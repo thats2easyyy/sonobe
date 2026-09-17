@@ -43,7 +43,7 @@ Origami's text Error output is **Error Message** here. Error (a true/false value
 
 | Output | Type | Description |
 |---|---|---|
-| **Connection**<br>`connection` | `any` | A handle to this connection. Wire it into WebSocket Send and WebSocket Receive. |
+| **Connection**<br>`connection` | `connection` | A handle to this connection. Wire it into WebSocket Send and WebSocket Receive. |
 | **Connected**<br>`connected` | `boolean` | True while the connection is open and messages can travel. |
 | **Connecting**<br>`connecting` | `boolean` | True while the connection is being set up. |
 | **Error**<br>`error` | `boolean` | True when the latest attempt to connect or send had a problem. |

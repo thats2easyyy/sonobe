@@ -53,7 +53,7 @@ const CATEGORIES = [
 const VALUE_TYPES = [
   "number", "boolean", "pulse", "text", "color", "point", "point3d", "point4d", "size", "anchor",
   "index", "enum", "json", "layer", "image", "video", "sound", "gradient", "shape", "textStyle",
-  "layerEffect", "transform", "any",
+  "layerEffect", "transform", "connection", "any",
 ] as const satisfies readonly ValueType[];
 
 const SUBTYPES = [
@@ -79,14 +79,14 @@ const CURVE_KEYS = [
 ];
 
 const VECTOR_LENGTH: Record<string, number> = { point: 2, size: 2, anchor: 2, point3d: 3, point4d: 4 };
-const NULL_ONLY_TYPES = new Set(["layer", "image", "video", "sound", "shape", "layerEffect"]);
+const NULL_ONLY_TYPES = new Set(["layer", "image", "video", "sound", "shape", "layerEffect", "connection"]);
 
 const REQUIRED_FIELDS = [
   "type", "name", "category", "tier", "status", "aliases", "summary", "docs", "behavior", "inputs", "outputs",
   "alwaysEvaluate", "pairsWellWith", "commonMistakes", "examples", "origami",
 ];
 const OPTIONAL_FIELDS = [
-  "statusReason", "platforms", "variadic", "variants", "variantDefaults", "settings", "dynamicPortsRule",
+  "statusReason", "platforms", "variadic", "variants", "variantDefaults", "inputCountRange", "settings", "dynamicPortsRule",
   "shortcut", "importAliases", "origamiPorts", "defaultNotes",
 ];
 const PORT_FIELDS = ["key", "name", "type", "subtype", "default", "min", "max", "step", "enumOptions", "description", "wholeLoop", "advanced", "acceptsPulse"];
@@ -268,7 +268,7 @@ describe("patch catalog", () => {
         for (const n of ["min", "max", "step"]) if (port[n] !== undefined && !isFiniteNumber(port[n])) report(`${at}: ${n} must be a finite number`);
         if (isFiniteNumber(port.min) && isFiniteNumber(port.max) && port.min > port.max) report(`${at}: min exceeds max`);
         if (isFiniteNumber(port.step) && port.step <= 0) report(`${at}: step must be positive`);
-        for (const flag of ["wholeLoop", "advanced"]) if (port[flag] !== undefined && typeof port[flag] !== "boolean") report(`${at}: ${flag} must be a boolean`);
+        for (const flag of ["wholeLoop", "advanced", "acceptsPulse"]) if (port[flag] !== undefined && typeof port[flag] !== "boolean") report(`${at}: ${flag} must be a boolean`);
         if (port.type === "enum") {
           if (!Array.isArray(port.enumOptions) || port.enumOptions.length === 0) report(`${at}: enum ports need enumOptions`);
           else for (const option of port.enumOptions) {
@@ -289,6 +289,16 @@ describe("patch catalog", () => {
           else if (!(Number(min) >= 1 && Number(min) <= Number(defaultCount) && Number(defaultCount) <= Number(max))) report("variadic needs 1 ≤ min ≤ defaultCount ≤ max");
           if (v.startIndex !== undefined && v.startIndex !== 0 && v.startIndex !== 1) report("variadic startIndex must be 0 or 1");
           if (v.direction !== undefined && v.direction !== "inputs" && v.direction !== "outputs") report('variadic direction must be "inputs" or "outputs"');
+        }
+      }
+      const range = entry.inputCountRange;
+      if (range !== undefined) {
+        if (!isRecord(range)) report("inputCountRange must be an object");
+        else {
+          for (const field of Object.keys(range)) if (!["min", "max", "defaultCount"].includes(field)) report(`inputCountRange: unknown field "${field}"`);
+          const { min, max, defaultCount } = range;
+          if (!Number.isInteger(min) || !Number.isInteger(max) || !Number.isInteger(defaultCount)) report("inputCountRange min, max, and defaultCount must be integers");
+          else if (!(Number(min) >= 1 && Number(min) <= Number(defaultCount) && Number(defaultCount) <= Number(max))) report("inputCountRange needs 1 ≤ min ≤ defaultCount ≤ max");
         }
       }
       if (entry.variantDefaults !== undefined && !(isRecord(entry.variantDefaults) && Object.values(entry.variantDefaults).every(isRecord))) {

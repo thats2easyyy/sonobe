@@ -13,8 +13,8 @@ import {
   type Value,
   type ValueType,
 } from "@sonobe/core";
-import { BookOpen, Copy, Ellipsis, Minus, Plus, ScanSearch, Shapes } from "lucide-react";
-import { useMemo, useState, type ReactNode } from "react";
+import { ArrowRight, BookOpen, Copy, Ellipsis, Minus, Plus, ScanSearch, Shapes, TriangleAlert } from "lucide-react";
+import { useId, useMemo, useState, type ReactNode } from "react";
 import { CATEGORY_ICONS } from "../../shell/icons.tsx";
 import { useDocument, useEditorSession, useSelection } from "../../state/EditorProvider.tsx";
 import { isPatchImplemented } from "../../state/registry.ts";
@@ -35,6 +35,7 @@ import { DocsText } from "./DocsText.tsx";
 import { FieldRow, LiveValue } from "./FieldRow.tsx";
 import { InspectorHeader } from "./Header.tsx";
 import { intersectFields, patchSources, sameInputValue, splitAdvanced, subjectLabel, summarizeField, type FieldPort, type InspectorField } from "./model.ts";
+import { planPortChange, type LostCable, type PortChangePlan } from "./portChange.ts";
 import { InspectorSection } from "./Section.tsx";
 import { isSpringPatch } from "./spring.ts";
 import { SpringSection } from "./SpringSection.tsx";
@@ -50,6 +51,17 @@ interface Entry {
   id: Id;
   node: PatchNode;
   ports: ResolvedPorts;
+}
+
+/** A Type or count change waiting for a decision because it would disconnect cables. */
+export interface PendingPortChange {
+  kind: "type" | "count";
+  ops: Op[];
+  label: string;
+  /** "Switching to Color", "Removing Value 3" */
+  title: string;
+  plan: Extract<PortChangePlan, { ok: true }>;
+  revision: number;
 }
 
 function settingValue(node: PatchNode, setting: SettingSpec): InputValue {
@@ -82,6 +94,78 @@ function OptionRow({ label, description, children }: { label: string; descriptio
   );
 }
 
+const typeName = (type: ValueType | undefined) => (type ? (VALUE_TYPE_LABELS[type] ?? type) : "value");
+
+function lostReason(cable: LostCable): string {
+  if (cable.removedPort) return "That port goes away.";
+  if (cable.converter) return cable.converter.description;
+  return `A ${typeName(cable.fromType).toLowerCase()} can't drive a ${typeName(cable.toType).toLowerCase()}, and there's no converter for it.`;
+}
+
+/**
+ * Inline decision for a Type or count change that disconnects cables: insert converters where they
+ * exist (one undo step with the change), change anyway, or cancel.
+ */
+export function PortChangeCard({ pending, onConfirm, onCancel }: { pending: PendingPortChange; onConfirm: (withConverters: boolean) => void; onCancel: () => void }) {
+  const titleId = useId();
+  const { plan } = pending;
+  const count = plan.lost.length;
+  const converters = plan.converterCount;
+  const firstConverter = plan.lost.find((l) => l.converter)?.converter;
+  return (
+    <div
+      className="sb-insp-conflict"
+      role="alertdialog"
+      aria-labelledby={titleId}
+      onKeyDown={(event) => {
+        if (event.key !== "Escape") return;
+        event.preventDefault();
+        event.stopPropagation();
+        onCancel();
+      }}
+    >
+      <div className="sb-insp-conflict__head">
+        <TriangleAlert size={14} strokeWidth={2} aria-hidden className="sb-insp-conflict__icon" />
+        <span id={titleId} className="sb-insp-conflict__title">
+          {pending.title} disconnects {count === 1 ? "a cable" : `${count} cables`}
+        </span>
+      </div>
+      <ul className="sb-insp-conflict__list">
+        {plan.lost.map((cable) => (
+          <li key={`${cable.from}→${cable.to}`} className="sb-insp-conflict__cable">
+            <span className="sb-insp-conflict__ends">
+              <PortGlyph type={cable.fromType ?? "any"} size={7} />
+              <span className="sb-insp-conflict__end">{cable.fromLabel}</span>
+              <ArrowRight size={11} strokeWidth={2} aria-label="to" className="sb-insp-conflict__arrow" />
+              <PortGlyph type={cable.toType ?? "any"} size={7} />
+              <span className="sb-insp-conflict__end">{cable.toLabel}</span>
+            </span>
+            <span className="sb-insp-conflict__why">{lostReason(cable)}</span>
+          </li>
+        ))}
+      </ul>
+      {plan.resetValues > 0 && (
+        <p className="sb-insp-conflict__note">
+          {plan.resetValues === 1 ? "One value you set goes back to its default." : `${plan.resetValues} values you set go back to their defaults.`}
+        </p>
+      )}
+      <div className="sb-insp-conflict__actions">
+        {converters > 0 && (
+          <Button size="sm" variant="primary" autoFocus onClick={() => onConfirm(true)}>
+            {converters === 1 && firstConverter ? `Insert ${firstConverter.patchName}` : `Insert ${converters} Converters`}
+          </Button>
+        )}
+        <Button size="sm" variant={converters > 0 ? "secondary" : "primary"} autoFocus={converters === 0} onClick={() => onConfirm(false)}>
+          {pending.kind === "type" ? "Change Anyway" : "Remove Anyway"}
+        </Button>
+        <Button size="sm" variant="ghost" onClick={onCancel}>
+          Cancel
+        </Button>
+      </div>
+    </div>
+  );
+}
+
 export function PatchInspector({ patchIds, onLearnMore }: PatchInspectorProps) {
   const session = useEditorSession();
   const registry = session.registry;
@@ -89,6 +173,7 @@ export function PatchInspector({ patchIds, onLearnMore }: PatchInspectorProps) {
   const componentId = useSelection(currentComponentId);
   const edit = useInspectorEdit();
   const [docsOpen, setDocsOpen] = useState(false);
+  const [pending, setPending] = useState<PendingPortChange | null>(null);
   const component = doc.components[componentId];
 
   const entries = useMemo(
@@ -118,6 +203,45 @@ export function PatchInspector({ patchIds, onLearnMore }: PatchInspectorProps) {
   const { primary, more } = splitAdvanced(fields);
   const renderRow = (field: InspectorField) => <FieldRow key={field.key} field={field} subject={subject} {...(single && field.link ? { liveAddress: field.link } : {})} />;
 
+  /** Apply a Type or count change, first asking when it would disconnect cables. */
+  const changePorts = (kind: PendingPortChange["kind"], build: (e: Entry) => Op | undefined, label: string, title: string) => {
+    const ops = entries.flatMap((e) => build(e) ?? []);
+    if (ops.length === 0) return;
+    const state = session.document.getState();
+    const plan = planPortChange(state.doc, componentId, registry, ops);
+    if (!plan.ok || plan.lost.length === 0) {
+      setPending(null);
+      edit.apply(ops, label);
+      return;
+    }
+    setPending({ kind, ops, label, title, plan, revision: state.revision });
+  };
+
+  const confirmPortChange = (withConverters: boolean) => {
+    if (!pending) return;
+    const state = session.document.getState();
+    let plan: PortChangePlan = pending.plan;
+    if (state.revision !== pending.revision) plan = planPortChange(state.doc, componentId, registry, pending.ops);
+    setPending(null);
+    if (!plan.ok || !withConverters || plan.converterCount === 0) {
+      edit.apply(pending.ops, pending.label);
+      return;
+    }
+    const converter = plan.lost.find((l) => l.converter)?.converter;
+    const label = `${pending.label} and insert ${plan.converterCount === 1 && converter ? converter.patchName : `${plan.converterCount} converters`}`;
+    const result = edit.apply([...pending.ops, ...plan.converterOps], label);
+    if (result?.ok) {
+      const added = Object.values(result.idMap);
+      toast({
+        id: "inspector-converters",
+        title: added.length === 1 && converter ? `Inserted ${converter.patchName}` : `Inserted ${added.length} converters`,
+        description: "The cables that no longer fit go through them now.",
+        tone: "success",
+        action: { label: "Show", onClick: () => session.selection.getState().requestReveal(componentId, added) },
+      });
+    }
+  };
+
   const overflow: MenuEntry[] = [
     { id: "reveal", label: "Reveal in Patch Editor", icon: <ScanSearch size={14} />, onSelect: () => session.selection.getState().requestReveal(componentId, entries.map((e) => e.id)) },
     ...(single
@@ -137,6 +261,7 @@ export function PatchInspector({ patchIds, onLearnMore }: PatchInspectorProps) {
   const counts = new Set(entries.map((e) => e.ports.inputCount));
   const inputCount = first.ports.inputCount ?? spec.variadic?.defaultCount ?? 0;
   const hasOptions = sameType && (!!spec.variants?.length || !!spec.variadic || !!spec.settings?.length);
+  const variadicName = spec.variadic?.name ?? "";
 
   const settingActions = (setting: SettingSpec): FieldActions => {
     const run = (update: Parameters<FieldActions["set"]>[0], options: { gesture?: string }) => {
@@ -164,6 +289,8 @@ export function PatchInspector({ patchIds, onLearnMore }: PatchInspectorProps) {
       disconnect: () => undefined,
     };
   };
+
+  const card = (kind: PendingPortChange["kind"]) => (pending?.kind === kind ? <PortChangeCard pending={pending} onConfirm={confirmPortChange} onCancel={() => setPending(null)} /> : null);
 
   return (
     <>
@@ -244,42 +371,65 @@ export function PatchInspector({ patchIds, onLearnMore }: PatchInspectorProps) {
       {(hasOptions || single) && (
         <InspectorSection id="patch.options" title="Options">
           {sameType && spec.variants?.length ? (
-            <OptionRow label="Type" description="The kind of value this patch works with. Changing it can disconnect cables that no longer fit.">
-              <Select
-                size="sm"
-                aria-label="Value type"
-                className="sb-insp-select"
-                value={typeParams.size === 1 ? (first.ports.typeParam ?? null) : null}
-                mixed={typeParams.size > 1}
-                options={spec.variants.map((t) => ({ value: t, label: VALUE_TYPE_LABELS[t] }))}
-                onChange={(typeParam) => updateAll((e) => (e.ports.typeParam === typeParam ? undefined : { op: "updatePatch", component: componentId, id: e.id, typeParam }), `Set type of ${subject} to ${VALUE_TYPE_LABELS[typeParam as ValueType] ?? typeParam}`)}
-              />
-            </OptionRow>
+            <>
+              <OptionRow label="Type" description="The kind of value this patch works with. When cables no longer fit, you can insert converters or disconnect them.">
+                <Select
+                  size="sm"
+                  aria-label="Value type"
+                  className="sb-insp-select"
+                  value={typeParams.size === 1 ? (first.ports.typeParam ?? null) : null}
+                  mixed={typeParams.size > 1}
+                  options={spec.variants.map((t) => ({ value: t, label: VALUE_TYPE_LABELS[t] }))}
+                  onChange={(typeParam) => {
+                    const name = VALUE_TYPE_LABELS[typeParam as ValueType] ?? typeParam;
+                    changePorts("type", (e) => (e.ports.typeParam === typeParam ? undefined : { op: "updatePatch", component: componentId, id: e.id, typeParam }), `Set type of ${subject} to ${name}`, `Switching to ${name}`);
+                  }}
+                />
+              </OptionRow>
+              {card("type")}
+            </>
           ) : null}
           {sameType && spec.variadic ? (
-            <OptionRow label={`${spec.variadic.name}s`} description={`How many ${spec.variadic.name.toLowerCase()} ${spec.variadic.direction === "outputs" ? "outputs" : "inputs"} it has (${spec.variadic.min}–${spec.variadic.max}).`}>
-              <div className="sb-insp-stepper" role="group" aria-label={`${spec.variadic.name} count`}>
-                <IconButton
-                  size="xs"
-                  variant="secondary"
-                  icon={<Minus size={12} />}
-                  label={`Remove a ${spec.variadic.name.toLowerCase()}`}
-                  disabled={inputCount <= spec.variadic.min}
-                  onClick={() => updateAll((e) => ({ op: "updatePatch", component: componentId, id: e.id, inputCount: Math.max(spec.variadic!.min, (e.ports.inputCount ?? inputCount) - 1) }), `Remove ${spec.variadic!.name} from ${subject}`)}
-                />
-                <span className="sb-insp-stepper__value sb-tabular" aria-live="polite">
-                  {counts.size === 1 ? inputCount : "–"}
-                </span>
-                <IconButton
-                  size="xs"
-                  variant="secondary"
-                  icon={<Plus size={12} />}
-                  label={`Add a ${spec.variadic.name.toLowerCase()}`}
-                  disabled={inputCount >= spec.variadic.max}
-                  onClick={() => updateAll((e) => ({ op: "updatePatch", component: componentId, id: e.id, inputCount: Math.min(spec.variadic!.max, (e.ports.inputCount ?? inputCount) + 1) }), `Add ${spec.variadic!.name} to ${subject}`)}
-                />
-              </div>
-            </OptionRow>
+            <>
+              <OptionRow label={`${spec.variadic.name}s`} description={`How many ${spec.variadic.name.toLowerCase()} ${spec.variadic.direction === "outputs" ? "outputs" : "inputs"} it has (${spec.variadic.min}–${spec.variadic.max}).`}>
+                <div className="sb-insp-stepper" role="group" aria-label={`${spec.variadic.name} count`}>
+                  <IconButton
+                    size="xs"
+                    variant="secondary"
+                    icon={<Minus size={12} />}
+                    label={`Remove a ${variadicName.toLowerCase()}`}
+                    disabled={inputCount <= spec.variadic.min}
+                    onClick={() =>
+                      changePorts(
+                        "count",
+                        (e) => ({ op: "updatePatch", component: componentId, id: e.id, inputCount: Math.max(spec.variadic!.min, (e.ports.inputCount ?? inputCount) - 1) }),
+                        `Remove ${variadicName} from ${subject}`,
+                        `Removing ${variadicName} ${inputCount}`,
+                      )
+                    }
+                  />
+                  <span className="sb-insp-stepper__value sb-tabular" aria-live="polite">
+                    {counts.size === 1 ? inputCount : "–"}
+                  </span>
+                  <IconButton
+                    size="xs"
+                    variant="secondary"
+                    icon={<Plus size={12} />}
+                    label={`Add a ${variadicName.toLowerCase()}`}
+                    disabled={inputCount >= spec.variadic.max}
+                    onClick={() =>
+                      changePorts(
+                        "count",
+                        (e) => ({ op: "updatePatch", component: componentId, id: e.id, inputCount: Math.min(spec.variadic!.max, (e.ports.inputCount ?? inputCount) + 1) }),
+                        `Add ${variadicName} to ${subject}`,
+                        `Adding ${variadicName} ${inputCount + 1}`,
+                      )
+                    }
+                  />
+                </div>
+              </OptionRow>
+              {card("count")}
+            </>
           ) : null}
           {sameType &&
             spec.settings?.map((setting) => (

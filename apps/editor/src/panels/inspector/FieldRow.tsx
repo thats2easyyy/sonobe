@@ -1,16 +1,23 @@
-/** One inspector row: the property label, its editor (or a binding chip when a patch drives it), and a context menu. */
+/**
+ * One inspector row: the property label, its editor (or a binding chip when a patch drives it), a
+ * port to drive it with a patch, and a context menu. Layer property rows accept cables dropped from
+ * the patch editor, and asset rows accept dropped files.
+ */
 
 import { findLayer, type Id, type ValueType } from "@sonobe/core";
-import { Copy, Link2, Link2Off, RotateCcw, ScanSearch } from "lucide-react";
-import { useMemo } from "react";
+import { Cable, Copy, Link2, Link2Off, RotateCcw, ScanSearch } from "lucide-react";
+import { useMemo, useState, type DragEvent } from "react";
+import { dragHasFiles, filesFromDataTransfer } from "../../state/assets.ts";
 import { useDocument, useEditorSession, useLiveValues, useSelection } from "../../state/EditorProvider.tsx";
 import { currentComponentId } from "../../state/selection.ts";
 import { IconButton } from "../../ui/IconButton.tsx";
 import { ContextMenu, type MenuEntry } from "../../ui/Menu.tsx";
+import { PortGlyph } from "../../ui/PortGlyph.tsx";
 import { toast } from "../../ui/Toast.tsx";
 import { Tooltip } from "../../ui/Tooltip.tsx";
 import { useLatest } from "../../ui/lib/hooks.ts";
-import { controlKind, LiveReadout, STACKED_CONTROLS, ValueControl, type FieldActions } from "./controls.tsx";
+import { layerPropDropAttributes, startLinkToLayerProp, type LayerPropTarget } from "../patch-editor/index.ts";
+import { controlKind, LiveReadout, STACKED_CONTROLS, useAssetFieldImport, ValueControl, type FieldActions } from "./controls.tsx";
 import { editLabel, linkSourceItem, planFieldDisconnect, planFieldReset, planFieldSet, type InspectorField } from "./model.ts";
 import { useInspectorEdit } from "./useInspectorEdit.ts";
 
@@ -51,6 +58,16 @@ export function LiveValue({ address, type }: { address: string; type: ValueType 
   return <LiveReadout value={values[address]} type={type} />;
 }
 
+/** A row's state while a patch editor drags a cable. */
+export interface FieldRowCable {
+  /** The dragged cable can drive this property. */
+  accept: boolean;
+  /** The pointer is over this row. */
+  hover: boolean;
+  /** What the cable carries, for the drop hint ("Zoom Spring"). */
+  source: string;
+}
+
 export interface FieldRowProps {
   field: InspectorField;
   /** What's being edited, for undo labels: "Event Card" or "3 layers". */
@@ -59,17 +76,29 @@ export interface FieldRowProps {
   liveAddress?: string;
   /** Layers a layer picker leaves out. */
   excludeLayers?: readonly Id[];
+  /**
+   * The layer property this row drives with a patch (its port, "Drive with a Patch…", and cable
+   * drops). `null` keeps the port column but offers nothing (multi-selections, properties that only
+   * take a set value). Omit it for rows without ports (patch inputs).
+   */
+  drive?: LayerPropTarget | null;
+  /** Set while a patch editor drags a cable. */
+  cable?: FieldRowCable;
 }
 
 const chipText = (link: string) => (link.startsWith("$in.") ? link.slice(1) : link);
 
-export function FieldRow({ field, subject, liveAddress, excludeLayers }: FieldRowProps) {
+export function FieldRow({ field, subject, liveAddress, excludeLayers, drive, cable }: FieldRowProps) {
   const session = useEditorSession();
   const componentId = useSelection(currentComponentId);
   const component = useDocument((s) => s.doc.components[componentId]);
   const actions = useFieldActions(field, subject);
+  const { importing, importFile } = useAssetFieldImport(field, actions);
+  const [fileOver, setFileOver] = useState(false);
   const linked = field.linkedCount > 0;
-  const stacked = !linked && STACKED_CONTROLS.has(controlKind(field));
+  const kind = controlKind(field);
+  const stacked = !linked && STACKED_CONTROLS.has(kind);
+  const takesFiles = !linked && kind === "asset";
   const single = field.targets.length === 1 ? field.targets[0] : undefined;
   const source = field.link ? linkSourceItem(field.link) : undefined;
   const sourceName =
@@ -78,9 +107,14 @@ export function FieldRow({ field, subject, liveAddress, excludeLayers }: FieldRo
         ? (component.patches[source.id]?.name ?? source.id)
         : (findLayer(component.layers, source.id)?.layer.name ?? source.id)
       : undefined;
+  const name = field.port.name;
 
   const reveal = () => {
     if (source?.id) session.selection.getState().requestReveal(componentId, [source.id]);
+  };
+
+  const driveWithPatch = () => {
+    if (drive) startLinkToLayerProp(drive, { session });
   };
 
   const setHovered = (on: boolean, kind: "row" | "source") => {
@@ -97,6 +131,19 @@ export function FieldRow({ field, subject, liveAddress, excludeLayers }: FieldRo
   };
 
   const entries = (): MenuEntry[] => [
+    ...(drive !== undefined
+      ? ([
+          {
+            id: "drive",
+            label: linked ? "Change Driving Patch…" : "Drive with a Patch…",
+            icon: <Cable size={14} />,
+            disabled: !drive,
+            ...(drive ? {} : { description: field.bindable ? "Select one layer" : "Takes a set value only" }),
+            onSelect: driveWithPatch,
+          },
+          { type: "separator" },
+        ] satisfies MenuEntry[])
+      : []),
     { id: "reset", label: "Reset to Default", icon: <RotateCcw size={14} />, disabled: !field.isSet, onSelect: actions.reset },
     ...(linked
       ? ([
@@ -121,12 +168,51 @@ export function FieldRow({ field, subject, liveAddress, excludeLayers }: FieldRo
     },
   ];
 
+  const fileHandlers = takesFiles
+    ? {
+        onDragOver: (event: DragEvent<HTMLDivElement>) => {
+          if (!dragHasFiles(event.dataTransfer)) return;
+          event.preventDefault();
+          event.stopPropagation();
+          event.dataTransfer.dropEffect = "copy";
+          if (!fileOver) setFileOver(true);
+        },
+        onDragLeave: (event: DragEvent<HTMLDivElement>) => {
+          const next = event.relatedTarget as Node | null;
+          if (next && event.currentTarget.contains(next)) return;
+          setFileOver(false);
+        },
+        onDrop: (event: DragEvent<HTMLDivElement>) => {
+          if (!dragHasFiles(event.dataTransfer)) return;
+          event.preventDefault();
+          event.stopPropagation();
+          setFileOver(false);
+          const file = filesFromDataTransfer(event.dataTransfer)[0];
+          if (file) void importFile(file);
+        },
+      }
+    : {};
+
+  const dropHint = cable?.accept && cable.hover ? `Drive ${name} from ${cable.source}` : fileOver ? `Drop to set ${name}` : importing ? "Importing…" : null;
+
   return (
     <ContextMenu entries={entries}>
-      <div className="sb-insp-row" data-stacked={stacked || undefined} data-linked={linked || undefined} onPointerEnter={() => setHovered(true, "row")} onPointerLeave={() => setHovered(false, "row")}>
+      <div
+        className="sb-insp-row"
+        data-stacked={stacked || undefined}
+        data-linked={linked || undefined}
+        data-port={drive !== undefined || undefined}
+        data-drop={cable ? (cable.accept ? "accept" : "reject") : undefined}
+        data-drop-hover={(cable?.accept && cable.hover) || fileOver || undefined}
+        {...(drive ? layerPropDropAttributes(drive) : {})}
+        {...fileHandlers}
+        onPointerDownCapture={() => actions.commit()}
+        onPointerEnter={() => setHovered(true, "row")}
+        onPointerLeave={() => setHovered(false, "row")}
+      >
         <Tooltip content={field.port.description} placement="left" delay={700}>
           <span className="sb-insp-row__label">
-            <span className="sb-insp-row__name">{field.port.name}</span>
+            <span className="sb-insp-row__name">{name}</span>
             {field.isSet && !linked && <span className="sb-insp-row__dot" aria-label="Changed from default" />}
           </span>
         </Tooltip>
@@ -147,12 +233,29 @@ export function FieldRow({ field, subject, liveAddress, excludeLayers }: FieldRo
                 </button>
               </Tooltip>
               {field.link && liveAddress && <LiveValue address={liveAddress} type={field.type} />}
-              <IconButton size="xs" icon={<Link2Off size={12} />} label={`Disconnect ${field.port.name}`} tooltip="Disconnect" className="sb-insp-linked__unlink" onClick={actions.disconnect} />
+              <IconButton size="xs" icon={<Link2Off size={12} />} label={`Disconnect ${name}`} tooltip="Disconnect" className="sb-insp-linked__unlink" onClick={actions.disconnect} />
             </div>
           ) : (
-            <ValueControl field={field} actions={actions} label={field.port.name} {...(excludeLayers ? { excludeLayers } : {})} />
+            <ValueControl field={field} actions={actions} label={name} {...(excludeLayers ? { excludeLayers } : {})} />
           )}
         </div>
+        {drive !== undefined && (
+          <span className="sb-insp-row__port">
+            {drive && (
+              <Tooltip content={linked ? `Driven by ${sourceName ?? (field.link ? chipText(field.link) : "a patch")}. Click to choose another.` : "Drive with a patch…"} placement="left" delay={400}>
+                <button type="button" className="sb-insp-port" aria-label={linked ? `Change what drives ${name}` : `Drive ${name} with a patch`} data-linked={linked || undefined} onClick={driveWithPatch}>
+                  <PortGlyph type={field.type} size={8} />
+                </button>
+              </Tooltip>
+            )}
+          </span>
+        )}
+        {dropHint && (
+          <span className="sb-insp-row__drop-hint" role="status">
+            {cable?.accept && cable.hover && <Cable size={12} strokeWidth={2} aria-hidden />}
+            <span className="sb-insp-row__drop-text">{dropHint}</span>
+          </span>
+        )}
       </div>
     </ContextMenu>
   );

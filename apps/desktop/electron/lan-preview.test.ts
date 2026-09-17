@@ -166,6 +166,25 @@ describe("startLanPreview", () => {
     expect(clients).toEqual([1, 0]);
   });
 
+  it("follows pokes instead of polling in push mode", async () => {
+    const s = server!;
+    expect(s.pushUpdates).toBe(false);
+    s.setPushUpdates(true);
+    expect(s.pushUpdates).toBe(true);
+    const { ws, next } = await open(`ws://127.0.0.1:${s.port}/p/${s.token}/sync`);
+    expect(await next((m) => m.type === "document")).toMatchObject({ revision: 1 });
+
+    current = { ...current!, revision: 2 };
+    await expect(next((m) => m.type === "document", 300)).rejects.toThrow(/Timed out/);
+    s.poke();
+    expect(await next((m) => m.type === "document")).toMatchObject({ revision: 2 });
+
+    current = { ...current!, revision: 3 };
+    s.setPushUpdates(false);
+    expect(await next((m) => m.type === "document")).toMatchObject({ revision: 3 });
+    ws.terminate();
+  });
+
   it("rejects sockets without the token or from other origins", async () => {
     const s = server!;
     await expect(open(`ws://127.0.0.1:${s.port}/p/nope/sync`)).rejects.toThrow();

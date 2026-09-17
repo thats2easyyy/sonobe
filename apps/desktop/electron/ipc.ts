@@ -26,6 +26,18 @@ export const IPC = {
   previewStop: "sonobe:preview:stop",
   /** main → renderer: phone preview status changed. */
   previewChanged: "sonobe:preview:changed",
+  /** renderer → main: the editor's document reached a new revision. */
+  documentChanged: "sonobe:document:changed",
+  secretsStatus: "sonobe:secrets:status",
+  secretsGet: "sonobe:secrets:get",
+  secretsSet: "sonobe:secrets:set",
+  secretsDelete: "sonobe:secrets:delete",
+  openExternal: "sonobe:shell:open-external",
+  viewerWindowOpen: "sonobe:viewer-window:open",
+  viewerWindowClose: "sonobe:viewer-window:close",
+  viewerWindowStatus: "sonobe:viewer-window:status",
+  /** main → renderer: the pop-out viewer window opened, closed, or changed. */
+  viewerWindowChanged: "sonobe:viewer-window:changed",
   rpcRequest: "sonobe:rpc:request",
   rpcResponse: "sonobe:rpc:response",
   /** renderer → main: the full list of registered rpc method names. */

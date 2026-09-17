@@ -1,12 +1,15 @@
 // @vitest-environment happy-dom
-import { applyOps, createEmptyDocument, findLayer, getPatchSpec, type Op, type SonobeDocument } from "@sonobe/core";
+import { applyOps, createEmptyDocument, findLayer, getPatchSpec, resolveNodePorts, type Op, type SonobeDocument } from "@sonobe/core";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createManualScheduler } from "../../runtime/scheduler.ts";
+import { layoutStore } from "../../shell/layoutStore.ts";
+import { createAssetService } from "../../state/assets.ts";
 import { EditorProvider } from "../../state/EditorProvider.tsx";
 import { getRegistry } from "../../state/registry.ts";
 import { createEditorSession, type EditorSession } from "../../state/session.ts";
+import { completeConnectionToLayerProp, dropTargetAt, patchEditorBridge } from "../patch-editor/index.ts";
 import { InspectorPanel } from "./InspectorPanel.tsx";
 import { activePreset } from "./spring.ts";
 
@@ -30,10 +33,12 @@ afterEach(() => {
   document.body.innerHTML = "";
   session?.dispose();
   session = null;
+  vi.restoreAllMocks();
+  layoutStore.getState().setViewMode("split");
 });
 
-function build(ops: Op[]): SonobeDocument {
-  const result = applyOps(createEmptyDocument(), ops, { registry });
+function build(ops: Op[], doc: SonobeDocument = createEmptyDocument()): SonobeDocument {
+  const result = applyOps(doc, ops, { registry });
   if (!result.ok) throw new Error(result.errors.map((e) => e.message).join("\n"));
   return result.doc;
 }
@@ -42,6 +47,7 @@ const fixture = () =>
   build([
     { op: "addLayer", layer: { id: "card", type: "rectangle", name: "Card", props: { position: [16, 146], size: [370, 440], opacity: 0.5 } } },
     { op: "addLayer", layer: { id: "dot", type: "oval", name: "Dot", props: { opacity: 0.8 } } },
+    { op: "addLayer", layer: { id: "hero", type: "image", name: "Hero" } },
     { op: "addPatch", patch: { id: "grow", type: "transition", typeParam: "number", inputs: { start: 1, end: 1.2 }, ui: { x: 0, y: 0 } } },
     { op: "addPatch", patch: { id: "pop", type: "popAnimation", typeParam: "number", ui: { x: 0, y: 200 } } },
     { op: "addPatch", patch: { id: "sum", type: "add", typeParam: "number", ui: { x: 0, y: 400 } } },
@@ -66,6 +72,10 @@ const main = (s: EditorSession) => s.document.getState().doc.components.main!;
 const input = (label: string) => container.querySelector<HTMLInputElement>(`input[aria-label="${label}"]`)!;
 const button = (label: string) => container.querySelector<HTMLButtonElement>(`button[aria-label="${label}"]`)!;
 const buttonWithText = (text: string, scope: ParentNode = container) => [...scope.querySelectorAll<HTMLButtonElement>("button")].find((b) => b.textContent?.trim() === text)!;
+const rowNamed = (name: string) => [...container.querySelectorAll<HTMLElement>(".sb-insp-row")].find((row) => row.querySelector(".sb-insp-row__name")?.textContent === name)!;
+const option = (label: string) => [...document.querySelectorAll<HTMLElement>('[role="option"]')].find((el) => el.querySelector(".sb-selectmenu__label")?.textContent === label)!;
+const menuItem = (label: string) => [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].find((el) => el.querySelector(".sb-menu__title")?.textContent === label)!;
+const png = (seed: number, name: string) => new File([new Uint8Array([0x89, 0x50, 0x4e, 0x47, seed, 2, 3])], name, { type: "image/png" });
 
 function type(el: HTMLInputElement | HTMLTextAreaElement, text: string) {
   act(() => {
@@ -89,11 +99,31 @@ function click(el: Element | null | undefined) {
 
 const select = (s: EditorSession, items: { layers?: string[]; patches?: string[] }) => act(() => s.selection.getState().select(items));
 
+/** Imports without DOM media decoding (happy-dom can't decode images). */
+function stubAssets(s: EditorSession) {
+  const service = createAssetService({ document: s.document, host: null, probe: async () => ({ width: 64, height: 48 }) });
+  return vi.spyOn(s.assets, "importFile").mockImplementation((file, options) => service.importFile(file, options));
+}
+
+function dragEvent(type: string, dataTransfer: unknown): Event {
+  const event = new Event(type, { bubbles: true, cancelable: true });
+  Object.defineProperty(event, "dataTransfer", { value: dataTransfer });
+  return event;
+}
+
+const fileTransfer = (files: File[]) => ({ types: ["Files"], files, items: files.map((f) => ({ kind: "file", type: f.type, getAsFile: () => f })), dropEffect: "none" });
+
+async function eventually(check: () => void) {
+  await act(async () => {
+    await vi.waitFor(check, { timeout: 3000 });
+  });
+}
+
 describe("InspectorPanel", () => {
   it("shows a friendly empty state with the component's notes", () => {
     const s = mount(fixture());
     expect(container.textContent).toContain("Nothing selected");
-    expect(container.textContent).toContain("2 layers · 3 patches");
+    expect(container.textContent).toContain("3 layers · 3 patches");
     const notes = container.querySelector<HTMLTextAreaElement>('textarea[aria-label="Component notes"]')!;
     type(notes, "Tap the card to grow it.");
     act(() => notes.dispatchEvent(new FocusEvent("focusout", { bubbles: true })));
@@ -133,6 +163,35 @@ describe("InspectorPanel", () => {
     expect(s.document.getState().undoLabel).toContain("Set Rotation on Card");
   });
 
+  it("keeps a slow scrub as one undo step until the drag ends, then starts a new one", () => {
+    let now = 1_000_000;
+    vi.spyOn(Date, "now").mockImplementation(() => now);
+    const s = mount(fixture());
+    select(s, { layers: ["card"] });
+    const field = input("Opacity").closest(".sb-scrub")!;
+    const fire = (type: string, clientX: number) =>
+      act(() => {
+        field.dispatchEvent(new PointerEvent(type, { bubbles: true, cancelable: true, clientX, clientY: 0, pointerId: 3, button: 0 }));
+      });
+    const scrub = (start: number) => {
+      fire("pointerdown", start);
+      for (const dx of [8, 16, 24, 32]) {
+        now += 1500;
+        fire("pointermove", start - dx);
+      }
+      now += 4000;
+      fire("pointerup", start - 32);
+    };
+    scrub(200);
+    expect(s.document.getState().historyEntries().map((e) => e.label)).toEqual(["Set Opacity on Card"]);
+    const afterFirst = findLayer(main(s).layers, "card")!.layer.props.opacity;
+    expect(afterFirst).not.toBe(0.5);
+    scrub(200);
+    expect(s.document.getState().historyEntries()).toHaveLength(2);
+    act(() => void s.document.getState().undo());
+    expect(findLayer(main(s).layers, "card")!.layer.props.opacity).toBe(afterFirst);
+  });
+
   it("shows a binding chip for linked properties that reveals and disconnects", () => {
     const s = mount(fixture());
     select(s, { layers: ["card"] });
@@ -142,6 +201,115 @@ describe("InspectorPanel", () => {
     expect(s.selection.getState().reveal).toMatchObject({ component: "main", ids: ["grow"] });
     click(button("Disconnect Scale"));
     expect(findLayer(main(s).layers, "card")!.layer.props.scale).toBeUndefined();
+  });
+
+  it("drives a layer property with a patch from its port and its context menu", () => {
+    layoutStore.getState().setViewMode("canvas");
+    const s = mount(fixture());
+    select(s, { layers: ["dot"] });
+    click(button("Drive Opacity with a patch"));
+    expect(patchEditorBridge(s).getState().targets.main).toEqual(["@dot.opacity"]);
+    expect(patchEditorBridge(s).getState().request).toMatchObject({ kind: "drive", component: "main", address: "@dot.opacity" });
+    expect(layoutStore.getState().viewMode).toBe("split");
+
+    select(s, { layers: ["card"] });
+    expect(button("Change what drives Scale")).not.toBeNull();
+    act(() => {
+      rowNamed("Opacity").dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: 20, clientY: 20 }));
+    });
+    click(menuItem("Drive with a Patch…"));
+    expect(patchEditorBridge(s).getState().request?.address).toBe("@card.opacity");
+
+    select(s, { layers: ["card", "dot"] });
+    expect(rowNamed("Opacity").hasAttribute("data-port")).toBe(true);
+    expect(rowNamed("Opacity").querySelector(".sb-insp-port")).toBeNull();
+    expect(rowNamed("Opacity").hasAttribute("data-sb-layer-prop")).toBe(false);
+  });
+
+  it("lights up rows a dragged cable can drive and accepts the drop", () => {
+    const s = mount(fixture());
+    select(s, { layers: ["dot"] });
+    expect(rowNamed("Opacity").getAttribute("data-sb-layer-prop")).toBe("dot.opacity");
+    expect(rowNamed("Opacity").hasAttribute("data-drop")).toBe(false);
+
+    act(() => patchEditorBridge(s).getState().setCableDrag({ component: "main", from: "pop.output", type: "number" }));
+    expect(rowNamed("Opacity").getAttribute("data-drop")).toBe("accept");
+    expect(container.querySelector('.sb-insp-row[data-drop="reject"]')).not.toBeNull();
+
+    act(() => {
+      rowNamed("Opacity").querySelector("input")!.dispatchEvent(new PointerEvent("pointermove", { bubbles: true, clientX: 4, clientY: 4 }));
+    });
+    expect(rowNamed("Opacity").querySelector(".sb-insp-row__drop-hint")?.textContent).toBe("Drive Opacity from Pop Animation");
+
+    expect(dropTargetAt(rowNamed("Opacity").querySelector("input"))).toEqual({ kind: "prop", target: { layerId: "dot", prop: "opacity" } });
+    act(() => {
+      completeConnectionToLayerProp("pop.output", { layerId: "dot", prop: "opacity" }, { session: s });
+      patchEditorBridge(s).getState().setCableDrag(null);
+    });
+    expect(findLayer(main(s).layers, "dot")!.layer.props.opacity).toEqual({ link: "pop.output" });
+    expect(container.querySelector("[data-drop]")).toBeNull();
+    expect(rowNamed("Opacity").textContent).toContain("← pop.output");
+  });
+
+  it("imports a file from the asset picker", async () => {
+    const s = mount(fixture());
+    const imported = stubAssets(s);
+    select(s, { layers: ["hero"] });
+    expect(container.textContent).toContain("Import an image…");
+    const opened = vi.spyOn(HTMLInputElement.prototype, "click").mockImplementation(() => undefined);
+    click(container.querySelector('button[aria-label^="Image: "]'));
+    click(option("Import File…"));
+    expect(opened).toHaveBeenCalledTimes(1);
+
+    const picker = container.querySelector<HTMLInputElement>('input[type="file"][aria-label="Import a file for Image"]')!;
+    expect(picker.accept).toContain("image/*");
+    Object.defineProperty(picker, "files", { configurable: true, value: [png(1, "Hero Shot.png")] });
+    await act(async () => {
+      picker.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+    await eventually(() => expect(findLayer(main(s).layers, "hero")!.layer.props.image).toMatchObject({ asset: expect.any(String) }));
+    const image = findLayer(main(s).layers, "hero")!.layer.props.image as { asset: string };
+    expect(s.document.getState().doc.assets[image.asset]).toMatchObject({ kind: "image", name: "Hero Shot", width: 64, height: 48 });
+    expect(imported).toHaveBeenCalledTimes(1);
+    expect(s.document.getState().historyEntries().map((e) => e.label)).toEqual(["Set Image on Hero", 'Import "Hero Shot"']);
+    expect(container.querySelector(".sb-insp-dropzone")).toBeNull();
+  });
+
+  it("imports files dropped on an asset row or anywhere on a media layer's inspector, and refuses the wrong kind", async () => {
+    const s = mount(fixture());
+    const imported = stubAssets(s);
+    select(s, { layers: ["hero"] });
+    const row = rowNamed("Image");
+
+    act(() => {
+      row.dispatchEvent(dragEvent("dragover", fileTransfer([png(2, "sky.png")])));
+    });
+    expect(row.getAttribute("data-drop-hover")).toBe("true");
+    expect(row.querySelector(".sb-insp-row__drop-hint")?.textContent).toBe("Drop to set Image");
+
+    const clip = new File([new Uint8Array([0, 0, 0, 24, 0x66, 0x74, 0x79, 0x70])], "clip.mp4", { type: "video/mp4" });
+    await act(async () => {
+      row.dispatchEvent(dragEvent("drop", fileTransfer([clip])));
+    });
+    expect(imported).not.toHaveBeenCalled();
+    expect(findLayer(main(s).layers, "hero")!.layer.props.image).toBeUndefined();
+
+    await act(async () => {
+      row.dispatchEvent(dragEvent("drop", fileTransfer([png(2, "sky.png")])));
+    });
+    await eventually(() => expect(findLayer(main(s).layers, "hero")!.layer.props.image).toMatchObject({ asset: "sky" }));
+
+    const header = container.querySelector(".sb-insp-header")!;
+    act(() => {
+      header.dispatchEvent(dragEvent("dragover", fileTransfer([png(3, "night.png")])));
+    });
+    expect(container.querySelector(".sb-insp-layer")!.getAttribute("data-file-drop")).toBe("true");
+    expect(container.querySelector(".sb-insp-filedrop")?.textContent).toContain("Drop to set Image on Hero");
+    await act(async () => {
+      header.dispatchEvent(dragEvent("drop", fileTransfer([png(3, "night.png")])));
+    });
+    await eventually(() => expect(findLayer(main(s).layers, "hero")!.layer.props.image).toMatchObject({ asset: "night" }));
+    expect(container.querySelector(".sb-insp-layer")!.hasAttribute("data-file-drop")).toBe(false);
   });
 
   it("shows mixed values for a multi-selection and edits every layer", () => {
@@ -154,7 +322,8 @@ describe("InspectorPanel", () => {
     act(() => opacity.focus());
     type(opacity, "100");
     key(opacity, "Enter");
-    expect(main(s).layers.map((l) => l.props.opacity)).toEqual([1, 1]);
+    expect(findLayer(main(s).layers, "card")!.layer.props.opacity).toBe(1);
+    expect(findLayer(main(s).layers, "dot")!.layer.props.opacity).toBe(1);
   });
 
   it("reveals advanced properties behind More", () => {
@@ -180,6 +349,71 @@ describe("InspectorPanel", () => {
     click(button("Add a value"));
     expect(main(s).patches.sum!.inputCount).toBe(3);
     expect(input("Value 3")).not.toBeNull();
+  });
+
+  it("asks before a Type change disconnects cables, and inserts a converter in the same undo step", () => {
+    const s = mount(fixture());
+    select(s, { patches: ["grow"] });
+    click(button("Value type: Number"));
+    click(option("Color"));
+    const card = container.querySelector<HTMLElement>('[role="alertdialog"]')!;
+    expect(card.textContent).toContain("Switching to Color disconnects a cable");
+    expect(card.textContent).toContain("Card · Scale");
+    expect(card.textContent).toContain("values you set go back to their defaults");
+    expect(main(s).patches.grow!.typeParam).toBe("number");
+    expect(s.document.getState().historyEntries()).toHaveLength(0);
+
+    click([...card.querySelectorAll("button")].find((b) => b.textContent?.startsWith("Insert ")));
+    expect(container.querySelector('[role="alertdialog"]')).toBeNull();
+    expect(main(s).patches.grow!.typeParam).toBe("color");
+    const scale = findLayer(main(s).layers, "card")!.layer.props.scale as { link: string };
+    const converter = scale.link.split(".")[0]!;
+    expect(converter).not.toBe("grow");
+    expect(Object.values(main(s).patches[converter]!.inputs)).toContainEqual({ link: "grow.output" });
+    expect(s.document.getState().historyEntries()).toHaveLength(1);
+    expect(s.document.getState().undoLabel).toContain("and insert");
+
+    act(() => void s.document.getState().undo());
+    expect(main(s).patches.grow!.typeParam).toBe("number");
+    expect(findLayer(main(s).layers, "card")!.layer.props.scale).toEqual({ link: "grow.output" });
+    expect(main(s).patches[converter]).toBeUndefined();
+  });
+
+  it("cancels or disconnects when asked instead", () => {
+    const s = mount(fixture());
+    select(s, { patches: ["grow"] });
+    click(button("Value type: Number"));
+    click(option("Color"));
+    click(buttonWithText("Cancel", container.querySelector('[role="alertdialog"]')!));
+    expect(container.querySelector('[role="alertdialog"]')).toBeNull();
+    expect(main(s).patches.grow!.typeParam).toBe("number");
+
+    click(button("Value type: Number"));
+    click(option("Color"));
+    click(buttonWithText("Change Anyway", container.querySelector('[role="alertdialog"]')!));
+    expect(main(s).patches.grow!.typeParam).toBe("color");
+    expect(findLayer(main(s).layers, "card")!.layer.props.scale).toBeUndefined();
+
+    // Changes that don't disconnect anything apply right away.
+    select(s, { patches: ["pop"] });
+    click(button("Value type: Number"));
+    click(option("Point"));
+    expect(container.querySelector('[role="alertdialog"]')).toBeNull();
+    expect(main(s).patches.pop!.typeParam).toBe("point");
+  });
+
+  it("asks before removing an input that has a cable", () => {
+    let doc = build([{ op: "updatePatch", component: "main", id: "sum", inputCount: 3 }], fixture());
+    const last = resolveNodePorts(doc, doc.components.main!.patches.sum!, registry)!.inputs.at(-1)!;
+    doc = build([{ op: "connect", from: "pop.output", to: `sum.${last.key}` }], doc);
+    const s = mount(doc);
+    select(s, { patches: ["sum"] });
+    click(button("Remove a value"));
+    const card = container.querySelector<HTMLElement>('[role="alertdialog"]')!;
+    expect(card.textContent).toContain("Removing Value 3 disconnects a cable");
+    expect(card.textContent).toContain("That port goes away.");
+    click(buttonWithText("Remove Anyway", card));
+    expect(main(s).patches.sum!.inputCount).toBe(2);
   });
 
   it("sends Learn More to the host when asked", () => {

@@ -2,11 +2,13 @@
 import { applyOps, createEmptyDocument, findLayer, type Op, type SonobeDocument } from "@sonobe/core";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createManualScheduler } from "../../runtime/scheduler.ts";
+import { createAssetService } from "../../state/assets.ts";
 import { EditorProvider } from "../../state/EditorProvider.tsx";
 import { getRegistry } from "../../state/registry.ts";
 import { createEditorSession, type EditorSession } from "../../state/session.ts";
+import { dropTargetAt, patchEditorBridge } from "../patch-editor/index.ts";
 import { LayersPanel } from "./LayersPanel.tsx";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -28,6 +30,7 @@ afterEach(() => {
   document.body.innerHTML = "";
   session?.dispose();
   session = null;
+  vi.restoreAllMocks();
 });
 
 function build(ops: Op[]): SonobeDocument {
@@ -36,13 +39,14 @@ function build(ops: Op[]): SonobeDocument {
   return result.doc;
 }
 
-const fixture = () =>
-  build([
-    { op: "addLayer", layer: { id: "a", type: "rectangle", name: "A", props: { position: [10, 10], size: [40, 40] } } },
-    { op: "addLayer", layer: { id: "b", type: "rectangle", name: "B" } },
-    { op: "addLayer", layer: { id: "group", type: "group", name: "Group", children: [{ id: "g1", type: "oval", name: "Inner One" }, { id: "g2", type: "text", name: "Label" }] } },
-    { op: "addLayer", layer: { id: "c", type: "text", name: "Title" } },
-  ]);
+const FIXTURE_OPS: Op[] = [
+  { op: "addLayer", layer: { id: "a", type: "rectangle", name: "A", props: { position: [10, 10], size: [40, 40] } } },
+  { op: "addLayer", layer: { id: "b", type: "rectangle", name: "B" } },
+  { op: "addLayer", layer: { id: "group", type: "group", name: "Group", props: { size: [200, 100] }, children: [{ id: "g1", type: "oval", name: "Inner One" }, { id: "g2", type: "text", name: "Label" }] } },
+  { op: "addLayer", layer: { id: "c", type: "text", name: "Title" } },
+];
+
+const fixture = () => build(FIXTURE_OPS);
 
 function mount(doc: SonobeDocument): EditorSession {
   session = createEditorSession({ host: null, registry, document: doc, autoplay: false, scheduler: createManualScheduler(), textMeasurer: "approximate" });
@@ -80,6 +84,21 @@ function type(input: HTMLInputElement, text: string) {
 function click(target: Element | null) {
   act(() => {
     (target as HTMLElement).click();
+  });
+}
+
+function dragEvent(type: string, dataTransfer: unknown): Event {
+  const event = new Event(type, { bubbles: true, cancelable: true });
+  Object.defineProperty(event, "dataTransfer", { value: dataTransfer });
+  return event;
+}
+
+const fileTransfer = (files: File[]) => ({ types: ["Files"], files, items: files.map((f) => ({ kind: "file", type: f.type, getAsFile: () => f })), dropEffect: "none" });
+const png = (seed: number, name: string) => new File([new Uint8Array([0x89, 0x50, 0x4e, 0x47, seed, 2, 3])], name, { type: "image/png" });
+
+async function eventually(check: () => void) {
+  await act(async () => {
+    await vi.waitFor(check, { timeout: 3000 });
   });
 }
 
@@ -202,5 +221,67 @@ describe("LayersPanel", () => {
     click(menuItem("Group"));
     expect(main(s).layers.map((l) => l.type)).toContain("group");
     expect(findLayer(main(s).layers, "a")!.parent?.name).toBe("Group");
+  });
+
+  it("turns every row into a cable drop target while a patch editor drags a cable", () => {
+    const s = mount(fixture());
+    expect(container.querySelector("[data-sb-layer-drop]")).toBeNull();
+    act(() => patchEditorBridge(s).getState().setCableDrag({ component: "main", from: "pop.output", type: "number" }));
+    const overlay = rowNamed("A").querySelector<HTMLElement>('[data-sb-layer-drop="a"]')!;
+    expect(overlay).not.toBeNull();
+    expect(rows().every((row) => row.querySelector("[data-sb-layer-drop]"))).toBe(true);
+    expect(overlay.getAttribute("data-accept")).toBe("true");
+    expect(dropTargetAt(overlay)).toEqual({ kind: "layer", layerId: "a" });
+
+    act(() => {
+      overlay.dispatchEvent(new PointerEvent("pointermove", { bubbles: true, clientX: 3, clientY: 3 }));
+    });
+    expect(overlay.getAttribute("data-hover")).toBe("true");
+    expect(overlay.textContent).toBe("Choose a property");
+
+    act(() => patchEditorBridge(s).getState().setCableDrag({ component: "main", from: "tap.layer", type: "layer" }));
+    expect(rowNamed("A").querySelector("[data-sb-layer-drop]")!.hasAttribute("data-accept")).toBe(false);
+
+    act(() => patchEditorBridge(s).getState().setCableDrag({ component: "elsewhere", from: "pop.output", type: "number" }));
+    expect(container.querySelector("[data-sb-layer-drop]")).toBeNull();
+    act(() => patchEditorBridge(s).getState().setCableDrag(null));
+    expect(container.querySelector("[data-sb-layer-drop]")).toBeNull();
+  });
+
+  it("replaces a media layer's content with a dropped file, and turns other drops into media layers", async () => {
+    const s = mount(build([...FIXTURE_OPS, { op: "addLayer", layer: { id: "photo", type: "image", name: "Photo", props: { size: [120, 80] } } }]));
+    const service = createAssetService({ document: s.document, host: null, probe: async () => ({ width: 400, height: 300 }) });
+    vi.spyOn(s.assets, "importFile").mockImplementation((file, options) => service.importFile(file, options));
+
+    const photoRow = rowNamed("Photo");
+    act(() => {
+      photoRow.dispatchEvent(dragEvent("dragover", fileTransfer([png(1, "sunset.png")])));
+    });
+    expect(photoRow.querySelector('.sb-layerspanel__drop[data-kind="file"]')?.textContent).toBe("Replace image in Photo");
+    await act(async () => {
+      photoRow.dispatchEvent(dragEvent("drop", fileTransfer([png(1, "sunset.png")])));
+    });
+    await eventually(() => expect(findLayer(main(s).layers, "photo")!.layer.props.image).toEqual({ asset: "sunset" }));
+    expect(container.querySelector('.sb-layerspanel__drop[data-kind="file"]')).toBeNull();
+
+    await act(async () => {
+      rowNamed("Group").dispatchEvent(dragEvent("drop", fileTransfer([png(2, "hero.png")])));
+    });
+    await eventually(() => expect(findLayer(main(s).layers, "group")!.layer.children).toHaveLength(3));
+    const hero = findLayer(main(s).layers, "group")!.layer.children!.at(-1)!;
+    expect(hero).toMatchObject({ type: "image", name: "hero", props: { image: { asset: "hero" }, size: [133, 100] } });
+    expect(s.selection.getState().layers).toEqual([hero.id]);
+
+    const body = container.querySelector<HTMLElement>(".sb-layerspanel__body")!;
+    act(() => {
+      body.dispatchEvent(dragEvent("dragover", fileTransfer([png(3, "logo.png")])));
+    });
+    expect(body.getAttribute("data-file-drop")).toBe("panel");
+    expect(container.querySelector(".sb-layerspanel__filedrop")?.textContent).toBe("Add image");
+    await act(async () => {
+      body.dispatchEvent(dragEvent("drop", fileTransfer([png(3, "logo.png")])));
+    });
+    await eventually(() => expect(main(s).layers.at(-1)).toMatchObject({ type: "image", name: "logo" }));
+    expect(body.hasAttribute("data-file-drop")).toBe(false);
   });
 });

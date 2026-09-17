@@ -1,6 +1,6 @@
 import type { MenuItemConstructorOptions } from "electron";
 import type { SonobeCommandId } from "./host-api.d.ts";
-import { COMMANDS, commandLabel, resolveAccelerator, type HostPlatform } from "./commands.ts";
+import { COMMANDS, commandLabel, isNativeAccelerator, resolveAccelerator, type HostPlatform } from "./commands.ts";
 
 type Role = NonNullable<MenuItemConstructorOptions["role"]>;
 
@@ -247,7 +247,7 @@ export function toMenuTemplate(nodes: readonly MenuNode[], platform: HostPlatfor
         return {
           id: node.id,
           label: commandLabel(node.id, platform),
-          ...(accelerator ? { accelerator, registerAccelerator: spec.nativeAccelerator !== false } : {}),
+          ...(accelerator ? { accelerator, registerAccelerator: isNativeAccelerator(spec, platform) } : {}),
           click: () => handlers.command(node.id),
         };
       }
@@ -302,7 +302,7 @@ export function collectAccelerators(nodes: readonly MenuNode[], platform: HostPl
       else if (node.kind === "command") {
         const spec = COMMANDS[node.id];
         const accelerator = resolveAccelerator(spec.accelerator, platform);
-        if (accelerator) out.push({ label: commandLabel(node.id, platform), accelerator, normalized: normalizeAccelerator(accelerator, platform), registered: spec.nativeAccelerator !== false });
+        if (accelerator) out.push({ label: commandLabel(node.id, platform), accelerator, normalized: normalizeAccelerator(accelerator, platform), registered: isNativeAccelerator(spec, platform) });
       } else if ((node.kind === "role" || node.kind === "action") && node.accelerator) {
         out.push({ label: node.label ?? node.kind, accelerator: node.accelerator, normalized: normalizeAccelerator(node.accelerator, platform), registered: true });
       }

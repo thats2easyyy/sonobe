@@ -10,8 +10,11 @@ export interface CommandSpec {
   /** Per-platform label overrides. */
   labels?: Partial<Record<HostPlatform, string>>;
   accelerator?: AcceleratorSpec;
-  /** Defaults to true. False = shown in the menu but left to the editor keymap. */
-  nativeAccelerator?: boolean;
+  /**
+   * Defaults to true. False = shown in the menu but left to the editor keymap. `{ mac, other }` sets
+   * it per platform (`other` covers win32 + linux).
+   */
+  nativeAccelerator?: boolean | { mac?: boolean; other?: boolean };
 }
 
 /** Placeholder until the public repository URL is final. */
@@ -19,8 +22,9 @@ export const ISSUES_URL = "https://github.com/sonobe-app/sonobe/issues/new";
 
 /**
  * Every command the native menus can send. Shortcuts follow Origami Studio where they exist
- * (docs/research/ui-controls.md §26) and platform conventions otherwise. Ctrl+Alt combos are
- * avoided on Windows/Linux because they collide with AltGr characters.
+ * (docs/research/ui-controls.md §26) and platform conventions otherwise, and match the shortcuts the
+ * editor registers for the same commands (editor-shortcuts.test.ts checks them). Ctrl+Alt combos are
+ * never registered natively on Windows/Linux because they collide with AltGr characters.
  */
 export const COMMANDS: Readonly<Record<SonobeCommandId, CommandSpec>> = {
   "file.new": { label: "New Prototype", accelerator: "CmdOrCtrl+N" },
@@ -44,13 +48,14 @@ export const COMMANDS: Readonly<Record<SonobeCommandId, CommandSpec>> = {
   "view.toggleViewer": { label: "Viewer", accelerator: "CmdOrCtrl+2" },
   "view.toggleCanvas": { label: "Canvas", accelerator: "CmdOrCtrl+3" },
   "view.togglePatchEditor": { label: "Patch Editor", accelerator: "CmdOrCtrl+4" },
-  "view.toggleConsole": { label: "Console & Diagnostics", accelerator: "CmdOrCtrl+5" },
+  "view.toggleConsole": { label: "Console & Diagnostics", accelerator: "CmdOrCtrl+J" },
   "view.toggleAssistant": { label: "Assistant", accelerator: "CmdOrCtrl+6" },
   "view.toggleInspector": { label: "Inspector", accelerator: "CmdOrCtrl+7" },
   "view.toggleSplitOrientation": { label: "Toggle Split Orientation", accelerator: "CmdOrCtrl+\\" },
   "view.zoomIn": { label: "Zoom In", accelerator: "CmdOrCtrl+=" },
   "view.zoomOut": { label: "Zoom Out", accelerator: "CmdOrCtrl+-" },
-  "view.zoomToFit": { label: "Zoom to Fit", accelerator: "CmdOrCtrl+0" },
+  // Mod+0 is "Zoom to 100%" in the patch editor; Shift+1 fits both the canvas and the patch graph.
+  "view.zoomToFit": { label: "Zoom to Fit", accelerator: "Shift+1", nativeAccelerator: false },
 
   "layer.insert": { label: "Insert Layer…", accelerator: "CmdOrCtrl+Enter" },
   "layer.group": { label: "Group", accelerator: "CmdOrCtrl+G" },
@@ -60,15 +65,17 @@ export const COMMANDS: Readonly<Record<SonobeCommandId, CommandSpec>> = {
   "layer.exitComponent": { label: "Exit Component", accelerator: "Alt+Up", nativeAccelerator: false },
   "layer.toggleVisibility": { label: "Hide/Show", accelerator: "CmdOrCtrl+Shift+H" },
   "layer.toggleLock": { label: "Lock/Unlock", accelerator: "CmdOrCtrl+Shift+L" },
-  "layer.useAsMask": { label: "Use as Mask", accelerator: { mac: "Cmd+Alt+M", other: "Ctrl+Shift+M" } },
+  // Origami's ⌥⌘M. On Windows/Linux, Ctrl+Shift+M is the editor's Show Diagnostics.
+  "layer.useAsMask": { label: "Use as Mask", accelerator: { mac: "Cmd+Alt+M" } },
   "layer.bringForward": { label: "Bring Forward", accelerator: "CmdOrCtrl+Alt+Up", nativeAccelerator: false },
   "layer.sendBackward": { label: "Send Backward", accelerator: "CmdOrCtrl+Alt+Down", nativeAccelerator: false },
   "layer.bringToFront": { label: "Bring to Front", accelerator: "CmdOrCtrl+Alt+Shift+Up", nativeAccelerator: false },
   "layer.sendToBack": { label: "Send to Back", accelerator: "CmdOrCtrl+Alt+Shift+Down", nativeAccelerator: false },
 
   "patch.insert": { label: "Insert Patch…", accelerator: "Alt+Enter", nativeAccelerator: false },
-  "patch.tidyUp": { label: "Tidy Up", accelerator: { mac: "Ctrl+T", other: "Ctrl+Shift+T" } },
-  "patch.commentAroundSelection": { label: "Comment Around Selection", accelerator: { mac: "Ctrl+Alt+C", other: "Ctrl+Shift+C" } },
+  "patch.tidyUp": { label: "Tidy Up", accelerator: "Ctrl+T" },
+  // The editor binds Ctrl+Alt+C everywhere; on Windows/Linux only its keymap handles it (AltGr+C types characters).
+  "patch.commentAroundSelection": { label: "Comment Around Selection", accelerator: "Ctrl+Alt+C", nativeAccelerator: { mac: true, other: false } },
   "patch.alignLeft": { label: "Align Left", accelerator: "CmdOrCtrl+[" },
   "patch.alignRight": { label: "Align Right", accelerator: "CmdOrCtrl+]" },
   "patch.alignTop": { label: "Align Top", accelerator: "CmdOrCtrl+Shift+[" },
@@ -103,6 +110,13 @@ export function resolveAccelerator(spec: AcceleratorSpec | undefined, platform: 
   return (platform === "win32" ? spec.win : spec.linux) ?? spec.other ?? null;
 }
 
+/** Whether the menu registers a command's accelerator natively on this platform. */
+export function isNativeAccelerator(spec: CommandSpec, platform: HostPlatform): boolean {
+  const native = spec.nativeAccelerator;
+  if (native === undefined || typeof native === "boolean") return native !== false;
+  return (platform === "darwin" ? native.mac : native.other) !== false;
+}
+
 export function commandLabel(id: SonobeCommandId, platform: HostPlatform): string {
   const spec = COMMANDS[id];
   return spec.labels?.[platform] ?? spec.label;
@@ -114,7 +128,7 @@ export function listCommands(platform: HostPlatform): SonobeCommandInfo[] {
     id,
     label: commandLabel(id, platform),
     accelerator: resolveAccelerator(COMMANDS[id].accelerator, platform),
-    nativeAccelerator: COMMANDS[id].nativeAccelerator !== false,
+    nativeAccelerator: isNativeAccelerator(COMMANDS[id], platform),
   }));
 }
 

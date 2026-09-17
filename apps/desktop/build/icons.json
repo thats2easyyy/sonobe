@@ -1,0 +1,35 @@
+{
+  "source": "494c5a75354c7f2066ee649adcb9fbf458a8e612b3b401d807d8a3193274661e",
+  "generatedFrom": "assets/brand/sonobe-mark.svg",
+  "ico": [
+    16,
+    24,
+    32,
+    48,
+    64,
+    128,
+    256
+  ],
+  "linux": [
+    16,
+    32,
+    48,
+    64,
+    128,
+    256,
+    512,
+    1024
+  ],
+  "icns": [
+    "icon_16x16.png",
+    "icon_16x16@2x.png",
+    "icon_32x32.png",
+    "icon_32x32@2x.png",
+    "icon_128x128.png",
+    "icon_128x128@2x.png",
+    "icon_256x256.png",
+    "icon_256x256@2x.png",
+    "icon_512x512.png",
+    "icon_512x512@2x.png"
+  ]
+}

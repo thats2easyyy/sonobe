@@ -35,7 +35,7 @@ Message is always a single value. Several messages in one frame come out on the 
 
 | Input | Type | Default | Description |
 |---|---|---|---|
-| **Connection**<br>`connection` | `any` | none | The Connection output of a WebSocket Connection patch. |
+| **Connection**<br>`connection` | `connection` | none | The Connection output of a WebSocket Connection patch. |
 
 ## Outputs
 
