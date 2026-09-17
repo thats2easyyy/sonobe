@@ -1,0 +1,13 @@
+{
+  "formatVersion": 1,
+  "name": "Swipe Cards",
+  "generator": "Sonobe 0.1.0",
+  "root": "main",
+  "device": { "preset": "iphone-17-pro" },
+  "background": "#F4F4F6FF",
+  "meta": {
+    "description": "Throw dinner ideas left to skip or right to save. Each card follows your finger, tilts, shows a badge, and flies off or springs back; the deck moves up behind it.",
+    "guides": ["06-gestures", "07-loops"],
+    "recipe": "10-swipe-cards"
+  }
+}

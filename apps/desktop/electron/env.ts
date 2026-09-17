@@ -16,6 +16,10 @@ export interface DesktopEnv {
   editorDist: string | null;
   /** SONOBE_TEST=1: expose test hooks on globalThis in the main process. */
   testHooks: boolean;
+  /** SONOBE_LAN=1: start the phone preview server at launch. */
+  lan: boolean;
+  /** SONOBE_LAN_PORT: fixed phone preview port; null picks a free port. */
+  lanPort: number | null;
 }
 
 function flag(value: string | undefined): boolean {
@@ -64,6 +68,14 @@ export function readDesktopEnv(env: Record<string, string | undefined>, warn: (m
     else warn(`SONOBE_MCP_PORT must be an integer in 1..65535; ignoring ${rawPort}`);
   }
 
+  let lanPort: number | null = null;
+  const rawLanPort = nonEmpty(env.SONOBE_LAN_PORT);
+  if (rawLanPort) {
+    const n = Number(rawLanPort);
+    if (Number.isInteger(n) && n > 0 && n < 65536) lanPort = n;
+    else warn(`SONOBE_LAN_PORT must be an integer in 1..65535; ignoring ${rawLanPort}`);
+  }
+
   return {
     devUrl,
     mute: flag(env.SONOBE_MUTE),
@@ -73,5 +85,7 @@ export function readDesktopEnv(env: Record<string, string | undefined>, warn: (m
     userData: nonEmpty(env.SONOBE_USER_DATA),
     editorDist: nonEmpty(env.SONOBE_EDITOR_DIST),
     testHooks: flag(env.SONOBE_TEST),
+    lan: flag(env.SONOBE_LAN),
+    lanPort,
   };
 }

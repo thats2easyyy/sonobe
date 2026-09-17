@@ -1,0 +1,1714 @@
+{
+  "formatVersion": 1,
+  "id": "main",
+  "name": "Main",
+  "kind": "prototype",
+  "notes": "Scroll the tracks. Collapse Progress turns the first 190 points of scrolling into 0…1, and every Transition reads it, so the header follows the finger exactly with no animation of its own.",
+  "size": [402, 874],
+  "interface": { "inputs": {}, "outputs": {} },
+  "layers": [
+    {
+      "id": "content",
+      "type": "group",
+      "name": "Tracks",
+      "props": {
+        "color": "#0E0F1AFF",
+        "position": { "link": "tracks_scroll.position" },
+        "size": [402, 1408]
+      },
+      "children": [
+        {
+          "id": "track_summary",
+          "type": "text",
+          "name": "Summary",
+          "props": {
+            "fontSize": 13,
+            "fontWeight": 400,
+            "hitTest": false,
+            "lineHeight": 18,
+            "position": [24, 322],
+            "text": "18 songs · 1 hr 4 min",
+            "textColor": "#FFFFFFB3"
+          }
+        },
+        {
+          "id": "track_1",
+          "type": "group",
+          "name": "Neon Rain",
+          "props": {
+            "position": [0, 360],
+            "size": [402, 56]
+          },
+          "children": [
+            {
+              "id": "track_1_number",
+              "type": "text",
+              "name": "Number",
+              "props": {
+                "anchor": [0.5, 0],
+                "fontSize": 13,
+                "fontWeight": 500,
+                "hitTest": false,
+                "position": [36, 19],
+                "text": "1",
+                "textAlignment": "center",
+                "textColor": "#FFFFFF66"
+              }
+            },
+            {
+              "id": "track_1_title",
+              "type": "text",
+              "name": "Title",
+              "props": {
+                "fontSize": 16,
+                "fontWeight": 600,
+                "hitTest": false,
+                "position": [64, 9],
+                "text": "Neon Rain",
+                "textColor": "#FFFFFFFF"
+              }
+            },
+            {
+              "id": "track_1_artist",
+              "type": "text",
+              "name": "Artist",
+              "props": {
+                "fontSize": 13,
+                "fontWeight": 400,
+                "hitTest": false,
+                "lineHeight": 18,
+                "position": [64, 30],
+                "text": "Nova Lane",
+                "textColor": "#FFFFFFB3"
+              }
+            },
+            {
+              "id": "track_1_duration",
+              "type": "text",
+              "name": "Duration",
+              "props": {
+                "anchor": [1, 0],
+                "fontSize": 13,
+                "fontWeight": 500,
+                "hitTest": false,
+                "position": [378, 19],
+                "text": "3:41",
+                "textAlignment": "right",
+                "textColor": "#FFFFFF66"
+              }
+            }
+          ]
+        },
+        {
+          "id": "track_2",
+          "type": "group",
+          "name": "Coastline at 2 AM",
+          "props": {
+            "position": [0, 416],
+            "size": [402, 56]
+          },
+          "children": [
+            {
+              "id": "track_2_number",
+              "type": "text",
+              "name": "Number",
+              "props": {
+                "anchor": [0.5, 0],
+                "fontSize": 13,
+                "fontWeight": 500,
+                "hitTest": false,
+                "position": [36, 19],
+                "text": "2",
+                "textAlignment": "center",
+                "textColor": "#FFFFFF66"
+              }
+            },
+            {
+              "id": "track_2_title",
+              "type": "text",
+              "name": "Title",
+              "props": {
+                "fontSize": 16,
+                "fontWeight": 600,
+                "hitTest": false,
+                "position": [64, 9],
+                "text": "Coastline at 2 AM",
+                "textColor": "#FFFFFFFF"
+              }
+            },
+            {
+              "id": "track_2_artist",
+              "type": "text",
+              "name": "Artist",
+              "props": {
+                "fontSize": 13,
+                "fontWeight": 400,
+                "hitTest": false,
+                "lineHeight": 18,
+                "position": [64, 30],
+                "text": "Nova Lane",
+                "textColor": "#FFFFFFB3"
+              }
+            },
+            {
+              "id": "track_2_duration",
+              "type": "text",
+              "name": "Duration",
+              "props": {
+                "anchor": [1, 0],
+                "fontSize": 13,
+                "fontWeight": 500,
+                "hitTest": false,
+                "position": [378, 19],
+                "text": "4:05",
+                "textAlignment": "right",
+                "textColor": "#FFFFFF66"
+              }
+            }
+          ]
+        },
+        {
+          "id": "track_3",
+          "type": "group",
+          "name": "Slow Headlights",
+          "props": {
+            "position": [0, 472],
+            "size": [402, 56]
+          },
+          "children": [
+            {
+              "id": "track_3_number",
+              "type": "text",
+              "name": "Number",
+              "props": {
+                "anchor": [0.5, 0],
+                "fontSize": 13,
+                "fontWeight": 500,
+                "hitTest": false,
+                "position": [36, 19],
+                "text": "3",
+                "textAlignment": "center",
+                "textColor": "#FFFFFF66"
+              }
+            },
+            {
+              "id": "track_3_title",
+              "type": "text",
+              "name": "Title",
+              "props": {
+                "fontSize": 16,
+                "fontWeight": 600,
+                "hitTest": false,
+                "position": [64, 9],
+                "text": "Slow Headlights",
+                "textColor": "#FFFFFFFF"
+              }
+            },
+            {
+              "id": "track_3_artist",
+              "type": "text",
+              "name": "Artist",
+              "props": {
+                "fontSize": 13,
+                "fontWeight": 400,
+                "hitTest": false,
+                "lineHeight": 18,
+                "position": [64, 30],
+                "text": "Nova Lane",
+                "textColor": "#FFFFFFB3"
+              }
+            },
+            {
+              "id": "track_3_duration",
+              "type": "text",
+              "name": "Duration",
+              "props": {
+                "anchor": [1, 0],
+                "fontSize": 13,
+                "fontWeight": 500,
+                "hitTest": false,
+                "position": [378, 19],
+                "text": "3:18",
+                "textAlignment": "right",
+                "textColor": "#FFFFFF66"
+              }
+            }
+          ]
+        },
+        {
+          "id": "track_4",
+          "type": "group",
+          "name": "Afterglow",
+          "props": {
+            "position": [0, 528],
+            "size": [402, 56]
+          },
+          "children": [
+            {
+              "id": "track_4_number",
+              "type": "text",
+              "name": "Number",
+              "props": {
+                "anchor": [0.5, 0],
+                "fontSize": 13,
+                "fontWeight": 500,
+                "hitTest": false,
+                "position": [36, 19],
+                "text": "4",
+                "textAlignment": "center",
+                "textColor": "#FFFFFF66"
+              }
+            },
+            {
+              "id": "track_4_title",
+              "type": "text",
+              "name": "Title",
+              "props": {
+                "fontSize": 16,
+                "fontWeight": 600,
+                "hitTest": false,
+                "position": [64, 9],
+                "text": "Afterglow",
+                "textColor": "#FFFFFFFF"
+              }
+            },
+            {
+              "id": "track_4_artist",
+              "type": "text",
+              "name": "Artist",
+              "props": {
+                "fontSize": 13,
+                "fontWeight": 400,
+                "hitTest": false,
+                "lineHeight": 18,
+                "position": [64, 30],
+                "text": "Nova Lane",
+                "textColor": "#FFFFFFB3"
+              }
+            },
+            {
+              "id": "track_4_duration",
+              "type": "text",
+              "name": "Duration",
+              "props": {
+                "anchor": [1, 0],
+                "fontSize": 13,
+                "fontWeight": 500,
+                "hitTest": false,
+                "position": [378, 19],
+                "text": "2:57",
+                "textAlignment": "right",
+                "textColor": "#FFFFFF66"
+              }
+            }
+          ]
+        },
+        {
+          "id": "track_5",
+          "type": "group",
+          "name": "Streetlamp Choir",
+          "props": {
+            "position": [0, 584],
+            "size": [402, 56]
+          },
+          "children": [
+            {
+              "id": "track_5_number",
+              "type": "text",
+              "name": "Number",
+              "props": {
+                "anchor": [0.5, 0],
+                "fontSize": 13,
+                "fontWeight": 500,
+                "hitTest": false,
+                "position": [36, 19],
+                "text": "5",
+                "textAlignment": "center",
+                "textColor": "#FFFFFF66"
+              }
+            },
+            {
+              "id": "track_5_title",
+              "type": "text",
+              "name": "Title",
+              "props": {
+                "fontSize": 16,
+                "fontWeight": 600,
+                "hitTest": false,
+                "position": [64, 9],
+                "text": "Streetlamp Choir",
+                "textColor": "#FFFFFFFF"
+              }
+            },
+            {
+              "id": "track_5_artist",
+              "type": "text",
+              "name": "Artist",
+              "props": {
+                "fontSize": 13,
+                "fontWeight": 400,
+                "hitTest": false,
+                "lineHeight": 18,
+                "position": [64, 30],
+                "text": "Nova Lane",
+                "textColor": "#FFFFFFB3"
+              }
+            },
+            {
+              "id": "track_5_duration",
+              "type": "text",
+              "name": "Duration",
+              "props": {
+                "anchor": [1, 0],
+                "fontSize": 13,
+                "fontWeight": 500,
+                "hitTest": false,
+                "position": [378, 19],
+                "text": "3:33",
+                "textAlignment": "right",
+                "textColor": "#FFFFFF66"
+              }
+            }
+          ]
+        },
+        {
+          "id": "track_6",
+          "type": "group",
+          "name": "Tunnel Vision",
+          "props": {
+            "position": [0, 640],
+            "size": [402, 56]
+          },
+          "children": [
+            {
+              "id": "track_6_number",
+              "type": "text",
+              "name": "Number",
+              "props": {
+                "anchor": [0.5, 0],
+                "fontSize": 13,
+                "fontWeight": 500,
+                "hitTest": false,
+                "position": [36, 19],
+                "text": "6",
+                "textAlignment": "center",
+                "textColor": "#FFFFFF66"
+              }
+            },
+            {
+              "id": "track_6_title",
+              "type": "text",
+              "name": "Title",
+              "props": {
+                "fontSize": 16,
+                "fontWeight": 600,
+                "hitTest": false,
+                "position": [64, 9],
+                "text": "Tunnel Vision",
+                "textColor": "#FFFFFFFF"
+              }
+            },
+            {
+              "id": "track_6_artist",
+              "type": "text",
+              "name": "Artist",
+              "props": {
+                "fontSize": 13,
+                "fontWeight": 400,
+                "hitTest": false,
+                "lineHeight": 18,
+                "position": [64, 30],
+                "text": "Nova Lane",
+                "textColor": "#FFFFFFB3"
+              }
+            },
+            {
+              "id": "track_6_duration",
+              "type": "text",
+              "name": "Duration",
+              "props": {
+                "anchor": [1, 0],
+                "fontSize": 13,
+                "fontWeight": 500,
+                "hitTest": false,
+                "position": [378, 19],
+                "text": "4:21",
+                "textAlignment": "right",
+                "textColor": "#FFFFFF66"
+              }
+            }
+          ]
+        },
+        {
+          "id": "track_7",
+          "type": "group",
+          "name": "Static Hearts",
+          "props": {
+            "position": [0, 696],
+            "size": [402, 56]
+          },
+          "children": [
+            {
+              "id": "track_7_number",
+              "type": "text",
+              "name": "Number",
+              "props": {
+                "anchor": [0.5, 0],
+                "fontSize": 13,
+                "fontWeight": 500,
+                "hitTest": false,
+                "position": [36, 19],
+                "text": "7",
+                "textAlignment": "center",
+                "textColor": "#FFFFFF66"
+              }
+            },
+            {
+              "id": "track_7_title",
+              "type": "text",
+              "name": "Title",
+              "props": {
+                "fontSize": 16,
+                "fontWeight": 600,
+                "hitTest": false,
+                "position": [64, 9],
+                "text": "Static Hearts",
+                "textColor": "#FFFFFFFF"
+              }
+            },
+            {
+              "id": "track_7_artist",
+              "type": "text",
+              "name": "Artist",
+              "props": {
+                "fontSize": 13,
+                "fontWeight": 400,
+                "hitTest": false,
+                "lineHeight": 18,
+                "position": [64, 30],
+                "text": "Nova Lane",
+                "textColor": "#FFFFFFB3"
+              }
+            },
+            {
+              "id": "track_7_duration",
+              "type": "text",
+              "name": "Duration",
+              "props": {
+                "anchor": [1, 0],
+                "fontSize": 13,
+                "fontWeight": 500,
+                "hitTest": false,
+                "position": [378, 19],
+                "text": "3:09",
+                "textAlignment": "right",
+                "textColor": "#FFFFFF66"
+              }
+            }
+          ]
+        },
+        {
+          "id": "track_8",
+          "type": "group",
+          "name": "Overpass",
+          "props": {
+            "position": [0, 752],
+            "size": [402, 56]
+          },
+          "children": [
+            {
+              "id": "track_8_number",
+              "type": "text",
+              "name": "Number",
+              "props": {
+                "anchor": [0.5, 0],
+                "fontSize": 13,
+                "fontWeight": 500,
+                "hitTest": false,
+                "position": [36, 19],
+                "text": "8",
+                "textAlignment": "center",
+                "textColor": "#FFFFFF66"
+              }
+            },
+            {
+              "id": "track_8_title",
+              "type": "text",
+              "name": "Title",
+              "props": {
+                "fontSize": 16,
+                "fontWeight": 600,
+                "hitTest": false,
+                "position": [64, 9],
+                "text": "Overpass",
+                "textColor": "#FFFFFFFF"
+              }
+            },
+            {
+              "id": "track_8_artist",
+              "type": "text",
+              "name": "Artist",
+              "props": {
+                "fontSize": 13,
+                "fontWeight": 400,
+                "hitTest": false,
+                "lineHeight": 18,
+                "position": [64, 30],
+                "text": "Nova Lane",
+                "textColor": "#FFFFFFB3"
+              }
+            },
+            {
+              "id": "track_8_duration",
+              "type": "text",
+              "name": "Duration",
+              "props": {
+                "anchor": [1, 0],
+                "fontSize": 13,
+                "fontWeight": 500,
+                "hitTest": false,
+                "position": [378, 19],
+                "text": "3:46",
+                "textAlignment": "right",
+                "textColor": "#FFFFFF66"
+              }
+            }
+          ]
+        },
+        {
+          "id": "track_9",
+          "type": "group",
+          "name": "Glass Skyline",
+          "props": {
+            "position": [0, 808],
+            "size": [402, 56]
+          },
+          "children": [
+            {
+              "id": "track_9_number",
+              "type": "text",
+              "name": "Number",
+              "props": {
+                "anchor": [0.5, 0],
+                "fontSize": 13,
+                "fontWeight": 500,
+                "hitTest": false,
+                "position": [36, 19],
+                "text": "9",
+                "textAlignment": "center",
+                "textColor": "#FFFFFF66"
+              }
+            },
+            {
+              "id": "track_9_title",
+              "type": "text",
+              "name": "Title",
+              "props": {
+                "fontSize": 16,
+                "fontWeight": 600,
+                "hitTest": false,
+                "position": [64, 9],
+                "text": "Glass Skyline",
+                "textColor": "#FFFFFFFF"
+              }
+            },
+            {
+              "id": "track_9_artist",
+              "type": "text",
+              "name": "Artist",
+              "props": {
+                "fontSize": 13,
+                "fontWeight": 400,
+                "hitTest": false,
+                "lineHeight": 18,
+                "position": [64, 30],
+                "text": "Nova Lane",
+                "textColor": "#FFFFFFB3"
+              }
+            },
+            {
+              "id": "track_9_duration",
+              "type": "text",
+              "name": "Duration",
+              "props": {
+                "anchor": [1, 0],
+                "fontSize": 13,
+                "fontWeight": 500,
+                "hitTest": false,
+                "position": [378, 19],
+                "text": "4:12",
+                "textAlignment": "right",
+                "textColor": "#FFFFFF66"
+              }
+            }
+          ]
+        },
+        {
+          "id": "track_10",
+          "type": "group",
+          "name": "Cruise Control",
+          "props": {
+            "position": [0, 864],
+            "size": [402, 56]
+          },
+          "children": [
+            {
+              "id": "track_10_number",
+              "type": "text",
+              "name": "Number",
+              "props": {
+                "anchor": [0.5, 0],
+                "fontSize": 13,
+                "fontWeight": 500,
+                "hitTest": false,
+                "position": [36, 19],
+                "text": "10",
+                "textAlignment": "center",
+                "textColor": "#FFFFFF66"
+              }
+            },
+            {
+              "id": "track_10_title",
+              "type": "text",
+              "name": "Title",
+              "props": {
+                "fontSize": 16,
+                "fontWeight": 600,
+                "hitTest": false,
+                "position": [64, 9],
+                "text": "Cruise Control",
+                "textColor": "#FFFFFFFF"
+              }
+            },
+            {
+              "id": "track_10_artist",
+              "type": "text",
+              "name": "Artist",
+              "props": {
+                "fontSize": 13,
+                "fontWeight": 400,
+                "hitTest": false,
+                "lineHeight": 18,
+                "position": [64, 30],
+                "text": "Nova Lane",
+                "textColor": "#FFFFFFB3"
+              }
+            },
+            {
+              "id": "track_10_duration",
+              "type": "text",
+              "name": "Duration",
+              "props": {
+                "anchor": [1, 0],
+                "fontSize": 13,
+                "fontWeight": 500,
+                "hitTest": false,
+                "position": [378, 19],
+                "text": "3:27",
+                "textAlignment": "right",
+                "textColor": "#FFFFFF66"
+              }
+            }
+          ]
+        },
+        {
+          "id": "track_11",
+          "type": "group",
+          "name": "Dashboard Light",
+          "props": {
+            "position": [0, 920],
+            "size": [402, 56]
+          },
+          "children": [
+            {
+              "id": "track_11_number",
+              "type": "text",
+              "name": "Number",
+              "props": {
+                "anchor": [0.5, 0],
+                "fontSize": 13,
+                "fontWeight": 500,
+                "hitTest": false,
+                "position": [36, 19],
+                "text": "11",
+                "textAlignment": "center",
+                "textColor": "#FFFFFF66"
+              }
+            },
+            {
+              "id": "track_11_title",
+              "type": "text",
+              "name": "Title",
+              "props": {
+                "fontSize": 16,
+                "fontWeight": 600,
+                "hitTest": false,
+                "position": [64, 9],
+                "text": "Dashboard Light",
+                "textColor": "#FFFFFFFF"
+              }
+            },
+            {
+              "id": "track_11_artist",
+              "type": "text",
+              "name": "Artist",
+              "props": {
+                "fontSize": 13,
+                "fontWeight": 400,
+                "hitTest": false,
+                "lineHeight": 18,
+                "position": [64, 30],
+                "text": "Nova Lane",
+                "textColor": "#FFFFFFB3"
+              }
+            },
+            {
+              "id": "track_11_duration",
+              "type": "text",
+              "name": "Duration",
+              "props": {
+                "anchor": [1, 0],
+                "fontSize": 13,
+                "fontWeight": 500,
+                "hitTest": false,
+                "position": [378, 19],
+                "text": "3:52",
+                "textAlignment": "right",
+                "textColor": "#FFFFFF66"
+              }
+            }
+          ]
+        },
+        {
+          "id": "track_12",
+          "type": "group",
+          "name": "Nightshift",
+          "props": {
+            "position": [0, 976],
+            "size": [402, 56]
+          },
+          "children": [
+            {
+              "id": "track_12_number",
+              "type": "text",
+              "name": "Number",
+              "props": {
+                "anchor": [0.5, 0],
+                "fontSize": 13,
+                "fontWeight": 500,
+                "hitTest": false,
+                "position": [36, 19],
+                "text": "12",
+                "textAlignment": "center",
+                "textColor": "#FFFFFF66"
+              }
+            },
+            {
+              "id": "track_12_title",
+              "type": "text",
+              "name": "Title",
+              "props": {
+                "fontSize": 16,
+                "fontWeight": 600,
+                "hitTest": false,
+                "position": [64, 9],
+                "text": "Nightshift",
+                "textColor": "#FFFFFFFF"
+              }
+            },
+            {
+              "id": "track_12_artist",
+              "type": "text",
+              "name": "Artist",
+              "props": {
+                "fontSize": 13,
+                "fontWeight": 400,
+                "hitTest": false,
+                "lineHeight": 18,
+                "position": [64, 30],
+                "text": "Nova Lane",
+                "textColor": "#FFFFFFB3"
+              }
+            },
+            {
+              "id": "track_12_duration",
+              "type": "text",
+              "name": "Duration",
+              "props": {
+                "anchor": [1, 0],
+                "fontSize": 13,
+                "fontWeight": 500,
+                "hitTest": false,
+                "position": [378, 19],
+                "text": "4:38",
+                "textAlignment": "right",
+                "textColor": "#FFFFFF66"
+              }
+            }
+          ]
+        },
+        {
+          "id": "track_13",
+          "type": "group",
+          "name": "Exit 42",
+          "props": {
+            "position": [0, 1032],
+            "size": [402, 56]
+          },
+          "children": [
+            {
+              "id": "track_13_number",
+              "type": "text",
+              "name": "Number",
+              "props": {
+                "anchor": [0.5, 0],
+                "fontSize": 13,
+                "fontWeight": 500,
+                "hitTest": false,
+                "position": [36, 19],
+                "text": "13",
+                "textAlignment": "center",
+                "textColor": "#FFFFFF66"
+              }
+            },
+            {
+              "id": "track_13_title",
+              "type": "text",
+              "name": "Title",
+              "props": {
+                "fontSize": 16,
+                "fontWeight": 600,
+                "hitTest": false,
+                "position": [64, 9],
+                "text": "Exit 42",
+                "textColor": "#FFFFFFFF"
+              }
+            },
+            {
+              "id": "track_13_artist",
+              "type": "text",
+              "name": "Artist",
+              "props": {
+                "fontSize": 13,
+                "fontWeight": 400,
+                "hitTest": false,
+                "lineHeight": 18,
+                "position": [64, 30],
+                "text": "Nova Lane",
+                "textColor": "#FFFFFFB3"
+              }
+            },
+            {
+              "id": "track_13_duration",
+              "type": "text",
+              "name": "Duration",
+              "props": {
+                "anchor": [1, 0],
+                "fontSize": 13,
+                "fontWeight": 500,
+                "hitTest": false,
+                "position": [378, 19],
+                "text": "2:49",
+                "textAlignment": "right",
+                "textColor": "#FFFFFF66"
+              }
+            }
+          ]
+        },
+        {
+          "id": "track_14",
+          "type": "group",
+          "name": "Low Beams",
+          "props": {
+            "position": [0, 1088],
+            "size": [402, 56]
+          },
+          "children": [
+            {
+              "id": "track_14_number",
+              "type": "text",
+              "name": "Number",
+              "props": {
+                "anchor": [0.5, 0],
+                "fontSize": 13,
+                "fontWeight": 500,
+                "hitTest": false,
+                "position": [36, 19],
+                "text": "14",
+                "textAlignment": "center",
+                "textColor": "#FFFFFF66"
+              }
+            },
+            {
+              "id": "track_14_title",
+              "type": "text",
+              "name": "Title",
+              "props": {
+                "fontSize": 16,
+                "fontWeight": 600,
+                "hitTest": false,
+                "position": [64, 9],
+                "text": "Low Beams",
+                "textColor": "#FFFFFFFF"
+              }
+            },
+            {
+              "id": "track_14_artist",
+              "type": "text",
+              "name": "Artist",
+              "props": {
+                "fontSize": 13,
+                "fontWeight": 400,
+                "hitTest": false,
+                "lineHeight": 18,
+                "position": [64, 30],
+                "text": "Nova Lane",
+                "textColor": "#FFFFFFB3"
+              }
+            },
+            {
+              "id": "track_14_duration",
+              "type": "text",
+              "name": "Duration",
+              "props": {
+                "anchor": [1, 0],
+                "fontSize": 13,
+                "fontWeight": 500,
+                "hitTest": false,
+                "position": [378, 19],
+                "text": "3:15",
+                "textAlignment": "right",
+                "textColor": "#FFFFFF66"
+              }
+            }
+          ]
+        },
+        {
+          "id": "track_15",
+          "type": "group",
+          "name": "Echo Park",
+          "props": {
+            "position": [0, 1144],
+            "size": [402, 56]
+          },
+          "children": [
+            {
+              "id": "track_15_number",
+              "type": "text",
+              "name": "Number",
+              "props": {
+                "anchor": [0.5, 0],
+                "fontSize": 13,
+                "fontWeight": 500,
+                "hitTest": false,
+                "position": [36, 19],
+                "text": "15",
+                "textAlignment": "center",
+                "textColor": "#FFFFFF66"
+              }
+            },
+            {
+              "id": "track_15_title",
+              "type": "text",
+              "name": "Title",
+              "props": {
+                "fontSize": 16,
+                "fontWeight": 600,
+                "hitTest": false,
+                "position": [64, 9],
+                "text": "Echo Park",
+                "textColor": "#FFFFFFFF"
+              }
+            },
+            {
+              "id": "track_15_artist",
+              "type": "text",
+              "name": "Artist",
+              "props": {
+                "fontSize": 13,
+                "fontWeight": 400,
+                "hitTest": false,
+                "lineHeight": 18,
+                "position": [64, 30],
+                "text": "Nova Lane",
+                "textColor": "#FFFFFFB3"
+              }
+            },
+            {
+              "id": "track_15_duration",
+              "type": "text",
+              "name": "Duration",
+              "props": {
+                "anchor": [1, 0],
+                "fontSize": 13,
+                "fontWeight": 500,
+                "hitTest": false,
+                "position": [378, 19],
+                "text": "3:58",
+                "textAlignment": "right",
+                "textColor": "#FFFFFF66"
+              }
+            }
+          ]
+        },
+        {
+          "id": "track_16",
+          "type": "group",
+          "name": "Blue Hour",
+          "props": {
+            "position": [0, 1200],
+            "size": [402, 56]
+          },
+          "children": [
+            {
+              "id": "track_16_number",
+              "type": "text",
+              "name": "Number",
+              "props": {
+                "anchor": [0.5, 0],
+                "fontSize": 13,
+                "fontWeight": 500,
+                "hitTest": false,
+                "position": [36, 19],
+                "text": "16",
+                "textAlignment": "center",
+                "textColor": "#FFFFFF66"
+              }
+            },
+            {
+              "id": "track_16_title",
+              "type": "text",
+              "name": "Title",
+              "props": {
+                "fontSize": 16,
+                "fontWeight": 600,
+                "hitTest": false,
+                "position": [64, 9],
+                "text": "Blue Hour",
+                "textColor": "#FFFFFFFF"
+              }
+            },
+            {
+              "id": "track_16_artist",
+              "type": "text",
+              "name": "Artist",
+              "props": {
+                "fontSize": 13,
+                "fontWeight": 400,
+                "hitTest": false,
+                "lineHeight": 18,
+                "position": [64, 30],
+                "text": "Nova Lane",
+                "textColor": "#FFFFFFB3"
+              }
+            },
+            {
+              "id": "track_16_duration",
+              "type": "text",
+              "name": "Duration",
+              "props": {
+                "anchor": [1, 0],
+                "fontSize": 13,
+                "fontWeight": 500,
+                "hitTest": false,
+                "position": [378, 19],
+                "text": "4:02",
+                "textAlignment": "right",
+                "textColor": "#FFFFFF66"
+              }
+            }
+          ]
+        },
+        {
+          "id": "track_17",
+          "type": "group",
+          "name": "Parallel Lanes",
+          "props": {
+            "position": [0, 1256],
+            "size": [402, 56]
+          },
+          "children": [
+            {
+              "id": "track_17_number",
+              "type": "text",
+              "name": "Number",
+              "props": {
+                "anchor": [0.5, 0],
+                "fontSize": 13,
+                "fontWeight": 500,
+                "hitTest": false,
+                "position": [36, 19],
+                "text": "17",
+                "textAlignment": "center",
+                "textColor": "#FFFFFF66"
+              }
+            },
+            {
+              "id": "track_17_title",
+              "type": "text",
+              "name": "Title",
+              "props": {
+                "fontSize": 16,
+                "fontWeight": 600,
+                "hitTest": false,
+                "position": [64, 9],
+                "text": "Parallel Lanes",
+                "textColor": "#FFFFFFFF"
+              }
+            },
+            {
+              "id": "track_17_artist",
+              "type": "text",
+              "name": "Artist",
+              "props": {
+                "fontSize": 13,
+                "fontWeight": 400,
+                "hitTest": false,
+                "lineHeight": 18,
+                "position": [64, 30],
+                "text": "Nova Lane",
+                "textColor": "#FFFFFFB3"
+              }
+            },
+            {
+              "id": "track_17_duration",
+              "type": "text",
+              "name": "Duration",
+              "props": {
+                "anchor": [1, 0],
+                "fontSize": 13,
+                "fontWeight": 500,
+                "hitTest": false,
+                "position": [378, 19],
+                "text": "3:36",
+                "textAlignment": "right",
+                "textColor": "#FFFFFF66"
+              }
+            }
+          ]
+        },
+        {
+          "id": "track_18",
+          "type": "group",
+          "name": "Homeward",
+          "props": {
+            "position": [0, 1312],
+            "size": [402, 56]
+          },
+          "children": [
+            {
+              "id": "track_18_number",
+              "type": "text",
+              "name": "Number",
+              "props": {
+                "anchor": [0.5, 0],
+                "fontSize": 13,
+                "fontWeight": 500,
+                "hitTest": false,
+                "position": [36, 19],
+                "text": "18",
+                "textAlignment": "center",
+                "textColor": "#FFFFFF66"
+              }
+            },
+            {
+              "id": "track_18_title",
+              "type": "text",
+              "name": "Title",
+              "props": {
+                "fontSize": 16,
+                "fontWeight": 600,
+                "hitTest": false,
+                "position": [64, 9],
+                "text": "Homeward",
+                "textColor": "#FFFFFFFF"
+              }
+            },
+            {
+              "id": "track_18_artist",
+              "type": "text",
+              "name": "Artist",
+              "props": {
+                "fontSize": 13,
+                "fontWeight": 400,
+                "hitTest": false,
+                "lineHeight": 18,
+                "position": [64, 30],
+                "text": "Nova Lane",
+                "textColor": "#FFFFFFB3"
+              }
+            },
+            {
+              "id": "track_18_duration",
+              "type": "text",
+              "name": "Duration",
+              "props": {
+                "anchor": [1, 0],
+                "fontSize": 13,
+                "fontWeight": 500,
+                "hitTest": false,
+                "position": [378, 19],
+                "text": "5:11",
+                "textAlignment": "right",
+                "textColor": "#FFFFFF66"
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "header",
+      "type": "group",
+      "name": "Header",
+      "props": {
+        "clip": true,
+        "color": "#0E0F1AFF",
+        "hitTest": false,
+        "shadowColor": "#000000FF",
+        "shadowOffset": [0, 10],
+        "shadowOpacity": 0.45,
+        "shadowRadius": 28,
+        "size": { "link": "header_size.output" }
+      },
+      "children": [
+        {
+          "id": "header_art",
+          "type": "gradient",
+          "name": "Header Art",
+          "props": {
+            "gradient": {
+              "gradient": {
+                "kind": "linear",
+                "stops": [[0, "#4C1D95FF"], [0.55, "#BE185DFF"], [1, "#0E0F1AFF"]],
+                "start": [0, 0],
+                "end": [0.4, 1]
+              }
+            },
+            "size": [402, 300]
+          }
+        },
+        {
+          "id": "cover",
+          "type": "group",
+          "name": "Cover Art",
+          "props": {
+            "anchor": [0.5, 0.5],
+            "clip": true,
+            "cornerRadius": 18,
+            "opacity": { "link": "cover_fade.output" },
+            "position": [201, 140],
+            "scale": { "link": "cover_scale.output" },
+            "shadowColor": "#000000FF",
+            "shadowOffset": [0, 10],
+            "shadowOpacity": 0.45,
+            "shadowRadius": 28,
+            "size": [150, 150]
+          },
+          "children": [
+            {
+              "id": "cover_sky",
+              "type": "gradient",
+              "name": "Sky",
+              "props": {
+                "gradient": {
+                  "gradient": {
+                    "kind": "linear",
+                    "stops": [[0, "#F472B6FF"], [1, "#7C3AEDFF"]],
+                    "start": [0.5, 0],
+                    "end": [0.5, 1]
+                  }
+                },
+                "size": [150, 150]
+              }
+            },
+            {
+              "id": "cover_sun",
+              "type": "oval",
+              "name": "Sun",
+              "props": {
+                "color": "#FDE68AFF",
+                "position": [45, 38],
+                "size": [60, 60]
+              }
+            },
+            {
+              "id": "cover_road",
+              "type": "rectangle",
+              "name": "Road",
+              "props": {
+                "color": "#1E1B4BFF",
+                "position": [55, 92],
+                "rotation": 0,
+                "size": [40, 90]
+              }
+            },
+            {
+              "id": "cover_horizon",
+              "type": "rectangle",
+              "name": "Horizon",
+              "props": {
+                "color": "#312E81FF",
+                "position": [0, 96],
+                "size": [150, 54]
+              }
+            },
+            {
+              "id": "cover_lane",
+              "type": "rectangle",
+              "name": "Lane",
+              "props": {
+                "color": "#FDE68AFF",
+                "position": [73, 104],
+                "size": [4, 40]
+              }
+            }
+          ]
+        },
+        {
+          "id": "header_shade",
+          "type": "gradient",
+          "name": "Shade",
+          "props": {
+            "gradient": {
+              "gradient": {
+                "kind": "linear",
+                "stops": [[0, "#0E0F1A00"], [1, "#0E0F1AFF"]],
+                "start": [0.5, 0],
+                "end": [0.5, 1]
+              }
+            },
+            "position": [0, 200],
+            "size": [402, 100]
+          }
+        },
+        {
+          "id": "back_button",
+          "type": "oval",
+          "name": "Back",
+          "props": {
+            "color": "#FFFFFF26",
+            "position": [16, 62],
+            "size": [36, 36]
+          }
+        },
+        {
+          "id": "back_chevron_top",
+          "type": "rectangle",
+          "name": "Chevron Top",
+          "props": {
+            "color": "#FFFFFFFF",
+            "cornerRadius": 1.5,
+            "position": [28, 74],
+            "rotation": -45,
+            "size": [11, 3]
+          }
+        },
+        {
+          "id": "back_chevron_bottom",
+          "type": "rectangle",
+          "name": "Chevron Bottom",
+          "props": {
+            "color": "#FFFFFFFF",
+            "cornerRadius": 1.5,
+            "position": [28, 82],
+            "rotation": 45,
+            "size": [11, 3]
+          }
+        },
+        {
+          "id": "header_title",
+          "type": "text",
+          "name": "Title",
+          "props": {
+            "fontSize": { "link": "title_size.output" },
+            "fontWeight": 700,
+            "hitTest": false,
+            "letterSpacing": -0.6,
+            "position": { "link": "title_position.output" },
+            "text": "Night Drive",
+            "textColor": "#FFFFFFFF"
+          }
+        },
+        {
+          "id": "header_subtitle",
+          "type": "text",
+          "name": "Subtitle",
+          "props": {
+            "fontSize": 13,
+            "fontWeight": 400,
+            "hitTest": false,
+            "lineHeight": 18,
+            "opacity": { "link": "cover_fade.output" },
+            "position": [24, 272],
+            "text": "Playlist · Nova Lane",
+            "textColor": "#FFFFFFB3"
+          }
+        },
+        {
+          "id": "play_button",
+          "type": "group",
+          "name": "Play Button",
+          "props": {
+            "color": "#22C55EFF",
+            "cornerRadius": 28,
+            "position": { "link": "play_position.output" },
+            "scale": { "link": "play_scale.output" },
+            "shadowColor": "#22C55EFF",
+            "shadowOffset": [0, 10],
+            "shadowOpacity": 0.45,
+            "shadowRadius": 28,
+            "size": [56, 56]
+          },
+          "children": [
+            {
+              "id": "play_icon",
+              "type": "shape",
+              "name": "Play Icon",
+              "props": {
+                "color": "#0E0F1AFF",
+                "shape": { "link": "play_icon_shape.shape" },
+                "size": [56, 56]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "app_status_bar",
+      "type": "group",
+      "name": "Status Bar",
+      "props": {
+        "hitTest": false,
+        "size": [402, 62]
+      },
+      "children": [
+        {
+          "id": "app_clock",
+          "type": "text",
+          "name": "Clock",
+          "props": {
+            "anchor": [0.5, 0],
+            "fontSize": 17,
+            "fontWeight": 600,
+            "hitTest": false,
+            "position": [72, 20],
+            "text": "9:41",
+            "textAlignment": "center",
+            "textColor": "#FFFFFFFF"
+          }
+        },
+        {
+          "id": "app_signal_1",
+          "type": "rectangle",
+          "name": "Signal 1",
+          "props": {
+            "color": "#FFFFFFFF",
+            "cornerRadius": 1,
+            "hitTest": false,
+            "position": [292, 30],
+            "size": [3, 4]
+          }
+        },
+        {
+          "id": "app_signal_2",
+          "type": "rectangle",
+          "name": "Signal 2",
+          "props": {
+            "color": "#FFFFFFFF",
+            "cornerRadius": 1,
+            "hitTest": false,
+            "position": [297, 28],
+            "size": [3, 6]
+          }
+        },
+        {
+          "id": "app_signal_3",
+          "type": "rectangle",
+          "name": "Signal 3",
+          "props": {
+            "color": "#FFFFFFFF",
+            "cornerRadius": 1,
+            "hitTest": false,
+            "position": [302, 26],
+            "size": [3, 8]
+          }
+        },
+        {
+          "id": "app_signal_4",
+          "type": "rectangle",
+          "name": "Signal 4",
+          "props": {
+            "color": "#FFFFFFFF",
+            "cornerRadius": 1,
+            "hitTest": false,
+            "position": [307, 24],
+            "size": [3, 10]
+          }
+        },
+        {
+          "id": "app_battery",
+          "type": "rectangle",
+          "name": "Battery",
+          "props": {
+            "color": "#00000000",
+            "cornerRadius": 3.5,
+            "hitTest": false,
+            "position": [322, 23],
+            "size": [25, 12],
+            "strokeColor": "#FFFFFF59",
+            "strokeWidth": 1
+          }
+        },
+        {
+          "id": "app_battery_level",
+          "type": "rectangle",
+          "name": "Battery Level",
+          "props": {
+            "color": "#FFFFFFFF",
+            "cornerRadius": 2,
+            "hitTest": false,
+            "position": [324, 25],
+            "size": [19, 8]
+          }
+        },
+        {
+          "id": "app_battery_cap",
+          "type": "rectangle",
+          "name": "Battery Cap",
+          "props": {
+            "color": "#FFFFFF59",
+            "cornerRadius": 1,
+            "hitTest": false,
+            "position": [348, 27],
+            "size": [2, 4]
+          }
+        }
+      ]
+    },
+    {
+      "id": "app_home_indicator",
+      "type": "rectangle",
+      "name": "Home Indicator",
+      "props": {
+        "anchor": [0.5, 1],
+        "color": "#FFFFFFFF",
+        "cornerRadius": 3,
+        "hitTest": false,
+        "position": [201, 866],
+        "size": [140, 5]
+      }
+    }
+  ],
+  "patches": {
+    "collapse": {
+      "type": "progress",
+      "name": "Collapse Progress",
+      "inputs": {
+        "clampToRange": true,
+        "end": -190,
+        "start": 0,
+        "value": { "link": "tracks_scroll.y" }
+      },
+      "ui": { "x": 300, "y": 340 }
+    },
+    "cover_fade": {
+      "type": "transition",
+      "name": "Cover Fade",
+      "typeParam": "number",
+      "inputs": {
+        "end": 0,
+        "progress": { "link": "collapse.progress" },
+        "start": 1
+      },
+      "ui": { "x": 560, "y": 640 }
+    },
+    "cover_scale": {
+      "type": "transition",
+      "name": "Cover Scale",
+      "typeParam": "number",
+      "inputs": {
+        "end": 0.6,
+        "progress": { "link": "collapse.progress" },
+        "start": 1
+      },
+      "ui": { "x": 560, "y": 490 }
+    },
+    "header_size": {
+      "type": "transition",
+      "name": "Header Size",
+      "typeParam": "size",
+      "inputs": {
+        "end": [402, 110],
+        "progress": { "link": "collapse.progress" },
+        "start": [402, 300]
+      },
+      "ui": { "x": 560, "y": 340 }
+    },
+    "play_icon_shape": {
+      "type": "svgPathShape",
+      "name": "Play Icon Shape",
+      "inputs": {
+        "pathData": "M22 17L40 28L22 39Z",
+        "size": [56, 56],
+        "viewBox": [0, 0, 56, 56]
+      },
+      "ui": { "x": 40, "y": 40 }
+    },
+    "play_position": {
+      "type": "transition",
+      "name": "Play Position",
+      "typeParam": "point",
+      "inputs": {
+        "end": [342, 58],
+        "progress": { "link": "collapse.progress" },
+        "start": [322, 244]
+      },
+      "ui": { "x": 560, "y": 1090 }
+    },
+    "play_scale": {
+      "type": "transition",
+      "name": "Play Scale",
+      "typeParam": "number",
+      "inputs": {
+        "end": 0.72,
+        "progress": { "link": "collapse.progress" },
+        "start": 1
+      },
+      "ui": { "x": 560, "y": 1240 }
+    },
+    "title_position": {
+      "type": "transition",
+      "name": "Title Position",
+      "typeParam": "point",
+      "inputs": {
+        "end": [64, 64],
+        "progress": { "link": "collapse.progress" },
+        "start": [24, 228]
+      },
+      "ui": { "x": 560, "y": 790 }
+    },
+    "title_size": {
+      "type": "transition",
+      "name": "Title Size",
+      "typeParam": "number",
+      "inputs": {
+        "end": 20,
+        "progress": { "link": "collapse.progress" },
+        "start": 34
+      },
+      "ui": { "x": 560, "y": 940 }
+    },
+    "tracks_scroll": {
+      "type": "scroll",
+      "name": "Scroll Tracks",
+      "inputs": {
+        "layer": { "layer": "content" },
+        "scrollY": "free"
+      },
+      "ui": { "x": 40, "y": 340 }
+    }
+  },
+  "comments": []
+}

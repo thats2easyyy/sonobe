@@ -1,0 +1,49 @@
+{
+  "description": "The inbox scrolls with the finger, keeps gliding after a flick, stops at the end, springs back from the top, and Back to Top returns home.",
+  "scenarios": [
+    {
+      "name": "A slow drag moves the list with the finger",
+      "events": [{ "kind": "drag", "from": [201, 700], "to": [201, 500], "durationMs": 800, "release": false, "atMs": 100 }],
+      "durationMs": 1000,
+      "expect": [
+        { "description": "Scroll Inbox is dragging", "target": "inbox_scroll.dragging", "at": "end", "op": "==", "value": true },
+        { "description": "The content moved up by the finger's distance, less the 10-point slop", "target": "@content.position", "component": "y", "at": "end", "op": "<", "value": -180 },
+        { "description": "and no more than the finger moved", "target": "@content.position", "component": "y", "at": "end", "op": ">", "value": -200 }
+      ]
+    },
+    {
+      "name": "A quick flick glides to the end of the list",
+      "events": [{ "kind": "drag", "from": [201, 760], "to": [201, 400], "durationMs": 150, "atMs": 100 }],
+      "durationMs": 2800,
+      "expect": [
+        { "description": "It stops at the last message: 724 visible points minus 1264 of content", "target": "@content.position", "component": "y", "at": "end", "op": "==", "value": -540, "tolerance": 1 },
+        { "description": "It comes to rest", "target": "@content.position", "component": "y", "settled": true },
+        { "description": "The header has lifted", "target": "@header.shadowOpacity", "at": "end", "op": "==", "value": 0.14, "tolerance": 0.001 },
+        { "description": "Back to Top slid in", "target": "@top_button.position", "component": "y", "at": "end", "op": "==", "value": 800, "tolerance": 1 }
+      ]
+    },
+    {
+      "name": "Pulling down at the top stretches and springs back",
+      "events": [{ "kind": "drag", "from": [201, 300], "to": [201, 500], "durationMs": 400, "atMs": 100 }],
+      "durationMs": 1600,
+      "expect": [
+        { "description": "The list stretched past the top", "target": "@content.position", "component": "y", "at": "max", "op": ">", "value": 30 },
+        { "description": "and returned to 0", "target": "@content.position", "component": "y", "at": "end", "op": "==", "value": 0, "tolerance": 0.5 },
+        { "description": "The header stays flat at the top", "target": "@header.shadowOpacity", "at": "end", "op": "==", "value": 0 }
+      ]
+    },
+    {
+      "name": "Back to Top returns to the first message",
+      "events": [
+        { "kind": "drag", "from": [201, 760], "to": [201, 400], "durationMs": 150, "atMs": 100 },
+        { "kind": "tap", "target": "@top_button", "atMs": 1900 }
+      ],
+      "durationMs": 3600,
+      "expect": [
+        { "description": "It was showing before the tap", "target": "top_button_spring.output", "at": 1850, "op": ">", "value": 0.95 },
+        { "description": "The list is back at the top", "target": "@content.position", "component": "y", "at": "end", "op": "==", "value": 0, "tolerance": 0.5 },
+        { "description": "and the button slid away", "target": "top_button_spring.output", "at": "end", "op": "<", "value": 0.05 }
+      ]
+    }
+  ]
+}

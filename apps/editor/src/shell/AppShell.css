@@ -152,46 +152,13 @@
   }
 }
 
-/* Claude presence */
-.sb-presence {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--space-3);
+/* Unsaved changes marker */
+.sb-toolbar__dirty {
   flex: none;
-  height: 24px;
-  margin-right: var(--space-3);
-  padding: 0 var(--space-4) 0 3px;
-  border: 0;
-  border-radius: var(--radius-full);
-  background: var(--ai-soft);
-  color: var(--ai-text);
-  font-size: var(--font-size-sm);
-  font-weight: var(--font-weight-medium);
-  transition: background-color var(--duration-fast) var(--ease-standard);
-}
-
-@media (hover: hover) {
-  .sb-presence:hover {
-    background: color-mix(in srgb, var(--ai) 24%, transparent);
-  }
-}
-
-.sb-presence__avatar {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 18px;
-  height: 18px;
-  border-radius: 50%;
-  background: var(--ai);
-  color: #fff;
-}
-
-.sb-presence__dot {
   width: 6px;
   height: 6px;
   border-radius: 50%;
-  background: var(--success);
+  background: var(--text-tertiary);
 }
 
 /* Main layout */

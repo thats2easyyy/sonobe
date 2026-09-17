@@ -1,0 +1,547 @@
+{
+  "formatVersion": 1,
+  "id": "main",
+  "name": "Main",
+  "kind": "prototype",
+  "notes": "Drag the small self view and let go, or flick it. Position Under Finger follows the finger from where it was grabbed; on release Nearest Corner After Fling projects the throw and Current Corner remembers it; Self View Spring glides there with the finger's velocity.",
+  "size": [402, 874],
+  "interface": { "inputs": {}, "outputs": {} },
+  "layers": [
+    {
+      "id": "remote_video",
+      "type": "gradient",
+      "name": "Remote Video",
+      "props": {
+        "gradient": {
+          "gradient": {
+            "kind": "linear",
+            "stops": [[0, "#334155FF"], [1, "#0F172AFF"]],
+            "start": [0.5, 0],
+            "end": [0.5, 1]
+          }
+        },
+        "hitTest": false,
+        "size": [402, 874]
+      }
+    },
+    {
+      "id": "remote_window",
+      "type": "rectangle",
+      "name": "Window Light",
+      "props": {
+        "color": "#FFFFFF14",
+        "cornerRadius": 12,
+        "hitTest": false,
+        "position": [40, 160],
+        "size": [150, 220]
+      }
+    },
+    {
+      "id": "remote_shoulders",
+      "type": "oval",
+      "name": "Shoulders",
+      "props": {
+        "color": "#1E3A8AFF",
+        "hitTest": false,
+        "position": [51, 470],
+        "size": [300, 380]
+      }
+    },
+    {
+      "id": "remote_head",
+      "type": "oval",
+      "name": "Head",
+      "props": {
+        "color": "#D6A77AFF",
+        "hitTest": false,
+        "position": [131, 300],
+        "size": [140, 170]
+      }
+    },
+    {
+      "id": "remote_hair",
+      "type": "oval",
+      "name": "Hair",
+      "props": {
+        "color": "#1C1917FF",
+        "hitTest": false,
+        "position": [121, 276],
+        "size": [160, 90]
+      }
+    },
+    {
+      "id": "app_status_bar",
+      "type": "group",
+      "name": "Status Bar",
+      "props": {
+        "hitTest": false,
+        "size": [402, 62]
+      },
+      "children": [
+        {
+          "id": "app_clock",
+          "type": "text",
+          "name": "Clock",
+          "props": {
+            "anchor": [0.5, 0],
+            "fontSize": 17,
+            "fontWeight": 600,
+            "hitTest": false,
+            "position": [72, 20],
+            "text": "9:41",
+            "textAlignment": "center",
+            "textColor": "#FFFFFFFF"
+          }
+        },
+        {
+          "id": "app_signal_1",
+          "type": "rectangle",
+          "name": "Signal 1",
+          "props": {
+            "color": "#FFFFFFFF",
+            "cornerRadius": 1,
+            "hitTest": false,
+            "position": [292, 30],
+            "size": [3, 4]
+          }
+        },
+        {
+          "id": "app_signal_2",
+          "type": "rectangle",
+          "name": "Signal 2",
+          "props": {
+            "color": "#FFFFFFFF",
+            "cornerRadius": 1,
+            "hitTest": false,
+            "position": [297, 28],
+            "size": [3, 6]
+          }
+        },
+        {
+          "id": "app_signal_3",
+          "type": "rectangle",
+          "name": "Signal 3",
+          "props": {
+            "color": "#FFFFFFFF",
+            "cornerRadius": 1,
+            "hitTest": false,
+            "position": [302, 26],
+            "size": [3, 8]
+          }
+        },
+        {
+          "id": "app_signal_4",
+          "type": "rectangle",
+          "name": "Signal 4",
+          "props": {
+            "color": "#FFFFFFFF",
+            "cornerRadius": 1,
+            "hitTest": false,
+            "position": [307, 24],
+            "size": [3, 10]
+          }
+        },
+        {
+          "id": "app_battery",
+          "type": "rectangle",
+          "name": "Battery",
+          "props": {
+            "color": "#00000000",
+            "cornerRadius": 3.5,
+            "hitTest": false,
+            "position": [322, 23],
+            "size": [25, 12],
+            "strokeColor": "#FFFFFF59",
+            "strokeWidth": 1
+          }
+        },
+        {
+          "id": "app_battery_level",
+          "type": "rectangle",
+          "name": "Battery Level",
+          "props": {
+            "color": "#FFFFFFFF",
+            "cornerRadius": 2,
+            "hitTest": false,
+            "position": [324, 25],
+            "size": [19, 8]
+          }
+        },
+        {
+          "id": "app_battery_cap",
+          "type": "rectangle",
+          "name": "Battery Cap",
+          "props": {
+            "color": "#FFFFFF59",
+            "cornerRadius": 1,
+            "hitTest": false,
+            "position": [348, 27],
+            "size": [2, 4]
+          }
+        }
+      ]
+    },
+    {
+      "id": "call_chip",
+      "type": "group",
+      "name": "Call Chip",
+      "props": {
+        "backgroundBlur": 16,
+        "color": "#0000004D",
+        "cornerRadius": 18,
+        "hitTest": false,
+        "position": [16, 68],
+        "size": [150, 36]
+      },
+      "children": [
+        {
+          "id": "call_chip_dot",
+          "type": "oval",
+          "name": "Live Dot",
+          "props": {
+            "color": "#22C55EFF",
+            "position": [14, 13],
+            "size": [10, 10]
+          }
+        },
+        {
+          "id": "call_chip_label",
+          "type": "text",
+          "name": "Caller",
+          "props": {
+            "fontSize": 15,
+            "fontWeight": 600,
+            "hitTest": false,
+            "position": [32, 8],
+            "text": "Jordan · 12:48",
+            "textColor": "#FFFFFFFF"
+          }
+        }
+      ]
+    },
+    {
+      "id": "controls",
+      "type": "group",
+      "name": "Controls",
+      "props": {
+        "backgroundBlur": 24,
+        "color": "#00000059",
+        "hitTest": false,
+        "position": [0, 764],
+        "size": [402, 110]
+      },
+      "children": [
+        {
+          "id": "mute_button",
+          "type": "group",
+          "name": "Mute",
+          "props": {
+            "color": "#FFFFFF33",
+            "cornerRadius": 30,
+            "position": [36, 16],
+            "size": [60, 60]
+          },
+          "children": [
+            {
+              "id": "mute_button_glyph",
+              "type": "rectangle",
+              "name": "Glyph",
+              "props": {
+                "color": "#FFFFFFFF",
+                "cornerRadius": 3,
+                "hitTest": false,
+                "position": [26, 19],
+                "size": [8, 22]
+              }
+            }
+          ]
+        },
+        {
+          "id": "camera_button",
+          "type": "group",
+          "name": "Camera",
+          "props": {
+            "color": "#FFFFFF33",
+            "cornerRadius": 30,
+            "position": [126, 16],
+            "size": [60, 60]
+          },
+          "children": [
+            {
+              "id": "camera_button_glyph",
+              "type": "rectangle",
+              "name": "Glyph",
+              "props": {
+                "color": "#FFFFFFFF",
+                "cornerRadius": 3,
+                "hitTest": false,
+                "position": [18, 22],
+                "size": [24, 16]
+              }
+            }
+          ]
+        },
+        {
+          "id": "flip_button",
+          "type": "group",
+          "name": "Flip Camera",
+          "props": {
+            "color": "#FFFFFF33",
+            "cornerRadius": 30,
+            "position": [216, 16],
+            "size": [60, 60]
+          },
+          "children": [
+            {
+              "id": "flip_button_glyph",
+              "type": "rectangle",
+              "name": "Glyph",
+              "props": {
+                "color": "#FFFFFFFF",
+                "cornerRadius": 3,
+                "hitTest": false,
+                "position": [19, 19],
+                "size": [22, 22]
+              }
+            }
+          ]
+        },
+        {
+          "id": "end_button",
+          "type": "group",
+          "name": "End Call",
+          "props": {
+            "color": "#EF4444FF",
+            "cornerRadius": 30,
+            "position": [306, 16],
+            "size": [60, 60]
+          },
+          "children": [
+            {
+              "id": "end_button_glyph",
+              "type": "rectangle",
+              "name": "Glyph",
+              "props": {
+                "color": "#FFFFFFFF",
+                "cornerRadius": 3,
+                "hitTest": false,
+                "position": [17, 26],
+                "size": [26, 8]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "pip",
+      "type": "group",
+      "name": "Self View",
+      "props": {
+        "clip": true,
+        "color": "#1A1B2AFF",
+        "cornerRadius": 20,
+        "position": { "link": "pip_spring.output" },
+        "scale": { "link": "pip_lift.output" },
+        "shadowColor": "#000000FF",
+        "shadowOffset": [0, 10],
+        "shadowOpacity": 0.45,
+        "shadowRadius": 28,
+        "size": [120, 170],
+        "strokeColor": "#FFFFFF59",
+        "strokeWidth": 1.5
+      },
+      "children": [
+        {
+          "id": "pip_room",
+          "type": "gradient",
+          "name": "Room",
+          "props": {
+            "gradient": {
+              "gradient": {
+                "kind": "linear",
+                "stops": [[0, "#FDBA74FF"], [1, "#9A3412FF"]],
+                "start": [0.5, 0],
+                "end": [0.5, 1]
+              }
+            },
+            "size": [120, 170]
+          }
+        },
+        {
+          "id": "pip_shoulders",
+          "type": "oval",
+          "name": "Shoulders",
+          "props": {
+            "color": "#0F766EFF",
+            "position": [10, 112],
+            "size": [100, 110]
+          }
+        },
+        {
+          "id": "pip_head",
+          "type": "oval",
+          "name": "Head",
+          "props": {
+            "color": "#F1C27DFF",
+            "position": [36, 50],
+            "size": [48, 60]
+          }
+        }
+      ]
+    },
+    {
+      "id": "app_home_indicator",
+      "type": "rectangle",
+      "name": "Home Indicator",
+      "props": {
+        "anchor": [0.5, 1],
+        "color": "#FFFFFFFF",
+        "cornerRadius": 3,
+        "hitTest": false,
+        "position": [201, 866],
+        "size": [140, 5]
+      }
+    }
+  ],
+  "patches": {
+    "corner_position": {
+      "type": "loopSelect",
+      "name": "Corner Position",
+      "typeParam": "point",
+      "inputs": {
+        "index": { "link": "current_corner.count" },
+        "loop": { "link": "corners.loop" }
+      },
+      "ui": { "x": 820, "y": 190 }
+    },
+    "corners": {
+      "type": "loopBuilder",
+      "name": "Corners",
+      "typeParam": "point",
+      "inputCount": 4,
+      "inputs": {
+        "item0": [266, 76],
+        "item1": [16, 76],
+        "item2": [16, 578],
+        "item3": [266, 578]
+      },
+      "ui": { "x": 40, "y": 190 }
+    },
+    "current_corner": {
+      "type": "counter",
+      "name": "Current Corner",
+      "inputs": {
+        "jump": { "link": "finger.turnedOff" },
+        "jumpToNumber": { "link": "fling_corner.index" }
+      },
+      "ui": { "x": 560, "y": 190 }
+    },
+    "finger": {
+      "type": "pulse",
+      "name": "Finger Down or Up",
+      "inputs": { "on": { "link": "pip_gesture.down" } },
+      "ui": { "x": 300, "y": 190 }
+    },
+    "finger_position": {
+      "type": "add",
+      "name": "Position Under Finger",
+      "typeParam": "point",
+      "inputCount": 2,
+      "inputs": {
+        "value1": { "link": "grab_position.output" },
+        "value2": { "link": "pip_gesture.translation" }
+      },
+      "ui": { "x": 820, "y": 40 }
+    },
+    "fling_corner": {
+      "type": "snap",
+      "name": "Nearest Corner After Fling",
+      "typeParam": "point",
+      "inputs": {
+        "deceleration": "normal",
+        "mode": "points",
+        "points": { "link": "corners.loop" },
+        "value": { "link": "pip_last_frame.output" },
+        "velocity": { "link": "pip_gesture.velocity" }
+      },
+      "ui": { "x": 300, "y": 490 }
+    },
+    "grab_position": {
+      "type": "sampleAndHold",
+      "name": "Position at Grab",
+      "typeParam": "point",
+      "inputs": {
+        "sample": { "link": "pip_idle.output" },
+        "value": { "link": "pip_last_frame.output" }
+      },
+      "ui": { "x": 560, "y": 40 }
+    },
+    "pip_gesture": {
+      "type": "gesture",
+      "name": "Drag Self View",
+      "inputs": { "layer": { "layer": "pip" } },
+      "ui": { "x": 40, "y": 40 }
+    },
+    "pip_idle": {
+      "type": "not",
+      "name": "Not Dragging",
+      "inputs": { "value": { "link": "pip_gesture.down" } },
+      "ui": { "x": 300, "y": 40 }
+    },
+    "pip_last_frame": {
+      "type": "delay1",
+      "name": "Position Last Frame",
+      "typeParam": "point",
+      "inputs": { "value": { "link": "pip_spring.output" } },
+      "ui": { "x": 1600, "y": 40 }
+    },
+    "pip_lift": {
+      "type": "transition",
+      "name": "Lift While Held",
+      "typeParam": "number",
+      "inputs": {
+        "end": 1.06,
+        "progress": { "link": "pip_press.output" },
+        "start": 1
+      },
+      "ui": { "x": 560, "y": 340 }
+    },
+    "pip_press": {
+      "type": "popAnimation",
+      "name": "Press Spring",
+      "typeParam": "number",
+      "inputs": {
+        "bounciness": 0,
+        "number": { "link": "pip_gesture.down" },
+        "speed": 20
+      },
+      "ui": { "x": 300, "y": 340 }
+    },
+    "pip_spring": {
+      "type": "springAnimation",
+      "name": "Self View Spring",
+      "typeParam": "point",
+      "inputs": {
+        "friction": 22,
+        "gestureActive": { "link": "pip_gesture.down" },
+        "gestureVelocity": { "link": "pip_gesture.velocity" },
+        "number": { "link": "pip_target.output" },
+        "tension": 220
+      },
+      "ui": { "x": 1340, "y": 40 }
+    },
+    "pip_target": {
+      "type": "ifElse",
+      "name": "Finger or Corner",
+      "typeParam": "point",
+      "inputs": {
+        "condition": { "link": "pip_gesture.down" },
+        "ifFalse": { "link": "corner_position.output" },
+        "ifTrue": { "link": "finger_position.output" }
+      },
+      "ui": { "x": 1080, "y": 40 }
+    }
+  },
+  "comments": []
+}

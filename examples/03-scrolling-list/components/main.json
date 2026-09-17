@@ -1,0 +1,1912 @@
+{
+  "formatVersion": 1,
+  "id": "main",
+  "name": "Main",
+  "kind": "prototype",
+  "notes": "Drag or flick the list. Scroll Inbox moves the content layer inside a clipped window; Header Lift and Scrolled Far read its y straight away, so those effects follow the finger with no animation of their own. Tap Back to Top to jump home.",
+  "size": [402, 874],
+  "interface": { "inputs": {}, "outputs": {} },
+  "layers": [
+    {
+      "id": "window",
+      "type": "group",
+      "name": "Window",
+      "props": {
+        "clip": true,
+        "position": [0, 150],
+        "size": [402, 724]
+      },
+      "children": [
+        {
+          "id": "content",
+          "type": "group",
+          "name": "Content",
+          "props": {
+            "color": "#F4F4F6FF",
+            "position": { "link": "inbox_scroll.position" },
+            "size": [402, 1264]
+          },
+          "children": [
+            {
+              "id": "chat_1",
+              "type": "group",
+              "name": "Ava Chen",
+              "props": {
+                "position": [0, 8],
+                "size": [402, 76]
+              },
+              "children": [
+                {
+                  "id": "chat_1_avatar",
+                  "type": "oval",
+                  "name": "Avatar",
+                  "props": {
+                    "gradient": {
+                      "gradient": {
+                        "kind": "linear",
+                        "stops": [[0, "#FF9A62FF"], [1, "#FF3D71FF"]],
+                        "start": [0, 0],
+                        "end": [1, 1]
+                      }
+                    },
+                    "position": [20, 12],
+                    "size": [52, 52]
+                  }
+                },
+                {
+                  "id": "chat_1_initials",
+                  "type": "text",
+                  "name": "Initials",
+                  "props": {
+                    "anchor": [0.5, 0.5],
+                    "fontSize": 15,
+                    "fontWeight": 600,
+                    "hitTest": false,
+                    "position": [46, 38],
+                    "text": "AC",
+                    "textAlignment": "center",
+                    "textColor": "#FFFFFFFF"
+                  }
+                },
+                {
+                  "id": "chat_1_name",
+                  "type": "text",
+                  "name": "Name",
+                  "props": {
+                    "fontSize": 17,
+                    "fontWeight": 600,
+                    "hitTest": false,
+                    "position": [88, 15],
+                    "text": "Ava Chen",
+                    "textColor": "#111118FF"
+                  }
+                },
+                {
+                  "id": "chat_1_preview",
+                  "type": "text",
+                  "name": "Preview",
+                  "props": {
+                    "fontSize": 13,
+                    "fontWeight": 400,
+                    "hitTest": false,
+                    "lineHeight": 18,
+                    "maxLines": 1,
+                    "position": [88, 40],
+                    "text": "The prototype feels so much better now",
+                    "textColor": "#111118FF"
+                  }
+                },
+                {
+                  "id": "chat_1_time",
+                  "type": "text",
+                  "name": "Time",
+                  "props": {
+                    "anchor": [1, 0],
+                    "fontSize": 13,
+                    "fontWeight": 500,
+                    "hitTest": false,
+                    "position": [382, 17],
+                    "text": "9:24",
+                    "textAlignment": "right",
+                    "textColor": "#5B5CF6FF"
+                  }
+                },
+                {
+                  "id": "chat_1_unread",
+                  "type": "oval",
+                  "name": "Unread Dot",
+                  "props": {
+                    "color": "#5B5CF6FF",
+                    "position": [372, 44],
+                    "size": [10, 10]
+                  }
+                },
+                {
+                  "id": "chat_1_divider",
+                  "type": "rectangle",
+                  "name": "Divider",
+                  "props": {
+                    "color": "#E6E6EBFF",
+                    "position": [88, 75],
+                    "size": [314, 1]
+                  }
+                }
+              ]
+            },
+            {
+              "id": "chat_2",
+              "type": "group",
+              "name": "Design Crit",
+              "props": {
+                "position": [0, 84],
+                "size": [402, 76]
+              },
+              "children": [
+                {
+                  "id": "chat_2_avatar",
+                  "type": "oval",
+                  "name": "Avatar",
+                  "props": {
+                    "gradient": {
+                      "gradient": {
+                        "kind": "linear",
+                        "stops": [[0, "#7DD3FCFF"], [1, "#5B5CF6FF"]],
+                        "start": [0, 0],
+                        "end": [1, 1]
+                      }
+                    },
+                    "position": [20, 12],
+                    "size": [52, 52]
+                  }
+                },
+                {
+                  "id": "chat_2_initials",
+                  "type": "text",
+                  "name": "Initials",
+                  "props": {
+                    "anchor": [0.5, 0.5],
+                    "fontSize": 15,
+                    "fontWeight": 600,
+                    "hitTest": false,
+                    "position": [46, 38],
+                    "text": "DC",
+                    "textAlignment": "center",
+                    "textColor": "#FFFFFFFF"
+                  }
+                },
+                {
+                  "id": "chat_2_name",
+                  "type": "text",
+                  "name": "Name",
+                  "props": {
+                    "fontSize": 17,
+                    "fontWeight": 600,
+                    "hitTest": false,
+                    "position": [88, 15],
+                    "text": "Design Crit",
+                    "textColor": "#111118FF"
+                  }
+                },
+                {
+                  "id": "chat_2_preview",
+                  "type": "text",
+                  "name": "Preview",
+                  "props": {
+                    "fontSize": 13,
+                    "fontWeight": 400,
+                    "hitTest": false,
+                    "lineHeight": 18,
+                    "maxLines": 1,
+                    "position": [88, 40],
+                    "text": "Leo: can we look at the sheet again?",
+                    "textColor": "#111118FF"
+                  }
+                },
+                {
+                  "id": "chat_2_time",
+                  "type": "text",
+                  "name": "Time",
+                  "props": {
+                    "anchor": [1, 0],
+                    "fontSize": 13,
+                    "fontWeight": 500,
+                    "hitTest": false,
+                    "position": [382, 17],
+                    "text": "9:02",
+                    "textAlignment": "right",
+                    "textColor": "#5B5CF6FF"
+                  }
+                },
+                {
+                  "id": "chat_2_unread",
+                  "type": "oval",
+                  "name": "Unread Dot",
+                  "props": {
+                    "color": "#5B5CF6FF",
+                    "position": [372, 44],
+                    "size": [10, 10]
+                  }
+                },
+                {
+                  "id": "chat_2_divider",
+                  "type": "rectangle",
+                  "name": "Divider",
+                  "props": {
+                    "color": "#E6E6EBFF",
+                    "position": [88, 75],
+                    "size": [314, 1]
+                  }
+                }
+              ]
+            },
+            {
+              "id": "chat_3",
+              "type": "group",
+              "name": "Marcus Hale",
+              "props": {
+                "position": [0, 160],
+                "size": [402, 76]
+              },
+              "children": [
+                {
+                  "id": "chat_3_avatar",
+                  "type": "oval",
+                  "name": "Avatar",
+                  "props": {
+                    "gradient": {
+                      "gradient": {
+                        "kind": "linear",
+                        "stops": [[0, "#FDE68AFF"], [1, "#F59E0BFF"]],
+                        "start": [0, 0],
+                        "end": [1, 1]
+                      }
+                    },
+                    "position": [20, 12],
+                    "size": [52, 52]
+                  }
+                },
+                {
+                  "id": "chat_3_initials",
+                  "type": "text",
+                  "name": "Initials",
+                  "props": {
+                    "anchor": [0.5, 0.5],
+                    "fontSize": 15,
+                    "fontWeight": 600,
+                    "hitTest": false,
+                    "position": [46, 38],
+                    "text": "MH",
+                    "textAlignment": "center",
+                    "textColor": "#FFFFFFFF"
+                  }
+                },
+                {
+                  "id": "chat_3_name",
+                  "type": "text",
+                  "name": "Name",
+                  "props": {
+                    "fontSize": 17,
+                    "fontWeight": 600,
+                    "hitTest": false,
+                    "position": [88, 15],
+                    "text": "Marcus Hale",
+                    "textColor": "#111118FF"
+                  }
+                },
+                {
+                  "id": "chat_3_preview",
+                  "type": "text",
+                  "name": "Preview",
+                  "props": {
+                    "fontSize": 13,
+                    "fontWeight": 400,
+                    "hitTest": false,
+                    "lineHeight": 18,
+                    "maxLines": 1,
+                    "position": [88, 40],
+                    "text": "Sending the new icons this afternoon",
+                    "textColor": "#111118FF"
+                  }
+                },
+                {
+                  "id": "chat_3_time",
+                  "type": "text",
+                  "name": "Time",
+                  "props": {
+                    "anchor": [1, 0],
+                    "fontSize": 13,
+                    "fontWeight": 500,
+                    "hitTest": false,
+                    "position": [382, 17],
+                    "text": "8:47",
+                    "textAlignment": "right",
+                    "textColor": "#5B5CF6FF"
+                  }
+                },
+                {
+                  "id": "chat_3_unread",
+                  "type": "oval",
+                  "name": "Unread Dot",
+                  "props": {
+                    "color": "#5B5CF6FF",
+                    "position": [372, 44],
+                    "size": [10, 10]
+                  }
+                },
+                {
+                  "id": "chat_3_divider",
+                  "type": "rectangle",
+                  "name": "Divider",
+                  "props": {
+                    "color": "#E6E6EBFF",
+                    "position": [88, 75],
+                    "size": [314, 1]
+                  }
+                }
+              ]
+            },
+            {
+              "id": "chat_4",
+              "type": "group",
+              "name": "Priya Raman",
+              "props": {
+                "position": [0, 236],
+                "size": [402, 76]
+              },
+              "children": [
+                {
+                  "id": "chat_4_avatar",
+                  "type": "oval",
+                  "name": "Avatar",
+                  "props": {
+                    "gradient": {
+                      "gradient": {
+                        "kind": "linear",
+                        "stops": [[0, "#86EFACFF"], [1, "#14B8A6FF"]],
+                        "start": [0, 0],
+                        "end": [1, 1]
+                      }
+                    },
+                    "position": [20, 12],
+                    "size": [52, 52]
+                  }
+                },
+                {
+                  "id": "chat_4_initials",
+                  "type": "text",
+                  "name": "Initials",
+                  "props": {
+                    "anchor": [0.5, 0.5],
+                    "fontSize": 15,
+                    "fontWeight": 600,
+                    "hitTest": false,
+                    "position": [46, 38],
+                    "text": "PR",
+                    "textAlignment": "center",
+                    "textColor": "#FFFFFFFF"
+                  }
+                },
+                {
+                  "id": "chat_4_name",
+                  "type": "text",
+                  "name": "Name",
+                  "props": {
+                    "fontSize": 17,
+                    "fontWeight": 500,
+                    "hitTest": false,
+                    "position": [88, 15],
+                    "text": "Priya Raman",
+                    "textColor": "#111118FF"
+                  }
+                },
+                {
+                  "id": "chat_4_preview",
+                  "type": "text",
+                  "name": "Preview",
+                  "props": {
+                    "fontSize": 13,
+                    "fontWeight": 400,
+                    "hitTest": false,
+                    "lineHeight": 18,
+                    "maxLines": 1,
+                    "position": [88, 40],
+                    "text": "Dinner at 8? I booked the corner table",
+                    "textColor": "#5F5F6BFF"
+                  }
+                },
+                {
+                  "id": "chat_4_time",
+                  "type": "text",
+                  "name": "Time",
+                  "props": {
+                    "anchor": [1, 0],
+                    "fontSize": 13,
+                    "fontWeight": 500,
+                    "hitTest": false,
+                    "position": [382, 17],
+                    "text": "Yesterday",
+                    "textAlignment": "right",
+                    "textColor": "#A1A1AAFF"
+                  }
+                },
+                {
+                  "id": "chat_4_divider",
+                  "type": "rectangle",
+                  "name": "Divider",
+                  "props": {
+                    "color": "#E6E6EBFF",
+                    "position": [88, 75],
+                    "size": [314, 1]
+                  }
+                }
+              ]
+            },
+            {
+              "id": "chat_5",
+              "type": "group",
+              "name": "Sunday Soccer",
+              "props": {
+                "position": [0, 312],
+                "size": [402, 76]
+              },
+              "children": [
+                {
+                  "id": "chat_5_avatar",
+                  "type": "oval",
+                  "name": "Avatar",
+                  "props": {
+                    "gradient": {
+                      "gradient": {
+                        "kind": "linear",
+                        "stops": [[0, "#F0ABFCFF"], [1, "#8B5CF6FF"]],
+                        "start": [0, 0],
+                        "end": [1, 1]
+                      }
+                    },
+                    "position": [20, 12],
+                    "size": [52, 52]
+                  }
+                },
+                {
+                  "id": "chat_5_initials",
+                  "type": "text",
+                  "name": "Initials",
+                  "props": {
+                    "anchor": [0.5, 0.5],
+                    "fontSize": 15,
+                    "fontWeight": 600,
+                    "hitTest": false,
+                    "position": [46, 38],
+                    "text": "SS",
+                    "textAlignment": "center",
+                    "textColor": "#FFFFFFFF"
+                  }
+                },
+                {
+                  "id": "chat_5_name",
+                  "type": "text",
+                  "name": "Name",
+                  "props": {
+                    "fontSize": 17,
+                    "fontWeight": 500,
+                    "hitTest": false,
+                    "position": [88, 15],
+                    "text": "Sunday Soccer",
+                    "textColor": "#111118FF"
+                  }
+                },
+                {
+                  "id": "chat_5_preview",
+                  "type": "text",
+                  "name": "Preview",
+                  "props": {
+                    "fontSize": 13,
+                    "fontWeight": 400,
+                    "hitTest": false,
+                    "lineHeight": 18,
+                    "maxLines": 1,
+                    "position": [88, 40],
+                    "text": "Hana: bring the orange cones",
+                    "textColor": "#5F5F6BFF"
+                  }
+                },
+                {
+                  "id": "chat_5_time",
+                  "type": "text",
+                  "name": "Time",
+                  "props": {
+                    "anchor": [1, 0],
+                    "fontSize": 13,
+                    "fontWeight": 500,
+                    "hitTest": false,
+                    "position": [382, 17],
+                    "text": "Yesterday",
+                    "textAlignment": "right",
+                    "textColor": "#A1A1AAFF"
+                  }
+                },
+                {
+                  "id": "chat_5_divider",
+                  "type": "rectangle",
+                  "name": "Divider",
+                  "props": {
+                    "color": "#E6E6EBFF",
+                    "position": [88, 75],
+                    "size": [314, 1]
+                  }
+                }
+              ]
+            },
+            {
+              "id": "chat_6",
+              "type": "group",
+              "name": "Leo Okafor",
+              "props": {
+                "position": [0, 388],
+                "size": [402, 76]
+              },
+              "children": [
+                {
+                  "id": "chat_6_avatar",
+                  "type": "oval",
+                  "name": "Avatar",
+                  "props": {
+                    "gradient": {
+                      "gradient": {
+                        "kind": "linear",
+                        "stops": [[0, "#FCA5A5FF"], [1, "#EF4444FF"]],
+                        "start": [0, 0],
+                        "end": [1, 1]
+                      }
+                    },
+                    "position": [20, 12],
+                    "size": [52, 52]
+                  }
+                },
+                {
+                  "id": "chat_6_initials",
+                  "type": "text",
+                  "name": "Initials",
+                  "props": {
+                    "anchor": [0.5, 0.5],
+                    "fontSize": 15,
+                    "fontWeight": 600,
+                    "hitTest": false,
+                    "position": [46, 38],
+                    "text": "LO",
+                    "textAlignment": "center",
+                    "textColor": "#FFFFFFFF"
+                  }
+                },
+                {
+                  "id": "chat_6_name",
+                  "type": "text",
+                  "name": "Name",
+                  "props": {
+                    "fontSize": 17,
+                    "fontWeight": 500,
+                    "hitTest": false,
+                    "position": [88, 15],
+                    "text": "Leo Okafor",
+                    "textColor": "#111118FF"
+                  }
+                },
+                {
+                  "id": "chat_6_preview",
+                  "type": "text",
+                  "name": "Preview",
+                  "props": {
+                    "fontSize": 13,
+                    "fontWeight": 400,
+                    "hitTest": false,
+                    "lineHeight": 18,
+                    "maxLines": 1,
+                    "position": [88, 40],
+                    "text": "Ha, that spring is way too bouncy",
+                    "textColor": "#5F5F6BFF"
+                  }
+                },
+                {
+                  "id": "chat_6_time",
+                  "type": "text",
+                  "name": "Time",
+                  "props": {
+                    "anchor": [1, 0],
+                    "fontSize": 13,
+                    "fontWeight": 500,
+                    "hitTest": false,
+                    "position": [382, 17],
+                    "text": "Yesterday",
+                    "textAlignment": "right",
+                    "textColor": "#A1A1AAFF"
+                  }
+                },
+                {
+                  "id": "chat_6_divider",
+                  "type": "rectangle",
+                  "name": "Divider",
+                  "props": {
+                    "color": "#E6E6EBFF",
+                    "position": [88, 75],
+                    "size": [314, 1]
+                  }
+                }
+              ]
+            },
+            {
+              "id": "chat_7",
+              "type": "group",
+              "name": "Hana Sato",
+              "props": {
+                "position": [0, 464],
+                "size": [402, 76]
+              },
+              "children": [
+                {
+                  "id": "chat_7_avatar",
+                  "type": "oval",
+                  "name": "Avatar",
+                  "props": {
+                    "gradient": {
+                      "gradient": {
+                        "kind": "linear",
+                        "stops": [[0, "#A5B4FCFF"], [1, "#6366F1FF"]],
+                        "start": [0, 0],
+                        "end": [1, 1]
+                      }
+                    },
+                    "position": [20, 12],
+                    "size": [52, 52]
+                  }
+                },
+                {
+                  "id": "chat_7_initials",
+                  "type": "text",
+                  "name": "Initials",
+                  "props": {
+                    "anchor": [0.5, 0.5],
+                    "fontSize": 15,
+                    "fontWeight": 600,
+                    "hitTest": false,
+                    "position": [46, 38],
+                    "text": "HS",
+                    "textAlignment": "center",
+                    "textColor": "#FFFFFFFF"
+                  }
+                },
+                {
+                  "id": "chat_7_name",
+                  "type": "text",
+                  "name": "Name",
+                  "props": {
+                    "fontSize": 17,
+                    "fontWeight": 500,
+                    "hitTest": false,
+                    "position": [88, 15],
+                    "text": "Hana Sato",
+                    "textColor": "#111118FF"
+                  }
+                },
+                {
+                  "id": "chat_7_preview",
+                  "type": "text",
+                  "name": "Preview",
+                  "props": {
+                    "fontSize": 13,
+                    "fontWeight": 400,
+                    "hitTest": false,
+                    "lineHeight": 18,
+                    "maxLines": 1,
+                    "position": [88, 40],
+                    "text": "Photos from the trip are up",
+                    "textColor": "#5F5F6BFF"
+                  }
+                },
+                {
+                  "id": "chat_7_time",
+                  "type": "text",
+                  "name": "Time",
+                  "props": {
+                    "anchor": [1, 0],
+                    "fontSize": 13,
+                    "fontWeight": 500,
+                    "hitTest": false,
+                    "position": [382, 17],
+                    "text": "Mon",
+                    "textAlignment": "right",
+                    "textColor": "#A1A1AAFF"
+                  }
+                },
+                {
+                  "id": "chat_7_divider",
+                  "type": "rectangle",
+                  "name": "Divider",
+                  "props": {
+                    "color": "#E6E6EBFF",
+                    "position": [88, 75],
+                    "size": [314, 1]
+                  }
+                }
+              ]
+            },
+            {
+              "id": "chat_8",
+              "type": "group",
+              "name": "Tomás Rivera",
+              "props": {
+                "position": [0, 540],
+                "size": [402, 76]
+              },
+              "children": [
+                {
+                  "id": "chat_8_avatar",
+                  "type": "oval",
+                  "name": "Avatar",
+                  "props": {
+                    "gradient": {
+                      "gradient": {
+                        "kind": "linear",
+                        "stops": [[0, "#99F6E4FF"], [1, "#0EA5E9FF"]],
+                        "start": [0, 0],
+                        "end": [1, 1]
+                      }
+                    },
+                    "position": [20, 12],
+                    "size": [52, 52]
+                  }
+                },
+                {
+                  "id": "chat_8_initials",
+                  "type": "text",
+                  "name": "Initials",
+                  "props": {
+                    "anchor": [0.5, 0.5],
+                    "fontSize": 15,
+                    "fontWeight": 600,
+                    "hitTest": false,
+                    "position": [46, 38],
+                    "text": "TR",
+                    "textAlignment": "center",
+                    "textColor": "#FFFFFFFF"
+                  }
+                },
+                {
+                  "id": "chat_8_name",
+                  "type": "text",
+                  "name": "Name",
+                  "props": {
+                    "fontSize": 17,
+                    "fontWeight": 500,
+                    "hitTest": false,
+                    "position": [88, 15],
+                    "text": "Tomás Rivera",
+                    "textColor": "#111118FF"
+                  }
+                },
+                {
+                  "id": "chat_8_preview",
+                  "type": "text",
+                  "name": "Preview",
+                  "props": {
+                    "fontSize": 13,
+                    "fontWeight": 400,
+                    "hitTest": false,
+                    "lineHeight": 18,
+                    "maxLines": 1,
+                    "position": [88, 40],
+                    "text": "Thanks for the intro!",
+                    "textColor": "#5F5F6BFF"
+                  }
+                },
+                {
+                  "id": "chat_8_time",
+                  "type": "text",
+                  "name": "Time",
+                  "props": {
+                    "anchor": [1, 0],
+                    "fontSize": 13,
+                    "fontWeight": 500,
+                    "hitTest": false,
+                    "position": [382, 17],
+                    "text": "Mon",
+                    "textAlignment": "right",
+                    "textColor": "#A1A1AAFF"
+                  }
+                },
+                {
+                  "id": "chat_8_divider",
+                  "type": "rectangle",
+                  "name": "Divider",
+                  "props": {
+                    "color": "#E6E6EBFF",
+                    "position": [88, 75],
+                    "size": [314, 1]
+                  }
+                }
+              ]
+            },
+            {
+              "id": "chat_9",
+              "type": "group",
+              "name": "Book Club",
+              "props": {
+                "position": [0, 616],
+                "size": [402, 76]
+              },
+              "children": [
+                {
+                  "id": "chat_9_avatar",
+                  "type": "oval",
+                  "name": "Avatar",
+                  "props": {
+                    "gradient": {
+                      "gradient": {
+                        "kind": "linear",
+                        "stops": [[0, "#FDBA74FF"], [1, "#EA580CFF"]],
+                        "start": [0, 0],
+                        "end": [1, 1]
+                      }
+                    },
+                    "position": [20, 12],
+                    "size": [52, 52]
+                  }
+                },
+                {
+                  "id": "chat_9_initials",
+                  "type": "text",
+                  "name": "Initials",
+                  "props": {
+                    "anchor": [0.5, 0.5],
+                    "fontSize": 15,
+                    "fontWeight": 600,
+                    "hitTest": false,
+                    "position": [46, 38],
+                    "text": "BC",
+                    "textAlignment": "center",
+                    "textColor": "#FFFFFFFF"
+                  }
+                },
+                {
+                  "id": "chat_9_name",
+                  "type": "text",
+                  "name": "Name",
+                  "props": {
+                    "fontSize": 17,
+                    "fontWeight": 500,
+                    "hitTest": false,
+                    "position": [88, 15],
+                    "text": "Book Club",
+                    "textColor": "#111118FF"
+                  }
+                },
+                {
+                  "id": "chat_9_preview",
+                  "type": "text",
+                  "name": "Preview",
+                  "props": {
+                    "fontSize": 13,
+                    "fontWeight": 400,
+                    "hitTest": false,
+                    "lineHeight": 18,
+                    "maxLines": 1,
+                    "position": [88, 40],
+                    "text": "Iris: chapter 9 was wild",
+                    "textColor": "#5F5F6BFF"
+                  }
+                },
+                {
+                  "id": "chat_9_time",
+                  "type": "text",
+                  "name": "Time",
+                  "props": {
+                    "anchor": [1, 0],
+                    "fontSize": 13,
+                    "fontWeight": 500,
+                    "hitTest": false,
+                    "position": [382, 17],
+                    "text": "Sun",
+                    "textAlignment": "right",
+                    "textColor": "#A1A1AAFF"
+                  }
+                },
+                {
+                  "id": "chat_9_divider",
+                  "type": "rectangle",
+                  "name": "Divider",
+                  "props": {
+                    "color": "#E6E6EBFF",
+                    "position": [88, 75],
+                    "size": [314, 1]
+                  }
+                }
+              ]
+            },
+            {
+              "id": "chat_10",
+              "type": "group",
+              "name": "Iris Novak",
+              "props": {
+                "position": [0, 692],
+                "size": [402, 76]
+              },
+              "children": [
+                {
+                  "id": "chat_10_avatar",
+                  "type": "oval",
+                  "name": "Avatar",
+                  "props": {
+                    "gradient": {
+                      "gradient": {
+                        "kind": "linear",
+                        "stops": [[0, "#D9F99DFF"], [1, "#65A30DFF"]],
+                        "start": [0, 0],
+                        "end": [1, 1]
+                      }
+                    },
+                    "position": [20, 12],
+                    "size": [52, 52]
+                  }
+                },
+                {
+                  "id": "chat_10_initials",
+                  "type": "text",
+                  "name": "Initials",
+                  "props": {
+                    "anchor": [0.5, 0.5],
+                    "fontSize": 15,
+                    "fontWeight": 600,
+                    "hitTest": false,
+                    "position": [46, 38],
+                    "text": "IN",
+                    "textAlignment": "center",
+                    "textColor": "#FFFFFFFF"
+                  }
+                },
+                {
+                  "id": "chat_10_name",
+                  "type": "text",
+                  "name": "Name",
+                  "props": {
+                    "fontSize": 17,
+                    "fontWeight": 500,
+                    "hitTest": false,
+                    "position": [88, 15],
+                    "text": "Iris Novak",
+                    "textColor": "#111118FF"
+                  }
+                },
+                {
+                  "id": "chat_10_preview",
+                  "type": "text",
+                  "name": "Preview",
+                  "props": {
+                    "fontSize": 13,
+                    "fontWeight": 400,
+                    "hitTest": false,
+                    "lineHeight": 18,
+                    "maxLines": 1,
+                    "position": [88, 40],
+                    "text": "Voice memo · 0:42",
+                    "textColor": "#5F5F6BFF"
+                  }
+                },
+                {
+                  "id": "chat_10_time",
+                  "type": "text",
+                  "name": "Time",
+                  "props": {
+                    "anchor": [1, 0],
+                    "fontSize": 13,
+                    "fontWeight": 500,
+                    "hitTest": false,
+                    "position": [382, 17],
+                    "text": "Sun",
+                    "textAlignment": "right",
+                    "textColor": "#A1A1AAFF"
+                  }
+                },
+                {
+                  "id": "chat_10_divider",
+                  "type": "rectangle",
+                  "name": "Divider",
+                  "props": {
+                    "color": "#E6E6EBFF",
+                    "position": [88, 75],
+                    "size": [314, 1]
+                  }
+                }
+              ]
+            },
+            {
+              "id": "chat_11",
+              "type": "group",
+              "name": "Dev Patel",
+              "props": {
+                "position": [0, 768],
+                "size": [402, 76]
+              },
+              "children": [
+                {
+                  "id": "chat_11_avatar",
+                  "type": "oval",
+                  "name": "Avatar",
+                  "props": {
+                    "gradient": {
+                      "gradient": {
+                        "kind": "linear",
+                        "stops": [[0, "#C4B5FDFF"], [1, "#7C3AEDFF"]],
+                        "start": [0, 0],
+                        "end": [1, 1]
+                      }
+                    },
+                    "position": [20, 12],
+                    "size": [52, 52]
+                  }
+                },
+                {
+                  "id": "chat_11_initials",
+                  "type": "text",
+                  "name": "Initials",
+                  "props": {
+                    "anchor": [0.5, 0.5],
+                    "fontSize": 15,
+                    "fontWeight": 600,
+                    "hitTest": false,
+                    "position": [46, 38],
+                    "text": "DP",
+                    "textAlignment": "center",
+                    "textColor": "#FFFFFFFF"
+                  }
+                },
+                {
+                  "id": "chat_11_name",
+                  "type": "text",
+                  "name": "Name",
+                  "props": {
+                    "fontSize": 17,
+                    "fontWeight": 500,
+                    "hitTest": false,
+                    "position": [88, 15],
+                    "text": "Dev Patel",
+                    "textColor": "#111118FF"
+                  }
+                },
+                {
+                  "id": "chat_11_preview",
+                  "type": "text",
+                  "name": "Preview",
+                  "props": {
+                    "fontSize": 13,
+                    "fontWeight": 400,
+                    "hitTest": false,
+                    "lineHeight": 18,
+                    "maxLines": 1,
+                    "position": [88, 40],
+                    "text": "Merged. Ship it",
+                    "textColor": "#5F5F6BFF"
+                  }
+                },
+                {
+                  "id": "chat_11_time",
+                  "type": "text",
+                  "name": "Time",
+                  "props": {
+                    "anchor": [1, 0],
+                    "fontSize": 13,
+                    "fontWeight": 500,
+                    "hitTest": false,
+                    "position": [382, 17],
+                    "text": "Sat",
+                    "textAlignment": "right",
+                    "textColor": "#A1A1AAFF"
+                  }
+                },
+                {
+                  "id": "chat_11_divider",
+                  "type": "rectangle",
+                  "name": "Divider",
+                  "props": {
+                    "color": "#E6E6EBFF",
+                    "position": [88, 75],
+                    "size": [314, 1]
+                  }
+                }
+              ]
+            },
+            {
+              "id": "chat_12",
+              "type": "group",
+              "name": "Family",
+              "props": {
+                "position": [0, 844],
+                "size": [402, 76]
+              },
+              "children": [
+                {
+                  "id": "chat_12_avatar",
+                  "type": "oval",
+                  "name": "Avatar",
+                  "props": {
+                    "gradient": {
+                      "gradient": {
+                        "kind": "linear",
+                        "stops": [[0, "#FBCFE8FF"], [1, "#DB2777FF"]],
+                        "start": [0, 0],
+                        "end": [1, 1]
+                      }
+                    },
+                    "position": [20, 12],
+                    "size": [52, 52]
+                  }
+                },
+                {
+                  "id": "chat_12_initials",
+                  "type": "text",
+                  "name": "Initials",
+                  "props": {
+                    "anchor": [0.5, 0.5],
+                    "fontSize": 15,
+                    "fontWeight": 600,
+                    "hitTest": false,
+                    "position": [46, 38],
+                    "text": "F",
+                    "textAlignment": "center",
+                    "textColor": "#FFFFFFFF"
+                  }
+                },
+                {
+                  "id": "chat_12_name",
+                  "type": "text",
+                  "name": "Name",
+                  "props": {
+                    "fontSize": 17,
+                    "fontWeight": 500,
+                    "hitTest": false,
+                    "position": [88, 15],
+                    "text": "Family",
+                    "textColor": "#111118FF"
+                  }
+                },
+                {
+                  "id": "chat_12_preview",
+                  "type": "text",
+                  "name": "Preview",
+                  "props": {
+                    "fontSize": 13,
+                    "fontWeight": 400,
+                    "hitTest": false,
+                    "lineHeight": 18,
+                    "maxLines": 1,
+                    "position": [88, 40],
+                    "text": "Mom: call when you land",
+                    "textColor": "#5F5F6BFF"
+                  }
+                },
+                {
+                  "id": "chat_12_time",
+                  "type": "text",
+                  "name": "Time",
+                  "props": {
+                    "anchor": [1, 0],
+                    "fontSize": 13,
+                    "fontWeight": 500,
+                    "hitTest": false,
+                    "position": [382, 17],
+                    "text": "Sat",
+                    "textAlignment": "right",
+                    "textColor": "#A1A1AAFF"
+                  }
+                },
+                {
+                  "id": "chat_12_divider",
+                  "type": "rectangle",
+                  "name": "Divider",
+                  "props": {
+                    "color": "#E6E6EBFF",
+                    "position": [88, 75],
+                    "size": [314, 1]
+                  }
+                }
+              ]
+            },
+            {
+              "id": "chat_13",
+              "type": "group",
+              "name": "Zoe Martin",
+              "props": {
+                "position": [0, 920],
+                "size": [402, 76]
+              },
+              "children": [
+                {
+                  "id": "chat_13_avatar",
+                  "type": "oval",
+                  "name": "Avatar",
+                  "props": {
+                    "gradient": {
+                      "gradient": {
+                        "kind": "linear",
+                        "stops": [[0, "#BAE6FDFF"], [1, "#0284C7FF"]],
+                        "start": [0, 0],
+                        "end": [1, 1]
+                      }
+                    },
+                    "position": [20, 12],
+                    "size": [52, 52]
+                  }
+                },
+                {
+                  "id": "chat_13_initials",
+                  "type": "text",
+                  "name": "Initials",
+                  "props": {
+                    "anchor": [0.5, 0.5],
+                    "fontSize": 15,
+                    "fontWeight": 600,
+                    "hitTest": false,
+                    "position": [46, 38],
+                    "text": "ZM",
+                    "textAlignment": "center",
+                    "textColor": "#FFFFFFFF"
+                  }
+                },
+                {
+                  "id": "chat_13_name",
+                  "type": "text",
+                  "name": "Name",
+                  "props": {
+                    "fontSize": 17,
+                    "fontWeight": 500,
+                    "hitTest": false,
+                    "position": [88, 15],
+                    "text": "Zoe Martin",
+                    "textColor": "#111118FF"
+                  }
+                },
+                {
+                  "id": "chat_13_preview",
+                  "type": "text",
+                  "name": "Preview",
+                  "props": {
+                    "fontSize": 13,
+                    "fontWeight": 400,
+                    "hitTest": false,
+                    "lineHeight": 18,
+                    "maxLines": 1,
+                    "position": [88, 40],
+                    "text": "Can you share the file?",
+                    "textColor": "#5F5F6BFF"
+                  }
+                },
+                {
+                  "id": "chat_13_time",
+                  "type": "text",
+                  "name": "Time",
+                  "props": {
+                    "anchor": [1, 0],
+                    "fontSize": 13,
+                    "fontWeight": 500,
+                    "hitTest": false,
+                    "position": [382, 17],
+                    "text": "Fri",
+                    "textAlignment": "right",
+                    "textColor": "#A1A1AAFF"
+                  }
+                },
+                {
+                  "id": "chat_13_divider",
+                  "type": "rectangle",
+                  "name": "Divider",
+                  "props": {
+                    "color": "#E6E6EBFF",
+                    "position": [88, 75],
+                    "size": [314, 1]
+                  }
+                }
+              ]
+            },
+            {
+              "id": "chat_14",
+              "type": "group",
+              "name": "Kai Andersen",
+              "props": {
+                "position": [0, 996],
+                "size": [402, 76]
+              },
+              "children": [
+                {
+                  "id": "chat_14_avatar",
+                  "type": "oval",
+                  "name": "Avatar",
+                  "props": {
+                    "gradient": {
+                      "gradient": {
+                        "kind": "linear",
+                        "stops": [[0, "#FEF08AFF"], [1, "#CA8A04FF"]],
+                        "start": [0, 0],
+                        "end": [1, 1]
+                      }
+                    },
+                    "position": [20, 12],
+                    "size": [52, 52]
+                  }
+                },
+                {
+                  "id": "chat_14_initials",
+                  "type": "text",
+                  "name": "Initials",
+                  "props": {
+                    "anchor": [0.5, 0.5],
+                    "fontSize": 15,
+                    "fontWeight": 600,
+                    "hitTest": false,
+                    "position": [46, 38],
+                    "text": "KA",
+                    "textAlignment": "center",
+                    "textColor": "#FFFFFFFF"
+                  }
+                },
+                {
+                  "id": "chat_14_name",
+                  "type": "text",
+                  "name": "Name",
+                  "props": {
+                    "fontSize": 17,
+                    "fontWeight": 500,
+                    "hitTest": false,
+                    "position": [88, 15],
+                    "text": "Kai Andersen",
+                    "textColor": "#111118FF"
+                  }
+                },
+                {
+                  "id": "chat_14_preview",
+                  "type": "text",
+                  "name": "Preview",
+                  "props": {
+                    "fontSize": 13,
+                    "fontWeight": 400,
+                    "hitTest": false,
+                    "lineHeight": 18,
+                    "maxLines": 1,
+                    "position": [88, 40],
+                    "text": "See you at the climbing gym",
+                    "textColor": "#5F5F6BFF"
+                  }
+                },
+                {
+                  "id": "chat_14_time",
+                  "type": "text",
+                  "name": "Time",
+                  "props": {
+                    "anchor": [1, 0],
+                    "fontSize": 13,
+                    "fontWeight": 500,
+                    "hitTest": false,
+                    "position": [382, 17],
+                    "text": "Fri",
+                    "textAlignment": "right",
+                    "textColor": "#A1A1AAFF"
+                  }
+                },
+                {
+                  "id": "chat_14_divider",
+                  "type": "rectangle",
+                  "name": "Divider",
+                  "props": {
+                    "color": "#E6E6EBFF",
+                    "position": [88, 75],
+                    "size": [314, 1]
+                  }
+                }
+              ]
+            },
+            {
+              "id": "chat_15",
+              "type": "group",
+              "name": "Ruth Mendes",
+              "props": {
+                "position": [0, 1072],
+                "size": [402, 76]
+              },
+              "children": [
+                {
+                  "id": "chat_15_avatar",
+                  "type": "oval",
+                  "name": "Avatar",
+                  "props": {
+                    "gradient": {
+                      "gradient": {
+                        "kind": "linear",
+                        "stops": [[0, "#BBF7D0FF"], [1, "#16A34AFF"]],
+                        "start": [0, 0],
+                        "end": [1, 1]
+                      }
+                    },
+                    "position": [20, 12],
+                    "size": [52, 52]
+                  }
+                },
+                {
+                  "id": "chat_15_initials",
+                  "type": "text",
+                  "name": "Initials",
+                  "props": {
+                    "anchor": [0.5, 0.5],
+                    "fontSize": 15,
+                    "fontWeight": 600,
+                    "hitTest": false,
+                    "position": [46, 38],
+                    "text": "RM",
+                    "textAlignment": "center",
+                    "textColor": "#FFFFFFFF"
+                  }
+                },
+                {
+                  "id": "chat_15_name",
+                  "type": "text",
+                  "name": "Name",
+                  "props": {
+                    "fontSize": 17,
+                    "fontWeight": 500,
+                    "hitTest": false,
+                    "position": [88, 15],
+                    "text": "Ruth Mendes",
+                    "textColor": "#111118FF"
+                  }
+                },
+                {
+                  "id": "chat_15_preview",
+                  "type": "text",
+                  "name": "Preview",
+                  "props": {
+                    "fontSize": 13,
+                    "fontWeight": 400,
+                    "hitTest": false,
+                    "lineHeight": 18,
+                    "maxLines": 1,
+                    "position": [88, 40],
+                    "text": "Loved the talk",
+                    "textColor": "#5F5F6BFF"
+                  }
+                },
+                {
+                  "id": "chat_15_time",
+                  "type": "text",
+                  "name": "Time",
+                  "props": {
+                    "anchor": [1, 0],
+                    "fontSize": 13,
+                    "fontWeight": 500,
+                    "hitTest": false,
+                    "position": [382, 17],
+                    "text": "Thu",
+                    "textAlignment": "right",
+                    "textColor": "#A1A1AAFF"
+                  }
+                },
+                {
+                  "id": "chat_15_divider",
+                  "type": "rectangle",
+                  "name": "Divider",
+                  "props": {
+                    "color": "#E6E6EBFF",
+                    "position": [88, 75],
+                    "size": [314, 1]
+                  }
+                }
+              ]
+            },
+            {
+              "id": "chat_16",
+              "type": "group",
+              "name": "Oliver Grant",
+              "props": {
+                "position": [0, 1148],
+                "size": [402, 76]
+              },
+              "children": [
+                {
+                  "id": "chat_16_avatar",
+                  "type": "oval",
+                  "name": "Avatar",
+                  "props": {
+                    "gradient": {
+                      "gradient": {
+                        "kind": "linear",
+                        "stops": [[0, "#E9D5FFFF"], [1, "#9333EAFF"]],
+                        "start": [0, 0],
+                        "end": [1, 1]
+                      }
+                    },
+                    "position": [20, 12],
+                    "size": [52, 52]
+                  }
+                },
+                {
+                  "id": "chat_16_initials",
+                  "type": "text",
+                  "name": "Initials",
+                  "props": {
+                    "anchor": [0.5, 0.5],
+                    "fontSize": 15,
+                    "fontWeight": 600,
+                    "hitTest": false,
+                    "position": [46, 38],
+                    "text": "OG",
+                    "textAlignment": "center",
+                    "textColor": "#FFFFFFFF"
+                  }
+                },
+                {
+                  "id": "chat_16_name",
+                  "type": "text",
+                  "name": "Name",
+                  "props": {
+                    "fontSize": 17,
+                    "fontWeight": 500,
+                    "hitTest": false,
+                    "position": [88, 15],
+                    "text": "Oliver Grant",
+                    "textColor": "#111118FF"
+                  }
+                },
+                {
+                  "id": "chat_16_preview",
+                  "type": "text",
+                  "name": "Preview",
+                  "props": {
+                    "fontSize": 13,
+                    "fontWeight": 400,
+                    "hitTest": false,
+                    "lineHeight": 18,
+                    "maxLines": 1,
+                    "position": [88, 40],
+                    "text": "Receipt attached",
+                    "textColor": "#5F5F6BFF"
+                  }
+                },
+                {
+                  "id": "chat_16_time",
+                  "type": "text",
+                  "name": "Time",
+                  "props": {
+                    "anchor": [1, 0],
+                    "fontSize": 13,
+                    "fontWeight": 500,
+                    "hitTest": false,
+                    "position": [382, 17],
+                    "text": "Wed",
+                    "textAlignment": "right",
+                    "textColor": "#A1A1AAFF"
+                  }
+                },
+                {
+                  "id": "chat_16_divider",
+                  "type": "rectangle",
+                  "name": "Divider",
+                  "props": {
+                    "color": "#E6E6EBFF",
+                    "position": [88, 75],
+                    "size": [314, 1]
+                  }
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "header",
+      "type": "group",
+      "name": "Header",
+      "props": {
+        "color": "#F4F4F6FF",
+        "hitTest": false,
+        "shadowColor": "#000000FF",
+        "shadowOffset": [0, 6],
+        "shadowOpacity": { "link": "header_shadow.output" },
+        "shadowRadius": 14,
+        "size": [402, 150]
+      },
+      "children": [
+        {
+          "id": "header_title",
+          "type": "text",
+          "name": "Title",
+          "props": {
+            "fontSize": 34,
+            "fontWeight": 700,
+            "hitTest": false,
+            "letterSpacing": -0.6,
+            "position": [24, 70],
+            "text": "Messages",
+            "textColor": "#111118FF"
+          }
+        },
+        {
+          "id": "header_subtitle",
+          "type": "text",
+          "name": "Unread Count",
+          "props": {
+            "fontSize": 13,
+            "fontWeight": 400,
+            "hitTest": false,
+            "lineHeight": 18,
+            "position": [24, 114],
+            "text": "3 unread",
+            "textColor": "#5F5F6BFF"
+          }
+        },
+        {
+          "id": "compose",
+          "type": "group",
+          "name": "Compose",
+          "props": {
+            "color": "#5B5CF6FF",
+            "cornerRadius": 20,
+            "position": [338, 72],
+            "size": [40, 40]
+          },
+          "children": [
+            {
+              "id": "compose_bar_h",
+              "type": "rectangle",
+              "name": "Plus Horizontal",
+              "props": {
+                "color": "#FFFFFFFF",
+                "cornerRadius": 1,
+                "position": [12, 19],
+                "size": [16, 2]
+              }
+            },
+            {
+              "id": "compose_bar_v",
+              "type": "rectangle",
+              "name": "Plus Vertical",
+              "props": {
+                "color": "#FFFFFFFF",
+                "cornerRadius": 1,
+                "position": [19, 12],
+                "size": [2, 16]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "app_status_bar",
+      "type": "group",
+      "name": "Status Bar",
+      "props": {
+        "hitTest": false,
+        "size": [402, 62]
+      },
+      "children": [
+        {
+          "id": "app_clock",
+          "type": "text",
+          "name": "Clock",
+          "props": {
+            "anchor": [0.5, 0],
+            "fontSize": 17,
+            "fontWeight": 600,
+            "hitTest": false,
+            "position": [72, 20],
+            "text": "9:41",
+            "textAlignment": "center",
+            "textColor": "#111118FF"
+          }
+        },
+        {
+          "id": "app_signal_1",
+          "type": "rectangle",
+          "name": "Signal 1",
+          "props": {
+            "color": "#111118FF",
+            "cornerRadius": 1,
+            "hitTest": false,
+            "position": [292, 30],
+            "size": [3, 4]
+          }
+        },
+        {
+          "id": "app_signal_2",
+          "type": "rectangle",
+          "name": "Signal 2",
+          "props": {
+            "color": "#111118FF",
+            "cornerRadius": 1,
+            "hitTest": false,
+            "position": [297, 28],
+            "size": [3, 6]
+          }
+        },
+        {
+          "id": "app_signal_3",
+          "type": "rectangle",
+          "name": "Signal 3",
+          "props": {
+            "color": "#111118FF",
+            "cornerRadius": 1,
+            "hitTest": false,
+            "position": [302, 26],
+            "size": [3, 8]
+          }
+        },
+        {
+          "id": "app_signal_4",
+          "type": "rectangle",
+          "name": "Signal 4",
+          "props": {
+            "color": "#111118FF",
+            "cornerRadius": 1,
+            "hitTest": false,
+            "position": [307, 24],
+            "size": [3, 10]
+          }
+        },
+        {
+          "id": "app_battery",
+          "type": "rectangle",
+          "name": "Battery",
+          "props": {
+            "color": "#00000000",
+            "cornerRadius": 3.5,
+            "hitTest": false,
+            "position": [322, 23],
+            "size": [25, 12],
+            "strokeColor": "#11111859",
+            "strokeWidth": 1
+          }
+        },
+        {
+          "id": "app_battery_level",
+          "type": "rectangle",
+          "name": "Battery Level",
+          "props": {
+            "color": "#111118FF",
+            "cornerRadius": 2,
+            "hitTest": false,
+            "position": [324, 25],
+            "size": [19, 8]
+          }
+        },
+        {
+          "id": "app_battery_cap",
+          "type": "rectangle",
+          "name": "Battery Cap",
+          "props": {
+            "color": "#11111859",
+            "cornerRadius": 1,
+            "hitTest": false,
+            "position": [348, 27],
+            "size": [2, 4]
+          }
+        }
+      ]
+    },
+    {
+      "id": "top_button",
+      "type": "group",
+      "name": "Back to Top",
+      "props": {
+        "anchor": [0.5, 0.5],
+        "color": "#111118FF",
+        "cornerRadius": 22,
+        "position": { "link": "top_button_position.output" },
+        "shadowColor": "#000000FF",
+        "shadowOffset": [0, 10],
+        "shadowOpacity": 0.45,
+        "shadowRadius": 28,
+        "size": [148, 44]
+      },
+      "children": [
+        {
+          "id": "top_button_label",
+          "type": "text",
+          "name": "Back to Top Label",
+          "props": {
+            "anchor": [0.5, 0.5],
+            "fontSize": 15,
+            "fontWeight": 600,
+            "hitTest": false,
+            "position": [74, 22],
+            "text": "Back to top",
+            "textAlignment": "center",
+            "textColor": "#FFFFFFFF"
+          }
+        }
+      ]
+    },
+    {
+      "id": "app_home_indicator",
+      "type": "rectangle",
+      "name": "Home Indicator",
+      "props": {
+        "anchor": [0.5, 1],
+        "color": "#111118FF",
+        "cornerRadius": 3,
+        "hitTest": false,
+        "position": [201, 866],
+        "size": [140, 5]
+      }
+    }
+  ],
+  "patches": {
+    "header_lift": {
+      "type": "progress",
+      "name": "Header Lift",
+      "inputs": {
+        "clampToRange": true,
+        "end": -24,
+        "start": 0,
+        "value": { "link": "inbox_scroll.y" }
+      },
+      "ui": { "x": 560, "y": 40 }
+    },
+    "header_shadow": {
+      "type": "transition",
+      "name": "Header Shadow",
+      "typeParam": "number",
+      "inputs": {
+        "end": 0.14,
+        "progress": { "link": "header_lift.progress" },
+        "start": 0
+      },
+      "ui": { "x": 820, "y": 40 }
+    },
+    "inbox_scroll": {
+      "type": "scroll",
+      "name": "Scroll Inbox",
+      "inputs": {
+        "jumpToY": { "link": "tap_top.tap" },
+        "layer": { "layer": "content" },
+        "scrollY": "free"
+      },
+      "ui": { "x": 300, "y": 40 }
+    },
+    "scrolled_far": {
+      "type": "lessThan",
+      "name": "Scrolled Far",
+      "typeParam": "number",
+      "inputCount": 2,
+      "inputs": {
+        "value1": { "link": "inbox_scroll.y" },
+        "value2": -400
+      },
+      "ui": { "x": 560, "y": 190 }
+    },
+    "tap_top": {
+      "type": "interaction",
+      "name": "Tap Back to Top",
+      "inputs": { "layer": { "layer": "top_button" } },
+      "ui": { "x": 40, "y": 40 }
+    },
+    "top_button_position": {
+      "type": "transition",
+      "name": "Back to Top Position",
+      "typeParam": "point",
+      "inputs": {
+        "end": [201, 800],
+        "progress": { "link": "top_button_spring.output" },
+        "start": [201, 940]
+      },
+      "ui": { "x": 1080, "y": 40 }
+    },
+    "top_button_spring": {
+      "type": "popAnimation",
+      "name": "Back to Top Spring",
+      "typeParam": "number",
+      "inputs": {
+        "bounciness": 4,
+        "number": { "link": "scrolled_far.output" },
+        "speed": 16
+      },
+      "ui": { "x": 820, "y": 190 }
+    }
+  },
+  "comments": []
+}

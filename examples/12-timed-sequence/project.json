@@ -1,0 +1,13 @@
+{
+  "formatVersion": 1,
+  "name": "Timed Sequence",
+  "generator": "Sonobe 0.1.0",
+  "root": "main",
+  "device": { "preset": "iphone-17-pro" },
+  "background": "#ECFDF3FF",
+  "meta": {
+    "description": "A payment confirmation that plays in stages: the circle pops, the check draws, the amount fades up, the receipt slides in, and Replay runs it again.",
+    "guides": ["02-isat", "05-springs-and-feel"],
+    "recipe": "12-timed-sequence"
+  }
+}

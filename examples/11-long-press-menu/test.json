@@ -1,0 +1,61 @@
+{
+  "description": "Holding the message for 0.45 seconds opens the menu and dims the chat; shorter presses only squeeze; tapping the backdrop or an action closes it.",
+  "scenarios": [
+    {
+      "name": "Holding the message opens the menu",
+      "events": [{ "kind": "longPress", "target": "@message", "durationMs": 700, "atMs": 100 }],
+      "durationMs": 1500,
+      "expect": [
+        { "description": "Long Press turned on while held", "target": "hold_message.longPress", "at": "max", "op": "==", "value": 1 },
+        { "description": "Menu Open is on", "target": "menu_open.on", "at": "end", "op": "==", "value": true },
+        { "description": "The overlay is fully visible", "target": "@overlay.opacity", "at": "end", "op": "==", "value": 1, "tolerance": 0.005 },
+        { "description": "The menu is full size", "target": "@menu.scale", "at": "end", "op": "==", "value": 1, "tolerance": 0.005 },
+        { "description": "The bubble squeezed while held", "target": "@message.scale", "at": "min", "op": "<", "value": 0.95 },
+        { "description": "and sprang back after", "target": "@message.scale", "at": "end", "op": "==", "value": 1, "tolerance": 0.005 }
+      ]
+    },
+    {
+      "name": "A quick tap doesn't open it",
+      "events": [{ "kind": "tap", "target": "@message", "atMs": 100 }],
+      "durationMs": 1000,
+      "expect": [
+        { "description": "Menu Open never turns on", "target": "menu_open.on", "at": "max", "op": "==", "value": 0 },
+        { "description": "The overlay stays invisible", "target": "@overlay.opacity", "at": "max", "op": "==", "value": 0 }
+      ]
+    },
+    {
+      "name": "Letting go early only squeezes",
+      "events": [{ "kind": "longPress", "target": "@message", "durationMs": 250, "atMs": 100 }],
+      "durationMs": 1200,
+      "expect": [
+        { "description": "Menu Open never turns on", "target": "menu_open.on", "at": "max", "op": "==", "value": 0 },
+        { "description": "The bubble squeezed partway", "target": "@message.scale", "at": "min", "op": "<", "value": 0.98 },
+        { "description": "and returned to normal", "target": "@message.scale", "at": "end", "op": "==", "value": 1, "tolerance": 0.005 }
+      ]
+    },
+    {
+      "name": "Tapping the backdrop closes the menu",
+      "events": [
+        { "kind": "longPress", "target": "@message", "durationMs": 700, "atMs": 100 },
+        { "kind": "tap", "target": [201, 180], "atMs": 1300 }
+      ],
+      "durationMs": 2100,
+      "expect": [
+        { "description": "It was open before the tap", "target": "menu_open.on", "at": 1250, "op": "==", "value": true },
+        { "description": "Menu Open is off", "target": "menu_open.on", "at": "end", "op": "==", "value": false },
+        { "description": "The overlay faded away", "target": "@overlay.opacity", "at": "end", "op": "==", "value": 0, "tolerance": 0.005 }
+      ]
+    },
+    {
+      "name": "Tapping an action closes it too",
+      "events": [
+        { "kind": "longPress", "target": "@message", "durationMs": 700, "atMs": 100 },
+        { "kind": "tap", "target": "@menu_row_2", "atMs": 1300 }
+      ],
+      "durationMs": 2100,
+      "expect": [
+        { "description": "Menu Open is off", "target": "menu_open.on", "at": "end", "op": "==", "value": false }
+      ]
+    }
+  ]
+}

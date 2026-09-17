@@ -1,0 +1,65 @@
+{
+  "description": "Stories advance every five seconds, the bars show seen, current and upcoming stories, right-side taps skip, left-side taps go back, and the count wraps after the last story.",
+  "scenarios": [
+    {
+      "name": "The first story's bar fills as it plays",
+      "events": [],
+      "durationMs": 2600,
+      "expect": [
+        { "description": "Story 0 is showing", "target": "current_story.count", "at": "end", "op": "==", "value": 0 },
+        { "description": "Halfway through, its bar is half full", "target": "@segment_fill.size#0", "component": "width", "at": 2500, "op": "==", "value": 61, "tolerance": 2 },
+        { "description": "The next bar is empty", "target": "@segment_fill.size#1", "component": "width", "at": "end", "op": "==", "value": 0 },
+        { "description": "Story 0 is visible", "target": "@story.opacity#0", "at": "end", "op": "==", "value": 1 },
+        { "description": "Story 1 isn't", "target": "@story.opacity#1", "at": "end", "op": "==", "value": 0 }
+      ]
+    },
+    {
+      "name": "After five seconds it moves on by itself",
+      "events": [],
+      "durationMs": 5800,
+      "expect": [
+        { "description": "Story 1 is showing", "target": "current_story.count", "at": "end", "op": "==", "value": 1 },
+        { "description": "Story 0's bar is full", "target": "@segment_fill.size#0", "component": "width", "at": "end", "op": "==", "value": 122, "tolerance": 0.01 },
+        { "description": "Story 1's bar is just starting", "target": "@segment_fill.size#1", "component": "width", "at": "end", "op": "<", "value": 20 },
+        { "description": "Story 1 faded in", "target": "@story.opacity#1", "at": "end", "op": "==", "value": 1, "tolerance": 0.01 },
+        { "description": "Story 0 faded out", "target": "@story.opacity#0", "at": "end", "op": "==", "value": 0, "tolerance": 0.01 }
+      ]
+    },
+    {
+      "name": "Tapping the right side skips ahead",
+      "events": [{ "kind": "tap", "target": "@tap_zone_forward", "atMs": 300 }],
+      "durationMs": 1200,
+      "expect": [
+        { "description": "Story 1 is showing", "target": "current_story.count", "at": "end", "op": "==", "value": 1 },
+        { "description": "Story 0's bar filled all the way", "target": "@segment_fill.size#0", "component": "width", "at": "end", "op": "==", "value": 122, "tolerance": 0.01 },
+        { "description": "The timer restarted for story 1", "target": "@segment_fill.size#1", "component": "width", "at": "end", "op": "<", "value": 25 }
+      ]
+    },
+    {
+      "name": "Tapping the left side goes back",
+      "events": [
+        { "kind": "tap", "target": "@tap_zone_forward", "atMs": 300 },
+        { "kind": "tap", "target": "@tap_zone_back", "atMs": 900 }
+      ],
+      "durationMs": 1600,
+      "expect": [
+        { "description": "Story 0 is showing again", "target": "current_story.count", "at": "end", "op": "==", "value": 0 },
+        { "description": "Story 1's bar is empty", "target": "@segment_fill.size#1", "component": "width", "at": "end", "op": "==", "value": 0 },
+        { "description": "Story 0's bar started over", "target": "@segment_fill.size#0", "component": "width", "at": "end", "op": "<", "value": 20 }
+      ]
+    },
+    {
+      "name": "Skipping past the last story wraps to the first",
+      "events": [
+        { "kind": "tap", "target": "@tap_zone_forward", "atMs": 300 },
+        { "kind": "tap", "target": "@tap_zone_forward", "atMs": 700 },
+        { "kind": "tap", "target": "@tap_zone_forward", "atMs": 1100 }
+      ],
+      "durationMs": 1700,
+      "expect": [
+        { "description": "It reached story 2", "target": "current_story.count", "at": "max", "op": "==", "value": 2 },
+        { "description": "and wrapped back to story 0", "target": "current_story.count", "at": "end", "op": "==", "value": 0 }
+      ]
+    }
+  ]
+}

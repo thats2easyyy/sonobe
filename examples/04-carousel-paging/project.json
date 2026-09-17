@@ -1,0 +1,13 @@
+{
+  "formatVersion": 1,
+  "name": "Carousel Paging",
+  "generator": "Sonobe 0.1.0",
+  "root": "main",
+  "device": { "preset": "iphone-17-pro" },
+  "background": "#0E0F1AFF",
+  "meta": {
+    "description": "Swipe through trip cards one page at a time. Neighbors peek at the edges, the dots stretch to show where you are, and a Next button jumps ahead.",
+    "guides": ["06-gestures", "07-loops"],
+    "recipe": "04-carousel-paging"
+  }
+}

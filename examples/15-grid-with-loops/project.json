@@ -1,0 +1,13 @@
+{
+  "formatVersion": 1,
+  "name": "Grid with Loops",
+  "generator": "Sonobe 0.1.0",
+  "root": "main",
+  "device": { "preset": "iphone-17-pro" },
+  "background": "#F4F4F6FF",
+  "meta": {
+    "description": "Twelve color tiles made from one layer and one loop. Grid Layout places them, HSL Color tints each one, they pop in one after another, and tapping a tile picks its color.",
+    "guides": ["07-loops"],
+    "recipe": "15-grid-with-loops"
+  }
+}

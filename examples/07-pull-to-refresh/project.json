@@ -1,0 +1,13 @@
+{
+  "formatVersion": 1,
+  "name": "Pull to Refresh",
+  "generator": "Sonobe 0.1.0",
+  "root": "main",
+  "device": { "preset": "iphone-17-pro" },
+  "background": "#F4F4F6FF",
+  "meta": {
+    "description": "Pull the feed down past a threshold and let go. A spinner draws in as you pull, holds the list down while a pretend request runs, then the list slides back up.",
+    "guides": ["03-states-and-pulses", "06-gestures"],
+    "recipe": "07-pull-to-refresh"
+  }
+}

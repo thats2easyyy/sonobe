@@ -1,0 +1,68 @@
+{
+  "description": "Each card copy has its own state: throws past 120 points or 800 points per second fly off, anything less springs back, the next card becomes touchable, and Start over brings the deck back.",
+  "scenarios": [
+    {
+      "name": "The deck starts stacked",
+      "events": [],
+      "durationMs": 600,
+      "expect": [
+        { "description": "Card 2 is on top", "target": "top_index.output", "at": "end", "op": "==", "value": 2 },
+        { "description": "It's centered", "target": "@card.position#2", "component": "x", "at": "end", "op": "==", "value": 201 },
+        { "description": "The card under it sits 18 points lower", "target": "@card.position#1", "component": "y", "at": "end", "op": "==", "value": 458, "tolerance": 0.5 },
+        { "description": "and a little smaller", "target": "@card.scale#1", "at": "end", "op": "==", "value": 0.95, "tolerance": 0.002 },
+        { "description": "The bottom card sits another 18 points lower", "target": "@card.position#0", "component": "y", "at": "end", "op": "==", "value": 476, "tolerance": 0.5 },
+        { "description": "Only the top card takes touches", "target": "@card.hitTest#1", "at": "end", "op": "==", "value": false }
+      ]
+    },
+    {
+      "name": "A fast flick left throws the card away",
+      "events": [{ "kind": "drag", "from": "@card#2", "to": [40, 470], "durationMs": 120, "atMs": 100 }],
+      "durationMs": 1600,
+      "expect": [
+        { "description": "Card 2 is gone", "target": "card_gone.on#2", "at": "end", "op": "==", "value": true },
+        { "description": "It flew off to the left", "target": "@card.position#2", "component": "x", "at": "end", "op": "<", "value": -350 },
+        { "description": "tilting as it went", "target": "@card.rotation#2", "at": "end", "op": "<", "value": -25 },
+        { "description": "Card 1 is on top now", "target": "top_index.output", "at": "end", "op": "==", "value": 1 },
+        { "description": "and moved up into place", "target": "@card.position#1", "component": "y", "at": "end", "op": "==", "value": 440, "tolerance": 0.5 }
+      ]
+    },
+    {
+      "name": "A slow long drag right saves it",
+      "events": [{ "kind": "drag", "from": "@card#2", "to": [370, 440], "durationMs": 900, "atMs": 100 }],
+      "durationMs": 2400,
+      "expect": [
+        { "description": "The save badge showed while dragging", "target": "@card_like.opacity#2", "at": "max", "op": "==", "value": 1, "tolerance": 0.01 },
+        { "description": "Card 2 is gone", "target": "card_gone.on#2", "at": "end", "op": "==", "value": true },
+        { "description": "It ends off to the right", "target": "@card.position#2", "component": "x", "at": "end", "op": "==", "value": 801, "tolerance": 1 }
+      ]
+    },
+    {
+      "name": "A short drag springs back",
+      "events": [{ "kind": "drag", "from": "@card#2", "to": [260, 440], "durationMs": 500, "atMs": 100 }],
+      "durationMs": 1800,
+      "expect": [
+        { "description": "Card 2 stays", "target": "card_gone.on#2", "at": "end", "op": "==", "value": false },
+        { "description": "It moved with the finger", "target": "@card.position#2", "component": "x", "at": "max", "op": ">", "value": 255 },
+        { "description": "and came back to the center", "target": "@card.position#2", "component": "x", "at": "end", "op": "==", "value": 201, "tolerance": 0.5 },
+        { "description": "without its badge", "target": "@card_like.opacity#2", "at": "end", "op": "==", "value": 0, "tolerance": 0.01 }
+      ]
+    },
+    {
+      "name": "Throwing every card, then Start over",
+      "events": [
+        { "kind": "drag", "from": "@card#2", "to": [40, 470], "durationMs": 120, "atMs": 100 },
+        { "kind": "drag", "from": "@card#1", "to": [380, 470], "durationMs": 120, "atMs": 900 },
+        { "kind": "drag", "from": "@card#0", "to": [40, 470], "durationMs": 120, "atMs": 1700 },
+        { "kind": "tap", "target": "@start_over", "atMs": 2800 }
+      ],
+      "durationMs": 4400,
+      "expect": [
+        { "description": "All three were gone before Start over", "target": "cards_gone.sum", "at": 2750, "op": "==", "value": 3 },
+        { "description": "Card 1 went right", "target": "@card.position#1", "component": "x", "at": 2750, "op": ">", "value": 700 },
+        { "description": "The deck is back", "target": "cards_gone.sum", "at": "end", "op": "==", "value": 0 },
+        { "description": "Card 2 is centered on top again", "target": "@card.position#2", "component": "x", "at": "end", "op": "==", "value": 201, "tolerance": 1 },
+        { "description": "Card 0 is back at the bottom of the deck", "target": "@card.position#0", "component": "y", "at": "end", "op": "==", "value": 476, "tolerance": 1 }
+      ]
+    }
+  ]
+}

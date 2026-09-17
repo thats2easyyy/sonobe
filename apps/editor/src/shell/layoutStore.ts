@@ -10,7 +10,7 @@ import { readJSON, writeJSON } from "../ui/lib/storage.ts";
 export type ViewMode = "canvas" | "split" | "patches";
 /** "rows": canvas above the patch editor. "columns": side by side. */
 export type SplitDirection = "rows" | "columns";
-export type DrawerId = "learn" | "assistant";
+export type DrawerId = "learn";
 export type HudTab = "console" | "diagnostics" | "ai" | "performance";
 export type CollapsiblePanel = "layers" | "viewer" | "inspector" | "hud";
 export type SizedPanel = "layers" | "viewer" | "inspector" | "hud" | "drawer";
@@ -63,7 +63,7 @@ export const DEFAULT_LAYOUT: LayoutState = {
 };
 
 const VIEW_MODES: readonly ViewMode[] = ["canvas", "split", "patches"];
-const DRAWERS: readonly DrawerId[] = ["learn", "assistant"];
+const DRAWERS: readonly DrawerId[] = ["learn"];
 const HUD_TABS: readonly HudTab[] = ["console", "diagnostics", "ai", "performance"];
 
 const clampRange = (value: number, [lo, hi]: readonly [number, number]) => Math.min(hi, Math.max(lo, value));

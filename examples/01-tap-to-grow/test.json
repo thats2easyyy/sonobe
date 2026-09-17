@@ -1,0 +1,40 @@
+{
+  "description": "Tapping the card toggles it between normal size and zoomed, with a springy settle both ways.",
+  "scenarios": [
+    {
+      "name": "The card waits for a tap",
+      "events": [],
+      "durationMs": 500,
+      "expect": [
+        { "description": "The card starts at normal size", "target": "@card.scale", "at": "end", "op": "==", "value": 1 },
+        { "description": "Card Zoomed starts off", "target": "card_zoomed.on", "at": "end", "op": "==", "value": false }
+      ]
+    },
+    {
+      "name": "Tapping the card springs it bigger",
+      "events": [{ "kind": "tap", "target": "@card", "atMs": 100 }],
+      "durationMs": 1500,
+      "expect": [
+        { "description": "Card Zoomed turns on", "target": "card_zoomed.on", "at": "end", "op": "==", "value": true },
+        { "description": "The card ends at 1.12× scale", "target": "@card.scale", "at": "end", "op": "==", "value": 1.12, "tolerance": 0.002 },
+        { "description": "It overshoots a little past 1.12 on the way, so it feels springy", "target": "@card.scale", "at": "max", "op": ">", "value": 1.122 },
+        { "description": "It settles within a second of the tap", "target": "@card.scale", "settlesWithinMs": 1100 },
+        { "description": "The shadow spreads as the card lifts", "target": "@card.shadowRadius", "at": "end", "op": "==", "value": 44, "tolerance": 0.1 }
+      ]
+    },
+    {
+      "name": "Tapping again springs it back",
+      "events": [
+        { "kind": "tap", "target": "@card", "atMs": 100 },
+        { "kind": "tap", "target": "@card", "atMs": 900 }
+      ],
+      "durationMs": 2200,
+      "expect": [
+        { "description": "Card Zoomed is off again", "target": "card_zoomed.on", "at": "end", "op": "==", "value": false },
+        { "description": "The card is back at normal size", "target": "@card.scale", "at": "end", "op": "==", "value": 1, "tolerance": 0.002 },
+        { "description": "It had zoomed in between", "target": "@card.scale", "at": 800, "op": ">", "value": 1.1 },
+        { "description": "It comes to rest", "target": "@card.scale", "settled": true }
+      ]
+    }
+  ]
+}

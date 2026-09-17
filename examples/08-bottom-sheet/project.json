@@ -1,0 +1,13 @@
+{
+  "formatVersion": 1,
+  "name": "Bottom Sheet",
+  "generator": "Sonobe 0.1.0",
+  "root": "main",
+  "device": { "preset": "iphone-17-pro" },
+  "background": "#E8EFE6FF",
+  "meta": {
+    "description": "Drag a sheet up, down, or flick it. It follows your finger, then springs to the stop a fling would reach, keeping the finger's speed.",
+    "guides": ["05-springs-and-feel", "06-gestures"],
+    "recipe": "08-bottom-sheet"
+  }
+}

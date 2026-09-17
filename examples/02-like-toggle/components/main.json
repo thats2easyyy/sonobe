@@ -1,0 +1,605 @@
+{
+  "formatVersion": 1,
+  "id": "main",
+  "name": "Main",
+  "kind": "prototype",
+  "notes": "Tap the heart to like or unlike. Double-tap the photo to like (it never unlikes) and flash a big heart. Liked is the one piece of memory; everything you see is drawn from it.",
+  "size": [402, 874],
+  "interface": { "inputs": {}, "outputs": {} },
+  "layers": [
+    {
+      "id": "app_status_bar",
+      "type": "group",
+      "name": "Status Bar",
+      "props": {
+        "hitTest": false,
+        "size": [402, 62]
+      },
+      "children": [
+        {
+          "id": "app_clock",
+          "type": "text",
+          "name": "Clock",
+          "props": {
+            "anchor": [0.5, 0],
+            "fontSize": 17,
+            "fontWeight": 600,
+            "hitTest": false,
+            "position": [72, 20],
+            "text": "9:41",
+            "textAlignment": "center",
+            "textColor": "#111118FF"
+          }
+        },
+        {
+          "id": "app_signal_1",
+          "type": "rectangle",
+          "name": "Signal 1",
+          "props": {
+            "color": "#111118FF",
+            "cornerRadius": 1,
+            "hitTest": false,
+            "position": [292, 30],
+            "size": [3, 4]
+          }
+        },
+        {
+          "id": "app_signal_2",
+          "type": "rectangle",
+          "name": "Signal 2",
+          "props": {
+            "color": "#111118FF",
+            "cornerRadius": 1,
+            "hitTest": false,
+            "position": [297, 28],
+            "size": [3, 6]
+          }
+        },
+        {
+          "id": "app_signal_3",
+          "type": "rectangle",
+          "name": "Signal 3",
+          "props": {
+            "color": "#111118FF",
+            "cornerRadius": 1,
+            "hitTest": false,
+            "position": [302, 26],
+            "size": [3, 8]
+          }
+        },
+        {
+          "id": "app_signal_4",
+          "type": "rectangle",
+          "name": "Signal 4",
+          "props": {
+            "color": "#111118FF",
+            "cornerRadius": 1,
+            "hitTest": false,
+            "position": [307, 24],
+            "size": [3, 10]
+          }
+        },
+        {
+          "id": "app_battery",
+          "type": "rectangle",
+          "name": "Battery",
+          "props": {
+            "color": "#00000000",
+            "cornerRadius": 3.5,
+            "hitTest": false,
+            "position": [322, 23],
+            "size": [25, 12],
+            "strokeColor": "#11111859",
+            "strokeWidth": 1
+          }
+        },
+        {
+          "id": "app_battery_level",
+          "type": "rectangle",
+          "name": "Battery Level",
+          "props": {
+            "color": "#111118FF",
+            "cornerRadius": 2,
+            "hitTest": false,
+            "position": [324, 25],
+            "size": [19, 8]
+          }
+        },
+        {
+          "id": "app_battery_cap",
+          "type": "rectangle",
+          "name": "Battery Cap",
+          "props": {
+            "color": "#11111859",
+            "cornerRadius": 1,
+            "hitTest": false,
+            "position": [348, 27],
+            "size": [2, 4]
+          }
+        }
+      ]
+    },
+    {
+      "id": "screen_title",
+      "type": "text",
+      "name": "Screen Title",
+      "props": {
+        "fontSize": 22,
+        "fontWeight": 700,
+        "hitTest": false,
+        "letterSpacing": -0.2,
+        "position": [24, 72],
+        "text": "Moments",
+        "textColor": "#111118FF"
+      }
+    },
+    {
+      "id": "post",
+      "type": "group",
+      "name": "Post",
+      "props": {
+        "color": "#FFFFFFFF",
+        "cornerRadius": 28,
+        "position": [16, 118],
+        "shadowColor": "#000000FF",
+        "shadowOffset": [0, 6],
+        "shadowOpacity": 0.08,
+        "shadowRadius": 18,
+        "size": [370, 612]
+      },
+      "children": [
+        {
+          "id": "author_avatar",
+          "type": "oval",
+          "name": "Author Avatar",
+          "props": {
+            "gradient": {
+              "gradient": {
+                "kind": "linear",
+                "stops": [[0, "#FF9A62FF"], [1, "#FF3D71FF"]],
+                "start": [0, 0],
+                "end": [1, 1]
+              }
+            },
+            "position": [16, 16],
+            "size": [40, 40]
+          }
+        },
+        {
+          "id": "author_name",
+          "type": "text",
+          "name": "Author Name",
+          "props": {
+            "fontSize": 17,
+            "fontWeight": 600,
+            "hitTest": false,
+            "position": [68, 17],
+            "text": "Noa Park",
+            "textColor": "#111118FF"
+          }
+        },
+        {
+          "id": "author_meta",
+          "type": "text",
+          "name": "Author Details",
+          "props": {
+            "fontSize": 13,
+            "fontWeight": 400,
+            "hitTest": false,
+            "lineHeight": 18,
+            "position": [68, 39],
+            "text": "Lake Tahoe · 2h",
+            "textColor": "#5F5F6BFF"
+          }
+        },
+        {
+          "id": "post_photo",
+          "type": "group",
+          "name": "Photo",
+          "props": {
+            "clip": true,
+            "color": "#0E0F1AFF",
+            "cornerRadius": 20,
+            "position": [16, 72],
+            "size": [338, 380]
+          },
+          "children": [
+            {
+              "id": "photo_sky",
+              "type": "gradient",
+              "name": "Sky",
+              "props": {
+                "gradient": {
+                  "gradient": {
+                    "kind": "linear",
+                    "stops": [[0, "#0F1A3AFF"], [0.62, "#3B2B7AFF"], [1, "#F97366FF"]],
+                    "start": [0.5, 0],
+                    "end": [0.5, 1]
+                  }
+                },
+                "size": [338, 380]
+              }
+            },
+            {
+              "id": "photo_moon",
+              "type": "oval",
+              "name": "Moon",
+              "props": {
+                "color": "#FFF3D6FF",
+                "position": [232, 46],
+                "shadowColor": "#FFB020FF",
+                "shadowOffset": [0, 10],
+                "shadowOpacity": 0.45,
+                "shadowRadius": 28,
+                "size": [64, 64]
+              }
+            },
+            {
+              "id": "photo_lantern_1",
+              "type": "oval",
+              "name": "Lantern 1",
+              "props": {
+                "color": "#FFB020FF",
+                "position": [78, 196],
+                "shadowColor": "#FFB020FF",
+                "shadowOffset": [0, 10],
+                "shadowOpacity": 0.45,
+                "shadowRadius": 28,
+                "size": [10, 14]
+              }
+            },
+            {
+              "id": "photo_lantern_2",
+              "type": "oval",
+              "name": "Lantern 2",
+              "props": {
+                "color": "#FFD27AFF",
+                "position": [142, 150],
+                "shadowColor": "#FFB020FF",
+                "shadowOffset": [0, 10],
+                "shadowOpacity": 0.45,
+                "shadowRadius": 28,
+                "size": [8, 11]
+              }
+            },
+            {
+              "id": "photo_lantern_3",
+              "type": "oval",
+              "name": "Lantern 3",
+              "props": {
+                "color": "#FFB020FF",
+                "position": [196, 218],
+                "shadowColor": "#FFB020FF",
+                "shadowOffset": [0, 10],
+                "shadowOpacity": 0.45,
+                "shadowRadius": 28,
+                "size": [12, 16]
+              }
+            },
+            {
+              "id": "photo_far_ridge",
+              "type": "oval",
+              "name": "Far Ridge",
+              "props": {
+                "color": "#221A4FFF",
+                "position": [-120, 262],
+                "size": [420, 260]
+              }
+            },
+            {
+              "id": "photo_near_ridge",
+              "type": "oval",
+              "name": "Near Ridge",
+              "props": {
+                "color": "#120E2EFF",
+                "position": [130, 292],
+                "size": [400, 240]
+              }
+            },
+            {
+              "id": "burst",
+              "type": "shape",
+              "name": "Big Heart",
+              "props": {
+                "anchor": [0.5, 0.5],
+                "color": "#FFFFFFFF",
+                "hitTest": false,
+                "opacity": { "link": "burst_opacity.progress" },
+                "position": [169, 190],
+                "scale": { "link": "burst_scale.output" },
+                "shadowColor": "#FF3D71FF",
+                "shadowOffset": [0, 10],
+                "shadowOpacity": 0.45,
+                "shadowRadius": 28,
+                "shape": { "link": "burst_shape.shape" },
+                "size": [96, 96]
+              }
+            }
+          ]
+        },
+        {
+          "id": "heart_button",
+          "type": "group",
+          "name": "Heart Button",
+          "props": {
+            "position": [12, 458],
+            "size": [48, 48]
+          },
+          "children": [
+            {
+              "id": "heart_icon",
+              "type": "shape",
+              "name": "Heart",
+              "props": {
+                "color": { "link": "heart_fill.output" },
+                "hitTest": false,
+                "position": [12, 12],
+                "scale": { "link": "heart_scale.output" },
+                "shape": { "link": "heart_shape.shape" },
+                "size": [24, 24],
+                "strokeColor": { "link": "heart_outline.output" },
+                "strokeWidth": 2
+              }
+            }
+          ]
+        },
+        {
+          "id": "comment_icon",
+          "type": "oval",
+          "name": "Comment",
+          "props": {
+            "color": "#00000000",
+            "hitTest": false,
+            "position": [70, 470],
+            "size": [24, 24],
+            "strokeColor": "#111118FF",
+            "strokeWidth": 2
+          }
+        },
+        {
+          "id": "save_icon",
+          "type": "rectangle",
+          "name": "Save",
+          "props": {
+            "color": "#00000000",
+            "cornerRadius": 3,
+            "hitTest": false,
+            "position": [330, 470],
+            "size": [18, 24],
+            "strokeColor": "#111118FF",
+            "strokeWidth": 2
+          }
+        },
+        {
+          "id": "likes",
+          "type": "text",
+          "name": "Like Count",
+          "props": {
+            "fontSize": 17,
+            "fontWeight": 600,
+            "hitTest": false,
+            "position": [20, 516],
+            "text": { "link": "like_label.text" },
+            "textColor": "#111118FF"
+          }
+        },
+        {
+          "id": "caption",
+          "type": "text",
+          "name": "Caption",
+          "props": {
+            "fontSize": 15,
+            "fontWeight": 400,
+            "hitTest": false,
+            "lineHeight": 21,
+            "position": [20, 544],
+            "text": "Floating lanterns over the lake after midnight.",
+            "textColor": "#5F5F6BFF"
+          }
+        },
+        {
+          "id": "comments_link",
+          "type": "text",
+          "name": "Comments Link",
+          "props": {
+            "fontSize": 13,
+            "fontWeight": 400,
+            "hitTest": false,
+            "lineHeight": 18,
+            "position": [20, 574],
+            "text": "View all 24 comments",
+            "textColor": "#A1A1AAFF"
+          }
+        }
+      ]
+    },
+    {
+      "id": "hint",
+      "type": "text",
+      "name": "Hint",
+      "props": {
+        "anchor": [0.5, 0],
+        "fontSize": 13,
+        "fontWeight": 400,
+        "hitTest": false,
+        "lineHeight": 18,
+        "position": [201, 770],
+        "text": "Tap the heart or double-tap the photo",
+        "textAlignment": "center",
+        "textColor": "#5F5F6BFF"
+      }
+    },
+    {
+      "id": "app_home_indicator",
+      "type": "rectangle",
+      "name": "Home Indicator",
+      "props": {
+        "anchor": [0.5, 1],
+        "color": "#111118FF",
+        "cornerRadius": 3,
+        "hitTest": false,
+        "position": [201, 866],
+        "size": [140, 5]
+      }
+    }
+  ],
+  "patches": {
+    "burst_opacity": {
+      "type": "progress",
+      "name": "Big Heart Opacity",
+      "inputs": {
+        "clampToRange": true,
+        "end": 0.5,
+        "start": 0,
+        "value": { "link": "burst_spring.output" }
+      },
+      "ui": { "x": 1080, "y": 790 }
+    },
+    "burst_scale": {
+      "type": "transition",
+      "name": "Big Heart Scale",
+      "typeParam": "number",
+      "inputs": {
+        "end": 1,
+        "progress": { "link": "burst_spring.output" },
+        "start": 0.3
+      },
+      "ui": { "x": 1080, "y": 640 }
+    },
+    "burst_shape": {
+      "type": "svgPathShape",
+      "name": "Big Heart Shape",
+      "inputs": {
+        "pathData": "M12 21C12 21 3 15.2 3 8.9C3 5.8 5.4 3.5 8.2 3.5C9.9 3.5 11.2 4.4 12 5.7C12.8 4.4 14.1 3.5 15.8 3.5C18.6 3.5 21 5.8 21 8.9C21 15.2 12 21 12 21Z",
+        "size": [96, 96],
+        "viewBox": [0, 0, 24, 24]
+      },
+      "ui": { "x": 40, "y": 340 }
+    },
+    "burst_spring": {
+      "type": "popAnimation",
+      "name": "Big Heart Spring",
+      "typeParam": "number",
+      "inputs": {
+        "bounciness": 10,
+        "number": { "link": "burst_visible.on" },
+        "speed": 16
+      },
+      "ui": { "x": 820, "y": 1240 }
+    },
+    "burst_timer": {
+      "type": "wait",
+      "name": "Big Heart Timer",
+      "inputs": {
+        "duration": 0.55,
+        "start": { "link": "double_tap_photo.doubleTap" }
+      },
+      "ui": { "x": 300, "y": 790 }
+    },
+    "burst_visible": {
+      "type": "switch",
+      "name": "Big Heart Visible",
+      "inputs": {
+        "turnOff": { "link": "burst_timer.finished" },
+        "turnOn": { "link": "double_tap_photo.doubleTap" }
+      },
+      "ui": { "x": 560, "y": 940 }
+    },
+    "double_tap_photo": {
+      "type": "doubleTap",
+      "name": "Double-Tap Photo",
+      "inputs": { "layer": { "layer": "post_photo" } },
+      "ui": { "x": 40, "y": 790 }
+    },
+    "heart_fill": {
+      "type": "transition",
+      "name": "Heart Fill",
+      "typeParam": "color",
+      "inputs": {
+        "end": "#FF3D71FF",
+        "progress": { "link": "like_spring.output" },
+        "start": "#FF3D7100"
+      },
+      "ui": { "x": 820, "y": 790 }
+    },
+    "heart_outline": {
+      "type": "transition",
+      "name": "Heart Outline",
+      "typeParam": "color",
+      "inputs": {
+        "end": "#FF3D71FF",
+        "progress": { "link": "like_spring.output" },
+        "start": "#111118FF"
+      },
+      "ui": { "x": 820, "y": 940 }
+    },
+    "heart_scale": {
+      "type": "transition",
+      "name": "Heart Scale",
+      "typeParam": "number",
+      "inputs": {
+        "end": 1,
+        "progress": { "link": "like_spring.output" },
+        "start": 0.9
+      },
+      "ui": { "x": 820, "y": 640 }
+    },
+    "heart_shape": {
+      "type": "svgPathShape",
+      "name": "Heart Shape",
+      "inputs": {
+        "pathData": "M12 21C12 21 3 15.2 3 8.9C3 5.8 5.4 3.5 8.2 3.5C9.9 3.5 11.2 4.4 12 5.7C12.8 4.4 14.1 3.5 15.8 3.5C18.6 3.5 21 5.8 21 8.9C21 15.2 12 21 12 21Z",
+        "size": [24, 24],
+        "viewBox": [0, 0, 24, 24]
+      },
+      "ui": { "x": 40, "y": 40 }
+    },
+    "like_count": {
+      "type": "add",
+      "name": "Like Count",
+      "typeParam": "number",
+      "inputCount": 2,
+      "inputs": {
+        "value1": 128,
+        "value2": { "link": "liked.on" }
+      },
+      "ui": { "x": 560, "y": 790 }
+    },
+    "like_label": {
+      "type": "formatNumber",
+      "name": "Like Label",
+      "inputs": {
+        "suffix": " likes",
+        "value": { "link": "like_count.output" }
+      },
+      "ui": { "x": 820, "y": 1090 }
+    },
+    "like_spring": {
+      "type": "popAnimation",
+      "name": "Like Spring",
+      "typeParam": "number",
+      "inputs": {
+        "bounciness": 12,
+        "number": { "link": "liked.on" },
+        "speed": 14
+      },
+      "ui": { "x": 560, "y": 640 }
+    },
+    "liked": {
+      "type": "switch",
+      "name": "Liked",
+      "inputs": {
+        "flip": { "link": "tap_heart.tap" },
+        "turnOn": { "link": "double_tap_photo.doubleTap" }
+      },
+      "ui": { "x": 300, "y": 640 }
+    },
+    "tap_heart": {
+      "type": "interaction",
+      "name": "Tap Heart",
+      "inputs": { "layer": { "layer": "heart_button" } },
+      "ui": { "x": 40, "y": 640 }
+    }
+  },
+  "comments": []
+}

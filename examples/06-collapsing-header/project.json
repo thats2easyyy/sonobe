@@ -1,0 +1,13 @@
+{
+  "formatVersion": 1,
+  "name": "Collapsing Header",
+  "generator": "Sonobe 0.1.0",
+  "root": "main",
+  "device": { "preset": "iphone-17-pro" },
+  "background": "#0E0F1AFF",
+  "meta": {
+    "description": "A playlist header that shrinks into a compact bar as the tracks scroll under it. The title glides into the bar and the cover art fades, all read straight from the scroll position.",
+    "guides": ["04-layers-and-layout", "06-gestures"],
+    "recipe": "06-collapsing-header"
+  }
+}

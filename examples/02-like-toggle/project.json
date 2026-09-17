@@ -1,0 +1,13 @@
+{
+  "formatVersion": 1,
+  "name": "Like Toggle",
+  "generator": "Sonobe 0.1.0",
+  "root": "main",
+  "device": { "preset": "iphone-17-pro" },
+  "background": "#F4F4F6FF",
+  "meta": {
+    "description": "Tap the heart or double-tap the photo to like a post. The heart pops, turns pink, and the count goes up by one.",
+    "guides": ["02-isat", "03-states-and-pulses"],
+    "recipe": "02-like-toggle"
+  }
+}

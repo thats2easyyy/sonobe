@@ -1,0 +1,79 @@
+{
+  "description": "Next and swipes move one page within bounds, Skip jumps to the last page, the button relabels itself, and only a tap on the last page finishes onboarding.",
+  "scenarios": [
+    {
+      "name": "Next moves through the pages",
+      "events": [
+        { "kind": "tap", "target": "@next_button", "atMs": 100 },
+        { "kind": "tap", "target": "@next_button", "atMs": 700 }
+      ],
+      "durationMs": 1600,
+      "expect": [
+        { "description": "Current Page is 2", "target": "page.count", "at": "end", "op": "==", "value": 2 },
+        { "description": "The pages slid two widths left", "target": "@pages.position", "component": "x", "at": "end", "op": "==", "value": -804, "tolerance": 0.5 },
+        { "description": "It was on page 1 in between", "target": "page.count", "at": 650, "op": "==", "value": 1 },
+        { "description": "The button says Get started", "target": "@next_label.text", "at": "end", "op": "==", "value": "Get started" },
+        { "description": "Skip faded away", "target": "@skip_button.opacity", "at": "end", "op": "==", "value": 0 },
+        { "description": "The third dot is stretched", "target": "@dot.size#2", "component": "width", "at": "end", "op": "==", "value": 24, "tolerance": 0.1 }
+      ]
+    },
+    {
+      "name": "The tap that reaches the last page doesn't finish onboarding",
+      "events": [
+        { "kind": "tap", "target": "@next_button", "atMs": 100 },
+        { "kind": "tap", "target": "@next_button", "atMs": 700 }
+      ],
+      "durationMs": 1400,
+      "expect": [
+        { "description": "Onboarding Done never turns on", "target": "onboarding_done.on", "at": "max", "op": "==", "value": 0 },
+        { "description": "The welcome screen stays hidden", "target": "@welcome.opacity", "at": "max", "op": "==", "value": 0 }
+      ]
+    },
+    {
+      "name": "Get started finishes onboarding",
+      "events": [
+        { "kind": "tap", "target": "@next_button", "atMs": 100 },
+        { "kind": "tap", "target": "@next_button", "atMs": 700 },
+        { "kind": "tap", "target": "@next_button", "atMs": 1300 }
+      ],
+      "durationMs": 2000,
+      "expect": [
+        { "description": "Onboarding Done is on", "target": "onboarding_done.on", "at": "end", "op": "==", "value": true },
+        { "description": "The page stays at 2", "target": "page.count", "at": "end", "op": "==", "value": 2 },
+        { "description": "The welcome screen faded in", "target": "@welcome.opacity", "at": "end", "op": "==", "value": 1 }
+      ]
+    },
+    {
+      "name": "Swiping left and right moves between pages",
+      "events": [
+        { "kind": "drag", "from": [320, 400], "to": [80, 400], "durationMs": 150, "atMs": 100 },
+        { "kind": "drag", "from": [80, 400], "to": [320, 400], "durationMs": 150, "atMs": 900 }
+      ],
+      "durationMs": 1800,
+      "expect": [
+        { "description": "It reached page 1", "target": "page.count", "at": 850, "op": "==", "value": 1 },
+        { "description": "and came back to page 0", "target": "page.count", "at": "end", "op": "==", "value": 0 },
+        { "description": "The pages are back at the start", "target": "@pages.position", "component": "x", "at": "end", "op": "==", "value": 0, "tolerance": 0.5 }
+      ]
+    },
+    {
+      "name": "Swiping right on the first page does nothing",
+      "events": [{ "kind": "drag", "from": [80, 400], "to": [320, 400], "durationMs": 150, "atMs": 100 }],
+      "durationMs": 1000,
+      "expect": [
+        { "description": "The page never goes below 0", "target": "page.count", "at": "min", "op": "==", "value": 0 },
+        { "description": "and never wraps", "target": "page.count", "at": "max", "op": "==", "value": 0 }
+      ]
+    },
+    {
+      "name": "Skip jumps to the last page",
+      "events": [{ "kind": "tap", "target": "@skip_button", "atMs": 100 }],
+      "durationMs": 1300,
+      "expect": [
+        { "description": "Current Page is 2", "target": "page.count", "at": "end", "op": "==", "value": 2 },
+        { "description": "The pages slid to the last page", "target": "@pages.position", "component": "x", "at": "end", "op": "==", "value": -804, "tolerance": 0.5 },
+        { "description": "Onboarding isn't finished", "target": "onboarding_done.on", "at": "end", "op": "==", "value": false }
+      ]
+    }
+  ]
+}

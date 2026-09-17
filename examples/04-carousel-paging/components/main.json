@@ -1,0 +1,914 @@
+{
+  "formatVersion": 1,
+  "id": "main",
+  "name": "Main",
+  "kind": "prototype",
+  "notes": "Swipe the cards. Scroll Trips pages one card at a time (Page Size 320, Page Padding 12) and reports the page number; the dots and the price read that number. Next jumps to the following page.",
+  "size": [402, 874],
+  "interface": { "inputs": {}, "outputs": {} },
+  "layers": [
+    {
+      "id": "backdrop",
+      "type": "gradient",
+      "name": "Backdrop",
+      "props": {
+        "gradient": {
+          "gradient": {
+            "kind": "linear",
+            "stops": [[0, "#1A1B2AFF"], [1, "#0B0C14FF"]],
+            "start": [0.5, 0],
+            "end": [0.5, 1]
+          }
+        },
+        "hitTest": false,
+        "size": [402, 874]
+      }
+    },
+    {
+      "id": "app_status_bar",
+      "type": "group",
+      "name": "Status Bar",
+      "props": {
+        "hitTest": false,
+        "size": [402, 62]
+      },
+      "children": [
+        {
+          "id": "app_clock",
+          "type": "text",
+          "name": "Clock",
+          "props": {
+            "anchor": [0.5, 0],
+            "fontSize": 17,
+            "fontWeight": 600,
+            "hitTest": false,
+            "position": [72, 20],
+            "text": "9:41",
+            "textAlignment": "center",
+            "textColor": "#FFFFFFFF"
+          }
+        },
+        {
+          "id": "app_signal_1",
+          "type": "rectangle",
+          "name": "Signal 1",
+          "props": {
+            "color": "#FFFFFFFF",
+            "cornerRadius": 1,
+            "hitTest": false,
+            "position": [292, 30],
+            "size": [3, 4]
+          }
+        },
+        {
+          "id": "app_signal_2",
+          "type": "rectangle",
+          "name": "Signal 2",
+          "props": {
+            "color": "#FFFFFFFF",
+            "cornerRadius": 1,
+            "hitTest": false,
+            "position": [297, 28],
+            "size": [3, 6]
+          }
+        },
+        {
+          "id": "app_signal_3",
+          "type": "rectangle",
+          "name": "Signal 3",
+          "props": {
+            "color": "#FFFFFFFF",
+            "cornerRadius": 1,
+            "hitTest": false,
+            "position": [302, 26],
+            "size": [3, 8]
+          }
+        },
+        {
+          "id": "app_signal_4",
+          "type": "rectangle",
+          "name": "Signal 4",
+          "props": {
+            "color": "#FFFFFFFF",
+            "cornerRadius": 1,
+            "hitTest": false,
+            "position": [307, 24],
+            "size": [3, 10]
+          }
+        },
+        {
+          "id": "app_battery",
+          "type": "rectangle",
+          "name": "Battery",
+          "props": {
+            "color": "#00000000",
+            "cornerRadius": 3.5,
+            "hitTest": false,
+            "position": [322, 23],
+            "size": [25, 12],
+            "strokeColor": "#FFFFFF59",
+            "strokeWidth": 1
+          }
+        },
+        {
+          "id": "app_battery_level",
+          "type": "rectangle",
+          "name": "Battery Level",
+          "props": {
+            "color": "#FFFFFFFF",
+            "cornerRadius": 2,
+            "hitTest": false,
+            "position": [324, 25],
+            "size": [19, 8]
+          }
+        },
+        {
+          "id": "app_battery_cap",
+          "type": "rectangle",
+          "name": "Battery Cap",
+          "props": {
+            "color": "#FFFFFF59",
+            "cornerRadius": 1,
+            "hitTest": false,
+            "position": [348, 27],
+            "size": [2, 4]
+          }
+        }
+      ]
+    },
+    {
+      "id": "title",
+      "type": "text",
+      "name": "Title",
+      "props": {
+        "fontSize": 34,
+        "fontWeight": 700,
+        "hitTest": false,
+        "letterSpacing": -0.6,
+        "position": [24, 76],
+        "text": "Trips",
+        "textColor": "#FFFFFFFF"
+      }
+    },
+    {
+      "id": "subtitle",
+      "type": "text",
+      "name": "Subtitle",
+      "props": {
+        "fontSize": 15,
+        "fontWeight": 400,
+        "hitTest": false,
+        "lineHeight": 21,
+        "position": [24, 120],
+        "text": "Swipe to explore",
+        "textColor": "#FFFFFFB3"
+      }
+    },
+    {
+      "id": "carousel",
+      "type": "group",
+      "name": "Carousel",
+      "props": {
+        "position": [0, 176],
+        "size": [402, 480]
+      },
+      "children": [
+        {
+          "id": "cards",
+          "type": "group",
+          "name": "Cards",
+          "props": {
+            "layout": "row",
+            "position": { "link": "trips_scroll.position" },
+            "size": [1316, 480],
+            "spacing": 12
+          },
+          "children": [
+            {
+              "id": "trip_1",
+              "type": "group",
+              "name": "Kyoto",
+              "props": {
+                "clip": true,
+                "color": "#1A1B2AFF",
+                "cornerRadius": 28,
+                "shadowColor": "#000000FF",
+                "shadowOffset": [0, 10],
+                "shadowOpacity": 0.45,
+                "shadowRadius": 28,
+                "size": [320, 480]
+              },
+              "children": [
+                {
+                  "id": "trip_1_sky",
+                  "type": "gradient",
+                  "name": "Sky",
+                  "props": {
+                    "gradient": {
+                      "gradient": {
+                        "kind": "linear",
+                        "stops": [[0, "#FDBA74FF"], [1, "#DB2777FF"]],
+                        "start": [0.5, 0],
+                        "end": [0.5, 1]
+                      }
+                    },
+                    "size": [320, 480]
+                  }
+                },
+                {
+                  "id": "trip_1_sun",
+                  "type": "oval",
+                  "name": "Sun",
+                  "props": {
+                    "color": "#FFFFFFD9",
+                    "position": [196, 70],
+                    "shadowColor": "#FFFFFFFF",
+                    "shadowOffset": [0, 10],
+                    "shadowOpacity": 0.45,
+                    "shadowRadius": 28,
+                    "size": [92, 92]
+                  }
+                },
+                {
+                  "id": "trip_1_peak_1",
+                  "type": "rectangle",
+                  "name": "Peak",
+                  "props": {
+                    "color": "#3B0A2EB3",
+                    "cornerRadius": 24,
+                    "position": [-40, 250],
+                    "rotation": 45,
+                    "size": [260, 260]
+                  }
+                },
+                {
+                  "id": "trip_1_peak_2",
+                  "type": "rectangle",
+                  "name": "Peak",
+                  "props": {
+                    "color": "#3B0A2EFF",
+                    "cornerRadius": 24,
+                    "position": [150, 290],
+                    "rotation": 45,
+                    "size": [240, 240]
+                  }
+                },
+                {
+                  "id": "trip_1_chip",
+                  "type": "group",
+                  "name": "Days",
+                  "props": {
+                    "backgroundBlur": 12,
+                    "color": "#FFFFFF33",
+                    "cornerRadius": 15,
+                    "hitTest": false,
+                    "position": [20, 20],
+                    "size": [76, 30]
+                  },
+                  "children": [
+                    {
+                      "id": "trip_1_days",
+                      "type": "text",
+                      "name": "Days Label",
+                      "props": {
+                        "anchor": [0.5, 0.5],
+                        "fontSize": 12,
+                        "fontWeight": 600,
+                        "hitTest": false,
+                        "letterSpacing": 0.2,
+                        "position": [38, 15],
+                        "text": "7 days",
+                        "textAlignment": "center",
+                        "textColor": "#FFFFFFFF"
+                      }
+                    }
+                  ]
+                },
+                {
+                  "id": "trip_1_name",
+                  "type": "text",
+                  "name": "Name",
+                  "props": {
+                    "fontSize": 28,
+                    "fontWeight": 700,
+                    "hitTest": false,
+                    "letterSpacing": -0.4,
+                    "position": [24, 376],
+                    "text": "Kyoto",
+                    "textColor": "#FFFFFFFF"
+                  }
+                },
+                {
+                  "id": "trip_1_tagline",
+                  "type": "text",
+                  "name": "Tagline",
+                  "props": {
+                    "fontSize": 15,
+                    "fontWeight": 400,
+                    "hitTest": false,
+                    "lineHeight": 21,
+                    "position": [24, 416],
+                    "text": "Temples and tea houses",
+                    "textColor": "#FFFFFFB3"
+                  }
+                }
+              ]
+            },
+            {
+              "id": "trip_2",
+              "type": "group",
+              "name": "Reykjavík",
+              "props": {
+                "clip": true,
+                "color": "#1A1B2AFF",
+                "cornerRadius": 28,
+                "shadowColor": "#000000FF",
+                "shadowOffset": [0, 10],
+                "shadowOpacity": 0.45,
+                "shadowRadius": 28,
+                "size": [320, 480]
+              },
+              "children": [
+                {
+                  "id": "trip_2_sky",
+                  "type": "gradient",
+                  "name": "Sky",
+                  "props": {
+                    "gradient": {
+                      "gradient": {
+                        "kind": "linear",
+                        "stops": [[0, "#0F766EFF"], [1, "#1E1B4BFF"]],
+                        "start": [0.5, 0],
+                        "end": [0.5, 1]
+                      }
+                    },
+                    "size": [320, 480]
+                  }
+                },
+                {
+                  "id": "trip_2_sun",
+                  "type": "oval",
+                  "name": "Sun",
+                  "props": {
+                    "color": "#FFFFFFD9",
+                    "position": [196, 70],
+                    "shadowColor": "#FFFFFFFF",
+                    "shadowOffset": [0, 10],
+                    "shadowOpacity": 0.45,
+                    "shadowRadius": 28,
+                    "size": [92, 92]
+                  }
+                },
+                {
+                  "id": "trip_2_peak_1",
+                  "type": "rectangle",
+                  "name": "Peak",
+                  "props": {
+                    "color": "#020617B3",
+                    "cornerRadius": 24,
+                    "position": [-40, 250],
+                    "rotation": 45,
+                    "size": [260, 260]
+                  }
+                },
+                {
+                  "id": "trip_2_peak_2",
+                  "type": "rectangle",
+                  "name": "Peak",
+                  "props": {
+                    "color": "#020617FF",
+                    "cornerRadius": 24,
+                    "position": [150, 290],
+                    "rotation": 45,
+                    "size": [240, 240]
+                  }
+                },
+                {
+                  "id": "trip_2_chip",
+                  "type": "group",
+                  "name": "Days",
+                  "props": {
+                    "backgroundBlur": 12,
+                    "color": "#FFFFFF33",
+                    "cornerRadius": 15,
+                    "hitTest": false,
+                    "position": [20, 20],
+                    "size": [76, 30]
+                  },
+                  "children": [
+                    {
+                      "id": "trip_2_days",
+                      "type": "text",
+                      "name": "Days Label",
+                      "props": {
+                        "anchor": [0.5, 0.5],
+                        "fontSize": 12,
+                        "fontWeight": 600,
+                        "hitTest": false,
+                        "letterSpacing": 0.2,
+                        "position": [38, 15],
+                        "text": "5 days",
+                        "textAlignment": "center",
+                        "textColor": "#FFFFFFFF"
+                      }
+                    }
+                  ]
+                },
+                {
+                  "id": "trip_2_name",
+                  "type": "text",
+                  "name": "Name",
+                  "props": {
+                    "fontSize": 28,
+                    "fontWeight": 700,
+                    "hitTest": false,
+                    "letterSpacing": -0.4,
+                    "position": [24, 376],
+                    "text": "Reykjavík",
+                    "textColor": "#FFFFFFFF"
+                  }
+                },
+                {
+                  "id": "trip_2_tagline",
+                  "type": "text",
+                  "name": "Tagline",
+                  "props": {
+                    "fontSize": 15,
+                    "fontWeight": 400,
+                    "hitTest": false,
+                    "lineHeight": 21,
+                    "position": [24, 416],
+                    "text": "Chasing the northern lights",
+                    "textColor": "#FFFFFFB3"
+                  }
+                }
+              ]
+            },
+            {
+              "id": "trip_3",
+              "type": "group",
+              "name": "Lisbon",
+              "props": {
+                "clip": true,
+                "color": "#1A1B2AFF",
+                "cornerRadius": 28,
+                "shadowColor": "#000000FF",
+                "shadowOffset": [0, 10],
+                "shadowOpacity": 0.45,
+                "shadowRadius": 28,
+                "size": [320, 480]
+              },
+              "children": [
+                {
+                  "id": "trip_3_sky",
+                  "type": "gradient",
+                  "name": "Sky",
+                  "props": {
+                    "gradient": {
+                      "gradient": {
+                        "kind": "linear",
+                        "stops": [[0, "#FDE68AFF"], [1, "#F97316FF"]],
+                        "start": [0.5, 0],
+                        "end": [0.5, 1]
+                      }
+                    },
+                    "size": [320, 480]
+                  }
+                },
+                {
+                  "id": "trip_3_sun",
+                  "type": "oval",
+                  "name": "Sun",
+                  "props": {
+                    "color": "#FFFFFFD9",
+                    "position": [196, 70],
+                    "shadowColor": "#FFFFFFFF",
+                    "shadowOffset": [0, 10],
+                    "shadowOpacity": 0.45,
+                    "shadowRadius": 28,
+                    "size": [92, 92]
+                  }
+                },
+                {
+                  "id": "trip_3_peak_1",
+                  "type": "rectangle",
+                  "name": "Peak",
+                  "props": {
+                    "color": "#7C2D12B3",
+                    "cornerRadius": 24,
+                    "position": [-40, 250],
+                    "rotation": 45,
+                    "size": [260, 260]
+                  }
+                },
+                {
+                  "id": "trip_3_peak_2",
+                  "type": "rectangle",
+                  "name": "Peak",
+                  "props": {
+                    "color": "#7C2D12FF",
+                    "cornerRadius": 24,
+                    "position": [150, 290],
+                    "rotation": 45,
+                    "size": [240, 240]
+                  }
+                },
+                {
+                  "id": "trip_3_chip",
+                  "type": "group",
+                  "name": "Days",
+                  "props": {
+                    "backgroundBlur": 12,
+                    "color": "#FFFFFF33",
+                    "cornerRadius": 15,
+                    "hitTest": false,
+                    "position": [20, 20],
+                    "size": [76, 30]
+                  },
+                  "children": [
+                    {
+                      "id": "trip_3_days",
+                      "type": "text",
+                      "name": "Days Label",
+                      "props": {
+                        "anchor": [0.5, 0.5],
+                        "fontSize": 12,
+                        "fontWeight": 600,
+                        "hitTest": false,
+                        "letterSpacing": 0.2,
+                        "position": [38, 15],
+                        "text": "4 days",
+                        "textAlignment": "center",
+                        "textColor": "#FFFFFFFF"
+                      }
+                    }
+                  ]
+                },
+                {
+                  "id": "trip_3_name",
+                  "type": "text",
+                  "name": "Name",
+                  "props": {
+                    "fontSize": 28,
+                    "fontWeight": 700,
+                    "hitTest": false,
+                    "letterSpacing": -0.4,
+                    "position": [24, 376],
+                    "text": "Lisbon",
+                    "textColor": "#FFFFFFFF"
+                  }
+                },
+                {
+                  "id": "trip_3_tagline",
+                  "type": "text",
+                  "name": "Tagline",
+                  "props": {
+                    "fontSize": 15,
+                    "fontWeight": 400,
+                    "hitTest": false,
+                    "lineHeight": 21,
+                    "position": [24, 416],
+                    "text": "Tiles, trams and custard tarts",
+                    "textColor": "#FFFFFFB3"
+                  }
+                }
+              ]
+            },
+            {
+              "id": "trip_4",
+              "type": "group",
+              "name": "Patagonia",
+              "props": {
+                "clip": true,
+                "color": "#1A1B2AFF",
+                "cornerRadius": 28,
+                "shadowColor": "#000000FF",
+                "shadowOffset": [0, 10],
+                "shadowOpacity": 0.45,
+                "shadowRadius": 28,
+                "size": [320, 480]
+              },
+              "children": [
+                {
+                  "id": "trip_4_sky",
+                  "type": "gradient",
+                  "name": "Sky",
+                  "props": {
+                    "gradient": {
+                      "gradient": {
+                        "kind": "linear",
+                        "stops": [[0, "#BAE6FDFF"], [1, "#6366F1FF"]],
+                        "start": [0.5, 0],
+                        "end": [0.5, 1]
+                      }
+                    },
+                    "size": [320, 480]
+                  }
+                },
+                {
+                  "id": "trip_4_sun",
+                  "type": "oval",
+                  "name": "Sun",
+                  "props": {
+                    "color": "#FFFFFFD9",
+                    "position": [196, 70],
+                    "shadowColor": "#FFFFFFFF",
+                    "shadowOffset": [0, 10],
+                    "shadowOpacity": 0.45,
+                    "shadowRadius": 28,
+                    "size": [92, 92]
+                  }
+                },
+                {
+                  "id": "trip_4_peak_1",
+                  "type": "rectangle",
+                  "name": "Peak",
+                  "props": {
+                    "color": "#1E293BB3",
+                    "cornerRadius": 24,
+                    "position": [-40, 250],
+                    "rotation": 45,
+                    "size": [260, 260]
+                  }
+                },
+                {
+                  "id": "trip_4_peak_2",
+                  "type": "rectangle",
+                  "name": "Peak",
+                  "props": {
+                    "color": "#1E293BFF",
+                    "cornerRadius": 24,
+                    "position": [150, 290],
+                    "rotation": 45,
+                    "size": [240, 240]
+                  }
+                },
+                {
+                  "id": "trip_4_chip",
+                  "type": "group",
+                  "name": "Days",
+                  "props": {
+                    "backgroundBlur": 12,
+                    "color": "#FFFFFF33",
+                    "cornerRadius": 15,
+                    "hitTest": false,
+                    "position": [20, 20],
+                    "size": [76, 30]
+                  },
+                  "children": [
+                    {
+                      "id": "trip_4_days",
+                      "type": "text",
+                      "name": "Days Label",
+                      "props": {
+                        "anchor": [0.5, 0.5],
+                        "fontSize": 12,
+                        "fontWeight": 600,
+                        "hitTest": false,
+                        "letterSpacing": 0.2,
+                        "position": [38, 15],
+                        "text": "10 days",
+                        "textAlignment": "center",
+                        "textColor": "#FFFFFFFF"
+                      }
+                    }
+                  ]
+                },
+                {
+                  "id": "trip_4_name",
+                  "type": "text",
+                  "name": "Name",
+                  "props": {
+                    "fontSize": 28,
+                    "fontWeight": 700,
+                    "hitTest": false,
+                    "letterSpacing": -0.4,
+                    "position": [24, 376],
+                    "text": "Patagonia",
+                    "textColor": "#FFFFFFFF"
+                  }
+                },
+                {
+                  "id": "trip_4_tagline",
+                  "type": "text",
+                  "name": "Tagline",
+                  "props": {
+                    "fontSize": 15,
+                    "fontWeight": 400,
+                    "hitTest": false,
+                    "lineHeight": 21,
+                    "position": [24, 416],
+                    "text": "Glaciers at the end of the world",
+                    "textColor": "#FFFFFFB3"
+                  }
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "dot",
+      "type": "oval",
+      "name": "Page Dot",
+      "props": {
+        "anchor": [0.5, 0.5],
+        "color": { "link": "dot_color.output" },
+        "hitTest": false,
+        "position": { "link": "dot_position.output" },
+        "size": { "link": "dot_size.output" }
+      }
+    },
+    {
+      "id": "price_caption",
+      "type": "text",
+      "name": "Price Caption",
+      "props": {
+        "fontSize": 13,
+        "fontWeight": 400,
+        "hitTest": false,
+        "lineHeight": 18,
+        "position": [24, 738],
+        "text": "From",
+        "textColor": "#FFFFFFB3"
+      }
+    },
+    {
+      "id": "price",
+      "type": "text",
+      "name": "Price",
+      "props": {
+        "fontSize": 22,
+        "fontWeight": 700,
+        "hitTest": false,
+        "letterSpacing": -0.2,
+        "position": [24, 758],
+        "text": { "link": "trip_price.output" },
+        "textColor": "#FFFFFFFF"
+      }
+    },
+    {
+      "id": "next_button",
+      "type": "group",
+      "name": "Next Button",
+      "props": {
+        "color": "#FFFFFFFF",
+        "cornerRadius": 28,
+        "position": [322, 734],
+        "size": [56, 56]
+      },
+      "children": [
+        {
+          "id": "next_arrow_top",
+          "type": "rectangle",
+          "name": "Arrow Top",
+          "props": {
+            "color": "#111118FF",
+            "cornerRadius": 1.5,
+            "hitTest": false,
+            "position": [24, 22],
+            "rotation": 45,
+            "size": [12, 3]
+          }
+        },
+        {
+          "id": "next_arrow_bottom",
+          "type": "rectangle",
+          "name": "Arrow Bottom",
+          "props": {
+            "color": "#111118FF",
+            "cornerRadius": 1.5,
+            "hitTest": false,
+            "position": [24, 31],
+            "rotation": -45,
+            "size": [12, 3]
+          }
+        }
+      ]
+    },
+    {
+      "id": "app_home_indicator",
+      "type": "rectangle",
+      "name": "Home Indicator",
+      "props": {
+        "anchor": [0.5, 1],
+        "color": "#FFFFFFFF",
+        "cornerRadius": 3,
+        "hitTest": false,
+        "position": [201, 866],
+        "size": [140, 5]
+      }
+    }
+  ],
+  "patches": {
+    "dot_color": {
+      "type": "transition",
+      "name": "Dot Color",
+      "typeParam": "color",
+      "inputs": {
+        "end": "#FFFFFFFF",
+        "progress": { "link": "dot_spring.output" },
+        "start": "#FFFFFF66"
+      },
+      "ui": { "x": 1080, "y": 190 }
+    },
+    "dot_is_current": {
+      "type": "equals",
+      "name": "Dot Is Current Page",
+      "typeParam": "number",
+      "inputs": {
+        "value1": { "link": "page_dots.index" },
+        "value2": { "link": "trips_scroll.pageX" }
+      },
+      "ui": { "x": 560, "y": 190 }
+    },
+    "dot_position": {
+      "type": "point",
+      "name": "Dot Position",
+      "inputs": {
+        "x": { "link": "dot_x.output" },
+        "y": 700
+      },
+      "ui": { "x": 560, "y": 40 }
+    },
+    "dot_size": {
+      "type": "transition",
+      "name": "Dot Size",
+      "typeParam": "size",
+      "inputs": {
+        "end": [22, 8],
+        "progress": { "link": "dot_spring.output" },
+        "start": [8, 8]
+      },
+      "ui": { "x": 1080, "y": 40 }
+    },
+    "dot_spring": {
+      "type": "popAnimation",
+      "name": "Dot Spring",
+      "typeParam": "number",
+      "inputs": {
+        "bounciness": 0,
+        "number": { "link": "dot_is_current.output" },
+        "speed": 18
+      },
+      "ui": { "x": 820, "y": 40 }
+    },
+    "dot_x": {
+      "type": "mathExpression",
+      "name": "Dot X",
+      "inputs": { "index": { "link": "page_dots.index" } },
+      "settings": { "expression": "171 + index * 20" },
+      "ui": { "x": 300, "y": 40 }
+    },
+    "next_page_x": {
+      "type": "mathExpression",
+      "name": "Next Page X",
+      "inputs": { "page": { "link": "trips_scroll.pageX" } },
+      "settings": { "expression": "41 - clamp(page + 1, 0, 3) * 332" },
+      "ui": { "x": 40, "y": 340 }
+    },
+    "page_dots": {
+      "type": "loop",
+      "name": "Page Dots",
+      "inputs": { "count": 4 },
+      "ui": { "x": 40, "y": 40 }
+    },
+    "tap_next": {
+      "type": "interaction",
+      "name": "Tap Next",
+      "inputs": { "layer": { "layer": "next_button" } },
+      "ui": { "x": 40, "y": 190 }
+    },
+    "trip_price": {
+      "type": "optionPicker",
+      "name": "Trip Price",
+      "typeParam": "text",
+      "inputCount": 4,
+      "inputs": {
+        "option": { "link": "trips_scroll.pageX" },
+        "option0": "$1,240",
+        "option1": "$980",
+        "option2": "$1,610",
+        "option3": "$2,150"
+      },
+      "ui": { "x": 560, "y": 340 }
+    },
+    "trips_scroll": {
+      "type": "scroll",
+      "name": "Scroll Trips",
+      "inputs": {
+        "jumpPositionX": { "link": "next_page_x.output" },
+        "jumpToX": { "link": "tap_next.tap" },
+        "layer": { "layer": "cards" },
+        "pagePadding": [12, 0],
+        "pageSize": [320, 480],
+        "scrollX": "paging",
+        "scrollY": "off",
+        "startPosition": [41, 0]
+      },
+      "ui": { "x": 300, "y": 190 }
+    }
+  },
+  "comments": []
+}

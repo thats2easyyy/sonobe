@@ -1,7 +1,7 @@
 export { AppShell, type AppShellProps, type AppShellSlots } from "./AppShell.tsx";
+export { DrawerHost } from "./drawers/DrawerHost.tsx";
 export { Panel, PanelRail, type PanelProps, type PanelRailProps } from "./Panel.tsx";
 export { DevicePicker, Toolbar, type ToolbarProps } from "./Toolbar.tsx";
-export { PatchPicker, type PatchPickerProps } from "./PatchPicker.tsx";
 export { useShellCommands, type ShellCommandHandlers } from "./useShellCommands.tsx";
 export {
   DEFAULT_LAYOUT,

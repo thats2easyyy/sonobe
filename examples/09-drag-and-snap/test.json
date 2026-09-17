@@ -1,0 +1,55 @@
+{
+  "description": "The self view follows the finger in 2D, then springs to the corner a throw at the release velocity would reach: fling toward a corner, place it slowly, or nudge it back.",
+  "scenarios": [
+    {
+      "name": "Starts in the top-right corner",
+      "events": [],
+      "durationMs": 300,
+      "expect": [
+        { "description": "x is 266", "target": "@pip.position", "component": "x", "at": "end", "op": "==", "value": 266 },
+        { "description": "y is 76", "target": "@pip.position", "component": "y", "at": "end", "op": "==", "value": 76 }
+      ]
+    },
+    {
+      "name": "A fling down and left lands in the bottom-left corner",
+      "events": [{ "kind": "drag", "from": "@pip", "to": [150, 400], "durationMs": 120, "atMs": 100 }],
+      "durationMs": 1800,
+      "expect": [
+        { "description": "Current Corner is 2 (bottom left)", "target": "current_corner.count", "at": "end", "op": "==", "value": 2 },
+        { "description": "It settles at x 16", "target": "@pip.position", "component": "x", "at": "end", "op": "==", "value": 16, "tolerance": 0.5 },
+        { "description": "and y 578, just above the controls", "target": "@pip.position", "component": "y", "at": "end", "op": "==", "value": 578, "tolerance": 0.5 },
+        { "description": "It comes to rest", "target": "@pip.position", "component": "y", "settled": true }
+      ]
+    },
+    {
+      "name": "A slow drag near the bottom right stays there",
+      "events": [{ "kind": "drag", "from": "@pip", "to": [330, 600], "durationMs": 900, "atMs": 100 }],
+      "durationMs": 2200,
+      "expect": [
+        { "description": "Current Corner is 3 (bottom right)", "target": "current_corner.count", "at": "end", "op": "==", "value": 3 },
+        { "description": "x 266", "target": "@pip.position", "component": "x", "at": "end", "op": "==", "value": 266, "tolerance": 0.5 },
+        { "description": "y 578", "target": "@pip.position", "component": "y", "at": "end", "op": "==", "value": 578, "tolerance": 0.5 }
+      ]
+    },
+    {
+      "name": "A small slow nudge goes back to its corner",
+      "events": [{ "kind": "drag", "from": "@pip", "to": [300, 200], "durationMs": 700, "atMs": 100 }],
+      "durationMs": 1800,
+      "expect": [
+        { "description": "Current Corner stays 0 (top right)", "target": "current_corner.count", "at": "end", "op": "==", "value": 0 },
+        { "description": "Back at x 266", "target": "@pip.position", "component": "x", "at": "end", "op": "==", "value": 266, "tolerance": 0.5 },
+        { "description": "Back at y 76", "target": "@pip.position", "component": "y", "at": "end", "op": "==", "value": 76, "tolerance": 0.5 }
+      ]
+    },
+    {
+      "name": "It follows the finger and lifts while held",
+      "events": [{ "kind": "drag", "from": "@pip", "to": [200, 450], "durationMs": 500, "release": false, "atMs": 100 }],
+      "durationMs": 900,
+      "expect": [
+        { "description": "Moved left by the finger's 126 points", "target": "@pip.position", "component": "x", "at": "end", "op": "==", "value": 140, "tolerance": 0.5 },
+        { "description": "Moved down by the finger's 289 points", "target": "@pip.position", "component": "y", "at": "end", "op": "==", "value": 365, "tolerance": 0.5 },
+        { "description": "It's scaled up to 1.06", "target": "@pip.scale", "at": "end", "op": "==", "value": 1.06, "tolerance": 0.003 }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,42 @@
+{
+  "description": "One Tile layer becomes twelve copies laid out in three columns, each with its own color, number, entrance timing and selection ring; tapping a copy picks its color.",
+  "scenarios": [
+    {
+      "name": "Twelve tiles in three columns",
+      "events": [],
+      "durationMs": 300,
+      "expect": [
+        { "description": "Tile 5 (index 4) sits in the second row, second column", "target": "@tile.position#4", "component": "x", "at": "end", "op": "==", "value": 142.667, "tolerance": 0.01 },
+        { "description": "126 points below the first row", "target": "@tile.position#4", "component": "y", "at": "end", "op": "==", "value": 416 },
+        { "description": "Each tile is a third of the width, less the gaps", "target": "@tile.size#0", "component": "width", "at": "end", "op": "==", "value": 116.667, "tolerance": 0.01 },
+        { "description": "The last tile is in the fourth row", "target": "@tile.position#11", "component": "y", "at": "end", "op": "==", "value": 668 },
+        { "description": "Tile 8 is numbered #08", "target": "@tile_label.text#7", "at": "end", "op": "==", "value": "#08" }
+      ]
+    },
+    {
+      "name": "Tiles pop in one after another",
+      "events": [],
+      "durationMs": 1800,
+      "expect": [
+        { "description": "Nothing shows before the short pause", "target": "@tile.opacity#0", "at": 100, "op": "==", "value": 0 },
+        { "description": "The first tile is in by 0.3 s", "target": "@tile.opacity#0", "at": 300, "op": ">", "value": 0.7 },
+        { "description": "while the last is still waiting its turn", "target": "@tile.opacity#11", "at": 300, "op": "==", "value": 0 },
+        { "description": "The last tile is in by the end", "target": "@tile.opacity#11", "at": "end", "op": "==", "value": 1 },
+        { "description": "at full size", "target": "@tile.scale#11", "at": "end", "op": "==", "value": 1, "tolerance": 0.005 }
+      ]
+    },
+    {
+      "name": "Tapping a tile picks it",
+      "events": [{ "kind": "tap", "target": "@tile#7", "atMs": 900 }],
+      "durationMs": 1900,
+      "expect": [
+        { "description": "Selected Tile is 7", "target": "selected_tile.option", "at": "end", "op": "==", "value": 7 },
+        { "description": "Tile 8 has its ring", "target": "@tile.strokeWidth#7", "at": "end", "op": "==", "value": 4, "tolerance": 0.05 },
+        { "description": "Tile 1 lost its ring", "target": "@tile.strokeWidth#0", "at": "end", "op": "==", "value": 0, "tolerance": 0.05 },
+        { "description": "It had the ring at the start", "target": "@tile.strokeWidth#0", "at": 850, "op": "==", "value": 4, "tolerance": 0.05 },
+        { "description": "The preview shows tile 8's color in hex", "target": "@preview_label.text", "at": "end", "op": "==", "value": "#5099E2" },
+        { "description": "and the preview animated to it", "target": "@preview.color", "component": "b", "at": "end", "op": "==", "value": 0.886, "tolerance": 0.01 }
+      ]
+    }
+  ]
+}

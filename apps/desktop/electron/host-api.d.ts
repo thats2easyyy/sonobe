@@ -120,6 +120,21 @@ export interface McpStatus {
   tokenFile: string;
 }
 
+/** The phone preview server (LAN web player). */
+export interface PreviewStatus {
+  running: boolean;
+  /** Player URL for a phone on the same Wi-Fi, with its access token; null when stopped. */
+  url: string | null;
+  /** Every usable player URL, best first. */
+  urls: string[];
+  /** False when no local network address was found: only this computer can open the URL. */
+  lanReachable: boolean;
+  /** Players connected right now. */
+  clients: number;
+  /** Why the server couldn't start, when it couldn't. */
+  error: string | null;
+}
+
 export type RpcHandler = (params: unknown) => unknown | Promise<unknown>;
 
 /**
@@ -131,6 +146,11 @@ export type RpcHandler = (params: unknown) => unknown | Promise<unknown>;
  * Well-known methods the host calls when registered:
  * - `document.save`: called when the user picks Save in the "unsaved changes" prompt.
  *   Resolve `false` to cancel closing.
+ * - The MCP bridge methods of apps/editor/src/host/rpcHandlers.ts (`document.info`, `document.apply`...).
+ *   Optional: `canvas.bounds`, `graph.bounds` and `viewer.layerBounds({ layerId })` resolve a
+ *   `{ x, y, width, height, scale? }` rect in viewport CSS pixels so screenshots can target them.
+ * - `viewer.showPhonePreview(status: PreviewStatus)`: show the editor's QR panel after Viewer →
+ *   Preview on Phone starts the server. Without it the host shows a native dialog with a QR code.
  */
 export interface SonobeHostRpc {
   /** Register a handler; returns an unregister function. Re-registering replaces the handler. */
@@ -171,6 +191,14 @@ export interface SonobeHost {
 
   rpc: SonobeHostRpc;
   getMcpStatus(): Promise<McpStatus>;
+
+  /** Phone preview server state (for the viewer's "On phone" QR panel). */
+  getPreviewStatus(): Promise<PreviewStatus>;
+  /** Start the phone preview server; resolves the new status (with `error` when it couldn't start). */
+  startPreview(): Promise<PreviewStatus>;
+  stopPreview(): Promise<PreviewStatus>;
+  /** Status changes: started, stopped, players joining or leaving. Returns unsubscribe. */
+  onPreviewStatus(cb: (status: PreviewStatus) => void): () => void;
 }
 
 declare global {

@@ -11,6 +11,24 @@ export default defineConfig({
   resolve: {
     dedupe: ["react", "react-dom"],
   },
+  // Workspace packages are served as source, so their dependencies are only found mid-load.
+  // Pre-bundle them up front: a cold dev server otherwise re-optimizes and the first load 504s.
+  optimizeDeps: {
+    include: [
+      "react",
+      "react-dom",
+      "react-dom/client",
+      "react/jsx-runtime",
+      "react/jsx-dev-runtime",
+      "zustand",
+      "zustand/vanilla",
+      "@xyflow/react",
+      "lucide-react",
+      "elkjs/lib/elk-api.js",
+      "lottie-web",
+      "zod",
+    ],
+  },
   server: {
     port: 5199,
     strictPort: false,
