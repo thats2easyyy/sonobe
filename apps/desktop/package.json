@@ -12,17 +12,18 @@
     "test": "vitest run --config vitest.config.ts"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.126.0",
     "@sonobe/core": "*",
     "@sonobe/engine": "*",
-    "@sonobe/patches": "*",
     "@sonobe/mcp": "*",
-    "ws": "^8.21.3",
+    "@sonobe/patches": "*",
     "qrcode": "^1.5.4",
-    "@anthropic-ai/sdk": "^0.126.0"
+    "ws": "^8.21.3"
   },
   "devDependencies": {
-    "electron": "^44.4.1",
+    "@types/qrcode": "^1.5.0",
     "@types/ws": "^8.5.0",
-    "@types/qrcode": "^1.5.0"
+    "electron": "^44.4.1",
+    "electron-builder": "^26.15.3"
   }
 }
