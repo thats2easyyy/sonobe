@@ -42,7 +42,7 @@ sonobe/
 │   ├── claude-code/     Claude Code plugin (.mcp.json + skills)
 │   └── claude-desktop/  .mcpb bundle manifest
 ├── examples/       canonical example prototypes (*.sonobe folders), used by docs, lessons, tests
-└── docs/           research/, guides/ (numbered tutorials), patches/ (generated reference)
+└── docs/           research/, guides/ (numbered tutorials), patches/ (generated reference), assets/ (README screenshots)
 ```
 
 Dependency direction (no cycles): `core ← engine ← patches ← renderer ← editor ← desktop`, and `mcp ← cli`, where `mcp` depends on `core`, `engine`, and `patches`.

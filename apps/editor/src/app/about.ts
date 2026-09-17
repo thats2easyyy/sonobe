@@ -31,7 +31,7 @@ export const CREDITS: readonly Credit[] = [
 ];
 
 /** Where issues are filed. */
-export const ISSUES_URL = "https://github.com/sonobe-app/sonobe/issues/new";
+export const ISSUES_URL = "https://github.com/thats2easyyy/sonobe/issues/new";
 
 export interface IssueContext {
   version: string;
