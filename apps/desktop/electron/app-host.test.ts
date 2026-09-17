@@ -1,0 +1,406 @@
+/**
+ * The app host against the real editor: an EditorSession with the renderer RPC handlers from
+ * apps/editor/src/host/rpcHandlers.ts, bridged through this app's rpc client/server with structured
+ * cloning like IPC, and the MCP endpoint served over HTTP to the SDK client.
+ */
+
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
+import type { Op } from "@sonobe/core";
+import { createHttpHandler, isHostError, TOOL_NAMES, type NodeMcpHandler } from "@sonobe/mcp";
+import { createPatchRegistry } from "@sonobe/patches";
+import { afterEach, describe, expect, it } from "vitest";
+import { createBrowserHost, createMemoryProjectStorage } from "../../editor/src/host/browserHost.ts";
+import { registerRpcHandlers } from "../../editor/src/host/rpcHandlers.ts";
+import { createManualScheduler } from "../../editor/src/runtime/scheduler.ts";
+import { createDemoDocument } from "../../editor/src/state/demoDocument.ts";
+import { createEditorSession, type EditorSession } from "../../editor/src/state/session.ts";
+import { createAppHost, hostErrorFromRpc, type AppHost, type AppHostOptions, type RendererTarget } from "./app-host.ts";
+import { startMcpServer, type McpServerHandle } from "./mcp-server.ts";
+import { createRpcClient, createRpcFailure, createRpcServer, type RpcServer } from "./rpc.ts";
+
+const registry = createPatchRegistry();
+const CLAUDE = { kind: "agent" as const, name: "Claude" };
+
+interface TestWindow {
+  session: EditorSession;
+  server: RpcServer;
+  target: RendererTarget;
+  focused: number;
+  captures: { rect: unknown; size: { width: number; height: number } }[];
+  captureResult: "ok" | "empty";
+  names: { save: string | null };
+  dispose(): void;
+}
+
+const cleanups: (() => void | Promise<void>)[] = [];
+afterEach(async () => {
+  for (const cleanup of cleanups.splice(0).reverse()) await cleanup();
+});
+
+/** An editor window: a real session whose RPC handlers answer through a cloning bridge. */
+function editorWindow(id: number, options: { handlers?: boolean } = {}): TestWindow {
+  const names = { save: "Agent Proto" as string | null };
+  const host = createBrowserHost({ storage: createMemoryProjectStorage(), channelName: null, recentKey: null, fileSystemAccess: false, dialogs: { promptName: async () => names.save, pickProject: async () => null } });
+  const session = createEditorSession({ host, registry, document: createDemoDocument(registry), autoplay: false, scheduler: createManualScheduler(), textMeasurer: "approximate" });
+  let client: ReturnType<typeof createRpcClient>;
+  const server = createRpcServer({ send: (response) => queueMicrotask(() => client.handleResponse(structuredClone(response))) });
+  client = createRpcClient({ send: (request) => queueMicrotask(() => void server.dispatch(structuredClone(request))), defaultTimeoutMs: 5000 });
+  const off = options.handlers === false ? () => undefined : registerRpcHandlers(session, { rpc: { handle: (method, fn) => server.handle(method, fn), methods: () => server.methods(), fail: createRpcFailure } });
+  const w: TestWindow = {
+    session,
+    server,
+    focused: 0,
+    captures: [],
+    captureResult: "ok",
+    names,
+    target: {
+      id,
+      invoke: <T>(method: string, params?: unknown, opts?: { timeoutMs?: number }) => client.invoke<T>(method, params, opts),
+      hasMethod: (method) => server.methods().includes(method),
+      focus: () => {
+        w.focused++;
+      },
+      capture: async (rect, size) => {
+        w.captures.push({ rect, size });
+        return w.captureResult === "ok" ? { data: "iVBORw0KGgo=", width: size.width, height: size.height } : null;
+      },
+    },
+    dispose() {
+      off();
+      session.dispose();
+    },
+  };
+  cleanups.push(() => w.dispose());
+  return w;
+}
+
+function appHost(windows: TestWindow[], extra: Partial<AppHostOptions> = {}): AppHost & { written: string[] } {
+  const written: string[] = [];
+  const host = createAppHost({
+    registry,
+    targets: () => windows.map((w) => w.target),
+    approveProject: async (dir) => (dir.endsWith(".sonobe") ? dir : null),
+    defaultProjectDir: async (name) => `/Users/test/Documents/${name}.sonobe`,
+    projectExists: async () => false,
+    writeProject: async (dir) => {
+      written.push(dir);
+    },
+    ...extra,
+  });
+  cleanups.push(() => host.dispose());
+  return Object.assign(host, { written });
+}
+
+async function rejection(promise: Promise<unknown>): Promise<{ code: string; message: string; hint?: string }> {
+  try {
+    await promise;
+  } catch (err) {
+    if (isHostError(err)) return { code: err.code, message: err.message, ...(err.hint ? { hint: err.hint } : {}) };
+    throw err;
+  }
+  throw new Error("Expected a HostError");
+}
+
+/** Interaction → Switch → Pop Animation → Transition on the Next Card's scale. */
+const pressChain: Op[] = [
+  { op: "addPatch", patch: { id: "press_next", type: "interaction", name: "Press Next Card", inputs: { layer: { layer: "next_card" } }, ui: { x: 40, y: 700 } } },
+  { op: "addPatch", patch: { id: "next_pressed", type: "switch", name: "Next Card Pressed", ui: { x: 260, y: 700 } } },
+  { op: "addPatch", patch: { id: "press_spring", type: "popAnimation", name: "Press Spring", typeParam: "number", ui: { x: 480, y: 700 } } },
+  { op: "addPatch", patch: { id: "press_scale", type: "transition", name: "Press Scale", typeParam: "number", inputs: { start: 1, end: 0.95 }, ui: { x: 720, y: 700 } } },
+  { op: "connect", from: "press_next.tap", to: "next_pressed.flip" },
+  { op: "connect", from: "next_pressed.on", to: "press_spring.number" },
+  { op: "connect", from: "press_spring.output", to: "press_scale.progress" },
+  { op: "connect", from: "press_scale.output", to: "@next_card.scale" },
+];
+
+describe("app host documents", () => {
+  it("describes the live document", async () => {
+    const w = editorWindow(1);
+    const host = appHost([w]);
+    expect(host.kind).toBe("app");
+    expect(host.capabilities).toEqual({ screenshots: true, selection: true, presence: true, autosave: false });
+    expect(await host.listDocuments()).toEqual([{ docId: "photo_zoom", name: "Photo Zoom", revision: 0, dirty: false, active: true }]);
+    const snap = await host.getDocument();
+    expect(snap).toMatchObject({ docId: "photo_zoom", revision: 0, dirty: false, doc: { project: { name: "Photo Zoom" } } });
+    expect(snap.doc.components.main!.patches.tap_photo).toBeDefined();
+    expect(await host.getDocument("photo_zoom")).toMatchObject({ docId: "photo_zoom" });
+    expect(await host.diagnostics()).toMatchObject({ docId: "photo_zoom", revision: 0, diagnostics: expect.any(Array) });
+    expect(await rejection(host.getDocument("nope"))).toMatchObject({ code: "unknown_document", hint: expect.stringContaining("photo_zoom") });
+  });
+
+  it("names several windows apart and forgets closed ones", async () => {
+    const a = editorWindow(1);
+    const b = editorWindow(2);
+    const windows = [a, b];
+    const host = appHost(windows);
+    const docs = await host.listDocuments();
+    expect(docs.map((d) => [d.docId, d.active])).toEqual([
+      ["photo_zoom", true],
+      ["photo_zoom_2", false],
+    ]);
+    await host.apply([{ op: "setProject", changes: { name: "Second" } }], { docId: "photo_zoom_2", label: "renamed", author: CLAUDE });
+    expect(b.session.document.getState().doc.project.name).toBe("Second");
+    expect(a.session.document.getState().doc.project.name).toBe("Photo Zoom");
+    windows.pop();
+    expect(await host.listDocuments()).toHaveLength(1);
+    expect(await rejection(host.getDocument("photo_zoom_2"))).toMatchObject({ code: "unknown_document" });
+  });
+
+  it("explains missing windows and editors without the bridge", async () => {
+    const none = appHost([]);
+    expect(await none.listDocuments()).toEqual([]);
+    expect(await rejection(none.getDocument())).toMatchObject({ code: "no_window", hint: expect.stringContaining("open a prototype") });
+    expect(await rejection(none.apply(pressChain, { label: "x", author: CLAUDE }))).toMatchObject({ code: "no_window" });
+
+    const placeholder = editorWindow(9, { handlers: false });
+    const host = appHost([placeholder]);
+    expect(await host.listDocuments()).toEqual([]);
+    expect(await rejection(host.getDocument())).toMatchObject({ code: "editor_not_connected", hint: expect.stringContaining("npm run build -w @sonobe/editor") });
+
+    expect(hostErrorFromRpc({ code: "timeout", message: "late" }, "document.get")).toMatchObject({ code: "editor_timeout" });
+    expect(hostErrorFromRpc({ code: "renderer_gone", message: "gone" }, "document.get")).toMatchObject({ code: "window_closed" });
+    expect(hostErrorFromRpc({ code: "no_viewer", message: "No viewer", data: { hint: "Show it", ok: true } }, "viewer.bounds")).toMatchObject({ code: "no_viewer", message: "No viewer", hint: "Show it", data: undefined });
+  });
+});
+
+describe("app host writes", () => {
+  it("applies ops through the editor's history as Claude", async () => {
+    const w = editorWindow(1);
+    const host = appHost([w]);
+    const result = await host.apply(pressChain, { label: "added press feedback", author: CLAUDE });
+    expect(result).toMatchObject({ ok: true, docId: "photo_zoom", revision: 1, dryRun: false, txnId: expect.any(String), affected: { patches: expect.arrayContaining(["press_next", "press_scale"]) } });
+    expect(result.applied).toHaveLength(pressChain.length);
+    expect(result.diagnostics.totals.errors).toBe(0);
+
+    const state = w.session.document.getState();
+    expect(state.doc.components.main!.patches.press_spring).toBeDefined();
+    expect(state.historyEntries()[0]).toMatchObject({ txnId: result.txnId, description: "Claude: added press feedback (8 ops)" });
+    expect(w.session.presence.getState().recent[0]).toMatchObject({ kind: "apply", description: expect.stringContaining("Claude: added press feedback") });
+
+    expect(await host.history.list({})).toMatchObject([{ txnId: result.txnId, summary: "Claude: added press feedback (8 ops)", author: CLAUDE, opCount: pressChain.length }]);
+    expect(await host.history.list({ author: "human" })).toEqual([]);
+    expect((await host.getDocument()).revision).toBe(1);
+  });
+
+  it("previews dry runs, reports errors, and refuses stale revisions", async () => {
+    const w = editorWindow(1);
+    const host = appHost([w]);
+    const dry = await host.apply(pressChain, { label: "try", author: CLAUDE, dryRun: true });
+    expect(dry).toMatchObject({ ok: true, dryRun: true, revision: 0 });
+    expect(dry.preview?.components.main!.patches.press_scale).toBeDefined();
+    expect(dry.txnId).toBeUndefined();
+    expect(w.session.document.getState().historyEntries()).toHaveLength(0);
+
+    const broken = await host.apply([{ op: "removePatch", id: "ghost" }], { label: "remove ghost", author: CLAUDE });
+    expect(broken).toMatchObject({ ok: false, revision: 0, errors: [{ code: "not_found" }] });
+
+    w.session.document.getState().apply([{ op: "setProject", changes: { name: "Edited by a person" } }], { label: "Rename" });
+    const stale = await host.apply(pressChain, { label: "late", author: CLAUDE, expectedRevision: 0 });
+    expect(stale).toMatchObject({ ok: false, conflict: { expectedRevision: 0, currentRevision: 1 }, errors: [{ code: "revision_conflict" }] });
+    expect(w.session.document.getState().doc.components.main!.patches.press_next).toBeUndefined();
+  });
+
+  it("undoes Claude's changes but won't discard a person's edits without asking", async () => {
+    const w = editorWindow(1);
+    const host = appHost([w]);
+    const first = await host.apply(pressChain, { label: "added press feedback", author: CLAUDE });
+    w.session.document.getState().apply([{ op: "updateLayer", id: "card", props: { position: [16, 150] } }], { label: "Move Card" });
+
+    expect(await rejection(host.history.undo({ author: CLAUDE }))).toMatchObject({ code: "human_edit", message: expect.stringContaining("Move Card") });
+    expect(await rejection(host.history.undo({ author: CLAUDE, txnId: first.txnId! }))).toMatchObject({ code: "human_edit" });
+    expect(await rejection(host.history.undo({ author: CLAUDE, txnId: "txn_nope" }))).toMatchObject({ code: "not_found" });
+
+    const undone = await host.history.undo({ author: CLAUDE, txnId: first.txnId!, allowHumanEdits: true });
+    expect(undone).toMatchObject({ docId: "photo_zoom", revision: 4, undone: [{ label: "Move Card" }, { label: "added press feedback" }] });
+    expect(w.session.document.getState().doc.components.main!.patches.press_next).toBeUndefined();
+    expect(await rejection(host.history.undo({ author: CLAUDE }))).toMatchObject({ code: "nothing_to_undo" });
+  });
+
+  it("saves through the editor and explains a cancelled save", async () => {
+    const w = editorWindow(1);
+    const host = appHost([w]);
+    w.names.save = null;
+    expect(await rejection(host.saveDocument())).toMatchObject({ code: "save_cancelled" });
+    w.names.save = "Agent Proto";
+    expect(await host.saveDocument()).toEqual({ docId: "photo_zoom", path: "browser:Agent Proto", revision: 0, written: [], removed: [] });
+    expect((await host.listDocuments())[0]).toMatchObject({ path: "browser:Agent Proto", dirty: false });
+  });
+
+  it("opens and creates documents", async () => {
+    const w = editorWindow(1);
+    const host = appHost([w]);
+    expect(await host.openDocument("photo_zoom")).toMatchObject({ docId: "photo_zoom", active: true });
+    expect(w.focused).toBe(1);
+    expect(await rejection(host.openDocument("relative/Checkout.sonobe"))).toMatchObject({ code: "not_a_project" });
+    expect(await rejection(host.openDocument("/Users/test/not-a-project"))).toMatchObject({ code: "not_a_project" });
+    // The browser host can't read disk paths, so the editor's own open error comes back.
+    expect(await rejection(host.openDocument("/Users/test/Checkout.sonobe"))).toMatchObject({ code: "open_failed" });
+
+    expect(await rejection(host.createDocument({ template: "nope" }))).toMatchObject({ code: "unknown_template" });
+    expect(await rejection(host.createDocument({ path: "Checkout.sonobe" }))).toMatchObject({ code: "absolute_path_required" });
+    expect(await host.createDocument({ name: "Checkout", template: "blank", open: false })).toEqual({ docId: "checkout", name: "Checkout", path: "/Users/test/Documents/Checkout.sonobe", revision: 0, dirty: false, active: false });
+    expect(host.written).toEqual(["/Users/test/Documents/Checkout.sonobe"]);
+    expect(await rejection(host.createDocument({ path: "/Users/test/Checkout.sonobe" }))).toMatchObject({ code: "open_failed" });
+
+    const exists = appHost([w], { projectExists: async () => true });
+    expect(await rejection(exists.createDocument({ name: "Checkout" }))).toMatchObject({ code: "already_exists" });
+  });
+});
+
+describe("app host presence, selection and screenshots", () => {
+  it("reveals items, reads the selection, and shows working badges", async () => {
+    const w = editorWindow(1);
+    const host = appHost([w]);
+    expect(await host.reveal(["card", "zoomed", "ghost"], { focus: true })).toEqual({ revealed: true, reason: "Not found: ghost." });
+    expect(w.focused).toBe(1);
+    expect(await host.getSelection()).toEqual({ docId: "photo_zoom", component: "main", layers: ["card"], patches: ["zoomed"], comments: [] });
+    expect(await host.reveal(["ghost"], {})).toMatchObject({ revealed: false, reason: expect.stringContaining("ghost") });
+
+    await host.setWorking({ ids: ["card"], intent: "Tuning the zoom spring" }, { author: CLAUDE });
+    expect(w.session.presence.getState().working).toMatchObject([{ intent: "Tuning the zoom spring", ids: ["card"], author: CLAUDE }]);
+    expect(await host.presence()).toMatchObject([{ intent: "Tuning the zoom spring", author: CLAUDE }]);
+    await host.setWorking({ ids: [], intent: "Checking the result" }, { author: CLAUDE });
+    expect(w.session.presence.getState().working).toMatchObject([{ intent: "Checking the result" }]);
+    await host.setWorking(null, { author: CLAUDE });
+    expect(w.session.presence.getState().working).toEqual([]);
+    expect(await host.presence()).toEqual([]);
+  });
+
+  it("crops screenshots to the visible viewer stage", async () => {
+    const w = editorWindow(1);
+    const host = appHost([w]);
+    expect(await rejection(host.screenshot({ kind: "viewer" }, {}))).toMatchObject({ code: "no_viewer", hint: expect.stringContaining("Viewer") });
+
+    w.server.handle("viewer.bounds", () => ({ x: 100, y: 50, width: 400, height: 900, stage: { x: 105, y: 40, width: 201, height: 437 }, scale: 0.5, devicePixelRatio: 2, prototypeSize: [402, 874] }));
+    const shot = await host.screenshot({ kind: "viewer" }, { maxWidth: 800 });
+    expect(shot).toEqual({ data: "iVBORw0KGgo=", mimeType: "image/png", width: 402, height: 854 });
+    expect(w.captures[0]).toEqual({ rect: { x: 105, y: 50, width: 201, height: 427 }, size: { width: 402, height: 854 } });
+    await host.screenshot({ kind: "viewer" }, { scale: 2, maxWidth: 400 });
+    expect(w.captures[1]!.size).toEqual({ width: 400, height: 850 });
+
+    // A viewer zoomed by CSS outside the renderer reports scale 1; the measured stage still gives points.
+    w.server.handle("viewer.bounds", () => ({ x: 263, y: 128, width: 236.04, height: 513.17, stage: { x: 263, y: 128, width: 236.04, height: 513.17 }, scale: 1, devicePixelRatio: 2, prototypeSize: [402, 874] }));
+    expect(await host.screenshot({ kind: "viewer" }, { maxWidth: 800 })).toMatchObject({ width: 402, height: 874 });
+    w.captures.length = 0;
+
+    expect(await rejection(host.screenshot({ kind: "viewer" }, { simId: "sim_1" }))).toMatchObject({ code: "sim_screenshot_unavailable" });
+    expect(await rejection(host.screenshot({ kind: "graph" }, {}))).toMatchObject({ code: "target_unavailable", hint: expect.stringContaining("get_outline") });
+    expect(await rejection(host.screenshot({ kind: "layer", layerId: "card" }, {}))).toMatchObject({ code: "target_unavailable" });
+
+    w.server.handle("graph.bounds", () => ({ x: 600, y: 60, width: 500, height: 300 }));
+    expect(await host.screenshot({ kind: "graph" }, { maxWidth: 250 })).toMatchObject({ width: 250, height: 150 });
+
+    w.captureResult = "empty";
+    expect(await rejection(host.screenshot({ kind: "viewer" }, {}))).toMatchObject({ code: "capture_failed" });
+    w.server.handle("viewer.bounds", () => ({ nope: true }));
+    expect(await rejection(host.screenshot({ kind: "viewer" }, {}))).toMatchObject({ code: "editor_error" });
+  });
+});
+
+describe("app host simulations", () => {
+  it("runs deterministic simulations of the live document and hot-swaps edits", async () => {
+    const w = editorWindow(1);
+    const host = appHost([w]);
+    const reset = await host.sim.reset({ seed: 7 });
+    expect(reset).toMatchObject({ docId: "photo_zoom", frame: expect.any(Number), seed: 7 });
+    expect(host.sim.list()).toHaveLength(1);
+
+    const dispatched = await host.sim.dispatch(reset.simId, [{ kind: "tap", target: "@card" }]);
+    expect(dispatched.events[0]).toMatchObject({ kind: "tap", hit: { handledBy: expect.arrayContaining(["tap_photo"]) } });
+    const settled = await host.sim.step(reset.simId, { until: "idle", maxMs: 4000 });
+    expect(settled).toMatchObject({ settled: true, timedOut: false });
+    const values = await host.sim.values(reset.simId, ["zoomed.on", "@photo.scale"]);
+    expect(values.values["zoomed.on"]).toBe(true);
+    expect(values.values["@photo.scale"]).toBeCloseTo(1.18, 2);
+
+    await host.apply([{ op: "setInput", target: "photo_scale.end", value: 1.5 }], { label: "bigger zoom", author: CLAUDE });
+    const swapped = await host.sim.step(reset.simId, { until: "idle", maxMs: 4000 });
+    expect(swapped.documentUpdated).toBe(true);
+    expect((await host.sim.values(reset.simId, ["@photo.scale"])).values["@photo.scale"]).toBeCloseTo(1.5, 2);
+
+    const trace = await host.sim.trace(reset.simId, { targets: ["zoom_spring.output"], durationMs: 500, events: [{ kind: "tap", target: "@card" }] });
+    expect(trace.times.length).toBeGreaterThan(20);
+  });
+
+  it("drops simulations whose window closed", async () => {
+    const w = editorWindow(1);
+    const windows = [w];
+    const host = appHost(windows);
+    const { simId } = await host.sim.reset({});
+    windows.pop();
+    host.forgetTarget(1);
+    expect(host.sim.list()).toEqual([]);
+    expect(await rejection(host.sim.values(simId, ["zoomed.on"]))).toMatchObject({ code: "unknown_sim" });
+  });
+});
+
+describe("desktop MCP endpoint", () => {
+  let server: McpServerHandle | null = null;
+  let handler: NodeMcpHandler | null = null;
+
+  afterEach(async () => {
+    await handler?.close();
+    await server?.close();
+    handler = null;
+    server = null;
+  });
+
+  it("serves the tools over Streamable HTTP with the bearer token", async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), "sonobe-desktop-mcp-"));
+    cleanups.push(() => rm(dir, { recursive: true, force: true }));
+    const w = editorWindow(1);
+    const host = appHost([w]);
+    server = await startMcpServer({ version: "0.1.0-test", configDir: dir, port: 0 });
+    handler = createHttpHandler(host, { version: "0.1.0-test" });
+    server.setHandler(handler);
+
+    const client = new Client({ name: "claude-code", version: "1.0.0" });
+    const transport = new StreamableHTTPClientTransport(new URL(server.url), { requestInit: { headers: { Authorization: `Bearer ${server.token}` } } });
+    await client.connect(transport);
+    cleanups.push(() => client.close());
+
+    const { tools } = await client.listTools();
+    expect(tools.map((t) => t.name).sort()).toEqual([...TOOL_NAMES].sort());
+
+    const info = await client.callTool({ name: "get_document_info", arguments: {} });
+    expect(JSON.stringify(info.content)).toContain("Photo Zoom");
+    expect(info.structuredContent).toMatchObject({ docId: "photo_zoom", host: { kind: "app", screenshots: true } });
+
+    const added = await client.callTool({
+      name: "add_patches",
+      arguments: {
+        label: "added press feedback",
+        patches: pressChain.filter((op) => op.op === "addPatch").map((op) => (op as Extract<Op, { op: "addPatch" }>).patch),
+        connections: pressChain.filter((op) => op.op === "connect").map((op) => ({ from: (op as Extract<Op, { op: "connect" }>).from, to: (op as Extract<Op, { op: "connect" }>).to })),
+      },
+    });
+    expect(added.isError).toBeFalsy();
+    expect(added.structuredContent).toMatchObject({ ok: true, revision: 1 });
+    expect(w.session.document.getState().historyEntries()[0]!.description).toBe("Claude: added press feedback (8 ops)");
+
+    const history = await client.callTool({ name: "list_history", arguments: {} });
+    expect(JSON.stringify(history.content)).toContain("Claude: added press feedback");
+
+    const reset = await client.callTool({ name: "sim_reset", arguments: {} });
+    const simId = (reset.structuredContent as { simId: string }).simId;
+    await client.callTool({ name: "sim_dispatch", arguments: { simId, events: [{ kind: "tap", target: "@next_card" }] } });
+    await client.callTool({ name: "sim_step", arguments: { simId, until: "idle" } });
+    const values = await client.callTool({ name: "sim_get_values", arguments: { simId, targets: ["next_pressed.on"] } });
+    expect(values.structuredContent).toMatchObject({ values: { "next_pressed.on": true } });
+
+    const noViewer = await client.callTool({ name: "get_screenshot", arguments: {} });
+    expect(noViewer.isError).toBe(true);
+    expect(JSON.stringify(noViewer.content)).toContain("no_viewer");
+
+    const outline = await client.callTool({ name: "get_outline", arguments: { docId: "missing_doc" } });
+    expect(outline.isError).toBe(true);
+    expect(JSON.stringify(outline.content)).toContain("unknown_document");
+    w.server.handle("viewer.bounds", () => ({ x: 0, y: 0, width: 402, height: 874, stage: { x: 0, y: 0, width: 402, height: 874 }, scale: 1, devicePixelRatio: 1, prototypeSize: [402, 874] }));
+    const shot = await client.callTool({ name: "get_screenshot", arguments: {} });
+    expect(shot.content).toMatchObject([{ type: "image", mimeType: "image/png" }, { type: "text" }]);
+  });
+});

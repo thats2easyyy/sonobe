@@ -1,0 +1,13 @@
+{
+  "formatVersion": 1,
+  "name": "Onboarding",
+  "generator": "Sonobe 0.1.0",
+  "root": "main",
+  "device": { "preset": "iphone-17-pro" },
+  "background": "#F4F4F6FF",
+  "meta": {
+    "description": "Three onboarding pages with Next, Skip, swipes and page dots. Next becomes Get started on the last page and finishes the flow.",
+    "guides": ["02-isat", "03-states-and-pulses"],
+    "recipe": "14-onboarding"
+  }
+}

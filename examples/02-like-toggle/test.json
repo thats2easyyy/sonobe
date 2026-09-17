@@ -1,0 +1,77 @@
+{
+  "description": "The heart toggles the like, a double tap on the photo only ever likes, and the count and colors follow the Liked switch.",
+  "scenarios": [
+    {
+      "name": "The shapes draw",
+      "events": [],
+      "durationMs": 200,
+      "expect": [
+        { "description": "The heart path parses", "target": "heart_shape.error", "at": "end", "op": "==", "value": false },
+        { "description": "The count starts at 128", "target": "@likes.text", "at": "end", "op": "==", "value": "128 likes" },
+        { "description": "The unliked heart is an outline (transparent fill)", "target": "@heart_icon.color", "component": "a", "at": "end", "op": "==", "value": 0, "tolerance": 0.01 }
+      ]
+    },
+    {
+      "name": "Tapping the heart likes the post",
+      "events": [{ "kind": "tap", "target": "@heart_button", "atMs": 100 }],
+      "durationMs": 1400,
+      "expect": [
+        { "description": "Liked turns on", "target": "liked.on", "at": "end", "op": "==", "value": true },
+        { "description": "The count goes up by one", "target": "@likes.text", "at": "end", "op": "==", "value": "129 likes" },
+        { "description": "The heart ends at full size", "target": "@heart_icon.scale", "at": "end", "op": "==", "value": 1, "tolerance": 0.003 },
+        { "description": "It pops past full size first (Bounciness 12)", "target": "@heart_icon.scale", "at": "max", "op": ">", "value": 1.01 },
+        { "description": "The heart fills pink", "target": "@heart_icon.color", "component": "a", "at": "end", "op": "==", "value": 1, "tolerance": 0.01 },
+        { "description": "The outline turns pink too", "target": "@heart_icon.strokeColor", "component": "g", "at": "end", "op": "==", "value": 0.239, "tolerance": 0.01 }
+      ]
+    },
+    {
+      "name": "Tapping the heart again unlikes it",
+      "events": [
+        { "kind": "tap", "target": "@heart_button", "atMs": 100 },
+        { "kind": "tap", "target": "@heart_button", "atMs": 800 }
+      ],
+      "durationMs": 1900,
+      "expect": [
+        { "description": "Liked is off again", "target": "liked.on", "at": "end", "op": "==", "value": false },
+        { "description": "The count goes back to 128", "target": "@likes.text", "at": "end", "op": "==", "value": "128 likes" },
+        { "description": "The heart shrinks back to 0.9", "target": "@heart_icon.scale", "at": "end", "op": "==", "value": 0.9, "tolerance": 0.003 }
+      ]
+    },
+    {
+      "name": "Double-tapping the photo likes it and flashes a big heart",
+      "events": [
+        { "kind": "tap", "target": "@post_photo", "atMs": 100 },
+        { "kind": "tap", "target": "@post_photo", "atMs": 250 }
+      ],
+      "durationMs": 1600,
+      "expect": [
+        { "description": "Liked turns on", "target": "liked.on", "at": "end", "op": "==", "value": true },
+        { "description": "The count goes up by one", "target": "@likes.text", "at": "end", "op": "==", "value": "129 likes" },
+        { "description": "The big heart shows", "target": "@burst.opacity", "at": "max", "op": ">", "value": 0.95 },
+        { "description": "Then it disappears again", "target": "@burst.opacity", "at": "end", "op": "==", "value": 0, "tolerance": 0.01 }
+      ]
+    },
+    {
+      "name": "A single tap on the photo does nothing",
+      "events": [{ "kind": "tap", "target": "@post_photo", "atMs": 100 }],
+      "durationMs": 1000,
+      "expect": [
+        { "description": "Liked stays off", "target": "liked.on", "at": "end", "op": "==", "value": false },
+        { "description": "No big heart", "target": "@burst.opacity", "at": "max", "op": "==", "value": 0 }
+      ]
+    },
+    {
+      "name": "Double-tapping a liked photo keeps it liked",
+      "events": [
+        { "kind": "tap", "target": "@heart_button", "atMs": 100 },
+        { "kind": "tap", "target": "@post_photo", "atMs": 700 },
+        { "kind": "tap", "target": "@post_photo", "atMs": 850 }
+      ],
+      "durationMs": 1700,
+      "expect": [
+        { "description": "Liked is still on (Turn On never unlikes)", "target": "liked.on", "at": "end", "op": "==", "value": true },
+        { "description": "The count is still 129", "target": "@likes.text", "at": "end", "op": "==", "value": "129 likes" }
+      ]
+    }
+  ]
+}

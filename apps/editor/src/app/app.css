@@ -1,0 +1,101 @@
+/* App dialogs (browser save and open, unsaved changes) */
+.sb-appdialog {
+  background: var(--bg-elevated);
+}
+
+.sb-appdialog__body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+  padding: var(--space-7);
+}
+
+.sb-appdialog__title {
+  font-size: var(--font-size-lg);
+  font-weight: var(--font-weight-semibold);
+  line-height: var(--line-height-tight);
+}
+
+.sb-appdialog__text {
+  margin-top: calc(-1 * var(--space-2));
+  color: var(--text-secondary);
+  font-size: var(--font-size-sm);
+  line-height: 1.5;
+}
+
+.sb-appdialog__actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--space-3);
+  margin-top: var(--space-2);
+}
+
+.sb-appdialog__discard {
+  margin-right: auto;
+}
+
+.sb-appdialog--list {
+  max-height: min(420px, calc(100vh - 200px));
+}
+
+.sb-appdialog__item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  min-width: 0;
+  color: var(--text-primary);
+}
+
+.sb-appdialog__item svg {
+  flex: none;
+  color: var(--text-tertiary);
+}
+
+.sb-appdialog__item-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* External change banner */
+.sb-banner {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  flex: none;
+  min-height: 36px;
+  padding: var(--space-2) var(--space-4) var(--space-2) var(--space-6);
+  border-bottom: 1px solid var(--border-default);
+  background: var(--warn-soft);
+  color: var(--text-primary);
+  font-size: var(--font-size-sm);
+}
+
+.sb-banner svg {
+  flex: none;
+  color: var(--warn-text);
+}
+
+.sb-banner__text {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sb-banner__text strong {
+  font-weight: var(--font-weight-semibold);
+}
+
+.sb-banner__actions {
+  display: flex;
+  flex: none;
+  gap: var(--space-2);
+}
+
+/* Patches panel: breadcrumbs sit in the header */
+.sb-app-patches .sb-panel__header-content {
+  overflow: hidden;
+}

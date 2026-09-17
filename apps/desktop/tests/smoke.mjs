@@ -1,30 +1,52 @@
 #!/usr/bin/env node
 /**
- * Electron smoke test (muted). Builds the shell, launches it against a missing editor build so the
- * setup page renders, and checks: window + secure defaults, window.sonobeHost, native menus and
- * command delivery, main→renderer RPC, project IO + watching, the MCP endpoint and token file,
- * link handling, a screenshot, and a clean quit that removes mcp.json.
+ * Electron smoke test (muted). Builds the shell, then:
+ *
+ * 1. Launches against a missing editor build (setup page): window + secure defaults,
+ *    window.sonobeHost, native menus and command delivery, main→renderer RPC, project IO + watching,
+ *    the MCP endpoint (token file, Host/Origin guards, tools explaining that no editor is connected),
+ *    link handling, a screenshot, and a clean quit that removes mcp.json.
+ * 2. Builds the editor (npm run build -w @sonobe/editor) and launches it with SONOBE_LAN=1. When the
+ *    build doesn't mount the MCP bridge, it says so and uses an editor harness instead (the real
+ *    editor session, RPC handlers and viewer from apps/editor/src). Then runs the whole loop over
+ *    Streamable HTTP with the token file: list tools, build an ISAT chain with add_patches + connect on
+ *    the demo document, simulate it, screenshot the viewer (screenshots/mcp-screenshot.png), check the
+ *    renderer's history (AI Activity), presence, reveal and undo. Then the phone preview: HTTP, live
+ *    sync over WebSocket, the player rendering in a browser window (screenshots/lan-player.png), and
+ *    the "no window" error.
+ * 3. Relaunches for window-state restore, file-loaded IPC trust, and the dev-server fallback.
  *
  *   node apps/desktop/tests/smoke.mjs
+ *   SONOBE_SMOKE_SKIP_EDITOR_BUILD=1 node apps/desktop/tests/smoke.mjs    reuse apps/editor/dist
+ *   SONOBE_SMOKE_HARNESS=1 node apps/desktop/tests/smoke.mjs              always use the harness
  */
 
 import { _electron as electron } from "playwright";
 import electronPath from "electron";
-import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { execFileSync, spawn } from "node:child_process";
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { request } from "node:http";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
+import { build as esbuild } from "esbuild";
+import { WebSocket } from "ws";
 
 const appDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const screenshotPath = path.join(appDir, "screenshots", "smoke.png");
+const repoDir = path.resolve(appDir, "../..");
+const screenshotsDir = path.join(appDir, "screenshots");
+const screenshotPath = path.join(screenshotsDir, "smoke.png");
+const mcpScreenshotPath = path.join(screenshotsDir, "mcp-screenshot.png");
+const editorScreenshotPath = path.join(screenshotsDir, "mcp-editor.png");
+const lanScreenshotPath = path.join(screenshotsDir, "lan-player.png");
 const started = Date.now();
 
 const log = (msg) => console.log(`[smoke +${((Date.now() - started) / 1000).toFixed(1)}s] ${msg}`);
 function assert(condition, message, detail) {
   if (!condition) {
-    const err = new Error(`Assertion failed: ${message}${detail === undefined ? "" : `\n  got: ${JSON.stringify(detail)}`}`);
+    const err = new Error(`Assertion failed: ${message}${detail === undefined ? "" : `\n  got: ${typeof detail === "string" ? detail : JSON.stringify(detail)}`}`);
     throw err;
   }
 }
@@ -38,6 +60,17 @@ async function poll(fn, { timeout = 10_000, interval = 100, message = "condition
   }
   throw new Error(`Timed out waiting for ${message} (last: ${JSON.stringify(last)})`);
 }
+/** Like poll, but resolves the last value instead of throwing. */
+async function settle(fn, { timeout = 10_000, interval = 100 } = {}) {
+  const deadline = Date.now() + timeout;
+  let last;
+  while (Date.now() < deadline) {
+    last = await fn();
+    if (last) return last;
+    await new Promise((r) => setTimeout(r, interval));
+  }
+  return last;
+}
 function http(port, { method = "GET", path: urlPath = "/health", headers = {}, body } = {}) {
   return new Promise((resolve, reject) => {
     const req = request({ host: "127.0.0.1", port, method, path: urlPath, headers: { host: `127.0.0.1:${port}`, ...headers } }, (res) => {
@@ -48,6 +81,58 @@ function http(port, { method = "GET", path: urlPath = "/health", headers = {}, b
     req.on("error", reject);
     if (body) req.write(body);
     req.end();
+  });
+}
+
+/**
+ * An MCP client over Streamable HTTP with the bearer token from mcp.json. Error checks use tools
+ * without an output schema (get_outline): the SDK client rejects error results of tools that have
+ * one, because @sonobe/mcp attaches a structuredContent that doesn't match it.
+ */
+async function connectMcp(conn) {
+  const client = new Client({ name: "claude-code", version: "smoke" });
+  const transport = new StreamableHTTPClientTransport(new URL(conn.url), { requestInit: { headers: { Authorization: `Bearer ${conn.token}` } } });
+  await client.connect(transport);
+  return {
+    client,
+    async call(name, args = {}) {
+      const result = await client.callTool({ name, arguments: args });
+      const text = (result.content ?? []).filter((c) => c.type === "text").map((c) => c.text).join("\n");
+      return { ...result, text };
+    },
+    close: () => client.close().catch(() => undefined),
+  };
+}
+
+/** A WebSocket whose messages are buffered from the start. */
+function openSocket(url) {
+  return new Promise((resolve, reject) => {
+    const ws = new WebSocket(url);
+    const inbox = [];
+    const waiters = new Set();
+    ws.on("message", (data) => {
+      inbox.push(JSON.parse(String(data)));
+      for (const wake of [...waiters]) wake();
+    });
+    const next = (predicate, timeoutMs = 5000) =>
+      new Promise((resolveMessage, rejectMessage) => {
+        const check = () => {
+          const index = inbox.findIndex(predicate);
+          if (index < 0) return;
+          const message = inbox.splice(0, index + 1).at(-1);
+          waiters.delete(check);
+          clearTimeout(timer);
+          resolveMessage(message);
+        };
+        const timer = setTimeout(() => {
+          waiters.delete(check);
+          rejectMessage(new Error(`Timed out waiting for a preview message (inbox: ${JSON.stringify(inbox.map((m) => m.type))})`));
+        }, timeoutMs);
+        waiters.add(check);
+        check();
+      });
+    ws.once("open", () => resolve({ ws, next }));
+    ws.once("error", reject);
   });
 }
 
@@ -66,28 +151,86 @@ function makeFixtureProject() {
   writeFileSync(path.join(projectDir, "assets", "abc.png"), Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a]));
 }
 
+/** Bundle tests/harness (real editor modules, no React shell) into a loadable editor build. */
+async function buildHarness() {
+  const dir = path.join(temp, "editor-harness");
+  mkdirSync(dir, { recursive: true });
+  await esbuild({
+    absWorkingDir: appDir,
+    entryPoints: [path.join(appDir, "tests", "harness", "editor-harness.ts")],
+    outfile: path.join(dir, "harness.js"),
+    bundle: true,
+    platform: "browser",
+    format: "iife",
+    target: "es2022",
+    logLevel: "warning",
+    loader: { ".css": "empty" },
+    define: { "import.meta.env": JSON.stringify({ DEV: false, PROD: true, MODE: "production" }), "process.env.NODE_ENV": '"production"' },
+  });
+  cpSync(path.join(appDir, "tests", "harness", "index.html"), path.join(dir, "index.html"));
+  return dir;
+}
+
 let app;
 let failed = false;
 const watchdog = setTimeout(() => {
-  console.error("[smoke] watchdog: exceeded 120 s");
+  console.error("[smoke] watchdog: exceeded 420 s");
   app?.process()?.kill("SIGKILL");
   process.exit(1);
-}, 120_000);
+}, 420_000);
+
+const env = { ...process.env, SONOBE_MUTE: "1", SONOBE_HOME: home, SONOBE_USER_DATA: userData, SONOBE_EDITOR_DIST: path.join(temp, "no-editor-build"), SONOBE_TEST: "1" };
+delete env.SONOBE_DEV_URL;
+delete env.SONOBE_MCP_PORT;
+delete env.SONOBE_LAN;
+delete env.SONOBE_LAN_PORT;
+delete env.ELECTRON_RUN_AS_NODE;
+
+const launch = async (launchEnv, { pipeStdout = false } = {}) => {
+  const next = await electron.launch({ executablePath: electronPath, args: ["--mute-audio", appDir], cwd: appDir, env: launchEnv, timeout: 30_000 });
+  if (pipeStdout) next.process().stdout?.on("data", (d) => process.stdout.write(`[app] ${d}`));
+  next.process().stderr?.on("data", (d) => process.stderr.write(`[app] ${d}`));
+  return next;
+};
+
+const readConnection = async () => {
+  await poll(() => existsSync(tokenFile), { message: "mcp.json" });
+  return JSON.parse(readFileSync(tokenFile, "utf8"));
+};
+
+/** Quit even when a document has unsaved changes (destroying windows skips the prompt). */
+const quit = async () => {
+  await app.evaluate(() => globalThis.__sonobeTest?.destroyWindows()).catch(() => undefined);
+  await app.close();
+  app = null;
+};
+
+/** Interaction → Switch → Pop Animation → Transition, pressing the demo's Next Card. */
+const PRESS_PATCHES = [
+  { id: "press_next", type: "interaction", name: "Press Next Card", inputs: { layer: { layer: "next_card" } }, ui: { x: 40, y: 700 } },
+  { id: "next_pressed", type: "switch", name: "Next Card Pressed", ui: { x: 260, y: 700 } },
+  { id: "press_spring", type: "popAnimation", name: "Press Spring", typeParam: "number", inputs: { bounciness: 8, speed: 14 }, ui: { x: 480, y: 700 } },
+  { id: "press_scale", type: "transition", name: "Press Scale", typeParam: "number", inputs: { start: 1, end: 0.95 }, ui: { x: 720, y: 700 } },
+];
+const PRESS_CONNECTIONS = [
+  { from: "press_next.tap", to: "next_pressed.flip" },
+  { from: "next_pressed.on", to: "press_spring.number" },
+  { from: "press_spring.output", to: "press_scale.progress" },
+  { from: "press_scale.output", to: "@next_card.scale" },
+];
 
 try {
-  log("building main + preload");
+  log("building main + preload + player");
   execFileSync(process.execPath, [path.join(appDir, "scripts", "build.mjs")], { stdio: "inherit" });
   makeFixtureProject();
+  mkdirSync(screenshotsDir, { recursive: true });
 
-  const env = { ...process.env, SONOBE_MUTE: "1", SONOBE_HOME: home, SONOBE_USER_DATA: userData, SONOBE_EDITOR_DIST: path.join(temp, "no-editor-build"), SONOBE_TEST: "1" };
-  delete env.SONOBE_DEV_URL;
-  delete env.SONOBE_MCP_PORT;
-  delete env.ELECTRON_RUN_AS_NODE;
+  // ---------------------------------------------------------------------------------------------
+  // 1. Setup page (no editor build)
+  // ---------------------------------------------------------------------------------------------
 
   log("launching Electron (muted)");
-  app = await electron.launch({ executablePath: electronPath, args: ["--mute-audio", appDir], cwd: appDir, env, timeout: 30_000 });
-  app.process().stdout?.on("data", (d) => process.stdout.write(`[app] ${d}`));
-  app.process().stderr?.on("data", (d) => process.stderr.write(`[app] ${d}`));
+  app = await launch(env, { pipeStdout: true });
 
   const win = await app.firstWindow();
   await win.waitForLoadState("domcontentloaded");
@@ -132,7 +275,7 @@ try {
     nodeProcess: typeof globalThis.process,
   }));
   assert(hostInfo.type === "object", "window.sonobeHost exists", hostInfo);
-  for (const key of ["commands", "getMcpStatus", "onCommand", "onOpenProject", "openProjectDialog", "platform", "readProject", "recentProjects", "revealInFinder", "rpc", "saveProjectDialog", "setDocumentEdited", "setTitle", "version", "watchProject", "writeProject"]) {
+  for (const key of ["commands", "getMcpStatus", "getPreviewStatus", "onCommand", "onOpenProject", "onPreviewStatus", "openProjectDialog", "platform", "readProject", "recentProjects", "revealInFinder", "rpc", "saveProjectDialog", "setDocumentEdited", "setTitle", "startPreview", "stopPreview", "version", "watchProject", "writeProject"]) {
     assert(hostInfo.keys.includes(key), `sonobeHost.${key}`, hostInfo.keys);
   }
   assert(hostInfo.platform === process.platform, "platform", hostInfo.platform);
@@ -141,8 +284,7 @@ try {
   log(`sonobeHost ok (${hostInfo.commandCount} commands)`);
 
   // MCP endpoint + token file.
-  await poll(() => existsSync(tokenFile), { message: "mcp.json" });
-  const conn = JSON.parse(readFileSync(tokenFile, "utf8"));
+  const conn = await readConnection();
   assert(conn.url === `http://127.0.0.1:${conn.port}/mcp` && conn.token.length >= 43 && conn.pid === app.process().pid, "mcp.json contents", conn);
   if (process.platform !== "win32") assert((statSync(tokenFile).mode & 0o777) === 0o600, "mcp.json is 0600", (statSync(tokenFile).mode & 0o777).toString(8));
   const auth = { authorization: `Bearer ${conn.token}` };
@@ -151,11 +293,22 @@ try {
   assert((await http(conn.port)).status === 401, "/health requires the token");
   assert((await http(conn.port, { headers: { ...auth, host: `evil.example:${conn.port}` } })).status === 403, "bad Host rejected");
   assert((await http(conn.port, { headers: { ...auth, origin: "https://evil.example" } })).status === 403, "bad Origin rejected");
-  const notWired = await http(conn.port, { method: "POST", path: "/mcp", headers: { ...auth, "content-type": "application/json" }, body: '{"jsonrpc":"2.0","id":7,"method":"tools/list"}' });
-  assert(notWired.status === 501 && JSON.parse(notWired.body).error.message === "MCP tools not yet wired" && JSON.parse(notWired.body).id === 7, "/mcp placeholder", notWired);
+  const anonymous = await http(conn.port, { method: "POST", path: "/mcp", headers: { "content-type": "application/json" }, body: '{"jsonrpc":"2.0","id":7,"method":"tools/list"}' });
+  assert(anonymous.status === 401, "/mcp requires the token", anonymous);
   const status = await win.evaluate(() => window.sonobeHost.getMcpStatus());
   assert(status.running && status.port === conn.port && status.url === conn.url && status.tokenFile === tokenFile, "getMcpStatus", status);
-  log(`MCP endpoint ok on ${conn.url}`);
+
+  const setupMcp = await connectMcp(conn);
+  const setupTools = await setupMcp.client.listTools();
+  assert(setupTools.tools.length >= 39 && setupTools.tools.some((t) => t.name === "get_screenshot"), "MCP lists every tool", setupTools.tools.map((t) => t.name));
+  const guide = await setupMcp.call("get_guide", { topic: "start-here" });
+  assert(!guide.isError && guide.text.length > 200, "bundled guides load", guide.text.slice(0, 200));
+  const notConnected = await setupMcp.call("get_outline");
+  assert(notConnected.isError && notConnected.text.includes("editor_not_connected"), "tools explain that no editor is connected", notConnected.text);
+  await setupMcp.close();
+  const previewOff = await win.evaluate(() => window.sonobeHost.getPreviewStatus());
+  assert(previewOff.running === false && previewOff.url === null, "phone preview is off by default", previewOff);
+  log(`MCP endpoint ok on ${conn.url} (${setupTools.tools.length} tools; setup page answers editor_not_connected)`);
 
   // Menus and command delivery.
   const menuLabels = await app.evaluate(({ Menu }) => Menu.getApplicationMenu()?.items.map((i) => i.label) ?? []);
@@ -251,7 +404,6 @@ try {
     window.__openRequests = [];
     window.sonobeHost.onOpenProject((dir) => window.__openRequests.push(dir));
   });
-  const { spawn } = await import("node:child_process");
   const secondExit = await new Promise((resolve) => {
     const child = spawn(electronPath, ["--mute-audio", appDir, projectDir], { cwd: appDir, env, stdio: "ignore" });
     const timer = setTimeout(() => {
@@ -270,7 +422,6 @@ try {
   log("single-instance forwarding ok");
 
   await win.getByText("MCP endpoint on").first().waitFor({ timeout: 5000 });
-  mkdirSync(path.dirname(screenshotPath), { recursive: true });
   await win.screenshot({ path: screenshotPath });
   log(`screenshot → ${path.relative(process.cwd(), screenshotPath)}`);
 
@@ -302,11 +453,197 @@ try {
   assert(!existsSync(tokenFile), "mcp.json removed on quit");
   assert(existsSync(path.join(userData, "window-state.json")), "window state persisted");
 
-  const relaunch = async (overrides) => {
-    const next = await electron.launch({ executablePath: electronPath, args: ["--mute-audio", appDir], cwd: appDir, env: { ...env, ...overrides }, timeout: 30_000 });
-    next.process().stderr?.on("data", (d) => process.stderr.write(`[app] ${d}`));
-    return next;
-  };
+  // ---------------------------------------------------------------------------------------------
+  // 2. The built editor (or the harness): the whole MCP loop and phone preview
+  // ---------------------------------------------------------------------------------------------
+
+  if (process.env.SONOBE_SMOKE_SKIP_EDITOR_BUILD === "1" && existsSync(path.join(repoDir, "apps", "editor", "dist", "index.html"))) {
+    log("reusing apps/editor/dist");
+  } else {
+    log("building the editor (npm run build -w @sonobe/editor)");
+    execFileSync(process.platform === "win32" ? "npm.cmd" : "npm", ["run", "build", "-w", "@sonobe/editor"], { cwd: repoDir, stdio: "inherit", shell: process.platform === "win32" });
+  }
+
+  let mode = "editor";
+  let page;
+  if (process.env.SONOBE_SMOKE_HARNESS !== "1") {
+    const editorEnv = { ...env, SONOBE_USER_DATA: path.join(temp, "userData-editor"), SONOBE_LAN: "1" };
+    delete editorEnv.SONOBE_EDITOR_DIST;
+    app = await launch(editorEnv);
+    page = await app.firstWindow();
+    await page.waitForLoadState("domcontentloaded");
+    const editorUrl = await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].webContents.getURL());
+    assert(editorUrl.startsWith("file:") && editorUrl.includes("/editor/dist/index.html"), "loads apps/editor/dist", editorUrl);
+    const bridged = await settle(() => app.evaluate(() => globalThis.__sonobeTest.hasRendererMethod("document.apply") === true), { timeout: 20_000 });
+    if (bridged) {
+      log("the built editor mounts the MCP bridge");
+    } else {
+      const probe = await connectMcp(await readConnection());
+      const outline = await probe.call("get_outline");
+      assert(outline.isError && outline.text.includes("editor_not_connected"), "an editor without the bridge is explained", outline.text);
+      await probe.close();
+      await quit();
+      log("WARN the built editor doesn't mount the MCP bridge; using the editor harness from apps/editor/src");
+      mode = "harness";
+    }
+  } else {
+    mode = "harness";
+  }
+  if (mode === "harness") {
+    const harnessDir = await buildHarness();
+    app = await launch({ ...env, SONOBE_EDITOR_DIST: harnessDir, SONOBE_USER_DATA: path.join(temp, "userData-harness"), SONOBE_LAN: "1" });
+    page = await app.firstWindow();
+    await page.getByText("Ready · Photo Zoom").first().waitFor({ timeout: 20_000 });
+    await poll(() => app.evaluate(() => globalThis.__sonobeTest.hasRendererMethod("document.apply") === true), { timeout: 15_000, message: "harness MCP bridge" });
+  }
+
+  const mcp = await connectMcp(await readConnection());
+  const { tools } = await mcp.client.listTools();
+  for (const name of ["get_document_info", "get_outline", "add_patches", "connect", "apply_ops", "sim_reset", "sim_dispatch", "sim_step", "sim_get_values", "get_screenshot", "begin_work", "finish_work", "reveal", "list_history", "undo"]) {
+    assert(tools.some((t) => t.name === name), `tool ${name}`, tools.map((t) => t.name));
+  }
+  const info = await mcp.call("get_document_info");
+  assert(!info.isError && info.structuredContent.name === "Photo Zoom" && info.structuredContent.host.kind === "app" && info.structuredContent.host.screenshots === true, "get_document_info on the demo", info.text);
+  const outline = await mcp.call("get_outline", { detail: "compact" });
+  assert(outline.text.includes("patch tap_photo interaction"), "get_outline", outline.text.slice(0, 300));
+  log(`MCP (${mode}): ${tools.length} tools; ${info.text.split("\n")[0]}`);
+
+  const begun = await mcp.call("begin_work", { intent: "Adding press feedback to the next card", ids: ["next_card"] });
+  assert(!begun.isError, "begin_work", begun.text);
+  if (mode === "harness") await page.getByText("Claude — Adding press feedback to the next card").first().waitFor({ timeout: 5000 });
+
+  const added = await mcp.call("add_patches", { label: "added press feedback", patches: PRESS_PATCHES });
+  assert(!added.isError && added.structuredContent.ok === true, "add_patches", added.text);
+  const wired = await mcp.call("connect", { label: "wired press feedback", connections: PRESS_CONNECTIONS });
+  assert(!wired.isError && wired.structuredContent.ok === true, "connect", wired.text);
+  const diagnostics = await mcp.call("get_diagnostics");
+  assert(!diagnostics.isError && !/\b[1-9]\d* errors?\b/.test(diagnostics.text), "no diagnostic errors after wiring", diagnostics.text);
+  log(`ISAT chain built (revision ${wired.structuredContent.revision})`);
+
+  const reset = await mcp.call("sim_reset", { seed: 1 });
+  assert(!reset.isError && typeof reset.structuredContent.simId === "string", "sim_reset", reset.text);
+  const simId = reset.structuredContent.simId;
+  const dispatched = await mcp.call("sim_dispatch", { simId, events: [{ kind: "tap", target: "@next_card" }] });
+  assert(!dispatched.isError && dispatched.structuredContent.events[0].hit.handledBy.includes("press_next"), "sim_dispatch taps the next card", dispatched.text);
+  const stepped = await mcp.call("sim_step", { simId, until: "idle", maxMs: 5000 });
+  assert(!stepped.isError && stepped.structuredContent.settled === true, "sim_step until idle", stepped.text);
+  const values = await mcp.call("sim_get_values", { simId, targets: ["next_pressed.on", "@next_card.scale"] });
+  assert(values.structuredContent.values["next_pressed.on"] === true && Math.abs(values.structuredContent.values["@next_card.scale"] - 0.95) < 0.01, "the tap flipped the switch and sprang the card to 0.95", values.text);
+  log(`simulated: ${values.text.split("\n").slice(1).join("; ").trim()}`);
+
+  const shot = await mcp.call("get_screenshot", { target: "viewer", maxWidth: 800 });
+  const image = (shot.content ?? []).find((c) => c.type === "image");
+  assert(!shot.isError && image?.mimeType === "image/png", "get_screenshot returns a PNG", shot.text);
+  const png = Buffer.from(image.data, "base64");
+  assert(png.subarray(1, 4).toString("latin1") === "PNG" && shot.structuredContent.width >= 200 && shot.structuredContent.height >= 400, "screenshot size", shot.structuredContent);
+  writeFileSync(mcpScreenshotPath, png);
+  log(`MCP screenshot ${shot.structuredContent.width}×${shot.structuredContent.height} → ${path.relative(process.cwd(), mcpScreenshotPath)}`);
+
+  const listed = await mcp.call("list_history");
+  assert(listed.text.includes("Claude: added press feedback") && listed.text.includes("Claude: wired press feedback"), "list_history", listed.text);
+  const rendererHistory = await app.evaluate(() => globalThis.__sonobeTest.invokeRenderer("history.list", { limit: 10 }));
+  assert(
+    rendererHistory.entries[0]?.author.kind === "agent" && rendererHistory.entries[0].description.startsWith("Claude: wired press feedback") && rendererHistory.entries[1]?.description.startsWith("Claude: added press feedback"),
+    "the renderer's history has Claude's changes",
+    rendererHistory.entries.slice(0, 3),
+  );
+  if (mode === "harness") await page.getByText("Claude: wired press feedback").first().waitFor({ timeout: 5000 });
+  const finished = await mcp.call("finish_work", { summary: "Pressing the next card now shrinks it with a spring." });
+  assert(!finished.isError, "finish_work", finished.text);
+  if (mode === "harness") await page.getByText("Nobody is working right now.").first().waitFor({ timeout: 5000 });
+  const revealed = await mcp.call("reveal", { ids: ["press_spring", "next_card"] });
+  assert(revealed.structuredContent.revealed === true, "reveal", revealed.text);
+  const selection = await mcp.call("get_selection");
+  assert(selection.text.includes("press_spring") && selection.text.includes("next_card"), "get_selection reflects the reveal", selection.text);
+  if (mode === "editor") {
+    const tab = page.getByRole("tab", { name: /AI Activity/ }).first();
+    if (await tab.isVisible().catch(() => false)) {
+      await tab.click().catch(() => undefined);
+      const listedInPanel = await page.getByText(/wired press feedback/).first().waitFor({ timeout: 3000 }).then(() => true, () => false);
+      log(listedInPanel ? "the AI Activity panel lists Claude's changes" : "opened AI Activity (entries weren't found by text)");
+    }
+  }
+  await page.screenshot({ path: editorScreenshotPath });
+  log(`renderer history has Claude's changes; presence, reveal and selection ok; window → ${path.relative(process.cwd(), editorScreenshotPath)}`);
+
+  // Phone preview (SONOBE_LAN=1).
+  const preview = await poll(() => app.evaluate(() => {
+    const s = globalThis.__sonobeTest.previewStatus();
+    return s.running ? s : null;
+  }), { message: "phone preview to start" });
+  assert(/^http:\/\/[^/]+:\d+\/p\/[A-Za-z0-9_-]{16,}\/$/.test(preview.url), "phone preview URL", preview);
+  const rendererPreview = await page.evaluate(() => window.sonobeHost.getPreviewStatus());
+  assert(rendererPreview.url === preview.url, "getPreviewStatus in the renderer", rendererPreview);
+  const playerPage = await fetch(preview.url);
+  assert(playerPage.status === 200 && (await playerPage.text()).includes("player.js"), "player page", playerPage.status);
+  assert((await fetch(preview.url.replace(/\/p\/[^/]+\//, "/p/not-the-token/"))).status === 404, "player requires the token");
+  const docJson = await (await fetch(`${preview.url}document.json`)).json();
+  assert(docJson.type === "document" && docJson.doc.components.main.patches.press_scale, "document.json has Claude's patches", Object.keys(docJson.doc?.components?.main?.patches ?? {}));
+
+  const socket = await openSocket(`${preview.url.replace(/^http/, "ws")}sync`);
+  const firstSync = await socket.next((m) => m.type === "document");
+  const tweak = await mcp.call("apply_ops", { label: "tuned press scale", ops: [{ op: "setInput", target: "press_scale.end", value: 0.9 }] });
+  assert(!tweak.isError, "apply_ops", tweak.text);
+  const synced = await socket.next((m) => m.type === "document" && m.revision === tweak.structuredContent.revision);
+  assert(synced.doc.components.main.patches.press_scale.inputs.end === 0.9 && synced.revision > firstSync.revision, "live sync pushes the new revision", { from: firstSync.revision, to: synced.revision });
+  socket.ws.close();
+  log(`phone preview on ${preview.url}${preview.lanReachable ? "" : " (loopback only)"}; live sync ${firstSync.revision} → ${synced.revision}`);
+
+  const player = await app.evaluate(async ({ BrowserWindow }, url) => {
+    const w = new BrowserWindow({ show: false, width: 402, height: 874, useContentSize: true, webPreferences: { sandbox: true, contextIsolation: true } });
+    w.webContents.setAudioMuted(true);
+    const errors = [];
+    w.webContents.on("console-message", (...args) => {
+      const e = args[0];
+      const level = e?.level ?? args[1];
+      const message = e?.message ?? args[2];
+      if (level === "error" || level === 3) errors.push(String(message));
+    });
+    await w.loadURL(url);
+    let layers = 0;
+    const deadline = Date.now() + 10_000;
+    while (Date.now() < deadline) {
+      layers = await w.webContents.executeJavaScript("document.querySelectorAll('.sonobe-layer').length");
+      if (layers > 5) break;
+      await new Promise((r) => setTimeout(r, 150));
+    }
+    await new Promise((r) => setTimeout(r, 500));
+    const statusText = await w.webContents.executeJavaScript("document.getElementById('status').textContent");
+    const capture = await w.webContents.capturePage(undefined, { stayHidden: true });
+    w.destroy();
+    return { layers, errors, statusText, png: capture.isEmpty() ? null : capture.toPNG().toString("base64") };
+  }, preview.url);
+  assert(player.layers > 5 && player.errors.length === 0 && player.statusText.includes("Photo Zoom"), "the phone player renders the live prototype", { layers: player.layers, errors: player.errors, status: player.statusText });
+  if (player.png) {
+    writeFileSync(lanScreenshotPath, Buffer.from(player.png, "base64"));
+    log(`phone player rendered ${player.layers} layers → ${path.relative(process.cwd(), lanScreenshotPath)}`);
+  } else {
+    log(`phone player rendered ${player.layers} layers (hidden-window capture was empty; no image saved)`);
+  }
+  const stopped = await app.evaluate(() => globalThis.__sonobeTest.stopPreview());
+  assert(stopped.running === false, "stopPreview", stopped);
+  assert(await fetch(preview.url).then(() => false, () => true), "the preview server stopped listening");
+
+  const undone = await mcp.call("undo");
+  assert(!undone.isError && undone.text.includes("tuned press scale"), "undo Claude's newest change", undone.text);
+  const afterUndo = await app.evaluate(() => globalThis.__sonobeTest.invokeRenderer("history.list", { limit: 3 }));
+  assert(afterUndo.entries[0]?.description.startsWith("Claude: wired press feedback"), "undo went through the renderer's history", afterUndo.entries[0]);
+  log("undo ok");
+
+  await app.evaluate(() => globalThis.__sonobeTest.destroyWindows());
+  if (process.platform === "darwin") {
+    await poll(() => app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().length === 0), { message: "windows destroyed" });
+    const orphan = await mcp.call("get_outline");
+    assert(orphan.isError && orphan.text.includes("no_window"), "tools explain that no window is open", orphan.text);
+    log("no-window error ok");
+  }
+  await mcp.close();
+  await app.close().catch(() => undefined);
+  app = null;
+
+  // ---------------------------------------------------------------------------------------------
+  // 3. Relaunches
+  // ---------------------------------------------------------------------------------------------
 
   log("relaunching against a stub editor build");
   const editorDist = path.join(temp, "editor-dist");
@@ -315,7 +652,7 @@ try {
     path.join(editorDist, "index.html"),
     '<!doctype html><html><head><meta charset="utf-8"><title>Editor stub</title></head><body><p id="out">waiting</p><script>window.sonobeHost.getMcpStatus().then((s) => { document.getElementById("out").textContent = "mcp:" + s.running; }, (e) => { document.getElementById("out").textContent = "error:" + e.message; });</script></body></html>\n',
   );
-  app = await relaunch({ SONOBE_EDITOR_DIST: editorDist });
+  app = await launch({ ...env, SONOBE_EDITOR_DIST: editorDist });
   const stubWin = await app.firstWindow();
   const stubStatus = await poll(
     async () => {
@@ -347,7 +684,7 @@ try {
       probe.close(() => resolve(port));
     });
   });
-  app = await relaunch({ SONOBE_DEV_URL: `http://127.0.0.1:${closedPort}`, SONOBE_MCP: "0" });
+  app = await launch({ ...env, SONOBE_DEV_URL: `http://127.0.0.1:${closedPort}`, SONOBE_MCP: "0" });
   const devWin = await app.firstWindow();
   await devWin.getByText("Can't reach the editor dev server").first().waitFor({ timeout: 15_000 });
   await devWin.getByText("MCP endpoint is off").first().waitFor({ timeout: 5000 });
@@ -360,6 +697,7 @@ try {
   failed = true;
   console.error(`[smoke] FAIL: ${err?.stack ?? err}`);
   try {
+    await app?.evaluate(() => globalThis.__sonobeTest?.destroyWindows()).catch(() => undefined);
     await app?.close();
   } catch {
     app?.process()?.kill("SIGKILL");

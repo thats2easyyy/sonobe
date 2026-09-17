@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Sonobe Editor Harness</title>
+    <style>
+      :root {
+        color-scheme: dark;
+      }
+      body {
+        margin: 0;
+        display: flex;
+        gap: 24px;
+        min-height: 100vh;
+        background: #161618;
+        color: #f5f5f7;
+        font: 13px/1.4 system-ui, -apple-system, "Segoe UI", sans-serif;
+      }
+      #viewer {
+        position: relative;
+        flex: none;
+        width: 302px;
+        height: 656px;
+        margin: 24px;
+        overflow: hidden;
+        border-radius: 24px;
+        background: #000;
+      }
+      aside {
+        max-width: 440px;
+        padding: 24px 24px 24px 0;
+      }
+      h2 {
+        margin: 20px 0 8px;
+        font-size: 11px;
+        font-weight: 600;
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+        color: #8e8e93;
+      }
+      ol {
+        margin: 0;
+        padding-left: 18px;
+      }
+      #working {
+        white-space: pre-line;
+      }
+    </style>
+    <script src="harness.js" defer></script>
+  </head>
+  <body>
+    <div id="viewer" aria-label="Viewer"></div>
+    <aside>
+      <p id="status">Loading…</p>
+      <h2>Working</h2>
+      <p id="working"></p>
+      <h2>AI Activity</h2>
+      <ol id="activity"></ol>
+    </aside>
+  </body>
+</html>

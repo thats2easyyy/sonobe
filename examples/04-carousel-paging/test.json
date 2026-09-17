@@ -1,0 +1,70 @@
+{
+  "description": "Swipes move exactly one card at a time, slow nudges snap back, and the dots, price and Next button follow the page number.",
+  "scenarios": [
+    {
+      "name": "Starts on the first trip",
+      "events": [],
+      "durationMs": 300,
+      "expect": [
+        { "description": "Page 0", "target": "trips_scroll.pageX", "at": "end", "op": "==", "value": 0 },
+        { "description": "The first card is centered", "target": "@cards.position", "component": "x", "at": "end", "op": "==", "value": 41 },
+        { "description": "The first dot is stretched", "target": "@dot.size#0", "component": "width", "at": "end", "op": "==", "value": 22, "tolerance": 0.1 },
+        { "description": "The price is Kyoto's", "target": "@price.text", "at": "end", "op": "==", "value": "$1,240" }
+      ]
+    },
+    {
+      "name": "Swiping left moves to the next trip",
+      "events": [{ "kind": "drag", "from": [300, 420], "to": [140, 420], "durationMs": 150, "atMs": 100 }],
+      "durationMs": 1600,
+      "expect": [
+        { "description": "Page 1", "target": "trips_scroll.pageX", "at": "end", "op": "==", "value": 1 },
+        { "description": "The second card is centered: 41 − 332", "target": "@cards.position", "component": "x", "at": "end", "op": "==", "value": -291, "tolerance": 0.5 },
+        { "description": "It comes to rest", "target": "@cards.position", "component": "x", "settled": true },
+        { "description": "The second dot stretches", "target": "@dot.size#1", "component": "width", "at": "end", "op": "==", "value": 22, "tolerance": 0.1 },
+        { "description": "The first dot shrinks", "target": "@dot.size#0", "component": "width", "at": "end", "op": "==", "value": 8, "tolerance": 0.1 },
+        { "description": "The price changes", "target": "@price.text", "at": "end", "op": "==", "value": "$980" }
+      ]
+    },
+    {
+      "name": "A slow short drag snaps back",
+      "events": [{ "kind": "drag", "from": [260, 420], "to": [200, 420], "durationMs": 700, "atMs": 100 }],
+      "durationMs": 1600,
+      "expect": [
+        { "description": "Still page 0", "target": "trips_scroll.pageX", "at": "end", "op": "==", "value": 0 },
+        { "description": "The first card is centered again", "target": "@cards.position", "component": "x", "at": "end", "op": "==", "value": 41, "tolerance": 0.5 }
+      ]
+    },
+    {
+      "name": "A big fling still moves one page",
+      "events": [{ "kind": "drag", "from": [390, 420], "to": [10, 420], "durationMs": 90, "atMs": 100 }],
+      "durationMs": 1600,
+      "expect": [
+        { "description": "Page 1, not 2 or 3", "target": "trips_scroll.pageX", "at": "end", "op": "==", "value": 1 },
+        { "description": "Centered on the second card", "target": "@cards.position", "component": "x", "at": "end", "op": "==", "value": -291, "tolerance": 0.5 }
+      ]
+    },
+    {
+      "name": "Swiping right on the first card rubber-bands",
+      "events": [{ "kind": "drag", "from": [100, 420], "to": [300, 420], "durationMs": 300, "atMs": 100 }],
+      "durationMs": 1600,
+      "expect": [
+        { "description": "It stretched past the start", "target": "@cards.position", "component": "x", "at": "max", "op": ">", "value": 60 },
+        { "description": "and came back to page 0", "target": "@cards.position", "component": "x", "at": "end", "op": "==", "value": 41, "tolerance": 0.5 }
+      ]
+    },
+    {
+      "name": "Next jumps one page at a time",
+      "events": [
+        { "kind": "tap", "target": "@next_button", "atMs": 100 },
+        { "kind": "tap", "target": "@next_button", "atMs": 900 }
+      ],
+      "durationMs": 2000,
+      "expect": [
+        { "description": "Page 2", "target": "trips_scroll.pageX", "at": "end", "op": "==", "value": 2 },
+        { "description": "Centered on the third card: 41 − 2 × 332", "target": "@cards.position", "component": "x", "at": "end", "op": "==", "value": -623, "tolerance": 0.5 },
+        { "description": "It was on page 1 in between", "target": "trips_scroll.pageX", "at": 850, "op": "==", "value": 1 },
+        { "description": "Lisbon's price", "target": "@price.text", "at": "end", "op": "==", "value": "$1,610" }
+      ]
+    }
+  ]
+}

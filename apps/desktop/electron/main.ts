@@ -1,12 +1,21 @@
-/** Electron main process entry: lifecycle, windows, menus, file IO, and the MCP endpoint. */
+/** Electron main process entry: lifecycle, windows, menus, file IO, the MCP endpoint, and phone preview. */
 
-import { app, BrowserWindow, dialog, ipcMain, Menu, session, shell, type IpcMainEvent, type IpcMainInvokeEvent } from "electron";
+import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, nativeImage, session, shell, type IpcMainEvent, type IpcMainInvokeEvent } from "electron";
+import { existsSync } from "node:fs";
 import path from "node:path";
+import type { SonobeDocument } from "@sonobe/core";
+import { saveProjectToDisk } from "@sonobe/core/node";
+import { createHttpHandler, isHostError, loadGuides, type NodeMcpHandler } from "@sonobe/mcp";
+import { createPatchRegistry } from "@sonobe/patches";
+import { toBuffer as qrPng } from "qrcode";
+import { createAppHost, type AppHost, type RendererTarget } from "./app-host.ts";
 import { createAppWindow, type AppWindow, type WindowContentSource } from "./app-window.ts";
+import { captureWebContents } from "./capture.ts";
 import { isCommandId, toHostPlatform } from "./commands.ts";
 import { projectPathsFromArgv, readDesktopEnv } from "./env.ts";
-import type { McpStatus, SonobeCommandId } from "./host-api.d.ts";
+import type { McpStatus, PreviewStatus, SonobeCommandId } from "./host-api.d.ts";
 import { IPC } from "./ipc.ts";
+import { resolveUnder, startLanPreview, type LanPreviewHandle } from "./lan-preview.ts";
 import { defaultSonobeHome, startMcpServer, type McpServerHandle } from "./mcp-server.ts";
 import { buildMenuSpec, toMenuTemplate, type NativeAction } from "./menu.ts";
 import { OwnWriteRegistry, ProjectAccess, readProject, resolveProjectSelection, writeProject, type WriteProjectInput } from "./project-io.ts";
@@ -22,6 +31,8 @@ const platform = toHostPlatform(process.platform);
 function log(level: "info" | "warn" | "error", message: string): void {
   (level === "info" ? console.log : level === "warn" ? console.warn : console.error)(`[sonobe] ${message}`);
 }
+
+const errorMessage = (err: unknown) => (err instanceof Error ? err.message : String(err));
 
 const env = readDesktopEnv(process.env, (msg) => log("warn", msg));
 
@@ -41,6 +52,12 @@ function resolveContentSource(): WindowContentSource {
   return { kind: "file", root, index: path.join(root, "index.html") };
 }
 
+/** A folder scripts/build.mjs copies next to main.cjs, or its source in a repo checkout. */
+function bundledResource(name: string, repoRelative: string): string {
+  const bundled = path.join(__dirname, name);
+  return existsSync(bundled) ? bundled : path.resolve(__dirname, "../../..", repoRelative);
+}
+
 function main(): void {
   if (!app.requestSingleInstanceLock()) {
     app.quit();
@@ -55,6 +72,11 @@ function main(): void {
   let recents: RecentProjects | null = null;
   let rpc: RendererRpcHub | null = null;
   let mcp: McpServerHandle | null = null;
+  let mcpHandler: NodeMcpHandler | null = null;
+  let appHost: AppHost | null = null;
+  let preview: LanPreviewHandle | null = null;
+  let previewError: string | null = null;
+  let previewStarting: Promise<void> | null = null;
   let creating: Promise<AppWindow> | null = null;
   let ready = false;
 
@@ -78,9 +100,12 @@ function main(): void {
   };
 
   const rebuildMenu = () => {
-    const spec = buildMenuSpec({ platform, appName: APP_NAME, recentProjects: recents?.snapshot() ?? [], dev: !app.isPackaged });
+    const spec = buildMenuSpec({ platform, appName: APP_NAME, recentProjects: recents?.snapshot() ?? [], dev: !app.isPackaged, previewRunning: preview !== null });
     const template = toMenuTemplate(spec, platform, {
-      command: (id: SonobeCommandId) => void ensureWindow().then((w) => w.sendCommand(id)),
+      command: (id: SonobeCommandId) => {
+        if (id === "viewer.previewOnDevice") void showPhonePreview().catch((err: unknown) => log("warn", `Phone preview failed: ${errorMessage(err)}`));
+        else void ensureWindow().then((w) => w.sendCommand(id));
+      },
       openRecent: (dir) => void openProjects([dir]),
       action: (action: NativeAction) => void handleAction(action),
     });
@@ -99,6 +124,10 @@ function main(): void {
       await recents?.clear();
       app.clearRecentDocuments();
       rebuildMenu();
+      return;
+    }
+    if (action === "stopPreview") {
+      await stopPreview();
       return;
     }
     const w = primaryWindow();
@@ -125,6 +154,7 @@ function main(): void {
         windows.set(id, w);
         w.webContents.once("destroyed", () => {
           windows.delete(id);
+          appHost?.forgetTarget(id);
           for (const [watchId, entry] of watchers) {
             if (entry.ownerId === id) {
               entry.watcher.close();
@@ -162,6 +192,167 @@ function main(): void {
     }
   };
 
+  // --- MCP bridge: windows as RendererTargets for the app host -------------------------------
+
+  const editorTarget = (w: AppWindow): RendererTarget => ({
+    id: w.webContents.id,
+    invoke<T>(method: string, params?: unknown, opts?: { timeoutMs?: number }): Promise<T> {
+      return rpc ? rpc.invoke<T>(w.webContents, method, params, opts) : Promise.reject(Object.assign(new Error("The RPC bridge isn't ready"), { code: "disposed" }));
+    },
+    hasMethod: (method) => rpc?.hasMethod(w.webContents, method),
+    focus: () => w.focus(),
+    capture: (rect, size) => captureWebContents(w.webContents, rect, size),
+  });
+
+  const editorTargets = (): RendererTarget[] => {
+    const focused = BrowserWindow.getFocusedWindow();
+    return [...windows.values()]
+      .filter((w) => !w.webContents.isDestroyed())
+      .sort((a, b) => Number(b.win === focused) - Number(a.win === focused))
+      .map(editorTarget);
+  };
+
+  /** Resolve once a window's editor registered the MCP bridge, or clearly never will. */
+  const waitForEditor = async (w: AppWindow, timeoutMs = 20_000) => {
+    const started = Date.now();
+    while (!w.webContents.isDestroyed() && Date.now() - started < timeoutMs) {
+      const has = rpc?.hasMethod(w.webContents, "document.info");
+      if (has === true || w.content().kind === "placeholder") return;
+      if (has === false && !w.webContents.isLoading() && Date.now() - started > 5000) return;
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+  };
+
+  const approveAgentProject = async (dir: string) => {
+    const resolved = await resolveProjectSelection(dir);
+    if (resolved) access.approve(resolved);
+    return resolved ?? null;
+  };
+
+  const defaultProjectDir = async (name: string): Promise<string> => {
+    const base = name.replace(/[\\/:*?"<>|\0]/g, "-").trim() || "Untitled";
+    const documents = app.getPath("documents");
+    for (let n = 1; n < 10_000; n++) {
+      const candidate = path.join(documents, `${n === 1 ? base : `${base} ${n}`}.sonobe`);
+      if (!existsSync(candidate)) return candidate;
+    }
+    return path.join(documents, `${base} ${Date.now()}.sonobe`);
+  };
+
+  const writeNewProject = async (dir: string, doc: SonobeDocument) => {
+    access.approve(dir);
+    await saveProjectToDisk(dir, doc);
+  };
+
+  // --- Phone preview (LAN web player) ---------------------------------------------------------
+
+  const previewStatus = (): PreviewStatus =>
+    preview
+      ? { running: true, url: preview.url, urls: preview.urls, lanReachable: preview.lanReachable, clients: preview.clientCount(), error: null }
+      : { running: false, url: null, urls: [], lanReachable: false, clients: 0, error: previewError };
+
+  const publishPreviewStatus = () => {
+    const status = previewStatus();
+    for (const w of windows.values()) if (!w.webContents.isDestroyed()) w.webContents.send(IPC.previewChanged, status);
+  };
+
+  const previewDocument = async () => {
+    if (!appHost || windows.size === 0) return null;
+    try {
+      const snap = await appHost.getDocument();
+      return { docId: snap.docId, name: snap.doc.project.name, revision: snap.revision, doc: snap.doc };
+    } catch (err) {
+      if (isHostError(err)) return null;
+      throw err;
+    }
+  };
+
+  const previewAsset = async (file: string) => {
+    const snap = appHost ? await appHost.getDocument().catch(() => null) : null;
+    if (!snap?.path) return null;
+    const candidate = resolveUnder(path.join(snap.path, "assets"), file);
+    return candidate && existsSync(candidate) ? candidate : null;
+  };
+
+  const startPreview = async (): Promise<PreviewStatus> => {
+    if (preview) return previewStatus();
+    const playerRoot = path.join(__dirname, "player");
+    if (!existsSync(path.join(playerRoot, "index.html"))) {
+      previewError = `The phone player isn't built (${playerRoot}). Run npm run build -w @sonobe/desktop.`;
+      publishPreviewStatus();
+      return previewStatus();
+    }
+    const starting = (previewStarting ??= startLanPreview({
+      playerRoot,
+      port: env.lanPort,
+      version: VERSION,
+      log,
+      getDocument: previewDocument,
+      resolveAsset: previewAsset,
+      onClientsChange: publishPreviewStatus,
+    })
+      .then((handle) => {
+        preview = handle;
+        previewError = null;
+      })
+      .catch((err: unknown) => {
+        previewError = errorMessage(err);
+        log("warn", `Phone preview couldn't start: ${previewError}`);
+      })
+      .finally(() => {
+        previewStarting = null;
+        rebuildMenu();
+        publishPreviewStatus();
+      }));
+    await starting;
+    return previewStatus();
+  };
+
+  const stopPreview = async (): Promise<PreviewStatus> => {
+    const handle = preview;
+    preview = null;
+    previewError = null;
+    if (handle) await handle.close();
+    rebuildMenu();
+    publishPreviewStatus();
+    return previewStatus();
+  };
+
+  /** Viewer → Preview on Phone: start the server, then let the editor show its QR panel (or show ours). */
+  const showPhonePreview = async () => {
+    const w = await ensureWindow();
+    const status = await startPreview();
+    if (!status.running || !status.url) {
+      await dialog.showMessageBox(w.win, { type: "warning", message: "Sonobe couldn't start the phone preview.", detail: status.error ?? "The preview server didn't start." });
+      return;
+    }
+    if (rpc?.hasMethod(w.webContents, "viewer.showPhonePreview") === true) {
+      try {
+        await rpc.invoke(w.webContents, "viewer.showPhonePreview", status);
+        return;
+      } catch (err) {
+        log("warn", `The editor couldn't show the phone preview: ${errorMessage(err)}`);
+      }
+    }
+    const png = await qrPng(status.url, { margin: 2, width: 240, errorCorrectionLevel: "M" });
+    const { response } = await dialog.showMessageBox(w.win, {
+      type: "none",
+      icon: nativeImage.createFromBuffer(png),
+      message: "Preview on Phone",
+      detail: [
+        status.lanReachable ? "Scan the code with a phone on the same Wi-Fi, or open this link:" : "No local network was found, so only this computer can open the preview:",
+        status.url,
+        "",
+        "The link includes a private code. Anyone with it can view this prototype while the preview is on.",
+      ].join("\n"),
+      buttons: ["Done", "Copy Link", "Stop Preview"],
+      defaultId: 0,
+      cancelId: 0,
+    });
+    if (response === 1) clipboard.writeText(status.url);
+    else if (response === 2) await stopPreview();
+  };
+
   app.on("open-file", (event, filePath) => {
     event.preventDefault();
     void openProjects([filePath]);
@@ -195,6 +386,9 @@ function main(): void {
     for (const { watcher } of watchers.values()) watcher.close();
     watchers.clear();
     rpc?.dispose();
+    if (mcpHandler) void mcpHandler.close().catch(() => undefined);
+    appHost?.dispose();
+    if (preview) void preview.close();
     if (mcp) {
       mcp.removeTokenFile();
       void mcp.close();
@@ -301,6 +495,19 @@ function main(): void {
         : { running: false, port: null, url: null, tokenFile: path.join(env.home ?? defaultSonobeHome(), "mcp.json") };
     });
 
+    ipcMain.handle(IPC.previewStatus, (event): PreviewStatus => {
+      requireWindow(event);
+      return previewStatus();
+    });
+    ipcMain.handle(IPC.previewStart, (event): Promise<PreviewStatus> => {
+      requireWindow(event);
+      return startPreview();
+    });
+    ipcMain.handle(IPC.previewStop, (event): Promise<PreviewStatus> => {
+      requireWindow(event);
+      return stopPreview();
+    });
+
     ipcMain.on(IPC.commandListeners, (event, count: unknown) => {
       if (typeof count === "number") trustedWindow(event)?.setCommandListeners(count);
     });
@@ -324,6 +531,20 @@ function main(): void {
     rpc = createRendererRpcHub(ipcMain, { isTrustedSender: (event: RpcIpcEvent) => !!trustedWindow(event as unknown as IpcMainEvent) });
     registerIpc();
 
+    appHost = createAppHost({
+      registry: createPatchRegistry(),
+      targets: editorTargets,
+      ensureTarget: async () => {
+        const w = await ensureWindow();
+        await waitForEditor(w);
+        return editorTarget(w);
+      },
+      approveProject: approveAgentProject,
+      defaultProjectDir,
+      projectExists: async (dir) => existsSync(path.join(dir, "project.json")),
+      writeProject: writeNewProject,
+    });
+
     recents = new RecentProjects(path.join(app.getPath("userData"), "recent-projects.json"));
     for (const dir of await recents.list()) access.approve(dir);
     rebuildMenu();
@@ -331,14 +552,21 @@ function main(): void {
     if (env.mcpEnabled) {
       try {
         mcp = await startMcpServer({ version: VERSION, port: env.mcpPort, ...(env.home ? { configDir: env.home } : {}), log });
+        mcpHandler = createHttpHandler(appHost, {
+          version: VERSION,
+          guides: loadGuides(bundledResource("guides", "packages/mcp/guides")),
+          onError: (err) => log("warn", `MCP transport error: ${err.message}`),
+        });
+        mcp.setHandler(mcpHandler);
       } catch (err) {
-        log("warn", `MCP endpoint disabled: ${err instanceof Error ? err.message : String(err)}`);
+        log("warn", `MCP endpoint disabled: ${errorMessage(err)}`);
       }
     }
 
     await ensureWindow();
     ready = true;
     if (pendingOpen.length) await openProjects(pendingOpen.splice(0));
+    if (env.lan) void startPreview();
 
     if (env.testHooks) {
       (globalThis as Record<string, unknown>).__sonobeTest = {
@@ -347,11 +575,22 @@ function main(): void {
           if (!w || !rpc) return Promise.reject(new Error("No window"));
           return rpc.invoke(w.webContents, method, params, opts);
         },
+        hasRendererMethod: (method: string) => {
+          const w = primaryWindow();
+          return w && rpc ? (rpc.hasMethod(w.webContents, method) ?? null) : null;
+        },
         sendCommand: (id: string) => {
           if (isCommandId(id)) primaryWindow()?.sendCommand(id);
         },
         openProject: (dir: string) => openProjects([dir]),
         mcpStatus: () => (mcp ? { running: mcp.running, port: mcp.port, url: mcp.url, tokenFile: mcp.tokenFile } : null),
+        previewStatus: () => previewStatus(),
+        startPreview: () => startPreview(),
+        stopPreview: () => stopPreview(),
+        /** Destroy every window without the unsaved-changes prompt. */
+        destroyWindows: () => {
+          for (const w of windows.values()) w.win.destroy();
+        },
       };
     }
   });

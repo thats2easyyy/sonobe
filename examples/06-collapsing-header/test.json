@@ -1,0 +1,51 @@
+{
+  "description": "The header height, title, cover and play button follow the scroll position directly: collapsed after 190 points, expanded again at the top.",
+  "scenarios": [
+    {
+      "name": "Starts expanded",
+      "events": [],
+      "durationMs": 300,
+      "expect": [
+        { "description": "The header is 300 points tall", "target": "@header.size", "component": "height", "at": "end", "op": "==", "value": 300 },
+        { "description": "The title is large", "target": "@header_title.fontSize", "at": "end", "op": "==", "value": 34 },
+        { "description": "The play icon path parses", "target": "play_icon_shape.error", "at": "end", "op": "==", "value": false }
+      ]
+    },
+    {
+      "name": "The header follows the finger with no lag",
+      "events": [{ "kind": "drag", "from": [201, 700], "to": [201, 605], "durationMs": 500, "release": false, "atMs": 100 }],
+      "durationMs": 800,
+      "expect": [
+        { "description": "Scroll Tracks is dragging", "target": "tracks_scroll.dragging", "at": "end", "op": "==", "value": true },
+        { "description": "About 85 points scrolled: the header is partway collapsed", "target": "@header.size", "component": "height", "at": "end", "op": "<", "value": 225 },
+        { "description": "but not all the way", "target": "@header.size", "component": "height", "at": "end", "op": ">", "value": 205 }
+      ]
+    },
+    {
+      "name": "Scrolling up collapses the header into a bar",
+      "events": [{ "kind": "drag", "from": [201, 700], "to": [201, 380], "durationMs": 300, "atMs": 100 }],
+      "durationMs": 2400,
+      "expect": [
+        { "description": "Collapse Progress reaches 1", "target": "collapse.progress", "at": "end", "op": "==", "value": 1 },
+        { "description": "The header is 110 points tall", "target": "@header.size", "component": "height", "at": "end", "op": "==", "value": 110 },
+        { "description": "The title shrank to 20", "target": "@header_title.fontSize", "at": "end", "op": "==", "value": 20 },
+        { "description": "The cover art is gone", "target": "@cover.opacity", "at": "end", "op": "==", "value": 0 },
+        { "description": "The play button moved into the bar", "target": "@play_button.position", "component": "y", "at": "end", "op": "==", "value": 58 }
+      ]
+    },
+    {
+      "name": "Scrolling back to the top expands it again",
+      "events": [
+        { "kind": "drag", "from": [201, 700], "to": [201, 380], "durationMs": 300, "atMs": 100 },
+        { "kind": "drag", "from": [201, 300], "to": [201, 820], "durationMs": 300, "atMs": 2000 }
+      ],
+      "durationMs": 4200,
+      "expect": [
+        { "description": "It had collapsed in between", "target": "@header.size", "component": "height", "at": 1900, "op": "==", "value": 110 },
+        { "description": "The header is 300 points tall again", "target": "@header.size", "component": "height", "at": "end", "op": "==", "value": 300, "tolerance": 0.5 },
+        { "description": "The title is large again", "target": "@header_title.fontSize", "at": "end", "op": "==", "value": 34, "tolerance": 0.05 },
+        { "description": "The tracks are back at the top", "target": "@content.position", "component": "y", "at": "end", "op": "==", "value": 0, "tolerance": 0.5 }
+      ]
+    }
+  ]
+}

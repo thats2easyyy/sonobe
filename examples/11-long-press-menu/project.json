@@ -1,0 +1,13 @@
+{
+  "formatVersion": 1,
+  "name": "Long-Press Menu",
+  "generator": "Sonobe 0.1.0",
+  "root": "main",
+  "device": { "preset": "iphone-17-pro" },
+  "background": "#EEF0F5FF",
+  "meta": {
+    "description": "Hold a chat message and it squeezes, then a context menu springs out while the chat dims. A quick tap does nothing; tapping anywhere closes the menu.",
+    "guides": ["03-states-and-pulses", "06-gestures"],
+    "recipe": "11-long-press-menu"
+  }
+}

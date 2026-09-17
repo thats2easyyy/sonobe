@@ -1,0 +1,13 @@
+{
+  "formatVersion": 1,
+  "name": "Tap to Grow",
+  "generator": "Sonobe 0.1.0",
+  "root": "main",
+  "device": { "preset": "iphone-17-pro" },
+  "background": "#F4F4F6FF",
+  "meta": {
+    "description": "Tap a photo card and it springs bigger; tap again and it springs back. The four-patch ISAT chain behind most interactions.",
+    "guides": ["01-first-prototype", "02-isat"],
+    "recipe": "01-tap-to-grow"
+  }
+}

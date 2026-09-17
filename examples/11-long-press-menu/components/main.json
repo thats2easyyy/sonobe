@@ -1,0 +1,729 @@
+{
+  "formatVersion": 1,
+  "id": "main",
+  "name": "Main",
+  "kind": "prototype",
+  "notes": "Press and hold the message that says Dinner at 8. Hold Message reports progress while you hold and turns Long Press on after 0.45 seconds, which turns Menu Open on. The whole overlay listens for taps, so tapping the backdrop or any action turns it off.",
+  "size": [402, 874],
+  "interface": { "inputs": {}, "outputs": {} },
+  "layers": [
+    {
+      "id": "chat_header",
+      "type": "group",
+      "name": "Chat Header",
+      "props": {
+        "color": "#FFFFFFFF",
+        "hitTest": false,
+        "size": [402, 120]
+      },
+      "children": [
+        {
+          "id": "chat_back_top",
+          "type": "rectangle",
+          "name": "Back Chevron Top",
+          "props": {
+            "color": "#5B5CF6FF",
+            "cornerRadius": 1.5,
+            "position": [18, 76],
+            "rotation": -45,
+            "size": [12, 3]
+          }
+        },
+        {
+          "id": "chat_back_bottom",
+          "type": "rectangle",
+          "name": "Back Chevron Bottom",
+          "props": {
+            "color": "#5B5CF6FF",
+            "cornerRadius": 1.5,
+            "position": [18, 84],
+            "rotation": 45,
+            "size": [12, 3]
+          }
+        },
+        {
+          "id": "chat_avatar",
+          "type": "oval",
+          "name": "Avatar",
+          "props": {
+            "color": "#14B8A6FF",
+            "position": [46, 64],
+            "size": [40, 40]
+          }
+        },
+        {
+          "id": "chat_name",
+          "type": "text",
+          "name": "Name",
+          "props": {
+            "fontSize": 17,
+            "fontWeight": 600,
+            "hitTest": false,
+            "position": [96, 65],
+            "text": "Priya",
+            "textColor": "#111118FF"
+          }
+        },
+        {
+          "id": "chat_status",
+          "type": "text",
+          "name": "Status",
+          "props": {
+            "fontSize": 13,
+            "fontWeight": 400,
+            "hitTest": false,
+            "lineHeight": 18,
+            "position": [96, 87],
+            "text": "online",
+            "textColor": "#22C55EFF"
+          }
+        },
+        {
+          "id": "chat_header_divider",
+          "type": "rectangle",
+          "name": "Divider",
+          "props": {
+            "color": "#E6E6EBFF",
+            "position": [0, 119],
+            "size": [402, 1]
+          }
+        }
+      ]
+    },
+    {
+      "id": "app_status_bar",
+      "type": "group",
+      "name": "Status Bar",
+      "props": {
+        "hitTest": false,
+        "size": [402, 62]
+      },
+      "children": [
+        {
+          "id": "app_clock",
+          "type": "text",
+          "name": "Clock",
+          "props": {
+            "anchor": [0.5, 0],
+            "fontSize": 17,
+            "fontWeight": 600,
+            "hitTest": false,
+            "position": [72, 20],
+            "text": "9:41",
+            "textAlignment": "center",
+            "textColor": "#111118FF"
+          }
+        },
+        {
+          "id": "app_signal_1",
+          "type": "rectangle",
+          "name": "Signal 1",
+          "props": {
+            "color": "#111118FF",
+            "cornerRadius": 1,
+            "hitTest": false,
+            "position": [292, 30],
+            "size": [3, 4]
+          }
+        },
+        {
+          "id": "app_signal_2",
+          "type": "rectangle",
+          "name": "Signal 2",
+          "props": {
+            "color": "#111118FF",
+            "cornerRadius": 1,
+            "hitTest": false,
+            "position": [297, 28],
+            "size": [3, 6]
+          }
+        },
+        {
+          "id": "app_signal_3",
+          "type": "rectangle",
+          "name": "Signal 3",
+          "props": {
+            "color": "#111118FF",
+            "cornerRadius": 1,
+            "hitTest": false,
+            "position": [302, 26],
+            "size": [3, 8]
+          }
+        },
+        {
+          "id": "app_signal_4",
+          "type": "rectangle",
+          "name": "Signal 4",
+          "props": {
+            "color": "#111118FF",
+            "cornerRadius": 1,
+            "hitTest": false,
+            "position": [307, 24],
+            "size": [3, 10]
+          }
+        },
+        {
+          "id": "app_battery",
+          "type": "rectangle",
+          "name": "Battery",
+          "props": {
+            "color": "#00000000",
+            "cornerRadius": 3.5,
+            "hitTest": false,
+            "position": [322, 23],
+            "size": [25, 12],
+            "strokeColor": "#11111859",
+            "strokeWidth": 1
+          }
+        },
+        {
+          "id": "app_battery_level",
+          "type": "rectangle",
+          "name": "Battery Level",
+          "props": {
+            "color": "#111118FF",
+            "cornerRadius": 2,
+            "hitTest": false,
+            "position": [324, 25],
+            "size": [19, 8]
+          }
+        },
+        {
+          "id": "app_battery_cap",
+          "type": "rectangle",
+          "name": "Battery Cap",
+          "props": {
+            "color": "#11111859",
+            "cornerRadius": 1,
+            "hitTest": false,
+            "position": [348, 27],
+            "size": [2, 4]
+          }
+        }
+      ]
+    },
+    {
+      "id": "msg_1",
+      "type": "group",
+      "name": "Message 1",
+      "props": {
+        "color": "#FFFFFFFF",
+        "cornerRadius": 20,
+        "hitTest": false,
+        "position": [16, 150],
+        "shadowColor": "#000000FF",
+        "shadowOffset": [0, 6],
+        "shadowOpacity": 0.08,
+        "shadowRadius": 18,
+        "size": [236, 44]
+      },
+      "children": [
+        {
+          "id": "msg_1_text",
+          "type": "text",
+          "name": "Text",
+          "props": {
+            "fontSize": 15,
+            "fontWeight": 400,
+            "hitTest": false,
+            "lineHeight": 21,
+            "position": [16, 11],
+            "text": "Are we still on for tonight?",
+            "textColor": "#111118FF"
+          }
+        }
+      ]
+    },
+    {
+      "id": "msg_2",
+      "type": "group",
+      "name": "Message 2",
+      "props": {
+        "color": "#5B5CF6FF",
+        "cornerRadius": 20,
+        "hitTest": false,
+        "position": [190, 206],
+        "shadowColor": "#000000FF",
+        "shadowOffset": [0, 6],
+        "shadowOpacity": 0.08,
+        "shadowRadius": 18,
+        "size": [196, 44]
+      },
+      "children": [
+        {
+          "id": "msg_2_text",
+          "type": "text",
+          "name": "Text",
+          "props": {
+            "fontSize": 15,
+            "fontWeight": 400,
+            "hitTest": false,
+            "lineHeight": 21,
+            "position": [16, 11],
+            "text": "Yes! Leaving work at 7",
+            "textColor": "#FFFFFFFF"
+          }
+        }
+      ]
+    },
+    {
+      "id": "msg_3",
+      "type": "group",
+      "name": "Message 3",
+      "props": {
+        "color": "#FFFFFFFF",
+        "cornerRadius": 20,
+        "hitTest": false,
+        "position": [16, 262],
+        "shadowColor": "#000000FF",
+        "shadowOffset": [0, 6],
+        "shadowOpacity": 0.08,
+        "shadowRadius": 18,
+        "size": [88, 44]
+      },
+      "children": [
+        {
+          "id": "msg_3_text",
+          "type": "text",
+          "name": "Text",
+          "props": {
+            "fontSize": 15,
+            "fontWeight": 400,
+            "hitTest": false,
+            "lineHeight": 21,
+            "position": [16, 11],
+            "text": "Perfect",
+            "textColor": "#111118FF"
+          }
+        }
+      ]
+    },
+    {
+      "id": "msg_5",
+      "type": "group",
+      "name": "Message 5",
+      "props": {
+        "color": "#5B5CF6FF",
+        "cornerRadius": 20,
+        "hitTest": false,
+        "position": [186, 620],
+        "shadowColor": "#000000FF",
+        "shadowOffset": [0, 6],
+        "shadowOpacity": 0.08,
+        "shadowRadius": 18,
+        "size": [200, 44]
+      },
+      "children": [
+        {
+          "id": "msg_5_text",
+          "type": "text",
+          "name": "Text",
+          "props": {
+            "fontSize": 15,
+            "fontWeight": 400,
+            "hitTest": false,
+            "lineHeight": 21,
+            "position": [16, 11],
+            "text": "Amazing. See you there",
+            "textColor": "#FFFFFFFF"
+          }
+        }
+      ]
+    },
+    {
+      "id": "composer",
+      "type": "group",
+      "name": "Composer",
+      "props": {
+        "color": "#FFFFFFFF",
+        "cornerRadius": 22,
+        "hitTest": false,
+        "position": [16, 790],
+        "size": [370, 44]
+      },
+      "children": [
+        {
+          "id": "composer_placeholder",
+          "type": "text",
+          "name": "Placeholder",
+          "props": {
+            "fontSize": 15,
+            "fontWeight": 400,
+            "hitTest": false,
+            "lineHeight": 21,
+            "position": [18, 11],
+            "text": "Message",
+            "textColor": "#A1A1AAFF"
+          }
+        }
+      ]
+    },
+    {
+      "id": "overlay",
+      "type": "group",
+      "name": "Overlay",
+      "props": {
+        "opacity": { "link": "menu_fade.output" },
+        "size": [402, 874]
+      },
+      "children": [
+        {
+          "id": "backdrop",
+          "type": "rectangle",
+          "name": "Backdrop",
+          "props": {
+            "backgroundBlur": 14,
+            "color": "#0E0F1A59",
+            "size": [402, 874]
+          }
+        },
+        {
+          "id": "menu",
+          "type": "group",
+          "name": "Menu",
+          "props": {
+            "clip": true,
+            "color": "#FFFFFFFF",
+            "cornerRadius": 16,
+            "pivot": [0, 0],
+            "position": [16, 412],
+            "scale": { "link": "menu_scale.output" },
+            "shadowColor": "#000000FF",
+            "shadowOffset": [0, 10],
+            "shadowOpacity": 0.45,
+            "shadowRadius": 28,
+            "size": [230, 184]
+          },
+          "children": [
+            {
+              "id": "menu_row_1",
+              "type": "group",
+              "name": "Reply",
+              "props": {
+                "position": [0, 0],
+                "size": [230, 46]
+              },
+              "children": [
+                {
+                  "id": "menu_row_1_label",
+                  "type": "text",
+                  "name": "Label",
+                  "props": {
+                    "fontSize": 16,
+                    "fontWeight": 500,
+                    "hitTest": false,
+                    "position": [16, 13],
+                    "text": "Reply",
+                    "textColor": "#111118FF"
+                  }
+                },
+                {
+                  "id": "menu_reply_glyph",
+                  "type": "rectangle",
+                  "name": "Reply Glyph",
+                  "props": {
+                    "color": "#00000000",
+                    "cornerRadius": 3,
+                    "hitTest": false,
+                    "position": [196, 17],
+                    "size": [16, 12],
+                    "strokeColor": "#111118FF",
+                    "strokeWidth": 2
+                  }
+                },
+                {
+                  "id": "menu_row_1_divider",
+                  "type": "rectangle",
+                  "name": "Divider",
+                  "props": {
+                    "color": "#E6E6EBFF",
+                    "hitTest": false,
+                    "position": [0, 45],
+                    "size": [230, 1]
+                  }
+                }
+              ]
+            },
+            {
+              "id": "menu_row_2",
+              "type": "group",
+              "name": "Copy",
+              "props": {
+                "position": [0, 46],
+                "size": [230, 46]
+              },
+              "children": [
+                {
+                  "id": "menu_row_2_label",
+                  "type": "text",
+                  "name": "Label",
+                  "props": {
+                    "fontSize": 16,
+                    "fontWeight": 500,
+                    "hitTest": false,
+                    "position": [16, 13],
+                    "text": "Copy",
+                    "textColor": "#111118FF"
+                  }
+                },
+                {
+                  "id": "menu_copy_glyph",
+                  "type": "rectangle",
+                  "name": "Copy Glyph",
+                  "props": {
+                    "color": "#00000000",
+                    "cornerRadius": 3,
+                    "hitTest": false,
+                    "position": [198, 14],
+                    "size": [13, 16],
+                    "strokeColor": "#111118FF",
+                    "strokeWidth": 2
+                  }
+                },
+                {
+                  "id": "menu_row_2_divider",
+                  "type": "rectangle",
+                  "name": "Divider",
+                  "props": {
+                    "color": "#E6E6EBFF",
+                    "hitTest": false,
+                    "position": [0, 45],
+                    "size": [230, 1]
+                  }
+                }
+              ]
+            },
+            {
+              "id": "menu_row_3",
+              "type": "group",
+              "name": "Pin",
+              "props": {
+                "position": [0, 92],
+                "size": [230, 46]
+              },
+              "children": [
+                {
+                  "id": "menu_row_3_label",
+                  "type": "text",
+                  "name": "Label",
+                  "props": {
+                    "fontSize": 16,
+                    "fontWeight": 500,
+                    "hitTest": false,
+                    "position": [16, 13],
+                    "text": "Pin",
+                    "textColor": "#111118FF"
+                  }
+                },
+                {
+                  "id": "menu_pin_glyph",
+                  "type": "oval",
+                  "name": "Pin Glyph",
+                  "props": {
+                    "color": "#00000000",
+                    "hitTest": false,
+                    "position": [197, 15],
+                    "size": [14, 14],
+                    "strokeColor": "#111118FF",
+                    "strokeWidth": 2
+                  }
+                },
+                {
+                  "id": "menu_row_3_divider",
+                  "type": "rectangle",
+                  "name": "Divider",
+                  "props": {
+                    "color": "#E6E6EBFF",
+                    "hitTest": false,
+                    "position": [0, 45],
+                    "size": [230, 1]
+                  }
+                }
+              ]
+            },
+            {
+              "id": "menu_row_4",
+              "type": "group",
+              "name": "Delete",
+              "props": {
+                "position": [0, 138],
+                "size": [230, 46]
+              },
+              "children": [
+                {
+                  "id": "menu_row_4_label",
+                  "type": "text",
+                  "name": "Label",
+                  "props": {
+                    "fontSize": 16,
+                    "fontWeight": 500,
+                    "hitTest": false,
+                    "position": [16, 13],
+                    "text": "Delete",
+                    "textColor": "#EF4444FF"
+                  }
+                },
+                {
+                  "id": "menu_delete_glyph",
+                  "type": "rectangle",
+                  "name": "Delete Glyph",
+                  "props": {
+                    "color": "#00000000",
+                    "cornerRadius": 2,
+                    "hitTest": false,
+                    "position": [198, 14],
+                    "size": [13, 17],
+                    "strokeColor": "#EF4444FF",
+                    "strokeWidth": 2
+                  }
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "message",
+      "type": "group",
+      "name": "Held Message",
+      "props": {
+        "color": "#FFFFFFFF",
+        "cornerRadius": 22,
+        "pivot": [0, 0.5],
+        "position": [16, 318],
+        "scale": { "link": "message_squeeze.output" },
+        "shadowColor": "#000000FF",
+        "shadowOffset": [0, 6],
+        "shadowOpacity": 0.08,
+        "shadowRadius": 18,
+        "size": [300, 64]
+      },
+      "children": [
+        {
+          "id": "message_text",
+          "type": "text",
+          "name": "Text",
+          "props": {
+            "fontSize": 15,
+            "fontWeight": 400,
+            "hitTest": false,
+            "lineHeight": 21,
+            "position": [16, 11],
+            "text": "Dinner at 8? I booked the",
+            "textColor": "#111118FF"
+          }
+        },
+        {
+          "id": "message_text_2",
+          "type": "text",
+          "name": "Text Line 2",
+          "props": {
+            "fontSize": 15,
+            "fontWeight": 400,
+            "hitTest": false,
+            "lineHeight": 21,
+            "position": [16, 32],
+            "text": "corner table.",
+            "textColor": "#111118FF"
+          }
+        }
+      ]
+    },
+    {
+      "id": "app_home_indicator",
+      "type": "rectangle",
+      "name": "Home Indicator",
+      "props": {
+        "anchor": [0.5, 1],
+        "color": "#111118FF",
+        "cornerRadius": 3,
+        "hitTest": false,
+        "position": [201, 866],
+        "size": [140, 5]
+      }
+    }
+  ],
+  "patches": {
+    "hold_message": {
+      "type": "longPress",
+      "name": "Hold Message",
+      "inputs": {
+        "duration": 0.45,
+        "layer": { "layer": "message" }
+      },
+      "ui": { "x": 40, "y": 40 }
+    },
+    "menu_fade": {
+      "type": "classicAnimation",
+      "name": "Menu Fade",
+      "typeParam": "number",
+      "inputs": {
+        "curve": "cubicOut",
+        "duration": 0.18,
+        "number": { "link": "menu_open.on" }
+      },
+      "ui": { "x": 560, "y": 340 }
+    },
+    "menu_open": {
+      "type": "switch",
+      "name": "Menu Open",
+      "inputs": {
+        "turnOff": { "link": "tap_overlay.tap" },
+        "turnOn": { "link": "hold_message.longPress" }
+      },
+      "ui": { "x": 300, "y": 190 }
+    },
+    "menu_scale": {
+      "type": "transition",
+      "name": "Menu Scale",
+      "typeParam": "number",
+      "inputs": {
+        "end": 1,
+        "progress": { "link": "menu_spring.output" },
+        "start": 0.7
+      },
+      "ui": { "x": 820, "y": 40 }
+    },
+    "menu_spring": {
+      "type": "popAnimation",
+      "name": "Menu Spring",
+      "typeParam": "number",
+      "inputs": {
+        "bounciness": 6,
+        "number": { "link": "menu_open.on" },
+        "speed": 18
+      },
+      "ui": { "x": 560, "y": 190 }
+    },
+    "message_squeeze": {
+      "type": "transition",
+      "name": "Message Squeeze",
+      "typeParam": "number",
+      "inputs": {
+        "end": 0.94,
+        "progress": { "link": "squeeze_spring.output" },
+        "start": 1
+      },
+      "ui": { "x": 560, "y": 40 }
+    },
+    "squeeze_spring": {
+      "type": "popAnimation",
+      "name": "Squeeze Spring",
+      "typeParam": "number",
+      "inputs": {
+        "bounciness": 8,
+        "number": { "link": "hold_message.progress" },
+        "speed": 16
+      },
+      "ui": { "x": 300, "y": 40 }
+    },
+    "tap_overlay": {
+      "type": "interaction",
+      "name": "Tap Outside or an Action",
+      "inputs": { "layer": { "layer": "overlay" } },
+      "ui": { "x": 40, "y": 190 }
+    }
+  },
+  "comments": []
+}

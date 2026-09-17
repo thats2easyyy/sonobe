@@ -1,0 +1,13 @@
+{
+  "formatVersion": 1,
+  "name": "Scrolling List",
+  "generator": "Sonobe 0.1.0",
+  "root": "main",
+  "device": { "preset": "iphone-17-pro" },
+  "background": "#F4F4F6FF",
+  "meta": {
+    "description": "An inbox that scrolls with momentum and rubber-bands at the edges. The header lifts as messages slide under it, and a Back to Top button appears once you're far down.",
+    "guides": ["04-layers-and-layout", "06-gestures"],
+    "recipe": "03-scrolling-list"
+  }
+}

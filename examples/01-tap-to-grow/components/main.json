@@ -1,0 +1,404 @@
+{
+  "formatVersion": 1,
+  "id": "main",
+  "name": "Main",
+  "kind": "prototype",
+  "notes": "Tap the card. Tap Card pulses, Card Zoomed remembers the new state, Zoom Spring moves from 0 to 1 with a bounce, and three Transitions turn that into scale and shadow.",
+  "size": [402, 874],
+  "interface": { "inputs": {}, "outputs": {} },
+  "layers": [
+    {
+      "id": "app_status_bar",
+      "type": "group",
+      "name": "Status Bar",
+      "props": {
+        "hitTest": false,
+        "size": [402, 62]
+      },
+      "children": [
+        {
+          "id": "app_clock",
+          "type": "text",
+          "name": "Clock",
+          "props": {
+            "anchor": [0.5, 0],
+            "fontSize": 17,
+            "fontWeight": 600,
+            "hitTest": false,
+            "position": [72, 20],
+            "text": "9:41",
+            "textAlignment": "center",
+            "textColor": "#111118FF"
+          }
+        },
+        {
+          "id": "app_signal_1",
+          "type": "rectangle",
+          "name": "Signal 1",
+          "props": {
+            "color": "#111118FF",
+            "cornerRadius": 1,
+            "hitTest": false,
+            "position": [292, 30],
+            "size": [3, 4]
+          }
+        },
+        {
+          "id": "app_signal_2",
+          "type": "rectangle",
+          "name": "Signal 2",
+          "props": {
+            "color": "#111118FF",
+            "cornerRadius": 1,
+            "hitTest": false,
+            "position": [297, 28],
+            "size": [3, 6]
+          }
+        },
+        {
+          "id": "app_signal_3",
+          "type": "rectangle",
+          "name": "Signal 3",
+          "props": {
+            "color": "#111118FF",
+            "cornerRadius": 1,
+            "hitTest": false,
+            "position": [302, 26],
+            "size": [3, 8]
+          }
+        },
+        {
+          "id": "app_signal_4",
+          "type": "rectangle",
+          "name": "Signal 4",
+          "props": {
+            "color": "#111118FF",
+            "cornerRadius": 1,
+            "hitTest": false,
+            "position": [307, 24],
+            "size": [3, 10]
+          }
+        },
+        {
+          "id": "app_battery",
+          "type": "rectangle",
+          "name": "Battery",
+          "props": {
+            "color": "#00000000",
+            "cornerRadius": 3.5,
+            "hitTest": false,
+            "position": [322, 23],
+            "size": [25, 12],
+            "strokeColor": "#11111859",
+            "strokeWidth": 1
+          }
+        },
+        {
+          "id": "app_battery_level",
+          "type": "rectangle",
+          "name": "Battery Level",
+          "props": {
+            "color": "#111118FF",
+            "cornerRadius": 2,
+            "hitTest": false,
+            "position": [324, 25],
+            "size": [19, 8]
+          }
+        },
+        {
+          "id": "app_battery_cap",
+          "type": "rectangle",
+          "name": "Battery Cap",
+          "props": {
+            "color": "#11111859",
+            "cornerRadius": 1,
+            "hitTest": false,
+            "position": [348, 27],
+            "size": [2, 4]
+          }
+        }
+      ]
+    },
+    {
+      "id": "date",
+      "type": "text",
+      "name": "Date",
+      "props": {
+        "fontSize": 12,
+        "fontWeight": 600,
+        "hitTest": false,
+        "letterSpacing": 0.2,
+        "position": [24, 78],
+        "text": "SATURDAY, JUNE 14",
+        "textColor": "#A1A1AAFF"
+      }
+    },
+    {
+      "id": "title",
+      "type": "text",
+      "name": "Title",
+      "props": {
+        "fontSize": 34,
+        "fontWeight": 700,
+        "hitTest": false,
+        "letterSpacing": -0.6,
+        "position": [24, 96],
+        "text": "Discover",
+        "textColor": "#111118FF"
+      }
+    },
+    {
+      "id": "avatar",
+      "type": "oval",
+      "name": "Avatar",
+      "props": {
+        "color": "#5B5CF6FF",
+        "gradient": {
+          "gradient": {
+            "kind": "linear",
+            "stops": [[0, "#8B5CF6FF"], [1, "#FF3D71FF"]],
+            "start": [0, 0],
+            "end": [1, 1]
+          }
+        },
+        "hitTest": false,
+        "position": [338, 98],
+        "size": [40, 40]
+      }
+    },
+    {
+      "id": "card",
+      "type": "group",
+      "name": "Card",
+      "props": {
+        "anchor": [0.5, 0.5],
+        "clip": true,
+        "color": "#0E0F1AFF",
+        "cornerRadius": 32,
+        "position": [201, 470],
+        "scale": { "link": "card_scale.output" },
+        "shadowColor": "#000000FF",
+        "shadowOffset": [0, 6],
+        "shadowOpacity": { "link": "card_shadow_opacity.output" },
+        "shadowRadius": { "link": "card_shadow_radius.output" },
+        "size": [338, 440]
+      },
+      "children": [
+        {
+          "id": "card_photo",
+          "type": "gradient",
+          "name": "Photo",
+          "props": {
+            "gradient": {
+              "gradient": {
+                "kind": "linear",
+                "stops": [[0, "#FFB37BFF"], [0.45, "#FF5E7EFF"], [1, "#4B3FD8FF"]],
+                "start": [0, 0],
+                "end": [1, 1]
+              }
+            },
+            "size": [338, 440]
+          }
+        },
+        {
+          "id": "card_sun",
+          "type": "oval",
+          "name": "Sun",
+          "props": {
+            "color": "#FFE9B8FF",
+            "position": [92, 110],
+            "shadowColor": "#FFB020FF",
+            "shadowOffset": [0, 10],
+            "shadowOpacity": 0.45,
+            "shadowRadius": 28,
+            "size": [150, 150]
+          }
+        },
+        {
+          "id": "card_far_hill",
+          "type": "oval",
+          "name": "Far Hill",
+          "props": {
+            "color": "#46329ACC",
+            "position": [-90, 262],
+            "size": [380, 260]
+          }
+        },
+        {
+          "id": "card_near_hill",
+          "type": "oval",
+          "name": "Near Hill",
+          "props": {
+            "color": "#2A1F6BFF",
+            "position": [110, 300],
+            "size": [420, 280]
+          }
+        },
+        {
+          "id": "card_shade",
+          "type": "gradient",
+          "name": "Shade",
+          "props": {
+            "gradient": {
+              "gradient": {
+                "kind": "linear",
+                "stops": [[0, "#00000000"], [1, "#00000080"]],
+                "start": [0.5, 0],
+                "end": [0.5, 1]
+              }
+            },
+            "position": [0, 240],
+            "size": [338, 200]
+          }
+        },
+        {
+          "id": "card_chip",
+          "type": "group",
+          "name": "Photo Count",
+          "props": {
+            "backgroundBlur": 12,
+            "color": "#FFFFFF33",
+            "cornerRadius": 15,
+            "hitTest": false,
+            "position": [20, 20],
+            "size": [92, 30]
+          },
+          "children": [
+            {
+              "id": "card_chip_label",
+              "type": "text",
+              "name": "Photo Count Label",
+              "props": {
+                "anchor": [0.5, 0.5],
+                "fontSize": 12,
+                "fontWeight": 600,
+                "hitTest": false,
+                "letterSpacing": 0.2,
+                "position": [46, 15],
+                "text": "6 photos",
+                "textAlignment": "center",
+                "textColor": "#FFFFFFFF"
+              }
+            }
+          ]
+        },
+        {
+          "id": "card_title",
+          "type": "text",
+          "name": "Card Title",
+          "props": {
+            "fontSize": 28,
+            "fontWeight": 700,
+            "hitTest": false,
+            "letterSpacing": -0.4,
+            "position": [24, 346],
+            "text": "Golden hour",
+            "textColor": "#FFFFFFFF"
+          }
+        },
+        {
+          "id": "card_subtitle",
+          "type": "text",
+          "name": "Card Subtitle",
+          "props": {
+            "fontSize": 15,
+            "fontWeight": 400,
+            "hitTest": false,
+            "lineHeight": 21,
+            "position": [24, 386],
+            "text": "Ocean Beach · San Francisco",
+            "textColor": "#FFFFFFB3"
+          }
+        }
+      ]
+    },
+    {
+      "id": "hint",
+      "type": "text",
+      "name": "Hint",
+      "props": {
+        "anchor": [0.5, 0],
+        "fontSize": 13,
+        "fontWeight": 400,
+        "hitTest": false,
+        "lineHeight": 18,
+        "position": [201, 770],
+        "text": "Tap the card to zoom",
+        "textAlignment": "center",
+        "textColor": "#5F5F6BFF"
+      }
+    },
+    {
+      "id": "app_home_indicator",
+      "type": "rectangle",
+      "name": "Home Indicator",
+      "props": {
+        "anchor": [0.5, 1],
+        "color": "#111118FF",
+        "cornerRadius": 3,
+        "hitTest": false,
+        "position": [201, 866],
+        "size": [140, 5]
+      }
+    }
+  ],
+  "patches": {
+    "card_scale": {
+      "type": "transition",
+      "name": "Card Scale",
+      "typeParam": "number",
+      "inputs": {
+        "end": 1.12,
+        "progress": { "link": "zoom_spring.output" },
+        "start": 1
+      },
+      "ui": { "x": 820, "y": 40 }
+    },
+    "card_shadow_opacity": {
+      "type": "transition",
+      "name": "Shadow Opacity",
+      "typeParam": "number",
+      "inputs": {
+        "end": 0.26,
+        "progress": { "link": "zoom_spring.output" },
+        "start": 0.08
+      },
+      "ui": { "x": 820, "y": 340 }
+    },
+    "card_shadow_radius": {
+      "type": "transition",
+      "name": "Shadow Radius",
+      "typeParam": "number",
+      "inputs": {
+        "end": 44,
+        "progress": { "link": "zoom_spring.output" },
+        "start": 18
+      },
+      "ui": { "x": 820, "y": 190 }
+    },
+    "card_zoomed": {
+      "type": "switch",
+      "name": "Card Zoomed",
+      "inputs": { "flip": { "link": "tap_card.tap" } },
+      "ui": { "x": 300, "y": 40 }
+    },
+    "tap_card": {
+      "type": "interaction",
+      "name": "Tap Card",
+      "inputs": { "layer": { "layer": "card" } },
+      "ui": { "x": 40, "y": 40 }
+    },
+    "zoom_spring": {
+      "type": "popAnimation",
+      "name": "Zoom Spring",
+      "typeParam": "number",
+      "inputs": {
+        "bounciness": 6,
+        "number": { "link": "card_zoomed.on" },
+        "speed": 12
+      },
+      "ui": { "x": 560, "y": 40 }
+    }
+  },
+  "comments": []
+}

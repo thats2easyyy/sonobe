@@ -1,0 +1,45 @@
+{
+  "description": "Tapping a tab sets Current Tab, the screens slide by whole screen widths, the indicator follows, and only the current tab is tinted.",
+  "scenarios": [
+    {
+      "name": "Starts on Home",
+      "events": [],
+      "durationMs": 400,
+      "expect": [
+        { "description": "Current Tab is 0", "target": "current_tab.option", "at": "end", "op": "==", "value": 0 },
+        { "description": "The Home screen is showing", "target": "@screens.position", "component": "x", "at": "end", "op": "==", "value": 0 },
+        { "description": "Home is tinted indigo", "target": "@home_label.textColor", "component": "r", "at": "end", "op": "==", "value": 0.357, "tolerance": 0.01 },
+        { "description": "Saved is gray", "target": "@saved_label.textColor", "component": "r", "at": "end", "op": "==", "value": 0.631, "tolerance": 0.01 }
+      ]
+    },
+    {
+      "name": "Tapping Saved slides to the third screen",
+      "events": [{ "kind": "tap", "target": "@tab_saved", "atMs": 100 }],
+      "durationMs": 1500,
+      "expect": [
+        { "description": "Current Tab is 2", "target": "current_tab.option", "at": "end", "op": "==", "value": 2 },
+        { "description": "The screens moved two widths left", "target": "@screens.position", "component": "x", "at": "end", "op": "==", "value": -804, "tolerance": 0.5 },
+        { "description": "without bouncing past", "target": "@screens.position", "component": "x", "at": "min", "op": ">", "value": -806 },
+        { "description": "and settled quickly", "target": "@screens.position", "component": "x", "settlesWithinMs": 1000 },
+        { "description": "The indicator sits under Saved", "target": "@indicator.position", "component": "x", "at": "end", "op": "==", "value": 223.25, "tolerance": 0.5 },
+        { "description": "Saved is tinted indigo", "target": "@saved_label.textColor", "component": "r", "at": "end", "op": "==", "value": 0.357, "tolerance": 0.01 },
+        { "description": "The saved icon is tinted too", "target": "@saved_icon.color", "component": "b", "at": "end", "op": "==", "value": 0.965, "tolerance": 0.01 },
+        { "description": "Home went gray", "target": "@home_label.textColor", "component": "r", "at": "end", "op": "==", "value": 0.631, "tolerance": 0.01 }
+      ]
+    },
+    {
+      "name": "Tapping Profile, then Home, comes back",
+      "events": [
+        { "kind": "tap", "target": "@tab_profile", "atMs": 100 },
+        { "kind": "tap", "target": "@tab_home", "atMs": 900 }
+      ],
+      "durationMs": 2100,
+      "expect": [
+        { "description": "Current Tab is 0 again", "target": "current_tab.option", "at": "end", "op": "==", "value": 0 },
+        { "description": "It had reached the Profile screen", "target": "@screens.position", "component": "x", "at": "min", "op": "<", "value": -1150 },
+        { "description": "The Home screen is showing", "target": "@screens.position", "component": "x", "at": "end", "op": "==", "value": 0, "tolerance": 0.5 },
+        { "description": "The indicator is back under Home", "target": "@indicator.position", "component": "x", "at": "end", "op": "==", "value": 22.25, "tolerance": 0.5 }
+      ]
+    }
+  ]
+}

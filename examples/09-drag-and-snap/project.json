@@ -1,0 +1,13 @@
+{
+  "formatVersion": 1,
+  "name": "Drag and Snap",
+  "generator": "Sonobe 0.1.0",
+  "root": "main",
+  "device": { "preset": "iphone-17-pro" },
+  "background": "#0E0F1AFF",
+  "meta": {
+    "description": "Drag your self view during a video call and fling it toward any corner. It follows your finger, then glides to the corner a throw at that speed would reach.",
+    "guides": ["05-springs-and-feel", "06-gestures"],
+    "recipe": "09-drag-and-snap"
+  }
+}

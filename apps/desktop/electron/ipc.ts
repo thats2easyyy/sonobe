@@ -21,6 +21,11 @@ export const IPC = {
   setDocumentEdited: "sonobe:window:set-edited",
   setTitle: "sonobe:window:set-title",
   mcpStatus: "sonobe:mcp:status",
+  previewStatus: "sonobe:preview:status",
+  previewStart: "sonobe:preview:start",
+  previewStop: "sonobe:preview:stop",
+  /** main → renderer: phone preview status changed. */
+  previewChanged: "sonobe:preview:changed",
   rpcRequest: "sonobe:rpc:request",
   rpcResponse: "sonobe:rpc:response",
   /** renderer → main: the full list of registered rpc method names. */

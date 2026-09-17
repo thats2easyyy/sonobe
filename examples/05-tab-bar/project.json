@@ -1,0 +1,13 @@
+{
+  "formatVersion": 1,
+  "name": "Tab Bar",
+  "generator": "Sonobe 0.1.0",
+  "root": "main",
+  "device": { "preset": "iphone-17-pro" },
+  "background": "#F4F4F6FF",
+  "meta": {
+    "description": "Four tabs that slide between screens. Option Switch remembers the tab, Option Pickers turn it into positions, and springs move the screens and the indicator.",
+    "guides": ["02-isat", "03-states-and-pulses"],
+    "recipe": "05-tab-bar"
+  }
+}

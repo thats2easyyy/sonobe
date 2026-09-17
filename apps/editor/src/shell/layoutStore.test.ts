@@ -25,8 +25,12 @@ describe("sanitizeLayout", () => {
     expect(layout.collapsed).toEqual({ ...DEFAULT_LAYOUT.collapsed, inspector: true });
     expect(layout.viewMode).toBe("split");
     expect(layout.splitDirection).toBe("columns");
-    expect(layout.drawer).toBe("assistant");
+    expect(layout.drawer).toBeNull();
     expect(layout.hudTab).toBe("ai");
+  });
+
+  it("keeps the Learn drawer", () => {
+    expect(sanitizeLayout({ drawer: "learn" }).drawer).toBe("learn");
   });
 });
 
@@ -45,9 +49,8 @@ describe("createLayoutStore", () => {
     s.toggleCollapsed("layers");
     expect(store.getState().collapsed.layers).toBe(true);
     s.toggleDrawer("learn");
-    s.toggleDrawer("assistant");
-    expect(store.getState().drawer).toBe("assistant");
-    s.toggleDrawer("assistant");
+    expect(store.getState().drawer).toBe("learn");
+    s.toggleDrawer("learn");
     expect(store.getState().drawer).toBeNull();
     s.toggleCollapsed("hud", true);
     s.setHudTab("diagnostics");

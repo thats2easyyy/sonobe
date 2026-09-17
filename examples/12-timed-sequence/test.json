@@ -1,0 +1,53 @@
+{
+  "description": "The stages play in order at their scheduled times, everything is in place by two seconds, and Replay plays it all again from the top.",
+  "scenarios": [
+    {
+      "name": "Nothing shows at first",
+      "events": [],
+      "durationMs": 100,
+      "expect": [
+        { "description": "The circle hasn't popped yet", "target": "@check_circle.scale", "at": 50, "op": "<", "value": 0.05 },
+        { "description": "The title is hidden", "target": "@title.opacity", "at": 50, "op": "==", "value": 0 },
+        { "description": "Replay is hidden", "target": "@replay_button.opacity", "at": 50, "op": "==", "value": 0 }
+      ]
+    },
+    {
+      "name": "The stages play in order",
+      "events": [],
+      "durationMs": 1100,
+      "expect": [
+        { "description": "The circle has popped by 0.4 s", "target": "@check_circle.scale", "at": 400, "op": ">", "value": 0.8 },
+        { "description": "but the check hasn't started drawing", "target": "@checkmark.strokeEnd", "at": 400, "op": "==", "value": 0 },
+        { "description": "The check is drawing at 0.6 s", "target": "@checkmark.strokeEnd", "at": 600, "op": ">", "value": 0.3 },
+        { "description": "and finished by 1 s", "target": "@checkmark.strokeEnd", "at": 1000, "op": "==", "value": 1, "tolerance": 0.001 },
+        { "description": "The title is still hidden at 0.75 s", "target": "@title.opacity", "at": 750, "op": "==", "value": 0 },
+        { "description": "and fading in at 1 s", "target": "@title.opacity", "at": 1000, "op": ">", "value": 0.5 },
+        { "description": "The receipt is still off screen at 1 s", "target": "@details.position", "component": "y", "at": 1000, "op": "==", "value": 900 }
+      ]
+    },
+    {
+      "name": "Everything is in place by two seconds",
+      "events": [],
+      "durationMs": 2400,
+      "expect": [
+        { "description": "The circle is full size", "target": "@check_circle.scale", "at": "end", "op": "==", "value": 1, "tolerance": 0.005 },
+        { "description": "The amount is visible", "target": "@amount.opacity", "at": "end", "op": "==", "value": 1 },
+        { "description": "The receipt slid into place", "target": "@details.position", "component": "y", "at": "end", "op": "==", "value": 548, "tolerance": 0.5 },
+        { "description": "Replay is visible", "target": "@replay_button.opacity", "at": "end", "op": "==", "value": 1 },
+        { "description": "The check path parses", "target": "check_shape.error", "at": "end", "op": "==", "value": false }
+      ]
+    },
+    {
+      "name": "Replay plays it again from the top",
+      "events": [{ "kind": "tap", "target": "@replay_button", "atMs": 2200 }],
+      "durationMs": 4600,
+      "expect": [
+        { "description": "Just after the tap the circle is gone again", "target": "@check_circle.scale", "at": 2320, "op": "<", "value": 0.2 },
+        { "description": "and the check is undrawn", "target": "@checkmark.strokeEnd", "at": 2320, "op": "==", "value": 0 },
+        { "description": "Then it all plays through again: the check is drawn", "target": "@checkmark.strokeEnd", "at": "end", "op": "==", "value": 1, "tolerance": 0.001 },
+        { "description": "the receipt is in place", "target": "@details.position", "component": "y", "at": "end", "op": "==", "value": 548, "tolerance": 0.5 },
+        { "description": "and Replay is back", "target": "@replay_button.opacity", "at": "end", "op": "==", "value": 1 }
+      ]
+    }
+  ]
+}

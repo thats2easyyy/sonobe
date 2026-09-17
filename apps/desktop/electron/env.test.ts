@@ -7,21 +7,22 @@ import { isAppUrl, isExternalUrl } from "./security.ts";
 
 describe("readDesktopEnv", () => {
   it("defaults to production behavior", () => {
-    expect(readDesktopEnv({})).toEqual({ devUrl: null, mute: false, mcpPort: null, mcpEnabled: true, home: null, userData: null, editorDist: null, testHooks: false });
+    expect(readDesktopEnv({})).toEqual({ devUrl: null, mute: false, mcpPort: null, mcpEnabled: true, home: null, userData: null, editorDist: null, testHooks: false, lan: false, lanPort: null });
   });
 
   it("parses switches", () => {
-    const env = readDesktopEnv({ SONOBE_DEV_URL: "http://localhost:5199", SONOBE_MUTE: "1", SONOBE_MCP_PORT: "47821", SONOBE_MCP: "0", SONOBE_HOME: " /tmp/h ", SONOBE_TEST: "true" });
+    const env = readDesktopEnv({ SONOBE_DEV_URL: "http://localhost:5199", SONOBE_MUTE: "1", SONOBE_MCP_PORT: "47821", SONOBE_MCP: "0", SONOBE_HOME: " /tmp/h ", SONOBE_TEST: "true", SONOBE_LAN: "1", SONOBE_LAN_PORT: "8765" });
     expect(env.devUrl?.origin).toBe("http://localhost:5199");
-    expect(env).toMatchObject({ mute: true, mcpPort: 47821, mcpEnabled: false, home: "/tmp/h", testHooks: true });
+    expect(env).toMatchObject({ mute: true, mcpPort: 47821, mcpEnabled: false, home: "/tmp/h", testHooks: true, lan: true, lanPort: 8765 });
   });
 
   it("warns and ignores invalid values", () => {
     const warn = vi.fn();
-    const env = readDesktopEnv({ SONOBE_DEV_URL: "javascript:alert(1)", SONOBE_MCP_PORT: "99999" }, warn);
+    const env = readDesktopEnv({ SONOBE_DEV_URL: "javascript:alert(1)", SONOBE_MCP_PORT: "99999", SONOBE_LAN_PORT: "phone" }, warn);
     expect(env.devUrl).toBeNull();
     expect(env.mcpPort).toBeNull();
-    expect(warn).toHaveBeenCalledTimes(2);
+    expect(env.lanPort).toBeNull();
+    expect(warn).toHaveBeenCalledTimes(3);
   });
 });
 

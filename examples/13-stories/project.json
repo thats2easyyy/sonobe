@@ -1,0 +1,13 @@
+{
+  "formatVersion": 1,
+  "name": "Stories",
+  "generator": "Sonobe 0.1.0",
+  "root": "main",
+  "device": { "preset": "iphone-17-pro" },
+  "background": "#000000FF",
+  "meta": {
+    "description": "Three stories that advance on their own every five seconds. The bars at the top fill as each one plays; tap the right side to skip ahead or the left side to go back.",
+    "guides": ["03-states-and-pulses", "07-loops"],
+    "recipe": "13-stories"
+  }
+}

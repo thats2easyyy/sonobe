@@ -1,0 +1,49 @@
+{
+  "description": "Letting go past 64 points turns Refreshing on, the list stays 64 points down with a spinning arc, and 1.6 seconds later it slides back and the status updates. Small pulls just spring back.",
+  "scenarios": [
+    {
+      "name": "Pulling far and letting go starts a refresh",
+      "events": [{ "kind": "drag", "from": [201, 300], "to": [201, 580], "durationMs": 400, "atMs": 100 }],
+      "durationMs": 1500,
+      "expect": [
+        { "description": "The pull went past the threshold", "target": "feed_scroll.y", "at": "max", "op": ">", "value": 64 },
+        { "description": "Refreshing is on", "target": "refreshing.on", "at": "end", "op": "==", "value": true },
+        { "description": "The list is held 64 points down", "target": "@content.position", "component": "y", "at": "end", "op": "==", "value": 64, "tolerance": 1.5 },
+        { "description": "The spinner is fully visible", "target": "@spinner.opacity", "at": "end", "op": "==", "value": 1, "tolerance": 0.01 },
+        { "description": "and it's spinning", "target": "@spinner.rotation", "at": "max", "op": ">", "value": 90 }
+      ]
+    },
+    {
+      "name": "The refresh finishes and the list slides back up",
+      "events": [{ "kind": "drag", "from": [201, 300], "to": [201, 580], "durationMs": 400, "atMs": 100 }],
+      "durationMs": 3600,
+      "expect": [
+        { "description": "Refreshing is off again", "target": "refreshing.on", "at": "end", "op": "==", "value": false },
+        { "description": "The list is back at the top", "target": "@content.position", "component": "y", "at": "end", "op": "==", "value": 0, "tolerance": 0.5 },
+        { "description": "One refresh happened", "target": "refresh_count.count", "at": "end", "op": "==", "value": 1 },
+        { "description": "The status says so", "target": "@subtitle.text", "at": "end", "op": "==", "value": "Updated just now" },
+        { "description": "The spinner has faded out", "target": "@spinner.opacity", "at": "end", "op": "<", "value": 0.02 }
+      ]
+    },
+    {
+      "name": "A small pull just springs back",
+      "events": [{ "kind": "drag", "from": [201, 300], "to": [201, 380], "durationMs": 400, "atMs": 100 }],
+      "durationMs": 1500,
+      "expect": [
+        { "description": "Refreshing never turned on", "target": "refreshing.on", "at": "max", "op": "==", "value": 0 },
+        { "description": "The spinner drew partway in", "target": "@spinner.strokeEnd", "at": "max", "op": ">", "value": 0.2 },
+        { "description": "The list is back at the top", "target": "@content.position", "component": "y", "at": "end", "op": "==", "value": 0, "tolerance": 0.5 },
+        { "description": "The status hasn't changed", "target": "@subtitle.text", "at": "end", "op": "==", "value": "Pull down to refresh" }
+      ]
+    },
+    {
+      "name": "Scrolling the other way doesn't refresh",
+      "events": [{ "kind": "drag", "from": [201, 700], "to": [201, 400], "durationMs": 300, "atMs": 100 }],
+      "durationMs": 1500,
+      "expect": [
+        { "description": "Refreshing never turned on", "target": "refreshing.on", "at": "max", "op": "==", "value": 0 },
+        { "description": "The feed scrolled up", "target": "@content.position", "component": "y", "at": "end", "op": "<", "value": -200 }
+      ]
+    }
+  ]
+}

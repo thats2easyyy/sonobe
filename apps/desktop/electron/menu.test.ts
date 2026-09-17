@@ -106,6 +106,14 @@ describe("menu spec", () => {
     expect(withRecent).toContain("clearRecent");
     expect(JSON.stringify(spec("darwin"))).toContain("No Recent Projects");
   });
+
+  it("offers Stop Phone Preview only while the preview runs", () => {
+    expect(labels(spec("darwin"))).not.toContain("Stop Phone Preview");
+    const running = buildMenuSpec({ platform: "darwin", appName: "Sonobe", recentProjects: [], dev: false, previewRunning: true });
+    const viewer = running.find((n): n is Extract<MenuNode, { kind: "submenu" }> => n.kind === "submenu" && n.label === "Viewer")!;
+    expect(viewer.items.at(-2)).toEqual({ kind: "command", id: "viewer.previewOnDevice" });
+    expect(viewer.items.at(-1)).toEqual({ kind: "action", action: "stopPreview", label: "Stop Phone Preview" });
+  });
 });
 
 describe("toMenuTemplate", () => {

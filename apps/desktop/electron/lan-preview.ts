@@ -1,0 +1,414 @@
+/**
+ * LAN preview server ("Preview on Phone", SONOBE_LAN=1). Serves the web player to devices on the
+ * local network and streams the open document to them over WebSocket as it changes.
+ *
+ * Every URL lives under /p/<token>/ with a random 128-bit token (the QR code carries it), pages send
+ * no Referer, sockets must come from the player's own origin, and the socket is one-way: nothing a
+ * phone sends can change the document. Node only.
+ */
+
+import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
+import { createReadStream } from "node:fs";
+import { stat } from "node:fs/promises";
+import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
+import type { AddressInfo } from "node:net";
+import { networkInterfaces, type NetworkInterfaceInfo } from "node:os";
+import path from "node:path";
+import { WebSocketServer, type WebSocket } from "ws";
+
+/** The document the player shows. */
+export interface PreviewDocument {
+  docId: string;
+  name: string;
+  revision: number;
+  doc: unknown;
+}
+
+/** Messages sent to the player over the socket. */
+export type PreviewMessage =
+  | { type: "hello"; version: string }
+  | { type: "document"; docId: string; name: string; revision: number; doc: unknown }
+  | { type: "offline"; message: string };
+
+export interface LanPreviewOptions {
+  /** Directory with the built player (index.html, player.js, player.css). */
+  playerRoot: string;
+  /** The document to show, or null when nothing is open. */
+  getDocument(): Promise<PreviewDocument | null>;
+  /** Absolute path of a file under the current project's assets/ folder, or null. */
+  resolveAsset?(file: string): Promise<string | null>;
+  /** Default 0 (a free port). */
+  port?: number | null;
+  /** Bind address. Default "0.0.0.0" (every interface). */
+  host?: string;
+  /** URL token. Default: 16 random bytes, base64url. */
+  token?: string;
+  /** How often to look for a new revision while players are connected. Default 400 ms. */
+  pollMs?: number;
+  version?: string;
+  /** Network interfaces (tests). */
+  interfaces?: () => NodeJS.Dict<NetworkInterfaceInfo[]>;
+  /** Players connected or disconnected. */
+  onClientsChange?(count: number): void;
+  log?(level: "info" | "warn" | "error", message: string): void;
+}
+
+export interface LanPreviewHandle {
+  readonly port: number;
+  readonly token: string;
+  /** The best player URL for a phone on the same network. */
+  readonly url: string;
+  /** One player URL per usable address, best first. */
+  readonly urls: string[];
+  /** False when no LAN address was found (only this computer can open the URL). */
+  readonly lanReachable: boolean;
+  clientCount(): number;
+  /** Look for a new revision now (e.g. right after an edit). */
+  poke(): void;
+  close(): Promise<void>;
+}
+
+export const OFFLINE_MESSAGE = "Open a prototype in Sonobe on your computer to preview it here.";
+
+const CONTENT_TYPES: Record<string, string> = {
+  ".html": "text/html; charset=utf-8",
+  ".js": "text/javascript; charset=utf-8",
+  ".css": "text/css; charset=utf-8",
+  ".json": "application/json; charset=utf-8",
+  ".map": "application/json; charset=utf-8",
+  ".svg": "image/svg+xml",
+  ".png": "image/png",
+  ".jpg": "image/jpeg",
+  ".jpeg": "image/jpeg",
+  ".gif": "image/gif",
+  ".webp": "image/webp",
+  ".avif": "image/avif",
+  ".mp4": "video/mp4",
+  ".mov": "video/quicktime",
+  ".webm": "video/webm",
+  ".mp3": "audio/mpeg",
+  ".m4a": "audio/mp4",
+  ".wav": "audio/wav",
+  ".ogg": "audio/ogg",
+  ".woff": "font/woff",
+  ".woff2": "font/woff2",
+  ".ttf": "font/ttf",
+  ".otf": "font/otf",
+};
+
+const PLAYER_CSP = [
+  "default-src 'self'",
+  "script-src 'self'",
+  "style-src 'self' 'unsafe-inline'",
+  "img-src 'self' data: blob:",
+  "media-src 'self' blob:",
+  "font-src 'self' data:",
+  "connect-src 'self' ws: wss:",
+  "worker-src 'self' blob:",
+  "base-uri 'none'",
+  "frame-ancestors 'none'",
+  "form-action 'none'",
+].join("; ");
+
+/** Non-internal IPv4 addresses, Wi-Fi/Ethernet first and VPN/virtual interfaces last. */
+export function lanAddresses(interfaces: NodeJS.Dict<NetworkInterfaceInfo[]> = networkInterfaces()): string[] {
+  const found: { address: string; rank: number }[] = [];
+  for (const [name, list] of Object.entries(interfaces)) {
+    for (const info of list ?? []) {
+      const family = info.family as string | number;
+      if (info.internal || (family !== "IPv4" && family !== 4) || info.address.startsWith("169.254.")) continue;
+      const rank = /^(en|eth|wl|wlan|wi-?fi|ethernet)/i.test(name) ? 0 : /^(utun|tun|tap|ppp|ipsec|vboxnet|vmnet|docker|br-|veth|awdl|llw|bridge|zt|tailscale)/i.test(name) ? 2 : 1;
+      found.push({ address: info.address, rank });
+    }
+  }
+  found.sort((a, b) => a.rank - b.rank);
+  return [...new Set(found.map((f) => f.address))];
+}
+
+export function previewUrl(address: string, port: number, token: string): string {
+  const host = address.includes(":") ? `[${address}]` : address;
+  return `http://${host}:${port}/p/${token}/`;
+}
+
+function tokensMatch(candidate: string, token: string): boolean {
+  const a = createHash("sha256").update(candidate).digest();
+  const b = createHash("sha256").update(token).digest();
+  return timingSafeEqual(a, b);
+}
+
+/** Resolve a request path under /p/<token>/: the rest of the path, "redirect" for /p/<token>, or null. */
+export function matchPreviewPath(rawUrl: string | undefined, token: string): { rest: string } | "redirect" | null {
+  const pathname = (rawUrl ?? "/").split(/[?#]/)[0]!;
+  const match = /^\/p\/([A-Za-z0-9_-]{1,128})(\/.*)?$/.exec(pathname);
+  if (!match || !tokensMatch(match[1]!, token)) return null;
+  if (match[2] === undefined) return "redirect";
+  try {
+    const rest = decodeURIComponent(match[2].slice(1));
+    return rest.includes("\0") ? null : { rest };
+  } catch {
+    return null;
+  }
+}
+
+/** A file under `root`, or null when `rel` escapes it. */
+export function resolveUnder(root: string, rel: string): string | null {
+  const file = path.resolve(root, rel);
+  const relative = path.relative(root, file);
+  return relative === "" || relative.startsWith("..") || path.isAbsolute(relative) ? null : file;
+}
+
+const baseHeaders = { "X-Content-Type-Options": "nosniff", "Referrer-Policy": "no-referrer", "Cross-Origin-Resource-Policy": "same-origin" };
+
+function sendText(res: ServerResponse, status: number, text: string, headers: Record<string, string> = {}): void {
+  if (res.headersSent) {
+    res.end();
+    return;
+  }
+  res.writeHead(status, { ...baseHeaders, "Content-Type": "text/plain; charset=utf-8", "Content-Length": String(Buffer.byteLength(text)), "Cache-Control": "no-store", ...headers });
+  res.end(text);
+}
+
+async function sendFile(req: IncomingMessage, res: ServerResponse, file: string, cacheControl: string, extraHeaders: Record<string, string> = {}): Promise<void> {
+  let size: number;
+  try {
+    const info = await stat(file);
+    if (!info.isFile()) return sendText(res, 404, "Not found");
+    size = info.size;
+  } catch {
+    return sendText(res, 404, "Not found");
+  }
+  const type = CONTENT_TYPES[path.extname(file).toLowerCase()] ?? "application/octet-stream";
+  const headers: Record<string, string> = { ...baseHeaders, "Content-Type": type, "Cache-Control": cacheControl, "Accept-Ranges": "bytes", ...extraHeaders };
+  // Safari needs byte ranges for video.
+  const range = /^bytes=(\d*)-(\d*)$/.exec(String(req.headers.range ?? ""));
+  let start = 0;
+  let end = size - 1;
+  let status = 200;
+  if (range && (range[1] || range[2])) {
+    if (range[1]) {
+      start = Number(range[1]);
+      end = range[2] ? Math.min(Number(range[2]), size - 1) : size - 1;
+    } else {
+      start = Math.max(0, size - Number(range[2]));
+    }
+    if (start > end || start >= size) return sendText(res, 416, "Range not satisfiable", { "Content-Range": `bytes */${size}` });
+    status = 206;
+    headers["Content-Range"] = `bytes ${start}-${end}/${size}`;
+  }
+  headers["Content-Length"] = String(size === 0 ? 0 : end - start + 1);
+  res.writeHead(status, headers);
+  if (req.method === "HEAD" || size === 0) {
+    res.end();
+    return;
+  }
+  await new Promise<void>((resolve) => {
+    const stream = createReadStream(file, { start, end });
+    stream.on("error", () => {
+      res.destroy();
+      resolve();
+    });
+    stream.on("end", resolve);
+    stream.pipe(res);
+  });
+}
+
+function sameOrigin(req: IncomingMessage): boolean {
+  const origin = req.headers.origin;
+  if (origin === undefined) return true;
+  try {
+    return new URL(origin).host.toLowerCase() === String(req.headers.host ?? "").toLowerCase();
+  } catch {
+    return false;
+  }
+}
+
+export async function startLanPreview(opts: LanPreviewOptions): Promise<LanPreviewHandle> {
+  const log = opts.log ?? (() => undefined);
+  const token = opts.token ?? randomBytes(16).toString("base64url");
+  const pollMs = Math.max(50, opts.pollMs ?? 400);
+  const playerRoot = path.resolve(opts.playerRoot);
+  const hello = JSON.stringify({ type: "hello", version: opts.version ?? "0.0.0" } satisfies PreviewMessage);
+
+  let lastKey: string | null = null;
+  let lastPayload: string | null = null;
+  let polling = false;
+  let pollAgain = false;
+  let pollTimer: ReturnType<typeof setInterval> | null = null;
+  let closed = false;
+
+  const wss = new WebSocketServer({ noServer: true, maxPayload: 16 * 1024, clientTracking: true });
+  const alive = new WeakMap<WebSocket, boolean>();
+
+  const broadcast = (payload: string) => {
+    for (const client of wss.clients) if (client.readyState === client.OPEN) client.send(payload);
+  };
+
+  const current = async (): Promise<{ key: string; payload: string }> => {
+    const doc = await opts.getDocument();
+    if (!doc) return { key: "offline", payload: JSON.stringify({ type: "offline", message: OFFLINE_MESSAGE } satisfies PreviewMessage) };
+    return { key: `${doc.docId}@${doc.revision}`, payload: JSON.stringify({ type: "document", docId: doc.docId, name: doc.name, revision: doc.revision, doc: doc.doc } satisfies PreviewMessage) };
+  };
+
+  const poll = async () => {
+    if (closed) return;
+    if (polling) {
+      pollAgain = true;
+      return;
+    }
+    polling = true;
+    try {
+      const next = await current();
+      if (next.key !== lastKey) {
+        lastKey = next.key;
+        lastPayload = next.payload;
+        broadcast(next.payload);
+      }
+    } catch (err) {
+      log("warn", `Phone preview couldn't read the document: ${err instanceof Error ? err.message : String(err)}`);
+    } finally {
+      polling = false;
+      if (pollAgain) {
+        pollAgain = false;
+        void poll();
+      }
+    }
+  };
+
+  let reportedClients = 0;
+  const syncPolling = () => {
+    if (wss.clients.size !== reportedClients) {
+      reportedClients = wss.clients.size;
+      if (!closed) opts.onClientsChange?.(reportedClients);
+    }
+    if (wss.clients.size > 0 && !pollTimer && !closed) {
+      pollTimer = setInterval(() => void poll(), pollMs);
+      pollTimer.unref?.();
+    } else if (wss.clients.size === 0 && pollTimer) {
+      clearInterval(pollTimer);
+      pollTimer = null;
+      lastKey = null;
+      lastPayload = null;
+    }
+  };
+
+  wss.on("connection", (ws: WebSocket) => {
+    alive.set(ws, true);
+    ws.on("pong", () => alive.set(ws, true));
+    ws.on("message", (data) => {
+      if (String(data) === '{"type":"ping"}') ws.send('{"type":"pong"}');
+    });
+    ws.on("close", syncPolling);
+    ws.on("error", () => ws.terminate());
+    ws.send(hello);
+    if (lastPayload) ws.send(lastPayload);
+    syncPolling();
+    void poll();
+  });
+
+  const heartbeat = setInterval(() => {
+    for (const client of wss.clients) {
+      if (alive.get(client) === false) {
+        client.terminate();
+        continue;
+      }
+      alive.set(client, false);
+      client.ping();
+    }
+  }, 20_000);
+  heartbeat.unref?.();
+
+  const handle = async (req: IncomingMessage, res: ServerResponse) => {
+    const route = matchPreviewPath(req.url, token);
+    if (route === null) return sendText(res, 404, "Not found");
+    if (req.method !== "GET" && req.method !== "HEAD") return sendText(res, 405, "Method not allowed", { Allow: "GET, HEAD" });
+    if (route === "redirect") {
+      res.writeHead(308, { ...baseHeaders, Location: `/p/${token}/`, "Cache-Control": "no-store", "Content-Length": "0" });
+      res.end();
+      return;
+    }
+    const rest = route.rest;
+    if (rest === "" || rest === "index.html") {
+      return sendFile(req, res, path.join(playerRoot, "index.html"), "no-store", { "Content-Security-Policy": PLAYER_CSP, "X-Frame-Options": "DENY" });
+    }
+    if (rest === "document.json") {
+      const next = await current();
+      const body = next.payload;
+      res.writeHead(next.key === "offline" ? 503 : 200, { ...baseHeaders, "Content-Type": "application/json; charset=utf-8", "Content-Length": String(Buffer.byteLength(body)), "Cache-Control": "no-store" });
+      res.end(req.method === "HEAD" ? undefined : body);
+      return;
+    }
+    if (rest.startsWith("assets/")) {
+      const name = rest.slice("assets/".length);
+      if (!/^[A-Za-z0-9._-]{1,200}$/.test(name) || name.startsWith(".") || !opts.resolveAsset) return sendText(res, 404, "Not found");
+      const file = await opts.resolveAsset(name);
+      return file ? sendFile(req, res, file, "private, max-age=60") : sendText(res, 404, "Not found");
+    }
+    const file = resolveUnder(playerRoot, rest);
+    if (!file) return sendText(res, 404, "Not found");
+    return sendFile(req, res, file, "no-cache");
+  };
+
+  const server: Server = createServer((req, res) => {
+    handle(req, res).catch((err: unknown) => {
+      log("error", `Phone preview request failed: ${err instanceof Error ? (err.stack ?? err.message) : String(err)}`);
+      sendText(res, 500, "Internal error");
+    });
+  });
+  server.headersTimeout = 30_000;
+  server.requestTimeout = 60_000;
+
+  server.on("upgrade", (req, socket, head) => {
+    const route = matchPreviewPath(req.url, token);
+    if (route === null || route === "redirect" || route.rest !== "sync" || !sameOrigin(req) || closed) {
+      socket.end("HTTP/1.1 404 Not Found\r\nConnection: close\r\nContent-Length: 0\r\n\r\n");
+      return;
+    }
+    wss.handleUpgrade(req, socket, head, (ws) => wss.emit("connection", ws, req));
+  });
+
+  const bindHost = opts.host ?? "0.0.0.0";
+  const requestedPort = opts.port ?? 0;
+  await new Promise<void>((resolve, reject) => {
+    const onError = (err: NodeJS.ErrnoException) => {
+      server.off("listening", onListening);
+      reject(err.code === "EADDRINUSE" ? new Error(`Phone preview port ${requestedPort} is already in use. Set SONOBE_LAN_PORT to a free port or unset it.`) : err);
+    };
+    const onListening = () => {
+      server.off("error", onError);
+      resolve();
+    };
+    server.once("error", onError);
+    server.once("listening", onListening);
+    server.listen({ port: requestedPort, host: bindHost });
+  });
+  server.on("error", (err) => log("error", `Phone preview server error: ${err.message}`));
+
+  const port = (server.address() as AddressInfo).port;
+  const wildcard = bindHost === "0.0.0.0" || bindHost === "::";
+  const addresses = wildcard ? lanAddresses(opts.interfaces?.() ?? networkInterfaces()) : [bindHost];
+  const lanReachable = addresses.some((a) => a !== "127.0.0.1" && a !== "localhost" && a !== "::1");
+  const urls = (addresses.length ? addresses : ["127.0.0.1"]).map((a) => previewUrl(a, port, token));
+  log("info", `Phone preview on ${urls[0]}${lanReachable ? "" : " (no local network found; only this computer can open it)"}`);
+
+  return {
+    port,
+    token,
+    url: urls[0]!,
+    urls,
+    lanReachable,
+    clientCount: () => wss.clients.size,
+    poke: () => void poll(),
+    close() {
+      if (closed) return Promise.resolve();
+      closed = true;
+      clearInterval(heartbeat);
+      if (pollTimer) clearInterval(pollTimer);
+      for (const client of wss.clients) client.terminate();
+      wss.close();
+      return new Promise<void>((resolve) => {
+        server.close(() => resolve());
+        server.closeAllConnections();
+      });
+    },
+  };
+}

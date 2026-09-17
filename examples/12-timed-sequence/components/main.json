@@ -1,0 +1,588 @@
+{
+  "formatVersion": 1,
+  "id": "main",
+  "name": "Main",
+  "kind": "prototype",
+  "notes": "Watch it play, then tap Replay. When Prototype Starts pulses once; five Waits started by that one pulse finish at 0.1, 0.45, 0.8, 1.15 and 1.5 seconds, and each Done drives its own animation. Replay restarts the prototype, so everything plays from the top.",
+  "size": [402, 874],
+  "interface": { "inputs": {}, "outputs": {} },
+  "layers": [
+    {
+      "id": "backdrop",
+      "type": "gradient",
+      "name": "Backdrop",
+      "props": {
+        "gradient": {
+          "gradient": {
+            "kind": "linear",
+            "stops": [[0, "#D1FAE5FF"], [0.6, "#F8FAFCFF"]],
+            "start": [0.5, 0],
+            "end": [0.5, 1]
+          }
+        },
+        "hitTest": false,
+        "size": [402, 874]
+      }
+    },
+    {
+      "id": "app_status_bar",
+      "type": "group",
+      "name": "Status Bar",
+      "props": {
+        "hitTest": false,
+        "size": [402, 62]
+      },
+      "children": [
+        {
+          "id": "app_clock",
+          "type": "text",
+          "name": "Clock",
+          "props": {
+            "anchor": [0.5, 0],
+            "fontSize": 17,
+            "fontWeight": 600,
+            "hitTest": false,
+            "position": [72, 20],
+            "text": "9:41",
+            "textAlignment": "center",
+            "textColor": "#111118FF"
+          }
+        },
+        {
+          "id": "app_signal_1",
+          "type": "rectangle",
+          "name": "Signal 1",
+          "props": {
+            "color": "#111118FF",
+            "cornerRadius": 1,
+            "hitTest": false,
+            "position": [292, 30],
+            "size": [3, 4]
+          }
+        },
+        {
+          "id": "app_signal_2",
+          "type": "rectangle",
+          "name": "Signal 2",
+          "props": {
+            "color": "#111118FF",
+            "cornerRadius": 1,
+            "hitTest": false,
+            "position": [297, 28],
+            "size": [3, 6]
+          }
+        },
+        {
+          "id": "app_signal_3",
+          "type": "rectangle",
+          "name": "Signal 3",
+          "props": {
+            "color": "#111118FF",
+            "cornerRadius": 1,
+            "hitTest": false,
+            "position": [302, 26],
+            "size": [3, 8]
+          }
+        },
+        {
+          "id": "app_signal_4",
+          "type": "rectangle",
+          "name": "Signal 4",
+          "props": {
+            "color": "#111118FF",
+            "cornerRadius": 1,
+            "hitTest": false,
+            "position": [307, 24],
+            "size": [3, 10]
+          }
+        },
+        {
+          "id": "app_battery",
+          "type": "rectangle",
+          "name": "Battery",
+          "props": {
+            "color": "#00000000",
+            "cornerRadius": 3.5,
+            "hitTest": false,
+            "position": [322, 23],
+            "size": [25, 12],
+            "strokeColor": "#11111859",
+            "strokeWidth": 1
+          }
+        },
+        {
+          "id": "app_battery_level",
+          "type": "rectangle",
+          "name": "Battery Level",
+          "props": {
+            "color": "#111118FF",
+            "cornerRadius": 2,
+            "hitTest": false,
+            "position": [324, 25],
+            "size": [19, 8]
+          }
+        },
+        {
+          "id": "app_battery_cap",
+          "type": "rectangle",
+          "name": "Battery Cap",
+          "props": {
+            "color": "#11111859",
+            "cornerRadius": 1,
+            "hitTest": false,
+            "position": [348, 27],
+            "size": [2, 4]
+          }
+        }
+      ]
+    },
+    {
+      "id": "check_ring",
+      "type": "oval",
+      "name": "Ring",
+      "props": {
+        "anchor": [0.5, 0.5],
+        "color": "#22C55E29",
+        "hitTest": false,
+        "position": [201, 290],
+        "scale": { "link": "ring_scale.output" },
+        "size": [168, 168]
+      }
+    },
+    {
+      "id": "check_circle",
+      "type": "oval",
+      "name": "Circle",
+      "props": {
+        "anchor": [0.5, 0.5],
+        "color": "#22C55EFF",
+        "hitTest": false,
+        "position": [201, 290],
+        "scale": { "link": "circle_scale.output" },
+        "shadowColor": "#22C55EFF",
+        "shadowOffset": [0, 10],
+        "shadowOpacity": 0.45,
+        "shadowRadius": 28,
+        "size": [120, 120]
+      }
+    },
+    {
+      "id": "checkmark",
+      "type": "shape",
+      "name": "Checkmark",
+      "props": {
+        "anchor": [0.5, 0.5],
+        "color": "#00000000",
+        "hitTest": false,
+        "lineCap": "round",
+        "lineJoin": "round",
+        "position": [201, 290],
+        "shape": { "link": "check_shape.shape" },
+        "size": [120, 120],
+        "strokeColor": "#FFFFFFFF",
+        "strokeEnd": { "link": "check_draw.output" },
+        "strokeWidth": 8
+      }
+    },
+    {
+      "id": "title",
+      "type": "text",
+      "name": "Title",
+      "props": {
+        "anchor": [0.5, 0],
+        "fontSize": 22,
+        "fontWeight": 700,
+        "hitTest": false,
+        "letterSpacing": -0.2,
+        "opacity": { "link": "title_fade.output" },
+        "position": { "link": "title_rise.output" },
+        "text": "Payment sent",
+        "textAlignment": "center",
+        "textColor": "#111118FF"
+      }
+    },
+    {
+      "id": "amount",
+      "type": "text",
+      "name": "Amount",
+      "props": {
+        "anchor": [0.5, 0],
+        "fontSize": 48,
+        "fontWeight": 700,
+        "hitTest": false,
+        "letterSpacing": -1,
+        "opacity": { "link": "title_fade.output" },
+        "position": { "link": "amount_rise.output" },
+        "text": "$248.00",
+        "textAlignment": "center",
+        "textColor": "#111118FF"
+      }
+    },
+    {
+      "id": "details",
+      "type": "group",
+      "name": "Receipt",
+      "props": {
+        "color": "#FFFFFFFF",
+        "cornerRadius": 20,
+        "hitTest": false,
+        "position": { "link": "details_position.output" },
+        "shadowColor": "#000000FF",
+        "shadowOffset": [0, 6],
+        "shadowOpacity": 0.08,
+        "shadowRadius": 18,
+        "size": [354, 136]
+      },
+      "children": [
+        {
+          "id": "detail_1",
+          "type": "group",
+          "name": "To",
+          "props": {
+            "position": [20, 16],
+            "size": [314, 32]
+          },
+          "children": [
+            {
+              "id": "detail_1_label",
+              "type": "text",
+              "name": "Label",
+              "props": {
+                "fontSize": 15,
+                "fontWeight": 400,
+                "hitTest": false,
+                "lineHeight": 21,
+                "position": [0, 6],
+                "text": "To",
+                "textColor": "#5F5F6BFF"
+              }
+            },
+            {
+              "id": "detail_1_value",
+              "type": "text",
+              "name": "Value",
+              "props": {
+                "anchor": [1, 0],
+                "fontSize": 15,
+                "fontWeight": 600,
+                "hitTest": false,
+                "position": [314, 6],
+                "text": "Juniper & Oak Catering",
+                "textAlignment": "right",
+                "textColor": "#111118FF"
+              }
+            }
+          ]
+        },
+        {
+          "id": "detail_2",
+          "type": "group",
+          "name": "When",
+          "props": {
+            "position": [20, 56],
+            "size": [314, 32]
+          },
+          "children": [
+            {
+              "id": "detail_2_label",
+              "type": "text",
+              "name": "Label",
+              "props": {
+                "fontSize": 15,
+                "fontWeight": 400,
+                "hitTest": false,
+                "lineHeight": 21,
+                "position": [0, 6],
+                "text": "When",
+                "textColor": "#5F5F6BFF"
+              }
+            },
+            {
+              "id": "detail_2_value",
+              "type": "text",
+              "name": "Value",
+              "props": {
+                "anchor": [1, 0],
+                "fontSize": 15,
+                "fontWeight": 600,
+                "hitTest": false,
+                "position": [314, 6],
+                "text": "Today, 9:41",
+                "textAlignment": "right",
+                "textColor": "#111118FF"
+              }
+            }
+          ]
+        },
+        {
+          "id": "detail_3",
+          "type": "group",
+          "name": "Reference",
+          "props": {
+            "position": [20, 96],
+            "size": [314, 32]
+          },
+          "children": [
+            {
+              "id": "detail_3_label",
+              "type": "text",
+              "name": "Label",
+              "props": {
+                "fontSize": 15,
+                "fontWeight": 400,
+                "hitTest": false,
+                "lineHeight": 21,
+                "position": [0, 6],
+                "text": "Reference",
+                "textColor": "#5F5F6BFF"
+              }
+            },
+            {
+              "id": "detail_3_value",
+              "type": "text",
+              "name": "Value",
+              "props": {
+                "anchor": [1, 0],
+                "fontSize": 15,
+                "fontWeight": 600,
+                "hitTest": false,
+                "position": [314, 6],
+                "text": "A7-2291",
+                "textAlignment": "right",
+                "textColor": "#111118FF"
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "replay_button",
+      "type": "group",
+      "name": "Replay Button",
+      "props": {
+        "color": "#111118FF",
+        "cornerRadius": 28,
+        "opacity": { "link": "button_fade.output" },
+        "position": [24, 740],
+        "size": [354, 56]
+      },
+      "children": [
+        {
+          "id": "replay_label",
+          "type": "text",
+          "name": "Replay Label",
+          "props": {
+            "anchor": [0.5, 0.5],
+            "fontSize": 17,
+            "fontWeight": 600,
+            "hitTest": false,
+            "position": [177, 28],
+            "text": "Replay",
+            "textAlignment": "center",
+            "textColor": "#FFFFFFFF"
+          }
+        }
+      ]
+    },
+    {
+      "id": "app_home_indicator",
+      "type": "rectangle",
+      "name": "Home Indicator",
+      "props": {
+        "anchor": [0.5, 1],
+        "color": "#111118FF",
+        "cornerRadius": 3,
+        "hitTest": false,
+        "position": [201, 866],
+        "size": [140, 5]
+      }
+    }
+  ],
+  "patches": {
+    "amount_rise": {
+      "type": "transition",
+      "name": "Amount Rise",
+      "typeParam": "point",
+      "inputs": {
+        "end": [201, 446],
+        "progress": { "link": "title_fade.output" },
+        "start": [201, 462]
+      },
+      "ui": { "x": 820, "y": 790 }
+    },
+    "button_fade": {
+      "type": "classicAnimation",
+      "name": "Button Fade",
+      "typeParam": "number",
+      "inputs": {
+        "curve": "cubicOut",
+        "duration": 0.3,
+        "number": { "link": "button_wait.done" }
+      },
+      "ui": { "x": 560, "y": 940 }
+    },
+    "button_wait": {
+      "type": "wait",
+      "name": "After 1.5 s",
+      "inputs": {
+        "duration": 1.5,
+        "start": { "link": "started.started" }
+      },
+      "ui": { "x": 300, "y": 940 }
+    },
+    "check_draw": {
+      "type": "classicAnimation",
+      "name": "Draw Check",
+      "typeParam": "number",
+      "inputs": {
+        "curve": "cubicOut",
+        "duration": 0.45,
+        "number": { "link": "check_wait.done" }
+      },
+      "ui": { "x": 560, "y": 490 }
+    },
+    "check_shape": {
+      "type": "svgPathShape",
+      "name": "Checkmark Shape",
+      "inputs": {
+        "pathData": "M34 62L52 80L88 42",
+        "size": [120, 120],
+        "viewBox": [0, 0, 120, 120]
+      },
+      "ui": { "x": 40, "y": 40 }
+    },
+    "check_wait": {
+      "type": "wait",
+      "name": "After 0.45 s",
+      "inputs": {
+        "duration": 0.45,
+        "start": { "link": "started.started" }
+      },
+      "ui": { "x": 300, "y": 490 }
+    },
+    "circle_scale": {
+      "type": "transition",
+      "name": "Circle Scale",
+      "typeParam": "number",
+      "inputs": {
+        "end": 1,
+        "progress": { "link": "circle_spring.output" },
+        "start": 0
+      },
+      "ui": { "x": 820, "y": 340 }
+    },
+    "circle_spring": {
+      "type": "popAnimation",
+      "name": "Circle Spring",
+      "typeParam": "number",
+      "inputs": {
+        "bounciness": 8,
+        "number": { "link": "circle_wait.done" },
+        "speed": 12
+      },
+      "ui": { "x": 560, "y": 340 }
+    },
+    "circle_wait": {
+      "type": "wait",
+      "name": "After 0.1 s",
+      "inputs": {
+        "duration": 0.1,
+        "start": { "link": "started.started" }
+      },
+      "ui": { "x": 300, "y": 340 }
+    },
+    "details_position": {
+      "type": "transition",
+      "name": "Receipt Position",
+      "typeParam": "point",
+      "inputs": {
+        "end": [24, 548],
+        "progress": { "link": "details_spring.output" },
+        "start": [24, 900]
+      },
+      "ui": { "x": 820, "y": 940 }
+    },
+    "details_spring": {
+      "type": "popAnimation",
+      "name": "Receipt Spring",
+      "typeParam": "number",
+      "inputs": {
+        "bounciness": 3,
+        "number": { "link": "details_wait.done" },
+        "speed": 12
+      },
+      "ui": { "x": 560, "y": 790 }
+    },
+    "details_wait": {
+      "type": "wait",
+      "name": "After 1.15 s",
+      "inputs": {
+        "duration": 1.15,
+        "start": { "link": "started.started" }
+      },
+      "ui": { "x": 300, "y": 790 }
+    },
+    "replay": {
+      "type": "restartPrototype",
+      "name": "Replay",
+      "inputs": { "restart": { "link": "tap_replay.tap" } },
+      "ui": { "x": 300, "y": 1240 }
+    },
+    "ring_scale": {
+      "type": "transition",
+      "name": "Ring Scale",
+      "typeParam": "number",
+      "inputs": {
+        "end": 1,
+        "progress": { "link": "circle_spring.output" },
+        "start": 0.5
+      },
+      "ui": { "x": 820, "y": 490 }
+    },
+    "started": {
+      "type": "whenPrototypeStarts",
+      "name": "Prototype Starts",
+      "inputs": {},
+      "ui": { "x": 40, "y": 340 }
+    },
+    "tap_replay": {
+      "type": "interaction",
+      "name": "Tap Replay",
+      "inputs": { "layer": { "layer": "replay_button" } },
+      "ui": { "x": 40, "y": 1240 }
+    },
+    "title_fade": {
+      "type": "classicAnimation",
+      "name": "Text Fade",
+      "typeParam": "number",
+      "inputs": {
+        "curve": "cubicOut",
+        "duration": 0.4,
+        "number": { "link": "title_wait.done" }
+      },
+      "ui": { "x": 560, "y": 640 }
+    },
+    "title_rise": {
+      "type": "transition",
+      "name": "Title Rise",
+      "typeParam": "point",
+      "inputs": {
+        "end": [201, 406],
+        "progress": { "link": "title_fade.output" },
+        "start": [201, 422]
+      },
+      "ui": { "x": 820, "y": 640 }
+    },
+    "title_wait": {
+      "type": "wait",
+      "name": "After 0.8 s",
+      "inputs": {
+        "duration": 0.8,
+        "start": { "link": "started.started" }
+      },
+      "ui": { "x": 300, "y": 640 }
+    }
+  },
+  "comments": []
+}

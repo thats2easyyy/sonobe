@@ -1,0 +1,1444 @@
+{
+  "formatVersion": 1,
+  "id": "main",
+  "name": "Main",
+  "kind": "prototype",
+  "notes": "Pull the list down more than 64 points and let go. Let Go Past Threshold turns on the moment the finger lifts while the list is pulled far enough, which turns Refreshing on; a Wait turns it off 1.6 seconds later.",
+  "size": [402, 874],
+  "interface": { "inputs": {}, "outputs": {} },
+  "layers": [
+    {
+      "id": "window",
+      "type": "group",
+      "name": "Window",
+      "props": {
+        "clip": true,
+        "position": [0, 130],
+        "size": [402, 744]
+      },
+      "children": [
+        {
+          "id": "spinner",
+          "type": "shape",
+          "name": "Spinner",
+          "props": {
+            "anchor": [0.5, 0.5],
+            "color": "#00000000",
+            "hitTest": false,
+            "lineCap": "round",
+            "opacity": { "link": "spinner_reveal.output" },
+            "position": [201, 34],
+            "rotation": { "link": "spinner_rotation.output" },
+            "shape": { "link": "spinner_shape.shape" },
+            "size": [28, 28],
+            "strokeColor": "#5B5CF6FF",
+            "strokeEnd": { "link": "spinner_arc.output" },
+            "strokeWidth": 3
+          }
+        },
+        {
+          "id": "content",
+          "type": "group",
+          "name": "Feed",
+          "props": {
+            "color": "#F4F4F6FF",
+            "position": { "link": "content_position.output" },
+            "size": [402, 1396]
+          },
+          "children": [
+            {
+              "id": "activity_1",
+              "type": "group",
+              "name": "Maya liked your photo",
+              "props": {
+                "color": "#FFFFFFFF",
+                "cornerRadius": 18,
+                "position": [16, 12],
+                "shadowColor": "#000000FF",
+                "shadowOffset": [0, 6],
+                "shadowOpacity": 0.08,
+                "shadowRadius": 18,
+                "size": [370, 72]
+              },
+              "children": [
+                {
+                  "id": "activity_1_icon",
+                  "type": "oval",
+                  "name": "Icon",
+                  "props": {
+                    "color": "#FF3D7126",
+                    "position": [16, 16],
+                    "size": [40, 40]
+                  }
+                },
+                {
+                  "id": "activity_1_dot",
+                  "type": "oval",
+                  "name": "Icon Dot",
+                  "props": {
+                    "color": "#FF3D71FF",
+                    "position": [30, 30],
+                    "size": [12, 12]
+                  }
+                },
+                {
+                  "id": "activity_1_title",
+                  "type": "text",
+                  "name": "Title",
+                  "props": {
+                    "fontSize": 15,
+                    "fontWeight": 600,
+                    "hitTest": false,
+                    "position": [68, 16],
+                    "text": "Maya liked your photo",
+                    "textColor": "#111118FF"
+                  }
+                },
+                {
+                  "id": "activity_1_time",
+                  "type": "text",
+                  "name": "Time",
+                  "props": {
+                    "fontSize": 13,
+                    "fontWeight": 400,
+                    "hitTest": false,
+                    "lineHeight": 18,
+                    "position": [68, 39],
+                    "text": "2 min ago",
+                    "textColor": "#5F5F6BFF"
+                  }
+                }
+              ]
+            },
+            {
+              "id": "activity_2",
+              "type": "group",
+              "name": "Leo started following you",
+              "props": {
+                "color": "#FFFFFFFF",
+                "cornerRadius": 18,
+                "position": [16, 96],
+                "shadowColor": "#000000FF",
+                "shadowOffset": [0, 6],
+                "shadowOpacity": 0.08,
+                "shadowRadius": 18,
+                "size": [370, 72]
+              },
+              "children": [
+                {
+                  "id": "activity_2_icon",
+                  "type": "oval",
+                  "name": "Icon",
+                  "props": {
+                    "color": "#5B5CF626",
+                    "position": [16, 16],
+                    "size": [40, 40]
+                  }
+                },
+                {
+                  "id": "activity_2_dot",
+                  "type": "oval",
+                  "name": "Icon Dot",
+                  "props": {
+                    "color": "#5B5CF6FF",
+                    "position": [30, 30],
+                    "size": [12, 12]
+                  }
+                },
+                {
+                  "id": "activity_2_title",
+                  "type": "text",
+                  "name": "Title",
+                  "props": {
+                    "fontSize": 15,
+                    "fontWeight": 600,
+                    "hitTest": false,
+                    "position": [68, 16],
+                    "text": "Leo started following you",
+                    "textColor": "#111118FF"
+                  }
+                },
+                {
+                  "id": "activity_2_time",
+                  "type": "text",
+                  "name": "Time",
+                  "props": {
+                    "fontSize": 13,
+                    "fontWeight": 400,
+                    "hitTest": false,
+                    "lineHeight": 18,
+                    "position": [68, 39],
+                    "text": "14 min ago",
+                    "textColor": "#5F5F6BFF"
+                  }
+                }
+              ]
+            },
+            {
+              "id": "activity_3",
+              "type": "group",
+              "name": "Your export finished",
+              "props": {
+                "color": "#FFFFFFFF",
+                "cornerRadius": 18,
+                "position": [16, 180],
+                "shadowColor": "#000000FF",
+                "shadowOffset": [0, 6],
+                "shadowOpacity": 0.08,
+                "shadowRadius": 18,
+                "size": [370, 72]
+              },
+              "children": [
+                {
+                  "id": "activity_3_icon",
+                  "type": "oval",
+                  "name": "Icon",
+                  "props": {
+                    "color": "#22C55E26",
+                    "position": [16, 16],
+                    "size": [40, 40]
+                  }
+                },
+                {
+                  "id": "activity_3_dot",
+                  "type": "oval",
+                  "name": "Icon Dot",
+                  "props": {
+                    "color": "#22C55EFF",
+                    "position": [30, 30],
+                    "size": [12, 12]
+                  }
+                },
+                {
+                  "id": "activity_3_title",
+                  "type": "text",
+                  "name": "Title",
+                  "props": {
+                    "fontSize": 15,
+                    "fontWeight": 600,
+                    "hitTest": false,
+                    "position": [68, 16],
+                    "text": "Your export finished",
+                    "textColor": "#111118FF"
+                  }
+                },
+                {
+                  "id": "activity_3_time",
+                  "type": "text",
+                  "name": "Time",
+                  "props": {
+                    "fontSize": 13,
+                    "fontWeight": 400,
+                    "hitTest": false,
+                    "lineHeight": 18,
+                    "position": [68, 39],
+                    "text": "32 min ago",
+                    "textColor": "#5F5F6BFF"
+                  }
+                }
+              ]
+            },
+            {
+              "id": "activity_4",
+              "type": "group",
+              "name": "Iris commented: “that spring!”",
+              "props": {
+                "color": "#FFFFFFFF",
+                "cornerRadius": 18,
+                "position": [16, 264],
+                "shadowColor": "#000000FF",
+                "shadowOffset": [0, 6],
+                "shadowOpacity": 0.08,
+                "shadowRadius": 18,
+                "size": [370, 72]
+              },
+              "children": [
+                {
+                  "id": "activity_4_icon",
+                  "type": "oval",
+                  "name": "Icon",
+                  "props": {
+                    "color": "#FFB02026",
+                    "position": [16, 16],
+                    "size": [40, 40]
+                  }
+                },
+                {
+                  "id": "activity_4_dot",
+                  "type": "oval",
+                  "name": "Icon Dot",
+                  "props": {
+                    "color": "#FFB020FF",
+                    "position": [30, 30],
+                    "size": [12, 12]
+                  }
+                },
+                {
+                  "id": "activity_4_title",
+                  "type": "text",
+                  "name": "Title",
+                  "props": {
+                    "fontSize": 15,
+                    "fontWeight": 600,
+                    "hitTest": false,
+                    "position": [68, 16],
+                    "text": "Iris commented: “that spring!”",
+                    "textColor": "#111118FF"
+                  }
+                },
+                {
+                  "id": "activity_4_time",
+                  "type": "text",
+                  "name": "Time",
+                  "props": {
+                    "fontSize": 13,
+                    "fontWeight": 400,
+                    "hitTest": false,
+                    "lineHeight": 18,
+                    "position": [68, 39],
+                    "text": "1 h ago",
+                    "textColor": "#5F5F6BFF"
+                  }
+                }
+              ]
+            },
+            {
+              "id": "activity_5",
+              "type": "group",
+              "name": "3 people viewed your prototype",
+              "props": {
+                "color": "#FFFFFFFF",
+                "cornerRadius": 18,
+                "position": [16, 348],
+                "shadowColor": "#000000FF",
+                "shadowOffset": [0, 6],
+                "shadowOpacity": 0.08,
+                "shadowRadius": 18,
+                "size": [370, 72]
+              },
+              "children": [
+                {
+                  "id": "activity_5_icon",
+                  "type": "oval",
+                  "name": "Icon",
+                  "props": {
+                    "color": "#38BDF826",
+                    "position": [16, 16],
+                    "size": [40, 40]
+                  }
+                },
+                {
+                  "id": "activity_5_dot",
+                  "type": "oval",
+                  "name": "Icon Dot",
+                  "props": {
+                    "color": "#38BDF8FF",
+                    "position": [30, 30],
+                    "size": [12, 12]
+                  }
+                },
+                {
+                  "id": "activity_5_title",
+                  "type": "text",
+                  "name": "Title",
+                  "props": {
+                    "fontSize": 15,
+                    "fontWeight": 600,
+                    "hitTest": false,
+                    "position": [68, 16],
+                    "text": "3 people viewed your prototype",
+                    "textColor": "#111118FF"
+                  }
+                },
+                {
+                  "id": "activity_5_time",
+                  "type": "text",
+                  "name": "Time",
+                  "props": {
+                    "fontSize": 13,
+                    "fontWeight": 400,
+                    "hitTest": false,
+                    "lineHeight": 18,
+                    "position": [68, 39],
+                    "text": "2 h ago",
+                    "textColor": "#5F5F6BFF"
+                  }
+                }
+              ]
+            },
+            {
+              "id": "activity_6",
+              "type": "group",
+              "name": "Dev shared “Checkout Flow”",
+              "props": {
+                "color": "#FFFFFFFF",
+                "cornerRadius": 18,
+                "position": [16, 432],
+                "shadowColor": "#000000FF",
+                "shadowOffset": [0, 6],
+                "shadowOpacity": 0.08,
+                "shadowRadius": 18,
+                "size": [370, 72]
+              },
+              "children": [
+                {
+                  "id": "activity_6_icon",
+                  "type": "oval",
+                  "name": "Icon",
+                  "props": {
+                    "color": "#8B5CF626",
+                    "position": [16, 16],
+                    "size": [40, 40]
+                  }
+                },
+                {
+                  "id": "activity_6_dot",
+                  "type": "oval",
+                  "name": "Icon Dot",
+                  "props": {
+                    "color": "#8B5CF6FF",
+                    "position": [30, 30],
+                    "size": [12, 12]
+                  }
+                },
+                {
+                  "id": "activity_6_title",
+                  "type": "text",
+                  "name": "Title",
+                  "props": {
+                    "fontSize": 15,
+                    "fontWeight": 600,
+                    "hitTest": false,
+                    "position": [68, 16],
+                    "text": "Dev shared “Checkout Flow”",
+                    "textColor": "#111118FF"
+                  }
+                },
+                {
+                  "id": "activity_6_time",
+                  "type": "text",
+                  "name": "Time",
+                  "props": {
+                    "fontSize": 13,
+                    "fontWeight": 400,
+                    "hitTest": false,
+                    "lineHeight": 18,
+                    "position": [68, 39],
+                    "text": "3 h ago",
+                    "textColor": "#5F5F6BFF"
+                  }
+                }
+              ]
+            },
+            {
+              "id": "activity_7",
+              "type": "group",
+              "name": "Weekly summary is ready",
+              "props": {
+                "color": "#FFFFFFFF",
+                "cornerRadius": 18,
+                "position": [16, 516],
+                "shadowColor": "#000000FF",
+                "shadowOffset": [0, 6],
+                "shadowOpacity": 0.08,
+                "shadowRadius": 18,
+                "size": [370, 72]
+              },
+              "children": [
+                {
+                  "id": "activity_7_icon",
+                  "type": "oval",
+                  "name": "Icon",
+                  "props": {
+                    "color": "#14B8A626",
+                    "position": [16, 16],
+                    "size": [40, 40]
+                  }
+                },
+                {
+                  "id": "activity_7_dot",
+                  "type": "oval",
+                  "name": "Icon Dot",
+                  "props": {
+                    "color": "#14B8A6FF",
+                    "position": [30, 30],
+                    "size": [12, 12]
+                  }
+                },
+                {
+                  "id": "activity_7_title",
+                  "type": "text",
+                  "name": "Title",
+                  "props": {
+                    "fontSize": 15,
+                    "fontWeight": 600,
+                    "hitTest": false,
+                    "position": [68, 16],
+                    "text": "Weekly summary is ready",
+                    "textColor": "#111118FF"
+                  }
+                },
+                {
+                  "id": "activity_7_time",
+                  "type": "text",
+                  "name": "Time",
+                  "props": {
+                    "fontSize": 13,
+                    "fontWeight": 400,
+                    "hitTest": false,
+                    "lineHeight": 18,
+                    "position": [68, 39],
+                    "text": "5 h ago",
+                    "textColor": "#5F5F6BFF"
+                  }
+                }
+              ]
+            },
+            {
+              "id": "activity_8",
+              "type": "group",
+              "name": "Hana liked your comment",
+              "props": {
+                "color": "#FFFFFFFF",
+                "cornerRadius": 18,
+                "position": [16, 600],
+                "shadowColor": "#000000FF",
+                "shadowOffset": [0, 6],
+                "shadowOpacity": 0.08,
+                "shadowRadius": 18,
+                "size": [370, 72]
+              },
+              "children": [
+                {
+                  "id": "activity_8_icon",
+                  "type": "oval",
+                  "name": "Icon",
+                  "props": {
+                    "color": "#FF3D7126",
+                    "position": [16, 16],
+                    "size": [40, 40]
+                  }
+                },
+                {
+                  "id": "activity_8_dot",
+                  "type": "oval",
+                  "name": "Icon Dot",
+                  "props": {
+                    "color": "#FF3D71FF",
+                    "position": [30, 30],
+                    "size": [12, 12]
+                  }
+                },
+                {
+                  "id": "activity_8_title",
+                  "type": "text",
+                  "name": "Title",
+                  "props": {
+                    "fontSize": 15,
+                    "fontWeight": 600,
+                    "hitTest": false,
+                    "position": [68, 16],
+                    "text": "Hana liked your comment",
+                    "textColor": "#111118FF"
+                  }
+                },
+                {
+                  "id": "activity_8_time",
+                  "type": "text",
+                  "name": "Time",
+                  "props": {
+                    "fontSize": 13,
+                    "fontWeight": 400,
+                    "hitTest": false,
+                    "lineHeight": 18,
+                    "position": [68, 39],
+                    "text": "Yesterday",
+                    "textColor": "#5F5F6BFF"
+                  }
+                }
+              ]
+            },
+            {
+              "id": "activity_9",
+              "type": "group",
+              "name": "New device connected",
+              "props": {
+                "color": "#FFFFFFFF",
+                "cornerRadius": 18,
+                "position": [16, 684],
+                "shadowColor": "#000000FF",
+                "shadowOffset": [0, 6],
+                "shadowOpacity": 0.08,
+                "shadowRadius": 18,
+                "size": [370, 72]
+              },
+              "children": [
+                {
+                  "id": "activity_9_icon",
+                  "type": "oval",
+                  "name": "Icon",
+                  "props": {
+                    "color": "#FF6B4A26",
+                    "position": [16, 16],
+                    "size": [40, 40]
+                  }
+                },
+                {
+                  "id": "activity_9_dot",
+                  "type": "oval",
+                  "name": "Icon Dot",
+                  "props": {
+                    "color": "#FF6B4AFF",
+                    "position": [30, 30],
+                    "size": [12, 12]
+                  }
+                },
+                {
+                  "id": "activity_9_title",
+                  "type": "text",
+                  "name": "Title",
+                  "props": {
+                    "fontSize": 15,
+                    "fontWeight": 600,
+                    "hitTest": false,
+                    "position": [68, 16],
+                    "text": "New device connected",
+                    "textColor": "#111118FF"
+                  }
+                },
+                {
+                  "id": "activity_9_time",
+                  "type": "text",
+                  "name": "Time",
+                  "props": {
+                    "fontSize": 13,
+                    "fontWeight": 400,
+                    "hitTest": false,
+                    "lineHeight": 18,
+                    "position": [68, 39],
+                    "text": "Yesterday",
+                    "textColor": "#5F5F6BFF"
+                  }
+                }
+              ]
+            },
+            {
+              "id": "activity_10",
+              "type": "group",
+              "name": "Zoe mentioned you",
+              "props": {
+                "color": "#FFFFFFFF",
+                "cornerRadius": 18,
+                "position": [16, 768],
+                "shadowColor": "#000000FF",
+                "shadowOffset": [0, 6],
+                "shadowOpacity": 0.08,
+                "shadowRadius": 18,
+                "size": [370, 72]
+              },
+              "children": [
+                {
+                  "id": "activity_10_icon",
+                  "type": "oval",
+                  "name": "Icon",
+                  "props": {
+                    "color": "#5B5CF626",
+                    "position": [16, 16],
+                    "size": [40, 40]
+                  }
+                },
+                {
+                  "id": "activity_10_dot",
+                  "type": "oval",
+                  "name": "Icon Dot",
+                  "props": {
+                    "color": "#5B5CF6FF",
+                    "position": [30, 30],
+                    "size": [12, 12]
+                  }
+                },
+                {
+                  "id": "activity_10_title",
+                  "type": "text",
+                  "name": "Title",
+                  "props": {
+                    "fontSize": 15,
+                    "fontWeight": 600,
+                    "hitTest": false,
+                    "position": [68, 16],
+                    "text": "Zoe mentioned you",
+                    "textColor": "#111118FF"
+                  }
+                },
+                {
+                  "id": "activity_10_time",
+                  "type": "text",
+                  "name": "Time",
+                  "props": {
+                    "fontSize": 13,
+                    "fontWeight": 400,
+                    "hitTest": false,
+                    "lineHeight": 18,
+                    "position": [68, 39],
+                    "text": "Mon",
+                    "textColor": "#5F5F6BFF"
+                  }
+                }
+              ]
+            },
+            {
+              "id": "activity_11",
+              "type": "group",
+              "name": "Your prototype got 12 new views",
+              "props": {
+                "color": "#FFFFFFFF",
+                "cornerRadius": 18,
+                "position": [16, 852],
+                "shadowColor": "#000000FF",
+                "shadowOffset": [0, 6],
+                "shadowOpacity": 0.08,
+                "shadowRadius": 18,
+                "size": [370, 72]
+              },
+              "children": [
+                {
+                  "id": "activity_11_icon",
+                  "type": "oval",
+                  "name": "Icon",
+                  "props": {
+                    "color": "#38BDF826",
+                    "position": [16, 16],
+                    "size": [40, 40]
+                  }
+                },
+                {
+                  "id": "activity_11_dot",
+                  "type": "oval",
+                  "name": "Icon Dot",
+                  "props": {
+                    "color": "#38BDF8FF",
+                    "position": [30, 30],
+                    "size": [12, 12]
+                  }
+                },
+                {
+                  "id": "activity_11_title",
+                  "type": "text",
+                  "name": "Title",
+                  "props": {
+                    "fontSize": 15,
+                    "fontWeight": 600,
+                    "hitTest": false,
+                    "position": [68, 16],
+                    "text": "Your prototype got 12 new views",
+                    "textColor": "#111118FF"
+                  }
+                },
+                {
+                  "id": "activity_11_time",
+                  "type": "text",
+                  "name": "Time",
+                  "props": {
+                    "fontSize": 13,
+                    "fontWeight": 400,
+                    "hitTest": false,
+                    "lineHeight": 18,
+                    "position": [68, 39],
+                    "text": "Mon",
+                    "textColor": "#5F5F6BFF"
+                  }
+                }
+              ]
+            },
+            {
+              "id": "activity_12",
+              "type": "group",
+              "name": "Kai liked your photo",
+              "props": {
+                "color": "#FFFFFFFF",
+                "cornerRadius": 18,
+                "position": [16, 936],
+                "shadowColor": "#000000FF",
+                "shadowOffset": [0, 6],
+                "shadowOpacity": 0.08,
+                "shadowRadius": 18,
+                "size": [370, 72]
+              },
+              "children": [
+                {
+                  "id": "activity_12_icon",
+                  "type": "oval",
+                  "name": "Icon",
+                  "props": {
+                    "color": "#FF3D7126",
+                    "position": [16, 16],
+                    "size": [40, 40]
+                  }
+                },
+                {
+                  "id": "activity_12_dot",
+                  "type": "oval",
+                  "name": "Icon Dot",
+                  "props": {
+                    "color": "#FF3D71FF",
+                    "position": [30, 30],
+                    "size": [12, 12]
+                  }
+                },
+                {
+                  "id": "activity_12_title",
+                  "type": "text",
+                  "name": "Title",
+                  "props": {
+                    "fontSize": 15,
+                    "fontWeight": 600,
+                    "hitTest": false,
+                    "position": [68, 16],
+                    "text": "Kai liked your photo",
+                    "textColor": "#111118FF"
+                  }
+                },
+                {
+                  "id": "activity_12_time",
+                  "type": "text",
+                  "name": "Time",
+                  "props": {
+                    "fontSize": 13,
+                    "fontWeight": 400,
+                    "hitTest": false,
+                    "lineHeight": 18,
+                    "position": [68, 39],
+                    "text": "Sun",
+                    "textColor": "#5F5F6BFF"
+                  }
+                }
+              ]
+            },
+            {
+              "id": "activity_13",
+              "type": "group",
+              "name": "Ruth started following you",
+              "props": {
+                "color": "#FFFFFFFF",
+                "cornerRadius": 18,
+                "position": [16, 1020],
+                "shadowColor": "#000000FF",
+                "shadowOffset": [0, 6],
+                "shadowOpacity": 0.08,
+                "shadowRadius": 18,
+                "size": [370, 72]
+              },
+              "children": [
+                {
+                  "id": "activity_13_icon",
+                  "type": "oval",
+                  "name": "Icon",
+                  "props": {
+                    "color": "#5B5CF626",
+                    "position": [16, 16],
+                    "size": [40, 40]
+                  }
+                },
+                {
+                  "id": "activity_13_dot",
+                  "type": "oval",
+                  "name": "Icon Dot",
+                  "props": {
+                    "color": "#5B5CF6FF",
+                    "position": [30, 30],
+                    "size": [12, 12]
+                  }
+                },
+                {
+                  "id": "activity_13_title",
+                  "type": "text",
+                  "name": "Title",
+                  "props": {
+                    "fontSize": 15,
+                    "fontWeight": 600,
+                    "hitTest": false,
+                    "position": [68, 16],
+                    "text": "Ruth started following you",
+                    "textColor": "#111118FF"
+                  }
+                },
+                {
+                  "id": "activity_13_time",
+                  "type": "text",
+                  "name": "Time",
+                  "props": {
+                    "fontSize": 13,
+                    "fontWeight": 400,
+                    "hitTest": false,
+                    "lineHeight": 18,
+                    "position": [68, 39],
+                    "text": "Sun",
+                    "textColor": "#5F5F6BFF"
+                  }
+                }
+              ]
+            },
+            {
+              "id": "activity_14",
+              "type": "group",
+              "name": "Backup completed",
+              "props": {
+                "color": "#FFFFFFFF",
+                "cornerRadius": 18,
+                "position": [16, 1104],
+                "shadowColor": "#000000FF",
+                "shadowOffset": [0, 6],
+                "shadowOpacity": 0.08,
+                "shadowRadius": 18,
+                "size": [370, 72]
+              },
+              "children": [
+                {
+                  "id": "activity_14_icon",
+                  "type": "oval",
+                  "name": "Icon",
+                  "props": {
+                    "color": "#22C55E26",
+                    "position": [16, 16],
+                    "size": [40, 40]
+                  }
+                },
+                {
+                  "id": "activity_14_dot",
+                  "type": "oval",
+                  "name": "Icon Dot",
+                  "props": {
+                    "color": "#22C55EFF",
+                    "position": [30, 30],
+                    "size": [12, 12]
+                  }
+                },
+                {
+                  "id": "activity_14_title",
+                  "type": "text",
+                  "name": "Title",
+                  "props": {
+                    "fontSize": 15,
+                    "fontWeight": 600,
+                    "hitTest": false,
+                    "position": [68, 16],
+                    "text": "Backup completed",
+                    "textColor": "#111118FF"
+                  }
+                },
+                {
+                  "id": "activity_14_time",
+                  "type": "text",
+                  "name": "Time",
+                  "props": {
+                    "fontSize": 13,
+                    "fontWeight": 400,
+                    "hitTest": false,
+                    "lineHeight": 18,
+                    "position": [68, 39],
+                    "text": "Sat",
+                    "textColor": "#5F5F6BFF"
+                  }
+                }
+              ]
+            },
+            {
+              "id": "activity_15",
+              "type": "group",
+              "name": "Oliver commented: “ship it”",
+              "props": {
+                "color": "#FFFFFFFF",
+                "cornerRadius": 18,
+                "position": [16, 1188],
+                "shadowColor": "#000000FF",
+                "shadowOffset": [0, 6],
+                "shadowOpacity": 0.08,
+                "shadowRadius": 18,
+                "size": [370, 72]
+              },
+              "children": [
+                {
+                  "id": "activity_15_icon",
+                  "type": "oval",
+                  "name": "Icon",
+                  "props": {
+                    "color": "#FFB02026",
+                    "position": [16, 16],
+                    "size": [40, 40]
+                  }
+                },
+                {
+                  "id": "activity_15_dot",
+                  "type": "oval",
+                  "name": "Icon Dot",
+                  "props": {
+                    "color": "#FFB020FF",
+                    "position": [30, 30],
+                    "size": [12, 12]
+                  }
+                },
+                {
+                  "id": "activity_15_title",
+                  "type": "text",
+                  "name": "Title",
+                  "props": {
+                    "fontSize": 15,
+                    "fontWeight": 600,
+                    "hitTest": false,
+                    "position": [68, 16],
+                    "text": "Oliver commented: “ship it”",
+                    "textColor": "#111118FF"
+                  }
+                },
+                {
+                  "id": "activity_15_time",
+                  "type": "text",
+                  "name": "Time",
+                  "props": {
+                    "fontSize": 13,
+                    "fontWeight": 400,
+                    "hitTest": false,
+                    "lineHeight": 18,
+                    "position": [68, 39],
+                    "text": "Sat",
+                    "textColor": "#5F5F6BFF"
+                  }
+                }
+              ]
+            },
+            {
+              "id": "activity_16",
+              "type": "group",
+              "name": "Welcome to Activity",
+              "props": {
+                "color": "#FFFFFFFF",
+                "cornerRadius": 18,
+                "position": [16, 1272],
+                "shadowColor": "#000000FF",
+                "shadowOffset": [0, 6],
+                "shadowOpacity": 0.08,
+                "shadowRadius": 18,
+                "size": [370, 72]
+              },
+              "children": [
+                {
+                  "id": "activity_16_icon",
+                  "type": "oval",
+                  "name": "Icon",
+                  "props": {
+                    "color": "#8B5CF626",
+                    "position": [16, 16],
+                    "size": [40, 40]
+                  }
+                },
+                {
+                  "id": "activity_16_dot",
+                  "type": "oval",
+                  "name": "Icon Dot",
+                  "props": {
+                    "color": "#8B5CF6FF",
+                    "position": [30, 30],
+                    "size": [12, 12]
+                  }
+                },
+                {
+                  "id": "activity_16_title",
+                  "type": "text",
+                  "name": "Title",
+                  "props": {
+                    "fontSize": 15,
+                    "fontWeight": 600,
+                    "hitTest": false,
+                    "position": [68, 16],
+                    "text": "Welcome to Activity",
+                    "textColor": "#111118FF"
+                  }
+                },
+                {
+                  "id": "activity_16_time",
+                  "type": "text",
+                  "name": "Time",
+                  "props": {
+                    "fontSize": 13,
+                    "fontWeight": 400,
+                    "hitTest": false,
+                    "lineHeight": 18,
+                    "position": [68, 39],
+                    "text": "Fri",
+                    "textColor": "#5F5F6BFF"
+                  }
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "header",
+      "type": "group",
+      "name": "Header",
+      "props": {
+        "color": "#F4F4F6FF",
+        "hitTest": false,
+        "size": [402, 130]
+      },
+      "children": [
+        {
+          "id": "header_title",
+          "type": "text",
+          "name": "Title",
+          "props": {
+            "fontSize": 34,
+            "fontWeight": 700,
+            "hitTest": false,
+            "letterSpacing": -0.6,
+            "position": [24, 66],
+            "text": "Activity",
+            "textColor": "#111118FF"
+          }
+        },
+        {
+          "id": "subtitle",
+          "type": "text",
+          "name": "Status",
+          "props": {
+            "fontSize": 13,
+            "fontWeight": 400,
+            "hitTest": false,
+            "lineHeight": 18,
+            "position": [24, 106],
+            "text": { "link": "status_text.output" },
+            "textColor": "#5F5F6BFF"
+          }
+        },
+        {
+          "id": "header_divider",
+          "type": "rectangle",
+          "name": "Divider",
+          "props": {
+            "color": "#E6E6EBFF",
+            "position": [0, 129],
+            "size": [402, 1]
+          }
+        }
+      ]
+    },
+    {
+      "id": "app_status_bar",
+      "type": "group",
+      "name": "Status Bar",
+      "props": {
+        "hitTest": false,
+        "size": [402, 62]
+      },
+      "children": [
+        {
+          "id": "app_clock",
+          "type": "text",
+          "name": "Clock",
+          "props": {
+            "anchor": [0.5, 0],
+            "fontSize": 17,
+            "fontWeight": 600,
+            "hitTest": false,
+            "position": [72, 20],
+            "text": "9:41",
+            "textAlignment": "center",
+            "textColor": "#111118FF"
+          }
+        },
+        {
+          "id": "app_signal_1",
+          "type": "rectangle",
+          "name": "Signal 1",
+          "props": {
+            "color": "#111118FF",
+            "cornerRadius": 1,
+            "hitTest": false,
+            "position": [292, 30],
+            "size": [3, 4]
+          }
+        },
+        {
+          "id": "app_signal_2",
+          "type": "rectangle",
+          "name": "Signal 2",
+          "props": {
+            "color": "#111118FF",
+            "cornerRadius": 1,
+            "hitTest": false,
+            "position": [297, 28],
+            "size": [3, 6]
+          }
+        },
+        {
+          "id": "app_signal_3",
+          "type": "rectangle",
+          "name": "Signal 3",
+          "props": {
+            "color": "#111118FF",
+            "cornerRadius": 1,
+            "hitTest": false,
+            "position": [302, 26],
+            "size": [3, 8]
+          }
+        },
+        {
+          "id": "app_signal_4",
+          "type": "rectangle",
+          "name": "Signal 4",
+          "props": {
+            "color": "#111118FF",
+            "cornerRadius": 1,
+            "hitTest": false,
+            "position": [307, 24],
+            "size": [3, 10]
+          }
+        },
+        {
+          "id": "app_battery",
+          "type": "rectangle",
+          "name": "Battery",
+          "props": {
+            "color": "#00000000",
+            "cornerRadius": 3.5,
+            "hitTest": false,
+            "position": [322, 23],
+            "size": [25, 12],
+            "strokeColor": "#11111859",
+            "strokeWidth": 1
+          }
+        },
+        {
+          "id": "app_battery_level",
+          "type": "rectangle",
+          "name": "Battery Level",
+          "props": {
+            "color": "#111118FF",
+            "cornerRadius": 2,
+            "hitTest": false,
+            "position": [324, 25],
+            "size": [19, 8]
+          }
+        },
+        {
+          "id": "app_battery_cap",
+          "type": "rectangle",
+          "name": "Battery Cap",
+          "props": {
+            "color": "#11111859",
+            "cornerRadius": 1,
+            "hitTest": false,
+            "position": [348, 27],
+            "size": [2, 4]
+          }
+        }
+      ]
+    },
+    {
+      "id": "app_home_indicator",
+      "type": "rectangle",
+      "name": "Home Indicator",
+      "props": {
+        "anchor": [0.5, 1],
+        "color": "#111118FF",
+        "cornerRadius": 3,
+        "hitTest": false,
+        "position": [201, 866],
+        "size": [140, 5]
+      }
+    }
+  ],
+  "patches": {
+    "content_position": {
+      "type": "point",
+      "name": "Content Position",
+      "inputs": {
+        "x": 0,
+        "y": { "link": "content_y.output" }
+      },
+      "ui": { "x": 1860, "y": 40 }
+    },
+    "content_y": {
+      "type": "add",
+      "name": "Content Y",
+      "typeParam": "number",
+      "inputCount": 2,
+      "inputs": {
+        "value1": { "link": "feed_scroll.y" },
+        "value2": { "link": "spacer_height.output" }
+      },
+      "ui": { "x": 1600, "y": 40 }
+    },
+    "feed_scroll": {
+      "type": "scroll",
+      "name": "Scroll Feed",
+      "inputs": {
+        "layer": { "layer": "content" },
+        "scrollY": "free"
+      },
+      "ui": { "x": 40, "y": 40 }
+    },
+    "has_refreshed": {
+      "type": "greaterThan",
+      "name": "Has Refreshed",
+      "typeParam": "number",
+      "inputCount": 2,
+      "inputs": {
+        "value1": { "link": "refresh_count.count" },
+        "value2": 0
+      },
+      "ui": { "x": 560, "y": 190 }
+    },
+    "not_dragging": {
+      "type": "not",
+      "name": "Not Dragging",
+      "inputs": { "value": { "link": "feed_scroll.dragging" } },
+      "ui": { "x": 300, "y": 190 }
+    },
+    "pull_amount": {
+      "type": "progress",
+      "name": "Pull Amount",
+      "inputs": {
+        "clampToRange": true,
+        "end": 64,
+        "start": 0,
+        "value": { "link": "feed_scroll.y" }
+      },
+      "ui": { "x": 300, "y": 40 }
+    },
+    "pulled_far": {
+      "type": "greaterThanOrEqual",
+      "name": "Pulled Far Enough",
+      "typeParam": "number",
+      "inputCount": 2,
+      "inputs": {
+        "value1": { "link": "feed_scroll.y" },
+        "value2": 64
+      },
+      "ui": { "x": 300, "y": 340 }
+    },
+    "refresh_count": {
+      "type": "counter",
+      "name": "Refresh Count",
+      "inputs": { "increase": { "link": "refresh_timer.finished" } },
+      "ui": { "x": 300, "y": 490 }
+    },
+    "refresh_timer": {
+      "type": "wait",
+      "name": "Pretend Network Request",
+      "inputs": {
+        "duration": 1.6,
+        "start": { "link": "refreshing.on" }
+      },
+      "ui": { "x": 40, "y": 190 }
+    },
+    "refreshing": {
+      "type": "switch",
+      "name": "Refreshing",
+      "inputs": {
+        "turnOff": { "link": "refresh_timer.finished" },
+        "turnOn": { "link": "start_refresh.output" }
+      },
+      "ui": { "x": 820, "y": 40 }
+    },
+    "spacer_height": {
+      "type": "transition",
+      "name": "Spacer Height",
+      "typeParam": "number",
+      "inputs": {
+        "end": 64,
+        "progress": { "link": "spacer_spring.output" },
+        "start": 0
+      },
+      "ui": { "x": 1340, "y": 40 }
+    },
+    "spacer_spring": {
+      "type": "popAnimation",
+      "name": "Spacer Spring",
+      "typeParam": "number",
+      "inputs": {
+        "bounciness": 0,
+        "number": { "link": "refreshing.on" },
+        "speed": 14
+      },
+      "ui": { "x": 1080, "y": 40 }
+    },
+    "spin": {
+      "type": "repeatingAnimation",
+      "name": "Spin",
+      "inputs": {
+        "curve": "linear",
+        "duration": 0.9,
+        "enabled": { "link": "refreshing.on" },
+        "mirrored": false
+      },
+      "ui": { "x": 1080, "y": 190 }
+    },
+    "spinner_arc": {
+      "type": "transition",
+      "name": "Spinner Arc",
+      "typeParam": "number",
+      "inputs": {
+        "end": 0.8,
+        "progress": { "link": "spinner_reveal.output" },
+        "start": 0
+      },
+      "ui": { "x": 1600, "y": 190 }
+    },
+    "spinner_reveal": {
+      "type": "max",
+      "name": "Spinner Reveal",
+      "typeParam": "number",
+      "inputCount": 2,
+      "inputs": {
+        "value1": { "link": "pull_amount.progress" },
+        "value2": { "link": "spacer_spring.output" }
+      },
+      "ui": { "x": 1340, "y": 190 }
+    },
+    "spinner_rotation": {
+      "type": "transition",
+      "name": "Spinner Rotation",
+      "typeParam": "number",
+      "inputs": {
+        "end": 360,
+        "progress": { "link": "spin.progress" },
+        "start": 0
+      },
+      "ui": { "x": 1340, "y": 340 }
+    },
+    "spinner_shape": {
+      "type": "circleShape",
+      "name": "Spinner Circle",
+      "inputs": {
+        "position": [14, 14],
+        "radius": 11
+      },
+      "ui": { "x": 40, "y": 790 }
+    },
+    "start_refresh": {
+      "type": "and",
+      "name": "Let Go Past Threshold",
+      "inputCount": 2,
+      "inputs": {
+        "value1": { "link": "not_dragging.output" },
+        "value2": { "link": "pulled_far.output" }
+      },
+      "ui": { "x": 560, "y": 40 }
+    },
+    "status_text": {
+      "type": "ifElse",
+      "name": "Status Text",
+      "typeParam": "text",
+      "inputs": {
+        "condition": { "link": "has_refreshed.output" },
+        "ifFalse": "Pull down to refresh",
+        "ifTrue": "Updated just now"
+      },
+      "ui": { "x": 820, "y": 190 }
+    }
+  },
+  "comments": []
+}

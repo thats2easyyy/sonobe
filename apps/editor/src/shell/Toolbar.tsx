@@ -1,38 +1,12 @@
 import { DEVICE_PRESETS, type DevicePreset } from "@sonobe/core";
-import {
-  BookOpen,
-  ChevronDown,
-  Columns2,
-  Copy,
-  Download,
-  FolderOpen,
-  Monitor,
-  Moon,
-  Pause,
-  Pencil,
-  Play,
-  RotateCcw,
-  Rows2,
-  Scaling,
-  Search,
-  Share2,
-  Smartphone,
-  Sparkles,
-  SquareMousePointer,
-  Sun,
-  Tablet,
-  Watch,
-  Workflow,
-} from "lucide-react";
+import { BookOpen, ChevronDown, Columns2, Monitor, Moon, Pause, Pencil, Play, RotateCcw, Rows2, Scaling, Search, Smartphone, SquareMousePointer, Sun, Tablet, Watch, Workflow } from "lucide-react";
 import { useState, type ReactNode } from "react";
 import { useTheme } from "../theme/ThemeProvider.tsx";
-import { Button } from "../ui/Button.tsx";
 import { IconButton } from "../ui/IconButton.tsx";
 import { Kbd } from "../ui/Kbd.tsx";
-import { Menu } from "../ui/Menu.tsx";
+import { Menu, type MenuEntry } from "../ui/Menu.tsx";
 import { SegmentedControl } from "../ui/SegmentedControl.tsx";
 import { Select, type SelectOption } from "../ui/Select.tsx";
-import { toast } from "../ui/Toast.tsx";
 import { SonobeMark } from "./icons.tsx";
 import { layoutStore, useLayout } from "./layoutStore.ts";
 
@@ -81,102 +55,75 @@ export function DevicePicker({ value, onChange }: { value: string; onChange: (id
   );
 }
 
-function DocumentMenu({ title, onRename }: { title: string; onRename: () => void }) {
-  return (
-    <Menu
-      aria-label="Document"
-      entries={[
-        { id: "rename", label: "Rename…", icon: <Pencil size={14} />, onSelect: onRename },
-        { id: "duplicate", label: "Duplicate", icon: <Copy size={14} />, shortcut: "Mod+Shift+S", onSelect: () => toast({ title: `Duplicated “${title}”`, tone: "success" }) },
-        { type: "separator" },
-        {
-          id: "export",
-          label: "Export",
-          icon: <Download size={14} />,
-          submenu: [
-            { id: "export_video", label: "Video…", description: "MP4 at device resolution" },
-            { id: "export_gif", label: "Animated GIF…" },
-            { type: "separator" },
-            { id: "export_bundle", label: "Project bundle (.sonobez)" },
-          ],
-        },
-        { id: "reveal", label: "Show in Folder", icon: <FolderOpen size={14} /> },
-      ]}
-    >
-      <button type="button" className="sb-toolbar__doc">
-        <span className="sb-toolbar__doc-title">{title}</span>
-        <ChevronDown size={12} strokeWidth={2} className="sb-toolbar__doc-chevron" aria-hidden />
-      </button>
-    </Menu>
-  );
-}
+type MenuEntries = readonly MenuEntry[] | (() => readonly MenuEntry[]);
 
-function DocumentTitle({ title }: { title: string }) {
-  const [name, setName] = useState(title);
+function DocumentTitle({ title, dirty, onRename, menu }: { title: string; dirty: boolean; onRename?: ((name: string) => void) | undefined; menu?: MenuEntries | undefined }) {
   const [editing, setEditing] = useState(false);
-  if (editing) {
+
+  if (editing && onRename) {
     return (
       <input
         className="sb-toolbar__doc-input"
-        aria-label="Document name"
-        defaultValue={name}
+        aria-label="Prototype name"
+        defaultValue={title}
         autoFocus
+        spellCheck={false}
         onFocus={(event) => event.currentTarget.select()}
         onBlur={(event) => {
-          setName(event.currentTarget.value.trim() || name);
+          const next = event.currentTarget.value.trim();
           setEditing(false);
+          if (next && next !== title) onRename(next);
         }}
         onKeyDown={(event) => {
           if (event.key === "Enter") event.currentTarget.blur();
           if (event.key === "Escape") {
             event.stopPropagation();
-            event.currentTarget.value = name;
+            event.currentTarget.value = title;
             event.currentTarget.blur();
           }
         }}
       />
     );
   }
-  return <DocumentMenu title={name} onRename={() => setEditing(true)} />;
-}
 
-function PresenceAndShare({ onOpenAssistant }: { onOpenAssistant: () => void }) {
+  const entries = (): readonly MenuEntry[] => {
+    const rest = typeof menu === "function" ? menu() : (menu ?? []);
+    if (!onRename) return rest;
+    const rename: MenuEntry = { id: "rename", label: "Rename…", icon: <Pencil size={14} />, onSelect: () => setEditing(true) };
+    return rest.length ? [rename, { type: "separator" }, ...rest] : [rename];
+  };
+
   return (
-    <>
-      <button type="button" className="sb-presence" onClick={onOpenAssistant} aria-label="Claude is connected. Open the assistant">
-        <span className="sb-presence__avatar" aria-hidden>
-          <Sparkles size={11} strokeWidth={2} />
-        </span>
-        <span className="sb-presence__label">Claude</span>
-        <span className="sb-presence__dot" aria-hidden />
+    <Menu aria-label="Prototype" entries={entries}>
+      <button type="button" className="sb-toolbar__doc" title={dirty ? `${title} (unsaved changes)` : title} onDoubleClick={onRename ? () => setEditing(true) : undefined}>
+        <span className="sb-toolbar__doc-title">{title}</span>
+        {dirty && <span className="sb-toolbar__dirty" role="img" aria-label="Unsaved changes" />}
+        <ChevronDown size={12} strokeWidth={2} className="sb-toolbar__doc-chevron" aria-hidden />
       </button>
-      <Button
-        size="sm"
-        variant="primary"
-        icon={<Share2 size={13} strokeWidth={2} />}
-        onClick={() => toast({ title: "Preview link copied", description: "Open it on a phone on the same Wi-Fi to try the prototype.", tone: "success" })}
-      >
-        Share
-      </Button>
-    </>
+    </Menu>
   );
 }
 
 export interface ToolbarProps {
   documentTitle: string;
+  /** Shows the unsaved-changes dot. */
+  dirty?: boolean;
+  /** Rename the prototype. Without it the title can't be edited. */
+  onRename?: (name: string) => void;
+  /** Items after "Rename…" in the title menu (New, Open, Save...). */
+  documentMenu?: MenuEntries;
   deviceId: string;
   onDeviceChange: (id: string) => void;
   playing: boolean;
   onTogglePlay: () => void;
   onRestart: () => void;
   onOpenPalette: () => void;
-  /** Replaces the device picker. */
-  devicePicker?: ReactNode;
-  /** Replaces the Claude presence and Share button. */
-  share?: ReactNode;
+  /** The Claude button. */
+  claude?: ReactNode;
 }
 
-export function Toolbar({ documentTitle, deviceId, onDeviceChange, playing, onTogglePlay, onRestart, onOpenPalette, devicePicker, share }: ToolbarProps) {
+/** Title and device on the left; play, restart, and view mode in the middle; search, Claude, Learn, and theme on the right. */
+export function Toolbar({ documentTitle, dirty = false, onRename, documentMenu, deviceId, onDeviceChange, playing, onTogglePlay, onRestart, onOpenPalette, claude }: ToolbarProps) {
   const viewMode = useLayout((s) => s.viewMode);
   const splitDirection = useLayout((s) => s.splitDirection);
   const drawer = useLayout((s) => s.drawer);
@@ -189,9 +136,9 @@ export function Toolbar({ documentTitle, deviceId, onDeviceChange, playing, onTo
         <span className="sb-toolbar__mark">
           <SonobeMark size={20} />
         </span>
-        <DocumentTitle title={documentTitle} />
+        <DocumentTitle title={documentTitle} dirty={dirty} onRename={onRename} menu={documentMenu} />
         <span className="sb-toolbar__divider" aria-hidden />
-        {devicePicker ?? <DevicePicker value={deviceId} onChange={onDeviceChange} />}
+        <DevicePicker value={deviceId} onChange={onDeviceChange} />
       </div>
 
       <div className="sb-toolbar__center" role="toolbar" aria-label="Prototype and view">
@@ -228,15 +175,10 @@ export function Toolbar({ documentTitle, deviceId, onDeviceChange, playing, onTo
           <span className="sb-toolbar__search-label">Search commands</span>
           <Kbd shortcut="Mod+K" variant="plain" />
         </button>
-        {share ?? <PresenceAndShare onOpenAssistant={() => toggleDrawer("assistant")} />}
+        {claude}
         <span className="sb-toolbar__divider" aria-hidden />
         <IconButton icon={<BookOpen size={15} />} label="Learn" shortcut="Mod+/" active={drawer === "learn"} onClick={() => toggleDrawer("learn")} />
-        <IconButton icon={<Sparkles size={15} />} label="Assistant" shortcut="Mod+L" active={drawer === "assistant"} onClick={() => toggleDrawer("assistant")} />
-        <IconButton
-          icon={theme === "dark" ? <Sun size={15} /> : <Moon size={15} />}
-          label={theme === "dark" ? "Use light theme" : "Use dark theme"}
-          onClick={toggleTheme}
-        />
+        <IconButton icon={theme === "dark" ? <Sun size={15} /> : <Moon size={15} />} label={theme === "dark" ? "Use light theme" : "Use dark theme"} onClick={toggleTheme} />
       </div>
     </header>
   );

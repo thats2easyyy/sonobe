@@ -1,0 +1,671 @@
+/**
+ * SonobeHost for the desktop app (ARCHITECTURE.md §10). MCP tools reach the live editor through the
+ * renderer RPC handlers in apps/editor/src/host/rpcHandlers.ts, so every edit lands in the person's
+ * undo history and AI Activity. Around that bridge, the main process caches documents by revision,
+ * computes diagnostics and runs simulations on the patch registry, guards undo against discarding
+ * human edits, and crops screenshots to the viewer. Electron-free: windows arrive as RendererTargets.
+ */
+
+import { homedir } from "node:os";
+import path from "node:path";
+import { applyOps, getDiagnostics, slugify, uniqueId, type Affected, type Author, type Diagnostic, type Id, type OpResult, type SonobeDocument, type SonobeError } from "@sonobe/core";
+import type { EngineRegistry } from "@sonobe/engine";
+import {
+  createSimulationManager,
+  createTemplateDocument,
+  diagnosticTotals,
+  diffDiagnostics,
+  HostError,
+  isHostError,
+  TEMPLATES,
+  type DocumentSummary,
+  type HistoryItem,
+  type HostApplyResult,
+  type Screenshot,
+  type SimHost,
+  type SimulationManager,
+  type SonobeHost,
+  type WorkIntent,
+} from "@sonobe/mcp";
+import { isRect, isViewerBounds, screenshotSize, viewerCaptureRect, type Rect, type Size } from "./screenshot.ts";
+
+export interface CapturedImage {
+  /** Base64-encoded PNG. */
+  data: string;
+  width: number;
+  height: number;
+}
+
+/** One editor window, as the app host sees it. */
+export interface RendererTarget {
+  /** Stable for the window's lifetime (the webContents id). */
+  readonly id: number;
+  /** Call a renderer RPC handler. Rejects with `{ code, message, data }` errors. */
+  invoke<T = unknown>(method: string, params?: unknown, options?: { timeoutMs?: number }): Promise<T>;
+  /** Whether the renderer registered `method`; undefined before it reported any methods. */
+  hasMethod(method: string): boolean | undefined;
+  /** Bring the window to the front. */
+  focus(): void;
+  /** Capture a page rect (viewport CSS pixels) as a PNG at most `size` big; null when capture fails. */
+  capture(rect: Rect, size: Size): Promise<CapturedImage | null>;
+}
+
+export interface AppHostOptions {
+  registry: EngineRegistry;
+  /** Editor windows, the focused one first. */
+  targets(): RendererTarget[];
+  /** Open a window when none exists and resolve once its editor can answer (or null). */
+  ensureTarget?(): Promise<RendererTarget | null>;
+  /** Resolve a folder an agent named to an approved project directory, or null when it isn't one. */
+  approveProject(dir: string): Promise<string | null>;
+  /** Where create_document puts a project when no path is given (should not exist yet). */
+  defaultProjectDir(name: string): Promise<string>;
+  /** Whether `dir` already holds a Sonobe project. */
+  projectExists(dir: string): Promise<boolean>;
+  /** Write a new project folder to disk (and approve it for the editor). */
+  writeProject(dir: string, doc: SonobeDocument): Promise<void>;
+  maxSimSessions?: number;
+  now?: () => number;
+}
+
+export interface AppHost extends SonobeHost {
+  /** Forget a closed window's document, badges and simulations. */
+  forgetTarget(id: number): void;
+  dispose(): void;
+}
+
+/** What `document.info` returns. */
+interface RendererInfo {
+  name: string;
+  projectPath: string | null;
+  revision: number;
+  dirty: boolean;
+}
+
+interface RendererApplyReply {
+  result: { ok: boolean; results: OpResult[]; errors: SonobeError[]; idMap: Record<string, Id>; affected: Affected; applied: number };
+  revision: number;
+}
+
+interface RendererHistoryEntry {
+  txnId: string;
+  label: string;
+  author: Author;
+  revision: number;
+  opCount: number;
+  timestamp: number;
+  description: string;
+}
+
+interface Snapshot {
+  revision: number;
+  doc: SonobeDocument;
+}
+
+interface Entry {
+  target: RendererTarget;
+  docId: Id;
+  info: RendererInfo;
+  snapshot: Snapshot | null;
+  diagnostics: { doc: SonobeDocument; list: Diagnostic[] } | null;
+  /** Working badges this host started, by author name. */
+  working: Map<string, { workId: string; intent: WorkIntent }>;
+}
+
+const OPEN_TIMEOUT_MS = 120_000;
+const APPLY_TIMEOUT_MS = 60_000;
+const HISTORY_SCAN = 500;
+
+const EDITOR_NOT_CONNECTED_HINT =
+  "Wait a moment for the editor to finish loading, then retry. If it keeps happening, this editor build doesn't include the MCP bridge: rebuild it with `npm run build -w @sonobe/editor` and restart Sonobe.";
+
+function noWindow(): HostError {
+  return new HostError("no_window", "Sonobe has no editor window open.", {
+    hint: "Ask the person to open a prototype in Sonobe (File → New Prototype or Open…), or call open_document with a project folder.",
+  });
+}
+
+function unexpectedReply(method: string): HostError {
+  return new HostError("editor_error", `The editor sent an unexpected reply to ${method}.`, {
+    hint: "This is a bug in Sonobe (the editor and app may be out of sync). Restart Sonobe and try again.",
+  });
+}
+
+/** Turn a renderer RPC failure into a teaching HostError. */
+export function hostErrorFromRpc(err: unknown, method: string): HostError {
+  if (isHostError(err)) return err;
+  const e = (err ?? {}) as { code?: unknown; message?: unknown; data?: unknown };
+  const code = typeof e.code === "string" ? e.code : "editor_error";
+  const message = typeof e.message === "string" && e.message ? e.message : String(err);
+  switch (code) {
+    case "no_handler":
+      return new HostError("editor_not_connected", "This Sonobe window's editor isn't connected to Claude yet.", { hint: EDITOR_NOT_CONNECTED_HINT, data: { method } });
+    case "renderer_gone":
+      return new HostError("window_closed", "The Sonobe window closed before it answered.", { hint: "Ask the person to open the prototype again, then retry." });
+    case "timeout":
+      return new HostError("editor_timeout", `The editor didn't answer ${method} in time.`, { hint: "It may be busy or showing a dialog. Ask the person to check the Sonobe window, then retry." });
+    case "disposed":
+      return new HostError("app_quitting", "Sonobe is quitting.", { hint: "Reopen Sonobe to continue." });
+    case "send_failed":
+    case "unserializable_result":
+      return new HostError("editor_error", message, { hint: "This is a bug in Sonobe. The call couldn't cross into the editor; try a smaller request." });
+    default: {
+      const data = e.data && typeof e.data === "object" && !Array.isArray(e.data) ? { ...(e.data as Record<string, unknown>) } : undefined;
+      const hint = typeof data?.hint === "string" ? data.hint : undefined;
+      if (data) {
+        delete data.hint;
+        for (const reserved of ["ok", "changed", "error"]) delete data[reserved];
+      }
+      return new HostError(code, message, { ...(hint ? { hint } : {}), ...(data && Object.keys(data).length ? { data } : {}) });
+    }
+  }
+}
+
+function asInfo(value: unknown): RendererInfo {
+  const v = (value ?? {}) as Record<string, unknown>;
+  if (typeof v.name !== "string" || typeof v.revision !== "number") throw unexpectedReply("document.info");
+  return { name: v.name, projectPath: typeof v.projectPath === "string" ? v.projectPath : null, revision: v.revision, dirty: v.dirty === true };
+}
+
+function expandHome(p: string): string {
+  return p === "~" || p.startsWith("~/") || p.startsWith("~\\") ? path.join(homedir(), p.slice(1)) : p;
+}
+
+function samePath(a: string, b: string): boolean {
+  if (!path.isAbsolute(expandHome(b))) return false;
+  const norm = (p: string) => path.resolve(expandHome(p)).replace(/[\\/]+$/, "");
+  return process.platform === "linux" ? norm(a) === norm(b) : norm(a).toLowerCase() === norm(b).toLowerCase();
+}
+
+const toHistoryItem = (e: RendererHistoryEntry): HistoryItem => ({ txnId: e.txnId, label: e.label, author: e.author, revision: e.revision, opCount: e.opCount, timestamp: e.timestamp, summary: e.description });
+
+function matchesAuthor(author: Author, filter: string | undefined): boolean {
+  if (!filter) return true;
+  if (filter === "human" || filter === "agent") return author.kind === filter;
+  return author.name.toLowerCase() === filter.toLowerCase();
+}
+
+export function createAppHost(options: AppHostOptions): AppHost {
+  const { registry } = options;
+  const now = options.now ?? (() => Date.now());
+  const entries = new Map<number, Entry>();
+  const simDocs = new Map<string, Id>();
+  let activeId: number | null = null;
+
+  const call = async <T>(target: RendererTarget, method: string, params?: unknown, timeoutMs?: number): Promise<T> => {
+    try {
+      return await target.invoke<T>(method, params, timeoutMs !== undefined ? { timeoutMs } : undefined);
+    } catch (err) {
+      throw hostErrorFromRpc(err, method);
+    }
+  };
+
+  const forget = (id: number) => {
+    const entry = entries.get(id);
+    if (!entry) return;
+    entries.delete(id);
+    manager.closeDocument(entry.docId);
+    for (const [simId, docId] of simDocs) if (docId === entry.docId) simDocs.delete(simId);
+    if (activeId === id) activeId = null;
+  };
+
+  const prune = (targets: readonly RendererTarget[]) => {
+    for (const id of [...entries.keys()]) if (!targets.some((t) => t.id === id)) forget(id);
+  };
+
+  const findEntry = (ref: string): Entry | undefined => [...entries.values()].find((e) => e.docId === ref || (e.info.projectPath !== null && samePath(e.info.projectPath, ref)));
+
+  const assignDocId = (entry: Entry) => {
+    entry.docId = uniqueId(slugify(entry.info.name, "document"), (id: Id) => [...entries.values()].some((other) => other !== entry && other.docId === id));
+  };
+
+  /** Fresh document.info for a window (creating its entry on first sight). */
+  const describe = async (target: RendererTarget): Promise<Entry> => {
+    const info = asInfo(await call<unknown>(target, "document.info"));
+    let entry = entries.get(target.id);
+    if (entry) {
+      entry.target = target;
+      entry.info = info;
+    } else {
+      entry = { target, docId: "", info, snapshot: null, diagnostics: null, working: new Map() };
+      entries.set(target.id, entry);
+      assignDocId(entry);
+    }
+    return entry;
+  };
+
+  const activeTarget = (targets: readonly RendererTarget[]) => (activeId !== null ? targets.find((t) => t.id === activeId) : undefined) ?? targets[0];
+
+  const resolve = async (docId: Id | undefined): Promise<Entry> => {
+    const targets = options.targets();
+    prune(targets);
+    if (docId === undefined) {
+      const target = activeTarget(targets);
+      if (!target) throw noWindow();
+      return describe(target);
+    }
+    const known = findEntry(docId);
+    if (known) return describe(known.target);
+    for (const target of targets) if (!entries.has(target.id)) await describe(target).catch(() => undefined);
+    const found = findEntry(docId);
+    if (found) return describe(found.target);
+    const open = [...entries.values()].map((e) => e.docId);
+    throw new HostError("unknown_document", `There's no open document "${docId}".`, {
+      hint: open.length ? `Open documents: ${open.join(", ")}. Omit docId to use the one in front.` : "Nothing is open in Sonobe yet. Ask the person to open a prototype, or call open_document with a project folder.",
+    });
+  };
+
+  /** The document at the entry's last described revision (fetched only when it changed). */
+  const snapshot = async (entry: Entry): Promise<Snapshot> => {
+    if (entry.snapshot && entry.snapshot.revision === entry.info.revision) return entry.snapshot;
+    const reply = (await call<unknown>(entry.target, "document.get", { format: "json" })) as { revision?: unknown; document?: unknown } | null;
+    if (!reply || typeof reply.revision !== "number" || !reply.document || typeof reply.document !== "object") throw unexpectedReply("document.get");
+    entry.snapshot = { revision: reply.revision, doc: reply.document as SonobeDocument };
+    entry.info = { ...entry.info, revision: reply.revision };
+    return entry.snapshot;
+  };
+
+  const refresh = async (entry: Entry): Promise<Snapshot> => snapshot(await describe(entry.target));
+
+  const diagnosticsOf = (entry: Entry, snap: Snapshot): Diagnostic[] => {
+    if (entry.diagnostics?.doc !== snap.doc) entry.diagnostics = { doc: snap.doc, list: getDiagnostics(snap.doc, registry) };
+    return entry.diagnostics.list;
+  };
+
+  const summary = (entry: Entry): DocumentSummary => ({
+    docId: entry.docId,
+    name: entry.info.name,
+    ...(entry.info.projectPath ? { path: entry.info.projectPath } : {}),
+    revision: entry.info.revision,
+    dirty: entry.info.dirty,
+    active: entry.target.id === activeTarget(options.targets())?.id,
+  });
+
+  const manager: SimulationManager = createSimulationManager({
+    registry,
+    ...(options.maxSimSessions !== undefined ? { maxSessions: options.maxSimSessions } : {}),
+    getDocument: (docId) => {
+      const entry = docId !== undefined ? findEntry(docId) : activeId !== null ? entries.get(activeId) : entries.values().next().value;
+      if (!entry?.snapshot) throw new HostError("unknown_document", docId !== undefined ? `There's no open document "${docId}".` : "No document is open in Sonobe.", { hint: "Call get_document_info to see what's open." });
+      return { docId: entry.docId, doc: entry.snapshot.doc, revision: entry.snapshot.revision };
+    },
+  });
+
+  /** Pull the latest revision of a simulation's document so the session hot-swaps edits. */
+  const prepareSim = async (simId: string) => {
+    const docId = simDocs.get(simId);
+    if (docId === undefined) return;
+    const entry = findEntry(docId);
+    if (!entry || !options.targets().some((t) => t.id === entry.target.id)) {
+      manager.closeDocument(docId);
+      simDocs.delete(simId);
+      throw new HostError("window_closed", `The Sonobe window simulation "${simId}" was running in has closed.`, { hint: "Start a new simulation with sim_reset." });
+    }
+    await refresh(entry);
+  };
+
+  const sim: SimHost = {
+    async reset(o) {
+      const entry = await resolve(o.docId ?? (o.simId !== undefined ? simDocs.get(o.simId) : undefined));
+      await snapshot(entry);
+      const state = await manager.reset({ ...o, docId: entry.docId });
+      simDocs.set(state.simId, state.docId);
+      return state;
+    },
+    async dispatch(simId, events) {
+      await prepareSim(simId);
+      return manager.dispatch(simId, events);
+    },
+    async step(simId, o) {
+      await prepareSim(simId);
+      return manager.step(simId, o);
+    },
+    async trace(simId, o) {
+      await prepareSim(simId);
+      return manager.trace(simId, o);
+    },
+    async values(simId, targets) {
+      await prepareSim(simId);
+      return manager.values(simId, targets);
+    },
+    list: (docId) => manager.list(docId),
+  };
+
+  const conflictResult = (entry: Entry, expected: number, current: number, diagnostics: Diagnostic[], dryRun: boolean): HostApplyResult => ({
+    ok: false,
+    docId: entry.docId,
+    revision: current,
+    dryRun,
+    results: [],
+    errors: [
+      {
+        code: "revision_conflict",
+        message: `The document changed since revision ${expected}; it's at revision ${current} now. Nothing was applied.`,
+        hint: "Re-read what you're changing (get_outline or get_items), then retry with expectedRevision set to the current revision.",
+      },
+    ],
+    idMap: {},
+    affected: { components: [], layers: [], patches: [] },
+    applied: [],
+    diagnostics: { added: [], resolved: [], totals: diagnosticTotals(diagnostics) },
+    conflict: { expectedRevision: expected, currentRevision: current },
+  });
+
+  const openInto = async (target: RendererTarget, dir: string): Promise<DocumentSummary> => {
+    const reply = await call<{ ok?: unknown; cancelled?: unknown }>(target, "document.open", { path: dir }, OPEN_TIMEOUT_MS);
+    if (reply?.ok !== true) {
+      throw new HostError("open_cancelled", "The person kept their unsaved changes, so the project wasn't opened.", {
+        hint: "Ask them to save or discard their changes in Sonobe, then try again.",
+      });
+    }
+    const previous = entries.get(target.id);
+    if (previous) forget(target.id);
+    const entry = await describe(target);
+    activeId = target.id;
+    return summary(entry);
+  };
+
+  const host: AppHost = {
+    kind: "app",
+    capabilities: { screenshots: true, selection: true, presence: true, autosave: false },
+    registry,
+
+    async listDocuments() {
+      const targets = options.targets();
+      prune(targets);
+      const out: DocumentSummary[] = [];
+      for (const target of targets) {
+        try {
+          out.push(summary(await describe(target)));
+        } catch (err) {
+          if (isHostError(err) && (err.code === "editor_not_connected" || err.code === "window_closed")) continue;
+          throw err;
+        }
+      }
+      return out;
+    },
+
+    async openDocument(ref) {
+      const targets = options.targets();
+      prune(targets);
+      for (const target of targets) if (!entries.has(target.id)) await describe(target).catch(() => undefined);
+      const open = findEntry(ref);
+      if (open) {
+        activeId = open.target.id;
+        open.target.focus();
+        return summary(await describe(open.target));
+      }
+      const dir = path.isAbsolute(expandHome(ref)) ? await options.approveProject(path.resolve(expandHome(ref))) : null;
+      if (!dir) {
+        const docIds = [...entries.values()].map((e) => e.docId);
+        throw new HostError("not_a_project", `"${ref}" isn't an open document or a Sonobe project folder.`, {
+          hint: `${docIds.length ? `Open documents: ${docIds.join(", ")}. ` : ""}To open a project, pass the absolute path of its folder (it contains project.json, e.g. "~/Documents/Checkout Flow.sonobe"). To start one, use create_document.`,
+        });
+      }
+      const target = activeTarget(targets) ?? (await options.ensureTarget?.()) ?? null;
+      if (!target) throw noWindow();
+      return openInto(target, dir);
+    },
+
+    async createDocument(request) {
+      if (request.template !== undefined && !TEMPLATES.some((t) => t.id === request.template)) {
+        throw new HostError("unknown_template", `There's no template "${request.template}".`, {
+          hint: `Templates: ${TEMPLATES.map((t) => `${t.id} (${t.description})`).join("; ")}.`,
+        });
+      }
+      let dir: string;
+      if (request.path !== undefined) {
+        const expanded = expandHome(request.path);
+        if (!path.isAbsolute(expanded)) {
+          throw new HostError("absolute_path_required", `"${request.path}" is a relative path, and the Sonobe app has no working folder to resolve it against.`, {
+            hint: 'Pass an absolute folder path such as "~/Documents/Checkout Flow.sonobe", or omit path to save in the Documents folder.',
+          });
+        }
+        dir = path.resolve(expanded);
+      } else {
+        dir = await options.defaultProjectDir(request.name?.trim() || "Untitled");
+      }
+      if (await options.projectExists(dir)) {
+        throw new HostError("already_exists", `${dir} already holds a Sonobe project.`, { hint: "Open it with open_document instead, or pick another folder." });
+      }
+      const name = request.name?.trim() || path.basename(dir).replace(/\.sonobe$/i, "") || "Untitled";
+      const doc = createTemplateDocument({ name, registry, ...(request.template ? { template: request.template } : {}), ...(request.device ? { device: request.device } : {}) });
+      await options.writeProject(dir, doc);
+      if (request.open === false) {
+        const docId = uniqueId(slugify(name, "document"), (id: Id) => [...entries.values()].some((e) => e.docId === id));
+        return { docId, name, path: dir, revision: 0, dirty: false, active: false };
+      }
+      const targets = options.targets();
+      const target = activeTarget(targets) ?? (await options.ensureTarget?.()) ?? null;
+      if (!target) throw noWindow();
+      return openInto(target, dir);
+    },
+
+    async getDocument(docId) {
+      const entry = await resolve(docId);
+      const snap = await snapshot(entry);
+      return { docId: entry.docId, ...(entry.info.projectPath ? { path: entry.info.projectPath } : {}), doc: snap.doc, revision: snap.revision, dirty: entry.info.dirty };
+    },
+
+    async saveDocument(docId) {
+      const entry = await resolve(docId);
+      const reply = await call<false | { ok?: unknown; path?: unknown; revision?: unknown }>(entry.target, "document.save", {}, OPEN_TIMEOUT_MS);
+      if (reply === false) {
+        throw new HostError("save_cancelled", "Saving was cancelled.", {
+          hint: "This prototype hadn't been saved before, so Sonobe asked the person where to put it and they cancelled. Ask them where it should go, then call save_document again.",
+        });
+      }
+      if (!reply || reply.ok !== true || typeof reply.revision !== "number") throw unexpectedReply("document.save");
+      await describe(entry.target);
+      return { docId: entry.docId, ...(typeof reply.path === "string" ? { path: reply.path } : {}), revision: reply.revision, written: [], removed: [] };
+    },
+
+    async apply(ops, o) {
+      const entry = await resolve(o.docId);
+      const before = await snapshot(entry);
+      const beforeDiagnostics = diagnosticsOf(entry, before);
+      const dryRun = !!o.dryRun;
+      if (o.expectedRevision !== undefined && o.expectedRevision !== before.revision) return conflictResult(entry, o.expectedRevision, before.revision, beforeDiagnostics, dryRun);
+
+      const reply = await call<RendererApplyReply>(
+        entry.target,
+        "document.apply",
+        {
+          ops,
+          label: o.label,
+          author: o.author,
+          dryRun,
+          ...(o.expectedRevision !== undefined ? { expectedRevision: o.expectedRevision } : {}),
+          ...(o.atomic !== undefined ? { atomic: o.atomic } : {}),
+          ...(o.defaultComponent !== undefined ? { component: o.defaultComponent } : {}),
+        },
+        APPLY_TIMEOUT_MS,
+      );
+      const r = reply?.result;
+      if (!r || typeof reply.revision !== "number" || !Array.isArray(r.errors)) throw unexpectedReply("document.apply");
+      if (!r.ok && r.errors.some((e) => e.code === "revision_mismatch")) return conflictResult(entry, o.expectedRevision ?? before.revision, reply.revision, beforeDiagnostics, dryRun);
+
+      // Replay locally (never committed) for the resolved ops and, on dry runs, the preview.
+      const local = applyOps(before.doc, ops, { registry, atomic: o.atomic !== false, dryRun: true, ...(o.defaultComponent !== undefined ? { defaultComponent: o.defaultComponent } : {}) });
+      const out: HostApplyResult = {
+        ok: r.ok,
+        docId: entry.docId,
+        revision: reply.revision,
+        dryRun,
+        results: r.results,
+        errors: r.errors,
+        idMap: r.idMap,
+        affected: r.affected,
+        applied: local.applied,
+        diagnostics: { added: [], resolved: [], totals: diagnosticTotals(beforeDiagnostics) },
+      };
+      if (dryRun) {
+        if (local.preview) {
+          out.preview = local.preview;
+          out.diagnostics = diffDiagnostics(beforeDiagnostics, getDiagnostics(local.preview, registry));
+        }
+        return out;
+      }
+      if (r.applied > 0) {
+        const after = await refresh(entry);
+        out.diagnostics = diffDiagnostics(beforeDiagnostics, diagnosticsOf(entry, after));
+        const history = await call<{ entries?: RendererHistoryEntry[] }>(entry.target, "history.list", { limit: 5 });
+        const committed = history?.entries?.find((e) => e.revision === reply.revision);
+        if (committed) out.txnId = committed.txnId;
+      }
+      return out;
+    },
+
+    async diagnostics(docId) {
+      const entry = await resolve(docId);
+      const snap = await snapshot(entry);
+      return { docId: entry.docId, revision: snap.revision, diagnostics: diagnosticsOf(entry, snap) };
+    },
+
+    async getSelection(docId) {
+      const entry = await resolve(docId);
+      const s = await call<{ component?: unknown; layers?: unknown; patches?: unknown; comments?: unknown }>(entry.target, "selection.get");
+      const ids = (v: unknown): Id[] => (Array.isArray(v) ? v.filter((id): id is Id => typeof id === "string") : []);
+      if (!s || typeof s.component !== "string") throw unexpectedReply("selection.get");
+      return { docId: entry.docId, component: s.component, layers: ids(s.layers), patches: ids(s.patches), comments: ids(s.comments) };
+    },
+
+    async screenshot(target, o) {
+      const entry = await resolve(o.docId);
+      if (o.simId !== undefined) {
+        throw new HostError("sim_screenshot_unavailable", "Screenshots show the live viewer; Sonobe can't draw a simulation's frame yet.", {
+          hint: "Take the screenshot without simId, and check the simulation with sim_get_values or sim_trace.",
+        });
+      }
+      const scale = o.scale ?? 1;
+      let rect: Rect | null;
+      let cssPerPoint = 1;
+      if (target.kind === "viewer") {
+        const bounds = await call<unknown>(entry.target, "viewer.bounds");
+        if (!isViewerBounds(bounds)) throw unexpectedReply("viewer.bounds");
+        rect = viewerCaptureRect(bounds);
+        // Measure the stage rather than trusting `scale`: the viewer may be zoomed by a CSS transform
+        // outside the renderer, which getBoundingClientRect includes.
+        cssPerPoint = bounds.prototypeSize[0] > 0 && bounds.stage.width > 0 ? bounds.stage.width / bounds.prototypeSize[0] : bounds.scale;
+      } else {
+        const method = target.kind === "layer" ? "viewer.layerBounds" : `${target.kind}.bounds`;
+        const label = target.kind === "layer" ? `layer "${target.layerId}"` : target.kind === "graph" ? "patch graph" : "canvas";
+        if (entry.target.hasMethod(method) !== true) {
+          throw new HostError("target_unavailable", `This version of the editor can capture the viewer, but not the ${label}.`, {
+            hint: target.kind === "graph" ? 'Use target "viewer". To read the graph, use get_outline or explain.' : 'Use target "viewer" (the whole prototype screen).',
+          });
+        }
+        const bounds = await call<unknown>(entry.target, method, target.kind === "layer" ? { layerId: target.layerId } : undefined);
+        if (!isRect(bounds)) throw unexpectedReply(method);
+        rect = bounds;
+        const perPoint = (bounds as unknown as { scale?: unknown }).scale;
+        if (typeof perPoint === "number" && perPoint > 0) cssPerPoint = perPoint;
+      }
+      if (!rect || rect.width < 1 || rect.height < 1) {
+        throw new HostError("capture_failed", "There's nothing visible to capture: the target has no area on screen.", { hint: "Ask the person to show the Viewer panel (⌘2) and make the window larger, then try again." });
+      }
+      const image = await entry.target.capture(rect, screenshotSize(rect, cssPerPoint, scale, o.maxWidth));
+      if (!image) {
+        throw new HostError("capture_failed", "Sonobe couldn't capture the window.", { hint: "Make sure the Sonobe window isn't minimized, then try again." });
+      }
+      const shot: Screenshot = { data: image.data, mimeType: "image/png", width: image.width, height: image.height };
+      return shot;
+    },
+
+    async reveal(ids, o) {
+      const entry = await resolve(o.docId);
+      const reply = await call<{ revealed?: unknown; missing?: unknown }>(entry.target, "reveal", { ids });
+      const list = (v: unknown): Id[] => (Array.isArray(v) ? v.filter((id): id is Id => typeof id === "string") : []);
+      const revealed = list(reply?.revealed);
+      const missing = list(reply?.missing);
+      if (o.focus) entry.target.focus();
+      if (!revealed.length) return { revealed: false, reason: `None of these are in the document: ${missing.join(", ") || ids.join(", ")}.` };
+      return missing.length ? { revealed: true, reason: `Not found: ${missing.join(", ")}.` } : { revealed: true };
+    },
+
+    async setWorking(work, o) {
+      const entry = await resolve(o.docId);
+      const key = o.author.name;
+      const current = entry.working.get(key);
+      if (current) {
+        entry.working.delete(key);
+        await call(entry.target, "presence.finish", { workId: current.workId });
+      } else if (work === null) {
+        await call(entry.target, "presence.finish", { author: o.author });
+      }
+      if (work === null) return;
+      const reply = await call<{ workId?: unknown }>(entry.target, "presence.begin", { ids: work.ids, intent: work.intent, author: o.author });
+      if (typeof reply?.workId !== "string") throw unexpectedReply("presence.begin");
+      entry.working.set(key, { workId: reply.workId, intent: { ids: [...work.ids], intent: work.intent, author: o.author, since: now() } });
+    },
+
+    async presence(docId) {
+      const entry = await resolve(docId);
+      return [...entry.working.values()].map((w) => w.intent);
+    },
+
+    sim,
+
+    history: {
+      async list(o) {
+        const entry = await resolve(o.docId);
+        const limit = o.limit ?? 20;
+        const reply = await call<{ entries?: RendererHistoryEntry[] }>(entry.target, "history.list", { limit: o.author ? HISTORY_SCAN : limit });
+        return (reply?.entries ?? []).filter((e) => matchesAuthor(e.author, o.author)).slice(0, limit).map(toHistoryItem);
+      },
+
+      async undo(o) {
+        const entry = await resolve(o.docId);
+        const reply = await call<{ entries?: RendererHistoryEntry[] }>(entry.target, "history.list", { limit: HISTORY_SCAN });
+        const list = reply?.entries ?? [];
+        const top = list[0];
+        if (!top) throw new HostError("nothing_to_undo", "There's nothing to undo in this document's history.", { hint: "list_history shows what's been recorded since the document was opened." });
+        let targetId = o.txnId;
+        if (targetId === undefined) {
+          if (top.author.kind === "human" && !o.allowHumanEdits) {
+            throw new HostError("human_edit", `The newest change was made by ${top.author.name}: "${top.label}". Undoing it would throw away their work.`, {
+              hint: `Ask before undoing someone else's edit. To undo it anyway, pass txnId "${top.txnId}".`,
+            });
+          }
+          targetId = top.txnId;
+        }
+        const index = list.findIndex((e) => e.txnId === targetId);
+        if (index < 0) {
+          throw new HostError("not_found", `There's no undoable history entry "${targetId}".`, {
+            hint: `Newest entries: ${list
+              .slice(0, 5)
+              .map((e) => `${e.txnId} (${e.label})`)
+              .join(", ")}.`,
+          });
+        }
+        const humans = list.slice(0, index + 1).filter((e) => e.author.kind === "human" && e.txnId !== targetId);
+        if (humans.length && !o.allowHumanEdits) {
+          throw new HostError("human_edit", `Undoing back to "${list[index]!.label}" would also undo ${humans.length} newer change${humans.length === 1 ? "" : "s"} made by ${humans[0]!.author.name}.`, {
+            hint: "Ask the person first; to go ahead anyway, pass allowHumanEdits: true.",
+          });
+        }
+        const before = await snapshot(entry);
+        const beforeDiagnostics = diagnosticsOf(entry, before);
+        const undone = await call<{ revision?: unknown; undone?: { txnId: string }[] }>(entry.target, "history.undo", { txnId: targetId, author: o.author });
+        if (typeof undone?.revision !== "number") throw unexpectedReply("history.undo");
+        const after = await refresh(entry);
+        const byId = new Map(list.map((e) => [e.txnId, e]));
+        return {
+          docId: entry.docId,
+          revision: undone.revision,
+          undone: (undone.undone ?? []).map((u) => byId.get(u.txnId)).filter((e): e is RendererHistoryEntry => !!e).map(toHistoryItem),
+          diagnostics: diffDiagnostics(beforeDiagnostics, diagnosticsOf(entry, after)),
+        };
+      },
+    },
+
+    forgetTarget: forget,
+
+    dispose() {
+      manager.dispose();
+      entries.clear();
+      simDocs.clear();
+    },
+  };
+  return host;
+}

@@ -1,0 +1,516 @@
+{
+  "formatVersion": 1,
+  "id": "main",
+  "name": "Main",
+  "kind": "prototype",
+  "notes": "Watch, or tap the right two thirds to skip and the left third to go back. Current Story counts which story is showing; Story Timer restarts whenever that count changes. Each bar's fill is clamp(story + progress − index, 0, 1): full for stories you've seen, filling for the current one, empty after.",
+  "size": [402, 874],
+  "interface": { "inputs": {}, "outputs": {} },
+  "layers": [
+    {
+      "id": "story",
+      "type": "group",
+      "name": "Story",
+      "props": {
+        "color": { "link": "story_colors.loop" },
+        "hitTest": false,
+        "opacity": { "link": "story_fade.output" },
+        "size": [402, 874]
+      },
+      "children": [
+        {
+          "id": "story_sun",
+          "type": "oval",
+          "name": "Sun",
+          "props": {
+            "color": { "link": "story_accents.loop" },
+            "position": [40, 180],
+            "size": [320, 320]
+          }
+        },
+        {
+          "id": "story_hill",
+          "type": "rectangle",
+          "name": "Hill",
+          "props": {
+            "color": "#0000002E",
+            "cornerRadius": 120,
+            "position": [-80, 560],
+            "rotation": -8,
+            "size": [560, 420]
+          }
+        },
+        {
+          "id": "story_title",
+          "type": "text",
+          "name": "Title",
+          "props": {
+            "fontSize": 28,
+            "fontWeight": 700,
+            "hitTest": false,
+            "letterSpacing": -0.4,
+            "position": [24, 648],
+            "text": { "link": "story_titles.loop" },
+            "textColor": "#FFFFFFFF"
+          }
+        },
+        {
+          "id": "story_caption",
+          "type": "text",
+          "name": "Caption",
+          "props": {
+            "fontSize": 15,
+            "fontWeight": 400,
+            "hitTest": false,
+            "lineHeight": 21,
+            "position": [24, 690],
+            "text": { "link": "story_captions.loop" },
+            "textColor": "#FFFFFFB3"
+          }
+        }
+      ]
+    },
+    {
+      "id": "story_shade",
+      "type": "gradient",
+      "name": "Top Shade",
+      "props": {
+        "gradient": {
+          "gradient": {
+            "kind": "linear",
+            "stops": [[0, "#00000066"], [1, "#00000000"]],
+            "start": [0.5, 0],
+            "end": [0.5, 1]
+          }
+        },
+        "hitTest": false,
+        "size": [402, 180]
+      }
+    },
+    {
+      "id": "segment_track",
+      "type": "rectangle",
+      "name": "Bar Track",
+      "props": {
+        "color": "#FFFFFF59",
+        "cornerRadius": 1.5,
+        "hitTest": false,
+        "position": { "link": "segment_grid.position" },
+        "size": { "link": "segment_grid.size" }
+      }
+    },
+    {
+      "id": "segment_fill",
+      "type": "rectangle",
+      "name": "Bar Fill",
+      "props": {
+        "color": "#FFFFFFFF",
+        "cornerRadius": 1.5,
+        "hitTest": false,
+        "position": { "link": "segment_grid.position" },
+        "size": { "link": "fill_size.output" }
+      }
+    },
+    {
+      "id": "app_status_bar",
+      "type": "group",
+      "name": "Status Bar",
+      "props": {
+        "hitTest": false,
+        "size": [402, 62]
+      },
+      "children": [
+        {
+          "id": "app_clock",
+          "type": "text",
+          "name": "Clock",
+          "props": {
+            "anchor": [0.5, 0],
+            "fontSize": 17,
+            "fontWeight": 600,
+            "hitTest": false,
+            "position": [72, 20],
+            "text": "9:41",
+            "textAlignment": "center",
+            "textColor": "#FFFFFFFF"
+          }
+        },
+        {
+          "id": "app_signal_1",
+          "type": "rectangle",
+          "name": "Signal 1",
+          "props": {
+            "color": "#FFFFFFFF",
+            "cornerRadius": 1,
+            "hitTest": false,
+            "position": [292, 30],
+            "size": [3, 4]
+          }
+        },
+        {
+          "id": "app_signal_2",
+          "type": "rectangle",
+          "name": "Signal 2",
+          "props": {
+            "color": "#FFFFFFFF",
+            "cornerRadius": 1,
+            "hitTest": false,
+            "position": [297, 28],
+            "size": [3, 6]
+          }
+        },
+        {
+          "id": "app_signal_3",
+          "type": "rectangle",
+          "name": "Signal 3",
+          "props": {
+            "color": "#FFFFFFFF",
+            "cornerRadius": 1,
+            "hitTest": false,
+            "position": [302, 26],
+            "size": [3, 8]
+          }
+        },
+        {
+          "id": "app_signal_4",
+          "type": "rectangle",
+          "name": "Signal 4",
+          "props": {
+            "color": "#FFFFFFFF",
+            "cornerRadius": 1,
+            "hitTest": false,
+            "position": [307, 24],
+            "size": [3, 10]
+          }
+        },
+        {
+          "id": "app_battery",
+          "type": "rectangle",
+          "name": "Battery",
+          "props": {
+            "color": "#00000000",
+            "cornerRadius": 3.5,
+            "hitTest": false,
+            "position": [322, 23],
+            "size": [25, 12],
+            "strokeColor": "#FFFFFF59",
+            "strokeWidth": 1
+          }
+        },
+        {
+          "id": "app_battery_level",
+          "type": "rectangle",
+          "name": "Battery Level",
+          "props": {
+            "color": "#FFFFFFFF",
+            "cornerRadius": 2,
+            "hitTest": false,
+            "position": [324, 25],
+            "size": [19, 8]
+          }
+        },
+        {
+          "id": "app_battery_cap",
+          "type": "rectangle",
+          "name": "Battery Cap",
+          "props": {
+            "color": "#FFFFFF59",
+            "cornerRadius": 1,
+            "hitTest": false,
+            "position": [348, 27],
+            "size": [2, 4]
+          }
+        }
+      ]
+    },
+    {
+      "id": "author_avatar",
+      "type": "oval",
+      "name": "Avatar",
+      "props": {
+        "color": "#FFFFFFFF",
+        "hitTest": false,
+        "position": [16, 82],
+        "size": [36, 36],
+        "strokeColor": "#FFFFFF80",
+        "strokeWidth": 2
+      }
+    },
+    {
+      "id": "author_name",
+      "type": "text",
+      "name": "Author",
+      "props": {
+        "fontSize": 15,
+        "fontWeight": 600,
+        "hitTest": false,
+        "position": [62, 90],
+        "text": "lisa.travels · 2h",
+        "textColor": "#FFFFFFFF"
+      }
+    },
+    {
+      "id": "close_bar_1",
+      "type": "rectangle",
+      "name": "Close",
+      "props": {
+        "color": "#FFFFFFFF",
+        "cornerRadius": 1,
+        "hitTest": false,
+        "position": [370, 99],
+        "rotation": 45,
+        "size": [20, 2.5]
+      }
+    },
+    {
+      "id": "close_bar_2",
+      "type": "rectangle",
+      "name": "Close",
+      "props": {
+        "color": "#FFFFFFFF",
+        "cornerRadius": 1,
+        "hitTest": false,
+        "position": [370, 99],
+        "rotation": -45,
+        "size": [20, 2.5]
+      }
+    },
+    {
+      "id": "reply_field",
+      "type": "group",
+      "name": "Reply Field",
+      "props": {
+        "color": "#00000000",
+        "cornerRadius": 24,
+        "hitTest": false,
+        "position": [16, 784],
+        "size": [370, 48],
+        "strokeColor": "#FFFFFF80",
+        "strokeWidth": 1.5
+      },
+      "children": [
+        {
+          "id": "reply_placeholder",
+          "type": "text",
+          "name": "Placeholder",
+          "props": {
+            "fontSize": 15,
+            "fontWeight": 400,
+            "hitTest": false,
+            "lineHeight": 21,
+            "position": [20, 13],
+            "text": "Send message",
+            "textColor": "#FFFFFFB3"
+          }
+        }
+      ]
+    },
+    {
+      "id": "tap_zone_back",
+      "type": "hitArea",
+      "name": "Tap Zone Back",
+      "props": {
+        "position": [0, 130],
+        "showInEditor": false,
+        "size": [134, 640]
+      }
+    },
+    {
+      "id": "tap_zone_forward",
+      "type": "hitArea",
+      "name": "Tap Zone Forward",
+      "props": {
+        "position": [134, 130],
+        "showInEditor": false,
+        "size": [268, 640]
+      }
+    },
+    {
+      "id": "app_home_indicator",
+      "type": "rectangle",
+      "name": "Home Indicator",
+      "props": {
+        "anchor": [0.5, 1],
+        "color": "#FFFFFFFF",
+        "cornerRadius": 3,
+        "hitTest": false,
+        "position": [201, 866],
+        "size": [140, 5]
+      }
+    }
+  ],
+  "patches": {
+    "current_story": {
+      "type": "counter",
+      "name": "Current Story",
+      "inputs": {
+        "decrease": { "link": "tap_back.tap" },
+        "increase": { "link": "next_story.output" },
+        "maximumCount": 3
+      },
+      "ui": { "x": 560, "y": 40 }
+    },
+    "fill_size": {
+      "type": "size",
+      "name": "Fill Size",
+      "inputs": {
+        "height": 3,
+        "width": { "link": "fill_width.output" }
+      },
+      "ui": { "x": 2120, "y": 40 }
+    },
+    "fill_width": {
+      "type": "multiply",
+      "name": "Fill Width",
+      "typeParam": "number",
+      "inputCount": 2,
+      "inputs": {
+        "value1": { "link": "segment_fill_amount.output" },
+        "value2": 122
+      },
+      "ui": { "x": 1860, "y": 40 }
+    },
+    "next_story": {
+      "type": "or",
+      "name": "Tap or Time Up",
+      "inputCount": 2,
+      "inputs": {
+        "value1": { "link": "tap_forward.tap" },
+        "value2": { "link": "story_timer.finished" }
+      },
+      "ui": { "x": 300, "y": 190 }
+    },
+    "segment_fill_amount": {
+      "type": "mathExpression",
+      "name": "Bar Fill Amount",
+      "inputs": {
+        "index": { "link": "stories.index" },
+        "progress": { "link": "story_timer.progress" },
+        "story": { "link": "current_story.count" }
+      },
+      "settings": { "expression": "clamp(story + progress - index, 0, 1)" },
+      "ui": { "x": 1600, "y": 40 }
+    },
+    "segment_grid": {
+      "type": "gridLayout",
+      "name": "Bar Positions",
+      "inputs": {
+        "columns": 3,
+        "index": { "link": "stories.index" },
+        "itemHeight": 3,
+        "origin": [12, 64],
+        "spacing": 6,
+        "width": 378
+      },
+      "ui": { "x": 300, "y": 40 }
+    },
+    "start_timer": {
+      "type": "or",
+      "name": "Start or Story Changed",
+      "inputCount": 2,
+      "inputs": {
+        "value1": { "link": "started.started" },
+        "value2": { "link": "story_changed.changed" }
+      },
+      "ui": { "x": 1080, "y": 40 }
+    },
+    "started": {
+      "type": "whenPrototypeStarts",
+      "name": "Prototype Starts",
+      "inputs": {},
+      "ui": { "x": 40, "y": 190 }
+    },
+    "stories": {
+      "type": "loop",
+      "name": "Stories",
+      "inputs": { "count": 3 },
+      "ui": { "x": 40, "y": 40 }
+    },
+    "story_accents": {
+      "type": "loopBuilder",
+      "name": "Sun Colors",
+      "typeParam": "color",
+      "inputCount": 3,
+      "inputs": { "item0": "#FDE68AFF", "item1": "#BAE6FDFF", "item2": "#FBCFE8FF" },
+      "ui": { "x": 40, "y": 1090 }
+    },
+    "story_captions": {
+      "type": "loopBuilder",
+      "name": "Story Captions",
+      "typeParam": "text",
+      "inputCount": 3,
+      "inputs": {
+        "item0": "Yellow trams and a very steep hill",
+        "item1": "Fog over the painted palace",
+        "item2": "Sunset from the bridge"
+      },
+      "ui": { "x": 40, "y": 1690 }
+    },
+    "story_changed": {
+      "type": "pulseOnChange",
+      "name": "Story Changed",
+      "typeParam": "number",
+      "inputs": { "value": { "link": "current_story.count" } },
+      "ui": { "x": 820, "y": 40 }
+    },
+    "story_colors": {
+      "type": "loopBuilder",
+      "name": "Story Colors",
+      "typeParam": "color",
+      "inputCount": 3,
+      "inputs": { "item0": "#F59E0BFF", "item1": "#0EA5E9FF", "item2": "#DB2777FF" },
+      "ui": { "x": 40, "y": 790 }
+    },
+    "story_fade": {
+      "type": "classicAnimation",
+      "name": "Story Fade",
+      "typeParam": "number",
+      "inputs": {
+        "curve": "cubicOut",
+        "duration": 0.25,
+        "number": { "link": "story_is_current.output" }
+      },
+      "ui": { "x": 1080, "y": 190 }
+    },
+    "story_is_current": {
+      "type": "equals",
+      "name": "Is Current Story",
+      "typeParam": "number",
+      "inputs": {
+        "value1": { "link": "stories.index" },
+        "value2": { "link": "current_story.count" }
+      },
+      "ui": { "x": 820, "y": 190 }
+    },
+    "story_timer": {
+      "type": "wait",
+      "name": "Story Timer",
+      "inputs": {
+        "duration": 5,
+        "start": { "link": "start_timer.output" }
+      },
+      "ui": { "x": 1340, "y": 40 }
+    },
+    "story_titles": {
+      "type": "loopBuilder",
+      "name": "Story Titles",
+      "typeParam": "text",
+      "inputCount": 3,
+      "inputs": { "item0": "Day 1 · Lisbon", "item1": "Day 2 · Sintra", "item2": "Day 3 · Porto" },
+      "ui": { "x": 40, "y": 1390 }
+    },
+    "tap_back": {
+      "type": "interaction",
+      "name": "Tap Left Side",
+      "inputs": { "layer": { "layer": "tap_zone_back" } },
+      "ui": { "x": 40, "y": 340 }
+    },
+    "tap_forward": {
+      "type": "interaction",
+      "name": "Tap Right Side",
+      "inputs": { "layer": { "layer": "tap_zone_forward" } },
+      "ui": { "x": 40, "y": 490 }
+    }
+  },
+  "comments": []
+}

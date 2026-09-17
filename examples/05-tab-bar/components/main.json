@@ -1,0 +1,1535 @@
+{
+  "formatVersion": 1,
+  "id": "main",
+  "name": "Main",
+  "kind": "prototype",
+  "notes": "Tap a tab. Each tab's Tap pulses one Set to input on Current Tab; Screen Offset and Indicator X pick a position for that tab, and two Pop Animations slide there. Each tab's tint reads Equals on the same option number.",
+  "size": [402, 874],
+  "interface": { "inputs": {}, "outputs": {} },
+  "layers": [
+    {
+      "id": "screens",
+      "type": "group",
+      "name": "Screens",
+      "props": {
+        "layout": "row",
+        "position": { "link": "screens_position.output" },
+        "size": [1608, 874]
+      },
+      "children": [
+        {
+          "id": "screen_home",
+          "type": "group",
+          "name": "Home Screen",
+          "props": { "size": [402, 874] },
+          "children": [
+            {
+              "id": "screen_home_title",
+              "type": "text",
+              "name": "Title",
+              "props": {
+                "fontSize": 34,
+                "fontWeight": 700,
+                "hitTest": false,
+                "letterSpacing": -0.6,
+                "position": [24, 76],
+                "text": "Good morning",
+                "textColor": "#111118FF"
+              }
+            },
+            {
+              "id": "screen_home_subtitle",
+              "type": "text",
+              "name": "Subtitle",
+              "props": {
+                "fontSize": 15,
+                "fontWeight": 400,
+                "hitTest": false,
+                "lineHeight": 21,
+                "position": [24, 120],
+                "text": "Tuesday · 3 things today",
+                "textColor": "#5F5F6BFF"
+              }
+            },
+            {
+              "id": "focus_card",
+              "type": "group",
+              "name": "Focus Card",
+              "props": {
+                "clip": true,
+                "cornerRadius": 24,
+                "position": [24, 164],
+                "shadowColor": "#000000FF",
+                "shadowOffset": [0, 6],
+                "shadowOpacity": 0.08,
+                "shadowRadius": 18,
+                "size": [354, 200]
+              },
+              "children": [
+                {
+                  "id": "focus_card_fill",
+                  "type": "gradient",
+                  "name": "Fill",
+                  "props": {
+                    "gradient": {
+                      "gradient": {
+                        "kind": "linear",
+                        "stops": [[0, "#8B5CF6FF"], [1, "#5B5CF6FF"]],
+                        "start": [0, 0],
+                        "end": [1, 1]
+                      }
+                    },
+                    "size": [354, 200]
+                  }
+                },
+                {
+                  "id": "focus_card_title",
+                  "type": "text",
+                  "name": "Title",
+                  "props": {
+                    "fontSize": 17,
+                    "fontWeight": 600,
+                    "hitTest": false,
+                    "position": [20, 144],
+                    "text": "Focus session",
+                    "textColor": "#FFFFFFFF"
+                  }
+                },
+                {
+                  "id": "focus_card_detail",
+                  "type": "text",
+                  "name": "Detail",
+                  "props": {
+                    "fontSize": 13,
+                    "fontWeight": 400,
+                    "hitTest": false,
+                    "lineHeight": 18,
+                    "position": [20, 168],
+                    "text": "25 min · starts 9:30",
+                    "textColor": "#FFFFFFB3"
+                  }
+                }
+              ]
+            },
+            {
+              "id": "walk_card",
+              "type": "group",
+              "name": "Walk Card",
+              "props": {
+                "clip": true,
+                "cornerRadius": 24,
+                "position": [24, 384],
+                "shadowColor": "#000000FF",
+                "shadowOffset": [0, 6],
+                "shadowOpacity": 0.08,
+                "shadowRadius": 18,
+                "size": [167, 150]
+              },
+              "children": [
+                {
+                  "id": "walk_card_fill",
+                  "type": "gradient",
+                  "name": "Fill",
+                  "props": {
+                    "gradient": {
+                      "gradient": {
+                        "kind": "linear",
+                        "stops": [[0, "#FF9A62FF"], [1, "#FF3D71FF"]],
+                        "start": [0, 0],
+                        "end": [1, 1]
+                      }
+                    },
+                    "size": [167, 150]
+                  }
+                },
+                {
+                  "id": "walk_card_title",
+                  "type": "text",
+                  "name": "Title",
+                  "props": {
+                    "fontSize": 17,
+                    "fontWeight": 600,
+                    "hitTest": false,
+                    "position": [20, 94],
+                    "text": "Walk",
+                    "textColor": "#FFFFFFFF"
+                  }
+                },
+                {
+                  "id": "walk_card_detail",
+                  "type": "text",
+                  "name": "Detail",
+                  "props": {
+                    "fontSize": 13,
+                    "fontWeight": 400,
+                    "hitTest": false,
+                    "lineHeight": 18,
+                    "position": [20, 118],
+                    "text": "4,210 steps",
+                    "textColor": "#FFFFFFB3"
+                  }
+                }
+              ]
+            },
+            {
+              "id": "water_card",
+              "type": "group",
+              "name": "Water Card",
+              "props": {
+                "clip": true,
+                "cornerRadius": 24,
+                "position": [211, 384],
+                "shadowColor": "#000000FF",
+                "shadowOffset": [0, 6],
+                "shadowOpacity": 0.08,
+                "shadowRadius": 18,
+                "size": [167, 150]
+              },
+              "children": [
+                {
+                  "id": "water_card_fill",
+                  "type": "gradient",
+                  "name": "Fill",
+                  "props": {
+                    "gradient": {
+                      "gradient": {
+                        "kind": "linear",
+                        "stops": [[0, "#5EEAD4FF"], [1, "#14B8A6FF"]],
+                        "start": [0, 0],
+                        "end": [1, 1]
+                      }
+                    },
+                    "size": [167, 150]
+                  }
+                },
+                {
+                  "id": "water_card_title",
+                  "type": "text",
+                  "name": "Title",
+                  "props": {
+                    "fontSize": 17,
+                    "fontWeight": 600,
+                    "hitTest": false,
+                    "position": [20, 94],
+                    "text": "Water",
+                    "textColor": "#FFFFFFFF"
+                  }
+                },
+                {
+                  "id": "water_card_detail",
+                  "type": "text",
+                  "name": "Detail",
+                  "props": {
+                    "fontSize": 13,
+                    "fontWeight": 400,
+                    "hitTest": false,
+                    "lineHeight": 18,
+                    "position": [20, 118],
+                    "text": "5 of 8 cups",
+                    "textColor": "#FFFFFFB3"
+                  }
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "id": "screen_explore",
+          "type": "group",
+          "name": "Explore Screen",
+          "props": { "size": [402, 874] },
+          "children": [
+            {
+              "id": "screen_explore_title",
+              "type": "text",
+              "name": "Title",
+              "props": {
+                "fontSize": 34,
+                "fontWeight": 700,
+                "hitTest": false,
+                "letterSpacing": -0.6,
+                "position": [24, 76],
+                "text": "Explore",
+                "textColor": "#111118FF"
+              }
+            },
+            {
+              "id": "screen_explore_subtitle",
+              "type": "text",
+              "name": "Subtitle",
+              "props": {
+                "fontSize": 15,
+                "fontWeight": 400,
+                "hitTest": false,
+                "lineHeight": 21,
+                "position": [24, 120],
+                "text": "Pick something new",
+                "textColor": "#5F5F6BFF"
+              }
+            },
+            {
+              "id": "design_tile",
+              "type": "group",
+              "name": "Design Tile",
+              "props": {
+                "clip": true,
+                "cornerRadius": 24,
+                "position": [24, 164],
+                "shadowColor": "#000000FF",
+                "shadowOffset": [0, 6],
+                "shadowOpacity": 0.08,
+                "shadowRadius": 18,
+                "size": [167, 200]
+              },
+              "children": [
+                {
+                  "id": "design_tile_fill",
+                  "type": "gradient",
+                  "name": "Fill",
+                  "props": {
+                    "gradient": {
+                      "gradient": {
+                        "kind": "linear",
+                        "stops": [[0, "#FDE68AFF"], [1, "#F59E0BFF"]],
+                        "start": [0, 0],
+                        "end": [1, 1]
+                      }
+                    },
+                    "size": [167, 200]
+                  }
+                },
+                {
+                  "id": "design_tile_title",
+                  "type": "text",
+                  "name": "Title",
+                  "props": {
+                    "fontSize": 17,
+                    "fontWeight": 600,
+                    "hitTest": false,
+                    "position": [20, 144],
+                    "text": "Design",
+                    "textColor": "#FFFFFFFF"
+                  }
+                },
+                {
+                  "id": "design_tile_detail",
+                  "type": "text",
+                  "name": "Detail",
+                  "props": {
+                    "fontSize": 13,
+                    "fontWeight": 400,
+                    "hitTest": false,
+                    "lineHeight": 18,
+                    "position": [20, 168],
+                    "text": "128 lessons",
+                    "textColor": "#FFFFFFB3"
+                  }
+                }
+              ]
+            },
+            {
+              "id": "music_tile",
+              "type": "group",
+              "name": "Music Tile",
+              "props": {
+                "clip": true,
+                "cornerRadius": 24,
+                "position": [211, 164],
+                "shadowColor": "#000000FF",
+                "shadowOffset": [0, 6],
+                "shadowOpacity": 0.08,
+                "shadowRadius": 18,
+                "size": [167, 200]
+              },
+              "children": [
+                {
+                  "id": "music_tile_fill",
+                  "type": "gradient",
+                  "name": "Fill",
+                  "props": {
+                    "gradient": {
+                      "gradient": {
+                        "kind": "linear",
+                        "stops": [[0, "#A5B4FCFF"], [1, "#6366F1FF"]],
+                        "start": [0, 0],
+                        "end": [1, 1]
+                      }
+                    },
+                    "size": [167, 200]
+                  }
+                },
+                {
+                  "id": "music_tile_title",
+                  "type": "text",
+                  "name": "Title",
+                  "props": {
+                    "fontSize": 17,
+                    "fontWeight": 600,
+                    "hitTest": false,
+                    "position": [20, 144],
+                    "text": "Music",
+                    "textColor": "#FFFFFFFF"
+                  }
+                },
+                {
+                  "id": "music_tile_detail",
+                  "type": "text",
+                  "name": "Detail",
+                  "props": {
+                    "fontSize": 13,
+                    "fontWeight": 400,
+                    "hitTest": false,
+                    "lineHeight": 18,
+                    "position": [20, 168],
+                    "text": "86 lessons",
+                    "textColor": "#FFFFFFB3"
+                  }
+                }
+              ]
+            },
+            {
+              "id": "travel_tile",
+              "type": "group",
+              "name": "Travel Tile",
+              "props": {
+                "clip": true,
+                "cornerRadius": 24,
+                "position": [24, 384],
+                "shadowColor": "#000000FF",
+                "shadowOffset": [0, 6],
+                "shadowOpacity": 0.08,
+                "shadowRadius": 18,
+                "size": [167, 200]
+              },
+              "children": [
+                {
+                  "id": "travel_tile_fill",
+                  "type": "gradient",
+                  "name": "Fill",
+                  "props": {
+                    "gradient": {
+                      "gradient": {
+                        "kind": "linear",
+                        "stops": [[0, "#7DD3FCFF"], [1, "#0284C7FF"]],
+                        "start": [0, 0],
+                        "end": [1, 1]
+                      }
+                    },
+                    "size": [167, 200]
+                  }
+                },
+                {
+                  "id": "travel_tile_title",
+                  "type": "text",
+                  "name": "Title",
+                  "props": {
+                    "fontSize": 17,
+                    "fontWeight": 600,
+                    "hitTest": false,
+                    "position": [20, 144],
+                    "text": "Travel",
+                    "textColor": "#FFFFFFFF"
+                  }
+                },
+                {
+                  "id": "travel_tile_detail",
+                  "type": "text",
+                  "name": "Detail",
+                  "props": {
+                    "fontSize": 13,
+                    "fontWeight": 400,
+                    "hitTest": false,
+                    "lineHeight": 18,
+                    "position": [20, 168],
+                    "text": "54 guides",
+                    "textColor": "#FFFFFFB3"
+                  }
+                }
+              ]
+            },
+            {
+              "id": "food_tile",
+              "type": "group",
+              "name": "Food Tile",
+              "props": {
+                "clip": true,
+                "cornerRadius": 24,
+                "position": [211, 384],
+                "shadowColor": "#000000FF",
+                "shadowOffset": [0, 6],
+                "shadowOpacity": 0.08,
+                "shadowRadius": 18,
+                "size": [167, 200]
+              },
+              "children": [
+                {
+                  "id": "food_tile_fill",
+                  "type": "gradient",
+                  "name": "Fill",
+                  "props": {
+                    "gradient": {
+                      "gradient": {
+                        "kind": "linear",
+                        "stops": [[0, "#FCA5A5FF"], [1, "#EF4444FF"]],
+                        "start": [0, 0],
+                        "end": [1, 1]
+                      }
+                    },
+                    "size": [167, 200]
+                  }
+                },
+                {
+                  "id": "food_tile_title",
+                  "type": "text",
+                  "name": "Title",
+                  "props": {
+                    "fontSize": 17,
+                    "fontWeight": 600,
+                    "hitTest": false,
+                    "position": [20, 144],
+                    "text": "Food",
+                    "textColor": "#FFFFFFFF"
+                  }
+                },
+                {
+                  "id": "food_tile_detail",
+                  "type": "text",
+                  "name": "Detail",
+                  "props": {
+                    "fontSize": 13,
+                    "fontWeight": 400,
+                    "hitTest": false,
+                    "lineHeight": 18,
+                    "position": [20, 168],
+                    "text": "210 recipes",
+                    "textColor": "#FFFFFFB3"
+                  }
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "id": "screen_saved",
+          "type": "group",
+          "name": "Saved Screen",
+          "props": { "size": [402, 874] },
+          "children": [
+            {
+              "id": "screen_saved_title",
+              "type": "text",
+              "name": "Title",
+              "props": {
+                "fontSize": 34,
+                "fontWeight": 700,
+                "hitTest": false,
+                "letterSpacing": -0.6,
+                "position": [24, 76],
+                "text": "Saved",
+                "textColor": "#111118FF"
+              }
+            },
+            {
+              "id": "screen_saved_subtitle",
+              "type": "text",
+              "name": "Subtitle",
+              "props": {
+                "fontSize": 15,
+                "fontWeight": 400,
+                "hitTest": false,
+                "lineHeight": 21,
+                "position": [24, 120],
+                "text": "4 items",
+                "textColor": "#5F5F6BFF"
+              }
+            },
+            {
+              "id": "saved_row_1",
+              "type": "group",
+              "name": "Morning stretch",
+              "props": {
+                "color": "#FFFFFFFF",
+                "cornerRadius": 18,
+                "position": [24, 164],
+                "shadowColor": "#000000FF",
+                "shadowOffset": [0, 6],
+                "shadowOpacity": 0.08,
+                "shadowRadius": 18,
+                "size": [354, 72]
+              },
+              "children": [
+                {
+                  "id": "saved_row_1_thumb",
+                  "type": "rectangle",
+                  "name": "Thumbnail",
+                  "props": {
+                    "cornerRadius": 12,
+                    "gradient": {
+                      "gradient": {
+                        "kind": "linear",
+                        "stops": [[0, "#86EFACFF"], [1, "#16A34AFF"]],
+                        "start": [0, 0],
+                        "end": [1, 1]
+                      }
+                    },
+                    "position": [12, 12],
+                    "size": [48, 48]
+                  }
+                },
+                {
+                  "id": "saved_row_1_title",
+                  "type": "text",
+                  "name": "Title",
+                  "props": {
+                    "fontSize": 17,
+                    "fontWeight": 600,
+                    "hitTest": false,
+                    "position": [76, 15],
+                    "text": "Morning stretch",
+                    "textColor": "#111118FF"
+                  }
+                },
+                {
+                  "id": "saved_row_1_detail",
+                  "type": "text",
+                  "name": "Detail",
+                  "props": {
+                    "fontSize": 13,
+                    "fontWeight": 400,
+                    "hitTest": false,
+                    "lineHeight": 18,
+                    "position": [76, 39],
+                    "text": "Routine · 12 min",
+                    "textColor": "#5F5F6BFF"
+                  }
+                }
+              ]
+            },
+            {
+              "id": "saved_row_2",
+              "type": "group",
+              "name": "Lemon ricotta pasta",
+              "props": {
+                "color": "#FFFFFFFF",
+                "cornerRadius": 18,
+                "position": [24, 248],
+                "shadowColor": "#000000FF",
+                "shadowOffset": [0, 6],
+                "shadowOpacity": 0.08,
+                "shadowRadius": 18,
+                "size": [354, 72]
+              },
+              "children": [
+                {
+                  "id": "saved_row_2_thumb",
+                  "type": "rectangle",
+                  "name": "Thumbnail",
+                  "props": {
+                    "cornerRadius": 12,
+                    "gradient": {
+                      "gradient": {
+                        "kind": "linear",
+                        "stops": [[0, "#FDE68AFF"], [1, "#EAB308FF"]],
+                        "start": [0, 0],
+                        "end": [1, 1]
+                      }
+                    },
+                    "position": [12, 12],
+                    "size": [48, 48]
+                  }
+                },
+                {
+                  "id": "saved_row_2_title",
+                  "type": "text",
+                  "name": "Title",
+                  "props": {
+                    "fontSize": 17,
+                    "fontWeight": 600,
+                    "hitTest": false,
+                    "position": [76, 15],
+                    "text": "Lemon ricotta pasta",
+                    "textColor": "#111118FF"
+                  }
+                },
+                {
+                  "id": "saved_row_2_detail",
+                  "type": "text",
+                  "name": "Detail",
+                  "props": {
+                    "fontSize": 13,
+                    "fontWeight": 400,
+                    "hitTest": false,
+                    "lineHeight": 18,
+                    "position": [76, 39],
+                    "text": "Recipe · 25 min",
+                    "textColor": "#5F5F6BFF"
+                  }
+                }
+              ]
+            },
+            {
+              "id": "saved_row_3",
+              "type": "group",
+              "name": "Night Drive",
+              "props": {
+                "color": "#FFFFFFFF",
+                "cornerRadius": 18,
+                "position": [24, 332],
+                "shadowColor": "#000000FF",
+                "shadowOffset": [0, 6],
+                "shadowOpacity": 0.08,
+                "shadowRadius": 18,
+                "size": [354, 72]
+              },
+              "children": [
+                {
+                  "id": "saved_row_3_thumb",
+                  "type": "rectangle",
+                  "name": "Thumbnail",
+                  "props": {
+                    "cornerRadius": 12,
+                    "gradient": {
+                      "gradient": {
+                        "kind": "linear",
+                        "stops": [[0, "#F0ABFCFF"], [1, "#8B5CF6FF"]],
+                        "start": [0, 0],
+                        "end": [1, 1]
+                      }
+                    },
+                    "position": [12, 12],
+                    "size": [48, 48]
+                  }
+                },
+                {
+                  "id": "saved_row_3_title",
+                  "type": "text",
+                  "name": "Title",
+                  "props": {
+                    "fontSize": 17,
+                    "fontWeight": 600,
+                    "hitTest": false,
+                    "position": [76, 15],
+                    "text": "Night Drive",
+                    "textColor": "#111118FF"
+                  }
+                },
+                {
+                  "id": "saved_row_3_detail",
+                  "type": "text",
+                  "name": "Detail",
+                  "props": {
+                    "fontSize": 13,
+                    "fontWeight": 400,
+                    "hitTest": false,
+                    "lineHeight": 18,
+                    "position": [76, 39],
+                    "text": "Playlist · 18 songs",
+                    "textColor": "#5F5F6BFF"
+                  }
+                }
+              ]
+            },
+            {
+              "id": "saved_row_4",
+              "type": "group",
+              "name": "Kyoto in autumn",
+              "props": {
+                "color": "#FFFFFFFF",
+                "cornerRadius": 18,
+                "position": [24, 416],
+                "shadowColor": "#000000FF",
+                "shadowOffset": [0, 6],
+                "shadowOpacity": 0.08,
+                "shadowRadius": 18,
+                "size": [354, 72]
+              },
+              "children": [
+                {
+                  "id": "saved_row_4_thumb",
+                  "type": "rectangle",
+                  "name": "Thumbnail",
+                  "props": {
+                    "cornerRadius": 12,
+                    "gradient": {
+                      "gradient": {
+                        "kind": "linear",
+                        "stops": [[0, "#FDBA74FF"], [1, "#DB2777FF"]],
+                        "start": [0, 0],
+                        "end": [1, 1]
+                      }
+                    },
+                    "position": [12, 12],
+                    "size": [48, 48]
+                  }
+                },
+                {
+                  "id": "saved_row_4_title",
+                  "type": "text",
+                  "name": "Title",
+                  "props": {
+                    "fontSize": 17,
+                    "fontWeight": 600,
+                    "hitTest": false,
+                    "position": [76, 15],
+                    "text": "Kyoto in autumn",
+                    "textColor": "#111118FF"
+                  }
+                },
+                {
+                  "id": "saved_row_4_detail",
+                  "type": "text",
+                  "name": "Detail",
+                  "props": {
+                    "fontSize": 13,
+                    "fontWeight": 400,
+                    "hitTest": false,
+                    "lineHeight": 18,
+                    "position": [76, 39],
+                    "text": "Guide · 7 days",
+                    "textColor": "#5F5F6BFF"
+                  }
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "id": "screen_profile",
+          "type": "group",
+          "name": "Profile Screen",
+          "props": { "size": [402, 874] },
+          "children": [
+            {
+              "id": "screen_profile_title",
+              "type": "text",
+              "name": "Title",
+              "props": {
+                "fontSize": 34,
+                "fontWeight": 700,
+                "hitTest": false,
+                "letterSpacing": -0.6,
+                "position": [24, 76],
+                "text": "Profile",
+                "textColor": "#111118FF"
+              }
+            },
+            {
+              "id": "screen_profile_subtitle",
+              "type": "text",
+              "name": "Subtitle",
+              "props": {
+                "fontSize": 15,
+                "fontWeight": 400,
+                "hitTest": false,
+                "lineHeight": 21,
+                "position": [24, 120],
+                "text": "Member since 2024",
+                "textColor": "#5F5F6BFF"
+              }
+            },
+            {
+              "id": "profile_avatar",
+              "type": "oval",
+              "name": "Avatar",
+              "props": {
+                "gradient": {
+                  "gradient": {
+                    "kind": "linear",
+                    "stops": [[0, "#8B5CF6FF"], [1, "#FF3D71FF"]],
+                    "start": [0, 0],
+                    "end": [1, 1]
+                  }
+                },
+                "position": [153, 170],
+                "shadowColor": "#000000FF",
+                "shadowOffset": [0, 6],
+                "shadowOpacity": 0.08,
+                "shadowRadius": 18,
+                "size": [96, 96]
+              }
+            },
+            {
+              "id": "profile_name",
+              "type": "text",
+              "name": "Name",
+              "props": {
+                "anchor": [0.5, 0],
+                "fontSize": 22,
+                "fontWeight": 700,
+                "hitTest": false,
+                "letterSpacing": -0.2,
+                "position": [201, 286],
+                "text": "Ari Lopez",
+                "textAlignment": "center",
+                "textColor": "#111118FF"
+              }
+            },
+            {
+              "id": "profile_handle",
+              "type": "text",
+              "name": "Handle",
+              "props": {
+                "anchor": [0.5, 0],
+                "fontSize": 15,
+                "fontWeight": 400,
+                "hitTest": false,
+                "lineHeight": 21,
+                "position": [201, 318],
+                "text": "@ari",
+                "textAlignment": "center",
+                "textColor": "#5F5F6BFF"
+              }
+            },
+            {
+              "id": "stats_card",
+              "type": "group",
+              "name": "Stats Card",
+              "props": {
+                "clip": true,
+                "cornerRadius": 24,
+                "position": [24, 370],
+                "shadowColor": "#000000FF",
+                "shadowOffset": [0, 6],
+                "shadowOpacity": 0.08,
+                "shadowRadius": 18,
+                "size": [354, 120]
+              },
+              "children": [
+                {
+                  "id": "stats_card_fill",
+                  "type": "gradient",
+                  "name": "Fill",
+                  "props": {
+                    "gradient": {
+                      "gradient": {
+                        "kind": "linear",
+                        "stops": [[0, "#1A1B2AFF"], [1, "#0E0F1AFF"]],
+                        "start": [0, 0],
+                        "end": [1, 1]
+                      }
+                    },
+                    "size": [354, 120]
+                  }
+                },
+                {
+                  "id": "stats_card_title",
+                  "type": "text",
+                  "name": "Title",
+                  "props": {
+                    "fontSize": 17,
+                    "fontWeight": 600,
+                    "hitTest": false,
+                    "position": [20, 64],
+                    "text": "42 day streak",
+                    "textColor": "#FFFFFFFF"
+                  }
+                },
+                {
+                  "id": "stats_card_detail",
+                  "type": "text",
+                  "name": "Detail",
+                  "props": {
+                    "fontSize": 13,
+                    "fontWeight": 400,
+                    "hitTest": false,
+                    "lineHeight": 18,
+                    "position": [20, 88],
+                    "text": "Longest this year",
+                    "textColor": "#FFFFFFB3"
+                  }
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "app_status_bar",
+      "type": "group",
+      "name": "Status Bar",
+      "props": {
+        "hitTest": false,
+        "size": [402, 62]
+      },
+      "children": [
+        {
+          "id": "app_clock",
+          "type": "text",
+          "name": "Clock",
+          "props": {
+            "anchor": [0.5, 0],
+            "fontSize": 17,
+            "fontWeight": 600,
+            "hitTest": false,
+            "position": [72, 20],
+            "text": "9:41",
+            "textAlignment": "center",
+            "textColor": "#111118FF"
+          }
+        },
+        {
+          "id": "app_signal_1",
+          "type": "rectangle",
+          "name": "Signal 1",
+          "props": {
+            "color": "#111118FF",
+            "cornerRadius": 1,
+            "hitTest": false,
+            "position": [292, 30],
+            "size": [3, 4]
+          }
+        },
+        {
+          "id": "app_signal_2",
+          "type": "rectangle",
+          "name": "Signal 2",
+          "props": {
+            "color": "#111118FF",
+            "cornerRadius": 1,
+            "hitTest": false,
+            "position": [297, 28],
+            "size": [3, 6]
+          }
+        },
+        {
+          "id": "app_signal_3",
+          "type": "rectangle",
+          "name": "Signal 3",
+          "props": {
+            "color": "#111118FF",
+            "cornerRadius": 1,
+            "hitTest": false,
+            "position": [302, 26],
+            "size": [3, 8]
+          }
+        },
+        {
+          "id": "app_signal_4",
+          "type": "rectangle",
+          "name": "Signal 4",
+          "props": {
+            "color": "#111118FF",
+            "cornerRadius": 1,
+            "hitTest": false,
+            "position": [307, 24],
+            "size": [3, 10]
+          }
+        },
+        {
+          "id": "app_battery",
+          "type": "rectangle",
+          "name": "Battery",
+          "props": {
+            "color": "#00000000",
+            "cornerRadius": 3.5,
+            "hitTest": false,
+            "position": [322, 23],
+            "size": [25, 12],
+            "strokeColor": "#11111859",
+            "strokeWidth": 1
+          }
+        },
+        {
+          "id": "app_battery_level",
+          "type": "rectangle",
+          "name": "Battery Level",
+          "props": {
+            "color": "#111118FF",
+            "cornerRadius": 2,
+            "hitTest": false,
+            "position": [324, 25],
+            "size": [19, 8]
+          }
+        },
+        {
+          "id": "app_battery_cap",
+          "type": "rectangle",
+          "name": "Battery Cap",
+          "props": {
+            "color": "#11111859",
+            "cornerRadius": 1,
+            "hitTest": false,
+            "position": [348, 27],
+            "size": [2, 4]
+          }
+        }
+      ]
+    },
+    {
+      "id": "tab_bar",
+      "type": "group",
+      "name": "Tab Bar",
+      "props": {
+        "backgroundBlur": 20,
+        "color": "#FFFFFFF2",
+        "position": [0, 784],
+        "shadowColor": "#000000FF",
+        "shadowOffset": [0, -4],
+        "shadowOpacity": 0.06,
+        "shadowRadius": 16,
+        "size": [402, 90]
+      },
+      "children": [
+        {
+          "id": "tab_bar_divider",
+          "type": "rectangle",
+          "name": "Divider",
+          "props": {
+            "color": "#E6E6EBFF",
+            "hitTest": false,
+            "size": [402, 1]
+          }
+        },
+        {
+          "id": "indicator",
+          "type": "rectangle",
+          "name": "Indicator",
+          "props": {
+            "color": "#5B5CF61F",
+            "cornerRadius": 18,
+            "hitTest": false,
+            "position": { "link": "indicator_position.output" },
+            "size": [56, 36]
+          }
+        },
+        {
+          "id": "tab_home",
+          "type": "group",
+          "name": "Home Tab",
+          "props": {
+            "position": [0, 0],
+            "size": [100.5, 90]
+          },
+          "children": [
+            {
+              "id": "home_icon_roof",
+              "type": "rectangle",
+              "name": "Roof",
+              "props": {
+                "color": { "link": "home_tint.output" },
+                "cornerRadius": 3,
+                "hitTest": false,
+                "position": [42.25, 12],
+                "rotation": 45,
+                "size": [16, 16]
+              }
+            },
+            {
+              "id": "home_icon",
+              "type": "rectangle",
+              "name": "House",
+              "props": {
+                "color": { "link": "home_tint.output" },
+                "cornerRadius": 3,
+                "hitTest": false,
+                "position": [40.25, 20],
+                "size": [20, 14]
+              }
+            },
+            {
+              "id": "home_label",
+              "type": "text",
+              "name": "Home Label",
+              "props": {
+                "anchor": [0.5, 0],
+                "fontSize": 11,
+                "fontWeight": 600,
+                "hitTest": false,
+                "position": [50.25, 46],
+                "text": "Home",
+                "textAlignment": "center",
+                "textColor": { "link": "home_tint.output" }
+              }
+            }
+          ]
+        },
+        {
+          "id": "tab_explore",
+          "type": "group",
+          "name": "Explore Tab",
+          "props": {
+            "position": [100.5, 0],
+            "size": [100.5, 90]
+          },
+          "children": [
+            {
+              "id": "explore_icon",
+              "type": "oval",
+              "name": "Compass",
+              "props": {
+                "color": "#00000000",
+                "hitTest": false,
+                "position": [39.25, 12],
+                "size": [22, 22],
+                "strokeColor": { "link": "explore_tint.output" },
+                "strokeWidth": 2.5
+              }
+            },
+            {
+              "id": "explore_icon_dot",
+              "type": "oval",
+              "name": "Needle",
+              "props": {
+                "color": { "link": "explore_tint.output" },
+                "hitTest": false,
+                "position": [47.25, 20],
+                "size": [6, 6]
+              }
+            },
+            {
+              "id": "explore_label",
+              "type": "text",
+              "name": "Explore Label",
+              "props": {
+                "anchor": [0.5, 0],
+                "fontSize": 11,
+                "fontWeight": 600,
+                "hitTest": false,
+                "position": [50.25, 46],
+                "text": "Explore",
+                "textAlignment": "center",
+                "textColor": { "link": "explore_tint.output" }
+              }
+            }
+          ]
+        },
+        {
+          "id": "tab_saved",
+          "type": "group",
+          "name": "Saved Tab",
+          "props": {
+            "position": [201, 0],
+            "size": [100.5, 90]
+          },
+          "children": [
+            {
+              "id": "saved_icon",
+              "type": "rectangle",
+              "name": "Bookmark",
+              "props": {
+                "color": { "link": "saved_tint.output" },
+                "cornerRadius": 4,
+                "hitTest": false,
+                "position": [42.25, 11],
+                "size": [16, 23]
+              }
+            },
+            {
+              "id": "saved_label",
+              "type": "text",
+              "name": "Saved Label",
+              "props": {
+                "anchor": [0.5, 0],
+                "fontSize": 11,
+                "fontWeight": 600,
+                "hitTest": false,
+                "position": [50.25, 46],
+                "text": "Saved",
+                "textAlignment": "center",
+                "textColor": { "link": "saved_tint.output" }
+              }
+            }
+          ]
+        },
+        {
+          "id": "tab_profile",
+          "type": "group",
+          "name": "Profile Tab",
+          "props": {
+            "position": [301.5, 0],
+            "size": [100.5, 90]
+          },
+          "children": [
+            {
+              "id": "profile_icon",
+              "type": "oval",
+              "name": "Head",
+              "props": {
+                "color": { "link": "profile_tint.output" },
+                "hitTest": false,
+                "position": [44.25, 11],
+                "size": [12, 12]
+              }
+            },
+            {
+              "id": "profile_icon_body",
+              "type": "rectangle",
+              "name": "Body",
+              "props": {
+                "color": { "link": "profile_tint.output" },
+                "cornerRadius": 5,
+                "hitTest": false,
+                "position": [40.25, 25],
+                "size": [20, 10]
+              }
+            },
+            {
+              "id": "profile_label",
+              "type": "text",
+              "name": "Profile Label",
+              "props": {
+                "anchor": [0.5, 0],
+                "fontSize": 11,
+                "fontWeight": 600,
+                "hitTest": false,
+                "position": [50.25, 46],
+                "text": "Profile",
+                "textAlignment": "center",
+                "textColor": { "link": "profile_tint.output" }
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "app_home_indicator",
+      "type": "rectangle",
+      "name": "Home Indicator",
+      "props": {
+        "anchor": [0.5, 1],
+        "color": "#111118FF",
+        "cornerRadius": 3,
+        "hitTest": false,
+        "position": [201, 866],
+        "size": [140, 5]
+      }
+    }
+  ],
+  "patches": {
+    "current_tab": {
+      "type": "optionSwitch",
+      "name": "Current Tab",
+      "inputCount": 4,
+      "inputs": {
+        "setTo0": { "link": "tap_home.tap" },
+        "setTo1": { "link": "tap_explore.tap" },
+        "setTo2": { "link": "tap_saved.tap" },
+        "setTo3": { "link": "tap_profile.tap" }
+      },
+      "ui": { "x": 300, "y": 40 }
+    },
+    "explore_selected": {
+      "type": "equals",
+      "name": "Explore Selected",
+      "typeParam": "number",
+      "inputs": {
+        "value1": { "link": "current_tab.option" },
+        "value2": 1
+      },
+      "ui": { "x": 560, "y": 490 }
+    },
+    "explore_tint": {
+      "type": "transition",
+      "name": "Explore Tint",
+      "typeParam": "color",
+      "inputs": {
+        "end": "#5B5CF6FF",
+        "progress": { "link": "explore_tint_spring.output" },
+        "start": "#A1A1AAFF"
+      },
+      "ui": { "x": 1080, "y": 490 }
+    },
+    "explore_tint_spring": {
+      "type": "popAnimation",
+      "name": "Explore Tint Spring",
+      "typeParam": "number",
+      "inputs": {
+        "bounciness": 0,
+        "number": { "link": "explore_selected.output" },
+        "speed": 20
+      },
+      "ui": { "x": 820, "y": 490 }
+    },
+    "home_selected": {
+      "type": "equals",
+      "name": "Home Selected",
+      "typeParam": "number",
+      "inputs": {
+        "value1": { "link": "current_tab.option" },
+        "value2": 0
+      },
+      "ui": { "x": 560, "y": 340 }
+    },
+    "home_tint": {
+      "type": "transition",
+      "name": "Home Tint",
+      "typeParam": "color",
+      "inputs": {
+        "end": "#5B5CF6FF",
+        "progress": { "link": "home_tint_spring.output" },
+        "start": "#A1A1AAFF"
+      },
+      "ui": { "x": 1080, "y": 340 }
+    },
+    "home_tint_spring": {
+      "type": "popAnimation",
+      "name": "Home Tint Spring",
+      "typeParam": "number",
+      "inputs": {
+        "bounciness": 0,
+        "number": { "link": "home_selected.output" },
+        "speed": 20
+      },
+      "ui": { "x": 820, "y": 340 }
+    },
+    "indicator_offset": {
+      "type": "optionPicker",
+      "name": "Indicator X",
+      "typeParam": "number",
+      "inputCount": 4,
+      "inputs": {
+        "option": { "link": "current_tab.option" },
+        "option0": 22.25,
+        "option1": 122.75,
+        "option2": 223.25,
+        "option3": 323.75
+      },
+      "ui": { "x": 560, "y": 190 }
+    },
+    "indicator_position": {
+      "type": "point",
+      "name": "Indicator Position",
+      "inputs": {
+        "x": { "link": "indicator_spring.output" },
+        "y": 6
+      },
+      "ui": { "x": 1080, "y": 190 }
+    },
+    "indicator_spring": {
+      "type": "popAnimation",
+      "name": "Indicator Spring",
+      "typeParam": "number",
+      "inputs": {
+        "bounciness": 5,
+        "number": { "link": "indicator_offset.output" },
+        "speed": 14
+      },
+      "ui": { "x": 820, "y": 190 }
+    },
+    "profile_selected": {
+      "type": "equals",
+      "name": "Profile Selected",
+      "typeParam": "number",
+      "inputs": {
+        "value1": { "link": "current_tab.option" },
+        "value2": 3
+      },
+      "ui": { "x": 560, "y": 790 }
+    },
+    "profile_tint": {
+      "type": "transition",
+      "name": "Profile Tint",
+      "typeParam": "color",
+      "inputs": {
+        "end": "#5B5CF6FF",
+        "progress": { "link": "profile_tint_spring.output" },
+        "start": "#A1A1AAFF"
+      },
+      "ui": { "x": 1080, "y": 790 }
+    },
+    "profile_tint_spring": {
+      "type": "popAnimation",
+      "name": "Profile Tint Spring",
+      "typeParam": "number",
+      "inputs": {
+        "bounciness": 0,
+        "number": { "link": "profile_selected.output" },
+        "speed": 20
+      },
+      "ui": { "x": 820, "y": 790 }
+    },
+    "saved_selected": {
+      "type": "equals",
+      "name": "Saved Selected",
+      "typeParam": "number",
+      "inputs": {
+        "value1": { "link": "current_tab.option" },
+        "value2": 2
+      },
+      "ui": { "x": 560, "y": 640 }
+    },
+    "saved_tint": {
+      "type": "transition",
+      "name": "Saved Tint",
+      "typeParam": "color",
+      "inputs": {
+        "end": "#5B5CF6FF",
+        "progress": { "link": "saved_tint_spring.output" },
+        "start": "#A1A1AAFF"
+      },
+      "ui": { "x": 1080, "y": 640 }
+    },
+    "saved_tint_spring": {
+      "type": "popAnimation",
+      "name": "Saved Tint Spring",
+      "typeParam": "number",
+      "inputs": {
+        "bounciness": 0,
+        "number": { "link": "saved_selected.output" },
+        "speed": 20
+      },
+      "ui": { "x": 820, "y": 640 }
+    },
+    "screen_offset": {
+      "type": "optionPicker",
+      "name": "Screen Offset",
+      "typeParam": "number",
+      "inputCount": 4,
+      "inputs": {
+        "option": { "link": "current_tab.option" },
+        "option0": 0,
+        "option1": -402,
+        "option2": -804,
+        "option3": -1206
+      },
+      "ui": { "x": 560, "y": 40 }
+    },
+    "screen_spring": {
+      "type": "popAnimation",
+      "name": "Screen Spring",
+      "typeParam": "number",
+      "inputs": {
+        "bounciness": 0,
+        "number": { "link": "screen_offset.output" },
+        "speed": 16
+      },
+      "ui": { "x": 820, "y": 40 }
+    },
+    "screens_position": {
+      "type": "point",
+      "name": "Screens Position",
+      "inputs": {
+        "x": { "link": "screen_spring.output" },
+        "y": 0
+      },
+      "ui": { "x": 1080, "y": 40 }
+    },
+    "tap_explore": {
+      "type": "interaction",
+      "name": "Tap Explore",
+      "inputs": { "layer": { "layer": "tab_explore" } },
+      "ui": { "x": 40, "y": 190 }
+    },
+    "tap_home": {
+      "type": "interaction",
+      "name": "Tap Home",
+      "inputs": { "layer": { "layer": "tab_home" } },
+      "ui": { "x": 40, "y": 40 }
+    },
+    "tap_profile": {
+      "type": "interaction",
+      "name": "Tap Profile",
+      "inputs": { "layer": { "layer": "tab_profile" } },
+      "ui": { "x": 40, "y": 490 }
+    },
+    "tap_saved": {
+      "type": "interaction",
+      "name": "Tap Saved",
+      "inputs": { "layer": { "layer": "tab_saved" } },
+      "ui": { "x": 40, "y": 340 }
+    }
+  },
+  "comments": []
+}

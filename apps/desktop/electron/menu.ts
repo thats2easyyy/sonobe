@@ -5,7 +5,7 @@ import { COMMANDS, commandLabel, resolveAccelerator, type HostPlatform } from ".
 type Role = NonNullable<MenuItemConstructorOptions["role"]>;
 
 /** Main-process actions that don't involve the renderer. */
-export type NativeAction = "clearRecent" | "interfaceLarger" | "interfaceSmaller" | "interfaceReset" | "maximize";
+export type NativeAction = "clearRecent" | "interfaceLarger" | "interfaceSmaller" | "interfaceReset" | "maximize" | "stopPreview";
 
 /** Platform-neutral menu description; converted to an Electron template by {@link toMenuTemplate}. */
 export type MenuNode =
@@ -23,6 +23,8 @@ export interface MenuContext {
   recentProjects: readonly string[];
   /** Adds developer-only items (Reload Editor). */
   dev: boolean;
+  /** The phone preview server is running (adds Stop Phone Preview). */
+  previewRunning?: boolean;
 }
 
 const sep: MenuNode = { kind: "separator" };
@@ -182,6 +184,7 @@ export function buildMenuSpec(ctx: MenuContext): MenuNode[] {
       cmd("viewer.fullscreen"),
       cmd("viewer.popOut"),
       cmd("viewer.previewOnDevice"),
+      ...(ctx.previewRunning ? [{ kind: "action", action: "stopPreview", label: "Stop Phone Preview" } satisfies MenuNode] : []),
     ],
   };
 

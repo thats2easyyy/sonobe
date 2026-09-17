@@ -4,7 +4,7 @@
  */
 
 import { contextBridge, ipcRenderer, type IpcRendererEvent } from "electron";
-import type { McpStatus, ProjectChange, ProjectFiles, ProjectWrite, RpcHandler, SonobeCommandId, SonobeHost } from "./host-api.d.ts";
+import type { McpStatus, PreviewStatus, ProjectChange, ProjectFiles, ProjectWrite, RpcHandler, SonobeCommandId, SonobeHost } from "./host-api.d.ts";
 import { isCommandId, listCommands, toHostPlatform } from "./commands.ts";
 import { IPC } from "./ipc.ts";
 import { createRpcFailure, createRpcServer } from "./rpc.ts";
@@ -125,6 +125,17 @@ const host: SonobeHost = {
   },
 
   getMcpStatus: () => ipcRenderer.invoke(IPC.mcpStatus) as Promise<McpStatus>,
+
+  getPreviewStatus: () => ipcRenderer.invoke(IPC.previewStatus) as Promise<PreviewStatus>,
+  startPreview: () => ipcRenderer.invoke(IPC.previewStart) as Promise<PreviewStatus>,
+  stopPreview: () => ipcRenderer.invoke(IPC.previewStop) as Promise<PreviewStatus>,
+  onPreviewStatus(cb) {
+    const listener = (_event: IpcRendererEvent, status: PreviewStatus) => cb(status);
+    ipcRenderer.on(IPC.previewChanged, listener);
+    return () => {
+      ipcRenderer.removeListener(IPC.previewChanged, listener);
+    };
+  },
 };
 
 contextBridge.exposeInMainWorld("sonobeHost", host);

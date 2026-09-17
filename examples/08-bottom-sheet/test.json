@@ -1,0 +1,63 @@
+{
+  "description": "The sheet follows the finger, then springs to the stop a release at that speed would reach: fling down to collapse, fling up to open, let go gently to return to the nearest stop.",
+  "scenarios": [
+    {
+      "name": "The sheet starts half open",
+      "events": [],
+      "durationMs": 300,
+      "expect": [
+        { "description": "The sheet top sits at 470", "target": "@sheet.position", "component": "y", "at": "end", "op": "==", "value": 470 },
+        { "description": "The map is dimmed partway", "target": "@scrim.opacity", "at": "end", "op": "==", "value": 0.185, "tolerance": 0.005 }
+      ]
+    },
+    {
+      "name": "The sheet follows the finger while it's held",
+      "events": [{ "kind": "drag", "from": "@grabber", "to": [201, 300], "durationMs": 300, "release": false, "atMs": 100 }],
+      "durationMs": 600,
+      "expect": [
+        { "description": "The sheet top moved up with the finger by the same 182.5 points", "target": "@sheet.position", "component": "y", "at": "end", "op": "==", "value": 287.5, "tolerance": 0.5 },
+        { "description": "Drag Sheet reports the finger is down", "target": "sheet_gesture.down", "at": "end", "op": "==", "value": true }
+      ]
+    },
+    {
+      "name": "A fast downward flick collapses the sheet",
+      "events": [{ "kind": "drag", "from": "@grabber", "to": [201, 640], "durationMs": 100, "atMs": 100 }],
+      "durationMs": 1500,
+      "expect": [
+        { "description": "The sheet settles collapsed at 760, below where the finger let go", "target": "@sheet.position", "component": "y", "at": "end", "op": "==", "value": 760, "tolerance": 0.5 },
+        { "description": "It comes to rest", "target": "@sheet.position", "component": "y", "settled": true },
+        { "description": "Current Stop is 2 (collapsed)", "target": "current_stop.count", "at": "end", "op": "==", "value": 2 },
+        { "description": "The finger was moving fast, over 1000 points per second", "target": "drag_speed.y", "at": "max", "op": ">", "value": 1000 },
+        { "description": "The map is no longer dimmed", "target": "@scrim.opacity", "at": "end", "op": "==", "value": 0, "tolerance": 0.005 }
+      ]
+    },
+    {
+      "name": "A slow drag up opens the sheet fully",
+      "events": [{ "kind": "drag", "from": "@grabber", "to": [201, 130], "durationMs": 900, "atMs": 100 }],
+      "durationMs": 2000,
+      "expect": [
+        { "description": "The sheet settles fully open at 132, just below the location chip", "target": "@sheet.position", "component": "y", "at": "end", "op": "==", "value": 132, "tolerance": 0.5 },
+        { "description": "Current Stop is 1 (full)", "target": "current_stop.count", "at": "end", "op": "==", "value": 1 },
+        { "description": "The map dims to 40%", "target": "@scrim.opacity", "at": "end", "op": "==", "value": 0.4, "tolerance": 0.005 }
+      ]
+    },
+    {
+      "name": "A short quick flick up still opens fully",
+      "events": [{ "kind": "drag", "from": "@grabber", "to": [201, 380], "durationMs": 90, "atMs": 100 }],
+      "durationMs": 1500,
+      "expect": [
+        { "description": "Released only 100 points up, the fling carries it to 132", "target": "@sheet.position", "component": "y", "at": "end", "op": "==", "value": 132, "tolerance": 0.5 },
+        { "description": "It comes to rest", "target": "@sheet.position", "component": "y", "settlesWithinMs": 1200 }
+      ]
+    },
+    {
+      "name": "A small slow drag springs back to half open",
+      "events": [{ "kind": "drag", "from": "@grabber", "to": [201, 560], "durationMs": 800, "atMs": 100 }],
+      "durationMs": 2000,
+      "expect": [
+        { "description": "Released 78 points lower and slowly, it returns to 470", "target": "@sheet.position", "component": "y", "at": "end", "op": "==", "value": 470, "tolerance": 0.5 },
+        { "description": "Current Stop stays 0 (half)", "target": "current_stop.count", "at": "end", "op": "==", "value": 0 }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,1061 @@
+{
+  "formatVersion": 1,
+  "id": "main",
+  "name": "Main",
+  "kind": "prototype",
+  "notes": "Drag the sheet by any part of it, slowly or with a flick. While your finger is down the sheet follows it exactly; on release Nearest Stop After Fling projects where a fling would land, Current Stop remembers that stop, and Sheet Spring glides there starting at the finger's speed.",
+  "size": [402, 874],
+  "interface": { "inputs": {}, "outputs": {} },
+  "layers": [
+    {
+      "id": "map",
+      "type": "gradient",
+      "name": "Map",
+      "props": {
+        "gradient": {
+          "gradient": {
+            "kind": "linear",
+            "stops": [[0, "#EAF2E3FF"], [1, "#DCE7F3FF"]],
+            "start": [0.5, 0],
+            "end": [0.5, 1]
+          }
+        },
+        "hitTest": false,
+        "size": [402, 874]
+      }
+    },
+    {
+      "id": "park",
+      "type": "oval",
+      "name": "Park",
+      "props": {
+        "color": "#C7E3BEFF",
+        "hitTest": false,
+        "position": [-70, 150],
+        "size": [270, 230]
+      }
+    },
+    {
+      "id": "bay",
+      "type": "rectangle",
+      "name": "Bay",
+      "props": {
+        "color": "#BBD8F1FF",
+        "cornerRadius": 70,
+        "hitTest": false,
+        "position": [250, 470],
+        "rotation": 18,
+        "size": [260, 320]
+      }
+    },
+    {
+      "id": "avenue",
+      "type": "rectangle",
+      "name": "Avenue",
+      "props": {
+        "color": "#FFFFFFFF",
+        "hitTest": false,
+        "position": [-40, 310],
+        "rotation": -14,
+        "size": [520, 18]
+      }
+    },
+    {
+      "id": "cross_street",
+      "type": "rectangle",
+      "name": "Cross Street",
+      "props": {
+        "color": "#FFFFFFFF",
+        "hitTest": false,
+        "position": [190, -40],
+        "rotation": 10,
+        "size": [16, 980]
+      }
+    },
+    {
+      "id": "side_street",
+      "type": "rectangle",
+      "name": "Side Street",
+      "props": {
+        "color": "#FFFFFFCC",
+        "hitTest": false,
+        "position": [-20, 560],
+        "rotation": 8,
+        "size": [480, 10]
+      }
+    },
+    {
+      "id": "pin_1",
+      "type": "group",
+      "name": "Pin 1",
+      "props": {
+        "anchor": [0.5, 0.5],
+        "hitTest": false,
+        "position": [118, 252],
+        "size": [34, 34]
+      },
+      "children": [
+        {
+          "id": "pin_1_dot",
+          "type": "oval",
+          "name": "Dot",
+          "props": {
+            "color": "#FF6B4AFF",
+            "shadowColor": "#000000FF",
+            "shadowOffset": [0, 6],
+            "shadowOpacity": 0.08,
+            "shadowRadius": 18,
+            "size": [34, 34],
+            "strokeColor": "#FFFFFFFF",
+            "strokeWidth": 3
+          }
+        },
+        {
+          "id": "pin_1_center",
+          "type": "oval",
+          "name": "Center",
+          "props": {
+            "color": "#FFFFFFFF",
+            "position": [12, 12],
+            "size": [10, 10]
+          }
+        }
+      ]
+    },
+    {
+      "id": "pin_2",
+      "type": "group",
+      "name": "Pin 2",
+      "props": {
+        "anchor": [0.5, 0.5],
+        "hitTest": false,
+        "position": [262, 214],
+        "size": [34, 34]
+      },
+      "children": [
+        {
+          "id": "pin_2_dot",
+          "type": "oval",
+          "name": "Dot",
+          "props": {
+            "color": "#FF6B4AFF",
+            "shadowColor": "#000000FF",
+            "shadowOffset": [0, 6],
+            "shadowOpacity": 0.08,
+            "shadowRadius": 18,
+            "size": [34, 34],
+            "strokeColor": "#FFFFFFFF",
+            "strokeWidth": 3
+          }
+        },
+        {
+          "id": "pin_2_center",
+          "type": "oval",
+          "name": "Center",
+          "props": {
+            "color": "#FFFFFFFF",
+            "position": [12, 12],
+            "size": [10, 10]
+          }
+        }
+      ]
+    },
+    {
+      "id": "pin_3",
+      "type": "group",
+      "name": "Pin 3",
+      "props": {
+        "anchor": [0.5, 0.5],
+        "hitTest": false,
+        "position": [84, 420],
+        "size": [34, 34]
+      },
+      "children": [
+        {
+          "id": "pin_3_dot",
+          "type": "oval",
+          "name": "Dot",
+          "props": {
+            "color": "#FF6B4AFF",
+            "shadowColor": "#000000FF",
+            "shadowOffset": [0, 6],
+            "shadowOpacity": 0.08,
+            "shadowRadius": 18,
+            "size": [34, 34],
+            "strokeColor": "#FFFFFFFF",
+            "strokeWidth": 3
+          }
+        },
+        {
+          "id": "pin_3_center",
+          "type": "oval",
+          "name": "Center",
+          "props": {
+            "color": "#FFFFFFFF",
+            "position": [12, 12],
+            "size": [10, 10]
+          }
+        }
+      ]
+    },
+    {
+      "id": "you_halo",
+      "type": "oval",
+      "name": "You Halo",
+      "props": {
+        "anchor": [0.5, 0.5],
+        "color": "#5B5CF633",
+        "hitTest": false,
+        "position": [210, 360],
+        "size": [64, 64]
+      }
+    },
+    {
+      "id": "you",
+      "type": "oval",
+      "name": "You",
+      "props": {
+        "anchor": [0.5, 0.5],
+        "color": "#5B5CF6FF",
+        "hitTest": false,
+        "position": [210, 360],
+        "size": [18, 18],
+        "strokeColor": "#FFFFFFFF",
+        "strokeWidth": 3
+      }
+    },
+    {
+      "id": "map_status_bar",
+      "type": "group",
+      "name": "Status Bar",
+      "props": {
+        "hitTest": false,
+        "size": [402, 62]
+      },
+      "children": [
+        {
+          "id": "map_clock",
+          "type": "text",
+          "name": "Clock",
+          "props": {
+            "anchor": [0.5, 0],
+            "fontSize": 17,
+            "fontWeight": 600,
+            "hitTest": false,
+            "position": [72, 20],
+            "text": "9:41",
+            "textAlignment": "center",
+            "textColor": "#111118FF"
+          }
+        },
+        {
+          "id": "map_signal_1",
+          "type": "rectangle",
+          "name": "Signal 1",
+          "props": {
+            "color": "#111118FF",
+            "cornerRadius": 1,
+            "hitTest": false,
+            "position": [292, 30],
+            "size": [3, 4]
+          }
+        },
+        {
+          "id": "map_signal_2",
+          "type": "rectangle",
+          "name": "Signal 2",
+          "props": {
+            "color": "#111118FF",
+            "cornerRadius": 1,
+            "hitTest": false,
+            "position": [297, 28],
+            "size": [3, 6]
+          }
+        },
+        {
+          "id": "map_signal_3",
+          "type": "rectangle",
+          "name": "Signal 3",
+          "props": {
+            "color": "#111118FF",
+            "cornerRadius": 1,
+            "hitTest": false,
+            "position": [302, 26],
+            "size": [3, 8]
+          }
+        },
+        {
+          "id": "map_signal_4",
+          "type": "rectangle",
+          "name": "Signal 4",
+          "props": {
+            "color": "#111118FF",
+            "cornerRadius": 1,
+            "hitTest": false,
+            "position": [307, 24],
+            "size": [3, 10]
+          }
+        },
+        {
+          "id": "map_battery",
+          "type": "rectangle",
+          "name": "Battery",
+          "props": {
+            "color": "#00000000",
+            "cornerRadius": 3.5,
+            "hitTest": false,
+            "position": [322, 23],
+            "size": [25, 12],
+            "strokeColor": "#11111859",
+            "strokeWidth": 1
+          }
+        },
+        {
+          "id": "map_battery_level",
+          "type": "rectangle",
+          "name": "Battery Level",
+          "props": {
+            "color": "#111118FF",
+            "cornerRadius": 2,
+            "hitTest": false,
+            "position": [324, 25],
+            "size": [19, 8]
+          }
+        },
+        {
+          "id": "map_battery_cap",
+          "type": "rectangle",
+          "name": "Battery Cap",
+          "props": {
+            "color": "#11111859",
+            "cornerRadius": 1,
+            "hitTest": false,
+            "position": [348, 27],
+            "size": [2, 4]
+          }
+        }
+      ]
+    },
+    {
+      "id": "location_chip",
+      "type": "group",
+      "name": "Location Chip",
+      "props": {
+        "color": "#FFFFFFFF",
+        "cornerRadius": 25,
+        "hitTest": false,
+        "position": [16, 66],
+        "shadowColor": "#000000FF",
+        "shadowOffset": [0, 6],
+        "shadowOpacity": 0.08,
+        "shadowRadius": 18,
+        "size": [370, 50]
+      },
+      "children": [
+        {
+          "id": "location_dot",
+          "type": "oval",
+          "name": "Location Dot",
+          "props": {
+            "color": "#22C55EFF",
+            "position": [20, 20],
+            "size": [10, 10]
+          }
+        },
+        {
+          "id": "location_label",
+          "type": "text",
+          "name": "Location",
+          "props": {
+            "fontSize": 17,
+            "fontWeight": 600,
+            "hitTest": false,
+            "position": [40, 14],
+            "text": "Mission District",
+            "textColor": "#111118FF"
+          }
+        }
+      ]
+    },
+    {
+      "id": "scrim",
+      "type": "rectangle",
+      "name": "Scrim",
+      "props": {
+        "color": "#000000FF",
+        "hitTest": false,
+        "opacity": { "link": "scrim_opacity.output" },
+        "size": [402, 874]
+      }
+    },
+    {
+      "id": "sheet",
+      "type": "group",
+      "name": "Sheet",
+      "props": {
+        "color": "#FFFFFFFF",
+        "cornerRadius": 28,
+        "position": { "link": "sheet_position.output" },
+        "shadowColor": "#000000FF",
+        "shadowOffset": [0, -4],
+        "shadowOpacity": 0.18,
+        "shadowRadius": 32,
+        "size": [402, 874]
+      },
+      "children": [
+        {
+          "id": "grabber",
+          "type": "rectangle",
+          "name": "Grabber",
+          "props": {
+            "color": "#D4D4D8FF",
+            "cornerRadius": 3,
+            "position": [181, 10],
+            "size": [40, 5]
+          }
+        },
+        {
+          "id": "sheet_title",
+          "type": "text",
+          "name": "Sheet Title",
+          "props": {
+            "fontSize": 22,
+            "fontWeight": 700,
+            "hitTest": false,
+            "letterSpacing": -0.2,
+            "position": [24, 34],
+            "text": "Coffee nearby",
+            "textColor": "#111118FF"
+          }
+        },
+        {
+          "id": "sheet_subtitle",
+          "type": "text",
+          "name": "Sheet Subtitle",
+          "props": {
+            "fontSize": 13,
+            "fontWeight": 400,
+            "hitTest": false,
+            "lineHeight": 18,
+            "position": [24, 66],
+            "text": "12 places open now",
+            "textColor": "#5F5F6BFF"
+          }
+        },
+        {
+          "id": "search",
+          "type": "group",
+          "name": "Search",
+          "props": {
+            "color": "#EDEDF1FF",
+            "cornerRadius": 12,
+            "position": [24, 104],
+            "size": [354, 44]
+          },
+          "children": [
+            {
+              "id": "search_icon",
+              "type": "oval",
+              "name": "Search Icon",
+              "props": {
+                "color": "#00000000",
+                "position": [16, 15],
+                "size": [14, 14],
+                "strokeColor": "#A1A1AAFF",
+                "strokeWidth": 2
+              }
+            },
+            {
+              "id": "search_placeholder",
+              "type": "text",
+              "name": "Placeholder",
+              "props": {
+                "fontSize": 15,
+                "fontWeight": 400,
+                "hitTest": false,
+                "lineHeight": 21,
+                "position": [40, 11],
+                "text": "Search cafés",
+                "textColor": "#A1A1AAFF"
+              }
+            }
+          ]
+        },
+        {
+          "id": "place_1",
+          "type": "group",
+          "name": "Juniper & Oak",
+          "props": {
+            "position": [0, 168],
+            "size": [402, 76]
+          },
+          "children": [
+            {
+              "id": "place_1_thumb",
+              "type": "rectangle",
+              "name": "Thumbnail",
+              "props": {
+                "cornerRadius": 14,
+                "gradient": {
+                  "gradient": {
+                    "kind": "linear",
+                    "stops": [[0, "#FFB37BFF"], [1, "#FF5E7EFF"]],
+                    "start": [0, 0],
+                    "end": [1, 1]
+                  }
+                },
+                "position": [24, 12],
+                "size": [52, 52]
+              }
+            },
+            {
+              "id": "place_1_name",
+              "type": "text",
+              "name": "Name",
+              "props": {
+                "fontSize": 17,
+                "fontWeight": 600,
+                "hitTest": false,
+                "position": [92, 16],
+                "text": "Juniper & Oak",
+                "textColor": "#111118FF"
+              }
+            },
+            {
+              "id": "place_1_meta",
+              "type": "text",
+              "name": "Details",
+              "props": {
+                "fontSize": 13,
+                "fontWeight": 400,
+                "hitTest": false,
+                "lineHeight": 18,
+                "position": [92, 40],
+                "text": "4.8 · 6 min walk",
+                "textColor": "#5F5F6BFF"
+              }
+            },
+            {
+              "id": "place_1_price",
+              "type": "text",
+              "name": "Price",
+              "props": {
+                "anchor": [1, 0],
+                "fontSize": 15,
+                "fontWeight": 600,
+                "hitTest": false,
+                "position": [378, 26],
+                "text": "$$",
+                "textAlignment": "right",
+                "textColor": "#A1A1AAFF"
+              }
+            },
+            {
+              "id": "place_1_divider",
+              "type": "rectangle",
+              "name": "Divider",
+              "props": {
+                "color": "#E6E6EBFF",
+                "position": [92, 75],
+                "size": [286, 1]
+              }
+            }
+          ]
+        },
+        {
+          "id": "place_2",
+          "type": "group",
+          "name": "Morning Tide",
+          "props": {
+            "position": [0, 244],
+            "size": [402, 76]
+          },
+          "children": [
+            {
+              "id": "place_2_thumb",
+              "type": "rectangle",
+              "name": "Thumbnail",
+              "props": {
+                "cornerRadius": 14,
+                "gradient": {
+                  "gradient": {
+                    "kind": "linear",
+                    "stops": [[0, "#7DD3FCFF"], [1, "#5B5CF6FF"]],
+                    "start": [0, 0],
+                    "end": [1, 1]
+                  }
+                },
+                "position": [24, 12],
+                "size": [52, 52]
+              }
+            },
+            {
+              "id": "place_2_name",
+              "type": "text",
+              "name": "Name",
+              "props": {
+                "fontSize": 17,
+                "fontWeight": 600,
+                "hitTest": false,
+                "position": [92, 16],
+                "text": "Morning Tide",
+                "textColor": "#111118FF"
+              }
+            },
+            {
+              "id": "place_2_meta",
+              "type": "text",
+              "name": "Details",
+              "props": {
+                "fontSize": 13,
+                "fontWeight": 400,
+                "hitTest": false,
+                "lineHeight": 18,
+                "position": [92, 40],
+                "text": "4.7 · 9 min walk",
+                "textColor": "#5F5F6BFF"
+              }
+            },
+            {
+              "id": "place_2_price",
+              "type": "text",
+              "name": "Price",
+              "props": {
+                "anchor": [1, 0],
+                "fontSize": 15,
+                "fontWeight": 600,
+                "hitTest": false,
+                "position": [378, 26],
+                "text": "$$",
+                "textAlignment": "right",
+                "textColor": "#A1A1AAFF"
+              }
+            },
+            {
+              "id": "place_2_divider",
+              "type": "rectangle",
+              "name": "Divider",
+              "props": {
+                "color": "#E6E6EBFF",
+                "position": [92, 75],
+                "size": [286, 1]
+              }
+            }
+          ]
+        },
+        {
+          "id": "place_3",
+          "type": "group",
+          "name": "Ferro Espresso",
+          "props": {
+            "position": [0, 320],
+            "size": [402, 76]
+          },
+          "children": [
+            {
+              "id": "place_3_thumb",
+              "type": "rectangle",
+              "name": "Thumbnail",
+              "props": {
+                "cornerRadius": 14,
+                "gradient": {
+                  "gradient": {
+                    "kind": "linear",
+                    "stops": [[0, "#FDE68AFF"], [1, "#F59E0BFF"]],
+                    "start": [0, 0],
+                    "end": [1, 1]
+                  }
+                },
+                "position": [24, 12],
+                "size": [52, 52]
+              }
+            },
+            {
+              "id": "place_3_name",
+              "type": "text",
+              "name": "Name",
+              "props": {
+                "fontSize": 17,
+                "fontWeight": 600,
+                "hitTest": false,
+                "position": [92, 16],
+                "text": "Ferro Espresso",
+                "textColor": "#111118FF"
+              }
+            },
+            {
+              "id": "place_3_meta",
+              "type": "text",
+              "name": "Details",
+              "props": {
+                "fontSize": 13,
+                "fontWeight": 400,
+                "hitTest": false,
+                "lineHeight": 18,
+                "position": [92, 40],
+                "text": "4.9 · 12 min walk",
+                "textColor": "#5F5F6BFF"
+              }
+            },
+            {
+              "id": "place_3_price",
+              "type": "text",
+              "name": "Price",
+              "props": {
+                "anchor": [1, 0],
+                "fontSize": 15,
+                "fontWeight": 600,
+                "hitTest": false,
+                "position": [378, 26],
+                "text": "$",
+                "textAlignment": "right",
+                "textColor": "#A1A1AAFF"
+              }
+            },
+            {
+              "id": "place_3_divider",
+              "type": "rectangle",
+              "name": "Divider",
+              "props": {
+                "color": "#E6E6EBFF",
+                "position": [92, 75],
+                "size": [286, 1]
+              }
+            }
+          ]
+        },
+        {
+          "id": "place_4",
+          "type": "group",
+          "name": "Little Orbit",
+          "props": {
+            "position": [0, 396],
+            "size": [402, 76]
+          },
+          "children": [
+            {
+              "id": "place_4_thumb",
+              "type": "rectangle",
+              "name": "Thumbnail",
+              "props": {
+                "cornerRadius": 14,
+                "gradient": {
+                  "gradient": {
+                    "kind": "linear",
+                    "stops": [[0, "#86EFACFF"], [1, "#14B8A6FF"]],
+                    "start": [0, 0],
+                    "end": [1, 1]
+                  }
+                },
+                "position": [24, 12],
+                "size": [52, 52]
+              }
+            },
+            {
+              "id": "place_4_name",
+              "type": "text",
+              "name": "Name",
+              "props": {
+                "fontSize": 17,
+                "fontWeight": 600,
+                "hitTest": false,
+                "position": [92, 16],
+                "text": "Little Orbit",
+                "textColor": "#111118FF"
+              }
+            },
+            {
+              "id": "place_4_meta",
+              "type": "text",
+              "name": "Details",
+              "props": {
+                "fontSize": 13,
+                "fontWeight": 400,
+                "hitTest": false,
+                "lineHeight": 18,
+                "position": [92, 40],
+                "text": "4.6 · 14 min walk",
+                "textColor": "#5F5F6BFF"
+              }
+            },
+            {
+              "id": "place_4_price",
+              "type": "text",
+              "name": "Price",
+              "props": {
+                "anchor": [1, 0],
+                "fontSize": 15,
+                "fontWeight": 600,
+                "hitTest": false,
+                "position": [378, 26],
+                "text": "$$",
+                "textAlignment": "right",
+                "textColor": "#A1A1AAFF"
+              }
+            },
+            {
+              "id": "place_4_divider",
+              "type": "rectangle",
+              "name": "Divider",
+              "props": {
+                "color": "#E6E6EBFF",
+                "position": [92, 75],
+                "size": [286, 1]
+              }
+            }
+          ]
+        },
+        {
+          "id": "place_5",
+          "type": "group",
+          "name": "Cloudline Roasters",
+          "props": {
+            "position": [0, 472],
+            "size": [402, 76]
+          },
+          "children": [
+            {
+              "id": "place_5_thumb",
+              "type": "rectangle",
+              "name": "Thumbnail",
+              "props": {
+                "cornerRadius": 14,
+                "gradient": {
+                  "gradient": {
+                    "kind": "linear",
+                    "stops": [[0, "#F0ABFCFF"], [1, "#8B5CF6FF"]],
+                    "start": [0, 0],
+                    "end": [1, 1]
+                  }
+                },
+                "position": [24, 12],
+                "size": [52, 52]
+              }
+            },
+            {
+              "id": "place_5_name",
+              "type": "text",
+              "name": "Name",
+              "props": {
+                "fontSize": 17,
+                "fontWeight": 600,
+                "hitTest": false,
+                "position": [92, 16],
+                "text": "Cloudline Roasters",
+                "textColor": "#111118FF"
+              }
+            },
+            {
+              "id": "place_5_meta",
+              "type": "text",
+              "name": "Details",
+              "props": {
+                "fontSize": 13,
+                "fontWeight": 400,
+                "hitTest": false,
+                "lineHeight": 18,
+                "position": [92, 40],
+                "text": "4.7 · 18 min walk",
+                "textColor": "#5F5F6BFF"
+              }
+            },
+            {
+              "id": "place_5_price",
+              "type": "text",
+              "name": "Price",
+              "props": {
+                "anchor": [1, 0],
+                "fontSize": 15,
+                "fontWeight": 600,
+                "hitTest": false,
+                "position": [378, 26],
+                "text": "$$$",
+                "textAlignment": "right",
+                "textColor": "#A1A1AAFF"
+              }
+            },
+            {
+              "id": "place_5_divider",
+              "type": "rectangle",
+              "name": "Divider",
+              "props": {
+                "color": "#E6E6EBFF",
+                "position": [92, 75],
+                "size": [286, 1]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "app_home_indicator",
+      "type": "rectangle",
+      "name": "Home Indicator",
+      "props": {
+        "anchor": [0.5, 1],
+        "color": "#111118FF",
+        "cornerRadius": 3,
+        "hitTest": false,
+        "position": [201, 866],
+        "size": [140, 5]
+      }
+    }
+  ],
+  "patches": {
+    "current_stop": {
+      "type": "counter",
+      "name": "Current Stop",
+      "inputs": {
+        "jump": { "link": "finger.turnedOff" },
+        "jumpToNumber": { "link": "fling_stop.index" }
+      },
+      "ui": { "x": 820, "y": 190 }
+    },
+    "drag_distance": {
+      "type": "pointUnpack",
+      "name": "Drag Distance",
+      "inputs": { "value": { "link": "sheet_gesture.translation" } },
+      "ui": { "x": 300, "y": 340 }
+    },
+    "drag_speed": {
+      "type": "pointUnpack",
+      "name": "Drag Speed",
+      "inputs": { "value": { "link": "sheet_gesture.velocity" } },
+      "ui": { "x": 300, "y": 490 }
+    },
+    "finger": {
+      "type": "pulse",
+      "name": "Finger Down or Up",
+      "inputs": { "on": { "link": "sheet_gesture.down" } },
+      "ui": { "x": 300, "y": 190 }
+    },
+    "finger_y": {
+      "type": "add",
+      "name": "Sheet Y Under Finger",
+      "typeParam": "number",
+      "inputCount": 2,
+      "inputs": {
+        "value1": { "link": "grab_y.output" },
+        "value2": { "link": "drag_distance.y" }
+      },
+      "ui": { "x": 820, "y": 40 }
+    },
+    "fling_stop": {
+      "type": "snap",
+      "name": "Nearest Stop After Fling",
+      "typeParam": "number",
+      "inputs": {
+        "deceleration": "fast",
+        "mode": "points",
+        "points": { "link": "stops.loop" },
+        "value": { "link": "sheet_y_last_frame.output" },
+        "velocity": { "link": "drag_speed.y" }
+      },
+      "ui": { "x": 560, "y": 190 }
+    },
+    "grab_y": {
+      "type": "sampleAndHold",
+      "name": "Sheet Y at Grab",
+      "typeParam": "number",
+      "inputs": {
+        "sample": { "link": "sheet_idle.output" },
+        "value": { "link": "sheet_y_last_frame.output" }
+      },
+      "ui": { "x": 560, "y": 40 }
+    },
+    "scrim_opacity": {
+      "type": "transition",
+      "name": "Scrim Opacity",
+      "typeParam": "number",
+      "inputs": {
+        "end": 0.4,
+        "progress": { "link": "sheet_openness.progress" },
+        "start": 0
+      },
+      "ui": { "x": 2120, "y": 40 }
+    },
+    "sheet_gesture": {
+      "type": "gesture",
+      "name": "Drag Sheet",
+      "inputs": { "layer": { "layer": "sheet" } },
+      "ui": { "x": 40, "y": 40 }
+    },
+    "sheet_idle": {
+      "type": "not",
+      "name": "Not Dragging",
+      "inputs": { "value": { "link": "sheet_gesture.down" } },
+      "ui": { "x": 300, "y": 40 }
+    },
+    "sheet_openness": {
+      "type": "progress",
+      "name": "Sheet Openness",
+      "inputs": {
+        "clampToRange": true,
+        "end": 132,
+        "start": 760,
+        "value": { "link": "sheet_spring.output" }
+      },
+      "ui": { "x": 1860, "y": 340 }
+    },
+    "sheet_position": {
+      "type": "point",
+      "name": "Sheet Position",
+      "inputs": {
+        "x": 0,
+        "y": { "link": "sheet_spring.output" }
+      },
+      "ui": { "x": 1860, "y": 190 }
+    },
+    "sheet_spring": {
+      "type": "springAnimation",
+      "name": "Sheet Spring",
+      "typeParam": "number",
+      "inputs": {
+        "friction": 30,
+        "gestureActive": { "link": "sheet_gesture.down" },
+        "gestureVelocity": { "link": "drag_speed.y" },
+        "number": { "link": "sheet_target.output" },
+        "tension": 300
+      },
+      "ui": { "x": 1600, "y": 40 }
+    },
+    "sheet_target": {
+      "type": "ifElse",
+      "name": "Finger or Stop",
+      "typeParam": "number",
+      "inputs": {
+        "condition": { "link": "sheet_gesture.down" },
+        "ifFalse": { "link": "stop_y.output" },
+        "ifTrue": { "link": "finger_y.output" }
+      },
+      "ui": { "x": 1340, "y": 40 }
+    },
+    "sheet_y_last_frame": {
+      "type": "delay1",
+      "name": "Sheet Y Last Frame",
+      "typeParam": "number",
+      "inputs": { "value": { "link": "sheet_spring.output" } },
+      "ui": { "x": 1860, "y": 40 }
+    },
+    "stop_y": {
+      "type": "loopSelect",
+      "name": "Stop Y",
+      "typeParam": "number",
+      "inputs": {
+        "index": { "link": "current_stop.count" },
+        "loop": { "link": "stops.loop" }
+      },
+      "ui": { "x": 1080, "y": 40 }
+    },
+    "stops": {
+      "type": "loopBuilder",
+      "name": "Stops",
+      "typeParam": "number",
+      "inputCount": 3,
+      "inputs": { "item0": 470, "item1": 132, "item2": 760 },
+      "ui": { "x": 40, "y": 190 }
+    }
+  },
+  "comments": []
+}
