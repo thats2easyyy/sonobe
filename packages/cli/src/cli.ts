@@ -37,6 +37,13 @@ import { runRelay, sonobeHome, type TextSink } from "./relay.ts";
 
 export const VERSION: string = (pkg as { version?: string }).version ?? "0.0.0";
 
+/** A path for hints: relative when it stays under cwd, absolute otherwise. */
+function displayPath(cwd: string, dir: string): string {
+  const rel = path.relative(cwd, dir);
+  if (!rel) return ".";
+  return rel.startsWith("..") || path.isAbsolute(rel) ? dir : rel;
+}
+
 export interface CliIo {
   stdout: TextSink;
   stderr: TextSink;
@@ -192,7 +199,7 @@ async function cmdNew(args: string[], io: CliIo): Promise<number> {
       ...(values.device ? { device: values.device } : {}),
     });
     io.stdout.write(
-      `Created "${created.name}" at ${dir}${values.template ? ` from the ${values.template} template` : ""}.\n\nNext:\n  sonobe outline "${path.relative(io.cwd, dir) || "."}"\n  sonobe mcp --headless "${path.relative(io.cwd, dir) || "."}"   (let Claude edit it)\n`,
+      `Created "${created.name}" at ${dir}${values.template ? ` from the ${values.template} template` : ""}.\n\nNext:\n  sonobe outline "${displayPath(io.cwd, dir)}"\n  sonobe mcp --headless "${displayPath(io.cwd, dir)}"   (let Claude edit it)\n`,
     );
     return 0;
   } catch (err) {
@@ -266,7 +273,7 @@ async function cmdFmt(args: string[], io: CliIo): Promise<number> {
       return 0;
     }
     io.stdout.write(
-      `Would reformat:\n${changed.map((f) => `  ${f}`).join("\n")}\nRun: sonobe fmt "${path.relative(io.cwd, dir) || "."}"\n`,
+      `Would reformat:\n${changed.map((f) => `  ${f}`).join("\n")}\nRun: sonobe fmt "${displayPath(io.cwd, dir)}"\n`,
     );
     return 1;
   }
