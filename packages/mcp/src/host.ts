@@ -1,0 +1,446 @@
+/**
+ * SonobeHost: everything the MCP tools need from wherever documents live (ARCHITECTURE §10).
+ *
+ * The desktop app implements it over the live editor (RPC into the renderer); HeadlessHost
+ * (headless.ts) implements it over project folders on disk. Tool handlers only talk to this
+ * interface, so both front doors behave the same. Browser-safe: types plus HostError.
+ */
+
+import type {
+  Affected,
+  Author,
+  Diagnostic,
+  Id,
+  Op,
+  OpResult,
+  SonobeDocument,
+  SonobeError,
+  Suggestion,
+} from "@sonobe/core";
+import type { EngineRegistry, InputEvent, TraceSummary } from "@sonobe/engine";
+
+export type HostKind = "app" | "headless";
+
+/** What a host can do; tools use this to explain unavailable features up front. */
+export interface HostCapabilities {
+  /** get_screenshot returns images. */
+  screenshots: boolean;
+  /** get_selection reflects a human's selection in an editor. */
+  selection: boolean;
+  /** begin_work / reveal show something to a human. */
+  presence: boolean;
+  /** Writes are saved to disk after every successful batch. */
+  autosave: boolean;
+}
+
+/** One open document. */
+export interface DocumentSummary {
+  docId: Id;
+  name: string;
+  /** Project folder on disk, when there is one. */
+  path?: string;
+  revision: number;
+  /** Has changes that aren't saved to disk. */
+  dirty: boolean;
+  /** Tools that omit docId use the active document. */
+  active: boolean;
+}
+
+export interface DocumentSnapshot {
+  docId: Id;
+  path?: string;
+  doc: SonobeDocument;
+  revision: number;
+  dirty: boolean;
+}
+
+export interface CreateDocumentRequest {
+  /** Project folder to create (required by hosts without a file picker). */
+  path?: string;
+  name?: string;
+  /** Template id from templates.ts ("blank", "photo-zoom"). */
+  template?: string;
+  /** Device preset id. */
+  device?: string;
+  /** Make it the active document (default true). */
+  open?: boolean;
+}
+
+export interface SaveOutcome {
+  docId: Id;
+  path?: string;
+  revision: number;
+  written: string[];
+  removed: string[];
+}
+
+export interface DiagnosticTotals {
+  errors: number;
+  warnings: number;
+  info: number;
+}
+
+/** Diagnostics that appeared or went away because of a change. */
+export interface DiagnosticsDelta {
+  added: Diagnostic[];
+  resolved: Diagnostic[];
+  totals: DiagnosticTotals;
+}
+
+export interface HostApplyOptions {
+  docId?: Id;
+  /** History label, e.g. "added press animation". */
+  label: string;
+  author: Author;
+  /** Default true: any failing op rolls back the batch. */
+  atomic?: boolean;
+  dryRun?: boolean;
+  /** Reject the batch when the document moved on (optimistic concurrency). */
+  expectedRevision?: number;
+  /** Component used by ops that don't name one. */
+  defaultComponent?: Id;
+}
+
+export interface HostApplyResult {
+  ok: boolean;
+  docId: Id;
+  /** Revision after the batch (unchanged when nothing applied). */
+  revision: number;
+  dryRun: boolean;
+  /** History group id when the batch was committed. */
+  txnId?: string;
+  results: OpResult[];
+  errors: SonobeError[];
+  idMap: Record<string, Id>;
+  affected: Affected;
+  applied: Op[];
+  diagnostics: DiagnosticsDelta;
+  /** Set when expectedRevision didn't match. */
+  conflict?: { expectedRevision: number; currentRevision: number };
+  /** The batch was written to disk (autosave hosts). */
+  saved?: boolean;
+  /** dryRun only: the would-be document. */
+  preview?: SonobeDocument;
+}
+
+export interface Selection {
+  docId: Id;
+  component: Id;
+  layers: Id[];
+  patches: Id[];
+  comments: Id[];
+  /** Why the selection is always empty (headless hosts). */
+  note?: string;
+}
+
+export type ScreenshotTarget =
+  { kind: "viewer" } | { kind: "canvas" } | { kind: "graph" } | { kind: "layer"; layerId: Id };
+
+export interface ScreenshotOptions {
+  docId?: Id;
+  /** Render a simulation's current frame instead of the live viewer. */
+  simId?: string;
+  component?: Id;
+  /** Device pixel scale (default 1). */
+  scale?: number;
+  /** Downscale so the image is at most this wide. */
+  maxWidth?: number;
+}
+
+export interface Screenshot {
+  /** Base64-encoded image bytes. */
+  data: string;
+  mimeType: "image/png" | "image/jpeg" | "image/webp";
+  width: number;
+  height: number;
+  timeMs?: number;
+}
+
+/** An agent's "working on" badge. */
+export interface WorkIntent {
+  ids: Id[];
+  intent: string;
+  author: Author;
+  since: number;
+}
+
+export interface HistoryItem {
+  txnId: string;
+  label: string;
+  author: Author;
+  revision: number;
+  opCount: number;
+  timestamp: number;
+  /** "Claude: added press animation (12 ops)". */
+  summary: string;
+}
+
+export interface HistoryListOptions {
+  docId?: Id;
+  limit?: number;
+  /** "human", "agent", or an author name. */
+  author?: string;
+}
+
+export interface UndoOptions {
+  docId?: Id;
+  /** Undo every group up to and including this one (default: the newest). */
+  txnId?: string;
+  author: Author;
+  /** Allow undoing a human's edit without naming its txnId. */
+  allowHumanEdits?: boolean;
+}
+
+export interface UndoResult {
+  docId: Id;
+  revision: number;
+  undone: HistoryItem[];
+  diagnostics: DiagnosticsDelta;
+  saved?: boolean;
+}
+
+// ---------------------------------------------------------------------------
+// Simulation
+// ---------------------------------------------------------------------------
+
+/** A layer ("@card", "@card#2" for a loop copy) or a point in prototype coordinates. */
+export type SimTarget = string | [number, number];
+
+interface SimEventBase {
+  /** Milliseconds after the dispatch (or trace) starts. Default 0. */
+  atMs?: number;
+}
+
+/** High-level input the simulation synthesizes into pointer, key, and text events. */
+export type SimEvent =
+  | (SimEventBase & { kind: "tap"; target: SimTarget; holdMs?: number })
+  | (SimEventBase & { kind: "longPress"; target: SimTarget; durationMs?: number })
+  | (SimEventBase & {
+      kind: "drag";
+      from: SimTarget;
+      to: SimTarget;
+      durationMs?: number;
+      release?: boolean;
+    })
+  | (SimEventBase & { kind: "hover"; target: SimTarget })
+  | (SimEventBase & { kind: "leave" })
+  | (SimEventBase & { kind: "scroll"; target: SimTarget; dx?: number; dy?: number })
+  | (SimEventBase & {
+      kind: "key";
+      key: string;
+      phase?: "press" | "down" | "up";
+      shift?: boolean;
+      alt?: boolean;
+      meta?: boolean;
+      ctrl?: boolean;
+    })
+  | (SimEventBase & { kind: "text"; layer: Id; value: string })
+  | (SimEventBase & { kind: "focus"; layer: Id; focused: boolean })
+  | (SimEventBase & { kind: "submit"; layer: Id })
+  | (SimEventBase & {
+      kind: "pointer";
+      phase: "down" | "move" | "up" | "cancel" | "leave";
+      x: number;
+      y: number;
+      pointerId?: number;
+      pointerType?: "mouse" | "touch" | "pen";
+    })
+  | (SimEventBase & { kind: "orientation"; orientation: "portrait" | "landscape" })
+  | (SimEventBase & {
+      kind: "deviceMotion";
+      acceleration: [number, number, number];
+      rotationRate: [number, number, number];
+    });
+
+export interface SimIssue {
+  code: string;
+  severity: "error" | "warning";
+  message: string;
+  patchId?: Id;
+  layerId?: Id;
+}
+
+/** Common fields of every simulation result. */
+export interface SimState {
+  simId: string;
+  docId: Id;
+  frame: number;
+  timeMs: number;
+  fps: number;
+  seed: number;
+  /** The document changed since the last call and was hot-swapped into the simulation. */
+  documentUpdated?: boolean;
+  /** Runtime issues raised since the last call (unimplemented patches, script errors...). */
+  issues: SimIssue[];
+}
+
+export interface SimResetOptions {
+  docId?: Id;
+  /** Reset this session instead of creating a new one. */
+  simId?: string;
+  seed?: number;
+  fps?: 60 | 120;
+}
+
+export interface SimHit {
+  /** Front-most layer under the point, if any. */
+  layerId?: Id;
+  layerName?: string;
+  /** Front-most first, including ancestors that touches bubble to. */
+  chain: Id[];
+  /** Interaction-type patches listening to a layer in the chain (or to the whole screen). */
+  handledBy: Id[];
+}
+
+export interface SimDispatchedEvent {
+  index: number;
+  kind: SimEvent["kind"];
+  /** Resolved press or hover point. */
+  point?: [number, number];
+  hit?: SimHit;
+  warnings: string[];
+}
+
+export interface SimDispatchResult extends SimState {
+  framesStepped: number;
+  events: SimDispatchedEvent[];
+}
+
+export type SimCompareOp = ">" | ">=" | "<" | "<=" | "==" | "!=";
+
+export interface SimStepOptions {
+  frames?: number;
+  ms?: number;
+  /** "idle": nothing animating and watched values stable; or a condition on a value. */
+  until?: "idle" | { target: string; op: SimCompareOp; value: number | boolean | string };
+  /** Cap for `until` (default 10000 ms). */
+  maxMs?: number;
+  /** Values reported in `changed` (default: linked layer properties of the root component). */
+  watch?: string[];
+}
+
+export interface SimChange {
+  target: string;
+  from: unknown;
+  to: unknown;
+}
+
+export interface SimStepResult extends SimState {
+  framesStepped: number;
+  settled: boolean;
+  timedOut: boolean;
+  changed: SimChange[];
+}
+
+export interface SimTraceOptions {
+  targets: string[];
+  durationMs: number;
+  events?: SimEvent[];
+  /** Advance the session through the traced time (default false: trace a copy). */
+  advance?: boolean;
+}
+
+export interface SimTraceResult extends SimState {
+  /** Hit reports for the scheduled events. */
+  events: SimDispatchedEvent[];
+  targets: string[];
+  /** Milliseconds since the trace started, one per frame. */
+  times: number[];
+  values: Record<string, unknown[]>;
+  summaries: Record<string, TraceSummary | null>;
+}
+
+export interface SimValuesResult extends SimState {
+  values: Record<string, unknown>;
+}
+
+export interface SimHost {
+  reset(options: SimResetOptions): Promise<SimState>;
+  dispatch(simId: string, events: SimEvent[]): Promise<SimDispatchResult>;
+  step(simId: string, options: SimStepOptions): Promise<SimStepResult>;
+  trace(simId: string, options: SimTraceOptions): Promise<SimTraceResult>;
+  values(simId: string, targets: string[]): Promise<SimValuesResult>;
+  /** Open sessions (for get_document_info). */
+  list(docId?: Id): SimState[];
+}
+
+// ---------------------------------------------------------------------------
+// Host
+// ---------------------------------------------------------------------------
+
+export interface SonobeHost {
+  readonly kind: HostKind;
+  readonly capabilities: HostCapabilities;
+  /** Patch and layer declarations plus evaluators. */
+  readonly registry: EngineRegistry;
+
+  listDocuments(): Promise<DocumentSummary[]>;
+  /** Open (or activate) a document by docId or project folder path. */
+  openDocument(ref: string): Promise<DocumentSummary>;
+  createDocument(request: CreateDocumentRequest): Promise<DocumentSummary>;
+  /** A document snapshot (default: the active document). */
+  getDocument(docId?: Id): Promise<DocumentSnapshot>;
+  saveDocument(docId?: Id): Promise<SaveOutcome>;
+  /** Apply a batch through core applyOps as one attributed history group. */
+  apply(ops: Op[], options: HostApplyOptions): Promise<HostApplyResult>;
+  /** Diagnostics for the current revision (cached). */
+  diagnostics(docId?: Id): Promise<{ docId: Id; revision: number; diagnostics: Diagnostic[] }>;
+
+  getSelection(docId?: Id): Promise<Selection>;
+  /** Throws HostError("screenshots_unavailable") when capabilities.screenshots is false. */
+  screenshot(target: ScreenshotTarget, options: ScreenshotOptions): Promise<Screenshot>;
+  reveal(
+    ids: Id[],
+    options: { docId?: Id; focus?: boolean },
+  ): Promise<{ revealed: boolean; reason?: string }>;
+  /** Show (or clear, with null) an agent's working badge. */
+  setWorking(
+    work: { ids: Id[]; intent: string } | null,
+    options: { docId?: Id; author: Author },
+  ): Promise<void>;
+  /** Current working badges. */
+  presence(docId?: Id): Promise<WorkIntent[]>;
+
+  readonly sim: SimHost;
+  readonly history: {
+    list(options: HistoryListOptions): Promise<HistoryItem[]>;
+    undo(options: UndoOptions): Promise<UndoResult>;
+  };
+}
+
+/** A host failure written for the agent: code, message, hint, and ready-to-apply suggestions. */
+export class HostError extends Error {
+  readonly code: string;
+  readonly hint: string | undefined;
+  readonly suggestions: Suggestion[];
+  readonly data: Record<string, unknown> | undefined;
+
+  constructor(
+    code: string,
+    message: string,
+    extra: { hint?: string; suggestions?: Suggestion[]; data?: Record<string, unknown> } = {},
+  ) {
+    super(message);
+    this.name = "HostError";
+    this.code = code;
+    this.hint = extra.hint;
+    this.suggestions = extra.suggestions ?? [];
+    this.data = extra.data;
+  }
+}
+
+export function isHostError(err: unknown): err is HostError {
+  return (
+    err instanceof HostError ||
+    (!!err &&
+      typeof err === "object" &&
+      (err as { name?: unknown }).name === "HostError" &&
+      typeof (err as { code?: unknown }).code === "string")
+  );
+}
+
+/** Events synthesized for one frame. */
+export interface ScheduledFrameEvents {
+  atMs: number;
+  events: InputEvent[];
+}

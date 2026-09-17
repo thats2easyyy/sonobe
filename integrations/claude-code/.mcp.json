@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "sonobe": {
+      "command": "${SONOBE_CLI:-sonobe}",
+      "args": ["mcp"]
+    }
+  }
+}

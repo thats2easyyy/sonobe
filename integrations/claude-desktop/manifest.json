@@ -1,0 +1,124 @@
+{
+  "manifest_version": "0.3",
+  "name": "sonobe",
+  "display_name": "Sonobe",
+  "version": "0.1.0",
+  "description": "Let Claude build, simulate and explain interaction prototypes in the Sonobe app.",
+  "long_description": "Sonobe is an open-source interaction prototyping app: layers, a patch graph, and a live viewer. This extension connects Claude Desktop to the running Sonobe app over a local, token-protected MCP connection. Claude can read your document's outline, add layers and patches, wire interactions and springs, simulate taps and drags to verify how they feel, explain graphs at your level, and undo its own changes. Everything happens on your computer and lands in Sonobe's undo history.",
+  "author": { "name": "Sonobe contributors" },
+  "license": "MIT",
+  "keywords": ["prototyping", "interaction design", "animation", "design tools"],
+  "server": {
+    "type": "node",
+    "entry_point": "server/sonobe.mjs",
+    "mcp_config": {
+      "command": "node",
+      "args": ["${__dirname}/server/sonobe.mjs", "mcp"],
+      "env": {
+        "SONOBE_HOME": "${user_config.sonobe_home}"
+      }
+    }
+  },
+  "user_config": {
+    "sonobe_home": {
+      "type": "directory",
+      "title": "Sonobe settings folder",
+      "description": "Where the Sonobe app writes mcp.json. Change it only if you launch Sonobe with SONOBE_HOME.",
+      "required": false,
+      "default": "${HOME}/.sonobe"
+    }
+  },
+  "tools": [
+    {
+      "name": "get_guide",
+      "description": "Workflow guides for building prototypes with Sonobe tools."
+    },
+    {
+      "name": "list_patch_types",
+      "description": "Search the patch library by intent or category."
+    },
+    {
+      "name": "describe_patch_types",
+      "description": "Ports, defaults, pairings and examples for patch types."
+    },
+    { "name": "describe_layer_types", "description": "Layer types and their properties." },
+    { "name": "list_value_types", "description": "Value types, literals and conversions." },
+    { "name": "list_documents", "description": "Documents open in Sonobe." },
+    { "name": "open_document", "description": "Open a document and make it active." },
+    { "name": "create_document", "description": "Create a project from a template." },
+    {
+      "name": "get_document_info",
+      "description": "Revision, device, components, diagnostics and host features."
+    },
+    { "name": "save_document", "description": "Write the document to its project folder." },
+    { "name": "get_outline", "description": "Compact text projection of layers and patches." },
+    { "name": "get_layers", "description": "The layer tree with linked properties." },
+    { "name": "get_patches", "description": "Patches with inputs, links and consumers." },
+    { "name": "get_items", "description": "Details for specific layers, patches or comments." },
+    { "name": "find", "description": "Find items by text, type, property or connection." },
+    { "name": "get_selection", "description": "What's selected in the editor." },
+    { "name": "get_diagnostics", "description": "Problems with ready-to-apply fixes." },
+    {
+      "name": "explain",
+      "description": "Plain-language description of a graph at beginner, designer or engineer level."
+    },
+    { "name": "apply_ops", "description": "Apply an atomic batch of document ops." },
+    { "name": "add_layers", "description": "Add layers with nested children." },
+    { "name": "add_patches", "description": "Add patches and wire them in one batch." },
+    { "name": "connect", "description": "Connect outputs to inputs or layer properties." },
+    { "name": "set_values", "description": "Set literal values on inputs and properties." },
+    { "name": "update_layers", "description": "Change layer properties, names and flags." },
+    {
+      "name": "delete_items",
+      "description": "Delete layers, patches and comments (with confirmation for large deletes)."
+    },
+    { "name": "rename", "description": "Change display names." },
+    {
+      "name": "create_component",
+      "description": "Turn layers and patches into a reusable component."
+    },
+    { "name": "tidy_graph", "description": "Arrange patches by dataflow." },
+    { "name": "sim_reset", "description": "Start a deterministic simulation." },
+    { "name": "sim_dispatch", "description": "Simulate taps, drags, keys and more." },
+    { "name": "sim_step", "description": "Advance a simulation until idle or a condition." },
+    {
+      "name": "sim_trace",
+      "description": "Trace values over time with settle and overshoot summaries."
+    },
+    { "name": "sim_get_values", "description": "Current simulated values." },
+    {
+      "name": "get_screenshot",
+      "description": "An image of the viewer, canvas, graph or a layer."
+    },
+    { "name": "begin_work", "description": "Show what Claude is about to change." },
+    { "name": "finish_work", "description": "Clear Claude's working badge." },
+    { "name": "reveal", "description": "Point at items in the editor." },
+    { "name": "list_history", "description": "Undoable change groups with authors." },
+    { "name": "undo", "description": "Undo Claude's latest change group." }
+  ],
+  "prompts": [
+    {
+      "name": "prototype_interaction",
+      "description": "Build an interaction, verify it in simulation, and explain the result.",
+      "arguments": ["description", "docId"],
+      "text": "Prototype this interaction in Sonobe: ${arguments.description}"
+    },
+    {
+      "name": "debug_interaction",
+      "description": "Find why an interaction misbehaves and apply the minimal fix.",
+      "arguments": ["symptom", "docId"],
+      "text": "Debug this Sonobe prototype: ${arguments.symptom}"
+    },
+    {
+      "name": "explain_prototype",
+      "description": "Explain the open prototype at your level.",
+      "arguments": ["audience", "docId"],
+      "text": "Explain this Sonobe prototype for a ${arguments.audience}."
+    }
+  ],
+  "compatibility": {
+    "claude_desktop": ">=1.0.0",
+    "platforms": ["darwin", "win32", "linux"],
+    "runtimes": { "node": ">=22.18.0" }
+  }
+}

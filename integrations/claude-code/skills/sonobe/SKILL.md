@@ -1,0 +1,59 @@
+---
+name: sonobe
+description: Build, debug and explain interaction prototypes in Sonobe (layers plus a patch graph with a live viewer) using the sonobe MCP tools. Use when someone asks to prototype an interaction, animation, gesture or screen flow in Sonobe, to fix a Sonobe prototype that doesn't behave, or to explain what one does.
+---
+
+# Prototyping in Sonobe
+
+Sonobe prototypes are layers (what people see) plus patches (logic nodes with typed ports) wired together. The `sonobe` MCP tools edit the person's open document through the same ops, validation and undo history as their own clicks. Changes show up live in their editor.
+
+## Before you touch anything
+
+1. Call `get_guide` with topic `start-here`, once per conversation (again after your context is compacted).
+2. Call `get_document_info`. It tells you:
+   - which document is active and its screen size
+   - whether this is the app or headless mode (no screenshots; saving may be manual)
+   - existing diagnostics
+3. Call `get_outline` to see what exists. Use ids exactly as printed.
+4. Call `list_patch_types` (search by intent: "spring", "drag", "tabs") and `describe_patch_types` for every patch type you'll wire. Never invent port keys.
+
+## Building
+
+- Call `begin_work` with a one-line intent the person will see. Call `finish_work` at the end, even after a failure.
+- Build one feature per call:
+  - `add_layers` for visuals.
+  - `add_patches` with `connections` for logic. Give patches a `ref` and wire with `"$ref.port"` in the same call.
+  - `set_values` to tune; `connect` for single wires; `apply_ops` for anything else, such as disconnects, components or moves.
+- Name things for people: layers by what they are ("Like Button"), patches by what they do ("Liked", "Press Spring").
+- Default to the ISAT chain: Interaction (tap or down) → Switch (remember) → Pop Animation or Classic Animation (move 0…1 smoothly) → Transition (0…1 into real units) → layer property.
+  - `down` is a state that ends on release. Wire `tap` into a Switch when the change should stay.
+- Read every write result:
+  - `revision`, created ids, and the diagnostics added or resolved.
+  - A failed call changed nothing. Read the hint, apply a suggestion's ops if one fits, and retry.
+- Pass `expectedRevision` when acting on something you read a while ago, so you don't overwrite the person's edits.
+
+## Verifying (do this before saying it works)
+
+1. `get_diagnostics` with `severity: "warning"`.
+2. `sim_reset`, then `sim_dispatch` the gesture (`{ "kind": "tap", "target": "@card" }`). Check the hit report: which layer caught it, which patch heard it, any warnings.
+3. `sim_trace` the properties that should move. Check the end value, settle time and overshoot against the requested feel ("snappy" means little or no overshoot and settles fast).
+4. `sim_step` with `until: "idle"`, or `sim_get_values`, for final states.
+5. `get_screenshot` only for visual QA, and only in the app. Read structure and values from tools.
+
+## Debugging
+
+- Call `explain` with `audience: "engineer"` on the items involved.
+- Reproduce in simulation and read values along the chain (interaction output, switch, animation, layer property) to find where the value stops changing.
+- Fix the smallest thing, then re-run the same simulation.
+- The `troubleshooting` guide lists symptoms and fixes.
+
+## Talking to people
+
+- Describe results by names and feel: "tapping the card springs it up to 108% size and settles in about 0.4 s". Don't paste ids, addresses or JSON unless they ask.
+- For beginners, `explain` with `audience: "beginner"` gives a plain walkthrough you can build on.
+- Ask before deleting things you didn't create. `delete_items` requires a confirmation token past 10 items.
+- `undo` reverts your last batch. It refuses to undo the person's own edits unless they agree.
+
+## Guides
+
+`get_guide` topics: `start-here`, `graph-basics`, `gestures`, `animation`, `layout`, `loops`, `components`, `simulation`, `troubleshooting`. Read the one that matches the task before building something unfamiliar.
