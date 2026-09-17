@@ -1,9 +1,9 @@
-/** App-wide open state for the Settings and About dialogs (menus, the palette, and the welcome screen open them). */
+/** App-wide open state for the Settings, About, and Keyboard Shortcuts dialogs (menus, the palette, and the welcome screen open them). */
 
 import { useStore } from "zustand";
 import { createStore, type StoreApi } from "zustand/vanilla";
 
-export type AppPanel = "settings" | "about";
+export type AppPanel = "settings" | "about" | "shortcuts";
 
 export interface AppPanelsState {
   open: AppPanel | null;

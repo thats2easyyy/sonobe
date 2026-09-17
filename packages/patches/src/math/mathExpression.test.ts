@@ -34,7 +34,7 @@ describe("mathExpression", () => {
     expect(outputs.output).toBe(0);
     expect(outputs.output2).toBe(Math.PI / 2);
     expect(Object.is(outputs.output3, 0)).toBe(true);
-    expect(h.logs.map((l) => l.message)).toEqual(["patch_1.output isn't a finite number, so it outputs 0"]);
+    expect(h.logs.map((l) => l.message)).toEqual(["Math Expression output \"output\" isn't a finite number, so it outputs 0"]);
     h.restart();
     h.step();
     expect(h.logs).toHaveLength(2);
@@ -46,7 +46,7 @@ describe("mathExpression", () => {
   it("outputs 0 on the lenient outputs and raises invalid_expression once per restart for invalid text", () => {
     const h = withText("a = b ^ 2; b + 1", { b: 3 });
     expect(h.run(3).outputs).toEqual({ a: 0, output: 0 });
-    const issue = { code: "invalid_expression", severity: "error", message: "patch_1: Use `**` for powers, like `x ** 2`. (column 7)" };
+    const issue = { code: "invalid_expression", severity: "error", message: "Use `**` for powers, like `x ** 2`. (column 7)" };
     expect(h.issues).toEqual([issue]);
     expect(h.logs).toEqual([]);
     h.restart();
@@ -54,13 +54,13 @@ describe("mathExpression", () => {
     expect(h.issues).toEqual([issue]);
     const run = runPatch(mathExpression, [{ b: 3 }, { b: 4 }], { id: "formula", settings: { expression: "a = b ^ 2; b + 1" } });
     expect(run.frames[1]!.outputs).toEqual({ a: 0, output: 0 });
-    expect(run.issues).toEqual([{ ...issue, message: "formula: Use `**` for powers, like `x ** 2`. (column 7)", patchId: "formula" }]);
+    expect(run.issues).toEqual([{ ...issue, message: "Use `**` for powers, like `x ** 2`. (column 7)", patchId: "formula" }]);
   });
 
   it("logs one error for invalid text on a host without runtime issues", () => {
     const h = createPatchHarness(mathExpression, { settings: { expression: "a = b ^ 2" }, services: { issue: undefined } as never });
     h.run(2);
-    expect(h.logs.map((l) => [l.level, l.message])).toEqual([["error", "patch_1: Use `**` for powers, like `x ** 2`. (column 7)"]]);
+    expect(h.logs.map((l) => [l.level, l.message])).toEqual([["error", "Use `**` for powers, like `x ** 2`. (column 7)"]]);
   });
 
   it("does nothing for an empty expression", () => {

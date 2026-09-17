@@ -6,7 +6,7 @@
 
 import { layerAddress, parseAddress, type ParsedAddress } from "../address.ts";
 import { deviceScreenSize, FORMAT_VERSION } from "../document.ts";
-import { isValidId, slugify, uniqueId } from "../ids.ts";
+import { isFileNameTaken, isValidId, slugify, uniqueId } from "../ids.ts";
 import { allLayerIds, COMPONENT_INSTANCE_LAYER_TYPE, COMPONENT_PATCH_TYPE, componentItemIds, findPort, resolveLayerProps } from "../registry.ts";
 import type { Component, ComponentKind, Id, InputValue, InterfacePort, LayerNode, Op, PatchNode, ValueType } from "../types.ts";
 import { resolveSource, resolveTarget } from "../validate.ts";
@@ -60,7 +60,9 @@ export function createComponent(ctx: OpContext, op: OpOf<"createComponent">): Op
   const isInside = (t: InputTarget) => (t.kind === "patch" ? movedPatches.has(t.id) : t.kind === "layer" ? movedLayers.has(t.id) : false);
   const isMovedSource = (a: ParsedAddress | undefined) => !!a && ((a.kind === "patch" && movedPatches.has(a.id)) || (a.kind === "layer" && movedLayers.has(a.id)));
 
-  const newId = uniqueId(slugify(op.name, "component"), (id) => id in ctx.doc.components || ctx.reserved.has(id));
+  // Case-insensitive: "navBar" and "navbar" would be one components/*.json file on macOS and Windows.
+  const componentIds = Object.keys(ctx.doc.components);
+  const newId = uniqueId(slugify(op.name, "component"), (id) => isFileNameTaken(componentIds, id) || ctx.reserved.has(id));
   defineRef(ctx, op.ref, newId);
   const takenItems = componentItemIds(component);
   const instanceId = uniqueId(slugify(op.name, "component"), (id) => takenItems.has(id) || ctx.reserved.has(id));

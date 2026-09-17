@@ -68,6 +68,27 @@ describe("desktop host", () => {
     expect(writes[0]!.changes.binaries).toEqual({ "assets/abc.png": bytes });
   });
 
+  it("replaces an existing prototype on Save As instead of merging into it", async () => {
+    const old = applyOps(createEmptyDocument({ name: "Old" }), [{ op: "addComponent", component: { id: "legacy", name: "Legacy", kind: "layerComponent" } }, { op: "setScript", file: "x.js", source: "// old" }], { registry }).doc;
+    const { api, writes } = fakeApi({ "/p/Old.sonobe": { files: { ...serializeDocument(old), "scripts/.eslintrc.json": "{}", "notes.md": "keep me" } } });
+    const host = createDesktopHost(api);
+    const summary = await host.writeProject("/p/Old.sonobe", createEmptyDocument({ name: "New" }));
+    expect(summary.deleted).toEqual(["components/legacy.json", "scripts/x.js"]);
+    expect(writes[0]!.changes.deleted).toEqual(["components/legacy.json", "scripts/x.js"]);
+
+    const fresh = createDesktopHost(fakeApi({}).api);
+    expect((await fresh.writeProject("/p/Brand New.sonobe", createEmptyDocument())).deleted).toEqual([]);
+  });
+
+  it("remembers what's on disk even when a file doesn't parse, so the next save rewrites it", async () => {
+    const doc = createEmptyDocument({ name: "Checkout" });
+    const { api, writes } = fakeApi({ "/p/C.sonobe": { files: { ...serializeDocument(doc), "assets/assets.json": "<<<<<<< HEAD\n{}\n" } } });
+    const host = createDesktopHost(api);
+    await expect(host.readProject("/p/C.sonobe")).rejects.toMatchObject({ code: "corrupt" });
+    await host.writeProject("/p/C.sonobe", doc);
+    expect(writes[0]!.changes).toEqual({ files: { "assets/assets.json": serializeDocument(doc)["assets/assets.json"] }, deleted: [] });
+  });
+
   it("passes window chrome, commands, watching, and RPC through", () => {
     const { api } = fakeApi({});
     const host = createDesktopHost(api);

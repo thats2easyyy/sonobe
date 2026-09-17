@@ -1,8 +1,15 @@
+import { runPatch } from "@sonobe/engine/testing";
 import { describe, expect, it } from "vitest";
 import { createPatchHarness, loopOf } from "../infra/index.ts";
 import { loopSumPatch } from "./loopSum.ts";
 
 describe("loopSum", () => {
+  it("outputs the zero value while muted instead of passing its loop into Sum", () => {
+    expect(runPatch(loopSumPatch, [{ loop: { loop: [1, 2, 3] } }], { typeParam: "number", muted: true }).frames[0]!.outputs.sum).toBe(0);
+    expect(runPatch(loopSumPatch, [{ loop: { loop: [[1, 2], [3, 4]] } }], { typeParam: "point", muted: true }).frames[0]!.outputs.sum).toEqual([0, 0]);
+    expect(createPatchHarness(loopSumPatch, { muted: true, inputs: { loop: loopOf([1, 2, 3]) } }).step().outputs.sum).toBe(0);
+  });
+
   it("adds numbers, and an empty loop sums to 0", () => {
     const h = createPatchHarness(loopSumPatch);
     expect(h.step().outputs.sum).toBe(0);

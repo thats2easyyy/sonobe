@@ -75,6 +75,24 @@ describe("addLayer", () => {
   });
 });
 
+describe("layer nesting depth", () => {
+  const chain = (depth: number): Extract<Op, { op: "addLayer" }>["layer"] => {
+    let layer: Extract<Op, { op: "addLayer" }>["layer"] = { id: `g${depth}`, type: "group", name: "G" };
+    for (let i = depth - 1; i >= 1; i--) layer = { id: `g${i}`, type: "group", name: "G", children: [layer] };
+    return layer;
+  };
+
+  it("refuses to nest layers deeper than a file can hold", () => {
+    expect(mustApply(emptyDoc(), [{ op: "addLayer", layer: chain(256) }]).ok).toBe(true);
+    expect(firstError(emptyDoc(), [{ op: "addLayer", layer: chain(2000) }]).code).toBe("too_deep");
+    const deep = mustApply(emptyDoc(), [{ op: "addLayer", layer: chain(255) }, { op: "addLayer", layer: { id: "box", type: "group", name: "Box", children: [{ id: "inner", type: "rectangle", name: "Inner" }] } }]).doc;
+    expect(mustApply(deep, [{ op: "addLayer", parent: "g255", layer: { type: "rectangle" } }]).ok).toBe(true);
+    expect(firstError(deep, [{ op: "addLayer", parent: "g255", layer: { type: "group", children: [{ type: "rectangle" }] } }]).code).toBe("too_deep");
+    expect(firstError(deep, [{ op: "moveLayer", id: "box", parent: "g255" }]).code).toBe("too_deep");
+    expect(mustApply(deep, [{ op: "moveLayer", id: "inner", parent: "g255" }]).ok).toBe(true);
+  });
+});
+
 describe("updateLayer", () => {
   it("sets and resets props, name and flags with an exact inverse", () => {
     const base = mustApply(emptyDoc(), [{ op: "addLayer", layer: { type: "rectangle", name: "Card", props: { opacity: 0.5 } } }]).doc;

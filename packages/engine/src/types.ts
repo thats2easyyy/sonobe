@@ -36,8 +36,9 @@ export interface Loop<T = Value> {
 /**
  * What a muted patch outputs:
  * - "bypass" (default): evaluate is skipped. Variant outputs pass the first variant input; other
- *   outputs pass the first input of the same type; anything unmatched emits its zero value and
- *   pulses never fire.
+ *   outputs pass the first input of the same type; ports only pass to ports of the same shape
+ *   (whole-loop to whole-loop); anything unmatched emits its zero value (an empty Loop for a
+ *   whole-loop output) and pulses never fire.
  * - "zero": evaluate is skipped and every output emits its zero value.
  * - "evaluate": evaluate runs as usual and the patch checks `ctx.muted` itself.
  */
@@ -548,6 +549,11 @@ export interface SceneNode {
    * Resolved drawable props for this type (color, cornerRadius, text, image...). Props whose declared
    * default is null (cornerRadii, gradient, image...) stay null while unset.
    */
+  /**
+   * Read props by key. Defaults are inherited from one shared object per layer (only bound values are
+   * own properties), so enumerate with for...in and copy with plainProps / plainSceneFrame before
+   * JSON or structured clone.
+   */
   props: Record<string, Value>;
   children: SceneNode[];
 }
@@ -678,6 +684,8 @@ export interface Runtime {
    * Simulate `durationMs` on a deterministic clone of this runtime (same document, state reached
    * by replaying this runtime's input since its last restart) and sample `targets` every frame.
    * The live runtime is never touched and the clone performs no platform side effects.
+   * Throws TraceUnavailableError (code "trace_unavailable") once the runtime has run longer than its
+   * replay log (MAX_REPLAY_FRAMES since the last restart), instead of tracing a restarted copy.
    */
   trace(targets: readonly string[], durationMs: number, events?: readonly TraceInput[]): TraceResult;
   /** Swap in an edited document, keeping state for patches whose type is unchanged. */

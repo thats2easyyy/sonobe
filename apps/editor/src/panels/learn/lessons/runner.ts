@@ -1,9 +1,11 @@
 /**
  * Running a lesson: build a LessonContext from the editor session, evaluate the current step, and
- * start a lesson (loading its starter prototype after asking about unsaved changes).
+ * start a lesson (loading its starter prototype after asking about unsaved changes). A starter is
+ * marked with its lesson in the root component's meta, so progress resumes only while that practice
+ * prototype is open.
  */
 
-import type { Id, SonobeDocument } from "@sonobe/core";
+import { applyOps, type Id, type Registry, type SonobeDocument } from "@sonobe/core";
 import type { SceneFrame, SceneNode } from "@sonobe/engine";
 import type { DocumentStore } from "../../../state/document.ts";
 import type { SelectionStore } from "../../../state/selection.ts";
@@ -74,9 +76,34 @@ export function countLayerCopies(scene: SceneFrame | null | undefined, layerId: 
   return count;
 }
 
+/** Root component meta key that marks a lesson's practice prototype: `"lesson": "first-prototype"`. */
+export const LESSON_META_KEY = "lesson";
+
+/** The lesson a document is the practice prototype for, if any. */
+export function lessonOfDocument(doc: SonobeDocument): string | undefined {
+  const value = doc.components[doc.project.root]?.meta?.[LESSON_META_KEY];
+  return typeof value === "string" ? value : undefined;
+}
+
+/**
+ * Whether a lesson can run on the open document. A lesson with a starter checks its own practice
+ * prototype (another prototype would make its checks meaningless); a lesson without one works with
+ * whatever is open.
+ */
+export function isLessonDocumentOpen(lesson: Pick<Lesson, "id" | "starter">, doc: SonobeDocument): boolean {
+  return !lesson.starter || lessonOfDocument(doc) === lesson.id;
+}
+
+/** Mark a document as a lesson's practice prototype (updateComponent meta, which merges keys). */
+export function markLessonDocument(doc: SonobeDocument, lessonId: string, registry: Registry): SonobeDocument {
+  const result = applyOps(doc, [{ op: "updateComponent", id: doc.project.root, meta: { [LESSON_META_KEY]: lessonId } }], { registry });
+  if (!result.ok) throw new Error(`Couldn't mark the practice prototype: ${result.errors.map((e) => e.message).join("; ")}`);
+  return result.doc;
+}
+
 /** The part of an EditorSession a lesson needs to start. */
 export interface LessonSessionLike {
-  readonly registry: Parameters<NonNullable<Lesson["starter"]>>[0];
+  readonly registry: Registry;
   readonly document: DocumentStore;
   readonly selection: SelectionStore;
   confirmDiscardChanges(action: "open" | "new" | "reload"): Promise<boolean>;
@@ -89,7 +116,7 @@ export interface LessonSessionLike {
 export async function loadLessonStarter(session: LessonSessionLike, lesson: Lesson): Promise<boolean> {
   if (!lesson.starter) return true;
   if (!(await session.confirmDiscardChanges("new"))) return false;
-  const doc = lesson.starter(session.registry);
+  const doc = markLessonDocument(lesson.starter(session.registry), lesson.id, session.registry);
   session.document.getState().replaceDocument(doc, { projectPath: null, saved: true, label: `Started lesson “${lesson.title}”` });
   session.selection.getState().setComponentPath([doc.project.root]);
   session.selection.getState().clear();

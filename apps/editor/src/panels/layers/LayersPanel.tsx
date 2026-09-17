@@ -57,7 +57,7 @@ import { toast } from "../../ui/Toast.tsx";
 import { TreeView } from "../../ui/TreeView.tsx";
 import { cx } from "../../ui/lib/cx.ts";
 import { getAncestorIds } from "../../ui/lib/treeModel.ts";
-import { layerDropAttributes, useCableDrag } from "../patch-editor/index.ts";
+import { layerDropAttributes, useCableDrag } from "../patch-editor/api.ts";
 import { layerAcceptsCable, layerHoverKey, useCableHover } from "./cableHover.ts";
 import { displayTree, filterLayerTree, isFiltering, parentLayerIds, planInsertLayer, planLayerMove, relatedPatchIds, treeIds } from "./layerTree.ts";
 import { dragMediaKinds, dropFilesOnLayers, planLayerFileDrop } from "./mediaDrop.ts";
@@ -116,6 +116,8 @@ export function LayersPanel({ onCollapse, className }: LayersPanelProps) {
   const componentId = componentPath.at(-1) ?? doc.project.root;
   const component = doc.components[componentId];
   const layers = component?.layers ?? EMPTY_LAYERS;
+  /** A patch component is never drawn, so it can't hold layers (core refuses them too). */
+  const canHoldLayers = component?.kind !== "patchComponent";
   const menu = useContextMenu();
   const bodyRef = useRef<HTMLDivElement>(null);
   const pendingScroll = useRef<Id | null>(null);
@@ -230,6 +232,7 @@ export function LayersPanel({ onCollapse, className }: LayersPanelProps) {
   };
 
   const insert = (type: string, instanceOf?: Id) => {
+    if (!canHoldLayers) return;
     const current = session.document.getState().doc;
     const plan = planInsertLayer(current, componentId, registry, type, { ...(sel().layers.at(-1) ? { anchor: sel().layers.at(-1)! } : {}), ...(instanceOf ? { component: instanceOf } : {}) });
     if (!plan) return;
@@ -343,8 +346,7 @@ export function LayersPanel({ onCollapse, className }: LayersPanelProps) {
 
   const backgroundEntries = (): MenuEntry[] => [
     { id: "paste", label: "Paste", icon: <ClipboardPaste size={14} />, shortcut: "Mod+V", onSelect: () => run("edit.paste", () => void pasteFallback()) },
-    { type: "separator" },
-    { id: "insert", label: "Insert Layer", icon: <Plus size={14} />, submenu: insertEntries() },
+    ...(canHoldLayers ? ([{ type: "separator" }, { id: "insert", label: "Insert Layer", icon: <Plus size={14} />, submenu: insertEntries() }] satisfies MenuEntry[]) : []),
   ];
 
   const typeFilterEntries = (): MenuEntry[] => {
@@ -403,7 +405,7 @@ export function LayersPanel({ onCollapse, className }: LayersPanelProps) {
 
   // Files from the desktop: replace a media layer's content, go into a group, or become new layers.
   const onFileDragOver = (event: DragEvent<HTMLDivElement>) => {
-    if (!dragHasFiles(event.dataTransfer) || !component) return;
+    if (!dragHasFiles(event.dataTransfer) || !component || !canHoldLayers) return;
     event.preventDefault();
     event.dataTransfer.dropEffect = "copy";
     const layerId = rowLayerId(event.target);
@@ -418,7 +420,7 @@ export function LayersPanel({ onCollapse, className }: LayersPanelProps) {
   };
 
   const onFileDrop = (event: DragEvent<HTMLDivElement>) => {
-    if (!dragHasFiles(event.dataTransfer)) return;
+    if (!dragHasFiles(event.dataTransfer) || !canHoldLayers) return;
     event.preventDefault();
     setFileDrop(null);
     const files = filesFromDataTransfer(event.dataTransfer);
@@ -457,6 +459,13 @@ export function LayersPanel({ onCollapse, className }: LayersPanelProps) {
         </Button>
       }
     />
+  ) : !canHoldLayers ? (
+    <EmptyState
+      size="sm"
+      icon={<Component size={16} />}
+      title="Patch components have no layers"
+      description="A patch component is logic only, like a function: edit its patches in the patch editor. To reuse layers, select them in a prototype and choose Create Component."
+    />
   ) : (
     <EmptyState
       size="sm"
@@ -482,9 +491,13 @@ export function LayersPanel({ onCollapse, className }: LayersPanelProps) {
       className={cx("sb-layerspanel-panel", className)}
       actions={
         <>
-          <Menu aria-label="Insert layer" placement="bottom-end" entries={insertEntries}>
-            <IconButton size="sm" icon={<Plus size={14} />} label="Insert layer" />
-          </Menu>
+          {canHoldLayers ? (
+            <Menu aria-label="Insert layer" placement="bottom-end" entries={insertEntries}>
+              <IconButton size="sm" icon={<Plus size={14} />} label="Insert layer" />
+            </Menu>
+          ) : (
+            <IconButton size="sm" icon={<Plus size={14} />} label="Insert layer" tooltip="Patch components hold only patches" disabled />
+          )}
           {onCollapse && <IconButton size="sm" icon={<PanelLeftClose size={14} />} label="Hide layers" shortcut="Mod+1" onClick={onCollapse} />}
         </>
       }
@@ -578,6 +591,8 @@ export function LayersPanel({ onCollapse, className }: LayersPanelProps) {
               menu.open(event, rowEntries(node));
             }}
             isDimmed={isHidden}
+            // A cable released anywhere on a row lists that layer's properties (the patch editor looks for these attributes).
+            getRowProps={accepting ? (node) => layerDropAttributes(node.id) : undefined}
             renderIcon={(node) => (
               <span className="sb-layerspanel__icon" data-layer-id={node.id} data-kind={node.type === COMPONENT_INSTANCE_LAYER_TYPE ? "component" : undefined}>
                 <LayerTypeIcon type={node.type} size={14} />
@@ -596,7 +611,7 @@ export function LayersPanel({ onCollapse, className }: LayersPanelProps) {
                     </span>
                   )}
                   {accepting && (
-                    <span className="sb-layerspanel__drop" data-kind="cable" data-accept={accepts || undefined} data-hover={cableOver || undefined} {...layerDropAttributes(node.id)}>
+                    <span className="sb-layerspanel__drop" data-kind="cable" data-accept={accepts || undefined} data-hover={cableOver || undefined}>
                       {cableOver && <span className="sb-layerspanel__drop-label">Choose a property</span>}
                     </span>
                   )}

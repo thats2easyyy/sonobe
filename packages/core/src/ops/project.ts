@@ -2,6 +2,7 @@
 
 import { DEVICE_PRESETS } from "../devices.ts";
 import { listComponentIds } from "../document.ts";
+import { fileNameCollision, getOwn } from "../ids.ts";
 import { AssetRecordSchema, zodIssues, formatIssues } from "../schema.ts";
 import { isValidScriptFile } from "../serialize.ts";
 import { didYouMean, didYouMeanText } from "../suggest.ts";
@@ -14,7 +15,15 @@ export function setScript(ctx: OpContext, op: OpOf<"setScript">): OpOutcome {
   if (typeof op.file !== "string" || !isValidScriptFile(op.file)) {
     fail("invalid_value", `"${String(op.file)}" isn't a valid script file name.`, { hint: 'Script files live directly in scripts/, like "js_1.js".' });
   }
-  const old = ctx.doc.scripts[op.file];
+  const old = getOwn(ctx.doc.scripts, op.file);
+  if (old === undefined && op.source !== null && op.source !== undefined && !ctx.lenient) {
+    const clash = fileNameCollision(Object.keys(ctx.doc.scripts), op.file);
+    if (clash !== undefined) {
+      fail("file_name_taken", `"${op.file}" would share a file with the script "${clash}": on macOS and Windows, scripts/${op.file} and scripts/${clash} are the same file.`, {
+        hint: `Write to "${clash}" instead, or pick a name that differs by more than capitalization.`,
+      });
+    }
+  }
   const scripts = { ...ctx.doc.scripts };
   if (op.source === null || op.source === undefined) delete scripts[op.file];
   else if (typeof op.source !== "string") fail("invalid_value", "Script source must be text.");
@@ -31,14 +40,14 @@ export function addAsset(ctx: OpContext, op: OpOf<"addAsset">): OpOutcome {
   const r = AssetRecordSchema.safeParse(op.asset);
   if (!r.success) fail("invalid_value", `The asset has problems:\n${formatIssues(zodIssues(r.error))}`, { hint: 'Assets look like { "id": "photo", "kind": "image", "name": "Photo", "file": "3f2a….png" }.' });
   const asset: AssetRecord = r.data;
-  if (ctx.doc.assets[asset.id]) fail("id_taken", `There's already an asset "${asset.id}".`, { hint: "Remove it first with removeAsset, or pick another id." });
+  if (getOwn(ctx.doc.assets, asset.id)) fail("id_taken",`There's already an asset "${asset.id}".`, { hint: "Remove it first with removeAsset, or pick another id." });
   ctx.doc = { ...ctx.doc, assets: { ...ctx.doc.assets, [asset.id]: asset } };
   return { ids: [asset.id], applied: { op: "addAsset", asset }, inverse: [{ op: "removeAsset", id: asset.id }] };
 }
 
 export function removeAsset(ctx: OpContext, op: OpOf<"removeAsset">): OpOutcome {
   const id = resolveId(ctx, op.id);
-  const asset = ctx.doc.assets[id];
+  const asset = getOwn(ctx.doc.assets, id);
   if (!asset) fail("not_found", `There's no asset "${id}".${didYouMeanText(didYouMean(id, Object.keys(ctx.doc.assets)))}`);
   const assets = { ...ctx.doc.assets };
   delete assets[id];
@@ -91,7 +100,7 @@ export function setProject(ctx: OpContext, op: OpOf<"setProject">): OpOutcome {
         if (typeof value !== "number" || !Number.isInteger(value) || value < 1) fail("invalid_value", "minReaderVersion must be a whole number ≥ 1.");
         break;
       case "root": {
-        const root = ctx.doc.components[resolveId(ctx, value)];
+        const root = getOwn(ctx.doc.components, resolveId(ctx, value));
         if (!root) fail("not_found", `There's no component "${String(value)}" to make the root.${didYouMeanText(didYouMean(String(value), Object.keys(ctx.doc.components)))}`);
         if (root.kind !== "prototype" && !ctx.lenient) fail("invalid_value", `"${root.id}" is a ${root.kind}; the root must be a prototype.`);
         record[key] = root.id;

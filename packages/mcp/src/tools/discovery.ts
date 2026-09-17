@@ -17,6 +17,12 @@ import { GUIDE_TOPICS } from "../guides.ts";
 import { failure, success } from "../results.ts";
 import { READ_ONLY, type ToolContext } from "../server.ts";
 
+/** Combined size of the guides one get_guide call returns, in estimated tokens. */
+export const GUIDE_TOKEN_BUDGET = 12_000;
+
+/** A rough token count for English markdown (about 4 characters per token). */
+const estimateTokens = (text: string) => Math.ceil(text.length / 4);
+
 export function registerDiscoveryTools(tc: ToolContext): void {
   const { host } = tc;
 
@@ -24,28 +30,83 @@ export function registerDiscoveryTools(tc: ToolContext): void {
     "get_guide",
     {
       title: "Get guide",
-      description: `Short workflow guides for building prototypes with Sonobe tools. Read "start-here" once per conversation before editing. Topics: ${GUIDE_TOPICS.join(", ")}.`,
-      input: z.object({ topic: z.string().describe(`One of: ${GUIDE_TOPICS.join(", ")}.`) }),
+      description: `Short workflow guides for building prototypes with Sonobe tools. Read "start-here" once per conversation before editing. Pass topic for one guide, or topics for several in one call (about ${GUIDE_TOKEN_BUDGET.toLocaleString("en-US")} tokens combined). Topics: ${GUIDE_TOPICS.join(", ")}.`,
+      input: z.object({
+        topic: z
+          .string()
+          .optional()
+          .describe(`One of: ${GUIDE_TOPICS.join(", ")}.`),
+        topics: z
+          .array(z.string())
+          .min(1)
+          .max(GUIDE_TOPICS.length)
+          .optional()
+          .describe('Several topics, returned in order, e.g. ["start-here", "gestures"].'),
+      }),
       annotations: READ_ONLY,
     },
-    async ({ topic }) => {
-      const guide = tc.guides().get(topic);
-      if (!guide) {
-        const topics = tc
-          .guides()
-          .list()
-          .map((g) => g.topic);
+    async ({ topic, topics }) => {
+      const store = tc.guides();
+      const all = store.list().map((g) => g.topic);
+      const requested = [...new Set([...(topic !== undefined ? [topic] : []), ...(topics ?? [])])];
+      const explainUnknown = (t: string) =>
+        `There's no guide "${t}".${didYouMeanText(didYouMean(t, all))}`;
+      if (!requested.length)
+        return failure({
+          code: "missing_topic",
+          message: "Pass topic (one guide) or topics (several).",
+          hint: `Topics: ${all.join(", ")}.`,
+        });
+      const unknown = requested.filter((t) => !store.get(t));
+      const guides = requested.flatMap((t) => store.get(t) ?? []);
+      if (!guides.length)
         return failure({
           code: "unknown_topic",
-          message: `There's no guide "${topic}".${didYouMeanText(didYouMean(topic, topics))}`,
-          hint: `Topics: ${topics.join(", ")}.`,
+          message: unknown.map(explainUnknown).join(" "),
+          hint: `Topics: ${all.join(", ")}.`,
+        });
+      if (topics === undefined && guides.length === 1) {
+        const guide = guides[0]!;
+        const related = guide.related.length
+          ? `\n\nRelated topics: ${guide.related.join(", ")}`
+          : "";
+        return success(`${guide.markdown.trim()}${related}`, {
+          topic: guide.topic,
+          title: guide.title,
+          relatedTopics: guide.related,
         });
       }
-      const related = guide.related.length ? `\n\nRelated topics: ${guide.related.join(", ")}` : "";
-      return success(`${guide.markdown.trim()}${related}`, {
-        topic: guide.topic,
-        title: guide.title,
-        relatedTopics: guide.related,
+      const included: typeof guides = [];
+      const omitted: string[] = [];
+      let tokens = 0;
+      for (const guide of guides) {
+        const cost = estimateTokens(guide.markdown);
+        if (included.length && tokens + cost > GUIDE_TOKEN_BUDGET) {
+          omitted.push(guide.topic);
+          continue;
+        }
+        included.push(guide);
+        tokens += cost;
+      }
+      const shown = new Set(included.map((g) => g.topic));
+      const related = [...new Set(included.flatMap((g) => g.related))].filter(
+        (t) => !shown.has(t) && !omitted.includes(t),
+      );
+      const notes: string[] = [];
+      if (unknown.length) notes.push(`Skipped: ${unknown.map(explainUnknown).join(" ")}`);
+      if (omitted.length)
+        notes.push(
+          `Not included, to stay within about ${GUIDE_TOKEN_BUDGET.toLocaleString("en-US")} tokens: ${omitted.join(", ")}. Ask for them in another call.`,
+        );
+      if (related.length) notes.push(`Related topics: ${related.join(", ")}`);
+      const body = included.map((g) => g.markdown.trim()).join("\n\n---\n\n");
+      return success(notes.length ? `${body}\n\n---\n\n${notes.join("\n")}` : body, {
+        topics: included.map((g) => g.topic),
+        titles: included.map((g) => g.title),
+        relatedTopics: related,
+        omitted,
+        unknown,
+        estimatedTokens: tokens,
       });
     },
   );

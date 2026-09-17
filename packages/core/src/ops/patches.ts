@@ -2,12 +2,16 @@
 
 import { parseAddress, patchAddress } from "../address.ts";
 import { wouldCreateComponentCycle } from "../document.ts";
+import { VARIABLE_BROADCASTER_TYPE } from "../graph.ts";
+import { getOwn } from "../ids.ts";
 import { COMPONENT_PATCH_TYPE, componentItemIds, findPort, getInputCountRange, getPatchSpec, resolveNodePorts, resolveNodeVariants } from "../registry.ts";
 import { didYouMean, didYouMeanText } from "../suggest.ts";
-import type { Component, PatchNode, PatchSpec, ValueType } from "../types.ts";
+import type { Component, Op, PatchNode, PatchSpec, ValueType } from "../types.ts";
+import { followingReceivers, sameVariable, variableKey, type VariableKey } from "../variables.ts";
 import { checkInputValue, resolveSource, resolveTarget } from "../validate.ts";
 import { canConnect } from "../values.ts";
 import {
+  appliedOps,
   CLEAR,
   commitComponent,
   defineRef,
@@ -47,7 +51,8 @@ function validateInputCount(spec: PatchSpec, inputCount: unknown): number {
   return inputCount;
 }
 
-function validatePatchComponent(ctx: OpContext, host: Component, id: string, node: PatchNode): void {
+/** A "component" patch points at an existing patch component that doesn't contain `host`. */
+export function validatePatchComponent(ctx: OpContext, host: Component, id: string, node: PatchNode): void {
   if (node.type !== COMPONENT_PATCH_TYPE) {
     if (ctx.lenient) return;
     fail("invalid_op", `Only patches of type "component" can point at a component ("${id}" is a ${node.type}).`, { hint: 'Leave out "component", or use type "component".' });
@@ -59,7 +64,7 @@ function validatePatchComponent(ctx: OpContext, host: Component, id: string, nod
       hint: patchComponents.length ? `Patch components: ${patchComponents.join(", ")}.` : "Create one first with addComponent or createComponent.",
     });
   }
-  const target = ctx.doc.components[node.component];
+  const target = getOwn(ctx.doc.components, node.component);
   if (!target) fail("not_found", `There's no component "${node.component}".${didYouMeanText(didYouMean(node.component, patchComponents))}`);
   if (target.kind !== "patchComponent" && !ctx.lenient) {
     fail("wrong_component_kind", `"${target.id}" is a ${target.kind}; component patches run patch components.`, {
@@ -186,6 +191,12 @@ export function updatePatch(ctx: OpContext, op: OpOf<"updatePatch">): OpOutcome 
   const inverse: OpOf<"updatePatch"> = { op: "updatePatch", component: component.id, id };
   const applied: OpOf<"updatePatch"> = { op: "updatePatch", component: component.id, id };
   let portsChanged = false;
+  // Receivers follow a broadcaster whose name, scope, or type changes (catalog: Variable Broadcaster, Authoring).
+  // Undo and redo replay explicit ops (lenient), so nothing cascades there.
+  const following =
+    !ctx.lenient && original.type === VARIABLE_BROADCASTER_TYPE && (op.settings?.name !== undefined || op.settings?.scope !== undefined || op.typeParam !== undefined)
+      ? { before: variableKey(ctx.doc, original, ctx.registry), receivers: followingReceivers(ctx.doc, ctx.registry, component.id, id) }
+      : null;
 
   if (op.name !== undefined) {
     if (op.name !== null && typeof op.name !== "string") fail("invalid_value", "Patch names must be text.");
@@ -271,7 +282,29 @@ export function updatePatch(ctx: OpContext, op: OpOf<"updatePatch">): OpOutcome 
     if (e.target.kind === "patch") ctx.affected.patches.add(e.target.id);
     if (e.target.kind === "layer") ctx.affected.layers.add(e.target.id);
   }
-  return { ids: [id], applied, inverse: [inverse, ...restoreInputOps(component.id, removed)] };
+  const outcome: OpOutcome = { ids: [id], applied, inverse: [inverse, ...restoreInputOps(component.id, removed)] };
+  return following?.receivers.length ? followBroadcaster(ctx, outcome, node, following.before, following.receivers) : outcome;
+}
+
+/** Update the receivers that read a broadcaster's variable to its new name, scope, and type, in the same batch. */
+function followBroadcaster(ctx: OpContext, outcome: OpOutcome, node: PatchNode, before: VariableKey, receivers: readonly { componentId: string; id: string }[]): OpOutcome {
+  const after = variableKey(ctx.doc, node, ctx.registry);
+  // An emptied name reaches nobody; receivers keep theirs, so naming it back reconnects them.
+  if (!after.name || sameVariable(after, before)) return outcome;
+  const applied: Op[] = [...appliedOps(outcome)];
+  const inverse: Op[] = [];
+  for (const r of receivers) {
+    const change: OpOf<"updatePatch"> = { op: "updatePatch", component: r.componentId, id: r.id };
+    const settings: NonNullable<PatchNode["settings"]> = {};
+    if (after.name !== before.name) settings.name = after.name;
+    if (after.scope !== before.scope) settings.scope = after.scope === "global" ? "global" : (null as unknown as string);
+    if (Object.keys(settings).length) change.settings = settings;
+    if (after.type !== before.type) change.typeParam = node.typeParam ?? CLEAR;
+    const result = updatePatch(ctx, change);
+    applied.push(...appliedOps(result));
+    inverse.unshift(...result.inverse);
+  }
+  return { ids: outcome.ids, applied, inverse: [...inverse, ...outcome.inverse] };
 }
 
 export function removePatch(ctx: OpContext, op: OpOf<"removePatch">): OpOutcome {

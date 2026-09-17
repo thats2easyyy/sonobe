@@ -26,7 +26,7 @@ Sonobe is a separate, open-source project with no affiliation to Meta. It doesn'
 
 | Origami | Sonobe | Notes |
 |---|---|---|
-| Canvas, Layer List, Inspector, Viewer, Patch Editor | Canvas, Layers, Inspector, Viewer, Patch Editor | Plus side drawers for Learn and Assistant, and a bottom HUD with Console, Diagnostics, AI Activity and FPS |
+| Canvas, Layer List, Inspector, Viewer, Patch Editor | Canvas, Layers, Inspector, Viewer, Patch Editor | Plus side drawers for Learn and Assistant, and a bottom HUD with Console, Diagnostics, AI Activity and Performance tabs |
 | Patch Library / patch picker | Patch picker | Double-click or ⌥⏎. Searches names, aliases and port names, with docs in the picker |
 | Touch button on a layer row | Touch button on a layer row | Inserts a pre-wired interaction |
 | Blue layer property patch | Drag a cable onto an inspector property or a layer row | Clicking an inspector property also makes it a link target |
@@ -49,17 +49,18 @@ Sonobe keeps Origami's patch names wherever a patch does the same job, so search
 
 | Origami | Sonobe | Notes |
 |---|---|---|
-| Interaction | Interaction | Down, Tap, Position, and Velocity in points per second |
+| Interaction | Interaction | Down, Tap, Position, Local Position and Force. For finger speed, use Gesture's or Drag's Velocity |
 | Switch, Option Switch, Option Picker, Counter | Same names | Same-frame precedence is documented (see below) |
 | Pulse, Pulse on Change, When Prototype Starts | Same names | |
-| Delay, Delay 1, Wait | Same names | Delay 1 is the documented way to close a feedback loop |
+| Delay, Wait | Same names | |
+| Delay 1 | Delay One Frame | Search "delay 1" to find it. It's the documented way to close a feedback loop |
 | Pop Animation, Classic Animation, Spring Animation | Same names | Spring Animation supports gesture velocity handoff |
-| Spring Converter | Spring converter and presets in the inspector | Converts between response and damping fraction, tension and friction, and bounciness and speed, and shows handoff code |
+| Spring Converter | Spring Converter | Converts response and damping fraction into Spring Animation's Tension and Friction and Pop Animation's Bounciness and Speed. A spring patch's inspector also has presets, a live curve and handoff code |
 | Transition, Progress, Reverse Progress | Same names | Transition doesn't clamp, as in Origami |
-| Scroll, Drag, Hover, Keyboard, Long Press | Same names | Momentum uses the same decay model, with an end bound of 99999 by default |
-| Pop Switch | Drag with a snapping Spring Animation, or Swipe | Guide 06 builds a snapping drag |
+| Scroll, Drag, Gesture, Hover, Keyboard, Long Press | Same names | Momentum uses the same decay model, with an end bound of 99999 by default |
+| Pop Switch | Pop Switch | Swipes or pinches between two states, then springs to the nearer one. Guide 06 also builds a snapping drag from Gesture and Spring Animation |
 | Hit Area | Hit Area layer, or Hit Slop on any layer | |
-| Loop, Loop Builder, Loop Select, Loop Option Switch | Loop patches | Guide 07 |
+| Loop, Loop Builder, Loop Select, Loop Option Switch | Same names | Guide 07 |
 
 ## Shortcuts
 
@@ -73,7 +74,7 @@ Sonobe keeps Origami's patch names wherever a patch does the same job, so search
 | Enter or exit a component | ⌥↓ / ⌥↑ | Double-click / ⌥↑ |
 | Connect one output to many inputs | Shift-click the inputs | Shift-click the inputs |
 | Duplicate with input connections | ⌥-drag | ⌥-drag |
-| Splice a patch into a cable | ⌘-drag the patch onto the cable | Drag the patch onto the cable |
+| Splice a patch into a cable | ⌘-drag the patch onto the cable | Same. The cable glows while you hover, and a chooser opens when several ports fit |
 | Cut cables | Drag a cable's end off its input | ⌃ right-drag across cables (knife) |
 | Nudge a number | ↑↓, ⇧ for ±10, ⌥ for ±0.1 | Same, plus drag to scrub |
 | Find any other command | Menus | ⌘K opens the command palette, which lists every command with its shortcut |
@@ -90,11 +91,11 @@ To convert by hand, keep the anchor at the center and add half the parent's size
 
 ### Where a tap landed
 
-In Origami, Interaction's Position resets on the same frame Tap fires, so graphs that need the tap location use a Delay 1. In Sonobe, Position still holds where the finger lifted on the Tap frame. You can drop that Delay 1.
+In Origami, Interaction's Position resets on the same frame Tap fires, so graphs that need the tap location use a Delay 1. In Sonobe, Position still holds where the finger lifted on the Tap frame. You can drop that delay.
 
 ### The first frame
 
-Sonobe evaluates the graph with your authored values on the very first frame. Patches that compare with the previous frame, like Velocity, Delay 1, Pulse on Change and Smooth Value, start from that first value. There's no one-frame velocity spike at restart, so the workaround patches some Origami files use at frame 0 aren't needed.
+Sonobe evaluates the graph with your authored values on the very first frame. Patches that compare with the previous frame, like Velocity, Delay One Frame, Pulse on Change and Smooth Value, start from that first value. There's no one-frame velocity spike at restart, so the workaround patches some Origami files use at frame 0 aren't needed.
 
 ### Same-frame precedence
 
@@ -145,7 +146,7 @@ Origami's recent versions (221 and 223) can generate the code inside a JavaScrip
 ## Try it
 
 1. Convert an Origami layer at `−100, −300` with a center anchor, on a 402 × 874 screen, to Sonobe coordinates. The answer is `101, 137` with Anchor `0.5, 0.5`.
-2. Find a graph of yours that uses Delay 1 to read where a tap landed, rebuild it in Sonobe, and remove the Delay 1.
+2. Find an Origami graph of yours that uses Delay 1 to read where a tap landed, rebuild it in Sonobe, and leave the delay out.
 3. Copy Pop Animation numbers from an Origami prototype into Sonobe, and compare the curves side by side.
 4. Open `components/main.json` in a text editor and find the line that connects your Interaction to your Switch.
 5. Press ⌘K and find three commands you used to dig through menus for.

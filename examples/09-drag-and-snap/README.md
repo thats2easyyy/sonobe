@@ -18,7 +18,7 @@ Level 2 · Guides: [05 Springs and feel](../../docs/guides/05-springs-and-feel.m
 3. **Follow from the grab point.** Add a Delay One Frame (`pip_last_frame`, point) and a Sample and Hold (`grab_position`, point) with Value from `pip_last_frame.output` and Sample from `pip_idle.output`. Add an Add (`finger_position`, point): `grab_position.output` plus `pip_gesture.translation`.
 4. **The corners.** Add a Loop Builder (`corners`, point) with the top-left position for each corner. Item 0 is top right, where the self view starts: `[266, 76]`, `[16, 76]`, `[16, 578]`, `[266, 578]`.
 5. **Pick a corner on release.** Add a Snap (`fling_corner`, point) with Mode Points, Points from `corners.loop`, Value from `pip_last_frame.output`, Velocity from `pip_gesture.velocity`, and Deceleration Normal. Add a Counter (`current_corner`) with Jump from `finger.turnedOff` and Jump to Number from `fling_corner.index`, then a Loop Select (`corner_position`, point).
-6. **Animate.** Add an If Else (`pip_target`, point) that picks `finger_position.output` while `pip_gesture.down` is on, otherwise `corner_position.output`. Add a Spring Animation (`pip_spring`, point) with Number from the target, Gesture Active from Down, Gesture Velocity from `pip_gesture.velocity`, Tension 220 and Friction 22. Connect its output to the Self View's Position and back into `pip_last_frame.value`.
+6. **Animate.** Add an If / Else (`pip_target`, point) that picks `finger_position.output` while `pip_gesture.down` is on, otherwise `corner_position.output`. Add a Spring Animation (`pip_spring`, point) with Number from the target, Gesture Active from Down, Gesture Velocity from `pip_gesture.velocity`, Tension 220 and Friction 22. Connect its output to the Self View's Position and back into `pip_last_frame.value`.
 7. **Lift while held.** Add a Pop Animation (`pip_press`, Bounciness 0, Speed 20) on Down, and a Transition (`pip_lift`, 1 → 1.06) into Scale.
 
 ## The patch chain
@@ -45,7 +45,7 @@ Level 2 · Guides: [05 Springs and feel](../../docs/guides/05-springs-and-feel.m
 | `corners` | Loop Builder | The four resting positions. |
 | `fling_corner` | Snap | Projects where a throw at this velocity would land, and picks the nearest corner. |
 | `current_corner`, `corner_position` | Counter, Loop Select | Remember the chosen corner, then look up its position. |
-| `pip_target` | If Else | The finger's position while dragging, the corner after. |
+| `pip_target` | If / Else | The finger's position while dragging, the corner after. |
 | `pip_spring` | Spring Animation | Tracks the finger exactly, then springs to the corner starting at the finger's velocity. |
 | `pip_press`, `pip_lift` | Pop Animation, Transition | A slight lift while held. |
 
@@ -64,7 +64,7 @@ npx vitest run examples/run.test.ts -t 09-drag-and-snap
 - **Only left or right.** Set the Loop Builder to two points at the same y, and keep the y the finger chose by snapping only x (a number Snap on the x part).
 - **Tighter throws.** Deceleration Fast projects about a fifth as far, so you need to place the window closer to the corner.
 - **Dismiss by throwing off screen.** Add a fifth point far off screen, and hide the self view when Current Corner reaches it.
-- **Rubber band against the edges.** Clamp `finger_position.output` between `[0, 62]` and `[282, 594]` before the If Else.
+- **Rubber band against the edges.** Clamp `finger_position.output` between `[0, 62]` and `[282, 594]` before the If / Else.
 
 ## Common mistakes
 

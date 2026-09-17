@@ -66,6 +66,35 @@ describe("matchesChord", () => {
   it("ignores Shift for symbol keys", () => {
     expect(matchesChord({ ...base, key: "?", code: "Slash", shiftKey: true }, parseShortcut("?", "mac"))).toBe(true);
     expect(matchesChord({ ...base, key: "+", code: "Equal", shiftKey: true }, parseShortcut("+", "mac"))).toBe(true);
+    expect(matchesChord({ ...base, key: "+", code: "Equal", shiftKey: true, metaKey: true }, parseShortcut("Mod++", "mac"))).toBe(true);
+  });
+
+  it("tells ⌘[ from ⇧⌘[ (and ⌘] from ⇧⌘])", () => {
+    const left = parseShortcut("Mod+[", "mac");
+    const top = parseShortcut("Mod+Shift+[", "mac");
+    const right = parseShortcut("Mod+]", "mac");
+    const bottom = parseShortcut("Mod+Shift+]", "mac");
+    const cmdBracket = { ...base, key: "[", code: "BracketLeft", metaKey: true };
+    const shiftCmdBracket = { ...base, key: "{", code: "BracketLeft", metaKey: true, shiftKey: true };
+    expect(matchesChord(cmdBracket, left)).toBe(true);
+    expect(matchesChord(cmdBracket, top)).toBe(false);
+    expect(matchesChord(shiftCmdBracket, top)).toBe(true);
+    expect(matchesChord(shiftCmdBracket, left)).toBe(false);
+    // Some platforms report the unshifted character with Shift held.
+    expect(matchesChord({ ...cmdBracket, shiftKey: true }, top)).toBe(true);
+    expect(matchesChord({ ...cmdBracket, shiftKey: true }, left)).toBe(false);
+
+    const cmdClose = { ...base, key: "]", code: "BracketRight", metaKey: true };
+    const shiftCmdClose = { ...base, key: "}", code: "BracketRight", metaKey: true, shiftKey: true };
+    expect(matchesChord(cmdClose, right)).toBe(true);
+    expect(matchesChord(cmdClose, bottom)).toBe(false);
+    expect(matchesChord(shiftCmdClose, bottom)).toBe(true);
+    expect(matchesChord(shiftCmdClose, right)).toBe(false);
+  });
+
+  it("matches Option with a symbol by its physical key (⌥⌘/ types ÷)", () => {
+    expect(matchesChord({ ...base, key: "÷", code: "Slash", metaKey: true, altKey: true }, parseShortcut("Mod+Alt+/", "mac"))).toBe(true);
+    expect(matchesChord({ ...base, key: "÷", code: "Slash", metaKey: true }, parseShortcut("Mod+/", "mac"))).toBe(false);
   });
 });
 
@@ -203,6 +232,23 @@ describe("KeyboardShortcutManager", () => {
     key(document.body, { key: "r", metaKey: true });
     expect(decline).toHaveBeenCalledTimes(1);
     expect(guarded).toHaveBeenCalledTimes(2);
+  });
+
+  it("routes the four align chords to their own commands in one scope", () => {
+    const fired: string[] = [];
+    for (const [id, shortcut] of [
+      ["alignLeft", "Mod+["],
+      ["alignRight", "Mod+]"],
+      ["alignTop", "Mod+Shift+["],
+      ["alignBottom", "Mod+Shift+]"],
+    ] as const) {
+      manager.bind({ id, shortcut, scope: "patchEditor", handler: () => void fired.push(id) });
+    }
+    key(nodeInPatchEditor, { key: "[", code: "BracketLeft", metaKey: true });
+    key(nodeInPatchEditor, { key: "]", code: "BracketRight", metaKey: true });
+    key(nodeInPatchEditor, { key: "{", code: "BracketLeft", metaKey: true, shiftKey: true });
+    key(nodeInPatchEditor, { key: "}", code: "BracketRight", metaKey: true, shiftKey: true });
+    expect(fired).toEqual(["alignLeft", "alignRight", "alignTop", "alignBottom"]);
   });
 
   it("allows auto-repeat when requested", () => {

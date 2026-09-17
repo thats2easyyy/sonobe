@@ -1,5 +1,5 @@
 import type { PatchDefinition, SceneFrame, SceneNode } from "@sonobe/engine";
-import { buildDoc, createMockRegistry, createTestRuntime, runFrames, sequenceDefinition, tap } from "@sonobe/engine/testing";
+import { buildDoc, createMockRegistry, createTestRuntime, runFrames, runPatch, sequenceDefinition, tap } from "@sonobe/engine/testing";
 import { describe, expect, it } from "vitest";
 import { definitions } from "./index.ts";
 
@@ -83,6 +83,42 @@ describe("loop patches in a running prototype", () => {
     expect(rt.getValue("packed.array")).toEqual(["dot", "dot"]);
     expect(nodesOf(rt.scene(), "label").map((n) => n.props.text)).toEqual(["dot", "dot"]);
     expect(rt.issues()).toEqual([]);
+  });
+
+  it("muting a loop patch never changes how many copies a layer makes", () => {
+    const registry = registryWith();
+    const base = buildDoc(
+      {
+        layers: [
+          { id: "card", type: "rectangle", name: "Card", props: { position: { link: "pos.loop" }, size: [10, 10] } },
+          { id: "total", type: "rectangle", name: "Total", props: { size: [10, 10], opacity: { link: "sum.sum" } } },
+        ],
+        patches: {
+          pos: { type: "loopBuilder", typeParam: "point", inputCount: 3, inputs: { item0: [0, 0], item1: [20, 0], item2: [40, 0] } },
+          fades: { type: "loopBuilder", typeParam: "number", inputCount: 3, inputs: { item0: 0.1, item1: 0.2, item2: 0.3 } },
+          sum: { type: "loopSum", typeParam: "number", inputs: { loop: { link: "fades.loop" } } },
+        },
+      },
+      registry,
+    );
+    const run = (muted: readonly string[]) => {
+      const doc = structuredClone(base);
+      for (const id of muted) doc.components.main!.patches[id]!.muted = true;
+      const rt = createTestRuntime(doc, registry);
+      const frame = rt.step();
+      return { cards: nodesOf(frame, "card").length, totals: nodesOf(frame, "total").map((n) => n.props.opacity as number), loop: rt.getRawValue("pos.loop") };
+    };
+    const live = run([]);
+    expect([live.cards, live.totals.length]).toEqual([3, 1]);
+    expect(live.totals[0]).toBeCloseTo(0.6, 9);
+    const muted = run(["pos", "sum"]);
+    expect([muted.cards, muted.totals]).toEqual([3, [0]]);
+    expect((muted.loop as { items: unknown[] }).items).toEqual([[0, 0], [20, 0], [40, 0]]);
+
+    for (const type of ["loopAny", "loopAll"]) {
+      const definition = definitions.find((d) => d.type === type)!;
+      expect(runPatch(definition, [{ loop: { loop: [true, true] } }], { muted: true }).frames[0]!.outputs.output).toBe(false);
+    }
   });
 
   it("shuffles a grid deterministically and follows a new Count", () => {

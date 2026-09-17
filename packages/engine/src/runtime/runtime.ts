@@ -41,14 +41,14 @@ import type {
   TraceResult,
   TraceSummary,
 } from "../types.ts";
-import { compileDocument, type CompiledGraph } from "./compile.ts";
+import { compileDocument, updateLiterals, type CompiledGraph } from "./compile.ts";
 import { beginInputs, createRecord, disposeRecord, evaluateRecord, type EvalEnv } from "./evaluate.ts";
 import type { Binding, CNode, InstancePath, Scope } from "./graph.ts";
 import { isLoop, makeLoop, MAX_LOOP_LENGTH } from "./loop.ts";
 import { mulberry32 } from "./random.ts";
 import { buildScene, type SceneBuild } from "./scene.ts";
 import { summarizeSeries } from "./trace.ts";
-import { coerceValue } from "./values.ts";
+import { coerceValue, valuesEqual } from "./values.ts";
 
 /** services.now() in deterministic mode: 2026-01-01T00:00:00Z plus prototype time. */
 export const DETERMINISTIC_EPOCH_MS = 1_767_225_600_000;
@@ -59,12 +59,34 @@ export const MAX_REPLAY_FRAMES = 7_200;
 /** Runtime issues kept (oldest dropped first). */
 export const MAX_RUNTIME_ISSUES = 200;
 
+/**
+ * Thrown by `trace` when the runtime has run more than MAX_REPLAY_FRAMES since its last restart:
+ * its input log was dropped, so no copy of the current state can be built. Restart the prototype,
+ * or trace a simulation host that keeps its own log.
+ */
+export class TraceUnavailableError extends Error {
+  readonly code = "trace_unavailable";
+  /** The live runtime's frame when the trace was refused. */
+  readonly frame: number;
+
+  constructor(frame: number) {
+    super(`The prototype has run for more than ${MAX_REPLAY_FRAMES} frames since it last restarted, so a copy of its current state can't be traced.`);
+    this.name = "TraceUnavailableError";
+    this.frame = frame;
+  }
+}
+
+/** True for TraceUnavailableError, including copies that crossed a realm or lost their class. */
+export function isTraceUnavailable(err: unknown): err is TraceUnavailableError {
+  return err instanceof TraceUnavailableError || (typeof err === "object" && err !== null && (err as { code?: unknown }).code === "trace_unavailable");
+}
+
 /** The engine runtime: the contract `Runtime` plus inspection members. */
 export interface SonobeRuntime extends Runtime {
   readonly document: SonobeDocument;
   readonly deterministic: boolean;
   readonly fps: number;
-  /** A patch called requestNextFrame() during the last step (something is still moving). */
+  /** Something is still moving: a patch called requestNextFrame() during the last step, or a feedback loop's back-edge would read a different value next step. */
   readonly needsNextFrame: boolean;
   readonly services: RuntimeServices;
   /** Turn per-patch evaluate timing on or off (off discards what was collected). */
@@ -81,7 +103,11 @@ export function createRuntime(doc: SonobeDocument, options: RuntimeOptions): Son
 type ReplayEntry =
   | { kind: "step"; dt: number; events: InputEvent[] }
   | { kind: "update"; doc: SonobeDocument }
+  | { kind: "refresh" }
   | { kind: "layerOutputs"; key: string; values: Record<string, Value> };
+
+/** Nodes with at least one back-edge input (their driver evaluates later in the frame). */
+const feedbackNodesOf = (graph: CompiledGraph): CNode[] => graph.order.filter((n) => n.kind !== "copies" && n.feedback.some(Boolean));
 
 interface CopiesInfo {
   paths: InstancePath[];
@@ -154,6 +180,7 @@ class RuntimeImpl implements SonobeRuntime {
   private readonly runtimeIssues = new Map<string, RuntimeIssue>();
   private readonly refPrefix = new WeakMap<object, string>();
   private graph: CompiledGraph;
+  private feedbackNodes: CNode[];
   private rootPath: InstancePath | null = null;
   private rootPaths: InstancePath[] = [];
   private queue: InputEvent[] = [];
@@ -203,6 +230,7 @@ class RuntimeImpl implements SonobeRuntime {
       once: new Set(),
     };
     this.graph = compileDocument(doc, options.registry);
+    this.feedbackNodes = feedbackNodesOf(this.graph);
     this.resetRootPath();
   }
 
@@ -242,9 +270,15 @@ class RuntimeImpl implements SonobeRuntime {
 
   updateDocument(doc: SonobeDocument): void {
     if (this.disposed || doc === this.document) return;
-    const previous = this.graph;
     this.document = doc;
+    // A scrub, a canvas drag or a small literal write only changes constant values: patch them in place.
+    if (updateLiterals(this.graph, doc)) {
+      this.record({ kind: "update", doc });
+      return;
+    }
+    const previous = this.graph;
     this.graph = compileDocument(doc, this.options.registry);
+    this.feedbackNodes = feedbackNodesOf(this.graph);
     this.resetRootPath();
     this.copies = new WeakMap();
     const old = new Map<string, CNode>();
@@ -268,6 +302,8 @@ class RuntimeImpl implements SonobeRuntime {
     this.tick++;
     this.snapshot = build;
     if (this.produced) this.produced = build;
+    // The next step hit-tests against this layout, so trace replays must refresh at the same point.
+    this.record({ kind: "refresh" });
   }
 
   restart(): void {
@@ -316,20 +352,21 @@ class RuntimeImpl implements SonobeRuntime {
   }
 
   trace(targets: readonly string[], durationMs: number, events: readonly TraceInput[] = []): TraceResult {
+    // Past the replay log there's no way to rebuild the current state; a fresh copy would trace a restarted prototype.
+    if (this.logTruncated) throw new TraceUnavailableError(this.frame);
     const options: RuntimeOptions = { ...this.options, deterministic: true, platform: {}, onLog: undefined, profile: false };
-    const clone = new RuntimeImpl(this.logTruncated ? this.document : this.logBase, options);
-    for (const [key, values] of this.logTruncated ? this.layerOutputs : this.logBaseOutputs) clone.layerOutputs.set(key, { ...values });
-    if (!this.logTruncated) {
-      for (const entry of this.log) {
-        if (entry.kind === "step") {
-          if (clone.restartRequested) clone.performRestart();
-          clone.queue = [...entry.events];
-          clone.advance(entry.dt);
-        } else if (entry.kind === "update") clone.updateDocument(entry.doc);
-        else clone.setLayerOutputs(entry.key, entry.values);
-      }
-      clone.restartRequested = this.restartRequested;
+    const clone = new RuntimeImpl(this.logBase, options);
+    for (const [key, values] of this.logBaseOutputs) clone.layerOutputs.set(key, { ...values });
+    for (const entry of this.log) {
+      if (entry.kind === "step") {
+        if (clone.restartRequested) clone.performRestart();
+        clone.queue = [...entry.events];
+        clone.advance(entry.dt);
+      } else if (entry.kind === "update") clone.updateDocument(entry.doc);
+      else if (entry.kind === "refresh") clone.refreshScene();
+      else clone.setLayerOutputs(entry.key, entry.values);
     }
+    clone.restartRequested = this.restartRequested;
     clone.queue = [...this.queue];
 
     const schedule = events
@@ -451,7 +488,38 @@ class RuntimeImpl implements SonobeRuntime {
     }
     this.currentPath = null;
     this.currentPatch = undefined;
+    if (!this.requested && this.feedbackMoving()) this.requested = true;
     this.sweep();
+  }
+
+  /**
+   * True while a feedback loop keeps changing: some back-edge input would read a different value
+   * next frame than it read this frame, because its driver changed after the consumer read it.
+   * Loops need no patch that requests frames (Delay One Frame on a back-edge and plain cycles alike).
+   */
+  private feedbackMoving(): boolean {
+    for (const node of this.feedbackNodes) {
+      if (node.scope.muted) continue;
+      const paths = node.scope.copies ? node.scope.active : this.rootPaths;
+      for (let p = 0; p < paths.length; p++) {
+        const path = paths[p]!;
+        const record = node.records.get(path.stateKey);
+        if (!record || record.frame !== this.frame) continue;
+        for (let i = 0; i < node.feedback.length; i++) {
+          if (node.feedback[i] && !valuesEqual(record.cur[i], this.readInput(node, i, path))) return true;
+        }
+      }
+    }
+    return false;
+  }
+
+  /** An input slot's value now: its literal, else the driver's value coerced to the slot type (the slot default when undriven). */
+  private readInput(node: CNode, i: number, path: InstancePath): Value | Loop {
+    const b = node.bindings[i]!;
+    if (b.kind === "const") return b.value;
+    const v = this.read(b, path);
+    const s = node.inputs[i]!;
+    return v === undefined ? s.default : b.type === s.type ? v : coerceValue(v, b.type, s.type);
   }
 
   private evaluateAt(node: CNode, path: InstancePath): void {
@@ -461,18 +529,7 @@ class RuntimeImpl implements SonobeRuntime {
       node.records.set(path.stateKey, record);
     }
     const cur = beginInputs(record);
-    const bindings = node.bindings;
-    const inputs = node.inputs;
-    for (let i = 0; i < bindings.length; i++) {
-      const b = bindings[i]!;
-      if (b.kind === "const") {
-        cur[i] = b.value;
-        continue;
-      }
-      const v = this.read(b, path);
-      const s = inputs[i]!;
-      cur[i] = v === undefined ? s.default : b.type === s.type ? v : coerceValue(v, b.type, s.type);
-    }
+    for (let i = 0; i < node.bindings.length; i++) cur[i] = this.readInput(node, i, path);
     this.currentPath = path;
     this.currentPatch = node.id;
     if (node.kind === "receiver") {
@@ -971,7 +1028,8 @@ class RuntimeImpl implements SonobeRuntime {
     for (const [key, node] of snap.nodes) {
       const outputs = this.layerOutputs.get(key);
       if (!outputs) continue;
-      for (const v of Object.values(node.props)) {
+      for (const key in node.props) {
+        const v = node.props[key];
         if (!v || typeof v !== "object" || Array.isArray(v)) continue;
         const media = v as { assetId?: unknown; url?: unknown };
         if ((assetId !== undefined && media.assetId === assetId) || (assetId === undefined && url !== undefined && media.url === url)) return outputs;

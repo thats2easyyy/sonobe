@@ -1,6 +1,7 @@
 /** Document construction and component queries (ARCHITECTURE §3.1, §3.4). */
 
 import { DEFAULT_DEVICE, getDevicePreset } from "./devices.ts";
+import { getOwn } from "./ids.ts";
 import { allLayers, COMPONENT_INSTANCE_LAYER_TYPE, COMPONENT_PATCH_TYPE } from "./registry.ts";
 import type { Component, ComponentKind, DeviceSettings, Id, SonobeDocument } from "./types.ts";
 
@@ -70,11 +71,11 @@ export function createEmptyDocument(options: CreateDocumentOptions = {}): Sonobe
 
 /** A component by id (defaults to the root component). */
 export function getComponent(doc: SonobeDocument, id?: Id): Component | undefined {
-  return doc.components[id ?? doc.project.root];
+  return getOwn(doc.components, id ?? doc.project.root);
 }
 
 export function getRootComponent(doc: SonobeDocument): Component | undefined {
-  return doc.components[doc.project.root];
+  return getOwn(doc.components, doc.project.root);
 }
 
 /** Component ids: root first, then the rest sorted by id. */
@@ -110,7 +111,7 @@ export function findComponentInstances(doc: SonobeDocument, targetId: Id): Insta
 export function componentDependencies(doc: SonobeDocument, componentId: Id): Set<Id> {
   const seen = new Set<Id>();
   const visit = (id: Id) => {
-    const c = doc.components[id];
+    const c = getOwn(doc.components, id);
     if (!c) return;
     const direct: Id[] = [];
     for (const l of allLayers(c.layers)) if (l.type === COMPONENT_INSTANCE_LAYER_TYPE && l.component) direct.push(l.component);

@@ -10,12 +10,14 @@ import {
   canConnect,
   defaultForPort,
   findLayer,
+  getPatchSpec,
   interfacePortToPort,
   isLayerInput,
   isLinkInput,
   isLoopLiteral,
   listInputs,
   parseAddress,
+  patchDisplayName,
   resolveLayerOutputs,
   resolveLayerProps,
   resolveNodePorts,
@@ -26,6 +28,7 @@ import {
   type InputEntry,
   type InputValue,
   type LayerNode,
+  type PatchNode,
   type Registry,
   type ResolvedPort,
   type ResolvedPorts,
@@ -35,7 +38,7 @@ import {
   type ValueType,
 } from "@sonobe/core";
 import { deepEqual } from "./equal.ts";
-import { estimateNodeSize, rectsOverlap, type Rect } from "./geometry.ts";
+import { createPlacementIndex, estimateNodeSize, PLACEMENT_PADDING, type Rect } from "./geometry.ts";
 import { readNodePositions } from "./meta.ts";
 import {
   cableId,
@@ -88,7 +91,50 @@ interface Link {
   entry: InputEntry;
   to: string;
   from: string;
+  /** `from`, parsed once. */
+  src: ReturnType<typeof parseAddress>;
 }
+
+/** Ports of nodes whose spec has no dynamic ports depend only on the node, so each node resolves once. */
+const staticPorts = new WeakMap<Registry, WeakMap<PatchNode, ResolvedPorts>>();
+
+function portsOf(doc: SonobeDocument, node: PatchNode, registry: Registry): ResolvedPorts | undefined {
+  const spec = getPatchSpec(registry, node.type);
+  if (!spec || spec.dynamicPorts) return resolveNodePorts(doc, node, registry);
+  let byNode = staticPorts.get(registry);
+  if (!byNode) staticPorts.set(registry, (byNode = new WeakMap()));
+  let ports = byNode.get(node);
+  if (!ports) {
+    ports = resolveNodePorts(doc, node, registry);
+    if (ports) byNode.set(node, ports);
+  }
+  return ports;
+}
+
+/** What a patch node's derived data was built from, so the next derive can reuse the node object. */
+interface PatchCacheEntry {
+  node: PatchNode;
+  rp: ResolvedPorts;
+  /** Output keys other items read, in link order. */
+  consumed: string;
+  working: readonly string[];
+  issues: readonly NodeIssue[];
+  flowNode: PatchFlowNode;
+}
+
+interface PatchCache {
+  registry: Registry;
+  componentId: Id;
+  /** No patch loops and no whole-loop outputs: a node's loop flags depend only on the node itself. */
+  loopFree: boolean;
+  entries: Map<Id, PatchCacheEntry>;
+}
+
+const patchCaches = new WeakMap<GraphModel, PatchCache>();
+
+const sameItems = <T>(a: readonly T[], b: readonly T[]) => a === b || (a.length === b.length && a.every((x, i) => x === b[i]));
+
+const issueCache = new WeakMap<Diagnostic, NodeIssue>();
 
 function toPortModel(port: ResolvedPort, side: PortSide, address: string, connected: boolean, defaultOverride?: unknown): PortModel {
   const model: PortModel = {
@@ -114,10 +160,14 @@ function toPortModel(port: ResolvedPort, side: PortSide, address: string, connec
 
 const unknownPort = (key: string): ResolvedPort => ({ key, name: key, type: "any", description: "This port isn't declared by the patch type." });
 
+/** A diagnostic as a node badge (one object per diagnostic, so unchanged badges keep their identity). */
 function issueFrom(d: Diagnostic): NodeIssue {
+  const cached = issueCache.get(d);
+  if (cached) return cached;
   const issue: NodeIssue = { severity: d.severity === "error" ? "error" : "warning", code: d.code, message: d.message };
   if (d.port !== undefined) issue.port = d.port;
   if (d.suggestions?.length) issue.suggestions = d.suggestions;
+  issueCache.set(d, issue);
   return issue;
 }
 
@@ -130,11 +180,21 @@ export function deriveGraph(options: DeriveGraphOptions): GraphModel {
 
   // -- Ports and links ------------------------------------------------------
   const patchPorts = new Map<Id, ResolvedPorts | undefined>();
-  for (const [id, node] of Object.entries(component.patches)) patchPorts.set(id, resolveNodePorts(doc, node, registry));
+  let wholeLoopOutputs = false;
+  for (const [id, node] of Object.entries(component.patches)) {
+    const rp = portsOf(doc, node, registry);
+    patchPorts.set(id, rp);
+    if (rp?.outputs.some((p) => p.wholeLoop)) wholeLoopOutputs = true;
+  }
 
   const links: Link[] = [];
+  const consumedKeys = new Map<Id, string>();
   for (const entry of listInputs(component)) {
-    if (isLinkInput(entry.value)) links.push({ entry, to: targetAddress(entry.target), from: stripIndex(entry.value.link) });
+    if (!isLinkInput(entry.value)) continue;
+    const from = stripIndex(entry.value.link);
+    const src = parseAddress(from);
+    links.push({ entry, to: targetAddress(entry.target), from, src });
+    if (src?.kind === "patch") consumedKeys.set(src.id, consumedKeys.has(src.id) ? `${consumedKeys.get(src.id)}|${src.key}` : src.key);
   }
   const consumed = new Set(links.map((l) => l.from));
 
@@ -260,11 +320,32 @@ export function deriveGraph(options: DeriveGraphOptions): GraphModel {
   const nodes: FlowNode[] = [];
   const outputAddresses: string[] = [];
   const patchRects: Rect[] = [];
+  const patchData = new Map<Id, PatchNodeData>();
   const sizeOf = (id: string, data: Parameters<typeof estimateNodeSize>[0]) => options.sizes?.get(id) ?? estimateNodeSize(data);
+
+  const previousCache = options.previous ? patchCaches.get(options.previous) : undefined;
+  const loopFree = looped.size === 0 && !wholeLoopOutputs;
+  const cache: PatchCache = { registry, componentId, loopFree, entries: new Map() };
+  const reusable = !!previousCache && previousCache.loopFree && loopFree && previousCache.registry === registry && previousCache.componentId === componentId;
 
   for (const [id, node] of Object.entries(component.patches)) {
     const rp = patchPorts.get(id);
     const nodeIssues = issuesByItem.get(id) ?? EMPTY_ISSUES;
+    const working = options.working?.get(id) ?? EMPTY_NAMES;
+    const consumedSignature = consumedKeys.get(id) ?? "";
+    const cached = reusable ? previousCache.entries.get(id) : undefined;
+    if (cached && rp && cached.node === node && cached.rp === rp && cached.consumed === consumedSignature && cached.working === working && sameItems(cached.issues, nodeIssues)) {
+      // Same node, ports, readers, badges and presence: the derived node is unchanged.
+      const flowNode = cached.flowNode;
+      register(flowNode.data.inputs);
+      register(flowNode.data.outputs);
+      for (const o of flowNode.data.outputs) outputAddresses.push(o.address);
+      nodes.push(flowNode);
+      patchData.set(id, flowNode.data);
+      patchRects.push({ x: node.ui.x, y: node.ui.y, ...sizeOf(id, flowNode.data) });
+      cache.entries.set(id, cached);
+      continue;
+    }
     const portIssue = (key: string) => {
       const issue = nodeIssues.find((i) => i.port === key);
       return issue ? { severity: issue.severity, message: issue.message } : undefined;
@@ -307,7 +388,7 @@ export function deriveGraph(options: DeriveGraphOptions): GraphModel {
     }
     if (!rp) {
       for (const l of links) {
-        const a = parseAddress(l.from);
+        const a = l.src;
         if (a?.kind === "patch" && a.id === id && !outputs.some((p) => p.key === a.key)) outputs.push(toPortModel(unknownPort(a.key), "out", l.from, true));
       }
     }
@@ -317,9 +398,9 @@ export function deriveGraph(options: DeriveGraphOptions): GraphModel {
       componentId,
       patchId: id,
       type: node.type,
-      title: node.name || spec?.name || node.type,
+      title: patchDisplayName(node, spec),
       specName: spec?.name ?? node.type,
-      customName: !!node.name && node.name !== spec?.name,
+      customName: patchDisplayName(node, spec) !== (spec?.name ?? node.type),
       category: spec?.category ?? "utility",
       known: !!spec,
       inputs: register(inputs),
@@ -329,7 +410,7 @@ export function deriveGraph(options: DeriveGraphOptions): GraphModel {
       collapsed: node.ui.collapsed === true,
       looped: looped.has(id),
       issues: nodeIssues,
-      working: options.working?.get(id) ?? EMPTY_NAMES,
+      working,
     };
     if (rp?.typeParam) data.typeParam = rp.typeParam;
     if (spec?.variants?.length) data.variants = spec.variants;
@@ -345,7 +426,9 @@ export function deriveGraph(options: DeriveGraphOptions): GraphModel {
     if (layerRef !== undefined) data.layerRef = layerRef;
     const flowNode: PatchFlowNode = { id, type: "patch", position: { x: node.ui.x, y: node.ui.y }, data };
     nodes.push(flowNode);
+    patchData.set(id, data);
     patchRects.push({ x: node.ui.x, y: node.ui.y, ...sizeOf(id, data) });
+    if (rp) cache.entries.set(id, { node, rp, consumed: consumedSignature, working, issues: nodeIssues, flowNode });
   }
 
   // Layer target nodes: driven properties in, read outputs/properties out.
@@ -359,7 +442,7 @@ export function deriveGraph(options: DeriveGraphOptions): GraphModel {
     map.set(key, set);
   };
   for (const l of links) {
-    const src = parseAddress(l.from);
+    const src = l.src;
     if (l.entry.target.kind === "layer") {
       add(bound, l.entry.target.id, l.entry.target.key);
       if (src?.kind === "patch") add(driversOf, l.entry.target.id, src.id);
@@ -382,28 +465,30 @@ export function deriveGraph(options: DeriveGraphOptions): GraphModel {
   }
   const graphRight = patchRects.length ? Math.max(...patchRects.map((r) => r.x + r.width)) : 0;
   const graphTop = patchRects.length ? Math.min(...patchRects.map((r) => r.y)) : 0;
-  const placed: Rect[] = [...patchRects];
+  const placed = createPlacementIndex(PLACEMENT_PADDING);
+  for (const r of patchRects) placed.add(r);
   const place = (id: string, size: { width: number; height: number }, preferred: { x: number; y: number }) => {
     const saved = options.positions?.[id] ?? savedPositions[id];
     if (saved) return { x: saved.x, y: saved.y };
     const base: Rect = { x: Math.round(preferred.x), y: Math.round(preferred.y), ...size };
-    const padded = (r: Rect): Rect => ({ x: r.x - 12, y: r.y - 12, width: r.width + 24, height: r.height + 24 });
+    // First fit: the preferred spot, then 24 px steps down and up, clear of placed nodes by 12 px.
     for (let d = 0; d <= 480; d += 24) {
       for (const dy of d === 0 ? [0] : [d, -d]) {
         const rect = { ...base, y: base.y + dy };
-        if (!placed.some((r) => rectsOverlap(padded(r), rect))) {
-          placed.push(rect);
+        if (!placed.overlaps(rect)) {
+          placed.add(rect);
           return { x: rect.x, y: rect.y };
         }
       }
     }
-    placed.push(base);
+    placed.add(base);
     return { x: base.x, y: base.y };
   };
   const layerIds = [...new Set([...bound.keys(), ...read.keys(), ...pending.keys()])].filter((id) => layerInfo(id));
   const rectOfPatch = (id: Id) => {
     const node = component.patches[id];
-    return node ? { x: node.ui.x, y: node.ui.y, ...sizeOf(id, nodes.find((n) => n.id === id)!.data) } : undefined;
+    const data = patchData.get(id);
+    return node && data ? { x: node.ui.x, y: node.ui.y, ...sizeOf(id, data) } : undefined;
   };
   const avgY = (ids: Set<Id> | undefined) => {
     const ys = [...(ids ?? [])].map((p) => component.patches[p]?.ui.y).filter((y): y is number => y !== undefined);
@@ -503,7 +588,7 @@ export function deriveGraph(options: DeriveGraphOptions): GraphModel {
   const edges: CableFlowEdge[] = [];
   const cablesBySource = new Map<string, string[]>();
   for (const l of links) {
-    const src = parseAddress(l.from);
+    const src = l.src;
     if (!src || src.kind === "componentOutput") continue;
     const sourceNode = src.kind === "patch" ? src.id : src.kind === "layer" ? layerNodeId(src.id) : INPUTS_NODE_ID;
     const t = l.entry.target;
@@ -529,7 +614,24 @@ export function deriveGraph(options: DeriveGraphOptions): GraphModel {
     cablesBySource.set(l.from, list);
   }
 
-  return share({ componentId, nodes, edges, cablesBySource, outputAddresses, ports, nodeIds }, options.previous);
+  const result = share({ componentId, nodes, edges, cablesBySource, outputAddresses, ports, nodeIds }, options.previous);
+  // Remember the node objects the model actually holds, so the next derive hands them back.
+  for (const node of result.nodes) {
+    const entry = node.type === "patch" ? cache.entries.get(node.id) : undefined;
+    if (entry) entry.flowNode = node as PatchFlowNode;
+  }
+  patchCaches.set(result, cache);
+  return result;
+}
+
+const CABLE_KEYS = ["from", "to", "sourceType", "targetType", "conversion", "invalid", "loop"] as const;
+
+function sameCable(a: CableData | undefined, b: CableData | undefined): boolean {
+  if (a === b) return true;
+  if (!a || !b || Object.keys(a).length !== Object.keys(b).length) return false;
+  for (const key of CABLE_KEYS) if (a[key] !== b[key]) return false;
+  for (const key of Object.keys(a)) if (!(CABLE_KEYS as readonly string[]).includes(key) && a[key] !== b[key] && !deepEqual(a[key], b[key])) return false;
+  return true;
 }
 
 /** Reuse previous node and edge objects that didn't change. */
@@ -538,6 +640,7 @@ function share(next: GraphModel, previous: GraphModel | null | undefined): Graph
   const prevNodes = new Map(previous.nodes.map((n) => [n.id, n]));
   const nodes = next.nodes.map((n) => {
     const p = prevNodes.get(n.id);
+    if (p === n) return p;
     if (!p || p.type !== n.type || p.position.x !== n.position.x || p.position.y !== n.position.y || p.width !== n.width || p.height !== n.height) return n;
     if (p.data === n.data || deepEqual(p.data, n.data)) return p;
     return n;
@@ -545,9 +648,10 @@ function share(next: GraphModel, previous: GraphModel | null | undefined): Graph
   const prevEdges = new Map(previous.edges.map((e) => [e.id, e]));
   const edges = next.edges.map((e) => {
     const p = prevEdges.get(e.id);
-    return p && p.source === e.source && p.target === e.target && p.sourceHandle === e.sourceHandle && p.targetHandle === e.targetHandle && deepEqual(p.data, e.data) ? p : e;
+    return p && p.source === e.source && p.target === e.target && p.sourceHandle === e.sourceHandle && p.targetHandle === e.targetHandle && sameCable(p.data, e.data) ? p : e;
   });
-  return { ...next, nodes, edges };
+  // Unchanged lists keep their identity too, so React Flow skips rebuilding its lookups (a literal edit changes one node and no cables).
+  return { ...next, nodes: sameItems(nodes, previous.nodes) ? previous.nodes : nodes, edges: sameItems(edges, previous.edges) ? previous.edges : edges };
 }
 
 /** Rect of a patch in a component using an estimate (placement before measuring). */

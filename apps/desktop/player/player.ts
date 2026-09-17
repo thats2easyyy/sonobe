@@ -7,7 +7,29 @@
 import type { SonobeDocument } from "@sonobe/core";
 import { createRuntime, type SonobeRuntime } from "@sonobe/engine";
 import { createPatchRegistry } from "@sonobe/patches";
-import { createDomRenderer, DomTextMeasurer, type DomRenderer } from "@sonobe/renderer";
+import { createDomRenderer, DomTextMeasurer, type DomRenderer, type LottiePlayerLike } from "@sonobe/renderer";
+
+let lottiePlayer: Promise<LottiePlayerLike> | null = null;
+
+/** lottie-web ships as lottie.js next to this bundle and loads the first time a Lottie layer draws. */
+function loadLottie(): Promise<LottiePlayerLike> {
+  lottiePlayer ??= new Promise<LottiePlayerLike>((resolve, reject) => {
+    const script = document.createElement("script");
+    script.src = "lottie.js";
+    script.onload = () => {
+      const player = (globalThis as { sonobeLottie?: LottiePlayerLike }).sonobeLottie;
+      if (player && typeof player.loadAnimation === "function") resolve(player);
+      else reject(new Error("lottie.js loaded without a player"));
+    };
+    script.onerror = () => {
+      lottiePlayer = null;
+      script.remove();
+      reject(new Error("lottie.js didn't load"));
+    };
+    document.head.appendChild(script);
+  });
+  return lottiePlayer;
+}
 
 type Message =
   | { type: "hello"; version: string }
@@ -76,7 +98,7 @@ function show(message: Extract<Message, { type: "document" }>): void {
     stageHost.replaceChildren();
     const next = createRuntime(message.doc, { registry, textMeasurer: measurer, resolveAssetUrl });
     runtime = next;
-    renderer = createDomRenderer(stageHost, { resolveAssetUrl, textMeasurer: measurer, onEvents: (events) => next.dispatch(events) });
+    renderer = createDomRenderer(stageHost, { resolveAssetUrl, textMeasurer: measurer, loadLottie, onEvents: (events) => next.dispatch(events) });
     size = [0, 0];
     run();
   } else {

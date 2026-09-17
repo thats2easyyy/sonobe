@@ -27,7 +27,8 @@ export const mathExpression = definePatch<MathExpressionState>("mathExpression",
     const program = compileExpression(expressionText(ctx.node.settings));
     if (!program.ok) {
       const { message, line, column } = program.error;
-      const text = `${ctx.id}: ${message} (${line > 1 ? `line ${line}, ` : ""}column ${column})`;
+      // The issue is attributed to this patch (the HUD names it), so the text is just the problem.
+      const text = `${message} (${line > 1 ? `line ${line}, ` : ""}column ${column})`;
       // A runtime issue with the catalog's code (deduplicated until restart); hosts without issues get one console error.
       if (typeof ctx.services.issue === "function") ctx.services.issue(INVALID_EXPRESSION, "error", text);
       else logOnce(ctx, "error", INVALID_EXPRESSION, text);
@@ -42,7 +43,7 @@ export const mathExpression = definePatch<MathExpressionState>("mathExpression",
         v = 0;
         if (!ctx.state.warned) {
           ctx.state.warned = true;
-          ctx.services.log("warn", `${ctx.id}.${statement.key} isn't a finite number, so it outputs 0`);
+          ctx.services.log("warn", `Math Expression output "${statement.key}" isn't a finite number, so it outputs 0`);
         }
       }
       if (v === 0) v = 0;

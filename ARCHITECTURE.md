@@ -34,7 +34,7 @@ sonobe/
 │   ├── patches/    @sonobe/patches  built-in patch library: definitions + evaluators + docs + examples
 │   ├── renderer/   @sonobe/renderer DOM renderer for SceneFrame, pointer/keyboard capture, device frames
 │   ├── mcp/        @sonobe/mcp      MCP tools over a SonobeHost interface, headless host, HTTP + stdio transports
-│   └── cli/        @sonobe/cli      `sonobe` CLI: validate, fmt, run/sim, mcp relay, new, export
+│   └── cli/        @sonobe/cli      `sonobe` CLI: new, validate, fmt, outline, describe, sim, mcp (stdio relay; --headless <dir>)
 ├── apps/
 │   ├── editor/     React editor UI (Electron renderer process; also runs in a browser for dev/tests)
 │   └── desktop/    Electron main + preload: windows, menus, file IO, MCP HTTP server, LAN preview server
@@ -42,12 +42,12 @@ sonobe/
 │   ├── claude-code/     Claude Code plugin (.mcp.json + skills)
 │   └── claude-desktop/  .mcpb bundle manifest
 ├── examples/       canonical example prototypes (*.sonobe folders), used by docs, lessons, tests
-└── docs/           research/, spec/, guides/ (concepts, recipes), patches/ (generated reference)
+└── docs/           research/, guides/ (numbered tutorials), patches/ (generated reference)
 ```
 
 Dependency direction (no cycles): `core ← engine ← patches ← renderer ← editor ← desktop`, and `mcp ← cli`, where `mcp` depends on `core`, `engine`, and `patches`.
 
-Tooling: TypeScript (strict, ESM), Vite 8 for the editor, esbuild for Electron main/preload and the CLI, Vitest for unit tests, Playwright for e2e (browser and `_electron`). Formatting uses Prettier defaults.
+Tooling: TypeScript (strict, ESM), Vite 8 for the editor, esbuild for Electron main/preload and the CLI, Vitest for unit tests, Playwright for e2e (Chromium via `npm run e2e`; `_electron` in the desktop smoke test and package verification). Formatting uses Prettier defaults.
 
 ---
 
@@ -71,13 +71,19 @@ Canonical serialization rules:
 - UTF-8, LF line endings, 2-space indent, trailing newline.
 - Keys in schema order; maps sorted by id.
 - Short leaf objects stay on one line, so a connection change is a one-line diff.
-- Numbers are rounded to 6 significant decimals, `-0` is written as `0`, and there are no volatile fields.
+- Numbers are rounded to 6 significant decimals, `-0` is written as `0`, and there are no volatile fields. Rounding is idempotent, so a saved file passes `sonobe fmt --check`.
+
+Folder rules:
+- Only regular files named like document files load: `components/*.json` and `scripts/<name>` matching `[A-Za-z0-9_][A-Za-z0-9_.-]*`. Folders and other files in `scripts/` (`lib/`, `.eslintrc.json`) are left alone: saves never read, rewrite or delete them, and never delete a folder.
+- File names must stay distinct where names ignore case (macOS, Windows). Component ids and script names that differ only by case are refused by ops, reported by diagnostics (`file_name_collision`), and saving throws before writing anything.
+- Layers nest at most 256 levels deep (ops refuse deeper, loading reports a format error).
 
 A `.sonobez` zip of the same layout is used for sharing (later).
 
 ### 3.2 Identifiers
 
-- Ids are **readable, immutable slugs**: `^[A-Za-z_][A-Za-z0-9_]*$`. They are unique within a component across layers, patches, and comments.
+- Ids are **readable, immutable slugs**: `^[A-Za-z_][A-Za-z0-9_]*$`. They are unique within a component across layers, patches, and comments. `__proto__` is reserved; other Object.prototype names are ordinary ids because lookups only read own keys.
+- Component ids are file names (`components/<id>.json`), so they're unique ignoring case: `navBar` and `navbar` can't both exist, and derived ids skip to `navbar_2`.
 - They are auto-derived from the display name on creation (`card`, `card_2`, `tap_card`, `popAnimation_1`).
 - Renaming changes `name`, never `id`. Ids are never reused within a session.
 - References:
@@ -153,6 +159,12 @@ Op kinds (see `Op` in `packages/core/src/types.ts`): `addLayer, updateLayer, mov
 Errors are `{ code, message, hint, address, opIndex, suggestions: [{ description, ops }] }` and are written for humans first. Links may also read layer outputs or props: `{ "link": "@layerId.key" }`.
 
 **History.** Every committed batch is one undo group `{ label, author: { kind: "human" | "agent", name }, ops, inverse, revision }`. Undo applies the inverse. The history panel shows agent groups ("Claude: added press animation (12 ops)"). Soft deletes go to a session trash.
+- A reload of outside changes is its own undo group ("Outside Sonobe: Reloaded from disk"). Undoing past it restores the document older groups were recorded against, and redo restores the reloaded version exactly, so undo then redo never reverts outside changes.
+- An agent's undo checks the human-edit guard in the same step it undoes (in the editor, not across RPCs).
+
+**Outside changes.** Other writers share project folders (the app, git, a person, `sonobe mcp --headless`).
+- The app reloads outside changes when clean. With unsaved edits it holds them (`externalChange`) and Save refuses with `disk_changed` until the person keeps their edits or reloads. Changes reported during a save or open are checked once it finishes. A file that no longer parses sets `diskProblem` and marks the document as having something to save.
+- The headless host remembers the files as it last read or wrote them. `save_document` (and autosave) refuse with `disk_changed` when the folder changed since, and only delete stale files the session loaded or wrote. `save_document({ force: true })` writes over the outside changes but still never deletes files the session didn't know; `open_document({ ref, reload: true })` loads the version on disk.
 
 ### 3.6 Diagnostics
 
@@ -165,6 +177,12 @@ Errors are `{ code, message, hint, address, opIndex, suggestions: [{ description
 - unreachable or unused patches (info)
 - missing assets
 - a layer that can't receive touches because it has opacity 0 or is disabled
+- variables: an unnamed broadcaster, broadcasters that share a name, scope, and type, and a variable nothing reads (info)
+- layers in a patch component, which is never drawn (ops refuse to add them)
+
+Messages name items the way the editor shows them ("Photo Scale" (Transition)); ids stay in `itemIds` and suggestion ops.
+
+Hosts that diagnose every revision use `createDiagnosticsCache(registry)`. It returns exactly what `getDiagnostics` would, but re-checks only components that changed (or that show a changed component), and inside a changed component only the inputs and layer properties whose literal values changed. A scrub or a drag at 1,000 patches costs well under a millisecond.
 
 ---
 
@@ -172,9 +190,10 @@ Errors are `{ code, message, hint, address, opIndex, suggestions: [{ description
 
 Value types (`ValueType`):
 
-`number, boolean, pulse, text, color, point, point3d, point4d, size, anchor, index, enum, json, layer, image, video, sound, gradient, shape, textStyle, layerEffect, transform, any`
+`number, boolean, pulse, text, color, point, point3d, point4d, size, anchor, index, enum, json, layer, image, video, sound, gradient, shape, textStyle, layerEffect, transform, connection, any`
 
 - A `point4d` subtype covers edges and corner radii.
+- `connection` is an opaque runtime handle from patches like WebSocket Connection. It has no literal value.
 - `progress` is a `number` with a hint.
 
 Runtime representation:
@@ -265,7 +284,7 @@ input events (pointer/keyboard/device) ─┐
 - Touches bubble to ancestors. Layers may declare `hitSlop`.
 - Tap fires on touch-up if the touch moved < 10 pt. On that frame, `position` still holds the last touch position (a documented deviation from Origami, where it resets first).
 - Long press = held and stationary (10 pt slop) for the duration.
-- Recognizers: interaction (down/tap/position/velocity), drag, scroll/momentum, swipe, hover, keyboard, mouse, trackpad, device motion (player only).
+- Recognizers: interaction (down/tap/position/localPosition/force), gesture (down/tap/position/translation/velocity/startPosition/localPosition), drag (position/dragging/velocity), scroll/momentum, swipe, hover, keyboard, mouse, trackpad, device motion (player only). Finger speed comes from gesture or drag; interaction has no velocity.
 
 ### 5.6 Runtime API
 
@@ -278,34 +297,53 @@ rt.trace(targets, durationMs, events?)       // columnar samples + summaries
 rt.updateDocument(nextDoc)                   // hot-swap graph, keep compatible state
 ```
 
+- `updateDocument` patches literal-only edits (input and property literals, patch positions outside cycles) into the compiled graph in place, and recompiles for anything else.
+- `trace` replays the input log since the last restart. Past its budget (7,200 frames) it throws `TraceUnavailableError` instead of tracing a restarted copy.
+- Scene node props inherit their layer's defaults. Copy them with `plainSceneFrame` before JSON or structured clone.
+
 ---
 
 ## 6. Patch library (`@sonobe/patches`)
 
-Each patch is one module:
+Each patch is a catalog entry plus one module.
+
+**The catalog entry** in `packages/patches/catalog/<category>-<n>.json` is where the patch is declared once: type, name, category, tier, aliases, summary, docs, behavior, inputs, outputs, variants, examples, pairsWellWith and the Origami mapping, following `catalog/CONVENTIONS.md`. An abridged entry from `catalog/state-1.json`:
+
+```jsonc
+{
+  "type": "switch",                       // stable camelCase id
+  "name": "Switch",
+  "category": "state",
+  "tier": 1,
+  "summary": "Remembers whether something is on or off and changes when it gets a pulse.",
+  "inputs": [
+    { "key": "flip", "name": "Flip", "type": "pulse" /* default, description, … */ },
+    { "key": "turnOn", "name": "Turn On", "type": "pulse" },
+    { "key": "turnOff", "name": "Turn Off", "type": "pulse" }
+  ],
+  "outputs": [{ "key": "on", "name": "On", "type": "boolean" }]
+  // aliases, docs, behavior, examples, pairsWellWith, origami, …
+}
+```
+
+**The module** in `packages/patches/src/<category>/<type>.ts` attaches the evaluator by type string. From `src/state/switch.ts`:
 
 ```ts
-export default definePatch({
-  type: "popAnimation",                 // stable camelCase id
-  name: "Pop Animation",
-  category: "animation",
-  aliases: ["spring", "bouncy", "pop"],
-  summary: "Animates toward a target number with a spring defined by bounciness and speed.",
-  docs: "...markdown: behavior, edge cases, tips, common mistakes...",
-  inputs: [
-    { key: "number", name: "Number", type: "number", default: 0, description: "Target value." },
-    { key: "bounciness", name: "Bounciness", type: "number", default: 5, min: 0, description: "..." },
-    { key: "speed", name: "Speed", type: "number", default: 10, min: 0, description: "..." },
-  ],
-  outputs: [{ key: "output", name: "Progress", type: "number", description: "Current animated value." }],
-  variants: ["number", "point", "point3d", "color"],   // optional typeParam options
-  state: () => ({ value: 0, velocity: 0 }),            // per instance × loop index
-  evaluate(ctx) { /* read ctx.input(key), ctx.dt, ctx.state; ctx.output(key, v) */ },
-  examples: [{ title: "Press to shrink", graph: "..." }],
-  pairsWellWith: ["interaction", "switch", "transition"],
-  origami: { id: "builtin.bouncy", name: "Pop Animation" },   // compatibility mapping (import)
+export const switchPatch = definePatch<SwitchState>("switch", {
+  state: () => ({ on: false }),
+  evaluate(ctx) {
+    const pulsed = firstPulsed(ctx, PRECEDENCE);
+    if (pulsed === "turnOff") ctx.state.on = false;
+    else if (pulsed === "turnOn") ctx.state.on = true;
+    else if (pulsed === "flip") ctx.state.on = !ctx.state.on;
+    ctx.output("on", ctx.state.on);
+  },
 });
 ```
+
+- `definePatch(type, implementation)` merges the implementation into the catalog spec for `type`. It throws when `type` isn't a catalog patch type string.
+- The implementation holds `evaluate` plus the optional `state` (per instance × loop index), `dispose`, `dynamicPorts` and `mutedBehavior`. Ports, docs, aliases and the Origami mapping always come from the catalog.
+- [CONTRIBUTING.md](CONTRIBUTING.md) ("Adding or fixing a patch") has the steps.
 
 - **Tier 1** (MVP, the ISAT core plus the most common): interaction, switch, counter, pulse, delay, wait, popAnimation, springAnimation, classicAnimation, transition, progress, reverseProgress, optionSwitch, optionPicker, math, logic, comparison, loops, text, color, point pack/unpack, velocity, smoothValue, time, whenPrototypeStarts, drag, scroll, hover, keyboard, variables, and javascript.
 - **Tier 2:** data/JSON, network, sound, device info and motion, random, formatting, the remaining loops.
@@ -344,7 +382,7 @@ Layer types are declared in `@sonobe/core` (`layerTypes.ts`) with typed props (k
   ```
   Toolbar
   Layers | Viewer | Canvas / Patch Editor (split) | Inspector
-  Bottom HUD: Console · Diagnostics · AI Activity · FPS
+  Bottom HUD: Console · Diagnostics · AI Activity · Performance (live fps readout in the HUD bar)
   ```
 
   - Side drawers: **Learn** (lessons, recipes, patch docs) and **Assistant** (BYO API key).
@@ -357,7 +395,7 @@ Layer types are declared in `@sonobe/core` (`layerTypes.ts`) with typed props (k
     - dropping on empty canvas opens **link-drag search** filtered to compatible ports
     - shift-click to fan out
     - **Ctrl+right-drag knife cut**
-    - drag a patch onto a wire to splice it in
+    - ⌘-drag (Ctrl-drag on Windows and Linux) a single patch onto a wire to splice it in; a port chooser opens when several inputs or outputs fit. A plain drag only moves the patch
     - Option-drag duplicates with its inputs
   - Adding patches:
     - **Patch picker**: double-click the canvas or ⌥⏎, type-to-search over names, aliases, and ports, docs pane, return inserts
@@ -380,7 +418,9 @@ Layer types are declared in `@sonobe/core` (`layerTypes.ts`) with typed props (k
   - Handlers report errors by returning `sonobeHost.rpc.fail(code, message, data)`, because the context bridge strips Error properties.
   - `document.save` is reserved for the unsaved-changes prompt.
 - **Menus and clipboard.** Menu commands arrive through `sonobeHost.onCommand(id)`. Cut, Copy, and Paste are native roles, so the editor handles DOM `copy`/`cut`/`paste` events.
-- **Env switches:** `SONOBE_DEV_URL, SONOBE_MUTE, SONOBE_MCP_PORT, SONOBE_MCP, SONOBE_HOME, SONOBE_USER_DATA, SONOBE_EDITOR_DIST, SONOBE_TEST`.
+- **Env switches** read by the desktop main process (`apps/desktop/electron/env.ts`): `SONOBE_DEV_URL`, `SONOBE_MUTE`, `SONOBE_MCP_PORT`, `SONOBE_MCP`, `SONOBE_HOME`, `SONOBE_USER_DATA`, `SONOBE_EDITOR_DIST`, `SONOBE_TEST`, `SONOBE_LAN` (start the phone preview server at launch) and `SONOBE_LAN_PORT` (a fixed phone preview port).
+- Two switches are read elsewhere: `SONOBE_GUIDES_DIR` overrides the MCP agent guides folder (`packages/mcp/src/guides.ts`, used by bundles), and `SONOBE_NODE` picks the Node binary for the packaged `sonobe` CLI launcher (`apps/desktop/scripts/build.mjs`), which otherwise uses the app's own runtime.
+- **Connect Claude** reads `getMcpStatus().cliPath`, the app's bundled CLI launcher (`Resources/cli/sonobe`, `sonobe.cmd` on Windows), so the setup it shows uses a full path instead of a `sonobe` on PATH.
 
 ---
 
@@ -394,7 +434,7 @@ Layer types are declared in `@sonobe/core` (`layerTypes.ts`) with typed props (k
 **Topology.**
 - Electron main hosts Streamable HTTP MCP at `http://127.0.0.1:<port>/mcp`. It validates Host/Origin and requires a bearer token.
 - The port and token are written to `~/.sonobe/mcp.json` (0600).
-- `sonobe mcp` (the CLI) is a stdio relay to the running app. With `--headless <project>`, it serves a project folder without the app (ops, simulation, and save; no screenshots).
+- `sonobe mcp` (the CLI) is a stdio relay to the running app. With `--headless <project>`, it serves a project folder without the app: ops, simulation, save, and screenshots drawn from the SceneFrame (SVG rasterized to PNG with `@resvg/resvg-js`, approximate text metrics, placeholders for video, Lottie and shaders). Headless mode has no editor selection and no canvas or graph capture targets.
 - Tool handlers run against `SonobeHost`:
 
   ```ts
@@ -419,7 +459,7 @@ Layer types are declared in `@sonobe/core` (`layerTypes.ts`) with typed props (k
 
 - **Resources:** guides, patch reference, document outline.
 - **Prompts:** `prototype_interaction`, `debug_interaction`, `explain_prototype`.
-- **Distribution:** Claude Code plugin (`integrations/claude-code`) and `.mcpb` bundle (`integrations/claude-desktop`). The app's **Connect Claude** screen offers copy-paste and one-click setup.
+- **Distribution:** Claude Code plugin (`integrations/claude-code`) and `.mcpb` bundle (`integrations/claude-desktop`), both built from a checkout. The app's **Connect Claude** screen shows copy-paste setup for Claude Code and Claude Desktop, filled in for this machine (the app's bundled CLI, or Node plus a checkout). In a source checkout it also shows the commands that build and pack the `.mcpb`.
 
 **Outline projection** (token-lean, read-only):
 
@@ -450,6 +490,7 @@ patch grow transition<number> progress←pop.output start=1 end=1.08
 
 - `npm run typecheck`: tsc across all packages.
 - `npm test`: Vitest. Golden tests cover spring curves against the Rebound formulas, pulse and loop semantics, ops/inverse round-trips, and canonical serialization stability.
-- `npm run e2e`: Playwright against the editor in the browser plus an Electron smoke test, with screenshot artifacts.
+- `npm run e2e`: Playwright (Chromium project only) against the editor served by Vite on port 5199, with screenshot artifacts. This is what CI runs.
+- `npm run smoke -w @sonobe/desktop`: the muted Electron end-to-end run (`apps/desktop/tests/smoke.mjs`, Playwright `_electron`) covering the host API, the MCP loop, the phone preview and the pop-out viewer. It builds the shell and editor, runs by hand, and isn't part of `npm run e2e` or CI. `SONOBE_SMOKE_SKIP_EDITOR_BUILD=1` reuses `apps/editor/dist`.
 - Examples must load, validate with zero errors, and simulate their scripted interactions (`examples/*/test.json`).
 - Automated app and QA runs are muted (`--mute-audio`).

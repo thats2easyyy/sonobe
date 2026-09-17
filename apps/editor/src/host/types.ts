@@ -36,8 +36,8 @@ export interface DesktopHostApi {
   setTitle(title: string): void;
   rpc: RpcRegistrar;
   getMcpStatus(): Promise<unknown>;
-  /** Push the live document's revision to main (LAN player sync, MCP resource notifications). Optional: older preloads lack it. */
-  notifyDocumentChanged?(revision: number): void;
+  /** Push the live document's revision (and the Edit menu's Undo and Redo titles) to main. Optional: older preloads lack it. */
+  notifyDocumentChanged?(revision: number, history?: { undo: string; redo: string }): void;
   /** Open a web or mail link in the system browser. Optional: older preloads lack it. */
   openExternal?(url: string): boolean | void | Promise<boolean | void>;
   /** True when the app was started muted (SONOBE_MUTE, automated runs). */
@@ -46,6 +46,44 @@ export interface DesktopHostApi {
   startPreview?(): Promise<unknown>;
   stopPreview?(): Promise<unknown>;
   onPreviewStatus?(cb: (status: unknown) => void): () => void;
+  /** Keychain-backed secrets (the in-app assistant's API key). Optional: older preloads lack it. */
+  secrets?: DesktopSecretsApi;
+  /** The in-app assistant bridge; panels/assistant/types.ts describes it (AssistantApi). */
+  assistant?: unknown;
+  /** Show the prototype in its own window, or focus it when it's open. */
+  popOutViewer?(options?: DesktopViewerWindowOptions): Promise<DesktopViewerWindowStatus>;
+  closeViewerWindow?(): Promise<DesktopViewerWindowStatus>;
+  getViewerWindowStatus?(): Promise<DesktopViewerWindowStatus>;
+  /** The pop-out viewer window opened, closed, or changed. Returns unsubscribe. */
+  onViewerWindowStatus?(cb: (status: DesktopViewerWindowStatus) => void): () => void;
+}
+
+/** SecretsStatus in host-api.d.ts. */
+export interface DesktopSecretsStatus {
+  available: boolean;
+  /** "keychain" (macOS), "dpapi" (Windows), or the Linux key store. */
+  backend: string | null;
+  reason: string | null;
+}
+
+/** SonobeSecrets in host-api.d.ts. */
+export interface DesktopSecretsApi {
+  status(): Promise<DesktopSecretsStatus>;
+  get(name: string): Promise<string | null>;
+  set(name: string, value: string): Promise<void>;
+  delete(name: string): Promise<boolean>;
+}
+
+/** ViewerWindowOptions in host-api.d.ts. */
+export interface DesktopViewerWindowOptions {
+  alwaysOnTop?: boolean;
+}
+
+/** ViewerWindowStatus in host-api.d.ts. */
+export interface DesktopViewerWindowStatus {
+  open: boolean;
+  alwaysOnTop: boolean;
+  error: string | null;
 }
 
 export interface HostCapabilities {
@@ -112,8 +150,8 @@ export interface HostAdapter {
   readAssetBytes?(path: string | null, file: string): Promise<ArrayBuffer | undefined>;
   /** Open a link outside the editor (system browser in the desktop app). False when it didn't open. */
   openExternal?(url: string): boolean | Promise<boolean>;
-  /** Tell the host the live document moved to `revision`. */
-  notifyDocumentChanged?(revision: number): void;
+  /** Tell the host the live document moved to `revision`; `history` holds the current Undo and Redo titles. */
+  notifyDocumentChanged?(revision: number, history?: { undo: string; redo: string }): void;
   /** The host asks for silence (SONOBE_MUTE, automated runs). */
   readonly muted?: boolean;
   dispose(): void;

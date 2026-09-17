@@ -17,7 +17,7 @@ import { useStore } from "zustand";
 import { Panel } from "../../shell/Panel.tsx";
 import { useEditorSession } from "../../state/EditorProvider.tsx";
 import { topLevelLayerIds } from "../../state/clipboard.ts";
-import { enterSelectedComponent, groupSelection } from "../../state/editActions.ts";
+import { duplicateSelection, enterSelectedComponent, groupSelection } from "../../state/editActions.ts";
 import { currentComponentId } from "../../state/selection.ts";
 import type { EditorSession } from "../../state/session.ts";
 import { EmptyState } from "../../ui/EmptyState.tsx";
@@ -32,6 +32,7 @@ import { cx } from "../../ui/lib/cx.ts";
 import { useLatest } from "../../ui/lib/hooks.ts";
 import { readString, writeString } from "../../ui/lib/storage.ts";
 import { useElementSize } from "../../ui/lib/useElementSize.ts";
+import { rectOfElement } from "../../state/bounds.ts";
 import { registerBoundsProvider } from "../viewer/hostBridge.ts";
 import { dragHasFiles, dropLabel, dropUndoLabel, mediaLayerOps, prepareDroppedFiles, type DroppedFile } from "./assetDrop.ts";
 import { CanvasOverlay, EMPTY_DRAFT, type OverlayDraft } from "./CanvasOverlay.tsx";
@@ -95,9 +96,19 @@ interface GestureBase {
   startScreen: Point;
 }
 
+/**
+ * An ⌥-drag's copies: the paste that made them (folded into one undo step with the move when the drag
+ * ends) and original → copy ids. The move is computed on the originals, then pointed at the copies.
+ */
+interface DuplicateDrag {
+  txnId: string;
+  ops: readonly Op[];
+  copies: ReadonlyMap<Id, Id>;
+}
+
 type Gesture =
-  | (GestureBase & { kind: "press"; picked: Id | null; wasSelected: boolean; shift: boolean })
-  | (GestureBase & { kind: "move"; snapshot: MoveSnapshot; txn: EditTransaction })
+  | (GestureBase & { kind: "press"; picked: Id | null; wasSelected: boolean; shift: boolean; alt: boolean })
+  | (GestureBase & { kind: "move"; snapshot: MoveSnapshot; txn: EditTransaction; duplicate?: DuplicateDrag })
   | (GestureBase & { kind: "resize"; snapshot: ResizeSnapshot; txn: EditTransaction })
   | (GestureBase & { kind: "rotate"; snapshot: RotateSnapshot; txn: EditTransaction })
   | (GestureBase & { kind: "reorder"; snapshot: ReorderSnapshot; ops: Op[] })
@@ -119,6 +130,19 @@ interface NudgeRun {
   starts: Map<Id, Point>;
   delta: Point;
   timer: ReturnType<typeof setTimeout> | undefined;
+}
+
+/** Move ops for the originals, pointed at their copies (copies start exactly where the originals are). */
+function retarget(ops: readonly Op[], copies: ReadonlyMap<Id, Id>): Op[] {
+  return ops.map((op): Op => {
+    if (op.op === "updateLayer" && copies.has(op.id)) return { ...op, id: copies.get(op.id)! };
+    if (op.op === "setInput") {
+      const m = /^@([A-Za-z_][A-Za-z0-9_]*)\.(.+)$/.exec(op.target);
+      const copy = m ? copies.get(m[1]!) : undefined;
+      if (copy) return { ...op, target: `@${copy}.${m![2]}` };
+    }
+    return op;
+  });
 }
 
 function layerNames(index: CanvasIndex, ids: readonly Id[]): string {
@@ -260,6 +284,10 @@ export function CanvasPanel({ session: sessionProp, sceneSource, onSceneSourceCh
     return () => clearTimeout(timer);
   }, [viewport, componentId, session]);
 
+  // Where the canvas is on screen, so the desktop MCP bridge can screenshot it (canvas.bounds).
+  const zoomRef = useLatest(viewport?.zoom);
+  useEffect(() => session.bounds?.register("canvas.bounds", () => rectOfElement(bodyRef.current, zoomRef.current)), [session, bodyRef, zoomRef]);
+
   const apply = (ops: Op[], label: string) => session.document.getState().apply(ops, { label, defaultComponent: latest.current.componentId });
 
   const notifyBlocked = (ids: readonly Id[], prop = "position") => {
@@ -380,6 +408,11 @@ export function CanvasPanel({ session: sessionProp, sceneSource, onSceneSourceCh
     if (!g) return false;
     gestureRef.current = null;
     if (g.kind === "move" || g.kind === "resize" || g.kind === "rotate") g.txn.cancel();
+    if (g.kind === "move" && g.duplicate) {
+      // Escape during an ⌥-drag: no copies are left behind.
+      const store = session.document.getState();
+      if (store.historyEntries(1)[0]?.txnId === g.duplicate.txnId && store.undoTo(g.duplicate.txnId).ok) session.selection.getState().select({ layers: g.snapshot.layers.map((l) => l.id), patches: [], comments: [] });
+    }
     try {
       bodyRef.current?.releasePointerCapture(g.pointerId);
     } catch {
@@ -410,7 +443,36 @@ export function CanvasPanel({ session: sessionProp, sceneSource, onSceneSourceCh
       gestureRef.current = null;
       return;
     }
-    gestureRef.current = { ...g, kind: "move", snapshot, txn: createEditTransaction(session.document, { label: `Move ${layerNames(idx, snapshot.layers.map((l) => l.id))}`, defaultComponent: cid }) };
+    const names = layerNames(idx, snapshot.layers.map((l) => l.id));
+    const duplicate = g.alt ? duplicateForDrag(snapshot) : null;
+    gestureRef.current = { ...g, kind: "move", snapshot, txn: createEditTransaction(session.document, { label: duplicate ? `Duplicate ${names}` : `Move ${names}`, defaultComponent: cid }), ...(duplicate ? { duplicate } : {}) };
+  };
+
+  /** ⌥-drag (Origami, Figma): copy the selection in place, and the drag moves the copies. */
+  const duplicateForDrag = (snapshot: MoveSnapshot): DuplicateDrag | null => {
+    const result = duplicateSelection(session);
+    const txnId = session.document.getState().lastChange?.txnId;
+    if (!result.ok || !result.copies || !result.result || !txnId) {
+      if (result.message) toast({ title: result.message, ...(result.hint ? { description: result.hint } : {}), tone: "warn" });
+      return null;
+    }
+    const copies = result.copies;
+    if (!snapshot.layers.every((l) => copies.has(l.id))) {
+      session.document.getState().undoTo(txnId);
+      return null;
+    }
+    return { txnId, ops: result.result.applied, copies };
+  };
+
+  /** Fold an ⌥-drag's paste and move into one undo step ("Duplicate Like Button"). */
+  const finishDuplicate = (d: DuplicateDrag, moveOps: readonly Op[], label: string, componentId: Id) => {
+    const store = session.document.getState();
+    // Nothing to fold when the copies ended where they started (the move undid itself) or someone else committed meanwhile.
+    if (moveOps.length === 0 || store.historyEntries(2)[1]?.txnId !== d.txnId) return;
+    const selected = session.selection.getState().layers;
+    if (!store.undoTo(d.txnId).ok) return;
+    const result = session.document.getState().apply([...d.ops, ...moveOps], { label, defaultComponent: componentId });
+    if (result.ok) session.selection.getState().select({ layers: selected, patches: [], comments: [] });
   };
 
   const onPointerDown = (event: ReactPointerEvent<HTMLDivElement>) => {
@@ -453,9 +515,9 @@ export function CanvasPanel({ session: sessionProp, sceneSource, onSceneSourceCh
           const wasSelected = sel.layers.includes(picked);
           if (event.shiftKey) sel.select({ layers: [picked] }, "toggle");
           else if (!wasSelected) sel.select({ layers: [picked], patches: [], comments: [] });
-          gestureRef.current = { ...base, kind: "press", picked, wasSelected, shift: event.shiftKey };
+          gestureRef.current = { ...base, kind: "press", picked, wasSelected, shift: event.shiftKey, alt: event.altKey };
         } else if (c && !event.shiftKey && selectionIds.length > 1 && pointInQuad(c.quad, p)) {
-          gestureRef.current = { ...base, kind: "press", picked: null, wasSelected: true, shift: false };
+          gestureRef.current = { ...base, kind: "press", picked: null, wasSelected: true, shift: false, alt: event.altKey };
         } else {
           const baseSelection = event.shiftKey ? [...sel.layers] : [];
           if (!event.shiftKey) sel.select({ layers: [], patches: [], comments: [] });
@@ -492,7 +554,7 @@ export function CanvasPanel({ session: sessionProp, sceneSource, onSceneSourceCh
         break;
       case "move": {
         const r = moveGesture(g.snapshot, g.start, a, { snap, threshold: snapThreshold(), axisLock: event.shiftKey });
-        g.txn.update(r.ops);
+        g.txn.update(g.duplicate ? retarget(r.ops, g.duplicate.copies) : r.ops);
         setDraft({ ...EMPTY_DRAFT, guides: r.guides, measurements: r.measurements, spacing: r.spacing ?? [], hideChrome: true });
         setHover(null);
         break;
@@ -546,6 +608,9 @@ export function CanvasPanel({ session: sessionProp, sceneSource, onSceneSourceCh
         break;
       }
       case "move":
+        g.txn.commit();
+        if (g.duplicate) finishDuplicate(g.duplicate, g.txn.ops, g.txn.label, cid);
+        break;
       case "resize":
       case "rotate":
         g.txn.commit();

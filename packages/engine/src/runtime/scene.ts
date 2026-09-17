@@ -48,6 +48,22 @@ interface Pending extends LayoutNode {
 
 const ROOT_KEY = " root";
 
+/**
+ * A scene node's props with the inherited layer defaults copied in as own properties, for JSON,
+ * structured clone, or Object.keys. Reading a prop by key needs no copy.
+ */
+export function plainProps(props: Readonly<Record<string, Value>>): Record<string, Value> {
+  const out: Record<string, Value> = {};
+  for (const key in props) out[key] = props[key]!;
+  return out;
+}
+
+/** A copy of a frame whose nodes have plain props (see plainProps), ready to serialize. */
+export function plainSceneFrame(frame: SceneFrame): SceneFrame {
+  const plain = (node: SceneNode): SceneNode => ({ ...node, props: plainProps(node.props), children: node.children.map(plain) });
+  return { ...frame, roots: frame.roots.map(plain) };
+}
+
 /** Split a scene key ("card#2/title#1") into its prefix ("card#2/") and loop instance (1). */
 export function splitSceneKey(key: string): { prefix: string; instance: number | undefined } {
   const slash = key.lastIndexOf("/");
@@ -107,7 +123,10 @@ export function buildScene(env: SceneEnv): SceneBuild {
       for (let n = 0; n < count; n++) {
         const index = looping ? n : (inherited?.index ?? 0);
         const key = looping || inherited ? `${baseKey}#${index}` : baseKey;
-        const props: Record<string, Value> = { ...layer.defaults };
+        // Defaults come through the prototype and bound values are own properties, so a layer replicated
+        // thousands of times doesn't copy every default per copy per frame. Enumerate with for...in, or
+        // plainProps before JSON or structured clone.
+        const props = Object.create(layer.defaults) as Record<string, Value>;
         for (let j = 0; j < bound.length; j++) {
           const p = bound[j]!;
           const v = values[j];

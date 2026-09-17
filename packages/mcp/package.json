@@ -14,6 +14,7 @@
     "@sonobe/core": "*",
     "@sonobe/engine": "*",
     "@sonobe/patches": "*",
+    "@sonobe/renderer": "*",
     "zod": "^4.6.5"
   },
   "devDependencies": {

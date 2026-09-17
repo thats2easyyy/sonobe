@@ -1231,3 +1231,78 @@
   flex-wrap: wrap;
   gap: var(--space-2);
 }
+
+/* Variable Receiver: the variable it reads */
+.sb-insp-variable {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.sb-insp-variable .sb-insp-select {
+  flex: 1;
+  min-width: 0;
+}
+
+.sb-insp-section__body .sb-insp-variable__note {
+  padding: 0 0 var(--space-3);
+}
+
+/* A component's published ports */
+.sb-insp-interface {
+  flex-direction: column;
+  align-items: stretch;
+  gap: var(--space-5);
+}
+
+.sb-insp-interface__group {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.sb-insp-interface .sb-insp-note {
+  padding: 0;
+}
+
+.sb-insp-interface__port {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.sb-insp-interface__row,
+.sb-insp-interface__default {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  min-width: 0;
+}
+
+.sb-insp-interface__name {
+  flex: 1;
+  min-width: 0;
+}
+
+.sb-insp-interface__type {
+  flex: none;
+  color: var(--text-secondary);
+  font-size: var(--font-size-xs);
+}
+
+.sb-insp-interface__default {
+  padding-left: var(--space-6);
+}
+
+.sb-insp-interface__default-label {
+  flex: none;
+  width: 52px;
+  color: var(--text-secondary);
+  font-size: var(--font-size-xs);
+}
+
+.sb-insp-interface__default-control {
+  flex: 1;
+  min-width: 0;
+}

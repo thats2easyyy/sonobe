@@ -43,7 +43,7 @@ If you'd rather not use an extension, build the CLI bundle (`npm run build -w @s
 }
 ```
 
-To work on a project folder without the app (editing, simulation and saving; no screenshots):
+To work on a project folder without the app (editing, simulation, screenshots and saving):
 
 ```json
 {
@@ -60,6 +60,8 @@ To work on a project folder without the app (editing, simulation and saving; no 
   }
 }
 ```
+
+Headless screenshots are drawn without the app: text uses approximate font metrics, and video, Lottie and shaders show placeholders. They need the native rasterizer `@resvg/resvg-js`. `build.ts` copies the one installed for your platform into `dist/server/node_modules`, so build the extension on the platform it runs on.
 
 ## Troubleshooting
 

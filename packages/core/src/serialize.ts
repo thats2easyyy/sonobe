@@ -4,6 +4,7 @@
  * indent, trailing newline. Plus project folder IO through an FsAdapter.
  */
 
+import { fileNameKey, UNSAFE_IDS } from "./ids.ts";
 import { migrateFile, ProjectFormatError, type MigrateOptions } from "./migrations.ts";
 import { formatIssues, parseAssetsFile, parseComponentFile, parseProjectFile, type FormatIssue } from "./schema.ts";
 import type { AssetRecord, Component, Id, ProjectManifest, SonobeDocument } from "./types.ts";
@@ -78,7 +79,10 @@ function canonicalize(value: unknown, shape: Shape): unknown {
   const out: Record<string, unknown> = {};
   const put = (key: string, s: Shape) => {
     const v = canonicalize(value[key], s);
-    if (v !== undefined) out[key] = v;
+    if (v === undefined) return;
+    // `out["__proto__"] = v` would set the prototype and drop the key (json literal data can hold one).
+    if (key === "__proto__") Object.defineProperty(out, key, { value: v, enumerable: true, writable: true, configurable: true });
+    else out[key] = v;
   };
   switch (shape.kind) {
     case "object": {
@@ -179,7 +183,7 @@ const SCRIPT_FILE = /^[A-Za-z0-9_][A-Za-z0-9_.-]*$/;
 
 /** True for a script file name that can live in scripts/ ("js_1.js"). */
 export function isValidScriptFile(file: string): boolean {
-  return SCRIPT_FILE.test(file) && !file.includes("..");
+  return SCRIPT_FILE.test(file) && !file.includes("..") && !UNSAFE_IDS.includes(file);
 }
 
 /** Every file of a project folder, keyed by path relative to the folder. */
@@ -189,6 +193,39 @@ export function serializeDocument(doc: SonobeDocument): Record<string, string> {
   for (const file of Object.keys(doc.scripts).sort(byKey)) files[`${SCRIPTS_DIR}/${file}`] = doc.scripts[file]!;
   files[ASSETS_FILE] = serializeAssets(doc.assets);
   return files;
+}
+
+/** Groups of paths that differ only by case, so they'd be one file on macOS and Windows (sorted). */
+export function fileNameCollisions(paths: Iterable<string>): string[][] {
+  const groups = new Map<string, string[]>();
+  for (const path of paths) {
+    const key = fileNameKey(path);
+    const group = groups.get(key);
+    if (group) group.push(path);
+    else groups.set(key, [path]);
+  }
+  return [...groups.values()].filter((g) => g.length > 1).map((g) => g.sort(byKey));
+}
+
+/**
+ * Throw before anything is written when two document files differ only by case ("components/Card.json"
+ * and "components/card.json"). On case-insensitive file systems one would overwrite the other,
+ * losing a component or script and leaving a project that doesn't open.
+ */
+export function assertNoFileNameCollisions(paths: Iterable<string>): void {
+  const collisions = fileNameCollisions(paths);
+  if (!collisions.length) return;
+  const issues: FormatIssue[] = collisions.map((group) => ({
+    file: group[0]!,
+    path: "",
+    message: `${group.join(" and ")} would overwrite each other on macOS and Windows, where file names ignore case`,
+  }));
+  const [first] = collisions;
+  throw new ProjectFormatError(
+    "invalidFormat",
+    `Sonobe didn't save, because ${first!.join(" and ")} would overwrite each other on macOS and Windows, where file names ignore case. Recreate one of them under an id that differs by more than capitalization (for example with createComponent), then save again.`,
+    { file: first![0]!, issues },
+  );
 }
 
 function parseJsonText(text: string, file: string): unknown {
@@ -201,18 +238,34 @@ function parseJsonText(text: string, file: string): unknown {
 
 /** Parse (migrate + validate) a component file's text. Throws ProjectFormatError. */
 export function parseComponent(text: string, file = "component", options: MigrateOptions = {}): Component {
-  const json = migrateFile("component", parseJsonText(text, file), { ...options, file });
-  const r = parseComponentFile(json, file);
-  if (!r.ok) throw new ProjectFormatError("invalidFormat", `${file} has problems:\n${r.message}`, { file, issues: r.issues });
-  return r.value;
+  return withStackGuard(file, () => {
+    const json = migrateFile("component", parseJsonText(text, file), { ...options, file });
+    const r = parseComponentFile(json, file);
+    if (!r.ok) throw new ProjectFormatError("invalidFormat", `${file} has problems:\n${r.message}`, { file, issues: r.issues });
+    return r.value;
+  });
 }
 
 /** Parse (migrate + validate) project.json text. Throws ProjectFormatError. */
 export function parseProjectManifest(text: string, file = PROJECT_FILE, options: MigrateOptions = {}): ProjectManifest {
-  const json = migrateFile("project", parseJsonText(text, file), { ...options, file });
-  const r = parseProjectFile(json, file);
-  if (!r.ok) throw new ProjectFormatError("invalidFormat", `${file} has problems:\n${r.message}`, { file, issues: r.issues });
-  return r.value;
+  return withStackGuard(file, () => {
+    const json = migrateFile("project", parseJsonText(text, file), { ...options, file });
+    const r = parseProjectFile(json, file);
+    if (!r.ok) throw new ProjectFormatError("invalidFormat", `${file} has problems:\n${r.message}`, { file, issues: r.issues });
+    return r.value;
+  });
+}
+
+/** Deeply nested data the depth check doesn't cover (json literals, meta) can still overflow the parser's stack. */
+function withStackGuard<T>(file: string, parse: () => T): T {
+  try {
+    return parse();
+  } catch (err) {
+    if (err instanceof RangeError) {
+      throw new ProjectFormatError("corrupt", `${file} is nested too deeply to read. Flatten the deepest groups or data in it, then open it again.`, { file, cause: err });
+    }
+    throw err;
+  }
 }
 
 /** Build a document from project files (as produced by serializeDocument). Throws ProjectFormatError. */
@@ -230,8 +283,14 @@ export function parseDocumentFiles(files: Record<string, string>, options: Migra
     try {
       const component = parseComponent(files[path]!, path, options);
       const expected = path.slice(COMPONENTS_DIR.length + 1, -".json".length);
-      if (component.id !== expected) issues.push({ file: path, path: "id", message: `is "${component.id}" but the file is named ${expected}.json; rename one so they match` });
-      else components[component.id] = component;
+      if (component.id === expected) components[component.id] = component;
+      else if (fileNameKey(component.id) === fileNameKey(expected)) {
+        issues.push({
+          file: path,
+          path: "id",
+          message: `is "${component.id}" but the file is named ${expected}.json. The names differ only by capitalization, which macOS and Windows treat as one file, so two components whose ids differ only by case likely overwrote each other. Rename the file to ${component.id}.json; if a component is missing, recreate it under a different id`,
+        });
+      } else issues.push({ file: path, path: "id", message: `is "${component.id}" but the file is named ${expected}.json; rename one so they match` });
     } catch (err) {
       if (err instanceof ProjectFormatError && err.code === "invalidFormat") issues.push(...(err.issues.length ? err.issues : [{ file: path, path: "", message: err.message }]));
       else throw err;
@@ -273,6 +332,9 @@ export interface FsAdapter {
   list(dir: string): Promise<string[]>;
   mkdirp(dir: string): Promise<void>;
   exists(path: string): Promise<boolean>;
+  /** True for a regular file; false for folders and missing paths. Adapters without it are probed with exists and list. */
+  isFile?(path: string): Promise<boolean>;
+  /** Remove a file. Folders are never removed. */
   remove(path: string): Promise<void>;
 }
 
@@ -284,21 +346,79 @@ export function joinPath(...parts: string[]): string {
   return joined.length > 1 ? joined.replace(/\/$/, "") : joined;
 }
 
-/** Load a project folder. Throws ProjectFormatError for missing, too-new, corrupt or invalid files. */
-export async function loadProject(fs: FsAdapter, dir: string, options: MigrateOptions = {}): Promise<SonobeDocument> {
-  const files: Record<string, string> = {};
-  const projectPath = joinPath(dir, PROJECT_FILE);
-  if (!(await fs.exists(projectPath))) throw new ProjectFormatError("invalidFormat", `${dir} isn't a Sonobe project: project.json is missing.`, { file: PROJECT_FILE });
-  files[PROJECT_FILE] = await fs.readText(projectPath);
+const errorCodeOf = (err: unknown) => (!!err && typeof err === "object" ? (err as { code?: unknown }).code : undefined);
+
+async function isRegularFile(fs: FsAdapter, path: string): Promise<boolean> {
+  if (fs.isFile) return fs.isFile(path);
+  if (!(await fs.exists(path))) return false;
+  try {
+    return (await fs.list(path)).length === 0;
+  } catch {
+    return true;
+  }
+}
+
+/**
+ * Document files present in a project folder, as relative paths: project.json, components/*.json,
+ * scripts/<valid script names> and assets/assets.json. Only regular files count, so folders (like
+ * a scripts/lib/ someone keeps helpers in) are never read, rewritten or deleted.
+ */
+export async function listDocumentFiles(fs: FsAdapter, dir: string): Promise<string[]> {
+  const out: string[] = [];
+  if (await isRegularFile(fs, joinPath(dir, PROJECT_FILE))) out.push(PROJECT_FILE);
   for (const name of await fs.list(joinPath(dir, COMPONENTS_DIR))) {
-    if (name.endsWith(".json")) files[`${COMPONENTS_DIR}/${name}`] = await fs.readText(joinPath(dir, COMPONENTS_DIR, name));
+    if (name.endsWith(".json") && (await isRegularFile(fs, joinPath(dir, COMPONENTS_DIR, name)))) out.push(`${COMPONENTS_DIR}/${name}`);
   }
   for (const name of await fs.list(joinPath(dir, SCRIPTS_DIR))) {
-    if (isValidScriptFile(name)) files[`${SCRIPTS_DIR}/${name}`] = await fs.readText(joinPath(dir, SCRIPTS_DIR, name));
+    if (isValidScriptFile(name) && (await isRegularFile(fs, joinPath(dir, SCRIPTS_DIR, name)))) out.push(`${SCRIPTS_DIR}/${name}`);
   }
-  const assetsPath = joinPath(dir, ASSETS_FILE);
-  if (await fs.exists(assetsPath)) files[ASSETS_FILE] = await fs.readText(assetsPath);
-  return parseDocumentFiles(files, options);
+  if (await isRegularFile(fs, joinPath(dir, ASSETS_FILE))) out.push(ASSETS_FILE);
+  return out;
+}
+
+/**
+ * The text of every document file in a folder (see listDocumentFiles), keyed by relative path.
+ * Files that disappear while reading are skipped; other read failures become ProjectFormatErrors.
+ */
+export async function readProjectFiles(fs: FsAdapter, dir: string): Promise<Record<string, string>> {
+  const files: Record<string, string> = {};
+  for (const rel of await listDocumentFiles(fs, dir)) {
+    try {
+      files[rel] = await fs.readText(joinPath(dir, rel));
+    } catch (err) {
+      const code = errorCodeOf(err);
+      if (code === "ENOENT" || code === "EISDIR" || code === "ERR_FS_EISDIR") continue;
+      throw new ProjectFormatError("corrupt", `Couldn't read ${rel}: ${err instanceof Error ? err.message : String(err)}`, { file: rel, cause: err });
+    }
+  }
+  return files;
+}
+
+export interface LoadedProject {
+  doc: SonobeDocument;
+  /** The document files exactly as read (readProjectFiles). */
+  files: Record<string, string>;
+}
+
+/** Load a project folder along with the files it was read from. Throws ProjectFormatError. */
+export async function loadProjectFiles(fs: FsAdapter, dir: string, options: MigrateOptions = {}): Promise<LoadedProject> {
+  const files = await readProjectFiles(fs, dir);
+  if (files[PROJECT_FILE] === undefined) throw new ProjectFormatError("invalidFormat", `${dir} isn't a Sonobe project: project.json is missing.`, { file: PROJECT_FILE });
+  return { doc: parseDocumentFiles(files, options), files };
+}
+
+/** Load a project folder. Throws ProjectFormatError for missing, too-new, corrupt or invalid files. */
+export async function loadProject(fs: FsAdapter, dir: string, options: MigrateOptions = {}): Promise<SonobeDocument> {
+  return (await loadProjectFiles(fs, dir, options)).doc;
+}
+
+export interface SaveOptions {
+  /**
+   * Stale files this save may delete: typically the document files a session loaded or last wrote.
+   * Component or script files it never knew about (added by someone else) stay on disk. Default:
+   * any component or valid script file the document no longer has.
+   */
+  removable?: ReadonlySet<string>;
 }
 
 export interface SaveResult {
@@ -307,37 +427,52 @@ export interface SaveResult {
   /** Stale component and script files that were deleted. */
   removed: string[];
   unchanged: string[];
+  /** Every document file as saved (serializeDocument of the document). */
+  files: Record<string, string>;
 }
 
 /**
- * Save a document into a project folder. Writes only files whose content changed and
- * removes stale component and script files.
+ * Component and script files in a folder that `files` (a serialized document) doesn't have and a
+ * save would delete. Never project.json or assets.json, never folders or files with other names,
+ * never a path that differs from a saved file only by case (on macOS and Windows that's the same
+ * file), and, when `removable` is given, only paths in it.
  */
-export async function saveProject(fs: FsAdapter, dir: string, doc: SonobeDocument): Promise<SaveResult> {
+export async function staleProjectFiles(fs: FsAdapter, dir: string, files: Record<string, string>, removable?: ReadonlySet<string>): Promise<string[]> {
+  const saved = new Set(Object.keys(files).map(fileNameKey));
+  const out: string[] = [];
+  for (const rel of await listDocumentFiles(fs, dir)) {
+    if (rel === PROJECT_FILE || rel === ASSETS_FILE || rel in files || saved.has(fileNameKey(rel))) continue;
+    if (removable && !removable.has(rel)) continue;
+    out.push(rel);
+  }
+  return out;
+}
+
+/**
+ * Save a document into a project folder. Writes only files whose content changed and removes
+ * stale component and script files (see staleProjectFiles and SaveOptions.removable). Throws
+ * ProjectFormatError before writing anything when two files would differ only by case.
+ */
+export async function saveProject(fs: FsAdapter, dir: string, doc: SonobeDocument, options: SaveOptions = {}): Promise<SaveResult> {
   const files = serializeDocument(doc);
-  const result: SaveResult = { written: [], removed: [], unchanged: [] };
+  assertNoFileNameCollisions(Object.keys(files));
+  const result: SaveResult = { written: [], removed: [], unchanged: [], files };
   await fs.mkdirp(dir);
   await fs.mkdirp(joinPath(dir, COMPONENTS_DIR));
   await fs.mkdirp(joinPath(dir, ASSETS_DIR));
   if (Object.keys(doc.scripts).length) await fs.mkdirp(joinPath(dir, SCRIPTS_DIR));
   for (const [rel, text] of Object.entries(files)) {
     const path = joinPath(dir, rel);
-    if ((await fs.exists(path)) && (await fs.readText(path)) === text) {
+    if ((await isRegularFile(fs, path)) && (await fs.readText(path)) === text) {
       result.unchanged.push(rel);
       continue;
     }
     await fs.writeText(path, text);
     result.written.push(rel);
   }
-  for (const [sub, keep] of [
-    [COMPONENTS_DIR, (name: string) => !name.endsWith(".json") || `${COMPONENTS_DIR}/${name}` in files],
-    [SCRIPTS_DIR, (name: string) => `${SCRIPTS_DIR}/${name}` in files],
-  ] as const) {
-    for (const name of await fs.list(joinPath(dir, sub))) {
-      if (keep(name)) continue;
-      await fs.remove(joinPath(dir, sub, name));
-      result.removed.push(`${sub}/${name}`);
-    }
+  for (const rel of await staleProjectFiles(fs, dir, files, options.removable)) {
+    await fs.remove(joinPath(dir, rel));
+    result.removed.push(rel);
   }
   return result;
 }
@@ -391,11 +526,11 @@ export function createMemoryFs(initial: Record<string, string | Uint8Array> = {}
       const p = joinPath(path);
       return files.has(p) || dirs.has(p);
     },
+    async isFile(path) {
+      return files.has(joinPath(path));
+    },
     async remove(path) {
-      const p = joinPath(path);
-      files.delete(p);
-      for (const f of [...files.keys()]) if (f.startsWith(p + "/")) files.delete(f);
-      dirs.delete(p);
+      files.delete(joinPath(path));
     },
   };
 }

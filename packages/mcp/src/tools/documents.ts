@@ -6,7 +6,7 @@ import { componentCounts } from "../graph.ts";
 import { plural } from "../format.ts";
 import type { SonobeHost } from "../host.ts";
 import { success } from "../results.ts";
-import { ADDITIVE, READ_ONLY, UI_ONLY, type ToolContext } from "../server.ts";
+import { ADDITIVE, DESTRUCTIVE, READ_ONLY, UI_ONLY, type ToolContext } from "../server.ts";
 import { DocIdSchema, DocumentInfoOutputSchema } from "../schemas.ts";
 import { TEMPLATES } from "../templates.ts";
 
@@ -111,14 +111,20 @@ export function registerDocumentTools(tc: ToolContext): void {
         ref: z
           .string()
           .describe("docId of an open document, or a path to a .sonobe project folder."),
+        reload: z
+          .boolean()
+          .optional()
+          .describe(
+            "Headless: read the project folder again even though it's already open, dropping this session's unsaved changes and undo history (after save_document reports disk_changed and the person wants the version on disk). The Sonobe app reloads outside changes on its own.",
+          ),
       }),
       output: DocumentInfoOutputSchema,
       annotations: UI_ONLY,
     },
-    async ({ ref }) => {
-      const opened = await host.openDocument(ref);
+    async ({ ref, reload }) => {
+      const opened = await host.openDocument(ref, reload ? { reload: true } : {});
       const info = await documentInfo(host, opened.docId);
-      return success(`Opened.\n${info.text}`, info.data);
+      return success(`${reload ? "Reloaded from disk" : "Opened"}.\n${info.text}`, info.data);
     },
   );
 
@@ -178,22 +184,25 @@ export function registerDocumentTools(tc: ToolContext): void {
     {
       title: "Save document",
       description:
-        "Write the document to its project folder in canonical form (only changed files are written).",
-      input: z.object({ docId: DocIdSchema.optional() }),
-      annotations: {
-        readOnlyHint: false,
-        destructiveHint: false,
-        idempotentHint: true,
-        openWorldHint: false,
-      },
+        "Write the document to its project folder in canonical form (only changed files are written; component and script files the document no longer has are removed). Fails with disk_changed when the project changed outside this session since it was opened or last saved: ask the person, then reload (open_document with reload: true) or save again with force: true.",
+      input: z.object({
+        docId: DocIdSchema.optional(),
+        force: z
+          .boolean()
+          .optional()
+          .describe(
+            "Write over changes made outside this session (on disk, or not yet reviewed in the app). Those changes are lost, so only pass it after the person agrees.",
+          ),
+      }),
+      annotations: DESTRUCTIVE,
     },
-    async ({ docId }) => {
-      const r = await host.saveDocument(docId);
+    async ({ docId, force }) => {
+      const r = await host.saveDocument(docId, force ? { force: true } : {});
       const written = r.written.length
         ? `wrote ${r.written.join(", ")}`
         : "nothing changed on disk";
       return success(
-        `Saved ${r.docId} at revision ${r.revision}${r.path ? ` to ${r.path}` : ""}: ${written}${r.removed.length ? `; removed ${r.removed.join(", ")}` : ""}.`,
+        `Saved ${r.docId} at revision ${r.revision}${r.path ? ` to ${r.path}` : ""}: ${written}${r.removed.length ? `; removed ${r.removed.join(", ")}` : ""}${r.overwritten?.length ? `; replaced outside changes to ${r.overwritten.join(", ")}` : ""}.`,
         { ...r },
       );
     },

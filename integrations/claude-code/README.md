@@ -60,8 +60,9 @@ To work on a project folder without the app running, point the server at the fol
 claude mcp add sonobe-headless -- node "/absolute/path/to/sonobe/packages/cli/dist/sonobe.mjs" mcp --headless "/absolute/path/Checkout Flow.sonobe"
 ```
 
-- **Works:** editing, validation, simulation and saving. Changes save after every edit; pass `--no-autosave` to keep them in memory until Claude calls `save_document`.
-- **Unavailable:** screenshots and the editor selection.
+- **Works:** editing, validation, simulation, screenshots and saving. Changes save after every edit; pass `--no-autosave` to keep them in memory until Claude calls `save_document`. If the folder changes outside the session (the app, git, you), saving stops with `disk_changed` instead of writing over it, and Claude asks whether to reload or overwrite.
+- **Screenshots** are drawn without the app. Text uses approximate font metrics, and video, Lottie and shaders show placeholders. They need the native rasterizer `@resvg/resvg-js`: the build copies the one installed for your platform into `dist/node_modules`, so build the plugin on the platform it runs on.
+- **Unavailable:** the editor selection.
 
 ## Troubleshooting
 

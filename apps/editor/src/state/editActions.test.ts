@@ -1,5 +1,6 @@
 import { applyOps, createEmptyDocument, findLayer, type Op, type SonobeDocument } from "@sonobe/core";
 import { afterEach, describe, expect, it } from "vitest";
+import { estimatePatchSize } from "../panels/patch-editor/model/placement.ts";
 import { createManualScheduler } from "../runtime/scheduler.ts";
 import {
   arrangeLayers,
@@ -9,6 +10,7 @@ import {
   duplicateSelection,
   enterSelectedComponent,
   exitComponent,
+  freePasteOffset,
   groupSelection,
   pasteFragment,
   selectAll,
@@ -85,7 +87,21 @@ describe("edit actions", () => {
     expect(ids(s)).toEqual(["a", "b", "c", "b_2"]);
     expect(result.patches).toEqual(["tap_2"]);
     expect(main(s).patches.tap_2!.inputs.layer).toEqual({ layer: "a" });
-    expect(main(s).patches.tap_2!.ui).toEqual({ x: main(s).patches.tap!.ui.x + 24, y: main(s).patches.tap!.ui.y + 24 });
+    // The copy steps diagonally in 24 pt steps until it no longer covers the original.
+    const size = estimatePatchSize(s.document.getState().doc, registry, main(s).patches.tap!);
+    const step = Math.ceil(Math.min(size.width, size.height) / 24) * 24;
+    expect(main(s).patches.tap_2!.ui).toEqual({ x: main(s).patches.tap!.ui.x + step, y: main(s).patches.tap!.ui.y + step });
+  });
+
+  it("pastes patches where they were when that spot is free", () => {
+    const s = start(twoRects());
+    s.selection.getState().select({ patches: ["tap"] });
+    const fragment = copySelection(s)!;
+    expect(freePasteOffset(s.document.getState().doc, "main", fragment, registry)).not.toEqual([0, 0]);
+    s.document.getState().apply([{ op: "updatePatch", component: "main", id: "tap", ui: { x: 900, y: 900 } }], { label: "Move" });
+    expect(freePasteOffset(s.document.getState().doc, "main", fragment, registry)).toEqual([0, 0]);
+    const result = pasteFragment(s, fragment);
+    expect(main(s).patches[result.patches[0]!]!.ui).toEqual({ x: fragment.patches.tap!.ui.x, y: fragment.patches.tap!.ui.y });
   });
 
   it("groups layers around their bounds and ungroups them back", () => {

@@ -7,6 +7,8 @@ import { indices } from "./shared.ts";
 const MAX_ITEMS = 128;
 
 export const loopBuilderPatch = definePatch("loopBuilder", {
+  // Collecting the items is its pass-through: muted, it still lists them, so replication counts don't change.
+  mutedBehavior: "evaluate",
   evaluate(ctx) {
     const n = Math.min(MAX_ITEMS, Math.max(1, ctx.inputCount));
     const items = new Array<unknown>(n);

@@ -17,7 +17,7 @@ Shares a value under a name, so any Variable Receiver with that name can use it 
 A Variable Broadcaster gives a value a name. Every Variable Receiver set to the same name outputs that value on the same frame, as if a cable connected them.
 
 - **Value** is the value to share. Leave it unconnected and type a value to make a constant you change in one place.
-- **Name** (click the title) is the variable's name. Names are case-sensitive, and an empty name shares nothing.
+- **Name** is the variable's name: rename the patch (press Return on it, or type in the Inspector's name field), and every receiver that reads the variable follows. Names are case-sensitive, and an empty name shares nothing.
 - **Scope** decides who can receive it. **Local**, the default, reaches receivers in this patch graph only. **Global** also reaches receivers inside every component placed here, and inside their components, all the way down. Global variables never flow up to a parent.
 - **Type:** right-click to change the value's type. Receivers match on name, scope, and type.
 
@@ -28,7 +28,7 @@ A component can override a global variable for everything inside it by broadcast
 - Use variables for values many distant patches need, like scroll position or a dark-mode switch. For nearby patches, a cable or a Splitter is easier to follow.
 
 ## Coming from Origami
-Formerly Wireless Broadcaster. The variable's name lives in the patch's Name setting instead of its title.
+Formerly Wireless Broadcaster. As in Origami, the broadcaster's title is the variable's name; the document stores it as the patch's Name setting.
 
 ## Inputs
 
@@ -101,7 +101,7 @@ patch card_color optionPicker<color> option←dark_mode.output option0=#FFFFFFFF
 
 ## Common mistakes
 
-- A receiver outputs 0 and shows a warning: its name, scope, or type doesn't match the broadcaster, often because of different capitalization. Pick the variable from the receiver's name menu, which copies all three.
+- A receiver outputs 0 and shows a warning: its name, scope, or type doesn't match the broadcaster, often because of different capitalization. Pick the variable from the receiver's Variable menu in the Inspector, which copies all three.
 - Receivers inside a component get nothing: the broadcaster's scope is Local, which stops at the component's edge. Set Scope to Global.
 - Two broadcasters show an error: they share a name, scope, and type in the same patch graph, so receivers can't tell them apart. Rename one of them.
 

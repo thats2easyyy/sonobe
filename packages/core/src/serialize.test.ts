@@ -5,12 +5,14 @@ import { parseComponentFile, parseProjectFile } from "./schema.ts";
 import {
   createMemoryFs,
   loadProject,
+  loadProjectFiles,
   parseComponent,
   parseDocumentFiles,
   saveProject,
   serializeAssets,
   serializeComponent,
   serializeDocument,
+  staleProjectFiles,
   stringifyCanonical,
 } from "./serialize.ts";
 import { buildSampleDocument, mustApply } from "./testing/fixtures.ts";
@@ -254,5 +256,115 @@ describe("project IO", () => {
     const files = serializeDocument(buildSampleDocument());
     delete files["components/main.json"];
     expect(() => parseDocumentFiles(files)).toThrow(/root component is "main"/);
+  });
+
+  it("never loads or deletes folders and files in scripts/ it doesn't own", async () => {
+    const dir = "/work/Kept.sonobe";
+    const doc = mustApply(buildSampleDocument(), [
+      { op: "setScript", file: "js_1.js", source: "// one\n" },
+      { op: "setScript", file: "helpers.js", source: "// helpers\n" },
+    ]).doc;
+    const fs = createMemoryFs();
+    await saveProject(fs, dir, doc);
+    await fs.writeText(`${dir}/scripts/lib/math.js`, "export const x = 1;\n");
+    await fs.writeText(`${dir}/scripts/.eslintrc.json`, "{}\n");
+    await fs.writeText(`${dir}/scripts/my helper.js`, "// spaces\n");
+    await fs.writeText(`${dir}/components/sub/nested.json`, "{}\n");
+    await fs.mkdirp(`${dir}/components/old.json`);
+
+    const loaded = await loadProject(fs, dir);
+    expect(Object.keys(loaded.scripts).sort()).toEqual(["helpers.js", "js_1.js"]);
+
+    const removed = mustApply(loaded, [{ op: "setScript", file: "js_1.js", source: null }]).doc;
+    const result = await saveProject(fs, dir, removed);
+    expect(result.removed).toEqual(["scripts/js_1.js"]);
+    for (const kept of ["scripts/lib/math.js", "scripts/.eslintrc.json", "scripts/my helper.js", "scripts/helpers.js", "components/sub/nested.json"]) {
+      expect(await fs.exists(`${dir}/${kept}`)).toBe(true);
+    }
+    expect(await loadProject(fs, dir)).toStrictEqual(removed);
+  });
+
+  it("removes only stale files the caller says it owns", async () => {
+    const dir = "/work/Shared.sonobe";
+    const fs = createMemoryFs();
+    const { doc, files } = await (async () => {
+      await saveProject(fs, dir, mustApply(buildSampleDocument(), [{ op: "setScript", file: "mine.js", source: "// mine\n" }]).doc);
+      return loadProjectFiles(fs, dir);
+    })();
+    expect(Object.keys(files).sort()).toEqual(["assets/assets.json", "components/main.json", "project.json", "scripts/mine.js"]);
+    // Someone else adds a component and a script while this document is open.
+    await fs.writeText(`${dir}/components/button.json`, serializeComponent(newComponent({ id: "button", name: "Button", kind: "layerComponent" })));
+    await fs.writeText(`${dir}/scripts/theirs.js`, "// theirs\n");
+
+    const next = mustApply(doc, [{ op: "setScript", file: "mine.js", source: null }]).doc;
+    expect(await staleProjectFiles(fs, dir, serializeDocument(next))).toEqual(["components/button.json", "scripts/mine.js", "scripts/theirs.js"]);
+    const result = await saveProject(fs, dir, next, { removable: new Set(Object.keys(files)) });
+    expect(result.removed).toEqual(["scripts/mine.js"]);
+    expect(await fs.exists(`${dir}/components/button.json`)).toBe(true);
+    expect(await fs.exists(`${dir}/scripts/theirs.js`)).toBe(true);
+    expect(result.files).toEqual(serializeDocument(next));
+  });
+
+  it("refuses to save files whose names differ only by case, before writing anything", async () => {
+    const doc = mustApply(
+      buildSampleDocument(),
+      [
+        { op: "addComponent", component: { id: "card", name: "Card", kind: "layerComponent" } },
+        { op: "addComponent", component: { id: "Card", name: "Card 2", kind: "layerComponent" } },
+      ],
+      { lenient: true },
+    ).doc;
+    const fs = createMemoryFs();
+    await expect(saveProject(fs, "/work/Clash.sonobe", doc)).rejects.toMatchObject({
+      code: "invalidFormat",
+      message: expect.stringContaining("components/Card.json and components/card.json would overwrite each other"),
+    });
+    expect(fs.files.size).toBe(0);
+
+    const scripts = mustApply(buildSampleDocument(), [
+      { op: "setScript", file: "js_1.js", source: "// lower\n" },
+      { op: "setScript", file: "JS_1.js", source: "// upper\n" },
+    ], { lenient: true }).doc;
+    await expect(saveProject(fs, "/work/Clash.sonobe", scripts)).rejects.toMatchObject({ message: expect.stringContaining("scripts/JS_1.js and scripts/js_1.js") });
+  });
+
+  it("explains a component file whose id differs from its name only by case", () => {
+    const files = serializeDocument(mustApply(buildSampleDocument(), [{ op: "addComponent", component: { id: "card", name: "Card", kind: "layerComponent" } }]).doc);
+    files["components/Card.json"] = files["components/card.json"]!;
+    delete files["components/card.json"];
+    expect(() => parseDocumentFiles(files)).toThrow(/differ only by capitalization/);
+  });
+});
+
+describe("hostile files", () => {
+  const componentText = (patches: string) =>
+    `{"formatVersion":1,"id":"main","name":"Main","kind":"prototype","interface":{"inputs":{},"outputs":{}},"layers":[],"patches":${patches},"comments":[]}`;
+
+  it("reports a __proto__ patch id instead of silently dropping the patch", () => {
+    const r = parseComponentFile(componentText('{"__proto__":{"type":"switch","inputs":{},"ui":{"x":0,"y":0}},"other":{"type":"switch","inputs":{},"ui":{"x":0,"y":0}}}'), "components/main.json");
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.message).toContain("__proto__");
+  });
+
+  it("turns layers nested thousands deep into a format error with a short path", () => {
+    let layer: Record<string, unknown> = { id: "l2000", type: "group", name: "L", props: {} };
+    for (let i = 1999; i >= 1; i--) layer = { id: `l${i}`, type: "group", name: "L", props: {}, children: [layer] };
+    const text = `{"formatVersion":1,"id":"main","name":"Main","kind":"prototype","interface":{"inputs":{},"outputs":{}},"layers":[${JSON.stringify(layer)}],"patches":{},"comments":[]}`;
+    try {
+      parseComponent(text, "components/main.json");
+      expect.unreachable();
+    } catch (err) {
+      expect(err).toBeInstanceOf(ProjectFormatError);
+      expect((err as ProjectFormatError).code).toBe("invalidFormat");
+      const issue = (err as ProjectFormatError).issues[0]!;
+      expect(issue.message).toContain("nested more than 256 levels");
+      expect(issue.path.length).toBeLessThan(80);
+    }
+  });
+
+  it("keeps large coordinates stable across load and save", () => {
+    const doc = mustApply(buildSampleDocument(), [{ op: "updatePatch", id: "pop", ui: { x: -4345500469.207764, y: 4294967296.1234567 } }]).doc;
+    const files = serializeDocument(doc);
+    expect(serializeDocument(parseDocumentFiles(files))).toEqual(files);
   });
 });

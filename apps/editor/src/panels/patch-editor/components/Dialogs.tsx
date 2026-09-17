@@ -2,6 +2,7 @@
 
 import { findLayer, getPatchSpec, resolveNodePorts, type Id, type PatchSpec, type ValueType } from "@sonobe/core";
 import { isPatchImplemented } from "../../../state/registry.ts";
+import { singleKeyFor } from "../model/singleKey.ts";
 import { ArrowRight, CornerDownLeft, Layers } from "lucide-react";
 import { Fragment, useMemo, type CSSProperties, type ReactNode } from "react";
 import { useStore } from "zustand";
@@ -79,7 +80,7 @@ function PickerBody({ request, onClose, onPick }: { request: PickerRequest; onCl
             <span className="sb-pe-picker__name">{ctx.highlight("name", item.name)}</span>
             {alias && !ctx.matches.name && <span className="sb-pe-picker__alias">{ctx.highlight("aliases", alias.value)}</span>}
             {port && !ctx.matches.name && !alias && <span className="sb-pe-picker__alias">port: {ctx.highlight("ports", port.value)}</span>}
-            {item.spec.shortcut && <Kbd className="sb-pe-picker__key">{item.spec.shortcut.replace("Shift+", "⇧")}</Kbd>}
+            {singleKeyFor(registry, item.spec.type) && <Kbd className="sb-pe-picker__key" shortcut={singleKeyFor(registry, item.spec.type)} />}
           </div>
         );
       }}
@@ -162,9 +163,9 @@ function PatchPreview({ item, onInsert, replacing }: { item: PickerItem; onInser
           </div>
         </div>
       ) : null}
-      {spec.shortcut && (
+      {singleKeyFor(registry, spec.type) && (
         <div className="sb-pe-picker__shortcut">
-          Quick insert: hover the patch editor and press <Kbd>{spec.shortcut.replace("Shift+", "⇧")}</Kbd>
+          Quick insert: hover the patch editor and press <Kbd shortcut={singleKeyFor(registry, spec.type)} />
         </div>
       )}
     </div>

@@ -26,7 +26,7 @@ import {
   Undo2,
   Ungroup,
 } from "lucide-react";
-import { COMPONENT_INSTANCE_LAYER_TYPE, COMPONENT_PATCH_TYPE, findLayer } from "@sonobe/core";
+import { COMPONENT_INSTANCE_LAYER_TYPE, COMPONENT_PATCH_TYPE, describeHistoryEntry, findLayer } from "@sonobe/core";
 import type { Command, CommandRegistry } from "../ui/commands/commandRegistry.ts";
 import { isEditableTarget, type Platform } from "../ui/commands/shortcutManager.ts";
 import { toast, type ToastOptions } from "../ui/Toast.tsx";
@@ -48,8 +48,14 @@ import {
   toggleLayerVisibility,
   ungroupSelection,
   type ActionResult,
+  type PasteActionResult,
 } from "./editActions.ts";
+import { saveDocumentInteractively } from "./saveFlow.ts";
 import { currentComponentId, hasSelection } from "./selection.ts";
+import { historyStepTitle, undoMenuTitle } from "./undoLabels.ts";
+
+/** Why selection commands are greyed out in the palette. */
+const SELECT_SOMETHING = "Select a layer, patch, or comment first";
 import type { EditorSession } from "./session.ts";
 
 export type Notify = (options: ToastOptions) => void;
@@ -86,6 +92,21 @@ function reportAction(notify: Notify, result: ActionResult): void {
   notify({ title: result.message, ...(result.hint ? { description: result.hint } : {}), tone: "warn" });
 }
 
+/** A failed paste as a warning; a paste that had to leave component instances out as a note. */
+function reportPaste(notify: Notify, result: PasteActionResult): void {
+  reportAction(notify, result);
+  if (result.ok && result.droppedLayers) {
+    notify({ title: `${result.droppedLayers === 1 ? "1 layer" : `${result.droppedLayers} layers`} left out`, description: "Patch components hold only patches, so only the patches were pasted.", tone: "neutral" });
+  }
+  const n = result.droppedInstances ?? 0;
+  if (!result.ok || n === 0) return;
+  notify({
+    title: `${n === 1 ? "1 component instance" : `${n} component instances`} couldn't be pasted`,
+    description: "Its component isn't available here, or it would end up containing itself. Everything else was pasted.",
+    tone: "neutral",
+  });
+}
+
 function reportFile(notify: Notify, verb: string, result: FileResult): void {
   if (result.ok || result.cancelled) return;
   notify({ title: `Couldn't ${verb}`, description: result.error ?? "Something went wrong.", tone: "danger" });
@@ -105,6 +126,19 @@ export function registerDocumentCommands(registry: CommandRegistry, session: Edi
   const sel = () => session.selection.getState();
   const selectedLayers = () => sel().layers.length > 0;
 
+  /** Undo or redo, then say what changed (one toast that repeated steps update), with the way back. */
+  const historyStep = (verb: "Undo" | "Redo") => {
+    const result = verb === "Undo" ? doc().undo() : doc().redo();
+    if (!result.ok) {
+      if (result.errors[0]) notify({ title: result.errors[0].message, tone: "warn" });
+      return;
+    }
+    const entry = result.entries[0];
+    if (!entry) return;
+    const back = verb === "Undo" ? "edit.redo" : "edit.undo";
+    notify({ id: "history-step", title: historyStepTitle(verb, describeHistoryEntry(entry)), tone: "neutral", duration: 2600, action: { label: verb === "Undo" ? "Redo" : "Undo", onClick: () => void registry.run(back) } });
+  };
+
   const writeClipboard = async (fragment: ClipboardFragment) => {
     try {
       await clipboard?.writeText(serializeClipboardFragment(fragment));
@@ -117,30 +151,28 @@ export function registerDocumentCommands(registry: CommandRegistry, session: Edi
     {
       id: "edit.undo",
       title: "Undo",
+      label: () => undoMenuTitle("Undo", doc().undoLabel),
       category: "Edit",
       shortcut: "Mod+Z",
       icon: Undo2,
       keywords: ["back", "revert"],
       when: () => doc().canUndo,
-      run: () => {
-        const result = doc().undo();
-        if (!result.ok && result.errors[0]) notify({ title: result.errors[0].message, tone: "warn" });
-      },
+      disabledReason: "Nothing to undo",
+      run: () => historyStep("Undo"),
     },
     {
       id: "edit.redo",
       title: "Redo",
+      label: () => undoMenuTitle("Redo", doc().redoLabel),
       category: "Edit",
       shortcut: platform === "mac" ? "Mod+Shift+Z" : ["Mod+Shift+Z", "Ctrl+Y"],
       icon: Redo2,
       when: () => doc().canRedo,
-      run: () => {
-        const result = doc().redo();
-        if (!result.ok && result.errors[0]) notify({ title: result.errors[0].message, tone: "warn" });
-      },
+      disabledReason: "Nothing to redo",
+      run: () => historyStep("Redo"),
     },
     { id: "file.new", title: "New Prototype", category: "File", shortcut: "Mod+N", allowInInput: true, icon: FilePlus, keywords: ["blank", "create"], run: async () => void (await session.newProject()) },
-    { id: "file.open", title: "Open…", category: "File", shortcut: "Mod+O", allowInInput: true, icon: FolderOpen, keywords: ["project", "load"], when: () => session.host !== null, run: async () => reportFile(notify, "open the project", await session.openProject()) },
+    { id: "file.open", title: "Open…", category: "File", shortcut: "Mod+O", allowInInput: true, icon: FolderOpen, keywords: ["project", "load"], when: () => session.host !== null, disabledReason: "Opening projects needs the desktop app or a browser with folder access", run: async () => reportFile(notify, "open the project", await session.openProject()) },
     {
       id: "file.save",
       title: "Save",
@@ -150,7 +182,7 @@ export function registerDocumentCommands(registry: CommandRegistry, session: Edi
       icon: Save,
       when: () => session.host !== null,
       run: async () => {
-        const result = await doc().save();
+        const result = await saveDocumentInteractively(session.document, session.dialogs);
         reportFile(notify, "save", result);
       },
     },
@@ -161,6 +193,7 @@ export function registerDocumentCommands(registry: CommandRegistry, session: Edi
       category: "File",
       icon: FolderSearch,
       when: () => !!session.host?.capabilities.reveal && doc().projectPath !== null,
+      disabledReason: "Save the prototype to a folder first",
       run: () => {
         const path = doc().projectPath;
         if (path) session.host?.revealInFinder(path);
@@ -172,6 +205,7 @@ export function registerDocumentCommands(registry: CommandRegistry, session: Edi
       category: "Edit",
       icon: Copy,
       when: () => hasSelection(sel()),
+      disabledReason: SELECT_SOMETHING,
       run: async () => {
         const fragment = copySelection(session);
         if (fragment) await writeClipboard(fragment);
@@ -183,6 +217,7 @@ export function registerDocumentCommands(registry: CommandRegistry, session: Edi
       category: "Edit",
       icon: Scissors,
       when: () => hasSelection(sel()),
+      disabledReason: SELECT_SOMETHING,
       run: async () => {
         const result = cutSelection(session);
         reportAction(notify, result);
@@ -206,14 +241,14 @@ export function registerDocumentCommands(registry: CommandRegistry, session: Edi
           notify({ title: "There's nothing to paste.", description: "Copy layers or patches first.", tone: "neutral" });
           return;
         }
-        reportAction(notify, pasteFragment(session, fragment));
+        reportPaste(notify, pasteFragment(session, fragment));
       },
     },
-    { id: "edit.delete", title: "Delete", category: "Edit", shortcut: ["Backspace", "Delete"], icon: Trash2, keywords: ["remove"], when: () => hasSelection(sel()), run: () => reportAction(notify, deleteSelection(session)) },
-    { id: "edit.duplicate", title: "Duplicate", category: "Edit", shortcut: "Mod+D", icon: CopyPlus, keywords: ["copy"], when: () => sel().layers.length > 0 || sel().patches.length > 0, run: () => reportAction(notify, duplicateSelection(session)) },
+    { id: "edit.delete", title: "Delete", category: "Edit", shortcut: ["Backspace", "Delete"], icon: Trash2, keywords: ["remove"], when: () => hasSelection(sel()), disabledReason: SELECT_SOMETHING, run: () => reportAction(notify, deleteSelection(session)) },
+    { id: "edit.duplicate", title: "Duplicate", category: "Edit", shortcut: "Mod+D", icon: CopyPlus, keywords: ["copy"], when: () => sel().layers.length > 0 || sel().patches.length > 0, disabledReason: "Select layers or patches first", run: () => reportPaste(notify, duplicateSelection(session)) },
     { id: "edit.selectAll", title: "Select All", category: "Edit", shortcut: "Mod+A", run: () => selectAll(session) },
-    { id: "edit.deselectAll", title: "Deselect All", category: "Edit", shortcut: "Mod+Shift+A", when: () => hasSelection(sel()), run: () => sel().clear() },
-    { id: "layer.group", title: "Group Layers", category: "Layer", shortcut: "Mod+G", icon: Group, when: selectedLayers, run: () => reportAction(notify, groupSelection(session)) },
+    { id: "edit.deselectAll", title: "Deselect All", category: "Edit", shortcut: "Mod+Shift+A", when: () => hasSelection(sel()), disabledReason: "Nothing is selected", run: () => sel().clear() },
+    { id: "layer.group", title: "Group Layers", category: "Layer", shortcut: "Mod+G", icon: Group, when: selectedLayers, disabledReason: "Select layers first", run: () => reportAction(notify, groupSelection(session)) },
     {
       id: "layer.ungroup",
       title: "Ungroup",
@@ -224,6 +259,7 @@ export function registerDocumentCommands(registry: CommandRegistry, session: Edi
         const component = doc().doc.components[currentComponentId(sel())];
         return !!component && sel().layers.some((id) => findLayer(component.layers, id)?.layer.type === "group");
       },
+      disabledReason: "Select a group first",
       run: () => reportAction(notify, ungroupSelection(session)),
     },
     {
@@ -231,8 +267,9 @@ export function registerDocumentCommands(registry: CommandRegistry, session: Edi
       title: "Create Component",
       category: "Layer",
       shortcut: platform === "mac" ? "Mod+Ctrl+G" : "Ctrl+Alt+G",
-      keywords: ["reuse", "symbol", "extract"],
+      keywords: ["reuse", "symbol", "extract", "component"],
       when: () => sel().layers.length > 0 || sel().patches.length > 0,
+      disabledReason: "Select layers or patches first",
       run: () => reportAction(notify, createComponentFromSelection(session)),
     },
     {
@@ -249,15 +286,16 @@ export function registerDocumentCommands(registry: CommandRegistry, session: Edi
         const patch = s.patches.length === 1 ? component.patches[s.patches[0]!] : undefined;
         return layer?.type === COMPONENT_INSTANCE_LAYER_TYPE || patch?.type === COMPONENT_PATCH_TYPE;
       },
+      disabledReason: "Select a component instance first",
       run: () => void enterSelectedComponent(session),
     },
-    { id: "layer.exitComponent", title: "Exit Component", category: "Layer", shortcut: "Alt+Up", icon: LogOut, when: () => sel().componentPath.length > 1, run: () => void exitComponent(session) },
-    { id: "layer.toggleVisibility", title: "Hide or Show Layers", category: "Layer", shortcut: "Mod+Shift+H", icon: Eye, when: selectedLayers, run: () => reportAction(notify, toggleLayerVisibility(session)) },
-    { id: "layer.toggleLock", title: "Lock or Unlock Layers", category: "Layer", shortcut: "Mod+Shift+L", icon: Lock, when: selectedLayers, run: () => reportAction(notify, toggleLayerLock(session)) },
-    { id: "layer.bringForward", title: "Bring Forward", category: "Layer", shortcut: "Mod+Alt+Up", when: selectedLayers, run: () => reportAction(notify, arrangeLayers(session, "forward")) },
-    { id: "layer.sendBackward", title: "Send Backward", category: "Layer", shortcut: "Mod+Alt+Down", when: selectedLayers, run: () => reportAction(notify, arrangeLayers(session, "backward")) },
-    { id: "layer.bringToFront", title: "Bring to Front", category: "Layer", shortcut: "Mod+Alt+Shift+Up", when: selectedLayers, run: () => reportAction(notify, arrangeLayers(session, "front")) },
-    { id: "layer.sendToBack", title: "Send to Back", category: "Layer", shortcut: "Mod+Alt+Shift+Down", when: selectedLayers, run: () => reportAction(notify, arrangeLayers(session, "back")) },
+    { id: "layer.exitComponent", title: "Exit Component", category: "Layer", shortcut: "Alt+Up", icon: LogOut, when: () => sel().componentPath.length > 1, disabledReason: "You're not inside a component", run: () => void exitComponent(session) },
+    { id: "layer.toggleVisibility", title: "Hide or Show Layers", category: "Layer", shortcut: "Mod+Shift+H", icon: Eye, when: selectedLayers, disabledReason: "Select layers first", run: () => reportAction(notify, toggleLayerVisibility(session)) },
+    { id: "layer.toggleLock", title: "Lock or Unlock Layers", category: "Layer", shortcut: "Mod+Shift+L", icon: Lock, when: selectedLayers, disabledReason: "Select layers first", run: () => reportAction(notify, toggleLayerLock(session)) },
+    { id: "layer.bringForward", title: "Bring Forward", category: "Layer", shortcut: "Mod+Alt+Up", when: selectedLayers, disabledReason: "Select layers first", run: () => reportAction(notify, arrangeLayers(session, "forward")) },
+    { id: "layer.sendBackward", title: "Send Backward", category: "Layer", shortcut: "Mod+Alt+Down", when: selectedLayers, disabledReason: "Select layers first", run: () => reportAction(notify, arrangeLayers(session, "backward")) },
+    { id: "layer.bringToFront", title: "Bring to Front", category: "Layer", shortcut: "Mod+Alt+Shift+Up", when: selectedLayers, disabledReason: "Select layers first", run: () => reportAction(notify, arrangeLayers(session, "front")) },
+    { id: "layer.sendToBack", title: "Send to Back", category: "Layer", shortcut: "Mod+Alt+Shift+Down", when: selectedLayers, disabledReason: "Select layers first", run: () => reportAction(notify, arrangeLayers(session, "back")) },
   ];
   if (options.transport !== false) {
     commands.push(
@@ -333,7 +371,7 @@ export function attachClipboardEvents(target: Document, session: EditorSession, 
     const fragment = parseClipboardFragment(data?.getData(CLIPBOARD_MIME) || data?.getData("text/plain") || "");
     if (!fragment) return;
     e.preventDefault();
-    reportAction(notify, pasteFragment(session, fragment));
+    reportPaste(notify, pasteFragment(session, fragment));
   };
   target.addEventListener("copy", onCopy);
   target.addEventListener("cut", onCut);

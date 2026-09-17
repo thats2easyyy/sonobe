@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildDoc, createMockRegistry, createTestRuntime, port, sequenceDefinition, type ComponentInput } from "../testing/index.ts";
+import { buildDoc, createMockRegistry, createTestRuntime, defineMock, port, sequenceDefinition, type ComponentInput } from "../testing/index.ts";
 import { createEngineRegistry } from "./builtins.ts";
 import { compileDocument } from "./compile.ts";
 
@@ -71,6 +71,77 @@ describe("compile: topological order", () => {
     const rt = createTestRuntime(doc, reg);
     expect(values(rt, 5, ["d.output"]).flat()).toEqual([5, 5, 7, 7, 9]);
     expect(rt.needsNextFrame).toBe(false);
+  });
+
+  it("a feedback loop that keeps changing requests the next frame, whether Delay One Frame or a plain cable closes it", () => {
+    const needs = (rt: ReturnType<typeof createTestRuntime>, frames: number, address: string) => {
+      const out: [unknown, boolean][] = [];
+      for (let i = 0; i < frames; i++) {
+        rt.step();
+        out.push([rt.getValue(address), rt.needsNextFrame]);
+      }
+      return out;
+    };
+    const accumulator = buildDoc({
+      patches: {
+        acc: { type: "add", inputs: { value1: { link: "d.output" }, value2: 1 } },
+        d: { type: "delay1", inputs: { value: { link: "acc.output" } } },
+      },
+    });
+    expect(needs(createTestRuntime(accumulator), 4, "acc.output")).toEqual([
+      [1, true],
+      [2, true],
+      [3, true],
+      [4, true],
+    ]);
+    const cycle = buildDoc({
+      patches: {
+        acc: { type: "add", inputs: { value1: { link: "hold.output" }, value2: 1 } },
+        hold: { type: "splitter", inputs: { value: { link: "acc.output" } } },
+      },
+    });
+    expect(needs(createTestRuntime(cycle), 3, "acc.output")).toEqual([
+      [1, true],
+      [2, true],
+      [3, true],
+    ]);
+  });
+
+  it("a feedback loop settles once its back-edge reads stop changing", () => {
+    const minimum = defineMock({
+      type: "minimum",
+      name: "Minimum",
+      inputs: [port("a", "number", { default: 0 }), port("b", "number", { default: 0 })],
+      outputs: [port("output", "number")],
+      evaluate(ctx) {
+        ctx.output("output", Math.min(ctx.input<number>("a"), ctx.input<number>("b")));
+      },
+    });
+    const reg = createMockRegistry([minimum]);
+    const doc = buildDoc(
+      {
+        patches: {
+          acc: { type: "add", inputs: { value1: { link: "d.output" }, value2: 1 } },
+          clamp: { type: "minimum", inputs: { a: { link: "acc.output" }, b: 3 } },
+          d: { type: "delay1", inputs: { value: { link: "clamp.output" } } },
+        },
+      },
+      reg,
+    );
+    const rt = createTestRuntime(doc, reg);
+    const rows: [unknown, boolean][] = [];
+    for (let i = 0; i < 6; i++) {
+      rt.step();
+      rows.push([rt.getValue("clamp.output"), rt.needsNextFrame]);
+    }
+    expect(rows).toEqual([
+      [1, true],
+      [2, true],
+      [3, true],
+      [3, false],
+      [3, false],
+      [3, false],
+    ]);
   });
 
   it("rejects a direct self-edge with an issue and uses the port default", () => {

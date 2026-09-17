@@ -2,6 +2,7 @@
 
 import { useCallback, useLayoutEffect, useRef, useState, type CSSProperties, type RefCallback, type RefObject } from "react";
 import { useLatest } from "./hooks.ts";
+import { observeResize } from "./observeResize.ts";
 import { computePosition, splitPlacement, type Placement, type Rect, type Side } from "./position.ts";
 
 /** An element, or a virtual rect in viewport coordinates (e.g. a context-menu point). */
@@ -111,14 +112,12 @@ export function useFloating<T extends HTMLElement = HTMLDivElement>(options: Use
     const onChange = () => update();
     window.addEventListener("resize", onChange);
     window.addEventListener("scroll", onChange, true);
-    const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(onChange);
-    observer?.observe(element);
     const currentAnchor = latest.current.anchor;
-    if (isElementAnchor(currentAnchor)) observer?.observe(currentAnchor);
+    const disconnect = observeResize([element, isElementAnchor(currentAnchor) ? currentAnchor : null], onChange);
     return () => {
       window.removeEventListener("resize", onChange);
       window.removeEventListener("scroll", onChange, true);
-      observer?.disconnect();
+      disconnect();
     };
   }, [options.open, anchorKey, element, update, latest]);
 

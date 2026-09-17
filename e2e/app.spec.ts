@@ -1,9 +1,10 @@
 import { expect, test } from "@playwright/test";
-import { collectConsoleProblems, hook, openEditor, screenshot } from "./helpers.ts";
+import { collectConsoleProblems, collectUiWarnings, hook, openEditor, screenshot } from "./helpers.ts";
 
 test.describe("editor app", () => {
   test("loads the demo with no console errors", async ({ page }) => {
     const problems = collectConsoleProblems(page);
+    const warnings = await collectUiWarnings(page);
     await openEditor(page);
 
     await expect(page.getByRole("button", { name: /Photo Zoom/ })).toBeVisible();
@@ -16,9 +17,14 @@ test.describe("editor app", () => {
     // The console starts as a tab strip; the patch editor loads on its own.
     await expect(page.locator("#sb-hud")).toHaveAttribute("data-collapsed");
     await expect(page.locator(".sb-pe .react-flow__node").first()).toBeVisible();
+    // Tidy up, comment, and insert live in the Patches header instead of floating over nodes.
+    await expect(page.locator(".sb-app-patches .sb-panel__header").getByRole("toolbar", { name: "Patch editor tools" })).toBeVisible();
+    await expect(page.locator(".sb-pe .sb-pe-toolbar")).toHaveCount(0);
     await page.waitForTimeout(600);
     await screenshot(page, "app-01-default");
+    await page.locator(".sb-app-patches").screenshot({ path: "apps/editor/screenshots/stage4-patch-editor-01-default.png", animations: "disabled", caret: "hide" });
     expect(problems).toEqual([]);
+    expect(warnings).toEqual([]);
   });
 
   test("the console opens on the first error", async ({ page }) => {

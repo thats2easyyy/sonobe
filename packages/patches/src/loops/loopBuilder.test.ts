@@ -6,6 +6,13 @@ import { createPatchHarness, loopOf } from "../infra/index.ts";
 import { loopBuilderPatch } from "./loopBuilder.ts";
 
 describe("loopBuilder", () => {
+  it("still lists every item while muted, so replication counts don't change", () => {
+    expect(loopBuilderPatch.mutedBehavior).toBe("evaluate");
+    const result = runPatch(loopBuilderPatch, [{ item0: [0, 0], item1: [20, 0], item2: [40, 0] }], { typeParam: "point", inputCount: 3, muted: true });
+    expect(result.frames[0]!.outputs.loop).toEqual(loopOf([[0, 0], [20, 0], [40, 0]]));
+    expect(result.frames[0]!.outputs.index).toEqual(loopOf([0, 1, 2]));
+  });
+
   it("collects the items in order with matching indices", () => {
     const h = createPatchHarness(loopBuilderPatch, { typeParam: "text", inputCount: 3, inputs: { item0: "Ada", item1: "Grace", item2: "Katherine" } });
     const frame = h.step();

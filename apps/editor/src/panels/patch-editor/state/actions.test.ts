@@ -21,11 +21,12 @@ afterEach(() => {
   session = null;
 });
 
-function setup(doc: SonobeDocument = createDemoDocument(registry)) {
+function setup(doc: SonobeDocument = createDemoDocument(registry), componentId = "main") {
   session = createEditorSession({ host: null, registry, document: doc, autoplay: false, scheduler: createManualScheduler(), textMeasurer: "approximate" });
   const s = session;
-  const actions = createPatchEditorActions({ session: s, registry, componentId: "main", ui: createUiStore(), flow: () => null, pointer: () => null, openPicker: () => undefined, openInfo: () => undefined });
-  return { s, actions, main: () => s.document.getState().doc.components.main! };
+  const ui = createUiStore();
+  const actions = createPatchEditorActions({ session: s, registry, componentId, ui, flow: () => null, pointer: () => null, openPicker: () => undefined, openInfo: () => undefined });
+  return { s, actions, ui, main: () => s.document.getState().doc.components.main!, component: () => s.document.getState().doc.components[componentId]! };
 }
 
 describe("patch editor actions", () => {
@@ -90,3 +91,53 @@ describe("patch editor actions", () => {
     expect(patchEditorBridge(s).getState().targets.main).toBeUndefined();
   });
 });
+
+describe("patch editor actions: components and variables", () => {
+  const withComponent = () => applyOps(createDemoDocument(registry), [{ op: "createComponent", component: "main", name: "Heart Logic", patchIds: ["liked", "like_spring"] }], { registry }).doc;
+
+  it("groups patches into a component and starts naming the component", () => {
+    const { s, actions, ui, main } = setup();
+    s.selection.getState().select({ patches: ["liked", "like_spring"] });
+    actions.groupIntoComponent();
+    const instance = s.selection.getState().patches[0]!;
+    const componentId = main().patches[instance]!.component!;
+    expect(ui.getState()).toMatchObject({ editingTitle: instance, namingComponent: componentId });
+    actions.renameComponent(componentId, "Heart Logic");
+    expect(s.document.getState().doc.components[componentId]!.name).toBe("Heart Logic");
+    expect(s.document.getState().undoLabel).toBe("You: Rename component “Component” to “Heart Logic”");
+  });
+
+  it("publishes a port inside a component in one undo step, and ⌥P again unpublishes it", () => {
+    const { s, actions, component } = setup(withComponent(), "heart_logic");
+    expect(actions.publishPort("like_spring.bounciness", "in")).toBe(true);
+    expect(component().interface.inputs.bounciness).toMatchObject({ name: "Bounciness", type: "number" });
+    expect(component().patches.like_spring!.inputs.bounciness).toEqual({ link: "$in.bounciness" });
+    expect(s.document.getState().undoLabel).toBe("You: Publish Like Spring · Bounciness (2 ops)");
+    actions.togglePublish("like_spring.bounciness", "in");
+    expect(component().interface.inputs.bounciness).toBeUndefined();
+    expect(s.document.getState().undo().ok).toBe(true);
+    expect(component().interface.inputs.bounciness).toBeDefined();
+  });
+
+  it("refuses to publish at the prototype's root with a teaching message", () => {
+    const { actions, main } = setup();
+    expect(actions.publishPort("zoom_spring.bounciness", "in")).toBe(false);
+    expect(main().interface.inputs).toEqual({});
+  });
+
+  it("names new broadcasters, and jumps from a receiver to its broadcaster", () => {
+    const { s, actions, main } = setup();
+    const broadcaster = actions.insertPatch("variableBroadcaster", { x: 1400, y: 1400 })!;
+    const name = main().patches[broadcaster]!.settings?.name;
+    expect(name).toMatch(/^Variable( \d+)?$/);
+    const receiver = actions.insertPatch("variableReceiver", { x: 1700, y: 1400 })!;
+    actions.apply([{ op: "updatePatch", component: "main", id: receiver, settings: { name: name as string } }], "Pick variable");
+    expect(actions.jumpToBroadcaster(receiver)).toBe(true);
+    expect(s.selection.getState().patches).toEqual([broadcaster]);
+    expect(s.selection.getState().reveal).toMatchObject({ component: "main", ids: [broadcaster] });
+    const lonely = actions.insertPatch("variableReceiver", { x: 1700, y: 1700 })!;
+    actions.apply([{ op: "updatePatch", component: "main", id: lonely, settings: { name: "nobody" } }], "Pick variable");
+    expect(actions.jumpToBroadcaster(lonely)).toBe(false);
+  });
+});
+

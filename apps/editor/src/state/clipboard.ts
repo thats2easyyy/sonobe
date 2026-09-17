@@ -1,16 +1,22 @@
 /**
  * Clipboard fragments: layers, patches, and comments copied out of a component, with the assets
- * they use (records plus bytes when the host holds them) and the script files their JavaScript
- * patches run. Pasting turns a fragment into one atomic applyOps batch that recreates every item
- * with fresh ids (through "$ref" names) and rewires links between copied items to the copies. Links
- * to items that don't exist where you paste are dropped.
+ * they use (records plus bytes when the host holds them), the script files their JavaScript
+ * patches run, and the definitions of the components their instances show. Pasting turns a
+ * fragment into one atomic applyOps batch that recreates every item with fresh ids (through "$ref"
+ * names) and rewires links between copied items to the copies. Links to items that don't exist where
+ * you paste are dropped, and so are instances of components that can't be used there.
  */
 
 import {
+  COMPONENT_INSTANCE_LAYER_TYPE,
+  COMPONENT_PATCH_TYPE,
+  componentDependencies,
   componentItemIds,
   findLayer,
   formatAddress,
+  getOwn,
   isAssetInput,
+  isFileNameTaken,
   isLayerInput,
   isLinkInput,
   isValidId,
@@ -18,10 +24,12 @@ import {
   slugify,
   uniqueId,
   walkLayers,
+  wouldCreateComponentCycle,
   type ApplyOpsResult,
   type AssetRecord,
   type CommentNode,
   type Component,
+  type ComponentKind,
   type Id,
   type InputValue,
   type LayerNode,
@@ -57,6 +65,8 @@ export interface ClipboardFragment {
   scripts?: Record<string, string>;
   /** Asset bytes as base64, by asset id (when the host held them). */
   assetData?: Record<Id, string>;
+  /** Definitions of the components copied instances show, and of the components those contain, by id. */
+  components?: Record<Id, Component>;
 }
 
 export interface ClipboardItems {
@@ -89,7 +99,7 @@ export function topLevelLayerIds(component: Component, ids: readonly Id[]): Id[]
 function collectAssets(values: Iterable<InputValue>, doc: SonobeDocument, into: Record<Id, AssetRecord>): void {
   for (const v of values) {
     if (isAssetInput(v)) {
-      const record = doc.assets[v.asset];
+      const record = getOwn(doc.assets, v.asset);
       if (record) into[record.id] = clone(record);
     }
   }
@@ -102,31 +112,60 @@ export function scriptFileOf(node: PatchNode): string | undefined {
   return typeof file === "string" && file.trim() ? file.trim() : undefined;
 }
 
+/** Component ids that instance layers and component patches point at (not following components). */
+function componentRefs(layers: readonly LayerNode[], patches: Iterable<PatchNode>): Set<Id> {
+  const refs = new Set<Id>();
+  walkLayers(layers, (layer) => {
+    if (layer.type === COMPONENT_INSTANCE_LAYER_TYPE && layer.component !== undefined) refs.add(layer.component);
+  });
+  for (const node of patches) if (node.type === COMPONENT_PATCH_TYPE && node.component !== undefined) refs.add(node.component);
+  return refs;
+}
+
 /** Copy layers (with subtrees), patches, and comments out of a component. Null when nothing matches. */
 export function createClipboardFragment(doc: SonobeDocument, componentId: Id, items: ClipboardItems, options: ClipboardCopyOptions = {}): ClipboardFragment | null {
-  const component = doc.components[componentId];
+  const component = getOwn(doc.components, componentId);
   if (!component) return null;
   const layers = topLevelLayerIds(component, items.layers ?? []).map((id) => clone(findLayer(component.layers, id)!.layer));
   const patches: Record<Id, PatchNode> = {};
   for (const id of items.patches ?? []) {
-    const node = component.patches[id];
+    const node = getOwn(component.patches, id);
     if (node) patches[id] = clone(node);
   }
   const wantedComments = new Set(items.comments ?? []);
   const comments = component.comments.filter((c) => wantedComments.has(c.id)).map((c) => clone(c));
   if (layers.length === 0 && Object.keys(patches).length === 0 && comments.length === 0) return null;
+
+  // The components instances show, with everything they contain, so the paste works in another prototype too.
+  const components: Record<Id, Component> = {};
+  for (const id of componentRefs(layers, Object.values(patches))) {
+    for (const dep of [id, ...componentDependencies(doc, id)]) {
+      const c = getOwn(doc.components, dep);
+      if (c && !Object.hasOwn(components, dep)) components[dep] = clone(c);
+    }
+  }
+
   const assets: Record<Id, AssetRecord> = {};
-  walkLayers(layers, (layer) => collectAssets(Object.values(layer.props), doc, assets));
-  for (const node of Object.values(patches)) collectAssets(Object.values(node.inputs), doc, assets);
+  const scripts: Record<string, string> = {};
+  const collect = (layerNodes: readonly LayerNode[], patchNodes: Iterable<PatchNode>) => {
+    walkLayers(layerNodes, (layer) => collectAssets(Object.values(layer.props), doc, assets));
+    for (const node of patchNodes) {
+      collectAssets(Object.values(node.inputs), doc, assets);
+      const file = scriptFileOf(node);
+      const source = file !== undefined ? getOwn(doc.scripts, file) : undefined;
+      if (file !== undefined && source !== undefined) scripts[file] = source;
+    }
+  };
+  collect(layers, Object.values(patches));
+  for (const c of Object.values(components)) {
+    collect(c.layers, Object.values(c.patches));
+    collectAssets(Object.values(c.interface.inputs).flatMap((p) => (p.default === undefined ? [] : [p.default])), doc, assets);
+  }
+
   const fragment: ClipboardFragment = { type: CLIPBOARD_TYPE, formatVersion: CLIPBOARD_FORMAT_VERSION, source: { component: componentId }, layers, patches, assets };
   if (comments.length) fragment.comments = comments;
-
-  const scripts: Record<string, string> = {};
-  for (const node of Object.values(patches)) {
-    const file = scriptFileOf(node);
-    if (file !== undefined && doc.scripts[file] !== undefined) scripts[file] = doc.scripts[file]!;
-  }
   if (Object.keys(scripts).length) fragment.scripts = scripts;
+  if (Object.keys(components).length) fragment.components = components;
 
   if (options.readAssetBytes) {
     let budget = options.maxAssetBytes ?? MAX_CLIPBOARD_ASSET_BYTES;
@@ -174,6 +213,26 @@ function isCommentShape(v: unknown): v is CommentNode {
   );
 }
 
+const COMPONENT_KINDS: readonly string[] = ["prototype", "layerComponent", "patchComponent"];
+
+function isComponentShape(v: unknown): v is Component {
+  return (
+    isObject(v) &&
+    typeof v.id === "string" &&
+    typeof v.name === "string" &&
+    typeof v.kind === "string" &&
+    COMPONENT_KINDS.includes(v.kind) &&
+    isObject(v.interface) &&
+    isObject(v.interface.inputs) &&
+    isObject(v.interface.outputs) &&
+    Array.isArray(v.layers) &&
+    v.layers.every(isLayerNodeShape) &&
+    isObject(v.patches) &&
+    Object.values(v.patches).every(isPatchNodeShape) &&
+    Array.isArray(v.comments)
+  );
+}
+
 const isStringMap = (v: unknown): v is Record<string, string> => isObject(v) && Object.values(v).every((s) => typeof s === "string");
 
 /** Parse clipboard text (or an object) into a fragment; null when it isn't one. */
@@ -195,13 +254,16 @@ export function parseClipboardFragment(input: unknown): ClipboardFragment | null
   const comments = value.comments ?? [];
   const scripts = value.scripts ?? {};
   const assetData = value.assetData ?? {};
+  const components = value.components ?? {};
   if (!Array.isArray(layers) || !layers.every(isLayerNodeShape) || !isObject(patches) || !Object.values(patches).every(isPatchNodeShape) || !isObject(assets)) return null;
   if (!Array.isArray(comments) || !comments.every(isCommentShape) || !isStringMap(scripts) || !isStringMap(assetData)) return null;
+  if (!isObject(components) || !Object.entries(components).every(([id, c]) => isComponentShape(c) && c.id === id)) return null;
   const fragment: ClipboardFragment = { type: CLIPBOARD_TYPE, formatVersion: CLIPBOARD_FORMAT_VERSION, layers: clone(layers), patches: clone(patches as Record<Id, PatchNode>), assets: clone(assets as Record<Id, AssetRecord>) };
   if (isObject(value.source) && typeof value.source.component === "string") fragment.source = { component: value.source.component };
   if (comments.length) fragment.comments = clone(comments);
   if (Object.keys(scripts).length) fragment.scripts = { ...scripts };
   if (Object.keys(assetData).length) fragment.assetData = { ...assetData };
+  if (Object.keys(components).length) fragment.components = clone(components as Record<Id, Component>);
   return fragment;
 }
 
@@ -214,6 +276,8 @@ export interface PasteOptions {
   patchOffset?: readonly [number, number];
   /** Ids that can't be used even though they're free (removed earlier this session). */
   isReserved?: (id: Id) => boolean;
+  /** Fragment components to treat as unavailable, so their instances aren't pasted (applyPastePlan's fallback). */
+  excludeComponents?: ReadonlySet<Id>;
 }
 
 export interface PastePlan {
@@ -234,6 +298,14 @@ export interface PastePlan {
   scriptFiles: Map<string, string>;
   /** Asset bytes to hand to the host, by asset file name. */
   assetBytes: Record<string, Uint8Array>;
+  /** Fragment component id → the component pasted instances show (a same-id, same-kind one here is reused). */
+  componentIds: Map<Id, Id>;
+  /** Op index of each addComponent op → the fragment component it adds. */
+  componentOps: Map<number, Id>;
+  /** Instances left out: their component isn't available here, is the wrong kind, or would contain itself. */
+  droppedInstances: number;
+  /** The same paste with more fragment components treated as unavailable. */
+  without?: (componentIds: ReadonlySet<Id>) => PastePlan;
 }
 
 const layerRef = (id: Id) => `l_${id}`;
@@ -253,12 +325,124 @@ function uniqueScriptFile(file: string, isTaken: (name: string) => boolean): str
 
 /** Build the ops that paste a fragment into a component. */
 export function planPaste(doc: SonobeDocument, componentId: Id, fragment: ClipboardFragment, options: PasteOptions = {}): PastePlan {
-  const target = doc.components[componentId];
+  const target = getOwn(doc.components, componentId);
+  const excluded = options.excludeComponents ?? new Set<Id>();
+  const embedded = fragment.components ?? {};
+
+  // Components: reuse a component with the same id and kind; add the fragment's definition otherwise
+  // (under a new id when that id is taken by another kind, or by a name differing only by case).
+  const componentIds = new Map<Id, Id>();
+  const unavailable = new Set<Id>();
+  const kindOf = new Map<Id, ComponentKind>();
+  const added = new Map<Id, Component>();
+  const takenComponents = Object.keys(doc.components);
+  const resolving = new Set<Id>();
+  const resolveComponent = (id: Id): Id | undefined => {
+    if (componentIds.has(id)) return componentIds.get(id);
+    if (unavailable.has(id) || excluded.has(id) || resolving.has(id)) return undefined;
+    const def = getOwn(embedded, id);
+    const existing = getOwn(doc.components, id);
+    if (existing && (!def || existing.kind === def.kind)) {
+      componentIds.set(id, id);
+      kindOf.set(id, existing.kind);
+      return id;
+    }
+    if (!def) {
+      unavailable.add(id);
+      return undefined;
+    }
+    resolving.add(id);
+    const depsOk = [...componentRefs(def.layers, Object.values(def.patches))].every((dep) => resolveComponent(dep) !== undefined);
+    resolving.delete(id);
+    if (!depsOk) {
+      unavailable.add(id);
+      return undefined;
+    }
+    const newId = isFileNameTaken(takenComponents, id) ? uniqueId(isValidId(id) ? id : slugify(id, "component"), (c) => isFileNameTaken(takenComponents, c)) : id;
+    takenComponents.push(newId);
+    componentIds.set(id, newId);
+    kindOf.set(newId, def.kind);
+    added.set(id, def); // Dependencies were added first, so this order adds them before the components that use them.
+    return newId;
+  };
+  for (const ref of componentRefs(fragment.layers, Object.values(fragment.patches))) resolveComponent(ref);
+
+  /** A definition with the ids of the components it instantiates remapped (and, when given, assets and scripts). */
+  const remapDefinition = (fragmentId: Id, def: Component, values?: { literal: (v: InputValue) => InputValue; scriptFiles: Map<string, string> }): Component => {
+    const out = clone(def);
+    out.id = componentIds.get(fragmentId)!;
+    walkLayers(out.layers, (layer) => {
+      if (layer.type === COMPONENT_INSTANCE_LAYER_TYPE && layer.component !== undefined) layer.component = componentIds.get(layer.component) ?? layer.component;
+      if (values) for (const [key, value] of Object.entries(layer.props)) layer.props[key] = values.literal(value);
+    });
+    for (const node of Object.values(out.patches)) {
+      if (node.type === COMPONENT_PATCH_TYPE && node.component !== undefined) node.component = componentIds.get(node.component) ?? node.component;
+      if (!values) continue;
+      for (const [key, value] of Object.entries(node.inputs)) node.inputs[key] = values.literal(value);
+      const file = scriptFileOf(node);
+      const renamed = file !== undefined ? values.scriptFiles.get(file) : undefined;
+      if (renamed !== undefined && renamed !== file) node.settings = { ...node.settings, script: renamed };
+    }
+    if (values) for (const port of Object.values(out.interface.inputs)) if (port.default !== undefined) port.default = values.literal(port.default);
+    return out;
+  };
+  const merged: SonobeDocument = { ...doc, components: { ...doc.components } };
+  for (const [fragmentId, def] of added) merged.components[componentIds.get(fragmentId)!] = remapDefinition(fragmentId, def);
+
+  /** The component a pasted instance can show here, or undefined when it has to be left out. */
+  const usableTarget = (ref: Id | undefined, kind: ComponentKind): Id | undefined => {
+    const id = ref === undefined ? undefined : componentIds.get(ref);
+    if (id === undefined || kindOf.get(id) !== kind) return undefined;
+    return target && wouldCreateComponentCycle(merged, componentId, id) ? undefined : id;
+  };
+  let droppedInstances = 0;
+  const droppedLayers = new Set<Id>();
+  const instanceTargets = new Map<Id, Id>();
+  walkLayers(fragment.layers, (layer) => {
+    if (layer.type !== COMPONENT_INSTANCE_LAYER_TYPE) return;
+    const id = usableTarget(layer.component, "layerComponent");
+    if (id !== undefined) {
+      instanceTargets.set(layer.id, id);
+      return;
+    }
+    droppedInstances++;
+    walkLayers([layer], (inner) => {
+      droppedLayers.add(inner.id);
+    });
+    return "skip";
+  });
+  const droppedPatches = new Set<Id>();
+  const patchTargets = new Map<Id, Id>();
+  for (const [id, node] of Object.entries(fragment.patches)) {
+    if (node.type !== COMPONENT_PATCH_TYPE) continue;
+    const componentTarget = usableTarget(node.component, "patchComponent");
+    if (componentTarget !== undefined) patchTargets.set(id, componentTarget);
+    else {
+      droppedPatches.add(id);
+      droppedInstances++;
+    }
+  }
+  // Only definitions a pasted instance still needs (and what they contain) get added.
+  const needed = new Set<Id>();
+  const need = (targetId: Id) => {
+    for (const [fragmentId, def] of added) {
+      if (componentIds.get(fragmentId) !== targetId || needed.has(fragmentId)) continue;
+      needed.add(fragmentId);
+      for (const dep of componentRefs(def.layers, Object.values(def.patches))) {
+        const depTarget = componentIds.get(dep);
+        if (depTarget !== undefined) need(depTarget);
+      }
+    }
+  };
+  for (const id of [...instanceTargets.values(), ...patchTargets.values()]) need(id);
+  const neededDefs = [...added].filter(([fragmentId]) => needed.has(fragmentId));
+
   const fragmentLayerIds = new Set<Id>();
   walkLayers(fragment.layers, (layer) => {
-    fragmentLayerIds.add(layer.id);
+    if (!droppedLayers.has(layer.id)) fragmentLayerIds.add(layer.id);
   });
-  const existsPatch = (id: Id) => !!target && id in target.patches;
+  const pastedPatches = Object.entries(fragment.patches).filter(([id]) => !droppedPatches.has(id));
+  const existsPatch = (id: Id) => !!target && Object.hasOwn(target.patches, id);
   const existsLayer = (id: Id) => !!target && !!findLayer(target.layers, id);
 
   const ops: Op[] = [];
@@ -276,7 +460,7 @@ export function planPaste(doc: SonobeDocument, componentId: Id, fragment: Clipbo
       if (bytes) assetBytes[record.file] = bytes;
     }
     const same = (a: AssetRecord) => a.file === record.file || (!!record.sha256 && a.sha256 === record.sha256);
-    const existing = doc.assets[id];
+    const existing = getOwn(doc.assets, id);
     if (existing && same(existing)) {
       assetIds.set(id, id);
       continue;
@@ -292,18 +476,48 @@ export function planPaste(doc: SonobeDocument, componentId: Id, fragment: Clipbo
     ops.push({ op: "addAsset", asset: { ...clone(record), id: newId } });
   }
 
-  // Script files: reuse identical sources, rename files that exist with different code.
+  // Script files: a pasted JavaScript patch gets its own copy of its script (like duplicating one in
+  // Origami), unless an identical file here isn't used by any patch yet. Patches pasted together that
+  // shared a file share the copy. Names that differ only by case count as taken.
   const scriptFiles = new Map<string, string>();
-  const takenScripts = new Set(Object.keys(doc.scripts));
+  const takenScripts = Object.keys(doc.scripts);
+  const usedScripts = new Set<string>();
+  for (const c of Object.values(doc.components)) {
+    for (const node of Object.values(c.patches)) {
+      const file = scriptFileOf(node);
+      if (file !== undefined) usedScripts.add(file);
+    }
+  }
+  const neededScripts = new Set<string>();
+  for (const node of [...pastedPatches.map(([, n]) => n), ...neededDefs.flatMap(([, def]) => Object.values(def.patches))]) {
+    const file = scriptFileOf(node);
+    if (file !== undefined) neededScripts.add(file);
+  }
   for (const [file, source] of Object.entries(fragment.scripts ?? {})) {
-    if (doc.scripts[file] === source) {
+    if (!neededScripts.has(file)) continue;
+    if (getOwn(doc.scripts, file) === source && !usedScripts.has(file)) {
       scriptFiles.set(file, file);
       continue;
     }
-    const name = doc.scripts[file] === undefined && !takenScripts.has(file) ? file : uniqueScriptFile(file, (candidate) => takenScripts.has(candidate));
-    takenScripts.add(name);
+    const name = !isFileNameTaken(takenScripts, file) ? file : uniqueScriptFile(file, (candidate) => isFileNameTaken(takenScripts, candidate));
+    takenScripts.push(name);
     scriptFiles.set(file, name);
     ops.push({ op: "setScript", file: name, source });
+  }
+
+  const literal = (value: InputValue): InputValue => {
+    if (isAssetInput(value)) {
+      const id = assetIds.get(value.asset);
+      if (id !== undefined && id !== value.asset) return { ...clone(value), asset: id };
+    }
+    return clone(value);
+  };
+
+  // Components before the layers and patches that show them (assets and scripts they use come first).
+  const componentOps = new Map<number, Id>();
+  for (const [fragmentId, def] of neededDefs) {
+    componentOps.set(ops.length, fragmentId);
+    ops.push({ op: "addComponent", component: remapDefinition(fragmentId, def, { literal, scriptFiles }) });
   }
 
   const remapLink = (link: string): string | undefined => {
@@ -311,13 +525,15 @@ export function planPaste(doc: SonobeDocument, componentId: Id, fragment: Clipbo
     if (!parsed) return undefined;
     switch (parsed.kind) {
       case "patch":
-        if (fragment.patches[parsed.id]) return formatAddress({ ...parsed, id: `$${patchRef(parsed.id)}` });
+        if (droppedPatches.has(parsed.id)) return undefined;
+        if (Object.hasOwn(fragment.patches, parsed.id)) return formatAddress({ ...parsed, id: `$${patchRef(parsed.id)}` });
         return existsPatch(parsed.id) ? link : undefined;
       case "layer":
+        if (droppedLayers.has(parsed.id)) return undefined;
         if (fragmentLayerIds.has(parsed.id)) return formatAddress({ ...parsed, id: `$${layerRef(parsed.id)}` });
         return existsLayer(parsed.id) ? link : undefined;
       case "componentInput":
-        return target?.interface.inputs[parsed.key] ? link : undefined;
+        return target && getOwn(target.interface.inputs, parsed.key) ? link : undefined;
       case "componentOutput":
         return undefined;
     }
@@ -328,19 +544,13 @@ export function planPaste(doc: SonobeDocument, componentId: Id, fragment: Clipbo
       return link === undefined ? undefined : { link };
     }
     if (isLayerInput(value)) {
+      if (droppedLayers.has(value.layer)) return undefined;
       if (fragmentLayerIds.has(value.layer)) return { layer: `$${layerRef(value.layer)}` };
       return existsLayer(value.layer) ? value : undefined;
     }
     return value;
   };
   const deferred = (value: InputValue) => isLinkInput(value) || isLayerInput(value);
-  const literal = (value: InputValue): InputValue => {
-    if (isAssetInput(value)) {
-      const id = assetIds.get(value.asset);
-      if (id !== undefined && id !== value.asset) return { ...clone(value), asset: id };
-    }
-    return clone(value);
-  };
 
   const layerRefs = new Map<Id, string>();
   const patchRefs = new Map<Id, string>();
@@ -357,7 +567,8 @@ export function planPaste(doc: SonobeDocument, componentId: Id, fragment: Clipbo
     return id;
   };
 
-  const toNewLayer = (layer: LayerNode): NewLayer => {
+  const toNewLayer = (layer: LayerNode): NewLayer | undefined => {
+    if (droppedLayers.has(layer.id)) return undefined;
     const props: Record<string, InputValue> = {};
     for (const [key, value] of Object.entries(layer.props)) {
       if (!deferred(value)) props[key] = literal(value);
@@ -367,20 +578,25 @@ export function planPaste(doc: SonobeDocument, componentId: Id, fragment: Clipbo
       }
     }
     const nl: NewLayer = { ref: layerRef(layer.id), id: assign(layer.id), type: layer.type, name: layer.name, props };
-    if (layer.component !== undefined) nl.component = layer.component;
-    if (layer.children?.length) nl.children = layer.children.map(toNewLayer);
+    if (layer.component !== undefined) nl.component = instanceTargets.get(layer.id) ?? layer.component;
+    const children = (layer.children ?? []).map(toNewLayer).filter((c): c is NewLayer => c !== undefined);
+    if (children.length) nl.children = children;
     return nl;
   };
 
-  fragment.layers.forEach((layer, i) => {
+  let pastedIndex = 0;
+  for (const layer of fragment.layers) {
+    const nl = toNewLayer(layer);
+    if (!nl) continue;
     layerRefs.set(layer.id, layerRef(layer.id));
-    const op: Op = { op: "addLayer", component: componentId, parent: options.parent ?? null, layer: toNewLayer(layer) };
-    if (options.index !== undefined) op.index = options.index + i;
+    const op: Op = { op: "addLayer", component: componentId, parent: options.parent ?? null, layer: nl };
+    if (options.index !== undefined) op.index = options.index + pastedIndex;
+    pastedIndex++;
     ops.push(op);
-  });
+  }
 
   const [dx, dy] = options.patchOffset ?? [0, 0];
-  for (const [id, node] of Object.entries(fragment.patches)) {
+  for (const [id, node] of pastedPatches) {
     patchRefs.set(id, patchRef(id));
     const inputs: Record<string, InputValue> = {};
     for (const [key, value] of Object.entries(node.inputs)) {
@@ -400,7 +616,7 @@ export function planPaste(doc: SonobeDocument, componentId: Id, fragment: Clipbo
       const renamed = file !== undefined ? scriptFiles.get(file) : undefined;
       if (renamed !== undefined && renamed !== file) np.settings = { ...np.settings, script: renamed };
     }
-    if (node.component !== undefined) np.component = node.component;
+    if (node.component !== undefined) np.component = patchTargets.get(id) ?? node.component;
     ops.push({ op: "addPatch", component: componentId, patch: np });
     if (node.muted || node.ui.collapsed || node.ui.color !== undefined) {
       const update: Op = { op: "updatePatch", component: componentId, id: `$${patchRef(id)}` };
@@ -422,7 +638,21 @@ export function planPaste(doc: SonobeDocument, componentId: Id, fragment: Clipbo
 
   const linkStart = ops.length;
   ops.push(...later);
-  return { ops, linkStart, layerRefs, patchRefs, commentRefs, ids, assetIds, scriptFiles, assetBytes };
+  return {
+    ops,
+    linkStart,
+    layerRefs,
+    patchRefs,
+    commentRefs,
+    ids,
+    assetIds,
+    scriptFiles,
+    assetBytes,
+    componentIds,
+    componentOps,
+    droppedInstances,
+    without: (more) => planPaste(doc, componentId, fragment, { ...options, excludeComponents: new Set([...excluded, ...more]) }),
+  };
 }
 
 export interface PasteOutcome {
@@ -433,21 +663,38 @@ export interface PasteOutcome {
   comments: Id[];
   /** Links that couldn't be restored where the items were pasted. */
   droppedLinks: number;
+  /** Component instances that couldn't be pasted (see PastePlan.droppedInstances). */
+  droppedInstances: number;
 }
 
-/** Apply a paste plan, dropping link ops that fail validation (e.g. a type mismatch in another component). */
+/**
+ * Apply a paste plan, dropping link ops that fail validation (e.g. a type mismatch in another
+ * component). When a component the fragment carries can't be added here, the paste goes ahead
+ * without that component's instances.
+ */
 export function applyPastePlan(plan: PastePlan, apply: (ops: Op[]) => ApplyOpsResult): PasteOutcome {
+  let current = plan;
   let ops = plan.ops;
   let dropped = 0;
+  const excluded = new Set<Id>();
   const refIds = (result: ApplyOpsResult, refs: Map<Id, string>) => [...refs.values()].map((ref) => result.idMap[ref]).filter((id): id is Id => id !== undefined);
   for (;;) {
     const result = apply(ops);
+    const droppedInstances = current.droppedInstances ?? 0;
     if (result.ok) {
-      return { result, layers: refIds(result, plan.layerRefs), patches: refIds(result, plan.patchRefs), comments: refIds(result, plan.commentRefs ?? new Map()), droppedLinks: dropped };
+      return { result, layers: refIds(result, current.layerRefs), patches: refIds(result, current.patchRefs), comments: refIds(result, current.commentRefs ?? new Map()), droppedLinks: dropped, droppedInstances };
     }
     const failed = result.results.find((r) => !r.ok && r.error?.code !== "skipped");
     const index = failed?.index ?? result.errors[0]?.opIndex;
-    if (index === undefined || index < plan.linkStart || index >= ops.length) return { result, layers: [], patches: [], comments: [], droppedLinks: dropped };
+    const failedComponent = index !== undefined && index < current.linkStart ? current.componentOps?.get(index) : undefined;
+    if (failedComponent !== undefined && current.without && !excluded.has(failedComponent)) {
+      excluded.add(failedComponent);
+      current = current.without(excluded);
+      ops = current.ops;
+      dropped = 0;
+      continue;
+    }
+    if (index === undefined || index < current.linkStart || index >= ops.length) return { result, layers: [], patches: [], comments: [], droppedLinks: dropped, droppedInstances };
     ops = ops.filter((_, i) => i !== index);
     dropped++;
   }

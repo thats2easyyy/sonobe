@@ -61,7 +61,7 @@ npx vitest run examples/run.test.ts -t 04-carousel-paging
 - **Let flings travel.** Paging always moves one page per fling. For free scrolling that snaps, use Scroll X Free and snap the release with Snap (Mode Step, Step 332), like the bottom sheet does.
 - **Scale the side cards.** Feed `trips_scroll.x` and each card's index into a Math Expression that measures how far the card is from the center, then map that to a scale of 0.92…1.
 - **Previous button.** Copy Next with `41 - clamp(page - 1, 0, 3) * 332`.
-- **Loop around.** On the last page, Next could jump to 41 instead. Use an If Else on Equals(pageX, 3).
+- **Loop around.** On the last page, Next could jump to 41 instead. Use an If / Else on Equals(pageX, 3).
 
 ## Common mistakes
 

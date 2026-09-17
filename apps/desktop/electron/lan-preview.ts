@@ -9,11 +9,12 @@
 
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import { createReadStream } from "node:fs";
-import { stat } from "node:fs/promises";
+import { readFile, stat } from "node:fs/promises";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
 import { networkInterfaces, type NetworkInterfaceInfo } from "node:os";
 import path from "node:path";
+import { gzipSync } from "node:zlib";
 import { WebSocketServer, type WebSocket } from "ws";
 
 /** The document the player shows. */
@@ -177,17 +178,62 @@ function sendText(res: ServerResponse, status: number, text: string, headers: Re
   res.end(text);
 }
 
+/** Text files worth compressing: the player bundle is megabytes of JavaScript sent over Wi-Fi. */
+const COMPRESSIBLE: ReadonlySet<string> = new Set([".html", ".js", ".mjs", ".css", ".json", ".map", ".svg", ".txt"]);
+const MIN_COMPRESS_BYTES = 1024;
+const MAX_GZIP_CACHE = 32;
+/** Gzipped bodies by file, for the file version (ETag) they were made from. */
+const gzipCache = new Map<string, { etag: string; body: Buffer }>();
+
+async function gzippedFile(file: string, etag: string): Promise<Buffer> {
+  const cached = gzipCache.get(file);
+  if (cached?.etag === etag) return cached.body;
+  const body = gzipSync(await readFile(file));
+  gzipCache.delete(file);
+  if (gzipCache.size >= MAX_GZIP_CACHE) gzipCache.delete(gzipCache.keys().next().value!);
+  gzipCache.set(file, { etag, body });
+  return body;
+}
+
+/** True when an If-None-Match header lists `etag` (or "*"). */
+export function etagMatches(header: string | string[] | undefined, etag: string): boolean {
+  if (header === undefined) return false;
+  const bare = (tag: string) => tag.trim().replace(/^W\//, "");
+  return String(header)
+    .split(",")
+    .some((tag) => tag.trim() === "*" || bare(tag) === bare(etag));
+}
+
 async function sendFile(req: IncomingMessage, res: ServerResponse, file: string, cacheControl: string, extraHeaders: Record<string, string> = {}): Promise<void> {
   let size: number;
+  let etag: string;
+  let modified: string;
   try {
     const info = await stat(file);
     if (!info.isFile()) return sendText(res, 404, "Not found");
     size = info.size;
+    etag = `W/"${size.toString(16)}-${Math.floor(info.mtimeMs).toString(16)}"`;
+    modified = info.mtime.toUTCString();
   } catch {
     return sendText(res, 404, "Not found");
   }
-  const type = CONTENT_TYPES[path.extname(file).toLowerCase()] ?? "application/octet-stream";
-  const headers: Record<string, string> = { ...baseHeaders, "Content-Type": type, "Cache-Control": cacheControl, "Accept-Ranges": "bytes", ...extraHeaders };
+  const ext = path.extname(file).toLowerCase();
+  const type = CONTENT_TYPES[ext] ?? "application/octet-stream";
+  const compressible = COMPRESSIBLE.has(ext);
+  const headers: Record<string, string> = { ...baseHeaders, "Content-Type": type, "Cache-Control": cacheControl, "Accept-Ranges": "bytes", ETag: etag, "Last-Modified": modified, ...(compressible ? { Vary: "Accept-Encoding" } : {}), ...extraHeaders };
+  // A phone reopening the player revalidates instead of downloading the bundle again.
+  if (cacheControl !== "no-store" && etagMatches(req.headers["if-none-match"], etag)) {
+    res.writeHead(304, { ...baseHeaders, "Cache-Control": cacheControl, ETag: etag, "Last-Modified": modified, ...(compressible ? { Vary: "Accept-Encoding" } : {}) });
+    res.end();
+    return;
+  }
+  if (compressible && size >= MIN_COMPRESS_BYTES && req.headers.range === undefined && /\bgzip\b/.test(String(req.headers["accept-encoding"] ?? ""))) {
+    const body = await gzippedFile(file, etag);
+    const { "Accept-Ranges": _ranges, ...rest } = headers;
+    res.writeHead(200, { ...rest, "Content-Encoding": "gzip", "Content-Length": String(body.length) });
+    res.end(req.method === "HEAD" ? undefined : body);
+    return;
+  }
   // Safari needs byte ranges for video.
   const range = /^bytes=(\d*)-(\d*)$/.exec(String(req.headers.range ?? ""));
   let start = 0;

@@ -3,8 +3,10 @@ import { claudeCodeCommand, claudeDesktopConfig, claudeDesktopConfigPath, EXAMPL
 
 describe("parseMcpStatus", () => {
   it("accepts the host's status shape", () => {
-    expect(parseMcpStatus({ running: true, port: 52817, url: "http://127.0.0.1:52817/mcp", tokenFile: "/Users/me/.sonobe/mcp.json" })).toEqual({ running: true, port: 52817, url: "http://127.0.0.1:52817/mcp", tokenFile: "/Users/me/.sonobe/mcp.json" });
-    expect(parseMcpStatus({ running: false, port: null, url: null, tokenFile: "" })).toEqual({ running: false, port: null, url: null, tokenFile: null });
+    const cliPath = "/Applications/Sonobe.app/Contents/Resources/cli/sonobe";
+    expect(parseMcpStatus({ running: true, port: 52817, url: "http://127.0.0.1:52817/mcp", tokenFile: "/Users/me/.sonobe/mcp.json", cliPath })).toEqual({ running: true, port: 52817, url: "http://127.0.0.1:52817/mcp", tokenFile: "/Users/me/.sonobe/mcp.json", cliPath });
+    expect(parseMcpStatus({ running: false, port: null, url: null, tokenFile: "" })).toEqual({ running: false, port: null, url: null, tokenFile: null, cliPath: null });
+    expect(parseMcpStatus({ running: false, port: null, url: null, tokenFile: "", cliPath: " " })?.cliPath).toBeNull();
   });
 
   it("rejects anything else", () => {
@@ -40,8 +42,17 @@ describe("launch commands", () => {
     expect(claudeCodeCommand(spec)).toBe("claude mcp add sonobe -- /opt/homebrew/bin/node /Users/me/sonobe/packages/cli/src/main.ts mcp");
   });
 
-  it("uses the installed CLI in production", () => {
-    const spec = mcpLaunchSpec({ mode: "installed" });
+  it("uses the app's bundled CLI by full path in production", () => {
+    const cliPath = "/Applications/Sonobe.app/Contents/Resources/cli/sonobe";
+    const spec = mcpLaunchSpec({ mode: "installed", cliPath });
+    expect(claudeCodeCommand(spec)).toBe(`claude mcp add sonobe -- ${cliPath} mcp`);
+    expect(JSON.parse(claudeDesktopConfig(spec))).toEqual({ mcpServers: { sonobe: { command: cliPath, args: ["mcp"] } } });
+    const windows = mcpLaunchSpec({ mode: "installed", cliPath: "C:\\Program Files\\Sonobe\\resources\\cli\\sonobe.cmd" });
+    expect(claudeCodeCommand(windows, "windows")).toBe('claude mcp add sonobe -- "C:\\Program Files\\Sonobe\\resources\\cli\\sonobe.cmd" mcp');
+  });
+
+  it("falls back to sonobe on PATH when the host has no bundled CLI", () => {
+    const spec = mcpLaunchSpec({ mode: "installed", cliPath: null });
     expect(claudeCodeCommand(spec)).toBe("claude mcp add sonobe -- sonobe mcp");
     expect(JSON.parse(claudeDesktopConfig(spec))).toEqual({ mcpServers: { sonobe: { command: "sonobe", args: ["mcp"] } } });
   });

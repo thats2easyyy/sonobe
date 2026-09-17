@@ -55,6 +55,9 @@ export function traceTable(
 
 const TargetsSchema = z.array(z.string()).min(1);
 
+/** Largest image a get_screenshot result carries (base64 characters). */
+const MAX_IMAGE_BASE64 = 4_000_000;
+
 export function registerSimulationTools(tc: ToolContext): void {
   const { host } = tc;
 
@@ -258,20 +261,28 @@ export function registerSimulationTools(tc: ToolContext): void {
     {
       title: "Get screenshot",
       description:
-        'A PNG of the live viewer, the canvas, the patch graph, or one layer ("@layerId"), optionally at a simulation\'s current frame. For visual QA only; read structure and values with get_outline and sim_get_values. Needs the Sonobe app.',
+        'A PNG of the prototype screen ("viewer"), one layer ("@layerId", "@row#2" for a loop copy), or in the app the canvas or patch graph. Pass simId to draw a simulation\'s current frame, plus atMs for the frame that many ms later (drawn on a copy, so the session doesn\'t move). Headless servers draw the screen themselves with approximate text metrics and placeholders for video, Lottie and shaders; without simId they show the prototype once start-up animations settle (or atMs after it starts). For visual QA; read structure and values with get_outline and sim_get_values.',
       input: z.object({
         docId: DocIdSchema.optional(),
         target: z
           .string()
           .optional()
-          .describe('"viewer" (default), "canvas", "graph", or "@layerId".'),
+          .describe('"viewer" (default), "@layerId", or in the app "canvas" or "graph".'),
         simId: z.string().optional(),
+        atMs: z
+          .number()
+          .min(0)
+          .max(60000)
+          .optional()
+          .describe(
+            "Milliseconds after the simulation's current frame. Without simId: milliseconds after the prototype starts (default: once start-up animations settle).",
+          ),
         scale: z.number().min(0.25).max(3).optional(),
         maxWidth: z.number().int().min(64).max(1600).optional().describe("Default 800."),
       }),
       annotations: READ_ONLY,
     },
-    async ({ docId, target, simId, scale, maxWidth }) => {
+    async ({ docId, target, simId, atMs, scale, maxWidth }) => {
       if (!host.capabilities.screenshots) {
         try {
           await host.screenshot({ kind: "viewer" }, {});
@@ -283,28 +294,36 @@ export function registerSimulationTools(tc: ToolContext): void {
       const raw = target ?? "viewer";
       let shot: ScreenshotTarget;
       if (raw === "viewer" || raw === "canvas" || raw === "graph") shot = { kind: raw };
-      else if (/^@[A-Za-z_][A-Za-z0-9_]*$/.test(raw))
+      else if (/^@[A-Za-z_][A-Za-z0-9_]*(#\d+)?(\/[A-Za-z_][A-Za-z0-9_]*(#\d+)?)*$/.test(raw))
         shot = { kind: "layer", layerId: raw.slice(1) };
       else
         return failure({
           code: "invalid_target",
           message: `"${raw}" isn't a screenshot target.`,
-          hint: 'Use "viewer", "canvas", "graph", or "@layerId".',
+          hint: 'Use "viewer", "@layerId" (or "@row#2" for one loop copy), or in the app "canvas" or "graph".',
         });
       const image = await host.screenshot(shot, {
         ...(docId !== undefined ? { docId } : {}),
         ...(simId !== undefined ? { simId } : {}),
+        ...(atMs !== undefined ? { atMs } : {}),
         ...(scale !== undefined ? { scale } : {}),
         maxWidth: maxWidth ?? 800,
       });
+      if (image.data.length > MAX_IMAGE_BASE64)
+        return failure({
+          code: "image_too_large",
+          message: `The screenshot is ${Math.round(image.data.length / 1024)} KB encoded, over the ${Math.round(MAX_IMAGE_BASE64 / 1024)} KB limit.`,
+          hint: "Pass a smaller maxWidth or scale, or capture one layer.",
+        });
+      const lines = [
+        `${raw} · ${image.width}×${image.height}${image.timeMs !== undefined ? ` · ${roundForDisplay(image.timeMs)} ms` : ""}${simId !== undefined ? ` · ${simId}${atMs ? ` + ${roundForDisplay(atMs)} ms (session not advanced)` : ""}` : host.kind === "headless" ? (atMs !== undefined ? ` · ${roundForDisplay(atMs)} ms after the prototype starts` : " · after start-up animations settle") : ""}`,
+        ...(image.notes ?? []).map((n) => `Note: ${n}`),
+      ];
       // No structuredContent: clients that prefer it (Claude Code) would drop the image block.
       return {
         content: [
           { type: "image", data: image.data, mimeType: image.mimeType },
-          {
-            type: "text",
-            text: `${raw} · ${image.width}×${image.height}${image.timeMs !== undefined ? ` · ${roundForDisplay(image.timeMs)} ms` : ""}`,
-          },
+          { type: "text", text: lines.join("\n") },
         ],
       };
     },

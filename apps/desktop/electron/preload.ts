@@ -146,8 +146,10 @@ const host: SonobeHost = {
     };
   },
 
-  notifyDocumentChanged(revision) {
-    if (typeof revision === "number" && Number.isFinite(revision)) ipcRenderer.send(IPC.documentChanged, revision);
+  notifyDocumentChanged(revision, history) {
+    if (typeof revision !== "number" || !Number.isFinite(revision)) return;
+    const labels = history && typeof history.undo === "string" && typeof history.redo === "string" ? { undo: history.undo.slice(0, 120), redo: history.redo.slice(0, 120) } : undefined;
+    ipcRenderer.send(IPC.documentChanged, revision, labels);
   },
 
   secrets: {

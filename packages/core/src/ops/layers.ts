@@ -2,8 +2,9 @@
 
 import { layerAddress } from "../address.ts";
 import { wouldCreateComponentCycle } from "../document.ts";
-import { slugify } from "../ids.ts";
+import { getOwn, slugify } from "../ids.ts";
 import { allLayerIds, COMPONENT_INSTANCE_LAYER_TYPE, componentItemIds, findLayer, isDescendantLayer } from "../registry.ts";
+import { layerTreeHeight, MAX_LAYER_DEPTH } from "../schema.ts";
 import { didYouMean, didYouMeanText } from "../suggest.ts";
 import type { Component, Id, InputValue, LayerNode, NewLayer } from "../types.ts";
 import { checkInputValue, resolveTarget } from "../validate.ts";
@@ -33,7 +34,13 @@ function requireContainer(ctx: OpContext, layer: LayerNode): void {
   }
 }
 
-function validateInstance(ctx: OpContext, host: Component, node: LayerNode): void {
+const tooDeep = () =>
+  fail("too_deep", `That would nest layers more than ${MAX_LAYER_DEPTH} levels deep, which Sonobe can't save or open.`, {
+    hint: "Flatten some groups, or put these layers in a group closer to the top.",
+  });
+
+/** A componentInstance layer points at an existing layer component that doesn't contain `host`. */
+export function validateInstance(ctx: OpContext, host: Component, node: LayerNode): void {
   if (node.type !== COMPONENT_INSTANCE_LAYER_TYPE) {
     if (ctx.lenient) return;
     fail("invalid_op", `Only componentInstance layers can point at a component ("${node.id}" is a ${node.type}).`, { hint: 'Leave out "component", or use type "componentInstance".' });
@@ -45,7 +52,7 @@ function validateInstance(ctx: OpContext, host: Component, node: LayerNode): voi
       hint: layerComponents.length ? `Layer components: ${layerComponents.join(", ")}.` : "Create one first with addComponent or createComponent.",
     });
   }
-  const target = ctx.doc.components[node.component];
+  const target = getOwn(ctx.doc.components, node.component);
   if (!target) fail("not_found", `There's no component "${node.component}".${didYouMeanText(didYouMean(node.component, layerComponents))}`);
   if (target.kind !== "layerComponent" && !ctx.lenient) {
     fail("wrong_component_kind", `"${target.id}" is a ${target.kind}; layer instances render layer components.`, {
@@ -72,15 +79,23 @@ function toNewLayer(node: LayerNode): NewLayer {
 
 export function addLayer(ctx: OpContext, op: OpOf<"addLayer">): OpOutcome {
   let component = getTargetComponent(ctx, op.component);
+  if (component.kind === "patchComponent" && !ctx.lenient) {
+    fail("wrong_component_kind", `"${component.name}" is a patch component, which holds only patches, so a layer there would never be drawn.`, {
+      hint: "Add layers to a prototype or a layer component. To reuse layers, select them and choose Create Component.",
+    });
+  }
   const parentId = op.parent === undefined || op.parent === null ? null : resolveId(ctx, op.parent);
   let siblings: readonly LayerNode[] = component.layers;
+  let parentDepth = 0;
   if (parentId !== null) {
     const loc = requireLayer(component, parentId);
     requireContainer(ctx, loc.layer);
     siblings = loc.layer.children ?? [];
+    parentDepth = loc.path.length;
   }
   const index = resolveIndex(op.index, siblings.length);
   if (!op.layer || typeof op.layer !== "object") fail("invalid_op", "addLayer needs a layer, like { \"type\": \"rectangle\", \"name\": \"Card\" }.");
+  if (!ctx.lenient && parentDepth + layerTreeHeight(op.layer) > MAX_LAYER_DEPTH) tooDeep();
 
   const taken = new Set(componentItemIds(component));
   const created: { node: LayerNode; props: Record<string, InputValue> | undefined }[] = [];
@@ -188,7 +203,9 @@ export function moveLayer(ctx: OpContext, op: OpOf<"moveLayer">): OpOutcome {
     if (parentId === id || isDescendantLayer(component.layers, id, parentId)) {
       fail("cycle", `Can't move "${id}" into ${parentId === id ? "itself" : `its own child "${parentId}"`}.`, { hint: "Pick a parent outside this layer." });
     }
-    requireContainer(ctx, requireLayer(component, parentId).layer);
+    const parent = requireLayer(component, parentId);
+    requireContainer(ctx, parent.layer);
+    if (!ctx.lenient && parent.path.length + layerTreeHeight(loc.layer) > MAX_LAYER_DEPTH) tooDeep();
   }
   let layers = removeLayerNode(component.layers, id);
   const siblings = parentId === null ? layers : (findLayer(layers, parentId)!.layer.children ?? []);

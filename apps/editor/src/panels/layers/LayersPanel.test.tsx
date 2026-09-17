@@ -9,6 +9,7 @@ import { EditorProvider } from "../../state/EditorProvider.tsx";
 import { getRegistry } from "../../state/registry.ts";
 import { createEditorSession, type EditorSession } from "../../state/session.ts";
 import { dropTargetAt, patchEditorBridge } from "../patch-editor/index.ts";
+import { planInsertLayer } from "./layerTree.ts";
 import { LayersPanel } from "./LayersPanel.tsx";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -227,11 +228,14 @@ describe("LayersPanel", () => {
     const s = mount(fixture());
     expect(container.querySelector("[data-sb-layer-drop]")).toBeNull();
     act(() => patchEditorBridge(s).getState().setCableDrag({ component: "main", from: "pop.output", type: "number" }));
-    const overlay = rowNamed("A").querySelector<HTMLElement>('[data-sb-layer-drop="a"]')!;
+    // The rows themselves carry the drop markers (TreeView getRowProps); the overlay shows what accepts the cable.
+    expect(rowNamed("A").getAttribute("data-sb-layer-drop")).toBe("a");
+    expect(rows().every((row) => row.hasAttribute("data-sb-layer-drop"))).toBe(true);
+    const overlay = rowNamed("A").querySelector<HTMLElement>('.sb-layerspanel__drop[data-kind="cable"]')!;
     expect(overlay).not.toBeNull();
-    expect(rows().every((row) => row.querySelector("[data-sb-layer-drop]"))).toBe(true);
     expect(overlay.getAttribute("data-accept")).toBe("true");
     expect(dropTargetAt(overlay)).toEqual({ kind: "layer", layerId: "a" });
+    expect(dropTargetAt(rowNamed("A").querySelector(".sb-tree__label"))).toEqual({ kind: "layer", layerId: "a" });
 
     act(() => {
       overlay.dispatchEvent(new PointerEvent("pointermove", { bubbles: true, clientX: 3, clientY: 3 }));
@@ -240,7 +244,7 @@ describe("LayersPanel", () => {
     expect(overlay.textContent).toBe("Choose a property");
 
     act(() => patchEditorBridge(s).getState().setCableDrag({ component: "main", from: "tap.layer", type: "layer" }));
-    expect(rowNamed("A").querySelector("[data-sb-layer-drop]")!.hasAttribute("data-accept")).toBe(false);
+    expect(rowNamed("A").querySelector('.sb-layerspanel__drop[data-kind="cable"]')!.hasAttribute("data-accept")).toBe(false);
 
     act(() => patchEditorBridge(s).getState().setCableDrag({ component: "elsewhere", from: "pop.output", type: "number" }));
     expect(container.querySelector("[data-sb-layer-drop]")).toBeNull();
@@ -285,3 +289,16 @@ describe("LayersPanel", () => {
     expect(body.hasAttribute("data-file-drop")).toBe(false);
   });
 });
+
+describe("LayersPanel in a patch component", () => {
+  it("offers no layer inserts and explains why, so no invisible layers get added", () => {
+    const s = mount(build([...FIXTURE_OPS, { op: "addComponent", component: { id: "logic", name: "Logic", kind: "patchComponent" } }]));
+    act(() => s.selection.getState().enterComponent("logic"));
+    expect(container.textContent).toContain("Patch components have no layers");
+    expect([...container.querySelectorAll("button")].some((b) => ["Rectangle", "Text", "Image"].includes(b.textContent?.trim() ?? ""))).toBe(false);
+    expect(container.querySelector<HTMLButtonElement>('button[aria-label="Insert layer"]')!.disabled).toBe(true);
+    expect(planInsertLayer(s.document.getState().doc, "logic", registry, "rectangle")).toBeUndefined();
+    expect(planInsertLayer(s.document.getState().doc, "main", registry, "rectangle")).toBeDefined();
+  });
+});
+

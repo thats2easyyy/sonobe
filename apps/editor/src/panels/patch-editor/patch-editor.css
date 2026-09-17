@@ -56,9 +56,22 @@
   cursor: default;
 }
 
-/* xyflow (MIT) is credited in the app's About and credits rather than on the canvas. Hidden with CSS, not proOptions, which logs a warning on every mount. */
+/* The React Flow credit its maintainers ask for: small and quiet, in the corner the canvas chrome doesn't use. */
 .sb-pe .react-flow__attribution {
-  display: none;
+  margin: 0 0 var(--space-3) var(--space-4);
+  padding: 0;
+  background: transparent;
+  font-size: var(--font-size-2xs);
+  line-height: 16px;
+}
+
+.sb-pe .react-flow__attribution a {
+  color: var(--text-disabled);
+  text-decoration: none;
+}
+
+.sb-pe .react-flow__attribution a:hover {
+  color: var(--text-secondary);
 }
 
 /* Until the first fit, don't flash the graph at 100% from the corner. */
@@ -107,9 +120,7 @@
     0 8px 20px -10px rgba(0, 0, 0, 0.6);
   font-size: var(--font-size-xs);
   line-height: 1.2;
-  transition:
-    box-shadow var(--duration-fast) var(--ease-standard),
-    opacity var(--duration-base) var(--ease-standard);
+  transition: opacity var(--duration-base) var(--ease-standard);
 }
 
 [data-theme="light"] .sb-pe-node {
@@ -118,16 +129,52 @@
     0 6px 16px -8px rgba(20, 20, 40, 0.18);
 }
 
+/*
+ * Selection: the raised shadow changes at once, and the ring fades in on its own layer (opacity only).
+ * Transitioning box-shadow repaints and re-layerizes the whole graph on every frame of the fade, which
+ * costs a 1,000-patch graph over 150 ms per selection.
+ */
+.sb-pe-node::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  box-shadow: 0 0 0 1.5px var(--selection);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity var(--duration-fast) var(--ease-standard);
+}
+
+.sb-pe-node[data-selected]::after {
+  opacity: 1;
+}
+
+/*
+ * Far zoom (FAR_ZOOM in model/geometry.ts): text is a few pixels tall, so port labels, values and icons
+ * stop painting. Their boxes stay, so handles, cables and hit targets don't move. With hundreds of nodes
+ * on screen this takes most of the graph out of every repaint (Chromium re-layerizes the whole page's
+ * paint output whenever anything changes, a scrubbed value or the fps readout).
+ */
+.sb-pe__canvas[data-lod="far"] :is(.sb-pe-port__label, .sb-pe-port__live, .sb-pe-port__drive, .sb-pe-value, .sb-pe-vector, .sb-pe-check, .sb-pe-swatch, .sb-pe-node__icon, .sb-pe-chip, .sb-pe-node__loop, .sb-pe-collapsed-glyph, .sb-pe-pulse-ring, .sb-pe-working) {
+  visibility: hidden;
+}
+
 .sb-pe-node[data-selected] {
   box-shadow:
-    0 0 0 1.5px var(--selection),
+    0 0 0 1px var(--patch-node-border),
     0 10px 28px -10px rgba(0, 0, 0, 0.6);
 }
 
 [data-theme="light"] .sb-pe-node[data-selected] {
   box-shadow:
-    0 0 0 1.5px var(--selection),
+    0 0 0 1px var(--patch-node-border),
     0 8px 22px -10px rgba(20, 20, 40, 0.22);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sb-pe-node::after {
+    transition: none;
+  }
 }
 
 .sb-pe-node[data-issue="error"]:not([data-selected]) {
@@ -305,6 +352,15 @@ textarea.sb-pe-title-input {
   border-radius: var(--radius-full);
   background: transparent;
   cursor: pointer;
+}
+
+.sb-pe-badge--jump {
+  color: var(--text-secondary);
+}
+
+.sb-pe-badge--jump:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
 }
 
 .sb-pe-badge[data-severity="warning"] {
@@ -850,6 +906,12 @@ textarea.sb-pe-title-input {
   cursor: grab;
 }
 
+/* Light theme: mix with primary text so every hue keeps 4.5:1 on its tinted frame. */
+[data-theme="light"] .sb-pe-comment__title,
+.sb-pe[data-theme="light"] .sb-pe-comment__title {
+  color: color-mix(in srgb, var(--sb-comment) 50%, var(--text-primary));
+}
+
 .sb-pe-comment[data-color="gray"] .sb-pe-comment__title {
   color: var(--text-tertiary);
 }
@@ -1086,11 +1148,40 @@ textarea.sb-pe-title-input {
   font-weight: var(--font-weight-medium);
 }
 
-.sb-pe-crumbs--overlay {
+/*
+ * The top bar docks the canvas chrome (breadcrumbs, live scope, the floating toolbar) in one row.
+ * It only takes pointer events on its controls, and fitting the graph leaves room below it, so it
+ * never covers a node header after a fit.
+ */
+.sb-pe-topbar {
   position: absolute;
-  top: var(--space-5);
-  left: var(--space-5);
+  top: 0;
+  right: 0;
+  left: 0;
   z-index: 5;
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  min-width: 0;
+  padding: var(--space-5);
+  pointer-events: none;
+}
+
+.sb-pe-topbar:empty {
+  display: none;
+}
+
+.sb-pe-topbar[data-scrim] {
+  background: linear-gradient(to bottom, color-mix(in srgb, var(--canvas-bg) 88%, transparent) 55%, transparent);
+}
+
+.sb-pe-topbar > * {
+  pointer-events: auto;
+}
+
+.sb-pe-crumbs--overlay {
+  flex: 0 1 auto;
+  min-width: 0;
   height: 26px;
   padding: 0 var(--space-2);
   border-radius: var(--radius-md);
@@ -1103,7 +1194,6 @@ textarea.sb-pe-title-input {
 
 .sb-pe-toolbar,
 .sb-pe-zoom {
-  position: absolute;
   z-index: 5;
   display: flex;
   align-items: center;
@@ -1117,11 +1207,21 @@ textarea.sb-pe-title-input {
 }
 
 .sb-pe-toolbar {
-  top: var(--space-5);
-  right: var(--space-5);
+  flex: none;
+  margin-left: auto;
+}
+
+/* Docked in the Patches panel header: plain header buttons. */
+.sb-pe-toolbar[data-docked] {
+  gap: 2px;
+  margin-left: 0;
+  padding: 0;
+  background: transparent;
+  box-shadow: none;
 }
 
 .sb-pe-zoom {
+  position: absolute;
   right: var(--space-5);
   bottom: var(--space-5);
 }
@@ -1690,11 +1790,9 @@ textarea.sb-pe-title-input {
 /* ---------------------------------------------------------------------- */
 
 .sb-pe-live {
-  position: absolute;
-  top: var(--space-5);
-  left: var(--space-5);
-  z-index: 5;
   display: flex;
+  flex: 0 1 auto;
+  min-width: 0;
   align-items: center;
   gap: var(--space-3);
   height: 26px;
@@ -1708,10 +1806,6 @@ textarea.sb-pe-title-input {
   color: var(--text-secondary);
   font-size: var(--font-size-xs);
   white-space: nowrap;
-}
-
-.sb-pe-live[data-offset] {
-  top: calc(var(--space-5) + 34px);
 }
 
 .sb-pe-live__dot {

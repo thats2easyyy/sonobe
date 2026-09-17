@@ -423,9 +423,10 @@ export function createBrowserHost(options: BrowserHostOptions = {}): BrowserHost
     async readProject(path) {
       const stored = await readStored(path);
       if (!stored) throw new ProjectFormatError("invalidFormat", `There's no project called "${projectDisplayName(path)}" here.`, { file: "project.json" });
-      const doc = parseDocumentFiles(stored.files);
+      // What's stored, even when it doesn't parse, so the next save rewrites invalid files.
       known.set(path, documentFiles(stored.files));
       assets.setBinaries(path, assetBinaries(stored.binaries));
+      const doc = parseDocumentFiles(stored.files);
       touchRecent(path);
       return doc;
     },

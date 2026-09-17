@@ -25,6 +25,9 @@ export function PerformanceView() {
   const [scene, setScene] = useState<SceneStats>(() => sceneStats(session.runtime.scene()));
   const [timings, setTimings] = useState<PatchTiming[] | null>(() => patchTimingsOf(session.runtime.runtime));
 
+  // Patch timings are only collected while this tab is showing.
+  useEffect(() => (typeof session.runtime.profilePatches === "function" ? session.runtime.profilePatches() : undefined), [session]);
+
   useEffect(() => {
     const read = () => {
       setScene(sceneStats(session.runtime.scene()));
@@ -135,7 +138,7 @@ export function PerformanceView() {
               <dt>Loop instances</dt>
               <dd className="sb-tabular">
                 {scene.loopInstances}
-                {scene.replicated.length > 0 && <span className="sb-perfx__sub">{scene.replicated.slice(0, 3).map((r) => `${itemDisplayName(doc, doc.project.root, r.layerId)} ×${r.count}`).join(" · ")}</span>}
+                {scene.replicated.length > 0 && <span className="sb-perfx__sub">{scene.replicated.slice(0, 3).map((r) => `${itemDisplayName(doc, doc.project.root, r.layerId, session.registry)} ×${r.count}`).join(" · ")}</span>}
               </dd>
             </div>
             <div className="sb-perfx__stat">
@@ -164,7 +167,7 @@ export function PerformanceView() {
                     {timings.map((t) => (
                       <li key={`${t.componentPath ?? ""}/${t.patchId}`}>
                         <button type="button" onClick={() => revealItems(session, doc.project.root, [t.patchId])}>
-                          {itemDisplayName(doc, doc.project.root, t.patchId)}
+                          {itemDisplayName(doc, doc.project.root, t.patchId, session.registry)}
                         </button>
                         <span className="sb-tabular">{formatMs(t.ms)}</span>
                       </li>

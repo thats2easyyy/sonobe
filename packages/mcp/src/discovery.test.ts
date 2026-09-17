@@ -40,7 +40,7 @@ describe("server surface", () => {
     ]) {
       expect(byName.get(name)!.annotations?.readOnlyHint, name).toBe(true);
     }
-    for (const name of ["apply_ops", "set_values", "update_layers", "delete_items", "undo"]) {
+    for (const name of ["apply_ops", "set_values", "update_layers", "delete_items", "undo", "save_document"]) {
       expect(byName.get(name)!.annotations, name).toMatchObject({
         readOnlyHint: false,
         destructiveHint: true,
@@ -102,6 +102,39 @@ describe("discovery tools", () => {
     const bad = await client.call("get_guide", { topic: "animations" });
     expect(bad.isError).toBe(true);
     expect(bad.text).toContain('Did you mean "animation"');
+  });
+
+  it("serves several guides in one call within a combined token budget", async () => {
+    const r = await client.call("get_guide", {
+      topics: ["gestures", "animation", "gestures", "animatoin"],
+    });
+    expect(r.isError, r.text).toBe(false);
+    expect(r.structured).toMatchObject({
+      topics: ["gestures", "animation"],
+      unknown: ["animatoin"],
+      omitted: [],
+    });
+    expect(r.text).toMatch(/^# /);
+    expect(r.text.split("\n\n---\n\n# ")).toHaveLength(2);
+    expect(r.text).toContain('Skipped: There\'s no guide "animatoin". Did you mean "animation"?');
+    expect(r.text).toMatch(/Related topics: .*simulation/);
+
+    const all = await client.call("get_guide", { topics: [...GUIDE_TOPICS] });
+    const omitted = all.structured.omitted as string[];
+    expect(omitted.length).toBeGreaterThan(0);
+    expect(all.structured.estimatedTokens as number).toBeLessThanOrEqual(12_000);
+    expect([...(all.structured.topics as string[]), ...omitted].sort()).toEqual(
+      [...GUIDE_TOPICS].sort(),
+    );
+    expect(all.text).toContain(
+      `Not included, to stay within about 12,000 tokens: ${omitted.join(", ")}.`,
+    );
+
+    const none = await client.call("get_guide", {});
+    expect(none.isError).toBe(true);
+    expect(none.structured.error).toMatchObject({ code: "missing_topic" });
+    const unknown = await client.call("get_guide", { topics: ["nope"] });
+    expect(unknown.structured.error).toMatchObject({ code: "unknown_topic" });
   });
 
   it("searches patch types by intent", async () => {

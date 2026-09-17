@@ -4,7 +4,8 @@
   "private": true,
   "type": "module",
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./svg": "./src/svg/index.ts"
   },
   "scripts": {
     "demo:build": "esbuild demo/demo.ts --bundle --format=iife --target=es2022 --outfile=demo/dist/demo.js",

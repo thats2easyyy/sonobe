@@ -80,23 +80,34 @@ button.sb-hudx__stat {
 }
 
 .sb-hudx__live {
+  position: relative;
   display: inline-block;
   width: 6px;
   height: 6px;
   border-radius: 50%;
   background: var(--ai);
+}
+
+/* A composited ring (transform and opacity only): an animated box-shadow repaints the whole page every frame. */
+.sb-hudx__live::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
   box-shadow: 0 0 0 3px var(--ai-soft);
+  pointer-events: none;
   animation: sb-hudx-pulse 1.6s ease-in-out infinite;
 }
 
 @keyframes sb-hudx-pulse {
   50% {
-    box-shadow: 0 0 0 5px transparent;
+    transform: scale(1.6);
+    opacity: 0;
   }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .sb-hudx__live {
+  .sb-hudx__live::after {
     animation: none;
   }
 }

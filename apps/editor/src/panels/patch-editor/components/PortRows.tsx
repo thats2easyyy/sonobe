@@ -1,8 +1,8 @@
 /** Port rows shared by patch, layer, and interface nodes: handles, labels, inline values, live values. */
 
 import { canConnect } from "@sonobe/core";
-import { Handle, Position } from "@xyflow/react";
-import { memo, useEffect, useRef, useState, type MouseEvent, type PointerEvent } from "react";
+import { Handle, Position, useUpdateNodeInternals } from "@xyflow/react";
+import { memo, useEffect, useLayoutEffect, useRef, useState, type MouseEvent, type PointerEvent } from "react";
 import { PortGlyph } from "../../../ui/PortGlyph.tsx";
 import { formatValue, isTruthyState } from "../model/format.ts";
 import { HEADER_HEIGHT } from "../model/geometry.ts";
@@ -42,6 +42,7 @@ function useHoverCard(nodeId: string, port: PortModel) {
       const el = event.currentTarget;
       clearTimeout(hoverTimer);
       hoverOwner = token.current;
+      ui.getState().set({ pointerPort: { nodeId, address: port.address, side: port.side } });
       session.selection.getState().setHovered({ kind: "port", id: nodeId.replace(/^@/, ""), component: componentId, address: port.address, source: "patchEditor" });
       if (event.buttons !== 0) return;
       hoverTimer = setTimeout(() => {
@@ -58,6 +59,8 @@ function useHoverCard(nodeId: string, port: PortModel) {
       clearTimeout(hoverTimer);
       hoverOwner = null;
       if (ui.getState().hoverPort) ui.getState().set({ hoverPort: null });
+      const pointer = ui.getState().pointerPort;
+      if (pointer && pointer.nodeId === nodeId && pointer.address === port.address) ui.getState().set({ pointerPort: null });
       const hovered = session.selection.getState().hovered;
       if (hovered?.address === port.address) session.selection.getState().setHovered(null);
     },
@@ -69,8 +72,20 @@ function useHoverCard(nodeId: string, port: PortModel) {
   };
 }
 
+/** Right-click on a port row: the port's menu instead of the node's. */
+function usePortMenu(nodeId: string, port: PortModel) {
+  const { openPortMenu } = usePatchEditor();
+  return (event: MouseEvent<HTMLDivElement>) => {
+    if (!openPortMenu) return;
+    event.preventDefault();
+    event.stopPropagation();
+    openPortMenu(event, nodeId, port);
+  };
+}
+
 const InputPort = memo(function InputPort({ nodeId, port, editable }: { nodeId: string; port: PortModel; editable: boolean }) {
   const { ui, actions } = usePatchEditor();
+  const onContextMenu = usePortMenu(nodeId, port);
   const hover = useHoverCard(nodeId, port);
   const armable = useUi((s) => (s.armed && s.armed.nodeId !== nodeId ? canConnect(s.armed.type, port.type).ok : null));
   const highlighted = useUi((s) => s.highlightPort === port.address);
@@ -84,7 +99,7 @@ const InputPort = memo(function InputPort({ nodeId, port, editable }: { nodeId: 
     if (!event.shiftKey) ui.getState().set({ armed: null });
   };
   return (
-    <div className="sb-pe-port sb-pe-port--in" data-connected={port.connected || undefined} data-issue={port.issue?.severity} data-armable={armable ?? undefined} data-highlight={highlighted || undefined} data-undriven={undriven || undefined} onClick={onClick} {...hover}>
+    <div className="sb-pe-port sb-pe-port--in" data-connected={port.connected || undefined} data-issue={port.issue?.severity} data-armable={armable ?? undefined} data-highlight={highlighted || undefined} data-undriven={undriven || undefined} onClick={onClick} onContextMenu={onContextMenu} {...hover}>
       <Handle type="target" position={Position.Left} id={port.handleId} className="sb-pe-handle sb-pe-handle--in" aria-label={`${port.name} input`}>
         <PortGlyph type={port.type} connected={port.connected} size={9} />
       </Handle>
@@ -126,6 +141,7 @@ function PulseRing({ address }: { address: string }) {
 const OutputPort = memo(function OutputPort({ nodeId, port }: { nodeId: string; port: PortModel }) {
   const { liveEnabled, ui, session, componentId } = usePatchEditor();
   const hover = useHoverCard(nodeId, port);
+  const onContextMenu = usePortMenu(nodeId, port);
   const live = useLiveValue(liveEnabled ? port.address : null);
   const armed = useUi((s) => s.armed?.address === port.address);
   const truthy = isTruthyState(live);
@@ -137,7 +153,7 @@ const OutputPort = memo(function OutputPort({ nodeId, port }: { nodeId: string; 
   };
   const text = live === undefined || port.type === "pulse" ? "" : formatValue(live, port.type, { maxText: 10, ...(port.enumOptions ? { enumOptions: port.enumOptions } : {}) });
   return (
-    <div className="sb-pe-port sb-pe-port--out" data-connected={port.connected || undefined} data-live={truthy || undefined} data-armed={armed || undefined} onClick={onClick} {...hover}>
+    <div className="sb-pe-port sb-pe-port--out" data-connected={port.connected || undefined} data-live={truthy || undefined} data-armed={armed || undefined} onClick={onClick} onContextMenu={onContextMenu} {...hover}>
       {text && <span className="sb-pe-port__live sb-tabular">{text}</span>}
       <span className="sb-pe-port__label">{port.name}</span>
       <Handle type="source" position={Position.Right} id={port.handleId} className="sb-pe-handle sb-pe-handle--out" aria-label={`${port.name} output`}>
@@ -155,8 +171,24 @@ export interface PortRowsProps {
   editable: boolean;
 }
 
+/**
+ * React Flow measures a node's handles when it mounts or resizes. When the set of handles changes
+ * without a resize (a port swapped for another), ask it to measure again so cables find their handles.
+ */
+function useRemeasureOnHandleChange(nodeId: string, inputs: readonly PortModel[], outputs: readonly PortModel[]) {
+  const updateNodeInternals = useUpdateNodeInternals();
+  const signature = `${inputs.map((p) => p.handleId).join(",")}|${outputs.map((p) => p.handleId).join(",")}`;
+  const previous = useRef(signature);
+  useLayoutEffect(() => {
+    if (previous.current === signature) return;
+    previous.current = signature;
+    updateNodeInternals(nodeId);
+  }, [nodeId, signature, updateNodeInternals]);
+}
+
 /** Inputs down the left, outputs down the right, one row each. */
 export const PortRows = memo(function PortRows({ nodeId, inputs, outputs, editable }: PortRowsProps) {
+  useRemeasureOnHandleChange(nodeId, inputs, outputs);
   const rows = Math.max(inputs.length, outputs.length);
   if (rows === 0) return <div className="sb-pe-rows sb-pe-rows--empty" />;
   return (

@@ -1,9 +1,11 @@
 export {
   createRuntime,
   DETERMINISTIC_EPOCH_MS,
+  isTraceUnavailable,
   MAX_LIVE_DT,
   MAX_REPLAY_FRAMES,
   MAX_RUNTIME_ISSUES,
+  TraceUnavailableError,
   type SonobeRuntime,
 } from "./runtime.ts";
 export { isLoop, loopItemAt, loopItems, loopLength, makeLoop, MAX_LOOP_LENGTH, toLoop } from "./loop.ts";
@@ -21,3 +23,4 @@ export {
 export { compileDocument, MAX_COMPONENT_DEPTH, type CompiledGraph } from "./compile.ts";
 export { type RuntimePatchDefinition } from "./evaluate.ts";
 export { summarizeSeries } from "./trace.ts";
+export { plainProps, plainSceneFrame } from "./scene.ts";

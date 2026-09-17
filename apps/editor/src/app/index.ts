@@ -1,7 +1,8 @@
 /** The editor app: root, session, commands, dialogs, settings, the welcome screen, and the test hook. */
 
 export { Root } from "./Root.tsx";
-export { commandMenuEntries, EditorApp, insertPosition, type EditorAppProps } from "./EditorApp.tsx";
+export { commandMenuEntries, EditorApp, type EditorAppProps } from "./EditorApp.tsx";
+export { ScriptTrustBanner } from "./ScriptTrustBanner.tsx";
 export { createAppBrowserHost, createAppSession, getAppSession, type AppSessionOptions } from "./session.ts";
 export { appCommands, runInPatchEditor, runWhenRegistered, useAppCommands, zoomTarget, type AppCommandOptions } from "./useAppCommands.tsx";
 export { alignSelection, closePrototype, insertLayer, renameSelection, reportIssue, toggleViewerFullscreen, useAsMask, type Notify } from "./appActions.ts";

@@ -262,7 +262,7 @@ export const LISTS_WITH_LOOPS: Lesson = {
       id: "loop",
       title: "Add a Loop",
       body: "Double-click empty space in the patch editor, or press **Insert patch** in its toolbar. Type **Loop** and press Return.",
-      target: { selector: '.sb-pe button[aria-label="Insert patch"]' },
+      target: { selector: '[role="toolbar"][aria-label="Patch editor tools"] button[aria-label="Insert patch"]' },
       prepare: (app) => showPatches(app),
       check: (ctx) => patchesOfType(ctx.component, "loop").length > 0,
     },

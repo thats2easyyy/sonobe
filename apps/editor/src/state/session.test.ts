@@ -92,7 +92,8 @@ describe("editor session", () => {
     expect(notify).not.toHaveBeenCalled();
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(notify).toHaveBeenCalledTimes(1);
-    expect(notify).toHaveBeenCalledWith(2);
+    // The Edit menu's titles travel with the revision.
+    expect(notify).toHaveBeenCalledWith(2, { undo: "Undo Add B", redo: "Redo" });
   });
 
   it("keeps trust for prototypes the person saves, and asks before running someone else's scripts", async () => {

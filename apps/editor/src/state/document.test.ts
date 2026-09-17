@@ -1,8 +1,11 @@
-import { createEmptyDocument, findLayer, type Op } from "@sonobe/core";
+import { applyOps, createEmptyDocument, findLayer, parseDocumentFiles, serializeDocument, type Op, type SonobeDocument } from "@sonobe/core";
 import { describe, expect, it, vi } from "vitest";
 import { createBrowserHost, createMemoryProjectStorage } from "../host/browserHost.ts";
+import { createDesktopHost } from "../host/desktopHost.ts";
+import type { DesktopHostApi } from "../host/types.ts";
 import { CLAUDE_AUTHOR, createDocumentStore } from "./document.ts";
 import { getRegistry } from "./registry.ts";
+import { saveDocumentInteractively } from "./saveFlow.ts";
 
 const registry = getRegistry();
 const addRect = (name: string, extra: Partial<Extract<Op, { op: "addLayer" }>["layer"]> = {}): Op => ({ op: "addLayer", layer: { type: "rectangle", name, ...extra } });
@@ -123,6 +126,35 @@ describe("document store: apply, undo, redo", () => {
   });
 });
 
+describe("document store: open gestures", () => {
+  it("publishes the open gesture's key while a scrub runs, and null once it ends", () => {
+    const doc = applyOps(createEmptyDocument({ name: "Proj" }), [addRect("Card")], { registry }).doc;
+    const store = createDocumentStore({ registry, document: doc });
+    const move = (x: number, gesture?: "begin" | "update" | "end") =>
+      store.getState().apply([{ op: "updateLayer", id: "card", props: { position: [x, 0] } }], { label: "Move Card", coalesceKey: "scrub:@card.position", ...(gesture ? { gesture } : {}) });
+    const seen: (string | null)[] = [];
+    const off = store.subscribe((s, prev) => {
+      if (s.gesture !== prev.gesture) seen.push(s.gesture);
+    });
+    expect(store.getState().gesture).toBeNull();
+    move(1, "begin");
+    expect(store.getState().gesture).toBe("scrub:@card.position");
+    move(2, "update");
+    move(3, "update");
+    store.getState().endGesture("scrub:@card.position");
+    expect(store.getState().gesture).toBeNull();
+    move(4, "begin");
+    move(5, "end");
+    expect(store.getState().gesture).toBeNull();
+    move(6, "begin");
+    store.getState().apply([addRect("Chip")], { label: "Add Chip" });
+    expect(store.getState().gesture).toBeNull();
+    // Only begins and ends notify; the updates in between don't.
+    expect(seen).toEqual(["scrub:@card.position", null, "scrub:@card.position", null, "scrub:@card.position", null]);
+    off();
+  });
+});
+
 describe("document store: files", () => {
   const makeHost = (storage = createMemoryProjectStorage(), name: string | null = "Photo Zoom") =>
     createBrowserHost({ storage, dialogs: { promptName: async () => name, pickProject: async (names) => names[0] ?? null }, channelName: null, recentKey: null, fileSystemAccess: false });
@@ -191,5 +223,195 @@ describe("document store: files", () => {
     await store.getState().checkExternalChanges();
     store.getState().dismissExternalChange();
     expect(store.getState()).toMatchObject({ dirty: true, externalChange: null });
+  });
+});
+
+/** A project folder behind the desktop host: `files` is the disk, `hold()` makes the next writes wait. */
+function diskProject(initial: SonobeDocument) {
+  const dir = "/p/Proj.sonobe";
+  const files: Record<string, string> = serializeDocument(initial);
+  const writes: { files?: Record<string, string>; deleted?: string[] }[] = [];
+  let gate: Promise<void> | null = null;
+  const api: DesktopHostApi = {
+    platform: "darwin",
+    version: "0.1.0",
+    openProjectDialog: async () => dir,
+    saveProjectDialog: async () => dir,
+    readProject: async () => ({ files: { ...files }, binaries: {} }),
+    writeProject: async (_dir, changes) => {
+      if (gate) await gate;
+      writes.push(changes);
+      for (const [path, text] of Object.entries(changes.files ?? {})) files[path] = text as string;
+      for (const path of changes.deleted ?? []) delete files[path];
+    },
+    watchProject: () => () => undefined,
+    revealInFinder: () => undefined,
+    recentProjects: async () => [],
+    onCommand: () => () => undefined,
+    onOpenProject: () => () => undefined,
+    commands: () => [],
+    setDocumentEdited: () => undefined,
+    setTitle: () => undefined,
+    rpc: { handle: () => () => undefined, fail: () => undefined },
+    getMcpStatus: async () => ({}),
+  };
+  const store = createDocumentStore({ registry, host: createDesktopHost(api) });
+  /** Another tool saves the project: `ops` applied to what's on disk. */
+  const outsideEdit = (ops: Op[]) => {
+    const next = applyOps(parseDocumentFiles(files), ops, { registry });
+    if (!next.ok) throw new Error(JSON.stringify(next.errors));
+    Object.assign(files, serializeDocument(next.doc));
+  };
+  const hold = () => {
+    let release!: () => void;
+    gate = new Promise((resolve) => (release = resolve));
+    return () => {
+      gate = null;
+      release();
+    };
+  };
+  return { dir, files, writes, store, outsideEdit, hold };
+}
+
+const flush = async () => {
+  for (let i = 0; i < 3; i++) await new Promise((resolve) => setTimeout(resolve, 0));
+};
+const withCard = () => applyOps(createEmptyDocument({ name: "Proj" }), [addRect("Card")], { registry }).doc;
+const cardOf = (store: ReturnType<typeof createDocumentStore>) => findLayer(store.getState().doc.components.main!.layers, "card")?.layer;
+
+describe("document store: outside changes", () => {
+  it("says when an outside change leaves a file it can't read, and the next save rewrites it", async () => {
+    const p = diskProject(withCard());
+    expect((await p.store.getState().open(p.dir)).ok).toBe(true);
+    const good = p.files["assets/assets.json"]!;
+    p.files["assets/assets.json"] = "<<<<<<< HEAD\n{}\n=======\n{ }\n>>>>>>> theirs\n";
+    await p.store.getState().checkExternalChanges(["assets/assets.json"]);
+    expect(p.store.getState()).toMatchObject({ dirty: true, externalChange: null, diskProblem: { paths: ["assets/assets.json"], code: "corrupt", message: expect.stringContaining("assets/assets.json") } });
+
+    // A later good read clears it.
+    p.files["assets/assets.json"] = good;
+    await p.store.getState().checkExternalChanges(["assets/assets.json"]);
+    expect(p.store.getState()).toMatchObject({ dirty: false, diskProblem: null });
+
+    p.files["assets/assets.json"] = "{ nope";
+    await p.store.getState().checkExternalChanges(["assets/assets.json"]);
+    p.store.getState().apply([{ op: "updateLayer", id: "card", props: { opacity: 0.5 } }], { label: "Set opacity" });
+    expect(await p.store.getState().save()).toMatchObject({ ok: true });
+    expect(Object.keys(p.writes.at(-1)!.files!).sort()).toEqual(["assets/assets.json", "components/main.json"]);
+    expect(parseDocumentFiles(p.files).components.main!.layers[0]!.props.opacity).toBe(0.5);
+    expect(p.store.getState()).toMatchObject({ dirty: false, diskProblem: null });
+  });
+
+  it("rewrites a broken file on save even with no edits", async () => {
+    const p = diskProject(withCard());
+    await p.store.getState().open(p.dir);
+    p.files["project.json"] = "{";
+    await p.store.getState().checkExternalChanges(["project.json"]);
+    expect(p.store.getState().dirty).toBe(true);
+    expect(await p.store.getState().save()).toMatchObject({ ok: true });
+    expect(Object.keys(p.writes.at(-1)!.files!)).toEqual(["project.json"]);
+    expect(() => parseDocumentFiles(p.files)).not.toThrow();
+  });
+
+  it("checks outside changes that arrive while saving once the save is done", async () => {
+    const p = diskProject(withCard());
+    await p.store.getState().open(p.dir);
+    p.store.getState().apply([{ op: "setProject", changes: { fps: 120 } }], { label: "120 fps" });
+    const release = p.hold();
+    const saving = p.store.getState().save();
+    expect(p.store.getState().status).toBe("saving");
+    const theirs = applyOps(parseDocumentFiles(p.files), [addRect("External Dot")], { registry }).doc;
+    p.files["components/main.json"] = serializeDocument(theirs)["components/main.json"]!;
+    await p.store.getState().checkExternalChanges(["components/main.json"]);
+    release();
+    expect((await saving).ok).toBe(true);
+    await flush();
+    expect(layerIds(p.store)).toEqual(["card", "external_dot"]);
+    expect(p.store.getState()).toMatchObject({ dirty: false, externalChange: null, lastChange: { kind: "reload" } });
+    expect(p.store.getState().doc.project.fps).toBe(120);
+  });
+
+  it("won't save over an outside change until the person decides", async () => {
+    const p = diskProject(withCard());
+    await p.store.getState().open(p.dir);
+    p.store.getState().apply([addRect("Mine")], { label: "Add Mine" });
+    p.outsideEdit([addRect("Theirs")]);
+    await p.store.getState().checkExternalChanges(["components/main.json"]);
+    expect(p.store.getState().externalChange?.paths).toEqual(["components/main.json"]);
+
+    expect(await p.store.getState().save()).toMatchObject({ ok: false, errorCode: "disk_changed", error: expect.stringContaining("changed outside Sonobe") });
+    expect(parseDocumentFiles(p.files).components.main!.layers.map((l) => l.id)).toEqual(["card", "theirs"]);
+    expect(p.store.getState().externalChange).not.toBeNull();
+
+    expect(await p.store.getState().save({ overwriteExternal: true })).toMatchObject({ ok: true });
+    expect(parseDocumentFiles(p.files).components.main!.layers.map((l) => l.id)).toEqual(["card", "mine"]);
+    expect(p.store.getState()).toMatchObject({ dirty: false, externalChange: null });
+
+    p.store.getState().apply([addRect("Second")], { label: "Add Second" });
+    p.outsideEdit([addRect("Theirs Again")]);
+    await p.store.getState().checkExternalChanges(["components/main.json"]);
+    p.store.getState().dismissExternalChange();
+    expect(await p.store.getState().save()).toMatchObject({ ok: true });
+  });
+
+  it("asks which version to keep when the person saves", async () => {
+    const p = diskProject(withCard());
+    await p.store.getState().open(p.dir);
+    const setup = async () => {
+      p.store.getState().apply([addRect("Mine")], { label: "Add Mine" });
+      p.outsideEdit([addRect("Theirs")]);
+      await p.store.getState().checkExternalChanges(["components/main.json"]);
+    };
+    await setup();
+    const choose = vi.fn(async () => "reload" as const);
+    expect(await saveDocumentInteractively(p.store, { choose } as never)).toMatchObject({ ok: false, cancelled: true, reloaded: true });
+    expect(choose).toHaveBeenCalledWith(expect.objectContaining({ title: expect.stringContaining("changed outside Sonobe"), actions: expect.arrayContaining([expect.objectContaining({ value: "overwrite" })]) }));
+    expect(layerIds(p.store)).toEqual(["card", "theirs"]);
+    expect(p.store.getState().dirty).toBe(false);
+
+    await setup();
+    expect(await saveDocumentInteractively(p.store, { choose: async () => "overwrite" } as never)).toMatchObject({ ok: true });
+    // "mine" was removed by the reload, and removed ids aren't reused within a session.
+    expect(parseDocumentFiles(p.files).components.main!.layers.map((l) => l.id)).toEqual(["card", "theirs", "mine_2"]);
+  });
+
+  it("keeps undo and redo from reverting outside changes after a reload", async () => {
+    const p = diskProject(createEmptyDocument({ name: "Proj" }));
+    await p.store.getState().open(p.dir);
+    p.store.getState().apply([addRect("Card", { props: { opacity: 0.5 } })], { label: "Add Card" });
+    await p.store.getState().save();
+    p.outsideEdit([{ op: "updateLayer", id: "card", name: "Hero Card", props: { opacity: 0.8 } }]);
+    await p.store.getState().checkExternalChanges(["components/main.json"]);
+    expect(cardOf(p.store)).toMatchObject({ name: "Hero Card", props: { opacity: 0.8 } });
+    expect(p.store.getState()).toMatchObject({ dirty: false, canUndo: true, undoLabel: "Outside Sonobe: Reloaded from disk" });
+    const reloaded = p.store.getState().doc;
+
+    expect(p.store.getState().undo().ok).toBe(true);
+    expect(cardOf(p.store)).toMatchObject({ name: "Card", props: { opacity: 0.5 } });
+    expect(p.store.getState().dirty).toBe(true);
+    expect(p.store.getState().redo().ok).toBe(true);
+    expect(p.store.getState().doc).toBe(reloaded);
+    expect(p.store.getState().dirty).toBe(false);
+
+    p.store.getState().undo();
+    p.store.getState().undo();
+    expect(cardOf(p.store)).toBeUndefined();
+    p.store.getState().redo();
+    p.store.getState().redo();
+    expect(cardOf(p.store)).toMatchObject({ name: "Hero Card", props: { opacity: 0.8 } });
+    expect(serializeDocument(p.store.getState().doc)).toEqual(p.files);
+    expect(p.store.getState().dirty).toBe(false);
+
+    // Reloading over unsaved edits: undo brings the edits back as they were.
+    p.store.getState().apply([{ op: "updateLayer", id: "card", props: { opacity: 0.2 } }], { label: "Fade" });
+    p.outsideEdit([{ op: "updateLayer", id: "card", props: { opacity: 1 } }]);
+    await p.store.getState().checkExternalChanges(["components/main.json"]);
+    p.store.getState().acceptExternalChange();
+    expect(cardOf(p.store)!.props.opacity).toBe(1);
+    p.store.getState().undo();
+    expect(cardOf(p.store)!.props.opacity).toBe(0.2);
+    p.store.getState().redo();
+    expect(cardOf(p.store)!.props.opacity).toBe(1);
+    expect(p.store.getState().dirty).toBe(false);
   });
 });

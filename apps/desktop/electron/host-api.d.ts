@@ -118,6 +118,11 @@ export interface McpStatus {
   url: string | null;
   /** Path of ~/.sonobe/mcp.json (port + bearer token, mode 0600). */
   tokenFile: string;
+  /**
+   * The app's bundled `sonobe` CLI launcher (Resources/cli/sonobe, or sonobe.cmd on Windows), or null
+   * when this build has none. Connect Claude uses it so Claude launches the relay by full path.
+   */
+  cliPath: string | null;
 }
 
 /** The phone preview server (LAN web player). */
@@ -240,9 +245,10 @@ export interface SonobeHost {
   /**
    * Tell the host the document reached `revision`: call it after every committed change, undo, redo,
    * open, and reload. It drives the phone preview's and pop-out viewer's live sync and MCP resource
-   * notifications. Cheap; calling it for every revision is fine.
+   * notifications. Cheap; calling it for every revision is fine. `history` carries the Edit menu's
+   * Undo and Redo titles ("Undo Mute Card Shadow").
    */
-  notifyDocumentChanged(revision: number): void;
+  notifyDocumentChanged(revision: number, history?: { undo: string; redo: string }): void;
 
   /** Keychain-backed secrets (for example the in-app assistant's API key). */
   secrets: SonobeSecrets;

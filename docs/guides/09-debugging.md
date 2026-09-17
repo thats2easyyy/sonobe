@@ -46,13 +46,13 @@ A pulse lasts one frame, so there's no value to read by the time your eyes get t
 
 ## The Diagnostics panel
 
-Diagnostics lives in the bottom HUD, next to the Console, AI Activity and FPS. It checks the document continuously and sorts findings into errors, warnings and info. Many findings come with a suggested fix you can apply.
+Diagnostics lives in the bottom HUD, next to the Console, AI Activity and Performance tabs. It checks the document continuously and sorts findings into errors, warnings and info. Many findings come with a suggested fix you can apply.
 
 | Finding | What it usually means | Fix |
 |---|---|---|
 | Unknown patch type or port | A typo, or a file from a newer version | Accept the did-you-mean suggestion |
 | Invalid link or type mismatch | Two ports that can't talk directly | Add the converter patch it suggests |
-| Zero-latency self-cycle | A patch feeding its own input | Put a Delay 1 in the loop |
+| Zero-latency self-cycle | A patch feeding its own input | Put a Delay One Frame in the loop |
 | Pulse into a state input | A tap wired where a lasting value is expected | Add a Switch (guide 03) |
 | Loop length mismatch | Lists of different lengths meeting | Check whether the wrap was intended (guide 07) |
 | Unused patches | Leftovers that don't affect anything | Delete them, or connect them |
@@ -86,18 +86,25 @@ If something is off by exactly one frame, one of these is almost always why.
 
 ### Ask for a trace
 
-A trace records values on every frame while a scripted interaction plays. It also summarizes each value's start, end, min, max, overshoot and settle time. This one follows the tap-to-grow card for half a second after a tap (illustrative):
+A trace records values on every frame while a scripted interaction plays. It also summarizes each value's start, end, range, overshoot and settle time. This one follows the tap-to-grow card from guide 01 for one second after a tap, recorded with `sonobe sim` (a few of its rows):
 
 ```
-time after tap   toggle.on   pop.output   @card.scale
-0.0 s            true        0.000        1.0000
-0.1 s            true        0.593        1.0474
-0.2 s            true        0.968        1.0774
-0.3 s            true        1.019        1.0815
-0.5 s            true        1.000        1.0800
+t_ms     toggle.on  pop.output  @card.scale
+33.33    false      0           1
+50       true       0.0358      1.0029
+100      true       0.3597      1.0288
+200      true       0.8959      1.0717
+316.67   true       1.0194      1.0816
+500      true       1.0016      1.0801
 
-@card.scale   start 1.000   end 1.080   max 1.0816   overshoot 2%   settles in 0.48 s
+Summaries:
+  pop.output: start 0 → end 1, settled by 517 ms, overshoot 0.0194 (2%), range 0…1.0194
+  @card.scale: start 1 → end 1.08, settled by 400 ms, overshoot 0.0016 (2%), range 1…1.0816
 ```
+
+Times count from the tap. The spring starts moving a few frames in, once the tap has landed and the Switch has flipped, so a trace reads a little later than a spring's own curve in guide 05.
+
+A value counts as settled once it stays within 0.1% of its final value. That's why @card.scale settles before pop.output: 0.1% of 1.08 is a bigger share of the card's small 0.08 travel.
 
 Ask Claude: "Tap @card, trace @card.scale for one second, and tell me the overshoot and settle time." Traces are also how you check a fix. Run the same trace before and after, and compare the summaries.
 

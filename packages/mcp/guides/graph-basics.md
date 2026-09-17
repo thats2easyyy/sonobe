@@ -45,7 +45,7 @@ Some connections convert automatically: number to boolean (on when > 0), boolean
 
 - Ops apply in order, and later ops see earlier results.
 - Batches are **atomic** by default: any failure rolls back everything.
-- Give an item a `ref` and address it later in the batch as `$ref`.
+- Give an item a `ref` and address it as `$ref` anywhere in the batch, even before the op that creates it. Items are created first, then the values and connections that name them, so two patches can feed each other in one batch.
 - `dryRun: true` previews the diagnostics without changing anything.
 - `expectedRevision` refuses to apply when the document moved on.
 
@@ -119,7 +119,9 @@ The error suggests an Option Picker set to color, with the three ops that insert
 
 - Every patch evaluates every frame in dataflow order, then layer props resolve, then layout runs.
 - Same-frame precedence: Switch `turnOff` beats `turnOn` beats `flip`; Counter `jump` beats increase and decrease.
-- A cable that loops back to an earlier patch reads the **previous frame's** value. Diagnostics note it as `feedback_loop` (info).
+- A cable that loops back to an earlier patch reads the **previous frame's** value. Loops that close through a layer property (`b.output → @card.opacity`, then `@card.opacity → a.value1`) or through a Variable Broadcaster and Receiver count too. Diagnostics name the lagging connection in `feedback_loop`:
+  - **info** when the loop is intentional: it goes through `delay1`, or values only come back when a pulse fires (a scroll's jump position, a Sample and Hold, a Counter's jump number).
+  - **warning** when values feed back every frame, which can drift or oscillate. Insert `delay1` to make it explicit, or disconnect the cable.
 - A patch can't feed its own input (`self_edge`). Route the value through `delay1` (Delay One Frame), which outputs what its input was last frame.
 
 Accumulate an angle, 3 degrees per frame:

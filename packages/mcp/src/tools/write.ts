@@ -14,11 +14,13 @@ import {
   type NewPatch,
   type Op,
   type OpResult,
+  type SonobeDocument,
 } from "@sonobe/core";
 import type { CallToolResult, ServerContext } from "@modelcontextprotocol/server";
 import { z } from "zod";
 import { joinList, plural } from "../format.ts";
 import { requireComponent } from "../graph.ts";
+import { describeRemovals, hasDestructiveOps, removedItems, type RemovalSummary } from "../removals.ts";
 import type { HostApplyResult } from "../host.ts";
 import { failure, formatSonobeError, success } from "../results.ts";
 import { ADDITIVE, DESTRUCTIVE, UI_ONLY, type ToolContext } from "../server.ts";
@@ -101,6 +103,7 @@ export function writeResult(
     affected: result.affected,
     diagnostics: delta,
     ...(result.saved ? { saved: true } : {}),
+    ...(result.saveError ? { saved: false, saveError: result.saveError } : {}),
     ...(extra.data ?? {}),
   };
   if (
@@ -157,6 +160,10 @@ export function writeResult(
   lines.push(...deltaLines());
   for (const note of extra.notes ?? []) lines.push(note);
   if (result.saved) lines.push("Saved to disk.");
+  if (result.saveError) {
+    lines.push(`Not saved to disk (${result.saveError.code}): ${result.saveError.message} The change is applied in this session only.`);
+    if (result.saveError.hint) lines.push(`Hint: ${result.saveError.hint}`);
+  }
   const out = success(lines.join("\n"), data);
   if (failed.length) out.isError = true;
   return out;
@@ -196,12 +203,32 @@ export function registerWriteTools(tc: ToolContext): void {
       ...(args.component !== undefined ? { defaultComponent: args.component } : {}),
     });
 
+  /**
+   * apply, plus what the batch removes (or would remove, on a dry run) when it has destructive ops.
+   * Counted from the documents before and after, so a removeLayer counts its whole subtree.
+   */
+  const applyCounted = async (ctx: ServerContext, ops: Op[], args: Parameters<typeof apply>[2]) => {
+    if (!hasDestructiveOps(ops)) return writeResult(await apply(ctx, ops, args));
+    const before = await host.getDocument(args.docId);
+    const result = await apply(ctx, ops, args);
+    let after: SonobeDocument | undefined;
+    if (result.dryRun) after = result.preview;
+    else if (result.revision !== before.revision) after = (await host.getDocument(args.docId)).doc;
+    if (!after || result.conflict) return writeResult(result);
+    const removed: RemovalSummary = removedItems(before.doc, after);
+    const text = describeRemovals(removed);
+    return writeResult(result, {
+      data: { removed },
+      ...(text ? { notes: [`${result.dryRun ? "Would remove" : "Removed"}: ${text}.`] } : {}),
+    });
+  };
+
   tc.tool(
     "apply_ops",
     {
       title: "Apply ops",
       description:
-        'Apply a batch of document ops through Sonobe\'s op engine: sequential (later ops see earlier effects and "$ref" ids), atomic by default (any failure rolls back everything), validated with teaching errors and ready-to-apply fixes. dryRun previews diagnostics without changing anything. The other write tools compile to these ops.',
+        'Apply a batch of document ops through Sonobe\'s op engine: in order (later ops see earlier effects), atomic by default (any failure rolls back everything), validated with teaching errors and ready-to-apply fixes. "$ref" ids resolve anywhere in the batch: items are created first, then the values and connections that name items created later. dryRun previews diagnostics without changing anything. The other write tools compile to these ops.',
       input: z.object({
         docId: DocIdSchema.optional(),
         ops: z.array(OpSchema).min(1).max(500),
@@ -219,7 +246,7 @@ export function registerWriteTools(tc: ToolContext): void {
       output: WriteOutputSchema,
       annotations: DESTRUCTIVE,
     },
-    async (args, ctx) => writeResult(await apply(ctx, args.ops as unknown as Op[], args)),
+    async (args, ctx) => applyCounted(ctx, args.ops as unknown as Op[], args),
   );
 
   tc.tool(
@@ -269,7 +296,7 @@ export function registerWriteTools(tc: ToolContext): void {
     {
       title: "Add patches",
       description:
-        'Add patches and wire them in one atomic batch. Give each a "ref" and a name describing its effect; inputs take literals or { "link": "$ref.port" | "patchId.port" | "@layerId.prop" } and { "layer": "layerId" }. connections run after every patch exists, e.g. { "from": "$grow.output", "to": "@card.scale" }. Patches without ui are placed below the existing graph.',
+        'Add patches and wire them in one atomic batch. Give each a "ref" and a name describing its effect; inputs take literals or { "link": "$ref.port" | "patchId.port" | "@layerId.prop" } and { "layer": "layerId" }, and may name patches later in the list (loops too). connections run after every patch exists, e.g. { "from": "$grow.output", "to": "@card.scale" }. Patches without ui are placed below the existing graph.',
       input: z.object({
         docId: DocIdSchema.optional(),
         component: ComponentIdSchema.optional(),
@@ -511,12 +538,13 @@ export function registerWriteTools(tc: ToolContext): void {
     "delete_items",
     {
       title: "Delete items",
-      description: `Delete layers (with their children), patches and comments, plus every connection to them. Undoable. Deleting more than ${DELETE_CONFIRM_THRESHOLD} items first returns a summary and a confirmToken; ask the person, then call again with the token.`,
+      description: `Delete layers (with their children), patches and comments, plus every connection to them. Undoable. Deleting more than ${DELETE_CONFIRM_THRESHOLD} items first returns a summary and a confirmToken; ask the person, then call again with the token. dryRun reports what would be removed without changing anything or asking.`,
       input: z.object({
         docId: DocIdSchema.optional(),
         component: ComponentIdSchema.optional(),
         ids: z.array(z.string()).min(1).max(500),
         confirmToken: z.string().optional(),
+        dryRun: z.boolean().optional(),
         label: LabelSchema.optional(),
         expectedRevision: ExpectedRevisionSchema.optional(),
       }),
@@ -554,7 +582,7 @@ export function registerWriteTools(tc: ToolContext): void {
           ops.push({ op: "removePatch", component: c.id, id });
         }
       }
-      if (count > DELETE_CONFIRM_THRESHOLD) {
+      if (count > DELETE_CONFIRM_THRESHOLD && args.dryRun !== true) {
         const token = confirmToken(snap.docId, snap.revision, unique);
         if (args.confirmToken !== token) {
           const summary = `Deleting ${plural(count, "item")} from ${c.id}: ${joinList(names.slice(0, 12))}${names.length > 12 ? `, and ${names.length - 12} more` : ""}.`;
@@ -572,14 +600,12 @@ export function registerWriteTools(tc: ToolContext): void {
           );
         }
       }
-      return writeResult(
-        await apply(ctx, ops, {
-          ...args,
-          label:
-            args.label ??
-            `deleted ${joinList(names.slice(0, 3))}${names.length > 3 ? ` and ${names.length - 3} more` : ""}`,
-        }),
-      );
+      return applyCounted(ctx, ops, {
+        ...args,
+        label:
+          args.label ??
+          `deleted ${joinList(names.slice(0, 3))}${names.length > 3 ? ` and ${names.length - 3} more` : ""}`,
+      });
     },
   );
 

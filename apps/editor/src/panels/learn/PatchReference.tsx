@@ -6,8 +6,11 @@ import { Badge } from "../../ui/Badge.tsx";
 import { Button } from "../../ui/Button.tsx";
 import { EmptyState } from "../../ui/EmptyState.tsx";
 import { PortGlyph, VALUE_TYPE_LABELS } from "../../ui/PortGlyph.tsx";
+import { getRegistry } from "../../state/registry.ts";
+import { Kbd } from "../../ui/Kbd.tsx";
 import { HighlightedText } from "../../ui/SearchList.tsx";
 import { TextField } from "../../ui/TextField.tsx";
+import { singleKeyFor } from "../patch-editor/model/singleKey.ts";
 import { examplesUsingPatch, type ExampleProject } from "./examples.ts";
 import { Markdown } from "./Markdown.tsx";
 import { patchAvailability, patchPortRows, searchPatchReference, type PatchReferenceItem, type PortRow } from "./patchReference.ts";
@@ -167,9 +170,9 @@ function PatchDetail({ items, type, onSelect, examples, onTryExample, onInsertPa
         </h1>
         <div className="sb-patchdoc__ids">
           <code>{item.type}</code>
-          {spec.shortcut && (
+          {singleKeyFor(getRegistry(), spec.type) && (
             <span className="sb-patchdoc__shortcut">
-              press <kbd>{spec.shortcut}</kbd> on the canvas
+              point at the patch editor and press <Kbd variant="plain" shortcut={singleKeyFor(getRegistry(), spec.type)} />
             </span>
           )}
         </div>

@@ -32,7 +32,6 @@ import {
   type InputEvent,
   type SceneFrame,
   type SceneNode,
-  type ScheduledInput,
   type SonobeRuntime,
   type TraceSummary,
 } from "@sonobe/engine";
@@ -171,7 +170,8 @@ function findSceneNode(
   return first;
 }
 
-const LAYER_TARGET = /^@((?:[A-Za-z_][A-Za-z0-9_]*(?:#\d+)?\/)*)([A-Za-z_][A-Za-z0-9_]*)(?:#(\d+))?$/;
+const LAYER_TARGET =
+  /^@((?:[A-Za-z_][A-Za-z0-9_]*(?:#\d+)?\/)*)([A-Za-z_][A-Za-z0-9_]*)(?:#(\d+))?$/;
 
 function comparePasses(actual: unknown, op: string, expected: number | boolean | string): boolean {
   if (typeof expected === "number") {
@@ -210,12 +210,32 @@ function sameValue(a: unknown, b: unknown): boolean {
   return JSON.stringify(toJsonValue(a)) === JSON.stringify(toJsonValue(b));
 }
 
+const finiteMs = (ms: unknown) =>
+  typeof ms === "number" && Number.isFinite(ms) && ms > 0 ? ms : 0;
+
+/** How long previewScene waits for start-up animations to settle. */
+const PREVIEW_SETTLE_MS = 5000;
+
 export interface SimulationManager extends SimHost {
   /**
    * A session's current frame, for rendering simulation screenshots. Pending document edits are
    * hot-swapped first (without advancing time); the next sim_* result still reports them.
    */
   scene(simId: string): SceneFrame;
+  /**
+   * The frame `atMs` milliseconds after a session's current frame, stepped on a copy so the session
+   * doesn't move (0: the current frame).
+   */
+  sceneAt(simId: string, atMs: number): SceneFrame;
+  /**
+   * A document's frame without a session, for screenshots: a fresh deterministic run stepped `atMs`
+   * past its first frame, or (without atMs) until start-up animations settle, up to `maxMs`
+   * (default 5000). `settled` is false when something was still animating.
+   */
+  previewScene(
+    docId: Id | undefined,
+    options?: { atMs?: number; maxMs?: number },
+  ): { scene: SceneFrame; settled: boolean };
   /** Drop every session for a document (closed documents). */
   closeDocument(docId: Id): void;
   dispose(): void;
@@ -316,7 +336,9 @@ export function createSimulationManager(options: SimulationManagerOptions): Simu
       session.reportedIssues.add(key);
       const out1: SimIssue = { code: issue.code, severity: issue.severity, message: issue.message };
       if (issue.patchId !== undefined)
-        out1.patchId = issue.componentPath ? `${issue.componentPath}/${issue.patchId}` : issue.patchId;
+        out1.patchId = issue.componentPath
+          ? `${issue.componentPath}/${issue.patchId}`
+          : issue.patchId;
       if (issue.layerId !== undefined) out1.layerId = issue.layerId;
       out.push(out1);
     }
@@ -483,7 +505,11 @@ export function createSimulationManager(options: SimulationManagerOptions): Simu
       throw new HostError(
         "not_found",
         `There's no layer "${layerId}" to touch${pathText ? ` inside ${pathText}` : ""}.${didYouMeanText(didYouMean(layerId, allLayerIdsOf(scope.component.layers)))}`,
-        path ? { hint: `"${layerId}" lives inside component "${other!.id}"; target "@${path}/${layerId}".` } : {},
+        path
+          ? {
+              hint: `"${layerId}" lives inside component "${other!.id}"; target "@${path}/${layerId}".`,
+            }
+          : {},
       );
     }
     const spec: TargetSpec = {
@@ -529,7 +555,10 @@ export function createSimulationManager(options: SimulationManagerOptions): Simu
   };
 
   /** Interaction-category patches bound to a layer in the hit chain (or to the whole screen), with instance paths. */
-  const listeners = (rt: SonobeRuntime, chain: readonly { key: string; layerId: Id }[]): string[] => {
+  const listeners = (
+    rt: SonobeRuntime,
+    chain: readonly { key: string; layerId: Id }[],
+  ): string[] => {
     const doc = rt.document;
     const byPrefix = new Map<string, Set<Id>>([["", new Set()]]);
     for (const node of chain) {
@@ -797,7 +826,8 @@ export function createSimulationManager(options: SimulationManagerOptions): Simu
         }
         case "pointer": {
           const e = pointer(event.phase, [event.x, event.y], event.pointerType ?? "touch", start);
-          if (event.pointerId !== undefined) (e as { pointerId: number }).pointerId = event.pointerId;
+          if (event.pointerId !== undefined)
+            (e as { pointerId: number }).pointerId = event.pointerId;
           report.point = [event.x, event.y];
           at(start, () => [e]);
           break;
@@ -1011,14 +1041,13 @@ export function createSimulationManager(options: SimulationManagerOptions): Simu
           clone.dispose();
         }
       } else {
-        // Past the replay budget: the engine traces its own copy, and inputs resolve against the current frame.
-        const scheduled: ScheduledInput[] = planned.map((p) => ({
-          atMs: p.atMs,
-          events: p.fire(session.runtime, 0),
-        }));
-        const r = session.runtime.trace(targets, durationMs, scheduled);
-        times = r.times;
-        raw = r.values;
+        // Past the replay budget there's no copy of the current state to trace. (The engine's own log
+        // is shorter still, so its trace would start a restarted prototype and report wrong values.)
+        throw new HostError(
+          "sim_copy_unavailable",
+          `Simulation "${simId}" has run too long to copy, so it can't trace without moving.`,
+          { hint: "Pass advance: true to trace the simulation itself, or start again with sim_reset." },
+        );
       }
       const summaries: Record<string, TraceSummary | null> = Object.fromEntries(
         targets.map((t) => [t, summarizeSeries(times, raw[t]! as never[])]),
@@ -1053,6 +1082,63 @@ export function createSimulationManager(options: SimulationManagerOptions): Simu
       const session = require(simId);
       refresh(session);
       return session.runtime.scene();
+    },
+
+    sceneAt(simId, atMs) {
+      const session = require(simId);
+      refresh(session);
+      const frames = Math.max(0, Math.round((finiteMs(atMs) * session.fps) / 1000));
+      if (frames === 0) return session.runtime.scene();
+      if (session.logTruncated) {
+        throw new HostError(
+          "sim_copy_unavailable",
+          `Simulation "${simId}" has run too long to copy, so it can't show a later frame without moving.`,
+          { hint: "Advance it with sim_step, then take the screenshot without atMs." },
+        );
+      }
+      const copy = replay(session);
+      try {
+        for (let i = 0; i < Math.min(frames, MAX_FRAMES_PER_CALL); i++) copy.step();
+        return copy.scene();
+      } finally {
+        copy.dispose();
+      }
+    },
+
+    previewScene(docId, previewOptions = {}) {
+      const current = options.getDocument(docId);
+      const fps = (current.doc.project.fps ?? 60) as 60 | 120;
+      const runtime = createRuntime(current.doc, {
+        registry: options.registry,
+        deterministic: true,
+        seed: 1,
+        fps,
+        platform: {},
+      });
+      try {
+        runtime.step();
+        let settled: boolean;
+        if (previewOptions.atMs !== undefined) {
+          const frames = Math.round((finiteMs(previewOptions.atMs) * fps) / 1000);
+          for (let i = 0; i < Math.min(frames, MAX_FRAMES_PER_CALL); i++) runtime.step();
+          settled = !runtime.needsNextFrame;
+        } else {
+          // Like sim_step until "idle": nothing animating for three frames in a row.
+          const maxFrames = Math.min(
+            MAX_FRAMES_PER_CALL,
+            Math.ceil(((finiteMs(previewOptions.maxMs) || PREVIEW_SETTLE_MS) * fps) / 1000),
+          );
+          let stable = runtime.needsNextFrame ? 0 : 1;
+          for (let i = 0; i < maxFrames && stable < 3; i++) {
+            runtime.step();
+            stable = runtime.needsNextFrame ? 0 : stable + 1;
+          }
+          settled = stable >= 3;
+        }
+        return { scene: runtime.scene(), settled };
+      } finally {
+        runtime.dispose();
+      }
     },
 
     list(docId) {

@@ -96,6 +96,57 @@ const BLEND_MODES: Record<string, string> = {
 
 const clamp01 = (n: number) => (n < 0 ? 0 : n > 1 ? 1 : n);
 
+/** Box layers draw only from their props, size, opacity and visibility, so an unchanged one only needs its transform written. */
+const STATIC_TYPES: ReadonlySet<string> = new Set(["group", "componentInstance", "rectangle", "oval", "colorFill", "gradient"]);
+/** Props already folded into a node's transform and size. */
+const GEOMETRY_KEYS: ReadonlySet<string> = new Set(["position", "size", "anchor", "pivot", "scale", "scaleXYZ", "rotation", "rotationX", "rotationY", "zPosition"]);
+const NO_PROPS: Readonly<Record<string, unknown>> = Object.freeze({});
+
+/** What a static host was last drawn from. */
+interface StyleMemo {
+  type: string;
+  props: Readonly<Record<string, unknown>>;
+  width: number;
+  height: number;
+  opacity: number;
+  visible: boolean | undefined;
+  clip: boolean | undefined;
+  flags: number;
+  keys: ReadonlySet<string>;
+  scale: number;
+  dpr: number;
+  visibleResult: boolean;
+  cursor: boolean;
+}
+
+/** Same values by identity, ignoring props the transform and size already cover (own and inherited keys). */
+function sameStyleProps(a: Readonly<Record<string, unknown>>, b: Readonly<Record<string, unknown>>): boolean {
+  const proto = Object.getPrototypeOf(a) as object | null;
+  if (proto !== null && proto !== Object.prototype && proto === Object.getPrototypeOf(b)) {
+    // Engine scenes: both inherit one defaults object, so only own (bound) values can differ. for...in
+    // lists own keys before inherited ones, so each loop stops at the first inherited key.
+    let n = 0;
+    for (const key in a) {
+      if (!Object.hasOwn(a, key)) break;
+      n++;
+      if (a[key] !== b[key] && !GEOMETRY_KEYS.has(key)) return false;
+    }
+    for (const key in b) {
+      if (!Object.hasOwn(b, key)) break;
+      n--;
+      if (!Object.hasOwn(a, key) && a[key] !== b[key] && !GEOMETRY_KEYS.has(key)) return false;
+    }
+    return n === 0;
+  }
+  let n = 0;
+  for (const key in a) {
+    n++;
+    if (a[key] !== b[key] && !GEOMETRY_KEYS.has(key)) return false;
+  }
+  for (const _key in b) n--;
+  return n === 0;
+}
+
 /** Longest increasing subsequence over `sources` (ignoring -1); returns the kept indices. */
 export function lisIndices(sources: readonly number[]): Set<number> {
   const tails: number[] = [];
@@ -189,6 +240,8 @@ export function createDomRenderer(container: HTMLElement, opts: DomRendererOptio
   const measurer = opts.textMeasurer ?? new DomTextMeasurer({ document: doc });
   const shaders = new ShaderHost(doc);
   const hosts = new Map<string, Host>();
+  const styleMemos = new WeakMap<Host, StyleMemo>();
+  const transforms = new WeakMap<Host, Float64Array>();
   const rootHost: Host = { key: "", type: "stage", layerId: "", el: stage, body: stage, parts: [], stroke: null, strokeSvg: null, overlay: null, children: [], gen: 0, state: {} };
 
   let gen = 0;
@@ -385,14 +438,54 @@ export function createDomRenderer(container: HTMLElement, opts: DomRendererOptio
     return [copy(source, node.key, true)];
   }
 
+  /** Writes the transform, formatting the string only when the matrix changed. */
+  function writeTransform(host: Host, node: SceneNode): void {
+    const m = isMat4(node.transform) ? node.transform : translation(node.x || 0, node.y || 0);
+    let last = transforms.get(host);
+    if (last) {
+      let same = true;
+      for (let i = 0; i < 16; i++) {
+        if (last[i] !== m[i]) {
+          same = false;
+          break;
+        }
+      }
+      if (same) return;
+    } else transforms.set(host, (last = new Float64Array(16)));
+    for (let i = 0; i < 16; i++) last[i] = m[i]!;
+    setStyle(host.el, "transform", cssTransform(m), stats);
+  }
+
   /** Common pass: transform, size, visibility, blending, filters, shadows, radius, clip, stroke, overlay. */
   function updateHost(host: Host, node: SceneNode, p: PropReader, drawer: Drawer): boolean {
     const { el, body } = host;
     const w = nodeWidth(node);
     const h = nodeHeight(node);
+    writeTransform(host, node);
+    const props = node.props ?? NO_PROPS;
+    const flags = (ctx.editorMode ? 1 : 0) | (ctx.showHitTargets ? 2 : 0) | (ctx.hidden ? 4 : 0) | (ctx.allowAudio ? 8 : 0);
+    const memo = styleMemos.get(host);
+    if (
+      memo &&
+      memo.type === node.type &&
+      memo.width === w &&
+      memo.height === h &&
+      memo.opacity === node.opacity &&
+      memo.visible === node.visible &&
+      memo.clip === node.clip &&
+      memo.flags === flags &&
+      memo.keys === ctx.hitTargetKeys &&
+      memo.scale === ctx.scale &&
+      memo.dpr === ctx.dpr &&
+      sameStyleProps(props, memo.props)
+    ) {
+      // A moving box layer: nothing but its transform changed, and that's written above.
+      memo.props = props;
+      if (memo.cursor) hasCursors = true;
+      return memo.visibleResult;
+    }
     setStyle(el, "width", px(w), stats);
     setStyle(el, "height", px(h), stats);
-    setStyle(el, "transform", cssTransform(isMat4(node.transform) ? node.transform : translation(node.x || 0, node.y || 0)), stats);
     const visible = node.visible !== false && p.bool("enabled", true);
     setStyle(el, "display", visible ? "" : "none", stats);
     const opacity = clamp01(readNumber(node.opacity, 1));
@@ -442,6 +535,23 @@ export function createDomRenderer(container: HTMLElement, opts: DomRendererOptio
     if (info.stroke) updateStroke(host, p, info, w, h, squircle);
     else removeStroke(host);
     updateOverlay(host, node, p, radius || (squircle ? radiusCss({ ...info, smoothing: 0 }) : ""));
+    if (STATIC_TYPES.has(node.type)) {
+      styleMemos.set(host, {
+        type: node.type,
+        props,
+        width: w,
+        height: h,
+        opacity: node.opacity,
+        visible: node.visible,
+        clip: node.clip,
+        flags,
+        keys: ctx.hitTargetKeys,
+        scale: ctx.scale,
+        dpr: ctx.dpr,
+        visibleResult: visible,
+        cursor: typeof props.cursor === "string" && props.cursor !== "auto",
+      });
+    } else styleMemos.delete(host);
     return visible;
   }
 

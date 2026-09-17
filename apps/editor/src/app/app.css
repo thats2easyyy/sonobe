@@ -95,7 +95,24 @@
   gap: var(--space-2);
 }
 
-/* Patches panel: breadcrumbs sit in the header */
+.sb-banner[data-tone="info"] {
+  background: var(--info-soft);
+}
+
+.sb-banner[data-tone="info"] svg {
+  color: var(--info-text);
+}
+
+/* Patches panel: breadcrumbs and the patch editor's toolbar sit in the header */
 .sb-app-patches .sb-panel__header-content {
   overflow: hidden;
+}
+
+.sb-app-patches__tools {
+  display: flex;
+  align-items: center;
+}
+
+.sb-app-patches__tools:empty {
+  display: none;
 }

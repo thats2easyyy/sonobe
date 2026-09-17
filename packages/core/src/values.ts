@@ -52,7 +52,15 @@ export const IDENTITY_TRANSFORM: readonly number[] = [1, 0, 0, 0, 0, 1, 0, 0, 0,
 /** Round to `decimals` places, mapping -0 to 0 and non-finite values to 0. */
 export function roundNumber(n: number, decimals = 6): number {
   if (!Number.isFinite(n)) return 0;
-  if (Math.abs(n) >= 1e15) return n;
+  const abs = Math.abs(n);
+  if (abs >= 1e15) return n;
+  if (abs >= 2 ** 32) {
+    // Here a double's step is close to 10^-6, so n * 10^6 loses precision and repeated rounding
+    // drifts the last digit (…764 → …763 → …762). toFixed rounds the exact binary value, so it's
+    // idempotent. Smaller values keep Math.round, whose half-way rounding existing files rely on.
+    const r = Number(n.toFixed(decimals));
+    return Object.is(r, -0) ? 0 : r;
+  }
   const f = 10 ** decimals;
   const r = Math.round(n * f) / f;
   return Object.is(r, -0) ? 0 : r;

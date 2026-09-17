@@ -24,7 +24,7 @@ import {
   type Suggestion,
   type ValueType,
 } from "@sonobe/core";
-import { freeInsertPosition, portTypeAt } from "../patch-editor/index.ts";
+import { freeInsertPosition, portTypeAt } from "../patch-editor/api.ts";
 
 /** A cable as stored: the output it reads and the input it drives. */
 export interface CableRef {

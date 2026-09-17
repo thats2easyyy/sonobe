@@ -16,7 +16,7 @@ import { PortGlyph } from "../../ui/PortGlyph.tsx";
 import { toast } from "../../ui/Toast.tsx";
 import { Tooltip } from "../../ui/Tooltip.tsx";
 import { useLatest } from "../../ui/lib/hooks.ts";
-import { layerPropDropAttributes, startLinkToLayerProp, type LayerPropTarget } from "../patch-editor/index.ts";
+import { layerPropDropAttributes, startLinkToLayerProp, type LayerPropTarget } from "../patch-editor/api.ts";
 import { controlKind, LiveReadout, STACKED_CONTROLS, useAssetFieldImport, ValueControl, type FieldActions } from "./controls.tsx";
 import { editLabel, linkSourceItem, planFieldDisconnect, planFieldReset, planFieldSet, type InspectorField } from "./model.ts";
 import { useInspectorEdit } from "./useInspectorEdit.ts";
@@ -29,14 +29,14 @@ export function useFieldActions(field: InspectorField, subject: string): FieldAc
   return useMemo(() => {
     const component = () => session.document.getState().doc.components[session.currentComponentId()];
     const gesture = () => `${latest.current.key}:${latest.current.targets.map((t) => t.address).join(",")}`;
-    const set = (update: Parameters<FieldActions["set"]>[0], options: { gesture?: string }) => {
+    const set = (update: Parameters<FieldActions["set"]>[0], options: { gesture?: string; coalesceKey?: string }) => {
       const c = component();
       if (c) edit.apply(planFieldSet(c, latest.current, update), editLabel(latest.current, subject), options);
     };
     return {
       change: (update) => set(update, { gesture: gesture() }),
-      set: (update) => {
-        set(update, {});
+      set: (update, options) => {
+        set(update, options?.coalesceKey ? { coalesceKey: options.coalesceKey } : {});
         edit.endGesture();
       },
       commit: () => edit.endGesture(),

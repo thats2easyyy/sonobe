@@ -50,6 +50,10 @@ export interface PatchEditorUiState {
   editingTitle: string | null;
   /** An input row flashed to draw the eye (a property you asked to drive). */
   highlightPort: string | null;
+  /** The port under the pointer right now (⌥P publishes it). */
+  pointerPort: { nodeId: string; address: string; side: PortSide } | null;
+  /** The component just created: committing `editingTitle` names the component, not the patch. */
+  namingComponent: Id | null;
   set: (partial: Partial<Omit<PatchEditorUiState, "set">>) => void;
 }
 
@@ -68,6 +72,8 @@ export function createUiStore(initial: { minimap?: boolean } = {}): UiStore {
     minimap: initial.minimap ?? false,
     editingTitle: null,
     highlightPort: null,
+    pointerPort: null,
+    namingComponent: null,
     set: (partial) => set(partial),
   }));
 }

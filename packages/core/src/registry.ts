@@ -4,6 +4,7 @@
  * and the props of a layer. Also layer-tree helpers.
  */
 
+import { getOwn } from "./ids.ts";
 import { LAYER_TYPES } from "./layerTypes.ts";
 import type {
   Component,
@@ -178,7 +179,7 @@ export function interfacePortToPort(port: InterfacePort, direction: "input" | "o
 
 /** Ports of a component's published interface (sorted by key). Empty when the component doesn't exist. */
 export function componentInterfacePorts(doc: SonobeDocument, componentId: Id | undefined): { inputs: ResolvedPort[]; outputs: ResolvedPort[] } {
-  const target = componentId === undefined ? undefined : doc.components[componentId];
+  const target = componentId === undefined ? undefined : getOwn(doc.components, componentId);
   if (!target) return { inputs: [], outputs: [] };
   return {
     inputs: sortedPorts(target.interface?.inputs).map((p) => interfacePortToPort(p, "input")),
@@ -258,39 +259,92 @@ export function resolveNodePorts(doc: SonobeDocument, node: PatchNode, registry:
 
 /** Resolve the ports of patch `patchId` in component `componentId`; undefined if the patch or its type is unknown. */
 export function resolvePatchPorts(doc: SonobeDocument, componentId: Id, patchId: Id, registry: Registry): ResolvedPorts | undefined {
-  const node = doc.components[componentId]?.patches[patchId];
+  const component = getOwn(doc.components, componentId);
+  const node = component ? getOwn(component.patches, patchId) : undefined;
   return node ? resolveNodePorts(doc, node, registry) : undefined;
+}
+
+const NO_PORTS: Readonly<Record<string, InterfacePort>> = Object.freeze({});
+
+function hasKeys(record: object): boolean {
+  for (const key in record) if (Object.hasOwn(record, key)) return true;
+  return false;
+}
+
+/** Resolved props per layer type spec, and per published-inputs object for component instances. */
+const basePropsCache = new WeakMap<LayerTypeSpec, readonly ResolvedProp[]>();
+const instancePropsCache = new WeakMap<LayerTypeSpec, WeakMap<object, readonly ResolvedProp[]>>();
+const baseOutputsCache = new WeakMap<LayerTypeSpec, readonly ResolvedPort[]>();
+const instanceOutputsCache = new WeakMap<LayerTypeSpec, WeakMap<object, readonly ResolvedPort[]>>();
+
+function cachedFor<T>(cache: WeakMap<LayerTypeSpec, WeakMap<object, T>>, spec: LayerTypeSpec, key: object, build: () => T): T {
+  let byKey = cache.get(spec);
+  if (!byKey) cache.set(spec, (byKey = new WeakMap()));
+  let value = byKey.get(key);
+  if (value === undefined) byKey.set(key, (value = build()));
+  return value;
+}
+
+function baseLayerProps(spec: LayerTypeSpec): readonly ResolvedProp[] {
+  let props = basePropsCache.get(spec);
+  if (!props) {
+    props = Object.freeze(spec.props.map((p): ResolvedProp => Object.freeze({ ...p, type: p.type === "variant" ? "any" : p.type })));
+    basePropsCache.set(spec, props);
+  }
+  return props;
+}
+
+function baseLayerOutputs(spec: LayerTypeSpec | undefined): readonly ResolvedPort[] {
+  if (!spec) return Object.freeze([]);
+  let outputs = baseOutputsCache.get(spec);
+  if (!outputs) {
+    outputs = Object.freeze((spec.outputs ?? []).map((p): ResolvedPort => Object.freeze({ ...p, type: p.type === "variant" ? "any" : p.type })));
+    baseOutputsCache.set(spec, outputs);
+  }
+  return outputs;
 }
 
 /**
  * Resolve the props a layer accepts: its type's props, plus published inputs for a
  * componentInstance. Undefined when the layer type is unknown.
+ *
+ * The result is shared and frozen (documents are immutable, so it's cached per layer type, and per
+ * published-inputs object for component instances). Copy it before changing it.
  */
 export function resolveLayerProps(doc: SonobeDocument, _componentId: Id, layer: Pick<LayerNode, "type" | "component">, registry: Registry): ResolvedProp[] | undefined {
   const spec = registry.layers.get(layer.type);
   if (!spec) return undefined;
-  const props: ResolvedProp[] = spec.props.map((p) => ({ ...p, type: p.type === "variant" ? "any" : p.type }));
-  if (layer.type === COMPONENT_INSTANCE_LAYER_TYPE && layer.component) {
-    const target = doc.components[layer.component];
-    for (const port of sortedPorts(target?.interface?.inputs)) {
-      if (props.some((p) => p.key === port.key)) continue;
+  const base = baseLayerProps(spec);
+  if (layer.type !== COMPONENT_INSTANCE_LAYER_TYPE || !layer.component) return base as ResolvedProp[];
+  const inputs = getOwn(doc.components, layer.component)?.interface?.inputs ?? NO_PORTS;
+  if (!hasKeys(inputs)) return base as ResolvedProp[];
+  const props = cachedFor(instancePropsCache, spec, inputs, () => {
+    const out: ResolvedProp[] = [...base];
+    for (const port of sortedPorts(inputs)) {
+      if (out.some((p) => p.key === port.key)) continue;
       const category = (port.category && PROP_CATEGORIES.has(port.category) ? port.category : "content") as PropCategory;
-      props.push({ ...interfacePortToPort(port, "input"), category });
+      out.push(Object.freeze({ ...interfacePortToPort(port, "input"), category }));
     }
-  }
-  return props;
+    return Object.freeze(out);
+  });
+  return props as ResolvedProp[];
 }
 
-/** Read-only outputs of a layer: its type's outputs, plus published outputs for a componentInstance. */
+/** Read-only outputs of a layer: its type's outputs, plus published outputs for a componentInstance. Shared and frozen like resolveLayerProps. */
 export function resolveLayerOutputs(doc: SonobeDocument, _componentId: Id, layer: Pick<LayerNode, "type" | "component">, registry: Registry): ResolvedPort[] {
   const spec = registry.layers.get(layer.type);
-  const outputs: ResolvedPort[] = (spec?.outputs ?? []).map((p) => ({ ...p, type: p.type === "variant" ? "any" : p.type }));
-  if (layer.type === COMPONENT_INSTANCE_LAYER_TYPE && layer.component) {
-    for (const port of componentInterfacePorts(doc, layer.component).outputs) {
-      if (!outputs.some((p) => p.key === port.key)) outputs.push(port);
+  const base = baseLayerOutputs(spec);
+  if (layer.type !== COMPONENT_INSTANCE_LAYER_TYPE || !layer.component) return base as ResolvedPort[];
+  const outputsOf = getOwn(doc.components, layer.component)?.interface?.outputs ?? NO_PORTS;
+  if (!hasKeys(outputsOf)) return base as ResolvedPort[];
+  const build = () => {
+    const out: ResolvedPort[] = [...base];
+    for (const port of sortedPorts(outputsOf).map((p) => interfacePortToPort(p, "output"))) {
+      if (!out.some((p) => p.key === port.key)) out.push(Object.freeze(port));
     }
-  }
-  return outputs;
+    return Object.freeze(out);
+  };
+  return (spec ? cachedFor(instanceOutputsCache, spec, outputsOf, build) : build()) as ResolvedPort[];
 }
 
 export function findPort<P extends { key: string }>(ports: readonly P[] | undefined, key: string): P | undefined {
@@ -313,21 +367,66 @@ export interface LayerLocation {
   path: readonly Id[];
 }
 
-/** Locate a layer anywhere in a tree. */
-export function findLayer(layers: readonly LayerNode[], id: Id): LayerLocation | undefined {
-  const visit = (siblings: readonly LayerNode[], parent: LayerNode | null, path: Id[]): LayerLocation | undefined => {
+interface LayerIndex {
+  byId: Map<Id, LayerLocation>;
+  /** Every layer node in walk order when the index was built. */
+  nodes: LayerNode[];
+}
+
+/**
+ * Layer locations per tree, built in one walk. Documents are immutable and ops replace a
+ * component's `layers` array on every commit, so a new tree gets a new index by itself. Lookups
+ * still check what they return, so trees edited in place (tests, hand-built documents) stay
+ * correct: a hit whose sibling slot no longer holds the layer, or a miss in a tree whose nodes
+ * changed since the index was built, rebuilds it. A miss costs one walk without allocations.
+ */
+const layerIndexes = new WeakMap<readonly LayerNode[], LayerIndex>();
+
+function buildLayerIndex(layers: readonly LayerNode[]): LayerIndex {
+  const byId = new Map<Id, LayerLocation>();
+  const nodes: LayerNode[] = [];
+  const visit = (siblings: readonly LayerNode[], parent: LayerNode | null, parentPath: readonly Id[]): void => {
     for (let index = 0; index < siblings.length; index++) {
       const layer = siblings[index]!;
-      const here = [...path, layer.id];
-      if (layer.id === id) return { layer, parent, index, siblings, depth: path.length, path: here };
-      if (layer.children?.length) {
-        const found = visit(layer.children, layer, here);
-        if (found) return found;
-      }
+      nodes.push(layer);
+      const path = Object.freeze([...parentPath, layer.id]);
+      // First occurrence in walk order wins, like a search would (duplicate ids are a diagnostic).
+      if (!byId.has(layer.id)) byId.set(layer.id, Object.freeze({ layer, parent, index, siblings, depth: parentPath.length, path }));
+      if (layer.children?.length) visit(layer.children, layer, path);
     }
-    return undefined;
   };
-  return visit(layers, null, []);
+  visit(layers, null, []);
+  return { byId, nodes };
+}
+
+/** True when the tree still holds exactly `nodes`, in walk order, with the same ids. */
+function sameLayerNodes(layers: readonly LayerNode[], nodes: readonly LayerNode[]): boolean {
+  let i = 0;
+  const visit = (siblings: readonly LayerNode[]): boolean => {
+    for (const layer of siblings) {
+      const known = nodes[i++];
+      if (known !== layer || nodeIds.get(layer) !== layer.id) return false;
+      if (layer.children?.length && !visit(layer.children)) return false;
+    }
+    return true;
+  };
+  return visit(layers) && i === nodes.length;
+}
+
+/** The id each indexed node had when it was indexed (catches ids changed in place). */
+const nodeIds = new WeakMap<LayerNode, Id>();
+
+/** Locate a layer anywhere in a tree (the first match in walk order). */
+export function findLayer(layers: readonly LayerNode[], id: Id): LayerLocation | undefined {
+  let index = layerIndexes.get(layers);
+  if (index) {
+    const loc = index.byId.get(id);
+    if (loc ? loc.siblings[loc.index] === loc.layer && loc.layer.id === id : sameLayerNodes(layers, index.nodes)) return loc;
+  }
+  index = buildLayerIndex(layers);
+  for (const node of index.nodes) nodeIds.set(node, node.id);
+  layerIndexes.set(layers, index);
+  return index.byId.get(id);
 }
 
 export interface WalkInfo {

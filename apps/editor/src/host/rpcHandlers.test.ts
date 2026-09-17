@@ -157,6 +157,38 @@ describe("rpc handlers", () => {
   });
 });
 
+describe("rpc handlers: data safety", () => {
+  it("checks the human-edit guard in the same step it undoes", async () => {
+    const { call, session: s } = setup();
+    await call("document.apply", { ops: [{ op: "addLayer", layer: { id: "badge", type: "oval", name: "Badge" } }], label: "added badge" });
+    const agentTxn = s.document.getState().historyEntries()[0]!.txnId;
+    s.document.getState().apply([{ op: "addLayer", layer: { id: "human", type: "rectangle", name: "Human" } }], { label: "Add Human" });
+
+    expect(await call("history.undo")).toMatchObject({ failed: true, code: "human_edit", data: { hint: expect.stringContaining("txnId") } });
+    expect(await call("history.undo", { txnId: agentTxn })).toMatchObject({ failed: true, code: "human_edit", data: { hint: expect.stringContaining("allowHumanEdits") } });
+    expect(await call("history.undo", { txnId: "txn_nope" })).toMatchObject({ failed: true, code: "not_found" });
+    expect(findLayer(s.document.getState().doc.components.main!.layers, "human")).toBeDefined();
+    expect(s.document.getState().redoEntries()).toEqual([]);
+
+    const both = await call("history.undo", { txnId: agentTxn, allowHumanEdits: true });
+    expect(both).toMatchObject({ ok: true, undone: [{ label: "Add Human", author: { kind: "human" }, description: "You: Add Human", revision: expect.any(Number) }, { label: "added badge", description: "Claude: added badge" }] });
+  });
+
+  it("refuses to save over outside changes unless forced, and reports them in document.info", async () => {
+    const { call, session: s } = setup();
+    expect(await call("document.save")).toMatchObject({ ok: true });
+    const store = s.document;
+    store.getState().apply([{ op: "addLayer", layer: { type: "oval", name: "Mine" } }], { label: "Add Mine" });
+    store.setState({ externalChange: { path: store.getState().projectPath!, paths: ["components/main.json"], document: store.getState().doc, detectedAt: 7 } });
+    expect(await call("document.info")).toMatchObject({ dirty: true, externalChange: { paths: ["components/main.json"], detectedAt: 7 }, diskProblem: null });
+
+    expect(await call("document.save")).toMatchObject({ failed: true, code: "disk_changed", data: { paths: ["components/main.json"], hint: expect.stringContaining("force: true") } });
+    expect(store.getState().dirty).toBe(true);
+    expect(await call("document.save", { force: true })).toMatchObject({ ok: true });
+    expect(store.getState()).toMatchObject({ dirty: false, externalChange: null });
+  });
+});
+
 describe("rpc handlers: bridge additions", () => {
   it("returns the transaction id and the applied ops", async () => {
     const { call, session: s } = setup();

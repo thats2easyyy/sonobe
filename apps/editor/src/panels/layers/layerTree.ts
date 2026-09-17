@@ -144,7 +144,8 @@ export function planInsertLayer(
 ): InsertPlan | undefined {
   const component = doc.components[componentId];
   const spec = registry.layers.get(type);
-  if (!component || !spec) return undefined;
+  // Patch components are never drawn, so they hold no layers (core refuses them).
+  if (!component || !spec || component.kind === "patchComponent") return undefined;
   const target = options.component !== undefined ? doc.components[options.component] : undefined;
   if (options.component !== undefined && !target) return undefined;
   const anchor = options.anchor !== undefined ? findLayer(component.layers, options.anchor) : undefined;

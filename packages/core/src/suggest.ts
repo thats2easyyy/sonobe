@@ -31,7 +31,7 @@ export interface SuggestCandidate {
   aliases?: readonly string[];
 }
 
-const normalize = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, "");
+const normalize = (s: string) => String(s ?? "").toLowerCase().replace(/[^a-z0-9]/g, "");
 
 function score(input: string, key: string): number | undefined {
   const a = normalize(input);

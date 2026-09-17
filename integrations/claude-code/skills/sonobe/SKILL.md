@@ -12,7 +12,7 @@ Sonobe prototypes are layers (what people see) plus patches (logic nodes with ty
 1. Call `get_guide` with topic `start-here`, once per conversation (again after your context is compacted).
 2. Call `get_document_info`. It tells you:
    - which document is active and its screen size
-   - whether this is the app or headless mode (no screenshots; saving may be manual)
+   - whether this is the app or headless mode (no editor selection; saving may be manual)
    - existing diagnostics
 3. Call `get_outline` to see what exists. Use ids exactly as printed.
 4. Call `list_patch_types` (search by intent: "spring", "drag", "tabs") and `describe_patch_types` for every patch type you'll wire. Never invent port keys.
@@ -22,7 +22,7 @@ Sonobe prototypes are layers (what people see) plus patches (logic nodes with ty
 - Call `begin_work` with a one-line intent the person will see. Call `finish_work` at the end, even after a failure.
 - Build one feature per call:
   - `add_layers` for visuals.
-  - `add_patches` with `connections` for logic. Give patches a `ref` and wire with `"$ref.port"` in the same call.
+  - `add_patches` with `connections` for logic. Give patches a `ref` and wire with `"$ref.port"` in the same call; refs work in any order, so loops fit in one call.
   - `set_values` to tune; `connect` for single wires; `apply_ops` for anything else, such as disconnects, components or moves.
 - Name things for people: layers by what they are ("Like Button"), patches by what they do ("Liked", "Press Spring").
 - Default to the ISAT chain: Interaction (tap or down) → Switch (remember) → Pop Animation or Classic Animation (move 0…1 smoothly) → Transition (0…1 into real units) → layer property.
@@ -38,7 +38,7 @@ Sonobe prototypes are layers (what people see) plus patches (logic nodes with ty
 2. `sim_reset`, then `sim_dispatch` the gesture (`{ "kind": "tap", "target": "@card" }`). Check the hit report: which layer caught it, which patch heard it, any warnings.
 3. `sim_trace` the properties that should move. Check the end value, settle time and overshoot against the requested feel ("snappy" means little or no overshoot and settles fast).
 4. `sim_step` with `until: "idle"`, or `sim_get_values`, for final states.
-5. `get_screenshot` only for visual QA, and only in the app. Read structure and values from tools.
+5. `get_screenshot` for visual QA: `"@card"` for one layer, `simId` plus `atMs` for a moment in a simulation. Headless servers draw it themselves with approximate text and placeholders for video. Read structure and values from tools, not pixels.
 
 ## Debugging
 

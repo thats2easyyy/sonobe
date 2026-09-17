@@ -6,14 +6,15 @@
 import { mkdir, readdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 import type { MigrateOptions } from "./migrations.ts";
-import { loadProject, saveProject, type FsAdapter, type SaveResult } from "./serialize.ts";
+import { loadProject, loadProjectFiles, saveProject, type FsAdapter, type LoadedProject, type SaveOptions, type SaveResult } from "./serialize.ts";
 import type { SonobeDocument } from "./types.ts";
 
-const isMissing = (err: unknown) => !!err && typeof err === "object" && (err as { code?: string }).code === "ENOENT";
+const errorCode = (err: unknown) => (!!err && typeof err === "object" ? (err as { code?: unknown }).code : undefined);
+const isMissing = (err: unknown) => errorCode(err) === "ENOENT";
 
 let tempCounter = 0;
 
-/** FsAdapter over node:fs/promises. Text writes are atomic (temp file + rename). */
+/** FsAdapter over node:fs/promises. Text writes are atomic (temp file + rename). `remove` never deletes a directory. */
 export function createNodeFs(): FsAdapter {
   return {
     readText: (path) => readFile(path, "utf8"),
@@ -34,7 +35,7 @@ export function createNodeFs(): FsAdapter {
       try {
         return (await readdir(dir)).sort();
       } catch (err) {
-        if (isMissing(err)) return [];
+        if (isMissing(err) || errorCode(err) === "ENOTDIR") return [];
         throw err;
       }
     },
@@ -50,8 +51,22 @@ export function createNodeFs(): FsAdapter {
         throw err;
       }
     },
+    async isFile(path) {
+      try {
+        return (await stat(path)).isFile();
+      } catch (err) {
+        if (isMissing(err) || errorCode(err) === "ENOTDIR") return false;
+        throw err;
+      }
+    },
     async remove(path) {
-      await rm(path, { recursive: true, force: true });
+      try {
+        // Not recursive: a folder someone keeps next to Sonobe's files is never deleted.
+        await rm(path, { force: true });
+      } catch (err) {
+        if (errorCode(err) === "ERR_FS_EISDIR" || errorCode(err) === "EISDIR") return;
+        throw err;
+      }
     },
   };
 }
@@ -61,7 +76,12 @@ export function loadProjectFromDisk(dir: string, options: MigrateOptions = {}): 
   return loadProject(createNodeFs(), dir, options);
 }
 
+/** Load a project folder from disk, with the document files exactly as read (for noticing later changes on disk). */
+export function loadProjectFilesFromDisk(dir: string, options: MigrateOptions = {}): Promise<LoadedProject> {
+  return loadProjectFiles(createNodeFs(), dir, options);
+}
+
 /** Save a document into a project folder on disk. */
-export function saveProjectToDisk(dir: string, doc: SonobeDocument): Promise<SaveResult> {
-  return saveProject(createNodeFs(), dir, doc);
+export function saveProjectToDisk(dir: string, doc: SonobeDocument, options: SaveOptions = {}): Promise<SaveResult> {
+  return saveProject(createNodeFs(), dir, doc, options);
 }

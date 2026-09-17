@@ -19,6 +19,7 @@ import { build, context } from "esbuild";
 import { chmodSync, cpSync, existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { externalLottiePlugin, leanCatalogPlugin } from "./player-bundle.ts";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const repo = path.resolve(root, "../..");
@@ -61,7 +62,9 @@ const targets = [
     define: { ...common.define, "import.meta.url": "__sonobe_import_meta_url" },
   },
   { ...common, entryPoints: ["electron/preload.ts"], outfile: "dist/preload.cjs" },
-  { ...browserPage, entryPoints: ["player/player.ts"], outfile: "dist/player/player.js" },
+  // The phone player: no patch docs, and lottie-web in its own file that loads on first use.
+  { ...browserPage, entryPoints: ["player/player.ts"], outfile: "dist/player/player.js", plugins: [leanCatalogPlugin(), externalLottiePlugin()] },
+  { ...browserPage, entryPoints: ["player/lottie.ts"], outfile: "dist/player/lottie.js" },
   { ...browserPage, entryPoints: ["scene/scene.ts"], outfile: "dist/scene/scene.js" },
 ];
 

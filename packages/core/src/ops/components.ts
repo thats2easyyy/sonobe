@@ -1,24 +1,101 @@
 /** addComponent, removeComponent, updateComponent, updateInterface. */
 
-import { parseAddress } from "../address.ts";
+import { layerAddress, parseAddress, patchAddress } from "../address.ts";
 import { DEFAULT_LAYER_COMPONENT_SIZE, deviceScreenSize, findComponentInstances, FORMAT_VERSION, listComponentIds } from "../document.ts";
-import { isValidId, slugify, uniqueId } from "../ids.ts";
-import { allLayers, COMPONENT_INSTANCE_LAYER_TYPE, COMPONENT_PATCH_TYPE, interfacePortToPort } from "../registry.ts";
+import { fileNameCollision, getOwn, isFileNameTaken, isValidId, slugify, uniqueId } from "../ids.ts";
+import { allLayers, COMPONENT_INSTANCE_LAYER_TYPE, COMPONENT_PATCH_TYPE, getPatchSpec, interfacePortToPort } from "../registry.ts";
 import { parseComponentFile } from "../schema.ts";
 import { didYouMean, didYouMeanText } from "../suggest.ts";
-import type { Component, Id, InterfacePort, Op } from "../types.ts";
-import { checkLink, checkLiteral, type PortTarget } from "../validate.ts";
+import type { Component, Id, InputValue, InterfacePort, LayerNode, Op, PatchNode } from "../types.ts";
+import { checkInputValue, checkLink, checkLiteral, resolveTarget, type PortTarget } from "../validate.ts";
 import { isLinkInput, isValueType, VALUE_TYPES } from "../values.ts";
-import { CLEAR, defineRef, fail, getTargetComponent, isClear, resolveAddress, resolveId, unwrap, withComponent, type OpContext, type OpOf, type OpOutcome } from "./context.ts";
+import { CLEAR, defineRef, fail, getTargetComponent, isClear, OpFailure, resolveAddress, resolveId, unwrap, withComponent, type OpContext, type OpOf, type OpOutcome } from "./context.ts";
+import { validateInstance } from "./layers.ts";
+import { validatePatchComponent } from "./patches.ts";
 import { linkSourceId, removeInputs, restoreInputOps, type InputEntry } from "./references.ts";
 
 const KINDS = ["prototype", "layerComponent", "patchComponent"];
 
 function requireComponentById(ctx: OpContext, raw: unknown): Component {
   const id = resolveId(ctx, raw);
-  const c = ctx.doc.components[id];
+  const c = getOwn(ctx.doc.components, id);
   if (!c) fail("not_found", `There's no component "${id}".${didYouMeanText(didYouMean(id, Object.keys(ctx.doc.components)))}`);
   return c;
+}
+
+/** Run `check`, naming the new component in any failure. */
+function inNewComponent<T>(id: Id, check: () => T): T {
+  try {
+    return check();
+  } catch (err) {
+    if (err instanceof OpFailure) throw new OpFailure({ ...err.error, message: `In the new component "${id}": ${err.error.message}` });
+    throw err;
+  }
+}
+
+/**
+ * The checks addLayer, addPatch and updateInterface run, applied to a whole component's content:
+ * known layer and patch types, existing ports, valid values and links, and instances of existing
+ * components of the right kind that don't end up containing themselves. Links between items of the
+ * new component resolve in any order. Returns the component with values normalized.
+ */
+function checkNewComponent(ctx: OpContext, component: Component): Component {
+  const doc = withComponent(ctx.doc, component);
+  const inner: OpContext = { ...ctx, doc };
+  const checkValue = (address: string, value: InputValue): InputValue => {
+    if (value === null) return null;
+    const target = unwrap(resolveTarget(doc, component, address, ctx.validate));
+    return unwrap(checkInputValue(doc, component, target, value, ctx.validate));
+  };
+  const checkLayer = (layer: LayerNode): LayerNode => {
+    const spec = ctx.registry.layers.get(layer.type);
+    if (!spec) {
+      const types = [...ctx.registry.layers.values()];
+      fail("unknown_layer_type", `Layer "${layer.id}" has an unknown type "${layer.type}".${didYouMeanText(didYouMean(layer.type, types.map((t) => ({ value: t.type, aliases: [t.name] }))))}`, {
+        hint: `Layer types: ${types.map((t) => t.type).join(", ")}.`,
+      });
+    }
+    if (layer.type === COMPONENT_INSTANCE_LAYER_TYPE || layer.component !== undefined) validateInstance(inner, component, layer);
+    const out: LayerNode = { ...layer, props: {} };
+    for (const [key, value] of Object.entries(layer.props)) out.props[key] = checkValue(layerAddress(layer.id, key), value);
+    if (layer.children?.length) {
+      if (!spec.canHaveChildren) fail("cannot_have_children", `"${layer.id}" is a ${spec.name} layer, which can't hold other layers.`, { hint: "Put the layers in a Group instead." });
+      out.children = layer.children.map(checkLayer);
+    }
+    return out;
+  };
+  return inNewComponent(component.id, () => {
+    const layers = component.layers.map(checkLayer);
+    const patches: Record<Id, PatchNode> = {};
+    for (const [id, node] of Object.entries(component.patches)) {
+      if (!getPatchSpec(ctx.registry, node.type)) {
+        const specs = [...ctx.registry.patches.values()];
+        fail("unknown_patch_type", `Patch "${id}" has an unknown type "${node.type}".${didYouMeanText(didYouMean(node.type, specs.map((s) => ({ value: s.type, aliases: [s.name, ...(s.aliases ?? [])] }))))}`, {
+          hint: "list_patch_types shows every patch type with a one-line summary.",
+        });
+      }
+      if (node.type === COMPONENT_PATCH_TYPE || node.component !== undefined) validatePatchComponent(inner, component, id, node);
+      const inputs: Record<string, InputValue> = {};
+      for (const [key, value] of Object.entries(node.inputs)) inputs[key] = checkValue(patchAddress(id, key), value);
+      patches[id] = { ...node, inputs };
+    }
+    const inputs: Record<string, InterfacePort> = {};
+    for (const [key, port] of Object.entries(component.interface.inputs)) {
+      if (port.default === undefined) inputs[key] = port;
+      else if (isLinkInput(port.default)) fail("invalid_value", `The default for "${key}" must be a value, not a connection.`);
+      else inputs[key] = { ...port, default: unwrap(checkLiteral(doc, component, port.default, interfacePortToPort(port, "input"), `$in.${key}`, ctx.validate)) };
+    }
+    const outputs: Record<string, InterfacePort> = {};
+    for (const [key, port] of Object.entries(component.interface.outputs)) {
+      if (port.link === undefined) {
+        outputs[key] = port;
+        continue;
+      }
+      const target: PortTarget = { kind: "componentOutput", address: `$out.${key}`, key, port: interfacePortToPort(port, "output"), bindable: true };
+      outputs[key] = { ...port, link: unwrap(checkLink(doc, component, port.link, target, ctx.validate)).link };
+    }
+    return { ...component, interface: { inputs, outputs }, layers, patches };
+  });
 }
 
 export function addComponent(ctx: OpContext, op: OpOf<"addComponent">): OpOutcome {
@@ -26,17 +103,31 @@ export function addComponent(ctx: OpContext, op: OpOf<"addComponent">): OpOutcom
   if (!c || typeof c !== "object") fail("invalid_op", 'addComponent needs a component, like { "name": "Primary Button", "kind": "layerComponent" }.');
   if (typeof c.name !== "string" || !c.name.trim()) fail("invalid_value", "A component needs a name.");
   if (!KINDS.includes(c.kind)) fail("invalid_value", `A component's kind must be ${KINDS.join(", ")}, but got ${JSON.stringify(c.kind)}.${didYouMeanText(didYouMean(String(c.kind), KINDS))}`);
+  if (c.kind === "patchComponent" && Array.isArray(c.layers) && c.layers.length > 0 && !ctx.lenient) {
+    fail("wrong_component_kind", `"${c.name}" is a patch component, which holds only patches, so its layers would never be drawn.`, { hint: 'Use kind "layerComponent" for components with layers, or leave "layers" out.' });
+  }
+  if (c.formatVersion !== undefined && c.formatVersion !== FORMAT_VERSION && !ctx.lenient) {
+    fail("invalid_op", `formatVersion can't be set with addComponent; it's managed by Sonobe (this version writes format ${FORMAT_VERSION}).`, { hint: 'Leave "formatVersion" out.' });
+  }
+  const componentIds = Object.keys(ctx.doc.components);
   let id: Id;
   if (c.id !== undefined) {
     if (!isValidId(c.id)) fail("invalid_id", `"${String(c.id)}" isn't a valid component id.`, { hint: `Try "${slugify(String(c.id), "component")}".` });
-    if (ctx.doc.components[c.id]) fail("id_taken", `There's already a component "${c.id}".`, { hint: 'Leave "id" out to get a free one.' });
+    if (Object.hasOwn(ctx.doc.components, c.id)) fail("id_taken", `There's already a component "${c.id}".`, { hint: 'Leave "id" out to get a free one.' });
+    const clash = ctx.lenient ? undefined : fileNameCollision(componentIds, c.id);
+    if (clash !== undefined) {
+      fail("id_taken", `"${c.id}" would share a file with the component "${clash}": on macOS and Windows, components/${c.id}.json and components/${clash}.json are the same file.`, {
+        hint: 'Pick an id that differs by more than capitalization, or leave "id" out to get a free one.',
+      });
+    }
     id = c.id;
   } else {
-    id = uniqueId(slugify(c.name, "component"), (x) => x in ctx.doc.components || ctx.reserved.has(x));
+    id = uniqueId(slugify(c.name, "component"), (x) => isFileNameTaken(componentIds, x) || ctx.reserved.has(x));
   }
   defineRef(ctx, op.ref, id);
   const full: Component = {
-    formatVersion: c.formatVersion ?? FORMAT_VERSION,
+    // In-memory components are always at the current format (loads migrate), so this is never the caller's.
+    formatVersion: FORMAT_VERSION,
     id,
     name: c.name,
     kind: c.kind,
@@ -59,9 +150,11 @@ export function addComponent(ctx: OpContext, op: OpOf<"addComponent">): OpOutcom
     seen.add(itemId);
   }
   if (dupes.size) fail("id_taken", `The component "${id}" uses these ids more than once: ${[...dupes].join(", ")}.`, { hint: "Ids are unique across layers, patches and comments." });
-  ctx.doc = withComponent(ctx.doc, parsed.value);
+  // Lenient applies (undo, redo) restore components exactly, diagnostics and all.
+  const component = ctx.lenient ? parsed.value : checkNewComponent(ctx, parsed.value);
+  ctx.doc = withComponent(ctx.doc, component);
   ctx.affected.components.add(id);
-  return { ids: [id], applied: { op: "addComponent", component: parsed.value }, inverse: [{ op: "removeComponent", id }] };
+  return { ids: [id], applied: { op: "addComponent", component }, inverse: [{ op: "removeComponent", id }] };
 }
 
 export function removeComponent(ctx: OpContext, op: OpOf<"removeComponent">): OpOutcome {

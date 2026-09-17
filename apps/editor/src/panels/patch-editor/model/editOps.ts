@@ -6,6 +6,7 @@
 import {
   canConnect,
   getPatchSpec,
+  patchDisplayName,
   isLinkInput,
   listInputs,
   parseAddress,
@@ -29,10 +30,10 @@ import {
 import { COMMENT_PADDING, boundsOf, type Rect } from "./geometry.ts";
 import { portTypeAt } from "./connect.ts";
 
-/** A patch's display name: its custom name, else its type's name. */
-export function patchTitle(node: Pick<PatchNode, "name" | "type"> | undefined, spec?: PatchSpec): string {
+/** A patch's display name: its custom name, a variable's name, else its type's name. */
+export function patchTitle(node: (Pick<PatchNode, "name" | "type"> & { settings?: PatchNode["settings"] }) | undefined, spec?: PatchSpec): string {
   if (!node) return "patch";
-  return node.name || spec?.name || node.type;
+  return patchDisplayName(node, spec);
 }
 
 /** "Zoom Spring" for one patch, "3 patches" for several. */
@@ -96,6 +97,7 @@ export interface InsertOptions {
   /** Component patches: the patch component to run. */
   component?: Id;
   name?: string;
+  settings?: PatchNode["settings"];
   /** Batch ref for the new patch. Default "inserted". */
   ref?: string;
 }
@@ -107,6 +109,7 @@ export function insertPatchOps(componentId: Id, type: string, position: { x: num
   if (options.inputCount !== undefined) patch.inputCount = options.inputCount;
   if (options.component !== undefined) patch.component = options.component;
   if (options.name) patch.name = options.name;
+  if (options.settings && Object.keys(options.settings).length) patch.settings = options.settings;
   return [{ op: "addPatch", component: componentId, patch }];
 }
 
@@ -329,31 +332,39 @@ export function splicePatchOps(doc: SonobeDocument, componentId: Id, registry: R
   };
 }
 
-export type AlignMode = "left" | "top";
+export type AlignMode = "left" | "right" | "top" | "bottom";
 
-/** Align rects on their left edges (a column) or top edges (a row), spreading any that would overlap. */
-export function alignPositions(rects: readonly (Rect & { id: string })[], mode: AlignMode, gap = mode === "left" ? 16 : 24): Map<string, { x: number; y: number }> {
+/**
+ * Align rects on an edge: left or right edges make a column (overlaps spread downward), top or
+ * bottom edges make a row (overlaps spread to the right).
+ */
+export function alignPositions(rects: readonly (Rect & { id: string })[], mode: AlignMode, gap = mode === "left" || mode === "right" ? 16 : 24): Map<string, { x: number; y: number }> {
   const out = new Map<string, { x: number; y: number }>();
   if (rects.length === 0) return out;
-  if (mode === "left") {
-    const x = Math.min(...rects.map((r) => r.x));
+  if (mode === "left" || mode === "right") {
+    const left = Math.min(...rects.map((r) => r.x));
+    const right = Math.max(...rects.map((r) => r.x + r.width));
     let bottom = -Infinity;
     for (const r of [...rects].sort((a, b) => a.y - b.y || a.x - b.x)) {
       const y = Math.max(r.y, bottom + gap);
-      out.set(r.id, { x: Math.round(x), y: Math.round(y) });
+      out.set(r.id, { x: Math.round(mode === "left" ? left : right - r.width), y: Math.round(y) });
       bottom = y + r.height;
     }
   } else {
-    const y = Math.min(...rects.map((r) => r.y));
+    const top = Math.min(...rects.map((r) => r.y));
+    const bottomEdge = Math.max(...rects.map((r) => r.y + r.height));
     let right = -Infinity;
     for (const r of [...rects].sort((a, b) => a.x - b.x || a.y - b.y)) {
       const x = Math.max(r.x, right + gap);
-      out.set(r.id, { x: Math.round(x), y: Math.round(y) });
+      out.set(r.id, { x: Math.round(x), y: Math.round(mode === "top" ? top : bottomEdge - r.height) });
       right = x + r.width;
     }
   }
   return out;
 }
+
+/** "left", "to top"… for undo labels ("Align 3 items to the right"). */
+export const ALIGN_LABELS: Record<AlignMode, string> = { left: "left", right: "right", top: "to top", bottom: "to bottom" };
 
 /** updatePatch ui ops for patches whose position changed. */
 export function movePatchOps(component: Component, positions: ReadonlyMap<string, { x: number; y: number }>): Op[] {

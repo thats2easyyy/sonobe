@@ -26,7 +26,7 @@ import {
   resolveTypeParam,
   walkLayers,
 } from "./registry.ts";
-import { extendedRegistry, MOCK_PATCH_SPECS, mockRegistry, port } from "./testing/fixtures.ts";
+import { emptyDoc, extendedRegistry, MOCK_PATCH_SPECS, mockRegistry, mustApply, port } from "./testing/fixtures.ts";
 import type { LayerNode, PatchNode, SonobeDocument } from "./types.ts";
 
 const node = (type: string, extra: Partial<PatchNode> = {}): PatchNode => ({ type, inputs: {}, ui: { x: 0, y: 0 }, ...extra });
@@ -47,6 +47,60 @@ function docWithComponents(): SonobeDocument {
   main.patches = { deb: node("component", { component: "debounce" }) };
   return { ...doc, components: { main, button, debounce } };
 }
+
+describe("layer lookups", () => {
+  const tree = (): LayerNode[] => [
+    { id: "a", type: "group", name: "A", props: {}, children: [{ id: "b", type: "rectangle", name: "B", props: {} }, { id: "dup", type: "rectangle", name: "Inner", props: {} }] },
+    { id: "dup", type: "rectangle", name: "Outer", props: {} },
+  ];
+
+  it("finds the first match in walk order with its parent, index, depth and path", () => {
+    const layers = tree();
+    expect(findLayer(layers, "b")).toMatchObject({ parent: layers[0], index: 0, depth: 1, path: ["a", "b"] });
+    expect(findLayer(layers, "a")).toMatchObject({ parent: null, index: 0, depth: 0, path: ["a"] });
+    expect(findLayer(layers, "dup")?.layer.name).toBe("Inner");
+    expect(findLayer(layers, "nope")).toBeUndefined();
+    expect(findLayer(layers, "b")).toBe(findLayer(layers, "b"));
+    expect(layerPath(layers, "dup")).toEqual(["a", "dup"]);
+    expect(isDescendantLayer(layers, "a", "b")).toBe(true);
+  });
+
+  it("notices trees edited in place", () => {
+    const layers = tree();
+    expect(findLayer(layers, "c")).toBeUndefined();
+    layers[0]!.children!.push({ id: "c", type: "rectangle", name: "C", props: {} });
+    expect(findLayer(layers, "c")).toMatchObject({ index: 2, path: ["a", "c"] });
+    layers[0]!.children!.splice(0, 1);
+    expect(findLayer(layers, "b")).toBeUndefined();
+    expect(findLayer(layers, "c")?.index).toBe(1);
+    layers[1] = { id: "outer", type: "oval", name: "Oval", props: {} };
+    expect(findLayer(layers, "outer")?.index).toBe(1);
+    expect(findLayer(layers, "dup")?.layer.name).toBe("Inner");
+  });
+});
+
+describe("resolveLayerProps sharing", () => {
+  it("shares frozen props per layer type and follows a component's published inputs", () => {
+    const doc = mustApply(emptyDoc(), [
+      { op: "addComponent", component: { id: "button", name: "Button", kind: "layerComponent" } },
+      { op: "updateInterface", component: "button", inputs: { label: { key: "label", name: "Label", type: "text" } } },
+    ]).doc;
+    const rect = resolveLayerProps(doc, "main", { type: "rectangle" }, mockRegistry)!;
+    expect(resolveLayerProps(doc, "main", { type: "rectangle" }, mockRegistry)).toBe(rect);
+    expect(Object.isFrozen(rect)).toBe(true);
+    expect(Object.isFrozen(rect[0])).toBe(true);
+    expect(() => (rect as unknown as unknown[]).push({})).toThrow();
+    expect(resolveLayerOutputs(doc, "main", { type: "text" }, mockRegistry)).toBe(resolveLayerOutputs(doc, "main", { type: "text" }, mockRegistry));
+
+    const instance = { type: "componentInstance", component: "button" };
+    const labelled = resolveLayerProps(doc, "main", instance, mockRegistry)!;
+    expect(labelled.find((p) => p.key === "label")).toMatchObject({ type: "text", fromInterface: true, category: "content" });
+    expect(resolveLayerProps(doc, "main", instance, mockRegistry)).toBe(labelled);
+    const retitled = mustApply(doc, [{ op: "updateInterface", component: "button", inputs: { title: { key: "title", name: "Title", type: "number" } } }]).doc;
+    expect(resolveLayerProps(retitled, "main", instance, mockRegistry)!.find((p) => p.key === "title")?.type).toBe("number");
+    expect(resolveLayerProps(retitled, "main", { type: "componentInstance", component: "missing" }, mockRegistry)).toBe(resolveLayerProps(doc, "main", { type: "componentInstance" }, mockRegistry));
+  });
+});
 
 describe("createRegistry", () => {
   it("indexes specs and adds the component patch type", () => {

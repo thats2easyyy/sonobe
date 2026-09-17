@@ -85,3 +85,49 @@ describe("port palette", () => {
     expect(portColor("enum", "light")).toBe(PORT_GROUP_COLORS.light.index);
   });
 });
+
+/** WCAG relative luminance of an sRGB color (0–1 channels). */
+function luminance([r, g, b]: readonly number[]): number {
+  const lin = (c: number) => (c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4);
+  return 0.2126 * lin(r!) + 0.7152 * lin(g!) + 0.0722 * lin(b!);
+}
+
+/** "#RRGGBB" or "rgba(r, g, b, a)" → [r, g, b, a] in 0–1. */
+function parseColor(value: string): [number, number, number, number] {
+  const hex = /^#([0-9a-f]{6})$/i.exec(value);
+  if (hex) return [0, 2, 4].map((i) => parseInt(hex[1]!.slice(i, i + 2), 16) / 255).concat(1) as [number, number, number, number];
+  const rgba = /^rgba\((\d+),\s*(\d+),\s*(\d+),\s*([\d.]+)\)$/.exec(value);
+  if (rgba) return [Number(rgba[1]) / 255, Number(rgba[2]) / 255, Number(rgba[3]) / 255, Number(rgba[4])];
+  throw new Error(`Can't parse ${value}`);
+}
+
+/** A translucent color over an opaque one. */
+const over = (top: readonly number[], base: readonly number[]) => [0, 1, 2].map((i) => top[i]! * top[3]! + base[i]! * (1 - top[3]!));
+
+const contrast = (a: readonly number[], b: readonly number[]) => {
+  const [hi, lo] = [luminance(a), luminance(b)].sort((x, y) => y - x);
+  return (hi! + 0.05) / (lo! + 0.05);
+};
+
+describe("text contrast (WCAG AA, 4.5:1 for small text)", () => {
+  const SURFACES = ["bg-window", "bg-toolbar", "bg-panel", "bg-sunken", "bg-elevated", "canvas-bg", "patch-node-bg"] as const;
+
+  it.each(THEMES)("secondary and tertiary text pass on every %s surface, including fields over the toolbar", (theme) => {
+    const tokens = THEME_TOKENS[theme];
+    const surfaces: Record<string, readonly number[]> = Object.fromEntries(SURFACES.map((name) => [name, parseColor(tokens[name])]));
+    surfaces["bg-field over bg-toolbar"] = over(parseColor(tokens["bg-field"]), parseColor(tokens["bg-toolbar"]));
+    const failures: string[] = [];
+    for (const text of ["text-secondary", "text-tertiary"] as const) {
+      const color = parseColor(tokens[text]);
+      for (const [surface, background] of Object.entries(surfaces)) {
+        const ratio = contrast(color, background);
+        if (ratio < 4.5) failures.push(`${text} on ${surface}: ${ratio.toFixed(2)}`);
+      }
+    }
+    expect(failures).toEqual([]);
+  });
+
+  it.each(THEMES)("white numbers on the accent-pressed fill (the canvas size pill) pass in %s", (theme) => {
+    expect(contrast([1, 1, 1], parseColor(THEME_TOKENS[theme]["accent-pressed"]))).toBeGreaterThanOrEqual(4.5);
+  });
+});

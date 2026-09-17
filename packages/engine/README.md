@@ -47,7 +47,7 @@ rt.refreshScene();                          // re-layout the edited document wit
 | `issues()` | Compile issues plus the most recent 200 runtime issues, deduplicated. |
 | `patchTimings()` | Average evaluate time per patch (all instances and loop indices) over the last ~1 s of frames, slowest first: `{ patchId, componentPath, ms }`. Empty while profiling is off. |
 | `setProfiling(on)` | Turns timing on or off (off discards collected timings). `options.profile` turns it on at creation. When off, evaluation does no timing work. |
-| `needsNextFrame` | A patch called `requestNextFrame()` last frame. |
+| `needsNextFrame` | Something is still moving: a patch called `requestNextFrame()` last frame, or a feedback loop's back-edge would read a different value next frame. |
 | `services` | The `RuntimeServices` handed to patches. |
 | `document`, `deterministic`, `fps` | The current document and mode. |
 | `dispose()` | Calls every `dispose` and stops the runtime. |
@@ -124,7 +124,7 @@ Each frame an input receives its driver's value coerced to the port's declared t
 
 A muted patch doesn't evaluate. `PatchDefinition.mutedBehavior` decides the outputs:
 
-- `"bypass"` (default): variant outputs pass the first variant input (a muted number Transition outputs Start, not Progress); other outputs pass the first non-variant input of the same type; either falls back to any input of the same type; unmatched outputs emit zero values and pulses never fire.
+- `"bypass"` (default): variant outputs pass the first variant input (a muted number Transition outputs Start, not Progress); other outputs pass the first non-variant input of the same type; either falls back to any input of the same type. A port only passes to one of the same shape, whole-loop to whole-loop and per-item to per-item, so muting never changes how many copies something makes (a muted Loop Sum outputs 0, not its loop). Unmatched outputs emit zero values (an empty Loop for a whole-loop output) and pulses never fire.
 - `"zero"`: every output emits its zero value (Interaction, Velocity, Layer Info).
 - `"evaluate"`: `evaluate` runs and the patch checks `ctx.muted` itself.
 
@@ -189,7 +189,7 @@ Runtime issues raised while a patch inside a component instance evaluates carry 
 
 ### updateDocument
 
-`updateDocument` recompiles and moves per-path records to nodes with the same `componentPath:id` and type. State, sticky outputs, and input history carry over, remapped by port key, so springs keep their velocity. Outputs whose type changed restart from their defaults. Delay One Frame resets when its variant changes. Removed or retyped patches dispose. Variables re-resolve. The scene updates on the next step, or immediately with `refreshScene()`.
+`updateDocument` first tries `updateLiterals`: when the new document differs only in literal patch inputs, literal layer properties, or patch positions (outside cycles), it rewrites the compiled constant bindings in place, so scrubbing a value, dragging a layer, or a small agent write costs almost nothing and keeps all state. Anything else recompiles and moves per-path records to nodes with the same `componentPath:id` and type. State, sticky outputs, and input history carry over, remapped by port key, so springs keep their velocity. Outputs whose type changed restart from their defaults. Delay One Frame resets when its variant changes. Removed or retyped patches dispose. Variables re-resolve. The scene updates on the next step, or immediately with `refreshScene()`.
 
 ### Restart
 
@@ -197,7 +197,7 @@ Runtime issues raised while a patch inside a component instance evaluates carry 
 
 ### Trace
 
-`trace(targets, durationMs, events?)` builds a separate deterministic runtime from the document at the last restart and replays this runtime's recorded steps, document updates, and layer outputs, which reproduces the live state. The replay log keeps 7,200 frames; beyond that, traces start from a fresh runtime with the current document. It then steps at `1 / fps`, sampling `getValue(target)` after each step (any address above works, including instance paths). `times` are seconds from the trace start: a fresh runtime's first sample is frame 0 at 0 s, and a continued one's first sample is at `1 / fps`. Plain events dispatch on the first traced frame; `{ atMs, events }` dispatch on the first frame at or after `atMs`. The clone has no platform services, no `onLog`, and no profiling, so traces never cause side effects, and the live runtime is never touched.
+`trace(targets, durationMs, events?)` builds a separate deterministic runtime from the document at the last restart and replays this runtime's recorded steps, document updates, scene refreshes, and layer outputs, which reproduces the live state. The replay log keeps 7,200 frames since the last restart; beyond that, `trace` throws `TraceUnavailableError` (code `"trace_unavailable"`, see `isTraceUnavailable`) rather than tracing a restarted copy, until the prototype restarts. Replay cost grows with the frames since the restart. It then steps at `1 / fps`, sampling `getValue(target)` after each step (any address above works, including instance paths). `times` are seconds from the trace start: a fresh runtime's first sample is frame 0 at 0 s, and a continued one's first sample is at `1 / fps`. Plain events dispatch on the first traced frame; `{ atMs, events }` dispatch on the first frame at or after `atMs`. The clone has no platform services, no `onLog`, and no profiling, so traces never cause side effects, and the live runtime is never touched.
 
 Summaries cover numbers, booleans (0/1), and vectors (the component that moves the most): `min`, `max`, `start`, `end`, `overshoot` (past the end in the direction of travel), and `settleTime`. `settleTime` is the first time after which the value stays within 0.1% of its final value, measured against the larger of the final magnitude and the range; it's null when the value was still moving within the last 50 ms. Other value types summarize to null.
 

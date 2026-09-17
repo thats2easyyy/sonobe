@@ -310,12 +310,16 @@ export function createPatchHarness<S = any>(definition: PatchDefinition<S>, opti
     }
   }
 
-  /** The runtime's muted bypass: variant outputs pass the first variant input, others the first input of the same type. */
+  /**
+   * The runtime's muted bypass: variant outputs pass the first variant input, others the first input of
+   * the same type, and only between ports of the same shape (whole-loop to whole-loop).
+   */
   const bypassInputs = outputPorts.map((o) => {
     if (o.type === "pulse") return -1;
     const variant = declaredVariant(spec, o.key, "outputs");
-    const preferred = inputPorts.findIndex((i) => i.type !== "pulse" && (variant ? declaredVariant(spec, i.key, "inputs") : !declaredVariant(spec, i.key, "inputs") && i.type === o.type));
-    return preferred >= 0 ? preferred : inputPorts.findIndex((i) => i.type !== "pulse" && i.type === o.type);
+    const same = (i: (typeof inputPorts)[number]) => i.type !== "pulse" && (i.wholeLoop === true) === (o.wholeLoop === true);
+    const preferred = inputPorts.findIndex((i) => same(i) && (variant ? declaredVariant(spec, i.key, "inputs") : !declaredVariant(spec, i.key, "inputs") && i.type === o.type));
+    return preferred >= 0 ? preferred : inputPorts.findIndex((i) => same(i) && i.type === o.type);
   });
 
   function writeOutput(key: string, index: number, value: unknown): void {

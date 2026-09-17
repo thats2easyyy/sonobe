@@ -1,7 +1,7 @@
 /** Shared state and helpers for op handlers. */
 
 import { didYouMean, didYouMeanText } from "../suggest.ts";
-import { ID_PATTERN, isValidId, slugify, uniqueId } from "../ids.ts";
+import { getOwn, ID_PATTERN, isValidId, slugify, uniqueId } from "../ids.ts";
 import { allLayerIds, findLayer, type LayerLocation } from "../registry.ts";
 import type { ApplyOptions, ApplyResult, Component, Id, Op, OpKind, PatchNode, Registry, SonobeDocument, SonobeError } from "../types.ts";
 import { makeError, type Check, type ValidateOptions } from "../validate.ts";
@@ -38,6 +38,21 @@ export class OpFailure extends Error {
   }
 }
 
+/**
+ * Thrown when an op names a "$ref" that another op in the same batch defines but hasn't run yet.
+ * applyOps catches it and runs the op again once that item exists, so refs resolve in any order.
+ */
+export class PendingRef extends Error {
+  /** The ref name without "$". */
+  readonly ref: string;
+
+  constructor(ref: string) {
+    super(`Waiting for "$${ref}".`);
+    this.name = "PendingRef";
+    this.ref = ref;
+  }
+}
+
 export function fail(code: string, message: string, extra: Partial<Omit<SonobeError, "code" | "message">> = {}): never {
   throw new OpFailure(makeError(code, message, extra));
 }
@@ -61,19 +76,25 @@ export interface OpContext {
   readonly lenient: boolean;
   readonly validate: ValidateOptions;
   readonly defaultComponent: Id | undefined;
-  /** Ref name (without "$") → id, from earlier ops in the batch. */
+  /** Ref name (without "$") → id, from ops in the batch that already ran. */
   readonly refs: Map<string, Id>;
   /** Refs defined by the op being applied; merged into `refs` when it succeeds. */
   pendingRefs: Map<string, { given: string; id: Id }>;
+  /** Every ref some op in the batch defines (name without "$") → the index of that op. */
+  readonly batchRefs: Map<string, number>;
   readonly reserved: ReadonlySet<Id>;
   affected: AffectedSets;
 }
 
 export interface OpOutcome {
   inverse: Op[];
-  applied: Op;
+  /** The op as applied, followed by any ops it caused (receivers following a renamed broadcaster). */
+  applied: Op | Op[];
   ids: Id[];
 }
+
+/** An outcome's applied ops as a list. */
+export const appliedOps = (outcome: Pick<OpOutcome, "applied">): Op[] => (Array.isArray(outcome.applied) ? outcome.applied : [outcome.applied]);
 
 export function createContext(doc: SonobeDocument, options: ApplyOpsOptions): OpContext {
   const lenient = !!options.lenient;
@@ -85,6 +106,7 @@ export function createContext(doc: SonobeDocument, options: ApplyOpsOptions): Op
     defaultComponent: options.defaultComponent,
     refs: new Map(),
     pendingRefs: new Map(),
+    batchRefs: new Map(),
     reserved: new Set(options.reservedIds ?? []),
     affected: newAffected(),
   };
@@ -100,20 +122,30 @@ export function defineRef(ctx: OpContext, ref: unknown, id: Id): void {
   }
   const name = refName(ref);
   if (name === "in" || name === "out") fail("invalid_ref", `"${ref}" is reserved for published ports.`, { hint: "Pick another ref name." });
-  if (ctx.refs.has(name) || ctx.pendingRefs.has(name)) fail("duplicate_ref", `The ref "${ref}" is already used earlier in this batch.`, { hint: "Each ref names one new item." });
+  if (ctx.refs.has(name) || ctx.pendingRefs.has(name)) fail("duplicate_ref", `The ref "${ref}" is already used in this batch.`, { hint: "Each ref names one new item." });
   ctx.pendingRefs.set(name, { given: ref, id });
 }
 
-/** Resolve "$ref" to the id assigned earlier in the batch; other strings pass through. */
+/** Every ref name the batch knows about, as "$name", sorted. */
+export function knownRefs(ctx: OpContext): string[] {
+  return [...new Set([...ctx.batchRefs.keys(), ...ctx.refs.keys(), ...ctx.pendingRefs.keys()])].map((k) => `$${k}`).sort();
+}
+
+/**
+ * Resolve "$ref" to the id of the item some op in the batch created; other strings pass through.
+ * Refs resolve in any order: naming an item a later op creates throws PendingRef, and applyOps
+ * retries once that op has run.
+ */
 export function resolveId(ctx: OpContext, value: unknown): Id {
   if (typeof value !== "string") fail("invalid_op", `Expected an id, but got ${JSON.stringify(value) ?? String(value)}.`);
   if (!value.startsWith("$") || value === "$in" || value === "$out") return value;
   const name = value.slice(1);
   const id = ctx.pendingRefs.get(name)?.id ?? ctx.refs.get(name);
   if (id === undefined) {
-    const known = [...ctx.refs.keys(), ...ctx.pendingRefs.keys()].map((k) => `$${k}`);
-    fail("unknown_ref", `"${value}" doesn't name anything created earlier in this batch.${didYouMeanText(didYouMean(value, known))}`, {
-      hint: 'Give the new item a "ref" (e.g. "ref": "card") in an earlier op, then write "$card" in later ops.',
+    if (ctx.batchRefs.has(name)) throw new PendingRef(name);
+    const known = knownRefs(ctx);
+    fail("unknown_ref", `"${value}" doesn't name anything created in this batch.${didYouMeanText(didYouMean(value, known))}`, {
+      hint: `${known.length ? `Refs in this batch: ${known.join(", ")}.` : 'No op in this batch gives its item a "ref" yet.'} Give the new item a "ref" (e.g. "ref": "card"), then write "$card" in any op of the same batch.`,
     });
   }
   return id;
@@ -140,7 +172,7 @@ export function resolveInputRefs(ctx: OpContext, value: unknown): unknown {
 export function getTargetComponent(ctx: OpContext, id: unknown): Component {
   const raw = id ?? ctx.defaultComponent ?? ctx.doc.project.root;
   const componentId = resolveId(ctx, raw);
-  const component = ctx.doc.components[componentId];
+  const component = getOwn(ctx.doc.components, componentId);
   if (!component) {
     const ids = Object.keys(ctx.doc.components);
     fail("not_found", `There's no component "${componentId}".${didYouMeanText(didYouMean(componentId, ids))}`, { hint: `Components: ${ids.join(", ")}.` });
@@ -184,7 +216,7 @@ export function resolveIndex(index: unknown, length: number): number {
 export function requireLayer(component: Component, id: Id): LayerLocation {
   const loc = findLayer(component.layers, id);
   if (loc) return loc;
-  const isPatch = id in component.patches;
+  const isPatch = Object.hasOwn(component.patches, id);
   const ids = allLayerIds(component.layers);
   return fail("not_found", `There's no layer "${id}" in ${component.id}.${didYouMeanText(didYouMean(id, ids))}`, {
     hint: isPatch ? `"${id}" is a patch, not a layer.` : ids.length ? `Layers here: ${ids.slice(0, 12).join(", ")}.` : "This component has no layers yet.",
@@ -192,7 +224,7 @@ export function requireLayer(component: Component, id: Id): LayerLocation {
 }
 
 export function requirePatch(component: Component, id: Id): PatchNode {
-  const node = component.patches[id];
+  const node = getOwn(component.patches, id);
   if (node) return node;
   const isLayer = !!findLayer(component.layers, id);
   const ids = Object.keys(component.patches);

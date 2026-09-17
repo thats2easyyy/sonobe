@@ -11,13 +11,18 @@ import {
   findLayer,
   isLinkInput,
   resolveLayerProps,
+  resolveReceiver,
+  variableName,
   type ApplyOpsResult,
   type Component,
   type Id,
   type LayerNode,
   type Op,
+  type PatchNode,
+  type Registry,
   type SonobeDocument,
 } from "@sonobe/core";
+import { estimatePatchSize } from "../panels/patch-editor/model/placement.ts";
 import { applyPastePlan, createClipboardFragment, planPaste, topLevelLayerIds, type ClipboardFragment } from "./clipboard.ts";
 import { currentComponentId, hasSelection } from "./selection.ts";
 import type { EditorSession } from "./session.ts";
@@ -148,12 +153,48 @@ export interface PasteActionResult extends ActionResult {
   /** Pasted comment ids. */
   comments?: Id[];
   droppedLinks: number;
+  /** Component instances that couldn't be pasted (their component isn't available here, or would contain itself). */
+  droppedInstances?: number;
+  /** Layers left out because they were pasted into a patch component, which holds only patches. */
+  droppedLayers?: number;
+  /** Original id → the copy's id, for every pasted layer, patch, and comment. */
+  copies?: ReadonlyMap<Id, Id>;
+}
+
+type Box = { x: number; y: number; width: number; height: number };
+
+const shiftedOverlap = (a: Box, b: Box, d: number) => a.x + d < b.x + b.width && b.x < a.x + d + a.width && a.y + d < b.y + b.height && b.y < a.y + d + a.height;
+
+/**
+ * How far to move pasted patches and comment frames so they land clear of what's already there:
+ * the smallest diagonal step of `step` points at which no pasted patch overlaps a patch and no pasted
+ * frame overlaps a frame (sizes are estimates, like the patch editor's placement). [0, 0] when nothing
+ * overlaps, such as a paste into another component.
+ */
+export function freePasteOffset(doc: SonobeDocument, componentId: Id, fragment: ClipboardFragment, registry: Registry, step = 24, maxSteps = 80): [number, number] {
+  const component = doc.components[componentId];
+  if (!component) return [0, 0];
+  const patchBox = (node: PatchNode): Box => ({ x: node.ui.x, y: node.ui.y, ...estimatePatchSize(doc, registry, node) });
+  const frameBox = (c: { rect: readonly [number, number, number, number] }): Box => ({ x: c.rect[0], y: c.rect[1], width: c.rect[2], height: c.rect[3] });
+  const patches = Object.values(component.patches).map(patchBox);
+  const frames = component.comments.map(frameBox);
+  const pastedPatches = Object.values(fragment.patches).map(patchBox);
+  const pastedFrames = (fragment.comments ?? []).map(frameBox);
+  const collides = (d: number) => pastedPatches.some((p) => patches.some((e) => shiftedOverlap(p, e, d))) || pastedFrames.some((p) => frames.some((e) => shiftedOverlap(p, e, d)));
+  for (let k = 0; k <= maxSteps; k++) if (!collides(k * step)) return [k * step, k * step];
+  return [step, step];
 }
 
 /** Paste a fragment above the selected layer (or in front), selecting what was pasted. */
-export function pasteFragment(session: EditorSession, fragment: ClipboardFragment, options: { label?: string } = {}): PasteActionResult {
+export function pasteFragment(session: EditorSession, source: ClipboardFragment, options: { label?: string } = {}): PasteActionResult {
   const ctx = context(session);
   if (!ctx) return { ...failed("There's no component to paste into."), layers: [], patches: [], droppedLinks: 0 };
+  // A patch component is never drawn, so it holds only patches: leave the layers out.
+  const droppedLayers = ctx.component.kind === "patchComponent" ? source.layers.length : 0;
+  const fragment: ClipboardFragment = droppedLayers ? { ...source, layers: [] } : source;
+  if (droppedLayers && Object.keys(fragment.patches).length === 0 && !fragment.comments?.length) {
+    return { ...failed("Patch components hold only patches, so layers can't be pasted here.", "Paste them into a prototype or a layer component."), layers: [], patches: [], droppedLinks: 0, droppedLayers };
+  }
   const s = session.selection.getState();
   let parent: Id | null = null;
   let index: number | undefined;
@@ -163,13 +204,10 @@ export function pasteFragment(session: EditorSession, fragment: ClipboardFragmen
     parent = anchor.parent?.id ?? null;
     index = anchor.index + 1;
   }
-  const overlapping =
-    Object.values(fragment.patches).some((node) => Object.values(ctx.component.patches).some((p) => p.ui.x === node.ui.x && p.ui.y === node.ui.y)) ||
-    (fragment.comments ?? []).some((c) => ctx.component.comments.some((existing) => existing.rect[0] === c.rect[0] && existing.rect[1] === c.rect[1]));
   const plan = planPaste(ctx.doc, ctx.componentId, fragment, {
     parent,
     ...(index !== undefined ? { index } : {}),
-    patchOffset: overlapping ? [24, 24] : [0, 0],
+    patchOffset: freePasteOffset(ctx.doc, ctx.componentId, fragment, session.registry),
     isReserved: session.document.getState().isReservedId,
   });
   const comments = fragment.comments ?? [];
@@ -181,7 +219,16 @@ export function pasteFragment(session: EditorSession, fragment: ClipboardFragmen
   if (assets) for (const [file, bytes] of Object.entries(plan.assetBytes)) if (!assets.peekBytes(file)) assets.storeBytes(file, bytes);
   const outcome = applyPastePlan(plan, (ops) => apply(session, ops, label, ctx.componentId));
   if (outcome.result.ok) session.selection.getState().select({ layers: outcome.layers, patches: outcome.patches, comments: outcome.comments });
-  return { ...fromResult(outcome.result), layers: outcome.layers, patches: outcome.patches, comments: outcome.comments, droppedLinks: outcome.droppedLinks };
+  return {
+    ...fromResult(outcome.result),
+    layers: outcome.layers,
+    patches: outcome.patches,
+    comments: outcome.comments,
+    droppedLinks: outcome.droppedLinks,
+    droppedInstances: outcome.droppedInstances,
+    ...(droppedLayers ? { droppedLayers } : {}),
+    ...(outcome.result.ok ? { copies: plan.ids } : {}),
+  };
 }
 
 /** Duplicate the selection in place (patches and comments shift so the copies are visible). */
@@ -399,4 +446,27 @@ export function exitComponent(session: EditorSession): boolean {
   }
   s.exitComponent(select);
   return true;
+}
+
+/**
+ * Select and reveal the broadcaster a Variable Receiver in the current component reads, entering the
+ * enclosing component that broadcasts a global variable when it's there.
+ */
+export function revealBroadcaster(session: EditorSession, receiverId: Id): ActionResult {
+  const s = session.selection.getState();
+  const path = s.componentPath;
+  const doc = session.document.getState().doc;
+  const { broadcaster, mismatch } = resolveReceiver(doc, session.registry, path, receiverId);
+  if (!broadcaster) {
+    const node = doc.components[currentComponentId(s)]?.patches[receiverId];
+    const name = node ? variableName(node) : "";
+    if (!name) return failed("This receiver doesn't read a variable yet.", "Choose one under Variable in the Inspector.");
+    return mismatch
+      ? failed(`The variable “${name}” here has another type.`, "Choose the variable again in the Inspector to match its type.")
+      : failed(`There's no broadcaster for “${name}” here.`, "Add a Variable Broadcaster (W) and give it that name.");
+  }
+  if (broadcaster.componentId !== currentComponentId(s)) s.setComponentPath(path.slice(0, path.indexOf(broadcaster.componentId) + 1));
+  session.selection.getState().select({ patches: [broadcaster.id], layers: [], comments: [] });
+  session.selection.getState().requestReveal(broadcaster.componentId, [broadcaster.id]);
+  return { ok: true };
 }

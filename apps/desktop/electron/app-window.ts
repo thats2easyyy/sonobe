@@ -191,7 +191,8 @@ export async function createAppWindow(opts: AppWindowOptions): Promise<AppWindow
     if (choice === "Cancel") return;
     if (choice === "Save") {
       try {
-        const result = await opts.rpc.invoke(wc, "document.save", undefined, { timeoutMs: 120_000 });
+        // interactive: when the project changed on disk meanwhile, the editor asks which version to keep.
+        const result = await opts.rpc.invoke(wc, "document.save", { interactive: true }, { timeoutMs: 120_000 });
         if (result === false) return;
       } catch (err) {
         await dialog.showMessageBox(win, { type: "error", message: "Sonobe couldn't save your prototype.", detail: err instanceof Error ? err.message : String(err) });

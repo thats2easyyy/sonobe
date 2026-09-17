@@ -165,15 +165,40 @@ export function keyFromEvent(event: Pick<KeyboardEvent, "key" | "code" | "altKey
 
 const isSymbolKey = (key: string) => key.length === 1 && !/[a-z0-9]/.test(key);
 
-/** Whether a keyboard event matches a chord. Shift is ignored for symbol keys like "?" and "+". */
+/** The unshifted symbol each physical punctuation key produces on a US layout. */
+const CODE_SYMBOLS: Readonly<Record<string, string>> = {
+  BracketLeft: "[",
+  BracketRight: "]",
+  Slash: "/",
+  Equal: "=",
+  Minus: "-",
+  Comma: ",",
+  Period: ".",
+  Semicolon: ";",
+  Quote: "'",
+  Backquote: "`",
+  Backslash: "\\",
+};
+
+/**
+ * Whether a keyboard event matches a chord.
+ *
+ * - Letters, digits and named keys compare every modifier exactly.
+ * - A symbol chord without Shift ("?", "+", "Mod++", "Mod+[") compares the produced character, so
+ *   "?" matches ⇧/ and "+" matches ⇧=. With Option held the physical key counts too (⌥/ types "÷").
+ *   Shift pressed on the symbol's own key ("[" still reported with Shift held) doesn't match, so ⌘[
+ *   and ⇧⌘[ stay different chords.
+ * - A symbol chord with Shift ("Mod+Shift+[") needs Shift and matches the produced character or the
+ *   physical key's unshifted symbol, because ⇧⌘[ arrives as "{".
+ */
 export function matchesChord(event: KeyEventLike, chord: KeyChord): boolean {
   if (event.metaKey !== chord.meta || event.ctrlKey !== chord.ctrl || event.altKey !== chord.alt) return false;
-  const symbol = isSymbolKey(chord.key);
-  // Symbols are compared by the produced character, which already reflects Shift.
-  const key = symbol ? normalizeKeyName(event.key) : keyFromEvent(event);
-  if (key !== chord.key) return false;
-  if (!symbol && event.shiftKey !== chord.shift) return false;
-  return true;
+  if (!isSymbolKey(chord.key)) return keyFromEvent(event) === chord.key && event.shiftKey === chord.shift;
+  const produced = normalizeKeyName(event.key);
+  const physical = event.code ? CODE_SYMBOLS[event.code] : undefined;
+  if (chord.shift) return event.shiftKey && (produced === chord.key || physical === chord.key);
+  if (produced !== chord.key && !(event.altKey && physical === chord.key)) return false;
+  return !(event.shiftKey && physical === chord.key);
 }
 
 const MAC_KEY_LABELS: Record<string, string> = {

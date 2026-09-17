@@ -2,7 +2,8 @@
 
 import { typeLabel } from "@sonobe/core";
 import { NodeResizer, type NodeProps } from "@xyflow/react";
-import { CircleAlert, CornerDownRight, Layers, LogIn, TriangleAlert } from "lucide-react";
+import { VARIABLE_RECEIVER_TYPE } from "@sonobe/core";
+import { CircleAlert, CornerDownRight, Layers, LogIn, Radio, TriangleAlert } from "lucide-react";
 import { memo, useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from "react";
 import { useStore } from "zustand";
 import { categoryColorVar } from "../../../theme/tokens.ts";
@@ -151,7 +152,17 @@ export const PatchNodeView = memo(function PatchNodeView({ id, data, selected }:
           <Icon size={11} strokeWidth={2.25} />
         </span>
         {editing ? (
-          <TitleInput initial={data.title} ariaLabel="Patch name" onCommit={(v) => (actions.rename(id, v), ui.getState().set({ editingTitle: null }))} onCancel={() => ui.getState().set({ editingTitle: null })} />
+          <TitleInput
+            initial={data.title}
+            ariaLabel={ui.getState().namingComponent && data.componentTarget === ui.getState().namingComponent ? "Component name" : "Patch name"}
+            onCommit={(v) => {
+              const naming = ui.getState().namingComponent;
+              if (naming && data.componentTarget === naming) actions.renameComponent(naming, v);
+              else actions.rename(id, v);
+              ui.getState().set({ editingTitle: null, namingComponent: null });
+            }}
+            onCancel={() => ui.getState().set({ editingTitle: null, namingComponent: null })}
+          />
         ) : (
           <span className="sb-pe-node__title" title={data.customName ? data.specName : undefined}>
             {data.title}
@@ -172,6 +183,22 @@ export const PatchNodeView = memo(function PatchNodeView({ id, data, selected }:
           </span>
         )}
         {data.componentTarget && <LogIn className="sb-pe-node__enter" size={11} strokeWidth={2.25} aria-label="Double-click to enter" />}
+        {data.type === VARIABLE_RECEIVER_TYPE && (
+          <button
+            type="button"
+            className="sb-pe-badge sb-pe-badge--jump nodrag nopan"
+            aria-label="Jump to broadcaster"
+            title="Jump to broadcaster"
+            onPointerDown={(e) => e.stopPropagation()}
+            onDoubleClick={(e) => e.stopPropagation()}
+            onClick={(e) => {
+              e.stopPropagation();
+              actions.jumpToBroadcaster(id);
+            }}
+          >
+            <Radio size={11} strokeWidth={2.25} aria-hidden />
+          </button>
+        )}
       </header>
       {data.collapsed ? <CollapsedPorts inputs={data.inputs} outputs={data.outputs} /> : <PortRows nodeId={id} inputs={data.inputs} outputs={data.outputs} editable />}
     </div>

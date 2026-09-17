@@ -28,20 +28,25 @@ value
          0     0.1 s   0.2 s   0.3 s   0.5 s
 ```
 
-It covers most of the distance in the first 0.2 seconds, runs about 2% past the target, and comes to rest at about 0.48 seconds.
+It covers most of the distance in the first 0.2 seconds after it starts moving, runs about 2% past the target, and comes to rest at about 0.48 seconds.
 
 ## Start with a preset
 
 The inspector offers four presets: Smooth, Snappy, Bouncy and Gentle. Start with the one closest to the feel you want, then adjust.
 
-| Preset | Feels | Use it for | Ballpark response | Ballpark damping fraction | Overshoot | Settles in |
+| Preset | Feels | Use it for | Response | Damping fraction | Overshoot | Settles in |
 |---|---|---|---|---|---|---|
-| Smooth | Calm, no bounce | Sheets, page transitions, anything large | 0.5 s | 1.0 | 0% | about 0.73 s |
-| Snappy | Quick, with at most a hint of wobble | Toggles, buttons, menus | 0.3 s | 0.85 | under 1% | about 0.42 s |
-| Bouncy | Playful, visibly overshoots | Likes, stickers, celebrations | 0.5 s | 0.6 | about 10% | about 0.81 s |
-| Gentle | Slow and soft | Ambient motion, onboarding illustrations, big hero elements | 0.8 s | 0.9 | under 1% | about 1.07 s |
+| Smooth | Calm, no bounce | Sheets, page transitions, anything large | 0.5 s | 1.0 | 0% | about 0.75 s |
+| Snappy | Quick, with at most a hint of wobble | Toggles, buttons, menus | 0.3 s | 0.85 | under 1% | about 0.43 s |
+| Bouncy | Playful, visibly overshoots | Likes, stickers, celebrations | 0.5 s | 0.7 | about 5% | about 0.82 s |
+| Gentle | Slow and soft | Ambient motion, onboarding illustrations, big hero elements | 0.75 s | 0.9 | under 1% | about 1.00 s |
 
-"Settles in" means the time until the value stays within 0.1% of its target. The ballpark numbers are there to help you read the table. The inspector shows each preset's exact values with a live curve.
+"Settles in" means the time until the value stays within 0.1% of its target, counted from when the spring starts moving, at 60 frames per second. The inspector shows each preset with a live curve.
+
+Two other tools report slightly different times for the same spring, and both are right by their own rules:
+
+- A trace after a tap, like `sonobe sim` or Claude's `sim_trace`, counts from the tap. The spring starts moving a few frames later, so Pop Animation's default spring reads 517 ms there instead of 0.48 s.
+- The inspector's curve label waits until both the value and its speed have come to rest, which is stricter. It shows 0.57 s for the default spring.
 
 ## Four ways to say the same spring
 
@@ -101,7 +106,7 @@ Here's what the knobs do, measured:
 |---|---|---|---|---|
 | 0 / 10 | 0.36 s | 0.995 | 0% | 0.53 s |
 | 5 / 10 | 0.36 s | 0.78 | 2% | 0.48 s |
-| 10 / 10 | 0.36 s | 0.59 | 10% | 0.59 s |
+| 10 / 10 | 0.36 s | 0.59 | 10% | 0.60 s |
 | 5 / 20 | 0.28 s | 0.78 | 2% | 0.37 s |
 
 Two things stand out. Changing Bounciness leaves the response alone, but a bouncier spring takes longer to settle. And the spring with no bounce at all settles more slowly than the one with a little. A spring with zero bounce creeps in at the end. A hint of overshoot often feels faster, even though it travels farther.
@@ -178,8 +183,8 @@ When you flick a sheet, the animation that takes over should start at the finger
 Spring Animation handles this with two inputs. While Gesture Active is on, the spring sits on its target, so you can feed it the finger's position. When Gesture Active turns off, the spring starts moving at whatever speed is in Gesture Velocity.
 
 ```
-Interaction (Sheet) ── Down ───────────────────────────▶ Spring Animation . Gesture Active
-                    ── Velocity (Y part) ──────────────▶ Spring Animation . Gesture Velocity
+Gesture (Sheet) ── Down ───────────────────────────────▶ Spring Animation . Gesture Active
+                ── Velocity ─▶ Point Unpack . Y ───────▶ Spring Animation . Gesture Velocity
 
 finger's Y while down, snap target once released ──────▶ Spring Animation . Number
                                                                    │
@@ -187,7 +192,7 @@ finger's Y while down, snap target once released ──────▶ Spring An
                                                            Sheet . Position Y
 ```
 
-Interaction's Velocity is smoothed, in points per second. Guide 06 builds this sheet step by step.
+Gesture's Velocity is in points per second on each axis, and it holds its value on the release frame, which is the frame the spring reads. The Bottom Sheet recipe in `examples/08-bottom-sheet` builds this sheet step by step, and guide 06 builds a snapping picture-in-picture the same way.
 
 Pop Animation does something related on its own. When its target changes mid-flight, it keeps its current speed.
 
@@ -196,7 +201,7 @@ When you hand off a flick to engineers, check the velocity units. Some APIs want
 ## Try it
 
 1. Put four squares side by side, all driven by the same Switch, each with a different preset. Tap and compare.
-2. Tune a toggle to settle in under 300 ms with no visible bounce. Hint: raise Speed, keep Bounciness near 0, and check the settle time in the converter.
+2. Tune a toggle to settle in under 300 ms with no visible bounce. Hint: raise Speed, keep Bounciness near 0, and check the settle time under the spring's curve in the inspector.
 3. Use the converter to turn Bounciness 10, Speed 6 into SwiftUI's duration and bounce. The answer is about 0.43 seconds and 0.41.
 4. Give a like button the Bouncy preset and a full-screen card expansion the Smooth preset. Then swap them, and notice why each one belongs where it was.
 5. Build a sheet you can flick. Try it with Gesture Velocity connected, then without.

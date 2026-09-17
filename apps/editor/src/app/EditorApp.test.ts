@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { CommandRegistry } from "../ui/commands/commandRegistry.ts";
-import { commandMenuEntries, insertPosition } from "./EditorApp.tsx";
+import { commandMenuEntries } from "./EditorApp.tsx";
 
 describe("commandMenuEntries", () => {
   it("builds the title menu from registered file commands", () => {
@@ -27,15 +27,5 @@ describe("commandMenuEntries", () => {
     const registry = new CommandRegistry();
     registry.register({ id: "file.new", title: "New Prototype", run: () => undefined });
     expect(commandMenuEntries(registry).map((e) => e.type ?? "item")).toEqual(["item"]);
-  });
-});
-
-describe("insertPosition", () => {
-  it("starts at the top left of an empty graph", () => {
-    expect(insertPosition({})).toEqual({ x: 40, y: 40 });
-  });
-
-  it("goes to the right of the existing patches", () => {
-    expect(insertPosition({ a: { ui: { x: 40, y: 200 } }, b: { ui: { x: 500, y: 60 } } })).toEqual({ x: 740, y: 60 });
   });
 });

@@ -21,7 +21,7 @@ Level 2 · Guides: [05 Springs and feel](../../docs/guides/05-springs-and-feel.m
 5. **List the stops.** Add a Loop Builder (`stops`, number) with 470, 132 and 760. Item 0 is where the sheet starts, because the Counter in step 7 starts at 0.
 6. **Project the fling.** Add a Snap (`fling_stop`) with Mode Points, Points from `stops.loop`, Value from `sheet_y_last_frame.output`, Velocity from `drag_speed.y`, and Deceleration Fast. Snap works out where the sheet would coast to at that speed, then picks the nearest stop.
 7. **Remember the stop.** Add a Counter (`current_stop`) with Jump from `finger.turnedOff` and Jump to Number from `fling_stop.index`. On the frame the finger lifts, the count becomes the chosen stop. A Loop Select (`stop_y`) turns the count back into a y value.
-8. **Animate.** Add an If Else (`sheet_target`): Condition from `sheet_gesture.down`, If True from `finger_y.output`, If False from `stop_y.output`. Add a Spring Animation (`sheet_spring`) with Number from `sheet_target.output`, Gesture Active from `sheet_gesture.down`, Gesture Velocity from `drag_speed.y`, Tension 300 and Friction 30.
+8. **Animate.** Add an If / Else (`sheet_target`): Condition from `sheet_gesture.down`, If True from `finger_y.output`, If False from `stop_y.output`. Add a Spring Animation (`sheet_spring`) with Number from `sheet_target.output`, Gesture Active from `sheet_gesture.down`, Gesture Velocity from `drag_speed.y`, Tension 300 and Friction 30.
 9. **Place the sheet.** Add a Point (`sheet_position`) with X 0 and Y from `sheet_spring.output`, into the Sheet's Position. Then connect `sheet_spring.output` into `sheet_y_last_frame.value` to close the loop.
 10. **Dim the map.** Add a Progress (`sheet_openness`) from 760 to 132 with Clamp to Range on, and a Transition (`scrim_opacity`) from 0 to 0.4 into the Scrim's Opacity.
 
@@ -52,7 +52,7 @@ The graph has four stages. Read it left to right.
 | `fling_stop` | Snap | Projects the release along its velocity and picks the nearest of the three stops. |
 | `current_stop` | Counter | Remembers which stop the sheet belongs at (0 half, 1 full, 2 collapsed). |
 | `stop_y` | Loop Select | Turns the stop number into a y value. |
-| `sheet_target` | If Else | The finger's y while dragging, the stop's y otherwise. |
+| `sheet_target` | If / Else | The finger's y while dragging, the stop's y otherwise. |
 | `sheet_spring` | Spring Animation | Follows Number exactly while Gesture Active is on. When it turns off, the spring takes over, starting at Gesture Velocity. |
 | `sheet_openness`, `scrim_opacity` | Progress, Transition | Turn the sheet's y into a 0…1 openness, then into the scrim's opacity. |
 

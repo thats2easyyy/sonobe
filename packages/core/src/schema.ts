@@ -5,7 +5,7 @@
 
 import { z } from "zod";
 import { parseAddress } from "./address.ts";
-import { ID_PATTERN, isValidId } from "./ids.ts";
+import { ID_PATTERN, isValidId, UNSAFE_IDS } from "./ids.ts";
 import type { AssetRecord, Component, Id, InputValue, LayerNode, PatchNode, ProjectManifest } from "./types.ts";
 import { isLiteral, parseColor, VALUE_TYPES } from "./values.ts";
 
@@ -21,7 +21,87 @@ export type ParseResult<T> = { ok: true; value: T } | { ok: false; issues: Forma
 
 const ID_MESSAGE = "must be an id (letters, digits and underscores; not starting with a digit)";
 
-export const IdSchema = z.string().regex(ID_PATTERN, ID_MESSAGE);
+export const IdSchema = z
+  .string()
+  .regex(ID_PATTERN, ID_MESSAGE)
+  .refine((id) => !UNSAFE_IDS.includes(id), { message: `can't be ${UNSAFE_IDS.map((id) => `"${id}"`).join(" or ")}, which JavaScript reserves; pick another id` });
+
+/**
+ * Deepest layer nesting a component may have. Parsing, normalizing, serializing and every layer
+ * walk recurse per level, so a hand-written or generated file nested thousands of levels deep would
+ * overflow the stack instead of teaching what's wrong. Ops refuse to nest deeper, too.
+ */
+export const MAX_LAYER_DEPTH = 256;
+
+const isRecord = (v: unknown): v is Record<string, unknown> => !!v && typeof v === "object" && !Array.isArray(v);
+
+/** The first layer nested deeper than MAX_LAYER_DEPTH, found without recursion; undefined when within the limit. */
+export function layerDepthIssue(json: unknown, file?: string): FormatIssue | undefined {
+  const layers = isRecord(json) ? json.layers : undefined;
+  if (!Array.isArray(layers)) return undefined;
+  const stack: [node: unknown, depth: number, top: number][] = layers.map((layer, i) => [layer, 1, i]);
+  while (stack.length) {
+    const [node, depth, top] = stack.pop()!;
+    if (depth > MAX_LAYER_DEPTH) {
+      const id = isRecord(node) && typeof node.id === "string" ? ` (layer "${node.id.slice(0, 48)}")` : "";
+      const issue: FormatIssue = {
+        path: `layers[${top}] … children[…]${id}`,
+        message: `layers are nested more than ${MAX_LAYER_DEPTH} levels deep; flatten some groups so layers sit fewer groups deep`,
+      };
+      if (file !== undefined) issue.file = file;
+      return issue;
+    }
+    const children = isRecord(node) ? node.children : undefined;
+    if (Array.isArray(children)) for (const child of children) stack.push([child, depth + 1, top]);
+  }
+  return undefined;
+}
+
+/**
+ * Map keys JavaScript can't hold: zod (and plain assignment) silently drop an own "__proto__" key,
+ * so a patch or port with that id would vanish on load. Report it instead.
+ */
+function unsafeKeyIssues(json: unknown, file?: string): FormatIssue[] {
+  if (!isRecord(json)) return [];
+  const out: FormatIssue[] = [];
+  const check = (map: unknown, path: string) => {
+    if (!isRecord(map)) return;
+    for (const key of UNSAFE_IDS) {
+      if (!Object.hasOwn(map, key)) continue;
+      const issue: FormatIssue = { path: `${path}[${JSON.stringify(key)}]`, message: `"${key}" can't be an id or key, because JavaScript reserves it; rename it` };
+      if (file !== undefined) issue.file = file;
+      out.push(issue);
+    }
+  };
+  check(json.patches, "patches");
+  if (isRecord(json.patches)) for (const [id, node] of Object.entries(json.patches)) if (isRecord(node)) check(node.inputs, `patches.${id}.inputs`);
+  if (isRecord(json.interface)) {
+    check(json.interface.inputs, "interface.inputs");
+    check(json.interface.outputs, "interface.outputs");
+  }
+  const stack: unknown[] = Array.isArray(json.layers) ? [...json.layers] : [];
+  while (stack.length) {
+    const node = stack.pop();
+    if (!isRecord(node)) continue;
+    check(node.props, `layer ${JSON.stringify(String(node.id))} props`);
+    if (Array.isArray(node.children)) stack.push(...node.children);
+  }
+  return out;
+}
+
+/** Levels a layer and its children span (1 without children), counted without recursion and capped at `cap`. */
+export function layerTreeHeight(layer: unknown, cap = MAX_LAYER_DEPTH + 1): number {
+  let height = 0;
+  const stack: [node: unknown, depth: number][] = [[layer, 1]];
+  while (stack.length) {
+    const [node, depth] = stack.pop()!;
+    if (depth > height) height = depth;
+    if (height >= cap) return cap;
+    const children = isRecord(node) ? node.children : undefined;
+    if (Array.isArray(children)) for (const child of children) stack.push([child, depth + 1]);
+  }
+  return height;
+}
 const ValueTypeSchema = z.enum(VALUE_TYPES as unknown as [string, ...string[]]);
 const Vec2Schema = z.tuple([z.number(), z.number()]);
 const MetaSchema = z.record(z.string(), z.unknown());
@@ -273,7 +353,19 @@ export function normalizeComponent(component: Component): Component {
 
 /** Validate a component file (text or parsed JSON) and normalize it. */
 export function parseComponentFile(input: unknown, file = "component"): ParseResult<Component> {
-  const r = parseWith(ComponentSchema, input, file);
+  let json = input;
+  if (typeof input === "string") {
+    try {
+      json = JSON.parse(input);
+    } catch {
+      return parseWith(ComponentSchema, input, file);
+    }
+  }
+  const deep = layerDepthIssue(json, file);
+  if (deep) return { ok: false, issues: [deep], message: formatIssues([deep]) };
+  const unsafe = unsafeKeyIssues(json, file);
+  if (unsafe.length) return { ok: false, issues: unsafe, message: formatIssues(unsafe) };
+  const r = parseWith(ComponentSchema, json, file);
   return r.ok ? { ok: true, value: normalizeComponent(r.value) } : r;
 }
 
@@ -284,5 +376,9 @@ export function parseProjectFile(input: unknown, file = "project.json"): ParseRe
 
 /** Validate assets/assets.json (text or parsed JSON). */
 export function parseAssetsFile(input: unknown, file = "assets/assets.json"): ParseResult<Record<Id, AssetRecord>> {
+  if (isRecord(input) && Object.hasOwn(input, "__proto__")) {
+    const issues = [{ file, path: '["__proto__"]', message: '"__proto__" can\'t be an asset id, because JavaScript reserves it; rename it' }];
+    return { ok: false, issues, message: formatIssues(issues) };
+  }
   return parseWith(AssetRegistrySchema as unknown as z.ZodType<Record<Id, AssetRecord>>, input, file);
 }
