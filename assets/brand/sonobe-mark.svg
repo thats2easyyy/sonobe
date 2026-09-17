@@ -4,7 +4,6 @@
   <polygon points="32,5 57,19.5 32,34 7,19.5" fill="#9B8CFF"/>
   <polygon points="7,19.5 32,34 32,59 7,44.5" fill="#6A57F0"/>
   <polygon points="57,19.5 57,44.5 32,59 32,34" fill="#4632C8"/>
-  <path d="M7 19.5 L32 34 M32 5 L32 20 M57 44.5 L44.5 37.25" stroke="#FFFFFF" stroke-opacity="0.28" stroke-width="1.6" stroke-linecap="round" fill="none"/>
   <polygon points="32,5 57,19.5 44.5,26.75" fill="#FFFFFF" fill-opacity="0.16"/>
   <polygon points="7,44.5 19.5,37.25 32,59" fill="#000000" fill-opacity="0.14"/>
 </svg>
