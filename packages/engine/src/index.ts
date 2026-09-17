@@ -14,3 +14,4 @@ export { simplifyPolyline, toCssLinear, type CurvePoint } from "./math/polyline.
 export * from "./layout/index.ts";
 export * from "./hittest/index.ts";
 export * from "./gestures/index.ts";
+export * from "./runtime/index.ts";

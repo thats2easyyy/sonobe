@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { cssGradient } from "./gradient.ts";
 import { cssTransform, projectPoint, unprojectPoint } from "./matrix.ts";
-import { buildFragmentSource, parseShaderLog, uniformVector } from "./shader.ts";
+import { buildFragmentSource, parseShaderLog, readTextureSpec, uniformVector } from "./shader.ts";
 import { squirclePath } from "./squircle.ts";
 import { cssColor, parseColor, propReader, readAssetUrl, readGradient, readLayerRef, readShapePath } from "./values.ts";
 
@@ -124,6 +124,24 @@ describe("shader source", () => {
     expect(err.line).toBe(2);
     expect(err.message.split("\n")[0]).toBe("Line 2: 'foo' : undeclared identifier");
     expect(parseShaderLog("link failed", 0, 1)).toEqual({ message: "link failed", line: null });
+  });
+
+  it("declares four channels with resolutions and blanks user redeclarations", () => {
+    const { source, lineOffset } = buildFragmentSource("uniform sampler2D iChannel1;\nuniform vec3 iChannelResolution[4];\nvoid mainImage(out vec4 c, in vec2 p) { c = texture(iChannel1, p / iChannelResolution[1].xy); }");
+    expect(source).toContain("uniform sampler2D iChannel3;");
+    expect(source.match(/uniform sampler2D iChannel1;/g)!.length).toBe(1);
+    expect(source.match(/uniform vec3 iChannelResolution\[4\];/g)!.length).toBe(1);
+    expect(source.split("\n")[lineOffset + 2]).toMatch(/^void mainImage/);
+  });
+
+  it("reads texture uniforms from assets and URLs with wrap and filter options", () => {
+    const resolve = (id: string) => (id === "photo" ? "blob:photo" : undefined);
+    expect(readTextureSpec({ asset: "photo" }, resolve)).toEqual({ url: "blob:photo", wrap: "repeat", filter: "mipmap" });
+    expect(readTextureSpec({ assetId: "photo", wrap: "clamp", filter: "nearest" }, resolve)).toEqual({ url: "blob:photo", wrap: "clamp", filter: "nearest" });
+    expect(readTextureSpec({ url: "https://x.test/a.png", wrap: "mirror", filter: "bogus" }, resolve)).toEqual({ url: "https://x.test/a.png", wrap: "mirror", filter: "mipmap" });
+    expect(readTextureSpec("https://x.test/b.png", resolve)!.url).toBe("https://x.test/b.png");
+    expect(readTextureSpec({ asset: "missing" }, resolve)).toBeNull();
+    expect(readTextureSpec(0.5, resolve)).toBeNull();
   });
 
   it("normalizes uniform values", () => {

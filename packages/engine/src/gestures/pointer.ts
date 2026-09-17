@@ -16,6 +16,9 @@ export interface HitTarget {
 
 export type HitTestFunction = (x: number, y: number) => readonly HitTarget[];
 
+type PointerEvent = Extract<InputEvent, { kind: "pointer" }>;
+type PointerType = NonNullable<PointerEvent["pointerType"]>;
+
 /** A touch that moves less than this (points) can still be a tap or a long press. */
 export const TAP_SLOP = 10;
 /** Time constant (seconds) of the velocity moving average. */
@@ -33,13 +36,14 @@ export interface PointerTrackerOptions {
   velocitySmoothing: number;
   /**
    * After a release the pointer keeps hovering at its last position (mouse behavior).
-   * Renderers send `cancel` for a pointer that leaves or a touch that lifts.
+   * Touches never hover; renderers send `leave` when a mouse leaves the viewer.
    */
   hoverOnRelease: boolean;
 }
 
 interface PointerRecord {
   id: number;
+  pointerType: PointerType;
   pressed: boolean;
   /** Hit chain captured at press. */
   chain: readonly HitTarget[];
@@ -54,6 +58,10 @@ interface PointerRecord {
   velocity: [number, number];
   samplePosition: [number, number];
   sampleTime: number;
+  /** Event time (seconds) of the latest event, when the renderer supplies timeStamp. */
+  stamp: number | undefined;
+  /** Event time of the last velocity sample. */
+  sampleStamp: number | undefined;
   lastMoveTime: number;
   began: boolean;
   cancelled: boolean;
@@ -65,14 +73,21 @@ function matches(chain: readonly HitTarget[], target: string | null): boolean {
   return false;
 }
 
+function stampOf(event: PointerEvent): number | undefined {
+  return typeof event.timeStamp === "number" && Number.isFinite(event.timeStamp) ? event.timeStamp / 1000 : undefined;
+}
+
 function createRecord(
   id: number,
   position: [number, number],
   time: number,
   pressed: boolean,
+  pointerType: PointerType = "mouse",
+  stamp: number | undefined = undefined,
 ): PointerRecord {
   return {
     id,
+    pointerType,
     pressed,
     chain: [],
     releaseChain: [],
@@ -84,6 +99,8 @@ function createRecord(
     velocity: [0, 0],
     samplePosition: [position[0], position[1]],
     sampleTime: time,
+    stamp,
+    sampleStamp: stamp,
     lastMoveTime: time,
     began: pressed,
     cancelled: false,
@@ -126,16 +143,19 @@ export class PointerTracker {
       const position: [number, number] = [event.x, event.y];
       switch (event.phase) {
         case "down":
-          this.press(event.pointerId, position, hitTest);
+          this.press(event, position, hitTest);
           break;
         case "move":
-          this.move(event.pointerId, position);
+          this.move(event, position);
           break;
         case "up":
-          this.release(event.pointerId, position, hitTest, false);
+          this.release(event, position, hitTest, false);
           break;
         case "cancel":
-          this.release(event.pointerId, position, hitTest, true);
+          this.release(event, position, hitTest, true);
+          break;
+        case "leave":
+          this.hovers.delete(event.pointerId);
           break;
       }
     }
@@ -148,22 +168,25 @@ export class PointerTracker {
   /**
    * Pointer state for a layer (`target` matches a hit-chain key or layer id; null means the
    * whole screen). `worldInverse` maps prototype coordinates to the layer's local space for
-   * `localPosition` (use `planeInverse(worldTransform)`).
+   * `localPosition` (use `planeInverse(worldTransform)`). With `exact`, `target` must equal a
+   * SceneNode key (layer ids alone don't match).
    */
-  snapshot(target: string | null, worldInverse?: readonly number[] | null): PointerSnapshot {
+  snapshot(target: string | null, worldInverse?: readonly number[] | null, exact = false): PointerSnapshot {
+    const match = (chain: readonly HitTarget[]) =>
+      exact && target !== null ? chain.some((e) => e.key === target) : matches(chain, target);
     const pressed: PointerRecord[] = [];
     for (const record of this.active.values())
-      if (matches(record.chain, target)) pressed.push(record);
-    const ended = this.endedThisFrame.filter((r) => matches(r.chain, target));
+      if (match(record.chain)) pressed.push(record);
+    const ended = this.endedThisFrame.filter((r) => match(r.chain));
     let hover: PointerRecord | undefined;
     for (const record of this.hovers.values()) {
-      if (matches(record.hoverChain, target)) {
+      if (match(record.hoverChain)) {
         hover = record;
         break;
       }
     }
     const current = pressed[0] ?? ended[ended.length - 1];
-    const press = current ?? this.recent.find((r) => matches(r.chain, target));
+    const press = current ?? this.recent.find((r) => match(r.chain));
     const position = current?.position ?? hover?.position ?? press?.position ?? [0, 0];
     const startPosition = press ? press.startPosition : position;
     const translation: [number, number] = press
@@ -224,40 +247,47 @@ export class PointerTracker {
     this.time = 0;
   }
 
-  private press(id: number, position: [number, number], hitTest: HitTestFunction): void {
+  private press(event: PointerEvent, position: [number, number], hitTest: HitTestFunction): void {
+    const id = event.pointerId;
     const existing = this.active.get(id);
     if (existing) this.finish(existing, existing.position, [], true);
     this.hovers.delete(id);
-    const record = createRecord(id, position, this.time, true);
+    const record = createRecord(id, position, this.time, true, event.pointerType, stampOf(event));
     record.chain = [...hitTest(position[0], position[1])];
     this.active.set(id, record);
   }
 
-  private move(id: number, position: [number, number]): void {
+  private move(event: PointerEvent, position: [number, number]): void {
+    const id = event.pointerId;
     const record = this.active.get(id);
     if (record) {
       record.position = position;
+      record.stamp = stampOf(event) ?? record.stamp;
       this.updateDistance(record);
       return;
     }
+    // A touch that isn't pressed can't hover.
+    if (event.pointerType === "touch") return;
     const hover = this.hovers.get(id);
     if (hover) hover.position = position;
-    else this.hovers.set(id, createRecord(id, position, this.time, false));
+    else this.hovers.set(id, createRecord(id, position, this.time, false, event.pointerType, stampOf(event)));
   }
 
   private release(
-    id: number,
+    event: PointerEvent,
     position: [number, number],
     hitTest: HitTestFunction,
     cancelled: boolean,
   ): void {
+    const id = event.pointerId;
     const record = this.active.get(id);
     if (!record) {
       if (cancelled) this.hovers.delete(id);
-      else this.move(id, position);
+      else this.move(event, position);
       return;
     }
     record.position = position;
+    record.stamp = stampOf(event) ?? record.stamp;
     this.updateDistance(record);
     this.finish(
       record,
@@ -265,8 +295,8 @@ export class PointerTracker {
       cancelled ? [] : [...hitTest(position[0], position[1])],
       cancelled,
     );
-    if (!cancelled && this.options.hoverOnRelease)
-      this.hovers.set(id, createRecord(id, position, this.time, false));
+    if (!cancelled && this.options.hoverOnRelease && record.pointerType !== "touch")
+      this.hovers.set(id, createRecord(id, position, this.time, false, record.pointerType));
   }
 
   private finish(
@@ -295,14 +325,19 @@ export class PointerTracker {
    * Exponential moving average of displacement / time between move frames. The press frame
    * contributes no sample (no first-frame jump); frames without movement hold the estimate
    * briefly (input can arrive slower than frames) and then decay it; a release with no
-   * displacement holds the last velocity for the release frame.
+   * displacement holds the last velocity for the release frame. When events carry timeStamps,
+   * the time between samples comes from them instead of frame times.
    */
   private sampleVelocity(record: PointerRecord, h: number, releasing: boolean): void {
     const tau = this.options.velocitySmoothing;
     const dx = record.position[0] - record.samplePosition[0];
     const dy = record.position[1] - record.samplePosition[1];
     if (dx !== 0 || dy !== 0) {
-      const elapsed = this.time - record.sampleTime;
+      let elapsed =
+        record.stamp !== undefined && record.sampleStamp !== undefined
+          ? record.stamp - record.sampleStamp
+          : Number.NaN;
+      if (!(elapsed > 0)) elapsed = this.time - record.sampleTime;
       if (elapsed <= 0) return;
       const sdt = Math.min(MAX_SAMPLE_DT, Math.max(MIN_SAMPLE_DT, elapsed));
       const alpha = tau > 0 ? 1 - Math.exp(-sdt / tau) : 1;
@@ -310,6 +345,7 @@ export class PointerTracker {
       record.velocity[1] += (dy / sdt - record.velocity[1]) * alpha;
       record.samplePosition = [record.position[0], record.position[1]];
       record.sampleTime = this.time;
+      record.sampleStamp = record.stamp;
       record.lastMoveTime = this.time;
       return;
     }

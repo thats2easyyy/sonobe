@@ -1,0 +1,819 @@
+/**
+ * Graph compiler: turns a document into scopes, nodes, bindings and layers. Component instances
+ * (patch components and layer component instances) are inlined recursively, variables compile to
+ * implicit edges, and nodes are ordered topologically. Inside a strongly connected component the
+ * edges that close a cycle become back-edges: their consumer evaluates first and reads the
+ * driver's previous-frame value. Edges into Delay One Frame are preferred as back-edges.
+ */
+
+import {
+  COMPONENT_INSTANCE_LAYER_TYPE,
+  COMPONENT_PATCH_TYPE,
+  defaultForPort,
+  interfacePortToPort,
+  isLayerInput,
+  isLinkInput,
+  parseAddress,
+  resolveLayerProps,
+  resolveNodePorts,
+  wouldCreateComponentCycle,
+  type Component,
+  type ComponentKind,
+  type Id,
+  type InputValue,
+  type LayerNode,
+  type PatchNode,
+  type PatchSpec,
+  type ResolvedPort,
+  type SonobeDocument,
+  type Value,
+  type ValueType,
+} from "@sonobe/core";
+import type { EngineRegistry, Loop, RuntimeIssue } from "../types.ts";
+import { DELAY1_TYPE, VARIABLE_BROADCASTER_TYPE, VARIABLE_RECEIVER_TYPE, withBuiltinSpecs } from "./builtins.ts";
+import { bypassMap, type InputSlot, type OutputSlot, type RuntimePatchDefinition } from "./evaluate.ts";
+import type { Binding, Broadcaster, CLayer, CNode, CNodeKind, Scope, ScopeInput } from "./graph.ts";
+import { makeLoop } from "./loop.ts";
+import { decodeStored, normalizeDefault, valuesEqual, zeroValue } from "./values.ts";
+
+/** Component instances nest at most this deep. */
+export const MAX_COMPONENT_DEPTH = 32;
+
+export interface CompiledGraph {
+  doc: SonobeDocument;
+  registry: EngineRegistry;
+  root: Scope | null;
+  /** Evaluation order. */
+  order: CNode[];
+  scopes: Scope[];
+  issues: RuntimeIssue[];
+  /** Resolve a root-scope address ("patch.port", "@layer.key") to a binding and its target type. */
+  resolveLink(address: string): { binding: Binding; type: ValueType } | null;
+}
+
+interface Label {
+  patchId?: Id;
+  layerId?: Id;
+  text: string;
+}
+
+const constBinding = (value: Value | Loop, type: ValueType): Binding => ({ kind: "const", type, pulse: false, value });
+
+const sortedKeys = (record: Record<string, unknown>) => Object.keys(record).sort();
+
+export function compileDocument(doc: SonobeDocument, engineRegistry: EngineRegistry): CompiledGraph {
+  const registry = withBuiltinSpecs(engineRegistry);
+  const issues: RuntimeIssue[] = [];
+  const nodes: CNode[] = [];
+  const scopes: Scope[] = [];
+  const inertInstances = new WeakMap<Scope, Set<Id>>();
+  const layerInstances: { host: Scope; layer: CLayer }[] = [];
+  const patchInstances: { host: Scope; child: Scope; node: PatchNode }[] = [];
+  const pendingProps = new Set<string>();
+  const broadcasterBindings = new Map<Broadcaster, Binding>();
+  const nodePorts = new Map<CNode, ResolvedPort[]>();
+
+  const issue = (code: string, severity: RuntimeIssue["severity"], message: string, label?: Pick<Label, "patchId" | "layerId">) => {
+    const item: RuntimeIssue = { code, severity, message };
+    if (label?.patchId !== undefined) item.patchId = label.patchId;
+    if (label?.layerId !== undefined) item.layerId = label.layerId;
+    issues.push(item);
+  };
+
+  const rootComponent = doc.components[doc.project.root];
+  if (!rootComponent) {
+    issue("missing_root", "error", `The project's root component "${doc.project.root}" doesn't exist, so there's nothing to run.`);
+    return { doc, registry, root: null, order: [], scopes, issues, resolveLink: () => null };
+  }
+
+  // ---- scopes and shells -----------------------------------------------------
+
+  function newScope(parent: Scope | null, component: Component, kind: Scope["kind"], instanceId: Id | null, selfMuted: boolean): Scope {
+    const scope: Scope = {
+      key: parent ? `${parent.key}/${instanceId}` : component.id,
+      depth: parent ? parent.depth + 1 : 0,
+      parent,
+      component,
+      kind,
+      instanceId,
+      muted: selfMuted || (parent?.muted ?? false),
+      selfMuted,
+      copies: null,
+      inputs: [],
+      inputIndex: new Map(),
+      replicators: [],
+      nodes: new Map(),
+      instances: new Map(),
+      broadcasters: [],
+      layers: [],
+      layerIndex: new Map(),
+      outputBindings: new Map(),
+      active: [],
+      defaultPaths: new Map(),
+    };
+    scopes.push(scope);
+    return scope;
+  }
+
+  function markInert(host: Scope, id: Id) {
+    let set = inertInstances.get(host);
+    if (!set) inertInstances.set(host, (set = new Set()));
+    set.add(id);
+  }
+
+  function instanceScope(host: Scope, instanceId: Id, componentId: Id | undefined, expected: ComponentKind, selfMuted: boolean, label: Label): Scope | null {
+    const what = expected === "patchComponent" ? "Component patch" : "Component layer";
+    if (componentId === undefined) {
+      issue("missing_component", "error", `${what} "${instanceId}" in ${host.component.id} doesn't say which component it shows.`, label);
+      return null;
+    }
+    const target = doc.components[componentId];
+    if (!target) {
+      issue("component_not_found", "error", `${what} "${instanceId}" shows component "${componentId}", which doesn't exist.`, label);
+      return null;
+    }
+    if (target.kind !== expected) {
+      issue("wrong_component_kind", "error", `${what} "${instanceId}" shows "${componentId}", which is a ${target.kind}, not a ${expected}.`, label);
+      return null;
+    }
+    let ancestorUses = false;
+    for (let s: Scope | null = host; s; s = s.parent) if (s.component.id === target.id) ancestorUses = true;
+    if (ancestorUses || host.depth >= MAX_COMPONENT_DEPTH || wouldCreateComponentCycle(doc, host.component.id, target.id)) {
+      issue("component_cycle", "error", `"${componentId}" ends up containing itself through "${instanceId}", so that instance doesn't run.`, label);
+      return null;
+    }
+    const child = newScope(host, target, expected === "patchComponent" ? "patchInstance" : "layerInstance", instanceId, selfMuted);
+    child.copies = createCopiesNode(host, child);
+    for (const key of sortedKeys(target.interface.inputs)) {
+      const iport = target.interface.inputs[key]!;
+      const port = interfacePortToPort(iport, "input");
+      const def = iport.default !== undefined && !isLinkInput(iport.default) ? decodeStored(iport.default, iport.type) : zeroValue(iport.type, port.enumOptions);
+      const input: ScopeInput = { key, port, binding: constBinding(def, iport.type), loop: (iport.loopBehavior ?? "loop") === "loop", default: def };
+      child.inputs.push(input);
+      child.inputIndex.set(key, input);
+    }
+    buildShells(child);
+    return child;
+  }
+
+  function baseNode(scope: Scope, id: Id, node: PatchNode, kind: CNodeKind, type: string): CNode {
+    const cnode: CNode = {
+      id,
+      node,
+      def: null,
+      inputs: [],
+      outputs: [],
+      inputIndex: new Map(),
+      outputIndex: new Map(),
+      wholeLoop: false,
+      muted: false,
+      mutedBehavior: "bypass",
+      bypass: [],
+      typeParam: undefined,
+      inputCount: 0,
+      kind,
+      type,
+      identity: `${scope.key}:${id}`,
+      scope,
+      compileIndex: nodes.length,
+      order: 0,
+      bindings: [],
+      deps: [],
+      feedback: [],
+      records: new Map(),
+      copiesOf: null,
+    };
+    nodes.push(cnode);
+    return cnode;
+  }
+
+  function createCopiesNode(host: Scope, child: Scope): CNode {
+    const synthetic: PatchNode = { type: "$copies", inputs: {}, ui: { x: 0, y: 0 } };
+    const cnode = baseNode(host, `$copies_${child.instanceId}`, synthetic, "copies", "$copies");
+    cnode.identity = `${child.key}:$copies`;
+    cnode.copiesOf = child;
+    return cnode;
+  }
+
+  function buildShells(scope: Scope): void {
+    const c = scope.component;
+    for (const id of sortedKeys(c.patches)) {
+      const pnode = c.patches[id]!;
+      const label: Label = { patchId: id, text: `Patch "${id}"` };
+      if (pnode.type === COMPONENT_PATCH_TYPE) {
+        const child = instanceScope(scope, id, pnode.component, "patchComponent", pnode.muted === true, label);
+        if (child) {
+          scope.instances.set(id, child);
+          patchInstances.push({ host: scope, child, node: pnode });
+        } else markInert(scope, id);
+        continue;
+      }
+      const ports = resolveNodePorts(doc, pnode, registry);
+      if (!ports) {
+        issue("unknown_patch_type", "error", `Patch "${id}" in ${c.id} has an unknown type "${pnode.type}", so it doesn't run.`, label);
+        baseNode(scope, id, pnode, "inert", pnode.type);
+        scope.nodes.set(id, nodes[nodes.length - 1]!);
+        continue;
+      }
+      if (ports.dynamicPortsError !== undefined) {
+        issue("dynamic_ports_failed", "warning", `Patch "${id}" couldn't work out its ports: ${ports.dynamicPortsError}`, label);
+      }
+      if (pnode.type === VARIABLE_BROADCASTER_TYPE) {
+        const settings = pnode.settings ?? {};
+        scope.broadcasters.push({
+          id,
+          name: typeof settings.name === "string" ? settings.name.trim() : "",
+          scope: settings.scope === "global" ? "global" : "local",
+          type: ports.inputs.find((p) => p.key === "value")?.type ?? "number",
+          muted: pnode.muted === true || scope.muted,
+          node: pnode,
+          binding: null,
+        });
+        continue;
+      }
+      let kind: CNodeKind;
+      let def: RuntimePatchDefinition | null = null;
+      if (pnode.type === DELAY1_TYPE) kind = "delay1";
+      else if (pnode.type === VARIABLE_RECEIVER_TYPE) kind = "receiver";
+      else {
+        def = registry.definitions.get(pnode.type) ?? null;
+        if (!def || typeof def.evaluate !== "function") {
+          issue("unimplemented_patch", "warning", `${ports.spec.name} ("${id}") isn't implemented in this runtime, so its outputs hold their defaults.`, label);
+          def = null;
+          kind = "inert";
+        } else kind = "patch";
+      }
+      const cnode = baseNode(scope, id, pnode, kind, pnode.type);
+      cnode.def = def;
+      cnode.typeParam = ports.typeParam;
+      cnode.inputCount = ports.inputCount ?? 0;
+      cnode.muted = pnode.muted === true || scope.muted;
+      const variantDefaults = ports.typeParam ? ports.spec.variantDefaults?.[ports.typeParam] : undefined;
+      cnode.outputs = ports.outputs.map((p): OutputSlot => {
+        const wholeLoop = p.wholeLoop === true && kind === "patch";
+        const zero = wholeLoop ? makeLoop([]) : zeroValue(p.type, p.enumOptions);
+        const declared = normalizeDefault(p.default, p.type);
+        return { key: p.key, type: p.type, wholeLoop, pulse: p.type === "pulse", initial: p.type === "pulse" ? false : (declared ?? zero), zero };
+      });
+      if (kind === "receiver") {
+        const type = cnode.outputs[0]?.type ?? "number";
+        const zero = zeroValue(type);
+        cnode.inputs = [{ key: "$source", type, wholeLoop: false, pulseSource: false, connected: true, default: zero, zero }];
+        cnode.mutedBehavior = "zero";
+      } else {
+        const inputPorts = ports.inputs;
+        nodePorts.set(cnode, inputPorts);
+        cnode.inputs = inputPorts.map((p): InputSlot => {
+          const raw = variantDefaults?.[p.key] ?? p.default;
+          const wholeLoop = p.wholeLoop === true && kind === "patch";
+          const fallback = wholeLoop && raw === undefined ? makeLoop([]) : defaultForPort(p);
+          const value = normalizeDefault(raw, p.type) ?? fallback;
+          return { key: p.key, type: p.type, wholeLoop, pulseSource: false, connected: false, default: value, zero: zeroValue(p.type, p.enumOptions) };
+        });
+        cnode.mutedBehavior = def?.mutedBehavior ?? "bypass";
+      }
+      cnode.inputs.forEach((s, i) => cnode.inputIndex.set(s.key, i));
+      cnode.outputs.forEach((s, i) => cnode.outputIndex.set(s.key, i));
+      cnode.bindings = cnode.inputs.map((s) => constBinding(s.default, s.type));
+      cnode.feedback = cnode.inputs.map(() => false);
+      cnode.wholeLoop = cnode.inputs.some((s) => s.wholeLoop) || cnode.outputs.some((s) => s.wholeLoop);
+      cnode.bypass = bypassMap(cnode.inputs, cnode.outputs);
+      if (kind === "delay1") cnode.def = delay1Definition(cnode, ports.spec);
+      scope.nodes.set(id, cnode);
+    }
+    scope.layers = buildLayers(scope, c.layers);
+  }
+
+  function buildLayers(scope: Scope, layers: readonly LayerNode[]): CLayer[] {
+    const out: CLayer[] = [];
+    for (const node of layers) {
+      const spec = registry.layers.get(node.type);
+      const label: Label = { layerId: node.id, text: `Layer "${node.id}"` };
+      if (!spec) {
+        issue("unknown_layer_type", "error", `Layer "${node.id}" in ${scope.component.id} has an unknown type "${node.type}", so it isn't drawn.`, label);
+        continue;
+      }
+      const props = resolveLayerProps(doc, scope.component.id, node, registry) ?? [];
+      const defaults: Record<string, Value> = {};
+      for (const p of props) defaults[p.key] = normalizeDefault(p.default, p.type) ?? defaultForPort(p);
+      const layer: CLayer = {
+        id: node.id,
+        type: node.type,
+        node,
+        scope,
+        spec,
+        defaults,
+        bound: [],
+        props: new Map(props.map((p) => [p.key, p])),
+        outputs: (spec.outputs ?? []).map((p) => ({ ...p, type: p.type === "variant" ? "any" : p.type })),
+        children: [],
+        instance: null,
+        propBindings: new Map(),
+      };
+      scope.layerIndex.set(node.id, layer);
+      if (node.type === COMPONENT_INSTANCE_LAYER_TYPE) {
+        layer.instance = instanceScope(scope, node.id, node.component, "layerComponent", false, label);
+        if (layer.instance) {
+          const size = layer.instance.component.size;
+          if (size && node.props.size === undefined) defaults.size = [size[0], size[1]];
+          for (const input of layer.instance.inputs) defaults[input.key] = input.default;
+          layerInstances.push({ host: scope, layer });
+        }
+      }
+      if (node.children?.length) layer.children = buildLayers(scope, node.children);
+      out.push(layer);
+    }
+    return out;
+  }
+
+  // ---- bindings ---------------------------------------------------------------
+
+  function compileStored(scope: Scope, stored: InputValue | undefined, type: ValueType, fallback: Value | Loop, label: Label): { binding: Binding; connected: boolean } {
+    if (stored === undefined) return { binding: constBinding(fallback, type), connected: false };
+    if (isLinkInput(stored)) {
+      const binding = compileLink(scope, stored.link, label);
+      return binding ? { binding, connected: true } : { binding: constBinding(fallback, type), connected: false };
+    }
+    if (isLayerInput(stored)) return { binding: { kind: "layerRef", type: "layer", pulse: false, layerId: stored.layer, cache: new Map() }, connected: false };
+    return { binding: constBinding(decodeStored(stored, type), type), connected: false };
+  }
+
+  function compileLink(scope: Scope, address: string, label: Label): Binding | null {
+    const a = parseAddress(address);
+    if (!a || a.index !== undefined) {
+      issue("invalid_link", "warning", `${label.text} reads "${address}", which isn't a valid address.`, label);
+      return null;
+    }
+    const where = scope.component.id;
+    switch (a.kind) {
+      case "patch": {
+        const child = scope.instances.get(a.id);
+        if (child) return instanceOutputBinding(child, a.key, label);
+        if (inertInstances.get(scope)?.has(a.id)) return null;
+        const node = scope.nodes.get(a.id);
+        if (!node) {
+          issue("dangling_link", "warning", `${label.text} reads "${address}", but there's no patch "${a.id}" in ${where}.`, label);
+          return null;
+        }
+        const slot = node.outputIndex.get(a.key);
+        if (slot === undefined) {
+          if (node.kind !== "inert" || node.outputs.length) issue("dangling_link", "warning", `${label.text} reads "${address}", but "${a.id}" has no output "${a.key}".`, label);
+          return null;
+        }
+        const o = node.outputs[slot]!;
+        return { kind: "output", type: o.type, pulse: o.pulse, node, slot };
+      }
+      case "componentInput": {
+        const input = scope.inputIndex.get(a.key);
+        if (!input) {
+          issue("dangling_link", "warning", `${label.text} reads "${address}", but ${where} has no published input "${a.key}".`, label);
+          return null;
+        }
+        return { kind: "input", type: input.port.type, pulse: false, scope, input };
+      }
+      case "layer": {
+        const layer = scope.layerIndex.get(a.id);
+        if (!layer) {
+          issue("dangling_link", "warning", `${label.text} reads "${address}", but there's no layer "${a.id}" in ${where}.`, label);
+          return null;
+        }
+        if (layer.instance?.component.interface.outputs[a.key]) return instanceOutputBinding(layer.instance, a.key, label);
+        const out = layer.outputs.find((o) => o.key === a.key);
+        if (out) {
+          return { kind: "layerOutput", type: out.type, pulse: out.type === "pulse", layerId: layer.id, layerType: layer.type, key: a.key, default: normalizeDefault(out.default, out.type) ?? zeroValue(out.type) };
+        }
+        if (layer.props.has(a.key)) return propBinding(layer, a.key);
+        issue("dangling_link", "warning", `${label.text} reads "${address}", but layer "${a.id}" has no output or property "${a.key}".`, label);
+        return null;
+      }
+      default:
+        issue("invalid_link", "warning", `${label.text} reads "${address}", which can't be read from.`, label);
+        return null;
+    }
+  }
+
+  function propBinding(layer: CLayer, key: string): Binding {
+    const cached = layer.propBindings.get(key);
+    if (cached) return cached;
+    const prop = layer.props.get(key)!;
+    const fallback = layer.defaults[key] as Value | Loop;
+    const pendingKey = `${layer.scope.key}:${layer.id}.${key}`;
+    if (pendingProps.has(pendingKey)) {
+      issue("layer_link_cycle", "warning", `@${layer.id}.${key} ends up reading itself through layer property links, so it uses its default.`, { layerId: layer.id });
+      return constBinding(fallback, prop.type);
+    }
+    pendingProps.add(pendingKey);
+    const { binding } = compileStored(layer.scope, layer.node.props[key], prop.type, fallback, { layerId: layer.id, text: `@${layer.id}.${key}` });
+    pendingProps.delete(pendingKey);
+    layer.propBindings.set(key, binding);
+    return binding;
+  }
+
+  function instanceOutputBinding(child: Scope, key: string, label: Label): Binding | null {
+    if (child.outputBindings.has(key)) return child.outputBindings.get(key) ?? null;
+    const port = child.component.interface.outputs[key];
+    if (!port) {
+      issue("dangling_link", "warning", `${label.text} reads "${key}" from "${child.instanceId}", but ${child.component.id} has no published output "${key}".`, label);
+      return null;
+    }
+    child.outputBindings.set(key, null);
+    const inner = port.link !== undefined ? compileLink(child, port.link, { text: `${child.component.id} published output "${key}"` }) : null;
+    const enumOptions = port.enumOptions?.map((k) => ({ key: k, name: k }));
+    const binding: Binding = { kind: "instanceOutput", type: port.type, pulse: port.type === "pulse", scope: child, key, inner, zero: zeroValue(port.type, enumOptions) };
+    child.outputBindings.set(key, binding);
+    return binding;
+  }
+
+  function bindInstanceInputs(host: Scope, child: Scope, stored: Record<string, InputValue>, label: Label): void {
+    for (const input of child.inputs) {
+      let { binding } = compileStored(host, stored[input.key], input.port.type, input.default, label);
+      if (binding.kind === "instanceOutput" && binding.scope === child) {
+        issue("self_edge", "error", `"${child.instanceId}.${binding.key}" is wired straight into its own input "${input.key}". Put a patch in between (Delay One Frame for feedback).`, label);
+        binding = constBinding(input.default, input.port.type);
+      }
+      input.binding = binding;
+    }
+  }
+
+  function broadcasterBinding(level: Scope, b: Broadcaster): Binding {
+    const cached = broadcasterBindings.get(b);
+    if (cached) return cached;
+    const ports = resolveNodePorts(doc, b.node, registry);
+    const port = ports?.inputs.find((p) => p.key === "value");
+    const type = port?.type ?? b.type;
+    const fallback = port ? (normalizeDefault(port.default, type) ?? defaultForPort(port)) : zeroValue(type);
+    const { binding } = compileStored(level, b.node.inputs.value, type, fallback, { patchId: b.id, text: `Patch "${b.id}"` });
+    broadcasterBindings.set(b, binding);
+    return binding;
+  }
+
+  function bindReceiver(scope: Scope, cnode: CNode): void {
+    const settings = cnode.node.settings ?? {};
+    const name = typeof settings.name === "string" ? settings.name.trim() : "";
+    const vscope = settings.scope === "global" ? "global" : "local";
+    const type = cnode.inputs[0]!.type;
+    const zero = cnode.inputs[0]!.zero;
+    let found: { level: Scope; b: Broadcaster } | null = null;
+    let mismatch = false;
+    let level: Scope | null = scope;
+    while (name && level && !found) {
+      const candidates = level.broadcasters.filter((b) => b.name === name && b.scope === vscope);
+      const match = candidates.filter((b) => b.type === type).sort((x, y) => (x.id < y.id ? -1 : 1))[0];
+      if (match) found = { level, b: match };
+      else if (candidates.length) mismatch = true;
+      level = vscope === "global" ? level.parent : null;
+    }
+    const label = { patchId: cnode.id };
+    if (!found) {
+      if (!name) issue("unresolved_variable", "warning", `Variable Receiver "${cnode.id}" has no name, so it outputs a zero value.`, label);
+      else if (mismatch) issue("variable_type_mismatch", "warning", `Variable Receiver "${cnode.id}" wants a ${type} "${name}", but the broadcaster with that name has another type.`, label);
+      else issue("unresolved_variable", "warning", `Variable Receiver "${cnode.id}" can't find a ${vscope} variable named "${name}".`, label);
+      cnode.bindings[0] = constBinding(zero, type);
+      return;
+    }
+    cnode.bindings[0] = { kind: "variable", type, pulse: false, depth: found.level.depth, source: found.b.muted ? null : broadcasterBinding(found.level, found.b), zero };
+  }
+
+  function bindNode(scope: Scope, cnode: CNode): void {
+    if (cnode.kind === "receiver") return bindReceiver(scope, cnode);
+    const ports = nodePorts.get(cnode);
+    if (!ports) return;
+    const label: Label = { patchId: cnode.id, text: `Patch "${cnode.id}"` };
+    ports.forEach((port, i) => {
+      const slot = cnode.inputs[i]!;
+      let { binding, connected } = compileStored(scope, cnode.node.inputs[port.key], slot.type, slot.default, label);
+      if (binding.kind === "output" && binding.node === cnode) {
+        issue("self_edge", "error", `"${cnode.id}.${port.key}" is wired to its own output "${cnode.outputs[binding.slot]!.key}". Put another patch in between (Delay One Frame for feedback).`, label);
+        binding = constBinding(slot.default, slot.type);
+        connected = false;
+      }
+      cnode.bindings[i] = binding;
+      slot.connected = connected;
+    });
+  }
+
+  function bindAllInputs(scope: Scope): void {
+    for (const { host, child, node } of patchInstances) if (host === scope) bindInstanceInputs(host, child, node.inputs, { patchId: child.instanceId!, text: `Component patch "${child.instanceId}"` });
+    for (const { host, layer } of layerInstances) {
+      if (host !== scope || !layer.instance) continue;
+      const child = layer.instance;
+      bindInstanceInputs(host, child, layer.node.props, { layerId: layer.id, text: `Component layer "${layer.id}"` });
+      for (const key of Object.keys(layer.node.props)) {
+        const prop = layer.props.get(key);
+        if (!prop || child.inputIndex.has(key) || prop.wholeLoop) continue;
+        const binding = propBinding(layer, key);
+        if (binding.kind !== "const" || binding.value !== null) child.replicators.push(binding);
+      }
+    }
+    for (const child of scope.instances.values()) bindAllInputs(child);
+    for (const { host, layer } of layerInstances) if (host === scope && layer.instance) bindAllInputs(layer.instance);
+  }
+
+  function bindLayers(layers: readonly CLayer[]): void {
+    for (const layer of layers) {
+      for (const key of Object.keys(layer.node.props)) {
+        const prop = layer.props.get(key);
+        if (!prop) continue;
+        layer.bound.push({ key, type: prop.type, wholeLoop: prop.wholeLoop === true, binding: propBinding(layer, key) });
+      }
+      bindLayers(layer.children);
+    }
+  }
+
+  const root = newScope(null, rootComponent, "root", null, false);
+  buildShells(root);
+  bindAllInputs(root);
+  for (const scope of scopes) {
+    for (const cnode of scope.nodes.values()) bindNode(scope, cnode);
+    bindLayers(scope.layers);
+  }
+  breakPassThroughCycles(scopes, issue);
+
+  // ---- pulses, dependencies, order --------------------------------------------
+
+  const pulseOf = (b: Binding): boolean => (b.kind === "input" ? b.input.port.type === "pulse" && pulseOf(b.input.binding) : b.pulse);
+  for (const cnode of nodes) {
+    cnode.bindings.forEach((b, i) => {
+      if (b.kind === "input") b.pulse = pulseOf(b);
+      cnode.inputs[i]!.pulseSource = pulseOf(b);
+    });
+  }
+
+  for (const cnode of nodes) {
+    const deps: CNode[] = [];
+    for (const b of cnode.bindings) bindingDeps(b, deps);
+    if (cnode.copiesOf) {
+      for (const input of cnode.copiesOf.inputs) if (input.loop) bindingDeps(input.binding, deps);
+      for (const r of cnode.copiesOf.replicators) bindingDeps(r, deps);
+    }
+    if (cnode.scope.copies) deps.push(cnode.scope.copies);
+    cnode.deps = [...new Set(deps)];
+  }
+  const order = orderNodes(nodes);
+  for (const cnode of order) {
+    if (cnode.kind !== "delay1") continue;
+    cnode.bindings.forEach((b, i) => {
+      const deps: CNode[] = [];
+      bindingDeps(b, deps);
+      cnode.feedback[i] = deps.some((d) => d.order >= cnode.order);
+    });
+  }
+  const links = new Map<string, { binding: Binding; type: ValueType } | null>();
+  const resolveLink = (address: string): { binding: Binding; type: ValueType } | null => {
+    if (links.has(address)) return links.get(address)!;
+    const saved = issues.length;
+    const binding = compileLink(root, address, { text: address });
+    issues.length = saved;
+    let result: { binding: Binding; type: ValueType } | null = null;
+    if (binding) {
+      let type = binding.type;
+      const a = parseAddress(address);
+      const layer = a?.kind === "layer" ? root.layerIndex.get(a.id) : undefined;
+      if (a && layer && !layer.outputs.some((o) => o.key === a.key) && !layer.instance?.component.interface.outputs[a.key]) {
+        type = layer.props.get(a.key)?.type ?? type;
+      }
+      result = { binding, type };
+    }
+    links.set(address, result);
+    return result;
+  };
+  return { doc, registry, root, order, scopes, issues, resolveLink };
+}
+
+function bindingDeps(b: Binding | null, out: CNode[]): void {
+  if (!b) return;
+  switch (b.kind) {
+    case "output":
+      out.push(b.node);
+      return;
+    case "input":
+      bindingDeps(b.input.binding, out);
+      return;
+    case "instanceOutput":
+      if (b.scope.copies) out.push(b.scope.copies);
+      bindingDeps(b.inner, out);
+      return;
+    case "variable":
+      bindingDeps(b.source, out);
+      return;
+    default:
+      return;
+  }
+}
+
+/** A published input that reaches itself only through pass-through bindings has no patch to delay it: break it. */
+function breakPassThroughCycles(scopes: readonly Scope[], issue: (code: string, severity: RuntimeIssue["severity"], message: string) => void): void {
+  const state = new Map<ScopeInput, 1 | 2>();
+  const visitBinding = (b: Binding | null): void => {
+    if (!b) return;
+    if (b.kind === "input") visitInput(b.input);
+    else if (b.kind === "instanceOutput") visitBinding(b.inner);
+  };
+  const visitInput = (input: ScopeInput): void => {
+    const s = state.get(input);
+    if (s === 2) return;
+    if (s === 1) {
+      issue("zero_latency_cycle", "error", `Published input "${input.key}" feeds itself through component outputs with no patch in between, so it uses its default.`);
+      input.binding = constBinding(input.default, input.port.type);
+      return;
+    }
+    state.set(input, 1);
+    visitBinding(input.binding);
+    state.set(input, 2);
+  };
+  for (const scope of scopes) for (const input of scope.inputs) visitInput(input);
+}
+
+function delay1Definition(cnode: CNode, spec: PatchSpec): RuntimePatchDefinition<{ seeded: boolean; held: Value }> {
+  return {
+    ...spec,
+    state: () => ({ seeded: false, held: undefined }),
+    evaluate(ctx) {
+      if (cnode.feedback[0]) {
+        // The driver evaluates later this frame, so the read is already last frame's value.
+        ctx.output("output", ctx.input("value"));
+        return;
+      }
+      const v = ctx.input<Value>("value");
+      const state = ctx.state;
+      if (!state.seeded) {
+        state.seeded = true;
+        state.held = cnode.inputs[0]!.pulseSource && ctx.pulsed("value") ? false : v;
+      }
+      ctx.output("output", state.held);
+      if (!valuesEqual(state.held, v)) ctx.requestNextFrame();
+      state.held = v;
+    },
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Ordering
+// ---------------------------------------------------------------------------
+
+class MinHeap {
+  private items: number[] = [];
+  private readonly key: (x: number) => number;
+  constructor(key: (x: number) => number) {
+    this.key = key;
+  }
+  get size(): number {
+    return this.items.length;
+  }
+  push(x: number): void {
+    const a = this.items;
+    a.push(x);
+    let i = a.length - 1;
+    while (i > 0) {
+      const p = (i - 1) >> 1;
+      if (this.key(a[p]!) <= this.key(a[i]!)) break;
+      [a[p], a[i]] = [a[i]!, a[p]!];
+      i = p;
+    }
+  }
+  pop(): number {
+    const a = this.items;
+    const top = a[0]!;
+    const last = a.pop()!;
+    if (a.length) {
+      a[0] = last;
+      let i = 0;
+      for (;;) {
+        const l = 2 * i + 1;
+        const r = l + 1;
+        let m = i;
+        if (l < a.length && this.key(a[l]!) < this.key(a[m]!)) m = l;
+        if (r < a.length && this.key(a[r]!) < this.key(a[m]!)) m = r;
+        if (m === i) break;
+        [a[m], a[i]] = [a[i]!, a[m]!];
+        i = m;
+      }
+    }
+    return top;
+  }
+}
+
+/** Tarjan's strongly connected components (iterative). Returns the component id per node. */
+function stronglyConnected(n: number, succ: readonly number[][]): { compOf: Int32Array; count: number } {
+  const index = new Int32Array(n).fill(-1);
+  const low = new Int32Array(n);
+  const onStack = new Uint8Array(n);
+  const compOf = new Int32Array(n).fill(-1);
+  const stack: number[] = [];
+  const calls: number[] = [];
+  const edge: number[] = [];
+  let next = 0;
+  let count = 0;
+  for (let s = 0; s < n; s++) {
+    if (index[s] !== -1) continue;
+    index[s] = low[s] = next++;
+    stack.push(s);
+    onStack[s] = 1;
+    calls.push(s);
+    edge.push(0);
+    while (calls.length) {
+      const top = calls.length - 1;
+      const v = calls[top]!;
+      const targets = succ[v]!;
+      if (edge[top]! < targets.length) {
+        const w = targets[edge[top]!++]!;
+        if (index[w] === -1) {
+          index[w] = low[w] = next++;
+          stack.push(w);
+          onStack[w] = 1;
+          calls.push(w);
+          edge.push(0);
+        } else if (onStack[w]) low[v] = Math.min(low[v]!, index[w]!);
+        continue;
+      }
+      calls.pop();
+      edge.pop();
+      if (calls.length) {
+        const u = calls[calls.length - 1]!;
+        low[u] = Math.min(low[u]!, low[v]!);
+      }
+      if (low[v] === index[v]) {
+        let w: number;
+        do {
+          w = stack.pop()!;
+          onStack[w] = 0;
+          compOf[w] = count;
+        } while (w !== v);
+        count++;
+      }
+    }
+  }
+  return { compOf, count };
+}
+
+/**
+ * Deterministic evaluation order: components of the condensation DAG in topological order
+ * (ties by compile order); inside a cycle, edges into delay1 are dropped first, then the
+ * cheapest node to force (copies nodes, then compile order) goes first when nothing is free.
+ */
+function orderNodes(nodes: CNode[]): CNode[] {
+  const n = nodes.length;
+  const succ: number[][] = nodes.map(() => []);
+  for (const node of nodes) for (const d of node.deps) if (d !== node) succ[d.compileIndex]!.push(node.compileIndex);
+  const { compOf, count } = stronglyConnected(n, succ);
+  const members: number[][] = Array.from({ length: count }, () => []);
+  for (let v = 0; v < n; v++) members[compOf[v]!]!.push(v);
+  const compSucc: Set<number>[] = Array.from({ length: count }, () => new Set());
+  const indegree = new Int32Array(count);
+  for (let v = 0; v < n; v++) {
+    for (const w of succ[v]!) {
+      const a = compOf[v]!;
+      const b = compOf[w]!;
+      if (a !== b && !compSucc[a]!.has(b)) {
+        compSucc[a]!.add(b);
+        indegree[b]!++;
+      }
+    }
+  }
+  const ready = new MinHeap((c) => members[c]![0]!);
+  for (let c = 0; c < count; c++) if (indegree[c] === 0) ready.push(c);
+  const order: CNode[] = [];
+  while (ready.size) {
+    const c = ready.pop();
+    const group = members[c]!;
+    if (group.length === 1) order.push(nodes[group[0]!]!);
+    else for (const v of orderCycle(nodes, group, succ, compOf, c)) order.push(nodes[v]!);
+    for (const d of compSucc[c]!) if (--indegree[d]! === 0) ready.push(d);
+  }
+  order.forEach((node, i) => (node.order = i));
+  return order;
+}
+
+function orderCycle(nodes: readonly CNode[], group: readonly number[], succ: readonly number[][], compOf: Int32Array, comp: number): number[] {
+  const indegree = new Map<number, number>();
+  for (const v of group) indegree.set(v, 0);
+  const breaks = (w: number) => nodes[w]!.kind === "delay1";
+  for (const v of group) for (const w of succ[v]!) if (compOf[w] === comp && !breaks(w)) indegree.set(w, indegree.get(w)! + 1);
+  const heap = new MinHeap((x) => x);
+  const done = new Set<number>();
+  for (const v of group) if (indegree.get(v) === 0) heap.push(v);
+  const out: number[] = [];
+  const rank = (v: number) => (nodes[v]!.kind === "copies" || nodes[v]!.kind === "delay1" ? 0 : 1);
+  while (out.length < group.length) {
+    if (!heap.size) {
+      let pick = -1;
+      for (const v of group) {
+        if (done.has(v)) continue;
+        if (pick < 0 || rank(v) < rank(pick) || (rank(v) === rank(pick) && v < pick)) pick = v;
+      }
+      indegree.set(pick, 0);
+      heap.push(pick);
+    }
+    const v = heap.pop();
+    if (done.has(v)) continue;
+    done.add(v);
+    out.push(v);
+    for (const w of succ[v]!) {
+      if (compOf[w] !== comp || done.has(w) || breaks(w)) continue;
+      const d = indegree.get(w)! - 1;
+      indegree.set(w, d);
+      if (d === 0) heap.push(w);
+    }
+  }
+  return out;
+}

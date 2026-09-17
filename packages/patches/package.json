@@ -4,10 +4,18 @@
   "private": true,
   "type": "module",
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./infra": "./src/infra/index.ts",
+    "./specs": "./src/specs.ts"
+  },
+  "scripts": {
+    "docs": "node scripts/generate-docs.ts",
+    "docs:check": "node scripts/generate-docs.ts --check",
+    "validate": "node catalog/validate.ts"
   },
   "dependencies": {
     "@sonobe/core": "*",
     "@sonobe/engine": "*"
-  }
+  },
+  "sideEffects": false
 }

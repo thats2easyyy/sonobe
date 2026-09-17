@@ -10,6 +10,8 @@ import { SVG_NS } from "./host.ts";
 import type { Drawer, Host, MediaState, RenderContext, RendererStats, ShaderErrorInfo, ShapeInfo } from "./host.ts";
 import { attachInputCapture } from "./input.ts";
 import type { PointerState } from "./input.ts";
+import { loadLottiePlayer } from "./lottie.ts";
+import type { LottieLoader } from "./lottie.ts";
 import { IDENTITY, cssTransform, isMat4, translation } from "./matrix.ts";
 import { cursorAt } from "./sceneQuery.ts";
 import { ShaderHost } from "./shader.ts";
@@ -43,6 +45,8 @@ export interface DomRendererOptions {
   onMediaState?: (key: string, layerId: string, state: MediaState) => void;
   /** Called with the text field's layer id when it gains focus, and null on blur. */
   onFocusChange?: (layerId: string | null) => void;
+  /** Supplies the Lottie player. Default: lazily imports lottie-web's SVG "light" build. */
+  loadLottie?: LottieLoader;
 }
 
 export interface DomRenderer {
@@ -65,6 +69,7 @@ const RENDERER_CSS = `
 .sonobe-body{position:absolute;left:0;top:0;width:100%;height:100%;box-sizing:border-box;background-repeat:no-repeat}
 .sonobe-fill{position:absolute;left:0;top:0;width:100%;height:100%}
 .sonobe-media{position:absolute;left:0;top:0;width:100%;height:100%;display:block;margin:0;padding:0;border:0}
+.sonobe-lottie>svg{display:block}
 .sonobe-shape{position:absolute;left:0;top:0;overflow:visible}
 .sonobe-text{margin:0;white-space:pre-wrap;overflow-wrap:break-word;word-break:normal;font-kerning:normal}
 .sonobe-stroke{position:absolute;box-sizing:border-box;border-style:solid;pointer-events:none}
@@ -192,6 +197,7 @@ export function createDomRenderer(container: HTMLElement, opts: DomRendererOptio
   let index: { byKey: Map<string, SceneNode>; byLayer: Map<string, SceneNode> } | null = null;
   let hasCursors = false;
   let cloneDepth = 0;
+  let visited = 0;
   let disposed = false;
   let maskCounter = 0;
   const plusDarker = win?.CSS?.supports?.("mix-blend-mode", "plus-darker") ? "plus-darker" : "color-burn";
@@ -211,6 +217,7 @@ export function createDomRenderer(container: HTMLElement, opts: DomRendererOptio
     pointer,
     measurer,
     shaders,
+    loadLottie: opts.loadLottie ?? loadLottiePlayer,
     resolveAssetUrl: opts.resolveAssetUrl,
     emit: (events) => {
       if (!disposed && events.length) opts.onEvents?.(events);
@@ -294,11 +301,27 @@ export function createDomRenderer(container: HTMLElement, opts: DomRendererOptio
     const host = existing ?? createHost(key, node);
     host.gen = gen;
     host.layerId = node.layerId;
+    visited++;
     return host;
   }
 
   function arrange(parent: Host, next: Host[]): void {
     const container = parent.body;
+    // Fast path: same children, same order, still attached here (the common animated frame).
+    const prev = parent.children;
+    if (prev.length === next.length) {
+      let same = true;
+      for (let k = 0; k < next.length; k++) {
+        if (prev[k] !== next[k] || next[k]!.el.parentNode !== container) {
+          same = false;
+          break;
+        }
+      }
+      if (same) {
+        parent.children = next;
+        return;
+      }
+    }
     const nextSet = new Set(next);
     for (const h of parent.children) {
       if (!nextSet.has(h) && h.el.parentNode === container) container.removeChild(h.el);
@@ -388,20 +411,27 @@ export function createDomRenderer(container: HTMLElement, opts: DomRendererOptio
     setStyle(body, "clip-path", squircle && info.squircleClip ? cssPath(squirclePath(0, 0, w, h, info.radii, info.smoothing)) : "", stats);
     setStyle(body, "overflow", info.clip ? "hidden" : "", stats);
 
+    // Shadow and filter strings are only built when a layer has them (most don't).
     const shadowOpacity = clamp01(p.num("shadowOpacity", 0));
-    const shadowColor = p.color("shadowColor") ?? { r: 0, g: 0, b: 0, a: 1 };
-    const hasShadow = shadowOpacity > 0 && shadowColor.a > 0;
-    const [ox, oy] = p.vec("shadowOffset", 2, [0, 0]);
-    const shadow = hasShadow ? `${px(ox!)} ${px(oy!)} ${px(Math.max(0, p.num("shadowRadius", 0)))} ${cssColor(shadowColor, shadowOpacity)}` : "";
+    const shadowColor = shadowOpacity > 0 ? p.color("shadowColor") : null;
+    const hasShadow = !!shadowColor && shadowColor.a > 0;
+    let shadow = "";
+    if (hasShadow) {
+      const [ox, oy] = p.vec("shadowOffset", 2, [0, 0]);
+      shadow = `${px(ox!)} ${px(oy!)} ${px(Math.max(0, p.num("shadowRadius", 0)))} ${cssColor(shadowColor, shadowOpacity)}`;
+    }
     const boxShadow = hasShadow && info.boxShadow && !squircle;
     setStyle(body, "box-shadow", boxShadow ? shadow : "", stats);
 
-    const filters: string[] = [];
     const blur = Math.max(0, p.num("blur", 0));
-    if (blur > 0) filters.push(`blur(${px(blur)})`);
-    filters.push(...effectFilters(p.raw("effects")));
-    if (hasShadow && !boxShadow) filters.push(`drop-shadow(${shadow})`);
-    setStyle(el, "filter", filters.join(" "), stats);
+    let filter = blur > 0 ? `blur(${px(blur)})` : "";
+    const effects = p.raw("effects");
+    if (effects) {
+      const list = effectFilters(effects);
+      if (list.length) filter = filter ? `${filter} ${list.join(" ")}` : list.join(" ");
+    }
+    if (hasShadow && !boxShadow) filter = filter ? `${filter} drop-shadow(${shadow})` : `drop-shadow(${shadow})`;
+    setStyle(el, "filter", filter, stats);
 
     const backdrop = Math.max(0, p.num("backgroundBlur", 0));
     const backdropCss = backdrop > 0 ? `blur(${px(backdrop)})` : "";
@@ -500,6 +530,7 @@ export function createDomRenderer(container: HTMLElement, opts: DomRendererOptio
     index = null;
     hasCursors = false;
     cloneDepth = 0;
+    visited = 0;
     const [fw, fh] = frame.size;
     setStyle(stage, "width", px(fw), stats);
     setStyle(stage, "height", px(fh), stats);
@@ -508,15 +539,18 @@ export function createDomRenderer(container: HTMLElement, opts: DomRendererOptio
     setStyle(stage, "background-color", bg && bg.a > 0 ? cssColor(bg) : "", stats);
     rootHost.gen = gen;
     reconcile(rootHost, frame.roots ?? []);
-    for (const host of [...hosts.values()]) if (host.gen !== gen) destroyHost(host);
+    // Every host was visited: nothing to sweep. (Deleting during Map iteration is safe.)
+    if (visited !== hosts.size) for (const host of hosts.values()) if (host.gen !== gen) destroyHost(host);
     ctx.prevTime = frame.time;
     lastFrame = frame;
     if (hasCursors || container.style.cursor) updateCursor();
   }
 
-  const unsubscribeFonts = measurer.onInvalidate(() => {
+  const rerender = () => {
     if (lastFrame) render(lastFrame);
-  });
+  };
+  const unsubscribeFonts = measurer.onInvalidate(rerender);
+  const unsubscribeTextures = shaders.onTextureChange(rerender);
 
   return {
     stage,
@@ -541,6 +575,7 @@ export function createDomRenderer(container: HTMLElement, opts: DomRendererOptio
       disposed = true;
       detachInput();
       unsubscribeFonts();
+      unsubscribeTextures();
       shaders.dispose();
       if (ownsMeasurer) measurer.dispose();
       stage.remove();

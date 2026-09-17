@@ -57,6 +57,8 @@ export interface InputCaptureOptions {
   onPointerMove?: (x: number, y: number) => void;
 }
 
+type PointerInputEvent = Extract<InputEvent, { kind: "pointer" }>;
+
 const NAVIGATION_KEYS = new Set([" ", "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "PageUp", "PageDown", "Home", "End"]);
 const EDITABLE_PASSTHROUGH_KEYS = new Set(["Enter", "Escape"]);
 
@@ -66,12 +68,31 @@ function isEditableTarget(t: EventTarget | null): boolean {
   return el.closest("input, textarea, select, [contenteditable]") !== null;
 }
 
+/** Normalizes PointerEvent.pointerType ("" or vendor values count as mouse). */
+export function pointerTypeOf(e: { pointerType?: string }): "mouse" | "touch" | "pen" {
+  return e.pointerType === "touch" || e.pointerType === "pen" ? e.pointerType : "mouse";
+}
+
+/** Event time in ms on the performance clock (the same clock as requestAnimationFrame). */
+export function eventTime(e: { timeStamp?: number }): number {
+  const t = e.timeStamp;
+  return typeof t === "number" && Number.isFinite(t) && t > 0 ? t : typeof performance !== "undefined" ? performance.now() : Date.now();
+}
+
 /** Attaches listeners to the container; returns a function that removes them. */
 export function attachInputCapture(opts: InputCaptureOptions): () => void {
   const { container, stage, pointer, emit } = opts;
   const pressedKeys = new Map<string, KeyboardEvent>();
   const rect = () => stage.getBoundingClientRect();
-  const toPrototype = (e: { clientX: number; clientY: number }) => clientToPrototype(e.clientX, e.clientY, rect(), opts.getSize(), opts.getScale());
+  const toPrototype = (e: { clientX: number; clientY: number }, r: ClientRectLike = rect()) => clientToPrototype(e.clientX, e.clientY, r, opts.getSize(), opts.getScale());
+
+  const pointerEvent = (e: PointerEvent, phase: PointerInputEvent["phase"], x: number, y: number): PointerInputEvent => {
+    const type = pointerTypeOf(e);
+    const out: PointerInputEvent = { kind: "pointer", phase, pointerId: e.pointerId, pointerType: type, timeStamp: eventTime(e), x, y };
+    if (phase === "down" || phase === "up") out.button = e.button;
+    if (type !== "mouse" && e.pressure && (phase === "down" || phase === "move")) out.pressure = e.pressure;
+    return out;
+  };
 
   const onPointerDown = (e: PointerEvent) => {
     const [x, y] = toPrototype(e);
@@ -91,14 +112,24 @@ export function attachInputCapture(opts: InputCaptureOptions): () => void {
       if (e.pointerType === "mouse") e.preventDefault();
       if (typeof container.focus === "function") container.focus({ preventScroll: true });
     }
-    emit([{ kind: "pointer", phase: "down", pointerId: e.pointerId, x, y, button: e.button, ...(e.pointerType !== "mouse" && e.pressure ? { pressure: e.pressure } : {}) }]);
+    emit([pointerEvent(e, "down", x, y)]);
   };
 
   const onPointerMove = (e: PointerEvent) => {
-    const [x, y] = toPrototype(e);
+    const r = rect();
+    // While pressed, coalesced samples (each with its own timestamp) sharpen drag velocity.
+    const coalesced = e.buttons && typeof e.getCoalescedEvents === "function" ? e.getCoalescedEvents() : [];
+    const samples = coalesced.length > 1 ? coalesced : [e];
+    const events: PointerInputEvent[] = [];
+    let x = 0;
+    let y = 0;
+    for (const sample of samples) {
+      [x, y] = toPrototype(sample, r);
+      events.push(pointerEvent(sample, "move", x, y));
+    }
     pointer.x = x;
     pointer.y = y;
-    emit([{ kind: "pointer", phase: "move", pointerId: e.pointerId, x, y, ...(e.pointerType !== "mouse" && e.pressure ? { pressure: e.pressure } : {}) }]);
+    emit(events);
     opts.onPointerMove?.(x, y);
   };
 
@@ -107,32 +138,21 @@ export function attachInputCapture(opts: InputCaptureOptions): () => void {
     pointer.x = x;
     pointer.y = y;
     if (!e.buttons) pointer.down = false;
-    emit([{ kind: "pointer", phase: "up", pointerId: e.pointerId, x, y, button: e.button }]);
+    emit([pointerEvent(e, "up", x, y)]);
   };
 
   const onPointerCancel = (e: PointerEvent) => {
     const [x, y] = toPrototype(e);
     pointer.down = false;
-    emit([{ kind: "pointer", phase: "cancel", pointerId: e.pointerId, x, y }]);
+    emit([pointerEvent(e, "cancel", x, y)]);
   };
 
-  // A hovering mouse that leaves the viewer ends hover: report a position just outside the prototype.
+  // A pointer that leaves the viewer (a hovering mouse, or a touch after it lifts) ends hover.
+  // Captured drags keep reporting moves until release instead.
   const onPointerLeave = (e: PointerEvent) => {
-    if (e.pointerType !== "mouse" || e.buttons) return;
-    const size = opts.getSize();
-    let [x, y] = toPrototype(e);
-    if (size && x >= 0 && y >= 0 && x <= size[0] && y <= size[1]) {
-      const distances = [x, size[0] - x, y, size[1] - y];
-      const nearest = distances.indexOf(Math.min(...distances));
-      if (nearest === 0) x = -1;
-      else if (nearest === 1) x = size[0] + 1;
-      else if (nearest === 2) y = -1;
-      else y = size[1] + 1;
-    }
-    pointer.x = x;
-    pointer.y = y;
-    emit([{ kind: "pointer", phase: "move", pointerId: e.pointerId, x, y }]);
-    opts.onPointerMove?.(x, y);
+    if (e.buttons) return;
+    const [x, y] = toPrototype(e);
+    emit([pointerEvent(e, "leave", x, y)]);
   };
 
   const onWheel = (e: WheelEvent) => {

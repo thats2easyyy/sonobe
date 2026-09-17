@@ -1,8 +1,8 @@
 /**
  * Renderer demo: static SceneFrames that exercise every layer type, a sample app screen
- * inside a CSS device frame, and a gallery of device frames.
+ * inside a CSS device frame, a gallery of device frames, and a 500-node stress list.
  *
- * Views: ?view=specimens | prototype | hit-targets | devices   (&static=1 freezes time)
+ * Views: ?view=specimens | prototype | hit-targets | devices | stress   (&static=1 freezes time)
  */
 
 import type { GradientValue } from "@sonobe/core";
@@ -248,6 +248,69 @@ const BROKEN_SHADER = `void mainImage(out vec4 fragColor, in vec2 fragCoord) {
 }
 `;
 
+/** Samples iChannel0 (an image asset) through a ripple; transparent until the texture loads. */
+const RIPPLE = `void mainImage(out vec4 fragColor, in vec2 fragCoord) {
+  vec2 uv = fragCoord / iResolution.xy;
+  vec2 d = uv - 0.5;
+  float r = length(d);
+  float wave = sin(r * 38.0 - iTime * 4.0) * 0.012 * smoothstep(0.55, 0.0, r);
+  vec2 st = uv + normalize(d + 1e-4) * wave;
+  vec4 tex = texture(iChannel0, st);
+  fragColor = vec4(tex.rgb * (1.0 + wave * 6.0), tex.a);
+}
+`;
+
+// ---------------------------------------------------------------------------
+// Lottie: a spinner that resolves into a check mark (authored here, clean room)
+// ---------------------------------------------------------------------------
+
+const ease = { o: { x: [0.4], y: [0] }, i: { x: [0.2], y: [1] } };
+const static_ = (k: unknown) => ({ a: 0, k });
+const keys = (frames: [number, number[]][]) => ({ a: 1, k: frames.map(([t, s], i) => (i < frames.length - 1 ? { t, s, ...ease } : { t, s })) });
+const transform = { ty: "tr", p: static_([0, 0]), a: static_([0, 0]), s: static_([100, 100]), r: static_(0), o: static_(100), sk: static_(0), sa: static_(0) };
+
+function shapeLayer(ind: number, nm: string, ks: Record<string, unknown>, shapes: unknown[]) {
+  return { ddd: 0, ind, ty: 4, nm, sr: 1, ks: { o: static_(100), r: static_(0), p: static_([100, 100, 0]), a: static_([0, 0, 0]), s: static_([100, 100, 100]), ...ks }, ao: 0, shapes, ip: 0, op: 120, st: 0, bm: 0 };
+}
+
+function makeLottie(): Record<string, unknown> {
+  const blue = [0.04, 0.52, 1, 1];
+  const green = [0.19, 0.82, 0.35, 1];
+  return {
+    v: "5.7.4", nm: "Spinner to check", fr: 60, ip: 0, op: 120, w: 200, h: 200, ddd: 0, assets: [],
+    layers: [
+      shapeLayer(1, "check", { s: keys([[62, [0, 0, 100]], [80, [112, 112, 100]], [92, [100, 100, 100]]]) }, [
+        { ty: "gr", nm: "mark", it: [
+          { ty: "sh", d: 1, ks: static_({ i: [[0, 0], [0, 0], [0, 0]], o: [[0, 0], [0, 0], [0, 0]], v: [[-26, 2], [-8, 20], [28, -18]], c: false }) },
+          { ty: "tm", s: static_(0), e: keys([[64, [0]], [88, [100]]]), o: static_(0), m: 1 },
+          { ty: "st", c: static_([1, 1, 1, 1]), o: static_(100), w: static_(9), lc: 2, lj: 2, ml: 4 },
+          transform,
+        ] },
+        { ty: "gr", nm: "disc", it: [
+          { ty: "el", d: 1, p: static_([0, 0]), s: static_([112, 112]) },
+          { ty: "fl", c: static_(green), o: static_(100), r: 1 },
+          transform,
+        ] },
+      ]),
+      shapeLayer(2, "ring", { r: keys([[0, [0]], [60, [300]]]), o: keys([[52, [100]], [66, [0]]]) }, [
+        { ty: "gr", nm: "arc", it: [
+          { ty: "el", d: 1, p: static_([0, 0]), s: static_([112, 112]) },
+          { ty: "tm", s: keys([[10, [0]], [60, [100]]]), e: keys([[0, [0]], [44, [100]]]), o: static_(0), m: 1 },
+          { ty: "st", c: static_(blue), o: static_(100), w: static_(10), lc: 2, lj: 2, ml: 4 },
+          transform,
+        ] },
+        { ty: "gr", nm: "track", it: [
+          { ty: "el", d: 1, p: static_([0, 0]), s: static_([112, 112]) },
+          { ty: "st", c: static_([0.04, 0.52, 1, 0.16]), o: static_(100), w: static_(10), lc: 2, lj: 2, ml: 4 },
+          transform,
+        ] },
+      ]),
+    ],
+  };
+}
+
+const LOTTIE = makeLottie();
+
 const CELL_W = 290;
 const CELL_H = 220;
 const GAP = 16;
@@ -336,9 +399,10 @@ function specimenFrame(time: number): SceneFrame {
         L("tf_password", "textField", { x: 14, y: 0, w: 230, h: 44 }, { text: "hunter2hunter2", secure: true, fontFamily: FONT, fontSize: 15, textColor: "#1D1D1FFF" }),
       ]),
     ]),
-    cell(11, "Shader", "GLSL ES 3.0 · iTime · compile errors", [
-      L("fx", "shader", { x: 16, y: 62, w: 162, h: 136 }, { code: PLASMA, cornerRadius: 16, cornerSmoothing: 0.6 }),
-      L("fx_broken", "shader", { x: 186, y: 62, w: 88, h: 136 }, { code: BROKEN_SHADER, cornerRadius: 12 }),
+    cell(11, "Shader", "GLSL ES 3.0 · iChannel0 image · compile errors", [
+      L("fx", "shader", { x: 16, y: 62, w: 82, h: 136 }, { code: PLASMA, cornerRadius: 16, cornerSmoothing: 0.6 }),
+      L("fx_texture", "shader", { x: 104, y: 62, w: 82, h: 136 }, { code: RIPPLE, uniforms: { iChannel0: { asset: "photo", wrap: "clamp" } }, cornerRadius: 16, cornerSmoothing: 0.6 }),
+      L("fx_broken", "shader", { x: 192, y: 62, w: 82, h: 136 }, { code: BROKEN_SHADER, cornerRadius: 12 }),
     ]),
     cell(12, "Clone", "live copies with their own transform", [
       L("clone_src", "group", { x: 22, y: 70, w: 86, h: 116 }, { color: "#FFFFFFFF", cornerRadius: 16, cornerSmoothing: 0.6, shadowOpacity: 0.15, shadowRadius: 10, shadowOffset: [0, 4] }, [
@@ -348,8 +412,13 @@ function specimenFrame(time: number): SceneFrame {
       L("clone_a", "clone", { x: 116, y: 72, w: 86, h: 116, rotation: -8, scale: 0.92, opacity: 0.85 }, { source: { layerId: "clone_src" } }),
       L("clone_b", "clone", { x: 196, y: 74, w: 86, h: 116, rotation: 9, scale: 0.8, opacity: 0.55 }, { source: { layerId: "clone_src" } }),
     ]),
-    cell(13, "Lottie", "placeholder until a player is bundled", [
-      L("lottie", "lottie", { x: 70, y: 62, w: 150, h: 136 }, { animation: { assetId: "confetti.json" } }),
+    cell(13, "Lottie", "lottie-web · playing · scrubbed · load failure", [
+      L("lottie", "lottie", { x: 16, y: 66, w: 82, h: 100 }, { animation: LOTTIE }),
+      L("lottie_scrub", "lottie", { x: 104, y: 66, w: 82, h: 100 }, { animation: { asset: "spinner" }, scrub: true, scrubTime: 1.4 }),
+      L("lottie_missing", "lottie", { x: 192, y: 66, w: 82, h: 100 }, { animation: { assetId: "confetti" } }),
+      L("lottie_l1", "text", { x: 16, y: 180, w: 82, h: 16 }, { text: "playing", fontFamily: FONT, fontSize: 11, textAlignment: "center", textColor: "#86868BFF" }),
+      L("lottie_l2", "text", { x: 104, y: 180, w: 82, h: 16 }, { text: "scrub 1.4s", fontFamily: FONT, fontSize: 11, textAlignment: "center", textColor: "#86868BFF" }),
+      L("lottie_l3", "text", { x: 192, y: 180, w: 82, h: 16 }, { text: "missing", fontFamily: FONT, fontSize: 11, textAlignment: "center", textColor: "#86868BFF" }),
     ]),
     cell(14, "Component Instance", "container for a component's layers", [
       L("comp", "componentInstance", { x: 45, y: 96, w: 200, h: 52 }, {}, [
@@ -456,6 +525,25 @@ function prototypeFrame(time: number): SceneFrame {
   return { frame: 1, time, size: [402, 874], background: { r: 0.95, g: 0.95, b: 0.97, a: 1 }, roots: finalize(roots) };
 }
 
+/** 100 list rows × 5 layers = 500 nodes; the list scrolls and progress bars pulse. */
+function stressFrame(time: number): SceneFrame {
+  const rows: SceneNode[] = [];
+  const scroll = (Math.sin(time * 0.8) * 0.5 + 0.5) * 3200;
+  for (let i = 0; i < 100; i++) {
+    const key = `srow${i}`;
+    const progress = 0.5 + 0.45 * Math.sin(time * 2 + i * 0.4);
+    rows.push(
+      L(key, "group", { x: 16, y: 16 + i * 72 - scroll, w: 370, h: 64 }, { color: "#FFFFFFFF", cornerRadius: 16, cornerSmoothing: 0.6 }, [
+        L(`${key}_avatar`, "oval", { x: 12, y: 12, w: 40, h: 40 }, { color: ["#FF375FFF", "#FF9F0AFF", "#30D158FF", "#0A84FFFF", "#5E5CE6FF"][i % 5] }),
+        L(`${key}_title`, "text", { x: 64, y: 12, w: 220, h: 20 }, { text: `Event #${i + 1}`, fontFamily: FONT, fontSize: 16, fontWeight: 600, lineHeight: 20, textColor: "#1D1D1FFF" }),
+        L(`${key}_detail`, "text", { x: 64, y: 34, w: 220, h: 18 }, { text: "Tonight · Pier 39 · 214 going", fontFamily: FONT, fontSize: 13, lineHeight: 18, textColor: "#8E8E93FF", maxLines: 1 }),
+        L(`${key}_bar`, "rectangle", { x: 296, y: 28, w: 62 * progress, h: 8 }, { color: "#30D158FF", cornerRadius: 4 }),
+      ]),
+    );
+  }
+  return { frame: 1, time, size: [402, 874], background: { r: 0.95, g: 0.95, b: 0.97, a: 1 }, roots: finalize(rows) };
+}
+
 function wallpaperFrame(size: [number, number], time: number, label: string): SceneFrame {
   const [w, h] = size;
   const big = Math.min(w, h);
@@ -487,6 +575,10 @@ interface BenchResult {
   frames: number;
   nodes: number;
   msPerFrame: number;
+  /** Median render() time. */
+  medianMs: number;
+  /** Median render() plus a forced style/layout pass. */
+  medianWithLayoutMs: number;
   writesPerFrame: number;
   rerenderWrites: number;
 }
@@ -496,6 +588,7 @@ declare global {
     __sonobeReady?: boolean;
     __sonobeLog?: string[];
     __sonobeEvents?: unknown[];
+    __sonobeMedia?: Record<string, { currentTime?: number; duration?: number }>;
     __sonobeVerifyText?: () => Promise<{ cases: number; mismatches: string[] }>;
     __sonobeBench?: () => BenchResult;
   }
@@ -506,6 +599,7 @@ const view = params.get("view") ?? "specimens";
 const isStatic = params.has("static");
 const log = (window.__sonobeLog = [] as string[]);
 const capturedEvents = (window.__sonobeEvents = [] as unknown[]);
+const media = (window.__sonobeMedia = {} as Record<string, { currentTime?: number; duration?: number }>);
 
 function lcg(seed: number): () => number {
   let s = seed >>> 0;
@@ -570,12 +664,31 @@ async function verifyText(): Promise<{ cases: number; mismatches: string[] }> {
 function registerBench(renderer: DomRenderer, make: (t: number) => SceneFrame): void {
   window.__sonobeBench = () => {
     const count = (nodes: readonly SceneNode[]): number => nodes.reduce((n, c) => n + 1 + count(c.children), 0);
+    const median = (xs: number[]) => [...xs].sort((a, b) => a - b)[Math.floor(xs.length / 2)]!;
+    const round = (n: number) => Math.round(n * 100) / 100;
     const frames = 120;
+    // Build frames up front so the timing covers rendering, not scene construction.
+    for (let i = 0; i < 30; i++) renderer.render(make(1 + i / 60));
+    const scenes = Array.from({ length: frames }, (_, i) => make(2 + i / 60));
     const s0 = renderer.getStats();
+    const times: number[] = [];
     const t0 = performance.now();
-    for (let i = 0; i < frames; i++) renderer.render(make(2 + i / 60));
+    for (const f of scenes) {
+      const a = performance.now();
+      renderer.render(f);
+      times.push(performance.now() - a);
+    }
     const elapsed = performance.now() - t0;
     const s1 = renderer.getStats();
+    const layoutTimes: number[] = [];
+    for (let i = 0; i < 60; i++) {
+      const f = make(5 + i / 60);
+      const a = performance.now();
+      renderer.render(f);
+      void renderer.stage.getBoundingClientRect();
+      void renderer.stage.offsetHeight;
+      layoutTimes.push(performance.now() - a);
+    }
     const f = make(10);
     renderer.render(f);
     const s2 = renderer.getStats();
@@ -584,7 +697,9 @@ function registerBench(renderer: DomRenderer, make: (t: number) => SceneFrame): 
     return {
       frames,
       nodes: count(f.roots),
-      msPerFrame: Math.round((elapsed / frames) * 100) / 100,
+      msPerFrame: round(elapsed / frames),
+      medianMs: round(median(times)),
+      medianWithLayoutMs: round(median(layoutTimes)),
       writesPerFrame: (s1.styleWrites + s1.attrWrites - s0.styleWrites - s0.attrWrites) / frames,
       rerenderWrites: s3.styleWrites + s3.attrWrites - s2.styleWrites - s2.attrWrites,
     };
@@ -595,6 +710,9 @@ window.__sonobeVerifyText = verifyText;
 
 async function waitForMedia(root: HTMLElement): Promise<void> {
   await document.fonts?.ready;
+  // Lottie layers load the player lazily; wait until each shows an animation or a placeholder.
+  const lottieSettled = () => [...root.querySelectorAll('[data-type="lottie"] > .sonobe-body')].every((b) => b.querySelector("svg path") || b.querySelector(".sonobe-placeholder"));
+  for (let i = 0; i < 100 && !lottieSettled(); i++) await new Promise((r) => setTimeout(r, 50));
   await Promise.all([...root.querySelectorAll("img")].map((img) => img.decode().catch(() => {})));
   await Promise.all(
     [...root.querySelectorAll("video")].map(
@@ -628,6 +746,7 @@ async function main(): Promise<void> {
     avatar_a: makeAvatar(260, "JP"),
     avatar_b: makeAvatar(20, "NM"),
     avatar_c: makeAvatar(140, "SY"),
+    spinner: `data:application/json;base64,${btoa(JSON.stringify(LOTTIE))}`,
   };
   const clip = await makeClip();
   if (clip) assets.clip = clip;
@@ -638,6 +757,9 @@ async function main(): Promise<void> {
     onShaderError: (info: { layerId: string; error: { message: string; line: number | null } | null }) => log.push(`shader ${info.layerId}: ${info.error ? info.error.message : "ok"}`),
     onEvents: (events: unknown[]) => {
       if (capturedEvents.length < 2000) capturedEvents.push(...events);
+    },
+    onMediaState: (key: string, _layerId: string, state: { currentTime?: number; duration?: number }) => {
+      media[key] = { ...media[key], ...state };
     },
   };
   const app = document.getElementById("app")!;
@@ -703,6 +825,16 @@ async function main(): Promise<void> {
     }
     await waitForMedia(gallery);
     animate(renderers);
+  } else if (view === "stress") {
+    const stage = document.createElement("div");
+    stage.className = "device-stage";
+    app.appendChild(stage);
+    const device = createDeviceFrame(stage, getDevicePreset("iphone-17-pro"), { showFrame: true });
+    const r = createDomRenderer(device.screen, common);
+    r.render(stressFrame(fixedTime));
+    registerBench(r, stressFrame);
+    await waitForMedia(stage);
+    animate([[r, stressFrame]]);
   }
   window.__sonobeReady = true;
 }

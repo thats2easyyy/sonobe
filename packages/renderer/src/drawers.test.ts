@@ -320,7 +320,7 @@ describe("layer drawing", () => {
       expect(writtenStyle(input, "--sonobe-placeholder")).toBe("rgba(255, 0, 0, 0.502)");
       input.value = "hello!";
       input.dispatchEvent(new Event("input", { bubbles: true }));
-      expect(events).toContainEqual({ kind: "text", layerId: "field", value: "hello!" });
+      expect(events).toContainEqual({ kind: "text", layerId: "field", key: "field", value: "hello!" });
       // The authored text didn't change, so typing is preserved.
       draw(node("field", "textField", { text: "hello" }));
       expect(input.value).toBe("hello!");
@@ -345,6 +345,47 @@ describe("layer drawing", () => {
       expect(document.activeElement).toBe(input);
       expect(onFocusChange).toHaveBeenCalledWith("field");
     });
+
+    it("emits focus, blur, and submit events keyed by SceneNode key", () => {
+      const events: InputEvent[] = [];
+      make({ onEvents: (e) => events.push(...e) });
+      draw(node("field#2", "textField", {}, { layerId: "field" }));
+      const input = body("field#2").querySelector("input")!;
+      input.focus();
+      input.value = "a";
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+      input.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, key: "Enter", code: "Enter" }));
+      input.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, key: "Enter", code: "Enter", isComposing: true }));
+      input.blur();
+      // Enter is also forwarded as a key event by input capture; only field events matter here.
+      expect(events.filter((e) => e.kind !== "key")).toEqual([
+        { kind: "focus", layerId: "field", key: "field#2", focused: true },
+        { kind: "text", layerId: "field", key: "field#2", value: "a" },
+        { kind: "submit", layerId: "field", key: "field#2" },
+        { kind: "focus", layerId: "field", key: "field#2", focused: false },
+      ]);
+    });
+
+    it("submits multiline fields only with a modifier", () => {
+      const events: InputEvent[] = [];
+      make({ onEvents: (e) => events.push(...e) });
+      draw(node("notes", "textField", { multiline: true }));
+      const area = body("notes").querySelector("textarea")!;
+      area.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, key: "Enter" }));
+      expect(events.filter((e) => e.kind === "submit")).toEqual([]);
+      const withMeta = new KeyboardEvent("keydown", { bubbles: true, cancelable: true, key: "Enter", metaKey: true });
+      area.dispatchEvent(withMeta);
+      expect(events.filter((e) => e.kind === "submit")).toEqual([{ kind: "submit", layerId: "notes", key: "notes" }]);
+      expect(withMeta.defaultPrevented).toBe(true);
+    });
+
+    it("reports blur when a focused field is removed", () => {
+      const events: InputEvent[] = [];
+      make({ onEvents: (e) => events.push(...e) });
+      draw(node("field", "textField", { focused: true }));
+      draw();
+      expect(events.at(-1)).toEqual({ kind: "focus", layerId: "field", key: "field", focused: false });
+    });
   });
 
   describe("shader / lottie", () => {
@@ -360,9 +401,14 @@ describe("layer drawing", () => {
       expect(onShaderError).toHaveBeenCalledTimes(1);
     });
 
-    it("renders a labelled lottie placeholder", () => {
-      draw(node("l", "lottie", { animation: { assetId: "confetti" } }));
-      expect(body("l").querySelector(".sonobe-placeholder")!.textContent).toBe("Lottie · confetti");
+    it("shows a lottie placeholder for missing assets, and for empty layers in editor mode", () => {
+      make({ resolveAssetUrl: () => undefined, loadLottie: () => new Promise(() => {}) });
+      draw(node("l", "lottie", { animation: { assetId: "confetti" } }), node("empty", "lottie"));
+      expect(body("l").querySelector(".sonobe-placeholder")!.textContent).toBe("Lottie · missing asset\nconfetti");
+      expect(body("empty").children.length).toBe(0);
+      make({ editorMode: true, loadLottie: () => new Promise(() => {}) });
+      draw(node("empty", "lottie"));
+      expect(body("empty").querySelector(".sonobe-placeholder")!.textContent).toBe("No animation");
     });
   });
 });

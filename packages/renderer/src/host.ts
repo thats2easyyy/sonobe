@@ -3,7 +3,9 @@
 import type { LayerRef } from "@sonobe/core";
 import type { InputEvent, SceneFrame, SceneNode } from "@sonobe/engine";
 import type { PointerState } from "./input.ts";
+import type { LottieLoader } from "./lottie.ts";
 import type { ShaderCompileError, ShaderHost } from "./shader.ts";
+import { setAttr } from "./style.ts";
 import type { WriteStats } from "./style.ts";
 import type { DomTextMeasurer } from "./textMeasurer.ts";
 import type { PropReader } from "./values.ts";
@@ -70,6 +72,7 @@ export interface RenderContext {
   readonly pointer: PointerState;
   readonly measurer: DomTextMeasurer;
   readonly shaders: ShaderHost;
+  readonly loadLottie: LottieLoader;
   resolveAssetUrl(assetId: string): string | undefined;
   emit(events: InputEvent[]): void;
   findNode(ref: LayerRef): SceneNode | undefined;
@@ -136,4 +139,20 @@ export function setParts(host: Host, parts: Element[]): void {
     else host.body.insertBefore(part, ref);
   }
   host.parts = parts;
+}
+
+/** A labelled placeholder (missing media, failed Lottie loads, shader errors). */
+export function placeholder(host: Host, ctx: RenderContext, label: string, tone: "neutral" | "error"): HTMLElement {
+  const el = partEl(host, "placeholder", "div", "sonobe-placeholder");
+  const st = ensureState(host, "placeholder", () => ({ label: "", tone: "" }));
+  if (st.label !== label) {
+    el.textContent = label;
+    st.label = label;
+  }
+  if (st.tone !== tone) {
+    setAttr(el, "data-tone", tone, ctx.stats);
+    st.tone = tone;
+  }
+  setAttr(el, "title", label, ctx.stats);
+  return el;
 }

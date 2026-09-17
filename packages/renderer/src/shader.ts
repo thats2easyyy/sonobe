@@ -4,15 +4,32 @@
  * number of shader layers under the browser's WebGL context limit.
  *
  * Coordinates follow Sonobe (and Origami's Shader Layer): `fragCoord` is in device pixels
- * with the origin at the layer's top-left and +Y down.
+ * with the origin at the layer's top-left and +Y down. Textures are uploaded top row first,
+ * so `texture(iChannel0, fragCoord / iResolution.xy)` shows an image upright.
+ *
+ * Textures: `iChannel0`–`iChannel3`, and any other `sampler2D` uniform, sample an image named
+ * in the `uniforms` prop, e.g. `{"iChannel0": {"asset": "photo", "wrap": "clamp"}}`
+ * (`wrap`: repeat | clamp | mirror, `filter`: mipmap | linear | nearest). Unset channels are
+ * transparent. Limitation: a shader layer's children are drawn as DOM above the canvas and are
+ * not captured into iChannel0 (the DOM has no synchronous DOM-to-texture path).
  */
 
-import { readNumber } from "./values.ts";
+import { readAssetUrl, readNumber } from "./values.ts";
 
 export interface ShaderCompileError {
   message: string;
   /** Line in the user's code (1-based), when the log names one. */
   line: number | null;
+}
+
+export type TextureWrap = "repeat" | "clamp" | "mirror";
+export type TextureFilter = "mipmap" | "linear" | "nearest";
+
+/** An image bound to a sampler uniform. */
+export interface TextureSpec {
+  url: string;
+  wrap: TextureWrap;
+  filter: TextureFilter;
 }
 
 export interface ShaderInputs {
@@ -25,6 +42,8 @@ export interface ShaderInputs {
   mouse: [number, number, number, number];
   /** Extra uniform values by name (from the `uniforms` prop or published ports). */
   uniform: (name: string) => unknown;
+  /** Image for a sampler uniform (iChannel0..3 or a custom sampler2D); null leaves it transparent. */
+  texture?: (name: string) => TextureSpec | null;
 }
 
 export interface FragmentSource {
@@ -34,7 +53,7 @@ export interface FragmentSource {
   userLines: number;
 }
 
-const BUILTIN_UNIFORMS = ["iResolution", "iTime", "iTimeDelta", "iFrame", "iMouse", "iChannel0"];
+const BUILTIN_UNIFORMS = ["iResolution", "iTime", "iTimeDelta", "iFrame", "iMouse", "iChannel0", "iChannel1", "iChannel2", "iChannel3", "iChannelResolution"];
 
 const PRELUDE_UNIFORMS = `uniform vec3 iResolution;
 uniform float iTime;
@@ -42,6 +61,10 @@ uniform float iTimeDelta;
 uniform int iFrame;
 uniform vec4 iMouse;
 uniform sampler2D iChannel0;
+uniform sampler2D iChannel1;
+uniform sampler2D iChannel2;
+uniform sampler2D iChannel3;
+uniform vec3 iChannelResolution[4];
 `;
 
 const VERTEX_SHADER = `#version 300 es
@@ -101,6 +124,19 @@ export function parseShaderLog(log: string, lineOffset: number, userLines: numbe
   return { message, line: firstLine };
 }
 
+/**
+ * Reads a sampler uniform value: `{ asset }`, `{ assetId }`, `{ url }`, or a URL string, with
+ * optional `wrap` (default repeat, like ShaderToy) and `filter` (default mipmap).
+ */
+export function readTextureSpec(value: unknown, resolveAssetUrl: (assetId: string) => string | undefined): TextureSpec | null {
+  const url = readAssetUrl(value, resolveAssetUrl);
+  if (!url) return null;
+  const o = value && typeof value === "object" ? (value as { wrap?: unknown; filter?: unknown }) : {};
+  const wrap: TextureWrap = o.wrap === "clamp" || o.wrap === "mirror" ? o.wrap : "repeat";
+  const filter: TextureFilter = o.filter === "linear" || o.filter === "nearest" ? o.filter : "mipmap";
+  return { url, wrap, filter };
+}
+
 interface UniformInfo {
   location: WebGLUniformLocation;
   type: number;
@@ -110,6 +146,15 @@ interface ProgramEntry {
   program: WebGLProgram | null;
   uniforms: Map<string, UniformInfo>;
   error: ShaderCompileError | null;
+}
+
+interface TextureEntry {
+  status: "loading" | "loaded" | "error";
+  image: HTMLImageElement | null;
+  /** Uploaded texture; null until the image loads (and again after a context loss). */
+  texture: WebGLTexture | null;
+  width: number;
+  height: number;
 }
 
 /** Normalizes a uniform value (number, boolean, vector, Color) to n floats. */
@@ -153,8 +198,21 @@ function clearTarget(out: TargetContext | null, w: number, h: number): void {
   else out?.ctx.clearRect(0, 0, w, h);
 }
 
+/** Cross-origin http(s) images need CORS to be uploaded; data:, blob:, and file: URLs don't. */
+function needsCors(url: string, doc: Document | undefined): boolean {
+  if (!/^https?:/i.test(url)) return false;
+  try {
+    const base = doc?.baseURI;
+    return new URL(url, base).origin !== (base ? new URL(base).origin : "");
+  } catch {
+    return false;
+  }
+}
+
 const MAX_PROGRAMS = 64;
+const MAX_TEXTURES = 32;
 const MAX_DIMENSION = 4096;
+const CHANNEL = /^iChannel([0-3])$/;
 
 /** One WebGL2 context shared by every shader layer of a renderer. */
 export class ShaderHost {
@@ -164,8 +222,13 @@ export class ShaderHost {
   private vertex: WebGLShader | null = null;
   private emptyTexture: WebGLTexture | null = null;
   private readonly programs = new Map<string, ProgramEntry>();
+  private readonly textures = new Map<string, TextureEntry>();
+  private readonly samplers = new Map<string, WebGLSampler>();
+  private readonly textureListeners = new Set<() => void>();
+  private readonly channelResolution = new Float32Array(12);
   private unavailable: ShaderCompileError | null = null;
   private lost = false;
+  private version = 0;
 
   constructor(doc?: Document) {
     this.doc = doc;
@@ -174,6 +237,17 @@ export class ShaderHost {
   /** True once a WebGL2 context exists (attempts creation on first call). */
   available(): boolean {
     return this.ensureContext() !== null;
+  }
+
+  /** Increments when a texture finishes loading or fails; include it in redraw signatures. */
+  get textureVersion(): number {
+    return this.version;
+  }
+
+  /** Called whenever a texture finishes loading or fails. Returns an unsubscribe function. */
+  onTextureChange(listener: () => void): () => void {
+    this.textureListeners.add(listener);
+    return () => this.textureListeners.delete(listener);
   }
 
   /**
@@ -208,9 +282,8 @@ export class ShaderHost {
     }
     gl.viewport(0, 0, w, h);
     gl.useProgram(entry.program);
-    for (const [name, u] of entry.uniforms) this.setUniform(gl, name, u, inputs);
-    gl.activeTexture(gl.TEXTURE0);
-    gl.bindTexture(gl.TEXTURE_2D, this.emptyTexture);
+    this.bindTextures(gl, entry, inputs);
+    for (const [name, u] of entry.uniforms) if (u.type !== gl.SAMPLER_2D) this.setUniform(gl, name, u, inputs);
     gl.drawArrays(gl.TRIANGLES, 0, 3);
     if (out?.kind === "bitmap") {
       out.ctx.transferFromImageBitmap((canvas as OffscreenCanvas).transferToImageBitmap());
@@ -225,11 +298,22 @@ export class ShaderHost {
     const gl = this.gl;
     if (gl && !this.lost) {
       for (const e of this.programs.values()) if (e.program) gl.deleteProgram(e.program);
+      for (const t of this.textures.values()) if (t.texture) gl.deleteTexture(t.texture);
+      for (const s of this.samplers.values()) gl.deleteSampler(s);
       if (this.vertex) gl.deleteShader(this.vertex);
       if (this.emptyTexture) gl.deleteTexture(this.emptyTexture);
       gl.getExtension("WEBGL_lose_context")?.loseContext();
     }
+    for (const t of this.textures.values()) {
+      if (t.image) {
+        t.image.onload = null;
+        t.image.onerror = null;
+      }
+    }
     this.programs.clear();
+    this.textures.clear();
+    this.samplers.clear();
+    this.textureListeners.clear();
     this.gl = null;
     this.canvas = null;
   }
@@ -250,6 +334,8 @@ export class ShaderHost {
         e.preventDefault();
         this.lost = true;
         this.programs.clear();
+        this.samplers.clear();
+        for (const t of this.textures.values()) t.texture = null;
       });
       canvas.addEventListener("webglcontextrestored", () => {
         this.lost = false;
@@ -330,6 +416,130 @@ export class ShaderHost {
     return { program, uniforms, error: null };
   }
 
+  /** Binds every active sampler: iChannelN to unit N, other samplers to units 4+. Fills iChannelResolution. */
+  private bindTextures(gl: WebGL2RenderingContext, entry: ProgramEntry, inputs: ShaderInputs): void {
+    const res = this.channelResolution;
+    res.fill(0);
+    const maxUnits = gl.getParameter(gl.MAX_TEXTURE_IMAGE_UNITS) as number;
+    let nextUnit = 4;
+    for (const [name, u] of entry.uniforms) {
+      if (u.type !== gl.SAMPLER_2D) continue;
+      const channel = CHANNEL.exec(name);
+      const unit = channel ? Number(channel[1]) : nextUnit++;
+      if (unit >= maxUnits) continue;
+      const spec = inputs.texture?.(name) ?? null;
+      const tex = spec ? this.texture(gl, spec.url) : null;
+      gl.activeTexture(gl.TEXTURE0 + unit);
+      gl.bindTexture(gl.TEXTURE_2D, tex?.texture ?? this.emptyTexture);
+      gl.bindSampler(unit, spec && tex?.texture ? this.sampler(gl, spec) : null);
+      gl.uniform1i(u.location, unit);
+      if (channel && tex?.texture) {
+        res[unit * 3] = tex.width;
+        res[unit * 3 + 1] = tex.height;
+        res[unit * 3 + 2] = 1;
+      }
+    }
+    gl.activeTexture(gl.TEXTURE0);
+  }
+
+  /** Texture for an image URL, loading it on first use (a finished load notifies listeners). */
+  private texture(gl: WebGL2RenderingContext, url: string): TextureEntry {
+    const cached = this.textures.get(url);
+    if (cached) {
+      this.textures.delete(url);
+      this.textures.set(url, cached);
+      if (cached.status === "loaded" && !cached.texture) this.upload(gl, cached);
+      return cached;
+    }
+    const entry: TextureEntry = { status: "loading", image: null, texture: null, width: 0, height: 0 };
+    if (this.textures.size >= MAX_TEXTURES) {
+      const oldest = this.textures.keys().next().value as string;
+      const old = this.textures.get(oldest);
+      if (old?.texture) gl.deleteTexture(old.texture);
+      if (old?.image) old.image.onload = old.image.onerror = null;
+      this.textures.delete(oldest);
+    }
+    this.textures.set(url, entry);
+    const img = this.doc?.createElement("img") ?? (typeof Image === "function" ? new Image() : null);
+    if (!img) {
+      entry.status = "error";
+      return entry;
+    }
+    entry.image = img;
+    if (needsCors(url, this.doc)) img.crossOrigin = "anonymous";
+    img.decoding = "async";
+    const settle = () => {
+      img.onload = img.onerror = null;
+      if (this.textures.get(url) !== entry) return;
+      const live = this.gl;
+      if (entry.status === "loaded" && live && !this.lost) this.upload(live, entry);
+      this.version++;
+      for (const listener of [...this.textureListeners]) listener();
+    };
+    img.onload = () => {
+      entry.status = "loaded";
+      entry.width = img.naturalWidth;
+      entry.height = img.naturalHeight;
+      settle();
+    };
+    img.onerror = () => {
+      entry.status = "error";
+      settle();
+    };
+    img.src = url;
+    return entry;
+  }
+
+  private upload(gl: WebGL2RenderingContext, entry: TextureEntry): void {
+    const img = entry.image;
+    if (!img || entry.width <= 0 || entry.height <= 0) return;
+    const tex = gl.createTexture();
+    if (!tex) return;
+    try {
+      let source: TexImageSource = img;
+      const max = Math.min(MAX_DIMENSION * 2, gl.getParameter(gl.MAX_TEXTURE_SIZE) as number);
+      if (entry.width > max || entry.height > max) {
+        const k = max / Math.max(entry.width, entry.height);
+        const w = Math.max(1, Math.floor(entry.width * k));
+        const h = Math.max(1, Math.floor(entry.height * k));
+        const scaled = typeof OffscreenCanvas === "function" ? new OffscreenCanvas(w, h) : this.doc?.createElement("canvas");
+        if (!scaled) throw new Error("no canvas");
+        scaled.width = w;
+        scaled.height = h;
+        (scaled.getContext("2d") as CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D | null)?.drawImage(img, 0, 0, w, h);
+        source = scaled;
+        entry.width = w;
+        entry.height = h;
+      }
+      gl.activeTexture(gl.TEXTURE0);
+      gl.bindTexture(gl.TEXTURE_2D, tex);
+      gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
+      gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, false);
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, source);
+      gl.generateMipmap(gl.TEXTURE_2D);
+      entry.texture = tex;
+    } catch {
+      // Tainted (cross-origin without CORS) or undecodable images stay transparent.
+      gl.deleteTexture(tex);
+      entry.status = "error";
+    }
+  }
+
+  private sampler(gl: WebGL2RenderingContext, spec: TextureSpec): WebGLSampler | null {
+    const key = `${spec.wrap}|${spec.filter}`;
+    const cached = this.samplers.get(key);
+    if (cached) return cached;
+    const s = gl.createSampler();
+    if (!s) return null;
+    const wrap = spec.wrap === "clamp" ? gl.CLAMP_TO_EDGE : spec.wrap === "mirror" ? gl.MIRRORED_REPEAT : gl.REPEAT;
+    gl.samplerParameteri(s, gl.TEXTURE_WRAP_S, wrap);
+    gl.samplerParameteri(s, gl.TEXTURE_WRAP_T, wrap);
+    gl.samplerParameteri(s, gl.TEXTURE_MIN_FILTER, spec.filter === "nearest" ? gl.NEAREST : spec.filter === "linear" ? gl.LINEAR : gl.LINEAR_MIPMAP_LINEAR);
+    gl.samplerParameteri(s, gl.TEXTURE_MAG_FILTER, spec.filter === "nearest" ? gl.NEAREST : gl.LINEAR);
+    this.samplers.set(key, s);
+    return s;
+  }
+
   private setUniform(gl: WebGL2RenderingContext, name: string, u: UniformInfo, inputs: ShaderInputs): void {
     const loc = u.location;
     switch (name) {
@@ -348,8 +558,8 @@ export class ShaderHost {
       case "iMouse":
         gl.uniform4f(loc, inputs.mouse[0], inputs.mouse[1], inputs.mouse[2], inputs.mouse[3]);
         return;
-      case "iChannel0":
-        gl.uniform1i(loc, 0);
+      case "iChannelResolution":
+        gl.uniform3fv(loc, this.channelResolution);
         return;
     }
     const value = inputs.uniform(name);

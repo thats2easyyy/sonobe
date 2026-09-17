@@ -3,14 +3,16 @@
 import type { Color, GradientValue } from "@sonobe/core";
 import type { SceneNode } from "@sonobe/engine";
 import { cssGradient } from "./gradient.ts";
-import { NO_SHAPE, SVG_NS, ensureState, partEl, setParts } from "./host.ts";
+import { NO_SHAPE, SVG_NS, ensureState, partEl, placeholder, setParts } from "./host.ts";
 import type { Drawer, Host, RenderContext, ShapeInfo } from "./host.ts";
+import { lottieDrawer } from "./lottie.ts";
 import { approxScale, isMat4, unprojectPoint } from "./matrix.ts";
+import { readTextureSpec } from "./shader.ts";
 import { squirclePath } from "./squircle.ts";
 import { setAttr, setStyle } from "./style.ts";
 import { clampWeight, fontStack } from "./textMeasurer.ts";
 import type { TextStyle } from "./textMeasurer.ts";
-import { cssColor, fmt, px, readAssetUrl, readGradient, readShapePath, readVec } from "./values.ts";
+import { cssColor, fmt, px, readAssetUrl, readGradient, readNumber, readShapePath, readVec } from "./values.ts";
 import type { PropReader } from "./values.ts";
 
 const clamp01 = (n: number) => (n < 0 ? 0 : n > 1 ? 1 : n);
@@ -48,22 +50,6 @@ function paintFill(host: Host, ctx: RenderContext, w: number, h: number, color: 
   setStyle(fill, "background-image", bgImage, s);
   setStyle(fill, "clip-path", cssPath(squircleD), s);
   return fill;
-}
-
-/** A labelled placeholder (missing media, lottie without a player, shader errors). */
-function placeholder(host: Host, ctx: RenderContext, label: string, tone: "neutral" | "error"): HTMLElement {
-  const el = partEl(host, "placeholder", "div", "sonobe-placeholder");
-  const st = ensureState(host, "placeholder", () => ({ label: "", tone: "" }));
-  if (st.label !== label) {
-    el.textContent = label;
-    st.label = label;
-  }
-  if (st.tone !== tone) {
-    setAttr(el, "data-tone", tone, ctx.stats);
-    st.tone = tone;
-  }
-  setAttr(el, "title", label, ctx.stats);
-  return el;
 }
 
 type BoxKind = "group" | "rectangle" | "oval" | "colorFill" | "gradient" | "componentInstance";
@@ -117,9 +103,22 @@ export function readTextStyle(p: PropReader): TextStyle {
   };
 }
 
+const stacks = new Map<string, string>();
+
+/** fontStack() memoized: text layers ask for the same few families every frame. */
+function cachedFontStack(family: string): string {
+  let stack = stacks.get(family);
+  if (stack === undefined) {
+    if (stacks.size > 256) stacks.clear();
+    stack = fontStack(family);
+    stacks.set(family, stack);
+  }
+  return stack;
+}
+
 function applyTextStyle(el: HTMLElement, ctx: RenderContext, style: TextStyle, lineHeight: number, color: Color | null, align: string, withTransform: boolean): void {
   const s = ctx.stats;
-  setStyle(el, "font-family", fontStack(style.fontFamily), s);
+  setStyle(el, "font-family", cachedFontStack(style.fontFamily), s);
   setStyle(el, "font-size", px(style.fontSize), s);
   setStyle(el, "font-weight", String(clampWeight(style.fontWeight)), s);
   setStyle(el, "font-style", style.italic ? "italic" : "", s);
@@ -373,10 +372,18 @@ interface TextFieldState {
   multiline: boolean;
   lastText: string | null;
   lastFocused: boolean | null;
+  /** SceneNode key of the field (loop and component instances share a layer id). */
+  nodeKey: string;
+  /** The input currently has DOM focus (as last reported to the engine). */
+  hasFocus: boolean;
 }
 
 const KEYBOARD_MODES: Record<string, string> = { number: "decimal", email: "email", url: "url", phone: "tel" };
 
+/**
+ * Creates the field's input element. It emits `text` on every edit, `focus` on focus and blur,
+ * and `submit` on Return (⌘/Ctrl+Return in multiline fields, where Return inserts a newline).
+ */
 function createInput(host: Host, ctx: RenderContext, multiline: boolean): HTMLInputElement | HTMLTextAreaElement {
   const doc = host.body.ownerDocument;
   const input = multiline ? doc.createElement("textarea") : doc.createElement("input");
@@ -385,10 +392,35 @@ function createInput(host: Host, ctx: RenderContext, multiline: boolean): HTMLIn
   input.setAttribute("autocorrect", "off");
   input.setAttribute("autocapitalize", "off");
   input.spellcheck = false;
-  input.addEventListener("input", () => ctx.emit([{ kind: "text", layerId: host.layerId, value: input.value }]));
-  input.addEventListener("focus", () => ctx.onFocusChange?.(host.layerId));
-  input.addEventListener("blur", () => ctx.onFocusChange?.(null));
+  const state = () => host.state.field as TextFieldState | undefined;
+  const key = () => state()?.nodeKey ?? host.key;
+  input.addEventListener("input", () => ctx.emit([{ kind: "text", layerId: host.layerId, key: key(), value: input.value }]));
+  input.addEventListener("focus", () => {
+    const st = state();
+    if (st?.input === input) st.hasFocus = true;
+    ctx.emit([{ kind: "focus", layerId: host.layerId, key: key(), focused: true }]);
+    ctx.onFocusChange?.(host.layerId);
+  });
+  input.addEventListener("blur", () => {
+    const st = state();
+    if (st?.input === input) st.hasFocus = false;
+    ctx.emit([{ kind: "focus", layerId: host.layerId, key: key(), focused: false }]);
+    ctx.onFocusChange?.(null);
+  });
+  input.addEventListener("keydown", (event: Event) => {
+    const e = event as KeyboardEvent;
+    // keyCode 229 is an IME composition keystroke: Return confirms the composition, not the field.
+    if (e.key !== "Enter" || e.isComposing || e.keyCode === 229) return;
+    if (multiline && !(e.metaKey || e.ctrlKey)) return;
+    if (multiline) e.preventDefault();
+    ctx.emit([{ kind: "submit", layerId: host.layerId, key: key() }]);
+  });
   return input;
+}
+
+/** Blurs a focused field before it leaves the DOM (removal alone fires no blur event). */
+function releaseFocus(input: HTMLInputElement | HTMLTextAreaElement): void {
+  if (input.ownerDocument.activeElement === input) input.blur();
 }
 
 const textFieldDrawer: Drawer = {
@@ -398,10 +430,12 @@ const textFieldDrawer: Drawer = {
     let st = host.state.field as TextFieldState | undefined;
     if (!st || st.multiline !== multiline) {
       const previous = st;
-      st = { input: createInput(host, ctx, multiline), multiline, lastText: null, lastFocused: null };
+      if (previous) releaseFocus(previous.input);
+      st = { input: createInput(host, ctx, multiline), multiline, lastText: null, lastFocused: null, nodeKey: node.key, hasFocus: false };
       host.state.field = st;
       if (previous) previous.input.remove();
     }
+    st.nodeKey = node.key;
     const input = st.input;
     setParts(host, [input]);
     const style = readTextStyle(p);
@@ -413,6 +447,7 @@ const textFieldDrawer: Drawer = {
     setAttr(input, "placeholder", p.str("placeholder", ""), s);
     const keyboard = p.str("keyboardType", "default");
     setAttr(input, "inputmode", KEYBOARD_MODES[keyboard] ?? null, s);
+    setAttr(input, "enterkeyhint", multiline ? null : "done", s);
     if (!multiline) setAttr(input, "type", p.bool("secure", false) ? "password" : "text", s);
     setAttr(input, "aria-label", node.layerId, s);
     // Text and focus are edge-triggered: only changes to the props push into the field,
@@ -425,10 +460,21 @@ const textFieldDrawer: Drawer = {
     const focused = p.bool("focused", false);
     if (st.lastFocused !== focused) {
       if (focused) input.focus({ preventScroll: true });
-      else if (st.lastFocused !== null && input.ownerDocument.activeElement === input) input.blur();
+      else if (st.lastFocused !== null) releaseFocus(input);
       st.lastFocused = focused;
     }
     return NO_SHAPE;
+  },
+  dispose(host, ctx) {
+    const st = host.state.field as TextFieldState | undefined;
+    if (!st) return;
+    releaseFocus(st.input);
+    // The element may already be detached (focus moved to body without a blur event).
+    if (st.hasFocus) {
+      st.hasFocus = false;
+      ctx.emit([{ kind: "focus", layerId: host.layerId, key: st.nodeKey, focused: false }]);
+      ctx.onFocusChange?.(null);
+    }
   },
 };
 
@@ -453,7 +499,7 @@ const shaderDrawer: Drawer = {
     const info: ShapeInfo = { shape: "box", radii, smoothing, boxShadow: false, stroke: false, clip: true, squircleClip: hasSquircle(radii, smoothing) };
     const w = nodeWidth(node);
     const h = nodeHeight(node);
-    if (ctx.hidden || w <= 0 || h <= 0 || node.opacity <= 0) {
+    if (ctx.hidden || w <= 0 || h <= 0 || !(readNumber(node.opacity, 1) > 0)) {
       setParts(host, st.error ? [st.canvas, placeholder(host, ctx, st.error, "error")] : [st.canvas]);
       return info;
     }
@@ -476,7 +522,9 @@ const shaderDrawer: Drawer = {
     }
     const uniformsRaw = p.raw("uniforms");
     const uniforms = uniformsRaw && typeof uniformsRaw === "object" ? (uniformsRaw as Record<string, unknown>) : null;
-    const signature = `${code.length}:${hashString(code)}|${pw}x${ph}|${ctx.frame.time}|${ctx.frame.frame}|${mouse.map((m) => fmt(m, 1)).join(",")}|${uniforms ? safeJson(uniforms) : ""}`;
+    const lookup = (name: string) => (uniforms && name in uniforms ? uniforms[name] : node.props?.[name]);
+    // textureVersion changes when a sampled image finishes loading, so the frame redraws with it.
+    const signature = `${code.length}:${hashString(code)}|${pw}x${ph}|${ctx.frame.time}|${ctx.frame.frame}|${mouse.map((m) => fmt(m, 1)).join(",")}|${uniforms ? safeJson(uniforms) : ""}|${ctx.shaders.textureVersion}`;
     if (signature !== st.signature) {
       st.signature = signature;
       const err = ctx.shaders.draw(code, st.canvas, pw, ph, {
@@ -485,7 +533,8 @@ const shaderDrawer: Drawer = {
         timeDelta: Math.max(0, ctx.frame.time - ctx.prevTime),
         frame: ctx.frame.frame,
         mouse,
-        uniform: (name) => (uniforms && name in uniforms ? uniforms[name] : node.props?.[name]),
+        uniform: lookup,
+        texture: (name) => readTextureSpec(lookup(name), ctx.resolveAssetUrl),
       });
       st.error = err ? err.message : null;
       const key = err ? `${err.line ?? ""}:${err.message}` : "";
@@ -517,16 +566,6 @@ const cloneDrawer: Drawer = {
   update(host) {
     setParts(host, []);
     return NO_SHAPE;
-  },
-};
-
-const lottieDrawer: Drawer = {
-  update(host, _node, p, ctx) {
-    const raw = p.raw("animation");
-    const ref = raw && typeof raw === "object" ? ((raw as { assetId?: unknown; asset?: unknown }).assetId ?? (raw as { asset?: unknown }).asset) : null;
-    const label = typeof ref === "string" ? `Lottie · ${ref}` : "Lottie";
-    setParts(host, [placeholder(host, ctx, label, "neutral")]);
-    return { ...NO_SHAPE, clip: true };
   },
 };
 

@@ -59,18 +59,35 @@ export function readVec(v: unknown, n: number, fallback: readonly number[]): num
 
 const HEX = /^#([0-9a-f]{3,8})$/i;
 
-/** Parses a runtime Color, "#RGB[A]" / "#RRGGBB[AA]", or [r, g, b, a] in 0..1. */
+function parseHex(v: string): Color | null {
+  if (v === "transparent") return { r: 0, g: 0, b: 0, a: 0 };
+  const m = HEX.exec(v.trim());
+  if (!m) return null;
+  let hex = m[1]!;
+  if (hex.length === 3 || hex.length === 4) hex = [...hex].map((c) => c + c).join("");
+  if (hex.length !== 6 && hex.length !== 8) return null;
+  const byte = (i: number) => parseInt(hex.slice(i, i + 2), 16) / 255;
+  return { r: byte(0), g: byte(2), b: byte(4), a: hex.length === 8 ? byte(6) : 1 };
+}
+
+const MAX_CACHED_COLORS = 1024;
+const colorCache = new Map<string, Color | null>();
+
+/**
+ * Parses a runtime Color, "#RGB[A]" / "#RRGGBB[AA]", or [r, g, b, a] in 0..1. Hex strings are
+ * cached and runtime Colors pass through, so the result must be treated as read-only.
+ */
 export function parseColor(v: unknown): Color | null {
   if (v == null) return null;
   if (typeof v === "string") {
-    if (v === "transparent") return { r: 0, g: 0, b: 0, a: 0 };
-    const m = HEX.exec(v.trim());
-    if (!m) return null;
-    let hex = m[1]!;
-    if (hex.length === 3 || hex.length === 4) hex = [...hex].map((c) => c + c).join("");
-    if (hex.length !== 6 && hex.length !== 8) return null;
-    const byte = (i: number) => parseInt(hex.slice(i, i + 2), 16) / 255;
-    return { r: byte(0), g: byte(2), b: byte(4), a: hex.length === 8 ? byte(6) : 1 };
+    let c = colorCache.get(v);
+    if (c === undefined) {
+      c = parseHex(v);
+      if (c) Object.freeze(c);
+      if (colorCache.size >= MAX_CACHED_COLORS) colorCache.clear();
+      colorCache.set(v, c);
+    }
+    return c;
   }
   if (Array.isArray(v)) {
     if (v.length < 3) return null;
@@ -79,7 +96,7 @@ export function parseColor(v: unknown): Color | null {
   if (typeof v === "object") {
     const c = v as Partial<Color>;
     if (typeof c.r === "number" && typeof c.g === "number" && typeof c.b === "number") {
-      return { r: c.r, g: c.g, b: c.b, a: typeof c.a === "number" ? c.a : 1 };
+      return typeof c.a === "number" ? (c as Color) : { r: c.r, g: c.g, b: c.b, a: 1 };
     }
   }
   return null;
@@ -172,17 +189,42 @@ export interface PropReader {
   color(key: string): Color | null;
 }
 
+class Props implements PropReader {
+  private readonly type: string;
+  private readonly props: Readonly<Record<string, unknown>>;
+
+  constructor(type: string, props: Readonly<Record<string, unknown>>) {
+    this.type = type;
+    this.props = props;
+  }
+
+  raw(key: string): unknown {
+    const v = this.props[key];
+    return v === undefined || v === null ? layerDefault(this.type, key) : v;
+  }
+
+  num(key: string, fallback?: number): number {
+    return readNumber(this.raw(key), fallback ?? readNumber(layerDefault(this.type, key), 0));
+  }
+
+  bool(key: string, fallback?: boolean): boolean {
+    return readBool(this.raw(key), fallback ?? readBool(layerDefault(this.type, key), false));
+  }
+
+  str(key: string, fallback?: string): string {
+    return readString(this.raw(key), fallback ?? readString(layerDefault(this.type, key), ""));
+  }
+
+  vec(key: string, n: number, fallback?: readonly number[]): number[] {
+    return readVec(this.raw(key), n, fallback ?? readVec(layerDefault(this.type, key), n, new Array<number>(n).fill(0)));
+  }
+
+  color(key: string): Color | null {
+    return parseColor(this.raw(key));
+  }
+}
+
+/** Typed prop accessors for one node (one allocation per node per frame, no closures). */
 export function propReader(type: string, props: Readonly<Record<string, unknown>>): PropReader {
-  const raw = (key: string): unknown => {
-    const v = props[key];
-    return v === undefined || v === null ? layerDefault(type, key) : v;
-  };
-  return {
-    raw,
-    num: (key, fallback) => readNumber(raw(key), fallback ?? readNumber(layerDefault(type, key), 0)),
-    bool: (key, fallback) => readBool(raw(key), fallback ?? readBool(layerDefault(type, key), false)),
-    str: (key, fallback) => readString(raw(key), fallback ?? readString(layerDefault(type, key), "")),
-    vec: (key, n, fallback) => readVec(raw(key), n, fallback ?? readVec(layerDefault(type, key), n, new Array<number>(n).fill(0))),
-    color: (key) => parseColor(raw(key)),
-  };
+  return new Props(type, props);
 }

@@ -13,14 +13,17 @@ export type { DomTextMeasurerOptions, TextLayout, TextStyle } from "./textMeasur
 export { createDeviceFrame, getDeviceFrameLayout, orientSafeArea } from "./deviceFrame.ts";
 export type { DeviceButton, DeviceCutout, DeviceFrame, DeviceFrameLayout, DeviceFrameOptions, Orientation, SafeArea } from "./deviceFrame.ts";
 
-export { attachInputCapture, clientToPrototype, effectiveScale } from "./input.ts";
+export { attachInputCapture, clientToPrototype, effectiveScale, eventTime, pointerTypeOf } from "./input.ts";
 export type { ClientRectLike, InputCaptureOptions, PointerState } from "./input.ts";
 
 export { cursorAt, findNodesAt } from "./sceneQuery.ts";
 export type { SceneHit } from "./sceneQuery.ts";
 
-export { buildFragmentSource, parseShaderLog, ShaderHost } from "./shader.ts";
-export type { FragmentSource, ShaderCompileError, ShaderInputs } from "./shader.ts";
+export { buildFragmentSource, parseShaderLog, readTextureSpec, ShaderHost } from "./shader.ts";
+export type { FragmentSource, ShaderCompileError, ShaderInputs, TextureFilter, TextureSpec, TextureWrap } from "./shader.ts";
+
+export { advancePlayhead, frameForTime, isLottieData, loadLottiePlayer, readLottieSource } from "./lottie.ts";
+export type { LottieLoader, LottiePlayerLike, LottieSource } from "./lottie.ts";
 
 export { cssGradient } from "./gradient.ts";
 export { squirclePath } from "./squircle.ts";

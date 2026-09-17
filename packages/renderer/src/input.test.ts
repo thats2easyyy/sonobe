@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 import type { InputEvent, SceneFrame, SceneNode } from "@sonobe/engine";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { clientToPrototype, effectiveScale } from "./input.ts";
+import { clientToPrototype, effectiveScale, eventTime, pointerTypeOf } from "./input.ts";
 import { createDomRenderer } from "./renderer.ts";
 import type { DomRenderer } from "./renderer.ts";
 import { cursorAt, findNodesAt } from "./sceneQuery.ts";
@@ -19,6 +19,17 @@ describe("clientToPrototype", () => {
   it("falls back to the renderer scale before the stage has a size", () => {
     expect(clientToPrototype(40, 20, { left: 0, top: 0, width: 0, height: 0 }, null, 2)).toEqual([20, 10]);
     expect(clientToPrototype(40, 20, { left: 10, top: 0, width: 0, height: 0 }, [390, 844], 0)).toEqual([30, 20]);
+  });
+});
+
+describe("event normalization", () => {
+  it("maps pointer types and timestamps", () => {
+    expect(pointerTypeOf({ pointerType: "touch" })).toBe("touch");
+    expect(pointerTypeOf({ pointerType: "pen" })).toBe("pen");
+    expect(pointerTypeOf({ pointerType: "" })).toBe("mouse");
+    expect(pointerTypeOf({})).toBe("mouse");
+    expect(eventTime({ timeStamp: 1234.5 })).toBe(1234.5);
+    expect(eventTime({ timeStamp: 0 })).toBeGreaterThan(0);
   });
 });
 
@@ -43,26 +54,62 @@ describe("input capture", () => {
     vi.restoreAllMocks();
   });
 
-  const pointer = (type: string, init: PointerEventInit) => container.dispatchEvent(new PointerEvent(type, { bubbles: true, cancelable: true, pointerType: "mouse", ...init }));
+  const pointerEvent = (type: string, init: PointerEventInit) => new PointerEvent(type, { bubbles: true, cancelable: true, pointerType: "mouse", ...init });
+  const pointer = (type: string, init: PointerEventInit) => container.dispatchEvent(pointerEvent(type, init));
+  const at = expect.any(Number);
 
-  it("converts pointer down/move/up/cancel into prototype coordinates", () => {
+  it("converts pointer down/move/up/cancel into prototype coordinates with type and time", () => {
     pointer("pointerdown", { clientX: 120, clientY: 110, pointerId: 7, button: 0, buttons: 1 });
     pointer("pointermove", { clientX: 130, clientY: 120, pointerId: 7, buttons: 1 });
     pointer("pointerup", { clientX: 130, clientY: 120, pointerId: 7, button: 0 });
     pointer("pointercancel", { clientX: 20, clientY: 10, pointerId: 8 });
     expect(events).toEqual([
-      { kind: "pointer", phase: "down", pointerId: 7, x: 200, y: 200, button: 0 },
-      { kind: "pointer", phase: "move", pointerId: 7, x: 220, y: 220 },
-      { kind: "pointer", phase: "up", pointerId: 7, x: 220, y: 220, button: 0 },
-      { kind: "pointer", phase: "cancel", pointerId: 8, x: 0, y: 0 },
+      { kind: "pointer", phase: "down", pointerId: 7, pointerType: "mouse", timeStamp: at, x: 200, y: 200, button: 0 },
+      { kind: "pointer", phase: "move", pointerId: 7, pointerType: "mouse", timeStamp: at, x: 220, y: 220 },
+      { kind: "pointer", phase: "up", pointerId: 7, pointerType: "mouse", timeStamp: at, x: 220, y: 220, button: 0 },
+      { kind: "pointer", phase: "cancel", pointerId: 8, pointerType: "mouse", timeStamp: at, x: 0, y: 0 },
+    ]);
+    const times = events.map((e) => (e.kind === "pointer" ? e.timeStamp! : 0));
+    expect(times.every((t, i) => i === 0 || t >= times[i - 1]!)).toBe(true);
+  });
+
+  it("reports touch and pen pressure", () => {
+    pointer("pointerdown", { clientX: 120, clientY: 110, pointerId: 3, pointerType: "touch", pressure: 0.6, buttons: 1 });
+    expect(events[0]).toMatchObject({ phase: "down", pointerType: "touch", pressure: 0.6 });
+  });
+
+  it("reports hover moves and a leave phase when the pointer exits", () => {
+    pointer("pointermove", { clientX: 24, clientY: 110, pointerId: 1 });
+    pointer("pointerleave", { clientX: 18, clientY: 110, pointerId: 1 });
+    expect(events).toEqual([
+      { kind: "pointer", phase: "move", pointerId: 1, pointerType: "mouse", timeStamp: at, x: 8, y: 200 },
+      { kind: "pointer", phase: "leave", pointerId: 1, pointerType: "mouse", timeStamp: at, x: -4, y: 200 },
     ]);
   });
 
-  it("reports hover moves and a position outside the prototype when the mouse leaves", () => {
-    pointer("pointermove", { clientX: 24, clientY: 110, pointerId: 1 });
-    pointer("pointerleave", { clientX: 24, clientY: 110, pointerId: 1 });
-    expect(events[0]).toEqual({ kind: "pointer", phase: "move", pointerId: 1, x: 8, y: 200 });
-    expect(events[1]).toEqual({ kind: "pointer", phase: "move", pointerId: 1, x: -1, y: 200 });
+  it("doesn't end hover while a captured drag is still pressed", () => {
+    pointer("pointerleave", { clientX: 5, clientY: 5, pointerId: 1, buttons: 1 });
+    expect(events).toEqual([]);
+  });
+
+  it("emits a lifted touch leaving as a leave phase", () => {
+    pointer("pointerup", { clientX: 120, clientY: 110, pointerId: 9, pointerType: "touch", button: 0 });
+    pointer("pointerleave", { clientX: 120, clientY: 110, pointerId: 9, pointerType: "touch" });
+    expect(events.map((e) => (e.kind === "pointer" ? `${e.phase}:${e.pointerType}` : e.kind))).toEqual(["up:touch", "leave:touch"]);
+  });
+
+  it("expands coalesced samples while dragging", () => {
+    const move = pointerEvent("pointermove", { clientX: 140, clientY: 130, pointerId: 2, buttons: 1 });
+    const samples = [
+      { clientX: 120, clientY: 110, pointerId: 2, pointerType: "mouse", timeStamp: 100 },
+      { clientX: 140, clientY: 130, pointerId: 2, pointerType: "mouse", timeStamp: 108 },
+    ];
+    Object.defineProperty(move, "getCoalescedEvents", { value: () => samples });
+    container.dispatchEvent(move);
+    expect(events).toEqual([
+      { kind: "pointer", phase: "move", pointerId: 2, pointerType: "mouse", timeStamp: 100, x: 200, y: 200 },
+      { kind: "pointer", phase: "move", pointerId: 2, pointerType: "mouse", timeStamp: 108, x: 240, y: 240 },
+    ]);
   });
 
   it("captures the pointer for drags", () => {
