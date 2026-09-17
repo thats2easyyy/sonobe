@@ -1,20 +1,25 @@
 /** Properties of the selected layers, generated from their layer type specs. */
 
 import { COMPONENT_INSTANCE_LAYER_TYPE, findLayer, type Id, type Op } from "@sonobe/core";
-import { Component, Copy, Ellipsis, Layers, Pointer, RotateCcw, ScanSearch } from "lucide-react";
-import { useMemo } from "react";
+import { Component, Copy, Ellipsis, Layers, Pointer, RotateCcw, ScanSearch, Upload } from "lucide-react";
+import { useMemo, useState, type DragEvent } from "react";
 import { LayerTypeIcon } from "../../shell/icons.tsx";
+import { dragHasFiles, filesFromDataTransfer } from "../../state/assets.ts";
 import { useDocument, useEditorSession, useSelection } from "../../state/EditorProvider.tsx";
 import { currentComponentId } from "../../state/selection.ts";
 import { Button } from "../../ui/Button.tsx";
 import { IconButton } from "../../ui/IconButton.tsx";
 import { Menu, type MenuEntry } from "../../ui/Menu.tsx";
 import { toast } from "../../ui/Toast.tsx";
+import { propHoverKey, useCableHover } from "../layers/cableHover.ts";
 import { relatedPatchIds } from "../layers/layerTree.ts";
 import { touchMenuEntries } from "../layers/touchActions.tsx";
-import { FieldRow } from "./FieldRow.tsx";
+import { acceptsCable, cableSourceName, useCableDrag, type LayerPropTarget } from "../patch-editor/index.ts";
+import { assetKindsFor, importAssetForField } from "./assetImport.ts";
+import { controlKind } from "./controls.tsx";
+import { FieldRow, type FieldRowCable } from "./FieldRow.tsx";
 import { InspectorHeader } from "./Header.tsx";
-import { intersectFields, layerSections, layerSources, splitAdvanced, subjectLabel, type InspectorField } from "./model.ts";
+import { editLabel, intersectFields, layerSections, layerSources, planFieldSet, splitAdvanced, subjectLabel, type InspectorField } from "./model.ts";
 import { InspectorSection } from "./Section.tsx";
 import { useInspectorEdit } from "./useInspectorEdit.ts";
 
@@ -28,6 +33,9 @@ export function LayerInspector({ layerIds }: LayerInspectorProps) {
   const doc = useDocument((s) => s.doc);
   const componentId = useSelection(currentComponentId);
   const edit = useInspectorEdit();
+  const drag = useCableDrag(session);
+  const cableHover = useCableHover(drag !== null);
+  const [fileOver, setFileOver] = useState(false);
   const component = doc.components[componentId];
   const sources = useMemo(() => layerSources(doc, componentId, layerIds, registry), [doc, componentId, layerIds, registry]);
   const fields = useMemo(() => intersectFields(sources), [sources]);
@@ -42,6 +50,9 @@ export function LayerInspector({ layerIds }: LayerInspectorProps) {
   const typeNames = [...new Set(layers.map((l) => registry.layers.get(l.type)?.name ?? l.type))];
   const instanceTarget = single?.type === COMPONENT_INSTANCE_LAYER_TYPE && single.component ? doc.components[single.component] : undefined;
   const publishedCount = instanceTarget ? Object.keys(instanceTarget.interface.inputs).length : 0;
+  const cableSource = drag ? cableSourceName(session, drag) : "";
+  /** The media a file dropped anywhere on this inspector sets (an Image layer's Image). */
+  const contentField = single ? fields.find((f) => f.linkedCount === 0 && controlKind(f) === "asset") : undefined;
 
   const revealInPatchEditor = () => {
     const ids = [...new Set(layers.flatMap((l) => relatedPatchIds(component, l.id)))];
@@ -72,12 +83,61 @@ export function LayerInspector({ layerIds }: LayerInspectorProps) {
       : []),
   ];
 
-  const renderRow = (field: InspectorField) => (
-    <FieldRow key={field.key} field={field} subject={subject} excludeLayers={layerIds} {...(single && field.link ? { liveAddress: field.targets[0]!.address } : {})} />
-  );
+  const renderRow = (field: InspectorField) => {
+    const address = field.targets[0]?.address ?? "";
+    const drive: LayerPropTarget | null = single && field.bindable && address === `@${single.id}.${field.key}` ? { layerId: single.id, prop: field.key } : null;
+    const cable: FieldRowCable | undefined = drag
+      ? { accept: !!drive && drag.component === componentId && acceptsCable(drag, field.type), hover: !!drive && cableHover === propHoverKey(drive.layerId, drive.prop), source: cableSource }
+      : undefined;
+    return (
+      <FieldRow
+        key={field.key}
+        field={field}
+        subject={subject}
+        excludeLayers={layerIds}
+        drive={drive}
+        {...(cable ? { cable } : {})}
+        {...(single && field.link ? { liveAddress: field.targets[0]!.address } : {})}
+      />
+    );
+  };
+
+  const importDropped = async (file: File) => {
+    if (!contentField) return;
+    const result = await importAssetForField(session, file, assetKindsFor(contentField.type), contentField.port.name);
+    if (!result.ok) {
+      toast({ id: "inspector-import", title: result.error, tone: "warn" });
+      return;
+    }
+    const current = session.document.getState().doc.components[componentId];
+    if (current) edit.apply(planFieldSet(current, contentField, { asset: result.assetId }), editLabel(contentField, subject));
+  };
+
+  const fileHandlers = contentField
+    ? {
+        onDragOver: (event: DragEvent<HTMLDivElement>) => {
+          if (!dragHasFiles(event.dataTransfer)) return;
+          event.preventDefault();
+          event.dataTransfer.dropEffect = "copy";
+          if (!fileOver) setFileOver(true);
+        },
+        onDragLeave: (event: DragEvent<HTMLDivElement>) => {
+          const next = event.relatedTarget as Node | null;
+          if (next && event.currentTarget.contains(next)) return;
+          setFileOver(false);
+        },
+        onDrop: (event: DragEvent<HTMLDivElement>) => {
+          if (!dragHasFiles(event.dataTransfer)) return;
+          event.preventDefault();
+          setFileOver(false);
+          const file = filesFromDataTransfer(event.dataTransfer)[0];
+          if (file) void importDropped(file);
+        },
+      }
+    : {};
 
   return (
-    <>
+    <div className="sb-insp-layer" data-file-drop={fileOver || undefined} data-cable={drag ? "" : undefined} {...fileHandlers}>
       <InspectorHeader
         icon={single ? <LayerTypeIcon type={single.type} size={15} /> : <Layers size={15} strokeWidth={1.75} />}
         name={single ? single.name : `${layers.length} layers`}
@@ -139,6 +199,13 @@ export function LayerInspector({ layerIds }: LayerInspectorProps) {
           </InspectorSection>
         );
       })}
-    </>
+
+      {fileOver && contentField && (
+        <div className="sb-insp-filedrop" role="status">
+          <Upload size={13} strokeWidth={2} aria-hidden />
+          Drop to set {contentField.port.name} on {subject}
+        </div>
+      )}
+    </div>
   );
 }

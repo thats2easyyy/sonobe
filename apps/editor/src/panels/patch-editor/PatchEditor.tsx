@@ -313,6 +313,23 @@ function Canvas({ session, componentId, showBreadcrumbs, showToolbar, defaultMin
     });
   }, [savedViewport, autoFit]);
 
+  // Another prototype replaced the document (a lesson, an example, an opened file): its root component
+  // can share this component id, so fit the new graph instead of keeping the previous document's view.
+  useEffect(
+    () =>
+      session.document.getState().subscribeRevision((s, previous) => {
+        const change = s.lastChange;
+        if (!change || change === previous.lastChange || change.kind !== "replace") return;
+        fitModeRef.current = true;
+        requestAnimationFrame(() =>
+          requestAnimationFrame(() => {
+            if (mountedRef.current && fitModeRef.current) autoFit();
+          }),
+        );
+      }),
+    [session, autoFit],
+  );
+
   useEffect(() => {
     const el = wrapperRef.current;
     if (!el || typeof ResizeObserver === "undefined") return;

@@ -9,7 +9,7 @@
 import { homedir } from "node:os";
 import path from "node:path";
 import { applyOps, getDiagnostics, slugify, uniqueId, type Affected, type Author, type Diagnostic, type Id, type OpResult, type SonobeDocument, type SonobeError } from "@sonobe/core";
-import type { EngineRegistry } from "@sonobe/engine";
+import type { EngineRegistry, SceneFrame, SceneNode } from "@sonobe/engine";
 import {
   createSimulationManager,
   createTemplateDocument,
@@ -22,12 +22,15 @@ import {
   type HistoryItem,
   type HostApplyResult,
   type Screenshot,
+  type ScreenshotOptions,
+  type ScreenshotTarget,
   type SimHost,
   type SimulationManager,
+  type SimulationManagerOptions,
   type SonobeHost,
   type WorkIntent,
 } from "@sonobe/mcp";
-import { isRect, isViewerBounds, screenshotSize, viewerCaptureRect, type Rect, type Size } from "./screenshot.ts";
+import { intersectRects, isRect, isViewerBounds, screenshotSize, viewerCaptureRect, type Rect, type Size, type ViewerBoundsLike } from "./screenshot.ts";
 
 export interface CapturedImage {
   /** Base64-encoded PNG. */
@@ -64,13 +67,45 @@ export interface AppHostOptions {
   projectExists(dir: string): Promise<boolean>;
   /** Write a new project folder to disk (and approve it for the editor). */
   writeProject(dir: string, doc: SonobeDocument): Promise<void>;
+  /**
+   * Draw a simulation's frame for get_screenshot({ simId }). Without it (or when @sonobe/mcp's
+   * SimulationManager has no `scene(simId)`), simulation screenshots explain that they're unavailable.
+   */
+  renderScene?(request: SceneRenderRequest): Promise<CapturedImage | null>;
+  /** A window's document appeared, reached a new revision, or went away (drives MCP resource notifications). */
+  onDocumentChange?(change: DocumentChange): void;
+  /** Creates the simulation manager. Default: @sonobe/mcp createSimulationManager (tests wrap it). */
+  simulations?(options: SimulationManagerOptions): SimulationManager;
   maxSimSessions?: number;
   now?: () => number;
+}
+
+/** What renderScene draws. */
+export interface SceneRenderRequest {
+  scene: SceneFrame;
+  /** The part of the screen to capture, in prototype points. */
+  crop: Rect;
+  /** Output image size in pixels. */
+  size: Size;
+  /** Asset id → absolute path of its file in the project's assets folder (none for unsaved projects). */
+  assets: Record<string, string>;
+}
+
+export interface DocumentChange {
+  kind: "opened" | "changed" | "closed";
+  docId: Id;
+  revision: number;
+  /** The window (RendererTarget id). */
+  targetId: number;
 }
 
 export interface AppHost extends SonobeHost {
   /** Forget a closed window's document, badges and simulations. */
   forgetTarget(id: number): void;
+  /** The editor in window `targetId` pushed a new revision (sonobeHost.notifyDocumentChanged). */
+  documentChanged(targetId: number, revision: number): Promise<void>;
+  /** Whether get_screenshot({ simId }) can draw a simulation's frame. */
+  simulationScreenshots(): boolean;
   dispose(): void;
 }
 
@@ -185,6 +220,59 @@ function matchesAuthor(author: Author, filter: string | undefined): boolean {
   return author.name.toLowerCase() === filter.toLowerCase();
 }
 
+/** CSS pixels per prototype point, measured from the stage (the viewer may be zoomed by CSS outside the renderer). */
+function measuredScale(bounds: ViewerBoundsLike): number {
+  return bounds.prototypeSize[0] > 0 && bounds.stage.width > 0 ? bounds.stage.width / bounds.prototypeSize[0] : bounds.scale;
+}
+
+function* walkScene(nodes: readonly SceneNode[]): Generator<SceneNode> {
+  for (const node of nodes) {
+    yield node;
+    yield* walkScene(node.children);
+  }
+}
+
+/** Axis-aligned bounds of a node in prototype points. */
+function nodeBounds(node: SceneNode): Rect {
+  const m = node.worldTransform;
+  const corners = [
+    [0, 0],
+    [node.width, 0],
+    [0, node.height],
+    [node.width, node.height],
+  ].map(([x, y]) => [m[0]! * x! + m[4]! * y! + m[12]!, m[1]! * x! + m[5]! * y! + m[13]!] as const);
+  const xs = corners.map((c) => c[0]);
+  const ys = corners.map((c) => c[1]);
+  const left = Math.min(...xs);
+  const top = Math.min(...ys);
+  return { x: left, y: top, width: Math.max(...xs) - left, height: Math.max(...ys) - top };
+}
+
+/** Where a layer is drawn in a scene: its exact node key, else every copy of it (loops, components). */
+export function sceneLayerBounds(scene: SceneFrame, layerId: string): Rect | null {
+  const nodes = [...walkScene(scene.roots)];
+  const exact = nodes.find((n) => n.key === layerId);
+  const matches = exact ? [exact] : nodes.filter((n) => n.layerId === layerId);
+  if (!matches.length) return null;
+  const rects = matches.map(nodeBounds);
+  const left = Math.min(...rects.map((r) => r.x));
+  const top = Math.min(...rects.map((r) => r.y));
+  const right = Math.max(...rects.map((r) => r.x + r.width));
+  const bottom = Math.max(...rects.map((r) => r.y + r.height));
+  return { x: left, y: top, width: right - left, height: bottom - top };
+}
+
+/** Asset id → file path for a saved project (files must stay inside assets/). */
+function assetFiles(doc: SonobeDocument | undefined, projectPath: string | null): Record<string, string> {
+  if (!doc || !projectPath) return {};
+  const out: Record<string, string> = {};
+  for (const [id, record] of Object.entries(doc.assets ?? {})) {
+    const file = (record as { file?: unknown }).file;
+    if (typeof file === "string" && file && path.basename(file) === file && file !== "..") out[id] = path.join(projectPath, "assets", file);
+  }
+  return out;
+}
+
 export function createAppHost(options: AppHostOptions): AppHost {
   const { registry } = options;
   const now = options.now ?? (() => Date.now());
@@ -200,6 +288,14 @@ export function createAppHost(options: AppHostOptions): AppHost {
     }
   };
 
+  const emit = (change: DocumentChange) => {
+    try {
+      options.onDocumentChange?.(change);
+    } catch {
+      // Notifications are best effort.
+    }
+  };
+
   const forget = (id: number) => {
     const entry = entries.get(id);
     if (!entry) return;
@@ -207,6 +303,7 @@ export function createAppHost(options: AppHostOptions): AppHost {
     manager.closeDocument(entry.docId);
     for (const [simId, docId] of simDocs) if (docId === entry.docId) simDocs.delete(simId);
     if (activeId === id) activeId = null;
+    emit({ kind: "closed", docId: entry.docId, revision: entry.info.revision, targetId: id });
   };
 
   const prune = (targets: readonly RendererTarget[]) => {
@@ -224,12 +321,15 @@ export function createAppHost(options: AppHostOptions): AppHost {
     const info = asInfo(await call<unknown>(target, "document.info"));
     let entry = entries.get(target.id);
     if (entry) {
+      const changed = entry.info.revision !== info.revision;
       entry.target = target;
       entry.info = info;
+      if (changed) emit({ kind: "changed", docId: entry.docId, revision: info.revision, targetId: target.id });
     } else {
       entry = { target, docId: "", info, snapshot: null, diagnostics: null, working: new Map() };
       entries.set(target.id, entry);
       assignDocId(entry);
+      emit({ kind: "opened", docId: entry.docId, revision: info.revision, targetId: target.id });
     }
     return entry;
   };
@@ -281,7 +381,7 @@ export function createAppHost(options: AppHostOptions): AppHost {
     active: entry.target.id === activeTarget(options.targets())?.id,
   });
 
-  const manager: SimulationManager = createSimulationManager({
+  const manager: SimulationManager = (options.simulations ?? createSimulationManager)({
     registry,
     ...(options.maxSimSessions !== undefined ? { maxSessions: options.maxSimSessions } : {}),
     getDocument: (docId) => {
@@ -329,6 +429,46 @@ export function createAppHost(options: AppHostOptions): AppHost {
       return manager.values(simId, targets);
     },
     list: (docId) => manager.list(docId),
+  };
+
+  const sceneFunction = () => (manager as SimulationManager & { scene?: (simId: string) => SceneFrame }).scene;
+
+  /** get_screenshot({ simId }): draw the simulation's current frame (it doesn't step or hot-swap). */
+  const simScreenshot = async (target: ScreenshotTarget, simId: string, o: ScreenshotOptions): Promise<Screenshot> => {
+    const sceneOf = sceneFunction();
+    if (typeof sceneOf !== "function" || !options.renderScene) {
+      throw new HostError("sim_screenshot_unavailable", "Screenshots show the live viewer; Sonobe can't draw a simulation's frame yet.", {
+        hint: "Take the screenshot without simId, and check the simulation with sim_get_values or sim_trace.",
+      });
+    }
+    if (target.kind === "graph" || target.kind === "canvas") {
+      throw new HostError("target_unavailable", `A simulation has no ${target.kind === "graph" ? "patch graph" : "canvas"} to capture: its screenshots show the prototype screen.`, {
+        hint: 'Use target "viewer" for the whole screen, or "layer" with a layerId.',
+      });
+    }
+    const scene = sceneOf.call(manager, simId);
+    const screen: Rect = { x: 0, y: 0, width: scene.size[0], height: scene.size[1] };
+    let crop: Rect | null = screen;
+    if (target.kind === "layer") {
+      const bounds = sceneLayerBounds(scene, target.layerId);
+      if (!bounds) {
+        throw new HostError("not_found", `Layer "${target.layerId}" isn't drawn in simulation "${simId}" right now.`, {
+          hint: "Check the id with get_outline. Hidden layers and layers outside a loop's current count aren't drawn.",
+        });
+      }
+      crop = intersectRects(bounds, screen);
+    }
+    if (!crop || crop.width < 1 || crop.height < 1) {
+      throw new HostError("capture_failed", "There's nothing visible to capture: the target has no area on screen.", { hint: 'Try target "viewer" to see the whole screen.' });
+    }
+    const docId = simDocs.get(simId);
+    const entry = docId !== undefined ? findEntry(docId) : undefined;
+    const size = screenshotSize(crop, 1, o.scale ?? 1, o.maxWidth);
+    const image = await options.renderScene({ scene, crop, size, assets: assetFiles(entry?.snapshot?.doc, entry?.info.projectPath ?? null) });
+    if (!image) {
+      throw new HostError("capture_failed", "Sonobe couldn't draw the simulation's frame.", { hint: "Try again. If it keeps failing, check the simulation with sim_get_values or sim_trace instead." });
+    }
+    return { data: image.data, mimeType: "image/png", width: image.width, height: image.height, timeMs: Math.round(scene.time * 1000) };
   };
 
   const conflictResult = (entry: Entry, expected: number, current: number, diagnostics: Diagnostic[], dryRun: boolean): HostApplyResult => ({
@@ -532,11 +672,7 @@ export function createAppHost(options: AppHostOptions): AppHost {
 
     async screenshot(target, o) {
       const entry = await resolve(o.docId);
-      if (o.simId !== undefined) {
-        throw new HostError("sim_screenshot_unavailable", "Screenshots show the live viewer; Sonobe can't draw a simulation's frame yet.", {
-          hint: "Take the screenshot without simId, and check the simulation with sim_get_values or sim_trace.",
-        });
-      }
+      if (o.simId !== undefined) return simScreenshot(target, o.simId, o);
       const scale = o.scale ?? 1;
       let rect: Rect | null;
       let cssPerPoint = 1;
@@ -546,7 +682,7 @@ export function createAppHost(options: AppHostOptions): AppHost {
         rect = viewerCaptureRect(bounds);
         // Measure the stage rather than trusting `scale`: the viewer may be zoomed by a CSS transform
         // outside the renderer, which getBoundingClientRect includes.
-        cssPerPoint = bounds.prototypeSize[0] > 0 && bounds.stage.width > 0 ? bounds.stage.width / bounds.prototypeSize[0] : bounds.scale;
+        cssPerPoint = measuredScale(bounds);
       } else {
         const method = target.kind === "layer" ? "viewer.layerBounds" : `${target.kind}.bounds`;
         const label = target.kind === "layer" ? `layer "${target.layerId}"` : target.kind === "graph" ? "patch graph" : "canvas";
@@ -560,6 +696,15 @@ export function createAppHost(options: AppHostOptions): AppHost {
         rect = bounds;
         const perPoint = (bounds as unknown as { scale?: unknown }).scale;
         if (typeof perPoint === "number" && perPoint > 0) cssPerPoint = perPoint;
+        if (target.kind === "layer" && entry.target.hasMethod("viewer.bounds") === true) {
+          // A layer is drawn in the viewer: clip it to the visible stage and size it in points.
+          const viewer = await call<unknown>(entry.target, "viewer.bounds").catch(() => null);
+          if (isViewerBounds(viewer)) {
+            const visible = viewerCaptureRect(viewer);
+            rect = visible ? intersectRects(rect, visible) : null;
+            if (!(typeof perPoint === "number" && perPoint > 0)) cssPerPoint = measuredScale(viewer);
+          }
+        }
       }
       if (!rect || rect.width < 1 || rect.height < 1) {
         throw new HostError("capture_failed", "There's nothing visible to capture: the target has no area on screen.", { hint: "Ask the person to show the Viewer panel (⌘2) and make the window larger, then try again." });
@@ -660,6 +805,22 @@ export function createAppHost(options: AppHostOptions): AppHost {
     },
 
     forgetTarget: forget,
+
+    async documentChanged(targetId, revision) {
+      if (!Number.isFinite(revision)) return;
+      const target = options.targets().find((t) => t.id === targetId);
+      if (!target) return;
+      const entry = entries.get(targetId);
+      if (!entry) {
+        await describe(target).catch(() => undefined);
+        return;
+      }
+      if (entry.info.revision === revision) return;
+      entry.info = { ...entry.info, revision };
+      emit({ kind: "changed", docId: entry.docId, revision, targetId });
+    },
+
+    simulationScreenshots: () => typeof sceneFunction() === "function" && !!options.renderScene,
 
     dispose() {
       manager.dispose();

@@ -43,8 +43,13 @@ export interface LanPreviewOptions {
   host?: string;
   /** URL token. Default: 16 random bytes, base64url. */
   token?: string;
-  /** How often to look for a new revision while players are connected. Default 400 ms. */
+  /** How often to look for a new revision while players are connected (polling mode). Default 400 ms. */
   pollMs?: number;
+  /**
+   * Start in push mode: no polling; the host calls poke() whenever the document changes (for example
+   * from the editor's notifyDocumentChanged). Default false.
+   */
+  pushUpdates?: boolean;
   version?: string;
   /** Network interfaces (tests). */
   interfaces?: () => NodeJS.Dict<NetworkInterfaceInfo[]>;
@@ -63,8 +68,12 @@ export interface LanPreviewHandle {
   /** False when no LAN address was found (only this computer can open the URL). */
   readonly lanReachable: boolean;
   clientCount(): number;
-  /** Look for a new revision now (e.g. right after an edit). */
+  /** Look for a new revision now (e.g. right after an edit). Does nothing while no player is connected. */
   poke(): void;
+  /** True when revisions arrive through poke() instead of polling. */
+  readonly pushUpdates: boolean;
+  /** Switch between polling and push mode. */
+  setPushUpdates(on: boolean): void;
   close(): Promise<void>;
 }
 
@@ -235,6 +244,7 @@ export async function startLanPreview(opts: LanPreviewOptions): Promise<LanPrevi
   let pollAgain = false;
   let pollTimer: ReturnType<typeof setInterval> | null = null;
   let closed = false;
+  let pushUpdates = opts.pushUpdates === true;
 
   const wss = new WebSocketServer({ noServer: true, maxPayload: 16 * 1024, clientTracking: true });
   const alive = new WeakMap<WebSocket, boolean>();
@@ -280,12 +290,15 @@ export async function startLanPreview(opts: LanPreviewOptions): Promise<LanPrevi
       reportedClients = wss.clients.size;
       if (!closed) opts.onClientsChange?.(reportedClients);
     }
-    if (wss.clients.size > 0 && !pollTimer && !closed) {
+    const wantTimer = wss.clients.size > 0 && !pushUpdates && !closed;
+    if (wantTimer && !pollTimer) {
       pollTimer = setInterval(() => void poll(), pollMs);
       pollTimer.unref?.();
-    } else if (wss.clients.size === 0 && pollTimer) {
+    } else if (!wantTimer && pollTimer) {
       clearInterval(pollTimer);
       pollTimer = null;
+    }
+    if (wss.clients.size === 0) {
       lastKey = null;
       lastPayload = null;
     }
@@ -397,7 +410,18 @@ export async function startLanPreview(opts: LanPreviewOptions): Promise<LanPrevi
     urls,
     lanReachable,
     clientCount: () => wss.clients.size,
-    poke: () => void poll(),
+    poke: () => {
+      if (wss.clients.size > 0) void poll();
+    },
+    get pushUpdates() {
+      return pushUpdates;
+    },
+    setPushUpdates(on) {
+      if (pushUpdates === on) return;
+      pushUpdates = on;
+      syncPolling();
+      if (!on) void poll();
+    },
     close() {
       if (closed) return Promise.resolve();
       closed = true;

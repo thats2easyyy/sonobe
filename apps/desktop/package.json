@@ -9,7 +9,10 @@
     "dev": "node scripts/build.mjs --watch",
     "start": "node scripts/build.mjs && electron . --mute-audio",
     "smoke": "node tests/smoke.mjs",
-    "test": "vitest run --config vitest.config.ts"
+    "test": "vitest run --config vitest.config.ts",
+    "icons": "node scripts/icons.mjs",
+    "package": "node scripts/package.mjs",
+    "package:verify": "node scripts/verify-package.mjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.126.0",

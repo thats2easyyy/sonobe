@@ -135,6 +135,43 @@ export interface PreviewStatus {
   error: string | null;
 }
 
+/** Whether secrets can be stored on this computer, and where. */
+export interface SecretsStatus {
+  available: boolean;
+  /** "keychain" (macOS), "dpapi" (Windows), or the Linux key store (e.g. "gnome_libsecret"). */
+  backend: string | null;
+  /** Why secrets can't be stored, when they can't. */
+  reason: string | null;
+}
+
+/**
+ * Small secrets such as the optional in-app assistant's API key. Values are encrypted with the
+ * operating system's keychain (Electron safeStorage) and kept in the app's user data folder; they
+ * never reach project files. Names are 1–64 letters, digits, ".", "_" or "-", e.g. "anthropic.apiKey".
+ */
+export interface SonobeSecrets {
+  status(): Promise<SecretsStatus>;
+  /** The stored value, or null when it isn't set. */
+  get(name: string): Promise<string | null>;
+  /** Rejects when the keychain isn't available (see status()) or the value is over 16 KB. */
+  set(name: string, value: string): Promise<void>;
+  /** Resolves true when something was removed. */
+  delete(name: string): Promise<boolean>;
+}
+
+export interface ViewerWindowOptions {
+  /** Keep the viewer window above other windows. */
+  alwaysOnTop?: boolean;
+}
+
+/** The pop-out viewer window: the live prototype in its own window, following edits. */
+export interface ViewerWindowStatus {
+  open: boolean;
+  alwaysOnTop: boolean;
+  /** Why the window couldn't open, when it couldn't. */
+  error: string | null;
+}
+
 export type RpcHandler = (params: unknown) => unknown | Promise<unknown>;
 
 /**
@@ -199,6 +236,26 @@ export interface SonobeHost {
   stopPreview(): Promise<PreviewStatus>;
   /** Status changes: started, stopped, players joining or leaving. Returns unsubscribe. */
   onPreviewStatus(cb: (status: PreviewStatus) => void): () => void;
+
+  /**
+   * Tell the host the document reached `revision`: call it after every committed change, undo, redo,
+   * open, and reload. It drives the phone preview's and pop-out viewer's live sync and MCP resource
+   * notifications. Cheap; calling it for every revision is fine.
+   */
+  notifyDocumentChanged(revision: number): void;
+
+  /** Keychain-backed secrets (for example the in-app assistant's API key). */
+  secrets: SonobeSecrets;
+
+  /** Open an http(s) or mailto link in the default browser or mail app. Resolves false for any other URL. */
+  openExternal(url: string): Promise<boolean>;
+
+  /** Show the prototype in its own window (a live player that follows edits), or focus it when it's open. */
+  popOutViewer(options?: ViewerWindowOptions): Promise<ViewerWindowStatus>;
+  closeViewerWindow(): Promise<ViewerWindowStatus>;
+  getViewerWindowStatus(): Promise<ViewerWindowStatus>;
+  /** The pop-out viewer window opened, closed, or changed. Returns unsubscribe. */
+  onViewerWindowStatus(cb: (status: ViewerWindowStatus) => void): () => void;
 }
 
 declare global {

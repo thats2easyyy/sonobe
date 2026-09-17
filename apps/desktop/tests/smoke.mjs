@@ -4,16 +4,19 @@
  *
  * 1. Launches against a missing editor build (setup page): window + secure defaults,
  *    window.sonobeHost, native menus and command delivery, main→renderer RPC, project IO + watching,
- *    the MCP endpoint (token file, Host/Origin guards, tools explaining that no editor is connected),
- *    link handling, a screenshot, and a clean quit that removes mcp.json.
+ *    keychain secrets (with the test cipher), the MCP endpoint (token file, Host/Origin guards, tools
+ *    explaining that no editor is connected), openExternal and link handling, a screenshot, and a clean
+ *    quit that removes mcp.json.
  * 2. Builds the editor (npm run build -w @sonobe/editor) and launches it with SONOBE_LAN=1. When the
  *    build doesn't mount the MCP bridge, it says so and uses an editor harness instead (the real
  *    editor session, RPC handlers and viewer from apps/editor/src). Then runs the whole loop over
  *    Streamable HTTP with the token file: list tools, build an ISAT chain with add_patches + connect on
- *    the demo document, simulate it, screenshot the viewer (screenshots/mcp-screenshot.png), check the
- *    renderer's history (AI Activity), presence, reveal and undo. Then the phone preview: HTTP, live
- *    sync over WebSocket, the player rendering in a browser window (screenshots/lan-player.png), and
- *    the "no window" error.
+ *    the demo document, simulate it, screenshot the viewer (screenshots/mcp-screenshot.png) and the
+ *    simulation (screenshots/mcp-sim-screenshot.png, when @sonobe/mcp exposes scenes), check MCP
+ *    resource notifications, the renderer's history (AI Activity), presence, reveal and undo. Then the
+ *    phone preview: HTTP, live sync over WebSocket (polling, then revisions pushed with
+ *    notifyDocumentChanged), the player rendering in a browser window (screenshots/lan-player.png), the
+ *    pop-out viewer window (screenshots/viewer-window.png), and the "no window" error.
  * 3. Relaunches for window-state restore, file-loaded IPC trust, and the dev-server fallback.
  *
  *   node apps/desktop/tests/smoke.mjs
@@ -41,6 +44,8 @@ const screenshotPath = path.join(screenshotsDir, "smoke.png");
 const mcpScreenshotPath = path.join(screenshotsDir, "mcp-screenshot.png");
 const editorScreenshotPath = path.join(screenshotsDir, "mcp-editor.png");
 const lanScreenshotPath = path.join(screenshotsDir, "lan-player.png");
+const simScreenshotPath = path.join(screenshotsDir, "mcp-sim-screenshot.png");
+const viewerWindowScreenshotPath = path.join(screenshotsDir, "viewer-window.png");
 const started = Date.now();
 
 const log = (msg) => console.log(`[smoke +${((Date.now() - started) / 1000).toFixed(1)}s] ${msg}`);
@@ -102,6 +107,12 @@ async function connectMcp(conn) {
     },
     close: () => client.close().catch(() => undefined),
   };
+}
+
+/** Width and height from a PNG's IHDR chunk (get_screenshot returns only the image block). */
+function pngSize(png) {
+  if (png.length < 24 || png.subarray(1, 4).toString("latin1") !== "PNG") return null;
+  return { width: png.readUInt32BE(16), height: png.readUInt32BE(20) };
 }
 
 /** A WebSocket whose messages are buffered from the start. */
@@ -275,13 +286,36 @@ try {
     nodeProcess: typeof globalThis.process,
   }));
   assert(hostInfo.type === "object", "window.sonobeHost exists", hostInfo);
-  for (const key of ["commands", "getMcpStatus", "getPreviewStatus", "onCommand", "onOpenProject", "onPreviewStatus", "openProjectDialog", "platform", "readProject", "recentProjects", "revealInFinder", "rpc", "saveProjectDialog", "setDocumentEdited", "setTitle", "startPreview", "stopPreview", "version", "watchProject", "writeProject"]) {
+  for (const key of ["closeViewerWindow", "commands", "getMcpStatus", "getPreviewStatus", "getViewerWindowStatus", "notifyDocumentChanged", "onCommand", "onOpenProject", "onPreviewStatus", "onViewerWindowStatus", "openExternal", "openProjectDialog", "platform", "popOutViewer", "readProject", "recentProjects", "revealInFinder", "rpc", "saveProjectDialog", "secrets", "setDocumentEdited", "setTitle", "startPreview", "stopPreview", "version", "watchProject", "writeProject"]) {
     assert(hostInfo.keys.includes(key), `sonobeHost.${key}`, hostInfo.keys);
   }
   assert(hostInfo.platform === process.platform, "platform", hostInfo.platform);
   assert(hostInfo.restart?.accelerator === "CmdOrCtrl+R", "commands() lists accelerators", hostInfo.restart);
   assert(hostInfo.nodeRequire === "undefined" && hostInfo.nodeProcess === "undefined", "no Node globals in the page", hostInfo);
   log(`sonobeHost ok (${hostInfo.commandCount} commands)`);
+
+  // Secrets (SONOBE_TEST=1 swaps safeStorage for a test cipher, so the keychain is never touched).
+  const secretRun = await win.evaluate(async () => {
+    const s = window.sonobeHost.secrets;
+    const status = await s.status();
+    const missing = await s.get("anthropic.apiKey");
+    await s.set("anthropic.apiKey", "sk-ant-smoke-123");
+    const stored = await s.get("anthropic.apiKey");
+    const badName = await s.set("../escape", "x").then(() => "allowed", (e) => e.message);
+    const removed = await s.delete("anthropic.apiKey");
+    const afterDelete = await s.get("anthropic.apiKey");
+    await s.set("smoke.kept", "still here");
+    return { status, missing, stored, badName, removed, afterDelete };
+  });
+  assert(secretRun.status.available === true && ["keychain", "dpapi", "test"].includes(secretRun.status.backend), "secrets status", secretRun.status);
+  assert(secretRun.missing === null && secretRun.stored === "sk-ant-smoke-123" && secretRun.removed === true && secretRun.afterDelete === null, "secrets round trip", secretRun);
+  assert(secretRun.badName.startsWith("Secret names") && !secretRun.badName.includes("invoking remote method"), "secret errors keep a clean message", secretRun.badName);
+  const secretsFile = readFileSync(path.join(userData, "secrets.json"), "utf8");
+  assert(secretsFile.includes("smoke.kept") && !secretsFile.includes("still here"), "secrets.json holds ciphertext only", secretsFile);
+  if (process.platform !== "win32") assert((statSync(path.join(userData, "secrets.json")).mode & 0o777) === 0o600, "secrets.json is 0600");
+  const viewerOff = await win.evaluate(() => window.sonobeHost.getViewerWindowStatus());
+  assert(viewerOff.open === false, "no viewer window by default", viewerOff);
+  log("secrets ok (encrypted file, clean errors)");
 
   // MCP endpoint + token file.
   const conn = await readConnection();
@@ -433,12 +467,19 @@ try {
       globalThis.__opened.push(url);
     };
   });
+  const externalResults = await win.evaluate(async () => [
+    await window.sonobeHost.openExternal("https://example.com/help"),
+    await window.sonobeHost.openExternal("mailto:hello@example.com"),
+    await window.sonobeHost.openExternal("file:///etc/passwd"),
+    await window.sonobeHost.openExternal("javascript:alert(1)"),
+  ]);
+  assert(externalResults.join() === "true,true,false,false", "openExternal allows only http(s) and mailto", externalResults);
   await win.evaluate(() => window.open("https://example.com/docs", "_blank"));
   await win.evaluate(() => {
     location.href = "https://example.com/elsewhere";
   });
-  const opened = await poll(() => app.evaluate(() => (globalThis.__opened.length >= 2 ? globalThis.__opened : null)), { message: "external links" });
-  assert(opened.includes("https://example.com/docs") && opened.includes("https://example.com/elsewhere"), "external links", opened);
+  const opened = await poll(() => app.evaluate(() => (globalThis.__opened.includes("https://example.com/elsewhere") ? globalThis.__opened : null)), { message: "external links" });
+  assert(opened.includes("https://example.com/docs") && opened.includes("https://example.com/help") && opened.includes("mailto:hello@example.com") && !opened.some((u) => u.startsWith("file:") || u.startsWith("javascript:")), "external links", opened);
   const currentUrl = await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].webContents.getURL());
   assert(currentUrl.startsWith("data:"), "navigation guard kept the app page", currentUrl.slice(0, 40));
   const windowCount = await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().length);
@@ -477,6 +518,14 @@ try {
     const bridged = await settle(() => app.evaluate(() => globalThis.__sonobeTest.hasRendererMethod("document.apply") === true), { timeout: 20_000 });
     if (bridged) {
       log("the built editor mounts the MCP bridge");
+      // Fresh user data means a first launch: dismiss the welcome screen so it doesn't cover the editor.
+      const welcome = page.getByRole("dialog", { name: "Welcome to Sonobe" });
+      if (await welcome.waitFor({ timeout: 3000 }).then(() => true, () => false)) {
+        const keepWorking = welcome.getByRole("button", { name: /Keep working on/ });
+        if (!(await keepWorking.click({ timeout: 3000 }).then(() => true, () => false))) await page.keyboard.press("Escape");
+        await welcome.waitFor({ state: "hidden", timeout: 5000 }).catch(() => undefined);
+        log("dismissed the first-launch welcome screen");
+      }
     } else {
       const probe = await connectMcp(await readConnection());
       const outline = await probe.call("get_outline");
@@ -535,9 +584,32 @@ try {
   const image = (shot.content ?? []).find((c) => c.type === "image");
   assert(!shot.isError && image?.mimeType === "image/png", "get_screenshot returns a PNG", shot.text);
   const png = Buffer.from(image.data, "base64");
-  assert(png.subarray(1, 4).toString("latin1") === "PNG" && shot.structuredContent.width >= 200 && shot.structuredContent.height >= 400, "screenshot size", shot.structuredContent);
+  const shotSize = pngSize(png);
+  assert(shotSize && shotSize.width >= 200 && shotSize.height >= 400, "screenshot size", shotSize);
   writeFileSync(mcpScreenshotPath, png);
-  log(`MCP screenshot ${shot.structuredContent.width}×${shot.structuredContent.height} → ${path.relative(process.cwd(), mcpScreenshotPath)}`);
+  log(`MCP screenshot ${shotSize.width}×${shotSize.height} → ${path.relative(process.cwd(), mcpScreenshotPath)}`);
+
+  // A simulation's frame (drawn in a hidden window) when @sonobe/mcp exposes SimulationManager.scene.
+  if (await app.evaluate(() => globalThis.__sonobeTest.simulationScreenshots())) {
+    const simShot = await mcp.call("get_screenshot", { simId, target: "viewer", maxWidth: 402 });
+    const simImage = (simShot.content ?? []).find((c) => c.type === "image");
+    const simPng = simImage ? Buffer.from(simImage.data, "base64") : Buffer.alloc(0);
+    const simSize = pngSize(simPng);
+    assert(!simShot.isError && simImage?.mimeType === "image/png" && simSize?.width === 402, "get_screenshot with simId", simShot.text);
+    writeFileSync(simScreenshotPath, simPng);
+    const layerShot = await mcp.call("get_screenshot", { simId, target: "@next_card" });
+    const layerImage = (layerShot.content ?? []).find((c) => c.type === "image");
+    const layerSize = layerImage ? pngSize(Buffer.from(layerImage.data, "base64")) : null;
+    assert(!layerShot.isError && layerSize && layerSize.width >= 50, "get_screenshot of a layer in a simulation", layerShot.text);
+    log(`simulation screenshot ${simSize.width}×${simSize.height}, layer ${layerSize.width}×${layerSize.height} → ${path.relative(process.cwd(), simScreenshotPath)}`);
+  } else {
+    log("WARN @sonobe/mcp doesn't expose SimulationManager.scene yet; simulation screenshots stay unavailable");
+  }
+
+  const notifications = await app.evaluate(() => globalThis.__sonobeTest.notifications());
+  const outlineUri = `sonobe://documents/${info.structuredContent.docId}/outline`;
+  assert(notifications.includes("resources/list_changed") && notifications.includes(`resources/updated ${outlineUri}`) && notifications.includes(`resources/updated sonobe://documents/${info.structuredContent.docId}/diagnostics`), "MCP resource notifications on new revisions", notifications);
+  log(`MCP resource notifications published (${notifications.length})`);
 
   const listed = await mcp.call("list_history");
   assert(listed.text.includes("Claude: added press feedback") && listed.text.includes("Claude: wired press feedback"), "list_history", listed.text);
@@ -551,14 +623,15 @@ try {
   const finished = await mcp.call("finish_work", { summary: "Pressing the next card now shrinks it with a spring." });
   assert(!finished.isError, "finish_work", finished.text);
   if (mode === "harness") await page.getByText("Nobody is working right now.").first().waitFor({ timeout: 5000 });
+  const selectionBefore = await mcp.call("get_selection");
   const revealed = await mcp.call("reveal", { ids: ["press_spring", "next_card"] });
   assert(revealed.structuredContent.revealed === true, "reveal", revealed.text);
   const selection = await mcp.call("get_selection");
-  assert(selection.text.includes("press_spring") && selection.text.includes("next_card"), "get_selection reflects the reveal", selection.text);
+  assert(!selection.isError && selection.text === selectionBefore.text, "reveal shows items without changing the person's selection", { before: selectionBefore.text, after: selection.text });
   if (mode === "editor") {
     const tab = page.getByRole("tab", { name: /AI Activity/ }).first();
     if (await tab.isVisible().catch(() => false)) {
-      await tab.click().catch(() => undefined);
+      await tab.click({ timeout: 5000 }).catch(() => undefined);
       const listedInPanel = await page.getByText(/wired press feedback/).first().waitFor({ timeout: 3000 }).then(() => true, () => false);
       log(listedInPanel ? "the AI Activity panel lists Claude's changes" : "opened AI Activity (entries weren't found by text)");
     }
@@ -586,8 +659,57 @@ try {
   assert(!tweak.isError, "apply_ops", tweak.text);
   const synced = await socket.next((m) => m.type === "document" && m.revision === tweak.structuredContent.revision);
   assert(synced.doc.components.main.patches.press_scale.inputs.end === 0.9 && synced.revision > firstSync.revision, "live sync pushes the new revision", { from: firstSync.revision, to: synced.revision });
+
+  // Revisions pushed by the editor (sonobeHost.notifyDocumentChanged) replace polling.
+  await page.evaluate((revision) => window.sonobeHost.notifyDocumentChanged(revision), synced.revision);
+  assert(await poll(() => app.evaluate(() => globalThis.__sonobeTest.previewPushUpdates() === true), { message: "push mode" }), "players switch to pushed revisions");
+  const direct = await app.evaluate(() =>
+    globalThis.__sonobeTest.invokeRenderer("document.apply", { ops: [{ op: "setInput", target: "press_scale.end", value: 0.92 }], label: "tuned press scale again", author: { kind: "agent", name: "Claude" } }),
+  );
+  assert(direct?.result?.ok === true && typeof direct.revision === "number", "a direct renderer edit", direct);
+  // An editor that calls notifyDocumentChanged itself syncs the edit on its own; otherwise nothing polls,
+  // so the edit only arrives once the revision is pushed (electron/lan-preview.test.ts covers no-polling exactly).
+  let pushed = await socket.next((m) => m.type === "document" && m.revision === direct.revision, 1500).catch(() => null);
+  const editorPushes = pushed !== null;
+  if (!pushed) {
+    await page.evaluate((revision) => window.sonobeHost.notifyDocumentChanged(revision), direct.revision);
+    pushed = await socket.next((m) => m.type === "document" && m.revision === direct.revision);
+  }
+  assert(pushed.doc.components.main.patches.press_scale.inputs.end === 0.92, "pushed revisions sync players", pushed.revision);
   socket.ws.close();
-  log(`phone preview on ${preview.url}${preview.lanReachable ? "" : " (loopback only)"}; live sync ${firstSync.revision} → ${synced.revision}`);
+  log(`phone preview on ${preview.url}${preview.lanReachable ? "" : " (loopback only)"}; live sync ${firstSync.revision} → ${synced.revision} → ${pushed.revision} (pushed ${editorPushes ? "by the editor itself" : "with notifyDocumentChanged"})`);
+
+  // Pop-out viewer window: the live prototype in its own sandboxed window.
+  const popped = await page.evaluate(() => window.sonobeHost.popOutViewer({ alwaysOnTop: false }));
+  assert(popped.open === true && popped.error === null, "popOutViewer", popped);
+  const viewerWindow = await poll(
+    () =>
+      app.evaluate(async ({ BrowserWindow }) => {
+        const w = BrowserWindow.getAllWindows().find((x) => x.webContents.getURL().startsWith("http://127.0.0.1:"));
+        if (!w || !w.isVisible()) return null;
+        const layers = await w.webContents.executeJavaScript("document.querySelectorAll('.sonobe-layer').length");
+        if (layers <= 5) return null;
+        const prefs = w.webContents.getLastWebPreferences() ?? {};
+        return { layers, title: w.getTitle(), muted: w.webContents.isAudioMuted(), sandbox: prefs.sandbox, contextIsolation: prefs.contextIsolation, size: w.getContentSize() };
+      }),
+    { timeout: 15_000, interval: 250, message: "the pop-out viewer to render" },
+  );
+  assert(viewerWindow.muted && viewerWindow.sandbox === true && viewerWindow.contextIsolation === true, "viewer window is muted and sandboxed", viewerWindow);
+  const noHostInViewer = await app.evaluate(async ({ BrowserWindow }) => BrowserWindow.getAllWindows().find((x) => x.webContents.getURL().startsWith("http://127.0.0.1:")).webContents.executeJavaScript("typeof window.sonobeHost"));
+  assert(noHostInViewer === "undefined", "the viewer window has no host API", noHostInViewer);
+  const refocused = await page.evaluate(() => window.sonobeHost.popOutViewer());
+  const windowTotal = await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().filter((w) => !w.isDestroyed() && w.isVisible()).length);
+  assert(refocused.open === true && windowTotal === 2, "popOutViewer reuses its window", { refocused, windowTotal });
+  const viewerPng = await app.evaluate(async ({ BrowserWindow }) => {
+    const w = BrowserWindow.getAllWindows().find((x) => x.webContents.getURL().startsWith("http://127.0.0.1:"));
+    await new Promise((r) => setTimeout(r, 400));
+    const image = await w.webContents.capturePage();
+    return image.isEmpty() ? null : image.toPNG().toString("base64");
+  });
+  if (viewerPng) writeFileSync(viewerWindowScreenshotPath, Buffer.from(viewerPng, "base64"));
+  const closedViewer = await page.evaluate(() => window.sonobeHost.closeViewerWindow());
+  assert(closedViewer.open === false, "closeViewerWindow", closedViewer);
+  log(`pop-out viewer rendered ${viewerWindow.layers} layers at ${viewerWindow.size.join("×")}${viewerPng ? ` → ${path.relative(process.cwd(), viewerWindowScreenshotPath)}` : ""}`);
 
   const player = await app.evaluate(async ({ BrowserWindow }, url) => {
     const w = new BrowserWindow({ show: false, width: 402, height: 874, useContentSize: true, webPreferences: { sandbox: true, contextIsolation: true } });
@@ -624,8 +746,10 @@ try {
   assert(stopped.running === false, "stopPreview", stopped);
   assert(await fetch(preview.url).then(() => false, () => true), "the preview server stopped listening");
 
+  const undoneDirect = await mcp.call("undo");
+  assert(!undoneDirect.isError && undoneDirect.text.includes("tuned press scale again"), "undo the pushed edit", undoneDirect.text);
   const undone = await mcp.call("undo");
-  assert(!undone.isError && undone.text.includes("tuned press scale"), "undo Claude's newest change", undone.text);
+  assert(!undone.isError && undone.text.includes("tuned press scale") && !undone.text.includes("again"), "undo Claude's newest change", undone.text);
   const afterUndo = await app.evaluate(() => globalThis.__sonobeTest.invokeRenderer("history.list", { limit: 3 }));
   assert(afterUndo.entries[0]?.description.startsWith("Claude: wired press feedback"), "undo went through the renderer's history", afterUndo.entries[0]);
   log("undo ok");

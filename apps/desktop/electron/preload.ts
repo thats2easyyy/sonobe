@@ -4,7 +4,8 @@
  */
 
 import { contextBridge, ipcRenderer, type IpcRendererEvent } from "electron";
-import type { McpStatus, PreviewStatus, ProjectChange, ProjectFiles, ProjectWrite, RpcHandler, SonobeCommandId, SonobeHost } from "./host-api.d.ts";
+import { attachAssistantBridge } from "./assistant/preload.ts";
+import type { McpStatus, PreviewStatus, ProjectChange, ProjectFiles, ProjectWrite, RpcHandler, SecretsStatus, SonobeCommandId, SonobeHost, ViewerWindowStatus } from "./host-api.d.ts";
 import { isCommandId, listCommands, toHostPlatform } from "./commands.ts";
 import { IPC } from "./ipc.ts";
 import { createRpcFailure, createRpcServer } from "./rpc.ts";
@@ -43,6 +44,14 @@ ipcRenderer.on(IPC.openProject, (_event, dir: unknown) => {
 });
 
 let watchCounter = 0;
+
+/** invoke() whose errors carry the main process's message without Electron's "Error invoking remote method" prefix. */
+function invoke<T>(channel: string, ...args: unknown[]): Promise<T> {
+  return (ipcRenderer.invoke(channel, ...args) as Promise<T>).catch((err: unknown) => {
+    const message = err instanceof Error ? err.message : String(err);
+    throw new Error(message.replace(/^Error invoking remote method '[^']*': (?:[A-Za-z]*Error: )?/, ""));
+  });
+}
 
 const host: SonobeHost = {
   platform,
@@ -136,6 +145,31 @@ const host: SonobeHost = {
       ipcRenderer.removeListener(IPC.previewChanged, listener);
     };
   },
+
+  notifyDocumentChanged(revision) {
+    if (typeof revision === "number" && Number.isFinite(revision)) ipcRenderer.send(IPC.documentChanged, revision);
+  },
+
+  secrets: {
+    status: () => invoke<SecretsStatus>(IPC.secretsStatus),
+    get: (name) => invoke<string | null>(IPC.secretsGet, name),
+    set: (name, value) => invoke<void>(IPC.secretsSet, name, value),
+    delete: (name) => invoke<boolean>(IPC.secretsDelete, name),
+  },
+
+  openExternal: (url) => invoke<boolean>(IPC.openExternal, String(url)),
+
+  popOutViewer: (options) => invoke<ViewerWindowStatus>(IPC.viewerWindowOpen, typeof options?.alwaysOnTop === "boolean" ? { alwaysOnTop: options.alwaysOnTop } : {}),
+  closeViewerWindow: () => invoke<ViewerWindowStatus>(IPC.viewerWindowClose),
+  getViewerWindowStatus: () => invoke<ViewerWindowStatus>(IPC.viewerWindowStatus),
+  onViewerWindowStatus(cb) {
+    const listener = (_event: IpcRendererEvent, status: ViewerWindowStatus) => cb(status);
+    ipcRenderer.on(IPC.viewerWindowChanged, listener);
+    return () => {
+      ipcRenderer.removeListener(IPC.viewerWindowChanged, listener);
+    };
+  },
 };
 
+attachAssistantBridge(host, ipcRenderer);
 contextBridge.exposeInMainWorld("sonobeHost", host);

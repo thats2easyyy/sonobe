@@ -18,8 +18,8 @@ import {
   type InputValue,
   type ValueType,
 } from "@sonobe/core";
-import { Image as ImageIcon, Plus, Trash } from "lucide-react";
-import { useRef, useState, type CSSProperties, type KeyboardEvent } from "react";
+import { Image as ImageIcon, Plus, Trash, Upload } from "lucide-react";
+import { useCallback, useRef, useState, type CSSProperties, type KeyboardEvent } from "react";
 import { LayerTypeIcon } from "../../shell/icons.tsx";
 import { useCurrentComponent, useDocument, useEditorSession } from "../../state/EditorProvider.tsx";
 import { Badge } from "../../ui/Badge.tsx";
@@ -30,11 +30,13 @@ import { ScrubNumberField } from "../../ui/ScrubNumberField.tsx";
 import { SegmentedControl } from "../../ui/SegmentedControl.tsx";
 import { Select, type SelectOption } from "../../ui/Select.tsx";
 import { TextArea, TextField } from "../../ui/TextField.tsx";
+import { toast } from "../../ui/Toast.tsx";
 import { Checkbox, Toggle } from "../../ui/Toggle.tsx";
 import { VectorField } from "../../ui/VectorField.tsx";
 import { clamp01, parseHexColor, toCssColor, toHex8 } from "../../ui/lib/colorMath.ts";
-import { usePointerDrag } from "../../ui/lib/hooks.ts";
+import { useLatest, usePointerDrag } from "../../ui/lib/hooks.ts";
 import { decimalsOf } from "../../ui/lib/scrubMath.ts";
+import { acceptAttribute, assetKindsFor, importAssetForField, KIND_NOUNS, type FieldImportResult } from "./assetImport.ts";
 import { formatLiveValue, literalValue, sameInputValue, updateVectorComponent, type FieldUpdate, type InspectorField } from "./model.ts";
 
 /** What a control can do to its field. */
@@ -380,25 +382,55 @@ function LayerControl({ field, actions, label, excludeLayers = [] }: ValueContro
   );
 }
 
-const ASSET_KINDS: Partial<Record<ValueType, readonly AssetKind[]>> = {
-  image: ["image"],
-  video: ["video"],
-  sound: ["sound"],
-  json: ["lottie", "json"],
-};
-
 const URL_OPTION = "__url";
+const IMPORT_OPTION = "__import";
+
+export interface AssetFieldImport {
+  /** A file is being read and imported. */
+  importing: boolean;
+  /** Import a file as an asset and set the field to it; problems show as a toast. */
+  importFile: (file: File) => Promise<FieldImportResult>;
+}
+
+/** Import files into an asset field (the picker's Import File… and files dropped on the row). */
+export function useAssetFieldImport(field: InspectorField, actions: FieldActions): AssetFieldImport {
+  const session = useEditorSession();
+  const [importing, setImporting] = useState(false);
+  const latest = useLatest({ field, actions });
+  const importFile = useCallback(
+    async (file: File): Promise<FieldImportResult> => {
+      const { field: current } = latest.current;
+      setImporting(true);
+      let result: FieldImportResult;
+      try {
+        result = await importAssetForField(session, file, assetKindsFor(current.type), current.port.name);
+      } catch (err) {
+        result = { ok: false, error: `Couldn't import “${file.name}”: ${err instanceof Error ? err.message : String(err)}` };
+      }
+      setImporting(false);
+      if (result.ok) latest.current.actions.set({ asset: result.assetId });
+      else toast({ id: "inspector-import", title: result.error, tone: "warn" });
+      return result;
+    },
+    [session, latest],
+  );
+  return { importing, importFile };
+}
 
 function AssetControl({ field, actions, label }: ValueControlProps) {
   const session = useEditorSession();
   const assets = useDocument((s) => s.doc.assets);
-  const kinds = ASSET_KINDS[field.type] ?? ["image"];
+  const fileRef = useRef<HTMLInputElement>(null);
+  const { importing, importFile } = useAssetFieldImport(field, actions);
+  const kinds = assetKindsFor(field.type);
+  const noun = KIND_NOUNS[kinds[0] ?? "image"];
   const list = Object.values(assets)
     .filter((a) => kinds.includes(a.kind))
     .sort((a, b) => a.name.localeCompare(b.name));
   const url = typeof field.value === "string" ? field.value : null;
   const [urlMode, setUrlMode] = useState(url !== null);
   const value = field.mixed ? null : isAssetInput(field.value) ? field.value.asset : url !== null || urlMode ? URL_OPTION : "";
+  const chooseFile = () => fileRef.current?.click();
   const options: SelectOption[] = [
     { value: "", label: "None" },
     ...list.map(
@@ -410,6 +442,7 @@ function AssetControl({ field, actions, label }: ValueControlProps) {
         keywords: [a.file, a.id],
       }),
     ),
+    { value: IMPORT_OPTION, label: "Import File…", description: `Choose ${noun} from your computer`, icon: <Upload size={13} />, keywords: ["upload", "add", "file"] },
     { value: URL_OPTION, label: "Web Address…", description: "Load it from a URL" },
   ];
   return (
@@ -422,6 +455,10 @@ function AssetControl({ field, actions, label }: ValueControlProps) {
         mixed={field.mixed}
         options={options}
         onChange={(next) => {
+          if (next === IMPORT_OPTION) {
+            chooseFile();
+            return;
+          }
           if (next === URL_OPTION) {
             setUrlMode(true);
             return;
@@ -430,8 +467,30 @@ function AssetControl({ field, actions, label }: ValueControlProps) {
           actions.set(next ? { asset: next } : null);
         }}
       />
+      <input
+        ref={fileRef}
+        type="file"
+        hidden
+        tabIndex={-1}
+        accept={acceptAttribute(kinds)}
+        aria-label={`Import a file for ${label}`}
+        onChange={(event) => {
+          const file = event.target.files?.[0];
+          event.target.value = "";
+          if (file) void importFile(file);
+        }}
+      />
       {value === URL_OPTION && <UrlField initial={url ?? ""} label={label} onCommit={(text) => actions.set(text.trim() ? text.trim() : null)} />}
-      {list.length === 0 && value !== URL_OPTION && <p className="sb-insp-hint">No {kinds[0]} files in this project yet. Use a web address instead.</p>}
+      {value === "" && (
+        <button type="button" className="sb-insp-dropzone" disabled={importing} aria-busy={importing || undefined} onClick={chooseFile}>
+          <Upload size={13} strokeWidth={1.75} aria-hidden />
+          <span className="sb-insp-dropzone__text">
+            <span className="sb-insp-dropzone__title">{importing ? "Importing…" : `Import ${noun}…`}</span>
+            {!importing && <span className="sb-insp-dropzone__meta">or drop a file here</span>}
+          </span>
+        </button>
+      )}
+      {importing && value !== "" && <p className="sb-insp-hint">Importing…</p>}
     </div>
   );
 }

@@ -1,19 +1,21 @@
 /** Electron main process entry: lifecycle, windows, menus, file IO, the MCP endpoint, and phone preview. */
 
-import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, nativeImage, session, shell, type IpcMainEvent, type IpcMainInvokeEvent } from "electron";
+import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, nativeImage, safeStorage, screen, session, shell, type IpcMainEvent, type IpcMainInvokeEvent } from "electron";
 import { existsSync } from "node:fs";
 import path from "node:path";
+import { pathToFileURL } from "node:url";
 import type { SonobeDocument } from "@sonobe/core";
 import { saveProjectToDisk } from "@sonobe/core/node";
 import { createHttpHandler, isHostError, loadGuides, type NodeMcpHandler } from "@sonobe/mcp";
 import { createPatchRegistry } from "@sonobe/patches";
 import { toBuffer as qrPng } from "qrcode";
-import { createAppHost, type AppHost, type RendererTarget } from "./app-host.ts";
+import { createAppHost, type AppHost, type CapturedImage, type DocumentChange, type RendererTarget, type SceneRenderRequest } from "./app-host.ts";
 import { createAppWindow, type AppWindow, type WindowContentSource } from "./app-window.ts";
+import { registerAssistant } from "./assistant/register.ts";
 import { captureWebContents } from "./capture.ts";
 import { isCommandId, toHostPlatform } from "./commands.ts";
 import { projectPathsFromArgv, readDesktopEnv } from "./env.ts";
-import type { McpStatus, PreviewStatus, SonobeCommandId } from "./host-api.d.ts";
+import type { McpStatus, PreviewStatus, SecretsStatus, SonobeCommandId, ViewerWindowStatus } from "./host-api.d.ts";
 import { IPC } from "./ipc.ts";
 import { resolveUnder, startLanPreview, type LanPreviewHandle } from "./lan-preview.ts";
 import { defaultSonobeHome, startMcpServer, type McpServerHandle } from "./mcp-server.ts";
@@ -22,7 +24,8 @@ import { OwnWriteRegistry, ProjectAccess, readProject, resolveProjectSelection, 
 import { createProjectWatcher, type ProjectWatcher } from "./project-watcher.ts";
 import { RecentProjects } from "./recent-projects.ts";
 import { createRendererRpcHub, type RendererRpcHub, type RpcIpcEvent } from "./rpc.ts";
-import { ALLOWED_PERMISSIONS, isAppUrl } from "./security.ts";
+import { createSecretStore, createTestCipher, type SecretStore } from "./secrets.ts";
+import { ALLOWED_PERMISSIONS, isAppUrl, isExternalUrl, isMailtoUrl } from "./security.ts";
 
 const APP_NAME = "Sonobe";
 const VERSION = __SONOBE_VERSION__;
@@ -52,6 +55,18 @@ function resolveContentSource(): WindowContentSource {
   return { kind: "file", root, index: path.join(root, "index.html") };
 }
 
+/** How often MCP resource-updated notifications go out while a document keeps changing. */
+const RESOURCE_NOTIFY_MS = 250;
+
+/** Window content size for the pop-out viewer: the prototype's screen, shrunk to fit the display. */
+function viewerWindowSize(doc: SonobeDocument | undefined, workArea: { width: number; height: number }): [number, number] {
+  const device = doc?.project.device;
+  let [width, height] = device?.size ?? [402, 874];
+  if (device?.orientation === "landscape" && height > width) [width, height] = [height, width];
+  const fit = Math.min(1, (workArea.height * 0.85) / height, (workArea.width * 0.85) / width);
+  return [Math.max(160, Math.round(width * fit)), Math.max(160, Math.round(height * fit))];
+}
+
 /** A folder scripts/build.mjs copies next to main.cjs, or its source in a repo checkout. */
 function bundledResource(name: string, repoRelative: string): string {
   const bundled = path.join(__dirname, name);
@@ -79,6 +94,18 @@ function main(): void {
   let previewStarting: Promise<void> | null = null;
   let creating: Promise<AppWindow> | null = null;
   let ready = false;
+  let secrets: SecretStore | null = null;
+  /** Set once an editor pushes revisions (notifyDocumentChanged): players stop polling. */
+  let pushUpdates = false;
+  let viewerWindow: { win: BrowserWindow; server: LanPreviewHandle; origin: string } | null = null;
+  let viewerWindowError: string | null = null;
+  let viewerWindowOpening: Promise<ViewerWindowStatus> | null = null;
+  let sceneWindow: Promise<BrowserWindow> | null = null;
+  let sceneQueue: Promise<unknown> = Promise.resolve();
+  const pendingResourceUris = new Set<string>();
+  let resourceTimer: ReturnType<typeof setTimeout> | null = null;
+  /** MCP notifications published (SONOBE_TEST only). */
+  const notificationLog: string[] = [];
 
   const primaryWindow = (): AppWindow | undefined => {
     const focused = BrowserWindow.getFocusedWindow();
@@ -161,6 +188,12 @@ function main(): void {
               watchers.delete(watchId);
             }
           }
+          if (windows.size === 0) {
+            // Helper windows shouldn't keep the app alive (or show a document nobody has open).
+            if (viewerWindow && !viewerWindow.win.isDestroyed()) viewerWindow.win.close();
+            void sceneWindow?.then((scene) => scene.destroy()).catch(() => undefined);
+          }
+          pokePlayers();
         });
       },
     });
@@ -290,6 +323,7 @@ function main(): void {
       getDocument: previewDocument,
       resolveAsset: previewAsset,
       onClientsChange: publishPreviewStatus,
+      pushUpdates,
     })
       .then((handle) => {
         preview = handle;
@@ -353,6 +387,215 @@ function main(): void {
     else if (response === 2) await stopPreview();
   };
 
+  // --- Live sync: revisions pushed by the editor ---------------------------------------------
+
+  /** Look for a new revision in every connected player (phone preview and pop-out viewer). */
+  function pokePlayers(): void {
+    preview?.poke();
+    viewerWindow?.server.poke();
+  }
+
+  /** The editor in `w` committed `revision` (sonobeHost.notifyDocumentChanged). */
+  const documentChanged = (w: AppWindow, revision: number) => {
+    if (!pushUpdates) {
+      pushUpdates = true;
+      preview?.setPushUpdates(true);
+      viewerWindow?.server.setPushUpdates(true);
+      log("info", "The editor pushes revisions; players follow them instead of polling");
+    }
+    pokePlayers();
+    void appHost?.documentChanged(w.webContents.id, revision).catch(() => undefined);
+  };
+
+  const flushResourceUpdates = () => {
+    resourceTimer = null;
+    const uris = [...pendingResourceUris];
+    pendingResourceUris.clear();
+    for (const uri of uris) {
+      if (env.testHooks) notificationLog.push(`resources/updated ${uri}`);
+      mcpHandler?.notify.resourceUpdated(uri);
+    }
+  };
+
+  /** Documents opened, changed or closed: MCP resource notifications, and players follow along. */
+  const onDocumentChange = (change: DocumentChange) => {
+    if (change.kind !== "changed") {
+      if (env.testHooks) notificationLog.push("resources/list_changed");
+      mcpHandler?.notify.resourcesChanged();
+    }
+    if (change.kind !== "closed") {
+      pendingResourceUris.add(`sonobe://documents/${change.docId}/outline`);
+      pendingResourceUris.add(`sonobe://documents/${change.docId}/diagnostics`);
+      resourceTimer ??= setTimeout(flushResourceUpdates, RESOURCE_NOTIFY_MS);
+    }
+    if (change.kind === "changed") pokePlayers();
+  };
+
+  // --- Pop-out viewer window --------------------------------------------------------------------
+
+  const viewerWindowStatus = (): ViewerWindowStatus => {
+    const win = viewerWindow?.win;
+    return win && !win.isDestroyed() ? { open: true, alwaysOnTop: win.isAlwaysOnTop(), error: null } : { open: false, alwaysOnTop: false, error: viewerWindowError };
+  };
+
+  const publishViewerWindowStatus = () => {
+    const status = viewerWindowStatus();
+    for (const w of windows.values()) if (!w.webContents.isDestroyed()) w.webContents.send(IPC.viewerWindowChanged, status);
+  };
+
+  /** A sandboxed window running the web player from a loopback-only server, next to the editor. */
+  const openViewerWindow = async (opts: { alwaysOnTop?: boolean }): Promise<ViewerWindowStatus> => {
+    const playerRoot = path.join(__dirname, "player");
+    if (!existsSync(path.join(playerRoot, "index.html"))) {
+      viewerWindowError = `The viewer player isn't built (${playerRoot}). Run npm run build -w @sonobe/desktop.`;
+      publishViewerWindowStatus();
+      return viewerWindowStatus();
+    }
+    let server: LanPreviewHandle;
+    try {
+      server = await startLanPreview({ playerRoot, host: "127.0.0.1", version: VERSION, log, getDocument: previewDocument, resolveAsset: previewAsset, pushUpdates });
+    } catch (err) {
+      viewerWindowError = `The viewer window couldn't start: ${errorMessage(err)}`;
+      publishViewerWindowStatus();
+      return viewerWindowStatus();
+    }
+    const snap = await previewDocument().catch(() => null);
+    const anchor = primaryWindow()?.win;
+    const display = anchor ? screen.getDisplayMatching(anchor.getBounds()) : screen.getPrimaryDisplay();
+    const [width, height] = viewerWindowSize(snap?.doc, display.workArea);
+    let position: { x: number; y: number } | undefined;
+    if (anchor) {
+      const b = anchor.getBounds();
+      const area = display.workArea;
+      const x = b.x + b.width + 12;
+      if (x + width <= area.x + area.width) position = { x, y: Math.max(area.y, Math.min(b.y, area.y + area.height - height)) };
+    }
+    const win = new BrowserWindow({
+      width,
+      height,
+      ...(position ?? {}),
+      useContentSize: true,
+      show: false,
+      title: snap ? `${snap.name} · Viewer` : "Viewer",
+      backgroundColor: "#000000",
+      alwaysOnTop: opts.alwaysOnTop === true,
+      webPreferences: { contextIsolation: true, sandbox: true, nodeIntegration: false, nodeIntegrationInWorker: false, webSecurity: true, webviewTag: false, navigateOnDragDrop: false, spellcheck: false, safeDialogs: true },
+    });
+    const wc = win.webContents;
+    if (env.mute) wc.setAudioMuted(true);
+    const origin = new URL(server.url).origin;
+    wc.on("will-navigate", (event) => {
+      let same = false;
+      try {
+        same = new URL(event.url).origin === origin;
+      } catch {
+        same = false;
+      }
+      if (same) return;
+      event.preventDefault();
+      if (isExternalUrl(event.url) || isMailtoUrl(event.url)) void shell.openExternal(event.url);
+    });
+    wc.setWindowOpenHandler(({ url }) => {
+      if (isExternalUrl(url) || isMailtoUrl(url)) void shell.openExternal(url);
+      return { action: "deny" };
+    });
+    win.once("ready-to-show", () => win.show());
+    win.on("closed", () => {
+      if (viewerWindow?.win === win) viewerWindow = null;
+      void server.close();
+      publishViewerWindowStatus();
+    });
+    viewerWindow = { win, server, origin };
+    viewerWindowError = null;
+    try {
+      await win.loadURL(server.url);
+    } catch (err) {
+      log("warn", `The viewer window didn't load: ${errorMessage(err)}`);
+    }
+    publishViewerWindowStatus();
+    return viewerWindowStatus();
+  };
+
+  const popOutViewer = (opts: { alwaysOnTop?: boolean } = {}): Promise<ViewerWindowStatus> => {
+    const existing = viewerWindow?.win;
+    if (existing && !existing.isDestroyed()) {
+      if (opts.alwaysOnTop !== undefined) existing.setAlwaysOnTop(opts.alwaysOnTop, "floating");
+      if (existing.isMinimized()) existing.restore();
+      existing.show();
+      existing.focus();
+      publishViewerWindowStatus();
+      return Promise.resolve(viewerWindowStatus());
+    }
+    return (viewerWindowOpening ??= openViewerWindow(opts).finally(() => {
+      viewerWindowOpening = null;
+    }));
+  };
+
+  const closeViewerWindow = async (): Promise<ViewerWindowStatus> => {
+    const win = viewerWindow?.win;
+    if (win && !win.isDestroyed()) {
+      const closed = new Promise<void>((resolve) => win.once("closed", () => resolve()));
+      win.close();
+      await closed;
+    }
+    return viewerWindowStatus();
+  };
+
+  // --- Simulation frames for MCP screenshots ---------------------------------------------------
+
+  /** A hidden window that draws SceneFrames (dist/scene), created on first use. */
+  const sceneRenderer = (): Promise<BrowserWindow> =>
+    (sceneWindow ??= (async () => {
+      const index = path.join(__dirname, "scene", "index.html");
+      if (!existsSync(index)) throw new Error(`The scene renderer isn't built (${index}). Run npm run build -w @sonobe/desktop.`);
+      const win = new BrowserWindow({
+        show: false,
+        width: 402,
+        height: 874,
+        useContentSize: true,
+        frame: false,
+        skipTaskbar: true,
+        enableLargerThanScreen: true,
+        paintWhenInitiallyHidden: true,
+        webPreferences: { contextIsolation: true, sandbox: true, nodeIntegration: false, webSecurity: true, backgroundThrottling: false, navigateOnDragDrop: false, spellcheck: false },
+      });
+      win.webContents.setAudioMuted(true);
+      win.webContents.on("will-navigate", (event) => event.preventDefault());
+      win.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
+      win.on("closed", () => {
+        sceneWindow = null;
+      });
+      await win.loadFile(index);
+      return win;
+    })().catch((err: unknown) => {
+      sceneWindow = null;
+      throw err;
+    }));
+
+  const renderScene = (request: SceneRenderRequest): Promise<CapturedImage | null> => {
+    const task = async () => {
+      const win = await sceneRenderer();
+      const scale = request.crop.width > 0 ? request.size.width / request.crop.width : 1;
+      const [width, height] = request.scene.size;
+      win.setContentSize(Math.max(1, Math.ceil(width * scale)), Math.max(1, Math.ceil(height * scale)));
+      const assets = Object.fromEntries(Object.entries(request.assets).map(([id, file]) => [id, pathToFileURL(file).href]));
+      await win.webContents.executeJavaScript(`window.__sonobeRenderScene(${JSON.stringify({ scene: request.scene, scale, assets })})`, true);
+      const crop = { x: request.crop.x * scale, y: request.crop.y * scale, width: request.crop.width * scale, height: request.crop.height * scale };
+      return captureWebContents(win.webContents, crop, request.size);
+    };
+    const run = sceneQueue.then(task, task);
+    sceneQueue = run.catch(() => undefined);
+    return run.catch((err: unknown) => {
+      log("warn", `Couldn't draw a simulation frame: ${errorMessage(err)}`);
+      return null;
+    });
+  };
+
+  const requireSecrets = (): SecretStore => {
+    if (!secrets) throw new Error("Secure storage isn't ready yet.");
+    return secrets;
+  };
+
   app.on("open-file", (event, filePath) => {
     event.preventDefault();
     void openProjects([filePath]);
@@ -382,9 +625,16 @@ function main(): void {
     if (ready && windows.size === 0) void ensureWindow();
   });
 
+  // The players show the document in front, so switching editor windows may change what they show.
+  app.on("browser-window-focus", (_event, win) => {
+    if (windows.has(win.webContents.id)) pokePlayers();
+  });
+
   app.on("will-quit", () => {
     for (const { watcher } of watchers.values()) watcher.close();
     watchers.clear();
+    if (resourceTimer) clearTimeout(resourceTimer);
+    if (viewerWindow) void viewerWindow.server.close();
     rpc?.dispose();
     if (mcpHandler) void mcpHandler.close().catch(() => undefined);
     appHost?.dispose();
@@ -508,6 +758,49 @@ function main(): void {
       return stopPreview();
     });
 
+    ipcMain.on(IPC.documentChanged, (event, revision: unknown) => {
+      const w = trustedWindow(event);
+      if (w && typeof revision === "number" && Number.isFinite(revision)) documentChanged(w, revision);
+    });
+
+    ipcMain.handle(IPC.secretsStatus, (event): SecretsStatus => {
+      requireWindow(event);
+      return requireSecrets().status();
+    });
+    ipcMain.handle(IPC.secretsGet, (event, name: unknown) => {
+      requireWindow(event);
+      return requireSecrets().get(name);
+    });
+    ipcMain.handle(IPC.secretsSet, async (event, name: unknown, value: unknown) => {
+      requireWindow(event);
+      await requireSecrets().set(name, value);
+    });
+    ipcMain.handle(IPC.secretsDelete, (event, name: unknown) => {
+      requireWindow(event);
+      return requireSecrets().delete(name);
+    });
+
+    ipcMain.handle(IPC.openExternal, async (event, url: unknown) => {
+      requireWindow(event);
+      if (typeof url !== "string" || url.length > 8192 || !(isExternalUrl(url) || isMailtoUrl(url))) return false;
+      await shell.openExternal(url);
+      return true;
+    });
+
+    ipcMain.handle(IPC.viewerWindowOpen, (event, options: unknown) => {
+      requireWindow(event);
+      const alwaysOnTop = options && typeof options === "object" ? (options as { alwaysOnTop?: unknown }).alwaysOnTop : undefined;
+      return popOutViewer(typeof alwaysOnTop === "boolean" ? { alwaysOnTop } : {});
+    });
+    ipcMain.handle(IPC.viewerWindowClose, (event) => {
+      requireWindow(event);
+      return closeViewerWindow();
+    });
+    ipcMain.handle(IPC.viewerWindowStatus, (event): ViewerWindowStatus => {
+      requireWindow(event);
+      return viewerWindowStatus();
+    });
+
     ipcMain.on(IPC.commandListeners, (event, count: unknown) => {
       if (typeof count === "number") trustedWindow(event)?.setCommandListeners(count);
     });
@@ -519,7 +812,16 @@ function main(): void {
   };
 
   void app.whenReady().then(async () => {
-    const trustedUrl = (url: string | undefined) => !!url && [...windows.values()].some((w) => isAppUrl(url, w.content()));
+    const trustedUrl = (url: string | undefined) => {
+      if (!url) return false;
+      if ([...windows.values()].some((w) => isAppUrl(url, w.content()))) return true;
+      // The pop-out viewer may use the camera and microphone like the editor's viewer (no IPC access).
+      try {
+        return !!viewerWindow && new URL(url).origin === viewerWindow.origin;
+      } catch {
+        return false;
+      }
+    };
     session.defaultSession.setPermissionRequestHandler((_wc, permission, callback, details) => {
       callback(ALLOWED_PERMISSIONS.has(permission) && trustedUrl(details.requestingUrl));
     });
@@ -529,7 +831,10 @@ function main(): void {
     app.setAboutPanelOptions({ applicationName: APP_NAME, applicationVersion: VERSION, copyright: "MIT License · Sonobe contributors" });
 
     rpc = createRendererRpcHub(ipcMain, { isTrustedSender: (event: RpcIpcEvent) => !!trustedWindow(event as unknown as IpcMainEvent) });
+    // Test runs use a reversible cipher so automated launches never touch (or prompt for) the keychain.
+    secrets = createSecretStore({ file: path.join(app.getPath("userData"), "secrets.json"), cipher: env.testHooks ? createTestCipher() : safeStorage, log });
     registerIpc();
+    registerAssistant({ ipcMain, isTrustedSender: (event) => trustedWindow(event as IpcMainInvokeEvent) !== null, host: () => appHost, secrets: () => secrets, version: VERSION, guides: () => loadGuides(bundledResource("guides", "packages/mcp/guides")), log });
 
     appHost = createAppHost({
       registry: createPatchRegistry(),
@@ -543,6 +848,8 @@ function main(): void {
       defaultProjectDir,
       projectExists: async (dir) => existsSync(path.join(dir, "project.json")),
       writeProject: writeNewProject,
+      renderScene,
+      onDocumentChange,
     });
 
     recents = new RecentProjects(path.join(app.getPath("userData"), "recent-projects.json"));
@@ -587,9 +894,26 @@ function main(): void {
         previewStatus: () => previewStatus(),
         startPreview: () => startPreview(),
         stopPreview: () => stopPreview(),
+        previewPushUpdates: () => preview?.pushUpdates ?? null,
+        simulationScreenshots: () => appHost?.simulationScreenshots() ?? false,
+        viewerWindowStatus: () => viewerWindowStatus(),
+        viewerWindowUrl: () => (viewerWindow && !viewerWindow.win.isDestroyed() ? viewerWindow.win.webContents.getURL() : null),
+        popOutViewer: (options?: { alwaysOnTop?: boolean }) => popOutViewer(options),
+        closeViewerWindow: () => closeViewerWindow(),
+        secretsStatus: () => secrets?.status() ?? null,
+        /** MCP notifications published so far (outline/diagnostics updates and list changes). */
+        notifications: () => {
+          if (resourceTimer) {
+            clearTimeout(resourceTimer);
+            flushResourceUpdates();
+          }
+          return [...notificationLog];
+        },
         /** Destroy every window without the unsaved-changes prompt. */
         destroyWindows: () => {
           for (const w of windows.values()) w.win.destroy();
+          if (viewerWindow && !viewerWindow.win.isDestroyed()) viewerWindow.win.destroy();
+          void sceneWindow?.then((scene) => scene.destroy()).catch(() => undefined);
         },
       };
     }

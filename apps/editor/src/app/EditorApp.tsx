@@ -13,6 +13,8 @@ import { FilePlus, FolderOpen, FolderSearch, Save, SaveAll, X } from "lucide-rea
 import { lazy, Suspense, useEffect, useState, type ReactNode } from "react";
 import { getDesktopHostApi } from "../host/detect.ts";
 import { registerRpcHandlers } from "../host/rpcHandlers.ts";
+import { useAssistant } from "../panels/assistant/assistantStore.ts";
+import { assistantCommand } from "../panels/assistant/commands.ts";
 import { CanvasPanel } from "../panels/canvas/CanvasPanel.tsx";
 import { ConnectClaudeButton } from "../panels/connect/ConnectClaudeButton.tsx";
 import { connectClaudeStore, useConnectClaude } from "../panels/connect/connectStore.ts";
@@ -28,7 +30,7 @@ import { layoutStore, useLayout } from "../shell/layoutStore.ts";
 import { Panel } from "../shell/Panel.tsx";
 import { EditorProvider, useDocument, useEditorSession, useRuntimeState } from "../state/EditorProvider.tsx";
 import type { EditorSession } from "../state/session.ts";
-import { useCommands } from "../ui/commands/CommandProvider.tsx";
+import { useCommands, useRegisterCommands } from "../ui/commands/CommandProvider.tsx";
 import type { CommandRegistry } from "../ui/commands/commandRegistry.ts";
 import type { MenuEntry } from "../ui/Menu.tsx";
 import { toast } from "../ui/Toast.tsx";
@@ -57,6 +59,7 @@ const ConnectClaudeHost = lazy(() => import("../panels/connect/ConnectClaudeDial
 const WelcomeScreen = lazy(() => import("./welcome/WelcomeScreen.tsx").then((m) => ({ default: m.WelcomeScreen })));
 const SettingsDialog = lazy(() => import("./SettingsDialog.tsx").then((m) => ({ default: m.SettingsDialog })));
 const AboutDialog = lazy(() => import("./AboutDialog.tsx").then((m) => ({ default: m.AboutDialog })));
+const AssistantHost = lazy(() => import("../panels/assistant/AssistantHost.tsx").then((m) => ({ default: m.AssistantHost })));
 
 export interface EditorAppProps {
   /** Default: the app-wide session. */
@@ -91,14 +94,21 @@ function Overlays() {
   const welcomeOpen = useWelcome((s) => s.open);
   const welcomeReason = useWelcome((s) => s.reason);
   const panel = useAppPanels((s) => s.open);
+  const assistantOpen = useAssistant((s) => s.open);
+  const [assistantLoaded, setAssistantLoaded] = useState(assistantOpen);
 
   useEffect(() => {
     if (connectOpen) setConnectLoaded(true);
   }, [connectOpen]);
 
+  useEffect(() => {
+    if (assistantOpen) setAssistantLoaded(true);
+  }, [assistantOpen]);
+
   return (
     <Suspense fallback={null}>
       {connectLoaded && <ConnectClaudeHost onOpenGuide={(slug) => learnNav.getState().open({ kind: "guide", slug })} />}
+      {assistantLoaded && <AssistantHost onConnectClaude={() => connectClaudeStore.getState().show()} />}
       {welcomeOpen && <WelcomeScreen open reason={welcomeReason} onClose={() => welcomeStore.getState().hide()} />}
       {panel === "settings" && <SettingsDialog open onOpenChange={(open) => !open && appPanels.getState().hide()} />}
       {panel === "about" && <AboutDialog open onOpenChange={(open) => !open && appPanels.getState().hide()} onReportIssue={() => reportIssue(session)} />}
@@ -167,6 +177,8 @@ function Workspace() {
   const [learnView, setLearnView] = useState<LearnView | undefined>(undefined);
   const [titlebarInset] = useState(() => (getDesktopHostApi()?.platform === "darwin" ? 80 : 0));
 
+  // The in-app Assistant claims "ai.assistant" before useAppCommands, which skips ids already registered.
+  useRegisterCommands(() => [assistantCommand()], []);
   useAppCommands(session);
   useHudAutoOpen(session, () => layoutStore.getState());
   useEffect(() => (shouldInstallTestHook() ? installTestHook(session) : undefined), [session]);

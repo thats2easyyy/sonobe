@@ -55,9 +55,14 @@ export function LessonSpotlight({ target }: { target: LessonTarget | null }) {
   }, [selector, closest]);
 
   if (!box) return null;
+  // Keep the ring inside the window, so a full-width row (a layer at the window's left edge) isn't clipped.
+  const left = Math.max(1, box.x - PAD);
+  const top = Math.max(1, box.y - PAD);
+  const right = Math.min(window.innerWidth - 1, box.x + box.width + PAD);
+  const bottom = Math.min(window.innerHeight - 1, box.y + box.height + PAD);
   return (
     <Portal>
-      <div className="sb-spotlight" data-lesson-spotlight aria-hidden style={{ left: box.x - PAD, top: box.y - PAD, width: box.width + PAD * 2, height: box.height + PAD * 2 }} />
+      <div className="sb-spotlight" data-lesson-spotlight aria-hidden style={{ left, top, width: Math.max(MIN_SIZE, right - left), height: Math.max(MIN_SIZE, bottom - top) }} />
     </Portal>
   );
 }

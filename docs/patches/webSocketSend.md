@@ -33,7 +33,7 @@ Sent is new.
 
 | Input | Type | Default | Description |
 |---|---|---|---|
-| **Connection**<br>`connection` | `any` | none | The Connection output of a WebSocket Connection patch. |
+| **Connection**<br>`connection` | `connection` | none | The Connection output of a WebSocket Connection patch. |
 | **Send**<br>`send` | `pulse` | — | Pulse to send the current Message. |
 | **Message**<br>`message` | `variant` | `""` | The text or JSON to send. A loop sends each item as its own message. |
 

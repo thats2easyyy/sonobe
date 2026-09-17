@@ -43,7 +43,7 @@ const CATEGORIES = [
 const VALUE_TYPES = [
   "number", "boolean", "pulse", "text", "color", "point", "point3d", "point4d", "size", "anchor",
   "index", "enum", "json", "layer", "image", "video", "sound", "gradient", "shape", "textStyle",
-  "layerEffect", "transform", "any",
+  "layerEffect", "transform", "connection", "any",
 ] as const satisfies readonly ValueType[];
 
 const SUBTYPES = [
@@ -69,15 +69,15 @@ const NOTE_RE = /^(verified|legacy|inferred|sonobe): \S/;
 
 const ENTRY_KEYS = [
   "type", "name", "category", "tier", "status", "statusReason", "platforms", "aliases", "summary", "docs",
-  "behavior", "inputs", "outputs", "variadic", "variants", "variantDefaults", "settings", "dynamicPortsRule",
-  "alwaysEvaluate", "shortcut", "pairsWellWith", "commonMistakes", "examples", "origami", "importAliases",
-  "origamiPorts", "defaultNotes",
+  "behavior", "inputs", "outputs", "variadic", "variants", "variantDefaults", "inputCountRange", "settings",
+  "dynamicPortsRule", "alwaysEvaluate", "shortcut", "pairsWellWith", "commonMistakes", "examples", "origami",
+  "importAliases", "origamiPorts", "defaultNotes",
 ];
 const REQUIRED_ENTRY_KEYS = [
   "type", "name", "category", "tier", "status", "aliases", "summary", "docs", "behavior", "inputs", "outputs",
   "alwaysEvaluate", "pairsWellWith", "commonMistakes", "examples", "origami",
 ];
-const PORT_KEYS = ["key", "name", "type", "subtype", "default", "min", "max", "step", "enumOptions", "description", "wholeLoop", "advanced"];
+const PORT_KEYS = ["key", "name", "type", "subtype", "default", "min", "max", "step", "enumOptions", "description", "wholeLoop", "advanced", "acceptsPulse"];
 const VARIADIC_KEYS = ["key", "name", "type", "default", "min", "max", "defaultCount", "startIndex", "direction", "description"];
 const SETTING_KEYS = ["key", "name", "type", "default", "enumOptions", "description"];
 const EXAMPLE_KEYS = ["title", "description", "outline"];
@@ -102,7 +102,7 @@ const SHORTCUTS: Record<string, string> = {
   progress: "Shift+R", reverseProgress: "R",
 };
 
-const NULL_DEFAULT_TYPES = new Set(["layer", "image", "video", "sound", "shape", "layerEffect"]);
+const NULL_DEFAULT_TYPES = new Set(["layer", "image", "video", "sound", "shape", "layerEffect", "connection"]);
 const VECTOR_LENGTH: Record<string, number> = { point: 2, size: 2, anchor: 2, point3d: 3, point4d: 4 };
 
 // ---------------------------------------------------------------------------
@@ -325,7 +325,7 @@ function validatePorts(ports: unknown, side: "inputs" | "outputs", entry: Json, 
     }
     if (typeof p.min === "number" && typeof p.max === "number" && p.min > p.max) report.error(pw, "min must not exceed max");
     if (typeof p.step === "number" && p.step <= 0) report.error(pw, "step must be positive");
-    for (const flag of ["wholeLoop", "advanced"] as const) {
+    for (const flag of ["wholeLoop", "advanced", "acceptsPulse"] as const) {
       if (p[flag] !== undefined && typeof p[flag] !== "boolean") report.error(pw, `${flag} must be a boolean`);
     }
 
@@ -467,6 +467,21 @@ function validateEntry(entry: Json, index: IndexEntry, where: string, typesInInd
       const expanded = expandVariadic(v);
       for (const k of expanded) if (allKeys.has(k)) report.error(vw, `expanded key "${k}" collides with a fixed port`);
       (v.direction === "outputs" ? variadicOutputs : variadicInputs).push(...expanded);
+    }
+  }
+  if (entry.inputCountRange !== undefined) {
+    const r = entry.inputCountRange;
+    const rw = `${where} inputCountRange`;
+    if (!isRecord(r)) report.error(rw, "must be { min, max, defaultCount }");
+    else {
+      checkKeys(r, ["min", "max", "defaultCount"], rw, report);
+      const { min, max, defaultCount } = r;
+      if (!Number.isInteger(min) || !Number.isInteger(max) || !Number.isInteger(defaultCount)) report.error(rw, "min, max, and defaultCount must be integers");
+      else if (!((min as number) >= 1 && (min as number) <= (defaultCount as number) && (defaultCount as number) <= (max as number))) {
+        report.error(rw, "need 1 ≤ min ≤ defaultCount ≤ max");
+      }
+      if (entry.variadic !== undefined) report.warn(rw, "ignored when variadic is set");
+      if (entry.dynamicPortsRule === undefined) report.error(rw, "needs a dynamicPortsRule that builds the repeated ports");
     }
   }
 

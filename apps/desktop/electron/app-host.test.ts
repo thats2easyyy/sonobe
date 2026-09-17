@@ -10,7 +10,8 @@ import path from "node:path";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import type { Op } from "@sonobe/core";
-import { createHttpHandler, isHostError, TOOL_NAMES, type NodeMcpHandler } from "@sonobe/mcp";
+import type { SceneFrame, SceneNode } from "@sonobe/engine";
+import { createHttpHandler, createSimulationManager, isHostError, TOOL_NAMES, type NodeMcpHandler } from "@sonobe/mcp";
 import { createPatchRegistry } from "@sonobe/patches";
 import { afterEach, describe, expect, it } from "vitest";
 import { createBrowserHost, createMemoryProjectStorage } from "../../editor/src/host/browserHost.ts";
@@ -18,7 +19,7 @@ import { registerRpcHandlers } from "../../editor/src/host/rpcHandlers.ts";
 import { createManualScheduler } from "../../editor/src/runtime/scheduler.ts";
 import { createDemoDocument } from "../../editor/src/state/demoDocument.ts";
 import { createEditorSession, type EditorSession } from "../../editor/src/state/session.ts";
-import { createAppHost, hostErrorFromRpc, type AppHost, type AppHostOptions, type RendererTarget } from "./app-host.ts";
+import { createAppHost, hostErrorFromRpc, sceneLayerBounds, type AppHost, type AppHostOptions, type DocumentChange, type RendererTarget, type SceneRenderRequest } from "./app-host.ts";
 import { startMcpServer, type McpServerHandle } from "./mcp-server.ts";
 import { createRpcClient, createRpcFailure, createRpcServer, type RpcServer } from "./rpc.ts";
 
@@ -150,6 +151,29 @@ describe("app host documents", () => {
     expect(await rejection(host.getDocument("photo_zoom_2"))).toMatchObject({ code: "unknown_document" });
   });
 
+  it("reports opened, changed and closed documents once per revision", async () => {
+    const w = editorWindow(1);
+    const changes: DocumentChange[] = [];
+    const host = appHost([w], { onDocumentChange: (change) => changes.push(change) });
+    const start = w.session.document.getState().revision;
+
+    await host.documentChanged(1, start);
+    expect(changes).toEqual([{ kind: "opened", docId: "photo_zoom", revision: start, targetId: 1 }]);
+    await host.documentChanged(99, start + 1);
+    expect(changes).toHaveLength(1);
+
+    const applied = await host.apply([{ op: "setInput", target: "photo_scale.end", value: 1.4 }], { label: "bigger zoom", author: CLAUDE });
+    expect(changes.at(-1)).toEqual({ kind: "changed", docId: "photo_zoom", revision: applied.revision, targetId: 1 });
+    const count = changes.length;
+    await host.documentChanged(1, applied.revision);
+    expect(changes).toHaveLength(count);
+    await host.documentChanged(1, applied.revision + 1);
+    expect(changes.at(-1)).toEqual({ kind: "changed", docId: "photo_zoom", revision: applied.revision + 1, targetId: 1 });
+
+    host.forgetTarget(1);
+    expect(changes.at(-1)).toMatchObject({ kind: "closed", docId: "photo_zoom", targetId: 1 });
+  });
+
   it("explains missing windows and editors without the bridge", async () => {
     const none = appHost([]);
     expect(await none.listDocuments()).toEqual([]);
@@ -255,8 +279,10 @@ describe("app host presence, selection and screenshots", () => {
   it("reveals items, reads the selection, and shows working badges", async () => {
     const w = editorWindow(1);
     const host = appHost([w]);
+    w.session.selection.getState().select({ layers: ["card"], patches: ["zoomed"] });
     expect(await host.reveal(["card", "zoomed", "ghost"], { focus: true })).toEqual({ revealed: true, reason: "Not found: ghost." });
     expect(w.focused).toBe(1);
+    // Revealing shows items without replacing the person's selection; getSelection reads it.
     expect(await host.getSelection()).toEqual({ docId: "photo_zoom", component: "main", layers: ["card"], patches: ["zoomed"], comments: [] });
     expect(await host.reveal(["ghost"], {})).toMatchObject({ revealed: false, reason: expect.stringContaining("ghost") });
 
@@ -294,10 +320,74 @@ describe("app host presence, selection and screenshots", () => {
     w.server.handle("graph.bounds", () => ({ x: 600, y: 60, width: 500, height: 300 }));
     expect(await host.screenshot({ kind: "graph" }, { maxWidth: 250 })).toMatchObject({ width: 250, height: 150 });
 
+    // Layers are clipped to the visible stage and sized in points from the viewer's measured scale.
+    w.server.handle("viewer.bounds", () => ({ x: 100, y: 50, width: 400, height: 900, stage: { x: 105, y: 40, width: 201, height: 437 }, scale: 1, devicePixelRatio: 2, prototypeSize: [402, 874] }));
+    w.server.handle("viewer.layerBounds", (params) => ((params as { layerId?: string }).layerId === "card" ? { x: 110, y: 30, width: 100, height: 60 } : null));
+    w.captures.length = 0;
+    expect(await host.screenshot({ kind: "layer", layerId: "card" }, {})).toMatchObject({ width: 200, height: 80 });
+    expect(w.captures[0]).toEqual({ rect: { x: 110, y: 50, width: 100, height: 40 }, size: { width: 200, height: 80 } });
+
     w.captureResult = "empty";
     expect(await rejection(host.screenshot({ kind: "viewer" }, {}))).toMatchObject({ code: "capture_failed" });
     w.server.handle("viewer.bounds", () => ({ nope: true }));
     expect(await rejection(host.screenshot({ kind: "viewer" }, {}))).toMatchObject({ code: "editor_error" });
+  });
+});
+
+const node = (key: string, layerId: string, x: number, y: number, width: number, height: number, children: SceneNode[] = []): SceneNode =>
+  ({ key, layerId, type: "rectangle", parentKey: null, x, y, width, height, transform: [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, x, y, 0, 1], worldTransform: [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, x, y, 0, 1], opacity: 1, children }) as unknown as SceneNode;
+
+describe("app host simulation screenshots", () => {
+  const scene: SceneFrame = {
+    frame: 12,
+    time: 0.2,
+    size: [402, 874],
+    background: { r: 1, g: 1, b: 1, a: 1 },
+    roots: [node("card", "card", 16, 120, 358, 220), node("row#1", "row", 0, 700, 402, 40), node("row#2", "row", 0, 760, 402, 40)],
+  };
+
+  it("finds where layers are drawn", () => {
+    expect(sceneLayerBounds(scene, "card")).toEqual({ x: 16, y: 120, width: 358, height: 220 });
+    expect(sceneLayerBounds(scene, "row")).toEqual({ x: 0, y: 700, width: 402, height: 100 });
+    expect(sceneLayerBounds(scene, "row#2")).toEqual({ x: 0, y: 760, width: 402, height: 40 });
+    expect(sceneLayerBounds(scene, "ghost")).toBeNull();
+  });
+
+  it("draws a simulation's frame when the simulation manager exposes scenes", async () => {
+    const w = editorWindow(1);
+    const requests: SceneRenderRequest[] = [];
+    let drawn = true;
+    const host = appHost([w], {
+      simulations: (o) => Object.assign(createSimulationManager(o), { scene: () => scene }),
+      renderScene: async (request) => {
+        requests.push(request);
+        return drawn ? { data: "iVBORw0KGgo=", width: request.size.width, height: request.size.height } : null;
+      },
+    });
+    const { simId } = await host.sim.reset({});
+    expect(host.simulationScreenshots()).toBe(true);
+
+    expect(await host.screenshot({ kind: "viewer" }, { simId, maxWidth: 201 })).toEqual({ data: "iVBORw0KGgo=", mimeType: "image/png", width: 201, height: 437, timeMs: 200 });
+    expect(requests[0]).toMatchObject({ scene, crop: { x: 0, y: 0, width: 402, height: 874 }, size: { width: 201, height: 437 }, assets: {} });
+    expect(await host.screenshot({ kind: "layer", layerId: "card" }, { simId, scale: 2 })).toMatchObject({ width: 716, height: 440 });
+    expect(requests[1]!.crop).toEqual({ x: 16, y: 120, width: 358, height: 220 });
+
+    expect(await rejection(host.screenshot({ kind: "layer", layerId: "ghost" }, { simId }))).toMatchObject({ code: "not_found" });
+    expect(await rejection(host.screenshot({ kind: "graph" }, { simId }))).toMatchObject({ code: "target_unavailable", hint: expect.stringContaining("viewer") });
+    drawn = false;
+    expect(await rejection(host.screenshot({ kind: "viewer" }, { simId }))).toMatchObject({ code: "capture_failed" });
+    expect(w.captures).toEqual([]);
+  });
+
+  it("explains that simulation screenshots are unavailable without scenes", async () => {
+    const w = editorWindow(1);
+    const host = appHost([w], { renderScene: async () => null });
+    const { simId } = await host.sim.reset({});
+    const hasScene = typeof (createSimulationManager({ registry, getDocument: () => ({ docId: "x", doc: createDemoDocument(registry), revision: 0 }) }) as { scene?: unknown }).scene === "function";
+    expect(appHost([w]).simulationScreenshots()).toBe(false);
+    if (hasScene) return; // @sonobe/mcp now exposes scene(simId); the previous test covers drawing.
+    expect(host.simulationScreenshots()).toBe(false);
+    expect(await rejection(host.screenshot({ kind: "viewer" }, { simId }))).toMatchObject({ code: "sim_screenshot_unavailable" });
   });
 });
 

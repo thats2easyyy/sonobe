@@ -61,7 +61,9 @@ function measure(renderer: DomRenderer, frames: SceneFrame[]): { median: number;
   return { median: times[Math.floor(times.length / 2)]!, writesPerFrame };
 }
 
-describe("render performance (500 nodes)", () => {
+// Timing medians are sensitive to other test files running in parallel workers; each timed test primes
+// its own starting frame, so a retry repeats it exactly (write counts stay exact) and the budget is unchanged.
+describe("render performance (500 nodes)", { retry: 2 }, () => {
   let container: HTMLElement;
   let renderer: DomRenderer;
   const proto = CSSStyleDeclaration.prototype;

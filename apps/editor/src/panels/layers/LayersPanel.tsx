@@ -24,11 +24,13 @@ import {
   SendToBack,
   Trash,
   Ungroup,
+  Upload,
   X,
 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent, type PointerEvent, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent, type MouseEvent, type PointerEvent, type ReactNode } from "react";
 import { LayerTypeIcon } from "../../shell/icons.tsx";
 import { Panel } from "../../shell/Panel.tsx";
+import { dragHasFiles, filesFromDataTransfer } from "../../state/assets.ts";
 import { parseClipboardFragment, serializeClipboardFragment, type ClipboardFragment } from "../../state/clipboard.ts";
 import {
   arrangeLayers,
@@ -55,7 +57,10 @@ import { toast } from "../../ui/Toast.tsx";
 import { TreeView } from "../../ui/TreeView.tsx";
 import { cx } from "../../ui/lib/cx.ts";
 import { getAncestorIds } from "../../ui/lib/treeModel.ts";
+import { layerDropAttributes, useCableDrag } from "../patch-editor/index.ts";
+import { layerAcceptsCable, layerHoverKey, useCableHover } from "./cableHover.ts";
 import { displayTree, filterLayerTree, isFiltering, parentLayerIds, planInsertLayer, planLayerMove, relatedPatchIds, treeIds } from "./layerTree.ts";
+import { dragMediaKinds, dropFilesOnLayers, planLayerFileDrop } from "./mediaDrop.ts";
 import { touchMenuEntries } from "./touchActions.tsx";
 import "./LayersPanel.css";
 
@@ -84,6 +89,9 @@ const isHidden = (node: LayerNode) => node.props.enabled === false;
 
 const collapsedFromDocument = (layers: readonly LayerNode[]): ReadonlySet<Id> => new Set(allLayers(layers).filter((l) => l.collapsed).map((l) => l.id));
 
+/** The layer a row element belongs to (rows carry the id on their icon). */
+const rowLayerId = (target: EventTarget | null): Id | null => (target as Element | null)?.closest?.(".sb-tree__row")?.querySelector("[data-layer-id]")?.getAttribute("data-layer-id") ?? null;
+
 function report(result: ActionResult): void {
   if (!result.ok && result.message) toast({ title: result.message, ...(result.hint ? { description: result.hint } : {}), tone: "warn" });
 }
@@ -92,7 +100,9 @@ function report(result: ActionResult): void {
  * The Layers panel: the current component's layer tree, front-most first. Select (Shift / ⌘ for
  * more), rename (double-click or Enter), drag to reorder or reparent, hide and lock from the row,
  * add pre-wired interactions with Touch, insert any layer type, filter by name or type, and act on
- * the selection from the context menu. Hovering a row highlights the layer elsewhere.
+ * the selection from the context menu. Hovering a row highlights the layer elsewhere. A cable
+ * dragged from the patch editor onto a row lists that layer's properties to drive, and files dropped
+ * on the panel become media layers (or replace the media of the layer they land on).
  */
 export function LayersPanel({ onCollapse, className }: LayersPanelProps) {
   const session = useEditorSession();
@@ -112,6 +122,10 @@ export function LayersPanel({ onCollapse, className }: LayersPanelProps) {
   const [query, setQuery] = useState("");
   const [types, setTypes] = useState<ReadonlySet<string>>(() => new Set());
   const [collapsedByComponent, setCollapsedByComponent] = useState<Readonly<Record<Id, ReadonlySet<Id>>>>({});
+  const [fileDrop, setFileDrop] = useState<{ layerId: Id | null; label: string } | null>(null);
+  const drag = useCableDrag(session);
+  const cableActive = drag !== null && drag.component === componentId;
+  const cableHover = useCableHover(cableActive);
 
   const typeName = useCallback((type: string) => registry.layers.get(type)?.name ?? type, [registry]);
   const display = useMemo(() => displayTree(layers), [layers]);
@@ -121,6 +135,11 @@ export function LayersPanel({ onCollapse, className }: LayersPanelProps) {
   const collapsed = collapsedByComponent[componentId] ?? collapsedFromDocument(layers);
   const expanded = useMemo(() => (filtering ? treeIds(nodes) : new Set(parentLayerIds(display).filter((id) => !collapsed.has(id)))), [filtering, nodes, display, collapsed]);
   const selected = useMemo(() => new Set(selectedLayers), [selectedLayers]);
+  /** Layers with a property the dragged cable can drive. */
+  const accepting = useMemo(
+    () => (cableActive ? new Set(allLayers(layers).filter((layer) => layerAcceptsCable(doc, componentId, registry, layer, drag)).map((layer) => layer.id)) : null),
+    [cableActive, layers, doc, componentId, registry, drag],
+  );
   const sel = () => session.selection.getState();
 
   const expandTo = useCallback(
@@ -382,6 +401,41 @@ export function LayersPanel({ onCollapse, className }: LayersPanelProps) {
     menu.open(event, backgroundEntries());
   };
 
+  // Files from the desktop: replace a media layer's content, go into a group, or become new layers.
+  const onFileDragOver = (event: DragEvent<HTMLDivElement>) => {
+    if (!dragHasFiles(event.dataTransfer) || !component) return;
+    event.preventDefault();
+    event.dataTransfer.dropEffect = "copy";
+    const layerId = rowLayerId(event.target);
+    const label = planLayerFileDrop(doc, componentId, registry, layerId, dragMediaKinds(event.dataTransfer.items))?.label ?? "Add files";
+    setFileDrop((current) => (current && current.layerId === layerId && current.label === label ? current : { layerId, label }));
+  };
+
+  const onFileDragLeave = (event: DragEvent<HTMLDivElement>) => {
+    const next = event.relatedTarget as Node | null;
+    if (next && event.currentTarget.contains(next)) return;
+    setFileDrop(null);
+  };
+
+  const onFileDrop = (event: DragEvent<HTMLDivElement>) => {
+    if (!dragHasFiles(event.dataTransfer)) return;
+    event.preventDefault();
+    setFileDrop(null);
+    const files = filesFromDataTransfer(event.dataTransfer);
+    if (files.length === 0 || !component) return;
+    void dropFilesOnLayers(session, componentId, rowLayerId(event.target), files).then((result) => {
+      if (result.errors.length) {
+        toast({
+          id: "layers-drop",
+          title: result.errors[0]!,
+          ...(result.errors.length > 1 ? { description: `${result.errors.length - 1} more ${result.errors.length === 2 ? "file" : "files"} couldn't be added either.` } : {}),
+          tone: "warn",
+        });
+      }
+      if (result.ok && result.layerIds.length) sel().select({ layers: result.layerIds });
+    });
+  };
+
   const crumbs = selectBreadcrumbs({ componentPath }, doc);
 
   const emptyState = filtering ? (
@@ -408,7 +462,7 @@ export function LayersPanel({ onCollapse, className }: LayersPanelProps) {
       size="sm"
       icon={<LayerTypeIcon type="rectangle" size={16} />}
       title="No layers yet"
-      description="Layers are what people see and touch. Start with a shape, some text, or an image."
+      description="Layers are what people see and touch. Start with a shape, some text, or an image, or drop an image file here."
       actions={
         <>
           {["rectangle", "text", "image"].filter((type) => registry.layers.has(type)).map((type) => (
@@ -475,7 +529,19 @@ export function LayersPanel({ onCollapse, className }: LayersPanelProps) {
           </nav>
           {component && <span className="sb-layerspanel__kind">{KIND_LABELS[component.kind]}</span>}
         </div>
-        <div ref={bodyRef} className="sb-layerspanel__body" onPointerOver={onPointerOver} onPointerLeave={onPointerLeave} onPointerDown={onBackgroundPointerDown} onContextMenu={onBackgroundContextMenu}>
+        <div
+          ref={bodyRef}
+          className="sb-layerspanel__body"
+          data-cable={cableActive ? "" : undefined}
+          data-file-drop={fileDrop ? (fileDrop.layerId === null ? "panel" : "row") : undefined}
+          onPointerOver={onPointerOver}
+          onPointerLeave={onPointerLeave}
+          onPointerDown={onBackgroundPointerDown}
+          onContextMenu={onBackgroundContextMenu}
+          onDragOver={onFileDragOver}
+          onDragLeave={onFileDragLeave}
+          onDrop={onFileDrop}
+        >
           <TreeView<LayerNode>
             aria-label="Layers"
             className="sb-layerspanel__tree"
@@ -517,17 +583,31 @@ export function LayersPanel({ onCollapse, className }: LayersPanelProps) {
                 <LayerTypeIcon type={node.type} size={14} />
               </span>
             )}
-            renderTrailing={(node) => (
-              <>
-                {highlighted === node.id && <span className="sb-layerspanel__hover" aria-hidden />}
-                {(isHidden(node) || node.locked) && (
-                  <span className="sb-layerspanel__status">
-                    {isHidden(node) && <EyeOff size={12} strokeWidth={1.75} aria-label="Hidden" />}
-                    {node.locked && <Lock size={12} strokeWidth={1.75} aria-label="Locked" />}
-                  </span>
-                )}
-              </>
-            )}
+            renderTrailing={(node) => {
+              const accepts = accepting?.has(node.id) ?? false;
+              const cableOver = accepts && cableHover === layerHoverKey(node.id);
+              return (
+                <>
+                  {highlighted === node.id && <span className="sb-layerspanel__hover" aria-hidden />}
+                  {(isHidden(node) || node.locked) && (
+                    <span className="sb-layerspanel__status">
+                      {isHidden(node) && <EyeOff size={12} strokeWidth={1.75} aria-label="Hidden" />}
+                      {node.locked && <Lock size={12} strokeWidth={1.75} aria-label="Locked" />}
+                    </span>
+                  )}
+                  {accepting && (
+                    <span className="sb-layerspanel__drop" data-kind="cable" data-accept={accepts || undefined} data-hover={cableOver || undefined} {...layerDropAttributes(node.id)}>
+                      {cableOver && <span className="sb-layerspanel__drop-label">Choose a property</span>}
+                    </span>
+                  )}
+                  {fileDrop?.layerId === node.id && (
+                    <span className="sb-layerspanel__drop" data-kind="file" data-hover aria-hidden>
+                      <span className="sb-layerspanel__drop-label">{fileDrop.label}</span>
+                    </span>
+                  )}
+                </>
+              );
+            }}
             renderActions={(node) => {
               const hidden = isHidden(node);
               return (
@@ -542,6 +622,12 @@ export function LayersPanel({ onCollapse, className }: LayersPanelProps) {
             }}
             emptyState={<div className="sb-layerspanel__empty">{emptyState}</div>}
           />
+          {fileDrop?.layerId === null && (
+            <div className="sb-layerspanel__filedrop" role="status">
+              <Upload size={13} strokeWidth={2} aria-hidden />
+              {fileDrop.label}
+            </div>
+          )}
         </div>
       </div>
       {menu.element}

@@ -107,7 +107,7 @@ export function appCommands(session: EditorSession, registry: CommandRegistry, o
     { id: "help.welcome", title: "Welcome Screen", category: "Help", icon: LayoutTemplate, keywords: ["start", "templates", "recent"], run: () => welcomeStore.getState().show("menu") },
     { id: "help.reportIssue", title: "Report an Issue…", category: "Help", icon: Bug, keywords: ["bug", "feedback", "github"], run: () => void reportIssue(session) },
     { id: "help.about", title: "About Sonobe", category: "Help", icon: Info, keywords: ["version", "credits", "licenses", "open source"], run: () => appPanels.getState().show("about") },
-    // No in-app assistant yet: the menu's Assistant item opens Connect Claude.
+    // Fallback when the Assistant panel isn't registered (EditorApp registers the real one first): the menu's Assistant item opens Connect Claude.
     { id: "ai.assistant", title: "Assistant", hidden: true, run: showConnect },
     { id: "help.shortcuts", title: "Keyboard Shortcuts", hidden: true, run: () => void registry.run("app.commandPalette") },
     // View aliases

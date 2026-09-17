@@ -1,4 +1,6 @@
-# Packaging config for electron-builder (run after `npm run build`).
+# Packaging config for electron-builder. Run `npm run package -w @sonobe/desktop` (scripts/package.mjs):
+# it builds the editor, the desktop bundles, the CLI and the icons first, then packages with the local
+# Electron for this machine's architecture. Local builds are unsigned (ad-hoc signed on macOS).
 appId: dev.sonobe.app
 productName: Sonobe
 copyright: Copyright © 2026 Sonobe contributors
@@ -6,23 +8,33 @@ artifactName: ${productName}-${version}-${os}-${arch}.${ext}
 
 directories:
   output: release
+  # icon.icns, icon.ico, icon.png and icons/ come from scripts/icons.mjs.
   buildResources: build
 
-# main.cjs and preload.cjs are fully bundled, so no node_modules ship in the app.
+# main.cjs, preload.cjs and the player and scene pages are fully bundled, so no node_modules ship in the app.
 files:
   - dist/**/*
   - "!dist/**/*.map"
+  - "!dist/cli/**"
   - package.json
   - "!node_modules/**/*"
 
-# The editor build is loaded from Resources/editor/index.html when packaged.
 extraResources:
+  # The editor build, loaded from Resources/editor/index.html when packaged.
   - from: ../editor/dist
     to: editor
     filter:
       - "**/*"
+  # The `sonobe` CLI: Resources/cli/sonobe runs sonobe.mjs with the app's runtime in Node mode.
+  - from: dist/cli
+    to: cli
+    filter:
+      - "**/*"
 
 asar: true
+npmRebuild: false
+nodeGypRebuild: false
+buildDependenciesFromSource: false
 
 fileAssociations:
   - ext: sonobe
@@ -37,17 +49,21 @@ fileAssociations:
 mac:
   category: public.app-category.graphics-design
   darkModeSupport: true
-  hardenedRuntime: true
+  icon: build/icon.icns
+  # Unsigned local build: an ad-hoc signature is enough for Apple silicon to run it on this Mac.
+  # To distribute, set a Developer ID identity, hardenedRuntime: true, and notarize.
+  identity: "-"
+  hardenedRuntime: false
   target:
     - target: dmg
-      arch: [arm64, x64]
-    - target: zip
-      arch: [arm64, x64]
+      arch: [arm64]
 
 dmg:
   sign: false
+  writeUpdateInfo: false
 
 win:
+  icon: build/icon.ico
   target:
     - target: nsis
       arch: [x64, arm64]
@@ -59,6 +75,8 @@ nsis:
   createDesktopShortcut: true
 
 linux:
+  icon: build/icons
+  executableName: sonobe
   category: Graphics
   synopsis: Interaction prototyping with layers, patches, and a live viewer
   target:
