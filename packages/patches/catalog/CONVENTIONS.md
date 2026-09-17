@@ -10,8 +10,8 @@ This is the contract for `packages/patches/catalog/`. The catalog is the plan an
 This document wins over any chunk file. When two of them conflict, fix the lower one or raise it (§19).
 
 **Research inputs:**
-- `docs/research/patches/index.json`: the census of Origami patches.
-- `docs/research/patches/batch-*.json` and `gap-fill.json`: port-level specs with evidence grades.
+- `docs/research/patches/index.json`: the census of Origami patches (internal research input, not published in the public repository).
+- `docs/research/patches/batch-*.json` and `gap-fill.json`: port-level specs with evidence grades (internal research input, not published).
 - `docs/research/semantics.md`: evaluation rules and physics formulas.
 - `docs/research/gap-fill.md`: corrections C1–C18 and runtime decisions R1–R12.
 - `docs/research/release-notes.md` §3.4: Origami's current patch inventory.

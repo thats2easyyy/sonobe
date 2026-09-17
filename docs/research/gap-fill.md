@@ -1,5 +1,8 @@
 # Gap-Fill Report (Completeness Critic)
 
+> **Note on published material:** this report was written against internal research inputs (a raw patch census, per-patch batch specs, and a verbatim copy of the release notes). Those raw files quote third-party documentation and are not included in the public repository. The patch catalog in `packages/patches/catalog/` supersedes them, and the release notes are at https://origami.design/releases/.
+
+
 Research date: 2026-09-16. Latest Origami Studio release: **Version 228 (09/07/2026)** ([release notes](https://origami.design/releases/)).
 
 Scope: I read every report in `research/` (semantics, release-notes, releases_verbatim, ui-controls, file-format-interop, learning-painpoints, ai-native-design-tools, claude-byo, stack-prior-art, blender-nodes) and the patch census (`patches/report.md`, `index.json`). I also audited all 257 entries in `patches/batch-01..19.json` by script: names, categories, port counts, confidence and loop notes.
