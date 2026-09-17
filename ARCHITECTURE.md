@@ -8,7 +8,7 @@ Sonobe is an open-source, AI-native desktop app for interaction prototyping. It 
 
 This document is the **contract** every contributor (human or agent) builds against. If code and this document disagree, fix one of them in the same PR.
 
-Research that backs these decisions lives in `docs/research/`. Origami's docs are stale, so `docs/research/releases_verbatim.md` (release notes through v228) is the source of truth for "what Origami does today".
+Research that backs these decisions lives in `docs/research/`. Origami's docs are stale, so the release notes at https://origami.design/releases/ (summarized through v228 in `docs/research/release-notes.md`) are the source of truth for "what Origami does today".
 
 ---
 
