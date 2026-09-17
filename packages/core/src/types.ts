@@ -133,7 +133,7 @@ export type Literal = number | boolean | string | number[] | null;
 
 /** Driven by a patch output, a component input ("$in.key"), or nothing else. */
 export interface LinkInput {
-  link: string; // "patchId.portKey" | "$in.key"
+  link: string; // "patchId.portKey" | "$in.key" | "@layerId.key" (layer output or prop)
 }
 export interface LayerInput {
   layer: Id;
@@ -323,6 +323,20 @@ export interface VariadicSpec {
   min: number;
   max: number;
   defaultCount: number;
+  /** First expanded index: 0 when ports map to 0-based options or loop items. Default 1. */
+  startIndex?: 0 | 1;
+  /** Which side repeats. Default "inputs". */
+  direction?: "inputs" | "outputs";
+  description: string;
+}
+
+/** Non-port configuration stored in PatchNode.settings (expression text, variable name, script file...). */
+export interface SettingSpec {
+  key: string;
+  name: string;
+  type: "text" | "number" | "boolean" | "enum" | "json";
+  default: Literal | Record<string, unknown> | unknown[];
+  enumOptions?: EnumOption[];
   description: string;
 }
 
@@ -352,8 +366,16 @@ export interface PatchSpec {
   pairsWellWith?: string[];
   commonMistakes?: string[];
   examples?: PatchExample[];
+  /** Non-port configuration (PatchNode.settings). */
+  settings?: SettingSpec[];
+  /** Per-variant default overrides: { color: { start: "#FFFFFFFF" } }. */
+  variantDefaults?: Partial<Record<ValueType, Record<string, Value>>>;
+  /** 1 = everyday essentials, 2 = breadth, 3 = hardware/platform specific. */
+  tier?: 1 | 2 | 3;
+  status?: "supported" | "web-limited" | "unsupported-web";
+  statusReason?: string;
   /** Compatibility mapping for importers and docs. */
-  origami?: { id?: string; name: string };
+  origami?: { id?: string; name: string } | null;
   /** Evaluated every frame even without input changes (time, animation, gestures). */
   alwaysEvaluate?: boolean;
   /** Node-dependent ports (JS patch, math expression, component instance). */
@@ -456,8 +478,9 @@ export type Op =
       op: "updatePatch";
       id: Id;
       name?: string;
-      typeParam?: string;
-      inputCount?: number;
+      /** null clears the field. */
+      typeParam?: string | null;
+      inputCount?: number | null;
       muted?: boolean;
       settings?: PatchNode["settings"];
       ui?: Partial<PatchNode["ui"]>;
@@ -491,11 +514,11 @@ export type Op =
       inputs?: Record<string, InterfacePort | null>;
       outputs?: Record<string, InterfacePort | null>;
     }
-  | (OpBase & { op: "updateComponent"; id: Id; name?: string; notes?: string; size?: [number, number] })
+  | (OpBase & { op: "updateComponent"; id: Id; name?: string; notes?: string | null; size?: [number, number] | null })
   | { op: "setScript"; file: string; source: string | null }
   | { op: "addAsset"; asset: AssetRecord }
   | { op: "removeAsset"; id: Id }
-  | { op: "setProject"; changes: Partial<Omit<ProjectManifest, "formatVersion">> };
+  | { op: "setProject"; changes: { [K in keyof Omit<ProjectManifest, "formatVersion">]?: ProjectManifest[K] | null } };
 
 export type OpKind = Op["op"];
 
@@ -524,6 +547,7 @@ export interface Diagnostic {
   code: string;
   severity: Severity;
   message: string;
+  hint?: string;
   component: Id;
   itemIds: Id[];
   port?: string;
@@ -551,6 +575,10 @@ export interface ApplyOptions {
   /** Validate and compute results without producing a new document. */
   dryRun?: boolean;
   defaultComponent?: Id;
+  /** Skip registry strictness (used when replaying undo/redo onto documents with diagnostics). */
+  lenient?: boolean;
+  /** Ids that must not be generated (e.g. soft-deleted items in the trash). */
+  reservedIds?: Iterable<Id>;
 }
 
 export interface ApplyResult {
@@ -563,6 +591,10 @@ export interface ApplyResult {
   idMap: Record<string, Id>;
   /** Ops that undo this batch when applied to the resulting doc. */
   inverse: Op[];
+  /** The resolved ops actually applied (refs replaced by ids) — store these for redo. */
+  applied: Op[];
+  /** dryRun only: the would-be document. */
+  preview?: SonobeDocument;
   affected: Affected;
 }
 

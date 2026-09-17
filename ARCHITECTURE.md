@@ -148,9 +148,9 @@ A `.sonobez` zip of the same layout is used for sharing (later).
 - `expectedRevision` enables optimistic concurrency.
 - Every op validates against the registry: unknown port → did-you-mean; type mismatch → converter suggestion.
 
-Op kinds: `addLayer, updateLayer, moveLayer, removeLayer, addPatch, updatePatch, removePatch, connect, disconnect, setInput, setLayerProp, rename, addComment, updateComment, removeComment, createComponent, updateInterface, addScript, setScript, addAsset, removeAsset, setProject`.
+Op kinds (see `Op` in `packages/core/src/types.ts`): `addLayer, updateLayer, moveLayer, removeLayer, addPatch, updatePatch, removePatch, setInput, connect, disconnect, rename, addComment, updateComment, removeComment, addComponent, removeComponent, createComponent, updateInterface, updateComponent, setScript, addAsset, removeAsset, setProject`. There is no separate layer-prop op: `setInput` and `connect` accept `@layer.prop` addresses.
 
-Errors are `{ code, message, hint, path, suggestions: [{ description, ops }] }` and are written for humans first.
+Errors are `{ code, message, hint, address, opIndex, suggestions: [{ description, ops }] }` and are written for humans first. Links may also read layer outputs or props: `{ "link": "@layerId.key" }`.
 
 **History.** Every committed batch is one undo group `{ label, author: { kind: "human" | "agent", name }, ops, inverse, revision }`. Undo applies the inverse. The history panel shows agent groups ("Claude: added press animation (12 ops)"). Soft deletes go to a session trash.
 
@@ -371,6 +371,16 @@ Layer types are declared in `@sonobe/core` (`layerTypes.ts`) with typed props (k
 - **Canvas:** artboard with direct manipulation (select, move, resize, rotate), rulers and snapping, insert shapes and text.
 - **Viewer:** live prototype, device picker, restart ⌘R, frame toggle, 1:1, "show hit targets", and pop-out window. Also serves a LAN web player (QR code).
 - **Command palette** (⌘K) lists every command with its shortcut, so the app is discoverable.
+
+### 9.1 Desktop host conventions
+
+- The editor detects the desktop with `window.sonobeHost` (`apps/desktop/electron/host-api.d.ts`). Without it, the editor runs in the browser with an in-memory or File System Access fallback.
+- **RPC.** Main calls into the live document with `createRendererRpcHub().invoke(webContents, method, params)`.
+  - Renderer handlers are registered with `sonobeHost.rpc.handle(method, fn)`.
+  - Handlers report errors by returning `sonobeHost.rpc.fail(code, message, data)`, because the context bridge strips Error properties.
+  - `document.save` is reserved for the unsaved-changes prompt.
+- **Menus and clipboard.** Menu commands arrive through `sonobeHost.onCommand(id)`. Cut, Copy, and Paste are native roles, so the editor handles DOM `copy`/`cut`/`paste` events.
+- **Env switches:** `SONOBE_DEV_URL, SONOBE_MUTE, SONOBE_MCP_PORT, SONOBE_MCP, SONOBE_HOME, SONOBE_USER_DATA, SONOBE_EDITOR_DIST, SONOBE_TEST`.
 
 ---
 

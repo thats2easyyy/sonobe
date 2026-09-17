@@ -12,6 +12,7 @@
   },
   "dependencies": {
     "@sonobe/core": "*",
-    "@sonobe/engine": "*"
+    "@sonobe/engine": "*",
+    "lottie-web": "^5.13.0"
   }
 }

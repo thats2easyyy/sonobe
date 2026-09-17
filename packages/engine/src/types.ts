@@ -19,7 +19,10 @@ import type {
 // Loops
 // ---------------------------------------------------------------------------
 
-/** A loop (Origami "indexed values"): a tagged array flowing on a cable. */
+/**
+ * A loop (Origami "indexed values"): a tagged array flowing on a cable.
+ * core.decodeInput returns literal loops as { loop: true, items }; the runtime converts them to Loop.
+ */
 export interface Loop<T = Value> {
   readonly __loop: true;
   readonly items: readonly T[];
@@ -136,7 +139,7 @@ export interface RuntimeServices {
   now(): number;
   pointer(layer: LayerRef | null): PointerSnapshot;
   keyboard(): KeyboardSnapshot;
-  wheel(): { delta: [number, number]; position: [number, number] };
+  wheel(): { delta: [number, number]; position: [number, number]; velocity: [number, number] };
   /** Previous frame's resolved layer geometry. */
   layerInfo(layer: LayerRef): LayerInfoSnapshot | undefined;
   device(): DeviceInfo;
@@ -167,8 +170,13 @@ export interface PlatformServices {
 export type InputEvent =
   | {
       kind: "pointer";
-      phase: "down" | "move" | "up" | "cancel";
+      /** "leave" = the pointer left the viewer (ends hover). */
+      phase: "down" | "move" | "up" | "cancel" | "leave";
       pointerId: number;
+      /** Input device; hover semantics and slop differ for touch. */
+      pointerType?: "mouse" | "touch" | "pen";
+      /** Event time in ms (same clock as frames); improves velocity estimates. */
+      timeStamp?: number;
       /** Prototype coordinates (points, origin top-left of root). */
       x: number;
       y: number;
@@ -186,7 +194,10 @@ export type InputEvent =
       meta?: boolean;
       ctrl?: boolean;
     }
-  | { kind: "text"; layerId: Id; value: string }
+  /** key = SceneNode key for looped / component-instanced fields. */
+  | { kind: "text"; layerId: Id; key?: string; value: string }
+  | { kind: "focus"; layerId: Id; key?: string; focused: boolean }
+  | { kind: "submit"; layerId: Id; key?: string }
   | { kind: "deviceMotion"; acceleration: [number, number, number]; rotationRate: [number, number, number] }
   | { kind: "orientation"; orientation: "portrait" | "landscape" };
 
@@ -205,10 +216,15 @@ export interface SceneNode {
   y: number;
   width: number;
   height: number;
-  /** Local transform about pivot (translate/rotate/scale), 4x4 column-major. */
+  /**
+   * Local transform relative to the parent's top-left, INCLUDING translation to (x, y) and pivot math:
+   * T(x,y)·T(pivot)·R·S·T(-pivot), 4x4 column-major. Renderers apply it as-is with transform-origin 0 0.
+   */
   transform: number[];
-  /** World transform (for hit testing / overlays), 4x4 column-major. */
+  /** Maps node-local points (origin top-left, bounds [0,width]×[0,height]) to prototype coordinates. */
   worldTransform: number[];
+  /** Stacking/depth among siblings (higher is in front). */
+  zPosition?: number;
   opacity: number;
   visible: boolean;
   clip: boolean;
@@ -233,7 +249,15 @@ export interface SceneFrame {
 export interface TextMeasurer {
   measure(
     text: string,
-    style: { fontFamily: string; fontSize: number; fontWeight: number; letterSpacing: number; lineHeight: number },
+    style: {
+      fontFamily: string;
+      fontSize: number;
+      fontWeight: number;
+      letterSpacing: number;
+      lineHeight: number;
+      italic?: boolean;
+      textTransform?: "none" | "uppercase" | "lowercase" | "capitalize";
+    },
     maxWidth: number | null,
   ): { width: number; height: number };
 }
@@ -298,6 +322,8 @@ export interface Runtime {
   restart(): void;
   /** Hit test in prototype coordinates; front-most first, with bubbling chain. */
   hitTest(x: number, y: number): { key: string; layerId: Id }[];
+  /** Report DOM-measured layer outputs (image naturalSize/loading, video currentTime/duration...) by SceneNode key. */
+  setLayerOutputs(key: string, values: Record<string, Value>): void;
   /** Runtime issues raised while evaluating (script errors, loop limits...). */
   issues(): RuntimeIssue[];
   dispose(): void;
