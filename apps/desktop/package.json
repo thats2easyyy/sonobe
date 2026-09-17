@@ -6,7 +6,10 @@
   "main": "dist/main.cjs",
   "scripts": {
     "build": "node scripts/build.mjs",
-    "start": "node scripts/build.mjs && electron . --mute-audio"
+    "dev": "node scripts/build.mjs --watch",
+    "start": "node scripts/build.mjs && electron . --mute-audio",
+    "smoke": "node tests/smoke.mjs",
+    "test": "vitest run --config vitest.config.ts"
   },
   "dependencies": {
     "@sonobe/core": "*",

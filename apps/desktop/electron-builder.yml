@@ -1,0 +1,68 @@
+# Packaging config for electron-builder (run after `npm run build`).
+appId: dev.sonobe.app
+productName: Sonobe
+copyright: Copyright © 2026 Sonobe contributors
+artifactName: ${productName}-${version}-${os}-${arch}.${ext}
+
+directories:
+  output: release
+  buildResources: build
+
+# main.cjs and preload.cjs are fully bundled, so no node_modules ship in the app.
+files:
+  - dist/**/*
+  - "!dist/**/*.map"
+  - package.json
+  - "!node_modules/**/*"
+
+# The editor build is loaded from Resources/editor/index.html when packaged.
+extraResources:
+  - from: ../editor/dist
+    to: editor
+    filter:
+      - "**/*"
+
+asar: true
+
+fileAssociations:
+  - ext: sonobe
+    name: Sonobe Prototype
+    description: Sonobe prototype project
+    role: Editor
+    rank: Owner
+    # macOS: a *.sonobe folder behaves like a document in Finder.
+    isPackage: true
+    mimeType: application/x-sonobe
+
+mac:
+  category: public.app-category.graphics-design
+  darkModeSupport: true
+  hardenedRuntime: true
+  target:
+    - target: dmg
+      arch: [arm64, x64]
+    - target: zip
+      arch: [arm64, x64]
+
+dmg:
+  sign: false
+
+win:
+  target:
+    - target: nsis
+      arch: [x64, arm64]
+
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+
+linux:
+  category: Graphics
+  synopsis: Interaction prototyping with layers, patches, and a live viewer
+  target:
+    - target: AppImage
+      arch: [x64, arm64]
+    - target: deb
+      arch: [x64, arm64]
