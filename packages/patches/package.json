@@ -15,7 +15,8 @@
   },
   "dependencies": {
     "@sonobe/core": "*",
-    "@sonobe/engine": "*"
+    "@sonobe/engine": "*",
+    "quickjs-emscripten": "^0.32.0"
   },
   "sideEffects": false
 }
