@@ -1,0 +1,128 @@
+.sb-highlight {
+  background: transparent;
+  color: var(--text-accent);
+  font-weight: inherit;
+  text-decoration: underline;
+  text-decoration-color: color-mix(in srgb, var(--text-accent) 45%, transparent);
+  text-underline-offset: 2px;
+}
+
+.sb-searchlist {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  height: 100%;
+}
+
+.sb-searchlist__header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  flex: none;
+  height: 44px;
+  padding: 0 var(--space-5) 0 var(--space-6);
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.sb-searchlist[data-size="lg"] .sb-searchlist__header {
+  height: 52px;
+}
+
+.sb-searchlist__leading {
+  display: inline-flex;
+  flex: none;
+  color: var(--text-tertiary);
+}
+
+.sb-searchlist__input {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 100%;
+  border: 0;
+  outline: none;
+  background: transparent;
+  color: var(--text-primary);
+  font-size: var(--font-size-md);
+}
+
+.sb-searchlist[data-size="lg"] .sb-searchlist__input {
+  font-size: var(--font-size-lg);
+}
+
+.sb-searchlist__input:focus-visible {
+  outline: none;
+}
+
+.sb-searchlist__input::placeholder {
+  color: var(--text-tertiary);
+}
+
+.sb-searchlist__body {
+  display: flex;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.sb-searchlist__list {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: var(--space-3);
+  outline: none;
+}
+
+.sb-searchlist[data-with-preview] .sb-searchlist__list {
+  flex: 0 0 46%;
+  border-right: 1px solid var(--border-subtle);
+}
+
+.sb-searchlist__preview {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: var(--space-6);
+  background: color-mix(in srgb, var(--bg-sunken) 55%, transparent);
+}
+
+.sb-searchlist__group {
+  padding: var(--space-5) var(--space-4) var(--space-2);
+  color: var(--text-tertiary);
+  font-size: var(--font-size-2xs);
+  font-weight: var(--font-weight-semibold);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.sb-searchlist__group:first-child {
+  padding-top: var(--space-3);
+}
+
+.sb-searchlist__option {
+  display: flex;
+  align-items: center;
+  min-height: 32px;
+  padding: 0 var(--space-4);
+  border-radius: var(--radius-md);
+  color: var(--text-primary);
+  cursor: default;
+}
+
+.sb-searchlist__option[data-active] {
+  background: var(--bg-selected-muted);
+}
+
+.sb-searchlist__empty {
+  padding: var(--space-9) var(--space-6);
+  color: var(--text-tertiary);
+  text-align: center;
+}
+
+.sb-searchlist__footer {
+  display: flex;
+  align-items: center;
+  gap: var(--space-6);
+  flex: none;
+  height: 34px;
+  padding: 0 var(--space-6);
+  border-top: 1px solid var(--border-subtle);
+  color: var(--text-tertiary);
+  font-size: var(--font-size-xs);
+}

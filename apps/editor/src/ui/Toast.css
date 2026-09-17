@@ -1,0 +1,111 @@
+.sb-toaster {
+  position: fixed;
+  z-index: var(--z-toast);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  width: 356px;
+  max-width: calc(100vw - 32px);
+  pointer-events: none;
+}
+
+.sb-toaster[data-placement="bottom-right"] {
+  right: var(--space-6);
+  bottom: var(--space-6);
+}
+
+.sb-toaster[data-placement="bottom-center"] {
+  left: 50%;
+  bottom: var(--space-6);
+  transform: translateX(-50%);
+}
+
+.sb-toaster[data-placement="top-right"] {
+  top: calc(var(--toolbar-h) + var(--space-4));
+  right: var(--space-6);
+  flex-direction: column-reverse;
+}
+
+.sb-toast {
+  --sb-toast-accent: var(--text-secondary);
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-4);
+  padding: var(--space-4) var(--space-3) var(--space-4) var(--space-5);
+  pointer-events: auto;
+  animation: sb-toast-in var(--duration-slow) var(--ease-out);
+}
+
+.sb-toast[data-state="closing"] {
+  animation: sb-toast-out var(--duration-fast) var(--ease-in) forwards;
+}
+
+.sb-toast[data-tone="info"] {
+  --sb-toast-accent: var(--info-text);
+}
+
+.sb-toast[data-tone="success"] {
+  --sb-toast-accent: var(--success-text);
+}
+
+.sb-toast[data-tone="warn"] {
+  --sb-toast-accent: var(--warn-text);
+}
+
+.sb-toast[data-tone="danger"] {
+  --sb-toast-accent: var(--danger-text);
+}
+
+.sb-toast[data-tone="ai"] {
+  --sb-toast-accent: var(--ai-text);
+}
+
+.sb-toast__icon {
+  display: inline-flex;
+  flex: none;
+  margin-top: 1px;
+  color: var(--sb-toast-accent);
+}
+
+.sb-toast__body {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 1px 0;
+}
+
+.sb-toast__title {
+  color: var(--text-primary);
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-semibold);
+  line-height: 16px;
+}
+
+.sb-toast__description {
+  margin-top: 2px;
+  color: var(--text-secondary);
+  font-size: var(--font-size-sm);
+  line-height: var(--line-height-normal);
+}
+
+.sb-toast__action {
+  margin: -2px 0;
+  color: var(--text-accent);
+}
+
+.sb-toast__close {
+  margin-top: -1px;
+}
+
+@keyframes sb-toast-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(0.98);
+  }
+}
+
+@keyframes sb-toast-out {
+  to {
+    opacity: 0;
+    transform: translateY(4px) scale(0.98);
+  }
+}

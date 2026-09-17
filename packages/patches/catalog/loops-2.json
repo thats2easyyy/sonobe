@@ -1,0 +1,926 @@
+{
+  "file": "loops-2.json",
+  "category": "loops",
+  "patches": [
+    {
+      "type": "loopReverse",
+      "name": "Loop Reverse",
+      "category": "loops",
+      "tier": 2,
+      "status": "supported",
+      "aliases": [
+        "reverse",
+        "reverse order",
+        "backwards",
+        "flip order",
+        "newest first",
+        "invert order"
+      ],
+      "summary": "Flips a loop so its last item comes first.",
+      "docs": "## How it works\nLoop Reverse takes a whole loop (a list of values that makes patches and layers repeat once per item) and outputs the same items in the opposite order. The first item becomes the last.\n\n- **Loop** is the loop to flip. A single value counts as a one-item loop.\n- **Output** has the same number of items, so an Index loop from before still lines up with it.\n\nChange the patch's type to reverse text, colors, images, points, and more.\n\n## Tips\n- Show the newest entry first: build the list with Loop Append, then reverse it for display.\n- Reverse the loop that drives content, such as Text or Color, and let a Layout group place the rows.\n- To reverse a JSON array instead of a loop, use Array Reverse.\n\n## Coming from Origami\nOrigami's output port is unlabeled. Sonobe labels it Output.",
+      "behavior": "Stateless.\n\nEach frame:\n```\nconst items = ctx.inputItems(\"loop\"); // whole loop; a scalar arrives as a 1-item array\nctx.output(\"output\", loopOf([...items].reverse()));\n```\n\n`loopOf(array)` means \"emit this array as a Loop value\" (the engine's `Loop` representation). Items are passed through as they are; nothing inside them is copied or changed.\n\n- Formula: `output[i] = loop[n − 1 − i]` for `n = count`.\n- Frame 0: evaluates with authored values; no special case.\n- Loops: `loop` and `output` are whole-loop ports, so the patch evaluates once per frame and the output count always equals the input count. An empty loop gives an empty loop; a single value gives a one-item loop.\n- Retargeting: any change to Loop shows on the same frame.\n- Muted: the default bypass passes Loop through in its original order.\n- Restart and dispose: nothing to reset or release.\n- Coming from Origami: same single input. Origami's unlabeled output is keyed `output` here. Like Origami, there's no Index output, because the count doesn't change.",
+      "inputs": [
+        {
+          "key": "loop",
+          "name": "Loop",
+          "type": "variant",
+          "default": {
+            "loop": []
+          },
+          "description": "The loop to put in reverse order. A single value counts as a one-item loop.",
+          "wholeLoop": true
+        }
+      ],
+      "outputs": [
+        {
+          "key": "output",
+          "name": "Output",
+          "type": "variant",
+          "description": "The same items with the last one first. It always has as many items as Loop.",
+          "wholeLoop": true
+        }
+      ],
+      "variants": [
+        "number",
+        "boolean",
+        "text",
+        "color",
+        "point",
+        "point3d",
+        "point4d",
+        "size",
+        "anchor",
+        "index",
+        "enum",
+        "json",
+        "image",
+        "video",
+        "sound",
+        "gradient",
+        "shape",
+        "layerEffect",
+        "layer"
+      ],
+      "alwaysEvaluate": false,
+      "pairsWellWith": [
+        "loopAppend",
+        "loopBuilder",
+        "loopOverArray",
+        "arrayReverse"
+      ],
+      "commonMistakes": [
+        "The order doesn't change: Loop is wired to a single value, which is a one-item loop. Wire a whole loop, such as Loop Builder's Loop or Loop Over Array's Items.",
+        "Rows move but their content stays put: the reversed loop drives Position instead of the content. Reverse the loop that feeds Text or Color, and let a Layout group place the rows."
+      ],
+      "examples": [
+        {
+          "title": "Show the newest lap first",
+          "description": "Each tap appends the current time; the reversed loop puts the latest lap at the top.",
+          "outline": "layer lap_button rectangle \"Lap\" @16,780 358x52\nlayer lap_list group \"Laps\" @16,100 358x640 layout=column spacing=8\n  layer lap_row text \"Lap Time\" text←newest_first.output\npatch clock time\npatch tap_lap interaction layer=@lap_button\npatch laps loopAppend value←clock.time append←tap_lap.tap\npatch newest_first loopReverse loop←laps.output"
+        }
+      ],
+      "origami": {
+        "id": "builtin.loop.mutations.reverse",
+        "name": "Loop Reverse"
+      },
+      "defaultNotes": {
+        "loop": "inferred: Origami's default is undocumented; an empty loop outputs an empty loop."
+      }
+    },
+    {
+      "type": "loopShuffle",
+      "name": "Loop Shuffle",
+      "category": "loops",
+      "tier": 2,
+      "status": "supported",
+      "aliases": [
+        "shuffle",
+        "randomize order",
+        "random order",
+        "scramble",
+        "mix up",
+        "deck",
+        "fisher yates"
+      ],
+      "summary": "Puts a loop's items in a random order each time it gets a pulse, and keeps that order until the next one.",
+      "docs": "## How it works\nLoop Shuffle mixes up the order of a loop's items when it gets a pulse (a signal that lasts one frame), then keeps that order until the next pulse. Before the first pulse, items stay in their original order.\n\n- **Loop** is the loop to shuffle.\n- **Shuffle** picks a new random order. With two or more items, the order always changes.\n- **Reset** puts the items back in their original order.\n\nThe patch remembers positions, not values, so if items update (new text, an animating number), they keep their shuffled places. When items are added, they appear at the end until you shuffle again.\n\n## Tips\n- Wire When Prototype Starts into Shuffle to shuffle before the first frame is drawn.\n- To shuffle several related loops together (a photo and its caption), shuffle a loop of indices once and use Loop Select to reorder each loop with it.\n- Random draws come from the prototype's seed, so simulations and tests repeat exactly.\n\n## Coming from Origami\nReset is a Sonobe addition. Sonobe labels the output Output.",
+      "behavior": "State per patch instance: `{ order: null, variant: undefined, warned: false }`. `order` is `null` (original order) or an array of source positions.\n\nEach frame:\n```\nconst variant = ctx.typeParam ?? \"number\"; // undefined typeParam means the first variant\nif (state.variant !== variant) { state.variant = variant; state.order = null; }\nconst items = ctx.inputItems(\"loop\");\nconst n = items.length;\nif (ctx.pulsed(\"reset\")) state.order = null;\nif (ctx.pulsed(\"shuffle\") && n >= 2) {\n  const current = fit(state.order, n);\n  let next = current;\n  for (let attempt = 0; attempt < 16 && sameOrder(next, current); attempt++) {\n    next = fisherYates(n, () => ctx.services.random());\n  }\n  if (sameOrder(next, current)) { next = [...current]; [next[0], next[1]] = [next[1], next[0]]; }\n  state.order = next;\n}\nctx.output(\"output\", loopOf(fit(state.order, n).map((p) => items[p])));\n```\n\nHelpers:\n- `fit(order, n)`: `null` gives `[0, 1, …, n − 1]`. Otherwise keep the stored entries that are `< n`, in stored order, then append the missing positions in ascending order. `fit` never modifies `state.order`.\n- `fisherYates(n, random)`: `a = [0 … n − 1]; for (i = n − 1; i ≥ 1; i--) { j = Math.floor(random() * (i + 1)); swap a[i], a[j]; }`.\n- `sameOrder(a, b)`: same length and `a[i] === b[i]` for every i.\n- `loopOf(array)`: emit the array as a Loop value.\n\n- Pulses: `shuffle` and `reset` use `ctx.pulsed` (an upstream pulse or a false→true edge of a connected boolean). Consecutive-frame pulses each shuffle again.\n- Precedence: reset runs first, then shuffle, so both in one frame gives a fresh shuffle.\n- Guaranteed change: with 2 or more items, a shuffle never outputs the order it replaces (up to 16 draws, then a swap of the first two). With 0 or 1 item, Shuffle does nothing and stores nothing.\n- Determinism: randomness comes only from `ctx.services.random()`, never `Math.random`.\n- Live values: output reads the current Loop every frame through the stored positions, so updated or animating items keep their shuffled places.\n- Retargeting: when the count changes, `fit` keeps the surviving items' shuffled order and puts new positions at the end in original order. If the count returns, the stored order applies again. Changing the patch's type resets to original order.\n- Frame 0: original order. A Shuffle pulse on frame 0 applies on frame 0, so the unshuffled order is never drawn.\n- Loops: `loop` and `output` are whole-loop ports; the patch evaluates once per frame with one state per patch instance (and per component instance). Shuffle and Reset are single values read at loop index 0. If a loop with more than one item drives either, only item 0 counts, and the patch logs one warning per restart through `ctx.services.log(\"warn\", …)` (`state.warned`).\n- Edge cases: an empty loop outputs an empty loop.\n- Muted: passes Loop through in original order; the stored order is kept for when it's unmuted.\n- Restart and dispose: restart clears the order back to original. Nothing to release.\n- Coming from Origami: same Loop and Shuffle ports; Origami's output is labeled Loop. Reset is Sonobe-only. Origami doesn't document uniformity, whether a shuffle can repeat the old order, or count changes; the rules above are Sonobe decisions.",
+      "inputs": [
+        {
+          "key": "loop",
+          "name": "Loop",
+          "type": "variant",
+          "default": {
+            "loop": []
+          },
+          "description": "The loop whose items you want in a random order.",
+          "wholeLoop": true
+        },
+        {
+          "key": "shuffle",
+          "name": "Shuffle",
+          "type": "pulse",
+          "description": "Pulse to pick a new random order. With two or more items the order always changes."
+        },
+        {
+          "key": "reset",
+          "name": "Reset",
+          "type": "pulse",
+          "description": "Pulse to put the items back in their original order."
+        }
+      ],
+      "outputs": [
+        {
+          "key": "output",
+          "name": "Output",
+          "type": "variant",
+          "description": "The items in the current shuffled order, or in original order before the first shuffle.",
+          "wholeLoop": true
+        }
+      ],
+      "variants": [
+        "number",
+        "boolean",
+        "text",
+        "color",
+        "point",
+        "point3d",
+        "point4d",
+        "size",
+        "anchor",
+        "index",
+        "enum",
+        "json",
+        "image",
+        "video",
+        "sound",
+        "gradient",
+        "shape",
+        "layerEffect",
+        "layer"
+      ],
+      "alwaysEvaluate": false,
+      "pairsWellWith": [
+        "whenPrototypeStarts",
+        "interaction",
+        "loopBuilder",
+        "loopSelect",
+        "random"
+      ],
+      "commonMistakes": [
+        "The order keeps changing on its own: Shuffle is wired to a Repeating Pulse or a state that flickers on and off. Wire a single event such as Tap or When Prototype Starts.",
+        "Photos and their captions no longer match: two Loop Shuffle patches each drew their own order. Shuffle one loop of indices and reorder every related loop with Loop Select.",
+        "Tapping a looped card doesn't shuffle unless it's the first card: looped Taps into Shuffle only listen to item 0. Combine them with Any first."
+      ],
+      "examples": [
+        {
+          "title": "Deal the cards in a random order",
+          "description": "The shuffle happens on the first frame, so the original order is never drawn.",
+          "outline": "layer deck group \"Deck\" @16,120 358x80 layout=row spacing=8\n  layer card rectangle \"Card\" 80x80 cornerRadius=12 color←shuffled.output\npatch start whenPrototypeStarts\npatch shuffled loopShuffle<color> loop=loop[#FF3B30FF|#34C759FF|#007AFFFF|#FFCC00FF] shuffle←start.started"
+        },
+        {
+          "title": "Shuffle quiz answers and sort them back",
+          "outline": "layer answers group \"Answers\" @16,200 358x240 layout=column spacing=12\n  layer answer text \"Answer\" text←quiz.output\nlayer shuffle_button rectangle \"Shuffle\" @16,780 170x52\nlayer in_order_button rectangle \"In Order\" @204,780 170x52\npatch tap_shuffle interaction layer=@shuffle_button\npatch tap_in_order interaction layer=@in_order_button\npatch quiz loopShuffle<text> loop=loop[\"Paris\"|\"Rome\"|\"Madrid\"|\"Berlin\"] shuffle←tap_shuffle.tap reset←tap_in_order.tap"
+        }
+      ],
+      "origami": {
+        "id": "builtin.loop.mutations.shuffle",
+        "name": "Loop Shuffle"
+      },
+      "origamiPorts": {
+        "output": "Loop"
+      },
+      "defaultNotes": {
+        "loop": "inferred: Origami's default is undocumented; an empty loop outputs an empty loop."
+      }
+    },
+    {
+      "type": "loopDedupe",
+      "name": "Loop Dedupe",
+      "category": "loops",
+      "tier": 2,
+      "status": "supported",
+      "aliases": [
+        "dedupe",
+        "unique",
+        "remove duplicates",
+        "deduplicate",
+        "distinct",
+        "no repeats",
+        "set"
+      ],
+      "summary": "Removes repeated items from a loop, keeping the first of each.",
+      "docs": "## How it works\nLoop Dedupe removes repeated items from a loop. The first time a value appears it stays; later copies are dropped. Order is otherwise unchanged, so `[b, a, b, c, a]` becomes `[b, a, c]`.\n\n- **Loop** is the loop to clean up.\n- **Output** holds each distinct value once.\n- **Index** counts the result's items from 0: `[0, 1, 2]`.\n\nValues compare exactly. Text is case-sensitive, numbers must match exactly, and colors match when they'd store as the same hex color. Change the patch's type to dedupe text, colors, points, JSON, and more.\n\n## Tips\n- Build a list of unique tags or categories from data: Loop Over Array, then Loop Dedupe set to Text.\n- Numbers from math can differ by tiny amounts. Round them first if 0.3 and 0.30000000000000004 should count as the same.\n- For case-insensitive matching, Change Case the text to lowercase before deduping.\n\n## Coming from Origami\nSonobe labels the loop output Output. Origami doesn't document which copy survives or how values compare; Sonobe keeps the first and uses the same equality as Option Equals.",
+      "behavior": "Stateless.\n\nEach frame:\n```\nconst items = ctx.inputItems(\"loop\"); // whole loop; a scalar arrives as a 1-item array\nconst unique = [];\nfor (const item of items) {\n  if (!unique.some((kept) => same(kept, item))) unique.push(item);\n}\nctx.output(\"output\", loopOf(unique));\nctx.output(\"index\", loopOf(unique.map((_, i) => i)));\n```\n\n`same(a, b)` by variant (identical to Option Equals and Pulse on Change):\n- number and index: `a === b` (exact; `0 === -0`).\n- boolean, enum, and text: strict equality. Text is case-sensitive, with no trimming or Unicode normalization.\n- color: equal when r, g, b, and a each round to the same 8-bit value (`Math.round(c * 255)`).\n- point, point3d, point4d, size, anchor: every component `===`.\n- json: deep structural equality. Same kind (null, boolean, number, string, array, object); arrays match element by element in order; objects have the same key set with equal values, in any key order.\n\n`loopOf(array)` means \"emit this array as a Loop value\".\n\n- Order: the first occurrence of each value is kept and relative order is preserved. `[b, a, b, c, a]` → `[b, a, c]`, Index `[0, 1, 2]`.\n- Performance: the quadratic scan above defines the result. An implementation may bucket items by a canonical key (for example 8-bit color hex, or JSON with sorted keys) as long as it returns exactly what `same` would.\n- Frame 0: evaluates with authored values; no special case.\n- Loops: `loop`, `output`, and `index` are whole-loop ports; the patch evaluates once per frame. The output count is at most the input count. An empty loop gives two empty loops; a single value gives one-item loops.\n- Edge cases: coercion happens at the port before comparing, so numbers wired into a text-typed patch compare as formatted text. JSON `null` items equal each other, so at most one survives.\n- Retargeting: any change to Loop shows on the same frame.\n- Muted: Loop passes through unchanged (duplicates kept), and Index outputs `0 … count − 1`.\n- Restart and dispose: nothing to reset or release.\n- Coming from Origami: same ports; Origami's outputs are labeled Loop and Index. Origami doesn't document which duplicate survives or how values compare; keeping the first with exact equality is a Sonobe decision.",
+      "inputs": [
+        {
+          "key": "loop",
+          "name": "Loop",
+          "type": "variant",
+          "default": {
+            "loop": []
+          },
+          "description": "The loop to remove repeated values from.",
+          "wholeLoop": true
+        }
+      ],
+      "outputs": [
+        {
+          "key": "output",
+          "name": "Output",
+          "type": "variant",
+          "description": "Each distinct value once, in the order it first appeared.",
+          "wholeLoop": true
+        },
+        {
+          "key": "index",
+          "name": "Index",
+          "type": "index",
+          "description": "The position of each result item, counted from 0: [0, 1, 2, …].",
+          "wholeLoop": true
+        }
+      ],
+      "variants": [
+        "number",
+        "boolean",
+        "text",
+        "color",
+        "point",
+        "point3d",
+        "point4d",
+        "size",
+        "anchor",
+        "index",
+        "enum",
+        "json"
+      ],
+      "alwaysEvaluate": false,
+      "pairsWellWith": [
+        "loopOverArray",
+        "loopAppend",
+        "loopCount",
+        "changeCase",
+        "round"
+      ],
+      "commonMistakes": [
+        "Numbers that look the same both stay: math results such as 0.1 + 0.2 aren't exactly 0.3. Round the values before deduping.",
+        "\"Apple\" and \"apple\" both stay: text comparison is case-sensitive. Change Case both to lowercase first.",
+        "Images or labels no longer match their items: the result is shorter than the original, but a loop built alongside it still has the old count. Dedupe first, then derive the related loops from the result."
+      ],
+      "examples": [
+        {
+          "title": "Show each tag once",
+          "outline": "layer tag_row group \"Tags\" @16,120 358x36 layout=row spacing=8\n  layer tag text \"Tag\" text←unique_tags.output\npatch tags loopOverArray array=json[\"design\",\"music\",\"design\",\"travel\",\"music\"]\npatch unique_tags loopDedupe<text> loop←tags.items"
+        }
+      ],
+      "origami": {
+        "id": "builtin.loop.mutations.dedupe",
+        "name": "Loop Dedupe"
+      },
+      "origamiPorts": {
+        "output": "Loop"
+      },
+      "defaultNotes": {
+        "loop": "inferred: Origami's default is undocumented; an empty loop outputs empty loops."
+      }
+    },
+    {
+      "type": "loopInsert",
+      "name": "Loop Insert",
+      "category": "loops",
+      "tier": 2,
+      "status": "supported",
+      "aliases": [
+        "insert",
+        "prepend",
+        "add item",
+        "push front",
+        "splice",
+        "insert at index",
+        "add to list"
+      ],
+      "summary": "Adds a value into a loop at a chosen position each time it gets a pulse.",
+      "docs": "## How it works\nLoop Insert adds **Value** into a loop at position **Index** each time **Insert** gets a pulse (a signal that lasts one frame). The loop grows by one item per pulse, and the patch remembers what it added.\n\n- **Loop** is the starting list. Leave it unconnected to start empty and build a list over time.\n- **Value** is copied on the pulse frame. Changing it later doesn't change items already added.\n- **Index** is where the new item lands: 0 puts it first, and a number past the end adds it last.\n- **Reset** forgets every insert and outputs Loop as it is.\n- **Output Index** counts the result's items from 0.\n\nThe patch stores its inserts, not a copy of the list. If Loop changes, the stored inserts are applied to the new loop, so your additions survive new data.\n\n## Tips\n- Record a live history: Repeating Pulse into Insert with Index 0 puts the newest reading first.\n- Keep a fixed length: pulse Loop Remove Last on the same event.\n- Adding to the end? Loop Append does that without an Index.\n\n## Coming from Origami\nSonobe labels the outputs Output and Output Index (keys `output` and `outputIndex`), because the input already uses Index. Reset is a Sonobe addition.",
+      "behavior": "State per patch instance: `{ inserts: [], variant: undefined, warned: false }`, where each insert is `{ at, value }`.\n\nEach frame:\n```\nconst variant = ctx.typeParam ?? \"number\"; // undefined typeParam means the first variant\nif (state.variant !== variant) { state.variant = variant; state.inserts = []; }\nif (ctx.pulsed(\"reset\")) state.inserts = [];\nconst items = replay(ctx.inputItems(\"loop\"), state.inserts);\nif (ctx.pulsed(\"insert\")) {\n  if (items.length >= 10000) {\n    warnOnce(\"Loop Insert reached 10,000 items, so this insert was skipped.\");\n  } else {\n    const at = clampIndex(ctx.input(\"index\"), items.length);\n    const value = snapshot(ctx.input(\"value\"));\n    state.inserts.push({ at, value });\n    items.splice(at, 0, value);\n  }\n}\nctx.output(\"output\", loopOf(items));\nctx.output(\"outputIndex\", loopOf(items.map((_, i) => i)));\n```\n\nHelpers:\n- `replay(source, inserts)`: `items = [...source]; for (const op of inserts) items.splice(clampIndex(op.at, items.length), 0, op.value); return items;`\n- `clampIndex(x, n)`: `Number.isFinite(x) ? Math.min(Math.max(Math.floor(x + 1e-6), 0), n) : 0`. The epsilon matches Option Picker, so 2.9999999999999996 counts as 3.\n- `snapshot(v)`: a deep copy for JSON values; other runtime values are immutable and are stored as they are.\n- `warnOnce(message)`: `ctx.services.log(\"warn\", message)` at most once per restart.\n- `loopOf(array)`: emit the array as a Loop value.\n\n- Model: the patch stores its changes, not a copy of the list. Every frame it starts from the current Loop and re-applies the stored inserts in order. With a static Loop this accumulates, exactly like holding a list. When Loop changes (new data, or an upstream Loop Append added an item), earlier inserts are re-applied to the new loop. Implementations may cache `items` and replay only when Loop changes, as long as output matches `replay`.\n- Pulses: `insert` and `reset` use `ctx.pulsed` (an upstream pulse or a false→true edge of a connected boolean). Pulses on consecutive frames each insert, so a Repeating Pulse inserts on every tick.\n- Precedence: reset runs first, then insert, so both in one frame gives Loop plus the one new item.\n- Index: 0 inserts first; `count` or more appends at the end; negative or non-finite values insert first (they never count from the end). Number-to-index coercion at the port already rounds down and clamps at 0. The stored `at` is the clamped position and is clamped again on replay if Loop got shorter.\n- Timing: the new item appears on the pulse frame. Value is read on that frame, after upstream patches have evaluated.\n- Frame 0: no inserts, so output equals Loop. A pulse on frame 0 applies on frame 0.\n- Loops: `loop`, `output`, and `outputIndex` are whole-loop ports; the patch evaluates once per frame with one state per patch instance (and per component instance). Value, Index, Insert, and Reset are single values read at loop index 0. If a loop with more than one item drives any of them, item 0 is used and one warning per restart is logged (`state.warned`).\n- Retargeting: changing Value or Index affects only future inserts. Changing the patch's type clears the stored inserts.\n- Edge cases: at 10,000 items further inserts are skipped with one warning, matching the engine's loop limit. An empty Loop with no inserts outputs empty loops.\n- Muted: outputs Loop unchanged and Output Index `0 … count − 1`. Evaluation doesn't run, so pulses while muted are ignored; stored inserts return when unmuted.\n- Restart and dispose: restart clears every stored insert. Nothing to release.\n- Coming from Origami: ports Loop, Value, Index, Insert → Loop, Index; outputs are keyed `output` and `outputIndex` here. Reset is Sonobe-only. Origami's tutorials show inserts accumulating while Loop is unconnected but don't show what happens when Loop changes; re-applying inserts is a Sonobe decision that matches Origami whenever Loop is static. Origami's default Index isn't documented; 0 matches the newest-first waveform in its audio tutorial.",
+      "inputs": [
+        {
+          "key": "loop",
+          "name": "Loop",
+          "type": "variant",
+          "default": {
+            "loop": []
+          },
+          "description": "The starting list. Leave it unconnected to start empty and build the list with pulses.",
+          "wholeLoop": true
+        },
+        {
+          "key": "value",
+          "name": "Value",
+          "type": "variant",
+          "default": 0,
+          "description": "The value to add, copied on the frame Insert fires."
+        },
+        {
+          "key": "index",
+          "name": "Index",
+          "type": "index",
+          "default": 0,
+          "min": 0,
+          "step": 1,
+          "description": "Where the new item goes, counted from 0. 0 puts it first; a number past the end puts it last."
+        },
+        {
+          "key": "insert",
+          "name": "Insert",
+          "type": "pulse",
+          "description": "Pulse to add Value at Index. Every pulse adds one more item."
+        },
+        {
+          "key": "reset",
+          "name": "Reset",
+          "type": "pulse",
+          "description": "Pulse to forget every insert and output Loop as it is."
+        }
+      ],
+      "outputs": [
+        {
+          "key": "output",
+          "name": "Output",
+          "type": "variant",
+          "description": "Loop with every inserted value in place.",
+          "wholeLoop": true
+        },
+        {
+          "key": "outputIndex",
+          "name": "Output Index",
+          "type": "index",
+          "description": "The position of each result item, counted from 0: [0, 1, 2, …].",
+          "wholeLoop": true
+        }
+      ],
+      "variants": [
+        "number",
+        "boolean",
+        "text",
+        "color",
+        "point",
+        "point3d",
+        "point4d",
+        "size",
+        "anchor",
+        "index",
+        "enum",
+        "json",
+        "image",
+        "video",
+        "sound",
+        "gradient",
+        "shape",
+        "layerEffect",
+        "layer"
+      ],
+      "alwaysEvaluate": false,
+      "pairsWellWith": [
+        "repeatingPulse",
+        "loopRemoveLast",
+        "loopAppend",
+        "counter",
+        "loopCount"
+      ],
+      "commonMistakes": [
+        "Nothing gets added: Insert needs a pulse, and a state that stays on fires only once. Wire a Tap, a Repeating Pulse's Tick, or When Prototype Starts into Insert.",
+        "Tapping any looped row inserts the first row's value: looped Taps and Values into a single-value port only use item 0. Turn the taps into one pulse with Any, and pick the tapped value with Loop Option Switch and Loop Select.",
+        "The list grows forever: every pulse adds one item. Pulse Loop Remove Last on the same event to keep a fixed length, or pulse Reset to start over."
+      ],
+      "examples": [
+        {
+          "title": "Put the newest card on top",
+          "outline": "layer add_button rectangle \"Add\" @16,780 358x52\nlayer feed group \"Feed\" @16,100 358x660 layout=column spacing=12\n  layer card text \"Card\" text←posts.output\npatch tap_add interaction layer=@add_button\npatch post_number counter increase←tap_add.tap\npatch posts loopInsert value←post_number.count index=0 insert←tap_add.tap"
+        },
+        {
+          "title": "Draw a live level meter",
+          "description": "Every 0.1 s a new reading goes in front, so bars scroll away from the start. Add Loop Remove Last on the same tick to cap its length.",
+          "outline": "layer meter group \"Meter\" @16,300 358x120 layout=row spacing=2\n  layer bar rectangle \"Bar\" 6x120 opacity←history.output\npatch tick repeatingPulse interval=0.1\npatch reading random randomize←tick.tick start=0.2 end=1\npatch history loopInsert value←reading.value index=0 insert←tick.tick"
+        }
+      ],
+      "origami": {
+        "id": "builtin.loop.mutations.insert",
+        "name": "Loop Insert"
+      },
+      "origamiPorts": {
+        "output": "Loop",
+        "outputIndex": "Index"
+      },
+      "defaultNotes": {
+        "loop": "inferred: Origami's audio tutorial leaves Loop unconnected and the list starts empty.",
+        "value": "inferred: Origami types Value as a number by default; 0 is the number type's zero value.",
+        "index": "inferred: undocumented; the newest-first waveform in Origami's audio tutorial suggests 0."
+      }
+    },
+    {
+      "type": "loopAppend",
+      "name": "Loop Append",
+      "category": "loops",
+      "tier": 2,
+      "status": "supported",
+      "aliases": [
+        "loop insert at end",
+        "append",
+        "push",
+        "add to end",
+        "add item",
+        "add to list"
+      ],
+      "summary": "Adds a value to the end of a loop each time it gets a pulse.",
+      "docs": "## How it works\nLoop Append adds **Value** to the end of a loop each time **Append** gets a pulse (a signal that lasts one frame). The loop grows by one item per pulse, and the patch remembers what it added.\n\n- **Loop** is the starting list. Leave it unconnected to start empty.\n- **Value** is copied on the pulse frame, so later changes don't affect items already added.\n- **Reset** forgets every appended item and outputs Loop as it is.\n- **Index** (output) counts the result's items from 0.\n\nThe patch stores its appended items, not a copy of the list. If Loop changes, the appended items stay at the end of the new loop.\n\n## Tips\n- Chats, carts, and lap lists: wire a button's Tap into Append.\n- Show the newest item first by sending the result through Loop Reverse.\n- Add undo or delete by wiring this patch's Output into Loop Remove Last or Loop Remove. Put the removing patch after the adding one.\n- To send the list somewhere, pack it with Loop to Array.\n\n## Coming from Origami\nThis is Origami's Loop Insert at End. Its pulse port, Insert at End, is keyed `append`, and the loop output is labeled Output. Reset is a Sonobe addition.",
+      "behavior": "State per patch instance: `{ appended: [], variant: undefined, warned: false }`.\n\nEach frame:\n```\nconst variant = ctx.typeParam ?? \"number\"; // undefined typeParam means the first variant\nif (state.variant !== variant) { state.variant = variant; state.appended = []; }\nif (ctx.pulsed(\"reset\")) state.appended = [];\nconst items = [...ctx.inputItems(\"loop\"), ...state.appended];\nif (ctx.pulsed(\"append\")) {\n  if (items.length >= 10000) {\n    warnOnce(\"Loop Append reached 10,000 items, so this append was skipped.\");\n  } else {\n    const value = snapshot(ctx.input(\"value\"));\n    state.appended.push(value);\n    items.push(value);\n  }\n}\nctx.output(\"output\", loopOf(items));\nctx.output(\"index\", loopOf(items.map((_, i) => i)));\n```\n\nHelpers:\n- `snapshot(v)`: a deep copy for JSON values; other runtime values are immutable and are stored as they are.\n- `warnOnce(message)`: `ctx.services.log(\"warn\", message)` at most once per restart.\n- `loopOf(array)`: emit the array as a Loop value.\n\n- Model: the patch stores the values it appended, not a copy of the list. Every frame the output is the current Loop followed by the stored values. With a static Loop this accumulates; when Loop changes (new data arrives, an upstream patch edits it), the appended values stay at the end. This is the same model as Loop Insert with an index past the end.\n- Pulses: `append` and `reset` use `ctx.pulsed` (an upstream pulse or a false→true edge of a connected boolean). Pulses on consecutive frames each append.\n- Precedence: reset runs first, then append, so both in one frame gives Loop plus the one new item.\n- Timing: the new item appears on the pulse frame. Value is read on that frame, after upstream patches have evaluated.\n- Frame 0: nothing appended, so output equals Loop. A pulse on frame 0 applies on frame 0.\n- Loops: `loop`, `output`, and `index` are whole-loop ports; the patch evaluates once per frame with one state per patch instance (and per component instance). Value, Append, and Reset are single values read at loop index 0. If a loop with more than one item drives any of them, item 0 is used and one warning per restart is logged (`state.warned`).\n- Chaining: a downstream Loop Remove or Loop Remove Last sees every appended item, so add-then-remove chains stay consistent. An upstream removal patch never sees items appended here.\n- Retargeting: changing Value affects only future appends. Changing the patch's type clears the stored values.\n- Edge cases: at 10,000 items further appends are skipped with one warning, matching the engine's loop limit.\n- Muted: outputs Loop unchanged and Index `0 … count − 1`. Pulses while muted are ignored; stored values return when unmuted.\n- Restart and dispose: restart clears the stored values. Nothing to release.\n- Coming from Origami: Loop Insert at End with ports Loop, Value, Insert at End → Loop, Index. Origami doesn't document what happens when Loop changes; keeping appended values at the end is a Sonobe decision that matches Origami whenever Loop is static. Reset is Sonobe-only.",
+      "inputs": [
+        {
+          "key": "loop",
+          "name": "Loop",
+          "type": "variant",
+          "default": {
+            "loop": []
+          },
+          "description": "The starting list. Leave it unconnected to start empty and build the list with pulses.",
+          "wholeLoop": true
+        },
+        {
+          "key": "value",
+          "name": "Value",
+          "type": "variant",
+          "default": 0,
+          "description": "The value to add, copied on the frame Append fires."
+        },
+        {
+          "key": "append",
+          "name": "Append",
+          "type": "pulse",
+          "description": "Pulse to add Value to the end. Every pulse adds one more item."
+        },
+        {
+          "key": "reset",
+          "name": "Reset",
+          "type": "pulse",
+          "description": "Pulse to forget every appended item and output Loop as it is."
+        }
+      ],
+      "outputs": [
+        {
+          "key": "output",
+          "name": "Output",
+          "type": "variant",
+          "description": "Loop followed by every appended value, oldest first.",
+          "wholeLoop": true
+        },
+        {
+          "key": "index",
+          "name": "Index",
+          "type": "index",
+          "description": "The position of each result item, counted from 0: [0, 1, 2, …].",
+          "wholeLoop": true
+        }
+      ],
+      "variants": [
+        "number",
+        "boolean",
+        "text",
+        "color",
+        "point",
+        "point3d",
+        "point4d",
+        "size",
+        "anchor",
+        "index",
+        "enum",
+        "json",
+        "image",
+        "video",
+        "sound",
+        "gradient",
+        "shape",
+        "layerEffect",
+        "layer"
+      ],
+      "alwaysEvaluate": false,
+      "pairsWellWith": [
+        "interaction",
+        "loopRemoveLast",
+        "loopRemove",
+        "loopReverse",
+        "loopToArray"
+      ],
+      "commonMistakes": [
+        "Items you just added can't be removed: the Loop Remove or Loop Remove Last patch comes before Loop Append, so it never sees them. Wire Loop Append's Output into the removing patch and show that patch's result.",
+        "Every new item shows an old value: Value comes through a Delay or another patch that updates a frame later. Make sure Value is already right on the frame Append fires.",
+        "Nothing gets added: Append is wired to a state that stays on, which fires only once. Wire a Tap or another pulse into Append."
+      ],
+      "examples": [
+        {
+          "title": "Record lap times",
+          "outline": "layer lap_button rectangle \"Lap\" @16,780 170x52\nlayer clear_button rectangle \"Clear\" @204,780 170x52\nlayer lap_list group \"Laps\" @16,100 358x640 layout=column spacing=8\n  layer lap_row text \"Lap Time\" text←laps.output\npatch clock time\npatch tap_lap interaction layer=@lap_button\npatch tap_clear interaction layer=@clear_button\npatch laps loopAppend value←clock.time append←tap_lap.tap reset←tap_clear.tap"
+        },
+        {
+          "title": "Add dots and undo them",
+          "description": "Loop Remove Last comes after Loop Append, so Undo can remove anything you added.",
+          "outline": "layer add_button rectangle \"Add\" @16,780 170x52\nlayer undo_button rectangle \"Undo\" @204,780 170x52\nlayer dot_row group \"Dots\" @16,120 358x44 layout=row spacing=8\n  layer dot oval \"Dot\" 32x32 color←shown.output\npatch tap_add interaction layer=@add_button\npatch tap_undo interaction layer=@undo_button\npatch added loopAppend<color> value=#007AFFFF append←tap_add.tap\npatch shown loopRemoveLast<color> loop←added.output removeLast←tap_undo.tap"
+        }
+      ],
+      "origami": {
+        "id": "builtin.loop.mutations.append",
+        "name": "Loop Insert at End"
+      },
+      "origamiPorts": {
+        "output": "Loop",
+        "append": "Insert at End"
+      },
+      "defaultNotes": {
+        "loop": "inferred: undocumented; matches Loop Insert, whose list starts empty when Loop is unconnected.",
+        "value": "inferred: Origami types Value as a number by default; 0 is the number type's zero value."
+      }
+    },
+    {
+      "type": "loopRemove",
+      "name": "Loop Remove",
+      "category": "loops",
+      "tier": 2,
+      "status": "supported",
+      "aliases": [
+        "remove",
+        "delete",
+        "delete item",
+        "remove at index",
+        "splice",
+        "dismiss",
+        "drop item"
+      ],
+      "summary": "Removes the item at a chosen position from a loop each time it gets a pulse.",
+      "docs": "## How it works\nLoop Remove takes out the item at position **Index** each time **Remove** gets a pulse (a signal that lasts one frame). The loop shrinks by one item per pulse, and the patch remembers what it removed.\n\n- **Loop** is the list to remove from.\n- **Index** is the position to remove, counted from 0. If there's no item there, the pulse does nothing.\n- **Reset** brings back every removed item.\n- **Output Index** counts the result's items from 0, so the positions close up after a removal.\n\nThe patch stores the positions it removed, not a copy of the list. If Loop changes, the same positions are removed from the new loop.\n\n## Tips\n- Tap a looped row to delete it: wire the looped taps into Loop Option Switch for Index, and into Any for Remove.\n- Replace an item: remove it here, then insert the new value at the same Index with Loop Insert.\n- When fresh data replaces the list, pulse Reset so old removals don't carry over.\n\n## Coming from Origami\nSonobe labels the outputs Output and Output Index (keys `output` and `outputIndex`), because the input already uses Index. Reset is a Sonobe addition.",
+      "behavior": "State per patch instance: `{ removals: [], variant: undefined, warned: false }`, where each removal is a position.\n\nEach frame:\n```\nconst variant = ctx.typeParam ?? \"number\"; // undefined typeParam means the first variant\nif (state.variant !== variant) { state.variant = variant; state.removals = []; }\nif (ctx.pulsed(\"reset\")) state.removals = [];\nconst items = replay(ctx.inputItems(\"loop\"), state.removals);\nif (ctx.pulsed(\"remove\")) {\n  const at = toPosition(ctx.input(\"index\"));\n  if (at >= 0 && at < items.length) {\n    state.removals.push(at);\n    items.splice(at, 1);\n  }\n}\nctx.output(\"output\", loopOf(items));\nctx.output(\"outputIndex\", loopOf(items.map((_, i) => i)));\n```\n\nHelpers:\n- `replay(source, removals)`: `items = [...source]; for (const at of removals) if (at < items.length) items.splice(at, 1); return items;`\n- `toPosition(x)`: `Number.isFinite(x) ? Math.floor(x + 1e-6) : -1`. The epsilon matches Option Picker, so 2.9999999999999996 counts as 3.\n- `loopOf(array)`: emit the array as a Loop value.\n\n- Model: the patch stores removed positions, not a copy of the list. Every frame it starts from the current Loop and re-applies the stored removals in order. With a static Loop this behaves like deleting from a held list. When Loop changes, the stored positions are removed from the new loop; a stored position that's past the end is skipped for that frame and applies again if the loop grows back. Implementations may cache and replay only when Loop changes, as long as output matches `replay`.\n- Pulses: `remove` and `reset` use `ctx.pulsed` (an upstream pulse or a false→true edge of a connected boolean). Pulses on consecutive frames each remove, re-reading Index each time.\n- Precedence: reset runs first, then remove, so both in one frame gives Loop minus the one new removal.\n- Index: removes only when `0 ≤ position < count` of the current result; otherwise the pulse does nothing and nothing is stored. Negative indices never count from the end, so an index-typed −1 (such as Option Equals with no match) is a no-op. Number-to-index coercion at the port rounds down and clamps at 0 before the patch sees it.\n- Timing: the item disappears on the pulse frame. Index is read on that frame, after upstream patches have evaluated, so a same-frame Loop Option Switch result is used.\n- Frame 0: no removals, so output equals Loop. A pulse on frame 0 applies on frame 0.\n- Loops: `loop`, `output`, and `outputIndex` are whole-loop ports; the patch evaluates once per frame with one state per patch instance (and per component instance). Index, Remove, and Reset are single values read at loop index 0. If a loop with more than one item drives any of them, item 0 is used and one warning per restart is logged through `ctx.services.log(\"warn\", …)` (`state.warned`).\n- Chaining: positions refer to this patch's own result. Put removal patches after patches that add items (Loop Append, Loop Insert), and show the last patch's output.\n- Retargeting: changing Index affects only future removals. Changing the patch's type clears the stored removals.\n- Edge cases: removing from an empty loop does nothing.\n- Muted: outputs Loop unchanged and Output Index `0 … count − 1`. Pulses while muted are ignored; stored removals return when unmuted.\n- Restart and dispose: restart clears the stored removals. Nothing to release.\n- Coming from Origami: ports Loop, Index, Remove → Loop, Index; outputs are keyed `output` and `outputIndex` here. Origami's identifier suffix is `delete` (its `remove` suffix is Loop Remove Last). Origami doesn't document out-of-range Index or what happens when Loop changes; the no-op and re-applied removals are Sonobe decisions that match Origami whenever Loop is static. Reset is Sonobe-only.",
+      "inputs": [
+        {
+          "key": "loop",
+          "name": "Loop",
+          "type": "variant",
+          "default": {
+            "loop": []
+          },
+          "description": "The list to remove items from.",
+          "wholeLoop": true
+        },
+        {
+          "key": "index",
+          "name": "Index",
+          "type": "index",
+          "default": 0,
+          "min": 0,
+          "step": 1,
+          "description": "The position to remove, counted from 0. A position past the end does nothing."
+        },
+        {
+          "key": "remove",
+          "name": "Remove",
+          "type": "pulse",
+          "description": "Pulse to remove the item at Index. Every pulse removes one more item."
+        },
+        {
+          "key": "reset",
+          "name": "Reset",
+          "type": "pulse",
+          "description": "Pulse to bring back every removed item and output Loop as it is."
+        }
+      ],
+      "outputs": [
+        {
+          "key": "output",
+          "name": "Output",
+          "type": "variant",
+          "description": "Loop without the removed items.",
+          "wholeLoop": true
+        },
+        {
+          "key": "outputIndex",
+          "name": "Output Index",
+          "type": "index",
+          "description": "The position of each result item, counted from 0: [0, 1, 2, …].",
+          "wholeLoop": true
+        }
+      ],
+      "variants": [
+        "number",
+        "boolean",
+        "text",
+        "color",
+        "point",
+        "point3d",
+        "point4d",
+        "size",
+        "anchor",
+        "index",
+        "enum",
+        "json",
+        "image",
+        "video",
+        "sound",
+        "gradient",
+        "shape",
+        "layerEffect",
+        "layer"
+      ],
+      "alwaysEvaluate": false,
+      "pairsWellWith": [
+        "loopOptionSwitch",
+        "loopAny",
+        "interaction",
+        "loopAppend",
+        "loopInsert"
+      ],
+      "commonMistakes": [
+        "Tapping any row deletes the first one: looped Taps into Remove only listen to item 0, and Index stays 0. Wire the looped taps into Loop Option Switch for Index and into Any for Remove.",
+        "Remove stops working after a few deletes: Index points past the end of the shorter list. Keep Index below Loop Count, or pick it from the rows that are still showing.",
+        "The wrong items vanish when new data loads: removals are stored as positions and re-applied to the new loop. Pulse Reset when fresh data arrives, for example from Pulse on Change."
+      ],
+      "examples": [
+        {
+          "title": "Dismiss the top notification",
+          "outline": "layer stack group \"Notifications\" @16,80 358x400 layout=column spacing=8\n  layer notification text \"Notification\" text←inbox.output\nlayer dismiss_button rectangle \"Dismiss\" @16,780 358x52\npatch tap_dismiss interaction layer=@dismiss_button\npatch inbox loopRemove<text> loop=loop[\"Payment\"|\"Reminder\"|\"Update\"] index=0 remove←tap_dismiss.tap"
+        },
+        {
+          "title": "Tap a row to delete it",
+          "description": "Loop Option Switch turns the looped taps into the tapped position, and Any turns them into one pulse. The rows below close up.",
+          "outline": "layer inbox_list group \"Inbox\" @16,100 358x600 layout=column spacing=8\n  layer row text \"Message\" text←messages.output\npatch tap_row interaction layer=@row\npatch tapped_row loopOptionSwitch select←tap_row.tap\npatch any_tap loopAny loop←tap_row.tap\npatch messages loopRemove<text> loop=loop[\"Lunch?\"|\"Invoice\"|\"Photos\"|\"Flight\"] index←tapped_row.option remove←any_tap.output"
+        }
+      ],
+      "origami": {
+        "id": "builtin.loop.mutations.delete",
+        "name": "Loop Remove"
+      },
+      "origamiPorts": {
+        "output": "Loop",
+        "outputIndex": "Index"
+      },
+      "defaultNotes": {
+        "loop": "inferred: Origami's default is undocumented; an empty loop outputs empty loops.",
+        "index": "inferred: undocumented; 0 removes the first item."
+      }
+    },
+    {
+      "type": "loopRemoveLast",
+      "name": "Loop Remove Last",
+      "category": "loops",
+      "tier": 2,
+      "status": "supported",
+      "aliases": [
+        "pop",
+        "remove last",
+        "undo last",
+        "delete last",
+        "drop last",
+        "stack pop"
+      ],
+      "summary": "Removes a loop's last item each time it gets a pulse, like undoing the latest addition.",
+      "docs": "## How it works\nLoop Remove Last takes the last item off a loop each time **Remove Last** gets a pulse (a signal that lasts one frame). It works like undo for a list you're adding to.\n\n- **Loop** is the list to shorten.\n- **Remove Last** removes one item from the end. On an empty list it does nothing.\n- **Reset** brings back every removed item.\n- **Index** (output) counts the result's items from 0.\n\nThe patch stores how many items it removed, not a copy of the list. If Loop changes, that many items come off the end of the new loop.\n\n## Tips\n- Undo: wire Loop Append's Output into Loop, and an Undo button's Tap into Remove Last.\n- Keep a fixed length: insert a new item at the front with Loop Insert and pulse Remove Last on the same event.\n- Removing from the front or the middle? Use Loop Remove with an Index.\n\n## Coming from Origami\nSonobe labels the loop output Output. Reset is a Sonobe addition.",
+      "behavior": "State per patch instance: `{ removed: 0, variant: undefined, warned: false }`.\n\nEach frame:\n```\nconst variant = ctx.typeParam ?? \"number\"; // undefined typeParam means the first variant\nif (state.variant !== variant) { state.variant = variant; state.removed = 0; }\nif (ctx.pulsed(\"reset\")) state.removed = 0;\nconst source = ctx.inputItems(\"loop\");\nlet items = source.slice(0, Math.max(0, source.length - state.removed));\nif (ctx.pulsed(\"removeLast\") && items.length > 0) {\n  state.removed += 1;\n  items = items.slice(0, -1);\n}\nctx.output(\"output\", loopOf(items));\nctx.output(\"index\", loopOf(items.map((_, i) => i)));\n```\n\n`loopOf(array)` means \"emit this array as a Loop value\".\n\n- Model: the patch stores a count of removed items, not a copy of the list. Every frame the output is the current Loop without its last `removed` items. With a static Loop this behaves like popping from a held list. When Loop grows (an upstream Loop Append or Loop Insert added an item), the same number of items still comes off the end, so an insert-then-remove-last chain keeps a constant length.\n- Pulses: `removeLast` and `reset` use `ctx.pulsed` (an upstream pulse or a false→true edge of a connected boolean). Pulses on consecutive frames each remove one more item.\n- Precedence: reset runs first, then removeLast, so both in one frame gives Loop minus its last item.\n- Empty lists: a pulse when the current result is empty does nothing and isn't counted, so it never removes items that arrive later.\n- Shrinking input: if Loop gets shorter than `removed`, the output is empty; if it grows back, the stored count applies again.\n- Timing: the item disappears on the pulse frame.\n- Frame 0: nothing removed, so output equals Loop. A pulse on frame 0 applies on frame 0.\n- Loops: `loop`, `output`, and `index` are whole-loop ports; the patch evaluates once per frame with one state per patch instance (and per component instance). Remove Last and Reset are single values read at loop index 0. If a loop with more than one item drives either, item 0 is used and one warning per restart is logged through `ctx.services.log(\"warn\", …)` (`state.warned`).\n- Chaining: put this patch after patches that add items, and show its output.\n- Retargeting: changing the patch's type clears the count.\n- Muted: outputs Loop unchanged and Index `0 … count − 1`. Pulses while muted are ignored; the stored count returns when unmuted.\n- Restart and dispose: restart sets the count back to 0. Nothing to release.\n- Coming from Origami: ports Loop, Remove Last → Loop, Index. Origami's identifier suffix is `remove` (its `delete` suffix is Loop Remove), and its Loop output description says \"with the last value\" where it means without. Origami doesn't document empty lists or changing input; the rules above are Sonobe decisions that match Origami whenever Loop is static. Reset is Sonobe-only.",
+      "inputs": [
+        {
+          "key": "loop",
+          "name": "Loop",
+          "type": "variant",
+          "default": {
+            "loop": []
+          },
+          "description": "The list to take items off the end of.",
+          "wholeLoop": true
+        },
+        {
+          "key": "removeLast",
+          "name": "Remove Last",
+          "type": "pulse",
+          "description": "Pulse to remove the last item. Does nothing when the list is empty."
+        },
+        {
+          "key": "reset",
+          "name": "Reset",
+          "type": "pulse",
+          "description": "Pulse to bring back every removed item and output Loop as it is."
+        }
+      ],
+      "outputs": [
+        {
+          "key": "output",
+          "name": "Output",
+          "type": "variant",
+          "description": "Loop without the items removed from its end.",
+          "wholeLoop": true
+        },
+        {
+          "key": "index",
+          "name": "Index",
+          "type": "index",
+          "description": "The position of each result item, counted from 0: [0, 1, 2, …].",
+          "wholeLoop": true
+        }
+      ],
+      "variants": [
+        "number",
+        "boolean",
+        "text",
+        "color",
+        "point",
+        "point3d",
+        "point4d",
+        "size",
+        "anchor",
+        "index",
+        "enum",
+        "json",
+        "image",
+        "video",
+        "sound",
+        "gradient",
+        "shape",
+        "layerEffect",
+        "layer"
+      ],
+      "alwaysEvaluate": false,
+      "pairsWellWith": [
+        "loopAppend",
+        "loopInsert",
+        "repeatingPulse",
+        "interaction",
+        "loopCount"
+      ],
+      "commonMistakes": [
+        "Undo can't remove items you just added: Loop Remove Last comes before Loop Append in the chain. Wire Loop Append's Output into this patch's Loop and show this patch's result.",
+        "The list keeps growing even with Remove Last: it's driven by a state such as Greater Than, which fires once when it turns on and not again while it stays on. Pulse Remove Last on the same event that adds items."
+      ],
+      "examples": [
+        {
+          "title": "Keep only the five latest readings",
+          "description": "Each tick inserts a reading at the front and removes one from the end, so the meter always shows five bars.",
+          "outline": "layer meter group \"Meter\" @16,300 358x120 layout=row spacing=4\n  layer bar rectangle \"Bar\" 24x120 opacity←latest.output\npatch tick repeatingPulse interval=0.5\npatch reading random randomize←tick.tick start=0.2 end=1\npatch history loopInsert loop=loop[0|0|0|0|0] value←reading.value index=0 insert←tick.tick\npatch latest loopRemoveLast loop←history.output removeLast←tick.tick"
+        }
+      ],
+      "origami": {
+        "id": "builtin.loop.mutations.remove",
+        "name": "Loop Remove Last"
+      },
+      "origamiPorts": {
+        "output": "Loop"
+      },
+      "defaultNotes": {
+        "loop": "inferred: Origami's default is undocumented; an empty loop outputs empty loops."
+      }
+    },
+    {
+      "type": "loopToArray",
+      "name": "Loop to Array",
+      "category": "loops",
+      "tier": 2,
+      "status": "supported",
+      "aliases": [
+        "loop to json",
+        "to array",
+        "pack loop",
+        "collect",
+        "gather",
+        "serialize loop"
+      ],
+      "summary": "Packs a whole loop into one JSON array you can send, store, or inspect.",
+      "docs": "## How it works\nLoop to Array packs every item of a loop, in order, into one JSON array. Downstream patches then see a single value instead of repeating once per item. That's what request bodies, scripts, variables, and data patches expect.\n\n- **Loop** is the loop to pack. It accepts a loop of any type, and a single value becomes a one-item array.\n- **Array** is the JSON array. An empty loop gives `[]`.\n\nItems are written the way Sonobe documents store values: numbers, text, and true/false as themselves, colors as `\"#RRGGBBAA\"` text, and points and sizes as number arrays like `[x, y]`.\n\n## Tips\n- Send a list to a server: wire Array into Network Request's Body.\n- Read one item by position with Value at Index, or count items with Array Count.\n- Loop Over Array turns the array back into a loop. Colors and points convert back when you wire the items into a color or point port.",
+      "behavior": "Stateless.\n\nEach frame:\n```\nconst items = ctx.inputItems(\"loop\"); // whole loop; a scalar arrives as a 1-item array\nctx.output(\"array\", items.map(toJson));\n```\n\n`toJson(v)` converts one runtime value into plain JSON:\n- number: itself; NaN or ±Infinity becomes `0`, with one `ctx.services.log(\"warn\", …)` per restart.\n- boolean, string (text and enum keys): itself.\n- `null` or `undefined`: `null`.\n- Color `{ r, g, b, a }`: `\"#RRGGBBAA\"` via core's `formatColor`, the document encoding.\n- number arrays (point, size, anchor, point3d, point4d, transform): a new array of numbers, with non-finite components as `0`.\n- a nested Loop (a loop of loops): a nested array, converted recursively.\n- JSON values and every other runtime object (AssetRef, LayerRef, GradientValue, ShapeValue, LayerEffectValue, TextStyleValue): a deep copy with the same keys, where any Color object found inside becomes `\"#RRGGBBAA\"` and non-finite numbers become `0`.\n\n- Output: always a single JSON array, never a loop. It's a fresh array each frame; downstream patches must not mutate it.\n- Round trip: Loop Over Array on this array gives items that coerce back through the port rules in core's `values.ts`: `\"#RRGGBBAA\"` text → color, `[x, y]` → point or size.\n- Frame 0: evaluates with authored values; no special case.\n- Loops: `loop` is a whole-loop port, so the patch evaluates once per frame. An empty loop gives `[]`; a single value gives a one-element array.\n- Retargeting: any change to Loop shows on the same frame.\n- Muted: Array outputs `null`.\n- Restart and dispose: nothing to reset or release.\n- Coming from Origami: same ports. Origami doesn't document how colors, points, or media are written into the array; Sonobe uses the document literal encoding (ARCHITECTURE.md §3.3), and object shapes for media and layer references.",
+      "inputs": [
+        {
+          "key": "loop",
+          "name": "Loop",
+          "type": "any",
+          "default": {
+            "loop": []
+          },
+          "description": "The loop to pack, of any type. A single value becomes a one-item array.",
+          "wholeLoop": true
+        }
+      ],
+      "outputs": [
+        {
+          "key": "array",
+          "name": "Array",
+          "type": "json",
+          "description": "One JSON array holding every item in order; [] for an empty loop."
+        }
+      ],
+      "alwaysEvaluate": false,
+      "pairsWellWith": [
+        "loopOverArray",
+        "networkRequest",
+        "valueAtIndex",
+        "arrayCount",
+        "jsonToText"
+      ],
+      "commonMistakes": [
+        "The request fires once per item: the loop itself is wired into Network Request. Pack it with Loop to Array first so the body is one JSON value.",
+        "A script receives colors as text like \"#FF3B30FF\": colors are written as hex text and points as [x, y] arrays. Parse them in the script, or send the array through Loop Over Array into a typed port to convert back."
+      ],
+      "examples": [
+        {
+          "title": "Send the cart to a server",
+          "outline": "layer add_button rectangle \"Add\" @16,720 358x52\nlayer checkout_button rectangle \"Checkout\" @16,780 358x52\npatch tap_add interaction layer=@add_button\npatch tap_checkout interaction layer=@checkout_button\npatch cart loopAppend<text> value=\"sku_42\" append←tap_add.tap\npatch cart_json loopToArray loop←cart.output\npatch checkout networkRequest url=\"https://example.com/api/checkout\" body←cart_json.array request←tap_checkout.tap"
+        },
+        {
+          "title": "Inspect a loop as JSON",
+          "description": "Watch shows the array, such as [\"#34C759FF\", \"#FF3B30FF\", \"#007AFFFF\"], in the console.",
+          "outline": "patch palette loopShuffle<color> loop=loop[#FF3B30FF|#34C759FF|#007AFFFF]\npatch palette_json loopToArray loop←palette.output\npatch peek watch value←palette_json.array"
+        }
+      ],
+      "origami": {
+        "id": "builtin.loop.toarray",
+        "name": "Loop to Array"
+      },
+      "importAliases": [
+        "builtin.loop.toArray"
+      ],
+      "defaultNotes": {
+        "loop": "inferred: Origami's default is undocumented; an empty loop outputs []."
+      }
+    },
+    {
+      "type": "loopOverArray",
+      "name": "Loop Over Array",
+      "category": "loops",
+      "tier": 2,
+      "status": "supported",
+      "aliases": [
+        "for each",
+        "iterate array",
+        "array to loop",
+        "json to loop",
+        "from array",
+        "map over array",
+        "repeat for each item"
+      ],
+      "summary": "Turns a JSON array into a loop, one item per element, so layers repeat for each entry.",
+      "docs": "## How it works\nLoop Over Array turns a JSON array into a loop, with one item per element. Wire **Items** into a layer and that layer repeats once for each entry. It's the usual way to show data from a network request or a JSON file.\n\n- **Array** is the JSON array to loop over.\n- **Items** holds the elements in order. Each item is JSON: wire a plain value straight into a port, or pull fields out of an object with Value for Key.\n- **Index** counts the items from 0: `[0, 1, 2, …]`.\n\nAn empty or missing array makes an empty loop, so looped layers show nothing until data arrives.\n\n## Tips\n- If the data is an object that contains the array, such as `{ \"results\": [...] }`, pick the array with Value for Key first.\n- Nested arrays become items that are arrays. Pass each one into a looped component and use another Loop Over Array inside to build a loop of loops.\n- Loop to Array does the reverse.\n\n## Coming from Origami\nSonobe lists Items before Index.",
+      "behavior": "Stateless (apart from one-time warning flags).\n\nEach frame:\n```\nconst sources = ctx.inputItems(\"array\"); // a single JSON value arrives as a 1-item array; a Loop as its items\nconst items = [];\nfor (const source of sources) {\n  if (Array.isArray(source)) items.push(...source);\n  else if (source === null || source === undefined) continue;\n  else items.push(source);\n}\nif (sources.length === 1) warnIfSuspicious(sources[0]);\nctx.output(\"items\", loopOf(items));\nctx.output(\"index\", loopOf(items.map((_, i) => i)));\n```\n\n`loopOf(array)` means \"emit this array as a Loop value\".\n\n- Elements: an array contributes its elements in order. Nested arrays aren't flattened further; an element that's an array stays one item. Items are the JSON values themselves (never copied or re-typed); coercion into typed ports happens at the receiving port (json → any, best effort, core `values.ts`).\n- Non-array input: `null` (for example, a Network Request that hasn't finished) gives empty loops. Any other single value (object, number, text, boolean) gives a one-item loop holding it.\n- `warnIfSuspicious(v)`: logs at most one `ctx.services.log(\"warn\", …)` per restart when a single, non-looped Array is an object (\"Loop Over Array got an object, not an array. Use Value for Key to pick the array inside it.\") or text whose first non-space character is `[` (\"Loop Over Array got text that looks like JSON. Convert it with Text to JSON first.\").\n- Loop input: when a loop drives Array, each loop item is treated as above and the results are joined in loop order (flattened one level), like looped component outputs. Index counts across the joined result.\n- Frame 0: evaluates with authored values. Before data arrives the result is empty, so bound layers render 0 instances.\n- Loops: `array`, `items`, and `index` are whole-loop ports; the patch evaluates once per frame. The output count follows the array's length every frame.\n- Retargeting: a new array (such as a finished request) replaces the loop on the same frame; per-index state in downstream patches follows the engine's grow and shrink rules.\n- Edge cases: `[]` gives empty loops. The engine's 10,000-item loop limit applies to long arrays.\n- Muted: both outputs are empty loops.\n- Restart and dispose: nothing to reset or release; warning flags clear on restart.\n- Coming from Origami: same ports (Array → Index, Items), with Items listed first here. Origami doesn't document non-array input or a looped Array; the rules above are Sonobe decisions. Files store the identifier as `builtin.loop.fromArray`.",
+      "inputs": [
+        {
+          "key": "array",
+          "name": "Array",
+          "type": "json",
+          "default": [],
+          "description": "The JSON array to loop over. Nothing, or an empty array, makes an empty loop.",
+          "wholeLoop": true
+        }
+      ],
+      "outputs": [
+        {
+          "key": "items",
+          "name": "Items",
+          "type": "json",
+          "description": "One item per array element, in order. Each item is JSON.",
+          "wholeLoop": true
+        },
+        {
+          "key": "index",
+          "name": "Index",
+          "type": "index",
+          "description": "The position of each item, counted from 0: [0, 1, 2, …].",
+          "wholeLoop": true
+        }
+      ],
+      "alwaysEvaluate": false,
+      "pairsWellWith": [
+        "networkRequest",
+        "valueForKey",
+        "jsonArray",
+        "jsonFile",
+        "loopToArray"
+      ],
+      "commonMistakes": [
+        "One row appears holding the whole response: the data is an object that contains the array. Use Value for Key to pick the array, such as \"results\", before Loop Over Array.",
+        "Labels show braces and quotes: each item is an object. Pull out the field you want with Value for Key, then wire it into the Text layer.",
+        "No rows at all: the request hasn't finished, or Array is text that only looks like JSON. Show a loading state from Network Request, or convert text with Text to JSON."
+      ],
+      "examples": [
+        {
+          "title": "List names from a JSON array",
+          "outline": "layer people group \"People\" @16,100 358x400 layout=column spacing=8\n  layer name_label text \"Name\" text←names.items\npatch names loopOverArray array=json[\"Ada\",\"Grace\",\"Linus\"]"
+        },
+        {
+          "title": "Show a list loaded from the network",
+          "description": "The endpoint returns an array of strings. For an array of objects, pull fields out of each item with Value for Key.",
+          "outline": "layer tag_list group \"Tags\" @16,100 358x600 layout=column spacing=8\n  layer tag_label text \"Tag\" text←tag_items.items\npatch start whenPrototypeStarts\npatch feed networkRequest url=\"https://example.com/api/tags.json\" request←start.started\npatch tag_items loopOverArray array←feed.result"
+        }
+      ],
+      "origami": {
+        "id": "builtin.loop.fromarray",
+        "name": "Loop Over Array"
+      },
+      "importAliases": [
+        "builtin.loop.fromArray"
+      ],
+      "defaultNotes": {
+        "array": "inferred: Origami's default is undocumented; [] makes an empty loop until data is wired in."
+      }
+    }
+  ]
+}

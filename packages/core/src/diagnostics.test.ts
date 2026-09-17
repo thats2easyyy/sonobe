@@ -1,0 +1,135 @@
+import { describe, expect, it } from "vitest";
+import { getDiagnostics } from "./diagnostics.ts";
+import { applyOps } from "./ops/index.ts";
+import { buildSampleDocument, emptyDoc, mockRegistry, mustApply } from "./testing/fixtures.ts";
+import type { Component, SonobeDocument } from "./types.ts";
+
+const codes = (doc: SonobeDocument) => getDiagnostics(doc, mockRegistry).map((d) => `${d.severity}:${d.code}`);
+
+function edit(doc: SonobeDocument, fn: (c: Component) => void): SonobeDocument {
+  const copy = structuredClone(doc);
+  fn(copy.components.main!);
+  return copy;
+}
+
+describe("getDiagnostics", () => {
+  it("reports nothing for a healthy prototype", () => {
+    expect(getDiagnostics(buildSampleDocument(), mockRegistry)).toEqual([]);
+  });
+
+  it("flags unknown types, ports and props with ready fixes", () => {
+    const doc = edit(buildSampleDocument(), (c) => {
+      c.patches.weird = { type: "popAnimaton", inputs: {}, ui: { x: 0, y: 0 } };
+      c.patches.pop!.inputs.bounciess = 3;
+      c.layers[0]!.props.cornerRadus = 4;
+      c.layers.push({ id: "sparkle", type: "sparkle", name: "Sparkle", props: {} });
+    });
+    const d = getDiagnostics(doc, mockRegistry);
+    expect(d.find((x) => x.code === "unknown_patch_type")!.message).toContain('"popAnimation"');
+    const port = d.find((x) => x.code === "unknown_port")!;
+    expect(port).toMatchObject({ severity: "error", component: "main", itemIds: ["pop"], port: "bounciess" });
+    expect(port.message).toContain('"bounciness"');
+    expect(port.suggestions![0]!.ops).toEqual([{ op: "setInput", component: "main", target: "pop.bounciess", value: null }]);
+    expect(applyOps(doc, port.suggestions![0]!.ops!, { registry: mockRegistry }).ok).toBe(true);
+    expect(d.some((x) => x.code === "unknown_prop" && x.port === "cornerRadus")).toBe(true);
+    expect(d.some((x) => x.code === "unknown_layer_type" && x.itemIds[0] === "sparkle")).toBe(true);
+  });
+
+  it("flags dangling links, type mismatches, missing layers and missing assets", () => {
+    const doc = edit(buildSampleDocument(), (c) => {
+      c.patches.grow!.inputs.progress = { link: "gone.output" };
+      c.layers[0]!.props.color = { link: "toggle.on" };
+      c.patches.tap_card!.inputs.layer = { layer: "ghost" };
+      c.layers[0]!.children![0]!.props.text = { link: "grow.nope" };
+      c.layers.push({ id: "hero", type: "image", name: "Hero", props: { image: { asset: "missing" } } });
+    });
+    expect(codes(doc)).toEqual(expect.arrayContaining(["error:dangling_link", "error:type_mismatch", "error:missing_layer", "error:unknown_port", "error:missing_asset", "info:unused_patch"]));
+    const d = getDiagnostics(doc, mockRegistry);
+    const dangling = d.find((x) => x.code === "dangling_link")!;
+    expect(dangling.itemIds).toEqual(["grow", "gone"]);
+    expect(dangling.suggestions!.at(-1)!.ops).toEqual([{ op: "disconnect", component: "main", to: "grow.progress" }]);
+    const mismatch = d.find((x) => x.code === "type_mismatch")!;
+    expect(mismatch.suggestions![0]!.ops![0]).toMatchObject({ op: "addPatch", patch: { type: "transition", typeParam: "color" } });
+  });
+
+  it("flags zero-latency self edges and explains feedback loops", () => {
+    expect(codes(edit(buildSampleDocument(), (c) => (c.patches.pop!.inputs.number = { link: "pop.output" })))).toContain("error:self_cycle");
+    const loop = mustApply(buildSampleDocument(), [
+      { op: "addPatch", patch: { id: "d1", type: "delay1", inputs: { value: { link: "grow.output" } } } },
+      { op: "connect", from: "d1.output", to: "pop.number" },
+    ]).doc;
+    const info = getDiagnostics(loop, mockRegistry).find((d) => d.code === "feedback_loop")!;
+    expect(info.severity).toBe("info");
+    expect(info.itemIds).toEqual(["d1", "grow", "pop"]);
+  });
+
+  it("hints when a pulse drives a state input and offers a Switch", () => {
+    const doc = mustApply(buildSampleDocument(), [{ op: "connect", from: "tap_card.tap", to: "pop.number" }]).doc;
+    const hint = getDiagnostics(doc, mockRegistry).find((d) => d.code === "pulse_into_state")!;
+    expect(hint).toMatchObject({ severity: "warning", itemIds: ["pop", "tap_card"], port: "number" });
+    expect(hint.message).toContain("Did you mean to use a Switch?");
+    const fixed = mustApply(doc, hint.suggestions![0]!.ops!);
+    expect(getDiagnostics(fixed.doc, mockRegistry).some((d) => d.code === "pulse_into_state")).toBe(false);
+  });
+
+  it("reports unused patches but not sinks", () => {
+    const doc = mustApply(buildSampleDocument(), [
+      { op: "addPatch", patch: { id: "extra", type: "counter" } },
+      { op: "addPatch", patch: { id: "log", type: "logger", inputs: { value: { link: "extra.count" } } } },
+      { op: "addPatch", patch: { id: "orphan", type: "switch" } },
+    ]).doc;
+    expect(getDiagnostics(doc, mockRegistry).filter((d) => d.code === "unused_patch").map((d) => d.itemIds[0])).toEqual(["orphan"]);
+  });
+
+  it("warns when an interaction's layer can't receive touches", () => {
+    const faded = mustApply(buildSampleDocument(), [{ op: "setInput", target: "@card.opacity", value: 0 }]).doc;
+    const w = getDiagnostics(faded, mockRegistry).find((d) => d.code === "untouchable_layer")!;
+    expect(w).toMatchObject({ severity: "warning", itemIds: ["card", "tap_card"], port: "layer" });
+    expect(w.message).toContain("opacity is 0");
+    const nested = mustApply(buildSampleDocument(), [
+      { op: "addPatch", patch: { id: "tap_title", type: "interaction", inputs: { layer: { layer: "title" } } } },
+      { op: "connect", from: "tap_title.down", to: "grow.start" },
+      { op: "setInput", target: "@card.enabled", value: false },
+      { op: "setInput", target: "@title.hitTest", value: false },
+    ]).doc;
+    const warning = getDiagnostics(nested, mockRegistry).find((d) => d.code === "untouchable_layer" && d.itemIds[0] === "title")!;
+    expect(warning.message).toContain('its parent "card" is disabled and Receives Touches is off');
+    const fixed = mustApply(nested, warning.suggestions!.flatMap((s) => s.ops ?? []));
+    expect(getDiagnostics(fixed.doc, mockRegistry).some((d) => d.code === "untouchable_layer")).toBe(false);
+  });
+
+  it("checks component references, duplicate ids, type params and the root", () => {
+    const doc = edit(buildSampleDocument(), (c) => {
+      c.layers.push({ id: "inst", type: "componentInstance", name: "Inst", component: "nope", props: {} });
+      c.patches.card = { type: "switch", inputs: {}, ui: { x: 0, y: 0 } };
+      c.patches.grow!.typeParam = "sound";
+      c.patches.sum = { type: "add", inputCount: 12, inputs: {}, ui: { x: 0, y: 0 } };
+    });
+    expect(codes(doc)).toEqual(expect.arrayContaining(["error:component_not_found", "error:duplicate_id", "error:invalid_type_param", "warning:input_count_out_of_range"]));
+    const sample = buildSampleDocument();
+    expect(codes({ ...sample, project: { ...sample.project, root: "gone" } })).toContain("error:missing_root");
+  });
+
+  it("checks published ports", () => {
+    const doc = mustApply(emptyDoc(), [
+      {
+        op: "addComponent",
+        component: {
+          name: "Chip",
+          kind: "patchComponent",
+          interface: {
+            inputs: { big: { key: "big", name: "Big", type: "number", default: "huge" } },
+            outputs: { a: { key: "a", name: "A", type: "number", link: "gone.output" }, b: { key: "b", name: "B", type: "number" } },
+          },
+        },
+      },
+    ]).doc;
+    const d = getDiagnostics(doc, mockRegistry, { components: ["chip"] });
+    expect(d.map((x) => `${x.severity}:${x.code}:${x.port}`)).toEqual(["error:invalid_value:big", "error:dangling_link:a", "info:unconnected_output:b"]);
+  });
+
+  it("reports dynamic port failures", () => {
+    const doc = mustApply(emptyDoc(), [{ op: "addPatch", patch: { id: "js", type: "javascript", settings: { broken: true } } }]).doc;
+    expect(codes(doc)).toContain("warning:dynamic_ports_failed");
+  });
+});

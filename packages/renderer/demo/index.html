@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Sonobe Renderer Demo</title>
+    <style>
+      :root {
+        color-scheme: light;
+        font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+      }
+      html,
+      body {
+        margin: 0;
+        background: #e8e8ed;
+        color: #1d1d1f;
+      }
+      nav {
+        display: flex;
+        gap: 6px;
+        padding: 12px 16px;
+        position: sticky;
+        top: 0;
+        z-index: 10;
+        background: rgba(232, 232, 237, 0.85);
+        backdrop-filter: blur(12px);
+      }
+      nav a {
+        font-size: 13px;
+        font-weight: 500;
+        color: #1d1d1f;
+        text-decoration: none;
+        padding: 6px 12px;
+        border-radius: 999px;
+      }
+      nav a[aria-current="page"] {
+        background: #1d1d1f;
+        color: #fff;
+      }
+      body[data-static] nav {
+        display: none;
+      }
+      #app {
+        padding: 24px;
+        display: flex;
+        justify-content: center;
+      }
+      .board {
+        position: relative;
+        border-radius: 24px;
+        overflow: hidden;
+        box-shadow: 0 1px 2px rgba(0, 0, 0, 0.06), 0 20px 50px -20px rgba(0, 0, 0, 0.25);
+      }
+      .device-stage {
+        padding: 24px 40px 40px;
+      }
+      .gallery {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: flex-end;
+        justify-content: center;
+        gap: 48px 56px;
+        max-width: 1320px;
+        padding: 16px 0 24px;
+      }
+      figure {
+        margin: 0;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 18px;
+      }
+      .shell {
+        position: relative;
+      }
+      .zoom {
+        position: absolute;
+        left: 0;
+        top: 0;
+        transform-origin: 0 0;
+      }
+      figcaption {
+        font-size: 13px;
+        font-weight: 500;
+        color: #6e6e73;
+      }
+    </style>
+  </head>
+  <body>
+    <nav>
+      <a href="?view=specimens">Specimens</a>
+      <a href="?view=prototype">Prototype</a>
+      <a href="?view=hit-targets">Hit targets</a>
+      <a href="?view=devices">Devices</a>
+    </nav>
+    <div id="app"></div>
+    <script>
+      const params = new URLSearchParams(location.search);
+      const view = params.get("view") || "specimens";
+      if (params.has("static")) document.body.setAttribute("data-static", "");
+      for (const a of document.querySelectorAll("nav a")) if (a.getAttribute("href") === `?view=${view}`) a.setAttribute("aria-current", "page");
+    </script>
+    <script src="./dist/demo.js"></script>
+  </body>
+</html>

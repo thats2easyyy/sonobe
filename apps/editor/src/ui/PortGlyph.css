@@ -1,0 +1,42 @@
+.sb-portglyph {
+  display: inline-block;
+  flex: none;
+  width: var(--sb-port-size);
+  height: var(--sb-port-size);
+  border-radius: 50%;
+  background: var(--sb-port-color);
+  opacity: 0.5;
+  transition:
+    opacity var(--duration-fast) var(--ease-standard),
+    box-shadow var(--duration-base) var(--ease-standard);
+}
+
+.sb-portglyph[data-connected] {
+  opacity: 1;
+}
+
+.sb-portglyph[data-glyph="pill"] {
+  width: calc(var(--sb-port-size) * 0.7);
+  height: calc(var(--sb-port-size) * 1.25);
+  border-radius: 999px;
+}
+
+.sb-portglyph[data-glyph="diamond"] {
+  border-radius: 1.5px;
+  transform: rotate(45deg) scale(0.85);
+}
+
+.sb-portglyph[data-glyph="square"] {
+  border-radius: 2px;
+  transform: scale(0.9);
+}
+
+.sb-portglyph[data-glyph="ring"] {
+  background: transparent;
+  box-shadow: inset 0 0 0 2px var(--sb-port-color);
+}
+
+.sb-portglyph[data-live] {
+  opacity: 1;
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--sb-port-color) 30%, transparent);
+}

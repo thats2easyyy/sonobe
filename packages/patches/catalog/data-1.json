@@ -1,0 +1,1552 @@
+{
+  "file": "data-1.json",
+  "category": "data",
+  "patches": [
+    {
+      "type": "jsonArray",
+      "name": "JSON Array",
+      "category": "data",
+      "tier": 2,
+      "status": "supported",
+      "aliases": [
+        "array builder",
+        "make array",
+        "list",
+        "create list",
+        "build json",
+        "items",
+        "collection"
+      ],
+      "summary": "Builds a JSON array from a list of values, such as tab titles or ids, to read by position or send as data.",
+      "docs": "## How it works\nA JSON Array collects several values into one ordered list, the kind of data a server sends or expects.\n\n- **Item 0**, **Item 1**, and so on are the values, in order. Item 0 becomes the first element. Change the number of items to add or remove ports.\n- **Array** is the finished list. It updates on the same frame any item changes.\n- Change the patch's type to fill the items with text, numbers, colors, points, JSON, and more. Colors become `\"#RRGGBBAA\"` text and points become `[x, y]` lists.\n\n## Tips\n- Read one element back with Value at Index, and count elements with Array Count.\n- Choosing one of a few values by number? Option Picker does that without JSON.\n- Set the type to JSON to mix kinds of values, or to nest arrays and objects built by other patches.\n\n## Coming from Origami\nItem ports have names and a shared type, so you don't need a Splitter in front of each one.",
+      "behavior": "Stateless.\n\nHelper `toJson(v)`: a runtime Color `{ r, g, b, a }` becomes `formatColor(v)` (\"#RRGGBBAA\"); a non-finite number becomes 0 (warn once per restart through `ctx.services.log(\"warn\", …)`); `undefined` becomes `null`; arrays and plain objects map recursively; media references (`{ assetId }` or `{ url }`) stay as objects so upload bodies can carry them; everything else passes through. Vectors are already `number[]`.\n\nEach frame:\n```\nconst n = Math.max(1, ctx.inputCount); // number of item ports\nconst array = [];\nfor (let i = 0; i < n; i++) array.push(toJson(ctx.input(`item${i}`)));\nctx.output(\"array\", array);\n```\n\n- Length: always the number of item ports, whether or not each port is connected. An unconnected item contributes its literal or the variant's zero value (0, \"\", `\"#00000000\"`, `[0, 0]`, or `null`).\n- Output identity: build a new array every frame; never mutate an array an upstream patch produced. Downstream patches compare by value, not identity.\n- Frame 0: evaluates with authored values; no special case.\n- Loops: evaluates once per loop index. A loop on any item gives a loop of arrays (longest input wins, shorter loops wrap, scalars broadcast). It does not gather a loop into one array; that's Loop to Array.\n- Retargeting: changing the type re-coerces every item on the next evaluation; there is no state to reset.\n- Edge cases: never emits NaN or ±Infinity inside the array. JSON-typed items are copied by reference into the new array (treat them as immutable).\n- Muted: outputs `[]`, since no input has the JSON type to pass through.\n- Coming from Origami: Origami's JSON Array starts with 2 unnamed, untyped ports whose element types come from upstream Splitters. Importers set `typeParam` to `json` and map ports in order to `item0…`. The legacy doc name was Array Builder.",
+      "inputs": [],
+      "outputs": [
+        {
+          "key": "array",
+          "name": "Array",
+          "type": "json",
+          "description": "The items as one JSON array, in port order: Item 0 is the first element."
+        }
+      ],
+      "variadic": {
+        "key": "item",
+        "name": "Item",
+        "type": "variant",
+        "default": 0,
+        "min": 1,
+        "max": 32,
+        "defaultCount": 2,
+        "startIndex": 0,
+        "direction": "inputs",
+        "description": "The value stored at this position in the array, counted from 0."
+      },
+      "variants": [
+        "number",
+        "boolean",
+        "text",
+        "color",
+        "point",
+        "point3d",
+        "point4d",
+        "size",
+        "anchor",
+        "index",
+        "json",
+        "image",
+        "video",
+        "sound"
+      ],
+      "alwaysEvaluate": false,
+      "pairsWellWith": [
+        "valueAtIndex",
+        "arrayCount",
+        "loopOverArray",
+        "jsonObject",
+        "arrayJoin"
+      ],
+      "commonMistakes": [
+        "Value at Index shows the wrong item: positions count from 0, so the first item is Item 0. Subtract 1 from a count that starts at 1.",
+        "A loop wired into one item gives many arrays instead of one: JSON Array evaluates once per loop index. Use Loop to Array to turn a whole loop into an array.",
+        "Text items show up as numbers or 0: the patch is still set to Number. Change its type to Text before typing words."
+      ],
+      "examples": [
+        {
+          "title": "Cycle through three headlines",
+          "outline": "layer headline text \"Headline\" @24,120 text←current.value\nlayer next_button rectangle \"Next\" @24,760 342x52\npatch tap_next interaction layer=@next_button\npatch step counter increase←tap_next.tap maximumCount=3\npatch headlines jsonArray<text>[3] item0=\"Fresh picks for you\" item1=\"Trending near you\" item2=\"Saved for later\"\npatch current valueAtIndex<text> array←headlines.array index←step.count"
+        },
+        {
+          "title": "Preview a request body with a list of ids",
+          "description": "Nest the array inside an object, then turn it into text to check what would be sent.",
+          "outline": "layer preview text \"Body Preview\" @24,120 text←body_text.text\npatch ids jsonArray<number>[3] item0=12 item1=40 item2=7\npatch body jsonObject<json> key=\"ids\" value←ids.array\npatch body_text jsonToText json←body.object"
+        }
+      ],
+      "origami": {
+        "id": "builtin.structure.array.builder",
+        "name": "JSON Array"
+      },
+      "defaultNotes": {
+        "item": "inferred: Origami's item ports are untyped and undocumented; 0 is the Number type's zero value, and Origami starts with 2 items."
+      }
+    },
+    {
+      "type": "jsonObject",
+      "name": "JSON Object",
+      "category": "data",
+      "tier": 2,
+      "status": "supported",
+      "aliases": [
+        "make object",
+        "dictionary",
+        "key value",
+        "create json",
+        "map",
+        "record",
+        "headers",
+        "request body"
+      ],
+      "summary": "Builds a JSON object with one named value, like {\"name\": \"Ada\"}, for request bodies, headers, and nested data.",
+      "docs": "## How it works\nA JSON object stores values by name. This patch makes an object with exactly one entry.\n\n- **Key** is the entry's name. Capital letters and spaces count.\n- **Value** is what the key holds. Change the patch's type to store text, numbers, booleans, colors, points, JSON, or media.\n- **Object** is the result, updated on the same frame Key or Value changes. When Key is empty, Object is `{}`.\n\nColors become `\"#RRGGBBAA\"` text and points become `[x, y]` lists, so the data reads cleanly as text.\n\n## Tips\n- Add more entries with Set Value for Key, or merge several objects with Object Join.\n- Set the type to JSON to nest another object or an array inside this one.\n- Build request headers such as `Authorization` with a Text value.",
+      "behavior": "Stateless.\n\nHelper `toJson(v)`: a runtime Color becomes `formatColor(v)` (\"#RRGGBBAA\"); a non-finite number becomes 0 (warn once per restart); `undefined` becomes `null`; arrays and plain objects map recursively; media references (`{ assetId }` or `{ url }`) stay as objects; everything else passes through.\n\nEach frame:\n```\nconst key = ctx.input<string>(\"key\");\nctx.output(\"object\", key === \"\" ? {} : { [key]: toJson(ctx.input(\"value\")) });\n```\n\n- Keys: used exactly as typed, case-sensitive, with no trimming and no path syntax (\"a.b\" is one key). Build the object with a null-prototype-safe assignment (`Object.defineProperty` or a `Map` converted to an object) so keys such as `__proto__` are stored as ordinary keys.\n- Empty key: outputs `{}`, so a patch whose Key isn't filled in yet adds nothing downstream.\n- Output identity: a new object every frame; never mutate the value input.\n- Frame 0: evaluates with authored values; no special case.\n- Loops: evaluates once per loop index. Looped Key and Value zip into a loop of one-entry objects (longest wins, shorter loops wrap, scalars broadcast). Gathering them into one object needs Object Join or a script.\n- Retargeting: changing the type re-coerces Value on the next evaluation.\n- Edge cases: never stores NaN or ±Infinity. A `null` JSON value is stored as `null`, not dropped.\n- Muted: outputs `{}` (Key is text and Value may not be JSON, so nothing passes through).\n- Coming from Origami: same ports (Key, Value, Object). Origami's Value type is chosen by right-click and its default is undocumented; Sonobe defaults to Number 0. Origami doesn't document the empty-key case.",
+      "inputs": [
+        {
+          "key": "key",
+          "name": "Key",
+          "type": "text",
+          "default": "key",
+          "description": "The entry's name, used exactly as typed; empty text gives an empty object."
+        },
+        {
+          "key": "value",
+          "name": "Value",
+          "type": "variant",
+          "default": 0,
+          "description": "The value stored under Key. Its type follows the patch's type."
+        }
+      ],
+      "outputs": [
+        {
+          "key": "object",
+          "name": "Object",
+          "type": "json",
+          "description": "A JSON object with one entry: Key set to Value."
+        }
+      ],
+      "variants": [
+        "number",
+        "boolean",
+        "text",
+        "color",
+        "point",
+        "point3d",
+        "point4d",
+        "size",
+        "anchor",
+        "index",
+        "json",
+        "image",
+        "video",
+        "sound"
+      ],
+      "alwaysEvaluate": false,
+      "pairsWellWith": [
+        "setValueForKey",
+        "objectJoin",
+        "networkRequest",
+        "jsonToText",
+        "valueForKey"
+      ],
+      "commonMistakes": [
+        "The object only ever has one entry: JSON Object holds a single key. Chain Set Value for Key after it, or join several objects with Object Join.",
+        "The server ignores the value: keys are case-sensitive and exact, so \"userId\" isn't \"userid \". Match the key the API expects character for character.",
+        "A number arrives as text, or the other way around: the patch type decides how Value is stored. Set the type to Number for 42 and to Text for \"42\"."
+      ],
+      "examples": [
+        {
+          "title": "Send a message as a request body",
+          "outline": "layer send_button rectangle \"Send\" @24,760 342x52\npatch tap_send interaction layer=@send_button\npatch message jsonObject<text> key=\"text\" value=\"Running 5 minutes late\"\npatch with_room setValueForKey<number> object←message.object key=\"roomId\" value=42\npatch post networkRequest request←tap_send.tap url=\"https://example.com/messages\" body←with_room.output"
+        },
+        {
+          "title": "Show a toggle's state as JSON",
+          "outline": "layer bell rectangle \"Bell\" @171,300 48x48\nlayer state_label text \"State\" @24,400 text←state_text.text\npatch tap_bell interaction layer=@bell\npatch muted switch flip←tap_bell.tap\npatch state jsonObject<boolean> key=\"muted\" value←muted.on\npatch state_text jsonToText json←state.object pretty=false"
+        }
+      ],
+      "origami": {
+        "id": "builtin.structure.object",
+        "name": "JSON Object"
+      },
+      "defaultNotes": {
+        "key": "sonobe: Origami's default is undocumented; \"key\" makes the output visible as {\"key\": 0} the moment you wire it.",
+        "value": "inferred: Origami's Value type and default are undocumented; Number 0 is the default type's zero value."
+      }
+    },
+    {
+      "type": "valueAtIndex",
+      "name": "Value at Index",
+      "category": "data",
+      "tier": 2,
+      "status": "supported",
+      "aliases": [
+        "object at index",
+        "get value from array",
+        "array item",
+        "nth item",
+        "element at",
+        "array lookup",
+        "get item",
+        "list item"
+      ],
+      "summary": "Reads one element of a JSON array by its position, counted from 0, like the first search result.",
+      "docs": "## How it works\nValue at Index picks one element out of a JSON array, the way `list[2]` does in code.\n\n- **Array** is the list to read from.\n- **Index** is the element's position, counted from 0: 0 is the first element.\n- **Value** is that element. Change the patch's type to read it as text, a number, a color, a point, an image, or JSON.\n- **Found** is true when the position exists. When it doesn't (past the end, negative, or Array isn't an array), Value is empty: 0, empty text, a transparent color, or nothing.\n\nThe patch reads values best effort: the text \"12\" reads as the number 12, `\"#FF3B30\"` reads as a color, and `[x, y]` or `{\"x\": …, \"y\": …}` reads as a point.\n\n## Tips\n- To show every element, use Loop Over Array instead of one Value at Index per element.\n- For nested data such as `results.0.title`, Value at Path does several steps at once.\n- Wire Found into a layer's Enabled to hide a placeholder when there's nothing to show.",
+      "behavior": "Stateless.\n\nHelpers:\n- `whole(x) = Number.isFinite(x) ? Math.floor(x + 1e-6) : NaN` (the epsilon keeps 2.9999999999999996 from float math at 3).\n- `readAs(found, variant)`: `json` returns `found` unchanged. For other variants, `null` returns the variant's zero value (CONVENTIONS.md §8: 0, false, \"\", `#00000000`, zero vectors, `null` for media), and anything else returns `coerce(found, \"json\", variant)` from `@sonobe/core` (best effort; unconvertible values become the type default).\n\nEach frame:\n```\nconst array = ctx.input(\"array\");\nconst i = whole(ctx.input<number>(\"index\"));\nconst variant = ctx.typeParam ?? \"json\";\nconst ok = Array.isArray(array) && Number.isInteger(i) && i >= 0 && i < array.length;\nctx.output(\"value\", ok ? readAs(array[i], variant) : zeroValue(variant));\nctx.output(\"found\", ok);\n```\n\n- Index port: typed `number`, not `index`, so a negative number reaches the patch instead of being clamped to 0 by coercion. Negative indices never count from the end (CONVENTIONS.md §18.5.9).\n- Out of range: past the end, negative, non-finite, or a non-array Array (object, text, null) outputs the zero value and `found` false. No warning, because empty data while a request loads is normal.\n- Element `null`: `found` is true; Value is `null` for JSON and the zero value for other types.\n- Frame 0: evaluates with authored values; no special case.\n- Loops: evaluates once per loop index. A loop of indices over one array gives a loop of elements; a loop of arrays with one index reads the same position from each. Longest input wins, shorter loops wrap, scalars broadcast.\n- Retargeting: changing the type changes only how the element is read; nothing to reset.\n- Coming from Origami: Origami's output is unnamed (the tutorial calls it Value); since v153 its type is selectable, and older files cast with a Splitter. Found is a Sonobe addition. Origami doesn't document out-of-range results; Sonobe outputs the zero value.",
+      "inputs": [
+        {
+          "key": "array",
+          "name": "Array",
+          "type": "json",
+          "default": [],
+          "description": "The JSON array to read from."
+        },
+        {
+          "key": "index",
+          "name": "Index",
+          "type": "number",
+          "default": 0,
+          "min": 0,
+          "step": 1,
+          "description": "The element's position, counted from 0; negative or past-the-end positions output an empty Value."
+        }
+      ],
+      "outputs": [
+        {
+          "key": "value",
+          "name": "Value",
+          "type": "variant",
+          "description": "The element at Index, read as the patch's type; empty when Found is false."
+        },
+        {
+          "key": "found",
+          "name": "Found",
+          "type": "boolean",
+          "description": "True when Array is an array and Index is one of its positions."
+        }
+      ],
+      "variants": [
+        "json",
+        "number",
+        "boolean",
+        "text",
+        "color",
+        "point",
+        "point3d",
+        "point4d",
+        "size",
+        "anchor",
+        "index",
+        "image",
+        "video",
+        "sound"
+      ],
+      "alwaysEvaluate": false,
+      "pairsWellWith": [
+        "valueForKey",
+        "arrayCount",
+        "counter",
+        "loopOverArray",
+        "networkRequest"
+      ],
+      "commonMistakes": [
+        "It shows the second item instead of the first: positions count from 0. Use Index 0 for the first element.",
+        "Value is 0 or empty even though the data is there: the element is an object, not a number or text. Set the type to JSON and read the field with Value for Key, or use Value at Path.",
+        "Nothing shows when the prototype starts: the request hasn't finished, so Array is still empty. Use Found or the request's Loading to show a placeholder."
+      ],
+      "examples": [
+        {
+          "title": "Show the title of the first search result",
+          "outline": "layer title text \"First Result\" @24,120 text←title.value\npatch launch whenPrototypeStarts\npatch search networkRequest request←launch.started url=\"https://example.com/search?q=tacos\"\npatch results valueForKey object←search.result key=\"results\"\npatch first valueAtIndex array←results.value index=0\npatch title valueForKey<text> object←first.value key=\"name\""
+        },
+        {
+          "title": "Step through a color palette",
+          "outline": "layer swatch rectangle \"Swatch\" @95,300 200x200 cornerRadius=24 color←swatch_color.value\npatch tap_swatch interaction layer=@swatch\npatch step counter increase←tap_swatch.tap maximumCount=3\npatch palette jsonArray<color>[3] item0=\"#FF3B30FF\" item1=\"#34C759FF\" item2=\"#007AFFFF\"\npatch swatch_color valueAtIndex<color> array←palette.array index←step.count"
+        }
+      ],
+      "origami": {
+        "id": "builtin.structure.array.index",
+        "name": "Value at Index"
+      },
+      "origamiPorts": {
+        "value": "Output"
+      },
+      "defaultNotes": {
+        "array": "inferred: Origami's default is undocumented; an empty array reads as nothing found.",
+        "index": "verified: the Prototyping with Data tutorial keeps Index at its default of 0."
+      }
+    },
+    {
+      "type": "valueForKey",
+      "name": "Value for Key",
+      "category": "data",
+      "tier": 2,
+      "status": "supported",
+      "aliases": [
+        "structure key",
+        "get field",
+        "object property",
+        "read key",
+        "dictionary lookup",
+        "get value",
+        "json field",
+        "attribute"
+      ],
+      "summary": "Reads one named field from a JSON object, such as a product's name or price.",
+      "docs": "## How it works\nValue for Key reads one entry of a JSON object by its name, the way `item.name` does in code.\n\n- **Object** is the JSON object to read from, such as a network response or one item from Loop Over Array.\n- **Key** is the entry's name. It must match exactly, including capital letters and spaces.\n- **Value** is the entry's value. Change the patch's type to read it as text, a number, a boolean, a color, a point, an image, or JSON.\n- **Found** is true when Object has that key. Otherwise Value is empty: 0, empty text, a transparent color, or nothing.\n\nReading is best effort: the text \"4.5\" reads as the number 4.5, and a URL reads as an image.\n\n## Tips\n- Keep the type at JSON when the value is another object or an array you want to keep reading.\n- For several steps such as `user.address.city`, Value at Path is shorter than a chain of these.\n- Not sure which keys exist? Get Keys lists them, and JSON to Text shows the whole object.",
+      "behavior": "Stateless.\n\nHelper `readAs(found, variant)`: `json` returns `found` unchanged. For other variants, `null` returns the variant's zero value (CONVENTIONS.md §8), and anything else returns `coerce(found, \"json\", variant)` from `@sonobe/core` (best effort; unconvertible values become the type default).\n\nEach frame:\n```\nconst object = ctx.input(\"object\");\nconst key = ctx.input<string>(\"key\");\nconst variant = ctx.typeParam ?? \"json\";\nconst ok = isPlainObject(object) && Object.hasOwn(object, key);\nctx.output(\"value\", ok ? readAs(object[key], variant) : zeroValue(variant));\nctx.output(\"found\", ok);\n```\n\n- Matching: exact, case-sensitive, no trimming, no Unicode normalization, and no path syntax (\"a.b\" is a literal key). Only own keys count, so `toString`, `constructor`, and `__proto__` are found only when the data really contains them.\n- Arrays: an array is not an object here; \"0\" on an array isn't found. Use Value at Index for positions.\n- Missing: a missing key, an empty Key with no \"\" entry, or a non-object Object (array, text, number, null) outputs the zero value and `found` false. No warning, since data often arrives a few frames late.\n- Present `null`: `found` is true; Value is `null` for JSON and the zero value for other types.\n- Frame 0: evaluates with authored values; no special case.\n- Loops: evaluates once per loop index. A loop of objects (from Loop Over Array) with one Key reads the same field from every item; a loop of keys over one object reads several fields. Longest input wins, shorter loops wrap, scalars broadcast.\n- Retargeting: changing the type changes only how the value is read.\n- Coming from Origami: Origami's output is unnamed (the tutorial calls it Value); since v153 its type is selectable, and older files cast with a Splitter. Found is a Sonobe addition. Origami doesn't document the missing-key result; Sonobe outputs the zero value.",
+      "inputs": [
+        {
+          "key": "object",
+          "name": "Object",
+          "type": "json",
+          "default": {},
+          "description": "The JSON object to read from."
+        },
+        {
+          "key": "key",
+          "name": "Key",
+          "type": "text",
+          "default": "",
+          "description": "The name of the entry to read, matched exactly, including capital letters and spaces."
+        }
+      ],
+      "outputs": [
+        {
+          "key": "value",
+          "name": "Value",
+          "type": "variant",
+          "description": "The value stored under Key, read as the patch's type; empty when Found is false."
+        },
+        {
+          "key": "found",
+          "name": "Found",
+          "type": "boolean",
+          "description": "True when Object is a JSON object that contains Key."
+        }
+      ],
+      "variants": [
+        "json",
+        "number",
+        "boolean",
+        "text",
+        "color",
+        "point",
+        "point3d",
+        "point4d",
+        "size",
+        "anchor",
+        "index",
+        "image",
+        "video",
+        "sound"
+      ],
+      "alwaysEvaluate": false,
+      "pairsWellWith": [
+        "loopOverArray",
+        "networkRequest",
+        "valueAtIndex",
+        "valueAtPath",
+        "getKeys"
+      ],
+      "commonMistakes": [
+        "Value stays empty: the key doesn't match exactly. \"Name\" and \"name\" are different keys; check the data with JSON to Text.",
+        "The value you need is one level deeper, so Value is an object instead of text: the field is nested. Chain another Value for Key, or use Value at Path with a path like `user.name`.",
+        "A price shows as 0: the patch type is Text or JSON wired into a number property that can't read it, or the price is text like \"$4\". Set the type to Number and make sure the data holds a plain number."
+      ],
+      "examples": [
+        {
+          "title": "List products from a JSON file",
+          "description": "Loop Over Array turns the array into a loop, so each Value for Key reads one field per row.",
+          "outline": "layer list group \"List\" @0,100 390x600 layout=column spacing=12\n  layer row_title text \"Product Name\" text←names.value\n  layer row_price text \"Price\" text←prices.value\npatch products jsonFile asset=\"products\"\npatch rows loopOverArray array←products.json\npatch names valueForKey<text> object←rows.items key=\"name\"\npatch prices valueForKey<text> object←rows.items key=\"price\""
+        },
+        {
+          "title": "Show the current temperature",
+          "outline": "layer temperature text \"Temperature\" @24,120 text←temp.value\npatch launch whenPrototypeStarts\npatch weather networkRequest request←launch.started url=\"https://example.com/weather.json\"\npatch current valueForKey object←weather.result key=\"current\"\npatch temp valueForKey<text> object←current.value key=\"temperature\""
+        }
+      ],
+      "origami": {
+        "id": "builtin.structure.dictionary.key",
+        "name": "Value for Key"
+      },
+      "origamiPorts": {
+        "value": "Output"
+      },
+      "defaultNotes": {
+        "object": "inferred: Origami's default is undocumented; an empty object reads as nothing found.",
+        "key": "inferred: Origami's default is undocumented; empty text finds nothing until you name a key."
+      }
+    },
+    {
+      "type": "valueAtPath",
+      "name": "Value at Path",
+      "category": "data",
+      "tier": 2,
+      "status": "supported",
+      "aliases": [
+        "json path",
+        "dot path",
+        "nested value",
+        "deep lookup",
+        "get nested",
+        "query json",
+        "pluck",
+        "wildcard"
+      ],
+      "summary": "Reads a value deep inside JSON with a dot path like results.0.title, including every match with * or a .. search.",
+      "docs": "## How it works\nValue at Path walks through nested JSON one step at a time. **Path** is a list of steps separated by dots.\n\n- A word such as `title` reads that key from an object.\n- A whole number such as `0` reads that position from an array, counted from 0.\n- `*` reads every child and gives back an array: `books.*.title` lists every book's title.\n- Starting with `..` searches everything: `..title` finds every `title` key at any depth, in the order they appear.\n- An empty Path gives back the whole Object.\n\n**Value** is the result, read as the patch's type. **Found** is true when the path leads somewhere. When it doesn't, Value is empty: 0, empty text, a transparent color, or nothing.\n\n## Tips\n- Paths with `*` or `..` always give an array. Feed it into Loop Over Array to show one row per match.\n- Keys that contain dots can't be written in a path; use Value for Key for those.\n- Build a path from a loop index with Format Number or Add, such as `items.3.name`.",
+      "behavior": "Stateless.\n\nHelper `readAs(found, variant)`: `json` returns `found` unchanged. For other variants, `null` returns the zero value (CONVENTIONS.md §8), and anything else returns `coerce(found, \"json\", variant)` from `@sonobe/core`.\n\nParsing `path` (text, used exactly as typed; no trimming):\n```\nif (path === \"\") return { ok: true, value: object };\nlet recursive = false, body = path;\nif (path.startsWith(\"..\")) { recursive = true; body = path.slice(2); }\nconst steps = body.split(\".\"); // any empty step (\"a..b\", \"a.\", \".a\", \"..\") → not found\n```\nResolving `steps` against a node:\n```\nfunction walk(node, steps, depth): { ok, value } {\n  if (depth > 256) { warnOnce(\"path is nested more than 256 levels\"); return { ok: false }; }\n  if (steps.length === 0) return { ok: true, value: node };\n  const [step, ...rest] = steps;\n  if (step === \"*\") {\n    const children = Array.isArray(node) ? node : isPlainObject(node) ? Object.values(node) : null;\n    if (!children) return { ok: false };\n    const out = [];\n    for (const child of children) {\n      const r = walk(child, rest, depth + 1);\n      if (!r.ok) continue;                               // children without the rest are skipped\n      if (rest.includes(\"*\")) out.push(...(r.value as unknown[])); // several * give one flat array\n      else out.push(r.value);\n    }\n    return { ok: true, value: out };\n  }\n  if (Array.isArray(node)) {\n    if (!/^\\d+$/.test(step)) return { ok: false };\n    const i = Number(step);\n    return i < node.length ? walk(node[i], rest, depth + 1) : { ok: false };\n  }\n  if (isPlainObject(node) && Object.hasOwn(node, step)) return walk(node[step], rest, depth + 1);\n  return { ok: false };\n}\n```\nRecursive search (`..`): with `[first, ...rest] = steps`, visit every node depth-first in document order (the node itself, then array elements by position or object values in key order). At each plain object that has own key `first`, resolve `walk(node[first], rest)` and collect successful results; recursion continues into `node[first]` as well. The result is `{ ok: true, value: collected }`, an array that may be empty. `first === \"*\"` is not special in recursive mode; it matches a literal `*` key.\n\nEach frame:\n```\nconst r = resolve(ctx.input(\"object\"), ctx.input<string>(\"path\"));\nconst variant = ctx.typeParam ?? \"json\";\nctx.output(\"value\", r.ok ? readAs(r.value, variant) : zeroValue(variant));\nctx.output(\"found\", r.ok);\n```\n\n- Steps: a step of digits indexes arrays (leading zeros allowed: \"01\" is 1); on objects the same step is an ordinary key (\"2024\"). Negative numbers are never positions. Keys are case-sensitive and own-properties only. There is no escape syntax.\n- Found: true when every step resolved. A `*` step on an array or object is found even when no child matches (Value is `[]`); a `..` search is found whenever the path parses, with Value `[]` when nothing matches.\n- Key order: `Object.values`/`Object.keys` order, where whole-number keys come first in ascending order, then other keys in insertion order.\n- Frame 0: evaluates with authored values; no special case.\n- Loops: evaluates once per loop index. A loop of paths over one object reads several values; a loop of objects with one path reads the same place in each. Longest input wins, shorter loops wrap, scalars broadcast. `*` and `..` results are JSON arrays, not loops.\n- Performance: implementations may cache the parsed steps per loop index while Path is unchanged.\n- Edge cases: never throws on bad paths or data; outputs the zero value and `found` false instead.\n- Coming from Origami: same grammar (numbers, keys, `*`, leading `..`). Origami doesn't document empty steps, several wildcards, or depth; Sonobe treats empty steps as not found and flattens several wildcards into one array. Found is a Sonobe addition; since v153 the output type is selectable.",
+      "inputs": [
+        {
+          "key": "object",
+          "name": "Object",
+          "type": "json",
+          "default": {},
+          "description": "The JSON object or array to read from."
+        },
+        {
+          "key": "path",
+          "name": "Path",
+          "type": "text",
+          "default": "",
+          "description": "Steps separated by dots: keys, positions from 0, * for every child, or a leading .. to search everything. Empty returns the whole Object."
+        }
+      ],
+      "outputs": [
+        {
+          "key": "value",
+          "name": "Value",
+          "type": "variant",
+          "description": "What the path leads to, read as the patch's type; an array for * and .. paths, and empty when Found is false."
+        },
+        {
+          "key": "found",
+          "name": "Found",
+          "type": "boolean",
+          "description": "True when every step of the path resolved."
+        }
+      ],
+      "variants": [
+        "json",
+        "number",
+        "boolean",
+        "text",
+        "color",
+        "point",
+        "point3d",
+        "point4d",
+        "size",
+        "anchor",
+        "index",
+        "image",
+        "video",
+        "sound"
+      ],
+      "alwaysEvaluate": false,
+      "pairsWellWith": [
+        "networkRequest",
+        "jsonFile",
+        "loopOverArray",
+        "valueForKey",
+        "valueAtIndex"
+      ],
+      "commonMistakes": [
+        "Value is empty for `results[0].title`: paths use dots only. Write `results.0.title`.",
+        "Text shows brackets and quotes: a path with * or .. returns an array. Feed it into Loop Over Array, or use a position such as `books.0.title` for one value.",
+        "Nothing is found even though the key looks right: spaces and capitals count, and a path like `user.` has an empty step. Remove stray spaces and trailing dots."
+      ],
+      "examples": [
+        {
+          "title": "Show the artist of the first track",
+          "outline": "layer artist text \"Artist\" @24,160 text←artist.value\npatch launch whenPrototypeStarts\npatch tracks networkRequest request←launch.started url=\"https://example.com/tracks.json\"\npatch artist valueAtPath<text> object←tracks.result path=\"results.0.artist.name\""
+        },
+        {
+          "title": "List every book title",
+          "description": "The wildcard collects one title per book, and Loop Over Array makes a row for each.",
+          "outline": "layer list group \"Titles\" @0,100 390x600 layout=column spacing=8\n  layer book_title text \"Book Title\" text←title_items.items\npatch library jsonFile asset=\"library\"\npatch titles valueAtPath object←library.json path=\"books.*.title\"\npatch title_items loopOverArray array←titles.value"
+        }
+      ],
+      "origami": {
+        "id": "builtin.structure.path",
+        "name": "Value at Path"
+      },
+      "defaultNotes": {
+        "object": "inferred: Origami's default is undocumented; an empty object gives an empty result.",
+        "path": "inferred: Origami's default is undocumented; an empty path returns the whole Object, which makes the data visible right away."
+      }
+    },
+    {
+      "type": "setValueForKey",
+      "name": "Set Value for Key",
+      "category": "data",
+      "tier": 2,
+      "status": "supported",
+      "aliases": [
+        "set field",
+        "update object",
+        "add key",
+        "set property",
+        "put value",
+        "assign",
+        "change json",
+        "set object for key"
+      ],
+      "summary": "Adds or replaces one named field in a JSON object and outputs the updated copy.",
+      "docs": "## How it works\nSet Value for Key takes a JSON object and gives back a copy with one entry changed. The original object stays as it was for any other patch reading it.\n\n- **Object** is the object to start from.\n- **Key** is the entry to set. If Object already has it, its value is replaced in the same position; otherwise the entry is added at the end.\n- **Value** is the new value. Change the patch's type to store text, numbers, booleans, colors, points, JSON, or media.\n- **Output** is the updated object, on the same frame any input changes.\n\nWhile Key is empty, Output is Object unchanged, so you can insert the patch into a chain safely.\n\n## Tips\n- Chain several of these to build a request body field by field.\n- To combine whole objects at once, use Object Join.\n- Keys are top-level only: \"user.name\" is one key with a dot in it, not a nested field.",
+      "behavior": "Stateless.\n\nHelper `toJson(v)`: a runtime Color becomes \"#RRGGBBAA\"; a non-finite number becomes 0 (warn once per restart); `undefined` becomes `null`; arrays and plain objects map recursively; media references stay as objects; everything else passes through.\n\nEach frame:\n```\nconst object = ctx.input(\"object\");\nconst key = ctx.input<string>(\"key\");\nconst base = isPlainObject(object) ? object : {};\nif (object !== null && !isPlainObject(object)) warnOnce(\"Object isn't a JSON object, so Set Value for Key starts from {}\");\nif (key === \"\") { ctx.output(\"output\", base); return; }\nconst out = shallowCopy(base);                  // same key order\ndefineOwn(out, key, toJson(ctx.input(\"value\"))); // replaces in place, or appends at the end\nctx.output(\"output\", out);\n```\n\n- Immutability: never mutate the incoming object; copy it shallowly each frame. Nested objects are shared by reference and must be treated as immutable downstream.\n- Keys: exact and case-sensitive, no path syntax. Store with an own-property definition so `__proto__` becomes an ordinary key.\n- Order: replacing keeps the key's position; a new key goes last (JavaScript key order still lists whole-number keys first).\n- Non-objects: `null` starts from `{}` silently; arrays, text, numbers, and booleans start from `{}` and warn once per restart per loop index through `ctx.services.log(\"warn\", …)`.\n- Frame 0: evaluates with authored values; no special case.\n- Loops: evaluates once per loop index. A loop of objects (such as items from Loop Over Array) with one Key and Value sets the field on every item; looped Values give each item its own value. Longest input wins, shorter loops wrap, scalars broadcast.\n- Retargeting: changing the type re-coerces Value on the next evaluation.\n- Restart and dispose: restart clears the warn-once flags. Nothing to release.\n- Coming from Origami: same inputs. Origami's output is also named Object; Sonobe names it Output because the input already uses that key. Origami doesn't document empty keys or non-object inputs.",
+      "inputs": [
+        {
+          "key": "object",
+          "name": "Object",
+          "type": "json",
+          "default": {},
+          "description": "The JSON object to start from; it isn't changed for other patches."
+        },
+        {
+          "key": "key",
+          "name": "Key",
+          "type": "text",
+          "default": "",
+          "description": "The entry to add or replace, matched exactly; empty passes Object through unchanged."
+        },
+        {
+          "key": "value",
+          "name": "Value",
+          "type": "variant",
+          "default": 0,
+          "description": "The new value for Key. Its type follows the patch's type."
+        }
+      ],
+      "outputs": [
+        {
+          "key": "output",
+          "name": "Output",
+          "type": "json",
+          "description": "A copy of Object with Key set to Value."
+        }
+      ],
+      "variants": [
+        "number",
+        "boolean",
+        "text",
+        "color",
+        "point",
+        "point3d",
+        "point4d",
+        "size",
+        "anchor",
+        "index",
+        "json",
+        "image",
+        "video",
+        "sound"
+      ],
+      "alwaysEvaluate": false,
+      "pairsWellWith": [
+        "jsonObject",
+        "valueForKey",
+        "networkRequest",
+        "objectJoin",
+        "jsonToText"
+      ],
+      "commonMistakes": [
+        "The change never reaches the original data: Set Value for Key makes a copy. Read from its Output downstream instead of from the original object.",
+        "A nested field isn't updated and a new key with a dot appears instead: keys are top-level only. Read the inner object with Value for Key, set the field on it, then set it back on the outer object.",
+        "The value disappears on the next frame after a tap: this patch has no memory. Store the value in a Switch, Counter, or Sample and Hold and wire that into Value."
+      ],
+      "examples": [
+        {
+          "title": "Mark a post as liked before sending it",
+          "outline": "layer heart rectangle \"Heart\" @171,400 48x48\nlayer preview text \"Preview\" @24,480 text←preview_text.text\npatch tap_heart interaction layer=@heart\npatch liked switch flip←tap_heart.tap\npatch post jsonObject<number> key=\"postId\" value=81\npatch with_like setValueForKey<boolean> object←post.object key=\"liked\" value←liked.on\npatch preview_text jsonToText json←with_like.output pretty=false"
+        },
+        {
+          "title": "Add a request field from a counter",
+          "outline": "layer more_button rectangle \"Load More\" @24,760 342x52\npatch tap_more interaction layer=@more_button\npatch page counter increase←tap_more.tap\npatch query jsonObject<text> key=\"sort\" value=\"newest\"\npatch with_page setValueForKey<number> object←query.object key=\"page\" value←page.count\npatch feed networkRequest request←tap_more.tap url=\"https://example.com/feed\" body←with_page.output"
+        }
+      ],
+      "origami": {
+        "id": "builtin.structure.setobjectforkey",
+        "name": "Set Value for Key"
+      },
+      "importAliases": [
+        "builtin.structure.setObjectForKey"
+      ],
+      "origamiPorts": {
+        "output": "Object"
+      },
+      "defaultNotes": {
+        "object": "inferred: Origami's default is undocumented; an empty object makes the result {key: value}.",
+        "key": "sonobe: empty text passes Object through, so inserting the patch into a chain changes nothing until a key is typed.",
+        "value": "inferred: Origami's Value type and default are undocumented; Number 0 is the default type's zero value."
+      }
+    },
+    {
+      "type": "getKeys",
+      "name": "Get Keys",
+      "category": "data",
+      "tier": 2,
+      "status": "supported",
+      "aliases": [
+        "object keys",
+        "field names",
+        "list keys",
+        "property names",
+        "dictionary keys",
+        "key list",
+        "iterate object"
+      ],
+      "summary": "Lists the names of every entry in a JSON object as an array of text, so you can show or loop over them.",
+      "docs": "## How it works\nGet Keys looks at a JSON object and outputs the names of its top-level entries.\n\n- **Object** is the object to inspect.\n- **Keys** is a JSON array of text, one per entry. Nested objects aren't searched.\n- Keys come out in the order they appear in the object, except that keys made only of digits (such as \"2024\") come first, smallest to largest.\n- Anything that isn't an object gives an empty array.\n\n## Tips\n- Loop over an object: Get Keys, then Loop Over Array, then Value for Key with the looped key and the same object.\n- Need alphabetical order? Put Array Sort after it.\n- Count the entries with Array Count.",
+      "behavior": "Stateless.\n\nEach frame:\n```\nconst object = ctx.input(\"object\");\nif (isPlainObject(object)) ctx.output(\"keys\", Object.keys(object));\nelse {\n  if (object !== null) warnOnce(\"Object isn't a JSON object, so Get Keys outputs []\");\n  ctx.output(\"keys\", []);\n}\n```\n\n- Order: `Object.keys` order, which is deterministic in every JavaScript engine: canonical whole-number keys (\"0\", \"7\", \"2024\") ascending, then every other key in insertion order (for parsed JSON, the order in the text). Document this rather than inventing a different order.\n- Scope: top-level own keys only, including keys whose value is `null`.\n- Non-objects: `null` outputs `[]` silently; arrays, text, numbers, and booleans output `[]` and warn once per restart per loop index. An array's positions are not keys.\n- Output identity: a new array every frame.\n- Frame 0: evaluates with authored values; no special case.\n- Loops: evaluates once per loop index; a loop of objects gives a loop of key arrays.\n- Restart and dispose: restart clears the warn-once flags. Nothing to release.\n- Coming from Origami: Origami's output is unnamed. Origami doesn't document key order or non-object input; Sonobe uses JavaScript key order and outputs `[]`.",
+      "inputs": [
+        {
+          "key": "object",
+          "name": "Object",
+          "type": "json",
+          "default": {},
+          "description": "The JSON object whose entry names you want."
+        }
+      ],
+      "outputs": [
+        {
+          "key": "keys",
+          "name": "Keys",
+          "type": "json",
+          "description": "A JSON array of the object's top-level key names, as text."
+        }
+      ],
+      "alwaysEvaluate": false,
+      "pairsWellWith": [
+        "loopOverArray",
+        "valueForKey",
+        "arraySort",
+        "arrayCount",
+        "jsonFile"
+      ],
+      "commonMistakes": [
+        "Keys is empty for your data: the value is an array, not an object. Read one item with Value at Index first, or use Array Count for the length.",
+        "The order looks shuffled: keys made of digits come first, smallest to largest. Put Array Sort after Get Keys, or keep the order in an array instead of an object."
+      ],
+      "examples": [
+        {
+          "title": "Make a tab label for each category",
+          "description": "The data is an object such as {\"Photos\": [...], \"Videos\": [...]}; each key becomes a tab.",
+          "outline": "layer tabs group \"Tabs\" @0,60 390x44 layout=row spacing=16\n  layer tab_label text \"Tab Label\" text←tab_keys.items\npatch media jsonFile asset=\"media_library\"\npatch categories getKeys object←media.json\npatch tab_keys loopOverArray array←categories.keys"
+        },
+        {
+          "title": "Count the fields in a response",
+          "outline": "layer field_count text \"Field Count\" @24,120 text←count_fields.count\npatch launch whenPrototypeStarts\npatch profile networkRequest request←launch.started url=\"https://example.com/profile.json\"\npatch fields getKeys object←profile.result\npatch count_fields arrayCount array←fields.keys"
+        }
+      ],
+      "origami": {
+        "id": "builtin.structure.array.keys",
+        "name": "Get Keys"
+      },
+      "origamiPorts": {
+        "keys": "Output"
+      },
+      "defaultNotes": {
+        "object": "inferred: Origami's default is undocumented; an empty object gives an empty key list."
+      }
+    },
+    {
+      "type": "objectJoin",
+      "name": "Object Join",
+      "category": "data",
+      "tier": 2,
+      "status": "supported",
+      "aliases": [
+        "merge objects",
+        "combine json",
+        "object assign",
+        "spread",
+        "extend",
+        "defaults and overrides",
+        "merge headers"
+      ],
+      "summary": "Merges several JSON objects into one, with later objects overwriting keys that earlier ones already have.",
+      "docs": "## How it works\nObject Join combines the entries of several JSON objects into one object.\n\n- **Object 1**, **Object 2**, and so on are merged in order. Change the number of inputs to add more.\n- When two objects have the same key, the later object's value wins. The key keeps the position where it first appeared.\n- The merge is shallow: if both objects hold a nested object under the same key, the later nested object replaces the earlier one completely.\n- Inputs that aren't objects are skipped.\n- **Object** is the merged result, updated on the same frame any input changes.\n\n## Tips\n- Put defaults in Object 1 and overrides in Object 2.\n- Build request headers from separate JSON Object patches, such as `Content-Type` and `Authorization`, then join them.\n- To change a single key, Set Value for Key is simpler.",
+      "behavior": "Stateless.\n\nEach frame:\n```\nconst n = Math.max(2, ctx.inputCount); // number of object inputs\nconst out = {};\nfor (let i = 1; i <= n; i++) {\n  const o = ctx.input(`object${i}`);\n  if (isPlainObject(o)) for (const k of Object.keys(o)) defineOwn(out, k, o[k]);\n  else if (o !== null) warnOnce(i, `Object ${i} isn't a JSON object and was skipped`);\n}\nctx.output(\"object\", out);\n```\n\n- Precedence: last write wins across inputs in port order (Object 1 first). This matches `Object.assign({}, o1, o2, …)`, including key positions: a key's position is where it first appeared, and whole-number keys still list first.\n- Depth: shallow. Values are copied by reference; nested objects are never merged.\n- Non-objects: `null` (the default for an unset JSON input) is skipped silently. Arrays, text, numbers, and booleans are skipped and warn once per restart per input per loop index through `ctx.services.log(\"warn\", …)`.\n- Keys: store with own-property definitions so `__proto__` becomes an ordinary key and never changes the prototype.\n- Immutability: always a new object; never mutate an input.\n- Frame 0: evaluates with authored values; no special case.\n- Loops: evaluates once per loop index. Looped inputs zip into a loop of merged objects (longest wins, shorter loops wrap, scalars broadcast). A whole loop of objects is not folded into one object.\n- Restart and dispose: restart clears the warn-once flags. Nothing to release.\n- Coming from Origami: added in v193 with no doc page; its port names aren't published. The release note says duplicate keys overwrite previous values, which Sonobe matches. Importers map unnamed inputs in order to `object1…`.",
+      "inputs": [],
+      "outputs": [
+        {
+          "key": "object",
+          "name": "Object",
+          "type": "json",
+          "description": "One object holding every entry from the inputs; for duplicate keys, the later input's value."
+        }
+      ],
+      "variadic": {
+        "key": "object",
+        "name": "Object",
+        "type": "json",
+        "default": {},
+        "min": 2,
+        "max": 32,
+        "defaultCount": 2,
+        "startIndex": 1,
+        "direction": "inputs",
+        "description": "An object to merge; its keys overwrite the same keys from earlier inputs."
+      },
+      "alwaysEvaluate": false,
+      "pairsWellWith": [
+        "jsonObject",
+        "setValueForKey",
+        "networkRequest",
+        "getKeys",
+        "jsonToText"
+      ],
+      "commonMistakes": [
+        "Your override doesn't take effect: it's in an earlier input, and later inputs win. Put defaults first and overrides last.",
+        "A nested setting loses its other fields: the merge is shallow, so a nested object is replaced, not combined. Join the nested objects separately, then set the result back with Set Value for Key."
+      ],
+      "examples": [
+        {
+          "title": "Combine request headers",
+          "outline": "layer refresh_button rectangle \"Refresh\" @24,760 342x52\npatch tap_refresh interaction layer=@refresh_button\npatch content_type jsonObject<text> key=\"Content-Type\" value=\"application/json\"\npatch auth jsonObject<text> key=\"Authorization\" value=\"Bearer demo-token\"\npatch headers objectJoin[2] object1←content_type.object object2←auth.object\npatch inbox networkRequest request←tap_refresh.tap url=\"https://example.com/inbox\" headers←headers.object"
+        },
+        {
+          "title": "Apply a theme override to default settings",
+          "outline": "layer settings_text text \"Settings\" @24,120 text←settings_text_value.text\npatch defaults jsonFile asset=\"default_settings\"\npatch dark_mode jsonObject<text> key=\"theme\" value=\"dark\"\npatch settings objectJoin[2] object1←defaults.json object2←dark_mode.object\npatch settings_text_value jsonToText json←settings.object"
+        }
+      ],
+      "origami": {
+        "name": "Object Join"
+      },
+      "defaultNotes": {
+        "object": "inferred: Origami's ports are undocumented; an empty object merges nothing, and 2 inputs mirror Array Join."
+      }
+    },
+    {
+      "type": "arrayAppend",
+      "name": "Array Append",
+      "category": "data",
+      "tier": 2,
+      "status": "supported",
+      "aliases": [
+        "push",
+        "add to list",
+        "add item",
+        "insert at end",
+        "collect",
+        "accumulate",
+        "record",
+        "history"
+      ],
+      "summary": "Adds an item to the end of a JSON array each time it gets a pulse, remembering everything added so far.",
+      "docs": "## How it works\nArray Append keeps a growing list. Each pulse (a signal that lasts one frame) on **Append** adds the current **Item** to the end.\n\n- **Array** is the starting list. Leave it empty to start from nothing.\n- **Item** is what gets added. Its value is captured at the moment of the pulse; changing it later doesn't change items already added.\n- **Append** adds one item per pulse.\n- **Reset** removes everything you appended and goes back to Array.\n- **Output** is Array followed by every appended item.\n\nWhen Array itself changes, such as new data arriving, the appended items are cleared and the list starts again from the new Array. Restarting the prototype also clears them.\n\nChange the patch's type to append text, numbers, colors, points, JSON, and more.\n\n## Tips\n- Count the list with Array Count, or show it with Loop Over Array.\n- To add a whole array at once, use Array Join.\n- The list holds up to 10,000 appended items.",
+      "behavior": "State per loop index: `{ base: undefined, items: [], output: [], warned: false }`.\n\nHelper `toJson(v)`: a runtime Color becomes \"#RRGGBBAA\"; a non-finite number becomes 0; `undefined` becomes `null`; arrays and plain objects map recursively; media references stay as objects; everything else passes through.\n\nEach frame:\n```\nconst input = ctx.input(\"array\");\nlet dirty = false;\nif (state.base === undefined || (input !== state.base && !jsonEqual(input, state.base))) {\n  state.base = input;   // new starting array: drop appended items\n  state.items = [];\n  dirty = true;\n}\nif (ctx.pulsed(\"reset\") && state.items.length > 0) { state.items = []; dirty = true; }\nif (ctx.pulsed(\"append\")) {\n  if (state.items.length < 10000) { state.items = [...state.items, toJson(ctx.input(\"item\"))]; dirty = true; }\n  else if (!state.warned) { state.warned = true; ctx.services.log(\"warn\", `${ctx.id}: Array Append holds at most 10,000 appended items`); }\n}\nif (dirty) {\n  const base = Array.isArray(state.base) ? state.base : [];\n  state.output = [...base, ...state.items];\n}\nctx.output(\"output\", state.output);\n```\n\n- Pulses: `append` and `reset` are pulse inputs (`ctx.pulsed`: an upstream pulse or a false→true edge of a connected boolean). A held `true` appends once. Pulses on consecutive frames each append. At most one item is appended per frame per loop index.\n- Precedence: re-seeding runs first, then Reset, then Append. A Reset and an Append in the same frame leave Array plus the new item.\n- Re-seeding: `jsonEqual` is deep structural equality (same kind; arrays in order; objects with the same key set in any order). Because the check is by value, a feedback wire from Output back into Array through Delay One Frame does not duplicate items: the next frame's Array already contains them and the appended list restarts empty.\n- Snapshot: Item is converted with `toJson` on the pulse frame and never re-read. Output reflects an append on the same frame the pulse arrives.\n- Output identity: the output array changes identity only when its contents change.\n- Frame 0: the first evaluation seeds `base` from Array. A pulse on frame 0 appends on frame 0.\n- Loops: per-index state. A scalar Append pulse with a looped Item appends each index's own item to that index's list and outputs a loop of arrays. New indices start from Array; removed indices drop their state. To gather a loop into one array, use Loop to Array.\n- Edge cases: a non-array Array (null, object, text) counts as `[]` for the base. The 10,000 cap applies to appended items; further pulses are ignored with one warning per restart per index.\n- Retargeting: changing the type keeps appended items as they were stored.\n- Muted: Output passes Array through (the first JSON input), and pulses don't append. State is kept.\n- Restart and dispose: restart clears appended items and the warning flag on every index. Nothing to release.\n- Coming from Origami: same Array, Item, and Append ports; Origami's output is unnamed and it has no Reset input. Origami doesn't document whether items persist across input changes; Sonobe clears them when Array changes by value.",
+      "inputs": [
+        {
+          "key": "array",
+          "name": "Array",
+          "type": "json",
+          "default": [],
+          "description": "The starting list; when it changes, previously appended items are cleared."
+        },
+        {
+          "key": "item",
+          "name": "Item",
+          "type": "variant",
+          "default": 0,
+          "description": "The value to add, captured on the frame Append fires. Its type follows the patch's type."
+        },
+        {
+          "key": "append",
+          "name": "Append",
+          "type": "pulse",
+          "description": "Pulse to add Item to the end of the list."
+        },
+        {
+          "key": "reset",
+          "name": "Reset",
+          "type": "pulse",
+          "description": "Pulse to remove every appended item and go back to Array."
+        }
+      ],
+      "outputs": [
+        {
+          "key": "output",
+          "name": "Output",
+          "type": "json",
+          "description": "Array followed by every item appended since the last reset, restart, or change to Array."
+        }
+      ],
+      "variants": [
+        "number",
+        "boolean",
+        "text",
+        "color",
+        "point",
+        "point3d",
+        "point4d",
+        "size",
+        "anchor",
+        "index",
+        "json",
+        "image",
+        "video",
+        "sound"
+      ],
+      "alwaysEvaluate": false,
+      "pairsWellWith": [
+        "arrayCount",
+        "loopOverArray",
+        "interaction",
+        "arrayIndexOf",
+        "arrayReverse"
+      ],
+      "commonMistakes": [
+        "Every tap adds the item twice or the list resets by itself: Array is wired to data that keeps changing, so the list restarts from it. Wire a stable starting list, or leave Array empty.",
+        "The list only ever has one item: Append is wired to a state such as Down that stays on. A held state appends once; wire the Tap pulse so each tap counts.",
+        "Items vanish when the prototype restarts: appended items live only while the prototype runs. Put permanent items in Array instead."
+      ],
+      "examples": [
+        {
+          "title": "Save each color you land on",
+          "outline": "layer swatch rectangle \"Swatch\" @95,200 200x200 cornerRadius=24 color←swatch_color.value\nlayer count_label text \"Saved Count\" @24,440 text←saved_count.count\nlayer clear_button rectangle \"Clear\" @24,760 342x52\npatch tap_swatch interaction layer=@swatch\npatch tap_clear interaction layer=@clear_button\npatch step counter increase←tap_swatch.tap maximumCount=3\npatch palette jsonArray<color>[3] item0=\"#FF3B30FF\" item1=\"#34C759FF\" item2=\"#007AFFFF\"\npatch swatch_color valueAtIndex<color> array←palette.array index←step.count\npatch saved arrayAppend<color> item←swatch_color.value append←tap_swatch.tap reset←tap_clear.tap\npatch saved_count arrayCount array←saved.output"
+        },
+        {
+          "title": "Add a reply to a chat thread",
+          "description": "Each tap on Send appends the same reply, and Loop Over Array makes one bubble per message.",
+          "outline": "layer thread group \"Thread\" @0,100 390x600 layout=column spacing=8\n  layer bubble text \"Message\" text←message_rows.items\nlayer send_button rectangle \"Send\" @24,760 342x52\npatch tap_send interaction layer=@send_button\npatch seed jsonArray<text>[2] item0=\"Still on for lunch?\" item1=\"Yes! 12:30?\"\npatch thread_items arrayAppend<text> array←seed.array item=\"Sounds good!\" append←tap_send.tap\npatch message_rows loopOverArray array←thread_items.output"
+        }
+      ],
+      "origami": {
+        "id": "builtin.structure.array.append",
+        "name": "Array Append"
+      },
+      "defaultNotes": {
+        "array": "inferred: Origami's default is undocumented; an empty array starts the list from nothing.",
+        "item": "inferred: Origami's Item type and default are undocumented; Number 0 is the default type's zero value."
+      }
+    },
+    {
+      "type": "arrayCount",
+      "name": "Array Count",
+      "category": "data",
+      "tier": 2,
+      "status": "supported",
+      "aliases": [
+        "array length",
+        "size of list",
+        "number of items",
+        "how many",
+        "item count",
+        "length",
+        "count items"
+      ],
+      "summary": "Counts how many elements a JSON array has, such as the number of search results or items in a cart.",
+      "docs": "## How it works\nArray Count outputs how many elements **Array** holds.\n\n- Only the top level counts: an element that is itself an array counts as 1.\n- Anything that isn't an array, including an object or empty data, counts as 0.\n- **Count** updates on the same frame Array changes.\n\n## Tips\n- A count wired into a layer's Enabled turns the layer on only while the array has items.\n- The last element's position is Count − 1, because positions count from 0.\n- To count an object's entries, use Get Keys first. To count a loop, use Loop Count.",
+      "behavior": "Stateless.\n\nEach frame:\n```\nconst array = ctx.input(\"array\");\nctx.output(\"count\", Array.isArray(array) ? array.length : 0);\n```\n\n- Scope: top-level elements only; nested arrays and objects count as one element each. `null` elements count.\n- Non-arrays: objects, text, numbers, booleans, and `null` output 0 without a warning. Text is not measured; that's Text Length.\n- Frame 0: evaluates with authored values; no special case.\n- Loops: evaluates once per loop index; a loop of arrays gives a loop of counts. It never counts the loop itself.\n- Edge cases: the output is always a finite, non-negative integer.\n- Coming from Origami: Origami's output is unnamed. Origami doesn't document non-array input; Sonobe outputs 0.",
+      "inputs": [
+        {
+          "key": "array",
+          "name": "Array",
+          "type": "json",
+          "default": [],
+          "description": "The JSON array to count; anything that isn't an array counts as 0."
+        }
+      ],
+      "outputs": [
+        {
+          "key": "count",
+          "name": "Count",
+          "type": "number",
+          "step": 1,
+          "description": "The number of top-level elements in Array, 0 or more."
+        }
+      ],
+      "alwaysEvaluate": false,
+      "pairsWellWith": [
+        "arrayAppend",
+        "valueAtIndex",
+        "counter",
+        "loopOverArray",
+        "getKeys"
+      ],
+      "commonMistakes": [
+        "Count is 0 for data that clearly has items: the data is an object that holds the array, such as {\"results\": [...]}. Read the array with Value for Key first.",
+        "Value at Index with Count shows nothing: positions stop at Count − 1. Subtract 1 to reach the last element."
+      ],
+      "examples": [
+        {
+          "title": "Show the results list only when there are results",
+          "description": "A count above 0 reads as on, so the list turns on when results arrive.",
+          "outline": "layer results_list group \"Results\" @0,120 390x640 enabled←result_count.count\nlayer count_label text \"Result Count\" @24,80 text←result_count.count\npatch launch whenPrototypeStarts\npatch search networkRequest request←launch.started url=\"https://example.com/search?q=tacos\"\npatch results valueForKey object←search.result key=\"results\"\npatch result_count arrayCount array←results.value"
+        },
+        {
+          "title": "Wrap a carousel after the last photo",
+          "outline": "layer photo image \"Photo\" @0,120 390x390 image←current_photo.value\npatch tap_photo interaction layer=@photo\npatch album jsonFile asset=\"album\"\npatch photo_count arrayCount array←album.json\npatch step counter increase←tap_photo.tap maximumCount←photo_count.count\npatch current_photo valueAtIndex<image> array←album.json index←step.count"
+        }
+      ],
+      "origami": {
+        "id": "builtin.structure.count",
+        "name": "Array Count"
+      },
+      "defaultNotes": {
+        "array": "inferred: Origami's default is undocumented; an empty array counts as 0."
+      }
+    },
+    {
+      "type": "arrayJoin",
+      "name": "Array Join",
+      "category": "data",
+      "tier": 2,
+      "status": "supported",
+      "aliases": [
+        "concatenate",
+        "concat",
+        "merge arrays",
+        "combine lists",
+        "append all",
+        "join lists",
+        "flatten two"
+      ],
+      "summary": "Joins several JSON arrays end to end into one array, such as pinned posts followed by the feed.",
+      "docs": "## How it works\nArray Join puts arrays one after another to make a single array.\n\n- **Array 1**, **Array 2**, and so on are joined in order: every element of Array 1, then every element of Array 2. Change the number of inputs to add more.\n- Nothing is removed or reordered, and nested arrays stay nested.\n- An input that holds a single value instead of an array, such as one object, is added as one element. Empty inputs add nothing.\n- **Array** is the joined result, updated on the same frame any input changes.\n\n## Tips\n- Show pinned items first by putting them in Array 1.\n- To add one item when someone taps, Array Append remembers each addition.\n- The joined array holds up to 10,000 elements.",
+      "behavior": "Stateless.\n\nEach frame:\n```\nconst n = Math.max(2, ctx.inputCount); // number of array inputs\nconst out = [];\nfor (let i = 1; i <= n; i++) {\n  const a = ctx.input(`array${i}`);\n  if (a === null || a === undefined) continue;\n  if (Array.isArray(a)) out.push(...a);\n  else out.push(a);                // a single value joins as one element\n}\nif (out.length > 10000) { warnOnce(\"Array Join keeps the first 10,000 elements\"); out.length = 10000; }\nctx.output(\"array\", out);\n```\n\n- Order: input port order, then element order within each input. Shallow: elements are copied by reference, nested arrays aren't flattened, and duplicates are kept.\n- Single values: text, numbers, booleans, and objects on an input are added as one element. `null` (the default for an unset JSON input) adds nothing.\n- Cap: at most 10,000 elements; extra elements are dropped with one warning per restart per loop index through `ctx.services.log(\"warn\", …)`.\n- Immutability: a new array every frame; never mutate an input. Push elements in chunks (not one giant spread) to avoid call-stack limits on large inputs.\n- Frame 0: evaluates with authored values; no special case.\n- Loops: evaluates once per loop index. Looped inputs zip into a loop of joined arrays (longest wins, shorter loops wrap, scalars broadcast). It never gathers a loop into an array; that's Loop to Array.\n- Muted: Array passes Array 1 through, per the default bypass.\n- Restart and dispose: restart clears the warn-once flag. Nothing to release.\n- Coming from Origami: Origami starts with 2 unnamed inputs and one unnamed output; importers map inputs in order to `array1…`. Origami doesn't document single-value inputs; Sonobe adds them as one element.",
+      "inputs": [],
+      "outputs": [
+        {
+          "key": "array",
+          "name": "Array",
+          "type": "json",
+          "description": "Every element of the inputs, in port order, as one JSON array."
+        }
+      ],
+      "variadic": {
+        "key": "array",
+        "name": "Array",
+        "type": "json",
+        "default": [],
+        "min": 2,
+        "max": 32,
+        "defaultCount": 2,
+        "startIndex": 1,
+        "direction": "inputs",
+        "description": "An array whose elements come after those of the earlier inputs."
+      },
+      "alwaysEvaluate": false,
+      "pairsWellWith": [
+        "jsonArray",
+        "arrayAppend",
+        "loopOverArray",
+        "loopToArray",
+        "networkRequest"
+      ],
+      "commonMistakes": [
+        "The joined array has only two elements, each a whole list: the inputs are objects that contain arrays, such as {\"items\": [...]}. Read each array with Value for Key before joining.",
+        "The items appear in the wrong order: inputs join from top to bottom. Swap the wires, or reorder the ports."
+      ],
+      "examples": [
+        {
+          "title": "Pinned posts above the feed",
+          "outline": "layer feed group \"Feed\" @0,100 390x700 layout=column spacing=12\n  layer post_title text \"Post Title\" text←titles.value\npatch launch whenPrototypeStarts\npatch pinned jsonFile asset=\"pinned_posts\"\npatch latest networkRequest request←launch.started url=\"https://example.com/posts.json\"\npatch latest_posts valueForKey object←latest.result key=\"posts\"\npatch all_posts arrayJoin[2] array1←pinned.json array2←latest_posts.value\npatch rows loopOverArray array←all_posts.array\npatch titles valueForKey<text> object←rows.items key=\"title\""
+        },
+        {
+          "title": "Show favorites first, then suggestions",
+          "outline": "layer total text \"Total\" @24,80 text←total_count.count\npatch favorites jsonArray<text>[2] item0=\"Tacos\" item1=\"Ramen\"\npatch suggestions jsonArray<text>[3] item0=\"Pho\" item1=\"Dumplings\" item2=\"Curry\"\npatch menu arrayJoin[2] array1←favorites.array array2←suggestions.array\npatch total_count arrayCount array←menu.array"
+        }
+      ],
+      "origami": {
+        "id": "builtin.structure.array.join",
+        "name": "Array Join"
+      },
+      "defaultNotes": {
+        "array": "inferred: Origami's defaults are undocumented; an empty array adds nothing, and Origami starts with 2 inputs."
+      }
+    },
+    {
+      "type": "arrayReverse",
+      "name": "Array Reverse",
+      "category": "data",
+      "tier": 2,
+      "status": "supported",
+      "aliases": [
+        "reverse list",
+        "flip order",
+        "backwards",
+        "newest first",
+        "invert order",
+        "reverse array"
+      ],
+      "summary": "Outputs a JSON array's elements in the opposite order, like showing the newest message first.",
+      "docs": "## How it works\nArray Reverse gives back **Array** with its elements in reverse order: the last element becomes the first.\n\n- Only the top level is reversed; arrays inside elements keep their own order.\n- Anything that isn't an array gives an empty array.\n- **Output** updates on the same frame Array changes.\n\n## Tips\n- Lists built with Array Append are oldest first. Reverse them to show the newest item on top.\n- To reverse a loop instead of an array, use Loop Reverse.\n- For largest-to-smallest order, Array Sort with Descending is more direct.",
+      "behavior": "Stateless.\n\nEach frame:\n```\nconst array = ctx.input(\"array\");\nif (Array.isArray(array)) ctx.output(\"output\", [...array].reverse());\nelse {\n  if (array !== null) warnOnce(\"Array isn't a JSON array, so Array Reverse outputs []\");\n  ctx.output(\"output\", []);\n}\n```\n\n- Immutability: reverse a copy; never mutate the input. Elements are copied by reference.\n- Scope: shallow; nested arrays keep their order.\n- Non-arrays: `null` outputs `[]` silently; objects, text, numbers, and booleans output `[]` and warn once per restart per loop index through `ctx.services.log(\"warn\", …)`.\n- Frame 0: evaluates with authored values; no special case.\n- Loops: evaluates once per loop index; a loop of arrays gives a loop of reversed arrays. It never reverses loop order; that's Loop Reverse.\n- Restart and dispose: restart clears the warn-once flag. Nothing to release.\n- Coming from Origami: Origami's output is unnamed. Origami doesn't document non-array input; Sonobe outputs `[]`.",
+      "inputs": [
+        {
+          "key": "array",
+          "name": "Array",
+          "type": "json",
+          "default": [],
+          "description": "The JSON array to reverse."
+        }
+      ],
+      "outputs": [
+        {
+          "key": "output",
+          "name": "Output",
+          "type": "json",
+          "description": "A copy of Array with its elements in reverse order."
+        }
+      ],
+      "alwaysEvaluate": false,
+      "pairsWellWith": [
+        "arrayAppend",
+        "arraySort",
+        "loopOverArray",
+        "loopReverse",
+        "valueAtIndex"
+      ],
+      "commonMistakes": [
+        "Nothing changes on screen: the list is a loop, not a JSON array. Use Loop Reverse, or reverse the array before Loop Over Array.",
+        "Output is empty: Array holds an object that contains the list. Read the list with Value for Key first."
+      ],
+      "examples": [
+        {
+          "title": "Newest message on top",
+          "outline": "layer thread group \"Thread\" @0,100 390x600 layout=column spacing=8\n  layer bubble text \"Message\" text←message_rows.items\nlayer send_button rectangle \"Send\" @24,760 342x52\npatch tap_send interaction layer=@send_button\npatch messages arrayAppend<text> item=\"On my way!\" append←tap_send.tap\npatch newest_first arrayReverse array←messages.output\npatch message_rows loopOverArray array←newest_first.output"
+        },
+        {
+          "title": "Show the last step of a flow",
+          "outline": "layer last_step text \"Last Step\" @24,120 text←last.value\npatch steps jsonArray<text>[3] item0=\"Welcome\" item1=\"Permissions\" item2=\"All set\"\npatch reversed arrayReverse array←steps.array\npatch last valueAtIndex<text> array←reversed.output index=0"
+        }
+      ],
+      "origami": {
+        "id": "builtin.structure.array.reverse",
+        "name": "Array Reverse"
+      },
+      "defaultNotes": {
+        "array": "inferred: Origami's default is undocumented; an empty array reverses to an empty array."
+      }
+    },
+    {
+      "type": "arraySort",
+      "name": "Array Sort",
+      "category": "data",
+      "tier": 2,
+      "status": "supported",
+      "aliases": [
+        "sort list",
+        "order by",
+        "alphabetize",
+        "rank",
+        "leaderboard",
+        "ascending",
+        "descending",
+        "sort by field"
+      ],
+      "summary": "Sorts a JSON array from smallest to largest or the reverse, optionally by a field such as price or name.",
+      "docs": "## How it works\nArray Sort outputs **Array** in order.\n\n- **Sort By** chooses **Ascending** (smallest first, A to Z) or **Descending** (largest first, Z to A).\n- **Key** sorts objects by one of their fields, such as `price`. Leave it empty to sort the elements themselves. Elements without that field go last.\n- Numbers sort by value. Text sorts alphabetically, ignoring capital letters first, so \"apple\" comes before \"Banana\".\n- When elements tie, they keep their original order.\n- Mixed kinds sort as: empty values, booleans, numbers, text, arrays, then objects.\n\n**Output** is the sorted copy, updated on the same frame any input changes.\n\n## Tips\n- Top score: sort Descending by `score`, then Value at Index 0.\n- Get Keys, then Array Sort, gives an object's keys in alphabetical order.\n- Text such as \"10\" sorts as text, after \"1\" and before \"2\". Store numbers as numbers to sort them by value.",
+      "behavior": "Stateless.\n\nHelpers:\n```\nconst MISSING = Symbol(\"missing\");\nfunction rank(v) { return v === MISSING ? 6 : v === null ? 0 : typeof v === \"boolean\" ? 1 : typeof v === \"number\" ? 2 : typeof v === \"string\" ? 3 : Array.isArray(v) ? 4 : 5; }\nfunction compare(a, b) { // ascending\n  const r = rank(a) - rank(b);\n  if (r !== 0) return r;\n  if (typeof a === \"boolean\") return a === b ? 0 : a ? 1 : -1;\n  if (typeof a === \"number\") return a < b ? -1 : a > b ? 1 : 0;\n  if (typeof a === \"string\") {\n    const la = a.toLowerCase(), lb = b.toLowerCase();\n    if (la !== lb) return la < lb ? -1 : 1;\n    return a < b ? -1 : a > b ? 1 : 0; // same letters: uppercase code units first\n  }\n  return 0; // null, arrays, objects tie\n}\n```\n\nEach frame:\n```\nconst array = ctx.input(\"array\");\nif (!Array.isArray(array)) { if (array !== null) warnOnce(\"Array isn't a JSON array, so Array Sort outputs []\"); ctx.output(\"output\", []); return; }\nconst key = ctx.input<string>(\"key\");\nconst descending = ctx.input<string>(\"sortBy\") === \"descending\";\nconst sortValue = (item) => key === \"\" ? item : isPlainObject(item) && Object.hasOwn(item, key) ? item[key] : MISSING;\nconst decorated = array.map((item, i) => ({ item, v: sortValue(item), i }));\ndecorated.sort((x, y) => {\n  const xm = x.v === MISSING, ym = y.v === MISSING;\n  if (xm || ym) return xm === ym ? x.i - y.i : xm ? 1 : -1; // missing last in both directions\n  const c = descending ? -compare(x.v, y.v) : compare(x.v, y.v);\n  return c !== 0 ? c : x.i - y.i; // ties keep original order\n});\nctx.output(\"output\", decorated.map((d) => d.item));\n```\n\n- Text: code-unit comparison of `toLowerCase()`, with ties broken by exact code units. No locale collation and no natural number ordering, so results are identical in every host. Accented letters sort after z.\n- Stability: ties keep input order in both directions; Descending is not the same as reversing Ascending.\n- Key: exact, case-sensitive, top-level only (no dot paths). A present `null` field sorts as `null`, before booleans; a missing field or a non-object element sorts after everything.\n- Immutability: sort a copy; elements are copied by reference.\n- Non-arrays: `null` outputs `[]` silently; other values output `[]` and warn once per restart per loop index.\n- Frame 0: evaluates with authored values; no special case.\n- Loops: evaluates once per loop index; looped Sort By or Key sort the same array different ways. It never sorts a loop itself.\n- Coming from Origami: Array and Sort By match Origami, whose output is unnamed. Key is a Sonobe addition; importers leave it empty. Origami doesn't document text case, mixed kinds, or stability; Sonobe defines them as above.",
+      "inputs": [
+        {
+          "key": "array",
+          "name": "Array",
+          "type": "json",
+          "default": [],
+          "description": "The JSON array to sort."
+        },
+        {
+          "key": "sortBy",
+          "name": "Sort By",
+          "type": "enum",
+          "default": "ascending",
+          "enumOptions": [
+            {
+              "key": "ascending",
+              "name": "Ascending",
+              "description": "Smallest first: 1, 2, 3 and A to Z."
+            },
+            {
+              "key": "descending",
+              "name": "Descending",
+              "description": "Largest first: 3, 2, 1 and Z to A."
+            }
+          ],
+          "description": "Which direction to sort."
+        },
+        {
+          "key": "key",
+          "name": "Key",
+          "type": "text",
+          "default": "",
+          "description": "A field to sort objects by, such as price; empty sorts the elements themselves."
+        }
+      ],
+      "outputs": [
+        {
+          "key": "output",
+          "name": "Output",
+          "type": "json",
+          "description": "A sorted copy of Array."
+        }
+      ],
+      "alwaysEvaluate": false,
+      "pairsWellWith": [
+        "arrayReverse",
+        "getKeys",
+        "valueAtIndex",
+        "loopOverArray",
+        "jsonFile"
+      ],
+      "commonMistakes": [
+        "Objects don't move: they're compared as ties when Key is empty. Set Key to the field to sort by, such as `name`.",
+        "\"10\" sorts before \"9\": the numbers are stored as text, which sorts letter by letter. Store them as numbers in the data.",
+        "Some items end up at the bottom no matter the direction: they don't have the Key field. Check the field name's spelling and capitals."
+      ],
+      "examples": [
+        {
+          "title": "Show the top scorer",
+          "outline": "layer leader text \"Leader\" @24,120 text←leader_name.value\npatch scores jsonFile asset=\"scores\"\npatch ranked arraySort array←scores.json sortBy=descending key=\"score\"\npatch top valueAtIndex array←ranked.output index=0\npatch leader_name valueForKey<text> object←top.value key=\"name\""
+        },
+        {
+          "title": "List categories alphabetically",
+          "outline": "layer list group \"Categories\" @0,100 390x600 layout=column spacing=8\n  layer category_label text \"Category\" text←category_rows.items\npatch catalog jsonFile asset=\"catalog\"\npatch category_names getKeys object←catalog.json\npatch sorted_names arraySort array←category_names.keys\npatch category_rows loopOverArray array←sorted_names.output"
+        }
+      ],
+      "origami": {
+        "id": "builtin.structure.array.sort",
+        "name": "Array Sort"
+      },
+      "defaultNotes": {
+        "array": "inferred: Origami's default is undocumented; an empty array sorts to an empty array.",
+        "sortBy": "inferred: Origami lists Ascending first; its default isn't documented.",
+        "key": "sonobe: Key is a Sonobe addition; empty sorts elements directly, matching Origami."
+      }
+    },
+    {
+      "type": "arrayIndexOf",
+      "name": "Array Index Of",
+      "category": "data",
+      "tier": 2,
+      "status": "supported",
+      "aliases": [
+        "index of",
+        "find in array",
+        "contains",
+        "includes",
+        "position of",
+        "search list",
+        "is saved",
+        "membership"
+      ],
+      "summary": "Finds where an item sits in a JSON array and whether it's there at all, such as checking if a post is saved.",
+      "docs": "## How it works\nArray Index Of looks for **Item** in **Array**, starting from the first element.\n\n- **Index** is the position of the first match, counted from 0. It's −1 when Item isn't in the array.\n- **Contains** is true when Item is in the array.\n\nMatching is exact. Text must match including capital letters and spaces, and the number 3 doesn't match the text \"3\". Objects match when they have the same keys and values in any order; arrays match element by element. Colors are compared as `\"#RRGGBBAA\"` text.\n\nChange the patch's type to match the kind of value in the array.\n\n## Tips\n- Wire Contains into an Option Picker to show a filled or outlined icon.\n- With a looped Item, each row learns whether it's selected.\n- Pair it with Array Append to track saved or selected ids.",
+      "behavior": "Stateless.\n\nHelpers:\n- `toJson(v)`: a runtime Color becomes \"#RRGGBBAA\"; a non-finite number becomes 0; `undefined` becomes `null`; arrays and plain objects map recursively; everything else passes through.\n- `jsonEqual(a, b)`: same kind (null, boolean, number, string, array, object); numbers with `===` (so `0 === -0`); strings exact (case-sensitive, no trimming or Unicode normalization); arrays of equal length with equal elements in order; objects with the same own key set and equal values, in any key order. Media references compare as objects.\n\nEach frame:\n```\nconst array = ctx.input(\"array\");\nconst item = toJson(ctx.input(\"item\"));\nlet index = -1;\nif (Array.isArray(array)) {\n  for (let i = 0; i < array.length; i++) if (jsonEqual(array[i], item)) { index = i; break; }\n}\nctx.output(\"index\", index);\nctx.output(\"contains\", index >= 0);\n```\n\n- Matching: the first (lowest) position wins. No type coercion between kinds: text \"3\" never matches number 3, and `true` never matches 1.\n- Non-arrays: objects, text, and `null` give −1 and false, without a warning.\n- Frame 0: evaluates with authored values; no special case.\n- Loops: evaluates once per loop index. A looped Item over one array gives a loop of positions and booleans, one per row. Longest input wins, shorter loops wrap, scalars broadcast.\n- Edge cases: `index` is an index output that may be −1; downstream `index` inputs clamp it to 0, so check Contains before using it as a position.\n- Muted: outputs −1 and false, as if nothing matched.\n- Coming from Origami: Origami's patch is named Index Of, with the same Array, Item, Index, and Contains ports. Origami doesn't document how values compare; Sonobe uses exact JSON equality.",
+      "inputs": [
+        {
+          "key": "array",
+          "name": "Array",
+          "type": "json",
+          "default": [],
+          "description": "The JSON array to search."
+        },
+        {
+          "key": "item",
+          "name": "Item",
+          "type": "variant",
+          "default": 0,
+          "description": "The value to look for; it must match an element exactly. Its type follows the patch's type."
+        }
+      ],
+      "outputs": [
+        {
+          "key": "index",
+          "name": "Index",
+          "type": "index",
+          "description": "The position of the first matching element, counted from 0, or −1 when there's no match."
+        },
+        {
+          "key": "contains",
+          "name": "Contains",
+          "type": "boolean",
+          "description": "True when Item is in Array."
+        }
+      ],
+      "variants": [
+        "number",
+        "boolean",
+        "text",
+        "color",
+        "point",
+        "point3d",
+        "point4d",
+        "size",
+        "anchor",
+        "index",
+        "json",
+        "image",
+        "video",
+        "sound"
+      ],
+      "alwaysEvaluate": false,
+      "pairsWellWith": [
+        "arrayAppend",
+        "optionPicker",
+        "loopOverArray",
+        "valueAtIndex",
+        "jsonArray"
+      ],
+      "commonMistakes": [
+        "Contains stays false even though the id is in the list: the list stores numbers and Item is text, or the other way around. Change the patch's type to match the data.",
+        "The first row looks selected when nothing is: Index is −1, and index inputs such as Option Picker's Option clamp −1 to 0. Use Contains to decide whether there's a match."
+      ],
+      "examples": [
+        {
+          "title": "Fill the heart once a post is saved",
+          "outline": "layer heart rectangle \"Heart\" @171,400 48x48 cornerRadius=24 color←heart_color.output\npatch tap_heart interaction layer=@heart\npatch saved arrayAppend<text> item=\"post_81\" append←tap_heart.tap\npatch is_saved arrayIndexOf<text> array←saved.output item=\"post_81\"\npatch heart_color optionPicker<color>[2] option←is_saved.contains option0=\"#8E8E93FF\" option1=\"#FF3B30FF\""
+        },
+        {
+          "title": "Show which step a screen belongs to",
+          "outline": "layer step_label text \"Step Number\" @24,120 text←step_index.index\npatch steps jsonArray<text>[3] item0=\"welcome\" item1=\"permissions\" item2=\"done\"\npatch step_index arrayIndexOf<text> array←steps.array item=\"permissions\""
+        }
+      ],
+      "origami": {
+        "id": "builtin.structure.array.indexof",
+        "name": "Index Of"
+      },
+      "defaultNotes": {
+        "array": "inferred: Origami's default is undocumented; an empty array never contains anything.",
+        "item": "inferred: Origami's Item type and default are undocumented; Number 0 is the default type's zero value."
+      }
+    },
+    {
+      "type": "subarray",
+      "name": "Subarray",
+      "category": "data",
+      "tier": 2,
+      "status": "supported",
+      "aliases": [
+        "slice",
+        "take first",
+        "top n",
+        "range of items",
+        "page of results",
+        "limit",
+        "portion",
+        "sublist"
+      ],
+      "summary": "Takes a run of elements from a JSON array, such as the first five results or one page of a feed.",
+      "docs": "## How it works\nSubarray copies part of **Array**.\n\n- **Start** is the position of the first element to take, counted from 0.\n- **Length** is how many elements to take.\n- **Output** holds the elements from Start onward, up to Length of them.\n\nIt never fails: if fewer elements remain, you get what's there, and a Start past the end or a Length of 0 gives an empty array. Fractions round down.\n\n## Tips\n- Show the top results: Start 0, Length 5.\n- Page through a feed: set Start to the page number times the page size, and Length to the page size.\n- Array Count on the output tells you how many elements you actually got.",
+      "behavior": "Stateless.\n\nHelper: `whole(x) = Number.isFinite(x) ? Math.floor(x + 1e-6) : 0` (the epsilon keeps float results such as 4.9999999999999996 at 5).\n\nEach frame:\n```\nconst array = ctx.input(\"array\");\nif (!Array.isArray(array)) { if (array !== null) warnOnce(\"Array isn't a JSON array, so Subarray outputs []\"); ctx.output(\"output\", []); return; }\nconst start = Math.max(0, whole(ctx.input<number>(\"start\")));\nconst length = whole(ctx.input<number>(\"length\"));\nctx.output(\"output\", length <= 0 || start >= array.length ? [] : array.slice(start, Math.min(array.length, start + length)));\n```\n\n- Ranges: Start is clamped to 0 or more (the `index` port already floors and clamps); Length ≤ 0 or non-finite gives `[]`; Start + Length past the end is cut at the end. Negative Start never counts from the end (CONVENTIONS.md §18.5.9).\n- Immutability: a new array every frame; elements are copied by reference.\n- Non-arrays: `null` outputs `[]` silently; other values output `[]` and warn once per restart per loop index through `ctx.services.log(\"warn\", …)`.\n- Frame 0: evaluates with authored values; no special case.\n- Loops: evaluates once per loop index. Looped Start values over one array give a loop of pages. Longest input wins, shorter loops wrap, scalars broadcast.\n- Restart and dispose: restart clears the warn-once flag. Nothing to release.\n- Coming from Origami: Origami calls Start \"Location\" and leaves the output unnamed. Origami doesn't document out-of-range ranges; Sonobe clamps like `Array.prototype.slice`.",
+      "inputs": [
+        {
+          "key": "array",
+          "name": "Array",
+          "type": "json",
+          "default": [],
+          "description": "The JSON array to take elements from."
+        },
+        {
+          "key": "start",
+          "name": "Start",
+          "type": "index",
+          "default": 0,
+          "min": 0,
+          "step": 1,
+          "description": "Position of the first element to take, counted from 0; past the end gives an empty array."
+        },
+        {
+          "key": "length",
+          "name": "Length",
+          "type": "number",
+          "default": 3,
+          "min": 0,
+          "step": 1,
+          "description": "How many elements to take; 0 gives an empty array, and extra length stops at the end."
+        }
+      ],
+      "outputs": [
+        {
+          "key": "output",
+          "name": "Output",
+          "type": "json",
+          "description": "Up to Length elements of Array, beginning at Start."
+        }
+      ],
+      "alwaysEvaluate": false,
+      "pairsWellWith": [
+        "loopOverArray",
+        "counter",
+        "arrayCount",
+        "valueForKey",
+        "arrayJoin"
+      ],
+      "commonMistakes": [
+        "The first result is missing: Start counts from 0. Use Start 0 to begin with the first element.",
+        "The last page shows fewer items than expected and nothing breaks: Subarray stops at the end of the array. Use Array Count on the output to hide an empty Next button."
+      ],
+      "examples": [
+        {
+          "title": "Show only the top five results",
+          "outline": "layer results group \"Results\" @0,100 390x600 layout=column spacing=12\n  layer result_name text \"Result Name\" text←names.value\npatch launch whenPrototypeStarts\npatch search networkRequest request←launch.started url=\"https://example.com/search?q=parks\"\npatch all_results valueForKey object←search.result key=\"results\"\npatch top_five subarray array←all_results.value start=0 length=5\npatch rows loopOverArray array←top_five.output\npatch names valueForKey<text> object←rows.items key=\"name\""
+        },
+        {
+          "title": "Page through a feed five posts at a time",
+          "outline": "layer feed group \"Feed\" @0,100 390x600 layout=column spacing=12\n  layer post_title text \"Post Title\" text←titles.value\nlayer next_button rectangle \"Next Page\" @24,760 342x52\npatch tap_next interaction layer=@next_button\npatch page counter increase←tap_next.tap maximumCount=4\npatch page_start mathExpression expression=\"start = page * 5\" page←page.count\npatch posts jsonFile asset=\"posts\"\npatch this_page subarray array←posts.json start←page_start.start length=5\npatch rows loopOverArray array←this_page.output\npatch titles valueForKey<text> object←rows.items key=\"title\""
+        }
+      ],
+      "origami": {
+        "id": "builtin.structure.subarray",
+        "name": "Subarray"
+      },
+      "origamiPorts": {
+        "start": "Location"
+      },
+      "defaultNotes": {
+        "array": "inferred: Origami's default is undocumented; an empty array gives an empty result.",
+        "start": "inferred: Origami's default is undocumented; 0 starts at the first element.",
+        "length": "sonobe: Origami's default is undocumented; 3 matches the default loop count and shows a visible slice right away."
+      }
+    },
+    {
+      "type": "jsonToText",
+      "name": "JSON to Text",
+      "category": "data",
+      "tier": 2,
+      "status": "supported",
+      "aliases": [
+        "text from json",
+        "structure formatter",
+        "stringify",
+        "serialize",
+        "print json",
+        "debug data",
+        "format json"
+      ],
+      "summary": "Turns any JSON value into readable JSON text, for checking data on screen or sending it as a message.",
+      "docs": "## How it works\nJSON to Text writes a JSON value out as text, so you can see what's inside it.\n\n- **JSON** is the value to write out: an object, an array, or a single value.\n- **Pretty** puts each entry on its own line, indented by two spaces. Turn it off for compact one-line text, which is better for sending data.\n- **Text** is valid JSON text. Text values come out in quotes, and empty data comes out as `null`.\n\nKeys keep the order they have in the object, except that keys made only of digits come first. Colors appear as `\"#RRGGBBAA\"` text.\n\n## Tips\n- Wire a network response into JSON to Text and then into a Text layer to see its structure while you build.\n- Text to JSON reads the text back into data.\n- Very large responses make long text. Narrow them first with Value for Key or Subarray.\n\n## Coming from Origami\nFormerly called Text from JSON. Pretty is a Sonobe addition.",
+      "behavior": "Stateless.\n\nHelper `toJson(v)`: a runtime Color becomes \"#RRGGBBAA\"; a non-finite number becomes 0; `undefined` becomes `null`; arrays and plain objects map recursively; media references stay as objects; everything else passes through.\n\nEach frame:\n```\nlet text;\ntry {\n  text = JSON.stringify(toJson(ctx.input(\"json\")), null, ctx.input<boolean>(\"pretty\") ? 2 : undefined) ?? \"null\";\n} catch {\n  text = \"\";\n  warnOnce(\"JSON to Text can't write a value that contains itself\");\n}\nctx.output(\"text\", text);\n```\n\n- Format: standard JSON (RFC 8259) as produced by `JSON.stringify`: no trailing commas, strings quoted and escaped, non-ASCII characters written as-is, integers without a decimal point, and very large or small numbers in exponent form (`1e+21`). Pretty uses 2-space indentation and `\\n` line breaks; empty arrays and objects print as `[]` and `{}`.\n- Top-level values: text prints quoted (`\"hello\"`), numbers and booleans print as literals, and `null` or an unset input prints `null`.\n- Key order: `Object.keys` order (whole-number keys ascending first, then insertion order), so output is identical in every host.\n- Cycles: only values from scripts can contain themselves; outputs `\"\"` and warns once per restart per loop index through `ctx.services.log(\"warn\", …)`.\n- Performance: implementations may cache the last input identity and Pretty per loop index and skip re-serializing.\n- Frame 0: evaluates with authored values; no special case.\n- Loops: evaluates once per loop index; a loop of JSON values gives a loop of texts.\n- Restart and dispose: restart clears the warn-once flag. Nothing to release.\n- Coming from Origami: renamed from Text from JSON in v207; the ports are unnamed in Origami. Origami's indentation isn't documented; Sonobe pretty-prints by default for readability. Importers leave Pretty at true.",
+      "inputs": [
+        {
+          "key": "json",
+          "name": "JSON",
+          "type": "json",
+          "default": null,
+          "description": "The object, array, or single value to write out as text."
+        },
+        {
+          "key": "pretty",
+          "name": "Pretty",
+          "type": "boolean",
+          "default": true,
+          "description": "When on, writes one entry per line with 2-space indentation; when off, writes compact one-line text."
+        }
+      ],
+      "outputs": [
+        {
+          "key": "text",
+          "name": "Text",
+          "type": "text",
+          "description": "The value as JSON text."
+        }
+      ],
+      "alwaysEvaluate": false,
+      "pairsWellWith": [
+        "networkRequest",
+        "textToJson",
+        "jsonObject",
+        "watch",
+        "valueForKey"
+      ],
+      "commonMistakes": [
+        "The Text layer shows `null`: the request hasn't returned yet, or the wire comes from the wrong output. Wait for Loading to turn off, and wire the request's Result.",
+        "Only part of the text fits on screen: pretty printing adds many lines. Turn Pretty off, make the Text layer taller, or narrow the data with Value for Key first."
+      ],
+      "examples": [
+        {
+          "title": "Inspect a network response on screen",
+          "outline": "layer debug_text text \"Response\" @16,80 358x700 fontSize=12 text←response_text.text\npatch launch whenPrototypeStarts\npatch profile networkRequest request←launch.started url=\"https://example.com/profile.json\"\npatch response_text jsonToText json←profile.result"
+        },
+        {
+          "title": "Show a compact summary of a selection",
+          "outline": "layer summary text \"Summary\" @24,120 text←summary_text.text\nlayer size_button rectangle \"Size\" @24,760 342x52\npatch tap_size interaction layer=@size_button\npatch size_step counter increase←tap_size.tap maximumCount=3\npatch order jsonObject<number> key=\"size\" value←size_step.count\npatch summary_text jsonToText json←order.object pretty=false"
+        }
+      ],
+      "origami": {
+        "id": "builtin.structure.format",
+        "name": "JSON to Text"
+      },
+      "importAliases": [
+        "builtin.structureformatter"
+      ],
+      "origamiPorts": {
+        "json": "Input",
+        "text": "Output"
+      },
+      "defaultNotes": {
+        "json": "inferred: Origami's default is undocumented; null is the JSON type's zero value.",
+        "pretty": "sonobe: Pretty is a Sonobe addition; multi-line text is easier to read while debugging."
+      }
+    },
+    {
+      "type": "textToJson",
+      "name": "Text to JSON",
+      "category": "data",
+      "tier": 2,
+      "status": "supported",
+      "aliases": [
+        "parse json",
+        "json parse",
+        "read json text",
+        "decode json",
+        "string to object",
+        "text to data"
+      ],
+      "summary": "Reads text written in JSON format and turns it into data the JSON patches can use.",
+      "docs": "## How it works\nText to JSON reads text such as `{\"name\": \"Ada\"}` or `[1, 2, 3]` and outputs it as JSON data.\n\n- **Text** is the JSON-formatted text to read. It must be standard JSON: keys and text in double quotes, no trailing commas, no comments.\n- **JSON** is the result. It can be an object, an array, or a single value such as a number.\n- **Error** turns on when the text isn't valid JSON, and **Error Message** explains why. While there's an error, JSON is empty.\n- Empty text, or text with only spaces, gives empty JSON without an error.\n\n## Tips\n- Use it on text that holds data, such as a WebSocket message or text from a script.\n- JSON to Text does the reverse.\n- Show Error Message in a Text layer while you debug a payload.",
+      "behavior": "Stateless (implementations may cache the last text and result per loop index to skip re-parsing).\n\nEach frame:\n```\nlet text = ctx.input<string>(\"text\");\nif (text.charCodeAt(0) === 0xfeff) text = text.slice(1); // byte-order mark\nlet json = null, error = false, message = \"\";\nif (text.trim() !== \"\") {\n  try { json = JSON.parse(text); }\n  catch (e) { error = true; message = `Text isn't valid JSON: ${e.message}`; }\n}\nctx.output(\"json\", json);\nctx.output(\"error\", error);\nctx.output(\"errorMessage\", message);\n```\n\n- Grammar: strict RFC 8259 via `JSON.parse`. Top-level scalars are accepted (`42`, `true`, `\"hi\"`, `null`). Surrounding whitespace is allowed. Comments, trailing commas, single quotes, `NaN`, and NDJSON (several values on separate lines) are errors.\n- Numbers: parsed as 64-bit doubles, so integers beyond 2^53 lose precision. Duplicate keys keep the last value.\n- Error Message: always starts with \"Text isn't valid JSON: \"; the rest is the host engine's parser message and may differ between hosts, so tests should check the prefix only. No console warning, since text being typed is often invalid for a while.\n- Timing: the result appears on the same frame Text changes; an invalid text gives `null` immediately rather than holding the last valid value.\n- Frame 0: evaluates with authored values; no special case.\n- Loops: evaluates once per loop index; a loop of texts gives loops of results, errors, and messages.\n- Muted: outputs `null`, false, and \"\". Error Message does not echo Text, although the default bypass would pass the text input through to it.\n- Coming from Origami: added in v207 with no doc page, so its port names aren't published; Sonobe names them Text, JSON, Error, and Error Message. Error and Error Message are Sonobe additions.",
+      "inputs": [
+        {
+          "key": "text",
+          "name": "Text",
+          "type": "text",
+          "subtype": "multiline",
+          "default": "",
+          "description": "JSON-formatted text to read; empty text gives empty JSON."
+        }
+      ],
+      "outputs": [
+        {
+          "key": "json",
+          "name": "JSON",
+          "type": "json",
+          "description": "The data the text describes, or empty when the text is empty or invalid."
+        },
+        {
+          "key": "error",
+          "name": "Error",
+          "type": "boolean",
+          "description": "True when Text isn't valid JSON."
+        },
+        {
+          "key": "errorMessage",
+          "name": "Error Message",
+          "type": "text",
+          "description": "Why the text couldn't be read, or empty text when there's no error."
+        }
+      ],
+      "alwaysEvaluate": false,
+      "pairsWellWith": [
+        "jsonToText",
+        "valueForKey",
+        "loopOverArray",
+        "webSocketReceive",
+        "valueAtIndex"
+      ],
+      "commonMistakes": [
+        "Error turns on for text that looks fine: it uses single quotes, unquoted keys, or a trailing comma. Write keys and text in double quotes and remove the last comma.",
+        "JSON is empty but Error is off: the text is empty or only spaces. Check that the upstream text has arrived."
+      ],
+      "examples": [
+        {
+          "title": "Read a list of sizes from text",
+          "outline": "layer headline text \"Headline\" @24,120 fontSize←medium_size.value\npatch sizes textToJson text=\"[16,24,32]\"\npatch medium_size valueAtIndex<number> array←sizes.json index=1"
+        },
+        {
+          "title": "Show why a payload won't parse",
+          "outline": "layer error_banner text \"Parse Error\" @24,80 enabled←payload.error text←payload.errorMessage\npatch payload textToJson text=\"{broken\""
+        }
+      ],
+      "origami": {
+        "name": "Text to JSON"
+      },
+      "defaultNotes": {
+        "text": "inferred: Origami's default is undocumented; empty text gives empty JSON without an error."
+      }
+    },
+    {
+      "type": "jsonFile",
+      "name": "JSON File",
+      "category": "data",
+      "tier": 2,
+      "status": "supported",
+      "aliases": [
+        "data file",
+        "json asset",
+        "load json",
+        "local data",
+        "mock data",
+        "fixture",
+        "sample data",
+        "import json"
+      ],
+      "summary": "Loads a JSON file from your project, such as a product list or mock feed, so prototypes work without a server.",
+      "docs": "## How it works\nJSON File reads a `.json` file stored in your project and outputs its contents as data.\n\n- Drop a `.json` file onto the patch editor to create the patch, or choose the file in the inspector. The file lives in the project's assets, so it travels with the prototype.\n- **JSON** is the file's data: usually an object or an array.\n- **Loading** is true while the file is being read. It usually lasts a frame or two when the prototype starts.\n- **Error** turns on when the file is missing or isn't valid JSON, and **Error Message** explains why.\n\nWhen you replace the file, the patch reads it again. The previous data stays on screen until the new data is ready.\n\n## Tips\n- Use a JSON File as mock data while you design, then swap in a Network Request with the same shape.\n- Read fields with Value for Key or Value at Path, and make rows with Loop Over Array.\n- Keep files small. Very large files slow down loading.\n\n## Coming from Origami\nFormerly called Data File.",
+      "behavior": "State per instance: `{ url: undefined, token: 0, pending: null, json: null, loading: false, error: false, message: \"\" }`.\n\nEach frame:\n```\nconst assetId = String(ctx.node.settings?.asset ?? \"\");\nconst url = assetId === \"\" ? undefined : ctx.services.resolveAssetUrl(assetId);\nif (state.token === 0 || url !== state.url) {\n  state.url = url;\n  const token = ++state.token;        // results from older requests are ignored\n  state.pending = null;\n  const fetch = ctx.services.platform.fetch;\n  if (assetId === \"\") { set(state, null, false, false, \"\"); }\n  else if (url === undefined) { set(state, null, false, true, `No asset named \"${assetId}\" in this project`); }\n  else if (!fetch) { set(state, null, false, true, \"This host can't read project files\"); }\n  else {\n    state.loading = true;              // keep the previous json while reloading\n    fetch(url)\n      .then((r) => (r.ok ? r.text() : Promise.reject(new Error(`the file couldn't be read (status ${r.status})`))))\n      .then((text) => { if (token === state.token) state.pending = { ok: true, text }; },\n            (e) => { if (token === state.token) state.pending = { ok: false, message: String(e?.message ?? e) }; });\n  }\n}\nif (state.pending) {\n  const p = state.pending; state.pending = null; state.loading = false;\n  if (!p.ok) set(state, null, false, true, `Couldn't load ${assetId}: ${p.message}`);\n  else {\n    const text = p.text.charCodeAt(0) === 0xfeff ? p.text.slice(1) : p.text;\n    try { set(state, JSON.parse(text), false, false, \"\"); }\n    catch (e) { set(state, null, false, true, `${assetId} isn't valid JSON: ${e.message}`); }\n  }\n}\nif (state.loading) ctx.requestNextFrame();\nctx.output(\"json\", state.json);\nctx.output(\"loading\", state.loading);\nctx.output(\"error\", state.error);\nctx.output(\"errorMessage\", state.message);\n```\n(`set(state, json, loading, error, message)` assigns those four fields.)\n\n- Settings: `asset` is an asset id from `assets/assets.json` (kind `json`). Drag-and-drop and the inspector write this setting; the patch has no input ports.\n- Async (CONVENTIONS.md §16.10): the read starts on the first evaluation and whenever the resolved URL changes (a replaced file gets a new content-addressed URL). Results are stored in `state` by the promise and applied on a later `evaluate`; `ctx.output` is never called from a callback. A newer request invalidates older ones through `token`.\n- Frame 0: Loading is true and JSON is `null` on frame 0; data appears on the first frame after the read settles.\n- Errors: a missing asset, a failed read, and invalid JSON set Error with a readable message and JSON `null`. An empty `asset` setting is idle: no error. Parser details after the fixed prefix come from the host engine; tests should check the prefix. Each distinct error message is also logged once through `ctx.services.log(\"warn\", …)`.\n- Loops: no loopable inputs; one instance, scalar outputs.\n- Evaluation: `alwaysEvaluate` is true because outputs change when the read finishes, without any input change.\n- Platform and simulation: reads go through `ctx.services.platform.fetch` on the URL from `resolveAssetUrl`. The desktop app, the web player, and the headless host (which stubs `fetch` to read the project folder) all provide it. For reproducible traces, a deterministic host must settle asset reads before the next `step`, so data arrives on frame 1.\n- Muted: outputs `null`, false, false, and \"\", and starts no reads.\n- Restart and dispose: restart resets state and reads the file again. Dispose increments `token` so a late result is ignored; there is nothing else to release.\n- Coming from Origami: Data File (`builtin.dataFile`) is undocumented and appears only inside published system components; its ports aren't published. Importers map its embedded data to a project asset and set `asset`.",
+      "inputs": [],
+      "outputs": [
+        {
+          "key": "json",
+          "name": "JSON",
+          "type": "json",
+          "description": "The file's contents as data; empty until the file has loaded, and while there's an error."
+        },
+        {
+          "key": "loading",
+          "name": "Loading",
+          "type": "boolean",
+          "description": "True while the file is being read."
+        },
+        {
+          "key": "error",
+          "name": "Error",
+          "type": "boolean",
+          "description": "True when the file is missing, can't be read, or isn't valid JSON."
+        },
+        {
+          "key": "errorMessage",
+          "name": "Error Message",
+          "type": "text",
+          "description": "Why the file couldn't be loaded, or empty text when there's no error."
+        }
+      ],
+      "settings": [
+        {
+          "key": "asset",
+          "name": "File",
+          "type": "text",
+          "default": "",
+          "description": "The id of a JSON file in the project's assets. Drop a .json file on the patch editor to add one."
+        }
+      ],
+      "alwaysEvaluate": true,
+      "pairsWellWith": [
+        "loopOverArray",
+        "valueForKey",
+        "valueAtPath",
+        "arraySort",
+        "networkRequest"
+      ],
+      "commonMistakes": [
+        "Error Message says the file isn't valid JSON: the file has comments, trailing commas, or single quotes. Fix it in a text editor and replace the asset.",
+        "The first frame shows empty rows or placeholder text: the file is still loading. Wire Loading into a placeholder's Enabled, or hide the list until JSON arrives."
+      ],
+      "examples": [
+        {
+          "title": "Build a contact list from mock data",
+          "outline": "layer contacts group \"Contacts\" @0,100 390x700 layout=column spacing=12\n  layer contact_name text \"Contact Name\" text←names.value\npatch people jsonFile asset=\"contacts\"\npatch rows loopOverArray array←people.json\npatch names valueForKey<text> object←rows.items key=\"name\""
+        },
+        {
+          "title": "Show a loading message until the file is ready",
+          "outline": "layer loading_label text \"Loading\" @24,120 enabled←catalog.loading\nlayer product_count text \"Product Count\" @24,160 text←count_products.count\npatch catalog jsonFile asset=\"catalog\"\npatch products valueForKey object←catalog.json key=\"products\"\npatch count_products arrayCount array←products.value"
+        }
+      ],
+      "origami": {
+        "id": "builtin.dataFile",
+        "name": "Data File"
+      },
+      "defaultNotes": {
+        "asset": "sonobe: a new patch has no file until one is chosen or dropped, so it stays idle without an error."
+      }
+    }
+  ]
+}

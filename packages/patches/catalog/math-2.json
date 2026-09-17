@@ -1,0 +1,456 @@
+{
+  "file": "math-2.json",
+  "category": "math",
+  "patches": [
+    {
+      "type": "mathExpression",
+      "name": "Math Expression",
+      "category": "math",
+      "tier": 1,
+      "status": "supported",
+      "aliases": [
+        "expression",
+        "formula",
+        "equation",
+        "calculate",
+        "calculator",
+        "custom math",
+        "js math",
+        "evaluate",
+        "compute"
+      ],
+      "summary": "Calculates numbers from a formula you type, creating an input for each variable and an output for each result.",
+      "docs": "## How it works\nType a formula into the patch's **Expression** setting and the patch does the math every frame. Each variable you use becomes a number input, so `(a + b) / 2` gives you inputs **a** and **b** and one output.\n\n- **Several results:** separate formulas with `;` and name a result with `name =`, like `area = w * h; perimeter = 2 * (w + h)`. Unnamed results are called Output, Output 2, and so on.\n- **Reuse a result:** a later formula can use an earlier named result: `d = sqrt(dx * dx + dy * dy); nx = dx / d`.\n- **Operators:** `+ - * / % **`, parentheses, comparisons like `<` and `==` (which give 1 or 0), `&&`, `||`, `!`, and `condition ? a : b`.\n- **Functions:** `sqrt`, `abs`, `min`, `max`, `round`, `floor`, `sin`, `atan2`, and the rest of JavaScript's `Math` library, with or without `Math.`, plus `PI`, `clamp(value, min, max)`, `lerp(start, end, progress)`, `radians(degrees)`, and `degrees(radians)`.\n\nIf the formula has a mistake, the editor points to it and keeps the last formula that worked.\n\n## Tips\n- Formulas have no memory. For running totals, use Counter or Delay One Frame.\n\n## Coming from Origami\nFunctions also work without `Math.`, `^` is rejected with a hint to use `**`, and `Math.random()` isn't available: wire in a Random patch so restarts are reproducible. A result that isn't a real number outputs 0.",
+      "behavior": "State per loop index: `{ warned: false }`, used only to log the non-finite warning once. Values are stateless.\n\nThe setting `expression` (text) holds the formula. `dynamicPortsRule` derives the ports from the same parse that drives evaluation. Compile each distinct text once (a bounded cache keyed by the text) into an AST or closure tree. Never use `eval`, `new Function`, or host objects.\n\nEach frame, per loop index:\n```\nconst program = compile(ctx.node.settings?.expression ?? \"\");\nif (!program.ok) { for (const key of program.fallbackOutputs) ctx.output(key, 0); return; }\nconst env = new Map<string, number>();\nfor (const name of program.inputs) env.set(name, ctx.input<number>(name));\nfor (const st of program.statements) {\n  let v = st.evaluate(env);                 // IEEE double arithmetic, JavaScript semantics\n  if (!Number.isFinite(v)) {\n    v = 0;\n    if (!ctx.state.warned) { ctx.state.warned = true; ctx.services.log(\"warn\", `${ctx.id}.${st.key} isn't a finite number, so it outputs 0`); }\n  }\n  if (v === 0) v = 0;                        // fold -0\n  if (st.named) env.set(st.key, v);          // later statements see the value the port shows\n  ctx.output(st.key, v);\n}\n```\n\n**Grammar** (a numeric subset of JavaScript expressions; spaces and newlines are free):\n```\nprogram    := statement (\";\" statement)* \";\"?     empty statements are skipped\nstatement  := (IDENT \"=\")? expr                    this \"=\" is never part of \"==\", \"===\", \"!=\", \"<=\", \">=\"\nexpr       := or (\"?\" expr \":\" expr)?\nor         := and (\"||\" and)*\nand        := equality (\"&&\" equality)*\nequality   := relational ((\"==\" | \"===\" | \"!=\" | \"!==\") relational)*\nrelational := additive ((\"<\" | \"<=\" | \">\" | \">=\") additive)*\nadditive   := term ((\"+\" | \"-\") term)*\nterm       := unary ((\"*\" | \"/\" | \"%\") unary)*\nunary      := (\"-\" | \"+\" | \"!\") unary | power\npower      := primary (\"**\" unary)?               right-associative: 2 ** 3 ** 2 is 512\nprimary    := NUMBER | IDENT | constant | call | \"(\" expr \")\"\ncall       := (\"Math.\" NAME | NAME) \"(\" (expr (\",\" expr)*)? \")\"\nNUMBER     := digits with optional fraction and exponent (2, .5, 1.5e3) | hex (0xFF)\nIDENT      := [A-Za-z_][A-Za-z0-9_]*\n```\n- As in JavaScript, a unary operator directly on the left operand of `**` is an error (`-2 ** 2`); the message suggests `(-2) ** 2` or `-(2 ** 2)`.\n\n**Numeric semantics:**\n- Comparisons, `==`/`===`, `!=`/`!==` (identical for numbers), and `!` return 1 or 0. `true` is 1 and `false` is 0.\n- `a && b` returns `b` when `a` is truthy, otherwise `a`. `a || b` returns `a` when truthy, otherwise `b`. Truthy means non-zero and not NaN. `c ? x : y` evaluates only the chosen branch.\n- `%` is JavaScript's remainder: the sign follows the left operand (`-1 % 3` is `-1`). `round` rounds halves toward +Infinity (`round(-2.5)` is `-2`).\n\n**Names:**\n- Functions, callable as `Math.name(...)` or bare `name(...)`, with enforced argument counts. One argument: `abs acos acosh asin asinh atan atanh cbrt ceil cos cosh exp expm1 floor log log10 log1p log2 round sign sin sinh sqrt tan tanh trunc`. Two: `atan2 pow`. One or more: `hypot max min`. Trig functions use radians, as in JavaScript.\n- Sonobe helpers (bare only; `Math.clamp` is an error): `radians(deg)` = deg * PI / 180; `degrees(rad)` = rad * 180 / PI; `clamp(value, a, b)` limits value to [min(a, b), max(a, b)]; `lerp(start, end, progress)` = start + (end - start) * progress, unclamped.\n- Constants: `Math.E`, `Math.LN2`, `Math.LN10`, `Math.LOG2E`, `Math.LOG10E`, `Math.PI`, `Math.SQRT1_2`, `Math.SQRT2`, and bare `PI`. Literals: `true`, `false`, `Infinity`, `NaN`.\n- A bare name directly followed by `(` is a call; anywhere else it is a variable. So `min` can be a variable and `min(a, b)` a call in the same formula.\n- Reserved (never variables or output names): `Math`, `PI`, `true`, `false`, `Infinity`, `NaN`, `undefined`, `null`, and JavaScript reserved words (`break case catch class const continue debugger default delete do else export extends finally for function if import in instanceof let new of return super switch this throw try typeof var void while with yield await`).\n\n**Errors.** `addPatch` and `updatePatch` validate `settings.expression`. Invalid text fails the op with code `invalid_expression`, a human message, and the 1-based column. The editor keeps the last valid text and underlines the problem.\n- Unknown function: \"`sqr` isn't a function. Did you mean `sqrt`?\" (did-you-mean over the function list).\n- Wrong argument count: \"`round` takes 1 value. To round to 2 decimals, write `round(x * 100) / 100`.\"\n- `^`: \"Use `**` for powers, like `x ** 2`.\"\n- Anything else outside the grammar gets \"`X` isn't supported in Math Expression.\": bitwise operators (`& | ~ << >> >>>`), `++`, `+=`, `=>`, member access other than `Math.`, strings, arrays, objects, and comments.\n- `Math.random`: \"Random numbers come from the Random patch, so restarts are reproducible. Wire one into an input.\"\n- A name used as an input before a statement defines it, including `x = x + 1`: \"`x` is already an input, so it can't also name a result. Math Expression has no memory; use Counter or Delay One Frame to build on the previous value.\"\n- Duplicate result names, more than one `=` in a statement (`a = b = 1`), or a result named with a reserved word.\n- Limits: 10,000 characters, 32 inputs, 32 outputs, nesting depth 64.\n- An empty or whitespace-only expression is valid: no ports, nothing to evaluate, and one info diagnostic (\"Type a formula in Expression\").\n\n- Frame 0: evaluates with the authored input values; no history.\n- Loops: once per loop index. Output length is the longest input loop, shorter loops wrap, and scalars broadcast. With no inputs, every output is a scalar.\n- Edge cases: only each statement's final value is checked, so intermediate infinities are fine (`atan(1 / 0)` is PI / 2). Non-finite results output 0 and warn once per restart per loop index. Inputs arrive already coerced to numbers (booleans 1/0, vectors their first component, text parsed with NaN becoming 0).\n- Invalid text in a file (hand-edited or imported; ops never store it): raise diagnostic error `invalid_expression` with the parse message, use the lenient ports from `dynamicPortsRule`, output 0 on every fallback output, and never throw.\n- Determinism: no randomness, clocks, or host access. Results depend only on the text and the inputs.\n- Restart and dispose: restart clears `warned`. The compile cache survives restarts; nothing to release.\n- Coming from Origami: Origami evaluates real JavaScript. Sonobe accepts the numeric subset above, which covers Origami's documented examples. On import, text outside the subset (bitwise operators, `Math.random`, non-numeric code) is kept verbatim and raises `invalid_expression`; the lenient ports keep its wires attached. Exporters rewrite bare calls and `PI` to `Math.` forms and expand `radians`, `degrees`, `clamp`, and `lerp` inline. Origami doesn't document whether a later statement can use an earlier result or how unnamed outputs are labeled; Sonobe allows the first and names the second Output, Output 2, and so on.",
+      "inputs": [],
+      "outputs": [],
+      "settings": [
+        {
+          "key": "expression",
+          "name": "Expression",
+          "type": "text",
+          "default": "",
+          "description": "The formula. Each variable becomes an input, `;` separates results, and `name =` names a result."
+        }
+      ],
+      "dynamicPortsRule": "Parse `settings.expression` with the grammar in `behavior` and derive ports in one left-to-right pass.\n- Inputs: an identifier becomes an input when it is used as a value: not directly after `Math.`, not directly followed by `(`, not reserved, and not a result named by an earlier statement. Each input is `{ key: <identifier>, name: <identifier>, type: \"number\", default: 0, description: \"Value of <identifier> in the formula.\" }`. Inputs are ordered by first appearance, and a name used several times is one input.\n- Outputs: one per non-empty statement, in statement order, type `number`. A `name = expr` statement uses the name as key and display name. Unnamed statements take the first unused key from `output`, `output2`, `output3`, and so on (names \"Output\", \"Output 2\", ...), skipping keys already taken by an input or a named result.\n- Keys are the identifiers exactly as typed: case-sensitive, matching `[A-Za-z_][A-Za-z0-9_]*`. This is the one exception to the camelCase port-key rule (§6.1), because the formula text is the source of truth and imported Origami formulas use names like `x_1`.\n- Keys are unique across inputs and outputs. Any collision is a parse error, never a silent rename; the unnamed `output...` sequence is the only automatic naming.\n- Editing the expression regenerates the ports. Stored inputs (literals or links) whose key still exists are kept. Entries for removed variables are dropped from `node.inputs`, and downstream links from removed outputs are disconnected; the op records both in its inverse so undo restores them. Renaming a variable removes one input and adds another, so its cable must be reconnected.\n- Lenient fallback, used only when stored text doesn't parse: inputs are identifier tokens found by a regex scan that skips reserved names, names after `Math.`, names followed by `(`, and a name at the start of a `;` segment that is followed by a single `=`. Outputs are those segment names, plus the unnamed `output...` sequence for the other non-empty segments. This keeps existing wires attached while the formula gets fixed.",
+      "alwaysEvaluate": false,
+      "pairsWellWith": [
+        "time",
+        "popAnimation",
+        "loop",
+        "round",
+        "javascript"
+      ],
+      "commonMistakes": [
+        "Motion is tiny or jittery: `sin`, `cos`, and `tan` in a formula take radians, but angles elsewhere in Sonobe are degrees. Write `sin(radians(angle))`, or use the Sine and Cosine patches.",
+        "A result reads 0 when you expected a number: it wasn't finite, often because an input used as a divisor is 0. Guard it with `b == 0 ? 0 : a / b` or `max(b, 0.001)`.",
+        "A cable disappeared after you edited the formula: renaming a variable removes its old input and adds a new one. Reconnect the cable to the renamed input."
+      ],
+      "examples": [
+        {
+          "title": "Drive two properties from one spring",
+          "description": "One formula turns the spring's 0 to 1 into a smaller scale and a lower opacity, replacing two Transition patches.",
+          "outline": "layer card rectangle \"Card\" @16,120 358x220 cornerRadius=24 scale←look.scale opacity←look.opacity\npatch tap_card interaction layer=@card\npatch toggle switch flip←tap_card.tap\npatch pop popAnimation number←toggle.on\npatch look mathExpression expression=\"scale = 1 - 0.1 * p; opacity = 1 - 0.6 * p\" p←pop.output"
+        },
+        {
+          "title": "Make a button breathe",
+          "description": "Time feeds a sine wave, so the button's scale drifts between 0.95 and 1.05 once every 2 seconds.",
+          "outline": "layer button rectangle \"Button\" @127,400 148x56 cornerRadius=28 scale←breathe.scale\npatch clock time\npatch breathe mathExpression expression=\"scale = 1 + 0.05 * sin(t * PI)\" t←clock.time"
+        }
+      ],
+      "origami": {
+        "id": "builtin.javascript.expression",
+        "name": "Math Expression"
+      },
+      "defaultNotes": {
+        "expression": "verified: Origami inserts Math Expression with no formula and no ports until one is typed (Math Expressions concept page)."
+      }
+    },
+    {
+      "type": "random",
+      "name": "Random",
+      "category": "math",
+      "tier": 2,
+      "status": "supported",
+      "aliases": [
+        "random number",
+        "randomize",
+        "dice",
+        "chance",
+        "rng",
+        "jitter",
+        "surprise",
+        "math random"
+      ],
+      "summary": "Picks a random number between Start and End, and picks a new one each time Randomize gets a pulse.",
+      "docs": "## How it works\nRandom holds one random number and swaps it for a new one when **Randomize** gets a pulse (a signal that's on for one frame). It picks its first number as soon as the prototype starts.\n\n- **Start** and **End** set the range, and every value in between is equally likely. Either one can be the larger. Changing the range without a pulse stretches the current pick to fit instead of jumping to a new random spot.\n- **Whole Numbers** picks whole numbers from Start to End, including both ends, each equally likely. Start 1 and End 6 rolls a die.\n- **Value** is the current random number.\n\n## Tips\n- Send Value through Pop Animation so each new pick springs into place instead of jumping.\n- Feed a loop into Start or End and every item in the loop gets its own random number.\n- Simulations use a fixed random seed, so the same run picks the same numbers every time.\n\n## Coming from Origami\nStart Value and End Value are named Start and End. Whole Numbers is new, so you don't need a Round patch for whole numbers. Random picks its first number when the prototype starts instead of waiting for the first pulse.",
+      "behavior": "State per loop index: `{ u: number | null, warned: boolean }`, where `u` is a unit random draw in [0, 1). Starts as `{ u: null, warned: false }`.\n\nEach frame, per loop index:\n```\nif (ctx.state.u === null || ctx.pulsed(\"randomize\")) ctx.state.u = ctx.services.random();\nconst s = ctx.input<number>(\"start\");\nconst e = ctx.input<number>(\"end\");\nlet v: number;\nif (ctx.input<boolean>(\"wholeNumbers\")) {\n  const lo = Math.ceil(Math.min(s, e));\n  const hi = Math.floor(Math.max(s, e));\n  v = hi < lo ? Math.round((s + e) / 2) : lo + Math.floor(ctx.state.u * (hi - lo + 1));\n} else {\n  v = s + ctx.state.u * (e - s);\n}\nif (!Number.isFinite(v)) {\n  v = 0;\n  if (!ctx.state.warned) { ctx.state.warned = true; ctx.services.log(\"warn\", `${ctx.id}: Start or End isn't a finite number, so Random outputs 0`); }\n}\nif (v === 0) v = 0; // fold -0\nctx.output(\"value\", v);\n```\n\n- Pulses: `randomize` is the only pulse input. It fires on an upstream pulse or on a false→true edge of a connected boolean, so a held `true` draws once. Pulses on consecutive frames each draw a new number.\n- Frame 0: each loop index draws once on its first evaluation. A `randomize` pulse on that same frame doesn't draw a second time.\n- Range: the held draw `u` is rescaled every frame. Changing Start or End moves Value proportionally without a new draw; this includes a range that arrives a frame late from layer-derived outputs. Decimal mode covers [Start, End) when Start < End and (End, Start] when reversed, and Start == End outputs Start. Whole-number mode is inclusive at both ends and ignores which input is larger. When no whole number lies in the range (Start 0.2, End 0.8), it outputs the whole number nearest the middle.\n- Determinism: draws come only from `ctx.services.random()`, never `Math.random`. The engine evaluates loop indices in ascending order, so for a given seed and input sequence the draw order, and therefore every value, is reproducible. Draw at most once per index per frame.\n- Loops: per-index state; each index keeps its own draw. A scalar Randomize pulse broadcasts, so every index draws a new number on the same frame. New indices draw on their first evaluation; removed indices drop their state.\n- Edge cases: never outputs NaN or ±Infinity. Warn once per restart per index through `ctx.services.log(\"warn\", ...)`.\n- Restart and dispose: state resets to `{ u: null, warned: false }`, so frame 0 draws again from the reseeded stream. Nothing to release.\n- Coming from Origami: Origami doesn't document the value before the first pulse. Sonobe draws on the first evaluation so looped layouts scatter without a pulse. Origami also doesn't document what happens when Start or End change between pulses; Sonobe rescales the current draw. `wholeNumbers` is a Sonobe addition; importers leave it false.",
+      "inputs": [
+        {
+          "key": "randomize",
+          "name": "Randomize",
+          "type": "pulse",
+          "description": "Pulse to pick a new random number."
+        },
+        {
+          "key": "start",
+          "name": "Start",
+          "type": "number",
+          "default": 0,
+          "description": "One end of the range. Random picks between Start and End, and either one can be the larger."
+        },
+        {
+          "key": "end",
+          "name": "End",
+          "type": "number",
+          "default": 1,
+          "description": "The other end of the range. Without Whole Numbers, Value can get very close to End but never lands exactly on it."
+        },
+        {
+          "key": "wholeNumbers",
+          "name": "Whole Numbers",
+          "type": "boolean",
+          "default": false,
+          "description": "When on, picks whole numbers from Start to End, including both ends, each equally likely."
+        }
+      ],
+      "outputs": [
+        {
+          "key": "value",
+          "name": "Value",
+          "type": "number",
+          "description": "The current random number. It changes when Randomize gets a pulse, and it rescales when Start or End change."
+        }
+      ],
+      "alwaysEvaluate": false,
+      "pairsWellWith": [
+        "interaction",
+        "popAnimation",
+        "sampleAndHold",
+        "repeatingPulse",
+        "round"
+      ],
+      "commonMistakes": [
+        "Value never changes after the first pick: Randomize isn't connected, or it's wired to a state that stays on, which only counts on the frame it turns on. Wire a pulse such as Interaction's Tap.",
+        "The first and last whole numbers come up about half as often as the others: rounding a decimal pick squeezes the ends. Turn on Whole Numbers instead of adding a Round patch.",
+        "Every copy of a looped layer gets the same number: Random runs once unless one of its inputs is a loop. Feed a loop into Start or End so each copy picks its own."
+      ],
+      "examples": [
+        {
+          "title": "Tap to roll a die",
+          "description": "Each tap shows a whole number from 1 to 6; the Text layer displays the number as text.",
+          "outline": "layer die_face text \"Die Face\" @171,380 fontSize=64 text←roll.value\npatch tap_die interaction layer=@die_face\npatch roll random randomize←tap_die.tap start=1 end=6 wholeNumbers=true"
+        },
+        {
+          "title": "Spring a bubble to a random size on each tap",
+          "description": "Pop Animation springs each new pick into place instead of jumping.",
+          "outline": "layer bubble oval \"Bubble\" @151,380 100x100 scale←grow.output\npatch tap_bubble interaction layer=@bubble\npatch pick random randomize←tap_bubble.tap start=0.6 end=1.4\npatch grow popAnimation number←pick.value bounciness=8"
+        }
+      ],
+      "origami": {
+        "id": "builtin.random",
+        "name": "Random"
+      },
+      "origamiPorts": {
+        "start": "Start Value",
+        "end": "End Value"
+      },
+      "defaultNotes": {
+        "start": "inferred: Origami's default is undocumented; a 0 to 1 range matches the research inference and the §15 range default.",
+        "end": "inferred: Origami's default is undocumented; a 0 to 1 range matches the research inference and the §15 range default.",
+        "wholeNumbers": "sonobe: new port; off matches Origami's decimal output."
+      }
+    },
+    {
+      "type": "sine",
+      "name": "Sine",
+      "category": "math",
+      "tier": 2,
+      "status": "supported",
+      "aliases": [
+        "sin",
+        "wave",
+        "oscillate",
+        "oscillator",
+        "trigonometry",
+        "trig",
+        "sine wave",
+        "circle y",
+        "lfo"
+      ],
+      "summary": "Turns an angle in degrees into a smooth wave from -1 to 1, for bobbing, breathing, and circular motion.",
+      "docs": "## How it works\nPicture a point traveling around a circle with a radius of 1. Sine is the point's vertical distance from the center: 0 at 0°, 1 at 90°, 0 at 180°, and -1 at 270°. As the angle keeps growing, the output rises and falls in a smooth, repeating wave.\n\n- **Angle** is in degrees. 360° is one full wave, and the wave keeps repeating for angles above 360° or below 0°.\n- **Output** runs from -1 to 1.\n\n## Tips\n- Drive Angle from Time through a Transition with Start 0 and End 360 for one wave per second. A bigger End makes it faster.\n- Transition keeps going past its ends, so it maps the output nicely. With Start 1 and End 1.1, an output of -1 to 1 becomes a scale from 0.9 to 1.1.\n- For circular motion, pair it with Cosine: x = center + radius × Cosine and y = center + radius × Sine.\n\n## Coming from Origami\nOrigami's docs don't state the unit. Sonobe uses degrees, like layer Rotation. The `sin()` function inside Math Expression uses radians.",
+      "behavior": "State per loop index: `{ warned: false }`, used only to log the non-finite warning once. Values are stateless.\n\nEach frame, per loop index:\n```\nconst a = ctx.input<number>(\"angle\") % 360;       // exact in floating point\nlet v = Math.sin(a * Math.PI / 180);\nv = Math.round(v * 1e12) / 1e12;                   // removes float fuzz; identical in every JS engine\nif (!Number.isFinite(v)) {\n  v = 0;\n  if (!ctx.state.warned) { ctx.state.warned = true; ctx.services.log(\"warn\", `${ctx.id}: Angle isn't a finite number, so Sine outputs 0`); }\n}\nif (v === 0) v = 0;                                // fold -0\nctx.output(\"output\", v);\n```\n\n- Precision: reducing the angle with `%` before converting keeps results accurate for huge angles, such as hours of Time × 360. Rounding to 12 decimal places gives exact results at common angles (`sine(180)` is exactly 0, `sine(30)` exactly 0.5, `sine(270)` exactly -1) and hides last-bit differences between browsers' `Math.sin`.\n- Frame 0: evaluates with the authored angle; no history.\n- Loops: once per loop index; the output length follows the Angle loop.\n- Edge cases: only a non-finite Angle (±Infinity or NaN from a bad upstream value) can produce a non-finite result. Output 0 and warn once per restart per index through `ctx.services.log(\"warn\", ...)`.\n- Restart and dispose: restart clears `warned`; nothing to release.\n- Coming from Origami: Origami's Sine page doesn't state units. Sonobe uses degrees, matching Origami's documented Arctangent output and layer rotation. `sin()` inside Math Expression uses radians, as in JavaScript.",
+      "inputs": [
+        {
+          "key": "angle",
+          "name": "Angle",
+          "type": "number",
+          "subtype": "angle",
+          "default": 0,
+          "description": "The angle in degrees: 0 gives 0, 90 gives 1, 180 gives 0, and 270 gives -1, repeating every 360."
+        }
+      ],
+      "outputs": [
+        {
+          "key": "output",
+          "name": "Output",
+          "type": "number",
+          "description": "The sine of Angle, from -1 to 1."
+        }
+      ],
+      "alwaysEvaluate": false,
+      "pairsWellWith": [
+        "cosine",
+        "time",
+        "transition",
+        "loop",
+        "mathExpression"
+      ],
+      "commonMistakes": [
+        "The value barely changes: Angle is in degrees, so a Time value from 0 to 10 covers only 10° of a 360° wave. Scale it up first, for example with a Transition from 0 to 360.",
+        "The motion jumps once per cycle: the angle resets before reaching a multiple of 360, for example a Repeating Animation mapped to 0–180. Map each cycle to 0–360, or drive the angle from Time.",
+        "Values from a formula you copied from code look wrong: most code uses radians. Multiply radians by 57.2958 (180 ÷ π) to get degrees, or use `sin()` in Math Expression."
+      ],
+      "examples": [
+        {
+          "title": "Make an orb breathe",
+          "description": "Time × 120° per second gives one wave every 3 seconds, and Transition turns -1 to 1 into a scale from 0.92 to 1.08.",
+          "outline": "layer orb oval \"Orb\" @151,380 100x100 scale←breathe.output\npatch clock time\npatch turn transition<number> progress←clock.time start=0 end=120\npatch wave sine angle←turn.output\npatch breathe transition<number> progress←wave.output start=1 end=1.08"
+        },
+        {
+          "title": "Ripple a wave across a row of dots",
+          "description": "Each dot's angle is 45° ahead of its neighbor's, so the fade travels along the row; opacity moves between 0.3 and 1.",
+          "outline": "layer row group \"Row\" @40,400 320x24 layout=row spacing=12\n  layer dot oval \"Dot\" 24x24 opacity←glow.output\npatch dots loop count=8\npatch clock time\npatch phase mathExpression expression=\"angle = t * 360 + i * 45\" t←clock.time i←dots.index\npatch wave sine angle←phase.angle\npatch glow transition<number> progress←wave.output start=0.65 end=1"
+        }
+      ],
+      "origami": {
+        "id": "builtin.math.sin",
+        "name": "Sine"
+      },
+      "defaultNotes": {
+        "angle": "inferred: Origami's default is undocumented; 0° gives a sine of 0."
+      }
+    },
+    {
+      "type": "cosine",
+      "name": "Cosine",
+      "category": "math",
+      "tier": 2,
+      "status": "supported",
+      "aliases": [
+        "cos",
+        "wave",
+        "oscillate",
+        "swing",
+        "trigonometry",
+        "trig",
+        "cosine wave",
+        "circle x"
+      ],
+      "summary": "Turns an angle in degrees into a smooth wave from -1 to 1 that starts at its peak, for swinging and circular motion.",
+      "docs": "## How it works\nPicture a point traveling around a circle with a radius of 1. Cosine is the point's horizontal distance from the center: 1 at 0°, 0 at 90°, -1 at 180°, and 0 at 270°. It's the same wave as Sine, a quarter turn earlier, so it starts at its peak.\n\n- **Angle** is in degrees. 360° is one full wave, and the wave keeps repeating for angles above 360° or below 0°.\n- **Output** runs from -1 to 1.\n\n## Tips\n- Use Cosine when motion should start at its farthest point, like a pendulum let go from one side.\n- For circular motion, x = center + radius × Cosine and y = center + radius × Sine. Y points down on screen, so growing angles move clockwise, the same direction as layer Rotation.\n- To arrange loop items in a ring, give each one an angle of index × 360 ÷ count.\n\n## Coming from Origami\nOrigami's docs don't state the unit. Sonobe uses degrees, like layer Rotation. The `cos()` function inside Math Expression uses radians.",
+      "behavior": "State per loop index: `{ warned: false }`, used only to log the non-finite warning once. Values are stateless.\n\nEach frame, per loop index:\n```\nconst a = ctx.input<number>(\"angle\") % 360;       // exact in floating point\nlet v = Math.cos(a * Math.PI / 180);\nv = Math.round(v * 1e12) / 1e12;                   // removes float fuzz; identical in every JS engine\nif (!Number.isFinite(v)) {\n  v = 0;\n  if (!ctx.state.warned) { ctx.state.warned = true; ctx.services.log(\"warn\", `${ctx.id}: Angle isn't a finite number, so Cosine outputs 0`); }\n}\nif (v === 0) v = 0;                                // fold -0\nctx.output(\"output\", v);\n```\n\n- Precision: reducing the angle with `%` before converting keeps results accurate for huge angles, such as hours of Time × 360. Rounding to 12 decimal places gives exact results at common angles (`cosine(90)` is exactly 0, `cosine(60)` exactly 0.5, `cosine(180)` exactly -1) and hides last-bit differences between browsers' `Math.cos`.\n- Frame 0: evaluates with the authored angle; no history.\n- Loops: once per loop index; the output length follows the Angle loop.\n- Edge cases: only a non-finite Angle (±Infinity or NaN from a bad upstream value) can produce a non-finite result. Output 0 and warn once per restart per index through `ctx.services.log(\"warn\", ...)`.\n- Restart and dispose: restart clears `warned`; nothing to release.\n- Coming from Origami: Origami's Cosine page doesn't state units. Sonobe uses degrees, matching Origami's documented Arctangent output and layer rotation. `cos()` inside Math Expression uses radians, as in JavaScript.",
+      "inputs": [
+        {
+          "key": "angle",
+          "name": "Angle",
+          "type": "number",
+          "subtype": "angle",
+          "default": 0,
+          "description": "The angle in degrees: 0 gives 1, 90 gives 0, 180 gives -1, and 270 gives 0, repeating every 360."
+        }
+      ],
+      "outputs": [
+        {
+          "key": "output",
+          "name": "Output",
+          "type": "number",
+          "description": "The cosine of Angle, from -1 to 1."
+        }
+      ],
+      "alwaysEvaluate": false,
+      "pairsWellWith": [
+        "sine",
+        "arctangent",
+        "time",
+        "transition",
+        "loop"
+      ],
+      "commonMistakes": [
+        "The layer starts pushed to one side instead of at rest: Cosine is 1 at 0°, not 0. Use Sine when the motion should start from the middle.",
+        "The value barely changes: Angle is in degrees, so a Time value from 0 to 10 covers only 10° of a 360° wave. Scale it up first, for example with a Transition from 0 to 360.",
+        "Items in a ring leave a gap or overlap: the angle step was based on count - 1. Space items by index × 360 ÷ count, because 0° and 360° are the same spot."
+      ],
+      "examples": [
+        {
+          "title": "Rock a bell back and forth",
+          "description": "Time × 360° per second through Cosine swings the bell from 15° to -15° and back once per second, starting at its farthest point.",
+          "outline": "layer bell rectangle \"Bell\" @171,400 48x48 cornerRadius=12 rotation←swing.output\npatch clock time\npatch turn transition<number> progress←clock.time start=0 end=360\npatch rock cosine angle←turn.output\npatch swing transition<number> progress←rock.output start=0 end=15"
+        }
+      ],
+      "origami": {
+        "id": "builtin.math.cos",
+        "name": "Cosine"
+      },
+      "defaultNotes": {
+        "angle": "inferred: Origami's default is undocumented; 0° gives a cosine of 1."
+      }
+    },
+    {
+      "type": "arctangent",
+      "name": "Arctangent",
+      "category": "math",
+      "tier": 2,
+      "status": "supported",
+      "aliases": [
+        "atan",
+        "atan2",
+        "angle",
+        "direction",
+        "point at",
+        "look at",
+        "heading",
+        "inverse tangent",
+        "trigonometry"
+      ],
+      "summary": "Measures the direction of an X and Y offset as an angle in degrees, so a layer can point toward a finger or another layer.",
+      "docs": "## How it works\nGive Arctangent how far something is across (**X**) and down (**Y**) from a center, and it tells you which direction that is, in degrees.\n\n- 0° points right, 90° points down, 180° points left, and -90° points up. The output runs from just above -180 up to 180.\n- Y grows downward on screen, so angles grow clockwise, the same way layer Rotation turns. Wire the output into Rotation and a layer drawn pointing right will face that direction.\n- **Y** comes first and **X** second, like `atan2(y, x)` in code. Either can be negative, and X can be 0.\n\n## Tips\n- To aim at a finger, subtract the layer's center from the touch position first, then feed in the difference's Y and X.\n- For an angle from 0 to 360, add 360 and take Modulo 360.\n- For a dial's progress from 0 to 1, add 180 and divide by 360. It starts on the left and increases clockwise.\n\n## Coming from Origami\nThe ports, their order, and the degree unit match. The exact output range is Sonobe's documented choice; Origami's docs don't state it.",
+      "behavior": "State per loop index: `{ warned: false }`, used only to log the non-finite warning once. Values are stateless.\n\nEach frame, per loop index:\n```\nconst y = ctx.input<number>(\"y\");\nconst x = ctx.input<number>(\"x\");\nlet deg = Math.atan2(y, x) * 180 / Math.PI;\ndeg = Math.round(deg * 1e12) / 1e12;        // identical in every JS engine; atan2(1, 1) gives exactly 45\nif (!Number.isFinite(deg)) {\n  deg = 0;\n  if (!ctx.state.warned) { ctx.state.warned = true; ctx.services.log(\"warn\", `${ctx.id}: Y or X isn't a number, so Arctangent outputs 0`); }\n}\nif (deg === -180) deg = 180;                 // a -0 Y on the left side\nif (deg === 0) deg = 0;                      // fold -0\nctx.output(\"angle\", deg);\n```\n\n- Range: (-180, 180]. 0 = right (+X), 90 = down (+Y), 180 = left, -90 = up. Y points down, so angles increase clockwise on screen, matching layer `rotation` and the Sine/Cosine circle convention (x = r·cos, y = r·sin).\n- Quadrants: this is the two-argument arctangent, so all four quadrants are distinct (`y = 1, x = -1` gives 135, not -45), and `x = 0` never divides by zero (`y = 1, x = 0` gives 90).\n- Edge cases: `y = 0, x = 0` outputs 0; the direction is undefined, and this matches `Math.atan2`. Infinite inputs give finite angles (both infinite gives ±45 or ±135). A NaN input outputs 0 and warns once per restart per index through `ctx.services.log(\"warn\", ...)`.\n- Frame 0: evaluates with the authored values; no history.\n- Loops: once per loop index. Output length is the longer of the Y and X loops, the shorter one wraps, and scalars broadcast.\n- Restart and dispose: restart clears `warned`; nothing to release.\n- Coming from Origami: Origami documents degrees and the Y-then-X order. The quadrant-aware range is inferred from Origami's Dial pattern, which needs full-circle angles. Origami's default inputs are undocumented; Sonobe defaults X to 1 so the default direction is defined.",
+      "inputs": [
+        {
+          "key": "y",
+          "name": "Y",
+          "type": "number",
+          "default": 0,
+          "description": "How far down the target is from the center, in points or any unit; negative means up."
+        },
+        {
+          "key": "x",
+          "name": "X",
+          "type": "number",
+          "default": 1,
+          "description": "How far right the target is from the center, in the same unit as Y; negative means left."
+        }
+      ],
+      "outputs": [
+        {
+          "key": "angle",
+          "name": "Angle",
+          "type": "number",
+          "subtype": "angle",
+          "description": "The direction in degrees, from just above -180 to 180: 0 is right, 90 is down, 180 is left, and -90 is up."
+        }
+      ],
+      "alwaysEvaluate": false,
+      "pairsWellWith": [
+        "cosine",
+        "sine",
+        "pointUnpack",
+        "subtract",
+        "popAnimation"
+      ],
+      "commonMistakes": [
+        "The layer points a quarter turn off: 0° means pointing right. Draw the artwork pointing right, or add 90 when it's drawn pointing up.",
+        "A spring on the angle spins the layer almost all the way around: the output jumps between 180 and -180 when the direction crosses the left side. Take the short way by adding or subtracting 360, or animate the offset instead of the angle.",
+        "The angle barely changes as your finger moves: the touch position is measured from the prototype's top-left, not from the layer. Subtract the layer's center from the position before splitting it into X and Y."
+      ],
+      "examples": [
+        {
+          "title": "Point an arrow at your finger",
+          "description": "The offset from the arrow's center (195, 437) to the touch becomes an angle, and Rotation turns the arrow, drawn pointing right, to face it.",
+          "outline": "layer arrow rectangle \"Arrow\" @155,433 80x8 cornerRadius=4 rotation←aim.angle\npatch touch interaction\npatch touch_xy pointUnpack value←touch.position\npatch offset mathExpression expression=\"dx = px - 195; dy = py - 437\" px←touch_xy.x py←touch_xy.y\npatch aim arctangent y←offset.dy x←offset.dx"
+        },
+        {
+          "title": "Aim a needle down and to the left",
+          "description": "A fixed offset of 60 right-to-left and 60 down gives 135°.",
+          "outline": "layer needle rectangle \"Needle\" @155,433 80x8 cornerRadius=4 rotation←aim.angle\npatch aim arctangent y=60 x=-60"
+        }
+      ],
+      "origami": {
+        "id": "builtin.math.atan",
+        "name": "Arctangent"
+      },
+      "defaultNotes": {
+        "y": "inferred: Origami's default is undocumented; 0 with X at 1 points right (0°).",
+        "x": "sonobe: 1 instead of 0 so the default offset has a defined direction, pointing right."
+      }
+    },
+    {
+      "type": "length",
+      "name": "Length",
+      "category": "math",
+      "tier": 2,
+      "status": "supported",
+      "aliases": [
+        "magnitude",
+        "distance",
+        "hypotenuse",
+        "vector length",
+        "norm",
+        "pythagorean theorem",
+        "speed",
+        "how far"
+      ],
+      "summary": "Measures how far a number, point, or vector is from zero, such as how far a drag has traveled in any direction.",
+      "docs": "## How it works\nLength measures how far a value is from zero, ignoring direction. For a point, that's the straight-line distance from 0,0, the long side of a right triangle: the point 3,4 has a length of 5.\n\n- **Value** is what you measure. Change the patch's type to measure a Number, Point, Point 3D, Point 4D, or Size. A number's length is the number without its sign, so -7 gives 7.\n- **Length** is always a single number, 0 or more.\n\n## Tips\n- Wire Gesture's Translation into a Point Length to know how far someone dragged in any direction, then compare it with Greater Than to dismiss past a threshold.\n- The length of a velocity is a speed in points per second, handy for spotting a fling.\n- For the distance between two points, subtract one from the other first, then measure the result.\n\n## Coming from Origami\nOrigami's position and vec4 types are called Point and Point 4D.",
+      "behavior": "State per loop index: `{ warned: false }`, used only to log the non-finite warning once. Values are stateless.\n\nEach frame, per loop index:\n```\nconst v = ctx.input<number | number[]>(\"value\");   // shaped by typeParam\nconst parts = typeof v === \"number\" ? [v] : v;\nlet sum = 0;\nfor (const c of parts) sum += c * c;\nlet len = Math.sqrt(sum);\nif (!Number.isFinite(len)) {\n  len = 0;\n  if (!ctx.state.warned) { ctx.state.warned = true; ctx.services.log(\"warn\", `${ctx.id}: Value is too large or isn't a number, so Length outputs 0`); }\n}\nctx.output(\"length\", len);\n```\n\n- Variants: `number` (default) gives `|value|`. `point` and `size` use 2 components, `point3d` 3, and `point4d` 4. The output is always a number, never a vector.\n- Precision: use `Math.sqrt` of the summed squares, not `Math.hypot`, so every JS engine returns bit-identical results (IEEE `sqrt` is correctly rounded). Overflow needs components above about 1e154 and falls under the non-finite rule.\n- Coercion (ARCHITECTURE.md §4): a wire of another type is coerced to the variant first. A number into the Point variant broadcasts (`5` becomes `[5, 5]`, length ≈ 7.071), and a point into the Number variant keeps only X.\n- Edge cases: an all-zero value outputs 0. The output is never negative and never -0. A non-finite result outputs 0 and warns once per restart per index through `ctx.services.log(\"warn\", ...)`.\n- Frame 0: evaluates with the authored value; no history.\n- Loops: once per loop index; the output length follows Value's loop.\n- Muted: the `number` variant outputs Value unchanged. Vector variants output 0 because there's no number input to pass through.\n- Restart and dispose: restart clears `warned`; nothing to release.\n- Coming from Origami: same formula. Origami's type names map as number → `number`, position → `point`, point 3D (also used for rotation) → `point3d`, and vec4 → `point4d`. `size` comes from Sonobe's arithmetic variant set.",
+      "inputs": [
+        {
+          "key": "value",
+          "name": "Value",
+          "type": "variant",
+          "default": 0,
+          "description": "The value to measure: a number, or a point or vector whose components are in points or any unit."
+        }
+      ],
+      "outputs": [
+        {
+          "key": "length",
+          "name": "Length",
+          "type": "number",
+          "description": "How far Value is from zero: the square root of the sum of its squared components, always 0 or more."
+        }
+      ],
+      "variants": [
+        "number",
+        "point",
+        "point3d",
+        "point4d",
+        "size"
+      ],
+      "alwaysEvaluate": false,
+      "pairsWellWith": [
+        "gesture",
+        "velocity",
+        "progress",
+        "subtract",
+        "greaterThan"
+      ],
+      "commonMistakes": [
+        "Length only reflects the X of the point you wired in: the patch is still on the Number type, which keeps only X. Change its type to Point.",
+        "The distance is measured from the top-left corner instead of between two layers: Length measures from 0,0. Subtract one point from the other first, then measure the difference."
+      ],
+      "examples": [
+        {
+          "title": "Shrink a card the farther you drag",
+          "description": "Translation is how far your finger has moved since it pressed. Length turns it into one distance in any direction, and the card shrinks by 20% over 400 points.",
+          "outline": "layer card rectangle \"Card\" @16,300 358x220 cornerRadius=24 scale←shrink.output\npatch pan gesture layer=@card\npatch distance length<point> value←pan.translation\npatch pulled progress value←distance.length start=0 end=400\npatch shrink transition<number> progress←pulled.progress start=1 end=0.8"
+        },
+        {
+          "title": "Swell a ball the faster you drag it",
+          "description": "The length of Velocity is speed in points per second, and Pop Animation smooths it so the ball doesn't flicker.",
+          "outline": "layer ball oval \"Ball\" @151,380 100x100 scale←swell.output\npatch pan gesture layer=@ball\npatch speed length<point> value←pan.velocity\npatch fast progress value←speed.length start=0 end=2000\npatch grow popAnimation number←fast.progress\npatch swell transition<number> progress←grow.output start=1 end=1.5"
+        }
+      ],
+      "origami": {
+        "id": "builtin.math.length",
+        "name": "Length"
+      },
+      "defaultNotes": {
+        "value": "inferred: Origami's default is undocumented; 0 measures as 0."
+      }
+    }
+  ]
+}

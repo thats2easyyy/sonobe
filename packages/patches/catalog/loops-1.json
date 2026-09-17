@@ -1,0 +1,975 @@
+{
+  "file": "loops-1.json",
+  "category": "loops",
+  "patches": [
+    {
+      "type": "loop",
+      "name": "Loop",
+      "category": "loops",
+      "tier": 1,
+      "status": "supported",
+      "aliases": [
+        "for loop",
+        "repeat",
+        "range",
+        "iterate",
+        "duplicate",
+        "copies",
+        "times",
+        "index loop",
+        "for each"
+      ],
+      "summary": "Makes a loop of indices from 0 up to Count minus 1, so layers and patches repeat once per index.",
+      "docs": "## How it works\nA Loop counts out positions: a Count of 5 gives the loop 0, 1, 2, 3, 4. A loop is a list of values that travels on one cable, and everything it feeds runs once per item. Wire the index into a layer property, directly or through math, and that layer repeats, one copy per index.\n\n- **Count** is how many indices you get. Decimals round down, and 0 or less makes an empty loop, so connected layers disappear.\n- **Index** is the loop of positions, starting at 0.\n\n## Tips\n- Multiply Index by 15 and wire it into Rotation to fan the copies out.\n- An Interaction on a repeated layer reports once per copy, so each copy can react to its own taps.\n- For a different value per copy, like names or images, use Loop Builder, or look values up with Loop Select.",
+      "behavior": "Stateless.\n\nEach frame:\n```\nconst raw = ctx.input<number>(\"count\");\nif (Number.isNaN(raw)) warnOnce(\"Loop: Count isn't a number, so the loop is empty.\");\nif (raw > 10000) warnOnce(\"Loop: Count is capped at 10,000 items.\");\nconst n = Number.isNaN(raw) ? 0 : Math.min(10000, Math.max(0, Math.floor(raw)));\nctx.output(\"index\", Array.from({ length: n }, (_, i) => i)); // a whole-loop output takes the item array\n```\n\n- Loops: `index` is a whole-loop output, so the patch evaluates once per frame. `count` isn't loopable: if a loop arrives there, `ctx.input` reads item 0 and the patch warns once per restart. Loops of loops come from components set to Loop the Component.\n- Frame 0: emits the full loop on frame 0.\n- Retargeting: a new Count changes the loop on the same frame. Downstream stateful patches keep state for the indices that survive; removed indices drop their state and new indices start fresh (ARCHITECTURE.md §4).\n- Edge cases: `warnOnce` logs through `ctx.services.log(\"warn\", …)` at most once per restart. A Count of 0 or less gives an empty loop without a warning: downstream loops are empty and bound layers render no copies. +Infinity clamps to 10,000 (with the warning); −Infinity gives an empty loop.\n- Restart and dispose: nothing to reset or release.\n- Coming from Origami: same ports. Origami doesn't document Count's default or how it rounds; Sonobe defaults to 3 and rounds down.",
+      "inputs": [
+        {
+          "key": "count",
+          "name": "Count",
+          "type": "number",
+          "default": 3,
+          "min": 0,
+          "max": 10000,
+          "step": 1,
+          "description": "How many indices to make; decimals round down, and 0 or less makes an empty loop."
+        }
+      ],
+      "outputs": [
+        {
+          "key": "index",
+          "name": "Index",
+          "type": "index",
+          "description": "The loop of positions 0, 1, 2, … up to Count − 1.",
+          "wholeLoop": true
+        }
+      ],
+      "alwaysEvaluate": false,
+      "pairsWellWith": [
+        "gridLayout",
+        "loopBuilder",
+        "loopSelect",
+        "interaction",
+        "loopCount"
+      ],
+      "commonMistakes": [
+        "Only one copy of the layer shows up: every copy sits in the same spot. Put the layer in a Group with Layout turned on, or wire Grid Layout's Position and Size into it.",
+        "Labels read 0 to 4 when you expected 1 to 5: indices start at 0. Add 1 before showing an index as a number people read."
+      ],
+      "examples": [
+        {
+          "title": "Stack five rows in a list",
+          "description": "Loop makes five indices, and a one-column Grid Layout turns them into row positions.",
+          "outline": "layer row rectangle \"Row\" position←grid.position size←grid.size cornerRadius=12\npatch rows loop count=5\npatch grid gridLayout index←rows.index columns=1 origin=16,120 width=370 itemHeight=72 spacing=12"
+        },
+        {
+          "title": "Number each row from 1",
+          "description": "Indices start at 0, so Add 1 before showing them as labels.",
+          "outline": "layer label text \"Label\" position←grid.position text←plus_one.output\npatch rows loop count=5\npatch grid gridLayout index←rows.index columns=1 origin=32,144 width=338 itemHeight=72 spacing=12\npatch plus_one add[2] value1←rows.index value2=1"
+        }
+      ],
+      "origami": {
+        "id": "builtin.loop",
+        "name": "Loop"
+      },
+      "defaultNotes": {
+        "count": "sonobe: Origami doesn't document a default; 3 shows repetition without clutter (§15 loop counts)."
+      }
+    },
+    {
+      "type": "loopBuilder",
+      "name": "Loop Builder",
+      "category": "loops",
+      "tier": 1,
+      "status": "supported",
+      "aliases": [
+        "array",
+        "list",
+        "list of values",
+        "collection",
+        "items",
+        "values",
+        "data list",
+        "array literal"
+      ],
+      "summary": "Collects several values of one type, like names, colors, or images, into a loop that repeats layers once per value.",
+      "docs": "## How it works\nLoop Builder turns separate values into one loop, a list of values that travels on a single cable. Everything the loop feeds runs once per item, and a layer bound to it repeats once per item.\n\n- **Item 0, Item 1, …** are the values, in order, counted from 0. Add or remove items to change the length.\n- **Loop** is the list of values.\n- **Index** is the matching positions: 0, 1, 2, ….\n\nEvery item shares one type, such as number, text, color, or image. Choose it from the patch's type menu.\n\n## Tips\n- Wire Index into Grid Layout to place the copies in rows and columns.\n- Feed one layer from two Loop Builders, such as titles and colors, and each copy gets its matching pair.\n- For data from JSON or the network, use Loop Over Array instead.",
+      "behavior": "Stateless.\n\nEach frame:\n```\nconst n = Math.max(1, ctx.inputCount);        // default 3, max 128\nconst items = [];\nfor (let i = 0; i < n; i++) items.push(ctx.input(`item${i}`));\nctx.output(\"loop\", items);                     // whole-loop outputs take item arrays\nctx.output(\"index\", items.map((_, i) => i));\n```\n\n- Types: `typeParam` sets the type of every item and of `loop`. Connected values are coerced to it at connect time.\n- Loops: both outputs are whole loops, so the patch evaluates once per frame, and the output length always equals the input count, whatever the values are. Item inputs take single values: when an item receives a loop, `ctx.input` reads its item 0 and the patch warns once per restart through `ctx.services.log(\"warn\", …)`. Loops of loops come only from components.\n- Frame 0: emits the full loop on frame 0.\n- Retargeting: changing one item updates that item on the same frame; downstream per-index state for the other items is untouched.\n- Edge cases: media items without an asset stay in the loop as `null`, so their copies render empty instead of shifting later items forward. The 128-item maximum lets an imported folder of images fit in one patch; for larger data, use Loop Over Array.\n- Restart and dispose: nothing to reset or release.\n- Coming from Origami: Origami lists Index before Loop and leaves the item inputs unlabeled. Importers map items by position: the first input becomes Item 0.",
+      "inputs": [],
+      "outputs": [
+        {
+          "key": "loop",
+          "name": "Loop",
+          "type": "variant",
+          "description": "The loop of item values, in order.",
+          "wholeLoop": true
+        },
+        {
+          "key": "index",
+          "name": "Index",
+          "type": "index",
+          "description": "The position of each item: 0, 1, 2, ….",
+          "wholeLoop": true
+        }
+      ],
+      "variadic": {
+        "key": "item",
+        "name": "Item",
+        "type": "variant",
+        "default": 0,
+        "min": 1,
+        "max": 128,
+        "defaultCount": 3,
+        "startIndex": 0,
+        "direction": "inputs",
+        "description": "One value in the loop; Item 0 comes first."
+      },
+      "variants": [
+        "number",
+        "boolean",
+        "text",
+        "color",
+        "point",
+        "point3d",
+        "point4d",
+        "size",
+        "anchor",
+        "index",
+        "enum",
+        "json",
+        "image",
+        "video",
+        "sound",
+        "gradient",
+        "shape",
+        "layerEffect",
+        "layer"
+      ],
+      "alwaysEvaluate": false,
+      "pairsWellWith": [
+        "loop",
+        "loopSelect",
+        "gridLayout",
+        "loopFilter",
+        "loopCount"
+      ],
+      "commonMistakes": [
+        "Items don't match the positions you expect: the first input is Item 0, not Item 1. Count from 0 when you look items up with Loop Select or match them to Loop Option Switch.",
+        "Copies repeat values or show the wrong pairs: two loops of different lengths feed the same layer, and the shorter one wraps around. Give every loop that feeds one layer the same number of items."
+      ],
+      "examples": [
+        {
+          "title": "List three names",
+          "description": "A text layer bound to a loop of text repeats once per name inside a column layout.",
+          "outline": "layer list group \"List\" @16,120 370x300 layout=column spacing=12\n  layer name text \"Name\" text←names.loop\npatch names loopBuilder<text>[3] item0=\"Ada\" item1=\"Grace\" item2=\"Katherine\""
+        },
+        {
+          "title": "Give each swatch its own color",
+          "outline": "layer row group \"Row\" @16,200 370x100 layout=row spacing=10\n  layer swatch rectangle \"Swatch\" 116x100 cornerRadius=16 color←colors.loop\npatch colors loopBuilder<color>[3] item0=#FF6B6BFF item1=#FFD93DFF item2=#6BCB77FF"
+        }
+      ],
+      "origami": {
+        "id": "builtin.loop.builder",
+        "name": "Loop Builder"
+      },
+      "defaultNotes": {
+        "item": "inferred: Origami's docs say each item is a number by default; 0 is the number zero value."
+      }
+    },
+    {
+      "type": "loopCount",
+      "name": "Loop Count",
+      "category": "loops",
+      "tier": 1,
+      "status": "supported",
+      "aliases": [
+        "length",
+        "count",
+        "how many",
+        "number of items",
+        "array length",
+        "size of loop",
+        "len"
+      ],
+      "summary": "Counts how many items a loop has, for sizing containers, showing totals, or keeping an index in range.",
+      "docs": "## How it works\nLoop Count reports the length of whatever you connect, as a plain number.\n\n- **Loop** is any loop, of any type.\n- **Count** is how many items it holds. A single value that isn't a loop counts as 1, and an empty loop counts as 0.\n\n## Tips\n- Multiply Count by a row height to size a scrolling list's content so every row fits.\n- Count what's left after Loop Filter to show how many items match a search or a selection.",
+      "behavior": "Stateless.\n\nEach frame:\n```\nctx.output(\"count\", ctx.inputItems(\"loop\").length);\n```\n\n- Loops: `loop` is a whole-loop input, so the patch evaluates once per frame and outputs a plain number, which ends the loop. A plain value arrives as a one-item array and counts as 1. Unconnected, the default is an empty loop, so Count is 0.\n- Types: the input accepts any type, including pulses and layers, so there's no type menu.\n- Frame 0: outputs the count on frame 0.\n- Edge cases: `null` items, such as an image without an asset, still count. Engine loops are capped at 10,000 items, so Count never exceeds 10,000.\n- Restart and dispose: nothing to reset or release.\n- Coming from Origami: Origami leaves the output unlabeled; Sonobe calls it Count. Same behavior.",
+      "inputs": [
+        {
+          "key": "loop",
+          "name": "Loop",
+          "type": "any",
+          "default": {
+            "loop": []
+          },
+          "description": "The loop to count; any type works.",
+          "wholeLoop": true
+        }
+      ],
+      "outputs": [
+        {
+          "key": "count",
+          "name": "Count",
+          "type": "number",
+          "step": 1,
+          "description": "How many items the loop has: 1 for a single value, 0 for an empty loop."
+        }
+      ],
+      "alwaysEvaluate": false,
+      "pairsWellWith": [
+        "loopFilter",
+        "loopOverArray",
+        "loopBuilder",
+        "clamp",
+        "counter"
+      ],
+      "commonMistakes": [
+        "Count is 1 when you expected many: the cable carries a single value, not a loop. That happens after a patch that reduces a loop, like Loop Select with one index, Any, or Loop Sum. Count the loop before it's reduced.",
+        "Stepping past the last item shows nothing: indices go up to Count − 1, not Count. Subtract 1 before using Count as a maximum index."
+      ],
+      "examples": [
+        {
+          "title": "Caption a grid with its item count",
+          "outline": "layer photos group \"Photos\" @16,120 370x400 layout=grid spacing=8\n  layer photo rectangle \"Photo\" 118x118 cornerRadius=8 color←swatches.loop\nlayer caption text \"Caption\" @16,540 text←photo_count.count\npatch swatches loopBuilder<color>[5] item0=#FF6B6BFF item1=#FFD93DFF item2=#6BCB77FF item3=#4D96FFFF item4=#C77DFFFF\npatch photo_count loopCount loop←swatches.loop"
+        }
+      ],
+      "origami": {
+        "id": "builtin.loop.count",
+        "name": "Loop Count"
+      },
+      "origamiPorts": {
+        "count": "Output"
+      },
+      "defaultNotes": {
+        "loop": "sonobe: an empty loop, so an unconnected patch reads 0."
+      }
+    },
+    {
+      "type": "loopSelect",
+      "name": "Loop Select",
+      "category": "loops",
+      "tier": 1,
+      "status": "supported",
+      "aliases": [
+        "item at index",
+        "get item",
+        "pick from loop",
+        "nth item",
+        "lookup",
+        "gather",
+        "reorder",
+        "array index",
+        "select reorder"
+      ],
+      "summary": "Picks items out of a loop by position, to show the tapped item's details or to reorder a list.",
+      "docs": "## How it works\nLoop Select looks items up by their position in a loop. Give it one index to pull out one item, or a loop of indices to pick several, in any order, with repeats allowed.\n\n- **Loop** is the list to pick from.\n- **Index** is which position to take, counted from 0. A loop of indices like 2, 1, 0 returns those items in that order.\n- **Output** is the picked items.\n- **Output Index** is each picked item's position in Output: 0, 1, 2, ….\n\nAn index past the end, or below 0, is skipped and adds nothing to Output.\n\n## Tips\n- In a carousel, wire the current page number into Index to show that page's title.\n- To keep or drop items by a condition instead of by position, use Loop Filter.\n\n## Coming from Origami\nThe inputs are called Input and Index Loop in Origami. With a single index, Origami's Index output repeats the selected index; here Output Index always counts positions in Output, so it's 0.",
+      "behavior": "Stateless.\n\nEach frame:\n```\nconst items = ctx.inputItems(\"loop\");\nconst picks = ctx.inputItems<number>(\"index\");\nconst out = [];\nfor (const raw of picks) {\n  if (!Number.isFinite(raw)) continue;\n  const i = Math.floor(raw);\n  if (i < 0 || i >= items.length) continue;   // skip; never count from the end\n  out.push(items[i]);\n}\nctx.output(\"output\", out);                    // whole-loop outputs take item arrays\nctx.output(\"outputIndex\", out.map((_, k) => k));\n```\n\n- Loops: `loop` and `index` are whole-loop inputs, so the patch evaluates once per frame. The output length is the number of valid indices, not the longest input. A plain index arrives as a one-item array and gives a one-item loop, which downstream patches and layers treat like a single value.\n- Types: `typeParam` sets the item type of `loop` and `output`. There's no pulse type: select a looped Tap with the boolean type, and its one-frame true reads as a pulse downstream.\n- Frame 0: outputs on frame 0.\n- Edge cases: `index` is a number port with `step: 1`, not an `index` port, because core coerces `index` values below 0 to 0. That way −1 (for example from Option Equals when nothing matches) is skipped instead of selecting the first item. Non-integer indices round down (2.7 → 2; −0.5 → −1, skipped). NaN and ±Infinity are skipped. An empty `loop` gives empty outputs. Duplicate indices repeat items ([0, 0] gives the first item twice).\n- Restart and dispose: nothing to reset or release.\n- Coming from Origami: with a scalar index, Origami's Index output echoes that index, while with an index loop it outputs 0…m−1. Sonobe always outputs 0…m−1 so both cases follow one rule.",
+      "inputs": [
+        {
+          "key": "loop",
+          "name": "Loop",
+          "type": "variant",
+          "default": {
+            "loop": []
+          },
+          "description": "The loop to pick items from.",
+          "wholeLoop": true
+        },
+        {
+          "key": "index",
+          "name": "Index",
+          "type": "number",
+          "default": 0,
+          "step": 1,
+          "description": "Which position to pick, counted from 0; a loop of indices picks several in that order, and out-of-range values are skipped.",
+          "wholeLoop": true
+        }
+      ],
+      "outputs": [
+        {
+          "key": "output",
+          "name": "Output",
+          "type": "variant",
+          "description": "The picked items, in the order of Index.",
+          "wholeLoop": true
+        },
+        {
+          "key": "outputIndex",
+          "name": "Output Index",
+          "type": "index",
+          "description": "Each picked item's position in Output: 0, 1, 2, ….",
+          "wholeLoop": true
+        }
+      ],
+      "variants": [
+        "number",
+        "boolean",
+        "text",
+        "color",
+        "point",
+        "point3d",
+        "point4d",
+        "size",
+        "anchor",
+        "index",
+        "enum",
+        "json",
+        "image",
+        "video",
+        "sound",
+        "gradient",
+        "shape",
+        "layerEffect",
+        "layer"
+      ],
+      "alwaysEvaluate": false,
+      "pairsWellWith": [
+        "loopOptionSwitch",
+        "loopBuilder",
+        "interaction",
+        "counter",
+        "loopFilter"
+      ],
+      "commonMistakes": [
+        "Output is empty and connected layers vanish: the index is past the end (a loop of 3 has indices 0 to 2) or below 0. Keep the index between 0 and Loop Count − 1, for example with Clamp.",
+        "Only one item comes out when you wanted the list reordered: Index is a single number, so it picks one item. Wire a loop of indices, for example from a Loop Builder set to Number, to pick several."
+      ],
+      "examples": [
+        {
+          "title": "Show the name of the tapped card",
+          "description": "Loop Option Switch remembers which card was tapped, and Loop Select looks up its name.",
+          "outline": "layer card rectangle \"Card\" position←grid.position size←grid.size cornerRadius=16\nlayer title text \"Title\" @16,480 text←chosen.output\npatch names loopBuilder<text>[3] item0=\"Tokyo\" item1=\"Lisbon\" item2=\"Oaxaca\"\npatch grid gridLayout index←names.index columns=3 origin=16,120 width=370 itemHeight=120 spacing=8\npatch tap_card interaction layer=@card\npatch which loopOptionSwitch select←tap_card.tap\npatch chosen loopSelect<text> loop←names.loop index←which.option"
+        },
+        {
+          "title": "Open a panel only when the second row is tapped",
+          "outline": "layer row rectangle \"Row\" position←grid.position size←grid.size cornerRadius=12\nlayer panel rectangle \"Panel\" @0,474 402x400 cornerRadius=24 opacity←pop.output\npatch rows loop count=3\npatch grid gridLayout index←rows.index columns=1 origin=16,120 width=370 itemHeight=72 spacing=8\npatch tap_row interaction layer=@row\npatch second_tap loopSelect<boolean> loop←tap_row.tap index=1\npatch open switch turnOn←second_tap.output\npatch pop popAnimation number←open.on"
+        }
+      ],
+      "origami": {
+        "id": "builtin.loop.selectreorder",
+        "name": "Loop Select"
+      },
+      "importAliases": [
+        "builtin.loop.selectReorder"
+      ],
+      "origamiPorts": {
+        "loop": "Input",
+        "index": "Index Loop",
+        "output": "Loop",
+        "outputIndex": "Index"
+      },
+      "defaultNotes": {
+        "loop": "sonobe: an empty loop, like every whole-loop Loop input, so an unconnected patch outputs nothing."
+      }
+    },
+    {
+      "type": "loopOptionSwitch",
+      "name": "Loop Option Switch",
+      "category": "loops",
+      "tier": 1,
+      "status": "supported",
+      "aliases": [
+        "which one was tapped",
+        "selected index",
+        "tab selection",
+        "radio group",
+        "segmented control",
+        "single select",
+        "last pulsed",
+        "loop index switch"
+      ],
+      "summary": "Remembers which item in a loop pulsed most recently, like which tab or card was tapped.",
+      "docs": "## How it works\nLoop Option Switch watches a loop of pulses, signals that are on for one frame, and remembers the position of the last item that fired. It starts at 0 and holds its value until another item pulses.\n\n- **Select** takes a loop of pulses, usually the Tap output of an Interaction on a repeated layer.\n- **Option** is the position, counted from 0, of the most recent item that pulsed.\n\nIf several items pulse in the same frame, the highest position wins. When the loop gets shorter, Option stops at the last position.\n\n## Tips\n- Wire Option into Loop Select to show the tapped item's title or image.\n- Compare each copy's Index with Option using Equals Exactly to highlight the selected copy.\n- For a few separate buttons that aren't repeated, use Option Switch.",
+      "behavior": "State per instance: `{ option: 0, prev: [] }`. The patch reduces a whole loop, so it keeps one state, not one per loop index.\n\nEach frame:\n```\nconst items = ctx.inputItems<boolean>(\"select\");\nfor (let i = 0; i < items.length; i++) {\n  if (items[i] && !state.prev[i]) state.option = i;   // ascending, so the highest firing index wins\n}\nstate.prev = items.slice();\nconst n = items.length;\nctx.output(\"option\", n === 0 ? 0 : Math.min(state.option, n - 1));\n```\n\n- Pulses: `select` is a whole-loop pulse input. An item fires on an upstream pulse or on a false→true edge of a connected boolean state, so an item held on selects once and later taps on other items still win. `ctx.pulsed` has no per-item form for whole-loop ports, so the sketch detects edges against last frame's items. The only difference from true per-item pulse detection: a pulse repeated on the same item on the next frame counts once, which changes the result only when a lower index also fires on that second frame.\n- Precedence: when several items fire in one frame, the highest index wins.\n- Frame 0: Option starts at 0. `prev` starts empty (all off), so an item that's on during frame 0 selects on frame 0.\n- Loops: Option is a plain index, so the patch ends the loop. When the loop shrinks, the stored option is kept but the output is capped at count − 1, following the option-patch clamping rule; if the loop grows back, the stored option returns. An empty loop outputs 0. A plain pulse that isn't a loop arrives as a one-item array, so Option stays 0.\n- Restart and dispose: Option resets to 0 and `prev` clears. Nothing to release.\n- Coming from Origami: Origami leaves the input unlabeled. Its starting value and same-frame tie-breaking aren't documented; Sonobe starts at 0 and lets the highest index win.",
+      "inputs": [
+        {
+          "key": "select",
+          "name": "Select",
+          "type": "pulse",
+          "description": "Pulse to select: when item i of this loop pulses, Option becomes i.",
+          "wholeLoop": true
+        }
+      ],
+      "outputs": [
+        {
+          "key": "option",
+          "name": "Option",
+          "type": "index",
+          "description": "The position, counted from 0, of the item that pulsed most recently; 0 until the first pulse."
+        }
+      ],
+      "alwaysEvaluate": false,
+      "pairsWellWith": [
+        "interaction",
+        "loopSelect",
+        "gridLayout",
+        "popAnimation",
+        "optionPicker"
+      ],
+      "commonMistakes": [
+        "The first tab looks selected before anyone taps: Option starts at 0, the first item. If nothing should look selected at first, gate the highlight with a Switch whose Turn On comes from Any on the same Tap loop.",
+        "Option never changes: the Interaction points at a layer that isn't repeated, so Tap is one pulse instead of a loop. Point the Interaction at the repeated layer so each copy reports its own taps."
+      ],
+      "examples": [
+        {
+          "title": "Slide an indicator under the tapped tab",
+          "description": "A second Grid Layout turns the selected option into the indicator's position, and Pop Animation springs it there.",
+          "outline": "layer tab rectangle \"Tab\" position←tab_grid.position size←tab_grid.size cornerRadius=10\nlayer indicator rectangle \"Indicator\" position←slide.output size←marker_grid.size cornerRadius=2\npatch tabs loop count=4\npatch tab_grid gridLayout index←tabs.index columns=4 origin=16,790 width=370 itemHeight=44 spacing=6\npatch tap_tab interaction layer=@tab\npatch current loopOptionSwitch select←tap_tab.tap\npatch marker_grid gridLayout index←current.option columns=4 origin=16,838 width=370 itemHeight=4 spacing=6\npatch slide popAnimation<point> number←marker_grid.position"
+        }
+      ],
+      "origami": {
+        "id": "origami.loopoptionswitch",
+        "name": "Loop Option Switch"
+      },
+      "importAliases": [
+        "builtin.loop.loopoptionswitch"
+      ],
+      "origamiPorts": {
+        "select": "Input"
+      }
+    },
+    {
+      "type": "loopAny",
+      "name": "Any",
+      "category": "loops",
+      "tier": 1,
+      "status": "supported",
+      "aliases": [
+        "loop any",
+        "any true",
+        "some",
+        "any tapped",
+        "or across loop",
+        "exists",
+        "reduce or"
+      ],
+      "summary": "Turns a loop of on/off values into one value that's on when at least one item is on, like any card being tapped.",
+      "docs": "## How it works\nAny looks across a whole loop and answers one question: is at least one item on? It's how you react to a tap on any copy of a repeated layer.\n\n- **Loop** takes a loop of on/off values (booleans) or pulses.\n- **Output** is on when one or more items are on. An empty loop gives off.\n\nOr compares separate inputs at each position; Any collapses a whole loop into one answer.\n\n## Tips\n- Any tells you that something was tapped; Loop Option Switch tells you which copy it was.\n- Wire a looped Down through Any and Not to pause auto-scrolling while a finger is on any item.\n- To ask whether every item is on, use All.\n\n## Advanced: Grouping\nGrouping splits one loop into several answers. Give each item a group number, counted from 0, and Output becomes a loop with one answer per group. Groups that no item belongs to answer off. Leave Grouping at −1 for a single answer.",
+      "behavior": "Stateless.\n\nEach frame:\n```\nconst items = ctx.inputItems<boolean>(\"loop\");\nconst groups = ctx.inputItems<number>(\"grouping\");\nif (groups.every((g) => !(g >= 0))) {\n  ctx.output(\"output\", items.some(Boolean));   // plain boolean\n  return;\n}\n// grouped: see Grouping below\n```\n\n- Loops: `loop` and `grouping` are whole-loop inputs, so the patch evaluates once per frame. Without grouping, the output is a plain boolean, which ends the loop.\n- Grouping: when every `grouping` item is negative or not finite (the default −1), `output` is a plain boolean. Otherwise `output` is a loop of booleans whose length is the highest group id + 1 (non-integer ids round down). Item i belongs to group `grouping[i % grouping.length]`, so a shorter Grouping loop wraps. Items with a negative or non-finite id are ignored. Groups with no items answer false. Group ids of 10,000 or more are ignored with a warning once per restart, matching the engine's loop limit.\n  ```\n  const result = [];\n  for (let i = 0; i < items.length; i++) {\n    const g = Math.floor(groups[i % groups.length]);\n    if (!(g >= 0 && g < 10000)) continue;\n    while (result.length <= g) result.push(false);\n    if (items[i]) result[g] = true;\n  }\n  ctx.output(\"output\", result);   // emitted as a loop\n  ```\n- Pulses: stateless, so with a loop of Tap pulses the output is true exactly on frames where any item pulses. It's a boolean state, not a pulse: if two different items pulse on consecutive frames, the output stays true for both frames and a downstream pulse input sees one rising edge.\n- Frame 0: evaluates on frame 0.\n- Edge cases: an empty loop gives false (or an empty loop when grouped). A plain boolean arrives as a one-item array and passes through unchanged.\n- Restart and dispose: nothing to reset or release.\n- Coming from Origami: Origami documents Grouping only as an advanced index input defaulting to −1. Sonobe reads each Grouping item as the group id of the matching Loop item, which recovers one answer per instance from a looped component's flattened outputs.",
+      "inputs": [
+        {
+          "key": "loop",
+          "name": "Loop",
+          "type": "boolean",
+          "default": false,
+          "description": "The loop of on/off values or pulses to check.",
+          "wholeLoop": true
+        },
+        {
+          "key": "grouping",
+          "name": "Grouping",
+          "type": "number",
+          "default": -1,
+          "step": 1,
+          "description": "The group number of each item, counted from 0, for one answer per group; −1 gives one answer for the whole loop.",
+          "wholeLoop": true,
+          "advanced": true
+        }
+      ],
+      "outputs": [
+        {
+          "key": "output",
+          "name": "Output",
+          "type": "boolean",
+          "description": "On when at least one item is on and off for an empty loop; a loop with one answer per group when Grouping is set."
+        }
+      ],
+      "alwaysEvaluate": false,
+      "pairsWellWith": [
+        "interaction",
+        "switch",
+        "loopOptionSwitch",
+        "not",
+        "loopAll"
+      ],
+      "commonMistakes": [
+        "A layer bound to Any flickers on for a single frame: a looped Tap is on only on the frame of the tap. Wire Any into a Switch's Turn On or Flip so the change stays.",
+        "Any stays on: you checked a state like Down or a Switch's On, and one copy is still on. Hover the cable to see which item is on, or check Tap when you mean a one-time event.",
+        "Output turned into a loop: Grouping isn't −1. Set it back to −1 for a single answer."
+      ],
+      "examples": [
+        {
+          "title": "Open a sheet when any card is tapped",
+          "outline": "layer card rectangle \"Card\" position←grid.position size←grid.size cornerRadius=16\nlayer sheet rectangle \"Sheet\" @0,474 402x400 cornerRadius=24 opacity←pop.output\npatch cards loop count=6\npatch grid gridLayout index←cards.index columns=2 origin=16,120 width=370 itemHeight=100 spacing=10\npatch tap_card interaction layer=@card\npatch tapped_any loopAny loop←tap_card.tap\npatch open switch turnOn←tapped_any.output\npatch pop popAnimation number←open.on"
+        }
+      ],
+      "origami": {
+        "id": "builtin.loop.any",
+        "name": "Any"
+      },
+      "defaultNotes": {
+        "loop": "sonobe: one off item, so an unconnected patch answers off."
+      }
+    },
+    {
+      "type": "loopAll",
+      "name": "All",
+      "category": "loops",
+      "tier": 2,
+      "status": "supported",
+      "aliases": [
+        "loop all",
+        "all true",
+        "every",
+        "every item",
+        "all checked",
+        "and across loop",
+        "reduce and"
+      ],
+      "summary": "Turns a loop of on/off values into one value that's on only when every item is on, like all boxes being checked.",
+      "docs": "## How it works\nAll looks across a whole loop and is on only when every item is on. It's the partner of Any.\n\n- **Loop** takes a loop of on/off values (booleans).\n- **Output** is on when no item is off. An empty loop counts as all on, because no item is off.\n\n## Tips\n- Enable a Continue button once every checklist item is checked.\n- When one item being on is enough, use Any instead.\n- All is the same as Not on every item, then Any, then Not.\n\n## Advanced: Grouping\nGrouping splits one loop into several answers. Give each item a group number, counted from 0, and Output becomes a loop with one answer per group. Groups that no item belongs to answer on. Leave Grouping at −1 for a single answer.",
+      "behavior": "Stateless.\n\nEach frame:\n```\nconst items = ctx.inputItems<boolean>(\"loop\");\nconst groups = ctx.inputItems<number>(\"grouping\");\nif (groups.every((g) => !(g >= 0))) {\n  ctx.output(\"output\", items.every(Boolean));  // plain boolean; true for an empty loop\n  return;\n}\n// grouped: see Grouping below\n```\n\n- Loops: `loop` and `grouping` are whole-loop inputs, so the patch evaluates once per frame. Without grouping, the output is a plain boolean, which ends the loop.\n- Grouping: when every `grouping` item is negative or not finite (the default −1), `output` is a plain boolean. Otherwise `output` is a loop of booleans whose length is the highest group id + 1 (non-integer ids round down). Item i belongs to group `grouping[i % grouping.length]`, so a shorter Grouping loop wraps. Items with a negative or non-finite id are ignored. Groups with no items answer true, the same vacuous truth as an empty loop. Group ids of 10,000 or more are ignored with a warning once per restart, matching the engine's loop limit.\n  ```\n  const result = [];\n  for (let i = 0; i < items.length; i++) {\n    const g = Math.floor(groups[i % groups.length]);\n    if (!(g >= 0 && g < 10000)) continue;\n    while (result.length <= g) result.push(true);\n    if (!items[i]) result[g] = false;\n  }\n  ctx.output(\"output\", result);   // emitted as a loop\n  ```\n- Pulses: stateless. With a loop of pulses the output is true only on a frame where every item pulses at once.\n- Frame 0: evaluates on frame 0.\n- Edge cases: an empty loop gives true (or an empty loop when grouped). A plain boolean arrives as a one-item array and passes through unchanged.\n- Restart and dispose: nothing to reset or release.\n- Coming from Origami: Origami has no All patch. Rebuild one there with Not on each item, Any, then Not; import that chain as is.",
+      "inputs": [
+        {
+          "key": "loop",
+          "name": "Loop",
+          "type": "boolean",
+          "default": false,
+          "description": "The loop of on/off values to check.",
+          "wholeLoop": true
+        },
+        {
+          "key": "grouping",
+          "name": "Grouping",
+          "type": "number",
+          "default": -1,
+          "step": 1,
+          "description": "The group number of each item, counted from 0, for one answer per group; −1 gives one answer for the whole loop.",
+          "wholeLoop": true,
+          "advanced": true
+        }
+      ],
+      "outputs": [
+        {
+          "key": "output",
+          "name": "Output",
+          "type": "boolean",
+          "description": "On when every item is on, including for an empty loop; a loop with one answer per group when Grouping is set."
+        }
+      ],
+      "alwaysEvaluate": false,
+      "pairsWellWith": [
+        "loopAny",
+        "switch",
+        "loopCount",
+        "and",
+        "not"
+      ],
+      "commonMistakes": [
+        "All never turns on with a looped Tap: every copy would have to be tapped in the same frame. Store each copy's choice in a Switch and check the Switch's On instead.",
+        "The button turns on before anything is listed: an empty loop counts as all on. Also require Loop Count greater than 0."
+      ],
+      "examples": [
+        {
+          "title": "Enable Continue when every box is checked",
+          "outline": "layer check rectangle \"Check\" position←grid.position size←grid.size cornerRadius=12 color←fill.output\nlayer continue_button rectangle \"Continue\" @16,760 370x56 cornerRadius=28 opacity←ready.output\npatch items loop count=3\npatch grid gridLayout index←items.index columns=1 origin=16,120 width=370 itemHeight=56 spacing=8\npatch tap_check interaction layer=@check\npatch checked switch flip←tap_check.tap\npatch fill transition<color> progress←checked.on start=#E5E5EAFF end=#34C759FF\npatch all_checked loopAll loop←checked.on\npatch ready transition<number> progress←all_checked.output start=0.4 end=1"
+        }
+      ],
+      "origami": null,
+      "defaultNotes": {
+        "loop": "sonobe: one off item, so an unconnected patch answers off."
+      }
+    },
+    {
+      "type": "loopFilter",
+      "name": "Loop Filter",
+      "category": "loops",
+      "tier": 2,
+      "status": "supported",
+      "aliases": [
+        "filter",
+        "where",
+        "keep if",
+        "remove items",
+        "repeat items",
+        "subset",
+        "replicate",
+        "compress"
+      ],
+      "summary": "Keeps, drops, or repeats each item of a loop, for filtered lists, selected items, or a value repeated a set number of times.",
+      "docs": "## How it works\nLoop Filter builds a new loop from an old one. For each item, Include says how many times it appears in the result: 0 drops it, 1 keeps it, and 3 repeats it three times.\n\n- **Loop** is the list to filter.\n- **Include** is a loop of on/off values, where on keeps an item and off drops it, or a loop of counts. A single number applies to every item, so one item with Include 5 makes five copies.\n- **Output** is the resulting loop, in the original order.\n- **Index** is each result item's position: 0, 1, 2, ….\n\nCounts round down, and negative counts drop the item.\n\n## Tips\n- Build a search filter: check each name against the query, then wire the results into Include.\n- To keep items by position rather than by a condition, use Loop Select with the positions you want.\n- Count the kept items with Loop Count, or pick one with Loop Select.",
+      "behavior": "Stateless.\n\nEach frame:\n```\nconst items = ctx.inputItems(\"loop\");\nconst counts = ctx.inputItems<number>(\"include\");\nconst out = [];\nif (items.length > 0 && counts.length > 0) {\n  const pairs = Math.max(items.length, counts.length);\n  for (let i = 0; i < pairs; i++) {\n    const c = counts[i % counts.length];\n    const times = c > 0 ? Math.floor(Math.min(c, 10000)) : 0;   // NaN, 0, and negatives drop\n    for (let k = 0; k < times; k++) {\n      if (out.length === 10000) { warnOnce(\"Loop Filter: result capped at 10,000 items.\"); break; }\n      out.push(items[i % items.length]);\n    }\n  }\n}\nctx.output(\"output\", out);                   // whole-loop outputs take item arrays\nctx.output(\"index\", out.map((_, k) => k));\n```\n\n- Loops: `loop` and `include` are whole-loop inputs, so the patch evaluates once per frame. The output length follows the counts, not the longest input: it's the sum of the rounded-down counts, capped at 10,000. The two inputs pair item by item, and the shorter one wraps (the standard loop rule). That's how a single item repeats, or a single count applies to every item.\n- Types: `typeParam` sets the item type of `loop` and `output`. Include is a number port: on/off values arrive as 1 and 0, and a pulse arrives as 1 on the frame it fires, so a looped Tap in Include gives the tapped item for exactly that frame.\n- Frame 0: outputs on frame 0.\n- Edge cases: an empty Loop or an empty Include gives empty outputs. Fractional counts round down (2.9 → 2); NaN and counts ≤ 0 drop the item; +Infinity counts as 10,000. `warnOnce` logs through `ctx.services.log(\"warn\", …)` at most once per restart.\n- Restart and dispose: nothing to reset or release.\n- Coming from Origami: Origami calls the ports Input and Include, then Loop and Index. When the inputs have different lengths, Sonobe wraps the shorter one; Origami doesn't document that case.",
+      "inputs": [
+        {
+          "key": "loop",
+          "name": "Loop",
+          "type": "variant",
+          "default": {
+            "loop": []
+          },
+          "description": "The loop to filter or repeat.",
+          "wholeLoop": true
+        },
+        {
+          "key": "include",
+          "name": "Include",
+          "type": "number",
+          "default": 1,
+          "min": 0,
+          "step": 1,
+          "description": "How many times each item appears: on or 1 keeps it, off or 0 drops it, and 3 repeats it three times.",
+          "wholeLoop": true
+        }
+      ],
+      "outputs": [
+        {
+          "key": "output",
+          "name": "Output",
+          "type": "variant",
+          "description": "The kept and repeated items, in their original order.",
+          "wholeLoop": true
+        },
+        {
+          "key": "index",
+          "name": "Index",
+          "type": "index",
+          "description": "Each result item's position in Output: 0, 1, 2, ….",
+          "wholeLoop": true
+        }
+      ],
+      "variants": [
+        "number",
+        "boolean",
+        "text",
+        "color",
+        "point",
+        "point3d",
+        "point4d",
+        "size",
+        "anchor",
+        "index",
+        "enum",
+        "json",
+        "image",
+        "video",
+        "sound",
+        "gradient",
+        "shape",
+        "layerEffect",
+        "layer"
+      ],
+      "alwaysEvaluate": false,
+      "pairsWellWith": [
+        "loopBuilder",
+        "loopCount",
+        "loopSelect",
+        "loopSum",
+        "switch"
+      ],
+      "commonMistakes": [
+        "The filtered list flashes and disappears after a tap: Include is wired to Tap, which is on for one frame. Store each item's choice in a Switch and wire its On into Include.",
+        "Filtered copies land in the wrong places: the result has fewer items, so the original loop's indices no longer line up. Position the filtered copies with this patch's Index output, not the original Index."
+      ],
+      "examples": [
+        {
+          "title": "Show a four-star rating",
+          "description": "One star color repeated four times makes four copies in a row layout.",
+          "outline": "layer stars group \"Stars\" @16,120 240x44 layout=row spacing=8\n  layer star rectangle \"Star\" 40x40 cornerRadius=8 color←filled.output\npatch star_color loopBuilder<color>[1] item0=#FFC400FF\npatch filled loopFilter<color> loop←star_color.loop include=4"
+        },
+        {
+          "title": "Collect tapped swatches into a tray",
+          "outline": "layer swatch rectangle \"Swatch\" position←grid.position size←grid.size cornerRadius=12 color←swatches.loop opacity←dim.output\nlayer tray group \"Tray\" @16,500 370x60 layout=row spacing=8\n  layer chip oval \"Chip\" 40x40 color←picked_colors.output\npatch swatches loopBuilder<color>[4] item0=#FF6B6BFF item1=#FFD93DFF item2=#6BCB77FF item3=#4D96FFFF\npatch grid gridLayout index←swatches.index columns=4 origin=16,120 width=370 itemHeight=88 spacing=8\npatch tap_swatch interaction layer=@swatch\npatch picked switch flip←tap_swatch.tap\npatch dim transition<number> progress←picked.on start=0.5 end=1\npatch picked_colors loopFilter<color> loop←swatches.loop include←picked.on"
+        }
+      ],
+      "origami": {
+        "id": "builtin.loop.select",
+        "name": "Loop Filter"
+      },
+      "origamiPorts": {
+        "loop": "Input",
+        "output": "Loop"
+      },
+      "defaultNotes": {
+        "loop": "sonobe: an empty loop, like every whole-loop Loop input, so an unconnected patch outputs nothing.",
+        "include": "sonobe: Origami doesn't document a default; 1 keeps every item, so the loop passes through until you wire a condition."
+      }
+    },
+    {
+      "type": "loopSum",
+      "name": "Loop Sum",
+      "category": "loops",
+      "tier": 2,
+      "status": "supported",
+      "aliases": [
+        "sum",
+        "total",
+        "add all",
+        "aggregate",
+        "count on",
+        "reduce",
+        "grand total"
+      ],
+      "summary": "Adds up every item in a loop into one total, like a cart price, a count of checked items, or a content height.",
+      "docs": "## How it works\nLoop Sum adds every item in a loop together and outputs one total.\n\n- **Loop** is the list to add up. On/off values count as 1 and 0, so summing them counts how many are on.\n- **Sum** is the total. An empty loop sums to zero.\n\nChoose the type from the patch's type menu. Numbers add normally, points and sizes add component by component (x with x, y with y), and text joins end to end in order.\n\n## Tips\n- Sum a loop of row heights to size a list whose rows have different heights.\n- Sum prices times quantities to show a cart total.\n- Need the total of the items before each item, to stack things? Use Running Total.",
+      "behavior": "Stateless.\n\nEach frame:\n```\nconst items = ctx.inputItems(\"loop\");\nlet sum = zeroValue(ctx.typeParam ?? \"number\");   // 0, [0, 0], [0, 0, 0], [0, 0, 0, 0], or \"\"\nfor (const item of items) sum = add(sum, item);   // number +, vectors component-wise, text concatenation\nctx.output(\"sum\", finiteOrZero(sum));\n```\n\n- Types: `typeParam` follows Add's types (ADDABLE). Booleans, indices, and pulses coerce to numbers at connect time (on = 1, off = 0).\n- Loops: `loop` is a whole-loop input, so the patch evaluates once per frame and outputs a plain value, which ends the loop.\n- Frame 0: outputs on frame 0.\n- Edge cases: an empty loop gives the zero value for the type. If the total, or any component of a vector total, isn't finite (NaN or ±Infinity from huge values), output 0 for it and warn once per restart through `ctx.services.log(\"warn\", …)`. Text joins with no separator; to add separators, use Loop to Array and Array Join.\n- Restart and dispose: nothing to reset or release.\n- Coming from Origami: Origami's input is unlabeled. Origami gained type variance for this patch without documenting the type list; Sonobe uses Add's types.",
+      "inputs": [
+        {
+          "key": "loop",
+          "name": "Loop",
+          "type": "variant",
+          "default": {
+            "loop": []
+          },
+          "description": "The loop of values to add up; on/off values count as 1 and 0.",
+          "wholeLoop": true
+        }
+      ],
+      "outputs": [
+        {
+          "key": "sum",
+          "name": "Sum",
+          "type": "variant",
+          "description": "The total of every item; zero for an empty loop."
+        }
+      ],
+      "variants": [
+        "number",
+        "point",
+        "point3d",
+        "point4d",
+        "size",
+        "text"
+      ],
+      "alwaysEvaluate": false,
+      "pairsWellWith": [
+        "runningTotal",
+        "loopCount",
+        "loopBuilder",
+        "switch",
+        "formatNumber"
+      ],
+      "commonMistakes": [
+        "Sum shows one item's value: the cable carries a single value, not a loop, for example after Loop Select. Connect the loop itself.",
+        "The count jumps to 1 and back to 0: you summed a looped Tap, which is on for one frame. Store each item's choice in a Switch and sum its On."
+      ],
+      "examples": [
+        {
+          "title": "Show how many items are checked",
+          "outline": "layer check rectangle \"Check\" position←grid.position size←grid.size cornerRadius=12 opacity←dim.output\nlayer summary text \"Summary\" @16,440 text←checked_count.sum\npatch items loop count=5\npatch grid gridLayout index←items.index columns=1 origin=16,120 width=370 itemHeight=48 spacing=8\npatch tap_check interaction layer=@check\npatch checked switch flip←tap_check.tap\npatch dim transition<number> progress←checked.on start=0.4 end=1\npatch checked_count loopSum loop←checked.on"
+        }
+      ],
+      "origami": {
+        "id": "origami.loopsum",
+        "name": "Loop Sum"
+      },
+      "importAliases": [
+        "origami.LoopSum",
+        "builtin.loop.total"
+      ],
+      "origamiPorts": {
+        "loop": "Input"
+      },
+      "defaultNotes": {
+        "loop": "sonobe: Origami doesn't document a default; an empty loop, like every whole-loop Loop input, sums to 0."
+      }
+    },
+    {
+      "type": "runningTotal",
+      "name": "Running Total",
+      "category": "loops",
+      "tier": 2,
+      "status": "supported",
+      "aliases": [
+        "cumulative sum",
+        "prefix sum",
+        "accumulate",
+        "offsets",
+        "subtotal",
+        "stack positions",
+        "scan"
+      ],
+      "summary": "Gives each item in a loop the total of the items before it, for stacking uneven rows or staggering delays.",
+      "docs": "## How it works\nRunning Total walks through a loop and gives every item the sum of the items that come before it. For 1, 3, 5 you get 0, 1, 4: the first item has nothing before it.\n\n- **Loop** is the list of numbers. On/off values count as 1 and 0.\n- **Include Current** adds each item's own value too, so 1, 3, 5 gives 1, 4, 9.\n- **Total** is the loop of running totals, one per item.\n\n## Tips\n- Stack rows of different heights: the total of the heights before a row is where that row starts.\n- Stagger delays so each item waits for the ones before it to finish.\n- Only need the grand total? Use Loop Sum.",
+      "behavior": "Stateless.\n\nEach frame:\n```\nconst items = ctx.inputItems<number>(\"loop\");\nconst inclusive = ctx.input<boolean>(\"includeCurrent\");\nconst totals = [];\nlet acc = 0;\nfor (const raw of items) {\n  const v = Number.isFinite(raw) ? raw : 0;   // warnOnce when not finite\n  if (inclusive) acc += v;\n  totals.push(Number.isFinite(acc) ? acc : 0);\n  if (!inclusive) acc += v;\n}\nctx.output(\"total\", totals);                 // whole-loop output takes the item array\n```\n\n- Loops: `loop` is a whole-loop input and `total` is a whole-loop output of the same length, so the patch evaluates once per frame. `includeCurrent` isn't loopable: if a loop arrives there, `ctx.input` reads item 0.\n- Frame 0: outputs on frame 0.\n- Edge cases: an empty loop gives an empty loop. A plain number gives [0], or [value] with Include Current. Non-finite items count as 0, and a total that overflows to ±Infinity outputs 0 for that item; both warn once per restart through `ctx.services.log(\"warn\", …)`. Sums run left to right, so floating-point rounding matches a hand-written loop.\n- Restart and dispose: nothing to reset or release.\n- Coming from Origami: Origami leaves the output unlabeled; Sonobe calls it Total. Include Current is new, and off matches Origami.",
+      "inputs": [
+        {
+          "key": "loop",
+          "name": "Loop",
+          "type": "number",
+          "default": {
+            "loop": []
+          },
+          "description": "The loop of numbers to total; on/off values count as 1 and 0.",
+          "wholeLoop": true
+        },
+        {
+          "key": "includeCurrent",
+          "name": "Include Current",
+          "type": "boolean",
+          "default": false,
+          "description": "When on, each total includes the item itself (1, 3, 5 gives 1, 4, 9); when off, only the items before it count."
+        }
+      ],
+      "outputs": [
+        {
+          "key": "total",
+          "name": "Total",
+          "type": "number",
+          "description": "For each item, the sum of the items before it, plus the item itself when Include Current is on.",
+          "wholeLoop": true
+        }
+      ],
+      "alwaysEvaluate": false,
+      "pairsWellWith": [
+        "loopSum",
+        "loopBuilder",
+        "add",
+        "delay",
+        "loopCount"
+      ],
+      "commonMistakes": [
+        "The first item isn't offset at all: totals start at 0 for the first item. Add the starting value, such as a header height, to every total with Add.",
+        "Every item is shifted one step too far: Include Current is on, so each total already counts the item itself. Turn it off when you want where an item starts."
+      ],
+      "examples": [
+        {
+          "title": "Fan cards out by uneven angles",
+          "description": "Each card turns a little further than the one before it: the steps -24, 12, 16, 20 become rotations -24, -12, 4, 24.",
+          "outline": "layer card rectangle \"Card\" @126,300 150x220 cornerRadius=16 pivot=0.5,1 rotation←angles.total\npatch steps loopBuilder<number>[4] item0=-24 item1=12 item2=16 item3=20\npatch angles runningTotal loop←steps.loop includeCurrent=true"
+        }
+      ],
+      "origami": {
+        "id": "builtin.loop.sum",
+        "name": "Running Total"
+      },
+      "origamiPorts": {
+        "loop": "Input",
+        "total": "Output"
+      },
+      "defaultNotes": {
+        "loop": "sonobe: Origami doesn't document a default; an empty loop, like every whole-loop Loop input, gives an empty loop.",
+        "includeCurrent": "sonobe: a Sonobe-only option; off matches Origami's totals of the items before each item."
+      }
+    },
+    {
+      "type": "gridLayout",
+      "name": "Grid Layout",
+      "category": "loops",
+      "tier": 2,
+      "status": "supported",
+      "aliases": [
+        "grid",
+        "columns",
+        "tile layout",
+        "photo grid",
+        "list layout",
+        "collection view",
+        "arrange items",
+        "flow layout"
+      ],
+      "summary": "Calculates a position and size for each item so repeated layers fill a grid of evenly sized columns.",
+      "docs": "## How it works\nGrid Layout arranges repeated layers in rows and columns. It splits Width into equal columns, fills each row left to right, and starts a new row when one is full.\n\n- **Index** is the item's place in the grid, counted from 0. Wire a Loop's Index here.\n- **Columns** is how many items fit in a row. Use 1 for a list.\n- **Origin** is the top-left corner of the first item.\n- **Width** is the grid's total width, gaps included.\n- **Item Height** is how tall each item is.\n- **Spacing** is the gap between items, across and down.\n- **Position** and **Size** go to the repeated layer's Position and Size.\n\nPositions are measured from the parent layer's top-left corner to each item's top-left corner.\n\n## Tips\n- For square tiles, set Item Height to the item width: (Width − Spacing × (Columns − 1)) ÷ Columns.\n- The grid's height is rows × Item Height + (rows − 1) × Spacing, where rows is Loop Count ÷ Columns, rounded up.\n- A Group with Layout set to Grid also arranges children. Grid Layout gives you numbers you can animate or reuse, like a selection indicator's position.\n\n## Coming from Origami\nOrigami's Position input is Origin here, and Padding is Spacing. Origami measures from the screen's center; Sonobe measures from the parent's top-left.",
+      "behavior": "Stateless.\n\nEach frame, per loop index:\n```\nconst finite = (n, fallback) => (Number.isFinite(n) ? n : fallback);\nconst cols = Math.max(1, Math.floor(finite(ctx.input(\"columns\"), 1)));\nconst spacing = finite(ctx.input(\"spacing\"), 0);\nconst itemWidth = Math.max(0, (finite(ctx.input(\"width\"), 0) - spacing * (cols - 1)) / cols);\nconst itemHeight = Math.max(0, finite(ctx.input(\"itemHeight\"), 0));\nconst i = ctx.input<number>(\"index\");          // index port: already a whole number ≥ 0\nconst row = Math.floor(i / cols);\nconst col = i - row * cols;\nconst [ox, oy] = ctx.input<number[]>(\"origin\");\nctx.output(\"position\", [ox + col * (itemWidth + spacing), oy + row * (itemHeight + spacing)]);\nctx.output(\"size\", [itemWidth, itemHeight]);\n```\n\n- Loops: no whole-loop ports, so the patch evaluates once per loop index. A loop on Index gives loops of positions and sizes of the same length; scalars broadcast; an empty Index loop gives empty outputs. An item's place comes from the Index value, not from the loop position, so a reordered index loop (from Loop Select) moves items.\n- Coordinates: `position` is each item's top-left corner in the target layer's parent space (CONVENTIONS.md §18.5.1). With the default Anchor [0, 0] it lines up exactly; for another anchor, add Anchor × Size.\n- Frame 0: outputs on frame 0.\n- Edge cases: Columns below 1 or not finite count as 1, so there's no division by zero; decimal Columns round down. When Spacing is too wide for Width, item width clamps to 0 and positions still advance by Spacing. Negative Item Height clamps to 0; negative Spacing overlaps items. Index values below 0 arrive as 0 through `index` coercion. Non-finite Width, Item Height, or Spacing count as 0, and non-finite Origin components are already 0 after vector coercion.\n- Restart and dispose: nothing to reset or release.\n- Coming from Origami: Origami documents that items divide Width evenly but not how Padding affects item width. Sonobe subtracts the gaps first, so items plus gaps exactly fill Width. Importers convert Origami's center-origin positions to top-left.",
+      "inputs": [
+        {
+          "key": "index",
+          "name": "Index",
+          "type": "index",
+          "default": 0,
+          "description": "The item's place in the grid, counted from 0 left to right and then top to bottom; wire a Loop's Index here."
+        },
+        {
+          "key": "columns",
+          "name": "Columns",
+          "type": "number",
+          "default": 3,
+          "min": 1,
+          "step": 1,
+          "description": "How many items fit in each row; 1 makes a single-column list."
+        },
+        {
+          "key": "origin",
+          "name": "Origin",
+          "type": "point",
+          "subtype": "distance",
+          "default": [
+            0,
+            0
+          ],
+          "description": "The top-left corner of the first item, in points from the parent layer's top-left."
+        },
+        {
+          "key": "width",
+          "name": "Width",
+          "type": "number",
+          "subtype": "distance",
+          "default": 316,
+          "min": 0,
+          "description": "The grid's total width in points, including the gaps between columns."
+        },
+        {
+          "key": "itemHeight",
+          "name": "Item Height",
+          "type": "number",
+          "subtype": "distance",
+          "default": 100,
+          "min": 0,
+          "description": "The height of every item in points."
+        },
+        {
+          "key": "spacing",
+          "name": "Spacing",
+          "type": "number",
+          "subtype": "distance",
+          "default": 8,
+          "min": 0,
+          "description": "The gap between items in points, used both across and down; 0 makes items touch."
+        }
+      ],
+      "outputs": [
+        {
+          "key": "position",
+          "name": "Position",
+          "type": "point",
+          "subtype": "distance",
+          "description": "The item's top-left corner in its parent's coordinates; wire it into the repeated layer's Position."
+        },
+        {
+          "key": "size",
+          "name": "Size",
+          "type": "size",
+          "subtype": "distance",
+          "description": "The item's width and height in points; wire it into the repeated layer's Size."
+        }
+      ],
+      "alwaysEvaluate": false,
+      "pairsWellWith": [
+        "loop",
+        "loopBuilder",
+        "interaction",
+        "loopOptionSwitch",
+        "loopCount"
+      ],
+      "commonMistakes": [
+        "All the items pile up in one spot: Index isn't wired to a loop, so every copy gets index 0. Wire a Loop's Index, or Loop Builder's Index, into Index.",
+        "Items are shifted by half their size: the layer's Anchor isn't top-left, so Position places a different point. Set Anchor to 0,0, or add Anchor × Size to the position.",
+        "The last column runs off the screen: Width is wider than the space you have. Set Width to the screen width minus both margins, for example 402 − 32 = 370."
+      ],
+      "examples": [
+        {
+          "title": "Photo grid with three columns",
+          "description": "Nine tiles, 118 points wide, in three rows with 8-point gaps.",
+          "outline": "layer photo rectangle \"Photo\" position←grid.position size←grid.size cornerRadius=8\npatch photos loop count=9\npatch grid gridLayout index←photos.index columns=3 origin=16,120 width=370 itemHeight=118 spacing=8"
+        }
+      ],
+      "origami": {
+        "id": "origami.gridlayout",
+        "name": "Grid Layout"
+      },
+      "importAliases": [
+        "origami.grid"
+      ],
+      "origamiPorts": {
+        "origin": "Position",
+        "spacing": "Padding"
+      },
+      "defaultNotes": {
+        "index": "sonobe: a single item at index 0 until a loop is wired.",
+        "columns": "sonobe: Origami doesn't document a default; 3 columns read as a grid right away.",
+        "origin": "sonobe: positions default to 0,0, the parent's top-left (§15).",
+        "width": "sonobe: Origami doesn't document a default; 316 with Spacing 8 and 3 columns gives 100-point items, the default layer size.",
+        "itemHeight": "inferred: research suggests 100, which matches the default layer size.",
+        "spacing": "sonobe: Origami's Padding default is undocumented (probably 0); 8 keeps tiles visibly apart."
+      }
+    }
+  ]
+}

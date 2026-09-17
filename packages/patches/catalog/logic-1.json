@@ -1,0 +1,946 @@
+{
+  "file": "logic-1.json",
+  "category": "logic",
+  "patches": [
+    {
+      "type": "and",
+      "name": "And",
+      "category": "logic",
+      "tier": 1,
+      "status": "supported",
+      "aliases": [
+        "all true",
+        "both",
+        "logical and",
+        "&&",
+        "every",
+        "conjunction",
+        "gate"
+      ],
+      "summary": "Turns on only while every one of its inputs is on.",
+      "docs": "## How it works\nAnd answers \"are all of these true right now?\" Its output is on only while every input is on. If any input is off, the output is off.\n\n- **Value 1, Value 2, …** are on/off values (booleans). Numbers count as on when they're greater than 0. Add or remove inputs to check more conditions.\n- **Output** is on while all inputs are on.\n\n## Tips\n- Use And to gate a pulse, a signal that's on for one frame: wire a Tap into Value 1 and a state such as a Switch's On into Value 2. The output flashes on only when the tap happens while the state is on.\n- Combine with Not for \"this, but not that\" conditions.\n- To check whether every item in a loop is on, use All instead. And compares separate inputs at each loop index.\n\n## Coming from Origami\nOrigami's ports are unnamed. Here they're Value 1, Value 2, and so on, in the same order.",
+      "behavior": "Stateless.\n\nEach frame, for this loop index:\n```\nconst n = clamp(ctx.inputCount, 2, 32);\nlet on = true;\nfor (let i = 1; i <= n; i++) {\n  if (!ctx.input(`value${i}`)) { on = false; break; }\n}\nctx.output(\"output\", on);\n```\n\n- Coercion: each input is coerced to boolean by core (numbers are on when `> 0`, text \"true\"/\"yes\"/\"on\" is on, vectors use their first component).\n- Pulses in, state out: inputs are booleans, so a pulse arriving from upstream reads `true` only on the frame it fires. The output is a boolean, not a pulse. A downstream pulse input fires on its false→true edge, so two pulses on consecutive frames merge into one downstream pulse (the output stays true for two frames with no false in between).\n- Frame 0: evaluates with authored values and outputs on the same frame. There is no latency and no history.\n- Loops: evaluates once per loop index. Output length is the longest input loop; shorter loops wrap and scalars broadcast. An empty loop gives an empty output.\n- Edge cases: `inputCount` outside 2–32 (a hand-edited file) is clamped into that range; missing expanded inputs read their default `false`.\n- Coming from Origami: unnamed ports import positionally (port 0 → `value1`, port 1 → `value2`, …). The file's input count becomes `inputCount`.",
+      "inputs": [],
+      "outputs": [
+        {
+          "key": "output",
+          "name": "Output",
+          "type": "boolean",
+          "description": "On while every input is on; off as soon as any input is off."
+        }
+      ],
+      "variadic": {
+        "key": "value",
+        "name": "Value",
+        "type": "boolean",
+        "default": false,
+        "min": 2,
+        "max": 32,
+        "defaultCount": 2,
+        "startIndex": 1,
+        "direction": "inputs",
+        "description": "A condition to check. Numbers count as on when greater than 0."
+      },
+      "alwaysEvaluate": false,
+      "shortcut": "Shift+A",
+      "pairsWellWith": [
+        "or",
+        "not",
+        "switch",
+        "interaction",
+        "greaterThan"
+      ],
+      "commonMistakes": [
+        "The output never turns on when you tap: you wired two taps into And, and two taps almost never land on the same frame. Wire one tap and one state (Down, or a Switch's On) instead.",
+        "A patch fed by And fires once and then ignores the next tap: its input still reads on because the state input is held on and the tap came on the very next frame. Put a Pulse patch (Turned On) after And, or gate with a state that turns off between taps."
+      ],
+      "examples": [
+        {
+          "title": "Like a photo only while it's open",
+          "description": "Tapping the photo opens it; the heart only toggles while the photo is open.",
+          "outline": "layer photo rectangle \"Photo\" @0,160 402x402\nlayer heart oval \"Heart\" @24,580 36x36 color←heart_color.output\npatch tap_photo interaction layer=@photo\npatch expanded switch flip←tap_photo.tap\npatch tap_heart interaction layer=@heart\npatch can_like and[2] value1←tap_heart.tap value2←expanded.on\npatch liked switch flip←can_like.output\npatch heart_color transition<color> progress←liked.on start=#D9D9D9FF end=#FF3B5CFF"
+        }
+      ],
+      "origami": {
+        "id": "builtin.logic.and",
+        "name": "And"
+      },
+      "origamiPorts": {
+        "value1": "Input (port 0)",
+        "value2": "Input (port 1)"
+      },
+      "defaultNotes": {
+        "value": "inferred: Origami's inputs show unchecked in screenshots; false keeps the output off until you wire it."
+      }
+    },
+    {
+      "type": "or",
+      "name": "Or",
+      "category": "logic",
+      "tier": 1,
+      "status": "supported",
+      "aliases": [
+        "any true",
+        "either",
+        "logical or",
+        "||",
+        "merge pulses",
+        "combine taps",
+        "disjunction"
+      ],
+      "summary": "Turns on while at least one of its inputs is on, which also merges several pulses into one cable.",
+      "docs": "## How it works\nOr answers \"is any of these true right now?\" Its output is on while at least one input is on, and off only when every input is off.\n\n- **Value 1, Value 2, …** are on/off values (booleans). Numbers count as on when they're greater than 0. Add inputs to check more conditions.\n- **Output** is on while any input is on.\n\n## Tips\n- An input accepts only one cable. To let several buttons trigger the same thing, wire each button's Tap into Or and wire Or into the action.\n- Combine with And and Not to build rules like \"Cancel or the backdrop was tapped, and Send wasn't\".\n- To check whether any item in a loop is on, use Any instead. Or compares separate inputs at each loop index.\n\n## Coming from Origami\nOrigami's ports are unnamed. Here they're Value 1, Value 2, and so on, in the same order.",
+      "behavior": "Stateless.\n\nEach frame, for this loop index:\n```\nconst n = clamp(ctx.inputCount, 2, 32);\nlet on = false;\nfor (let i = 1; i <= n; i++) {\n  if (ctx.input(`value${i}`)) { on = true; break; }\n}\nctx.output(\"output\", on);\n```\n\n- Coercion: each input is coerced to boolean by core (numbers are on when `> 0`, text \"true\"/\"yes\"/\"on\" is on, vectors use their first component).\n- Pulses in, state out: inputs are booleans, so a pulse arriving from upstream reads `true` only on the frame it fires. The output is a boolean, not a pulse. A downstream pulse input fires on its false→true edge, so two pulses on consecutive frames merge into one downstream pulse (the output stays true for two frames with no false in between). Pulses on different frames each produce their own one-frame true.\n- Frame 0: evaluates with authored values and outputs on the same frame. There is no latency and no history.\n- Loops: evaluates once per loop index. Output length is the longest input loop; shorter loops wrap and scalars broadcast. An empty loop gives an empty output.\n- Edge cases: `inputCount` outside 2–32 (a hand-edited file) is clamped into that range; missing expanded inputs read their default `false`.\n- Coming from Origami: unnamed ports import positionally (port 0 → `value1`, port 1 → `value2`, …). The file's input count becomes `inputCount`. Origami v187+ can deliver pulses on consecutive frames through Or; here they merge as described above.",
+      "inputs": [],
+      "outputs": [
+        {
+          "key": "output",
+          "name": "Output",
+          "type": "boolean",
+          "description": "On while at least one input is on; off only when every input is off."
+        }
+      ],
+      "variadic": {
+        "key": "value",
+        "name": "Value",
+        "type": "boolean",
+        "default": false,
+        "min": 2,
+        "max": 32,
+        "defaultCount": 2,
+        "startIndex": 1,
+        "direction": "inputs",
+        "description": "A condition or pulse to combine. Numbers count as on when greater than 0."
+      },
+      "alwaysEvaluate": false,
+      "shortcut": "Shift+O",
+      "pairsWellWith": [
+        "and",
+        "not",
+        "switch",
+        "interaction",
+        "loopAny"
+      ],
+      "commonMistakes": [
+        "Or stays on and nothing downstream reacts to a second tap: one of its inputs is a state that's still on (for example Down), so the output never falls back to off. Wire Tap pulses into Or when you want to merge taps.",
+        "Tapping any looped card does nothing: Or checks separate inputs, not the items of a loop. Wire the loop of taps into Any to get one merged result."
+      ],
+      "examples": [
+        {
+          "title": "Close a sheet from Cancel or the backdrop",
+          "outline": "layer open_button rectangle \"Open\" @24,120 160x44 cornerRadius=22\nlayer backdrop colorFill \"Backdrop\" opacity←sheet_fade.output color=#00000066\nlayer sheet rectangle \"Sheet\" @0,520 402x354 cornerRadius=24 opacity←sheet_fade.output\nlayer cancel text \"Cancel\" \"Cancel\" @24,544 opacity←sheet_fade.output\npatch tap_open interaction layer=@open_button\npatch tap_cancel interaction layer=@cancel\npatch tap_backdrop interaction layer=@backdrop\npatch close or[2] value1←tap_cancel.tap value2←tap_backdrop.tap\npatch sheet_open switch turnOn←tap_open.tap turnOff←close.output\npatch sheet_fade popAnimation number←sheet_open.on"
+        }
+      ],
+      "origami": {
+        "id": "builtin.logic.or",
+        "name": "Or"
+      },
+      "origamiPorts": {
+        "value1": "Input (port 0)",
+        "value2": "Input (port 1)"
+      },
+      "defaultNotes": {
+        "value": "inferred: Origami's inputs show unchecked in screenshots; false keeps the output off until you wire it."
+      }
+    },
+    {
+      "type": "not",
+      "name": "Not",
+      "category": "logic",
+      "tier": 1,
+      "status": "supported",
+      "aliases": [
+        "invert",
+        "negate",
+        "opposite",
+        "logical not",
+        "!",
+        "inverse",
+        "reverse boolean"
+      ],
+      "summary": "Outputs the opposite of an on/off value: on becomes off and off becomes on.",
+      "docs": "## How it works\nNot flips an on/off value. When its input is on, the output is off. When the input is off, the output is on.\n\n- **Value** is the on/off value (boolean) to flip. Numbers count as on when they're greater than 0.\n- **Output** is the opposite of Value.\n\n## Tips\n- Hide something while a state is on: wire the state into Not and Not into the layer's Enabled or into an animation.\n- Build \"not equal\" by wiring Equals Exactly into Not.\n- With nothing connected, Value is off, so Output is on.\n\n## Coming from Origami\nOrigami calls the input Boolean. Here it's Value; importers map it automatically.",
+      "behavior": "Stateless.\n\nEach frame, for this loop index:\n```\nctx.output(\"output\", !ctx.input(\"value\"));\n```\n\n- Coercion: the input is coerced to boolean by core (numbers are on when `> 0`, text \"true\"/\"yes\"/\"on\" is on).\n- Pulses: Not of a pulse is true on every frame except the one frame the pulse fires. Wired into a pulse input downstream, it fires on the frame *after* the pulse (when it rises back to true), not on the pulse frame. The editor should show a hint when a pulse output feeds Not whose output feeds a pulse input.\n- Frame 0: evaluates with authored values and outputs on the same frame. There is no latency and no history.\n- Loops: evaluates once per loop index. Output length is the longest input loop; shorter loops wrap and scalars broadcast. An empty loop gives an empty output.\n- Coming from Origami: the input port `Boolean` imports as `value`.",
+      "inputs": [
+        {
+          "key": "value",
+          "name": "Value",
+          "type": "boolean",
+          "default": false,
+          "description": "The on/off value to flip. Numbers count as on when greater than 0."
+        }
+      ],
+      "outputs": [
+        {
+          "key": "output",
+          "name": "Output",
+          "type": "boolean",
+          "description": "On while Value is off, and off while Value is on."
+        }
+      ],
+      "alwaysEvaluate": false,
+      "shortcut": "Shift+N",
+      "pairsWellWith": [
+        "and",
+        "or",
+        "equalsExactly",
+        "switch",
+        "interaction"
+      ],
+      "commonMistakes": [
+        "A Switch flips one frame late, right after the tap instead of on it: you wired Tap → Not → Flip, and Not rises back to on the frame after the tap. Use Not to gate with And, or wire the pulse directly.",
+        "Something starts on the moment the prototype loads: an unconnected Not outputs on. Connect its Value before wiring the output to a layer."
+      ],
+      "examples": [
+        {
+          "title": "Show a hint until someone presses the card",
+          "outline": "layer card rectangle \"Card\" @16,120 370x220 cornerRadius=16\nlayer hint text \"Hint\" \"Press and hold\" @16,360 opacity←hint_fade.output\npatch press interaction layer=@card\npatch not_pressing not value←press.down\npatch hint_fade popAnimation number←not_pressing.output"
+        },
+        {
+          "title": "Dim the feed when Home isn't selected",
+          "description": "Equals Exactly plus Not gives \"is not equal\".",
+          "outline": "layer home_hit hitArea \"Home\" @0,794 201x50\nlayer profile_hit hitArea \"Profile\" @201,794 201x50\nlayer feed group \"Feed\" @0,0 402x794 opacity←dim.output\npatch tap_home interaction layer=@home_hit\npatch tap_profile interaction layer=@profile_hit\npatch tab optionSwitch[2] setTo0←tap_home.tap setTo1←tap_profile.tap\npatch on_home equalsExactly<index>[2] value1←tab.option value2=0\npatch elsewhere not value←on_home.output\npatch fade popAnimation number←elsewhere.output\npatch dim transition progress←fade.output start=1 end=0"
+        }
+      ],
+      "origami": {
+        "id": "builtin.logic.not",
+        "name": "Not"
+      },
+      "origamiPorts": {
+        "value": "Boolean"
+      },
+      "defaultNotes": {
+        "value": "inferred: undocumented; Origami shows the checkbox unchecked in new patches."
+      }
+    },
+    {
+      "type": "equals",
+      "name": "Equals",
+      "category": "logic",
+      "tier": 1,
+      "status": "supported",
+      "aliases": [
+        "approximately equal",
+        "almost equal",
+        "close to",
+        "nearly",
+        "within tolerance",
+        "≈",
+        "epsilon",
+        "settled"
+      ],
+      "summary": "Checks whether two numbers or points are equal within a tolerance, for values that never land exactly on a round number.",
+      "docs": "## How it works\nEquals turns on when two values are close enough to count as the same. Animated and calculated values often end up at 0.9999 instead of 1, so an exact check would miss them.\n\n- **Value 1** and **Value 2** are the values to compare. Change the type to compare points, 3D points, 4D points, or sizes.\n- **Tolerance** is how far apart they may be and still count as equal. 0.1 makes 2.1 equal 2. The edge counts as equal. For points, it's the straight-line distance in points.\n- **Output** is on while the values are within the tolerance.\n\n## Tips\n- Detect when an animation has arrived: compare its output with the target, then use Pulse (Turned On) to start the next step.\n- For whole numbers, indexes, text, or colors, use Equals Exactly.\n- Set Tolerance to 0 when you need a precise match on numbers that come straight from a literal or a counter.\n\n## Coming from Origami\nOrigami's Equals compares numbers only, and its ports are First Value, Second Value, and Tolerance. Here they're Value 1 and Value 2, so you can swap between comparison patches without rewiring. The point, size, and 4D types are new.",
+      "behavior": "Stateless.\n\nEach frame, for this loop index:\n```\nconst a = ctx.input(\"value1\");            // number, or number[] for vector variants\nconst b = ctx.input(\"value2\");\nconst tolerance = Math.abs(ctx.input(\"tolerance\"));\nconst av = typeof a === \"number\" ? [a] : a;\nconst bv = typeof b === \"number\" ? [b] : b;\nlet sum = 0, scale = 1;\nfor (let i = 0; i < av.length; i++) {\n  const d = av[i] - bv[i];\n  sum += d * d;\n  scale = Math.max(scale, Math.abs(av[i]), Math.abs(bv[i]));\n}\nconst distance = Math.sqrt(sum);            // |a − b| for numbers, Euclidean for vectors\nctx.output(\"output\", distance <= tolerance + 1e-9 * scale);\n```\n\n- Boundary: inclusive. The `1e-9 · max(1, |components|)` slack absorbs floating-point error so documented cases hold: `2.1` vs `2` with tolerance `0.1` is true, even though `2.1 − 2` is `0.10000000000000009` in doubles.\n- Vectors: `point`, `point3d`, `point4d`, and `size` compare by Euclidean distance across all components, so a tolerance of 10 means \"within a 10 pt circle\".\n- Edge cases: a negative tolerance uses its absolute value. A tolerance of 0 still applies the tiny slack, so `0.1 + 0.2` equals `0.3`. Inputs arrive finite (core coercion turns NaN and ±Infinity into 0); treat any non-finite value that slips through as 0.\n- Muted: output is false (the inputs are variant or number, so nothing passes through).\n- Frame 0: evaluates with authored values and outputs on the same frame. There is no latency and no history.\n- Loops: evaluates once per loop index. Output length is the longest input loop; shorter loops wrap and scalars broadcast. An empty loop gives an empty output.\n- Coming from Origami: `First Value` → `value1`, `Second Value` → `value2`, `Tolerance` → `tolerance`. Files store the id as `builtin.compare.equalApprox`. Origami files always import as the `number` variant.",
+      "inputs": [
+        {
+          "key": "value1",
+          "name": "Value 1",
+          "type": "variant",
+          "default": 0,
+          "description": "The first value to compare."
+        },
+        {
+          "key": "value2",
+          "name": "Value 2",
+          "type": "variant",
+          "default": 0,
+          "description": "The value to compare with Value 1."
+        },
+        {
+          "key": "tolerance",
+          "name": "Tolerance",
+          "type": "number",
+          "default": 0.001,
+          "min": 0,
+          "step": 0.001,
+          "description": "How far apart the values may be and still count as equal; 0.1 makes 2.1 equal 2, and 0 asks for an exact match."
+        }
+      ],
+      "outputs": [
+        {
+          "key": "output",
+          "name": "Output",
+          "type": "boolean",
+          "description": "On while Value 1 and Value 2 are within the tolerance of each other."
+        }
+      ],
+      "variants": [
+        "number",
+        "point",
+        "point3d",
+        "point4d",
+        "size"
+      ],
+      "alwaysEvaluate": false,
+      "shortcut": "E",
+      "pairsWellWith": [
+        "popAnimation",
+        "pulse",
+        "equalsExactly",
+        "not",
+        "and"
+      ],
+      "commonMistakes": [
+        "The output flickers on and off while a spring bounces around its target: the spring passes through the target on every swing. Raise the Tolerance a little and follow Equals with a short Delay, or check that the Switch driving the spring is on as well.",
+        "Nothing happens when an animation ends: the animation settles at 0.9996 and the Tolerance is 0. Use a tolerance such as 0.01."
+      ],
+      "examples": [
+        {
+          "title": "Pop in a badge once the card finishes growing",
+          "outline": "layer card rectangle \"Card\" @16,120 370x220 cornerRadius=16 scale←grow.output\nlayer badge oval \"Badge\" @346,108 28x28 scale←badge_pop.output\npatch tap_card interaction layer=@card\npatch expanded switch flip←tap_card.tap\npatch pop popAnimation number←expanded.on\npatch grow transition<number> progress←pop.output start=1 end=1.08\npatch settled_open equals value1←pop.output value2=1 tolerance=0.01\npatch badge_pop popAnimation number←settled_open.output"
+        }
+      ],
+      "origami": {
+        "id": "builtin.compare.equalapprox",
+        "name": "Equals"
+      },
+      "importAliases": [
+        "builtin.compare.equalApprox"
+      ],
+      "origamiPorts": {
+        "value1": "First Value",
+        "value2": "Second Value"
+      },
+      "defaultNotes": {
+        "value1": "inferred: undocumented; new Origami patches show 0.",
+        "value2": "inferred: undocumented; new Origami patches show 0.",
+        "tolerance": "sonobe: Origami's default is unverified. 0.001 absorbs float noise from animations and matches the spring rest threshold."
+      }
+    },
+    {
+      "type": "equalsExactly",
+      "name": "Equals Exactly",
+      "category": "logic",
+      "tier": 1,
+      "status": "supported",
+      "aliases": [
+        "same as",
+        "identical",
+        "is equal",
+        "equal to",
+        "match",
+        "==",
+        "===",
+        "exact match"
+      ],
+      "summary": "Checks whether two or more values are exactly the same: numbers, indexes, text, colors, points, options, or JSON.",
+      "docs": "## How it works\nEquals Exactly turns on when all of its values are identical. It's the go-to check for \"is this the selected tab?\" or \"did they type the right code?\"\n\n- **Value 1, Value 2, …** are the values to compare. Change the type to compare indexes, text, colors, points, options, or JSON. Add inputs to require more values to match.\n- **Output** is on while every value equals Value 1.\n\nWhat counts as equal:\n- **Text** must match character for character, including capitals and spaces.\n- **Colors** match when their hex codes match.\n- **Points and sizes** match when every component matches.\n- **JSON** matches when the structure and values match; key order doesn't matter.\n\n## Tips\n- Compare a Loop's Index with the selected option to highlight one item in a looped list.\n- Wire the output into Not for \"is not equal\".\n- Numbers from animations or division rarely match exactly. Use Equals with a tolerance for those.\n\n## Coming from Origami\nOrigami's ports are unnamed and its type menu shows number, index, and boolean. Here the ports are Value 1, Value 2, … and more types are available.",
+      "behavior": "Stateless.\n\nEach frame, for this loop index:\n```\nconst n = clamp(ctx.inputCount, 2, 32);\nconst base = ctx.input(\"value1\");          // coerced to typeParam\nlet same = true;\nfor (let i = 2; i <= n; i++) {\n  if (!equal(base, ctx.input(`value${i}`), ctx.typeParam)) { same = false; break; }\n}\nctx.output(\"output\", same);\n```\n\n`equal(a, b, type)`, with no tolerance:\n- `number`, `index`: `a === b` (so `0 === -0`; `0.1 + 0.2 !== 0.3`).\n- `boolean`: `a === b`.\n- `text`, `enum`: exact UTF-16 code-unit equality. Case-sensitive, no trimming, no Unicode normalization.\n- `color`: compare the 8-bit encodings, `Math.round(clamp01(c) * 255)` for each of r, g, b, a. This is \"same hex code\", so a color computed as 0.99999 red equals `#FF0000FF`.\n- `point`, `point3d`, `point4d`, `size`, `anchor`: same length and `===` component by component.\n- `json`: deep structural equality. Same JSON kind; arrays have equal length and equal items in order; objects have the same key set (order ignored) with equal values; numbers `===`; `null` equals only `null`.\n\nEquality is transitive for every type above, so comparing each value with Value 1 is the same as comparing all pairs.\n\n- Pulses: a pulse wired into a `boolean` variant input reads true only on its frame.\n- Frame 0: evaluates with authored values and outputs on the same frame. There is no latency and no history.\n- Loops: evaluates once per loop index. Output length is the longest input loop; shorter loops wrap and scalars broadcast. An empty loop gives an empty output.\n- Edge cases: `inputCount` outside 2–32 is clamped; missing expanded inputs read the variant's zero value. Inputs arrive already coerced to the variant type, so mixed types never reach `equal`.\n- Muted: output is false.\n- Coming from Origami: unnamed ports import positionally (port 0 → `value1`, port 1 → `value2`, …). Origami's Change Type maps to `typeParam`. Every added port counts (Origami fixed a bug where extra ports were ignored in v121).",
+      "inputs": [],
+      "outputs": [
+        {
+          "key": "output",
+          "name": "Output",
+          "type": "boolean",
+          "description": "On while every value is exactly equal to Value 1."
+        }
+      ],
+      "variadic": {
+        "key": "value",
+        "name": "Value",
+        "type": "variant",
+        "default": 0,
+        "min": 2,
+        "max": 32,
+        "defaultCount": 2,
+        "startIndex": 1,
+        "direction": "inputs",
+        "description": "A value to compare; Value 1 is the one every other value must match."
+      },
+      "variants": [
+        "number",
+        "boolean",
+        "text",
+        "color",
+        "point",
+        "point3d",
+        "point4d",
+        "size",
+        "anchor",
+        "index",
+        "enum",
+        "json"
+      ],
+      "alwaysEvaluate": false,
+      "pairsWellWith": [
+        "optionSwitch",
+        "loop",
+        "not",
+        "transition",
+        "optionEquals"
+      ],
+      "commonMistakes": [
+        "An animation's output never equals its target, so the check stays off: animated numbers stop at values like 0.99997. Use Equals with a small tolerance instead.",
+        "Every item in a looped list lights up, or none does: you compared the selected option with a fixed number instead of the Loop's Index. Wire the Loop's Index into Value 1 and the selected option into Value 2.",
+        "\"Yes\" doesn't match \"yes \": text comparison is exact. Clean the text first with Change Case or Text Replace."
+      ],
+      "examples": [
+        {
+          "title": "Highlight the selected tab",
+          "description": "One looped tab bar; each tab compares its index with the selected option.",
+          "outline": "layer tab_row group \"Tab Row\" @0,794 402x50 layout=row\n  layer tab rectangle \"Tab\" 134x50 color←tab_color.output\nlayer home_hit hitArea \"Home\" @0,794 134x50\nlayer search_hit hitArea \"Search\" @134,794 134x50\nlayer profile_hit hitArea \"Profile\" @268,794 134x50\npatch tap_home interaction layer=@home_hit\npatch tap_search interaction layer=@search_hit\npatch tap_profile interaction layer=@profile_hit\npatch selected optionSwitch[3] setTo0←tap_home.tap setTo1←tap_search.tap setTo2←tap_profile.tap\npatch tabs loop count=3\npatch is_selected equalsExactly<index>[2] value1←tabs.index value2←selected.option\npatch highlight popAnimation number←is_selected.output\npatch tab_color transition<color> progress←highlight.output start=#F2F2F7FF end=#111111FF"
+        },
+        {
+          "title": "Show Get Started on the last page",
+          "outline": "layer dot_1 oval \"Dot 1\" @163,780 12x12\nlayer dot_2 oval \"Dot 2\" @195,780 12x12\nlayer dot_3 oval \"Dot 3\" @227,780 12x12\nlayer start_button rectangle \"Get Started\" @24,700 354x56 cornerRadius=28 opacity←button_fade.output\npatch tap_1 interaction layer=@dot_1\npatch tap_2 interaction layer=@dot_2\npatch tap_3 interaction layer=@dot_3\npatch page optionSwitch[3] setTo0←tap_1.tap setTo1←tap_2.tap setTo2←tap_3.tap\npatch on_last equalsExactly<index>[2] value1←page.option value2=2\npatch button_fade popAnimation number←on_last.output"
+        }
+      ],
+      "origami": {
+        "id": "builtin.compare.eq",
+        "name": "Equals Exactly"
+      },
+      "origamiPorts": {
+        "value1": "Input (port 0, base value)",
+        "value2": "Input (port 1)"
+      },
+      "defaultNotes": {
+        "value": "inferred: undocumented; new Origami patches show 0."
+      }
+    },
+    {
+      "type": "greaterThan",
+      "name": "Greater Than",
+      "category": "logic",
+      "tier": 1,
+      "status": "supported",
+      "aliases": [
+        "more than",
+        "bigger than",
+        "larger than",
+        "above",
+        "exceeds",
+        "threshold",
+        ">"
+      ],
+      "summary": "Checks whether a value is greater than another, such as a drag passing a threshold or a timer passing a time.",
+      "docs": "## How it works\nGreater Than turns on while Value 1 is bigger than Value 2. It's the usual way to react when something crosses a threshold: a sheet dragged far enough, a timer past 3 seconds, a count above zero.\n\n- **Value 1** is the value you're checking. **Value 2** is the threshold.\n- Add more values to check a chain: with three values, the output is on only when Value 1 > Value 2 > Value 3, which checks that Value 2 sits strictly between the other two.\n- Equal values don't count as greater. Use Greater Than or Equal when the threshold itself should count.\n- **Output** is on while the whole chain holds.\n\n## Tips\n- Wire the output into a Switch's Turn On to remember that the threshold was crossed.\n- Use a Pulse patch (Turned On) to fire an action once at the moment the value crosses.\n- For \"between two numbers\" with clearer controls, use In Range.\n\n## Coming from Origami\nOrigami's ports are unnamed. Here they're Value 1, Value 2, and so on, in the same order and with the same chain rule.",
+      "behavior": "Stateless.\n\nEach frame, for this loop index:\n```\nconst n = clamp(ctx.inputCount, 2, 32);\nconst toNum = (v) => (typeof v === \"boolean\" ? (v ? 1 : 0) : v);\nlet ok = true;\nfor (let i = 1; i < n; i++) {\n  const a = toNum(ctx.input(`value${i}`));\n  const b = toNum(ctx.input(`value${i + 1}`));\n  if (!(a > b)) { ok = false; break; }\n}\nctx.output(\"output\", ok);\n```\n\n- Chain: each value is compared with the **next** one, and every pair must pass: `value1 > value2` AND `value2 > value3` AND …. So `3 > 2 > 1` is true and `4 > 3 > 10` is false. This is not \"Value 1 against every other value\": `10 > 3 > 4` is false even though Value 1 passes against Value 3.\n- Strict: equal neighbors fail, so two unconnected inputs (0 and 0) output false.\n- Types: `number` compares numerically with no tolerance (`-0` equals `0`). `index` compares integers. `boolean` treats false as 0 and true as 1.\n- Pulses: a pulse wired into an input reads 1 (number, index) or true (boolean) only on its frame.\n- Frame 0: evaluates with authored values and outputs on the same frame. There is no latency and no history.\n- Loops: evaluates once per loop index. Output length is the longest input loop; shorter loops wrap and scalars broadcast. An empty loop gives an empty output.\n- Edge cases: `inputCount` outside 2–32 is clamped; missing expanded inputs read 0. Inputs arrive finite because core coercion turns NaN and ±Infinity into 0; treat any non-finite value that slips through as 0.\n- Muted: output is false.\n- Coming from Origami: unnamed ports import positionally (port 0 → `value1`, port 1 → `value2`, …), and Change Type maps to `typeParam`. Every added port counts (Origami fixed a bug where extra ports were ignored in v121). Comparison patches can be swapped for one another with Replace With and keep their connections, because they share port keys.",
+      "inputs": [],
+      "outputs": [
+        {
+          "key": "output",
+          "name": "Output",
+          "type": "boolean",
+          "description": "On while each value is greater than the next one."
+        }
+      ],
+      "variadic": {
+        "key": "value",
+        "name": "Value",
+        "type": "variant",
+        "default": 0,
+        "min": 2,
+        "max": 32,
+        "defaultCount": 2,
+        "startIndex": 1,
+        "direction": "inputs",
+        "description": "A value in the chain; each one must be greater than the next."
+      },
+      "variants": [
+        "number",
+        "index",
+        "boolean"
+      ],
+      "alwaysEvaluate": false,
+      "shortcut": ">",
+      "pairsWellWith": [
+        "lessThan",
+        "and",
+        "switch",
+        "pulse",
+        "inRange"
+      ],
+      "commonMistakes": [
+        "The check is on when you expected off: Value 1 and Value 2 are the wrong way round. Value 1 is the value you're measuring and Value 2 is the threshold.",
+        "A drag-to-dismiss triggers while the finger is still down: Greater Than turns on as soon as the drag passes the threshold. Combine it with Not of Interaction Down in an And so it only acts on release."
+      ],
+      "examples": [
+        {
+          "title": "Show a Skip button after 3 seconds",
+          "outline": "layer skip text \"Skip\" \"Skip\" @330,64 opacity←skip_fade.output\npatch clock time\npatch late greaterThan[2] value1←clock.time value2=3\npatch skip_fade popAnimation number←late.output"
+        },
+        {
+          "title": "Show a caption between 2 and 5 seconds",
+          "description": "Three values form a chain: 5 > time > 2.",
+          "outline": "layer caption text \"Caption\" \"Swipe to explore\" @24,760 opacity←caption_fade.output\npatch clock time\npatch showing greaterThan[3] value1=5 value2←clock.time value3=2\npatch caption_fade popAnimation number←showing.output"
+        }
+      ],
+      "origami": {
+        "id": "builtin.compare.gt",
+        "name": "Greater Than"
+      },
+      "origamiPorts": {
+        "value1": "Input (port 0, base value)",
+        "value2": "Input (port 1)"
+      },
+      "defaultNotes": {
+        "value": "inferred: undocumented; new Origami patches show 0."
+      }
+    },
+    {
+      "type": "greaterThanOrEqual",
+      "name": "Greater Than or Equal",
+      "category": "logic",
+      "tier": 1,
+      "status": "supported",
+      "aliases": [
+        "greater or equal",
+        "more than or equal to",
+        "bigger than or equal to",
+        "at least",
+        "minimum",
+        ">="
+      ],
+      "summary": "Checks whether a value is at least another value, so reaching the threshold exactly also counts.",
+      "docs": "## How it works\nGreater Than or Equal turns on while Value 1 is bigger than Value 2 or exactly equal to it. Use it when reaching the threshold should count, such as a progress bar reaching 1 or a count reaching its limit.\n\n- **Value 1** is the value you're checking. **Value 2** is the threshold.\n- Add more values to check a chain: with three values, the output is on only when Value 1 ≥ Value 2 ≥ Value 3.\n- **Output** is on while the whole chain holds.\n\n## Tips\n- A Classic Animation lands exactly on its target, so `output ≥ 1` reliably detects that it finished. Springs can overshoot and settle, so use Equals with a tolerance for those.\n- With nothing connected, both values are 0 and the output is on.\n\n## Coming from Origami\nOrigami's ports are unnamed, and older tutorials call this patch Greater or Equal. Here the ports are Value 1, Value 2, and so on, with the same chain rule.",
+      "behavior": "Stateless.\n\nEach frame, for this loop index:\n```\nconst n = clamp(ctx.inputCount, 2, 32);\nconst toNum = (v) => (typeof v === \"boolean\" ? (v ? 1 : 0) : v);\nlet ok = true;\nfor (let i = 1; i < n; i++) {\n  const a = toNum(ctx.input(`value${i}`));\n  const b = toNum(ctx.input(`value${i + 1}`));\n  if (!(a >= b)) { ok = false; break; }\n}\nctx.output(\"output\", ok);\n```\n\n- Chain: each value is compared with the **next** one, and every pair must pass: `value1 >= value2` AND `value2 >= value3` AND …. So `3 >= 2 >= 2` is true and `4 >= 4 >= 10` is false. This is not \"Value 1 against every other value\": `10 >= 3 >= 4` is false even though Value 1 passes against Value 3.\n- Inclusive: equal neighbors pass, so two unconnected inputs (0 and 0) output true.\n- Types: `number` compares numerically with no tolerance (`-0` equals `0`). `index` compares integers. `boolean` treats false as 0 and true as 1.\n- Pulses: a pulse wired into an input reads 1 (number, index) or true (boolean) only on its frame.\n- Frame 0: evaluates with authored values and outputs on the same frame. There is no latency and no history.\n- Loops: evaluates once per loop index. Output length is the longest input loop; shorter loops wrap and scalars broadcast. An empty loop gives an empty output.\n- Edge cases: `inputCount` outside 2–32 is clamped; missing expanded inputs read 0. Inputs arrive finite because core coercion turns NaN and ±Infinity into 0; treat any non-finite value that slips through as 0.\n- Muted: output is false.\n- Coming from Origami: unnamed ports import positionally (port 0 → `value1`, port 1 → `value2`, …), and Change Type maps to `typeParam`. Every added port counts (Origami fixed a bug where extra ports were ignored in v121). Comparison patches can be swapped for one another with Replace With and keep their connections, because they share port keys.",
+      "inputs": [],
+      "outputs": [
+        {
+          "key": "output",
+          "name": "Output",
+          "type": "boolean",
+          "description": "On while each value is greater than or equal to the next one."
+        }
+      ],
+      "variadic": {
+        "key": "value",
+        "name": "Value",
+        "type": "variant",
+        "default": 0,
+        "min": 2,
+        "max": 32,
+        "defaultCount": 2,
+        "startIndex": 1,
+        "direction": "inputs",
+        "description": "A value in the chain; each one must be greater than or equal to the next."
+      },
+      "variants": [
+        "number",
+        "index",
+        "boolean"
+      ],
+      "alwaysEvaluate": false,
+      "pairsWellWith": [
+        "lessThanOrEqual",
+        "classicAnimation",
+        "pulse",
+        "and",
+        "switch"
+      ],
+      "commonMistakes": [
+        "Something is already on when the prototype starts: both inputs default to 0, and 0 ≥ 0 is true. Set the threshold to the value you mean before wiring the output.",
+        "The action repeats every frame after the threshold: the output is a state that stays on. Put a Pulse patch (Turned On) after it to act once."
+      ],
+      "examples": [
+        {
+          "title": "Hold for 2 seconds to confirm",
+          "outline": "layer track rectangle \"Hold to Confirm\" @24,700 354x56 cornerRadius=28\nlayer done_label text \"Done\" \"Confirmed\" @150,776 opacity←done_fade.output\npatch hold interaction layer=@track\npatch fill classicAnimation number←hold.down duration=2\npatch complete greaterThanOrEqual[2] value1←fill.output value2=1\npatch done_fade popAnimation number←complete.output"
+        }
+      ],
+      "origami": {
+        "id": "builtin.compare.gteq",
+        "name": "Greater Than or Equal"
+      },
+      "origamiPorts": {
+        "value1": "Input (port 0, base value)",
+        "value2": "Input (port 1)"
+      },
+      "defaultNotes": {
+        "value": "inferred: undocumented; new Origami patches show 0."
+      }
+    },
+    {
+      "type": "lessThan",
+      "name": "Less Than",
+      "category": "logic",
+      "tier": 1,
+      "status": "supported",
+      "aliases": [
+        "smaller than",
+        "fewer than",
+        "below",
+        "under",
+        "threshold",
+        "pull to refresh",
+        "<"
+      ],
+      "summary": "Checks whether a value is less than another, such as a scroll pulled past the top or an item before the current one.",
+      "docs": "## How it works\nLess Than turns on while Value 1 is smaller than Value 2. Use it to react when a value drops under a threshold: a list pulled down past the top, a countdown under 10, an item that comes before the current one.\n\n- **Value 1** is the value you're checking. **Value 2** is the threshold.\n- Add more values to check a chain: with three values, the output is on only when Value 1 < Value 2 < Value 3, which checks that Value 2 sits strictly between the other two.\n- Equal values don't count as less. Use Less Than or Equal when the threshold itself should count.\n- **Output** is on while the whole chain holds.\n\n## Tips\n- Negative thresholds are common for overscroll: a scroll position less than −80 means the list was pulled down 80 points.\n- Compare a Loop's Index with the current item to style earlier items differently from later ones.\n\n## Coming from Origami\nOrigami's ports are unnamed. Here they're Value 1, Value 2, and so on, in the same order and with the same chain rule.",
+      "behavior": "Stateless.\n\nEach frame, for this loop index:\n```\nconst n = clamp(ctx.inputCount, 2, 32);\nconst toNum = (v) => (typeof v === \"boolean\" ? (v ? 1 : 0) : v);\nlet ok = true;\nfor (let i = 1; i < n; i++) {\n  const a = toNum(ctx.input(`value${i}`));\n  const b = toNum(ctx.input(`value${i + 1}`));\n  if (!(a < b)) { ok = false; break; }\n}\nctx.output(\"output\", ok);\n```\n\n- Chain: each value is compared with the **next** one, and every pair must pass: `value1 < value2` AND `value2 < value3` AND …. So `1 < 2 < 3` is true and `3 < 10 < 4` is false. This is not \"Value 1 against every other value\": `3 < 10 < 4` is false even though Value 1 passes against Value 3.\n- Strict: equal neighbors fail, so two unconnected inputs (0 and 0) output false.\n- Types: `number` compares numerically with no tolerance (`-0` equals `0`). `index` compares integers. `boolean` treats false as 0 and true as 1.\n- Pulses: a pulse wired into an input reads 1 (number, index) or true (boolean) only on its frame.\n- Frame 0: evaluates with authored values and outputs on the same frame. There is no latency and no history.\n- Loops: evaluates once per loop index. Output length is the longest input loop; shorter loops wrap and scalars broadcast. An empty loop gives an empty output.\n- Edge cases: `inputCount` outside 2–32 is clamped; missing expanded inputs read 0. Inputs arrive finite because core coercion turns NaN and ±Infinity into 0; treat any non-finite value that slips through as 0.\n- Muted: output is false.\n- Coming from Origami: unnamed ports import positionally (port 0 → `value1`, port 1 → `value2`, …), and Change Type maps to `typeParam`. Every added port counts (Origami fixed a bug where extra ports were ignored in v121). Comparison patches can be swapped for one another with Replace With and keep their connections, because they share port keys.",
+      "inputs": [],
+      "outputs": [
+        {
+          "key": "output",
+          "name": "Output",
+          "type": "boolean",
+          "description": "On while each value is less than the next one."
+        }
+      ],
+      "variadic": {
+        "key": "value",
+        "name": "Value",
+        "type": "variant",
+        "default": 0,
+        "min": 2,
+        "max": 32,
+        "defaultCount": 2,
+        "startIndex": 1,
+        "direction": "inputs",
+        "description": "A value in the chain; each one must be less than the next."
+      },
+      "variants": [
+        "number",
+        "index",
+        "boolean"
+      ],
+      "alwaysEvaluate": false,
+      "shortcut": "<",
+      "pairsWellWith": [
+        "greaterThan",
+        "and",
+        "switch",
+        "loop",
+        "inRange"
+      ],
+      "commonMistakes": [
+        "Pull to refresh never triggers: the threshold is positive, but pulling down past the top gives a negative scroll position. Use a negative threshold such as −80.",
+        "The first item is never highlighted: Less Than is strict, so index 0 isn't less than 0. Use Less Than or Equal, or raise the threshold by 1."
+      ],
+      "examples": [
+        {
+          "title": "Fill the story segments you've already watched",
+          "description": "In a real story, wire Value 2 to your current-story index.",
+          "outline": "layer segments_row group \"Segments\" @16,56 370x3 layout=row spacing=4\n  layer segment rectangle \"Segment\" 89x3 cornerRadius=1.5 color←segment_color.output\npatch segments loop count=4\npatch watched lessThan<index>[2] value1←segments.index value2=2\npatch segment_color transition<color> progress←watched.output start=#FFFFFF59 end=#FFFFFFFF"
+        }
+      ],
+      "origami": {
+        "id": "builtin.compare.lt",
+        "name": "Less Than"
+      },
+      "origamiPorts": {
+        "value1": "Input (port 0, base value)",
+        "value2": "Input (port 1)"
+      },
+      "defaultNotes": {
+        "value": "inferred: undocumented; new Origami patches show 0."
+      }
+    },
+    {
+      "type": "lessThanOrEqual",
+      "name": "Less Than or Equal",
+      "category": "logic",
+      "tier": 1,
+      "status": "supported",
+      "aliases": [
+        "less or equal",
+        "smaller than or equal to",
+        "at most",
+        "no more than",
+        "maximum",
+        "<="
+      ],
+      "summary": "Checks whether a value is at most another value, so matching the threshold exactly also counts.",
+      "docs": "## How it works\nLess Than or Equal turns on while Value 1 is smaller than Value 2 or exactly equal to it. Use it when matching the threshold should count, such as lighting up every star up to the one you tapped.\n\n- **Value 1** is the value you're checking. **Value 2** is the threshold.\n- Add more values to check a chain: with three values, the output is on only when Value 1 ≤ Value 2 ≤ Value 3.\n- **Output** is on while the whole chain holds.\n\n## Tips\n- Star ratings: compare a Loop's Index with the selected star's index to light up that star and every star before it.\n- A three-value chain `0 ≤ value ≤ 1` checks that a progress value is inside 0–1. In Range does the same with named Min and Max.\n- With nothing connected, both values are 0 and the output is on.\n\n## Coming from Origami\nOrigami's ports are unnamed. Here they're Value 1, Value 2, and so on, in the same order and with the same chain rule.",
+      "behavior": "Stateless.\n\nEach frame, for this loop index:\n```\nconst n = clamp(ctx.inputCount, 2, 32);\nconst toNum = (v) => (typeof v === \"boolean\" ? (v ? 1 : 0) : v);\nlet ok = true;\nfor (let i = 1; i < n; i++) {\n  const a = toNum(ctx.input(`value${i}`));\n  const b = toNum(ctx.input(`value${i + 1}`));\n  if (!(a <= b)) { ok = false; break; }\n}\nctx.output(\"output\", ok);\n```\n\n- Chain: each value is compared with the **next** one, and every pair must pass: `value1 <= value2` AND `value2 <= value3` AND …. So `1 <= 1 <= 3` is true and `3 <= 3 <= 1` is false. This is not \"Value 1 against every other value\": `3 <= 10 <= 4` is false even though Value 1 passes against Value 3.\n- Inclusive: equal neighbors pass, so two unconnected inputs (0 and 0) output true.\n- Types: `number` compares numerically with no tolerance (`-0` equals `0`). `index` compares integers. `boolean` treats false as 0 and true as 1.\n- Pulses: a pulse wired into an input reads 1 (number, index) or true (boolean) only on its frame.\n- Frame 0: evaluates with authored values and outputs on the same frame. There is no latency and no history.\n- Loops: evaluates once per loop index. Output length is the longest input loop; shorter loops wrap and scalars broadcast. An empty loop gives an empty output.\n- Edge cases: `inputCount` outside 2–32 is clamped; missing expanded inputs read 0. Inputs arrive finite because core coercion turns NaN and ±Infinity into 0; treat any non-finite value that slips through as 0.\n- Muted: output is false.\n- Coming from Origami: unnamed ports import positionally (port 0 → `value1`, port 1 → `value2`, …), and Change Type maps to `typeParam`. Every added port counts (Origami fixed a bug where extra ports were ignored in v121). Comparison patches can be swapped for one another with Replace With and keep their connections, because they share port keys.",
+      "inputs": [],
+      "outputs": [
+        {
+          "key": "output",
+          "name": "Output",
+          "type": "boolean",
+          "description": "On while each value is less than or equal to the next one."
+        }
+      ],
+      "variadic": {
+        "key": "value",
+        "name": "Value",
+        "type": "variant",
+        "default": 0,
+        "min": 2,
+        "max": 32,
+        "defaultCount": 2,
+        "startIndex": 1,
+        "direction": "inputs",
+        "description": "A value in the chain; each one must be less than or equal to the next."
+      },
+      "variants": [
+        "number",
+        "index",
+        "boolean"
+      ],
+      "alwaysEvaluate": false,
+      "pairsWellWith": [
+        "greaterThanOrEqual",
+        "loop",
+        "transition",
+        "inRange",
+        "and"
+      ],
+      "commonMistakes": [
+        "One star too many lights up: the rating counts from 1 but the Loop's Index counts from 0. Subtract 1 from the rating, or use Less Than.",
+        "Something is already on when the prototype starts: both inputs default to 0, and 0 ≤ 0 is true. Set the threshold before wiring the output."
+      ],
+      "examples": [
+        {
+          "title": "Light up a star rating",
+          "description": "Value 2 is the index of the selected star; 2 lights the first three stars.",
+          "outline": "layer stars group \"Stars\" @100,400 200x32 layout=row spacing=10\n  layer star oval \"Star\" 32x32 color←star_color.output\npatch star_items loop count=5\npatch lit lessThanOrEqual<index>[2] value1←star_items.index value2=2\npatch star_color transition<color> progress←lit.output start=#D9D9D9FF end=#FFB800FF"
+        }
+      ],
+      "origami": {
+        "id": "builtin.compare.lteq",
+        "name": "Less Than or Equal"
+      },
+      "origamiPorts": {
+        "value1": "Input (port 0, base value)",
+        "value2": "Input (port 1)"
+      },
+      "defaultNotes": {
+        "value": "inferred: undocumented; new Origami patches show 0."
+      }
+    },
+    {
+      "type": "ifElse",
+      "name": "If / Else",
+      "category": "logic",
+      "tier": 1,
+      "status": "supported",
+      "aliases": [
+        "if",
+        "if statement",
+        "conditional",
+        "ternary",
+        "then else",
+        "choose",
+        "pick between two",
+        "when true"
+      ],
+      "summary": "Outputs one of two values depending on whether a condition is on or off.",
+      "docs": "## How it works\nIf / Else picks between two values. While **Condition** is on, the output is **If True**. While it's off, the output is **If False**.\n\n- **Condition** is an on/off value (boolean), often a Switch's On or a comparison's Output. Numbers count as on when they're greater than 0.\n- **If True** and **If False** are the two values to choose from. Change the type to pick between text, colors, points, images, layers, and more.\n- **Output** is the chosen value.\n\n## Tips\n- The change is instant. Wire the Condition into a Pop Animation and a Transition instead when you want it to animate.\n- Both values are always calculated; If / Else only chooses which one to pass on.\n- Need more than two choices? Use Option Picker with an Option Switch.\n\n## Coming from Origami\nOrigami has no If / Else patch. The usual equivalent is an Option Picker with two options and the boolean wired into Option. There, option 0 is the \"false\" value; here, If True comes first.",
+      "behavior": "Stateless.\n\nEach frame, for this loop index:\n```\nconst condition = ctx.input(\"condition\");   // coerced to boolean\nctx.output(\"output\", condition ? ctx.input(\"ifTrue\") : ctx.input(\"ifFalse\"));\n```\n\n- Coercion: Condition is coerced to boolean by core (numbers are on when `> 0`, text \"true\"/\"yes\"/\"on\" is on). If True and If False are coerced to the variant type, so the output always has that type.\n- Pulses: a pulse wired into Condition selects If True only on the frame it fires.\n- Retargeting: switches instantly on the frame Condition changes. There is no blending.\n- No short-circuit: upstream patches for both branches evaluate every frame regardless of Condition. If / Else never suppresses work or side effects on the unchosen side.\n- References: for `image`, `video`, `sound`, `gradient`, `shape`, `layerEffect`, and `layer`, the chosen reference passes through unchanged, and `null` passes through as `null`.\n- Frame 0: evaluates with authored values and outputs on the same frame. There is no latency and no history.\n- Loops: evaluates once per loop index. Output length is the longest input loop; shorter loops wrap and scalars broadcast. An empty loop gives an empty output. Each index chooses on its own: Condition `[true, false, true]` with scalar If True `\"A\"` and If False `\"B\"` outputs `[\"A\", \"B\", \"A\"]`.\n- Coming from Origami: no import mapping. Origami builds this as a two-option Option Picker (Option 0 = false value, Option 1 = true value), and those files import as `optionPicker`.",
+      "inputs": [
+        {
+          "key": "condition",
+          "name": "Condition",
+          "type": "boolean",
+          "default": false,
+          "description": "Chooses If True while on and If False while off. Numbers count as on when greater than 0."
+        },
+        {
+          "key": "ifTrue",
+          "name": "If True",
+          "type": "variant",
+          "default": 1,
+          "description": "The value to output while Condition is on."
+        },
+        {
+          "key": "ifFalse",
+          "name": "If False",
+          "type": "variant",
+          "default": 0,
+          "description": "The value to output while Condition is off."
+        }
+      ],
+      "outputs": [
+        {
+          "key": "output",
+          "name": "Output",
+          "type": "variant",
+          "description": "If True while Condition is on, otherwise If False."
+        }
+      ],
+      "variants": [
+        "number",
+        "boolean",
+        "text",
+        "color",
+        "point",
+        "point3d",
+        "point4d",
+        "size",
+        "anchor",
+        "index",
+        "enum",
+        "json",
+        "image",
+        "video",
+        "sound",
+        "gradient",
+        "shape",
+        "layerEffect",
+        "layer"
+      ],
+      "variantDefaults": {
+        "boolean": {
+          "ifTrue": true,
+          "ifFalse": false
+        },
+        "text": {
+          "ifTrue": "On",
+          "ifFalse": "Off"
+        },
+        "color": {
+          "ifTrue": "#000000FF",
+          "ifFalse": "#FFFFFFFF"
+        },
+        "index": {
+          "ifTrue": 1,
+          "ifFalse": 0
+        }
+      },
+      "alwaysEvaluate": false,
+      "pairsWellWith": [
+        "switch",
+        "popAnimation",
+        "optionPicker",
+        "equalsExactly",
+        "greaterThan"
+      ],
+      "commonMistakes": [
+        "The layer jumps instead of animating: If / Else switches values instantly. Wire the Condition into a Pop Animation and use a Transition to move between the two values.",
+        "The output is always If False: the Condition is wired to a Tap, which is on for only one frame. Wire the tap into a Switch and use its On as the Condition."
+      ],
+      "examples": [
+        {
+          "title": "Change a button label when you follow",
+          "outline": "layer follow_button rectangle \"Follow Button\" @24,120 354x48 cornerRadius=24\nlayer label text \"Label\" \"Follow\" @40,132 text←label_text.output\npatch tap_follow interaction layer=@follow_button\npatch following switch flip←tap_follow.tap\npatch label_text ifElse<text> condition←following.on ifTrue=\"Following\" ifFalse=\"Follow\""
+        },
+        {
+          "title": "Grow the heart more when liked",
+          "description": "If / Else picks the spring's target; Pop Animation makes the change bounce.",
+          "outline": "layer heart oval \"Heart\" @183,420 36x36 scale←heart_pop.output\npatch tap_heart interaction layer=@heart\npatch liked switch flip←tap_heart.tap\npatch target ifElse condition←liked.on ifTrue=1.25 ifFalse=1\npatch heart_pop popAnimation number←target.output bounciness=12"
+        }
+      ],
+      "origami": null,
+      "defaultNotes": {
+        "condition": "sonobe: off until wired, so the patch outputs If False.",
+        "ifTrue": "sonobe: 1 and 0 make a wired Condition visibly change a number output.",
+        "ifFalse": "sonobe: 1 and 0 make a wired Condition visibly change a number output."
+      }
+    },
+    {
+      "type": "inRange",
+      "name": "In Range",
+      "category": "logic",
+      "tier": 2,
+      "status": "supported",
+      "aliases": [
+        "between",
+        "is between",
+        "within range",
+        "range check",
+        "inside bounds",
+        "window",
+        "band",
+        "out of bounds"
+      ],
+      "summary": "Checks whether a number lies between a minimum and a maximum, and tells you if it's below or above instead.",
+      "docs": "## How it works\nIn Range answers \"is this number between A and B?\" and, if not, which side it's on. Exactly one of its three outputs is on at a time.\n\n- **Value** is the number to check.\n- **Min** and **Max** are the edges of the range. If Min is bigger than Max, the patch swaps them.\n- **Bounds** says whether a value sitting exactly on an edge counts. The default includes both edges.\n- **In Range** is on while Value is inside the range.\n- **Below** is on while Value is under the range. **Above** is on while it's over the range.\n\n## Tips\n- Use Include Min when you split a scroll or a list into sections, like 0–100, 100–200, and so on. A value on a shared edge then belongs to exactly one section.\n- Wire Above or Below into a Switch or a Pulse to react to overscroll past either end.\n- To force a value back into the range, use Clamp.",
+      "behavior": "Stateless.\n\nEach frame, for this loop index:\n```\nconst v = ctx.input(\"value\");\nlet lo = ctx.input(\"min\"), hi = ctx.input(\"max\");\nif (lo > hi) [lo, hi] = [hi, lo];\nconst bounds = ctx.input(\"bounds\");\nconst includeLo = bounds === \"includeBoth\" || bounds === \"includeMin\";\nconst includeHi = bounds === \"includeBoth\" || bounds === \"includeMax\";\nconst inside = (includeLo ? v >= lo : v > lo) && (includeHi ? v <= hi : v < hi);\nconst below = !inside && (v < lo || (v === lo && !includeLo));\nctx.output(\"inRange\", inside);\nctx.output(\"below\", below);\nctx.output(\"above\", !inside && !below);\n```\n\n- Exactly one output is true every frame.\n- Edges: an excluded lower edge counts as Below, and an excluded upper edge counts as Above.\n- `min > max`: the two are swapped, so Min 10 and Max 0 behave like Min 0 and Max 10. Bounds then applies to the lower and upper edges after swapping.\n- Zero-width range (`min == max`): with Include Both, only that exact value is in range. With Include Min, Include Max, or Exclude Both, nothing is in range; a value equal to the edge is Above for Include Min and Below for Include Max and Exclude Both.\n- No tolerance: comparisons use exact doubles. Inputs arrive finite because core coercion turns NaN and ±Infinity into 0; treat any non-finite value that slips through as 0.\n- Unknown `bounds` keys (a hand-edited file) behave as `includeBoth`.\n- Frame 0: evaluates with authored values and outputs on the same frame. There is no latency and no history.\n- Loops: evaluates once per loop index. Output length is the longest input loop; shorter loops wrap and scalars broadcast. An empty loop gives an empty output.\n- Coming from Origami: no import mapping. Origami builds this with Greater Than or Equal and Less Than or Equal combined through And (or one three-port Less Than or Equal chain, `min ≤ value ≤ max`).",
+      "inputs": [
+        {
+          "key": "value",
+          "name": "Value",
+          "type": "number",
+          "default": 0,
+          "description": "The number to check."
+        },
+        {
+          "key": "min",
+          "name": "Min",
+          "type": "number",
+          "default": 0,
+          "description": "The lower edge of the range; if it's bigger than Max, the two are swapped."
+        },
+        {
+          "key": "max",
+          "name": "Max",
+          "type": "number",
+          "default": 1,
+          "description": "The upper edge of the range; if it's smaller than Min, the two are swapped."
+        },
+        {
+          "key": "bounds",
+          "name": "Bounds",
+          "type": "enum",
+          "default": "includeBoth",
+          "enumOptions": [
+            {
+              "key": "includeBoth",
+              "name": "Include Both",
+              "description": "Min ≤ Value ≤ Max: values on either edge count as in range."
+            },
+            {
+              "key": "includeMin",
+              "name": "Include Min",
+              "description": "Min ≤ Value < Max: good for splitting a line into sections that don't overlap."
+            },
+            {
+              "key": "includeMax",
+              "name": "Include Max",
+              "description": "Min < Value ≤ Max."
+            },
+            {
+              "key": "excludeBoth",
+              "name": "Exclude Both",
+              "description": "Min < Value < Max: values on either edge are out of range."
+            }
+          ],
+          "description": "Whether a value exactly on Min or Max counts as in range.",
+          "advanced": true
+        }
+      ],
+      "outputs": [
+        {
+          "key": "inRange",
+          "name": "In Range",
+          "type": "boolean",
+          "description": "On while Value is between Min and Max, following Bounds."
+        },
+        {
+          "key": "below",
+          "name": "Below",
+          "type": "boolean",
+          "description": "On while Value is under the range (or on an excluded lower edge)."
+        },
+        {
+          "key": "above",
+          "name": "Above",
+          "type": "boolean",
+          "description": "On while Value is over the range (or on an excluded upper edge)."
+        }
+      ],
+      "alwaysEvaluate": false,
+      "pairsWellWith": [
+        "clamp",
+        "remap",
+        "greaterThan",
+        "lessThan",
+        "and"
+      ],
+      "commonMistakes": [
+        "Two neighboring sections are both on when the value sits on their shared edge: Include Both counts the edge in both ranges. Set Bounds to Include Min.",
+        "The range check is always off with Min and Max both set to the same number: with that setup only an exact match counts, and only when Bounds is Include Both. Give the range some width."
+      ],
+      "examples": [
+        {
+          "title": "Show a note halfway through a timer",
+          "outline": "layer start_button rectangle \"Start\" @24,700 354x56 cornerRadius=28\nlayer note text \"Note\" \"Halfway there\" @140,640 opacity←note_fade.output\npatch tap_start interaction layer=@start_button\npatch timer wait start←tap_start.tap duration=6\npatch middle inRange value←timer.progress min=0.4 max=0.6\npatch note_fade popAnimation number←middle.inRange"
+        },
+        {
+          "title": "Highlight cells 3 to 5 in a looped row",
+          "outline": "layer row group \"Row\" @16,120 370x40 layout=row spacing=4\n  layer cell rectangle \"Cell\" 33x40 cornerRadius=6 color←cell_color.output\npatch cells loop count=10\npatch visible inRange value←cells.index min=3 max=6 bounds=includeMin\npatch cell_color transition<color> progress←visible.inRange start=#E5E5EAFF end=#34C759FF"
+        }
+      ],
+      "origami": null,
+      "defaultNotes": {
+        "value": "sonobe: 0 sits on the default lower edge, so the patch starts in range.",
+        "min": "sonobe: endpoints default to 0 → 1 (§15).",
+        "max": "sonobe: endpoints default to 0 → 1 (§15).",
+        "bounds": "sonobe: inclusive edges match the three-port ≤ chain people build today."
+      }
+    }
+  ]
+}

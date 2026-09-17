@@ -1,0 +1,580 @@
+{
+  "file": "layers-1.json",
+  "category": "layers",
+  "patches": [
+    {
+      "type": "layerInfo",
+      "name": "Layer Info",
+      "category": "layers",
+      "tier": 2,
+      "status": "supported",
+      "aliases": [
+        "layer size",
+        "measure layer",
+        "get size",
+        "bounds",
+        "frame",
+        "dimensions",
+        "get position",
+        "parent layer",
+        "getboundingclientrect"
+      ],
+      "summary": "Reads a layer's size, position, scale, anchor, and parent as they were laid out on the previous frame.",
+      "docs": "## How it works\nLayer Info reports a layer's real geometry after layout, so you can build on measurements instead of typed numbers. It's how you learn the size of a layer whose width or height is Auto, Grow, or Percent.\n\n- **Layer** is the layer to read.\n- **Size** is the width and height in points after layout, before Scale.\n- **Position** is where the layer's anchor point sits, in points from its parent's top-left corner.\n- **Scale** and **Anchor** are the layer's current values, even while an animation drives them.\n- **Enabled** is true while the layer's own Enabled is on.\n- **Parent** is the group the layer sits in. Wire it into another Layer Info to measure that group.\n- **Content Size** (advanced) is the area a group's children cover.\n\nEvery output describes the **previous frame**. Layout runs after patches, so a change shows up here one frame later, about 17 ms at 60 fps.\n\n## Tips\n- Hug a text label with a background: add padding to the label's Size and wire the sum into the background's Size.\n- To find where a layer sits on screen, or inside another group, use Convert Position.\n- Point Layer at a looped layer to get one set of outputs per copy.\n\n## Coming from Origami\n- Position is measured from the parent's top-left corner, not its center.\n- Content Size is new. When a layer's X and Y scale differ, Scale reports the X factor.",
+      "behavior": "Stateless.\n\nEach frame:\n```\nconst ref = ctx.input(\"layer\");                              // LayerRef | null\nconst info = ref ? ctx.services.layerInfo(ref) : undefined;  // previous frame's layout\nif (!info) {                                                 // missing-layer values\n  ctx.output(\"size\", [0, 0]);\n  ctx.output(\"position\", [0, 0]);\n  ctx.output(\"scale\", 1);\n  ctx.output(\"anchor\", [0, 0]);\n  ctx.output(\"enabled\", false);\n  ctx.output(\"parent\", null);\n  ctx.output(\"contentSize\", [0, 0]);\n  return;\n}\nctx.output(\"size\", finite(info.size));\nctx.output(\"position\", finite(info.position));\nctx.output(\"scale\", finite(info.scale[0], 1));\nctx.output(\"anchor\", finite(info.anchor));\nctx.output(\"enabled\", info.enabled);\nctx.output(\"parent\", info.parent === null ? null : { layerId: info.parent, instance: ref.instance }); // omit instance when undefined\nctx.output(\"contentSize\", finite(info.contentSize));\n```\n`finite(v, fallback = 0)` replaces each non-finite component with `fallback` and warns once per restart through `ctx.services.log(\"warn\", …)`.\n\n- Timing (gap-fill R2, CONVENTIONS.md §18.5.8): `ctx.services.layerInfo` returns the geometry resolved at the end of the previous frame (ARCHITECTURE.md §5.1, step 6). Props that change on frame N appear here on frame N+1. Reading a layer adds no graph edge, so wiring these outputs into layer props never forms a cycle.\n- Output definitions:\n  - `size`: resolved width and height in points after layout, Auto/Grow/Percent sizing, and text measurement. Excludes the layer's Scale and its ancestors' scales.\n  - `position`: the layer's anchor point in its parent's local points, measured from the parent's top-left. For a child of a Row, Column, or Grid container it's the laid-out position, not the authored one. Excludes scale and rotation.\n  - `scale`: `info.scale[0]`, the layer's own Scale × Scale XYZ x. Ancestors' scales aren't included.\n  - `anchor`: the layer's Anchor.\n  - `enabled`: the layer's own Enabled prop. A layer inside a disabled group can still report true.\n  - `parent`: a reference to the containing layer, or null for a top-level layer (directly on the artboard, or at the top of a layer component).\n  - `contentSize`: the snapshot's `contentSize`, the area a container's children cover measured from its top-left corner; [0, 0] for a layer without children.\n- Frame 0: there's no previous frame. The engine lays out authored props once before evaluating frame 0 so a snapshot exists (contract request). If `layerInfo` still returns undefined, outputs take the missing-layer values for that frame.\n- Loops: when Layer refers to a layer replicated by a loop, `ctx.input(\"layer\")` carries the copy's `instance`, the patch evaluates once per copy, and every output is a loop. Parent copies the child's `instance`; the engine ignores `instance` on layers that aren't replicated (contract request: `LayerInfoSnapshot.parent` has no instance).\n- Edge cases: an empty Layer, an unknown id, or a layer missing from the previous frame's scene (deleted, or a loop instance past the end) gives the missing-layer values: Size, Position, and Content Size [0, 0], Scale 1 (so math that multiplies by Scale doesn't collapse), Anchor [0, 0], Enabled false, Parent null.\n- Muted: every output takes the missing-layer values. The default bypass would pass Layer into Parent, which is meaningless.\n- Platform and simulation: identical everywhere. Headless simulation lays out with the injected `TextMeasurer`, so text-driven sizes can differ from the DOM by a fraction of a point.\n- Restart and dispose: nothing to reset or release.\n- Coming from Origami: `builtin.layer.size` has Layer → Enabled, Position, Size, Scale, Anchor, Parent and the same one-frame delay (gap-fill C13). Origami's Position uses a center origin; importers convert. Content Size is a Sonobe addition.",
+      "inputs": [
+        {
+          "key": "layer",
+          "name": "Layer",
+          "type": "layer",
+          "default": null,
+          "description": "The layer to read. Leave it empty and every output stays at its empty value."
+        }
+      ],
+      "outputs": [
+        {
+          "key": "size",
+          "name": "Size",
+          "type": "size",
+          "subtype": "distance",
+          "description": "Width and height in points after layout, not counting Scale (previous frame)."
+        },
+        {
+          "key": "position",
+          "name": "Position",
+          "type": "point",
+          "subtype": "distance",
+          "description": "Where the layer's anchor point sits after layout, in points from its parent's top-left corner (previous frame)."
+        },
+        {
+          "key": "scale",
+          "name": "Scale",
+          "type": "number",
+          "description": "The layer's own scale, not counting its parents' (previous frame); 1 when the layer is missing."
+        },
+        {
+          "key": "anchor",
+          "name": "Anchor",
+          "type": "anchor",
+          "description": "Which point of the layer Position refers to, from [0, 0] top-left to [1, 1] bottom-right (previous frame)."
+        },
+        {
+          "key": "enabled",
+          "name": "Enabled",
+          "type": "boolean",
+          "description": "True while the layer's own Enabled is on (previous frame); false when the layer is missing."
+        },
+        {
+          "key": "parent",
+          "name": "Parent",
+          "type": "layer",
+          "description": "The group this layer sits in, or empty for a top-level layer; wire it into another Layer Info to measure that group."
+        },
+        {
+          "key": "contentSize",
+          "name": "Content Size",
+          "type": "size",
+          "subtype": "distance",
+          "description": "The area a group's children cover, in points from its top-left corner; [0, 0] when it has no children (previous frame).",
+          "advanced": true
+        }
+      ],
+      "alwaysEvaluate": true,
+      "pairsWellWith": [
+        "convertPosition",
+        "add",
+        "transition",
+        "sizeUnpack",
+        "multiply"
+      ],
+      "commonMistakes": [
+        "The layer keeps growing every frame: its Size is wired from its own Layer Info plus padding, so each frame adds the padding again. Measure a different layer, such as the text inside, and size the background from that.",
+        "Size reads 0 × 0: Layer is empty, or the layer was deleted or sits past the end of its loop. Pick the layer again in the Layer input.",
+        "Size doesn't follow a scale animation: Size is the laid-out size before Scale. Multiply Size by Scale when you need the drawn size."
+      ],
+      "examples": [
+        {
+          "title": "Hug a text label with a pill",
+          "description": "The Text layer sizes itself to its words; the pill adds 16 points of padding on each side and 8 on top and bottom.",
+          "outline": "layer pill rectangle \"Pill\" @16,96 size←pill_size.output cornerRadius=18 color=#1F6FEBFF\nlayer label text \"Label\" \"3 new messages\" @32,104 textColor=#FFFFFFFF\npatch label_info layerInfo layer=@label\npatch pill_size add<size>[2] value1←label_info.size value2=[32,16]"
+        },
+        {
+          "title": "Fill a progress bar to a track of any width",
+          "description": "The track is 92% of the screen wide on every device. Tap anywhere to fill it; the fill's final size comes from the track's measured size.",
+          "outline": "layer track rectangle \"Track\" @16,420 92x8 widthMode=percent cornerRadius=4 color=#E5E5EAFF\nlayer fill rectangle \"Fill\" @16,420 size←fill_size.output cornerRadius=4 color=#34C759FF\npatch track_info layerInfo layer=@track\npatch tap_anywhere interaction\npatch loaded switch flip←tap_anywhere.tap\npatch fill_anim classicAnimation number←loaded.on duration=2\npatch fill_size transition<size> progress←fill_anim.output start=[0,8] end←track_info.size"
+        }
+      ],
+      "origami": {
+        "id": "builtin.layer.size",
+        "name": "Layer Info"
+      }
+    },
+    {
+      "type": "convertPosition",
+      "name": "Convert Position",
+      "category": "layers",
+      "tier": 2,
+      "status": "supported",
+      "aliases": [
+        "convert coordinates",
+        "local to global",
+        "global position",
+        "screen position",
+        "follow layer",
+        "align layers",
+        "coordinate space",
+        "pin to layer",
+        "world position",
+        "position in parent"
+      ],
+      "summary": "Converts a point from one layer's coordinate space to another's, so a layer can line up with a layer in a different group.",
+      "docs": "## How it works\nEvery layer measures positions from its parent's top-left corner, so one spot on screen has different coordinates inside different groups. Convert Position translates a point from one layer's space into another's. It accounts for scrolling, scale, and layout.\n\n- **From Layer** is the layer the point belongs to. Leave it empty to start from screen coordinates.\n- **Position** is the point, in points from From Layer's **Anchor**. With both at [0, 0] it's the layer's top-left corner.\n- **To Layer** is the layer whose space you want the answer in, usually the **parent** of the layer you're moving. Leave it empty for screen coordinates.\n- **To Anchor** measures the answer from another point of To Layer: [0.5, 0.5] gives the offset from its center.\n- **Converted Position** is the answer. **Error** turns on when a layer can't be found.\n\nLike Layer Info, it reads the layout of the previous frame.\n\n## Tips\n- Make layer B follow layer A: set From Layer to A and To Layer to B's parent, then wire Converted Position into B's Position.\n- Set Anchor to where B should attach: [1, 0] is A's top-right corner. Give B an Anchor of [0.5, 0.5] to center it on that spot.\n\n## Coming from Origami\nFrom Parent and To Parent are called From Layer and To Layer, the unnamed input is Position, and coordinates start at the top-left. Disabled layers still convert: Error means a layer is missing.",
+      "behavior": "State per loop index: `{ last: [0, 0] }`.\n\nEach frame:\n```\nconst from = frameOf(ctx.input(\"fromLayer\"));\nconst to = frameOf(ctx.input(\"toLayer\"));\nif (!from || !to || !to.invertible) return fail();\nconst a = ctx.input(\"anchor\"), p = ctx.input(\"position\"), ta = ctx.input(\"toAnchor\");\nconst local = [a[0] * from.size[0] + p[0], a[1] * from.size[1] + p[1]];  // From Layer local points\nconst screen = from.toScreen(local);                                     // prototype coordinates\nconst inTo = to.fromScreen(screen);                                      // To Layer local points\nconst result = [inTo[0] - ta[0] * to.size[0], inTo[1] - ta[1] * to.size[1]];\nif (!Number.isFinite(result[0]) || !Number.isFinite(result[1])) { warnOnce(); return fail(); }\nstate.last = result;\nctx.output(\"convertedPosition\", result);\nctx.output(\"error\", false);\n\nfunction fail() {\n  ctx.output(\"convertedPosition\", state.last);\n  ctx.output(\"error\", true);\n}\n```\n\n`frameOf(ref)` describes a coordinate space as `{ size, toScreen, fromScreen, invertible }`. A layer's local space has its origin at the layer's top-left corner, in the layer's own points before its Scale and rotation: the space its children's Positions use.\n- `ref === null`: the screen. `size = ctx.services.device().screenSize`, both maps are the identity, and `invertible` is true.\n- Otherwise `info = ctx.services.layerInfo(ref)`; undefined returns null (missing).\n- Target math: take the 2D affine part `[a, b, c, d, tx, ty]` of the layer's world transform (translation, scale about the pivot, rotation, and every ancestor's transform). `toScreen(q) = [a·qx + c·qy + tx, b·qx + d·qy + ty]`, `fromScreen` is its inverse, and `invertible` is `|a·d − b·c| ≥ 1e-9`. Rotation X/Y, perspective, and z are ignored.\n- Until the contract exposes world transforms (contract request: `LayerInfoSnapshot.worldTransform`), compose from snapshots up the parent chain. For each layer L from the target to the top level, with parent refs keeping the target's `instance`:\n  ```\n  topLeft = L.position − L.anchor ⊙ L.size\n  pivot   = [0.5, 0.5] ⊙ L.size              // default pivot; the snapshot has none\n  toParent(q)   = topLeft + pivot + L.scale ⊙ (q − pivot)\n  fromParent(q) = pivot + (q − topLeft − pivot) / L.scale\n  ```\n  `toScreen` applies `toParent` from the target outward; `fromScreen` applies `fromParent` from the top level inward. Rotation is ignored, `invertible` is false when any `|L.scale[i]| < 1e-6` on the chain, and a missing ancestor snapshot makes the whole frame null.\n\n- Timing: geometry comes from the previous frame (CONVENTIONS.md §18.5.8). A layer following content that moves this frame, such as a scrolling list, trails it by one frame. Reading geometry adds no graph edge, so there's no cycle.\n- Frame 0: uses the engine's pre-frame layout (see Layer Info). If a set layer has no snapshot, Error is true and Converted Position is [0, 0].\n- Loops: per-index evaluation. From Layer and To Layer may be looped layers carrying `instance`; Position, Anchor, and To Anchor may be loops. Output length is the longest input loop. New indices start with `last = [0, 0]`; removed indices drop their state.\n- Edge cases:\n  - Both layers empty: converts screen to screen, so the result is `anchor ⊙ screenSize + position − toAnchor ⊙ screenSize`.\n  - From Layer equals To Layer: `anchor ⊙ size + position − toAnchor ⊙ size`.\n  - A set layer that can't be found (an unknown id, a layer absent from the previous frame's scene, or a loop instance past the end), or a To Layer chain that can't be inverted: Error is true and Converted Position holds the last successful value for this index. Error clears on the next successful frame.\n  - A zero scale on the From side is valid: the point collapses toward that layer's pivot.\n  - Disabled layers (Enabled off) still have geometry and convert normally.\n  - Anchors outside 0–1 extrapolate ([0, 1.2] is 20% of the height below the bottom edge); they aren't clamped.\n  - A non-finite result holds the last value, sets Error, and warns once per restart through `ctx.services.log(\"warn\", …)`.\n- Muted: default bypass. Converted Position passes Position through unchanged and Error is false.\n- Platform and simulation: identical everywhere, including headless simulation, which uses the engine's own layout.\n- Restart and dispose: `last` resets to [0, 0] for every index. Nothing to dispose.\n- Coming from Origami: `builtin.layer.convertposition`, plus an empty doc stub `builtin.convertposition`. Ports From Parent, an unlabeled Input, Anchor, To Parent, To Anchor → Output, Error. Origami measures from a center origin; importers convert literal positions. Origami raises Error for disabled layers; Sonobe converts them and raises Error only for missing layers or a flat To Layer transform. Holding the last value on error is a Sonobe decision.",
+      "inputs": [
+        {
+          "key": "fromLayer",
+          "name": "From Layer",
+          "type": "layer",
+          "default": null,
+          "description": "The layer the point belongs to. Leave it empty to start from screen coordinates."
+        },
+        {
+          "key": "position",
+          "name": "Position",
+          "type": "point",
+          "subtype": "distance",
+          "default": [
+            0,
+            0
+          ],
+          "description": "The point to convert, in points from From Layer's Anchor; [0, 0] is the anchor point itself."
+        },
+        {
+          "key": "anchor",
+          "name": "Anchor",
+          "type": "anchor",
+          "default": [
+            0,
+            0
+          ],
+          "description": "Which point of From Layer Position is measured from: [0, 0] top-left, [0.5, 0.5] center, [1, 1] bottom-right."
+        },
+        {
+          "key": "toLayer",
+          "name": "To Layer",
+          "type": "layer",
+          "default": null,
+          "description": "The layer whose space you want the answer in, usually the parent of the layer you're moving; empty means screen coordinates."
+        },
+        {
+          "key": "toAnchor",
+          "name": "To Anchor",
+          "type": "anchor",
+          "default": [
+            0,
+            0
+          ],
+          "description": "Measures the answer from this point of To Layer: [0, 0] its top-left, [0.5, 0.5] its center."
+        }
+      ],
+      "outputs": [
+        {
+          "key": "convertedPosition",
+          "name": "Converted Position",
+          "type": "point",
+          "subtype": "distance",
+          "description": "The point in To Layer's space, measured from To Anchor, from the previous frame's layout; wire it into the Position of a child of To Layer."
+        },
+        {
+          "key": "error",
+          "name": "Error",
+          "type": "boolean",
+          "description": "True when a layer can't be found or To Layer is scaled to 0; Converted Position then holds its last good value."
+        }
+      ],
+      "alwaysEvaluate": true,
+      "pairsWellWith": [
+        "layerInfo",
+        "scroll",
+        "transition",
+        "sampleAndHold",
+        "popAnimation"
+      ],
+      "commonMistakes": [
+        "The badge jitters or drifts away: To Layer is the badge itself, so every move changes the space it's measured in. Set To Layer to the badge's parent, or leave it empty when the badge sits directly on the screen.",
+        "The follower sits half a layer off: the follower's own Anchor doesn't match the spot you attach to. Set Anchor to that spot on From Layer, and give the follower an Anchor of [0.5, 0.5] when it should be centered there.",
+        "The overlay trails a frame behind while scrolling: positions come from the previous frame's layout. When the overlay must move exactly with the content, put it inside the scrolling group instead."
+      ],
+      "examples": [
+        {
+          "title": "Pin a badge to a card that scrolls",
+          "description": "The badge lives outside the feed, so the feed's clipping can't cut it off. With To Layer empty, the answer is in screen coordinates, which is the badge's parent space.",
+          "outline": "layer feed group \"Feed\" @0,0 402x874 clip=true\n  layer list group \"List\" 402x2000 position←feed_scroll.position\n    layer card rectangle \"Card\" @16,300 370x200 cornerRadius=20\nlayer badge oval \"Badge\" 28x28 anchor=[0.5,0.5] position←pin.convertedPosition color=#FF3B30FF\npatch feed_scroll scroll layer=@list\npatch pin convertPosition fromLayer=@card anchor=[1,0]"
+        },
+        {
+          "title": "Grow a photo out of its thumbnail",
+          "description": "Convert Position finds the thumbnail on screen, so the full-size photo starts exactly on top of it wherever the gallery sits.",
+          "outline": "layer gallery group \"Gallery\" @0,160 402x600\n  layer thumb image \"Thumb\" @136,80 130x130 cornerRadius=12\nlayer viewer image \"Viewer\" position←grow_position.output size←grow_size.output opacity←open_anim.output\npatch tap_thumb interaction layer=@thumb\npatch tap_viewer interaction layer=@viewer\npatch open switch turnOn←tap_thumb.tap turnOff←tap_viewer.tap\npatch open_anim popAnimation number←open.on bounciness=2 speed=14\npatch thumb_spot convertPosition fromLayer=@thumb\npatch grow_position transition<point> progress←open_anim.output start←thumb_spot.convertedPosition end=[0,0]\npatch grow_size transition<size> progress←open_anim.output start=[130,130] end=[402,874]"
+        }
+      ],
+      "origami": {
+        "id": "builtin.layer.convertposition",
+        "name": "Convert Position"
+      },
+      "importAliases": [
+        "builtin.convertposition",
+        "builtin.convertPosition",
+        "builtin.layer.convertPosition"
+      ],
+      "origamiPorts": {
+        "fromLayer": "From Parent",
+        "position": "Input",
+        "toLayer": "To Parent",
+        "convertedPosition": "Output"
+      },
+      "defaultNotes": {
+        "position": "inferred: the docs suggest 0,0 as the usual starting point but state no default.",
+        "anchor": "sonobe: Origami's default is unpublished; top-left matches Sonobe's default layer Anchor.",
+        "toLayer": "inferred: the docs show None; reading an empty To Layer as screen coordinates follows the research's reading of the algorithm.",
+        "toAnchor": "sonobe: top-left, so the answer can drive a child layer's Position directly."
+      }
+    },
+    {
+      "type": "blurEffect",
+      "name": "Blur Effect",
+      "category": "layers",
+      "tier": 2,
+      "status": "supported",
+      "aliases": [
+        "blur",
+        "gaussian blur",
+        "layer effect",
+        "filter",
+        "soften",
+        "defocus",
+        "depth of field",
+        "hard edges",
+        "focus pull"
+      ],
+      "summary": "Creates a blur for a layer's Effects property, softening everything the layer draws, with an option to keep its edges sharp.",
+      "docs": "## How it works\nBlur Effect makes an effect value: a description of a visual effect a layer applies to itself. Wire **Effect** into a layer's **Effects** property, in the Filters section of the inspector, and the layer and its children look out of focus.\n\n- **Radius** is how strong the blur is, in points. 0 turns it off.\n- **Hard Edges** keeps the layer's outline crisp and opaque instead of letting the blur fade out past its edges. Turn it on for full-bleed photos and backgrounds.\n\nTo apply several effects to one layer, collect them in a Loop Builder and wire its loop into Effects. They apply in order.\n\n## Tips\n- Animate Radius with a Transition to pull focus, for example to blur the page while a menu opens.\n- A Radius of 20 to 30 gives a soft backdrop behind menus and sheets; 2 to 6 reads as slightly out of focus.\n- For a different blur on each copy of a looped layer, drive the layer's Blur property instead. Effects applies a loop of effects to every copy.\n\n## Coming from Origami\nThe output is called Effect instead of Layer Effect. Radius uses the same scale as the layer's Blur property.",
+      "behavior": "Stateless.\n\nEach frame:\n```\nlet radius = ctx.input(\"radius\");\nif (!Number.isFinite(radius)) { warnOnce(\"Blur Effect: Radius isn't a finite number; using 0.\"); radius = 0; }\nctx.output(\"effect\", {\n  kind: \"blur\",\n  params: { radius: Math.max(0, radius), hardEdges: ctx.input(\"hardEdges\") },\n});\n```\n\n- Value: a `LayerEffectValue` with kind `\"blur\"` and params `radius` (points, ≥ 0) and `hardEdges` (boolean). The patch outputs an effect object even at radius 0, so loop indices stay stable; renderers skip no-op effects.\n- Rendering (renderer contract): a layer's Effects apply in loop order, after the layer's own Blur property and before its drop shadow, to the layer's composited content including children. Radius is the Gaussian standard deviation in points, the same scale as the layer's Blur property (CSS `blur(<radius>px)`).\n  - Hard Edges off: pixels outside the layer's bounds count as transparent, so the silhouette softens and bleeds outward by about 3 × Radius.\n  - Hard Edges on: pixels outside the bounds count as copies of the nearest edge pixel, and the result is clipped to the layer's shape (corner radius and smoothing included), so edges stay sharp and opaque. Preferred web approach: an SVG `feGaussianBlur` with `edgeMode=\"duplicate\"` plus a clip to the layer's shape. Where a browser ignores `edgeMode`, clip only; a thin band inside the edge may look slightly darker. (The DOM renderer's `effectFilters` doesn't read `hardEdges` yet.)\n- Frame 0: outputs the effect for the authored values; nothing animates.\n- Loops: per-index evaluation gives a loop of effects. A layer's Effects property takes whole loops (`wholeLoop: true` in layerTypes.ts), so wiring that loop stacks every effect on the layer, and on every copy of a looped layer.\n- Edge cases: a negative Radius becomes 0; NaN or ±Infinity becomes 0 with one warning per restart through `ctx.services.log(\"warn\", …)`. There's no upper clamp; renderers may cap very large radii for performance.\n- Muted: default bypass. Effect has no matching input and outputs null, so the layer shows no effect.\n- Platform and simulation: CSS filters work in the desktop app and every supported browser. Headless simulation carries the value in `SceneNode.props.effects` without drawing it.\n- Restart and dispose: nothing to reset.\n- Coming from Origami: `builtin.blurLayerEffect`, library category Layer Effects, ports Radius → Layer Effect (gap-fill §4.3). Hard Edges arrived later under an unpublished label; importers map it by name when present. Origami's radius units are unpublished; Sonobe uses the CSS standard deviation.",
+      "inputs": [
+        {
+          "key": "radius",
+          "name": "Radius",
+          "type": "number",
+          "subtype": "distance",
+          "default": 10,
+          "min": 0,
+          "max": 100,
+          "step": 1,
+          "description": "How strong the blur is, in points; 0 turns it off, and larger values look more out of focus."
+        },
+        {
+          "key": "hardEdges",
+          "name": "Hard Edges",
+          "type": "boolean",
+          "default": false,
+          "description": "When on, the layer's edges stay sharp and opaque instead of fading out past its bounds."
+        }
+      ],
+      "outputs": [
+        {
+          "key": "effect",
+          "name": "Effect",
+          "type": "layerEffect",
+          "description": "Wire into a layer's Effects property to blur that layer."
+        }
+      ],
+      "alwaysEvaluate": false,
+      "pairsWellWith": [
+        "colorControlsEffect",
+        "loopBuilder",
+        "transition",
+        "longPress",
+        "popAnimation"
+      ],
+      "commonMistakes": [
+        "Nothing blurs: Effect isn't wired into the layer's Effects property, or it's wired into a different layer. Open the layer's Filters section and connect Effect to Effects.",
+        "The photo's edges look faded and see-through: without Hard Edges, the blur pulls in transparent pixels from outside the layer. Turn on Hard Edges for full-bleed images and backgrounds.",
+        "The panel's own text blurs instead of what's behind it: Blur Effect blurs the layer's own content. To frost what's behind a panel, use the panel's Background Blur property or Glass Effect."
+      ],
+      "examples": [
+        {
+          "title": "Blur the page while a menu is held open",
+          "description": "A long press opens the menu, and the same animation drives the blur, so both move together.",
+          "outline": "layer photo image \"Photo\" @0,0 402x874 effects←background_blur.effect\nlayer menu rectangle \"Menu\" @101,357 200x160 cornerRadius=16 color=#FFFFFFFF opacity←menu_anim.output\npatch hold longPress layer=@photo\npatch menu_anim popAnimation number←hold.longPress bounciness=3 speed=16\npatch blur_amount transition<number> progress←menu_anim.output start=0 end=20\npatch background_blur blurEffect radius←blur_amount.output hardEdges=true"
+        },
+        {
+          "title": "Stack a soft blur with a dimmed tone",
+          "description": "A Loop Builder collects both effects, and the layer applies them in order.",
+          "outline": "layer hero image \"Hero\" @0,0 402x320 effects←stack.loop\npatch soft blurEffect radius=6 hardEdges=true\npatch dim colorControlsEffect brightness=-0.2 saturation=0.6\npatch stack loopBuilder<layerEffect>[2] item0←soft.effect item1←dim.effect"
+        }
+      ],
+      "origami": {
+        "id": "builtin.blurLayerEffect",
+        "name": "Blur Effect"
+      },
+      "origamiPorts": {
+        "effect": "Layer Effect"
+      },
+      "defaultNotes": {
+        "radius": "sonobe: Origami's default is unpublished (research guesses 0 or 10); 10 shows the blur as soon as it's connected.",
+        "hardEdges": "inferred: Hard Edges was added later as an option, so off matches the original look."
+      }
+    },
+    {
+      "type": "colorControlsEffect",
+      "name": "Color Controls Effect",
+      "category": "layers",
+      "tier": 2,
+      "status": "supported",
+      "aliases": [
+        "brightness",
+        "contrast",
+        "saturation",
+        "hue rotate",
+        "color adjust",
+        "grayscale",
+        "desaturate",
+        "tone",
+        "color filter",
+        "image adjustments"
+      ],
+      "summary": "Adjusts a layer's brightness, contrast, saturation, and hue through its Effects property.",
+      "docs": "## How it works\nColor Controls Effect makes an effect value that shifts a layer's colors. Wire **Effect** into a layer's **Effects** property and the layer, including its children, changes tone. Every control starts at a neutral value that leaves the layer unchanged.\n\n- **Brightness** lightens or darkens: 0 is unchanged, −1 is black, and 1 is twice as bright.\n- **Contrast** spreads colors apart: 1 is unchanged, 0 is flat gray, and 2 doubles the contrast.\n- **Saturation** sets how vivid colors are: 1 is unchanged, 0 is black and white, and 2 is twice as vivid.\n- **Hue Rotation** turns every color around the color wheel, in degrees. 180 swaps colors for their opposites.\n\n## Tips\n- Gray out a disabled card: Saturation 0 and Brightness 0.1.\n- Animate one control with a Transition and leave the others at their neutral values.\n- Combine it with Blur Effect by collecting both in a Loop Builder wired into Effects.",
+      "behavior": "Stateless.\n\nEach frame:\n```\nconst num = (key, neutral) => {\n  const v = ctx.input(key);\n  if (Number.isFinite(v)) return v;\n  warnOnce(`Color Controls Effect: ${key} isn't a finite number; using ${neutral}.`);\n  return neutral;\n};\nctx.output(\"effect\", {\n  kind: \"colorControls\",\n  params: {\n    brightness: Math.max(-1, num(\"brightness\", 0)),\n    contrast: Math.max(0, num(\"contrast\", 1)),\n    saturation: Math.max(0, num(\"saturation\", 1)),\n    hue: num(\"hueRotation\", 0),\n  },\n});\n```\n\n- Value: a `LayerEffectValue` with kind `\"colorControls\"` and params `brightness`, `contrast`, `saturation`, and `hue` (degrees). The param is `hue` to match the renderer; the port is Hue Rotation so it isn't confused with an HSL hue from 0 to 1.\n- Rendering (renderer contract): applied to the layer's composited content, including children, in straight RGBA with alpha untouched, in this order, using the CSS Filter Effects formulas:\n  1. brightness: `rgb × (1 + brightness)`\n  2. contrast: `(rgb − 0.5) × contrast + 0.5`\n  3. saturation: the CSS `saturate(saturation)` matrix\n  4. hue: the CSS `hue-rotate(<hue>deg)` matrix\n\n  Results clamp to 0–1. The DOM renderer emits `brightness() contrast() saturate() hue-rotate()` and skips any control at its neutral value; with all four neutral the effect is a no-op. Effects in the same loop apply in loop order.\n- Clamps: Brightness below −1 becomes −1; negative Contrast or Saturation becomes 0. There's no upper clamp. Hue Rotation isn't clamped or wrapped; 360 looks the same as 0.\n- Frame 0: outputs the effect for the authored values.\n- Loops: per-index evaluation gives a loop of effects. A layer's Effects property takes whole loops, so the loop stacks on the layer (see Blur Effect).\n- Edge cases: NaN or ±Infinity on a control uses that control's neutral value, with one warning per restart through `ctx.services.log(\"warn\", …)`.\n- Muted: default bypass. Effect outputs null and the layer is unchanged.\n- Platform and simulation: CSS filters work in the desktop app and every supported browser. Headless simulation carries the value in `SceneNode.props.effects` without drawing it.\n- Restart and dispose: nothing to reset.\n- Coming from Origami: Sonobe-native (CONVENTIONS.md §18.1). Origami's newer color effects have unpublished names and ports, so no Origami patch imports as this one.",
+      "inputs": [
+        {
+          "key": "brightness",
+          "name": "Brightness",
+          "type": "number",
+          "default": 0,
+          "min": -1,
+          "max": 1,
+          "step": 0.01,
+          "description": "Lightens or darkens the layer: 0 is unchanged, −1 is black, and 1 is twice as bright."
+        },
+        {
+          "key": "contrast",
+          "name": "Contrast",
+          "type": "number",
+          "default": 1,
+          "min": 0,
+          "max": 2,
+          "step": 0.01,
+          "description": "Spreads colors apart: 1 is unchanged, 0 is flat gray, and 2 doubles the contrast."
+        },
+        {
+          "key": "saturation",
+          "name": "Saturation",
+          "type": "number",
+          "default": 1,
+          "min": 0,
+          "max": 2,
+          "step": 0.01,
+          "description": "How vivid colors are: 1 is unchanged, 0 is black and white, and 2 is twice as vivid."
+        },
+        {
+          "key": "hueRotation",
+          "name": "Hue Rotation",
+          "type": "number",
+          "subtype": "angle",
+          "default": 0,
+          "min": -180,
+          "max": 180,
+          "step": 1,
+          "description": "Turns every color around the color wheel, in degrees; 0 is unchanged and 180 gives opposite colors."
+        }
+      ],
+      "outputs": [
+        {
+          "key": "effect",
+          "name": "Effect",
+          "type": "layerEffect",
+          "description": "Wire into a layer's Effects property to recolor that layer."
+        }
+      ],
+      "alwaysEvaluate": false,
+      "pairsWellWith": [
+        "blurEffect",
+        "loopBuilder",
+        "transition",
+        "hover",
+        "classicAnimation"
+      ],
+      "commonMistakes": [
+        "The layer turns gray as soon as you connect it: Saturation or Contrast is at 0. Their neutral value is 1; only Brightness and Hue Rotation are neutral at 0.",
+        "The label and icons on a card change color too: effects apply to the whole layer, children included. Apply the effect to the photo layer instead of the group that holds everything."
+      ],
+      "examples": [
+        {
+          "title": "Bring a photo to color when tapped",
+          "outline": "layer photo image \"Photo\" @16,140 370x370 cornerRadius=20 effects←tone.effect\npatch tap_photo interaction layer=@photo\npatch revealed switch flip←tap_photo.tap\npatch reveal_anim classicAnimation number←revealed.on duration=0.6\npatch vividness transition<number> progress←reveal_anim.output start=0 end=1\npatch tone colorControlsEffect saturation←vividness.output"
+        },
+        {
+          "title": "Brighten a thumbnail on hover",
+          "description": "One spring drives both controls, so brightness and contrast rise together while the pointer is over the thumbnail.",
+          "outline": "layer thumb image \"Thumb\" @136,300 130x130 cornerRadius=12 effects←hover_tone.effect\npatch hover_thumb hover layer=@thumb\npatch lift popAnimation number←hover_thumb.hovering bounciness=2 speed=18\npatch lighten transition<number> progress←lift.output start=0 end=0.15\npatch punch transition<number> progress←lift.output start=1 end=1.1\npatch hover_tone colorControlsEffect brightness←lighten.output contrast←punch.output"
+        }
+      ],
+      "origami": null,
+      "defaultNotes": {
+        "brightness": "sonobe: neutral, so the effect changes only the controls you adjust.",
+        "contrast": "sonobe: neutral (1), so the effect changes only the controls you adjust.",
+        "saturation": "sonobe: neutral (1), so the effect changes only the controls you adjust.",
+        "hueRotation": "sonobe: neutral, so the effect changes only the controls you adjust."
+      }
+    },
+    {
+      "type": "glassEffect",
+      "name": "Glass Effect",
+      "category": "layers",
+      "tier": 3,
+      "status": "web-limited",
+      "statusReason": "The frosted blur, tint, and rim work everywhere through CSS backdrop-filter. Refraction needs an SVG filter inside backdrop-filter, which only Chromium supports, so Safari and Firefox show the glass without lensing.",
+      "platforms": [
+        "desktop",
+        "web",
+        "mobile"
+      ],
+      "aliases": [
+        "liquid glass",
+        "frosted glass",
+        "glassmorphism",
+        "material",
+        "translucent",
+        "refraction",
+        "backdrop blur",
+        "visual effect",
+        "lens",
+        "vibrancy"
+      ],
+      "summary": "Turns a layer into a pane of glass that frosts, tints, and bends whatever sits behind it, with a bright rim along its edge.",
+      "docs": "## How it works\nGlass Effect makes an effect value that turns a layer into a glass pane. Wire **Effect** into a layer's **Effects** property: whatever is behind the layer shows through frosted and tinted, bent near the edges like a lens, with a light rim. The pane follows the layer's shape, including corner radius and smoothing.\n\n- **Intensity** fades the whole effect: 0 is no glass, 1 is full glass. Animate it to bring glass in or out.\n- **Frost** is how much the background blurs, in points.\n- **Tint** is a color washed over the glass; its alpha sets how strong it is.\n- **Refraction** is how strongly the edges bend what's behind, from 0 to 1.\n- **Highlight** is how bright the rim light is, from 0 to 1.\n- **Saturation** and **Depth** (advanced) boost background colors and set how far the lens reaches in from the edge.\n\nChildren of the layer draw on top of the glass, sharp and unaffected.\n\n## Tips\n- Clear glass over photos: Frost 2, a Tint alpha around 5%, and Refraction 0.8.\n- Match the theme: choose a dark Tint in dark mode with Device Info and If / Else.\n- Glass is expensive to draw. On phones, use a few panes rather than a grid of them.\n\n## Coming from Origami\nOrigami's glass support has unpublished parameters. This patch is Sonobe's own design, and imported glass doesn't carry its settings over.",
+      "behavior": "Stateless.\n\nEach frame:\n```\nconst k = clamp01(finiteOr(ctx.input(\"intensity\"), 1));\nconst tint = ctx.input(\"tint\");                                   // Color { r, g, b, a }\nconst saturation = Math.max(0, finiteOr(ctx.input(\"saturation\"), 1));\nctx.output(\"effect\", {\n  kind: \"glass\",\n  params: {\n    frost: Math.max(0, finiteOr(ctx.input(\"frost\"), 0)) * k,\n    tint: { r: tint.r, g: tint.g, b: tint.b, a: tint.a * k },\n    refraction: clamp01(finiteOr(ctx.input(\"refraction\"), 0)) * k,\n    highlight: clamp01(finiteOr(ctx.input(\"highlight\"), 0)) * k,\n    saturation: 1 + (saturation - 1) * k,\n    depth: Math.max(0, finiteOr(ctx.input(\"depth\"), 0)),\n  },\n});\n```\n`finiteOr(v, neutral)` returns `neutral` for NaN or ±Infinity and warns once per restart through `ctx.services.log(\"warn\", …)`.\n\n- Value: a `LayerEffectValue` with kind `\"glass\"` and params `frost`, `tint`, `refraction`, `highlight`, `saturation`, and `depth`. Intensity is folded into the params, so renderers never see it: at Intensity 0 every param is neutral and the effect is a no-op.\n- Rendering (renderer contract; the DOM renderer's `effectFilters` has no `\"glass\"` case yet). Clip every step to the layer's shape (Corner Radius, Corner Radii, Corner Smoothing, or the oval):\n  1. Backdrop: sample the composited content behind the layer in z-order (earlier siblings, ancestors' backgrounds, and everything below), never the layer's own content or children.\n  2. Refraction: for a pixel at distance `e` points inside the nearest shape edge with `e < depth`, sample the backdrop at `pixel + n × refraction × depth × (1 − e / depth)²`, where `n` is that edge's outward unit normal, so the rim shows content from slightly beyond the pane. Deeper pixels sample straight behind themselves. Skip when refraction or depth is 0.\n  3. Frost: Gaussian blur of the displaced backdrop with standard deviation `frost` points, then the CSS `saturate(saturation)` matrix.\n  4. Tint: composite `tint` source-over.\n  5. Highlight: a white rim 1.5 pt wide inside the edge, with alpha `highlight × (0.25 + 0.75 × max(0, n · (−0.7071, −0.7071)))`, brightest on edges facing up and left.\n  6. Draw the layer's own fill, stroke, and children on top.\n\n  If a layer's Effects loop holds several glass effects, only the last one applies. Blur and color effects in the same loop still filter the layer's own content.\n- DOM approach: `backdrop-filter: [url(#lens)] blur(<frost>px) saturate(<saturation>)` with the `-webkit-` prefix, the tint as a background under the layer's fill, and the rim as an SVG stroke or an inset box-shadow. The lens is an SVG `feDisplacementMap` fed by a generated edge-distance map, used only where `backdrop-filter: url()` works (Chromium, including Electron).\n- Frame 0: outputs the effect for the authored values.\n- Loops: per-index evaluation gives a loop of effects. A layer's Effects property takes whole loops (see Blur Effect).\n- Edge cases: Intensity, Refraction, and Highlight clamp to 0–1; a negative Frost, Depth, or Saturation becomes 0; NaN or ±Infinity uses the neutral value (Intensity and Saturation 1, others 0). A layer with zero size draws nothing.\n- Muted: default bypass. Effect outputs null and the layer shows no glass.\n- Platform and simulation: backdrop blur, saturation, tint, and rim work in the desktop app and in current Chromium, Safari, and Firefox. Lensing is Chromium-only; elsewhere step 2 is skipped. On the web, an ancestor with opacity below 1, a blend mode, a filter, or effects of its own limits the backdrop to that ancestor's contents. Headless simulation carries the value in `SceneNode.props.effects` and draws nothing.\n- Restart and dispose: nothing to reset. The renderer releases generated SVG filters when the layer is removed.\n- Coming from Origami: Origami added glass support with unpublished parameters (census row \"Liquid Glass\"). This spec is a clean-room design; imported files keep the wiring but not the parameters.",
+      "inputs": [
+        {
+          "key": "intensity",
+          "name": "Intensity",
+          "type": "number",
+          "subtype": "progress",
+          "default": 1,
+          "min": 0,
+          "max": 1,
+          "step": 0.01,
+          "description": "Fades the whole effect: 0 is no glass and 1 is full glass."
+        },
+        {
+          "key": "frost",
+          "name": "Frost",
+          "type": "number",
+          "subtype": "distance",
+          "default": 8,
+          "min": 0,
+          "max": 50,
+          "step": 0.5,
+          "description": "How much what's behind the glass blurs, in points; 0 keeps it sharp."
+        },
+        {
+          "key": "tint",
+          "name": "Tint",
+          "type": "color",
+          "default": "#FFFFFF26",
+          "description": "A color washed over the glass; its alpha sets the strength, and an alpha of 0 means no tint."
+        },
+        {
+          "key": "refraction",
+          "name": "Refraction",
+          "type": "number",
+          "subtype": "progress",
+          "default": 0.5,
+          "min": 0,
+          "max": 1,
+          "step": 0.01,
+          "description": "How strongly the edges bend what's behind, like a lens: 0 is flat and 1 is strongest."
+        },
+        {
+          "key": "highlight",
+          "name": "Highlight",
+          "type": "number",
+          "subtype": "progress",
+          "default": 0.6,
+          "min": 0,
+          "max": 1,
+          "step": 0.01,
+          "description": "How bright the light rim along the edge is, brightest at the top left; 0 turns it off."
+        },
+        {
+          "key": "saturation",
+          "name": "Saturation",
+          "type": "number",
+          "default": 1.4,
+          "min": 0,
+          "max": 2,
+          "step": 0.01,
+          "description": "Boosts the colors seen through the glass: 1 is unchanged and 0 is black and white.",
+          "advanced": true
+        },
+        {
+          "key": "depth",
+          "name": "Depth",
+          "type": "number",
+          "subtype": "distance",
+          "default": 16,
+          "min": 0,
+          "max": 64,
+          "step": 1,
+          "description": "How far the lens bending reaches in from the edge, in points; 0 turns refraction off.",
+          "advanced": true
+        }
+      ],
+      "outputs": [
+        {
+          "key": "effect",
+          "name": "Effect",
+          "type": "layerEffect",
+          "description": "Wire into a layer's Effects property to turn that layer into glass."
+        }
+      ],
+      "alwaysEvaluate": false,
+      "pairsWellWith": [
+        "scroll",
+        "progress",
+        "popAnimation",
+        "blurEffect",
+        "deviceInfo"
+      ],
+      "commonMistakes": [
+        "The glass looks like a flat gray panel: the layer's Color is opaque and covers the glass. Set the layer's Color alpha to 0 and use Tint for color.",
+        "Nothing shows through the glass: the content is in front of the glass layer, not behind it. Glass only shows layers below it in the layer list, so move the glass layer above the content.",
+        "The glass frosts its own label: the label is a sibling behind the glass. Make the label a child of the glass layer so it draws on top, sharp."
+      ],
+      "examples": [
+        {
+          "title": "A glass tab bar over a scrolling feed",
+          "description": "The feed scrolls under the bar, and the label inside the bar stays sharp on top of the glass.",
+          "outline": "layer feed group \"Feed\" 402x2400 position←feed_scroll.position\nlayer tab_bar group \"Tab Bar\" @24,780 354x64 cornerRadius=32 cornerSmoothing=0.6 effects←bar_glass.effect\n  layer home_label text \"Home\" \"Home\" @40,22\npatch feed_scroll scroll layer=@feed\npatch bar_glass glassEffect frost=10 tint=#FFFFFF33 refraction=0.6"
+        },
+        {
+          "title": "Turn a header to glass once content scrolls under it",
+          "description": "The header is clear at the top of the page and becomes full glass after 80 points of scrolling.",
+          "outline": "layer feed group \"Feed\" 402x2400 position←feed_scroll.position\nlayer header group \"Header\" @0,0 402x96 effects←header_glass.effect\n  layer title text \"Title\" \"Library\" @16,56\npatch feed_scroll scroll layer=@feed\npatch scrolled progress value←feed_scroll.y start=0 end=-80 clampToRange=true\npatch header_glass glassEffect intensity←scrolled.progress frost=12 refraction=0.3"
+        }
+      ],
+      "origami": {
+        "name": "Liquid Glass"
+      },
+      "defaultNotes": {
+        "intensity": "sonobe: full glass as soon as it's connected.",
+        "frost": "sonobe: Origami's parameters are unpublished; 8 pt clearly frosts while keeping background shapes readable.",
+        "tint": "sonobe: a 15% white wash reads as glass over both light and dark content.",
+        "refraction": "sonobe: a visible lens at the rim that leaves the middle undistorted.",
+        "highlight": "sonobe: a noticeable rim that doesn't read as a border.",
+        "saturation": "sonobe: a mild boost keeps colors behind the glass from looking washed out.",
+        "depth": "sonobe: 16 pt suits typical button and bar sizes."
+      }
+    }
+  ]
+}

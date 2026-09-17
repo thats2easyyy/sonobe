@@ -1,0 +1,820 @@
+{
+  "file": "shapes-1.json",
+  "category": "shapes",
+  "patches": [
+    {
+      "type": "circleShape",
+      "name": "Circle Shape",
+      "category": "shapes",
+      "tier": 2,
+      "status": "supported",
+      "aliases": [
+        "circle",
+        "dot",
+        "ring",
+        "disc",
+        "progress ring",
+        "round shape",
+        "arc"
+      ],
+      "summary": "Makes a circle shape from a center point and a radius, for dots, rings, and progress arcs in a Shape layer.",
+      "docs": "## How it works\nCircle Shape describes a circle as vector path data. It doesn't draw anything by itself: connect its **Shape** output to a Shape layer's Shape property, and the layer adds the fill, stroke, and shadow.\n\n- **Position** is where the circle's center sits, in points from the Shape layer's top-left corner, with y going down.\n- **Radius** is the distance from the center to the edge, in points. 0 draws nothing, so animating Radius up from 0 grows a circle out of nothing.\n- **Anchor** (advanced) changes which point Position refers to: [0.5, 0.5] is the center, and [0, 0] is the top-left of the circle's box.\n\nThe outline starts at the top (12 o'clock) and runs clockwise, so the Shape layer's **Stroke End** fills a progress ring the way people expect.\n\n## Tips\n- For a ring, set the Shape layer's Color to transparent, give it a Stroke Width, and drive Stroke End with a value from 0 to 1.\n- The stroke straddles the outline. Subtract half the Stroke Width from Radius to keep a ring inside its layer.\n- A plain filled dot works fine as an Oval layer. Reach for Circle Shape for rings, stroke trims, and combining shapes with Shape Union.\n\n## Coming from Origami\nOrigami measures shape coordinates from the center of the parent group; here they start at the Shape layer's top-left corner. Anchor is new.",
+      "behavior": "Stateless.\n\nEach frame, for this loop index:\n```\nconst [px, py] = vec(ctx.input(\"position\"));\nconst [ax, ay] = vec(ctx.input(\"anchor\"));\nconst r = Math.max(0, num(ctx.input(\"radius\")));\nif (r === 0) return ctx.output(\"shape\", { path: \"\" });\n// Move from the anchor point to the center of the circle's 2r × 2r box.\nconst cx = px + (0.5 - ax) * 2 * r;\nconst cy = py + (0.5 - ay) * 2 * r;\nconst arc = (x, y) => cmd(\"A\", r, r, 0, 0, 1, x, y);\nconst d = [cmd(\"M\", cx, cy - r), arc(cx + r, cy), arc(cx, cy + r), arc(cx - r, cy), arc(cx, cy - r), \"Z\"].join(\" \");\nctx.output(\"shape\", { path: d });\n```\n\n- Reading inputs: `num(v)` and `vec(v)` return finite numbers. A non-finite value (NaN, ±Infinity) reads as 0, and the patch warns once per restart with `ctx.services.log(\"warn\", …)`.\n- Path text: `cmd(letter, ...numbers)` writes the command letter followed by its numbers separated by single spaces, and commands are joined with one space (`M50 0 A50 50 0 0 1 100 50`). `f(n)` clamps to ±1,000,000, rounds to 3 decimals, and writes `-0` as `0`, so there's never exponent notation. The same inputs always give byte-identical text, which keeps traces and downstream `ctx.changed` stable.\n- Geometry: four quarter arcs make an exact circle (SVG arcs, not a Bézier approximation). The outline starts at 12 o'clock and runs clockwise on screen (y down), so Stroke Start and Stroke End on the Shape layer trim clockwise from the top. Shape Union expects this clockwise winding.\n- Coordinates: layer-local points of the Shape layer the output drives (`ShapeValue.path`), with the origin at its top-left and y down. The renderer draws the path without clipping it to the layer's size.\n- Frame 0: evaluates with authored values; no special case.\n- Loops: evaluates once per loop index. The output length is the longest input loop; shorter loops wrap and scalars broadcast. An empty loop gives an empty output. A Shape layer bound to a loop of shapes replicates, one instance per item.\n- Edge cases: a radius at or below 0 outputs the empty shape silently. The empty shape is `{ path: \"\" }`; the Shape layer draws nothing for it. Very large radii aren't limited beyond the ±1,000,000 coordinate clamp.\n- Hit testing: touches land on the Shape layer's box (its position and size), not on the path. Parts of the path outside that box still draw but don't receive touches.\n- Coming from Origami: Circle has Position and Radius, with Position measured from the center of the parent group and no documented defaults. Importers translate Position into the Shape layer's top-left space. `anchor` has no Origami port and imports as its default.",
+      "inputs": [
+        {
+          "key": "position",
+          "name": "Position",
+          "type": "point",
+          "subtype": "distance",
+          "default": [
+            50,
+            50
+          ],
+          "description": "Where the circle's center sits, in points from the Shape layer's top-left corner, y down."
+        },
+        {
+          "key": "radius",
+          "name": "Radius",
+          "type": "number",
+          "subtype": "distance",
+          "default": 50,
+          "min": 0,
+          "description": "Distance from the center to the edge, in points. 0 or less draws nothing."
+        },
+        {
+          "key": "anchor",
+          "name": "Anchor",
+          "type": "anchor",
+          "default": [
+            0.5,
+            0.5
+          ],
+          "description": "Which point of the circle's box Position refers to: [0.5, 0.5] is the center, [0, 0] the top-left corner.",
+          "advanced": true
+        }
+      ],
+      "outputs": [
+        {
+          "key": "shape",
+          "name": "Shape",
+          "type": "shape",
+          "description": "The circle as vector path data. Connect it to a Shape layer's Shape property."
+        }
+      ],
+      "alwaysEvaluate": false,
+      "pairsWellWith": [
+        "classicAnimation",
+        "transition",
+        "repeatingAnimation",
+        "shapeUnion",
+        "loop"
+      ],
+      "commonMistakes": [
+        "The ring shows as a solid disc: the Shape layer fills the circle with its Color. Set Color to transparent and give the layer a Stroke Width and Stroke Color.",
+        "Only a quarter of the circle shows, in the layer's corner: Position is still [0, 0], which puts the center on the layer's top-left corner. Set Position to half the layer's size, such as [50, 50] for a 100 × 100 layer.",
+        "Stroke End does nothing: the Shape layer's Stroke Width is 0, which turns the stroke off. Raise it above 0."
+      ],
+      "examples": [
+        {
+          "title": "Tap to fill a progress ring",
+          "description": "Radius 46 leaves room for the 8 pt stroke, which straddles the outline.",
+          "outline": "layer ring shape \"Ring\" @151,387 100x100 shape←ring_shape.shape color=#00000000 strokeColor=#34C759FF strokeWidth=8 strokeEnd←fill.output\npatch ring_shape circleShape position=[50,50] radius=46\npatch tap_ring interaction layer=@ring\npatch filled switch flip←tap_ring.tap\npatch fill classicAnimation number←filled.on duration=0.8 curve=cubicInOut"
+        },
+        {
+          "title": "Pulsing live indicator",
+          "outline": "layer live_dot shape \"Live Dot\" @183,420 36x36 shape←dot.shape color=#FF3B30FF opacity←fade.output\npatch beat repeatingAnimation duration=1 curve=quadraticInOut mirrored=true\npatch grow transition<number> progress←beat.progress start=8 end=18\npatch dot circleShape position=[18,18] radius←grow.output\npatch fade transition<number> progress←beat.progress start=1 end=0.35"
+        }
+      ],
+      "origami": {
+        "id": "builtin.shape.circle",
+        "name": "Circle"
+      },
+      "defaultNotes": {
+        "position": "sonobe: Origami's default is undocumented; [50, 50] centers the circle in a default 100 × 100 Shape layer.",
+        "radius": "sonobe: Origami's default is undocumented; 50 fills a default 100 × 100 Shape layer.",
+        "anchor": "sonobe: new port; [0.5, 0.5] keeps Position at the center, as Origami's Circle does."
+      }
+    },
+    {
+      "type": "ovalShape",
+      "name": "Oval Shape",
+      "category": "shapes",
+      "tier": 2,
+      "status": "supported",
+      "aliases": [
+        "oval",
+        "ellipse",
+        "circle",
+        "egg",
+        "blob",
+        "squash and stretch"
+      ],
+      "summary": "Makes an oval shape from a center point and a size, for ellipses, blobs, and squash-and-stretch effects in a Shape layer.",
+      "docs": "## How it works\nOval Shape describes an ellipse as vector path data. Connect its **Shape** output to a Shape layer's Shape property to see it; the layer supplies the fill and stroke.\n\n- **Position** is where the oval's center sits, in points from the Shape layer's top-left corner, y down.\n- **Size** is the oval's width and height in points. Equal values make a circle, and a 0 in either draws nothing.\n- **Anchor** (advanced) changes which point of the oval's box Position refers to. [0, 0] makes Position the top-left corner, like a layer's position.\n\nThe outline starts at the top center and runs clockwise.\n\n## Tips\n- Animate Size with a Pop Animation set to Size for squash and stretch: wider and shorter on impact, then back.\n- Combine several ovals with Shape Union to make clouds, eyes, or blobs that share one fill and shadow.\n- Keep the oval inside the Shape layer's size so the whole oval receives touches.\n\n## Coming from Origami\nOrigami measures shape coordinates from the center of the parent group; here they start at the Shape layer's top-left corner. Anchor is new.",
+      "behavior": "Stateless.\n\nEach frame, for this loop index:\n```\nconst [px, py] = vec(ctx.input(\"position\"));\nconst [ax, ay] = vec(ctx.input(\"anchor\"));\nconst [w, h] = vec(ctx.input(\"size\")).map((v) => Math.max(0, v));\nif (w === 0 || h === 0) return ctx.output(\"shape\", { path: \"\" });\nconst rx = w / 2;\nconst ry = h / 2;\n// Move from the anchor point to the center of the w × h box.\nconst cx = px + (0.5 - ax) * w;\nconst cy = py + (0.5 - ay) * h;\nconst arc = (x, y) => cmd(\"A\", rx, ry, 0, 0, 1, x, y);\nconst d = [cmd(\"M\", cx, cy - ry), arc(cx + rx, cy), arc(cx, cy + ry), arc(cx - rx, cy), arc(cx, cy - ry), \"Z\"].join(\" \");\nctx.output(\"shape\", { path: d });\n```\n\n- Reading inputs: `num(v)` and `vec(v)` return finite numbers. A non-finite value (NaN, ±Infinity) reads as 0, and the patch warns once per restart with `ctx.services.log(\"warn\", …)`.\n- Path text: `cmd(letter, ...numbers)` writes the command letter followed by its numbers separated by single spaces, and commands are joined with one space (`M50 0 A50 50 0 0 1 100 50`). `f(n)` clamps to ±1,000,000, rounds to 3 decimals, and writes `-0` as `0`, so there's never exponent notation. The same inputs always give byte-identical text, which keeps traces and downstream `ctx.changed` stable.\n- Geometry: four elliptical quarter arcs make an exact ellipse. The outline starts at the top center and runs clockwise on screen (y down). With equal width and height, the text is identical to Circle Shape's with radius `w / 2` at the same center.\n- Coordinates: layer-local points of the Shape layer the output drives (`ShapeValue.path`), with the origin at its top-left and y down. The renderer draws the path without clipping it to the layer's size.\n- Frame 0: evaluates with authored values; no special case.\n- Loops: evaluates once per loop index. The output length is the longest input loop; shorter loops wrap and scalars broadcast. An empty loop gives an empty output. A Shape layer bound to a loop of shapes replicates, one instance per item.\n- Edge cases: negative size components read as 0, and a width or height of 0 outputs the empty shape silently. The empty shape is `{ path: \"\" }`; the Shape layer draws nothing for it. A spring overshooting below 0 therefore hides the oval for those frames instead of drawing it flipped.\n- Hit testing: touches land on the Shape layer's box (its position and size), not on the path. Parts of the path outside that box still draw but don't receive touches.\n- Coming from Origami: Oval has Position and Size. Origami doesn't document whether Position is the center or a corner; Sonobe uses the center, consistent with Circle. Importers translate Position from Origami's parent-center coordinates. `anchor` has no Origami port and imports as its default.",
+      "inputs": [
+        {
+          "key": "position",
+          "name": "Position",
+          "type": "point",
+          "subtype": "distance",
+          "default": [
+            50,
+            50
+          ],
+          "description": "Where the oval's center sits, in points from the Shape layer's top-left corner, y down."
+        },
+        {
+          "key": "size",
+          "name": "Size",
+          "type": "size",
+          "subtype": "distance",
+          "default": [
+            100,
+            100
+          ],
+          "min": 0,
+          "description": "Width and height of the oval in points. A 0 in either draws nothing."
+        },
+        {
+          "key": "anchor",
+          "name": "Anchor",
+          "type": "anchor",
+          "default": [
+            0.5,
+            0.5
+          ],
+          "description": "Which point of the oval's box Position refers to: [0.5, 0.5] is the center, [0, 0] the top-left corner.",
+          "advanced": true
+        }
+      ],
+      "outputs": [
+        {
+          "key": "shape",
+          "name": "Shape",
+          "type": "shape",
+          "description": "The oval as vector path data. Connect it to a Shape layer's Shape property."
+        }
+      ],
+      "alwaysEvaluate": false,
+      "pairsWellWith": [
+        "popAnimation",
+        "transition",
+        "shapeUnion",
+        "circleShape",
+        "interaction"
+      ],
+      "commonMistakes": [
+        "The oval sits half outside its layer: Position is the oval's center, not its top-left corner. Set Position to half the Size, or set Anchor to [0, 0].",
+        "The oval blinks out for a moment during a bouncy animation: the spring pushes Size past 0, and a width or height at or below 0 draws nothing. Animate toward a small positive size, or lower the bounciness."
+      ],
+      "examples": [
+        {
+          "title": "Tap to blink an eye",
+          "outline": "layer eye shape \"Eye\" @151,380 100x60 shape←eye_shape.shape color=#1C1C1EFF\npatch tap_eye interaction layer=@eye\npatch blink switch flip←tap_eye.tap\npatch close popAnimation number←blink.on bounciness=0 speed=20\npatch lid transition<size> progress←close.output start=[100,60] end=[100,4]\npatch eye_shape ovalShape position=[50,30] size←lid.output"
+        }
+      ],
+      "origami": {
+        "id": "builtin.shape.ellipse",
+        "name": "Oval"
+      },
+      "defaultNotes": {
+        "position": "sonobe: Origami's default is undocumented; [50, 50] centers the oval in a default 100 × 100 Shape layer.",
+        "size": "sonobe: Origami's default is undocumented; [100, 100] fills a default Shape layer.",
+        "anchor": "sonobe: new port; [0.5, 0.5] keeps Position at the center, like Circle Shape."
+      }
+    },
+    {
+      "type": "roundedRectangleShape",
+      "name": "Rounded Rectangle Shape",
+      "category": "shapes",
+      "tier": 2,
+      "status": "supported",
+      "aliases": [
+        "rounded rectangle",
+        "round rect",
+        "rounded rect",
+        "pill",
+        "capsule",
+        "squircle",
+        "card shape",
+        "rectangle path"
+      ],
+      "summary": "Makes a rectangle shape with rounded corners, for cards, pills, and buttons you want to stroke, trim, morph, or combine.",
+      "docs": "## How it works\nRounded Rectangle Shape describes a rectangle with rounded corners as vector path data. Connect **Shape** to a Shape layer's Shape property to draw it.\n\n- **Position** is where the rectangle's center sits, in points from the Shape layer's top-left corner, y down.\n- **Size** is the width and height in points.\n- **Corner Radius** rounds every corner. A radius of half the height or more makes fully round, pill-shaped ends.\n- **Corner Radii** and **Corner Smoothing** (advanced) set each corner separately and add smooth, squircle-style corners. The outline matches a Rectangle layer with the same settings exactly.\n- **Anchor** (advanced) changes which point Position refers to.\n\nThe outline starts on the top edge, where the top-right corner begins, and runs clockwise.\n\n## Tips\n- Use a Rectangle layer for plain cards. Reach for this patch when you need a border that draws itself (Stroke End), a union with other shapes, or a morph such as a square turning into a circle.\n- Animate Corner Radius up to half the Size to turn a square into a circle.\n- For a tooltip or chat bubble, combine it with Triangle Shape in Shape Union so the body and tail share one fill and shadow.\n\n## Coming from Origami\nOrigami's port is named Radius, and its patch has no per-corner radii or smoothing. Origami measures shape coordinates from the center of the parent group; here they start at the Shape layer's top-left corner.",
+      "behavior": "Stateless.\n\nEach frame, for this loop index:\n```\nconst [px, py] = vec(ctx.input(\"position\"));\nconst [ax, ay] = vec(ctx.input(\"anchor\"));\nconst [w, h] = vec(ctx.input(\"size\")).map((v) => Math.max(0, v));\nif (w === 0 || h === 0) return ctx.output(\"shape\", { path: \"\" });\nconst r = num(ctx.input(\"cornerRadius\"));\nconst perCorner = vec(ctx.input(\"cornerRadii\"));       // [topLeft, topRight, bottomRight, bottomLeft]\nconst radii = ctx.isConnected(\"cornerRadii\") || perCorner.some((v) => v > 0) ? perCorner : [r, r, r, r];\nconst smoothing = Math.min(1, Math.max(0, num(ctx.input(\"cornerSmoothing\"))));\nconst left = px - ax * w;\nconst top = py - ay * h;\nctx.output(\"shape\", { path: squirclePath(left, top, w, h, radii, smoothing) });\n```\n\n- Reading inputs: `num(v)` and `vec(v)` return finite numbers. A non-finite value (NaN, ±Infinity) reads as 0, and the patch warns once per restart with `ctx.services.log(\"warn\", …)`.\n- Geometry: `squirclePath(x, y, w, h, radii, smoothing)` in `packages/renderer/src/squircle.ts` is the function that draws Rectangle layer corners, so a Shape layer fed by this patch matches a Rectangle layer with the same size, radii, and smoothing pixel for pixel. Patches can't import the renderer (the dependency direction is core ← engine ← patches ← renderer), so move `squirclePath` into a DOM-free module that both packages import, such as `@sonobe/engine` math, rather than copying it.\n- What `squirclePath` does: negative radii read as 0. Each corner shares the length of its two edges with the neighboring corners in proportion to their radii and is capped by that room, so a uniform radius is capped at half the shorter side (pill ends). Smoothing 0 draws circular arcs; above 0 each arc shortens and blends into its edges with two cubic Béziers (Figma's squircle construction). Its numbers are rounded to 3 decimals, and its text is used as is.\n- Winding and trimming: the path starts on the top edge where the top-right corner's curve begins and runs clockwise on screen (y down), so Stroke Start and Stroke End trim from near the top-right corner. Shape Union expects this clockwise winding.\n- Corner Radii precedence: while `cornerRadii` is connected it always wins, even when every value is 0, so an animation passing through [0, 0, 0, 0] doesn't jump back to Corner Radius. Unconnected, it wins when any value is above 0.\n- Coordinates: layer-local points of the Shape layer the output drives (`ShapeValue.path`), with the origin at its top-left and y down. The renderer draws the path without clipping it to the layer's size.\n- Frame 0: evaluates with authored values; no special case.\n- Loops: evaluates once per loop index. The output length is the longest input loop; shorter loops wrap and scalars broadcast. An empty loop gives an empty output. A Shape layer bound to a loop of shapes replicates, one instance per item.\n- Edge cases: negative size components read as 0, and a width or height of 0 outputs the empty shape silently. The empty shape is `{ path: \"\" }`; the Shape layer draws nothing for it. Coordinates are clamped to ±1,000,000.\n- Hit testing: touches land on the Shape layer's box (its position and size), not on the path. Parts of the path outside that box still draw but don't receive touches.\n- Coming from Origami: the serialized id is `builtin.shape.roundRect` (the docs slug is lowercase). The Radius port imports as `cornerRadius`. Origami doesn't document how it limits large radii or whether Position is the center; Sonobe caps radii as above and uses the center, consistent with Circle. Importers translate Position from Origami's parent-center coordinates. The advanced ports have no Origami equivalents and import as their defaults.",
+      "inputs": [
+        {
+          "key": "position",
+          "name": "Position",
+          "type": "point",
+          "subtype": "distance",
+          "default": [
+            50,
+            50
+          ],
+          "description": "Where the rectangle's center sits, in points from the Shape layer's top-left corner, y down."
+        },
+        {
+          "key": "size",
+          "name": "Size",
+          "type": "size",
+          "subtype": "distance",
+          "default": [
+            100,
+            100
+          ],
+          "min": 0,
+          "description": "Width and height in points. A 0 in either draws nothing."
+        },
+        {
+          "key": "cornerRadius",
+          "name": "Corner Radius",
+          "type": "number",
+          "subtype": "distance",
+          "default": 16,
+          "min": 0,
+          "description": "Rounds all four corners, in points. At half the shorter side or more, the ends are fully round, like a pill."
+        },
+        {
+          "key": "cornerRadii",
+          "name": "Corner Radii",
+          "type": "point4d",
+          "subtype": "distance",
+          "default": [
+            0,
+            0,
+            0,
+            0
+          ],
+          "description": "Separate radii for the top-left, top-right, bottom-right, and bottom-left corners, in points. While connected, or when any value is above 0, they replace Corner Radius.",
+          "advanced": true
+        },
+        {
+          "key": "cornerSmoothing",
+          "name": "Corner Smoothing",
+          "type": "number",
+          "subtype": "progress",
+          "default": 0,
+          "min": 0,
+          "max": 1,
+          "step": 0.01,
+          "description": "Blends each corner into its edges for a squircle look: 0 draws circular corners, and 1 the smoothest. Matches a Rectangle layer's Corner Smoothing.",
+          "advanced": true
+        },
+        {
+          "key": "anchor",
+          "name": "Anchor",
+          "type": "anchor",
+          "default": [
+            0.5,
+            0.5
+          ],
+          "description": "Which point of the rectangle Position refers to: [0.5, 0.5] is the center, [0, 0] the top-left corner.",
+          "advanced": true
+        }
+      ],
+      "outputs": [
+        {
+          "key": "shape",
+          "name": "Shape",
+          "type": "shape",
+          "description": "The rounded rectangle as vector path data. Connect it to a Shape layer's Shape property."
+        }
+      ],
+      "alwaysEvaluate": false,
+      "pairsWellWith": [
+        "shapeUnion",
+        "triangleShape",
+        "popAnimation",
+        "transition",
+        "classicAnimation"
+      ],
+      "commonMistakes": [
+        "Corner Radius has no effect: Corner Radii is connected, or one of its values is above 0, so it replaces Corner Radius. Disconnect Corner Radii and set it back to [0, 0, 0, 0].",
+        "The rectangle sits half outside its layer: Position is the center, not the top-left corner. Set Position to half the Size, or set Anchor to [0, 0].",
+        "Raising Corner Radius stops changing anything past a point: the radius is already capped at half the shorter side, which is fully round. Make Size larger if you want bigger curves."
+      ],
+      "examples": [
+        {
+          "title": "Tap to morph a square into a circle",
+          "outline": "layer avatar_frame shape \"Avatar Frame\" @151,380 100x100 shape←frame.shape color=#5856D6FF\npatch tap_frame interaction layer=@avatar_frame\npatch round switch flip←tap_frame.tap\npatch pop popAnimation number←round.on bounciness=4 speed=12\npatch radius transition<number> progress←pop.output start=16 end=50\npatch frame roundedRectangleShape position=[50,50] size=[100,100] cornerRadius←radius.output"
+        },
+        {
+          "title": "Pill button that traces its border while pressed",
+          "description": "The outline is 2 pt smaller than the layer so the stroke stays inside it.",
+          "outline": "layer pill shape \"Pill Button\" @121,420 160x48 shape←pill_shape.shape color=#00000000 strokeColor=#007AFFFF strokeWidth=2 strokeEnd←trace.output\npatch pill_shape roundedRectangleShape position=[80,24] size=[158,46] cornerRadius=23\npatch press interaction layer=@pill\npatch trace classicAnimation number←press.down duration=0.4 curve=cubicOut"
+        }
+      ],
+      "origami": {
+        "id": "builtin.shape.roundrect",
+        "name": "Rounded Rectangle"
+      },
+      "importAliases": [
+        "builtin.shape.roundRect"
+      ],
+      "origamiPorts": {
+        "cornerRadius": "Radius"
+      },
+      "defaultNotes": {
+        "position": "sonobe: Origami's default is undocumented; [50, 50] centers the rectangle in a default 100 × 100 Shape layer.",
+        "size": "sonobe: Origami's default is undocumented; [100, 100] fills a default Shape layer.",
+        "cornerRadius": "sonobe: Origami's default is undocumented; 16 shows the rounding at a glance.",
+        "cornerRadii": "sonobe: new port; all zeros defers to Corner Radius.",
+        "cornerSmoothing": "sonobe: new port; 0 matches a Rectangle layer's default circular corners.",
+        "anchor": "sonobe: new port; [0.5, 0.5] keeps Position at the center, like Circle Shape."
+      }
+    },
+    {
+      "type": "triangleShape",
+      "name": "Triangle Shape",
+      "category": "shapes",
+      "tier": 2,
+      "status": "supported",
+      "aliases": [
+        "triangle",
+        "arrow",
+        "play icon",
+        "chevron",
+        "tooltip tail",
+        "polygon",
+        "three points"
+      ],
+      "summary": "Makes a triangle shape from three corner points, for play icons, arrows, and tooltip tails in a Shape layer.",
+      "docs": "## How it works\nTriangle Shape joins three points with straight lines and closes the outline. Connect its **Shape** output to a Shape layer's Shape property to draw it.\n\n- **First Point**, **Second Point**, and **Third Point** are the corners, in points from the Shape layer's top-left corner, with y going down.\n- The outline runs from First to Second to Third and back to First. The order doesn't change the fill, but a trimmed stroke (Stroke End) starts at First Point and follows that order.\n- The default points make an upward-pointing triangle that fills a 100 × 100 layer.\n\n## Tips\n- Animate one point with a Transition set to Point to flip an arrow or morph a play icon.\n- Pair it with Rounded Rectangle Shape in Shape Union for a tooltip or chat bubble tail.\n- When all three points fall on one line, the fill disappears, but a stroke still draws the line.\n\n## Coming from Origami\nOrigami measures the points from the center of the parent group; here they start at the Shape layer's top-left corner.",
+      "behavior": "Stateless.\n\nEach frame, for this loop index:\n```\nconst p1 = vec(ctx.input(\"firstPoint\"));\nconst p2 = vec(ctx.input(\"secondPoint\"));\nconst p3 = vec(ctx.input(\"thirdPoint\"));\nconst d = [cmd(\"M\", ...p1), cmd(\"L\", ...p2), cmd(\"L\", ...p3), \"Z\"].join(\" \");\nctx.output(\"shape\", { path: d });\n```\n\n- Reading inputs: `num(v)` and `vec(v)` return finite numbers. A non-finite value (NaN, ±Infinity) reads as 0, and the patch warns once per restart with `ctx.services.log(\"warn\", …)`.\n- Path text: `cmd(letter, ...numbers)` writes the command letter followed by its numbers separated by single spaces, and commands are joined with one space (`M50 0 A50 50 0 0 1 100 50`). `f(n)` clamps to ±1,000,000, rounds to 3 decimals, and writes `-0` as `0`, so there's never exponent notation. The same inputs always give byte-identical text, which keeps traces and downstream `ctx.changed` stable.\n- Winding follows the point order: clockwise on screen (y down) when the points go clockwise. Shape Union corrects counter-clockwise inputs, so the order never punches a hole in a union.\n- Degenerate triangles: when the points are repeated or collinear, the path is still output. The fill shows nothing, and a stroke draws the line (or a dot with round caps). This keeps a flip animation continuous as a point crosses the opposite edge.\n- Coordinates: layer-local points of the Shape layer the output drives (`ShapeValue.path`), with the origin at its top-left and y down. The renderer draws the path without clipping it to the layer's size.\n- Frame 0: evaluates with authored values; no special case.\n- Loops: evaluates once per loop index. The output length is the longest input loop; shorter loops wrap and scalars broadcast. An empty loop gives an empty output. A Shape layer bound to a loop of shapes replicates, one instance per item.\n- Hit testing: touches land on the Shape layer's box (its position and size), not on the path. Parts of the path outside that box still draw but don't receive touches.\n- Coming from Origami: the ports First Point, Second Point, and Third Point import directly (the docs spell the last one \"Third point\"; files use \"Third Point\"). Origami's defaults are undocumented. Importers translate the points from Origami's parent-center coordinates.",
+      "inputs": [
+        {
+          "key": "firstPoint",
+          "name": "First Point",
+          "type": "point",
+          "subtype": "distance",
+          "default": [
+            50,
+            0
+          ],
+          "description": "The first corner, in points from the Shape layer's top-left corner, y down. The outline starts here."
+        },
+        {
+          "key": "secondPoint",
+          "name": "Second Point",
+          "type": "point",
+          "subtype": "distance",
+          "default": [
+            100,
+            100
+          ],
+          "description": "The second corner, in points from the Shape layer's top-left corner."
+        },
+        {
+          "key": "thirdPoint",
+          "name": "Third Point",
+          "type": "point",
+          "subtype": "distance",
+          "default": [
+            0,
+            100
+          ],
+          "description": "The third corner, in points from the Shape layer's top-left corner. The outline closes from here back to First Point."
+        }
+      ],
+      "outputs": [
+        {
+          "key": "shape",
+          "name": "Shape",
+          "type": "shape",
+          "description": "The triangle as vector path data. Connect it to a Shape layer's Shape property."
+        }
+      ],
+      "alwaysEvaluate": false,
+      "pairsWellWith": [
+        "shapeUnion",
+        "roundedRectangleShape",
+        "transition",
+        "popAnimation"
+      ],
+      "commonMistakes": [
+        "The triangle is invisible: the three points are the same or fall on one straight line, so there's no area to fill. Move one point off that line.",
+        "The triangle shows up far from where you expected: the points are measured from the Shape layer's top-left corner, not from the screen or the layer's center. Keep them within the layer's size."
+      ],
+      "examples": [
+        {
+          "title": "Dropdown arrow that flips when opened",
+          "description": "Moving the tip across the base flips the arrow from pointing down to pointing up.",
+          "outline": "layer menu_header rectangle \"Menu Header\" @16,100 370x64\nlayer arrow shape \"Arrow\" @340,120 24x24 shape←arrow_shape.shape color=#3C3C43FF hitTest=false\npatch tap_header interaction layer=@menu_header\npatch open switch flip←tap_header.tap\npatch pop popAnimation number←open.on bounciness=0 speed=16\npatch tip transition<point> progress←pop.output start=[12,17] end=[12,7]\npatch arrow_shape triangleShape firstPoint=[5,12] secondPoint=[19,12] thirdPoint←tip.output"
+        }
+      ],
+      "origami": {
+        "id": "builtin.shape.triangle",
+        "name": "Triangle"
+      },
+      "defaultNotes": {
+        "firstPoint": "sonobe: Origami's defaults are undocumented; the three defaults make an upward triangle that fills a default 100 × 100 Shape layer.",
+        "secondPoint": "sonobe: see First Point.",
+        "thirdPoint": "sonobe: see First Point."
+      }
+    },
+    {
+      "type": "lineShape",
+      "name": "Line Shape",
+      "category": "shapes",
+      "tier": 2,
+      "status": "supported",
+      "aliases": [
+        "line",
+        "divider",
+        "connector",
+        "polyline",
+        "segment",
+        "line chart",
+        "path through points",
+        "stroke line"
+      ],
+      "summary": "Makes a straight or smoothed line through two or more points, for dividers, connectors, progress tracks, and charts.",
+      "docs": "## How it works\nLine Shape draws a path through points for a Shape layer. A line has no area to fill, so the Shape layer shows it only when its **Stroke Width** is above 0.\n\n- **Start Point** and **End Point** set a single straight line, in points from the Shape layer's top-left corner, y down.\n- **Points** (advanced) takes a JSON list instead, like `[[0, 80], [60, 20], [120, 50]]`, for a line chart or a zigzag. Each point can be `[x, y]` or `{ \"x\": 10, \"y\": 20 }`.\n- **Closed** (advanced) joins the last point back to the first, so a list of points becomes a polygon you can fill.\n- **Smoothing** (advanced) curves the line through the points instead of making sharp corners.\n\nThe stroke starts at the first point, so animating the Shape layer's **Stroke End** from 0 to 1 draws the line on.\n\n## Tips\n- For a connector between two moving layers, wire each layer's position into Start Point and End Point.\n- Set the Shape layer's Line Cap to Round for soft ends on dividers and progress tracks.\n- To chart a loop of points, turn it into a list with Loop to Array and wire that into Points.",
+      "behavior": "Stateless.\n\nEach frame, for this loop index:\n```\nlet list = ctx.input(\"points\");\nif (typeof list === \"string\") list = tryParseJson(list);          // undefined when the text isn't JSON\nlet pts = Array.isArray(list) ? list.slice(0, 10000).map(readPoint).filter(Boolean) : [];\nif (pts.length < 2) pts = [vec(ctx.input(\"startPoint\")), vec(ctx.input(\"endPoint\"))];\nconst closed = ctx.input(\"closed\") === true;\nconst s = Math.min(1, Math.max(0, num(ctx.input(\"smoothing\"))));\nconst n = pts.length;\nconst at = (i) => (closed ? pts[(i + n) % n] : pts[Math.min(n - 1, Math.max(0, i))]);\nconst parts = [cmd(\"M\", ...pts[0])];\nconst segments = closed ? n : n - 1;\nfor (let i = 0; i < segments; i++) {\n  const p0 = at(i);\n  const p1 = at(i + 1);\n  if (s === 0) { parts.push(cmd(\"L\", ...p1)); continue; }\n  // Catmull-Rom through the neighbors, written as a cubic Bézier.\n  const prev = at(i - 1);\n  const next = at(i + 2);\n  const c1 = [p0[0] + ((p1[0] - prev[0]) * s) / 6, p0[1] + ((p1[1] - prev[1]) * s) / 6];\n  const c2 = [p1[0] - ((next[0] - p0[0]) * s) / 6, p1[1] - ((next[1] - p0[1]) * s) / 6];\n  parts.push(cmd(\"C\", ...c1, ...c2, ...p1));\n}\nif (closed) parts.push(\"Z\");\nctx.output(\"shape\", { path: parts.join(\" \") });\n```\n\n- Reading inputs: `num(v)` and `vec(v)` return finite numbers. A non-finite value (NaN, ±Infinity) reads as 0, and the patch warns once per restart with `ctx.services.log(\"warn\", …)`.\n- `readPoint(item)` accepts `[x, y]` arrays (extra items are ignored) and objects with `x` and `y`. Each coordinate must be a finite number or a numeric string such as `\"12.5\"`; anything else makes the item invalid and returns `null`.\n- Path text: `cmd(letter, ...numbers)` writes the command letter followed by its numbers separated by single spaces, and commands are joined with one space (`M50 0 A50 50 0 0 1 100 50`). `f(n)` clamps to ±1,000,000, rounds to 3 decimals, and writes `-0` as `0`, so there's never exponent notation. The same inputs always give byte-identical text, which keeps traces and downstream `ctx.changed` stable.\n- Points precedence: when `points` yields 2 or more valid points, Start Point and End Point are ignored. Invalid items are skipped. Skipped items, text that isn't JSON, a non-array value other than `null` or `[]`, or a list longer than 10,000 items each warn once per restart.\n- Smoothing: `s = 0` draws straight `L` segments. Above 0, each segment is a uniform Catmull-Rom curve scaled by `s`; `s = 1` is the standard curve. Open lines reuse the end points as their own neighbors, so a two-point line stays straight at any smoothing. Closed lines wrap neighbors around.\n- Winding and trimming: the path starts at the first point and follows the list order, so Stroke Start and Stroke End trim from the first point.\n- Fill: SVG fills an open path as if a straight edge joined its last point to its first. A Shape layer with an opaque Color therefore fills the area under an open chart line. This is the layer's behavior; the patch doesn't change it.\n- Edge cases: when every point is the same, the zero-length path is still output; with round line caps, a stroke draws a dot. Coordinates are clamped to ±1,000,000.\n- Coordinates: layer-local points of the Shape layer the output drives (`ShapeValue.path`), with the origin at its top-left and y down. The renderer draws the path without clipping it to the layer's size.\n- Frame 0: evaluates with authored values; no special case.\n- Loops: evaluates once per loop index. The output length is the longest input loop; shorter loops wrap and scalars broadcast. `points` is one JSON value per index, so a loop of points wired into Points gives single points per index, which fall back to Start Point and End Point. Convert the loop with Loop to Array first.\n- Hit testing: touches land on the Shape layer's box (its position and size), not on the path. Parts of the path outside that box still draw but don't receive touches.\n- Coming from Origami: Origami has no line patch; people draw lines with thin rectangles or JSON to Shape. Importers never produce this patch.",
+      "inputs": [
+        {
+          "key": "startPoint",
+          "name": "Start Point",
+          "type": "point",
+          "subtype": "distance",
+          "default": [
+            0,
+            50
+          ],
+          "description": "Where the line begins, in points from the Shape layer's top-left corner, y down."
+        },
+        {
+          "key": "endPoint",
+          "name": "End Point",
+          "type": "point",
+          "subtype": "distance",
+          "default": [
+            100,
+            50
+          ],
+          "description": "Where the line ends, in points from the Shape layer's top-left corner."
+        },
+        {
+          "key": "points",
+          "name": "Points",
+          "type": "json",
+          "default": [],
+          "description": "A list of points to draw through in order, such as [[0, 80], [60, 20], [120, 50]]. With 2 or more valid points, it replaces Start Point and End Point.",
+          "advanced": true
+        },
+        {
+          "key": "closed",
+          "name": "Closed",
+          "type": "boolean",
+          "default": false,
+          "description": "When on, joins the last point back to the first, making a closed outline you can fill.",
+          "advanced": true
+        },
+        {
+          "key": "smoothing",
+          "name": "Smoothing",
+          "type": "number",
+          "subtype": "progress",
+          "default": 0,
+          "min": 0,
+          "max": 1,
+          "step": 0.01,
+          "description": "0 draws straight segments between points; higher values curve the line smoothly through every point, up to 1.",
+          "advanced": true
+        }
+      ],
+      "outputs": [
+        {
+          "key": "shape",
+          "name": "Shape",
+          "type": "shape",
+          "description": "The line as vector path data. Connect it to a Shape layer's Shape property and give the layer a Stroke Width."
+        }
+      ],
+      "alwaysEvaluate": false,
+      "pairsWellWith": [
+        "drag",
+        "wait",
+        "loopToArray",
+        "classicAnimation",
+        "shapeUnion"
+      ],
+      "commonMistakes": [
+        "The line doesn't show up: Shape layers start with Stroke Width 0, and a line has nothing to fill. Set Stroke Width to 2 or more and choose a Stroke Color.",
+        "A chart line turns into a dark filled area: the Shape layer fills the region between the line and a straight edge from the last point back to the first. Set the Shape layer's Color to transparent.",
+        "Points seems to be ignored: it has fewer than 2 valid points, so Start Point and End Point are used instead. Make each item [x, y] or an object with numeric x and y."
+      ],
+      "examples": [
+        {
+          "title": "Slingshot band that follows your finger",
+          "description": "The band layer covers the screen at @0,0, so its coordinates match the screen's. Receives Touches is off so the band never blocks taps.",
+          "outline": "layer band shape \"Band\" @0,0 402x874 shape←band_line.shape color=#00000000 strokeColor=#FF9500FF strokeWidth=4 hitTest=false\nlayer stone oval \"Stone\" @181,600 40x40 position←pull.position\npatch pull drag layer=@stone startPosition=[181,600]\npatch stone_center add<point>[2] value1←pull.position value2=[20,20]\npatch band_line lineShape startPoint=[201,480] endPoint←stone_center.output"
+        },
+        {
+          "title": "Line chart that draws itself on launch",
+          "outline": "layer chart shape \"Chart\" @16,300 370x160 shape←trend.shape color=#00000000 strokeColor=#007AFFFF strokeWidth=3 strokeEnd←reveal.progress\npatch trend lineShape points=[[0,130],[60,90],[120,110],[185,50],[245,70],[310,25],[370,40]] smoothing=0.6\npatch launch whenPrototypeStarts\npatch reveal wait start←launch.started duration=1.2"
+        }
+      ],
+      "origami": null,
+      "defaultNotes": {
+        "startPoint": "sonobe: with End Point, draws a horizontal line across the middle of a default 100 × 100 Shape layer.",
+        "endPoint": "sonobe: see Start Point.",
+        "points": "sonobe: an empty list uses Start Point and End Point.",
+        "closed": "sonobe: lines are open unless you ask for a polygon.",
+        "smoothing": "sonobe: straight segments are the least surprising start."
+      }
+    },
+    {
+      "type": "svgPathShape",
+      "name": "SVG Path Shape",
+      "category": "shapes",
+      "tier": 2,
+      "status": "supported",
+      "aliases": [
+        "svg",
+        "svg path",
+        "path data",
+        "icon",
+        "vector path",
+        "custom shape",
+        "paste svg",
+        "bezier path"
+      ],
+      "summary": "Turns SVG path data, like an icon copied from a design tool, into a shape for a Shape layer, scaled to the size you want.",
+      "docs": "## How it works\nSVG Path Shape reads SVG path data, the text inside an SVG's `d` attribute, and outputs a shape for a Shape layer. Use it to bring icons and custom vector art from Figma, an icon set, or a code editor into a prototype.\n\n- **Path Data** is the path text, such as `M0 0 L100 0 L50 80 Z`. You can paste a whole `<svg>…</svg>` snippet instead: every `<path>` inside is combined, and the snippet's viewBox is used while View Box is all zeros.\n- **View Box** is the coordinate box the path was drawn in, like `[0, 0, 24, 24]` for a 24 pt icon.\n- **Size** is how big to draw that box, in points from the Shape layer's top-left corner. The path scales evenly and stays centered, so icons never stretch.\n- **Error** and **Error Message** tell you when part of the path couldn't be read.\n\n## Tips\n- In Figma, flatten the vector, choose Copy as SVG, and paste the snippet into Path Data.\n- Scaling here keeps the Shape layer's Stroke Width the same at any size, unlike scaling the layer.\n- Use the same values for Size and the Shape layer's size so the whole icon receives touches.",
+      "behavior": "Stateless: outputs depend only on the current inputs. Per loop index, cache the last `(pathData, viewBox, size)` and its result, and reparse only when one of them changes; the cache never changes outputs.\n\nEach frame, for this loop index:\n```\nlet text = String(ctx.input(\"pathData\") ?? \"\");\nlet viewBox = vec(ctx.input(\"viewBox\"));                   // [x, y, width, height]\nconst [w, h] = vec(ctx.input(\"size\")).map((v) => Math.max(0, v));\nconst problems = [];\nif (text.length > 1000000) return done([], [\"Path data is longer than 1,000,000 characters.\"]);\nif (text.trimStart().startsWith(\"<\")) {\n  const svg = readSvgMarkup(text);                         // { paths: string[], viewBox: number[] | null, problems: string[] }\n  text = svg.paths.join(\" \");\n  if (!(viewBox[2] > 0 && viewBox[3] > 0) && svg.viewBox) viewBox = svg.viewBox;\n  problems.push(...svg.problems);\n}\nconst { segments, syntaxError } = parsePath(text);         // absolute M, L, C, Q, A, Z\nif (syntaxError) problems.unshift(syntaxError);\nconst [vx, vy, vw, vh] = viewBox;\nif (vw > 0 && vh > 0) {\n  if (w === 0 || h === 0) return done([], problems);\n  const s = Math.min(w / vw, h / vh);\n  const tx = (w - vw * s) / 2 - vx * s;\n  const ty = (h - vh * s) / 2 - vy * s;\n  return done(transform(segments, s, tx, ty), problems);   // x → x·s + tx, y → y·s + ty, arc rx and ry × s\n}\nreturn done(segments, problems);\n\n// done(segments, problems): output \"shape\" = { path: format(segments) },\n// \"error\" = problems.length > 0, \"errorMessage\" = problems.join(\" \").\n```\n\n- Reading inputs: `num(v)` and `vec(v)` return finite numbers. A non-finite value (NaN, ±Infinity) reads as 0, and the patch warns once per restart with `ctx.services.log(\"warn\", …)`.\n- `parsePath(text)` follows the SVG 2 path grammar:\n  - Commands `M L H V C S Q T A Z`: upper case is absolute, lower case relative. Commands repeat implicitly when more numbers follow, and extra coordinate pairs after `M`/`m` are treated as `L`/`l`.\n  - Numbers take an optional sign, digits, an optional decimal point, and an optional exponent (`1e-3`). Separators (whitespace and at most one comma) are optional where unambiguous: `M1-2.5.5` is `M 1 -2.5 0.5`. Arc flags are single `0` or `1` characters and may run together (`a1 1 0 00 1 1`).\n  - The path must start with `M` or `m`; a leading `m` is absolute.\n  - Normalize while parsing: relative to absolute; `H` and `V` to `L`; `S` to `C`, reflecting the previous cubic's second control point (or using the current point when the previous command wasn't a cubic); `T` to `Q` the same way. After `Z`, the current point returns to the subpath start. Arcs with `rx` or `ry` of 0 become `L`; other arcs keep their radii, rotation, and flags.\n  - On the first syntax error, stop and keep the segments before the failing command, as browsers do with a broken `d`. `syntaxError` reads `Path data stops at character 14: expected a number after \"L\".` or `Path data stops at character 3: unknown command \"X\".`, using a 1-based index into the path text.\n- `readSvgMarkup(text)` uses a tolerant tag scanner with no DOM and no entity expansion, so it runs headless:\n  - `paths`: the `d` attribute of every `<path>` element, in document order, in single or double quotes.\n  - `viewBox`: the first `<svg>` element's `viewBox`, four numbers separated by spaces or commas. When that's missing but `width` and `height` are plain numbers (optionally ending in `px`), use `[0, 0, width, height]`; otherwise `null`.\n  - `problems`, each added once: other drawable elements (`<circle>`, `<ellipse>`, `<rect>`, `<line>`, `<polyline>`, `<polygon>`, `<text>`, `<image>`, `<use>`) give \"Only <path> elements are read; flatten other shapes before copying.\" Any `transform` attribute gives \"Transforms in the SVG are ignored; flatten the artwork before copying.\" No `<path>` at all gives \"The SVG has no <path> elements.\"\n- `format(segments)` writes absolute commands with `cmd` and `f(n)`: the letter followed by numbers separated by single spaces, commands joined with one space. `f(n)` clamps to ±1,000,000, rounds to 3 decimals, and writes `-0` as `0`. Share one path module (parse, normalize, transform, reverse, format) with jsonToShape and shapeUnion.\n- Edge cases: empty or whitespace-only Path Data outputs the empty shape, `error` false, and `errorMessage` \"\". The empty shape is `{ path: \"\" }`; the Shape layer draws nothing for it. `error` is true exactly when `errorMessage` isn't empty. A Size with a 0 while View Box is in use outputs the empty shape without an error.\n- Fill rule: the Shape layer fills with SVG's default nonzero rule. `fill-rule=\"evenodd\"` in a snippet isn't read, so a hole wound the same direction as its outline fills in. Most design tools export holes wound the opposite way, which renders correctly.\n- Coordinates: layer-local points of the Shape layer the output drives (`ShapeValue.path`), with the origin at its top-left and y down. The renderer draws the path without clipping it to the layer's size.\n- Frame 0: evaluates with authored values; no special case.\n- Loops: evaluates once per loop index. The output length is the longest input loop; shorter loops wrap and scalars broadcast. A loop of path texts gives a loop of shapes.\n- Muted: outputs `null` for Shape, `false` for Error, and `\"\"` for Error Message. The default bypass would copy Path Data into Error Message.\n- Hit testing: touches land on the Shape layer's box (its position and size), not on the path. Parts of the path outside that box still draw but don't receive touches.\n- Coming from Origami: Origami has no SVG path patch; its custom paths come from JSON to Shape or pasted layers. Importers never produce this patch.",
+      "inputs": [
+        {
+          "key": "pathData",
+          "name": "Path Data",
+          "type": "text",
+          "subtype": "multiline",
+          "default": "M50 0L61.756 33.82L97.553 34.549L69.021 56.18L79.389 90.451L50 70L20.611 90.451L30.979 56.18L2.447 34.549L38.244 33.82Z",
+          "description": "The SVG path text to draw (an SVG's d attribute), such as M0 0 L100 0 L50 80 Z. A whole <svg> snippet works too; its <path> elements are read."
+        },
+        {
+          "key": "viewBox",
+          "name": "View Box",
+          "type": "point4d",
+          "default": [
+            0,
+            0,
+            0,
+            0
+          ],
+          "description": "The box the path was drawn in, as [x, y, width, height], like an SVG's viewBox. All zeros draws the path's coordinates as points, without scaling."
+        },
+        {
+          "key": "size",
+          "name": "Size",
+          "type": "size",
+          "subtype": "distance",
+          "default": [
+            100,
+            100
+          ],
+          "min": 0,
+          "description": "The area, in points from the Shape layer's top-left corner, that View Box is fitted into without stretching and centered. Ignored while View Box is all zeros."
+        }
+      ],
+      "outputs": [
+        {
+          "key": "shape",
+          "name": "Shape",
+          "type": "shape",
+          "description": "The path as vector data. Connect it to a Shape layer's Shape property."
+        },
+        {
+          "key": "error",
+          "name": "Error",
+          "type": "boolean",
+          "description": "True when part of the path couldn't be read. The shape still includes everything before the problem."
+        },
+        {
+          "key": "errorMessage",
+          "name": "Error Message",
+          "type": "text",
+          "description": "Explains what couldn't be read and where; empty when there's no problem."
+        }
+      ],
+      "alwaysEvaluate": false,
+      "pairsWellWith": [
+        "interaction",
+        "switch",
+        "transition",
+        "shapeUnion",
+        "jsonToShape"
+      ],
+      "commonMistakes": [
+        "The icon is tiny and stuck in the corner: the path was drawn in a small box, such as 24 × 24, and View Box is all zeros, so it draws at 24 points. Set View Box to the icon's viewBox and Size to the size you want.",
+        "Parts of a pasted SVG are missing: only <path> elements are read, and transforms are ignored. Flatten the artwork before copying, and check Error Message.",
+        "A multicolor icon turns into a one-color silhouette: a Shape layer has one fill and one stroke. Split the art into one path and one Shape layer per color."
+      ],
+      "examples": [
+        {
+          "title": "Tap to fill a heart",
+          "description": "The heart is drawn in a 24 × 24 box and scaled to 48 pt, so the 2 pt stroke stays crisp.",
+          "outline": "layer heart shape \"Heart\" @171,400 48x48 shape←heart_shape.shape color←heart_fill.output strokeColor=#FF2D55FF strokeWidth=2\npatch heart_shape svgPathShape pathData=\"M12,21C12,21,3,15,3,9C3,6,5.5,4,8,4C10,4,11.5,5.5,12,7C12.5,5.5,14,4,16,4C18.5,4,21,6,21,9C21,15,12,21,12,21Z\" viewBox=[0,0,24,24] size=[48,48]\npatch tap_heart interaction layer=@heart\npatch liked switch flip←tap_heart.tap\npatch heart_fill transition<color> progress←liked.on start=#FF2D5500 end=#FF2D55FF"
+        }
+      ],
+      "origami": null,
+      "defaultNotes": {
+        "pathData": "sonobe: a five-pointed star inside a 100 × 100 box shows the patch working in a default Shape layer.",
+        "viewBox": "sonobe: all zeros draws the path's own coordinates as points, which suits paths drawn at their final size.",
+        "size": "sonobe: matches a Shape layer's default size."
+      }
+    },
+    {
+      "type": "shapeUnion",
+      "name": "Shape Union",
+      "category": "shapes",
+      "tier": 2,
+      "status": "supported",
+      "aliases": [
+        "union",
+        "combine shapes",
+        "merge shapes",
+        "boolean union",
+        "compound shape",
+        "join shapes",
+        "group paths"
+      ],
+      "summary": "Combines two or more shapes into one shape so they share a single fill, stroke, and shadow in one Shape layer.",
+      "docs": "## How it works\nShape Union joins several shapes into one, like combining vector paths in a design tool. Wire shapes from other shape patches into **Shape 1**, **Shape 2**, and so on, and connect **Shape** to a Shape layer. Add inputs to combine more shapes.\n\n- Where shapes overlap, their fills merge into one silhouette, and the Shape layer's shadow follows the combined outline.\n- Unconnected and empty inputs are skipped.\n- When the layer has a stroke, each shape keeps its own outline, so edges inside the overlap stay visible.\n- A hole that's already inside one input, such as the middle of a ring from SVG Path Shape, stays a hole unless another shape covers it.\n\n## Tips\n- Build a chat bubble from a Rounded Rectangle Shape body and a Triangle Shape tail.\n- Stroke End trims the combined path in input order: Shape 1 draws first, then Shape 2.\n- Shape Union combines separate inputs. A loop wired into Shape 1 makes one union per loop item.\n\n## Coming from Origami\nFormerly called Union. Its unnamed inputs become Shape 1, Shape 2, and so on in the same order, and the output is Shape.",
+      "behavior": "Stateless.\n\nEach frame, for this loop index:\n```\nconst n = Math.min(32, Math.max(2, ctx.inputCount));\nconst parts = [];\nfor (let i = 1; i <= n; i++) {\n  const d = pathText(ctx.input(\"shape\" + i));   // null, a missing path, or whitespace-only text → null\n  if (!d) continue;\n  let segs = parsePath(d).segments;              // absolute M, L, C, Q, A, Z (svgPathShape's parser)\n  if (segs.length === 0) continue;\n  if (signedArea(segs) < -1e-6) segs = reverseSubpaths(segs);\n  parts.push(format(segs));\n}\nctx.output(\"shape\", { path: parts.join(\" \") });\n```\n\n- `pathText(v)` returns `v.path` for a shape object whose `path` is a string, `v` for a string, and `null` otherwise, including whitespace-only text.\n- Why winding is normalized: the Shape layer fills with the nonzero rule. Two overlapping subpaths wound in opposite directions cancel and leave a hole, so a counter-clockwise triangle tail would cut into a clockwise body. Making every input's net winding clockwise makes overlaps add up, so fills merge whatever order the points came in.\n- `signedArea(segs)` flattens each subpath (lines as is; each curve or arc sampled at 16 evenly spaced parameter values), closes it back to its start, and sums `(x_i · y_(i+1) − x_(i+1) · y_i) / 2` over every subpath of that input. With y down, a positive total means clockwise on screen. A total within ±1e-6 leaves the input unchanged.\n- `reverseSubpaths(segs)` reverses every subpath of that input and keeps their order, so a hole inside the input stays opposite to its outline. For each subpath: when it's closed and its last point differs from its start, first add an explicit line back to the start. Then walk the segments backward. A line from A to B becomes a line to A. A cubic from A to B with controls c1 and c2 becomes a cubic from B to A with controls c2 and c1. A quadratic keeps its control point. An arc keeps rx, ry, rotation, and the large-arc flag and flips its sweep flag. The reversed subpath keeps its `Z` when the original had one.\n- Invalid path text in an input: use the valid prefix, as svgPathShape does, and warn once per restart naming the input (`Shape 2 has path data that stops at character 14.`).\n- Output text: absolute commands in the shared `cmd` / `f(n)` format (letter followed by numbers separated by single spaces; 3 decimals; `-0` as `0`; ±1,000,000 clamp). Subpaths keep input order, which sets the stroke trim order.\n- Strokes: this is path combination, not a boolean outline merge. Fills and shadows merge; each input's outline stays when stroked.\n- Coordinates: layer-local points of the Shape layer the output drives (`ShapeValue.path`), with the origin at its top-left and y down. The renderer draws the path without clipping it to the layer's size.\n- Frame 0: evaluates with authored values; no special case.\n- Loops: evaluates once per loop index. The output length is the longest input loop; shorter loops wrap and scalars broadcast. An empty loop gives an empty output. A Shape layer bound to a loop of shapes replicates, one instance per item.\n- Edge cases: when every input is empty, the output is the empty shape. The empty shape is `{ path: \"\" }`; the Shape layer draws nothing for it. `inputCount` outside 2–32 (a hand-edited file) is clamped into that range, and missing expanded inputs read `null`.\n- Coming from Origami: Union's unnamed inputs import positionally (port 0 → `shape1`, port 1 → `shape2`, …), its output imports as `shape`, and the file's input count becomes `inputCount`. Origami doesn't document whether Union merges outlines or appends paths; Sonobe appends with normalized winding, so fills merge and strokes don't.",
+      "inputs": [],
+      "outputs": [
+        {
+          "key": "shape",
+          "name": "Shape",
+          "type": "shape",
+          "description": "All the input shapes combined into one. Connect it to a Shape layer's Shape property."
+        }
+      ],
+      "variadic": {
+        "key": "shape",
+        "name": "Shape",
+        "type": "shape",
+        "default": null,
+        "min": 2,
+        "max": 32,
+        "defaultCount": 2,
+        "startIndex": 1,
+        "direction": "inputs",
+        "description": "A shape to combine with the others. Unconnected or empty shapes are skipped."
+      },
+      "alwaysEvaluate": false,
+      "pairsWellWith": [
+        "roundedRectangleShape",
+        "triangleShape",
+        "circleShape",
+        "ovalShape",
+        "svgPathShape"
+      ],
+      "commonMistakes": [
+        "Lines show where the shapes overlap: the Shape layer has a stroke, and each input keeps its own outline. Use the union for fills and shadows, or draw the outline as one path with SVG Path Shape.",
+        "The Shape layer repeats into many copies: a loop is wired into one of the inputs, so the patch makes one union per item. Wire separate shape patches into separate inputs instead."
+      ],
+      "examples": [
+        {
+          "title": "Chat bubble with a tail",
+          "outline": "layer bubble shape \"Bubble\" @40,300 240x112 shape←bubble_shape.shape color=#E9E9EBFF shadowOpacity=0.15 shadowRadius=8 shadowOffset=[0,2]\npatch body roundedRectangleShape position=[120,48] size=[240,96] cornerRadius=20\npatch tail triangleShape firstPoint=[28,90] secondPoint=[60,90] thirdPoint=[18,112]\npatch bubble_shape shapeUnion[2] shape1←body.shape shape2←tail.shape"
+        },
+        {
+          "title": "Plus button that turns into a close button",
+          "outline": "layer plus shape \"Plus\" @181,400 40x40 shape←plus_shape.shape color=#1C1C1EFF rotation←spin.output\npatch bar_across roundedRectangleShape position=[20,20] size=[40,6] cornerRadius=3\npatch bar_down roundedRectangleShape position=[20,20] size=[6,40] cornerRadius=3\npatch plus_shape shapeUnion[2] shape1←bar_across.shape shape2←bar_down.shape\npatch tap_plus interaction layer=@plus\npatch open switch flip←tap_plus.tap\npatch pop popAnimation number←open.on bounciness=6 speed=14\npatch spin transition<number> progress←pop.output start=0 end=45"
+        }
+      ],
+      "origami": {
+        "id": "builtin.shape.union",
+        "name": "Union"
+      },
+      "origamiPorts": {
+        "shape1": "Input (port 0)",
+        "shape2": "Input (port 1)",
+        "shape": "Output"
+      },
+      "defaultNotes": {
+        "shape": "sonobe: no shape, so unconnected inputs add nothing."
+      }
+    },
+    {
+      "type": "jsonToShape",
+      "name": "JSON to Shape",
+      "category": "shapes",
+      "tier": 2,
+      "status": "supported",
+      "aliases": [
+        "path from json",
+        "json path",
+        "custom path",
+        "draw path",
+        "path commands",
+        "shape from data",
+        "bezier from json"
+      ],
+      "summary": "Builds a shape from a JSON list of drawing commands, for custom paths that come from data, scripts, or other patches.",
+      "docs": "## How it works\nJSON to Shape draws a path from a list of commands, like giving directions to a pen. It's handy when the path comes from data, a JavaScript patch, or a network request.\n\n**JSON** is an object with a `\"path\"` list. Each command has a `\"type\"`:\n- `moveTo` lifts the pen and moves it to `\"point\"`, starting a new outline.\n- `lineTo` draws a straight line to `\"point\"`.\n- `curveTo` draws a curve to `\"point\"`, bending toward `\"control1\"` and `\"control2\"`.\n- `closePath` draws a line back to where the outline started.\n\nPoints can be `{ \"x\": 10, \"y\": 20 }` or `[10, 20]`, in points from the Shape layer's top-left corner, y down.\n\n**Coordinate Space** scales every point: x by its width and y by its height. Author a path from 0 to 1 and set Coordinate Space to the layer's size so the path resizes with the layer.\n\n**Error** and **Error Message** report the first command that couldn't be read.\n\n## Tips\n- Animate the Shape layer's Stroke End from 0 to 1 to draw the path on.\n- For straight polylines and charts, Line Shape is simpler. For art copied from a design tool, use SVG Path Shape.\n\n## Coming from Origami\nThe JSON format matches Origami's. Origami's curveTo form, where `\"curveTo\"` is the end point and `\"curveFrom\"` and `\"point\"` are the control points, still works. `closePath` and `[x, y]` points are new, and Origami's text Error output is split into Error and Error Message.",
+      "behavior": "Stateless: outputs depend only on the current inputs. Per loop index, cache the last `(json, coordinateSpace)` and its result, and rebuild only when one of them changes; the cache never changes outputs.\n\nEach frame, for this loop index:\n```\nlet data = ctx.input(\"json\");\nif (data === null || data === undefined) return done([], null);\nif (typeof data === \"string\") {\n  try { data = JSON.parse(data); } catch (e) { return done([], \"The JSON couldn't be read: \" + e.message); }\n}\nconst commands = Array.isArray(data) ? data : isPlainObject(data) ? data.path : undefined;\nif (!Array.isArray(commands)) return done([], 'Expected an object with a \"path\" list of commands.');\nconst [sx, sy] = vec(ctx.input(\"coordinateSpace\"));\nconst pt = (v) => { const p = readPoint(v); return p ? [p[0] * sx, p[1] * sy] : null; };\nconst segs = [];\nlet current = null;\nlet start = null;\nfor (let i = 0; i < commands.length; i++) {\n  if (i === 100000) return done(segs, \"Only the first 100,000 commands are drawn.\");\n  const c = isPlainObject(commands[i]) ? commands[i] : {};\n  const type = typeof c.type === \"string\" ? c.type : \"\";\n  const where = \"Command \" + (i + 1) + (type ? \" (\" + type + \")\" : \"\") + \": \";\n  const kind = type.toLowerCase();\n  if (kind !== \"moveto\" && current === null) {\n    return done(segs, where + ([\"lineto\", \"curveto\", \"closepath\"].includes(kind) ? \"start the path with moveTo first.\" : \"unknown type. Use moveTo, lineTo, curveTo, or closePath.\"));\n  }\n  if (kind === \"moveto\" || kind === \"lineto\") {\n    const p = pt(c.point);\n    if (!p) return done(segs, where + 'needs a \"point\" with numeric x and y.');\n    segs.push([kind === \"moveto\" ? \"M\" : \"L\", ...p]);\n    current = p;\n    if (kind === \"moveto\") start = p;\n  } else if (kind === \"curveto\") {\n    const origami = \"curveTo\" in c;                        // Origami layout: end = curveTo, controls = curveFrom, point\n    const end = pt(origami ? c.curveTo : c.point);\n    const c1 = pt(origami ? c.curveFrom : c.control1);\n    const c2 = pt(origami ? c.point : c.control2);\n    if (!end || !c1 || !c2) return done(segs, where + (origami ? 'needs \"curveFrom\", \"point\", and \"curveTo\" points.' : 'needs \"control1\", \"control2\", and \"point\" points.'));\n    segs.push([\"C\", ...c1, ...c2, ...end]);\n    current = end;\n  } else if (kind === \"closepath\") {\n    segs.push([\"Z\"]);\n    current = start;\n  } else {\n    return done(segs, where + \"unknown type. Use moveTo, lineTo, curveTo, or closePath.\");\n  }\n}\nreturn done(segs, null);\n\n// done(segs, message): output \"shape\" = { path: format(segs) },\n// \"error\" = message !== null, \"errorMessage\" = message ?? \"\".\n```\n\n- Reading inputs: `num(v)` and `vec(v)` return finite numbers. A non-finite value (NaN, ±Infinity) reads as 0, and the patch warns once per restart with `ctx.services.log(\"warn\", …)`.\n- `readPoint(v)` accepts `[x, y]` arrays and objects with `x` and `y`. Each coordinate must be a finite number or a numeric string such as `\"12.5\"`. Anything else, or a scaled coordinate that isn't finite, is invalid.\n- Command types match case-insensitively (`lineto` works); messages quote the type as written. Keys other than the ones listed are ignored.\n- Coordinate Space multiplies every point, including control points. Negative values mirror that axis, and 0 collapses it; neither is an error.\n- Errors: processing stops at the first invalid command. The shape keeps every command before it, `error` is true, and `errorMessage` names the command by its 1-based position. With no problem, `error` is false and `errorMessage` is \"\".\n- `format(segs)` writes absolute commands with `cmd` and `f(n)`: the letter followed by numbers separated by single spaces, commands joined with one space; `f(n)` clamps to ±1,000,000, rounds to 3 decimals, and writes `-0` as `0`. Share one path module (parse, normalize, transform, reverse, format) with svgPathShape and shapeUnion.\n- Edge cases: `null` JSON or an empty command list outputs the empty shape with no error. The empty shape is `{ path: \"\" }`; the Shape layer draws nothing for it. A subpath without closePath stays open, so its stroke doesn't join the start; the Shape layer still fills it as if closed.\n- Coordinates: layer-local points of the Shape layer the output drives (`ShapeValue.path`), with the origin at its top-left and y down. The renderer draws the path without clipping it to the layer's size.\n- Frame 0: evaluates with authored values; no special case.\n- Loops: evaluates once per loop index. The output length is the longest input loop; shorter loops wrap and scalars broadcast. A loop of JSON values gives a loop of shapes.\n- Hit testing: touches land on the Shape layer's box (its position and size), not on the path. Parts of the path outside that box still draw but don't receive touches.\n- Coming from Origami: the command format and the Coordinate Space multiplier match Origami's docs. Origami's docs print moveTo and lineTo examples without a comma after `\"type\"`; that text isn't valid JSON and reports an error here. The roles of the curveTo keys (`curveFrom` and `point` as controls, `curveTo` as the end) come from the wording of Origami's docs. Origami's text Error output imports as `errorMessage`; `error`, `closePath`, `[x, y]` points, and `control1`/`control2` are Sonobe additions. The patch moves from Origami's Utility category to Shapes.",
+      "inputs": [
+        {
+          "key": "json",
+          "name": "JSON",
+          "type": "json",
+          "default": {
+            "path": [
+              {
+                "type": "moveTo",
+                "point": {
+                  "x": 50,
+                  "y": 0
+                }
+              },
+              {
+                "type": "lineTo",
+                "point": {
+                  "x": 100,
+                  "y": 100
+                }
+              },
+              {
+                "type": "lineTo",
+                "point": {
+                  "x": 0,
+                  "y": 100
+                }
+              },
+              {
+                "type": "closePath"
+              }
+            ]
+          },
+          "description": "The path to draw: an object with a \"path\" list of commands (moveTo, lineTo, curveTo, closePath), each with its points."
+        },
+        {
+          "key": "coordinateSpace",
+          "name": "Coordinate Space",
+          "type": "size",
+          "default": [
+            1,
+            1
+          ],
+          "description": "Multiplies every x by the width and every y by the height. [1, 1] keeps coordinates in points; the layer's size suits coordinates from 0 to 1."
+        }
+      ],
+      "outputs": [
+        {
+          "key": "shape",
+          "name": "Shape",
+          "type": "shape",
+          "description": "The path as vector data. Connect it to a Shape layer's Shape property."
+        },
+        {
+          "key": "error",
+          "name": "Error",
+          "type": "boolean",
+          "description": "True when the JSON couldn't be fully read. The shape still holds every command before the problem."
+        },
+        {
+          "key": "errorMessage",
+          "name": "Error Message",
+          "type": "text",
+          "description": "Explains which command has a problem and why; empty when there's no problem."
+        }
+      ],
+      "alwaysEvaluate": false,
+      "pairsWellWith": [
+        "javascript",
+        "networkRequest",
+        "jsonFile",
+        "classicAnimation",
+        "lineShape"
+      ],
+      "commonMistakes": [
+        "Nothing draws and Error Message says the JSON couldn't be read: the text isn't valid JSON, often because of a missing comma or a key without quotes. Fix the JSON and watch Error Message clear.",
+        "The path is tiny: the coordinates run from 0 to 1, but Coordinate Space is still [1, 1]. Set Coordinate Space to the size you want, such as the Shape layer's size.",
+        "An outline's stroke leaves a notch where it should close: a lineTo back to the start doesn't join the corner. End the outline with closePath instead."
+      ],
+      "examples": [
+        {
+          "title": "Checkmark that draws itself on tap",
+          "description": "The path is written from 0 to 1 and scaled to the 64 pt layer with Coordinate Space.",
+          "outline": "layer check shape \"Check\" @169,400 64x64 shape←check_shape.shape color=#00000000 strokeColor=#34C759FF strokeWidth=6 strokeEnd←draw.output\npatch check_shape jsonToShape json={\"path\":[{\"type\":\"moveTo\",\"point\":[0.2,0.55]},{\"type\":\"lineTo\",\"point\":[0.42,0.75]},{\"type\":\"lineTo\",\"point\":[0.8,0.3]}]} coordinateSpace=[64,64]\npatch tap_check interaction layer=@check\npatch checked switch flip←tap_check.tap\npatch draw classicAnimation number←checked.on duration=0.35 curve=cubicOut"
+        }
+      ],
+      "origami": {
+        "id": "builtin.structure.shape",
+        "name": "JSON to Shape"
+      },
+      "origamiPorts": {
+        "errorMessage": "Error"
+      },
+      "defaultNotes": {
+        "json": "sonobe: Origami documents no default; a sample triangle in a 100 × 100 box shows the command format and draws something visible.",
+        "coordinateSpace": "inferred: Origami's default is undocumented; [1, 1] leaves coordinates unchanged."
+      }
+    }
+  ]
+}

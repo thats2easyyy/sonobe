@@ -1,0 +1,861 @@
+{
+  "file": "interaction-1.json",
+  "category": "interaction",
+  "patches": [
+    {
+      "type": "interaction",
+      "name": "Interaction",
+      "category": "interaction",
+      "tier": 1,
+      "status": "supported",
+      "aliases": [
+        "tap",
+        "press",
+        "click",
+        "touch",
+        "button",
+        "on tap",
+        "pointer down",
+        "touch events"
+      ],
+      "summary": "Detects presses and taps on a layer, or anywhere on the screen, and reports where the pointer is.",
+      "docs": "## How it works\nInteraction watches one layer for touches and mouse clicks. Leave **Layer** empty to watch the whole screen.\n\n- **Down** is a state: true while a press that began on the layer is held, even if the finger slides off.\n- **Tap** is a pulse, a signal that's on for one frame. It fires when a press lifts on the layer after moving less than 10 points.\n- **Position** is where the pointer is, in points from the top-left of the screen. It keeps the last press position after release.\n- **Enabled** turns sensing off. Touches still don't pass through to layers behind.\n\nPresses bubble: pressing a child layer also presses its parent groups. If a loop copies the layer, each copy gets its own outputs.\n\n## Tips\n- Use Tap with a Switch for changes that stay. Use Down for press feedback that springs back.\n- Layers at opacity 0 or with Enabled off can't be pressed. Use a Hit Area layer for an invisible target.\n- Need drag distance or fling speed? Use Gesture.\n\n## Coming from Origami\n- Position is measured from the screen's top-left, not the parent's center.\n- On the Tap frame, Position still holds where the finger lifted instead of resetting to 0, so you don't need a Delay 1.\n- Enable is called Enabled, and Force runs 0 to 1 instead of 0 to 6.67.",
+      "behavior": "State per loop index: `{ lastPosition: [0, 0], lastLocal: [0, 0], blocked: false }`.\n\nEach frame:\n```\nconst snap = ctx.services.pointer(ctx.input(\"layer\")); // null = whole screen\nconst enabled = ctx.input(\"enabled\");\nif (!enabled && (snap.down || snap.ended)) state.blocked = true;\nconst live = enabled && !state.blocked;\nif (live && (snap.down || snap.ended)) {\n  state.lastPosition = snap.position;\n  state.lastLocal = snap.localPosition;\n}\nctx.output(\"down\", live && snap.down);\nif (live && snap.tapped) ctx.pulse(\"tap\");\nctx.output(\"position\", state.lastPosition);\nctx.output(\"localPosition\", state.lastLocal);\nctx.output(\"force\", live && snap.down ? snap.pressure : 0);\nif (!snap.down) state.blocked = false; // a blocked press is over once every pointer lifts\n```\n\n- Pulses: `tap` is the only pulse and lasts one frame. Two fingers lifting on the same frame give one pulse.\n- Tap rule (ARCHITECTURE.md §5.5, CONVENTIONS.md §18.5.1): the press began on the layer or a descendant, never moved 10 pt or more from its start, wasn't cancelled, and lifted over the layer (the release hit chain contains it). There's no time limit, so a long hold still taps.\n- Down is captured: true from the press frame while any pointer that began on the layer stays down, even after sliding off; false on the release frame, the same frame Tap fires.\n- Position: prototype coordinates (points from the root's top-left, y down). While pressed it follows the first pointer still down; on the release frame it's the release point; afterward it holds. [0, 0] before the first press. Mouse movement without a press doesn't change it (that's Hover).\n- Local Position: the same pointer mapped through the inverse of the layer's world transform (layer-local points from its top-left). With no layer it equals Position.\n- Force: pointer pressure 0–1 while down, otherwise 0. Mouse presses report 0; touch screens without pressure sensing report 0.5 while pressed (web platform behavior).\n- Hit testing runs front to back on the previous frame's layout (ARCHITECTURE.md §5.1). Layers that are disabled, at opacity 0, or with Receives Touches off never receive presses, not even through their children.\n- Frame 0: idle outputs; pointer events dispatched before frame 0 apply on frame 0.\n- Loops: when Layer refers to a layer replicated by a loop, `ctx.input(\"layer\")` carries the copy's `instance`. The patch evaluates once per copy, every output is a loop, and state is per index. New indices start idle; removed indices drop their state.\n- Edge cases: a missing layer id, or a layer that isn't rendered this frame, reads as never pressed.\n- Disabled: Down false, no Tap, Force 0, positions hold. A press that was held during any disabled frame produces neither Down nor Tap until it lifts. Enabled doesn't change hit testing, so touches don't pass through to layers behind.\n- Muted: idle outputs and no pulses; Enabled is not passed through to Down.\n- Platform and simulation: identical in the desktop viewer, the web player, and headless simulation, which reads `pointer` InputEvents. Force needs a `pressure` field on `PointerSnapshot` (contract request); until the contract has it, Force outputs 0.\n- Restart and dispose: state resets and the engine's pointer tracker forgets held presses, so a finger held across a restart must lift and press again. Nothing to dispose.\n- Coming from Origami: Origami's Position is relative to the parent's center and resets to 0 on touch-up, so tap-position recipes needed Delay 1; Sonobe keeps the release point on the Tap frame (gap-fill R5). Force maps 0–6.67 to 0–1. The Quartz-era Interaction re-tested Down every frame; Sonobe captures the press.",
+      "inputs": [
+        {
+          "key": "layer",
+          "name": "Layer",
+          "type": "layer",
+          "default": null,
+          "description": "The layer to watch for presses. Leave empty to watch the whole screen."
+        },
+        {
+          "key": "enabled",
+          "name": "Enabled",
+          "type": "boolean",
+          "default": true,
+          "description": "When off, the patch ignores presses: Down stays false and Tap never fires."
+        }
+      ],
+      "outputs": [
+        {
+          "key": "down",
+          "name": "Down",
+          "type": "boolean",
+          "description": "True while a press that began on the layer is held, even if it slides off."
+        },
+        {
+          "key": "tap",
+          "name": "Tap",
+          "type": "pulse",
+          "description": "Pulses when a press lifts on the layer after moving less than 10 points."
+        },
+        {
+          "key": "position",
+          "name": "Position",
+          "type": "point",
+          "subtype": "distance",
+          "description": "Pointer position in points from the top-left of the screen; holds the last press position after release."
+        },
+        {
+          "key": "localPosition",
+          "name": "Local Position",
+          "type": "point",
+          "subtype": "distance",
+          "description": "Pointer position in points from the layer's own top-left corner, following its rotation and scale.",
+          "advanced": true
+        },
+        {
+          "key": "force",
+          "name": "Force",
+          "type": "number",
+          "subtype": "progress",
+          "min": 0,
+          "max": 1,
+          "description": "How hard the screen is pressed, from 0 to 1; 0 for a mouse or when nothing is pressed.",
+          "advanced": true
+        }
+      ],
+      "alwaysEvaluate": true,
+      "shortcut": "I",
+      "pairsWellWith": [
+        "switch",
+        "popAnimation",
+        "transition",
+        "longPress",
+        "doubleTap"
+      ],
+      "commonMistakes": [
+        "The layer grows while pressed and snaps back on release: Down turns off when you lift your finger. Wire Tap into a Switch's Flip when the change should stay.",
+        "Nothing happens when you tap: the layer has opacity 0, Enabled off, or another layer sits in front of it. Turn on the viewer's hit target overlay, and use a Hit Area layer for invisible targets.",
+        "Tapping a button inside a card also taps the card: presses bubble up to parent groups. Place the button in front of the card as a sibling instead of inside it."
+      ],
+      "examples": [
+        {
+          "title": "Press to shrink a button",
+          "description": "Down drives press feedback that springs back when you let go.",
+          "outline": "layer button rectangle \"Button\" @126,700 150x56 cornerRadius=28 scale←shrink.output\npatch press interaction layer=@button\npatch pop popAnimation number←press.down bounciness=5 speed=20\npatch shrink transition<number> progress←pop.output start=1 end=0.94"
+        },
+        {
+          "title": "Tap anywhere to dismiss a toast",
+          "description": "With no layer set, taps anywhere on the screen count.",
+          "outline": "layer toast rectangle \"Toast\" @16,780 370x64 cornerRadius=16 opacity←fade_out.output\npatch tap_anywhere interaction\npatch dismissed switch turnOn←tap_anywhere.tap\npatch fade classicAnimation number←dismissed.on duration=0.2\npatch fade_out transition<number> progress←fade.output start=1 end=0"
+        }
+      ],
+      "origami": {
+        "id": "builtin.layer.interaction",
+        "name": "Interaction"
+      },
+      "origamiPorts": {
+        "enabled": "Enable"
+      }
+    },
+    {
+      "type": "gesture",
+      "name": "Gesture",
+      "category": "interaction",
+      "tier": 1,
+      "status": "supported",
+      "aliases": [
+        "pan",
+        "drag gesture",
+        "translation",
+        "fling",
+        "flick",
+        "touch velocity",
+        "interruptible",
+        "follow finger"
+      ],
+      "summary": "Tracks a press on a layer with its drag offset and speed, for animations that follow the finger and fling on release.",
+      "docs": "## How it works\nGesture is Interaction plus movement. It watches a layer, or the whole screen, and reports how far and how fast the pointer moves during a press.\n\n- **Down** and **Tap** work like Interaction's.\n- **Translation** is the offset from where the press began, in points. It returns to 0,0 the frame after release.\n- **Velocity** is the pointer's speed in points per second, smoothed over the last few frames. It holds its final value on the release frame so a spring can pick it up, then drops to 0,0.\n- **Position** is the pointer location in points from the top-left of the screen.\n\n## Tips\n- Wire Translation into a Spring Animation's Number, Down into Gesture Active, and Velocity into Gesture Velocity. The layer follows your finger and flings home when you let go.\n- Decide where something lands on release by comparing Translation or Velocity with a threshold, or add a Swipe patch.\n- To move a layer and leave it where you drop it, use Drag instead.\n\n## Coming from Origami\nPosition is measured from the screen's top-left instead of the parent's center. Translation and Velocity return to 0,0 after the release frame.",
+      "behavior": "State per loop index: `{ lastPosition: [0, 0], lastLocal: [0, 0], lastStart: [0, 0], blocked: false }`.\n\nEach frame:\n```\nconst snap = ctx.services.pointer(ctx.input(\"layer\")); // null = whole screen\nconst enabled = ctx.input(\"enabled\");\nif (!enabled && (snap.down || snap.ended)) state.blocked = true;\nconst live = enabled && !state.blocked;\nconst active = live && (snap.down || snap.ended); // pressed now, or released this frame\nif (active) {\n  state.lastPosition = snap.position;\n  state.lastLocal = snap.localPosition;\n  state.lastStart = snap.startPosition;\n}\nctx.output(\"down\", live && snap.down);\nif (live && snap.tapped) ctx.pulse(\"tap\");\nctx.output(\"position\", state.lastPosition);\nctx.output(\"translation\", active ? snap.translation : [0, 0]);\nctx.output(\"velocity\", active ? snap.velocity : [0, 0]);\nctx.output(\"startPosition\", state.lastStart);\nctx.output(\"localPosition\", state.lastLocal);\nif (!snap.down) state.blocked = false;\n```\n\n- Pulses: `tap` follows Interaction's tap rule (began on the layer, moved less than 10 pt, not cancelled, lifted over the layer).\n- Translation: `position − startPosition` of the tracked pointer, in prototype axes (not rotated into the layer). [0, 0] on the press frame. No dead zone: movement inside the 10 pt tap slop still shows.\n- Velocity: the engine's per-pointer estimate (ARCHITECTURE.md §5.5, gap-fill R9), in points per second on each axis. It's an exponential moving average of displacement over time with a 25 ms time constant; the press frame adds no sample, so there's no first-frame spike; after about 50 ms without movement it decays toward 0; a release frame without new movement keeps the last estimate. The estimate is time-based, so it matches at 60 and 120 fps.\n- Release frame: Down false, Tap may fire, and Translation and Velocity keep their final values. The next frame both read [0, 0]. Spring Animation samples Gesture Velocity on the frame Gesture Active falls, which is this frame. Decision: returning to [0, 0] lets a spring driven by Translation fly home by default.\n- Position and Local Position behave as on Interaction: live while pressed, the release point on the release frame, held afterward. Start Position holds where the last press began.\n- Multi-touch: follows the first pointer still down. If that pointer lifts while another stays down, the tracked pointer switches and Translation jumps to the new pointer's offset.\n- Frame 0: idle outputs.\n- Loops: per copy of a loop-replicated layer, with per-index state, as on Interaction.\n- Edge cases: a missing layer reads as never pressed. Velocity never outputs NaN; the engine clamps sample intervals to 1/480–0.1 s.\n- Disabled: idle outputs (Down false, Translation and Velocity [0, 0], positions hold); a press held during any disabled frame stays ignored until it lifts.\n- Muted: idle outputs and no pulses; Enabled is not passed through to Down.\n- Platform and simulation: same everywhere; simulation reads `pointer` InputEvents.\n- Restart and dispose: state resets; nothing to dispose.\n- Coming from Origami: Origami documents Velocity in points per second without saying how it's smoothed; Sonobe fixes a 25 ms average. Position there is relative to the parent's center.",
+      "inputs": [
+        {
+          "key": "layer",
+          "name": "Layer",
+          "type": "layer",
+          "default": null,
+          "description": "The layer to watch for presses. Leave empty to watch the whole screen."
+        },
+        {
+          "key": "enabled",
+          "name": "Enabled",
+          "type": "boolean",
+          "default": true,
+          "description": "When off, the patch ignores presses and outputs idle values."
+        }
+      ],
+      "outputs": [
+        {
+          "key": "down",
+          "name": "Down",
+          "type": "boolean",
+          "description": "True while a press that began on the layer is held, even if it slides off."
+        },
+        {
+          "key": "tap",
+          "name": "Tap",
+          "type": "pulse",
+          "description": "Pulses when a press lifts on the layer after moving less than 10 points."
+        },
+        {
+          "key": "position",
+          "name": "Position",
+          "type": "point",
+          "subtype": "distance",
+          "description": "Pointer position in points from the top-left of the screen; holds the last press position after release."
+        },
+        {
+          "key": "translation",
+          "name": "Translation",
+          "type": "point",
+          "subtype": "distance",
+          "description": "How far the pointer has moved since the press began, in points; 0,0 from the frame after release."
+        },
+        {
+          "key": "velocity",
+          "name": "Velocity",
+          "type": "point",
+          "subtype": "velocity",
+          "description": "Pointer speed in points per second on each axis; kept on the release frame, then 0,0."
+        },
+        {
+          "key": "startPosition",
+          "name": "Start Position",
+          "type": "point",
+          "subtype": "distance",
+          "description": "Where the current or most recent press began, in points from the top-left of the screen.",
+          "advanced": true
+        },
+        {
+          "key": "localPosition",
+          "name": "Local Position",
+          "type": "point",
+          "subtype": "distance",
+          "description": "Pointer position in points from the layer's own top-left corner, following its rotation and scale.",
+          "advanced": true
+        }
+      ],
+      "alwaysEvaluate": true,
+      "pairsWellWith": [
+        "springAnimation",
+        "swipe",
+        "snap",
+        "clamp",
+        "transition"
+      ],
+      "commonMistakes": [
+        "The layer snaps back when you let go: Translation returns to 0,0 after release. Use Drag when the layer should stay where you drop it, or pick a new resting spot on release and add Translation to that.",
+        "The fling feels dead: Velocity isn't wired into the spring's Gesture Velocity, or Down isn't wired into Gesture Active, so the spring never gets the release speed.",
+        "The layer runs away from your finger: Translation is added to the layer's animated position, which already includes the offset. Add Translation to a fixed resting position instead."
+      ],
+      "examples": [
+        {
+          "title": "Drag a card and let it spring back",
+          "description": "While held, the card tracks the finger; on release the spring flings it home with the finger's speed.",
+          "outline": "layer stage group \"Stage\" @37,250 328x420\n  layer card rectangle \"Card\" 328x420 cornerRadius=24 position←follow.output\npatch touch gesture layer=@card\npatch follow springAnimation<point> number←touch.translation gestureActive←touch.down gestureVelocity←touch.velocity"
+        },
+        {
+          "title": "Tilt a photo while dragging sideways",
+          "description": "A point wired into a number reads its first component, so Translation's x drives the tilt.",
+          "outline": "layer photo rectangle \"Photo\" @51,250 300x400 cornerRadius=20 rotation←tilt.output\npatch touch gesture layer=@photo\npatch ease popAnimation number←touch.translation bounciness=6 speed=16\npatch tilt transition<number> progress←ease.output start=0 end=0.08"
+        }
+      ],
+      "origami": {
+        "id": "builtin.layer.gesture",
+        "name": "Gesture"
+      },
+      "defaultNotes": {
+        "enabled": "inferred: Origami's default is undocumented; true, like Interaction."
+      }
+    },
+    {
+      "type": "swipe",
+      "name": "Swipe",
+      "category": "interaction",
+      "tier": 1,
+      "status": "supported",
+      "aliases": [
+        "flick",
+        "fling",
+        "swipe left",
+        "swipe right",
+        "swipe up",
+        "swipe down",
+        "swipe gesture",
+        "card swipe"
+      ],
+      "summary": "Pulses when a press on a layer ends in a swipe, with separate pulses for left, right, up, and down.",
+      "docs": "## How it works\nSwipe judges each press when the finger lifts. If the pointer traveled far enough, or was moving fast enough at release, the press counts as a swipe. **Swiped** fires along with one direction pulse.\n\n- **Axis** chooses which directions count. Any Direction uses the direction the pointer traveled most. Horizontal and Vertical ignore the other axis, so a slightly diagonal swipe on a card still counts.\n- **Min Distance** is how far a slow drag must travel, in points.\n- **Min Velocity** is how fast a short flick must be moving at release, in points per second. A fast throw decides the direction, even if the finger first dragged the other way.\n- A press that moves less than 10 points is a tap, never a swipe.\n\nThe press has to start on the layer, but it can end anywhere.\n\n## Tips\n- Pair Swipe with Gesture: Gesture moves the card with the finger, and Swipe decides whether it leaves.\n- Wire Swiped Left into a Counter's Increase and Swiped Right into Decrease to page through items.\n- Raise Min Distance for big cards so short drags snap back. Lower Min Velocity to make flicks easier.\n\n## Coming from Origami\nOrigami has no Swipe patch. Two-state swipes there use Pop Switch.",
+      "behavior": "State per loop index: `{ blocked: false }`.\n\nEach frame:\n```\nconst snap = ctx.services.pointer(ctx.input(\"layer\")); // null = whole screen\nconst enabled = ctx.input(\"enabled\");\nif (!enabled && (snap.down || snap.ended)) state.blocked = true;\nif (enabled && !state.blocked && snap.ended && !snap.cancelled) judge(snap);\nif (!snap.down) state.blocked = false;\n\nfunction judge(snap) {\n  const [tx, ty] = snap.translation; // release point − press start\n  const [vx, vy] = snap.velocity;    // release-frame estimate, points per second\n  const axis = ctx.input(\"axis\");\n  const horizontal = axis === \"horizontal\" || (axis === \"any\" && Math.abs(tx) >= Math.abs(ty));\n  const d = horizontal ? tx : ty;\n  const v = horizontal ? vx : vy;\n  if (Math.abs(d) < 10) return; // taps and small wiggles never swipe\n  const minVelocity = Math.max(0, ctx.input(\"minVelocity\"));\n  const minDistance = Math.max(0, ctx.input(\"minDistance\"));\n  let dir = 0;\n  if (v !== 0 && Math.abs(v) >= minVelocity) dir = Math.sign(v); // a flick wins, whichever way it's thrown\n  else if (Math.abs(d) >= minDistance) dir = Math.sign(d);       // a slow drag must travel far enough\n  if (dir === 0) return;\n  ctx.pulse(\"swiped\");\n  if (horizontal) ctx.pulse(dir < 0 ? \"swipedLeft\" : \"swipedRight\");\n  else ctx.pulse(dir < 0 ? \"swipedUp\" : \"swipedDown\");\n}\n```\n\n- Pulses: outputs `swiped`, `swipedLeft`, `swipedRight`, `swipedUp`, `swipedDown`, one frame each. A swipe fires exactly two on the same frame: `swiped` plus one direction. Nothing fires mid-drag; the judgment happens only on the release frame.\n- Axis: with Any Direction, the axis with the larger travel wins and ties go to horizontal. Horizontal and Vertical judge only that axis. Up and down follow y-down coordinates: negative y travel is Up.\n- Where a press can end: it must begin on the layer or a descendant (the hit chain captured at press), and may lift anywhere, including off the layer or off the screen.\n- Exclusivity: a swipe needs at least 10 pt of travel on the judged axis at release, so a press that fires Interaction's Tap (always under 10 pt) never swipes.\n- Velocity: the same engine estimate Gesture reports, 25 ms average, kept on the release frame.\n- Cancelled presses (the browser took over the gesture) never swipe. This needs a `cancelled` field on `PointerSnapshot` (contract request); until then, treat every `ended` press as released.\n- Frame 0: no pulses unless a release is dispatched on frame 0.\n- Loops: per copy of a loop-replicated layer, with per-index state; each copy pulses independently.\n- Edge cases: negative Min Distance or Min Velocity count as 0. With Min Velocity 0, every release that traveled 10 pt and was still moving counts as a flick. A missing layer never swipes.\n- Disabled: no pulses; a press held during any disabled frame is ignored even if it lifts while enabled.\n- Platform and simulation: same everywhere; simulation reads `pointer` InputEvents, so a scripted drag path with timing produces the same velocity.\n- Restart and dispose: state resets; nothing to dispose.\n- Coming from Origami: no built-in equivalent. The Quartz-era Swipe macro took a Direction and output positions; Pop Switch (Swipe X or Y) covers two-state swipes and imports as Pop Switch.",
+      "inputs": [
+        {
+          "key": "layer",
+          "name": "Layer",
+          "type": "layer",
+          "default": null,
+          "description": "The layer a swipe must start on. Leave empty to accept swipes that start anywhere on the screen."
+        },
+        {
+          "key": "enabled",
+          "name": "Enabled",
+          "type": "boolean",
+          "default": true,
+          "description": "When off, releases are ignored and no swipe pulses fire."
+        },
+        {
+          "key": "axis",
+          "name": "Axis",
+          "type": "enum",
+          "default": "any",
+          "enumOptions": [
+            {
+              "key": "any",
+              "name": "Any Direction",
+              "description": "Judges along whichever axis the pointer traveled most."
+            },
+            {
+              "key": "horizontal",
+              "name": "Horizontal",
+              "description": "Only left and right count; vertical movement is ignored."
+            },
+            {
+              "key": "vertical",
+              "name": "Vertical",
+              "description": "Only up and down count; horizontal movement is ignored."
+            }
+          ],
+          "description": "Which directions count as swipes."
+        },
+        {
+          "key": "minDistance",
+          "name": "Min Distance",
+          "type": "number",
+          "subtype": "distance",
+          "default": 100,
+          "min": 0,
+          "step": 1,
+          "description": "How far a slow drag must travel along the axis to count, in points."
+        },
+        {
+          "key": "minVelocity",
+          "name": "Min Velocity",
+          "type": "number",
+          "subtype": "velocity",
+          "default": 500,
+          "min": 0,
+          "step": 10,
+          "description": "How fast a short flick must be moving along the axis at release to count, in points per second."
+        }
+      ],
+      "outputs": [
+        {
+          "key": "swiped",
+          "name": "Swiped",
+          "type": "pulse",
+          "description": "Pulses when a press ends as a swipe in any direction that counts."
+        },
+        {
+          "key": "swipedLeft",
+          "name": "Swiped Left",
+          "type": "pulse",
+          "description": "Pulses when a press ends as a swipe to the left."
+        },
+        {
+          "key": "swipedRight",
+          "name": "Swiped Right",
+          "type": "pulse",
+          "description": "Pulses when a press ends as a swipe to the right."
+        },
+        {
+          "key": "swipedUp",
+          "name": "Swiped Up",
+          "type": "pulse",
+          "description": "Pulses when a press ends as a swipe upward."
+        },
+        {
+          "key": "swipedDown",
+          "name": "Swiped Down",
+          "type": "pulse",
+          "description": "Pulses when a press ends as a swipe downward."
+        }
+      ],
+      "alwaysEvaluate": true,
+      "pairsWellWith": [
+        "gesture",
+        "springAnimation",
+        "counter",
+        "switch",
+        "transition"
+      ],
+      "commonMistakes": [
+        "Swiping the card does nothing: a text layer in front of the card catches the press. Group the card with its text and set Layer to the group, or turn off Receives Touches on the text.",
+        "A short drag counts as a swipe: the finger was still moving fast when it lifted. Raise Min Velocity, or raise Min Distance if slow drags count too early.",
+        "Diagonal swipes on a horizontal card are ignored: Axis is Any Direction, so mostly vertical movement becomes Swiped Up or Down. Set Axis to Horizontal."
+      ],
+      "examples": [
+        {
+          "title": "Swipe a card away",
+          "outline": "layer card rectangle \"Card\" @37,250 328x420 cornerRadius=24 opacity←fade_out.output\npatch swipe_card swipe layer=@card axis=horizontal\npatch gone switch turnOn←swipe_card.swiped\npatch fade classicAnimation number←gone.on duration=0.25\npatch fade_out transition<number> progress←fade.output start=1 end=0"
+        },
+        {
+          "title": "Swipe up to open a sheet, down to close it",
+          "outline": "layer sheet rectangle \"Sheet\" @0,560 402x600 cornerRadius=24 scale←grow.output\npatch swipe_sheet swipe layer=@sheet axis=vertical minDistance=60\npatch open switch turnOn←swipe_sheet.swipedUp turnOff←swipe_sheet.swipedDown\npatch pop popAnimation number←open.on bounciness=4 speed=14\npatch grow transition<number> progress←pop.output start=1 end=1.04"
+        }
+      ],
+      "origami": null,
+      "defaultNotes": {
+        "axis": "sonobe: any direction works the moment you insert it; restrict the axis for cards and carousels.",
+        "minDistance": "sonobe: 100 pt is about a third of a phone-width card, so short drags snap back.",
+        "minVelocity": "sonobe: 500 pt/s separates a deliberate flick from a slow release."
+      }
+    },
+    {
+      "type": "longPress",
+      "name": "Long Press",
+      "category": "interaction",
+      "tier": 1,
+      "status": "supported",
+      "aliases": [
+        "hold",
+        "press and hold",
+        "long tap",
+        "touch and hold",
+        "context menu",
+        "hold to confirm",
+        "peek"
+      ],
+      "summary": "Turns on when a press is held still on a layer for a set time, and tells a quick tap apart from a hold.",
+      "docs": "## How it works\nLong Press turns **on** once a press has been held for **Duration** seconds without moving 10 points or more. It turns off when the finger lifts.\n\n- **Layer** is the layer to watch. Leave it empty to watch the whole screen.\n- **Progress** runs from 0 to 1 while the press is held, so you can draw a filling ring or bar.\n- **Tap** pulses when a press lifts before it became a long press, so a tap and a hold on the same layer can do different things.\n- Once Long Press is on, moving the finger doesn't end it, so you can slide to a menu item.\n- **Down** accepts another patch's Down output instead of watching Layer. In that mode movement isn't checked.\n\n## Tips\n- Wire Long Press into a Switch's Turn On to open a menu that stays open after you lift.\n- Use about 0.4 s for menus and 1 to 2 s for hold-to-confirm actions.\n- Pair it with Vibrate so people feel the moment the hold registers.\n\n## Coming from Origami\nOrigami's Long Press only takes Interaction's Down. You can still wire that, but setting Layer adds the stay-still check. The Delay input is called Duration here.",
+      "behavior": "State per loop index: `{ pressing: false, recognized: false, moved: false, startTime: 0, start: [0, 0], blocked: false }`.\n\nEach frame:\n```\nconst enabled = ctx.input(\"enabled\");\nconst duration = Math.max(0, ctx.input(\"duration\"));\nconst snap = ctx.isConnected(\"down\") ? null : ctx.services.pointer(ctx.input(\"layer\"));\nconst down = snap ? snap.down : ctx.input(\"down\");\n\nif (!enabled || state.blocked) {\n  state.blocked = down; // a press that overlaps a disabled frame is ignored until it lifts\n  state.pressing = false;\n  state.recognized = false;\n  ctx.output(\"longPress\", false);\n  ctx.output(\"progress\", 0);\n  return;\n}\n// A new press: Down rose, or another finger took over the pointer snapshot.\nif (down && (!state.pressing || (snap && !samePoint(snap.startPosition, state.start)))) {\n  state.pressing = true;\n  state.recognized = false;\n  state.moved = false;\n  state.startTime = ctx.time;\n  state.start = snap ? snap.startPosition : [0, 0];\n}\nlet progress = 0;\nif (down) {\n  if (snap && !state.recognized && Math.hypot(snap.translation[0], snap.translation[1]) >= 10) state.moved = true;\n  const held = ctx.time - state.startTime;\n  if (!state.recognized && !state.moved && held >= duration - 1e-9) state.recognized = true;\n  progress = state.recognized ? 1 : state.moved ? 0 : Math.min(1, held / duration);\n  if (!state.recognized && !state.moved) ctx.requestNextFrame();\n} else if (state.pressing) { // lifted this frame\n  if (!state.recognized && (snap ? snap.tapped : true)) ctx.pulse(\"tap\");\n  state.pressing = false;\n  state.recognized = false;\n}\nctx.output(\"longPress\", down && state.recognized);\nctx.output(\"progress\", progress);\n```\n\n- Modes: when `down` is connected, the patch times that boolean (Origami-compatible) and ignores `layer`; there's no movement check, and every release before recognition pulses `tap`. Otherwise it watches `layer` through the pointer snapshot (null = whole screen).\n- Stationary rule (ARCHITECTURE.md §5.5, gap-fill R6, CONVENTIONS.md §18.5.5): before recognition, a press whose translation reaches 10 pt is moved for good. It never turns on, Progress drops to 0, and its release doesn't tap (the snapshot's tap rule fails too). Translation is sampled once per frame.\n- After recognition, movement is ignored and Long Press stays on until release. Decision: this supports sliding to a menu item; the Quartz-era macro turned off on movement.\n- Timing uses `ctx.time`, so 0.5 s turns on at the same moment at 60 and 120 fps: on the first frame where held time ≥ Duration.\n- Pulses: `tap` only, one frame, on the release frame of a press that wasn't recognized. There are no pulse inputs; `down` is a state.\n- Release frame: Long Press and Progress are already false and 0.\n- Frame 0: a Down that's already true on frame 0 starts timing on frame 0.\n- Retargeting: Duration is read every frame. Lowering it mid-press can turn Long Press on at once; raising it after recognition doesn't turn it off.\n- Edge cases: negative Duration counts as 0, which turns on on the press frame with Progress 1. A missing layer reads as never pressed.\n- Loops: per copy of a loop-replicated layer, or per index of a looped Down, with per-index state.\n- Disabled: Long Press false, Progress 0, no Tap; a press in progress is dropped and stays ignored until it lifts.\n- Muted: Long Press false, Progress 0, no pulses; Enabled is not passed through.\n- Platform and simulation: same everywhere; simulation reads `pointer` InputEvents.\n- Restart and dispose: state resets; nothing to dispose.\n- Coming from Origami: ports Down and Delay map to `down` and `duration`, and the output keeps its name. Origami's default is 0.5 s; the Quartz-era macro used 0.2 s. Setting `layer` is new and adds the stationary rule.",
+      "inputs": [
+        {
+          "key": "layer",
+          "name": "Layer",
+          "type": "layer",
+          "default": null,
+          "description": "The layer to watch for a press and hold. Leave empty to watch the whole screen; ignored when Down is connected."
+        },
+        {
+          "key": "enabled",
+          "name": "Enabled",
+          "type": "boolean",
+          "default": true,
+          "description": "When off, presses are ignored and Long Press stays off."
+        },
+        {
+          "key": "down",
+          "name": "Down",
+          "type": "boolean",
+          "default": false,
+          "description": "Connect another patch's Down output to time that press instead of watching Layer; movement isn't checked in this mode."
+        },
+        {
+          "key": "duration",
+          "name": "Duration",
+          "type": "number",
+          "subtype": "duration",
+          "default": 0.5,
+          "min": 0,
+          "step": 0.1,
+          "description": "How long the press must be held, in seconds; 0 turns on as soon as the press begins."
+        }
+      ],
+      "outputs": [
+        {
+          "key": "longPress",
+          "name": "Long Press",
+          "type": "boolean",
+          "description": "True once the press has been held still for Duration, until the finger lifts."
+        },
+        {
+          "key": "progress",
+          "name": "Progress",
+          "type": "number",
+          "subtype": "progress",
+          "min": 0,
+          "max": 1,
+          "description": "How far along the hold is, from 0 at the press to 1 when Long Press turns on; 0 when not pressed or after moving."
+        },
+        {
+          "key": "tap",
+          "name": "Tap",
+          "type": "pulse",
+          "description": "Pulses when a press lifts before it became a long press, like a regular tap."
+        }
+      ],
+      "alwaysEvaluate": true,
+      "pairsWellWith": [
+        "switch",
+        "popAnimation",
+        "transition",
+        "interaction",
+        "vibrate"
+      ],
+      "commonMistakes": [
+        "A hold also triggers the tap action: Interaction's Tap fires on release no matter how long you held. Use Long Press's own Tap output for the quick-tap action.",
+        "The menu closes when you lift your finger: Long Press is a state that turns off on release. Wire it into a Switch's Turn On so the menu stays open.",
+        "Long Press never turns on inside a scrolling list: the finger drifts 10 points or more while holding, which cancels the hold. Hold still, or check that the list isn't moving under the finger."
+      ],
+      "examples": [
+        {
+          "title": "Hold a photo to peek",
+          "outline": "layer photo rectangle \"Photo\" @16,200 370x370 cornerRadius=16 scale←grow.output\npatch hold longPress layer=@photo duration=0.4\npatch pop popAnimation number←hold.longPress bounciness=8 speed=12\npatch grow transition<number> progress←pop.output start=1 end=1.1"
+        },
+        {
+          "title": "Tap to expand, hold for a menu",
+          "description": "One layer, two actions: Tap toggles the card's size, and holding opens a menu that the next tap closes.",
+          "outline": "layer card rectangle \"Card\" @16,200 370x220 cornerRadius=20 scale←grow.output\nlayer menu rectangle \"Menu\" @96,440 210x180 cornerRadius=14 opacity←fade.output\npatch press longPress layer=@card\npatch expanded switch flip←press.tap\npatch pop popAnimation number←expanded.on\npatch grow transition<number> progress←pop.output start=1 end=1.05\npatch menu_open switch turnOn←press.longPress turnOff←press.tap\npatch fade classicAnimation number←menu_open.on duration=0.2"
+        }
+      ],
+      "origami": {
+        "id": "origami.longpress",
+        "name": "Long Press"
+      },
+      "importAliases": [
+        "origami.LongPress"
+      ],
+      "origamiPorts": {
+        "duration": "Delay"
+      },
+      "defaultNotes": {
+        "layer": "sonobe: Origami's patch has no Layer input; empty watches the whole screen, like Interaction.",
+        "enabled": "sonobe: Origami's patch has no Enabled input; true, the glossary default.",
+        "down": "inferred: Origami's default is undocumented; false means no press."
+      }
+    },
+    {
+      "type": "doubleTap",
+      "name": "Double Tap",
+      "category": "interaction",
+      "tier": 1,
+      "status": "supported",
+      "aliases": [
+        "double click",
+        "tap twice",
+        "single tap",
+        "double tap to like",
+        "multi tap",
+        "tap count"
+      ],
+      "summary": "Tells single taps from double taps, pulsing Double Tap on a quick second tap and Single Tap when no second tap comes.",
+      "docs": "## How it works\nDouble Tap waits a short time after each tap to see whether a second one follows.\n\n- **Double Tap** pulses right on the second tap, when it lands within **Interval** seconds of the first.\n- **Single Tap** pulses when Interval runs out after a lone tap, so it always arrives a little late.\n- **Layer** is the layer to watch. Leave it empty to watch the whole screen.\n- **Tap** accepts pulses from another patch, like Interaction's Tap, instead of watching Layer.\n\nA third quick tap starts a new wait, so three taps give a Double Tap and then a Single Tap.\n\n## Tips\n- Lower Interval to about 0.2 s when single taps must feel responsive. Raise it to about 0.4 s when double taps are hard to hit.\n- Double-tap to like: wire Double Tap into a Switch's Turn On, so another double tap doesn't unlike.\n\n## Coming from Origami\nOrigami's Delay input is called Interval. Wiring Interaction's Tap into Tap still works.",
+      "behavior": "State per loop index: `{ pending: false, firstTapTime: 0 }`.\n\nEach frame:\n```\nconst enabled = ctx.input(\"enabled\");\nconst interval = Math.max(0, ctx.input(\"interval\"));\nconst tapped = ctx.isConnected(\"tap\")\n  ? ctx.pulsed(\"tap\")\n  : ctx.services.pointer(ctx.input(\"layer\")).tapped; // null = whole screen\nif (!enabled) {\n  state.pending = false; // a waiting tap is discarded\n  return;\n}\nconst t = ctx.time;\nif (tapped && state.pending && t - state.firstTapTime <= interval + 1e-9) {\n  state.pending = false;\n  ctx.pulse(\"doubleTap\");\n} else {\n  if (state.pending && t - state.firstTapTime >= interval - 1e-9) {\n    state.pending = false;\n    ctx.pulse(\"singleTap\"); // the lone tap's wait is over\n  }\n  if (tapped) {\n    if (interval === 0) ctx.pulse(\"singleTap\");\n    else {\n      state.pending = true;\n      state.firstTapTime = t;\n    }\n  }\n}\nif (state.pending) ctx.requestNextFrame();\n```\n\n- Pulses: input `tap` fires on an upstream pulse or a false→true edge of a connected boolean (`ctx.pulsed`); taps on consecutive frames each count. Outputs `doubleTap` and `singleTap` last one frame, at most one pulse per output per frame.\n- Timing: measured between tap frames (release to release) with `ctx.time`, so results match at 60 and 120 fps. Double Tap fires on the second tap's frame. Single Tap fires on the first frame where Interval has passed since a lone tap.\n- Same-frame precedence: a tap that completes a double tap wins over the pending tap's expiry. If frames were dropped so a new tap arrives after the window closed, the old tap's Single Tap fires and the new tap starts its own wait on the same frame.\n- Modes: when `tap` is connected, `layer` is ignored. Otherwise taps come from the pointer snapshot's tap rule (lifted on the layer after moving less than 10 pt). The two taps don't have to land near each other.\n- Retargeting: Interval is read every frame, so changing it mid-wait moves the deadline.\n- Frame 0: nothing is pending; a tap on frame 0 starts a wait.\n- Edge cases: negative Interval counts as 0. With Interval 0, every tap pulses Single Tap on its own frame and Double Tap never fires. Two fingers lifting on the same frame count as one tap. A missing layer never taps.\n- Loops: per-index state; a loop-replicated layer or a looped Tap gives loops of Double Tap and Single Tap.\n- Disabled: no pulses; any waiting tap is discarded, so Single Tap doesn't fire later.\n- Platform and simulation: same everywhere; simulation reads `pointer` InputEvents.\n- Restart and dispose: the waiting tap clears; nothing to dispose.\n- Coming from Origami: ports Tap and Delay map to `tap` and `interval`; the 0.3 s default is Origami's. Origami's pattern-file version fired both pulses when the window closed, and the built-in's exact timing is undocumented. Sonobe fires Double Tap immediately on the second tap.",
+      "inputs": [
+        {
+          "key": "layer",
+          "name": "Layer",
+          "type": "layer",
+          "default": null,
+          "description": "The layer to watch for taps. Leave empty to watch the whole screen; ignored when Tap is connected."
+        },
+        {
+          "key": "enabled",
+          "name": "Enabled",
+          "type": "boolean",
+          "default": true,
+          "description": "When off, taps are ignored and a waiting single tap is discarded."
+        },
+        {
+          "key": "tap",
+          "name": "Tap",
+          "type": "pulse",
+          "description": "Pulse to count a tap, for example from Interaction's Tap, instead of watching Layer."
+        },
+        {
+          "key": "interval",
+          "name": "Interval",
+          "type": "number",
+          "subtype": "duration",
+          "default": 0.3,
+          "min": 0,
+          "step": 0.05,
+          "description": "The longest time between two taps that still counts as a double tap, in seconds; 0 turns double taps off."
+        }
+      ],
+      "outputs": [
+        {
+          "key": "doubleTap",
+          "name": "Double Tap",
+          "type": "pulse",
+          "description": "Pulses on the second tap when it lands within Interval of the first."
+        },
+        {
+          "key": "singleTap",
+          "name": "Single Tap",
+          "type": "pulse",
+          "description": "Pulses when Interval ends after a tap with no second tap."
+        }
+      ],
+      "alwaysEvaluate": true,
+      "pairsWellWith": [
+        "interaction",
+        "switch",
+        "popAnimation",
+        "transition"
+      ],
+      "commonMistakes": [
+        "Single taps feel slow: Single Tap waits for Interval in case a second tap comes. Use Interaction's Tap on layers that have no double-tap action, or lower Interval.",
+        "Double-tapping again unlikes the photo: Double Tap is wired into Flip. Wire it into Turn On so repeated double taps keep it liked."
+      ],
+      "examples": [
+        {
+          "title": "Double-tap to like, tap to show controls",
+          "outline": "layer photo rectangle \"Photo\" @0,120 402x402\nlayer heart oval \"Heart\" @161,281 80x80 color=#FF3040FF scale←heart_pop.output\nlayer controls rectangle \"Controls\" @0,760 402x114 opacity←controls_fade.output\npatch taps doubleTap layer=@photo\npatch liked switch turnOn←taps.doubleTap\npatch heart_pop popAnimation number←liked.on bounciness=10 speed=14\npatch controls_on switch flip←taps.singleTap\npatch controls_fade classicAnimation number←controls_on.on duration=0.2"
+        },
+        {
+          "title": "Double-tap to zoom",
+          "description": "The Origami-style wiring: Interaction's Tap feeds Double Tap.",
+          "outline": "layer photo rectangle \"Photo\" @0,200 402x402 scale←zoom.output\npatch touch interaction layer=@photo\npatch taps doubleTap tap←touch.tap interval=0.25\npatch zoomed switch flip←taps.doubleTap\npatch pop popAnimation number←zoomed.on bounciness=4 speed=14\npatch zoom transition<number> progress←pop.output start=1 end=2"
+        }
+      ],
+      "origami": {
+        "id": "origami.doubletap",
+        "name": "Double Tap"
+      },
+      "origamiPorts": {
+        "interval": "Delay"
+      },
+      "defaultNotes": {
+        "layer": "sonobe: Origami's patch has no Layer input; empty watches the whole screen, like Interaction.",
+        "enabled": "sonobe: Origami's patch has no Enabled input; true, the glossary default."
+      }
+    },
+    {
+      "type": "tapToggle",
+      "name": "Tap Toggle",
+      "category": "interaction",
+      "tier": 1,
+      "status": "supported",
+      "aliases": [
+        "toggle button",
+        "tap to toggle",
+        "checkbox",
+        "like button",
+        "on off button",
+        "toggle switch",
+        "select"
+      ],
+      "summary": "Flips between on and off each time a layer is tapped, combining Interaction and Switch in one patch.",
+      "docs": "## How it works\nTap Toggle remembers whether something is **on** or **off**, and each tap on **Layer** flips it. It's the quickest way to build a like button, a checkbox, or a card that expands on tap.\n\n- **On** is true while the toggle is on. It starts off unless **Start On** is set.\n- **Turned On** and **Turned Off** pulse on the frame the state changes, whatever caused it.\n- **Down** is true while the layer is pressed, for press feedback.\n- **Flip**, **Turn On**, and **Turn Off** let other patches change the state. If several arrive in the same frame, Turn Off wins, then Turn On, then Flip or a tap.\n\nIf a loop copies the layer, each copy keeps its own state.\n\n## Tips\n- Connect On to a Pop Animation and then a Transition so the change animates.\n- Turning Enabled off ignores taps, but Flip, Turn On, and Turn Off still work.\n- Need double taps, long presses, or more than two states? Use Interaction with Switch, Counter, or Option Switch.",
+      "behavior": "State per loop index: `{ on: ctx.input(\"startOn\"), blocked: false }`, created on frame 0, after a restart, and when a loop index first appears.\n\nEach frame:\n```\nconst snap = ctx.services.pointer(ctx.input(\"layer\")); // null = whole screen\nconst enabled = ctx.input(\"enabled\");\nif (!enabled && (snap.down || snap.ended)) state.blocked = true;\nconst live = enabled && !state.blocked;\nconst before = state.on;\nif (ctx.pulsed(\"turnOff\")) state.on = false;\nelse if (ctx.pulsed(\"turnOn\")) state.on = true;\nelse if ((live && snap.tapped) || ctx.pulsed(\"flip\")) state.on = !state.on;\nctx.output(\"on\", state.on);\nctx.output(\"down\", live && snap.down);\nif (state.on && !before) ctx.pulse(\"turnedOn\");\nif (!state.on && before) ctx.pulse(\"turnedOff\");\nif (!snap.down) state.blocked = false;\n```\n\n- Pulses: inputs `flip`, `turnOn`, `turnOff` fire on an upstream pulse or a false→true edge of a connected boolean (`ctx.pulsed`); pulses on consecutive frames each count. Outputs `turnedOn` and `turnedOff` fire only when the state actually changes, for one frame.\n- Precedence (ARCHITECTURE.md §5.2, CONVENTIONS.md §18.5.2): turnOff > turnOn > (tap or flip). A tap and a Flip pulse on the same frame flip once, not twice.\n- Tap rule: the same as Interaction's (began on the layer, moved less than 10 pt, not cancelled, lifted over the layer). Down is captured while the press is held.\n- Start On is read only when state is created. Changing it later doesn't change the current state. Starting on doesn't pulse Turned On on frame 0.\n- Frame 0: a tap or pulse on frame 0 applies on frame 0.\n- Loops: per-index state, so a loop-replicated layer gives independent toggles (a checklist). New indices start at that index's Start On; removed indices drop their state.\n- Disabled: taps are ignored and Down is false, but Flip, Turn On, and Turn Off still apply and On keeps its state. Decision: other patches can still reset a toggle that people can't tap. A press held during any disabled frame can't tap.\n- Muted: On outputs Start On, Down false, no pulses, and state doesn't change.\n- Edge cases: a missing layer never taps, but the pulse inputs still work.\n- Platform and simulation: same everywhere; simulation reads `pointer` InputEvents.\n- Restart and dispose: state resets to Start On; nothing to dispose.\n- Coming from Origami: there's no single patch. It's Interaction's Tap wired into Switch's Flip, and importers keep those two patches.",
+      "inputs": [
+        {
+          "key": "layer",
+          "name": "Layer",
+          "type": "layer",
+          "default": null,
+          "description": "The layer that flips the toggle when tapped. Leave empty to flip on taps anywhere on the screen."
+        },
+        {
+          "key": "enabled",
+          "name": "Enabled",
+          "type": "boolean",
+          "default": true,
+          "description": "When off, taps are ignored; Flip, Turn On, and Turn Off still work."
+        },
+        {
+          "key": "turnOn",
+          "name": "Turn On",
+          "type": "pulse",
+          "description": "Pulse to turn the toggle on. Does nothing if it's already on."
+        },
+        {
+          "key": "turnOff",
+          "name": "Turn Off",
+          "type": "pulse",
+          "description": "Pulse to turn the toggle off. Does nothing if it's already off."
+        },
+        {
+          "key": "flip",
+          "name": "Flip",
+          "type": "pulse",
+          "description": "Pulse to switch to the opposite state, as if the layer were tapped.",
+          "advanced": true
+        },
+        {
+          "key": "startOn",
+          "name": "Start On",
+          "type": "boolean",
+          "default": false,
+          "description": "When on, the toggle starts on when the prototype starts and after a restart.",
+          "advanced": true
+        }
+      ],
+      "outputs": [
+        {
+          "key": "on",
+          "name": "On",
+          "type": "boolean",
+          "description": "True while the toggle is on."
+        },
+        {
+          "key": "turnedOn",
+          "name": "Turned On",
+          "type": "pulse",
+          "description": "Pulses on the frame the toggle turns on."
+        },
+        {
+          "key": "turnedOff",
+          "name": "Turned Off",
+          "type": "pulse",
+          "description": "Pulses on the frame the toggle turns off."
+        },
+        {
+          "key": "down",
+          "name": "Down",
+          "type": "boolean",
+          "description": "True while a press on the layer is held, for press feedback."
+        }
+      ],
+      "alwaysEvaluate": true,
+      "pairsWellWith": [
+        "popAnimation",
+        "transition",
+        "classicAnimation",
+        "switch",
+        "interaction"
+      ],
+      "commonMistakes": [
+        "The change jumps instead of animating: On is wired straight into a layer property. Put a Pop Animation and a Transition between them.",
+        "Tapping one row toggles the whole list: Layer points at the list's group, so the list has one state. Set Layer to the looped row layer so each copy keeps its own.",
+        "Two toggles flip at once: the tapped layer sits inside another layer that has its own Tap Toggle, and taps bubble up to parent groups. Move the inner button out of the group, in front of it."
+      ],
+      "examples": [
+        {
+          "title": "Tap to like",
+          "description": "On fades the heart's color, and Down gives it a quick squeeze while pressed.",
+          "outline": "layer heart oval \"Heart\" @171,700 60x60 color←tint.output scale←squeeze.output\npatch like tapToggle layer=@heart\npatch fade classicAnimation number←like.on duration=0.2\npatch tint transition<color> progress←fade.output start=#D9D9D9FF end=#FF3040FF\npatch pop popAnimation number←like.down bounciness=8 speed=20\npatch squeeze transition<number> progress←pop.output start=1 end=0.9"
+        }
+      ],
+      "origami": null,
+      "defaultNotes": {
+        "startOn": "sonobe: toggles start off, like Switch."
+      }
+    },
+    {
+      "type": "hover",
+      "name": "Hover",
+      "category": "interaction",
+      "tier": 1,
+      "status": "supported",
+      "aliases": [
+        "mouse over",
+        "mouse enter",
+        "hover state",
+        "rollover",
+        "pointer over",
+        "cursor position",
+        "mouse position"
+      ],
+      "summary": "Reports whether the mouse pointer is over a layer and where it is, for hover highlights and tooltips on desktop.",
+      "docs": "## How it works\nHover watches the mouse pointer. **Hovering** is true while the pointer is over **Layer** or one of its children, including while a mouse button is held. **Position** is the pointer location in points from the top-left of the screen, and it keeps its last value after the pointer leaves.\n\nLeave Layer empty to watch the whole prototype. A layer in front blocks hover from layers behind it, unless that layer's Receives Touches is off. Layers at opacity 0 or with Enabled off never report hover.\n\nPhones and tablets have no hover pointer, so Hovering stays false there. Treat hover effects as extras, and make sure tapping still works.\n\n## Tips\n- Animate hover changes with a Classic Animation of about 0.15 s so they don't flicker.\n- For tooltips, add a Delay set to When Increasing so the tooltip only shows once the pointer rests.\n- If a loop copies the layer, each copy reports its own hover, which is handy for list rows.\n\n## Coming from Origami\nThe Hover output is called Hovering, and Enable is called Enabled. Position is measured from the screen's top-left instead of the parent's center.",
+      "behavior": "State per loop index: `{ lastPosition: [0, 0], lastLocal: [0, 0] }`.\n\nEach frame:\n```\nconst layer = ctx.input(\"layer\");\nconst snap = ctx.services.pointer(layer);\nconst hovering = ctx.input(\"enabled\") && (layer === null ? mouseInsidePrototype() : snap.hovering);\nif (hovering) {\n  state.lastPosition = snap.position;\n  state.lastLocal = snap.localPosition;\n}\nctx.output(\"hovering\", hovering);\nctx.output(\"position\", state.lastPosition);\nctx.output(\"localPosition\", state.lastLocal);\n```\n\n- Hover rule: a mouse pointer whose current hit chain contains the layer. Hovering pointers are re-hit-tested every frame against the previous frame's layout. The chain holds the front-most target plus its interactive ancestors, so children count, siblings in front block, and layers that are disabled, at opacity 0, or with Receives Touches off never hover.\n- Pressed mouse: while a button is held, the pointer keeps hovering whatever it's over, like CSS `:hover`. The engine's `PointerSnapshot.hovering` must include pressed mouse pointers; today `PointerTracker` drops a pointer from hover tracking while it's pressed.\n- Touch and pen pointers never hover, including after they lift. Telling them apart needs a `pointerType` on pointer InputEvents (contract request).\n- Layer empty (`mouseInsidePrototype`): true while a mouse pointer's position is inside `[0, width] × [0, height]` of the root. The renderer reports a move just outside the prototype when the pointer leaves the viewer, which always clears hover (Origami v174 fixed stuck hover).\n- Position: prototype coordinates. It updates only while hovering and holds after the pointer leaves; [0, 0] before the first hover. Local Position maps the same point through the layer's inverse world transform.\n- Pulses: none. Wire Hovering into a Pulse patch for enter and leave events.\n- Frame 0: false until the pointer first moves over the prototype.\n- Loops: per copy of a loop-replicated layer, with per-index state.\n- Edge cases: a missing layer never hovers.\n- Disabled: Hovering false; positions hold.\n- Muted: Hovering false and positions [0, 0]; Enabled is not passed through.\n- Platform and simulation: desktop app and desktop browsers. Phones and tablets output false, which the docs cover. Simulation drives hover with `pointer` move events that have no press.\n- Restart and dispose: state resets, and hover stays false until the pointer moves again. Nothing to dispose.\n- Coming from Origami: ports Enable and Hover map to `enabled` and `hovering`. Origami's Position is relative to the parent's center.",
+      "inputs": [
+        {
+          "key": "layer",
+          "name": "Layer",
+          "type": "layer",
+          "default": null,
+          "description": "The layer to watch. Leave empty to watch the whole prototype."
+        },
+        {
+          "key": "enabled",
+          "name": "Enabled",
+          "type": "boolean",
+          "default": true,
+          "description": "When off, Hovering stays false."
+        }
+      ],
+      "outputs": [
+        {
+          "key": "hovering",
+          "name": "Hovering",
+          "type": "boolean",
+          "description": "True while the mouse pointer is over the layer or one of its children."
+        },
+        {
+          "key": "position",
+          "name": "Position",
+          "type": "point",
+          "subtype": "distance",
+          "description": "Pointer position in points from the top-left of the screen; keeps its last value after the pointer leaves."
+        },
+        {
+          "key": "localPosition",
+          "name": "Local Position",
+          "type": "point",
+          "subtype": "distance",
+          "description": "Pointer position in points from the layer's own top-left corner, following its rotation and scale.",
+          "advanced": true
+        }
+      ],
+      "alwaysEvaluate": true,
+      "pairsWellWith": [
+        "classicAnimation",
+        "transition",
+        "delay",
+        "interaction",
+        "popAnimation"
+      ],
+      "commonMistakes": [
+        "The hover effect never shows on a phone: touch screens have no hover pointer. Give the same feedback on press with Interaction's Down.",
+        "Hover turns off over the button's label: the label is a separate layer in front of the button, so it blocks hover. Put the label inside the button's group, or turn off the label's Receives Touches.",
+        "The highlight flickers at the edge: the layer grows on hover, which moves its edge in and out under the pointer. Scale an inner layer, or watch a Hit Area that doesn't change size."
+      ],
+      "examples": [
+        {
+          "title": "Darken a button on hover",
+          "outline": "layer button rectangle \"Button\" @126,700 150x56 cornerRadius=12 color←tint.output\npatch hover_button hover layer=@button\npatch ease classicAnimation number←hover_button.hovering duration=0.15\npatch tint transition<color> progress←ease.output start=#3478F6FF end=#1F5FD0FF"
+        }
+      ],
+      "origami": {
+        "id": "builtin.layer.hover",
+        "name": "Hover"
+      },
+      "origamiPorts": {
+        "enabled": "Enable",
+        "hovering": "Hover"
+      },
+      "defaultNotes": {
+        "layer": "inferred: Origami shows None by default.",
+        "enabled": "inferred: Origami's default is undocumented; true, like Interaction."
+      }
+    },
+    {
+      "type": "keyboard",
+      "name": "Keyboard",
+      "category": "interaction",
+      "tier": 1,
+      "status": "supported",
+      "aliases": [
+        "key press",
+        "keydown",
+        "hotkey",
+        "keyboard shortcut",
+        "arrow keys",
+        "spacebar",
+        "key held"
+      ],
+      "summary": "Reports whether a key on a physical keyboard is held down, for desktop shortcuts and quick testing toggles.",
+      "docs": "## How it works\nKeyboard watches one key or a combination of keys. **Down** is true while every key in **Key** is held.\n\n- Type a single character, like `a`, `1`, or `/`, or a key name: `Space`, `Enter`, `Escape`, `Tab`, `Backspace`, `Up`, `Down`, `Left`, `Right`, `Shift`, `Control`, `Option`, `Command`, or `F1` to `F12`. Names aren't case-sensitive, and `A` watches the same key as `a`.\n- Join keys with `+` for a combination, like `Shift+Up` or `Command+K`.\n- The viewer needs keyboard focus, so click the prototype first. Typing into a Text Field layer doesn't count.\n\nPhones and tablets without a hardware keyboard never press keys, so use Keyboard for desktop prototypes and quick testing.\n\n## Tips\n- Wire Down into a Switch's Flip to toggle something with a key. It flips once per press.\n- Wire `Right` and `Left` into a Counter's Increase and Decrease to step through pages.\n- Keys match the character they type. With Shift held, `1` types `!`, so watch `!` instead of `Shift+1`.\n\n## Coming from Origami\nKey names from Origami files, like `up` or `shift`, work as they are. Combinations and Enabled are new.",
+      "behavior": "Stateless: reads the engine's keyboard snapshot every frame.\n\nEach frame:\n```\nconst raw = ctx.input(\"key\");\nlet parts;\nif (raw === \" \") parts = [\" \"];\nelse if (raw.trim() === \"\") parts = [];\nelse {\n  parts = raw.split(\"+\").map((p) => p.trim());\n  if (parts.includes(\"\")) parts = [...parts.filter((p) => p !== \"\"), \"+\"]; // \"+\" and \"Shift++\" watch the plus key\n}\nconst names = parts.map(normalizeKey); // @sonobe/engine gestures/keyboard.ts\nconst pressed = ctx.services.keyboard().pressed;\nctx.output(\"down\", ctx.input(\"enabled\") && names.length > 0 && names.every((k) => pressed.has(k)));\n```\n\n- Normalization (`normalizeKey`): single characters lowercase and a space character is `Space`. Friendly aliases: `up`/`down`/`left`/`right` → arrows; `esc` → `Escape`; `return` → `Enter`; `delete` → `Backspace` as on Mac keyboards; `del`/`forwardDelete` → `Delete`; `cmd`/`command`/`meta` → `Meta`; `option`/`opt`/`alt` → `Alt`; `ctrl`/`control` → `Control`; `capslock`, `home`, `end`, `pageUp`, `pageDown`. `F1`–`F12` go uppercase. Other names pass through as DOM `KeyboardEvent.key` names (`ArrowUp`, `MediaPlayPause`). Parse once per distinct Key text; cache by string.\n- Matching: Down is true while every named key is in `pressed`. Other held keys don't matter, so `a` stays down while Shift is also held. Keys are tracked by the character they produce (`event.key`), so with Shift held, digit keys arrive as symbols.\n- Timing: Down turns true on the frame the last required key goes down and false on the frame any required key goes up. The renderer ignores auto-repeat, so a held key stays true without flicker.\n- Pulses: none. Wiring Down into a pulse input fires once per press (a rising edge).\n- Focus: the renderer delivers keys only while the viewer has focus. Keys typed into an editable Text Field aren't delivered, except navigation keys it passes through. When the window loses focus, every held key is released so nothing stays stuck.\n- Frame 0: false. Keys already held when the prototype starts don't count until they're pressed again.\n- Loops: a looped Key evaluates per index, for example `1` to `9` into a Loop Option Switch.\n- Edge cases: empty Key → Down false, with no warning. Unknown names never match.\n- Disabled: Down false.\n- Muted: Down false; Enabled is not passed through.\n- Platform and simulation: works anywhere with a hardware keyboard. Phones without one output false, which the docs cover. Browser and app shortcuts, like ⌘R to restart, may be taken before the prototype sees them. Simulation reads `key` InputEvents.\n- Restart and dispose: the engine releases all keys on restart; nothing to dispose.\n- Coming from Origami: ports Key and Down keep their names. Origami's tokens for special keys are undocumented, so the aliases accept the likely spellings (`up`, `shift`, `command`, `option`, `escape`, `delete`, `tab`, `capslock`). Combinations and Enabled are Sonobe additions.",
+      "inputs": [
+        {
+          "key": "enabled",
+          "name": "Enabled",
+          "type": "boolean",
+          "default": true,
+          "description": "When off, Down stays false."
+        },
+        {
+          "key": "key",
+          "name": "Key",
+          "type": "text",
+          "default": "Space",
+          "description": "The key to watch: a character like a, or a name like Space, Enter, Up, or Shift; join keys with + for a combination."
+        }
+      ],
+      "outputs": [
+        {
+          "key": "down",
+          "name": "Down",
+          "type": "boolean",
+          "description": "True while every key in Key is held."
+        }
+      ],
+      "alwaysEvaluate": true,
+      "shortcut": "K",
+      "pairsWellWith": [
+        "switch",
+        "counter",
+        "pulse",
+        "optionSwitch",
+        "popAnimation"
+      ],
+      "commonMistakes": [
+        "Pressing the key does nothing: the viewer doesn't have keyboard focus, or you're typing into a Text Field. Click the prototype, then press the key.",
+        "The panel disappears when you let go of the key: Down is a state that turns off on release. Wire it into a Switch's Flip when the change should stay.",
+        "Shift+1 never turns on: with Shift held the key types !, and keys match the character they type. Watch ! instead."
+      ],
+      "examples": [
+        {
+          "title": "Press Space to show a panel",
+          "outline": "layer panel rectangle \"Panel\" @0,600 402x274 cornerRadius=24 opacity←fade.output\npatch space_key keyboard key=\"Space\"\npatch toggle switch flip←space_key.down\npatch fade classicAnimation number←toggle.on duration=0.25"
+        },
+        {
+          "title": "Hold Shift+Up to lift a card",
+          "outline": "layer card rectangle \"Card\" @37,300 328x200 cornerRadius=20 scale←lift.output\npatch shift_up keyboard key=\"Shift+Up\"\npatch pop popAnimation number←shift_up.down\npatch lift transition<number> progress←pop.output start=1 end=1.1"
+        }
+      ],
+      "origami": {
+        "id": "builtin.keyboard",
+        "name": "Keyboard"
+      },
+      "defaultNotes": {
+        "enabled": "sonobe: Origami's Keyboard has no Enabled input; true, the glossary default.",
+        "key": "sonobe: Origami's default is undocumented; Space works the moment you insert the patch."
+      }
+    }
+  ]
+}

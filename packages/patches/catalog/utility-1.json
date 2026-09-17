@@ -1,0 +1,841 @@
+{
+  "file": "utility-1.json",
+  "category": "utility",
+  "patches": [
+    {
+      "type": "splitter",
+      "name": "Splitter",
+      "category": "utility",
+      "tier": 1,
+      "status": "supported",
+      "aliases": [
+        "pass through",
+        "passthrough",
+        "junction",
+        "relay",
+        "cast",
+        "convert type",
+        "named value",
+        "constant",
+        "reroute",
+        "identity"
+      ],
+      "summary": "Passes a value through unchanged, so you can name it, reuse it as a constant, tidy cables, or cast it to another type.",
+      "docs": "## How it works\nA Splitter outputs exactly what it receives, on the same frame. It doesn't change the value; it gives the value a place in the graph and a name.\n\n- **Value** is the value to pass on. Leave it unconnected and type a value to make a named constant, like a card width that several patches share.\n- **Output** is Value, unchanged.\n- **Type:** right-click the patch to change its type. A Splitter accepts a cable of any type and converts the value to its own type, so it doubles as a cast: a number becomes a point with both parts equal, text like `\"12\"` becomes 12, a 2D point gains a third part of 0, and JSON becomes a typed value.\n\n## Tips\n- Rename a Splitter (⇧⏎) after what the value means, like \"Press Progress\". Cables that start at a named Splitter explain themselves.\n- Press X in the patch editor to insert one. A Splitter inserted on a port takes that port's name.\n- When one value feeds patches far apart, a Variable Broadcaster with Receivers keeps the graph tidier than long cables.\n\n## Coming from Origami\nSame patch. Origami leaves both ports unlabeled; Sonobe calls them Value and Output.",
+      "behavior": "Stateless.\n\nEach frame, per loop index:\n```\nctx.output(\"output\", ctx.input(\"value\"));\n```\n\n**Connections (the cast).** A Splitter is the explicit converter that core's connect errors suggest (`CONVERTER_CANDIDATES` in `values.ts`).\n- Any output type may connect to `value`, except layer references: a Splitter set to `layer` accepts only layer outputs, and a layer output connects to no other Splitter type (matching `canConnect`'s layer rule).\n- Pairs that `canConnect` allows keep its conversion label. Pairs it rejects are allowed here, and the wire label reads \"cast to <type label>\".\n- Contract gap: `PortSpec` can't mark a port as accepting every type. Proposed: `acceptsAnyType?: boolean` on `PortSpec`, which `canConnect` honors. Until then, connect validation special-cases `splitter.value`.\n- The engine's normal input path converts the upstream value with core `coerce(value, upstreamOutputType, typeParam)` before `ctx.input` returns it, so the evaluator never casts on its own. `coerce` is the single source of truth. At the time of writing it gives:\n  - number or boolean → any vector: every component equals the number (true is 1). Vector → number: the first component.\n  - Between vectors of different lengths: missing components are 0, extra ones are dropped (point → point3d appends 0).\n  - number → index: floor, at least 0.\n  - text → number: `parseFloat`, invalid text is 0. text → boolean: \"true\", \"yes\", \"on\" are true; \"false\", \"no\", \"off\", and \"\" are false; otherwise the parsed number > 0. text → vector: numbers separated by commas or spaces, otherwise zeros. text → color: hex parse, invalid text is opaque black. text → image, video, or sound: a URL. text → shape: SVG path data.\n  - boolean → text: \"true\" or \"false\". Number → text: formatted. Vector → text: \"10, 20\". Color → text: \"#RRGGBBAA\".\n  - color → vector: r, g, b, a in 0–1. Vector → color: the first four numbers, with alpha 1 when there are fewer than four.\n  - JSON → typed: objects with `x`/`y`/`z`/`w` or `width`/`height` become vectors, strings parse as text does, and anything unconvertible becomes the type's zero value (CONVENTIONS.md §8).\n\n- Pulses: no pulse ports. A pulse into a Splitter set to `boolean` comes out as a one-frame true, and downstream pulse inputs fire on its rising edge. Two pulses on back-to-back frames come out as two frames of true, which downstream pulse inputs see as one rising edge. The VALUE variant set has no `pulse` type.\n- Frame 0: outputs the authored or upstream value on frame 0.\n- Ordering: no latency. The patch sorts right after its upstream and never breaks a cycle; that's `delay1`'s job.\n- Loops: once per loop index, so the output loop has the input's length and an empty loop gives an empty output.\n- Type changes: `updatePatch` with a new `typeParam` converts a stored literal with `coerce`. Downstream links that no longer type-check get core's type-mismatch diagnostic and its converter suggestion.\n- Naming: `node.name` is the display name. When the editor inserts a Splitter on a port, it sets `name` to that port's display name.\n- Edge cases: values pass through with no clamping and no copying.\n- Restart and dispose: nothing to reset or release.\n- Coming from Origami: `builtin.splitter`, ports Input and Output. Origami's cast rules are undocumented; Sonobe uses core coercion. Origami Splitters of type Pulse import as `boolean`.",
+      "inputs": [
+        {
+          "key": "value",
+          "name": "Value",
+          "type": "variant",
+          "default": 0,
+          "description": "The value to pass on; leave it unconnected to type a constant. Its type follows the patch's type, which is number by default."
+        }
+      ],
+      "outputs": [
+        {
+          "key": "output",
+          "name": "Output",
+          "type": "variant",
+          "description": "Value, unchanged, on the same frame."
+        }
+      ],
+      "variants": [
+        "number",
+        "boolean",
+        "text",
+        "color",
+        "point",
+        "point3d",
+        "point4d",
+        "size",
+        "anchor",
+        "index",
+        "enum",
+        "json",
+        "image",
+        "video",
+        "sound",
+        "gradient",
+        "shape",
+        "layerEffect",
+        "layer"
+      ],
+      "variantDefaults": {
+        "color": {
+          "value": "#FFFFFFFF"
+        },
+        "size": {
+          "value": [
+            100,
+            100
+          ]
+        }
+      },
+      "alwaysEvaluate": false,
+      "shortcut": "X",
+      "pairsWellWith": [
+        "variableBroadcaster",
+        "watch",
+        "transition",
+        "optionPicker"
+      ],
+      "commonMistakes": [
+        "Typing a new value into the Splitter changes nothing: a cable drives Value, and a connected input ignores its typed value. Disconnect the cable to use the Splitter as a constant.",
+        "A layer turns into a square after you change a Splitter's type to size: casting a number copies it into both width and height. Use a Size or Point patch to set each part on its own.",
+        "Two quick pulses count as one downstream: a Splitter set to on/off passes a pulse as a one-frame true, and back-to-back trues merge. Wire the pulse straight into the input that must see every pulse."
+      ],
+      "examples": [
+        {
+          "title": "Share one card width across layers",
+          "description": "Change 358 on the Splitter and both layers resize together.",
+          "outline": "layer card rectangle \"Card\" @16,120 size←card_size.output\nlayer banner rectangle \"Banner\" @16,360 size←banner_size.output\npatch card_width splitter \"Card Width\" value=358\npatch card_size size width←card_width.output height=220\npatch banner_size size width←card_width.output height=64"
+        },
+        {
+          "title": "Name a press progress that drives three properties",
+          "description": "One named junction replaces three cables from the spring and says what the value means.",
+          "outline": "layer glow oval \"Glow\" @101,380 200x96 opacity←press_glow.output\nlayer button rectangle \"Button\" @121,400 160x56 cornerRadius=28 scale←press_scale.output opacity←press_fade.output\npatch press interaction layer=@button\npatch press_spring popAnimation number←press.down\npatch press_progress splitter \"Press Progress\" value←press_spring.output\npatch press_scale transition<number> progress←press_progress.output start=1 end=0.94\npatch press_fade transition<number> progress←press_progress.output start=1 end=0.8\npatch press_glow transition<number> progress←press_progress.output start=0 end=0.6"
+        }
+      ],
+      "origami": {
+        "id": "builtin.splitter",
+        "name": "Splitter"
+      },
+      "origamiPorts": {
+        "value": "Input",
+        "output": "Output"
+      },
+      "defaultNotes": {
+        "value": "inferred: research reads Origami's default Splitter type as Number with value 0."
+      }
+    },
+    {
+      "type": "variableBroadcaster",
+      "name": "Variable Broadcaster",
+      "category": "utility",
+      "tier": 1,
+      "status": "supported",
+      "aliases": [
+        "wireless broadcaster",
+        "wireless",
+        "variable",
+        "set variable",
+        "global variable",
+        "broadcast",
+        "send value",
+        "shared value",
+        "named value"
+      ],
+      "summary": "Shares a value under a name, so any Variable Receiver with that name can use it without a cable.",
+      "docs": "## How it works\nA Variable Broadcaster gives a value a name. Every Variable Receiver set to the same name outputs that value on the same frame, as if a cable connected them.\n\n- **Value** is the value to share. Leave it unconnected and type a value to make a constant you change in one place.\n- **Name** (click the title) is the variable's name. Names are case-sensitive, and an empty name shares nothing.\n- **Scope** decides who can receive it. **Local**, the default, reaches receivers in this patch graph only. **Global** also reaches receivers inside every component placed here, and inside their components, all the way down. Global variables never flow up to a parent.\n- **Type:** right-click to change the value's type. Receivers match on name, scope, and type.\n\nA component can override a global variable for everything inside it by broadcasting its own global variable with the same name and type. Each receiver uses the nearest one above it.\n\n## Tips\n- Press W to insert a broadcaster. Renaming or retyping it updates the receivers that follow it.\n- Use variables for values many distant patches need, like scroll position or a dark-mode switch. For nearby patches, a cable or a Splitter is easier to follow.\n\n## Coming from Origami\nFormerly Wireless Broadcaster. The variable's name lives in the patch's Name setting instead of its title.",
+      "behavior": "Stateless. A broadcaster computes nothing at runtime. The graph compiler turns each resolved variable into implicit edges (semantics.md §10, CONVENTIONS.md §18.5.10).\n\nSettings:\n- `name` (text, default \"\"): compared after trimming leading and trailing whitespace, case-sensitive. An empty name never matches.\n- `scope` (enum `local` | `global`, default `local`).\n- `typeParam` is the variable's type; missing means `number`.\n\n**Resolution** (static; the compiler runs it per component instance path such as \"main/card_1\"):\n```\nresolve(receiver at instance path P, name n, scope s, type t):\n  if (n === \"\") return unresolved;\n  levels = s === \"local\" ? [P] : [P, parent(P), …, root];   // nearest first\n  for (const level of levels) {\n    const candidates = broadcasters in level's own patch graph\n      where trim(settings.name) === n && scope === s && (typeParam ?? \"number\") === t;\n    if (candidates.length) return candidates sorted by patch id, first;\n  }\n  return unresolved;\n```\n- Levels follow instance nesting: layer component instances and `component` patches. A component placed in two parents can resolve a global receiver differently in each placement.\n- A same-name broadcaster with another type or scope doesn't match and doesn't shadow anything.\n\n**Compile.** For each resolved receiver the compiler adds an internal source that reads the broadcaster's `value` exactly as a cable would: the driving output, or the stored literal or default when `value` is unconnected. The receiver sorts after that upstream patch, across component boundaries. The internal source isn't a declared port and is never stored in the document. When the broadcaster is muted, the source is the variant's zero value instead.\n\nEach frame: `evaluate` is a no-op.\n\n- Pulses: no pulse ports. A pulse into a `boolean` broadcaster reaches receivers as a one-frame true.\n- Frame 0: receivers see the value on frame 0, with no latency.\n- Loops: the whole value travels, including loops. A receiver inside a component replicated by a loop gets the full loop in every instance, like a component input set to \"pass\".\n- Cycles: an implicit edge counts as a cable. A cycle through a variable gets one frame of latency on its back-edge (ARCHITECTURE.md §5.2). A receiver feeding its own broadcaster isn't a direct self-edge.\n- Muted: receivers resolved to a muted broadcaster output the zero value (CONVENTIONS.md §8) and fire nothing. Muting never changes resolution, so a muted nearer global still shadows the ones above it.\n- Diagnostics (core `getDiagnostics`):\n  - `duplicate_variable` (error, on each broadcaster involved): two or more broadcasters in one patch graph share name, scope, and type. Resolution uses the first by id.\n  - `unnamed_variable` (warning): the name is empty.\n  - `unused_variable` (info): no receiver resolves to this broadcaster.\n- Authoring: when an op changes a broadcaster's `name`, `scope`, or `typeParam`, the same batch updates every receiver that resolved to it before the change, and the inverse restores them. Deleting a broadcaster leaves its receivers unresolved. The editor names a broadcaster inserted from an output after that output (\"Scroll Y\"), otherwise \"Variable\", \"Variable 2\", and so on.\n- Hot swap: `rt.updateDocument` re-resolves every variable.\n- Restart and dispose: nothing to reset or release.\n- Coming from Origami: `builtin.wirelessbroadcaster` (serialized `builtin.wirelessBroadcaster`). The patch title imports as `settings.name` and the scope menu as `settings.scope`. Origami's legacy runtime wrote variables into a shared table every frame, so receivers could lag a frame depending on order; static edges remove that lag. Pulse-typed broadcasters import as `boolean` because the VALUE variant set has no `pulse`, so back-to-back pulses on consecutive frames merge downstream.",
+      "inputs": [
+        {
+          "key": "value",
+          "name": "Value",
+          "type": "variant",
+          "default": 0,
+          "description": "The value to share; leave it unconnected to share a typed constant. Its type follows the patch's type, which is number by default."
+        }
+      ],
+      "outputs": [],
+      "variants": [
+        "number",
+        "boolean",
+        "text",
+        "color",
+        "point",
+        "point3d",
+        "point4d",
+        "size",
+        "anchor",
+        "index",
+        "enum",
+        "json",
+        "image",
+        "video",
+        "sound",
+        "gradient",
+        "shape",
+        "layerEffect",
+        "layer"
+      ],
+      "variantDefaults": {
+        "color": {
+          "value": "#FFFFFFFF"
+        },
+        "size": {
+          "value": [
+            100,
+            100
+          ]
+        }
+      },
+      "settings": [
+        {
+          "key": "name",
+          "name": "Name",
+          "type": "text",
+          "default": "",
+          "description": "The variable's name. Receivers with the same name, scope, and type get this value."
+        },
+        {
+          "key": "scope",
+          "name": "Scope",
+          "type": "enum",
+          "default": "local",
+          "enumOptions": [
+            {
+              "key": "local",
+              "name": "Local",
+              "description": "Only this patch graph."
+            },
+            {
+              "key": "global",
+              "name": "Global",
+              "description": "This patch graph and every component nested inside it."
+            }
+          ],
+          "description": "Who can receive it: Local reaches this patch graph; Global also reaches every component nested inside it."
+        }
+      ],
+      "alwaysEvaluate": false,
+      "shortcut": "W",
+      "pairsWellWith": [
+        "variableReceiver",
+        "splitter",
+        "scroll",
+        "component"
+      ],
+      "commonMistakes": [
+        "A receiver outputs 0 and shows a warning: its name, scope, or type doesn't match the broadcaster, often because of different capitalization. Pick the variable from the receiver's name menu, which copies all three.",
+        "Receivers inside a component get nothing: the broadcaster's scope is Local, which stops at the component's edge. Set Scope to Global.",
+        "Two broadcasters show an error: they share a name, scope, and type in the same patch graph, so receivers can't tell them apart. Rename one of them."
+      ],
+      "examples": [
+        {
+          "title": "Fade a header as the feed scrolls",
+          "description": "The scroll position travels by name instead of by a long cable.",
+          "outline": "layer feed_window group \"Feed Window\" @0,0 402x874 clip=true\n  layer feed group \"Feed\" 402x2400 position←feed_scroll.position\nlayer header rectangle \"Header\" @0,0 402x96 opacity←header_fade.output\npatch feed_scroll scroll layer=@feed scrollY=free\npatch share_scroll_y variableBroadcaster name=\"Scroll Y\" value←feed_scroll.y\npatch scroll_y variableReceiver<number> name=\"Scroll Y\"\npatch fade_amount progress value←scroll_y.output start=0 end=-120 clampToRange=true\npatch header_fade transition<number> progress←fade_amount.progress start=1 end=0"
+        },
+        {
+          "title": "Switch every card to dark mode",
+          "description": "One global broadcaster in Main reaches a receiver inside each Card instance.",
+          "outline": "component main \"Main\" (prototype) 402x874\nlayer theme_button rectangle \"Theme Button\" @326,60 60x36 cornerRadius=18\nlayer card_1 componentInstance:card \"Card 1\" @16,120 370x200\nlayer card_2 componentInstance:card \"Card 2\" @16,340 370x200\npatch theme tapToggle layer=@theme_button\npatch share_dark_mode variableBroadcaster<boolean> name=\"Dark Mode\" scope=\"global\" value←theme.on\ncomponent card \"Card\" (layerComponent) 370x200\nlayer card_bg rectangle \"Background\" 370x200 cornerRadius=20 color←card_color.output\npatch dark_mode variableReceiver<boolean> name=\"Dark Mode\" scope=\"global\"\npatch card_color optionPicker<color> option←dark_mode.output option0=#FFFFFFFF option1=#1C1C1EFF"
+        }
+      ],
+      "origami": {
+        "id": "builtin.wirelessbroadcaster",
+        "name": "Variable Broadcaster"
+      },
+      "importAliases": [
+        "builtin.wirelessBroadcaster"
+      ],
+      "origamiPorts": {
+        "value": "Input"
+      },
+      "defaultNotes": {
+        "value": "inferred: research reads Origami's default broadcaster type as Number with value 0.",
+        "name": "sonobe: Origami titles a new broadcaster itself; an empty name matches nothing until the editor or an agent names it.",
+        "scope": "verified: the Variable Broadcaster doc says variables are local by default."
+      }
+    },
+    {
+      "type": "variableReceiver",
+      "name": "Variable Receiver",
+      "category": "utility",
+      "tier": 1,
+      "status": "supported",
+      "aliases": [
+        "wireless receiver",
+        "wireless",
+        "get variable",
+        "read variable",
+        "global variable",
+        "receive value",
+        "listen",
+        "shared value"
+      ],
+      "summary": "Outputs the value shared by the Variable Broadcaster with the same name, without a cable.",
+      "docs": "## How it works\nA Variable Receiver outputs whatever its matching Variable Broadcaster shares, on the same frame, as if a cable ran between them.\n\n- **Name** (click the title) picks the variable. The menu lists local variables from this patch graph and global variables from here and from every component this one sits inside. Choosing one copies its name, scope, and type.\n- **Output** is the broadcaster's value. When nothing matches, Output is the type's empty value (0, off, or empty text), and the patch shows a warning.\n\nWhen more than one global broadcaster above a receiver shares its name and type, the nearest one wins, so a component can override a value for everything inside it.\n\n## Tips\n- Click the receiver's radio icon to jump to its broadcaster.\n- Press ⇧W to insert a receiver.\n- Receivers are read-only. To change a shared value, change what drives the broadcaster.\n\n## Coming from Origami\nFormerly Wireless Receiver. Global overrides work the same way.",
+      "behavior": "Stateless.\n\nSettings: `name` and `scope`, as on Variable Broadcaster. `typeParam` holds the variable's type (default `number`).\n\nResolution and compilation are specified on Variable Broadcaster: the compiler resolves `(name, scope, typeParam)` statically per component instance path, nearest level first, and binds the receiver's internal source to the broadcaster's `value`.\n\nEach frame, per loop index of the internal source:\n```\n// SOURCE is the compiler's internal source: the resolved broadcaster's value\n// (its driving link, or its stored literal or default), or the zero value of\n// typeParam when the receiver is unresolved or the broadcaster is muted.\nctx.output(\"output\", ctx.input(SOURCE));\n```\n\n- Pulses: no pulse ports. A pulse shared through a `boolean` variable arrives as a one-frame true, and downstream pulse inputs fire on its rising edge.\n- Frame 0: outputs the resolved value on frame 0.\n- Loops: passes the whole value, loops included, unchanged.\n- Hot swap: `rt.updateDocument` re-resolves every receiver. A receiver whose match changes outputs the new value on the next evaluated frame; there's no state to carry over.\n- Edge cases:\n  - Unresolved (no match, empty name, or deleted broadcaster): outputs the zero value (CONVENTIONS.md §8) and raises `unresolved_variable` (warning). Suggestions: did-you-mean over the names this receiver can reach, a case-only match (\"scroll y\" for \"Scroll Y\"), and a scope switch when the name exists in the other scope.\n  - Same name and scope but a different type: `variable_type_mismatch` (warning) with a suggested `updatePatch` that sets `typeParam` to the broadcaster's type. Output stays the zero value until the types agree.\n- Muted: outputs the zero value.\n- Restart and dispose: nothing to reset or release.\n- Coming from Origami: `builtin.wirelessreceiver` (serialized `builtin.wirelessReceiver`). The selected variable's name, scope, and type import as `settings.name`, `settings.scope`, and `typeParam`. A receiver whose broadcaster is missing imports unresolved and keeps its name. Pulse-typed receivers import as `boolean`.",
+      "inputs": [],
+      "outputs": [
+        {
+          "key": "output",
+          "name": "Output",
+          "type": "variant",
+          "description": "The shared value from the matching broadcaster; the type's empty value (0, off, or empty text) when nothing matches."
+        }
+      ],
+      "variants": [
+        "number",
+        "boolean",
+        "text",
+        "color",
+        "point",
+        "point3d",
+        "point4d",
+        "size",
+        "anchor",
+        "index",
+        "enum",
+        "json",
+        "image",
+        "video",
+        "sound",
+        "gradient",
+        "shape",
+        "layerEffect",
+        "layer"
+      ],
+      "settings": [
+        {
+          "key": "name",
+          "name": "Name",
+          "type": "text",
+          "default": "",
+          "description": "The variable to receive. It matches a broadcaster with the same name, scope, and type."
+        },
+        {
+          "key": "scope",
+          "name": "Scope",
+          "type": "enum",
+          "default": "local",
+          "enumOptions": [
+            {
+              "key": "local",
+              "name": "Local",
+              "description": "Only this patch graph."
+            },
+            {
+              "key": "global",
+              "name": "Global",
+              "description": "This patch graph and every component nested inside it."
+            }
+          ],
+          "description": "Where to look: Local reads this patch graph; Global looks here first, then in each component this one sits inside."
+        }
+      ],
+      "dynamicPortsRule": "No inputs. One output, `output`, typed by the receiver's `typeParam`, which is kept equal to the type of the broadcaster it follows.\n- Choosing a variable from the receiver's name menu issues one `updatePatch` that copies `settings.name`, `settings.scope`, and `typeParam` from that broadcaster.\n- When a broadcaster's `name`, `scope`, or `typeParam` changes, the same batch updates the receivers that resolved to it (Variable Broadcaster, Authoring).\n- `addPatch` for a receiver without `typeParam` (for example an agent that supplies only a name) resolves by name and scope alone. If exactly one type matches, the op stores that type; otherwise `typeParam` stays unset and means `number`.\n- An unresolved receiver keeps its stored `typeParam`, so its downstream cables stay type-checked while the broadcaster is missing.",
+      "alwaysEvaluate": false,
+      "shortcut": "Shift+W",
+      "pairsWellWith": [
+        "variableBroadcaster",
+        "transition",
+        "progress",
+        "component"
+      ],
+      "commonMistakes": [
+        "The receiver shows a warning and outputs 0: no broadcaster with the same name, scope, and type reaches it, often because of a typo or different capitalization. Choose the variable from the receiver's name menu.",
+        "A receiver inside a component still reads the parent's value after you add an override: the component's broadcaster is Local, so it doesn't override globals. Set that broadcaster's Scope to Global."
+      ],
+      "examples": [
+        {
+          "title": "Use one header height in two places",
+          "description": "Change 96 on the broadcaster and both the header and the content below it follow.",
+          "outline": "layer header rectangle \"Header\" @0,0 size←header_size.output\nlayer content group \"Content\" 402x778 position←content_offset.output\npatch header_height variableBroadcaster name=\"Header Height\" value=96\npatch height_for_header variableReceiver<number> name=\"Header Height\"\npatch header_size size width=402 height←height_for_header.output\npatch height_for_content variableReceiver<number> name=\"Header Height\"\npatch content_offset point x=0 y←height_for_content.output"
+        }
+      ],
+      "origami": {
+        "id": "builtin.wirelessreceiver",
+        "name": "Variable Receiver"
+      },
+      "importAliases": [
+        "builtin.wirelessReceiver"
+      ],
+      "defaultNotes": {
+        "name": "sonobe: Origami copies the name from the chosen broadcaster; an empty name matches nothing.",
+        "scope": "sonobe: Origami copies the scope from the chosen broadcaster; local matches the broadcaster's default."
+      }
+    },
+    {
+      "type": "watch",
+      "name": "Watch",
+      "category": "utility",
+      "tier": 1,
+      "status": "supported",
+      "aliases": [
+        "debug",
+        "inspect",
+        "probe",
+        "log",
+        "print",
+        "console",
+        "readout",
+        "show value",
+        "monitor",
+        "trace"
+      ],
+      "summary": "Shows a value right on the patch and logs its changes to the console, so you can see what a cable carries.",
+      "docs": "## How it works\nConnect any output to a Watch to see what it carries while the prototype runs. The patch shows the current value on its face and writes changes to the console.\n\n- **Value** is the value to watch. Connecting a cable sets the patch's type to match; right-click to change it.\n- **Label** names the readout, like \"Card scale\".\n- **Log Changes** writes a console line when the value changes, at most 4 lines a second, so fast animations don't flood the console. The last line always shows where the value settled.\n- **Display** is the readout as text. Wire it to a Text layer to see values on a phone.\n- **Change Count** counts changes since the start or the last **Reset**. For on/off values it counts how many times the value turned on, so it's the quickest way to check that a tap or pulse fired.\n\nFor a loop, the patch face shows the first item and how many items there are; hover it to see every item.\n\n## Tips\n- A Watch never affects the prototype. Keep it while you work, then mute or delete it.\n- Pulses (signals that last one frame) are too short to see. Set the Watch's type to on/off and watch Change Count.",
+      "behavior": "State per loop index: `{ count: 0, lastLogged: null, lastLogTime: -Infinity }`.\n\nEach frame, per loop index:\n```\nconst text = format(ctx.input(\"value\"), ctx.typeParam ?? \"number\");\nif (ctx.pulsed(\"reset\")) state.count = 0;\nelse if (ctx.typeParam === \"boolean\" ? ctx.pulsed(\"value\") : ctx.changed(\"value\")) state.count += 1;\n\nconst label = ctx.input(\"label\").trim();\nconst suffix = ctx.typeParam === \"boolean\" && state.count > 0 ? \" · on \" + state.count + \"×\" : \"\";\nctx.output(\"display\", (label ? label + \": \" : \"\") + text + suffix);\nctx.output(\"changeCount\", state.count);\n\nif (ctx.input(\"logChanges\") && text !== state.lastLogged) {\n  if (ctx.time - state.lastLogTime >= 0.25) {\n    const who = label || ctx.node.name || ctx.id;\n    const item = ctx.loopCount > 1 ? \" #\" + ctx.loopIndex : \"\";\n    ctx.services.log(\"log\", who + item + \": \" + text);\n    state.lastLogged = text;\n    state.lastLogTime = ctx.time;\n  } else {\n    ctx.requestNextFrame();   // flush the newest text once the 0.25 s window passes\n  }\n}\n```\n\n**format(value, type)** never throws:\n- number: non-finite and -0 show as `0`. When |v| ≥ 1e9 or 0 < |v| < 0.001, 3 significant digits in exponent form with trailing zeros trimmed (`1.23e-4`, `4e+9`). Otherwise rounded to 3 decimals with trailing zeros trimmed (`0.94`, `120`).\n- index: the integer. boolean: `true` or `false`. enum: the option key.\n- text: in double quotes, line breaks shown as `↵`, cut to 60 characters with `…`.\n- color: `#RRGGBBAA`, uppercase (core `formatColor`).\n- point, size, anchor, point3d, point4d: `[a, b]` with each number formatted as above.\n- json: `JSON.stringify` (`null` for undefined), cut to 60 characters with `…`.\n- image, video, sound: `image <assetId>` or `image <url cut to 40>`, and `no image` (or video, sound) for null.\n- gradient: `<kind> gradient, <n> stops`. shape: `shape \"<path cut to 30>\"`. layerEffect: `<kind> effect`. layer: `@layerId`, plus `#instance` when set. Null media, gradient, shape, effect, or layer values read `no <type>`.\n- Anything else: `JSON.stringify` cut to 60 characters.\n\n- Pulses: `reset` is a pulse, and it beats a change on the same frame (the count reads 0 that frame). With `typeParam` `boolean`, every upstream pulse counts, including pulses on consecutive frames, because `ctx.pulsed` reports each one.\n- Frame 0: shows and logs the first value on frame 0. `ctx.changed` and `ctx.pulsed` follow the engine's frame-0 seeding, so nothing counts as a change on frame 0.\n- Loops: per loop index; outputs follow the input loop's length. The editor's patch face shows index 0 plus \"×N\" and lists the other items on hover by reading `<id>.display#n`. Console lines add `#i` when there's more than one item.\n- Time: the log throttle uses `ctx.time`, so results match at 60 and 120 fps and in simulation.\n- Evaluation: `alwaysEvaluate` is false. The patch requests the next frame while newer text waits for the throttle, so a settled value is logged within 0.25 s.\n- Authoring: when the first cable connects to an unconnected Watch's `value`, the `connect` op also sets `typeParam` to the source output's type, in the same batch and recorded in the inverse. Pulse sources map to `boolean`; types outside the VALUE set map to `json`.\n- Platform and simulation: logging goes through `ctx.services.log(\"log\", …)`: the editor's console in the app, and `RuntimeOptions.onLog` in headless runs. MCP `sim_get_values` can read `display` and `changeCount`. No other side effects.\n- Muted: outputs empty text and 0 and logs nothing. The default bypass would pass Label into Display instead.\n- Restart and dispose: `count`, `lastLogged`, and `lastLogTime` reset, so the first frame logs again. Nothing to release.",
+      "inputs": [
+        {
+          "key": "value",
+          "name": "Value",
+          "type": "variant",
+          "default": 0,
+          "description": "The value to show. Its type follows the patch's type, which is number by default."
+        },
+        {
+          "key": "label",
+          "name": "Label",
+          "type": "text",
+          "default": "",
+          "description": "Text shown before the value and in console lines; empty shows the value alone."
+        },
+        {
+          "key": "logChanges",
+          "name": "Log Changes",
+          "type": "boolean",
+          "default": true,
+          "description": "When on, writes a console line when the value changes, at most 4 lines a second per item, ending with the latest value."
+        },
+        {
+          "key": "reset",
+          "name": "Reset",
+          "type": "pulse",
+          "description": "Pulse to set Change Count back to 0.",
+          "advanced": true
+        }
+      ],
+      "outputs": [
+        {
+          "key": "display",
+          "name": "Display",
+          "type": "text",
+          "description": "The readout shown on the patch, such as \"Scale: 0.94\" or \"Taps: false · on 3×\"."
+        },
+        {
+          "key": "changeCount",
+          "name": "Change Count",
+          "type": "number",
+          "description": "How many times Value changed since the start or the last Reset; on/off values count only turning on, so each pulse counts once."
+        }
+      ],
+      "variants": [
+        "number",
+        "boolean",
+        "text",
+        "color",
+        "point",
+        "point3d",
+        "point4d",
+        "size",
+        "anchor",
+        "index",
+        "enum",
+        "json",
+        "image",
+        "video",
+        "sound",
+        "gradient",
+        "shape",
+        "layerEffect",
+        "layer"
+      ],
+      "alwaysEvaluate": false,
+      "pairsWellWith": [
+        "interaction",
+        "pulse",
+        "splitter",
+        "formatNumber"
+      ],
+      "commonMistakes": [
+        "Change Count goes up by 2 for every tap: with the number type, a pulse changes the value to 1 and back to 0. Set the Watch's type to on/off (boolean) so each pulse counts once.",
+        "The console fills with lines: Log Changes is on for values that animate across a big loop, and each item logs separately. Turn Log Changes off and read the patch face instead."
+      ],
+      "examples": [
+        {
+          "title": "Check that a tap reaches a card",
+          "description": "Change Count goes up by one on every tap, so you can tell whether touches reach the card.",
+          "outline": "layer card rectangle \"Card\" @16,120 370x220 cornerRadius=24\npatch tap_card interaction layer=@card\npatch tap_watch watch<boolean> value←tap_card.tap label=\"Card taps\""
+        },
+        {
+          "title": "Read a spring's value on a phone",
+          "description": "Display feeds a Text layer, so the number shows in the web player without a console.",
+          "outline": "layer button rectangle \"Button\" @121,400 160x56 cornerRadius=28 scale←press_scale.output\nlayer readout text \"Readout\" @16,780 text←scale_watch.display\npatch press interaction layer=@button\npatch press_spring popAnimation number←press.down\npatch press_scale transition<number> progress←press_spring.output start=1 end=0.94\npatch scale_watch watch value←press_scale.output label=\"Scale\" logChanges=false"
+        }
+      ],
+      "origami": null,
+      "defaultNotes": {
+        "value": "sonobe: a Watch is usually connected; 0 is the number variant's zero value.",
+        "label": "sonobe: an empty label keeps the readout short; console lines fall back to the patch's name or id.",
+        "logChanges": "sonobe: logging is half of what Watch is for, and the 4-lines-a-second limit keeps it readable."
+      }
+    },
+    {
+      "type": "point",
+      "name": "Point",
+      "category": "utility",
+      "tier": 1,
+      "status": "supported",
+      "aliases": [
+        "vec2",
+        "make point",
+        "pack point",
+        "xy",
+        "coordinate",
+        "combine x and y",
+        "position builder",
+        "anchor point",
+        "2d point"
+      ],
+      "summary": "Combines an X and a Y number into one point for a layer's Position, Anchor, Pivot, or any other 2D input.",
+      "docs": "## How it works\nPoint packs two numbers into a single 2D value.\n\n- **X** is the horizontal part. For a position it's the distance in points from the parent's left edge.\n- **Y** is the vertical part. For a position it's the distance in points from the parent's top edge, and it grows downward.\n- **Output** is `[X, Y]`. Wire it into Position, or into Anchor and Pivot, where 0 is the left or top edge and 1 is the right or bottom edge.\n\n## Tips\n- Animate one axis at a time: drive X from an animation and type a fixed Y.\n- Animation patches can also animate a whole point: set a Pop Animation's type to point instead of animating X and Y separately.\n- To take a point apart, use Point Unpack. For widths and heights, Size reads more clearly.\n\n## Coming from Origami\nSonobe measures positions from the parent's top-left corner; Origami measures them from the center.",
+      "behavior": "State per loop index: `{ warned: false }`, used only for the non-finite warning.\n\nEach frame, per loop index:\n```\nconst fix = (n) => {\n  if (Number.isFinite(n)) return n;\n  if (!state.warned) { state.warned = true; ctx.services.log(\"warn\", ctx.id + \" got a value that isn't a finite number and used 0\"); }\n  return 0;\n};\nctx.output(\"output\", [fix(ctx.input(\"x\")), fix(ctx.input(\"y\"))]);\n```\n\n- Pulses: none.\n- Frame 0: outputs the authored or upstream values on frame 0.\n- Loops: once per loop index. A loop on X, Y, or both gives a loop of points; the longest loop sets the length and shorter ones wrap (ARCHITECTURE.md §4).\n- Types: the output is `point`. It connects directly to `point`, `size`, and `anchor` inputs (all two numbers; core `canConnect`) and to `number` inputs as its first component. It doesn't connect to `point3d` or `point4d` without a Splitter.\n- Edge cases: no clamping. Non-finite inputs from a misbehaving upstream become 0 and warn once per restart.\n- Restart and dispose: `warned` resets; nothing to release.\n- Coming from Origami: `builtin.point`, ports X and Y, unlabeled output. Origami stores a type on this patch: Position and Anchor import as `point`, and Size imports as `size`. Origami positions are measured from a centered origin; importers convert on the layer side (CONVENTIONS.md §7).",
+      "inputs": [
+        {
+          "key": "x",
+          "name": "X",
+          "type": "number",
+          "default": 0,
+          "description": "Horizontal part: points from the parent's left edge for a position, or 0 to 1 across the layer for an anchor or pivot."
+        },
+        {
+          "key": "y",
+          "name": "Y",
+          "type": "number",
+          "default": 0,
+          "description": "Vertical part: points from the parent's top edge for a position (grows downward), or 0 to 1 down the layer for an anchor or pivot."
+        }
+      ],
+      "outputs": [
+        {
+          "key": "output",
+          "name": "Output",
+          "type": "point",
+          "description": "The point [X, Y]."
+        }
+      ],
+      "alwaysEvaluate": false,
+      "pairsWellWith": [
+        "pointUnpack",
+        "popAnimation",
+        "transition",
+        "loop",
+        "drag"
+      ],
+      "commonMistakes": [
+        "The layer jumps to the top edge when you wire Point into Position: Y is still 0 while only X is animated. Type the layer's current Y into the input you aren't animating.",
+        "A layer spins around its corner: a Point wired to Pivot is at [0, 0], the top-left corner. Set X and Y to 0.5 to pivot around the center."
+      ],
+      "examples": [
+        {
+          "title": "Slide a card sideways on tap",
+          "description": "Only X animates; Y stays at 120.",
+          "outline": "layer card rectangle \"Card\" 200x140 cornerRadius=20 position←card_position.output\npatch tap_card interaction layer=@card\npatch toggle switch flip←tap_card.tap\npatch slide popAnimation number←toggle.on\npatch card_x transition<number> progress←slide.output start=16 end=186\npatch card_position point x←card_x.output y=120"
+        },
+        {
+          "title": "Lay out a row of dots with a loop",
+          "description": "The loop's index spaces five dots 72 points apart.",
+          "outline": "layer dot oval \"Dot\" 48x48 position←dot_position.output\npatch dots loop count=5\npatch dot_x mathExpression expression=\"x = 33 + index * 72\" index←dots.index\npatch dot_position point x←dot_x.x y=400"
+        }
+      ],
+      "origami": {
+        "id": "builtin.point",
+        "name": "Point"
+      },
+      "defaultNotes": {
+        "x": "inferred: research reads Origami's Point defaults as 0.",
+        "y": "inferred: research reads Origami's Point defaults as 0."
+      }
+    },
+    {
+      "type": "pointUnpack",
+      "name": "Point Unpack",
+      "category": "utility",
+      "tier": 1,
+      "status": "supported",
+      "aliases": [
+        "split point",
+        "get x",
+        "get y",
+        "unpack xy",
+        "coordinates",
+        "vec2 unpack",
+        "point to numbers",
+        "separate x and y",
+        "decompose point"
+      ],
+      "summary": "Splits a 2D point, such as a touch position, into separate X and Y numbers.",
+      "docs": "## How it works\nPoint Unpack takes one 2D value apart.\n\n- **Value** is the point to split. Any two-number value works: a position, an anchor, a size, or a velocity.\n- **X** is the first number: the horizontal part, or the width of a size.\n- **Y** is the second number: the vertical part, or the height of a size.\n\n## Tips\n- Touch positions are in points from the top-left of the screen, and Y grows downward.\n- Make a horizontal slider: unpack a touch position, keep X, and pack it back into a point with a fixed Y.\n- For sizes, Size Unpack gives the same numbers labeled Width and Height.\n\n## Coming from Origami\nSame patch. Origami leaves the input unlabeled; Sonobe calls it Value.",
+      "behavior": "State per loop index: `{ warned: false }`, used only for the non-finite warning.\n\nEach frame, per loop index:\n```\nconst [x, y] = ctx.input(\"value\");   // already coerced to two numbers\nctx.output(\"x\", fix(x));              // fix: non-finite → 0 with one warning, as on Point\nctx.output(\"y\", fix(y));\n```\n\n- Types: `value` is `point`. Point, size, and anchor outputs connect directly, and a number arrives as `[n, n]` (core coercion). 3D and 4D points don't connect; the connect error suggests Point 3D Unpack or a Splitter.\n- Frame 0: splits the authored or upstream value on frame 0.\n- Loops: a loop of points gives two loops of numbers of the same length; an empty loop gives empty loops.\n- Edge cases: components pass through unchanged. Non-finite components output 0 and warn once per restart.\n- Restart and dispose: `warned` resets; nothing to release.\n- Coming from Origami: `builtin.getpoint` (serialized `builtin.getPoint`). Nodes with this id set to the Size type import as `sizeUnpack`. Origami's docs describe Y as \"the vertical X value\", a typo: it's the second component.",
+      "inputs": [
+        {
+          "key": "value",
+          "name": "Value",
+          "type": "point",
+          "default": [
+            0,
+            0
+          ],
+          "description": "The 2D value to split: a position, anchor, size, or velocity."
+        }
+      ],
+      "outputs": [
+        {
+          "key": "x",
+          "name": "X",
+          "type": "number",
+          "description": "The first number: the horizontal part, or the width of a size."
+        },
+        {
+          "key": "y",
+          "name": "Y",
+          "type": "number",
+          "description": "The second number: the vertical part (grows downward), or the height of a size."
+        }
+      ],
+      "alwaysEvaluate": false,
+      "pairsWellWith": [
+        "point",
+        "interaction",
+        "progress",
+        "clamp",
+        "mathExpression"
+      ],
+      "commonMistakes": [
+        "An effect runs backward when you move your finger up: Y grows downward, so moving up makes Y smaller. Swap Start and End on the Progress or Transition that reads Y.",
+        "A cable from a 3D point won't connect: Point Unpack takes two numbers and a 3D point has three. Use Point 3D Unpack."
+      ],
+      "examples": [
+        {
+          "title": "Tilt a card with your finger's X",
+          "description": "Dragging across the screen tilts the card from −12° to 12°.",
+          "outline": "layer card rectangle \"Card\" @66,300 270x270 cornerRadius=24 rotation←tilt.output\npatch touch interaction\npatch touch_xy pointUnpack value←touch.position\npatch finger_progress progress value←touch_xy.x start=0 end=402 clampToRange=true\npatch tilt transition<number> progress←finger_progress.progress start=-12 end=12"
+        },
+        {
+          "title": "Keep a slider thumb on its track",
+          "description": "The thumb follows your finger's X, stays within the track, and never leaves its line.",
+          "outline": "layer track rectangle \"Track\" @16,420 370x8 cornerRadius=4 hitSlop=16\nlayer thumb oval \"Thumb\" 40x40 anchor=[0.5,0.5] position←thumb_position.output\npatch touch_track interaction layer=@track\npatch touch_xy pointUnpack value←touch_track.position\npatch thumb_x clamp value←touch_xy.x min=16 max=386\npatch thumb_position point x←thumb_x.output y=424"
+        }
+      ],
+      "origami": {
+        "id": "builtin.getpoint",
+        "name": "Point Unpack"
+      },
+      "importAliases": [
+        "builtin.getPoint"
+      ],
+      "origamiPorts": {
+        "value": "Input"
+      },
+      "defaultNotes": {
+        "value": "inferred: research reads Origami's default as (0, 0)."
+      }
+    },
+    {
+      "type": "size",
+      "name": "Size",
+      "category": "utility",
+      "tier": 1,
+      "status": "supported",
+      "aliases": [
+        "make size",
+        "width and height",
+        "dimensions",
+        "pack size",
+        "combine width and height",
+        "wh",
+        "size builder",
+        "frame size"
+      ],
+      "summary": "Combines a width and a height into one size for a layer's Size or any other size input.",
+      "docs": "## How it works\nSize packs a width and a height into one value.\n\n- **Width** is the horizontal size in points.\n- **Height** is the vertical size in points.\n- **Output** is `[Width, Height]`. Wire it into a layer's Size.\n\n## Tips\n- Animate one dimension: drive Width from a Transition and type a fixed Height.\n- When a layer's width or height mode is Percent, the matching number is a percentage of the parent instead of points.\n- Size doesn't stop negative numbers. Clamp values that come from math before they reach a layer.\n- To take a size apart, use Size Unpack.\n\n## Coming from Origami\nIn Origami this is the Point patch set to the Size type. Imported ones become Size patches.",
+      "behavior": "State per loop index: `{ warned: false }`, used only for the non-finite warning.\n\nEach frame, per loop index:\n```\nctx.output(\"output\", [fix(ctx.input(\"width\")), fix(ctx.input(\"height\"))]);   // fix as on Point\n```\n\n- Pulses: none.\n- Frame 0: outputs the authored or upstream values on frame 0.\n- Loops: once per loop index; the longest input loop sets the length and shorter ones wrap.\n- Types: the output is `size` and connects directly to `size`, `point`, and `anchor` inputs.\n- Units: the numbers mean whatever the target expects: points for a fixed-size layer, or percent of the parent when the layer's `widthMode` or `heightMode` is `percent`.\n- Edge cases: no clamping; negative values pass through, and `min: 0` is a soft limit for the inspector. Non-finite inputs become 0 and warn once per restart.\n- Restart and dispose: `warned` resets; nothing to release.\n- Coming from Origami: Size has no census id. Origami serializes it as `builtin.point` with the Size type, so importers map that combination here. Ports W and H map to `width` and `height`; the labels are inferred from tutorials.",
+      "inputs": [
+        {
+          "key": "width",
+          "name": "Width",
+          "type": "number",
+          "subtype": "distance",
+          "default": 100,
+          "min": 0,
+          "description": "Width in points, or percent of the parent when the layer's width mode is Percent; 0 means no width."
+        },
+        {
+          "key": "height",
+          "name": "Height",
+          "type": "number",
+          "subtype": "distance",
+          "default": 100,
+          "min": 0,
+          "description": "Height in points, or percent of the parent when the layer's height mode is Percent; 0 means no height."
+        }
+      ],
+      "outputs": [
+        {
+          "key": "output",
+          "name": "Output",
+          "type": "size",
+          "description": "The size [Width, Height]."
+        }
+      ],
+      "alwaysEvaluate": false,
+      "pairsWellWith": [
+        "sizeUnpack",
+        "transition",
+        "popAnimation",
+        "wait"
+      ],
+      "commonMistakes": [
+        "The layer vanishes as soon as you wire Size into it: one of the inputs is 0. Give Width and Height the layer's current size before animating one of them.",
+        "A layer grows from its top-left corner instead of evenly: a new size keeps the layer's anchor point in place, and the anchor defaults to the top-left. Set the layer's Anchor to [0.5, 0.5] so it grows around its center."
+      ],
+      "examples": [
+        {
+          "title": "Widen a button while it's pressed",
+          "description": "The anchor sits at the center, so the button grows evenly on both sides.",
+          "outline": "layer button rectangle \"Button\" @201,437 anchor=[0.5,0.5] cornerRadius=28 size←button_size.output\npatch press interaction layer=@button\npatch press_spring popAnimation number←press.down\npatch button_width transition<number> progress←press_spring.output start=160 end=220\npatch button_size size width←button_width.output height=56"
+        },
+        {
+          "title": "Fill a progress bar over three seconds",
+          "outline": "layer bar rectangle \"Progress Bar\" @16,437 cornerRadius=4 size←bar_size.output\npatch launched whenPrototypeStarts\npatch timer wait start←launched.started duration=3\npatch bar_width multiply[2] value1←timer.progress value2=370\npatch bar_size size width←bar_width.output height=8"
+        }
+      ],
+      "origami": {
+        "name": "Size"
+      },
+      "origamiPorts": {
+        "width": "W",
+        "height": "H"
+      },
+      "defaultNotes": {
+        "width": "sonobe: Origami's Point patch defaults to 0; 100 keeps a newly wired layer visible (CONVENTIONS.md §15, geometry).",
+        "height": "sonobe: Origami's Point patch defaults to 0; 100 keeps a newly wired layer visible (CONVENTIONS.md §15, geometry)."
+      }
+    },
+    {
+      "type": "sizeUnpack",
+      "name": "Size Unpack",
+      "category": "utility",
+      "tier": 1,
+      "status": "supported",
+      "aliases": [
+        "split size",
+        "get width",
+        "get height",
+        "dimensions",
+        "size to numbers",
+        "w h",
+        "width height",
+        "decompose size"
+      ],
+      "summary": "Splits a size into separate Width and Height numbers.",
+      "docs": "## How it works\nSize Unpack takes a size apart.\n\n- **Value** is the size to split: any two-number value, such as a layer's size or the output of a Pop Animation set to size.\n- **Width** is the first number.\n- **Height** is the second number.\n\nBoth numbers keep the source's units: points, or percent when the size came from a percent-mode layer.\n\n## Tips\n- Keep a pill fully round while it resizes: divide Height by 2 and wire the result into Corner Radius.\n- Compare Width with Height using Greater Than to tell a landscape frame from a portrait one.\n\n## Coming from Origami\nIn Origami this is Point Unpack set to the Size type, with outputs W and H. Imported ones become Size Unpack patches.",
+      "behavior": "State per loop index: `{ warned: false }`, used only for the non-finite warning.\n\nEach frame, per loop index:\n```\nconst [width, height] = ctx.input(\"value\");   // already coerced to two numbers\nctx.output(\"width\", fix(width));               // fix as on Point\nctx.output(\"height\", fix(height));\n```\n\n- Types: `value` is `size`. Size, point, and anchor outputs connect directly, and a number arrives as `[n, n]`.\n- Frame 0: splits the authored or upstream value on frame 0.\n- Loops: a loop of sizes gives two loops of numbers of the same length; an empty loop gives empty loops.\n- Edge cases: negative sizes pass through. Non-finite components output 0 and warn once per restart.\n- Restart and dispose: `warned` resets; nothing to release.\n- Coming from Origami: Size Unpack has no census id. Origami serializes it as `builtin.getpoint` with the Size type, so importers map that combination here, with W → `width` and H → `height`. The sizes Origami's docs send to Size Unpack come from Layer Info, Image Info, and Device Info in Sonobe; layer-derived sizes describe the previous frame (gap-fill R2).",
+      "inputs": [
+        {
+          "key": "value",
+          "name": "Value",
+          "type": "size",
+          "default": [
+            100,
+            100
+          ],
+          "description": "The size to split: width and height in points, or percent when it comes from a percent-mode layer size."
+        }
+      ],
+      "outputs": [
+        {
+          "key": "width",
+          "name": "Width",
+          "type": "number",
+          "description": "The first number: the width."
+        },
+        {
+          "key": "height",
+          "name": "Height",
+          "type": "number",
+          "description": "The second number: the height."
+        }
+      ],
+      "alwaysEvaluate": false,
+      "pairsWellWith": [
+        "size",
+        "layerInfo",
+        "divide",
+        "greaterThan"
+      ],
+      "commonMistakes": [
+        "Height lags one frame behind a resizing layer: sizes read from Layer Info describe the previous frame. Unpack the size from the patch that drives the layer instead.",
+        "A cable from a 3D point or a color won't connect: Size Unpack takes exactly two numbers. Use Point 3D Unpack or Color to RGB."
+      ],
+      "examples": [
+        {
+          "title": "Keep a pill round while it grows",
+          "description": "The corner radius is always half the animated height, so the ends stay perfectly round.",
+          "outline": "layer pill rectangle \"Pill\" @201,437 anchor=[0.5,0.5] size←grow.output cornerRadius←half_height.output\npatch press interaction layer=@pill\npatch pick_size optionPicker<size> option←press.down option0=[160,56] option1=[240,88]\npatch grow popAnimation<size> number←pick_size.output\npatch pill_dims sizeUnpack value←grow.output\npatch half_height divide[2] value1←pill_dims.height value2=2"
+        }
+      ],
+      "origami": {
+        "name": "Size Unpack"
+      },
+      "origamiPorts": {
+        "value": "Input",
+        "width": "W",
+        "height": "H"
+      },
+      "defaultNotes": {
+        "value": "sonobe: Origami's default is undocumented; [100, 100] matches Size's defaults."
+      }
+    },
+    {
+      "type": "restartPrototype",
+      "name": "Restart Prototype",
+      "category": "utility",
+      "tier": 2,
+      "status": "supported",
+      "aliases": [
+        "reset prototype",
+        "restart",
+        "start over",
+        "reload",
+        "reset all",
+        "reset state",
+        "replay",
+        "kiosk reset"
+      ],
+      "summary": "Restarts the whole prototype from its first frame when it gets a pulse, as if you pressed Restart in the viewer.",
+      "docs": "## How it works\nRestart Prototype undoes everything that happened while the prototype ran: switches turn back off, counters return to their starting numbers, animations jump to their first values, and typed text clears. Then the prototype starts again from its first frame.\n\n- **Restart** takes a pulse (a signal that lasts one frame). The current frame finishes drawing, and the restart happens before the next one.\n\nYour document doesn't change: layers, patches, the values you typed into ports, and assets stay as they are. When Prototype Starts fires again after every restart.\n\n## Tips\n- Put a Start Over button at the end of a flow so testers can run it again without reaching for the viewer.\n- For a demo that loops on its own, wire a Wait's Finished into Restart.\n- Restart ignores pulses on the very first frame, so wiring When Prototype Starts straight into it can't restart forever.\n\n## Coming from Origami\nSame patch and port. Sonobe finishes the current frame before restarting and ignores a restart pulse on the first frame.",
+      "behavior": "State per loop index: `{ warned: false }`.\n\nEach frame, per loop index:\n```\nif (!ctx.pulsed(\"restart\")) return;\nif (ctx.frame === 0) {\n  if (!state.warned) {\n    state.warned = true;\n    ctx.services.log(\"warn\", ctx.id + \" ignored a restart pulse on the first frame; restarting there would repeat forever\");\n  }\n  return;\n}\nctx.services.restart();\n```\n\n- Pulses: `restart` fires on an upstream pulse or on a false→true edge of a connected boolean, so a held true restarts once.\n- Deferral (the engine's contract for `services.restart()`): the call only records a request. Every remaining patch still evaluates this frame, layers resolve, and the SceneFrame is emitted. Requests from several patches or loop indices in one frame collapse into one restart. Before the next `step`, the runtime performs the same reset as `Runtime.restart()` and the viewer's ⌘R:\n  - calls `dispose` on every patch state, then drops all state for every instance and loop index: switches, counters, springs, timers, sample-and-hold values, scroll offsets, and pending requests, whose late results are ignored;\n  - resets `frame` and `time` to 0 and reseeds `services.random()` with the runtime's seed, so the run after a restart matches the first run;\n  - clears gesture and hover state and treats pointers that are still pressed as canceled, so releasing them produces no tap;\n  - clears layer runtime state (text typed into Text Fields, video and Lottie playback positions) and the previous-frame layout snapshot, so layer-derived outputs start as they do at launch;\n  - leaves the document, assets, device settings, editor selection, and undo history untouched.\n  - Input events dispatched after the request apply to the new frame 0.\n- Frame 0: pulses on the first frame after launch or a restart are ignored, with one warning per restart. This prevents a restart loop from When Prototype Starts, or from a state that's already on at launch.\n- Loops: evaluates per loop index. Any index can request the restart, and only one restart happens.\n- Components: a Restart Prototype inside any component restarts the whole prototype, not only that component.\n- Muted: never restarts.\n- Platform and simulation: behaves the same in the desktop app, the web player, and the headless runtime. A web player restart doesn't reload the page. In simulation, time returns to 0 on the frame after the restart, so trace consumers should treat a drop in time as a restart boundary.\n- Restart and dispose: `warned` resets with everything else; nothing of its own to release.\n- Coming from Origami: `builtin.restart.prototype`, input Restart. Origami doesn't document when within a frame the restart happens, and it doesn't guard first-frame pulses.",
+      "inputs": [
+        {
+          "key": "restart",
+          "name": "Restart",
+          "type": "pulse",
+          "description": "Pulse to restart the prototype from its first frame; pulses on the first frame are ignored."
+        }
+      ],
+      "outputs": [],
+      "alwaysEvaluate": false,
+      "pairsWellWith": [
+        "whenPrototypeStarts",
+        "interaction",
+        "wait",
+        "longPress"
+      ],
+      "commonMistakes": [
+        "Nothing restarts when the prototype launches: the pulse arrives on the first frame, which Restart Prototype ignores so it can't loop forever. Delay the pulse with a Wait, or trigger it from a tap.",
+        "Restarting also resets a choice you meant to keep, like a setting picked on an earlier screen: a restart clears all running state. To reset only part of the flow, pulse those patches' own Reset or Turn Off inputs."
+      ],
+      "examples": [
+        {
+          "title": "Start over from a button",
+          "outline": "layer start_over rectangle \"Start Over\" @121,760 160x48 cornerRadius=24\npatch tap_start_over interaction layer=@start_over\npatch start_over_restart restartPrototype restart←tap_start_over.tap"
+        },
+        {
+          "title": "Loop a demo every 10 seconds",
+          "description": "Useful for a kiosk: after each restart, When Prototype Starts starts the Wait again.",
+          "outline": "patch launched whenPrototypeStarts\npatch demo_timer wait start←launched.started duration=10\npatch loop_demo restartPrototype restart←demo_timer.finished"
+        }
+      ],
+      "origami": {
+        "id": "builtin.restart.prototype",
+        "name": "Restart Prototype"
+      }
+    }
+  ]
+}

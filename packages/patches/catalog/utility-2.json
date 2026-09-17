@@ -1,0 +1,319 @@
+{
+  "file": "utility-2.json",
+  "category": "utility",
+  "patches": [
+    {
+      "type": "point3d",
+      "name": "Point 3D",
+      "category": "utility",
+      "tier": 2,
+      "status": "supported",
+      "aliases": ["vec3", "3d vector", "xyz", "pack xyz", "combine xyz", "make vector", "scale xyz", "triple"],
+      "summary": "Combines three numbers into one 3D point, such as separate X, Y, and Z scale amounts.",
+      "docs": "## How it works\nPoint 3D packs three separate numbers into one value with three parts. Use it wherever a 3D point is expected, such as a layer's Scale XYZ or a Transition set to Point 3D.\n\n- **X**, **Y**, and **Z** become the first, second, and third numbers. A change shows up on the same frame.\n- **Output** is the packed point, in X, Y, Z order.\n\nDrive one part from an animation and type the others in, so one axis moves while the rest stay put.\n\n## Tips\n- To change one part of an existing 3D point, split it with Point 3D Unpack, adjust that number, and pack it again here.\n- A single number wired into a 3D point input fills all three parts, so uniform values don't need this patch.\n- To tilt a layer in 3D, use Rotation X, Rotation Y, and Rotation. Each takes one number.\n\n## Coming from Origami\nOrigami also uses Point 3D for Position with depth and for three-axis Rotation. In Sonobe, Position is a 2D point with a separate Z Position, and rotation is three number properties: Rotation X, Rotation Y, and Rotation.",
+      "behavior": "State per loop index: `{ warned: false }`, used only to warn once about a non-finite component. Values are stateless.\n\nEach frame, per loop index:\n```\nconst finite = (n: number): number => {\n  if (Number.isFinite(n)) return n;\n  if (!ctx.state.warned) {\n    ctx.state.warned = true;\n    ctx.services.log('warn', `${ctx.id}: a component isn't a finite number, so Point 3D uses 0 for it`);\n  }\n  return 0;\n};\nctx.output('output', [finite(ctx.input<number>('x')), finite(ctx.input<number>('y')), finite(ctx.input<number>('z'))]);\n```\n\n- Pulses: none.\n- Frame 0: outputs the authored components on frame 0. There's no history and no animation.\n- Loops: once per loop index. The output length is the longest input loop; shorter loops wrap and scalars broadcast, so a loop of 3 on `x` with scalar `y` and `z` gives 3 points. An empty loop on any input gives an empty output.\n- Coercion: `x`, `y`, and `z` are number ports, so `ctx.input` has already converted wires (boolean → 0 or 1, text parsed, a vector → its first component). The patch never clamps; negative and large values pass through.\n- Output identity: emit a new array every frame and never mutate one already emitted, because history patches such as `delay1` and `pulseOnChange` may still hold the previous array.\n- Edge cases: a non-finite component becomes 0 and warns once per restart per loop index.\n- Restart and dispose: restart clears `warned`; nothing to release.\n- Coming from Origami: `builtin.point3d`, with ports X, Y, Z and Output in the same order. Origami feeds 3D points into Position (Z is depth) and Rotation (X pitch, Y yaw, Z roll, in degrees). Sonobe's `position` is a point plus a separate `zPosition`, and rotation is the numbers `rotationX`, `rotationY`, and `rotation`, so importers split those wires, for example through `point3dUnpack`. Converting from Origami's centered origin is the importer's job, not this patch's.",
+      "inputs": [
+        { "key": "x", "name": "X", "type": "number", "default": 0, "description": "The first number, usually a horizontal amount such as X scale or sideways offset." },
+        { "key": "y", "name": "Y", "type": "number", "default": 0, "description": "The second number, usually a vertical amount such as Y scale or up-and-down offset." },
+        { "key": "z", "name": "Z", "type": "number", "default": 0, "description": "The third number, usually depth, such as Z scale or distance toward the viewer." }
+      ],
+      "outputs": [
+        { "key": "output", "name": "Output", "type": "point3d", "description": "The three numbers as one 3D point, in X, Y, Z order." }
+      ],
+      "alwaysEvaluate": false,
+      "pairsWellWith": ["point3dUnpack", "transition", "popAnimation", "deviceMotion", "multiply"],
+      "commonMistakes": [
+        "The layer disappears when you wire Point 3D into Scale XYZ: every part starts at 0, and a scale of 0 shrinks the layer to nothing. Set X, Y, and Z to 1 before you connect it.",
+        "The layer only tips one way when a 3D point drives Rotation: Rotation takes one number, so the wire keeps only X. Split the point with Point 3D Unpack and wire X, Y, and Z into Rotation X, Rotation Y, and Rotation.",
+        "The wire into Position won't connect: Position is a 2D point, and a 3D point has one number too many. Use a Point patch for Position and set depth with Z Position."
+      ],
+      "examples": [
+        {
+          "title": "Squash a button when you press it",
+          "description": "X stretches wider while Y squashes shorter, and Z stays at 1. One spring drives both numbers, and Point 3D packs them into Scale XYZ.",
+          "outline": "layer button rectangle \"Button\" @101,400 200x56 cornerRadius=28 color=#3478F6FF scaleXYZ←squash.output\npatch press interaction layer=@button\npatch pressed popAnimation number←press.down bounciness=12 speed=20\npatch wide transition<number> progress←pressed.output start=1 end=1.12\npatch short transition<number> progress←pressed.output start=1 end=0.88\npatch squash point3d x←wide.output y←short.output z=1"
+        }
+      ],
+      "origami": { "id": "builtin.point3d", "name": "Point 3D" },
+      "defaultNotes": {
+        "x": "inferred: Origami doesn't document defaults; 0 is the neutral offset (use 1 for scale).",
+        "y": "inferred: Origami doesn't document defaults; 0 is the neutral offset (use 1 for scale).",
+        "z": "inferred: Origami doesn't document defaults; 0 is the neutral offset (use 1 for scale)."
+      }
+    },
+    {
+      "type": "point3dUnpack",
+      "name": "Point 3D Unpack",
+      "category": "utility",
+      "tier": 2,
+      "status": "supported",
+      "aliases": ["vec3 unpack", "split xyz", "separate xyz", "get x y z", "break apart", "decompose", "unpack xyz"],
+      "summary": "Splits a 3D point into its X, Y, and Z numbers so you can use or change each one on its own.",
+      "docs": "## How it works\nPoint 3D Unpack takes one 3D point and gives you its three numbers on separate ports. It's the reverse of Point 3D.\n\n- **Value** is the 3D point to split, such as a Transition set to Point 3D, or a motion sensor reading.\n- **X**, **Y**, and **Z** are its first, second, and third numbers, available on the same frame.\n\n## Tips\n- To tilt a layer in 3D, animate one 3D point, split it here, and wire X into Rotation X, Y into Rotation Y, and Z into Rotation.\n- To change one part, unpack the point, adjust that number with a math patch, and pack all three again with Point 3D.\n- Device Motion's acceleration is a 3D point. Unpack it to react to tilting along one axis.\n\n## Coming from Origami\nThe unnamed input is called Value.",
+      "behavior": "State per loop index: `{ warned: false }`, used only to warn once about a non-finite component. Values are stateless.\n\nEach frame, per loop index:\n```\nconst v = ctx.input<number[]>('value');   // coerced to point3d: always 3 numbers\nconst finite = (n: number | undefined): number => {\n  if (typeof n === 'number' && Number.isFinite(n)) return n;\n  if (!ctx.state.warned) {\n    ctx.state.warned = true;\n    ctx.services.log('warn', `${ctx.id}: Value has a component that isn't a finite number, so it outputs 0`);\n  }\n  return 0;\n};\nctx.output('x', finite(v[0]));\nctx.output('y', finite(v[1]));\nctx.output('z', finite(v[2]));\n```\n\n- Pulses: none.\n- Frame 0: outputs the authored or wired components on frame 0. Unconnected, it outputs 0, 0, 0.\n- Loops: once per loop index. A loop of 3D points gives three loops of numbers with the same length and order. An empty loop gives empty outputs.\n- Coercion (ARCHITECTURE.md §4, `canConnect` in core): a number wire broadcasts, so `5` gives 5, 5, 5. A point, size, anchor, 4D point, or color can't connect because the component counts differ, and the diagnostic suggests a converter. JSON is read best-effort by core coercion: an array keeps its first three numbers and fills missing ones with 0, and an object reads `x`, `y`, and `z`.\n- Edge cases: never throw on a malformed value, since core coercion already turns it into 0, 0, 0. A non-finite component outputs 0 and warns once per restart per loop index.\n- Restart and dispose: restart clears `warned`; nothing to release.\n- Coming from Origami: `builtin.getpoint3d`. Origami's unnamed Input maps to `value`; outputs X, Y, Z keep their order. When the point is a rotation, Origami calls X pitch, Y yaw, and Z roll; in Sonobe those drive `rotationX`, `rotationY`, and `rotation`.",
+      "inputs": [
+        { "key": "value", "name": "Value", "type": "point3d", "default": [0, 0, 0], "description": "The 3D point to split, such as animated angles or a motion reading." }
+      ],
+      "outputs": [
+        { "key": "x", "name": "X", "type": "number", "description": "The first number in the point, usually the horizontal part." },
+        { "key": "y", "name": "Y", "type": "number", "description": "The second number in the point, usually the vertical part." },
+        { "key": "z", "name": "Z", "type": "number", "description": "The third number in the point, usually depth." }
+      ],
+      "alwaysEvaluate": false,
+      "pairsWellWith": ["point3d", "transition", "deviceMotion", "smoothValue", "clamp"],
+      "commonMistakes": [
+        "The wire from a Point won't connect: a Point has two numbers and this patch expects three. Use Point Unpack for 2D points.",
+        "The card spins flat instead of tipping back: Z drives Rotation, which turns the layer on the screen. Wire X into Rotation X to tip it forward and back, and Y into Rotation Y to turn it side to side."
+      ],
+      "examples": [
+        {
+          "title": "Tilt a card in 3D when you tap it",
+          "description": "One Transition animates all three angles together, and Point 3D Unpack sends each angle to its own rotation property.",
+          "outline": "layer card rectangle \"Card\" @76,300 250x160 cornerRadius=16 color=#FFFFFFFF rotationX←angles.x rotationY←angles.y rotation←angles.z\npatch tap_card interaction layer=@card\npatch toggle switch flip←tap_card.tap\npatch pop popAnimation number←toggle.on\npatch tilt transition<point3d> progress←pop.output start=0,0,0 end=20,-15,4\npatch angles point3dUnpack value←tilt.output"
+        }
+      ],
+      "origami": { "id": "builtin.getpoint3d", "name": "Point 3D Unpack" },
+      "origamiPorts": { "value": "Input" },
+      "defaultNotes": {
+        "value": "inferred: Origami doesn't document a default; 0,0,0 splits into three zeros."
+      }
+    },
+    {
+      "type": "point4d",
+      "name": "Point 4D",
+      "category": "utility",
+      "tier": 2,
+      "status": "supported",
+      "aliases": ["vec4", "4d vector", "xyzw", "pack xyzw", "combine four numbers", "make vector", "four values"],
+      "summary": "Combines four numbers into one 4D point so you can animate, compare, or pass four values as one.",
+      "docs": "## How it works\nPoint 4D packs four separate numbers into one value with four parts, called X, Y, Z, and W. Anything that takes a 4D point accepts it: a Transition or Pop Animation set to Point 4D, Add, Option Picker, or a layer's Padding and Corner Radii.\n\n- **X**, **Y**, **Z**, and **W** become the first through fourth numbers.\n- **Output** is the packed point, in X, Y, Z, W order.\n\n## Tips\n- Pack several properties into one 4D point, run a single animation, then split it with Point 4D Unpack. Every property moves on the same spring.\n- Building padding or rounded corners? Edges and Corner Radii make the same kind of value, with ports named by side and corner.\n- The output can drive a color: X, Y, Z, and W become red, green, blue, and alpha, each from 0 to 1. RGB Color is clearer for most colors.\n\n## Coming from Origami\nThis is Origami's Vec4 patch. In Origami you change its type to Edges or Corner Radius; Sonobe has separate Edges and Corner Radii patches that output the same 4D value.",
+      "behavior": "State per loop index: `{ warned: false }`, used only to warn once about a non-finite component. Values are stateless.\n\nEach frame, per loop index:\n```\nconst finite = (n: number): number => {\n  if (Number.isFinite(n)) return n;\n  if (!ctx.state.warned) {\n    ctx.state.warned = true;\n    ctx.services.log('warn', `${ctx.id}: a component isn't a finite number, so Point 4D uses 0 for it`);\n  }\n  return 0;\n};\nctx.output('output', ['x', 'y', 'z', 'w'].map((key) => finite(ctx.input<number>(key))));\n```\n\n- Pulses: none.\n- Frame 0: outputs the authored components on frame 0. There's no history and no animation.\n- Loops: once per loop index. The output length is the longest input loop; shorter loops wrap and scalars broadcast. An empty loop on any input gives an empty output.\n- Coercion: the inputs are number ports, so `ctx.input` has already converted wires (boolean → 0 or 1, text parsed, a vector → its first component). The output is a plain `point4d`, so it connects with no conversion to every 4D input, including `padding` and `cornerRadii` layer props and the Edges and Corner Radii unpack patches. It also drives color inputs (ARCHITECTURE.md §4: point4d → color maps x, y, z, w to r, g, b, a, clamped to 0–1 by the conversion). The patch itself never clamps.\n- Output identity: emit a new array every frame and never mutate one already emitted, because history patches such as `delay1` and `pulseOnChange` may still hold it.\n- Edge cases: a non-finite component becomes 0 and warns once per restart per loop index.\n- Restart and dispose: restart clears `warned`; nothing to release.\n- Coming from Origami: `builtin.vec4`, titled Vec4 in the docs and Point 4D in current type menus (v114, v215). Ports X, Y, Z, W and Output map directly. Origami builds Edges and Corner Radius as this same node with a different selected type (`isVariant` in saved files). Importers must check the selected type: Point 4D imports as `point4d`, Edges as `edges`, and Corner Radius as `cornerRadii`, mapping ports by label.",
+      "inputs": [
+        { "key": "x", "name": "X", "type": "number", "default": 0, "description": "The first number; when the output drives a color, this is red from 0 to 1." },
+        { "key": "y", "name": "Y", "type": "number", "default": 0, "description": "The second number; when the output drives a color, this is green from 0 to 1." },
+        { "key": "z", "name": "Z", "type": "number", "default": 0, "description": "The third number; when the output drives a color, this is blue from 0 to 1." },
+        { "key": "w", "name": "W", "type": "number", "default": 0, "description": "The fourth number; when the output drives a color, this is alpha, where 0 is transparent and 1 is opaque." }
+      ],
+      "outputs": [
+        { "key": "output", "name": "Output", "type": "point4d", "description": "The four numbers as one 4D point, in X, Y, Z, W order." }
+      ],
+      "alwaysEvaluate": false,
+      "pairsWellWith": ["point4dUnpack", "popAnimation", "transition", "ifElse", "optionPicker"],
+      "commonMistakes": [
+        "A layer's color turns invisible when Point 4D drives it: W is alpha and starts at 0, which is fully transparent. Set W to 1, or use RGB Color.",
+        "Padding lands on the wrong sides: a 4D padding value runs top, right, bottom, left, and X, Y, Z, W don't show which is which. Use Edges, whose ports name each side."
+      ],
+      "examples": [
+        {
+          "title": "Spring four properties together",
+          "description": "Two Point 4D patches hold a resting look and a selected look: opacity, rotation, scale, and corner radius. One Pop Animation springs between them, and Point 4D Unpack sends each number to its property.",
+          "outline": "layer card rectangle \"Card\" @76,300 250x160 color=#FFFFFFFF opacity←look.x rotation←look.y scale←look.z cornerRadius←look.w\npatch tap_card interaction layer=@card\npatch toggle switch flip←tap_card.tap\npatch resting point4d x=0.6 y=0 z=0.94 w=32\npatch selected point4d x=1 y=-3 z=1 w=16\npatch pick ifElse<point4d> condition←toggle.on ifTrue←selected.output ifFalse←resting.output\npatch spring popAnimation<point4d> number←pick.output\npatch look point4dUnpack value←spring.output"
+        }
+      ],
+      "origami": { "id": "builtin.vec4", "name": "Vec4" },
+      "defaultNotes": {
+        "x": "inferred: Origami's Vec4 defaults are undocumented; 0 is the neutral value.",
+        "y": "inferred: Origami's Vec4 defaults are undocumented; 0 is the neutral value.",
+        "z": "inferred: Origami's Vec4 defaults are undocumented; 0 is the neutral value.",
+        "w": "inferred: Origami's Vec4 defaults are undocumented; 0 is the neutral value."
+      }
+    },
+    {
+      "type": "point4dUnpack",
+      "name": "Point 4D Unpack",
+      "category": "utility",
+      "tier": 2,
+      "status": "supported",
+      "aliases": ["vec4 unpack", "split xyzw", "separate xyzw", "get x y z w", "break apart", "decompose", "color channels"],
+      "summary": "Splits a 4D point into its X, Y, Z, and W numbers so each one can drive something different.",
+      "docs": "## How it works\nPoint 4D Unpack takes one 4D point and gives you its four numbers on separate ports. It's the reverse of Point 4D.\n\n- **Value** is the 4D point to split, such as the output of a Transition or Pop Animation set to Point 4D.\n- **X**, **Y**, **Z**, and **W** are its first through fourth numbers, available on the same frame.\n\nA color connects here too: red, green, blue, and alpha arrive on X, Y, Z, and W, each from 0 to 1.\n\n## Tips\n- Animate four properties as one value, then fan them out from here so they stay in sync.\n- For padding or corners, Edges Unpack and Corner Radii Unpack give the same numbers with ports named by side and corner.\n\n## Coming from Origami\nThis is Origami's Vec4 Unpack. The unnamed input is called Value.",
+      "behavior": "State per loop index: `{ warned: false }`, used only to warn once about a non-finite component. Values are stateless.\n\nEach frame, per loop index:\n```\nconst v = ctx.input<number[]>('value');   // coerced to point4d: always 4 numbers\nconst finite = (n: number | undefined): number => {\n  if (typeof n === 'number' && Number.isFinite(n)) return n;\n  if (!ctx.state.warned) {\n    ctx.state.warned = true;\n    ctx.services.log('warn', `${ctx.id}: Value has a component that isn't a finite number, so it outputs 0`);\n  }\n  return 0;\n};\nctx.output('x', finite(v[0]));\nctx.output('y', finite(v[1]));\nctx.output('z', finite(v[2]));\nctx.output('w', finite(v[3]));\n```\n\n- Pulses: none.\n- Frame 0: outputs the authored or wired components on frame 0. Unconnected, it outputs 0, 0, 0, 0.\n- Loops: once per loop index. A loop of 4D points gives four loops of numbers with the same length and order. An empty loop gives empty outputs.\n- Coercion (ARCHITECTURE.md §4, `canConnect` in core): a color wire converts to r, g, b, a in straight RGBA 0–1. A number wire broadcasts to all four. A point, size, anchor, or 3D point can't connect because the component counts differ, and the diagnostic suggests a converter. JSON is read best-effort by core coercion: an array keeps its first four numbers and fills missing ones with 0, and an object reads `x`, `y`, `z`, and `w`. Every `point4d` output, including Edges and Corner Radii, connects directly.\n- Edge cases: never throw on a malformed value, since core coercion already turns it into 0, 0, 0, 0. A non-finite component outputs 0 and warns once per restart per loop index.\n- Restart and dispose: restart clears `warned`; nothing to release.\n- Coming from Origami: `builtin.getvec4`, titled Vec4 Unpack. Origami's unnamed Input maps to `value`; outputs X, Y, Z, W keep their order. A `builtin.getvec4` node whose selected type is Edges imports as `edgesUnpack`, and one set to Corner Radius imports as `cornerRadiiUnpack`.",
+      "inputs": [
+        { "key": "value", "name": "Value", "type": "point4d", "default": [0, 0, 0, 0], "description": "The 4D point to split; a color also works and splits into red, green, blue, and alpha." }
+      ],
+      "outputs": [
+        { "key": "x", "name": "X", "type": "number", "description": "The first number; red from 0 to 1 when Value is a color." },
+        { "key": "y", "name": "Y", "type": "number", "description": "The second number; green from 0 to 1 when Value is a color." },
+        { "key": "z", "name": "Z", "type": "number", "description": "The third number; blue from 0 to 1 when Value is a color." },
+        { "key": "w", "name": "W", "type": "number", "description": "The fourth number; alpha from 0 (transparent) to 1 (opaque) when Value is a color." }
+      ],
+      "alwaysEvaluate": false,
+      "pairsWellWith": ["point4d", "transition", "popAnimation", "optionPicker"],
+      "commonMistakes": [
+        "The numbers from a color look tiny: color channels run from 0 to 1, not 0 to 255. Multiply by 255 when you need the larger scale.",
+        "A Point or Point 3D won't connect: Value needs exactly four numbers. Use the unpack patch that matches the point's size."
+      ],
+      "examples": [
+        {
+          "title": "Lift a card when you press it",
+          "description": "One Transition animates four numbers from resting to lifted, and Point 4D Unpack sends them to the shadow, the scale, and the corners.",
+          "outline": "layer card rectangle \"Card\" @38,300 326x200 color=#FFFFFFFF shadowOpacity←lift.x shadowRadius←lift.y scale←lift.z cornerRadius←lift.w\npatch press interaction layer=@card\npatch pressed popAnimation number←press.down\npatch rise transition<point4d> progress←pressed.output start=0.08,4,1,20 end=0.3,24,1.04,28\npatch lift point4dUnpack value←rise.output"
+        }
+      ],
+      "origami": { "id": "builtin.getvec4", "name": "Vec4 Unpack" },
+      "origamiPorts": { "value": "Input" },
+      "defaultNotes": {
+        "value": "inferred: Origami's Vec4 Unpack default is undocumented; 0,0,0,0 splits into four zeros."
+      }
+    },
+    {
+      "type": "edges",
+      "name": "Edges",
+      "category": "utility",
+      "tier": 2,
+      "status": "supported",
+      "aliases": ["padding", "insets", "edge insets", "margins", "safe area", "top right bottom left", "trbl", "inset"],
+      "summary": "Combines four side distances into one Edges value for padding and insets, in top, right, bottom, left order.",
+      "docs": "## How it works\nEdges packs four distances, one for each side of a box, into a single value. The sides go clockwise from the top: **top, right, bottom, left**, the same order as CSS padding.\n\n- **Top**, **Right**, **Bottom**, and **Left** are distances in points.\n- **Output** is the packed value. Wire it into a group's Padding, a Transition set to Point 4D, or any other 4D input.\n\nPadding is the space between a group's edges and its children. It applies only while the group's Layout is Row, Column, or Grid.\n\n## Tips\n- Animate one side at a time: drive Bottom from a Transition and type the other three in.\n- For the same inset on every side, wire one number straight into Padding. It fills all four sides.\n- To add your own spacing to a device's safe area, split the safe area with Edges Unpack, add to each side, and pack the result here.\n\n## Coming from Origami\nIn Origami, Edges is the Vec4 patch with its type changed. Origami doesn't document its side order, so check each side after importing.",
+      "behavior": "State per loop index: `{ warned: false }`, used only to warn once about a non-finite side. Values are stateless.\n\nEach frame, per loop index:\n```\nconst finite = (n: number): number => {\n  if (Number.isFinite(n)) return n;\n  if (!ctx.state.warned) {\n    ctx.state.warned = true;\n    ctx.services.log('warn', `${ctx.id}: a side isn't a finite number, so Edges uses 0 for it`);\n  }\n  return 0;\n};\nctx.output('output', ['top', 'right', 'bottom', 'left'].map((key) => finite(ctx.input<number>(key))));\n```\n\n- Order: components are always `[top, right, bottom, left]`. That matches the `padding` layer prop in layerTypes.ts, `DeviceInfo.safeArea` in the engine contract, and the engine layout, which reads `padding[0]` as top, `[1]` right, `[2]` bottom, and `[3]` left.\n- Pulses: none.\n- Frame 0: outputs the authored sides on frame 0. There's no history and no animation.\n- Loops: once per loop index. The output length is the longest input loop; shorter loops wrap and scalars broadcast. An empty loop on any input gives an empty output.\n- Coercion: the inputs are number ports, so `ctx.input` has already converted wires. The output type is `point4d` (ARCHITECTURE.md §4: a point4d subtype covers edges), so it connects to every 4D input with no conversion. The patch never clamps: negative sides pass through, and the consumer decides what they mean.\n- Output identity: emit a new array every frame and never mutate one already emitted.\n- Edge cases: a non-finite side becomes 0 and warns once per restart per loop index.\n- Restart and dispose: restart clears `warned`; nothing to release.\n- Coming from Origami: there's no census id. Saved files store Edges as a `builtin.vec4` node with its type set to Edges, used for a layout group's Padding and a child's Margin. Import it as `edges` and map ports by label (Top, Left, Bottom, Right are inferred labels), never by position, because Origami's serialized side order is unverified. Sonobe layers have no Margin property, so a Margin wire needs manual rework.",
+      "inputs": [
+        { "key": "top", "name": "Top", "type": "number", "subtype": "distance", "default": 0, "description": "Distance from the top edge in points." },
+        { "key": "right", "name": "Right", "type": "number", "subtype": "distance", "default": 0, "description": "Distance from the right edge in points." },
+        { "key": "bottom", "name": "Bottom", "type": "number", "subtype": "distance", "default": 0, "description": "Distance from the bottom edge in points." },
+        { "key": "left", "name": "Left", "type": "number", "subtype": "distance", "default": 0, "description": "Distance from the left edge in points." }
+      ],
+      "outputs": [
+        { "key": "output", "name": "Output", "type": "point4d", "subtype": "distance", "description": "The four distances as one Edges value, in top, right, bottom, left order." }
+      ],
+      "alwaysEvaluate": false,
+      "pairsWellWith": ["edgesUnpack", "deviceInfo", "popAnimation", "transition", "optionPicker"],
+      "commonMistakes": [
+        "Changing Edges doesn't move anything: the group's Layout is None, so Padding is ignored. Set Layout to Row, Column, or Grid.",
+        "Padding typed as four numbers lands on the wrong sides: the order is top, right, bottom, left, not top, left, bottom, right. Use Edges, whose ports name each side."
+      ],
+      "examples": [
+        {
+          "title": "Give a card roomier padding when it opens",
+          "description": "The card's Layout is Column, so Padding applies. The top and bottom insets grow with the spring while the sides stay at 20.",
+          "outline": "layer card group \"Card\" @16,120 370x240 layout=column color=#FFFFFFFF cornerRadius=20 padding←inset.output\n  layer title text \"Title\" \"Weekend in Lisbon\"\npatch tap_card interaction layer=@card\npatch toggle switch flip←tap_card.tap\npatch pop popAnimation number←toggle.on\npatch space transition<number> progress←pop.output start=16 end=40\npatch inset edges top←space.output right=20 bottom←space.output left=20"
+        }
+      ],
+      "origami": { "name": "Edges" },
+      "defaultNotes": {
+        "top": "sonobe: Origami's Edges patch has no documentation; 0 matches a group's default Padding.",
+        "right": "sonobe: Origami's Edges patch has no documentation; 0 matches a group's default Padding.",
+        "bottom": "sonobe: Origami's Edges patch has no documentation; 0 matches a group's default Padding.",
+        "left": "sonobe: Origami's Edges patch has no documentation; 0 matches a group's default Padding."
+      }
+    },
+    {
+      "type": "edgesUnpack",
+      "name": "Edges Unpack",
+      "category": "utility",
+      "tier": 2,
+      "status": "supported",
+      "aliases": ["split padding", "unpack padding", "safe area insets", "separate edges", "get top", "inset values", "vec4 unpack"],
+      "summary": "Splits an Edges value into separate top, right, bottom, and left distances.",
+      "docs": "## How it works\nEdges Unpack takes one Edges value, four side distances packed together, and gives you each side on its own port. It's the reverse of Edges.\n\n- **Value** is the Edges value to split, such as a device's safe area or an animated inset.\n- **Top**, **Right**, **Bottom**, and **Left** are the distances in points, read clockwise from the top.\n\n## Tips\n- Keep controls clear of the home indicator: split the device's safe area and add Bottom to a tab bar's height.\n- Any 4D value splits the same way, such as a Transition or Option Picker set to Point 4D.\n- One Edges value can set a group's Padding and, through this patch, line up a separate overlay with the same insets.\n\n## Coming from Origami\nIn Origami, this is Vec4 Unpack with its type changed to Edges. The unnamed input is called Value.",
+      "behavior": "State per loop index: `{ warned: false }`, used only to warn once about a non-finite side. Values are stateless.\n\nEach frame, per loop index:\n```\nconst v = ctx.input<number[]>('value');   // coerced to point4d: always 4 numbers\nconst finite = (n: number | undefined): number => {\n  if (typeof n === 'number' && Number.isFinite(n)) return n;\n  if (!ctx.state.warned) {\n    ctx.state.warned = true;\n    ctx.services.log('warn', `${ctx.id}: Value has a side that isn't a finite number, so it outputs 0`);\n  }\n  return 0;\n};\nctx.output('top', finite(v[0]));\nctx.output('right', finite(v[1]));\nctx.output('bottom', finite(v[2]));\nctx.output('left', finite(v[3]));\n```\n\n- Order: components are always `[top, right, bottom, left]`, the same as `edges`, the `padding` layer prop, and `DeviceInfo.safeArea`.\n- Pulses: none.\n- Frame 0: outputs the authored or wired sides on frame 0. Unconnected, it outputs 0 for every side.\n- Loops: once per loop index. A loop of Edges values gives four loops of numbers with the same length and order. An empty loop gives empty outputs.\n- Coercion (ARCHITECTURE.md §4, `canConnect` in core): any `point4d` output connects directly. A number wire broadcasts to all four sides. A point, size, anchor, or 3D point can't connect because the component counts differ. JSON is read by core coercion: an array keeps its first four numbers and fills missing ones with 0. Don't apply CSS shorthand expansion (`[8, 16]` meaning 8, 16, 8, 16) here; read what `ctx.input` returns.\n- No clamping: negative sides pass through.\n- Edge cases: never throw on a malformed value, since core coercion already turns it into 0, 0, 0, 0. A non-finite side outputs 0 and warns once per restart per loop index.\n- Restart and dispose: restart clears `warned`; nothing to release.\n- Coming from Origami: there's no census id. A `builtin.getvec4` node whose selected type is Edges imports as `edgesUnpack`. Map outputs by label, never by position, because Origami's serialized side order is unverified.",
+      "inputs": [
+        { "key": "value", "name": "Value", "type": "point4d", "subtype": "distance", "default": [0, 0, 0, 0], "description": "The Edges value to split: four distances in points, in top, right, bottom, left order." }
+      ],
+      "outputs": [
+        { "key": "top", "name": "Top", "type": "number", "subtype": "distance", "description": "The distance from the top edge, in points." },
+        { "key": "right", "name": "Right", "type": "number", "subtype": "distance", "description": "The distance from the right edge, in points." },
+        { "key": "bottom", "name": "Bottom", "type": "number", "subtype": "distance", "description": "The distance from the bottom edge, in points." },
+        { "key": "left", "name": "Left", "type": "number", "subtype": "distance", "description": "The distance from the left edge, in points." }
+      ],
+      "alwaysEvaluate": false,
+      "pairsWellWith": ["edges", "deviceInfo", "add", "transition"],
+      "commonMistakes": [
+        "There's no way to wire a group's Padding into Value: patches can't read layer properties. Build the inset with an Edges patch, wire its output into Padding, and unpack that same output here.",
+        "A Size or Point won't connect: Value needs four numbers. Pack the sides you need with Edges first."
+      ],
+      "examples": [
+        {
+          "title": "Keep list gaps equal to the side padding",
+          "description": "One Transition animates the list's padding between a compact preset and a roomy one. Edges Unpack reads the left inset from that same value and uses it as the gap between rows.",
+          "outline": "layer list group \"List\" @0,120 402x600 layout=column padding←inset.output spacing←sides.left\n  layer row_1 rectangle \"Row 1\" 340x64 cornerRadius=12\n  layer row_2 rectangle \"Row 2\" 340x64 cornerRadius=12\npatch tap_list interaction layer=@list\npatch roomy switch flip←tap_list.tap\npatch pop popAnimation number←roomy.on\npatch inset transition<point4d> progress←pop.output start=12,16,12,16 end=24,32,24,32\npatch sides edgesUnpack value←inset.output"
+        }
+      ],
+      "origami": { "name": "Edges Unpack" },
+      "defaultNotes": {
+        "value": "sonobe: Origami's Edges Unpack has no documentation; 0,0,0,0 splits into four zeros."
+      }
+    },
+    {
+      "type": "cornerRadii",
+      "name": "Corner Radii",
+      "category": "utility",
+      "tier": 2,
+      "status": "supported",
+      "aliases": ["corner radius", "rounded corners", "border radius", "independent corners", "per corner radius", "top corners", "round corners"],
+      "summary": "Combines four corner radii into one value so a layer can round each corner by a different amount.",
+      "docs": "## How it works\nCorner Radii packs a rounding amount for each corner into one value. The corners go clockwise from the top left: **top left, top right, bottom right, bottom left**, the same order as CSS border-radius.\n\n- **Top Left**, **Top Right**, **Bottom Right**, and **Bottom Left** are radii in points. 0 is a sharp corner.\n- **Output** goes into a layer's Corner Radii property. Rectangles, groups, images, videos, gradients, and shader layers have it.\n\nOnce Corner Radii is connected, it replaces the layer's single Corner Radius. Corner Smoothing still applies on top.\n\n## Tips\n- Round only the top of a bottom sheet: set Top Left and Top Right, and leave the bottom corners at 0.\n- Animate one corner by driving its port from a Transition while the others stay typed in.\n- A single number wired into Corner Radii rounds every corner the same, like Corner Radius.\n\n## Coming from Origami\nIn Origami, this is the Vec4 patch with its type changed to Corner Radius. Origami doesn't document its corner order, so check each corner after importing.",
+      "behavior": "State per loop index: `{ warned: false }`, used only to warn once about a non-finite radius. Values are stateless.\n\nEach frame, per loop index:\n```\nconst finite = (n: number): number => {\n  if (Number.isFinite(n)) return n;\n  if (!ctx.state.warned) {\n    ctx.state.warned = true;\n    ctx.services.log('warn', `${ctx.id}: a radius isn't a finite number, so Corner Radii uses 0 for it`);\n  }\n  return 0;\n};\nctx.output('output', ['topLeft', 'topRight', 'bottomRight', 'bottomLeft'].map((key) => finite(ctx.input<number>(key))));\n```\n\n- Order: components are always `[topLeft, topRight, bottomRight, bottomLeft]`, matching the `cornerRadii` layer prop in layerTypes.ts and the renderer's `readRadii`.\n- Pulses: none.\n- Frame 0: outputs the authored radii on frame 0. There's no history and no animation.\n- Loops: once per loop index. The output length is the longest input loop; shorter loops wrap and scalars broadcast. An empty loop on any input gives an empty output.\n- Coercion: the inputs are number ports, so `ctx.input` has already converted wires. The output type is `point4d` (ARCHITECTURE.md §4: a point4d subtype covers corner radii), so it connects to every 4D input with no conversion.\n- No clamping: `min: 0` is a soft inspector limit only. Negative radii pass through unchanged; the renderer draws them as 0.\n- Output identity: emit a new array every frame and never mutate one already emitted.\n- Edge cases: a non-finite radius becomes 0 and warns once per restart per loop index.\n- Restart and dispose: restart clears `warned`; nothing to release.\n- Coming from Origami: there's no census id. Saved files store it as a `builtin.vec4` node with its type set to Corner Radius. Import it as `cornerRadii` and map ports by label, never by position: Origami corrected these labels in v163, and its serialized corner order is unverified. Origami's corner smoothing is a separate layer property, like Sonobe's `cornerSmoothing`.",
+      "inputs": [
+        { "key": "topLeft", "name": "Top Left", "type": "number", "subtype": "distance", "default": 0, "min": 0, "description": "Rounding of the top-left corner in points; 0 is a sharp corner." },
+        { "key": "topRight", "name": "Top Right", "type": "number", "subtype": "distance", "default": 0, "min": 0, "description": "Rounding of the top-right corner in points; 0 is a sharp corner." },
+        { "key": "bottomRight", "name": "Bottom Right", "type": "number", "subtype": "distance", "default": 0, "min": 0, "description": "Rounding of the bottom-right corner in points; 0 is a sharp corner." },
+        { "key": "bottomLeft", "name": "Bottom Left", "type": "number", "subtype": "distance", "default": 0, "min": 0, "description": "Rounding of the bottom-left corner in points; 0 is a sharp corner." }
+      ],
+      "outputs": [
+        { "key": "output", "name": "Output", "type": "point4d", "subtype": "distance", "description": "The four radii as one value, in top left, top right, bottom right, bottom left order." }
+      ],
+      "alwaysEvaluate": false,
+      "pairsWellWith": ["cornerRadiiUnpack", "transition", "popAnimation", "switch"],
+      "commonMistakes": [
+        "Every corner goes sharp the moment you connect Corner Radii: it replaces the layer's Corner Radius, and all four corners start at 0. Type the radius you want into each corner.",
+        "Nothing changes on an oval or text layer: those layers have no Corner Radii. Put the content in a group, turn on Clip Contents, and round the group instead."
+      ],
+      "examples": [
+        {
+          "title": "Give a chat bubble a tail corner",
+          "description": "A sent message rounds three corners fully and keeps the bottom-right corner tight, pointing toward the sender.",
+          "outline": "layer bubble rectangle \"Bubble\" @150,600 236x64 color=#3478F6FF cornerRadii←bubble_shape.output\npatch bubble_shape cornerRadii topLeft=20 topRight=20 bottomRight=6 bottomLeft=20"
+        },
+        {
+          "title": "Square a card's bottom corners as it docks",
+          "description": "When you tap, the card springs down onto the toolbar and its bottom corners turn square so it sits flush.",
+          "outline": "layer toolbar rectangle \"Toolbar\" @0,791 402x83 color=#FFFFFFFF\nlayer card rectangle \"Card\" @16,420 370x220 color=#FFFFFFFF position←dock.output cornerRadii←corners.output\npatch tap_card interaction layer=@card\npatch toggle switch flip←tap_card.tap\npatch pop popAnimation number←toggle.on\npatch dock transition<point> progress←pop.output start=16,420 end=16,571\npatch bottom transition<number> progress←pop.output start=24 end=0\npatch corners cornerRadii topLeft=24 topRight=24 bottomRight←bottom.output bottomLeft←bottom.output"
+        }
+      ],
+      "origami": { "name": "Corner Radius" },
+      "defaultNotes": {
+        "topLeft": "sonobe: Origami's Corner Radius patch has no documentation; 0 matches a layer's default Corner Radius.",
+        "topRight": "sonobe: Origami's Corner Radius patch has no documentation; 0 matches a layer's default Corner Radius.",
+        "bottomRight": "sonobe: Origami's Corner Radius patch has no documentation; 0 matches a layer's default Corner Radius.",
+        "bottomLeft": "sonobe: Origami's Corner Radius patch has no documentation; 0 matches a layer's default Corner Radius."
+      }
+    },
+    {
+      "type": "cornerRadiiUnpack",
+      "name": "Corner Radii Unpack",
+      "category": "utility",
+      "tier": 2,
+      "status": "supported",
+      "aliases": ["corner radius unpack", "split corners", "separate corners", "border radius values", "get corner radius", "vec4 unpack"],
+      "summary": "Splits a Corner Radii value into the radius of each corner: top left, top right, bottom right, and bottom left.",
+      "docs": "## How it works\nCorner Radii Unpack takes one Corner Radii value and gives you each corner's radius on its own port. It's the reverse of Corner Radii.\n\n- **Value** is the set of radii to split, such as a Transition set to Point 4D that animates a card's corners.\n- **Top Left**, **Top Right**, **Bottom Right**, and **Bottom Left** are radii in points, read clockwise from the top left.\n\n## Tips\n- Keep nested corners concentric: unpack the outer radii, subtract the gap between the shapes, and pack the result with Corner Radii for the inner layer.\n- Wire one corner into Watch to see its value while you tune an animation.\n\n## Coming from Origami\nIn Origami, this is Vec4 Unpack with its type changed to Corner Radius. The unnamed input is called Value.",
+      "behavior": "State per loop index: `{ warned: false }`, used only to warn once about a non-finite radius. Values are stateless.\n\nEach frame, per loop index:\n```\nconst v = ctx.input<number[]>('value');   // coerced to point4d: always 4 numbers\nconst finite = (n: number | undefined): number => {\n  if (typeof n === 'number' && Number.isFinite(n)) return n;\n  if (!ctx.state.warned) {\n    ctx.state.warned = true;\n    ctx.services.log('warn', `${ctx.id}: Value has a radius that isn't a finite number, so it outputs 0`);\n  }\n  return 0;\n};\nctx.output('topLeft', finite(v[0]));\nctx.output('topRight', finite(v[1]));\nctx.output('bottomRight', finite(v[2]));\nctx.output('bottomLeft', finite(v[3]));\n```\n\n- Order: components are always `[topLeft, topRight, bottomRight, bottomLeft]`, the same as `cornerRadii` and the layer prop of that name.\n- Pulses: none.\n- Frame 0: outputs the authored or wired radii on frame 0. Unconnected, it outputs 0 for every corner.\n- Loops: once per loop index. A loop of corner radii gives four loops of numbers with the same length and order. An empty loop gives empty outputs.\n- Coercion (ARCHITECTURE.md §4, `canConnect` in core): any `point4d` output connects directly. A number wire broadcasts to all four corners. A point, size, anchor, or 3D point can't connect because the component counts differ. JSON is read by core coercion: an array keeps its first four numbers and fills missing ones with 0.\n- No clamping: negative radii pass through, so math on them can go below 0. The renderer draws a negative radius as 0.\n- Edge cases: never throw on a malformed value, since core coercion already turns it into 0, 0, 0, 0. A non-finite radius outputs 0 and warns once per restart per loop index.\n- Restart and dispose: restart clears `warned`; nothing to release.\n- Coming from Origami: there's no census id. A `builtin.getvec4` node whose selected type is Corner Radius imports as `cornerRadiiUnpack`. Map outputs by label, never by position, because Origami's serialized corner order is unverified.",
+      "inputs": [
+        { "key": "value", "name": "Value", "type": "point4d", "subtype": "distance", "default": [0, 0, 0, 0], "description": "The corner radii to split: four radii in points, clockwise from the top left." }
+      ],
+      "outputs": [
+        { "key": "topLeft", "name": "Top Left", "type": "number", "subtype": "distance", "description": "The top-left corner's radius, in points." },
+        { "key": "topRight", "name": "Top Right", "type": "number", "subtype": "distance", "description": "The top-right corner's radius, in points." },
+        { "key": "bottomRight", "name": "Bottom Right", "type": "number", "subtype": "distance", "description": "The bottom-right corner's radius, in points." },
+        { "key": "bottomLeft", "name": "Bottom Left", "type": "number", "subtype": "distance", "description": "The bottom-left corner's radius, in points." }
+      ],
+      "alwaysEvaluate": false,
+      "pairsWellWith": ["cornerRadii", "subtract", "transition", "watch"],
+      "commonMistakes": [
+        "There's no way to wire a layer's Corner Radii into Value: patches can't read layer properties. Keep the radii in a patch such as Corner Radii or Transition, wire it into the layer, and unpack that same output here.",
+        "Top Right shows what should be the bottom-left radius: the value was packed in another corner order, such as top left, top right, bottom left, bottom right. Pack corners with Corner Radii so the order is always clockwise from the top left."
+      ],
+      "examples": [
+        {
+          "title": "Keep a photo's corners parallel to its card",
+          "description": "The card's corners animate from 16 to 32 on tap. The photo sits 8 points inside, so its top corners use the card's radius minus 8 to stay concentric.",
+          "outline": "layer card group \"Card\" @16,200 370x260 color=#FFFFFFFF cornerRadii←card_corners.output\n  layer photo rectangle \"Photo\" @8,8 354x160 color=#D9D9D9FF cornerRadii←photo_corners.output\npatch tap_card interaction layer=@card\npatch toggle switch flip←tap_card.tap\npatch pop popAnimation number←toggle.on\npatch card_corners transition<point4d> progress←pop.output start=16,16,16,16 end=32,32,32,32\npatch outer cornerRadiiUnpack value←card_corners.output\npatch inner_left subtract value1←outer.topLeft value2=8\npatch inner_right subtract value1←outer.topRight value2=8\npatch photo_corners cornerRadii topLeft←inner_left.output topRight←inner_right.output bottomRight=4 bottomLeft=4"
+        }
+      ],
+      "origami": { "name": "Corner Radius Unpack" },
+      "defaultNotes": {
+        "value": "sonobe: Origami's Corner Radius Unpack has no documentation; 0,0,0,0 splits into four zeros."
+      }
+    }
+  ]
+}

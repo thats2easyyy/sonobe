@@ -1,0 +1,665 @@
+{
+  "file": "color-1.json",
+  "category": "color",
+  "patches": [
+    {
+      "type": "hexColor",
+      "name": "Hex Color",
+      "category": "color",
+      "tier": 1,
+      "status": "supported",
+      "aliases": [
+        "hex",
+        "hex code",
+        "color from hex",
+        "css color",
+        "html color",
+        "text to color",
+        "parse color",
+        "design token"
+      ],
+      "summary": "Turns a hex code such as #FF5F6D into a color you can wire into any color property.",
+      "docs": "## How it works\nHex Color reads a hex code, the short color code design tools show next to a swatch, and outputs that color.\n\n- **Hex** accepts 3, 4, 6, or 8 hex digits, with or without a leading `#`, in upper- or lowercase: `#F0A`, `#FF00AA`, or `#FF00AA80`, where the last pair is alpha. Spaces around the code are ignored.\n- **Color** is the color the code describes. While Hex isn't a valid code, it's transparent.\n- **Valid** is true when Hex is a code the patch understands.\n\n## Tips\n- Keep brand colors in a few Hex Color patches so the whole prototype shares one source of truth.\n- Give it a loop of codes to color each copy of a looped layer differently.\n- Codes from Figma or CSS paste in as they are. Color names and `rgb()` text aren't read.\n\n## Coming from Origami\nThe output is named Color, and Valid is new. Codes with 4 or 8 digits put alpha last, as in CSS.",
+      "behavior": "Stateless.\n\nEach frame:\n```\nlet digits = String(ctx.input(\"hex\")).trim();\nif (digits.startsWith(\"#\")) digits = digits.slice(1);\nconst valid = /^[0-9A-Fa-f]+$/.test(digits) && [3, 4, 6, 8].includes(digits.length);\nif (!valid) {\n  ctx.output(\"color\", { r: 0, g: 0, b: 0, a: 0 });\n  ctx.output(\"valid\", false);\n  return;\n}\nif (digits.length <= 4) digits = [...digits].map((d) => d + d).join(\"\");   // F0A → FF00AA\nif (digits.length === 6) digits += \"FF\";                                    // opaque\nconst byte = (i) => parseInt(digits.slice(2 * i, 2 * i + 2), 16) / 255;\nctx.output(\"color\", { r: byte(0), g: byte(1), b: byte(2), a: byte(3) });\nctx.output(\"valid\", true);\n```\n\n- Formats: 3 digits (RGB), 4 (RGBA), 6 (RRGGBB), or 8 (RRGGBBAA). Alpha always comes last. At most one leading `#`; surrounding whitespace is trimmed. Everything else is invalid: a `0x` prefix, inner spaces, 5 or 7 digits, CSS names, `rgb()`. For valid input the result equals core `parseColor(\"#\" + digits)`, but don't call `parseColor` on the raw text, because it also accepts names and `rgb()`.\n- Golden values: `\"FF5F6D\"` → r 1, g 0.372549, b 0.427451, a 1. `\" #ff0000 \"` → opaque red. `\"#F0A\"` → `#FF00AAFF`. `\"#F0A8\"` → `#FF00AA88` (a 0.533333). `\"#FF5F6D80\"` → a 0.501961. `\"\"`, `\"#12345\"`, and `\"GG0000\"` → `#00000000` with `valid` false.\n- Invalid text: outputs transparent (the color zero value) and `valid` false. No warning is logged, because partial codes are normal while someone types.\n- Coercion: a connected non-text value arrives coerced to text, so the number 123456 reads as `#123456`.\n- Frame 0: evaluates with the authored Hex; there's no history.\n- Loops: evaluates per index. A loop of codes outputs a loop of colors and a loop of booleans; scalars broadcast.\n- Restart and dispose: nothing to reset or release.\n- Coming from Origami: Origami documents only \"a hex string\" and an unlabeled output (\"Output\"). Its accepted lengths, alpha order, and fallback for bad text are unverified. Sonobe uses CSS order (alpha last), a transparent fallback, and adds Valid.",
+      "inputs": [
+        {
+          "key": "hex",
+          "name": "Hex",
+          "type": "text",
+          "default": "#FFFFFF",
+          "description": "The hex code to read, such as #FF5F6D or FF5F6D; in 4- and 8-digit codes the last digits are alpha."
+        }
+      ],
+      "outputs": [
+        {
+          "key": "color",
+          "name": "Color",
+          "type": "color",
+          "description": "The color the code describes; transparent while Hex isn't a valid code."
+        },
+        {
+          "key": "valid",
+          "name": "Valid",
+          "type": "boolean",
+          "description": "True when Hex is a valid 3, 4, 6, or 8-digit hex code."
+        }
+      ],
+      "alwaysEvaluate": false,
+      "pairsWellWith": [
+        "colorToHex",
+        "transition",
+        "optionPicker",
+        "loopOverArray",
+        "valueForKey"
+      ],
+      "commonMistakes": [
+        "The layer vanishes: Hex isn't a valid code, for example 5 digits, a space inside the code, or a color name, so Color is transparent. Check Valid and use 3, 4, 6, or 8 hex digits.",
+        "An 8-digit code copied from Android or Swift code shows the wrong color: those often put alpha first (AARRGGBB), but Hex reads alpha last. Move the first two digits to the end."
+      ],
+      "examples": [
+        {
+          "title": "Color list rows from hex codes",
+          "description": "A loop of three codes replicates the row, one color per copy.",
+          "outline": "layer list group \"List\" @16,120 358x276 layout=column spacing=12\n  layer row rectangle \"Row\" 358x80 cornerRadius=16 color←row_color.color\npatch row_color hexColor hex=loop[\"#FF5F6D\"|\"#FFC371\"|\"#47CACC\"]"
+        },
+        {
+          "title": "Press a brand-colored button to its darker shade",
+          "outline": "layer button rectangle \"Button\" @24,760 354x56 cornerRadius=14 color←tint.output\npatch brand hexColor hex=\"#5B5FEF\"\npatch brand_pressed hexColor hex=\"#3E42C8\"\npatch tap_button interaction layer=@button\npatch press popAnimation number←tap_button.down bounciness=0 speed=20\npatch tint transition<color> progress←press.output start←brand.color end←brand_pressed.color"
+        }
+      ],
+      "origami": {
+        "id": "builtin.color.hex",
+        "name": "Hex Color"
+      },
+      "origamiPorts": {
+        "color": "Output"
+      },
+      "defaultNotes": {
+        "hex": "legacy: the Quartz Composer Hex Color macro defaulted to FFFFFF (white); Sonobe adds the # that Color to Hex writes."
+      }
+    },
+    {
+      "type": "rgbColor",
+      "name": "RGB Color",
+      "category": "color",
+      "tier": 1,
+      "status": "supported",
+      "aliases": [
+        "rgba",
+        "red green blue",
+        "mix color",
+        "color from channels",
+        "make color",
+        "rgb to color",
+        "color channels"
+      ],
+      "summary": "Builds a color from red, green, blue, and alpha numbers between 0 and 1.",
+      "docs": "## How it works\nRGB Color mixes a color from red, green, and blue light, each from 0 (none) to 1 (full), plus alpha for transparency.\n\n- **Red**, **Green**, and **Blue** set how much of each light goes in. All 0 is black, all 1 is white, and 0.5 matches `80` in a hex code.\n- **Alpha** is opacity: 0 is fully transparent, 1 is opaque.\n- **Color** is the mixed color. Inputs outside 0–1 are clamped.\n\n## Tips\n- Drive one channel from an animation or a loop's index to make ramps and heat maps.\n- Numbers from 0 to 255, from an API or a code snippet, need dividing by 255 first.\n- To blend between two whole colors, a Transition set to Color is simpler than animating three channels.\n\n## Coming from Origami\nThe output is named Color.",
+      "behavior": "Stateless.\n\nEach frame:\n```\nconst channel = (key) => {\n  const v = ctx.input(key);\n  if (!Number.isFinite(v)) { warnOnce(`${key} isn't a finite number; using 0`); return 0; }\n  return Math.min(1, Math.max(0, v));\n};\nctx.output(\"color\", { r: channel(\"red\"), g: channel(\"green\"), b: channel(\"blue\"), a: channel(\"alpha\") });\n```\n\n- Range: every channel clamps to 0–1, so 1.4 → 1, −0.2 → 0, and 255 → 1. There's no automatic 0–255 detection.\n- Color space: channels are gamma-encoded sRGB, the same numbers a hex code holds (0.5 → `80`). Alpha is straight, not premultiplied: Red, Green, and Blue keep their values when Alpha is 0, so Color to RGB returns them unchanged.\n- Golden values (r, g, b, a): (1, 0.5, 0, 1) → `#FF8000FF`. (0, 0, 0, 0.5) → `#00000080`. (2, −1, 0.25, 1) → `#FF0040FF`.\n- Edge cases: a non-finite input (NaN or ±Infinity from upstream math) counts as 0; `warnOnce` logs through `ctx.services.log(\"warn\", …)` at most once per restart.\n- Frame 0: evaluates with the authored values; there's no history.\n- Loops: evaluates per index; scalars broadcast.\n- Restart and dispose: only the warn-once flag resets. Nothing to release.\n- Coming from Origami: same inputs and 0–1 ranges; Origami's output is unlabeled (\"Output\") and it doesn't document clamping.",
+      "inputs": [
+        {
+          "key": "red",
+          "name": "Red",
+          "type": "number",
+          "subtype": "progress",
+          "default": 0,
+          "min": 0,
+          "max": 1,
+          "step": 0.01,
+          "description": "How much red, from 0 (none) to 1 (full); values outside 0–1 are clamped."
+        },
+        {
+          "key": "green",
+          "name": "Green",
+          "type": "number",
+          "subtype": "progress",
+          "default": 0,
+          "min": 0,
+          "max": 1,
+          "step": 0.01,
+          "description": "How much green, from 0 (none) to 1 (full); values outside 0–1 are clamped."
+        },
+        {
+          "key": "blue",
+          "name": "Blue",
+          "type": "number",
+          "subtype": "progress",
+          "default": 0,
+          "min": 0,
+          "max": 1,
+          "step": 0.01,
+          "description": "How much blue, from 0 (none) to 1 (full); values outside 0–1 are clamped."
+        },
+        {
+          "key": "alpha",
+          "name": "Alpha",
+          "type": "number",
+          "subtype": "progress",
+          "default": 1,
+          "min": 0,
+          "max": 1,
+          "step": 0.01,
+          "description": "Opacity, from 0 (fully transparent) to 1 (opaque)."
+        }
+      ],
+      "outputs": [
+        {
+          "key": "color",
+          "name": "Color",
+          "type": "color",
+          "description": "The color mixed from the four channels."
+        }
+      ],
+      "alwaysEvaluate": false,
+      "pairsWellWith": [
+        "colorToRgb",
+        "transition",
+        "loop",
+        "mathExpression",
+        "remap"
+      ],
+      "commonMistakes": [
+        "The color comes out white or a pure primary: channels run 0 to 1, so values like 255 or 128 clamp to 1. Divide 0–255 values by 255 first.",
+        "Lowering Alpha doesn't fade the layer's border or text: Alpha only makes this one color transparent. Use the layer's Opacity to fade the whole layer."
+      ],
+      "examples": [
+        {
+          "title": "Heat-map tiles from cool to warm",
+          "description": "Loop indices 0 to 4 fade blue out and red in across five tiles.",
+          "outline": "layer tile_row group \"Tile Row\" @16,300 370x70 layout=row spacing=10\n  layer tile rectangle \"Tile\" 66x70 cornerRadius=10 color←tile_color.color\npatch tiles loop count=5\npatch heat mathExpression expression=\"warm = index / 4; cool = 1 - index / 4\" index←tiles.index\npatch tile_color rgbColor red←heat.warm green=0.35 blue←heat.cool"
+        },
+        {
+          "title": "Use 0–255 color values from a spec",
+          "outline": "layer swatch rectangle \"Swatch\" @101,300 200x200 cornerRadius=24 color←swatch_color.color\npatch bytes mathExpression expression=\"r = red / 255; g = green / 255; b = blue / 255\" red=255 green=149 blue=0\npatch swatch_color rgbColor red←bytes.r green←bytes.g blue←bytes.b"
+        }
+      ],
+      "origami": {
+        "id": "builtin.color.rgb",
+        "name": "RGB Color"
+      },
+      "origamiPorts": {
+        "color": "Output"
+      },
+      "defaultNotes": {
+        "red": "sonobe: Origami's default is undocumented; opaque black is visible on a light background, and raising one channel shows that channel.",
+        "green": "sonobe: Origami's default is undocumented; 0 keeps the default color black.",
+        "blue": "sonobe: Origami's default is undocumented; 0 keeps the default color black.",
+        "alpha": "sonobe: builder colors default to opaque."
+      }
+    },
+    {
+      "type": "hslColor",
+      "name": "HSL Color",
+      "category": "color",
+      "tier": 1,
+      "status": "supported",
+      "aliases": [
+        "hsla",
+        "hue saturation lightness",
+        "color wheel",
+        "rainbow",
+        "hue shift",
+        "tint and shade",
+        "color from hue",
+        "palette"
+      ],
+      "summary": "Builds a color from hue, saturation, lightness, and alpha between 0 and 1, for rainbows, tints, and shades.",
+      "docs": "## How it works\nHSL Color describes a color the way people talk about one: which hue, how vivid, and how light.\n\n- **Hue** picks a spot on the color wheel from 0 to 1: 0 is red, 0.33 green, 0.67 blue, and 1 is back at red. Values past either end keep going around, so 1.25 is the same as 0.25.\n- **Saturation** runs from 0 (gray) to 1 (fully vivid).\n- **Lightness** runs from 0 (black) through 0.5 (the purest hue) to 1 (white).\n- **Alpha** is opacity, from 0 (transparent) to 1 (opaque).\n- **Color** is the result. Saturation, Lightness, and Alpha are clamped to 0–1.\n\n## Tips\n- Divide a loop's index by its count and wire that into Hue to give every copy an evenly spaced color.\n- Animate Hue with a linear Repeating Animation for a color cycle that never jumps.\n- Start from a brand color with Color to HSL, then nudge Lightness for hover and pressed shades.\n\n## Coming from Origami\nThe output is named Color.",
+      "behavior": "Stateless.\n\nEach frame (the CSS Color 4 HSL-to-RGB conversion):\n```\nconst num = (key) => { const v = ctx.input(key); if (Number.isFinite(v)) return v; warnOnce(key); return 0; };\nconst clamp01 = (x) => Math.min(1, Math.max(0, x));\nlet h = num(\"hue\");\nh = h - Math.floor(h);                          // wrap into [0, 1)\nconst s = clamp01(num(\"saturation\"));\nconst l = clamp01(num(\"lightness\"));\nconst a = clamp01(num(\"alpha\"));\nconst f = (n) => {\n  const k = (n + h * 12) % 12;\n  return clamp01(l - s * Math.min(l, 1 - l) * Math.max(-1, Math.min(k - 3, 9 - k, 1)));\n};\nctx.output(\"color\", { r: f(0), g: f(8), b: f(4), a });\n```\n\n- Hue wraps to its fractional part: 1 → 0, 1.25 → 0.25, −0.25 → 0.75, and 120 → 0. Saturation, Lightness, and Alpha clamp to 0–1. The clamp inside `f` only absorbs floating-point error.\n- It's HSL, not HSB or HSV: Lightness 1 is white and Lightness 0 is black whatever the saturation.\n- Golden values (h, s, l): (0, 1, 0.5) → `#FF0000`; (1/3, 1, 0.5) → `#00FF00`; (2/3, 1, 0.5) → `#0000FF`; (0.5, 1, 0.25) → `#008080`; (0.3, 0, 0.5) → `#808080`; (0.1, 0.8, 1) → `#FFFFFF`; (0.1, 0.8, 0) → `#000000`; (1.25, 1, 0.5) → `#80FF00`; (−0.25, 1, 0.5) → `#8000FF`; (0.08, 0.9, 0.6) → r 0.96, g 0.5856, b 0.24.\n- Edge cases: a non-finite input counts as 0; `warnOnce` logs through `ctx.services.log(\"warn\", …)` at most once per restart.\n- Frame 0: evaluates with the authored values; there's no history.\n- Loops: evaluates per index; scalars broadcast.\n- Restart and dispose: only the warn-once flag resets. Nothing to release.\n- Coming from Origami: same inputs with hue as 0–1, not degrees; Origami's output is unlabeled (\"Output\"). Origami doesn't document wrapping or clamping; Sonobe wraps Hue so a hue cycle animates smoothly past 1.",
+      "inputs": [
+        {
+          "key": "hue",
+          "name": "Hue",
+          "type": "number",
+          "subtype": "progress",
+          "default": 0,
+          "step": 0.01,
+          "description": "Where on the color wheel, from 0 to 1: 0 red, 0.33 green, 0.67 blue; values outside 0–1 wrap around."
+        },
+        {
+          "key": "saturation",
+          "name": "Saturation",
+          "type": "number",
+          "subtype": "progress",
+          "default": 1,
+          "min": 0,
+          "max": 1,
+          "step": 0.01,
+          "description": "How vivid the color is, from 0 (gray) to 1 (full color)."
+        },
+        {
+          "key": "lightness",
+          "name": "Lightness",
+          "type": "number",
+          "subtype": "progress",
+          "default": 0.5,
+          "min": 0,
+          "max": 1,
+          "step": 0.01,
+          "description": "How light the color is: 0 is black, 0.5 the purest hue, 1 white."
+        },
+        {
+          "key": "alpha",
+          "name": "Alpha",
+          "type": "number",
+          "subtype": "progress",
+          "default": 1,
+          "min": 0,
+          "max": 1,
+          "step": 0.01,
+          "description": "Opacity, from 0 (fully transparent) to 1 (opaque)."
+        }
+      ],
+      "outputs": [
+        {
+          "key": "color",
+          "name": "Color",
+          "type": "color",
+          "description": "The color described by hue, saturation, lightness, and alpha."
+        }
+      ],
+      "alwaysEvaluate": false,
+      "pairsWellWith": [
+        "colorToHsl",
+        "loop",
+        "repeatingAnimation",
+        "mathExpression",
+        "gradientBuilder"
+      ],
+      "commonMistakes": [
+        "Every hue comes out red: Hue runs 0 to 1, not 0 to 360 degrees, so 120 wraps back to 0. Divide degrees by 360.",
+        "The color stays gray, white, or black whatever the hue: Saturation is 0, or Lightness is at 0 or 1. Raise Saturation and keep Lightness between about 0.2 and 0.8.",
+        "Rainbow colors don't look equally bright: lightness isn't perceived brightness, so yellow at 0.5 looks lighter than blue at 0.5. Adjust Lightness per hue by eye."
+      ],
+      "examples": [
+        {
+          "title": "A row of dots in rainbow colors",
+          "outline": "layer dot_row group \"Dot Row\" @16,400 370x48 layout=row spacing=16\n  layer dot oval \"Dot\" 48x48 color←dot_color.color\npatch dots loop count=6\npatch spread mathExpression expression=\"hue = index / 6\" index←dots.index\npatch dot_color hslColor hue←spread.hue saturation=0.75 lightness=0.6"
+        },
+        {
+          "title": "A glow that cycles through every hue",
+          "outline": "layer glow oval \"Glow\" @101,300 200x200 blur=24 color←glow_color.color\npatch clock repeatingAnimation duration=4 curve=linear\npatch glow_color hslColor hue←clock.progress saturation=0.9 lightness=0.6"
+        }
+      ],
+      "origami": {
+        "id": "builtin.color.hsl",
+        "name": "HSL Color"
+      },
+      "origamiPorts": {
+        "color": "Output"
+      },
+      "defaultNotes": {
+        "hue": "sonobe: Origami's default is undocumented; 0 is red, the start of the color wheel.",
+        "saturation": "sonobe: Origami's default is undocumented; 1 shows the hue at full strength.",
+        "lightness": "sonobe: Origami's default is undocumented; 0.5 is the purest version of the hue.",
+        "alpha": "sonobe: builder colors default to opaque."
+      }
+    },
+    {
+      "type": "colorToHex",
+      "name": "Color to Hex",
+      "category": "color",
+      "tier": 2,
+      "status": "supported",
+      "aliases": [
+        "hex code",
+        "color code",
+        "color to text",
+        "hex string",
+        "css hex",
+        "export color",
+        "handoff color"
+      ],
+      "summary": "Turns a color into hex code text such as #FF5F6D, for labels, data, and handoff.",
+      "docs": "## How it works\nColor to Hex writes a color as a hex code, the text designers copy between tools.\n\n- **Color** is the color to describe.\n- **Include Alpha** adds a final pair of digits for opacity (`#FF5F6D80`). While it's off, the code has six digits and opacity is dropped.\n- **Hex** is the code: a `#`, then an uppercase pair of digits each for red, green, and blue.\n\n## Tips\n- Wire Hex into a Text layer to show a live color value, for example in a color picker prototype.\n- Need lowercase or no `#`? Follow it with Change Case or Substring.\n- Hex Color reads the text back into a color.\n\n## Coming from Origami\nInclude Alpha is new; with it off, alpha is discarded as in Origami. Sonobe always writes uppercase digits after a `#`.",
+      "behavior": "Stateless.\n\nEach frame:\n```\nconst c = ctx.input(\"color\");   // { r, g, b, a } in 0–1\nconst byte = (x) => {\n  if (!Number.isFinite(x)) { warnOnce(\"non-finite color channel; using 0\"); x = 0; }\n  return Math.round(Math.min(1, Math.max(0, x)) * 255).toString(16).toUpperCase().padStart(2, \"0\");\n};\nlet hex = \"#\" + byte(c.r) + byte(c.g) + byte(c.b);\nif (ctx.input(\"includeAlpha\")) hex += byte(c.a);\nctx.output(\"hex\", hex);\n```\n\n- Format: always `#RRGGBB`, or `#RRGGBBAA` while Include Alpha is on. Uppercase, no 3-digit shorthand. The result equals core `formatColor(c)`, minus its last two characters while Include Alpha is off.\n- Rounding: each channel becomes `round(clamp(c, 0, 1) × 255)`, so 0.5 → `80` (127.5 rounds up).\n- Golden values: (1, 0.372549, 0.427451, 1) → `#FF5F6D`. (0.5, 0.5, 0.5, 0.5) → `#808080`, or `#80808080` with Include Alpha. Transparent black → `#000000`.\n- Round trip: Hex Color on this output returns each channel within 1/510 of the original; alpha comes back as 1 unless Include Alpha is on.\n- Edge cases: a non-finite channel counts as 0; `warnOnce` logs through `ctx.services.log(\"warn\", …)` at most once per restart.\n- Frame 0: evaluates with the authored values; there's no history.\n- Loops: evaluates per index; a loop of colors gives a loop of codes.\n- Restart and dispose: only the warn-once flag resets. Nothing to release.\n- Coming from Origami: same Color input and Hex output, and alpha is discarded by default as documented. Origami's letter case and `#` prefix are unverified; Sonobe's format is fixed as above. Include Alpha is Sonobe-only.",
+      "inputs": [
+        {
+          "key": "color",
+          "name": "Color",
+          "type": "color",
+          "default": "#FFFFFFFF",
+          "description": "The color to write as a hex code."
+        },
+        {
+          "key": "includeAlpha",
+          "name": "Include Alpha",
+          "type": "boolean",
+          "default": false,
+          "description": "When on, adds opacity as a final pair of digits (#RRGGBBAA)."
+        }
+      ],
+      "outputs": [
+        {
+          "key": "hex",
+          "name": "Hex",
+          "type": "text",
+          "description": "The color as text: # then six uppercase hex digits, or eight while Include Alpha is on."
+        }
+      ],
+      "alwaysEvaluate": false,
+      "pairsWellWith": [
+        "hexColor",
+        "changeCase",
+        "substring",
+        "jsonObject"
+      ],
+      "commonMistakes": [
+        "A see-through color shows the same code as a solid one: Hex drops opacity by default. Turn on Include Alpha to get #RRGGBBAA.",
+        "An API or code snippet rejects the code because it expects lowercase or no #: follow Color to Hex with Change Case, or with Substring to drop the first character."
+      ],
+      "examples": [
+        {
+          "title": "Show the hex code of a changing color",
+          "outline": "layer swatch rectangle \"Swatch\" @101,240 200x200 cornerRadius=24 color←swatch_color.color\nlayer code text \"Hex Code\" @101,460 fontSize=28 text←swatch_hex.hex\npatch clock repeatingAnimation duration=6 curve=linear\npatch swatch_color hslColor hue←clock.progress saturation=0.8 lightness=0.55\npatch swatch_hex colorToHex color←swatch_color.color"
+        }
+      ],
+      "origami": {
+        "id": "builtin.color.tohex",
+        "name": "Color to Hex"
+      },
+      "defaultNotes": {
+        "color": "sonobe: Origami's default is undocumented; white matches Hex Color's default, so the pair round-trips.",
+        "includeAlpha": "sonobe: off matches Origami, which discards alpha."
+      }
+    },
+    {
+      "type": "colorToRgb",
+      "name": "Color to RGB",
+      "category": "color",
+      "tier": 2,
+      "status": "supported",
+      "aliases": [
+        "split color",
+        "color channels",
+        "unpack color",
+        "red green blue",
+        "rgba values",
+        "color components",
+        "get opacity"
+      ],
+      "summary": "Splits a color into red, green, blue, and alpha numbers between 0 and 1.",
+      "docs": "## How it works\nColor to RGB takes a color apart into the four numbers that make it up, each from 0 to 1.\n\n- **Color** is the color to split.\n- **Red**, **Green**, and **Blue** say how much of each light the color holds: 0 is none, 1 is full.\n- **Alpha** is opacity: 0 is fully transparent, 1 is opaque.\n\n## Tips\n- Weigh the channels (0.2126 red, 0.7152 green, 0.0722 blue) for a quick estimate of how light a color looks, then choose black or white text for it.\n- Wire Alpha into a layer's Opacity to fade a layer by a color's transparency.\n- RGB Color puts the pieces back together after you change one.\n\n## Coming from Origami\nThe input is named Color.",
+      "behavior": "Stateless.\n\nEach frame:\n```\nconst c = ctx.input(\"color\");   // { r, g, b, a }\nconst ch = (x) => {\n  if (!Number.isFinite(x)) { warnOnce(\"non-finite color channel; using 0\"); return 0; }\n  return Math.min(1, Math.max(0, x));\n};\nctx.output(\"red\", ch(c.r));\nctx.output(\"green\", ch(c.g));\nctx.output(\"blue\", ch(c.b));\nctx.output(\"alpha\", ch(c.a));\n```\n\n- Color space: gamma-encoded sRGB with straight alpha. Channels aren't multiplied by alpha, so `#FF000080` gives Red 1 and Alpha 0.501961.\n- Range: outputs clamp to 0–1. That only matters for colors made from out-of-range vectors, because the Point 4D → Color coercion doesn't clamp.\n- Golden values (r, g, b, a): `#FF8000FF` → (1, 0.501961, 0, 1). `#00000000` → (0, 0, 0, 0).\n- Edge cases: a non-finite channel counts as 0; `warnOnce` logs through `ctx.services.log(\"warn\", …)` at most once per restart.\n- Frame 0: evaluates with the authored color; there's no history.\n- Loops: evaluates per index; each output is a loop of numbers.\n- Restart and dispose: only the warn-once flag resets. Nothing to release.\n- Coming from Origami: Origami labels the input \"Input\"; the outputs match.",
+      "inputs": [
+        {
+          "key": "color",
+          "name": "Color",
+          "type": "color",
+          "default": "#FFFFFFFF",
+          "description": "The color to split into channels."
+        }
+      ],
+      "outputs": [
+        {
+          "key": "red",
+          "name": "Red",
+          "type": "number",
+          "subtype": "progress",
+          "description": "How much red the color holds, from 0 to 1."
+        },
+        {
+          "key": "green",
+          "name": "Green",
+          "type": "number",
+          "subtype": "progress",
+          "description": "How much green the color holds, from 0 to 1."
+        },
+        {
+          "key": "blue",
+          "name": "Blue",
+          "type": "number",
+          "subtype": "progress",
+          "description": "How much blue the color holds, from 0 to 1."
+        },
+        {
+          "key": "alpha",
+          "name": "Alpha",
+          "type": "number",
+          "subtype": "progress",
+          "description": "The color's opacity, from 0 (fully transparent) to 1 (opaque)."
+        }
+      ],
+      "alwaysEvaluate": false,
+      "pairsWellWith": [
+        "rgbColor",
+        "mathExpression",
+        "greaterThan",
+        "optionPicker"
+      ],
+      "commonMistakes": [
+        "The numbers look far too small for your code or API: channels run 0 to 1, not 0 to 255. Multiply by 255 and round.",
+        "A half-transparent color still reports full Red: channels aren't multiplied by Alpha. Multiply each channel by Alpha when you need the blended values."
+      ],
+      "examples": [
+        {
+          "title": "Pick black or white text for any background",
+          "description": "A quick brightness estimate flips the title between white and black as the card cycles through hues.",
+          "outline": "layer card rectangle \"Card\" @16,120 370x200 cornerRadius=20 color←card_color.color\nlayer title text \"Title\" \"Hello\" @40,196 fontSize=28 textColor←text_color.output\npatch clock repeatingAnimation duration=8 curve=linear\npatch card_color hslColor hue←clock.progress saturation=0.7 lightness=0.55\npatch channels colorToRgb color←card_color.color\npatch luma mathExpression expression=\"light = 0.2126 * r + 0.7152 * g + 0.0722 * b > 0.55 ? 1 : 0\" r←channels.red g←channels.green b←channels.blue\npatch text_color optionPicker<color>[2] option←luma.light option0=#FFFFFFFF option1=#000000FF"
+        }
+      ],
+      "origami": {
+        "id": "builtin.color.torgb",
+        "name": "Color to RGB"
+      },
+      "defaultNotes": {
+        "color": "sonobe: Origami's default is undocumented; opaque white reads 1 on every channel."
+      }
+    },
+    {
+      "type": "colorToHsl",
+      "name": "Color to HSL",
+      "category": "color",
+      "tier": 2,
+      "status": "supported",
+      "aliases": [
+        "split color",
+        "unpack color",
+        "get hue",
+        "hue saturation lightness",
+        "hsla values",
+        "complementary color",
+        "color analysis"
+      ],
+      "summary": "Splits a color into hue, saturation, lightness, and alpha numbers between 0 and 1.",
+      "docs": "## How it works\nColor to HSL describes a color by its hue, how vivid it is, and how light it is, each from 0 to 1.\n\n- **Color** is the color to describe.\n- **Hue** is its spot on the color wheel: 0 red, 0.33 green, 0.67 blue, rising toward 1 as it comes back around to red.\n- **Saturation** runs from 0 (gray) to 1 (fully vivid).\n- **Lightness** runs from 0 (black) through 0.5 (the purest hue) to 1 (white).\n- **Alpha** is opacity.\n\n## Tips\n- Change one number and rebuild the color with HSL Color: add 0.5 to Hue for the complementary color, or multiply Lightness by 0.8 for a pressed shade.\n- Grays, white, and black have no hue, so Hue reads 0 for them.\n\n## Coming from Origami\nThe input is named Color.",
+      "behavior": "Stateless.\n\nEach frame (the standard RGB-to-HSL conversion, the inverse of HSL Color):\n```\nconst c = ctx.input(\"color\");\nconst ch = (x) => (Number.isFinite(x) ? Math.min(1, Math.max(0, x)) : (warnOnce(\"non-finite color channel; using 0\"), 0));\nconst r = ch(c.r), g = ch(c.g), b = ch(c.b), a = ch(c.a);\nconst max = Math.max(r, g, b), min = Math.min(r, g, b);\nconst l = (max + min) / 2, d = max - min;\nlet h = 0, s = 0;\nif (d > 0) {\n  s = Math.min(1, d / (1 - Math.abs(2 * l - 1)));\n  if (max === r) h = ((g - b) / d + 6) % 6;\n  else if (max === g) h = (b - r) / d + 2;\n  else h = (r - g) / d + 4;\n  h /= 6;\n  if (h >= 1) h = 0;\n}\nctx.output(\"hue\", h);\nctx.output(\"saturation\", s);\nctx.output(\"lightness\", l);\nctx.output(\"alpha\", a);\n```\n\n- Ranges: Hue is in [0, 1) and never exactly 1; Saturation, Lightness, and Alpha are in [0, 1]. `d > 0` guarantees `1 − |2l − 1| > 0`, so there's no division by zero.\n- Achromatic colors (r = g = b) output Hue 0 and Saturation 0. When two channels tie for the maximum, red wins, then green: `#FFFF00` → Hue 0.166667, `#FF00FF` → Hue 0.833333.\n- Golden values (h, s, l): `#FF0000` → (0, 1, 0.5); `#00FF00` → (0.333333, 1, 0.5); `#0000FF` → (0.666667, 1, 0.5); `#008080` → (0.5, 1, 0.25098); `#808080` → (0, 0, 0.501961); `#FFFFFF` → (0, 0, 1); `#FF5F6D` → (0.985417, 1, 0.686275).\n- Round trip: HSL Color on these outputs reproduces the input color within floating-point error. The reverse doesn't always hold: converting HSL Color's output back loses Hue when Saturation is 0 or Lightness is 0 or 1.\n- Edge cases: a non-finite channel counts as 0; `warnOnce` logs through `ctx.services.log(\"warn\", …)` at most once per restart.\n- Frame 0: evaluates with the authored color; there's no history.\n- Loops: evaluates per index; each output is a loop of numbers.\n- Restart and dispose: only the warn-once flag resets. Nothing to release.\n- Coming from Origami: Origami labels the input \"Input\"; the outputs match. Origami doesn't document its formula; Sonobe uses the standard CSS definition.",
+      "inputs": [
+        {
+          "key": "color",
+          "name": "Color",
+          "type": "color",
+          "default": "#FFFFFFFF",
+          "description": "The color to describe as hue, saturation, and lightness."
+        }
+      ],
+      "outputs": [
+        {
+          "key": "hue",
+          "name": "Hue",
+          "type": "number",
+          "subtype": "progress",
+          "description": "The color's spot on the color wheel, from 0 up to (not including) 1; 0 for grays."
+        },
+        {
+          "key": "saturation",
+          "name": "Saturation",
+          "type": "number",
+          "subtype": "progress",
+          "description": "How vivid the color is, from 0 (gray) to 1 (full color)."
+        },
+        {
+          "key": "lightness",
+          "name": "Lightness",
+          "type": "number",
+          "subtype": "progress",
+          "description": "How light the color is: 0 black, 0.5 the purest hue, 1 white."
+        },
+        {
+          "key": "alpha",
+          "name": "Alpha",
+          "type": "number",
+          "subtype": "progress",
+          "description": "The color's opacity, from 0 (fully transparent) to 1 (opaque)."
+        }
+      ],
+      "alwaysEvaluate": false,
+      "pairsWellWith": [
+        "hslColor",
+        "mathExpression",
+        "colorToRgb",
+        "hexColor"
+      ],
+      "commonMistakes": [
+        "Hue snaps to red after you desaturate: a gray has no hue, so Hue reads 0 when Saturation is 0. Take Hue from the original color, not the desaturated one.",
+        "A hue shift stops at red instead of going around: Hue was clamped to 0–1 after adding an offset. Leave the sum unclamped; HSL Color wraps Hue, so 1.2 means 0.2."
+      ],
+      "examples": [
+        {
+          "title": "Derive a pressed shade from a brand color",
+          "outline": "layer button rectangle \"Button\" @24,760 354x56 cornerRadius=14 color←tint.output\npatch brand hexColor hex=\"#5B5FEF\"\npatch brand_hsl colorToHsl color←brand.color\npatch darker mathExpression expression=\"shade = lightness * 0.8\" lightness←brand_hsl.lightness\npatch pressed_color hslColor hue←brand_hsl.hue saturation←brand_hsl.saturation lightness←darker.shade alpha←brand_hsl.alpha\npatch tap_button interaction layer=@button\npatch press popAnimation number←tap_button.down bounciness=0 speed=20\npatch tint transition<color> progress←press.output start←brand.color end←pressed_color.color"
+        },
+        {
+          "title": "Pair a color with its complementary accent",
+          "outline": "layer primary oval \"Primary\" @111,360 80x80 color=#34C759FF\nlayer accent oval \"Accent\" @211,360 80x80 color←complement.color\npatch primary_hsl colorToHsl color=#34C759FF\npatch opposite mathExpression expression=\"shifted = hue + 0.5\" hue←primary_hsl.hue\npatch complement hslColor hue←opposite.shifted saturation←primary_hsl.saturation lightness←primary_hsl.lightness"
+        }
+      ],
+      "origami": {
+        "id": "builtin.color.tohsl",
+        "name": "Color to HSL"
+      },
+      "defaultNotes": {
+        "color": "sonobe: Origami's default is undocumented; opaque white matches the other color converters."
+      }
+    },
+    {
+      "type": "gradientBuilder",
+      "name": "Gradient Builder",
+      "category": "color",
+      "tier": 2,
+      "status": "supported",
+      "aliases": [
+        "gradient",
+        "linear gradient",
+        "radial gradient",
+        "angular gradient",
+        "conic gradient",
+        "color stops",
+        "multi-color fill",
+        "shimmer",
+        "ombre"
+      ],
+      "summary": "Builds a linear, radial, or angular gradient from color stops, ready for a layer's Gradient property.",
+      "docs": "## How it works\nGradient Builder blends several colors across a layer. Each stop pairs a **Color** with a **Stop**, its position from 0 at Start to 1 at End.\n\n- **Type**: Linear blends along a line, Radial spreads out in a circle, and Angular sweeps around a center like a clock hand.\n- **Start** and **End** are points in the layer, from [0, 0] top-left to [1, 1] bottom-right. Linear runs from Start to End. Radial and Angular center on Start; End marks the outer edge for Radial and the starting direction for Angular.\n- **Ratio** stretches a radial gradient sideways: 2 makes it twice as wide as tall.\n- **Stop 1…N** and **Color 1…N** are the stops. Add or remove stops on the patch (1 to 32); only their positions set the order.\n- **Gradient** drives a Gradient layer, or a Rectangle's or Oval's Gradient, which replaces its Color.\n\n## Tips\n- Animate stop positions or colors, not the gradient itself, for shimmers and shifting moods.\n- Positions below 0 or above 1 sit beyond Start or End, so a highlight can slide in from off the edge.\n- To fade out, end on a color with alpha 0. The blend doesn't turn gray on the way.\n\n## Coming from Origami\nEach Origami stop is one port holding a color and a position; here it's a Stop port plus a Color port. The output is named Gradient, and Angular is new.",
+      "behavior": "Stateless.\n\nPorts: static `type`, `start`, `end`, and `ratio`, then `stop{n}` and `color{n}` for n = 1…N, where N = `ctx.inputCount` clamped to 1…32 (see `dynamicPortsRule`).\n\nEach frame:\n```\nconst N = Math.min(32, Math.max(1, ctx.inputCount));\nlet kind = ctx.input(\"type\");\nif (kind !== \"linear\" && kind !== \"radial\" && kind !== \"angular\") { warnOnce(`unknown gradient type ${kind}`); kind = \"linear\"; }\nconst start = finitePoint(ctx.input(\"start\"));   // non-finite components → 0 (warnOnce)\nconst end = finitePoint(ctx.input(\"end\"));\nlet ratio = ctx.input(\"ratio\");\nif (!(Number.isFinite(ratio) && ratio > 0)) { warnOnce(\"ratio must be above 0; using 1\"); ratio = 1; }\nconst stops = [];\nfor (let n = 1; n <= N; n++) {\n  let offset = ctx.input(`stop${n}`);\n  if (!Number.isFinite(offset)) { warnOnce(`stop${n} isn't finite; using 0`); offset = 0; }\n  stops.push({ offset, color: clampChannels(ctx.input(`color${n}`)) });   // each channel to 0–1\n}\nstops.sort((p, q) => p.offset - q.offset);   // stable: equal offsets keep port order\nconst gradient = { kind, stops, start, end };\nif (kind === \"radial\" && ratio !== 1) gradient.ratio = ratio;   // see Contract gap\nctx.output(\"gradient\", gradient);\n```\n\n- Output: a `GradientValue` (packages/core types). Stops are sorted ascending by offset with a stable sort. Offsets, Start, and End aren't clamped; stop colors are clamped per channel.\n- What a layer draws (the renderer contract). Work in the layer's points with S = start × size, E = end × size, and P the point being shaded:\n  - linear: `t = dot(P − S, E − S) / |E − S|²`. When S = E there's no direction, and the layer fills with the last stop's color.\n  - radial: `t = hypot((P.x − S.x) / ratio, P.y − S.y) / r`, where `r = |E − S|`. When r = 0 the layer fills with the last stop's color.\n  - angular: `t` is the clockwise angle from the S→E direction to P − S, divided by 360°, in [0, 1). When S = E, 0° points straight up.\n  - Color at t: the first stop's color before the first offset, the last stop's color after the last offset, and a linear blend between neighboring stops in premultiplied RGBA (as CSS does), so fading to a transparent color never darkens. Equal offsets make a hard edge where the later stop's color takes over.\n  - A single stop fills the layer with its color.\n- Golden values: all defaults with N = 2 output `{ kind: \"linear\", stops: [{ offset: 0, color: white }, { offset: 1, color: black }], start: [0.5, 0], end: [0.5, 1] }`, the same as the Gradient layer's default. Stops (0.8, red) and (0.2, blue) output blue at 0.2 first, then red at 0.8.\n- Frame 0: evaluates with the authored values; there's no history.\n- Loops: evaluates per index, so a loop on any input produces a loop of gradients, one per looped layer. Stops never gather across loop indices into one gradient.\n- Edge cases: an unknown Type key (for example from a newer file) falls back to linear. Non-finite numbers count as 0, and Ratio ≤ 0 counts as 1. Each fallback logs through `ctx.services.log(\"warn\", …)` at most once per restart.\n- Contract gap: `GradientValue` has no `ratio` field yet (proposed: `ratio?: number`, the horizontal stretch of a radial gradient, default 1). Until the renderer reads it, the extra field is ignored and radial gradients draw as circles; document encoding drops it.\n- Restart and dispose: only the warn-once flag resets. Nothing to release.\n- Coming from Origami: each Origami Stop port holds a color plus a progress value. Importers map Origami stop k to `stop{k}` and `color{k}` and set inputCount to the stop count. Origami's output is labeled \"Color\". Angular is Sonobe-only. Origami's default stop count and exact Ratio semantics are undocumented; Sonobe treats Ratio as a horizontal stretch.",
+      "inputs": [
+        {
+          "key": "type",
+          "name": "Type",
+          "type": "enum",
+          "default": "linear",
+          "enumOptions": [
+            {
+              "key": "linear",
+              "name": "Linear",
+              "description": "Blends along the line from Start to End."
+            },
+            {
+              "key": "radial",
+              "name": "Radial",
+              "description": "Spreads out in a circle centered on Start, reaching the last stop at End."
+            },
+            {
+              "key": "angular",
+              "name": "Angular",
+              "description": "Sweeps clockwise around Start, beginning in the direction of End."
+            }
+          ],
+          "description": "The gradient's shape: along a line, out from a center, or around a center."
+        },
+        {
+          "key": "start",
+          "name": "Start",
+          "type": "anchor",
+          "default": [
+            0.5,
+            0
+          ],
+          "step": 0.01,
+          "description": "Where the gradient begins, as a point in the layer from [0, 0] top-left to [1, 1] bottom-right; the center for Radial and Angular."
+        },
+        {
+          "key": "end",
+          "name": "End",
+          "type": "anchor",
+          "default": [
+            0.5,
+            1
+          ],
+          "step": 0.01,
+          "description": "Where the gradient ends, in the same units as Start; the outer edge for Radial and the starting direction for Angular."
+        },
+        {
+          "key": "ratio",
+          "name": "Ratio",
+          "type": "number",
+          "default": 1,
+          "min": 0.01,
+          "step": 0.01,
+          "description": "How much wider than tall a Radial gradient is: 1 is a circle, 2 is twice as wide; Linear and Angular ignore it.",
+          "advanced": true
+        }
+      ],
+      "outputs": [
+        {
+          "key": "gradient",
+          "name": "Gradient",
+          "type": "gradient",
+          "description": "The finished gradient, for a Gradient layer or a shape layer's Gradient property."
+        }
+      ],
+      "dynamicPortsRule": "N = node.inputCount clamped to 1…32 (default 2). After the static inputs, append two inputs for each n = 1…N, in order:\n- `stop{n}`: name \"Stop {n}\", type number, subtype progress, min 0, max 1, step 0.01, default `(n − 1) / (N − 1)` (evenly spaced from 0 to 1; 0 when N = 1), description \"Where Color {n} sits along the gradient: 0 at Start, 1 at End.\"\n- `color{n}`: name \"Color {n}\", type color, default an evenly spaced gray from white to black: each RGB byte is `round((1 − (n − 1) / (N − 1)) × 255)` with alpha FF (\"#FFFFFFFF\" when N = 1). N = 2 gives \"#FFFFFFFF\" and \"#000000FF\"; N = 3 adds \"#808080FF\" between them. Description \"The color at Stop {n}.\"\n\nOutputs are static. Stop and color defaults depend on N, so a tool that changes inputCount should first write explicit literals for any stop or color still at its default, which keeps the authored gradient in place.",
+      "alwaysEvaluate": false,
+      "pairsWellWith": [
+        "hexColor",
+        "hslColor",
+        "repeatingAnimation",
+        "transition",
+        "mathExpression"
+      ],
+      "commonMistakes": [
+        "A radial gradient looks like a small dot: End is close to Start, and End marks the outer edge. For a glow that fills a square layer, set Start to [0.5, 0.5] and End to [1, 0.5].",
+        "The layer shows one flat color: Start and End are the same point, so a Linear gradient has no direction. Move End away from Start.",
+        "Two colors meet in a hard line instead of blending: their stops share the same position. Spread the Stop values apart."
+      ],
+      "examples": [
+        {
+          "title": "A sunset background with three stops",
+          "outline": "layer background gradient \"Background\" @0,0 402x874 gradient←sunset.gradient\npatch sunset gradientBuilder[3] stop1=0 color1=#FF5F6DFF stop2=0.55 color2=#FFC371FF stop3=1 color3=#47CACCFF"
+        },
+        {
+          "title": "Shimmer across a loading placeholder",
+          "description": "Stop positions run from below 0 to above 1, so the highlight enters and leaves past the edges.",
+          "outline": "layer placeholder rectangle \"Placeholder\" @16,160 370x96 cornerRadius=12 gradient←shimmer.gradient\npatch clock repeatingAnimation duration=1.4 curve=linear\npatch sweep mathExpression expression=\"lead = progress * 1.6 - 0.3; middle = progress * 1.6 - 0.15; tail = progress * 1.6\" progress←clock.progress\npatch shimmer gradientBuilder[3] start=[0,0.5] end=[1,0.5] stop1←sweep.lead color1=#E5E5EAFF stop2←sweep.middle color2=#F7F7F8FF stop3←sweep.tail color3=#E5E5EAFF"
+        },
+        {
+          "title": "A soft radial glow behind an icon",
+          "outline": "layer glow gradient \"Glow\" @101,322 200x200 gradient←halo.gradient\nlayer icon oval \"Icon\" @171,392 60x60 color=#FFFFFFFF\npatch halo gradientBuilder[2] type=radial start=[0.5,0.5] end=[1,0.5] stop1=0 color1=#5B5FEFFF stop2=1 color2=#5B5FEF00"
+        }
+      ],
+      "origami": {
+        "id": "builtin.gradient.builder",
+        "name": "Gradient Builder"
+      },
+      "origamiPorts": {
+        "gradient": "Color"
+      },
+      "defaultNotes": {
+        "type": "inferred: Origami's default is undocumented; Linear is the first option and the most common shape.",
+        "start": "inferred: Origami's default is undocumented; top center matches the Gradient layer's default direction.",
+        "end": "inferred: Origami's default is undocumented; bottom center matches the Gradient layer's default direction.",
+        "ratio": "sonobe: 1 draws an unstretched circle."
+      }
+    }
+  ]
+}

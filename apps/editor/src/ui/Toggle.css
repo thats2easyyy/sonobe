@@ -1,0 +1,108 @@
+.sb-choice {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-4);
+  color: var(--text-primary);
+  font-size: var(--font-size-sm);
+}
+
+.sb-choice[data-disabled] {
+  color: var(--text-disabled);
+}
+
+.sb-choice__label {
+  min-width: 0;
+}
+
+/* Switch */
+.sb-toggle {
+  --sb-toggle-w: 28px;
+  --sb-toggle-h: 16px;
+  --sb-toggle-thumb: 12px;
+  position: relative;
+  flex: none;
+  width: var(--sb-toggle-w);
+  height: var(--sb-toggle-h);
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-full);
+  background: var(--bg-pressed);
+  box-shadow: inset 0 0 0 1px var(--border-default);
+  transition:
+    background-color var(--duration-base) var(--ease-standard),
+    box-shadow var(--duration-base) var(--ease-standard);
+}
+
+.sb-toggle[data-size="sm"] {
+  --sb-toggle-w: 24px;
+  --sb-toggle-h: 14px;
+  --sb-toggle-thumb: 10px;
+}
+
+.sb-toggle__thumb {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: var(--sb-toggle-thumb);
+  height: var(--sb-toggle-thumb);
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
+  transition: transform var(--duration-base) var(--ease-out);
+}
+
+.sb-toggle[data-checked] {
+  background: var(--accent);
+  box-shadow: none;
+}
+
+.sb-toggle[data-checked] .sb-toggle__thumb {
+  transform: translateX(calc(var(--sb-toggle-w) - var(--sb-toggle-thumb) - 4px));
+}
+
+@media (hover: hover) {
+  .sb-toggle:hover:not(:disabled):not([data-checked]) {
+    box-shadow: inset 0 0 0 1px var(--border-strong);
+  }
+  .sb-toggle[data-checked]:hover:not(:disabled) {
+    background: var(--accent-hover);
+  }
+}
+
+.sb-toggle:disabled {
+  opacity: 0.5;
+}
+
+/* Checkbox */
+.sb-checkbox {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 14px;
+  height: 14px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-xs);
+  background: var(--bg-field);
+  box-shadow: inset 0 0 0 1px var(--border-strong);
+  color: var(--text-on-accent);
+  transition:
+    background-color var(--duration-fast) var(--ease-standard),
+    box-shadow var(--duration-fast) var(--ease-standard);
+}
+
+.sb-checkbox[data-checked] {
+  background: var(--accent);
+  box-shadow: none;
+}
+
+@media (hover: hover) {
+  .sb-checkbox:hover:not(:disabled):not([data-checked]) {
+    background: var(--bg-field-hover);
+  }
+}
+
+.sb-checkbox:disabled {
+  opacity: 0.5;
+}

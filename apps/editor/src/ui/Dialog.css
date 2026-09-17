@@ -1,0 +1,41 @@
+.sb-dialog-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-modal);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-8);
+  background: var(--bg-overlay);
+  animation: sb-fade-in var(--duration-base) var(--ease-out);
+}
+
+.sb-dialog-overlay[data-placement="top"] {
+  align-items: flex-start;
+  padding-top: min(14vh, 120px);
+}
+
+.sb-dialog {
+  display: flex;
+  flex-direction: column;
+  max-width: 100%;
+  max-height: min(640px, calc(100vh - 96px));
+  overflow: hidden;
+  border-radius: var(--radius-xl);
+  box-shadow: var(--shadow-modal);
+  outline: none;
+  animation: sb-dialog-in var(--duration-slow) var(--ease-out);
+}
+
+@keyframes sb-fade-in {
+  from {
+    opacity: 0;
+  }
+}
+
+@keyframes sb-dialog-in {
+  from {
+    opacity: 0;
+    transform: translateY(-6px) scale(0.985);
+  }
+}

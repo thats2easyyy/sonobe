@@ -1,0 +1,858 @@
+{
+  "file": "data-2.json",
+  "category": "data",
+  "patches": [
+    {
+      "type": "networkRequest",
+      "name": "Network Request",
+      "category": "data",
+      "tier": 2,
+      "status": "web-limited",
+      "statusReason": "In the web player, browsers enforce CORS, block http:// URLs from https pages, and forbid some headers; the desktop app sends requests without those limits.",
+      "platforms": [
+        "desktop",
+        "web",
+        "mobile"
+      ],
+      "aliases": [
+        "http request",
+        "fetch",
+        "api call",
+        "rest api",
+        "get request",
+        "post request",
+        "download",
+        "load data",
+        "graphql",
+        "ajax"
+      ],
+      "summary": "Loads JSON, text, images, video, or sound from a URL when it gets a pulse, and reports loading and errors.",
+      "docs": "## How it works\nNetwork Request loads data from the internet when **Request** gets a pulse (a signal that's on for one frame). Nothing is sent until then, so changing the URL alone doesn't reload anything.\n\n- **URL** is the address to load, starting with `https://`.\n- **Method** is usually GET to read data. Use POST, PUT, PATCH, or DELETE to send data, with **Body** holding the JSON to send.\n- **URL Parameters** and **Headers** are JSON objects added to the request, such as `{\"q\": \"shoes\"}` or an `Authorization` header.\n- Right-click to choose what **Result** holds: JSON (the default), Text, Image, Video, or Sound.\n- **Loading** is true while the request runs. **Finished** pulses when it ends, successfully or not.\n- **Error** turns on when something went wrong, and **Error Message** says why in plain words. A failed request keeps the last good Result on screen.\n\n## Tips\n- Wire When Prototype Starts into Request to load data on open.\n- Turn on **Stream** for servers that send results bit by bit, like AI text, so Result fills in as data arrives.\n- In the web player, servers must allow cross-origin requests (CORS), and `http://` URLs are blocked. The desktop app has neither limit.\n\n## Coming from Origami\nExpect GraphQL Stream is now **Stream** and also handles NDJSON and server-sent events. The Boolean Error port is **Error**, and the JSON one is **Error Details**. Finished, Error Message, and Status are new, and Method adds PUT, PATCH, and DELETE.",
+      "behavior": "State per loop index: `{ generation: 0, job: null, settled: null, result: <zero value of typeParam>, loading: false, error: false, errorMessage: \"\", status: 0, errorDetails: null, objectUrl: null }`. `job` is `{ generation, startedAt, abort }` while a request is in flight; `settled` is the finished response waiting to be applied.\n\nEach frame:\n```\nlet finished = false;\nif (state.settled) { apply(state.settled); state.settled = null; state.job = null; finished = true; }\nif (state.job && !ctx.input(\"disableTimeout\") && ctx.time - state.job.startedAt >= 60) {\n  state.job.abort?.(); state.job = null; state.generation++;\n  fail(0, \"The request timed out after 60 seconds.\", null); finished = true;\n}\nif (ctx.pulsed(\"request\")) finished = start() || finished;   // start() returns true when it fails before sending\nstate.loading = state.job !== null;\nif (state.loading) ctx.requestNextFrame();\nctx.output(\"result\", state.result); ctx.output(\"loading\", state.loading);\nctx.output(\"error\", state.error); ctx.output(\"errorMessage\", state.errorMessage);\nctx.output(\"status\", state.status); ctx.output(\"errorDetails\", state.errorDetails);\nif (finished) ctx.pulse(\"finished\");\n```\n\n**start()**, in this order; any failure calls `fail(0, message, null)` on the same frame and sends nothing:\n1. `url = input(\"url\").trim()`. Empty → \"Add a URL to request.\" Parse with `new URL(url)`; an invalid URL → \"This URL isn't valid. Check for typos.\" A protocol other than `http:` or `https:` → \"Network Request only loads http:// and https:// URLs.\"\n2. URL Parameters must be a JSON object (or null / `{}`); otherwise → \"URL Parameters must be a JSON object.\" For each key in insertion order: `null` is skipped, an array appends one parameter per element, an object is JSON-stringified, and anything else is `String(value)`. Parameters are appended with `url.searchParams.append`, after any query already in the URL.\n3. Headers must be a JSON object; otherwise → \"Headers must be a JSON object.\" Values follow the same stringifying rules; `null` values are skipped. A header name that isn't a valid HTTP token → \"The header name \"<name>\" isn't valid.\"\n4. Body is sent only when Method isn't `get`; for GET it's ignored. Media detection: a value inside Body counts as a file when it is an object with exactly one key `assetId` (string), or exactly one key `url` whose value starts with `data:` or `blob:`. Any other `{ \"url\": \"https://…\" }` stays ordinary JSON.\n   - `contentType` `auto`: `multipartFormData` when Body (searched recursively) contains a file, otherwise `json`.\n   - `json`: when Headers already sets `Content-Type` (case-insensitive) and Body is a string, the string is sent as-is, so people can send form-encoded or plain text. Otherwise the body is `JSON.stringify(body)` with `Content-Type: application/json`, unless Headers overrides it.\n   - `multipartFormData`: Body must be a JSON object; otherwise → \"Form data needs a JSON object whose keys become form fields.\" Each key becomes a field in insertion order: files become file parts (filename from the asset name, else `file`; MIME from the asset record or data URL), strings stay as they are, and other values are JSON-stringified. The platform sets the multipart boundary; a `Content-Type` in Headers is dropped with a one-time warning.\n5. `platform.fetch` missing → \"This viewer can't make network requests.\"\n6. `state.job?.abort?.()`, then `state.generation++`, `const gen = state.generation`, and `state.job = { generation: gen, startedAt: ctx.time, abort }`. Call `platform.fetch(url, { method: METHOD, headers, body })`. On resolve or reject, store the outcome in `state.settled` only if `gen === state.generation`. Never call `ctx.output` from the callback.\n\n**apply(outcome):**\n- Rejected (transport failure, CORS, DNS): `fail(0, \"Couldn't reach the server. Check the URL and your connection, and that the server allows requests from prototypes (CORS).\", { message: String(reason) })`.\n- `ok === false`: `fail(status, \"The request failed with status <status>.\", { status, body })`. `body` is the response text parsed as JSON when that works, otherwise the text truncated to 10,000 characters.\n- `ok === true`: set `status`, convert the body for `typeParam`, and on success set `result`, clear `error`, `errorMessage` and `errorDetails`. A conversion failure calls `fail(status, message, { status, body })`. `result` is never cleared by a failure.\n  - `json`: an empty or whitespace-only body → `null`. When the response `Content-Type` is `application/x-ndjson`, `application/ndjson` or `application/jsonl`, or when `stream` is on, the result is an array of records (below). Otherwise `JSON.parse`; failure → \"The response isn't valid JSON. Switch this patch to Text to see what came back.\"\n  - `text`: the body text, unchanged.\n  - `image`, `video`, `sound`: the body bytes as a media value `{ url }`. Browsers use `URL.createObjectURL(new Blob([bytes], { type }))` and revoke the previous `objectUrl` when it's replaced; headless hosts use a `data:` URL. When the response `Content-Type` is clearly another kind (`text/*`, `application/json`), fail with \"The server sent <type>, not an image.\" (or video, or sound). An empty media body fails with \"The server sent an empty response.\"\n\n**Records (json with streaming):** records are split from the text as NDJSON lines (blank lines skipped). A `text/event-stream` response splits on `data:` lines instead, skipping `[DONE]`. A `multipart/mixed` response (GraphQL incremental delivery) splits into parts, each part's JSON body being one record. Each record goes through `JSON.parse`; a record that doesn't parse fails the request with \"Line <n> of the stream isn't valid JSON.\" Streams build arrays and never merge GraphQL patches.\n\n- Pulses: `request` is the only pulse input. It fires on an upstream pulse or on the false→true edge of a connected boolean, so a held `true` requests once. Pulses on consecutive frames each start a new request, and each one replaces the one before it. `finished` pulses on the frame a request ends, whether it succeeded, failed, or timed out, including failures found before sending.\n- Frame 0: outputs start idle (`result` is the typeParam zero value: `null` for json and media, `\"\"` for text). A request pulse on frame 0 starts on frame 0.\n- Loops: per-index state and requests. A scalar Request pulse broadcasting over a loop of URLs starts one request per index on the same frame, in index order; the platform may queue them. New indices start idle; removed indices abort their job and revoke their object URL.\n- Retargeting: a new pulse while a request is in flight aborts it (when the platform honors `abort`) and ignores its result through `generation`; `loading` stays true and `finished` fires only for the newest request. Changing URL, Headers or Body without a pulse does nothing.\n- Streaming (`stream` on): `loading` stays true until the response ends, and `result` updates on each frame where new data has arrived: the text so far for `text`, or the array of complete records so far for `json` (a partial trailing record waits). Media types ignore `stream`. With the current `PlatformServices.fetch` contract (no chunk callback) the stream is parsed once at the end; see Contract gaps.\n- Edge cases: whitespace is trimmed from the URL. A GET Body is silently ignored. Timeout is measured in prototype seconds (`ctx.time`), so simulation is deterministic. `status` is 0 when no HTTP response arrived.\n- Muted: sends nothing, ignores in-flight results, and outputs idle values (`result` zero value, `loading` false, `error` false, `errorMessage` \"\", `status` 0, `errorDetails` null).\n- Async: follows CONVENTIONS §16.10: start on the pulse, store the outcome in state, `requestNextFrame()` while pending, apply on the next evaluate, and let `generation` discard replaced requests.\n- Platform and simulation: all traffic goes through `ctx.services.platform.fetch`. The desktop host sends requests from the Electron main process (no CORS) and refuses non-HTTP schemes. The web player is subject to CORS, mixed content (an https page can't load `http://` URLs except `localhost`) and browser-forbidden headers. Headless simulation uses a host stub; without one, requests fail with the \"can't make network requests\" message. A stubbed response applies on the first frame after its promise settles, so hosts that step synchronously must flush pending platform promises between steps.\n- Restart and dispose: abort in-flight jobs, revoke object URLs, and reset state.\n- Contract gaps: `PlatformServices.fetch` has no `signal`, no response headers, no `arrayBuffer()`, and no chunk callback. Until those exist: `abort` is undefined and stale results are only ignored; the Content-Type checks are skipped; media results fall back to `{ url }` pointing at the request URL (GET with no headers only; otherwise fail with \"This viewer can't download media with headers or a body yet.\"); and streams are parsed once at the end.\n- Coming from Origami: the default type is JSON, matching Origami. Method adds PUT, PATCH and DELETE. Expect GraphQL Stream becomes Stream, which also covers NDJSON and server-sent events and produces an array of records. The Boolean Error maps to `error`, and the JSON Error maps to `errorDetails`. `finished`, `errorMessage` and `status` are new. A failed request keeps the last successful Result.",
+      "inputs": [
+        {
+          "key": "request",
+          "name": "Request",
+          "type": "pulse",
+          "description": "Pulse to send the request. A new pulse replaces a request that's still loading."
+        },
+        {
+          "key": "url",
+          "name": "URL",
+          "type": "text",
+          "subtype": "url",
+          "default": "",
+          "description": "The address to load, starting with https:// or http://. Spaces at either end are ignored."
+        },
+        {
+          "key": "method",
+          "name": "Method",
+          "type": "enum",
+          "default": "get",
+          "enumOptions": [
+            {
+              "key": "get",
+              "name": "GET",
+              "description": "Reads data. Body isn't sent."
+            },
+            {
+              "key": "post",
+              "name": "POST",
+              "description": "Sends Body to create something or run an action."
+            },
+            {
+              "key": "put",
+              "name": "PUT",
+              "description": "Sends Body to replace something."
+            },
+            {
+              "key": "patch",
+              "name": "PATCH",
+              "description": "Sends Body to change part of something."
+            },
+            {
+              "key": "delete",
+              "name": "DELETE",
+              "description": "Asks the server to remove something."
+            }
+          ],
+          "description": "How the request talks to the server. Most APIs use GET to read and POST to send."
+        },
+        {
+          "key": "urlParameters",
+          "name": "URL Parameters",
+          "type": "json",
+          "default": {},
+          "description": "A JSON object whose keys and values are added to the end of the URL, like {\"q\": \"shoes\"} becoming ?q=shoes."
+        },
+        {
+          "key": "headers",
+          "name": "Headers",
+          "type": "json",
+          "default": {},
+          "description": "A JSON object of extra request headers, such as an Authorization token."
+        },
+        {
+          "key": "body",
+          "name": "Body",
+          "type": "json",
+          "default": {},
+          "description": "The JSON to send with POST, PUT, PATCH, or DELETE. It's ignored for GET."
+        },
+        {
+          "key": "contentType",
+          "name": "Content Type",
+          "type": "enum",
+          "default": "auto",
+          "enumOptions": [
+            {
+              "key": "auto",
+              "name": "Auto",
+              "description": "Form data when Body contains an image, video, or sound; JSON otherwise."
+            },
+            {
+              "key": "json",
+              "name": "JSON (application/json)",
+              "description": "Sends Body as JSON text."
+            },
+            {
+              "key": "multipartFormData",
+              "name": "Form Data (multipart/form-data)",
+              "description": "Sends each key of Body as a form field, with media as file uploads."
+            }
+          ],
+          "description": "How Body is packaged. Auto picks form data when Body includes media, and JSON otherwise.",
+          "advanced": true
+        },
+        {
+          "key": "stream",
+          "name": "Stream",
+          "type": "boolean",
+          "default": false,
+          "description": "When on, Result updates as data arrives instead of waiting for the whole response, for streaming APIs such as AI text generation.",
+          "advanced": true
+        },
+        {
+          "key": "disableTimeout",
+          "name": "Disable Timeout",
+          "type": "boolean",
+          "default": false,
+          "description": "When on, the request can take longer than 60 seconds. When off, a request still loading after 60 seconds fails.",
+          "advanced": true
+        }
+      ],
+      "outputs": [
+        {
+          "key": "result",
+          "name": "Result",
+          "type": "variant",
+          "description": "The response as the patch's type: JSON, text, image, video, or sound. It keeps the last good response when a later request fails."
+        },
+        {
+          "key": "loading",
+          "name": "Loading",
+          "type": "boolean",
+          "description": "True while a request is in progress."
+        },
+        {
+          "key": "finished",
+          "name": "Finished",
+          "type": "pulse",
+          "description": "Pulses when a request ends, whether it worked or failed."
+        },
+        {
+          "key": "error",
+          "name": "Error",
+          "type": "boolean",
+          "description": "True when the most recent request failed."
+        },
+        {
+          "key": "errorMessage",
+          "name": "Error Message",
+          "type": "text",
+          "description": "A plain-language reason the most recent request failed, or empty text when it worked."
+        },
+        {
+          "key": "status",
+          "name": "Status",
+          "type": "number",
+          "description": "The HTTP status code of the last response, like 200 or 404; 0 before any response or when the server couldn't be reached.",
+          "advanced": true
+        },
+        {
+          "key": "errorDetails",
+          "name": "Error Details",
+          "type": "json",
+          "description": "A JSON object describing the last failure, including the status and the server's error body; null when the last request worked.",
+          "advanced": true
+        }
+      ],
+      "variants": [
+        "json",
+        "text",
+        "image",
+        "video",
+        "sound"
+      ],
+      "alwaysEvaluate": true,
+      "pairsWellWith": [
+        "whenPrototypeStarts",
+        "valueForKey",
+        "loopOverArray",
+        "pulseOnChange",
+        "base64Decode"
+      ],
+      "commonMistakes": [
+        "Changing the URL doesn't load anything new: requests only start on a pulse. Wire Pulse on Change on the URL, or a Tap, into Request.",
+        "Error Message says the response isn't valid JSON: the server sent a web page or plain text. Switch the patch to Text to see what came back, and check the URL.",
+        "It works in the desktop app but fails on a phone: the web player follows browser rules, so the server must allow cross-origin requests and the URL must use https://."
+      ],
+      "examples": [
+        {
+          "title": "Load a headline when the prototype opens",
+          "description": "A spinner shows while the text loads.",
+          "outline": "layer headline text \"Headline\" @24,160 text←fetch_headline.result\nlayer spinner oval \"Spinner\" @183,420 24x24 opacity←fetch_headline.loading\npatch on_start whenPrototypeStarts\npatch fetch_headline networkRequest<text> request←on_start.started url=\"https://example.com/headline.txt\""
+        },
+        {
+          "title": "Tap to download a new photo",
+          "outline": "layer photo image \"Photo\" @16,120 358x240 image←fetch_photo.result\nlayer reload_button rectangle \"Reload Button\" @16,400 358x56\npatch tap_reload interaction layer=@reload_button\npatch fetch_photo networkRequest<image> request←tap_reload.tap url=\"https://example.com/photo.jpg\""
+        }
+      ],
+      "origami": {
+        "id": "builtin.network.request",
+        "name": "Network Request"
+      },
+      "origamiPorts": {
+        "stream": "Expect GraphQL Stream",
+        "error": "Error (Boolean)",
+        "errorDetails": "Error (JSON)"
+      },
+      "defaultNotes": {
+        "url": "sonobe: empty so nothing is contacted by default; pulsing with no URL reports a readable error instead of failing every frame.",
+        "method": "inferred: Origami's default is undocumented; GET is the safe read-only choice.",
+        "urlParameters": "inferred: research infers an empty JSON object.",
+        "headers": "inferred: research infers an empty JSON object.",
+        "body": "inferred: research infers an empty JSON object.",
+        "contentType": "inferred: Auto is the first documented option.",
+        "stream": "inferred: off matches Expect GraphQL Stream's likely default.",
+        "disableTimeout": "inferred: off keeps Origami's documented 60 second timeout."
+      }
+    },
+    {
+      "type": "openUrl",
+      "name": "Open URL",
+      "category": "data",
+      "tier": 2,
+      "status": "web-limited",
+      "statusReason": "Browsers open new tabs only right after a tap or key press, and custom app schemes work only when an app handles them; headless simulation records the URL instead.",
+      "platforms": [
+        "desktop",
+        "web",
+        "mobile"
+      ],
+      "aliases": [
+        "open link",
+        "hyperlink",
+        "deep link",
+        "launch url",
+        "open website",
+        "href",
+        "app link",
+        "mailto"
+      ],
+      "summary": "Opens a website, email, phone number, or app link outside the prototype when it gets a pulse.",
+      "docs": "## How it works\nOpen URL opens a link outside the prototype when **Open** gets a pulse (a signal that's on for one frame), like a \"Learn more\" button that opens a web page.\n\n- **URL** can be a website (`https://…`), an email (`mailto:…`), a phone number (`tel:…`), or another app's link scheme (`myapp://…`).\n- **Opened** pulses when the link opened. **Failed** pulses when it couldn't open, and **Error Message** explains why.\n\nOn a computer, websites open in the default browser. On a phone, the link may leave the prototype and open another app.\n\n## Tips\n- Wire an Interaction patch's Tap into Open. Browsers only open new tabs right after a tap or key press, so links opened by timers are usually blocked.\n- Build links from data with Add set to Text, such as a base address plus an item's id.\n- Links using `javascript:`, `file:`, or `data:` are refused to keep shared prototypes safe.\n\n## Coming from Origami\nResult is named **Opened**. Failed and Error Message are new.",
+      "behavior": "State per loop index: `{ errorMessage: \"\", pending: null, settled: null }`. `pending` is `{ generation }` while an asynchronous open is awaiting its result. Shared per runtime: a module-level `WeakMap<RuntimeServices, Map<string, number>>` maps `\"<componentPath>/<patchId>\"` to the last frame a URL was opened.\n\nEach frame:\n```\nlet opened = false, failed = false;\nif (state.settled) { state.settled.ok ? (opened = true, state.errorMessage = \"\") : (failed = true, state.errorMessage = state.settled.message); state.settled = null; }\nif (ctx.pulsed(\"open\")) {\n  const problem = validate(ctx.input(\"url\"));\n  if (problem) { failed = true; state.errorMessage = problem; }\n  else if (openedThisFrame(ctx)) { failed = true; state.errorMessage = \"Only one link can open per frame.\"; }\n  else if (!ctx.services.platform.openUrl) { failed = true; state.errorMessage = \"This viewer can't open links.\"; }\n  else {\n    markOpened(ctx);\n    try {\n      const r = ctx.services.platform.openUrl(url);\n      if (isPromiseLike(r)) { state.pending = …; ctx.requestNextFrame(); }   // result settles into state.settled\n      else if (r === false) { failed = true; state.errorMessage = \"The link couldn't be opened. The browser may have blocked it, or no app handles it.\"; }\n      else { opened = true; state.errorMessage = \"\"; }\n    } catch (e) { failed = true; state.errorMessage = \"The link couldn't be opened: \" + String(e); }\n  }\n}\nif (state.pending) ctx.requestNextFrame();\nctx.output(\"errorMessage\", state.errorMessage);\nif (opened) ctx.pulse(\"opened\");\nif (failed) ctx.pulse(\"failed\");\n```\n\n**validate(url):** trim whitespace. Empty → \"Add a URL to open.\" The URL must start with a scheme matching `^[A-Za-z][A-Za-z0-9+.-]*:`; otherwise → \"Start the URL with https:// or an app scheme like myapp://.\" These schemes are refused → \"Links using <scheme>: can't be opened from a prototype.\": `javascript`, `data`, `file`, `blob`, `vbscript`, `about`. `http`, `https`, `mailto`, `tel` and `sms` are always allowed. Any other scheme is a custom app scheme and goes to the host.\n\n- Pulses: `open` is the only pulse input (upstream pulse or false→true edge of a connected boolean). Pulses on consecutive frames each try to open. `opened` and `failed` each last one frame, and at most one of them fires per index per frame.\n- Frame 0: no side effect unless `open` pulses on frame 0; browsers usually block that because there was no user gesture, so `failed` fires.\n- Loops: per-index evaluation, but at most one URL opens per patch per frame: the lowest pulsed index opens, and every other index pulsed on that frame fires `failed` with \"Only one link can open per frame.\" A tapped item in a looped list opens only its own URL.\n- Edge cases: changing `url` without a pulse does nothing. `errorMessage` keeps the latest problem until an open succeeds.\n- Muted: never opens anything; `opened` and `failed` never fire; `errorMessage` outputs \"\".\n- Async: when the platform returns a promise, the outcome is stored in `state.settled` (ignored if a newer pulse replaced it) and `opened` or `failed` fires on the first frame after it settles. Never call `ctx.output` from the callback.\n- Platform and simulation: the desktop host calls Electron `shell.openExternal` for http, https, mailto, tel and sms. For other custom schemes it asks the person once per scheme per session. The web player opens a new tab with `window.open(url, \"_blank\", \"noopener\")`; it treats a `null` return as a failure, and custom schemes may show the browser's own confirmation. Browsers allow new tabs only shortly after a tap or key press, so the renderer should flush pending opens inside the pointer or key event that caused them when it can. Headless simulation never opens anything: hosts provide a stub that records the URL through `ctx.services.log(\"log\", \"Open URL:\", url)` and reports success. Without a stub, the patch fails with \"This viewer can't open links.\"\n- Restart and dispose: clears `errorMessage` and pending results. Nothing to release.\n- Contract gap: `PlatformServices.openUrl` returns `void`, so success can't be detected yet; treat a normal return as success and a thrown error as failure. Proposed: `openUrl?: (url: string) => boolean | Promise<boolean>`.\n- Coming from Origami: Result is named `opened`. `failed` and `errorMessage` are new, and dangerous schemes are refused.",
+      "inputs": [
+        {
+          "key": "open",
+          "name": "Open",
+          "type": "pulse",
+          "description": "Pulse to open the URL. Wire a Tap into it so browsers allow the new tab."
+        },
+        {
+          "key": "url",
+          "name": "URL",
+          "type": "text",
+          "subtype": "url",
+          "default": "",
+          "description": "The link to open: https:// for websites, mailto: for email, tel: for phone calls, or an app scheme like myapp://."
+        }
+      ],
+      "outputs": [
+        {
+          "key": "opened",
+          "name": "Opened",
+          "type": "pulse",
+          "description": "Pulses when the link opened."
+        },
+        {
+          "key": "failed",
+          "name": "Failed",
+          "type": "pulse",
+          "description": "Pulses when the link couldn't open, for example when the URL is empty, the browser blocked it, or the scheme isn't allowed."
+        },
+        {
+          "key": "errorMessage",
+          "name": "Error Message",
+          "type": "text",
+          "description": "A plain-language reason the last open failed, or empty text after a link opens.",
+          "advanced": true
+        }
+      ],
+      "alwaysEvaluate": false,
+      "pairsWellWith": [
+        "interaction",
+        "add",
+        "networkRequest",
+        "base64Encode"
+      ],
+      "commonMistakes": [
+        "Nothing opens in the web player: the pulse didn't come from a tap or key press, so the browser blocked the new tab. Trigger Open from an Interaction patch's Tap.",
+        "Failed fires with \"Start the URL with https://\": the URL has no scheme, like example.com. Add https:// to the front."
+      ],
+      "examples": [
+        {
+          "title": "Tap a link to open the help page",
+          "outline": "layer help_link text \"Help Link\" @24,780 text=Help\npatch tap_help interaction layer=@help_link\npatch open_help openUrl open←tap_help.tap url=\"https://example.com/help\""
+        },
+        {
+          "title": "Open a product page built from its id",
+          "description": "Add set to Text joins the base address and the id.",
+          "outline": "layer buy_button rectangle \"Buy Button\" @16,760 358x56\npatch product_link add<text>[2] value1=\"https://example.com/products/\" value2=\"sku-2041\"\npatch tap_buy interaction layer=@buy_button\npatch open_product openUrl open←tap_buy.tap url←product_link.output"
+        }
+      ],
+      "origami": {
+        "id": "builtin.open.url",
+        "name": "Open URL"
+      },
+      "origamiPorts": {
+        "opened": "Result"
+      },
+      "defaultNotes": {
+        "url": "sonobe: empty so inserting the patch never points at a real site; pulsing with no URL fires Failed with a readable message."
+      }
+    },
+    {
+      "type": "webSocketConnection",
+      "name": "WebSocket Connection",
+      "category": "data",
+      "tier": 2,
+      "status": "web-limited",
+      "statusReason": "Browsers can't set WebSocket headers and block ws:// from https pages, so Headers apply only in the desktop app and the web player needs wss://.",
+      "platforms": [
+        "desktop",
+        "web",
+        "mobile"
+      ],
+      "aliases": [
+        "websocket",
+        "socket",
+        "ws",
+        "realtime",
+        "live connection",
+        "multiplayer",
+        "server connection",
+        "live data"
+      ],
+      "summary": "Keeps a live two-way connection to a WebSocket server open while Connect is on, for sending and receiving messages instantly.",
+      "docs": "## How it works\nWebSocket Connection keeps a live, two-way line open to a server, so a prototype can send and receive messages instantly. Use it for chat, live cursors, multiplayer games, or a script that controls the prototype remotely.\n\n- **Connect** opens the connection while it's on and closes it when it turns off.\n- **URL** is the server address, starting with `wss://` (or `ws://` for a server on your own computer).\n- **Connection** is the handle you wire into WebSocket Send and WebSocket Receive. One connection can feed as many of each as you like.\n- **Connected** is true while the line is open. **Connecting** is true while it's being set up.\n- **Error** and **Error Message** report the latest problem, including failed sends.\n\nThe connection doesn't retry by itself. Turn Connect off and on again to reconnect.\n\n## Tips\n- Drive Connect from a Switch so a button can start and stop the connection.\n- Show Connected on a status dot so you can tell when messages will get through.\n- **Headers** (advanced) only reach the server in the desktop app, because browsers don't allow them. In the web player, put tokens in the URL instead.\n\n## Coming from Origami\nOrigami's text Error output is **Error Message** here. Error (a true/false value) and Connecting are new.",
+      "behavior": "State per instance (inputs are `wholeLoop`, so there's one connection per patch): `{ socket: null, phase: \"idle\", target: null, error: false, errorMessage: \"\", warnedLoop: false, warnedHeaders: false, events: [] }`. `phase` is `\"idle\" | \"connecting\" | \"open\" | \"ended\"`. `target` is the `{ url, headersKey }` the socket was opened with. `events` holds socket callbacks (open, message, close, error) queued since the last frame.\n\nShared per runtime: a module-level `WeakMap<RuntimeServices, Map<string, ConnectionRecord>>`, keyed by `\"<componentPath>/<patchId>\"`. A record is `{ socket, phase, frame, messages: Message[], sendError: string | null, sendOk: boolean }`, where `Message = { text: string, parsed?: { ok: boolean, value: unknown } }`. `parsed` is filled lazily the first time a JSON receiver reads the message, so it's parsed at most once. The `connection` output is a frozen handle `{ kind: \"webSocket\", key }` that WebSocket Send and WebSocket Receive use to find the record.\n\nEach frame:\n```\nconst connect = items(\"connect\")[0] ?? false, url = String(items(\"url\")[0] ?? \"\").trim(), headers = items(\"headers\")[0] ?? {};\nwarn once if any input has more than one item (\"WebSocket Connection can't be looped; using the first item\").\nrecord.messages = []; record.frame = ctx.frame;\ndrain state.events in arrival order:\n  open    → phase = \"open\"; error = false; errorMessage = \"\"\n  message → record.messages.push({ text })          (binary frames are decoded as UTF-8, replacing invalid bytes)\n  close   → if phase !== \"idle\": phase = \"ended\"; socket = null;\n            code 1000 or 1001 → error = false, errorMessage = \"The server closed the connection.\"\n            otherwise → error = true, errorMessage = \"The connection was lost (code <code>).\" plus the reason when present\n  error   → error = true; errorMessage = <platform message> or \"Couldn't connect. Check the URL and that the server is running.\"\nif (record.sendError !== null) { error = true; errorMessage = record.sendError; record.sendError = null; }\nelse if (record.sendOk && phase === \"open\" && error) { error = false; errorMessage = \"\"; }\nrecord.sendOk = false;\nconst wanted = connect && url !== \"\";\nconst next = { url, headersKey: stableStringify(headers) };\nif (!wanted) closeSocket();                                          // phase = \"idle\"; error is kept\nelse if (phase === \"idle\" || rose(connect) || !sameTarget(state.target, next)) { closeSocket(); openSocket(next); }\nctx.output(\"connection\", handle); ctx.output(\"connected\", phase === \"open\");\nctx.output(\"connecting\", phase === \"connecting\"); ctx.output(\"error\", error); ctx.output(\"errorMessage\", errorMessage);\nif (phase === \"connecting\" || phase === \"open\") ctx.requestNextFrame();\n```\n\n**openSocket(target):** clear `error` and `errorMessage`, then:\n- `http:` and `https:` URLs become `ws:` and `wss:`. Any other scheme fails → \"WebSocket URLs start with wss:// or ws://.\"\n- Headers must be a JSON object; otherwise → \"Headers must be a JSON object.\" Values follow Network Request's stringifying rules.\n- `Sec-WebSocket-Protocol` (case-insensitive) is split on commas into `protocols`.\n- Call `platform.webSocket(url, { protocols, headers })`. A missing service fails → \"This viewer can't open WebSockets.\"\n- Set `phase = \"connecting\"`, store `target`, and attach callbacks that only push to `state.events`. They check a generation number so callbacks from a replaced socket are ignored.\n- A failure here sets `phase = \"ended\"`, `error = true`, and the message.\n\n**closeSocket():** when a socket exists, call `socket.close(1000, \"closed by prototype\")`, detach callbacks, and set `socket = null` and `phase = \"idle\"`.\n\n- Pulses: none. `connect` is a state: the socket stays open while it's true.\n- Frame 0: an authored `connect: true` opens the socket on frame 0; `connected` becomes true on the first frame after the open event arrives.\n- Loops: all inputs are `wholeLoop`, so the patch never replicates. It uses the first item of each input and warns once per restart when an input has more than one item.\n- Retargeting: changing URL or Headers while Connect is on closes the old socket and opens a new one on the same frame. Typing a URL character by character reconnects on each change; wire it through Sample and Hold if that matters.\n- No automatic reconnect: after an error or a server close, `phase` stays `\"ended\"` until Connect goes false→true or the URL or Headers change.\n- Errors: `error` and `errorMessage` report the latest problem with connecting, sending (from WebSocket Send via `record.sendError`) or the connection dropping. Starting a new connection clears them, and so does a successful send while the connection is open. Turning Connect off keeps the last error visible.\n- Edge cases: an empty URL with Connect on stays idle and reports nothing. A backlog of more than 10,000 messages in one frame drops the oldest, with one warning per restart.\n- Muted: closes any socket and outputs idle values (`connection` null, `connected` false, `connecting` false, `error` false, `errorMessage` \"\").\n- Async: socket callbacks only enqueue `state.events`; outputs change only inside `evaluate`.\n- Platform and simulation: the desktop host opens sockets from the Electron main process, where Headers are sent. The web player uses the browser `WebSocket`: only `Sec-WebSocket-Protocol` can be honored, and other headers are ignored with one warning per restart (\"Browsers don't let prototypes set WebSocket headers; Headers only apply in the desktop app. Put a token in the URL instead.\"). An https page can't open `ws://` except to `localhost`, and that case fails with \"Browsers block ws:// from secure pages. Use wss://.\" Headless simulation uses a host stub (for example an echo server); without one it fails with the \"can't open WebSockets\" message.\n- Restart and dispose: close the socket with code 1000, delete the record, and reset state. `updateDocument` keeps the socket open when the patch's type is unchanged.\n- Contract gap: `PlatformServices` has no WebSocket member (CONVENTIONS §19.7). Until it does, hosts attach `webSocket(url, { protocols, headers })` to the platform object. It returns `{ send(text), close(code, reason), bufferedAmount, onopen, onmessage(text), onclose(code, reason), onerror(message) }`, and the patch reads it through a local structural type. The connection handle travels on an `any` port until a `connection` value type exists.\n- Coming from Origami: Origami's text Error output is Error Message. Error (a boolean) and Connecting are new. Like Origami, the patch can't be looped and doesn't reconnect by itself.",
+      "inputs": [
+        {
+          "key": "connect",
+          "name": "Connect",
+          "type": "boolean",
+          "default": false,
+          "description": "When on, opens the connection and keeps it open; turning it off closes it. Turn it off and on again to reconnect.",
+          "wholeLoop": true
+        },
+        {
+          "key": "url",
+          "name": "URL",
+          "type": "text",
+          "subtype": "url",
+          "default": "",
+          "description": "The server address, starting with wss:// (secure) or ws://. Changing it while connected reconnects to the new address.",
+          "wholeLoop": true
+        },
+        {
+          "key": "headers",
+          "name": "Headers",
+          "type": "json",
+          "default": {},
+          "description": "A JSON object of headers sent when connecting, such as an Authorization token. Only the desktop app can send them.",
+          "wholeLoop": true,
+          "advanced": true
+        }
+      ],
+      "outputs": [
+        {
+          "key": "connection",
+          "name": "Connection",
+          "type": "any",
+          "description": "A handle to this connection. Wire it into WebSocket Send and WebSocket Receive."
+        },
+        {
+          "key": "connected",
+          "name": "Connected",
+          "type": "boolean",
+          "description": "True while the connection is open and messages can travel."
+        },
+        {
+          "key": "connecting",
+          "name": "Connecting",
+          "type": "boolean",
+          "description": "True while the connection is being set up."
+        },
+        {
+          "key": "error",
+          "name": "Error",
+          "type": "boolean",
+          "description": "True when the latest attempt to connect or send had a problem."
+        },
+        {
+          "key": "errorMessage",
+          "name": "Error Message",
+          "type": "text",
+          "description": "A plain-language description of the latest problem, or empty text when there's none."
+        }
+      ],
+      "alwaysEvaluate": true,
+      "pairsWellWith": [
+        "webSocketSend",
+        "webSocketReceive",
+        "switch",
+        "pulse"
+      ],
+      "commonMistakes": [
+        "Connected never turns on in the web player: the URL uses ws:// from a secure page, or the server needs a header browsers can't send. Use wss:// and put tokens in the URL.",
+        "The connection drops and never comes back: it doesn't retry by itself. Turn Connect off and on again, for example with a Switch."
+      ],
+      "examples": [
+        {
+          "title": "Show a live status dot and the latest message",
+          "outline": "layer status_dot oval \"Status Dot\" @24,72 12x12 opacity←live.connected\nlayer last_message text \"Last Message\" @24,120 text←inbox.message\npatch live webSocketConnection connect=true url=\"wss://example.com/live\"\npatch inbox webSocketReceive<text> connection←live.connection"
+        },
+        {
+          "title": "Tap to go online or offline",
+          "outline": "layer online_button rectangle \"Online Button\" @16,760 358x56\npatch tap_online interaction layer=@online_button\npatch online switch flip←tap_online.tap\npatch live webSocketConnection connect←online.on url=\"wss://example.com/live\""
+        }
+      ],
+      "origami": {
+        "id": "builtin.websocket.connect",
+        "name": "WebSocket Connection"
+      },
+      "importAliases": [
+        "builtin.webSocket.connect"
+      ],
+      "origamiPorts": {
+        "errorMessage": "Error"
+      },
+      "defaultNotes": {
+        "connect": "inferred: research infers false, and side-effect patches never connect when inserted (§15).",
+        "url": "sonobe: empty so nothing is contacted by default; with no URL the patch stays idle.",
+        "headers": "inferred: research infers an empty JSON object."
+      }
+    },
+    {
+      "type": "webSocketSend",
+      "name": "WebSocket Send",
+      "category": "data",
+      "tier": 2,
+      "status": "supported",
+      "aliases": [
+        "send message",
+        "socket send",
+        "ws send",
+        "emit",
+        "publish",
+        "broadcast event",
+        "realtime send"
+      ],
+      "summary": "Sends a text or JSON message over a WebSocket connection when it gets a pulse.",
+      "docs": "## How it works\nWebSocket Send sends a message to a server when **Send** gets a pulse (a signal that's on for one frame). It works together with a WebSocket Connection patch.\n\n- **Connection** comes from a WebSocket Connection patch.\n- **Message** is what gets sent. Right-click to choose Text or JSON; JSON is sent as text the server can parse.\n- **Sent** pulses when the message went out.\n\nIf the connection isn't open, nothing is sent, and the problem appears on the connection's Error Message.\n\n## Tips\n- Use several Send patches on one connection, such as a Text one for pings and a JSON one for events.\n- If Message is a loop, each item goes out as its own message. Use Loop to Array to send them as one list.\n- To stream a changing value, like a dragged position, wire Pulse on Change into Send.\n\n## Coming from Origami\nSent is new.",
+      "behavior": "Stateless apart from `{ warned: false }` per loop index, which tracks one-time warnings.\n\nEach frame, per loop index:\n```\nif (!ctx.pulsed(\"send\")) return;\nconst record = lookupRecord(ctx.services, ctx.input(\"connection\"));   // handle { kind: \"webSocket\", key } from WebSocket Connection\nif (!record) { warnOnce(\"WebSocket Send needs a Connection from a WebSocket Connection patch.\"); return; }\nif (record.phase !== \"open\") { record.sendError = \"Couldn't send: the WebSocket isn't connected yet.\"; return; }\nconst message = ctx.input(\"message\");\nconst text = ctx.typeParam === \"json\" ? JSON.stringify(message ?? null) : String(message ?? \"\");\nif (record.socket.bufferedAmount > 16 * 1024 * 1024) { record.sendError = \"Couldn't send: messages are going out faster than the connection can carry them.\"; return; }\ntry { record.socket.send(text); record.sendOk = true; ctx.pulse(\"sent\"); }\ncatch (e) { record.sendError = \"Couldn't send: \" + String(e); }\n```\n\n- Pulses: `send` is the only pulse input (upstream pulse or false→true edge of a connected boolean, so a held `true` sends once). Pulses on consecutive frames each send. `sent` pulses on the frame the message was handed to the socket.\n- Serialization: `text` sends the text unchanged as a text frame. `json` sends compact `JSON.stringify` output as a text frame; `NaN` and `Infinity` become `null` the way `JSON.stringify` writes them, and media values serialize as their `{ assetId }` or `{ url }` objects. Nothing is sent as binary.\n- Frame 0: a pulse on frame 0 usually arrives while the connection is still connecting, so it records the \"isn't connected yet\" error. Send once Connected turns on instead.\n- Loops: per-index evaluation. A scalar Send pulse over a looped Message sends every item as its own message, in ascending index order, on the same frame. To send the whole loop as one JSON array, convert it with Loop to Array first. A looped Send pulse sends only the pulsed indices.\n- Order and errors: Send is downstream of its Connection, so it sees this frame's connection phase. Problems go into `record.sendError` and appear on the Connection patch's Error and Error Message on the next frame. A successful send sets `record.sendOk`, which lets the Connection clear an old send error.\n- Edge cases: a Connection input that isn't a WebSocket handle (null, or a value from another patch) sends nothing and warns once per restart. Changing Message without a pulse sends nothing.\n- Muted: never sends; `sent` never fires.\n- Platform and simulation: behaves the same on every platform once a connection is open; headless hosts' socket stubs receive the text. Platform limits live on WebSocket Connection.\n- Restart and dispose: resets warnings. The socket belongs to the Connection patch, so there's nothing to release here.\n- Coming from Origami: Sent is new. Origami doesn't document how a looped Message is sent; Sonobe sends one message per item.",
+      "inputs": [
+        {
+          "key": "connection",
+          "name": "Connection",
+          "type": "any",
+          "default": null,
+          "description": "The Connection output of a WebSocket Connection patch."
+        },
+        {
+          "key": "send",
+          "name": "Send",
+          "type": "pulse",
+          "description": "Pulse to send the current Message."
+        },
+        {
+          "key": "message",
+          "name": "Message",
+          "type": "variant",
+          "default": "",
+          "description": "The text or JSON to send. A loop sends each item as its own message."
+        }
+      ],
+      "outputs": [
+        {
+          "key": "sent",
+          "name": "Sent",
+          "type": "pulse",
+          "description": "Pulses when a message was handed to the connection. It doesn't fire when the connection isn't open."
+        }
+      ],
+      "variants": [
+        "text",
+        "json"
+      ],
+      "variantDefaults": {
+        "json": {
+          "message": {}
+        }
+      },
+      "alwaysEvaluate": false,
+      "pairsWellWith": [
+        "webSocketConnection",
+        "webSocketReceive",
+        "interaction",
+        "pulseOnChange",
+        "loopToArray"
+      ],
+      "commonMistakes": [
+        "The connection's Error Message says it isn't connected yet: Send pulsed before the connection opened, often on the first frame. Wire Connected through a Pulse patch's Turned On to send once the line is open.",
+        "Editing Message doesn't send anything: messages only go out on a pulse. Wire a Tap or Pulse on Change into Send.",
+        "The server gets several messages instead of one list: Message is a loop, so each item is sent separately. Convert it with Loop to Array first."
+      ],
+      "examples": [
+        {
+          "title": "Send a like when a button is tapped",
+          "outline": "layer like_button rectangle \"Like Button\" @16,760 358x56\npatch live webSocketConnection connect=true url=\"wss://example.com/events\"\npatch tap_like interaction layer=@like_button\npatch send_like webSocketSend<json> connection←live.connection send←tap_like.tap message={\"type\":\"like\",\"postId\":42}"
+        },
+        {
+          "title": "Say hello as soon as the connection opens",
+          "outline": "patch live webSocketConnection connect=true url=\"wss://example.com/chat\"\npatch opened pulse on←live.connected\npatch hello webSocketSend<text> connection←live.connection send←opened.turnedOn message=hello"
+        }
+      ],
+      "origami": {
+        "id": "builtin.websocket.send",
+        "name": "WebSocket Send"
+      },
+      "importAliases": [
+        "builtin.webSocket.send"
+      ],
+      "defaultNotes": {
+        "connection": "sonobe: a connection handle has no literal; null until wired.",
+        "message": "inferred: research infers empty text; the JSON variant starts as an empty object."
+      }
+    },
+    {
+      "type": "webSocketReceive",
+      "name": "WebSocket Receive",
+      "category": "data",
+      "tier": 2,
+      "status": "supported",
+      "aliases": [
+        "receive message",
+        "socket listen",
+        "ws receive",
+        "on message",
+        "subscribe",
+        "incoming message",
+        "realtime receive"
+      ],
+      "summary": "Outputs the text or JSON messages a server sends over a WebSocket connection, and pulses when each new one arrives.",
+      "docs": "## How it works\nWebSocket Receive listens on a WebSocket connection and outputs the messages the server sends. It works together with a WebSocket Connection patch.\n\n- **Connection** comes from a WebSocket Connection patch.\n- Right-click to choose **Text** or **JSON**. A JSON receiver ignores messages that aren't valid JSON, and a Text receiver gets everything as text.\n- **Message** holds the latest message until the next one arrives.\n- **Messages** lists every message that arrived this frame, which matters when a server sends several at once.\n- **Received** pulses (a signal that's on for one frame) whenever a new message arrives, even when it repeats the last one.\n\nYou can use as many Receive patches on one connection as you like, and each one sees every message.\n\n## Tips\n- Bind Message to a layer for values that replace each other, like a live score or a cursor position.\n- For chat feeds and other lists, add from Messages when Received pulses so bursts don't lose items.\n- Pass a JSON Message through Value for Key to read one field.\n\n## Coming from Origami\nMessage is always a single value. Several messages in one frame come out on the new **Messages** output, and **Received** is new.",
+      "behavior": "State per instance (`messages` is a `wholeLoop` output, so the patch never replicates): `{ message: <zero value of typeParam>, warned: false }`.\n\nEach frame:\n```\nconst record = lookupRecord(ctx.services, ctx.inputItems(\"connection\")[0]);   // handle { kind: \"webSocket\", key }\nif (ctx.isConnected(\"connection\") && !record) warnOnce(\"WebSocket Receive needs a Connection from a WebSocket Connection patch.\");\nconst batch = record && record.frame === ctx.frame ? record.messages : [];\nconst matched = [];\nfor (const m of batch) {\n  if (ctx.typeParam === \"json\") {\n    m.parsed ??= tryParse(m.text);            // { ok, value }, parsed once and shared by every JSON receiver\n    if (m.parsed.ok) matched.push(m.parsed.value);\n  } else matched.push(m.text);\n}\nif (matched.length > 0) state.message = matched[matched.length - 1];\nctx.output(\"message\", state.message);\nctx.output(\"messages\", loopOf(matched));\nif (matched.length > 0) ctx.pulse(\"received\");\nctx.requestNextFrame();                       // while connected, messages can arrive at any time\n```\n\n- Delivery: the WebSocket Connection patch moves messages that arrived since the last frame into `record.messages`, in arrival order, when it evaluates (it's upstream, so it runs first). Every Receive patch on the connection sees the same batch, so messages are broadcast and never consumed. When the Connection didn't evaluate this frame (it's muted, for example), `record.frame !== ctx.frame` and nothing is delivered.\n- Type matching: `text` receives every message as its raw text, including text that happens to be JSON. `json` receives only messages that `JSON.parse` accepts, which includes bare numbers, strings and `null`; other messages are skipped silently. Binary frames arrive already decoded as UTF-8 text.\n- Pulses: `received` pulses on every frame where at least one matching message arrived, even when it's identical to the previous one. It fires once per frame, however many messages arrived.\n- Frame 0: `message` is the typeParam zero value (`\"\"` for text, `null` for json), `messages` is an empty loop, and `received` doesn't fire.\n- Loops: `messages` is a whole loop of every matching message from this frame, in arrival order, and it's empty on frames with none. `message` is a single value: the latest matching message, held between frames.\n- Retargeting: switching the Connection input, a disconnect, or a reconnect keeps the last `message` until a matching message arrives.\n- Edge cases: a Connection value that isn't a WebSocket handle delivers nothing and warns once per restart. The Connection patch caps a frame's batch at 10,000 messages.\n- Muted: outputs the zero value on `message` and an empty loop on `messages`, and `received` never fires.\n- Platform and simulation: identical everywhere once the connection is open. Simulation stubs push messages through the connection's platform socket, and each appears on the frame after it arrives.\n- Restart and dispose: `message` resets to the zero value. Nothing to release; the socket belongs to the Connection patch.\n- Coming from Origami: Origami's Message turns into a loop only on frames where several messages arrive. Sonobe keeps Message a single latest value and gives the frame's messages on Messages, so layers bound to Message don't flicker between one copy and several. Received is new; Origami needed Pulse on Change, which misses identical consecutive messages.",
+      "inputs": [
+        {
+          "key": "connection",
+          "name": "Connection",
+          "type": "any",
+          "default": null,
+          "description": "The Connection output of a WebSocket Connection patch."
+        }
+      ],
+      "outputs": [
+        {
+          "key": "message",
+          "name": "Message",
+          "type": "variant",
+          "description": "The latest message that matches this patch's type, held until the next one arrives."
+        },
+        {
+          "key": "messages",
+          "name": "Messages",
+          "type": "variant",
+          "description": "Every matching message that arrived this frame, in order, as a loop; empty on frames with no messages.",
+          "wholeLoop": true
+        },
+        {
+          "key": "received",
+          "name": "Received",
+          "type": "pulse",
+          "description": "Pulses on each frame where at least one matching message arrived, even if it repeats the previous one."
+        }
+      ],
+      "variants": [
+        "text",
+        "json"
+      ],
+      "alwaysEvaluate": true,
+      "pairsWellWith": [
+        "webSocketConnection",
+        "webSocketSend",
+        "valueForKey",
+        "counter",
+        "loopAppend"
+      ],
+      "commonMistakes": [
+        "A chat list skips messages: two arrived in the same frame and Message only holds the latest. Add items from Messages when Received pulses.",
+        "A JSON receiver never updates: the server sends plain text that isn't valid JSON. Switch the patch to Text to see what arrives.",
+        "Repeated identical messages don't trigger anything: Pulse on Change only fires when the value differs. Use Received, which pulses for every message."
+      ],
+      "examples": [
+        {
+          "title": "Count incoming messages",
+          "outline": "layer message_count text \"Message Count\" @24,120 text←tally.count\npatch live webSocketConnection connect=true url=\"wss://example.com/live\"\npatch inbox webSocketReceive<json> connection←live.connection\npatch tally counter increase←inbox.received"
+        },
+        {
+          "title": "Show a status line pushed by a server",
+          "outline": "layer status_banner text \"Status Banner\" @24,80 text←status.message\npatch live webSocketConnection connect=true url=\"wss://example.com/status\"\npatch status webSocketReceive<text> connection←live.connection"
+        }
+      ],
+      "origami": {
+        "id": "builtin.websocket.receive",
+        "name": "WebSocket Receive"
+      },
+      "importAliases": [
+        "builtin.webSocket.receive"
+      ],
+      "defaultNotes": {
+        "connection": "sonobe: a connection handle has no literal; null until wired."
+      }
+    },
+    {
+      "type": "base64Encode",
+      "name": "Base64 Encode",
+      "category": "data",
+      "tier": 2,
+      "status": "supported",
+      "aliases": [
+        "encode",
+        "base64",
+        "btoa",
+        "data url",
+        "encode image",
+        "basic auth",
+        "binary to text"
+      ],
+      "summary": "Turns text, JSON, an image, or a sound into base64 text for sending inside requests, links, or JSON.",
+      "docs": "## How it works\nBase64 Encode turns data into base64: plain text made only of letters, digits, and a few symbols, so it can travel safely inside JSON, URLs, and request headers.\n\n- Right-click to choose what **Value** is: Text, JSON, Image, or Sound.\n- **Base64** is the encoded text. It updates whenever Value changes.\n- **Loading** is true while a large image or sound is still being read and encoded.\n- **URL Safe** (advanced) swaps `+` and `/` for `-` and `_` and drops the `=` padding, so the result can sit inside a link.\n- **Queue** (advanced) encodes every value in order instead of skipping to the newest one when values change faster than encoding finishes.\n\n## Tips\n- Some APIs want images uploaded as base64 inside a JSON body. Encode the image, then put Base64 into the request's Body.\n- Basic authentication headers use `Basic ` followed by the base64 of `username:password`.\n- Base64 is about a third larger than the original data, and anyone can decode it. It isn't encryption.\n\n## Coming from Origami\nThis patch was called Encode. Its Text output is named **Base64**, and URL Safe, Error, and Error Message are new.",
+      "behavior": "State per loop index: `{ generation: 0, job: null, queue: [], base64: \"\", loading: false, error: false, errorMessage: \"\", started: false }`. A job is `{ generation, value, urlSafe, bytes: Uint8Array | null, offset, parts: string[], reading: boolean }`.\n\nEach frame, per loop index:\n```\nif (!state.started || ctx.changed(\"value\") || ctx.changed(\"urlSafe\")) { state.started = true; submit({ value: ctx.input(\"value\"), urlSafe: ctx.input(\"urlSafe\") }); }\nlet finishedThisFrame = false;\nif (state.job && state.job.bytes) finishedThisFrame = advance(state.job);   // encodes up to 1,500,000 bytes (a multiple of 3) this frame\nif (!state.job && !finishedThisFrame && state.queue.length > 0) start(state.queue.shift());   // the next queued job starts the frame after one finishes\nstate.loading = state.job !== null;\nif (state.loading) ctx.requestNextFrame();\nctx.output(\"base64\", state.base64); ctx.output(\"loading\", state.loading);\nctx.output(\"error\", state.error); ctx.output(\"errorMessage\", state.errorMessage);\n```\n\n**submit(input):** with `queue` off, discard the current job and any queued inputs (`generation++`) and `start(input)` now. With `queue` on, `start(input)` when idle; otherwise push it onto `queue`. The queue holds at most 100 inputs; when it overflows, the oldest queued input is dropped with one warning per restart.\n\n**start(input):** `generation++`, then create the job and get its bytes:\n- `text`: `new TextEncoder().encode(String(value ?? \"\"))`, the UTF-8 bytes.\n- `json`: `TextEncoder` over `JSON.stringify(value === undefined ? null : value)`: compact, with keys in the value's own order. A JSON string value therefore encodes with its quotes.\n- `image`, `sound`: `null` → finish with `\"\"` and no error. `{ url: \"data:…;base64,<payload>\" }` → use the payload directly: normalize it as Base64 Decode does and skip the byte pass. Any other data URL is percent-decoded into bytes. `{ assetId }` resolves through `ctx.services.resolveAssetUrl`; a missing asset finishes with the error \"The image asset is missing.\" (or sound). Other URLs (`blob:`, `http:`, `https:`, asset URLs) are read through the platform byte reader, and the job waits with `reading: true`. The result is stored only when `job.generation === state.generation`. A read failure finishes with \"Couldn't read the image data.\" (or sound). No re-encoding happens: the output is the file's original bytes (PNG, JPEG, MP3…).\n\n**advance(job):** append `base64(bytes.subarray(offset, offset + 1_500_000))` to `parts` and advance `offset`. When `offset >= bytes.length`, finish: `base64 = parts.join(\"\")`; when `urlSafe` is on, replace `+` with `-` and `/` with `_` and remove trailing `=`. Then set `error = false`, `errorMessage = \"\"`, and `job = null`, and return true. Inputs up to 1,500,000 bytes finish on the frame they're submitted.\n\n- Pulses: none. Work starts when Value or URL Safe changes (`ctx.changed`) and on the first evaluation.\n- Frame 0: text and JSON inputs up to 1.5 MB are encoded on frame 0, so `base64` is ready immediately and `loading` stays false.\n- Loops: per-index state, jobs and queues. New indices encode on their first evaluation; removed indices drop their jobs.\n- Retargeting: with Queue off, the newest input wins and a stale media read is ignored through `generation`. With Queue on, each input finishes in order, and its result shows for at least one frame before the next job starts. `base64` keeps the previous result while a job runs; it never shows partial output.\n- Edge cases: empty text encodes to `\"\"`. Encoding text or JSON can't fail. Output is RFC 4648 base64 with no line breaks and no `data:` prefix.\n- Muted: no work; outputs `base64` \"\", `loading` false, `error` false, `errorMessage` \"\".\n- Async: media byte reads resolve into the job, never into outputs directly; `requestNextFrame()` runs while a job exists.\n- Platform and simulation: text and JSON behave identically everywhere. Media reads use host byte access: in browsers `fetch(url).arrayBuffer()` on asset, blob and http URLs, and in headless hosts the project's asset files.\n- Restart and dispose: discard jobs and queues and reset state; frame 0 encodes again.\n- Contract gap: `RuntimeServices` can't read bytes (`PlatformServices.fetch` exposes only `text()`). Proposed: `PlatformServices.readBytes?: (url: string) => Promise<Uint8Array>`, or `arrayBuffer()` on the fetch response. Until then only `data:` media values encode; others finish with \"This viewer can't read media data yet.\"\n- Coming from Origami: the unnamed input is `value` and the Text output is `base64`. URL Safe, Error and Error Message are new. Like Origami, Video isn't a type.",
+      "inputs": [
+        {
+          "key": "value",
+          "name": "Value",
+          "type": "variant",
+          "default": "",
+          "description": "The text, JSON, image, or sound to encode, depending on the patch's type."
+        },
+        {
+          "key": "urlSafe",
+          "name": "URL Safe",
+          "type": "boolean",
+          "default": false,
+          "description": "When on, uses - and _ instead of + and / and removes = padding, so the result can go inside a URL.",
+          "advanced": true
+        },
+        {
+          "key": "queue",
+          "name": "Queue",
+          "type": "boolean",
+          "default": false,
+          "description": "When on, every new value is encoded in order. When off, a new value replaces one that's still encoding.",
+          "advanced": true
+        }
+      ],
+      "outputs": [
+        {
+          "key": "base64",
+          "name": "Base64",
+          "type": "text",
+          "description": "The encoded base64 text, without line breaks or a data: prefix. It keeps the previous result while new work is loading."
+        },
+        {
+          "key": "loading",
+          "name": "Loading",
+          "type": "boolean",
+          "description": "True while a large value or a media file is still being encoded."
+        },
+        {
+          "key": "error",
+          "name": "Error",
+          "type": "boolean",
+          "description": "True when the image or sound couldn't be read.",
+          "advanced": true
+        },
+        {
+          "key": "errorMessage",
+          "name": "Error Message",
+          "type": "text",
+          "description": "A plain-language reason encoding failed, or empty text when it worked.",
+          "advanced": true
+        }
+      ],
+      "variants": [
+        "text",
+        "json",
+        "image",
+        "sound"
+      ],
+      "variantDefaults": {
+        "json": {
+          "value": {}
+        }
+      },
+      "alwaysEvaluate": true,
+      "pairsWellWith": [
+        "networkRequest",
+        "base64Decode",
+        "add",
+        "openUrl"
+      ],
+      "commonMistakes": [
+        "The server rejects a Basic authentication header: the whole header, including the word Basic, was encoded. Encode only username:password, then join \"Basic \" in front with Add set to Text.",
+        "The result decodes to text wrapped in quotes: the patch is set to JSON while Value is plain text, so it's encoded as a JSON string. Switch the patch to Text.",
+        "A link with base64 in it breaks: standard base64 uses + and /, which URLs treat specially. Turn on URL Safe."
+      ],
+      "examples": [
+        {
+          "title": "Share a game state in a link",
+          "description": "URL Safe keeps the encoded state readable inside the link.",
+          "outline": "layer share_button rectangle \"Share Button\" @16,760 358x56\npatch encode_state base64Encode<text> value=\"level=3;score=1200\" urlSafe=true\npatch share_link add<text>[2] value1=\"https://example.com/play?s=\" value2←encode_state.base64\npatch tap_share interaction layer=@share_button\npatch open_share openUrl open←tap_share.tap url←share_link.output"
+        },
+        {
+          "title": "Show what text looks like in base64",
+          "outline": "layer encoded_label text \"Encoded\" @24,160 text←encode_greeting.base64\npatch encode_greeting base64Encode<text> value=\"hello-world\""
+        }
+      ],
+      "origami": {
+        "id": "builtin.data.base64.encode",
+        "name": "Encode"
+      },
+      "origamiPorts": {
+        "value": "Input",
+        "base64": "Text"
+      },
+      "defaultNotes": {
+        "value": "inferred: research infers an empty value; the JSON variant starts as an empty object.",
+        "urlSafe": "sonobe: new port; off gives standard base64, matching Origami.",
+        "queue": "inferred: research infers off, so the newest value wins."
+      }
+    },
+    {
+      "type": "base64Decode",
+      "name": "Base64 Decode",
+      "category": "data",
+      "tier": 2,
+      "status": "supported",
+      "aliases": [
+        "decode",
+        "base64",
+        "atob",
+        "data url",
+        "decode image",
+        "text to image",
+        "unencode"
+      ],
+      "summary": "Turns base64 text back into text, JSON, an image, or a sound.",
+      "docs": "## How it works\nBase64 Decode turns base64 text (letters, digits, and a few symbols that stand in for data) back into the original text, JSON, image, or sound. APIs often send small images or payloads this way inside JSON.\n\n- **Base64** is the text to decode. A `data:…;base64,` prefix, line breaks, and the URL-safe `-` and `_` characters are all fine.\n- Right-click to choose what **Output** is: Text, JSON, Image, or Sound.\n- **Loading** is true while a very large payload is still being decoded.\n- **Error** and **Error Message** explain what went wrong, such as text that isn't base64 or data that isn't an image.\n- **Queue** (advanced) decodes every value in order instead of skipping to the newest one.\n\n## Tips\n- Connect an Image Output straight to an Image layer's Image property.\n- Pull the base64 field out of a JSON response with Value for Key before decoding it.\n- If a JSON decode fails, switch to Text to see what the data really contains.\n\n## Coming from Origami\nThis patch was called Decode. Its Text input is named **Base64**. Error and Error Message are new.",
+      "behavior": "State per loop index: `{ generation: 0, job: null, queue: [], output: <zero value of typeParam>, loading: false, error: false, errorMessage: \"\", started: false }`. A job is `{ generation, b64: string, mime: string | null, offset, chunks: Uint8Array[] }`.\n\nEach frame, per loop index:\n```\nif (!state.started || ctx.changed(\"base64\")) { state.started = true; submit(ctx.input(\"base64\")); }\nlet finishedThisFrame = false;\nif (state.job) finishedThisFrame = advance(state.job);   // decodes up to 2,000,000 characters (a multiple of 4) this frame\nif (!state.job && !finishedThisFrame && state.queue.length > 0) start(state.queue.shift());\nstate.loading = state.job !== null;\nif (state.loading) ctx.requestNextFrame();\nctx.output(\"output\", state.output); ctx.output(\"loading\", state.loading);\nctx.output(\"error\", state.error); ctx.output(\"errorMessage\", state.errorMessage);\n```\n\n**submit / queue:** identical to Base64 Encode: Queue off means the newest input wins; Queue on means FIFO, at most 100 entries, and each result shows for at least one frame.\n\n**start(text) normalizes synchronously:**\n1. `s = String(text ?? \"\").trim()`.\n2. When `s` matches `^data:([^,;]*)((?:;[^,;]*)*);base64,` (case-insensitive), remember the MIME type and strip the prefix. A `data:` URL without `;base64` → fail \"This is a data URL, but it isn't base64.\"\n3. Remove all whitespace, map `-` to `+` and `_` to `/`, and strip trailing `=`. The rest must match `^[A-Za-z0-9+/]*$` and its length can't be `≡ 1 (mod 4)`; otherwise → fail \"This isn't valid base64 text.\" Re-pad with `=` to a multiple of 4.\n4. Empty after normalizing → finish with the zero value and no error.\n5. `image` and `sound` finish right away, without a byte pass. Decode only the first 64 characters to sniff the format. MIME comes from the data URL when it's `image/*` or `audio/*` (matching the type), otherwise from magic bytes:\n   - images: `89 50 4E 47 0D 0A 1A 0A` → `image/png`; `FF D8 FF` → `image/jpeg`; `GIF87a` or `GIF89a` → `image/gif`; `RIFF`, 4 bytes, `WEBP` → `image/webp`; `BM` → `image/bmp`; `ftyp` at offset 4 with brand `avif` or `avis` → `image/avif`; text starting with `<svg`, or `<?xml` followed by `<svg` (after optional BOM and whitespace) → `image/svg+xml`.\n   - sounds: `ID3` → `audio/mpeg`; `FF` then `(b1 & 0xF6) === 0xF0` → `audio/aac`; `FF` then `(b1 & 0xE0) === 0xE0` → `audio/mpeg`; `RIFF`, 4 bytes, `WAVE` → `audio/wav`; `OggS` → `audio/ogg`; `fLaC` → `audio/flac`; `ftyp` at offset 4 → `audio/mp4`.\n   - no match → fail \"The decoded data isn't an image (PNG, JPEG, GIF, WebP, AVIF, BMP, or SVG).\" or \"…isn't a sound (MP3, AAC, WAV, OGG, FLAC, or M4A).\"\n   - success: `output = { url: \"data:<mime>;base64,<normalized>\" }`.\n6. `text` and `json` create a job that decodes bytes in slices.\n\n**advance(job)** decodes the next slice of at most 2,000,000 characters into bytes. After the last slice, concatenate the bytes and finish:\n- `text`: `new TextDecoder(\"utf-8\", { fatal: false }).decode(bytes)`, which replaces invalid byte sequences with U+FFFD.\n- `json`: decode the text the same way, then `JSON.parse`; a failure → fail \"The decoded text isn't valid JSON. Switch this patch to Text to see what's inside.\"\n- Finishing sets `output`, `error = false`, `errorMessage = \"\"`, `job = null`.\n\n**fail(message):** `output = zero value`, `error = true`, `errorMessage = message`, `job = null`. The output always matches the current input, so stale results never show for different text.\n\n- Pulses: none. Work starts when Base64 changes and on the first evaluation.\n- Frame 0: inputs up to 2,000,000 characters and every media input finish on frame 0, so `loading` stays false.\n- Loops: per-index state, jobs and queues.\n- Retargeting: while a job is still slicing, `output` keeps the previous result and `loading` is true. With Queue off, a new input discards the unfinished job.\n- Edge cases: standard and URL-safe alphabets, missing padding, embedded line breaks and `data:` prefixes are all accepted. Never outputs `undefined`: failures emit the zero value (`\"\"` for text, `null` for json, image and sound).\n- Muted: no work; outputs the zero value, `loading` false, `error` false, `errorMessage` \"\".\n- Platform and simulation: pure computation that behaves identically everywhere. Media results are `data:` URLs, so no object URLs need releasing.\n- Restart and dispose: discard jobs and queues and reset state; frame 0 decodes again.\n- Coming from Origami: this patch was called Decode. Its Text input is `base64` and its unnamed output is `output`. Error and Error Message are new, data URLs and URL-safe text are accepted, and a failed decode clears the output instead of leaving it undefined.",
+      "inputs": [
+        {
+          "key": "base64",
+          "name": "Base64",
+          "type": "text",
+          "default": "",
+          "description": "The base64 text to decode. A data: prefix, line breaks, and URL-safe characters are accepted."
+        },
+        {
+          "key": "queue",
+          "name": "Queue",
+          "type": "boolean",
+          "default": false,
+          "description": "When on, every new value is decoded in order. When off, a new value replaces one that's still decoding.",
+          "advanced": true
+        }
+      ],
+      "outputs": [
+        {
+          "key": "output",
+          "name": "Output",
+          "type": "variant",
+          "description": "The decoded text, JSON, image, or sound, depending on the patch's type. It's empty (or null) when decoding fails."
+        },
+        {
+          "key": "loading",
+          "name": "Loading",
+          "type": "boolean",
+          "description": "True while a very large value is still being decoded."
+        },
+        {
+          "key": "error",
+          "name": "Error",
+          "type": "boolean",
+          "description": "True when the text isn't valid base64 or doesn't decode to the patch's type."
+        },
+        {
+          "key": "errorMessage",
+          "name": "Error Message",
+          "type": "text",
+          "description": "A plain-language reason decoding failed, or empty text when it worked."
+        }
+      ],
+      "variants": [
+        "text",
+        "json",
+        "image",
+        "sound"
+      ],
+      "alwaysEvaluate": true,
+      "pairsWellWith": [
+        "networkRequest",
+        "valueForKey",
+        "base64Encode",
+        "webSocketReceive"
+      ],
+      "commonMistakes": [
+        "Error Message says the text isn't valid base64: extra characters came along, such as quotes, a label, or a whole JSON object. Pass only the base64 field, for example through Value for Key.",
+        "The image never appears: the patch is still set to Text or JSON. Right-click it and choose Image.",
+        "JSON Output is null with an error: the data decodes to text that isn't JSON. Switch the patch to Text to see what's inside."
+      ],
+      "examples": [
+        {
+          "title": "Read a base64 message from a server",
+          "outline": "layer message_label text \"Message\" @24,160 text←decode_message.output\npatch on_start whenPrototypeStarts\npatch fetch_message networkRequest<text> request←on_start.started url=\"https://example.com/message.b64\"\npatch decode_message base64Decode<text> base64←fetch_message.result"
+        },
+        {
+          "title": "Show a tiny embedded icon",
+          "description": "The base64 text is a 1x1 PNG image.",
+          "outline": "layer badge_icon image \"Badge Icon\" @24,72 24x24 image←decode_icon.output\npatch decode_icon base64Decode<image> base64=\"iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==\""
+        }
+      ],
+      "origami": {
+        "id": "builtin.data.base64.decode",
+        "name": "Decode"
+      },
+      "origamiPorts": {
+        "base64": "Text"
+      },
+      "defaultNotes": {
+        "base64": "inferred: research infers empty text; empty input outputs the zero value without an error.",
+        "queue": "inferred: research infers off, so the newest value wins."
+      }
+    }
+  ]
+}

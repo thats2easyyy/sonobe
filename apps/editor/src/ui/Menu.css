@@ -1,0 +1,112 @@
+.sb-menu-popover {
+  min-width: 208px;
+}
+
+.sb-menu {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-height: 0;
+  padding: var(--space-2);
+  outline: none;
+  user-select: none;
+}
+
+.sb-menu__item {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  flex: none;
+  min-height: 26px;
+  padding: 3px var(--space-4) 3px var(--space-3);
+  border-radius: var(--radius-sm);
+  color: var(--text-primary);
+  font-size: var(--font-size-sm);
+  outline: none;
+  cursor: default;
+}
+
+.sb-menu__item[data-active] {
+  background: var(--bg-selected-muted);
+}
+
+.sb-menu__item[data-danger] {
+  color: var(--danger-text);
+}
+
+.sb-menu__item[data-danger][data-active] {
+  background: var(--danger-soft);
+}
+
+.sb-menu__item[data-disabled] {
+  color: var(--text-disabled);
+}
+
+.sb-menu__icon {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  color: var(--text-secondary);
+}
+
+.sb-menu__item[data-danger] .sb-menu__icon {
+  color: inherit;
+}
+
+.sb-menu__item[data-disabled] .sb-menu__icon {
+  color: var(--text-disabled);
+}
+
+.sb-menu__text {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.sb-menu__title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sb-menu__description {
+  color: var(--text-tertiary);
+  font-size: var(--font-size-xs);
+}
+
+.sb-menu__shortcut {
+  margin-left: auto;
+  padding-left: var(--space-8);
+}
+
+.sb-menu__item[data-disabled] .sb-menu__shortcut {
+  color: var(--text-disabled);
+}
+
+.sb-menu__chevron {
+  flex: none;
+  margin-left: auto;
+  margin-right: -4px;
+  color: var(--text-tertiary);
+}
+
+.sb-menu__separator {
+  flex: none;
+  height: 1px;
+  margin: var(--space-2) var(--space-3);
+  background: var(--border-subtle);
+}
+
+.sb-menu__label {
+  flex: none;
+  padding: var(--space-3) var(--space-3) var(--space-1);
+  color: var(--text-tertiary);
+  font-size: var(--font-size-2xs);
+  font-weight: var(--font-weight-semibold);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}

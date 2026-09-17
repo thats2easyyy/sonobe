@@ -1,0 +1,1612 @@
+{
+  "file": "device-1.json",
+  "category": "device",
+  "patches": [
+    {
+      "type": "deviceInfo",
+      "name": "Device Info",
+      "category": "device",
+      "tier": 2,
+      "status": "supported",
+      "aliases": [
+        "screen size",
+        "safe area",
+        "dark mode",
+        "screen scale",
+        "device orientation",
+        "device name",
+        "uses a mouse",
+        "responsive",
+        "notch"
+      ],
+      "summary": "Reports the screen size, safe area, orientation, dark mode, and input style of the device the prototype runs on.",
+      "docs": "## How it works\nDevice Info describes the phone, tablet, or computer your prototype is showing on: the device picked in the viewer, or the real phone when you open the web player on one. It has no inputs.\n\n- **Screen Size** is the width and height in points. They swap while the interface is in landscape.\n- **Safe Area** is how many points system UI covers on each edge, as [top, right, bottom, left]: the status bar, camera cutout, and home indicator.\n- **Screen Scale** is how many pixels make up one point, such as 3 on recent iPhones.\n- **Orientation** is how far the device is turned, in degrees. **Landscape** is true while the screen is wider than it's tall.\n- **Uses a Mouse** is true for computer devices, where people point and click instead of touching.\n- **Dark Mode** follows the system appearance.\n- **Device Name** is the device's display name, like iPhone 17 Pro.\n\n## Tips\n- Wire Screen Size into a full-screen layer's Size so it fits every device and orientation.\n- Unpack Safe Area with Edges Unpack and use Top to keep headers below the status bar.\n- Feed Dark Mode into If / Else to pick colors for each theme.\n- Rotating the viewer turns the interface only when an Interface Orientation patch allows it.\n\n## Coming from Origami\nDevice is called Device Name. Safe Area is a Point 4D in [top, right, bottom, left] order. Landscape is new.",
+      "behavior": "Stateless: reads the host's device snapshot every frame.\n\nEach frame:\n```\nconst d = ctx.services.device();\nconst preset = DEVICE_PRESETS.find((p) => p.id === d.preset); // @sonobe/core devices.ts\nconst [w, h] = finite2(d.screenSize);\nctx.output(\"screenSize\", [w, h]);\nctx.output(\"safeArea\", finite4(d.safeArea));          // [top, right, bottom, left]\nctx.output(\"screenScale\", d.screenScale > 0 && Number.isFinite(d.screenScale) ? d.screenScale : 1);\nctx.output(\"orientation\", orientationAngle(d));\nctx.output(\"landscape\", w > h);\nctx.output(\"usesMouse\", preset?.kind === \"computer\");\nctx.output(\"darkMode\", d.darkMode === true);\nctx.output(\"deviceName\", preset?.name ?? d.preset);\n```\n\n- Source of truth: the host fills `DeviceInfo` before frame 0 from the project's `device` settings (preset, size override, orientation) and keeps it current. Screen Size and Safe Area describe the **interface as drawn**: while the interface is in landscape, width and height are swapped and the insets come from the renderer's `orientSafeArea` (`packages/renderer/src/deviceFrame.ts`). The patch never re-derives them. The web player on a real phone reports the viewport size in points, `devicePixelRatio` as the scale, the `env(safe-area-inset-*)` insets, and `prefers-color-scheme`.\n- Orientation: the physical rotation of the device in degrees, measured counterclockwise: 0 upright, 90 turned counterclockwise (top edge on the left), 180 upside down, 270 turned clockwise. It follows the device even while Interface Orientation keeps the interface from turning. The contract only carries `\"portrait\" | \"landscape\"`, so until `DeviceInfo.orientationAngle` exists, `orientationAngle` maps portrait → 0 and landscape → 90. Web hosts read `screen.orientation.angle`.\n- Landscape: `width > height` of Screen Size, so it describes the interface, and a square screen reads false.\n- Uses a Mouse: describes the simulated device, not the machine running the viewer. A phone preset in the desktop app reads false; the Desktop presets read true. Unknown preset ids read false.\n- Dark Mode: the viewer's appearance setting in the editor, `prefers-color-scheme: dark` in the web player.\n- Updates: outputs change on the first frame after the snapshot changes (device picker, viewer rotation, a resized custom device, an `orientation` InputEvent). The host snapshot is taken at step 1 of the frame pipeline, so every patch in a frame sees the same values.\n- Frame 0: reports the starting device. There are no startup zeros.\n- Loops: no inputs, so every output is a single value.\n- Edge cases: an unknown preset id reports the raw id as Device Name. A non-positive or non-finite scale reports 1. Non-finite sizes or insets report 0 and warn once per restart.\n- Platform and simulation: the deterministic runtime merges `RuntimeOptions.device` over the project's preset (Dark Mode false unless set). `orientation` InputEvents flip the orientation and swap Screen Size and Safe Area from the next frame.\n- Restart and dispose: nothing to reset or release.\n- Coming from Origami: Device maps to `deviceName` and Uses a Mouse to `usesMouse`. Dark Mode (v72) and Safe Area (v114) are undocumented in Origami; Sonobe types Safe Area as point4d [top, right, bottom, left], matching the layout Padding property. Origami doesn't document its orientation angles, so imported comparisons against specific angles may need review.",
+      "inputs": [],
+      "outputs": [
+        {
+          "key": "screenSize",
+          "name": "Screen Size",
+          "type": "size",
+          "subtype": "distance",
+          "description": "Width and height of the screen in points; they swap while the interface is in landscape."
+        },
+        {
+          "key": "safeArea",
+          "name": "Safe Area",
+          "type": "point4d",
+          "subtype": "distance",
+          "description": "Points covered by system UI on each edge, as [top, right, bottom, left]: status bar, camera cutout, and home indicator."
+        },
+        {
+          "key": "screenScale",
+          "name": "Screen Scale",
+          "type": "number",
+          "description": "Pixels per point, such as 3 on recent iPhones and 1 or 2 on computer displays."
+        },
+        {
+          "key": "orientation",
+          "name": "Orientation",
+          "type": "number",
+          "subtype": "angle",
+          "description": "How far the device is turned in degrees: 0 upright, 90 turned left, 180 upside down, 270 turned right."
+        },
+        {
+          "key": "landscape",
+          "name": "Landscape",
+          "type": "boolean",
+          "description": "True while the screen is wider than it is tall."
+        },
+        {
+          "key": "usesMouse",
+          "name": "Uses a Mouse",
+          "type": "boolean",
+          "description": "True when the device is a computer, where people use a mouse or trackpad instead of touch."
+        },
+        {
+          "key": "darkMode",
+          "name": "Dark Mode",
+          "type": "boolean",
+          "description": "True while the system appearance is dark."
+        },
+        {
+          "key": "deviceName",
+          "name": "Device Name",
+          "type": "text",
+          "description": "The device's display name, such as iPhone 17 Pro."
+        }
+      ],
+      "alwaysEvaluate": true,
+      "pairsWellWith": [
+        "interfaceOrientation",
+        "ifElse",
+        "edgesUnpack",
+        "transition",
+        "popAnimation"
+      ],
+      "commonMistakes": [
+        "Landscape never turns true when you rotate the viewer: the interface stays upright unless an Interface Orientation patch allows landscape. Add one and leave Landscape Left and Landscape Right on.",
+        "A header slides under the status bar on some devices: a fixed top padding only fits one device. Use the top value of Safe Area instead.",
+        "Uses a Mouse is false while you click around in the desktop app: it describes the device you picked, not your computer. Pick a Desktop device to preview the mouse layout."
+      ],
+      "examples": [
+        {
+          "title": "Fill the screen on every device",
+          "outline": "layer backdrop rectangle \"Backdrop\" @0,0 size←info.screenSize color=#101820FF\npatch info deviceInfo"
+        },
+        {
+          "title": "Switch a card to dark colors",
+          "outline": "layer card rectangle \"Card\" @16,120 370x220 cornerRadius=20 color←theme.output\npatch info deviceInfo\npatch theme ifElse<color> condition←info.darkMode ifTrue=#1C1C1EFF ifFalse=#FFFFFFFF"
+        },
+        {
+          "title": "Enlarge a photo in landscape",
+          "description": "Interface Orientation lets the interface turn, and Landscape drives the spring.",
+          "outline": "layer photo image \"Photo\" @16,200 370x250 scale←zoom.output\npatch rotation interfaceOrientation landscapeLeft=true landscapeRight=true\npatch info deviceInfo\npatch pop popAnimation number←info.landscape bounciness=2 speed=12\npatch zoom transition<number> progress←pop.output start=1 end=1.6"
+        }
+      ],
+      "origami": {
+        "id": "builtin.deviceinfo",
+        "name": "Device Info"
+      },
+      "origamiPorts": {
+        "usesMouse": "Uses a Mouse",
+        "deviceName": "Device"
+      }
+    },
+    {
+      "type": "deviceMotion",
+      "name": "Device Motion",
+      "category": "device",
+      "tier": 2,
+      "status": "web-limited",
+      "statusReason": "Uses the DeviceMotionEvent and DeviceOrientationEvent web APIs, which only phones and tablets provide. iOS Safari also asks permission and only allows it on secure (https) pages, so the http:// LAN player can't read motion on iPhones.",
+      "platforms": [
+        "mobile"
+      ],
+      "aliases": [
+        "accelerometer",
+        "gyroscope",
+        "tilt",
+        "shake",
+        "motion sensor",
+        "parallax",
+        "attitude",
+        "rotation rate",
+        "gravity"
+      ],
+      "summary": "Reads how a phone is tilted, moving, and rotating, for tilt effects, parallax, and shake gestures.",
+      "docs": "## How it works\nDevice Motion reads the motion sensors in a phone or tablet. Its axes follow the device: **x** points to the right edge, **y** to the top edge, and **z** out of the screen toward you.\n\n- **Tilt** is how far the device is tipped, in degrees: x front to back, y side to side, and z the compass heading where the device reports one.\n- **Acceleration** is in g (1 g is the pull of gravity) and includes gravity. A still, upright phone reads about [0, -1, 0], and tipping the right edge down pushes x toward 1.\n- **Rotation Rate** is how fast the device turns around each axis, in degrees per second. It reads near 0 while the device is still.\n- **Available** is true once motion data arrives.\n- **Enabled** turns the sensors off to save battery.\n\nComputers have no motion sensors, so open the web player on a phone to try it. The first time, the player asks permission to use motion.\n\n## Tips\n- Sensor values jitter. Pass them through Smooth Value before they drive a layer.\n- For parallax, Remap Tilt into a small position offset.\n- Detect a shake by measuring Acceleration with Length and checking Greater Than about 2.\n\n## Coming from Origami\nHas Acceleration and Has Rotation Rate are combined into Available. Rotation Rate is in degrees per second. Tilt and Enabled are new. Headphone motion tracking isn't supported.",
+      "behavior": "State per loop index: `{ tilt: [0, 0, 0], acceleration: [0, 0, 0], rotationRate: [0, 0, 0], available: false }` (the last sample output while enabled).\n\nEach frame:\n```\nif (ctx.input(\"enabled\")) {\n  const s = ctx.services.platform.deviceMotion?.();\n  if (s) {\n    state.available = true;\n    state.acceleration = finite3(s.acceleration);\n    state.rotationRate = finite3(s.rotationRate);\n    state.tilt = s.attitude ? finite3(s.attitude) : tiltFromGravity(state.acceleration, state.tilt);\n  }\n  ctx.requestNextFrame();\n} else {\n  state.available = false;\n}\nctx.output(\"tilt\", state.tilt);\nctx.output(\"acceleration\", state.acceleration);\nctx.output(\"rotationRate\", state.rotationRate);\nctx.output(\"available\", state.available);\n```\n\n- Units and axes: the host normalizes samples and the patch never converts. Axes are the device's own: x toward the right edge, y toward the top edge, z out of the screen.\n  - Acceleration is in g including gravity, signed the way gravity pulls: upright portrait ≈ [0, −1, 0], face up on a table ≈ [0, 0, −1], right edge tipped down → x toward +1. Web hosts divide `accelerationIncludingGravity` by −9.80665 and correct for browsers that report the opposite sign, so a face-up device reads z ≈ −1 everywhere.\n  - Rotation Rate is degrees per second: `DeviceMotionEvent.rotationRate` `[beta, gamma, alpha]` → [x, y, z].\n  - Tilt comes from `DeviceOrientationEvent` `[beta, gamma, alpha]` in degrees: x front to back (−180..180), y side to side (−90..90), z heading (0..360, or 0 when unreported). `PlatformServices.deviceMotion().attitude` carries it in that order.\n- `tiltFromGravity(g, previous)`, used when a sample has no attitude (including simulation): let `n = |g|`; if `n < 0.1` (free fall or no data) return `previous`; otherwise `x = atan2(−g[1], −g[2])` and `y = asin(clamp(g[0] / n, −1, 1))`, both in degrees, and `z = 0`. Face up → [0, 0, 0]; upright → [90, 0, 0]; right edge down → y = 90.\n- Sampling: sensor events arrive between frames on their own schedule. The host keeps only the latest sample, read at step 1 of the frame pipeline, so values don't depend on frame rate.\n- Permission: iOS's `DeviceMotionEvent.requestPermission()` must run inside a user gesture, which `evaluate` never is. When a document contains a deviceMotion patch and the platform needs permission, the web player shows a one-time Allow Motion button. Until permission is granted, `deviceMotion()` returns undefined and Available stays false. A denial doesn't re-prompt during the session.\n- Available: false on frame 0 until a sample exists, on devices without sensors, on computers, and while disabled.\n- Frame 0: vectors [0, 0, 0] and Available false unless the host already holds a sample.\n- Loops: a looped Enabled gives one state per index; every enabled index reads the same sample.\n- Edge cases: non-finite components output 0 and warn once per restart.\n- Disabled: Available is false and the vectors hold their last values. The host may release its sensor listeners when no enabled deviceMotion patch remains.\n- Platform and simulation: simulation reads `deviceMotion` InputEvents (acceleration and rotation rate, no attitude, so Tilt comes from `tiltFromGravity`). The latest event stays in effect until the next one. Before the first event, Available is false.\n- Restart and dispose: state resets to zeros and false. Nothing to release; the host owns the listeners.\n- Coming from Origami: Has Acceleration and Has Rotation Rate both import as `available`. Origami's rotation rate units are undocumented (probably radians per second, from Core Motion), so imported multipliers may need a ×57.3 review. The v113 headphone motion source has no web equivalent and imports as the device's own sensors.",
+      "inputs": [
+        {
+          "key": "enabled",
+          "name": "Enabled",
+          "type": "boolean",
+          "default": true,
+          "description": "When off, the patch stops reading the sensors, Available turns false, and the other outputs hold."
+        }
+      ],
+      "outputs": [
+        {
+          "key": "tilt",
+          "name": "Tilt",
+          "type": "point3d",
+          "subtype": "angle",
+          "description": "How far the device is tipped in degrees: x front to back, y side to side, z compass heading (0 when unknown)."
+        },
+        {
+          "key": "acceleration",
+          "name": "Acceleration",
+          "type": "point3d",
+          "description": "Acceleration along the device's x, y, and z axes in g, including gravity; an upright, still phone reads about [0, -1, 0]."
+        },
+        {
+          "key": "rotationRate",
+          "name": "Rotation Rate",
+          "type": "point3d",
+          "description": "How fast the device turns around its x, y, and z axes, in degrees per second; near 0 when still."
+        },
+        {
+          "key": "available",
+          "name": "Available",
+          "type": "boolean",
+          "description": "True once motion data is arriving; false on computers, without permission, or while disabled."
+        }
+      ],
+      "alwaysEvaluate": true,
+      "pairsWellWith": [
+        "smoothValue",
+        "remap",
+        "length",
+        "greaterThan",
+        "transition"
+      ],
+      "commonMistakes": [
+        "Nothing moves in the desktop viewer: computers have no motion sensors. Open the web player on a phone, or send deviceMotion events in a simulation.",
+        "The layer trembles even when the phone lies still: raw sensor values jitter. Put a Smooth Value with a hysteresis around 0.9 between the sensor and the layer.",
+        "Available stays false on an iPhone: iOS asks permission first and only on secure (https) pages. Tap Allow Motion in the player, or open the prototype from a secure link."
+      ],
+      "examples": [
+        {
+          "title": "Tilt the phone to pan a panorama",
+          "description": "Acceleration's x component rises as you tip the right edge down; Smooth Value reads that first component.",
+          "outline": "layer panorama image \"Panorama\" @0,0 1200x874 position←pan.output\npatch motion deviceMotion\npatch smooth smoothValue value←motion.acceleration risingHysteresis=0.9\npatch tilt progress value←smooth.output start=-0.5 end=0.5 clampToRange=true\npatch pan transition<point> progress←tilt.progress start=[0,0] end=[-798,0]"
+        },
+        {
+          "title": "Count shakes",
+          "outline": "layer shake_count text \"Shake Count\" @16,120 text←shakes.count\npatch motion deviceMotion\npatch strength length<point3d> value←motion.acceleration\npatch hard_shake greaterThan[2] value1←strength.length value2=2.2\npatch shake_pulse pulse on←hard_shake.output\npatch shakes counter increase←shake_pulse.turnedOn"
+        }
+      ],
+      "origami": {
+        "id": "builtin.motion",
+        "name": "Device Motion"
+      },
+      "origamiPorts": {
+        "available": "Has Acceleration"
+      },
+      "defaultNotes": {
+        "enabled": "sonobe: Origami's Device Motion has no Enable input; true, the glossary default."
+      }
+    },
+    {
+      "type": "deviceTime",
+      "name": "Device Time",
+      "category": "device",
+      "tier": 2,
+      "status": "supported",
+      "aliases": [
+        "clock",
+        "current time",
+        "date",
+        "now",
+        "epoch",
+        "unix time",
+        "timestamp",
+        "time of day",
+        "wall clock"
+      ],
+      "summary": "Reads the real date and time from the device's clock, for status bar clocks, dates, and countdowns.",
+      "docs": "## How it works\nDevice Time reads the clock of the device running the prototype, so it shows the real time. Unlike Time, restarting the prototype doesn't reset it.\n\n- **Seconds** counts whole seconds since January 1, 1970 (UTC), the standard way computers store a moment. Wire it into Format Date & Time to show a readable date or time.\n- **Milliseconds** is the part of the current second, from 0 to 999.\n- **Time of Day** is seconds since midnight in the device's time zone, with fractions, from 0 up to 86,400.\n- **Enabled** freezes the outputs while off.\n\n## Tips\n- For an analog clock, multiply Time of Day by 6 for the second hand's rotation, by 0.1 for the minute hand, and by 1/120 for the hour hand.\n- Count down to a moment by subtracting Seconds from that moment's seconds.\n- Drive animations from Time instead. The device clock can jump when the system time changes.\n\n## Coming from Origami\nEnable is called Enabled. Time of Day is new.",
+      "behavior": "State per loop index: `{ seconds: 0, milliseconds: 0, timeOfDay: 0 }` (the last values output while enabled).\n\nEach frame:\n```\nif (ctx.input(\"enabled\")) {\n  const now = Math.floor(ctx.services.now());       // epoch ms\n  if (Number.isFinite(now)) {\n    state.seconds = Math.floor(now / 1000);\n    state.milliseconds = now - state.seconds * 1000; // integer 0..999, also before 1970\n    const d = new Date(now);\n    state.timeOfDay = deterministic\n      ? d.getUTCHours() * 3600 + d.getUTCMinutes() * 60 + d.getUTCSeconds() + d.getUTCMilliseconds() / 1000\n      : d.getHours() * 3600 + d.getMinutes() * 60 + d.getSeconds() + d.getMilliseconds() / 1000;\n  }\n  ctx.requestNextFrame();\n}\nctx.output(\"seconds\", state.seconds);\nctx.output(\"milliseconds\", state.milliseconds);\nctx.output(\"timeOfDay\", state.timeOfDay);\n```\n\n- Clock source: `ctx.services.now()`, the wall clock of the device running the prototype. Never `ctx.time` (that restarts at 0) and never `Date.now`. Building a `Date` from the given milliseconds is fine; it only decomposes that moment.\n- Time of Day: wall-clock seconds since local midnight, so on a daylight-saving change it follows the clock (the day has 23 or 25 hours, and the value jumps). `deterministic` means the runtime was created with `deterministic: true`; simulation uses UTC so traces match on every machine. The live web player uses the phone's own time zone.\n- Clock jumps: if the system clock changes (manual change, network sync), the outputs follow, and Seconds can go backward.\n- Frame 0: the current time. There's no zero startup frame.\n- Disabled: the outputs hold their last values (0 when disabled from the start). Re-enabling jumps them to the current time.\n- Loops: a looped Enabled gives one held set of values per index; every enabled index reads the same clock.\n- Edge cases: a non-finite `now()` keeps the held values and warns once per restart.\n- Platform and simulation: the deterministic runtime's `now()` starts at a fixed epoch and advances by the fixed dt each frame.\n- Restart and dispose: nothing resets, because the device clock keeps running. Nothing to release.\n- Coming from Origami: Seconds keeps its name. v88's millisecond output is undocumented; Sonobe defines Milliseconds as the 0–999 part of the current second, so Seconds × 1000 + Milliseconds is the full timestamp. v172's Enable maps to `enabled`.",
+      "inputs": [
+        {
+          "key": "enabled",
+          "name": "Enabled",
+          "type": "boolean",
+          "default": true,
+          "description": "When on, the outputs follow the device clock. When off, they hold their last values."
+        }
+      ],
+      "outputs": [
+        {
+          "key": "seconds",
+          "name": "Seconds",
+          "type": "number",
+          "subtype": "duration",
+          "description": "Whole seconds since January 1, 1970 (UTC); wire into Format Date & Time for readable text."
+        },
+        {
+          "key": "milliseconds",
+          "name": "Milliseconds",
+          "type": "number",
+          "description": "The part of the current second in milliseconds, from 0 to 999."
+        },
+        {
+          "key": "timeOfDay",
+          "name": "Time of Day",
+          "type": "number",
+          "subtype": "duration",
+          "description": "Seconds since midnight in the device's time zone, with fractions, from 0 up to 86,400."
+        }
+      ],
+      "alwaysEvaluate": true,
+      "pairsWellWith": [
+        "formatDateTime",
+        "multiply",
+        "subtract",
+        "time"
+      ],
+      "commonMistakes": [
+        "The text shows a huge number like 1789000000: Seconds counts from 1970. Wire it into Format Date & Time, or use Time of Day for the time since midnight.",
+        "An animation driven by Device Time jumps now and then: the device clock can change while the prototype runs. Drive animations from Time, and use Device Time to show real dates and times."
+      ],
+      "examples": [
+        {
+          "title": "Sweep an analog clock's hands",
+          "description": "Rotations come from Time of Day: 6° per second for the second hand and 0.1° per second for the minute hand.",
+          "outline": "layer second_hand rectangle \"Second Hand\" @201,400 2x120 anchor=[0.5,1] pivot=[0.5,1] rotation←second_angle.output\nlayer minute_hand rectangle \"Minute Hand\" @201,400 4x100 anchor=[0.5,1] pivot=[0.5,1] rotation←minute_angle.output\npatch clock deviceTime\npatch second_angle multiply[2] value1←clock.timeOfDay value2=6\npatch minute_angle multiply[2] value1←clock.timeOfDay value2=0.1"
+        },
+        {
+          "title": "Count down the seconds to 2027",
+          "description": "1798761600 is midnight UTC on January 1, 2027, in seconds since 1970.",
+          "outline": "layer countdown text \"Countdown\" @16,120 text←remaining.output\npatch clock deviceTime\npatch remaining subtract[2] value1=1798761600 value2←clock.seconds"
+        }
+      ],
+      "origami": {
+        "id": "builtin.time.device",
+        "name": "Device Time"
+      },
+      "origamiPorts": {
+        "enabled": "Enable"
+      },
+      "defaultNotes": {
+        "enabled": "inferred: v172 added the Enable port; its default isn't documented, and true keeps the patch's pre-v172 behavior."
+      }
+    },
+    {
+      "type": "vibrate",
+      "name": "Vibrate",
+      "category": "device",
+      "tier": 2,
+      "status": "web-limited",
+      "statusReason": "Uses the Vibration API (navigator.vibrate), which Android browsers support. iOS Safari has no vibration API and computers have no motor, so nothing buzzes there.",
+      "platforms": [
+        "mobile"
+      ],
+      "aliases": [
+        "buzz",
+        "vibration",
+        "vibration motor",
+        "rumble",
+        "alert buzz",
+        "feedback"
+      ],
+      "summary": "Buzzes the phone's vibration motor for a moment each time it gets a pulse.",
+      "docs": "## How it works\nVibrate buzzes the device's vibration motor. Each pulse (a signal that's on for one frame) into **Vibrate** starts a buzz that lasts **Duration** seconds. A pulse that arrives while a buzz is still going restarts it with the new duration.\n\n**Available** is true when the device can vibrate. Android phones can. iPhones and computers can't from a browser, so nothing happens there.\n\n## Tips\n- Wire an Interaction's Tap into Vibrate for confirmation feedback.\n- Keep buzzes short: 0.05 to 0.15 s feels like a tap, and 0.4 s feels like an alert.\n- For crisper feedback with named styles, use Haptic.\n- Show a visual shake where Available is false.\n\n## Coming from Origami\nThe unnamed input is called Vibrate. Duration and Available are new; Origami always plays the system buzz.",
+      "behavior": "Stateless.\n\nEach frame:\n```\nconst vibrate = ctx.services.platform.vibrate;\nctx.output(\"available\", typeof vibrate === \"function\");\nif (ctx.pulsed(\"vibrate\")) {\n  const seconds = Number.isFinite(ctx.input(\"duration\")) ? ctx.input(\"duration\") : 0;\n  const ms = Math.round(Math.min(Math.max(seconds, 0), 10) * 1000);\n  if (ms > 0) {\n    if (vibrate) vibrate(ms);\n    else ctx.services.log(\"log\", \"Vibrate: \" + ms + \" ms (this device can't vibrate)\");\n  }\n}\n```\n\n- Pulses: one input, `vibrate`. It fires on an upstream pulse or a false→true edge of a connected boolean, so a held true buzzes once. Pulses on consecutive frames each restart the buzz.\n- Duration: clamped to 0–10 s. Zero or negative durations do nothing and log nothing. Changing Duration while a buzz runs doesn't change that buzz.\n- Overlap: the host's `vibrate(ms)` replaces any running vibration, as `navigator.vibrate` does, so a new pulse restarts the buzz with the new duration.\n- User activation: Chromium ignores `navigator.vibrate` until the person has tapped or clicked the page, so a pulse at launch silently does nothing. Available still reads true.\n- Frame 0: a pulse on frame 0 buzzes (subject to user activation).\n- Loops: evaluated per index. Several indices pulsing in one frame each call `vibrate`; the host keeps the last call, which is the highest index.\n- Side effects: at most one `vibrate` call per frame per index, and only on a pulse.\n- Platform and simulation: hosts without a vibration API leave `platform.vibrate` undefined, so the desktop app and the deterministic runtime log instead and never touch hardware.\n- Restart and dispose: `dispose(state, services)` calls `services.platform.vibrate?.(0)`, which stops any running buzz.\n- Coming from Origami: the unlabeled input maps to `vibrate`. Origami's iPhone viewer plays a fixed system buzz of about 0.4 s, which the default Duration matches.",
+      "inputs": [
+        {
+          "key": "vibrate",
+          "name": "Vibrate",
+          "type": "pulse",
+          "description": "Pulse to start a buzz; a new pulse while one is running restarts it."
+        },
+        {
+          "key": "duration",
+          "name": "Duration",
+          "type": "number",
+          "subtype": "duration",
+          "default": 0.4,
+          "min": 0,
+          "max": 10,
+          "step": 0.05,
+          "description": "How long each buzz lasts, in seconds; 0 does nothing."
+        }
+      ],
+      "outputs": [
+        {
+          "key": "available",
+          "name": "Available",
+          "type": "boolean",
+          "description": "True when this device and browser can vibrate."
+        }
+      ],
+      "alwaysEvaluate": false,
+      "pairsWellWith": [
+        "haptic",
+        "interaction",
+        "longPress",
+        "pulse",
+        "wait"
+      ],
+      "commonMistakes": [
+        "Nothing buzzes on an iPhone: iOS Safari doesn't let web pages vibrate. Test on an Android phone, or show visual feedback where Available is false.",
+        "The phone buzzes again and again: Vibrate is wired to a state that keeps turning on and off, and every rise sends a pulse. Wire in one pulse per event, like an Interaction's Tap.",
+        "The first buzz at launch does nothing: browsers block vibration until the person has touched the page. Trigger it from a tap."
+      ],
+      "examples": [
+        {
+          "title": "Buzz when a button is tapped",
+          "outline": "layer pay_button rectangle \"Pay Button\" @16,780 370x56 cornerRadius=14\npatch tap_pay interaction layer=@pay_button\npatch buzz vibrate vibrate←tap_pay.tap duration=0.08"
+        },
+        {
+          "title": "Buzz when a long press opens a menu",
+          "outline": "layer menu_button rectangle \"Menu Button\" @126,700 150x56 cornerRadius=12\npatch hold longPress layer=@menu_button\npatch hold_started pulse on←hold.longPress\npatch buzz vibrate vibrate←hold_started.turnedOn duration=0.15"
+        }
+      ],
+      "origami": {
+        "id": "origami.vibrate",
+        "name": "Vibrate"
+      },
+      "origamiPorts": {
+        "vibrate": "Input"
+      },
+      "defaultNotes": {
+        "duration": "inferred: Origami has no Duration; 0.4 s approximates the fixed system buzz its iPhone viewer plays."
+      }
+    },
+    {
+      "type": "textToSpeech",
+      "name": "Text to Speech",
+      "category": "device",
+      "tier": 2,
+      "status": "web-limited",
+      "statusReason": "Uses the Web Speech API (speechSynthesis). Voices differ by system, Linux desktops need speech-dispatcher installed, and iOS Safari only speaks after the person has tapped the prototype.",
+      "platforms": [
+        "desktop",
+        "web",
+        "mobile"
+      ],
+      "aliases": [
+        "speak",
+        "say",
+        "read aloud",
+        "voice",
+        "speech synthesis",
+        "tts",
+        "narrate",
+        "voice assistant"
+      ],
+      "summary": "Speaks text aloud with a system voice, for voice assistants, spoken directions, and accessibility demos.",
+      "docs": "## How it works\nText to Speech reads **Text** aloud with a voice built into the system. Send a pulse (a signal that's on for one frame) into **Speak** to start.\n\n- Speaking again cuts off whatever the prototype is saying and starts the new text. Changing Text mid-sentence doesn't change what you hear.\n- **Stop** ends speech early.\n- **Voice** picks a voice by name, like Samantha, or by language code, like en-GB. Leave it empty for the default voice.\n- **Rate** is the speed: 1 is normal and 2 is twice as fast. **Pitch** runs from 0 (low) to 2 (high), and **Volume** from 0 (silent) to 1 (full).\n- **Speaking** is true while the voice talks, and **Finished** pulses when it reaches the end.\n\n## Tips\n- Chain lines by wiring Finished into the next Text to Speech's Speak.\n- Show captions from the same Text so people can follow without sound.\n- Voices sound different on every device, so test on the one you'll demo.\n\n## Coming from Origami\nOrigami doesn't document this patch's ports, so imported files map ports by label.",
+      "behavior": "State per loop index: `{ id: 0, speaking: false, ended: null, endAt: 0 }`, where `ended` is `null`, `\"ended\"`, or `\"interrupted\"`.\n\nEach frame:\n```\nconst platform = ctx.services.platform;\nif (ctx.pulsed(\"stop\")) {\n  if (state.speaking) {\n    state.id++;                                   // ignore the stopped utterance's result\n    state.speaking = false;\n    platform.stopSpeaking?.();                    // contract request; web: speechSynthesis.cancel()\n  }\n} else if (ctx.pulsed(\"speak\")) {\n  const text = String(ctx.input(\"text\")).trim();\n  if (text !== \"\") {\n    const id = ++state.id;\n    const rate = clamp(finite(ctx.input(\"rate\"), 1), 0.1, 10);\n    const opts = { rate, pitch: clamp(finite(ctx.input(\"pitch\"), 1), 0, 2), volume: clamp(finite(ctx.input(\"volume\"), 1), 0, 1), voice: ctx.input(\"voice\") || undefined };\n    state.speaking = true;\n    state.ended = false;\n    const result = platform.speak ? platform.speak(text, opts) : ctx.services.log(\"log\", \"Text to Speech: \" + JSON.stringify(text));\n    if (isThenable(result)) {\n      state.endAt = Infinity;\n      result.then((how) => { if (state.id === id) state.ended = how !== \"interrupted\" ? \"ended\" : \"interrupted\"; }, () => { if (state.id === id) state.ended = \"interrupted\"; });\n    } else {\n      state.endAt = ctx.time + Math.max(0.5, text.length / (15 * rate)); // estimate: 15 characters per second at rate 1\n    }\n  }\n}\nif (state.speaking && (state.ended || ctx.time >= state.endAt)) {\n  if (state.ended !== \"interrupted\") ctx.pulse(\"finished\");\n  state.speaking = false;\n  state.ended = false;\n}\nif (state.speaking) ctx.requestNextFrame();\nctx.output(\"speaking\", state.speaking);\n```\n\n- Pulses: `speak` and `stop`. If both arrive in one frame, Stop wins and Speak is ignored. Pulses on consecutive frames each count: a second Speak restarts with the current Text.\n- Interrupting: the web has one speech queue per page, so a host `speak` cancels anything the prototype is saying (other patches and loop indices included) before starting. An interrupted or stopped utterance never pulses Finished.\n- Async: a host that can report completion returns a promise from `speak` that resolves with `\"ended\"` or `\"interrupted\"` (web: the utterance's `end` and `error` events). The callback only stores the result, the next `evaluate` applies it, and results from replaced utterances are ignored by `id`. A host that returns nothing gets the length-based estimate instead.\n- Voice (host): empty → the system default. Otherwise the first voice whose name contains the text (case-insensitive), then the first whose language starts with it (`en-GB`). No match → the default voice and one warning per restart. Voices load asynchronously; the host waits up to 1 s for `voiceschanged` before falling back.\n- Retargeting: changing Text, Voice, Rate, Pitch, or Volume while speaking affects only the next Speak.\n- Frame 0: Speaking is false. A Speak pulse on frame 0 starts speaking, but iOS Safari stays silent until the person has tapped the page.\n- Loops: per-index state. When several indices pulse Speak in one frame, they're evaluated in index order, so the highest index is what you hear; the others end as interrupted.\n- Edge cases: empty or whitespace-only Text does nothing (no Speaking, no Finished). Non-finite Rate, Pitch, or Volume use their defaults.\n- Muted: never speaks; Speaking false and Finished never fires.\n- Platform and simulation: the deterministic runtime, and any host running with audio muted (QA runs launched with `--mute-audio`), must leave `platform.speak` undefined. System speech engines on macOS and Windows play through the OS and bypass Chromium's audio mute. The patch then logs the text and uses the estimate, so traces of Speaking and Finished stay deterministic.\n- Restart and dispose: `dispose` calls `platform.stopSpeaking?.()`; state resets.\n- Coming from Origami: v212 added the patch without published ports. Importers match the labels Text, Speak (or Play), Stop, Voice, Rate, Pitch, and Volume. If Origami's Rate uses Apple's 0–1 scale (default 0.5), importers double it.",
+      "inputs": [
+        {
+          "key": "text",
+          "name": "Text",
+          "type": "text",
+          "subtype": "multiline",
+          "default": "Hello",
+          "description": "What to say."
+        },
+        {
+          "key": "speak",
+          "name": "Speak",
+          "type": "pulse",
+          "description": "Pulse to say Text, cutting off anything the prototype is already saying."
+        },
+        {
+          "key": "stop",
+          "name": "Stop",
+          "type": "pulse",
+          "description": "Pulse to stop speaking right away; Finished doesn't fire."
+        },
+        {
+          "key": "voice",
+          "name": "Voice",
+          "type": "text",
+          "default": "",
+          "description": "A voice name like Samantha or a language code like en-GB; empty uses the system's default voice."
+        },
+        {
+          "key": "rate",
+          "name": "Rate",
+          "type": "number",
+          "default": 1,
+          "min": 0.1,
+          "max": 10,
+          "step": 0.1,
+          "description": "Speaking speed: 1 is normal, 0.5 is half speed, 2 is twice as fast."
+        },
+        {
+          "key": "pitch",
+          "name": "Pitch",
+          "type": "number",
+          "default": 1,
+          "min": 0,
+          "max": 2,
+          "step": 0.1,
+          "description": "Voice pitch from 0 (lowest) to 2 (highest); 1 is the voice's natural pitch."
+        },
+        {
+          "key": "volume",
+          "name": "Volume",
+          "type": "number",
+          "subtype": "progress",
+          "default": 1,
+          "min": 0,
+          "max": 1,
+          "step": 0.01,
+          "description": "Loudness from 0 (silent) to 1 (full volume)."
+        }
+      ],
+      "outputs": [
+        {
+          "key": "speaking",
+          "name": "Speaking",
+          "type": "boolean",
+          "description": "True while the voice is talking."
+        },
+        {
+          "key": "finished",
+          "name": "Finished",
+          "type": "pulse",
+          "description": "Pulses when the voice reaches the end of the text; not when stopped or cut off."
+        }
+      ],
+      "alwaysEvaluate": false,
+      "pairsWellWith": [
+        "interaction",
+        "optionPicker",
+        "whenPrototypeStarts",
+        "counter",
+        "wait"
+      ],
+      "commonMistakes": [
+        "Nothing speaks on an iPhone at launch: iOS Safari only allows speech after the person taps the page. Start speech from a tap.",
+        "Only the last line is heard: every Speak cuts off the previous speech. Wire each line's Finished into the next patch's Speak instead of pulsing them all at once.",
+        "The voice sounds different on another computer: Voice picks from the voices installed on that device. Use a language code like en-US, or test on the device you'll present."
+      ],
+      "examples": [
+        {
+          "title": "Read a card aloud when it's tapped",
+          "outline": "layer card rectangle \"Card\" @16,300 370x200 cornerRadius=20\npatch tap_card interaction layer=@card\npatch read_card textToSpeech text=\"Your table for two is booked for 7 PM.\" speak←tap_card.tap rate=1.1"
+        },
+        {
+          "title": "Speak turn-by-turn directions in order",
+          "description": "Each tap advances the counter, and Option Picker chooses the line to say.",
+          "outline": "layer next_button rectangle \"Next Button\" @16,780 370x56 cornerRadius=14\npatch tap_next interaction layer=@next_button\npatch step counter increase←tap_next.tap maximumCount=3\npatch line optionPicker<text>[3] option←step.count option0=\"Head north on Market Street.\" option1=\"Turn right onto 3rd Street.\" option2=\"Your destination is on the left.\"\npatch changed pulseOnChange<number> value←step.count\npatch say_line textToSpeech text←line.output speak←changed.changed"
+        }
+      ],
+      "origami": {
+        "name": "Text To Speech"
+      },
+      "defaultNotes": {
+        "text": "sonobe: Origami's ports are unpublished; a short word you can hear the moment you pulse Speak.",
+        "voice": "sonobe: empty uses the system default voice.",
+        "rate": "sonobe: the Web Speech API's normal rate.",
+        "pitch": "verified: the natural pitch in both the Web Speech API and AVSpeechUtterance (default 1.0).",
+        "volume": "verified: AVSpeechUtterance and the Web Speech API default to full volume (1.0)."
+      }
+    },
+    {
+      "type": "haptic",
+      "name": "Haptic",
+      "category": "device",
+      "tier": 3,
+      "status": "web-limited",
+      "statusReason": "Browsers have no haptics API. Android plays each type as a short Vibration API pattern; iOS Safari, computers, and the trackpad types do nothing until a native host provides a haptics service.",
+      "platforms": [
+        "mobile"
+      ],
+      "aliases": [
+        "haptics",
+        "haptic feedback",
+        "taptic",
+        "impact",
+        "tick",
+        "ahap",
+        "haptic player",
+        "trackpad haptic",
+        "haptic ios"
+      ],
+      "summary": "Plays a short tactile tap or pattern, like a light impact or a success buzz, each time it gets a pulse.",
+      "docs": "## How it works\nHaptic makes the device tap or buzz so an interaction feels physical. Each pulse (a signal that's on for one frame) into **Play** plays the feedback chosen in **Type** once.\n\n- **Selection** and the three **Impact** types are single taps from faint to strong.\n- The **Notification** types are short patterns for success, warning, and error.\n- **Vibrate** is a plain buzz.\n- **Alignment** and **Level Change** are for Force Touch trackpads.\n- **Custom Pattern** plays a Core Haptics pattern (AHAP JSON) from **Pattern**.\n\n**Available** is true when the device can play the selected type. On Android phones, the web player plays each type as a matching vibration. iPhones and computers can't play haptics from a browser.\n\n## Tips\n- Match the strength to the moment: Selection for scrolling through options, Impact Light for taps, Notification Success when something finishes.\n- Pair Pulse on Change with a scroll page or snap index to tick once per step.\n- Haptics are extras. Always show visual feedback too.\n\n## Coming from Origami\nHaptic, Haptic Player, and Trackpad Haptic are one patch here, with the trackpad types in Type. The AHAP input is called Pattern.",
+      "behavior": "State per instance: a cache `{ patternRef, plan }` for the last parsed Pattern (not per index, since it's derived data).\n\nEach frame:\n```\nconst platform = ctx.services.platform;\nconst type = ctx.input(\"type\");\nconst plan = vibrationPlan(type, ctx.input(\"pattern\"));     // number[] | null, cached by Pattern identity\nconst native = platform.haptic;                             // contract request; undefined today\nctx.output(\"available\", native ? native.supports(type) : plan !== null && typeof platform.vibrate === \"function\");\nif (ctx.pulsed(\"play\")) {\n  if (native?.supports(type)) native.play(type, type === \"customPattern\" ? ctx.input(\"pattern\") : undefined);\n  else if (plan && platform.vibrate) platform.vibrate(plan);\n  else ctx.services.log(\"log\", \"Haptic: \" + type + \" (no haptics on this device)\");\n}\n```\n\n- `vibrationPlan` (milliseconds, alternating on and off): vibrate `[400]`; selection `[8]`; impactLight `[12]`; impactMedium `[20]`; impactHeavy `[35]`; notificationSuccess `[15, 80, 25]`; notificationWarning `[25, 100, 25]`; notificationError `[20, 60, 20, 60, 30]`; alignment and levelChange `null` (a trackpad click has no phone equivalent); customPattern → `ahapToVibration(pattern)`.\n- `ahapToVibration(p)`: take `p.Pattern` entries with an `Event`. `HapticTransient` at `Time` t becomes the span [t, t + 0.012]; `HapticContinuous` becomes [t, t + max(0, EventDuration)]. Audio events and parameter curves are ignored, and intensity and sharpness can't be expressed as vibration. Sort the spans by start, merge overlaps, drop anything past 10 s, and emit `[on, off, on, …]` in whole milliseconds, prefixed with `[0, firstStart]` when the first event starts after 0. When Pattern isn't an object with a `Pattern` array or has no haptic events, the plan is null and one warning per restart names the problem.\n- Pulses: one input, `play`. Consecutive-frame pulses each play. A new play replaces a running vibration pattern (`navigator.vibrate` semantics); native haptics overlap as the OS allows.\n- Retargeting: changing Type or Pattern affects the next Play only.\n- User activation: Chromium ignores vibration until the person has tapped the page, so a Play at launch may do nothing.\n- Frame 0: a pulse on frame 0 plays.\n- Loops: per index; several indices pulsing in one frame each play, and for vibration the highest index's pattern is the one felt.\n- Edge cases: an unknown Type key imports as `impactLight` with a warning.\n- Side effects: at most one play per frame per index, only on a pulse.\n- Platform and simulation: hosts without haptics or vibration (desktop app, deterministic runtime) log instead and never touch hardware.\n- Restart and dispose: `dispose(state, services)` calls `services.platform.vibrate?.(0)` to stop a running pattern.\n- Coming from Origami: imports Haptic (the Haptic iOS component, `origami.haptic.ios` / `origami.HapticiOS`), Haptic Player (`builtin.hapticPlayer`), and Trackpad Haptic (`origami.haptic.macos`). Type options map by label with the platform suffix removed: \"Selection (iOS)\" → `selection`, \"Alignment (macOS)\" → `alignment`, \"Custom Pattern (iOS)\" → `customPattern`. The AHAP port and the component's File port map to `pattern`; importers load the .ahap file's JSON as the literal.",
+      "inputs": [
+        {
+          "key": "play",
+          "name": "Play",
+          "type": "pulse",
+          "description": "Pulse to play the selected feedback once."
+        },
+        {
+          "key": "type",
+          "name": "Type",
+          "type": "enum",
+          "default": "impactLight",
+          "enumOptions": [
+            {
+              "key": "vibrate",
+              "name": "Vibrate",
+              "description": "A plain buzz of about 0.4 s."
+            },
+            {
+              "key": "selection",
+              "name": "Selection",
+              "description": "A faint tick for moving between choices, like a picker or slider detent."
+            },
+            {
+              "key": "impactLight",
+              "name": "Impact Light",
+              "description": "A light tap for small buttons and toggles."
+            },
+            {
+              "key": "impactMedium",
+              "name": "Impact Medium",
+              "description": "A firmer tap for larger controls and cards snapping into place."
+            },
+            {
+              "key": "impactHeavy",
+              "name": "Impact Heavy",
+              "description": "A strong thud for big moments, like dropping a dragged item."
+            },
+            {
+              "key": "notificationSuccess",
+              "name": "Notification Success",
+              "description": "Two quick taps for a completed action."
+            },
+            {
+              "key": "notificationWarning",
+              "name": "Notification Warning",
+              "description": "Two firmer taps for something that needs attention."
+            },
+            {
+              "key": "notificationError",
+              "name": "Notification Error",
+              "description": "Three rapid taps for a failed action."
+            },
+            {
+              "key": "alignment",
+              "name": "Alignment (Trackpad)",
+              "description": "A crisp click on a Force Touch trackpad when something snaps into alignment."
+            },
+            {
+              "key": "levelChange",
+              "name": "Level Change (Trackpad)",
+              "description": "A click on a Force Touch trackpad when pressure crosses a level."
+            },
+            {
+              "key": "customPattern",
+              "name": "Custom Pattern",
+              "description": "Plays the Core Haptics pattern (AHAP JSON) on Pattern."
+            }
+          ],
+          "description": "Which feedback to play, from a faint Selection tick to an Error pattern; trackpad types only work on Force Touch trackpads."
+        },
+        {
+          "key": "pattern",
+          "name": "Pattern",
+          "type": "json",
+          "default": null,
+          "description": "A Core Haptics pattern (AHAP JSON) that plays when Type is Custom Pattern; ignored for other types."
+        }
+      ],
+      "outputs": [
+        {
+          "key": "available",
+          "name": "Available",
+          "type": "boolean",
+          "description": "True when this device can play the selected Type."
+        }
+      ],
+      "alwaysEvaluate": false,
+      "pairsWellWith": [
+        "interaction",
+        "pulseOnChange",
+        "snap",
+        "vibrate",
+        "jsonFile"
+      ],
+      "commonMistakes": [
+        "Nothing happens on an iPhone or a laptop: browsers there can't play haptics. Test on an Android phone, and always give visual feedback too.",
+        "Alignment and Level Change never do anything: they're for Force Touch trackpads, which a browser can't reach. On phones, use Selection or Impact Light.",
+        "Custom Pattern is silent: Pattern is empty or isn't AHAP JSON with a Pattern list. Load the .ahap file with a JSON File patch and wire it into Pattern."
+      ],
+      "examples": [
+        {
+          "title": "Tap a like button with a light haptic",
+          "outline": "layer like_button oval \"Like Button\" @171,700 60x60\npatch tap_like interaction layer=@like_button\npatch like_feedback haptic play←tap_like.tap type=impactLight"
+        },
+        {
+          "title": "Tick each time a carousel snaps to a page",
+          "outline": "layer carousel group \"Carousel\" @0,200 402x300 clip=true\n  layer cards group \"Cards\" 1206x300 position←pager.position\npatch pager scroll layer=@cards scrollX=paging scrollY=off\npatch page_changed pulseOnChange<index> value←pager.pageX\npatch tick haptic play←page_changed.changed type=selection"
+        }
+      ],
+      "origami": {
+        "id": "origami.haptic.ios",
+        "name": "Haptic"
+      },
+      "importAliases": [
+        "origami.HapticiOS",
+        "builtin.hapticPlayer",
+        "origami.haptic.macos"
+      ],
+      "origamiPorts": {
+        "pattern": "AHAP"
+      },
+      "defaultNotes": {
+        "type": "sonobe: Origami's default is undocumented; a light impact suits the most common use, button feedback.",
+        "pattern": "sonobe: empty until you choose Custom Pattern."
+      }
+    },
+    {
+      "type": "location",
+      "name": "Location",
+      "category": "device",
+      "tier": 3,
+      "status": "web-limited",
+      "statusReason": "Uses the Geolocation API, which needs the person's permission and a secure page, so the http:// LAN player can't use it, and Linux desktops have no location service. Override cities work everywhere.",
+      "platforms": [
+        "desktop",
+        "web",
+        "mobile"
+      ],
+      "aliases": [
+        "gps",
+        "geolocation",
+        "latitude",
+        "longitude",
+        "coordinates",
+        "current location",
+        "where am i",
+        "map location"
+      ],
+      "summary": "Reports where the device is on Earth as latitude and longitude, or a preset city so demos work anywhere.",
+      "docs": "## How it works\nLocation reports where the device is on Earth. **Latitude** runs from -90 (South Pole) to 90 (North Pole), and **Longitude** from -180 to 180, both in degrees.\n\n- **Override** swaps the real location for a preset city. On Current Location, the viewer asks permission the first time and then follows the device as it moves.\n- **Name** is the city for an override, or the coordinates as text for the real location.\n- **Available** is true once there's a location to report.\n- **Enabled** turns location off, and the device stops tracking.\n- Advanced outputs: **Accuracy** in meters, **Loading** while waiting for a first reading, and **Error Message** when location fails.\n\n## Tips\n- Demo with an override city so the prototype works on any computer without a permission prompt.\n- Round coordinates with Format Number before showing them.\n- Insert Latitude and Longitude into a weather or map URL with Text Replace, then fetch it with Network Request.\n\n## Coming from Origami\nOverride's city list differs, and Name shows coordinates for the real location because Sonobe has no geocoding service. Enabled, Available, Accuracy, Loading, and Error Message are new.",
+      "behavior": "State per loop index: `{ latitude: 0, longitude: 0, name: \"\", accuracy: 0, available: false, loading: false, errorMessage: \"\", watch: null, fix: null, fixError: null }`.\n\nEach frame:\n```\nconst override = ctx.input(\"override\");\nif (!ctx.input(\"enabled\")) {\n  stopWatch(state);                                   // state.watch?.stop(); state.watch = null\n  state.available = false;\n  state.loading = false;\n} else if (override !== \"current\") {\n  stopWatch(state);\n  const place = PLACES[override] ?? PLACES.sanFrancisco;\n  Object.assign(state, { latitude: place.latitude, longitude: place.longitude, name: place.name, accuracy: 0, available: true, loading: false, errorMessage: \"\" });\n} else {\n  const geo = ctx.services.platform.geolocation;      // contract request; undefined today\n  if (!geo) {\n    Object.assign(state, { available: false, loading: false, errorMessage: \"Location isn't available here. Choose an override city.\" });\n  } else {\n    if (!state.watch) {\n      state.loading = !state.available;\n      state.watch = geo.watch((fix) => { state.fix = fix; }, (message) => { state.fixError = message; });\n    }\n    if (state.fix) {\n      const { latitude, longitude, accuracy } = state.fix;\n      Object.assign(state, { latitude, longitude, accuracy, name: formatCoordinates(latitude, longitude), available: true, loading: false, errorMessage: \"\" });\n      state.fix = null;\n    }\n    if (state.fixError) {\n      Object.assign(state, { loading: false, errorMessage: state.fixError });\n      state.fixError = null;\n    }\n    if (state.loading) ctx.requestNextFrame();\n  }\n}\nctx.output(\"latitude\", state.latitude);\nctx.output(\"longitude\", state.longitude);\nctx.output(\"name\", state.name);\nctx.output(\"available\", state.available);\nctx.output(\"accuracy\", state.accuracy);\nctx.output(\"loading\", state.loading);\nctx.output(\"errorMessage\", state.errorMessage);\n```\n\n- Places (`PLACES`, decimal degrees of each city center): `sanFrancisco` San Francisco (37.7749, -122.4194); `newYork` New York (40.7128, -74.006); `mexicoCity` Mexico City (19.4326, -99.1332); `saoPaulo` São Paulo (-23.5505, -46.6333); `london` London (51.5074, -0.1278); `paris` Paris (48.8566, 2.3522); `lagos` Lagos (6.5244, 3.3792); `capeTown` Cape Town (-33.9249, 18.4241); `dubai` Dubai (25.2048, 55.2708); `mumbai` Mumbai (19.076, 72.8777); `singapore` Singapore (1.3521, 103.8198); `tokyo` Tokyo (35.6762, 139.6503); `sydney` Sydney (-33.8688, 151.2093).\n- Host service (web): `watch` wraps `navigator.geolocation.watchPosition` with `enableHighAccuracy: false` and `maximumAge: 5000` and returns `{ stop() }` calling `clearWatch`. Error messages: permission denied → \"Location permission was denied.\", position unavailable → \"The device couldn't find its location.\", timeout → \"Finding the location took too long.\", insecure page → \"Location needs a secure (https) page.\" A host shares one browser watch among all Location patches. Callbacks only store data, and the next `evaluate` applies it.\n- `formatCoordinates(lat, lon)`: 4 decimals with hemisphere letters, e.g. `37.7749° N, 122.4194° W`.\n- Permission: requested once, on the first frame a Location patch is enabled on Current Location in a live viewer. After a denial, Error Message stays set and there's no re-prompt this session.\n- Updates: the watch keeps reporting as the device moves; the outputs hold the last fix between readings. An error after a fix keeps the last fix and Available, and sets Error Message.\n- Retargeting: switching Override to a city stops the watch and outputs the city on that frame. Switching back to Current Location starts a new watch, and the outputs keep the city's values until the first fix arrives.\n- Frame 0: an override city outputs immediately. Current Location starts with Loading true and zeros.\n- Loops: per-index state (a looped Override lists several cities); indices on Current Location share the host's single watch.\n- Edge cases: non-finite coordinates from the host are ignored. An unknown Override key imports as San Francisco with one warning.\n- Disabled: Available and Loading false, the other outputs hold, and the watch stops.\n- Async: see Host service; results from a stopped watch are ignored because `stopWatch` clears `state.watch` and the host drops its callbacks.\n- Platform and simulation: the deterministic runtime has no geolocation service, so override cities work and Current Location reports Available false with \"Location isn't available in simulation.\" No permission prompt ever runs headless.\n- Restart and dispose: `dispose` stops the watch; state resets.\n- Coming from Origami: Origami's override list isn't documented. Importers map a place whose name matches a Sonobe city and otherwise use Current Location with a warning. Origami's Name may show a place name for the real location; Sonobe shows coordinates.",
+      "inputs": [
+        {
+          "key": "enabled",
+          "name": "Enabled",
+          "type": "boolean",
+          "default": true,
+          "description": "When off, the device stops tracking location, Available turns false, and the values hold."
+        },
+        {
+          "key": "override",
+          "name": "Override",
+          "type": "enum",
+          "default": "current",
+          "enumOptions": [
+            {
+              "key": "current",
+              "name": "Current Location",
+              "description": "The device's real position; asks permission the first time."
+            },
+            {
+              "key": "sanFrancisco",
+              "name": "San Francisco",
+              "description": "City center, 37.7749, -122.4194."
+            },
+            {
+              "key": "newYork",
+              "name": "New York",
+              "description": "City center, 40.7128, -74.006."
+            },
+            {
+              "key": "mexicoCity",
+              "name": "Mexico City",
+              "description": "City center, 19.4326, -99.1332."
+            },
+            {
+              "key": "saoPaulo",
+              "name": "São Paulo",
+              "description": "City center, -23.5505, -46.6333."
+            },
+            {
+              "key": "london",
+              "name": "London",
+              "description": "City center, 51.5074, -0.1278."
+            },
+            {
+              "key": "paris",
+              "name": "Paris",
+              "description": "City center, 48.8566, 2.3522."
+            },
+            {
+              "key": "lagos",
+              "name": "Lagos",
+              "description": "City center, 6.5244, 3.3792."
+            },
+            {
+              "key": "capeTown",
+              "name": "Cape Town",
+              "description": "City center, -33.9249, 18.4241."
+            },
+            {
+              "key": "dubai",
+              "name": "Dubai",
+              "description": "City center, 25.2048, 55.2708."
+            },
+            {
+              "key": "mumbai",
+              "name": "Mumbai",
+              "description": "City center, 19.076, 72.8777."
+            },
+            {
+              "key": "singapore",
+              "name": "Singapore",
+              "description": "City center, 1.3521, 103.8198."
+            },
+            {
+              "key": "tokyo",
+              "name": "Tokyo",
+              "description": "City center, 35.6762, 139.6503."
+            },
+            {
+              "key": "sydney",
+              "name": "Sydney",
+              "description": "City center, -33.8688, 151.2093."
+            }
+          ],
+          "description": "Current Location uses the device's real position; pick a city to use its coordinates instead, with no permission prompt."
+        }
+      ],
+      "outputs": [
+        {
+          "key": "latitude",
+          "name": "Latitude",
+          "type": "number",
+          "subtype": "angle",
+          "description": "Degrees north (positive) or south (negative) of the equator, from -90 to 90."
+        },
+        {
+          "key": "longitude",
+          "name": "Longitude",
+          "type": "number",
+          "subtype": "angle",
+          "description": "Degrees east (positive) or west (negative) of Greenwich, from -180 to 180."
+        },
+        {
+          "key": "name",
+          "name": "Name",
+          "type": "text",
+          "description": "The city name for an override, or the coordinates as text for the real location."
+        },
+        {
+          "key": "available",
+          "name": "Available",
+          "type": "boolean",
+          "description": "True once there's a location to report."
+        },
+        {
+          "key": "accuracy",
+          "name": "Accuracy",
+          "type": "number",
+          "subtype": "distance",
+          "description": "How far off the real location might be, in meters; 0 for override cities.",
+          "advanced": true
+        },
+        {
+          "key": "loading",
+          "name": "Loading",
+          "type": "boolean",
+          "description": "True while waiting for the first reading of the real location.",
+          "advanced": true
+        },
+        {
+          "key": "errorMessage",
+          "name": "Error Message",
+          "type": "text",
+          "description": "Why the location isn't available, such as a denied permission; empty when everything works.",
+          "advanced": true
+        }
+      ],
+      "alwaysEvaluate": true,
+      "pairsWellWith": [
+        "formatNumber",
+        "textReplace",
+        "networkRequest",
+        "ifElse",
+        "mathExpression"
+      ],
+      "commonMistakes": [
+        "Latitude and Longitude stay 0 on a phone: the web player opened over http://, and browsers only share location with secure pages. Use an override city, or open the prototype from a secure link.",
+        "A permission prompt interrupts every demo: Current Location asks for access. Pick an override city for presentations.",
+        "The map shows the wrong spot: many map and weather services want longitude first. Check which order the URL expects."
+      ],
+      "examples": [
+        {
+          "title": "Show where the device is",
+          "outline": "layer place_label text \"Place Label\" @16,120 text←where.name\npatch where location override=current"
+        },
+        {
+          "title": "Drop a pin once a demo city is known",
+          "outline": "layer pin oval \"Pin\" @191,400 20x20 color=#E5484DFF scale←drop.output\npatch where location override=tokyo\npatch drop popAnimation number←where.available bounciness=8 speed=14"
+        }
+      ],
+      "origami": {
+        "id": "builtin.gps",
+        "name": "Location"
+      },
+      "defaultNotes": {
+        "enabled": "sonobe: Origami's Location has no Enable input; true, the glossary default.",
+        "override": "inferred: Origami's Override shows no place by default, which uses the device's real location."
+      }
+    },
+    {
+      "type": "gameController",
+      "name": "Game Controller",
+      "category": "device",
+      "tier": 3,
+      "status": "web-limited",
+      "statusReason": "Uses the Gamepad API. A controller appears only after someone presses one of its buttons while the viewer has focus, Chromium browsers require a secure page, and no browser reports controller motion.",
+      "platforms": [
+        "desktop",
+        "web",
+        "mobile"
+      ],
+      "aliases": [
+        "gamepad",
+        "joystick",
+        "thumbstick",
+        "d-pad",
+        "xbox controller",
+        "playstation controller",
+        "mfi controller",
+        "tv remote",
+        "console"
+      ],
+      "summary": "Reads a game controller's buttons, triggers, D-pad, and thumbsticks, for TV, console, and game prototypes.",
+      "docs": "## How it works\nGame Controller reads a controller connected to the device, like an Xbox, PlayStation, or MFi controller. Browsers only reveal a controller after you press one of its buttons, so click the viewer and press any button first.\n\n- **Connected** is true while the controller is available.\n- **A**, **B**, **X**, **Y**, **L1**, **R1**, and **Home** are true while held.\n- **L2** and **R2** are the triggers, from 0 (released) to 1 (fully pressed).\n- **D-pad**, **Left Thumbstick**, and **Right Thumbstick** are points from [-1, -1] to [1, 1]. Pushing up gives a negative y, like layer positions, so you can add them to a position directly.\n- **Controller** picks which one to read when several are connected, counting from 0.\n\n## Tips\n- Buttons are states: wire one into a Counter's Increase and it steps once per press.\n- Multiply a thumbstick by a distance in points and add it to a resting position to move something.\n- Raise Dead Zone (advanced) if a stick drifts while nobody touches it.\n\n## Coming from Origami\nThumbstick and D-pad y points down instead of up. L2 and R2 are 0 to 1. Menu, Options, L3, and R3 are new advanced outputs.",
+      "behavior": "Stateless: polls the host's controller snapshot every frame.\n\nEach frame:\n```\nconst slot = Math.max(0, Math.floor(finite(ctx.input(\"controller\"), 0)));\nconst pad = ctx.services.platform.gamepads?.()[slot];      // contract request; undefined today\nif (!pad?.connected) return outputIdle();                  // false, 0, [0, 0], [0, 0, 0]\nconst pressed = (i) => pad.buttons[i]?.pressed === true;\nconst amount = (i) => clamp(finite(pad.buttons[i]?.value, 0), 0, 1);\nconst dz = clamp(finite(ctx.input(\"deadZone\"), 0.1), 0, 0.99);\nctx.output(\"connected\", true);\nctx.output(\"buttonA\", pressed(0));      ctx.output(\"buttonB\", pressed(1));\nctx.output(\"buttonX\", pressed(2));      ctx.output(\"buttonY\", pressed(3));\nctx.output(\"leftShoulder\", pressed(4)); ctx.output(\"rightShoulder\", pressed(5));\nctx.output(\"leftTrigger\", amount(6));   ctx.output(\"rightTrigger\", amount(7));\nctx.output(\"dpad\", [(pressed(15) ? 1 : 0) - (pressed(14) ? 1 : 0), (pressed(13) ? 1 : 0) - (pressed(12) ? 1 : 0)]);\nctx.output(\"leftThumbstick\", deadZone([pad.axes[0], pad.axes[1]], dz));\nctx.output(\"rightThumbstick\", deadZone([pad.axes[2], pad.axes[3]], dz));\nctx.output(\"home\", pressed(16));\nctx.output(\"menu\", pressed(9));         ctx.output(\"options\", pressed(8));\nctx.output(\"leftThumbstickButton\", pressed(10)); ctx.output(\"rightThumbstickButton\", pressed(11));\nctx.output(\"acceleration\", finite3(pad.motion?.acceleration));\nctx.output(\"rotationRate\", finite3(pad.motion?.rotationRate));\n```\n\n- Layout: indices follow the W3C Gamepad \"standard\" mapping (0 bottom face, 1 right face, 2 left face, 3 top face, 4/5 shoulders, 6/7 triggers, 8 select/view, 9 start/menu, 10/11 stick presses, 12–15 D-pad up/down/left/right, 16 home). When `pad.mapping !== \"standard\"`, the host remaps known controllers; otherwise the raw indices are used and one warning per restart says the buttons may not match.\n- Axes: stick y is positive downward, as the Gamepad API reports it, so up is −1 and down is +1, matching layer coordinates. The D-pad is discrete: each axis is −1, 0, or 1.\n- `deadZone(v, dz)`: radial. With `n = |v|`, return [0, 0] when `n ≤ dz`; otherwise scale v by `min(1, (n − dz) / (1 − dz)) / n`. Non-finite axis values count as 0.\n- Timing: the host snapshots `navigator.getGamepads()` at step 1 of each frame, so all outputs in a frame agree. Buttons and triggers are states, true or nonzero while held; a pulse input they're wired into fires once per press.\n- Privacy gate: browsers expose no controller until a button is pressed after the page loads, so Connected stays false until then.\n- Slots: Controller indexes `getGamepads()` slots, which don't shift when another controller disconnects.\n- Motion: no browser reports controller motion today, so Acceleration and Rotation Rate stay [0, 0, 0] unless a native host fills `pad.motion` (same units as Device Motion: g and degrees per second).\n- Frame 0: idle until the host's first snapshot shows a controller.\n- Loops: a looped Controller reads one controller per index, for multiplayer prototypes.\n- Edge cases: negative, fractional, or non-finite Controller values floor and clamp to 0 or more; a slot with no controller outputs idle values.\n- Platform and simulation: the deterministic runtime has no controller events and outputs idle values.\n- Restart and dispose: nothing to reset or release.\n- Coming from Origami: A, B, X, Y, L1, R1, L2, R2, D-pad, Left Thumbstick, Right Thumbstick, Home, Acceleration, and Rotation map as listed in `origamiPorts`. Origami's y axis points up (top right is [1, 1]), so importers insert a Multiply by [1, −1] on each connected D-pad and thumbstick wire. Origami's L2 and R2 were booleans before v110; a trigger wired into a boolean port still reads as pressed above 0.",
+      "inputs": [
+        {
+          "key": "controller",
+          "name": "Controller",
+          "type": "index",
+          "default": 0,
+          "min": 0,
+          "step": 1,
+          "description": "Which connected controller to read, counting from 0 in the order they connected."
+        },
+        {
+          "key": "deadZone",
+          "name": "Dead Zone",
+          "type": "number",
+          "default": 0.1,
+          "min": 0,
+          "max": 0.9,
+          "step": 0.01,
+          "description": "How far a thumbstick must move before it counts, from 0 (none) to 0.9; hides stick drift near the center.",
+          "advanced": true
+        }
+      ],
+      "outputs": [
+        {
+          "key": "connected",
+          "name": "Connected",
+          "type": "boolean",
+          "description": "True while the chosen controller is connected and has been activated with a button press."
+        },
+        {
+          "key": "buttonA",
+          "name": "A",
+          "type": "boolean",
+          "description": "True while the bottom face button is held."
+        },
+        {
+          "key": "buttonB",
+          "name": "B",
+          "type": "boolean",
+          "description": "True while the right face button is held."
+        },
+        {
+          "key": "buttonX",
+          "name": "X",
+          "type": "boolean",
+          "description": "True while the left face button is held."
+        },
+        {
+          "key": "buttonY",
+          "name": "Y",
+          "type": "boolean",
+          "description": "True while the top face button is held."
+        },
+        {
+          "key": "leftShoulder",
+          "name": "L1",
+          "type": "boolean",
+          "description": "True while the left shoulder button is held."
+        },
+        {
+          "key": "rightShoulder",
+          "name": "R1",
+          "type": "boolean",
+          "description": "True while the right shoulder button is held."
+        },
+        {
+          "key": "leftTrigger",
+          "name": "L2",
+          "type": "number",
+          "subtype": "progress",
+          "description": "How far the left trigger is pressed, from 0 (released) to 1 (all the way)."
+        },
+        {
+          "key": "rightTrigger",
+          "name": "R2",
+          "type": "number",
+          "subtype": "progress",
+          "description": "How far the right trigger is pressed, from 0 (released) to 1 (all the way)."
+        },
+        {
+          "key": "dpad",
+          "name": "D-pad",
+          "type": "point",
+          "description": "Directional pad as [x, y], each -1, 0, or 1; up is negative y."
+        },
+        {
+          "key": "leftThumbstick",
+          "name": "Left Thumbstick",
+          "type": "point",
+          "description": "Left stick position from [-1, -1] (up left) to [1, 1] (down right); [0, 0] at rest."
+        },
+        {
+          "key": "rightThumbstick",
+          "name": "Right Thumbstick",
+          "type": "point",
+          "description": "Right stick position from [-1, -1] (up left) to [1, 1] (down right); [0, 0] at rest."
+        },
+        {
+          "key": "home",
+          "name": "Home",
+          "type": "boolean",
+          "description": "True while the home or logo button is held; some browsers keep this button for themselves."
+        },
+        {
+          "key": "menu",
+          "name": "Menu",
+          "type": "boolean",
+          "description": "True while the menu or start button is held.",
+          "advanced": true
+        },
+        {
+          "key": "options",
+          "name": "Options",
+          "type": "boolean",
+          "description": "True while the options, view, or select button is held.",
+          "advanced": true
+        },
+        {
+          "key": "leftThumbstickButton",
+          "name": "L3",
+          "type": "boolean",
+          "description": "True while the left thumbstick is pressed in.",
+          "advanced": true
+        },
+        {
+          "key": "rightThumbstickButton",
+          "name": "R3",
+          "type": "boolean",
+          "description": "True while the right thumbstick is pressed in.",
+          "advanced": true
+        },
+        {
+          "key": "acceleration",
+          "name": "Acceleration",
+          "type": "point3d",
+          "description": "Controller acceleration in g where the platform reports it; [0, 0, 0] in browsers today.",
+          "advanced": true
+        },
+        {
+          "key": "rotationRate",
+          "name": "Rotation Rate",
+          "type": "point3d",
+          "description": "Controller rotation speed in degrees per second where the platform reports it; [0, 0, 0] in browsers today.",
+          "advanced": true
+        }
+      ],
+      "alwaysEvaluate": true,
+      "pairsWellWith": [
+        "counter",
+        "pulse",
+        "multiply",
+        "add",
+        "popAnimation"
+      ],
+      "commonMistakes": [
+        "Connected stays false with a controller plugged in: browsers hide controllers until a button is pressed while the page has focus. Click the viewer, then press any button.",
+        "Something moves up when you push the stick down: stick y is negative when pushed up, matching screen coordinates. Don't flip it unless your math expects up to be positive.",
+        "One press triggers an action many times: buttons stay true while held. Wire them into pulse inputs, like a Counter's Increase, so each press counts once."
+      ],
+      "examples": [
+        {
+          "title": "Step through tabs with the shoulder buttons",
+          "outline": "layer highlight rectangle \"Highlight\" @16,200 370x56 cornerRadius=12 position←glide.output\npatch pad gameController\npatch focus counter increase←pad.rightShoulder decrease←pad.leftShoulder maximumCount=3\npatch spot optionPicker<point>[3] option←focus.count option0=[16,200] option1=[16,264] option2=[16,328]\npatch glide popAnimation<point> number←spot.output bounciness=3 speed=14"
+        },
+        {
+          "title": "Nudge a ball with the left thumbstick",
+          "outline": "layer ball oval \"Ball\" @181,417 40x40 position←placed.output\npatch pad gameController\npatch reach multiply<point>[2] value1←pad.leftThumbstick value2=[120,120]\npatch placed add<point>[2] value1←reach.output value2=[181,417]"
+        }
+      ],
+      "origami": {
+        "id": "builtin.gamecontroller",
+        "name": "Game Controller"
+      },
+      "origamiPorts": {
+        "buttonA": "A",
+        "buttonB": "B",
+        "buttonX": "X",
+        "buttonY": "Y",
+        "leftShoulder": "L1",
+        "rightShoulder": "R1",
+        "leftTrigger": "L2",
+        "rightTrigger": "R2",
+        "dpad": "D-pad",
+        "rotationRate": "Rotation"
+      },
+      "defaultNotes": {
+        "controller": "sonobe: Origami reads a single controller; 0 is the first one connected.",
+        "deadZone": "sonobe: 0.1 hides typical stick drift without swallowing small movements."
+      }
+    },
+    {
+      "type": "interfaceOrientation",
+      "name": "Interface Orientation",
+      "category": "device",
+      "tier": 3,
+      "status": "supported",
+      "aliases": [
+        "rotation lock",
+        "orientation lock",
+        "auto rotate",
+        "screen rotation",
+        "landscape mode",
+        "portrait mode",
+        "rotate interface"
+      ],
+      "summary": "Chooses which ways the interface turns when the device rotates, and which orientation it starts in.",
+      "docs": "## How it works\nWithout this patch, the interface stays upright when you rotate the viewer or the phone. Interface Orientation lets it turn.\n\n- **Portrait**, **Landscape Left**, **Landscape Right**, and **Upside Down** say which ways the interface may turn. When the device turns to a direction that's off, the interface keeps its current orientation.\n- **Start In** is the orientation shown when the prototype starts or restarts. If the device can't show it, the prototype starts in portrait.\n- **Orientation** and **Landscape** report the interface's current orientation.\n\nLandscape Left means the device is turned counterclockwise, with its top edge on the left. Test with the viewer's rotate button. Phones with a camera cutout, like recent iPhones, never turn upside down.\n\n## Tips\n- Resize layouts from Device Info's Screen Size, which swaps when the interface turns.\n- Lock rotation while something is open: wire a Switch's On through Not into Landscape Left and Landscape Right.\n- Use one Interface Orientation patch per prototype.\n\n## Coming from Origami\nOrientation and Landscape are new outputs. Without the patch, the interface keeps the project's orientation instead of always portrait.",
+      "behavior": "State per instance: `{ current: \"portrait\", lastDevice: null }`.\n\nEach frame:\n```\nconst d = ctx.services.device();\nconst device = deviceOrientation(d);   // \"portrait\" | \"landscapeLeft\" | \"landscapeRight\" | \"upsideDown\"\nconst allowed = (o) => ctx.input(o) === true && deviceSupports(d, o);\nif (state.lastDevice === null) {\n  const start = ctx.input(\"startIn\");\n  state.current = deviceSupports(d, start) ? start : \"portrait\";\n} else if ((device !== state.lastDevice || ctx.changed(device)) && device !== state.current && allowed(device)) {\n  state.current = device;\n}\nstate.lastDevice = device;\nctx.output(\"orientation\", state.current);\nctx.output(\"landscape\", state.current === \"landscapeLeft\" || state.current === \"landscapeRight\");\n```\n\n- Rule: the interface turns only on an event, either the device rotating to an allowed direction or the input for the device's current direction turning on. Turning a direction off never turns the interface away from it, so switching off both landscape inputs while in landscape locks it there until the device turns to an allowed direction.\n- `deviceOrientation(d)`: the device's physical or simulated rotation. With the proposed `DeviceInfo.orientationAngle`, 0 → portrait, 90 → landscapeLeft, 180 → upsideDown, 270 → landscapeRight. Today the contract only has `\"portrait\" | \"landscape\"`, so landscape maps to landscapeLeft.\n- `deviceSupports(d, o)`: false for `upsideDown` on phone presets whose cutout is `island` or `notch`; true otherwise, including custom devices.\n- Host integration: the viewer reads the `orientation` output of the controlling patch through `rt.getValue`. It rotates the drawn interface, and from the next frame the host swaps Device Info's Screen Size and Safe Area (`orientSafeArea`). At start and restart, the desktop viewer rotates its simulated device to Start In. On a real phone, the web player can't lock the browser's own rotation, so when the physical and interface orientations differ it counter-rotates the prototype by the difference. Proposed contract alternative: `RuntimeServices.setInterfaceOrientation(o)`.\n- No patch: the interface keeps the project's `device.orientation` (portrait unless the project is landscape), and Device Info's Orientation still follows the device.\n- Controlling patch: the first interfaceOrientation patch by id in the root component. Others (and any inside components) still compute outputs but don't drive the viewer, with one warning per restart.\n- Pulses: none. Inputs are states.\n- Frame 0: applies Start In. Portrait, Landscape Left, and the others only matter from frame 1.\n- Loops: a looped input evaluates per index, but only index 0 drives the viewer.\n- Edge cases: an unknown Start In key falls back to portrait with one warning.\n- Muted: the viewer ignores a muted patch, so the interface keeps the project's orientation; Orientation outputs portrait and Landscape false.\n- Platform and simulation: `orientation` InputEvents rotate the simulated device, and the rule above decides whether the interface follows. Nothing is released headless.\n- Restart and dispose: `lastDevice` resets to null, so Start In applies again.\n- Coming from Origami: ports keep their names and defaults (Portrait, Landscape Left, and Landscape Right on; Upside Down off; Start In Portrait). Origami's viewer adds this patch from its settings; in Sonobe you insert it like any patch.",
+      "inputs": [
+        {
+          "key": "startIn",
+          "name": "Start In",
+          "type": "enum",
+          "default": "portrait",
+          "enumOptions": [
+            {
+              "key": "portrait",
+              "name": "Portrait",
+              "description": "Upright, with the top edge at the top."
+            },
+            {
+              "key": "landscapeLeft",
+              "name": "Landscape Left",
+              "description": "Turned counterclockwise, with the top edge on the left."
+            },
+            {
+              "key": "landscapeRight",
+              "name": "Landscape Right",
+              "description": "Turned clockwise, with the top edge on the right."
+            },
+            {
+              "key": "upsideDown",
+              "name": "Upside Down",
+              "description": "Turned halfway around, with the top edge at the bottom."
+            }
+          ],
+          "description": "The orientation shown when the prototype starts or restarts; portrait if the device can't show it."
+        },
+        {
+          "key": "portrait",
+          "name": "Portrait",
+          "type": "boolean",
+          "default": true,
+          "description": "When on, the interface turns upright when the device is held upright."
+        },
+        {
+          "key": "landscapeLeft",
+          "name": "Landscape Left",
+          "type": "boolean",
+          "default": true,
+          "description": "When on, the interface turns when the device is turned counterclockwise."
+        },
+        {
+          "key": "landscapeRight",
+          "name": "Landscape Right",
+          "type": "boolean",
+          "default": true,
+          "description": "When on, the interface turns when the device is turned clockwise."
+        },
+        {
+          "key": "upsideDown",
+          "name": "Upside Down",
+          "type": "boolean",
+          "default": false,
+          "description": "When on, the interface turns when the device is upside down; phones with a camera cutout never do."
+        }
+      ],
+      "outputs": [
+        {
+          "key": "orientation",
+          "name": "Orientation",
+          "type": "enum",
+          "enumOptions": [
+            {
+              "key": "portrait",
+              "name": "Portrait",
+              "description": "Upright, with the top edge at the top."
+            },
+            {
+              "key": "landscapeLeft",
+              "name": "Landscape Left",
+              "description": "Turned counterclockwise, with the top edge on the left."
+            },
+            {
+              "key": "landscapeRight",
+              "name": "Landscape Right",
+              "description": "Turned clockwise, with the top edge on the right."
+            },
+            {
+              "key": "upsideDown",
+              "name": "Upside Down",
+              "description": "Turned halfway around, with the top edge at the bottom."
+            }
+          ],
+          "description": "The interface's current orientation."
+        },
+        {
+          "key": "landscape",
+          "name": "Landscape",
+          "type": "boolean",
+          "description": "True while the interface is in Landscape Left or Landscape Right."
+        }
+      ],
+      "alwaysEvaluate": true,
+      "pairsWellWith": [
+        "deviceInfo",
+        "not",
+        "switch",
+        "popAnimation",
+        "transition"
+      ],
+      "commonMistakes": [
+        "Rotating the viewer doesn't turn the interface: that direction is off, or there's no Interface Orientation patch. Add one and turn on each direction you support.",
+        "The prototype starts in portrait although Start In is Upside Down: phones with a camera cutout can't show upside down. Pick another Start In or another device.",
+        "Layers keep their portrait size after the interface turns: sizes don't follow the screen by themselves. Drive them from Device Info's Screen Size."
+      ],
+      "examples": [
+        {
+          "title": "Let a video fill the screen in any orientation",
+          "outline": "layer player video \"Player\" @0,0 size←info.screenSize\npatch rotation interfaceOrientation startIn=portrait portrait=true landscapeLeft=true landscapeRight=true upsideDown=false\npatch info deviceInfo"
+        },
+        {
+          "title": "Lock rotation while a sheet is open",
+          "outline": "layer sheet_button rectangle \"Sheet Button\" @16,780 370x56 cornerRadius=14\npatch tap_button interaction layer=@sheet_button\npatch sheet_open switch flip←tap_button.tap\npatch unlocked not value←sheet_open.on\npatch rotation interfaceOrientation landscapeLeft←unlocked.output landscapeRight←unlocked.output"
+        }
+      ],
+      "origami": {
+        "id": "builtin.deviceorientation",
+        "name": "Interface Orientation"
+      },
+      "defaultNotes": {
+        "startIn": "verified: the Orientation tutorial leaves Start In on Portrait.",
+        "portrait": "verified: the Orientation tutorial's defaults enable Portrait and both landscape directions.",
+        "upsideDown": "verified: the Orientation tutorial notes Upside Down isn't enabled by default."
+      }
+    },
+    {
+      "type": "softKeyboard",
+      "name": "Soft Keyboard",
+      "category": "device",
+      "tier": 3,
+      "status": "web-limited",
+      "statusReason": "Browsers don't report the on-screen keyboard directly. The phone web player estimates its height from the VisualViewport API and approximates the slide animation; the desktop viewer simulates a keyboard for phone and tablet devices.",
+      "platforms": [
+        "desktop",
+        "web",
+        "mobile"
+      ],
+      "aliases": [
+        "keyboard info",
+        "keyboard height",
+        "on-screen keyboard",
+        "virtual keyboard",
+        "keyboard avoidance",
+        "composer bar"
+      ],
+      "summary": "Reports the on-screen keyboard's height and slide progress, so text inputs and buttons can ride above it.",
+      "docs": "## How it works\nSoft Keyboard reports the on-screen keyboard that slides up while someone types into a Text Field on a phone or tablet.\n\n- **Visible Height** is how many points the keyboard covers right now. It animates as the keyboard slides.\n- **Height** is the keyboard's full height for the current device and orientation, even while it's hidden.\n- **Progress** runs from 0 (hidden) to 1 (fully shown) along with the slide.\n- **Visible** is true while the keyboard is up or on its way up.\n- **Keyboard Type** picks which keyboard to measure. Auto follows the Text Field being edited.\n\nThe desktop viewer simulates the keyboard for phone and tablet devices. On a real phone, the web player measures the real keyboard. Computers have no on-screen keyboard, so everything stays 0.\n\n## Tips\n- Keep a message bar above the keyboard by moving it up by Visible Height.\n- Fade or shrink content with Progress so it moves in sync with the keyboard.\n\n## Coming from Origami\nKeyboard Info is called Soft Keyboard. Visible and Visible Height are new, and Keyboard Type adds Auto.",
+      "behavior": "State per instance: `{ from: 0, to: 0, elapsed: DURATION, progress: 0, measured: {} }`, where `DURATION = 0.35` s and `measured` holds the last real height per keyboard type.\n\nEach frame:\n```\nconst kb = ctx.services.platform.softKeyboard?.();     // contract request: { visible, height, keyboardType } | undefined\nconst d = ctx.services.device();\nconst choice = ctx.input(\"keyboardType\");\nconst type = choice === \"auto\" ? (kb?.keyboardType ?? \"default\") : choice;\nif (kb?.visible && Number.isFinite(kb.height) && kb.height > 0) state.measured[type] = kb.height;\nconst height = state.measured[type] ?? estimateHeight(d, type);\nconst target = kb?.visible ? 1 : 0;\nif (target !== state.to) { state.from = state.progress; state.to = target; state.elapsed = 0; }\nstate.elapsed = Math.min(state.elapsed + ctx.dt, DURATION);\nconst t = state.elapsed / DURATION;\nstate.progress = state.from + (state.to - state.from) * (1 - (1 - t) ** 3);   // cubic ease out\nif (t < 1) ctx.requestNextFrame();\nctx.output(\"visibleHeight\", height * state.progress);\nctx.output(\"height\", height);\nctx.output(\"progress\", state.progress);\nctx.output(\"visible\", target === 1);\n```\n\n- `estimateHeight(d, type)` in points, including the home-indicator area: classify the preset by `kind` (a custom device is a phone when its shorter side is under 600 pt, otherwise a tablet). Phone portrait: 336, or 250 for number and phone. Phone landscape: 209, or 171 for number and phone. Tablet portrait: 313. Tablet landscape: 398. Computers and watches: 0.\n- Host (desktop viewer): `softKeyboard()` reports visible while a Text Field layer is focused in a phone or tablet preset, with `height` from the table and `keyboardType` from the field's Keyboard property. The viewer may draw a placeholder keyboard over the bottom of the screen; the patch only reports metrics.\n- Host (web player on a phone): visible while a text field is focused and either `navigator.virtualKeyboard.boundingRect.height > 0` or `innerHeight − visualViewport.height > 120` CSS pixels; `height` is that covered height converted to prototype points with the viewer scale. Browsers don't expose the keyboard's animation, so Progress always comes from the ease above.\n- Retargeting: a keyboard that hides mid-slide eases from the current progress back to 0 over the full 0.35 s.\n- Pulses: none.\n- Frame 0: hidden, Progress 0, and Height from the estimate.\n- Loops: a looped Keyboard Type gives per-index Height and Visible Height; the slide state is shared by the instance because there's one keyboard.\n- Edge cases: a non-finite or non-positive host height falls back to the last measured height, then to the estimate.\n- Muted: outputs 0 and false.\n- Platform and simulation: the deterministic runtime has no keyboard service, so Visible stays false and Height reports the estimate.\n- Restart and dispose: state resets, including measured heights. Nothing to release.\n- Coming from Origami: Keyboard Info (`builtin.keyboard.info`). Type options map to Sonobe's: Default, ASCII Only, and Twitter → default; Numbers and Punctuation, Number Pad, Decimal Pad, and ASCII Numbers → number; Phone Pad and Name or Phone → phone; Email Address → email; URL and Web Search → url. Appearence [sic] maps to `appearance`. Height and Progress keep their names; Origami doesn't document whether its Height is 0 while hidden.",
+      "inputs": [
+        {
+          "key": "keyboardType",
+          "name": "Keyboard Type",
+          "type": "enum",
+          "default": "auto",
+          "enumOptions": [
+            {
+              "key": "auto",
+              "name": "Auto",
+              "description": "Follows the Keyboard setting of the Text Field being edited."
+            },
+            {
+              "key": "default",
+              "name": "Default",
+              "description": "The standard letter keyboard."
+            },
+            {
+              "key": "number",
+              "name": "Number",
+              "description": "A number pad."
+            },
+            {
+              "key": "email",
+              "name": "Email",
+              "description": "Letters with @ and . keys."
+            },
+            {
+              "key": "url",
+              "name": "URL",
+              "description": "Letters with / and .com keys."
+            },
+            {
+              "key": "phone",
+              "name": "Phone",
+              "description": "A phone dial pad."
+            }
+          ],
+          "description": "Which keyboard to measure; Auto follows the Text Field being edited, and number and phone pads are shorter on phones."
+        },
+        {
+          "key": "appearance",
+          "name": "Appearance",
+          "type": "enum",
+          "default": "default",
+          "enumOptions": [
+            {
+              "key": "default",
+              "name": "Default",
+              "description": "Follows the system appearance."
+            },
+            {
+              "key": "light",
+              "name": "Light"
+            },
+            {
+              "key": "dark",
+              "name": "Dark"
+            }
+          ],
+          "description": "Light or dark styling for the simulated keyboard the desktop viewer draws; doesn't change any measurement.",
+          "advanced": true
+        }
+      ],
+      "outputs": [
+        {
+          "key": "visibleHeight",
+          "name": "Visible Height",
+          "type": "number",
+          "subtype": "distance",
+          "description": "How many points of the screen the keyboard covers right now, animating as it slides."
+        },
+        {
+          "key": "height",
+          "name": "Height",
+          "type": "number",
+          "subtype": "distance",
+          "description": "The keyboard's full height in points for this device and orientation, even while hidden."
+        },
+        {
+          "key": "progress",
+          "name": "Progress",
+          "type": "number",
+          "subtype": "progress",
+          "description": "0 while hidden, 1 when fully shown, easing between as the keyboard slides."
+        },
+        {
+          "key": "visible",
+          "name": "Visible",
+          "type": "boolean",
+          "description": "True while the keyboard is shown or sliding up."
+        }
+      ],
+      "alwaysEvaluate": true,
+      "pairsWellWith": [
+        "multiply",
+        "add",
+        "transition",
+        "deviceInfo",
+        "classicAnimation"
+      ],
+      "commonMistakes": [
+        "The bar jumps instead of sliding: it follows Visible, which switches instantly. Use Visible Height or Progress, which animate.",
+        "Everything stays 0 in the desktop viewer: the device is a computer, which has no on-screen keyboard. Pick a phone or tablet device and tap into a Text Field.",
+        "The bar floats too high on iPhones: Visible Height already includes the home-indicator area. Don't add the bottom Safe Area on top of it."
+      ],
+      "examples": [
+        {
+          "title": "Keep a message bar above the keyboard",
+          "description": "Multiplying by [0, -1] turns the covered height into an upward offset.",
+          "outline": "layer composer group \"Composer\" @0,818 402x56 position←composer_position.output\n  layer message_field textField \"Message Field\" @16,6 370x44\npatch keyboard_info softKeyboard\npatch rise multiply<point>[2] value1←keyboard_info.visibleHeight value2=[0,-1]\npatch composer_position add<point>[2] value1=[0,818] value2←rise.output"
+        },
+        {
+          "title": "Dim the feed while typing",
+          "outline": "layer feed rectangle \"Feed\" @0,0 402x874 opacity←dim.output\npatch keyboard_info softKeyboard\npatch dim transition<number> progress←keyboard_info.progress start=1 end=0.4"
+        }
+      ],
+      "origami": {
+        "id": "builtin.keyboard.info",
+        "name": "Keyboard Info"
+      },
+      "origamiPorts": {
+        "keyboardType": "Type",
+        "appearance": "Appearence"
+      },
+      "defaultNotes": {
+        "keyboardType": "sonobe: Origami has no Auto option (its first option is Default); following the focused Text Field works without setup.",
+        "appearance": "inferred: Default is Origami's first Appearence option."
+      }
+    },
+    {
+      "type": "bluetoothLe",
+      "name": "Bluetooth LE",
+      "category": "device",
+      "tier": 3,
+      "status": "web-limited",
+      "statusReason": "Uses Web Bluetooth, which ships only in Chromium browsers (Chrome and Edge on desktop, Chrome on Android) and the desktop app. Safari, iOS, and Firefox have none, and connecting always needs a tap and the browser's device chooser.",
+      "platforms": [
+        "desktop",
+        "web",
+        "mobile"
+      ],
+      "aliases": [
+        "bluetooth",
+        "ble",
+        "gatt",
+        "peripheral",
+        "arduino",
+        "esp32",
+        "heart rate monitor",
+        "hardware prototype",
+        "iot"
+      ],
+      "summary": "Connects to a Bluetooth Low Energy device to read, write, and receive values, for hardware and sensor prototypes.",
+      "docs": "## How it works\nBluetooth LE talks to a nearby Bluetooth Low Energy device, like a heart-rate strap, a smart bulb, or an Arduino board.\n\n1. Send a pulse from a tap into **Connect**. The browser lists nearby devices that offer **Service UUID**, and you pick one.\n2. The patch opens **Characteristic UUID**, one value on the device, and reads it once.\n3. With **Notifications** on, new values arrive by themselves. **Read** asks again, and **Write** sends **Write Value**.\n\n- **Format** says how bytes become numbers or text, like Unsigned 8-bit for a battery level.\n- **Value** is the latest number, **Text** the latest text (or the bytes in hex), and **Received** pulses when a value arrives.\n- **Connected** is true while linked, and **Error Message** explains what went wrong.\n\nUUIDs accept standard names like battery_service, 4-character codes like 180F, or full UUIDs.\n\n## Tips\n- Use Chrome or Edge on a computer, or Chrome on Android. iPhones can't use Web Bluetooth.\n- Before your hardware is ready, test with a phone app that simulates a Bluetooth device.\n\n## Coming from Origami\nOrigami's Bluetooth LE patches aren't documented. This one patch covers connecting, reading, writing, and notifications.",
+      "behavior": "State per loop index: `{ gen: 0, link: null, connectError: null, dropped: false, incoming: null, ops: Promise.resolve(), opError: null, connected: false, loading: false, value: 0, text: \"\", deviceName: \"\", errorMessage: \"\", notifying: null }`.\n\nHost service (contract request, `PlatformServices.bluetooth`):\n```\ninterface BleService { available: boolean; connect(opts: { service: string; characteristic: string; namePrefix?: string }): Promise<BleLink>; }\ninterface BleLink {\n  name: string; canRead: boolean; canNotify: boolean;\n  read(): Promise<Uint8Array>; write(bytes: Uint8Array): Promise<void>; setNotifications(on: boolean): Promise<void>;\n  onValue(cb: (bytes: Uint8Array) => void): void; onDisconnect(cb: () => void): void; disconnect(): void;\n}\n```\n\nEach frame:\n```\nconst ble = ctx.services.platform.bluetooth;\nconst fail = (message) => { state.errorMessage = message; state.error = true; };\n// 1. Apply async results stored by callbacks (callbacks never call ctx.output).\nif (state.link && !state.connected) { state.connected = true; state.loading = false; state.deviceName = state.link.name; state.error = false; state.errorMessage = \"\"; queue(state, () => state.link.canRead ? state.link.read().then(store) : null); }\nif (state.connectError) { state.loading = false; fail(state.connectError); state.connectError = null; }\nif (state.dropped) { resetLink(state); fail(\"The device disconnected.\"); state.dropped = false; }\nif (state.opError) { fail(state.opError); state.opError = null; }\n// 2. Commands. Disconnect beats Connect; Write runs before Read.\nif (ctx.pulsed(\"disconnect\")) { state.gen++; state.link?.disconnect(); resetLink(state); }\nelse if (ctx.pulsed(\"connect\") && !state.connected && !state.loading) {\n  if (!ble?.available) { fail(\"Bluetooth LE isn't available in this browser.\"); ctx.services.log(\"log\", \"Bluetooth LE: connect (no Bluetooth here)\"); }\n  else {\n    const gen = ++state.gen;\n    state.loading = true; state.error = false; state.errorMessage = \"\";\n    ble.connect({ service: normalizeUuid(ctx.input(\"serviceUuid\")), characteristic: normalizeUuid(ctx.input(\"characteristicUuid\")), namePrefix: ctx.input(\"namePrefix\") || undefined })\n      .then((link) => {\n        if (state.gen !== gen) return link.disconnect();\n        link.onValue((bytes) => { if (state.gen === gen) state.incoming = bytes; });\n        link.onDisconnect(() => { if (state.gen === gen) state.dropped = true; });\n        state.link = link;\n      }, (err) => { if (state.gen === gen) state.connectError = describeError(err); });\n  }\n}\nif (ctx.pulsed(\"write\")) state.connected ? encodeAndQueueWrite(state, ctx.input(\"writeValue\"), ctx.input(\"format\")) : fail(\"Connect before writing.\");\nif (ctx.pulsed(\"read\")) state.connected ? queue(state, () => state.link.read().then(store)) : fail(\"Connect before reading.\");\nconst wantNotify = state.connected && ctx.input(\"notifications\") && state.link.canNotify;\nif (state.connected && state.notifying !== wantNotify) { state.notifying = wantNotify; queue(state, () => state.link.setNotifications(wantNotify)); }\n// 3. Deliver the newest value.\nif (state.incoming) { [state.value, state.text] = decode(state.incoming, ctx.input(\"format\")); state.incoming = null; ctx.pulse(\"received\"); }\nif (state.loading || state.connected) ctx.requestNextFrame();\nctx.output(\"value\", state.value); ctx.output(\"text\", state.text);\nctx.output(\"connected\", state.connected); ctx.output(\"deviceName\", state.deviceName);\nctx.output(\"errorMessage\", state.errorMessage); ctx.output(\"loading\", state.loading);\nctx.output(\"available\", ble?.available === true); ctx.output(\"error\", state.error === true);\n```\n\n- `store(bytes)` sets `state.incoming = bytes`. `queue(state, op)` chains `op` onto `state.ops`, so GATT operations run one at a time (Web Bluetooth rejects overlapping ones); a rejection stores `describeError(err)` in `state.opError`, and results for an older `gen` are dropped. `resetLink` clears `link`, `connected`, `loading`, `notifying`, and `deviceName` but keeps the last Value and Text.\n- `normalizeUuid(s)`: trim and lowercase. 4 hex digits (optionally `0x`-prefixed) → `0000xxxx-0000-1000-8000-00805f9b34fb`; 8 hex digits → `xxxxxxxx-0000-1000-8000-00805f9b34fb`; a 36-character UUID passes through; anything else is treated as a GATT name with spaces turned into underscores (`heart rate` → `heart_rate`). The host reports unknown names as errors.\n- `decode(bytes, format)`: little-endian `DataView` reads for the numeric formats; too few bytes → Value 0 and one warning per restart. Text for numeric formats is the bytes as uppercase hex pairs (`0A FF`). `text` → UTF-8 decode, and Value is `Number(text)` when finite, else 0. `hex` → Text is the hex pairs and Value is the first byte.\n- Write encoding: numeric formats parse Write Value as a number, round integers, and clamp to the format's range. Non-numbers fail with \"Write Value isn't a number.\" `text` → UTF-8 bytes. `hex` → pairs with spaces, colons, and `0x` ignored; odd or invalid digits fail. More than 512 bytes fails.\n- Host (web): `connect` calls `navigator.bluetooth.requestDevice({ filters: [{ services: [service], namePrefix }] })`, then `gatt.connect()`, `getPrimaryService`, and `getCharacteristic`. Error text: user cancelled → \"No device was chosen.\"; missing user activation → \"Connect needs a tap first.\"; unsupported service or characteristic → \"The device doesn't offer that service or characteristic.\". The desktop app answers Electron's `select-bluetooth-device` event with its own chooser.\n- Pulses: `connect`, `disconnect`, `read`, `write`. Disconnect beats Connect in one frame. Connect while connected or connecting does nothing. Write is queued before Read in the same frame, so Read sees the written value. Consecutive-frame pulses each queue an operation.\n- Retargeting: changing Service UUID, Characteristic UUID, or Name Prefix while connected takes effect on the next Connect (browsers only grant services named in the chooser), with one warning. Changing Notifications while connected turns them on or off.\n- Values: when several values arrive between frames, the newest wins and Received pulses once.\n- Frame 0: disconnected; Available reflects the platform.\n- Loops: per-index state; each index keeps its own connection and chooser.\n- Edge cases: empty UUIDs fail on Connect with \"Service UUID is empty.\" or \"Characteristic UUID is empty.\"\n- Muted: never connects, reads, or writes; outputs zeros.\n- Async: see the pseudo-code; nothing calls `ctx.output` from a callback, and `gen` discards results from replaced connections.\n- Platform and simulation: the deterministic runtime has no Bluetooth service, so Available is false and Connect logs instead of scanning.\n- Restart and dispose: `dispose` disconnects the link and drops its callbacks. After a restart the patch starts disconnected; reconnecting needs another tap.\n- Coming from Origami: v217 added a family of Bluetooth LE patches without published names or ports. Importers map matching labels (Connect, Disconnect, Service UUID, Characteristic UUID, Read, Write, Value, Connected) onto this patch and warn about anything else.",
+      "inputs": [
+        {
+          "key": "connect",
+          "name": "Connect",
+          "type": "pulse",
+          "description": "Pulse to open the browser's device chooser and connect to the device you pick; send it from a tap."
+        },
+        {
+          "key": "disconnect",
+          "name": "Disconnect",
+          "type": "pulse",
+          "description": "Pulse to end the connection."
+        },
+        {
+          "key": "read",
+          "name": "Read",
+          "type": "pulse",
+          "description": "Pulse to ask the device for the characteristic's current value."
+        },
+        {
+          "key": "write",
+          "name": "Write",
+          "type": "pulse",
+          "description": "Pulse to send Write Value to the characteristic."
+        },
+        {
+          "key": "writeValue",
+          "name": "Write Value",
+          "type": "text",
+          "default": "0",
+          "description": "What Write sends, encoded with Format: a number like 128, text, or hex bytes like 0A FF."
+        },
+        {
+          "key": "serviceUuid",
+          "name": "Service UUID",
+          "type": "text",
+          "default": "battery_service",
+          "description": "The service to look for: a standard name like heart_rate, a 4-character code like 180F, or a full UUID."
+        },
+        {
+          "key": "characteristicUuid",
+          "name": "Characteristic UUID",
+          "type": "text",
+          "default": "battery_level",
+          "description": "The value inside the service to read, write, or watch, written like Service UUID."
+        },
+        {
+          "key": "format",
+          "name": "Format",
+          "type": "enum",
+          "default": "uint8",
+          "enumOptions": [
+            {
+              "key": "uint8",
+              "name": "Unsigned 8-bit",
+              "description": "One byte, 0 to 255, like a battery level."
+            },
+            {
+              "key": "int8",
+              "name": "Signed 8-bit",
+              "description": "One byte, -128 to 127."
+            },
+            {
+              "key": "uint16",
+              "name": "Unsigned 16-bit",
+              "description": "Two bytes, little-endian, 0 to 65,535."
+            },
+            {
+              "key": "int16",
+              "name": "Signed 16-bit",
+              "description": "Two bytes, little-endian, -32,768 to 32,767."
+            },
+            {
+              "key": "uint32",
+              "name": "Unsigned 32-bit",
+              "description": "Four bytes, little-endian."
+            },
+            {
+              "key": "int32",
+              "name": "Signed 32-bit",
+              "description": "Four bytes, little-endian."
+            },
+            {
+              "key": "float32",
+              "name": "Float 32-bit",
+              "description": "Four bytes, little-endian decimal number."
+            },
+            {
+              "key": "text",
+              "name": "Text",
+              "description": "UTF-8 text, like a command string."
+            },
+            {
+              "key": "hex",
+              "name": "Hex Bytes",
+              "description": "Raw bytes written as hex pairs, like 0A FF."
+            }
+          ],
+          "description": "How the characteristic's bytes turn into Value and Text, and how Write Value becomes bytes."
+        },
+        {
+          "key": "notifications",
+          "name": "Notifications",
+          "type": "boolean",
+          "default": true,
+          "description": "When on, new values arrive by themselves while connected, if the characteristic supports it."
+        },
+        {
+          "key": "namePrefix",
+          "name": "Name Prefix",
+          "type": "text",
+          "default": "",
+          "description": "Only list devices whose names start with this text; empty lists every device offering the service.",
+          "advanced": true
+        }
+      ],
+      "outputs": [
+        {
+          "key": "value",
+          "name": "Value",
+          "type": "number",
+          "description": "The latest value as a number, decoded with Format."
+        },
+        {
+          "key": "text",
+          "name": "Text",
+          "type": "text",
+          "description": "The latest value as text for the Text format, otherwise its bytes in hex like 0A FF."
+        },
+        {
+          "key": "received",
+          "name": "Received",
+          "type": "pulse",
+          "description": "Pulses on the frame a new value arrives from a read or a notification."
+        },
+        {
+          "key": "connected",
+          "name": "Connected",
+          "type": "boolean",
+          "description": "True while connected to a device."
+        },
+        {
+          "key": "deviceName",
+          "name": "Device Name",
+          "type": "text",
+          "description": "The connected device's name, or empty."
+        },
+        {
+          "key": "errorMessage",
+          "name": "Error Message",
+          "type": "text",
+          "description": "What went wrong most recently, like a cancelled chooser; empty after a successful connect."
+        },
+        {
+          "key": "loading",
+          "name": "Loading",
+          "type": "boolean",
+          "description": "True while connecting.",
+          "advanced": true
+        },
+        {
+          "key": "available",
+          "name": "Available",
+          "type": "boolean",
+          "description": "True when this browser or app supports Bluetooth LE.",
+          "advanced": true
+        },
+        {
+          "key": "error",
+          "name": "Error",
+          "type": "boolean",
+          "description": "True when the last connect, read, or write failed.",
+          "advanced": true
+        }
+      ],
+      "alwaysEvaluate": true,
+      "pairsWellWith": [
+        "interaction",
+        "pulse",
+        "transition",
+        "formatNumber",
+        "popAnimation"
+      ],
+      "commonMistakes": [
+        "Connect does nothing and Error Message says it needs a tap: browsers only open the device chooser right after someone taps. Wire Connect from an Interaction's Tap, not from When Prototype Starts.",
+        "The chooser lists no devices: the device doesn't advertise Service UUID. Check which service your device offers, or find it by name with Name Prefix.",
+        "Value shows strange, huge numbers: Format doesn't match the device's data. A battery level is Unsigned 8-bit; many sensors send Signed 16-bit or Float 32-bit.",
+        "Nothing works on an iPhone: Safari has no Web Bluetooth. Use Chrome on Android or on a computer."
+      ],
+      "examples": [
+        {
+          "title": "Show a device's battery level",
+          "outline": "layer battery_label text \"Battery Label\" @16,200 text←battery.value\nlayer connect_button rectangle \"Connect Button\" @16,780 370x56 cornerRadius=14\npatch tap_connect interaction layer=@connect_button\npatch battery bluetoothLe connect←tap_connect.tap serviceUuid=\"battery_service\" characteristicUuid=\"battery_level\" format=uint8"
+        },
+        {
+          "title": "Grow a heart when a hardware button is pressed",
+          "description": "The board sends 1 while its button is held and 0 when released.",
+          "outline": "layer heart oval \"Heart\" @171,380 60x60 color=#E5484DFF scale←grow.output\nlayer pair_button rectangle \"Pair Button\" @16,780 370x56 cornerRadius=14\npatch tap_pair interaction layer=@pair_button\npatch board bluetoothLe connect←tap_pair.tap serviceUuid=\"19b10000-e8f2-537e-4f6c-d104768a1214\" characteristicUuid=\"19b10001-e8f2-537e-4f6c-d104768a1214\" format=uint8 notifications=true\npatch press popAnimation number←board.value bounciness=10 speed=16\npatch grow transition<number> progress←press.output start=1 end=1.3"
+        }
+      ],
+      "origami": {
+        "name": "Bluetooth LE"
+      },
+      "defaultNotes": {
+        "writeValue": "sonobe: Origami's ports are unpublished; 0 is a valid one-byte value.",
+        "serviceUuid": "sonobe: the standard Battery Service, which many devices offer.",
+        "characteristicUuid": "sonobe: Battery Level, readable on most devices with a Battery Service.",
+        "format": "sonobe: Battery Level is one unsigned byte.",
+        "notifications": "sonobe: on, so values that support notifications update without extra wiring.",
+        "namePrefix": "sonobe: empty lists every device offering the service."
+      }
+    }
+  ]
+}

@@ -1,0 +1,1219 @@
+{
+  "file": "text-1.json",
+  "category": "text",
+  "patches": [
+    {
+      "type": "formatNumber",
+      "name": "Format Number",
+      "category": "text",
+      "tier": 1,
+      "status": "supported",
+      "aliases": [
+        "number to text",
+        "number formatter",
+        "decimal places",
+        "thousands separator",
+        "currency",
+        "percent",
+        "price",
+        "compact number",
+        "leading zeros",
+        "tofixed"
+      ],
+      "summary": "Turns a number into display text with set decimals, separators, a percent or K/M style, and your own prefix and suffix.",
+      "docs": "## How it works\nFormat Number turns a number into text you can show in a Text layer, like a price, a score, or a like count.\n\n- **Value** is the number to show.\n- **Style** writes it as plain digits, as a percentage, or shortened: **Compact** turns 12,345 into 12K.\n- **Decimals** sets how many digits follow the decimal point. The number rounds to fit.\n- **Prefix** and **Suffix** add text around the number, such as \"$\" or \" of 5\". Include any spaces you want.\n- **Group Thousands** adds separators: 12,500 instead of 12500.\n\nAdvanced ports control rounding, trailing zeros, leading zeros, and the separator characters (1.234,5 in many European languages).\n\n## Tips\n- For follower counts, use Compact with Decimals 1 and Trailing Zeros off: 1,200 shows 1.2K and 1,000 shows 1K.\n- Countdowns read better with Rounding set to Up, so the label shows 1 until the last second is over.\n- To join several values into one label, use Add set to Text.\n\n## Coming from Origami\nOrigami has no number formatter. Format Number replaces labels built with Add set to Text or with a JavaScript patch.",
+      "behavior": "Stateless.\n\nHelpers:\n- `whole(x, lo, hi) = Number.isFinite(x) ? Math.min(hi, Math.max(lo, Math.floor(x + 1e-6))) : lo`. The epsilon keeps 1.9999999999999998 from rounding down to 1.\n- `roundDecimal(x, d, mode)` returns `x` rounded to exactly `d` decimals as an en-US digit string without grouping, such as `\"-1234.50\"`. Round the shortest round-trip decimal of `x` (`String(x)`), not its binary value, so 1.005 at 2 decimals gives \"1.01\". Reference: `new Intl.NumberFormat(\"en-US\", { useGrouping: false, minimumFractionDigits: d, maximumFractionDigits: d, roundingMode }).format(String(x))`, where `roundingMode` is `\"halfExpand\"` for nearest, `\"floor\"` for down, and `\"ceil\"` for up. This needs Intl.NumberFormat v3 (string input and `roundingMode`). Older engines silently ignore `roundingMode`, so feature-detect it and fall back to a decimal-string rounding helper that produces the same digits. Cache formatters by `(d, mode)`.\n\nEach frame:\n```\nconst style = ctx.input<string>(\"style\");\nconst d = whole(ctx.input<number>(\"decimals\"), 0, 20);\nconst mode = ctx.input<string>(\"rounding\");\nlet n = ctx.input<number>(\"value\");\nif (style === \"percent\") n *= 100;\nlet digits = roundDecimal(n, d, mode);\nlet unit = style === \"percent\" ? \"%\" : \"\";\nif (style === \"compact\") {\n  const units = [\"\", \"K\", \"M\", \"B\", \"T\"];\n  let k = 0;\n  while (k < 4 && Math.abs(n) >= 1000 ** (k + 1)) k++;\n  digits = roundDecimal(n / 1000 ** k, d, mode);\n  if (k < 4 && Math.abs(Number(digits)) >= 1000) {\n    k++;\n    digits = roundDecimal(n / 1000 ** k, d, mode);\n  }\n  unit = units[k];\n}\nconst negative = digits.startsWith(\"-\") && /[1-9]/.test(digits);\nlet [intPart, fraction = \"\"] = digits.replace(\"-\", \"\").split(\".\");\nif (!ctx.input<boolean>(\"trailingZeros\")) fraction = fraction.replace(/0+$/, \"\");\nintPart = intPart.padStart(whole(ctx.input<number>(\"minimumDigits\"), 1, 21), \"0\");\nconst [group, decimal] = { commaPeriod: [\",\", \".\"], periodComma: [\".\", \",\"], spaceComma: [\" \", \",\"] }[ctx.input<string>(\"separators\")];\nif (ctx.input<boolean>(\"groupThousands\")) intPart = intPart.replace(/\\B(?=(\\d{3})+(?!\\d))/g, group);\nconst body = (negative ? \"-\" : \"\") + intPart + (fraction ? decimal + fraction : \"\") + unit;\nctx.output(\"text\", ctx.input<string>(\"prefix\") + body + ctx.input<string>(\"suffix\"));\n```\n\n- Examples (other ports at defaults): 1234.5 → \"1,235\". Decimals 2 → \"1,234.50\"; with Trailing Zeros off → \"1,234.5\". Percent on 0.426 → \"43%\". Compact on 12345 with Decimals 1 → \"12.3K\". Compact on 999950 with Decimals 1 → \"1.0M\", because a result that rounds up to 1000 moves to the next unit (\"1M\" with Trailing Zeros off). −0.4 → \"0\". Minimum Digits 2 on 7 → \"07\". Separators Period and Comma with Decimals 2 on 1234.5 → \"1.234,50\".\n- Sign: an ASCII hyphen-minus goes directly before the digits, after Prefix, so Prefix \"$\" on −5 gives \"$-5\". A value that rounds to zero never shows a sign.\n- Rounding: Nearest rounds half away from zero (2.5 → 3, −2.5 → −3). Down rounds toward negative infinity (−2.1 → −3). Up rounds toward positive infinity (2.1 → 3). Compact rounds the shortened number.\n- Compact units: K = 10³, M = 10⁶, B = 10⁹, T = 10¹². Values below 1000 get no unit, and larger values stay in T (2e15 → \"2,000T\").\n- Edge cases: `value` arrives finite through port coercion. The output never contains exponent notation, NaN, or Infinity: `roundDecimal` writes every digit (1e21 → \"1,000,000,000,000,000,000,000\"). Non-integer Decimals and Minimum Digits round down and clamp to their ranges. Numbers wired into Prefix or Suffix arrive as text.\n- Loops: evaluates once per loop index; every input may be a loop.\n- Frame 0: no special case.\n- Muted: outputs Value through the standard number-to-text coercion (up to 6 decimals, no grouping), so a label still shows something.\n- Restart and dispose: nothing to reset or release.\n- Coming from Origami: Sonobe-native (CONVENTIONS.md §18.1); Origami has no equivalent patch.",
+      "inputs": [
+        {
+          "key": "value",
+          "name": "Value",
+          "type": "number",
+          "default": 0,
+          "description": "The number to show as text."
+        },
+        {
+          "key": "style",
+          "name": "Style",
+          "type": "enum",
+          "default": "number",
+          "enumOptions": [
+            {
+              "key": "number",
+              "name": "Number",
+              "description": "Plain digits, like 1,234.5."
+            },
+            {
+              "key": "percent",
+              "name": "Percent",
+              "description": "Multiplies by 100 and adds %, so 0.42 shows 42%."
+            },
+            {
+              "key": "compact",
+              "name": "Compact",
+              "description": "Shortens large numbers with K, M, B, and T, like 12.3K."
+            }
+          ],
+          "description": "How the number is written: plain digits, a percentage, or shortened with K, M, B, and T."
+        },
+        {
+          "key": "decimals",
+          "name": "Decimals",
+          "type": "number",
+          "default": 0,
+          "min": 0,
+          "max": 20,
+          "step": 1,
+          "description": "How many digits to show after the decimal point, from 0 to 20. With Compact, they apply to the shortened number (1.2K has 1)."
+        },
+        {
+          "key": "prefix",
+          "name": "Prefix",
+          "type": "text",
+          "default": "",
+          "description": "Text placed before the number, such as \"$\" or \"Page \"."
+        },
+        {
+          "key": "suffix",
+          "name": "Suffix",
+          "type": "text",
+          "default": "",
+          "description": "Text placed after the number, such as \" pts\" or \" of 5\"."
+        },
+        {
+          "key": "groupThousands",
+          "name": "Group Thousands",
+          "type": "boolean",
+          "default": true,
+          "description": "When on, separates thousands (12,500); when off, shows 12500."
+        },
+        {
+          "key": "trailingZeros",
+          "name": "Trailing Zeros",
+          "type": "boolean",
+          "default": true,
+          "description": "When on, always shows every decimal place (12.50); when off, drops zeros at the end (12.5).",
+          "advanced": true
+        },
+        {
+          "key": "rounding",
+          "name": "Rounding",
+          "type": "enum",
+          "default": "nearest",
+          "enumOptions": [
+            {
+              "key": "nearest",
+              "name": "Nearest",
+              "description": "Rounds to the closest value; halves round away from zero, so 2.5 shows 3."
+            },
+            {
+              "key": "down",
+              "name": "Down",
+              "description": "Rounds toward negative infinity, so 2.9 shows 2 and −2.1 shows −3."
+            },
+            {
+              "key": "up",
+              "name": "Up",
+              "description": "Rounds toward positive infinity, so 2.1 shows 3."
+            }
+          ],
+          "description": "How extra decimal places are rounded away.",
+          "advanced": true
+        },
+        {
+          "key": "minimumDigits",
+          "name": "Minimum Digits",
+          "type": "number",
+          "default": 1,
+          "min": 1,
+          "max": 21,
+          "step": 1,
+          "description": "Pads the whole-number part with leading zeros to at least this many digits: 2 shows 7 as 07.",
+          "advanced": true
+        },
+        {
+          "key": "separators",
+          "name": "Separators",
+          "type": "enum",
+          "default": "commaPeriod",
+          "enumOptions": [
+            {
+              "key": "commaPeriod",
+              "name": "Comma and Period",
+              "description": "1,234.5"
+            },
+            {
+              "key": "periodComma",
+              "name": "Period and Comma",
+              "description": "1.234,5"
+            },
+            {
+              "key": "spaceComma",
+              "name": "Space and Comma",
+              "description": "1 234,5, with a no-break space"
+            }
+          ],
+          "description": "Which characters separate thousands and decimals.",
+          "advanced": true
+        }
+      ],
+      "outputs": [
+        {
+          "key": "text",
+          "name": "Text",
+          "type": "text",
+          "description": "The formatted number, including Prefix and Suffix."
+        }
+      ],
+      "alwaysEvaluate": false,
+      "pairsWellWith": [
+        "counter",
+        "popAnimation",
+        "add",
+        "loopCount",
+        "stopwatch"
+      ],
+      "commonMistakes": [
+        "Percent shows 4200% instead of 42%: Percent multiplies by 100 because progress runs from 0 to 1. Feed it 0.42, or use Number with a Suffix of \"%\" when your value already runs from 0 to 100.",
+        "A price shows 12.5 instead of 12.50: Trailing Zeros is off. Turn it on so every decimal place shows.",
+        "The label shows 1234.567891: the number goes straight into the Text layer. Wire it through Format Number with Decimals set first."
+      ],
+      "examples": [
+        {
+          "title": "Like count that shortens with K",
+          "description": "Tapping adds likes to 1,284 existing ones, and Compact with one decimal shows 1.3K.",
+          "outline": "layer like_button oval \"Like Button\" @24,700 48x48\nlayer like_count text \"Like Count\" @84,712 text←count_label.text\npatch tap_like interaction layer=@like_button\npatch likes counter increase←tap_like.tap\npatch total add[2] value1←likes.count value2=1284\npatch count_label formatNumber value←total.output style=compact decimals=1 trailingZeros=false"
+        },
+        {
+          "title": "Page label for a story",
+          "description": "Counter counts from 0, so Add 1 before formatting: the label reads Page 1 of 5 through Page 5 of 5.",
+          "outline": "layer page_label text \"Page Label\" @24,60 text←label.text\nlayer next_button rectangle \"Next\" @254,780 120x44\npatch tap_next interaction layer=@next_button\npatch page counter increase←tap_next.tap maximumCount=5\npatch page_number add[2] value1←page.count value2=1\npatch label formatNumber value←page_number.output suffix=\" of 5\" prefix=\"Page \""
+        }
+      ],
+      "origami": null,
+      "defaultNotes": {
+        "value": "sonobe: 0 shows \"0\" until a number is wired in.",
+        "style": "sonobe: plain digits are the least surprising output.",
+        "decimals": "sonobe: whole numbers suit counts, the most common label.",
+        "prefix": "sonobe: no extra text until you add some.",
+        "suffix": "sonobe: no extra text until you add some.",
+        "groupThousands": "sonobe: separators keep large numbers readable, matching most interface copy.",
+        "trailingZeros": "sonobe: a fixed number of decimals keeps prices aligned (12.50).",
+        "rounding": "sonobe: nearest matches what people expect from rounding.",
+        "minimumDigits": "sonobe: 1 adds no leading zeros.",
+        "separators": "sonobe: comma and period match US English, the default document language."
+      }
+    },
+    {
+      "type": "textLength",
+      "name": "Text Length",
+      "category": "text",
+      "tier": 1,
+      "status": "supported",
+      "aliases": [
+        "character count",
+        "string length",
+        "strlen",
+        "count characters",
+        "length",
+        "how many letters"
+      ],
+      "summary": "Counts the characters in text, counting each emoji or accented letter as one character.",
+      "docs": "## How it works\nText Length counts the characters in **Text** and outputs the count as **Length**.\n\n- Every character counts as 1, including spaces, punctuation, and line breaks.\n- An emoji counts as 1, even skin-tone and flag emoji built from several parts, and so does an accented letter.\n- Empty text has a length of 0.\n\n## Tips\n- A number wired into an on/off port, such as a layer's Enabled, is on while it's above 0. Wire Length there to show something only when the text isn't empty.\n- For a character limit, compare Length with the limit using Greater Than, and turn a counter red when it's over.\n- Substring counts characters the same way, so positions from one line up with the other.",
+      "behavior": "Stateless.\n\nHelper: `graphemes(s)` splits text into user-perceived characters (extended grapheme clusters): `Array.from(segmenter.segment(s), (x) => x.segment)` with one module-level `segmenter = new Intl.Segmenter(undefined, { granularity: \"grapheme\" })`. Grapheme boundaries don't depend on the locale. Where `Intl.Segmenter` is missing, fall back to code points (`Array.from(s)`) and log one warning per restart through `ctx.services.log(\"warn\", …)`.\n\nEach frame:\n```\nctx.output(\"length\", graphemes(ctx.input<string>(\"text\")).length);\n```\n\n- Counting: \"héllo\" is 5 whether é is one code point or e plus a combining accent. \"👍🏽\", \"🇯🇵\", and \"👩‍👩‍👧\" are 1 each. \"\\r\\n\" is 1, and \"\" is 0. JavaScript's `string.length` (UTF-16 code units) is never used.\n- Coercion: the `text` port converts values before evaluation (ARCHITECTURE.md §4). 3.5 becomes \"3.5\" (3), true becomes \"true\" (4), and 1/3 becomes \"0.333333\" (8).\n- No trimming: leading and trailing spaces count.\n- Loops: evaluates once per loop index; a loop of texts gives a loop of lengths.\n- Performance: segmentation is O(n). Implementations may memoize the last text and result per loop index so long text isn't re-segmented every frame while it's unchanged.\n- Frame 0: no special case.\n- Restart and dispose: nothing to reset or release.\n- Coming from Origami: matches Origami's counting since its v73 emoji fix. Origami leaves the output unnamed; Sonobe calls it Length.",
+      "inputs": [
+        {
+          "key": "text",
+          "name": "Text",
+          "type": "text",
+          "default": "",
+          "description": "The text to count."
+        }
+      ],
+      "outputs": [
+        {
+          "key": "length",
+          "name": "Length",
+          "type": "number",
+          "step": 1,
+          "description": "How many characters Text has. Spaces, punctuation, and line breaks count, and each emoji counts as 1."
+        }
+      ],
+      "alwaysEvaluate": false,
+      "pairsWellWith": [
+        "substring",
+        "formatNumber",
+        "greaterThan",
+        "ifElse",
+        "transition"
+      ],
+      "commonMistakes": [
+        "Length never changes: the text is typed into the inspector, so it's a fixed value. Wire the text that changes into Text.",
+        "Length is one more than you expect: a trailing space or line break counts as a character. Remove it from the source, or check what the text holds with Watch."
+      ],
+      "examples": [
+        {
+          "title": "Type out a message letter by letter",
+          "description": "Wait's progress runs from 0 to 1 over 2 seconds, Transition scales it to the message's length, and Substring shows that many characters.",
+          "outline": "layer message text \"Message\" @24,120 text←typed.output\npatch launch whenPrototypeStarts\npatch message_text textReplace text=\"Hi {name}, your order is on its way.\" find=\"{name}\" replace=\"Sam\"\npatch message_length textLength text←message_text.output\npatch reveal wait start←launch.started duration=2\npatch shown transition<number> progress←reveal.progress start=0 end←message_length.length\npatch typed substring text←message_text.output length←shown.output"
+        }
+      ],
+      "origami": {
+        "id": "builtin.textlength",
+        "name": "Text Length"
+      },
+      "importAliases": [
+        "builtin.textLength"
+      ],
+      "origamiPorts": {
+        "length": "Output"
+      },
+      "defaultNotes": {
+        "text": "sonobe: Origami's example files hint at a placeholder sentence; empty text keeps Length at 0 until text is wired in."
+      }
+    },
+    {
+      "type": "splitText",
+      "name": "Split Text",
+      "category": "text",
+      "tier": 2,
+      "status": "supported",
+      "aliases": [
+        "split string",
+        "explode",
+        "tokenize",
+        "text to loop",
+        "comma separated",
+        "csv",
+        "separate words",
+        "split by"
+      ],
+      "summary": "Splits text into a loop of parts wherever a separator appears, like turning \"Home,Search,Profile\" into three tab labels.",
+      "docs": "## How it works\nSplit Text cuts **Text** apart wherever **Token** appears and outputs the pieces as a loop: a list of values that makes a layer repeat once per item.\n\n- **Token** is the separator, such as a comma, a space, or a line break. It must match exactly, including capital letters, and it isn't included in the parts.\n- **Parts** is the loop of pieces, in order. When Token doesn't appear, Parts holds the whole text as one item.\n- **Count** is how many parts there are.\n- An empty Token splits the text into single characters, which is handy for animating letter by letter.\n- Two tokens in a row leave an empty part between them. Turn on the advanced **Skip Empty** port to drop empty parts.\n\n## Tips\n- Wire Parts into a Text layer inside a group with Layout set to Row or Column to get one label per part.\n- Feed Count into a Loop patch to get an index for staggering animations.\n- A loop of texts splits each one and joins all the parts into one loop.\n\n## Coming from Origami\nThe output is named Parts, and Count and Skip Empty are new. An empty Token splits into characters instead of returning the whole text.",
+      "behavior": "State per instance: `{ warned: false }`, used only for warn-once logging. `text` and `parts` are whole-loop ports, so the patch evaluates once per frame rather than once per loop index. `token` and `skipEmpty` are ordinary ports; when a loop arrives on either, the patch reads item 0.\n\nHelper: `graphemes(s)` as in textLength (extended grapheme clusters through `Intl.Segmenter`, with a code-point fallback).\n\nEach frame:\n```\nconst texts = ctx.inputItems<string>(\"text\"); // a scalar arrives as one item\nconst token = ctx.input<string>(\"token\").normalize(\"NFC\");\nconst skipEmpty = ctx.input<boolean>(\"skipEmpty\");\nconst parts: string[] = [];\nfor (const item of texts) {\n  const text = item.normalize(\"NFC\");\n  const pieces = token === \"\" ? graphemes(text) : text.split(token);\n  for (const piece of pieces) if (!skipEmpty || piece !== \"\") parts.push(piece);\n}\nif (parts.length > 10000) {\n  parts.length = 10000;\n  if (!state.warned) { ctx.services.log(\"warn\", \"Split Text made more than 10,000 parts; the rest were dropped.\"); state.warned = true; }\n}\nctx.output(\"parts\", parts); // emitted as a loop\nctx.output(\"count\", parts.length);\n```\n\n- Matching: literal and case-sensitive. Token is never a pattern, and escape sequences aren't interpreted (backslash then n is two characters). Matches are found left to right without overlap: \"a,,b\" gives [\"a\", \"\", \"b\"], and \",a,\" gives [\"\", \"a\", \"\"].\n- Normalization: Text and Token are normalized to NFC first, so a letter with a composed accent matches the same letter with a combining accent. Parts are NFC text.\n- Empty cases: when Token isn't found, Parts is [text]. Empty Text with a non-empty Token gives [\"\"] and Count 1, or [] with Skip Empty. An empty Token gives each grapheme as a part: \"👋🏽 hi\" gives [\"👋🏽\", \" \", \"h\", \"i\"], and empty Text gives [] with Count 0.\n- Loops: the output length is the number of parts, not the input loop length. A loop on Text is flattened in order: [\"a,b\", \"c\"] with Token \",\" gives [\"a\", \"b\", \"c\"]. An empty loop on Text gives [] and Count 0.\n- Edge cases: the 10,000-part cap matches the engine's loop limit (ARCHITECTURE.md §4), and the warning logs once per restart.\n- Muted: Parts passes the Text items through unchanged, and Count is their number.\n- Frame 0: no special case.\n- Restart and dispose: restart clears `warned`. Nothing to release.\n- Coming from Origami: Origami labels the output \"Output\" and has no Count or Skip Empty. Its literal splitting (inferred) matches Sonobe for non-empty tokens. With an empty token Origami is inferred to return the whole text, while Sonobe splits into characters. Origami doesn't document looped Text input; Sonobe flattens it.",
+      "inputs": [
+        {
+          "key": "text",
+          "name": "Text",
+          "type": "text",
+          "default": "",
+          "description": "The text to split. A loop of texts splits each one and joins all the parts into one loop.",
+          "wholeLoop": true
+        },
+        {
+          "key": "token",
+          "name": "Token",
+          "type": "text",
+          "default": ",",
+          "description": "The separator to split at, such as \",\" or \" \"; it's left out of the parts. Leave it empty to split into single characters."
+        },
+        {
+          "key": "skipEmpty",
+          "name": "Skip Empty",
+          "type": "boolean",
+          "default": false,
+          "description": "When on, drops empty parts, such as the one between two commas in a row or after a trailing comma.",
+          "advanced": true
+        }
+      ],
+      "outputs": [
+        {
+          "key": "parts",
+          "name": "Parts",
+          "type": "text",
+          "description": "A loop of the pieces between separators, in order. When Token doesn't appear, it holds the whole text as one item.",
+          "wholeLoop": true
+        },
+        {
+          "key": "count",
+          "name": "Count",
+          "type": "number",
+          "step": 1,
+          "description": "How many parts there are."
+        }
+      ],
+      "alwaysEvaluate": false,
+      "pairsWellWith": [
+        "loop",
+        "loopSelect",
+        "loopFilter",
+        "textReplace",
+        "changeCase"
+      ],
+      "commonMistakes": [
+        "Every label after the first starts with a space: the text has a space after each comma, but Token is only \",\". Set Token to \", \".",
+        "Only one item appears: Token doesn't appear in the text, or its capital letters differ. Make Token match the separator exactly.",
+        "The copies stack on top of each other: each part makes its own copy of the layer at the same position. Put the layer in a group with Layout set to Row or Column."
+      ],
+      "examples": [
+        {
+          "title": "Tab labels from one line of text",
+          "outline": "layer tab_bar group \"Tab Bar\" @0,780 390x64 layout=row spacingMode=evenly\n  layer tab_label text \"Tab Label\" text←labels.parts\npatch labels splitText text=\"Home,Search,Inbox,Profile\""
+        },
+        {
+          "title": "Reveal a sentence word by word",
+          "description": "Loop turns Count into an index for each word, and Transition gives each word a later start: 0.3 s, 0.45 s, 0.6 s, and so on.",
+          "outline": "layer sentence group \"Sentence\" @24,200 342x40 layout=row spacing=6\n  layer word text \"Word\" text←words.parts opacity←fade.output\npatch words splitText text=\"Make something people love\" token=\" \"\npatch word_index loop count←words.count\npatch launch whenPrototypeStarts\npatch stagger transition<number> progress←word_index.index start=0.3 end=0.45\npatch reveal wait start←launch.started duration←stagger.output\npatch fade popAnimation number←reveal.done bounciness=0 speed=12"
+        }
+      ],
+      "origami": {
+        "id": "builtin.textsplitbytoken",
+        "name": "Split Text"
+      },
+      "importAliases": [
+        "builtin.textSplitByToken"
+      ],
+      "origamiPorts": {
+        "parts": "Output"
+      },
+      "defaultNotes": {
+        "text": "inferred: Origami's default is undocumented; empty text is the zero value.",
+        "token": "sonobe: Origami's default is undocumented; a comma is visible in the inspector and splits simple lists.",
+        "skipEmpty": "sonobe: keeping empty parts preserves positions, matching Origami's splitting."
+      }
+    },
+    {
+      "type": "textStartsWith",
+      "name": "Text Starts With",
+      "category": "text",
+      "tier": 2,
+      "status": "supported",
+      "aliases": [
+        "starts with",
+        "begins with",
+        "prefix",
+        "has prefix",
+        "startswith",
+        "text prefix"
+      ],
+      "summary": "Checks whether text begins with a given prefix, such as a slash command or https://.",
+      "docs": "## How it works\nText Starts With outputs **Starts With**: true when **Text** begins with **Prefix**, and false otherwise.\n\n- It checks the very first characters, so a leading space counts: \" hello\" doesn't start with \"hello\".\n- **Case Sensitive** is off by default, so \"Hello\" starts with \"he\". Turn it on when capitals matter.\n- An empty Prefix always matches.\n\n## Tips\n- Wire Starts With into Option Picker's Option to choose between two colors or icons.\n- For type-ahead search, feed a loop of names into Text and the search text into Prefix, then keep the matches with Loop Filter.\n- Need a match anywhere in the text? Use Text Contains.\n\n## Coming from Origami\nOrigami's version always matches capitals exactly and has no Case Sensitive port. Imported patches turn Case Sensitive on to keep that behavior.",
+      "behavior": "Stateless.\n\nHelper: `escapeRegExp(s) = s.replace(/[\\\\^$.*+?()[\\]{}|\\/]/g, \"\\\\$&\")`, which stays valid with the `u` flag.\n\nEach frame:\n```\nconst text = ctx.input<string>(\"text\").normalize(\"NFC\");\nconst prefix = ctx.input<string>(\"prefix\").normalize(\"NFC\");\nconst startsWith = ctx.input<boolean>(\"caseSensitive\")\n  ? text.startsWith(prefix)\n  : new RegExp(\"^\" + escapeRegExp(prefix), \"iu\").test(text);\nctx.output(\"startsWith\", startsWith);\n```\n\n- Case: with Case Sensitive off, matching uses Unicode simple case folding (the `i` and `u` regex flags) and doesn't depend on the locale. \"École\" starts with \"é\", but \"ß\" doesn't match \"SS\". Cache compiled regexes by prefix.\n- Normalization: both inputs are NFC-normalized, so composed and decomposed accents match.\n- Edge cases: an empty Prefix gives true for any Text, including empty Text. A Prefix longer than Text gives false. Nothing is trimmed.\n- Output: a state, not a pulse. It stays true while the condition holds, and pulse inputs downstream fire once when it turns true.\n- Loops: evaluates once per loop index; Text, Prefix, and Case Sensitive may each be loops.\n- Muted: outputs false.\n- Frame 0: no special case.\n- Restart and dispose: nothing to reset or release.\n- Coming from Origami: Text Starts With (`builtin.textprefix`) has no Case Sensitive port and matches exactly, so importers set `caseSensitive: true` on imported patches. Origami doesn't document the empty-prefix result; Sonobe returns true. Origami leaves the output unnamed.",
+      "inputs": [
+        {
+          "key": "text",
+          "name": "Text",
+          "type": "text",
+          "default": "",
+          "description": "The text to check."
+        },
+        {
+          "key": "prefix",
+          "name": "Prefix",
+          "type": "text",
+          "default": "",
+          "description": "The text that might appear at the very start of Text. An empty Prefix always matches."
+        },
+        {
+          "key": "caseSensitive",
+          "name": "Case Sensitive",
+          "type": "boolean",
+          "default": false,
+          "description": "When on, capital letters must match exactly; when off, case is ignored, so \"Hello\" starts with \"he\"."
+        }
+      ],
+      "outputs": [
+        {
+          "key": "startsWith",
+          "name": "Starts With",
+          "type": "boolean",
+          "description": "True while Text begins with Prefix."
+        }
+      ],
+      "alwaysEvaluate": false,
+      "pairsWellWith": [
+        "textEndsWith",
+        "textContains",
+        "loopFilter",
+        "optionPicker",
+        "changeCase"
+      ],
+      "commonMistakes": [
+        "A match is missed: the text starts with a space or line break, which counts. Remove it at the source, or use Text Contains when the position doesn't matter.",
+        "Everything matches while the search is empty: an empty Prefix always matches. Use Text Length to check that the search text isn't empty when nothing should match."
+      ],
+      "examples": [
+        {
+          "title": "Color links in a list",
+          "description": "Items that start with https:// turn blue.",
+          "outline": "layer rows group \"Rows\" @16,120 358x200 layout=column spacing=12\n  layer row_text text \"Row\" text←items.parts textColor←row_color.output\npatch items splitText text=\"Order #1042|https://example.com/track|Call support\" token=\"|\"\npatch is_link textStartsWith text←items.parts prefix=\"https://\"\npatch row_color optionPicker<color>[2] option←is_link.startsWith option0=\"#1C1C1EFF\" option1=\"#0A84FFFF\""
+        }
+      ],
+      "origami": {
+        "id": "builtin.textprefix",
+        "name": "Text Starts With"
+      },
+      "importAliases": [
+        "builtin.textPrefix"
+      ],
+      "origamiPorts": {
+        "startsWith": "Output"
+      },
+      "defaultNotes": {
+        "text": "inferred: Origami's default is undocumented; empty text is the zero value.",
+        "prefix": "inferred: Origami's default is undocumented; empty text is the zero value.",
+        "caseSensitive": "sonobe: ignoring case makes search-style checks work for most people; importers set true to keep Origami's exact matching."
+      }
+    },
+    {
+      "type": "textEndsWith",
+      "name": "Text Ends With",
+      "category": "text",
+      "tier": 2,
+      "status": "supported",
+      "aliases": [
+        "ends with",
+        "suffix",
+        "has suffix",
+        "endswith",
+        "file extension",
+        "text suffix"
+      ],
+      "summary": "Checks whether text ends with a given suffix, such as a file extension or a question mark.",
+      "docs": "## How it works\nText Ends With outputs **Ends With**: true when **Text** finishes with **Suffix**, and false otherwise.\n\n- It checks the very last characters, so a trailing space or line break counts: \"hello \" doesn't end with \"hello\".\n- **Case Sensitive** is off by default, so \"clip.MP4\" ends with \".mp4\". Turn it on when capitals matter.\n- An empty Suffix always matches.\n\n## Tips\n- Check file types by extension: \".mp4\" for videos, \".png\" for images.\n- Wire Ends With into a layer's Enabled to show a badge only when the text matches.\n- Need a match anywhere in the text? Use Text Contains.\n\n## Coming from Origami\nOrigami's version always matches capitals exactly and has no Case Sensitive port. Imported patches turn Case Sensitive on to keep that behavior.",
+      "behavior": "Stateless.\n\nHelper: `escapeRegExp(s) = s.replace(/[\\\\^$.*+?()[\\]{}|\\/]/g, \"\\\\$&\")`, which stays valid with the `u` flag.\n\nEach frame:\n```\nconst text = ctx.input<string>(\"text\").normalize(\"NFC\");\nconst suffix = ctx.input<string>(\"suffix\").normalize(\"NFC\");\nconst endsWith = ctx.input<boolean>(\"caseSensitive\")\n  ? text.endsWith(suffix)\n  : new RegExp(escapeRegExp(suffix) + \"$\", \"iu\").test(text);\nctx.output(\"endsWith\", endsWith);\n```\n\n- Case: with Case Sensitive off, matching uses Unicode simple case folding (the `i` and `u` regex flags) and doesn't depend on the locale. Cache compiled regexes by suffix.\n- Anchoring: without the `m` flag, `$` matches only at the very end, never before a trailing line break, so \"hi\\n\" doesn't end with \"hi\".\n- Normalization: both inputs are NFC-normalized, so composed and decomposed accents match.\n- Edge cases: an empty Suffix gives true for any Text, including empty Text. A Suffix longer than Text gives false. Nothing is trimmed.\n- Output: a state, not a pulse. It stays true while the condition holds.\n- Loops: evaluates once per loop index; Text, Suffix, and Case Sensitive may each be loops.\n- Muted: outputs false.\n- Frame 0: no special case.\n- Restart and dispose: nothing to reset or release.\n- Coming from Origami: Text Ends With (`builtin.textsuffix`) has no Case Sensitive port and matches exactly, so importers set `caseSensitive: true` on imported patches. Origami doesn't document the empty-suffix result; Sonobe returns true. Origami leaves the output unnamed.",
+      "inputs": [
+        {
+          "key": "text",
+          "name": "Text",
+          "type": "text",
+          "default": "",
+          "description": "The text to check."
+        },
+        {
+          "key": "suffix",
+          "name": "Suffix",
+          "type": "text",
+          "default": "",
+          "description": "The text that might appear at the very end of Text. An empty Suffix always matches."
+        },
+        {
+          "key": "caseSensitive",
+          "name": "Case Sensitive",
+          "type": "boolean",
+          "default": false,
+          "description": "When on, capital letters must match exactly; when off, case is ignored, so \"clip.MP4\" ends with \".mp4\"."
+        }
+      ],
+      "outputs": [
+        {
+          "key": "endsWith",
+          "name": "Ends With",
+          "type": "boolean",
+          "description": "True while Text finishes with Suffix."
+        }
+      ],
+      "alwaysEvaluate": false,
+      "pairsWellWith": [
+        "textStartsWith",
+        "textContains",
+        "or",
+        "optionPicker"
+      ],
+      "commonMistakes": [
+        "A match is missed: the text ends with a space or line break, which counts. Remove it at the source, or use Text Contains when the position doesn't matter.",
+        "\"photo.jpeg\" isn't treated as an image: the patch checks one Suffix, such as \".jpg\". Use one Text Ends With per extension and combine them with Or."
+      ],
+      "examples": [
+        {
+          "title": "Show a play icon for video attachments",
+          "description": "Case Sensitive is off, so the uppercase extension still matches.",
+          "outline": "layer attachment rectangle \"Attachment\" @16,300 358x200 cornerRadius=12\nlayer play_icon oval \"Play Icon\" @171,376 48x48 enabled←is_video.endsWith\npatch is_video textEndsWith text=\"beach-day.MP4\" suffix=\".mp4\""
+        }
+      ],
+      "origami": {
+        "id": "builtin.textsuffix",
+        "name": "Text Ends With"
+      },
+      "importAliases": [
+        "builtin.textSuffix"
+      ],
+      "origamiPorts": {
+        "endsWith": "Output"
+      },
+      "defaultNotes": {
+        "text": "inferred: Origami's default is undocumented; empty text is the zero value.",
+        "suffix": "inferred: Origami's default is undocumented; empty text is the zero value.",
+        "caseSensitive": "sonobe: ignoring case makes extension and keyword checks work for most people; importers set true to keep Origami's exact matching."
+      }
+    },
+    {
+      "type": "textContains",
+      "name": "Text Contains",
+      "category": "text",
+      "tier": 2,
+      "status": "supported",
+      "aliases": [
+        "contains",
+        "includes",
+        "search",
+        "find text",
+        "filter",
+        "indexof",
+        "has text",
+        "keyword"
+      ],
+      "summary": "Checks whether text includes a search term anywhere and where the first match starts, for search filters and keyword checks.",
+      "docs": "## How it works\nText Contains looks for **Find** anywhere inside **Text**.\n\n- **Contains** is true when Find appears at least once.\n- **Index** is where the first match begins, counted in characters from 0: in \"Hello world\", \"world\" begins at 6. It's −1 when there's no match.\n- **Case Sensitive** is off by default, so \"Maya\" contains \"ma\". Turn it on when capitals matter.\n- An empty Find always matches with Index 0, so a search filter shows every item until someone types.\n\n## Tips\n- Build a search filter: feed a loop of names into Text and the search text into Find, then keep the items where Contains is true with Loop Filter.\n- To dim rows that don't match instead of hiding them, wire Contains into an Option Picker set to Number and use its output as Opacity.\n- Index counts characters the same way as Substring, so you can cut text at a match.\n\n## Coming from Origami\nOrigami only has Text Starts With and Text Ends With. Text Contains matches anywhere in the text.",
+      "behavior": "Stateless.\n\nHelpers:\n- `escapeRegExp(s) = s.replace(/[\\\\^$.*+?()[\\]{}|\\/]/g, \"\\\\$&\")`, which stays valid with the `u` flag.\n- `graphemeIndex(text, offset)`: the number of grapheme segments (`Intl.Segmenter`, granularity `\"grapheme\"`) that end at or before the UTF-16 `offset`, that is `segments.filter((s) => s.index + s.segment.length <= offset).length`. A match that begins inside a grapheme reports that grapheme's index.\n\nEach frame:\n```\nconst text = ctx.input<string>(\"text\").normalize(\"NFC\");\nconst find = ctx.input<string>(\"find\").normalize(\"NFC\");\nconst offset = ctx.input<boolean>(\"caseSensitive\")\n  ? text.indexOf(find)\n  : text.search(new RegExp(escapeRegExp(find), \"iu\"));\nctx.output(\"contains\", offset >= 0);\nctx.output(\"index\", offset >= 0 ? graphemeIndex(text, offset) : -1);\n```\n\n- Case: with Case Sensitive off, matching uses Unicode simple case folding (the `i` and `u` regex flags) and doesn't depend on the locale. Cache compiled regexes by Find.\n- Normalization: both inputs are NFC-normalized. Index counts graphemes of the normalized text, the same unit Text Length and Substring use.\n- Edge cases: an empty Find gives Contains true and Index 0, even for empty Text. A Find longer than Text gives false and −1. Only the first match is reported.\n- Examples: Text \"Hello world\" with Find \"O\" gives Contains true, Index 4. Text \"👋🏽 hi\" with Find \"hi\" gives Index 2.\n- Output: Contains is a state, not a pulse.\n- Loops: evaluates once per loop index; Text, Find, and Case Sensitive may each be loops.\n- Muted: outputs Contains false and Index −1.\n- Frame 0: no special case.\n- Restart and dispose: nothing to reset or release.\n- Coming from Origami: Sonobe-native (CONVENTIONS.md §18.1). Origami only has starts-with and ends-with checks.",
+      "inputs": [
+        {
+          "key": "text",
+          "name": "Text",
+          "type": "text",
+          "default": "",
+          "description": "The text to search in."
+        },
+        {
+          "key": "find",
+          "name": "Find",
+          "type": "text",
+          "default": "",
+          "description": "The text to look for anywhere in Text. An empty Find always matches."
+        },
+        {
+          "key": "caseSensitive",
+          "name": "Case Sensitive",
+          "type": "boolean",
+          "default": false,
+          "description": "When on, capital letters must match exactly; when off, case is ignored, so \"Maya\" contains \"ma\"."
+        }
+      ],
+      "outputs": [
+        {
+          "key": "contains",
+          "name": "Contains",
+          "type": "boolean",
+          "description": "True while Find appears somewhere in Text."
+        },
+        {
+          "key": "index",
+          "name": "Index",
+          "type": "index",
+          "description": "Where the first match begins, counted in characters from 0, or −1 when there's no match."
+        }
+      ],
+      "alwaysEvaluate": false,
+      "pairsWellWith": [
+        "loopFilter",
+        "optionPicker",
+        "textStartsWith",
+        "substring",
+        "textLength"
+      ],
+      "commonMistakes": [
+        "Every item matches before anyone types: an empty Find always matches. That's usually right for a search filter; otherwise, also require that the search text's Text Length is above 0.",
+        "\"cafe\" doesn't find \"café\": accented letters are different letters. Search with the accent, or replace accented letters in both texts with Text Replace first."
+      ],
+      "examples": [
+        {
+          "title": "Dim contacts that don't match a search",
+          "description": "Case Sensitive is off, so \"mar\" matches Omar and Marisol.",
+          "outline": "layer contacts group \"Contacts\" @16,140 358x200 layout=column spacing=10\n  layer contact_name text \"Contact Name\" text←names.parts opacity←match_opacity.output\npatch names splitText text=\"Maya Chen,Omar Haddad,Marisol Ruiz,Theo Park\"\npatch match textContains text←names.parts find=\"mar\"\npatch match_opacity optionPicker<number>[2] option←match.contains option0=0.3 option1=1"
+        }
+      ],
+      "origami": null,
+      "defaultNotes": {
+        "text": "sonobe: empty text is the zero value.",
+        "find": "sonobe: an empty search matches everything, so a filter shows every item until someone types.",
+        "caseSensitive": "sonobe: search filters should ignore capital letters by default."
+      }
+    },
+    {
+      "type": "textReplace",
+      "name": "Text Replace",
+      "category": "text",
+      "tier": 2,
+      "status": "supported",
+      "aliases": [
+        "find and replace",
+        "replace all",
+        "substitute",
+        "template",
+        "placeholder",
+        "string replace",
+        "remove characters"
+      ],
+      "summary": "Replaces every occurrence of some text with other text, for templates like \"Hi {name}\" or removing characters.",
+      "docs": "## How it works\nText Replace searches **Text** for **Find** and puts **Replace** in place of every match.\n\n- Matches are found left to right and never overlap: replacing \"aa\" in \"aaa\" makes one replacement.\n- **Replace** can be empty, which deletes every match.\n- **Case Sensitive** is off by default, so Find \"hi\" also replaces \"Hi\". Turn it on to replace only exact capitals.\n- Find is plain text, not a pattern: characters like $ and * match themselves.\n- An empty Find leaves the text unchanged.\n\n## Tips\n- Write templates with placeholders such as {name}, then fill each placeholder with its own Text Replace.\n- Chain patches to replace several things, such as removing both spaces and dashes from a phone number.\n- Use Change Case after it when the result needs consistent capitals.",
+      "behavior": "Stateless.\n\nHelper: `escapeRegExp(s) = s.replace(/[\\\\^$.*+?()[\\]{}|\\/]/g, \"\\\\$&\")`, which stays valid with the `u` flag.\n\nEach frame:\n```\nconst text = ctx.input<string>(\"text\").normalize(\"NFC\");\nconst find = ctx.input<string>(\"find\").normalize(\"NFC\");\nconst replace = ctx.input<string>(\"replace\");\nif (find === \"\") {\n  ctx.output(\"output\", text);\n  return;\n}\nconst pattern = new RegExp(escapeRegExp(find), ctx.input<boolean>(\"caseSensitive\") ? \"gu\" : \"giu\");\nctx.output(\"output\", text.replace(pattern, () => replace));\n```\n\n- Replacement is literal: the function replacer keeps `$&`, `$1`, and `$$` in Replace from being interpreted. Inserted text is never searched again, so replacing \"a\" with \"aa\" doesn't repeat.\n- Matching: literal, left to right, and non-overlapping. With Case Sensitive off, matching uses Unicode simple case folding and doesn't depend on the locale. Cache compiled regexes by Find and Case Sensitive.\n- Normalization: Text and Find are NFC-normalized before matching, so Output is NFC text even when nothing matches.\n- Edge cases: an empty Find returns Text unchanged; it never inserts Replace between characters. Empty Text returns \"\".\n- Loops: evaluates once per loop index; all four inputs may be loops.\n- Frame 0: no special case.\n- Restart and dispose: nothing to reset or release.\n- Coming from Origami: same ports and meaning (`builtin.textreplace`). Origami doesn't document the Case Sensitive default or the empty-Find result; Sonobe uses false and returns Text unchanged. Origami's matching is inferred to be literal, which Sonobe makes explicit.",
+      "inputs": [
+        {
+          "key": "text",
+          "name": "Text",
+          "type": "text",
+          "default": "",
+          "description": "The text to search."
+        },
+        {
+          "key": "find",
+          "name": "Find",
+          "type": "text",
+          "default": "",
+          "description": "The text to look for. Every match is replaced, and an empty Find changes nothing."
+        },
+        {
+          "key": "replace",
+          "name": "Replace",
+          "type": "text",
+          "default": "",
+          "description": "The text that takes each match's place. Leave it empty to delete the matches."
+        },
+        {
+          "key": "caseSensitive",
+          "name": "Case Sensitive",
+          "type": "boolean",
+          "default": false,
+          "description": "When on, capital letters must match exactly; when off, case is ignored, so Find \"hi\" also replaces \"Hi\" and \"HI\"."
+        }
+      ],
+      "outputs": [
+        {
+          "key": "output",
+          "name": "Output",
+          "type": "text",
+          "description": "Text with every match of Find replaced."
+        }
+      ],
+      "alwaysEvaluate": false,
+      "pairsWellWith": [
+        "changeCase",
+        "formatNumber",
+        "splitText",
+        "textContains"
+      ],
+      "commonMistakes": [
+        "Only one placeholder gets filled: one Text Replace fills one placeholder. Chain a second patch for {date}, wiring the first Output into its Text.",
+        "Parts of other words change too: Find matches inside words, so \"art\" also changes \"start\". Include the spaces around the word in both Find and Replace."
+      ],
+      "examples": [
+        {
+          "title": "Greet whichever account is signed in",
+          "description": "Tapping the avatar switches accounts, and the greeting fills in the new name.",
+          "outline": "layer greeting_label text \"Greeting\" @24,90 text←greeting.output\nlayer avatar oval \"Avatar\" @326,80 48x48\npatch tap_avatar interaction layer=@avatar\npatch account switch flip←tap_avatar.tap\npatch account_name optionPicker<text>[2] option←account.on option0=\"Sam\" option1=\"Priya\"\npatch greeting textReplace text=\"Welcome back, {name}!\" find=\"{name}\" replace←account_name.output"
+        }
+      ],
+      "origami": {
+        "id": "builtin.textreplace",
+        "name": "Text Replace"
+      },
+      "importAliases": [
+        "builtin.textReplace"
+      ],
+      "defaultNotes": {
+        "text": "inferred: Origami's default is undocumented; empty text is the zero value.",
+        "find": "inferred: Origami's default is undocumented; empty text is the zero value.",
+        "replace": "inferred: Origami's default is undocumented; empty text is the zero value.",
+        "caseSensitive": "inferred: Origami's default is undocumented and research suggests false, which also matches Sonobe's other text search patches."
+      }
+    },
+    {
+      "type": "changeCase",
+      "name": "Change Case",
+      "category": "text",
+      "tier": 2,
+      "status": "supported",
+      "aliases": [
+        "text transform",
+        "uppercase",
+        "lowercase",
+        "capitalize",
+        "title case",
+        "all caps",
+        "sentence case",
+        "touppercase"
+      ],
+      "summary": "Changes text to uppercase, lowercase, capitalized words, or sentence case.",
+      "docs": "## How it works\nChange Case rewrites the capital letters in **Text** and outputs the result.\n\n- **Uppercase** makes every letter a capital: \"RECENTLY PLAYED\".\n- **Lowercase** makes every letter small: \"recently played\".\n- **Capitalize Words** capitalizes the first letter of each word and lowercases the rest: \"Recently Played\".\n- **Sentence Case** capitalizes the first letter of each sentence and lowercases the rest: \"Recently played\".\n\nCharacters without capitals, such as digits, emoji, and punctuation, stay the same.\n\n## Tips\n- To compare typed text with a known answer, lowercase both sides first.\n- When you only need the look on screen, set the Text layer's Transform property instead. Use Change Case when you need the changed text itself, to compare it or send it somewhere.\n\n## Coming from Origami\nFormerly Text Transform. The Transform port is named Case, Capitalized is named Capitalize Words, and Sentence Case is new.",
+      "behavior": "Stateless.\n\nEach frame:\n```\nconst text = ctx.input<string>(\"text\");\nconst upperFirst = (_match: string, gap: string, punctuation: string, letter: string) => gap + punctuation + letter.toUpperCase();\nlet output: string;\nswitch (ctx.input<string>(\"case\")) {\n  case \"lowercase\":\n    output = text.toLowerCase();\n    break;\n  case \"capitalize\":\n    output = text.toLowerCase().replace(/(^|\\s)(\\p{P}*)(\\p{L})/gu, upperFirst);\n    break;\n  case \"sentence\":\n    output = text.toLowerCase().replace(/(^\\s*|[.!?]\\s+)(\\p{P}*)(\\p{L})/gu, upperFirst);\n    break;\n  default: // \"uppercase\"\n    output = text.toUpperCase();\n}\nctx.output(\"output\", output);\n```\n\n- Case mapping: `toUpperCase` and `toLowerCase`, never the locale-sensitive variants, so results don't depend on the viewer's language (Turkish i follows the root mapping). Full mappings can change length: \"ß\" uppercases to \"SS\".\n- Words (Capitalize Words): a word starts at the beginning of the text or after whitespace. Leading punctuation is skipped, so \"(hello\" becomes \"(Hello\" and \"¿qué\" becomes \"¿Qué\". A word that starts with a digit keeps its letters small (\"1st\"). Apostrophes and hyphens don't start words: \"don't\" → \"Don't\", \"self-driving\" → \"Self-driving\". Letters after the first are lowercased: \"iPhone\" → \"Iphone\".\n- Sentences (Sentence Case): the first letter of the text, and the first letter after \".\", \"!\", or \"?\" followed by whitespace, become capitals. Everything else is lowercased, including names and \"I\".\n- Loops: evaluates once per loop index.\n- Edge cases: empty Text gives \"\". An unknown enum key behaves as Uppercase.\n- Frame 0: no special case.\n- Restart and dispose: nothing to reset or release.\n- Coming from Origami: Text Transform (`builtin.texttransform`). Its Transform options Uppercase, Lowercase, and Capitalized (stored indices 0, 1, 2; order from the docs) import as `uppercase`, `lowercase`, and `capitalize`. If a file stores an index outside that range, import it as `uppercase` and log one warning. Origami doesn't document its word rules; Sonobe capitalizes only after whitespace. Sentence Case has no Origami equivalent.",
+      "inputs": [
+        {
+          "key": "text",
+          "name": "Text",
+          "type": "text",
+          "default": "",
+          "description": "The text to change."
+        },
+        {
+          "key": "case",
+          "name": "Case",
+          "type": "enum",
+          "default": "uppercase",
+          "enumOptions": [
+            {
+              "key": "uppercase",
+              "name": "Uppercase",
+              "description": "Every letter becomes a capital."
+            },
+            {
+              "key": "lowercase",
+              "name": "Lowercase",
+              "description": "Every letter becomes small."
+            },
+            {
+              "key": "capitalize",
+              "name": "Capitalize Words",
+              "description": "The first letter of each word becomes a capital; the rest become small."
+            },
+            {
+              "key": "sentence",
+              "name": "Sentence Case",
+              "description": "The first letter of each sentence becomes a capital; the rest become small."
+            }
+          ],
+          "description": "Which capitalization to apply."
+        }
+      ],
+      "outputs": [
+        {
+          "key": "output",
+          "name": "Output",
+          "type": "text",
+          "description": "The text with its capitalization changed."
+        }
+      ],
+      "alwaysEvaluate": false,
+      "pairsWellWith": [
+        "textStartsWith",
+        "textContains",
+        "equalsExactly",
+        "textReplace",
+        "splitText"
+      ],
+      "commonMistakes": [
+        "Brand names lose their capitals, like iPhone becoming Iphone: Capitalize Words and Sentence Case lowercase every letter after the first. Type those words the way they should look and leave them out of Change Case.",
+        "Typed answers never match: \"Yes\" and \"yes\" are different text. Lowercase both the typed text and the answer before comparing them."
+      ],
+      "examples": [
+        {
+          "title": "All-caps section header",
+          "outline": "layer header text \"Header\" @24,96 fontSize=13 fontWeight=600 letterSpacing=0.5 text←header_text.output\npatch header_text changeCase text=\"Recently played\" case=uppercase"
+        },
+        {
+          "title": "Capitalize names from a list",
+          "outline": "layer people group \"People\" @16,160 358x160 layout=column spacing=8\n  layer person_name text \"Person Name\" text←names_title.output\npatch names splitText text=\"maya chen,omar haddad,theo park\"\npatch names_title changeCase text←names.parts case=capitalize"
+        }
+      ],
+      "origami": {
+        "id": "builtin.texttransform",
+        "name": "Text Transform"
+      },
+      "importAliases": [
+        "builtin.textTransform"
+      ],
+      "origamiPorts": {
+        "case": "Transform"
+      },
+      "defaultNotes": {
+        "text": "inferred: Origami's default is undocumented; empty text is the zero value.",
+        "case": "inferred: Origami's default is undocumented; Uppercase is its first listed option."
+      }
+    },
+    {
+      "type": "substring",
+      "name": "Substring",
+      "category": "text",
+      "tier": 2,
+      "status": "supported",
+      "aliases": [
+        "trim text",
+        "slice",
+        "truncate",
+        "first letters",
+        "initials",
+        "cut text",
+        "shorten text",
+        "ellipsis"
+      ],
+      "summary": "Keeps part of some text, a number of characters from a starting position, for initials, previews, and shortened titles.",
+      "docs": "## How it works\nSubstring keeps a stretch of **Text** and drops the rest.\n\n- **Start** is the character to begin at, counted from 0, so 0 is the first character.\n- **Length** is how many characters to keep. Asking for more than remain keeps everything to the end.\n- **Ellipsis** adds \"…\" at the end when characters after the kept part were cut off.\n- Emoji and accented letters count as one character, the same as in Text Length.\n\nFor example, Text \"Saturday\" with Start 0 and Length 3 gives \"Sat\".\n\n## Tips\n- For initials, use Length 1 on a first name and a last name, then join them with Add set to Text.\n- To shorten how a Text layer looks on screen, set its Max Lines property instead. Use Substring when you need the shortened text itself.\n- Animate Length from 0 up to the text's length for a typewriter effect.\n\n## Coming from Origami\nFormerly Trim Text. Position is named Start, and Ellipsis is new.",
+      "behavior": "Stateless.\n\nHelpers: `graphemes(s)` as in textLength, and `whole(x) = Number.isFinite(x) ? Math.floor(x + 1e-6) : 0`.\n\nEach frame:\n```\nconst chars = graphemes(ctx.input<string>(\"text\"));\nconst start = whole(ctx.input<number>(\"start\")); // the index port already delivers an integer ≥ 0\nconst length = Math.max(0, whole(ctx.input<number>(\"length\")));\nconst end = Math.min(chars.length, start + length);\nlet output = start < chars.length ? chars.slice(start, end).join(\"\") : \"\";\nif (ctx.input<boolean>(\"ellipsis\") && output !== \"\" && end < chars.length) output = output.trimEnd() + \"…\";\nctx.output(\"output\", output);\n```\n\n- Units: user-perceived characters (grapheme clusters), so slicing never splits an emoji or separates an accent from its letter.\n- Ranges (CONVENTIONS.md §18.5.9): negative values never count from the end. Start arrives through the index port clamped to at least 0, and a negative Length counts as 0. Fractions round down after a 1e-6 epsilon, so an animated 2.9999999 keeps 3 characters.\n- Ellipsis: \"…\" is U+2026, one character. Whitespace before it is trimmed, so \"Weekend hiking \" plus the ellipsis gives \"Weekend hiking…\". Nothing is added when the output is empty or already reaches the end. The ellipsis is extra: Length 10 with Ellipsis on gives up to 11 characters.\n- Examples: \"Saturday\" with Start 3 and Length 3 gives \"urd\". Start 8 gives \"\". \"👋🏽 hi\" with Start 0 and Length 1 gives \"👋🏽\".\n- Loops: evaluates once per loop index; Text, Start, Length, and Ellipsis may each be loops.\n- Edge cases: empty Text gives \"\". A non-finite Start or Length counts as 0.\n- Frame 0: no special case.\n- Restart and dispose: nothing to reset or release.\n- Coming from Origami: Trim Text (`builtin.textsubstring`), with ports Text, Position, and Length. Origami doesn't document zero-based counting or out-of-range handling; Sonobe counts from 0 and clamps as above. Emoji count as one character, as in Origami since v73.",
+      "inputs": [
+        {
+          "key": "text",
+          "name": "Text",
+          "type": "text",
+          "default": "",
+          "description": "The text to take characters from."
+        },
+        {
+          "key": "start",
+          "name": "Start",
+          "type": "index",
+          "default": 0,
+          "min": 0,
+          "step": 1,
+          "description": "Which character to begin at, counted from 0. A Start past the last character gives empty text."
+        },
+        {
+          "key": "length",
+          "name": "Length",
+          "type": "number",
+          "default": 3,
+          "min": 0,
+          "step": 1,
+          "description": "How many characters to keep from Start. 0 gives empty text, and more than remain keeps the rest."
+        },
+        {
+          "key": "ellipsis",
+          "name": "Ellipsis",
+          "type": "boolean",
+          "default": false,
+          "description": "When on, adds \"…\" after the kept characters if characters after them were cut off."
+        }
+      ],
+      "outputs": [
+        {
+          "key": "output",
+          "name": "Output",
+          "type": "text",
+          "description": "The kept characters."
+        }
+      ],
+      "alwaysEvaluate": false,
+      "pairsWellWith": [
+        "textLength",
+        "add",
+        "textContains",
+        "transition"
+      ],
+      "commonMistakes": [
+        "The first letter is missing: Start counts from 0, so Start 1 begins at the second character. Set Start to 0.",
+        "The output is empty: Start is past the last character, or Length is 0. Lower Start or raise Length."
+      ],
+      "examples": [
+        {
+          "title": "Initials for an avatar",
+          "outline": "layer avatar oval \"Avatar\" @24,120 56x56 color=\"#5E5CE6FF\"\nlayer initials_label text \"Initials\" @38,137 fontSize=17 fontWeight=600 textColor=\"#FFFFFFFF\" text←initials.output\npatch first_initial substring text=\"Maya\" length=1\npatch last_initial substring text=\"Chen\" length=1\npatch initials add<text>[2] value1←first_initial.output value2←last_initial.output"
+        },
+        {
+          "title": "Shorten a long title with an ellipsis",
+          "description": "Shows \"Weekend hiking…\": the space before the ellipsis is trimmed.",
+          "outline": "layer card_title text \"Card Title\" @24,300 text←short_title.output\npatch short_title substring text=\"Weekend hiking trails near the coast\" length=15 ellipsis=true"
+        }
+      ],
+      "origami": {
+        "id": "builtin.textsubstring",
+        "name": "Trim Text"
+      },
+      "importAliases": [
+        "builtin.textSubstring"
+      ],
+      "origamiPorts": {
+        "start": "Position"
+      },
+      "defaultNotes": {
+        "text": "inferred: Origami's default is undocumented; empty text is the zero value.",
+        "start": "inferred: Origami's default is undocumented; 0 begins at the first character.",
+        "length": "sonobe: Origami's default is undocumented (0 or 1); 3 shows a visible slice, like Sat from Saturday.",
+        "ellipsis": "sonobe: off, so the output is exactly the kept characters, as in Origami."
+      }
+    },
+    {
+      "type": "measureText",
+      "name": "Measure Text",
+      "category": "text",
+      "tier": 2,
+      "status": "supported",
+      "aliases": [
+        "text size",
+        "text width",
+        "measure string",
+        "text bounds",
+        "label width",
+        "hug text",
+        "fit text"
+      ],
+      "summary": "Measures how wide and tall text would be in a given font and size, so shapes can fit around a label.",
+      "docs": "## How it works\nMeasure Text works out the **Size** that **Text** takes up in a given font, using the same layout rules as a Text layer.\n\n- **Font**, **Font Size**, **Weight**, **Letter Spacing**, and **Line Height** match the Text layer properties with the same names. Set them to match the layer you're measuring for.\n- **Max Width** is where lines wrap. With 0, text breaks only at line breaks.\n- **Size** is the widest line's width and the total height of all lines. Empty text has width 0 and the height of one line.\n\nThe result arrives on the same frame. Reading a layer's size instead lags one frame.\n\n## Tips\n- Text layers already hug their text when Width Mode is Auto. Measure Text is for other layers that should match the text, such as a badge behind a label or an underline under a tab title.\n- Add padding by feeding Size into Add set to Size.\n- A font that isn't installed or embedded measures with the fallback font, just as it renders.\n\n## Coming from Origami\nFormerly Text Size. Max Width replaces Box Size, Font Name is named Font, Character Spacing is named Letter Spacing, and Weight is new.",
+      "behavior": "State per loop index: `{ warned: false }`, used only for warn-once logging (see Caching for optional memoization).\n\nEach frame:\n```\nconst text = ctx.input<string>(\"text\");\nconst style = {\n  fontFamily: ctx.input<string>(\"fontFamily\"),\n  fontSize: ctx.input<number>(\"fontSize\"),\n  fontWeight: ctx.input<number>(\"fontWeight\"),\n  letterSpacing: ctx.input<number>(\"letterSpacing\"),\n  lineHeight: ctx.input<number>(\"lineHeight\"),\n};\nconst maxWidth = ctx.input<number>(\"maxWidth\");\nconst measured = measure(text, style, maxWidth > 0 ? maxWidth : null);\nconst paragraphs = text.split(/\\r\\n|\\r|\\n/).length;\nconst height = measured.height + Math.max(0, ctx.input<number>(\"paragraphSpacing\")) * (paragraphs - 1);\nctx.output(\"size\", [Math.max(0, finite(measured.width)), Math.max(0, finite(height))]);\n```\n`finite(x)` returns `x` when finite; otherwise it returns 0 and logs one warning per restart through `ctx.services.log(\"warn\", …)`.\n\n- Measuring: `measure` is the runtime's injected `TextMeasurer` (ARCHITECTURE.md §5.4), the same one layout uses for Text layers. A Measure Text with a layer's text and style therefore gives that layer's auto size. The contract doesn't expose the measurer to patches yet; the proposed `RuntimeServices.measureText` (CONVENTIONS.md §19.5) fixes that. Until then, use `approximateTextMeasurer` from `@sonobe/engine`, and expect small differences from DOM-rendered text.\n- Layout rules come from the measurer: greedy word wrap at Max Width, words longer than a line break by character, line breaks always start a new line, width is the widest line, and height is lines × line height with at least one line. The headless measurer treats Font Size ≤ 0 as 17 and Line Height 0 as 1.2 × Font Size.\n- Timing: results are for the current frame. No layer is involved, so there's no one-frame latency (unlike layer-derived outputs, gap-fill R2).\n- Caching: implementations may memoize the last result per loop index keyed on every input. The DOM measurer's results change when a web font finishes loading, so invalidate the cache on font-load events when the host reports them, and otherwise re-measure every frame.\n- Edge cases: empty Text gives `[0, one line height]`. Max Width ≤ 0 means no wrapping. Negative Letter Spacing narrows text, but neither component goes below 0.\n- Platform and simulation: fonts must be available where the prototype runs; a missing font measures with the fallback font the renderer would use. Headless runs ignore Font and use approximate per-character widths, so golden tests should compare sizes with a tolerance.\n- Loops: evaluates once per loop index; a loop of labels gives a loop of sizes.\n- Muted: outputs `[0, 0]`.\n- Frame 0: no special case.\n- Restart and dispose: restart clears `warned` and any cache. Nothing to release.\n- Coming from Origami: Text Size (`builtin.textsize`). Importers map the width of Box Size to Max Width, dropping the box height, which has no equivalent. Font Name maps to Font, and Character Spacing maps to Letter Spacing. Weight takes its default, 400. Like Origami, Sonobe measures on the device running the prototype.",
+      "inputs": [
+        {
+          "key": "text",
+          "name": "Text",
+          "type": "text",
+          "default": "Text",
+          "description": "The text to measure."
+        },
+        {
+          "key": "maxWidth",
+          "name": "Max Width",
+          "type": "number",
+          "subtype": "distance",
+          "default": 0,
+          "min": 0,
+          "description": "The widest a line can be before text wraps, in points. 0 means no limit, so text breaks only at line breaks."
+        },
+        {
+          "key": "fontFamily",
+          "name": "Font",
+          "type": "text",
+          "default": "Inter",
+          "description": "Font family name, the same as the Text layer's Font."
+        },
+        {
+          "key": "fontSize",
+          "name": "Font Size",
+          "type": "number",
+          "default": 17,
+          "min": 1,
+          "description": "Font size in points."
+        },
+        {
+          "key": "fontWeight",
+          "name": "Weight",
+          "type": "number",
+          "default": 400,
+          "min": 100,
+          "max": 900,
+          "step": 100,
+          "description": "Font weight, from 100 (thin) to 900 (black)."
+        },
+        {
+          "key": "letterSpacing",
+          "name": "Letter Spacing",
+          "type": "number",
+          "default": 0,
+          "description": "Extra space between characters, in points."
+        },
+        {
+          "key": "lineHeight",
+          "name": "Line Height",
+          "type": "number",
+          "default": 0,
+          "min": 0,
+          "description": "Distance between lines in points; 0 uses the font's natural line height."
+        },
+        {
+          "key": "paragraphSpacing",
+          "name": "Paragraph Spacing",
+          "type": "number",
+          "default": 0,
+          "min": 0,
+          "description": "Extra space added between paragraphs (text separated by line breaks), in points.",
+          "advanced": true
+        }
+      ],
+      "outputs": [
+        {
+          "key": "size",
+          "name": "Size",
+          "type": "size",
+          "subtype": "distance",
+          "description": "The width of the widest line and the total height, in points, on the current frame."
+        }
+      ],
+      "alwaysEvaluate": false,
+      "pairsWellWith": [
+        "add",
+        "sizeUnpack",
+        "popAnimation",
+        "changeCase"
+      ],
+      "commonMistakes": [
+        "The badge is a little too wide or too narrow: Measure Text uses a different font, size, or weight than the Text layer. Set every style port to match the layer.",
+        "Long text never wraps: Max Width is 0, which means no limit. Set it to the widest the text may be.",
+        "The shape touches the text: Size covers the text alone. Add padding, such as [24, 8] with Add set to Size."
+      ],
+      "examples": [
+        {
+          "title": "Badge that fits its label",
+          "description": "Measure Text matches the label's font size and weight, and Add pads the badge by 12 points on each side and 4 points on top and bottom.",
+          "outline": "layer badge rectangle \"Badge\" @16,120 size←badge_size.output cornerRadius=12 color=\"#FF3B30FF\"\nlayer badge_label text \"Badge Label\" @28,124 fontSize=13 fontWeight=600 textColor=\"#FFFFFFFF\" text←label.output\npatch label changeCase text=\"Limited offer\" case=uppercase\npatch label_size measureText text←label.output fontSize=13 fontWeight=600\npatch badge_size add<size>[2] value1←label_size.size value2=[24,8]"
+        }
+      ],
+      "origami": {
+        "id": "builtin.textsize",
+        "name": "Text Size"
+      },
+      "importAliases": [
+        "builtin.textSize"
+      ],
+      "origamiPorts": {
+        "maxWidth": "Box Size",
+        "fontFamily": "Font Name",
+        "letterSpacing": "Character Spacing"
+      },
+      "defaultNotes": {
+        "text": "sonobe: \"Text\" is a new Text layer's content, so the defaults measure a new Text layer.",
+        "maxWidth": "sonobe: 0 (no wrapping) matches a Text layer with Auto width.",
+        "fontFamily": "sonobe: matches the Text layer default, Inter.",
+        "fontSize": "sonobe: matches the Text layer default, 17 pt.",
+        "fontWeight": "sonobe: matches the Text layer default, 400.",
+        "letterSpacing": "sonobe: matches the Text layer default, 0.",
+        "lineHeight": "sonobe: matches the Text layer default, the natural line height.",
+        "paragraphSpacing": "inferred: Origami's default is undocumented; 0 adds no space."
+      }
+    },
+    {
+      "type": "formatDateTime",
+      "name": "Format Date & Time",
+      "category": "text",
+      "tier": 2,
+      "status": "supported",
+      "aliases": [
+        "date & time formatter",
+        "date formatter",
+        "time formatter",
+        "strftime",
+        "clock",
+        "timestamp",
+        "media time",
+        "duration",
+        "epoch"
+      ],
+      "summary": "Turns seconds into readable text: a clock time, a date, a media timestamp like 2:05, or your own % pattern.",
+      "docs": "## How it works\nFormat Date & Time turns **Time**, a number of seconds, into text.\n\n- For clock times and dates, Time is a timestamp: seconds since January 1, 1970, UTC. Device Time and most web APIs give timestamps like this.\n- For **Media Time** and **Short Media Time**, Time is a duration, such as a video's current time. 125 seconds shows 02:05 or 2:05, and an hour or more adds hours (1:02:05).\n- **Custom** uses **Custom Format**, a pattern of % codes:\n\n| Code | Shows | Code | Shows |\n|---|---|---|---|\n| %A | Saturday | %a | Sat |\n| %B | March | %b | Mar |\n| %d | 14 | %Y | 2026 |\n| %H | 18 (24-hour) | %I | 06 (12-hour) |\n| %M | 30 | %S | 05 |\n| %p | PM | %y | 26 |\n\nPut a hyphen after % to drop leading zeros: %-I:%M %p shows 6:30 PM.\n\nNames of months and days are in English. The advanced **Time Zone** port chooses between the device's time zone and UTC.\n\n## Tips\n- For a live clock, wire Device Time into Time.\n- For elapsed time from Stopwatch, use Media Time.\n\n## Coming from Origami\nFormerly Date & Time Formatter. The formats are the same, and Time Zone is new.",
+      "behavior": "State per loop index: `{ warned: false }`, used only for warn-once logging.\n\nHelpers: `pad(n, width) = String(n).padStart(width, \"0\")`. `MONTHS` are January to December and `DAYS` are Sunday to Saturday; short names are their first three letters.\n\nEach frame:\n```\nconst t = ctx.input<number>(\"time\");\nconst format = ctx.input<string>(\"format\");\nif (format === \"mediaTime\" || format === \"shortMediaTime\") {\n  const s = Math.floor(Math.abs(t) + 1e-6);\n  const h = Math.floor(s / 3600);\n  const m = Math.floor((s % 3600) / 60);\n  const sec = s % 60;\n  const lead = h > 0 ? h : m;\n  const first = format === \"mediaTime\" ? pad(lead, 2) : String(lead);\n  const body = h > 0 ? first + \":\" + pad(m, 2) + \":\" + pad(sec, 2) : first + \":\" + pad(sec, 2);\n  ctx.output(\"text\", (t < 0 && s > 0 ? \"-\" : \"\") + body);\n  return;\n}\nif (!(t >= -62135596800 && t < 253402300800)) { // years 1 to 9999\n  if (!state.warned) { ctx.services.log(\"warn\", \"Format Date & Time: Time is outside years 1 to 9999.\"); state.warned = true; }\n  ctx.output(\"text\", \"\");\n  return;\n}\nconst ms = Math.floor(t * 1000);\nconst zone = ctx.input<string>(\"timeZone\") === \"utc\" ? \"UTC\" : deviceTimeZone();\nconst p = partsOf(ms, zone);\nconst pattern = format === \"custom\" ? ctx.input<string>(\"customFormat\") : PRESETS[format];\nctx.output(\"text\", strftime(pattern, p));\n```\n\n- `partsOf(ms, zone)` gives `{ year, month (1–12), day, hour (0–23), minute, second, millisecond, weekday (0–6, Sunday = 0), dayOfYear (1–366), offsetMinutes, zoneName }`. Read the calendar fields with `new Intl.DateTimeFormat(\"en-US\", { timeZone: zone, hourCycle: \"h23\", year: \"numeric\", month: \"numeric\", day: \"numeric\", hour: \"numeric\", minute: \"numeric\", second: \"numeric\", weekday: \"short\", timeZoneName: \"short\" }).formatToParts(ms)`, and cache one formatter per zone. `millisecond = ((ms % 1000) + 1000) % 1000`. `offsetMinutes` is (the fields read back as a UTC time − `Math.floor(ms / 1000) * 1000`) / 60000, built with `setUTCFullYear` so years below 100 aren't shifted. `zoneName` is the `timeZoneName` part, such as \"UTC\", \"PST\", or \"GMT+5:30\".\n- `deviceTimeZone()`: the device's IANA time zone. The contract has no field for it yet (proposed: `DeviceInfo.timeZone`). Until then, use `Intl.DateTimeFormat().resolvedOptions().timeZone`. Deterministic simulation must resolve Device to \"UTC\" so traces reproduce on every machine.\n- `PRESETS`: time12Hour `\"%-I:%M %p\"`, time12HourSeconds `\"%-I:%M:%S %p\"`, time24Hour `\"%H:%M\"`, time24HourSeconds `\"%H:%M:%S\"`, shortDateYmd `\"%Y-%m-%d\"`, shortDateDmy `\"%d-%m-%Y\"`, shortDateMdy `\"%m-%d-%Y\"`, mediumDateMdy `\"%b %-d, %Y\"`, mediumDateDmy `\"%-d %b, %Y\"`, longDateMdy `\"%B %-d, %Y\"`, longDateDmy `\"%-d %B, %Y\"`. For Time 1773513005 in UTC they give 6:30 PM, 6:30:05 PM, 18:30, 18:30:05, 2026-03-14, 14-03-2026, 03-14-2026, Mar 14, 2026, 14 Mar, 2026, March 14, 2026, and 14 March, 2026.\n- `strftime(pattern, p)` codes. Numeric codes pad with zeros unless noted, and a `-` flag after `%` removes padding from d, e, H, I, j, k, l, m, M, and S:\n\n| Code | Value | Code | Value |\n|---|---|---|---|\n| %a | Sat | %A | Saturday |\n| %b, %h | Mar | %B | March |\n| %C | 20 | %c | same as \"%a %b %e %H:%M:%S %Y\" |\n| %d | 01–31 | %D | same as \"%m/%d/%y\" |\n| %e | 1–31, padded with a space | %F | same as \"%Y-%m-%d\" |\n| %H | 00–23 | %I | 01–12 |\n| %j | 001–366 | %k | 0–23, padded with a space |\n| %l | 1–12, padded with a space | %L | 000–999 milliseconds |\n| %m | 01–12 | %M | 00–59 |\n| %n | line break | %p | AM or PM |\n| %r | same as \"%I:%M:%S %p\" | %R | same as \"%H:%M\" |\n| %S | 00–59 | %t | tab |\n| %T | same as \"%H:%M:%S\" | %u | 1–7, Monday = 1 |\n| %w | 0–6, Sunday = 0 | %x | same as \"%m/%d/%y\" |\n| %X | same as \"%H:%M:%S\" | %y | 00–99 |\n| %Y | at least 4 digits | %z | +hhmm or −hhmm offset (ASCII sign) |\n| %Z | zoneName | %% | % |\n\n- Unknown codes stay as typed (\"%Q\" stays \"%Q\"), and a lone \"%\" at the end stays \"%\". Week-number codes (%U, %V, %W, %G, %g) aren't supported and stay as typed. %L is a Sonobe addition.\n- Time: fractional seconds round down to milliseconds with `Math.floor`, so −0.5 is 23:59:59 on December 31, 1969, UTC. Media Time rounds down to whole seconds after a 1e-6 epsilon, so 59.9 shows 00:59. Negative durations show a leading \"-\" unless they round down to 0.\n- Edge cases: Time outside years 1 to 9999 (−62135596800 ≤ t < 253402300800) outputs \"\" and logs one warning per restart. An empty Custom Format outputs \"\". An unknown format key uses time12Hour.\n- Loops: evaluates once per loop index; a loop of timestamps gives a loop of labels.\n- Muted: outputs Time through the standard number-to-text coercion.\n- Frame 0: no special case. The patch doesn't read a clock itself; wire a time source into Time for a live display.\n- Restart and dispose: restart clears `warned`. Nothing to release.\n- Coming from Origami: Date & Time Formatter (`builtin.time.formatter`), with ports Time, Format, and Custom Format. Its Format enum stores indices 0–13 in the order of `enumOptions` here (order inferred from the reversed option strings in official files), and importers map them to these keys. Origami formats in the device's time zone, so imports use `timeZone: \"device\"`. Origami's Media Time output for durations over an hour is undocumented.",
+      "inputs": [
+        {
+          "key": "time",
+          "name": "Time",
+          "type": "number",
+          "default": 0,
+          "description": "Seconds since January 1, 1970 (UTC) for clock times and dates, or a duration in seconds for the Media Time formats."
+        },
+        {
+          "key": "format",
+          "name": "Format",
+          "type": "enum",
+          "default": "time12Hour",
+          "enumOptions": [
+            {
+              "key": "time12Hour",
+              "name": "12-Hour Time (6:30 PM)"
+            },
+            {
+              "key": "time12HourSeconds",
+              "name": "12-Hour Time with Seconds (6:30:05 PM)"
+            },
+            {
+              "key": "time24Hour",
+              "name": "24-Hour Time (18:30)"
+            },
+            {
+              "key": "time24HourSeconds",
+              "name": "24-Hour Time with Seconds (18:30:05)"
+            },
+            {
+              "key": "shortDateYmd",
+              "name": "Short Date (2026-03-14)"
+            },
+            {
+              "key": "shortDateDmy",
+              "name": "Short Date (14-03-2026)"
+            },
+            {
+              "key": "shortDateMdy",
+              "name": "Short Date (03-14-2026)"
+            },
+            {
+              "key": "mediumDateMdy",
+              "name": "Medium Date (Mar 14, 2026)"
+            },
+            {
+              "key": "mediumDateDmy",
+              "name": "Medium Date (14 Mar, 2026)"
+            },
+            {
+              "key": "longDateMdy",
+              "name": "Long Date (March 14, 2026)"
+            },
+            {
+              "key": "longDateDmy",
+              "name": "Long Date (14 March, 2026)"
+            },
+            {
+              "key": "mediaTime",
+              "name": "Media Time (02:05)",
+              "description": "Treats Time as a duration, with zero-padded minutes."
+            },
+            {
+              "key": "shortMediaTime",
+              "name": "Short Media Time (2:05)",
+              "description": "Treats Time as a duration, without padding the first number."
+            },
+            {
+              "key": "custom",
+              "name": "Custom",
+              "description": "Uses the % codes in Custom Format."
+            }
+          ],
+          "description": "How the text looks: a clock time, a date, a media timestamp, or a custom pattern."
+        },
+        {
+          "key": "customFormat",
+          "name": "Custom Format",
+          "type": "text",
+          "default": "%H:%M:%S",
+          "description": "The pattern used when Format is Custom, such as \"%B %-d\" for March 14. Codes start with %."
+        },
+        {
+          "key": "timeZone",
+          "name": "Time Zone",
+          "type": "enum",
+          "default": "device",
+          "enumOptions": [
+            {
+              "key": "device",
+              "name": "Device",
+              "description": "The time zone of the device running the prototype."
+            },
+            {
+              "key": "utc",
+              "name": "UTC",
+              "description": "Coordinated Universal Time, the same everywhere."
+            }
+          ],
+          "description": "Which time zone clock times and dates are shown in; the Media Time formats ignore it.",
+          "advanced": true
+        }
+      ],
+      "outputs": [
+        {
+          "key": "text",
+          "name": "Text",
+          "type": "text",
+          "description": "The formatted time or date."
+        }
+      ],
+      "alwaysEvaluate": false,
+      "pairsWellWith": [
+        "deviceTime",
+        "stopwatch",
+        "videoInfo",
+        "time",
+        "loopOverArray"
+      ],
+      "commonMistakes": [
+        "A timer shows strange hours or minutes: clock and date formats treat Time as a date in your time zone. Use Media Time for durations, such as Stopwatch's Time.",
+        "The date shows January 1, 1970: Time is 0 or a small number. Wire in a timestamp in seconds, such as from Device Time.",
+        "The date is thousands of years off, or the text is empty: the timestamp is in milliseconds. Divide it by 1000 before wiring it into Time."
+      ],
+      "examples": [
+        {
+          "title": "Recording timer",
+          "description": "Stopwatch's Time is a duration, so Media Time counts 00:00, 00:01, and so on.",
+          "outline": "layer record_button oval \"Record\" @163,700 64x64 color=\"#FF3B30FF\"\nlayer timer_label text \"Timer\" @170,640 text←timer_text.text\npatch tap_record interaction layer=@record_button\npatch recording switch flip←tap_record.tap\npatch rec_pulses pulse on←recording.on\npatch timer stopwatch start←rec_pulses.turnedOn stop←rec_pulses.turnedOff\npatch timer_text formatDateTime time←timer.time format=mediaTime"
+        },
+        {
+          "title": "Event date from a timestamp",
+          "description": "Shows Saturday, March 14 at 6:30 PM.",
+          "outline": "layer event_date text \"Event Date\" @24,160 text←date_label.text\npatch date_label formatDateTime time=1773513000 format=custom customFormat=\"%A, %B %-d at %-I:%M %p\" timeZone=utc"
+        }
+      ],
+      "origami": {
+        "id": "builtin.time.formatter",
+        "name": "Date & Time Formatter"
+      },
+      "origamiPorts": {
+        "text": "Output"
+      },
+      "defaultNotes": {
+        "time": "inferred: Origami's default is undocumented; 0 is the zero value (January 1, 1970, UTC).",
+        "format": "inferred: Origami's default is undocumented; 12-Hour Time is its first listed option.",
+        "customFormat": "inferred: Origami's docs use %H:%M:%S as their first example.",
+        "timeZone": "sonobe: the device's time zone matches Origami and what people see on their clocks."
+      }
+    }
+  ]
+}

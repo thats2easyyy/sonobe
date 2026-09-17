@@ -6,6 +6,10 @@
   "exports": {
     ".": "./src/index.ts"
   },
+  "scripts": {
+    "demo:build": "esbuild demo/demo.ts --bundle --format=iife --target=es2022 --outfile=demo/dist/demo.js",
+    "demo:screenshots": "npm run demo:build && node demo/screenshot.mjs"
+  },
   "dependencies": {
     "@sonobe/core": "*",
     "@sonobe/engine": "*"

@@ -1,0 +1,1111 @@
+{
+  "file": "interaction-2.json",
+  "category": "interaction",
+  "patches": [
+    {
+      "type": "drag",
+      "name": "Drag",
+      "category": "interaction",
+      "tier": 1,
+      "status": "supported",
+      "aliases": [
+        "draggable",
+        "move layer",
+        "pan",
+        "drag and drop",
+        "slider knob",
+        "throw",
+        "flick",
+        "drag settings"
+      ],
+      "summary": "Lets people drag a layer around and outputs where it should be, with optional bounds, axis lock, and momentum.",
+      "docs": "## How it works\nDrag watches for a finger or mouse pressing on **Layer** and turns the movement into a **Position**. It doesn't move anything by itself: link Position into the layer's Position property.\n\n- **Start Position** is where the layer sits before anyone drags it, and where **Reset** (a pulse, a signal that's on for one frame) puts it back.\n- **Axis** limits dragging to horizontal or vertical movement.\n- **Clip** keeps Position between **Min** and **Max** (both in the parent's coordinates).\n- **Momentum** lets a flicked layer keep gliding after release. **Momentum Friction** controls how soon it stops: 50 feels like iOS scrolling, 250 stops quickly.\n- **Dragging** is true while a finger is on the layer, and **Velocity** reports speed in points per second.\n\nLayer can be a different layer than the one you move, so a small handle can drag a whole panel.\n\n## Tips\n- To snap somewhere on release, feed Position into a Spring Animation with Dragging as Gesture Active and Velocity as Gesture Velocity.\n- For a slider, set Axis to Horizontal, turn on Clip, and use Min and Max for the track ends.\n\n## Coming from Origami\nDrag Settings is built in: Clip, Min, Max, Momentum, and Momentum Friction are advanced inputs on Drag. Sonobe adds Axis, Dragging, and Velocity. Positions use a top-left origin with y pointing down. Until the first drag, Position follows Start Position live, so editing it updates the viewer.",
+      "behavior": "State per loop index: `{ position: [x, y], velocity: [vx, vy], dragging: false, coasting: false, touched: false, grab: [x, y], ignoreUntilRelease: false, initialized: false }`.\n\nEach frame:\n```\nconst start = ctx.input(\"startPosition\");\nconst lo = [Math.min(min[0], max[0]), Math.min(min[1], max[1])];\nconst hi = [Math.max(min[0], max[0]), Math.max(min[1], max[1])];\nconst limit = (p) => clip ? [clamp(p[0], lo[0], hi[0]), clamp(p[1], lo[1], hi[1])] : p;\nconst mask = axis === \"horizontal\" ? [1, 0] : axis === \"vertical\" ? [0, 1] : [1, 1];\nconst p = ctx.services.pointer(layerRef);            // layerRef null = whole screen\nif (!state.initialized) { state.position = limit(start); state.initialized = true; }\n\nif (ctx.pulsed(\"reset\")) {\n  state.position = limit(start); state.velocity = [0, 0];\n  state.dragging = false; state.coasting = false; state.touched = false;\n  state.ignoreUntilRelease = p.down;\n} else if (!enabled) {\n  if (state.dragging) state.ignoreUntilRelease = p.down;\n  state.dragging = false; state.coasting = false; state.velocity = [0, 0];\n} else {\n  if (!state.touched) state.position = limit(start);\n  if (!state.dragging && p.began && !state.ignoreUntilRelease) {\n    state.dragging = true; state.coasting = false; state.touched = true;\n    state.grab = state.position;                        // catches a coasting layer\n  }\n  if (state.dragging) {\n    const t = toParentSpace(p.translation);\n    state.position = limit([state.grab[0] + t[0] * mask[0], state.grab[1] + t[1] * mask[1]]);\n    const v = toParentSpace(p.velocity);\n    state.velocity = [v[0] * mask[0], v[1] * mask[1]];\n    if (p.ended) {\n      state.dragging = false;\n      if (momentum && Math.hypot(...state.velocity) > 0.25) state.coasting = true;\n      else state.velocity = [0, 0];\n    }\n  } else if (state.coasting) {\n    coastPerAxis(ctx.dt);                              // see Momentum below\n    ctx.requestNextFrame();\n  }\n}\nif (!p.down) state.ignoreUntilRelease = false;\nctx.output(\"position\", state.position);\nctx.output(\"dragging\", state.dragging);\nctx.output(\"velocity\", state.velocity);\n```\n\n- Gesture source: `ctx.services.pointer({ layerId, instance })`. A drag starts on the frame a press begins on the layer or one of its descendants (touches bubble, ARCHITECTURE.md §5.5); there is no slop, so the layer moves from the first point of movement. Only the first pointer that pressed drives the drag; extra fingers are ignored until it lifts.\n- Parent space: `toParentSpace` divides pointer deltas by the product of the ancestor scales from `ctx.services.layerInfo` (previous frame). Rotated ancestors aren't compensated in v1.\n- Momentum: deceleration per millisecond `d = 1 − max(momentumFriction, 1) / 25000` (50 → 0.998 normal, 250 → 0.99 fast, 950 → 0.962). Per axis: `kv = d^(1000·dt)`, `x += (v / 1000) · d · (1 − kv) / (1 − d)`, `v *= kv` (POP decay, gap-fill §4.2.4). Coasting ends when the speed drops below 0.25 pt/s. With Clip on, an axis that reaches a bound stops there and its velocity becomes 0 (hard stop, no bounce).\n- Pulses: `reset` is the only pulse. It wins over a press in the same frame, and the current touch can't restart a drag until it lifts. Pulses on consecutive frames each reset.\n- Frame 0: Position is `limit(startPosition)`, Dragging false, Velocity `[0, 0]`. No drag can start on frame 0 because hit tests use the previous frame's layout.\n- Start Position: followed live until the first drag after a restart or Reset; later changes apply on the next Reset.\n- Retargeting: changing Clip, Min, Max, or Axis applies on the next frame, re-clamping Position (including mid-drag and mid-coast).\n- Loops: per-index state. A looped Layer gives each index its own pointer target (`instance` = loop index), so every replicated layer drags independently. New indices start at their Start Position; removed indices drop their state.\n- Edge cases: `min > max` on an axis is swapped per axis. `min == max` on an axis locks that axis when Clip is on. A missing or deleted layer never receives presses, so Position holds. Non-finite inputs are treated as 0 with one warning per restart through `ctx.services.log(\"warn\", …)`.\n- Disabled: new presses are ignored, an active drag ends with no momentum (the touch must lift before it can drag again), coasting stops where it is, and Position holds.\n- Muted: Position outputs Start Position, Dragging false, Velocity `[0, 0]`.\n- Evaluation: `alwaysEvaluate`; call `ctx.requestNextFrame()` while dragging or coasting.\n- Restart and dispose: state resets to Start Position. Nothing to release.\n- Coming from Origami: Drag Settings folds in as advanced inputs; importers move a linked Drag Settings patch's literals onto these ports. Momentum Friction's mapping is a Sonobe decision (no published formula).",
+      "inputs": [
+        {
+          "key": "layer",
+          "name": "Layer",
+          "type": "layer",
+          "default": null,
+          "description": "The layer whose touches start a drag; empty means a press anywhere on the screen drags."
+        },
+        {
+          "key": "enabled",
+          "name": "Enabled",
+          "type": "boolean",
+          "default": true,
+          "description": "When on, the layer can be dragged; when off, presses are ignored and Position holds."
+        },
+        {
+          "key": "startPosition",
+          "name": "Start Position",
+          "type": "point",
+          "subtype": "distance",
+          "default": [
+            0,
+            0
+          ],
+          "description": "Where Position starts, in the parent's points from its top-left; Reset returns here."
+        },
+        {
+          "key": "reset",
+          "name": "Reset",
+          "type": "pulse",
+          "description": "Pulse to put the layer back at Start Position and stop any movement."
+        },
+        {
+          "key": "axis",
+          "name": "Axis",
+          "type": "enum",
+          "default": "both",
+          "enumOptions": [
+            {
+              "key": "both",
+              "name": "Both",
+              "description": "Drag freely in any direction."
+            },
+            {
+              "key": "horizontal",
+              "name": "Horizontal",
+              "description": "Only x changes."
+            },
+            {
+              "key": "vertical",
+              "name": "Vertical",
+              "description": "Only y changes."
+            }
+          ],
+          "description": "Which directions the layer can move."
+        },
+        {
+          "key": "clip",
+          "name": "Clip",
+          "type": "boolean",
+          "default": false,
+          "description": "When on, Position always stays between Min and Max.",
+          "advanced": true
+        },
+        {
+          "key": "min",
+          "name": "Min",
+          "type": "point",
+          "subtype": "distance",
+          "default": [
+            0,
+            0
+          ],
+          "description": "Smallest allowed Position (the top-left corner of the drag bounds) when Clip is on.",
+          "advanced": true
+        },
+        {
+          "key": "max",
+          "name": "Max",
+          "type": "point",
+          "subtype": "distance",
+          "default": [
+            300,
+            300
+          ],
+          "description": "Largest allowed Position (the bottom-right corner of the drag bounds) when Clip is on.",
+          "advanced": true
+        },
+        {
+          "key": "momentum",
+          "name": "Momentum",
+          "type": "boolean",
+          "default": false,
+          "description": "When on, a flicked layer keeps gliding after release and slows down by Momentum Friction.",
+          "advanced": true
+        },
+        {
+          "key": "momentumFriction",
+          "name": "Momentum Friction",
+          "type": "number",
+          "default": 50,
+          "min": 0,
+          "max": 950,
+          "step": 1,
+          "description": "How quickly a flicked layer slows down, 0 to 950: 50 feels like iOS scrolling, 950 stops almost at once.",
+          "advanced": true
+        }
+      ],
+      "outputs": [
+        {
+          "key": "position",
+          "name": "Position",
+          "type": "point",
+          "subtype": "distance",
+          "description": "Where the dragged layer should be, in its parent's points; link it to the layer's Position."
+        },
+        {
+          "key": "dragging",
+          "name": "Dragging",
+          "type": "boolean",
+          "description": "True while a finger or mouse is dragging the layer."
+        },
+        {
+          "key": "velocity",
+          "name": "Velocity",
+          "type": "point",
+          "subtype": "velocity",
+          "description": "How fast Position is changing, in points per second, while dragging or gliding; 0 at rest."
+        }
+      ],
+      "alwaysEvaluate": true,
+      "pairsWellWith": [
+        "springAnimation",
+        "snap",
+        "clamp",
+        "transition",
+        "velocity"
+      ],
+      "commonMistakes": [
+        "Nothing moves when you drag: Drag only computes a position. Link Position into the layer's Position property.",
+        "The layer jumps or drifts on the first drag: Start Position doesn't match where the layer is drawn. Set Start Position to the layer's authored position.",
+        "The layer won't move at all with Clip on: Min and Max are equal or leave no room. Min and Max bound Position itself (the anchor point), not the layer's edges."
+      ],
+      "examples": [
+        {
+          "title": "Drag a card anywhere",
+          "outline": "layer card rectangle \"Card\" @16,120 160x220 position←move_card.position\npatch move_card drag layer=@card startPosition=[16,120]"
+        },
+        {
+          "title": "Slide a knob along a track",
+          "description": "Axis and Clip keep the knob on the track; Momentum lets a flick glide to the end.",
+          "outline": "layer track rectangle \"Track\" @40,420 322x4\nlayer knob oval \"Knob\" @40,400 44x44 position←slide.position\npatch slide drag layer=@knob startPosition=[40,400] axis=horizontal clip=true min=[18,400] max=[340,400] momentum=true momentumFriction=250"
+        }
+      ],
+      "origami": {
+        "id": "origami.drag",
+        "name": "Drag"
+      },
+      "importAliases": [
+        "builtin.drag",
+        "origami.drag-settings"
+      ],
+      "origamiPorts": {
+        "enabled": "Enable",
+        "startPosition": "Start",
+        "clip": "Drag Settings › Clip",
+        "min": "Drag Settings › Min",
+        "max": "Drag Settings › Max",
+        "momentum": "Drag Settings › Momentum",
+        "momentumFriction": "Drag Settings › Momentum Friction"
+      },
+      "defaultNotes": {
+        "enabled": "inferred: Origami's docs imply dragging is on by default.",
+        "startPosition": "inferred: research reads Origami's default as (0, 0).",
+        "axis": "sonobe: new port; Both matches Origami's free dragging.",
+        "clip": "inferred: an unconnected Drag Settings means no clipping.",
+        "min": "inferred: research reads Origami's default as (0, 0).",
+        "max": "sonobe: Origami's default is unknown (likely 0, 0); 300×300 leaves room to move when Clip is first turned on.",
+        "momentum": "inferred: an unconnected Drag Settings means no momentum.",
+        "momentumFriction": "sonobe: Origami's default and formula are unpublished; 50 maps to POP's normal deceleration 0.998 per ms."
+      }
+    },
+    {
+      "type": "scroll",
+      "name": "Scroll",
+      "category": "interaction",
+      "tier": 1,
+      "status": "supported",
+      "aliases": [
+        "scroll view",
+        "scrolling list",
+        "carousel",
+        "paging",
+        "swipe pages",
+        "overscroll",
+        "rubber band",
+        "scroll settings",
+        "scroll y",
+        "scroll x"
+      ],
+      "summary": "Scrolls a content layer inside its parent with momentum, rubber banding, or paging, and outputs the scroll position and page.",
+      "docs": "## How it works\nScroll turns drags, flicks, and mouse-wheel scrolling on **Layer** into a **Position** for that layer. The layer's parent is the visible window: content bigger than the parent can scroll, and the parent's Clip Contents hides what's outside. Link Position into the content layer's Position.\n\n- **Scroll X** and **Scroll Y** choose Off, Free (momentum and rubber banding), or Paging (snap page by page) for each direction.\n- **Start Position** is where the content sits when it's scrolled all the way to the top-left.\n- **X** and **Y** are the same position split into numbers, for scroll-linked effects like collapsing headers. They go negative as content moves up or left.\n- **Page X** and **Page Y** count pages from 0.\n- **Dragging** is true while a finger is scrolling; **Moving** stays true until the content settles.\n\nAdvanced inputs set the content size, page size and padding, direction locking, deceleration, rubber banding, and jumps (pulses that scroll to a position).\n\n## Tips\n- Put the content in a group sized to the visible area, with Clip Contents on.\n- For cards narrower than the screen, set Page Size to the card size and Page Padding to the gap.\n\n## Coming from Origami\nScroll Settings is built in as advanced inputs. Link Position instead of wiring X and Y into separate position fields. Sonobe adds Start Position, Rubber Band, Dragging, Moving, and mouse-wheel scrolling. Coordinates start at the parent's top-left with y down.",
+      "behavior": "State per loop index: one axis record per axis `{ offset: 0, velocity: 0, phase: \"idle\" | \"tracking\" | \"decelerating\" | \"rubberBanding\" | \"snapping\", spring, rawGrab, startPage, lastWheelTime }` plus `{ touch: \"none\" | \"pending\" | \"accepted\" | \"ignored\", slopOrigin: [x, y], lock: null | \"x\" | \"y\" }`.\n\nGeometry, per axis `a`, recomputed every frame from the previous frame's layout (`ctx.services.layerInfo`):\n```\ninfo = layerInfo(layerRef); parent = info.parent ? layerInfo(parentRef) : null;\nviewport = parent ? parent.size[a] : device().screenSize[a];\ncontent  = contentSize[a] > 0 ? contentSize[a] : info.size[a];\ntopLeft  = startPosition[a] − info.anchor[a] · info.size[a];   // content's top-left at offset 0\nFree:   hi = 0; lo = min(0, viewport − (topLeft + content));\nPaging: page = pageSize[a] > 0 ? pageSize[a] : viewport; step = page + pagePadding[a];\n        inset = (viewport − page) / 2; count = max(1, round((content + pagePadding[a]) / step));\n        pageOffset(n) = inset − topLeft − n · step; lo = pageOffset(count − 1); hi = pageOffset(0);\nOff:    lo = hi = 0 (the axis never moves).\n```\n\nEach frame:\n```\np = ctx.services.pointer(layerRef);\n1. Jumps (checked first; they work even while disabled):\n   if (ctx.pulsed(\"jumpToX\")) jump(x, jumpPositionX − startPosition[0], jumpStyleX);\n   if (ctx.pulsed(\"jumpToY\")) jump(y, jumpPositionY − startPosition[1], jumpStyleY);\n   jump(axis, target, style): target = clamp(target, lo, hi); cancel an active touch (touch = \"ignored\");\n     instant → offset = target, velocity = 0, phase idle; animated → snap spring from offset keeping velocity.\n2. Touch (when enabled):\n   p.began → touch = \"pending\"; slopOrigin = p.position; every moving axis stops where it is\n             (a tap catches a fling); rawGrab = inverseRubberBandClamp(offset, lo, hi, viewport, 0.55).\n   pending and distance(p.position, p.startPosition) > 10 → decide:\n     d = p.position − p.startPosition; dominant = |d.x| > |d.y| ? \"x\" : \"y\";\n     if directionLocking and both axes are on → lock = dominant;\n     if directionLocking and only one axis is on and dominant is the other → touch = \"ignored\";\n     else touch = \"accepted\"; slopOrigin = p.position (no 10 pt jump).\n   accepted and p.down → for each active axis (lock ? only lock : every non-Off axis):\n     raw = rawGrab + (p.position[a] − slopOrigin[a]) / ancestorScale[a];\n     offset = rubberBand ? rubberBandClamp(raw, lo, hi, viewport, 0.55) : clamp(raw, lo, hi); phase tracking.\n   p.ended and accepted → release(a, p.velocity[a] / ancestorScale[a]) for each active axis; touch = \"none\".\n   p.ended otherwise → touch = \"none\" (a tap or ignored touch leaves the content resting).\n3. Wheel (enabled, no accepted touch, ctx.services.pointer(parentRef).hovering):\n   w = ctx.services.wheel().delta; for each non-Off axis: offset = clamp(offset − w[a], lo, hi); phase idle;\n   lastWheelTime = ctx.time. A Paging axis snaps to its nearest page once 0.15 s pass with no wheel delta.\n4. Step every axis not tracking by ctx.dt (capped at 0.064 s): see Physics.\n5. position = [startPosition[0] + offset.x, startPosition[1] + offset.y];\n   ctx.output(\"position\", position); ctx.output(\"x\", position[0]); ctx.output(\"y\", position[1]);\n   ctx.output(\"pageX\", pageIndex(x)); ctx.output(\"pageY\", pageIndex(y));\n   ctx.output(\"dragging\", touch === \"accepted\"); ctx.output(\"moving\", any axis phase !== \"idle\");\n```\n\n- Physics (the Momentum Scrolling primitive, gap-fill R8; `MomentumScroller` in `@sonobe/engine`):\n  - `release(a, v)`, Free axis: outside `[lo, hi]` → rubber-band spring to the nearest bound with velocity `v`. Otherwise, if `|v| > 0.25` → decelerate with POP decay `d` = 0.998 per ms (Normal) or 0.99 (Fast): `kv = d^(1000·dt)`, `offset += (v/1000)·d·(1 − kv)/(1 − d)`, `v *= kv`, idle below 0.25 pt/s. Otherwise idle.\n  - Crossing a bound while decelerating: with Rubber Band on, a spring starts at the bound with the remaining velocity (sub-frame exact via the decay closed form); with it off, the axis stops at the bound.\n  - Rubber-band spring: Origami tension 40, friction 10 through `fromOrigamiTensionFriction`, mass 1, RK4 at 1 ms substeps, rest threshold 0.001.\n  - `release(a, v)`, Paging axis: `projected = offset + v · 0.99 / (1 − 0.99) / 1000`; `n = round((hi − projected) / step)`, clamped to `startPage ± 1` and `[0, count − 1]`; snap spring (bounciness 0, speed 12 through `fromBouncinessSpeed`) to `pageOffset(n)` with velocity `v`. A drag that overshoots backward can't land on a page past its start page.\n  - Idle and out of bounds (content shrank, or a jump target moved): spring back to the nearest bound, or clamp when Rubber Band is off.\n- Page index: Paging axis → `clamp(round((hi − offset) / step), 0, count − 1)`. Free or Off axis → `clamp(round(−offset / pageSizeOrViewport), 0, ∞)`, so it still counts screens.\n- Pulses: `jumpToX` and `jumpToY`. Same-frame precedence: jump > touch > wheel. Pulses on consecutive frames each jump.\n- Frame 0: offsets are 0, Position = Start Position, pages 0, Dragging and Moving false. Layout sizes arrive from frame 1 (layer-derived values lag one frame, gap-fill R2), so bounds are recomputed then.\n- Nested scrolls: a touch bubbles to every Scroll whose content contains it. With Direction Locking on, a one-axis Scroll ignores touches that start in the other direction, which lets a horizontal carousel sit inside a vertical feed. Two Scrolls on the same axis both move in v1; exclusive claiming needs an engine-level pointer claim.\n- Retargeting: changing Scroll X/Y, sizes, padding, or Start Position recomputes the bounds on the next frame and springs the content back into range. Changing Deceleration Rate affects the next release.\n- Loops: per-index state. A looped Layer scrolls each replicated layer independently (`instance` = loop index).\n- Edge cases: content smaller than the viewport → `lo = hi = 0`, but it still rubber-bands while dragged when Rubber Band is on. A missing layer or missing layout → content size 0 and no presses. Negative sizes are treated as 0. `step ≤ 0` (Page Size and padding both 0 with no viewport) → paging falls back to Free for that axis and warns once. Non-finite inputs are treated as 0 with one warning per restart.\n- Disabled: touches and wheel are ignored; an active drag releases with zero velocity (overscroll still springs back); decelerating axes stop where they are; jumps still apply; Position holds.\n- Muted: Position outputs Start Position, X and Y its components, pages 0, Dragging and Moving false.\n- Evaluation: `alwaysEvaluate`; call `ctx.requestNextFrame()` while any axis isn't idle.\n- Restart and dispose: offsets reset to 0. Nothing to release.\n- Coming from Origami: Scroll Settings folds in as advanced inputs; importers move a linked Scroll Settings patch's literals here. Origami outputs a content offset for Position X/Y fields; Sonobe outputs a whole Position (Start Position + offset).",
+      "inputs": [
+        {
+          "key": "layer",
+          "name": "Layer",
+          "type": "layer",
+          "default": null,
+          "description": "The content layer to scroll; its parent layer is the visible window."
+        },
+        {
+          "key": "enabled",
+          "name": "Enabled",
+          "type": "boolean",
+          "default": true,
+          "description": "When on, drags and the mouse wheel scroll the content; when off, it holds still but jumps still work."
+        },
+        {
+          "key": "scrollX",
+          "name": "Scroll X",
+          "type": "enum",
+          "default": "off",
+          "enumOptions": [
+            {
+              "key": "off",
+              "name": "Off",
+              "description": "No scrolling on this axis."
+            },
+            {
+              "key": "free",
+              "name": "Free",
+              "description": "Scroll anywhere with momentum and rubber banding."
+            },
+            {
+              "key": "paging",
+              "name": "Paging",
+              "description": "Snap to one page at a time, like a carousel."
+            }
+          ],
+          "description": "How the content scrolls horizontally."
+        },
+        {
+          "key": "scrollY",
+          "name": "Scroll Y",
+          "type": "enum",
+          "default": "free",
+          "enumOptions": [
+            {
+              "key": "off",
+              "name": "Off",
+              "description": "No scrolling on this axis."
+            },
+            {
+              "key": "free",
+              "name": "Free",
+              "description": "Scroll anywhere with momentum and rubber banding."
+            },
+            {
+              "key": "paging",
+              "name": "Paging",
+              "description": "Snap to one page at a time, like a carousel."
+            }
+          ],
+          "description": "How the content scrolls vertically."
+        },
+        {
+          "key": "startPosition",
+          "name": "Start Position",
+          "type": "point",
+          "subtype": "distance",
+          "default": [
+            0,
+            0
+          ],
+          "description": "The content layer's Position when it's scrolled to the very top-left, in its parent's points."
+        },
+        {
+          "key": "contentSize",
+          "name": "Content Size",
+          "type": "size",
+          "subtype": "distance",
+          "default": [
+            0,
+            0
+          ],
+          "description": "Width and height of the scrollable content; 0 uses the content layer's measured size.",
+          "advanced": true
+        },
+        {
+          "key": "directionLocking",
+          "name": "Direction Locking",
+          "type": "boolean",
+          "default": true,
+          "description": "When on, each touch scrolls only in the direction it started moving.",
+          "advanced": true
+        },
+        {
+          "key": "pageSize",
+          "name": "Page Size",
+          "type": "size",
+          "subtype": "distance",
+          "default": [
+            0,
+            0
+          ],
+          "description": "Size of one page when paging, centered in the window; 0 uses the window's size.",
+          "advanced": true
+        },
+        {
+          "key": "pagePadding",
+          "name": "Page Padding",
+          "type": "size",
+          "subtype": "distance",
+          "default": [
+            0,
+            0
+          ],
+          "min": 0,
+          "description": "Gap between pages when paging, in points.",
+          "advanced": true
+        },
+        {
+          "key": "decelerationRate",
+          "name": "Deceleration Rate",
+          "type": "enum",
+          "default": "normal",
+          "enumOptions": [
+            {
+              "key": "normal",
+              "name": "Normal",
+              "description": "Long, smooth glide (keeps 99.8% of velocity per millisecond)."
+            },
+            {
+              "key": "fast",
+              "name": "Fast",
+              "description": "Short glide (keeps 99% of velocity per millisecond)."
+            }
+          ],
+          "description": "How long a flick keeps gliding.",
+          "advanced": true
+        },
+        {
+          "key": "rubberBand",
+          "name": "Rubber Band",
+          "type": "boolean",
+          "default": true,
+          "description": "When on, content stretches past its edges and springs back; when off, it stops hard at the edges.",
+          "advanced": true
+        },
+        {
+          "key": "jumpStyleX",
+          "name": "Jump Style X",
+          "type": "enum",
+          "default": "animated",
+          "enumOptions": [
+            {
+              "key": "animated",
+              "name": "Animated",
+              "description": "Glide to the new position with a spring."
+            },
+            {
+              "key": "instant",
+              "name": "Instant",
+              "description": "Move there immediately."
+            }
+          ],
+          "description": "Whether Jump to X glides or moves instantly.",
+          "advanced": true
+        },
+        {
+          "key": "jumpToX",
+          "name": "Jump to X",
+          "type": "pulse",
+          "description": "Pulse to scroll horizontally so X becomes Jump Position X.",
+          "advanced": true
+        },
+        {
+          "key": "jumpPositionX",
+          "name": "Jump Position X",
+          "type": "number",
+          "subtype": "distance",
+          "default": 0,
+          "description": "The X value to jump to, in the same units as the X output.",
+          "advanced": true
+        },
+        {
+          "key": "jumpStyleY",
+          "name": "Jump Style Y",
+          "type": "enum",
+          "default": "animated",
+          "enumOptions": [
+            {
+              "key": "animated",
+              "name": "Animated",
+              "description": "Glide to the new position with a spring."
+            },
+            {
+              "key": "instant",
+              "name": "Instant",
+              "description": "Move there immediately."
+            }
+          ],
+          "description": "Whether Jump to Y glides or moves instantly.",
+          "advanced": true
+        },
+        {
+          "key": "jumpToY",
+          "name": "Jump to Y",
+          "type": "pulse",
+          "description": "Pulse to scroll vertically so Y becomes Jump Position Y.",
+          "advanced": true
+        },
+        {
+          "key": "jumpPositionY",
+          "name": "Jump Position Y",
+          "type": "number",
+          "subtype": "distance",
+          "default": 0,
+          "description": "The Y value to jump to, in the same units as the Y output; use Start Position's y to scroll to the top.",
+          "advanced": true
+        }
+      ],
+      "outputs": [
+        {
+          "key": "position",
+          "name": "Position",
+          "type": "point",
+          "subtype": "distance",
+          "description": "Where the content layer should be, in its parent's points; link it to the layer's Position."
+        },
+        {
+          "key": "x",
+          "name": "X",
+          "type": "number",
+          "subtype": "distance",
+          "description": "The horizontal part of Position; decreases as content scrolls left."
+        },
+        {
+          "key": "y",
+          "name": "Y",
+          "type": "number",
+          "subtype": "distance",
+          "description": "The vertical part of Position; decreases as content scrolls up and rises past Start Position when pulled down."
+        },
+        {
+          "key": "pageX",
+          "name": "Page X",
+          "type": "index",
+          "description": "The current horizontal page, counted from 0."
+        },
+        {
+          "key": "pageY",
+          "name": "Page Y",
+          "type": "index",
+          "description": "The current vertical page, counted from 0."
+        },
+        {
+          "key": "dragging",
+          "name": "Dragging",
+          "type": "boolean",
+          "description": "True while a finger is scrolling the content."
+        },
+        {
+          "key": "moving",
+          "name": "Moving",
+          "type": "boolean",
+          "description": "True while the content is dragged, gliding, springing back, or snapping to a page."
+        }
+      ],
+      "alwaysEvaluate": true,
+      "pairsWellWith": [
+        "remap",
+        "clamp",
+        "transition",
+        "progress",
+        "loop"
+      ],
+      "commonMistakes": [
+        "The content doesn't move: Scroll only computes a position. Link Position into the content layer's Position.",
+        "It stretches but won't scroll: the content isn't bigger than its parent. Put the content inside a group sized to the visible area and turn on Clip Contents.",
+        "Position has no effect inside a group with layout: relative children ignore Position. Set the content layer's Positioning to Absolute."
+      ],
+      "examples": [
+        {
+          "title": "Scroll a feed vertically",
+          "outline": "layer feed_window group \"Feed Window\" @0,64 402x760 clip=true\n  layer feed group \"Feed\" 402x2400 position←feed_scroll.position\npatch feed_scroll scroll layer=@feed scrollY=free"
+        },
+        {
+          "title": "Page through cards with a page label",
+          "description": "Five 275 pt cards with 10 pt gaps snap one at a time; Page X drives the label.",
+          "outline": "layer carousel group \"Carousel\" @0,200 402x300 clip=true\n  layer cards group \"Cards\" 1415x300 position←pager.position\nlayer page_label text \"Page Label\" @16,520 text←pager.pageX\npatch pager scroll layer=@cards scrollX=paging scrollY=off pageSize=[275,300] pagePadding=[10,0]"
+        }
+      ],
+      "origami": {
+        "id": "builtin.layer.scroll",
+        "name": "Scroll"
+      },
+      "importAliases": [
+        "origami.scroll",
+        "builtin.layer.scroll.settings",
+        "origami.scroll.settings"
+      ],
+      "origamiPorts": {
+        "layer": "Content Layer",
+        "enabled": "Enable",
+        "contentSize": "Scroll Settings › Content Size",
+        "directionLocking": "Scroll Settings › Direction Locking",
+        "pageSize": "Scroll Settings › Page Size",
+        "pagePadding": "Scroll Settings › Page Padding",
+        "decelerationRate": "Scroll Settings › Deceleration Rate",
+        "jumpStyleX": "Scroll Settings › Jump Style X",
+        "jumpToX": "Scroll Settings › Jump to X",
+        "jumpPositionX": "Scroll Settings › Jump Position X",
+        "jumpStyleY": "Scroll Settings › Jump Style Y",
+        "jumpToY": "Scroll Settings › Jump to Y",
+        "jumpPositionY": "Scroll Settings › Jump Position Y"
+      },
+      "defaultNotes": {
+        "scrollX": "sonobe: Origami's default is undocumented (likely Free); Off avoids accidental sideways scrolling in vertical lists. Not the first option because Off, Free, Paging follows Origami's order.",
+        "scrollY": "inferred: Origami's legacy default was Free.",
+        "startPosition": "sonobe: new port; 0, 0 matches Origami resetting the content position to 0.",
+        "contentSize": "verified: Origami's Scroll Settings shows Auto (the content layer's size).",
+        "directionLocking": "inferred: the legacy Scroll Settings UI showed it checked.",
+        "pageSize": "verified: Origami's Scroll Settings shows Auto (the bounds size).",
+        "pagePadding": "inferred: research reads Origami's default as 0, 0.",
+        "decelerationRate": "inferred: Normal matches UIScrollView's default rate.",
+        "rubberBand": "sonobe: new port; Origami's native Scroll always rubber-bands.",
+        "jumpStyleX": "inferred: the legacy Scroll Settings UI showed Animated.",
+        "jumpPositionX": "inferred: the legacy Scroll Settings UI showed 0.",
+        "jumpStyleY": "inferred: the legacy Scroll Settings UI showed Animated.",
+        "jumpPositionY": "inferred: the legacy Scroll Settings UI showed 0."
+      }
+    },
+    {
+      "type": "mouse",
+      "name": "Mouse",
+      "category": "interaction",
+      "tier": 2,
+      "status": "supported",
+      "aliases": [
+        "cursor position",
+        "mouse position",
+        "right click",
+        "middle click",
+        "mouse wheel",
+        "scroll wheel",
+        "trackpad scroll",
+        "pointer"
+      ],
+      "summary": "Reports the mouse pointer's position, which buttons are held, and how fast the scroll wheel or trackpad is scrolling.",
+      "docs": "## How it works\nMouse listens to the mouse across the whole prototype, not a particular layer.\n\n- **Position** is where the pointer is, in points from the prototype's top-left, even while no button is pressed.\n- **Left**, **Right**, and **Middle** are true while that button is held.\n- **Scroll Velocity** is how fast the wheel or trackpad is scrolling, in points per second. **Scroll Delta** is how far it scrolled this frame. Both are positive when scrolling toward the bottom or right of a page.\n\nOn phones and tablets a finger acts like the left button, and there's no wheel.\n\n## Tips\n- For clicks or hovering on one layer, use Interaction or Hover instead.\n- To move content with the wheel, subtract Scroll Delta from its position each frame, or use Scroll, which already handles the wheel.\n- Smooth Value makes a custom cursor trail the pointer gently.\n\n## Coming from Origami\nOrigami's older docs list Down and Location; current files use Left, Right, Middle, Position, and Scroll Velocity, which Sonobe matches. Position starts at the top-left with y down instead of the viewer center, and Scroll Velocity is per second instead of per frame. Scroll Delta is new.",
+      "behavior": "State: `{ position: [0, 0] }` (a single global instance; no per-index differences).\n\nEach frame:\n```\nconst p = ctx.services.pointer(null);        // whole screen\nif (p.down || p.hovering || p.ended) state.position = p.position;\nconst w = ctx.services.wheel();\nctx.output(\"position\", state.position);\nctx.output(\"left\", buttonHeld(p, 0));\nctx.output(\"right\", buttonHeld(p, 2));\nctx.output(\"middle\", buttonHeld(p, 1));\nctx.output(\"scrollDelta\", w.delta);\nctx.output(\"scrollVelocity\", ctx.dt > 0 ? [w.delta[0] / ctx.dt, w.delta[1] / ctx.dt] : [0, 0]);\n```\n\n- Position: the last known pointer position in prototype coordinates. It updates on moves with or without a pressed button, holds when the pointer leaves the viewer, and is `[0, 0]` before the first pointer event.\n- Buttons: DOM button numbers, 0 left, 1 middle, 2 right. A button is held from its `down` event until its `up` or `cancel`. Touch and pen presses count as Left. Contract gap: `PointerSnapshot` doesn't expose which buttons are held. Until it does (proposed: `buttons: number`, the DOM bitmask), `buttonHeld(p, 0)` is `p.down` for any button and Right and Middle stay false.\n- Wheel: `ctx.services.wheel().delta` sums this frame's wheel events in points, positive y toward the bottom of a page (DOM `deltaY`). The renderer converts line and page deltas to points and applies the OS natural-scrolling setting. Trackpad momentum arrives as wheel events, so it shows up here. Scroll Velocity is `delta / dt`, so it matches at 60 and 120 fps; frames with no wheel events output `[0, 0]`.\n- Frame 0: Position `[0, 0]` unless a pointer event arrives on frame 0; buttons false; scroll outputs `[0, 0]`.\n- Loops: the patch has no inputs, so it never loops.\n- Edge cases: several pointers pressed at once (multi-touch) report the first pressed pointer's position. Non-finite event coordinates are ignored.\n- Platform and simulation: phones and tablets have no hover, right or middle button, or wheel; those outputs stay idle. In headless simulation, `pointer` and `wheel` InputEvents drive the outputs deterministically.\n- Evaluation: `alwaysEvaluate` (the outputs change with input events, not inputs).\n- Restart and dispose: Position resets to `[0, 0]`. Nothing to release.\n- Coming from Origami: the per-frame Scroll Velocity becomes per second; Origami's legacy wheel patch flipped the y sign, Sonobe uses the DOM sign.",
+      "inputs": [],
+      "outputs": [
+        {
+          "key": "position",
+          "name": "Position",
+          "type": "point",
+          "subtype": "distance",
+          "description": "Where the mouse pointer is, in points from the prototype's top-left; keeps its last value when the pointer leaves."
+        },
+        {
+          "key": "left",
+          "name": "Left",
+          "type": "boolean",
+          "description": "True while the left mouse button (or a finger) is pressed."
+        },
+        {
+          "key": "right",
+          "name": "Right",
+          "type": "boolean",
+          "description": "True while the right mouse button is pressed."
+        },
+        {
+          "key": "middle",
+          "name": "Middle",
+          "type": "boolean",
+          "description": "True while the middle mouse button (the wheel) is pressed."
+        },
+        {
+          "key": "scrollVelocity",
+          "name": "Scroll Velocity",
+          "type": "point",
+          "subtype": "velocity",
+          "description": "How fast the wheel or trackpad is scrolling, in points per second; positive toward the bottom and right."
+        },
+        {
+          "key": "scrollDelta",
+          "name": "Scroll Delta",
+          "type": "point",
+          "subtype": "distance",
+          "description": "How far the wheel or trackpad scrolled this frame, in points; [0, 0] when it isn't scrolling."
+        }
+      ],
+      "alwaysEvaluate": true,
+      "pairsWellWith": [
+        "hover",
+        "interaction",
+        "switch",
+        "smoothValue"
+      ],
+      "commonMistakes": [
+        "Clicks register anywhere on the screen: Mouse is global. Use Interaction with a layer for clicks on one element.",
+        "A wheel-driven layer moves the wrong way: Scroll Delta is positive when scrolling down a page. Subtract it from the layer's position instead of adding it.",
+        "Right never turns on in the browser: the browser's context menu takes the click. Test in the desktop app, or check that nothing else handles right clicks on the page."
+      ],
+      "examples": [
+        {
+          "title": "A custom cursor that follows the mouse",
+          "outline": "layer cursor oval \"Cursor\" 24x24 anchor=[0.5,0.5] position←pointer.position\npatch pointer mouse"
+        },
+        {
+          "title": "Right-click to open a menu",
+          "description": "Right turns the menu on and a left click closes it; Turn Off wins when both happen in one frame.",
+          "outline": "layer menu rectangle \"Menu\" @120,200 180x220 enabled←menu_open.on\npatch pointer mouse\npatch menu_open switch turnOn←pointer.right turnOff←pointer.left"
+        }
+      ],
+      "origami": {
+        "id": "builtin.mouse",
+        "name": "Mouse"
+      }
+    },
+    {
+      "type": "touches",
+      "name": "Touches",
+      "category": "interaction",
+      "tier": 2,
+      "status": "supported",
+      "aliases": [
+        "multi-touch",
+        "multitouch",
+        "fingers",
+        "all touches",
+        "touch points",
+        "pressure",
+        "force touch",
+        "finger count"
+      ],
+      "summary": "Lists every finger touching the screen or a layer as loops of positions and pressures, for multi-touch effects.",
+      "docs": "## How it works\nTouches reports every finger currently pressed, as **loops** (lists that make a patch or layer repeat once per item).\n\n- **Positions** holds one point per finger, in points from the prototype's top-left. Link it to a layer's Position to draw one copy of the layer under each finger.\n- **Pressures** holds how hard each finger presses, from 0 to 1.\n- **IDs** gives each finger a number that stays the same until it lifts.\n- **Count** is how many fingers are down.\n- **JSON** has the same data as a list of objects, handy for debugging.\n\nLeave **Layer** empty to watch the whole screen, or pick a layer to count only touches that started on it.\n\n## Tips\n- A mouse is one pointer. Test multi-touch on a phone with the web player.\n- Fingers are listed in the order they touched. When one lifts, the fingers after it move up a place; use IDs to follow a particular finger.\n- Most screens and mice can't sense pressure and report a fixed value.\n\n## Coming from Origami\nOrigami outputs one JSON structure; Sonobe outputs typed loops plus a JSON output for compatibility. Positions start at the top-left with y down, and Pressure runs 0 to 1 instead of Force 0 to 6.67. Layer and Enabled are new.",
+      "behavior": "Stateless (the pointer tracker owns touch identity).\n\nEach frame:\n```\nif (!enabled) { emit empty loops, count 0, json []; return; }\nconst touches = pressedPointers(layerRef)       // pointers whose press hit chain contains the layer\n  .sort((a, b) => a.startTime - b.startTime || a.id - b.id);\nctx.output(\"positions\", loop(touches.map((t) => t.position)));\nctx.output(\"pressures\", loop(touches.map((t) => t.pressure ?? 1)));\nctx.output(\"ids\", loop(touches.map((t) => t.id)));\nctx.output(\"count\", touches.length);\nctx.output(\"json\", touches.map((t) => ({ id: t.id, position: [t.position[0], t.position[1]], pressure: t.pressure ?? 1 })));\n```\n\n- Which touches: a pointer counts from the frame its `down` event is processed until the frame of its `up` or `cancel`, where it's already gone. With Layer empty, every pressed pointer counts. With a layer, a pointer counts when the layer or one of its descendants was in the press hit chain (touches bubble, ARCHITECTURE.md §5.5); moving off the layer doesn't remove it. Hovering mice aren't touches.\n- Order: by press time, ties broken by pointer id. Indices shift down when an earlier finger lifts; IDs are the `pointerId` from `InputEvent` and never change during a touch.\n- Pressure: the event's `pressure` (0 to 1) from the latest down or move event; `1` when an event carries none. Mice commonly report 0.5.\n- Contract gap: `PointerSnapshot` exposes only the first pointer's position plus `pointerCount`. Proposed: `RuntimeServices.pointers(layer: LayerRef | null): { id: number; position: [number, number]; pressure: number; startTime: number }[]`, backed by `PointerTracker`'s active records. Until it lands, output a single-item loop from `pointer(layerRef)` while `down` (pressure 1, id 0) and use `pointerCount` for Count.\n- Loops: outputs are whole loops (`wholeLoop`). An empty set of touches outputs empty loops, which replicate a linked layer zero times. The inputs don't loop: a looped Layer uses its first item and warns once per restart.\n- Frame 0: no touches; empty loops and Count 0.\n- Edge cases: a missing or deleted layer matches no touches. Non-finite coordinates from an event are ignored.\n- Disabled: empty loops, Count 0, JSON `[]`.\n- Muted: the same idle values as Disabled.\n- Platform and simulation: phones and tablets report every finger; desktop mice report one pointer while a button is held. In headless simulation, `pointer` InputEvents with distinct `pointerId`s simulate fingers.\n- Evaluation: `alwaysEvaluate`.\n- Restart and dispose: nothing to reset or release.",
+      "inputs": [
+        {
+          "key": "layer",
+          "name": "Layer",
+          "type": "layer",
+          "default": null,
+          "description": "Only count touches that started on this layer or its children; empty counts every touch on the screen."
+        },
+        {
+          "key": "enabled",
+          "name": "Enabled",
+          "type": "boolean",
+          "default": true,
+          "description": "When on, touches are reported; when off, every output is empty."
+        }
+      ],
+      "outputs": [
+        {
+          "key": "positions",
+          "name": "Positions",
+          "type": "point",
+          "subtype": "distance",
+          "description": "A loop with each finger's position, in points from the prototype's top-left.",
+          "wholeLoop": true
+        },
+        {
+          "key": "pressures",
+          "name": "Pressures",
+          "type": "number",
+          "subtype": "progress",
+          "description": "A loop with how hard each finger presses, 0 (lightest) to 1 (hardest).",
+          "wholeLoop": true
+        },
+        {
+          "key": "ids",
+          "name": "IDs",
+          "type": "index",
+          "description": "A loop with each finger's id, which stays the same until that finger lifts.",
+          "wholeLoop": true
+        },
+        {
+          "key": "count",
+          "name": "Count",
+          "type": "number",
+          "step": 1,
+          "description": "How many fingers are touching right now."
+        },
+        {
+          "key": "json",
+          "name": "JSON",
+          "type": "json",
+          "description": "The same touches as a JSON array of { id, position, pressure } objects."
+        }
+      ],
+      "alwaysEvaluate": true,
+      "pairsWellWith": [
+        "loopCount",
+        "loopSelect",
+        "length",
+        "watch"
+      ],
+      "commonMistakes": [
+        "Only one dot ever appears: you're testing with a mouse, which is a single pointer. Open the web player on a phone to try several fingers.",
+        "A dot jumps to another finger when one lifts: positions are listed in touch order, so indices shift. Use IDs to follow a specific finger."
+      ],
+      "examples": [
+        {
+          "title": "Draw a dot under every finger",
+          "description": "Positions is a loop, so the dot layer repeats once per finger.",
+          "outline": "layer finger_dot oval \"Finger Dot\" 60x60 anchor=[0.5,0.5] position←fingers.positions\npatch fingers touches"
+        },
+        {
+          "title": "Show how many fingers are down",
+          "outline": "layer count_label text \"Count Label\" @16,80 text←fingers.count\npatch fingers touches"
+        }
+      ],
+      "origami": {
+        "id": "builtin.touches",
+        "name": "Touches"
+      },
+      "origamiPorts": {
+        "json": "Touches"
+      },
+      "defaultNotes": {
+        "layer": "sonobe: new port; empty matches Origami's global Touches.",
+        "enabled": "sonobe: new port; on by default (§15)."
+      }
+    },
+    {
+      "type": "popSwitch",
+      "name": "Pop Switch",
+      "category": "interaction",
+      "tier": 2,
+      "status": "supported",
+      "aliases": [
+        "swipe switch",
+        "swipe between states",
+        "pinch to zoom",
+        "pinch rotate",
+        "two-state gesture",
+        "flick toggle",
+        "swipe card",
+        "legacy swipe"
+      ],
+      "summary": "Swipes or pinches a value between two states, then springs to the nearer one and reports whether it's on.",
+      "docs": "## How it works\nPop Switch is a switch you control with a gesture. While a finger swipes or pinches **Layer**, **Output** follows it. On release, Output springs to **Start** (off) or **End** (on), whichever the flick was heading closer to.\n\n- **Gesture** picks what drives Output: a one-finger swipe along x or y, or a two-finger pinch that scales, rotates, or moves.\n- **Start** and **End** are in the gesture's units: points for swipes and pinch moves, a multiplier for Pinch Scale, degrees for Pinch Rotate.\n- **Flip**, **Turn On**, and **Turn Off** are pulses (signals that are on for one frame) that change the state and animate there, like a Switch.\n- **Bounciness** and **Speed** set the spring, the same as Pop Animation.\n- **Progress** runs 0 at Start and 1 at End, and overshoots while bouncing. **On** is the committed state, and **Dragging** is true while fingers are on the layer.\n\n## Tips\n- Output is a number. Drive a layer's Position with Transition set to point, using Progress.\n- Dragging past Start or End stretches with resistance, so the edges feel soft.\n- Set Gesture to None to animate with the pulses only.\n\n## Coming from Origami\nOrigami's Start Value, End Value, Value, and On/Off are Start, End, Output, and On here. Sonobe adds Dragging, rubber-band resistance past Start and End, and flick projection. On changes when the fingers lift rather than mid-drag.",
+      "behavior": "State per loop index: `{ on: false, spring: { value, velocity }, target, dragging: false, grab: 0, grabDistance: 0, grabAngle: 0, grabCentroid: [0, 0], trackedVelocity: 0, ignoreUntilRelease: false, initialized: false }`.\n\nEach frame:\n```\nconst lo = Math.min(start, end), hi = Math.max(start, end), span = Math.max(hi - lo, 1);\nconst config = fromBouncinessSpeed(bounciness, Math.max(speed, 0));   // BouncyConversion → k, c, mass 1\nif (!state.initialized) { state.spring = { value: start, velocity: 0 }; state.initialized = true; }\nconst p = ctx.services.pointer(layerRef);\n\n// 1. Pulses. Precedence: turnOff > turnOn > flip.\nif (ctx.pulsed(\"turnOff\")) { if (state.on) { state.on = false; cancelDrag(); } }\nelse if (ctx.pulsed(\"turnOn\")) { if (!state.on) { state.on = true; cancelDrag(); } }\nelse if (ctx.pulsed(\"flip\")) { state.on = !state.on; cancelDrag(); }\n\n// 2. Gesture.\nif (enabled && gesture !== \"none\" && !state.ignoreUntilRelease) {\n  if (!state.dragging && gestureBegan(p)) { state.dragging = true; state.grab = state.spring.value; state.spring.velocity = 0; }\n  if (state.dragging && gestureActive(p)) {\n    const raw = gestureValue(state.grab);              // see Gestures\n    state.spring.value = rubberBandClamp(raw, lo, hi, span, 0.55);\n    state.spring.velocity = gestureVelocity();          // units per second\n  } else if (state.dragging) release();\n} else if (state.dragging) release();                  // disabled or gesture set to none mid-drag\nif (!p.down) state.ignoreUntilRelease = false;\n\n// 3. Animate toward the committed state.\nstate.target = state.on ? end : start;\nif (!state.dragging) { stepSpring(state.spring, state.target, config, ctx.dt); ctx.requestNextFrame(); }\n\nconst progress = end !== start ? (state.spring.value - start) / (end - start) : (state.spring.value >= start ? 1 : 0);\nctx.output(\"output\", state.spring.value); ctx.output(\"progress\", progress);\nctx.output(\"on\", state.on); ctx.output(\"dragging\", state.dragging);\n```\n\n- `release()`: `projected = value + velocity · 0.099` (where a fast POP decay, 0.99 per ms, would come to rest). `on = |projected − end| < |projected − start|`; on a tie the state doesn't change. Then `dragging = false` and the spring starts from the current value with the release velocity.\n- `cancelDrag()`: a pulse during a drag ends it. The spring keeps the tracked velocity, and the touch can't grab again until it lifts (`ignoreUntilRelease = p.down`).\n- Gestures:\n  - `swipeX` / `swipeY`: begins when a press begins on the layer (`p.began`), active while `p.down`. `gestureValue = grab + p.translation[a] / ancestorScale[a]`; velocity is `p.velocity[a] / ancestorScale[a]`. There's no slop: Value follows from the first movement.\n  - `pinchScale`, `pinchRotate`, `pinchX`, `pinchY`: begin when a second finger presses on the layer and stay active while two fingers are down; lifting to one finger releases. With the two fingers' distance `dist`, angle `ang` (degrees, unwrapped so crossing ±180 doesn't jump), and centroid `c` captured at the start: Pinch Scale → `grab · dist / max(grabDistance, 1)`; Pinch Rotate → `grab + (ang − grabAngle)`; Pinch X / Pinch Y → `grab + (c[a] − grabCentroid[a])`. Velocity is an exponential moving average of the value's change per second (time constant 0.03 s), with no sample on the first pinch frame.\n  - Contract gap: pinch needs every pointer's position, but `PointerSnapshot` exposes only the first plus `pointerCount`. Proposed: `RuntimeServices.pointers(layer)` (see Touches). Until then, pinch gestures never begin.\n- Spring: RK4 at 1 ms substeps, `dt` capped at 0.064 s, rest threshold 0.001 on displacement and velocity, then snap to the target (semantics.md §7.5). Bounciness and Speed update the constants live without resetting motion.\n- Pulses: `flip`, `turnOn`, `turnOff` with the precedence above. Turn On while already on and Turn Off while already off do nothing, even mid-drag. Pulses on consecutive frames each count. Pulses work while disabled and with Gesture None.\n- Frame 0: Output = Start at rest, Progress 0, On false, Dragging false. A pulse on frame 0 applies on frame 0 and animates.\n- Retargeting: changing Start or End moves the target; the spring keeps its velocity (C¹ continuous). While dragging, the rubber-band bounds update on the next frame.\n- Loops: per-index state. A looped Layer gives each index its own gesture target (`instance` = loop index); looped Start, End, or pulses apply per index. New indices start at their Start, off.\n- Edge cases: `start == end` → Progress is a step (1 when Output ≥ Start, else 0) and every release lands on that value. Negative Speed is treated as 0, and negative Bounciness adds damping, as in Pop Animation. A missing layer never begins a gesture. Non-finite inputs are treated as 0 with one warning per restart.\n- Disabled: gestures are ignored and an active drag releases as if the fingers lifted; pulses and the spring keep working.\n- Muted: Output = Start, Progress 0, On false, Dragging false.\n- Evaluation: `alwaysEvaluate`; call `ctx.requestNextFrame()` while dragging or while the spring isn't at rest.\n- Restart and dispose: state resets to off at Start. Nothing to release.\n- Coming from Origami: Origami's docs say On/Off follows whichever value is closer during the gesture; Sonobe commits On at release (with flick projection) so downstream logic doesn't flicker mid-drag.",
+      "inputs": [
+        {
+          "key": "layer",
+          "name": "Layer",
+          "type": "layer",
+          "default": null,
+          "description": "The layer to swipe or pinch; empty listens to the whole screen."
+        },
+        {
+          "key": "enabled",
+          "name": "Enabled",
+          "type": "boolean",
+          "default": true,
+          "description": "When on, gestures move the value; when off, only the pulses change it."
+        },
+        {
+          "key": "gesture",
+          "name": "Gesture",
+          "type": "enum",
+          "default": "swipeX",
+          "enumOptions": [
+            {
+              "key": "none",
+              "name": "None",
+              "description": "No gesture; animate with the pulses only."
+            },
+            {
+              "key": "swipeX",
+              "name": "Swipe X",
+              "description": "One finger moving left and right, in points."
+            },
+            {
+              "key": "swipeY",
+              "name": "Swipe Y",
+              "description": "One finger moving up and down, in points."
+            },
+            {
+              "key": "pinchScale",
+              "name": "Pinch Scale",
+              "description": "Two fingers spreading apart or together, as a multiplier."
+            },
+            {
+              "key": "pinchRotate",
+              "name": "Pinch Rotate",
+              "description": "Two fingers twisting, in degrees."
+            },
+            {
+              "key": "pinchX",
+              "name": "Pinch X",
+              "description": "Two fingers moving together left and right, in points."
+            },
+            {
+              "key": "pinchY",
+              "name": "Pinch Y",
+              "description": "Two fingers moving together up and down, in points."
+            }
+          ],
+          "description": "Which gesture drives the value."
+        },
+        {
+          "key": "start",
+          "name": "Start",
+          "type": "number",
+          "default": 0,
+          "description": "The value when the switch is off, in the gesture's units."
+        },
+        {
+          "key": "end",
+          "name": "End",
+          "type": "number",
+          "default": 300,
+          "description": "The value when the switch is on, in the gesture's units; can be less than Start."
+        },
+        {
+          "key": "flip",
+          "name": "Flip",
+          "type": "pulse",
+          "description": "Pulse to switch to the opposite state and animate there."
+        },
+        {
+          "key": "turnOn",
+          "name": "Turn On",
+          "type": "pulse",
+          "description": "Pulse to turn on and animate to End. Does nothing if it's already on."
+        },
+        {
+          "key": "turnOff",
+          "name": "Turn Off",
+          "type": "pulse",
+          "description": "Pulse to turn off and animate to Start. Does nothing if it's already off."
+        },
+        {
+          "key": "bounciness",
+          "name": "Bounciness",
+          "type": "number",
+          "default": 5,
+          "min": 0,
+          "max": 20,
+          "step": 0.5,
+          "description": "How much the value bounces when it settles; 0 means no bounce."
+        },
+        {
+          "key": "speed",
+          "name": "Speed",
+          "type": "number",
+          "default": 10,
+          "min": 0,
+          "max": 20,
+          "step": 0.5,
+          "description": "How quickly the value settles; higher is faster."
+        }
+      ],
+      "outputs": [
+        {
+          "key": "output",
+          "name": "Output",
+          "type": "number",
+          "description": "The current value, following the fingers or springing toward Start or End."
+        },
+        {
+          "key": "progress",
+          "name": "Progress",
+          "type": "number",
+          "subtype": "progress",
+          "description": "0 at Start and 1 at End; goes past 0 or 1 while stretching or bouncing."
+        },
+        {
+          "key": "on",
+          "name": "On",
+          "type": "boolean",
+          "description": "True when the switch is committed to End: after a release nearer End, or after Flip or Turn On."
+        },
+        {
+          "key": "dragging",
+          "name": "Dragging",
+          "type": "boolean",
+          "description": "True while fingers are swiping or pinching the layer."
+        }
+      ],
+      "alwaysEvaluate": true,
+      "pairsWellWith": [
+        "transition",
+        "popAnimation",
+        "pulse",
+        "interaction",
+        "switch"
+      ],
+      "commonMistakes": [
+        "The layer doesn't follow the finger: Output is a number, and nothing is linked to the layer. Feed Progress into a Transition set to point and link its output to Position, or link Output to a number property like Scale.",
+        "The swipe snaps back the wrong way: Start and End are in points for swipes. For a card that slides left, make End negative.",
+        "Pinching does nothing: pinch gestures need two fingers, and a mouse has one. Test pinches on a phone with the web player."
+      ],
+      "examples": [
+        {
+          "title": "Swipe a card between two spots",
+          "description": "Progress drives a point Transition, so the card slides and bounces along x.",
+          "outline": "layer card rectangle \"Card\" @24,200 300x180 position←slide.output\npatch swipe_card popSwitch layer=@card gesture=swipeX start=0 end=300\npatch slide transition<point> progress←swipe_card.progress start=[24,200] end=[324,200]"
+        },
+        {
+          "title": "Pinch to zoom a photo",
+          "outline": "layer photo image \"Photo\" @0,236 402x402 scale←zoom.output\npatch zoom popSwitch layer=@photo gesture=pinchScale start=1 end=2 bounciness=3"
+        }
+      ],
+      "origami": {
+        "id": "origami.popswitch",
+        "name": "Pop Switch"
+      },
+      "importAliases": [
+        "origami.PopSwitch"
+      ],
+      "origamiPorts": {
+        "enabled": "Enable",
+        "start": "Start Value",
+        "end": "End Value",
+        "output": "Value",
+        "on": "On/Off"
+      },
+      "defaultNotes": {
+        "enabled": "inferred: Origami's docs imply the gesture is on by default.",
+        "gesture": "inferred: Origami's default is undocumented; Swipe X is the common first use. Not the first option because the options follow Origami's order, which starts with None.",
+        "start": "inferred: research reads Origami's default as 0.",
+        "end": "sonobe: Origami's default is unknown; 300 pt is a visible swipe distance (the legacy Swipe macro used 600).",
+        "bounciness": "inferred: matches Pop Animation's verified default of 5.",
+        "speed": "inferred: matches Pop Animation's verified default of 10."
+      }
+    },
+    {
+      "type": "momentumScrolling",
+      "name": "Momentum Scrolling",
+      "category": "interaction",
+      "tier": 2,
+      "status": "supported",
+      "aliases": [
+        "momentum scrolling engine",
+        "momentum",
+        "inertia",
+        "flick physics",
+        "decay",
+        "rubber band",
+        "overscroll",
+        "sample value",
+        "coast"
+      ],
+      "summary": "Adds flick momentum and rubber-band bounds to a value you track yourself, for custom scroll and drag physics.",
+      "docs": "## How it works\nMomentum Scrolling is the physics behind Scroll, offered as a building block. While **Tracking** is on, **Output** follows **Value** exactly. When Tracking turns off, Output keeps moving at the speed Value was changing, slows down, and springs back if it ends up outside the boundaries.\n\n- **Tracking** is usually a Down or Dragging output.\n- **Value** is what you track, often a position built from the finger's movement.\n- **Start Boundary** and **End Boundary** set the range Output settles into. Past them it rubber-bands back.\n- **Scrolling Friction** (1 to 100) sets how soon a flick stops: 4 feels like iOS, 20 stops quickly.\n- **Rubber Band Tension** and **Rubber Band Friction** (10 to 1000) shape the spring back: tension for speed, friction for smoothness.\n- **Stick to Boundaries** stops Output at the boundaries instead of stretching past them.\n- **Velocity** and **Moving** report the motion after release.\n\n## Tips\n- Scroll and Drag's Momentum already cover most prototypes. Reach for this patch when you need physics on something else, like a dial's rotation.\n- Feed Output back into your Value math with Delay One Frame, so a new grab continues from where the flick stopped.\n\n## Coming from Origami\nOrigami's docs list five inputs; current files have eight, which Sonobe matches (Sample Value is Tracking here). Output starts at Value instead of jumping to the End Boundary. Velocity and Moving are new.",
+      "behavior": "State per loop index: `{ output: 0, velocity: 0, phase: \"idle\" | \"tracking\" | \"decelerating\" | \"rubberBanding\", spring, lastValue: 0, initialized: false }`.\n\nEach frame:\n```\nconst lo = Math.min(startBoundary, endBoundary), hi = Math.max(startBoundary, endBoundary);\nconst d = 1 - clamp(scrollingFriction, 1, 100) / 2000;                  // per ms: 4 → 0.998, 20 → 0.99, 100 → 0.95\nconst rb = fromOrigamiTensionFriction(Math.max(rubberBandTension, 10), Math.max(rubberBandFriction, 10));\nconst target = stickToBoundaries ? clamp(value, lo, hi) : value;\nconst h = Math.min(Math.max(ctx.dt, 0), 0.064);\nif (!state.initialized) { state.output = clamp(value, lo, hi); state.lastValue = state.output; state.initialized = true; }\n\nif (tracking) {\n  if (state.phase !== \"tracking\") { state.velocity = 0; state.lastValue = target; state.phase = \"tracking\"; }\n  else if (h > 0) {\n    const sample = (target - state.lastValue) / h;\n    state.velocity += (sample - state.velocity) * (1 - Math.exp(-h / 0.03));\n    state.lastValue = target;\n  }\n  state.output = target;\n} else {\n  if (state.phase === \"tracking\") release(state.velocity);\n  step(h);\n}\nctx.output(\"output\", state.output);\nctx.output(\"velocity\", state.phase === \"idle\" ? 0 : state.velocity);\nctx.output(\"moving\", state.phase === \"decelerating\" || state.phase === \"rubberBanding\");\n```\n\n- `release(v)`: outside `[lo, hi]` → phase rubberBanding (spring toward the nearest bound, starting with velocity `v`; with Stick to Boundaries on, clamp and go idle instead). Otherwise `|v| > 0.25` → phase decelerating. Otherwise idle with velocity 0.\n- `step(h)`, decelerating: POP decay (gap-fill §4.2.4): `kv = d^(1000·h)`, `output += (v/1000)·d·(1 − kv)/(1 − d)`, `v *= kv`. If the path crosses a bound within this frame, find the crossing time from the closed form. With Stick to Boundaries, stop at the bound (velocity 0, idle). Without it, start the rubber-band spring at the bound with the remaining velocity `v·d^(1000·t)` and integrate the rest of the frame. Below 0.25 units/s → idle.\n- `step(h)`, rubberBanding: RK4 at 1 ms substeps with k and c from `rb`, mass 1 (semantics.md §7.5); at rest (0.001 on displacement and velocity) → output = the bound, velocity 0, idle.\n- `step(h)`, idle: if the bounds moved so Output is now outside them, spring back (or clamp with Stick to Boundaries).\n- Tracking velocity: an exponential moving average of Value's change per second (time constant 0.03 s). The first tracking frame takes no sample, so grabbing while coasting doesn't spike. Grabbing catches any motion in flight immediately.\n- Value while not tracking: ignored. To reposition Output programmatically, turn Tracking on for a frame with the new Value.\n- Pulses: none. Tracking is a state; a pulse wired into it tracks for exactly one frame and then releases with velocity 0 (a one-frame sample).\n- Frame 0: Output = Value clamped to the boundaries, Velocity 0, Moving false. If Tracking is on at frame 0, Output = Value.\n- Retargeting: new boundaries apply on the next frame; a coasting Output that's now out of range springs back. Friction, tension, and Stick to Boundaries changes apply immediately without resetting motion.\n- Loops: per-index state; every index coasts independently. New indices start at their Value; removed indices drop their state.\n- Edge cases: `startBoundary > endBoundary` is swapped. Equal boundaries pin Output to that value after release. Scrolling Friction outside 1–100 and rubber-band values below 10 are clamped for the physics (not rewritten). Non-finite Value or boundaries are treated as 0 with one warning per restart.\n- Muted: Output passes Value through, Velocity 0, Moving false.\n- Evaluation: `alwaysEvaluate`; call `ctx.requestNextFrame()` while decelerating or rubber-banding.\n- Restart and dispose: state resets on restart. Nothing to release.\n- Coming from Origami: Origami starts Output at the End Boundary on the first frame (default 99999), which its sample files work around; Sonobe starts at Value. Scrolling Friction's mapping to deceleration is a Sonobe decision anchored so the legacy default 4 equals POP's 0.998 per ms. Rubber band values use Origami's tension and friction units.",
+      "inputs": [
+        {
+          "key": "tracking",
+          "name": "Tracking",
+          "type": "boolean",
+          "default": false,
+          "description": "When on, Output follows Value; when it turns off, Output coasts with momentum."
+        },
+        {
+          "key": "value",
+          "name": "Value",
+          "type": "number",
+          "default": 0,
+          "description": "The number Output follows while Tracking is on, such as a position in points."
+        },
+        {
+          "key": "startBoundary",
+          "name": "Start Boundary",
+          "type": "number",
+          "default": 0,
+          "description": "The low end of the range Output settles into; past it Output springs back."
+        },
+        {
+          "key": "endBoundary",
+          "name": "End Boundary",
+          "type": "number",
+          "default": 99999,
+          "description": "The high end of the range Output settles into; the default leaves it effectively open."
+        },
+        {
+          "key": "scrollingFriction",
+          "name": "Scrolling Friction",
+          "type": "number",
+          "default": 4,
+          "min": 1,
+          "max": 100,
+          "step": 1,
+          "description": "How quickly a flick slows down, 1 to 100: 4 feels like iOS scrolling, 100 stops almost at once."
+        },
+        {
+          "key": "rubberBandTension",
+          "name": "Rubber Band Tension",
+          "type": "number",
+          "default": 200,
+          "min": 10,
+          "max": 1000,
+          "step": 1,
+          "description": "How fast Output returns from past a boundary, 10 to 1000; higher is snappier."
+        },
+        {
+          "key": "rubberBandFriction",
+          "name": "Rubber Band Friction",
+          "type": "number",
+          "default": 28,
+          "min": 10,
+          "max": 1000,
+          "step": 1,
+          "description": "How smoothly Output returns from past a boundary, 10 to 1000; lower wobbles more."
+        },
+        {
+          "key": "stickToBoundaries",
+          "name": "Stick to Boundaries",
+          "type": "boolean",
+          "default": false,
+          "description": "When on, Output stops at the boundaries instead of stretching past them and springing back.",
+          "advanced": true
+        }
+      ],
+      "outputs": [
+        {
+          "key": "output",
+          "name": "Output",
+          "type": "number",
+          "description": "The value with momentum added: Value while tracking, then coasting and settling."
+        },
+        {
+          "key": "velocity",
+          "name": "Velocity",
+          "type": "number",
+          "subtype": "velocity",
+          "description": "How fast Output is changing, in units per second; 0 at rest."
+        },
+        {
+          "key": "moving",
+          "name": "Moving",
+          "type": "boolean",
+          "description": "True while Output is coasting or springing back after release."
+        }
+      ],
+      "alwaysEvaluate": true,
+      "pairsWellWith": [
+        "gesture",
+        "delay1",
+        "add",
+        "scroll",
+        "drag"
+      ],
+      "commonMistakes": [
+        "Output jumps back when you grab again: Value restarted from the finger's position instead of where the flick stopped. Build Value from Output's previous frame (Delay One Frame) plus the finger's movement.",
+        "Nothing coasts after release: Value didn't change during the frames before Tracking turned off, so the release velocity was 0. Track a value that follows the finger every frame.",
+        "Changing Value does nothing: Value is only read while Tracking is on. Turn Tracking on for a frame to move Output."
+      ],
+      "examples": [
+        {
+          "title": "Flick a dial so it keeps spinning",
+          "description": "The feedback loop adds each frame's horizontal drag movement to the previous output, so the dial spins on after release.",
+          "outline": "layer dial oval \"Dial\" @101,300 200x200 rotation←spin.output\npatch grab drag layer=@dial axis=horizontal\npatch previous_drag delay1 value←grab.position\npatch step subtract<point> value1←grab.position value2←previous_drag.output\npatch previous_spin delay1 value←spin.output\npatch next_angle add value1←previous_spin.output value2←step.output\npatch spin momentumScrolling tracking←grab.dragging value←next_angle.output startBoundary=-99999 endBoundary=99999 scrollingFriction=10"
+        }
+      ],
+      "origami": {
+        "id": "builtin.momemtumscrolling",
+        "name": "Momentum Scrolling"
+      },
+      "importAliases": [
+        "builtin.momentumScrolling"
+      ],
+      "origamiPorts": {
+        "tracking": "Sample Value",
+        "stickToBoundaries": "Stick To Boundaries"
+      },
+      "defaultNotes": {
+        "tracking": "inferred: research reads Origami's default as false.",
+        "value": "inferred: research reads Origami's default as 0.",
+        "startBoundary": "inferred: research reads Origami's default as 0.",
+        "endBoundary": "verified: Meta's sample-file comment says the End Bounds default is 99999.",
+        "scrollingFriction": "inferred: the legacy Scroll Settings UI showed 4.",
+        "rubberBandTension": "inferred: the legacy Scroll Settings UI showed 200 (iOS feel).",
+        "rubberBandFriction": "inferred: the legacy Scroll Settings UI showed 28 (iOS feel).",
+        "stickToBoundaries": "inferred: research reads Origami's default as false."
+      }
+    }
+  ]
+}

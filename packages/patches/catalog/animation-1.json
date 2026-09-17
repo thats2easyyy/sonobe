@@ -1,0 +1,542 @@
+{
+  "file": "animation-1.json",
+  "category": "animation",
+  "patches": [
+    {
+      "type": "popAnimation",
+      "name": "Pop Animation",
+      "category": "animation",
+      "tier": 1,
+      "status": "supported",
+      "aliases": ["spring", "bouncy", "pop", "bouncy animation", "rebound", "spring animation", "animate", "ease"],
+      "summary": "Springs its output toward a target value whenever the target changes, with a feel set by Bounciness and Speed.",
+      "docs": "## How it works\nPop Animation moves its output toward **Number** like a spring: it speeds up, can overshoot a little, and settles. When Number changes, the output springs toward the new value. If it changes mid-flight, the motion carries its momentum into the new direction instead of stopping.\n\n- **Number** is the target. It's usually 0 or 1 from a Switch or Interaction, which gives you a progress value to feed into a Transition.\n- **Bounciness** controls how much it overshoots and wobbles. 0 settles with no bounce; 5 has a light bounce; 15 and up is very playful.\n- **Speed** controls how quickly it gets there. 10 feels natural for UI; 20 is snappy.\n- **Output** is the current animated value. It starts at the first Number without animating.\n\nRight-click the patch to animate a point, size, color, or other value directly. Each component springs independently.\n\n## Tips\n- Animate 0 to 1, then use Transition patches to map that progress onto scale, position, and color. One spring keeps every property in sync.\n- Bounciness and Speed match Facebook's Pop and Rebound libraries, so developers can reuse your values.\n- Want a named feel instead of numbers? Wire a Spring Preset into Bounciness and Speed.\n\n## Coming from Origami\nThe output port is named Output instead of Progress. Point 3D, Point 4D, anchor, and size variants are also available.",
+      "behavior": "State per loop index: `{ spring: VectorSpringState | null }` (engine `physics/spring.ts`), one component per vector component (number = 1, point/size/anchor = 2, point3d = 3, point4d = 4, color = 4 as straight RGBA 0–1).\n\nEach frame:\n```\nconst target = components(ctx.input(\"number\"));        // non-finite components: keep the previous target, warn once\nconst config = fromBouncinessSpeed(ctx.input(\"bounciness\"), ctx.input(\"speed\"));\n// BouncyConversion → OrigamiValueConverter, mass 1; k and c clamped to ≥ 0 (semantics.md §7.2–7.3)\nif (state.spring === null || state.spring.value.length !== target.length) {\n  state.spring = createVectorSpringState(target);        // at rest on the target, velocity 0\n} else if (!sameComponents(target, state.spring.target)) {\n  setVectorSpringTarget(state.spring, target);           // velocity untouched\n}\nconst atRest = stepVectorSpring(state.spring, config, ctx.dt);  // RK4, 1 ms substeps, dt capped at 0.064 s, rest threshold 0.001\nif (!atRest) ctx.requestNextFrame();\nctx.output(\"output\", fromComponents(state.spring.value));\n```\n\n- Physics: acceleration `k·(target − x) − c·v` per component with k and c from Bounciness/Speed exactly as Rebound computes them (defaults 5/10 give k ≈ 299.62, c ≈ 27.05, damping ratio ≈ 0.78). Integrate with 1 ms RK4 substeps plus a final partial substep so results match at 60 and 120 fps.\n- Rest: a component is at rest when `|v| < 0.001` and `|target − x| ≤ 0.001` (or k = 0). When every component is at rest, snap all of them to the target with zero velocity.\n- Bounciness and Speed: the inspector's soft range is 0–20. Speed below 0 (or non-finite) is treated as 0, because below that the fitted friction curve turns negative. Negative Bounciness is allowed and adds damping (overdamped), which is how Spring Preset expresses no-bounce feels. Bounciness above 42.5 stops adding bounce (the conversion folds back, so 85 behaves like 0). Non-finite Bounciness is treated as 5. The resulting k and c are clamped to ≥ 0. The same inputs must give the same k and c as `bouncyConverter`. Changing either input mid-flight updates the spring constants without resetting position or velocity.\n- Frame 0: the spring starts at rest on the first Number; nothing animates from 0.\n- Retargeting: a new target keeps the current position and velocity (C¹-continuous motion). Setting the target back to the value it is already resting on does nothing.\n- Loops: per-index springs. New indices start at rest on their own target; removed indices drop their state.\n- Variant change: when the component count changes, the spring restarts at rest on the new target.\n- Colors: channels spring in straight RGBA. The output clamps each channel to 0–1; internal state stays unclamped so motion stays smooth. Other variants are never clamped (a size can overshoot below 0; the renderer treats negative sizes as 0).\n- Edge cases: a non-finite Number component keeps that component's previous target and warns once per restart. If integration produces a non-finite value, the component snaps to its target.\n- Restart and dispose: restart clears every spring, so the next evaluation starts at rest on the current Number.\n- Coming from Origami: Origami's `builtin.bouncy` (Pop Animation) with the same defaults and Rebound math; its output label is Progress.",
+      "inputs": [
+        { "key": "number", "name": "Number", "type": "variant", "default": 0, "description": "The target value. The output springs toward it whenever it changes." },
+        { "key": "bounciness", "name": "Bounciness", "type": "number", "default": 5, "min": 0, "max": 20, "step": 0.5, "description": "How much the animation overshoots and wobbles, usually 0–20. 0 settles without bouncing; higher values bounce more." },
+        { "key": "speed", "name": "Speed", "type": "number", "default": 10, "min": 0, "max": 20, "step": 0.5, "description": "How quickly the animation reaches the target, usually 0–20. Higher values are stiffer and faster." }
+      ],
+      "outputs": [
+        { "key": "output", "name": "Output", "type": "variant", "description": "The current animated value, the same type as Number. With a 0-or-1 target it's a progress value that can overshoot past 1 or below 0." }
+      ],
+      "variants": ["number", "point", "point3d", "point4d", "size", "anchor", "color"],
+      "alwaysEvaluate": true,
+      "shortcut": "A",
+      "pairsWellWith": ["switch", "interaction", "transition", "springPreset", "optionPicker"],
+      "commonMistakes": [
+        "The layer jumps instead of animating: Pop Animation is wired after the Transition, so it springs the final value only when it changes, or it isn't in the chain at all. Put it between the Switch and the Transition so it animates the 0-to-1 progress.",
+        "Opacity flickers above 1 or below 0 at the end of the animation: the spring overshoots, and Transition extrapolates the overshoot. Set Bounciness to 0 for properties that must stay in range, or clamp the Transition output with Clamp.",
+        "Nothing animates when the prototype starts: the first Number is the starting value, so there's no change to animate. Change Number after start, for example with When Prototype Starts into a Switch."
+      ],
+      "examples": [
+        {
+          "title": "Tap to grow a card",
+          "description": "The ISAT chain: Interaction, Switch, Pop Animation, Transition.",
+          "outline": "layer card rectangle \"Card\" @16,120 358x220 scale←grow.output\npatch tap_card interaction layer=@card\npatch toggle switch flip←tap_card.tap\npatch pop popAnimation number←toggle.on bounciness=5 speed=10\npatch grow transition<number> progress←pop.output start=1 end=1.08"
+        },
+        {
+          "title": "Press a button to shrink it",
+          "description": "Down is true while the finger is on the button, so the button springs back on release.",
+          "outline": "layer button rectangle \"Button\" @111,700 180x56 scale←shrink.output\npatch press interaction layer=@button\npatch pop popAnimation number←press.down bounciness=8 speed=14\npatch shrink transition<number> progress←pop.output start=1 end=0.94"
+        }
+      ],
+      "origami": { "id": "builtin.bouncy", "name": "Pop Animation" },
+      "origamiPorts": {
+        "output": "Progress"
+      },
+      "defaultNotes": {
+        "number": "legacy: Pop Animation.qtz inputParameters Number 0.",
+        "bounciness": "legacy: Pop Animation.qtz inputParameters Bounciness 5; the States & Pulses docs example also shows 5.",
+        "speed": "legacy: Pop Animation.qtz inputParameters Speed 10; the States & Pulses docs example also shows 10."
+      }
+    },
+    {
+      "type": "springAnimation",
+      "name": "Spring Animation",
+      "category": "animation",
+      "tier": 1,
+      "status": "supported",
+      "aliases": [
+        "physics spring",
+        "mass tension friction",
+        "stiffness damping",
+        "interruptible animation",
+        "throw",
+        "fling",
+        "gesture spring",
+        "interpolating spring"
+      ],
+      "summary": "Animates toward a target with a physical spring defined by mass, tension, and friction, and can continue a thrown gesture's velocity.",
+      "docs": "## How it works\nSpring Animation moves its output toward **Number** with a physically modeled spring. It's the same kind of spring as Pop Animation, but you set the physics directly, and it can pick up where your finger left off.\n\n- **Number** is the target. When it changes, the output springs toward it and keeps its momentum.\n- **Tension** is the spring's stiffness. Higher values pull harder and move faster.\n- **Friction** is the damping. Low friction bounces; high friction settles slowly without bouncing.\n- **Mass** is the weight being moved. Heavier springs are slower and swing more. Leave it at 1 unless you're matching code.\n- **Gesture Active**: while it's on, the output follows Number exactly, so the layer sticks to the finger. When it turns off, the spring takes over.\n- **Gesture Velocity** is the finger's speed in points per second. The spring uses it at the moment Gesture Active turns off, so a throw carries on naturally.\n\n## Tips\n- Wire a Gesture's Down into Gesture Active and its Velocity into Gesture Velocity for a sheet or card you can fling.\n- Don't want to tune numbers? Wire a Spring Preset's Mass, Tension, and Friction outputs into this patch.\n- Right-click to animate a point, size, color, or other value directly.\n\n## Coming from Origami\nTension and Friction are raw stiffness and damping (the values SwiftUI and CSS spring libraries use), not Pop's Origami-scale tension and friction.",
+      "behavior": "State per loop index: `{ spring: VectorSpringState | null, wasActive: boolean }` (engine `physics/spring.ts`), one component per vector component (color = 4 straight RGBA channels).\n\nEach frame:\n```\nconst target = components(ctx.input(\"number\"));         // non-finite components keep the previous target, warn once\nconst config = {\n  mass: finiteOr(ctx.input(\"mass\"), 1) clamped to ≥ 0.01,\n  stiffness: max(0, finiteOr(ctx.input(\"tension\"), 0)),\n  damping: max(0, finiteOr(ctx.input(\"friction\"), 0)),\n};\nconst active = ctx.input(\"gestureActive\");\nif (state.spring === null || state.spring.value.length !== target.length) {\n  state.spring = createVectorSpringState(target);         // at rest on the target\n  state.wasActive = active;                               // no false edge on the first frame\n} else if (!sameComponents(target, state.spring.target)) {\n  setVectorSpringTarget(state.spring, target);            // velocity untouched\n}\nif (active) {\n  state.spring.value = [...target]; state.spring.velocity = zeros;   // track the finger\n} else {\n  if (state.wasActive) state.spring.velocity = components(ctx.input(\"gestureVelocity\"), target.length);  // missing components 0\n  const atRest = stepVectorSpring(state.spring, config, ctx.dt);    // RK4, 1 ms substeps, dt ≤ 0.064, threshold 0.001\n  if (!atRest) ctx.requestNextFrame();\n}\nstate.wasActive = active;\nctx.output(\"output\", fromComponents(state.spring.value));\n```\n\n- Physics: `m·a = k·(target − x) − c·v` per component, where k = Tension, c = Friction, m = Mass. Defaults (m 1, k 130.51, c 18.85) are SwiftUI's classic `spring(response: 0.55, dampingFraction: 0.825)`: damping ratio 0.825, about 1% overshoot, settles in about 0.93 s.\n- Gesture handoff: Gesture Active is a state, not a pulse. On its true→false edge, Gesture Velocity is sampled on that same frame (gesture patches hold the release velocity for that frame) and becomes the initial velocity before this frame's integration. While active, the output equals Number and velocity is 0.\n- Same frame: apply the new target first, then the gesture edge, then integrate.\n- Frame 0: the spring starts at rest on the first Number. If Gesture Active starts true, it tracks.\n- Retargeting: position and velocity carry over (C¹). Changing Mass, Tension, or Friction mid-flight updates the constants without resetting.\n- Tension 0: a coasting spring. It moves only by velocity, slows with Friction, and stops where it is.\n- Stiff springs: substeps shrink below 1 ms when `max(c/m, √(k/m)) · 0.001 > 1`, as in the engine integrator. An evaluator may cap work at 10,000 substeps per component per frame and snap to the target past that.\n- Loops: per-index state. New indices start at rest on their target; removed indices drop their state.\n- Variant change: when the component count changes, the spring restarts at rest on the new target.\n- Colors: the output clamps channels to 0–1; state stays unclamped. Other variants aren't clamped.\n- Edge cases: Mass ≤ 0 is treated as 0.01; negative Tension or Friction as 0; non-finite values fall back to the defaults above and warn once per restart. Non-finite integration results snap to the target.\n- Restart and dispose: restart clears all springs.\n- Coming from Origami: `builtin.springAnimation` has no documented defaults or units. Sonobe fixes the units as raw k and c (semantics.md §7.7), which is what Spring Converter's SwiftUI mapping implies.",
+      "inputs": [
+        { "key": "number", "name": "Number", "type": "variant", "default": 0, "description": "The target value. The output springs toward it whenever it changes." },
+        { "key": "mass", "name": "Mass", "type": "number", "default": 1, "min": 0.01, "step": 0.1, "description": "The weight being moved. Heavier springs move slower and swing further; 1 is standard." },
+        { "key": "tension", "name": "Tension", "type": "number", "default": 130.51, "min": 0, "step": 1, "description": "Spring stiffness. Higher values pull toward the target harder and faster; 0 means no pull at all." },
+        { "key": "friction", "name": "Friction", "type": "number", "default": 18.85, "min": 0, "step": 0.5, "description": "Damping that slows the motion. 0 bounces forever; higher values settle with less bounce." },
+        { "key": "gestureActive", "name": "Gesture Active", "type": "boolean", "default": false, "description": "While on, the output follows Number exactly. When it turns off, the spring takes over using Gesture Velocity." },
+        { "key": "gestureVelocity", "name": "Gesture Velocity", "type": "variant", "subtype": "velocity", "default": 0, "description": "The gesture's speed in points per second, sampled at the moment Gesture Active turns off." }
+      ],
+      "outputs": [
+        { "key": "output", "name": "Output", "type": "variant", "description": "The current animated value, the same type as Number." }
+      ],
+      "variants": ["number", "point", "point3d", "point4d", "size", "anchor", "color"],
+      "alwaysEvaluate": true,
+      "pairsWellWith": ["gesture", "springPreset", "switch", "transition", "velocity"],
+      "commonMistakes": [
+        "The thrown layer stops dead when you let go: Gesture Velocity is 0 on the release frame, often because it comes from a Velocity patch on a position that stopped changing. Wire the Gesture patch's Velocity output instead.",
+        "The layer lags behind your finger while dragging: Gesture Active isn't connected, so the spring animates toward the finger instead of tracking it. Wire the gesture's Down into Gesture Active.",
+        "It barely moves or wobbles forever: Tension and Friction use raw physics units, so Pop Animation's small numbers (like 5 and 10) feel very different here. Start from the defaults or a Spring Preset."
+      ],
+      "examples": [
+        {
+          "title": "Fling a card and let it spring home",
+          "description": "The card follows the finger while dragging, then springs back with the throw's momentum.",
+          "outline": "layer card rectangle \"Card\" @16,500 358x220 position←fling.output\npatch drag_card gesture layer=@card\npatch follow add<point>[2] value1=[16,500] value2←drag_card.translation\npatch where optionPicker<point>[2] option←drag_card.down option0=[16,500] option1←follow.output\npatch fling springAnimation<point> number←where.output gestureActive←drag_card.down gestureVelocity←drag_card.velocity tension=200 friction=22"
+        },
+        {
+          "title": "Toggle a switch knob with a Snappy spring",
+          "outline": "layer knob oval \"Knob\" @4,4 28x28 position←slide.output\npatch tap_knob interaction layer=@knob\npatch toggle switch flip←tap_knob.tap\npatch feel springPreset preset=snappy\npatch spring springAnimation number←toggle.on mass←feel.mass tension←feel.tension friction←feel.friction\npatch slide transition<point> progress←spring.output start=[4,4] end=[24,4]"
+        }
+      ],
+      "origami": { "id": "builtin.springanimation", "name": "Spring Animation" },
+      "importAliases": ["builtin.springAnimation"],
+      "defaultNotes": {
+        "number": "inferred: undocumented; 0 matches Pop and Classic Animation.",
+        "mass": "inferred: undocumented; 1 is the standard mass used by every converter.",
+        "tension": "inferred: undocumented; k of SwiftUI spring(response: 0.55, dampingFraction: 0.825), (2π/0.55)² ≈ 130.51.",
+        "friction": "inferred: undocumented; c of SwiftUI spring(response: 0.55, dampingFraction: 0.825), 4π·0.825/0.55 ≈ 18.85.",
+        "gestureActive": "inferred: undocumented; off so the patch behaves as a plain spring when inserted.",
+        "gestureVelocity": "inferred: undocumented; 0 adds no throw."
+      }
+    },
+    {
+      "type": "classicAnimation",
+      "name": "Classic Animation",
+      "category": "animation",
+      "tier": 1,
+      "status": "supported",
+      "aliases": ["tween", "ease", "easing", "timed animation", "duration animation", "ease in out", "keyframe animation", "css transition"],
+      "summary": "Animates toward a target value over a set duration with an easing curve whenever the target changes.",
+      "docs": "## How it works\nClassic Animation moves its output from where it is to **Number** over a fixed time, following an easing curve. It's the timed, predictable counterpart to Pop Animation's springs, like a CSS transition.\n\n- **Number** is the target. When it changes, a new animation starts from the current output.\n- **Duration** is how long each animation takes, in seconds. 0 jumps straight to the target.\n- **Curve** is the easing. *Out* curves start fast and slow down, which suits things appearing; *In* curves start slow, which suits things leaving; *In & Out* is slow at both ends.\n- **Output** is the current value. It starts at the first Number without animating.\n\nRight-click to animate a point, size, color, or other value directly.\n\n## Tips\n- Animate 0 to 1, then fan out to several Transition patches so every property moves in sync.\n- Use Classic Animation when timing must be exact, like a progress bar or a sequence. Use Pop or Spring Animation when motion should feel physical.\n- Cubic Out with a duration around 0.25–0.35 s is a good default for UI.\n\n## Coming from Origami\nThe output port is named Output instead of Progress.",
+      "behavior": "State per loop index: `{ tween: TweenState | null }` (engine `physics/tween.ts`), one component per vector component (color = 4 straight RGBA channels).\n\nEach frame:\n```\nconst target = components(ctx.input(\"number\"));          // non-finite components keep the previous target, warn once\nconst duration = ctx.input(\"duration\");                    // non-finite or < 0 → 0\nconst ease = getCurve(ctx.input(\"curve\"))?.fn ?? linear;  // catalog keys (sinusoidalIn…) resolve through getCurve\nif (state.tween === null || state.tween.to.length !== target.length) {\n  state.tween = createTweenState(target);                  // at rest on the target\n} else {\n  retargetTween(state.tween, target);                      // only if target differs from tween.to\n}\nconst done = stepTween(state.tween, ctx.dt, duration, ease);\nif (!done) ctx.requestNextFrame();\nctx.output(\"output\", fromComponents(state.tween.value));\n```\n\n- Interpolation: `value = from + ease(elapsed / duration) · (to − from)` per component, with `elapsed` in seconds from `ctx.dt`. When `elapsed ≥ duration`, the value lands exactly on the target and the tween stops.\n- Curves: the 13 CURVE options (CONVENTIONS.md §11.1) with the Penner formulas in semantics.md §7.8. None overshoot, so the output stays between the start and the target.\n- Retargeting (gap-fill R11): when Number changes to a value different from the current destination, a new tween starts from the current output value toward the new target over the full Duration. Velocity isn't preserved, so reversing mid-flight produces a visible corner. The frame where Number changes already advances by that frame's dt.\n- Live edits: Curve and Duration are read every frame. Changing Duration mid-flight rescales the remaining progress using the elapsed time; if the elapsed time already exceeds the new Duration, the tween finishes this frame.\n- Frame 0: starts at rest on the first Number; nothing animates from 0.\n- Loops: per-index tweens. New indices start at rest on their target; removed indices drop their state.\n- Variant change: when the component count changes, the tween restarts at rest on the new target.\n- Edge cases: Duration ≤ 0 or non-finite jumps to the target on the frame it changes. An unknown Curve key falls back to Linear.\n- Restart and dispose: restart clears all tweens.\n- Coming from Origami: `builtin.classicAnimation` (a Quartz Composer Smooth macro in legacy files). Its retargeting behavior is undocumented; restarting over the full duration is Sonobe's documented choice.",
+      "inputs": [
+        { "key": "number", "name": "Number", "type": "variant", "default": 0, "description": "The target value. A new animation toward it starts whenever it changes." },
+        { "key": "duration", "name": "Duration", "type": "number", "subtype": "duration", "default": 0.4, "min": 0, "step": 0.05, "description": "How long each animation takes, in seconds. 0 jumps straight to the target." },
+        {
+          "key": "curve",
+          "name": "Curve",
+          "type": "enum",
+          "default": "quadraticInOut",
+          "enumOptions": [
+            { "key": "linear", "name": "Linear" },
+            { "key": "quadraticIn", "name": "Quadratic In" },
+            { "key": "quadraticOut", "name": "Quadratic Out" },
+            { "key": "quadraticInOut", "name": "Quadratic In & Out" },
+            { "key": "cubicIn", "name": "Cubic In" },
+            { "key": "cubicOut", "name": "Cubic Out" },
+            { "key": "cubicInOut", "name": "Cubic In & Out" },
+            { "key": "exponentialIn", "name": "Exponential In" },
+            { "key": "exponentialOut", "name": "Exponential Out" },
+            { "key": "exponentialInOut", "name": "Exponential In & Out" },
+            { "key": "sinusoidalIn", "name": "Sinusoidal In" },
+            { "key": "sinusoidalOut", "name": "Sinusoidal Out" },
+            { "key": "sinusoidalInOut", "name": "Sinusoidal In & Out" }
+          ],
+          "description": "The easing curve. Out curves start fast and slow down; In curves start slow and speed up; In & Out is slow at both ends."
+        }
+      ],
+      "outputs": [
+        { "key": "output", "name": "Output", "type": "variant", "description": "The current animated value, the same type as Number." }
+      ],
+      "variants": ["number", "point", "point3d", "point4d", "size", "anchor", "color"],
+      "alwaysEvaluate": true,
+      "shortcut": "C",
+      "pairsWellWith": ["switch", "transition", "interaction", "wait", "counter"],
+      "commonMistakes": [
+        "Tapping quickly makes the animation feel slow: every change restarts a full-length tween from wherever the output is. Use a shorter Duration, or Pop Animation when people toggle rapidly.",
+        "The layer snaps instead of animating: Duration is 0, or the Classic Animation sits after the Transition and the Transition's inputs never change. Put it between the Switch and the Transition."
+      ],
+      "examples": [
+        {
+          "title": "Tap to fade an overlay in and out",
+          "outline": "layer overlay rectangle \"Overlay\" @0,0 402x874 opacity←fade.output\npatch tap_screen interaction\npatch toggle switch flip←tap_screen.tap\npatch fade classicAnimation number←toggle.on duration=0.3 curve=cubicOut"
+        },
+        {
+          "title": "Ease the background between light and dark",
+          "description": "The color variant animates straight RGBA channels.",
+          "outline": "layer background colorFill \"Background\" color←tint.output\npatch tap_screen interaction\npatch toggle switch flip←tap_screen.tap\npatch pick optionPicker<color>[2] option←toggle.on option0=#FFFFFFFF option1=#101014FF\npatch tint classicAnimation<color> number←pick.output duration=0.5 curve=sinusoidalInOut"
+        }
+      ],
+      "origami": { "id": "builtin.classicanimation", "name": "Classic Animation" },
+      "importAliases": ["builtin.classicAnimation"],
+      "origamiPorts": {
+        "output": "Progress"
+      },
+      "defaultNotes": {
+        "number": "legacy: Classic Animation.qtz inputParameters Number 0.",
+        "duration": "legacy: Classic Animation.qtz inputParameters Duration 0.4.",
+        "curve": "legacy: Classic Animation.qtz used index 3, Quadratic In & Out."
+      }
+    },
+    {
+      "type": "transition",
+      "name": "Transition",
+      "category": "animation",
+      "tier": 1,
+      "status": "supported",
+      "aliases": ["lerp", "interpolate", "tween", "map range", "mix", "blend", "convert range", "start end"],
+      "summary": "Turns a progress value into a value between Start and End, so one animation can drive any property.",
+      "docs": "## How it works\nTransition maps **Progress** onto a range you choose. At progress 0 the output is **Start**, at 1 it's **End**, and in between it blends proportionally: with Start 50 and End 100, progress 0.5 gives 75.\n\n- **Progress** is usually the output of Pop Animation or Classic Animation running from 0 to 1.\n- **Start** and **End** can be reversed (End smaller than Start) to move the other way.\n- **Output** isn't clamped. Progress 2 gives 150 in the example above, and -0.5 gives 25, so a bouncy spring overshoots the End value the same way it overshoots 1.\n\nRight-click to change the type. Points, sizes, and anchors blend each component; colors blend red, green, blue, and alpha.\n\n## Tips\n- This is the T in ISAT: Interaction, Switch, Animation, Transition. Drive several Transitions from one animation to keep scale, position, and color in sync.\n- Need the reverse direction on another property? Swap Start and End, or use Reverse Progress.\n- Going from a range back to progress (like a scroll offset to 0–1)? Use Progress.\n\n## Coming from Origami\nSame formula and ports. Origami's docs say values \"wrap\" outside 0–1, but they extrapolate, as here. Origami's Percentage type is a number here.",
+      "behavior": "Stateless.\n\nEach frame:\n```\nconst p = ctx.input(\"progress\");                  // non-finite → 0, warn once\nconst a = components(ctx.input(\"start\"));\nconst b = components(ctx.input(\"end\"));\nconst out = a.map((ai, i) => ai + p * (b[i] - ai));\nif (variant === \"color\") clampEachChannelTo01(out);\nctx.output(\"output\", fromComponents(out));\n```\n\n- Formula: `start + progress · (end − start)`, component-wise for vectors and straight-RGBA colors (gap-fill R12). Unclamped for every variant except color, whose channels clamp to 0–1 so overshoot can't produce invalid colors.\n- The result for progress 0 is exactly Start and for 1 exactly End (use the formula above, not `(1 − p)·start + p·end`, so Start is exact at 0).\n- Frame 0: evaluates with authored values; no history.\n- Loops: per index. The output length is the longest input loop; shorter loops wrap and scalars broadcast.\n- Edge cases: Start == End outputs Start for any progress. A non-finite Progress outputs Start and warns once per restart. Non-finite Start or End components output 0 for that component and warn once.\n- Muted: Output passes Start through (the default bypass).\n- Coming from Origami: `builtin.transition`. The legacy Transition macro computed `(End − Start) × Progress + Start`, and the legacy Color Transition split RGBA into four Transitions, matching this spec.",
+      "inputs": [
+        { "key": "progress", "name": "Progress", "type": "number", "subtype": "progress", "default": 0, "step": 0.01, "description": "How far along the range to be: 0 gives Start, 1 gives End. Values outside 0–1 extend past the ends." },
+        { "key": "start", "name": "Start", "type": "variant", "default": 0, "description": "The output when Progress is 0." },
+        { "key": "end", "name": "End", "type": "variant", "default": 1, "description": "The output when Progress is 1." }
+      ],
+      "outputs": [
+        { "key": "output", "name": "Output", "type": "variant", "description": "The blended value between Start and End, the same type as Start and End." }
+      ],
+      "variants": ["number", "point", "point3d", "point4d", "size", "anchor", "color"],
+      "variantDefaults": {
+        "point": { "start": [0, 0], "end": [100, 100] },
+        "point3d": { "start": [0, 0, 0], "end": [100, 100, 0] },
+        "point4d": { "start": [0, 0, 0, 0], "end": [1, 1, 1, 1] },
+        "size": { "start": [100, 100], "end": [200, 200] },
+        "anchor": { "start": [0, 0], "end": [1, 1] },
+        "color": { "start": "#FFFFFFFF", "end": "#000000FF" }
+      },
+      "alwaysEvaluate": false,
+      "shortcut": "T",
+      "pairsWellWith": ["popAnimation", "classicAnimation", "switch", "progress", "reverseProgress"],
+      "commonMistakes": [
+        "The property jumps between two values: Progress comes straight from a Switch or Interaction, which only outputs 0 or 1. Put Pop Animation or Classic Animation in between.",
+        "A color fade turns gray or dark in the middle: blending toward a transparent color also blends toward its black channels. Fade with the layer's Opacity instead, or give End the same RGB with alpha 0.",
+        "The layer moves too far when it bounces: Transition extends past End when a spring overshoots 1. Use Bounciness 0 for this property, or clamp the result."
+      ],
+      "examples": [
+        {
+          "title": "Tap a card to grow it and tint it yellow",
+          "description": "One spring drives two Transitions, so scale and color stay in sync.",
+          "outline": "layer card rectangle \"Card\" @16,120 358x220 color←shade.output scale←grow.output\npatch tap_card interaction layer=@card\npatch toggle switch flip←tap_card.tap\npatch pop popAnimation number←toggle.on\npatch grow transition<number> progress←pop.output start=1 end=1.08\npatch shade transition<color> progress←pop.output start=#FFFFFFFF end=#FFD60AFF"
+        },
+        {
+          "title": "Slide a menu in from the left",
+          "outline": "layer menu rectangle \"Menu\" @-300,0 300x874 position←slide.output\nlayer menu_button rectangle \"Menu Button\" @16,62 44x44\npatch tap_menu interaction layer=@menu_button\npatch open switch flip←tap_menu.tap\npatch pop popAnimation number←open.on bounciness=0 speed=14\npatch slide transition<point> progress←pop.output start=[-300,0] end=[0,0]"
+        }
+      ],
+      "origami": { "id": "builtin.transition", "name": "Transition" },
+      "defaultNotes": {
+        "progress": "inferred: undocumented; 0 outputs Start until an animation is wired in.",
+        "start": "inferred: Getting Started leaves a number Transition at its defaults for an opacity 0→1 fade.",
+        "end": "inferred: Getting Started leaves a number Transition at its defaults for an opacity 0→1 fade."
+      }
+    },
+    {
+      "type": "progress",
+      "name": "Progress",
+      "category": "animation",
+      "tier": 1,
+      "status": "supported",
+      "aliases": ["normalize", "inverse lerp", "convert range", "map range", "percent complete", "range to progress", "unlerp"],
+      "summary": "Converts a number from any range into progress, where Start gives 0 and End gives 1.",
+      "docs": "## How it works\nProgress measures how far **Value** is between **Start** and **End**. At Start it outputs 0, at End it outputs 1, and halfway between it outputs 0.5. It's the opposite of Transition.\n\n- **Value** is the number to measure, like a scroll offset, a drag distance, or a sound level.\n- **Start** and **End** define the range. They can be reversed (End smaller than Start) to count the other way.\n- **Clamp to Range** keeps the output between 0 and 1. It's off by default, so values past the range keep going (Value past End gives more than 1).\n\n## Tips\n- Progress into Transition remaps any range onto any other: scroll 0–200 points into header opacity 1–0.\n- Turn on Clamp to Range for scroll- and drag-linked effects so nothing overshoots when people pull past the edge.\n- When Start equals End, the output jumps from 0 to 1 as Value reaches Start, like a threshold.\n\n## Coming from Origami\nStart and End are Origami's Start Value and End Value. Clamp to Range is new and off by default, which matches Origami. When Start equals End, Origami divides by 0.0001 instead of acting as a threshold.",
+      "behavior": "Stateless.\n\nEach frame:\n```\nconst v = ctx.input(\"value\");\nconst s = ctx.input(\"start\");\nconst e = ctx.input(\"end\");\nlet p;\nif (e === s) p = v >= s ? 1 : 0;          // zero-width range acts as a step (CONVENTIONS.md §18.5.9)\nelse p = (v - s) / (e - s);\nif (ctx.input(\"clampToRange\")) p = Math.min(1, Math.max(0, p));\nctx.output(\"progress\", Number.isFinite(p) ? p : 0);\n```\n\n- Formula: inverse linear interpolation, unclamped unless Clamp to Range is on. Reversed ranges (End < Start) give a reversed mapping: Value = End → 1.\n- Frame 0: evaluates with authored values; no history.\n- Loops: per index; longest loop wins, shorter loops wrap, scalars broadcast.\n- Edge cases: Start == End is a step (1 when Value ≥ Start, else 0), never a division by zero. Any non-finite input or result outputs 0 and warns once per restart.\n- Muted: Progress passes Value through (the default bypass).\n- Coming from Origami: `builtin.progress`. The legacy macro divided by 0.0001 when End − Start was 0; importers keep this patch as-is, and the step behavior only differs for zero-width ranges.",
+      "inputs": [
+        { "key": "value", "name": "Value", "type": "number", "default": 0, "description": "The number to measure against the range." },
+        { "key": "start", "name": "Start", "type": "number", "default": 0, "description": "The value that gives progress 0." },
+        { "key": "end", "name": "End", "type": "number", "default": 1, "description": "The value that gives progress 1." },
+        { "key": "clampToRange", "name": "Clamp to Range", "type": "boolean", "default": false, "description": "When on, the output stays between 0 and 1 even if Value is outside the range." }
+      ],
+      "outputs": [
+        { "key": "progress", "name": "Progress", "type": "number", "subtype": "progress", "description": "Where Value sits in the range: 0 at Start, 1 at End, and beyond 0–1 outside the range unless Clamp to Range is on." }
+      ],
+      "alwaysEvaluate": false,
+      "shortcut": "Shift+R",
+      "pairsWellWith": ["transition", "clamp", "scroll", "drag", "reverseProgress"],
+      "commonMistakes": [
+        "The header fades past fully transparent and reappears, or scales the wrong way, when you pull past the edge: Progress keeps going below 0 and above 1. Turn on Clamp to Range, or add a Clamp patch.",
+        "The output is always 0 or 1: Start and End are equal, so the range has no width and acts as a threshold. Give End a different value."
+      ],
+      "examples": [
+        {
+          "title": "Drag along a track to fill a bar",
+          "description": "The touch's x position becomes 0–1 progress, which a size Transition turns into the bar width.",
+          "outline": "layer track rectangle \"Track\" @16,400 370x8\nlayer fill rectangle \"Fill\" @16,400 0x8 size←bar.output\npatch touch_track interaction layer=@track\npatch amount progress value←touch_track.position start=16 end=386 clampToRange=true\npatch bar transition<size> progress←amount.progress start=[0,8] end=[370,8]"
+        }
+      ],
+      "origami": { "id": "builtin.progress", "name": "Progress" },
+      "origamiPorts": {
+        "start": "Start Value",
+        "end": "End Value"
+      },
+      "defaultNotes": {
+        "value": "inferred: undocumented; 0 sits at Start.",
+        "start": "inferred: undocumented; 0–1 is the identity range.",
+        "end": "inferred: undocumented; 0–1 is the identity range.",
+        "clampToRange": "sonobe: Clamp to Range is a Sonobe addition, named like Remap's; off matches Origami's unclamped output."
+      }
+    },
+    {
+      "type": "reverseProgress",
+      "name": "Reverse Progress",
+      "category": "animation",
+      "tier": 1,
+      "status": "supported",
+      "aliases": ["invert progress", "one minus", "flip progress", "opposite", "crossfade", "inverse"],
+      "summary": "Flips a progress value so 0 becomes 1 and 1 becomes 0, for animations that run the opposite way.",
+      "docs": "## How it works\nReverse Progress outputs 1 minus its input. 0 becomes 1, 1 becomes 0, and 0.3 becomes 0.7. Use it when one thing should appear as another disappears, driven by the same animation.\n\n- **Progress** is the value to flip, usually from Pop Animation or Classic Animation.\n- **Output** isn't clamped, so a spring overshoot of 1.1 becomes -0.1.\n\n## Tips\n- Crossfade two photos from one animation: wire the progress into one photo's Opacity and the reversed progress into the other's.\n- To reverse a Transition, you can also swap its Start and End.\n\n## Coming from Origami\nBoth ports are named Progress in Origami; the output is named Output here.",
+      "behavior": "Stateless.\n\nEach frame:\n```\nconst p = ctx.input(\"progress\");\nctx.output(\"output\", Number.isFinite(p) ? 1 - p : 0);   // non-finite: output 0, warn once\n```\n\n- Formula: `1 − progress`, unclamped.\n- Frame 0: evaluates with authored values; no history.\n- Loops: per index; the output loop has the input loop's length.\n- Edge cases: a non-finite input outputs 0 and warns once per restart.\n- Muted: Output passes Progress through unreversed (the default bypass).\n- Coming from Origami: `origami.reverseProgress`, legacy-built as Transition(progress, 1, 0).",
+      "inputs": [
+        { "key": "progress", "name": "Progress", "type": "number", "subtype": "progress", "default": 0, "step": 0.01, "description": "The progress value to flip, usually 0–1." }
+      ],
+      "outputs": [
+        { "key": "output", "name": "Output", "type": "number", "subtype": "progress", "description": "1 minus Progress: 0 becomes 1 and 1 becomes 0. Values outside 0–1 stay unclamped." }
+      ],
+      "alwaysEvaluate": false,
+      "shortcut": "R",
+      "pairsWellWith": ["popAnimation", "classicAnimation", "transition", "progress"],
+      "commonMistakes": [
+        "Both layers fade out together: the reversed value and the original go to the same layer or to layers that are both hidden at 0. Wire the original into one layer and the reversed value into the other."
+      ],
+      "examples": [
+        {
+          "title": "Crossfade two photos with one tap",
+          "outline": "layer photo_a rectangle \"Photo A\" @0,0 402x874 opacity←pop.output\nlayer photo_b rectangle \"Photo B\" @0,0 402x874 opacity←fade_out.output\npatch tap_screen interaction\npatch toggle switch flip←tap_screen.tap\npatch pop popAnimation number←toggle.on bounciness=0\npatch fade_out reverseProgress progress←pop.output"
+        }
+      ],
+      "origami": { "id": "origami.reverseprogress", "name": "Reverse Progress" },
+      "importAliases": ["origami.reverseProgress"],
+      "origamiPorts": {
+        "output": "Progress"
+      },
+      "defaultNotes": {
+        "progress": "inferred: undocumented; 0 outputs 1 until an animation is wired in."
+      }
+    },
+    {
+      "type": "repeatingAnimation",
+      "name": "Repeating Animation",
+      "category": "animation",
+      "tier": 1,
+      "status": "supported",
+      "aliases": ["repeating motion", "loop animation", "infinite animation", "ping pong", "yoyo", "oscillate", "spinner", "pulse animation", "breathing"],
+      "summary": "Runs a progress value from 0 to 1 over and over, either restarting each time or swinging back and forth.",
+      "docs": "## How it works\nRepeating Animation outputs a **Progress** value that keeps cycling while it's enabled, shaped by an easing curve. It's the engine behind spinners, loading pulses, and gently breathing buttons.\n\n- **Enabled**: while on, the animation runs. Turning it off pauses it where it is; turning it back on continues.\n- **Duration** is the time for one trip from 0 to 1, in seconds.\n- **Curve** is the easing applied to each trip.\n- **Mirrored**: when on, progress swings 0 → 1 → 0 smoothly, and the way back is the way there played in reverse. When off, it jumps back to 0 after reaching 1, which suits spinners.\n- **Reset** is a pulse (a signal that lasts one frame) that returns the animation to the beginning.\n- **Time Offset** (advanced) shifts where in the cycle this animation is, in seconds, so copies in a loop can run out of step.\n\n## Tips\n- Spinner: Linear curve, Mirrored off, into a Transition from 0 to 360 on Rotation.\n- Breathing: Sinusoidal In & Out, Mirrored on, into a Transition from 1 to 1.05 on Scale.\n- Wire a state like \"loading\" into Enabled, and the same event into Reset, so each run starts fresh.\n\n## Coming from Origami\nEnable is named Enabled. Time Offset is new. Origami's default curve and mirrored behavior are undocumented; the return leg here mirrors the forward leg.",
+      "behavior": "State per loop index: `{ phase: 0 }`, the position in the cycle measured in trips, kept in [0, 2).\n\nEach frame:\n```\nconst duration = ctx.input(\"duration\");\nconst valid = Number.isFinite(duration) && duration > 0;   // otherwise output 0, warn once\nif (ctx.frame > 0 && ctx.input(\"enabled\") && valid) {\n  state.phase = positiveMod(state.phase + ctx.dt / duration, 2);\n}\nif (ctx.pulsed(\"reset\")) state.phase = 0;\nif (ctx.input(\"enabled\") && valid) ctx.requestNextFrame();\nif (!valid) { ctx.output(\"progress\", 0); return; }\nconst ease = getCurve(ctx.input(\"curve\"))?.fn ?? linear;\nconst offset = finiteOr(ctx.input(\"timeOffset\"), 0) / duration;\nconst u = state.phase + offset;\nlet leg;\nif (ctx.input(\"mirrored\")) {\n  const w = positiveMod(u, 2);\n  leg = w <= 1 ? w : 2 - w;                               // triangle wave\n} else {\n  leg = positiveMod(u, 1);                                // sawtooth: 1 wraps to 0\n}\nctx.output(\"progress\", ease(leg));\n```\n`positiveMod(a, m) = a − m·floor(a / m)`.\n\n- Timing: phase advances by `dt / Duration`, so changing Duration mid-flight changes speed without a jump, and results match at 60 and 120 fps.\n- Mirrored: the return leg applies the curve to `2 − w`, so the way back is the time reverse of the way there (like CSS `animation-direction: alternate`). Output is 0 at the start, 1 at the turnaround, 0 again at the end of the round trip.\n- Not mirrored: the output rises from 0 toward 1 and drops to 0 on the frame the trip completes.\n- Pulses: Reset is a pulse input; it fires on an upstream pulse or a false→true edge of a connected boolean. It sets the phase to 0 and applies on the frame it arrives, even while disabled (the output then holds at the start).\n- Frame 0: phase 0, so the output is `ease(Time Offset / Duration)` (0 with no offset). Time doesn't accumulate on frame 0.\n- Disabled: the phase stops advancing and the output holds its current value; re-enabling continues from there.\n- Loops: per-index phase. Indices added later start at phase 0, so they can be out of step with older ones; use Time Offset to stagger on purpose.\n- Edge cases: Duration ≤ 0 or non-finite outputs 0 and warns once per restart. Unknown Curve keys fall back to Linear. None of the curves overshoot, so the output stays within 0–1.\n- Muted: outputs 0 (not the default bypass, which would pass Duration through).\n- Restart and dispose: restart sets every phase to 0.\n- Coming from Origami: `builtin.repeatingmotion` (titled Repeating Animation; the Animations docs page calls it Repeating Motion).",
+      "inputs": [
+        { "key": "enabled", "name": "Enabled", "type": "boolean", "default": true, "description": "While on, the animation runs. Off pauses it and holds the current progress." },
+        { "key": "duration", "name": "Duration", "type": "number", "subtype": "duration", "default": 1, "min": 0, "step": 0.05, "description": "Seconds for one trip from 0 to 1. 0 stops the animation at the start." },
+        {
+          "key": "curve",
+          "name": "Curve",
+          "type": "enum",
+          "default": "quadraticInOut",
+          "enumOptions": [
+            { "key": "linear", "name": "Linear" },
+            { "key": "quadraticIn", "name": "Quadratic In" },
+            { "key": "quadraticOut", "name": "Quadratic Out" },
+            { "key": "quadraticInOut", "name": "Quadratic In & Out" },
+            { "key": "cubicIn", "name": "Cubic In" },
+            { "key": "cubicOut", "name": "Cubic Out" },
+            { "key": "cubicInOut", "name": "Cubic In & Out" },
+            { "key": "exponentialIn", "name": "Exponential In" },
+            { "key": "exponentialOut", "name": "Exponential Out" },
+            { "key": "exponentialInOut", "name": "Exponential In & Out" },
+            { "key": "sinusoidalIn", "name": "Sinusoidal In" },
+            { "key": "sinusoidalOut", "name": "Sinusoidal Out" },
+            { "key": "sinusoidalInOut", "name": "Sinusoidal In & Out" }
+          ],
+          "description": "The easing applied to each trip. Use Linear for steady spinning."
+        },
+        { "key": "mirrored", "name": "Mirrored", "type": "boolean", "default": true, "description": "When on, progress swings back and forth between 0 and 1. When off, it jumps back to 0 after reaching 1." },
+        { "key": "reset", "name": "Reset", "type": "pulse", "description": "Pulse to return the animation to the beginning." },
+        { "key": "timeOffset", "name": "Time Offset", "type": "number", "subtype": "duration", "default": 0, "step": 0.05, "description": "Seconds added to where the animation is in its cycle, so looped copies can run out of step. 0 means no offset.", "advanced": true }
+      ],
+      "outputs": [
+        { "key": "progress", "name": "Progress", "type": "number", "subtype": "progress", "description": "The repeating progress value, always between 0 and 1." }
+      ],
+      "alwaysEvaluate": true,
+      "pairsWellWith": ["transition", "switch", "wait", "loop"],
+      "commonMistakes": [
+        "The spinner stutters once per turn: Mirrored is on, or the Curve eases in and out, so it slows down and reverses. Turn Mirrored off and use Linear.",
+        "The loader picks up halfway through when it reappears: turning Enabled off pauses instead of resetting. Send the same event into Reset so each run starts at 0."
+      ],
+      "examples": [
+        {
+          "title": "Spin a loading indicator",
+          "outline": "layer spinner shape \"Spinner\" @181,420 40x40 rotation←spin.output\npatch turn repeatingAnimation duration=0.8 curve=linear mirrored=false\npatch spin transition<number> progress←turn.progress start=0 end=360"
+        },
+        {
+          "title": "Make a button breathe while it waits",
+          "outline": "layer button rectangle \"Button\" @111,700 180x56 scale←breathe.output\npatch cycle repeatingAnimation duration=1.2 curve=sinusoidalInOut mirrored=true\npatch breathe transition<number> progress←cycle.progress start=1 end=1.05"
+        }
+      ],
+      "origami": { "id": "builtin.repeatingmotion", "name": "Repeating Animation" },
+      "importAliases": ["builtin.repeatingMotion"],
+      "origamiPorts": {
+        "enabled": "Enable"
+      },
+      "defaultNotes": {
+        "enabled": "inferred: undocumented; on so the animation is visible when inserted.",
+        "duration": "sonobe: undocumented; 1 s is the conventions default for repeats.",
+        "curve": "sonobe: undocumented; CONVENTIONS.md §11.1 uses Quadratic In & Out when evidence doesn't settle it.",
+        "mirrored": "inferred: undocumented; on gives a smooth back-and-forth without a jump.",
+        "timeOffset": "sonobe: Time Offset is a Sonobe addition; 0 matches Origami."
+      }
+    },
+    {
+      "type": "smoothValue",
+      "name": "Smooth Value",
+      "category": "animation",
+      "tier": 1,
+      "status": "supported",
+      "aliases": ["smoothing", "low pass filter", "damping", "ease toward", "lerp toward", "exponential smoothing", "hysteresis", "denoise", "lazy follow"],
+      "summary": "Smooths a changing number over time, so noisy or jumpy values glide toward their latest value.",
+      "docs": "## How it works\nSmooth Value follows **Value**, but only moves part of the way there each frame, so sudden jumps turn into glides and jittery input steadies. It has no fixed duration: the farther the value is, the faster it catches up.\n\n- **Value** is the number to smooth, like a sound level, a sensor reading, or a finger position.\n- **Rising Hysteresis** (0–1) sets how much smoothing applies when Value goes up. 0 follows instantly; 0.9 is slow and silky; 1 never moves.\n- **Falling Hysteresis** sets the smoothing when Value goes down. The default of -1 uses the rising amount, so smoothing is the same both ways.\n- **Reset** is a pulse (a signal that lasts one frame) that jumps the output straight to Value.\n\n## Tips\n- Meters look natural with a fast rise and slow fall: Rising 0.2, Falling 0.9.\n- For a cursor-follower effect, smooth a pointer position with Rising around 0.85.\n- Need a target to animate with overshoot and settle? Use Pop Animation instead.\n\n## Coming from Origami\nThe output is named Output instead of Progress. Smoothing is scaled by frame time, so it looks the same at 60 and 120 fps; at 60 fps it matches Origami's per-frame formula exactly.",
+      "behavior": "State per loop index: `{ current: number | null }`.\n\nEach frame:\n```\nconst v = ctx.input(\"value\");\nif (!Number.isFinite(v)) { output current (or 0); warn once; return; }\nif (state.current === null || ctx.pulsed(\"reset\")) {\n  state.current = v;\n} else if (ctx.dt > 0) {\n  const rising = clamp01(finiteOr(ctx.input(\"risingHysteresis\"), 0));\n  const fallingRaw = ctx.input(\"fallingHysteresis\");\n  const falling = fallingRaw < 0 || !Number.isFinite(fallingRaw) ? rising : clamp01(fallingRaw);\n  const h = v > state.current ? rising : falling;\n  const hEff = Math.pow(h, ctx.dt * 60);              // frame-rate compensation (CONVENTIONS.md §18.5.6)\n  state.current = state.current * hEff + v * (1 - hEff);\n  if (Math.abs(v - state.current) <= 1e-6 * Math.max(1, Math.abs(v))) state.current = v;   // snap when converged\n}\nif (state.current !== v) ctx.requestNextFrame();\nctx.output(\"output\", state.current);\n```\n\n- Formula: exponential smoothing `next = current·h + value·(1 − h)`, with `h^(dt·60)` so the effect per second is the same at any frame rate. At dt = 1/60 it equals the per-frame formula.\n- Direction: rising hysteresis applies when Value is above the current output, falling hysteresis otherwise. Any negative Falling Hysteresis (the default -1) means \"use rising\".\n- Ranges: hysteresis values are clamped to 0–1 when used. 0 passes Value through; 1 freezes the output.\n- Pulses: Reset is a pulse input; it fires on an upstream pulse or a false→true edge of a connected boolean. On that frame the output equals Value.\n- Frame 0: seeds `current` with the first Value, so there's no glide from 0.\n- Retargeting: every frame smooths toward the latest Value; there's nothing to restart.\n- Loops: per-index state. New indices seed from their first Value; removed indices drop their state.\n- Edge cases: frames with dt ≤ 0 hold the output. A non-finite Value holds the previous output (0 before any finite value) and warns once per restart.\n- Muted: Output passes Value through (the default bypass).\n- Restart and dispose: restart clears `current`, so the next evaluation seeds from Value.\n- Coming from Origami: `builtin.smoothvalue`. Before v204 it had a single Hysteresis input; import it as Rising Hysteresis with Falling Hysteresis -1.",
+      "inputs": [
+        { "key": "value", "name": "Value", "type": "number", "default": 0, "description": "The number to smooth." },
+        { "key": "risingHysteresis", "name": "Rising Hysteresis", "type": "number", "default": 0.4, "min": 0, "max": 1, "step": 0.01, "description": "How much to smooth while Value goes up, 0–1. 0 follows instantly; values near 1 glide slowly." },
+        { "key": "fallingHysteresis", "name": "Falling Hysteresis", "type": "number", "default": -1, "min": -1, "max": 1, "step": 0.01, "description": "How much to smooth while Value goes down, 0–1. -1 uses Rising Hysteresis for both directions." },
+        { "key": "reset", "name": "Reset", "type": "pulse", "description": "Pulse to jump the output straight to Value." }
+      ],
+      "outputs": [
+        { "key": "output", "name": "Output", "type": "number", "description": "The smoothed value, gliding toward Value." }
+      ],
+      "alwaysEvaluate": true,
+      "pairsWellWith": ["velocity", "interaction", "transition", "progress", "deviceMotion"],
+      "commonMistakes": [
+        "The output never reaches the value or barely moves: a hysteresis of 1 (or very close) freezes it. Try 0.8–0.95 for strong smoothing.",
+        "Values still look jittery: a hysteresis near 0 passes the noise straight through. Raise Rising Hysteresis, and set Falling Hysteresis to -1 so falls are smoothed too."
+      ],
+      "examples": [
+        {
+          "title": "A slider thumb that glides after your finger",
+          "outline": "layer track rectangle \"Track\" @16,420 370x8\nlayer thumb oval \"Thumb\" @16,404 40x40 position←spot.output\npatch touch_track interaction layer=@track\npatch lazy smoothValue value←touch_track.position risingHysteresis=0.85\npatch spot point x←lazy.output y=404"
+        }
+      ],
+      "origami": { "id": "builtin.smoothvalue", "name": "Smooth Value" },
+      "importAliases": ["builtin.smoothValue"],
+      "origamiPorts": {
+        "output": "Progress"
+      },
+      "defaultNotes": {
+        "value": "inferred: undocumented; 0.",
+        "risingHysteresis": "inferred: the Device Motion tutorial raises the pre-v204 Hysteresis \"from 0.4\", suggesting 0.4 was the default.",
+        "fallingHysteresis": "verified: Smooth Value docs, \"The default value of -1 is used for symmetrical smoothing\"."
+      }
+    },
+    {
+      "type": "velocity",
+      "name": "Velocity",
+      "category": "animation",
+      "tier": 1,
+      "status": "supported",
+      "aliases": ["speed", "rate of change", "derivative", "delta", "change per second", "how fast", "direction"],
+      "summary": "Measures how fast a value is changing, in units per second, by comparing it with the previous frame.",
+      "docs": "## How it works\nVelocity tells you how quickly **Value** is changing and in which direction. If a position moves 10 points in a tenth of a second, the velocity is 100 points per second. Positive means increasing; negative means decreasing; 0 means it's holding still.\n\n- **Value** is the number or point to measure, like a drag position or a scroll offset.\n- **Velocity** is the change per second. For points, each axis has its own velocity.\n\nRight-click to measure a point or 3D point instead of a number.\n\n## Tips\n- Check the sign to detect direction, like hiding a toolbar while content scrolls up.\n- Frame-to-frame velocity can be jittery. Pass it through Smooth Value before using it for visuals.\n- To throw a layer with Spring Animation, use a Gesture patch's own Velocity output: it holds the release speed on the frame your finger lifts, when this patch already reads 0.\n\n## Coming from Origami\nOrigami's Velocity outputs the change per frame. This one outputs the change per second, so results don't depend on the frame rate. At 60 fps, divide by 60 to get Origami's number. Point and 3D point variants are new.",
+      "behavior": "State per loop index: `{ previous: number[] | null, velocity: number[] }`.\n\nEach frame:\n```\nconst value = components(ctx.input(\"value\"));\nif (value.some((n) => !Number.isFinite(n))) { output zeros; warn once; return; }   // previous is kept\nif (state.previous === null || state.previous.length !== value.length) {\n  state.previous = value; state.velocity = zeros(value.length);   // seed: no startup spike\n} else if (ctx.dt > 0) {\n  state.velocity = value.map((n, i) => (n - state.previous[i]) / ctx.dt);\n  state.previous = value;\n}\nctx.output(\"velocity\", fromComponents(state.velocity));\n```\n\n- Units: per second (CONVENTIONS.md §18.5.6), using `ctx.dt`, so the same motion measures the same at 60 and 120 fps. Live `dt` is capped at 64 ms, so a long frame hitch can overestimate speed for that frame.\n- Frame 0: seeds `previous` with the first Value and outputs 0 (gap-fill R1; no one-frame spike on restart).\n- Holding still: when Value stops changing, Velocity drops to 0 on the next frame.\n- Frames with dt ≤ 0: output the last velocity and keep `previous`.\n- Loops: per-index state. New indices seed from their first Value; removed indices drop their state.\n- Variant change: when the component count changes, state reseeds and outputs 0.\n- Edge cases: a non-finite Value outputs 0, keeps the previous finite value, and warns once per restart.\n- Muted: outputs the zero value (not the default bypass, which would pass the position through as a speed).\n- Restart and dispose: restart clears `previous`.\n- Coming from Origami: `origami.velocity` outputs `current − previous` per frame and spikes on frame 0 (Meta's pattern files work around it). Importers that need identical numbers can multiply by `dt` downstream.",
+      "inputs": [
+        { "key": "value", "name": "Value", "type": "variant", "default": 0, "description": "The number or point whose rate of change to measure." }
+      ],
+      "outputs": [
+        { "key": "velocity", "name": "Velocity", "type": "variant", "subtype": "velocity", "description": "How fast Value is changing, in units per second. Positive when increasing, negative when decreasing, 0 when still." }
+      ],
+      "variants": ["number", "point", "point3d"],
+      "alwaysEvaluate": true,
+      "pairsWellWith": ["drag", "scroll", "smoothValue", "greaterThan", "springAnimation"],
+      "commonMistakes": [
+        "A thrown layer stops dead on release: on the frame the finger lifts the position doesn't change, so Velocity reads 0. Wire the Gesture patch's Velocity into Spring Animation instead.",
+        "Numbers look far too big compared with Origami: Sonobe measures per second, not per frame. Divide by 60 for the per-frame value, or adjust your thresholds."
+      ],
+      "examples": [
+        {
+          "title": "Tilt a card while it's dragged sideways",
+          "description": "Horizontal speed, smoothed and clamped, becomes a small rotation.",
+          "outline": "layer card rectangle \"Card\" @16,300 358x220 position←drag_card.position rotation←tilt.output\npatch drag_card drag layer=@card\npatch speed velocity<point> value←drag_card.position\npatch calm smoothValue value←speed.velocity risingHysteresis=0.8\npatch amount progress value←calm.output start=-2000 end=2000 clampToRange=true\npatch tilt transition<number> progress←amount.progress start=-8 end=8"
+        }
+      ],
+      "origami": { "id": "origami.velocity", "name": "Velocity" },
+      "importAliases": ["origami.Velocity"],
+      "origamiPorts": {
+        "value": "Input",
+        "velocity": "Output"
+      },
+      "defaultNotes": {
+        "value": "inferred: undocumented; 0."
+      }
+    },
+    {
+      "type": "springPreset",
+      "name": "Spring Preset",
+      "category": "animation",
+      "tier": 1,
+      "status": "supported",
+      "aliases": [
+        "spring feel",
+        "motion preset",
+        "easing preset",
+        "snappy",
+        "bouncy spring",
+        "duration and bounce",
+        "swiftui spring",
+        "spring values",
+        "stiffness damping"
+      ],
+      "summary": "Picks a named spring feel, like Snappy or Bouncy, and outputs matching values for every kind of spring patch.",
+      "docs": "## How it works\nSpring Preset turns a feel into numbers, so you choose how motion should feel instead of tuning physics. It outputs the same spring in every format Sonobe's spring patches use.\n\n| Preset | Feel | Duration | Bounce |\n|---|---|---|---|\n| Smooth | Settles calmly, no overshoot | 0.5 s | 0 |\n| Snappy | Quick, a hint of overshoot | 0.3 s | 0.15 |\n| Bouncy | Playful wobble | 0.5 s | 0.3 |\n| Gentle | Slow and soft | 0.75 s | 0.1 |\n| Custom | Your own Duration and Bounce | | |\n\n- **Duration** is roughly how long the spring takes to get there, in seconds. **Bounce** runs from 0 (no overshoot) toward 1 (bouncing forever); negative values feel heavier and slower to settle. Both apply only when Preset is Custom.\n- **Mass**, **Tension**, and **Friction** go into Spring Animation.\n- **Bounciness** and **Speed** go into Pop Animation.\n- **Response** and **Damping Fraction** go into Fluid Spring Animation, and match SwiftUI's `spring(response:dampingFraction:)`.\n\n## Tips\n- Start with Smooth for sheets and screens, Snappy for toggles and taps, and Bouncy for delight like likes and badges.\n- Bounciness can be negative for springs with no bounce. Pop Animation accepts that, so wire the outputs straight in.\n- Custom's Duration and Bounce match SwiftUI's `spring(duration:bounce:)`, so developers can copy them.",
+      "behavior": "Stateless.\n\nEach frame:\n```\nconst PRESETS = {\n  smooth: { duration: 0.5,  bounce: 0 },\n  snappy: { duration: 0.3,  bounce: 0.15 },\n  bouncy: { duration: 0.5,  bounce: 0.3 },\n  gentle: { duration: 0.75, bounce: 0.1 },\n};                                                   // must equal SPRING_PRESETS in engine physics/spring.ts\nlet { duration, bounce } = PRESETS[ctx.input(\"preset\")] ?? PRESETS.smooth;\nif (ctx.input(\"preset\") === \"custom\") {\n  duration = Math.max(0.01, finiteOr(ctx.input(\"duration\"), 0.5));\n  bounce = clamp(finiteOr(ctx.input(\"bounce\"), 0), -0.999999, 0.999999);\n}\nconst zeta = bounce >= 0 ? 1 - bounce : 1 / (1 + bounce);   // damping fraction\nconst mass = 1;\nconst k = (2 * Math.PI / duration) ** 2 * mass;             // CONVENTIONS.md §18.5.3\nconst c = 4 * Math.PI * zeta * mass / duration;\nctx.output(\"mass\", mass); ctx.output(\"tension\", k); ctx.output(\"friction\", c);\nctx.output(\"response\", duration); ctx.output(\"dampingFraction\", zeta);\nconst pop = popCompatible(k, c, zeta);\nctx.output(\"bounciness\", pop.bounciness); ctx.output(\"speed\", pop.speed);\n```\n\n`popCompatible(k, c, zeta)`:\n```\nlet { bounciness, speed } = inverseBouncyConversion(origamiValueFromTension(k), origamiValueFromFriction(c));  // semantics.md §7.3\nconst back = fromBouncinessSpeed(bounciness, speed);\nif (speed >= 0 && relErr(back.stiffness, k) <= 1e-6 && relErr(back.damping, c) <= 1e-6) return { bounciness, speed };\n// No exact Pop equivalent: Pop can't be softer than k = 87.21 (Origami tension 0.5, Speed 0;\n// popAnimation treats negative Speed as 0) or less damped than c = 1.03 (Origami friction 0.01, Bounciness 42.5).\nconst k2 = Math.max(k, 87.21);\nlet c2 = k2 === k ? c : 2 * zeta * Math.sqrt(k2);          // keep the damping ratio\nc2 = Math.max(c2, 1.03);\nreturn inverseBouncyConversion(origamiValueFromTension(k2), origamiValueFromFriction(c2));\n```\n`relErr(a, b) = |a − b| / max(1, |b|)`.\n\n- Formulas: `k = (2π/duration)²·m`, `c = 4π·ζ·m/duration`, `ζ = 1 − bounce` for bounce ≥ 0 and `1/(1 + bounce)` below 0, mass 1. These must agree exactly with `fluidSpringAnimation`, `springConverter`, and the engine's `fromDurationBounce`. Response equals Duration.\n- Preset values (k, c, ζ → Bounciness, Speed): Smooth 157.91, 25.13, 1 → -2.56, 3.33. Snappy 438.65, 35.60, 0.85 → 3.39, 16.55. Bouncy 157.91, 17.59, 0.7 → 5.15, 3.33. Gentle 70.18, 15.08, 0.9 → no exact Pop equivalent; the fallback spring (k 87.21, c 16.81) gives -34.99, 0.\n- Pop fallback: used only when the exact inverse gives a negative Speed or doesn't round-trip. That happens for durations above about 0.673 s (stiffness below 87.21) or for bounce so high that damping falls below 1.03. The Pop spring then keeps the same damping ratio but runs a little quicker. Docs and the inspector should say \"closest Pop equivalent\" in that case. The fallback spring (k 87.21, c 16.81) round-trips through popAnimation and bouncyConverter exactly.\n- Coordination: `springConverter` computes its Bounciness and Speed with this same `popCompatible` rule, so one spring gives the same Pop values everywhere.\n- Frame 0: evaluates with authored values; no history.\n- Loops: per index; a loop of preset keys produces loops of values.\n- Edge cases: an unknown Preset key behaves as Smooth. Custom Duration ≤ 0.01 or non-finite is treated as 0.01 (0.5 when non-finite). Bounce is clamped to ±0.999999, so damping never reaches 0 or infinity.\n- Muted: outputs the Smooth preset's values (not the default bypass, which would pass Duration into Mass).\n- Coming from Origami: Sonobe-native. The closest Origami patch is Spring Converter, which takes Response and Damping Fraction.",
+      "inputs": [
+        {
+          "key": "preset",
+          "name": "Preset",
+          "type": "enum",
+          "default": "smooth",
+          "enumOptions": [
+            { "key": "smooth", "name": "Smooth", "description": "Settles calmly with no overshoot. A safe default for screens, sheets, and fades." },
+            { "key": "snappy", "name": "Snappy", "description": "Quick with a hint of overshoot. Good for toggles, taps, and small UI." },
+            { "key": "bouncy", "name": "Bouncy", "description": "Playful overshoot that wobbles into place. Good for likes, badges, and delight." },
+            { "key": "gentle", "name": "Gentle", "description": "Slow and soft with a little give. Good for large surfaces and ambient motion." },
+            { "key": "custom", "name": "Custom", "description": "Uses your own Duration and Bounce." }
+          ],
+          "description": "The feel to output. Custom uses Duration and Bounce instead."
+        },
+        { "key": "duration", "name": "Duration", "type": "number", "subtype": "duration", "default": 0.5, "min": 0.01, "step": 0.05, "description": "Roughly how long the spring takes to arrive, in seconds. Used only when Preset is Custom." },
+        { "key": "bounce", "name": "Bounce", "type": "number", "default": 0, "min": -1, "max": 1, "step": 0.05, "description": "How much it overshoots: 0 means none, values toward 1 bounce more, and negative values settle more slowly. Used only when Preset is Custom." }
+      ],
+      "outputs": [
+        { "key": "mass", "name": "Mass", "type": "number", "description": "The spring's mass for Spring Animation. Always 1." },
+        { "key": "tension", "name": "Tension", "type": "number", "description": "Stiffness for Spring Animation's Tension, in raw physics units." },
+        { "key": "friction", "name": "Friction", "type": "number", "description": "Damping for Spring Animation's Friction, in raw physics units." },
+        { "key": "bounciness", "name": "Bounciness", "type": "number", "description": "Bounciness for Pop Animation. Can be negative for springs with no bounce." },
+        { "key": "speed", "name": "Speed", "type": "number", "description": "Speed for Pop Animation. For slow feels like Gentle it's the closest spring Pop can make." },
+        { "key": "response", "name": "Response", "type": "number", "subtype": "duration", "description": "Response in seconds for Fluid Spring Animation (SwiftUI response)." },
+        { "key": "dampingFraction", "name": "Damping Fraction", "type": "number", "description": "Damping fraction for Fluid Spring Animation: 1 means no bounce, lower values bounce more." }
+      ],
+      "alwaysEvaluate": false,
+      "pairsWellWith": ["springAnimation", "popAnimation", "fluidSpringAnimation", "springConverter"],
+      "commonMistakes": [
+        "Changing Duration or Bounce does nothing: they only apply when Preset is Custom. Switch Preset to Custom first.",
+        "Only part of the spring changes: Tension is wired but Friction and Mass aren't, so Spring Animation mixes the preset with its own defaults. Wire all three outputs."
+      ],
+      "examples": [
+        {
+          "title": "Give a like button a Bouncy pop",
+          "outline": "layer heart shape \"Heart\" @171,400 60x60 scale←grow.output\npatch tap_heart interaction layer=@heart\npatch liked switch flip←tap_heart.tap\npatch feel springPreset preset=bouncy\npatch pop popAnimation number←liked.on bounciness←feel.bounciness speed←feel.speed\npatch grow transition<number> progress←pop.output start=1 end=1.2"
+        },
+        {
+          "title": "Open a sheet with a custom duration and bounce",
+          "outline": "layer sheet rectangle \"Sheet\" @0,874 402x600 position←rise.output\nlayer open_button rectangle \"Open\" @111,700 180x56\npatch tap_open interaction layer=@open_button\npatch open switch flip←tap_open.tap\npatch feel springPreset preset=custom duration=0.45 bounce=0.1\npatch spring springAnimation number←open.on mass←feel.mass tension←feel.tension friction←feel.friction\npatch rise transition<point> progress←spring.output start=[0,874] end=[0,274]"
+        }
+      ],
+      "origami": null,
+      "defaultNotes": {
+        "preset": "sonobe: Smooth never overshoots, so it's the safest first feel, and it's the first option.",
+        "duration": "verified: SwiftUI Spring(duration:bounce:) defaults duration to 0.5 (gap-fill.md §4.5); matches Smooth.",
+        "bounce": "verified: SwiftUI Spring(duration:bounce:) defaults bounce to 0 (gap-fill.md §4.5); matches Smooth."
+      }
+    }
+  ]
+}

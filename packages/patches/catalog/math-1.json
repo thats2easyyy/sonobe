@@ -1,0 +1,1390 @@
+{
+  "file": "math-1.json",
+  "category": "math",
+  "patches": [
+    {
+      "type": "add",
+      "name": "Add",
+      "category": "math",
+      "tier": 1,
+      "status": "supported",
+      "aliases": [
+        "+",
+        "plus",
+        "sum",
+        "addition",
+        "join text",
+        "concatenate",
+        "combine",
+        "offset"
+      ],
+      "summary": "Adds numbers or vectors together, or joins pieces of text in order.",
+      "docs": "## How it works\nAdd combines all of its inputs into one result, working from top to bottom.\n\n- **Value 1, Value 2, …** are the values to add. Change the input count to add up to 32 values.\n- Points, sizes, and other vectors add each component separately: [10, 20] + [5, 5] is [15, 25].\n- Set the type to **Text** to join text instead. \"Hello, \" + \"Sam\" is \"Hello, Sam\". Numbers wired into a text Add turn into text.\n- **Output** is the sum, or the joined text.\n\n## Tips\n- Space out looped layers: Multiply a Loop's Index by the row height, then Add a top margin.\n- Order only matters for text. For numbers, 2 + 3 and 3 + 2 are the same.\n- Keep a running total with a feedback wire: Output → Delay One Frame → back into Value 1.\n\n## Coming from Origami\nThis is Origami's **+** patch. Its unlabeled inputs are called Value 1, Value 2, and so on.",
+      "behavior": "Stateless, apart from a per-instance warned-once flag used by the edge-case warning below.\n\nEach frame, for each loop index:\n```\nn = ctx.inputCount\nif (ctx.typeParam === \"text\") {\n  out = \"\";\n  for (i = 1; i <= n; i++) out += ctx.input(`value${i}`);   // coerced to text at connect time\n} else {\n  out = ctx.input(\"value1\");\n  for (i = 2; i <= n; i++) out = out + ctx.input(`value${i}`);   // component-wise\n}\nctx.output(\"output\", out);\n```\n\n- Variants: `number` is a single component; `point` and `size` have 2 components, `point3d` 3, `point4d` 4. Vector variants apply the operation to each component independently. Coercion happens at connect time (ARCHITECTURE.md §4): a number wired into a vector variant broadcasts to every component, and a boolean arrives as 1 or 0.\n- Text: joins in port order with no separator. Numbers wired into the text variant are formatted by the engine's number → text coercion; empty inputs join as \"\".\n- Input count: `ctx.inputCount` is 2–32 (default 2). Removing ports drops their values; added ports start at the variadic default.\n- Frame 0: evaluates with the authored values. There's no history, so nothing is seeded.\n- Loops: evaluates once per loop index. The output length is the longest input loop; shorter loops wrap and scalars broadcast. An empty loop produces an empty output.\n- Edge cases: in numeric variants, any result component that isn't finite (NaN or ±Infinity, e.g. from overflow past ±1.8e308) outputs 0 for that component and warns once per restart through `ctx.services.log(\"warn\", …)`. `-0` is output as `0`.\n- Restart and dispose: restart clears the warned-once flag. Nothing to dispose.\n- Coming from Origami: + folds its inputs the same way. Its type menu also lists index, progress, and anchor. Import index and progress as `number` and anchor as `point`.",
+      "inputs": [],
+      "outputs": [
+        {
+          "key": "output",
+          "name": "Output",
+          "type": "variant",
+          "description": "The sum of all values, or the joined text when the type is Text."
+        }
+      ],
+      "variadic": {
+        "key": "value",
+        "name": "Value",
+        "type": "variant",
+        "default": 0,
+        "min": 2,
+        "max": 32,
+        "defaultCount": 2,
+        "startIndex": 1,
+        "direction": "inputs",
+        "description": "A value to add, or a piece of text to join. Inputs combine from top to bottom."
+      },
+      "variants": [
+        "number",
+        "point",
+        "point3d",
+        "point4d",
+        "size",
+        "text"
+      ],
+      "alwaysEvaluate": false,
+      "shortcut": "+",
+      "pairsWellWith": [
+        "multiply",
+        "subtract",
+        "loop",
+        "delay1",
+        "formatNumber"
+      ],
+      "commonMistakes": [
+        "The label shows \"12\" instead of 3: the type is Text, so the numbers were joined. Set the type to Number to add them.",
+        "Words run together (\"HelloSam\"): text joins with no separator. Put the space inside one of the values, such as \"Hello, \"."
+      ],
+      "examples": [
+        {
+          "title": "Stack looped cards down the screen",
+          "description": "Each card sits 100 pt below the previous one, starting 120 pt from the top.",
+          "outline": "layer card rectangle \"Card\" @16,120 358x88 cornerRadius=16 position←place.output\npatch rows loop count=5\npatch spread multiply<point> value1←rows.index value2=[0,100]\npatch place add<point> value1←spread.output value2=[16,120]"
+        },
+        {
+          "title": "Show seconds out of a minute, like 12/60",
+          "description": "With the type set to Text, the number from Round becomes text and the three pieces join in order.",
+          "outline": "layer status text \"Status\" @16,120 text←label.output\npatch clock time\npatch seconds round value←clock.time\npatch label add<text>[3] value1←seconds.roundedDown value2=\"/\" value3=\"60\""
+        }
+      ],
+      "origami": {
+        "id": "builtin.math.add",
+        "name": "+"
+      },
+      "origamiPorts": {
+        "value1": "Input 1 (unlabeled; the base value)",
+        "value2": "Input 2 (unlabeled)",
+        "output": "Output (unlabeled)"
+      },
+      "defaultNotes": {
+        "value": "sonobe: Origami's operand default is undocumented; 0 is the identity for addition, so unconnected inputs don't change the sum."
+      }
+    },
+    {
+      "type": "subtract",
+      "name": "Subtract",
+      "category": "math",
+      "tier": 1,
+      "status": "supported",
+      "aliases": [
+        "−",
+        "minus",
+        "difference",
+        "subtraction",
+        "delta",
+        "take away"
+      ],
+      "summary": "Subtracts one or more values from a starting value, such as finding how far apart two positions are.",
+      "docs": "## How it works\nSubtract starts with **Value 1** and takes away every input below it: Value 1 − Value 2 − Value 3 …\n\n- **Value 1** is the starting value. Every other input is subtracted from it, in order.\n- Points, sizes, and other vectors subtract each component separately: [100, 80] − [20, 30] is [80, 50].\n- **Output** is what's left.\n\n## Tips\n- Find how far something moved: current position − start position, with the type set to Point.\n- Flip a direction: 0 − value turns 40 into −40.\n- Center a layer: screen width − layer width, then Divide by 2.\n\n## Coming from Origami\nThis is Origami's **−** patch. Its unlabeled inputs are called Value 1, Value 2, and so on.",
+      "behavior": "Stateless, apart from a per-instance warned-once flag used by the edge-case warning below.\n\nEach frame, for each loop index:\n```\nout = ctx.input(\"value1\");\nfor (i = 2; i <= ctx.inputCount; i++) out = out - ctx.input(`value${i}`);   // left fold, component-wise\nctx.output(\"output\", out);\n```\n\n- Variants: `number` is a single component; `point` and `size` have 2 components, `point3d` 3, `point4d` 4. Vector variants apply the operation to each component independently. Coercion happens at connect time (ARCHITECTURE.md §4): a number wired into a vector variant broadcasts to every component, and a boolean arrives as 1 or 0.\n- Input count: `ctx.inputCount` is 2–32 (default 2). Removing ports drops their values; added ports start at the variadic default.\n- Frame 0: evaluates with the authored values. There's no history, so nothing is seeded.\n- Loops: evaluates once per loop index. The output length is the longest input loop; shorter loops wrap and scalars broadcast. An empty loop produces an empty output.\n- Edge cases: any result component that isn't finite (NaN or ±Infinity, e.g. from overflow past ±1.8e308) outputs 0 for that component and warns once per restart through `ctx.services.log(\"warn\", …)`. `-0` is output as `0`.\n- Restart and dispose: restart clears the warned-once flag. Nothing to dispose.\n- Coming from Origami: − folds left from its base value. Import index and progress types as `number` and anchor as `point`.",
+      "inputs": [],
+      "outputs": [
+        {
+          "key": "output",
+          "name": "Output",
+          "type": "variant",
+          "description": "Value 1 minus every other value."
+        }
+      ],
+      "variadic": {
+        "key": "value",
+        "name": "Value",
+        "type": "variant",
+        "default": 0,
+        "min": 2,
+        "max": 32,
+        "defaultCount": 2,
+        "startIndex": 1,
+        "direction": "inputs",
+        "description": "Value 1 is the starting value; each later value is subtracted from the running result."
+      },
+      "variants": [
+        "number",
+        "point",
+        "point3d",
+        "point4d",
+        "size"
+      ],
+      "alwaysEvaluate": false,
+      "shortcut": "-",
+      "pairsWellWith": [
+        "add",
+        "absoluteValue",
+        "drag",
+        "layerInfo",
+        "point"
+      ],
+      "commonMistakes": [
+        "The result has the wrong sign: inputs subtract from top to bottom, so Value 1 is the starting value. Swap the wires or reorder the ports.",
+        "A Point result moves on both axes: a plain number wired into a Point subtract becomes [n, n]. Build [n, 0] with a Point patch when you only want one axis."
+      ],
+      "examples": [
+        {
+          "title": "Count down from 10",
+          "outline": "layer timer text \"Timer\" @16,120 text←whole.roundedUp\npatch clock time\npatch remaining subtract value1=10 value2←clock.time\npatch whole round value←remaining.output"
+        }
+      ],
+      "origami": {
+        "id": "builtin.math.sub",
+        "name": "−"
+      },
+      "origamiPorts": {
+        "value1": "Input 1 (unlabeled; the base value)",
+        "value2": "Input 2 (unlabeled)",
+        "output": "Output (unlabeled)"
+      },
+      "defaultNotes": {
+        "value": "sonobe: Origami's operand default is undocumented; 0 is the identity for subtraction, so unconnected inputs don't change the result."
+      }
+    },
+    {
+      "type": "multiply",
+      "name": "Multiply",
+      "category": "math",
+      "tier": 1,
+      "status": "supported",
+      "aliases": [
+        "×",
+        "times",
+        "product",
+        "multiplication",
+        "scale value",
+        "*"
+      ],
+      "summary": "Multiplies values together, for scaling a number, spacing looped layers, or turning 0–1 progress into distance.",
+      "docs": "## How it works\nMultiply starts with **Value 1** and multiplies it by every input below it: Value 1 × Value 2 × …\n\n- Points, sizes, and other vectors multiply each component separately: [2, 3] × [10, 0] is [20, 0].\n- A number wired into a vector Multiply scales every component by that number.\n- **Output** is the product.\n\n## Tips\n- Turn 0–1 progress into points: progress × 300 moves something 300 pt.\n- Reverse a direction with × −1.\n- Space looped layers: Loop Index × 120 gives 0, 120, 240, …\n\n## Coming from Origami\nThis is Origami's **×** patch. Its unlabeled inputs are called Value 1, Value 2, and so on.",
+      "behavior": "Stateless, apart from a per-instance warned-once flag used by the edge-case warning below.\n\nEach frame, for each loop index:\n```\nout = ctx.input(\"value1\");\nfor (i = 2; i <= ctx.inputCount; i++) out = out * ctx.input(`value${i}`);   // left fold, component-wise\nctx.output(\"output\", out);\n```\n\n- Variants: `number` is a single component; `point` and `size` have 2 components, `point3d` 3, `point4d` 4. Vector variants apply the operation to each component independently. Coercion happens at connect time (ARCHITECTURE.md §4): a number wired into a vector variant broadcasts to every component, and a boolean arrives as 1 or 0. There's no dot or cross product: [2, 3] × [4, 5] is [8, 15].\n- Input count: `ctx.inputCount` is 2–32 (default 2). Removing ports drops their values; added ports start at the variadic default.\n- Frame 0: evaluates with the authored values. There's no history, so nothing is seeded.\n- Loops: evaluates once per loop index. The output length is the longest input loop; shorter loops wrap and scalars broadcast. An empty loop produces an empty output.\n- Edge cases: any result component that isn't finite (NaN or ±Infinity, e.g. from overflow past ±1.8e308) outputs 0 for that component and warns once per restart through `ctx.services.log(\"warn\", …)`. `-0` is output as `0`.\n- Restart and dispose: restart clears the warned-once flag. Nothing to dispose.\n- Coming from Origami: × folds left. Import index and progress types as `number` and anchor as `point`.",
+      "inputs": [],
+      "outputs": [
+        {
+          "key": "output",
+          "name": "Output",
+          "type": "variant",
+          "description": "The product of all values."
+        }
+      ],
+      "variadic": {
+        "key": "value",
+        "name": "Value",
+        "type": "variant",
+        "default": 1,
+        "min": 2,
+        "max": 32,
+        "defaultCount": 2,
+        "startIndex": 1,
+        "direction": "inputs",
+        "description": "A value to multiply by. Inputs combine from top to bottom."
+      },
+      "variants": [
+        "number",
+        "point",
+        "point3d",
+        "point4d",
+        "size"
+      ],
+      "alwaysEvaluate": false,
+      "shortcut": "*",
+      "pairsWellWith": [
+        "popAnimation",
+        "loop",
+        "add",
+        "divide",
+        "transition"
+      ],
+      "commonMistakes": [
+        "The output is stuck at 0: one input is 0, and anything times 0 is 0. Set multipliers you aren't using to 1, or lower the input count.",
+        "A slide goes the wrong way: positive values move right and down. Multiply by a negative number to move left or up."
+      ],
+      "examples": [
+        {
+          "title": "Slide to the next page on tap",
+          "description": "Pop Animation runs 0 → 1; multiplying by [−390, 0] slides the pages one screen to the left.",
+          "outline": "layer pages group \"Pages\" @0,0 780x844 position←slide.output\nlayer next_button rectangle \"Next Button\" @300,760 74x44 cornerRadius=22\npatch tap_next interaction layer=@next_button\npatch on_second switch flip←tap_next.tap\npatch pop popAnimation number←on_second.on\npatch slide multiply<point> value1←pop.output value2=[-390,0]"
+        }
+      ],
+      "origami": {
+        "id": "builtin.math.mul",
+        "name": "×"
+      },
+      "origamiPorts": {
+        "value1": "Input 1 (unlabeled; the base value)",
+        "value2": "Input 2 (unlabeled)",
+        "output": "Output (unlabeled)"
+      },
+      "defaultNotes": {
+        "value": "sonobe: Origami's operand default is undocumented; 1 is the identity for multiplication, so unconnected inputs don't change the product."
+      }
+    },
+    {
+      "type": "divide",
+      "name": "Divide",
+      "category": "math",
+      "tier": 1,
+      "status": "supported",
+      "aliases": [
+        "÷",
+        "division",
+        "quotient",
+        "ratio",
+        "per",
+        "/"
+      ],
+      "summary": "Divides a value by one or more values, outputting 0 with a warning instead of breaking when you divide by zero.",
+      "docs": "## How it works\nDivide starts with **Value 1** and divides it by every input below it: Value 1 ÷ Value 2 ÷ …\n\n- Points, sizes, and other vectors divide each component separately: [300, 90] ÷ [3, 2] is [100, 45].\n- Dividing by 0 outputs 0 for that component and shows a warning in the console, so layers don't vanish or fly off screen.\n- **Output** is the result.\n\n## Tips\n- Normalize: scroll distance ÷ scrollable height gives 0–1 progress.\n- Center a layer: (screen width − layer width) ÷ 2.\n- Find a grid row: Loop Index ÷ columns, then Round's Rounded Down.\n\n## Coming from Origami\nThis is Origami's **÷** patch. Origami doesn't document what dividing by zero does; Sonobe outputs 0 and warns.",
+      "behavior": "Stateless, apart from a per-instance warned-once flag used by the edge-case warning below.\n\nEach frame, for each loop index, per component:\n```\nout = ctx.input(\"value1\");\nfor (i = 2; i <= ctx.inputCount; i++) {\n  d = ctx.input(`value${i}`);\n  out = d === 0 ? 0 : out / d;      // per component; warn once (below)\n}\nctx.output(\"output\", out);\n```\n\n- Variants: `number` is a single component; `point` and `size` have 2 components, `point3d` 3, `point4d` 4. Vector variants apply the operation to each component independently. Coercion happens at connect time (ARCHITECTURE.md §4): a number wired into a vector variant broadcasts to every component, and a boolean arrives as 1 or 0.\n- Input count: `ctx.inputCount` is 2–32 (default 2). Removing ports drops their values; added ports start at the variadic default.\n- Frame 0: evaluates with the authored values. There's no history, so nothing is seeded.\n- Loops: evaluates once per loop index. The output length is the longest input loop; shorter loops wrap and scalars broadcast. An empty loop produces an empty output.\n- Division by zero: when a divisor component is 0 (or -0), that component of the running result becomes 0 and later divisions keep it at 0. The patch warns once per restart through `ctx.services.log(\"warn\", …)`, naming the patch id and the port (for example `\"divide_1: Value 2 is 0, so the output is 0.\"`). Other components still divide normally.\n- Edge cases: any result component that isn't finite (NaN or ±Infinity, e.g. from overflow past ±1.8e308) outputs 0 for that component and warns once per restart through `ctx.services.log(\"warn\", …)`. `-0` is output as `0`.\n- Restart and dispose: restart clears the warned-once flag. Nothing to dispose.\n- Coming from Origami: ÷ folds left. Its divide-by-zero result is undocumented (likely IEEE ±Infinity or NaN); imported files get 0 instead. Import index and progress types as `number` and anchor as `point`.",
+      "inputs": [],
+      "outputs": [
+        {
+          "key": "output",
+          "name": "Output",
+          "type": "variant",
+          "description": "Value 1 divided by every other value. Components divided by 0 output 0."
+        }
+      ],
+      "variadic": {
+        "key": "value",
+        "name": "Value",
+        "type": "variant",
+        "default": 1,
+        "min": 2,
+        "max": 32,
+        "defaultCount": 2,
+        "startIndex": 1,
+        "direction": "inputs",
+        "description": "Value 1 is the value to divide; each later value divides the running result."
+      },
+      "variants": [
+        "number",
+        "point",
+        "point3d",
+        "point4d",
+        "size"
+      ],
+      "alwaysEvaluate": false,
+      "shortcut": "/",
+      "pairsWellWith": [
+        "multiply",
+        "round",
+        "modulo",
+        "layerInfo",
+        "progress"
+      ],
+      "commonMistakes": [
+        "The layer suddenly snaps to 0: a divisor reached 0, such as a size before layout or a Counter at 0. Keep the divisor at least 1 with Max, or check it with Greater Than first.",
+        "Scroll progress never reaches 1: dividing by the full content height ignores the part already on screen. Divide by content height minus screen height."
+      ],
+      "examples": [
+        {
+          "title": "Show a monthly price",
+          "outline": "layer price text \"Price\" @16,200 text←label.output\npatch monthly divide value1=119.88 value2=12\npatch cents round value←monthly.output places=2\npatch label add<text>[3] value1=\"$\" value2←cents.rounded value3=\"/month\""
+        }
+      ],
+      "origami": {
+        "id": "builtin.math.div",
+        "name": "÷"
+      },
+      "origamiPorts": {
+        "value1": "Input 1 (unlabeled; the base value)",
+        "value2": "Input 2 (unlabeled)",
+        "output": "Output (unlabeled)"
+      },
+      "defaultNotes": {
+        "value": "sonobe: Origami's operand default is undocumented; 1 is the identity for division and never divides by zero."
+      }
+    },
+    {
+      "type": "modulo",
+      "name": "Modulo",
+      "category": "math",
+      "tier": 1,
+      "status": "supported",
+      "aliases": [
+        "mod",
+        "remainder",
+        "modulus",
+        "wrap around",
+        "%",
+        "cycle"
+      ],
+      "summary": "Outputs the remainder after dividing, for wrapping a count back to 0, finding grid columns, or alternating items.",
+      "docs": "## How it works\nModulo divides **Value 1** by **Value 2** and keeps what's left over: 7 mod 3 is 1. As Value 1 counts up, the result climbs toward Value 2, then wraps back to 0 before reaching it, like a clock.\n\n- Negative values wrap forward too: −1 mod 3 is 2, so a count going backwards still lands in range.\n- Decimals work: 5.5 mod 2 is 1.5.\n- Extra inputs apply again in order: (Value 1 mod Value 2) mod Value 3.\n- Vectors wrap each component separately.\n- Modulo by 0 outputs 0 and shows a warning in the console.\n\n## Tips\n- Grid column: Loop Index mod 3 gives 0, 1, 2, 0, 1, 2 …\n- Every other row: Index mod 2 is 0 for even rows and 1 for odd rows.\n- Keep an angle between 0 and 360: angle mod 360.\n\n## Coming from Origami\nThis is Origami's **Mod** patch. For negative values Sonobe always wraps into the range between 0 and Value 2 (−1 mod 3 is 2). A code-style remainder, like JavaScript's `%`, gives −1; use Math Expression if you need that.",
+      "behavior": "Stateless, apart from a per-instance warned-once flag used by the edge-case warning below.\n\nEach frame, for each loop index, per component (floored modulo):\n```\nr = ctx.input(\"value1\");\nfor (i = 2; i <= ctx.inputCount; i++) {\n  b = ctx.input(`value${i}`);\n  if (b === 0) { r = 0; continue; }          // warn once (below)\n  r = r - b * Math.floor(r / b);             // result has the sign of b\n  if (Math.abs(r) >= Math.abs(b)) r = 0;     // round-off guard, e.g. -1e-17 mod 3\n}\nctx.output(\"output\", r === 0 ? 0 : r);       // normalize -0\n```\n\n- Variants: `number` is a single component; `point` and `size` have 2 components, `point3d` 3, `point4d` 4. Vector variants apply the operation to each component independently. Coercion happens at connect time (ARCHITECTURE.md §4): a number wired into a vector variant broadcasts to every component, and a boolean arrives as 1 or 0.\n- Sign: with `b > 0` the result is in `[0, b)`; with `b < 0` it's in `(b, 0]`. Examples: 7 mod 3 = 1, −1 mod 3 = 2, 7 mod −3 = −2, 5.5 mod 2 = 1.5.\n- Input count: `ctx.inputCount` is 2–32 (default 2). Removing ports drops their values; added ports start at the variadic default.\n- Frame 0: evaluates with the authored values. There's no history, so nothing is seeded.\n- Loops: evaluates once per loop index. The output length is the longest input loop; shorter loops wrap and scalars broadcast. An empty loop produces an empty output.\n- Modulo by zero: a divisor component of 0 sets that component to 0 and later steps keep it at 0. Warn once per restart through `ctx.services.log(\"warn\", …)`, naming the patch id and port.\n- Edge cases: any result component that isn't finite (NaN or ±Infinity, e.g. from overflow past ±1.8e308) outputs 0 for that component and warns once per restart through `ctx.services.log(\"warn\", …)`. `-0` is output as `0`.\n- Restart and dispose: restart clears the warned-once flag. Nothing to dispose.\n- Coming from Origami: Mod's sign convention is undocumented (its Math Expression % is JavaScript's truncated remainder). Sonobe uses floored modulo because wrapping is what designers use it for; results differ only when an operand is negative. Import index and progress types as `number` and anchor as `point`.",
+      "inputs": [],
+      "outputs": [
+        {
+          "key": "output",
+          "name": "Output",
+          "type": "variant",
+          "description": "The remainder, always between 0 and the divisor (0 included)."
+        }
+      ],
+      "variadic": {
+        "key": "value",
+        "name": "Value",
+        "type": "variant",
+        "default": 1,
+        "min": 2,
+        "max": 32,
+        "defaultCount": 2,
+        "startIndex": 1,
+        "direction": "inputs",
+        "description": "Value 1 is the value to wrap; each later value is a divisor applied to the running result."
+      },
+      "variants": [
+        "number",
+        "point",
+        "point3d",
+        "point4d",
+        "size"
+      ],
+      "alwaysEvaluate": false,
+      "shortcut": "%",
+      "pairsWellWith": [
+        "loop",
+        "counter",
+        "round",
+        "equalsExactly",
+        "divide"
+      ],
+      "commonMistakes": [
+        "The last page never shows: mod 4 gives 0, 1, 2, 3, never 4. Use the number of items as Value 2, not the last index.",
+        "A result is almost Value 2 instead of 0: decimals aren't stored exactly, so 0.3 mod 0.1 comes out near 0.1. Work in whole numbers (3 mod 1) or Round first."
+      ],
+      "examples": [
+        {
+          "title": "Stripe alternate rows",
+          "description": "Index mod 2 is 0 or 1, which drives a color Transition directly.",
+          "outline": "layer list group \"List\" @0,120 390x336\n  layer row rectangle \"Row\" @0,0 390x56 position←stack.output color←shade.output\npatch rows loop count=6\npatch stack multiply<point> value1←rows.index value2=[0,56]\npatch odd modulo value1←rows.index value2=2\npatch shade transition<color> progress←odd.output start=\"#FFFFFFFF\" end=\"#F2F2F7FF\""
+        },
+        {
+          "title": "Spin forever without huge numbers",
+          "outline": "layer spinner rectangle \"Spinner\" @170,400 50x50 cornerRadius=8 rotation←angle.output\npatch clock time\npatch spin multiply value1←clock.time value2=90\npatch angle modulo value1←spin.output value2=360"
+        }
+      ],
+      "origami": {
+        "id": "builtin.math.mod",
+        "name": "Mod"
+      },
+      "origamiPorts": {
+        "value1": "Input 1 (unlabeled; the base value)",
+        "value2": "Input 2 (unlabeled)",
+        "output": "Output (unlabeled)"
+      },
+      "defaultNotes": {
+        "value": "sonobe: Origami's operand default is undocumented; 1 keeps every divisor non-zero until you enter your own."
+      }
+    },
+    {
+      "type": "power",
+      "name": "Power",
+      "category": "math",
+      "tier": 1,
+      "status": "supported",
+      "aliases": [
+        "exponent",
+        "pow",
+        "raise to power",
+        "squared",
+        "cubed",
+        "^"
+      ],
+      "summary": "Raises a value to a power, for squaring numbers, doubling at each step, or bending 0–1 progress into a curve.",
+      "docs": "## How it works\nPower multiplies **Value 1** by itself **Value 2** times: 2 to the power 3 is 2 × 2 × 2 = 8.\n\n- **Value 1** is the base and **Value 2** is the exponent. Extra inputs raise the result again, in order: (2³)² = 64.\n- Exponents can be decimals or negative: 9 to the power 0.5 is 3, and 2 to the power −1 is 0.5.\n- Vectors raise each component separately.\n- Combinations with no real answer, such as a negative base with a decimal exponent, output 0 and show a warning.\n\n## Tips\n- Ease 0–1 progress: progress to the power 2 starts slow; to the power 0.5 starts fast.\n- Zoom in doubling steps: 2 to the power of a level gives 1, 2, 4, 8.\n\n## Coming from Origami\nThis is Origami's **Power** patch. Extra exponent ports chain from left to right.",
+      "behavior": "Stateless, apart from a per-instance warned-once flag used by the edge-case warning below.\n\nEach frame, for each loop index, per component:\n```\nout = ctx.input(\"value1\");\nfor (i = 2; i <= ctx.inputCount; i++) out = Math.pow(out, ctx.input(`value${i}`));   // left fold\nctx.output(\"output\", out);\n```\n\n- Variants: `number` is a single component; `point` and `size` have 2 components, `point3d` 3, `point4d` 4. Vector variants apply the operation to each component independently. Coercion happens at connect time (ARCHITECTURE.md §4): a number wired into a vector variant broadcasts to every component, and a boolean arrives as 1 or 0.\n- Math: `Math.pow` semantics. Any value to the power 0 is 1 (including 0⁰). A negative base with an integer exponent keeps its sign (−2³ = −8).\n- Input count: `ctx.inputCount` is 2–32 (default 2). Removing ports drops their values; added ports start at the variadic default.\n- Frame 0: evaluates with the authored values. There's no history, so nothing is seeded.\n- Loops: evaluates once per loop index. The output length is the longest input loop; shorter loops wrap and scalars broadcast. An empty loop produces an empty output.\n- Edge cases: results with no real value (a negative base with a non-integer exponent, e.g. −8 to the power 1/3) and results that aren't finite (0 to a negative power, overflow) output 0 for that component. The patch warns once per restart through `ctx.services.log(\"warn\", …)`. `-0` is output as `0`.\n- Restart and dispose: restart clears the warned-once flag. Nothing to dispose.\n- Coming from Origami: the docs describe \"the base value to the subsequent exponents' powers\", which we read as a left fold ((base^e1)^e2). Import index and progress types as `number` and anchor as `point`.",
+      "inputs": [],
+      "outputs": [
+        {
+          "key": "output",
+          "name": "Output",
+          "type": "variant",
+          "description": "The base raised to each exponent in turn."
+        }
+      ],
+      "variadic": {
+        "key": "value",
+        "name": "Value",
+        "type": "variant",
+        "default": 1,
+        "min": 2,
+        "max": 32,
+        "defaultCount": 2,
+        "startIndex": 1,
+        "direction": "inputs",
+        "description": "Value 1 is the base; each later value is an exponent applied to the running result."
+      },
+      "variants": [
+        "number",
+        "point",
+        "point3d",
+        "point4d",
+        "size"
+      ],
+      "alwaysEvaluate": false,
+      "pairsWellWith": [
+        "squareRoot",
+        "multiply",
+        "repeatingAnimation",
+        "transition"
+      ],
+      "commonMistakes": [
+        "−8 to the power 1/3 gives 0 instead of −2: a negative base with a fractional exponent has no real answer here. Take Absolute Value, raise it, then Multiply by −1.",
+        "The curve bends the wrong way: exponents above 1 start slow and end fast. Use an exponent below 1, or the Curve patch, for a fast start."
+      ],
+      "examples": [
+        {
+          "title": "Pulse a glow that eases in",
+          "description": "Cubing the repeating 0–1 progress keeps the glow dim for most of each cycle, then brightens quickly.",
+          "outline": "layer glow oval \"Glow\" @145,372 100x100 opacity←ease_in.output\npatch wave repeatingAnimation\npatch ease_in power value1←wave.progress value2=3"
+        }
+      ],
+      "origami": {
+        "id": "builtin.math.pow",
+        "name": "Power"
+      },
+      "origamiPorts": {
+        "value1": "Input 1 (unlabeled; the base)",
+        "value2": "Input 2 (unlabeled; the exponent)",
+        "output": "Output (unlabeled)"
+      },
+      "defaultNotes": {
+        "value": "sonobe: Origami's defaults are undocumented; an exponent of 1 is the identity, so the output equals the base until you change it."
+      }
+    },
+    {
+      "type": "squareRoot",
+      "name": "Square Root",
+      "category": "math",
+      "tier": 1,
+      "status": "supported",
+      "aliases": [
+        "√",
+        "sqrt",
+        "root",
+        "radical",
+        "undo square"
+      ],
+      "summary": "Outputs the square root of a value, for undoing a square, sizing even grids, and working out distances.",
+      "docs": "## How it works\nSquare Root finds the number that, multiplied by itself, gives the input: the square root of 9 is 3.\n\n- **Value** is the number to take the root of. Vectors take the root of each component separately.\n- Negative values have no real square root, so they output 0 and show a warning.\n- **Output** is the root.\n\n## Tips\n- For the distance between two points, subtract them and use Length; it adds the squares for you.\n- Lay out N items in a square-ish grid: the square root of N, rounded up, is the column count.\n\n## Coming from Origami\nThis is Origami's **√** patch.",
+      "behavior": "Stateless, apart from a per-instance warned-once flag used by the edge-case warning below.\n\nEach frame, for each loop index, per component:\n```\nx = ctx.input(\"value\");\nctx.output(\"output\", x < 0 ? 0 : Math.sqrt(x));   // negative → 0, warn once\n```\n\n- Variants: `number` is a single component; `point` and `size` have 2 components, `point3d` 3, `point4d` 4. Vector variants apply the operation to each component independently. Coercion happens at connect time (ARCHITECTURE.md §4): a number wired into a vector variant broadcasts to every component, and a boolean arrives as 1 or 0.\n- Frame 0: evaluates with the authored values. There's no history, so nothing is seeded.\n- Loops: evaluates once per loop index. The output length is the longest input loop; shorter loops wrap and scalars broadcast. An empty loop produces an empty output.\n- Negative input: a component below 0 outputs 0 and the patch warns once per restart through `ctx.services.log(\"warn\", …)`, naming the patch id. `-0` outputs `0` without a warning.\n- Edge cases: any result component that isn't finite (NaN or ±Infinity, e.g. from overflow past ±1.8e308) outputs 0 for that component and warns once per restart through `ctx.services.log(\"warn\", …)`. `-0` is output as `0`.\n- Restart and dispose: restart clears the warned-once flag. Nothing to dispose.\n- Coming from Origami: √ documents its input as \"a non-negative value\" and doesn't say what negatives do; imported files get 0.",
+      "inputs": [
+        {
+          "key": "value",
+          "name": "Value",
+          "type": "variant",
+          "default": 0,
+          "min": 0,
+          "description": "The value to take the square root of. Negative values output 0."
+        }
+      ],
+      "outputs": [
+        {
+          "key": "output",
+          "name": "Output",
+          "type": "variant",
+          "description": "The square root of Value."
+        }
+      ],
+      "variants": [
+        "number",
+        "point",
+        "point3d",
+        "point4d",
+        "size"
+      ],
+      "alwaysEvaluate": false,
+      "pairsWellWith": [
+        "power",
+        "length",
+        "round",
+        "multiply"
+      ],
+      "commonMistakes": [
+        "The output stays at 0: the value going in is negative, like a position left of the origin. Take Absolute Value first, or use Length for distances."
+      ],
+      "examples": [
+        {
+          "title": "Pick a column count for 12 photos",
+          "outline": "layer columns_label text \"Columns\" @16,120 text←columns.roundedUp\npatch side squareRoot value=12\npatch columns round value←side.output"
+        }
+      ],
+      "origami": {
+        "id": "builtin.math.sqrt",
+        "name": "√"
+      },
+      "origamiPorts": {
+        "value": "Input (unlabeled)",
+        "output": "Output (unlabeled)"
+      },
+      "defaultNotes": {
+        "value": "inferred: Origami's input default is undocumented; 0 is the zero value."
+      }
+    },
+    {
+      "type": "absoluteValue",
+      "name": "Absolute Value",
+      "category": "math",
+      "tier": 1,
+      "status": "supported",
+      "aliases": [
+        "abs",
+        "magnitude",
+        "make positive",
+        "remove sign",
+        "unsigned",
+        "distance from zero"
+      ],
+      "summary": "Turns negative values into positive ones, for measuring how far something moved in either direction.",
+      "docs": "## How it works\nAbsolute Value removes the minus sign: −40 becomes 40, 500 stays 500, and 0 stays 0.\n\n- **Value** is the value to make positive. Vectors make each component positive separately: [−30, 40] becomes [30, 40].\n- **Output** is the positive result.\n\n## Tips\n- Detect a swipe in either direction: Absolute Value of the drag distance, then Greater Than 80.\n- Fade a card as it moves away from center either way: Absolute Value → Remap → Opacity.\n\n## Coming from Origami\nThis is Origami's **Absolute Value** patch.",
+      "behavior": "Stateless.\n\nEach frame, for each loop index, per component:\n```\nx = Math.abs(ctx.input(\"value\"));\nctx.output(\"output\", x === 0 ? 0 : x);   // normalize -0\n```\n\n- Variants: `number` is a single component; `point` and `size` have 2 components, `point3d` 3, `point4d` 4. Vector variants apply the operation to each component independently. Coercion happens at connect time (ARCHITECTURE.md §4): a number wired into a vector variant broadcasts to every component, and a boolean arrives as 1 or 0.\n- Frame 0: evaluates with the authored values. There's no history, so nothing is seeded.\n- Loops: evaluates once per loop index. The output length is the longest input loop; shorter loops wrap and scalars broadcast. An empty loop produces an empty output.\n- Edge cases: inputs are finite after coercion, so the output is always finite.\n- Restart and dispose: nothing to reset or release.",
+      "inputs": [
+        {
+          "key": "value",
+          "name": "Value",
+          "type": "variant",
+          "default": 0,
+          "description": "The value to make positive."
+        }
+      ],
+      "outputs": [
+        {
+          "key": "output",
+          "name": "Output",
+          "type": "variant",
+          "description": "Value without its minus sign."
+        }
+      ],
+      "variants": [
+        "number",
+        "point",
+        "point3d",
+        "point4d",
+        "size"
+      ],
+      "alwaysEvaluate": false,
+      "pairsWellWith": [
+        "subtract",
+        "greaterThan",
+        "gesture",
+        "length",
+        "remap"
+      ],
+      "commonMistakes": [
+        "A diagonal distance looks too small: Absolute Value works on each component separately, so [30, 40] stays [30, 40]. Use Length for the straight-line distance (50)."
+      ],
+      "examples": [
+        {
+          "title": "Fade a card as you drag it either way",
+          "description": "A Point wired into a number input reads its x. The card starts at x 16, so subtract that before taking the absolute value.",
+          "outline": "layer card rectangle \"Card\" @16,200 358x480 cornerRadius=24 position←move.position opacity←fade.output\npatch move drag layer=@card\npatch offset subtract value1←move.position value2=16\npatch away absoluteValue value←offset.output\npatch fade remap value←away.output fromStart=0 fromEnd=200 toStart=1 toEnd=0.2 clampToRange=true"
+        }
+      ],
+      "origami": {
+        "id": "builtin.math.abs",
+        "name": "Absolute Value"
+      },
+      "origamiPorts": {
+        "value": "Input (unlabeled)",
+        "output": "Output (unlabeled)"
+      },
+      "defaultNotes": {
+        "value": "inferred: Origami's input default is undocumented; 0 is the zero value."
+      }
+    },
+    {
+      "type": "round",
+      "name": "Round",
+      "category": "math",
+      "tier": 1,
+      "status": "supported",
+      "aliases": [
+        "floor",
+        "ceil",
+        "ceiling",
+        "round down",
+        "round up",
+        "nearest whole number",
+        "decimal places",
+        "integer"
+      ],
+      "summary": "Rounds a number to the nearest whole number or decimal place, and also outputs it rounded down and rounded up.",
+      "docs": "## How it works\nRound cleans up long decimals. You get three results at once:\n\n- **Rounded** is the nearest value. Halfway values round away from zero: 2.5 → 3 and −2.5 → −3.\n- **Rounded Down** always goes toward the lower number: 2.7 → 2 and −2.3 → −3.\n- **Rounded Up** always goes toward the higher number: 2.1 → 3 and −2.7 → −2.\n- **Places** is how many digits to keep after the decimal point: with 1, 3.14159 becomes 3.1. Negative places round to tens (−1) or hundreds (−2).\n- Set the type to Point or another vector to round each component, such as snapping a position to whole points.\n\n## Tips\n- Round outputs a number, so trailing zeros disappear (9.90 shows as 9.9). Use Format Number for display text with fixed decimals.\n- Use Rounded Down to turn a Random value between 0 and 3 into 0, 1, or 2.\n- To round to steps like 8 or 50, use Snap.\n\n## Coming from Origami\nThis is Origami's **Round** patch, including the Places input added in version 195. Halfway values round away from zero.",
+      "behavior": "Stateless.\n\nEach frame, for each loop index, per component of `value`:\n```\np = clamp(roundHalfAwayFromZero(ctx.input(\"places\")), -15, 15);\nk = 10 ** Math.abs(p);\nn = p >= 0 ? x * k : x / k;\nn = Number(n.toPrecision(15));        // strip binary noise: 1.005 × 100 → 100.5, 0.7 × 10 → 7\nback = (r) => (p >= 0 ? r / k : r * k);\nctx.output(\"rounded\",     back(Math.sign(n) * Math.floor(Math.abs(n) + 0.5)));   // half away from zero\nctx.output(\"roundedDown\", back(Math.floor(n)));\nctx.output(\"roundedUp\",   back(Math.ceil(n)));\n```\n\n- Variants: `number` is a single component; `point` and `size` have 2 components, `point3d` 3, `point4d` 4. Vector variants apply the operation to each component independently. Coercion happens at connect time (ARCHITECTURE.md §4): a number wired into a vector variant broadcasts to every component, and a boolean arrives as 1 or 0. `places` is always a single number applied to every component.\n- Precision: the `toPrecision(15)` step makes decimal inputs round the way they read. Golden values: (1.005, 2) → 1.01 / 1 / 1.01; (−2.5, 0) → −3 / −3 / −2; (0.7, 1) → 0.7 / 0.7 / 0.7; (1234.5, −2) → 1200 / 1200 / 1300; (−1.005, 2) → −1.01 / −1.01 / −1.\n- Places: a non-integer places value rounds to the nearest integer first; values beyond ±15 clamp, since doubles hold about 15 significant digits.\n- Frame 0: evaluates with the authored values. There's no history, so nothing is seeded.\n- Loops: evaluates once per loop index. The output length is the longest input loop; shorter loops wrap and scalars broadcast. An empty loop produces an empty output.\n- Edge cases: every output normalizes `-0` to `0` (−0.4 rounds to 0). Components with `|x| ≥ 2^53` are already whole and pass through unchanged. Inputs are finite after coercion, so no output is ever NaN or ±Infinity.\n- Muted: the default bypass: all three outputs pass `value` through.\n- Restart and dispose: nothing to reset or release.\n- Coming from Origami: Round is number-only there; the vector variants are a Sonobe extension, and imported patches use `number`. Origami's handling of exact halves and negative places is undocumented. Sonobe rounds halves away from zero (like Foundation's default) and accepts negative places.",
+      "inputs": [
+        {
+          "key": "value",
+          "name": "Value",
+          "type": "variant",
+          "default": 0,
+          "description": "The number to round."
+        },
+        {
+          "key": "places",
+          "name": "Places",
+          "type": "number",
+          "default": 0,
+          "min": -15,
+          "max": 15,
+          "step": 1,
+          "description": "Digits to keep after the decimal point. 0 rounds to whole numbers; −1 rounds to tens."
+        }
+      ],
+      "outputs": [
+        {
+          "key": "rounded",
+          "name": "Rounded",
+          "type": "variant",
+          "description": "Value rounded to the nearest step; halfway values round away from zero."
+        },
+        {
+          "key": "roundedDown",
+          "name": "Rounded Down",
+          "type": "variant",
+          "description": "Value rounded toward the lower number (floor)."
+        },
+        {
+          "key": "roundedUp",
+          "name": "Rounded Up",
+          "type": "variant",
+          "description": "Value rounded toward the higher number (ceiling)."
+        }
+      ],
+      "variants": [
+        "number",
+        "point",
+        "point3d",
+        "point4d",
+        "size"
+      ],
+      "alwaysEvaluate": false,
+      "pairsWellWith": [
+        "formatNumber",
+        "divide",
+        "random",
+        "snap"
+      ],
+      "commonMistakes": [
+        "A price shows 9.9 instead of 9.90: Round outputs a number, and numbers drop trailing zeros. Use Format Number to show a fixed number of decimals.",
+        "A counter changes a step early: Rounded goes up at the halfway point. Use Rounded Down when a value should only change after passing each whole number."
+      ],
+      "examples": [
+        {
+          "title": "Show a slider as a whole percent",
+          "description": "Interaction's position reads its x when wired into a number input.",
+          "outline": "layer track rectangle \"Track\" @40,400 310x40 cornerRadius=20\nlayer percent text \"Percent\" @40,460 text←whole.rounded\npatch press interaction layer=@track\npatch amount remap value←press.position fromStart=40 fromEnd=350 toStart=0 toEnd=100 clampToRange=true\npatch whole round value←amount.output"
+        }
+      ],
+      "origami": {
+        "id": "builtin.math.round",
+        "name": "Round"
+      },
+      "origamiPorts": {
+        "value": "Input (unlabeled)"
+      },
+      "defaultNotes": {
+        "value": "inferred: Origami's input default is undocumented; 0 is the zero value.",
+        "places": "inferred: Places arrived in Origami v195 with no documented default; 0 keeps whole-number rounding, matching files saved before it existed."
+      }
+    },
+    {
+      "type": "min",
+      "name": "Min",
+      "category": "math",
+      "tier": 1,
+      "status": "supported",
+      "aliases": [
+        "minimum",
+        "smallest",
+        "lowest",
+        "cap",
+        "upper limit",
+        "math.min"
+      ],
+      "summary": "Outputs the smallest of its inputs, for capping a value from above or picking the shorter of two sizes.",
+      "docs": "## How it works\nMin compares all of its inputs and outputs the smallest one.\n\n- Use it as a ceiling: Min of a value and 300 follows the value but never goes above 300.\n- Vectors compare each component separately: Min of [10, 50] and [30, 20] is [10, 20].\n- Change the input count to compare up to 32 values.\n\n## Tips\n- Need a floor and a ceiling at once? Use Clamp.\n- Size a card to the smaller of its content height and the screen height.\n\n## Coming from Origami\nThis is Origami's **Min** patch. Its unlabeled inputs are called Value 1, Value 2, and so on.",
+      "behavior": "Stateless, apart from a per-instance warned-once flag used by the edge-case warning below.\n\nEach frame, for each loop index, per component:\n```\nout = ctx.input(\"value1\");\nfor (i = 2; i <= ctx.inputCount; i++) out = Math.min(out, ctx.input(`value${i}`));\nctx.output(\"output\", out === 0 ? 0 : out);   // normalize -0\n```\n\n- Variants: `number` is a single component; `point` and `size` have 2 components, `point3d` 3, `point4d` 4. Vector variants apply the operation to each component independently. Coercion happens at connect time (ARCHITECTURE.md §4): a number wired into a vector variant broadcasts to every component, and a boolean arrives as 1 or 0. Components compare independently, so the result can mix components from different inputs: min([10, 50], [30, 20]) is [10, 20].\n- Input count: `ctx.inputCount` is 2–32 (default 2). Removing ports drops their values; added ports start at the variadic default.\n- Frame 0: evaluates with the authored values. There's no history, so nothing is seeded.\n- Loops: evaluates once per loop index. The output length is the longest input loop; shorter loops wrap and scalars broadcast. An empty loop produces an empty output.\n- Edge cases: inputs are finite after coercion, so the minimum is always finite.\n- Restart and dispose: restart clears the warned-once flag. Nothing to dispose.\n- Coming from Origami: Min's docs also mention color and index types. Index values arrive through the `number` variant; color isn't a variant here (compare channels with Color to RGB). Import position types as `point` and anchor as `point`.",
+      "inputs": [],
+      "outputs": [
+        {
+          "key": "output",
+          "name": "Output",
+          "type": "variant",
+          "description": "The smallest input, compared component by component for vectors."
+        }
+      ],
+      "variadic": {
+        "key": "value",
+        "name": "Value",
+        "type": "variant",
+        "default": 0,
+        "min": 2,
+        "max": 32,
+        "defaultCount": 2,
+        "startIndex": 1,
+        "direction": "inputs",
+        "description": "A value to compare."
+      },
+      "variants": [
+        "number",
+        "point",
+        "point3d",
+        "point4d",
+        "size"
+      ],
+      "alwaysEvaluate": false,
+      "pairsWellWith": [
+        "max",
+        "clamp",
+        "layerInfo",
+        "add"
+      ],
+      "commonMistakes": [
+        "The value never drops below the number you typed: that's Max. Min caps from above, so Min of a value and 300 never goes over 300. Use Max for a floor, or Clamp for both."
+      ],
+      "examples": [
+        {
+          "title": "Count up, but stop at 99",
+          "outline": "layer badge text \"Badge\" @16,120 text←capped.output\npatch clock time\npatch seconds round value←clock.time\npatch capped min value1←seconds.roundedDown value2=99"
+        }
+      ],
+      "origami": {
+        "id": "builtin.math.min",
+        "name": "Min"
+      },
+      "origamiPorts": {
+        "value1": "Input 1 (unlabeled; the base value)",
+        "value2": "Input 2 (unlabeled)",
+        "output": "Output (unlabeled)"
+      },
+      "defaultNotes": {
+        "value": "inferred: Origami's operand default is undocumented; 0 is the zero value."
+      }
+    },
+    {
+      "type": "max",
+      "name": "Max",
+      "category": "math",
+      "tier": 1,
+      "status": "supported",
+      "aliases": [
+        "maximum",
+        "largest",
+        "highest",
+        "floor limit",
+        "lower limit",
+        "math.max"
+      ],
+      "summary": "Outputs the largest of its inputs, for keeping a value from dropping below a limit or picking the taller of two sizes.",
+      "docs": "## How it works\nMax compares all of its inputs and outputs the largest one.\n\n- Use it as a floor: Max of a value and 0 follows the value but never goes below 0.\n- Vectors compare each component separately: Max of [10, 50] and [30, 20] is [30, 50].\n- Change the input count to compare up to 32 values.\n\n## Tips\n- Need a floor and a ceiling at once? Use Clamp.\n- Keep a divisor from reaching 0: Max of the divisor and 1.\n\n## Coming from Origami\nThis is Origami's **Max** patch. Its unlabeled inputs are called Value 1, Value 2, and so on.",
+      "behavior": "Stateless, apart from a per-instance warned-once flag used by the edge-case warning below.\n\nEach frame, for each loop index, per component:\n```\nout = ctx.input(\"value1\");\nfor (i = 2; i <= ctx.inputCount; i++) out = Math.max(out, ctx.input(`value${i}`));\nctx.output(\"output\", out === 0 ? 0 : out);   // normalize -0\n```\n\n- Variants: `number` is a single component; `point` and `size` have 2 components, `point3d` 3, `point4d` 4. Vector variants apply the operation to each component independently. Coercion happens at connect time (ARCHITECTURE.md §4): a number wired into a vector variant broadcasts to every component, and a boolean arrives as 1 or 0. Components compare independently, so the result can mix components from different inputs: max([10, 50], [30, 20]) is [30, 50].\n- Input count: `ctx.inputCount` is 2–32 (default 2). Removing ports drops their values; added ports start at the variadic default.\n- Frame 0: evaluates with the authored values. There's no history, so nothing is seeded.\n- Loops: evaluates once per loop index. The output length is the longest input loop; shorter loops wrap and scalars broadcast. An empty loop produces an empty output.\n- Edge cases: inputs are finite after coercion, so the maximum is always finite.\n- Restart and dispose: restart clears the warned-once flag. Nothing to dispose.\n- Coming from Origami: Max's docs also mention color and index types. Index values arrive through the `number` variant; color isn't a variant here (compare channels with Color to RGB). Import position types as `point` and anchor as `point`.",
+      "inputs": [],
+      "outputs": [
+        {
+          "key": "output",
+          "name": "Output",
+          "type": "variant",
+          "description": "The largest input, compared component by component for vectors."
+        }
+      ],
+      "variadic": {
+        "key": "value",
+        "name": "Value",
+        "type": "variant",
+        "default": 0,
+        "min": 2,
+        "max": 32,
+        "defaultCount": 2,
+        "startIndex": 1,
+        "direction": "inputs",
+        "description": "A value to compare."
+      },
+      "variants": [
+        "number",
+        "point",
+        "point3d",
+        "point4d",
+        "size"
+      ],
+      "alwaysEvaluate": false,
+      "pairsWellWith": [
+        "min",
+        "clamp",
+        "drag",
+        "subtract"
+      ],
+      "commonMistakes": [
+        "The value never goes above the number you typed: that's Min. Max sets a floor, so Max of a value and 0 never goes below 0. Use Min for a ceiling, or Clamp for both."
+      ],
+      "examples": [
+        {
+          "title": "Stop a sheet from being dragged too high",
+          "description": "Point Max keeps x at 0 or more and y at 120 or more.",
+          "outline": "layer sheet rectangle \"Sheet\" @0,400 390x600 cornerRadius=24 position←limit.output\npatch pull drag layer=@sheet\npatch limit max<point> value1←pull.position value2=[0,120]"
+        }
+      ],
+      "origami": {
+        "id": "builtin.math.max",
+        "name": "Max"
+      },
+      "origamiPorts": {
+        "value1": "Input 1 (unlabeled; the base value)",
+        "value2": "Input 2 (unlabeled)",
+        "output": "Output (unlabeled)"
+      },
+      "defaultNotes": {
+        "value": "inferred: Origami's operand default is undocumented; 0 is the zero value."
+      }
+    },
+    {
+      "type": "clamp",
+      "name": "Clamp",
+      "category": "math",
+      "tier": 1,
+      "status": "supported",
+      "aliases": [
+        "clip",
+        "limit",
+        "bound",
+        "constrain",
+        "keep in range",
+        "min max",
+        "cap"
+      ],
+      "summary": "Keeps a value between a minimum and a maximum, so scrolling, dragging, or progress can't go past its limits.",
+      "docs": "## How it works\nClamp lets a value through untouched while it's between **Min** and **Max**. Past either limit, the output holds at that limit.\n\n- **Value** is what you want to keep in range.\n- **Min** is the lowest allowed value and **Max** is the highest. If Min is greater than Max, Clamp swaps them, so the order doesn't matter.\n- Vectors clamp each component separately, which keeps a point inside a rectangle.\n\n## Tips\n- Clamp progress to 0–1 before a Transition so a bouncy scroll can't push the animation past its ends.\n- Bound a feedback loop: Add → Clamp → back into Add keeps a running total inside a range.\n- Converting ranges anyway? Remap has a Clamp to Range option.\n\n## Coming from Origami\nThis is Origami's **Clip** patch, renamed so it isn't confused with a layer's Clip Contents. Clip only handles numbers; Clamp also handles vectors. Origami doesn't document Min greater than Max; Clamp swaps them.",
+      "behavior": "Stateless.\n\nEach frame, for each loop index, per component:\n```\na = ctx.input(\"min\"); b = ctx.input(\"max\");\nlo = Math.min(a, b); hi = Math.max(a, b);          // min > max: limits swap\nout = Math.min(Math.max(ctx.input(\"value\"), lo), hi);\nctx.output(\"output\", out === 0 ? 0 : out);\n```\n\n- Variants: `number` is a single component; `point` and `size` have 2 components, `point3d` 3, `point4d` 4. Vector variants apply the operation to each component independently. Coercion happens at connect time (ARCHITECTURE.md §4): a number wired into a vector variant broadcasts to every component, and a boolean arrives as 1 or 0. Swapping also happens per component.\n- Equal limits: `min == max` outputs that number for every value (not an error).\n- Frame 0: evaluates with the authored values. There's no history, so nothing is seeded.\n- Loops: evaluates once per loop index. The output length is the longest input loop; shorter loops wrap and scalars broadcast. An empty loop produces an empty output.\n- Edge cases: inputs are finite after coercion, so the output is always finite.\n- Restart and dispose: nothing to reset or release.\n- Coming from Origami: Clip's formula is `min(max(value, min), max)`, which returns Max when Min > Max. Sonobe swaps the limits instead; imported files differ only in that case. Clip is number-only, so imported patches use `number`.",
+      "inputs": [
+        {
+          "key": "value",
+          "name": "Value",
+          "type": "variant",
+          "default": 0,
+          "description": "The value to keep in range."
+        },
+        {
+          "key": "min",
+          "name": "Min",
+          "type": "variant",
+          "default": 0,
+          "description": "The lowest value allowed through."
+        },
+        {
+          "key": "max",
+          "name": "Max",
+          "type": "variant",
+          "default": 1,
+          "description": "The highest value allowed through. If it's below Min, the two limits swap."
+        }
+      ],
+      "outputs": [
+        {
+          "key": "output",
+          "name": "Output",
+          "type": "variant",
+          "description": "Value, held between Min and Max."
+        }
+      ],
+      "variants": [
+        "number",
+        "point",
+        "point3d",
+        "point4d",
+        "size"
+      ],
+      "variantDefaults": {
+        "point": {
+          "max": [
+            1,
+            1
+          ]
+        },
+        "point3d": {
+          "max": [
+            1,
+            1,
+            1
+          ]
+        },
+        "point4d": {
+          "max": [
+            1,
+            1,
+            1,
+            1
+          ]
+        },
+        "size": {
+          "max": [
+            1,
+            1
+          ]
+        }
+      },
+      "alwaysEvaluate": false,
+      "pairsWellWith": [
+        "remap",
+        "progress",
+        "transition",
+        "scroll",
+        "drag"
+      ],
+      "commonMistakes": [
+        "The layer won't move at all: Min and Max are equal (both 0 after changing the type), so every value holds at one number. Set Max to the far limit, such as the content height.",
+        "The layer still slides past the edge: Clamp only changes its own output. Wire Clamp's Output into the layer's Position, not the original value."
+      ],
+      "examples": [
+        {
+          "title": "Keep a card on screen while dragging",
+          "description": "The card is 120 pt square on a 390 × 844 screen, so its top-left stays between [0, 0] and [270, 724].",
+          "outline": "layer card rectangle \"Card\" @16,300 120x120 cornerRadius=24 position←keep_on_screen.output\npatch move drag layer=@card\npatch keep_on_screen clamp<point> value←move.position min=[0,0] max=[270,724]"
+        }
+      ],
+      "origami": {
+        "id": "builtin.range",
+        "name": "Clip"
+      },
+      "defaultNotes": {
+        "value": "inferred: Origami's Value default is undocumented; 0 is the zero value.",
+        "min": "inferred: Origami's Min default is undocumented; 0 is the zero value.",
+        "max": "inferred: a 1.0 value sits next to every Clip record in Meta's example files (weak evidence); 1 gives a 0–1 progress range. Vector variants default to all ones."
+      }
+    },
+    {
+      "type": "remap",
+      "name": "Remap",
+      "category": "math",
+      "tier": 1,
+      "status": "supported",
+      "aliases": [
+        "map range",
+        "map value",
+        "range map",
+        "scale range",
+        "lerp",
+        "interpolate",
+        "normalize",
+        "linear map"
+      ],
+      "summary": "Converts a value from one range to another, like turning scroll distance 0–150 into a header height from 120 to 64.",
+      "docs": "## How it works\nRemap answers \"when the input is here, what should the output be?\" Set the two ends of each range and everything in between follows along.\n\n- **Value** is what you're reading, such as a scroll offset or a drag position.\n- **From Start** and **From End** are the input range. **To Start** and **To End** are the outputs at those two points.\n- Past the input range, the output keeps going beyond To Start and To End. Turn on **Clamp to Range** to hold it at the ends.\n- Either range can run backwards (From Start 200, From End 0) to flip the direction.\n- Set the type to Point, Size, or Color to map onto those: scroll 0–100 can fade a background from white to black.\n- **Curve** (advanced) eases the values in between instead of changing at a steady rate.\n\n## Tips\n- Collapsing header: Value from the scroll offset, From 0 → 150, To 120 → 64, Clamp to Range on.\n- If From Start equals From End, Remap acts like a switch: To End once Value reaches From Start, To Start below it.\n\n## Coming from Origami\nRemap does the job of a Progress patch feeding a Transition patch, in one patch.",
+      "behavior": "Stateless, apart from a per-instance warned-once flag used by the edge-case warning below.\n\nEach frame, for each loop index:\n```\nv = ctx.input(\"value\"); a = ctx.input(\"fromStart\"); b = ctx.input(\"fromEnd\");\np = a === b ? (v >= a ? 1 : 0)             // zero-width range acts as a step (CONVENTIONS.md §18.5.9)\n            : (v - a) / (b - a);           // unclamped\nif (ctx.input(\"clampToRange\")) p = Math.min(Math.max(p, 0), 1);\ne = (p >= 0 && p <= 1) ? ease(ctx.input(\"curve\"), p) : p;   // outside 0–1 the curve isn't applied\nout = toStart + e * (toEnd - toStart);     // component-wise\nctx.output(\"output\", out);\n```\n\n- Curve: `ease` is the Penner easing for the selected CURVE option (semantics.md §7.8); `linear` returns `p`. Every curve maps 0 → 0 and 1 → 1, so extrapolating with `e = p` outside 0–1 keeps the output continuous. A zero-width range gives `p` of exactly 0 or 1, so the curve doesn't change the step.\n- Variants: `value`, `fromStart`, and `fromEnd` are always numbers; `toStart`, `toEnd`, and `output` follow the variant. Vectors interpolate each component. Colors interpolate in straight RGBA (gap-fill R12) and each channel clamps to 0–1 after interpolation; no other variant clamps unless Clamp to Range is on.\n- Reversed ranges need no special case: the formula handles `fromEnd < fromStart` and `toEnd < toStart`, and Clamp to Range still holds the output between To Start and To End.\n- Frame 0: evaluates with the authored values; there's no history.\n- Loops: evaluates once per loop index. The output length is the longest input loop; shorter loops wrap and scalars broadcast. An empty loop produces an empty output.\n- Edge cases: any output component that isn't finite (for example, a huge Value over a tiny range overflowing ±1.8e308) outputs 0 for that component and warns once per restart through `ctx.services.log(\"warn\", …)`. `-0` is output as `0`.\n- Restart and dispose: restart clears the warned-once flag. Nothing to dispose.",
+      "inputs": [
+        {
+          "key": "value",
+          "name": "Value",
+          "type": "number",
+          "default": 0,
+          "description": "The number to convert, such as a scroll offset or drag distance."
+        },
+        {
+          "key": "fromStart",
+          "name": "From Start",
+          "type": "number",
+          "default": 0,
+          "description": "The input value that produces To Start."
+        },
+        {
+          "key": "fromEnd",
+          "name": "From End",
+          "type": "number",
+          "default": 1,
+          "description": "The input value that produces To End. It can be smaller than From Start."
+        },
+        {
+          "key": "toStart",
+          "name": "To Start",
+          "type": "variant",
+          "default": 0,
+          "description": "The output when Value equals From Start."
+        },
+        {
+          "key": "toEnd",
+          "name": "To End",
+          "type": "variant",
+          "default": 1,
+          "description": "The output when Value equals From End."
+        },
+        {
+          "key": "clampToRange",
+          "name": "Clamp to Range",
+          "type": "boolean",
+          "default": false,
+          "description": "When on, the output stops at To Start and To End instead of continuing past them."
+        },
+        {
+          "key": "curve",
+          "name": "Curve",
+          "type": "enum",
+          "default": "linear",
+          "enumOptions": [
+            {
+              "key": "linear",
+              "name": "Linear"
+            },
+            {
+              "key": "quadraticIn",
+              "name": "Quadratic In"
+            },
+            {
+              "key": "quadraticOut",
+              "name": "Quadratic Out"
+            },
+            {
+              "key": "quadraticInOut",
+              "name": "Quadratic In & Out"
+            },
+            {
+              "key": "cubicIn",
+              "name": "Cubic In"
+            },
+            {
+              "key": "cubicOut",
+              "name": "Cubic Out"
+            },
+            {
+              "key": "cubicInOut",
+              "name": "Cubic In & Out"
+            },
+            {
+              "key": "exponentialIn",
+              "name": "Exponential In"
+            },
+            {
+              "key": "exponentialOut",
+              "name": "Exponential Out"
+            },
+            {
+              "key": "exponentialInOut",
+              "name": "Exponential In & Out"
+            },
+            {
+              "key": "sinusoidalIn",
+              "name": "Sinusoidal In"
+            },
+            {
+              "key": "sinusoidalOut",
+              "name": "Sinusoidal Out"
+            },
+            {
+              "key": "sinusoidalInOut",
+              "name": "Sinusoidal In & Out"
+            }
+          ],
+          "description": "How values in between change: Linear changes steadily; the others ease in, out, or both.",
+          "advanced": true
+        }
+      ],
+      "outputs": [
+        {
+          "key": "output",
+          "name": "Output",
+          "type": "variant",
+          "description": "Value converted to the output range."
+        }
+      ],
+      "variants": [
+        "number",
+        "point",
+        "point3d",
+        "point4d",
+        "size",
+        "anchor",
+        "color"
+      ],
+      "variantDefaults": {
+        "point": {
+          "toStart": [
+            0,
+            0
+          ],
+          "toEnd": [
+            100,
+            100
+          ]
+        },
+        "point3d": {
+          "toStart": [
+            0,
+            0,
+            0
+          ],
+          "toEnd": [
+            100,
+            100,
+            100
+          ]
+        },
+        "point4d": {
+          "toStart": [
+            0,
+            0,
+            0,
+            0
+          ],
+          "toEnd": [
+            1,
+            1,
+            1,
+            1
+          ]
+        },
+        "size": {
+          "toStart": [
+            100,
+            100
+          ],
+          "toEnd": [
+            200,
+            200
+          ]
+        },
+        "anchor": {
+          "toStart": [
+            0,
+            0
+          ],
+          "toEnd": [
+            1,
+            1
+          ]
+        },
+        "color": {
+          "toStart": "#FFFFFFFF",
+          "toEnd": "#000000FF"
+        }
+      },
+      "alwaysEvaluate": false,
+      "pairsWellWith": [
+        "scroll",
+        "clamp",
+        "transition",
+        "progress",
+        "watch"
+      ],
+      "commonMistakes": [
+        "The header keeps shrinking after you pass From End: values outside the input range keep extrapolating. Turn on Clamp to Range.",
+        "Nothing changes as you scroll: the input range doesn't match what Value actually does (scrolling down often makes the offset negative). Look at Value with a Watch patch, then set From Start and From End to the numbers you see."
+      ],
+      "examples": [
+        {
+          "title": "Fade a title as a carousel scrolls",
+          "description": "Scrolling left makes the position's x negative; a Point wired into a number input reads its x.",
+          "outline": "layer title text \"Title\" @16,120 opacity←title_fade.output\nlayer strip group \"Card Strip\" @0,200 1170x400\npatch strip_scroll scroll layer=@strip\npatch title_fade remap value←strip_scroll.position fromStart=0 fromEnd=-150 toStart=1 toEnd=0 clampToRange=true"
+        },
+        {
+          "title": "Tint the background from a slider",
+          "outline": "layer backdrop colorFill \"Backdrop\" color←tint.output\nlayer track rectangle \"Track\" @40,400 310x40 cornerRadius=20\npatch press interaction layer=@track\npatch tint remap<color> value←press.position fromStart=40 fromEnd=350 toStart=\"#FFFFFFFF\" toEnd=\"#1C1C1EFF\" clampToRange=true"
+        }
+      ],
+      "origami": null,
+      "defaultNotes": {
+        "value": "sonobe: native patch; 0 is the zero value.",
+        "fromStart": "sonobe: CONVENTIONS.md §15 ranges default to 0 → 1.",
+        "fromEnd": "sonobe: CONVENTIONS.md §15 ranges default to 0 → 1, which never makes a zero-width range.",
+        "toStart": "sonobe: 0 → 1 for numbers; vector and color variants use variantDefaults (points 0 → 100, sizes 100 → 200, anchors 0 → 1, colors white → black) so a fresh patch visibly does something.",
+        "toEnd": "sonobe: see toStart.",
+        "clampToRange": "sonobe: off, matching Transition's unclamped extrapolation; the docs and common mistakes point to it.",
+        "curve": "sonobe: Linear so Remap matches a Progress → Transition pair until you choose an ease."
+      }
+    },
+    {
+      "type": "snap",
+      "name": "Snap",
+      "category": "math",
+      "tier": 1,
+      "status": "supported",
+      "aliases": [
+        "snap to grid",
+        "snap to points",
+        "nearest",
+        "quantize",
+        "paging",
+        "detents",
+        "notches",
+        "magnet"
+      ],
+      "summary": "Moves a value to the nearest step or point, and can use flick velocity to predict where it lands, for grids and carousels.",
+      "docs": "## How it works\nSnap works like a magnet: it moves a value to the nearest allowed spot. Use it for grids, carousel pages, and places a card should settle.\n\n- **Value** is the number or position to snap.\n- **Mode** picks the spots. **Step** uses evenly spaced values: Offset, Offset + Step, Offset + 2 × Step, and so on. **Points** uses the closest value in the **Points** loop.\n- **Velocity** (points per second) lets a flick carry the value further before it snaps, the way a flicked carousel lands on a later page. Leave it at 0 to snap to what's nearest right now.\n- **Output** is the snapped value, and **Index** says which spot won: the step number, or the position in Points (−1 if Points is empty).\n- With the type set to Point, Step snaps each axis separately (a step of 0 leaves that axis free), and Points picks the closest point in a straight line.\n\n## Tips\n- Snap only on release: use If / Else to pass the raw position while the finger is down and Snap's output after, then feed a Spring Animation.\n- **Deceleration** (advanced) matches Scroll's momentum. Normal carries a flick about half a second of travel; Fast stops sooner.\n- Keep the result in bounds with Clamp, such as between the first and last page.",
+      "behavior": "Stateless, apart from a per-instance warned-once flag used by the edge-case warning below.\n\n`points` is a whole-loop port, so the patch evaluates once per frame (not once per loop index). It reads every other input with `ctx.inputItems` and zips them itself (see Loops).\n\nFor each zipped item `i`:\n```\nv = value[i]; vel = velocity[i];\nr = deceleration[i] === \"fast\" ? 0.99 : 0.998;        // decay per millisecond, same as scroll momentum\nprojected = v + vel * r / (1000 * (1 - r));           // normal: v + 0.499·vel; fast: v + 0.099·vel\nif (mode[i] === \"step\") {\n  for each component c:\n    s = Math.abs(step[i][c]);\n    if (s === 0) { out[c] = projected[c]; n[c] = 0; }  // axis left free\n    else { n[c] = roundHalfAwayFromZero((projected[c] - offset[i][c]) / s); out[c] = offset[i][c] + n[c] * s; }\n  index = n[first component whose step isn't 0] ?? 0;\n} else {                                              // \"points\"\n  pts = ctx.inputItems(\"points\");\n  if (pts.length === 0) { out = projected; index = -1; }\n  else { k = argmin over pts of distance(projected, pts[k]); out = pts[k]; index = k; }\n}\nemit output[i] = out, index[i] = index, projected[i] = projected\n```\n\n- Projection: the distance a POP-style decay (velocity multiplied by `r` every millisecond) travels before stopping: `(vel / 1000) · r / (1 − r)`. It equals where a Scroll momentum fling at that velocity would come to rest without bounds, so snapping and scrolling agree. Velocity 0 skips projection exactly.\n- Distance: `|a − b|` for `number`; Euclidean `√Σ(aᶜ − bᶜ)²` for `point`. Ties go to the lowest index. Step-mode ties (exactly halfway) round away from Offset.\n- Variants: `value`, `velocity`, `step`, `offset`, `points`, `output`, and `projected` follow the variant. A number wired into the `point` variant broadcasts to both components.\n- Negative steps: the sign is ignored (`|step|`).\n- Frame 0: evaluates with the authored values. There's no history, so velocity comes only from the input.\n- Loops: `points` is always taken whole. `value`, `velocity`, `mode`, `step`, `offset`, and `deceleration` zip: the output length is the longest of those loops, shorter loops wrap, and scalars broadcast. Every item snaps against the whole `points` loop. Outputs are loops only when one of the zipped inputs is a loop; otherwise they're scalars. If a zipped input is an empty loop, all outputs are empty loops.\n- Retargeting: stateless, so the output jumps as soon as Value changes. Feed it into an animation for motion.\n- Edge cases: any output component that isn't finite (from an extreme velocity) outputs 0 and warns once per restart through `ctx.services.log(\"warn\", …)`. `-0` is output as `0`.\n- Muted: the default bypass: `output` and `projected` pass `value` through, and `index` outputs 0.\n- Restart and dispose: restart clears the warned-once flag. Nothing to dispose.",
+      "inputs": [
+        {
+          "key": "value",
+          "name": "Value",
+          "type": "variant",
+          "default": 0,
+          "description": "The number or position to snap."
+        },
+        {
+          "key": "velocity",
+          "name": "Velocity",
+          "type": "variant",
+          "subtype": "velocity",
+          "default": 0,
+          "description": "Flick speed in points per second, used to predict where Value lands before snapping. 0 snaps to the nearest spot now."
+        },
+        {
+          "key": "mode",
+          "name": "Mode",
+          "type": "enum",
+          "default": "step",
+          "enumOptions": [
+            {
+              "key": "step",
+              "name": "Step",
+              "description": "Snap to evenly spaced values: Offset plus whole multiples of Step."
+            },
+            {
+              "key": "points",
+              "name": "Points",
+              "description": "Snap to the closest value in the Points loop."
+            }
+          ],
+          "description": "Whether to snap to evenly spaced steps or to a list of points."
+        },
+        {
+          "key": "step",
+          "name": "Step",
+          "type": "variant",
+          "default": 100,
+          "min": 0,
+          "description": "Space between snap spots in Step mode, in points. 0 turns snapping off for that axis."
+        },
+        {
+          "key": "offset",
+          "name": "Offset",
+          "type": "variant",
+          "default": 0,
+          "description": "Where the first step sits in Step mode; spots are Offset + n × Step."
+        },
+        {
+          "key": "points",
+          "name": "Points",
+          "type": "variant",
+          "default": {
+            "loop": [
+              0,
+              100,
+              200
+            ]
+          },
+          "description": "The allowed spots in Points mode, as a loop.",
+          "wholeLoop": true
+        },
+        {
+          "key": "deceleration",
+          "name": "Deceleration",
+          "type": "enum",
+          "default": "normal",
+          "enumOptions": [
+            {
+              "key": "normal",
+              "name": "Normal",
+              "description": "Slows like a standard scroll fling (0.998 per millisecond)."
+            },
+            {
+              "key": "fast",
+              "name": "Fast",
+              "description": "Stops sooner, like a fast-decelerating scroll view (0.99 per millisecond)."
+            }
+          ],
+          "description": "How far Velocity carries the value before snapping, matching Scroll's momentum settings.",
+          "advanced": true
+        }
+      ],
+      "outputs": [
+        {
+          "key": "output",
+          "name": "Output",
+          "type": "variant",
+          "description": "The snapped value."
+        },
+        {
+          "key": "index",
+          "name": "Index",
+          "type": "index",
+          "description": "Which spot was chosen: the step number from Offset (negative below it), or the position in Points, or −1 when Points is empty."
+        },
+        {
+          "key": "projected",
+          "name": "Projected",
+          "type": "variant",
+          "description": "Where Value would land from its velocity, before snapping.",
+          "advanced": true
+        }
+      ],
+      "variants": [
+        "number",
+        "point"
+      ],
+      "variantDefaults": {
+        "point": {
+          "step": [
+            100,
+            100
+          ]
+        }
+      },
+      "alwaysEvaluate": false,
+      "pairsWellWith": [
+        "drag",
+        "velocity",
+        "springAnimation",
+        "scroll",
+        "ifElse"
+      ],
+      "commonMistakes": [
+        "The layer jumps between spots while you drag: Snap works every frame, not only on release. Pass the raw position while the finger is down (If / Else on Down) and the snapped position after.",
+        "A flick flies several pages past where you expect: Velocity is in points per second, so a per-frame difference or a scaled value projects too far. Wire the Velocity patch's output, or set Deceleration to Fast.",
+        "Points mode never snaps: the Points loop is empty, so Output passes the value through and Index is −1. Build the loop with Loop Builder."
+      ],
+      "examples": [
+        {
+          "title": "Drag a sticker on an 8-point grid",
+          "outline": "layer sticker rectangle \"Sticker\" @104,304 88x88 cornerRadius=16 position←on_grid.output\npatch move drag layer=@sticker\npatch on_grid snap<point> value←move.position step=[8,8]"
+        },
+        {
+          "title": "Show which card a carousel is on",
+          "description": "Cards are 300 pt apart. The scroll position's x goes negative as you scroll, so take its absolute value; Index is the page number from 0.",
+          "outline": "layer strip group \"Card Strip\" @0,240 1500x320\nlayer page_label text \"Page Label\" @16,600 text←page.index\npatch strip_scroll scroll layer=@strip\npatch travel absoluteValue value←strip_scroll.position\npatch page snap value←travel.output step=300"
+        }
+      ],
+      "origami": null,
+      "defaultNotes": {
+        "value": "sonobe: native patch; 0 is the zero value.",
+        "velocity": "sonobe: 0 disables projection, so a fresh patch snaps to the nearest spot.",
+        "mode": "sonobe: Step needs no loop wiring, so it works the moment it's inserted.",
+        "step": "sonobe: 100 pt (and [100, 100] for points) is visible without tuning and never a zero step.",
+        "offset": "sonobe: 0 puts spots on multiples of Step.",
+        "points": "sonobe: three spots 100 pt apart show Points mode working; the point variant falls back to the zero value until you wire a loop.",
+        "deceleration": "sonobe: Normal matches Scroll's default momentum (0.998 per ms, ARCHITECTURE.md §5.3)."
+      }
+    }
+  ]
+}

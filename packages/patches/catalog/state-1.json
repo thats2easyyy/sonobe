@@ -1,0 +1,908 @@
+{
+  "file": "state-1.json",
+  "category": "state",
+  "patches": [
+    {
+      "type": "switch",
+      "name": "Switch",
+      "category": "state",
+      "tier": 1,
+      "status": "supported",
+      "aliases": [
+        "toggle",
+        "on off",
+        "flip flop",
+        "boolean state",
+        "light switch",
+        "latch",
+        "two states"
+      ],
+      "summary": "Remembers whether something is on or off and changes when it gets a pulse.",
+      "docs": "## How it works\nA Switch works like a light switch: it stays **on** or **off** until a pulse (a signal that lasts one frame) changes it. It starts off.\n\n- **Flip** changes it to the opposite state. Use it when one control toggles, like tapping a photo to zoom in and out.\n- **Turn On** and **Turn Off** set the state directly and do nothing if the switch is already there. Use them when separate controls open and close something, like a Compose button and a Cancel button.\n- **On** is true while the switch is on. Wired into a number port, it reads as 1 or 0.\n- If pulses arrive on more than one input in the same frame, Turn Off wins, then Turn On, then Flip.\n\n## Tips\n- Connect On to an animation's Number so the change animates instead of jumping.\n- A state such as Down wired into Flip flips once each time that state turns on.\n- Need more than two states? Use Option Switch.\n\n## Coming from Origami\nThe output is named On instead of On / Off.",
+      "behavior": "State per loop index: `{ on: false }`.\n\nEach frame:\n```\nif (ctx.pulsed(\"turnOff\")) state.on = false;\nelse if (ctx.pulsed(\"turnOn\")) state.on = true;\nelse if (ctx.pulsed(\"flip\")) state.on = !state.on;\nctx.output(\"on\", state.on);\n```\n\n- Pulses: all three inputs are pulses. `ctx.pulsed` fires on an upstream pulse or on a false→true edge of a connected boolean, so a held `true` flips once. Pulses on consecutive frames each count: a pulse into Flip on two back-to-back frames turns the switch on, then off again.\n- Precedence (ARCHITECTURE.md §5.2): turnOff > turnOn > flip within one frame. Losing pulses that frame are ignored, not queued.\n- Frame 0: starts off. A pulse on frame 0 applies on frame 0, and `on` reflects it that same frame.\n- Loops: per-index state. A loop on any input evaluates once per index and outputs a loop of booleans; a scalar pulse broadcasts, so every index changes together. New indices start off; removed indices drop their state.\n- Edge cases: unconnected inputs never fire.\n- Muted: outputs false (there is no boolean input to pass through). State is kept, so the switch resumes where it was when unmuted.\n- Restart and dispose: restart resets every index to off. Nothing to release.\n- Coming from Origami: same inputs; Origami labels the output \"On / Off\". Origami doesn't document same-frame precedence; Sonobe follows the legacy Switch macro, where Turn Off dominates.",
+      "inputs": [
+        {
+          "key": "flip",
+          "name": "Flip",
+          "type": "pulse",
+          "description": "Pulse to switch to the opposite state."
+        },
+        {
+          "key": "turnOn",
+          "name": "Turn On",
+          "type": "pulse",
+          "description": "Pulse to turn the switch on. Does nothing if it's already on."
+        },
+        {
+          "key": "turnOff",
+          "name": "Turn Off",
+          "type": "pulse",
+          "description": "Pulse to turn the switch off. Does nothing if it's already off."
+        }
+      ],
+      "outputs": [
+        {
+          "key": "on",
+          "name": "On",
+          "type": "boolean",
+          "description": "True while the switch is on; reads as 1 or 0 when wired into a number."
+        }
+      ],
+      "alwaysEvaluate": false,
+      "shortcut": "S",
+      "pairsWellWith": [
+        "interaction",
+        "popAnimation",
+        "transition",
+        "pulse"
+      ],
+      "commonMistakes": [
+        "The layer springs back when you lift your finger: Down is a state that turns off on release. Wire Tap into Flip when the change should stay.",
+        "The switch never turns off: the same pulse also reaches Turn On, and Turn On beats Flip. Give each input its own pulse source.",
+        "The layer disappears while the switch is off: On reads as 0, and a Scale or Opacity of 0 hides the layer. Put a Transition after it with Start set to the resting value, such as 1."
+      ],
+      "examples": [
+        {
+          "title": "Tap to grow a card",
+          "description": "Interaction, Switch, Pop Animation, Transition: the most common chain for tap interactions.",
+          "outline": "layer card rectangle \"Card\" @16,120 358x220 scale←grow.output\npatch tap_card interaction layer=@card\npatch toggle switch flip←tap_card.tap\npatch pop popAnimation number←toggle.on\npatch grow transition<number> progress←pop.output start=1 end=1.08"
+        },
+        {
+          "title": "Open and close a menu with two buttons",
+          "description": "Separate buttons use Turn On and Turn Off, so tapping Menu twice keeps the menu open.",
+          "outline": "layer menu_button rectangle \"Menu Button\" @16,60 44x44\nlayer menu rectangle \"Menu\" @16,120 358x300 opacity←fade.output\nlayer close_button rectangle \"Close Button\" @330,60 44x44\npatch tap_menu interaction layer=@menu_button\npatch tap_close interaction layer=@close_button\npatch menu_open switch turnOn←tap_menu.tap turnOff←tap_close.tap\npatch fade popAnimation number←menu_open.on bounciness=0 speed=14"
+        }
+      ],
+      "origami": {
+        "id": "builtin.switch",
+        "name": "Switch"
+      },
+      "origamiPorts": {
+        "on": "On / Off"
+      }
+    },
+    {
+      "type": "counter",
+      "name": "Counter",
+      "category": "state",
+      "tier": 1,
+      "status": "supported",
+      "aliases": [
+        "increment",
+        "decrement",
+        "count up",
+        "tally",
+        "step counter",
+        "page number",
+        "carousel index",
+        "wrap around"
+      ],
+      "summary": "Keeps a whole-number count that pulses increase, decrease, or jump to a set number, with optional wrap-around.",
+      "docs": "## How it works\nA Counter remembers a whole number, starting at 0, and changes it when a pulse (a signal that lasts one frame) arrives.\n\n- **Increase** adds 1 and **Decrease** subtracts 1. If both fire in the same frame, they cancel out.\n- **Jump** sets the count to **Jump to Number**. It beats Increase and Decrease in the same frame.\n- **Maximum Count** makes the count wrap: with 3 it runs 0, 1, 2, then back to 0, and decreasing from 0 goes to 2. A Jump outside that range goes to 0. Leave it at 0 for no limit; the count can then go negative.\n- **Count** is the current number. Fractional inputs round down.\n\n## Tips\n- Feed Count into Option Picker to show a different title, image, or position for each step.\n- For page dots, compare Count with each dot's loop index using Equals Exactly.\n- To stop at the last step instead of wrapping, leave Maximum Count at 0 and only let Next's tap through while Count is below the last step (Less Than plus And).\n\n## Coming from Origami\nThe output is named Count.",
+      "behavior": "State per loop index: `{ count: 0 }`.\n\nHelpers: `whole(x) = Number.isFinite(x) ? Math.floor(x + 1e-6) : 0` (the epsilon keeps 2.9999999999999996 from float math at 3) and `wrap(n, m) = ((n % m) + m) % m`.\n\nEach frame:\n```\nconst max = whole(ctx.input(\"maximumCount\"));\nlet n = state.count;\nif (ctx.pulsed(\"jump\")) {\n  const target = whole(ctx.input(\"jumpToNumber\"));\n  n = max > 0 && (target < 0 || target >= max) ? 0 : target;\n} else {\n  n += (ctx.pulsed(\"increase\") ? 1 : 0) - (ctx.pulsed(\"decrease\") ? 1 : 0);\n}\nif (max > 0) n = wrap(n, max);\nstate.count = n;\nctx.output(\"count\", n);\n```\n\n- Pulses: `increase`, `decrease`, and `jump` are pulses (`ctx.pulsed`: an upstream pulse or a false→true edge of a connected boolean). Pulses on consecutive frames each count, so a pulse into Increase on 3 back-to-back frames adds 3.\n- Precedence (ARCHITECTURE.md §5.2): `jump` > (`increase` − `decrease`). When Jump fires, Increase and Decrease are ignored that frame. Increase and Decrease in the same frame cancel.\n- Wrapping (CONVENTIONS.md §18.5.2): `maximumCount ≤ 0` means unconstrained, so any integer including negatives. Otherwise the count stays within `[0, maximumCount − 1]`: increasing from the top goes to 0, decreasing from 0 goes to `maximumCount − 1`. A jump target outside that range sets 0 (the starting value), not a wrapped value.\n- Retargeting: a new `maximumCount` re-wraps the stored count on that frame even without a pulse (count 4 with a new maximum of 3 becomes 1). Raising the maximum again keeps the wrapped count. Changing `jumpToNumber` does nothing until Jump fires.\n- Frame 0: the count starts at 0. A pulse on frame 0 applies on frame 0.\n- Loops: per-index state. New indices start at 0; removed indices drop their state. A scalar pulse broadcasts, so every index steps together.\n- Edge cases: a non-finite `jumpToNumber` or `maximumCount` counts as 0. Fractional inputs round down after the epsilon (2.5 → 2, −1.5 → −2). The output is always a finite integer.\n- Restart and dispose: restart resets every index to 0. Nothing to release.\n- Coming from Origami: same input labels; Origami's output is unnamed. Origami documents wrap-around and the out-of-range jump reset but not same-frame precedence or fractional inputs. The legacy Counter macro stored an unwrapped count and wrapped only its output; Sonobe stores the wrapped count so the visible number is the state.",
+      "inputs": [
+        {
+          "key": "increase",
+          "name": "Increase",
+          "type": "pulse",
+          "description": "Pulse to add 1 to the count."
+        },
+        {
+          "key": "decrease",
+          "name": "Decrease",
+          "type": "pulse",
+          "description": "Pulse to subtract 1 from the count."
+        },
+        {
+          "key": "jump",
+          "name": "Jump",
+          "type": "pulse",
+          "description": "Pulse to set the count to Jump to Number. Beats Increase and Decrease in the same frame."
+        },
+        {
+          "key": "jumpToNumber",
+          "name": "Jump to Number",
+          "type": "number",
+          "default": 0,
+          "step": 1,
+          "description": "The whole number the count takes when Jump fires; with a Maximum Count, numbers outside 0 to Maximum Count − 1 send it to 0."
+        },
+        {
+          "key": "maximumCount",
+          "name": "Maximum Count",
+          "type": "number",
+          "default": 0,
+          "min": 0,
+          "step": 1,
+          "description": "How many values the count cycles through: 3 wraps it through 0, 1, 2. 0 means no limit."
+        }
+      ],
+      "outputs": [
+        {
+          "key": "count",
+          "name": "Count",
+          "type": "number",
+          "step": 1,
+          "description": "The current whole number, starting at 0."
+        }
+      ],
+      "alwaysEvaluate": false,
+      "pairsWellWith": [
+        "optionPicker",
+        "interaction",
+        "equalsExactly",
+        "pulseOnChange",
+        "popAnimation"
+      ],
+      "commonMistakes": [
+        "The last page never shows: counting starts at 0, so 3 pages use 0, 1, and 2. Set Maximum Count to the number of pages (3), not the last page number.",
+        "Going past the last step jumps back to the first: Maximum Count wraps around. Set it to 0 for no limit, and block Next at the end if the count should stop.",
+        "Jump sends the count to 0 instead of your number: Jump to Number is outside 0 to Maximum Count − 1. Raise Maximum Count or pick a number inside the range."
+      ],
+      "examples": [
+        {
+          "title": "Next and back buttons for a three-page carousel",
+          "description": "Transition extrapolates past 1, so page 2 slides the group to x = −780.",
+          "outline": "layer pages group \"Pages\" @0,0 1170x760 position←slide.output\nlayer back_button rectangle \"Back\" @16,780 120x44\nlayer next_button rectangle \"Next\" @254,780 120x44\npatch tap_back interaction layer=@back_button\npatch tap_next interaction layer=@next_button\npatch page counter increase←tap_next.tap decrease←tap_back.tap maximumCount=3\npatch settle popAnimation number←page.count bounciness=0 speed=16\npatch slide transition<point> progress←settle.output start=[0,0] end=[-390,0]"
+        },
+        {
+          "title": "Onboarding titles that change per step",
+          "outline": "layer title text \"Title\" @24,120 text←title_text.output\nlayer next_button rectangle \"Next\" @24,760 342x52\npatch tap_next interaction layer=@next_button\npatch step counter increase←tap_next.tap maximumCount=3\npatch title_text optionPicker<text>[3] option←step.count option0=\"Enter your name\" option1=\"Verify your email\" option2=\"You're all set\""
+        }
+      ],
+      "origami": {
+        "id": "builtin.counter",
+        "name": "Counter"
+      },
+      "origamiPorts": {
+        "count": "Output"
+      },
+      "defaultNotes": {
+        "jumpToNumber": "inferred: Origami's default is undocumented; 0 returns the counter to its starting value.",
+        "maximumCount": "inferred: Origami's default is undocumented; 0 leaves the count unconstrained, which matches its port description."
+      }
+    },
+    {
+      "type": "pulse",
+      "name": "Pulse",
+      "category": "state",
+      "tier": 1,
+      "status": "supported",
+      "aliases": [
+        "edge detector",
+        "rising edge",
+        "falling edge",
+        "turned on",
+        "turned off",
+        "state to pulse",
+        "trigger",
+        "on release"
+      ],
+      "summary": "Turns an on/off state into pulses: one the moment it turns on and another the moment it turns off.",
+      "docs": "## How it works\nA Pulse watches a state (a value that stays on or off over time) and fires a pulse (a signal that lasts one frame) each time that state changes.\n\n- **On** is the state to watch.\n- **Turned On** fires on the frame On goes from off to on.\n- **Turned Off** fires on the frame On goes from on to off.\n\nIt only reacts to changes, so nothing fires on the first frame, even if On starts on.\n\n## Tips\n- Pulse inputs, such as a Switch's Flip, already fire when a wired state turns on. Reach for Pulse when you need the moment something turns **off**, like a finger lifting or loading finishing.\n- A number wired into On counts as on while it's above 0.\n- To act at launch, use When Prototype Starts.",
+      "behavior": "State per loop index: `{ previous: false, seeded: false }`.\n\nEach frame:\n```\nconst on = ctx.input<boolean>(\"on\");\nif (state.seeded) {\n  if (on && !state.previous) ctx.pulse(\"turnedOn\");\n  if (!on && state.previous) ctx.pulse(\"turnedOff\");\n}\nstate.previous = on;\nstate.seeded = true;\n```\n\n- Pulses: both outputs use `ctx.pulse` and last exactly one frame. At most one of them fires per frame per index. A state that alternates every frame fires Turned On and Turned Off on alternating frames.\n- Input: `on` is a boolean state port, not a pulse port. Numbers coerce with `> 0`. An upstream pulse reads as `true` for one frame, so Turned On fires on that frame and Turned Off on the next. Pulses on back-to-back frames read as one longer `true`, so Turned On fires once.\n- Frame 0 (gap-fill R1): the first evaluation of each index only records the value. A state that starts on doesn't fire Turned On.\n- Loops: per-index history. A loop on On outputs loops of pulses. New indices seed on their first evaluation without firing; removed indices drop their state.\n- Restart and dispose: restart clears history, so the first frame after a restart seeds again without firing. Nothing to release.\n- Coming from Origami: Origami labels the input \"On / Off\". Origami inputs hold defaults on frame 0, so a state that starts on can fire on frame 1; Sonobe evaluates authored values on frame 0 and never fires on a first evaluation.",
+      "inputs": [
+        {
+          "key": "on",
+          "name": "On",
+          "type": "boolean",
+          "default": false,
+          "description": "The on/off state to watch, such as Down from an Interaction or the result of a comparison."
+        }
+      ],
+      "outputs": [
+        {
+          "key": "turnedOn",
+          "name": "Turned On",
+          "type": "pulse",
+          "description": "Pulses for one frame when On changes from off to on."
+        },
+        {
+          "key": "turnedOff",
+          "name": "Turned Off",
+          "type": "pulse",
+          "description": "Pulses for one frame when On changes from on to off."
+        }
+      ],
+      "alwaysEvaluate": false,
+      "shortcut": "U",
+      "pairsWellWith": [
+        "switch",
+        "interaction",
+        "wait",
+        "sampleAndHold",
+        "delay"
+      ],
+      "commonMistakes": [
+        "The action happens when the finger goes down instead of when it lifts: Turned On fires on press. Use Turned Off, or Interaction's Tap, for release.",
+        "Nothing fires when the prototype starts, even though On is already on: Pulse only reacts to changes. Use When Prototype Starts to act at launch."
+      ],
+      "examples": [
+        {
+          "title": "Show a banner when loading finishes",
+          "description": "Loading turns off when the response arrives, and Turned Off catches that moment.",
+          "outline": "layer banner rectangle \"Loaded Banner\" @16,60 358x56 opacity←show.output\npatch launch whenPrototypeStarts\npatch feed networkRequest request←launch.started url=\"https://example.com/feed.json\"\npatch load_state pulse on←feed.loading\npatch loaded switch turnOn←load_state.turnedOff\npatch show popAnimation number←loaded.on bounciness=0 speed=14"
+        },
+        {
+          "title": "Hide a hint one second after release",
+          "outline": "layer hold_button rectangle \"Hold Me\" @120,400 150x56\nlayer hint text \"Hint\" @120,470 opacity←fade.output\npatch hold interaction layer=@hold_button\npatch press pulse on←hold.down\npatch hide_timer wait start←press.turnedOff reset←press.turnedOn duration=1\npatch hint_visible switch turnOn←press.turnedOn turnOff←hide_timer.finished\npatch fade popAnimation number←hint_visible.on bounciness=0 speed=14"
+        }
+      ],
+      "origami": {
+        "id": "builtin.pulse",
+        "name": "Pulse"
+      },
+      "origamiPorts": {
+        "on": "On / Off"
+      },
+      "defaultNotes": {
+        "on": "inferred: Origami's default is undocumented; off means nothing fires until a state is wired in."
+      }
+    },
+    {
+      "type": "pulseOnChange",
+      "name": "Pulse on Change",
+      "category": "state",
+      "tier": 1,
+      "status": "supported",
+      "aliases": [
+        "on change",
+        "value changed",
+        "change detector",
+        "watch value",
+        "trigger on change",
+        "did change",
+        "changed"
+      ],
+      "summary": "Sends a pulse whenever a watched value changes, such as a new page number or a different tab.",
+      "docs": "## How it works\nPulse on Change compares **Value** with what it was on the previous frame. On every frame they differ, **Changed** sends a pulse (a signal that lasts one frame).\n\n- When the prototype starts, it only remembers the first value, so starting doesn't count as a change.\n- Setting Value to what it already is doesn't fire.\n- A value that keeps moving, like an animation's output, fires on every frame it moves.\n\nChange the patch's type to watch text, colors, points, JSON, and more.\n\n## Tips\n- Restart a timer or an animation whenever a Counter or Option Switch moves to a new step.\n- Watch the value a Switch or Counter sets, not an animation's output, to get one pulse per change.\n- Numbers compare exactly, so 0.1 + 0.2 counts as different from 0.3. Round first if tiny differences shouldn't count.",
+      "behavior": "State per loop index: `{ previous: undefined, variant: undefined, seeded: false }`.\n\nEach frame:\n```\nconst value = ctx.input(\"value\");\nconst variant = ctx.typeParam ?? \"number\"; // undefined typeParam means the first variant\nif (!state.seeded || state.variant !== variant) {\n  state.previous = value;\n  state.variant = variant;\n  state.seeded = true;\n} else if (!same(value, state.previous)) {\n  ctx.pulse(\"changed\");\n  state.previous = value;\n}\n```\n\n`same(a, b)` by variant:\n- number and index: `a === b` (exact; `0 === -0`).\n- boolean, enum, and text: strict equality. Text is case-sensitive, with no trimming or Unicode normalization.\n- color: equal when r, g, b, and a each round to the same 8-bit value (`Math.round(c * 255)`), the precision documents store colors with.\n- point, point3d, point4d, size, anchor: every component `===`.\n- json: deep structural equality. Same kind (null, boolean, number, string, array, object); arrays match element by element in order; objects have the same key set with equal values, in any key order.\n\nKeep explicit history as above; don't substitute `ctx.changed(\"value\")` unless it matches these equality and first-frame rules.\n\n- Pulses: `changed` lasts exactly one frame per `ctx.pulse`. A value that changes on consecutive frames fires on each of those frames (ARCHITECTURE.md §4).\n- Frame 0 (gap-fill R1): the first evaluation of each index seeds `previous` and never fires.\n- Loops: per-index history. A loop on Value outputs a loop of pulses, firing only at the indices that changed. When the loop grows, new indices seed without firing; when it shrinks, removed indices drop their history.\n- Retargeting: changing the patch's type (`typeParam`) re-seeds every index without firing.\n- Edge cases: an unconnected Value never changes, so it never fires. Coercion happens at the port before comparing: a number wired into a text-typed patch compares as formatted text.\n- Restart and dispose: restart clears history, so the first frame after a restart seeds again without firing. Nothing to release.\n- Coming from Origami: Origami's output is unnamed; Sonobe calls it Changed. Origami fixed a false pulse on first evaluation in v188; Sonobe never fires on a first evaluation.",
+      "inputs": [
+        {
+          "key": "value",
+          "name": "Value",
+          "type": "variant",
+          "default": 0,
+          "description": "The value to watch. Its type follows the patch's type, and any difference from the previous frame counts."
+        }
+      ],
+      "outputs": [
+        {
+          "key": "changed",
+          "name": "Changed",
+          "type": "pulse",
+          "description": "Pulses for one frame on every frame Value differs from the frame before."
+        }
+      ],
+      "variants": [
+        "number",
+        "boolean",
+        "text",
+        "color",
+        "point",
+        "point3d",
+        "point4d",
+        "size",
+        "anchor",
+        "index",
+        "enum",
+        "json"
+      ],
+      "alwaysEvaluate": false,
+      "pairsWellWith": [
+        "wait",
+        "counter",
+        "networkRequest",
+        "classicAnimation",
+        "optionSwitch"
+      ],
+      "commonMistakes": [
+        "It fires on every frame of an animation: the watched value is still moving. Watch the value that sets the target, such as a Switch or Counter, instead of the animation's output.",
+        "Tapping the tab that's already selected doesn't fire: only differences count. Use the tap pulse itself when every tap should count.",
+        "Nothing fires at launch: the first value is only remembered. Use When Prototype Starts to act at launch."
+      ],
+      "examples": [
+        {
+          "title": "Restart a story timer when the page changes",
+          "outline": "layer story rectangle \"Story\" @0,0 390x844\nlayer progress_bar rectangle \"Progress\" @16,60 size←bar_size.output\npatch tap_story interaction layer=@story\npatch page counter increase←tap_story.tap maximumCount=5\npatch page_changed pulseOnChange<number> value←page.count\npatch story_timer wait start←page_changed.changed duration=5\npatch bar_size transition<size> progress←story_timer.progress start=[0,4] end=[358,4]"
+        },
+        {
+          "title": "Reload a feed when the tab changes",
+          "outline": "layer tab_new rectangle \"New Tab\" @16,790 170x44\nlayer tab_top rectangle \"Top Tab\" @204,790 170x44\npatch tap_new interaction layer=@tab_new\npatch tap_top interaction layer=@tab_top\npatch tab optionSwitch[2] setTo0←tap_new.tap setTo1←tap_top.tap\npatch tab_changed pulseOnChange<index> value←tab.option\npatch feed_url optionPicker<text>[2] option←tab.option option0=\"https://example.com/new.json\" option1=\"https://example.com/top.json\"\npatch feed networkRequest request←tab_changed.changed url←feed_url.output"
+        }
+      ],
+      "origami": {
+        "id": "builtin.pulseonchange",
+        "name": "Pulse on Change"
+      },
+      "importAliases": [
+        "builtin.pulseOnChange"
+      ],
+      "origamiPorts": {
+        "changed": "Output"
+      },
+      "defaultNotes": {
+        "value": "inferred: Origami says Value is a number by default but not which number; 0 is the number type's zero value."
+      }
+    },
+    {
+      "type": "whenPrototypeStarts",
+      "name": "When Prototype Starts",
+      "category": "state",
+      "tier": 1,
+      "status": "supported",
+      "aliases": [
+        "on start",
+        "on launch",
+        "on load",
+        "startup",
+        "first frame",
+        "pulse on start",
+        "init",
+        "app launch"
+      ],
+      "summary": "Sends one pulse on the prototype's first frame, and again each time the prototype restarts.",
+      "docs": "## How it works\nWhen Prototype Starts has no inputs. **Started** sends a pulse (a signal that lasts one frame) on the prototype's first frame.\n\n- Restarting the viewer (⌘R), or a Restart Prototype patch, fires it again.\n- Adding this patch while the prototype runs fires it once, right away.\n- Inside a component, each instance fires when it first appears.\n\n## Tips\n- Start timed sequences here: wire Started into several Wait patches with different durations. Each duration counts from launch.\n- Fetch data at launch by wiring Started into a Network Request's Request.\n- Choose a starting option by wiring Started into one of an Option Switch's Set to inputs.\n\n## Coming from Origami\nThe output is named Started.",
+      "behavior": "State per instance (and per loop index when a replicated component contains it): `{ fired: false }`.\n\nEach frame:\n```\nif (!state.fired) {\n  state.fired = true;\n  ctx.pulse(\"started\");\n}\n```\n\n- Pulses: `started` lasts exactly one frame and fires at most once per instance between restarts.\n- Frame 0: fires on frame 0, so downstream patches see the pulse on frame 0 in topological order.\n- Insertion: a patch added while the runtime runs (`rt.updateDocument` with a new patch id, including paste and duplicate) has fresh state and fires on its first evaluated frame. `updateDocument` keeps state for a patch whose id and type are unchanged, so editing the graph never re-fires it.\n- Loops: the patch has no inputs and doesn't loop on its own. Inside a component instance replicated by a loop, state is per instance and loop index, so each index fires on the frame it first evaluates, including indices added later.\n- Muted: never fires while muted. The engine skips evaluation of muted patches, so `fired` stays false: a patch muted before it ever fired fires once on the first frame after it's unmuted.\n- Evaluation: `alwaysEvaluate` is false because the output changes only on the instance's first evaluation. A dirty-tracking engine must evaluate every new instance at least once.\n- Platform and simulation: in the deterministic runtime it fires on frame 0 after every `sim_reset` and restart, so traces repeat exactly.\n- Restart and dispose: restart (viewer ⌘R, `rt.restart()`, or `ctx.services.restart()` from Restart Prototype) resets `fired`, so it fires again on the new frame 0. Nothing to release.\n- Coming from Origami: Origami's output is unnamed. Origami also fires the patch when it's inserted (v83), which Sonobe matches. Origami's frame-0 default-value quirk doesn't apply: inputs downstream already hold authored values on frame 0.",
+      "inputs": [],
+      "outputs": [
+        {
+          "key": "started",
+          "name": "Started",
+          "type": "pulse",
+          "description": "Pulses once on the first frame after the prototype starts or restarts, and when the patch is added."
+        }
+      ],
+      "alwaysEvaluate": false,
+      "pairsWellWith": [
+        "wait",
+        "networkRequest",
+        "optionSwitch",
+        "delay",
+        "repeatingPulse"
+      ],
+      "commonMistakes": [
+        "Nothing happens after you wire it up: the pulse already went out when the prototype started. Restart the viewer (⌘R) to fire it again.",
+        "An entrance animation doesn't play at launch: this pulse turns a Switch on during frame 0, and animations start at their first target without moving. Put a short Wait (0.2 s) between this patch and the Switch."
+      ],
+      "examples": [
+        {
+          "title": "Fetch a feed at launch",
+          "outline": "patch launch whenPrototypeStarts\npatch feed networkRequest request←launch.started url=\"https://example.com/feed.json\""
+        },
+        {
+          "title": "Fade in a welcome card after launch",
+          "description": "The short Wait lets the animation start from its hidden state instead of appearing already visible.",
+          "outline": "layer welcome rectangle \"Welcome Card\" @16,300 358x200 opacity←fade_in.output\npatch launch whenPrototypeStarts\npatch intro_delay wait start←launch.started duration=0.2\npatch intro_on switch turnOn←intro_delay.finished\npatch fade_in popAnimation number←intro_on.on bounciness=0 speed=12"
+        }
+      ],
+      "origami": {
+        "id": "builtin.pulseonstart",
+        "name": "When Prototype Starts"
+      },
+      "importAliases": [
+        "builtin.pulseOnStart"
+      ],
+      "origamiPorts": {
+        "started": "Output"
+      }
+    },
+    {
+      "type": "sampleAndHold",
+      "name": "Sample and Hold",
+      "category": "state",
+      "tier": 1,
+      "status": "supported",
+      "aliases": [
+        "latch",
+        "track and hold",
+        "store value",
+        "remember value",
+        "capture value",
+        "freeze value",
+        "hold",
+        "memory"
+      ],
+      "summary": "Captures a value when you tell it to and keeps it, like remembering where a drag started.",
+      "docs": "## How it works\nSample and Hold remembers a value. While **Sample** is on, **Output** follows **Value**. When Sample turns off, Output keeps the last value until you sample again.\n\n- Wire a pulse (a signal that lasts one frame), such as a Tap, into Sample to capture one moment.\n- Wire a state, such as Down, into Sample to follow Value for as long as that state is on.\n- **Reset** clears the stored value back to empty: 0 for numbers, empty text, a transparent color. Before anything is sampled, Output is empty too.\n- If Reset and Sample happen in the same frame, the sample wins.\n\nChange the patch's type to store text, colors, points, images, and more.\n\n## Tips\n- To let a drag continue from where a layer was, sample its position when the finger goes down and add the finger's movement.\n- Pair it with Time to record when something happened.",
+      "behavior": "State per loop index: `{ variant: undefined, held: undefined }`.\n\nEach frame:\n```\nconst variant = ctx.typeParam ?? \"number\"; // undefined typeParam means the first variant\nif (state.variant !== variant) {\n  state.variant = variant;\n  state.held = zeroValue(variant);\n}\nif (ctx.pulsed(\"reset\")) state.held = zeroValue(variant);\nif (ctx.input<boolean>(\"sample\")) state.held = ctx.input(\"value\");\nctx.output(\"output\", state.held);\n```\n\n- Zero values (CONVENTIONS.md §8): number and index `0`; boolean `false`; text `\"\"`; color `#00000000`; vectors all zeros; enum the first option; json, image, video, sound, gradient, shape, layerEffect, and layer `null`.\n- Pulses: `reset` is a pulse input (`ctx.pulsed`). `sample` is a boolean state port that samples on every frame it's true: a wired pulse samples exactly one frame, and a held state tracks continuously. Numbers coerce with `> 0`.\n- Precedence: reset runs first, then sample, so a same-frame sample wins and Output shows the new value.\n- Timing: a sampled value appears on the same frame, with no one-frame delay.\n- Frame 0: `held` starts at the zero value. If `sample` is true on frame 0, frame 0's value is captured.\n- Loops: per-index storage. A loop on Value or Sample stores one value per index, such as one start position per looped card. When Sample is a scalar `true`, every index captures its own item. New indices start empty; removed indices drop their state.\n- Retargeting: changing the patch's type resets every index to the new type's zero value. Value changes never reach Output while Sample is false.\n- Restart and dispose: restart clears every index to the zero value. Nothing to release.\n- Coming from Origami: same ports. Origami doesn't document a same-frame Reset and Sample; Sonobe lets the sample win.",
+      "inputs": [
+        {
+          "key": "value",
+          "name": "Value",
+          "type": "variant",
+          "default": 0,
+          "description": "The value to capture. Its type follows the patch's type."
+        },
+        {
+          "key": "sample",
+          "name": "Sample",
+          "type": "boolean",
+          "default": false,
+          "description": "While true, Output follows Value; when false, Output keeps the last sampled value. Wire a pulse to capture a single frame."
+        },
+        {
+          "key": "reset",
+          "name": "Reset",
+          "type": "pulse",
+          "description": "Pulse to clear the stored value back to empty: 0, empty text, a transparent color, or nothing."
+        }
+      ],
+      "outputs": [
+        {
+          "key": "output",
+          "name": "Output",
+          "type": "variant",
+          "description": "The stored value: the last value captured while Sample was true."
+        }
+      ],
+      "variants": [
+        "number",
+        "boolean",
+        "text",
+        "color",
+        "point",
+        "point3d",
+        "point4d",
+        "size",
+        "anchor",
+        "index",
+        "enum",
+        "json",
+        "image",
+        "video",
+        "sound",
+        "gradient",
+        "shape",
+        "layerEffect",
+        "layer"
+      ],
+      "alwaysEvaluate": false,
+      "pairsWellWith": [
+        "interaction",
+        "pulse",
+        "time",
+        "gesture",
+        "loopAny"
+      ],
+      "commonMistakes": [
+        "Output keeps following the input instead of holding it: Sample is wired to a state such as Down, which samples on every frame it's on. Wire a pulse such as Tap, or a Pulse's Turned On, to capture a single moment.",
+        "Output is 0 until the first touch: nothing has been sampled yet. Wire When Prototype Starts into Sample to capture a starting value at launch."
+      ],
+      "examples": [
+        {
+          "title": "Record the time of the last tap",
+          "outline": "layer screen rectangle \"Screen\" @0,0 390x844\nlayer stamp text \"Last Tap\" @24,80 text←last_tap.output\npatch clock time\npatch tap_screen interaction layer=@screen\npatch last_tap sampleAndHold value←clock.time sample←tap_screen.tap"
+        },
+        {
+          "title": "Drop a marker where you tap, and clear it",
+          "description": "On the tap frame, Position still holds where the finger lifted, so the sample captures the landing point.",
+          "outline": "layer canvas rectangle \"Canvas\" @0,0 390x780\nlayer clear_button rectangle \"Clear\" @16,790 120x44\nlayer marker oval \"Marker\" 24x24 anchor=[0.5,0.5] position←landed.output\npatch touch interaction layer=@canvas\npatch tap_clear interaction layer=@clear_button\npatch landed sampleAndHold<point> value←touch.position sample←touch.tap reset←tap_clear.tap"
+        }
+      ],
+      "origami": {
+        "id": "builtin.sample",
+        "name": "Sample and Hold"
+      },
+      "defaultNotes": {
+        "value": "inferred: Origami says Value is a number by default but not which number; 0 is the number type's zero value.",
+        "sample": "inferred: Origami's default is undocumented; false captures nothing until Sample is wired."
+      }
+    },
+    {
+      "type": "optionSwitch",
+      "name": "Option Switch",
+      "category": "state",
+      "tier": 1,
+      "status": "supported",
+      "aliases": [
+        "index switch",
+        "multi state",
+        "tabs",
+        "radio buttons",
+        "segmented control",
+        "selected index",
+        "state machine",
+        "enum state"
+      ],
+      "summary": "Remembers which of several options is selected, counted from 0, and changes when an option's pulse arrives.",
+      "docs": "## How it works\nAn Option Switch is a Switch with more than two states. It remembers one option number, counted from 0, and starts at 0.\n\n- **Set to 0**, **Set to 1**, and so on switch to that option when they get a pulse (a signal that lasts one frame). A pulse for the option that's already selected changes nothing.\n- **Option** is the current option number.\n- Change the number of options to add or remove Set to inputs.\n- If several options get pulses in the same frame, the highest option number wins.\n\n## Tips\n- Feed Option into Option Picker to choose a position, color, or title for each option.\n- For two states, use Switch. To step through options in order, use Counter.\n- To track which item in a loop was tapped, use Loop Option Switch.\n\n## Coming from Origami\nFormerly called Index Switch.",
+      "behavior": "State per loop index: `{ option: 0 }`.\n\nEach frame:\n```\nconst n = Math.max(2, ctx.inputCount); // number of Set to inputs\nfor (let i = n - 1; i >= 0; i--) {\n  if (ctx.pulsed(`setTo${i}`)) { state.option = i; break; }\n}\nstate.option = Math.min(state.option, n - 1);\nctx.output(\"option\", state.option);\n```\n\n- Pulses: every `setTo<i>` input is a pulse (`ctx.pulsed`: an upstream pulse or a false→true edge of a connected boolean). Pulses on consecutive frames each count.\n- Precedence: when several fire in one frame, the highest index wins, matching the legacy multi-switch, which kept the last port in port order.\n- Frame 0: starts at option 0. A pulse on frame 0 applies on frame 0.\n- Retargeting: lowering the input count below the stored option clamps it to the last option (CONVENTIONS.md §18.5.9). Raising the count again doesn't restore the earlier option.\n- Loops: per-index state. A loop of pulses on any input gives each index its own option and outputs a loop of indices; scalar pulses broadcast to every index.\n- Restart and dispose: restart resets every index to 0. Nothing to release.\n- Coming from Origami: formerly Index Switch. The inputs keep Origami's labels, and Origami also starts with 3 options. Origami doesn't document same-frame collisions.",
+      "inputs": [],
+      "outputs": [
+        {
+          "key": "option",
+          "name": "Option",
+          "type": "index",
+          "description": "The current option, counted from 0. Starts at 0."
+        }
+      ],
+      "variadic": {
+        "key": "setTo",
+        "name": "Set to",
+        "type": "pulse",
+        "min": 2,
+        "max": 32,
+        "defaultCount": 3,
+        "startIndex": 0,
+        "direction": "inputs",
+        "description": "Pulse to switch to this option number."
+      },
+      "alwaysEvaluate": false,
+      "shortcut": "Shift+I",
+      "pairsWellWith": [
+        "optionPicker",
+        "optionSender",
+        "interaction",
+        "popAnimation",
+        "loopOptionSwitch"
+      ],
+      "commonMistakes": [
+        "Each tab shows the next tab's screen: options count from 0, so the first tab belongs in Set to 0. Move each tab's wire down by one.",
+        "Extra tabs all show the same screen: the Option Picker has fewer options than the Option Switch, so higher options stick on its last value. Give both patches the same number of options.",
+        "Tapping an item in a loop changes only that item: a loop of taps gives every item its own Option Switch. Use Loop Option Switch to track which single item was tapped."
+      ],
+      "examples": [
+        {
+          "title": "Tab bar that slides between three screens",
+          "outline": "layer screens group \"Screens\" @0,0 1170x760 position←slide.output\nlayer tab_feed rectangle \"Feed Tab\" @0,780 130x64\nlayer tab_search rectangle \"Search Tab\" @130,780 130x64\nlayer tab_profile rectangle \"Profile Tab\" @260,780 130x64\npatch tap_feed interaction layer=@tab_feed\npatch tap_search interaction layer=@tab_search\npatch tap_profile interaction layer=@tab_profile\npatch tabs optionSwitch[3] setTo0←tap_feed.tap setTo1←tap_search.tap setTo2←tap_profile.tap\npatch screen_x optionPicker<point>[3] option←tabs.option option0=[0,0] option1=[-390,0] option2=[-780,0]\npatch slide popAnimation<point> number←screen_x.output bounciness=0 speed=20"
+        },
+        {
+          "title": "Traffic light timed sequence",
+          "description": "Both Waits start at launch, so each duration counts from the start, not from the previous step.",
+          "outline": "layer light oval \"Light\" @145,300 100x100 color←light_color.output\npatch launch whenPrototypeStarts\npatch to_yellow wait start←launch.started duration=2\npatch to_red wait start←launch.started duration=3\npatch signal optionSwitch[3] setTo1←to_yellow.finished setTo2←to_red.finished\npatch light_color optionPicker<color>[3] option←signal.option option0=\"#34C759FF\" option1=\"#FFCC00FF\" option2=\"#FF3B30FF\""
+        }
+      ],
+      "origami": {
+        "id": "builtin.indexswitch",
+        "name": "Option Switch"
+      }
+    },
+    {
+      "type": "optionPicker",
+      "name": "Option Picker",
+      "category": "state",
+      "tier": 1,
+      "status": "supported",
+      "aliases": [
+        "multiplexer",
+        "mux",
+        "if statement",
+        "case statement",
+        "select value",
+        "choose value",
+        "lookup",
+        "pick one"
+      ],
+      "summary": "Outputs one of several values chosen by an option number, like a different color or title for each tab.",
+      "docs": "## How it works\nOption Picker holds a list of values and outputs one of them, like an if or case statement in code.\n\n- **Option** chooses which value to output, counted from 0.\n- **Option 0**, **Option 1**, and so on are the values. Change the number of options to add more.\n- **Output** is the chosen value. It switches on the same frame Option changes, without animating.\n- An Option past the last value picks the last one, a negative Option picks Option 0, and fractions round down.\n\nChange the patch's type to pick numbers, text, colors, points, images, and more.\n\n## Tips\n- Wire a Switch's On into Option to choose between two values: off picks Option 0, on picks Option 1.\n- Pair it with Option Switch or Counter to keep track of the selected option.\n- Put a Pop Animation of the same type after it to animate between values instead of jumping.\n\n## Coming from Origami\nFormerly called Multiplexer.",
+      "behavior": "Stateless.\n\nHelper: `toIndex(x) = Number.isFinite(x) ? Math.floor(x + 1e-6) : 0`. The epsilon keeps float results such as 2.9999999999999996 from rounding down to 2.\n\nEach frame:\n```\nconst n = Math.max(2, ctx.inputCount); // number of option values\nconst i = Math.min(Math.max(toIndex(ctx.input(\"option\")), 0), n - 1);\nctx.output(\"output\", ctx.input(`option${i}`));\n```\n\n- Ranges (CONVENTIONS.md §18.5.9): Option clamps to `[0, n − 1]`. Negative values never count from the end. A boolean wired into Option coerces to 0 or 1.\n- Timing: Output changes on the same frame Option or the selected value changes. Unselected values don't affect Output, and nothing animates.\n- Frame 0: evaluates with authored values; no special case.\n- Loops: evaluates once per loop index. Option and every option value may be loops; the output length is the longest input loop, shorter loops wrap, and scalars broadcast. A loop of indices into Option with scalar options gives a loop of picked values.\n- Edge cases: a non-finite Option picks Option 0.\n- Coming from Origami: formerly Multiplexer, with 2 options by default. Origami doesn't document out-of-range handling; Sonobe clamps.",
+      "inputs": [
+        {
+          "key": "option",
+          "name": "Option",
+          "type": "index",
+          "default": 0,
+          "min": 0,
+          "step": 1,
+          "description": "Which value to output, counted from 0. Past the last option picks the last one; negative picks Option 0."
+        }
+      ],
+      "outputs": [
+        {
+          "key": "output",
+          "name": "Output",
+          "type": "variant",
+          "description": "The value of the selected option."
+        }
+      ],
+      "variadic": {
+        "key": "option",
+        "name": "Option",
+        "type": "variant",
+        "default": 0,
+        "min": 2,
+        "max": 32,
+        "defaultCount": 2,
+        "startIndex": 0,
+        "direction": "inputs",
+        "description": "The value to output when Option is this number."
+      },
+      "variants": [
+        "number",
+        "boolean",
+        "text",
+        "color",
+        "point",
+        "point3d",
+        "point4d",
+        "size",
+        "anchor",
+        "index",
+        "enum",
+        "json",
+        "image",
+        "video",
+        "sound",
+        "gradient",
+        "shape",
+        "layerEffect",
+        "layer"
+      ],
+      "alwaysEvaluate": false,
+      "shortcut": "O",
+      "pairsWellWith": [
+        "optionSwitch",
+        "counter",
+        "popAnimation",
+        "optionEquals",
+        "switch"
+      ],
+      "commonMistakes": [
+        "The value jumps instead of animating: Option Picker switches instantly. Feed its output into a Pop Animation of the same type to animate between values.",
+        "The picker sticks on its last value: Option is past the end, and the picker clamps instead of wrapping. Add options, or set the Counter's Maximum Count to the number of options.",
+        "You can't enter colors or text as options: the patch is set to Number. Change its type to Color or Text first."
+      ],
+      "examples": [
+        {
+          "title": "Like button that turns red",
+          "outline": "layer like_button rectangle \"Like Button\" @171,400 48x48 cornerRadius=24 color←button_color.output\npatch tap_like interaction layer=@like_button\npatch liked switch flip←tap_like.tap\npatch button_color optionPicker<color>[2] option←liked.on option0=\"#8E8E93FF\" option1=\"#FF3B30FF\""
+        },
+        {
+          "title": "Title for each tab",
+          "outline": "layer title text \"Title\" @24,70 text←title_text.output\nlayer tab_home rectangle \"Home Tab\" @0,780 130x64\nlayer tab_alerts rectangle \"Alerts Tab\" @130,780 130x64\nlayer tab_profile rectangle \"Profile Tab\" @260,780 130x64\npatch tap_home interaction layer=@tab_home\npatch tap_alerts interaction layer=@tab_alerts\npatch tap_profile interaction layer=@tab_profile\npatch tabs optionSwitch[3] setTo0←tap_home.tap setTo1←tap_alerts.tap setTo2←tap_profile.tap\npatch title_text optionPicker<text>[3] option←tabs.option option0=\"Home\" option1=\"Notifications\" option2=\"Profile\""
+        }
+      ],
+      "origami": {
+        "id": "builtin.multiplexer",
+        "name": "Option Picker"
+      },
+      "defaultNotes": {
+        "option": "inferred: Origami's default is undocumented; 0 picks the first value.",
+        "option0": "inferred: applies to every option value; Origami documents no defaults, so each starts at the variant's zero value (0 for numbers)."
+      }
+    },
+    {
+      "type": "optionSender",
+      "name": "Option Sender",
+      "category": "state",
+      "tier": 2,
+      "status": "supported",
+      "aliases": [
+        "demultiplexer",
+        "demux",
+        "route value",
+        "send to one",
+        "one hot",
+        "exclusive",
+        "selected output",
+        "highlight active"
+      ],
+      "summary": "Sends a value to the one selected output and a default to all the others, like highlighting only the active tab.",
+      "docs": "## How it works\nOption Sender is the reverse of Option Picker: one value goes in, and it comes out of whichever output you choose.\n\n- **Option** chooses the output, counted from 0.\n- **Value** comes out of the chosen output.\n- **Default** comes out of every other output.\n- Change the number of options to add outputs. An Option past the last output picks the last one, a negative Option picks Option 0, and fractions round down.\n\nChange the patch's type to send booleans, colors, numbers, text, and more.\n\n## Tips\n- Set the type to Boolean, with Value on and Default off, and wire the outputs into each screen's Enabled to show only the selected screen.\n- Use Color with a bright Value and a gray Default to highlight the active tab.\n- Feed each output into its own Pop Animation to animate the change.\n\n## Coming from Origami\nFormerly called Demultiplexer. New patches start with Value 1 and Default 0 so the selected output stands out.",
+      "behavior": "Stateless.\n\nHelper: `toIndex(x) = Number.isFinite(x) ? Math.floor(x + 1e-6) : 0`. The epsilon keeps float results such as 2.9999999999999996 from rounding down to 2.\n\nEach frame:\n```\nconst n = Math.max(2, ctx.inputCount); // number of outputs\nconst selected = Math.min(Math.max(toIndex(ctx.input(\"option\")), 0), n - 1);\nconst value = ctx.input(\"value\");\nconst fallback = ctx.input(\"default\");\nfor (let i = 0; i < n; i++) ctx.output(`option${i}`, i === selected ? value : fallback);\n```\n\n- Ports: `ctx.inputCount` is the variadic count, which counts outputs on this patch (`direction: \"outputs\"`).\n- Ranges (CONVENTIONS.md §18.5.9): Option clamps to `[0, n − 1]`, so exactly one output always carries Value. Negative values never count from the end. A boolean wired into Option coerces to 0 or 1.\n- Timing: every output updates on the same frame any input changes; nothing animates.\n- Frame 0: evaluates with authored values; no special case.\n- Loops: evaluates once per loop index. Option, Value, and Default may each be loops (longest wins, shorter loops wrap, scalars broadcast), and every output is a loop of that length.\n- Edge cases: a non-finite Option selects output 0. When Value equals Default, every output is the same.\n- Coming from Origami: formerly Demultiplexer, with 2 outputs by default. Origami's doc formula leaves out-of-range handling open; Sonobe clamps. Sonobe defaults Value to 1 (true for booleans, 1 for indices) and Default to 0.",
+      "inputs": [
+        {
+          "key": "option",
+          "name": "Option",
+          "type": "index",
+          "default": 0,
+          "min": 0,
+          "step": 1,
+          "description": "Which output gets Value, counted from 0. Past the last output picks the last one; negative picks Option 0."
+        },
+        {
+          "key": "value",
+          "name": "Value",
+          "type": "variant",
+          "default": 1,
+          "description": "What the selected output sends."
+        },
+        {
+          "key": "default",
+          "name": "Default",
+          "type": "variant",
+          "default": 0,
+          "description": "What every other output sends."
+        }
+      ],
+      "outputs": [],
+      "variadic": {
+        "key": "option",
+        "name": "Option",
+        "type": "variant",
+        "min": 2,
+        "max": 32,
+        "defaultCount": 2,
+        "startIndex": 0,
+        "direction": "outputs",
+        "description": "Sends Value when Option is this number, and Default otherwise."
+      },
+      "variants": [
+        "number",
+        "boolean",
+        "text",
+        "color",
+        "point",
+        "point3d",
+        "point4d",
+        "size",
+        "anchor",
+        "index",
+        "enum",
+        "json",
+        "image",
+        "video",
+        "sound",
+        "gradient",
+        "shape",
+        "layerEffect",
+        "layer"
+      ],
+      "variantDefaults": {
+        "boolean": {
+          "value": true,
+          "default": false
+        },
+        "index": {
+          "value": 1,
+          "default": 0
+        }
+      },
+      "alwaysEvaluate": false,
+      "pairsWellWith": [
+        "optionSwitch",
+        "optionPicker",
+        "popAnimation",
+        "loopOptionSwitch"
+      ],
+      "commonMistakes": [
+        "Every output looks the same: Value and Default are equal, which is where the Text and Color types start. Set Value to the selected look and Default to the unselected one.",
+        "A tap reaches every item instead of the selected one: Option Sender sends values, not pulses. Send a boolean, and combine it with the tap using And."
+      ],
+      "examples": [
+        {
+          "title": "Show only the selected screen",
+          "outline": "layer feed_screen group \"Feed\" @0,0 390x760 enabled←visible.option0\nlayer search_screen group \"Search\" @0,0 390x760 enabled←visible.option1\nlayer profile_screen group \"Profile\" @0,0 390x760 enabled←visible.option2\nlayer tab_feed rectangle \"Feed Tab\" @0,780 130x64\nlayer tab_search rectangle \"Search Tab\" @130,780 130x64\nlayer tab_profile rectangle \"Profile Tab\" @260,780 130x64\npatch tap_feed interaction layer=@tab_feed\npatch tap_search interaction layer=@tab_search\npatch tap_profile interaction layer=@tab_profile\npatch tabs optionSwitch[3] setTo0←tap_feed.tap setTo1←tap_search.tap setTo2←tap_profile.tap\npatch visible optionSender<boolean>[3] option←tabs.option value=true default=false"
+        },
+        {
+          "title": "Highlight the active range label",
+          "outline": "layer label_day text \"Day\" @40,800 textColor←label_colors.option0\nlayer label_week text \"Week\" @170,800 textColor←label_colors.option1\nlayer label_month text \"Month\" @300,800 textColor←label_colors.option2\npatch tap_day interaction layer=@label_day\npatch tap_week interaction layer=@label_week\npatch tap_month interaction layer=@label_month\npatch range optionSwitch[3] setTo0←tap_day.tap setTo1←tap_week.tap setTo2←tap_month.tap\npatch label_colors optionSender<color>[3] option←range.option value=\"#0A84FFFF\" default=\"#8E8E93FF\""
+        }
+      ],
+      "origami": {
+        "id": "builtin.demultiplexer",
+        "name": "Option Sender"
+      },
+      "defaultNotes": {
+        "option": "inferred: Origami's default is undocumented; 0 selects the first output.",
+        "value": "sonobe: 1 against a Default of 0 makes the selected output visible the moment you wire it.",
+        "default": "sonobe: 0 (false for booleans) is the natural 'not selected' value."
+      }
+    },
+    {
+      "type": "optionEquals",
+      "name": "Option Equals",
+      "category": "state",
+      "tier": 2,
+      "status": "supported",
+      "aliases": [
+        "match",
+        "index of",
+        "find option",
+        "which option",
+        "equals any",
+        "one of",
+        "lookup index",
+        "switch case"
+      ],
+      "summary": "Finds which option a value matches and outputs its number, or −1 when nothing matches.",
+      "docs": "## How it works\nOption Equals compares **Value** with each option, starting from Option 0.\n\n- **Option** is the number of the first option that equals Value, counted from 0. It's −1 when nothing matches.\n- **Equals** is true when any option matches.\n- Change the number of options to add more, and change the patch's type to compare text, colors, points, JSON, and more.\n\nText must match exactly, including capital letters and spaces. Colors match when they look identical. Numbers must be exactly equal, so compare whole numbers or round first.\n\n## Tips\n- Turn text from data, such as a weather condition, into an option number, then feed Option into Option Picker to choose an icon.\n- Wire Equals into a layer's Enabled to show something only for certain values.\n\n## Coming from Origami\nFiles that use the older Option Equals import with the current behavior: Option is −1 when nothing matches.",
+      "behavior": "Stateless.\n\nEach frame:\n```\nconst n = Math.max(2, ctx.inputCount); // number of options\nconst value = ctx.input(\"value\");\nlet match = -1;\nfor (let i = 0; i < n; i++) {\n  if (same(value, ctx.input(`option${i}`))) { match = i; break; }\n}\nctx.output(\"option\", match);\nctx.output(\"equals\", match >= 0);\n```\n\n`same(a, b)` by variant:\n- number and index: `a === b` (exact; `0 === -0`).\n- boolean, enum, and text: strict equality. Text is case-sensitive, with no trimming or Unicode normalization.\n- color: equal when r, g, b, and a each round to the same 8-bit value (`Math.round(c * 255)`), the precision documents store colors with.\n- point, point3d, point4d, size, anchor: every component `===`.\n- json: deep structural equality. Same kind (null, boolean, number, string, array, object); arrays match element by element in order; objects have the same key set with equal values, in any key order.\n\n- Matching: when several options equal Value, the lowest-numbered one wins.\n- Frame 0: evaluates with authored values; no special case.\n- Loops: evaluates once per loop index. Value and every option may be loops (longest wins, shorter loops wrap, scalars broadcast); both outputs are loops of that length.\n- Edge cases: empty text matches empty text, and JSON `null` matches `null`. Coercion happens at the port before comparing (ARCHITECTURE.md §4), so a number wired into a text-typed patch compares as formatted text. `option` is an index output that may be −1; downstream index inputs, such as Option Picker's Option, clamp it.\n- Muted: outputs Option −1 and Equals false, as if nothing matched.\n- Coming from Origami: this is the current Option Equals (v205 and later), where no match gives −1. The legacy patch (`builtin.optionequals`) imports as this type with these semantics; legacy files that relied on a no-match value of 0 need a check on Equals.",
+      "inputs": [
+        {
+          "key": "value",
+          "name": "Value",
+          "type": "variant",
+          "default": 0,
+          "description": "The value to look for among the options."
+        }
+      ],
+      "outputs": [
+        {
+          "key": "option",
+          "name": "Option",
+          "type": "index",
+          "description": "The number of the first option equal to Value, counted from 0, or −1 when none match."
+        },
+        {
+          "key": "equals",
+          "name": "Equals",
+          "type": "boolean",
+          "description": "True when Value matches any option."
+        }
+      ],
+      "variadic": {
+        "key": "option",
+        "name": "Option",
+        "type": "variant",
+        "default": 0,
+        "min": 2,
+        "max": 32,
+        "defaultCount": 3,
+        "startIndex": 0,
+        "direction": "inputs",
+        "description": "A value to compare with Value; the first one that matches sets Option."
+      },
+      "variants": [
+        "number",
+        "boolean",
+        "text",
+        "color",
+        "point",
+        "point3d",
+        "point4d",
+        "size",
+        "anchor",
+        "index",
+        "enum",
+        "json"
+      ],
+      "alwaysEvaluate": false,
+      "pairsWellWith": [
+        "optionPicker",
+        "equalsExactly",
+        "loop",
+        "optionSwitch",
+        "ifElse"
+      ],
+      "commonMistakes": [
+        "Unmatched values show the first option's result: Option is −1 when nothing matches, and Option Picker clamps −1 to Option 0. Use Equals to hide the result, or put a fallback in the picker's Option 0 and add 1 to Option.",
+        "Text never matches: comparisons are exact, so \"Rain\" doesn't equal \"rain\" or \"Rain \". Make the options match the data exactly, including capitals and spaces.",
+        "A number from an animation or math never matches: numbers compare exactly, and 0.1 + 0.2 isn't exactly 0.3. Round the value first."
+      ],
+      "examples": [
+        {
+          "title": "Mark weekend days in a week strip",
+          "description": "The loop replicates the label seven times inside the row; indices 5 and 6 turn red.",
+          "outline": "layer week group \"Week\" @16,120 358x44 layout=row\n  layer day_label text \"Day\" textColor←day_color.output\npatch days loop count=7\npatch weekend optionEquals<index>[2] value←days.index option0=5 option1=6\npatch day_color optionPicker<color>[2] option←weekend.equals option0=\"#1C1C1EFF\" option1=\"#FF3B30FF\""
+        },
+        {
+          "title": "Show a filter button only on two tabs",
+          "outline": "layer filter_button rectangle \"Filter\" @330,60 44x44 enabled←has_filter.equals\nlayer tab_home rectangle \"Home Tab\" @0,780 98x64\nlayer tab_inbox rectangle \"Inbox Tab\" @98,780 98x64\nlayer tab_search rectangle \"Search Tab\" @196,780 98x64\nlayer tab_profile rectangle \"Profile Tab\" @294,780 98x64\npatch tap_home interaction layer=@tab_home\npatch tap_inbox interaction layer=@tab_inbox\npatch tap_search interaction layer=@tab_search\npatch tap_profile interaction layer=@tab_profile\npatch tabs optionSwitch[4] setTo0←tap_home.tap setTo1←tap_inbox.tap setTo2←tap_search.tap setTo3←tap_profile.tap\npatch has_filter optionEquals<index>[2] value←tabs.option option0=1 option1=3"
+        }
+      ],
+      "origami": {
+        "id": "builtin.optionequals",
+        "name": "Option Equals"
+      },
+      "importAliases": [
+        "builtin.optionEquals2"
+      ],
+      "defaultNotes": {
+        "value": "inferred: Origami's default is undocumented; 0 is the number type's zero value.",
+        "option0": "inferred: applies to every option; Origami documents no defaults, so each starts at the variant's zero value (0 for numbers)."
+      }
+    }
+  ]
+}

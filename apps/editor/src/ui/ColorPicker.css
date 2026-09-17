@@ -1,0 +1,284 @@
+/* Color field */
+.sb-colorfield {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  height: var(--control-h-md);
+  border-radius: var(--radius-md);
+  background: var(--bg-field);
+  box-shadow: inset 0 0 0 1px transparent;
+  transition:
+    background-color var(--duration-fast) var(--ease-standard),
+    box-shadow var(--duration-fast) var(--ease-standard);
+}
+
+.sb-colorfield[data-size="sm"] {
+  height: var(--control-h-sm);
+  border-radius: var(--radius-sm);
+}
+
+@media (hover: hover) {
+  .sb-colorfield:not([data-disabled]):not([data-linked]):hover {
+    background: var(--bg-field-hover);
+  }
+}
+
+.sb-colorfield:focus-within,
+.sb-colorfield[data-open] {
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
+
+.sb-colorfield[data-linked] {
+  background: var(--accent-soft);
+}
+
+.sb-colorfield__swatch {
+  position: relative;
+  flex: none;
+  width: 16px;
+  height: 16px;
+  margin-left: 5px;
+  padding: 0;
+  overflow: hidden;
+  border: 0;
+  border-radius: var(--radius-xs);
+  background-size: 6px 6px;
+  box-shadow: inset 0 0 0 1px var(--border-default);
+}
+
+.sb-colorfield[data-size="sm"] .sb-colorfield__swatch {
+  width: 14px;
+  height: 14px;
+  margin-left: 4px;
+}
+
+.sb-colorfield__fill {
+  position: absolute;
+  inset: 0;
+  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.12);
+  border-radius: inherit;
+}
+
+.sb-colorfield__hex {
+  flex: 1 1 auto;
+  width: 100%;
+  min-width: 0;
+  height: 100%;
+  padding: 0 var(--space-3) 0 var(--space-4);
+  border: 0;
+  outline: none;
+  background: transparent;
+  color: var(--text-primary);
+  font-family: var(--font-mono);
+  font-size: var(--font-size-xs);
+  text-transform: uppercase;
+}
+
+.sb-colorfield__hex::placeholder {
+  color: var(--text-tertiary);
+  font-family: var(--font-sans);
+  text-transform: none;
+}
+
+.sb-colorfield[data-linked] .sb-colorfield__hex {
+  color: var(--text-accent);
+}
+
+.sb-colorfield__alpha.sb-scrub {
+  flex: 0 0 56px;
+  border-radius: 0 var(--radius-md) var(--radius-md) 0;
+  background: transparent;
+  box-shadow: inset 1px 0 0 var(--border-subtle);
+}
+
+.sb-colorfield__alpha.sb-scrub:hover,
+.sb-colorfield__alpha.sb-scrub:focus-within {
+  background: transparent;
+  box-shadow: inset 1px 0 0 var(--border-subtle);
+}
+
+.sb-colorfield__alpha .sb-scrub__link {
+  display: none;
+}
+
+.sb-colorfield__link {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  margin-right: 3px;
+  color: var(--text-accent);
+}
+
+/* Picker */
+.sb-colorpicker-popover {
+  width: 248px;
+}
+
+.sb-colorpicker {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+  padding: var(--space-5);
+}
+
+.sb-colorpicker__pad {
+  position: relative;
+  height: 160px;
+  border-radius: var(--radius-md);
+  background:
+    linear-gradient(to top, #000, transparent),
+    linear-gradient(to right, #fff, transparent),
+    var(--sb-pad-hue);
+  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.1);
+  cursor: crosshair;
+  touch-action: none;
+}
+
+.sb-colorpicker__pad:focus-visible {
+  outline-offset: 2px;
+}
+
+.sb-colorpicker__pad-thumb {
+  position: absolute;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  box-shadow:
+    0 0 0 2px #fff,
+    0 0 0 3px rgba(0, 0, 0, 0.25),
+    0 2px 4px rgba(0, 0, 0, 0.3);
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+}
+
+.sb-colorpicker__controls {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+}
+
+.sb-colorpicker__sliders {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: var(--space-4);
+  min-width: 0;
+}
+
+.sb-colorpicker__slider {
+  position: relative;
+  height: 12px;
+  border-radius: var(--radius-full);
+  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.12);
+  touch-action: none;
+}
+
+.sb-colorpicker__slider:focus-visible {
+  outline-offset: 2px;
+}
+
+.sb-colorpicker__hue {
+  background: linear-gradient(to right, #f00 0%, #ff0 16.66%, #0f0 33.33%, #0ff 50%, #00f 66.66%, #f0f 83.33%, #f00 100%);
+}
+
+.sb-colorpicker__alpha {
+  background-size: 8px 8px;
+}
+
+.sb-colorpicker__slider-fill {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+}
+
+.sb-colorpicker__alpha .sb-colorpicker__slider-fill {
+  background: linear-gradient(to right, transparent, var(--sb-alpha-color));
+  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.12);
+}
+
+.sb-colorpicker__slider-thumb {
+  position: absolute;
+  top: 50%;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  box-shadow:
+    0 0 0 2px #fff,
+    0 0 0 3px rgba(0, 0, 0, 0.2),
+    0 1px 3px rgba(0, 0, 0, 0.3);
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+}
+
+.sb-colorpicker__fields {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.sb-colorpicker__fields .sb-segmented {
+  align-self: flex-start;
+}
+
+.sb-colorpicker__row {
+  display: grid;
+  grid-template-columns: 1fr 64px;
+  gap: var(--space-2);
+}
+
+.sb-colorpicker__row[data-mode="rgb"],
+.sb-colorpicker__row[data-mode="hsb"] {
+  grid-template-columns: repeat(3, minmax(0, 1fr)) 56px;
+}
+
+.sb-colorpicker__hash {
+  font-family: var(--font-mono);
+  font-size: var(--font-size-xs);
+}
+
+.sb-colorpicker__hex .sb-textfield__input {
+  text-transform: uppercase;
+}
+
+.sb-colorpicker__swatches {
+  display: grid;
+  grid-template-columns: repeat(8, minmax(0, 1fr));
+  gap: var(--space-2);
+  padding-top: var(--space-4);
+  border-top: 1px solid var(--border-subtle);
+}
+
+.sb-colorpicker__swatch {
+  position: relative;
+  aspect-ratio: 1;
+  padding: 0;
+  overflow: hidden;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background-size: 6px 6px;
+}
+
+.sb-colorpicker__swatch span {
+  position: absolute;
+  inset: 0;
+  box-shadow: inset 0 0 0 1px rgba(128, 128, 128, 0.25);
+  border-radius: inherit;
+}
+
+@media (hover: hover) {
+  .sb-colorpicker__swatch:hover {
+    transform: scale(1.08);
+  }
+}
+
+.sb-colorpicker__swatch {
+  transition: transform var(--duration-fast) var(--ease-out);
+}
+
+.sb-colorpicker__swatch[data-selected] {
+  box-shadow:
+    0 0 0 2px var(--bg-elevated),
+    0 0 0 3px var(--accent);
+}

@@ -1,0 +1,204 @@
+.sb-select {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-3);
+  min-width: 0;
+  max-width: 100%;
+  height: var(--control-h-md);
+  padding: 0 var(--space-3) 0 var(--space-4);
+  border: 0;
+  border-radius: var(--radius-md);
+  background: var(--bg-field);
+  box-shadow: inset 0 0 0 1px transparent;
+  color: var(--text-primary);
+  font-size: var(--font-size-sm);
+  text-align: left;
+  transition:
+    background-color var(--duration-fast) var(--ease-standard),
+    box-shadow var(--duration-fast) var(--ease-standard);
+}
+
+.sb-select[data-size="sm"] {
+  height: var(--control-h-sm);
+  padding: 0 var(--space-2) 0 var(--space-3);
+  border-radius: var(--radius-sm);
+  font-size: var(--font-size-xs);
+}
+
+.sb-select[data-variant="ghost"] {
+  background: transparent;
+}
+
+@media (hover: hover) {
+  .sb-select:hover:not(:disabled) {
+    background: var(--bg-field-hover);
+  }
+  .sb-select[data-variant="ghost"]:hover:not(:disabled) {
+    background: var(--bg-hover);
+  }
+}
+
+.sb-select[data-open] {
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
+
+.sb-select[data-variant="ghost"][data-open] {
+  background: var(--bg-pressed);
+  box-shadow: none;
+}
+
+.sb-select:disabled {
+  color: var(--text-disabled);
+}
+
+.sb-select__icon {
+  display: inline-flex;
+  flex: none;
+  color: var(--text-secondary);
+}
+
+.sb-select__value {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sb-select__value[data-placeholder],
+.sb-select__value[data-mixed] {
+  color: var(--text-tertiary);
+}
+
+.sb-select__chevron {
+  flex: none;
+  color: var(--text-tertiary);
+  transition: transform var(--duration-fast) var(--ease-out);
+}
+
+.sb-select[data-open] .sb-select__chevron {
+  transform: rotate(180deg);
+}
+
+/* Menu */
+.sb-select-popover {
+  min-width: 180px;
+}
+
+.sb-selectmenu {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.sb-selectmenu__search {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  flex: none;
+  height: 32px;
+  padding: 0 var(--space-5);
+  border-bottom: 1px solid var(--border-subtle);
+  color: var(--text-tertiary);
+}
+
+.sb-selectmenu__search input {
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  border: 0;
+  outline: none;
+  background: transparent;
+  color: var(--text-primary);
+  font-size: var(--font-size-sm);
+}
+
+.sb-selectmenu__search input::placeholder {
+  color: var(--text-tertiary);
+}
+
+.sb-selectmenu__list {
+  flex: 1 1 auto;
+  min-height: 0;
+  max-height: 320px;
+  padding: var(--space-2);
+  outline: none;
+}
+
+.sb-selectmenu__group {
+  padding: var(--space-4) var(--space-4) var(--space-2);
+  color: var(--text-tertiary);
+  font-size: var(--font-size-2xs);
+  font-weight: var(--font-weight-semibold);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.sb-selectmenu__option {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  min-height: 26px;
+  padding: 3px var(--space-4) 3px var(--space-2);
+  border-radius: var(--radius-sm);
+  color: var(--text-primary);
+  font-size: var(--font-size-sm);
+  cursor: default;
+}
+
+.sb-selectmenu__option[data-active] {
+  background: var(--bg-selected-muted);
+}
+
+.sb-selectmenu__option[data-disabled] {
+  color: var(--text-disabled);
+}
+
+.sb-selectmenu__check {
+  display: inline-flex;
+  flex: none;
+  justify-content: center;
+  width: 14px;
+  color: var(--text-accent);
+}
+
+.sb-selectmenu__icon {
+  display: inline-flex;
+  flex: none;
+  color: var(--text-secondary);
+}
+
+.sb-selectmenu__text {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.sb-selectmenu__label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sb-selectmenu__description {
+  overflow: hidden;
+  color: var(--text-tertiary);
+  font-size: var(--font-size-xs);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sb-selectmenu__trailing {
+  flex: none;
+  color: var(--text-tertiary);
+  font-size: var(--font-size-xs);
+  font-variant-numeric: tabular-nums;
+}
+
+.sb-selectmenu__empty {
+  padding: var(--space-6) var(--space-5);
+  color: var(--text-tertiary);
+  text-align: center;
+}
