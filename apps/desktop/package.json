@@ -28,5 +28,16 @@
     "@types/ws": "^8.5.0",
     "electron": "^44.4.1",
     "electron-builder": "^26.15.3"
-  }
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/thats2easyyy/sonobe.git"
+  },
+  "homepage": "https://github.com/thats2easyyy/sonobe",
+  "bugs": {
+    "url": "https://github.com/thats2easyyy/sonobe/issues"
+  },
+  "description": "Sonobe desktop app: open-source, AI-native interaction prototyping.",
+  "author": "Sonobe contributors",
+  "license": "MIT"
 }
