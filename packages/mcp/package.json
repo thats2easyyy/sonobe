@@ -10,6 +10,7 @@
     "@modelcontextprotocol/node": "^2.0.0",
     "@modelcontextprotocol/sdk": "^1.30.0",
     "@modelcontextprotocol/server": "^2.0.0",
+    "@resvg/resvg-js": "^2.6.2",
     "@sonobe/core": "*",
     "@sonobe/engine": "*",
     "@sonobe/patches": "*",
