@@ -1,0 +1,201 @@
+/* Rendered Markdown (guides, patch docs). Reading-first: generous line height, quiet chrome. */
+
+.sb-md {
+  color: var(--text-primary);
+  font-size: var(--font-size-md);
+  line-height: 1.6;
+  overflow-wrap: break-word;
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+.sb-md > :first-child {
+  margin-top: 0;
+}
+
+.sb-md__h {
+  margin: var(--space-8) 0 var(--space-4);
+  color: var(--text-primary);
+  font-weight: var(--font-weight-semibold);
+  line-height: var(--line-height-tight);
+  scroll-margin-top: var(--space-6);
+}
+
+.sb-md__h[data-level="1"] {
+  margin-top: 0;
+  font-size: var(--font-size-xl);
+  letter-spacing: -0.015em;
+}
+
+.sb-md__h[data-level="2"] {
+  font-size: var(--font-size-lg);
+  letter-spacing: -0.01em;
+}
+
+.sb-md__h[data-level="3"] {
+  margin-top: var(--space-7);
+  font-size: var(--font-size-md);
+}
+
+.sb-md__h[data-level="4"],
+.sb-md__h[data-level="5"],
+.sb-md__h[data-level="6"] {
+  margin-top: var(--space-6);
+  color: var(--text-secondary);
+  font-size: var(--font-size-sm);
+}
+
+.sb-md__p {
+  margin: 0 0 var(--space-5);
+  text-wrap: pretty;
+}
+
+.sb-md__list {
+  margin: 0 0 var(--space-5);
+  padding-left: 20px;
+}
+
+.sb-md__list .sb-md__list {
+  margin-top: var(--space-2);
+  margin-bottom: var(--space-2);
+}
+
+.sb-md__li {
+  margin: 0 0 var(--space-2);
+  padding-left: 2px;
+}
+
+.sb-md__li::marker {
+  color: var(--text-tertiary);
+}
+
+.sb-md__li > .sb-md__p:last-child {
+  margin-bottom: 0;
+}
+
+.sb-md__tight {
+  display: inline;
+}
+
+.sb-md__tight + .sb-md__list,
+.sb-md__tight + .sb-md__code {
+  margin-top: var(--space-2);
+}
+
+.sb-md__code-inline {
+  padding: 1px 4px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-field);
+  box-shadow: inset 0 0 0 1px var(--border-subtle);
+  color: var(--text-primary);
+  font-family: var(--font-mono);
+  font-size: 0.88em;
+  white-space: break-spaces;
+}
+
+.sb-md__code {
+  position: relative;
+  margin: 0 0 var(--space-5);
+}
+
+.sb-md__pre {
+  margin: 0;
+  padding: var(--space-5) var(--space-6);
+  overflow: auto;
+  border-radius: var(--radius-lg);
+  background: var(--bg-sunken);
+  box-shadow: inset 0 0 0 1px var(--border-subtle);
+  color: var(--text-primary);
+  font-family: var(--font-mono);
+  font-size: var(--font-size-xs);
+  line-height: 1.5;
+  tab-size: 2;
+  white-space: pre;
+}
+
+.sb-md__copy {
+  position: absolute;
+  top: var(--space-3);
+  right: var(--space-3);
+  opacity: 0;
+  transition: opacity var(--duration-fast) var(--ease-standard);
+}
+
+.sb-md__code:hover .sb-md__copy,
+.sb-md__copy:focus-visible {
+  opacity: 1;
+}
+
+@media (hover: none) {
+  .sb-md__copy {
+    opacity: 1;
+  }
+}
+
+.sb-md__table {
+  margin: 0 0 var(--space-5);
+  overflow-x: auto;
+  border-radius: var(--radius-lg);
+  box-shadow: inset 0 0 0 1px var(--border-subtle);
+}
+
+.sb-md__table table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--font-size-sm);
+  line-height: 1.45;
+}
+
+.sb-md__table th,
+.sb-md__table td {
+  padding: var(--space-3) var(--space-4);
+  border-bottom: 1px solid var(--border-subtle);
+  text-align: left;
+  vertical-align: top;
+}
+
+.sb-md__table th {
+  background: var(--bg-sunken);
+  color: var(--text-secondary);
+  font-weight: var(--font-weight-semibold);
+  white-space: nowrap;
+}
+
+.sb-md__table tr:last-child td {
+  border-bottom: 0;
+}
+
+.sb-md__quote {
+  margin: 0 0 var(--space-5);
+  padding: var(--space-1) 0 var(--space-1) var(--space-5);
+  border-left: 2px solid var(--border-strong);
+  color: var(--text-secondary);
+}
+
+.sb-md__quote > :last-child {
+  margin-bottom: 0;
+}
+
+.sb-md__hr {
+  margin: var(--space-7) 0;
+  border: 0;
+  border-top: 1px solid var(--border-subtle);
+}
+
+.sb-md__link {
+  color: var(--text-accent);
+  text-decoration: underline;
+  text-decoration-color: color-mix(in srgb, var(--text-accent) 35%, transparent);
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+
+@media (hover: hover) {
+  .sb-md__link:hover {
+    text-decoration-color: currentColor;
+  }
+}
+
+.sb-md strong {
+  font-weight: var(--font-weight-semibold);
+}

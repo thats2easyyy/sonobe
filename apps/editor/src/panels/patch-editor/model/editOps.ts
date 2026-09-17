@@ -1,0 +1,325 @@
+/**
+ * Op builders for patch editor edits: insert, duplicate with inputs, replace with another type,
+ * splice into a cable, align, move, comment around a selection, and history labels.
+ */
+
+import {
+  canConnect,
+  getPatchSpec,
+  isLinkInput,
+  listInputs,
+  parseAddress,
+  resolveInputCount,
+  resolveNodePorts,
+  resolveTypeParam,
+  targetAddress,
+  typeLabel,
+  type Component,
+  type Id,
+  type InputValue,
+  type NewPatch,
+  type Op,
+  type PatchNode,
+  type PatchSpec,
+  type Registry,
+  type ResolvedPort,
+  type SonobeDocument,
+  type ValueType,
+} from "@sonobe/core";
+import { COMMENT_PADDING, boundsOf, type Rect } from "./geometry.ts";
+import { portTypeAt } from "./connect.ts";
+
+/** A patch's display name: its custom name, else its type's name. */
+export function patchTitle(node: Pick<PatchNode, "name" | "type"> | undefined, spec?: PatchSpec): string {
+  if (!node) return "patch";
+  return node.name || spec?.name || node.type;
+}
+
+/** "Zoom Spring" for one patch, "3 patches" for several. */
+export function patchesLabel(component: Component, ids: readonly Id[], registry: Registry): string {
+  if (ids.length === 1) {
+    const node = component.patches[ids[0]!];
+    return patchTitle(node, node ? getPatchSpec(registry, node.type) : undefined);
+  }
+  return `${ids.length} patches`;
+}
+
+/** The name for a port address in labels ("Zoom Spring · Number"). */
+export function portLabel(doc: SonobeDocument, componentId: Id, registry: Registry, address: string): string {
+  const component = doc.components[componentId];
+  const a = parseAddress(address);
+  if (!component || !a) return address;
+  if (a.kind === "patch") {
+    const node = component.patches[a.id];
+    const spec = node ? getPatchSpec(registry, node.type) : undefined;
+    const ports = node ? resolveNodePorts(doc, node, registry) : undefined;
+    const port = ports?.inputs.find((p) => p.key === a.key) ?? ports?.outputs.find((p) => p.key === a.key);
+    return `${patchTitle(node, spec)} · ${port?.name ?? a.key}`;
+  }
+  if (a.kind === "layer") {
+    const layer = findLayerName(component, a.id);
+    const prop = registry.layers.get(findLayerType(component, a.id) ?? "")?.props.find((p) => p.key === a.key);
+    return `${layer ?? a.id} · ${prop?.name ?? a.key}`;
+  }
+  return a.kind === "componentInput" ? `Input ${a.key}` : `Output ${a.key}`;
+}
+
+function findLayerName(component: Component, id: Id): string | undefined {
+  let name: string | undefined;
+  const visit = (layers: Component["layers"]) => {
+    for (const l of layers) {
+      if (l.id === id) name = l.name;
+      else if (l.children) visit(l.children);
+      if (name) return;
+    }
+  };
+  visit(component.layers);
+  return name;
+}
+
+function findLayerType(component: Component, id: Id): string | undefined {
+  let type: string | undefined;
+  const visit = (layers: Component["layers"]) => {
+    for (const l of layers) {
+      if (l.id === id) type = l.type;
+      else if (l.children) visit(l.children);
+      if (type) return;
+    }
+  };
+  visit(component.layers);
+  return type;
+}
+
+export interface InsertOptions {
+  typeParam?: ValueType;
+  inputCount?: number;
+  /** Component patches: the patch component to run. */
+  component?: Id;
+  name?: string;
+  /** Batch ref for the new patch. Default "inserted". */
+  ref?: string;
+}
+
+/** Add a patch at a position (top-left, rounded). */
+export function insertPatchOps(componentId: Id, type: string, position: { x: number; y: number }, options: InsertOptions = {}): Op[] {
+  const patch: NewPatch = { ref: options.ref ?? "inserted", type, ui: { x: Math.round(position.x), y: Math.round(position.y) } };
+  if (options.typeParam) patch.typeParam = options.typeParam;
+  if (options.inputCount !== undefined) patch.inputCount = options.inputCount;
+  if (options.component !== undefined) patch.component = options.component;
+  if (options.name) patch.name = options.name;
+  return [{ op: "addPatch", component: componentId, patch }];
+}
+
+export interface DuplicatePlan {
+  ops: Op[];
+  /** Original patch id → batch ref of its copy. */
+  refs: Map<Id, string>;
+}
+
+/**
+ * Copy patches with their input values. Connections from outside the copied set are kept (the copies
+ * are driven by the same outputs); links between copied patches point at the copies.
+ */
+export function duplicatePatchOps(component: Component, ids: readonly Id[], positions: ReadonlyMap<Id, { x: number; y: number }>): DuplicatePlan {
+  const set = ids.filter((id) => component.patches[id]);
+  const refs = new Map(set.map((id) => [id, `dup_${id}`]));
+  const ops: Op[] = [];
+  const later: Op[] = [];
+  for (const id of set) {
+    const node = component.patches[id]!;
+    const ref = refs.get(id)!;
+    const pos = positions.get(id) ?? { x: node.ui.x + 24, y: node.ui.y + 24 };
+    const inputs: Record<string, InputValue> = {};
+    for (const [key, value] of Object.entries(node.inputs)) {
+      if (!isLinkInput(value)) {
+        inputs[key] = value;
+        continue;
+      }
+      const a = parseAddress(value.link);
+      const link = a?.kind === "patch" && refs.has(a.id) ? `$${refs.get(a.id)}.${a.key}` : value.link;
+      later.push({ op: "setInput", component: component.id, target: `$${ref}.${key}`, value: { link } });
+    }
+    const patch: NewPatch = { ref, type: node.type, inputs, ui: { x: Math.round(pos.x), y: Math.round(pos.y) } };
+    if (node.name !== undefined) patch.name = node.name;
+    if (node.typeParam !== undefined) patch.typeParam = node.typeParam;
+    if (node.inputCount !== undefined) patch.inputCount = node.inputCount;
+    if (node.settings !== undefined) patch.settings = node.settings;
+    if (node.component !== undefined) patch.component = node.component;
+    ops.push({ op: "addPatch", component: component.id, patch });
+    if (node.muted || node.ui.collapsed) {
+      later.push({ op: "updatePatch", component: component.id, id: `$${ref}`, ...(node.muted ? { muted: true } : {}), ...(node.ui.collapsed ? { ui: { collapsed: true } } : {}) });
+    }
+  }
+  return { ops: [...ops, ...later], refs };
+}
+
+function pickPort(ports: readonly ResolvedPort[], accepts: (p: ResolvedPort) => boolean, preferType: ValueType | undefined, taken: ReadonlySet<string> = new Set()): ResolvedPort | undefined {
+  const candidates = ports.filter((p) => !taken.has(p.key) && accepts(p));
+  return candidates.find((p) => p.type === preferType) ?? candidates.find((p) => p.type !== "any") ?? candidates[0];
+}
+
+export interface ReplacePlan {
+  ops: Op[];
+  /** Links that had no matching port on the new type. */
+  dropped: number;
+}
+
+/** Replace a patch with another type at the same spot, carrying over values and cables that still fit. */
+export function replacePatchOps(doc: SonobeDocument, componentId: Id, registry: Registry, patchId: Id, newType: string, componentTarget?: Id): ReplacePlan | { error: string } {
+  const component = doc.components[componentId];
+  const old = component?.patches[patchId];
+  const spec = getPatchSpec(registry, newType);
+  if (!component || !old) return { error: "That patch no longer exists." };
+  if (!spec) return { error: `There's no patch type "${newType}".` };
+  const oldPorts = resolveNodePorts(doc, old, registry);
+  const typeParam = spec.variants?.length ? resolveTypeParam(spec, old.typeParam) : undefined;
+  const inputCount = spec.variadic ? resolveInputCount(spec, old.inputCount) : undefined;
+  const virtual: PatchNode = { type: newType, inputs: {}, ui: { ...old.ui } };
+  if (typeParam) virtual.typeParam = typeParam;
+  if (inputCount !== undefined) virtual.inputCount = inputCount;
+  if (componentTarget) virtual.component = componentTarget;
+  const newPorts = resolveNodePorts(doc, virtual, registry);
+  if (!newPorts) return { error: `"${spec.name}" can't be placed here.` };
+
+  const ref = "replacement";
+  const patch: NewPatch = { ref, type: newType, ui: { x: old.ui.x, y: old.ui.y } };
+  if (typeParam) patch.typeParam = typeParam;
+  if (inputCount !== undefined) patch.inputCount = inputCount;
+  if (componentTarget) patch.component = componentTarget;
+  if (old.name && old.name !== oldPorts?.spec.name) patch.name = old.name;
+  const ops: Op[] = [{ op: "addPatch", component: componentId, patch }];
+  let dropped = 0;
+
+  const usedInputs = new Set<string>();
+  for (const [key, value] of Object.entries(old.inputs)) {
+    const oldPort = oldPorts?.inputs.find((p) => p.key === key);
+    if (isLinkInput(value)) {
+      const a = parseAddress(value.link);
+      if (a?.kind === "patch" && a.id === patchId) continue;
+      const fromType = portTypeAt(doc, componentId, registry, value.link, "out") ?? "any";
+      const same = newPorts.inputs.find((p) => p.key === key && canConnect(fromType, p.type).ok && !usedInputs.has(p.key));
+      const target = same ?? pickPort(newPorts.inputs, (p) => canConnect(fromType, p.type).ok && p.type !== "layer", oldPort?.type ?? fromType, usedInputs);
+      if (!target) {
+        dropped++;
+        continue;
+      }
+      usedInputs.add(target.key);
+      ops.push({ op: "connect", component: componentId, from: value.link, to: `$${ref}.${target.key}` });
+    } else {
+      const target = newPorts.inputs.find((p) => p.key === key && p.type === oldPort?.type);
+      if (target && !usedInputs.has(target.key)) {
+        usedInputs.add(target.key);
+        ops.push({ op: "setInput", component: componentId, target: `$${ref}.${target.key}`, value });
+      }
+    }
+  }
+  for (const entry of listInputs(component)) {
+    if (!isLinkInput(entry.value)) continue;
+    const a = parseAddress(entry.value.link);
+    if (a?.kind !== "patch" || a.id !== patchId) continue;
+    if (entry.target.kind === "patch" && entry.target.id === patchId) continue;
+    const to = targetAddress(entry.target);
+    const toType = portTypeAt(doc, componentId, registry, to, "in") ?? "any";
+    const oldOut = oldPorts?.outputs.find((p) => p.key === a.key);
+    const out = newPorts.outputs.find((p) => p.key === a.key && canConnect(p.type, toType).ok) ?? pickPort(newPorts.outputs, (p) => canConnect(p.type, toType).ok, oldOut?.type ?? toType);
+    if (!out) {
+      dropped++;
+      continue;
+    }
+    ops.push({ op: "connect", component: componentId, from: `$${ref}.${out.key}`, to });
+  }
+  ops.push({ op: "removePatch", component: componentId, id: patchId });
+  return { ops, dropped };
+}
+
+export interface SplicePlan {
+  ops: Op[];
+  inputKey: string;
+  outputKey: string;
+}
+
+/** Put a patch between the two ends of a cable. */
+export function splicePatchOps(doc: SonobeDocument, componentId: Id, registry: Registry, patchId: Id, cable: { from: string; to: string }): SplicePlan | { error: string } {
+  const component = doc.components[componentId];
+  const node = component?.patches[patchId];
+  if (!component || !node) return { error: "That patch no longer exists." };
+  const from = parseAddress(cable.from);
+  const to = parseAddress(cable.to);
+  if ((from?.kind === "patch" && from.id === patchId) || (to?.kind === "patch" && to.id === patchId)) return { error: "A patch can't be spliced into its own cable." };
+  const ports = resolveNodePorts(doc, node, registry);
+  const fromType = portTypeAt(doc, componentId, registry, cable.from, "out");
+  const toType = portTypeAt(doc, componentId, registry, cable.to, "in");
+  if (!ports || !fromType || !toType) return { error: "That cable no longer exists." };
+  const connected = new Set(Object.entries(node.inputs).filter(([, v]) => isLinkInput(v)).map(([k]) => k));
+  const accepts = (p: ResolvedPort) => canConnect(fromType, p.type).ok && p.type !== "layer";
+  const input = pickPort(ports.inputs, accepts, fromType, connected) ?? pickPort(ports.inputs, accepts, fromType);
+  const output = pickPort(ports.outputs, (p) => canConnect(p.type, toType).ok, toType);
+  const title = patchTitle(node, ports.spec);
+  if (!input) return { error: `${title} has no input that takes ${typeLabel(fromType)}.` };
+  if (!output) return { error: `${title} has no output that drives ${typeLabel(toType)}.` };
+  return {
+    inputKey: input.key,
+    outputKey: output.key,
+    ops: [
+      { op: "connect", component: componentId, from: cable.from, to: `${patchId}.${input.key}` },
+      { op: "connect", component: componentId, from: `${patchId}.${output.key}`, to: cable.to },
+    ],
+  };
+}
+
+export type AlignMode = "left" | "top";
+
+/** Align rects on their left edges (a column) or top edges (a row), spreading any that would overlap. */
+export function alignPositions(rects: readonly (Rect & { id: string })[], mode: AlignMode, gap = mode === "left" ? 16 : 24): Map<string, { x: number; y: number }> {
+  const out = new Map<string, { x: number; y: number }>();
+  if (rects.length === 0) return out;
+  if (mode === "left") {
+    const x = Math.min(...rects.map((r) => r.x));
+    let bottom = -Infinity;
+    for (const r of [...rects].sort((a, b) => a.y - b.y || a.x - b.x)) {
+      const y = Math.max(r.y, bottom + gap);
+      out.set(r.id, { x: Math.round(x), y: Math.round(y) });
+      bottom = y + r.height;
+    }
+  } else {
+    const y = Math.min(...rects.map((r) => r.y));
+    let right = -Infinity;
+    for (const r of [...rects].sort((a, b) => a.x - b.x || a.y - b.y)) {
+      const x = Math.max(r.x, right + gap);
+      out.set(r.id, { x: Math.round(x), y: Math.round(y) });
+      right = x + r.width;
+    }
+  }
+  return out;
+}
+
+/** updatePatch ui ops for patches whose position changed. */
+export function movePatchOps(component: Component, positions: ReadonlyMap<string, { x: number; y: number }>): Op[] {
+  const ops: Op[] = [];
+  for (const [id, pos] of positions) {
+    const node = component.patches[id];
+    if (!node) continue;
+    const x = Math.round(pos.x);
+    const y = Math.round(pos.y);
+    if (node.ui.x !== x || node.ui.y !== y) ops.push({ op: "updatePatch", component: component.id, id, ui: { x, y } });
+  }
+  return ops;
+}
+
+/** A comment framing the given rects. */
+export function commentAroundOps(componentId: Id, rects: readonly Rect[], text = "Comment", color?: string): Op[] {
+  const box = boundsOf(rects, COMMENT_PADDING) ?? { x: 0, y: 0, width: 320, height: 160 };
+  const rect: [number, number, number, number] = [Math.round(box.x), Math.round(box.y), Math.round(box.width), Math.round(box.height)];
+  return [{ op: "addComment", component: componentId, comment: { ref: "comment", text, rect, ...(color ? { color } : {}) } }];
+}
+
+/** Comment colors offered in the patch editor (stored as names). */
+export const COMMENT_COLORS: readonly { key: string; name: string }[] = [
+  { key: "gray", name: "Gray" },
+  { key: "yellow", name: "Yellow" },
+  { key: "orange", name: "Orange" },
+  { key: "pink", name: "Pink" },
+  { key: "purple", name: "Purple" },
+  { key: "blue", name: "Blue" },
+  { key: "green", name: "Green" },
+];

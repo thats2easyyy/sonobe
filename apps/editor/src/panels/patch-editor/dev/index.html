@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="dark light" />
+    <title>Patch Editor · Sonobe</title>
+    <script>
+      (function () {
+        var params = new URLSearchParams(location.search);
+        var theme = params.get("theme") === "light" ? "light" : "dark";
+        try {
+          localStorage.setItem("sonobe.theme", theme);
+        } catch (e) {}
+        document.documentElement.setAttribute("data-theme", theme);
+        if (params.get("reduced")) document.documentElement.setAttribute("data-reduced-motion", "true");
+      })();
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="./main.tsx"></script>
+  </body>
+</html>

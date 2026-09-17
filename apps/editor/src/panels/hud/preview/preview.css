@@ -1,0 +1,64 @@
+/* Preview harness layout: a stripped-down editor frame around the real panels. */
+
+.pv-app {
+  display: grid;
+  grid-template-rows: var(--toolbar-h) minmax(0, 1fr) 300px;
+  height: 100vh;
+  background: var(--bg-window);
+}
+
+.pv-toolbar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-5);
+  padding: 0 var(--space-6);
+  border-bottom: 1px solid var(--border-subtle);
+  background: var(--bg-toolbar);
+}
+
+.pv-toolbar__name {
+  font-size: var(--font-size-md);
+  font-weight: var(--font-weight-semibold);
+}
+
+.pv-spacer {
+  flex: 1 1 auto;
+}
+
+.pv-main {
+  display: flex;
+  min-height: 0;
+}
+
+.pv-stage {
+  display: flex;
+  flex: 1 1 auto;
+  align-items: center;
+  justify-content: center;
+  min-width: 0;
+  overflow: hidden;
+  background: var(--canvas-bg);
+}
+
+.pv-viewer {
+  position: relative;
+  /* Renderer layers use z-index; keep them inside the viewer so dialogs stay on top. */
+  isolation: isolate;
+  overflow: hidden;
+  border-radius: 34px;
+  box-shadow: var(--shadow-md);
+}
+
+.pv-drawer {
+  display: flex;
+  flex: none;
+  width: 400px;
+  min-height: 0;
+  border-left: 1px solid var(--border-subtle);
+  background: var(--bg-panel);
+}
+
+.pv-hud {
+  min-height: 0;
+  border-top: 1px solid var(--border-subtle);
+}
