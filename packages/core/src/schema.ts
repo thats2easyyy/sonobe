@@ -31,7 +31,8 @@ const WRAPPERS = 'a number, true/false, text, a list of numbers, null, or one of
 function gradientProblem(g: unknown): string | undefined {
   if (!g || typeof g !== "object" || Array.isArray(g)) return "gradient must be an object with kind, stops, start and end";
   const v = g as Record<string, unknown>;
-  const extra = Object.keys(v).filter((k) => !["kind", "stops", "start", "end"].includes(k));
+  const extra = Object.keys(v).filter((k) => !["kind", "stops", "start", "end", "ratio"].includes(k));
+  if (v.ratio !== undefined && !(typeof v.ratio === "number" && Number.isFinite(v.ratio) && v.ratio > 0)) return "gradient ratio must be a number above 0";
   if (extra.length) return `gradient has unknown field ${extra.map((k) => `"${k}"`).join(", ")}`;
   if (v.kind !== "linear" && v.kind !== "radial" && v.kind !== "angular") return 'gradient kind must be "linear", "radial" or "angular"';
   if (!Array.isArray(v.stops) || !v.stops.every((s) => Array.isArray(s) && s.length === 2 && typeof s[0] === "number" && typeof s[1] === "string" && !!parseColor(s[1]))) {
@@ -253,8 +254,9 @@ function normalizePatch(node: PatchNode): PatchNode {
 
 /**
  * Canonical in-memory form: no empty `children`, no `false` editor flags, no empty
- * names/notes/settings, comments sorted by id. Ops keep documents in this form so
- * inverse ops restore deep-equal documents.
+ * names/notes/settings, no null top-level `meta` values (updateComponent treats null as
+ * "remove the key"), comments sorted by id. Ops keep documents in this form so inverse ops
+ * restore deep-equal documents.
  */
 export function normalizeComponent(component: Component): Component {
   const out: Component = {
@@ -265,6 +267,7 @@ export function normalizeComponent(component: Component): Component {
     comments: [...component.comments].sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0)),
   };
   if (out.notes === "") delete out.notes;
+  if (out.meta) out.meta = Object.fromEntries(Object.entries(out.meta).filter(([, v]) => v !== null && v !== undefined));
   return out;
 }
 

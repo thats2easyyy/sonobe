@@ -11,10 +11,11 @@ describe("splitClock", () => {
     expect(splitClock(-1500, true)).toMatchObject({ seconds: -2, milliseconds: 500 });
   });
 
-  it("uses local time outside simulation", () => {
+  it("uses an IANA time zone when given one, else local time, outside simulation", () => {
     const ms = Date.UTC(2026, 5, 1, 8, 30, 0, 125);
     const d = new Date(ms);
     expect(splitClock(ms, false).timeOfDay).toBeCloseTo(d.getHours() * 3600 + d.getMinutes() * 60 + d.getSeconds() + 0.125, 9);
+    expect(splitClock(ms, false, "America/New_York").timeOfDay).toBeCloseTo(4 * 3600 + 30 * 60 + 0.125, 9);
   });
 });
 
@@ -37,11 +38,21 @@ describe("deviceTime", () => {
     expect(h.step({ dt: 0.5, inputs: { enabled: false } }).outputs.timeOfDay).toBe(1);
   });
 
-  it("uses the wall clock's local time zone outside simulation", () => {
+  it("uses the device's time zone outside simulation", () => {
     const wall = Date.UTC(2026, 8, 16, 21, 45, 30, 42);
-    const h = createPatchHarness(deviceTimePatch, { services: { now: () => wall } });
+    const device = (timeZone: string) => () => ({ ...createPatchHarness(deviceTimePatch).services.device(), timeZone });
+    const tokyo = createPatchHarness(deviceTimePatch, { services: { now: () => wall, deterministic: false, device: device("Asia/Tokyo") } });
+    // 21:45:30 UTC is 06:45:30 the next morning in Tokyo (UTC+9, no daylight saving).
+    expect(tokyo.step().outputs).toEqual({ seconds: Math.floor(wall / 1000), milliseconds: 42, timeOfDay: 6 * 3600 + 45 * 60 + 30.042 });
+    const unknown = createPatchHarness(deviceTimePatch, { services: { now: () => wall, deterministic: false, device: device("Mars/Olympus") } });
     const d = new Date(wall);
-    expect(h.step().outputs).toEqual({ seconds: Math.floor(wall / 1000), milliseconds: 42, timeOfDay: d.getHours() * 3600 + d.getMinutes() * 60 + d.getSeconds() + 0.042 });
+    expect(unknown.step().outputs.timeOfDay).toBeCloseTo(d.getHours() * 3600 + d.getMinutes() * 60 + d.getSeconds() + 0.042, 9);
+  });
+
+  it("uses UTC in deterministic runtimes whatever the device's time zone", () => {
+    const wall = Date.UTC(2026, 8, 16, 21, 45, 30, 42);
+    const h = createPatchHarness(deviceTimePatch, { services: { now: () => wall, device: () => ({ ...createPatchHarness(deviceTimePatch).services.device(), timeZone: "Asia/Tokyo" }) } });
+    expect(h.step().outputs.timeOfDay).toBeCloseTo(21 * 3600 + 45 * 60 + 30.042, 9);
   });
 
   it("keeps the held values and warns once when the clock isn't finite", () => {

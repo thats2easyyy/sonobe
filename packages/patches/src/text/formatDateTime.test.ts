@@ -42,10 +42,18 @@ describe("formatDateTime", () => {
     expect(run({ time: T, format: "custom", customFormat: "%T", timeZone: "utc" }, services)).toBe("18:30:05");
   });
 
-  it("uses the platform time zone on a live clock", () => {
-    const services: Partial<RuntimeServices> = { now: () => 1_800_000_000_000 };
+  it("falls back to UTC in deterministic runs and to the platform time zone on a live runtime", () => {
+    const device = createPatchHarness(formatDateTimePatch).services.device();
+    const unusable = { ...device, timeZone: "Not/AZone" };
+    expect(run({ time: T, format: "custom", customFormat: "%T %Z" }, { device: () => unusable })).toBe("18:30:05 UTC");
+    const live: Partial<RuntimeServices> = { deterministic: false, now: () => 1_800_000_000_000, device: () => unusable };
     const zone = Intl.DateTimeFormat().resolvedOptions().timeZone;
-    expect(run({ time: T, format: "custom", customFormat: "%F %T %Z" }, services)).toBe(strftime("%F %T %Z", dateParts(T * 1000, zone)));
+    expect(run({ time: T, format: "custom", customFormat: "%F %T %Z" }, live)).toBe(strftime("%F %T %Z", dateParts(T * 1000, zone)));
+  });
+
+  it("formats Device in the runtime's reported zone", () => {
+    const utc = runPatch(formatDateTimePatch, [{ time: T, format: "custom", customFormat: "%T %Z" }]);
+    expect(utc.frames[0]!.outputs.text).toBe("18:30:05 UTC");
   });
 
   it("outputs \"\" outside years 1 to 9999 and warns once per loop index per restart", () => {

@@ -38,8 +38,12 @@ describe("drag", () => {
     expect((last.outputs.velocity as number[])[0]).toBeGreaterThan(0);
     expect(last.requestedNextFrame).toBe(true);
     const up = r.step({ events: [pointerEvent("up", 230, 150)] });
-    expect(up.outputs).toEqual({ position: [200, 120], dragging: false, velocity: [0, 0] });
-    expect(r.step({ inputs: { startPosition: [0, 0] } }).outputs.position).toEqual([200, 120]);
+    expect(up.outputs).toMatchObject({ position: [200, 120], dragging: false });
+    // The release frame keeps the fling velocity (like Gesture), so a spring handing off on Dragging's falling edge reads it.
+    expect(up.outputs.velocity).toEqual(last.outputs.velocity);
+    expect(up.requestedNextFrame).toBe(true);
+    const rest = r.step({ inputs: { startPosition: [0, 0] } });
+    expect(rest.outputs).toEqual({ position: [200, 120], dragging: false, velocity: [0, 0] });
     expect(r.step({ pulses: ["reset"] }).outputs.position).toEqual([0, 0]);
     expect(r.step({ inputs: { startPosition: [5, 5] } }).outputs.position).toEqual([5, 5]);
   });

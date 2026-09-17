@@ -15,7 +15,7 @@ node integrations/claude-desktop/build.ts
 npx @anthropic-ai/mcpb pack integrations/claude-desktop/dist sonobe.mcpb
 ```
 
-`build.ts` bundles `packages/cli/src/main.ts` into `dist/server/sonobe.mjs`. It also copies the agent guides, the manifest and the license. `mcpb pack` validates the manifest and zips the folder.
+`build.ts` builds the single-file CLI with `packages/cli/scripts/bundle.ts` (the same bundle npm installs) into `dist/server/sonobe.mjs`. It also copies the agent guides, the manifest and the license. `mcpb pack` validates the manifest and zips the folder.
 
 ## Install
 
@@ -30,12 +30,15 @@ Updating: build and pack a new version, then install it the same way. Privately 
 
 ## Manual configuration
 
-If you'd rather not use an extension, add the relay to `claude_desktop_config.json`: **Settings → Developer → Edit Config**. Use absolute paths, then fully quit and restart Claude Desktop.
+If you'd rather not use an extension, build the CLI bundle (`npm run build -w @sonobe/cli` writes `packages/cli/dist/sonobe.mjs`) and add it to `claude_desktop_config.json`: **Settings → Developer → Edit Config**. Claude Desktop doesn't read your shell's PATH, so use absolute paths, then fully quit and restart Claude Desktop.
 
 ```json
 {
   "mcpServers": {
-    "sonobe": { "command": "/usr/local/bin/sonobe", "args": ["mcp"] }
+    "sonobe": {
+      "command": "/usr/local/bin/node",
+      "args": ["/Users/you/sonobe/packages/cli/dist/sonobe.mjs", "mcp"]
+    }
   }
 }
 ```
@@ -46,8 +49,13 @@ To work on a project folder without the app (editing, simulation and saving; no 
 {
   "mcpServers": {
     "sonobe-headless": {
-      "command": "/usr/local/bin/sonobe",
-      "args": ["mcp", "--headless", "/Users/you/Prototypes/Checkout Flow.sonobe"]
+      "command": "/usr/local/bin/node",
+      "args": [
+        "/Users/you/sonobe/packages/cli/dist/sonobe.mjs",
+        "mcp",
+        "--headless",
+        "/Users/you/Prototypes/Checkout Flow.sonobe"
+      ]
     }
   }
 }

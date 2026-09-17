@@ -16,7 +16,8 @@ import { defaultGuides, type GuideStore } from "./guides.ts";
 import type { SonobeHost } from "./host.ts";
 import { registerPrompts } from "./prompts.ts";
 import { registerResources } from "./resources.ts";
-import { guarded } from "./results.ts";
+import { guarded, withCompleteText } from "./results.ts";
+import { toolOutputSchema, type ToolOutputSchema } from "./schemas.ts";
 import { registerDiscoveryTools } from "./tools/discovery.ts";
 import { registerDocumentTools } from "./tools/documents.ts";
 import { registerPresenceTools } from "./tools/presence.ts";
@@ -183,18 +184,65 @@ export function serverInstructions(host: SonobeHost): string {
   return lines.join("\n");
 }
 
+/**
+ * Keep error results readable by every client: structuredContent on an isError result must fit
+ * the declared outputSchema (success ∪ teaching error), or it's dropped so clients show the
+ * teaching text instead of a -32602 validation failure.
+ */
+export function conformErrorResult(
+  result: CallToolResult,
+  output: ToolOutputSchema | undefined,
+): CallToolResult {
+  if (!output || !result.isError || result.structuredContent === undefined) return result;
+  if (output.accepts(result.structuredContent)) return result;
+  const { structuredContent: _dropped, ...rest } = result;
+  return rest as CallToolResult;
+}
+
+/** Resource URIs a 2025-era connection subscribed to (resources/subscribe), per server instance. */
+const subscriptions = new WeakMap<McpServer, Set<string>>();
+
+/** URIs this server instance's client subscribed to with resources/subscribe (2025-era). */
+export function subscribedResources(server: McpServer): ReadonlySet<string> {
+  return subscriptions.get(server) ?? new Set();
+}
+
+export interface SonobeServerContext {
+  /** The protocol era this instance serves (from the transport factory). */
+  era?: "legacy" | "modern";
+}
+
 /** Build an MCP server over a host. Create one per HTTP request or stdio connection. */
 export function createSonobeMcpServer(
   host: SonobeHost,
   options: SonobeMcpServerOptions,
+  context: SonobeServerContext = {},
 ): McpServer {
   const server = new McpServer(
     { name: options.name ?? "sonobe", title: "Sonobe", version: options.version },
     {
       instructions: options.instructions ?? serverInstructions(host),
-      capabilities: { tools: {}, resources: {}, prompts: {} },
+      capabilities: {
+        tools: {},
+        resources: { listChanged: true, subscribe: true },
+        prompts: {},
+      },
     },
   );
+  if (context.era !== "modern") {
+    // 2025-era delivery: resources/updated goes only to URIs the client subscribed to.
+    // 2026-07-28 clients opt in through subscriptions/listen, which the transport entry serves.
+    const uris = new Set<string>();
+    subscriptions.set(server, uris);
+    server.server.setRequestHandler("resources/subscribe", (request) => {
+      uris.add(request.params.uri);
+      return {};
+    });
+    server.server.setRequestHandler("resources/unsubscribe", (request) => {
+      uris.delete(request.params.uri);
+      return {};
+    });
+  }
   const tc: ToolContext = {
     host,
     server,
@@ -205,17 +253,19 @@ export function createSonobeMcpServer(
       const run = guarded(
         handler as (args: unknown, ctx: ServerContext) => Promise<CallToolResult>,
       );
+      const output = config.output ? toolOutputSchema(config.output) : undefined;
       const registration: Record<string, unknown> = {
         title: config.title,
         description: config.description,
         inputSchema: config.input,
         annotations: { title: config.title, ...config.annotations },
       };
-      if (config.output) registration.outputSchema = config.output;
+      if (output) registration.outputSchema = output;
       server.registerTool(
         name,
         registration as never,
-        ((args: unknown, ctx: ServerContext) => run(args, ctx)) as never,
+        (async (args: unknown, ctx: ServerContext) =>
+          conformErrorResult(withCompleteText(await run(args, ctx)), output)) as never,
       );
     },
   };

@@ -1,7 +1,7 @@
 /** Loop Shuffle: a random order picked on each pulse and held until the next one. */
 
 import { definePatch, loopOf } from "../infra/index.ts";
-import { indices, variantPortsFor, warnIfLooped } from "./shared.ts";
+import { indices, warnIfLooped } from "./shared.ts";
 
 export interface LoopShuffleState {
   /** null = original order; otherwise source positions in output order. */
@@ -44,7 +44,6 @@ function sameOrder(a: readonly number[], b: readonly number[]): boolean {
 }
 
 export const loopShufflePatch = definePatch<LoopShuffleState>("loopShuffle", {
-  dynamicPorts: variantPortsFor("loopShuffle"),
   state: () => ({ order: null, variant: undefined, warned: false }),
   evaluate(ctx) {
     const state = ctx.state;

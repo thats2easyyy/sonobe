@@ -10,6 +10,7 @@ import { PanelRail } from "./Panel.tsx";
 import { Toolbar, type ToolbarProps } from "./Toolbar.tsx";
 import { useShellCommands } from "./useShellCommands.tsx";
 import "./AppShell.css";
+import "./docking.css";
 
 export interface AppShellSlots {
   layers?: ReactNode;
@@ -40,6 +41,8 @@ export interface AppShellProps {
   slots?: AppShellSlots;
   /** Left inset for native window controls (e.g. macOS traffic lights in Electron). */
   titlebarInset?: number;
+  /** Dock the Learn drawer beside the panels (e.g. during a lesson) instead of over them. */
+  drawerDocked?: boolean;
 }
 
 const noop = () => undefined;
@@ -61,6 +64,7 @@ export function AppShell({
   onRestart = noop,
   slots = {},
   titlebarInset = 0,
+  drawerDocked = false,
 }: AppShellProps) {
   const rootRef = useRef<HTMLDivElement>(null);
   const sizes = useLayout((s) => s.sizes);
@@ -68,6 +72,7 @@ export function AppShell({
   const collapsed = useLayout((s) => s.collapsed);
   const viewMode = useLayout((s) => s.viewMode);
   const splitDirection = useLayout((s) => s.splitDirection);
+  const drawerOpen = useLayout((s) => s.drawer !== null);
   const { setSize, setSplit, toggleCollapsed } = layoutStore.getState();
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [centerRef, center] = useElementSize<HTMLDivElement>();
@@ -119,7 +124,7 @@ export function AppShell({
         claude={slots.claude}
       />
       {slots.banner}
-      <div className="sb-shell__main">
+      <div className="sb-shell__main" data-drawer-docked={(drawerDocked && drawerOpen && slots.learn !== undefined) || undefined}>
         <div className="sb-shell__row">
           {collapsed.layers ? (
             <PanelRail title="Layers" side="left" icon={<Layers size={13} />} shortcut="Mod+1" onExpand={() => toggleCollapsed("layers", false)} />
@@ -195,7 +200,7 @@ export function AppShell({
           {slots.hud}
         </div>
 
-        <DrawerHost learn={slots.learn} />
+        <DrawerHost learn={slots.learn} docked={drawerDocked} onLiveResize={(size) => live("--sb-drawer-w", `${size}px`)} />
       </div>
 
       <CommandPalette open={paletteOpen} onOpenChange={setPaletteOpen} />

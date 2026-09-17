@@ -7,6 +7,9 @@ import type { PatchNode } from "@sonobe/core";
 import { definePatch, logOnce, toNumber } from "../infra/index.ts";
 import { compileExpression, expressionPorts } from "./expression.ts";
 
+/** The issue code for formula text that doesn't parse (catalog behavior, "Errors"). */
+export const INVALID_EXPRESSION = "invalid_expression";
+
 export interface MathExpressionState {
   warned: boolean;
 }
@@ -24,7 +27,10 @@ export const mathExpression = definePatch<MathExpressionState>("mathExpression",
     const program = compileExpression(expressionText(ctx.node.settings));
     if (!program.ok) {
       const { message, line, column } = program.error;
-      logOnce(ctx, "error", "invalid_expression", `${ctx.id}: ${message} (${line > 1 ? `line ${line}, ` : ""}column ${column})`);
+      const text = `${ctx.id}: ${message} (${line > 1 ? `line ${line}, ` : ""}column ${column})`;
+      // A runtime issue with the catalog's code (deduplicated until restart); hosts without issues get one console error.
+      if (typeof ctx.services.issue === "function") ctx.services.issue(INVALID_EXPRESSION, "error", text);
+      else logOnce(ctx, "error", INVALID_EXPRESSION, text);
       for (const output of program.outputs) ctx.output(output.key, 0);
       return;
     }

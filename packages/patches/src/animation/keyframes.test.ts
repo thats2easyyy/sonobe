@@ -10,6 +10,13 @@ const run = (frames: Record<string, unknown>[], options: RunPatchOptions = {}) =
 const outputsOf = (frames: Record<string, unknown>[], options: RunPatchOptions = {}) => run(frames, options).frames.map((f) => f.outputs.output);
 
 describe("keyframes", () => {
+  it("takes its keyframe count from ctx.inputCount within the catalog's inputCountRange", () => {
+    expect(run([{ progress: 1, value4: 7 }], { inputCount: 4 }).frames[0]!.outputs.output).toBe(7);
+    expect(run([{ progress: 2 / 3 }], { inputCount: 4 }).frames[0]!.outputs.output).toBe(0);
+    expect(run([{ progress: 1 }], { inputCount: 1 }).frames[0]!.outputs.output).toBe(1);
+    expect([keyframeCount(undefined), keyframeCount(0), keyframeCount(3.4), keyframeCount(99), keyframeCount(Number.NaN)]).toEqual([3, 2, 3, 32, 3]);
+  });
+
   it("blends between neighboring keyframes and holds past the ends", () => {
     expect(outputsOf([{ progress: 0.25 }, { progress: 0.5 }, { progress: 0.75 }, { progress: -1 }, { progress: 1.5 }])).toEqual([0.5, 1, 0.5, 0, 0]);
   });

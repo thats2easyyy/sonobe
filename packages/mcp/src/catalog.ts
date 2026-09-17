@@ -171,26 +171,14 @@ export function describePatchType(
     );
   if (spec.variadic) {
     const v = spec.variadic;
-    // Show the keys document validation accepts today (core's expansion), not just the spec's intent.
-    const expanded = new Set(
-      staticPorts(spec)
-        .inputs.filter((p) => new RegExp(`^${v.key}\\d+$`).test(p.key))
-        .map((p) => p.key),
-    );
+    // Core expands variadic ports from startIndex, so these are exactly the keys validation accepts.
     const start = v.startIndex ?? 1;
-    const intended = Array.from(
-      { length: Math.min(3, v.defaultCount) },
-      (_, i) => `${v.key}${start + i}`,
-    );
-    const shown =
-      intended.every((k) => expanded.has(k)) || !expanded.size
-        ? intended
-        : [...expanded]
-            .sort((a, b) => Number(a.slice(v.key.length)) - Number(b.slice(v.key.length)))
-            .slice(0, 3);
-    const keys = shown.map((k) => `"${k}"`).join(", ");
+    const keys = Array.from(
+      { length: Math.min(3, Math.max(1, v.defaultCount)) },
+      (_, i) => `"${v.key}${start + i}"`,
+    ).join(", ");
     lines.push(
-      `inputCount: ${v.min}–${v.max} (default ${v.defaultCount}); repeats ${v.direction ?? "inputs"} ${keys}, … up to inputCount — ${v.description}`,
+      `inputCount: ${v.min}–${v.max} (default ${v.defaultCount}); repeats ${v.direction ?? "inputs"} ${keys}, … one per inputCount, numbered from ${start} (${v.key}${start}–${v.key}${start + v.defaultCount - 1} at the default count) — ${v.description}`,
     );
   }
   if (spec.status && spec.status !== "supported")

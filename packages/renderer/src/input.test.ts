@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 import type { InputEvent, SceneFrame, SceneNode } from "@sonobe/engine";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { clientToPrototype, effectiveScale, eventTime, pointerTypeOf } from "./input.ts";
+import { buttonsOf, clientToPrototype, effectiveScale, eventTime, pointerTypeOf } from "./input.ts";
 import { createDomRenderer } from "./renderer.ts";
 import type { DomRenderer } from "./renderer.ts";
 import { cursorAt, findNodesAt } from "./sceneQuery.ts";
@@ -30,6 +30,17 @@ describe("event normalization", () => {
     expect(pointerTypeOf({})).toBe("mouse");
     expect(eventTime({ timeStamp: 1234.5 })).toBe(1234.5);
     expect(eventTime({ timeStamp: 0 })).toBeGreaterThan(0);
+  });
+
+  it("reads the buttons bitmask, counting the pressed button when a press reports none", () => {
+    expect(buttonsOf({ buttons: 5 })).toBe(5);
+    expect(buttonsOf({ buttons: 0, button: 0 }, "up")).toBe(0);
+    expect(buttonsOf({}, "move")).toBe(0);
+    expect(buttonsOf({ buttons: 1.5 })).toBe(0);
+    expect(buttonsOf({ buttons: 0, button: 0 }, "down")).toBe(1);
+    expect(buttonsOf({ button: 1 }, "down")).toBe(4);
+    expect(buttonsOf({ button: 2 }, "down")).toBe(2);
+    expect(buttonsOf({ buttons: 2, button: 0 }, "down")).toBe(2);
   });
 });
 
@@ -64,13 +75,26 @@ describe("input capture", () => {
     pointer("pointerup", { clientX: 130, clientY: 120, pointerId: 7, button: 0 });
     pointer("pointercancel", { clientX: 20, clientY: 10, pointerId: 8 });
     expect(events).toEqual([
-      { kind: "pointer", phase: "down", pointerId: 7, pointerType: "mouse", timeStamp: at, x: 200, y: 200, button: 0 },
-      { kind: "pointer", phase: "move", pointerId: 7, pointerType: "mouse", timeStamp: at, x: 220, y: 220 },
-      { kind: "pointer", phase: "up", pointerId: 7, pointerType: "mouse", timeStamp: at, x: 220, y: 220, button: 0 },
-      { kind: "pointer", phase: "cancel", pointerId: 8, pointerType: "mouse", timeStamp: at, x: 0, y: 0 },
+      { kind: "pointer", phase: "down", pointerId: 7, pointerType: "mouse", timeStamp: at, x: 200, y: 200, buttons: 1, button: 0 },
+      { kind: "pointer", phase: "move", pointerId: 7, pointerType: "mouse", timeStamp: at, x: 220, y: 220, buttons: 1 },
+      { kind: "pointer", phase: "up", pointerId: 7, pointerType: "mouse", timeStamp: at, x: 220, y: 220, buttons: 0, button: 0 },
+      { kind: "pointer", phase: "cancel", pointerId: 8, pointerType: "mouse", timeStamp: at, x: 0, y: 0, buttons: 0 },
     ]);
     const times = events.map((e) => (e.kind === "pointer" ? e.timeStamp! : 0));
     expect(times.every((t, i) => i === 0 || t >= times[i - 1]!)).toBe(true);
+  });
+
+  it("reports the buttons bitmask, including chorded presses", () => {
+    pointer("pointerdown", { clientX: 120, clientY: 110, pointerId: 1, button: 2, buttons: 2 });
+    pointer("pointermove", { clientX: 120, clientY: 110, pointerId: 1, button: 0, buttons: 3 });
+    pointer("pointerup", { clientX: 120, clientY: 110, pointerId: 1, button: 2, buttons: 1 });
+    pointer("pointerup", { clientX: 120, clientY: 110, pointerId: 1, button: 0, buttons: 0 });
+    expect(events.map((e) => (e.kind === "pointer" ? [e.phase, (e as { buttons?: number }).buttons] : e.kind))).toEqual([
+      ["down", 2],
+      ["move", 3],
+      ["up", 1],
+      ["up", 0],
+    ]);
   });
 
   it("reports touch and pen pressure", () => {
@@ -82,8 +106,8 @@ describe("input capture", () => {
     pointer("pointermove", { clientX: 24, clientY: 110, pointerId: 1 });
     pointer("pointerleave", { clientX: 18, clientY: 110, pointerId: 1 });
     expect(events).toEqual([
-      { kind: "pointer", phase: "move", pointerId: 1, pointerType: "mouse", timeStamp: at, x: 8, y: 200 },
-      { kind: "pointer", phase: "leave", pointerId: 1, pointerType: "mouse", timeStamp: at, x: -4, y: 200 },
+      { kind: "pointer", phase: "move", pointerId: 1, pointerType: "mouse", timeStamp: at, x: 8, y: 200, buttons: 0 },
+      { kind: "pointer", phase: "leave", pointerId: 1, pointerType: "mouse", timeStamp: at, x: -4, y: 200, buttons: 0 },
     ]);
   });
 
@@ -101,14 +125,14 @@ describe("input capture", () => {
   it("expands coalesced samples while dragging", () => {
     const move = pointerEvent("pointermove", { clientX: 140, clientY: 130, pointerId: 2, buttons: 1 });
     const samples = [
-      { clientX: 120, clientY: 110, pointerId: 2, pointerType: "mouse", timeStamp: 100 },
-      { clientX: 140, clientY: 130, pointerId: 2, pointerType: "mouse", timeStamp: 108 },
+      { clientX: 120, clientY: 110, pointerId: 2, pointerType: "mouse", timeStamp: 100, buttons: 1 },
+      { clientX: 140, clientY: 130, pointerId: 2, pointerType: "mouse", timeStamp: 108, buttons: 1 },
     ];
     Object.defineProperty(move, "getCoalescedEvents", { value: () => samples });
     container.dispatchEvent(move);
     expect(events).toEqual([
-      { kind: "pointer", phase: "move", pointerId: 2, pointerType: "mouse", timeStamp: 100, x: 200, y: 200 },
-      { kind: "pointer", phase: "move", pointerId: 2, pointerType: "mouse", timeStamp: 108, x: 240, y: 240 },
+      { kind: "pointer", phase: "move", pointerId: 2, pointerType: "mouse", timeStamp: 100, x: 200, y: 200, buttons: 1 },
+      { kind: "pointer", phase: "move", pointerId: 2, pointerType: "mouse", timeStamp: 108, x: 240, y: 240, buttons: 1 },
     ]);
   });
 

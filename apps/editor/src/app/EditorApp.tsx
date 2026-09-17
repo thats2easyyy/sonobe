@@ -1,24 +1,26 @@
 /**
  * The real editor: one EditorSession wired into the shell. Layers, viewer, canvas, patch editor,
  * inspector, HUD, Learn, and Connect Claude; toolbar bound to the document and runtime; document
- * commands, menu routing, and (inside the desktop app) the MCP bridge handlers.
+ * commands, menu routing, the welcome screen, Settings and About, and (inside the desktop app) the
+ * MCP bridge handlers behind the agent-permission guard.
+ *
+ * The patch editor (React Flow and ELK), the Learn drawer (guides, examples, lessons, patch reference),
+ * the welcome screen, and the dialogs load on demand so the first paint stays small.
  */
 
-import { getDevicePreset, type Id } from "@sonobe/core";
-import { FilePlus, FolderOpen, FolderSearch, Save, SaveAll } from "lucide-react";
-import { useEffect, useState, type ReactNode } from "react";
+import { getDevicePreset, type Id, type Op } from "@sonobe/core";
+import { FilePlus, FolderOpen, FolderSearch, Save, SaveAll, X } from "lucide-react";
+import { lazy, Suspense, useEffect, useState, type ReactNode } from "react";
 import { getDesktopHostApi } from "../host/detect.ts";
+import { registerRpcHandlers } from "../host/rpcHandlers.ts";
 import { CanvasPanel } from "../panels/canvas/CanvasPanel.tsx";
 import { ConnectClaudeButton } from "../panels/connect/ConnectClaudeButton.tsx";
-import { ConnectClaudeHost } from "../panels/connect/ConnectClaudeDialog.tsx";
-import { connectClaudeStore } from "../panels/connect/connectStore.ts";
+import { connectClaudeStore, useConnectClaude } from "../panels/connect/connectStore.ts";
 import { Hud } from "../panels/hud/Hud.tsx";
 import { InspectorPanel } from "../panels/inspector/InspectorPanel.tsx";
 import { LayersPanel } from "../panels/layers/LayersPanel.tsx";
-import { LearnDrawer } from "../panels/learn/LearnDrawer.tsx";
-import { PatchEditorBreadcrumbs } from "../panels/patch-editor/components/Chrome.tsx";
-import { insertPatchOps } from "../panels/patch-editor/model/editOps.ts";
-import { PatchEditor } from "../panels/patch-editor/PatchEditor.tsx";
+import type { LearnView } from "../panels/learn/learnStorage.ts";
+import { useLessons } from "../panels/learn/lessons/lessonStore.ts";
 import { devicePresetOps } from "../panels/viewer/viewerModel.ts";
 import { ViewerPanel } from "../panels/viewer/ViewerPanel.tsx";
 import { AppShell } from "../shell/AppShell.tsx";
@@ -30,13 +32,31 @@ import { useCommands } from "../ui/commands/CommandProvider.tsx";
 import type { CommandRegistry } from "../ui/commands/commandRegistry.ts";
 import type { MenuEntry } from "../ui/Menu.tsx";
 import { toast } from "../ui/Toast.tsx";
+import { guardRpcRegistrar } from "./agentAccess.ts";
+import { reportIssue } from "./appActions.ts";
 import { AppDialogs } from "./AppDialogs.tsx";
+import { appPanels, useAppPanels } from "./appPanels.ts";
 import { ExternalChangeBanner } from "./ExternalChangeBanner.tsx";
+import { useHudAutoOpen } from "./hudAutoOpen.ts";
 import { learnNav, useLearnNav } from "./learnStore.ts";
+import { ServiceDialogs } from "./ServiceDialogs.tsx";
 import { getAppSession } from "./session.ts";
+import { dialogsFor } from "./sessionServices.ts";
+import { applyMotionPreference, settingsStore } from "./settings.ts";
 import { installTestHook, shouldInstallTestHook } from "./testHook.ts";
 import { useAppCommands } from "./useAppCommands.tsx";
+import { hasSeenWelcome, shouldShowWelcomeOnLaunch, useWelcome, welcomeStore } from "./welcome/welcomeStore.ts";
 import "./app.css";
+import "./workspace.css";
+
+const loadPatchEditor = () => import("../panels/patch-editor/PatchEditor.tsx");
+const PatchEditor = lazy(() => loadPatchEditor().then((m) => ({ default: m.PatchEditor })));
+const PatchEditorBreadcrumbs = lazy(() => import("../panels/patch-editor/components/Chrome.tsx").then((m) => ({ default: m.PatchEditorBreadcrumbs })));
+const LearnDrawer = lazy(() => import("../panels/learn/LearnDrawer.tsx").then((m) => ({ default: m.LearnDrawer })));
+const ConnectClaudeHost = lazy(() => import("../panels/connect/ConnectClaudeDialog.tsx").then((m) => ({ default: m.ConnectClaudeHost })));
+const WelcomeScreen = lazy(() => import("./welcome/WelcomeScreen.tsx").then((m) => ({ default: m.WelcomeScreen })));
+const SettingsDialog = lazy(() => import("./SettingsDialog.tsx").then((m) => ({ default: m.SettingsDialog })));
+const AboutDialog = lazy(() => import("./AboutDialog.tsx").then((m) => ({ default: m.AboutDialog })));
 
 export interface EditorAppProps {
   /** Default: the app-wide session. */
@@ -46,12 +66,43 @@ export interface EditorAppProps {
 /** Mount inside <CommandProvider> (and a Toaster). */
 export function EditorApp({ session }: EditorAppProps) {
   const [value] = useState(() => session ?? getAppSession());
+
+  // The MCP bridge, with writes refused while Settings → Claude is "Read only".
+  useEffect(() => {
+    const rpc = value.host?.rpc;
+    return rpc ? registerRpcHandlers(value, { rpc: guardRpcRegistrar(rpc, () => settingsStore.getState().agentPermission) }) : undefined;
+  }, [value]);
+
   return (
-    <EditorProvider session={value}>
+    <EditorProvider session={value} rpc={false}>
       <Workspace />
-      <ConnectClaudeHost onOpenGuide={(slug) => learnNav.getState().open({ kind: "guide", slug })} />
+      <Overlays />
       <AppDialogs />
+      <ServiceDialogs store={dialogsFor(value)} />
     </EditorProvider>
+  );
+}
+
+/** Dialogs and screens that load on first use. */
+function Overlays() {
+  const session = useEditorSession();
+  const connectOpen = useConnectClaude((s) => s.open);
+  const [connectLoaded, setConnectLoaded] = useState(connectOpen);
+  const welcomeOpen = useWelcome((s) => s.open);
+  const welcomeReason = useWelcome((s) => s.reason);
+  const panel = useAppPanels((s) => s.open);
+
+  useEffect(() => {
+    if (connectOpen) setConnectLoaded(true);
+  }, [connectOpen]);
+
+  return (
+    <Suspense fallback={null}>
+      {connectLoaded && <ConnectClaudeHost onOpenGuide={(slug) => learnNav.getState().open({ kind: "guide", slug })} />}
+      {welcomeOpen && <WelcomeScreen open reason={welcomeReason} onClose={() => welcomeStore.getState().hide()} />}
+      {panel === "settings" && <SettingsDialog open onOpenChange={(open) => !open && appPanels.getState().hide()} />}
+      {panel === "about" && <AboutDialog open onOpenChange={(open) => !open && appPanels.getState().hide()} onReportIssue={() => reportIssue(session)} />}
+    </Suspense>
   );
 }
 
@@ -62,6 +113,8 @@ const FILE_MENU: readonly (readonly [id: string, icon: ReactNode] | "separator")
   ["file.save", <Save size={14} />],
   ["file.saveAs", <SaveAll size={14} />],
   ["file.reveal", <FolderSearch size={14} />],
+  "separator",
+  ["file.close", <X size={14} />],
 ];
 
 /** Menu items for registered commands (titles, shortcuts, and enabled state from the registry). */
@@ -91,6 +144,15 @@ export function insertPosition(patches: Readonly<Record<Id, { ui: { x: number; y
   return { x: Math.max(...nodes.map((n) => n.ui.x)) + 240, y: Math.min(...nodes.map((n) => n.ui.y)) };
 }
 
+function PanelLoading({ label }: { label: string }) {
+  return (
+    <div className="sb-app-loading" role="status">
+      <span className="sb-app-loading__dot" aria-hidden />
+      {label}
+    </div>
+  );
+}
+
 function Workspace() {
   const session = useEditorSession();
   const { registry } = useCommands();
@@ -100,11 +162,48 @@ function Workspace() {
   const playing = useRuntimeState((s) => s.playing);
   const hudTab = useLayout((s) => s.hudTab);
   const hudCollapsed = useLayout((s) => s.collapsed.hud);
-  const learnView = useLearnNav((s) => s.view);
+  const requestedLearnView = useLearnNav((s) => s.view);
+  const lessonActive = useLessons((s) => s.active !== null);
+  const [learnView, setLearnView] = useState<LearnView | undefined>(undefined);
   const [titlebarInset] = useState(() => (getDesktopHostApi()?.platform === "darwin" ? 80 : 0));
 
   useAppCommands(session);
+  useHudAutoOpen(session, () => layoutStore.getState());
   useEffect(() => (shouldInstallTestHook() ? installTestHook(session) : undefined), [session]);
+
+  // Motion preference (Settings → Motion) on <html data-motion>.
+  useEffect(() => {
+    let release = applyMotionPreference(settingsStore.getState().motion);
+    const unsubscribe = settingsStore.subscribe((s, previous) => {
+      if (s.motion === previous.motion) return;
+      release();
+      release = applyMotionPreference(s.motion);
+    });
+    return () => {
+      release();
+      unsubscribe();
+    };
+  }, []);
+
+  // The welcome screen on the first launch (or every launch, when Settings asks for it).
+  useEffect(() => {
+    if (shouldShowWelcomeOnLaunch(hasSeenWelcome(), settingsStore.getState().showWelcomeOnLaunch)) welcomeStore.getState().show("launch");
+  }, []);
+
+  // A project opened from the OS, Open Recent, or Claude replaces whatever the welcome screen offered.
+  useEffect(
+    () =>
+      session.document.subscribe((s, previous) => {
+        if (s.projectPath && s.projectPath !== previous.projectPath) welcomeStore.getState().hide();
+      }),
+    [session],
+  );
+
+  // The patch editor is on screen in split mode; fetch it even when the canvas is showing alone.
+  useEffect(() => {
+    const timer = setTimeout(() => void loadPatchEditor().catch(() => undefined), 1200);
+    return () => clearTimeout(timer);
+  }, []);
 
   const layout = layoutStore.getState();
 
@@ -124,7 +223,9 @@ function Workspace() {
     const component = session.document.getState().doc.components[componentId];
     if (!component) return;
     const spec = session.registry.patches.get(type);
-    const result = session.document.getState().apply(insertPatchOps(componentId, type, insertPosition(component.patches)), { label: `Insert ${spec?.name ?? type}`, defaultComponent: componentId });
+    const position = insertPosition(component.patches);
+    const ops: Op[] = [{ op: "addPatch", component: componentId, patch: { ref: "inserted", type, ui: { x: Math.round(position.x), y: Math.round(position.y) } } }];
+    const result = session.document.getState().apply(ops, { label: `Insert ${spec?.name ?? type}`, defaultComponent: componentId });
     const id = result.idMap.inserted;
     if (!result.ok || !id) {
       toast({ title: result.errors[0]?.message ?? `Couldn't add ${spec?.name ?? type}.`, tone: "warn" });
@@ -148,6 +249,7 @@ function Workspace() {
       onTogglePlay={() => session.runtime.togglePlay()}
       onRestart={() => session.runtime.restart()}
       titlebarInset={titlebarInset}
+      drawerDocked={lessonActive && learnView?.kind === "lesson"}
       slots={{
         banner: <ExternalChangeBanner />,
         claude: <ConnectClaudeButton />,
@@ -155,13 +257,29 @@ function Workspace() {
         viewer: <ViewerPanel onCollapse={() => layout.toggleCollapsed("viewer", true)} />,
         canvas: <CanvasPanel />,
         patchEditor: (
-          <Panel title="Patches" scope="patchEditor" surface="sunken" className="sb-app-patches" headerContent={<PatchEditorBreadcrumbs />}>
-            <PatchEditor showBreadcrumbs={false} />
+          <Panel
+            title="Patches"
+            scope="patchEditor"
+            surface="sunken"
+            className="sb-app-patches"
+            headerContent={
+              <Suspense fallback={null}>
+                <PatchEditorBreadcrumbs />
+              </Suspense>
+            }
+          >
+            <Suspense fallback={<PanelLoading label="Loading the patch editor…" />}>
+              <PatchEditor showBreadcrumbs={false} />
+            </Suspense>
           </Panel>
         ),
         inspector: <InspectorPanel onCollapse={() => layout.toggleCollapsed("inspector", true)} onLearnMore={(type) => learnNav.getState().open({ kind: "patches", type })} />,
         hud: <Hud tab={hudTab} onTabChange={(tab) => layout.setHudTab(tab)} collapsed={hudCollapsed} onToggleCollapse={() => layout.toggleCollapsed("hud")} onConnectClaude={() => connectClaudeStore.getState().show()} />,
-        learn: <LearnDrawer onClose={() => layout.setDrawer(null)} {...(learnView ? { view: learnView } : {})} onConnectClaude={() => connectClaudeStore.getState().show()} onInsertPatch={insertPatch} />,
+        learn: (
+          <Suspense fallback={<PanelLoading label="Loading Learn…" />}>
+            <LearnDrawer onClose={() => layout.setDrawer(null)} {...(requestedLearnView ? { view: requestedLearnView } : {})} onViewChange={setLearnView} onConnectClaude={() => connectClaudeStore.getState().show()} onInsertPatch={insertPatch} />
+          </Suspense>
+        ),
       }}
     />
   );

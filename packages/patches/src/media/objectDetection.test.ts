@@ -1,9 +1,16 @@
 import type { LayerRef } from "@sonobe/core";
 import { describe, expect, it } from "vitest";
+import type { PatchDefinition, PixelReading } from "@sonobe/engine";
 import { createPatchHarness } from "../infra/index.ts";
 import { objectDetectionPatch } from "./objectDetection.ts";
-import type { PixelReading } from "./platform.ts";
 import { SALIENCY_GRID, grayGrid, saliencyMap, saliencyRegions } from "./saliency.ts";
+
+/** The definition with a switch for `ctx.muted`, so a test can mute a running patch. */
+function muteSwitch<S>(definition: PatchDefinition<S>) {
+  let muted = false;
+  const switched: PatchDefinition<S> = { ...definition, evaluate: (ctx) => definition.evaluate(Object.create(ctx, { muted: { get: () => muted } })) };
+  return { definition: switched, mute: (on: boolean) => void (muted = on) };
+}
 
 /** An RGBA picture: black with white rectangles [x, y, w, h]. */
 function picture(width: number, height: number, rects: [number, number, number, number][] = [], fill = 0): Uint8ClampedArray {
@@ -109,7 +116,7 @@ describe("objectDetection", () => {
       inputs: { layer: { layerId: "photo" }, mode: "attention" },
       services: {
         platform: { media: { close: () => {}, startRecording: () => {}, stopRecording: async () => null, readPixels: (layer: LayerRef) => (reads.push(layer), reading) } } as never,
-        layerInfo: () => ({ enabled: true, position: [100, 200], size: [320, 320], scale: [2, 2], anchor: [0.5, 0.5], parent: null, contentSize: [320, 320] }),
+        layerInfo: () => ({ type: "image", enabled: true, position: [100, 200], size: [320, 320], scale: [2, 2], anchor: [0.5, 0.5], parent: null, worldTransform: [2, 0, 0, 0, 0, 2, 0, 0, 0, 0, 1, 0, -220, -120, 0, 1], contentSize: [320, 320] }),
       },
     });
     const f = h.step({ dt: 0.05 });
@@ -158,8 +165,9 @@ describe("objectDetection", () => {
   });
 
   it("outputs idle values while muted", () => {
-    const h = createPatchHarness(objectDetectionPatch, { inputs: { layer: { layerId: "photo" } }, services: { platform: { media: { close: () => {}, startRecording: () => {}, stopRecording: async () => null, readPixels: () => pixels(1) } } as never } });
-    h.node.muted = true;
+    const { definition, mute } = muteSwitch(objectDetectionPatch);
+    const h = createPatchHarness(definition, { inputs: { layer: { layerId: "photo" } }, services: { platform: { media: { close: () => {}, startRecording: () => {}, stopRecording: async () => null, readPixels: () => pixels(1) } } as never } });
+    mute(true);
     expect(h.step().outputs).toMatchObject({ regionDetected: false, count: 0, available: true, error: false });
   });
 });

@@ -20,6 +20,8 @@ export interface MenuContext {
   paste: () => void;
   /** Start editing a node's title. */
   rename: (nodeId: string) => void;
+  /** Choose a property of a layer to drive. */
+  chooseLayerProperty?: (layerId: Id) => void;
 }
 
 const sep = (id: string): MenuEntry => ({ type: "separator", id });
@@ -101,10 +103,13 @@ export function commentMenu(ctx: MenuContext, data: CommentNodeData, edit: () =>
 
 export function layerMenu(ctx: MenuContext, data: LayerNodeData): MenuEntry[] {
   const { actions } = ctx;
-  return [
-    { id: "reveal", label: "Reveal Layer", onSelect: () => actions.revealLayer(data.layerId) },
-    ...(data.inputs.length ? [{ id: "disconnect", label: "Disconnect All Properties", danger: true, onSelect: () => actions.disconnect(data.inputs.map((p) => p.address), `Disconnect ${data.title}`) } as MenuEntry] : []),
-  ];
+  const driven = data.inputs.filter((p) => p.connected);
+  const undriven = data.inputs.length - driven.length;
+  const entries: MenuEntry[] = [{ id: "reveal", label: "Reveal Layer", onSelect: () => actions.revealLayer(data.layerId) }];
+  if (ctx.chooseLayerProperty) entries.push({ id: "drive", label: "Drive a Property…", description: "Show another property here and pick a patch for it", onSelect: () => ctx.chooseLayerProperty!(data.layerId) });
+  if (undriven > 0) entries.push({ id: "hide", label: undriven === 1 ? "Hide Undriven Property" : "Hide Undriven Properties", onSelect: () => actions.removeLayerTargets(data.layerId) });
+  if (driven.length) entries.push(sep("s1"), { id: "disconnect", label: "Disconnect All Properties", danger: true, onSelect: () => actions.disconnect(driven.map((p) => p.address), `Disconnect ${data.title}`) });
+  return entries;
 }
 
 export function paneMenu(ctx: MenuContext, at: { x: number; y: number }): MenuEntry[] {

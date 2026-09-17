@@ -9,6 +9,7 @@ import type {
   Component,
   EnumOption,
   Id,
+  InputCountRange,
   InterfacePort,
   LayerNode,
   LayerTypeSpec,
@@ -21,15 +22,19 @@ import type {
   SonobeDocument,
   ValueType,
 } from "./types.ts";
-import { coerce, decodeInput, inferValueType, isDecodedLoop } from "./values.ts";
+import { decodeInput, isDecodedLoop, isLoopLiteral, isValueType, zeroLiteral } from "./values.ts";
 
 export const COMPONENT_PATCH_TYPE = "component";
 export const COMPONENT_INSTANCE_LAYER_TYPE = "componentInstance";
 
-/** A port with its concrete value type ("variant" resolved). */
+/**
+ * A port with its concrete value type ("variant" resolved). For spec ports `default` stays
+ * document-encoded (see PortSpec.default and resolveNodePorts); published interface ports carry
+ * decoded values.
+ */
 export interface ResolvedPort extends PortSpec {
   type: ValueType;
-  /** 1-based position for ports expanded from a variadic spec. */
+  /** 1-based position for ports expanded from a variadic spec (option0 is 1 when startIndex is 0). */
   variadicIndex?: number;
   /** True for ports that come from a component's published interface. */
   fromInterface?: boolean;
@@ -45,7 +50,9 @@ export interface ResolvedPorts {
   spec: PatchSpec;
   /** Effective variant (the node's typeParam, or the first variant). */
   typeParam: ValueType | undefined;
-  /** Effective variadic count (clamped to the spec's range). */
+  /** Allowed typeParam values for this node: variants declared by dynamicPorts, else the spec's. */
+  variants?: ValueType[];
+  /** Effective count (clamped to the spec's variadic range or inputCountRange). */
   inputCount: number | undefined;
   inputs: ResolvedPort[];
   outputs: ResolvedPort[];
@@ -88,18 +95,63 @@ export function getLayerTypeSpec(registry: Registry, type: string): LayerTypeSpe
   return registry.layers.get(type);
 }
 
-/** The effective variant for a node: its typeParam when allowed, else the spec's first variant. */
-export function resolveTypeParam(spec: PatchSpec, typeParam: string | undefined): ValueType | undefined {
-  if (!spec.variants?.length) return undefined;
-  return typeParam !== undefined && (spec.variants as string[]).includes(typeParam) ? (typeParam as ValueType) : spec.variants[0];
+/**
+ * The effective variant for a node: its typeParam when allowed, else the first variant.
+ * `variants` (declared by the node's dynamicPorts) replaces the spec's variants when non-empty.
+ */
+export function resolveTypeParam(spec: PatchSpec, typeParam: string | undefined, variants?: readonly ValueType[]): ValueType | undefined {
+  const allowed = variants?.length ? variants : spec.variants;
+  if (!allowed?.length) return undefined;
+  return typeParam !== undefined && (allowed as readonly string[]).includes(typeParam) ? (typeParam as ValueType) : allowed[0];
 }
 
-/** The effective variadic input count for a node, clamped to the spec range. */
+/** The inputCount range of a spec: its VariadicSpec's range, else `inputCountRange`; undefined for fixed ports. */
+export function getInputCountRange(spec: PatchSpec): InputCountRange | undefined {
+  const range = spec.variadic ?? spec.inputCountRange;
+  return range ? { min: range.min, max: range.max, defaultCount: range.defaultCount } : undefined;
+}
+
+/** The effective input count for a node, clamped to the spec's variadic range or inputCountRange. */
 export function resolveInputCount(spec: PatchSpec, inputCount: number | undefined): number | undefined {
-  const v = spec.variadic;
-  if (!v) return undefined;
-  const n = inputCount === undefined || !Number.isFinite(inputCount) ? v.defaultCount : Math.round(inputCount);
-  return Math.min(v.max, Math.max(v.min, n));
+  const range = getInputCountRange(spec);
+  if (!range) return undefined;
+  const n = inputCount === undefined || !Number.isFinite(inputCount) ? range.defaultCount : Math.round(inputCount);
+  return Math.min(range.max, Math.max(range.min, n));
+}
+
+interface DynamicPorts {
+  inputs: readonly PortSpec[];
+  outputs: readonly PortSpec[];
+  variants: ValueType[] | undefined;
+  error?: string;
+}
+
+/** Run a spec's dynamicPorts defensively: a throw becomes `error`, malformed results become empty lists. */
+function runDynamicPorts(spec: PatchSpec, node: PatchNode, doc: SonobeDocument): DynamicPorts | undefined {
+  if (!spec.dynamicPorts) return undefined;
+  try {
+    const dyn = spec.dynamicPorts(node, doc);
+    const variants = Array.isArray(dyn?.variants) ? dyn.variants.filter(isValueType) : [];
+    return {
+      inputs: Array.isArray(dyn?.inputs) ? dyn.inputs : [],
+      outputs: Array.isArray(dyn?.outputs) ? dyn.outputs : [],
+      variants: variants.length ? variants : undefined,
+    };
+  } catch (err) {
+    return { inputs: [], outputs: [], variants: undefined, error: err instanceof Error ? err.message : String(err) };
+  }
+}
+
+function effectiveVariants(spec: PatchSpec, dynamic: readonly ValueType[] | undefined): ValueType[] | undefined {
+  const variants = dynamic?.length ? dynamic : spec.variants;
+  return variants?.length ? [...variants] : undefined;
+}
+
+/** Allowed typeParam values for a node: the variants its dynamicPorts declare, else the spec's. Undefined without variants. */
+export function resolveNodeVariants(doc: SonobeDocument, node: PatchNode, registry: Registry): ValueType[] | undefined {
+  const spec = getPatchSpec(registry, node.type);
+  if (!spec) return undefined;
+  return effectiveVariants(spec, runDynamicPorts(spec, node, doc)?.variants);
 }
 
 const PROP_CATEGORIES: ReadonlySet<string> = new Set(["basics", "layout", "content", "text", "fill", "stroke", "shadow", "transform", "filters", "interaction"]);
@@ -145,40 +197,62 @@ function mergePorts(base: ResolvedPort[], extra: readonly PortSpec[], resolveTyp
   return out;
 }
 
-/** Resolve the concrete ports of a patch node (which need not be in the document yet). */
+/**
+ * Resolve the concrete ports of a patch node (which need not be in the document yet).
+ *
+ * - "variant" ports take the effective typeParam; dynamicPorts may declare the allowed variants.
+ * - Defaults stay document-encoded literals (see PortSpec.default). For the effective variant, a
+ *   `variantDefaults` entry wins (by port key, then by variadic base key). Otherwise a variant port
+ *   keeps its declared default for the first variant and gets the type's zero value (zeroLiteral)
+ *   for other variants. Loop literals ({ loop: [...] }) are never converted.
+ * - Variadic ports expand from `startIndex` (default 1) on the side named by `direction`
+ *   (default inputs), after that side's static ports.
+ * - Dynamic ports merge last, unchanged, and replace static ports with the same key.
+ */
 export function resolveNodePorts(doc: SonobeDocument, node: PatchNode, registry: Registry): ResolvedPorts | undefined {
   const spec = getPatchSpec(registry, node.type);
   if (!spec) return undefined;
-  const typeParam = resolveTypeParam(spec, node.typeParam);
+  const dynamic = runDynamicPorts(spec, node, doc);
+  const variants = effectiveVariants(spec, dynamic?.variants);
+  const typeParam = resolveTypeParam(spec, node.typeParam, dynamic?.variants);
   const resolveType = (t: PortSpec["type"]): ValueType => (t === "variant" ? (typeParam ?? "any") : t);
-  const resolvePort = (p: PortSpec): ResolvedPort => {
+  const overrides = typeParam ? spec.variantDefaults?.[typeParam] : undefined;
+  const resolvePort = (p: PortSpec, variadicKey?: string): ResolvedPort => {
     const type = resolveType(p.type);
     const port: ResolvedPort = { ...p, type };
-    if (p.type === "variant" && p.default !== undefined && typeParam) port.default = coerce(p.default, inferValueType(p.default), type);
+    if (p.type !== "variant" || typeParam === undefined) return port;
+    if (overrides && Object.hasOwn(overrides, p.key)) port.default = overrides[p.key];
+    else if (overrides && variadicKey !== undefined && Object.hasOwn(overrides, variadicKey)) port.default = overrides[variadicKey];
+    else if (p.default !== undefined && typeParam !== variants?.[0] && !isLoopLiteral(p.default)) {
+      const zero = zeroLiteral(type, p.enumOptions);
+      if (zero === undefined) delete port.default;
+      else port.default = zero;
+    }
     return port;
   };
-  let inputs = spec.inputs.map(resolvePort);
+  let inputs = spec.inputs.map((p) => resolvePort(p));
+  let outputs = spec.outputs.map((p) => resolvePort(p));
   const inputCount = resolveInputCount(spec, node.inputCount);
-  if (spec.variadic && inputCount !== undefined) {
-    const v = spec.variadic;
-    for (let n = 1; n <= inputCount; n++) {
-      inputs.push(resolvePort({ key: `${v.key}${n}`, name: `${v.name} ${n}`, type: v.type, default: v.default, description: v.description }));
-      inputs[inputs.length - 1]!.variadicIndex = n;
+  const v = spec.variadic;
+  if (v && inputCount !== undefined) {
+    const start = v.startIndex ?? 1;
+    const side = v.direction === "outputs" ? outputs : inputs;
+    for (let i = 0; i < inputCount; i++) {
+      const n = start + i;
+      const declared: PortSpec = { key: `${v.key}${n}`, name: `${v.name} ${n}`, type: v.type, description: v.description };
+      if (v.default !== undefined) declared.default = v.default;
+      const port = resolvePort(declared, v.key);
+      port.variadicIndex = i + 1;
+      side.push(port);
     }
   }
-  let outputs = spec.outputs.map(resolvePort);
-  let dynamicPortsError: string | undefined;
-  if (spec.dynamicPorts) {
-    try {
-      const dyn = spec.dynamicPorts(node, doc);
-      inputs = mergePorts(inputs, dyn.inputs, resolveType);
-      outputs = mergePorts(outputs, dyn.outputs, resolveType);
-    } catch (err) {
-      dynamicPortsError = err instanceof Error ? err.message : String(err);
-    }
+  if (dynamic && dynamic.error === undefined) {
+    inputs = mergePorts(inputs, dynamic.inputs, resolveType);
+    outputs = mergePorts(outputs, dynamic.outputs, resolveType);
   }
   const result: ResolvedPorts = { spec, typeParam, inputCount, inputs, outputs };
-  if (dynamicPortsError !== undefined) result.dynamicPortsError = dynamicPortsError;
+  if (variants) result.variants = variants;
+  if (dynamic?.error !== undefined) result.dynamicPortsError = dynamic.error;
   return result;
 }
 

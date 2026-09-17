@@ -13,7 +13,7 @@ export type { DomTextMeasurerOptions, TextLayout, TextStyle } from "./textMeasur
 export { createDeviceFrame, getDeviceFrameLayout, orientSafeArea } from "./deviceFrame.ts";
 export type { DeviceButton, DeviceCutout, DeviceFrame, DeviceFrameLayout, DeviceFrameOptions, Orientation, SafeArea } from "./deviceFrame.ts";
 
-export { attachInputCapture, clientToPrototype, effectiveScale, eventTime, pointerTypeOf } from "./input.ts";
+export { attachInputCapture, buttonsOf, clientToPrototype, effectiveScale, eventTime, pointerTypeOf } from "./input.ts";
 export type { ClientRectLike, InputCaptureOptions, PointerState } from "./input.ts";
 
 export { cursorAt, findNodesAt } from "./sceneQuery.ts";

@@ -3,13 +3,14 @@
  * (patch components and layer component instances) are inlined recursively, variables compile to
  * implicit edges, and nodes are ordered topologically. Inside a strongly connected component the
  * edges that close a cycle become back-edges: their consumer evaluates first and reads the
- * driver's previous-frame value. Edges into Delay One Frame are preferred as back-edges.
+ * driver's previous-frame value. Back-edges are chosen by the same rule as core's feedback-loop
+ * diagnostics: edges into Delay One Frame first, then visually backwards edges (source ui.x ≥
+ * target ui.x), then target id order.
  */
 
 import {
   COMPONENT_INSTANCE_LAYER_TYPE,
   COMPONENT_PATCH_TYPE,
-  defaultForPort,
   interfacePortToPort,
   isLayerInput,
   isLinkInput,
@@ -29,12 +30,12 @@ import {
   type Value,
   type ValueType,
 } from "@sonobe/core";
-import type { EngineRegistry, Loop, RuntimeIssue } from "../types.ts";
+import type { EngineRegistry, Loop, PatchDefinition, RuntimeIssue } from "../types.ts";
 import { DELAY1_TYPE, VARIABLE_BROADCASTER_TYPE, VARIABLE_RECEIVER_TYPE, withBuiltinSpecs } from "./builtins.ts";
-import { bypassMap, type InputSlot, type OutputSlot, type RuntimePatchDefinition } from "./evaluate.ts";
+import { bypassMap, type InputSlot, type OutputSlot } from "./evaluate.ts";
 import type { Binding, Broadcaster, CLayer, CNode, CNodeKind, Scope, ScopeInput } from "./graph.ts";
 import { makeLoop } from "./loop.ts";
-import { decodeStored, normalizeDefault, valuesEqual, zeroValue } from "./values.ts";
+import { decodeStored, normalizeDefault, portDefault, valuesEqual, zeroValue } from "./values.ts";
 
 /** Component instances nest at most this deep. */
 export const MAX_COMPONENT_DEPTH = 32;
@@ -47,8 +48,33 @@ export interface CompiledGraph {
   order: CNode[];
   scopes: Scope[];
   issues: RuntimeIssue[];
-  /** Resolve a root-scope address ("patch.port", "@layer.key") to a binding and its target type. */
-  resolveLink(address: string): { binding: Binding; type: ValueType } | null;
+  /** Resolve an address ("patch.port", "@layer.key", "$in.key") in a scope (default: the root) to a binding and its target type. */
+  resolveLink(address: string, scope?: Scope): { binding: Binding; type: ValueType } | null;
+}
+
+/** True when the spec declares port `key` on `side` as "variant" (static ports and variadic expansions). */
+export function declaredVariant(spec: PatchSpec, key: string, side: "inputs" | "outputs"): boolean {
+  const own = spec[side].find((p) => p.key === key);
+  if (own) return own.type === "variant";
+  const v = spec.variadic;
+  if (v && key.startsWith(v.key) && /^\d+$/.test(key.slice(v.key.length))) return v.type === "variant";
+  return false;
+}
+
+/**
+ * PatchContext.inputCount: core's clamped variadic count; else node.inputCount clamped to the spec's
+ * `inputCountRange` (else its defaultCount); else node.inputCount ?? 0.
+ */
+export function effectiveInputCount(spec: PatchSpec, node: PatchNode, resolved: number | undefined): number {
+  if (resolved !== undefined) return resolved;
+  const raw = node.inputCount;
+  const range = (spec as unknown as { inputCountRange?: unknown }).inputCountRange as { min?: unknown; max?: unknown; defaultCount?: unknown } | undefined;
+  if (range && typeof range === "object" && typeof range.min === "number" && typeof range.max === "number") {
+    const fallback = typeof range.defaultCount === "number" ? range.defaultCount : range.min;
+    if (typeof raw !== "number" || !Number.isFinite(raw)) return fallback;
+    return Math.min(range.max, Math.max(range.min, Math.round(raw)));
+  }
+  return typeof raw === "number" && Number.isFinite(raw) ? raw : 0;
 }
 
 interface Label {
@@ -232,7 +258,7 @@ export function compileDocument(doc: SonobeDocument, engineRegistry: EngineRegis
         continue;
       }
       let kind: CNodeKind;
-      let def: RuntimePatchDefinition | null = null;
+      let def: PatchDefinition | null = null;
       if (pnode.type === DELAY1_TYPE) kind = "delay1";
       else if (pnode.type === VARIABLE_RECEIVER_TYPE) kind = "receiver";
       else {
@@ -246,19 +272,19 @@ export function compileDocument(doc: SonobeDocument, engineRegistry: EngineRegis
       const cnode = baseNode(scope, id, pnode, kind, pnode.type);
       cnode.def = def;
       cnode.typeParam = ports.typeParam;
-      cnode.inputCount = ports.inputCount ?? 0;
+      cnode.inputCount = effectiveInputCount(ports.spec, pnode, ports.inputCount);
       cnode.muted = pnode.muted === true || scope.muted;
       const variantDefaults = ports.typeParam ? ports.spec.variantDefaults?.[ports.typeParam] : undefined;
       cnode.outputs = ports.outputs.map((p): OutputSlot => {
         const wholeLoop = p.wholeLoop === true && kind === "patch";
         const zero = wholeLoop ? makeLoop([]) : zeroValue(p.type, p.enumOptions);
         const declared = normalizeDefault(p.default, p.type);
-        return { key: p.key, type: p.type, wholeLoop, pulse: p.type === "pulse", initial: p.type === "pulse" ? false : (declared ?? zero), zero };
+        return { key: p.key, type: p.type, variant: declaredVariant(ports.spec, p.key, "outputs"), wholeLoop, pulse: p.type === "pulse", initial: p.type === "pulse" ? false : (declared ?? zero), zero };
       });
       if (kind === "receiver") {
         const type = cnode.outputs[0]?.type ?? "number";
         const zero = zeroValue(type);
-        cnode.inputs = [{ key: "$source", type, wholeLoop: false, pulseSource: false, connected: true, default: zero, zero }];
+        cnode.inputs = [{ key: "$source", type, variant: true, wholeLoop: false, pulseSource: false, connected: true, default: zero, zero }];
         cnode.mutedBehavior = "zero";
       } else {
         const inputPorts = ports.inputs;
@@ -266,9 +292,9 @@ export function compileDocument(doc: SonobeDocument, engineRegistry: EngineRegis
         cnode.inputs = inputPorts.map((p): InputSlot => {
           const raw = variantDefaults?.[p.key] ?? p.default;
           const wholeLoop = p.wholeLoop === true && kind === "patch";
-          const fallback = wholeLoop && raw === undefined ? makeLoop([]) : defaultForPort(p);
+          const fallback = wholeLoop && raw === undefined ? makeLoop([]) : portDefault(p);
           const value = normalizeDefault(raw, p.type) ?? fallback;
-          return { key: p.key, type: p.type, wholeLoop, pulseSource: false, connected: false, default: value, zero: zeroValue(p.type, p.enumOptions) };
+          return { key: p.key, type: p.type, variant: declaredVariant(ports.spec, p.key, "inputs"), wholeLoop, pulseSource: false, connected: false, default: value, zero: zeroValue(p.type, p.enumOptions) };
         });
         cnode.mutedBehavior = def?.mutedBehavior ?? "bypass";
       }
@@ -295,7 +321,8 @@ export function compileDocument(doc: SonobeDocument, engineRegistry: EngineRegis
       }
       const props = resolveLayerProps(doc, scope.component.id, node, registry) ?? [];
       const defaults: Record<string, Value> = {};
-      for (const p of props) defaults[p.key] = normalizeDefault(p.default, p.type) ?? defaultForPort(p);
+      // A prop declared with a null default (cornerRadii, gradient, image...) stays null while unset.
+      for (const p of props) defaults[p.key] = p.default === null ? null : (normalizeDefault(p.default, p.type) ?? portDefault(p));
       const layer: CLayer = {
         id: node.id,
         type: node.type,
@@ -403,7 +430,11 @@ export function compileDocument(doc: SonobeDocument, engineRegistry: EngineRegis
       return constBinding(fallback, prop.type);
     }
     pendingProps.add(pendingKey);
-    const { binding } = compileStored(layer.scope, layer.node.props[key], prop.type, fallback, { layerId: layer.id, text: `@${layer.id}.${key}` });
+    const stored = layer.node.props[key];
+    const { binding } =
+      stored === null && prop.default === null
+        ? { binding: constBinding(null, prop.type) }
+        : compileStored(layer.scope, stored, prop.type, fallback, { layerId: layer.id, text: `@${layer.id}.${key}` });
     pendingProps.delete(pendingKey);
     layer.propBindings.set(key, binding);
     return binding;
@@ -441,7 +472,7 @@ export function compileDocument(doc: SonobeDocument, engineRegistry: EngineRegis
     const ports = resolveNodePorts(doc, b.node, registry);
     const port = ports?.inputs.find((p) => p.key === "value");
     const type = port?.type ?? b.type;
-    const fallback = port ? (normalizeDefault(port.default, type) ?? defaultForPort(port)) : zeroValue(type);
+    const fallback = port ? (normalizeDefault(port.default, type) ?? portDefault(port)) : zeroValue(type);
     const { binding } = compileStored(level, b.node.inputs.value, type, fallback, { patchId: b.id, text: `Patch "${b.id}"` });
     broadcasterBindings.set(b, binding);
     return binding;
@@ -551,30 +582,32 @@ export function compileDocument(doc: SonobeDocument, engineRegistry: EngineRegis
   }
   const order = orderNodes(nodes);
   for (const cnode of order) {
-    if (cnode.kind !== "delay1") continue;
+    if (cnode.kind === "copies") continue;
     cnode.bindings.forEach((b, i) => {
       const deps: CNode[] = [];
       bindingDeps(b, deps);
-      cnode.feedback[i] = deps.some((d) => d.order >= cnode.order);
+      cnode.feedback[i] = deps.some((d) => d !== cnode && d.order >= cnode.order);
     });
   }
-  const links = new Map<string, { binding: Binding; type: ValueType } | null>();
-  const resolveLink = (address: string): { binding: Binding; type: ValueType } | null => {
-    if (links.has(address)) return links.get(address)!;
+  const links = new Map<Scope, Map<string, { binding: Binding; type: ValueType } | null>>();
+  const resolveLink = (address: string, scope: Scope = root): { binding: Binding; type: ValueType } | null => {
+    let cache = links.get(scope);
+    if (!cache) links.set(scope, (cache = new Map()));
+    if (cache.has(address)) return cache.get(address)!;
     const saved = issues.length;
-    const binding = compileLink(root, address, { text: address });
+    const binding = compileLink(scope, address, { text: address });
     issues.length = saved;
     let result: { binding: Binding; type: ValueType } | null = null;
     if (binding) {
       let type = binding.type;
       const a = parseAddress(address);
-      const layer = a?.kind === "layer" ? root.layerIndex.get(a.id) : undefined;
+      const layer = a?.kind === "layer" ? scope.layerIndex.get(a.id) : undefined;
       if (a && layer && !layer.outputs.some((o) => o.key === a.key) && !layer.instance?.component.interface.outputs[a.key]) {
         type = layer.props.get(a.key)?.type ?? type;
       }
       result = { binding, type };
     }
-    links.set(address, result);
+    cache.set(address, result);
     return result;
   };
   return { doc, registry, root, order, scopes, issues, resolveLink };
@@ -624,7 +657,7 @@ function breakPassThroughCycles(scopes: readonly Scope[], issue: (code: string, 
   for (const scope of scopes) for (const input of scope.inputs) visitInput(input);
 }
 
-function delay1Definition(cnode: CNode, spec: PatchSpec): RuntimePatchDefinition<{ seeded: boolean; held: Value }> {
+function delay1Definition(cnode: CNode, spec: PatchSpec): PatchDefinition<{ seeded: boolean; held: Value }> {
   return {
     ...spec,
     state: () => ({ seeded: false, held: undefined }),
@@ -748,8 +781,8 @@ function stronglyConnected(n: number, succ: readonly number[][]): { compOf: Int3
 
 /**
  * Deterministic evaluation order: components of the condensation DAG in topological order
- * (ties by compile order); inside a cycle, edges into delay1 are dropped first, then the
- * cheapest node to force (copies nodes, then compile order) goes first when nothing is free.
+ * (ties by compile order); inside a cycle, back-edges are chosen by `orderCycle`'s rule and the
+ * rest is ordered topologically.
  */
 function orderNodes(nodes: CNode[]): CNode[] {
   const n = nodes.length;
@@ -784,32 +817,102 @@ function orderNodes(nodes: CNode[]): CNode[] {
   return order;
 }
 
+/** A node's position in each scope from its own up to the root: the node itself, then the component patch that contains it. */
+function visualChain(node: CNode): { scope: Scope; key: string; x: number | undefined }[] {
+  const out: { scope: Scope; key: string; x: number | undefined }[] = [];
+  const patchX = (scope: Scope, id: Id) => {
+    const x = scope.component.patches[id]?.ui?.x;
+    return typeof x === "number" && Number.isFinite(x) ? x : undefined;
+  };
+  if (node.kind === "copies") {
+    const child = node.copiesOf!;
+    out.push({ scope: node.scope, key: child.instanceId!, x: child.kind === "patchInstance" ? patchX(node.scope, child.instanceId!) : undefined });
+  } else {
+    out.push({ scope: node.scope, key: node.id, x: patchX(node.scope, node.id) });
+  }
+  for (let s: Scope = node.scope; s.parent; s = s.parent) {
+    out.push({ scope: s.parent, key: s.instanceId!, x: s.kind === "patchInstance" ? patchX(s.parent, s.instanceId!) : undefined });
+  }
+  return out;
+}
+
+/**
+ * source ui.x ≥ target ui.x, compared in the nearest scope containing both (a patch inside a
+ * component is placed where its component patch is). False when either has no position there or
+ * both sit in the same component patch.
+ */
+function visuallyBackwards(source: CNode, target: CNode): boolean {
+  const b = visualChain(target);
+  for (const ea of visualChain(source)) {
+    const eb = b.find((e) => e.scope === ea.scope);
+    if (!eb) continue;
+    return ea.key !== eb.key && ea.x !== undefined && eb.x !== undefined && ea.x >= eb.x;
+  }
+  return false;
+}
+
+/**
+ * Order one strongly connected component. Back-edges (edges whose consumer reads last frame's
+ * value) follow core's feedback rule: every edge into a Delay One Frame; then, while a cycle
+ * remains, one edge per remaining cycle, preferring visually backwards edges, then the lowest
+ * target id (then source id, then compile order). The rest is ordered topologically.
+ */
 function orderCycle(nodes: readonly CNode[], group: readonly number[], succ: readonly number[][], compOf: Int32Array, comp: number): number[] {
+  const n = nodes.length;
+  const edgeKey = (v: number, w: number) => v * n + w;
+  const back = new Set<number>();
+  for (const v of group) for (const w of succ[v]!) if (compOf[w] === comp && nodes[w]!.kind === "delay1") back.add(edgeKey(v, w));
+  const kept = (v: number, w: number) => compOf[w] === comp && !back.has(edgeKey(v, w));
+
+  const prefer = (a: readonly [number, number], b: readonly [number, number]): boolean => {
+    const ta = visuallyBackwards(nodes[a[0]]!, nodes[a[1]]!) ? 0 : 1;
+    const tb = visuallyBackwards(nodes[b[0]]!, nodes[b[1]]!) ? 0 : 1;
+    if (ta !== tb) return ta < tb;
+    const [sa, wa] = [nodes[a[0]]!, nodes[a[1]]!];
+    const [sb, wb] = [nodes[b[0]]!, nodes[b[1]]!];
+    if (wa.id !== wb.id) return wa.id < wb.id;
+    if (sa.id !== sb.id) return sa.id < sb.id;
+    if (a[1] !== b[1]) return a[1] < b[1];
+    return a[0] < b[0];
+  };
+
+  const local = new Map<number, number>();
+  group.forEach((v, i) => local.set(v, i));
+  for (;;) {
+    const localSucc = group.map((v) => succ[v]!.filter((w) => kept(v, w)).map((w) => local.get(w)!));
+    const { compOf: sub, count } = stronglyConnected(group.length, localSucc);
+    const parts: number[][] = Array.from({ length: count }, () => []);
+    for (let i = 0; i < group.length; i++) parts[sub[i]!]!.push(group[i]!);
+    let broke = false;
+    for (let c = 0; c < count; c++) {
+      const part = parts[c]!;
+      if (part.length < 2) continue;
+      let best: [number, number] | null = null;
+      for (const v of part) {
+        for (const w of succ[v]!) {
+          if (!kept(v, w) || sub[local.get(w)!] !== c) continue;
+          if (!best || prefer([v, w], best)) best = [v, w];
+        }
+      }
+      if (best) {
+        back.add(edgeKey(best[0], best[1]));
+        broke = true;
+      }
+    }
+    if (!broke) break;
+  }
+
   const indegree = new Map<number, number>();
   for (const v of group) indegree.set(v, 0);
-  const breaks = (w: number) => nodes[w]!.kind === "delay1";
-  for (const v of group) for (const w of succ[v]!) if (compOf[w] === comp && !breaks(w)) indegree.set(w, indegree.get(w)! + 1);
+  for (const v of group) for (const w of succ[v]!) if (kept(v, w)) indegree.set(w, indegree.get(w)! + 1);
   const heap = new MinHeap((x) => x);
-  const done = new Set<number>();
   for (const v of group) if (indegree.get(v) === 0) heap.push(v);
   const out: number[] = [];
-  const rank = (v: number) => (nodes[v]!.kind === "copies" || nodes[v]!.kind === "delay1" ? 0 : 1);
-  while (out.length < group.length) {
-    if (!heap.size) {
-      let pick = -1;
-      for (const v of group) {
-        if (done.has(v)) continue;
-        if (pick < 0 || rank(v) < rank(pick) || (rank(v) === rank(pick) && v < pick)) pick = v;
-      }
-      indegree.set(pick, 0);
-      heap.push(pick);
-    }
+  while (heap.size) {
     const v = heap.pop();
-    if (done.has(v)) continue;
-    done.add(v);
     out.push(v);
     for (const w of succ[v]!) {
-      if (compOf[w] !== comp || done.has(w) || breaks(w)) continue;
+      if (!kept(v, w)) continue;
       const d = indegree.get(w)! - 1;
       indegree.set(w, d);
       if (d === 0) heap.push(w);

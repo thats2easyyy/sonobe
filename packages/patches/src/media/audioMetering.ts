@@ -4,10 +4,9 @@
  * per frame because Waveform Data is a whole loop.
  */
 
-import type { AudioMeterReading } from "./platform.ts";
+import type { AudioMeterReading } from "@sonobe/engine";
 import { clamp, definePatch, finiteOr, loopOf, toText, warnOnce } from "../infra/index.ts";
-import { audioMeter, layerTypeOf, mediaPlatform } from "./platform.ts";
-import { clampInt, isAssetRef, isLayerRef, isLiveHandle, liveHandleKey, warnLoopedInputs, withMutedBehavior } from "./shared.ts";
+import { clampInt, isAssetRef, isLayerRef, isLiveHandle, layerTypeOf, liveHandleKey, warnLoopedInputs } from "./shared.ts";
 
 /** Silence in dBFS. */
 export const SILENCE_DB = -160;
@@ -31,52 +30,51 @@ interface MeterState {
   peaks: { time: number; db: number }[];
 }
 
-export const audioMeteringPatch = withMutedBehavior(
-  definePatch<MeterState>("audioMetering", {
-    state: () => ({ peaks: [] }),
-    evaluate(ctx) {
-      const s = ctx.state;
-      warnLoopedInputs(ctx, ["source", "resolution", "format", "layer"], "audioMetering");
-      const bands = clampInt(ctx.input("resolution"), 3, 1, 128);
-      const percent = toText(ctx.input("format")) === "percent";
-      let reading: AudioMeterReading | undefined;
-      if (ctx.node.muted) {
-        s.peaks = [];
-      } else {
-        const meter = audioMeter(mediaPlatform(ctx.services).audio);
-        const rawSource = ctx.input("source");
-        const rawLayer = ctx.input("layer");
-        const source = isAssetRef(rawSource) ? rawSource : null;
-        const layer = isLayerRef(rawLayer) ? rawLayer : null;
-        try {
-          if (source !== null) {
-            if (!isLiveHandle(source)) warnOnce(ctx, "plainAsset", "audioMetering: Source is a sound file, not a live sound; connect a Sound Player's or Microphone's Metering output.");
-            else if (meter) reading = meter({ live: liveHandleKey(source) }, bands);
-          } else if (layer !== null) {
-            const type = layerTypeOf(ctx, layer);
-            if (type !== undefined && type !== "video") warnOnce(ctx, "notVideo", "audioMetering: Layer isn't a Video layer, so there's nothing to measure.");
-            else if (meter) reading = meter({ layer }, bands);
-          }
-        } catch {
-          reading = undefined;
+export const audioMeteringPatch = definePatch<MeterState>("audioMetering", {
+  mutedBehavior: "evaluate",
+  state: () => ({ peaks: [] }),
+  evaluate(ctx) {
+    const s = ctx.state;
+    warnLoopedInputs(ctx, ["source", "resolution", "format", "layer"], "audioMetering");
+    const bands = clampInt(ctx.input("resolution"), 3, 1, 128);
+    const percent = toText(ctx.input("format")) === "percent";
+    let reading: AudioMeterReading | undefined;
+    if (ctx.muted) {
+      s.peaks = [];
+    } else {
+      const audio = ctx.services.platform.audio;
+      const meter = audio && typeof audio.meter === "function" ? audio.meter.bind(audio) : undefined;
+      const rawSource = ctx.input("source");
+      const rawLayer = ctx.input("layer");
+      const source = isAssetRef(rawSource) ? rawSource : null;
+      const layer = isLayerRef(rawLayer) ? rawLayer : null;
+      try {
+        if (source !== null) {
+          if (!isLiveHandle(source)) warnOnce(ctx, "plainAsset", "audioMetering: Source is a sound file, not a live sound; connect a Sound Player's or Microphone's Metering output.");
+          else if (meter) reading = meter({ live: liveHandleKey(source) }, bands);
+        } else if (layer !== null) {
+          const type = layerTypeOf(ctx, layer);
+          if (type !== undefined && type !== "video") warnOnce(ctx, "notVideo", "audioMetering: Layer isn't a Video layer, so there's nothing to measure.");
+          else if (meter) reading = meter({ layer }, bands);
         }
+      } catch {
+        reading = undefined;
       }
-      let volumeDb = SILENCE_DB;
-      let bandDb = new Array<number>(bands).fill(SILENCE_DB);
-      if (reading) {
-        volumeDb = toDb(finiteOr(reading.rms, 0));
-        const levels = Array.isArray(reading.bands) ? reading.bands : [];
-        bandDb = Array.from({ length: bands }, (_, i) => clamp(finiteOr(levels[i], SILENCE_DB), SILENCE_DB, 0));
-        s.peaks.push({ time: ctx.time, db: toDb(finiteOr(reading.peak, 0)) });
-        ctx.requestNextFrame();
-      }
-      s.peaks = s.peaks.filter((p) => ctx.time - p.time < 0.5);
-      if (s.peaks.length > 0) ctx.requestNextFrame();
-      const peakDb = s.peaks.reduce((max, p) => Math.max(max, p.db), SILENCE_DB);
-      ctx.output("volume", percent ? levelPercent(volumeDb) : volumeDb);
-      ctx.output("peakVolume", percent ? levelPercent(peakDb) : peakDb);
-      ctx.output("waveformData", loopOf(bandDb.map((db) => (percent ? bandPercent(db) : db))));
-    },
-  }),
-  "evaluate",
-);
+    }
+    let volumeDb = SILENCE_DB;
+    let bandDb = new Array<number>(bands).fill(SILENCE_DB);
+    if (reading) {
+      volumeDb = toDb(finiteOr(reading.rms, 0));
+      const levels = Array.isArray(reading.bands) ? reading.bands : [];
+      bandDb = Array.from({ length: bands }, (_, i) => clamp(finiteOr(levels[i], SILENCE_DB), SILENCE_DB, 0));
+      s.peaks.push({ time: ctx.time, db: toDb(finiteOr(reading.peak, 0)) });
+      ctx.requestNextFrame();
+    }
+    s.peaks = s.peaks.filter((p) => ctx.time - p.time < 0.5);
+    if (s.peaks.length > 0) ctx.requestNextFrame();
+    const peakDb = s.peaks.reduce((max, p) => Math.max(max, p.db), SILENCE_DB);
+    ctx.output("volume", percent ? levelPercent(volumeDb) : volumeDb);
+    ctx.output("peakVolume", percent ? levelPercent(peakDb) : peakDb);
+    ctx.output("waveformData", loopOf(bandDb.map((db) => (percent ? bandPercent(db) : db))));
+  },
+});

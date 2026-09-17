@@ -1,20 +1,31 @@
 import { describe, expect, it } from "vitest";
+import type { AudioMeterReading, AudioMeterSource, AudioServices, LayerInfoSnapshot, PatchDefinition } from "@sonobe/engine";
 import { createPatchHarness, loopOf } from "../infra/index.ts";
 import { audioMeteringPatch, bandPercent, levelPercent, toDb } from "./audioMetering.ts";
-import type { AudioMeterReading, MeterSource } from "./platform.ts";
 
-const HANDLE = { url: "sonobe-live:audio/main/player#0" };
+const HANDLE = { live: "audio/main/player#0" };
 
-function harness(meter: (source: MeterSource, bands: number) => AudioMeterReading | undefined, inputs: Record<string, unknown> = {}, layerType?: string) {
-  const calls: MeterSource[] = [];
-  const h = createPatchHarness(audioMeteringPatch, {
+/** The definition with a switch for `ctx.muted`, so a test can mute a running patch. */
+function muteSwitch<S>(definition: PatchDefinition<S>) {
+  let muted = false;
+  const switched: PatchDefinition<S> = { ...definition, evaluate: (ctx) => definition.evaluate(Object.create(ctx, { muted: { get: () => muted } })) };
+  return { definition: switched, mute: (on: boolean) => void (muted = on) };
+}
+
+const silentVoices = (): AudioServices => ({ play: () => {}, pause: () => {}, seek: () => {}, update: () => {}, stop: () => {}, state: () => undefined });
+const snapshotOfType = (type: string): LayerInfoSnapshot => ({ type, enabled: true, position: [0, 0], size: [100, 100], scale: [1, 1], anchor: [0, 0], parent: null, worldTransform: [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1], contentSize: [0, 0] });
+
+function harness(meter: (source: AudioMeterSource, bands: number) => AudioMeterReading | undefined, inputs: Record<string, unknown> = {}, layerType?: string) {
+  const calls: AudioMeterSource[] = [];
+  const { definition, mute } = muteSwitch(audioMeteringPatch);
+  const h = createPatchHarness(definition, {
     inputs,
     services: {
-      platform: { audio: { play: () => {}, stop: () => {}, currentTime: () => 0, meter: (s: MeterSource, b: number) => (calls.push(s), meter(s, b)) } } as never,
-      layerInfo: () => (layerType ? ({ type: layerType } as never) : undefined),
+      platform: { audio: { ...silentVoices(), meter: (s: AudioMeterSource, b: number) => (calls.push(s), meter(s, b)) } },
+      layerInfo: () => (layerType ? snapshotOfType(layerType) : undefined),
     },
   });
-  return { h, calls };
+  return { h, calls, mute };
 }
 
 describe("level conversions", () => {
@@ -88,11 +99,11 @@ describe("audioMetering", () => {
   });
 
   it("outputs idle values while muted and warns once about looped inputs", () => {
-    const { h, calls } = harness(() => ({ rms: 1, peak: 1, bands: [] }), { source: HANDLE });
-    h.node.muted = true;
+    const { h, calls, mute } = harness(() => ({ rms: 1, peak: 1, bands: [] }), { source: HANDLE });
+    mute(true);
     expect(h.step().outputs).toEqual({ volume: 0, peakVolume: 0, waveformData: loopOf([0, 0, 0]) });
     expect(calls).toEqual([]);
-    h.node.muted = false;
+    mute(false);
     h.step({ inputs: { resolution: loopOf([2, 4]) } });
     expect(h.logs.filter((l) => l.level === "warn")).toHaveLength(1);
   });

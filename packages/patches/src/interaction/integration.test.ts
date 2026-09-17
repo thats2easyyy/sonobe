@@ -3,6 +3,7 @@
 import { describe, expect, it } from "vitest";
 import { buildDoc, createMockRegistry, createTestRuntime, defineMock, drag, keyPress, pointerEvent, port, runFrames, tap } from "@sonobe/engine/testing";
 import type { DocInput } from "@sonobe/engine/testing";
+import { definitions as animation } from "../animation/index.ts";
 import { definitions } from "./index.ts";
 
 const rowPositions = defineMock({
@@ -22,6 +23,54 @@ function runtime(input: DocInput) {
 }
 
 describe("interaction patches in a runtime", () => {
+  it("hands Drag's release velocity to Spring Animation on Dragging's falling edge", () => {
+    const registry = createMockRegistry([...definitions, ...animation]);
+    const doc = buildDoc(
+      {
+        layers: [{ id: "knob", type: "rectangle", name: "Knob", props: { position: [100, 100], size: [60, 60] } }],
+        patches: {
+          mover: { type: "drag", inputs: { layer: { layer: "knob" }, startPosition: [0, 0] } },
+          settle: { type: "springAnimation", typeParam: "point", inputs: { number: { link: "mover.position" }, gestureActive: { link: "mover.dragging" }, gestureVelocity: { link: "mover.velocity" } } },
+        },
+      },
+      registry,
+    );
+    const rt = createTestRuntime(doc, registry);
+    runFrames(rt, 2);
+    runFrames(rt, 7, drag([130, 130], [250, 130], { frames: 6, release: false }));
+    const flung = rt.getValue("mover.velocity") as number[];
+    expect(flung[0]).toBeGreaterThan(500);
+    runFrames(rt, 1, [[pointerEvent("up", 250, 130)]]);
+    expect(rt.getValue("mover.dragging")).toBe(false);
+    expect(rt.getValue("mover.velocity")).toEqual(flung);
+    const rest = rt.getValue("mover.position") as number[];
+    runFrames(rt, 3);
+    expect(rt.getValue("mover.velocity")).toEqual([0, 0]);
+    expect((rt.getValue("settle.output") as number[])[0]).toBeGreaterThan(rest[0]! + 1);
+  });
+
+  it("reports every finger to Touches and pinches Pop Switch through the runtime's pointer list", () => {
+    const rt = runtime({
+      layers: [{ id: "pad", type: "rectangle", name: "Pad", props: { position: [0, 0], size: [390, 400] } }],
+      patches: {
+        fingers: { type: "touches", inputs: { layer: { layer: "pad" } } },
+        zoom: { type: "popSwitch", inputs: { layer: { layer: "pad" }, gesture: "pinchScale", start: 1, end: 3 } },
+      },
+    });
+    const finger = (phase: "down" | "move" | "up", x: number, y: number, pointerId: number) => ({ kind: "pointer" as const, phase, pointerId, pointerType: "touch" as const, x, y, pressure: 0.6 });
+    runFrames(rt, 2);
+    runFrames(rt, 1, [[finger("down", 100, 200, 1)]]);
+    runFrames(rt, 1, [[finger("down", 200, 200, 2)]]);
+    expect(rt.getValue("fingers.count")).toBe(2);
+    expect(rt.getRawValue("fingers.ids")).toEqual({ __loop: true, items: [1, 2] });
+    expect(rt.getValue("zoom.dragging")).toBe(true);
+    runFrames(rt, 1, [[finger("move", 300, 200, 2)]]);
+    expect(rt.getValue("zoom.output")).toBeCloseTo(2, 9);
+    runFrames(rt, 1, [[finger("up", 300, 200, 2)]]);
+    expect(rt.getValue("zoom.dragging")).toBe(false);
+    expect(rt.getValue("fingers.count")).toBe(1);
+  });
+
   it("taps a card through Switch, Pop Animation, and Transition until its scale settles", () => {
     const rt = runtime({
       layers: [{ id: "card", type: "rectangle", name: "Card", props: { position: [95, 322], size: [200, 200], scale: { link: "grow.output" } } }],

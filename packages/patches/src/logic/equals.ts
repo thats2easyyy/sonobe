@@ -1,6 +1,5 @@
 /** Equals: true when two numbers or vectors are within a tolerance of each other. */
 
-import type { RuntimePatchDefinition } from "@sonobe/engine";
 import { components, definePatch, finiteOr } from "../infra/index.ts";
 import { variantResolver } from "./shared.ts";
 
@@ -20,13 +19,12 @@ export function withinTolerance(a: readonly number[], b: readonly number[], tole
   return Math.sqrt(sum) <= Math.abs(finiteOr(tolerance, 0)) + 1e-9 * scale;
 }
 
-const definition = definePatch("equals", {
+export const equals = definePatch("equals", {
   evaluate(ctx) {
     const variant = variantOf(ctx.typeParam);
     const a = components(ctx.input("value1"), variant);
     const b = components(ctx.input("value2"), variant);
     ctx.output("output", withinTolerance(a, b, ctx.input<number>("tolerance")));
   },
+  mutedBehavior: "zero",
 });
-
-export const equals: RuntimePatchDefinition = { ...definition, mutedBehavior: "zero" };

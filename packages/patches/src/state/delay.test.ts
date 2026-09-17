@@ -18,6 +18,28 @@ describe("delay", () => {
     expect(frame.requestedNextFrame).toBe(false);
   });
 
+  it("seeds false when a pulse output drives Value on the first frame, so the pulse replays Duration later", () => {
+    const h = createPatchHarness(delayPatch, { typeParam: "boolean", inputs: { duration: 0.1 }, pulseSources: ["value"] });
+    const first = h.step({ pulses: ["value"] });
+    expect(first.outputs.output).toBe(false);
+    expect(first.requestedNextFrame).toBe(true);
+    const out = [first.outputs.output, ...repeat(9, undefined).map(() => h.step().outputs.output)];
+    expect(out.flatMap((v, i) => (v === true ? [i] : []))).toEqual([6]);
+  });
+
+  it("staggers a launch pulse across a loop of durations, launching every item on time", () => {
+    const h = createPatchHarness(delayPatch, { typeParam: "boolean", inputs: { duration: loopOf([0, 0.05, 0.1]) }, pulseSources: ["value"] });
+    const frames = [h.step({ pulses: ["value"] }), ...repeat(9, undefined).map(() => h.step())];
+    const launched = (index: number) => frames.flatMap((f, i) => ((f.outputs.output as { items: unknown[] }).items[index] === true ? [i] : []));
+    expect([launched(0), launched(1), launched(2)]).toEqual([[0], [3], [6]]);
+  });
+
+  it("seeds true for a held state that is already on at launch", () => {
+    const h = createPatchHarness(delayPatch, { typeParam: "boolean", inputs: { value: true, duration: 0.1 } });
+    expect(h.step().outputs.output).toBe(true);
+    expect(h.step().requestedNextFrame).toBe(false);
+  });
+
   it("releases a change exactly Duration later (30 frames at 60 fps for 0.5 s)", () => {
     const h = createPatchHarness(delayPatch, { inputs: { value: 5 } });
     h.step();

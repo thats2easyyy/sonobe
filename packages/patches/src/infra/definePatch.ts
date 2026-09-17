@@ -2,7 +2,7 @@
 
 import { didYouMean, didYouMeanText } from "@sonobe/core";
 import type { PatchSpec } from "@sonobe/core";
-import type { PatchContext, PatchDefinition, RuntimeServices } from "@sonobe/engine";
+import type { MutedBehavior, PatchContext, PatchDefinition, RuntimeServices } from "@sonobe/engine";
 import { SPECS, getSpec } from "../specs.ts";
 
 /** The runtime half of a patch; everything else comes from its catalog spec. */
@@ -14,6 +14,11 @@ export interface PatchImplementation<S = undefined> {
   dispose?: (state: S, services: RuntimeServices) => void;
   /** Node-dependent ports (the catalog's `dynamicPortsRule`). */
   dynamicPorts?: PatchSpec["dynamicPorts"];
+  /**
+   * What the runtime does while the patch is muted: "bypass" (default) passes inputs through,
+   * "zero" outputs zero values, and "evaluate" runs `evaluate`, which checks `ctx.muted` itself.
+   */
+  mutedBehavior?: MutedBehavior;
 }
 
 /**
@@ -31,5 +36,12 @@ export function definePatch<S = undefined>(type: string, implementation: PatchIm
   if (implementation.state) definition.state = implementation.state;
   if (implementation.dispose) definition.dispose = implementation.dispose;
   if (implementation.dynamicPorts) definition.dynamicPorts = implementation.dynamicPorts;
+  if (implementation.mutedBehavior !== undefined) {
+    const behavior = implementation.mutedBehavior;
+    if (behavior !== "bypass" && behavior !== "zero" && behavior !== "evaluate") {
+      throw new Error(`definePatch("${type}"): mutedBehavior must be "bypass", "zero", or "evaluate".`);
+    }
+    definition.mutedBehavior = behavior;
+  }
   return definition;
 }

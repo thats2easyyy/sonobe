@@ -2,15 +2,18 @@ import { Check, Copy } from "lucide-react";
 import { useEffect, useState } from "react";
 import { Button } from "../../ui/Button.tsx";
 import { toast } from "../../ui/Toast.tsx";
+import { connectClaudeStore, type CopiedKind } from "./connectStore.ts";
 
 export interface CopyBlockProps {
   text: string;
   /** What this is, for the copy button's accessible name ("Claude Code command"). */
   label: string;
+  /** Recorded in connectClaudeStore.copied after a successful copy. Default "setup". */
+  kind?: CopiedKind;
 }
 
 /** Copyable monospace text: a command or a config snippet. */
-export function CopyBlock({ text, label }: CopyBlockProps) {
+export function CopyBlock({ text, label, kind = "setup" }: CopyBlockProps) {
   const [copied, setCopied] = useState(false);
   useEffect(() => {
     if (!copied) return;
@@ -23,6 +26,7 @@ export function CopyBlock({ text, label }: CopyBlockProps) {
     try {
       await navigator.clipboard.writeText(text);
       setCopied(true);
+      connectClaudeStore.getState().markCopied(kind);
     } catch {
       toast.error("Couldn't copy", { description: "Select the text and copy it instead." });
     }

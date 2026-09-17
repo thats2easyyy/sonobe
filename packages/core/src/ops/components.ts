@@ -82,6 +82,17 @@ export function removeComponent(ctx: OpContext, op: OpOf<"removeComponent">): Op
   return { ids: [component.id], applied: { op: "removeComponent", id: component.id }, inverse: [{ op: "addComponent", component }] };
 }
 
+/** Plain JSON data a component file can store: null, booleans, finite numbers, text, arrays and plain objects. */
+function isJsonData(value: unknown, depth = 0): boolean {
+  if (depth > 64) return false;
+  if (value === null || typeof value === "boolean" || typeof value === "string") return true;
+  if (typeof value === "number") return Number.isFinite(value);
+  if (Array.isArray(value)) return value.every((item) => isJsonData(item, depth + 1));
+  if (typeof value !== "object") return false;
+  const proto = Object.getPrototypeOf(value);
+  return (proto === Object.prototype || proto === null) && Object.values(value).every((item) => isJsonData(item, depth + 1));
+}
+
 export function updateComponent(ctx: OpContext, op: OpOf<"updateComponent">): OpOutcome {
   const component = requireComponentById(ctx, op.id);
   const next: Component = { ...component };
@@ -108,6 +119,35 @@ export function updateComponent(ctx: OpContext, op: OpOf<"updateComponent">): Op
       const s = op.size;
       if (!Array.isArray(s) || s.length !== 2 || !s.every((n) => typeof n === "number" && Number.isFinite(n) && n > 0)) fail("invalid_value", '"size" must be [width, height] with positive numbers.');
       next.size = applied.size = [s[0], s[1]];
+    }
+  }
+  if (op.meta !== undefined) {
+    // Merge key by key: a null value removes the key; other values replace the key whole.
+    // The inverse restores every touched key (or removes meta again when there was none).
+    const before = component.meta;
+    if (op.meta === null) {
+      inverse.meta = before === undefined ? CLEAR : { ...before };
+      applied.meta = CLEAR;
+      delete next.meta;
+    } else {
+      if (typeof op.meta !== "object" || Array.isArray(op.meta)) {
+        fail("invalid_value", '"meta" must be an object like { "patchEditor": { … } }, or null to remove all metadata.', { hint: "Keys set to null are removed; other keys are replaced whole." });
+      }
+      const merged: Record<string, unknown> = { ...(before ?? {}) };
+      const restore: Record<string, unknown> = {};
+      const changes: Record<string, unknown> = {};
+      for (const [key, value] of Object.entries(op.meta)) {
+        if (value === undefined) continue;
+        if (!isJsonData(value)) fail("invalid_value", `meta.${key} must be plain JSON data: text, finite numbers, true/false, null, lists and objects.`);
+        restore[key] = before !== undefined && Object.hasOwn(before, key) ? before[key] : null;
+        changes[key] = value;
+        if (value === null) delete merged[key];
+        else merged[key] = value;
+      }
+      inverse.meta = before === undefined ? CLEAR : restore;
+      applied.meta = changes;
+      if (before === undefined && !Object.keys(merged).length) delete next.meta;
+      else next.meta = merged;
     }
   }
   ctx.doc = withComponent(ctx.doc, next);

@@ -5,6 +5,7 @@
  */
 
 import type {
+  AssetRef,
   Color,
   Id,
   LayerRef,
@@ -32,6 +33,16 @@ export interface Loop<T = Value> {
 // Patch definitions
 // ---------------------------------------------------------------------------
 
+/**
+ * What a muted patch outputs:
+ * - "bypass" (default): evaluate is skipped. Variant outputs pass the first variant input; other
+ *   outputs pass the first input of the same type; anything unmatched emits its zero value and
+ *   pulses never fire.
+ * - "zero": evaluate is skipped and every output emits its zero value.
+ * - "evaluate": evaluate runs as usual and the patch checks `ctx.muted` itself.
+ */
+export type MutedBehavior = "bypass" | "zero" | "evaluate";
+
 export interface PatchDefinition<S = any> extends PatchSpec {
   /** Create per-instance state (called once per patch × loop index). */
   state?: () => S;
@@ -42,6 +53,8 @@ export interface PatchDefinition<S = any> extends PatchSpec {
   evaluate: (ctx: PatchContext<S>) => void;
   /** Called when the prototype restarts or the patch is removed. */
   dispose?: (state: S, ctx: RuntimeServices) => void;
+  /** How the patch behaves while muted. Default "bypass". */
+  mutedBehavior?: MutedBehavior;
 }
 
 export interface PatchContext<S = any> {
@@ -56,7 +69,14 @@ export interface PatchContext<S = any> {
   readonly loopIndex: number;
   readonly loopCount: number;
   readonly typeParam: string | undefined;
+  /**
+   * The node's repeated-port count: node.inputCount clamped to the spec's VariadicSpec range
+   * (else its defaultCount); for specs with `inputCountRange` instead (keyframes, gradientBuilder),
+   * clamped to that range (else its defaultCount); otherwise node.inputCount ?? 0.
+   */
   readonly inputCount: number;
+  /** Effective mute: this patch or an enclosing component instance is muted (for mutedBehavior "evaluate"). */
+  readonly muted: boolean;
   /** Per instance × loop index; mutate freely. */
   state: S;
   /** Current value for this loop index, coerced to the port's declared type. */
@@ -65,7 +85,14 @@ export interface PatchContext<S = any> {
   inputItems<T = Value>(key: string): readonly T[];
   /** True if the input is driven by a link (vs literal/default). */
   isConnected(key: string): boolean;
-  /** True on the frame a pulse arrives OR a boolean input rises false→true. */
+  /** True when the input is driven by a pulse output (vs a held state), so first-frame pulses can be told from states that start on. */
+  isPulseSource(key: string): boolean;
+  /** True when the input's driver evaluates later in the frame, so the input reads last frame's value (a back-edge). */
+  isFeedback(key: string): boolean;
+  /**
+   * True on the frame a pulse arrives OR a boolean input rises false→true. Rising-edge history
+   * starts off: a boolean that is already true on frame 0 (or on a new loop index) counts as rising.
+   */
   pulsed(key: string): boolean;
   /** Value changed since last frame for this loop index. */
   changed(key: string): boolean;
@@ -74,6 +101,8 @@ export interface PatchContext<S = any> {
   pulse(key: string): void;
   /** Keep evaluating next frame even if nothing changes (animations in flight). */
   requestNextFrame(): void;
+  /** Log a warning through services.log at most once per patch instance and key until the prototype restarts. */
+  warnOnce(key: string, message: string): void;
   readonly services: RuntimeServices;
 }
 
@@ -88,6 +117,8 @@ export interface PointerSnapshot {
   began: boolean;
   /** Press ended this frame (inside or outside). */
   ended: boolean;
+  /** Every press that ended this frame was cancelled (the browser took over the gesture). */
+  cancelled: boolean;
   /** Released inside the layer this frame without moving beyond slop (10pt). */
   tapped: boolean;
   /** Current (or last, on the release frame) pointer position in prototype coordinates. */
@@ -98,9 +129,27 @@ export interface PointerSnapshot {
   translation: [number, number];
   /** Smoothed velocity in points/second. */
   velocity: [number, number];
-  /** Pointer is over the layer (hover; desktop only). */
+  /** Pressure 0–1 of the tracked pointer while down (event pressure; else 0.5 for touch and pen, 0 for mouse). 0 when not down. */
+  pressure: number;
+  /** DOM `buttons` bitmask (1 primary, 2 secondary, 4 middle...) of the pressed pointers on this target. 0 when none. */
+  buttons: number;
+  /** Input device of the tracked pointer (pressed, else hovering, else last press). */
+  pointerType?: "mouse" | "touch" | "pen";
+  /** A mouse or pen is over the layer, including while its button is held. Touches never hover. */
   hovering: boolean;
   pointerCount: number;
+}
+
+/** One pressed pointer (services.pointers). */
+export interface PointerInfo {
+  id: number;
+  /** Prototype coordinates. */
+  position: [number, number];
+  pressure: number;
+  /** Prototype time in seconds when the press began. */
+  startTime: number;
+  /** DOM `buttons` bitmask. */
+  buttons: number;
 }
 
 export interface KeyboardSnapshot {
@@ -112,12 +161,20 @@ export interface KeyboardSnapshot {
 }
 
 export interface LayerInfoSnapshot {
+  /** Layer type key, e.g. "video". */
+  type: string;
   enabled: boolean;
   position: [number, number];
   size: [number, number];
   scale: [number, number];
   anchor: [number, number];
-  parent: Id | null;
+  /**
+   * The parent layer in the scene tree (a component instance layer for a component's top-level
+   * layers), with its loop instance. The reference is scoped like the child's, so services resolve it.
+   */
+  parent: LayerRef | null;
+  /** 4x4 column-major; maps layer-local points (origin top-left) to prototype coordinates. */
+  worldTransform: number[];
   /** Content size for scrollable / auto-sized groups. */
   contentSize: [number, number];
 }
@@ -128,8 +185,26 @@ export interface DeviceInfo {
   screenScale: number;
   safeArea: [number, number, number, number]; // top, right, bottom, left
   orientation: "portrait" | "landscape";
+  /** Physical rotation in degrees counterclockwise: 0, 90, 180, 270. Undefined when unknown. */
+  orientationAngle?: number;
   darkMode: boolean;
   platform: "desktop" | "web" | "mobile";
+  /** IANA time zone of the device; "UTC" in deterministic simulation. */
+  timeZone: string;
+}
+
+/** Style accepted by TextMeasurer.measure and services.measureText. */
+export type TextMeasureStyle = Parameters<TextMeasurer["measure"]>[1];
+
+/** What the runtime knows about an image, video, or sound reference. */
+export interface MediaInfo {
+  status: "loading" | "ready" | "error";
+  /** Intrinsic pixel size (0 when unknown or not visual). */
+  width: number;
+  height: number;
+  /** Seconds (0 when unknown or not timed). */
+  duration: number;
+  name: string;
 }
 
 export interface RuntimeServices {
@@ -137,30 +212,267 @@ export interface RuntimeServices {
   random(): number;
   /** Wall-clock epoch ms (deterministic in simulation). */
   now(): number;
+  /** True when the runtime uses a fixed dt and a deterministic clock (simulation, trace): UTC clocks, no platform effects. */
+  readonly deterministic: boolean;
+  /** Restarts performed since the runtime was created (0 before the first restart). */
+  readonly restartCount: number;
   pointer(layer: LayerRef | null): PointerSnapshot;
+  /** Every pressed pointer whose press hit chain contains the layer (null = all), by press time then id. */
+  pointers(layer: LayerRef | null): PointerInfo[];
   keyboard(): KeyboardSnapshot;
   wheel(): { delta: [number, number]; position: [number, number]; velocity: [number, number] };
   /** Previous frame's resolved layer geometry. */
   layerInfo(layer: LayerRef): LayerInfoSnapshot | undefined;
+  /** A layer output (host-reported via setLayerOutputs, or derived: textSize, text field value...). Undefined when unknown. */
+  layerOutput?(layer: LayerRef, key: string): Value | undefined;
+  /** Status, size, duration, and name of a media reference. Undefined when the runtime knows nothing about it. */
+  mediaInfo?(ref: AssetRef): MediaInfo | undefined;
   device(): DeviceInfo;
+  /** Measure text with the runtime's injected TextMeasurer (same rules as Text layer layout). */
+  measureText(text: string, style: TextMeasureStyle, maxWidth: number | null): { width: number; height: number };
+  /** Source of scripts/<file> from the document, or undefined when it doesn't exist. */
+  readScript(file: string): string | undefined;
   log(level: "log" | "warn" | "error", ...args: unknown[]): void;
+  /** Raise a runtime issue attributed to the evaluating patch, deduplicated by code and message until restart. */
+  issue(code: string, severity: "error" | "warning", message: string): void;
   restart(): void;
   resolveAssetUrl(assetId: Id): string | undefined;
   /** Platform extensions (network, audio, speech, motion...). Undefined when unsupported. */
   platform: PlatformServices;
 }
 
+// ---- platform services ------------------------------------------------------
+
+/** A multipart form field; media values upload the referenced file. */
+export interface FetchFormField {
+  name: string;
+  value: string | { assetId?: Id; url?: string; filename?: string; mime?: string };
+}
+
+export interface FetchInit {
+  /** Uppercase HTTP method. Default "GET". */
+  method?: string;
+  headers?: Record<string, string>;
+  /** Text body, or multipart form data built by the host. */
+  body?: string | { form: FetchFormField[] };
+  signal?: AbortSignal;
+  /** Called with each chunk of response text as it arrives (streams); text() still resolves with the whole body. */
+  onChunk?: (text: string) => void;
+}
+
+export interface FetchResponse {
+  ok: boolean;
+  status: number;
+  /** Final URL after redirects. */
+  url?: string;
+  /** Response headers with lowercase names. */
+  headers?: Record<string, string>;
+  text(): Promise<string>;
+}
+
+/** A socket opened through platform.webSocket. Hosts call the handlers; patches assign them. */
+export interface PlatformWebSocket {
+  send(text: string): void;
+  close(code?: number, reason?: string): void;
+  readonly bufferedAmount?: number;
+  onopen?: (() => void) | null;
+  onmessage?: ((text: string) => void) | null;
+  onclose?: ((code: number, reason?: string) => void) | null;
+  /** Hosts report blocked or failed connections here (ws:// from https, refused...). */
+  onerror?: ((message?: string) => void) | null;
+}
+
+export interface SpeechOptions {
+  /** 0.1–10, 1 = normal. */
+  rate?: number;
+  /** 0–2, 1 = normal. */
+  pitch?: number;
+  voice?: string;
+  /** 0–1. */
+  volume?: number;
+}
+
+export interface AudioVoiceOptions {
+  loop: boolean;
+  /** 0–1. */
+  volume: number;
+  /** Playback rate, 1 = normal. */
+  rate: number;
+  /** Semitones, 0 = unchanged. */
+  pitch: number;
+  /** -1 (left) … 1 (right). */
+  pan: number;
+}
+
+export type AudioVoiceStatus = "loading" | "blocked" | "playing" | "paused" | "ended" | "error";
+
+/** A platform voice's clock. */
+export interface AudioVoiceState {
+  status: AudioVoiceStatus;
+  currentTime: number;
+  duration: number;
+  ended: boolean;
+  /** Completed loop iterations. */
+  loops: number;
+}
+
+/** What an audio meter listens to: a live source (microphone, player) or a layer's sound. */
+export type AudioMeterSource = { live: string } | { layer: LayerRef };
+
+export interface AudioMeterReading {
+  /** 0–1. */
+  rms: number;
+  /** 0–1. */
+  peak: number;
+  /** Per-band levels 0–1, low → high. */
+  bands: readonly number[];
+}
+
+/** Keyed voices: one voice per key (the patch picks keys such as "audio/main/player#0"). */
+export interface AudioServices {
+  play(key: string, source: AssetRef, opts: AudioVoiceOptions & { from: number }): void;
+  pause(key: string): void;
+  seek(key: string, seconds: number): void;
+  update(key: string, opts: AudioVoiceOptions): void;
+  stop(key: string): void;
+  state(key: string): AudioVoiceState | undefined;
+  meter?(source: AudioMeterSource, bands: number): AudioMeterReading | undefined;
+}
+
+export interface HapticServices {
+  supports(type: string): boolean;
+  play(type: string, pattern?: unknown): void;
+}
+
+export interface GeoFix {
+  latitude: number;
+  longitude: number;
+  /** Meters. */
+  accuracy: number;
+}
+
+export interface GeolocationServices {
+  watch(onFix: (fix: GeoFix) => void, onError: (message: string) => void): { stop(): void };
+}
+
+export interface GamepadSnapshot {
+  connected: boolean;
+  mapping: string;
+  buttons: readonly ({ pressed: boolean; value: number } | undefined)[];
+  axes: readonly number[];
+  motion?: { acceleration?: readonly number[]; rotationRate?: readonly number[] };
+}
+
+export interface SoftKeyboardSnapshot {
+  visible: boolean;
+  /** Points. */
+  height: number;
+  keyboardType?: string;
+}
+
+/** A connected Bluetooth LE characteristic. */
+export interface BluetoothLink {
+  name: string;
+  canRead: boolean;
+  canNotify: boolean;
+  read(): Promise<Uint8Array>;
+  write(bytes: Uint8Array): Promise<void>;
+  setNotifications(on: boolean): Promise<void>;
+  onValue(callback: (bytes: Uint8Array) => void): void;
+  onDisconnect(callback: () => void): void;
+  disconnect(): void;
+}
+
+export interface BluetoothServices {
+  available: boolean;
+  connect(options: { service: string; characteristic: string; namePrefix?: string }): Promise<BluetoothLink>;
+}
+
+export interface PickedMedia {
+  kind: "image" | "video";
+  image: AssetRef | null;
+  video: AssetRef | null;
+  width: number;
+  height: number;
+  name: string;
+}
+
+export interface PixelReading {
+  width: number;
+  height: number;
+  /** RGBA bytes, row by row. */
+  data: ArrayLike<number>;
+  /** Changes whenever the picture changes. */
+  frameId: number;
+  /** The picture's own pixel size. */
+  contentSize: [number, number];
+  /** Where the picture sits inside the layer, in local points: [x, y, w, h]. */
+  contentRect: [number, number, number, number];
+}
+
+/** Camera and microphone capture, keyed by the requesting patch instance. */
+export interface MediaCaptureServices {
+  /** Start a camera; resolves with a live video reference. */
+  openCamera?(key: string, opts: { facing: "front" | "back"; quality: "low" | "medium" | "high" }): Promise<AssetRef>;
+  /** Start a microphone; resolves with a live sound reference. */
+  openMicrophone?(key: string): Promise<AssetRef>;
+  /** Stop the camera or microphone opened under `key` (and any recording). */
+  close(key: string): void;
+  /** Capture a still image from the camera opened under `key`. */
+  captureFrame?(key: string): Promise<AssetRef>;
+  startRecording(key: string, opts: { audio: boolean }): void;
+  /** Resolves null for clips shorter than 0.1 s. */
+  stopRecording(key: string): Promise<AssetRef | null>;
+  /** Microphone input level 0–1 for `key`. */
+  level?(key: string): number | undefined;
+  /** Changes whenever the layer's picture changes. */
+  frameId?(layer: LayerRef): number | undefined;
+  readPixels?(layer: LayerRef, maxSize: number): PixelReading | undefined;
+}
+
+export type DetectionPositioning = "relative" | "absolute";
+
+export interface DetectServices {
+  faces?(layer: LayerRef, opts: { maxDimension: number; positioning: DetectionPositioning }): Promise<readonly { box: [number, number, number, number]; angle?: number; leftEye?: [number, number]; rightEye?: [number, number]; mouth?: [number, number] }[]>;
+  hands?(layer: LayerRef, opts: { maxHands: number; maxDimension: number; positioning: DetectionPositioning }): Promise<readonly { box?: [number, number, number, number]; handedness?: "left" | "right"; confidence?: number; landmarks: [number, number][] }[]>;
+  qrCodes?(layer: LayerRef, opts: { maxDimension: number }): Promise<readonly { message: string; corners: [number, number][] }[]>;
+}
+
+/** A device motion sample: accelerations in g including gravity, rotation rates in degrees/second, attitude in degrees. */
+export interface DeviceMotionSample {
+  acceleration: [number, number, number];
+  rotationRate: [number, number, number];
+  /** Omitted when the host has no attitude (simulation). */
+  attitude?: [number, number, number];
+}
+
+/** Host capabilities. Every member is optional; patches log once and output idle values when one is missing. */
 export interface PlatformServices {
-  fetch?: (url: string, init?: { method?: string; headers?: Record<string, string>; body?: string }) => Promise<{ ok: boolean; status: number; text(): Promise<string> }>;
-  openUrl?: (url: string) => void;
-  speak?: (text: string, opts?: { rate?: number; pitch?: number; voice?: string }) => void;
+  fetch?: (url: string, init?: FetchInit) => Promise<FetchResponse>;
+  /** Read a media reference's bytes (asset, URL, or live capture). */
+  readBytes?: (ref: AssetRef) => Promise<ArrayBuffer>;
+  webSocket?: (url: string, opts: { headers?: Record<string, string>; protocols?: string[] }) => PlatformWebSocket;
+  /** false (or a promise resolving false) means the link didn't open. */
+  openUrl?: (url: string) => void | boolean | Promise<boolean>;
+  /** Hosts that track completion return a promise with how the utterance ended. */
+  speak?: (text: string, opts?: SpeechOptions) => void | Promise<"ended" | "interrupted">;
+  stopSpeaking?: () => void;
   vibrate?: (pattern: number | number[]) => void;
-  deviceMotion?: () => { acceleration: [number, number, number]; rotationRate: [number, number, number]; attitude: [number, number, number] } | undefined;
-  audio?: {
-    play(key: string, assetId: Id, opts: { loop?: boolean; volume?: number; rate?: number }): void;
-    stop(key: string): void;
-    currentTime(key: string): number;
-  };
+  haptic?: HapticServices;
+  deviceMotion?: () => DeviceMotionSample | undefined;
+  geolocation?: GeolocationServices;
+  gamepads?: () => readonly (GamepadSnapshot | null)[];
+  softKeyboard?: () => SoftKeyboardSnapshot | undefined;
+  bluetooth?: BluetoothServices;
+  audio?: AudioServices;
+  /** Let the person pick photos or videos. */
+  pickMedia?: (opts: { accept: "all" | "photos" | "videos"; multiple: boolean }) => Promise<readonly PickedMedia[]>;
+  /** Release a blob URL or buffer the host created for a reference a patch no longer uses. */
+  releaseMedia?: (ref: AssetRef) => void;
+  /** Render a layer (null = the whole prototype) to an image. */
+  snapshot?: (layer: LayerRef | null, opts: { scale: number }) => Promise<AssetRef>;
+  media?: MediaCaptureServices;
+  detect?: DetectServices;
 }
 
 // ---------------------------------------------------------------------------
@@ -180,7 +492,10 @@ export type InputEvent =
       /** Prototype coordinates (points, origin top-left of root). */
       x: number;
       y: number;
+      /** DOM `button` of the button that changed (0 primary, 1 middle, 2 secondary). */
       button?: number;
+      /** DOM `buttons` bitmask of buttons held after the event. */
+      buttons?: number;
       pressure?: number;
     }
   | { kind: "wheel"; x: number; y: number; dx: number; dy: number }
@@ -198,8 +513,9 @@ export type InputEvent =
   | { kind: "text"; layerId: Id; key?: string; value: string }
   | { kind: "focus"; layerId: Id; key?: string; focused: boolean }
   | { kind: "submit"; layerId: Id; key?: string }
-  | { kind: "deviceMotion"; acceleration: [number, number, number]; rotationRate: [number, number, number] }
-  | { kind: "orientation"; orientation: "portrait" | "landscape" };
+  | { kind: "deviceMotion"; acceleration: [number, number, number]; rotationRate: [number, number, number]; attitude?: [number, number, number] }
+  /** angle = physical rotation in degrees counterclockwise (DeviceInfo.orientationAngle). */
+  | { kind: "orientation"; orientation: "portrait" | "landscape"; angle?: number };
 
 // ---------------------------------------------------------------------------
 // Scene frame (engine → renderer)
@@ -228,7 +544,10 @@ export interface SceneNode {
   opacity: number;
   visible: boolean;
   clip: boolean;
-  /** Resolved drawable props for this type (color, cornerRadius, text, image...). */
+  /**
+   * Resolved drawable props for this type (color, cornerRadius, text, image...). Props whose declared
+   * default is null (cornerRadii, gradient, image...) stay null while unset.
+   */
   props: Record<string, Value>;
   children: SceneNode[];
 }
@@ -262,6 +581,13 @@ export interface TextMeasurer {
   ): { width: number; height: number };
 }
 
+/** Where a console line came from: the evaluating patch and its instance path. */
+export interface LogSource {
+  patchId?: Id;
+  /** Instance path, e.g. "main" or "main/card#2". */
+  componentPath?: string;
+}
+
 export interface RuntimeOptions {
   registry: EngineRegistry;
   textMeasurer?: TextMeasurer;
@@ -271,9 +597,14 @@ export interface RuntimeOptions {
   deterministic?: boolean;
   platform?: PlatformServices;
   resolveAssetUrl?: (assetId: Id) => string | undefined;
-  onLog?: (level: "log" | "warn" | "error", args: unknown[]) => void;
+  /** Host knowledge about media (natural sizes, durations); consulted before the runtime's own data. */
+  mediaInfo?: (ref: AssetRef) => MediaInfo | undefined;
+  /** `source` is set for lines logged while a patch evaluates. */
+  onLog?: (level: "log" | "warn" | "error", args: unknown[], source?: LogSource) => void;
   /** Starting device info overrides. */
   device?: Partial<DeviceInfo>;
+  /** Record per-patch evaluate timings (Runtime.patchTimings). Default false. */
+  profile?: boolean;
 }
 
 export interface EngineRegistry extends Registry {
@@ -298,15 +629,35 @@ export interface TraceResult {
   summaries: Record<string, TraceSummary | null>;
 }
 
+/** Events to dispatch during a trace, `atMs` after the trace starts. */
+export interface ScheduledInput {
+  atMs: number;
+  events: readonly InputEvent[];
+}
+
+/** A plain InputEvent is dispatched on the first traced frame. */
+export type TraceInput = InputEvent | ScheduledInput;
+
 export interface RuntimeIssue {
   code: string;
   severity: "error" | "warning";
   message: string;
   patchId?: Id;
   layerId?: Id;
+  /** Instance path of the patch when it's inside a component instance ("main/card#2"); omitted at the root. */
+  componentPath?: string;
+}
+
+/** Average evaluate time of one patch (all instances and loop indices), per frame. */
+export interface PatchTiming {
+  patchId: Id;
+  /** Static scope path: "main", "main/card". */
+  componentPath: string;
+  ms: number;
 }
 
 export interface Runtime {
+  /** Last produced frame; -1 before the first step and after restart. */
   readonly frame: number;
   readonly time: number;
   /** Queue input events for the next step. */
@@ -315,10 +666,24 @@ export interface Runtime {
   step(dt?: number): SceneFrame;
   /** Last produced frame (step() once if none). */
   scene(): SceneFrame;
-  /** Read a value: "patchId.port" | "@layerId.prop" (current frame, loop index 0 unless "#n"). */
+  /**
+   * Read a value (current frame, loop index 0 unless "#n"):
+   * "patchId.port" | "@layerId.prop", or inside component instances
+   * "instancePath/patchId.port" | "@instancePath/layerId.prop" (instancePath like "card#2/badge").
+   */
   getValue(address: string): Value;
+  /** Like getValue, but returns whole loops instead of one item. */
+  getRawValue(address: string): Value | Loop | undefined;
+  /**
+   * Simulate `durationMs` on a deterministic clone of this runtime (same document, state reached
+   * by replaying this runtime's input since its last restart) and sample `targets` every frame.
+   * The live runtime is never touched and the clone performs no platform side effects.
+   */
+  trace(targets: readonly string[], durationMs: number, events?: readonly TraceInput[]): TraceResult;
   /** Swap in an edited document, keeping state for patches whose type is unchanged. */
   updateDocument(doc: SonobeDocument): void;
+  /** Rebuild layout and the scene from current values (after updateDocument) without advancing time. */
+  refreshScene(): void;
   restart(): void;
   /** Hit test in prototype coordinates; front-most first, with bubbling chain. */
   hitTest(x: number, y: number): { key: string; layerId: Id }[];
@@ -326,5 +691,7 @@ export interface Runtime {
   setLayerOutputs(key: string, values: Record<string, Value>): void;
   /** Runtime issues raised while evaluating (script errors, loop limits...). */
   issues(): RuntimeIssue[];
+  /** Average evaluate time per patch over the last ~1 s, slowest first (empty when profiling is off). */
+  patchTimings?(): PatchTiming[];
   dispose(): void;
 }

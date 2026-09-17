@@ -19,6 +19,7 @@ export const VALUE_TYPE_LABELS: Record<ValueType, string> = {
   index: "Index",
   enum: "Option",
   json: "JSON",
+  connection: "Connection",
   layer: "Layer",
   image: "Image",
   video: "Video",

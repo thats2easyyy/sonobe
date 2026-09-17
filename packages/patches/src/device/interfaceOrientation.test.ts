@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest";
 import { createPatchHarness } from "../infra/index.ts";
 import { deviceOrientation, deviceSupports, interfaceOrientationPatch } from "./interfaceOrientation.ts";
 
-const info = (overrides: Partial<DeviceInfo> & { orientationAngle?: number } = {}): DeviceInfo => ({
+const info = (overrides: Partial<DeviceInfo> = {}): DeviceInfo => ({
   preset: "iphone-17-pro",
   screenSize: [402, 874],
   screenScale: 3,
@@ -12,6 +12,7 @@ const info = (overrides: Partial<DeviceInfo> & { orientationAngle?: number } = {
   orientation: "portrait",
   darkMode: false,
   platform: "web",
+  timeZone: "UTC",
   ...overrides,
 });
 

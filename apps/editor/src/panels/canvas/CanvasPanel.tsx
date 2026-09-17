@@ -1,16 +1,18 @@
 /**
  * The Canvas panel: an editable artboard of the component being edited. Click to select (⇧ adds,
- * ⌘ selects deep), marquee, drag to move with snapping and smart guides (hold ⌘ to skip snapping),
- * resize (⇧ keeps proportions, ⌥ from center), rotate, nudge with arrows (⇧ ×10), draw rectangles
- * (R), ovals (O), and text (T), double-click to edit text or go into a group, zoom (⌘ scroll or
- * pinch) and pan (scroll, space-drag). Every gesture is one undo entry; layout children reorder.
+ * ⌘ selects deep), marquee, drag to move with snapping, smart guides, and equal-spacing guides (hold
+ * ⌘ to skip snapping), resize (⇧ keeps proportions, ⌥ from center), rotate, nudge with arrows (⇧ ×10),
+ * draw rectangles (R), ovals (O), and text (T), drop images, videos, and Lottie files to add layers,
+ * double-click to edit text or go into a group, zoom (⌘ scroll or pinch) and pan (scroll, space-drag).
+ * Rulers (⇧R) follow zoom and pan. Every gesture is one undo entry; layout children reorder. The
+ * artboard re-fits when the panel resizes until you zoom or pan.
  */
 
 import type { Id, Op } from "@sonobe/core";
 import type { SceneFrame } from "@sonobe/engine";
 import { createDomRenderer, DomTextMeasurer, type DomRenderer } from "@sonobe/renderer";
-import { ChevronDown, Circle, Group, MousePointer2, Square, Type } from "lucide-react";
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent, type RefObject } from "react";
+import { ChevronDown, Circle, Group, MousePointer2, Ruler, Square, Type } from "lucide-react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type DragEvent as ReactDragEvent, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent, type RefObject } from "react";
 import { useStore } from "zustand";
 import { Panel } from "../../shell/Panel.tsx";
 import { useEditorSession } from "../../state/EditorProvider.tsx";
@@ -28,8 +30,13 @@ import type { Command } from "../../ui/commands/commandRegistry.ts";
 import { isEditableTarget, type ShortcutBinding } from "../../ui/commands/shortcutManager.ts";
 import { cx } from "../../ui/lib/cx.ts";
 import { useLatest } from "../../ui/lib/hooks.ts";
+import { readString, writeString } from "../../ui/lib/storage.ts";
 import { useElementSize } from "../../ui/lib/useElementSize.ts";
+import { registerBoundsProvider } from "../viewer/hostBridge.ts";
+import { dragHasFiles, dropLabel, dropUndoLabel, mediaLayerOps, prepareDroppedFiles, type DroppedFile } from "./assetDrop.ts";
 import { CanvasOverlay, EMPTY_DRAFT, type OverlayDraft } from "./CanvasOverlay.tsx";
+import { CanvasRulers } from "./CanvasRulers.tsx";
+import { RULER_SIZE } from "./rulers.ts";
 import { createEditTransaction, type EditTransaction } from "./editTransaction.ts";
 import { pointInQuad, rectFromPoints, unionRects, type Point, type Rect } from "./geometry.ts";
 import {
@@ -38,6 +45,7 @@ import {
   beginResize,
   beginRotate,
   insertGesture,
+  insertParentAt,
   isPropLinked,
   moveGesture,
   nudgeGesture,
@@ -76,6 +84,8 @@ export interface CanvasPanelProps {
 const DRAG_THRESHOLD = 3;
 const SNAP_PX = 6;
 const NUDGE_IDLE_MS = 900;
+const FIT_PADDING = 56;
+const RULERS_KEY = "sonobe.canvas.rulers";
 const TOOL_LABELS: Record<InsertTool, string> = { rectangle: "Rectangle", oval: "Oval", text: "Text" };
 
 interface GestureBase {
@@ -184,6 +194,11 @@ export function CanvasPanel({ session: sessionProp, sceneSource, onSceneSourceCh
   const [spaceHeld, setSpaceHeld] = useState(false);
   const [editing, setEditing] = useState<TextEditState | null>(null);
   const [altMeasure, setAltMeasure] = useState<Measurement[]>([]);
+  const [rulers, setRulers] = useState(() => readString(RULERS_KEY) !== "off");
+  /** True while the viewport is the automatic fit (until someone zooms or pans). */
+  const autoFit = useRef(true);
+  /** The container size and fit inputs the viewport was last laid out for. */
+  const fitLayout = useRef<{ width: number; height: number; key: string } | null>(null);
   const rendererRef = useRef<DomRenderer | null>(null);
   const gestureRef = useRef<Gesture | null>(null);
   const nudgeRef = useRef<NudgeRun | null>(null);
@@ -201,15 +216,42 @@ export function CanvasPanel({ session: sessionProp, sceneSource, onSceneSourceCh
 
   const latest = useLatest({ index, viewport, componentId, component, tool, artboard, chrome, spaceHeld, box, editing });
 
-  const fitViewport = useCallback((): Viewport | null => (box.width > 0 && box.height > 0 ? fitRect(artboard, [box.width, box.height], { padding: 56, maxZoom: 1 }) : null), [artboard, box.width, box.height]);
+  const fitViewport = useCallback((): Viewport | null => {
+    if (box.width <= 0 || box.height <= 0) return null;
+    const inset = rulers ? RULER_SIZE : 0;
+    const vp = fitRect(artboard, [Math.max(1, box.width - inset), Math.max(1, box.height - inset)], { padding: FIT_PADDING, maxZoom: 1 });
+    return { ...vp, x: vp.x + inset, y: vp.y + inset };
+  }, [artboard, box.width, box.height, rulers]);
+  const fitKey = `${artboard.width}x${artboard.height}:${rulers ? 1 : 0}`;
 
   // Restore (or fit) the viewport when the component changes or the panel first gets a size.
   useEffect(() => {
     if (box.width === 0 || box.height === 0) return;
     if (viewportComponent.current === componentId && viewport) return;
     viewportComponent.current = componentId;
-    setViewport(session.selection.getState().canvasViewports[componentId] ?? fitViewport());
-  }, [componentId, box.width, box.height, viewport, fitViewport, session]);
+    const saved = session.selection.getState().canvasViewports[componentId];
+    autoFit.current = !saved;
+    fitLayout.current = { width: box.width, height: box.height, key: fitKey };
+    setViewport(saved ?? fitViewport());
+  }, [componentId, box.width, box.height, viewport, fitViewport, fitKey, session]);
+
+  // Panel resized, split changed, rulers toggled, or the artboard changed size: re-fit while the
+  // viewport is still the automatic fit; otherwise keep what was centered in the middle.
+  useEffect(() => {
+    if (box.width === 0 || box.height === 0) return;
+    const previous = fitLayout.current;
+    if (!previous) return;
+    if (previous.width === box.width && previous.height === box.height && previous.key === fitKey) return;
+    fitLayout.current = { width: box.width, height: box.height, key: fitKey };
+    if (autoFit.current) {
+      const next = fitViewport();
+      if (next) setViewport(next);
+      return;
+    }
+    const dx = (box.width - previous.width) / 2;
+    const dy = (box.height - previous.height) / 2;
+    if (dx !== 0 || dy !== 0) setViewport((vp) => (vp ? panBy(vp, dx, dy) : vp));
+  }, [box.width, box.height, fitKey, fitViewport]);
 
   // Remember the viewport per component.
   useEffect(() => {
@@ -439,6 +481,7 @@ export function CanvasPanel({ session: sessionProp, sceneSource, onSceneSourceCh
     const snap = !(event.metaKey || event.ctrlKey);
     switch (g.kind) {
       case "pan":
+        autoFit.current = false;
         setViewport(panBy(g.startViewport, p[0] - g.startScreen[0], p[1] - g.startScreen[1]));
         break;
       case "press":
@@ -450,7 +493,7 @@ export function CanvasPanel({ session: sessionProp, sceneSource, onSceneSourceCh
       case "move": {
         const r = moveGesture(g.snapshot, g.start, a, { snap, threshold: snapThreshold(), axisLock: event.shiftKey });
         g.txn.update(r.ops);
-        setDraft({ ...EMPTY_DRAFT, guides: r.guides, measurements: r.measurements, hideChrome: true });
+        setDraft({ ...EMPTY_DRAFT, guides: r.guides, measurements: r.measurements, spacing: r.spacing ?? [], hideChrome: true });
         setHover(null);
         break;
       }
@@ -570,6 +613,82 @@ export function CanvasPanel({ session: sessionProp, sceneSource, onSceneSourceCh
     }
   };
 
+  // Files dragged in from the desktop become Image, Video, and Lottie layers.
+  const dropFiles = async (files: readonly DroppedFile[], at: Point) => {
+    const cid = latest.current.componentId;
+    const prepared = await prepareDroppedFiles(session, files);
+    if (prepared.errors.length) {
+      toast({ title: prepared.errors[0]!, ...(prepared.errors.length > 1 ? { description: `${prepared.errors.length - 1} more ${prepared.errors.length === 2 ? "file" : "files"} couldn't be added either.` } : {}), tone: "warn" });
+    }
+    if (prepared.items.length === 0) return;
+    const { index: idx, artboard: board, componentId: current } = latest.current;
+    if (current !== cid) return;
+    const parentId = insertParentAt(idx, at);
+    const parentWorld = parentId ? (idx.entry(parentId)?.node?.worldTransform ?? null) : null;
+    // Media larger than the group it lands in (or the artboard) is scaled down to fit it.
+    const container = (parentId ? idx.bounds(parentId) : null) ?? board;
+    const { ops, refs } = mediaLayerOps(prepared.items, { componentId: cid, center: at, parentId, parentWorld, artboard: [container.width, container.height] });
+    const result = apply([...prepared.assetOps, ...ops], dropUndoLabel(prepared.items));
+    if (!result.ok) {
+      toast({ title: result.errors[0]?.message ?? "Couldn't add the files", tone: "warn" });
+      return;
+    }
+    const ids = refs.map((ref) => result.idMap[ref]).filter((id): id is Id => typeof id === "string");
+    setTool("select");
+    if (ids.length) session.selection.getState().select({ layers: ids, patches: [], comments: [] });
+  };
+
+  const onDragOver = (event: ReactDragEvent<HTMLDivElement>) => {
+    if (!dragHasFiles(event.dataTransfer)) return;
+    event.preventDefault();
+    event.dataTransfer.dropEffect = "copy";
+    const { viewport: vp, index: idx, artboard: board } = latest.current;
+    if (!vp) return;
+    const a = screenToArtboard(vp, screenPoint(event));
+    const parentId = insertParentAt(idx, a);
+    const rect = (parentId ? idx.bounds(parentId) : null) ?? board;
+    const into = parentId ? ` to ${idx.entry(parentId)?.layer.name ?? parentId}` : "";
+    const label = `${dropLabel(event.dataTransfer)}${into}`;
+    setDraft((d) => (d.dropTarget && d.dropTarget.label === label && d.dropTarget.rect === rect && d.dropTarget.at[0] === a[0] && d.dropTarget.at[1] === a[1] ? d : { ...EMPTY_DRAFT, dropTarget: { rect, at: a, label } }));
+  };
+
+  const onDragLeave = (event: ReactDragEvent<HTMLDivElement>) => {
+    const next = event.relatedTarget as Node | null;
+    if (next && event.currentTarget.contains(next)) return;
+    setDraft((d) => (d.dropTarget ? EMPTY_DRAFT : d));
+  };
+
+  const onDrop = (event: ReactDragEvent<HTMLDivElement>) => {
+    if (!dragHasFiles(event.dataTransfer)) return;
+    event.preventDefault();
+    setDraft((d) => (d.dropTarget ? EMPTY_DRAFT : d));
+    const vp = latest.current.viewport;
+    const files = Array.from(event.dataTransfer.files ?? []);
+    if (!vp || files.length === 0) return;
+    bodyRef.current?.focus({ preventScroll: true });
+    void dropFiles(files, screenToArtboard(vp, screenPoint(event)));
+  };
+
+  // Screenshots of the canvas (MCP get_screenshot target "canvas").
+  useEffect(() => {
+    const registration = registerBoundsProvider(session, "canvas.bounds", () => {
+      const el = bodyRef.current;
+      const { viewport: vp, artboard: board } = latest.current;
+      if (!el || !vp) return null;
+      const r = el.getBoundingClientRect();
+      if (r.width <= 0 || r.height <= 0) return null;
+      return {
+        x: r.left,
+        y: r.top,
+        width: r.width,
+        height: r.height,
+        scale: vp.zoom,
+        artboard: { x: r.left + vp.x + board.x * vp.zoom, y: r.top + vp.y + board.y * vp.zoom, width: board.width * vp.zoom, height: board.height * vp.zoom },
+      };
+    });
+    return registration.dispose;
+  }, [session, bodyRef, latest]);
+
   // Wheel: scroll pans, ⌘/Ctrl-scroll and pinch zoom about the pointer.
   useEffect(() => {
     const el = bodyRef.current;
@@ -580,6 +699,7 @@ export function CanvasPanel({ session: sessionProp, sceneSource, onSceneSourceCh
       if (!vp) return;
       const rect = el.getBoundingClientRect();
       const p: Point = [event.clientX - rect.left, event.clientY - rect.top];
+      autoFit.current = false;
       if (event.ctrlKey || event.metaKey) {
         setViewport(wheelZoom(vp, event.deltaY, p, event.deltaMode));
         return;
@@ -636,7 +756,11 @@ export function CanvasPanel({ session: sessionProp, sceneSource, onSceneSourceCh
     const { index: idx, viewport: vp, box: size, componentId: cid } = latest.current;
     if (!r || r.component !== cid || !vp) return;
     const bounds = unionRects(r.ids.map((id) => idx.bounds(id)).filter((b): b is Rect => b !== null));
-    if (bounds) setViewport(ensureVisible(vp, bounds, [size.width, size.height]));
+    if (!bounds) return;
+    const next = ensureVisible(vp, bounds, [size.width, size.height]);
+    if (next === vp) return;
+    autoFit.current = false;
+    setViewport(next);
   }, [revealNonce, session, latest]);
 
   const nudge = (key: ArrowKey, big: boolean): boolean => {
@@ -708,24 +832,41 @@ export function CanvasPanel({ session: sessionProp, sceneSource, onSceneSourceCh
   };
 
   const center = (): Point => [latest.current.box.width / 2, latest.current.box.height / 2];
-  const zoomBy = (direction: 1 | -1) => setViewport((vp) => vp && zoomAt(vp, nextZoomStep(vp.zoom, direction), center()));
-  const zoomTo = (zoom: number) => setViewport((vp) => vp && zoomAt(vp, zoom, center()));
+  const zoomBy = (direction: 1 | -1) => {
+    autoFit.current = false;
+    setViewport((vp) => vp && zoomAt(vp, nextZoomStep(vp.zoom, direction), center()));
+  };
+  const zoomTo = (zoom: number) => {
+    autoFit.current = false;
+    setViewport((vp) => vp && zoomAt(vp, zoom, center()));
+  };
   const zoomToFit = () => {
     const next = fitViewport();
-    if (next) setViewport(next);
+    if (!next) return;
+    autoFit.current = true;
+    setViewport(next);
   };
   const zoomToSelection = () => {
     const bounds = latest.current.chrome?.bounds;
     const { box: size } = latest.current;
-    if (!bounds) zoomToFit();
-    else setViewport(fitRect(bounds, [size.width, size.height], { padding: 96, maxZoom: 8 }));
+    if (!bounds) {
+      zoomToFit();
+      return;
+    }
+    autoFit.current = false;
+    setViewport(fitRect(bounds, [size.width, size.height], { padding: 96, maxZoom: 8 }));
   };
+  const toggleRulers = () =>
+    setRulers((on) => {
+      writeString(RULERS_KEY, on ? "off" : "on");
+      return !on;
+    });
   const group = () => {
     const result = groupSelection(session);
     if (!result.ok && result.message) toast({ title: result.message, ...(result.hint ? { description: result.hint } : {}), tone: "warn" });
   };
 
-  const actions = useLatest({ setTool, nudge, escape, enter, zoomBy, zoomTo, zoomToFit, zoomToSelection, group });
+  const actions = useLatest({ setTool, nudge, escape, enter, zoomBy, zoomTo, zoomToFit, zoomToSelection, group, toggleRulers });
   const cmds = useOptionalCommands();
   useEffect(() => {
     if (!commands || !cmds) return;
@@ -748,6 +889,7 @@ export function CanvasPanel({ session: sessionProp, sceneSource, onSceneSourceCh
       { id: "canvas.actualSize", title: "Canvas Actual Size", category: "Canvas", shortcut: "Shift+0", scope, keywords: ["100%", "1:1"], run: () => actions.current.zoomTo(1) },
       { id: "canvas.zoomIn", title: "Zoom Canvas In", category: "Canvas", shortcut: ["Mod+=", "Mod++"], scope, run: () => actions.current.zoomBy(1) },
       { id: "canvas.zoomOut", title: "Zoom Canvas Out", category: "Canvas", shortcut: "Mod+-", scope, run: () => actions.current.zoomBy(-1) },
+      { id: "canvas.toggleRulers", title: "Show Rulers", category: "Canvas", shortcut: "Shift+R", scope, icon: Ruler, keywords: ["ruler", "measure", "coordinates"], run: () => actions.current.toggleRulers() },
     ];
     const unregister = cmds.registry.register(list.filter((c) => !cmds.registry.get(c.id)));
     return () => {
@@ -762,7 +904,10 @@ export function CanvasPanel({ session: sessionProp, sceneSource, onSceneSourceCh
     const mod = event.metaKey || event.ctrlKey;
     const key = event.key;
     let handled = false;
-    if (!mod && !event.shiftKey && ["v", "r", "o", "t"].includes(key.toLowerCase())) {
+    if (!mod && event.shiftKey && key.toLowerCase() === "r") {
+      toggleRulers();
+      handled = true;
+    } else if (!mod && !event.shiftKey && ["v", "r", "o", "t"].includes(key.toLowerCase())) {
       const map: Record<string, CanvasTool> = { v: "select", r: "rectangle", o: "oval", t: "text" };
       setTool(map[key.toLowerCase()]!);
       handled = true;
@@ -787,6 +932,7 @@ export function CanvasPanel({ session: sessionProp, sceneSource, onSceneSourceCh
     { id: "actual", label: "Actual Size", shortcut: "Shift+0", onSelect: () => zoomTo(1) },
     { id: "double", label: "200%", onSelect: () => zoomTo(2) },
     { type: "separator" },
+    { id: "rulers", label: "Rulers", shortcut: "Shift+R", checked: rulers, onSelect: toggleRulers },
     {
       id: "live",
       label: "Show Live Frame",
@@ -842,6 +988,8 @@ export function CanvasPanel({ session: sessionProp, sceneSource, onSceneSourceCh
         data-tool={tool}
         data-live={live || undefined}
         data-panning={spaceHeld || undefined}
+        data-rulers={(rulers && canDraw) || undefined}
+        data-dropping={draft.dropTarget ? true : undefined}
         style={cursor ? { cursor } : undefined}
         onPointerDown={canDraw ? onPointerDown : undefined}
         onPointerMove={canDraw ? onPointerMove : undefined}
@@ -850,6 +998,9 @@ export function CanvasPanel({ session: sessionProp, sceneSource, onSceneSourceCh
         onPointerEnter={() => (pointerInside.current = true)}
         onPointerLeave={onPointerLeave}
         onDoubleClick={onDoubleClick}
+        onDragOver={canDraw ? onDragOver : undefined}
+        onDragLeave={canDraw ? onDragLeave : undefined}
+        onDrop={canDraw ? onDrop : undefined}
         onKeyDown={commands && cmds ? undefined : onKeyDownFallback}
       >
         {!component ? (
@@ -874,6 +1025,7 @@ export function CanvasPanel({ session: sessionProp, sceneSource, onSceneSourceCh
               )}
               <CanvasOverlay index={index} viewport={viewport} selected={selectionIds} hovered={draft.hideChrome || gestureRef.current ? null : hoverId} chrome={chrome} draft={draft} altMeasure={altMeasure} />
               {editing && editingNode && <InlineTextEditor key={editing.id} node={editingNode} viewport={viewport} initialText={editing.initial} selectAll={editing.selectAll} onCommit={commitText} />}
+              {rulers && <CanvasRulers viewport={viewport} width={box.width} height={box.height} selection={chrome?.bounds ?? null} />}
             </>
           )
         )}

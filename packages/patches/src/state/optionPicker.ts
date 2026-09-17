@@ -3,13 +3,12 @@
 import type { Value } from "@sonobe/core";
 import { definePatch } from "../infra/index.ts";
 import { getSpec } from "../specs.ts";
-import { optionIndex, optionKeys, optionPorts } from "./shared.ts";
+import { optionIndex, optionKeys } from "./shared.ts";
 
 const SPEC = getSpec("optionPicker")!;
 const OPTIONS = optionKeys("option", SPEC.variadic!.max);
 
 export const optionPickerPatch = definePatch("optionPicker", {
-  dynamicPorts: optionPorts(SPEC),
   evaluate(ctx) {
     const n = Math.min(Math.max(2, ctx.inputCount), OPTIONS.length);
     const i = optionIndex(ctx.input("option"), n);

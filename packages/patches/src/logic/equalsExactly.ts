@@ -1,7 +1,6 @@
 /** Equals Exactly: true when every value matches Value 1 with no tolerance. */
 
 import type { ValueType } from "@sonobe/core";
-import type { RuntimePatchDefinition } from "@sonobe/engine";
 import { clamp01, components, definePatch, equalValues, isPlainObject } from "../infra/index.ts";
 import { logicInputCount, variantResolver } from "./shared.ts";
 
@@ -55,7 +54,7 @@ export function exactlyEqual(a: unknown, b: unknown, type: ValueType): boolean {
   }
 }
 
-const definition = definePatch("equalsExactly", {
+export const equalsExactly = definePatch("equalsExactly", {
   evaluate(ctx) {
     const variant = variantOf(ctx.typeParam);
     const n = logicInputCount(ctx.inputCount);
@@ -69,6 +68,5 @@ const definition = definePatch("equalsExactly", {
     }
     ctx.output("output", same);
   },
+  mutedBehavior: "zero",
 });
-
-export const equalsExactly: RuntimePatchDefinition = { ...definition, mutedBehavior: "zero" };

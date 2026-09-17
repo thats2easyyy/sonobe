@@ -233,7 +233,13 @@ const DiagnosticsDeltaOutput = z.looseObject({
   totals: z.object({ errors: z.number(), warnings: z.number(), info: z.number() }),
 });
 
+/** Every structuredContent leads with the complete teaching text (results.ts withCompleteText). */
+const TextField = z
+  .string()
+  .describe("The complete result as text, the same text the content block carries.");
+
 export const WriteOutputSchema = z.looseObject({
+  text: TextField,
   ok: z.boolean(),
   changed: z.enum(["none", "partial", "all"]),
   docId: z.string(),
@@ -254,6 +260,7 @@ export const WriteOutputSchema = z.looseObject({
 });
 
 export const SimStateOutputSchema = z.looseObject({
+  text: TextField,
   simId: z.string(),
   docId: z.string(),
   frame: z.number(),
@@ -263,6 +270,7 @@ export const SimStateOutputSchema = z.looseObject({
 });
 
 export const DocumentInfoOutputSchema = z.looseObject({
+  text: TextField,
   docId: z.string(),
   name: z.string(),
   revision: z.number(),
@@ -270,3 +278,71 @@ export const DocumentInfoOutputSchema = z.looseObject({
   components: z.array(z.looseObject({ id: z.string(), name: z.string(), kind: z.string() })),
   diagnostics: z.object({ errors: z.number(), warnings: z.number(), info: z.number() }),
 });
+
+/** The structuredContent of a teaching error (results.ts failure()). */
+export const ToolErrorOutputSchema = z.looseObject({
+  text: TextField.optional(),
+  ok: z.literal(false),
+  changed: z.enum(["none", "partial", "all"]),
+  error: z.looseObject({
+    code: z.string(),
+    message: z.string(),
+    hint: z.string().optional(),
+    address: z.string().optional(),
+    opIndex: z.number().optional(),
+    suggestions: z.array(z.unknown()),
+  }),
+});
+
+type JsonSchemaOptions = { target: string; libraryOptions?: Record<string, unknown> };
+type JsonSchemaConverter = {
+  input(options: JsonSchemaOptions): Record<string, unknown>;
+  output(options: JsonSchemaOptions): Record<string, unknown>;
+};
+
+/** A Standard Schema (validation plus JSON Schema) that tools register as their outputSchema. */
+export interface ToolOutputSchema {
+  readonly "~standard": {
+    readonly version: 1;
+    readonly vendor: string;
+    validate(value: unknown): ReturnType<z.ZodType["~standard"]["validate"]>;
+    readonly jsonSchema: JsonSchemaConverter;
+  };
+  /** The success shape alone. */
+  readonly success: z.ZodObject;
+  /** Synchronous check against success ∪ teaching error. */
+  accepts(value: unknown): boolean;
+}
+
+function jsonBranch(schema: z.ZodType, options: JsonSchemaOptions): Record<string, unknown> {
+  const converter = (schema["~standard"] as { jsonSchema?: JsonSchemaConverter }).jsonSchema;
+  const json = converter
+    ? converter.output(options)
+    : (z.toJSONSchema(schema, { io: "output" }) as Record<string, unknown>);
+  const { $schema: _schema, ...rest } = json;
+  return rest;
+}
+
+/**
+ * An outputSchema that also accepts teaching errors. SDK clients validate structuredContent
+ * against a tool's outputSchema (the v1 SDK even on isError results), so an error result that
+ * doesn't fit the success shape would surface as -32602 instead of the teaching error. The JSON
+ * Schema keeps an object root (required by 2025-era clients) with anyOf success | error.
+ */
+export function toolOutputSchema(success: z.ZodObject): ToolOutputSchema {
+  const union = z.union([success, ToolErrorOutputSchema]);
+  const json = (options: JsonSchemaOptions) => {
+    const branches = [jsonBranch(success, options), jsonBranch(ToolErrorOutputSchema, options)];
+    return { type: "object", anyOf: branches };
+  };
+  return {
+    "~standard": {
+      version: 1,
+      vendor: "sonobe",
+      validate: (value) => union["~standard"].validate(value),
+      jsonSchema: { input: json, output: json },
+    },
+    success,
+    accepts: (value) => union.safeParse(value).success,
+  };
+}

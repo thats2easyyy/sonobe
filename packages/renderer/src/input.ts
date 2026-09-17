@@ -73,6 +73,28 @@ export function pointerTypeOf(e: { pointerType?: string }): "mouse" | "touch" | 
   return e.pointerType === "touch" || e.pointerType === "pen" ? e.pointerType : "mouse";
 }
 
+/**
+ * A pointer InputEvent with the DOM `buttons` bitmask (1 primary, 2 secondary, 4 middle, 8 back,
+ * 16 forward, 32 pen eraser). Declared locally so this compiles before and after the engine
+ * contract gains `buttons?: number`.
+ */
+type PointerWithButtons = PointerInputEvent & { buttons?: number };
+
+/** PointerEvent.button → its `buttons` bit (the two orders differ: button 1 is middle, bit 2 is secondary). */
+const BUTTON_BITS = [1, 4, 2, 8, 16, 32];
+
+/**
+ * Buttons held once this event has been handled: pressed buttons are included on "down" and the
+ * released button is gone on "up". Missing or invalid values read as 0 (nothing pressed), except
+ * that a press reporting no buttons (some synthetic events) counts the button it pressed.
+ */
+export function buttonsOf(e: { buttons?: number; button?: number }, phase?: PointerInputEvent["phase"]): number {
+  const b = e.buttons;
+  const held = typeof b === "number" && Number.isInteger(b) && b > 0 ? b : 0;
+  if (held === 0 && phase === "down") return BUTTON_BITS[e.button ?? 0] ?? 1;
+  return held;
+}
+
 /** Event time in ms on the performance clock (the same clock as requestAnimationFrame). */
 export function eventTime(e: { timeStamp?: number }): number {
   const t = e.timeStamp;
@@ -88,7 +110,7 @@ export function attachInputCapture(opts: InputCaptureOptions): () => void {
 
   const pointerEvent = (e: PointerEvent, phase: PointerInputEvent["phase"], x: number, y: number): PointerInputEvent => {
     const type = pointerTypeOf(e);
-    const out: PointerInputEvent = { kind: "pointer", phase, pointerId: e.pointerId, pointerType: type, timeStamp: eventTime(e), x, y };
+    const out: PointerWithButtons = { kind: "pointer", phase, pointerId: e.pointerId, pointerType: type, timeStamp: eventTime(e), x, y, buttons: buttonsOf(e, phase) };
     if (phase === "down" || phase === "up") out.button = e.button;
     if (type !== "mouse" && e.pressure && (phase === "down" || phase === "move")) out.pressure = e.pressure;
     return out;

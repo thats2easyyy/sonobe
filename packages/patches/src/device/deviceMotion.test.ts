@@ -1,8 +1,8 @@
 import { runPatch } from "@sonobe/engine/testing";
 import { describe, expect, it } from "vitest";
+import type { DeviceMotionSample } from "@sonobe/engine";
 import { createPatchHarness, loopOf } from "../infra/index.ts";
 import { deviceMotionPatch, tiltFromGravity } from "./deviceMotion.ts";
-import type { MotionSample } from "./platform.ts";
 
 describe("tiltFromGravity", () => {
   it("maps gravity to tilt in degrees", () => {
@@ -28,13 +28,15 @@ describe("deviceMotion", () => {
   });
 
   it("outputs samples, using attitude when present and gravity otherwise", () => {
-    let sample: MotionSample | undefined = { acceleration: [0, -1, 0], rotationRate: [1, 2, 3], attitude: [10, 20, 30] };
+    let sample: DeviceMotionSample | undefined = { acceleration: [0, -1, 0], rotationRate: [1, 2, 3], attitude: [10, 20, 30] };
     const h = createPatchHarness(deviceMotionPatch, { services: { platform: { deviceMotion: () => sample as never } } });
     expect(h.step().outputs).toEqual({ tilt: [10, 20, 30], acceleration: [0, -1, 0], rotationRate: [1, 2, 3], available: true });
     sample = { acceleration: [0, -1, 0], rotationRate: [0, 0, 0] };
     expect(h.step().outputs.tilt).toEqual([90, 0, 0]);
-    // The engine's simulated samples carry attitude [0, 0, 0]; tilt still comes from gravity.
-    sample = { acceleration: [0, 0, -1], rotationRate: [0, 0, 0], attitude: [0, 0, 0] };
+    // An attitude of [0, 0, 0] is a real reading (flat, facing its reference direction), not a missing one.
+    sample = { acceleration: [0, -1, 0], rotationRate: [0, 0, 0], attitude: [0, 0, 0] };
+    expect(h.step().outputs.tilt).toEqual([0, 0, 0]);
+    sample = { acceleration: [0, 0, -1], rotationRate: [0, 0, 0] };
     expect(h.step().outputs.tilt).toEqual([0, 0, 0]);
     sample = undefined;
     const held = h.step();
@@ -59,7 +61,7 @@ describe("deviceMotion", () => {
   });
 
   it("keeps one state per loop index", () => {
-    const sample: MotionSample = { acceleration: [0, -1, 0], rotationRate: [0, 0, 0] };
+    const sample: DeviceMotionSample = { acceleration: [0, -1, 0], rotationRate: [0, 0, 0] };
     const h = createPatchHarness(deviceMotionPatch, { inputs: { enabled: loopOf([true, false]) }, services: { platform: { deviceMotion: () => sample as never } } });
     const f = h.step();
     expect(f.outputs.available).toEqual(loopOf([true, false]));

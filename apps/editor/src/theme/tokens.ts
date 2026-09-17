@@ -247,6 +247,7 @@ export const PORT_TYPE_GROUP: Record<ValueType, PortColorGroup> = {
   index: "index",
   enum: "index",
   json: "json",
+  connection: "json",
   layer: "layer",
   image: "media",
   video: "media",

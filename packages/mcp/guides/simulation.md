@@ -8,7 +8,7 @@ Related: `start-here`, `gestures`, `animation`, `troubleshooting`
 
 - `sim_reset` starts a deterministic simulation: fixed timestep (60 fps unless the document says 120), seeded randomness, and deterministic clock time.
 - It steps frame 0 and returns a `simId`. Sessions are independent of each other and of the person's live viewer, and never change the document.
-- Edits made after `sim_reset` hot-swap into the session on its next call (the result says so). Call `sim_reset` again for a clean start.
+- Edits made after `sim_reset` hot-swap into the session on its next call (the result says so) and are laid out without advancing time. Call `sim_reset` again for a clean start.
 
 ## Tools
 
@@ -20,7 +20,7 @@ Related: `start-here`, `gestures`, `animation`, `troubleshooting`
 | `sim_get_values` | current values right now                                                                                                          |
 | `get_screenshot` | an image for visual QA (needs the Sonobe app)                                                                                     |
 
-**Events** share one shape everywhere. `atMs` is the time from the start of the call.
+**Events** share one shape everywhere. `atMs` is the time from the start of the call. Each input finds its target when it fires, so a tap at `atMs` 400 hits whatever is on screen by then, and the hit report describes that moment. A layer that isn't in the frame yet (a loop with fewer copies) is skipped with a warning.
 
 ```json events
 [
@@ -41,10 +41,12 @@ Related: `start-here`, `gestures`, `animation`, `troubleshooting`
 - `patchId.port` reads patch outputs and inputs.
 - `@layerId.prop` reads resolved layer properties and layer outputs.
 - A `#n` suffix picks one loop copy (`@row.position#2`).
+- Inside a component instance, put the instance path first: `like_button_2/liked.on`, `@like_button_2/like_button.color`. Paths chain through nested instances, and `card#2/...` picks copy 2 of a looped instance. `get_items` takes the same paths.
 
 ## Reading traces
 
 - By default, `sim_trace` runs on a **copy** from the session's current state, so the session doesn't move. Pass `advance: true` to move it.
+- `t_ms` counts frames from the start of the trace, so it keeps rising even when Restart Prototype fires.
 - Rows are evenly sampled down to `maxRows`; summaries always use every frame.
 - **start / end:** the first and last sampled values.
 - **settled by:** when the value came within 0.1% of its final value and stayed. "Still moving" means extend `durationMs`.
@@ -119,7 +121,6 @@ Hold for half a second, release, and watch the scale go down and come back:
 
 ## Limits
 
-- Simulations read the root component only.
 - A trace covers up to 60 s, and a step call covers up to 2 minutes.
 - **Runtime issues** show up in results: a patch that isn't implemented yet (it outputs default values), script errors, and loop limits.
 - **Platform services** (network, sound, camera) do nothing in simulation.

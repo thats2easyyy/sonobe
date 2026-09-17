@@ -10,7 +10,7 @@ Related: `start-here`, `animation`, `troubleshooting`
 - **Layers.** A tree, back to front; children draw above their parent. Each layer has a `type` (`rectangle`, `text`, `group`, `image`, `hitArea`, …) and `props`. A prop holds a literal or a connection. `describe_layer_types` lists props.
 - **Patches.** Logic nodes with typed input and output ports. Options:
   - `typeParam` picks the value type of variant ports, as in `transition<point>`.
-  - `inputCount` sets how many repeated inputs a variadic patch has (`add`, `or`, `optionPicker`, `loopBuilder`).
+  - `inputCount` sets how many repeated inputs a variadic patch has (`add`, `or`, `optionPicker`, `loopBuilder`). `describe_patch_types` prints the keys: `add` and `or` count from 1 (`value1`, `value2`), `optionPicker` and `loopBuilder` from 0 (`option0`, `item0`).
   - `settings` holds non-port configuration, such as a variable's name.
   - `ui` is the patch editor position.
 - **Connections.** They live on the input they drive: `{ "link": "pop.output" }`. Links may read patch outputs, layer props or layer outputs (`@card.scale`, `@label.textSize`), or published inputs (`$in.key`).
@@ -115,8 +115,33 @@ A mismatched connection fails and teaches the fix:
 
 The error suggests an Option Picker set to color, with the three ops that insert it.
 
-## Evaluation
+## Evaluation and feedback loops
 
 - Every patch evaluates every frame in dataflow order, then layer props resolve, then layout runs.
-- A feedback loop reads the previous frame's value. A patch can't feed its own input directly; put a `delay1` in between.
 - Same-frame precedence: Switch `turnOff` beats `turnOn` beats `flip`; Counter `jump` beats increase and decrease.
+- A cable that loops back to an earlier patch reads the **previous frame's** value. Diagnostics note it as `feedback_loop` (info).
+- A patch can't feed its own input (`self_edge`). Route the value through `delay1` (Delay One Frame), which outputs what its input was last frame.
+
+Accumulate an angle, 3 degrees per frame:
+
+```json tool:add_patches
+{
+  "patches": [
+    { "ref": "spin", "type": "add", "name": "Spin Angle", "inputs": { "value2": 3 } },
+    {
+      "ref": "last",
+      "type": "delay1",
+      "name": "Last Angle",
+      "inputs": { "value": { "link": "$spin.output" } }
+    }
+  ],
+  "connections": [{ "from": "$last.output", "to": "$spin.value1" }]
+}
+```
+
+```text outline
+patch spin_angle add<number>×2 "Spin Angle" value1←last_angle.output value2=3
+patch last_angle delay1<number> "Last Angle" value←spin_angle.output
+```
+
+- A feedback loop steps once per frame, so at 120 fps it runs twice as fast. Drive continuous motion from `time`, and keep feedback loops for per-frame work like smoothing or counting.

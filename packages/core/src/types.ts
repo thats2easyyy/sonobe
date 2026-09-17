@@ -36,6 +36,7 @@ export type ValueType =
   | "textStyle"
   | "layerEffect"
   | "transform" // 4x4 column-major matrix
+  | "connection" // opaque runtime handle (e.g. a WebSocket connection); no literal
   | "any";
 
 /** Port-level hint for UI + docs; does not change runtime representation. */
@@ -67,6 +68,12 @@ export interface LayerRef {
 export interface AssetRef {
   assetId?: Id;
   url?: string;
+  /**
+   * Live source (camera feed, microphone, player metering) such as "audio/main/player#0".
+   * Runtime-only: documents never store live references. The interim encoding before this field
+   * existed was url "sonobe-live:<kind>/<key>".
+   */
+  live?: string;
 }
 
 export interface GradientStop {
@@ -80,6 +87,8 @@ export interface GradientValue {
   /** Normalized 0..1 in layer bounds. */
   start: [number, number];
   end: [number, number];
+  /** Horizontal stretch of a radial gradient (default 1): 2 makes it twice as wide as tall. Above 0. */
+  ratio?: number;
 }
 
 export interface ShapeValue {
@@ -148,7 +157,7 @@ export interface JsonLiteral {
   json: unknown;
 }
 export interface GradientLiteral {
-  gradient: { kind: GradientValue["kind"]; stops: [number, string][]; start: [number, number]; end: [number, number] };
+  gradient: { kind: GradientValue["kind"]; stops: [number, string][]; start: [number, number]; end: [number, number]; ratio?: number };
 }
 
 /** Anything that can sit on an input port or a layer property in a file. */
@@ -225,6 +234,7 @@ export interface Component {
   layers: LayerNode[];
   patches: Record<Id, PatchNode>;
   comments: CommentNode[];
+  /** Extension data (editor node positions, importer notes): plain JSON, keys sorted on save. Change it with updateComponent `meta`. */
   meta?: Record<string, unknown>;
 }
 
@@ -302,6 +312,12 @@ export interface PortSpec {
   /** "variant" = takes the patch's typeParam type. */
   type: ValueType | "variant";
   subtype?: ValueSubtype;
+  /**
+   * Document-encoded literal (CONVENTIONS.md §7), not a runtime value: "#RRGGBBAA" colors,
+   * [x, y] vectors, raw JSON values, { loop: [...] } on wholeLoop ports, null for references and
+   * media. Decode with decodeInput (wrap a non-literal JSON value as { json }). On a "variant" port
+   * it's the first variant's default; see PatchSpec.variantDefaults for the others.
+   */
   default?: Value;
   min?: number;
   max?: number;
@@ -312,10 +328,12 @@ export interface PortSpec {
   wholeLoop?: boolean;
   /** Hidden from UI unless connected (advanced ports). */
   advanced?: boolean;
+  /** A state input that takes pulses on purpose (a one-frame true means something), so no pulse_into_state warning. */
+  acceptsPulse?: boolean;
 }
 
 export interface VariadicSpec {
-  /** Expanded keys are `${key}${n}` starting at 1, e.g. value1, value2. */
+  /** Expanded keys are `${key}${n}` from startIndex (default 1): value1, value2… or option0, option1… */
   key: string;
   name: string; // expanded names `${name} ${n}`
   type: ValueType | "variant";
@@ -347,6 +365,13 @@ export interface PatchExample {
   outline: string;
 }
 
+/** How many repeated port groups a node may have (PatchNode.inputCount). */
+export interface InputCountRange {
+  min: number;
+  max: number;
+  defaultCount: number;
+}
+
 export interface PatchSpec {
   type: string;
   name: string;
@@ -357,7 +382,14 @@ export interface PatchSpec {
   inputs: PortSpec[];
   outputs: PortSpec[];
   variadic?: VariadicSpec;
-  /** Allowed typeParam values when any port is "variant". First is default. */
+  /**
+   * Count range for node-dependent repeated port groups that don't fit VariadicSpec, such as
+   * Keyframes (stop{n} + value{n}) or Gradient Builder (stop{n} + color{n}). It lets nodes set
+   * `inputCount` (validated by ops, clamped by resolveNodePorts); dynamicPorts builds the ports.
+   * Ignored when `variadic` is set.
+   */
+  inputCountRange?: InputCountRange;
+  /** Allowed typeParam values when any port is "variant". First is default. dynamicPorts may replace them per node. */
   variants?: ValueType[];
   /** Platforms where the patch functions; omitted = everywhere. */
   platforms?: ("desktop" | "web" | "mobile")[];
@@ -368,7 +400,11 @@ export interface PatchSpec {
   examples?: PatchExample[];
   /** Non-port configuration (PatchNode.settings). */
   settings?: SettingSpec[];
-  /** Per-variant default overrides: { color: { start: "#FFFFFFFF" } }. */
+  /**
+   * Per-variant default overrides (document-encoded), by port key or variadic base key:
+   * { color: { start: "#FFFFFFFF" } }. Without an override, a variant port uses its declared default
+   * for the first variant and the type's zero value (CONVENTIONS.md §8) for the others.
+   */
   variantDefaults?: Partial<Record<ValueType, Record<string, Value>>>;
   /** 1 = everyday essentials, 2 = breadth, 3 = hardware/platform specific. */
   tier?: 1 | 2 | 3;
@@ -378,8 +414,12 @@ export interface PatchSpec {
   origami?: { id?: string; name: string } | null;
   /** Evaluated every frame even without input changes (time, animation, gestures). */
   alwaysEvaluate?: boolean;
-  /** Node-dependent ports (JS patch, math expression, component instance). */
-  dynamicPorts?: (node: PatchNode, doc: SonobeDocument) => { inputs: PortSpec[]; outputs: PortSpec[] };
+  /**
+   * Node-dependent ports (JS patch, math expression, component instance). Returned ports replace
+   * static ports with the same key. A non-empty `variants` replaces the spec's variants for this node
+   * (a script that declares its own types), so ops accept those typeParams.
+   */
+  dynamicPorts?: (node: PatchNode, doc: SonobeDocument) => { inputs: PortSpec[]; outputs: PortSpec[]; variants?: ValueType[] };
 }
 
 export type PropCategory =
@@ -514,7 +554,12 @@ export type Op =
       inputs?: Record<string, InterfacePort | null>;
       outputs?: Record<string, InterfacePort | null>;
     }
-  | (OpBase & { op: "updateComponent"; id: Id; name?: string; notes?: string | null; size?: [number, number] | null })
+  /**
+   * `meta` merges key by key into Component.meta: a key set to null is removed, any other value
+   * replaces that key whole (no deep merge), and untouched keys stay. `meta: null` removes all
+   * metadata. Values are plain JSON and can't be null. The inverse restores every touched key.
+   */
+  | (OpBase & { op: "updateComponent"; id: Id; name?: string; notes?: string | null; size?: [number, number] | null; meta?: Record<string, unknown> | null })
   | { op: "setScript"; file: string; source: string | null }
   | { op: "addAsset"; asset: AssetRecord }
   | { op: "removeAsset"; id: Id }

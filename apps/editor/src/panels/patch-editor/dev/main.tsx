@@ -1,7 +1,9 @@
 /**
  * Patch editor harness (dev only): /src/panels/patch-editor/dev/index.html on the editor dev server.
- * Query options: ?nodes=320 (stress graph), ?component=1 (nested patch component), ?theme=light,
- * ?minimap=1, ?reduced=1, ?empty=1. `window.__harness` exposes the session for scripted checks.
+ * Query options: ?nodes=320 (stress graph), ?component=1 (nested patch component; &instances=2 adds a
+ * second instance), ?enter=<componentId>, ?drive=<layerId>.<prop> (Drive with a patch on load),
+ * ?theme=light, ?minimap=1, ?reduced=1, ?empty=1. `window.__harness` exposes the session, the
+ * bridge API, and `resize(width, height)` for scripted checks (screenshots.mjs).
  */
 
 import { applyOps, createEmptyDocument, type Op, type SonobeDocument } from "@sonobe/core";
@@ -16,7 +18,7 @@ import "../../../theme/tokens.css";
 import "../../../theme/base.css";
 import { CommandProvider } from "../../../ui/commands/CommandProvider.tsx";
 import { Toaster } from "../../../ui/Toast.tsx";
-import { PatchEditor, PatchEditorBreadcrumbs } from "../index.ts";
+import { completeConnectionToLayerProp, patchEditorBridge, PatchEditor, PatchEditorBreadcrumbs, startLinkToLayerProp } from "../index.ts";
 import "./harness.css";
 
 const params = new URLSearchParams(location.search);
@@ -51,9 +53,9 @@ function stressDocument(count: number): SonobeDocument {
   return apply(createEmptyDocument({ name: "Stress" }), ops);
 }
 
-/** The demo plus a patch component ("Press Feedback") used from main. */
-function componentDocument(): SonobeDocument {
-  return apply(createDemoDocument(registry), [
+/** The demo plus a patch component ("Press Feedback") used from main, once or twice. */
+function componentDocument(instances: number): SonobeDocument {
+  const ops: Op[] = [
     { op: "addComponent", ref: "press", component: { id: "press_feedback", name: "Press Feedback", kind: "patchComponent" } },
     {
       op: "updateInterface",
@@ -68,11 +70,18 @@ function componentDocument(): SonobeDocument {
     { op: "updateInterface", component: "press_feedback", outputs: { scale: { key: "scale", name: "Scale", type: "number", link: "shrink.output" } } },
     { op: "addPatch", patch: { id: "press_card", type: "component", component: "press_feedback", name: "Press Feedback", ui: { x: 480, y: 660 } } },
     { op: "connect", from: "tap_photo.down", to: "press_card.pressed" },
-  ]);
+  ];
+  if (instances > 1) {
+    ops.push(
+      { op: "addPatch", patch: { id: "press_like", type: "component", component: "press_feedback", name: "Like Press", ui: { x: 480, y: 820 } } },
+      { op: "connect", from: "tap_like.down", to: "press_like.pressed" },
+    );
+  }
+  return apply(createDemoDocument(registry), ops);
 }
 
 const nodes = Number(params.get("nodes") ?? 0);
-const doc = params.get("empty") ? createEmptyDocument({ name: "Empty" }) : nodes > 0 ? stressDocument(nodes) : params.get("component") ? componentDocument() : createDemoDocument(registry);
+const doc = params.get("empty") ? createEmptyDocument({ name: "Empty" }) : nodes > 0 ? stressDocument(nodes) : params.get("component") ? componentDocument(Number(params.get("instances") ?? 1)) : createDemoDocument(registry);
 const session = createEditorSession({ host: null, document: doc, textMeasurer: "approximate" });
 setDefaultSession(session);
 if (params.get("enter")) session.selection.getState().enterComponent(params.get("enter")!);
@@ -83,7 +92,24 @@ function tapLayer(x: number, y: number) {
   setTimeout(() => session.runtime.runtime.dispatch([{ kind: "pointer", phase: "up", pointerId: 1, x, y }]), 60);
 }
 
-(window as unknown as { __harness: unknown }).__harness = { session, tapLayer };
+/** Resize the editor's container (split orientation and panel resizes). */
+function resize(width: number | null, height: number | null) {
+  const el = document.querySelector<HTMLElement>(".harness");
+  if (!el) return;
+  el.style.width = width === null ? "" : `${width}px`;
+  el.style.height = height === null ? "" : `${height}px`;
+}
+
+const drive = (layerId: string, prop: string) => startLinkToLayerProp({ layerId, prop }, { session, show: () => undefined });
+
+(window as unknown as { __harness: unknown }).__harness = {
+  session,
+  tapLayer,
+  resize,
+  drive,
+  connectToProp: (from: string, layerId: string, prop: string) => completeConnectionToLayerProp(from, { layerId, prop }, { session }),
+  bridge: () => patchEditorBridge(session).getState(),
+};
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
@@ -103,3 +129,9 @@ createRoot(document.getElementById("root")!).render(
     </ThemeProvider>
   </StrictMode>,
 );
+
+const driveParam = params.get("drive");
+if (driveParam?.includes(".")) {
+  const [layerId, prop] = driveParam.split(".") as [string, string];
+  setTimeout(() => drive(layerId, prop), 600);
+}

@@ -1,8 +1,8 @@
 {
   "mcpServers": {
     "sonobe": {
-      "command": "${SONOBE_CLI:-sonobe}",
-      "args": ["mcp"]
+      "command": "node",
+      "args": ["${CLAUDE_PLUGIN_ROOT}/dist/sonobe.mjs", "mcp"]
     }
   }
 }

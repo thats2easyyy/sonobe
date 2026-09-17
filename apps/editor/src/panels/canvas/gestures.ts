@@ -9,13 +9,15 @@ import { mat4 } from "@sonobe/engine";
 import { boundsOf, isAxisAligned, quadOf, rectFromPoints, roundTo, transformPoint, unionRects, type Point, type Rect } from "./geometry.ts";
 import { drawRect, insertOps, layoutDropTarget, moveOps, reorderOps, resizeOps, rotateOps, type DrawOptions, type DropTarget, type FlowChild, type InsertTool } from "./ops.ts";
 import { hitLayers, isEditableLayer, type CanvasIndex, type FlowLayout } from "./sceneIndex.ts";
-import { measureGaps, snapRect, type Guide, type Measurement, type SnapEdge } from "./snapping.ts";
+import { measureGaps, measurementMatchesMark, snapMove, snapRect, type Guide, type Measurement, type SnapEdge, type SpacingMark } from "./snapping.ts";
 import { HANDLE_POINTS, frameFromProps, localMatrix, mapRect, parentDelta, positionForPoint, resizeFrame, resizeRect, rotateFrame, toParentSpace, type Handle, type LayerFrame } from "./transform.ts";
 
 export interface GestureResult {
   ops: Op[];
   guides: Guide[];
   measurements: Measurement[];
+  /** Equal gaps between siblings (moves only). */
+  spacing?: SpacingMark[];
   /** Artboard bounds of what's being edited after this step. */
   bounds: Rect | null;
 }
@@ -109,12 +111,14 @@ export function moveGesture(s: MoveSnapshot, start: Point, current: Point, optio
   dx = roundTo(s.bounds.x + dx) - s.bounds.x;
   dy = roundTo(s.bounds.y + dy) - s.bounds.y;
   let guides: Guide[] = [];
+  let spacing: SpacingMark[] = [];
   if (options.snap) {
     const edges: { edgesX?: SnapEdge[]; edgesY?: SnapEdge[] } = options.axisLock ? (dx === 0 ? { edgesX: [] } : { edgesY: [] }) : {};
-    const snap = snapRect({ ...s.bounds, x: s.bounds.x + dx, y: s.bounds.y + dy }, s.targets, { threshold: options.threshold, ...edges });
+    const snap = snapMove({ ...s.bounds, x: s.bounds.x + dx, y: s.bounds.y + dy }, s.targets, s.others, { threshold: options.threshold, ...edges });
     dx += snap.dx;
     dy += snap.dy;
     guides = snap.guides;
+    spacing = snap.spacing;
   }
   const moved: Rect = { ...s.bounds, x: s.bounds.x + dx, y: s.bounds.y + dy };
   const target: Point = [start[0] + dx, start[1] + dy];
@@ -125,7 +129,8 @@ export function moveGesture(s: MoveSnapshot, start: Point, current: Point, optio
       return { id: l.id, position: [l.position[0] + d[0], l.position[1] + d[1]] as Point };
     }),
   );
-  return { ops, guides, measurements: measureGaps(moved, s.others, s.container), bounds: moved };
+  const measurements = measureGaps(moved, s.others, s.container).filter((m) => !spacing.some((mark) => measurementMatchesMark(m, mark)));
+  return { ops, guides, measurements, spacing, bounds: moved };
 }
 
 // ---------------------------------------------------------------------------

@@ -5,11 +5,9 @@
  */
 
 import type { AssetRef } from "@sonobe/core";
-import type { PatchContext, RuntimeServices } from "@sonobe/engine";
+import type { AudioServices, AudioVoiceOptions, AudioVoiceState, PatchContext, RuntimeServices } from "@sonobe/engine";
 import { clamp, definePatch, finiteOr, logOnce, toBool, warnOnce } from "../infra/index.ts";
-import { isExtendedAudio, mediaInfoReader, mediaPlatform } from "./platform.ts";
-import type { ExtendedAudioService, LegacyAudioService, VoiceOptions, VoiceState } from "./platform.ts";
-import { assetExists, isAssetRef, isLiveHandle, liveHandle, refKey, safely, withMutedBehavior } from "./shared.ts";
+import { assetExists, isAssetRef, isLiveHandle, liveHandle, refKey, safely } from "./shared.ts";
 
 /** Most voices that sound at once. */
 export const MAX_VOICES = 32;
@@ -54,7 +52,7 @@ function claimVoice(ctx: PatchContext, key: string): boolean {
 
 function stopVoice(s: SoundState, services: RuntimeServices): void {
   if (s.voice) {
-    const audio = mediaPlatform(services).audio;
+    const audio = services.platform.audio;
     safely(() => audio?.stop(s.key));
   }
   s.voice = false;
@@ -73,7 +71,7 @@ function readOption(ctx: PatchContext, key: string, label: string, fallback: num
   return clamp(v, lo, hi);
 }
 
-function voiceOptions(ctx: PatchContext, loop: boolean): VoiceOptions {
+function voiceOptions(ctx: PatchContext, loop: boolean): AudioVoiceOptions {
   return {
     loop,
     volume: readOption(ctx, "volume", "Volume", 1, 0, 1),
@@ -83,7 +81,10 @@ function voiceOptions(ctx: PatchContext, loop: boolean): VoiceOptions {
   };
 }
 
-const optionsKey = (o: VoiceOptions) => `${o.loop}|${o.volume}|${o.rate}|${o.pitch}|${o.pan}`;
+const optionsKey = (o: AudioVoiceOptions) => `${o.loop}|${o.volume}|${o.rate}|${o.pitch}|${o.pan}`;
+
+/** The Pitch input is in cents; the platform voice takes semitones. */
+const hostOptions = (o: AudioVoiceOptions): AudioVoiceOptions => ({ ...o, pitch: o.pitch / 100 });
 
 /** The input as a playable reference: null for empty, live handles (with a warning), and missing assets. */
 function playableSound(ctx: PatchContext, raw: unknown): AssetRef | null {
@@ -98,15 +99,15 @@ function playableSound(ctx: PatchContext, raw: unknown): AssetRef | null {
 function mediaDuration(ctx: PatchContext, ref: AssetRef | null): number {
   if (!ref) return 0;
   try {
-    const info = mediaInfoReader(ctx.services)?.(ref);
+    const info = ctx.services.mediaInfo?.(ref);
     return info?.status === "ready" && Number.isFinite(info.duration) && info.duration > 0 ? info.duration : 0;
   } catch {
     return 0;
   }
 }
 
-/** Drive a proposed-API voice; returns whether sound is actually coming out this frame. */
-function syncExtended(ctx: PatchContext, s: SoundState, audio: ExtendedAudioService, ref: AssetRef, wanted: boolean, seek: boolean, options: VoiceOptions, voiceState: VoiceState | undefined): boolean {
+/** Drive the platform voice; returns whether sound is actually coming out this frame. */
+function syncVoice(ctx: PatchContext, s: SoundState, audio: AudioServices, ref: AssetRef, wanted: boolean, seek: boolean, options: AudioVoiceOptions, voiceState: AudioVoiceState | undefined): boolean {
   const serialized = optionsKey(options);
   if (!wanted) {
     if (s.voicePlaying) {
@@ -116,7 +117,7 @@ function syncExtended(ctx: PatchContext, s: SoundState, audio: ExtendedAudioServ
     }
     if (s.voice && seek) safely(() => audio.seek(s.key, 0));
     if (s.voice && serialized !== s.options) {
-      safely(() => audio.update(s.key, options));
+      safely(() => audio.update(s.key, hostOptions(options)));
       s.options = serialized;
     }
     return false;
@@ -127,7 +128,7 @@ function syncExtended(ctx: PatchContext, s: SoundState, audio: ExtendedAudioServ
       if (s.voice) stopVoice(s, ctx.services);
       return true;
     }
-    safely(() => audio.play(s.key, ref, { ...options, from: s.position }));
+    safely(() => audio.play(s.key, ref, { ...hostOptions(options), from: s.position }));
     s.voice = true;
     s.voicePlaying = true;
     s.options = serialized;
@@ -135,166 +136,143 @@ function syncExtended(ctx: PatchContext, s: SoundState, audio: ExtendedAudioServ
   }
   if (seek) safely(() => audio.seek(s.key, 0));
   if (serialized !== s.options) {
-    safely(() => audio.update(s.key, options));
+    safely(() => audio.update(s.key, hostOptions(options)));
     s.options = serialized;
   }
   return voiceState?.status === "playing";
 }
 
-/** Drive the contract's play/stop audio: start on audible edges, restart on seeks, stop when not wanted. */
-function syncLegacy(ctx: PatchContext, s: SoundState, audio: LegacyAudioService, ref: AssetRef, wanted: boolean, seek: boolean, options: VoiceOptions): void {
-  if (!wanted) {
-    if (s.voice) stopVoice(s, ctx.services);
-    return;
-  }
-  if (s.voice && seek) stopVoice(s, ctx.services);
-  if (s.voice) return;
-  if (typeof ref.assetId !== "string") {
-    warnOnce(ctx, "urlSound", "soundPlayer: this host only plays sound assets, so a sound from a web address stays silent.");
-    return;
-  }
-  if (!claimVoice(ctx, s.key)) return;
-  const assetId = ref.assetId;
-  safely(() => audio.play(s.key, assetId, { loop: options.loop, volume: options.volume, rate: options.rate }));
-  s.voice = true;
-  s.voicePlaying = true;
-}
+export const soundPlayerPatch = definePatch<SoundState>("soundPlayer", {
+  mutedBehavior: "evaluate",
+  state: () => ({
+    key: "",
+    source: null,
+    sourceKey: "",
+    failedKey: "",
+    position: 0,
+    audible: false,
+    oneShot: false,
+    prevPlaying: false,
+    voice: false,
+    voicePlaying: false,
+    options: "",
+    loops: 0,
+    ended: false,
+  }),
+  evaluate(ctx) {
+    const s = ctx.state;
+    s.key = `${ctx.componentPath}/${ctx.id}#${ctx.loopIndex}`;
+    if (ctx.muted) {
+      stopVoice(s, ctx.services);
+      s.audible = false;
+      s.oneShot = false;
+      s.prevPlaying = false;
+      ctx.output("currentTime", 0);
+      ctx.output("duration", 0);
+      ctx.output("progress", 0);
+      ctx.output("isPlaying", false);
+      ctx.output("metering", null);
+      return;
+    }
+    const audio = ctx.services.platform.audio;
+    let ref = playableSound(ctx, ctx.input("sound"));
+    let key = refKey(ref);
+    if (key !== "" && key === s.failedKey) {
+      ref = null;
+      key = "";
+    }
+    if (key !== s.sourceKey) {
+      stopVoice(s, ctx.services);
+      Object.assign(s, { source: ref, sourceKey: key, position: 0, audible: false, oneShot: false });
+    }
+    const loop = toBool(ctx.input("loop"));
+    const options = voiceOptions(ctx, loop);
 
-export const soundPlayerPatch = withMutedBehavior(
-  definePatch<SoundState>("soundPlayer", {
-    state: () => ({
-      key: "",
-      source: null,
-      sourceKey: "",
-      failedKey: "",
-      position: 0,
-      audible: false,
-      oneShot: false,
-      prevPlaying: false,
-      voice: false,
-      voicePlaying: false,
-      options: "",
-      loops: 0,
-      ended: false,
-    }),
-    evaluate(ctx) {
-      const s = ctx.state;
-      s.key = `${ctx.componentPath}/${ctx.id}#${ctx.loopIndex}`;
-      if (ctx.node.muted) {
-        stopVoice(s, ctx.services);
-        s.audible = false;
-        s.oneShot = false;
-        s.prevPlaying = false;
-        ctx.output("currentTime", 0);
-        ctx.output("duration", 0);
-        ctx.output("progress", 0);
-        ctx.output("isPlaying", false);
-        ctx.output("metering", null);
-        return;
+    let voiceState: AudioVoiceState | undefined;
+    if (audio && s.voice) {
+      try {
+        voiceState = audio.state(s.key);
+      } catch {
+        voiceState = undefined;
       }
-      const audio = mediaPlatform(ctx.services).audio;
-      const extended = isExtendedAudio(audio) ? audio : undefined;
-      let ref = playableSound(ctx, ctx.input("sound"));
-      let key = refKey(ref);
-      if (key !== "" && key === s.failedKey) {
+      if (voiceState?.status === "error") {
+        warnOnce(ctx, `load:${key}`, "soundPlayer: couldn't load the sound, so it stays silent.");
+        stopVoice(s, ctx.services);
+        Object.assign(s, { failedKey: key, source: null, sourceKey: "", position: 0, audible: false, oneShot: false });
         ref = null;
         key = "";
+        voiceState = undefined;
       }
-      if (key !== s.sourceKey) {
-        stopVoice(s, ctx.services);
-        Object.assign(s, { source: ref, sourceKey: key, position: 0, audible: false, oneShot: false });
-      }
-      const loop = toBool(ctx.input("loop"));
-      const options = voiceOptions(ctx, loop);
+    }
+    const loaded = voiceState !== undefined && (voiceState.status === "playing" || voiceState.status === "paused" || voiceState.status === "ended");
+    const platformDuration = loaded ? finiteOr(voiceState!.duration, 0) : 0;
+    const d = platformDuration > 0 ? platformDuration : mediaDuration(ctx, ref);
+    let finished = false;
 
-      let voiceState: VoiceState | undefined;
-      if (extended && s.voice) {
-        try {
-          voiceState = extended.state(s.key);
-        } catch {
-          voiceState = undefined;
-        }
-        if (voiceState?.status === "error") {
-          warnOnce(ctx, `load:${key}`, "soundPlayer: couldn't load the sound, so it stays silent.");
-          stopVoice(s, ctx.services);
-          Object.assign(s, { failedKey: key, source: null, sourceKey: "", position: 0, audible: false, oneShot: false });
-          ref = null;
-          key = "";
-          voiceState = undefined;
-        }
+    // 1. Advance: the host voice's clock once it has loaded, else the simulated playhead.
+    if (loaded) {
+      const vs = voiceState!;
+      const loops = Math.max(0, Math.floor(finiteOr(vs.loops, 0)));
+      if (loops > s.loops || (vs.ended === true && !s.ended)) finished = true;
+      s.loops = loops;
+      s.ended = vs.ended === true;
+      s.position = Math.max(0, finiteOr(vs.currentTime, s.position));
+      if (s.ended && !loop) {
+        if (d > 0) s.position = d;
+        s.oneShot = false;
       }
-      const loaded = voiceState !== undefined && (voiceState.status === "playing" || voiceState.status === "paused" || voiceState.status === "ended");
-      const platformDuration = loaded ? finiteOr(voiceState!.duration, 0) : 0;
-      const d = platformDuration > 0 ? platformDuration : mediaDuration(ctx, ref);
-      let finished = false;
-
-      // 1. Advance: the host voice's clock once it has loaded, else the simulated playhead.
-      if (loaded) {
-        const vs = voiceState!;
-        const loops = Math.max(0, Math.floor(finiteOr(vs.loops, 0)));
-        if (loops > s.loops || (vs.ended === true && !s.ended)) finished = true;
-        s.loops = loops;
-        s.ended = vs.ended === true;
-        s.position = Math.max(0, finiteOr(vs.currentTime, s.position));
-        if (s.ended && !loop) {
-          if (d > 0) s.position = d;
+    } else if (s.audible) {
+      s.position += (ctx.dt > 0 ? ctx.dt : 0) * options.rate;
+      if (d > 0 && s.position >= d) {
+        finished = true;
+        if (loop) s.position %= d;
+        else {
+          s.position = d;
           s.oneShot = false;
         }
-      } else if (s.audible) {
-        s.position += (ctx.dt > 0 ? ctx.dt : 0) * options.rate;
-        if (d > 0 && s.position >= d) {
-          finished = true;
-          if (loop) s.position %= d;
-          else {
-            s.position = d;
-            s.oneShot = false;
-          }
-        }
       }
+    }
 
-      // 2. Commands: Reset > Play; a Playing rising edge at the end replays.
-      const playing = toBool(ctx.input("playing"));
-      const rose = playing && !s.prevPlaying;
-      if (!playing && s.prevPlaying) s.oneShot = false;
-      s.prevPlaying = playing;
-      let seek = false;
-      if (ctx.pulsed("reset")) {
-        s.position = 0;
-        s.oneShot = false;
-        seek = true;
-      } else if (ctx.pulsed("play") && ref !== null) {
-        s.position = 0;
-        s.oneShot = true;
-        seek = true;
-      } else if (rose && d > 0 && s.position >= d) {
-        s.position = 0;
-        seek = true;
-      }
-      if (seek) s.ended = false;
+    // 2. Commands: Reset > Play; a Playing rising edge at the end replays.
+    const playing = toBool(ctx.input("playing"));
+    const rose = playing && !s.prevPlaying;
+    if (!playing && s.prevPlaying) s.oneShot = false;
+    s.prevPlaying = playing;
+    let seek = false;
+    if (ctx.pulsed("reset")) {
+      s.position = 0;
+      s.oneShot = false;
+      seek = true;
+    } else if (ctx.pulsed("play") && ref !== null) {
+      s.position = 0;
+      s.oneShot = true;
+      seek = true;
+    } else if (rose && d > 0 && s.position >= d) {
+      s.position = 0;
+      seek = true;
+    }
+    if (seek) s.ended = false;
 
-      // 3. Whether sound comes out on this frame.
-      const atEnd = d > 0 && !loop && s.position >= d;
-      const wanted = ref !== null && (playing || s.oneShot) && !atEnd;
-      let platformPlaying = true;
-      if (ref !== null && audio) {
-        if (extended) platformPlaying = syncExtended(ctx, s, extended, ref, wanted, seek, options, voiceState);
-        else syncLegacy(ctx, s, audio as LegacyAudioService, ref, wanted, seek, options);
-      } else if (wanted) {
-        logOnce(ctx, "log", "silent", "soundPlayer: audio is silent in simulation");
-      }
-      s.audible = wanted && platformPlaying;
-      if (wanted) ctx.requestNextFrame();
+    // 3. Whether sound comes out on this frame.
+    const atEnd = d > 0 && !loop && s.position >= d;
+    const wanted = ref !== null && (playing || s.oneShot) && !atEnd;
+    let platformPlaying = true;
+    if (ref !== null && audio) {
+      platformPlaying = syncVoice(ctx, s, audio, ref, wanted, seek, options, voiceState);
+    } else if (wanted) {
+      logOnce(ctx, "log", "silent", "soundPlayer: audio is silent in simulation");
+    }
+    s.audible = wanted && platformPlaying;
+    if (wanted) ctx.requestNextFrame();
 
-      ctx.output("currentTime", s.position);
-      ctx.output("duration", d);
-      ctx.output("progress", d > 0 ? Math.min(s.position / d, 1) : 0);
-      ctx.output("isPlaying", s.audible);
-      ctx.output("metering", ref === null ? null : liveHandle("audio", s.key));
-      if (finished) ctx.pulse("finished");
-    },
-    dispose(state, services) {
-      if (state) stopVoice(state, services);
-    },
-  }),
-  "evaluate",
-);
+    ctx.output("currentTime", s.position);
+    ctx.output("duration", d);
+    ctx.output("progress", d > 0 ? Math.min(s.position / d, 1) : 0);
+    ctx.output("isPlaying", s.audible);
+    ctx.output("metering", ref === null ? null : liveHandle("audio", s.key));
+    if (finished) ctx.pulse("finished");
+  },
+  dispose(state, services) {
+    if (state) stopVoice(state, services);
+  },
+});

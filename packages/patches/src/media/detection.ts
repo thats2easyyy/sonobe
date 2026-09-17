@@ -6,7 +6,6 @@
 import type { LayerRef } from "@sonobe/core";
 import type { PatchContext } from "@sonobe/engine";
 import { finiteOr } from "../infra/index.ts";
-import { mediaPlatform } from "./platform.ts";
 import { describeError } from "./shared.ts";
 
 export type Box = [number, number, number, number];
@@ -51,7 +50,7 @@ export function takePass<T>(state: DetectionState<T>): PassResult | undefined {
 /** The layer's current frame id from the host, or undefined when it has no frames. */
 export function frameIdOf(ctx: PatchContext, layer: LayerRef): number | undefined {
   try {
-    const id = mediaPlatform(ctx.services).media?.frameId?.(layer);
+    const id = ctx.services.platform.media?.frameId?.(layer);
     return typeof id === "number" ? id : undefined;
   } catch {
     return undefined;

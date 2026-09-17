@@ -12,9 +12,25 @@ test.describe("editor app", () => {
       await expect(layers.getByText(name, { exact: true }).first()).toBeVisible();
     }
     expect(await hook(page, (s) => s.playing())).toBe(true);
+
+    // The console starts as a tab strip; the patch editor loads on its own.
+    await expect(page.locator("#sb-hud")).toHaveAttribute("data-collapsed");
+    await expect(page.locator(".sb-pe .react-flow__node").first()).toBeVisible();
     await page.waitForTimeout(600);
     await screenshot(page, "app-01-default");
     expect(problems).toEqual([]);
+  });
+
+  test("the console opens on the first error", async ({ page }) => {
+    await openEditor(page);
+    await expect(page.locator("#sb-hud")).toHaveAttribute("data-collapsed");
+    await hook(page, (s) => {
+      s.session.console.getState().push("error", ["Something went wrong in a patch"]);
+      s.session.console.getState().flush();
+    });
+    await expect(page.locator("#sb-hud")).not.toHaveAttribute("data-collapsed");
+    await expect(page.locator("#sb-hud").getByText("Something went wrong in a patch")).toBeVisible();
+    expect(await hook(page, (s) => s.layout().hudTab)).toBe("console");
   });
 
   test("toolbar drives the runtime, device, view mode, and theme", async ({ page }) => {

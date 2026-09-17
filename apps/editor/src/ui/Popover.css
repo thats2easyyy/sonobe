@@ -1,11 +1,4 @@
-.sb-surface {
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-lg);
-  background: var(--bg-elevated);
-  box-shadow: var(--shadow-popover);
-  color: var(--text-primary);
-}
-
+/* .sb-surface lives in Surface.css. */
 .sb-popover {
   z-index: var(--z-popover);
   display: flex;

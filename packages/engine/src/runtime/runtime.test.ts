@@ -107,7 +107,7 @@ describe("runtime: layout and scene", () => {
 });
 
 describe("runtime: muting", () => {
-  it("muted patches skip evaluation and pass matching inputs, or zero values when declared", () => {
+  it("muted patches skip evaluation and pass variant inputs to variant outputs, or zero values when declared", () => {
     const doc = buildDoc({
       patches: {
         t: { type: "transition", muted: true, inputs: { progress: 0.25, start: 10, end: 20 } },
@@ -117,7 +117,7 @@ describe("runtime: muting", () => {
     });
     const rt = createTestRuntime(doc);
     runFrames(rt, 2);
-    expect(rt.getValue("t.output")).toBe(0.25);
+    expect(rt.getValue("t.output")).toBe(10);
     expect(rt.getValue("start.started")).toBe(false);
     expect(rt.getValue("toggle.on")).toBe(false);
     const unmuted = applyOps(doc, [{ op: "updatePatch", id: "start", muted: false }], { registry: createMockRegistry() }).doc;

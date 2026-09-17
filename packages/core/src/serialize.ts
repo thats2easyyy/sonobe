@@ -30,7 +30,7 @@ const INPUT_MAP: Shape = { kind: "map", value: INPUT };
 
 const obj = (order: readonly string[], fields: Record<string, Shape> = {}): Shape & { kind: "object" } => ({ kind: "object", order, fields });
 
-const GRADIENT = obj(["kind", "stops", "start", "end"]);
+const GRADIENT = obj(["kind", "stops", "start", "end", "ratio"]);
 const INPUT_WRAPPER_ORDER = ["link", "layer", "asset", "loop", "json", "gradient"];
 
 const LAYER = obj(["id", "type", "name", "component", "locked", "collapsed", "props", "children"], { props: INPUT_MAP });

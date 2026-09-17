@@ -1,8 +1,7 @@
 import { EASINGS } from "@sonobe/engine";
-import type { DeviceInfo } from "@sonobe/engine";
+import type { DeviceInfo, SoftKeyboardSnapshot } from "@sonobe/engine";
 import { describe, expect, it } from "vitest";
 import { createPatchHarness, loopOf } from "../infra/index.ts";
-import type { SoftKeyboardSnapshot } from "./platform.ts";
 import { KEYBOARD_SLIDE_DURATION, estimateKeyboardHeight, softKeyboardPatch } from "./softKeyboard.ts";
 
 const info = (overrides: Partial<DeviceInfo> = {}): DeviceInfo => ({
@@ -13,6 +12,7 @@ const info = (overrides: Partial<DeviceInfo> = {}): DeviceInfo => ({
   orientation: "portrait",
   darkMode: false,
   platform: "web",
+  timeZone: "UTC",
   ...overrides,
 });
 

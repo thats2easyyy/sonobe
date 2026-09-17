@@ -1,48 +1,5 @@
-import { expect, test, type Page } from "@playwright/test";
-import { blurFields, centerOf, collectConsoleProblems, dragCable, emptyPanePoint, flowNode, handle, hook, modKey, openEditor, patchIds, patchesOfType, screenshot, storedInput } from "./helpers.ts";
-
-const newIds = (before: readonly string[], after: readonly string[]) => after.filter((id) => !before.includes(id));
-
-/** Run a palette command by title. */
-async function runCommand(page: Page, title: string) {
-  const mod = await modKey(page);
-  await blurFields(page);
-  await page.keyboard.press(`${mod}+k`);
-  const palette = page.getByRole("dialog", { name: "Command palette" });
-  await expect(palette).toBeVisible();
-  await page.keyboard.type(title);
-  await page.keyboard.press("Enter");
-  await expect(palette).toBeHidden();
-}
-
-/** Fit the patch graph in view (Shift+1 with the pointer over the patch editor). */
-async function fitPatches(page: Page) {
-  const pane = page.locator(".sb-pe .react-flow__pane");
-  const box = (await pane.boundingBox())!;
-  await page.mouse.move(box.x + box.width - 30, box.y + 60);
-  await page.keyboard.press("Shift+!");
-  await page.keyboard.press("Shift+Digit1");
-  await page.waitForTimeout(350);
-}
-
-/** Drag a cable from an output onto empty canvas and pick a patch from link-drag search. */
-async function connectNewPatch(page: Page, fromNode: string, fromPort: string, query: string, type: string): Promise<string> {
-  await fitPatches(page);
-  const before = await patchIds(page);
-  const source = handle(page, fromNode, `out:${fromPort}`);
-  const drop = await emptyPanePoint(page, await centerOf(source));
-  await dragCable(page, source, drop);
-  const search = page.getByRole("dialog", { name: "Connect to a new patch" }).or(page.locator(".sb-pe-linksearch"));
-  await expect(search.first()).toBeVisible();
-  await page.keyboard.type(query);
-  await page.keyboard.press("Enter");
-  await expect(search.first()).toBeHidden();
-  await expect.poll(async () => newIds(before, await patchIds(page)).length).toBe(1);
-  const [id] = newIds(before, await patchIds(page));
-  expect(await hook(page, (s, pid) => s.doc().components[s.doc().project.root]!.patches[pid]!.type, id!)).toBe(type);
-  await expect(flowNode(page, id!)).toBeVisible();
-  return id!;
-}
+import { expect, test } from "@playwright/test";
+import { blurFields, centerOf, collectConsoleProblems, connectNewPatch, dragCable, fitPatches, flowNode, handle, hook, modKey, newIds, openEditor, patchIds, patchesOfType, runCommand, screenshot, storedInput, touchLayer } from "./helpers.ts";
 
 test.describe("building an interaction in the UI", () => {
   test("inserts a patch from the picker", async ({ page }) => {
@@ -74,17 +31,11 @@ test.describe("building an interaction in the UI", () => {
     await runCommand(page, "Patches Only");
 
     // Touch on the Photo layer row adds a pre-wired Interaction.
-    const beforeTouch = await patchIds(page);
-    const photoRow = page.locator("#sb-layers").getByText("Photo", { exact: true });
-    await photoRow.hover();
-    await page.getByRole("button", { name: "Touch: add an interaction to Photo" }).click();
-    await page.getByRole("menuitem", { name: /^Tap/ }).click();
-    await expect.poll(async () => newIds(beforeTouch, await patchIds(page)).length).toBe(1);
-    const [interaction] = newIds(beforeTouch, await patchIds(page));
+    const interaction = await touchLayer(page, "Photo");
     expect(await storedInput(page, `${interaction}.layer`)).toEqual({ layer: "photo" });
 
     // Link-drag search builds the rest of the chain.
-    const toggle = await connectNewPatch(page, interaction!, "tap", "Switch", "switch");
+    const toggle = await connectNewPatch(page, interaction, "tap", "Switch", "switch");
     const toggleInputs = await hook(page, (s, id) => s.doc().components[s.doc().project.root]!.patches[id]!.inputs, toggle);
     expect(Object.values(toggleInputs)).toContainEqual({ link: `${interaction}.tap` });
 

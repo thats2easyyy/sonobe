@@ -18,6 +18,8 @@ function run(source: string, frames: Record<string, unknown>[], options: RunPatc
 
 const column = (result: ReturnType<typeof run>, key: string) => result.frames.map((f) => f.outputs[key]);
 const messages = (result: ReturnType<typeof run>, level?: string) => result.logs.filter((l) => !level || l.level === level).map((l) => l.args.join(" "));
+/** Script errors, which the patch raises as `script_error` runtime issues. */
+const scriptErrors = (result: ReturnType<typeof run>) => result.issues.filter((i) => i.code === "script_error").map((i) => i.message);
 const items = (value: unknown) => (isLoop(value) ? value.items : value);
 
 /** A runtime document with a javascript patch "js" running `source`, plus extra patches and connections. */
@@ -174,6 +176,23 @@ export function evaluate(patch) { console.log("ran"); patch.output("out", patch.
     expect(r.logs).toEqual([]);
   });
 
+  it("lets scripts that declare variants switch type through typeParam", () => {
+    const source = `export const variants = ["number", "text"];
+export const inputs = [{ key: "value", type: "variant" }];
+export const outputs = [{ key: "same", type: "variant" }];
+export function evaluate(patch) { patch.output("same", patch.input("value")); }`;
+    const doc = scriptDoc(source);
+    const ports = javascript.dynamicPorts!({ type: "javascript", typeParam: "text", inputs: {}, settings: { script: FILE }, ui: { x: 0, y: 0 } }, doc);
+    expect(ports.variants).toEqual(["number", "text"]);
+    expect(ports.outputs.map((p) => p.type)).toEqual(["text"]);
+    const added = applyOps(runtimeDoc(source), [{ op: "updatePatch", id: "js", typeParam: "text" }], { registry: createMockRegistry([javascript]) });
+    expect(added.ok).toBe(true);
+    const rt = createTestRuntime(added.ok ? added.doc : doc, [javascript]);
+    rt.step();
+    expect(rt.getValue("js.same")).toBe("");
+    expect(rt.issues()).toEqual([]);
+  });
+
   it("has no ports without a script and throws a clear error for a missing file", () => {
     expect(javascript.dynamicPorts!({ type: "javascript", inputs: {}, ui: { x: 0, y: 0 } }, scriptDoc(""))).toEqual({ inputs: [], outputs: [] });
     expect(() => javascript.dynamicPorts!({ type: "javascript", inputs: {}, settings: { script: "nope.js" }, ui: { x: 0, y: 0 } }, scriptDoc(""))).toThrow("scripts/nope.js doesn't exist. Create it with setScript or choose another file.");
@@ -216,7 +235,7 @@ export function evaluate() { setInterval(() => patch.output("ticks", ++ticks), 1
 
   it("rejects string callbacks", () => {
     const r = run(`export function evaluate() { setTimeout("alert(1)", 10); }`, [{}]);
-    expect(messages(r, "error")[0]).toMatch(/TypeError: setTimeout needs a function/);
+    expect(scriptErrors(r)[0]).toMatch(/TypeError: setTimeout needs a function/);
   });
 });
 
@@ -232,13 +251,13 @@ export function evaluate(patch) {
       [{ value: 2 }, { value: 9 }, { value: 9.5 }, { value: 3 }],
     );
     expect(column(r, "doubled")).toEqual([4, 4, 4, 6]);
-    expect(messages(r, "error")).toEqual(["scripts/test.js:5:3 Error: too big"]);
+    expect(scriptErrors(r)).toEqual(["scripts/test.js:5:3 Error: too big"]);
   });
 
   it("reports syntax errors once with line and column, and never runs the script", () => {
     const r = run(`export const outputs = [{ key: "a", type: "number", default: 1 }];\nexport function evaluate(patch) {\n  patch.output("a" 5);\n}`, [{}, {}]);
     expect(column(r, "a")).toEqual([1, 1]);
-    const errors = messages(r, "error");
+    const errors = scriptErrors(r);
     expect(errors).toHaveLength(1);
     expect(errors[0]).toMatch(/^scripts\/test\.js:3:20 SyntaxError: /);
   });
@@ -246,12 +265,12 @@ export function evaluate(patch) {
   it("reports top-level exceptions as compile errors", () => {
     const r = run(`export const outputs = [{ key: "a", type: "number" }];\nconst x = null;\nx.y = 1;\nexport function evaluate(patch) { patch.output("a", 5); }`, [{}, {}]);
     expect(column(r, "a")).toEqual([0, 0]);
-    expect(messages(r, "error")).toEqual(["scripts/test.js:3:1 TypeError: Cannot set properties of null (setting 'y')"]);
+    expect(scriptErrors(r)).toEqual(["scripts/test.js:3:1 TypeError: Cannot set properties of null (setting 'y')"]);
   });
 
   it("suggests the right key for undeclared ports", () => {
     const r = run(`export const outputs = [{ key: "label", type: "text" }, { key: "count", type: "number" }];\nexport function evaluate(patch) { patch.output("lable", "x"); }`, [{}]);
-    expect(messages(r, "error")[0]).toContain(`Error: "lable" isn't an output of this script. Did you mean "label"? Outputs: label, count.`);
+    expect(scriptErrors(r)[0]).toContain(`Error: "lable" isn't an output of this script. Did you mean "label"? Outputs: label, count.`);
   });
 
   it("stops a runaway script, marks it stalled, and keeps the runtime alive", () => {
@@ -265,12 +284,12 @@ export function evaluate(patch) {
       [{ go: 0 }, { go: 1 }, { go: 2 }, { go: 3 }],
     );
     expect(column(r, "value")).toEqual([0, 0, 0, 0]);
-    expect(messages(r, "error")).toEqual(["scripts/test.js:4:34 The script took too long. Check for a loop that never ends."]);
+    expect(scriptErrors(r)).toEqual(["scripts/test.js:4:34 The script took too long. Check for a loop that never ends."]);
   });
 
   it("logs unhandled promise rejections", () => {
     const r = run(`export async function evaluate() { await null; throw new Error("later"); }`, [{}]);
-    expect(messages(r, "error")).toEqual(["scripts/test.js:1:48 Uncaught (in promise) Error: later"]);
+    expect(scriptErrors(r)).toEqual(["scripts/test.js:1:48 Uncaught (in promise) Error: later"]);
   });
 });
 
@@ -374,7 +393,7 @@ return patch;`,
 
   it("asks Origami scripts to return their patch", () => {
     const r = run(`var patch = new Patch();\npatch.outputs = [new PatchOutput("A", types.NUMBER)];`, [{}]);
-    expect(messages(r, "error")[0]).toMatch(/ends with return patch;/);
+    expect(scriptErrors(r)[0]).toMatch(/ends with return patch;/);
   });
 });
 
@@ -408,7 +427,10 @@ export async function evaluate(patch) {
     rt.step();
     expect([rt.getValue("js.loading"), rt.getValue("js.quote")]).toEqual([true, ""]);
     expect(rt.needsNextFrame).toBe(true);
-    expect(calls).toEqual([{ url: "https://quotes.example/today", init: { method: "POST", headers: { Accept: "application/json", "Content-Type": "application/json" }, body: '{"mood":"calm"}' } }]);
+    expect(calls.map(({ url, init }) => ({ url, init: { ...(init as object), signal: undefined } }))).toEqual([
+      { url: "https://quotes.example/today", init: { method: "POST", headers: { Accept: "application/json", "Content-Type": "application/json" }, body: '{"mood":"calm"}', signal: undefined } },
+    ]);
+    expect((calls[0]!.init as { signal?: unknown }).signal).toBeInstanceOf(AbortSignal);
     await stepSettled(rt, 1);
     expect([rt.getValue("js.loading"), rt.getValue("js.quote")]).toEqual([false, "200 Stay curious."]);
     expect(rt.needsNextFrame).toBe(false);
@@ -430,16 +452,55 @@ export async function evaluate(patch) {
     expect(failing.getValue("js.error")).toBe("Network request failed");
   });
 
-  it("rejects aborted requests with AbortError on the next step", async () => {
+  it("rejects aborted requests with AbortError on the next step and cancels them on the host", async () => {
     const source = `export const outputs = [{ key: "result", type: "text" }];
+export const alwaysEvaluate = true;
 const controller = new AbortController();
 fetch("https://slow.example", { signal: controller.signal }).then(() => patch.output("result", "done"), (e) => patch.output("result", e.name));
-controller.abort();`;
-    const rt = createTestRuntime(runtimeDoc(source), [javascript], { platform: { fetch: () => new Promise(() => {}) } });
+export function evaluate(patch) { if (patch.frame === 1) controller.abort(); }`;
+    const signals: AbortSignal[] = [];
+    const rt = createTestRuntime(runtimeDoc(source), [javascript], {
+      platform: {
+        fetch: (_url, init) => {
+          signals.push(init!.signal!);
+          return new Promise(() => {});
+        },
+      },
+    });
     rt.step();
+    expect(signals.map((s) => s.aborted)).toEqual([false]);
+    rt.step();
+    expect(signals.map((s) => s.aborted)).toEqual([true]);
     expect(rt.getValue("js.result")).toBe("");
     await stepSettled(rt, 1);
     expect(rt.getValue("js.result")).toBe("AbortError");
+  });
+
+  it("cancels in-flight requests on the host when the prototype restarts", () => {
+    const source = `export const outputs = [];
+fetch("https://slow.example");`;
+    const signals: AbortSignal[] = [];
+    const rt = createTestRuntime(runtimeDoc(source), [javascript], { platform: { fetch: (_url, init) => (signals.push(init!.signal!), new Promise(() => {})) } });
+    rt.step();
+    rt.restart();
+    rt.step();
+    expect(signals.map((s) => s.aborted)).toEqual([true, false]);
+  });
+
+  it("exposes response headers to scripts, case-insensitively", async () => {
+    const source = `export const outputs = [{ key: "type", type: "text" }, { key: "missing", type: "boolean" }, { key: "names", type: "text" }];
+fetch("https://api.example/data").then((res) => {
+  patch.output("type", res.headers.get("Content-Type"));
+  patch.output("missing", res.headers.get("x-nope") === null && !res.headers.has("x-nope"));
+  const names = [];
+  res.headers.forEach((value, name) => names.push(name));
+  patch.output("names", names.join(","));
+});`;
+    const platform: PlatformServices = { fetch: async () => ({ ok: true, status: 200, headers: { "content-type": "application/json", etag: "7" }, text: async () => "{}" }) };
+    const rt = createTestRuntime(runtimeDoc(source), [javascript], { platform });
+    rt.step();
+    await stepSettled(rt, 1);
+    expect([rt.getValue("js.type"), rt.getValue("js.missing"), rt.getValue("js.names")]).toEqual(["application/json", true, "content-type,etag"]);
   });
 
   it("runs Origami Http and Base64 helpers on fetch", async () => {
@@ -472,7 +533,7 @@ return patch;`;
   it("raises script errors as runtime issues with the patch id", () => {
     const rt = createTestRuntime(runtimeDoc(`export const outputs = [];\nexport function evaluate() { null.boom; }`), [javascript]);
     rt.step();
-    expect(rt.issues()).toEqual([{ code: "patch_error", severity: "error", message: "scripts/test.js:2:30 TypeError: Cannot read properties of null (reading 'boom')", patchId: "js" }]);
+    expect(rt.issues()).toEqual([{ code: "script_error", severity: "error", message: "scripts/test.js:2:30 TypeError: Cannot read properties of null (reading 'boom')", patchId: "js" }]);
   });
 
   it("reports a broken header as dynamic_ports_failed", () => {

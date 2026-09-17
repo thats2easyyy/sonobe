@@ -54,6 +54,21 @@ describe("layer drawing", () => {
     it("maps independent corner radii in CSS order", () => {
       draw(node("r", "rectangle", { cornerRadii: [1, 2, 3, 4] }));
       expect(writtenStyle(body("r"), "border-radius")).toBe("1px 2px 3px 4px");
+      draw(node("r", "rectangle", { cornerRadius: 8, cornerRadii: [0, 0, 12, 12] }));
+      expect(writtenStyle(body("r"), "border-radius")).toBe("0px 0px 12px 12px");
+    });
+
+    it("falls back to cornerRadius when cornerRadii is null, empty, or all zero", () => {
+      // The engine resolves an unset cornerRadii (default null) to [0, 0, 0, 0].
+      for (const cornerRadii of [[0, 0, 0, 0], null, undefined, [], [-4, 0, -1, 0]]) {
+        draw(node("g", "group", { color: "#FFFFFFFF", cornerRadius: 24, cornerRadii, backgroundBlur: 12 }));
+        expect(writtenStyle(body("g"), "border-radius"), JSON.stringify(cornerRadii)).toBe("24px");
+        expect(writtenStyle(el("g"), "border-radius"), JSON.stringify(cornerRadii)).toBe("24px");
+      }
+      for (const type of ["image", "video", "gradient"]) {
+        draw(node(type, type, { cornerRadius: 16, cornerRadii: [0, 0, 0, 0] }));
+        expect(writtenStyle(body(type), "border-radius"), type).toBe("16px");
+      }
     });
 
     it("positions strokes inside, centered, and outside the edge", () => {

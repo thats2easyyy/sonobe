@@ -2,7 +2,7 @@ import type { PatchContext } from "@sonobe/engine";
 import { describe, expect, it } from "vitest";
 import { createPatchHarness } from "../infra/index.ts";
 import { definitions } from "./index.ts";
-import { drivenByPulse, isMuted, jsonEqual, optionIndex, readDuration, sameValue } from "./shared.ts";
+import { drivenByPulse, isMuted, jsonEqual, optionIndex, pulseOnFirstFrame, readDuration, sameValue } from "./shared.ts";
 
 describe("state shared helpers", () => {
   it("defines every state catalog type once", () => {
@@ -47,19 +47,18 @@ describe("state shared helpers", () => {
     expect(optionIndex(true, 3)).toBe(1);
   });
 
-  it("probes whether an input is driven by a pulse", () => {
-    const ctx = (extra: object) => extra as unknown as PatchContext;
-    expect(drivenByPulse(ctx({ isPulseSource: (key: string) => key === "value" }), "value")).toBe(true);
-    expect(drivenByPulse(ctx({ spec: { inputs: [{ key: "value", pulseSource: true }] } }), "value")).toBe(true);
-    expect(drivenByPulse(ctx({ spec: { inputs: [{ key: "value", pulseSource: false }] } }), "value")).toBe(false);
-    expect(drivenByPulse(ctx({}), "value")).toBe(false);
+  it("reads pulse sources through ctx.isPulseSource", () => {
+    const ctx = (sources: readonly string[]) => ({ isPulseSource: (key: string) => sources.includes(key), pulsed: () => true }) as unknown as PatchContext;
+    expect(drivenByPulse(ctx(["value"]), "value")).toBe(true);
+    expect(drivenByPulse(ctx([]), "value")).toBe(false);
+    expect(pulseOnFirstFrame(ctx(["value"]), "value", "boolean")).toBe(true);
+    expect(pulseOnFirstFrame(ctx(["value"]), "value", "number")).toBe(false);
+    expect(pulseOnFirstFrame(ctx([]), "value", "boolean")).toBe(false);
   });
 
-  it("reports muting from the node or from an enclosing muted instance", () => {
-    const ctx = (extra: object) => ({ node: { type: "optionEquals", inputs: {}, ui: { x: 0, y: 0 } }, ...extra }) as unknown as PatchContext;
-    expect(isMuted(ctx({}))).toBe(false);
-    expect(isMuted(ctx({ node: { type: "optionEquals", muted: true, inputs: {}, ui: { x: 0, y: 0 } } }))).toBe(true);
-    expect(isMuted(ctx({ spec: { muted: true } }))).toBe(true);
+  it("reports muting through ctx.muted, which includes an enclosing muted instance", () => {
+    expect(isMuted({ muted: false })).toBe(false);
+    expect(isMuted({ muted: true })).toBe(true);
   });
 
   it("reads durations safely and warns once per restart", () => {

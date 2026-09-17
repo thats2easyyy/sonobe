@@ -17,7 +17,12 @@ export interface OpenOptions {
   fileSystemAccess?: boolean;
   /** Extra path or hash, e.g. "#gallery". */
   path?: string;
+  /** Show the first-launch welcome screen. Default false: the viewer has already seen it. */
+  welcome?: boolean;
 }
+
+/** localStorage key the welcome screen uses to remember it was shown (apps/editor/src/app/welcome/welcomeStore.ts). */
+export const WELCOME_SEEN_KEY = "sonobe.welcome.v1";
 
 /** Console errors and uncaught exceptions seen by the page. */
 export function collectConsoleProblems(page: Page): string[] {
@@ -29,11 +34,26 @@ export function collectConsoleProblems(page: Page): string[] {
   return problems;
 }
 
+/** Mark the welcome screen as seen before the app loads (per page). */
+export async function skipWelcome(page: Page): Promise<void> {
+  await page.addInitScript((key) => {
+    try {
+      if (!sessionStorage.getItem("sonobe.e2e.welcomeInit")) {
+        sessionStorage.setItem("sonobe.e2e.welcomeInit", "1");
+        localStorage.setItem(key, "seen");
+      }
+    } catch {
+      // Storage blocked: the welcome screen shows, and tests that care will see it.
+    }
+  }, WELCOME_SEEN_KEY);
+}
+
 /** Open the editor and wait for the prototype to render a few frames. */
 export async function openEditor(page: Page, options: OpenOptions = {}): Promise<void> {
   await page.addInitScript((keepFsa) => {
     if (!keepFsa) Object.defineProperty(window, "showDirectoryPicker", { value: undefined, configurable: true });
   }, options.fileSystemAccess ?? false);
+  if (!options.welcome) await skipWelcome(page);
   await page.goto(options.path ?? "/");
   await page.waitForFunction(() => (window.__sonobe?.frame() ?? -1) > 3, undefined, { timeout: 30_000 });
 }
@@ -101,6 +121,8 @@ export const storedInput = (page: Page, address: string) =>
 
 export const patchIds = (page: Page) => hook(page, (s) => Object.keys(s.doc().components[s.doc().project.root]!.patches));
 
+export const newIds = (before: readonly string[], after: readonly string[]) => after.filter((id) => !before.includes(id));
+
 /** The patch editor's React Flow node for a patch or layer ("@id"). */
 export const flowNode = (page: Page, id: string): Locator => page.locator(`.react-flow__node[data-id="${id}"]`);
 
@@ -156,6 +178,57 @@ export async function emptyPanePoint(page: Page, near: { x: number; y: number })
   mkdirSync(dirname(debugPath), { recursive: true });
   await page.screenshot({ path: debugPath });
   throw new Error(`No empty space in the patch editor near ${JSON.stringify(near)}. Pane ${JSON.stringify(box)}; ${rects.length} nodes: ${JSON.stringify(rects.map((r) => [Math.round(r.x), Math.round(r.y), Math.round(r.width), Math.round(r.height)]))}. Screenshot: ${debugPath}`);
+}
+
+/** Run a palette command by title. */
+export async function runCommand(page: Page, title: string): Promise<void> {
+  const mod = await modKey(page);
+  await blurFields(page);
+  await page.keyboard.press(`${mod}+k`);
+  const palette = page.getByRole("dialog", { name: "Command palette" });
+  await expect(palette).toBeVisible();
+  await page.keyboard.type(title);
+  await page.keyboard.press("Enter");
+  await expect(palette).toBeHidden();
+}
+
+/** Fit the patch graph in view (Shift+1 with the pointer over the patch editor). */
+export async function fitPatches(page: Page): Promise<void> {
+  const pane = page.locator(".sb-pe .react-flow__pane");
+  const box = (await pane.boundingBox())!;
+  await page.mouse.move(box.x + box.width - 30, box.y + 60);
+  await page.keyboard.press("Shift+!");
+  await page.keyboard.press("Shift+Digit1");
+  await page.waitForTimeout(350);
+}
+
+/** Drag a cable from an output onto empty canvas and pick a patch from link-drag search. */
+export async function connectNewPatch(page: Page, fromNode: string, fromPort: string, query: string, type: string): Promise<string> {
+  await fitPatches(page);
+  const before = await patchIds(page);
+  const source = handle(page, fromNode, `out:${fromPort}`);
+  const drop = await emptyPanePoint(page, await centerOf(source));
+  await dragCable(page, source, drop);
+  const search = page.getByRole("dialog", { name: "Connect to a new patch" }).or(page.locator(".sb-pe-linksearch"));
+  await expect(search.first()).toBeVisible();
+  await page.keyboard.type(query);
+  await page.keyboard.press("Enter");
+  await expect(search.first()).toBeHidden();
+  await expect.poll(async () => newIds(before, await patchIds(page)).length).toBe(1);
+  const [id] = newIds(before, await patchIds(page));
+  expect(await hook(page, (s, pid) => s.doc().components[s.doc().project.root]!.patches[pid]!.type, id!)).toBe(type);
+  await expect(flowNode(page, id!)).toBeVisible();
+  return id!;
+}
+
+/** Add a pre-wired Interaction to a layer through its Touch button in the Layers panel. */
+export async function touchLayer(page: Page, layerName: string, option: string | RegExp = /^Tap/): Promise<string> {
+  const before = await patchIds(page);
+  await page.locator("#sb-layers").getByText(layerName, { exact: true }).first().hover();
+  await page.getByRole("button", { name: `Touch: add an interaction to ${layerName}` }).click();
+  await page.getByRole("menuitem", { name: option }).click();
+  await expect.poll(async () => newIds(before, await patchIds(page)).length).toBe(1);
+  return newIds(before, await patchIds(page))[0]!;
 }
 
 export { centerOf };

@@ -9,7 +9,7 @@ function harness(values: (ref: LayerRef) => Record<string, Value>, inputs: Recor
   return createPatchHarness(videoInfoPatch, {
     inputs,
     services: {
-      platform: { layerOutput: (ref: LayerRef, key: string) => values(ref)[key] } as never,
+      layerOutput: (ref: LayerRef, key: string) => values(ref)[key],
       layerInfo: () => (layerType ? ({ type: layerType } as never) : undefined),
     },
   });

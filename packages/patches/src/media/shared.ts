@@ -1,25 +1,19 @@
 /**
- * Helpers shared by the media patches: muted behavior, media and layer references, live handles,
- * loadable URLs, asset existence, whole-integer inputs, looped-input warnings, and releasing
+ * Helpers shared by the media patches: media and layer references, live sources, loadable URLs,
+ * asset existence, layer types, whole-integer inputs, looped-input warnings, and releasing
  * host-created media.
  */
 
 import type { AssetRef, LayerRef } from "@sonobe/core";
-import type { MutedBehavior, PatchContext, PatchDefinition, RuntimePatchDefinition, RuntimeServices } from "@sonobe/engine";
+import type { PatchContext, RuntimeServices } from "@sonobe/engine";
 import { finiteOr, isPlainObject, toText, warnOnce } from "../infra/index.ts";
-import { mediaPlatform } from "./platform.ts";
 
-/** Attach the engine's `mutedBehavior` extension to a definition. */
-export function withMutedBehavior<S>(definition: PatchDefinition<S>, mutedBehavior: MutedBehavior): RuntimePatchDefinition<S> {
-  return Object.assign(definition, { mutedBehavior });
-}
-
-/** URL scheme of live media handles (Metering outputs, camera feeds). */
+/** The interim live-source encoding (`{ url: "sonobe-live:<kind>/<key>" }`) from before `AssetRef.live`; still read, never written. */
 export const LIVE_URL_PREFIX = "sonobe-live:";
 
-/** True for `{ assetId }` or `{ url }` references. */
+/** True for `{ assetId }`, `{ url }`, or `{ live }` references. */
 export function isAssetRef(value: unknown): value is AssetRef {
-  return isPlainObject(value) && (typeof value.assetId === "string" || typeof value.url === "string");
+  return isPlainObject(value) && (typeof value.assetId === "string" || typeof value.url === "string" || typeof value.live === "string");
 }
 
 /** True for `{ layerId }` references. */
@@ -27,11 +21,12 @@ export function isLayerRef(value: unknown): value is LayerRef {
   return isPlainObject(value) && typeof value.layerId === "string";
 }
 
-/** A stable identity for a media reference: "asset:<id>", "url:<url>", or "" for none. */
+/** A stable identity for a media reference: "asset:<id>", "url:<url>", "live:<key>", or "" for none. */
 export function refKey(ref: AssetRef | null | undefined): string {
   if (!ref) return "";
   if (typeof ref.assetId === "string") return `asset:${ref.assetId}`;
   if (typeof ref.url === "string") return `url:${ref.url}`;
+  if (typeof ref.live === "string") return `live:${ref.live}`;
   return "";
 }
 
@@ -40,18 +35,20 @@ export function layerKey(ref: LayerRef | null | undefined): string {
   return ref ? `${ref.layerId}#${typeof ref.instance === "number" ? ref.instance : ""}` : "";
 }
 
-/** True for live handles such as `{ url: "sonobe-live:audio/main/player#0" }`. */
+/** True for live sources such as `{ live: "audio/main/player#0" }` (camera feeds, microphones, player metering). */
 export function isLiveHandle(ref: AssetRef | null | undefined): boolean {
-  return typeof ref?.url === "string" && ref.url.startsWith(LIVE_URL_PREFIX);
+  return liveHandleKey(ref) !== "";
 }
 
-/** The live handle naming a patch instance's sound or feed. */
+/** The live source naming a patch instance's sound or feed. */
 export function liveHandle(kind: "audio" | "camera" | "microphone", key: string): AssetRef {
-  return { url: `${LIVE_URL_PREFIX}${kind}/${key}` };
+  return { live: `${kind}/${key}` };
 }
 
-/** The part of a live handle after the scheme, e.g. "audio/main/player#0". */
-export function liveHandleKey(ref: AssetRef): string {
+/** A live source's key, e.g. "audio/main/player#0", or "" for other references. */
+export function liveHandleKey(ref: AssetRef | null | undefined): string {
+  if (!ref) return "";
+  if (typeof ref.live === "string") return ref.live;
   return typeof ref.url === "string" && ref.url.startsWith(LIVE_URL_PREFIX) ? ref.url.slice(LIVE_URL_PREFIX.length) : "";
 }
 
@@ -60,14 +57,24 @@ export function isLoadableUrl(url: string, kind: "image" | "video"): boolean {
   return /^(https?|blob):/i.test(url) || url.toLowerCase().startsWith(`data:${kind}/`);
 }
 
-/** A URL reference, or an asset id the host can resolve. */
+/** A URL reference, a live source, or an asset id the host can resolve. */
 export function assetExists(ctx: Pick<PatchContext, "services">, ref: AssetRef): boolean {
   if (typeof ref.url === "string") return ref.url !== "";
-  if (typeof ref.assetId !== "string") return false;
+  if (typeof ref.assetId !== "string") return typeof ref.live === "string" && ref.live !== "";
   try {
     return ctx.services.resolveAssetUrl(ref.assetId) !== undefined;
   } catch {
     return false;
+  }
+}
+
+/** The layer's type key from the previous frame's snapshot, or undefined when the layer isn't in the scene. */
+export function layerTypeOf(ctx: Pick<PatchContext, "services">, layer: LayerRef): string | undefined {
+  try {
+    const type = ctx.services.layerInfo(layer)?.type;
+    return typeof type === "string" ? type : undefined;
+  } catch {
+    return undefined;
   }
 }
 
@@ -96,7 +103,7 @@ export function warnLoopedInputs(ctx: PatchContext, keys: readonly string[], pat
 export function releaseRef(services: RuntimeServices, ref: AssetRef | null | undefined): void {
   if (!ref) return;
   try {
-    mediaPlatform(services).releaseMedia?.(ref);
+    services.platform.releaseMedia?.(ref);
   } catch {
     // Already released.
   }

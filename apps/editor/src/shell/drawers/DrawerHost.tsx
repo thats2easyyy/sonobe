@@ -5,8 +5,19 @@ import { SIZE_LIMITS, layoutStore, useLayout, type DrawerId } from "../layoutSto
 
 const EXIT_MS = 150;
 
+export interface DrawerHostProps {
+  learn?: ReactNode;
+  /**
+   * Docked drawers sit beside the panels instead of over them (the shell makes room), so a lesson
+   * can point at the inspector while its steps stay visible.
+   */
+  docked?: boolean;
+  /** Called while the edge is dragged, before the size is committed. */
+  onLiveResize?: (width: number) => void;
+}
+
 /** Right-side drawer for Learn. Escape closes it; the left edge resizes it. */
-export function DrawerHost({ learn }: { learn?: ReactNode }) {
+export function DrawerHost({ learn, docked = false, onLiveResize }: DrawerHostProps) {
   const drawer = useLayout((s) => s.drawer);
   const width = useLayout((s) => s.sizes.drawer);
   const [rendered, setRendered] = useState<DrawerId | null>(drawer);
@@ -33,7 +44,7 @@ export function DrawerHost({ learn }: { learn?: ReactNode }) {
   if (!rendered || learn === undefined) return null;
 
   return (
-    <aside ref={asideRef} className="sb-drawer" data-state={closing ? "closing" : "open"} data-shortcut-scope="drawer" aria-label="Learn" style={{ width }}>
+    <aside ref={asideRef} className="sb-drawer" data-state={closing ? "closing" : "open"} data-docked={docked || undefined} data-shortcut-scope="drawer" aria-label="Learn" style={{ width }}>
       <Splitter
         orientation="vertical"
         invert
@@ -45,6 +56,7 @@ export function DrawerHost({ learn }: { learn?: ReactNode }) {
         className="sb-drawer__splitter"
         onResize={(size) => {
           if (asideRef.current) asideRef.current.style.width = `${size}px`;
+          onLiveResize?.(size);
         }}
         onResizeEnd={(size) => layoutStore.getState().setSize("drawer", size)}
       />

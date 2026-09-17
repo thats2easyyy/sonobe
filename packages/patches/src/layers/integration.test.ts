@@ -50,6 +50,38 @@ describe("layer patches in a running prototype", () => {
     expect(rt.issues()).toEqual([]);
   });
 
+  it("Convert Position follows a rotated, pivoted group exactly, both ways", () => {
+    const doc = buildDoc(
+      {
+        layers: [
+          {
+            id: "dial",
+            type: "group",
+            name: "Dial",
+            props: { position: [80, 120], size: [160, 100], rotation: 30, pivot: [0, 1], scale: 1.5 },
+            children: [{ id: "knob", type: "rectangle", name: "Knob", props: { position: [20, 10], size: [40, 30], rotation: -12 } }],
+          },
+        ],
+        patches: {
+          to_screen: { type: "convertPosition", inputs: { fromLayer: { layer: "knob" }, anchor: [1, 1], position: [3, -4] } },
+          back: { type: "convertPosition", inputs: { toLayer: { layer: "knob" }, position: { link: "to_screen.convertedPosition" } } },
+        },
+      },
+      registry,
+    );
+    const rt = createTestRuntime(doc, registry);
+    runFrames(rt, 3);
+    const knob = findNode(rt.scene().roots, "knob")!;
+    const [x, y] = mat4.transformPoint(knob.worldTransform, [43, 26]);
+    const converted = rt.getValue("to_screen.convertedPosition") as number[];
+    expect(converted[0]).toBeCloseTo(x, 9);
+    expect(converted[1]).toBeCloseTo(y, 9);
+    const back = rt.getValue("back.convertedPosition") as number[];
+    expect(back[0]).toBeCloseTo(43, 9);
+    expect(back[1]).toBeCloseTo(26, 9);
+    expect(rt.getValue("back.error")).toBe(false);
+  });
+
   it("Layer Info sizes a pill to its label, one frame behind layout", () => {
     const doc = buildDoc(
       {
@@ -112,7 +144,8 @@ describe("layer patches in a running prototype", () => {
     const spots = rt.getRawValue("row_spot.convertedPosition") as { items: number[][] };
     expect(spots.items).toEqual([[0, 200], [0, 260], [0, 320]]);
     const parents = rt.getRawValue("row_info.parent") as { items: unknown[] };
-    expect(parents.items).toEqual([{ layerId: "list", instance: 0 }, { layerId: "list", instance: 1 }, { layerId: "list", instance: 2 }]);
+    // The list isn't replicated, so every row's parent is the one list, with no loop instance.
+    expect(parents.items).toEqual([{ layerId: "list" }, { layerId: "list" }, { layerId: "list" }]);
     expect((rt.getRawValue("parent_info.size") as { items: number[][] }).items).toEqual([[300, 400], [300, 400], [300, 400]]);
   });
 

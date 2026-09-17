@@ -1,10 +1,9 @@
 /** Loop Filter: keep, drop, or repeat each item by a count. */
 
 import { MAX_LOOP_LENGTH, definePatch, loopOf, warnOnce } from "../infra/index.ts";
-import { indices, variantPortsFor } from "./shared.ts";
+import { indices } from "./shared.ts";
 
 export const loopFilterPatch = definePatch("loopFilter", {
-  dynamicPorts: variantPortsFor("loopFilter"),
   evaluate(ctx) {
     const items = ctx.inputItems("loop");
     const counts = ctx.inputItems<unknown>("include");

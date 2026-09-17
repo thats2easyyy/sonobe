@@ -4,11 +4,9 @@
  * Stateless.
  */
 
-import type { PatchContext } from "@sonobe/engine";
+import type { GamepadSnapshot, PatchContext } from "@sonobe/engine";
 import { clamp, definePatch, finiteOr, toNumber, warnOnce } from "../infra/index.ts";
-import { devicePlatform } from "./platform.ts";
-import type { GamepadSnapshot } from "./platform.ts";
-import { withMutedBehavior } from "./shared.ts";
+
 
 const BOOLEAN_OUTPUTS = [
   "connected",
@@ -51,48 +49,46 @@ function outputIdle(ctx: PatchContext): void {
   ctx.output("rotationRate", [0, 0, 0]);
 }
 
-export const gameControllerPatch = withMutedBehavior(
-  definePatch("gameController", {
-    evaluate(ctx) {
-      const slot = Math.max(0, Math.floor(finiteOr(toNumber(ctx.input("controller"), 0), 0)));
-      let pad: GamepadSnapshot | null | undefined;
-      try {
-        pad = devicePlatform(ctx.services).gamepads?.()?.[slot];
-      } catch {
-        pad = undefined;
-      }
-      if (!pad?.connected) {
-        outputIdle(ctx);
-        return;
-      }
-      if (pad.mapping !== "standard") {
-        warnOnce(ctx, "mapping", "Game Controller: this controller doesn't use the standard layout, so its buttons may not match the outputs.");
-      }
-      const buttons = Array.isArray(pad.buttons) ? pad.buttons : [];
-      const axes = Array.isArray(pad.axes) ? pad.axes : [];
-      const pressed = (i: number) => buttons[i]?.pressed === true;
-      const amount = (i: number) => clamp(finiteOr(buttons[i]?.value, 0), 0, 1);
-      const dz = clamp(finiteOr(toNumber(ctx.input("deadZone"), 0.1), 0.1), 0, 0.99);
-      ctx.output("connected", true);
-      ctx.output("buttonA", pressed(0));
-      ctx.output("buttonB", pressed(1));
-      ctx.output("buttonX", pressed(2));
-      ctx.output("buttonY", pressed(3));
-      ctx.output("leftShoulder", pressed(4));
-      ctx.output("rightShoulder", pressed(5));
-      ctx.output("leftTrigger", amount(6));
-      ctx.output("rightTrigger", amount(7));
-      ctx.output("dpad", [(pressed(15) ? 1 : 0) - (pressed(14) ? 1 : 0), (pressed(13) ? 1 : 0) - (pressed(12) ? 1 : 0)]);
-      ctx.output("leftThumbstick", applyDeadZone([axes[0], axes[1]], dz));
-      ctx.output("rightThumbstick", applyDeadZone([axes[2], axes[3]], dz));
-      ctx.output("home", pressed(16));
-      ctx.output("menu", pressed(9));
-      ctx.output("options", pressed(8));
-      ctx.output("leftThumbstickButton", pressed(10));
-      ctx.output("rightThumbstickButton", pressed(11));
-      ctx.output("acceleration", finite3(pad.motion?.acceleration));
-      ctx.output("rotationRate", finite3(pad.motion?.rotationRate));
-    },
-  }),
-  "zero",
-);
+export const gameControllerPatch = definePatch("gameController", {
+  mutedBehavior: "zero",
+  evaluate(ctx) {
+    const slot = Math.max(0, Math.floor(finiteOr(toNumber(ctx.input("controller"), 0), 0)));
+    let pad: GamepadSnapshot | null | undefined;
+    try {
+      pad = ctx.services.platform.gamepads?.()?.[slot];
+    } catch {
+      pad = undefined;
+    }
+    if (!pad?.connected) {
+      outputIdle(ctx);
+      return;
+    }
+    if (pad.mapping !== "standard") {
+      warnOnce(ctx, "mapping", "Game Controller: this controller doesn't use the standard layout, so its buttons may not match the outputs.");
+    }
+    const buttons = Array.isArray(pad.buttons) ? pad.buttons : [];
+    const axes = Array.isArray(pad.axes) ? pad.axes : [];
+    const pressed = (i: number) => buttons[i]?.pressed === true;
+    const amount = (i: number) => clamp(finiteOr(buttons[i]?.value, 0), 0, 1);
+    const dz = clamp(finiteOr(toNumber(ctx.input("deadZone"), 0.1), 0.1), 0, 0.99);
+    ctx.output("connected", true);
+    ctx.output("buttonA", pressed(0));
+    ctx.output("buttonB", pressed(1));
+    ctx.output("buttonX", pressed(2));
+    ctx.output("buttonY", pressed(3));
+    ctx.output("leftShoulder", pressed(4));
+    ctx.output("rightShoulder", pressed(5));
+    ctx.output("leftTrigger", amount(6));
+    ctx.output("rightTrigger", amount(7));
+    ctx.output("dpad", [(pressed(15) ? 1 : 0) - (pressed(14) ? 1 : 0), (pressed(13) ? 1 : 0) - (pressed(12) ? 1 : 0)]);
+    ctx.output("leftThumbstick", applyDeadZone([axes[0], axes[1]], dz));
+    ctx.output("rightThumbstick", applyDeadZone([axes[2], axes[3]], dz));
+    ctx.output("home", pressed(16));
+    ctx.output("menu", pressed(9));
+    ctx.output("options", pressed(8));
+    ctx.output("leftThumbstickButton", pressed(10));
+    ctx.output("rightThumbstickButton", pressed(11));
+    ctx.output("acceleration", finite3(pad.motion?.acceleration));
+    ctx.output("rotationRate", finite3(pad.motion?.rotationRate));
+  },
+});

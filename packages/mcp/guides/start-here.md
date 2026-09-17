@@ -22,6 +22,7 @@ Related: `graph-basics`, `gestures`, `animation`, `simulation`, `troubleshooting
 | a layer property or layer output              | `@card.scale`                      |
 | something created earlier in the same batch   | `$tap.tap`, `{ "layer": "$card" }` |
 | one copy of a looped value (simulation reads) | `@row.position#2`                  |
+| a value inside a component instance (reads)   | `like_button_2/liked.on`           |
 | a component's published input / output        | `$in.down` / `$out.scale`          |
 
 An input has at most one connection; an output can feed many inputs. Literal values: numbers, `true`/`false`, text, colors as `"#RRGGBBAA"`, points and sizes as `[x, y]`, layer references as `{ "layer": "card" }`, connections as `{ "link": "pop.output" }`.

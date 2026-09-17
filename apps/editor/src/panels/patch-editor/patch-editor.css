@@ -56,16 +56,14 @@
   cursor: default;
 }
 
+/* xyflow (MIT) is credited in the app's About and credits rather than on the canvas. Hidden with CSS, not proOptions, which logs a warning on every mount. */
 .sb-pe .react-flow__attribution {
-  margin: 0 0 2px 4px;
-  padding: 0 4px;
-  background: transparent;
-  font-size: 9px;
-  opacity: 0.45;
+  display: none;
 }
 
-.sb-pe .react-flow__attribution a {
-  color: var(--text-tertiary);
+/* Until the first fit, don't flash the graph at 100% from the corner. */
+.sb-pe__canvas[data-fitting] .react-flow__viewport {
+  opacity: 0;
 }
 
 .sb-pe .react-flow__pane.dragging {
@@ -1685,4 +1683,151 @@ textarea.sb-pe-title-input {
   to {
     opacity: 0;
   }
+}
+
+/* ---------------------------------------------------------------------- */
+/* Live scope inside components                                             */
+/* ---------------------------------------------------------------------- */
+
+.sb-pe-live {
+  position: absolute;
+  top: var(--space-5);
+  left: var(--space-5);
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  height: 26px;
+  padding: 0 var(--space-4);
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--bg-elevated) 88%, transparent);
+  box-shadow:
+    0 0 0 1px var(--border-subtle),
+    var(--shadow-sm);
+  backdrop-filter: blur(8px);
+  color: var(--text-secondary);
+  font-size: var(--font-size-xs);
+  white-space: nowrap;
+}
+
+.sb-pe-live[data-offset] {
+  top: calc(var(--space-5) + 34px);
+}
+
+.sb-pe-live__dot {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--success);
+  box-shadow: 0 0 0 3px var(--success-soft);
+}
+
+.sb-pe-live[data-state="off"] .sb-pe-live__dot {
+  background: var(--text-tertiary);
+  box-shadow: none;
+}
+
+.sb-pe-live__label {
+  color: var(--text-tertiary);
+}
+
+.sb-pe-live__name {
+  color: var(--text-primary);
+  font-weight: var(--font-weight-medium);
+}
+
+.sb-pe-live__pick {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  height: 20px;
+  margin-right: calc(var(--space-2) * -1);
+  padding: 0 var(--space-2);
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-primary);
+  font: inherit;
+  font-weight: var(--font-weight-medium);
+  cursor: pointer;
+}
+
+.sb-pe-live__pick:hover,
+.sb-pe-live__pick[aria-expanded="true"] {
+  background: color-mix(in srgb, var(--text-primary) 8%, transparent);
+}
+
+.sb-pe-live__pick:focus-visible {
+  outline: 2px solid var(--selection);
+  outline-offset: 1px;
+}
+
+/* ---------------------------------------------------------------------- */
+/* Drive with a patch                                                       */
+/* ---------------------------------------------------------------------- */
+
+.sb-pe-port[data-undriven] .sb-pe-port__label {
+  color: var(--text-tertiary);
+}
+
+.sb-pe-port__drive {
+  flex: none;
+  height: 16px;
+  margin-left: auto;
+  padding: 0 6px;
+  border: 1px dashed var(--border-default);
+  border-radius: var(--radius-xs);
+  background: transparent;
+  color: var(--text-secondary);
+  font: inherit;
+  font-size: var(--font-size-2xs);
+  line-height: 14px;
+  cursor: pointer;
+}
+
+.sb-pe-port__drive:hover {
+  border-style: solid;
+  border-color: var(--sb-cat);
+  color: var(--text-primary);
+}
+
+.sb-pe-port__drive:focus-visible {
+  outline: 2px solid var(--selection);
+  outline-offset: 1px;
+}
+
+.sb-pe-port[data-highlight] {
+  border-radius: var(--radius-xs);
+  animation: sb-pe-highlight 1.1s var(--ease-out) 2;
+}
+
+@keyframes sb-pe-highlight {
+  0%,
+  100% {
+    background: transparent;
+  }
+  35% {
+    background: color-mix(in srgb, var(--selection) 24%, transparent);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sb-pe-port[data-highlight] {
+    animation: none;
+    background: color-mix(in srgb, var(--selection) 16%, transparent);
+  }
+}
+
+:root[data-reduced-motion="true"] .sb-pe-port[data-highlight] {
+  animation: none;
+  background: color-mix(in srgb, var(--selection) 16%, transparent);
+}
+
+.sb-pe-linksearch__sep {
+  color: var(--text-tertiary);
+}
+
+.sb-pe-splice {
+  min-width: 264px;
 }

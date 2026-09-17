@@ -1,17 +1,19 @@
 /**
  * RPC handlers the desktop MCP bridge calls to reach the live document: document info, read, apply
- * (with dry runs and optimistic concurrency), save, open; selection; viewer bounds for screenshots;
- * deterministic simulations; history; agent presence; and reveal. Errors are returned through
- * `rpc.fail(code, message, data)` because the context bridge strips Error properties.
+ * (with dry runs and optimistic concurrency), save, open, new; selection; viewer bounds and the
+ * panels' registered bounds for screenshots; deterministic simulations; history; agent presence;
+ * and reveal. Errors are returned through `rpc.fail(code, message, data)` because the context bridge
+ * strips Error properties.
  */
 
-import { allLayerIds, findComponentInstances, getOutline, listComponentIds, serializeDocument, type Diagnostic, type Id, type OutlineDetail, type SonobeDocument } from "@sonobe/core";
+import { allLayerIds, DEVICE_PRESETS, findComponentInstances, getOutline, listComponentIds, serializeDocument, type Diagnostic, type Id, type OutlineDetail, type SonobeDocument } from "@sonobe/core";
 import type { InputEvent, TraceInput } from "@sonobe/engine";
 import type { Simulation } from "../runtime/simulation.ts";
+import { BOUNDS_METHODS, type BoundsMethod } from "../state/bounds.ts";
 import { CLAUDE_AUTHOR, normalizeAuthor } from "../state/document.ts";
 import { diagnosticsFor } from "../state/registry.ts";
 import { currentComponentId, itemKindOf } from "../state/selection.ts";
-import type { EditorSession } from "../state/session.ts";
+import { DOCUMENT_TEMPLATES, type DocumentTemplate, type EditorSession } from "../state/session.ts";
 import type { RpcRegistrar } from "./types.ts";
 
 export const RPC_METHODS = [
@@ -20,6 +22,7 @@ export const RPC_METHODS = [
   "document.apply",
   "document.save",
   "document.open",
+  "document.new",
   "selection.get",
   "viewer.bounds",
   "sim.reset",
@@ -31,10 +34,14 @@ export const RPC_METHODS = [
   "history.undo",
   "presence.begin",
   "presence.finish",
+  "presence.list",
   "reveal",
 ] as const;
 
 export type RpcMethod = (typeof RPC_METHODS)[number];
+
+/** Methods registered only while a panel provides them (see EditorSession.bounds). */
+export const OPTIONAL_RPC_METHODS: readonly BoundsMethod[] = BOUNDS_METHODS;
 
 export interface RpcHandlerOptions {
   /** Default: session.host.rpc. */
@@ -140,6 +147,12 @@ function componentPathTo(doc: SonobeDocument, componentId: Id): Id[] {
   return path;
 }
 
+const BOUNDS_LABELS: Record<BoundsMethod, { label: string; hint: string }> = {
+  "canvas.bounds": { label: "the canvas", hint: "Ask the person to show the Canvas panel, then try again." },
+  "graph.bounds": { label: "the patch graph", hint: "Ask the person to show the Patch Editor, then try again." },
+  "viewer.layerBounds": { label: "that layer", hint: "Make sure the layer is visible in the Viewer (enabled, on screen, and in the current prototype state)." },
+};
+
 /** Register every RPC method. Returns a function that unregisters them and disposes simulations. */
 export function registerRpcHandlers(session: EditorSession, options: RpcHandlerOptions = {}): () => void {
   const rpc = options.rpc === undefined ? session.host?.rpc ?? null : options.rpc;
@@ -163,6 +176,7 @@ export function registerRpcHandlers(session: EditorSession, options: RpcHandlerO
   const info = () => {
     const s = doc();
     const d = s.doc;
+    const trust = session.scriptTrust?.getState();
     return {
       name: d.project.name,
       projectPath: s.projectPath,
@@ -180,6 +194,7 @@ export function registerRpcHandlers(session: EditorSession, options: RpcHandlerO
       canUndo: s.canUndo,
       canRedo: s.canRedo,
       playing: session.runtime.isPlaying(),
+      ...(trust ? { scripts: { count: trust.scriptCount, required: trust.required, trusted: trust.trusted } } : {}),
     };
   };
 
@@ -213,6 +228,7 @@ export function registerRpcHandlers(session: EditorSession, options: RpcHandlerO
       const atomic = optBoolean(p, "atomic");
       const component = optString(p, "component");
       const label = optString(p, "label")?.trim() || `applied ${p.ops.length} op${p.ops.length === 1 ? "" : "s"}`;
+      const before = doc().revision;
       const result = doc().apply(p.ops, {
         label,
         author: normalizeAuthor(p.author, CLAUDE_AUTHOR),
@@ -221,13 +237,18 @@ export function registerRpcHandlers(session: EditorSession, options: RpcHandlerO
         ...(atomic !== undefined ? { atomic } : {}),
         ...(component !== undefined ? { defaultComponent: component } : {}),
       });
+      const after = doc();
+      const committed = !dryRun && result.applied.length > 0 && after.revision !== before;
       const target = dryRun ? result.preview : result.doc;
       const touched = new Set(result.affected.components);
       const diagnostics: Diagnostic[] = target && touched.size ? diagnosticsFor(target, session.registry).filter((d) => touched.has(d.component)) : [];
       return {
         result: { ok: result.ok, results: result.results, errors: result.errors, idMap: result.idMap, affected: result.affected, applied: result.applied.length },
-        revision: doc().revision,
+        revision: after.revision,
         diagnostics,
+        /** Ops as applied (generated ids resolved), for replay and history. */
+        applied: result.applied,
+        ...(committed && after.lastChange?.txnId ? { txnId: after.lastChange.txnId } : {}),
       };
     },
 
@@ -245,6 +266,17 @@ export function registerRpcHandlers(session: EditorSession, options: RpcHandlerO
       const result = await session.openProject(path);
       if (result.cancelled) return { ok: false, cancelled: true };
       if (!result.ok) throw new RpcProblem("open_failed", result.error ?? "The project couldn't be opened.", { path: result.path, code: result.errorCode });
+      return { ok: true, ...info() };
+    },
+
+    "document.new": async (p) => {
+      const name = optString(p, "name");
+      const template = optString(p, "template");
+      const device = optString(p, "device");
+      if (template !== undefined && !DOCUMENT_TEMPLATES.includes(template as DocumentTemplate)) throw invalid(`"template" must be one of: ${DOCUMENT_TEMPLATES.join(", ")}.`, { templates: DOCUMENT_TEMPLATES });
+      if (device !== undefined && !DEVICE_PRESETS.some((d) => d.id === device)) throw invalid(`There's no device "${device}".`, { devices: DEVICE_PRESETS.map((d) => d.id) });
+      const created = await session.newProject({ ...(name !== undefined ? { name } : {}), ...(template !== undefined ? { template: template as DocumentTemplate } : {}), ...(device !== undefined ? { device } : {}) });
+      if (!created) return { ok: false, cancelled: true };
       return { ok: true, ...info() };
     },
 
@@ -343,9 +375,19 @@ export function registerRpcHandlers(session: EditorSession, options: RpcHandlerO
       return { finished: item !== undefined };
     },
 
+    "presence.list": (p) => {
+      const limit = optNumber(p, "limit");
+      const s = session.presence.getState();
+      return {
+        working: s.working.map((w) => ({ workId: w.workId, ids: [...w.ids], intent: w.intent, author: { ...w.author }, startedAt: w.startedAt, ...(w.component !== undefined ? { component: w.component } : {}) })),
+        recent: s.recent.slice(0, Math.max(0, Math.floor(limit ?? 20))).map((c) => ({ ...c, ids: [...c.ids], components: [...c.components] })),
+      };
+    },
+
     reveal: (p) => {
       const ids = stringList(p, "ids", true);
       if (ids.length === 0) throw invalid('"ids" must name at least one layer, patch, or comment.');
+      const focus = optBoolean(p, "focus") ?? false;
       const d = doc().doc;
       let componentId = optString(p, "component");
       if (componentId === undefined) {
@@ -365,28 +407,56 @@ export function registerRpcHandlers(session: EditorSession, options: RpcHandlerO
         else if (kind === "comment") comments.push(id);
         else missing.push(id);
       }
-      const selection = session.selection.getState();
-      if (currentComponentId(selection) !== componentId) selection.setComponentPath(componentPathTo(d, componentId));
-      session.selection.getState().select({ layers, patches, comments });
       const revealed = [...layers, ...patches, ...comments];
+      // Without focus, panels scroll to and highlight the items, but the person's selection and place stay put.
+      if (focus && revealed.length) {
+        const selection = session.selection.getState();
+        if (currentComponentId(selection) !== componentId) selection.setComponentPath(componentPathTo(d, componentId));
+        session.selection.getState().select({ layers, patches, comments });
+      }
       if (revealed.length) session.selection.getState().requestReveal(componentId, revealed);
-      return { component: componentId, componentPath: session.selection.getState().componentPath, revealed, missing };
+      return { component: componentId, componentPath: session.selection.getState().componentPath, revealed, missing, focused: focus && revealed.length > 0 };
     },
   };
 
-  const unregister = RPC_METHODS.map((method) =>
-    rpc.handle(method, async (params) => {
-      try {
-        return await handlers[method](asParams(params));
-      } catch (err) {
-        if (err instanceof RpcProblem) return rpc.fail(err.code, err.message, err.data);
-        return rpc.fail("internal_error", err instanceof Error ? err.message : String(err));
-      }
-    }),
-  );
+  const wrap = (fn: (p: Params) => unknown) => async (params: unknown) => {
+    try {
+      return await fn(asParams(params));
+    } catch (err) {
+      if (err instanceof RpcProblem) return rpc.fail(err.code, err.message, err.data);
+      return rpc.fail("internal_error", err instanceof Error ? err.message : String(err));
+    }
+  };
+
+  const unregister = RPC_METHODS.map((method) => rpc.handle(method, wrap(handlers[method])));
+
+  // Bounds methods exist only while some panel can answer them, so the desktop can tell what's capturable.
+  const boundsHandles = new Map<BoundsMethod, () => void>();
+  const boundsRegistry = session.bounds as EditorSession["bounds"] | undefined;
+  const measureBounds = (method: BoundsMethod) =>
+    wrap(async (p) => {
+      if (method === "viewer.layerBounds" && optString(p, "layerId") === undefined && optString(p, "key") === undefined) throw invalid('"layerId" is required: the layer to capture.');
+      const rect = await boundsRegistry!.measure(method, p);
+      if (!rect || rect.width < 1 || rect.height < 1) throw new RpcProblem("target_unavailable", `There's nothing on screen for ${BOUNDS_LABELS[method].label}.`, { hint: BOUNDS_LABELS[method].hint });
+      return rect;
+    });
+  const syncBounds = () => {
+    const available = new Set(boundsRegistry?.methods() ?? []);
+    for (const [method, off] of boundsHandles) {
+      if (available.has(method)) continue;
+      off();
+      boundsHandles.delete(method);
+    }
+    for (const method of available) if (!boundsHandles.has(method)) boundsHandles.set(method, rpc.handle(method, measureBounds(method)));
+  };
+  syncBounds();
+  const unsubscribeBounds = boundsRegistry?.subscribe(syncBounds);
 
   return () => {
     for (const off of unregister) off();
+    unsubscribeBounds?.();
+    for (const off of boundsHandles.values()) off();
+    boundsHandles.clear();
     for (const sim of sims.values()) sim.dispose();
     sims.clear();
   };

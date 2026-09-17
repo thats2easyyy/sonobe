@@ -48,6 +48,8 @@ export interface PatchEditorUiState {
   minimap: boolean;
   /** Node whose title is being edited. */
   editingTitle: string | null;
+  /** An input row flashed to draw the eye (a property you asked to drive). */
+  highlightPort: string | null;
   set: (partial: Partial<Omit<PatchEditorUiState, "set">>) => void;
 }
 
@@ -65,6 +67,7 @@ export function createUiStore(initial: { minimap?: boolean } = {}): UiStore {
     selectedEdges: [],
     minimap: initial.minimap ?? false,
     editingTitle: null,
+    highlightPort: null,
     set: (partial) => set(partial),
   }));
 }

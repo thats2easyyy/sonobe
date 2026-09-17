@@ -18,7 +18,7 @@ import {
   type ResolvedPort,
 } from "./registry.ts";
 import { didYouMean, didYouMeanText } from "./suggest.ts";
-import type { Component, Id, InputValue, LinkInput, Literal, PatchNode, Registry, SonobeDocument, SonobeError, Suggestion, ValueType } from "./types.ts";
+import type { Component, GradientLiteral, Id, InputValue, LinkInput, Literal, PatchNode, Registry, SonobeDocument, SonobeError, Suggestion, ValueType } from "./types.ts";
 import {
   CONVERTER_CANDIDATES,
   canConnect,
@@ -332,13 +332,14 @@ export function checkLink(doc: SonobeDocument, component: Component, link: strin
   const selfLayer = src.kind === "layer" && target.kind === "layer" && src.itemId === target.itemId && src.key === target.key;
   if (selfPatch || selfLayer) {
     const suggestions: Suggestion[] = [];
+    const delayName = getPatchSpec(opts.registry, "delay1")?.name ?? "Delay One Frame";
     if (selfPatch && src.port && target.port) {
-      const s = insertPatchSuggestion(doc, opts.registry, component.id, "delay1", "Insert a Delay 1 patch so the feedback reads the previous frame.", { address: src.address, type: src.port.type }, { address: target.address, type: target.port.type });
+      const s = insertPatchSuggestion(doc, opts.registry, component.id, "delay1", `Insert a ${delayName} patch so the feedback reads the previous frame.`, { address: src.address, type: src.port.type }, { address: target.address, type: target.port.type });
       if (s) suggestions.push(s);
     }
     return fail("self_edge", `"${src.itemId}" can't feed its own ${selfPatch ? "input" : "property"} directly (${src.address} → ${target.address}).`, {
       address: target.address,
-      hint: "Feedback needs one frame of delay: put a Delay 1 patch between the output and the input.",
+      hint: `Feedback needs one frame of delay: put a ${delayName} patch between the output and the input.`,
       suggestions,
     });
   }
@@ -446,6 +447,8 @@ export function checkScalarLiteral(lit: Literal, port: ResolvedPort, address: st
     case "textStyle":
     case "layerEffect":
       return mismatch(port.type === "textStyle" ? "a text style" : "a layer effect", 'Wrap objects as { "json": { … } }, or connect a patch output.');
+    case "connection":
+      return mismatch("a connection", "Connections have no stored value. Connect the output of a patch that opens one, such as WebSocket Connection.");
   }
 }
 
@@ -466,9 +469,12 @@ function checkGradient(value: { gradient: Record<string, unknown> }, address: st
   }
   const vec = (v: unknown) => Array.isArray(v) && v.length === 2 && v.every((n) => typeof n === "number" && Number.isFinite(n));
   if (!vec(g.start) || !vec(g.end)) return bad("start and end are [x, y] in 0..1");
-  const extra = Object.keys(g).filter((k) => !["kind", "stops", "start", "end"].includes(k));
+  const extra = Object.keys(g).filter((k) => !["kind", "stops", "start", "end", "ratio"].includes(k));
   if (extra.length) return bad(`unknown field ${extra.map((k) => `"${k}"`).join(", ")}`);
-  return ok({ gradient: { kind: g.kind, stops, start: g.start as [number, number], end: g.end as [number, number] } });
+  if (g.ratio !== undefined && !(typeof g.ratio === "number" && Number.isFinite(g.ratio) && g.ratio > 0)) return bad("ratio is a number above 0 (2 makes a radial gradient twice as wide as tall)");
+  const normalized: GradientLiteral["gradient"] = { kind: g.kind, stops, start: g.start as [number, number], end: g.end as [number, number] };
+  if (typeof g.ratio === "number") normalized.ratio = g.ratio;
+  return ok({ gradient: normalized });
 }
 
 /** Check a non-link input value against a declared port; returns a normalized value. */

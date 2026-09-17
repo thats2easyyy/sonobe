@@ -286,9 +286,11 @@ export interface SimHit {
   /** Front-most layer under the point, if any. */
   layerId?: Id;
   layerName?: string;
+  /** Instance path of the front-most layer when it's inside a component instance ("card#2"). */
+  instancePath?: string;
   /** Front-most first, including ancestors that touches bubble to. */
   chain: Id[];
-  /** Interaction-type patches listening to a layer in the chain (or to the whole screen). */
+  /** Interaction-type patches listening to a layer in the chain (or to the whole screen); "card/tap_badge" inside instances. */
   handledBy: Id[];
 }
 
@@ -368,6 +370,15 @@ export interface SimHost {
 // Host
 // ---------------------------------------------------------------------------
 
+/**
+ * A change that MCP resource notifications publish: a new revision updates the document's
+ * outline and diagnostics resources; opening or closing a document changes the resource list.
+ */
+export type DocumentChange =
+  | { kind: "revision"; docId: Id; revision: number }
+  | { kind: "opened"; docId: Id }
+  | { kind: "closed"; docId: Id };
+
 export interface SonobeHost {
   readonly kind: HostKind;
   readonly capabilities: HostCapabilities;
@@ -406,6 +417,13 @@ export interface SonobeHost {
     list(options: HistoryListOptions): Promise<HistoryItem[]>;
     undo(options: UndoOptions): Promise<UndoResult>;
   };
+
+  /**
+   * Optional: subscribe to document changes (new revisions, opened and closed documents).
+   * createHttpHandler and serveStdioHost subscribe automatically and publish resource
+   * notifications. Hosts without it can call NodeMcpHandler.documentChanged themselves.
+   */
+  onDocumentChange?(listener: (change: DocumentChange) => void): () => void;
 }
 
 /** A host failure written for the agent: code, message, hint, and ready-to-apply suggestions. */

@@ -126,7 +126,7 @@ describe("runtime host", () => {
     scheduler.frame();
     host.runtime.dispatch([up]);
     scheduler.frames(3);
-    expect(fires).toEqual([{ frame: 2, addresses: ["tap.tap"] }]);
+    expect(fires).toEqual([{ frame: 2, addresses: ["tap.tap"], component: "main", instancePath: "" }]);
   });
 
   it("routes logs to the console with the patch id and turns issues into diagnostics", () => {

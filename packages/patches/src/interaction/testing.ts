@@ -79,6 +79,8 @@ export function createInteractionRig<S>(definition: PatchDefinition<S>, options:
     return [];
   };
 
+  const refOf = (layer: RigLayer): LayerRef => (layer.instance === undefined ? { layerId: layer.id } : { layerId: layer.id, instance: layer.instance });
+
   const services: Partial<RuntimeServices> = {
     pointer: (ref): PointerSnapshot => {
       if (!ref) return pointer.snapshot(null);
@@ -87,20 +89,27 @@ export function createInteractionRig<S>(definition: PatchDefinition<S>, options:
       const [x, y] = layer.rect;
       return pointer.snapshot(keyOf(layer), [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, -x, -y, 0, 1], true);
     },
+    pointers: (ref) => {
+      if (!ref) return pointer.pointers(null);
+      const layer = find(ref);
+      return layer ? pointer.pointers(keyOf(layer), true) : [];
+    },
     keyboard: () => keyboard.snapshot(),
     wheel: () => wheel.snapshot(),
     layerInfo: (ref): LayerInfoSnapshot | undefined => {
       const layer = find(ref);
       if (!layer) return undefined;
       const [x, y, w, h] = layer.rect;
-      const parent = layer.parent !== undefined ? find({ layerId: layer.parent }) : undefined;
+      const parent = layer.parent !== undefined ? find({ layerId: layer.parent, ...(layer.instance === undefined ? {} : { instance: layer.instance }) }) : undefined;
       return {
+        type: "rectangle",
         enabled: true,
         position: parent ? [x - parent.rect[0], y - parent.rect[1]] : [x, y],
         size: [w, h],
         scale: layer.scale ?? [1, 1],
         anchor: [0, 0],
-        parent: layer.parent ?? null,
+        parent: parent ? refOf(parent) : null,
+        worldTransform: [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, x, y, 0, 1],
         contentSize: [w, h],
       };
     },

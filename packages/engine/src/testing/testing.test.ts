@@ -3,6 +3,7 @@ import { isLoop, makeLoop } from "../runtime/loop.ts";
 import {
   buildDoc,
   createTestRuntime,
+  defineMock,
   drag,
   idle,
   keyPress,
@@ -14,6 +15,7 @@ import {
   mockSwitch,
   mockTransition,
   mockWhenPrototypeStarts,
+  port,
   probeDefinition,
   runFrames,
   runPatch,
@@ -41,9 +43,28 @@ describe("runPatch", () => {
     expect(start.frames.map((f) => f.pulses)).toEqual([["started"], []]);
   });
 
-  it("applies mute behavior", () => {
-    expect(runPatch(mockTransition, [{ progress: 0.5, start: 0, end: 10 }], { muted: true }).frames[0]!.outputs.output).toBe(0.5);
+  it("applies mute behavior (variant outputs pass the first variant input)", () => {
+    expect(runPatch(mockTransition, [{ progress: 0.5, start: 3, end: 10 }], { muted: true }).frames[0]!.outputs.output).toBe(3);
     expect(runPatch(mockSwitch, [{ flip: true }], { muted: true }).frames[0]!.outputs.on).toBe(false);
+  });
+
+  it("provides the contract's context members and services", () => {
+    const seen: unknown[] = [];
+    const probe = defineMock({
+      type: "harnessProbe",
+      name: "Harness Probe",
+      inputs: [port("trigger", "pulse"), port("state", "pulse")],
+      outputs: [],
+      evaluate(ctx) {
+        seen.push([ctx.isPulseSource("trigger"), ctx.isPulseSource("state"), ctx.isFeedback("trigger"), ctx.muted, ctx.services.deterministic, ctx.services.restartCount, ctx.services.device().timeZone, ctx.services.pointers(null)]);
+        ctx.warnOnce("k", "once");
+        ctx.services.issue("custom_code", "warning", "Custom.");
+      },
+    });
+    const r = runPatch(probe, [{}, {}], { edgeInputs: ["state"], id: "probe_1" });
+    expect(seen[0]).toEqual([true, false, false, false, true, 0, "UTC", []]);
+    expect(r.logs).toEqual([{ level: "warn", args: ["once"] }]);
+    expect(r.issues).toEqual([{ code: "custom_code", severity: "warning", message: "Custom.", patchId: "probe_1" }]);
   });
 
   it("decodes document literals and variant defaults", () => {

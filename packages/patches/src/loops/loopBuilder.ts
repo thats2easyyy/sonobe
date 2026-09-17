@@ -1,13 +1,12 @@
 /** Loop Builder: separate item inputs collected into one loop. */
 
 import { definePatch, loopOf, warnOnce } from "../infra/index.ts";
-import { indices, variantPortsFor } from "./shared.ts";
+import { indices } from "./shared.ts";
 
 /** Largest item count (the catalog's variadic maximum). */
 const MAX_ITEMS = 128;
 
 export const loopBuilderPatch = definePatch("loopBuilder", {
-  dynamicPorts: variantPortsFor("loopBuilder"),
   evaluate(ctx) {
     const n = Math.min(MAX_ITEMS, Math.max(1, ctx.inputCount));
     const items = new Array<unknown>(n);

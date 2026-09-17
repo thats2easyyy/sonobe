@@ -6,7 +6,7 @@
  */
 
 import { transformPoint } from "../math/matrix.ts";
-import type { InputEvent, PointerSnapshot } from "../types.ts";
+import type { InputEvent, PointerInfo, PointerSnapshot } from "../types.ts";
 
 /** One entry of a hit chain (front-most first, then ancestors). */
 export interface HitTarget {
@@ -65,6 +65,10 @@ interface PointerRecord {
   lastMoveTime: number;
   began: boolean;
   cancelled: boolean;
+  /** 0–1 while pressed. */
+  pressure: number;
+  /** DOM `buttons` bitmask while pressed. */
+  buttons: number;
 }
 
 function matches(chain: readonly HitTarget[], target: string | null): boolean {
@@ -75,6 +79,31 @@ function matches(chain: readonly HitTarget[], target: string | null): boolean {
 
 function stampOf(event: PointerEvent): number | undefined {
   return typeof event.timeStamp === "number" && Number.isFinite(event.timeStamp) ? event.timeStamp / 1000 : undefined;
+}
+
+/** Event pressure clamped to 0–1; without one, touches and pens press at 0.5 and mice at 0. */
+function pressureOf(event: PointerEvent, pointerType: PointerType): number {
+  const p = event.pressure;
+  if (typeof p === "number" && Number.isFinite(p)) return Math.min(1, Math.max(0, p));
+  return pointerType === "mouse" ? 0 : 0.5;
+}
+
+/** DOM `buttons` for a press: the event's bitmask, else derived from `button` (primary by default). */
+function buttonsOf(event: PointerEvent): number {
+  const b = event.buttons;
+  if (typeof b === "number" && Number.isFinite(b) && b > 0) return Math.floor(b);
+  switch (event.button) {
+    case 1:
+      return 4;
+    case 2:
+      return 2;
+    case 3:
+      return 8;
+    case 4:
+      return 16;
+    default:
+      return 1;
+  }
 }
 
 function createRecord(
@@ -104,6 +133,8 @@ function createRecord(
     lastMoveTime: time,
     began: pressed,
     cancelled: false,
+    pressure: 0,
+    buttons: 0,
   };
 }
 
@@ -133,7 +164,8 @@ export class PointerTracker {
 
   /**
    * Process one frame: advance time by `dt`, apply pointer events in order, update velocity
-   * estimates, and re-hit-test hovering pointers. Non-pointer events are ignored.
+   * estimates, and re-hit-test hovering pointers (including mice and pens with a button held).
+   * Non-pointer events are ignored.
    */
   update(events: readonly InputEvent[], hitTest: HitTestFunction, dt: number): void {
     const h = dt > 0 && Number.isFinite(dt) ? dt : 0;
@@ -172,8 +204,7 @@ export class PointerTracker {
    * SceneNode key (layer ids alone don't match).
    */
   snapshot(target: string | null, worldInverse?: readonly number[] | null, exact = false): PointerSnapshot {
-    const match = (chain: readonly HitTarget[]) =>
-      exact && target !== null ? chain.some((e) => e.key === target) : matches(chain, target);
+    const match = this.matcher(target, exact);
     const pressed: PointerRecord[] = [];
     for (const record of this.active.values())
       if (match(record.chain)) pressed.push(record);
@@ -200,10 +231,13 @@ export class PointerTracker {
       if (Number.isFinite(lx) && Number.isFinite(ly)) localPosition = [lx, ly];
     }
 
-    return {
+    let buttons = 0;
+    for (const record of pressed) buttons |= record.buttons;
+    const snapshot: PointerSnapshot = {
       down: pressed.length > 0,
       began: pressed.some((r) => r.began) || ended.some((r) => r.began),
       ended: ended.length > 0,
+      cancelled: ended.length > 0 && ended.every((r) => r.cancelled),
       tapped: ended.some(
         (r) => !r.cancelled && r.maxDistance < slop && matches(r.releaseChain, target),
       ),
@@ -212,9 +246,32 @@ export class PointerTracker {
       startPosition: [startPosition[0], startPosition[1]],
       translation,
       velocity: current ? [current.velocity[0], current.velocity[1]] : [0, 0],
+      pressure: pressed[0]?.pressure ?? 0,
+      buttons,
       hovering: hover !== undefined,
       pointerCount: pressed.length,
     };
+    const typed = pressed[0] ?? hover ?? press;
+    if (typed) snapshot.pointerType = typed.pointerType;
+    return snapshot;
+  }
+
+  /**
+   * Every pressed pointer whose press hit chain matches `target` (null = all), sorted by press
+   * time then pointer id. `exact` has the same meaning as in snapshot().
+   */
+  pointers(target: string | null, exact = false): PointerInfo[] {
+    const match = this.matcher(target, exact);
+    const records: PointerRecord[] = [];
+    for (const record of this.active.values()) if (match(record.chain)) records.push(record);
+    records.sort((a, b) => a.startTime - b.startTime || a.id - b.id);
+    return records.map((r) => ({
+      id: r.id,
+      position: [r.position[0], r.position[1]],
+      pressure: r.pressure,
+      startTime: r.startTime,
+      buttons: r.buttons,
+    }));
   }
 
   /** True while a pointer on `target` has been held and stationary (within slop) for `duration` seconds. */
@@ -247,14 +304,23 @@ export class PointerTracker {
     this.time = 0;
   }
 
+  private matcher(target: string | null, exact: boolean): (chain: readonly HitTarget[]) => boolean {
+    return (chain) => (exact && target !== null ? chain.some((e) => e.key === target) : matches(chain, target));
+  }
+
   private press(event: PointerEvent, position: [number, number], hitTest: HitTestFunction): void {
     const id = event.pointerId;
     const existing = this.active.get(id);
     if (existing) this.finish(existing, existing.position, [], true);
-    this.hovers.delete(id);
-    const record = createRecord(id, position, this.time, true, event.pointerType, stampOf(event));
+    const pointerType = event.pointerType ?? "mouse";
+    const record = createRecord(id, position, this.time, true, pointerType, stampOf(event));
+    record.pressure = pressureOf(event, pointerType);
+    record.buttons = buttonsOf(event);
     record.chain = [...hitTest(position[0], position[1])];
     this.active.set(id, record);
+    // A mouse or pen keeps hovering while its button is held; a touch never hovers.
+    if (pointerType === "touch") this.hovers.delete(id);
+    else this.hoverAt(id, position, pointerType, stampOf(event));
   }
 
   private move(event: PointerEvent, position: [number, number]): void {
@@ -263,14 +329,24 @@ export class PointerTracker {
     if (record) {
       record.position = position;
       record.stamp = stampOf(event) ?? record.stamp;
+      if (typeof event.pressure === "number" && Number.isFinite(event.pressure))
+        record.pressure = Math.min(1, Math.max(0, event.pressure));
+      if (typeof event.buttons === "number" && Number.isFinite(event.buttons) && event.buttons > 0)
+        record.buttons = Math.floor(event.buttons);
       this.updateDistance(record);
+      const hover = this.hovers.get(id);
+      if (hover) hover.position = position;
       return;
     }
     // A touch that isn't pressed can't hover.
     if (event.pointerType === "touch") return;
+    this.hoverAt(id, position, event.pointerType ?? "mouse", stampOf(event));
+  }
+
+  private hoverAt(id: number, position: [number, number], pointerType: PointerType, stamp: number | undefined): void {
     const hover = this.hovers.get(id);
     if (hover) hover.position = position;
-    else this.hovers.set(id, createRecord(id, position, this.time, false, event.pointerType, stampOf(event)));
+    else this.hovers.set(id, createRecord(id, position, this.time, false, pointerType, stamp));
   }
 
   private release(
@@ -295,8 +371,8 @@ export class PointerTracker {
       cancelled ? [] : [...hitTest(position[0], position[1])],
       cancelled,
     );
-    if (!cancelled && this.options.hoverOnRelease && record.pointerType !== "touch")
-      this.hovers.set(id, createRecord(id, position, this.time, false, record.pointerType));
+    if (cancelled || !this.options.hoverOnRelease || record.pointerType === "touch") this.hovers.delete(id);
+    else this.hoverAt(id, position, record.pointerType, record.stamp);
   }
 
   private finish(

@@ -175,6 +175,14 @@ function variadicBlock(v: VariadicSpec): string {
   ].join("\n\n");
 }
 
+/** A repeated group of ports whose count the node sets (PatchSpec.inputCountRange), for patches without a VariadicSpec. */
+function inputCountBlock(range: NonNullable<PatchSpec["inputCountRange"]>): string {
+  return [
+    "### Repeating inputs",
+    `The inputs this patch adds come in repeating groups. A patch can have ${range.min} to ${range.max} groups, and a new patch starts with ${range.defaultCount}.`,
+  ].join("\n\n");
+}
+
 function shortcutText(shortcut: string): string {
   const keys = shortcut === "+" ? ["+"] : shortcut.split("+");
   return keys.map((k) => `<kbd>${k}</kbd>`).join("+");
@@ -200,6 +208,7 @@ export function renderPatchReference(spec: PatchSpec, options: ReferenceOptions 
   if (behavior?.dynamicPortsRule) blocks.push("This patch adds ports based on how it's set up, so these tables list only the ports it always has.");
   blocks.push(spec.inputs.length ? inputsTable(spec.inputs) : "This patch has no fixed inputs.");
   if (spec.variadic && (spec.variadic.direction ?? "inputs") === "inputs") blocks.push(variadicBlock(spec.variadic));
+  else if (!spec.variadic && spec.inputCountRange) blocks.push(inputCountBlock(spec.inputCountRange));
   blocks.push(...optionSections(spec.inputs));
 
   blocks.push("## Outputs");

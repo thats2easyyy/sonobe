@@ -32,6 +32,17 @@ const glow: PatchSpec = {
   origami: { id: "builtin.glow", name: "Glow" },
 };
 
+describe("renderPatchReference count ranges", () => {
+  it("describes an inputCountRange for patches that repeat a group of ports", () => {
+    const page = renderPatchReference({ ...glow, inputCountRange: { min: 2, max: 32, defaultCount: 3 } }, { behavior: { behavior: "", dynamicPortsRule: "stop{n} and value{n}." } });
+    expect(page).toContain("This patch adds ports based on how it's set up, so these tables list only the ports it always has.");
+    expect(page).toContain("### Repeating inputs\n\nThe inputs this patch adds come in repeating groups. A patch can have 2 to 32 groups, and a new patch starts with 3.");
+    expect(renderPatchReference(SPECS.keyframes!)).toContain("A patch can have 2 to 32 groups, and a new patch starts with 3.");
+    expect(renderPatchReference(SPECS.gradientBuilder!)).toContain("A patch can have 1 to 32 groups, and a new patch starts with 2.");
+    expect(renderPatchReference(glow)).not.toContain("### Repeating inputs");
+  });
+});
+
 describe("renderPatchReference", () => {
   const page = renderPatchReference(glow, {
     specs: { switch: SPECS.switch! },

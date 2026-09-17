@@ -5,32 +5,24 @@ import { definitions } from "./index.ts";
 import { restartPrototype } from "./restartPrototype.ts";
 
 const FIRST_FRAME_WARNING = "loop_demo ignored a restart pulse on the first frame; restarting there would repeat forever";
+const warnings = (result: ReturnType<typeof runPatch>) => result.logs.filter((l) => l.level === "warn").map((l) => l.args.join(" "));
 
 describe("restartPrototype", () => {
   it("ignores a pulse on the first frame with one warning, and restarts on later pulses", () => {
-    const h = createPatchHarness(restartPrototype, { id: "loop_demo" });
-    expect(h.step({ pulses: ["restart"] }).restartRequested).toBe(false);
-    expect(h.logs.map((l) => [l.level, l.message])).toEqual([["warn", FIRST_FRAME_WARNING]]);
-    expect(h.step().restartRequested).toBe(false);
-    expect(h.step({ pulses: ["restart"] }).restartRequested).toBe(true);
-    expect(h.step().restartRequested).toBe(false);
+    const result = runPatch(restartPrototype, [{ restart: true }, {}, { restart: true }, {}], { id: "loop_demo" });
+    expect(result.restarts).toBe(1);
+    expect(warnings(result)).toEqual([FIRST_FRAME_WARNING]);
   });
 
   it("restarts once when a held boolean turns on", () => {
-    const h = createPatchHarness(restartPrototype);
-    h.step();
-    expect(h.step({ inputs: { restart: true } }).restartRequested).toBe(true);
-    expect(h.step().restartRequested).toBe(false);
+    const result = runPatch(restartPrototype, [{}, { restart: true }, { restart: true }, { restart: true }], { edgeInputs: ["restart"] });
+    expect(result.restarts).toBe(1);
   });
 
-  it("warns once per loop index per restart and never requests a restart on the first frame", () => {
-    const h = createPatchHarness(restartPrototype, { id: "loop_demo", inputs: { restart: loopOf([true, true]) } });
-    expect(h.step().restartRequested).toBe(false);
-    h.run(3);
-    expect(h.logs.map((l) => l.message)).toEqual([FIRST_FRAME_WARNING, FIRST_FRAME_WARNING]);
-    h.restart();
-    h.step();
-    expect(h.logs).toHaveLength(4);
+  it("warns once per patch, not per loop index, and never requests a restart on the first frame", () => {
+    const result = runPatch(restartPrototype, [{ restart: loopOf([true, true]) }], { id: "loop_demo" });
+    expect(result.restarts).toBe(0);
+    expect(warnings(result)).toEqual([FIRST_FRAME_WARNING]);
   });
 
   it("requests one restart per pulsing index; the runtime collapses them into one", () => {
@@ -70,14 +62,20 @@ describe("restartPrototype", () => {
     ]);
   });
 
-  it("can't loop forever when When Prototype Starts drives it", () => {
+  it("can't loop forever when When Prototype Starts drives it, and warns again after each restart", () => {
     const registry = createMockRegistry(definitions);
+    const logs: string[] = [];
     const rt = createTestRuntime(
       buildDoc({ patches: { launched: { type: "whenPrototypeStarts" }, loop_demo: { type: "restartPrototype", inputs: { restart: { link: "launched.started" } } } } }, registry),
       registry,
+      { onLog: (level, args) => (level === "warn" ? logs.push(args.join(" ")) : undefined) },
     );
     for (let i = 0; i < 4; i++) rt.step();
     expect(rt.frame).toBe(3);
     expect(rt.issues().filter((i) => i.message === FIRST_FRAME_WARNING)).toHaveLength(1);
+    expect(logs).toEqual([FIRST_FRAME_WARNING]);
+    rt.restart();
+    rt.step();
+    expect(logs).toEqual([FIRST_FRAME_WARNING, FIRST_FRAME_WARNING]);
   });
 });

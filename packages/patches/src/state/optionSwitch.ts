@@ -5,7 +5,7 @@
 
 import { definePatch } from "../infra/index.ts";
 import { getSpec } from "../specs.ts";
-import { optionKeys, optionPorts } from "./shared.ts";
+import { optionKeys } from "./shared.ts";
 
 export interface OptionSwitchState {
   option: number;
@@ -16,7 +16,6 @@ const SET_TO = optionKeys("setTo", SPEC.variadic!.max);
 
 export const optionSwitchPatch = definePatch<OptionSwitchState>("optionSwitch", {
   state: () => ({ option: 0 }),
-  dynamicPorts: optionPorts(SPEC),
   evaluate(ctx) {
     const n = Math.min(Math.max(2, ctx.inputCount), SET_TO.length);
     for (let i = n - 1; i >= 0; i--) {

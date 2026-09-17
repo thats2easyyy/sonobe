@@ -11,9 +11,11 @@ import { registerRpcHandlers } from "../host/rpcHandlers.ts";
 import type { LiveValues, PulseFire, RuntimeHostState, ValueSubscriptionOptions } from "../runtime/runtimeHost.ts";
 import { useOptionalCommands } from "../ui/commands/CommandProvider.tsx";
 import { useLatest } from "../ui/lib/hooks.ts";
+import type { ScriptTrustState } from "../runtime/scriptTrust.ts";
 import { attachClipboardEvents, bindHostCommands, registerDocumentCommands } from "./commands.ts";
 import type { ConsoleState } from "./console.ts";
 import { EditorContext } from "./context.ts";
+import type { DialogState } from "./dialogs.ts";
 import type { DocumentState } from "./document.ts";
 import type { PresenceState } from "./presence.ts";
 import { currentComponentId, type SelectionState } from "./selection.ts";
@@ -75,6 +77,16 @@ export function useConsole<T>(selector: (state: ConsoleState) => T): T {
 
 export function useRuntimeState<T>(selector: (state: RuntimeHostState) => T): T {
   return useStore(useEditorSession().runtime.state, selector);
+}
+
+/** The session's dialog queue (render `queue[0]`; settle through `session.dialogs.getState().settle`). */
+export function useDialogs<T>(selector: (state: DialogState) => T): T {
+  return useStore(useEditorSession().dialogs, selector);
+}
+
+/** Whether project scripts may run (show a trust banner while `required && !trusted`). */
+export function useScriptTrust<T>(selector: (state: ScriptTrustState) => T): T {
+  return useStore(useEditorSession().scriptTrust, selector);
 }
 
 /** The component being edited. */

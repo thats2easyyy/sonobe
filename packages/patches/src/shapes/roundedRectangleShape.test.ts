@@ -1,7 +1,7 @@
+import { squirclePath } from "@sonobe/engine";
 import { describe, expect, it } from "vitest";
 import { createPatchHarness, loopOf } from "../infra/index.ts";
 import { roundedRectangleShape } from "./roundedRectangleShape.ts";
-import { squirclePath } from "./squircle.ts";
 
 describe("roundedRectangleShape", () => {
   it("draws the Rectangle layer's corner geometry for the defaults", () => {

@@ -1,3 +1,4 @@
+import { createEmptyDocument, createRegistry, resolveNodePorts } from "@sonobe/core";
 import { runPatch } from "@sonobe/engine/testing";
 import { describe, expect, it } from "vitest";
 import { createPatchHarness, loopOf } from "../infra/index.ts";
@@ -48,11 +49,13 @@ describe("jsonArray", () => {
     );
   });
 
-  it("declares item ports counted from 0 as dynamic ports", () => {
-    const ports = jsonArray.dynamicPorts!({ type: "jsonArray", typeParam: "text", inputCount: 3, inputs: {}, ui: { x: 0, y: 0 } }, {} as never);
-    expect(ports.inputs.map((p) => p.key)).toEqual(["item0", "item1", "item2"]);
-    expect(ports.inputs[0]).toMatchObject({ type: "text", default: "" });
-    expect(ports.outputs).toEqual([]);
+  it("expands item ports counted from 0 through core port resolution", () => {
+    expect(jsonArray.dynamicPorts).toBeUndefined();
+    const doc = createEmptyDocument({ name: "ports" });
+    const ports = resolveNodePorts(doc, { type: "jsonArray", typeParam: "text", inputCount: 3, inputs: {}, ui: { x: 0, y: 0 } }, createRegistry([jsonArray]));
+    expect(ports!.inputs.map((p) => p.key)).toEqual(["item0", "item1", "item2"]);
+    expect(ports!.inputs[0]).toMatchObject({ type: "text", variadicIndex: 1 });
+    expect(ports!.outputs.map((p) => p.key)).toEqual(["array"]);
   });
 
   it("outputs [] while muted", () => {

@@ -1,12 +1,8 @@
 /**
  * Smooth-corner ("squircle") rectangles as SVG path data, following the construction in
  * Figma's "Desperately seeking squircles": each corner is a circular arc shortened by the
- * smoothing amount and blended into the edges with two cubic Béziers.
- *
- * This mirrors packages/renderer/src/squircle.ts byte for byte so Rounded Rectangle Shape matches
- * a Rectangle layer exactly. Patches can't import the renderer; once `squirclePath` moves into a
- * DOM-free module both packages import (see the contract change request), delete this copy.
- * squircle.test.ts pins its output to the renderer's.
+ * smoothing amount and blended into the edges with two cubic Béziers. DOM-free, so the renderer
+ * (drawing) and patches (Rounded Rectangle Shape) share one implementation.
  */
 
 export type CornerRadii = readonly [number, number, number, number]; // topLeft, topRight, bottomRight, bottomLeft
@@ -63,10 +59,13 @@ function budgets(w: number, h: number, r: CornerRadii): [number, number, number,
  * Smoothing 0 yields plain circular corners.
  */
 export function squirclePath(x: number, y: number, w: number, h: number, radii: CornerRadii, smoothing: number): string {
-  w = Math.max(0, w);
-  h = Math.max(0, h);
-  const s = Math.max(0, Math.min(1, smoothing));
-  const clamped = radii.map((v) => Math.max(0, v)) as unknown as CornerRadii;
+  x = Number.isFinite(x) ? x : 0;
+  y = Number.isFinite(y) ? y : 0;
+  w = Number.isFinite(w) ? Math.max(0, w) : 0;
+  h = Number.isFinite(h) ? Math.max(0, h) : 0;
+  const s = Number.isFinite(smoothing) ? Math.max(0, Math.min(1, smoothing)) : 0;
+  // NaN radii are square; an infinite radius is as round as the room allows.
+  const clamped = radii.map((v) => (v === Number.POSITIVE_INFINITY ? 1e9 : Number.isFinite(v) ? Math.max(0, v) : 0)) as unknown as CornerRadii;
   const bud = budgets(w, h, clamped);
   const tl = cornerParams(clamped[0], s, bud[0]);
   const tr = cornerParams(clamped[1], s, bud[1]);

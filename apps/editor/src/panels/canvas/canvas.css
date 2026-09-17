@@ -92,6 +92,8 @@
     0 24px 48px -28px rgba(0, 0, 0, 0.6);
   transform-origin: 0 0;
   pointer-events: none;
+  /* The renderer layers use z-index: keep them under the overlay, rulers, and menus. */
+  isolation: isolate;
 }
 
 [data-theme="light"] .sb-cv__artboard {
@@ -217,6 +219,75 @@
   stroke: var(--selection);
   stroke-linecap: round;
   stroke-width: 3;
+}
+
+.sb-cv__spacing rect {
+  fill: color-mix(in srgb, var(--cv-guide) 16%, transparent);
+}
+
+.sb-cv__spacing line {
+  stroke: var(--cv-guide);
+  stroke-width: 1;
+}
+
+.sb-cv__drop-target {
+  fill: color-mix(in srgb, var(--selection) 7%, transparent);
+  stroke: var(--selection);
+  stroke-dasharray: 6 4;
+  stroke-width: 2;
+}
+
+.sb-cv__drop-label {
+  position: absolute;
+  top: 0;
+  left: 0;
+  padding: var(--space-2) var(--space-5);
+  border-radius: var(--radius-full);
+  background: var(--selection);
+  box-shadow: var(--shadow-sm);
+  color: #ffffff;
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-semibold);
+  line-height: 16px;
+  white-space: nowrap;
+  transform: translateX(-50%);
+  pointer-events: none;
+}
+
+.sb-cv__ruler {
+  position: absolute;
+  top: 0;
+  left: 0;
+  z-index: 2;
+  display: block;
+  /* Canvas colors are read from these computed styles. */
+  border-top-color: color-mix(in srgb, var(--text-tertiary) 55%, transparent);
+  outline-color: var(--selection);
+  background: var(--bg-panel);
+  color: var(--text-tertiary);
+  pointer-events: none;
+}
+
+.sb-cv__ruler[data-axis="x"] {
+  box-shadow: inset 0 -1px 0 var(--border-subtle);
+}
+
+.sb-cv__ruler[data-axis="y"] {
+  box-shadow: inset -1px 0 0 var(--border-subtle);
+}
+
+.sb-cv__ruler-corner {
+  position: absolute;
+  top: 0;
+  left: 0;
+  z-index: 3;
+  width: 20px;
+  height: 20px;
+  background: var(--bg-panel);
+  box-shadow:
+    inset -1px 0 0 var(--border-subtle),
+    inset 0 -1px 0 var(--border-subtle);
+  pointer-events: none;
 }
 
 .sb-cv__pill {

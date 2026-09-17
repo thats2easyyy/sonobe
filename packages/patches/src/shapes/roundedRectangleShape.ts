@@ -1,9 +1,12 @@
-/** Rounded Rectangle Shape: the Rectangle layer's corner geometry (radii and smoothing) as a path. */
+/**
+ * Rounded Rectangle Shape: the Rectangle layer's corner geometry (radii and smoothing) as a path,
+ * drawn with the engine's `squirclePath`, the same function the renderer uses for Rectangle layers.
+ */
 
+import { squirclePath } from "@sonobe/engine";
 import { clamp01, definePatch } from "../infra/index.ts";
 import { MAX_COORDINATE } from "./path.ts";
 import { emptyShape, readNumber, readPair, readVector } from "./read.ts";
-import { squirclePath } from "./squircle.ts";
 
 const clampCoordinate = (v: number) => Math.max(-MAX_COORDINATE, Math.min(MAX_COORDINATE, v));
 

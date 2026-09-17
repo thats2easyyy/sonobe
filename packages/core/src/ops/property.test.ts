@@ -207,7 +207,14 @@ function randomOp(doc: SonobeDocument, rand: () => number): Op | undefined {
       return { op: "updateInterface", component: cid, outputs: { [out.key]: { key: out.key, name: out.name, type: out.type, link: `${id}.${out.key}` } } };
     }
     case "updateComponent":
-      return { op: "updateComponent", id: pick(componentIds)!, name: chance(0.5) ? "Renamed" : undefined, notes: pick([undefined, "", "Some notes"]), size: chance(0.3) ? [int(500) + 1, int(500) + 1] : undefined };
+      return {
+        op: "updateComponent",
+        id: pick(componentIds)!,
+        name: chance(0.5) ? "Renamed" : undefined,
+        notes: pick([undefined, "", "Some notes"]),
+        size: chance(0.3) ? [int(500) + 1, int(500) + 1] : undefined,
+        meta: pick([undefined, undefined, null, {}, { patchEditor: { nodes: { a: [int(100), int(100)] } } }, { zoom: 2, patchEditor: null }]),
+      };
     case "setScript":
       return { op: "setScript", file: pick(["a.js", "b.js"])!, source: chance(0.3) ? null : "export default () => {}\n" };
     case "addAsset":

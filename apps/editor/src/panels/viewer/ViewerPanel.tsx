@@ -1,11 +1,12 @@
 /**
- * The Viewer panel: the live prototype in a device frame. Device picker (project.device), rotate,
- * frame toggle (⌥D), fit or 1:1, hit targets, play/pause, restart (⌘R), fps, a detachable floating
- * window, and "On phone" when the host serves the web player on the local network.
+ * The Viewer panel: the live prototype in a device frame. The header keeps zoom (fit or 1:1), restart
+ * (⌘R), the device frame (⌥D), and hit targets within reach and tucks rotate, device, pop-out, and
+ * phone preview into a menu, so nothing truncates at narrow widths. Play/pause and fps sit under the
+ * prototype, next to "On phone" (a QR code for the LAN web player).
  */
 
 import { DEVICE_PRESETS, getDevicePreset, type DevicePreset } from "@sonobe/core";
-import { Frame, Maximize, Minimize2, Monitor, MousePointerClick, PanelLeftClose, Pause, PictureInPicture2, Play, RotateCcw, RotateCw, Smartphone, Tablet, TriangleAlert, Watch } from "lucide-react";
+import { ChevronDown, Frame, Maximize, Minimize2, Monitor, MoreHorizontal, MousePointerClick, PanelLeftClose, Pause, PictureInPicture2, Play, QrCode, RotateCcw, RotateCw, Smartphone, Tablet, TriangleAlert, Watch } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useStore } from "zustand";
 import { Panel } from "../../shell/Panel.tsx";
@@ -14,29 +15,34 @@ import type { EditorSession } from "../../state/session.ts";
 import { Button } from "../../ui/Button.tsx";
 import { EmptyState } from "../../ui/EmptyState.tsx";
 import { IconButton } from "../../ui/IconButton.tsx";
-import { Select, type SelectOption } from "../../ui/Select.tsx";
+import { Menu, type MenuEntry } from "../../ui/Menu.tsx";
 import { Tooltip } from "../../ui/Tooltip.tsx";
 import { useOptionalCommands } from "../../ui/commands/CommandProvider.tsx";
 import type { Command } from "../../ui/commands/commandRegistry.ts";
 import { cx } from "../../ui/lib/cx.ts";
 import { useLatest } from "../../ui/lib/hooks.ts";
 import { readString, writeString } from "../../ui/lib/storage.ts";
+import { toast } from "../../ui/Toast.tsx";
 import { FloatingWindow } from "./FloatingWindow.tsx";
-import { PhonePreviewButton } from "./PhonePreview.tsx";
+import { getViewerWindowApi, toPreviewStatus, type ViewerWindowStatus } from "./hostBridge.ts";
+import { PhonePreviewButton, usePhonePreview, type PhonePreviewController } from "./PhonePreview.tsx";
 import { ViewerStage } from "./ViewerStage.tsx";
-import { devicePresetOps, formatFps, rotateDeviceOps, type ViewerZoom } from "./viewerModel.ts";
+import { devicePresetOps, formatFps, presetForDevice, rotateDeviceOps, type ViewerZoom } from "./viewerModel.ts";
 import "./viewer.css";
 
 export interface ViewerPanelProps {
   /** Default: the session from the nearest EditorProvider. */
   session?: EditorSession;
-  /** The host's LAN web player URL. "On phone" (QR code + link) only shows when set. */
+  /**
+   * A fixed LAN web player URL for "On phone" (null hides it). Leave it out to use the desktop host's
+   * phone preview server (start, stop, QR code) when the host has one.
+   */
   lanPreviewUrl?: string | null;
-  /** Open the viewer in its own host window. Without it, the viewer detaches into a floating in-app window. */
+  /** Open the viewer in its own window. Default: `sonobeHost.popOutViewer` when available, else a floating in-app window. */
   onPopOut?: () => void;
   /** Shows a "Hide viewer" button. */
   onCollapse?: () => void;
-  /** Register viewer.* commands and shortcuts (⌥D...). Default true. */
+  /** Register viewer.* commands and shortcuts (⌥D...) and the viewer.showPhonePreview RPC. Default true. */
   commands?: boolean;
   className?: string;
 }
@@ -44,22 +50,28 @@ export interface ViewerPanelProps {
 const KIND_ICONS: Record<DevicePreset["kind"], typeof Smartphone> = { phone: Smartphone, tablet: Tablet, computer: Monitor, watch: Watch, custom: Frame };
 const KIND_LABELS: Record<DevicePreset["kind"], string> = { phone: "Phones", tablet: "Tablets", computer: "Desktop", watch: "Watch", custom: "Custom" };
 
-const DEVICE_OPTIONS: SelectOption[] = DEVICE_PRESETS.map((device) => {
-  const Icon = KIND_ICONS[device.kind];
-  return {
-    value: device.id,
-    label: device.name,
-    group: KIND_LABELS[device.kind],
-    icon: <Icon size={14} strokeWidth={1.75} />,
-    trailing: `${device.size[0]}×${device.size[1]}`,
-    keywords: [device.platform, device.kind],
-  };
-});
+const DEVICE_GROUPS: { kind: DevicePreset["kind"]; devices: DevicePreset[] }[] = (() => {
+  const kinds: DevicePreset["kind"][] = [];
+  for (const device of DEVICE_PRESETS) if (!kinds.includes(device.kind)) kinds.push(device.kind);
+  return kinds.map((kind) => ({ kind, devices: DEVICE_PRESETS.filter((d) => d.kind === kind) }));
+})();
+
+/** Device presets grouped by kind, with the current one checked. */
+function deviceMenuEntries(current: string, onSelect: (id: string) => void): MenuEntry[] {
+  const out: MenuEntry[] = [];
+  for (const group of DEVICE_GROUPS) {
+    out.push({ type: "label", id: `kind-${group.kind}`, label: KIND_LABELS[group.kind] });
+    for (const device of group.devices) {
+      out.push({ id: `device-${device.id}`, label: device.name, description: `${device.size[0]} × ${device.size[1]}`, checked: device.id === current, onSelect: () => onSelect(device.id) });
+    }
+  }
+  return out;
+}
 
 const FRAME_KEY = "sonobe.viewer.frame";
 const ZOOM_KEY = "sonobe.viewer.zoom";
 
-function ViewerTransport({ session, lanPreviewUrl, phoneOpen, onPhoneOpenChange }: { session: EditorSession; lanPreviewUrl: string | null; phoneOpen: boolean; onPhoneOpenChange: (open: boolean) => void }) {
+function ViewerTransport({ session, phone, phoneOpen, onPhoneOpenChange }: { session: EditorSession; phone: PhonePreviewController; phoneOpen: boolean; onPhoneOpenChange: (open: boolean) => void }) {
   const playing = useStore(session.runtime.state, (s) => s.playing);
   const fps = useStore(session.runtime.state, (s) => s.fps);
   const frame = useStore(session.runtime.state, (s) => s.frame);
@@ -70,7 +82,6 @@ function ViewerTransport({ session, lanPreviewUrl, phoneOpen, onPhoneOpenChange 
     <div className="sb-vw__footer">
       <div className="sb-vw__transport" role="group" aria-label="Prototype playback">
         <IconButton size="sm" icon={playing ? <Pause size={14} /> : <Play size={14} />} label={playing ? "Pause prototype" : "Play prototype"} shortcut="Mod+Alt+P" tooltipPlacement="top" onClick={() => session.runtime.togglePlay()} />
-        <IconButton size="sm" icon={<RotateCcw size={14} />} label="Restart prototype" shortcut="Mod+R" tooltipPlacement="top" onClick={() => session.runtime.restart()} />
       </div>
       <span className="sb-vw__pill" data-playing={playing || undefined}>
         <span className="sb-vw__dot" aria-hidden />
@@ -85,12 +96,12 @@ function ViewerTransport({ session, lanPreviewUrl, phoneOpen, onPhoneOpenChange 
           </span>
         </Tooltip>
       )}
-      {lanPreviewUrl && <PhonePreviewButton url={lanPreviewUrl} open={phoneOpen} onOpenChange={onPhoneOpenChange} />}
+      {phone.available && <PhonePreviewButton preview={phone} open={phoneOpen} onOpenChange={onPhoneOpenChange} />}
     </div>
   );
 }
 
-export function ViewerPanel({ session: sessionProp, lanPreviewUrl = null, onPopOut, onCollapse, commands = true, className }: ViewerPanelProps) {
+export function ViewerPanel({ session: sessionProp, lanPreviewUrl, onPopOut, onCollapse, commands = true, className }: ViewerPanelProps) {
   const contextSession = useEditorSession();
   const session = sessionProp ?? contextSession;
   const device = useStore(session.document, (s) => s.doc.project.device);
@@ -102,12 +113,41 @@ export function ViewerPanel({ session: sessionProp, lanPreviewUrl = null, onPopO
   const [scale, setScale] = useState(1);
   const rootRef = useRef<HTMLDivElement>(null);
   const landscape = device.orientation === "landscape";
+  const preset = useMemo(() => presetForDevice(device), [device]);
+  const phone = usePhonePreview(lanPreviewUrl);
+  const viewerWindow = useMemo(() => (onPopOut ? null : getViewerWindowApi()), [onPopOut]);
+  const [windowStatus, setWindowStatus] = useState<ViewerWindowStatus | null>(null);
+
+  // The desktop's pop-out viewer window: follow it opening, closing, and staying on top.
+  useEffect(() => {
+    setWindowStatus(null);
+    if (!viewerWindow) return;
+    let cancelled = false;
+    viewerWindow.getStatus?.().then(
+      (status) => {
+        if (!cancelled) setWindowStatus(status);
+      },
+      () => undefined,
+    );
+    const off = viewerWindow.onStatus?.((status) => {
+      if (!cancelled) setWindowStatus(status);
+    });
+    return () => {
+      cancelled = true;
+      off?.();
+    };
+  }, [viewerWindow]);
 
   const toggleFrame = useCallback(() => {
     setShowFrame((on) => {
       writeString(FRAME_KEY, on ? "off" : "on");
       return !on;
     });
+  }, []);
+
+  const setZoomMode = useCallback((next: ViewerZoom) => {
+    writeString(ZOOM_KEY, next);
+    setZoom(next);
   }, []);
 
   const toggleZoom = useCallback(() => {
@@ -117,6 +157,8 @@ export function ViewerPanel({ session: sessionProp, lanPreviewUrl = null, onPopO
       return next;
     });
   }, []);
+
+  const toggleHitTargets = useCallback(() => setShowHitTargets((v) => !v), []);
 
   const setDevice = useCallback(
     (id: string) => {
@@ -132,12 +174,48 @@ export function ViewerPanel({ session: sessionProp, lanPreviewUrl = null, onPopO
     session.document.getState().apply(rotateDeviceOps(current), { label: current.orientation === "landscape" ? "Rotate device to portrait" : "Rotate device to landscape" });
   }, [session]);
 
-  const popOut = useCallback(() => {
-    if (onPopOut) onPopOut();
-    else setFloating((f) => !f);
-  }, [onPopOut]);
+  const restart = useCallback(() => session.runtime.restart(), [session]);
 
-  const actions = useLatest({ toggleFrame, toggleZoom, rotate, popOut, lanPreviewUrl, toggleHitTargets: () => setShowHitTargets((v) => !v), openPhone: () => setPhoneOpen(true) });
+  const popOut = useCallback(() => {
+    if (onPopOut) {
+      onPopOut();
+      return;
+    }
+    if (floating) {
+      setFloating(false);
+      return;
+    }
+    if (viewerWindow) {
+      const declined = (reason: string | null) => {
+        toast({ title: "Couldn't open the viewer window", description: reason ? `${reason} The viewer is floating here instead.` : "The viewer is floating here instead.", tone: "warn" });
+        setFloating(true);
+      };
+      viewerWindow.popOut().then(
+        (status) => {
+          setWindowStatus(status);
+          if (!status.open) declined(status.error);
+        },
+        (err: unknown) => declined(err instanceof Error ? err.message : null),
+      );
+      return;
+    }
+    setFloating(true);
+  }, [onPopOut, floating, viewerWindow]);
+
+  const setWindowOnTop = useCallback(
+    (alwaysOnTop: boolean) => {
+      viewerWindow?.popOut({ alwaysOnTop }).then(setWindowStatus, () => undefined);
+    },
+    [viewerWindow],
+  );
+
+  const closeViewerWindow = useCallback(() => {
+    viewerWindow?.close?.().then(setWindowStatus, () => undefined);
+  }, [viewerWindow]);
+
+  const openPhone = useCallback(() => setPhoneOpen(true), []);
+
+  const actions = useLatest({ toggleFrame, toggleZoom, rotate, popOut, toggleHitTargets, openPhone, phoneAvailable: phone.available });
   const cmds = useOptionalCommands();
   useEffect(() => {
     if (!commands || !cmds) return;
@@ -147,35 +225,77 @@ export function ViewerPanel({ session: sessionProp, lanPreviewUrl = null, onPopO
       { id: "viewer.actualSize", title: "Viewer: Actual Size or Fit", category: "Viewer", icon: Maximize, keywords: ["zoom", "1:1", "100%", "fit"], run: () => actions.current.toggleZoom() },
       { id: "viewer.rotateDevice", title: "Rotate Device", category: "Viewer", icon: RotateCw, keywords: ["landscape", "portrait", "orientation"], run: () => actions.current.rotate() },
       { id: "viewer.popOut", title: "Pop Out Viewer", category: "Viewer", icon: PictureInPicture2, keywords: ["window", "float", "detach", "dock"], run: () => actions.current.popOut() },
-      { id: "viewer.previewOnDevice", title: "Preview on Phone", category: "Viewer", keywords: ["qr", "device", "mobile"], when: () => !!actions.current.lanPreviewUrl, run: () => actions.current.openPhone() },
+      { id: "viewer.previewOnDevice", title: "Preview on Phone", category: "Viewer", icon: QrCode, keywords: ["qr", "device", "mobile", "lan", "wifi"], when: () => actions.current.phoneAvailable, run: () => actions.current.openPhone() },
     ];
     return cmds.registry.register(list.filter((c) => !cmds.registry.get(c.id)));
   }, [cmds, commands, actions]);
 
+  // Viewer → Preview on Phone in the desktop menu starts the server, then asks the editor to show the QR panel.
+  const phoneRef = useLatest(phone);
+  useEffect(() => {
+    const rpc = session.host?.rpc;
+    if (!commands || !rpc) return;
+    return rpc.handle("viewer.showPhonePreview", (params) => {
+      const status = toPreviewStatus(params);
+      if (status) phoneRef.current.adopt(status);
+      setPhoneOpen(true);
+      return { shown: true };
+    });
+  }, [session, commands, phoneRef]);
+
+  const zoomLabel = zoom === "actual" ? "1:1" : `${Math.round(scale * 100)}%`;
+  const zoomEntries: MenuEntry[] = [
+    { id: "fit", label: "Fit to Panel", checked: zoom === "fit", onSelect: () => setZoomMode("fit") },
+    { id: "actual", label: "Actual Size (1:1)", checked: zoom === "actual", onSelect: () => setZoomMode("actual") },
+  ];
+  const DeviceIcon = KIND_ICONS[preset.kind];
+  const moreEntries: MenuEntry[] = [
+    { id: "rotate", label: landscape ? "Rotate to Portrait" : "Rotate to Landscape", icon: <RotateCw size={14} />, onSelect: rotate },
+    { id: "device", label: "Device", description: preset.name, icon: <DeviceIcon size={14} />, submenu: deviceMenuEntries(device.preset, setDevice) },
+    { type: "separator" },
+    { id: "frame", label: "Show Device Frame", shortcut: "Alt+D", checked: showFrame, onSelect: toggleFrame },
+    { id: "hitTargets", label: "Show Hit Targets", checked: showHitTargets, onSelect: toggleHitTargets },
+    { type: "separator" },
+    ...(viewerWindow && windowStatus?.open
+      ? ([
+          { id: "showWindow", label: "Show Viewer Window", icon: <PictureInPicture2 size={14} />, onSelect: popOut },
+          { id: "windowOnTop", label: "Keep Viewer Window on Top", checked: windowStatus.alwaysOnTop, onSelect: () => setWindowOnTop(!windowStatus.alwaysOnTop) },
+          ...(viewerWindow.close ? [{ id: "closeWindow", label: "Close Viewer Window", icon: <Minimize2 size={14} />, onSelect: closeViewerWindow } satisfies MenuEntry] : []),
+        ] satisfies MenuEntry[])
+      : [{ id: "popOut", label: floating ? "Dock Viewer" : viewerWindow || onPopOut ? "Open in New Window" : "Pop Out Viewer", icon: floating ? <Minimize2 size={14} /> : <PictureInPicture2 size={14} />, onSelect: popOut } satisfies MenuEntry]),
+    ...(phone.available ? [{ id: "phone", label: "Preview on Phone…", icon: <QrCode size={14} />, onSelect: openPhone } satisfies MenuEntry] : []),
+  ];
+
   const stage = <ViewerStage session={session} showFrame={showFrame} zoom={zoom} showHitTargets={showHitTargets} onScaleChange={setScale} />;
-  const transport = <ViewerTransport session={session} lanPreviewUrl={lanPreviewUrl} phoneOpen={phoneOpen} onPhoneOpenChange={setPhoneOpen} />;
+  const transport = <ViewerTransport session={session} phone={phone} phoneOpen={phoneOpen} onPhoneOpenChange={setPhoneOpen} />;
 
   return (
     <Panel
       title="Viewer"
       scope="viewer"
       surface="sunken"
-      className={className}
+      className={cx("sb-vw-panel", className)}
       headerContent={
-        <div className="sb-vw__header">
-          <Select size="sm" variant="ghost" aria-label="Device" options={DEVICE_OPTIONS} value={device.preset} onChange={setDevice} searchable searchPlaceholder="Search devices…" menuWidth={272} className="sb-vw__device-select" />
-          <span className="sb-vw__meta sb-tabular" aria-label="Viewer zoom">
-            {zoom === "actual" ? "1:1" : `${Math.round(scale * 100)}%`}
-          </span>
-        </div>
+        <span className="sb-vw__device-name" title={`${preset.name} · ${landscape ? `${preset.size[1]} × ${preset.size[0]}` : `${preset.size[0]} × ${preset.size[1]}`}`}>
+          {preset.name}
+        </span>
       }
       actions={
         <>
-          <IconButton size="sm" icon={<RotateCw size={14} />} label={landscape ? "Rotate to portrait" : "Rotate to landscape"} onClick={rotate} />
-          <IconButton size="sm" icon={<Smartphone size={14} />} label="Device frame" shortcut="Alt+D" active={showFrame} onClick={toggleFrame} />
-          <IconButton size="sm" icon={<MousePointerClick size={14} />} label="Show hit targets" active={showHitTargets} onClick={() => setShowHitTargets((v) => !v)} />
-          <IconButton size="sm" icon={<Maximize size={14} />} label={zoom === "actual" ? "Fit to panel" : "Actual size (1:1)"} active={zoom === "actual"} onClick={toggleZoom} />
-          <IconButton size="sm" icon={<PictureInPicture2 size={14} />} label={floating ? "Dock viewer" : "Pop out viewer"} active={floating} onClick={popOut} />
+          <Menu aria-label="Viewer zoom" placement="bottom-end" entries={zoomEntries}>
+            <button type="button" className="sb-vw__zoom" aria-label={`Viewer zoom: ${zoomLabel}`}>
+              <span className="sb-tabular">{zoomLabel}</span>
+              <ChevronDown size={12} strokeWidth={2} aria-hidden />
+            </button>
+          </Menu>
+          <IconButton size="sm" icon={<RotateCcw size={14} />} label="Restart prototype" shortcut="Mod+R" onClick={restart} />
+          <IconButton size="sm" className="sb-vw__hdr-frame" icon={<Smartphone size={14} />} label="Device frame" shortcut="Alt+D" active={showFrame} onClick={toggleFrame} />
+          <IconButton size="sm" className="sb-vw__hdr-hit" icon={<MousePointerClick size={14} />} label="Show hit targets" active={showHitTargets} onClick={toggleHitTargets} />
+          <Menu aria-label="Viewer options" placement="bottom-end" entries={moreEntries}>
+            <button type="button" className="sb-iconbtn sb-vw__more" data-variant="ghost" data-size="sm" aria-label="More viewer options">
+              <MoreHorizontal size={14} />
+            </button>
+          </Menu>
           {onCollapse && <IconButton size="sm" icon={<PanelLeftClose size={14} />} label="Hide viewer" shortcut="Mod+2" onClick={onCollapse} />}
         </>
       }
@@ -203,11 +323,16 @@ export function ViewerPanel({ session: sessionProp, lanPreviewUrl = null, onPopO
       </div>
       {floating && (
         <FloatingWindow
-          title={`Viewer · ${getDevicePreset(device.preset).name}`}
+          title={`Viewer · ${preset.name}`}
           aria-label="Viewer"
           storageKey="sonobe.viewer.floating"
           themeFrom={rootRef.current}
-          actions={<IconButton size="xs" icon={<Minimize2 size={13} />} label="Dock viewer" tooltipPlacement="bottom" onClick={() => setFloating(false)} />}
+          actions={
+            <>
+              <IconButton size="xs" icon={<RotateCcw size={13} />} label="Restart prototype" shortcut="Mod+R" tooltipPlacement="bottom" onClick={restart} />
+              <IconButton size="xs" icon={<Minimize2 size={13} />} label="Dock viewer" tooltipPlacement="bottom" onClick={() => setFloating(false)} />
+            </>
+          }
         >
           <div className="sb-vw">
             {stage}

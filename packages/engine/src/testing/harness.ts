@@ -3,7 +3,6 @@
 import {
   coerce,
   createEmptyDocument,
-  defaultForPort,
   deviceScreenSize,
   getDevicePreset,
   inferValueType,
@@ -19,7 +18,9 @@ import {
 } from "@sonobe/core";
 import { KeyboardTracker } from "../gestures/keyboard.ts";
 import { PointerTracker } from "../gestures/pointer.ts";
+import { approximateTextMeasurer } from "../layout/textMeasurer.ts";
 import { createEngineRegistry } from "../runtime/builtins.ts";
+import { declaredVariant, effectiveInputCount } from "../runtime/compile.ts";
 import {
   beginInputs,
   bypassMap,
@@ -30,12 +31,11 @@ import {
   type InputSlot,
   type NodeSpec,
   type OutputSlot,
-  type RuntimePatchDefinition,
 } from "../runtime/evaluate.ts";
 import { isLoop, makeLoop } from "../runtime/loop.ts";
 import { mulberry32 } from "../runtime/random.ts";
 import { createRuntime, DETERMINISTIC_EPOCH_MS, type SonobeRuntime } from "../runtime/runtime.ts";
-import { coerceValue, decodeStored, normalizeDefault, zeroValue } from "../runtime/values.ts";
+import { coerceValue, decodeStored, normalizeDefault, portDefault, zeroValue } from "../runtime/values.ts";
 import type { EngineRegistry, InputEvent, Loop, PatchDefinition, Runtime, RuntimeIssue, RuntimeOptions, RuntimeServices, SceneFrame } from "../types.ts";
 import { createMockRegistry } from "./mockDefinitions.ts";
 
@@ -145,29 +145,37 @@ export function runPatch(definition: PatchDefinition, framesOfInputs: readonly R
   const inputs: InputSlot[] = ports.inputs.map((p) => {
     const raw = variantDefaults?.[p.key] ?? p.default;
     const wholeLoop = p.wholeLoop === true;
-    const value = normalizeDefault(raw, p.type) ?? (wholeLoop && raw === undefined ? makeLoop([]) : defaultForPort(p));
-    return { key: p.key, type: p.type, wholeLoop, pulseSource: p.type === "pulse" && !edges.has(p.key), connected: connected.has(p.key), default: value, zero: zeroValue(p.type, p.enumOptions) };
+    const value = normalizeDefault(raw, p.type) ?? (wholeLoop && raw === undefined ? makeLoop([]) : portDefault(p));
+    return {
+      key: p.key,
+      type: p.type,
+      variant: declaredVariant(ports.spec, p.key, "inputs"),
+      wholeLoop,
+      pulseSource: p.type === "pulse" && !edges.has(p.key),
+      connected: connected.has(p.key),
+      default: value,
+      zero: zeroValue(p.type, p.enumOptions),
+    };
   });
   const outputs: OutputSlot[] = ports.outputs.map((p) => {
     const wholeLoop = p.wholeLoop === true;
     const zero = wholeLoop ? makeLoop([]) : zeroValue(p.type, p.enumOptions);
-    return { key: p.key, type: p.type, wholeLoop, pulse: p.type === "pulse", initial: p.type === "pulse" ? false : (normalizeDefault(p.default, p.type) ?? zero), zero };
+    return { key: p.key, type: p.type, variant: declaredVariant(ports.spec, p.key, "outputs"), wholeLoop, pulse: p.type === "pulse", initial: p.type === "pulse" ? false : (normalizeDefault(p.default, p.type) ?? zero), zero };
   });
-  const def = definition as RuntimePatchDefinition;
   const spec: NodeSpec = {
     id: options.id ?? "patch",
     node,
-    def,
+    def: definition,
     inputs,
     outputs,
     inputIndex: new Map(inputs.map((s, i) => [s.key, i])),
     outputIndex: new Map(outputs.map((s, i) => [s.key, i])),
     wholeLoop: inputs.some((s) => s.wholeLoop) || outputs.some((s) => s.wholeLoop),
     muted: node.muted === true,
-    mutedBehavior: def.mutedBehavior ?? "bypass",
+    mutedBehavior: definition.mutedBehavior ?? "bypass",
     bypass: bypassMap(inputs, outputs),
     typeParam: ports.typeParam,
-    inputCount: ports.inputCount ?? 0,
+    inputCount: effectiveInputCount(ports.spec, node, ports.inputCount),
   };
 
   const logs: RunPatchResult["logs"] = [];
@@ -178,10 +186,18 @@ export function runPatch(definition: PatchDefinition, framesOfInputs: readonly R
   const pointer = new PointerTracker();
   const keyboard = new KeyboardTracker();
   const preset = getDevicePreset(doc.project.device.preset);
+  const addIssue = (code: string, severity: RuntimeIssue["severity"], message: string, patchId?: Id) => {
+    const item: RuntimeIssue = { code, severity, message };
+    if (patchId !== undefined) item.patchId = patchId;
+    issues.set(`${code}|${message}`, item);
+  };
   const services: RuntimeServices = {
     random: () => rng(),
     now: () => DETERMINISTIC_EPOCH_MS + time * 1000,
+    deterministic: true,
+    restartCount: 0,
     pointer: () => pointer.snapshot(null),
+    pointers: () => pointer.pointers(null),
     keyboard: () => keyboard.snapshot(),
     wheel: () => ({ delta: [0, 0], position: [0, 0], velocity: [0, 0] }),
     layerInfo: () => undefined,
@@ -193,10 +209,14 @@ export function runPatch(definition: PatchDefinition, framesOfInputs: readonly R
       orientation: doc.project.device.orientation ?? "portrait",
       darkMode: false,
       platform: "desktop",
+      timeZone: "UTC",
     }),
+    measureText: (text, style, maxWidth) => approximateTextMeasurer.measure(String(text), style, maxWidth),
+    readScript: (file) => (Object.prototype.hasOwnProperty.call(doc.scripts ?? {}, file) ? doc.scripts[file] : undefined),
     log: (level, ...args) => {
       logs.push({ level, args });
     },
+    issue: (code, severity, message) => addIssue(code, severity, message, spec.id),
     restart: () => {
       restarts++;
     },
@@ -216,11 +236,8 @@ export function runPatch(definition: PatchDefinition, framesOfInputs: readonly R
     requestFrame: () => {
       requested = true;
     },
-    issue: (code, severity, message, patchId) => {
-      const item: RuntimeIssue = { code, severity, message };
-      if (patchId !== undefined) item.patchId = patchId;
-      issues.set(`${code}|${message}`, item);
-    },
+    issue: addIssue,
+    once: new Set(),
   };
   let requested = false;
   const frames: RunPatchFrame[] = [];

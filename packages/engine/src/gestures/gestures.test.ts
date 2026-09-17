@@ -213,7 +213,7 @@ describe("PointerTracker: drag and velocity", () => {
 });
 
 describe("PointerTracker: hover, multi-touch, long press", () => {
-  it("hovering means over the layer without a press", () => {
+  it("hovering means a mouse over the layer, including while its button is held", () => {
     const t = new PointerTracker();
     expect(
       frame(t, [move(20, 20)], () => [
@@ -225,7 +225,7 @@ describe("PointerTracker: hover, multi-touch, long press", () => {
     expect(
       frame(t, [move(80, 80)], () => [t.snapshot("button").hovering, t.snapshot("card").hovering]),
     ).toEqual([false, true]);
-    expect(frame(t, [down(80, 80)], () => t.snapshot("card").hovering)).toBe(false);
+    expect(frame(t, [down(80, 80)], () => t.snapshot("card").hovering)).toBe(true);
     frame(t, [up(80, 80)], () => undefined);
     expect(frame(t, [], () => t.snapshot("card").hovering)).toBe(true);
     expect(frame(t, [cancel(80, 80)], () => t.snapshot("card").hovering)).toBe(false);

@@ -1,6 +1,5 @@
 /** Split Text: cuts text at a literal separator into a loop of parts (whole-loop Text and Parts). */
 
-import type { RuntimePatchDefinition } from "@sonobe/engine";
 import { MAX_LOOP_LENGTH, definePatch, toBool, toText } from "../infra/index.ts";
 import { graphemeSplitter, warnIfCodePointsOnly } from "./graphemes.ts";
 import { nfc } from "./search.ts";
@@ -29,26 +28,24 @@ export function splitParts(texts: readonly string[], token: string, skipEmpty: b
   return { parts, capped: false };
 }
 
-export const splitTextPatch: RuntimePatchDefinition<SplitTextState> = {
-  ...definePatch<SplitTextState>("splitText", {
-    state: () => ({ warned: false }),
-    evaluate(ctx) {
-      const texts = ctx.inputItems<unknown>("text").map(toText);
-      if (ctx.node.muted) {
-        ctx.output("parts", texts);
-        ctx.output("count", texts.length);
-        return;
-      }
-      const token = toText(ctx.input("token"));
-      if (token === "") warnIfCodePointsOnly(ctx, "Split Text");
-      const { parts, capped } = splitParts(texts, token, toBool(ctx.input("skipEmpty")));
-      if (capped && !ctx.state.warned) {
-        ctx.state.warned = true;
-        ctx.services.log("warn", "Split Text made more than 10,000 parts; the rest were dropped.");
-      }
-      ctx.output("parts", parts);
-      ctx.output("count", parts.length);
-    },
-  }),
+export const splitTextPatch = definePatch<SplitTextState>("splitText", {
+  state: () => ({ warned: false }),
+  evaluate(ctx) {
+    const texts = ctx.inputItems<unknown>("text").map(toText);
+    if (ctx.muted) {
+      ctx.output("parts", texts);
+      ctx.output("count", texts.length);
+      return;
+    }
+    const token = toText(ctx.input("token"));
+    if (token === "") warnIfCodePointsOnly(ctx, "Split Text");
+    const { parts, capped } = splitParts(texts, token, toBool(ctx.input("skipEmpty")));
+    if (capped && !ctx.state.warned) {
+      ctx.state.warned = true;
+      ctx.services.log("warn", "Split Text made more than 10,000 parts; the rest were dropped.");
+    }
+    ctx.output("parts", parts);
+    ctx.output("count", parts.length);
+  },
   mutedBehavior: "evaluate",
-};
+});

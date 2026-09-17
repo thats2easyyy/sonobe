@@ -1,22 +1,16 @@
 /**
  * Helpers shared by the state patches: the effective variant, the value-equality rules the
- * catalog specifies, probing whether an input is driven by a pulse, 0-based option ports,
- * duration inputs, and muted behavior.
+ * catalog specifies, pulse sources and muting, option numbers, and duration inputs.
  */
 
-import { encodeValue, isColor, resolveTypeParam } from "@sonobe/core";
-import type { PatchSpec, PortSpec, Value, ValueType } from "@sonobe/core";
-import type { MutedBehavior, PatchContext, PatchDefinition, RuntimePatchDefinition } from "@sonobe/engine";
-import { isPlainObject, portDefaultLiteral, resolvePortType, safeDuration, variadicKeys, warnOnce, zeroValue } from "../infra/index.ts";
+import { isColor, resolveTypeParam } from "@sonobe/core";
+import type { PatchSpec, ValueType } from "@sonobe/core";
+import type { PatchContext } from "@sonobe/engine";
+import { isPlainObject, safeDuration, warnOnce } from "../infra/index.ts";
 
 /** The node's effective variant: its typeParam when the spec allows it, else the first variant. */
 export function variantOf(ctx: Pick<PatchContext, "typeParam">, spec: PatchSpec): ValueType {
   return resolveTypeParam(spec, ctx.typeParam) ?? "number";
-}
-
-/** Attach the engine's muted behavior extension to a definition. */
-export function withMutedBehavior<S>(definition: PatchDefinition<S>, behavior: MutedBehavior): RuntimePatchDefinition<S> {
-  return Object.assign(definition, { mutedBehavior: behavior });
 }
 
 // ---------------------------------------------------------------------------
@@ -92,78 +86,33 @@ export function sameValue(a: unknown, b: unknown, variant: ValueType, colors: Co
 }
 
 // ---------------------------------------------------------------------------
-// Pulse sources
+// Pulse sources and muting
 // ---------------------------------------------------------------------------
 
-/** What the engine's PatchContext implementation exposes beyond the contract (its compiled node). */
-interface EngineContextProbe {
-  isPulseSource?: (key: string) => boolean;
-  spec?: { muted?: unknown; inputs?: readonly { key?: unknown; pulseSource?: unknown }[] };
+/** Whether the patch is muted, directly or through a muted component instance around it (`ctx.muted`). */
+export function isMuted(ctx: Pick<PatchContext, "muted">): boolean {
+  return ctx.muted === true;
+}
+
+/** Whether input `key` is driven by a pulse output, as opposed to a held state (`ctx.isPulseSource`). */
+export function drivenByPulse(ctx: Pick<PatchContext, "isPulseSource">, key: string): boolean {
+  return ctx.isPulseSource(key) === true;
 }
 
 /**
- * Whether the patch is muted, directly or through a muted component instance around it. PatchContext only
- * exposes the node's own flag, so this also reads the engine's compiled node when the context has one.
+ * True when a boolean-variant input is driven by a pulse output and carries that pulse on this patch's
+ * first evaluation (frame 0, or a new loop index). Patches that seed history from the first value (Delay,
+ * Delay One Frame) seed `false` then, so the pulse is an event instead of a starting state: a When
+ * Prototype Starts pulse into a looped Delay launches every staggered item on time. A held state that is
+ * already on at launch still seeds as on.
  */
-export function isMuted(ctx: PatchContext<any>): boolean {
-  return ctx.node.muted === true || (ctx as unknown as EngineContextProbe).spec?.muted === true;
-}
-
-/**
- * Whether input `key` is driven by a pulse output, as opposed to a held state. PatchContext can't say
- * (contract change request `PatchContext.isPulseSource`), so this uses that method when a host provides it,
- * then the engine's compiled input slot, and otherwise reports false.
- */
-export function drivenByPulse(ctx: PatchContext<any>, key: string): boolean {
-  const probe = ctx as unknown as EngineContextProbe;
-  if (typeof probe.isPulseSource === "function") return probe.isPulseSource(key) === true;
-  const inputs = probe.spec?.inputs;
-  if (!Array.isArray(inputs)) return false;
-  for (const slot of inputs) if (slot?.key === key) return slot.pulseSource === true;
-  return false;
-}
-
-/**
- * True when a boolean-variant input carries an upstream pulse on this patch's first evaluation. Patches that
- * seed history from the first value (Delay, Delay One Frame) seed `false` then, so the pulse is an event
- * instead of a starting state.
- */
-export function pulseOnFirstFrame(ctx: PatchContext<any>, key: string, variant: ValueType): boolean {
+export function pulseOnFirstFrame(ctx: Pick<PatchContext, "isPulseSource" | "pulsed">, key: string, variant: ValueType): boolean {
   return variant === "boolean" && drivenByPulse(ctx, key) && ctx.pulsed(key);
 }
 
 // ---------------------------------------------------------------------------
-// Option ports
+// Option numbers
 // ---------------------------------------------------------------------------
-
-/** The literal an option port starts with: the variant's declared default, or its zero value encoded. */
-function optionDefault(spec: PatchSpec, key: string, typeParam: string | undefined): Value {
-  const literal = portDefaultLiteral(spec, key, typeParam);
-  if (literal !== undefined) return literal;
-  const type = resolvePortType(spec, spec.variadic!.type, typeParam);
-  return encodeValue(zeroValue(type), type) as Value;
-}
-
-/**
- * dynamicPorts for the option patches: variadic ports expanded from `startIndex` on the side `direction`
- * names (CONVENTIONS.md §9). Core expands variadics 1-based on the input side until contract change request 1
- * lands; these ports override the matching keys and add the missing ones, so `option0` and Option Sender's
- * outputs exist everywhere ports are resolved.
- */
-export function optionPorts(spec: PatchSpec): NonNullable<PatchSpec["dynamicPorts"]> {
-  const v = spec.variadic;
-  if (!v) throw new Error(`optionPorts: "${spec.type}" has no variadic ports.`);
-  const start = v.startIndex ?? 1;
-  const outputs = v.direction === "outputs";
-  return (node) => {
-    const ports = variadicKeys(spec, node.inputCount).map((key, i): PortSpec => {
-      const port: PortSpec = { key, name: `${v.name} ${start + i}`, type: v.type, description: v.description };
-      if (!outputs && v.type !== "pulse") port.default = optionDefault(spec, key, node.typeParam);
-      return port;
-    });
-    return outputs ? { inputs: [], outputs: ports } : { inputs: ports, outputs: [] };
-  };
-}
 
 /** Expanded option keys `${key}0…${key}31`, precomputed so evaluators don't build strings every frame. */
 export function optionKeys(key: string, max = 32): readonly string[] {

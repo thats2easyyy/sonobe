@@ -6,34 +6,64 @@ import { memo, useEffect, useRef, useState, type MouseEvent, type PointerEvent }
 import { PortGlyph } from "../../../ui/PortGlyph.tsx";
 import { formatValue, isTruthyState } from "../model/format.ts";
 import { HEADER_HEIGHT } from "../model/geometry.ts";
-import type { PortModel } from "../model/types.ts";
+import { layerIdOfNode, type PortModel } from "../model/types.ts";
 import { usePatchEditor, useLiveValue, usePulseCount, useUi } from "../state/context.ts";
 import { InlineValue } from "./InlineValue.tsx";
 
 const HOVER_DELAY_MS = 450;
 let hoverTimer: ReturnType<typeof setTimeout> | undefined;
+/** The row whose timer is pending, so an unmounting row only cancels its own. */
+let hoverOwner: object | null = null;
+
+function stillHovered(el: Element): boolean {
+  try {
+    return el.matches(":hover");
+  } catch {
+    return true;
+  }
+}
 
 function useHoverCard(nodeId: string, port: PortModel) {
   const { ui, session, componentId } = usePatchEditor();
+  const token = useRef({});
+  useEffect(
+    () => () => {
+      if (hoverOwner === token.current) {
+        clearTimeout(hoverTimer);
+        hoverOwner = null;
+      }
+      const hover = ui.getState().hoverPort;
+      if (hover && hover.nodeId === nodeId && hover.address === port.address) ui.getState().set({ hoverPort: null });
+    },
+    [ui, nodeId, port.address],
+  );
   return {
     onPointerEnter(event: PointerEvent<HTMLDivElement>) {
       const el = event.currentTarget;
       clearTimeout(hoverTimer);
+      hoverOwner = token.current;
       session.selection.getState().setHovered({ kind: "port", id: nodeId.replace(/^@/, ""), component: componentId, address: port.address, source: "patchEditor" });
       if (event.buttons !== 0) return;
       hoverTimer = setTimeout(() => {
+        hoverOwner = null;
+        const state = ui.getState();
+        // The row may have re-rendered away, or a cable drag started: a detached row measures 0×0 at the page's corner.
+        if (!el.isConnected || !stillHovered(el) || state.draggingType || state.detaching || state.knife) return;
         const r = el.getBoundingClientRect();
-        ui.getState().set({ hoverPort: { nodeId, address: port.address, side: port.side, rect: { x: r.left, y: r.top, width: r.width, height: r.height } } });
+        if (r.width === 0 && r.height === 0) return;
+        state.set({ hoverPort: { nodeId, address: port.address, side: port.side, rect: { x: r.left, y: r.top, width: r.width, height: r.height } } });
       }, HOVER_DELAY_MS);
     },
     onPointerLeave() {
       clearTimeout(hoverTimer);
+      hoverOwner = null;
       if (ui.getState().hoverPort) ui.getState().set({ hoverPort: null });
       const hovered = session.selection.getState().hovered;
       if (hovered?.address === port.address) session.selection.getState().setHovered(null);
     },
     onPointerDown() {
       clearTimeout(hoverTimer);
+      hoverOwner = null;
       if (ui.getState().hoverPort) ui.getState().set({ hoverPort: null });
     },
   };
@@ -43,6 +73,9 @@ const InputPort = memo(function InputPort({ nodeId, port, editable }: { nodeId: 
   const { ui, actions } = usePatchEditor();
   const hover = useHoverCard(nodeId, port);
   const armable = useUi((s) => (s.armed && s.armed.nodeId !== nodeId ? canConnect(s.armed.type, port.type).ok : null));
+  const highlighted = useUi((s) => s.highlightPort === port.address);
+  const layerId = layerIdOfNode(nodeId);
+  const undriven = layerId !== undefined && !port.connected;
   const onClick = (event: MouseEvent<HTMLDivElement>) => {
     const armed = ui.getState().armed;
     if (!armed || !armable) return;
@@ -51,12 +84,27 @@ const InputPort = memo(function InputPort({ nodeId, port, editable }: { nodeId: 
     if (!event.shiftKey) ui.getState().set({ armed: null });
   };
   return (
-    <div className="sb-pe-port sb-pe-port--in" data-connected={port.connected || undefined} data-issue={port.issue?.severity} data-armable={armable ?? undefined} data-advanced={undefined} onClick={onClick} {...hover}>
+    <div className="sb-pe-port sb-pe-port--in" data-connected={port.connected || undefined} data-issue={port.issue?.severity} data-armable={armable ?? undefined} data-highlight={highlighted || undefined} data-undriven={undriven || undefined} onClick={onClick} {...hover}>
       <Handle type="target" position={Position.Left} id={port.handleId} className="sb-pe-handle sb-pe-handle--in" aria-label={`${port.name} input`}>
         <PortGlyph type={port.type} connected={port.connected} size={9} />
       </Handle>
       <span className="sb-pe-port__label">{port.name}</span>
       {!port.connected && editable && <InlineValue port={port} />}
+      {undriven && (
+        <button
+          type="button"
+          className="sb-pe-port__drive nodrag nopan"
+          aria-label={`Choose what drives ${port.name}`}
+          onPointerDown={(e) => e.stopPropagation()}
+          onDoubleClick={(e) => e.stopPropagation()}
+          onClick={(e) => {
+            e.stopPropagation();
+            actions.driveLayerProp(layerId, port.key);
+          }}
+        >
+          Drive…
+        </button>
+      )}
     </div>
   );
 });

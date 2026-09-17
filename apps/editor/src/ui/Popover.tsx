@@ -6,6 +6,7 @@ import { useLatest } from "./lib/hooks.ts";
 import { useDismissableLayer } from "./lib/layerStack.ts";
 import type { Placement } from "./lib/position.ts";
 import { isElementAnchor, useFloating, type FloatingAnchor } from "./lib/useFloating.ts";
+import "./Surface.css";
 import "./Popover.css";
 
 export interface PopoverProps {

@@ -238,8 +238,30 @@ export interface SplicePlan {
   outputKey: string;
 }
 
-/** Put a patch between the two ends of a cable. */
-export function splicePatchOps(doc: SonobeDocument, componentId: Id, registry: Registry, patchId: Id, cable: { from: string; to: string }): SplicePlan | { error: string } {
+/** One way to splice a patch into a cable: which input takes the cable and which output drives on. */
+export interface SpliceOption {
+  inputKey: string;
+  inputName: string;
+  inputType: ValueType;
+  outputKey: string;
+  outputName: string;
+  outputType: ValueType;
+  /** Implicit conversions on the two new cables ("on = 1, off = 0"). */
+  conversions: string[];
+  /** Lower is a better fit. */
+  score: number;
+}
+
+interface SpliceContext {
+  title: string;
+  fromType: ValueType;
+  toType: ValueType;
+  inputs: ResolvedPort[];
+  outputs: ResolvedPort[];
+  connected: ReadonlySet<string>;
+}
+
+function spliceContext(doc: SonobeDocument, componentId: Id, registry: Registry, patchId: Id, cable: { from: string; to: string }): SpliceContext | { error: string } {
   const component = doc.components[componentId];
   const node = component?.patches[patchId];
   if (!component || !node) return { error: "That patch no longer exists." };
@@ -251,12 +273,52 @@ export function splicePatchOps(doc: SonobeDocument, componentId: Id, registry: R
   const toType = portTypeAt(doc, componentId, registry, cable.to, "in");
   if (!ports || !fromType || !toType) return { error: "That cable no longer exists." };
   const connected = new Set(Object.entries(node.inputs).filter(([, v]) => isLinkInput(v)).map(([k]) => k));
-  const accepts = (p: ResolvedPort) => canConnect(fromType, p.type).ok && p.type !== "layer";
-  const input = pickPort(ports.inputs, accepts, fromType, connected) ?? pickPort(ports.inputs, accepts, fromType);
-  const output = pickPort(ports.outputs, (p) => canConnect(p.type, toType).ok, toType);
   const title = patchTitle(node, ports.spec);
-  if (!input) return { error: `${title} has no input that takes ${typeLabel(fromType)}.` };
-  if (!output) return { error: `${title} has no output that drives ${typeLabel(toType)}.` };
+  const accepting = ports.inputs.filter((p) => canConnect(fromType, p.type).ok && p.type !== "layer");
+  const free = accepting.filter((p) => !connected.has(p.key));
+  const inputs = free.length ? free : accepting;
+  const outputs = ports.outputs.filter((p) => canConnect(p.type, toType).ok);
+  if (!inputs.length) return { error: `${title} has no input that takes ${typeLabel(fromType)}.` };
+  if (!outputs.length) return { error: `${title} has no output that drives ${typeLabel(toType)}.` };
+  return { title, fromType, toType, inputs, outputs, connected };
+}
+
+/**
+ * Every input × output pair that can splice a patch into a cable, best fit first: exact types, then
+ * ports that aren't "any", then declaration order. Several options mean the editor should ask.
+ */
+export function spliceOptions(doc: SonobeDocument, componentId: Id, registry: Registry, patchId: Id, cable: { from: string; to: string }, limit = 12): SpliceOption[] | { error: string } {
+  const ctx = spliceContext(doc, componentId, registry, patchId, cable);
+  if ("error" in ctx) return ctx;
+  const options: SpliceOption[] = [];
+  ctx.inputs.forEach((input, i) => {
+    const inCheck = canConnect(ctx.fromType, input.type);
+    ctx.outputs.forEach((output, j) => {
+      const outCheck = canConnect(output.type, ctx.toType);
+      const fit = (a: ValueType, b: ValueType) => (a === b ? 0 : b === "any" || a === "any" ? 2 : 1);
+      options.push({
+        inputKey: input.key,
+        inputName: input.name,
+        inputType: input.type,
+        outputKey: output.key,
+        outputName: output.name,
+        outputType: output.type,
+        conversions: [inCheck.conversion, outCheck.conversion].filter((c): c is string => !!c),
+        score: (fit(ctx.fromType, input.type) + fit(output.type, ctx.toType)) * 10 + i + j * 0.5 + (ctx.connected.has(input.key) ? 50 : 0),
+      });
+    });
+  });
+  return options.sort((a, b) => a.score - b.score).slice(0, limit);
+}
+
+/** Put a patch between the two ends of a cable, through the given ports or the best fit. */
+export function splicePatchOps(doc: SonobeDocument, componentId: Id, registry: Registry, patchId: Id, cable: { from: string; to: string }, choice?: { inputKey: string; outputKey: string }): SplicePlan | { error: string } {
+  const ctx = spliceContext(doc, componentId, registry, patchId, cable);
+  if ("error" in ctx) return ctx;
+  const input = choice ? ctx.inputs.find((p) => p.key === choice.inputKey) : pickPort(ctx.inputs, () => true, ctx.fromType);
+  const output = choice ? ctx.outputs.find((p) => p.key === choice.outputKey) : pickPort(ctx.outputs, () => true, ctx.toType);
+  if (!input) return { error: `${ctx.title} can't take this cable on that input.` };
+  if (!output) return { error: `${ctx.title} can't drive this cable from that output.` };
   return {
     inputKey: input.key,
     outputKey: output.key,

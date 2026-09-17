@@ -1,10 +1,10 @@
 /** addPatch, updatePatch, removePatch. */
 
-import { patchAddress } from "../address.ts";
+import { parseAddress, patchAddress } from "../address.ts";
 import { wouldCreateComponentCycle } from "../document.ts";
-import { COMPONENT_PATCH_TYPE, componentItemIds, findPort, getPatchSpec, resolveNodePorts } from "../registry.ts";
+import { COMPONENT_PATCH_TYPE, componentItemIds, findPort, getInputCountRange, getPatchSpec, resolveNodePorts, resolveNodeVariants } from "../registry.ts";
 import { didYouMean, didYouMeanText } from "../suggest.ts";
-import type { Component, PatchNode, PatchSpec } from "../types.ts";
+import type { Component, PatchNode, PatchSpec, ValueType } from "../types.ts";
 import { checkInputValue, resolveSource, resolveTarget } from "../validate.ts";
 import { canConnect } from "../values.ts";
 import {
@@ -26,20 +26,23 @@ import {
 } from "./context.ts";
 import { linkSourceId, referencesItems, removeInputs, restoreInputOps, restorePatchOps, targetAddress, type InputEntry } from "./references.ts";
 
-function validateTypeParam(spec: PatchSpec, typeParam: unknown): string {
-  const variants = spec.variants ?? [];
-  if (!variants.length) fail("invalid_value", `The ${spec.name} patch has no type options, so "typeParam" doesn't apply.`, { hint: "Leave typeParam out." });
-  if (typeof typeParam !== "string" || !(variants as string[]).includes(typeParam)) {
-    fail("invalid_value", `The ${spec.name} patch can't be set to type "${String(typeParam)}".${didYouMeanText(didYouMean(String(typeParam), variants))}`, { hint: `Its types: ${variants.join(", ")}.` });
+/** A typeParam checked against the node's allowed variants (the spec's, or those its dynamicPorts declare). */
+function validateTypeParam(spec: PatchSpec, typeParam: unknown, variants: readonly ValueType[] | undefined): string {
+  const allowed: string[] = [...(variants ?? [])];
+  if (!allowed.length) fail("invalid_value", `The ${spec.name} patch has no type options, so "typeParam" doesn't apply.`, { hint: "Leave typeParam out." });
+  if (typeof typeParam !== "string" || !allowed.includes(typeParam)) {
+    fail("invalid_value", `The ${spec.name} patch can't be set to type "${String(typeParam)}".${didYouMeanText(didYouMean(String(typeParam), allowed))}`, { hint: `Its types: ${allowed.join(", ")}.` });
   }
   return typeParam;
 }
 
+/** An inputCount within the spec's variadic range or inputCountRange. */
 function validateInputCount(spec: PatchSpec, inputCount: unknown): number {
-  const v = spec.variadic;
-  if (!v) fail("invalid_value", `The ${spec.name} patch has a fixed set of inputs, so "inputCount" doesn't apply.`, { hint: "Leave inputCount out." });
-  if (typeof inputCount !== "number" || !Number.isInteger(inputCount) || inputCount < v.min || inputCount > v.max) {
-    fail("invalid_value", `The ${spec.name} patch takes between ${v.min} and ${v.max} ${v.name.toLowerCase()} inputs, but inputCount is ${JSON.stringify(inputCount)}.`);
+  const range = getInputCountRange(spec);
+  if (!range) fail("invalid_value", `The ${spec.name} patch has a fixed set of inputs, so "inputCount" doesn't apply.`, { hint: "Leave inputCount out." });
+  if (typeof inputCount !== "number" || !Number.isInteger(inputCount) || inputCount < range.min || inputCount > range.max) {
+    const what = spec.variadic ? `${spec.variadic.name.toLowerCase()} inputs` : "sets of inputs";
+    fail("invalid_value", `The ${spec.name} patch takes between ${range.min} and ${range.max} ${what}, but inputCount is ${JSON.stringify(inputCount)}.`);
   }
   return inputCount;
 }
@@ -101,18 +104,21 @@ export function addPatch(ctx: OpContext, op: OpOf<"addPatch">): OpOutcome {
   if (np.name) node.name = np.name;
   if (np.component !== undefined) node.component = resolveId(ctx, np.component);
   if (np.type === COMPONENT_PATCH_TYPE || node.component !== undefined) validatePatchComponent(ctx, component, id, node);
-  if (spec && !ctx.lenient) {
-    if (np.typeParam !== undefined) node.typeParam = validateTypeParam(spec, np.typeParam);
-    else if (spec.variants?.length) node.typeParam = spec.variants[0];
-    if (np.inputCount !== undefined) node.inputCount = validateInputCount(spec, np.inputCount);
-    else if (spec.variadic) node.inputCount = spec.variadic.defaultCount;
-  } else {
-    if (np.typeParam !== undefined) node.typeParam = np.typeParam;
-    if (np.inputCount !== undefined) node.inputCount = np.inputCount;
-  }
   if (np.settings !== undefined) {
     if (!np.settings || typeof np.settings !== "object" || Array.isArray(np.settings)) fail("invalid_value", '"settings" must be an object.');
     if (Object.keys(np.settings).length) node.settings = { ...np.settings };
+  }
+  if (spec && !ctx.lenient) {
+    // Settings can change a node's variants (a script declaring its types), so check typeParam after them.
+    const variants = resolveNodeVariants(ctx.doc, node, ctx.registry);
+    if (np.typeParam !== undefined) node.typeParam = validateTypeParam(spec, np.typeParam, variants);
+    else if (variants?.length) node.typeParam = variants[0];
+    const range = getInputCountRange(spec);
+    if (np.inputCount !== undefined) node.inputCount = validateInputCount(spec, np.inputCount);
+    else if (range) node.inputCount = range.defaultCount;
+  } else {
+    if (np.typeParam !== undefined) node.typeParam = np.typeParam;
+    if (np.inputCount !== undefined) node.inputCount = np.inputCount;
   }
   if (np.inputs !== undefined && (!np.inputs || typeof np.inputs !== "object" || Array.isArray(np.inputs))) fail("invalid_op", '"inputs" must be an object of input values.');
 
@@ -134,24 +140,37 @@ export function addPatch(ctx: OpContext, op: OpOf<"addPatch">): OpOutcome {
   return { ids: [id], applied, inverse: [{ op: "removePatch", component: component.id, id }] };
 }
 
-/** After a typeParam/inputCount change: drop inputs and outgoing links that no longer fit. */
-function pruneAfterPortChange(ctx: OpContext, component: Component, id: string): { component: Component; removed: InputEntry[] } {
+/**
+ * After a typeParam/inputCount change: drop stored inputs and outgoing links that no longer fit —
+ * ports that disappeared (expanded variadic keys, or ports the node had before the change) and
+ * values or links whose types no longer match.
+ */
+function pruneAfterPortChange(ctx: OpContext, component: Component, id: string, original: PatchNode): { component: Component; removed: InputEntry[] } {
   const node = component.patches[id]!;
   const doc = withComponent(ctx.doc, component);
   const ports = resolveNodePorts(doc, node, ctx.registry);
   if (!ports) return { component, removed: [] };
-  const variadicKey = ports.spec.variadic ? new RegExp(`^${ports.spec.variadic.key}(\\d+)$`) : undefined;
+  const before = resolveNodePorts(ctx.doc, original, ctx.registry);
+  const hadInput = new Set(before?.inputs.map((p) => p.key) ?? []);
+  const hadOutput = new Set(before?.outputs.map((p) => p.key) ?? []);
+  const v = ports.spec.variadic;
+  const variadicKey = v ? new RegExp(`^${v.key}(\\d+)$`) : undefined;
+  const variadicOutputs = v?.direction === "outputs";
   return removeInputs(component, (entry) => {
     if (entry.target.kind === "patch" && entry.target.id === id) {
       const port = findPort(ports.inputs, entry.target.key);
-      if (!port) return !!variadicKey?.test(entry.target.key);
+      if (!port) return hadInput.has(entry.target.key) || (!variadicOutputs && !!variadicKey?.test(entry.target.key));
       const target = resolveTarget(doc, component, targetAddress(entry.target), ctx.validate);
       if (!target.ok) return false;
       const check = checkInputValue(doc, component, target.value, entry.value, ctx.validate);
       return !check.ok && (check.error.code === "invalid_value" || check.error.code === "type_mismatch");
     }
     if (linkSourceId(entry.value) !== id) return false;
-    const src = resolveSource(doc, component, (entry.value as { link: string }).link, ctx.validate);
+    const link = (entry.value as { link: string }).link;
+    const source = parseAddress(link);
+    if (!source || source.kind !== "patch") return false;
+    if (!findPort(ports.outputs, source.key)) return hadOutput.has(source.key) || (variadicOutputs && !!variadicKey?.test(source.key));
+    const src = resolveSource(doc, component, link, ctx.validate);
     const target = resolveTarget(doc, component, targetAddress(entry.target), ctx.validate);
     if (!src.ok || !target.ok || !src.value.port || !target.value.port) return false;
     return !canConnect(src.value.port.type, target.value.port.type).ok;
@@ -175,28 +194,6 @@ export function updatePatch(ctx: OpContext, op: OpOf<"updatePatch">): OpOutcome 
     if (isClear(op.name)) delete node.name;
     else node.name = op.name;
   }
-  if (op.typeParam !== undefined) {
-    inverse.typeParam = original.typeParam ?? CLEAR;
-    if (isClear(op.typeParam)) {
-      delete node.typeParam;
-      applied.typeParam = CLEAR;
-    } else {
-      node.typeParam = spec && !ctx.lenient ? validateTypeParam(spec, op.typeParam) : op.typeParam;
-      applied.typeParam = node.typeParam;
-    }
-    portsChanged ||= node.typeParam !== original.typeParam;
-  }
-  if (op.inputCount !== undefined) {
-    inverse.inputCount = original.inputCount ?? CLEAR;
-    if (op.inputCount === null) {
-      delete node.inputCount;
-      applied.inputCount = CLEAR;
-    } else {
-      node.inputCount = spec && !ctx.lenient ? validateInputCount(spec, op.inputCount) : op.inputCount;
-      applied.inputCount = node.inputCount;
-    }
-    portsChanged ||= node.inputCount !== original.inputCount;
-  }
   if (op.muted !== undefined) {
     inverse.muted = !!original.muted;
     applied.muted = !!op.muted;
@@ -216,6 +213,29 @@ export function updatePatch(ctx: OpContext, op: OpOf<"updatePatch">): OpOutcome 
     else delete node.settings;
     inverse.settings = inv;
     applied.settings = op.settings;
+  }
+  if (op.typeParam !== undefined) {
+    inverse.typeParam = original.typeParam ?? CLEAR;
+    if (isClear(op.typeParam)) {
+      delete node.typeParam;
+      applied.typeParam = CLEAR;
+    } else {
+      // Checked against the node with this op's settings, which may declare its variants.
+      node.typeParam = spec && !ctx.lenient ? validateTypeParam(spec, op.typeParam, resolveNodeVariants(ctx.doc, node, ctx.registry)) : op.typeParam;
+      applied.typeParam = node.typeParam;
+    }
+    portsChanged ||= node.typeParam !== original.typeParam;
+  }
+  if (op.inputCount !== undefined) {
+    inverse.inputCount = original.inputCount ?? CLEAR;
+    if (op.inputCount === null) {
+      delete node.inputCount;
+      applied.inputCount = CLEAR;
+    } else {
+      node.inputCount = spec && !ctx.lenient ? validateInputCount(spec, op.inputCount) : op.inputCount;
+      applied.inputCount = node.inputCount;
+    }
+    portsChanged ||= node.inputCount !== original.inputCount;
   }
   if (op.ui !== undefined) {
     if (!op.ui || typeof op.ui !== "object") fail("invalid_value", '"ui" must be an object like { "x": 120, "y": 40 }.');
@@ -244,7 +264,7 @@ export function updatePatch(ctx: OpContext, op: OpOf<"updatePatch">): OpOutcome 
 
   component = { ...component, patches: { ...component.patches, [id]: node } };
   let removed: InputEntry[] = [];
-  if (portsChanged && !ctx.lenient) ({ component, removed } = pruneAfterPortChange(ctx, component, id));
+  if (portsChanged && !ctx.lenient) ({ component, removed } = pruneAfterPortChange(ctx, component, id, original));
   commitComponent(ctx, component);
   ctx.affected.patches.add(id);
   for (const e of removed) {

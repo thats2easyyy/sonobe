@@ -47,6 +47,20 @@ mcpServerHandle.setHandler(handler); // desktop startMcpServer guards Host/Origi
 - `createHttpHandler` creates one `McpServer` per request and performs no auth itself; mount it behind a guard.
 - `createSonobeMcpServer(host, { version })` returns the bare `McpServer`, for custom transports.
 
+### Resource notifications
+
+When a document gets a new revision, `sonobe://documents/{docId}/outline` and `.../diagnostics` publish `resources/updated`. Opening or closing a document publishes `resources/list_changed`.
+
+- **2026-07-28 clients** receive them on `subscriptions/listen` streams, over HTTP and stdio.
+- **2025-era stdio clients** get `list_changed` unsolicited, and `resources/updated` for URIs they `resources/subscribe` to. 2025-era HTTP traffic is stateless, so there's no session to push to.
+
+Hosts that implement `onDocumentChange(listener)` (HeadlessHost does) are subscribed automatically by `createHttpHandler` and `serveStdioHost`. App hosts without it call the hook themselves:
+
+```ts
+mcpHandler.documentChanged({ kind: "revision", docId, revision });
+mcpHandler.documentChanged({ kind: "opened", docId }); // or "closed"
+```
+
 ## Tools
 
 The tools are listed in `TOOL_NAMES`.
@@ -63,9 +77,17 @@ The tools are listed in `TOOL_NAMES`.
 Conventions:
 
 - **Results.** Each returns concise text plus `structuredContent`; writes, simulation and document info also declare `outputSchema`.
+- **`structuredContent.text`** always holds the complete text, as the first field. Some clients (Claude Code) give the model only `structuredContent`, so metadata alone would hide the outline, guide or trace. `get_screenshot` returns no `structuredContent`, so clients keep the image.
 - **Writes** return `revision`, `txnId`, created ids, `idMap` and diagnostics `{ added, resolved, totals }`.
-- **Errors** are `isError` results with `{ code, message, hint, suggestions: [{ description, ops }], changed }`.
+- **Errors** are `isError` results with `{ code, message, hint, suggestions: [{ description, ops }], changed }`. Every `outputSchema` is `{ type: "object", anyOf: [success, teaching error] }` (`toolOutputSchema`), so SDK clients that validate error results (the v1 SDK does) show the teaching error instead of -32602. The wrapper drops any error `structuredContent` that wouldn't validate.
 - **Reads** paginate with `cursor` and truncate with explicit notes.
+
+### Simulation addressing
+
+- `patchId.port`, `@layerId.prop`, `#n` for one loop copy.
+- Inside component instances: `like_button_2/liked.on`, `@card#2/badge.scale`, and `@like_button_2/like_button` as a tap target. `get_items` takes `like_button_2/liked`.
+- Inputs resolve their targets and compute hit reports when they fire. Traces on a copy replay the session's input log into a clone, so they report the same way. Trace times count frames.
+- `SimulationManager.scene(simId)` returns a session's current `SceneFrame`, for simulation screenshots.
 
 Resources: `sonobe://guides/{topic}`, `sonobe://patches/{type}`, `sonobe://documents/{docId}/outline`, `sonobe://documents/{docId}/diagnostics`.
 

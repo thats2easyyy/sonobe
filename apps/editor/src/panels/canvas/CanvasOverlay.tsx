@@ -10,12 +10,24 @@ import { nodeQuad, type Point, type Rect } from "./geometry.ts";
 import type { SelectionChrome } from "./handles.ts";
 import type { InsertTool } from "./ops.ts";
 import type { CanvasIndex } from "./sceneIndex.ts";
-import { formatMeasurement, type Guide, type Measurement } from "./snapping.ts";
+import { formatMeasurement, type Guide, type Measurement, type SpacingMark } from "./snapping.ts";
 import { artboardToScreen, rectToScreen, type Viewport } from "./viewport.ts";
+
+export interface OverlayDropTarget {
+  /** The container that receives dropped files (artboard space). */
+  rect: Rect;
+  /** Where the pointer is (artboard space). */
+  at: Point;
+  label: string;
+}
 
 export interface OverlayDraft {
   guides: Guide[];
   measurements: Measurement[];
+  /** Equal gaps between siblings while moving. */
+  spacing?: SpacingMark[];
+  /** Files being dragged over the canvas. */
+  dropTarget?: OverlayDropTarget | null;
   marquee: Rect | null;
   insert: { tool: InsertTool; rect: Rect } | null;
   drop: { line: [Point, Point] | null; ghost: Rect } | null;
@@ -81,6 +93,46 @@ export function CanvasOverlay({ index, viewport, selected, hovered, chrome, draf
     );
   });
 
+  const spacing = (draft.spacing ?? []).map((mark, i) => {
+    const s = rectToScreen(viewport, mark.rect);
+    const tick = 3;
+    const horizontal = mark.axis === "x";
+    const cx = s.x + s.width / 2;
+    const cy = s.y + s.height / 2;
+    pills.push(
+      <div key={`sp${i}`} className="sb-cv__pill" data-tone="guide" style={{ left: cx, top: cy }}>
+        {formatMeasurement(mark.value)}
+      </div>,
+    );
+    return (
+      <g key={`sp${i}`} className="sb-cv__spacing">
+        <rect x={s.x} y={s.y} width={Math.max(0, s.width)} height={Math.max(0, s.height)} />
+        {horizontal ? (
+          <>
+            <line x1={s.x} y1={crisp(cy)} x2={s.x + s.width} y2={crisp(cy)} />
+            <line x1={crisp(s.x)} y1={cy - tick} x2={crisp(s.x)} y2={cy + tick} />
+            <line x1={crisp(s.x + s.width)} y1={cy - tick} x2={crisp(s.x + s.width)} y2={cy + tick} />
+          </>
+        ) : (
+          <>
+            <line x1={crisp(cx)} y1={s.y} x2={crisp(cx)} y2={s.y + s.height} />
+            <line x1={cx - tick} y1={crisp(s.y)} x2={cx + tick} y2={crisp(s.y)} />
+            <line x1={cx - tick} y1={crisp(s.y + s.height)} x2={cx + tick} y2={crisp(s.y + s.height)} />
+          </>
+        )}
+      </g>
+    );
+  });
+
+  const dropTarget = draft.dropTarget ? { rect: rectToScreen(viewport, draft.dropTarget.rect), at: toScreen(draft.dropTarget.at), label: draft.dropTarget.label } : null;
+  if (dropTarget) {
+    pills.push(
+      <div key="drop" className="sb-cv__drop-label" style={{ left: dropTarget.at[0], top: dropTarget.at[1] + 18 }}>
+        {dropTarget.label}
+      </div>,
+    );
+  }
+
   if (chrome && !draft.hideChrome) {
     const bottom = Math.max(...chrome.quad.map((p) => p[1]));
     const centerX = chrome.quad.reduce((sum, p) => sum + p[0], 0) / 4;
@@ -133,7 +185,9 @@ export function CanvasOverlay({ index, viewport, selected, hovered, chrome, draf
           </g>
         )}
         {guides}
+        {spacing}
         {measurements}
+        {dropTarget && <rect className="sb-cv__drop-target" x={crisp(dropTarget.rect.x)} y={crisp(dropTarget.rect.y)} width={Math.round(dropTarget.rect.width)} height={Math.round(dropTarget.rect.height)} rx={2} />}
         {marquee && <rect className="sb-cv__marquee" x={crisp(marquee.x)} y={crisp(marquee.y)} width={Math.round(marquee.width)} height={Math.round(marquee.height)} />}
         {insert &&
           (insert.tool === "oval" ? (

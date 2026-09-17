@@ -8,7 +8,9 @@
   },
   "scripts": {
     "demo:build": "esbuild demo/demo.ts --bundle --format=iife --target=es2022 --outfile=demo/dist/demo.js",
-    "demo:screenshots": "npm run demo:build && node demo/screenshot.mjs"
+    "demo:screenshots": "npm run demo:build && node demo/screenshot.mjs",
+    "demo:examples:build": "esbuild demo/examples.ts --bundle --format=iife --target=es2022 --outfile=demo/dist/examples.js",
+    "demo:examples": "npm run demo:examples:build && node demo/screenshot-examples.mjs"
   },
   "dependencies": {
     "@sonobe/core": "*",

@@ -1,0 +1,26 @@
+/* Placeholders while a panel's code loads. */
+.sb-app-loading {
+  display: flex;
+  flex: 1 1 auto;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-4);
+  min-height: 0;
+  color: var(--text-tertiary);
+  font-size: var(--font-size-sm);
+}
+
+.sb-app-loading__dot {
+  width: 6px;
+  height: 6px;
+  border-radius: var(--radius-full);
+  background: var(--text-tertiary);
+  animation: sb-app-loading 900ms var(--ease-in-out) infinite alternate;
+}
+
+@keyframes sb-app-loading {
+  to {
+    opacity: 0.25;
+    transform: scale(0.7);
+  }
+}

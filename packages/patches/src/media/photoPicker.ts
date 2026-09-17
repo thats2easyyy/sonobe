@@ -5,11 +5,9 @@
  */
 
 import type { AssetRef } from "@sonobe/core";
-import type { RuntimeServices } from "@sonobe/engine";
+import type { PickedMedia, RuntimeServices } from "@sonobe/engine";
 import { definePatch, finiteOr, logOnce, loopOf, toBool, warnOnce } from "../infra/index.ts";
-import { mediaPlatform } from "./platform.ts";
-import type { PickedMedia } from "./platform.ts";
-import { clampInt, describeError, enumOr, isAssetRef, releaseRef, warnLoopedInputs, withMutedBehavior } from "./shared.ts";
+import { clampInt, describeError, enumOr, isAssetRef, releaseRef, warnLoopedInputs } from "./shared.ts";
 
 interface PickRequest {
   id: number;
@@ -53,100 +51,98 @@ function releaseItems(services: RuntimeServices, items: readonly unknown[]): voi
   }
 }
 
-export const photoPickerPatch = withMutedBehavior(
-  definePatch<PickerState>("photoPicker", {
-    state: () => ({ items: [], requestId: 0, pending: null, error: false, message: "" }),
-    evaluate(ctx) {
-      const s = ctx.state;
-      warnLoopedInputs(ctx, ["open", "mediaType", "multiple", "reset", "maxCount"], "photoPicker");
-      let picked = false;
-      const request = s.pending;
-      if (request?.result && request.id === s.requestId) {
-        s.pending = null;
-        const { files, error } = request.result;
-        if (error !== undefined) {
+export const photoPickerPatch = definePatch<PickerState>("photoPicker", {
+  mutedBehavior: "zero",
+  state: () => ({ items: [], requestId: 0, pending: null, error: false, message: "" }),
+  evaluate(ctx) {
+    const s = ctx.state;
+    warnLoopedInputs(ctx, ["open", "mediaType", "multiple", "reset", "maxCount"], "photoPicker");
+    let picked = false;
+    const request = s.pending;
+    if (request?.result && request.id === s.requestId) {
+      s.pending = null;
+      const { files, error } = request.result;
+      if (error !== undefined) {
+        s.error = true;
+        s.message = describeError(error) || "The picker couldn't be used.";
+        releaseItems(ctx.services, files);
+      } else if (files.length > 0) {
+        const multiple = toBool(ctx.input("multiple"));
+        const limit = multiple ? clampInt(ctx.input("maxCount"), 10, 1, 100) : 1;
+        const accept = enumOr(ctx.input("mediaType"), MEDIA_TYPES, "all");
+        const matching = files
+          .map(toPickedMedia)
+          .filter((item): item is PickedMedia => item !== undefined && (accept === "all" || (accept === "photos" ? item.kind === "image" : item.kind === "video")));
+        if (multiple && matching.length > limit) warnOnce(ctx, "maxCount", `photoPicker: kept the first ${limit} items; Max Count drops the rest.`);
+        const kept = matching.slice(0, limit);
+        releaseItems(
+          ctx.services,
+          files.filter((f) => !kept.some((k) => k.image === (f as PickedMedia)?.image && k.video === (f as PickedMedia)?.video)),
+        );
+        if (kept.length === 0) {
           s.error = true;
-          s.message = describeError(error) || "The picker couldn't be used.";
-          releaseItems(ctx.services, files);
-        } else if (files.length > 0) {
-          const multiple = toBool(ctx.input("multiple"));
-          const limit = multiple ? clampInt(ctx.input("maxCount"), 10, 1, 100) : 1;
-          const accept = enumOr(ctx.input("mediaType"), MEDIA_TYPES, "all");
-          const matching = files
-            .map(toPickedMedia)
-            .filter((item): item is PickedMedia => item !== undefined && (accept === "all" || (accept === "photos" ? item.kind === "image" : item.kind === "video")));
-          if (multiple && matching.length > limit) warnOnce(ctx, "maxCount", `photoPicker: kept the first ${limit} items; Max Count drops the rest.`);
-          const kept = matching.slice(0, limit);
-          releaseItems(
-            ctx.services,
-            files.filter((f) => !kept.some((k) => k.image === (f as PickedMedia)?.image && k.video === (f as PickedMedia)?.video)),
-          );
-          if (kept.length === 0) {
-            s.error = true;
-            s.message = "That file isn't a kind this picker accepts.";
-          } else {
-            releaseItems(ctx.services, s.items);
-            s.items = kept;
-            s.error = false;
-            s.message = "";
-            picked = true;
-          }
-        }
-      }
-      if (ctx.pulsed("reset")) {
-        s.requestId++;
-        s.pending = null;
-        releaseItems(ctx.services, s.items);
-        s.items = [];
-        s.error = false;
-        s.message = "";
-      } else if (ctx.pulsed("open") && s.pending === null) {
-        const platform = mediaPlatform(ctx.services);
-        if (typeof platform.pickMedia !== "function") {
-          logOnce(ctx, "log", "noPicker", "photoPicker: no file picker in simulation");
+          s.message = "That file isn't a kind this picker accepts.";
         } else {
-          const r: PickRequest = { id: ++s.requestId, result: null };
-          s.pending = r;
-          const options = { accept: enumOr(ctx.input("mediaType"), MEDIA_TYPES, "all"), multiple: toBool(ctx.input("multiple")) };
-          let promise: Promise<readonly unknown[]>;
-          try {
-            promise = Promise.resolve(platform.pickMedia(options));
-          } catch (error) {
-            promise = Promise.reject(error);
-          }
-          const services = ctx.services;
-          promise.then(
-            (files) => {
-              r.result = { files: Array.isArray(files) ? files : [] };
-              if (r.id !== s.requestId) releaseItems(services, r.result.files);
-            },
-            (error: unknown) => {
-              r.result = { files: [], error: error ?? "The picker couldn't be used." };
-            },
-          );
+          releaseItems(ctx.services, s.items);
+          s.items = kept;
+          s.error = false;
+          s.message = "";
+          picked = true;
         }
       }
-      if (s.pending) ctx.requestNextFrame();
-      const first = s.items[0];
-      ctx.output("image", first?.image ?? null);
-      ctx.output("video", first?.video ?? null);
-      ctx.output("isVideo", first?.kind === "video");
-      ctx.output("naturalSize", first ? [first.width, first.height] : [0, 0]);
-      ctx.output("images", loopOf(s.items.map((item) => item.image)));
-      ctx.output("videos", loopOf(s.items.map((item) => item.video)));
-      ctx.output("count", s.items.length);
-      ctx.output("loading", s.pending !== null);
-      ctx.output("error", s.error);
-      ctx.output("errorMessage", s.message);
-      if (picked) ctx.pulse("picked");
-    },
-    dispose(state, services) {
-      if (!state) return;
-      state.requestId++;
-      state.pending = null;
-      releaseItems(services, state.items);
-      state.items = [];
-    },
-  }),
-  "zero",
-);
+    }
+    if (ctx.pulsed("reset")) {
+      s.requestId++;
+      s.pending = null;
+      releaseItems(ctx.services, s.items);
+      s.items = [];
+      s.error = false;
+      s.message = "";
+    } else if (ctx.pulsed("open") && s.pending === null) {
+      const platform = ctx.services.platform;
+      if (typeof platform.pickMedia !== "function") {
+        logOnce(ctx, "log", "noPicker", "photoPicker: no file picker in simulation");
+      } else {
+        const r: PickRequest = { id: ++s.requestId, result: null };
+        s.pending = r;
+        const options = { accept: enumOr(ctx.input("mediaType"), MEDIA_TYPES, "all"), multiple: toBool(ctx.input("multiple")) };
+        let promise: Promise<readonly unknown[]>;
+        try {
+          promise = Promise.resolve(platform.pickMedia(options));
+        } catch (error) {
+          promise = Promise.reject(error);
+        }
+        const services = ctx.services;
+        promise.then(
+          (files) => {
+            r.result = { files: Array.isArray(files) ? files : [] };
+            if (r.id !== s.requestId) releaseItems(services, r.result.files);
+          },
+          (error: unknown) => {
+            r.result = { files: [], error: error ?? "The picker couldn't be used." };
+          },
+        );
+      }
+    }
+    if (s.pending) ctx.requestNextFrame();
+    const first = s.items[0];
+    ctx.output("image", first?.image ?? null);
+    ctx.output("video", first?.video ?? null);
+    ctx.output("isVideo", first?.kind === "video");
+    ctx.output("naturalSize", first ? [first.width, first.height] : [0, 0]);
+    ctx.output("images", loopOf(s.items.map((item) => item.image)));
+    ctx.output("videos", loopOf(s.items.map((item) => item.video)));
+    ctx.output("count", s.items.length);
+    ctx.output("loading", s.pending !== null);
+    ctx.output("error", s.error);
+    ctx.output("errorMessage", s.message);
+    if (picked) ctx.pulse("picked");
+  },
+  dispose(state, services) {
+    if (!state) return;
+    state.requestId++;
+    state.pending = null;
+    releaseItems(services, state.items);
+    state.items = [];
+  },
+});

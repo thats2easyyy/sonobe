@@ -2,7 +2,7 @@
 
 import type { PatchContext } from "@sonobe/engine";
 import { definePatch, isLoop, isPlainObject, loopOf, warnOnce } from "../infra/index.ts";
-import { indices, withMutedBehavior } from "./shared.ts";
+import { indices } from "./shared.ts";
 
 function warnIfSuspicious(ctx: PatchContext<unknown>, value: unknown): void {
   if (isPlainObject(value) && !isLoop(value)) {
@@ -12,20 +12,18 @@ function warnIfSuspicious(ctx: PatchContext<unknown>, value: unknown): void {
   }
 }
 
-export const loopOverArrayPatch = withMutedBehavior(
-  definePatch("loopOverArray", {
-    evaluate(ctx) {
-      const sources = ctx.inputItems<unknown>("array");
-      const items: unknown[] = [];
-      for (const source of sources) {
-        if (Array.isArray(source)) items.push(...source);
-        else if (source === null || source === undefined) continue;
-        else items.push(source);
-      }
-      if (sources.length === 1) warnIfSuspicious(ctx, sources[0]);
-      ctx.output("items", loopOf(items));
-      ctx.output("index", loopOf(indices(items.length)));
-    },
-  }),
-  "zero",
-);
+export const loopOverArrayPatch = definePatch("loopOverArray", {
+  evaluate(ctx) {
+    const sources = ctx.inputItems<unknown>("array");
+    const items: unknown[] = [];
+    for (const source of sources) {
+      if (Array.isArray(source)) items.push(...source);
+      else if (source === null || source === undefined) continue;
+      else items.push(source);
+    }
+    if (sources.length === 1) warnIfSuspicious(ctx, sources[0]);
+    ctx.output("items", loopOf(items));
+    ctx.output("index", loopOf(indices(items.length)));
+  },
+  mutedBehavior: "zero",
+});

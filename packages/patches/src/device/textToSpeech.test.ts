@@ -1,9 +1,16 @@
 import { describe, expect, it } from "vitest";
+import type { PatchDefinition, SpeechOptions } from "@sonobe/engine";
 import { createPatchHarness, loopOf } from "../infra/index.ts";
-import type { SpeechOptions } from "./platform.ts";
 import { estimateSpeechSeconds, textToSpeechPatch } from "./textToSpeech.ts";
 
 const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
+
+/** The definition with a switch for `ctx.muted`, so a test can mute a running patch. */
+function muteSwitch<S>(definition: PatchDefinition<S>) {
+  let muted = false;
+  const switched: PatchDefinition<S> = { ...definition, evaluate: (ctx) => definition.evaluate(Object.create(ctx, { muted: { get: () => muted } })) };
+  return { definition: switched, mute: (on: boolean) => void (muted = on) };
+}
 
 describe("textToSpeech", () => {
   it("estimates 15 characters per second at rate 1, at least 0.5 s", () => {
@@ -35,7 +42,7 @@ describe("textToSpeech", () => {
 
   it("passes clamped options and the voice to the host", () => {
     const calls: [string, SpeechOptions][] = [];
-    const h = createPatchHarness(textToSpeechPatch, { services: { platform: { speak: (text, opts) => calls.push([text, opts as SpeechOptions]) } } });
+    const h = createPatchHarness(textToSpeechPatch, { services: { platform: { speak: (text, opts) => void calls.push([text, opts as SpeechOptions]) } } });
     h.step({ pulses: ["speak"], inputs: { text: "  Good morning  ", rate: 50, pitch: -1, volume: Number.NaN, voice: "en-GB" } });
     expect(calls).toEqual([["Good morning", { rate: 10, pitch: 0, volume: 1, voice: "en-GB" }]]);
   });
@@ -96,12 +103,13 @@ describe("textToSpeech", () => {
 
   it("stops speaking while muted and on dispose", () => {
     let stops = 0;
-    const h = createPatchHarness(textToSpeechPatch, { services: { platform: { speak: () => {}, stopSpeaking: () => stops++ } as never } });
+    const { definition, mute } = muteSwitch(textToSpeechPatch);
+    const h = createPatchHarness(definition, { services: { platform: { speak: () => {}, stopSpeaking: () => void stops++ } } });
     h.step({ pulses: ["speak"] });
-    h.node.muted = true;
+    mute(true);
     expect(h.step({ pulses: ["speak"] }).outputs.speaking).toBe(false);
     expect(stops).toBe(1);
-    h.node.muted = false;
+    mute(false);
     h.step({ pulses: ["speak"] });
     h.dispose();
     expect(stops).toBe(2);

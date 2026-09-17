@@ -36,6 +36,7 @@ import {
 } from "@sonobe/core";
 import { deepEqual } from "./equal.ts";
 import { estimateNodeSize, rectsOverlap, type Rect } from "./geometry.ts";
+import { readNodePositions } from "./meta.ts";
 import {
   cableId,
   commentNodeId,
@@ -68,8 +69,10 @@ export interface DeriveGraphOptions {
   diagnostics?: readonly Diagnostic[];
   /** Patch id → names of agents working on it. */
   working?: ReadonlyMap<Id, readonly string[]>;
-  /** Session positions for layer and interface nodes. */
+  /** Positions for layer and interface nodes, over the ones saved in the component's patch editor metadata. */
   positions?: SessionPositions;
+  /** Layer properties to show on layer nodes before anything drives them ("@photo.opacity"). */
+  pendingTargets?: readonly string[];
   /** The previous model, so unchanged nodes and edges keep their identity. */
   previous?: GraphModel | null;
   /** Measured node sizes (placement of layer and interface nodes). */
@@ -366,10 +369,23 @@ export function deriveGraph(options: DeriveGraphOptions): GraphModel {
       if (l.entry.target.kind === "patch") add(readersOf, src.id, l.entry.target.id);
     }
   }
+  const savedPositions = readNodePositions(component);
+  // Properties someone asked to drive that nothing drives yet: open inputs on the layer's node.
+  const pending = new Map<Id, string[]>();
+  for (const address of options.pendingTargets ?? []) {
+    const a = parseAddress(address);
+    if (a?.kind !== "layer" || bound.get(a.id)?.has(a.key)) continue;
+    if (!layerInfo(a.id)?.props.some((p) => p.key === a.key && p.bindable !== false)) continue;
+    const keys = pending.get(a.id) ?? [];
+    if (!keys.includes(a.key)) keys.push(a.key);
+    pending.set(a.id, keys);
+  }
+  const graphRight = patchRects.length ? Math.max(...patchRects.map((r) => r.x + r.width)) : 0;
+  const graphTop = patchRects.length ? Math.min(...patchRects.map((r) => r.y)) : 0;
   const placed: Rect[] = [...patchRects];
   const place = (id: string, size: { width: number; height: number }, preferred: { x: number; y: number }) => {
-    const session = options.positions?.[id];
-    if (session) return { x: session.x, y: session.y };
+    const saved = options.positions?.[id] ?? savedPositions[id];
+    if (saved) return { x: saved.x, y: saved.y };
     const base: Rect = { x: Math.round(preferred.x), y: Math.round(preferred.y), ...size };
     const padded = (r: Rect): Rect => ({ x: r.x - 12, y: r.y - 12, width: r.width + 24, height: r.height + 24 });
     for (let d = 0; d <= 480; d += 24) {
@@ -384,7 +400,7 @@ export function deriveGraph(options: DeriveGraphOptions): GraphModel {
     placed.push(base);
     return { x: base.x, y: base.y };
   };
-  const layerIds = [...new Set([...bound.keys(), ...read.keys()])].filter((id) => layerInfo(id));
+  const layerIds = [...new Set([...bound.keys(), ...read.keys(), ...pending.keys()])].filter((id) => layerInfo(id));
   const rectOfPatch = (id: Id) => {
     const node = component.patches[id];
     return node ? { x: node.ui.x, y: node.ui.y, ...sizeOf(id, nodes.find((n) => n.id === id)!.data) } : undefined;
@@ -405,18 +421,22 @@ export function deriveGraph(options: DeriveGraphOptions): GraphModel {
       const src = isLinkInput(value) ? parseAddress(value.link) : undefined;
       return src?.kind === "patch" ? (component.patches[src.id]?.ui.y ?? 0) : 0;
     };
-    const inputs = register(
-      info.props
-        .filter((p) => boundKeys.has(p.key))
-        .map((p, index) => ({ p, index, y: driverY(p.key) }))
-        .sort((a, b) => a.y - b.y || a.index - b.index)
-        .map(({ p }) => {
-          const value = info.layer.props[p.key];
-          const model = toPortModel(p, "in", `@${layerId}.${p.key}`, true);
-          if (isLinkInput(value)) model.link = stripIndex(value.link);
-          return model;
-        }),
-    );
+    const driven = info.props
+      .filter((p) => boundKeys.has(p.key))
+      .map((p, index) => ({ p, index, y: driverY(p.key) }))
+      .sort((a, b) => a.y - b.y || a.index - b.index)
+      .map(({ p }) => {
+        const value = info.layer.props[p.key];
+        const model = toPortModel(p, "in", `@${layerId}.${p.key}`, true);
+        if (isLinkInput(value)) model.link = stripIndex(value.link);
+        return model;
+      });
+    // Undriven targets after the driven ones, in the order they were asked for.
+    const undriven = (pending.get(layerId) ?? [])
+      .map((key) => info.props.find((p) => p.key === key))
+      .filter((p): p is ResolvedProp => !!p)
+      .map((p) => toPortModel(p, "in", `@${layerId}.${p.key}`, false));
+    const inputs = register([...driven, ...undriven]);
     const readable = [...info.outputs, ...info.props.filter((p) => !info.outputs.some((o) => o.key === p.key))];
     const outputs = register(readable.filter((p) => readKeys.has(p.key)).map((p) => toPortModel(p, "out", `@${layerId}.${p.key}`, true)));
     for (const o of outputs) outputAddresses.push(o.address);
@@ -439,7 +459,7 @@ export function deriveGraph(options: DeriveGraphOptions): GraphModel {
       ? { x: Math.max(...drivers.map((r) => r.x + r.width)) + 96, y: Math.min(...drivers.map((r) => r.y)) }
       : readers.length
         ? { x: Math.min(...readers.map((r) => r.x)) - size.width - 96, y: Math.min(...readers.map((r) => r.y)) }
-        : { x: 0, y: 0 };
+        : { x: graphRight + 120, y: graphTop };
     const flowNode: LayerFlowNode = { id: nodeId, type: "layer", position: place(nodeId, size, preferred), data };
     nodes.push(flowNode);
   }

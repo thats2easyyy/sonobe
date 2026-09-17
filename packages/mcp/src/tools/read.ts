@@ -22,6 +22,7 @@ import {
   patchText,
   requireComponent,
 } from "../graph.ts";
+import { resolveInstancePath, splitInstanceAddress } from "../instances.ts";
 import { failure, formatSuggestions, success } from "../results.ts";
 import { READ_ONLY, type ToolContext } from "../server.ts";
 import { diagnosticTotals } from "../session.ts";
@@ -207,11 +208,11 @@ export function registerReadTools(tc: ToolContext): void {
     {
       title: "Get items",
       description:
-        "Details for specific layers, patches or comments by id: every port with its current value, default or link; where outputs go; parents and children; which patches reference a layer.",
+        'Details for specific layers, patches or comments by id: every port with its current value, default or link; where outputs go; parents and children; which patches reference a layer. Reach inside component instances with an instance path: "like_button_2/liked" or "@card#2/badge".',
       input: z.object({
         docId: DocIdSchema.optional(),
         component: ComponentIdSchema.optional().describe(
-          "Where to look (default: every component, root first).",
+          "Where to look (default: every component, root first). Instance paths start here.",
         ),
         ids: z.array(z.string()).min(1).max(25),
       }),
@@ -225,10 +226,24 @@ export function registerReadTools(tc: ToolContext): void {
       const missing: string[] = [];
       const consumerCache = new Map<string, Map<string, string[]>>();
       for (const id of ids) {
-        const located = locateItem(snap.doc, id, component);
+        const split = splitInstanceAddress(id);
+        // "tap_card.tap" names a port; details cover the whole item.
+        const itemId = split.tail.split(".")[0]!;
+        let scopeId = component;
+        if (split.path !== undefined) {
+          const scope = resolveInstancePath(snap.doc, split.path, component);
+          if (!scope.ok) {
+            missing.push(id);
+            blocks.push(`${id}: ${scope.message}${scope.hint ? ` ${scope.hint}` : ""}`);
+            continue;
+          }
+          scopeId = scope.component.id;
+        }
+        const located = locateItem(snap.doc, itemId, scopeId);
         if (!located) {
           missing.push(id);
-          const all = listComponentIds(snap.doc).flatMap((cid) => {
+          const searched = scopeId !== undefined ? [scopeId] : listComponentIds(snap.doc);
+          const all = searched.flatMap((cid) => {
             const c = snap.doc.components[cid]!;
             return [
               ...Object.keys(c.patches),
@@ -238,7 +253,9 @@ export function registerReadTools(tc: ToolContext): void {
               ),
             ];
           });
-          blocks.push(`${id}: not found.${didYouMeanText(didYouMean(id, all))}`);
+          blocks.push(
+            `${id}: not found${split.path !== undefined ? ` inside ${split.path} (component ${scopeId})` : ""}.${didYouMeanText(didYouMean(itemId, all))}`,
+          );
           continue;
         }
         if (!consumerCache.has(located.component.id))
@@ -249,8 +266,15 @@ export function registerReadTools(tc: ToolContext): void {
           located,
           consumerCache.get(located.component.id)!,
         );
-        blocks.push(details.text);
-        items.push(details.data);
+        if (split.path !== undefined) {
+          blocks.push(
+            `inside instance ${split.path} (component ${located.component.id}):\n${details.text}`,
+          );
+          items.push({ ...details.data, instancePath: split.path });
+        } else {
+          blocks.push(details.text);
+          items.push(details.data);
+        }
       }
       if (missing.length === ids.length)
         return failure({

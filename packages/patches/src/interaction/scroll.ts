@@ -3,7 +3,7 @@
 import { DECELERATION_FAST, DECELERATION_NORMAL, MomentumScroller } from "@sonobe/engine";
 import type { LayerInfoSnapshot, MomentumScrollerOptions, PatchContext } from "@sonobe/engine";
 import { clamp, definePatch, finiteOr, normalizeZero, warnOnce } from "../infra/index.ts";
-import { TOUCH_SLOP, ancestorScale, finiteInput, finitePoint, finitePointInput, layerInput, parentRef, withMutedBehavior, type Vec2 } from "./shared.ts";
+import { TOUCH_SLOP, ancestorScale, finiteInput, finitePoint, finitePointInput, layerInput, parentRef, type Vec2 } from "./shared.ts";
 
 type ScrollMode = "off" | "free" | "paging";
 type TouchPhase = "none" | "pending" | "accepted" | "ignored";
@@ -112,165 +112,163 @@ function emitMuted(ctx: PatchContext<ScrollState>, start: Vec2): void {
   ctx.output("moving", false);
 }
 
-export const scroll = withMutedBehavior(
-  definePatch<ScrollState>("scroll", {
-    state: () => ({ axes: null, touch: "none", slopOrigin: [0, 0], lock: null }),
-    evaluate(ctx) {
-      const state = ctx.state;
-      const start = finitePointInput(ctx, "startPosition");
-      if (ctx.node.muted) {
-        emitMuted(ctx, start);
-        return;
-      }
-      const services = ctx.services;
-      const ref = layerInput(ctx);
-      const info = ref ? services.layerInfo(ref) : undefined;
-      const parent = parentRef(services, ref);
-      const parentInfo = parent ? services.layerInfo(parent) : undefined;
-      const screen = services.device().screenSize;
-      const viewport: Vec2 = parentInfo ? [finiteOr(parentInfo.size[0], 0), finiteOr(parentInfo.size[1], 0)] : [finiteOr(screen[0], 0), finiteOr(screen[1], 0)];
-      const base = {
-        start,
-        contentSize: nonNegative(finitePointInput(ctx, "contentSize")),
-        pageSize: nonNegative(finitePointInput(ctx, "pageSize")),
-        pagePadding: nonNegative(finitePointInput(ctx, "pagePadding")),
-        info,
-        viewport,
-      };
-      const geometry = ([0, 1] as const).map((a) =>
-        scrollAxisGeometry(a, { ...base, mode: readMode(ctx.input(a === 0 ? "scrollX" : "scrollY")) }, () =>
-          warnOnce(ctx, `pageStep:${a}`, `Scroll can't page ${a === 0 ? "horizontally" : "vertically"}: the page has no size, so that direction scrolls freely.`),
-        ),
-      );
-      const fast = ctx.input<string>("decelerationRate") === "fast";
-      const rubberBand = ctx.input<boolean>("rubberBand") === true;
-      if (!state.axes) {
-        state.axes = geometry.map((g) => ({ scroller: new MomentumScroller(scrollerOptions(g, fast, rubberBand), 0), wheelPending: false, lastWheelTime: 0 }));
-      } else {
-        for (let a = 0; a < 2; a++) state.axes[a]!.scroller.setOptions(scrollerOptions(geometry[a]!, fast, rubberBand));
-      }
-      const axes = state.axes;
-      const scroller = (a: number) => axes[a]!.scroller;
-      const isOn = (a: number) => geometry[a]!.mode !== "off";
-      const activeAxes = () => [0, 1].filter((a) => isOn(a) && (state.lock === null || state.lock === a));
-      const stopTracking = (except?: number) => {
-        for (let a = 0; a < 2; a++) if (a !== except && scroller(a).phase === "tracking") scroller(a).stop();
-      };
-      const p = services.pointer(ref);
-      const enabled = ctx.input<boolean>("enabled") === true;
-      const scale = ancestorScale(services, ref);
+export const scroll = definePatch<ScrollState>("scroll", {
+  state: () => ({ axes: null, touch: "none", slopOrigin: [0, 0], lock: null }),
+  evaluate(ctx) {
+    const state = ctx.state;
+    const start = finitePointInput(ctx, "startPosition");
+    if (ctx.muted) {
+      emitMuted(ctx, start);
+      return;
+    }
+    const services = ctx.services;
+    const ref = layerInput(ctx);
+    const info = ref ? services.layerInfo(ref) : undefined;
+    const parent = parentRef(services, ref);
+    const parentInfo = parent ? services.layerInfo(parent) : undefined;
+    const screen = services.device().screenSize;
+    const viewport: Vec2 = parentInfo ? [finiteOr(parentInfo.size[0], 0), finiteOr(parentInfo.size[1], 0)] : [finiteOr(screen[0], 0), finiteOr(screen[1], 0)];
+    const base = {
+      start,
+      contentSize: nonNegative(finitePointInput(ctx, "contentSize")),
+      pageSize: nonNegative(finitePointInput(ctx, "pageSize")),
+      pagePadding: nonNegative(finitePointInput(ctx, "pagePadding")),
+      info,
+      viewport,
+    };
+    const geometry = ([0, 1] as const).map((a) =>
+      scrollAxisGeometry(a, { ...base, mode: readMode(ctx.input(a === 0 ? "scrollX" : "scrollY")) }, () =>
+        warnOnce(ctx, `pageStep:${a}`, `Scroll can't page ${a === 0 ? "horizontally" : "vertically"}: the page has no size, so that direction scrolls freely.`),
+      ),
+    );
+    const fast = ctx.input<string>("decelerationRate") === "fast";
+    const rubberBand = ctx.input<boolean>("rubberBand") === true;
+    if (!state.axes) {
+      state.axes = geometry.map((g) => ({ scroller: new MomentumScroller(scrollerOptions(g, fast, rubberBand), 0), wheelPending: false, lastWheelTime: 0 }));
+    } else {
+      for (let a = 0; a < 2; a++) state.axes[a]!.scroller.setOptions(scrollerOptions(geometry[a]!, fast, rubberBand));
+    }
+    const axes = state.axes;
+    const scroller = (a: number) => axes[a]!.scroller;
+    const isOn = (a: number) => geometry[a]!.mode !== "off";
+    const activeAxes = () => [0, 1].filter((a) => isOn(a) && (state.lock === null || state.lock === a));
+    const stopTracking = (except?: number) => {
+      for (let a = 0; a < 2; a++) if (a !== except && scroller(a).phase === "tracking") scroller(a).stop();
+    };
+    const p = services.pointer(ref);
+    const enabled = ctx.input<boolean>("enabled") === true;
+    const scale = ancestorScale(services, ref);
 
-      // 1. Jumps work even while disabled, and cancel an active touch.
-      const jump = (a: 0 | 1, pulseKey: string, positionKey: string, styleKey: string) => {
-        if (!ctx.pulsed(pulseKey)) return;
-        if (state.touch === "pending" || state.touch === "accepted") {
-          state.touch = "ignored";
-          state.lock = null;
-        }
-        stopTracking(a);
-        scroller(a).jumpTo(finiteInput(ctx, positionKey) - start[a], ctx.input<string>(styleKey) !== "instant");
-        axes[a]!.wheelPending = false;
-      };
-      jump(0, "jumpToX", "jumpPositionX", "jumpStyleX");
-      jump(1, "jumpToY", "jumpPositionY", "jumpStyleY");
-
-      // 2. Touch.
-      if (!enabled) {
-        if (state.touch === "accepted") for (const a of activeAxes()) if (scroller(a).phase === "tracking") scroller(a).release(0);
-        stopTracking();
-        if (state.touch !== "none") state.touch = p.down ? "ignored" : "none";
+    // 1. Jumps work even while disabled, and cancel an active touch.
+    const jump = (a: 0 | 1, pulseKey: string, positionKey: string, styleKey: string) => {
+      if (!ctx.pulsed(pulseKey)) return;
+      if (state.touch === "pending" || state.touch === "accepted") {
+        state.touch = "ignored";
         state.lock = null;
-        for (let a = 0; a < 2; a++) if (scroller(a).phase === "decelerating") scroller(a).stop();
-      } else {
-        if (p.began) {
-          state.touch = "pending";
-          state.slopOrigin = [p.position[0], p.position[1]];
-          state.lock = null;
-          // Catch any motion and hold the content where it is while the touch decides.
-          for (let a = 0; a < 2; a++) {
-            if (!isOn(a)) continue;
-            scroller(a).beginDrag();
-            axes[a]!.wheelPending = false;
-          }
-        }
-        if (state.touch === "pending") {
-          const dx = p.position[0] - p.startPosition[0];
-          const dy = p.position[1] - p.startPosition[1];
-          if (Math.hypot(dx, dy) > TOUCH_SLOP) {
-            const dominant = Math.abs(dx) > Math.abs(dy) ? 0 : 1;
-            const locking = ctx.input<boolean>("directionLocking") === true;
-            if (!isOn(0) && !isOn(1)) state.touch = "ignored";
-            else if (locking && isOn(0) && isOn(1)) {
-              state.lock = dominant;
-              state.touch = "accepted";
-            } else if (locking && !isOn(dominant)) state.touch = "ignored";
-            else state.touch = "accepted";
-            if (state.touch === "accepted") {
-              state.slopOrigin = [p.position[0], p.position[1]]; // no 10 pt jump
-              const active = activeAxes();
-              for (let a = 0; a < 2; a++) if (!active.includes(a) && scroller(a).phase === "tracking") scroller(a).stop();
-            } else {
-              stopTracking();
-            }
-          }
-        }
-        if (state.touch === "accepted" && p.down) {
-          for (const a of activeAxes()) scroller(a).dragTo(finiteOr(p.position[a]! - state.slopOrigin[a]!, 0) / scale[a]!);
-        }
-        if (p.ended || (!p.down && state.touch !== "none")) {
-          if (state.touch === "accepted") {
-            for (const a of activeAxes()) scroller(a).release(p.ended ? finiteOr(p.velocity[a], 0) / scale[a]! : 0);
-          }
-          stopTracking(); // a tap or an ignored touch leaves the content resting
-          state.touch = "none";
-          state.lock = null;
-        }
       }
+      stopTracking(a);
+      scroller(a).jumpTo(finiteInput(ctx, positionKey) - start[a], ctx.input<string>(styleKey) !== "instant");
+      axes[a]!.wheelPending = false;
+    };
+    jump(0, "jumpToX", "jumpPositionX", "jumpStyleX");
+    jump(1, "jumpToY", "jumpPositionY", "jumpStyleY");
 
-      // 3. Wheel, while the pointer is over the visible window.
-      if (enabled && state.touch !== "accepted" && services.pointer(parent).hovering) {
-        const delta = finitePoint(services.wheel().delta) ?? [0, 0];
+    // 2. Touch.
+    if (!enabled) {
+      if (state.touch === "accepted") for (const a of activeAxes()) if (scroller(a).phase === "tracking") scroller(a).release(0);
+      stopTracking();
+      if (state.touch !== "none") state.touch = p.down ? "ignored" : "none";
+      state.lock = null;
+      for (let a = 0; a < 2; a++) if (scroller(a).phase === "decelerating") scroller(a).stop();
+    } else {
+      if (p.began) {
+        state.touch = "pending";
+        state.slopOrigin = [p.position[0], p.position[1]];
+        state.lock = null;
+        // Catch any motion and hold the content where it is while the touch decides.
         for (let a = 0; a < 2; a++) {
-          if (!isOn(a) || delta[a] === 0) continue;
-          const g = geometry[a]!;
-          scroller(a).value = clamp(scroller(a).value - delta[a]!, g.lo, g.hi);
-          scroller(a).stop();
-          axes[a]!.wheelPending = g.mode === "paging";
-          axes[a]!.lastWheelTime = ctx.time;
+          if (!isOn(a)) continue;
+          scroller(a).beginDrag();
+          axes[a]!.wheelPending = false;
         }
       }
+      if (state.touch === "pending") {
+        const dx = p.position[0] - p.startPosition[0];
+        const dy = p.position[1] - p.startPosition[1];
+        if (Math.hypot(dx, dy) > TOUCH_SLOP) {
+          const dominant = Math.abs(dx) > Math.abs(dy) ? 0 : 1;
+          const locking = ctx.input<boolean>("directionLocking") === true;
+          if (!isOn(0) && !isOn(1)) state.touch = "ignored";
+          else if (locking && isOn(0) && isOn(1)) {
+            state.lock = dominant;
+            state.touch = "accepted";
+          } else if (locking && !isOn(dominant)) state.touch = "ignored";
+          else state.touch = "accepted";
+          if (state.touch === "accepted") {
+            state.slopOrigin = [p.position[0], p.position[1]]; // no 10 pt jump
+            const active = activeAxes();
+            for (let a = 0; a < 2; a++) if (!active.includes(a) && scroller(a).phase === "tracking") scroller(a).stop();
+          } else {
+            stopTracking();
+          }
+        }
+      }
+      if (state.touch === "accepted" && p.down) {
+        for (const a of activeAxes()) scroller(a).dragTo(finiteOr(p.position[a]! - state.slopOrigin[a]!, 0) / scale[a]!);
+      }
+      if (p.ended || (!p.down && state.touch !== "none")) {
+        if (state.touch === "accepted") {
+          for (const a of activeAxes()) scroller(a).release(p.ended ? finiteOr(p.velocity[a], 0) / scale[a]! : 0);
+        }
+        stopTracking(); // a tap or an ignored touch leaves the content resting
+        state.touch = "none";
+        state.lock = null;
+      }
+    }
+
+    // 3. Wheel, while the pointer is over the visible window.
+    if (enabled && state.touch !== "accepted" && services.pointer(parent).hovering) {
+      const delta = finitePoint(services.wheel().delta) ?? [0, 0];
       for (let a = 0; a < 2; a++) {
-        const axis = axes[a]!;
+        if (!isOn(a) || delta[a] === 0) continue;
         const g = geometry[a]!;
-        if (!axis.wheelPending) continue;
-        if (g.mode !== "paging") axis.wheelPending = false;
-        else if (ctx.time - axis.lastWheelTime >= WHEEL_SETTLE - 1e-9) {
-          axis.wheelPending = false;
-          axis.scroller.jumpTo(g.hi - scrollPageIndex(g, axis.scroller.value) * g.step, true);
-        }
+        scroller(a).value = clamp(scroller(a).value - delta[a]!, g.lo, g.hi);
+        scroller(a).stop();
+        axes[a]!.wheelPending = g.mode === "paging";
+        axes[a]!.lastWheelTime = ctx.time;
       }
-
-      // 4. Physics.
-      let animating = false;
-      let waiting = false;
-      for (const axis of axes) {
-        axis.scroller.step(ctx.dt);
-        if (axis.scroller.isAnimating) animating = true;
-        if (axis.wheelPending || axis.scroller.phase === "tracking") waiting = true;
+    }
+    for (let a = 0; a < 2; a++) {
+      const axis = axes[a]!;
+      const g = geometry[a]!;
+      if (!axis.wheelPending) continue;
+      if (g.mode !== "paging") axis.wheelPending = false;
+      else if (ctx.time - axis.lastWheelTime >= WHEEL_SETTLE - 1e-9) {
+        axis.wheelPending = false;
+        axis.scroller.jumpTo(g.hi - scrollPageIndex(g, axis.scroller.value) * g.step, true);
       }
-      if (animating || waiting) ctx.requestNextFrame();
+    }
 
-      const x = start[0] + scroller(0).value;
-      const y = start[1] + scroller(1).value;
-      const dragging = state.touch === "accepted";
-      ctx.output("position", [x, y]);
-      ctx.output("x", x);
-      ctx.output("y", y);
-      ctx.output("pageX", scrollPageIndex(geometry[0]!, scroller(0).value));
-      ctx.output("pageY", scrollPageIndex(geometry[1]!, scroller(1).value));
-      ctx.output("dragging", dragging);
-      ctx.output("moving", dragging || animating);
-    },
-  }),
-  "evaluate",
-);
+    // 4. Physics.
+    let animating = false;
+    let waiting = false;
+    for (const axis of axes) {
+      axis.scroller.step(ctx.dt);
+      if (axis.scroller.isAnimating) animating = true;
+      if (axis.wheelPending || axis.scroller.phase === "tracking") waiting = true;
+    }
+    if (animating || waiting) ctx.requestNextFrame();
+
+    const x = start[0] + scroller(0).value;
+    const y = start[1] + scroller(1).value;
+    const dragging = state.touch === "accepted";
+    ctx.output("position", [x, y]);
+    ctx.output("x", x);
+    ctx.output("y", y);
+    ctx.output("pageX", scrollPageIndex(geometry[0]!, scroller(0).value));
+    ctx.output("pageY", scrollPageIndex(geometry[1]!, scroller(1).value));
+    ctx.output("dragging", dragging);
+    ctx.output("moving", dragging || animating);
+  },
+  mutedBehavior: "evaluate",
+});

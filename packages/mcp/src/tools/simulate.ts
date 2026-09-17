@@ -12,7 +12,7 @@ function issuesText(state: SimState): string[] {
   const lines: string[] = [];
   if (state.documentUpdated)
     lines.push(
-      "Note: the document changed since the last call; the simulation picked up the edits (stepping one frame to lay them out) and kept compatible state. Use sim_reset for a clean start.",
+      "Note: the document changed since the last call; the simulation picked up the edits (laid out without advancing time) and kept compatible state. Use sim_reset for a clean start.",
     );
   for (const issue of state.issues.slice(0, 5))
     lines.push(
@@ -98,7 +98,7 @@ export function registerSimulationTools(tc: ToolContext): void {
     {
       title: "Dispatch input",
       description:
-        'Send input to a simulation and step through it: tap, longPress, drag, hover, scroll, key, text, focus, submit, raw pointer, orientation, deviceMotion. Targets are "@layerId" (its center) or [x, y]. Reports which layer each touch hit, which interaction patches heard it, and warnings when a touch hits nothing or the wrong layer. Follow with sim_step or sim_trace to watch the result.',
+        'Send input to a simulation and step through it: tap, longPress, drag, hover, scroll, key, text, focus, submit, raw pointer, orientation, deviceMotion. Targets are "@layerId" (its center), "@card/badge" for a layer inside a component instance, or [x, y]. Each input resolves its target when it fires, and reports which layer it hit, which interaction patches heard it, and warnings when it hits nothing or the wrong layer. Follow with sim_step or sim_trace to watch the result.',
       input: z.object({ simId: z.string(), events: z.array(SimEventSchema).min(1).max(50) }),
       output: SimStateOutputSchema,
       annotations: SIMULATION,
@@ -112,7 +112,7 @@ export function registerSimulationTools(tc: ToolContext): void {
         const at = e.point ? ` at (${Math.round(e.point[0])}, ${Math.round(e.point[1])})` : "";
         const hit = e.hit
           ? e.hit.layerId
-            ? ` → hit ${e.hit.layerId}${e.hit.chain.length > 1 ? ` (bubbles to ${e.hit.chain.slice(1).join(", ")})` : ""}${e.hit.handledBy.length ? ` · heard by ${e.hit.handledBy.join(", ")}` : ""}`
+            ? ` → hit ${e.hit.instancePath ? `${e.hit.instancePath}/` : ""}${e.hit.layerId}${e.hit.chain.length > 1 ? ` (bubbles to ${e.hit.chain.slice(1).join(", ")})` : ""}${e.hit.handledBy.length ? ` · heard by ${e.hit.handledBy.join(", ")}` : ""}`
             : " → hit nothing"
           : "";
         lines.push(`${e.index}. ${e.kind}${at}${hit}`);
@@ -187,10 +187,12 @@ export function registerSimulationTools(tc: ToolContext): void {
     {
       title: "Trace simulation",
       description:
-        "Sample values every frame for a duration, with optional scheduled events (same shapes as sim_dispatch, with atMs), and summarize each: start, end, settle time, overshoot, range. Rows are downsampled to maxRows; summaries use every frame. By default traces a copy so the session doesn't move; advance: true moves the session through the traced time.",
+        "Sample values every frame for a duration, with optional scheduled events (same shapes as sim_dispatch, with atMs), and summarize each: start, end, settle time, overshoot, range. Rows are downsampled to maxRows; summaries use every frame; times count frames from the start of the trace. By default traces a copy so the session doesn't move; advance: true moves the session through the traced time.",
       input: z.object({
         simId: z.string(),
-        targets: TargetsSchema.max(8).describe('Addresses like "@card.scale" or "pop.output".'),
+        targets: TargetsSchema.max(8).describe(
+          'Addresses like "@card.scale" or "pop.output"; inside a component instance, "card/tap_badge.down" or "@card/badge.scale".',
+        ),
         durationMs: z.number().min(1).max(60000),
         events: z.array(SimEventSchema).max(50).optional(),
         maxRows: z.number().int().min(2).max(600).optional().describe("Default 30."),
@@ -233,7 +235,7 @@ export function registerSimulationTools(tc: ToolContext): void {
     {
       title: "Get simulation values",
       description:
-        'Current values in a simulation: patch ports ("toggle.on", inputs too) and layer properties or outputs ("@card.scale", or "@row.position#2" for one loop copy).',
+        'Current values in a simulation: patch ports ("toggle.on", inputs too) and layer properties or outputs ("@card.scale", or "@row.position#2" for one loop copy). Reach inside component instances with an instance path: "like_button_2/liked.on", "@like_button_2/like_button.color", "card#2/..." for copy 2 of a looped instance.',
       input: z.object({ simId: z.string(), targets: TargetsSchema.max(30) }),
       output: SimStateOutputSchema,
       annotations: READ_ONLY,
@@ -295,6 +297,7 @@ export function registerSimulationTools(tc: ToolContext): void {
         ...(scale !== undefined ? { scale } : {}),
         maxWidth: maxWidth ?? 800,
       });
+      // No structuredContent: clients that prefer it (Claude Code) would drop the image block.
       return {
         content: [
           { type: "image", data: image.data, mimeType: image.mimeType },
@@ -303,12 +306,6 @@ export function registerSimulationTools(tc: ToolContext): void {
             text: `${raw} · ${image.width}×${image.height}${image.timeMs !== undefined ? ` · ${roundForDisplay(image.timeMs)} ms` : ""}`,
           },
         ],
-        structuredContent: {
-          width: image.width,
-          height: image.height,
-          mimeType: image.mimeType,
-          ...(image.timeMs !== undefined ? { timeMs: image.timeMs } : {}),
-        },
       };
     },
   );

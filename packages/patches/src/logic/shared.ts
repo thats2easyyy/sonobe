@@ -5,7 +5,7 @@
 
 import { resolveTypeParam } from "@sonobe/core";
 import type { ValueType } from "@sonobe/core";
-import type { RuntimePatchDefinition } from "@sonobe/engine";
+import type { PatchDefinition } from "@sonobe/engine";
 import { definePatch, finiteOr } from "../infra/index.ts";
 import { getSpec } from "../specs.ts";
 
@@ -31,8 +31,8 @@ export function orderedNumber(value: unknown): number {
  * A chained comparison: every value is compared with the next one and every pair must pass
  * (`value1 > value2` AND `value2 > value3` …). Muted, the output is false.
  */
-export function defineChainComparison(type: string, compare: (a: number, b: number) => boolean): RuntimePatchDefinition {
-  const definition = definePatch(type, {
+export function defineChainComparison(type: string, compare: (a: number, b: number) => boolean): PatchDefinition {
+  return definePatch(type, {
     evaluate(ctx) {
       const n = logicInputCount(ctx.inputCount);
       let previous = orderedNumber(ctx.input("value1"));
@@ -47,6 +47,6 @@ export function defineChainComparison(type: string, compare: (a: number, b: numb
       }
       ctx.output("output", ok);
     },
+    mutedBehavior: "zero",
   });
-  return { ...definition, mutedBehavior: "zero" };
 }

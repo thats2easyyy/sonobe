@@ -10,10 +10,13 @@ import {
   formatNumber,
   isDecodedLoop,
   isInputValue,
+  isNullableType,
   normalizeColor,
   parseColor,
   roundNumber,
+  typeLabel,
   VALUE_TYPES,
+  zeroLiteral,
 } from "./values.ts";
 import type { GradientValue } from "./types.ts";
 
@@ -187,5 +190,65 @@ describe("isInputValue", () => {
   it("accepts document encodings and rejects others", () => {
     for (const v of [1, true, "x", null, [1, 2], { link: "a.b" }, { layer: "l" }, { asset: "a" }, { loop: [1, "x"] }, { json: { a: 1 } }]) expect(isInputValue(v)).toBe(true);
     for (const v of [undefined, { link: 1 }, { a: 1 }, [1, "x"], Number.POSITIVE_INFINITY, { link: "a.b", extra: 1 }]) expect(isInputValue(v)).toBe(false);
+  });
+});
+
+describe("contract additions", () => {
+  it("rounds index coercion with a small epsilon", () => {
+    expect(coerce(2.9999999999999996, "number", "index")).toBe(3);
+    expect(coerce(0.1 * 3 * 10, "number", "index")).toBe(3);
+    expect(coerce(3.7, "number", "index")).toBe(3);
+    expect(coerce(-0.5, "number", "index")).toBe(0);
+    expect(coerce("4.9999999", "text", "index")).toBe(5);
+  });
+
+  it("treats connection as an opaque handle with no literal", () => {
+    const handle = { socket: 1 };
+    expect(VALUE_TYPES).toContain("connection");
+    expect(typeLabel("connection")).toBe("connection");
+    expect(isNullableType("connection")).toBe(true);
+    expect(defaultValue("connection")).toBeNull();
+    expect(coerce(handle, "any", "connection")).toBe(handle);
+    expect(coerce("ws://x", "text", "connection")).toBeNull();
+    expect(encodeValue(handle, "connection")).toBeNull();
+    expect(canConnect("connection", "connection")).toEqual({ ok: true });
+    expect(canConnect("connection", "any").ok).toBe(true);
+    expect(canConnect("json", "connection").ok).toBe(false);
+    expect(canConnect("number", "connection")).toMatchObject({ ok: false, reason: expect.stringContaining("WebSocket Connection") });
+    const out = canConnect("connection", "text");
+    expect(out.ok).toBe(false);
+    expect(out.suggestion).toBeUndefined();
+  });
+
+  it("accepts live media references at runtime without storing them", () => {
+    const live = { live: "audio/main/player#0" };
+    expect(coerce(live, "json", "sound")).toBe(live);
+    expect(encodeValue(live, "sound")).toBeNull();
+  });
+
+  it("carries a radial gradient's ratio through decode and encode", () => {
+    const lit = { gradient: { kind: "radial" as const, stops: [[0, "#FFFFFFFF"], [1, "#00000000"]] as [number, string][], start: [0.5, 0.5] as [number, number], end: [1, 0.5] as [number, number], ratio: 2 } };
+    const g = decodeInput(lit, "gradient") as GradientValue;
+    expect(g.ratio).toBe(2);
+    expect(encodeValue(g, "gradient")).toEqual(lit);
+    expect((decodeInput({ gradient: { ...lit.gradient, ratio: 0 } }, "gradient") as GradientValue).ratio).toBeUndefined();
+    expect(encodeValue({ ...g, ratio: undefined }, "gradient")).not.toHaveProperty("gradient.ratio");
+  });
+
+  it("gives zero values in document encoding", () => {
+    const cases: [Parameters<typeof zeroLiteral>[0], unknown][] = [
+      ["number", 0], ["index", 0], ["boolean", false], ["pulse", undefined], ["text", ""], ["enum", ""], ["color", "#00000000"],
+      ["point", [0, 0]], ["size", [0, 0]], ["anchor", [0, 0]], ["point3d", [0, 0, 0]], ["point4d", [0, 0, 0, 0]], ["textStyle", {}],
+      ["json", null], ["layer", null], ["image", null], ["gradient", null], ["connection", null],
+    ];
+    for (const [type, zero] of cases) expect(zeroLiteral(type), type).toEqual(zero);
+    expect(zeroLiteral("enum", [{ key: "row" }, { key: "column" }])).toBe("row");
+    expect(zeroLiteral("transform")).toHaveLength(16);
+  });
+
+  it("uses a transparent color for undeclared color defaults", () => {
+    expect(defaultForPort({ type: "color" })).toEqual({ r: 0, g: 0, b: 0, a: 0 });
+    expect(defaultForPort({ type: "color", default: "#00000000" })).toEqual({ r: 0, g: 0, b: 0, a: 0 });
+    expect(defaultForPort({ type: "color", default: "#FF0000FF" })).toEqual({ r: 1, g: 0, b: 0, a: 1 });
   });
 });

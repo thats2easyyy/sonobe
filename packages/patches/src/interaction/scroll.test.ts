@@ -28,7 +28,17 @@ const num = (f: HarnessFrame, key: string) => f.outputs[key] as number;
 
 describe("scroll geometry", () => {
   const base = { start: [0, 0] as [number, number], contentSize: [0, 0] as [number, number], pageSize: [0, 0] as [number, number], pagePadding: [0, 0] as [number, number], viewport: [390, 600] as [number, number] };
-  const info = { enabled: true, position: [0, 0] as [number, number], size: [1170, 2000] as [number, number], scale: [1, 1] as [number, number], anchor: [0, 0] as [number, number], parent: "window", contentSize: [0, 0] as [number, number] };
+  const info = {
+    type: "group",
+    enabled: true,
+    position: [0, 0] as [number, number],
+    size: [1170, 2000] as [number, number],
+    scale: [1, 1] as [number, number],
+    anchor: [0, 0] as [number, number],
+    parent: { layerId: "window" },
+    worldTransform: [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1],
+    contentSize: [0, 0] as [number, number],
+  };
 
   it("bounds a Free axis from the top-left down to the content's end", () => {
     expect(scrollAxisGeometry(1, { ...base, mode: "free", info })).toMatchObject({ mode: "free", lo: -1400, hi: 0 });

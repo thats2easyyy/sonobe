@@ -1,13 +1,10 @@
 /**
  * Helpers shared by the loop patches: index loops, the single-value port warning, JSON snapshots,
- * the muted pass-through used by the loop mutation patches, replay caches, and variant port
- * declarations with correct defaults.
+ * the muted pass-through used by the loop mutation patches, and replay caches.
  */
 
-import type { PatchSpec, PortSpec, Value } from "@sonobe/core";
-import type { PatchContext, PatchDefinition, RuntimePatchDefinition } from "@sonobe/engine";
-import { equalValues, isPlainObject, loopOf, nodePorts, portDefaultLiteral, zeroValue } from "../infra/index.ts";
-import { getSpec } from "../specs.ts";
+import type { PatchContext } from "@sonobe/engine";
+import { equalValues, isPlainObject, loopOf } from "../infra/index.ts";
 
 /** Positions 0 … n − 1. */
 export function indices(n: number): number[] {
@@ -47,17 +44,12 @@ export function snapshot<T>(value: T): T {
   return value;
 }
 
-/** Declare how the engine treats a muted patch (engine extension; see @sonobe/engine README). */
-export function withMutedBehavior<S>(definition: PatchDefinition<S>, behavior: RuntimePatchDefinition<S>["mutedBehavior"]): RuntimePatchDefinition<S> {
-  return Object.assign(definition, { mutedBehavior: behavior });
-}
-
 /**
- * The muted output of the loop mutation patches: Loop unchanged and positions 0 … count − 1.
- * Returns true when the patch is muted and has written its outputs.
+ * The muted output of the loop mutation patches (mutedBehavior "evaluate"): Loop unchanged and
+ * positions 0 … count − 1. Returns true when the patch is muted and has written its outputs.
  */
 export function passThroughWhenMuted(ctx: PatchContext<unknown>, indexKey: string): boolean {
-  if (ctx.node.muted !== true) return false;
+  if (!ctx.muted) return false;
   const items = ctx.inputItems("loop");
   ctx.output("output", loopOf(items));
   ctx.output(indexKey, loopOf(indices(items.length)));
@@ -83,32 +75,3 @@ export function cachedReplay(cache: ReplayCache | null, source: readonly unknown
   return { source: [...source], items: replay(source) };
 }
 
-/**
- * The variant-typed input ports of catalog patch `type` (static, and variadic with `startIndex`)
- * with defaults per CONVENTIONS.md §8: loop literals for every variant, the declared default for
- * the first variant, and the type's zero value for other variants.
- */
-export function variantInputPorts(type: string, typeParam: string | undefined, inputCount: number | undefined): PortSpec[] {
-  const spec = getSpec(type);
-  if (!spec) return [];
-  const variantKeys = new Set(spec.inputs.filter((p) => p.type === "variant").map((p) => p.key));
-  const variadic = spec.variadic?.type === "variant" && (spec.variadic.direction ?? "inputs") === "inputs";
-  return nodePorts(spec, typeParam, inputCount)
-    .inputs.filter((p) => variantKeys.has(p.key) || (variadic && p.variadicIndex !== undefined))
-    .map((resolved) => {
-      const port: PortSpec & { variadicIndex?: number } = { ...resolved };
-      delete port.variadicIndex;
-      const literal = portDefaultLiteral(spec, port.key, typeParam);
-      port.default = literal === undefined ? zeroValue(port.type, port.enumOptions) : (literal as Value);
-      return port;
-    });
-}
-
-/**
- * A `dynamicPorts` that re-declares {@link variantInputPorts}. Core's resolveNodePorts coerces a
- * variant port's default to the active variant (so `{ "loop": [] }` becomes text or 0) and expands
- * variadic ports 1-based; its merge replaces those ports key for key, and adds `item0`.
- */
-export function variantPortsFor(type: string): NonNullable<PatchSpec["dynamicPorts"]> {
-  return (node) => ({ inputs: variantInputPorts(type, node.typeParam, node.inputCount), outputs: [] });
-}

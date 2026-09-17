@@ -19,5 +19,6 @@ export * from "./serialize.ts";
 export * from "./validate.ts";
 export * from "./ops/index.ts";
 export * from "./history.ts";
+export * from "./graph.ts";
 export * from "./diagnostics.ts";
 export * from "./outline.ts";
