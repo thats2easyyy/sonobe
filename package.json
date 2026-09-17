@@ -1,0 +1,37 @@
+{
+  "name": "sonobe",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Open-source, AI-native interaction prototyping. Layers + patches + a live viewer, with an MCP server so Claude can build alongside you.",
+  "license": "MIT",
+  "type": "module",
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "engines": {
+    "node": ">=22.18"
+  },
+  "scripts": {
+    "dev": "npm run dev -w @sonobe/editor",
+    "desktop": "npm run start -w @sonobe/desktop",
+    "build": "npm run build -w @sonobe/editor && npm run build -w @sonobe/desktop",
+    "typecheck": "tsc -p tsconfig.json",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "e2e": "playwright test",
+    "format": "prettier --write .",
+    "sonobe": "node packages/cli/src/main.ts"
+  },
+  "dependencies": {},
+  "devDependencies": {
+    "typescript": "^7.0.2",
+    "vitest": "^5.0.1",
+    "@types/node": "^24.0.0",
+    "prettier": "^3.9.7",
+    "esbuild": "^0.28.2",
+    "@playwright/test": "^1.63.0",
+    "happy-dom": "^20.14.5",
+    "vite": "^8.3.0"
+  }
+}

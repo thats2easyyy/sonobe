@@ -1,0 +1,11 @@
+node_modules/
+dist/
+out/
+release/
+coverage/
+test-results/
+playwright-report/
+*.log
+.DS_Store
+# per-user editor state inside project folders
+**/*.sonobe/.sonobe/

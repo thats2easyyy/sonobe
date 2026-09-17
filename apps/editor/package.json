@@ -1,0 +1,29 @@
+{
+  "name": "@sonobe/editor",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@sonobe/core": "*",
+    "@sonobe/engine": "*",
+    "@sonobe/patches": "*",
+    "@sonobe/renderer": "*",
+    "react": "^19.3.0",
+    "react-dom": "^19.3.0",
+    "@xyflow/react": "^12.11.6",
+    "zustand": "^5.0.15",
+    "elkjs": "^0.12.0",
+    "motion": "^13.4.0",
+    "lucide-react": "^1.46.0"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^6.1.1",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0"
+  }
+}

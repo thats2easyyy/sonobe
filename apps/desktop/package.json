@@ -1,0 +1,25 @@
+{
+  "name": "@sonobe/desktop",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "dist/main.cjs",
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "start": "node scripts/build.mjs && electron . --mute-audio"
+  },
+  "dependencies": {
+    "@sonobe/core": "*",
+    "@sonobe/engine": "*",
+    "@sonobe/patches": "*",
+    "@sonobe/mcp": "*",
+    "ws": "^8.21.3",
+    "qrcode": "^1.5.4",
+    "@anthropic-ai/sdk": "^0.126.0"
+  },
+  "devDependencies": {
+    "electron": "^44.4.1",
+    "@types/ws": "^8.5.0",
+    "@types/qrcode": "^1.5.0"
+  }
+}
