@@ -105,3 +105,15 @@ describe("highlightSegments", () => {
     expect(highlightSegments("Text", undefined)).toEqual([{ text: "Text", match: false }]);
   });
 });
+
+describe("word-start matching", () => {
+  it("keeps acronyms and prefixes but drops letters scattered inside words", () => {
+    expect(fuzzyMatch("tu", "Tidy Up", { wordStart: true })).not.toBeNull();
+    expect(fuzzyMatch("align", "Align Left Edges", { wordStart: true })).not.toBeNull();
+    expect(fuzzyMatch("comp", "Create Component", { wordStart: true })).not.toBeNull();
+    expect(fuzzyMatch("copy", "Close Prototype", { wordStart: true })).toBeNull();
+    expect(fuzzyMatch("copy", "Close Prototype")).not.toBeNull();
+    expect(fuzzyMatch("phone", "patchEditor.insertPatch", { wordStart: true })).toBeNull();
+  });
+});
+

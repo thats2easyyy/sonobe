@@ -17,7 +17,7 @@ Fifteen runnable prototypes, from a single tap to a deck of swipeable cards. Eac
 | 11 | [Long-Press Menu](11-long-press-menu/) | Hold feedback, Turn On and Turn Off | Long Press, Switch, Classic Animation |
 | 12 | [Timed Sequence](12-timed-sequence/) | Scheduling stages, drawing strokes, replay | When Prototype Starts, Wait, Classic Animation, Restart Prototype |
 | 13 | [Stories](13-stories/) | Timers that restart, merging pulses, fill bars from math | Counter, Or, Pulse on Change, Wait, Math Expression |
-| 14 | [Onboarding](14-onboarding/) | Steps in order, keeping counts in bounds | Counter, Delay One Frame, Swipe, If Else |
+| 14 | [Onboarding](14-onboarding/) | Steps in order, keeping counts in bounds | Counter, Delay One Frame, Swipe, If / Else |
 | 15 | [Grid with Loops](15-grid-with-loops/) | One layer, many copies | Loop, Grid Layout, HSL Color, Delay, Loop Option Switch |
 
 Start at 01. Examples 01, 02, 05, 11 and 12 need nothing but taps, and 03, 06 and 07 add scrolling. Examples 08, 09 and 10 are the gesture-heavy ones, and 10, 13 and 15 lean on loops.

@@ -25,7 +25,9 @@ import { getDefaultDialogs, type DialogStore } from "./dialogs.ts";
 import { createDocumentStore, type DocumentState, type DocumentStore, type FileResult } from "./document.ts";
 import { createPresenceStore, type PresenceStore } from "./presence.ts";
 import { getRegistry } from "./registry.ts";
+import { saveDocumentInteractively } from "./saveFlow.ts";
 import { createSelectionStore, currentComponentId, type SelectionStore } from "./selection.ts";
+import { undoMenuTitle } from "./undoLabels.ts";
 
 export type DiscardChoice = "save" | "discard" | "cancel";
 
@@ -216,7 +218,8 @@ export function createEditorSession(options: EditorSessionOptions = {}): EditorS
       notifyQueued = true;
       queueMicrotask(() => {
         notifyQueued = false;
-        host.notifyDocumentChanged?.(document.getState().revision);
+        const state = document.getState();
+        host.notifyDocumentChanged?.(state.revision, { undo: undoMenuTitle("Undo", state.undoLabel), redo: undoMenuTitle("Redo", state.redoLabel) });
       });
     }
     // A prototype the person made (or already trusted) keeps its trust when it's saved somewhere new.
@@ -268,7 +271,7 @@ export function createEditorSession(options: EditorSessionOptions = {}): EditorS
       if (!s.dirty) return true;
       const choice = await confirmDiscard({ name: s.doc.project.name, action });
       if (choice === "cancel") return false;
-      if (choice === "save") return (await document.getState().save()).ok;
+      if (choice === "save") return (await saveDocumentInteractively(document, dialogs)).ok;
       return true;
     },
 

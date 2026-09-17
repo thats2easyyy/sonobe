@@ -34,6 +34,25 @@ export function collectConsoleProblems(page: Page): string[] {
   return problems;
 }
 
+/**
+ * React Flow warnings (such as error #008, a cable drawn before its port handle exists) and
+ * "ResizeObserver loop" errors, which the page reports as window error events rather than console
+ * errors. Await before openEditor.
+ */
+export async function collectUiWarnings(page: Page): Promise<string[]> {
+  const warnings: string[] = [];
+  page.on("console", (message) => {
+    const text = message.text();
+    if (/\[React Flow\]|ResizeObserver loop/.test(text)) warnings.push(text);
+  });
+  await page.addInitScript(() => {
+    window.addEventListener("error", (event) => {
+      if (/ResizeObserver loop/.test(event.message)) console.warn(`[e2e] ${event.message}`);
+    });
+  });
+  return warnings;
+}
+
 /** Mark the welcome screen as seen before the app loads (per page). */
 export async function skipWelcome(page: Page): Promise<void> {
   await page.addInitScript((key) => {

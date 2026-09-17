@@ -1,15 +1,18 @@
-import type { Op } from "@sonobe/core";
-import { Component, MousePointerClick, PanelRightClose, StickyNote } from "lucide-react";
+import { allLayers, isJsonLiteral, zeroLiteral, type Component as SonobeComponent, type InputValue, type InterfacePort, type Op } from "@sonobe/core";
+import { Component, MousePointerClick, PanelRightClose, StickyNote, X } from "lucide-react";
 import { useState } from "react";
+import { unpublishOps, updatePublishedOps, type PublishSide } from "../patch-editor/model/publish.ts";
 import { Panel } from "../../shell/Panel.tsx";
 import { useCurrentComponent, useEditorSession, useSelection } from "../../state/EditorProvider.tsx";
 import { EmptyState } from "../../ui/EmptyState.tsx";
 import { IconButton } from "../../ui/IconButton.tsx";
+import { PortGlyph, VALUE_TYPE_LABELS } from "../../ui/PortGlyph.tsx";
 import { SegmentedControl } from "../../ui/SegmentedControl.tsx";
-import { TextArea } from "../../ui/TextField.tsx";
+import { TextArea, TextField } from "../../ui/TextField.tsx";
 import { cx } from "../../ui/lib/cx.ts";
-import { allLayers } from "@sonobe/core";
+import { ValueControl, type FieldActions } from "./controls.tsx";
 import { LayerInspector } from "./LayerInspector.tsx";
+import { sameInputValue, summarizeField, type FieldPort } from "./model.ts";
 import { PatchInspector } from "./PatchInspector.tsx";
 import { useInspectorEdit } from "./useInspectorEdit.ts";
 import "./Inspector.css";
@@ -125,6 +128,111 @@ function EmptyInspector({ commentCount }: { commentCount: number }) {
           </label>
         </div>
       )}
+      {component && component.kind !== "prototype" && <PublishedPorts component={component} />}
+    </div>
+  );
+}
+
+const byKey = (a: InterfacePort, b: InterfacePort) => (a.key < b.key ? -1 : a.key > b.key ? 1 : 0);
+
+/**
+ * A component's published inputs and outputs: what shows as properties wherever the component is
+ * placed. Rename them, set an input's default, or unpublish them. Publishing happens in the patch
+ * editor (⌥P on a port, or its context menu).
+ */
+function PublishedPorts({ component }: { component: SonobeComponent }) {
+  const inputs = Object.values(component.interface.inputs).sort(byKey);
+  const outputs = Object.values(component.interface.outputs).sort(byKey);
+  return (
+    <div className="sb-insp-card sb-insp-interface" role="group" aria-label="Published ports">
+      <div className="sb-insp-interface__group">
+        <span className="sb-insp-component__label">Published inputs</span>
+        {inputs.length ? inputs.map((port) => <PublishedRow key={port.key} componentId={component.id} port={port} side="in" />) : <p className="sb-insp-note">None yet. In the patch editor, point at an input and press ⌥P, or right-click it and choose Publish as Component Input.</p>}
+      </div>
+      <div className="sb-insp-interface__group">
+        <span className="sb-insp-component__label">Published outputs</span>
+        {outputs.length ? outputs.map((port) => <PublishedRow key={port.key} componentId={component.id} port={port} side="out" />) : <p className="sb-insp-note">None yet. Point at an output and press ⌥P, so patches outside can read it.</p>}
+      </div>
+    </div>
+  );
+}
+
+function PublishedRow({ componentId, port, side }: { componentId: string; port: InterfacePort; side: PublishSide }) {
+  const session = useEditorSession();
+  const edit = useInspectorEdit();
+  const [draft, setDraft] = useState<string | null>(null);
+  const kind = side === "in" ? "input" : "output";
+  const latest = () => session.document.getState().doc.components[componentId];
+  const rename = () => {
+    if (draft === null) return;
+    const next = draft.trim();
+    setDraft(null);
+    const c = latest();
+    if (!c || !next || next === port.name) return;
+    edit.apply(updatePublishedOps(c, side, port.key, { name: next }), `Rename published ${kind} “${port.name}” to “${next}”`);
+  };
+  const remove = () => {
+    const c = latest();
+    if (c) edit.apply(unpublishOps(c, port.key, side), `Unpublish “${port.name}”`);
+  };
+  return (
+    <div className="sb-insp-interface__port">
+      <div className="sb-insp-interface__row">
+        <PortGlyph type={port.type} size={8} />
+        <TextField
+          size="sm"
+          aria-label={`Published ${kind} name`}
+          containerClassName="sb-insp-interface__name"
+          value={draft ?? port.name}
+          onFocus={() => setDraft(port.name)}
+          onChange={(event) => setDraft(event.target.value)}
+          onBlur={rename}
+          onCommit={rename}
+          onCancel={() => setDraft(null)}
+        />
+        <span className="sb-insp-interface__type">{VALUE_TYPE_LABELS[port.type] ?? port.type}</span>
+        <IconButton size="xs" icon={<X size={12} />} label={`Unpublish ${port.name}`} tooltip="Unpublish" onClick={remove} />
+      </div>
+      {side === "in" && port.type !== "pulse" && port.type !== "layer" && <PublishedDefault componentId={componentId} port={port} />}
+    </div>
+  );
+}
+
+/** A published input's default: the value it has where an instance doesn't set it. */
+function PublishedDefault({ componentId, port }: { componentId: string; port: InterfacePort }) {
+  const session = useEditorSession();
+  const edit = useInspectorEdit();
+  const fallback = zeroLiteral(port.type) as InputValue;
+  const fieldPort: FieldPort = { key: port.key, name: port.name, type: port.type, description: "The value where an instance doesn't set it.", ...(port.enumOptions ? { enumOptions: port.enumOptions.map((key) => ({ key, name: key })) } : {}) };
+  const field = summarizeField(fieldPort, [{ id: componentId, address: `$in.${port.key}`, stored: port.default, fallback: port.default ?? fallback }]);
+  const write = (update: Parameters<FieldActions["set"]>[0], options: { gesture?: string; coalesceKey?: string }) => {
+    const c = session.document.getState().doc.components[componentId];
+    const current = c?.interface.inputs[port.key];
+    if (!c || !current) return;
+    const value = current.default ?? fallback;
+    const next = typeof update === "function" ? update(value, 0) : update;
+    if (sameInputValue(value, next)) return;
+    edit.apply(updatePublishedOps(c, "in", port.key, { default: (isJsonLiteral(next) ? next.json : next) as InputValue }), `Set default of “${current.name}”`, options);
+  };
+  const actions: FieldActions = {
+    change: (update) => write(update, { gesture: `published-default:${componentId}:${port.key}` }),
+    set: (update, options) => {
+      write(update, options?.coalesceKey ? { coalesceKey: options.coalesceKey } : {});
+      edit.endGesture();
+    },
+    commit: () => edit.endGesture(),
+    reset: () => {
+      const c = session.document.getState().doc.components[componentId];
+      if (c) edit.apply(updatePublishedOps(c, "in", port.key, { default: null }), `Reset default of “${port.name}”`);
+    },
+    disconnect: () => undefined,
+  };
+  return (
+    <div className="sb-insp-interface__default">
+      <span className="sb-insp-interface__default-label">Default</span>
+      <div className="sb-insp-interface__default-control">
+        <ValueControl field={field} actions={actions} label={`${port.name} default`} />
+      </div>
     </div>
   );
 }

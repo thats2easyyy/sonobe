@@ -3,7 +3,7 @@ import { applyOps, createEmptyDocument, type Op, type SonobeDocument } from "@so
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { HostAdapter } from "../host/types.ts";
 import { createManualScheduler } from "../runtime/scheduler.ts";
-import { CommandRegistry } from "../ui/commands/commandRegistry.ts";
+import { commandDisabledReason, CommandRegistry, commandTitle } from "../ui/commands/commandRegistry.ts";
 import { attachClipboardEvents, bindHostCommands, registerDocumentCommands } from "./commands.ts";
 import { getRegistry } from "./registry.ts";
 import { createEditorSession, type EditorSession } from "./session.ts";
@@ -137,3 +137,23 @@ describe("document commands", () => {
     off();
   });
 });
+
+describe("undo and redo titles", () => {
+  it("say what they'll change, and a step says what it did with the way back", () => {
+    const s = start();
+    const commands = new CommandRegistry();
+    const notify = vi.fn();
+    registerDocumentCommands(commands, s, { notify, clipboard: null, platform: "mac" });
+    expect(commandTitle(commands.get("edit.undo")!)).toBe("Undo");
+    expect(commandDisabledReason(commands.get("edit.undo")!)).toBe("Nothing to undo");
+    s.document.getState().apply([{ op: "updateLayer", id: "card", props: { opacity: 0.5 } }], { label: "Change Card Opacity" });
+    expect(commandTitle(commands.get("edit.undo")!)).toBe("Undo Change Card Opacity");
+    expect(commands.run("edit.undo")).toBe(true);
+    expect(notify).toHaveBeenCalledWith(expect.objectContaining({ id: "history-step", title: "Undid Change Card Opacity", action: expect.objectContaining({ label: "Redo" }) }));
+    expect(commandTitle(commands.get("edit.redo")!)).toBe("Redo Change Card Opacity");
+    expect(commandTitle(commands.get("edit.undo")!)).toBe("Undo");
+    expect(commands.run("edit.redo")).toBe(true);
+    expect(notify).toHaveBeenLastCalledWith(expect.objectContaining({ title: "Redid Change Card Opacity", action: expect.objectContaining({ label: "Undo" }) }));
+  });
+});
+

@@ -52,6 +52,10 @@ export async function renameSelection(session: EditorSession, registry: CommandR
 
 /** Layer → Insert Layer: pick a type, add it centered, and select it. */
 export async function insertLayer(session: EditorSession, dialogs: Pick<DialogService, "pick">, notify: Notify = defaultNotify): Promise<Id | null> {
+  if (session.document.getState().doc.components[session.currentComponentId()]?.kind === "patchComponent") {
+    notify({ title: "Patch components hold only patches.", description: "Add layers to a prototype or a layer component. To reuse layers, select them and choose Create Component.", tone: "warn" });
+    return null;
+  }
   const type = await dialogs.pick({ title: "Insert Layer", items: layerPickItems(session.registry), confirmLabel: "Insert" });
   if (!type) return null;
   const componentId = session.currentComponentId();

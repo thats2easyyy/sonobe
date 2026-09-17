@@ -316,6 +316,20 @@ export function ViewerPanel({ session: sessionProp, lanPreviewUrl, onPopOut, onC
           />
         ) : (
           <>
+            {viewerWindow && windowStatus?.open && (
+              <div className="sb-vw__window-note" role="status">
+                <PictureInPicture2 size={13} aria-hidden />
+                <span className="sb-vw__window-note-text">Also showing in its own window</span>
+                <Button size="sm" variant="ghost" onClick={popOut}>
+                  Show
+                </Button>
+                {viewerWindow.close && (
+                  <Button size="sm" variant="ghost" onClick={closeViewerWindow}>
+                    Close
+                  </Button>
+                )}
+              </div>
+            )}
             {stage}
             {transport}
           </>

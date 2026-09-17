@@ -70,8 +70,8 @@ describe("host asset bytes", () => {
     const notify = vi.fn();
     const openExternal = vi.fn(async () => true);
     const host = createDesktopHost(fakeApi({ notifyDocumentChanged: notify, openExternal, muted: true }).api);
-    host.notifyDocumentChanged!(7);
-    expect(notify).toHaveBeenCalledWith(7);
+    host.notifyDocumentChanged!(7, { undo: "Undo Add Card", redo: "Redo" });
+    expect(notify).toHaveBeenCalledWith(7, { undo: "Undo Add Card", redo: "Redo" });
     expect(await host.openExternal!("https://sonobe.dev")).toBe(true);
     expect(openExternal).toHaveBeenCalledWith("https://sonobe.dev");
     expect(host.muted).toBe(true);

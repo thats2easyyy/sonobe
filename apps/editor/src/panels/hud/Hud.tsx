@@ -1,5 +1,6 @@
 import { getDevicePreset } from "@sonobe/core";
 import { ChevronDown, ChevronUp, Gauge, Sparkles, SquareTerminal, TriangleAlert } from "lucide-react";
+import type { ReactNode } from "react";
 import { useDocument, useRuntimeState } from "../../state/EditorProvider.tsx";
 import { Badge } from "../../ui/Badge.tsx";
 import { IconButton } from "../../ui/IconButton.tsx";
@@ -10,6 +11,7 @@ import { AiActivityView } from "./AiActivityView.tsx";
 import { ConsoleView } from "./ConsoleView.tsx";
 import { DiagnosticsView } from "./DiagnosticsView.tsx";
 import { useHudCounts } from "./hooks.ts";
+import { HUD_TABS } from "./hudTabs.ts";
 import { formatMs, smoothness } from "./perfModel.ts";
 import { PerformanceView } from "./PerformanceView.tsx";
 import "./hud.css";
@@ -32,6 +34,13 @@ export interface HudProps {
 }
 
 const ID_BASE = "sb-hudx";
+
+const TAB_ICONS: Record<HudTabId, ReactNode> = {
+  console: <SquareTerminal size={13} />,
+  diagnostics: <TriangleAlert size={13} />,
+  ai: <Sparkles size={13} />,
+  performance: <Gauge size={13} />,
+};
 
 /**
  * Bottom HUD: Console, Diagnostics, AI Activity, and Performance, with a live fps and frame-time
@@ -64,6 +73,12 @@ export function Hud({ tab, defaultTab = "console", onTabChange, collapsed = fals
       </Badge>
     ) : undefined;
 
+  const badges: Partial<Record<HudTabId, ReactNode>> = {
+    console: consoleBadge,
+    diagnostics: diagnosticsBadge,
+    ai: counts.working > 0 ? <span className="sb-hudx__live" role="status" aria-label="Claude is working" /> : undefined,
+  };
+
   return (
     <section className={cx("sb-hudx", className)} aria-label="Console and diagnostics" data-collapsed={collapsed || undefined} data-shortcut-scope="hud">
       <div className="sb-hudx__bar">
@@ -72,12 +87,7 @@ export function Hud({ tab, defaultTab = "console", onTabChange, collapsed = fals
           aria-label="HUD panels"
           value={current}
           onChange={setCurrent}
-          items={[
-            { value: "console", label: "Console", icon: <SquareTerminal size={13} />, badge: consoleBadge },
-            { value: "diagnostics", label: "Diagnostics", icon: <TriangleAlert size={13} />, badge: diagnosticsBadge },
-            { value: "ai", label: "AI Activity", icon: <Sparkles size={13} />, badge: counts.working > 0 ? <span className="sb-hudx__live" role="status" aria-label="Claude is working" /> : undefined },
-            { value: "performance", label: "Performance", icon: <Gauge size={13} /> },
-          ]}
+          items={HUD_TABS.map(({ value, label }) => ({ value, label, icon: TAB_ICONS[value], badge: badges[value] }))}
         />
         <div className="sb-hudx__status">
           <button type="button" className="sb-hudx__stat" data-link onClick={() => setCurrent("performance")} aria-label={`${status.label}: ${playing ? `${Math.round(fps)} frames per second` : "paused"}. Show performance`}>

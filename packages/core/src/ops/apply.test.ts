@@ -62,8 +62,86 @@ describe("applyOps", () => {
     const e = apply(emptyDoc(), [{ op: "addLayer", layer: { ref: "card", type: "rectangle" } }, { op: "setInput", target: "@$crad.opacity", value: 1 }]).errors[0]!;
     expect(e.code).toBe("unknown_ref");
     expect(e.message).toContain('"$card"');
+    expect(e.hint).toContain("Refs in this batch: $card.");
     expect(apply(emptyDoc(), [{ op: "addLayer", layer: { ref: "a", type: "rectangle" } }, { op: "addLayer", layer: { ref: "$a", type: "oval" } }]).errors[0]!.code).toBe("duplicate_ref");
     expect(apply(emptyDoc(), [{ op: "addLayer", layer: { ref: "in", type: "oval" } }]).errors[0]!.code).toBe("invalid_ref");
+    const none = apply(emptyDoc(), [{ op: "connect", from: "$tap.tap", to: "$toggle.flip" }]).errors[0]!;
+    expect(none).toMatchObject({ code: "unknown_ref", opIndex: 0 });
+    expect(none.hint).toContain('No op in this batch gives its item a "ref" yet.');
+  });
+
+  it("resolves refs defined later in the batch, in any order", () => {
+    const doc = emptyDoc();
+    const r = mustApply(doc, [
+      { op: "addPatch", patch: { ref: "grow", type: "transition", name: "Grow", typeParam: "number", inputs: { progress: { link: "$pop.output" }, start: 1, end: 1.08 } } },
+      { op: "setInput", target: "@$card.scale", value: { link: "$grow.output" } },
+      { op: "addPatch", patch: { ref: "pop", type: "popAnimation", name: "Pop", inputs: { number: { link: "$toggle.on" }, speed: 12 } } },
+      { op: "addLayer", parent: "$stack", layer: { ref: "card", type: "rectangle", name: "Card" } },
+      { op: "addPatch", patch: { ref: "toggle", type: "switch", name: "Toggle", inputs: { flip: { link: "$tap.tap" } } } },
+      { op: "addPatch", patch: { ref: "tap", type: "interaction", name: "Tap", inputs: { layer: { layer: "$card" } } } },
+      { op: "addLayer", layer: { ref: "stack", type: "group", name: "Stack" } },
+    ]);
+    expect(r.results.map((x) => [x.ok, x.ids])).toEqual([[true, ["grow"]], [true, ["card"]], [true, ["pop"]], [true, ["card"]], [true, ["toggle"]], [true, ["tap"]], [true, ["stack"]]]);
+    expect(r.idMap).toEqual({ grow: "grow", pop: "pop", toggle: "toggle", tap: "tap", stack: "stack", card: "card" });
+    const c = r.doc.components.main!;
+    expect(c.patches.grow!.inputs).toEqual({ start: 1, end: 1.08, progress: { link: "pop.output" } });
+    expect(c.patches.pop!.inputs).toEqual({ speed: 12, number: { link: "toggle.on" } });
+    expect(c.patches.tap!.inputs).toEqual({ layer: { layer: "card" } });
+    expect(c.layers.map((l) => [l.id, l.children?.map((k) => k.id)])).toEqual([["stack", ["card"]]]);
+    expect(c.layers[0]!.children![0]!.props).toEqual({ scale: { link: "grow.output" } });
+    expect(r.applied.filter((op) => op.op === "setInput").map((op) => (op as { target: string }).target)).toEqual(["grow.progress", "pop.number", "toggle.flip", "tap.layer", "@card.scale"]);
+    expectRoundTrip(doc, r);
+  });
+
+  it("wires loops between patches created in one batch, and nested layer props that wait for patches", () => {
+    const doc = emptyDoc();
+    const r = mustApply(doc, [
+      { op: "addLayer", layer: { type: "group", name: "Stack", children: [{ type: "rectangle", name: "Dot", props: { size: [10, 10], opacity: { link: "$fade.output" } } }] } },
+      { op: "addPatch", patch: { ref: "pop", type: "popAnimation", name: "Pop", inputs: { number: { link: "$fade.output" } } } },
+      { op: "addPatch", patch: { ref: "fade", type: "transition", name: "Fade", typeParam: "number", inputs: { progress: { link: "$pop.output" } } } },
+    ]);
+    const c = r.doc.components.main!;
+    expect(c.patches.pop!.inputs).toEqual({ number: { link: "fade.output" } });
+    expect(c.patches.fade!.inputs).toEqual({ progress: { link: "pop.output" } });
+    expect(c.layers[0]!.children![0]!.props).toEqual({ size: [10, 10], opacity: { link: "fade.output" } });
+    expectRoundTrip(doc, r);
+  });
+
+  it("explains refs whose op failed, ops that wait for each other, and rolls back held-back values that fail", () => {
+    const partial = apply(
+      emptyDoc(),
+      [
+        { op: "connect", from: "$tap.tap", to: "$toggle.flip" },
+        { op: "addPatch", patch: { ref: "tap", type: "nope" } },
+        { op: "addPatch", patch: { ref: "toggle", type: "switch" } },
+      ],
+      { atomic: false },
+    );
+    expect(partial.results.map((x) => x.error?.code)).toEqual(["unknown_ref", "unknown_patch_type", undefined]);
+    expect(partial.results[0]!.error!.message).toBe('"$tap" names the item op 1 creates, but op 1 failed.');
+    expect(partial.doc.components.main!.patches.switch).toBeDefined();
+
+    const stalled = apply(emptyDoc(), [
+      { op: "addLayer", parent: "$b", layer: { ref: "a", type: "group" } },
+      { op: "addLayer", parent: "$a", layer: { ref: "b", type: "group" } },
+    ]);
+    expect(stalled.errors).toHaveLength(1);
+    expect(stalled.errors[0]).toMatchObject({ code: "unknown_ref", opIndex: 0 });
+    expect(stalled.errors[0]!.message).toContain("neither can run");
+    expect(stalled.results[1]!.error!.code).toBe("skipped");
+
+    const self = apply(emptyDoc(), [{ op: "addComment", comment: { ref: "note", text: "Hi", rect: [0, 0, 10, 10] } }, { op: "updateComment", id: "$note", text: "Hello" }, { op: "removeComment", id: "$later" }]);
+    expect(self.errors[0]).toMatchObject({ code: "unknown_ref", opIndex: 2 });
+
+    const doc = emptyDoc();
+    const bad = apply(doc, [
+      { op: "addPatch", patch: { ref: "tap", type: "interaction", inputs: { enabled: { link: "$hex.color" } } } },
+      { op: "addPatch", patch: { ref: "hex", type: "hexColor" } },
+    ]);
+    expect(bad.ok).toBe(false);
+    expect(bad.doc).toBe(doc);
+    expect(bad.errors[0]).toMatchObject({ code: "type_mismatch", opIndex: 0 });
+    expect(bad).toMatchObject({ inverse: [], applied: [], idMap: {} });
   });
 
   it("suggests op names", () => {

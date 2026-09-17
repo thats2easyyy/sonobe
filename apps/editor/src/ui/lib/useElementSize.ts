@@ -1,11 +1,15 @@
 import { useLayoutEffect, useRef, useState, type RefObject } from "react";
+import { observeResize } from "./observeResize.ts";
 
 export interface ElementSize {
   width: number;
   height: number;
 }
 
-/** Tracks an element's client size with a ResizeObserver. */
+/**
+ * Tracks an element's client size. It measures once on mount, then on the frame after each resize
+ * (observeResize), so a layout that depends on the size can't feed back into the observer.
+ */
 export function useElementSize<T extends HTMLElement>(): [RefObject<T | null>, ElementSize] {
   const ref = useRef<T>(null);
   const [size, setSize] = useState<ElementSize>({ width: 0, height: 0 });
@@ -15,10 +19,7 @@ export function useElementSize<T extends HTMLElement>(): [RefObject<T | null>, E
     const measure = () =>
       setSize((current) => (current.width === el.clientWidth && current.height === el.clientHeight ? current : { width: el.clientWidth, height: el.clientHeight }));
     measure();
-    if (typeof ResizeObserver === "undefined") return;
-    const observer = new ResizeObserver(measure);
-    observer.observe(el);
-    return () => observer.disconnect();
+    return observeResize([el], measure);
   }, []);
   return [ref, size];
 }

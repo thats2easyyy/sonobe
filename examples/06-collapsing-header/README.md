@@ -60,7 +60,7 @@ npx vitest run examples/run.test.ts -t 06-collapsing-header
 ## Variations
 
 - **Stretch when pulling down.** Replace `header_size` with a Math Expression `clamp(300 + y, 110, 460)` fed by `tracks_scroll.y`, into a Size patch (width 402). The header now grows past 300 when you pull down at the top.
-- **Snap to open or closed.** When the finger lifts mid-collapse, jump the scroll to 0 or −190. Use a Pulse on `tracks_scroll.dragging`, and an If Else on `collapse.progress` above 0.5 into Jump Position Y.
+- **Snap to open or closed.** When the finger lifts mid-collapse, jump the scroll to 0 or −190. Use a Pulse on `tracks_scroll.dragging`, and an If / Else on `collapse.progress` above 0.5 into Jump Position Y.
 - **Tint the bar.** A color Transition from clear to the art's deep purple into a bar background, so the compact bar is readable over the tracks.
 - **Ease the fade.** Set a Curve on a Remap patch instead of Transition, for example Quadratic In, so the cover stays visible longer before fading.
 

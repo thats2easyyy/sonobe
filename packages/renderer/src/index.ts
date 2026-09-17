@@ -31,3 +31,4 @@ export type { CornerRadii } from "./squircle.ts";
 export { cssTransform, projectPoint, unprojectPoint } from "./matrix.ts";
 export { cssColor, parseColor } from "./values.ts";
 export { writtenStyle } from "./style.ts";
+export { findSceneNode, renderSceneSvg, sceneNodeBounds, sceneToSvg, type SceneToSvgOptions, type SvgAsset, type SvgRender } from "./svg/index.ts";

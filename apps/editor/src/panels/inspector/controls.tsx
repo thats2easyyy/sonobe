@@ -43,8 +43,8 @@ import { formatLiveValue, literalValue, sameInputValue, updateVectorComponent, t
 export interface FieldActions {
   /** A change within a gesture (scrubbing, dragging a color); merges into one undo step until `commit`. */
   change: (update: FieldUpdate) => void;
-  /** A discrete change: its own undo step. */
-  set: (update: FieldUpdate) => void;
+  /** A discrete change: its own undo step, or part of the step with the same `coalesceKey` (an import this sets). */
+  set: (update: FieldUpdate, options?: { coalesceKey?: string }) => void;
   /** End the current gesture. */
   commit: () => void;
   reset: () => void;
@@ -401,14 +401,16 @@ export function useAssetFieldImport(field: InspectorField, actions: FieldActions
     async (file: File): Promise<FieldImportResult> => {
       const { field: current } = latest.current;
       setImporting(true);
+      // Importing the file and setting the field undo together.
+      const coalesceKey = `inspector-import:${current.key}:${Date.now()}`;
       let result: FieldImportResult;
       try {
-        result = await importAssetForField(session, file, assetKindsFor(current.type), current.port.name);
+        result = await importAssetForField(session, file, assetKindsFor(current.type), current.port.name, { coalesceKey });
       } catch (err) {
         result = { ok: false, error: `Couldn't import “${file.name}”: ${err instanceof Error ? err.message : String(err)}` };
       }
       setImporting(false);
-      if (result.ok) latest.current.actions.set({ asset: result.assetId });
+      if (result.ok) latest.current.actions.set({ asset: result.assetId }, { coalesceKey });
       else toast({ id: "inspector-import", title: result.error, tone: "warn" });
       return result;
     },

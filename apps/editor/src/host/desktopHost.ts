@@ -23,14 +23,25 @@ export function createDesktopHost(api: DesktopHostApi): HostAdapter {
 
     async readProject(dir) {
       const { files, binaries } = await api.readProject(dir);
-      const doc = parseDocumentFiles(files);
+      // Record what's really on disk before parsing: when a file is invalid (a merge conflict, a typo),
+      // the next save then sees it differs from the document and rewrites it.
       known.set(dir, documentFiles(files));
       assets.setBinaries(dir, assetBinaries(binaries));
-      return doc;
+      return parseDocumentFiles(files);
     },
 
     async writeProject(dir, doc, options = {}) {
-      const plan = planProjectWrite(doc, known.get(dir));
+      let previous = known.get(dir);
+      if (!previous) {
+        // A folder this window never read (Save As onto an existing prototype the person chose to
+        // replace): diff against what's there, so the old project's components and scripts go away.
+        try {
+          previous = documentFiles((await api.readProject(dir)).files);
+        } catch {
+          previous = undefined; // A new folder.
+        }
+      }
+      const plan = planProjectWrite(doc, previous);
       const from = options.copyAssetsFrom && options.copyAssetsFrom !== dir ? options.copyAssetsFrom : null;
       const binaries = assets.pending(dir, doc, from);
       if (from && !assets.hasProject(from) && Object.keys(doc.assets).length > 0) {
@@ -77,9 +88,9 @@ export function createDesktopHost(api: DesktopHostApi): HostAdapter {
       return true;
     },
 
-    notifyDocumentChanged(revision) {
+    notifyDocumentChanged(revision, history) {
       try {
-        api.notifyDocumentChanged?.(revision);
+        api.notifyDocumentChanged?.(revision, history);
       } catch {
         // The bridge went away (window closing).
       }

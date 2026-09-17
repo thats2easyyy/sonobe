@@ -1,3 +1,7 @@
+import { spawnSync } from "node:child_process";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { compileScript } from "./compiler.ts";
 import { ScriptSyntaxError } from "./lexer.ts";
@@ -182,6 +186,69 @@ describe("sandbox: budgets", () => {
   it("refuses huge strings", () => {
     expect(() => run("let s = 'x'; while (true) s += s;")).toThrow(/too much memory/);
     expect(() => run("'x'.repeat(2 ** 30);")).toThrow(/too much memory/);
+  });
+
+  it("refuses huge native allocations before V8 makes them", () => {
+    for (const deterministic of [true, false]) {
+      const memory = (source: string) => expect(() => run(source, { deterministic }), source).toThrow(/too much memory/);
+      memory("new Array(2 ** 28).fill(0);");
+      memory("new Uint8Array(2 ** 30);");
+      memory("new ArrayBuffer(2 ** 31);");
+      memory("new Float64Array(1e9);");
+      memory("const a = []; a.length = 2 ** 30;");
+      memory("Array.from({ length: 2 ** 30 });");
+      memory("Object.keys(new Uint8Array(4e7));");
+      memory("new Set(new Uint32Array(3e7));");
+      memory("const row = new Array(1e6).fill(0); new Array(1000).fill(row).flat();");
+      memory("'ab'.repeat(1e7).split('');");
+      memory("JSON.parse('[' + '0,'.repeat(1e7) + '0]');");
+      memory("const keep = []; for (let i = 0; i < 100; i++) keep.push(new Uint8Array(60e6));");
+      memory("[1].flatMap(() => new Array(2 ** 27));");
+      expect(() => run("const a = []; a[5e7] = 1; a.fill(0);", { deterministic })).toThrow(/too much memory|took too long/);
+      expect(() => run("Math.max.apply(null, { length: 2 ** 30 });", { deterministic })).toThrow(/too much memory|took too long/);
+    }
+  });
+
+  it("stops one native call that would visit too many elements", () => {
+    expect(() => run("new Array(1e6).fill(0).map(Math.random).sort();", { deterministic: false })).toThrow(/took too long/);
+    // Each call visits 4 million slots natively; deterministic runtimes count those visits as interrupt checks.
+    expect(() => run("const a = []; a.length = 4e6; for (let i = 0; i < 100; i++) a.indexOf(1);")).toThrow(/took too long/);
+  });
+
+  it("can't catch a memory stop, and still allows ordinary allocations", () => {
+    expect(() => run("try { new Array(2 ** 28).fill(0); } catch { globalThis.caught = true; }")).toThrow(InternalAbort);
+    expect(value("export const result = new Uint8Array(1e6).length + new Array(1000).fill(1).length + Object.keys(new Array(5000).fill(0)).length + [...new Array(2000)].length;")).toBe(1_008_000);
+    expect(value("class Bytes extends Uint8Array { total() { return this.reduce((a, b) => a + b, 0); } } export const result = [new Bytes([1, 2, 3]).total(), new Bytes(2) instanceof Uint8Array, Array.isArray(Array.from('abc')), new Map([[1, 2]]).get(1)];")).toEqual([6, true, true, 2]);
+  });
+
+  it("contains an allocation that would crash V8 (in a child process, so a regression can't take down the runner)", () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "sonobe-oom-"));
+    const file = path.join(dir, "oom.ts");
+    writeFileSync(
+      file,
+      `import { compileScript } from ${JSON.stringify(new URL("./compiler.ts", import.meta.url).href)};
+import { InternalAbort, Realm } from ${JSON.stringify(new URL("./realm.ts", import.meta.url).href)};
+const hooks = { beginSegment() {}, endSegment() {}, unhandledRejection() {}, now: () => 0, perfNow: () => 0, random: () => 0 };
+for (const deterministic of [true, false]) {
+  const realm = new Realm(hooks, deterministic);
+  realm.beginInvocation();
+  try {
+    compileScript("try { new Array(2 ** 28).fill(0); } catch {}", "module").run(realm);
+    console.log("ran");
+  } catch (err) {
+    console.log(err instanceof InternalAbort ? err.reason : "threw " + err);
+  }
+}
+`,
+    );
+    try {
+      const result = spawnSync(process.execPath, ["--max-old-space-size=512", file], { encoding: "utf8", timeout: 60_000 });
+      expect(result.stderr).not.toContain("FATAL ERROR");
+      expect(result.status).toBe(0);
+      expect(result.stdout.trim().split("\n")).toEqual(["memory", "memory"]);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 
   it("uses the prototype clock and seeded randomness", () => {

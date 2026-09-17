@@ -34,6 +34,11 @@ export interface AssetImportOptions {
   author?: Author;
   /** Override the detected kind. */
   kind?: AssetKind;
+  /**
+   * Undo coalescing key. An edit right after the import that passes the same key (setting the
+   * property that shows the file) joins its undo step, so "drop an image on Image" is one undo.
+   */
+  coalesceKey?: string;
 }
 
 export interface AssetImportResult {
@@ -305,7 +310,11 @@ export function createAssetService(options: AssetServiceOptions): AssetService {
       if (measured.duration !== undefined && Number.isFinite(measured.duration) && measured.duration > 0) record.duration = measured.duration;
 
       service.storeBytes(file, bytes);
-      const result = document.getState().apply([{ op: "addAsset", asset: record }], { label: importOptions.label ?? `Import "${baseName}"`, ...(importOptions.author ? { author: importOptions.author } : {}) });
+      const result = document.getState().apply([{ op: "addAsset", asset: record }], {
+        label: importOptions.label ?? `Import "${baseName}"`,
+        ...(importOptions.author ? { author: importOptions.author } : {}),
+        ...(importOptions.coalesceKey ? { coalesceKey: importOptions.coalesceKey } : {}),
+      });
       if (!result.ok) return { ok: false, errorCode: "apply_failed", error: result.errors[0]?.message ?? `Couldn't add "${baseName}".`, result };
       return { ok: true, assetId: id, record, result };
     },

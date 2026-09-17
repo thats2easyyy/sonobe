@@ -58,6 +58,7 @@ export {
 } from "./instances.ts";
 export { createTemplateDocument, TEMPLATES, templateOps, type TemplateInfo } from "./templates.ts";
 export { explain, type Audience, type ExplainOptions } from "./explain.ts";
+export { describeRemovals, hasDestructiveOps, isDestructiveOp, removedItems, type RemovalSummary } from "./removals.ts";
 export {
   defaultGuides,
   defaultGuidesDir,

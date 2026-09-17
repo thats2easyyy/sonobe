@@ -23,7 +23,7 @@ Modulo divides **Value 1** by **Value 2** and keeps what's left over: 7 mod 3 is
 - Modulo by 0 outputs 0 and shows a warning in the console.
 
 ## Tips
-- Grid column: Loop Index mod 3 gives 0, 1, 2, 0, 1, 2 …
+- Grid column: Loop's Index mod 3 gives 0, 1, 2, 0, 1, 2 …
 - Every other row: Index mod 2 is 0 for even rows and 1 for odd rows.
 - Keep an angle between 0 and 360: angle mod 360.
 

@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-import { findLayer } from "@sonobe/core";
+import { allLayers, findLayer } from "@sonobe/core";
 import { act, type ReactNode } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
@@ -99,10 +99,21 @@ function dragEvent(type: string, point: { clientX: number; clientY: number }, da
   return event;
 }
 
+/** Resize the canvas body. Size observers report on the next animation frame (ui/lib/observeResize.ts), so run that frame too. */
 function resize(width: number, height: number) {
   bodySize = [width, height];
+  const frames: FrameRequestCallback[] = [];
+  const requestFrame = globalThis.requestAnimationFrame;
+  globalThis.requestAnimationFrame = (callback) => frames.push(callback);
+  try {
+    act(() => {
+      for (const o of observers) if (o.targets.includes(body())) o.callback([], {} as ResizeObserver);
+    });
+  } finally {
+    globalThis.requestAnimationFrame = requestFrame;
+  }
   act(() => {
-    for (const o of observers) if (o.targets.includes(body())) o.callback([], {} as ResizeObserver);
+    for (const callback of frames.splice(0)) callback(performance.now());
   });
 }
 
@@ -138,6 +149,43 @@ describe("CanvasPanel", () => {
     pointer("pointerup", at(230, 550));
     expect(position("card")).toEqual([46, 176]);
     expect(session.document.getState().historyEntries().map((e) => e.label)).toEqual(["Move Event Card"]);
+  });
+
+  it("⌥-drag duplicates: the copy moves, the original stays, and one undo removes the copy", () => {
+    mount();
+    pointer("pointerdown", at(200, 520));
+    pointer("pointerup", at(200, 520));
+    const count = () => allLayers(session.document.getState().doc.components.main!.layers).length;
+    const before = count();
+    pointer("pointerdown", at(200, 520), { altKey: true });
+    for (let i = 1; i <= 6; i++) pointer("pointermove", at(200 + i * 5, 520 + i * 5), { metaKey: true, altKey: true });
+    pointer("pointerup", at(230, 550), { altKey: true });
+    expect(position("card")).toEqual([16, 146]);
+    const copy = session.selection.getState().layers[0]!;
+    expect(copy).not.toBe("card");
+    expect(position(copy)).toEqual([46, 176]);
+    expect(count()).toBeGreaterThan(before);
+    expect(session.document.getState().historyEntries().map((e) => e.label)).toEqual(["Duplicate Event Card"]);
+    act(() => {
+      session.document.getState().undo();
+    });
+    expect(count()).toBe(before);
+    expect(position("card")).toEqual([16, 146]);
+  });
+
+  it("Escape during an ⌥-drag leaves no copy behind", () => {
+    mount();
+    pointer("pointerdown", at(200, 520));
+    pointer("pointerup", at(200, 520));
+    const before = allLayers(session.document.getState().doc.components.main!.layers).length;
+    pointer("pointerdown", at(200, 520), { altKey: true });
+    for (let i = 1; i <= 4; i++) pointer("pointermove", at(200 + i * 5, 520 + i * 5), { altKey: true });
+    act(() => {
+      shortcuts.handleKeyDown(new KeyboardEvent("keydown", { key: "Escape" }));
+    });
+    expect(allLayers(session.document.getState().doc.components.main!.layers).length).toBe(before);
+    expect(position("card")).toEqual([16, 146]);
+    expect(session.document.getState().historyEntries()).toEqual([]);
   });
 
   it("nudges with arrows (⇧ ×10) and Escape clears the selection", () => {

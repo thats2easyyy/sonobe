@@ -2,8 +2,9 @@ import { describe, expect, it } from "vitest";
 import { getDiagnostics } from "./diagnostics.ts";
 import { feedbackEdges } from "./graph.ts";
 import { applyOps } from "./ops/index.ts";
-import { buildSampleDocument, emptyDoc, extendedRegistry, mockRegistry, mustApply } from "./testing/fixtures.ts";
-import type { Component, SonobeDocument } from "./types.ts";
+import { createRegistry } from "./registry.ts";
+import { buildSampleDocument, emptyDoc, extendedRegistry, MOCK_PATCH_SPECS, mockRegistry, mustApply, port } from "./testing/fixtures.ts";
+import type { Component, Op, PatchSpec, SonobeDocument } from "./types.ts";
 
 const codes = (doc: SonobeDocument) => getDiagnostics(doc, mockRegistry).map((d) => `${d.severity}:${d.code}`);
 
@@ -62,25 +63,143 @@ describe("getDiagnostics", () => {
     const info = getDiagnostics(loop, mockRegistry).find((d) => d.code === "feedback_loop")!;
     expect(info.severity).toBe("info");
     expect(info.itemIds).toEqual(["d1", "grow", "pop"]);
-    expect(info.message).toBe('Patches "d1", "grow", "pop" form a feedback loop. Delay 1 "d1" gives it one frame of delay: grow.output → d1.value reads last frame\'s value.');
+    expect(info.message).toBe('Patches "d1", "grow", "pop" form a feedback loop. This loop is intentional: Delay 1 "d1" gives it one frame of delay, so grow.output → d1.value reads last frame\'s value.');
     expect(info.hint).toBeUndefined();
     expect(info.suggestions).toBeUndefined();
   });
 
-  it("names the cable that reads the previous frame and offers a Delay One Frame", () => {
+  it("warns about loops that feed back every frame, naming the cable and offering fixes", () => {
     const loop = mustApply(buildSampleDocument(), [{ op: "connect", from: "grow.output", to: "pop.number" }]).doc;
-    const info = getDiagnostics(loop, mockRegistry).find((d) => d.code === "feedback_loop")!;
-    expect(info.itemIds).toEqual(["grow", "pop"]);
-    expect(info.message).toBe('Patches "grow", "pop" form a feedback loop. The connection grow.output → pop.number runs right to left, so it reads last frame\'s value.');
-    expect(info.hint).toBe("To make the delay explicit, insert a Delay 1 patch on that connection.");
-    const insert = info.suggestions![0]!;
-    expect(insert.description).toBe("Insert a Delay 1 on grow.output → pop.number");
-    expect(insert.ops![0]).toMatchObject({ op: "addPatch", patch: { type: "delay1", ui: { x: 540, y: 40 } } });
-    const fixed = mustApply(loop, insert.ops!).doc;
+    const warning = getDiagnostics(loop, mockRegistry).find((d) => d.code === "feedback_loop")!;
+    expect(warning.severity).toBe("warning");
+    expect(warning.itemIds).toEqual(["grow", "pop"]);
+    expect(warning.message).toBe('Patches "grow", "pop" form a feedback loop that feeds values back every frame, so they can drift or oscillate. The connection grow.output → pop.number runs right to left, so it reads last frame\'s value.');
+    expect(warning.hint).toBe("If the loop is on purpose, insert a Delay 1 patch on that connection to make the delay explicit. Otherwise disconnect the cable that loops back.");
+    const [insert, disconnect] = warning.suggestions!;
+    expect(insert!.description).toBe("Insert a Delay 1 on grow.output → pop.number");
+    expect(insert!.ops![0]).toMatchObject({ op: "addPatch", patch: { type: "delay1", ui: { x: 540, y: 40 } } });
+    expect(disconnect).toEqual({ description: "Disconnect grow.output → pop.number", ops: [{ op: "disconnect", component: "main", to: "pop.number" }] });
+    expect(applyOps(loop, disconnect!.ops!, { registry: mockRegistry }).ok).toBe(true);
+    const fixed = mustApply(loop, insert!.ops!).doc;
     expect(feedbackEdges(fixed, "main", mockRegistry).map((e) => `${e.from} → ${e.to} (${e.reason})`)).toEqual(["grow.output → delay1.value (delay1)"]);
     const after = getDiagnostics(fixed, mockRegistry).find((d) => d.code === "feedback_loop")!;
+    expect(after.severity).toBe("info");
     expect(after.itemIds).toEqual(["delay1", "grow", "pop"]);
+    expect(after.message).toContain("This loop is intentional");
     expect(after.suggestions).toBeUndefined();
+  });
+
+  it("names loops closed through a layer property or a variable, with fixes on the links the document stores", () => {
+    const variableSettings: PatchSpec["settings"] = [
+      { key: "name", name: "Name", type: "text", default: "", description: "The variable's name." },
+      { key: "scope", name: "Scope", type: "enum", default: "local", enumOptions: [{ key: "local", name: "Local" }, { key: "global", name: "Global" }], description: "Where it reaches." },
+    ];
+    const registry = createRegistry([
+      ...MOCK_PATCH_SPECS,
+      { type: "variableBroadcaster", name: "Variable Broadcaster", category: "utility", summary: "Sends a value.", variants: ["number"], settings: variableSettings, inputs: [port("value", "variant", { default: 0 })], outputs: [] },
+      { type: "variableReceiver", name: "Variable Receiver", category: "utility", summary: "Receives a value.", variants: ["number"], settings: variableSettings, inputs: [], outputs: [port("output", "variant")] },
+    ]);
+    const build = (ops: Op[]) => {
+      const r = applyOps(emptyDoc(), ops, { registry });
+      if (!r.ok) throw new Error(JSON.stringify(r.errors));
+      return r.doc;
+    };
+    const loopOf = (doc: SonobeDocument) => getDiagnostics(doc, registry).find((d) => d.code === "feedback_loop");
+
+    const layered = build([
+      { op: "addLayer", layer: { id: "card", type: "rectangle", name: "Card" } },
+      { op: "addPatch", patch: { id: "a", type: "transition", ui: { x: 0, y: 0 } } },
+      { op: "addPatch", patch: { id: "b", type: "transition", ui: { x: 300, y: 40 } } },
+      { op: "connect", from: "a.output", to: "b.progress" },
+      { op: "setInput", target: "@card.opacity", value: { link: "b.output" } },
+      { op: "setInput", target: "a.progress", value: { link: "@card.opacity" } },
+    ]);
+    const warning = loopOf(layered)!;
+    expect(warning.severity).toBe("warning");
+    expect(warning.itemIds).toEqual(["a", "b"]);
+    expect(warning.message).toBe('Patches "a", "b" form a feedback loop that feeds values back every frame, so they can drift or oscillate. a.progress reads @card.opacity, which b.output drives, so it reads last frame\'s value.');
+    const [insert, disconnect] = warning.suggestions!;
+    expect(insert!.description).toBe("Insert a Delay 1 on @card.opacity → a.progress");
+    expect(insert!.ops![0]).toMatchObject({ op: "addPatch", patch: { type: "delay1", ui: { x: 150, y: 20 } } });
+    expect(disconnect).toEqual({ description: "Disconnect @card.opacity → a.progress", ops: [{ op: "disconnect", component: "main", to: "a.progress" }] });
+    expect(loopOf(applyOps(layered, disconnect!.ops!, { registry }).doc!)).toBeUndefined();
+    const delayed = applyOps(layered, insert!.ops!, { registry });
+    expect(delayed.ok).toBe(true);
+    expect(feedbackEdges(delayed.doc!, "main", registry).map((e) => `${e.from} → ${e.to} (${e.reason})`)).toEqual(["@card.opacity → delay1.value (delay1)"]);
+    expect(loopOf(delayed.doc!)!.severity).toBe("info");
+
+    const variable = build([
+      { op: "addPatch", patch: { id: "acc", type: "transition", ui: { x: 300, y: 0 } } },
+      { op: "addPatch", patch: { id: "send", type: "variableBroadcaster", settings: { name: "total" }, ui: { x: 500, y: 0 } } },
+      { op: "addPatch", patch: { id: "r", type: "variableReceiver", settings: { name: "total" }, ui: { x: 0, y: 0 } } },
+      { op: "connect", from: "acc.output", to: "send.value" },
+      { op: "connect", from: "r.output", to: "acc.progress" },
+    ]);
+    const shared = loopOf(variable)!;
+    expect(shared.itemIds).toEqual(["acc", "r"]);
+    expect(shared.message).toBe('Patches "acc", "r" form a feedback loop that feeds values back every frame, so they can drift or oscillate. Variable Receiver "r" reads the variable "total", which acc.output drives, so it reads last frame\'s value.');
+    const [insertOnSend, disconnectSend] = shared.suggestions!;
+    expect(insertOnSend!.description).toBe("Insert a Delay 1 on acc.output → send.value");
+    expect(insertOnSend!.ops![0]).toMatchObject({ op: "addPatch", patch: { type: "delay1", ui: { x: 400, y: 0 } } });
+    expect(disconnectSend).toEqual({ description: "Disconnect acc.output → send.value", ops: [{ op: "disconnect", component: "main", to: "send.value" }] });
+    const fixed = applyOps(variable, insertOnSend!.ops!, { registry });
+    expect(fixed.ok).toBe(true);
+    expect(loopOf(fixed.doc!)!.severity).toBe("info");
+  });
+
+  it("calls loops intentional when values only come back when a pulse fires", () => {
+    const registry = createRegistry([
+      ...MOCK_PATCH_SPECS,
+      { type: "scroll", name: "Scroll", category: "interaction", summary: "Scrolls a layer.", inputs: [port("jumpToX", "pulse"), port("jumpPositionX", "number", { default: 0 })], outputs: [port("pageX", "index")] },
+      { type: "sampleAndHold", name: "Sample and Hold", category: "state", summary: "Captures a value.", inputs: [port("value", "number", { default: 0 }), port("sample", "boolean", { default: false, acceptsPulse: true })], outputs: [port("output", "number")] },
+    ]);
+    const build = (ops: Op[]) => {
+      const r = applyOps(emptyDoc(), ops, { registry });
+      if (!r.ok) throw new Error(JSON.stringify(r.errors));
+      return r.doc;
+    };
+    const loopsOf = (doc: SonobeDocument) => getDiagnostics(doc, registry).filter((d) => d.code === "feedback_loop");
+
+    // The carousel's Next button: the page number feeds arithmetic that the scroll reads only when Jump fires.
+    const carousel = build([
+      { op: "addPatch", patch: { id: "next_page_x", type: "add", ui: { x: 40, y: 300 }, inputs: { value1: { link: "$scroll.pageX" }, value2: 1 } } },
+      { op: "addPatch", patch: { ref: "scroll", id: "trips_scroll", type: "scroll", ui: { x: 300, y: 200 }, inputs: { jumpPositionX: { link: "next_page_x.output" } } } },
+    ]);
+    expect(loopsOf(carousel)).toEqual([
+      {
+        code: "feedback_loop",
+        severity: "info",
+        component: "main",
+        itemIds: ["next_page_x", "trips_scroll"],
+        message:
+          'Patches "next_page_x", "trips_scroll" form a feedback loop. This loop is intentional: trips_scroll.jumpPositionX is only read when Jump To X fires, so values go around once per pulse instead of every frame. The connection trips_scroll.pageX → next_page_x.value1 runs right to left, so it reads last frame\'s value.',
+      },
+    ]);
+
+    const hold = build([
+      { op: "addPatch", patch: { id: "grab", type: "sampleAndHold", ui: { x: 0, y: 0 }, inputs: { value: { link: "$finger.output" } } } },
+      { op: "addPatch", patch: { ref: "finger", id: "finger", type: "add", ui: { x: 200, y: 0 }, inputs: { value1: { link: "grab.output" } } } },
+    ]);
+    const held = loopsOf(hold)[0]!;
+    expect(held.severity).toBe("info");
+    expect(held.message).toContain("grab.value is only read when Sample fires");
+
+    const switches = build([
+      { op: "addPatch", patch: { id: "a", type: "switch", ui: { x: 0, y: 0 }, inputs: { flip: { link: "$b.on" } } } },
+      { op: "addPatch", patch: { ref: "b", id: "b", type: "switch", ui: { x: 200, y: 0 }, inputs: { turnOff: { link: "a.on" } } } },
+    ]);
+    expect(loopsOf(switches)[0]).toMatchObject({ severity: "info", message: expect.stringContaining("b.on → a.flip only triggers Flip") });
+
+    // A gate on one path doesn't excuse a second path that feeds back every frame.
+    const mixed = build([
+      { op: "addPatch", patch: { id: "grab", type: "sampleAndHold", ui: { x: 0, y: 0 }, inputs: { value: { link: "$sum.output" } } } },
+      { op: "addPatch", patch: { ref: "sum", id: "sum", type: "add", ui: { x: 200, y: 0 }, inputs: { value1: { link: "grab.output" }, value2: { link: "$echo.output" } } } },
+      { op: "addPatch", patch: { ref: "echo", id: "echo", type: "transition", typeParam: "number", ui: { x: 400, y: 0 }, inputs: { progress: { link: "sum.output" } } } },
+    ]);
+    const warning = loopsOf(mixed)[0]!;
+    expect(warning.severity).toBe("warning");
+    expect(warning.itemIds).toEqual(["echo", "grab", "sum"]);
+    expect(warning.suggestions!.map((s) => s.description)).toContain("Disconnect echo.output → sum.value2");
   });
 
   it("doesn't warn about pulses into ports that take them on purpose", () => {
@@ -102,7 +221,7 @@ describe("getDiagnostics", () => {
     expect(getDiagnostics(counted, extendedRegistry).find((d) => d.code === "input_count_out_of_range")).toMatchObject({
       severity: "warning",
       itemIds: ["grad"],
-      message: 'Patch "grad" has an input count of 9; Gradient Builder supports 1–4.',
+      message: '"Gradient Builder" has an input count of 9, but it supports 1–4.',
     });
     const scripted = edit(emptyDoc(), (c) => (c.patches.js = { type: "script", typeParam: "color", settings: { variants: ["number", "color"] }, inputs: {}, ui: { x: 0, y: 0 } }));
     expect(getDiagnostics(scripted, extendedRegistry).filter((d) => d.code === "invalid_type_param")).toEqual([]);
@@ -140,7 +259,7 @@ describe("getDiagnostics", () => {
       { op: "setInput", target: "@title.hitTest", value: false },
     ]).doc;
     const warning = getDiagnostics(nested, mockRegistry).find((d) => d.code === "untouchable_layer" && d.itemIds[0] === "title")!;
-    expect(warning.message).toContain('its parent "card" is disabled and Receives Touches is off');
+    expect(warning.message).toContain('its parent "Card" is disabled and Receives Touches is off');
     const fixed = mustApply(nested, warning.suggestions!.flatMap((s) => s.ops ?? []));
     expect(getDiagnostics(fixed.doc, mockRegistry).some((d) => d.code === "untouchable_layer")).toBe(false);
   });
@@ -170,9 +289,28 @@ describe("getDiagnostics", () => {
           },
         },
       },
-    ]).doc;
+      // addComponent refuses content with problems; a lenient apply stands in for a file that already has them.
+    ], { lenient: true }).doc;
     const d = getDiagnostics(doc, mockRegistry, { components: ["chip"] });
     expect(d.map((x) => `${x.severity}:${x.code}:${x.port}`)).toEqual(["error:invalid_value:big", "error:dangling_link:a", "info:unconnected_output:b"]);
+  });
+
+  it("reports component ids and script names that would share a file", () => {
+    const doc = mustApply(
+      emptyDoc(),
+      [
+        { op: "addComponent", component: { id: "card", name: "Card", kind: "layerComponent" } },
+        { op: "addComponent", component: { id: "Card", name: "Card 2", kind: "layerComponent" } },
+        { op: "setScript", file: "js_1.js", source: "// a" },
+        { op: "setScript", file: "JS_1.js", source: "// b" },
+      ],
+      { lenient: true },
+    ).doc;
+    const collisions = getDiagnostics(doc, mockRegistry).filter((d) => d.code === "file_name_collision");
+    expect(collisions).toHaveLength(2);
+    expect(collisions[0]).toMatchObject({ severity: "error", component: "card", message: expect.stringContaining('"Card" and "card"') });
+    expect(collisions[0]!.suggestions?.[0]?.description).toContain("Recreate");
+    expect(collisions[1]!.message).toContain("scripts");
   });
 
   it("reports dynamic port failures", () => {

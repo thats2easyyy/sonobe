@@ -18,7 +18,7 @@ Related: `start-here`, `gestures`, `animation`, `troubleshooting`
 | `sim_step`       | advances `frames` or `ms`, or `until: "idle"`, or until a condition like `{ "target": "@card.scale", "op": ">=", "value": 1.07 }` |
 | `sim_trace`      | samples targets every frame for `durationMs` with scheduled `events`; returns a table plus summaries                              |
 | `sim_get_values` | current values right now                                                                                                          |
-| `get_screenshot` | an image for visual QA (needs the Sonobe app)                                                                                     |
+| `get_screenshot` | a PNG of the screen or one layer, at the session's frame or `atMs` later (see Screenshots)                                        |
 
 **Events** share one shape everywhere. `atMs` is the time from the start of the call. Each input finds its target when it fires, so a tap at `atMs` 400 hits whatever is on screen by then, and the hit report describes that moment. A layer that isn't in the frame yet (a loop with fewer copies) is skipped with a warning.
 
@@ -46,6 +46,7 @@ Related: `start-here`, `gestures`, `animation`, `troubleshooting`
 ## Reading traces
 
 - By default, `sim_trace` runs on a **copy** from the session's current state, so the session doesn't move. Pass `advance: true` to move it.
+- The copy replays everything since `sim_reset`, so it gets slower as a session runs. After about 20,000 steps there's no copy to make: `sim_trace` refuses with the error code "sim_copy_unavailable". Pass `advance: true`, or `sim_reset` and replay the interaction.
 - `t_ms` counts frames from the start of the trace, so it keeps rising even when Restart Prototype fires.
 - Rows are evenly sampled down to `maxRows`; summaries always use every frame.
 - **start / end:** the first and last sampled values.
@@ -119,9 +120,25 @@ Hold for half a second, release, and watch the scale go down and come back:
 { "simId": "sim_1", "until": "idle", "watch": ["@button.scale"] }
 ```
 
+## Screenshots
+
+- `get_screenshot` draws `"viewer"` (the whole screen) or `"@layerId"` (one layer's box; `"@row#2"` for a loop copy).
+- With `simId` it shows that session's current frame. `atMs` shows the frame that many milliseconds later, drawn on a copy, so the session doesn't move.
+- Headless servers draw the screen without the app. Text uses approximate metrics, and video, Lottie and shaders show placeholders; the result's notes list what's approximate. Without `simId`, a headless screenshot shows the prototype once its start-up animations settle (up to 5 s), or `atMs` after it starts.
+- Use screenshots to check the look. For timing and exact values, trust `sim_trace` and `sim_get_values`.
+
+Press the button again and look at it mid-press:
+
+```json tool:sim_dispatch
+{ "simId": "sim_1", "events": [{ "kind": "pointer", "phase": "down", "x": 201, "y": 728 }] }
+```
+
+```json tool:get_screenshot
+{ "simId": "sim_1", "target": "@button", "atMs": 300 }
+```
+
 ## Limits
 
 - A trace covers up to 60 s, and a step call covers up to 2 minutes.
 - **Runtime issues** show up in results: a patch that isn't implemented yet (it outputs default values), script errors, and loop limits.
 - **Platform services** (network, sound, camera) do nothing in simulation.
-- **Screenshots** need the Sonobe app. Headless mode explains this and points to values and traces instead.

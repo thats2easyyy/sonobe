@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { blurFields, collectConsoleProblems, hook, modKey, openEditor, runCommand, screenshot } from "./helpers.ts";
+import { blurFields, collectConsoleProblems, collectUiWarnings, hook, modKey, openEditor, runCommand, screenshot } from "./helpers.ts";
 
 test.describe("command palette and app commands", () => {
   test("lists categories in menu order, then panels", async ({ page }) => {
@@ -27,6 +27,8 @@ test.describe("command palette and app commands", () => {
 
   test("Insert Layer, Use as Mask, and Rename", async ({ page }) => {
     const problems = collectConsoleProblems(page);
+    // The demo's layer target cables (@card.scale…) used to log React Flow #008 while their handles registered.
+    const warnings = await collectUiWarnings(page);
     await openEditor(page);
 
     // Insert Layer picks a type and selects the new layer.
@@ -60,6 +62,8 @@ test.describe("command palette and app commands", () => {
     await page.keyboard.press("Enter");
     await expect(rename).toBeHidden();
     await expect.poll(() => hook(page, (s) => s.doc().components.main!.layers.find((l) => l.id === "title")?.name)).toBe("Headline");
+    await page.waitForTimeout(300);
     expect(problems).toEqual([]);
+    expect(warnings).toEqual([]);
   });
 });

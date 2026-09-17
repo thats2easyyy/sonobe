@@ -23,7 +23,7 @@ Multiply starts with **Value 1** and multiplies it by every input below it: Valu
 ## Tips
 - Turn 0–1 progress into points: progress × 300 moves something 300 pt.
 - Reverse a direction with × −1.
-- Space looped layers: Loop Index × 120 gives 0, 120, 240, …
+- Space looped layers: Loop's Index × 120 gives 0, 120, 240, …
 
 ## Coming from Origami
 This is Origami's **×** patch. Its unlabeled inputs are called Value 1, Value 2, and so on.

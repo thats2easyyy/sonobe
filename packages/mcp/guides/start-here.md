@@ -9,7 +9,7 @@ Related: `graph-basics`, `gestures`, `animation`, `simulation`, `troubleshooting
 1. **Look first.** Call `get_document_info` (device size, components, what this host can do), then `get_outline`. Use ids exactly as the outline prints them.
 2. **Look up patches.** Search with `list_patch_types` by intent ("spring", "drag", "tabs"), then call `describe_patch_types` for exact port keys, types and defaults. Never guess a port key.
 3. **Say what you're doing.** Call `begin_work` with a one-line intent.
-4. **Build one feature per batch.** Call `add_layers`, then `add_patches` with `connections`. Give new patches a `ref` and wire them with `"$ref.port"`. Name layers by what they are ("Card") and patches by what they do ("Card Grown").
+4. **Build one feature per batch.** Call `add_layers`, then `add_patches` with `connections`. Give new patches a `ref` and wire them with `"$ref.port"`; refs work in any order within a batch. Name layers by what they are ("Card") and patches by what they do ("Card Grown").
 5. **Check.** Read the diagnostics delta in each write result, or call `get_diagnostics` for everything. Suggestions include ops you can pass straight to `apply_ops`.
 6. **Prove it.** Call `sim_reset`, `sim_dispatch` the gesture, then `sim_trace` the properties that should change. Compare end values, settle time and overshoot with the feel you were asked for.
 7. **Hand off.** Call `finish_work`, then describe the result by layer and patch _names_. Don't show raw ids, addresses or JSON to people.
@@ -109,10 +109,24 @@ Verify it in a simulation. `sim_reset` returns the simId to use:
 
 The trace summary should show `@card.scale` ending at 1.08, settling within a few hundred milliseconds with a small overshoot.
 
+Look at the result as well. `atMs` draws a later frame without moving the session:
+
+```json tool:get_screenshot
+{ "simId": "sim_1", "target": "@card", "atMs": 800 }
+```
+
 ## Habits
 
 - **Small batches.** One feature per `add_patches` call keeps failures easy to fix. Batches are atomic: when one op fails, nothing changes, and the error says which op failed and why.
 - **Stay in sync.** Each write returns a `revision`. Pass `expectedRevision` when you act on something you read earlier, so you never overwrite edits the person made in the meantime.
 - **Read errors.** A failed call includes a hint and often ready-to-apply `ops`. Nothing changed, so fix the call and retry.
 - **Ask before destroying.** `delete_items` asks for a confirmation token when more than 10 items would go. Undo with `undo`, which refuses to throw away a human's edit unless you name it.
-- **Headless mode** (a project folder without the app): there are no screenshots and no editor selection. `get_document_info` says whether changes save automatically or need `save_document`.
+- **Headless mode** (a project folder without the app): there's no editor selection, and `get_screenshot` draws the screen itself with approximate text. `get_document_info` says whether changes save automatically or need `save_document`.
+
+## More guides
+
+Fetch the guides that match the task in one call:
+
+```json tool:get_guide
+{ "topics": ["gestures", "simulation"] }
+```

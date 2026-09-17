@@ -42,6 +42,8 @@ export interface SearchListProps<T> {
   onActiveChange?: (item: T | null) => void;
   /** Section headers when the query is empty (items should already be ordered by group). */
   groupBy?: (item: T) => string | undefined;
+  /** Rows shown greyed out that can't be picked; while searching they sort after the rest. */
+  isDisabled?: (item: T) => boolean;
   renderGroupLabel?: (group: string) => ReactNode;
   query?: string;
   defaultQuery?: string;
@@ -81,6 +83,7 @@ export function SearchList<T>({
   onSelect,
   onActiveChange,
   groupBy,
+  isDisabled,
   renderGroupLabel,
   query: controlledQuery,
   defaultQuery = "",
@@ -109,14 +112,15 @@ export function SearchList<T>({
   const onActiveChangeRef = useLatest(onActiveChange);
 
   const rows = useMemo<Row<T>[]>(() => {
-    const results = fuzzySearch(items, query, keys, { limit });
+    let results = fuzzySearch(items, query, keys, { limit });
+    if (isDisabled && query.trim()) results = [...results.filter((r) => !isDisabled(r.item)), ...results.filter((r) => isDisabled(r.item))];
     return results.map((r, index) => ({
       item: r.item,
       index,
       matches: r.matches,
       group: !query.trim() && groupBy ? groupBy(r.item) : undefined,
     }));
-  }, [items, query, keys, limit, groupBy]);
+  }, [items, query, keys, limit, groupBy, isDisabled]);
 
   const clampedActive = rows.length === 0 ? -1 : Math.min(active, rows.length - 1);
   const activeRow = clampedActive >= 0 ? rows[clampedActive] : undefined;
@@ -163,7 +167,7 @@ export function SearchList<T>({
         go(clampedActive - 8);
         break;
       case "Enter":
-        if (activeItem !== null) onSelect(activeItem);
+        if (activeItem !== null && !isDisabled?.(activeItem)) onSelect(activeItem);
         break;
       default:
         return;
@@ -218,15 +222,19 @@ export function SearchList<T>({
                   id={`${listId}-${row.index}`}
                   role="option"
                   aria-selected={isActive}
+                  aria-disabled={isDisabled?.(row.item) || undefined}
                   className="sb-searchlist__option"
                   data-active={isActive || undefined}
+                  data-disabled={isDisabled?.(row.item) || undefined}
                   onPointerMove={(event) => {
                     if (event.clientX === lastPointer.current.x && event.clientY === lastPointer.current.y) return;
                     lastPointer.current = { x: event.clientX, y: event.clientY };
                     if (!isActive) setActive(row.index);
                   }}
                   onPointerDown={(event) => event.preventDefault()}
-                  onClick={() => onSelect(row.item)}
+                  onClick={() => {
+                    if (!isDisabled?.(row.item)) onSelect(row.item);
+                  }}
                 >
                   {renderItem(row.item, {
                     active: isActive,

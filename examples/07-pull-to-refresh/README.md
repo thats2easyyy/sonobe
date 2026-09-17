@@ -21,7 +21,7 @@ Level 1–2 · Guides: [03 States and pulses](../../docs/guides/03-states-and-pu
 5. **Refreshing.** Add a Switch (`refreshing`) with Turn On from `start_refresh.output`. Add a Wait (`refresh_timer`, 1.6 s) started by `refreshing.on`, and connect its Finished to the Switch's Turn Off.
 6. **Hold the list down.** Add a Pop Animation (`spacer_spring`, Bounciness 0, Speed 14) on `refreshing.on` and a Transition (`spacer_height`, 0 → 64). Add `feed_scroll.y` and the spacer with an Add (`content_y`), pack it with a Point (`content_position`), and connect that to the feed's Position instead of the scroll's position.
 7. **The spinner.** Add a Circle Shape (`spinner_shape`, center `[14, 14]`, radius 11) into the spinner's Shape. Add a Max (`spinner_reveal`) of `pull_amount.progress` and `spacer_spring.output` into its Opacity, and a Transition (`spinner_arc`, 0 → 0.8) into Stroke End. Add a Repeating Animation (`spin`, 0.9 s, Linear, Mirrored off) enabled by `refreshing.on`, and a Transition (`spinner_rotation`, 0 → 360) into Rotation.
-8. **Status.** Add a Counter (`refresh_count`) increased by `refresh_timer.finished`, Greater Than (`has_refreshed`) comparing it with 0, and an If Else (`status_text`, text) into the status line.
+8. **Status.** Add a Counter (`refresh_count`) increased by `refresh_timer.finished`, Greater Than (`has_refreshed`) comparing it with 0, and an If / Else (`status_text`, text) into the status line.
 
 ## The patch chain
 
@@ -47,7 +47,7 @@ Refreshing ──on──┬─▶ Pretend Network Request (Wait 1.6 s) ──fi
 | `refresh_timer` | Wait | Turns Refreshing off 1.6 seconds after it turned on. In a real app this is the network request. |
 | `spacer_spring`, `spacer_height`, `content_y`, `content_position` | Pop Animation, Transition, Add, Point | Keep the feed 64 points down while refreshing, on top of whatever the scroll is doing. |
 | `spinner_shape`, `spinner_reveal`, `spinner_arc`, `spin`, `spinner_rotation` | Circle Shape, Max, Transition, Repeating Animation | Draw the arc in while pulling, keep it visible and spinning while refreshing. |
-| `refresh_count`, `has_refreshed`, `status_text` | Counter, Greater Than, If Else | Change the status text after the first refresh. |
+| `refresh_count`, `has_refreshed`, `status_text` | Counter, Greater Than, If / Else | Change the status text after the first refresh. |
 
 Refreshing and the Wait form a small loop (the Switch starts the Wait, and the Wait stops the Switch). Sonobe reads one of those cables from the previous frame, which is invisible at 60 frames a second, and the diagnostics panel lists it as information.
 

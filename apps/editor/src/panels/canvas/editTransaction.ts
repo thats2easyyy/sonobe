@@ -19,6 +19,8 @@ export interface EditTransaction {
   readonly label: string;
   /** The document holds changes from this transaction. */
   readonly changed: boolean;
+  /** The gesture's latest ops (what `commit` keeps). */
+  readonly ops: readonly Op[];
   /** Apply the gesture's current state. Returns null once finished or for an empty batch. */
   update(ops: readonly Op[], label?: string): ApplyOpsResult | null;
   /**
@@ -69,6 +71,9 @@ export function createEditTransaction(store: DocumentStore, options: EditTransac
     },
     get changed() {
       return txnIds.length > 0;
+    },
+    get ops() {
+      return lastOps;
     },
 
     update(ops, nextLabel) {

@@ -61,11 +61,11 @@ Double-click an empty spot in the patch editor (or press ⌥⏎), type "switch" 
 
 Drag a cable from Interaction's Tap output to Switch's Flip input.
 
-Tap the card a few times. Switch's On/Off output glows while it's on and goes dark while it's off. The Switch remembers.
+Tap the card a few times. Switch's On output glows while it's on and goes dark while it's off. The Switch remembers.
 
 ### 4. Make it move
 
-Hover the canvas and press A to add a Pop Animation. Connect Switch's On/Off output to Pop Animation's Number input.
+Hover the canvas and press A to add a Pop Animation. Connect Switch's On output to Pop Animation's Number input.
 
 When a boolean travels into a number input, on becomes 1 and off becomes 0. So the Pop Animation's target flips between 0 and 1, and its output travels there on a spring instead of jumping.
 
@@ -87,7 +87,7 @@ Interaction watches one layer for touches. Its Down output is true for as long a
 
 Switch remembers on or off. Each pulse into Flip swaps it.
 
-| Event | On/Off |
+| Event | On |
 |---|---|
 | Start | 0 |
 | Tap 1 | 1 |
@@ -100,7 +100,7 @@ A tap is gone after one frame. The Switch turns that moment into something that 
 
 Pop Animation chases its Number with a spring. With the default Bounciness 5 and Speed 10, a jump from 0 to 1 looks like this:
 
-| Time after the tap | Output |
+| Time since the spring started | Output |
 |---|---|
 | 0.0 s | 0.00 |
 | 0.1 s | 0.59 |

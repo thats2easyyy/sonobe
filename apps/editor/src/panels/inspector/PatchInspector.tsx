@@ -3,7 +3,12 @@
 import {
   encodeValue,
   isJsonLiteral,
+  reachableVariables,
   resolveNodePorts,
+  resolveReceiver,
+  VARIABLE_BROADCASTER_TYPE,
+  VARIABLE_RECEIVER_TYPE,
+  variableName,
   type Id,
   type InputValue,
   type Op,
@@ -12,10 +17,12 @@ import {
   type SettingSpec,
   type Value,
   type ValueType,
+  type VariableInfo,
 } from "@sonobe/core";
-import { ArrowRight, BookOpen, Copy, Ellipsis, Minus, Plus, ScanSearch, Shapes, TriangleAlert } from "lucide-react";
+import { ArrowRight, BookOpen, Copy, Ellipsis, Minus, Plus, Radio, ScanSearch, Shapes, TriangleAlert } from "lucide-react";
 import { useId, useMemo, useState, type ReactNode } from "react";
 import { CATEGORY_ICONS } from "../../shell/icons.tsx";
+import { revealBroadcaster } from "../../state/editActions.ts";
 import { useDocument, useEditorSession, useSelection } from "../../state/EditorProvider.tsx";
 import { isPatchImplemented } from "../../state/registry.ts";
 import { currentComponentId } from "../../state/selection.ts";
@@ -26,7 +33,7 @@ import { EmptyState } from "../../ui/EmptyState.tsx";
 import { IconButton } from "../../ui/IconButton.tsx";
 import { Menu, type MenuEntry } from "../../ui/Menu.tsx";
 import { PortGlyph, VALUE_TYPE_LABELS } from "../../ui/PortGlyph.tsx";
-import { Select } from "../../ui/Select.tsx";
+import { Select, type SelectOption } from "../../ui/Select.tsx";
 import { toast } from "../../ui/Toast.tsx";
 import { Toggle } from "../../ui/Toggle.tsx";
 import { Tooltip } from "../../ui/Tooltip.tsx";
@@ -166,6 +173,75 @@ export function PortChangeCard({ pending, onConfirm, onCancel }: { pending: Pend
   );
 }
 
+/**
+ * A Variable Receiver's variable: the broadcasters it can read (local ones here, global ones here and
+ * above), by name and type. Choosing one copies its name, scope, and type in one step.
+ */
+function VariableRow({ receiverId, node, subject }: { receiverId: Id; node: PatchNode; subject: string }) {
+  const session = useEditorSession();
+  const registry = session.registry;
+  const doc = useDocument((s) => s.doc);
+  const componentPath = useSelection((s) => s.componentPath);
+  const edit = useInspectorEdit();
+  const componentId = componentPath.at(-1) ?? doc.project.root;
+  const choices = useMemo(() => reachableVariables(doc, registry, componentPath), [doc, registry, componentPath]);
+  const resolved = useMemo(() => resolveReceiver(doc, registry, componentPath, receiverId), [doc, registry, componentPath, receiverId]);
+  const current = variableName(node);
+  const valueOf = (v: VariableInfo) => `${v.componentId}/${v.id}`;
+  const options = choices
+    .map(
+      (v): SelectOption => ({
+        value: valueOf(v),
+        label: v.name,
+        group: v.scope === "global" ? "Global" : "Local",
+        description: v.componentId === componentId ? VALUE_TYPE_LABELS[v.type] : `${VALUE_TYPE_LABELS[v.type]} · from ${doc.components[v.componentId]?.name ?? v.componentId}`,
+        icon: <PortGlyph type={v.type} size={8} />,
+        keywords: [VALUE_TYPE_LABELS[v.type]],
+      }),
+    )
+    .sort((a, b) => (a.group === b.group ? 0 : a.group === "Local" ? -1 : 1));
+  const choose = (value: string) => {
+    const v = choices.find((c) => valueOf(c) === value);
+    const broadcaster = v ? doc.components[v.componentId]?.patches[v.id] : undefined;
+    if (!v || !broadcaster) return;
+    edit.apply([{ op: "updatePatch", component: componentId, id: receiverId, settings: { name: v.name, scope: v.scope === "global" ? "global" : null }, typeParam: broadcaster.typeParam ?? null }], `Read variable “${v.name}” in ${subject}`);
+  };
+  const jump = () => {
+    const result = revealBroadcaster(session, receiverId);
+    if (!result.ok && result.message) toast({ title: result.message, ...(result.hint ? { description: result.hint } : {}), tone: "warn" });
+  };
+  return (
+    <>
+      <OptionRow label="Variable" description="The broadcaster this receiver reads. Choosing one copies its name, scope, and type.">
+        <div className="sb-insp-variable">
+          <Select
+            size="sm"
+            aria-label="Variable"
+            className="sb-insp-select"
+            value={resolved.broadcaster ? valueOf(resolved.broadcaster) : null}
+            options={options}
+            placeholder={current ? `“${current}” not found` : "Choose a variable"}
+            emptyText="No variables yet. Add a Variable Broadcaster (W) and name it."
+            onChange={choose}
+          />
+          <IconButton size="sm" icon={<Radio size={13} />} label="Jump to broadcaster" disabled={!resolved.broadcaster} onClick={jump} />
+        </div>
+      </OptionRow>
+      {!resolved.broadcaster && (
+        <p className="sb-insp-note sb-insp-variable__note" role="status">
+          {!current
+            ? choices.length
+              ? "Choose the variable this receiver reads."
+              : "Nothing to read yet. Add a Variable Broadcaster (W) and give it a name."
+            : resolved.mismatch
+              ? `“${current}” here has another type. Choose it again to match.`
+              : `No broadcaster named “${current}” reaches this receiver.`}
+        </p>
+      )}
+    </>
+  );
+}
+
 export function PatchInspector({ patchIds, onLearnMore }: PatchInspectorProps) {
   const session = useEditorSession();
   const registry = session.registry;
@@ -202,6 +278,8 @@ export function PatchInspector({ patchIds, onLearnMore }: PatchInspectorProps) {
   const implemented = spec.type === "component" || isPatchImplemented(registry, spec.type);
   const { primary, more } = splitAdvanced(fields);
   const renderRow = (field: InspectorField) => <FieldRow key={field.key} field={field} subject={subject} {...(single && field.link ? { liveAddress: field.link } : {})} />;
+  /** A broadcaster's name is its variable's name; a receiver shows the variable it reads (chosen under Options). */
+  const variableKind = single?.node.type === VARIABLE_BROADCASTER_TYPE ? "broadcaster" : single?.node.type === VARIABLE_RECEIVER_TYPE ? "receiver" : null;
 
   /** Apply a Type or count change, first asking when it would disconnect cables. */
   const changePorts = (kind: PendingPortChange["kind"], build: (e: Entry) => Op | undefined, label: string, title: string) => {
@@ -264,7 +342,7 @@ export function PatchInspector({ patchIds, onLearnMore }: PatchInspectorProps) {
   const variadicName = spec.variadic?.name ?? "";
 
   const settingActions = (setting: SettingSpec): FieldActions => {
-    const run = (update: Parameters<FieldActions["set"]>[0], options: { gesture?: string }) => {
+    const run = (update: Parameters<FieldActions["set"]>[0], options: { gesture?: string; coalesceKey?: string }) => {
       const c = session.document.getState().doc.components[componentId];
       if (!c) return;
       const ops = entries.flatMap((e, index): Op[] => {
@@ -280,8 +358,8 @@ export function PatchInspector({ patchIds, onLearnMore }: PatchInspectorProps) {
     };
     return {
       change: (update) => run(update, { gesture: `setting:${setting.key}` }),
-      set: (update) => {
-        run(update, {});
+      set: (update, options) => {
+        run(update, options?.coalesceKey ? { coalesceKey: options.coalesceKey } : {});
         edit.endGesture();
       },
       commit: () => edit.endGesture(),
@@ -297,10 +375,18 @@ export function PatchInspector({ patchIds, onLearnMore }: PatchInspectorProps) {
       <InspectorHeader
         icon={<CategoryIcon size={15} strokeWidth={1.75} />}
         accent={sameType ? categoryColorVar(spec.category) : undefined}
-        name={single ? (single.node.name ?? "") : `${entries.length} patches`}
-        placeholder={spec.name}
+        name={single ? (single.node.name || variableName(single.node)) : `${entries.length} patches`}
+        placeholder={variableKind === "broadcaster" ? "Name this variable" : variableKind === "receiver" ? "Choose a variable below" : spec.name}
         allowEmpty
-        {...(single ? { onRename: (name: string) => edit.apply([{ op: "rename", component: componentId, id: single.id, name }], `Rename ${single.node.name ?? spec.name} to ${name || spec.name}`) } : {})}
+        {...(single && variableKind !== "receiver"
+          ? {
+              onRename: (name: string) =>
+                edit.apply(
+                  [{ op: "rename", component: componentId, id: single.id, name }],
+                  variableKind === "broadcaster" ? (name ? `Name variable “${name}”` : "Clear variable name") : `Rename ${single.node.name ?? spec.name} to ${name || spec.name}`,
+                ),
+            }
+          : {})}
         subtitle={
           single ? (
             <>
@@ -432,11 +518,15 @@ export function PatchInspector({ patchIds, onLearnMore }: PatchInspectorProps) {
             </>
           ) : null}
           {sameType &&
-            spec.settings?.map((setting) => (
-              <OptionRow key={setting.key} label={setting.name} description={setting.description}>
-                <ValueControl field={settingField(setting, entries)} actions={settingActions(setting)} label={setting.name} />
-              </OptionRow>
-            ))}
+            spec.settings?.map((setting) => {
+              if (single && variableKind && setting.key === "name") return variableKind === "receiver" ? <VariableRow key="variable" receiverId={single.id} node={single.node} subject={subject} /> : null;
+              if (single && variableKind === "receiver" && setting.key === "scope") return null;
+              return (
+                <OptionRow key={setting.key} label={setting.name} description={setting.description}>
+                  <ValueControl field={settingField(setting, entries)} actions={settingActions(setting)} label={setting.name} />
+                </OptionRow>
+              );
+            })}
           {single && (
             <OptionRow label="Bypass" description="Mute the patch: matching inputs pass straight through to its outputs.">
               <Toggle size="sm" aria-label="Bypass" checked={!!single.node.muted} onChange={(muted) => edit.apply([{ op: "updatePatch", component: componentId, id: single.id, muted }], `${muted ? "Bypass" : "Unbypass"} ${subject}`)} />

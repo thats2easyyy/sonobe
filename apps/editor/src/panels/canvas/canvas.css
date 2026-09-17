@@ -296,7 +296,8 @@
   left: 0;
   padding: 0 5px;
   border-radius: var(--radius-sm);
-  background: var(--selection);
+  /* A darker fill than --selection so the white numbers keep 4.5:1. */
+  background: var(--accent-pressed);
   color: #ffffff;
   font-size: var(--font-size-2xs);
   font-variant-numeric: tabular-nums;

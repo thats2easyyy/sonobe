@@ -56,6 +56,10 @@ describe("the bundled CLI", () => {
     expect((await stat(bundle.outfile)).mode & 0o111).not.toBe(0);
     expect(code).not.toMatch(/from\s+["']@sonobe\//);
     expect(bundle.guidesDir).toBe(path.join(dir, "bin", "guides"));
+    expect(bundle.rasterizerDir).toBe(path.join(dir, "bin", "node_modules", "@resvg"));
+    expect(
+      (await stat(path.join(bundle.rasterizerDir!, "resvg-js", "package.json"))).isFile(),
+    ).toBe(true);
     const direct = await run(bundle.outfile, ["--version"], { cwd: dir, env: childEnv() });
     expect(direct.stdout).toMatch(/^\d+\.\d+\.\d+\n$/);
   });
@@ -107,7 +111,10 @@ describe("the bundled CLI", () => {
     try {
       const { tools } = await client.listTools();
       expect(tools.length).toBeGreaterThan(30);
-      const guide = await client.callTool({ name: "get_guide", arguments: { topic: "start-here" } });
+      const guide = await client.callTool({
+        name: "get_guide",
+        arguments: { topic: "start-here" },
+      });
       expect((guide.structuredContent as { text: string }).text).toContain("# Start here");
       const reset = await client.callTool({ name: "sim_reset", arguments: {} });
       const simId = (reset.structuredContent as { simId: string }).simId;
@@ -116,6 +123,16 @@ describe("the bundled CLI", () => {
         arguments: { simId, events: [{ kind: "tap", target: "@photo" }] },
       });
       expect(JSON.stringify(tap.structuredContent)).toContain("tap_photo");
+      // Headless screenshots load the rasterizer copied beside the bundle.
+      const shot = await client.callTool({
+        name: "get_screenshot",
+        arguments: { simId, target: "@photo", atMs: 400 },
+      });
+      expect(shot.isError, JSON.stringify(shot.content)).toBeFalsy();
+      expect((shot.content as { type: string; mimeType?: string }[])[0]).toMatchObject({
+        type: "image",
+        mimeType: "image/png",
+      });
       const missing = await client.callTool({ name: "sim_step", arguments: { simId: "sim_99" } });
       expect(missing.isError).toBe(true);
       expect((missing.structuredContent as { error: { code: string } }).error.code).toBe(

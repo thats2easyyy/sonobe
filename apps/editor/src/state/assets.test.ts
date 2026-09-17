@@ -44,6 +44,16 @@ describe("asset import", () => {
     expect(await assets.readBytes("missing")).toBeUndefined();
   });
 
+  it("joins the import and the edit that uses it in one undo step with a coalesce key", async () => {
+    const { store, assets } = setup();
+    const result = await assets.importFile({ name: "sunset.png", bytes: png }, { coalesceKey: "drop:image" });
+    store.getState().apply([{ op: "addLayer", layer: { id: "hero", type: "image", name: "Hero", props: { image: { asset: result.assetId! } } } }], { label: "Set Image on Hero", coalesceKey: "drop:image" });
+    expect(store.getState().historyEntries().map((e) => e.label)).toEqual(["Set Image on Hero"]);
+    store.getState().undo();
+    expect(store.getState().doc.assets).toEqual({});
+    expect(store.getState().doc.components.main!.layers).toEqual([]);
+  });
+
   it("explains unsupported and oversized files", async () => {
     const { store, assets } = setup();
     expect(await assets.importFile({ name: "notes.xyz", bytes: new Uint8Array([1]) })).toMatchObject({ ok: false, errorCode: "unsupported", error: expect.stringContaining(".xyz") });

@@ -58,6 +58,19 @@ export function chordOf(shortcut: string): string | undefined {
   return `${shift ? "shift+" : ""}${key.toLowerCase()}`;
 }
 
+const keysByRegistry = new WeakMap<Registry, Map<string, string>>();
+
+/** The key that inserts a patch type when you point at the patch editor ("A", "Shift+W"), if any. */
+export function singleKeyFor(registry: Registry, type: string): string | undefined {
+  let keys = keysByRegistry.get(registry);
+  if (!keys) {
+    keys = new Map();
+    for (const insert of singleKeyInserts(registry)) if (!keys.has(insert.type)) keys.set(insert.type, insert.shortcut);
+    keysByRegistry.set(registry, keys);
+  }
+  return keys.get(type);
+}
+
 /** The single-key inserts for a registry: declared shortcuts first, then the defaults. */
 export function singleKeyInserts(registry: Registry): SingleKeyInsert[] {
   const byChord = new Map<string, SingleKeyInsert>();

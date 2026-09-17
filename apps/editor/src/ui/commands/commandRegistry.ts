@@ -22,10 +22,28 @@ export interface Command {
   allowInInput?: boolean;
   allowRepeat?: boolean;
   icon?: ComponentType<{ size?: number | string; strokeWidth?: number | string }>;
-  /** Hidden from the palette; still runnable and bound. */
-  hidden?: boolean;
+  /** Hidden from the palette; still runnable and bound. A function is asked each time the palette lists commands. */
+  hidden?: boolean | (() => boolean);
   when?: (ctx: CommandContext) => boolean;
+  /** Why the command can't run right now ("Select 2 or more patches"), for its greyed-out palette row. */
+  disabledReason?: string | ((ctx: CommandContext) => string);
+  /** The title right now, when it depends on state ("Undo Mute Card Shadow"). Searches still match `title`. */
+  label?: (ctx: CommandContext) => string | undefined;
   run: (ctx: CommandContext) => void | Promise<void>;
+}
+
+/** Whether the palette leaves a command out. */
+export const isCommandHidden = (command: Pick<Command, "hidden">): boolean => (typeof command.hidden === "function" ? command.hidden() : command.hidden === true);
+
+/** The title to show for a command now (its `label`, else `title`). */
+export function commandTitle(command: Pick<Command, "title" | "label">, ctx: CommandContext = {}): string {
+  return command.label?.(ctx) || command.title;
+}
+
+/** Why a disabled command can't run, for people reading the palette. */
+export function commandDisabledReason(command: Pick<Command, "disabledReason">, ctx: CommandContext = {}): string {
+  const reason = typeof command.disabledReason === "function" ? command.disabledReason(ctx) : command.disabledReason;
+  return reason || "Not available right now";
 }
 
 export interface CommandRegistryOptions {
@@ -101,7 +119,12 @@ export class CommandRegistry {
   /** Commands that are visible in the palette and enabled for the context. */
   available(ctx?: CommandContext): Command[] {
     const context = ctx ?? this.#getContext();
-    return this.all().filter((c) => !c.hidden && (!c.when || c.when(context)));
+    return this.all().filter((c) => !isCommandHidden(c) && (!c.when || c.when(context)));
+  }
+
+  /** Commands the palette lists (not hidden), enabled or not, in registration order. */
+  listed(): Command[] {
+    return this.all().filter((c) => !isCommandHidden(c));
   }
 
   /** Run a command. Returns false when it is unknown, disabled, or throws synchronously. */

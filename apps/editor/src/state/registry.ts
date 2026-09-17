@@ -4,14 +4,15 @@
  */
 
 import {
+  createDiagnosticsCache,
   findLayer,
-  getDiagnostics,
   getLayerTypeSpec,
   getPatchSpec,
   resolveLayerOutputs,
   resolveLayerProps,
   resolveNodePorts,
   type Diagnostic,
+  type DiagnosticsCache,
   type Id,
   type LayerTypeSpec,
   type PatchSpec,
@@ -39,15 +40,16 @@ export function setRegistry(registry: PatchRegistry | undefined): void {
   shared = registry;
 }
 
-const diagnosticsCache = new WeakMap<Registry, WeakMap<SonobeDocument, Diagnostic[]>>();
+const diagnosticsCaches = new WeakMap<Registry, DiagnosticsCache>();
 
-/** getDiagnostics, memoized per document object (documents are immutable). */
+/**
+ * getDiagnostics, memoized per document object (documents are immutable) and incremental from the
+ * last document: a scrub or a drag re-checks only the values that changed.
+ */
 export function diagnosticsFor(doc: SonobeDocument, registry: Registry = getRegistry()): Diagnostic[] {
-  let byDoc = diagnosticsCache.get(registry);
-  if (!byDoc) diagnosticsCache.set(registry, (byDoc = new WeakMap()));
-  let list = byDoc.get(doc);
-  if (!list) byDoc.set(doc, (list = getDiagnostics(doc, registry)));
-  return list;
+  let cache = diagnosticsCaches.get(registry);
+  if (!cache) diagnosticsCaches.set(registry, (cache = createDiagnosticsCache(registry)));
+  return cache.get(doc);
 }
 
 /** Ports of a patch in a component; undefined when the patch or its type is unknown. */

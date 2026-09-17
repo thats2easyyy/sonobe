@@ -158,6 +158,10 @@ export function registerPresenceTools(tc: ToolContext): void {
       for (const x of d.added.filter((x) => x.severity !== "info").slice(0, 4))
         lines.push(...formatDiagnostic(x).map((l) => `  + ${l}`));
       if (r.saved) lines.push("Saved to disk.");
+      if (r.saveError) {
+        lines.push(`Not saved to disk (${r.saveError.code}): ${r.saveError.message} The undo is applied in this session only.`);
+        if (r.saveError.hint) lines.push(`Hint: ${r.saveError.hint}`);
+      }
       return success(lines.join("\n"), { ...r });
     },
   );

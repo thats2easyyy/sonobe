@@ -39,9 +39,15 @@ describe("appCommands", () => {
     expect(connectClaudeStore.getState().open).toBe(true);
   });
 
-  it("keeps menu aliases out of the palette", () => {
-    const visible = registry.available().map((c) => c.id);
-    expect(visible).toEqual(["file.new", "file.close", "app.settings", "layer.insert", "viewer.fullscreen", "ai.connectClaude", "help.lessons", "help.patchReference", "help.welcome", "help.reportIssue", "help.about"]);
+  it("keeps menu aliases out of the palette, listing patch editor aliases only while the patch editor isn't mounted", () => {
+    const visible = () => registry.available().map((c) => c.id);
+    expect(visible()).toEqual(["file.new", "file.close", "app.settings", "layer.insert", "patch.insert", "patch.tidyUp", "patch.commentAroundSelection", "viewer.fullscreen", "ai.connectClaude", "help.lessons", "help.patchReference", "help.welcome", "help.reportIssue", "help.about", "help.shortcuts"]);
+    expect(registry.get("patch.alignRight")).toMatchObject({ title: "Align Right Edges", category: "Patches", disabledReason: "Select 2 or more patches" });
+    session.selection.getState().select({ patches: ["tap_photo", "zoomed"] });
+    expect(visible()).toContain("patch.alignBottom");
+    // Once the patch editor registers its own commands (with shortcuts), each align command is listed once.
+    for (const id of ["insertPatch", "tidyUp", "commentSelection", "alignLeft", "alignRight", "alignTop", "alignBottom"]) registry.register({ id: `patchEditor.${id}`, title: id, run: () => undefined });
+    expect(visible().filter((id) => id.startsWith("patch."))).toEqual([]);
   });
 
   it("registers a command for every desktop menu item that had none", () => {
@@ -140,7 +146,7 @@ describe("appCommands", () => {
     expect(zoom).toHaveBeenCalledTimes(1);
   });
 
-  it("opens the patch reference and the palette for shortcuts", () => {
+  it("opens the patch reference, and a keyboard shortcuts cheat sheet (not the palette)", () => {
     registry.run("help.patchReference");
     expect(learnNav.getState().view).toEqual({ kind: "patches" });
     expect(layoutStore.getState().drawer).toBe("learn");
@@ -148,6 +154,9 @@ describe("appCommands", () => {
     const palette = vi.fn();
     registry.register({ id: "app.commandPalette", title: "Palette", run: palette });
     registry.run("help.shortcuts");
-    expect(palette).toHaveBeenCalledTimes(1);
+    expect(palette).not.toHaveBeenCalled();
+    expect(appPanels.getState().open).toBe("shortcuts");
+    expect(appCommands(session, registry, { platform: "mac" }).find((c) => c.id === "help.shortcuts")?.shortcut).toBe("Mod+Alt+/");
+    expect(appCommands(session, registry, { platform: "windows" }).find((c) => c.id === "help.shortcuts")?.shortcut).toBe("Ctrl+Shift+/");
   });
 });

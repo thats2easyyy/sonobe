@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { formatAddress, parseAddress } from "./address.ts";
-import { isRefToken, isValidId, slugify, uniqueId } from "./ids.ts";
+import { fileNameCollision, getOwn, isFileNameTaken, isRefToken, isValidId, slugify, uniqueId } from "./ids.ts";
 import { didYouMean, didYouMeanText, editDistance } from "./suggest.ts";
 
 describe("ids", () => {
@@ -32,6 +32,20 @@ describe("ids", () => {
     expect(isRefToken("$card")).toBe(true);
     expect(isRefToken("$in")).toBe(false);
     expect(isRefToken("card")).toBe(false);
+  });
+
+  it("reserves __proto__ but reads other Object.prototype names as own keys only", () => {
+    expect(isValidId("__proto__")).toBe(false);
+    expect(isValidId("constructor")).toBe(true);
+    expect(getOwn({}, "constructor")).toBeUndefined();
+    expect(getOwn({ constructor: 1 }, "constructor")).toBe(1);
+  });
+
+  it("finds names that share a file on case-insensitive file systems", () => {
+    expect(fileNameCollision(["main", "card"], "Card")).toBe("card");
+    expect(fileNameCollision(["card"], "card")).toBeUndefined();
+    expect(isFileNameTaken(["tabBar"], "tabbar")).toBe(true);
+    expect(uniqueId("tabbar", (id) => isFileNameTaken(["tabBar"], id))).toBe("tabbar_2");
   });
 });
 

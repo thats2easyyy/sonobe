@@ -20,6 +20,88 @@ afterEach(async () => {
   await project.cleanup();
 });
 
+describe("refs in any order", () => {
+  it("wires patches that name patches later in the batch, like a drag loop through Sample and Hold", async () => {
+    await client.call("add_layers", {
+      layers: [
+        { type: "rectangle", name: "Sheet", props: { position: [0, 600], size: [402, 700] } },
+      ],
+    });
+    // The usability study's bottom sheet: "$snap" is used before the patch that defines it.
+    const r = await client.call("add_patches", {
+      patches: [
+        { ref: "drag", type: "gesture", name: "Drag Sheet", inputs: { layer: { layer: "sheet" } } },
+        {
+          ref: "dy",
+          type: "pointUnpack",
+          name: "Drag Distance",
+          inputs: { value: { link: "$drag.translation" } },
+        },
+        {
+          ref: "release",
+          type: "pulse",
+          name: "Finger Lifted",
+          inputs: { on: { link: "$drag.down" } },
+        },
+        {
+          ref: "rest",
+          type: "sampleAndHold",
+          name: "Resting Offset",
+          inputs: { value: { link: "$snap.output" }, sample: { link: "$release.turnedOff" } },
+        },
+        {
+          ref: "finger",
+          type: "add",
+          name: "Finger Offset",
+          inputs: { value1: { link: "$rest.output" }, value2: { link: "$dy.y" } },
+        },
+        {
+          ref: "snap",
+          type: "snap",
+          name: "Snap to Peek or Open",
+          inputs: {
+            value: { link: "$finger.output" },
+            mode: "points",
+            points: { loop: [0, -630] },
+          },
+        },
+      ],
+    });
+    expect(r.isError, r.text).toBe(false);
+    expect(r.structured.created).toEqual([
+      "drag_sheet",
+      "drag_distance",
+      "finger_lifted",
+      "resting_offset",
+      "finger_offset",
+      "snap_to_peek_or_open",
+    ]);
+    expect(r.text).toContain("$snap → snap_to_peek_or_open");
+    expect((await client.call("get_outline", {})).text).toContain(
+      "value←snap_to_peek_or_open.output",
+    );
+    const all = await client.call("get_diagnostics", {});
+    const loop = (
+      all.structured.diagnostics as { code: string; severity: string; message: string }[]
+    ).find((d) => d.code === "feedback_loop");
+    expect(loop).toMatchObject({
+      severity: "info",
+      message: expect.stringContaining("This loop is intentional"),
+    });
+
+    const typo = await client.call("add_patches", {
+      patches: [
+        { ref: "spin", type: "add", name: "Spin", inputs: { value1: { link: "$sipn.output" } } },
+      ],
+    });
+    expect(typo.isError).toBe(true);
+    expect(typo.text).toContain(
+      '"$sipn" doesn\'t name anything created in this batch. Did you mean "$spin"?',
+    );
+    expect(typo.text).toContain("Refs in this batch: $spin.");
+  });
+});
+
 describe("building an ISAT chain", () => {
   it("adds layers and wired patches in batches and returns deltas", async () => {
     const layers = await client.call("add_layers", {
@@ -297,6 +379,42 @@ describe("other write tools", () => {
     expect(undo.text).toContain("Undid");
     const outline = await client.call("get_outline", {});
     expect(outline.text).toContain("scale←card_scale.output");
+  });
+
+  it("reports what a destructive batch removes, cascades included, on dry runs and real runs", async () => {
+    const children = Array.from({ length: 40 }, (_, i) => ({ type: "rectangle", name: `Row ${i + 1}` }));
+    expect((await client.call("add_layers", { layers: [{ type: "group", name: "Screen", children }] })).isError).toBe(false);
+    const lib = await client.call("apply_ops", {
+      ops: [
+        { op: "addComponent", component: { id: "library", name: "Library", kind: "patchComponent" } },
+        ...Array.from({ length: 20 }, (_, i) => ({ op: "addPatch", component: "library", patch: { id: `sw_${i}`, type: "switch" } })),
+      ],
+    });
+    expect(lib.isError).toBe(false);
+    expect(lib.structured.removed).toBeUndefined();
+
+    const dry = await client.call("apply_ops", { ops: [{ op: "removeLayer", id: "screen" }], dryRun: true });
+    expect(dry.structured).toMatchObject({ changed: "none", removed: { layers: 41, total: 41 } });
+    expect(dry.text).toContain("Would remove: 41 layers.");
+    const component = await client.call("apply_ops", { ops: [{ op: "removeComponent", id: "library" }], dryRun: true });
+    expect(component.structured.removed).toMatchObject({ components: 1, patches: 20, total: 21 });
+
+    const real = await client.call("apply_ops", { ops: [{ op: "removeLayer", id: "screen" }] });
+    expect(real.structured).toMatchObject({ changed: "all", removed: { layers: 41, total: 41 } });
+    expect(real.text).toContain("Removed: 41 layers.");
+  });
+
+  it("previews delete_items with dryRun without asking or changing anything", async () => {
+    await client.call("add_layers", {
+      layers: Array.from({ length: 12 }, (_, i) => ({ type: "rectangle", name: `Box ${i + 1}` })),
+    });
+    const ids = Array.from({ length: 12 }, (_, i) => `box_${i + 1}`);
+    const before = (await client.call("get_document_info", {})).structured.revision;
+    const dry = await client.call("delete_items", { ids, dryRun: true });
+    expect(dry.isError).toBe(false);
+    expect(dry.structured).toMatchObject({ changed: "none", dryRun: true, removed: { layers: 12, total: 12 } });
+    expect(dry.structured.status).toBeUndefined();
+    expect((await client.call("get_document_info", {})).structured.revision).toBe(before);
   });
 });
 

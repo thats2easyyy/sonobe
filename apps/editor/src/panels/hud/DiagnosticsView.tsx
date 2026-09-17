@@ -139,7 +139,7 @@ export function DiagnosticsView() {
                     {d.component !== root && component && <span className="sb-problem__component">in {component.name}</span>}
                     {d.itemIds.map((id) => (
                       <button key={id} type="button" className="sb-problem__item" onClick={() => reveal(d, [id])} title={`Reveal ${id}`}>
-                        {itemDisplayName(doc, d.component, id)}
+                        {itemDisplayName(doc, d.component, id, session.registry)}
                         {d.port && d.itemIds[0] === id ? <span className="sb-problem__port">.{d.port}</span> : null}
                       </button>
                     ))}

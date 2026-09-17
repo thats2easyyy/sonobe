@@ -5,6 +5,7 @@
  */
 
 import { listComponentIds } from "./document.ts";
+import { getOwn } from "./ids.ts";
 import { LAYER_TYPES } from "./layerTypes.ts";
 import { createRegistry, findPort, resolveLayerProps, resolveNodePorts, type ResolvedPort } from "./registry.ts";
 import type { Component, Id, InputValue, LayerNode, PatchNode, Registry, SonobeDocument, ValueType } from "./types.ts";
@@ -128,7 +129,7 @@ function patchOrder(c: Component): Id[] {
     for (const value of Object.values(node.inputs)) {
       if (!isLinkInput(value)) continue;
       const source = value.link.split(".")[0]!;
-      if (source !== id && c.patches[source]) deps.get(id)!.add(source);
+      if (source !== id && getOwn(c.patches, source)) deps.get(id)!.add(source);
     }
   }
   const byPosition = (a: Id, b: Id) => c.patches[a]!.ui.x - c.patches[b]!.ui.x || c.patches[a]!.ui.y - c.patches[b]!.ui.y || (a < b ? -1 : a > b ? 1 : 0);
@@ -202,7 +203,7 @@ function componentOutline(doc: SonobeDocument, c: Component, detail: OutlineDeta
 export function getOutline(doc: SonobeDocument, componentId?: Id, options: OutlineOptions = {}): string {
   const detail = options.detail ?? "normal";
   if (componentId !== undefined) {
-    const c = doc.components[componentId];
+    const c = getOwn(doc.components, componentId);
     if (!c) throw new Error(`There's no component "${componentId}".`);
     return componentOutline(doc, c, detail, options.registry).join("\n");
   }

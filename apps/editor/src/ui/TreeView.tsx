@@ -2,6 +2,7 @@ import { ChevronRight } from "lucide-react";
 import { useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent, type MouseEvent, type PointerEvent, type ReactNode } from "react";
 import { cx } from "./lib/cx.ts";
 import { useControllableState, useLatest } from "./lib/hooks.ts";
+import { observeResize } from "./lib/observeResize.ts";
 import {
   findTreeNode,
   flattenTree,
@@ -50,6 +51,8 @@ export interface TreeViewProps<T extends TreeNodeLike<T>> {
   renderTrailing?: (node: T, state: TreeRowState) => ReactNode;
   /** Dim a row (hidden layers). */
   isDimmed?: (node: T) => boolean;
+  /** Extra data attributes on a row's element, such as drop-target markers other panels look for. */
+  getRowProps?: (node: T) => Readonly<Record<`data-${string}`, string>> | undefined;
   rowHeight?: number;
   indent?: number;
   /** Row count above which only visible rows render. */
@@ -115,6 +118,7 @@ export function TreeView<T extends TreeNodeLike<T>>({
   renderActions,
   renderTrailing,
   isDimmed,
+  getRowProps,
   rowHeight = 26,
   indent = 14,
   virtualizeThreshold = 150,
@@ -149,9 +153,7 @@ export function TreeView<T extends TreeNodeLike<T>>({
     if (!el) return;
     const measure = () => setViewport((v) => (v.height === el.clientHeight && v.top === el.scrollTop ? v : { top: el.scrollTop, height: el.clientHeight }));
     measure();
-    const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(measure);
-    observer?.observe(el);
-    return () => observer?.disconnect();
+    return observeResize([el], measure);
   }, []);
 
   const virtual = rows.length > virtualizeThreshold;
@@ -364,6 +366,7 @@ export function TreeView<T extends TreeNodeLike<T>>({
     const label = getLabel(row.node);
     return (
       <div
+        {...getRowProps?.(row.node)}
         key={row.id}
         id={rowDomId(row.id)}
         role="treeitem"

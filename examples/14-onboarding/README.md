@@ -9,7 +9,7 @@ Level 1–2 · Guides: [02 ISAT](../../docs/guides/02-isat.md), [03 States and p
 - A Counter for steps in order: Increase, Decrease, and Jump.
 - Keeping the count in bounds by enabling inputs instead of clamping afterwards.
 - Reading "what was true last frame" with Delay One Frame, so one tap can't do two things.
-- Relabeling a button with If Else, and hiding a button by fading it to 0.
+- Relabeling a button with If / Else, and hiding a button by fading it to 0.
 - Two Interactions on the same button that do different things depending on the page.
 
 ## Build it step by step
@@ -25,7 +25,7 @@ Level 1–2 · Guides: [02 ISAT](../../docs/guides/02-isat.md), [03 States and p
    - Two Swipes on the swipe area (Axis Horizontal, Min Distance 60, Min Velocity 400): `swipe_forward`, enabled by `can_go_forward`, and `swipe_back`, enabled by `can_go_back`.
 6. **Count.** Add an Or (`go_forward`) of `tap_next.tap` and `swipe_forward.swipedLeft` into the Counter's Increase. Connect `swipe_back.swipedRight` to Decrease, and `tap_skip.tap` to Jump with Jump to Number 2.
 7. **Slide.** Add a Multiply (`pages_x`: count × −402), a Pop Animation (`pages_spring`, Bounciness 2, Speed 13), and a Point (`pages_position`) into the Pages' Position.
-8. **The last page.** Add Equals (`on_last_page`) on the count. Add an If Else (`button_label`, text: "Get started" or "Next") into the label. Add a Not (`skip_visible`) and a Classic Animation (`skip_fade`, 0.2 s) into Skip's Opacity.
+8. **The last page.** Add Equals (`on_last_page`) on the count. Add an If / Else (`button_label`, text: "Get started" or "Next") into the label. Add a Not (`skip_visible`) and a Classic Animation (`skip_fade`, 0.2 s) into Skip's Opacity.
 9. **Finish.** Add a Switch (`onboarding_done`) turned on by `tap_get_started.tap`, and a Classic Animation (`welcome_fade`, 0.35 s) into the Welcome's Opacity.
 10. **Dots.** Add a Loop (`page_dots`, 3), a Math Expression (`dot_x`: `177 + index * 24`), a Point (`dot_position`), Equals (`dot_is_current`), a Pop Animation (`dot_spring`), and Transitions for size (`dot_size`) and color (`dot_color`).
 
@@ -60,7 +60,7 @@ Tap Get Started ──tap──▶ Onboarding Done ──▶ Welcome Fade ──
 | `go_forward` | Or | Next or a left swipe both move forward. |
 | `tap_skip` | Interaction | Jumps to the last page. |
 | `pages_x`, `pages_spring`, `pages_position` | Multiply, Pop Animation, Point | Turn the page number into a position and slide there. |
-| `on_last_page`, `button_label`, `skip_visible`, `skip_fade` | Equals, If Else, Not, Classic Animation | Last-page looks: the label and Skip. |
+| `on_last_page`, `button_label`, `skip_visible`, `skip_fade` | Equals, If / Else, Not, Classic Animation | Last-page looks: the label and Skip. |
 | `onboarding_done`, `welcome_fade` | Switch, Classic Animation | Finish and show the welcome screen. |
 | `page_dots`, `dot_x`, `dot_position`, `dot_is_current`, `dot_spring`, `dot_size`, `dot_color` | Loop and friends | The three page dots from one layer. |
 

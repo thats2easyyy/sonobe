@@ -41,21 +41,22 @@ A thrown layer needs the release speed. Wire the gesture's `down` into the sprin
 
 Nothing changed when a write fails. Fix the call and retry.
 
-| Code                                                 | Meaning                                      | Fix                                                                                   |
-| ---------------------------------------------------- | -------------------------------------------- | ------------------------------------------------------------------------------------- |
-| `unknown_patch_type`, `unknown_port`, `unknown_prop` | a name doesn't exist                         | use the "did you mean"; confirm with `describe_patch_types` or `describe_layer_types` |
-| `type_mismatch`                                      | the output type can't drive that input       | apply a suggested converter (the ops are included) or pick a matching port            |
-| `wrong_direction`                                    | `from` is an input or `to` is an output      | swap them (suggested op included)                                                     |
-| `already_connected`                                  | the input already has a connection           | `replaceExisting: true`, or merge sources with `or` (pulses) or `add` (numbers)       |
-| `self_edge`                                          | a patch feeds its own input                  | put a `delay1` in between                                                             |
-| `revision_conflict`                                  | the document changed since you read it       | re-read, then retry with the new `expectedRevision`                                   |
-| `unknown_ref`                                        | a `$ref` wasn't defined earlier in the batch | add `"ref"` on the op that creates the item                                           |
-| `human_edit` (undo)                                  | the newest change is the person's            | ask first; pass its `txnId` to undo it anyway                                         |
+| Code                                                 | Meaning                                 | Fix                                                                                   |
+| ---------------------------------------------------- | --------------------------------------- | ------------------------------------------------------------------------------------- |
+| `unknown_patch_type`, `unknown_port`, `unknown_prop` | a name doesn't exist                    | use the "did you mean"; confirm with `describe_patch_types` or `describe_layer_types` |
+| `type_mismatch`                                      | the output type can't drive that input  | apply a suggested converter (the ops are included) or pick a matching port            |
+| `wrong_direction`                                    | `from` is an input or `to` is an output | swap them (suggested op included)                                                     |
+| `already_connected`                                  | the input already has a connection      | `replaceExisting: true`, or merge sources with `or` (pulses) or `add` (numbers)       |
+| `self_edge`                                          | a patch feeds its own input             | put a `delay1` in between                                                             |
+| `revision_conflict`                                  | the document changed since you read it  | re-read, then retry with the new `expectedRevision`                                   |
+| `unknown_ref`                                        | no op in the batch defines that `$ref`  | add `"ref"` on the op that creates the item; the error lists the batch's refs         |
+| `human_edit` (undo)                                  | the newest change is the person's       | ask first; pass its `txnId` to undo it anyway                                         |
 
 ## Diagnostics worth knowing
 
 - `pulse_into_state` (warning): a pulse drives a steady input. Insert a Switch, using the suggested ops.
-- `feedback_loop` (info): the loop reads the previous frame's value. That's fine when intended.
+- `feedback_loop` (info): an intentional loop. It goes through `delay1`, or values only come back when a pulse fires (a Next button's page jump, a sample-and-hold grab). Nothing to fix; describe it as part of the design.
+- `feedback_loop` (warning): values feed back every frame, so they can drift or oscillate. If it's on purpose, insert `delay1` on the named cable (the ops are included); otherwise disconnect it.
 - `unused_patch` (info): nothing uses the patch's outputs.
 - `dangling_link`, `missing_layer` (errors): something points at a deleted item. Disconnect it or reset the value.
 
@@ -64,5 +65,5 @@ Nothing changed when a write fails. Fix the call and retry.
 - **Values look wrong in simulation right after edits.** The session hot-swapped the document and kept state. `sim_reset` gives a clean start.
 - **"isn't implemented yet"** in runtime issues: that patch outputs default values for now. Pick another patch, or tell the person.
 - **A loop shows one copy.** Every copy sits at the same position. Feed `gridLayout` positions into the layer.
-- **Screenshots fail** in headless mode. Verify with `sim_get_values` and `sim_trace`, and suggest opening the project in the Sonobe app.
+- **A headless screenshot looks slightly off.** Headless servers draw the screen themselves: text uses approximate metrics, and video, Lottie and shaders are placeholders. Check exact values with `sim_get_values`, or open the project in the Sonobe app.
 - **Changes vanished** after a headless session: the host wasn't autosaving, so call `save_document`. `get_document_info` shows "unsaved changes".

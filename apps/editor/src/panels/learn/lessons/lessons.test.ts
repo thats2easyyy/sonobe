@@ -4,7 +4,7 @@ import { createManualScheduler } from "../../../runtime/scheduler.ts";
 import { getRegistry } from "../../../state/registry.ts";
 import { createEditorSession, type EditorSession } from "../../../state/session.ts";
 import { BUILDING_WITH_CLAUDE, FIRST_PROTOTYPE, getLesson, LESSONS, LISTS_WITH_LOOPS, nextLesson, photoChain, SPRING_FEEL, STATES_AND_PULSES } from "./catalog.ts";
-import { countLayerCopies, createLessonContext, evaluateStep, loadLessonStarter, stepTarget, type LessonContextInput } from "./runner.ts";
+import { countLayerCopies, createLessonContext, evaluateStep, isLessonDocumentOpen, LESSON_META_KEY, lessonOfDocument, loadLessonStarter, stepTarget, type LessonContextInput } from "./runner.ts";
 import type { Lesson } from "./types.ts";
 
 const registry = getRegistry();
@@ -171,5 +171,25 @@ describe("loadLessonStarter", () => {
     expect(session.document.getState().dirty).toBe(false);
     expect(await loadLessonStarter(target, BUILDING_WITH_CLAUDE)).toBe(true);
     expect(asked).toBe(2);
+  });
+
+  it("marks the practice prototype, so progress resumes only while it's open", async () => {
+    session = createEditorSession({ host: null, autoplay: false, scheduler: createManualScheduler(), textMeasurer: "approximate" });
+    const target = { registry: session.registry, document: session.document, selection: session.selection, confirmDiscardChanges: async () => true };
+    const demo = session.document.getState().doc;
+    expect(lessonOfDocument(demo)).toBeUndefined();
+    expect(isLessonDocumentOpen(FIRST_PROTOTYPE, demo)).toBe(false);
+    expect(isLessonDocumentOpen(BUILDING_WITH_CLAUDE, demo)).toBe(true);
+
+    await loadLessonStarter(target, FIRST_PROTOTYPE);
+    const practice = session.document.getState().doc;
+    expect(practice.components[practice.project.root]!.meta).toMatchObject({ [LESSON_META_KEY]: "first-prototype" });
+    expect(isLessonDocumentOpen(FIRST_PROTOTYPE, practice)).toBe(true);
+    expect(isLessonDocumentOpen(STATES_AND_PULSES, practice)).toBe(false);
+    expect(getDiagnostics(practice, registry).filter((d) => d.severity === "error")).toEqual([]);
+
+    // Editing the practice prototype (including patch editor positions in meta) keeps the mark.
+    session.document.getState().apply([{ op: "updateComponent", id: practice.project.root, meta: { patchEditor: { nodes: { "@photo": [900, 60] } } } }], { label: "Move" });
+    expect(lessonOfDocument(session.document.getState().doc)).toBe("first-prototype");
   });
 });

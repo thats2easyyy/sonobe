@@ -46,8 +46,17 @@ function boundaryFlags(target: string): boolean[] {
   return flags;
 }
 
+export interface FuzzyMatchOptions {
+  /**
+   * Every run of matched characters must start a word: "tu" finds "Tidy Up", but "copy" doesn't find
+   * "Close Prototype" (c, o, p, y scattered inside words). For command titles, where scattered letters
+   * surface unrelated results.
+   */
+  wordStart?: boolean;
+}
+
 /** Match one query against one string. Whitespace in the query is ignored. */
-export function fuzzyMatch(query: string, target: string): FuzzyMatch | null {
+export function fuzzyMatch(query: string, target: string, options: FuzzyMatchOptions = {}): FuzzyMatch | null {
   const q = query.replace(/\s+/g, "").toLowerCase();
   if (q.length === 0) return { score: 0, indices: [] };
   const t = target.toLowerCase();
@@ -133,6 +142,12 @@ export function fuzzyMatch(query: string, target: string): FuzzyMatch | null {
     indices[i] = j;
     j = from[i * m + j]!;
   }
+  if (options.wordStart) {
+    for (let i = 0; i < n; i++) {
+      const startsRun = i === 0 || indices[i] !== indices[i - 1]! + 1;
+      if (startsRun && !boundary[indices[i]!]) return null;
+    }
+  }
 
   const compactTarget = t.replace(/\s+/g, "");
   const trimmedQuery = query.trim().toLowerCase();
@@ -157,6 +172,8 @@ export interface FuzzyKey<T> {
   get: (item: T) => string | readonly string[] | null | undefined;
   /** Score multiplier (default 1). Use < 1 for secondary fields like descriptions. */
   weight?: number;
+  /** Only word-start matches count (see FuzzyMatchOptions.wordStart). */
+  wordStart?: boolean;
 }
 
 export interface FieldMatch {
@@ -185,7 +202,7 @@ function bestFieldMatch<T>(item: T, query: string, keys: readonly FuzzyKey<T>[])
     const values: readonly string[] = typeof raw === "string" ? [raw] : raw;
     const weight = key.weight ?? 1;
     for (const value of values) {
-      const match = fuzzyMatch(query, value);
+      const match = fuzzyMatch(query, value, key.wordStart ? { wordStart: true } : {});
       if (!match) continue;
       const weighted = match.score * weight;
       if (!best || weighted > best.score) best = { key: key.name, score: weighted, match: { value, indices: match.indices } };

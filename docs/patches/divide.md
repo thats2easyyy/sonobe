@@ -23,7 +23,7 @@ Divide starts with **Value 1** and divides it by every input below it: Value 1 �
 ## Tips
 - Normalize: scroll distance ÷ scrollable height gives 0–1 progress.
 - Center a layer: (screen width − layer width) ÷ 2.
-- Find a grid row: Loop Index ÷ columns, then Round's Rounded Down.
+- Find a grid row: Loop's Index ÷ columns, then Round's Rounded Down.
 
 ## Coming from Origami
 This is Origami's **÷** patch. Origami doesn't document what dividing by zero does; Sonobe outputs 0 and warns.

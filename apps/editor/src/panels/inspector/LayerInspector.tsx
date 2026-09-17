@@ -14,7 +14,7 @@ import { toast } from "../../ui/Toast.tsx";
 import { propHoverKey, useCableHover } from "../layers/cableHover.ts";
 import { relatedPatchIds } from "../layers/layerTree.ts";
 import { touchMenuEntries } from "../layers/touchActions.tsx";
-import { acceptsCable, cableSourceName, useCableDrag, type LayerPropTarget } from "../patch-editor/index.ts";
+import { acceptsCable, cableSourceName, useCableDrag, type LayerPropTarget } from "../patch-editor/api.ts";
 import { assetKindsFor, importAssetForField } from "./assetImport.ts";
 import { controlKind } from "./controls.tsx";
 import { FieldRow, type FieldRowCable } from "./FieldRow.tsx";
@@ -104,13 +104,15 @@ export function LayerInspector({ layerIds }: LayerInspectorProps) {
 
   const importDropped = async (file: File) => {
     if (!contentField) return;
-    const result = await importAssetForField(session, file, assetKindsFor(contentField.type), contentField.port.name);
+    // Importing the file and setting the content undo together.
+    const coalesceKey = `inspector-import:${contentField.key}:${Date.now()}`;
+    const result = await importAssetForField(session, file, assetKindsFor(contentField.type), contentField.port.name, { coalesceKey });
     if (!result.ok) {
       toast({ id: "inspector-import", title: result.error, tone: "warn" });
       return;
     }
     const current = session.document.getState().doc.components[componentId];
-    if (current) edit.apply(planFieldSet(current, contentField, { asset: result.assetId }), editLabel(contentField, subject));
+    if (current) edit.apply(planFieldSet(current, contentField, { asset: result.assetId }), editLabel(contentField, subject), { coalesceKey });
   };
 
   const fileHandlers = contentField
@@ -180,7 +182,7 @@ export function LayerInspector({ layerIds }: LayerInspectorProps) {
               {instanceTarget
                 ? publishedCount
                   ? `${publishedCount} published ${publishedCount === 1 ? "input" : "inputs"}`
-                  : "No published inputs yet. Publish some inside the component."
+                  : "No published inputs yet. Inside the component, point at a port and press ⌥P, or right-click it and choose Publish."
                 : `This instance points at “${single.component ?? "nothing"}”, which doesn't exist.`}
             </div>
           </div>

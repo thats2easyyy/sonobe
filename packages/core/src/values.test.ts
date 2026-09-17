@@ -55,6 +55,22 @@ describe("numbers", () => {
     expect(roundNumber(Number.NaN)).toBe(0);
     expect(formatNumber(2.5000000001)).toBe("2.5");
   });
+
+  it("is idempotent at every magnitude, so saved files pass fmt --check", () => {
+    expect(roundNumber(-4345500469.207764)).toBe(-4345500469.207764);
+    // Existing half-way rounding below 2^32 stays byte-identical.
+    expect(roundNumber(50.8102045)).toBe(50.810205);
+    let seed = 42;
+    const random = () => ((seed = (seed * 1103515245 + 12345) % 2 ** 31) / 2 ** 31);
+    for (const [min, max] of [[0, 1e3], [1e6, 1e9], [2 ** 31, 2 ** 32], [2 ** 32, 2 ** 33], [2 ** 33, 1e15]] as const) {
+      for (let i = 0; i < 4000; i++) {
+        const x = (min + random() * (max - min)) * (i % 2 ? -1 : 1);
+        const once = roundNumber(x);
+        expect(roundNumber(once)).toBe(once);
+        expect(roundNumber(JSON.parse(String(once)) as number)).toBe(once);
+      }
+    }
+  });
 });
 
 describe("defaults", () => {

@@ -3,7 +3,13 @@
  * console formatting that never runs getters.
  */
 
-import { InternalAbort, activeRealm, callValue, isObjectLike, registerIntrinsics } from "../sandbox/realm.ts";
+import { ACTIVE, InternalAbort, activeRealm, callValue, isObjectLike, registerIntrinsics } from "../sandbox/realm.ts";
+
+/** Charge a web extra that allocates in proportion to its input (outside script code this does nothing). */
+function charge(bytes: number): void {
+  ACTIVE.realm?.chargeMemory(bytes);
+  ACTIVE.realm?.chargeWork(bytes >>> 2);
+}
 
 // ---------------------------------------------------------------------------
 // Base64
@@ -55,6 +61,7 @@ export function decodeBase64Bytes(text: string): Uint8Array | null {
 
 export function btoaImpl(input: unknown): string {
   const text = String(input);
+  charge(text.length * 4);
   const bytes = new Uint8Array(text.length);
   for (let i = 0; i < text.length; i++) {
     const code = text.charCodeAt(i);
@@ -65,7 +72,9 @@ export function btoaImpl(input: unknown): string {
 }
 
 export function atobImpl(input: unknown): string {
-  const bytes = decodeBase64Bytes(String(input));
+  const text = String(input);
+  charge(text.length * 3);
+  const bytes = decodeBase64Bytes(text);
   if (!bytes) throw namedError("InvalidCharacterError", "atob got text that isn't valid base64.");
   let out = "";
   for (const b of bytes) out += String.fromCharCode(b);
@@ -94,7 +103,9 @@ export class ScriptTextEncoder {
   }
 
   encode(input: unknown = ""): Uint8Array {
-    return utf8Encoder.encode(String(input));
+    const text = String(input);
+    charge(text.length * 3);
+    return utf8Encoder.encode(text);
   }
 
   encodeInto(source: unknown, destination: unknown): { read: number; written: number } {

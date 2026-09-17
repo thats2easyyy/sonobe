@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { describe, expect, it, vi } from "vitest";
-import { CommandRegistry, type Command } from "./commandRegistry.ts";
+import { commandDisabledReason, CommandRegistry, commandTitle, type Command } from "./commandRegistry.ts";
 import { KeyboardShortcutManager } from "./shortcutManager.ts";
 
 const cmd = (id: string, extra: Partial<Command> = {}): Command => ({ id, title: id, run: vi.fn(), ...extra });
@@ -110,5 +110,25 @@ describe("CommandRegistry", () => {
     detach();
     expect(press({ key: "7", metaKey: true })).toBe(false);
     expect(manager.bindings()).toHaveLength(0);
+  });
+});
+
+describe("palette listing", () => {
+  it("lists commands that aren't hidden (asking hidden functions), with live titles and reasons", () => {
+    const registry = new CommandRegistry();
+    let editorMounted = false;
+    registry.register([
+      { id: "edit.undo", title: "Undo", label: () => "Undo Mute Card Shadow", when: () => false, disabledReason: "Nothing to undo", run: () => undefined },
+      { id: "patch.alignLeft", title: "Align Left Edges", hidden: () => editorMounted, run: () => undefined },
+      { id: "app.secret", title: "Secret", hidden: true, run: () => undefined },
+    ]);
+    expect(registry.listed().map((c) => c.id)).toEqual(["edit.undo", "patch.alignLeft"]);
+    expect(registry.available().map((c) => c.id)).toEqual(["patch.alignLeft"]);
+    editorMounted = true;
+    expect(registry.listed().map((c) => c.id)).toEqual(["edit.undo"]);
+    expect(commandTitle(registry.get("edit.undo")!)).toBe("Undo Mute Card Shadow");
+    expect(commandTitle(registry.get("app.secret")!)).toBe("Secret");
+    expect(commandDisabledReason(registry.get("edit.undo")!)).toBe("Nothing to undo");
+    expect(commandDisabledReason(registry.get("app.secret")!)).toBe("Not available right now");
   });
 });

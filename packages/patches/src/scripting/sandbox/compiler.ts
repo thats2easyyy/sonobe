@@ -31,6 +31,7 @@ import {
   type Realm,
   type ScriptFunctionRecord,
 } from "./realm.ts";
+import { chargeElements, chargeKeys } from "./natives.ts";
 
 // ---------------------------------------------------------------------------
 // Runtime structures
@@ -122,6 +123,7 @@ function defineData(target: object, key: PropertyKey, value: unknown): void {
 function copyDataProperties(target: object, source: unknown, excluded?: ReadonlySet<PropertyKey>): void {
   if (source === null || source === undefined) return;
   const from = Object(source) as object;
+  chargeKeys(from, 64);
   for (const key of Reflect.ownKeys(from)) {
     if (excluded?.has(key)) continue;
     const d = Reflect.getOwnPropertyDescriptor(from, key);
@@ -2656,6 +2658,7 @@ class Compiler {
         const o = right(env);
         if (o === null || o === undefined) return undefined;
         const obj = Object(o) as object;
+        chargeKeys(obj);
         const keys: string[] = [];
         for (const k in obj) keys.push(k);
         for (const k of keys) {
@@ -3114,6 +3117,7 @@ class Compiler {
       if (isForIn) {
         if (iterable === null || iterable === undefined) return undefined;
         const obj = Object(iterable) as object;
+        chargeKeys(obj);
         const keys: string[] = [];
         for (const k in obj) keys.push(k);
         const values = keys.values();
@@ -3204,6 +3208,7 @@ function construct(func: Function, newTarget: unknown, thisEnv: Env, thisIndex: 
 
 function spreadInto(out: unknown[], value: unknown): void {
   if (Array.isArray(value) && value[Symbol.iterator] === ARRAY_VALUES) {
+    chargeElements(value);
     for (let i = 0; i < value.length; i++) out.push(value[i]);
     return;
   }

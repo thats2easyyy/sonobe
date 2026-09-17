@@ -47,6 +47,14 @@ A component's interface is the short list of things the outside world can see.
 
 Published inputs on a layer component show up in the inspector as extra properties on every instance, right under the usual ones.
 
+To publish a port, open the component (double-click its patch or instance) and:
+
+- point at the port and press ⌥P, or
+- right-click the port and choose **Publish as Component Input** (or **Output**), or
+- drag a cable from the port onto the **Component Inputs** or **Component Outputs** node.
+
+A published input keeps the port's current value as its default. Press ⌥P on the port again to unpublish it. With nothing selected inside the component, the Inspector lists its published inputs and outputs, where you can rename them, change an input's default, or unpublish them. Group into Component names the new component right away: type a name and press Return.
+
 Here's a like button's interface:
 
 | Port | Direction | Type | Why it's published |

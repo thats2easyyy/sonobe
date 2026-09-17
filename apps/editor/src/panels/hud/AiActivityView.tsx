@@ -11,6 +11,7 @@ import { formatRelativeTime, undoActionLabel, type ActivityItem, type ChangeActi
 import { useActivityFeed, useNow } from "./hooks.ts";
 import { itemDisplayName, summarizeNames } from "./itemNames.ts";
 import { revealItems } from "./reveal.ts";
+import { getRegistry } from "../../state/registry.ts";
 
 export interface AiActivityViewProps {
   /** Shows a "Connect Claude" button in the empty state. */
@@ -21,7 +22,7 @@ const lowerFirst = (text: string) => (/^[A-Z][a-z]/.test(text) ? text.charAt(0).
 
 function namesFor(doc: SonobeDocument, item: { ids: readonly string[]; components: readonly string[] } | { ids: readonly string[]; component?: string }): string {
   const component = "components" in item ? item.components[0] : item.component;
-  return summarizeNames(item.ids.map((id) => itemDisplayName(doc, component, id)));
+  return summarizeNames(item.ids.map((id) => itemDisplayName(doc, component, id, getRegistry())));
 }
 
 /** AI Activity tab: what Claude is doing now, and each change it made as one undoable entry. */

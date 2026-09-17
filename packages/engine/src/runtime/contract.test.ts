@@ -1,9 +1,10 @@
-import { applyOps, type LayerRef } from "@sonobe/core";
+import { applyOps, feedbackEdges, getDiagnostics, type LayerRef, type SonobeDocument } from "@sonobe/core";
 import { describe, expect, it } from "vitest";
 import { buildDoc, createMockRegistry, createTestRuntime, defineMock, port, runFrames, type ComponentInput } from "../testing/index.ts";
 import type { InputEvent, LogSource, PatchDefinition, SceneNode } from "../types.ts";
 import { compileDocument } from "./compile.ts";
-import { isLoop } from "./loop.ts";
+import { bypassMap, type InputSlot, type OutputSlot } from "./evaluate.ts";
+import { isLoop, makeLoop } from "./loop.ts";
 import { createRuntime } from "./runtime.ts";
 
 const items = (v: unknown) => (isLoop(v) ? v.items : v);
@@ -78,6 +79,75 @@ describe("contract: muted behavior", () => {
     expect(rt.getValue("v.velocity")).toBe(0);
     expect([rt.getValue("w.muted"), rt.getValue("w.value")]).toEqual([true, -1]);
     expect([rt.getValue("live.muted"), rt.getValue("live.value")]).toEqual([false, 4]);
+  });
+
+  it("bypass keeps each port's shape: whole-loop outputs take whole-loop inputs, per-item outputs take per-item inputs", () => {
+    const input = (key: string, wholeLoop = false): InputSlot => ({ key, type: "number", variant: true, wholeLoop, pulseSource: false, connected: true, default: 0, zero: 0 });
+    const output = (key: string, wholeLoop = false): OutputSlot => ({ key, type: "number", variant: true, wholeLoop, pulse: false, initial: 0, zero: wholeLoop ? makeLoop([]) : 0 });
+    expect(bypassMap([input("loop", true)], [output("sum")])).toEqual([-1]);
+    expect(bypassMap([input("item0")], [output("loop", true)])).toEqual([-1]);
+    expect(bypassMap([input("item0"), input("loop", true)], [output("loop", true), output("first")])).toEqual([1, 0]);
+
+    const doc = buildDoc({
+      layers: [{ id: "dot", type: "rectangle", name: "Dot", props: { size: [10, 10], opacity: { link: "total.sum" } } }],
+      patches: { items: { type: "loop", inputs: { count: 3 } }, total: { type: "loopSum", muted: true, inputs: { loop: { link: "items.index" } } } },
+    });
+    const rt = createTestRuntime(doc);
+    const frame = rt.step();
+    expect(rt.getRawValue("total.sum")).toBe(0);
+    expect(frame.roots.map((r) => r.key)).toEqual(["dot"]);
+  });
+});
+
+describe("contract: back-edges match core's feedback edges", () => {
+  const reg = createMockRegistry();
+  const engineBackEdges = (doc: SonobeDocument) =>
+    compileDocument(doc, reg)
+      .order.flatMap((n) => n.inputs.filter((_, i) => n.feedback[i]).map((s) => `${n.id}.${n.kind === "receiver" ? "name" : s.key}`))
+      .sort();
+  const coreBackEdges = (doc: SonobeDocument) => feedbackEdges(doc, "main", reg).map((e) => e.to).sort();
+
+  it("for loops closed through layer properties (any number of hops) and through variables", () => {
+    const layered = buildDoc({
+      layers: [{ id: "card", type: "rectangle", name: "Card", props: { size: [10, 10], opacity: { link: "b.output" } } }],
+      patches: {
+        a: { type: "add", inputs: { value1: { link: "@card.opacity" }, value2: 0.1 } },
+        b: { type: "multiply", inputs: { a: { link: "a.output" }, b: 1 } },
+      },
+    });
+    const twoHops = buildDoc({
+      layers: [
+        { id: "card", type: "rectangle", name: "Card", props: { size: [10, 10], opacity: { link: "b.output" } } },
+        { id: "shadow", type: "rectangle", name: "Shadow", props: { size: [10, 10], opacity: { link: "@card.opacity" } } },
+      ],
+      patches: {
+        a: { type: "add", inputs: { value1: { link: "@shadow.opacity" }, value2: 0.1 } },
+        b: { type: "multiply", inputs: { a: { link: "a.output" }, b: 1 } },
+      },
+    });
+    const shared = buildDoc({
+      patches: {
+        acc: { type: "add", inputs: { value1: { link: "r.output" }, value2: 1 } },
+        send: { type: "variableBroadcaster", settings: { name: "acc" }, inputs: { value: { link: "acc.output" } } },
+        r: { type: "variableReceiver", settings: { name: "acc" } },
+      },
+    });
+    const receiverLags = structuredClone(shared);
+    receiverLags.components.main!.patches.acc!.ui = { x: 400, y: 0 };
+    receiverLags.components.main!.patches.r!.ui = { x: 0, y: 0 };
+    for (const [doc, expected] of [
+      [layered, ["a.value1"]],
+      [twoHops, ["a.value1"]],
+      [shared, ["acc.value1"]],
+      [receiverLags, ["r.name"]],
+    ] as const) {
+      expect(engineBackEdges(doc)).toEqual(expected);
+      expect(coreBackEdges(doc)).toEqual(expected);
+      expect(getDiagnostics(doc, reg).some((d) => d.code === "feedback_loop")).toBe(true);
+    }
+    const rt = createTestRuntime(layered);
+    runFrames(rt, 3);
+    expect(rt.getValue("a.output")).toBeCloseTo(0.3, 9);
   });
 });
 

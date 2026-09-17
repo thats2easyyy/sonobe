@@ -1,6 +1,6 @@
 /**
  * Connect Claude helpers: MCP status parsing, the launch command for `sonobe mcp` (a repo checkout in
- * development, the installed CLI in production), the Claude Code command, the Claude Desktop config
+ * development, the app's bundled CLI in production), the Claude Code command, the Claude Desktop config
  * snippet and its file location, shell quoting, and example prompts.
  */
 
@@ -11,6 +11,8 @@ export interface McpStatusInfo {
   url: string | null;
   /** Path of ~/.sonobe/mcp.json. */
   tokenFile: string | null;
+  /** The app's bundled CLI launcher ("/Applications/Sonobe.app/Contents/Resources/cli/sonobe"), or null. */
+  cliPath: string | null;
 }
 
 /** Validate what `sonobeHost.getMcpStatus()` resolved (it crosses a context bridge as unknown). */
@@ -23,6 +25,7 @@ export function parseMcpStatus(value: unknown): McpStatusInfo | null {
     port: typeof v.port === "number" && Number.isFinite(v.port) ? v.port : null,
     url: typeof v.url === "string" && v.url ? v.url : null,
     tokenFile: typeof v.tokenFile === "string" && v.tokenFile ? v.tokenFile : null,
+    cliPath: typeof v.cliPath === "string" && v.cliPath.trim() ? v.cliPath : null,
   };
 }
 
@@ -51,8 +54,13 @@ export const CLI_ENTRY = "packages/cli/src/main.ts";
 export type LaunchMode = "checkout" | "installed";
 
 export interface LaunchOptions {
-  /** "checkout": run the CLI from a repo with node. "installed": the `sonobe` command. */
+  /** "checkout": run the CLI from a repo with node. "installed": the app's bundled CLI (`cliPath`), else `sonobe` on PATH. */
   mode: LaunchMode;
+  /**
+   * Installed mode: the full path of the app's CLI launcher. Claude Desktop doesn't read the shell's
+   * PATH, so a bare `sonobe` only works after `npm link -w @sonobe/cli` and only in a terminal.
+   */
+  cliPath?: string | null;
   /** Node executable for checkout mode. Default "node". */
   nodePath?: string;
   /** Repo root for checkout mode. */
@@ -69,7 +77,7 @@ export interface LaunchSpec {
 /** The process Claude should launch for Sonobe's MCP relay (or headless server). */
 export function mcpLaunchSpec(options: LaunchOptions): LaunchSpec {
   const tail = ["mcp", ...(options.headlessProject ? ["--headless", options.headlessProject] : [])];
-  if (options.mode === "installed") return { command: "sonobe", args: tail };
+  if (options.mode === "installed") return { command: options.cliPath?.trim() || "sonobe", args: tail };
   const repo = options.repoPath?.trim() || "/path/to/sonobe";
   return { command: options.nodePath?.trim() || "node", args: [joinRepoPath(repo, CLI_ENTRY), ...tail] };
 }

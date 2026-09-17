@@ -8,7 +8,7 @@
  * the welcome screen, and the dialogs load on demand so the first paint stays small.
  */
 
-import { getDevicePreset, type Id, type Op } from "@sonobe/core";
+import { getDevicePreset, type Op } from "@sonobe/core";
 import { FilePlus, FolderOpen, FolderSearch, Save, SaveAll, X } from "lucide-react";
 import { lazy, Suspense, useEffect, useState, type ReactNode } from "react";
 import { getDesktopHostApi } from "../host/detect.ts";
@@ -21,8 +21,9 @@ import { connectClaudeStore, useConnectClaude } from "../panels/connect/connectS
 import { Hud } from "../panels/hud/Hud.tsx";
 import { InspectorPanel } from "../panels/inspector/InspectorPanel.tsx";
 import { LayersPanel } from "../panels/layers/LayersPanel.tsx";
-import type { LearnView } from "../panels/learn/learnStorage.ts";
+import { lessonLayout, useLessonLayout } from "../panels/learn/lessons/lessonLayout.ts";
 import { useLessons } from "../panels/learn/lessons/lessonStore.ts";
+import { freeInsertPosition, PatchEditorBreadcrumbs } from "../panels/patch-editor/api.ts";
 import { devicePresetOps } from "../panels/viewer/viewerModel.ts";
 import { ViewerPanel } from "../panels/viewer/ViewerPanel.tsx";
 import { AppShell } from "../shell/AppShell.tsx";
@@ -42,6 +43,7 @@ import { ExternalChangeBanner } from "./ExternalChangeBanner.tsx";
 import { useHudAutoOpen } from "./hudAutoOpen.ts";
 import { learnNav, useLearnNav } from "./learnStore.ts";
 import { ServiceDialogs } from "./ServiceDialogs.tsx";
+import { ScriptTrustBanner } from "./ScriptTrustBanner.tsx";
 import { getAppSession } from "./session.ts";
 import { dialogsFor } from "./sessionServices.ts";
 import { applyMotionPreference, settingsStore } from "./settings.ts";
@@ -53,12 +55,12 @@ import "./workspace.css";
 
 const loadPatchEditor = () => import("../panels/patch-editor/PatchEditor.tsx");
 const PatchEditor = lazy(() => loadPatchEditor().then((m) => ({ default: m.PatchEditor })));
-const PatchEditorBreadcrumbs = lazy(() => import("../panels/patch-editor/components/Chrome.tsx").then((m) => ({ default: m.PatchEditorBreadcrumbs })));
 const LearnDrawer = lazy(() => import("../panels/learn/LearnDrawer.tsx").then((m) => ({ default: m.LearnDrawer })));
 const ConnectClaudeHost = lazy(() => import("../panels/connect/ConnectClaudeDialog.tsx").then((m) => ({ default: m.ConnectClaudeHost })));
 const WelcomeScreen = lazy(() => import("./welcome/WelcomeScreen.tsx").then((m) => ({ default: m.WelcomeScreen })));
 const SettingsDialog = lazy(() => import("./SettingsDialog.tsx").then((m) => ({ default: m.SettingsDialog })));
 const AboutDialog = lazy(() => import("./AboutDialog.tsx").then((m) => ({ default: m.AboutDialog })));
+const KeyboardShortcutsDialog = lazy(() => import("./KeyboardShortcutsDialog.tsx").then((m) => ({ default: m.KeyboardShortcutsDialog })));
 const AssistantHost = lazy(() => import("../panels/assistant/AssistantHost.tsx").then((m) => ({ default: m.AssistantHost })));
 
 export interface EditorAppProps {
@@ -112,6 +114,7 @@ function Overlays() {
       {welcomeOpen && <WelcomeScreen open reason={welcomeReason} onClose={() => welcomeStore.getState().hide()} />}
       {panel === "settings" && <SettingsDialog open onOpenChange={(open) => !open && appPanels.getState().hide()} />}
       {panel === "about" && <AboutDialog open onOpenChange={(open) => !open && appPanels.getState().hide()} onReportIssue={() => reportIssue(session)} />}
+      {panel === "shortcuts" && <KeyboardShortcutsDialog open onOpenChange={(open) => !open && appPanels.getState().hide()} />}
     </Suspense>
   );
 }
@@ -147,13 +150,6 @@ export function commandMenuEntries(registry: CommandRegistry, items: typeof FILE
   return entries;
 }
 
-/** Where a patch added from outside the patch editor goes: to the right of the existing graph. */
-export function insertPosition(patches: Readonly<Record<Id, { ui: { x: number; y: number } }>>): { x: number; y: number } {
-  const nodes = Object.values(patches);
-  if (nodes.length === 0) return { x: 40, y: 40 };
-  return { x: Math.max(...nodes.map((n) => n.ui.x)) + 240, y: Math.min(...nodes.map((n) => n.ui.y)) };
-}
-
 function PanelLoading({ label }: { label: string }) {
   return (
     <div className="sb-app-loading" role="status">
@@ -172,9 +168,12 @@ function Workspace() {
   const playing = useRuntimeState((s) => s.playing);
   const hudTab = useLayout((s) => s.hudTab);
   const hudCollapsed = useLayout((s) => s.collapsed.hud);
+  const drawer = useLayout((s) => s.drawer);
   const requestedLearnView = useLearnNav((s) => s.view);
   const lessonActive = useLessons((s) => s.active !== null);
-  const [learnView, setLearnView] = useState<LearnView | undefined>(undefined);
+  // A lesson on screen (its practice prototype open) docks the drawer and uses the lesson layout.
+  const lessonDocked = useLessonLayout((s) => s.active);
+  const [patchTools, setPatchTools] = useState<HTMLDivElement | null>(null);
   const [titlebarInset] = useState(() => (getDesktopHostApi()?.platform === "darwin" ? 80 : 0));
 
   // The in-app Assistant claims "ai.assistant" before useAppCommands, which skips ids already registered.
@@ -211,6 +210,11 @@ function Workspace() {
     [session],
   );
 
+  // A lesson layout saved before a reload, with no lesson left to show: put the normal layout back.
+  useEffect(() => {
+    if (drawer !== "learn" || !lessonActive) lessonLayout.releaseStale();
+  }, [drawer, lessonActive]);
+
   // The patch editor is on screen in split mode; fetch it even when the canvas is showing alone.
   useEffect(() => {
     const timer = setTimeout(() => void loadPatchEditor().catch(() => undefined), 1200);
@@ -232,10 +236,11 @@ function Workspace() {
 
   const insertPatch = (type: string) => {
     const componentId = session.currentComponentId();
-    const component = session.document.getState().doc.components[componentId];
-    if (!component) return;
+    const doc = session.document.getState().doc;
+    if (!doc.components[componentId]) return;
     const spec = session.registry.patches.get(type);
-    const position = insertPosition(component.patches);
+    // Free space below the graph, so it never lands on another patch or straddles a comment frame.
+    const position = freeInsertPosition(doc, componentId, session.registry, type);
     const ops: Op[] = [{ op: "addPatch", component: componentId, patch: { ref: "inserted", type, ui: { x: Math.round(position.x), y: Math.round(position.y) } } }];
     const result = session.document.getState().apply(ops, { label: `Insert ${spec?.name ?? type}`, defaultComponent: componentId });
     const id = result.idMap.inserted;
@@ -261,9 +266,14 @@ function Workspace() {
       onTogglePlay={() => session.runtime.togglePlay()}
       onRestart={() => session.runtime.restart()}
       titlebarInset={titlebarInset}
-      drawerDocked={lessonActive && learnView?.kind === "lesson"}
+      drawerDocked={lessonDocked}
       slots={{
-        banner: <ExternalChangeBanner />,
+        banner: (
+          <>
+            <ExternalChangeBanner />
+            <ScriptTrustBanner />
+          </>
+        ),
         claude: <ConnectClaudeButton />,
         layers: <LayersPanel onCollapse={() => layout.toggleCollapsed("layers", true)} />,
         viewer: <ViewerPanel onCollapse={() => layout.toggleCollapsed("viewer", true)} />,
@@ -274,14 +284,12 @@ function Workspace() {
             scope="patchEditor"
             surface="sunken"
             className="sb-app-patches"
-            headerContent={
-              <Suspense fallback={null}>
-                <PatchEditorBreadcrumbs />
-              </Suspense>
-            }
+            headerContent={<PatchEditorBreadcrumbs />}
+            // The patch editor docks its toolbar here, so it never covers node headers.
+            actions={<div ref={setPatchTools} className="sb-app-patches__tools" />}
           >
             <Suspense fallback={<PanelLoading label="Loading the patch editor…" />}>
-              <PatchEditor showBreadcrumbs={false} />
+              <PatchEditor showBreadcrumbs={false} toolbarContainer={patchTools} />
             </Suspense>
           </Panel>
         ),
@@ -289,7 +297,7 @@ function Workspace() {
         hud: <Hud tab={hudTab} onTabChange={(tab) => layout.setHudTab(tab)} collapsed={hudCollapsed} onToggleCollapse={() => layout.toggleCollapsed("hud")} onConnectClaude={() => connectClaudeStore.getState().show()} />,
         learn: (
           <Suspense fallback={<PanelLoading label="Loading Learn…" />}>
-            <LearnDrawer onClose={() => layout.setDrawer(null)} {...(requestedLearnView ? { view: requestedLearnView } : {})} onViewChange={setLearnView} onConnectClaude={() => connectClaudeStore.getState().show()} onInsertPatch={insertPatch} />
+            <LearnDrawer onClose={() => layout.setDrawer(null)} {...(requestedLearnView ? { view: requestedLearnView } : {})} onConnectClaude={() => connectClaudeStore.getState().show()} onInsertPatch={insertPatch} />
           </Suspense>
         ),
       }}

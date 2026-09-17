@@ -56,6 +56,8 @@ export interface TidyOptions {
 
 let elkPromise: Promise<ELK> | undefined;
 
+const ELK_MODULE: string = "elkjs/lib/elk.bundled.js";
+
 /**
  * ELK's GWT build needs a sloppy-mode global, so browsers load it as a classic script (bundlers that
  * wrap it as an ES module break it); Node imports it as a module.
@@ -78,7 +80,8 @@ function loadElk(): Promise<ELK> {
       if (!g.ELK) throw new Error("The layout engine didn't start.");
       return new g.ELK();
     }
-    const mod = (await import("elkjs/lib/elk.bundled.js")) as unknown as { default: new () => ELK };
+    // Node and tests only. The specifier isn't a literal, so browser builds don't emit a second copy of ELK as a chunk.
+    const mod = (await import(/* @vite-ignore */ ELK_MODULE)) as unknown as { default: new () => ELK };
     return new mod.default();
   })();
   elkPromise.catch(() => {

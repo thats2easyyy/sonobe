@@ -51,14 +51,46 @@ describe("edit actions: clipboard content", () => {
     expect(b.document.getState().historyEntries().map((e) => e.label)).toEqual(["Paste 3 items"]);
   });
 
+  it("pastes layers with component instances into another prototype", () => {
+    const a = make();
+    const ops: Op[] = [
+      { op: "addComponent", component: { id: "button", name: "Button", kind: "layerComponent" } },
+      { op: "addLayer", component: "button", layer: { id: "bg", type: "rectangle", name: "Bg" } },
+      { op: "addLayer", layer: { id: "card", type: "group", name: "Card", children: [{ id: "cta", type: "componentInstance", name: "CTA", component: "button" }] } },
+      { op: "addLayer", layer: { id: "plain", type: "rectangle", name: "Plain" } },
+    ];
+    expect(a.document.getState().apply(ops, { label: "Build" }).ok).toBe(true);
+    a.selection.getState().select({ layers: ["card", "plain"] });
+    const fragment = copySelection(a)!;
+
+    const b = make();
+    expect(pasteFragment(b, fragment)).toMatchObject({ ok: true, layers: ["card", "plain"], droppedInstances: 0 });
+    expect(b.document.getState().doc.components.button!.layers.map((l) => l.id)).toEqual(["bg"]);
+  });
+
+  it("duplicating a JavaScript patch gives the copy its own script file", () => {
+    const s = make();
+    const ops: Op[] = [
+      { op: "setScript", file: "js_1.js", source: "// hi" },
+      { op: "addPatch", patch: { id: "js_1", type: "javascript", settings: { script: "js_1.js" }, ui: { x: 0, y: 0 } } },
+    ];
+    expect(s.document.getState().apply(ops, { label: "Build" }).ok).toBe(true);
+    s.selection.getState().select({ patches: ["js_1"] });
+    expect(duplicateSelection(s)).toMatchObject({ ok: true, patches: ["js_2"] });
+    const doc = s.document.getState().doc;
+    expect(doc.components.main!.patches.js_2!.settings).toEqual({ script: "js_1_2.js" });
+    expect(doc.scripts).toEqual({ "js_1.js": "// hi", "js_1_2.js": "// hi" });
+  });
+
   it("duplicates and cuts comments", () => {
     const s = make();
     s.document.getState().apply([{ op: "addComment", comment: { id: "note", text: "Remember", rect: [10, 10, 100, 50] } }], { label: "Comment" });
     s.selection.getState().select({ comments: ["note"] });
     expect(duplicateSelection(s)).toMatchObject({ ok: true, comments: ["note_2"] });
+    // The copy steps diagonally (24 pt steps) until it clears the original 100 × 50 frame.
     expect(s.document.getState().doc.components.main!.comments.map((c) => c.rect)).toEqual([
       [10, 10, 100, 50],
-      [34, 34, 100, 50],
+      [82, 82, 100, 50],
     ]);
     s.selection.getState().select({ comments: ["note_2"] });
     expect(cutSelection(s)).toMatchObject({ ok: true, fragment: { comments: [{ id: "note_2" }] } });

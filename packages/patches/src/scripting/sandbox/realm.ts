@@ -8,11 +8,19 @@
  *   built-ins (Object, Reflect), or read wall-clock time (Date) for safe versions;
  * - built-in objects are "intrinsics": script code can read them but never write to them;
  * - native mutators (Array.prototype.push...) can't be pointed at intrinsics.
- * This isn't a WebAssembly isolate (see the javascript patch's known gaps), but it never runs script
- * text through `eval` or `Function`, and runaway scripts stop at their budget.
+ * It never runs script text through `eval` or `Function`.
+ *
+ * Budgets are cooperative: the interpreter checks them at loops and calls, and the built-ins that could
+ * do a lot in one native call are guarded so they stay bounded (regexp.ts runs regular expressions on
+ * the budget; natives.ts charges bulk allocations and element visits before they run). What isn't
+ * covered: this isn't a WebAssembly isolate, so memory is counted per invocation from projections, not
+ * measured, and memory a script keeps across invocations isn't capped. See the javascript patch's
+ * Budgets notes in the catalog.
  */
 
+import { installNativeGuards, chargeElements, chargeKeys } from "./natives.ts";
 import { SafePromise } from "./promise.ts";
+import { installRegExpGuards } from "./regexp.ts";
 
 /** Maximum nesting of script function calls. */
 export const MAX_CALL_DEPTH = 256;
@@ -20,8 +28,21 @@ export const MAX_CALL_DEPTH = 256;
 export const DETERMINISTIC_TICK_LIMIT = 2_000_000;
 /** Wall-clock milliseconds allowed per invocation in live runtimes. */
 export const LIVE_BUDGET_MS = 50;
+/**
+ * A wall-clock backstop for deterministic runtimes. They stop at a fixed interrupt count, so this only
+ * fires when native work between interrupt checks is unusually slow.
+ */
+export const DETERMINISTIC_WALL_MS = 1000;
+/** Interrupt checks between wall-clock reads. */
+const CHECK_INTERVAL = 256;
 /** Longest string a script may build (64 MB of UTF-16). */
 export const MAX_STRING_LENGTH = 32 * 1024 * 1024;
+/** Native allocation one invocation may project (arrays, typed arrays, buffers, bulk strings). */
+export const MAX_INVOCATION_BYTES = 64 * 1024 * 1024;
+/** Elements one native call may visit (an upfront projection; above it the call doesn't run). */
+export const MAX_NATIVE_WORK = 64_000_000;
+/** Element visits charged as one interrupt check. */
+export const WORK_PER_TICK = 32;
 
 export const TOO_LONG_MESSAGE = "The script took too long. Check for a loop that never ends.";
 export const TOO_MUCH_MEMORY_MESSAGE = "The script used too much memory.";
@@ -87,6 +108,7 @@ export class Realm {
   private ticks = 0;
   private nextCheck = 0;
   private deadline = 0;
+  private allocated = 0;
   private readonly jobs: (() => boolean | void)[] = [];
   private jobHead = 0;
   private draining = false;
@@ -103,19 +125,37 @@ export class Realm {
   beginInvocation(): void {
     this.ticks = 0;
     this.depth = 0;
-    if (this.deterministic) this.nextCheck = DETERMINISTIC_TICK_LIMIT;
-    else {
-      this.nextCheck = 256;
-      this.deadline = performance.now() + LIVE_BUDGET_MS;
-    }
+    this.allocated = 0;
+    this.nextCheck = CHECK_INTERVAL;
+    this.deadline = performance.now() + (this.deterministic ? DETERMINISTIC_WALL_MS : LIVE_BUDGET_MS);
   }
 
-  /** An interrupt check: loop iterations and function calls. */
+  /** An interrupt check: loop iterations, function calls, and regular expression steps. */
   tick(): void {
-    if (++this.ticks < this.nextCheck) return;
-    if (this.deterministic) throw new InternalAbort("timeout");
+    if (++this.ticks >= this.nextCheck) this.check();
+  }
+
+  private check(): void {
+    if (this.deterministic && this.ticks >= DETERMINISTIC_TICK_LIMIT) throw new InternalAbort("timeout");
     if (performance.now() > this.deadline) throw new InternalAbort("timeout");
-    this.nextCheck = this.ticks + 256;
+    this.nextCheck = this.deterministic ? Math.min(this.ticks + CHECK_INTERVAL, DETERMINISTIC_TICK_LIMIT) : this.ticks + CHECK_INTERVAL;
+  }
+
+  /** Count memory a native call is about to allocate; stops the invocation above its allowance. */
+  chargeMemory(bytes: number): void {
+    if (!(bytes > 0)) return;
+    this.allocated += bytes;
+    if (this.allocated > MAX_INVOCATION_BYTES) throw new InternalAbort("memory");
+  }
+
+  /** Count element visits a native call is about to make, as interrupt checks. */
+  chargeWork(units: number): void {
+    if (!(units > 0)) return;
+    if (units > MAX_NATIVE_WORK) throw new InternalAbort("timeout");
+    this.ticks += Math.floor(units / WORK_PER_TICK);
+    if (this.ticks >= this.nextCheck) this.check();
+    // Read the clock right after the call, so a slow one can't be followed by more work unchecked.
+    else if (units >= CHECK_INTERVAL * WORK_PER_TICK) this.nextCheck = this.ticks + 1;
   }
 
   enqueue(job: () => boolean | void): void {
@@ -387,7 +427,11 @@ function buildSubstitutes(): void {
       return HostReflect.apply(host, HostObject, args);
     }, length);
   };
-  guardTarget("assign", 2);
+  defineMethod(safeObject, "assign", function (this: unknown, ...args: unknown[]) {
+    guardWrite(args[0]);
+    for (let k = 1; k < args.length; k++) chargeKeys(args[k], 64);
+    return HostReflect.apply(HostObject.assign, HostObject, args);
+  }, 2);
   guardTarget("defineProperty", 3);
   guardTarget("defineProperties", 2);
   guardTarget("freeze", 1);
@@ -401,8 +445,14 @@ function buildSubstitutes(): void {
     return all;
   }, 1);
   defineMethod(safeObject, "getPrototypeOf", (o: unknown) => substitute(HostObject.getPrototypeOf(o)), 1);
-  defineMethod(safeObject, "values", (o: unknown) => HostObject.values(o as object).map(substitute), 1);
-  defineMethod(safeObject, "entries", (o: unknown) => HostObject.entries(o as object).map(([k, v]) => [k, substitute(v)]), 1);
+  defineMethod(safeObject, "values", (o: unknown) => {
+    chargeKeys(o, 16);
+    return HostObject.values(o as object).map(substitute);
+  }, 1);
+  defineMethod(safeObject, "entries", (o: unknown) => {
+    chargeKeys(o, 96);
+    return HostObject.entries(o as object).map(([k, v]) => [k, substitute(v)]);
+  }, 1);
 
   safeReflect = HostObject.create(HostObject.prototype) as Record<string, unknown>;
   copyStatics(safeReflect, HostReflect, []);
@@ -438,6 +488,10 @@ function buildSubstitutes(): void {
   HostObject.defineProperty(safeRegExp, "length", { value: 2 });
   const escape = (HostRegExp as unknown as { escape?: Function }).escape;
   if (typeof escape === "function") defineMethod(safeRegExp, "escape", (s: unknown) => escape(s), 1);
+  // Matching runs on the budget instead of V8's uninterruptible backtracking.
+  installRegExpGuards(map, safeRegExp);
+  // Bulk allocations and long native loops are charged before they run.
+  installNativeGuards(map);
 
   // String builders that could allocate huge strings in one native call.
   const hostRepeat = String.prototype.repeat;
@@ -475,13 +529,15 @@ function buildSubstitutes(): void {
   map.set(Promise, SafePromise);
   substitutes = map;
 
-  protoMutators = new Set<unknown>([
+  const mutators: unknown[] = [
     Array.prototype.push, Array.prototype.pop, Array.prototype.shift, Array.prototype.unshift, Array.prototype.splice, Array.prototype.sort,
     Array.prototype.reverse, Array.prototype.fill, Array.prototype.copyWithin,
     (HostObject.prototype as unknown as Record<string, unknown>).__defineGetter__,
     (HostObject.prototype as unknown as Record<string, unknown>).__defineSetter__,
     HostObject.getOwnPropertyDescriptor(HostObject.prototype, "__proto__")?.set,
-  ]);
+  ];
+  // Guarded versions check the host mutator themselves; list them too for the argument scan.
+  protoMutators = new Set<unknown>([...mutators, ...mutators.map((m) => map.get(m)).filter((m) => m !== undefined)]);
 }
 
 /** A host value as scripts see it: dangerous host constructors and methods become their safe versions. */
@@ -496,6 +552,7 @@ export function substitute(value: unknown): unknown {
 
 function listFromArrayLike(value: unknown): unknown[] {
   if (!isObjectLike(value)) throw new TypeError("CreateListFromArrayLike called on non-object");
+  chargeElements(value);
   return HostReflect.apply(Array.prototype.slice, value, []) as unknown[];
 }
 
@@ -533,6 +590,7 @@ export function getProp(obj: unknown, key: PropertyKey): unknown {
 export function setProp(obj: unknown, key: PropertyKey, value: unknown): void {
   if (obj === null || obj === undefined) throw new TypeError(`Cannot set properties of ${obj} (setting '${describeKey(key)}')`);
   if (isObjectLike(obj) && isIntrinsic(obj)) throw builtinWriteError(obj);
+  if (key === "length" && Array.isArray(obj) && typeof value === "number" && value > obj.length) ACTIVE.realm?.chargeMemory((value - obj.length) * 8);
   (obj as Record<PropertyKey, unknown>)[key] = value;
 }
 
@@ -631,5 +689,7 @@ function createStandardGlobals(realm: Realm): Record<string, unknown> {
     Infinity,
     undefined,
   };
+  // Guarded constructors (Array, typed arrays, Map...) replace the host ones.
+  for (const key of HostObject.keys(globals)) globals[key] = substitute(globals[key]);
   return globals;
 }

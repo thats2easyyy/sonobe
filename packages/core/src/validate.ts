@@ -5,7 +5,7 @@
  */
 
 import { formatAddress, parseAddress, type ParsedAddress } from "./address.ts";
-import { isValidId } from "./ids.ts";
+import { getOwn, isValidId } from "./ids.ts";
 import {
   allLayerIds,
   findLayer,
@@ -107,7 +107,7 @@ function patchNotFound(component: Component, id: Id, key: string, address: strin
 }
 
 function layerNotFound(component: Component, id: Id, key: string, address: string): { ok: false; error: SonobeError } {
-  const isPatch = id in component.patches;
+  const isPatch = Object.hasOwn(component.patches, id);
   const ids = allLayerIds(component.layers);
   return fail("not_found", `There's no layer "${id}" in ${component.id}.${didYouMeanText(didYouMean(id, ids))}`, {
     address,
@@ -133,7 +133,7 @@ export function resolveTarget(doc: SonobeDocument, component: Component, address
   const canonical = formatAddress(parsed);
   switch (parsed.kind) {
     case "patch": {
-      const node = component.patches[parsed.id];
+      const node = getOwn(component.patches, parsed.id);
       if (!node) return patchNotFound(component, parsed.id, parsed.key, address);
       const base = { kind: "patch" as const, address: canonical, itemId: parsed.id, key: parsed.key, bindable: true };
       const ports = resolveNodePorts(doc, node, opts.registry);
@@ -174,7 +174,7 @@ export function resolveTarget(doc: SonobeDocument, component: Component, address
       return ok({ ...base, port: prop, bindable: prop.bindable !== false });
     }
     case "componentOutput": {
-      const port = component.interface.outputs[parsed.key];
+      const port = getOwn(component.interface.outputs, parsed.key);
       const keys = Object.keys(component.interface.outputs);
       if (!port) {
         return fail("not_found", `${component.id} has no published output "${parsed.key}".${didYouMeanText(didYouMean(parsed.key, keys))}`, {
@@ -200,7 +200,7 @@ export function resolveSource(doc: SonobeDocument, component: Component, address
   const canonical = formatAddress(parsed);
   switch (parsed.kind) {
     case "patch": {
-      const node = component.patches[parsed.id];
+      const node = getOwn(component.patches, parsed.id);
       if (!node) return patchNotFound(component, parsed.id, parsed.key, address);
       const base = { kind: "patch" as const, address: canonical, itemId: parsed.id, key: parsed.key };
       const ports = resolveNodePorts(doc, node, opts.registry);
@@ -240,7 +240,7 @@ export function resolveSource(doc: SonobeDocument, component: Component, address
       return ok({ ...base, port });
     }
     case "componentInput": {
-      const port = component.interface.inputs[parsed.key];
+      const port = getOwn(component.interface.inputs, parsed.key);
       if (!port) {
         return fail("not_found", `${component.id} has no published input "${parsed.key}".${didYouMeanText(didYouMean(parsed.key, Object.keys(component.interface.inputs)))}`, {
           address,
@@ -498,7 +498,7 @@ export function checkLiteral(doc: SonobeDocument, component: Component, value: u
   }
   if (isAssetInput(value)) {
     if (!ASSET_TYPES.has(type)) return fail("invalid_value", `${label} needs ${typeLabel(type)}, not an asset.`, { address });
-    if (!doc.assets[value.asset]) {
+    if (!getOwn(doc.assets, value.asset)) {
       return fail("not_found", `There's no asset "${value.asset}".${didYouMeanText(didYouMean(value.asset, Object.keys(doc.assets)))}`, {
         address,
         hint: "Add the file with an addAsset op first.",

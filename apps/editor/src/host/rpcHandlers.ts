@@ -7,11 +7,12 @@
  */
 
 import { allLayerIds, DEVICE_PRESETS, findComponentInstances, getOutline, listComponentIds, serializeDocument, type Diagnostic, type Id, type OutlineDetail, type SonobeDocument } from "@sonobe/core";
-import type { InputEvent, TraceInput } from "@sonobe/engine";
+import { isTraceUnavailable, type InputEvent, type TraceInput } from "@sonobe/engine";
 import type { Simulation } from "../runtime/simulation.ts";
 import { BOUNDS_METHODS, type BoundsMethod } from "../state/bounds.ts";
-import { CLAUDE_AUTHOR, normalizeAuthor } from "../state/document.ts";
+import { CLAUDE_AUTHOR, historyListEntry, normalizeAuthor, type FileResult } from "../state/document.ts";
 import { diagnosticsFor } from "../state/registry.ts";
+import { saveDocumentInteractively } from "../state/saveFlow.ts";
 import { currentComponentId, itemKindOf } from "../state/selection.ts";
 import { DOCUMENT_TEMPLATES, type DocumentTemplate, type EditorSession } from "../state/session.ts";
 import type { RpcRegistrar } from "./types.ts";
@@ -193,6 +194,10 @@ export function registerRpcHandlers(session: EditorSession, options: RpcHandlerO
       }),
       canUndo: s.canUndo,
       canRedo: s.canRedo,
+      /** Outside changes waiting for the person to keep their edits or reload (saving without force refuses meanwhile). */
+      externalChange: s.externalChange ? { paths: s.externalChange.paths.filter((p) => p !== "."), detectedAt: s.externalChange.detectedAt } : null,
+      /** The project on disk can't be read since an outside change. */
+      diskProblem: s.diskProblem ? { paths: s.diskProblem.paths.filter((p) => p !== "."), message: s.diskProblem.message, detectedAt: s.diskProblem.detectedAt } : null,
       playing: session.runtime.isPlaying(),
       ...(trust ? { scripts: { count: trust.scriptCount, required: trust.required, trusted: trust.trusted } } : {}),
     };
@@ -207,8 +212,11 @@ export function registerRpcHandlers(session: EditorSession, options: RpcHandlerO
       const format = optString(p, "format") ?? "json";
       if (component !== undefined && !s.doc.components[component]) throw new RpcProblem("not_found", `There's no component "${component}".`, { components: Object.keys(s.doc.components) });
       switch (format) {
-        case "json":
-          return component === undefined ? { revision: s.revision, document: s.doc } : { revision: s.revision, component: s.doc.components[component] };
+        case "json": {
+          if (component !== undefined) return { revision: s.revision, component: s.doc.components[component] };
+          // The editor keeps diagnostics incrementally; the desktop host asks for them instead of diagnosing the copy again.
+          return optBoolean(p, "diagnostics") ? { revision: s.revision, document: s.doc, diagnostics: diagnosticsFor(s.doc, session.registry) } : { revision: s.revision, document: s.doc };
+        }
         case "outline": {
           const detail = optString(p, "detail");
           if (detail !== undefined && detail !== "compact" && detail !== "normal" && detail !== "full") throw invalid('"detail" must be "compact", "normal", or "full".');
@@ -241,11 +249,14 @@ export function registerRpcHandlers(session: EditorSession, options: RpcHandlerO
       const committed = !dryRun && result.applied.length > 0 && after.revision !== before;
       const target = dryRun ? result.preview : result.doc;
       const touched = new Set(result.affected.components);
-      const diagnostics: Diagnostic[] = target && touched.size ? diagnosticsFor(target, session.registry).filter((d) => touched.has(d.component)) : [];
+      const documentDiagnostics = target ? diagnosticsFor(target, session.registry) : undefined;
+      const diagnostics: Diagnostic[] = documentDiagnostics && touched.size ? documentDiagnostics.filter((d) => touched.has(d.component)) : [];
       return {
         result: { ok: result.ok, results: result.results, errors: result.errors, idMap: result.idMap, affected: result.affected, applied: result.applied.length },
         revision: after.revision,
         diagnostics,
+        /** Every diagnostic of the resulting document (the preview for a dry run). */
+        ...(documentDiagnostics ? { documentDiagnostics } : {}),
         /** Ops as applied (generated ids resolved), for replay and history. */
         applied: result.applied,
         ...(committed && after.lastChange?.txnId ? { txnId: after.lastChange.txnId } : {}),
@@ -254,9 +265,26 @@ export function registerRpcHandlers(session: EditorSession, options: RpcHandlerO
 
     "document.save": async (p) => {
       const saveAs = optBoolean(p, "saveAs") ?? false;
-      const result = saveAs || !doc().projectPath ? await doc().saveAs() : await doc().save();
+      /** Write over outside changes the person hasn't decided about (only after asking them). */
+      const force = optBoolean(p, "force") ?? false;
+      /** The person is saving (the close prompt): ask them about outside changes instead of failing. */
+      const interactive = optBoolean(p, "interactive") ?? false;
+      let result: FileResult;
+      if (saveAs || !doc().projectPath) result = await doc().saveAs();
+      else if (interactive) result = await saveDocumentInteractively(session.document, session.dialogs);
+      else result = await doc().save(force ? { overwriteExternal: true } : {});
       if (result.cancelled) return false;
-      if (!result.ok) throw new RpcProblem("save_failed", result.error ?? "The prototype couldn't be saved.", { path: result.path, code: result.errorCode });
+      if (!result.ok) {
+        if (result.errorCode === "disk_changed") {
+          const pending = doc().externalChange;
+          throw new RpcProblem("disk_changed", result.error ?? "The project changed on disk while there were unsaved changes, so it wasn't saved.", {
+            paths: pending ? pending.paths.filter((x) => x !== ".") : [],
+            ...(pending ? { detectedAt: pending.detectedAt } : {}),
+            hint: "Someone changed the project on disk while the person had unsaved edits in Sonobe, and they haven't chosen which version to keep. Ask them: to keep the Sonobe version, call save_document with force: true; to use the version on disk, they can click Reload in the banner.",
+          });
+        }
+        throw new RpcProblem("save_failed", result.error ?? "The prototype couldn't be saved.", { path: result.path, code: result.errorCode });
+      }
       return { ok: true, path: result.path ?? null, revision: doc().revision };
     },
 
@@ -331,7 +359,15 @@ export function registerRpcHandlers(session: EditorSession, options: RpcHandlerO
       const durationMs = optNumber(p, "durationMs");
       if (durationMs === undefined || durationMs < 0) throw invalid('"durationMs" is required: how long to simulate, in milliseconds.');
       if (durationMs > maxTraceMs) throw invalid(`Traces can be at most ${maxTraceMs} ms long.`);
-      return { simId: sim.id, ...sim.trace(targets, durationMs, traceEvents(p.events)) };
+      try {
+        return { simId: sim.id, ...sim.trace(targets, durationMs, traceEvents(p.events)) };
+      } catch (err) {
+        if (!isTraceUnavailable(err)) throw err;
+        throw new RpcProblem("sim_copy_unavailable", `Simulation "${sim.id}" has run too long to copy, so it can't trace its current state.`, {
+          frame: err.frame,
+          hint: "Start it again with sim.reset and trace sooner, or read values with sim.step and sim.values.",
+        });
+      }
     },
 
     "sim.values": (p) => {
@@ -347,13 +383,40 @@ export function registerRpcHandlers(session: EditorSession, options: RpcHandlerO
 
     "history.undo": (p) => {
       const txnId = optString(p, "txnId");
+      const allowHumanEdits = optBoolean(p, "allowHumanEdits") ?? false;
       const author = normalizeAuthor(p.author, CLAUDE_AUTHOR);
-      const result = txnId !== undefined ? doc().undoTo(txnId, author) : doc().undo(author);
-      if (!result.ok) {
-        if (result.errors.length === 0) throw new RpcProblem("nothing_to_undo", "There's nothing to undo.");
-        throw new RpcProblem(result.errors[0]!.code, result.errors[0]!.message, { errors: result.errors, revision: result.revision });
+      // Check and undo in this one synchronous handler, so a person's edit can't land between them.
+      const entries = doc().historyEntries();
+      const top = entries[0];
+      if (!top) throw new RpcProblem("nothing_to_undo", "There's nothing to undo in this document's history.", { hint: "list_history shows what's been recorded since the document was opened." });
+      if (txnId === undefined && top.author.kind === "human" && !allowHumanEdits) {
+        throw new RpcProblem("human_edit", `The newest change was made by ${top.author.name}: "${top.label}". Undoing it would throw away their work.`, {
+          hint: `Ask before undoing someone else's edit. To undo it anyway, pass txnId "${top.txnId}".`,
+        });
       }
-      return { ok: true, revision: result.revision, undone: result.entries.map((e) => ({ txnId: e.txnId, label: e.label, author: e.author, opCount: e.ops.length })) };
+      const target = txnId ?? top.txnId;
+      const index = entries.findIndex((e) => e.txnId === target);
+      if (index < 0) {
+        throw new RpcProblem("not_found", `There's no undoable history entry "${target}".`, {
+          hint: `Newest entries: ${entries
+            .slice(0, 5)
+            .map((e) => `${e.txnId} (${e.label})`)
+            .join(", ")}.`,
+        });
+      }
+      const humans = entries.slice(0, index + 1).filter((e) => e.author.kind === "human" && e.txnId !== target);
+      if (humans.length && !allowHumanEdits) {
+        throw new RpcProblem("human_edit", `Undoing back to "${entries[index]!.label}" would also undo ${humans.length} newer change${humans.length === 1 ? "" : "s"} made by ${humans[0]!.author.name}.`, {
+          hint: "Ask the person first; to go ahead anyway, pass allowHumanEdits: true.",
+        });
+      }
+      const result = doc().undoTo(target, author);
+      if (!result.ok) {
+        const first = result.errors[0];
+        if (!first) throw new RpcProblem("nothing_to_undo", "There's nothing to undo.");
+        throw new RpcProblem(first.code, first.message, { errors: result.errors, revision: result.revision, ...(first.hint ? { hint: first.hint } : {}) });
+      }
+      return { ok: true, revision: result.revision, undone: result.entries.map(historyListEntry) };
     },
 
     "presence.begin": (p) => {

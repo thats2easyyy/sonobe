@@ -16,7 +16,7 @@ import {
   tap,
 } from "../testing/index.ts";
 import type { InputEvent } from "../types.ts";
-import { DETERMINISTIC_EPOCH_MS } from "./runtime.ts";
+import { DETERMINISTIC_EPOCH_MS, isTraceUnavailable, MAX_REPLAY_FRAMES, TraceUnavailableError } from "./runtime.ts";
 
 const down = (x: number, y: number): InputEvent => ({ kind: "pointer", phase: "down", pointerId: 1, x, y });
 const up = (x: number, y: number): InputEvent => ({ kind: "pointer", phase: "up", pointerId: 1, x, y });
@@ -254,6 +254,53 @@ describe("runtime: trace", () => {
     expect(scheduled.summaries["toggle.on"]).toMatchObject({ start: 1, end: 0 });
     expect(rt.frame).toBe(2);
     expect(rt.getValue("toggle.on")).toBe(true);
+  });
+
+  it("replays scene refreshes, so a tap on a layer moved by updateDocument + refreshScene traces like the live runtime", () => {
+    const doc = buildDoc({
+      layers: [{ id: "card", type: "rectangle", name: "Card", props: { position: [0, 0], size: [100, 100] } }],
+      patches: { touch: { type: "interaction", inputs: { layer: { layer: "card" } } }, sw: { type: "switch", inputs: { flip: { link: "touch.tap" } } } },
+    });
+    const rt = createTestRuntime(doc);
+    rt.refreshScene();
+    const fresh = rt.trace(["sw.on"], 0);
+    expect([fresh.times, fresh.values["sw.on"]]).toEqual([[0], [false]]);
+    runFrames(rt, 2);
+    const moved = structuredClone(doc);
+    moved.components.main!.layers[0]!.props.position = [200, 200];
+    rt.updateDocument(moved);
+    rt.refreshScene();
+    rt.dispatch([down(250, 250)]);
+    rt.step();
+    rt.dispatch([up(250, 250)]);
+    rt.step();
+    expect(rt.getValue("sw.on")).toBe(true);
+    const traced = rt.trace(["sw.on"], 50);
+    expect(traced.values["sw.on"]).toEqual([true, true, true]);
+    expect(traced.times[0]).toBeCloseTo(1 / 60, 9);
+    expect(rt.frame).toBe(3);
+  });
+
+  it("refuses to trace once the replay log is gone, instead of tracing a restarted copy", () => {
+    const rt = createTestRuntime(tapDoc());
+    runFrames(rt, 3, sequence(idle(1), tap(100, 200)));
+    expect(rt.getValue("toggle.on")).toBe(true);
+    for (let i = 0; i < MAX_REPLAY_FRAMES - 10; i++) rt.step();
+    expect(rt.trace(["toggle.on"], 50).values["toggle.on"]).toEqual([true, true, true]);
+    for (let i = 0; i < 20; i++) rt.step();
+    let error: unknown;
+    try {
+      rt.trace(["toggle.on"], 50);
+    } catch (err) {
+      error = err;
+    }
+    expect(error).toBeInstanceOf(TraceUnavailableError);
+    expect(isTraceUnavailable(error)).toBe(true);
+    expect(isTraceUnavailable({ code: "trace_unavailable", message: "copied over IPC" })).toBe(true);
+    expect(rt.getValue("toggle.on")).toBe(true);
+    // A restart starts a new log, so tracing works again.
+    rt.restart();
+    expect(rt.trace(["toggle.on"], 0).values["toggle.on"]).toEqual([false]);
   });
 });
 

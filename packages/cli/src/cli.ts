@@ -16,6 +16,7 @@ import {
   joinPath,
   ProjectFormatError,
   serializeDocument,
+  staleProjectFiles,
   type Diagnostic,
 } from "@sonobe/core";
 import { createNodeFs, loadProjectFromDisk, saveProjectToDisk } from "@sonobe/core/node";
@@ -116,7 +117,8 @@ Starts a deterministic simulation, dispatches the events, and prints every trace
 Without --headless: a stdio relay to the running Sonobe app. It reads ~/.sonobe/mcp.json
 (SONOBE_HOME overrides the folder) and forwards MCP messages with the app's token.
 
-With --headless: serves a project folder directly (editing, simulation, saving; no screenshots).
+With --headless: serves a project folder directly (editing, simulation, saving, and screenshots
+drawn without the app).
 Changes are saved after every edit unless --no-autosave.
 
 Claude Code:     claude mcp add sonobe -- sonobe mcp
@@ -265,9 +267,8 @@ async function cmdFmt(args: string[], io: CliIo): Promise<number> {
       const at = joinPath(dir, rel);
       if (!(await fs.exists(at)) || (await fs.readText(at)) !== text) changed.push(rel);
     }
-    for (const name of await fs.list(joinPath(dir, "components")))
-      if (name.endsWith(".json") && !(`components/${name}` in files))
-        changed.push(`components/${name} (stale)`);
+    // The same rule `sonobe fmt` removes stale files by, so the check and the real run agree.
+    for (const rel of await staleProjectFiles(fs, dir, files)) changed.push(`${rel} (stale)`);
     if (!changed.length) {
       io.stdout.write("Already formatted.\n");
       return 0;
@@ -472,7 +473,7 @@ async function cmdMcp(args: string[], io: CliIo): Promise<number> {
     onError: (error) => io.stderr.write(`sonobe mcp: ${error.message}\n`),
   });
   io.stderr.write(
-    `sonobe mcp: serving ${dir} headless (no screenshots${autosave ? "; changes save automatically" : "; call save_document to write changes"})\n`,
+    `sonobe mcp: serving ${dir} headless (${autosave ? "changes save automatically" : "call save_document to write changes"})\n`,
   );
   await new Promise<void>((resolve) => {
     io.stdin.once("end", resolve);

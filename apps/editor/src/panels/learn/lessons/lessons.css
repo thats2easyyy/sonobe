@@ -324,6 +324,35 @@
   margin-left: calc(var(--space-3) * -1);
 }
 
+/* Another prototype is open: offer a restart instead of steps that can't be checked. */
+.sb-lesson__elsewhere {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  padding: var(--space-5);
+  border-radius: var(--radius-lg);
+  background: var(--bg-sunken);
+  box-shadow: inset 0 0 0 1px var(--border-subtle);
+}
+
+.sb-lesson__elsewhere-title {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  color: var(--text-primary);
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-semibold);
+}
+
+.sb-lesson__elsewhere-title svg {
+  flex: none;
+  color: var(--text-secondary);
+}
+
+.sb-lesson__elsewhere .sb-lesson__actions {
+  margin-left: 0;
+}
+
 .sb-lesson__footer {
   display: flex;
   align-items: center;
@@ -447,7 +476,19 @@
     top var(--duration-base) var(--ease-out),
     width var(--duration-base) var(--ease-out),
     height var(--duration-base) var(--ease-out);
-  animation: sb-spotlight-in var(--duration-slow) var(--ease-out), sb-spotlight-breathe 1.8s var(--ease-in-out) 240ms infinite;
+  animation: sb-spotlight-in var(--duration-slow) var(--ease-out);
+}
+
+/* The breathing glow fades on its own layer (opacity only), so it never repaints the page behind the lesson. */
+.sb-spotlight::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  box-shadow: 0 0 0 10px color-mix(in srgb, var(--accent) 14%, transparent);
+  opacity: 0;
+  pointer-events: none;
+  animation: sb-spotlight-breathe 1.8s var(--ease-in-out) 240ms infinite;
 }
 
 @keyframes sb-spotlight-in {
@@ -459,8 +500,12 @@
 
 @keyframes sb-spotlight-breathe {
   50% {
-    box-shadow:
-      0 0 0 2px var(--accent),
-      0 0 0 10px color-mix(in srgb, var(--accent) 12%, transparent);
+    opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sb-spotlight::after {
+    animation: none;
   }
 }

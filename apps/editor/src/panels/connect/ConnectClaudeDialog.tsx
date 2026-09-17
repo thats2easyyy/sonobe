@@ -24,7 +24,7 @@ export interface ConnectHostLike extends McpStatusSource {
 }
 
 export interface ConnectDefaults {
-  /** "installed" (the `sonobe` command) or "checkout" (node + repo). Default: checkout in dev builds. */
+  /** "installed" (the app's bundled CLI, else `sonobe` on PATH) or "checkout" (node + repo). Default: checkout in dev builds. */
   mode?: LaunchMode;
   nodePath?: string;
   repoPath?: string;
@@ -114,7 +114,8 @@ function ConnectClaudeContent({ titleId, bodyRef, onClose, host, onOpenGuide, de
   const nodePath = storedNode || defaults?.nodePath || "node";
   const repoPath = storedRepo || defaults?.repoPath || detectedRepo || "";
   const project = storedProject || defaults?.headlessProject || "";
-  const spec = mcpLaunchSpec({ mode, nodePath, repoPath, ...(browser ? { headlessProject: project || (shell === "windows" ? "C:\\path\\to\\Prototype.sonobe" : "/path/to/Prototype.sonobe") } : {}) });
+  const cliPath = mcp.status?.cliPath ?? null;
+  const spec = mcpLaunchSpec({ mode, nodePath, repoPath, cliPath,...(browser ? { headlessProject: project || (shell === "windows" ? "C:\\path\\to\\Prototype.sonobe" : "/path/to/Prototype.sonobe") } : {}) });
   const tokenFile = mcp.status?.tokenFile ? tildePath(mcp.status.tokenFile) : "~/.sonobe/mcp.json";
 
   const launchSettings = (
@@ -127,6 +128,7 @@ function ConnectClaudeContent({ titleId, bodyRef, onClose, host, onOpenGuide, de
       onRepoPathChange={setRepoPath}
       shell={shell}
       browser={browser}
+      cliPath={cliPath}
       project={project}
       onProjectChange={setProject}
     />
@@ -335,11 +337,24 @@ interface LaunchSettingsProps {
   onRepoPathChange: (value: string) => void;
   shell: ShellFlavor;
   browser: boolean;
+  /** The app's bundled CLI launcher, when the desktop host reports one. */
+  cliPath: string | null;
   project: string;
   onProjectChange: (value: string) => void;
 }
 
-function LaunchSettings({ mode, onModeChange, nodePath, onNodePathChange, repoPath, onRepoPathChange, shell, browser, project, onProjectChange }: LaunchSettingsProps) {
+/** What the chosen launch mode runs. */
+function launchHint(mode: LaunchMode, cliPath: string | null): ReactNode {
+  if (mode === "checkout") return "Runs the CLI from a Sonobe checkout with Node 22.18 or later.";
+  if (cliPath) return "Runs the CLI that comes with the Sonobe app, by its full path, so nothing has to be on your PATH.";
+  return (
+    <>
+      Uses a <code>sonobe</code> command on your PATH, after building the CLI and running <code>npm link -w @sonobe/cli</code>.
+    </>
+  );
+}
+
+function LaunchSettings({ mode, onModeChange, nodePath, onNodePathChange, repoPath, onRepoPathChange, shell, browser, cliPath, project, onProjectChange }: LaunchSettingsProps) {
   return (
     <div className="sb-connect__settings">
       <div className="sb-connect__settings-row">
@@ -349,11 +364,11 @@ function LaunchSettings({ mode, onModeChange, nodePath, onNodePathChange, repoPa
           value={mode}
           onChange={onModeChange}
           options={[
-            { value: "installed", label: "sonobe command" },
+            { value: "installed", label: cliPath ? "Sonobe app" : "sonobe command" },
             { value: "checkout", label: "From source" },
           ]}
         />
-        <span className="sb-connect__hint">{mode === "installed" ? "Uses the sonobe CLI on your PATH." : "Runs the CLI from a Sonobe checkout with Node 22.18 or later."}</span>
+        <span className="sb-connect__hint">{launchHint(mode, cliPath)}</span>
       </div>
       {mode === "checkout" && (
         <div className="sb-connect__fields">
@@ -376,7 +391,7 @@ function LaunchSettings({ mode, onModeChange, nodePath, onNodePathChange, repoPa
             <span className="sb-connect__field-label">Project folder</span>
             <TextField size="sm" mono value={project} placeholder={shell === "windows" ? "C:\\path\\to\\Prototype.sonobe" : "/path/to/Prototype.sonobe"} onChange={(event) => onProjectChange(event.target.value)} />
           </label>
-          <p className="sb-connect__hint">Headless mode edits, simulates, and saves the folder directly. Screenshots need the desktop app.</p>
+          <p className="sb-connect__hint">Headless mode edits, simulates, saves, and takes approximate screenshots of the folder directly. Only the app sees your selection.</p>
         </div>
       )}
     </div>
@@ -390,9 +405,13 @@ function DesktopSteps({ spec, platform, launchSettings, mode, browser }: { spec:
   return (
     <ol className="sb-connect__steps">
       {bundle && (
-        <Step n={++n} title={`Install the ${bundle.name} extension`}>
+        <Step n={++n} title={`Build and install the ${bundle.name} extension`}>
           <p className="sb-connect__text">
-            Open the <code>.mcpb</code> bundle built from <code>{bundle.folder}</code>. Claude Desktop shows what it will run. Confirm to install.
+            From your Sonobe folder, build and pack the extension in <code>{bundle.folder}</code>:
+          </p>
+          <CopyBlock text={bundle.buildCommands} label="Extension build commands" />
+          <p className="sb-connect__hint">
+            Then open <code>{bundle.file}</code>. Claude Desktop shows what it will run. Confirm to install.
           </p>
         </Step>
       )}
@@ -408,7 +427,11 @@ function DesktopSteps({ spec, platform, launchSettings, mode, browser }: { spec:
             </>
           ) : null}
           If it already has <code>mcpServers</code>, add the <code>sonobe</code> entry inside it.
-          {mode === "checkout" ? " Apps opened from the Dock or Start menu don't see your terminal's PATH, so a full path to node is safest." : ""}
+          {mode === "checkout"
+            ? " Apps opened from the Dock or Start menu don't see your terminal's PATH, so a full path to node is safest."
+            : spec.command === "sonobe"
+              ? " Claude Desktop doesn't see your terminal's PATH, so replace sonobe with the command's full path."
+              : ""}
         </p>
         {launchSettings}
       </Step>

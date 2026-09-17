@@ -63,8 +63,11 @@ async function readFile(file: File): Promise<{ name: string; bytes: Uint8Array; 
   return { name: file.name, bytes: new Uint8Array(await file.arrayBuffer()), ...(file.type ? { mime: file.type } : {}) };
 }
 
-/** Import a file as an asset for a field that takes `kinds` (`propName` is for messages: "Image"). */
-export async function importAssetForField(session: EditorSession, file: File, kinds: readonly AssetKind[], propName: string): Promise<FieldImportResult> {
+/**
+ * Import a file as an asset for a field that takes `kinds` (`propName` is for messages: "Image").
+ * Pass `coalesceKey`, then set the field with the same key, to make the import and the set one undo step.
+ */
+export async function importAssetForField(session: EditorSession, file: File, kinds: readonly AssetKind[], propName: string, options: { coalesceKey?: string } = {}): Promise<FieldImportResult> {
   const assets = (session as Partial<Pick<EditorSession, "assets">>).assets;
   const wanted = KIND_NOUNS[kinds[0] ?? "image"];
   if (!assets || typeof assets.importFile !== "function") return { ok: false, error: "This version of Sonobe can't import files here yet. Use a web address instead." };
@@ -76,7 +79,7 @@ export async function importAssetForField(session: EditorSession, file: File, ki
   } catch (err) {
     return { ok: false, error: `Couldn't read “${file.name}”: ${err instanceof Error ? err.message : String(err)}` };
   }
-  const result = await assets.importFile(input);
+  const result = await assets.importFile(input, options.coalesceKey ? { coalesceKey: options.coalesceKey } : {});
   if (!result.ok || !result.assetId || !result.record) return { ok: false, error: result.error ?? `Couldn't import “${file.name}”.` };
   if (!fits(result.record.kind, kinds)) return { ok: false, error: `“${file.name}” is ${KIND_NOUNS[result.record.kind]}, but ${propName} takes ${wanted}.` };
   return { ok: true, assetId: result.assetId, name: result.record.name, reused: result.reused === true };

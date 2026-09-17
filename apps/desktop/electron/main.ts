@@ -6,6 +6,7 @@ import path from "node:path";
 import { pathToFileURL } from "node:url";
 import type { SonobeDocument } from "@sonobe/core";
 import { saveProjectToDisk } from "@sonobe/core/node";
+import { plainSceneFrame } from "@sonobe/engine";
 import { createHttpHandler, isHostError, loadGuides, type NodeMcpHandler } from "@sonobe/mcp";
 import { createPatchRegistry } from "@sonobe/patches";
 import { toBuffer as qrPng } from "qrcode";
@@ -13,6 +14,7 @@ import { createAppHost, type AppHost, type CapturedImage, type DocumentChange, t
 import { createAppWindow, type AppWindow, type WindowContentSource } from "./app-window.ts";
 import { registerAssistant } from "./assistant/register.ts";
 import { captureWebContents } from "./capture.ts";
+import { bundledCliPath } from "./cli-path.ts";
 import { isCommandId, toHostPlatform } from "./commands.ts";
 import { projectPathsFromArgv, readDesktopEnv } from "./env.ts";
 import type { McpStatus, PreviewStatus, SecretsStatus, SonobeCommandId, ViewerWindowStatus } from "./host-api.d.ts";
@@ -97,6 +99,9 @@ function main(): void {
   let secrets: SecretStore | null = null;
   /** Set once an editor pushes revisions (notifyDocumentChanged): players stop polling. */
   let pushUpdates = false;
+  /** Undo and Redo titles from the front editor window ("Undo Mute Card Shadow"), for the Edit menu. */
+  let historyLabels: { undo: string; redo: string } | null = null;
+  let historyMenuTimer: ReturnType<typeof setTimeout> | null = null;
   let viewerWindow: { win: BrowserWindow; server: LanPreviewHandle; origin: string } | null = null;
   let viewerWindowError: string | null = null;
   let viewerWindowOpening: Promise<ViewerWindowStatus> | null = null;
@@ -127,7 +132,14 @@ function main(): void {
   };
 
   const rebuildMenu = () => {
-    const spec = buildMenuSpec({ platform, appName: APP_NAME, recentProjects: recents?.snapshot() ?? [], dev: !app.isPackaged, previewRunning: preview !== null });
+    const spec = buildMenuSpec({
+      platform,
+      appName: APP_NAME,
+      recentProjects: recents?.snapshot() ?? [],
+      dev: !app.isPackaged,
+      previewRunning: preview !== null,
+      ...(historyLabels ? { undoLabel: historyLabels.undo, redoLabel: historyLabels.redo } : {}),
+    });
     const template = toMenuTemplate(spec, platform, {
       command: (id: SonobeCommandId) => {
         if (id === "viewer.previewOnDevice") void showPhonePreview().catch((err: unknown) => log("warn", `Phone preview failed: ${errorMessage(err)}`));
@@ -137,6 +149,21 @@ function main(): void {
       action: (action: NativeAction) => void handleAction(action),
     });
     Menu.setApplicationMenu(Menu.buildFromTemplate(template));
+  };
+
+  /** The front editor's Undo and Redo titles changed: rebuild the menu (editing a MenuItem's label doesn't refresh the macOS menu bar), debounced while scrubbing. */
+  const setHistoryLabels = (labels: unknown) => {
+    if (!labels || typeof labels !== "object") return;
+    const { undo, redo } = labels as { undo?: unknown; redo?: unknown };
+    if (typeof undo !== "string" || typeof redo !== "string") return;
+    const next = { undo: undo.slice(0, 120), redo: redo.slice(0, 120) };
+    if (historyLabels?.undo === next.undo && historyLabels.redo === next.redo) return;
+    historyLabels = next;
+    if (historyMenuTimer) clearTimeout(historyMenuTimer);
+    historyMenuTimer = setTimeout(() => {
+      historyMenuTimer = null;
+      rebuildMenu();
+    }, 150);
   };
 
   const addRecent = async (dir: string) => {
@@ -274,7 +301,8 @@ function main(): void {
 
   const writeNewProject = async (dir: string, doc: SonobeDocument) => {
     access.approve(dir);
-    await saveProjectToDisk(dir, doc);
+    // A new project never deletes files already in the folder.
+    await saveProjectToDisk(dir, doc, { removable: new Set() });
   };
 
   // --- Phone preview (LAN web player) ---------------------------------------------------------
@@ -579,7 +607,8 @@ function main(): void {
       const [width, height] = request.scene.size;
       win.setContentSize(Math.max(1, Math.ceil(width * scale)), Math.max(1, Math.ceil(height * scale)));
       const assets = Object.fromEntries(Object.entries(request.assets).map(([id, file]) => [id, pathToFileURL(file).href]));
-      await win.webContents.executeJavaScript(`window.__sonobeRenderScene(${JSON.stringify({ scene: request.scene, scale, assets })})`, true);
+      // Scene props inherit layer defaults, which JSON would drop: send plain props.
+      await win.webContents.executeJavaScript(`window.__sonobeRenderScene(${JSON.stringify({ scene: plainSceneFrame(request.scene), scale, assets })})`, true);
       const crop = { x: request.crop.x * scale, y: request.crop.y * scale, width: request.crop.width * scale, height: request.crop.height * scale };
       return captureWebContents(win.webContents, crop, request.size);
     };
@@ -740,9 +769,10 @@ function main(): void {
 
     ipcMain.handle(IPC.mcpStatus, (event): McpStatus => {
       requireWindow(event);
+      const cliPath = bundledCliPath({ packaged: app.isPackaged, resourcesPath: process.resourcesPath, mainDir: __dirname, platform: process.platform, exists: existsSync });
       return mcp?.running
-        ? { running: true, port: mcp.port, url: mcp.url, tokenFile: mcp.tokenFile }
-        : { running: false, port: null, url: null, tokenFile: path.join(env.home ?? defaultSonobeHome(), "mcp.json") };
+        ? { running: true, port: mcp.port, url: mcp.url, tokenFile: mcp.tokenFile, cliPath }
+        : { running: false, port: null, url: null, tokenFile: path.join(env.home ?? defaultSonobeHome(), "mcp.json"), cliPath };
     });
 
     ipcMain.handle(IPC.previewStatus, (event): PreviewStatus => {
@@ -758,9 +788,11 @@ function main(): void {
       return stopPreview();
     });
 
-    ipcMain.on(IPC.documentChanged, (event, revision: unknown) => {
+    ipcMain.on(IPC.documentChanged, (event, revision: unknown, labels: unknown) => {
       const w = trustedWindow(event);
-      if (w && typeof revision === "number" && Number.isFinite(revision)) documentChanged(w, revision);
+      if (!w || typeof revision !== "number" || !Number.isFinite(revision)) return;
+      documentChanged(w, revision);
+      if (w === primaryWindow()) setHistoryLabels(labels);
     });
 
     ipcMain.handle(IPC.secretsStatus, (event): SecretsStatus => {

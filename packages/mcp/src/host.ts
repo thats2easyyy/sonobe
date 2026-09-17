@@ -72,6 +72,29 @@ export interface SaveOutcome {
   revision: number;
   written: string[];
   removed: string[];
+  /** With force: files others had changed on disk that this save wrote over. */
+  overwritten?: string[];
+}
+
+export interface OpenDocumentOptions {
+  /** Headless: read the project folder again, dropping unsaved changes and undo history. */
+  reload?: boolean;
+}
+
+export interface SaveDocumentOptions {
+  /**
+   * Write over changes made outside this session since it last read or saved the project (headless:
+   * on disk; app: external changes the person hasn't reviewed). Without it such a save fails with
+   * "disk_changed".
+   */
+  force?: boolean;
+}
+
+/** Why an automatic save after a write or undo didn't happen (the change itself stays applied). */
+export interface SaveProblem {
+  code: string;
+  message: string;
+  hint?: string;
 }
 
 export interface DiagnosticTotals {
@@ -119,6 +142,8 @@ export interface HostApplyResult {
   conflict?: { expectedRevision: number; currentRevision: number };
   /** The batch was written to disk (autosave hosts). */
   saved?: boolean;
+  /** Autosave hosts: why the applied batch wasn't written to disk. */
+  saveError?: SaveProblem;
   /** dryRun only: the would-be document. */
   preview?: SonobeDocument;
 }
@@ -140,6 +165,12 @@ export interface ScreenshotOptions {
   docId?: Id;
   /** Render a simulation's current frame instead of the live viewer. */
   simId?: string;
+  /**
+   * Milliseconds later: with simId, the frame this long after the session's current frame, drawn on
+   * a copy so the session doesn't move; without simId (headless), this long after the prototype starts
+   * (omitted: once start-up animations settle, up to 5 s).
+   */
+  atMs?: number;
   component?: Id;
   /** Device pixel scale (default 1). */
   scale?: number;
@@ -154,6 +185,8 @@ export interface Screenshot {
   width: number;
   height: number;
   timeMs?: number;
+  /** What the image approximates or leaves out (headless drawings), in plain words. */
+  notes?: string[];
 }
 
 /** An agent's "working on" badge. */
@@ -197,6 +230,8 @@ export interface UndoResult {
   undone: HistoryItem[];
   diagnostics: DiagnosticsDelta;
   saved?: boolean;
+  /** Autosave hosts: why the undo wasn't written to disk. */
+  saveError?: SaveProblem;
 }
 
 // ---------------------------------------------------------------------------
@@ -387,11 +422,12 @@ export interface SonobeHost {
 
   listDocuments(): Promise<DocumentSummary[]>;
   /** Open (or activate) a document by docId or project folder path. */
-  openDocument(ref: string): Promise<DocumentSummary>;
+  openDocument(ref: string, options?: OpenDocumentOptions): Promise<DocumentSummary>;
   createDocument(request: CreateDocumentRequest): Promise<DocumentSummary>;
   /** A document snapshot (default: the active document). */
   getDocument(docId?: Id): Promise<DocumentSnapshot>;
-  saveDocument(docId?: Id): Promise<SaveOutcome>;
+  /** Throws HostError("disk_changed") when the project changed outside this session, unless `force`. */
+  saveDocument(docId?: Id, options?: SaveDocumentOptions): Promise<SaveOutcome>;
   /** Apply a batch through core applyOps as one attributed history group. */
   apply(ops: Op[], options: HostApplyOptions): Promise<HostApplyResult>;
   /** Diagnostics for the current revision (cached). */

@@ -16,13 +16,13 @@ Outputs the value shared by the Variable Broadcaster with the same name, without
 ## How it works
 A Variable Receiver outputs whatever its matching Variable Broadcaster shares, on the same frame, as if a cable ran between them.
 
-- **Name** (click the title) picks the variable. The menu lists local variables from this patch graph and global variables from here and from every component this one sits inside. Choosing one copies its name, scope, and type.
+- **Variable** (in the Inspector) picks the variable. The menu lists local variables from this patch graph and global variables from here and from every component this one sits inside. Choosing one copies its name, scope, and type.
 - **Output** is the broadcaster's value. When nothing matches, Output is the type's empty value (0, off, or empty text), and the patch shows a warning.
 
 When more than one global broadcaster above a receiver shares its name and type, the nearest one wins, so a component can override a value for everything inside it.
 
 ## Tips
-- Click the receiver's radio icon to jump to its broadcaster.
+- Click the radio icon on the receiver's title, or choose Jump to Broadcaster from its menu, to select its broadcaster.
 - Press ⇧W to insert a receiver.
 - Receivers are read-only. To change a shared value, change what drives the broadcaster.
 
@@ -77,7 +77,7 @@ patch content_offset point x=0 y←height_for_content.output
 
 ## Common mistakes
 
-- The receiver shows a warning and outputs 0: no broadcaster with the same name, scope, and type reaches it, often because of a typo or different capitalization. Choose the variable from the receiver's name menu.
+- The receiver shows a warning and outputs 0: no broadcaster with the same name, scope, and type reaches it, often because of a typo or different capitalization. Choose the variable from the receiver's Variable menu in the Inspector.
 - A receiver inside a component still reads the parent's value after you add an override: the component's broadcaster is Local, so it doesn't override globals. Set that broadcaster's Scope to Global.
 
 ## Pairs well with

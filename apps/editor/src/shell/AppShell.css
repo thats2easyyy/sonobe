@@ -391,8 +391,3 @@
   animation: sb-spin 0.9s linear infinite;
 }
 
-@keyframes sb-pulse-dot {
-  50% {
-    box-shadow: 0 0 0 5px transparent;
-  }
-}

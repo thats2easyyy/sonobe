@@ -29,10 +29,14 @@ const COMPONENT_SHORTCUTS: Partial<Record<string, Shortcut>> = {
   "view.toggleInspector": "Mod+7",
   "view.toggleConsole": "Mod+J", // view.toggleHud
   "help.learn": "Mod+/",
+  "help.shortcuts": ["Mod+Alt+/", "Ctrl+Shift+/"], // app/useAppCommands.tsx (macOS first, then Windows and Linux)
   "patch.insert": "Alt+Enter", // app/useAppCommands.tsx alias → panels/patch-editor/PatchEditor.tsx patchEditor.insertPatch
   "patch.tidyUp": "Ctrl+T",
   "patch.commentAroundSelection": "Ctrl+Alt+C",
   "patch.alignLeft": "Mod+[",
+  "patch.alignRight": "Mod+]", // app alias → patchEditor.alignRight
+  "patch.alignTop": "Mod+Shift+[",
+  "patch.alignBottom": "Mod+Shift+]",
   "view.zoomIn": ["Mod+=", "Mod++"], // app alias → patchEditor.zoomIn / canvas.zoomIn
   "view.zoomOut": "Mod+-",
   "view.zoomToFit": "Shift+1", // patchEditor.zoomToFit / canvas.zoomToFit
@@ -45,19 +49,16 @@ const EDITOR_ONLY_SHORTCUTS: Record<string, Shortcut> = {
   "view.canvasOnly": "Alt+1",
   "view.split": "Alt+2",
   "view.patchesOnly": "Alt+3",
-  "patchEditor.alignTop": "Mod+]",
   "patchEditor.zoomReset": "Mod+0",
   "patchEditor.patchInfo": "Mod+I",
+  "patchEditor.publishPort": "Alt+P",
   "patchEditor.toggleMinimap": "Shift+M",
   "canvas.zoomToSelection": "Shift+2",
   "canvas.actualSize": "Shift+0",
 };
 
-/** Deliberate differences, each with its reason. */
-const KNOWN_DIFFERENCES: Record<string, string> = {
-  "patch.alignRight": "Origami aligns right with ⌘] (docs/research/ui-controls.md §13.2); the editor binds Mod+] to Align Top.",
-  "patch.alignTop": "Origami aligns top with ⌘⇧[; the editor binds Mod+] to Align Top.",
-};
+/** Deliberate differences, each with its reason. Empty: every menu accelerator matches the editor. */
+const KNOWN_DIFFERENCES: Record<string, string> = {};
 
 const PLATFORMS: [HostPlatform, Platform][] = [
   ["darwin", "mac"],

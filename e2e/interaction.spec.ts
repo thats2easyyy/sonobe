@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { blurFields, centerOf, collectConsoleProblems, connectNewPatch, dragCable, fitPatches, flowNode, handle, hook, modKey, newIds, openEditor, patchIds, patchesOfType, runCommand, screenshot, storedInput, touchLayer } from "./helpers.ts";
+import { blurFields, centerOf, collectConsoleProblems, collectUiWarnings, connectNewPatch, dragCable, fitPatches, flowNode, handle, hook, modKey, newIds, openEditor, patchIds, patchesOfType, runCommand, screenshot, storedInput, touchLayer } from "./helpers.ts";
 
 test.describe("building an interaction in the UI", () => {
   test("inserts a patch from the picker", async ({ page }) => {
@@ -7,7 +7,10 @@ test.describe("building an interaction in the UI", () => {
     await openEditor(page);
     const before = await patchIds(page);
 
-    await page.locator(".sb-pe").getByRole("button", { name: "Insert patch" }).click();
+    // The patch editor's tools sit in the Patches panel header, clear of the graph.
+    const tools = page.locator(".sb-app-patches .sb-panel__header").getByRole("toolbar", { name: "Patch editor tools" });
+    await expect(tools).toBeVisible();
+    await tools.getByRole("button", { name: "Insert patch" }).click();
     const picker = page.getByRole("dialog", { name: "Insert patch" });
     await expect(picker).toBeVisible();
     await page.keyboard.type("counter");
@@ -26,6 +29,7 @@ test.describe("building an interaction in the UI", () => {
   test("Interaction → Switch → Pop Animation → Transition → @photo.scale, then a tap animates it", async ({ page }) => {
     await page.setViewportSize({ width: 1680, height: 1050 });
     const problems = collectConsoleProblems(page);
+    const warnings = await collectUiWarnings(page);
     await openEditor(page);
     const mod = await modKey(page);
     await runCommand(page, "Patches Only");
@@ -73,6 +77,13 @@ test.describe("building an interaction in the UI", () => {
     await blurFields(page);
     await screenshot(page, "app-03-interaction-wired");
 
+    // Zoom to fit keeps every node header clear of the chrome at the top of the canvas.
+    await fitPatches(page);
+    const pane = (await page.locator(".sb-pe .react-flow__pane").boundingBox())!;
+    const topmost = await page.locator(".sb-pe .react-flow__node:not(.react-flow__node-comment)").evaluateAll((nodes) => Math.min(...nodes.map((n) => n.getBoundingClientRect().top)));
+    expect(topmost - pane.y).toBeGreaterThanOrEqual(40);
+    await screenshot(page, "stage4-patch-editor-02-wired-fit");
+
     // Tap the photo in the viewer: scale springs from 1 toward 1.4 over many frames.
     await expect.poll(() => hook(page, (s) => s.getValue("@photo.scale") as number)).toBeCloseTo(1, 3);
     // The device content layer captures input for the prototype, so tap at the photo's position on screen.
@@ -91,5 +102,6 @@ test.describe("building an interaction in the UI", () => {
     expect(samples.some((s) => s.scale > 1.01 && s.scale < 1.39)).toBe(true);
     await expect.poll(() => hook(page, (s) => s.getValue("@photo.scale") as number), { timeout: 5000 }).toBeGreaterThan(1.38);
     expect(problems).toEqual([]);
+    expect(warnings).toEqual([]);
   });
 });

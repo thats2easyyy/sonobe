@@ -4,6 +4,7 @@ import { DETERMINISTIC_EPOCH_MS, isLoop, makeLoop, type PatchDefinition, type Pl
 import { buildDoc, createMockRegistry, createTestRuntime, runFrames, runPatch, sequenceDefinition, type RunPatchOptions } from "@sonobe/engine/testing";
 import { describe, expect, it } from "vitest";
 import { javascript } from "./javascript.ts";
+import { LIVE_BUDGET_MS } from "./sandbox/realm.ts";
 
 const FILE = "test.js";
 
@@ -285,6 +286,40 @@ export function evaluate(patch) {
     );
     expect(column(r, "value")).toEqual([0, 0, 0, 0]);
     expect(scriptErrors(r)).toEqual(["scripts/test.js:4:34 The script took too long. Check for a loop that never ends."]);
+  });
+
+  it("stops a catastrophic regular expression within the budget, live and deterministic", () => {
+    const source = `export const inputs = [{ key: "email", type: "text", default: "${"a".repeat(30)}!" }];
+export const outputs = [{ key: "valid", type: "boolean", default: true }];
+export function evaluate(patch) {
+  patch.output("valid", /^(a+)+$/.test(patch.input("email")));
+}`;
+    for (const deterministic of [false, true]) {
+      const rt = createTestRuntime(runtimeDoc(source), [javascript], { deterministic });
+      const started = performance.now();
+      rt.step();
+      expect(performance.now() - started).toBeLessThan(LIVE_BUDGET_MS * 10);
+      expect(rt.getValue("js.valid")).toBe(true);
+      expect(rt.issues()).toEqual([{ code: "script_error", severity: "error", message: "scripts/test.js:4:3 The script took too long. Check for a loop that never ends.", patchId: "js" }]);
+      // Stalled: later frames don't run the script again.
+      const again = performance.now();
+      rt.step();
+      expect(performance.now() - again).toBeLessThan(LIVE_BUDGET_MS);
+    }
+  });
+
+  it("stops a huge native allocation before it crashes the app, live and deterministic", () => {
+    const source = `export const outputs = [{ key: "n", type: "number" }];
+export function evaluate(patch) {
+  const zeros = new Array(2 ** 28).fill(0);
+  patch.output("n", zeros.length);
+}`;
+    for (const deterministic of [false, true]) {
+      const rt = createTestRuntime(runtimeDoc(source), [javascript], { deterministic });
+      rt.step();
+      expect(rt.getValue("js.n")).toBe(0);
+      expect(rt.issues()).toEqual([{ code: "script_error", severity: "error", message: "scripts/test.js:3:3 The script used too much memory.", patchId: "js" }]);
+    }
   });
 
   it("logs unhandled promise rejections", () => {

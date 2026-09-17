@@ -1,62 +1,36 @@
-/** Patch editor chrome: breadcrumbs, toolbar, zoom and minimap controls, live scope, hints, empty state. */
+/** Patch editor chrome: toolbar, zoom and minimap controls, live scope, hints, empty state. */
 
 import { useReactFlow, useViewport } from "@xyflow/react";
-import { ChevronDown, ChevronRight, Map as MapIcon, MessageSquarePlus, Minus, Plus, Scan, WandSparkles, X } from "lucide-react";
-import { useStore } from "zustand";
-import { useEditorSession } from "../../../state/EditorProvider.tsx";
-import { selectBreadcrumbs } from "../../../state/selection.ts";
-import type { EditorSession } from "../../../state/session.ts";
+import { ChevronDown, Map as MapIcon, MessageSquarePlus, Minus, Plus, Scan, WandSparkles, X } from "lucide-react";
+import { createPortal } from "react-dom";
 import { IconButton } from "../../../ui/IconButton.tsx";
 import { Kbd } from "../../../ui/Kbd.tsx";
 import { useContextMenu, type MenuEntry } from "../../../ui/Menu.tsx";
 import { PortGlyph } from "../../../ui/PortGlyph.tsx";
+import { FIT_VIEW_PADDING } from "../model/geometry.ts";
 import { instanceChoiceKey } from "../model/instances.ts";
 import { patchEditorBridge } from "../state/bridge.ts";
 import { usePatchEditor, useUi } from "../state/context.ts";
 
-export interface PatchEditorBreadcrumbsProps {
-  /** Default: the nearest EditorProvider's session. */
-  session?: EditorSession;
-  className?: string;
+export { PatchEditorBreadcrumbs, type PatchEditorBreadcrumbsProps } from "./Breadcrumbs.tsx";
+
+export interface ToolbarProps {
+  /** Render into this element (a panel header) instead of over the canvas. */
+  container?: Element | null;
 }
 
-/** Component path: click a crumb to go back up (⌥↑ exits one level). */
-export function PatchEditorBreadcrumbs({ session: provided, className }: PatchEditorBreadcrumbsProps) {
-  const fallback = useEditorSession();
-  const session = provided ?? fallback;
-  const path = useStore(session.selection, (s) => s.componentPath);
-  const components = useStore(session.document, (s) => s.doc.components);
-  const crumbs = selectBreadcrumbs({ componentPath: path }, { components } as never);
-  return (
-    <nav className={`sb-pe-crumbs${className ? ` ${className}` : ""}`} aria-label="Component path">
-      {crumbs.map((crumb, i) => {
-        const last = i === crumbs.length - 1;
-        return (
-          <span key={crumb.path.join("/")} className="sb-pe-crumbs__item">
-            {i > 0 && <ChevronRight size={12} aria-hidden className="sb-pe-crumbs__sep" />}
-            {last ? (
-              <span aria-current="page">{crumb.name}</span>
-            ) : (
-              <button type="button" onClick={() => session.selection.getState().setComponentPath(crumb.path)}>
-                {crumb.name}
-              </button>
-            )}
-          </span>
-        );
-      })}
-    </nav>
-  );
-}
-
-export function Toolbar() {
+/** Tidy up, comment, insert. Docked in a panel header when `container` is given, else floating in the canvas's top bar. */
+export function Toolbar({ container }: ToolbarProps) {
   const { actions } = usePatchEditor();
-  return (
-    <div className="sb-pe-toolbar" role="toolbar" aria-label="Patch editor tools">
-      <IconButton size="sm" icon={<WandSparkles size={14} />} label="Tidy up" shortcut="Ctrl+T" onClick={() => void actions.tidyUp()} />
-      <IconButton size="sm" icon={<MessageSquarePlus size={14} />} label="Add comment" shortcut="Ctrl+Alt+C" onClick={() => actions.commentSelection()} />
-      <IconButton size="sm" icon={<Plus size={14} />} label="Insert patch" shortcut="Alt+Enter" onClick={() => actions.openPicker()} />
+  const docked = container !== undefined && container !== null;
+  const bar = (
+    <div className="sb-pe-toolbar" data-docked={docked || undefined} role="toolbar" aria-label="Patch editor tools">
+      <IconButton size={docked ? "xs" : "sm"} icon={<WandSparkles size={docked ? 13 : 14} />} label="Tidy up" shortcut="Ctrl+T" onClick={() => void actions.tidyUp()} />
+      <IconButton size={docked ? "xs" : "sm"} icon={<MessageSquarePlus size={docked ? 13 : 14} />} label="Add comment" shortcut="Ctrl+Alt+C" onClick={() => actions.commentSelection()} />
+      <IconButton size={docked ? "xs" : "sm"} icon={<Plus size={docked ? 13 : 14} />} label="Insert patch" shortcut="Alt+Enter" onClick={() => actions.openPicker()} />
     </div>
   );
+  return docked ? createPortal(bar, container) : bar;
 }
 
 export function ZoomControls() {
@@ -101,7 +75,7 @@ export function ZoomControls() {
         }}
         tooltipPlacement="top"
       />
-      <IconButton size="xs" icon={<Scan size={12} />} label="Zoom to fit" shortcut="Shift+1" onClick={() => void flow.fitView({ duration: 200, padding: 0.12 })} tooltipPlacement="top" />
+      <IconButton size="xs" icon={<Scan size={12} />} label="Zoom to fit" shortcut="Shift+1" onClick={() => void flow.fitView({ duration: 200, padding: FIT_VIEW_PADDING })} tooltipPlacement="top" />
     </div>
   );
 }
@@ -110,13 +84,13 @@ export function ZoomControls() {
  * Inside a component: where live values come from ("Live · Press Card"), with a menu to switch
  * instances when the component is used several times, or a note that it doesn't run anywhere.
  */
-export function LiveScopeChip({ offset = false }: { offset?: boolean }) {
+export function LiveScopeChip() {
   const { liveScope, session } = usePatchEditor();
   const menu = useContextMenu();
   if (liveScope.steps.length === 0 && liveScope.prefix !== null) return null;
   if (liveScope.prefix === null) {
     return (
-      <div className="sb-pe-live" data-state="off" data-offset={offset || undefined} role="status" title="Use this component in the prototype to see live values, pulses, and state here.">
+      <div className="sb-pe-live" data-state="off" role="status" title="Use this component in the prototype to see live values, pulses, and state here.">
         <span className="sb-pe-live__dot" aria-hidden />
         Not running · no instance in the prototype
       </div>
@@ -139,7 +113,7 @@ export function LiveScopeChip({ offset = false }: { offset?: boolean }) {
     ),
   ];
   return (
-    <div className="sb-pe-live" data-state="on" data-offset={offset || undefined} title={`Live values from ${path}`}>
+    <div className="sb-pe-live" data-state="on" title={`Live values from ${path}`}>
       <span className="sb-pe-live__dot" aria-hidden />
       <span className="sb-pe-live__label">Live</span>
       {several ? (

@@ -57,3 +57,23 @@
   color: var(--text-secondary);
   font-weight: var(--font-weight-medium);
 }
+
+.sb-palette__item[data-disabled] .sb-palette__title,
+.sb-palette__item[data-disabled] .sb-palette__icon {
+  color: var(--text-tertiary);
+}
+
+.sb-palette__reason {
+  flex: 0 1 auto;
+  min-width: 0;
+  margin-left: auto;
+  overflow: hidden;
+  color: var(--text-tertiary);
+  font-size: var(--font-size-xs);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sb-palette__reason + .sb-palette__kbd {
+  margin-left: var(--space-5);
+}

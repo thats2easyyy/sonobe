@@ -8,7 +8,7 @@
 
 import { homedir } from "node:os";
 import path from "node:path";
-import { applyOps, getDiagnostics, slugify, uniqueId, type Affected, type Author, type Diagnostic, type Id, type OpResult, type SonobeDocument, type SonobeError } from "@sonobe/core";
+import { applyOps, getDiagnostics, slugify, uniqueId, type Affected, type Author, type Diagnostic, type Id, type Op, type OpResult, type SonobeDocument, type SonobeError } from "@sonobe/core";
 import type { EngineRegistry, SceneFrame, SceneNode } from "@sonobe/engine";
 import {
   createSimulationManager,
@@ -120,6 +120,12 @@ interface RendererInfo {
 interface RendererApplyReply {
   result: { ok: boolean; results: OpResult[]; errors: SonobeError[]; idMap: Record<string, Id>; affected: Affected; applied: number };
   revision: number;
+  /** The ops as the editor applied them, with the ids it generated (it knows which ids this session reserved). */
+  applied?: Op[];
+  /** The history group of a committed batch. */
+  txnId?: string;
+  /** Every diagnostic of the resulting document (the preview for a dry run), so the main process doesn't diagnose it again. */
+  documentDiagnostics?: Diagnostic[];
 }
 
 interface RendererHistoryEntry {
@@ -213,6 +219,21 @@ function samePath(a: string, b: string): boolean {
 }
 
 const toHistoryItem = (e: RendererHistoryEntry): HistoryItem => ({ txnId: e.txnId, label: e.label, author: e.author, revision: e.revision, opCount: e.opCount, timestamp: e.timestamp, summary: e.description });
+
+/** An undone group as history.undo reports it (older editor builds send only txnId, label, author and opCount). */
+function undoneItem(e: Partial<RendererHistoryEntry>, revision: number): HistoryItem {
+  const author: Author = e.author && typeof e.author.name === "string" ? e.author : { kind: "human", name: "Someone" };
+  const label = typeof e.label === "string" ? e.label : "";
+  return {
+    txnId: String(e.txnId ?? ""),
+    label,
+    author,
+    revision: typeof e.revision === "number" ? e.revision : revision,
+    opCount: typeof e.opCount === "number" ? e.opCount : 0,
+    timestamp: typeof e.timestamp === "number" ? e.timestamp : 0,
+    summary: typeof e.description === "string" ? e.description : `${author.name}: ${label}`,
+  };
+}
 
 function matchesAuthor(author: Author, filter: string | undefined): boolean {
   if (!filter) return true;
@@ -358,10 +379,12 @@ export function createAppHost(options: AppHostOptions): AppHost {
   /** The document at the entry's last described revision (fetched only when it changed). */
   const snapshot = async (entry: Entry): Promise<Snapshot> => {
     if (entry.snapshot && entry.snapshot.revision === entry.info.revision) return entry.snapshot;
-    const reply = (await call<unknown>(entry.target, "document.get", { format: "json" })) as { revision?: unknown; document?: unknown } | null;
+    const reply = (await call<unknown>(entry.target, "document.get", { format: "json", diagnostics: true })) as { revision?: unknown; document?: unknown; diagnostics?: unknown } | null;
     if (!reply || typeof reply.revision !== "number" || !reply.document || typeof reply.document !== "object") throw unexpectedReply("document.get");
     entry.snapshot = { revision: reply.revision, doc: reply.document as SonobeDocument };
     entry.info = { ...entry.info, revision: reply.revision };
+    // The editor already knows the document's diagnostics; older builds don't send them, and diagnosticsOf computes them here.
+    if (Array.isArray(reply.diagnostics)) entry.diagnostics = { doc: entry.snapshot.doc, list: reply.diagnostics as Diagnostic[] };
     return entry.snapshot;
   };
 
@@ -587,9 +610,10 @@ export function createAppHost(options: AppHostOptions): AppHost {
       return { docId: entry.docId, ...(entry.info.projectPath ? { path: entry.info.projectPath } : {}), doc: snap.doc, revision: snap.revision, dirty: entry.info.dirty };
     },
 
-    async saveDocument(docId) {
+    async saveDocument(docId, saveOptions = {}) {
       const entry = await resolve(docId);
-      const reply = await call<false | { ok?: unknown; path?: unknown; revision?: unknown }>(entry.target, "document.save", {}, OPEN_TIMEOUT_MS);
+      // Without force, the editor refuses (disk_changed) while outside changes wait for the person's decision.
+      const reply = await call<false | { ok?: unknown; path?: unknown; revision?: unknown }>(entry.target, "document.save", saveOptions.force ? { force: true } : {}, OPEN_TIMEOUT_MS);
       if (reply === false) {
         throw new HostError("save_cancelled", "Saving was cancelled.", {
           hint: "This prototype hadn't been saved before, so Sonobe asked the person where to put it and they cancelled. Ask them where it should go, then call save_document again.",
@@ -625,8 +649,11 @@ export function createAppHost(options: AppHostOptions): AppHost {
       if (!r || typeof reply.revision !== "number" || !Array.isArray(r.errors)) throw unexpectedReply("document.apply");
       if (!r.ok && r.errors.some((e) => e.code === "revision_mismatch")) return conflictResult(entry, o.expectedRevision ?? before.revision, reply.revision, beforeDiagnostics, dryRun);
 
-      // Replay locally (never committed) for the resolved ops and, on dry runs, the preview.
-      const local = applyOps(before.doc, ops, { registry, atomic: o.atomic !== false, dryRun: true, ...(o.defaultComponent !== undefined ? { defaultComponent: o.defaultComponent } : {}) });
+      // The editor's own applied ops carry the ids it generated. A local replay can't know which ids the
+      // editor reserved (removed this session), so it's only a fallback for builds that don't send them.
+      const applied: Op[] = Array.isArray(reply.applied)
+        ? reply.applied
+        : applyOps(before.doc, ops, { registry, atomic: o.atomic !== false, dryRun: true, ...(o.defaultComponent !== undefined ? { defaultComponent: o.defaultComponent } : {}) }).applied;
       const out: HostApplyResult = {
         ok: r.ok,
         docId: entry.docId,
@@ -636,22 +663,24 @@ export function createAppHost(options: AppHostOptions): AppHost {
         errors: r.errors,
         idMap: r.idMap,
         affected: r.affected,
-        applied: local.applied,
+        applied,
         diagnostics: { added: [], resolved: [], totals: diagnosticTotals(beforeDiagnostics) },
       };
       if (dryRun) {
+        // Replay the resolved ops (explicit ids) so the preview shows what a commit would create.
+        const local = applyOps(before.doc, applied, { registry, atomic: false, dryRun: true });
         if (local.preview) {
           out.preview = local.preview;
-          out.diagnostics = diffDiagnostics(beforeDiagnostics, getDiagnostics(local.preview, registry));
+          const previewDiagnostics = Array.isArray(reply.documentDiagnostics) ? reply.documentDiagnostics : getDiagnostics(local.preview, registry);
+          out.diagnostics = diffDiagnostics(beforeDiagnostics, previewDiagnostics);
         }
         return out;
       }
       if (r.applied > 0) {
         const after = await refresh(entry);
+        if (Array.isArray(reply.documentDiagnostics) && after.revision === reply.revision) entry.diagnostics = { doc: after.doc, list: reply.documentDiagnostics };
         out.diagnostics = diffDiagnostics(beforeDiagnostics, diagnosticsOf(entry, after));
-        const history = await call<{ entries?: RendererHistoryEntry[] }>(entry.target, "history.list", { limit: 5 });
-        const committed = history?.entries?.find((e) => e.revision === reply.revision);
-        if (committed) out.txnId = committed.txnId;
+        if (typeof reply.txnId === "string") out.txnId = reply.txnId;
       }
       return out;
     },
@@ -761,44 +790,22 @@ export function createAppHost(options: AppHostOptions): AppHost {
 
       async undo(o) {
         const entry = await resolve(o.docId);
-        const reply = await call<{ entries?: RendererHistoryEntry[] }>(entry.target, "history.list", { limit: HISTORY_SCAN });
-        const list = reply?.entries ?? [];
-        const top = list[0];
-        if (!top) throw new HostError("nothing_to_undo", "There's nothing to undo in this document's history.", { hint: "list_history shows what's been recorded since the document was opened." });
-        let targetId = o.txnId;
-        if (targetId === undefined) {
-          if (top.author.kind === "human" && !o.allowHumanEdits) {
-            throw new HostError("human_edit", `The newest change was made by ${top.author.name}: "${top.label}". Undoing it would throw away their work.`, {
-              hint: `Ask before undoing someone else's edit. To undo it anyway, pass txnId "${top.txnId}".`,
-            });
-          }
-          targetId = top.txnId;
-        }
-        const index = list.findIndex((e) => e.txnId === targetId);
-        if (index < 0) {
-          throw new HostError("not_found", `There's no undoable history entry "${targetId}".`, {
-            hint: `Newest entries: ${list
-              .slice(0, 5)
-              .map((e) => `${e.txnId} (${e.label})`)
-              .join(", ")}.`,
-          });
-        }
-        const humans = list.slice(0, index + 1).filter((e) => e.author.kind === "human" && e.txnId !== targetId);
-        if (humans.length && !o.allowHumanEdits) {
-          throw new HostError("human_edit", `Undoing back to "${list[index]!.label}" would also undo ${humans.length} newer change${humans.length === 1 ? "" : "s"} made by ${humans[0]!.author.name}.`, {
-            hint: "Ask the person first; to go ahead anyway, pass allowHumanEdits: true.",
-          });
-        }
         const before = await snapshot(entry);
         const beforeDiagnostics = diagnosticsOf(entry, before);
-        const undone = await call<{ revision?: unknown; undone?: { txnId: string }[] }>(entry.target, "history.undo", { txnId: targetId, author: o.author });
-        if (typeof undone?.revision !== "number") throw unexpectedReply("history.undo");
+        // The editor checks the human-edit guard and undoes in one task, so a person's edit can't land
+        // between the check and the undo. Its refusals (human_edit, not_found, nothing_to_undo) come back as HostErrors.
+        const reply = await call<{ revision?: unknown; undone?: Partial<RendererHistoryEntry>[] }>(entry.target, "history.undo", {
+          ...(o.txnId !== undefined ? { txnId: o.txnId } : {}),
+          ...(o.allowHumanEdits ? { allowHumanEdits: true } : {}),
+          author: o.author,
+        });
+        if (typeof reply?.revision !== "number") throw unexpectedReply("history.undo");
+        const revision = reply.revision;
         const after = await refresh(entry);
-        const byId = new Map(list.map((e) => [e.txnId, e]));
         return {
           docId: entry.docId,
-          revision: undone.revision,
-          undone: (undone.undone ?? []).map((u) => byId.get(u.txnId)).filter((e): e is RendererHistoryEntry => !!e).map(toHistoryItem),
+          revision,
+          undone: (reply.undone ?? []).map((e) => undoneItem(e, revision)),
           diagnostics: diffDiagnostics(beforeDiagnostics, diagnosticsOf(entry, after)),
         };
       },

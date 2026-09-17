@@ -13,6 +13,7 @@ import { GUIDE_ID_PREFIX, GuideReader } from "./GuideReader.tsx";
 import { getGuideCatalog } from "./guides.ts";
 import { readLearnView, readOpenedGuides, writeLearnView, writeOpenedGuides, type LearnView } from "./learnStorage.ts";
 import { getLesson } from "./lessons/catalog.ts";
+import { lessonLayout } from "./lessons/lessonLayout.ts";
 import { LessonPlayer } from "./lessons/LessonPlayer.tsx";
 import { LessonsHome } from "./lessons/LessonsHome.tsx";
 import { listPatchReference } from "./patchReference.ts";
@@ -70,6 +71,11 @@ export function LearnDrawer({ onClose, view, defaultView, onViewChange, onConnec
     if (view) navigate(view);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [controlledKey, navigate]);
+
+  // A lesson layout left behind by a reload goes back to normal once Learn shows something other than a lesson.
+  useEffect(() => {
+    if (current.kind !== "lesson") lessonLayout.releaseStale();
+  }, [current.kind]);
 
   const currentKey = viewKey(current);
   useEffect(() => {

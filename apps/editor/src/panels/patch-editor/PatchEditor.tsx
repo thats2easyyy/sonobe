@@ -17,6 +17,8 @@ import {
   ReactFlowProvider,
   SelectionMode,
   useReactFlow,
+  useStore as useFlowStore,
+  useUpdateNodeInternals,
   ViewportPortal,
   type Connection,
   type Edge,
@@ -26,11 +28,15 @@ import {
   type NodeChange,
   type NodeTypes,
   type OnConnectStartParams,
+  type OnError,
   type ReactFlowInstance,
+  type ReactFlowState,
 } from "@xyflow/react";
 import "@xyflow/react/dist/base.css";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent } from "react";
+import { LARGE_GRAPH_NODES, useGestureDocument } from "./state/gestureDocument.ts";
 import { useStore } from "zustand";
+import { rectOfElement } from "../../state/bounds.ts";
 import { parseClipboardFragment } from "../../state/clipboard.ts";
 import { pasteFragment } from "../../state/editActions.ts";
 import { useEditorSession } from "../../state/EditorProvider.tsx";
@@ -46,18 +52,20 @@ import { toast } from "../../ui/Toast.tsx";
 import { CableEdgeView, ConnectionLineView } from "./components/CableEdge.tsx";
 import { ArmedHint, EmptyGraph, LiveScopeChip, PatchEditorBreadcrumbs, Toolbar, ZoomControls } from "./components/Chrome.tsx";
 import { LinkDragSearch, PatchInfoDialog, PatchPickerDialog, SpliceChooser, type SpliceChoiceRequest } from "./components/Dialogs.tsx";
-import { cableMenu, commentMenu, layerMenu, paneMenu, patchMenu, type MenuContext } from "./components/menus.ts";
+import { cableMenu, commentMenu, layerMenu, paneMenu, patchMenu, portMenu, type MenuContext } from "./components/menus.ts";
 import { CommentNodeView, InterfaceNodeView, LayerNodeView, PatchNodeView } from "./components/NodeViews.tsx";
 import { PortHoverCard } from "./components/PortHoverCard.tsx";
 import { orientConnection, portAtHandle, quickConnectCheck, type HandleRef } from "./model/connect.ts";
 import { patchTitle, spliceOptions, type SpliceOption } from "./model/editOps.ts";
-import { boundsOf, boundsVisible, estimateNodeSize, HEADER_HEIGHT, pointInRect, readableViewport, rectContains, ROW_HEIGHT, sampleCable, type Point, type Rect } from "./model/geometry.ts";
+import { boundsOf, boundsVisible, estimateNodeSize, FIT_VIEW_PADDING, HEADER_HEIGHT, isFarZoom, pointInRect, readableViewport, rectContains, ROW_HEIGHT, sampleCable, type Point, type Rect } from "./model/geometry.ts";
 import { deriveGraph } from "./model/graph.ts";
+import { missingHandlesKey, parseMissingHandlesKey } from "./model/handles.ts";
 import { resolveLiveScope, scopedAddress, type LiveScope } from "./model/instances.ts";
 import { cablesCutByKnife, simplifyStroke, type CableGeometry } from "./model/knife.ts";
 import type { LinkCandidate } from "./model/linkSearch.ts";
 import type { PickerItem } from "./model/picker.ts";
 import { estimatePatchSize } from "./model/placement.ts";
+import { isSpliceDrag } from "./model/splice.ts";
 import { reconcileNodes } from "./model/reconcile.ts";
 import { singleKeyInserts } from "./model/singleKey.ts";
 import {
@@ -91,8 +99,13 @@ export interface PatchEditorProps {
   session?: EditorSession;
   /** Breadcrumbs over the canvas. Turn off when the shell shows PatchEditorBreadcrumbs in its panel header. Default true. */
   showBreadcrumbs?: boolean;
-  /** Floating toolbar (tidy up, comment, insert). Default true. */
+  /** Toolbar (tidy up, comment, insert). Default true. */
   showToolbar?: boolean;
+  /**
+   * Dock the toolbar in this element (e.g. the panel header) instead of the canvas's top bar, so it
+   * never covers nodes. While it's null the toolbar isn't shown.
+   */
+  toolbarContainer?: Element | null;
   /** Start with the minimap visible. Default false. */
   defaultMinimap?: boolean;
   /** Register patch editor commands and single-key inserts with the CommandProvider. Default true. */
@@ -115,7 +128,7 @@ const MIN_CANVAS = 48;
 type Flow = ReactFlowInstance<FlowNode, CableFlowEdge>;
 
 /** The patch graph for the component being edited (selection.componentPath). */
-export function PatchEditor({ session: provided, showBreadcrumbs = true, showToolbar = true, defaultMinimap = false, commands = true, className, style, "aria-label": ariaLabel = "Patch editor" }: PatchEditorProps) {
+export function PatchEditor({ session: provided, showBreadcrumbs = true, showToolbar = true, toolbarContainer, defaultMinimap = false, commands = true, className, style, "aria-label": ariaLabel = "Patch editor" }: PatchEditorProps) {
   const fallback = useEditorSession();
   const session = provided ?? fallback;
   const componentId = useStore(session.selection, currentComponentId);
@@ -130,7 +143,7 @@ export function PatchEditor({ session: provided, showBreadcrumbs = true, showToo
       onPointerDownCapture={() => session.selection.getState().setFocusedPanel("patchEditor")}
     >
       <ReactFlowProvider key={componentId}>
-        <Canvas session={session} componentId={componentId} showBreadcrumbs={showBreadcrumbs} showToolbar={showToolbar} defaultMinimap={defaultMinimap} commands={commands} />
+        <Canvas session={session} componentId={componentId} showBreadcrumbs={showBreadcrumbs} showToolbar={showToolbar} toolbarContainer={toolbarContainer} defaultMinimap={defaultMinimap} commands={commands} />
       </ReactFlowProvider>
     </section>
   );
@@ -141,6 +154,8 @@ interface CanvasProps {
   componentId: Id;
   showBreadcrumbs: boolean;
   showToolbar: boolean;
+  /** undefined: float in the top bar. */
+  toolbarContainer: Element | null | undefined;
   defaultMinimap: boolean;
   commands: boolean;
 }
@@ -178,7 +193,7 @@ function clientPoint(event: MouseEvent | TouchEvent | ReactMouseEvent): XY {
 /** A string that changes only when the live scope does, so the context value stays stable across edits. */
 const scopeKey = (scope: LiveScope) => `${scope.prefix ?? "∅"}|${scope.steps.map((s) => `${s.parent}>${s.component}:${s.instance}:${s.instances.map((i) => `${i.id}=${i.name}`).join(",")}`).join(";")}`;
 
-function Canvas({ session, componentId, showBreadcrumbs, showToolbar, defaultMinimap, commands }: CanvasProps) {
+function Canvas({ session, componentId, showBreadcrumbs, showToolbar, toolbarContainer, defaultMinimap, commands }: CanvasProps) {
   const registry = session.registry;
   const flow = useReactFlow<FlowNode, CableFlowEdge>();
   const flowRef = useRef<Flow>(flow);
@@ -207,7 +222,12 @@ function Canvas({ session, componentId, showBreadcrumbs, showToolbar, defaultMin
   }, []);
 
   // -- Document → graph ------------------------------------------------------
-  const doc = useStore(session.document, (s) => s.doc);
+  const liveDoc = useStore(session.document, (s) => s.doc);
+  // While a gesture is open (an inspector scrub, a canvas drag), the graph follows at low priority, or
+  // for a large graph a few times a second, so the pointer, the inspector and the viewer never wait for it.
+  const gestureOpen = useStore(session.document, (s) => s.gesture !== null);
+  const graphSizeRef = useRef(0);
+  const doc = useGestureDocument(liveDoc, gestureOpen, graphSizeRef.current > LARGE_GRAPH_NODES);
   const componentPath = useStore(session.selection, (s) => s.componentPath);
   const instanceChoices = useStore(bridge, (s) => s.instanceChoices);
   const pendingTargets = useStore(bridge, (s) => s.targets[componentId]) ?? EMPTY_TARGETS;
@@ -234,12 +254,11 @@ function Canvas({ session, componentId, showBreadcrumbs, showToolbar, defaultMin
     return map;
   }, [working, componentId]);
 
-  // Runtime issues are attributed to the root component (engine limitation).
-  const rootComponent = componentId === doc.project.root;
+  // Runtime issues name their component (instance paths resolve to the component), and deriveGraph keeps this component's.
   const diagnostics = useMemo(() => {
     const base = diagnosticsFor(doc, registry);
-    return rootComponent && runtimeDiagnostics.length ? [...base, ...runtimeDiagnostics] : base;
-  }, [doc, registry, rootComponent, runtimeDiagnostics]);
+    return runtimeDiagnostics.length ? [...base, ...runtimeDiagnostics] : base;
+  }, [doc, registry, runtimeDiagnostics]);
 
   const modelRef = useRef<GraphModel | null>(null);
   const model = useMemo(
@@ -247,6 +266,7 @@ function Canvas({ session, componentId, showBreadcrumbs, showToolbar, defaultMin
     [doc, componentId, registry, diagnostics, workingMap, pendingTargets],
   );
   modelRef.current = model;
+  graphSizeRef.current = model.nodes.length;
   const edgeById = useMemo(() => new Map(model.edges.map((e) => [e.id, e])), [model.edges]);
 
   const actions = useMemo(
@@ -273,9 +293,13 @@ function Canvas({ session, componentId, showBreadcrumbs, showToolbar, defaultMin
     fitModeRef.current = false;
   }, []);
 
+  /** Filled in below, once the menu helpers exist; stable so the context doesn't change with it. */
+  const portMenuRef = useRef<(event: ReactMouseEvent, nodeId: string, port: PortModel) => void>(() => undefined);
+  const openPortMenu = useCallback((event: ReactMouseEvent, nodeId: string, port: PortModel) => portMenuRef.current(event, nodeId, port), []);
+
   const context = useMemo<PatchEditorContextValue>(
-    () => ({ session, registry, componentId, ui, live, geometry, actions, reducedMotion, liveEnabled, liveScope, markViewportManual }),
-    [session, registry, componentId, ui, live, geometry, actions, reducedMotion, liveEnabled, liveScope, markViewportManual],
+    () => ({ session, registry, componentId, ui, live, geometry, actions, reducedMotion, liveEnabled, liveScope, markViewportManual, openPortMenu }),
+    [session, registry, componentId, ui, live, geometry, actions, reducedMotion, liveEnabled, liveScope, markViewportManual, openPortMenu],
   );
 
   // -- React Flow node state ------------------------------------------------
@@ -365,11 +389,32 @@ function Canvas({ session, componentId, showBreadcrumbs, showToolbar, defaultMin
     };
   }, [autoFit]);
 
+  // Cables wait for their port handles: a cable that arrives with a new port row (a layer target) would
+  // reach React Flow before the row's handle is measured (error #008). Hold it back and re-measure the node.
+  const heldKey = useFlowStore(useCallback((s: ReactFlowState) => missingHandlesKey(model.edges, s.nodeLookup), [model.edges]));
+  const farZoom = useFlowStore(useCallback((s: ReactFlowState) => isFarZoom(s.transform[2]), []));
+  const held = useMemo(() => parseMissingHandlesKey(heldKey), [heldKey]);
+  const updateNodeInternals = useUpdateNodeInternals();
+  useEffect(() => {
+    if (held.nodes.length) updateNodeInternals(held.nodes);
+  }, [held, updateNodeInternals]);
+
   const edges = useMemo(() => {
-    if (selectedEdges.length === 0) return model.edges;
+    const hidden = held.missing.length ? new Set(held.missing) : null;
+    const ready = hidden ? model.edges.filter((e) => !hidden.has(e.id)) : model.edges;
+    if (selectedEdges.length === 0) return ready;
     const set = new Set(selectedEdges);
-    return model.edges.map((e) => (set.has(e.id) ? { ...e, selected: true } : e));
-  }, [model.edges, selectedEdges]);
+    return ready.map((e) => (set.has(e.id) ? { ...e, selected: true } : e));
+  }, [model.edges, selectedEdges, held]);
+
+  const onFlowError = useCallback<OnError>((code, message) => {
+    // #008 is the held-back cable above; it draws once its handle is measured.
+    if (code === "008") return;
+    if (import.meta.env?.DEV) console.warn(`[React Flow] ${message}`);
+  }, []);
+
+  // Where the graph is on screen, so the desktop MCP bridge can screenshot it (graph.bounds).
+  useEffect(() => session.bounds?.register("graph.bounds", () => rectOfElement(wrapperRef.current, flowRef.current.getZoom())), [session]);
 
   const syncSelection = useCallback(
     (next: readonly FlowNode[]) => {
@@ -530,7 +575,7 @@ function Canvas({ session, componentId, showBreadcrumbs, showToolbar, defaultMin
         }
         commit(nodesRef.current.map((n) => (moves.has(n.id) ? { ...n, position: moves.get(n.id)! } : n)));
       }
-      const splicing = (event.metaKey || event.ctrlKey) && dragged.length === 1 && dragged[0]!.type === "patch" ? findSpliceTarget(dragged[0]!) : null;
+      const splicing = isSpliceDrag(event, dragged) ? findSpliceTarget(dragged[0]!) : null;
       if (ui.getState().spliceEdge !== splicing) ui.getState().set({ spliceEdge: splicing });
     },
     [commit, findSpliceTarget, ui],
@@ -673,6 +718,14 @@ function Canvas({ session, componentId, showBreadcrumbs, showToolbar, defaultMin
       const targetId = nodeEl?.getAttribute("data-id");
       const target = targetId && targetId !== origin.nodeId ? modelRef.current!.nodes.find((n) => n.id === targetId) : undefined;
       if (!target || target.data.kind === "comment") return false;
+      if (target.data.kind === "interface") {
+        // A cable released on Component Inputs (from an input) or Component Outputs (from an output) publishes
+        // that port, instead of wiring an existing published port that may not fit.
+        const side: PortSide = origin.side === "in" ? "in" : "out";
+        if ((side === "in") !== (target.data.side === "inputs")) return false;
+        actions.publishPort(fromAddress, side);
+        return "connected";
+      }
       if (target.data.kind === "layer") {
         setLinkSearch({ client, position: flowRef.current.screenToFlowPosition(client), side: origin.side, address: fromAddress, type: fromType, layer: target.data.layerId, sourceNode: origin.nodeId, ...(reroute ? { reroute } : {}) });
         return "picker";
@@ -856,11 +909,22 @@ function Canvas({ session, componentId, showBreadcrumbs, showToolbar, defaultMin
     nested: session.selection.getState().componentPath.length > 1,
     minimap: ui.getState().minimap,
     toggleMinimap: () => ui.getState().set({ minimap: !ui.getState().minimap }),
-    fitView: () => void flowRef.current.fitView({ duration: 200, padding: 0.12 }),
+    fitView: () => void flowRef.current.fitView({ duration: 200, padding: FIT_VIEW_PADDING }),
     paste: () => void paste(),
     rename: (nodeId) => ui.getState().set({ editingTitle: nodeId }),
     chooseLayerProperty,
   });
+
+  portMenuRef.current = (event, nodeId, port) => {
+    const node = modelRef.current?.nodes.find((n) => n.id === nodeId);
+    if (!node) return;
+    const kind = flowNodeKind(nodeId);
+    const s = session.selection.getState();
+    if (kind === "patch" && !s.patches.includes(nodeId)) s.select({ patches: [nodeId], comments: [], layers: [] });
+    if (kind === "layer" && !s.layers.includes(layerIdOfNode(nodeId)!)) s.select({ patches: [], comments: [], layers: [layerIdOfNode(nodeId)!] });
+    const entries = portMenu(menuContext(), node.data as GraphNodeData, port);
+    if (entries.length) menu.open(event, entries);
+  };
 
   const onNodeContextMenu = useCallback(
     (event: ReactMouseEvent, node: FlowNode) => {
@@ -1001,6 +1065,7 @@ function Canvas({ session, componentId, showBreadcrumbs, showToolbar, defaultMin
         ref={wrapperRef}
         className="sb-pe__canvas"
         data-fitting={(!fitted && !empty) || undefined}
+        data-lod={farZoom ? "far" : undefined}
         onPointerEnter={activate}
         onPointerDownCapture={onPointerDownCapture}
         onPointerMove={onPointerMove}
@@ -1069,6 +1134,8 @@ function Canvas({ session, componentId, showBreadcrumbs, showToolbar, defaultMin
           connectOnClick={false}
           elevateNodesOnSelect={false}
           nodeDragThreshold={2}
+          onError={onFlowError}
+          attributionPosition="bottom-left"
           aria-label="Patch graph"
         >
           <Background variant={BackgroundVariant.Dots} gap={16} size={1.2} className="sb-pe-background" />
@@ -1092,9 +1159,12 @@ function Canvas({ session, componentId, showBreadcrumbs, showToolbar, defaultMin
           )}
         </ReactFlow>
         <KnifeOverlay ui={ui} />
-        {showBreadcrumbs && <PatchEditorBreadcrumbs session={session} className="sb-pe-crumbs--overlay" />}
-        <LiveScopeChip offset={showBreadcrumbs} />
-        {showToolbar && <Toolbar />}
+        <div className="sb-pe-topbar" data-scrim={(showToolbar && toolbarContainer === undefined) || undefined}>
+          {showBreadcrumbs && <PatchEditorBreadcrumbs session={session} className="sb-pe-crumbs--overlay" />}
+          <LiveScopeChip />
+          {showToolbar && toolbarContainer === undefined && <Toolbar />}
+        </div>
+        {showToolbar && toolbarContainer && <Toolbar container={toolbarContainer} />}
         <ZoomControls />
         <ArmedHint />
         {empty && <EmptyGraph />}
@@ -1159,6 +1229,14 @@ function registerPatchEditorCommands(cmds: CommandsContextValue, entry: CommandE
     if (t) fn(t);
   };
   const patches = () => target()?.actions.selectedPatchIds() ?? [];
+  /** The port ⌥P acts on: under the pointer, showing its hover card, or armed for fan-out. */
+  const publishTarget = () => {
+    const ui = target()?.ui.getState();
+    const port = ui?.pointerPort ?? (ui?.hoverPort ? { nodeId: ui.hoverPort.nodeId, address: ui.hoverPort.address, side: ui.hoverPort.side } : null) ?? (ui?.armed ? { nodeId: ui.armed.nodeId, address: ui.armed.address, side: "out" as const } : null);
+    if (!port) return undefined;
+    const kind = flowNodeKind(port.nodeId);
+    return kind === "patch" || kind === "layer" ? port : undefined;
+  };
   const singlePatch = () => (patches().length === 1 ? patches()[0] : undefined);
   const hasItems = () => {
     const t = target();
@@ -1174,12 +1252,29 @@ function registerPatchEditorCommands(cmds: CommandsContextValue, entry: CommandE
     { id: "patchEditor.commentSelection", title: "Comment Selected Patches", category, scope, shortcut: "Ctrl+Alt+C", keywords: ["note", "frame", "group"], run: run((t) => t.actions.commentSelection()) },
     { id: "patchEditor.delete", title: "Delete Patches or Cables", category, scope, shortcut: ["Backspace", "Delete"], when: hasItems, run: run((t) => t.actions.deleteSelection()) },
     { id: "patchEditor.selectAll", title: "Select All Patches", category, scope, shortcut: "Mod+A", run: run((t) => t.actions.selectAll()) },
-    { id: "patchEditor.duplicate", title: "Duplicate Patches", category, scope, shortcut: "Mod+D", when: () => patches().length > 0, run: run((t) => t.actions.duplicateSelection()) },
-    { id: "patchEditor.alignLeft", title: "Align Left Edges", category, scope, shortcut: "Mod+[", when: () => patches().length > 1, run: run((t) => t.actions.align("left")) },
-    { id: "patchEditor.alignTop", title: "Align Top Edges", category, scope, shortcut: "Mod+]", when: () => patches().length > 1, run: run((t) => t.actions.align("top")) },
-    { id: "patchEditor.mute", title: "Mute or Unmute Patches", category, scope, shortcut: "M", keywords: ["bypass", "disable"], when: () => patches().length > 0, run: run((t) => t.actions.toggleMute()) },
-    { id: "patchEditor.collapse", title: "Collapse or Expand Patches", category, scope, shortcut: "H", when: () => patches().length > 0, run: run((t) => t.actions.toggleCollapse()) },
-    { id: "patchEditor.createComponent", title: "Group Patches into Component", category, scope, shortcut: cmds.platform === "mac" ? "Mod+Ctrl+G" : "Ctrl+Alt+G", when: () => patches().length > 0, run: run((t) => t.actions.groupIntoComponent()) },
+    { id: "patchEditor.duplicate", title: "Duplicate Patches", category, scope, shortcut: "Mod+D", when: () => patches().length > 0, disabledReason: "Select patches first", run: run((t) => t.actions.duplicateSelection()) },
+    { id: "patchEditor.alignLeft", title: "Align Left Edges", category, scope, shortcut: "Mod+[", keywords: ["arrange", "column"], when: () => patches().length > 1, disabledReason: "Select 2 or more patches", run: run((t) => t.actions.align("left")) },
+    { id: "patchEditor.alignRight", title: "Align Right Edges", category, scope, shortcut: "Mod+]", keywords: ["arrange", "column"], when: () => patches().length > 1, disabledReason: "Select 2 or more patches", run: run((t) => t.actions.align("right")) },
+    { id: "patchEditor.alignTop", title: "Align Top Edges", category, scope, shortcut: "Mod+Shift+[", keywords: ["arrange", "row"], when: () => patches().length > 1, disabledReason: "Select 2 or more patches", run: run((t) => t.actions.align("top")) },
+    { id: "patchEditor.alignBottom", title: "Align Bottom Edges", category, scope, shortcut: "Mod+Shift+]", keywords: ["arrange", "row"], when: () => patches().length > 1, disabledReason: "Select 2 or more patches", run: run((t) => t.actions.align("bottom")) },
+    {
+      id: "patchEditor.publishPort",
+      title: "Publish or Unpublish Port",
+      category,
+      scope,
+      shortcut: "Alt+P",
+      keywords: ["publish", "unpublish", "expose", "interface", "component input", "component output", "property"],
+      description: "Point at a port inside a component and press ⌥P",
+      when: () => !!publishTarget(),
+      disabledReason: "Point at a port inside a component, then press ⌥P",
+      run: run((t) => {
+        const port = publishTarget();
+        if (port) t.actions.togglePublish(port.address, port.side);
+      }),
+    },
+    { id: "patchEditor.mute", title: "Mute or Unmute Patches", category, scope, shortcut: "M", keywords: ["bypass", "disable"], when: () => patches().length > 0, disabledReason: "Select patches first", run: run((t) => t.actions.toggleMute()) },
+    { id: "patchEditor.collapse", title: "Collapse or Expand Patches", category, scope, shortcut: "H", when: () => patches().length > 0, disabledReason: "Select patches first", run: run((t) => t.actions.toggleCollapse()) },
+    { id: "patchEditor.createComponent", title: "Group Patches into Component", category, scope, shortcut: cmds.platform === "mac" ? "Mod+Ctrl+G" : "Ctrl+Alt+G", keywords: ["component", "reuse", "create component"], when: () => patches().length > 0, disabledReason: "Select patches first", run: run((t) => t.actions.groupIntoComponent()) },
     {
       id: "patchEditor.enterComponent",
       title: "Enter Component Patch",
@@ -1229,7 +1324,7 @@ function registerPatchEditorCommands(cmds: CommandsContextValue, entry: CommandE
         void t.flow().zoomTo(1, { duration: 160 });
       }),
     },
-    { id: "patchEditor.zoomToFit", title: "Zoom to Fit Patches", category, scope, shortcut: "Shift+1", run: run((t) => void t.flow().fitView({ duration: 200, padding: 0.12 })) },
+    { id: "patchEditor.zoomToFit", title: "Zoom to Fit Patches", category, scope, shortcut: "Shift+1", run: run((t) => void t.flow().fitView({ duration: 200, padding: FIT_VIEW_PADDING })) },
     { id: "patchEditor.toggleMinimap", title: "Show or Hide Minimap", category, scope, shortcut: "Shift+M", run: run((t) => t.ui.getState().set({ minimap: !t.ui.getState().minimap })) },
     { id: "patchEditor.cancelConnect", title: "Cancel Connecting", category, scope, shortcut: "Escape", hidden: true, when: () => !!target()?.ui.getState().armed, run: run((t) => t.ui.getState().set({ armed: null })) },
   ];

@@ -1,13 +1,14 @@
-import { ArrowRight, BookOpen, Check, Crosshair, Lightbulb, LogOut, PartyPopper, RotateCcw } from "lucide-react";
+import { ArrowRight, BookOpen, Check, Crosshair, FileQuestionMark, Lightbulb, LogOut, PartyPopper, RotateCcw } from "lucide-react";
 import { useEffect, useId, useState } from "react";
-import { useEditorSession } from "../../../state/EditorProvider.tsx";
+import { useDocument, useEditorSession } from "../../../state/EditorProvider.tsx";
 import { Button } from "../../../ui/Button.tsx";
 import { toast } from "../../../ui/Toast.tsx";
 import { nextLesson } from "./catalog.ts";
 import { InlineText } from "./InlineText.tsx";
+import { lessonLayout } from "./lessonLayout.ts";
 import { lessonStore, useLessons } from "./lessonStore.ts";
 import { findLessonTarget, LessonSpotlight } from "./LessonSpotlight.tsx";
-import { loadLessonStarter } from "./runner.ts";
+import { isLessonDocumentOpen, loadLessonStarter } from "./runner.ts";
 import type { Lesson } from "./types.ts";
 import { useLessonRunner } from "./useLessonRunner.ts";
 
@@ -25,18 +26,25 @@ export interface LessonPlayerProps {
 
 const LEVELS = ["Level 0", "Level 1", "Level 2", "Level 3", "Level 4"];
 
-/** One lesson: an intro with Start, then the steps with a live check and spotlight, then a celebration. */
+/**
+ * One lesson: an intro with Start, then the steps with a live check and spotlight, then a celebration.
+ * Progress resumes only while the lesson's practice prototype is open; otherwise it offers a restart.
+ * While the lesson is on screen the shell uses the lesson layout (see lessonLayout.ts).
+ */
 export function LessonPlayer({ lesson, onBack, onOpenLesson, onOpenGuide }: LessonPlayerProps) {
   const session = useEditorSession();
   const titleId = useId();
   const active = useLessons((s) => (s.active?.id === lesson.id ? s.active : null));
   const completed = useLessons((s) => s.completed[lesson.id] !== undefined);
+  const documentOpen = useDocument((s) => isLessonDocumentOpen(lesson, s.doc));
   const [busy, setBusy] = useState(false);
   const [spotlightKey, setSpotlightKey] = useState(0);
   const stepCount = lesson.steps.length;
   const stepIndex = active ? Math.min(active.step, stepCount) : 0;
-  const running = active !== null && stepIndex < stepCount;
-  const finished = active !== null && stepIndex >= stepCount;
+  const inLesson = active !== null && documentOpen;
+  const elsewhere = active !== null && !documentOpen;
+  const running = inLesson && stepIndex < stepCount;
+  const finished = inLesson && stepIndex >= stepCount;
   const runner = useLessonRunner(lesson, stepIndex, running);
   const next = nextLesson(lesson.id);
 
@@ -45,6 +53,22 @@ export function LessonPlayer({ lesson, onBack, onOpenLesson, onOpenGuide }: Less
     const timer = setTimeout(() => lessonStore.getState().advance(stepCount), ADVANCE_DELAY_MS);
     return () => clearTimeout(timer);
   }, [running, runner.done, runner.step, stepIndex, stepCount]);
+
+  // Lesson layout while this lesson is on screen; the earlier layout comes back when it leaves.
+  useEffect(() => {
+    if (!inLesson) {
+      lessonLayout.releaseStale();
+      return;
+    }
+    lessonLayout.enter();
+    return () => lessonLayout.leave();
+  }, [inLesson]);
+
+  // Show the Inspector while a step points at it. A finished step keeps it until the next step starts.
+  useEffect(() => {
+    if (!running) lessonLayout.showPanelsFor(null);
+    else if (!runner.done) lessonLayout.showPanelsFor(runner.target);
+  }, [running, runner.done, runner.target]);
 
   const start = async () => {
     setBusy(true);
@@ -80,7 +104,7 @@ export function LessonPlayer({ lesson, onBack, onOpenLesson, onOpenGuide }: Less
           {lesson.title}
         </h3>
         <p className="sb-lesson__summary">{lesson.summary}</p>
-        {active && (
+        {inLesson && (
           <div className="sb-lesson__progress" role="progressbar" aria-label="Lesson progress" aria-valuemin={0} aria-valuemax={stepCount} aria-valuenow={stepIndex} aria-valuetext={finished ? "Finished" : `Step ${stepIndex + 1} of ${stepCount}`}>
             <span className="sb-lesson__progress-fill" style={{ width: `${(stepIndex / stepCount) * 100}%` }} />
           </div>
@@ -105,7 +129,27 @@ export function LessonPlayer({ lesson, onBack, onOpenLesson, onOpenGuide }: Less
         </section>
       )}
 
-      {active && !finished && (
+      {elsewhere && (
+        <section className="sb-lesson__elsewhere" role="status" aria-live="polite">
+          <div className="sb-lesson__elsewhere-title">
+            <FileQuestionMark size={14} strokeWidth={2} aria-hidden />
+            Your practice prototype isn't open
+          </div>
+          <p className="sb-lesson__text">
+            This lesson checks its own practice prototype, and a different one is open now. Restart the lesson to get a fresh copy. If the open prototype has unsaved changes, Sonobe asks first.
+          </p>
+          <div className="sb-lesson__actions">
+            <Button size="sm" variant="primary" icon={<RotateCcw size={12} />} loading={busy} onClick={() => void start()}>
+              Restart lesson
+            </Button>
+            <Button size="sm" variant="ghost" icon={<LogOut size={12} />} onClick={exit}>
+              Exit lesson
+            </Button>
+          </div>
+        </section>
+      )}
+
+      {running && (
         <ol className="sb-lesson__steps">
           {lesson.steps.map((step, index) => {
             const state = index < stepIndex ? "done" : index === stepIndex ? (runner.done ? "passed" : "current") : "upcoming";
@@ -195,7 +239,7 @@ export function LessonPlayer({ lesson, onBack, onOpenLesson, onOpenGuide }: Less
         </section>
       )}
 
-      {active && (
+      {inLesson && (
         <footer className="sb-lesson__footer">
           {lesson.starter && (
             <Button size="sm" variant="ghost" icon={<RotateCcw size={12} />} loading={busy} onClick={() => void start()}>

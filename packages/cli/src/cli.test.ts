@@ -142,6 +142,38 @@ describe("sonobe CLI commands", () => {
     expect((await run(["fmt", "Fmt.sonobe", "--check"])).stdout).toContain("Already formatted.");
   });
 
+  it("opens, formats and keeps projects with folders and other files in scripts/", async () => {
+    await run(["new", "Helpers.sonobe"]);
+    const scripts = path.join(dir, "Helpers.sonobe", "scripts");
+    await mkdir(path.join(scripts, "lib"), { recursive: true });
+    await writeFile(path.join(scripts, "lib", "math.js"), "export const x = 1;\n");
+    await writeFile(path.join(scripts, ".eslintrc.json"), "{}\n");
+    await writeFile(path.join(scripts, "my helper.js"), "// spaces\n");
+
+    const valid = await run(["validate", "Helpers.sonobe"]);
+    expect(valid.code, valid.stderr).toBe(0);
+    expect((await run(["outline", "Helpers.sonobe"])).code).toBe(0);
+    expect((await run(["fmt", "Helpers.sonobe", "--check"])).stdout).toContain("Already formatted.");
+    const fmt = await run(["fmt", "Helpers.sonobe"]);
+    expect(fmt.code, fmt.stderr).toBe(0);
+    expect(fmt.stdout).not.toContain("Removed");
+    expect(await readFile(path.join(scripts, "lib", "math.js"), "utf8")).toContain("x = 1");
+    expect(await readFile(path.join(scripts, "my helper.js"), "utf8")).toContain("spaces");
+  });
+
+  it("reports layers nested too deep as a format error", async () => {
+    await run(["new", "Deep.sonobe"]);
+    const file = path.join(dir, "Deep.sonobe", "components", "main.json");
+    const main = JSON.parse(await readFile(file, "utf8")) as { layers: unknown[] };
+    let layer: Record<string, unknown> = { id: "l5000", type: "group", name: "L", props: {} };
+    for (let i = 4999; i >= 1; i--) layer = { id: `l${i}`, type: "group", name: "L", props: {}, children: [layer] };
+    main.layers = [layer];
+    await writeFile(file, JSON.stringify(main));
+    const json = await run(["validate", "Deep.sonobe", "--json"]);
+    expect(json.code).toBe(1);
+    expect(JSON.parse(json.stdout)).toMatchObject({ ok: false, formatError: { code: "invalidFormat", message: expect.stringContaining("nested more than 256 levels") } });
+  });
+
   it("simulates events and prints a trace with summaries", async () => {
     await run(["new", "Sim.sonobe", "--template", "photo-zoom"]);
     await writeFile(

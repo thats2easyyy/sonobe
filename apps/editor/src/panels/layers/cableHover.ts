@@ -6,7 +6,7 @@
 
 import { resolveLayerProps, type Id, type LayerNode, type Registry, type SonobeDocument } from "@sonobe/core";
 import { useEffect, useState } from "react";
-import { acceptsCable, dropTargetAt, type CableDrag } from "../patch-editor/index.ts";
+import { acceptsCable, dropTargetAt, type CableDrag } from "../patch-editor/api.ts";
 
 /** Hover key for a property row ("prop:photo.scale"). */
 export const propHoverKey = (layerId: Id, prop: string): string => `prop:${layerId}.${prop}`;

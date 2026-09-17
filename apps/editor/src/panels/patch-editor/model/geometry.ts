@@ -87,6 +87,82 @@ export function rectsOverlap(a: Rect, b: Rect): boolean {
   return a.x < b.x + b.width && b.x < a.x + a.width && a.y < b.y + b.height && b.y < a.y + a.height;
 }
 
+/**
+ * Below this zoom, node text is a few pixels tall: the patch editor stops painting port labels, values
+ * and icons (their boxes stay, so handles and cables don't move). A fitted graph of hundreds of nodes
+ * otherwise makes every repaint anywhere in the window pay for tens of thousands of text runs.
+ */
+export const FAR_ZOOM = 0.35;
+
+export const isFarZoom = (zoom: number): boolean => zoom < FAR_ZOOM;
+
+/** Room kept around placed nodes when auto-placing layer and interface nodes. */
+export const PLACEMENT_PADDING = 12;
+
+/** Placed rects, each grown by a padding, answering "does this rect overlap any of them?" */
+export interface PlacementIndex {
+  add(rect: Rect): void;
+  /** True when `rect` overlaps a placed rect grown by the padding (like rectsOverlap(padRect(placed, padding), rect)). */
+  overlaps(rect: Rect): boolean;
+}
+
+const PLACEMENT_CELL = 256;
+/** Rects spanning more cells than this per axis go in a list checked one by one. */
+const MAX_CELL_SPAN = 64;
+
+/**
+ * A uniform grid of padded rects, so a placement search checks only nearby nodes instead of every
+ * placed node for every candidate spot. Answers exactly like checking every rect.
+ */
+export function createPlacementIndex(padding: number): PlacementIndex {
+  const cells = new Map<number, Map<number, Rect[]>>();
+  const loose: Rect[] = [];
+  const span = (r: Rect) => {
+    const x0 = Math.floor(r.x / PLACEMENT_CELL);
+    const y0 = Math.floor(r.y / PLACEMENT_CELL);
+    const x1 = Math.floor((r.x + r.width) / PLACEMENT_CELL);
+    const y1 = Math.floor((r.y + r.height) / PLACEMENT_CELL);
+    const indexed = Number.isFinite(x0 + y0 + x1 + y1) && x1 - x0 <= MAX_CELL_SPAN && y1 - y0 <= MAX_CELL_SPAN;
+    return indexed ? { x0, y0, x1, y1 } : null;
+  };
+  return {
+    add(rect) {
+      const padded = padRect(rect, padding);
+      const s = span(padded);
+      if (!s) {
+        loose.push(padded);
+        return;
+      }
+      for (let cx = s.x0; cx <= s.x1; cx++) {
+        let column = cells.get(cx);
+        if (!column) cells.set(cx, (column = new Map()));
+        for (let cy = s.y0; cy <= s.y1; cy++) {
+          const bucket = column.get(cy);
+          if (bucket) bucket.push(padded);
+          else column.set(cy, [padded]);
+        }
+      }
+    },
+    overlaps(rect) {
+      for (const r of loose) if (rectsOverlap(r, rect)) return true;
+      const s = span(rect);
+      if (!s) {
+        for (const column of cells.values()) for (const bucket of column.values()) for (const r of bucket) if (rectsOverlap(r, rect)) return true;
+        return false;
+      }
+      for (let cx = s.x0; cx <= s.x1; cx++) {
+        const column = cells.get(cx);
+        if (!column) continue;
+        for (let cy = s.y0; cy <= s.y1; cy++) {
+          const bucket = column.get(cy);
+          if (bucket) for (const r of bucket) if (rectsOverlap(r, rect)) return true;
+        }
+      }
+      return false;
+    },
+  };
+}
+
 export function pointInRect([x, y]: Point, r: Rect, inset = 0): boolean {
   return x >= r.x - inset && x <= r.x + r.width + inset && y >= r.y - inset && y <= r.y + r.height + inset;
 }
@@ -129,6 +205,9 @@ export interface ReadableViewportOptions {
 }
 
 const DEFAULT_PADDING = { top: 52, right: 40, bottom: 52, left: 36 } as const;
+
+/** React Flow fitView padding with the same room as a readable fit: the top bar above, zoom controls below. */
+export const FIT_VIEW_PADDING = { top: `${DEFAULT_PADDING.top}px`, right: `${DEFAULT_PADDING.right}px`, bottom: `${DEFAULT_PADDING.bottom}px`, left: `${DEFAULT_PADDING.left}px` } as const;
 
 /** A viewport that shows `bounds` in a `width` × `height` canvas: fit and centered, or readable from the top-left. */
 export function readableViewport(bounds: Rect, width: number, height: number, options: ReadableViewportOptions = {}): ViewportLike {

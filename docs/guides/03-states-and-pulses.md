@@ -13,7 +13,7 @@ If you only read one guide twice, make it this one. Mixing up pulses and states 
 
 ## Two kinds of true
 
-A state is a value that stays until something changes it. "The sheet is open." "The finger is down." Switch's On/Off and Interaction's Down are states.
+A state is a value that stays until something changes it. "The sheet is open." "The finger is down." Switch's On and Interaction's Down are states.
 
 A pulse is true for exactly one frame, then false again. A frame is 1/60 of a second, or 1/120 on fast displays. "The card was just tapped." "The prototype just started." Interaction's Tap and When Prototype Starts are pulses.
 
@@ -119,7 +119,7 @@ Tap Save, a toast slides up, and two seconds later it slides away.
 
 ```
 Save . Tap ─────────────────────▶ Turn On ┐
-                                          ├─ Switch ── On/Off ──┬─▶ Pop Animation ─▶ Transition 900 → 760 ─▶ Toast . Position Y
+                                          ├─ Switch ── On ──────┬─▶ Pop Animation ─▶ Transition 900 → 760 ─▶ Toast . Position Y
             ┌───────────────────▶ Turn Off┘                     │
             │                                                   │
   Delay (2 s, When Increasing) ◀────────────────────────────────┘

@@ -26,6 +26,11 @@ export interface PatchImplementation<S = undefined> {
  * patch type or `evaluate` isn't a function.
  */
 export function definePatch<S = undefined>(type: string, implementation: PatchImplementation<S>): PatchDefinition<S> {
+  if (typeof type !== "string") {
+    throw new TypeError(
+      `definePatch: the first argument must be a catalog type string, like definePatch("switch", { state, evaluate }), not ${type === null ? "null" : typeof type}. Ports, docs and aliases come from packages/patches/catalog.`,
+    );
+  }
   const spec = getSpec(type);
   if (!spec) {
     const candidates = Object.values(SPECS).map((s) => ({ value: s.type, aliases: [s.name, ...(s.aliases ?? [])] }));

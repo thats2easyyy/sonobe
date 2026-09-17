@@ -21,6 +21,19 @@ const RESERVED: Record<HostPlatform, string[]> = {
   linux: ["Alt+F4", "Ctrl+Alt+Delete", "Alt+Tab", "Ctrl+Alt+T"],
 };
 
+describe("undo and redo titles", () => {
+  it("say what Undo and Redo will change when the editor reports it, and stay plain otherwise", () => {
+    const handlers = { command: () => undefined, openRecent: () => undefined, action: () => undefined };
+    const editItems = (undoLabel?: string, redoLabel?: string) => {
+      const template = toMenuTemplate(buildMenuSpec({ platform: "darwin", appName: "Sonobe", recentProjects: [], dev: false, ...(undoLabel ? { undoLabel } : {}), ...(redoLabel ? { redoLabel } : {}) }), "darwin", handlers);
+      const edit = template.find((item) => item.label === "Edit")!;
+      return (edit.submenu as { id?: string; label?: string }[]).filter((item) => item.id === "edit.undo" || item.id === "edit.redo").map((item) => item.label);
+    };
+    expect(editItems()).toEqual(["Undo", "Redo"]);
+    expect(editItems("Undo Mute Card Shadow", "Redo Claude: renamed shadow")).toEqual(["Undo Mute Card Shadow", "Redo Claude: renamed shadow"]);
+  });
+});
+
 describe("menu spec", () => {
   it.each(PLATFORMS)("has the standard top-level menus on %s", (platform) => {
     const top = spec(platform).map((n) => (n.kind === "submenu" ? n.label : n.kind));

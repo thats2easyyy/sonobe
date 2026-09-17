@@ -9,7 +9,7 @@ export type NativeAction = "clearRecent" | "interfaceLarger" | "interfaceSmaller
 
 /** Platform-neutral menu description; converted to an Electron template by {@link toMenuTemplate}. */
 export type MenuNode =
-  | { kind: "command"; id: SonobeCommandId }
+  | { kind: "command"; id: SonobeCommandId; /** Shown instead of the command's label ("Undo Mute Card Shadow"). */ label?: string }
   | { kind: "role"; role: Role; label?: string; accelerator?: string }
   | { kind: "action"; action: NativeAction; label: string; accelerator?: string }
   | { kind: "recent"; path: string; label: string }
@@ -25,6 +25,9 @@ export interface MenuContext {
   dev: boolean;
   /** The phone preview server is running (adds Stop Phone Preview). */
   previewRunning?: boolean;
+  /** The editor's Undo and Redo titles, saying what they'll revert ("Undo Mute Card Shadow"). Plain "Undo" and "Redo" without them. */
+  undoLabel?: string;
+  redoLabel?: string;
 }
 
 const sep: MenuNode = { kind: "separator" };
@@ -85,8 +88,8 @@ export function buildMenuSpec(ctx: MenuContext): MenuNode[] {
     kind: "submenu",
     label: "Edit",
     items: [
-      cmd("edit.undo"),
-      cmd("edit.redo"),
+      ctx.undoLabel ? { kind: "command", id: "edit.undo", label: ctx.undoLabel } : cmd("edit.undo"),
+      ctx.redoLabel ? { kind: "command", id: "edit.redo", label: ctx.redoLabel } : cmd("edit.redo"),
       sep,
       { kind: "role", role: "cut", accelerator: "CmdOrCtrl+X" },
       { kind: "role", role: "copy", accelerator: "CmdOrCtrl+C" },
@@ -246,7 +249,7 @@ export function toMenuTemplate(nodes: readonly MenuNode[], platform: HostPlatfor
         const accelerator = resolveAccelerator(spec.accelerator, platform);
         return {
           id: node.id,
-          label: commandLabel(node.id, platform),
+          label: node.label ?? commandLabel(node.id, platform),
           ...(accelerator ? { accelerator, registerAccelerator: isNativeAccelerator(spec, platform) } : {}),
           click: () => handlers.command(node.id),
         };

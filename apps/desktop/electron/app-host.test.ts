@@ -9,16 +9,23 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
-import type { Op } from "@sonobe/core";
+import { findLayer, getDiagnostics, type Op } from "@sonobe/core";
 import type { SceneFrame, SceneNode } from "@sonobe/engine";
 import { createHttpHandler, createSimulationManager, isHostError, TOOL_NAMES, type NodeMcpHandler } from "@sonobe/mcp";
 import { createPatchRegistry } from "@sonobe/patches";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+
+// Count full diagnostics passes in this process (behavior unchanged).
+vi.mock("@sonobe/core", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@sonobe/core")>();
+  return { ...actual, getDiagnostics: vi.fn(actual.getDiagnostics) };
+});
 import { createBrowserHost, createMemoryProjectStorage } from "../../editor/src/host/browserHost.ts";
 import { registerRpcHandlers } from "../../editor/src/host/rpcHandlers.ts";
 import { createManualScheduler } from "../../editor/src/runtime/scheduler.ts";
 import { createDemoDocument } from "../../editor/src/state/demoDocument.ts";
 import { createEditorSession, type EditorSession } from "../../editor/src/state/session.ts";
+import { writeResult } from "../../../packages/mcp/src/tools/write.ts";
 import { createAppHost, hostErrorFromRpc, sceneLayerBounds, type AppHost, type AppHostOptions, type DocumentChange, type RendererTarget, type SceneRenderRequest } from "./app-host.ts";
 import { startMcpServer, type McpServerHandle } from "./mcp-server.ts";
 import { createRpcClient, createRpcFailure, createRpcServer, type RpcServer } from "./rpc.ts";
@@ -210,6 +217,27 @@ describe("app host writes", () => {
     expect((await host.getDocument()).revision).toBe(1);
   });
 
+  it("reuses the editor's diagnostics instead of diagnosing copies of the document", async () => {
+    const w = editorWindow(1);
+    const host = appHost([w]);
+    await host.getDocument();
+    vi.mocked(getDiagnostics).mockClear();
+    const committed = await host.apply(pressChain, { label: "added press feedback", author: CLAUDE });
+    expect(committed.ok).toBe(true);
+    const committedDoc = w.session.document.getState().doc;
+    const preview = await host.apply([{ op: "addPatch", patch: { id: "lonely", type: "switch", ui: { x: 0, y: 900 } } }], { label: "preview", author: CLAUDE, dryRun: true });
+    const listed = await host.diagnostics(undefined);
+    const undone = await host.history.undo({ author: CLAUDE });
+    expect(vi.mocked(getDiagnostics)).not.toHaveBeenCalled();
+
+    // Same answers as diagnosing here.
+    expect(listed.diagnostics).toEqual(getDiagnostics(committedDoc, registry));
+    expect(preview.diagnostics.added.map((d) => d.code)).toContain("unused_patch");
+    expect(preview.diagnostics.totals).toEqual({ ...committed.diagnostics.totals, info: committed.diagnostics.totals.info + 1 });
+    expect(undone.undone).toHaveLength(1);
+    expect(undone.diagnostics.totals.errors).toBe(0);
+  });
+
   it("previews dry runs, reports errors, and refuses stale revisions", async () => {
     const w = editorWindow(1);
     const host = appHost([w]);
@@ -242,6 +270,62 @@ describe("app host writes", () => {
     expect(undone).toMatchObject({ docId: "photo_zoom", revision: 4, undone: [{ label: "Move Card" }, { label: "added press feedback" }] });
     expect(w.session.document.getState().doc.components.main!.patches.press_next).toBeUndefined();
     expect(await rejection(host.history.undo({ author: CLAUDE }))).toMatchObject({ code: "nothing_to_undo" });
+  });
+
+  it("reports the ids the editor created, even when names were reserved", async () => {
+    const w = editorWindow(1);
+    const host = appHost([w]);
+    const sticker = [{ op: "addLayer", layer: { type: "rectangle", name: "Sticker" } }] as Op[];
+    await host.apply(sticker, { label: "add sticker", author: CLAUDE });
+    await host.apply([{ op: "removeLayer", id: "sticker" }], { label: "remove sticker", author: CLAUDE });
+    const again = await host.apply(sticker, { label: "add sticker", author: CLAUDE });
+    const layerId = (r: { applied: Op[] }) => (r.applied[0] as Extract<Op, { op: "addLayer" }>).layer.id;
+    expect(layerId(again)).toBe("sticker_2");
+    expect(again.results[0]!.ids).toEqual(["sticker_2"]);
+    expect(again.txnId).toBe(w.session.document.getState().historyEntries()[0]!.txnId);
+    expect(writeResult(again).structuredContent).toMatchObject({ created: ["sticker_2"] });
+
+    const dry = await host.apply(sticker, { label: "try", author: CLAUDE, dryRun: true });
+    expect(layerId(dry)).toBe("sticker_3");
+    expect(findLayer(dry.preview!.components.main!.layers, "sticker_3")).toBeDefined();
+    expect(writeResult(dry).content[0]).toMatchObject({ text: expect.stringContaining("Would create: sticker_3") });
+  });
+
+  it("won't undo a person's edit that lands just before the undo runs, and lists everything it undid", async () => {
+    const w = editorWindow(1);
+    const host = appHost([w]);
+    const agent = await host.apply([{ op: "addPatch", patch: { type: "switch", id: "agent_switch" } }], { label: "add switch", author: CLAUDE });
+    const invoke = w.target.invoke;
+    let armed = true;
+    w.target.invoke = <T>(method: string, params?: unknown, opts?: { timeoutMs?: number }) => {
+      if (method === "history.undo" && armed) {
+        armed = false;
+        // The person drags in a layer while the agent's undo is on its way to the editor.
+        w.session.document.getState().apply([{ op: "addLayer", layer: { type: "rectangle", id: "human_rect", name: "Human Rect" } }], { label: "Add Human Rect" });
+      }
+      return invoke<T>(method, params, opts);
+    };
+    expect(await rejection(host.history.undo({ author: CLAUDE, txnId: agent.txnId! }))).toMatchObject({ code: "human_edit", hint: expect.stringContaining("allowHumanEdits") });
+    const s = w.session.document.getState();
+    expect(findLayer(s.doc.components.main!.layers, "human_rect")).toBeDefined();
+    expect(s.redoEntries()).toEqual([]);
+
+    const both = await host.history.undo({ author: CLAUDE, txnId: agent.txnId!, allowHumanEdits: true });
+    expect(both.undone.map((u) => u.summary)).toEqual(["You: Add Human Rect", "Claude: add switch"]);
+    expect(both.undone[0]).toMatchObject({ author: { kind: "human" }, opCount: 1, revision: expect.any(Number), timestamp: expect.any(Number) });
+  });
+
+  it("passes save_document's force through and explains pending outside changes", async () => {
+    const w = editorWindow(1);
+    const host = appHost([w]);
+    await host.saveDocument();
+    const store = w.session.document;
+    store.getState().apply([{ op: "setInput", target: "photo_scale.end", value: 1.4 }], { label: "bigger zoom" });
+    store.setState({ externalChange: { path: store.getState().projectPath!, paths: ["components/main.json"], document: store.getState().doc, detectedAt: 5 } });
+    expect(await rejection(host.saveDocument())).toMatchObject({ code: "disk_changed", hint: expect.stringContaining("force: true") });
+    expect(store.getState().dirty).toBe(true);
+    expect(await host.saveDocument(undefined, { force: true })).toMatchObject({ docId: "photo_zoom", path: "browser:Agent Proto" });
+    expect(store.getState()).toMatchObject({ dirty: false, externalChange: null });
   });
 
   it("saves through the editor and explains a cancelled save", async () => {

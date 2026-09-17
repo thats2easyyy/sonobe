@@ -132,6 +132,38 @@ describe("createDomRenderer", () => {
     expect(writtenStyle(renderer.elementForKey("r")!.firstElementChild!, "background-color")).toBe("rgba(0, 255, 0, 1)");
   });
 
+  it("writes only the transform when a box layer only moves", () => {
+    const props = () => ({ color: "#FF0000FF", cornerRadius: 12, shadowOpacity: 0.4, shadowRadius: 6, strokeWidth: 2, strokeColor: "#000000FF", position: [0, 0] });
+    renderer.render(frame([node("r", "rectangle", props())]));
+    const before = renderer.getStats().styleWrites;
+    renderer.render(frame([node("r", "rectangle", { ...props(), position: [10, 20] }, [], { x: 10, y: 20 })]));
+    expect(renderer.getStats().styleWrites - before).toBe(1);
+    expect(writtenStyle(renderer.elementForKey("r")!, "transform")).toBe("matrix(1, 0, 0, 1, 10, 20)");
+    // Same matrix again: no string built, nothing written.
+    renderer.render(frame([node("r", "rectangle", { ...props(), position: [10, 20] }, [], { x: 10, y: 20 })]));
+    expect(renderer.getStats().styleWrites - before).toBe(1);
+  });
+
+  it("still redraws a box layer when a prop, its size, or the hit-target overlay changes", () => {
+    renderer.render(frame([node("r", "rectangle", { color: "#FF0000FF" })]));
+    renderer.render(frame([node("r", "rectangle", { color: "#00FF00FF" }, [], { x: 5 })]));
+    const body = renderer.elementForKey("r")!.firstElementChild!;
+    expect(writtenStyle(body, "background-color")).toBe("rgba(0, 255, 0, 1)");
+    renderer.render(frame([node("r", "rectangle", { color: "#00FF00FF" }, [], { x: 5, width: 140 })]));
+    expect(writtenStyle(renderer.elementForKey("r")!, "width")).toBe("140px");
+    renderer.setShowHitTargets(true, ["r"]);
+    expect(renderer.elementForKey("r")!.querySelector(".sonobe-hit")).not.toBeNull();
+    renderer.setShowHitTargets(false);
+    expect(renderer.elementForKey("r")!.querySelector(".sonobe-hit")).toBeNull();
+  });
+
+  it("reads props inherited from shared defaults", () => {
+    renderer.render(frame([node("r", "rectangle", Object.create({ color: "#0000FFFF", cornerRadius: 8 }) as Record<string, unknown>)]));
+    const body = renderer.elementForKey("r")!.firstElementChild!;
+    expect(writtenStyle(body, "background-color")).toBe("rgba(0, 0, 255, 1)");
+    expect(writtenStyle(body, "border-radius")).toBe("8px");
+  });
+
   it("moves a keyed node to a new parent without recreating it", () => {
     const child = node("child", "rectangle");
     renderer.render(frame([node("g1", "group", {}, [child]), node("g2", "group")]));

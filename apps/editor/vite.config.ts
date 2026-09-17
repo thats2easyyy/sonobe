@@ -11,9 +11,15 @@ const workspace = (names: string) => new RegExp(`[\\\\/]packages[\\\\/](?:${name
  * from `file://` inside Electron as well as from any static host.
  *
  * Chunks: the entry holds the app shell and panels that paint first. The patch editor (React Flow,
- * d3, ELK), the Learn drawer (guides, examples, lessons, patch reference), the welcome screen, and
- * the Connect Claude, Settings, and About dialogs load with dynamic imports. Libraries and the
- * Sonobe packages are split into long-lived vendor chunks that load in parallel.
+ * d3), the Learn drawer (guides, examples, lessons, patch reference), the welcome screen, the
+ * Assistant, and the Connect Claude, Settings, and About dialogs load with dynamic imports. ELK is a
+ * classic script asset that loads on the first Tidy Up. Panels on screen at startup reach the patch
+ * editor only through `panels/patch-editor/api.ts`, which doesn't import React Flow.
+ *
+ * Libraries and the Sonobe packages are split into long-lived vendor chunks that load in parallel.
+ * The patch catalog (specs, docs, examples as JSON) gets its own chunk: it changes on a different
+ * schedule from the evaluators. It still loads at startup, because the session builds the patch
+ * registry before first paint; deferring docs needs a docs-free registry from @sonobe/patches.
  */
 export default defineConfig({
   base: "./",
@@ -55,6 +61,8 @@ export default defineConfig({
             { name: "vendor-zod", test: npm("zod"), priority: 40 },
             { name: "vendor-icons", test: npm("lucide-react"), priority: 40 },
             { name: "vendor-flow", test: npm("@xyflow|d3-[a-z-]+|classcat"), priority: 40 },
+            { name: "sonobe-patch-catalog", test: /[\\/]packages[\\/]patches[\\/]catalog[\\/][^\\/]+\.json$/, priority: 35 },
+            { name: "sonobe-patch-scripting", test: /[\\/]packages[\\/]patches[\\/]src[\\/]scripting[\\/]/, priority: 35 },
             { name: "sonobe-patches", test: workspace("patches"), priority: 30 },
             { name: "sonobe-core", test: workspace("core"), priority: 30 },
             { name: "sonobe-runtime", test: workspace("engine|renderer"), priority: 30 },

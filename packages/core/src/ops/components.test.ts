@@ -87,6 +87,119 @@ describe("addComponent / updateComponent / removeComponent", () => {
   });
 });
 
+describe("component ids and script names on case-insensitive file systems", () => {
+  it("rejects an explicit id that differs from an existing one only by case", () => {
+    const doc = mustApply(emptyDoc(), [{ op: "addComponent", component: { id: "card", name: "Card", kind: "layerComponent" } }]).doc;
+    const e = firstError(doc, [{ op: "addComponent", component: { id: "Card", name: "Card", kind: "layerComponent" } }]);
+    expect(e).toMatchObject({ code: "id_taken", message: expect.stringContaining('share a file with the component "card"') });
+  });
+
+  it("derives ids that don't share a file with existing components", () => {
+    const r = mustApply(emptyDoc(), [
+      { op: "addComponent", component: { name: "TabBar", kind: "layerComponent" } },
+      { op: "addComponent", component: { name: "Tabbar", kind: "layerComponent" } },
+      { op: "addComponent", component: { name: "NavBar", kind: "layerComponent" } },
+      { op: "addLayer", layer: { id: "bar", type: "rectangle", name: "Bar" } },
+      { op: "createComponent", name: "Navbar", layerIds: ["bar"] },
+    ]);
+    expect(r.results.map((x) => x.ids?.[0])).toEqual(["tabBar", "tabbar_2", "navBar", "bar", "navbar_2"]);
+  });
+
+  it("rejects a script name that differs from an existing one only by case", () => {
+    const doc = mustApply(emptyDoc(), [{ op: "setScript", file: "js_1.js", source: "// lower" }]).doc;
+    expect(firstError(doc, [{ op: "setScript", file: "JS_1.js", source: "// upper" }]).code).toBe("file_name_taken");
+    expect(mustApply(doc, [{ op: "setScript", file: "js_1.js", source: "// updated" }]).doc.scripts).toEqual({ "js_1.js": "// updated" });
+    expect(mustApply(doc, [{ op: "setScript", file: "js_1.js", source: null }]).doc.scripts).toEqual({});
+  });
+
+  it("still undoes a removal (the original id is free again by then)", () => {
+    const doc = mustApply(emptyDoc(), [{ op: "addComponent", component: { id: "card", name: "Card", kind: "layerComponent" } }]).doc;
+    const removed = mustApply(doc, [{ op: "removeComponent", id: "card" }]);
+    expectRoundTrip(doc, removed, { lenient: true });
+  });
+});
+
+describe("addComponent checks its content like addLayer and addPatch", () => {
+  it("manages formatVersion itself", () => {
+    expect(firstError(emptyDoc(), [{ op: "addComponent", component: { name: "Card", kind: "layerComponent", formatVersion: 99 } }])).toMatchObject({ code: "invalid_op", message: expect.stringContaining("managed by Sonobe") });
+    expect(mustApply(emptyDoc(), [{ op: "addComponent", component: { name: "Card", kind: "layerComponent", formatVersion: 1 } }]).doc.components.card!.formatVersion).toBe(1);
+    const lenient = mustApply(emptyDoc(), [{ op: "addComponent", component: { name: "Card", kind: "layerComponent", formatVersion: 99 } }], { lenient: true });
+    expect(lenient.doc.components.card!.formatVersion).toBe(1);
+  });
+
+  it("rejects instances of itself, missing components, and cycles", () => {
+    const self = firstError(emptyDoc(), [{ op: "addComponent", component: { id: "card", name: "Card", kind: "layerComponent", layers: [{ id: "inner", type: "componentInstance", name: "Inner", component: "card", props: {} }] } }]);
+    expect(self).toMatchObject({ code: "component_cycle", message: expect.stringContaining('In the new component "card"') });
+    const ghost = firstError(emptyDoc(), [{ op: "addComponent", component: { name: "Row", kind: "layerComponent", layers: [{ id: "x", type: "componentInstance", name: "X", component: "ghost", props: {} }] } }]);
+    expect(ghost.code).toBe("not_found");
+    const patchSelf = firstError(emptyDoc(), [{ op: "addComponent", component: { id: "logic", name: "Logic", kind: "patchComponent", patches: { again: { type: "component", component: "logic", inputs: {}, ui: { x: 0, y: 0 } } } } }]);
+    expect(patchSelf.code).toBe("component_cycle");
+  });
+
+  it("rejects dangling links, unknown ports and unknown types", () => {
+    const withPatches = (patches: Record<string, unknown>) => [{ op: "addComponent", component: { name: "Logic", kind: "patchComponent", patches } } as Op];
+    expect(firstError(emptyDoc(), withPatches({ flip: { type: "switch", inputs: { flip: { link: "ghost.out" } }, ui: { x: 0, y: 0 } } })).code).toBe("not_found");
+    expect(firstError(emptyDoc(), withPatches({ flip: { type: "switch", inputs: { nonsense: 1 }, ui: { x: 0, y: 0 } } })).code).toBe("unknown_port");
+    expect(firstError(emptyDoc(), withPatches({ warp: { type: "warpDrive", inputs: {}, ui: { x: 0, y: 0 } } })).code).toBe("unknown_patch_type");
+    expect(firstError(emptyDoc(), [{ op: "addComponent", component: { name: "Card", kind: "layerComponent", layers: [{ id: "x", type: "hologram", name: "X", props: {} }] } }]).code).toBe("unknown_layer_type");
+    const badOutput = firstError(emptyDoc(), [{ op: "addComponent", component: { name: "Logic", kind: "patchComponent", interface: { inputs: {}, outputs: { v: { key: "v", name: "V", type: "number", link: "ghost.output" } } } } }]);
+    expect(badOutput.code).toBe("not_found");
+  });
+
+  it("accepts links between its own items in any order", () => {
+    const r = mustApply(emptyDoc(), [
+      {
+        op: "addComponent",
+        component: {
+          name: "Logic",
+          kind: "patchComponent",
+          interface: { inputs: { target: { key: "target", name: "Target", type: "number", default: 1 } }, outputs: { value: { key: "value", name: "Value", type: "number", link: "spring.output" } } },
+          patches: {
+            spring: { type: "popAnimation", inputs: { number: { link: "$in.target" } }, ui: { x: 0, y: 0 } },
+            toggle: { type: "switch", inputs: { flip: { link: "tap.tap" } }, ui: { x: 0, y: 0 } },
+            tap: { type: "interaction", inputs: {}, ui: { x: 0, y: 0 } },
+          },
+        },
+      },
+    ]);
+    expect(errorsOf(r.doc)).toEqual([]);
+    expectRoundTrip(emptyDoc(), r);
+  });
+
+  it("restores components that already carry problems when applied leniently (undo, redo)", () => {
+    const doc = mustApply(emptyDoc(), [{ op: "addComponent", component: { name: "Logic", kind: "patchComponent", patches: { flip: { type: "switch", inputs: { flip: { link: "ghost.out" } }, ui: { x: 0, y: 0 } } } } }], { lenient: true }).doc;
+    expect(errorsOf(doc).map((d) => d.code)).toContain("dangling_link");
+    const removed = mustApply(doc, [{ op: "removeComponent", id: "logic" }]);
+    expectRoundTrip(doc, removed, { lenient: true });
+  });
+});
+
+describe("ids equal to Object.prototype members", () => {
+  it("reports missing items instead of reading inherited members", () => {
+    const doc = mustApply(emptyDoc(), [{ op: "addPatch", patch: { id: "sw", type: "switch" } }]).doc;
+    for (const id of ["toString", "valueOf", "constructor", "hasOwnProperty"]) {
+      expect(firstError(doc, [{ op: "updatePatch", id, name: "Oops" }]).code).toBe("not_found");
+      expect(firstError(doc, [{ op: "removePatch", id }]).code).toBe("not_found");
+    }
+    expect(firstError(doc, [{ op: "connect", from: "constructor.on", to: "sw.flip" }]).code).toBe("not_found");
+    expect(firstError(doc, [{ op: "setInput", target: "toString.flip", value: 1 }]).code).toBe("not_found");
+    expect(firstError(doc, [{ op: "removePatch", component: "hasOwnProperty", id: "sw" }]).code).toBe("not_found");
+    expect(firstError(doc, [{ op: "addLayer", layer: { type: "componentInstance", component: "constructor" } }]).code).toBe("not_found");
+  });
+
+  it("allows those names as real ids, but never __proto__", () => {
+    const r = mustApply(emptyDoc(), [
+      { op: "addComponent", component: { id: "constructor", name: "Constructor", kind: "patchComponent" } },
+      { op: "addPatch", patch: { name: "Constructor", type: "switch" } },
+    ]);
+    expect(Object.keys(r.doc.components).sort()).toEqual(["constructor", "main"]);
+    expect(Object.keys(r.doc.components.main!.patches)).toEqual(["constructor"]);
+    expect(mustApply(r.doc, [{ op: "removePatch", id: "constructor" }]).doc.components.main!.patches).toEqual({});
+    expect(firstError(emptyDoc(), [{ op: "addPatch", patch: { id: "__proto__", type: "switch" } }]).code).toBe("invalid_id");
+    expect(firstError(emptyDoc(), [{ op: "setScript", file: "__proto__", source: "x" }]).code).toBe("invalid_value");
+  });
+});
+
 describe("component instances", () => {
   const base = () =>
     mustApply(emptyDoc(), [

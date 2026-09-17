@@ -2,11 +2,12 @@
 
 import type { Id } from "@sonobe/core";
 import type { PatchRegistry } from "@sonobe/patches";
-import { createContext, useCallback, useContext, useSyncExternalStore } from "react";
+import { createContext, useCallback, useContext, useSyncExternalStore, type MouseEvent as ReactMouseEvent } from "react";
 import { useStore } from "zustand";
 import type { EditorSession } from "../../../state/session.ts";
 import type { LiveScope } from "../model/instances.ts";
 import type { CableGeometry } from "../model/knife.ts";
+import type { PortModel } from "../model/types.ts";
 import type { PatchEditorActions } from "./actions.ts";
 import type { LiveStore } from "./liveStore.ts";
 import type { PatchEditorUiState, UiStore } from "./uiStore.ts";
@@ -27,6 +28,8 @@ export interface PatchEditorContextValue {
   liveScope: LiveScope;
   /** Call before moving the viewport on the user's behalf, so panel resizes keep their view instead of re-fitting. */
   markViewportManual: () => void;
+  /** Open a port's context menu (publish, unpublish, disconnect, and the node's own entries). */
+  openPortMenu?: (event: ReactMouseEvent, nodeId: string, port: PortModel) => void;
 }
 
 export const PatchEditorContext = createContext<PatchEditorContextValue | null>(null);

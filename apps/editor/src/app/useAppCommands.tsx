@@ -4,7 +4,7 @@
  * hidden aliases so every native menu item reaches the panel that owns it.
  */
 
-import { AlignEndHorizontal, AlignEndVertical, BookMarked, Bug, FilePlus, FileX, GraduationCap, Info, LayoutTemplate, Maximize, Pencil, Scissors, Settings, SquarePlus } from "lucide-react";
+import { AlignEndHorizontal, AlignEndVertical, AlignStartHorizontal, AlignStartVertical, BookMarked, Bug, FilePlus, FileX, GraduationCap, Info, Keyboard, LayoutTemplate, Maximize, MessageSquarePlus, Pencil, Scissors, Settings, SquarePlus, Workflow } from "lucide-react";
 import { connectClaudeCommand } from "../panels/connect/commands.ts";
 import { connectClaudeStore } from "../panels/connect/connectStore.ts";
 import { layoutStore } from "../shell/layoutStore.ts";
@@ -12,7 +12,7 @@ import type { EditorSession } from "../state/session.ts";
 import { useCommands, useRegisterCommands } from "../ui/commands/CommandProvider.tsx";
 import type { Command, CommandRegistry } from "../ui/commands/commandRegistry.ts";
 import type { Platform } from "../ui/commands/shortcutManager.ts";
-import { alignSelection, closePrototype, insertLayer, renameSelection, reportIssue, toggleViewerFullscreen, useAsMask } from "./appActions.ts";
+import { closePrototype, insertLayer, renameSelection, reportIssue, toggleViewerFullscreen, useAsMask } from "./appActions.ts";
 import { appPanels } from "./appPanels.ts";
 import { learnNav } from "./learnStore.ts";
 import { dialogsFor } from "./sessionServices.ts";
@@ -69,7 +69,20 @@ export function appCommands(session: EditorSession, registry: CommandRegistry, o
   const sel = () => session.selection.getState();
   const showConnect = () => connectClaudeStore.getState().show();
   const alias = (id: string, target: string): Command => ({ id, title: id, hidden: true, run: () => runInPatchEditor(registry, target) });
+  /**
+   * A menu item's alias for a patch editor command. The palette lists it while the patch editor isn't
+   * mounted (canvas only), and the patch editor's own command, with its shortcut, once it is.
+   */
+  const editorAlias = (id: string, target: string, shown: Pick<Command, "title" | "icon" | "keywords" | "when" | "disabledReason">): Command => ({
+    id,
+    category: "Patches",
+    ...shown,
+    hidden: () => registry.get(target) !== undefined,
+    run: () => runInPatchEditor(registry, target),
+  });
+  const alignReason = "Select 2 or more patches";
   const singleItem = () => (sel().patches.length === 1 && sel().layers.length === 0) || (sel().layers.length === 1 && sel().patches.length === 0);
+  const multiplePatches = () => sel().patches.length > 1;
   return [
     // File
     { id: "file.new", title: "New Prototype…", category: "File", description: "Blank, from a template, or a lesson", shortcut: "Mod+N", allowInInput: true, icon: FilePlus, keywords: ["blank", "create", "template", "welcome", "start"], run: () => welcomeStore.getState().show("new") },
@@ -90,14 +103,14 @@ export function appCommands(session: EditorSession, registry: CommandRegistry, o
       when: () => sel().layers.length > 0,
       run: () => void useAsMask(session),
     },
-    // Patch
-    { id: "patch.alignRight", title: "Align Right Edges", category: "Patch", icon: AlignEndVertical, keywords: ["arrange", "column"], when: () => sel().patches.length > 1, run: () => void alignSelection(session, "right") },
-    { id: "patch.alignBottom", title: "Align Bottom Edges", category: "Patch", icon: AlignEndHorizontal, keywords: ["arrange", "row"], when: () => sel().patches.length > 1, run: () => void alignSelection(session, "bottom") },
-    alias("patch.insert", "patchEditor.insertPatch"),
-    alias("patch.tidyUp", "patchEditor.tidyUp"),
-    alias("patch.alignLeft", "patchEditor.alignLeft"),
-    alias("patch.alignTop", "patchEditor.alignTop"),
-    alias("patch.commentAroundSelection", "patchEditor.commentSelection"),
+    // Patch: menu aliases for the patch editor's own commands, which the palette lists once (under Patches).
+    editorAlias("patch.insert", "patchEditor.insertPatch", { title: "Insert Patch…", icon: SquarePlus, keywords: ["add", "node", "library", "patch picker"] }),
+    editorAlias("patch.tidyUp", "patchEditor.tidyUp", { title: "Tidy Up Patches", icon: Workflow, keywords: ["layout", "arrange", "clean"] }),
+    editorAlias("patch.alignLeft", "patchEditor.alignLeft", { title: "Align Left Edges", icon: AlignStartVertical, keywords: ["arrange", "column"], when: multiplePatches, disabledReason: alignReason }),
+    editorAlias("patch.alignRight", "patchEditor.alignRight", { title: "Align Right Edges", icon: AlignEndVertical, keywords: ["arrange", "column"], when: multiplePatches, disabledReason: alignReason }),
+    editorAlias("patch.alignTop", "patchEditor.alignTop", { title: "Align Top Edges", icon: AlignStartHorizontal, keywords: ["arrange", "row"], when: multiplePatches, disabledReason: alignReason }),
+    editorAlias("patch.alignBottom", "patchEditor.alignBottom", { title: "Align Bottom Edges", icon: AlignEndHorizontal, keywords: ["arrange", "row"], when: multiplePatches, disabledReason: alignReason }),
+    editorAlias("patch.commentAroundSelection", "patchEditor.commentSelection", { title: "Comment Selected Patches", icon: MessageSquarePlus, keywords: ["note", "frame", "group"] }),
     // Prototype
     { id: "viewer.fullscreen", title: "Full Screen Viewer", category: "Prototype", shortcut: "Mod+Shift+F", icon: Maximize, keywords: ["present", "presentation", "demo", "fullscreen"], run: () => toggleViewerFullscreen() },
     // Help
@@ -109,7 +122,15 @@ export function appCommands(session: EditorSession, registry: CommandRegistry, o
     { id: "help.about", title: "About Sonobe", category: "Help", icon: Info, keywords: ["version", "credits", "licenses", "open source"], run: () => appPanels.getState().show("about") },
     // Fallback when the Assistant panel isn't registered (EditorApp registers the real one first): the menu's Assistant item opens Connect Claude.
     { id: "ai.assistant", title: "Assistant", hidden: true, run: showConnect },
-    { id: "help.shortcuts", title: "Keyboard Shortcuts", hidden: true, run: () => void registry.run("app.commandPalette") },
+    {
+      id: "help.shortcuts",
+      title: "Keyboard Shortcuts",
+      category: "Help",
+      shortcut: platform === "mac" ? "Mod+Alt+/" : "Ctrl+Shift+/",
+      icon: Keyboard,
+      keywords: ["cheat sheet", "keys", "hotkeys", "gestures", "reference"],
+      run: () => appPanels.getState().show("shortcuts"),
+    },
     // View aliases
     { id: "view.toggleCanvas", title: "Show or Hide Canvas", hidden: true, run: () => layout().setViewMode(layout().viewMode === "patches" ? "split" : "patches") },
     { id: "view.togglePatchEditor", title: "Show or Hide Patch Editor", hidden: true, run: () => layout().setViewMode(layout().viewMode === "canvas" ? "split" : "canvas") },

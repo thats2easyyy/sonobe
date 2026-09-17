@@ -271,8 +271,12 @@ describe("InspectorPanel", () => {
     const image = findLayer(main(s).layers, "hero")!.layer.props.image as { asset: string };
     expect(s.document.getState().doc.assets[image.asset]).toMatchObject({ kind: "image", name: "Hero Shot", width: 64, height: 48 });
     expect(imported).toHaveBeenCalledTimes(1);
-    expect(s.document.getState().historyEntries().map((e) => e.label)).toEqual(["Set Image on Hero", 'Import "Hero Shot"']);
     expect(container.querySelector(".sb-insp-dropzone")).toBeNull();
+    // Importing and setting the property are one undo step.
+    expect(s.document.getState().historyEntries().map((e) => e.label)).toEqual(["Set Image on Hero"]);
+    act(() => s.document.getState().undo());
+    expect(findLayer(main(s).layers, "hero")!.layer.props.image).toBeUndefined();
+    expect(s.document.getState().doc.assets[image.asset]).toBeUndefined();
   });
 
   it("imports files dropped on an asset row or anywhere on a media layer's inspector, and refuses the wrong kind", async () => {
@@ -461,3 +465,72 @@ describe("InspectorPanel", () => {
     expect(input("Name").placeholder).toBe("Pop Animation");
   });
 });
+
+describe("InspectorPanel: variables and published ports", () => {
+  const variables = () =>
+    build([
+      { op: "addPatch", patch: { id: "liked", type: "variableBroadcaster", typeParam: "boolean", settings: { name: "isLiked" }, ui: { x: 0, y: 0 } } },
+      { op: "addPatch", patch: { id: "count", type: "variableBroadcaster", settings: { name: "count", scope: "global" }, ui: { x: 0, y: 200 } } },
+      { op: "addPatch", patch: { id: "reader", type: "variableReceiver", ui: { x: 300, y: 0 } } },
+    ]);
+
+  it("names a broadcaster's variable from its header, with no second Name field", () => {
+    const s = mount(variables());
+    select(s, { patches: ["liked"] });
+    expect(rowNamed("Name")).toBeUndefined();
+    expect(rowNamed("Scope")).toBeDefined();
+    const name = input("Name");
+    expect(name.value).toBe("isLiked");
+    act(() => name.focus());
+    type(name, "hearted");
+    key(name, "Enter");
+    act(() => name.blur());
+    expect(main(s).patches.liked!.settings).toEqual({ name: "hearted" });
+    expect(main(s).patches.liked!.name).toBeUndefined();
+  });
+
+  it("lets a receiver pick from the variables it can read, copying name, scope, and type in one step", () => {
+    const s = mount(variables());
+    select(s, { patches: ["reader"] });
+    expect(rowNamed("Name")).toBeUndefined();
+    expect(rowNamed("Scope")).toBeUndefined();
+    expect(container.querySelector('input[aria-label="Name"]')).toBeNull();
+    expect(container.textContent).toContain("Choose the variable this receiver reads.");
+    click(container.querySelector('button.sb-select[aria-label^="Variable"]'));
+    expect([...document.querySelectorAll('[role="option"] .sb-selectmenu__label')].map((el) => el.textContent)).toEqual(["isLiked", "count"]);
+    click(option("isLiked"));
+    expect(main(s).patches.reader).toMatchObject({ typeParam: "boolean", settings: { name: "isLiked" } });
+    expect(s.document.getState().undoLabel).toBe("You: Read variable “isLiked” in Variable Receiver");
+    expect(container.textContent).not.toContain("Choose the variable this receiver reads.");
+    expect(button("Jump to broadcaster").disabled).toBe(false);
+    click(button("Jump to broadcaster"));
+    expect(s.selection.getState().patches).toEqual(["liked"]);
+  });
+
+  it("lists a component's published ports to rename and unpublish, and says how to publish more", () => {
+    const doc = build([
+      { op: "addComponent", component: { id: "press", name: "Press", kind: "patchComponent" } },
+      { op: "addPatch", component: "press", patch: { id: "spring", type: "popAnimation", ui: { x: 0, y: 0 } } },
+      { op: "updateInterface", component: "press", inputs: { bounciness: { key: "bounciness", name: "Bounciness", type: "number", default: 5 } } },
+      { op: "connect", component: "press", from: "$in.bounciness", to: "spring.bounciness" },
+      { op: "addPatch", patch: { id: "press_1", type: "component", component: "press", ui: { x: 0, y: 0 } } },
+    ]);
+    const s = mount(doc);
+    act(() => s.selection.getState().enterComponent("press"));
+    const press = () => s.document.getState().doc.components.press!;
+    expect(container.textContent).toContain("Published inputs");
+    expect(container.textContent).toContain("Point at an output and press ⌥P");
+    expect(container.querySelector(".sb-insp-interface__default")).not.toBeNull();
+    const name = input("Published input name");
+    expect(name.value).toBe("Bounciness");
+    act(() => name.focus());
+    type(name, "Bounce");
+    key(name, "Enter");
+    expect(press().interface.inputs.bounciness!.name).toBe("Bounce");
+    click(button("Unpublish Bounce"));
+    expect(press().interface.inputs.bounciness).toBeUndefined();
+    expect(press().patches.spring!.inputs.bounciness).toBe(5);
+    expect(container.textContent).toContain("None yet. In the patch editor, point at an input and press ⌥P");
+  });
+});
+

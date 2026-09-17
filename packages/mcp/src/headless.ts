@@ -2,22 +2,30 @@
  * HeadlessHost: SonobeHost over project folders on disk, with no app running. Documents open
  * through @sonobe/core/node, edits go through core applyOps + History with author attribution,
  * simulations run on the engine runtime, presence is recorded but shown nowhere, and screenshots
- * explain that they need the app. Node only.
+ * draw the prototype screen itself (SceneFrame → SVG → PNG, see screenshot.ts). Node only.
+ *
+ * Other writers may share the folder (the Sonobe app, git, a person, another session), so every
+ * document remembers the files as it last read or wrote them. A save first reads the folder again
+ * and refuses with "disk_changed" when anything differs, and it only deletes stale files this
+ * session loaded or wrote itself.
  */
 
 import { existsSync } from "node:fs";
 import path from "node:path";
-import { ProjectFormatError, slugify, uniqueId, type Id } from "@sonobe/core";
-import { loadProjectFromDisk, saveProjectToDisk } from "@sonobe/core/node";
+import { ProjectFormatError, readProjectFiles, saveProject, slugify, uniqueId, type Id, type SaveResult, type SonobeDocument } from "@sonobe/core";
+import { createNodeFs, loadProjectFilesFromDisk } from "@sonobe/core/node";
 import type { EngineRegistry } from "@sonobe/engine";
 import { createPatchRegistry } from "@sonobe/patches";
 import {
   HostError,
+  isHostError,
   type DocumentChange,
   type DocumentSummary,
+  type SaveProblem,
   type SonobeHost,
   type WorkIntent,
 } from "./host.ts";
+import { loadSceneAssets, renderSceneScreenshot } from "./screenshot.ts";
 import { createDocumentSession, type DocumentSession } from "./session.ts";
 import { createSimulationManager, type SimulationManager } from "./sim.ts";
 import { createTemplateDocument, TEMPLATES } from "./templates.ts";
@@ -43,15 +51,36 @@ interface Entry {
   docId: Id;
   path: string;
   session: DocumentSession;
+  /** Document files on disk as this session last read or wrote them (a save compares the folder against them). */
+  disk: Record<string, string>;
+  /** Files this session loaded or wrote: the only stale files a save may delete. */
+  owned: Set<string>;
 }
 
 const PROJECT_HINT =
   "A project is a folder with project.json and components/. Create one with create_document (or `sonobe new <dir>`), then open it.";
 
+const DISK_CHANGED_HINT =
+  "Someone else (the Sonobe app, git, a person or another session) changed the project. Ask the person which version to keep: open_document with reload: true loads what's on disk and drops this session's unsaved changes; save_document with force: true writes this session's version over those changes.";
+
+/** Paths whose content differs between two file listings (added, removed or changed), sorted. */
+function changedPaths(before: Readonly<Record<string, string>>, after: Readonly<Record<string, string>>): string[] {
+  const out = new Set<string>();
+  for (const p of Object.keys(before)) if (!Object.hasOwn(after, p) || before[p] !== after[p]) out.add(p);
+  for (const p of Object.keys(after)) if (!Object.hasOwn(before, p)) out.add(p);
+  return [...out].sort();
+}
+
+const listPaths = (paths: readonly string[], max = 6) =>
+  paths.slice(0, max).join(", ") + (paths.length > max ? ` and ${paths.length - max} more` : "");
+
+const errorText = (err: unknown) => (err instanceof Error ? err.message : String(err));
+
 export function createHeadlessHost(options: HeadlessHostOptions = {}): HeadlessHost {
   const registry = options.registry ?? createPatchRegistry();
   const autosave = options.autosave ?? false;
   const now = options.now ?? (() => Date.now());
+  const fs = createNodeFs();
   const entries = new Map<Id, Entry>();
   const working = new Map<Id, Map<string, WorkIntent>>();
   const listeners = new Set<(change: DocumentChange) => void>();
@@ -95,24 +124,83 @@ export function createHeadlessHost(options: HeadlessHostOptions = {}): HeadlessH
     return entry;
   };
 
-  const addEntry = (
-    dir: string,
-    doc: Parameters<typeof createDocumentSession>[0],
-    saved: boolean,
-  ): Entry => {
+  const addEntry = (dir: string, doc: SonobeDocument, disk: Record<string, string>, owned: Iterable<string>): Entry => {
     const base = slugify(doc.project.name || path.basename(dir, ".sonobe"), "document");
     const docId = uniqueId(base, (id) => entries.has(id));
     const session = createDocumentSession(doc, { docId, registry, now });
-    if (saved) session.markSaved();
-    const entry: Entry = { docId, path: dir, session };
+    session.markSaved();
+    const entry: Entry = { docId, path: dir, session, disk: { ...disk }, owned: new Set(owned) };
     entries.set(docId, entry);
     return entry;
   };
 
-  const save = async (entry: Entry) => {
-    const r = await saveProjectToDisk(entry.path, entry.session.doc);
-    entry.session.markSaved();
-    return r;
+  /** Load a project folder with the files it was read from, as teaching HostErrors. */
+  const loadFromDisk = async (dir: string) => {
+    try {
+      return await loadProjectFilesFromDisk(dir);
+    } catch (err) {
+      if (err instanceof ProjectFormatError) {
+        const missing = !existsSync(path.join(dir, "project.json"));
+        throw new HostError(missing ? "not_a_project" : "invalid_project", err.message, {
+          hint: missing
+            ? PROJECT_HINT
+            : "Fix the files it names (or run `sonobe validate <dir>` for the full list), then open it again.",
+        });
+      }
+      throw new HostError("open_failed", `Couldn't open ${dir}: ${errorText(err)}`, { hint: PROJECT_HINT });
+    }
+  };
+
+  /** Write the document, refusing when the folder changed since this session last read or wrote it. */
+  const save = async (entry: Entry, force = false): Promise<SaveResult & { overwritten: string[] }> => {
+    try {
+      const current = await readProjectFiles(fs, entry.path);
+      const overwritten = changedPaths(entry.disk, current);
+      if (overwritten.length && !force) {
+        throw new HostError(
+          "disk_changed",
+          `${entry.path} changed on disk since this session last read or saved it (${listPaths(overwritten)}), so nothing was saved.`,
+          { hint: DISK_CHANGED_HINT, data: { paths: overwritten } },
+        );
+      }
+      const r = await saveProject(fs, entry.path, entry.session.doc, { removable: entry.owned });
+      entry.session.markSaved();
+      const disk = { ...current };
+      for (const rel of r.removed) delete disk[rel];
+      Object.assign(disk, r.files);
+      entry.disk = disk;
+      entry.owned = new Set(Object.keys(r.files));
+      return { ...r, overwritten };
+    } catch (err) {
+      if (isHostError(err)) throw err;
+      if (err instanceof ProjectFormatError) {
+        throw new HostError("invalid_document", err.message, {
+          hint: "Nothing was written. Fix what it names with ops, then save again.",
+        });
+      }
+      throw new HostError("save_failed", `Couldn't save ${entry.path}: ${errorText(err)}`, {
+        hint: "Check that the folder still exists and can be written to, then try again.",
+      });
+    }
+  };
+
+  /** Autosave after a write or undo: the change stays applied either way, so problems are reported, not thrown. */
+  const autosaveProblem = async (entry: Entry): Promise<SaveProblem | undefined> => {
+    try {
+      await save(entry);
+      return undefined;
+    } catch (err) {
+      if (isHostError(err)) return { code: err.code, message: err.message, ...(err.hint ? { hint: err.hint } : {}) };
+      return { code: "save_failed", message: errorText(err) };
+    }
+  };
+
+  const reload = async (entry: Entry) => {
+    const { doc, files } = await loadFromDisk(entry.path);
+    entry.session.replace(doc);
+    entry.disk = { ...files };
+    entry.owned = new Set(Object.keys(files));
+    emit({ kind: "revision", docId: entry.docId, revision: entry.session.revision });
   };
 
   const sim: SimulationManager = createSimulationManager({
@@ -126,44 +214,23 @@ export function createHeadlessHost(options: HeadlessHostOptions = {}): HeadlessH
 
   const host: HeadlessHost = {
     kind: "headless",
-    capabilities: { screenshots: false, selection: false, presence: false, autosave },
+    capabilities: { screenshots: true, selection: false, presence: false, autosave },
     registry,
 
     async listDocuments() {
       return [...entries.values()].map(summary);
     },
 
-    async openDocument(ref) {
-      const byId = entries.get(ref);
-      if (byId) {
-        active = byId.docId;
-        return summary(byId);
-      }
+    async openDocument(ref, openOptions = {}) {
       const dir = path.resolve(ref);
-      const byPath = [...entries.values()].find((e) => e.path === dir);
-      if (byPath) {
-        active = byPath.docId;
-        return summary(byPath);
+      const existing = entries.get(ref) ?? [...entries.values()].find((e) => e.path === dir);
+      if (existing) {
+        active = existing.docId;
+        if (openOptions.reload) await reload(existing);
+        return summary(existing);
       }
-      let doc;
-      try {
-        doc = await loadProjectFromDisk(dir);
-      } catch (err) {
-        if (err instanceof ProjectFormatError) {
-          const missing = !existsSync(path.join(dir, "project.json"));
-          throw new HostError(missing ? "not_a_project" : "invalid_project", err.message, {
-            hint: missing
-              ? PROJECT_HINT
-              : "Fix the files it names (or run `sonobe validate <dir>` for the full list), then open it again.",
-          });
-        }
-        throw new HostError(
-          "open_failed",
-          `Couldn't open ${dir}: ${err instanceof Error ? err.message : String(err)}`,
-          { hint: PROJECT_HINT },
-        );
-      }
-      const entry = addEntry(dir, doc, true);
+      const { doc, files } = await loadFromDisk(dir);
+      const entry = addEntry(dir, doc, files, Object.keys(files));
       active = entry.docId;
       emit({ kind: "opened", docId: entry.docId });
       return summary(entry);
@@ -195,8 +262,9 @@ export function createHeadlessHost(options: HeadlessHostOptions = {}): HeadlessH
         ...(request.template ? { template: request.template } : {}),
         ...(request.device ? { device: request.device } : {}),
       });
-      await saveProjectToDisk(dir, doc);
-      const entry = addEntry(dir, doc, true);
+      // A new project never deletes anything already in the folder.
+      const r = await saveProject(fs, dir, doc, { removable: new Set() });
+      const entry = addEntry(dir, doc, await readProjectFiles(fs, dir), Object.keys(r.files));
       if (request.open !== false) active = entry.docId;
       emit({ kind: "opened", docId: entry.docId });
       return summary(entry);
@@ -213,15 +281,16 @@ export function createHeadlessHost(options: HeadlessHostOptions = {}): HeadlessH
       };
     },
 
-    async saveDocument(docId) {
+    async saveDocument(docId, saveOptions = {}) {
       const entry = resolve(docId);
-      const r = await save(entry);
+      const r = await save(entry, saveOptions.force === true);
       return {
         docId: entry.docId,
         path: entry.path,
         revision: entry.session.revision,
         written: r.written,
         removed: r.removed,
+        ...(r.overwritten.length ? { overwritten: r.overwritten } : {}),
       };
     },
 
@@ -230,8 +299,9 @@ export function createHeadlessHost(options: HeadlessHostOptions = {}): HeadlessH
       const before = entry.session.revision;
       const result = entry.session.apply(ops, applyOptions);
       if (result.ok && !result.dryRun && result.txnId !== undefined && autosave) {
-        await save(entry);
-        result.saved = true;
+        const problem = await autosaveProblem(entry);
+        result.saved = !problem;
+        if (problem) result.saveError = problem;
       }
       if (entry.session.revision !== before)
         emit({ kind: "revision", docId: entry.docId, revision: entry.session.revision });
@@ -259,14 +329,43 @@ export function createHeadlessHost(options: HeadlessHostOptions = {}): HeadlessH
       };
     },
 
-    async screenshot() {
-      throw new HostError(
-        "screenshots_unavailable",
-        "Screenshots need the Sonobe app; this MCP server is running headless.",
-        {
-          hint: "Open the project in the Sonobe app for screenshots. Meanwhile, check structure with get_outline and behavior with sim_get_values or sim_trace.",
-        },
-      );
+    async screenshot(target, shotOptions) {
+      if (target.kind === "canvas" || target.kind === "graph") {
+        throw new HostError(
+          "target_unavailable",
+          `Headless mode has no ${target.kind === "graph" ? "patch graph" : "editor canvas"} to capture; its screenshots draw the prototype screen.`,
+          { hint: 'Use target "viewer" for the whole screen, or "@layerId" for one layer.' },
+        );
+      }
+      let docId = shotOptions.docId;
+      let scene;
+      let settled = true;
+      if (shotOptions.simId !== undefined) {
+        scene = sim.sceneAt(shotOptions.simId, shotOptions.atMs ?? 0);
+        docId = sim.list().find((s) => s.simId === shotOptions.simId)?.docId ?? docId;
+      } else {
+        const preview = sim.previewScene(
+          resolve(docId).docId,
+          shotOptions.atMs !== undefined ? { atMs: shotOptions.atMs } : {},
+        );
+        scene = preview.scene;
+        settled = preview.settled || shotOptions.atMs !== undefined;
+      }
+      const entry = resolve(docId);
+      const shot = await renderSceneScreenshot({
+        scene,
+        target,
+        assets: await loadSceneAssets(scene, entry.session.doc, entry.path),
+        ...(shotOptions.scale !== undefined ? { scale: shotOptions.scale } : {}),
+        ...(shotOptions.maxWidth !== undefined ? { maxWidth: shotOptions.maxWidth } : {}),
+        ...(shotOptions.simId !== undefined ? { simId: shotOptions.simId } : {}),
+      });
+      if (!settled)
+        shot.notes = [
+          ...(shot.notes ?? []),
+          "The prototype was still animating 5 s after it started, so this shows that moment. Pass atMs to pick a moment.",
+        ];
+      return shot;
     },
 
     async reveal() {
@@ -307,8 +406,9 @@ export function createHeadlessHost(options: HeadlessHostOptions = {}): HeadlessH
         const before = entry.session.revision;
         const result = entry.session.undo(undoOptions);
         if (autosave) {
-          await save(entry);
-          result.saved = true;
+          const problem = await autosaveProblem(entry);
+          result.saved = !problem;
+          if (problem) result.saveError = problem;
         }
         if (entry.session.revision !== before)
           emit({ kind: "revision", docId: entry.docId, revision: entry.session.revision });

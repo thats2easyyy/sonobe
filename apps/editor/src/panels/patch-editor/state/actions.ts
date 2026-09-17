@@ -16,7 +16,7 @@ import {
 } from "@sonobe/core";
 import type { PatchRegistry } from "@sonobe/patches";
 import type { ReactFlowInstance } from "@xyflow/react";
-import { createComponentFromSelection, duplicateSelection, exitComponent as exitComponentAction } from "../../../state/editActions.ts";
+import { createComponentFromSelection, duplicateSelection, exitComponent as exitComponentAction, revealBroadcaster } from "../../../state/editActions.ts";
 import type { EditorSession } from "../../../state/session.ts";
 import type { Placement } from "../../../ui/lib/position.ts";
 import { toast } from "../../../ui/Toast.tsx";
@@ -24,6 +24,7 @@ import { VALUE_TYPE_LABELS } from "../../../ui/PortGlyph.tsx";
 import { checkConnection, placeSuggestion, portTypeAt } from "../model/connect.ts";
 import {
   alignPositions,
+  ALIGN_LABELS,
   commentAroundOps,
   duplicatePatchOps,
   insertPatchOps,
@@ -39,6 +40,8 @@ import {
 import { estimateNodeSize, HEADER_HEIGHT, ROW_HEIGHT, type Rect } from "../model/geometry.ts";
 import { instanceChoiceKey } from "../model/instances.ts";
 import { nodePositionsMetaOp } from "../model/meta.ts";
+import { publishedKeyOf, publishPortPlan, unpublishOps, withoutDefault, type PublishSide } from "../model/publish.ts";
+import { newVariablePatch } from "../model/variables.ts";
 import { documentObstacles, estimatePatchSize, findFreePosition, type PlacementBias, type PlacementObstacles } from "../model/placement.ts";
 import { tidyLayout, type TidyGroupInput, type TidyNodeInput } from "../model/tidy.ts";
 import {
@@ -136,6 +139,16 @@ export interface PatchEditorActions {
   groupIntoComponent(): void;
   enterComponent(patchId: Id): boolean;
   exitComponent(): boolean;
+  /** Enter a component patch with nothing selected, so the inspector shows its name, notes, and published ports. */
+  openComponentInfo(patchId: Id): void;
+  renameComponent(componentId: Id, name: string): void;
+  /** Publish a port inside a component as a component input ("in") or output ("out"). */
+  publishPort(address: string, side: PublishSide): boolean;
+  unpublishPort(key: string, side: PublishSide): void;
+  /** Publish the port, or unpublish it when it's already published (⌥P). */
+  togglePublish(address: string, side: PublishSide): void;
+  /** Select and reveal the broadcaster a Variable Receiver reads (in an enclosing component for a global variable). */
+  jumpToBroadcaster(receiverId: Id): boolean;
   revealLayer(layerId: Id): void;
   /** Show a layer property on its node and open the picker to choose what drives it. */
   driveLayerProp(layerId: Id, prop: string): void;
@@ -211,6 +224,11 @@ export function createPatchEditorActions(deps: ActionDeps): PatchEditorActions {
         return undefined;
       }
       const { connect, placement = "any", ...insert } = options;
+      // Variables: a broadcaster gets a free name (after the output it's inserted from); a receiver the only variable it can read.
+      const path = selection().componentPath;
+      const variable = newVariablePatch(doc(), registry, path.at(-1) === componentId ? path : [componentId], type, connect?.side === "out" ? connect.address : undefined);
+      if (variable.settings && !insert.settings) insert.settings = variable.settings;
+      if (variable.typeParam && !insert.typeParam) insert.typeParam = variable.typeParam as ValueType;
       let at = position;
       if (placement !== "exact") {
         const virtual: PatchNode = { type, inputs: {}, ui: { x: 0, y: 0 } };
@@ -530,7 +548,7 @@ export function createPatchEditorActions(deps: ActionDeps): PatchEditorActions {
       const nodes = flowNodes().filter((n) => ids.has(n.id) || commentIds.has(commentIdOfNode(n.id) ?? ""));
       if (!c || nodes.length < 2) return;
       const positions = alignPositions(nodes.map((n) => ({ id: n.id, ...nodeRect(n) })), mode);
-      actions.moveNodes(positions, `Align ${nodes.length} items ${mode === "left" ? "left" : "to top"}`);
+      actions.moveNodes(positions, `Align ${nodes.length} items ${ALIGN_LABELS[mode]}`);
     },
 
     async tidyUp() {
@@ -609,7 +627,12 @@ export function createPatchEditorActions(deps: ActionDeps): PatchEditorActions {
 
     groupIntoComponent() {
       const result = createComponentFromSelection(session);
-      if (!result.ok && result.message) quietToast(result.message, result.hint);
+      if (!result.ok) {
+        if (result.message) quietToast(result.message, result.hint);
+        return;
+      }
+      // Name it right away: the new component patch's title starts editing, and committing names the component.
+      if (result.componentId && result.instanceId && component()?.patches[result.instanceId]) ui.getState().set({ editingTitle: result.instanceId, namingComponent: result.componentId });
     },
 
     enterComponent(patchId) {
@@ -621,6 +644,63 @@ export function createPatchEditorActions(deps: ActionDeps): PatchEditorActions {
     },
 
     exitComponent: () => exitComponentAction(session),
+
+    openComponentInfo(patchId) {
+      if (actions.enterComponent(patchId)) selection().clear();
+    },
+
+    renameComponent(targetId, name) {
+      const target = doc().components[targetId];
+      const trimmed = name.trim();
+      if (!target || !trimmed || trimmed === target.name) return;
+      apply([{ op: "updateComponent", id: targetId, name: trimmed }], `Rename component “${target.name}” to “${trimmed}”`);
+    },
+
+    publishPort(address, side) {
+      const d = doc();
+      const plan = publishPortPlan(d, componentId, registry, address, side);
+      if ("error" in plan) {
+        quietToast(plan.error, plan.hint);
+        return false;
+      }
+      const label = `Publish ${portLabel(d, componentId, registry, address)}`;
+      let result = apply(plan.ops, label, { quiet: true });
+      // A current value core can't keep as a default (an unusual type): publish without one.
+      if (!result.ok && side === "in") result = apply(withoutDefault(plan).ops, label, { quiet: true });
+      if (!result.ok) {
+        const error = result.errors.find((e) => e.code !== "skipped") ?? result.errors[0];
+        quietToast(error?.message ?? "That port couldn't be published.", error?.hint);
+        return false;
+      }
+      void toast({
+        id: "patch-editor-publish",
+        title: `Published “${plan.name}”`,
+        description: side === "in" ? "It's a property wherever this component is placed." : "Patches where this component is placed can read it now.",
+        tone: "success",
+      });
+      return true;
+    },
+
+    unpublishPort(key, side) {
+      const c = component();
+      if (!c) return;
+      const port = side === "in" ? c.interface.inputs[key] : c.interface.outputs[key];
+      const ops = unpublishOps(c, key, side);
+      if (port && ops.length) apply(ops, `Unpublish “${port.name}”`);
+    },
+
+    togglePublish(address, side) {
+      const c = component();
+      const key = c ? publishedKeyOf(c, address, side) : undefined;
+      if (key !== undefined) actions.unpublishPort(key, side);
+      else actions.publishPort(address, side);
+    },
+
+    jumpToBroadcaster(receiverId) {
+      const result = revealBroadcaster(session, receiverId);
+      if (!result.ok && result.message) quietToast(result.message, result.hint);
+      return result.ok;
+    },
 
     revealLayer(layerId) {
       selection().select({ layers: [layerId], patches: [], comments: [] });

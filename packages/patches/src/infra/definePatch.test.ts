@@ -39,6 +39,12 @@ describe("definePatch", () => {
     expect(() => definePatch("constructor", { evaluate() {} })).toThrow(/isn't a catalog patch type/);
   });
 
+  it("explains a spec object passed where the type string goes", () => {
+    const specShaped = { type: "switch", name: "Switch", inputs: [], outputs: [] };
+    expect(() => definePatch(specShaped as never, { evaluate() {} })).toThrow(/first argument must be a catalog type string, like definePatch\("switch"/);
+    expect(() => definePatch(null as never, { evaluate() {} })).toThrow(/not null/);
+  });
+
   it("requires evaluate", () => {
     expect(() => definePatch("switch", {} as never)).toThrow(/evaluate must be a function/);
   });

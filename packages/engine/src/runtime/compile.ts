@@ -11,6 +11,8 @@
 import {
   COMPONENT_INSTANCE_LAYER_TYPE,
   COMPONENT_PATCH_TYPE,
+  describePatch,
+  getPatchSpec,
   interfacePortToPort,
   isLayerInput,
   isLinkInput,
@@ -48,6 +50,8 @@ export interface CompiledGraph {
   order: CNode[];
   scopes: Scope[];
   issues: RuntimeIssue[];
+  /** Some patches read last frame's value through a back-edge (a cycle's evaluation order read patch positions). */
+  cyclic: boolean;
   /** Resolve an address ("patch.port", "@layer.key", "$in.key") in a scope (default: the root) to a binding and its target type. */
   resolveLink(address: string, scope?: Scope): { binding: Binding; type: ValueType } | null;
 }
@@ -109,7 +113,7 @@ export function compileDocument(doc: SonobeDocument, engineRegistry: EngineRegis
   const rootComponent = doc.components[doc.project.root];
   if (!rootComponent) {
     issue("missing_root", "error", `The project's root component "${doc.project.root}" doesn't exist, so there's nothing to run.`);
-    return { doc, registry, root: null, order: [], scopes, issues, resolveLink: () => null };
+    return { doc, registry, root: null, order: [], scopes, issues, cyclic: false, resolveLink: () => null };
   }
 
   // ---- scopes and shells -----------------------------------------------------
@@ -225,7 +229,7 @@ export function compileDocument(doc: SonobeDocument, engineRegistry: EngineRegis
     const c = scope.component;
     for (const id of sortedKeys(c.patches)) {
       const pnode = c.patches[id]!;
-      const label: Label = { patchId: id, text: `Patch "${id}"` };
+      const label: Label = { patchId: id, text: describePatch(pnode, getPatchSpec(registry, pnode.type)) };
       if (pnode.type === COMPONENT_PATCH_TYPE) {
         const child = instanceScope(scope, id, pnode.component, "patchComponent", pnode.muted === true, label);
         if (child) {
@@ -236,13 +240,13 @@ export function compileDocument(doc: SonobeDocument, engineRegistry: EngineRegis
       }
       const ports = resolveNodePorts(doc, pnode, registry);
       if (!ports) {
-        issue("unknown_patch_type", "error", `Patch "${id}" in ${c.id} has an unknown type "${pnode.type}", so it doesn't run.`, label);
+        issue("unknown_patch_type", "error", `${pnode.name ? `The patch "${pnode.name}"` : "A patch"} in ${c.name} has an unknown type "${pnode.type}", so it doesn't run.`, label);
         baseNode(scope, id, pnode, "inert", pnode.type);
         scope.nodes.set(id, nodes[nodes.length - 1]!);
         continue;
       }
       if (ports.dynamicPortsError !== undefined) {
-        issue("dynamic_ports_failed", "warning", `Patch "${id}" couldn't work out its ports: ${ports.dynamicPortsError}`, label);
+        issue("dynamic_ports_failed", "warning", `${label.text} couldn't work out its ports: ${ports.dynamicPortsError}`, label);
       }
       if (pnode.type === VARIABLE_BROADCASTER_TYPE) {
         const settings = pnode.settings ?? {};
@@ -264,7 +268,7 @@ export function compileDocument(doc: SonobeDocument, engineRegistry: EngineRegis
       else {
         def = registry.definitions.get(pnode.type) ?? null;
         if (!def || typeof def.evaluate !== "function") {
-          issue("unimplemented_patch", "warning", `${ports.spec.name} ("${id}") isn't implemented in this runtime, so its outputs hold their defaults.`, label);
+          issue("unimplemented_patch", "warning", `${label.text} isn't implemented in this runtime, so its outputs hold their defaults.`, label);
           def = null;
           kind = "inert";
         } else kind = "patch";
@@ -314,9 +318,9 @@ export function compileDocument(doc: SonobeDocument, engineRegistry: EngineRegis
     const out: CLayer[] = [];
     for (const node of layers) {
       const spec = registry.layers.get(node.type);
-      const label: Label = { layerId: node.id, text: `Layer "${node.id}"` };
+      const label: Label = { layerId: node.id, text: `Layer "${node.name || node.id}"` };
       if (!spec) {
-        issue("unknown_layer_type", "error", `Layer "${node.id}" in ${scope.component.id} has an unknown type "${node.type}", so it isn't drawn.`, label);
+        issue("unknown_layer_type", "error", `${label.text} in ${scope.component.name} has an unknown type "${node.type}", so it isn't drawn.`, label);
         continue;
       }
       const props = resolveLayerProps(doc, scope.component.id, node, registry) ?? [];
@@ -473,7 +477,7 @@ export function compileDocument(doc: SonobeDocument, engineRegistry: EngineRegis
     const port = ports?.inputs.find((p) => p.key === "value");
     const type = port?.type ?? b.type;
     const fallback = port ? (normalizeDefault(port.default, type) ?? portDefault(port)) : zeroValue(type);
-    const { binding } = compileStored(level, b.node.inputs.value, type, fallback, { patchId: b.id, text: `Patch "${b.id}"` });
+    const { binding } = compileStored(level, b.node.inputs.value, type, fallback, { patchId: b.id, text: describePatch(b.node, getPatchSpec(registry, b.node.type)) });
     broadcasterBindings.set(b, binding);
     return binding;
   }
@@ -496,9 +500,11 @@ export function compileDocument(doc: SonobeDocument, engineRegistry: EngineRegis
     }
     const label = { patchId: cnode.id };
     if (!found) {
-      if (!name) issue("unresolved_variable", "warning", `Variable Receiver "${cnode.id}" has no name, so it outputs a zero value.`, label);
-      else if (mismatch) issue("variable_type_mismatch", "warning", `Variable Receiver "${cnode.id}" wants a ${type} "${name}", but the broadcaster with that name has another type.`, label);
-      else issue("unresolved_variable", "warning", `Variable Receiver "${cnode.id}" can't find a ${vscope} variable named "${name}".`, label);
+      const specName = getPatchSpec(registry, cnode.node.type)?.name ?? "Variable Receiver";
+      const who = cnode.node.name ? `${specName} "${cnode.node.name}"` : specName;
+      if (!name) issue("unresolved_variable", "warning", `${who} has no variable chosen, so it outputs a zero value.`, label);
+      else if (mismatch) issue("variable_type_mismatch", "warning", `${who} wants a ${type} variable named "${name}", but the broadcaster with that name has another type.`, label);
+      else issue("unresolved_variable", "warning", `${who} can't find a ${vscope} variable named "${name}".`, label);
       cnode.bindings[0] = constBinding(zero, type);
       return;
     }
@@ -509,12 +515,12 @@ export function compileDocument(doc: SonobeDocument, engineRegistry: EngineRegis
     if (cnode.kind === "receiver") return bindReceiver(scope, cnode);
     const ports = nodePorts.get(cnode);
     if (!ports) return;
-    const label: Label = { patchId: cnode.id, text: `Patch "${cnode.id}"` };
+    const label: Label = { patchId: cnode.id, text: describePatch(cnode.node, getPatchSpec(registry, cnode.node.type)) };
     ports.forEach((port, i) => {
       const slot = cnode.inputs[i]!;
       let { binding, connected } = compileStored(scope, cnode.node.inputs[port.key], slot.type, slot.default, label);
       if (binding.kind === "output" && binding.node === cnode) {
-        issue("self_edge", "error", `"${cnode.id}.${port.key}" is wired to its own output "${cnode.outputs[binding.slot]!.key}". Put another patch in between (Delay One Frame for feedback).`, label);
+        issue("self_edge", "error", `${label.text}: ${port.name} is wired to its own output "${cnode.outputs[binding.slot]!.key}". Put another patch in between (Delay One Frame for feedback).`, label);
         binding = constBinding(slot.default, slot.type);
         connected = false;
       }
@@ -524,11 +530,11 @@ export function compileDocument(doc: SonobeDocument, engineRegistry: EngineRegis
   }
 
   function bindAllInputs(scope: Scope): void {
-    for (const { host, child, node } of patchInstances) if (host === scope) bindInstanceInputs(host, child, node.inputs, { patchId: child.instanceId!, text: `Component patch "${child.instanceId}"` });
+    for (const { host, child, node } of patchInstances) if (host === scope) bindInstanceInputs(host, child, node.inputs, { patchId: child.instanceId!, text: `Component patch "${node.name || child.component.name}"` });
     for (const { host, layer } of layerInstances) {
       if (host !== scope || !layer.instance) continue;
       const child = layer.instance;
-      bindInstanceInputs(host, child, layer.node.props, { layerId: layer.id, text: `Component layer "${layer.id}"` });
+      bindInstanceInputs(host, child, layer.node.props, { layerId: layer.id, text: `Component layer "${layer.node.name || layer.id}"` });
       for (const key of Object.keys(layer.node.props)) {
         const prop = layer.props.get(key);
         if (!prop || child.inputIndex.has(key) || prop.wholeLoop) continue;
@@ -562,13 +568,27 @@ export function compileDocument(doc: SonobeDocument, engineRegistry: EngineRegis
 
   // ---- pulses, dependencies, order --------------------------------------------
 
-  const pulseOf = (b: Binding): boolean => (b.kind === "input" ? b.input.port.type === "pulse" && pulseOf(b.input.binding) : b.pulse);
+  // A binding is a pulse source only when a real pulse output drives it. Published inputs and
+  // outputs typed "pulse" pass what drives them through, so a held boolean behind a component
+  // boundary still fires on its rising edge instead of every frame (ARCHITECTURE §4).
+  const pulseMemo = new Map<Binding, boolean>();
+  const pulseOf = (b: Binding): boolean => {
+    if (b.kind !== "input" && b.kind !== "instanceOutput") return b.pulse;
+    const cached = pulseMemo.get(b);
+    if (cached !== undefined) return cached;
+    pulseMemo.set(b, false); // cycle guard
+    const result = b.kind === "input" ? b.input.port.type === "pulse" && pulseOf(b.input.binding) : b.type === "pulse" && b.inner !== null && pulseOf(b.inner);
+    pulseMemo.set(b, result);
+    b.pulse = result;
+    return result;
+  };
   for (const cnode of nodes) {
     cnode.bindings.forEach((b, i) => {
-      if (b.kind === "input") b.pulse = pulseOf(b);
       cnode.inputs[i]!.pulseSource = pulseOf(b);
     });
   }
+  // Published outputs read only by layers or by getValue still get their pulse flag settled.
+  for (const scope of scopes) for (const b of scope.outputBindings.values()) if (b) pulseOf(b);
 
   for (const cnode of nodes) {
     const deps: CNode[] = [];
@@ -610,7 +630,169 @@ export function compileDocument(doc: SonobeDocument, engineRegistry: EngineRegis
     cache.set(address, result);
     return result;
   };
-  return { doc, registry, root, order, scopes, issues, resolveLink };
+  const cyclic = order.some((node) => node.feedback.some(Boolean));
+  return { doc, registry, root, order, scopes, issues, cyclic, resolveLink };
+}
+
+// ---------------------------------------------------------------------------
+// Literal-only updates
+// ---------------------------------------------------------------------------
+
+const COMPONENT_CONTENT = new Set(["layers", "patches", "comments", "meta"]);
+const PATCH_CONTENT = new Set(["inputs", "ui"]);
+const LAYER_CONTENT = new Set(["props", "children", "locked", "collapsed", "name"]);
+
+/** Same own keys, and the same values (by identity) outside `skip`. */
+function sameFields(a: object, b: object, skip: ReadonlySet<string>): boolean {
+  const ka = Object.keys(a);
+  if (ka.length !== Object.keys(b).length) return false;
+  const ra = a as Record<string, unknown>;
+  const rb = b as Record<string, unknown>;
+  for (const k of ka) if (!Object.hasOwn(rb, k) || (!skip.has(k) && !Object.is(ra[k], rb[k]))) return false;
+  return true;
+}
+
+function sameKeys(a: readonly string[], b: readonly string[]): boolean {
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false;
+  return true;
+}
+
+/** A stored value that compiles to a constant binding (or the port default): not a link or a layer reference. */
+const isConstant = (v: InputValue | undefined) => v === undefined || (!isLinkInput(v) && !isLayerInput(v));
+
+/** Keys whose stored values changed, when every change is constant to constant; null otherwise. With `sameKeySet`, adding or removing a key is a structural change too. */
+function changedConstants(next: Record<string, InputValue>, prev: Record<string, InputValue>, sameKeySet: boolean): string[] | null {
+  const out: string[] = [];
+  const nextKeys = Object.keys(next);
+  if (sameKeySet && nextKeys.length !== Object.keys(prev).length) return null;
+  for (const key of nextKeys) {
+    const before = Object.hasOwn(prev, key) ? prev[key] : undefined;
+    if (Object.is(before, next[key])) continue;
+    if ((sameKeySet && !Object.hasOwn(prev, key)) || !isConstant(next[key]) || !isConstant(before)) return null;
+    out.push(key);
+  }
+  for (const key of Object.keys(prev)) {
+    if (Object.hasOwn(next, key)) continue;
+    if (sameKeySet || !isConstant(prev[key])) return null;
+    out.push(key);
+  }
+  return out;
+}
+
+/**
+ * Update a compiled graph in place for a document that differs from the one it was compiled from
+ * only in literal values: patch input literals, layer property literals, and patch positions (which
+ * only matter when patches form a cycle). Constant bindings are rewritten where they are, so every
+ * reader of a layer property sees the new value, and patch state is untouched. Returns false, with
+ * the graph unchanged, for anything else (links, new or removed items, types, names, settings,
+ * component instances, variables, patches with dynamic ports): compile the document instead.
+ */
+export function updateLiterals(graph: CompiledGraph, next: SonobeDocument): boolean {
+  const prev = graph.doc;
+  if (next === prev) return true;
+  if (next.project !== prev.project || next.scripts !== prev.scripts || next.assets !== prev.assets) return false;
+  const ids = Object.keys(next.components);
+  if (!sameKeys(ids, Object.keys(prev.components))) return false;
+  const registry = graph.registry;
+  const swaps = new Map<Component, Component>();
+  const nodes: { from: Component; id: Id; node: PatchNode; keys: readonly string[] }[] = [];
+  const layers: { from: Component; node: LayerNode; keys: readonly string[] }[] = [];
+
+  for (const id of ids) {
+    const a = next.components[id]!;
+    const b = prev.components[id]!;
+    if (a === b) continue;
+    if (!sameFields(a, b, COMPONENT_CONTENT) || a.comments.length !== b.comments.length) return false;
+    swaps.set(b, a);
+    if (a.patches !== b.patches) {
+      const keys = Object.keys(a.patches);
+      if (!sameKeys(keys, Object.keys(b.patches))) return false;
+      for (const pid of keys) {
+        const na = a.patches[pid]!;
+        const nb = b.patches[pid]!;
+        if (na === nb) continue;
+        if (!sameFields(na, nb, PATCH_CONTENT)) return false;
+        if (na.ui !== nb.ui && (na.ui?.x !== nb.ui?.x || na.ui?.y !== nb.ui?.y) && graph.cyclic) return false;
+        const changed = changedConstants(na.inputs, nb.inputs, false);
+        if (!changed) return false;
+        if (changed.length && (na.type === COMPONENT_PATCH_TYPE || na.type === VARIABLE_BROADCASTER_TYPE || getPatchSpec(registry, na.type)?.dynamicPorts)) return false;
+        nodes.push({ from: b, id: pid, node: na, keys: changed });
+      }
+    }
+    if (a.layers !== b.layers) {
+      const walk = (next: readonly LayerNode[], before: readonly LayerNode[]): boolean => {
+        if (next.length !== before.length) return false;
+        for (let k = 0; k < next.length; k++) {
+          const la = next[k]!;
+          const lb = before[k]!;
+          if (la === lb) continue;
+          if (!sameFields(la, lb, LAYER_CONTENT) || la.type === COMPONENT_INSTANCE_LAYER_TYPE) return false;
+          // Names only reach compile issues, which unknown layer types raise.
+          if (la.name !== lb.name && !registry.layers.has(la.type)) return false;
+          const changed = changedConstants(la.props, lb.props, true);
+          if (!changed) return false;
+          layers.push({ from: b, node: la, keys: changed });
+          if (!walk(la.children ?? [], lb.children ?? [])) return false;
+        }
+        return true;
+      };
+      if (!walk(a.layers, b.layers)) return false;
+    }
+  }
+
+  // Resolve every write first, so a surprise leaves the graph as it was.
+  const writes: { binding: Extract<Binding, { kind: "const" }>; value: Value | Loop }[] = [];
+  const nodeSwaps: { cnode: CNode; node: PatchNode }[] = [];
+  const layerSwaps: { layer: CLayer; node: LayerNode }[] = [];
+  const scopesOf = (component: Component) => graph.scopes.filter((s) => s.component === component);
+  for (const edit of nodes) {
+    for (const scope of scopesOf(edit.from)) {
+      // Component patches and broadcasters aren't compiled nodes; only their positions can differ here.
+      const cnode = scope.nodes.get(edit.id);
+      if (!cnode) continue;
+      nodeSwaps.push({ cnode, node: edit.node });
+      if (cnode.kind === "receiver" || cnode.kind === "inert") continue;
+      for (const key of edit.keys) {
+        const i = cnode.inputIndex.get(key);
+        if (i === undefined) continue;
+        const binding = cnode.bindings[i]!;
+        if (binding.kind !== "const") return false;
+        const slot = cnode.inputs[i]!;
+        const stored = edit.node.inputs[key];
+        writes.push({ binding, value: stored === undefined ? slot.default : decodeStored(stored, slot.type) });
+      }
+    }
+  }
+  for (const edit of layers) {
+    for (const scope of scopesOf(edit.from)) {
+      const layer = scope.layerIndex.get(edit.node.id);
+      if (!layer) continue;
+      if (layer.node.id !== edit.node.id || layer.instance) return false;
+      layerSwaps.push({ layer, node: edit.node });
+      for (const key of edit.keys) {
+        const prop = layer.props.get(key);
+        if (!prop) continue;
+        const binding = layer.propBindings.get(key);
+        if (!binding || binding.kind !== "const") return false;
+        const stored = edit.node.props[key]!;
+        writes.push({ binding, value: stored === null && prop.default === null ? null : decodeStored(stored, prop.type) });
+      }
+    }
+  }
+
+  for (const { binding, value } of writes) binding.value = value;
+  for (const { cnode, node } of nodeSwaps) {
+    cnode.node = node;
+    if (cnode.context) cnode.context.node = node;
+  }
+  for (const { layer, node } of layerSwaps) layer.node = node;
+  for (const scope of graph.scopes) {
+    const swapped = swaps.get(scope.component);
+    if (swapped) scope.component = swapped;
+  }
+  graph.doc = next;
+  return true;
 }
 
 function bindingDeps(b: Binding | null, out: CNode[]): void {

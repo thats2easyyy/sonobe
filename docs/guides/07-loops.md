@@ -107,7 +107,7 @@ To find out which item was tapped, use Loop Option Switch. It turns a loop of pu
 ```
 Dot . Tap (loop) ─▶ Loop Option Switch ─▶ current page (one number)
                                                   │
-Loop Index ─────────────────────────────▶ Equals ◀┘  ═[0 0 1 0 0]═▶ Pop Animation ─▶ Transition 8 → 20 ─▶ Dot . Width
+Loop . Index ───────────────────────────▶ Equals ◀┘  ═[0 0 1 0 0]═▶ Pop Animation ─▶ Transition 8 → 20 ─▶ Dot . Width
 ```
 
 Page dots work the same way. Five dots in a Row group, Equals compares each index with the current page, and the matching dot grows from 8 points wide to 20. Because Pop Animation keeps separate state per index, the old dot shrinks while the new one grows, each on its own spring.

@@ -1,6 +1,9 @@
 import { defineConfig, devices } from "@playwright/test";
 
-/** End-to-end tests drive the editor in Chromium (fast) and the Electron app (smoke). */
+/**
+ * End-to-end tests drive the editor in Chromium. The Electron app is covered separately by
+ * apps/desktop/tests/smoke.mjs (`npm run smoke -w @sonobe/desktop`), which isn't part of `npm run e2e` or CI.
+ */
 export default defineConfig({
   testDir: "./e2e",
   timeout: 60_000,

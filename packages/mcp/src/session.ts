@@ -8,8 +8,8 @@ import {
   applyOps,
   componentItemIds,
   createHistory,
+  createDiagnosticsCache,
   describeHistoryEntry,
-  getDiagnostics,
   type Author,
   type Diagnostic,
   type History,
@@ -180,13 +180,9 @@ export function createDocumentSession(
   let doc = initial;
   let savedRevision = 0;
   const seen = allItemIds(initial);
-  let cache: { revision: number; doc: SonobeDocument; list: Diagnostic[] } | null = null;
-
-  const diagnostics = (): Diagnostic[] => {
-    if (!cache || cache.revision !== history.revision || cache.doc !== doc)
-      cache = { revision: history.revision, doc, list: getDiagnostics(doc, registry) };
-    return cache.list;
-  };
+  // Incremental: a small write re-checks only what it changed.
+  const diagnosticsCache = createDiagnosticsCache(registry);
+  const diagnostics = (): Diagnostic[] => diagnosticsCache.get(doc);
 
   const emptyDelta = (): DiagnosticsDelta => ({
     added: [],
@@ -263,7 +259,7 @@ export function createDocumentSession(
       if (applyOptions.dryRun) {
         if (result.preview) {
           out.preview = result.preview;
-          out.diagnostics = diffDiagnostics(before, getDiagnostics(result.preview, registry));
+          out.diagnostics = diffDiagnostics(before, diagnosticsCache.get(result.preview));
         }
         return out;
       }

@@ -10,9 +10,10 @@ export interface InspectorEdit {
   /**
    * Apply ops to the current component. Edits passing a `gesture` key form one explicit document
    * gesture: the first starts a new undo step and the rest merge into it, however long the gesture
-   * lasts, until `endGesture()` or an edit without a gesture. Edits without one are their own step.
+   * lasts, until `endGesture()` or an edit without a gesture. Edits without one are their own step,
+   * unless they pass a `coalesceKey` an earlier step used (an asset import this edit uses).
    */
-  apply: (ops: readonly Op[], label: string, options?: { gesture?: string }) => ApplyOpsResult | undefined;
+  apply: (ops: readonly Op[], label: string, options?: { gesture?: string; coalesceKey?: string }) => ApplyOpsResult | undefined;
   /** Close the open gesture (only when it's `gesture`, if given): drag end, typed commit, arrow press. */
   endGesture: (gesture?: string) => void;
 }
@@ -41,6 +42,7 @@ export function useInspectorEdit(): InspectorEdit {
           input = { ...input, coalesceKey: key, gesture: phase };
         } else {
           close();
+          if (options.coalesceKey !== undefined) input = { ...input, coalesceKey: options.coalesceKey };
         }
         const result = session.document.getState().apply(ops, input);
         if (!result.ok) {

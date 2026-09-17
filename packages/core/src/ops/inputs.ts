@@ -1,5 +1,7 @@
 /** setInput, connect, disconnect, rename. */
 
+import { VARIABLE_BROADCASTER_TYPE } from "../graph.ts";
+import { getOwn } from "../ids.ts";
 import { findLayer } from "../registry.ts";
 import { didYouMean, didYouMeanText } from "../suggest.ts";
 import { checkInputValue, checkLink, resolveSource, resolveTarget, type PortTarget } from "../validate.ts";
@@ -16,6 +18,7 @@ import {
   type OpOf,
   type OpOutcome,
 } from "./context.ts";
+import { updatePatch } from "./patches.ts";
 import { readInput, writeInput, type InputTarget } from "./references.ts";
 import { mapLayer } from "./tree.ts";
 
@@ -110,7 +113,15 @@ export function rename(ctx: OpContext, op: OpOf<"rename">): OpOutcome {
     ctx.affected.layers.add(id);
     return { ids: [id], applied: { op: "rename", component: component.id, id, name: op.name }, inverse: [{ op: "rename", component: component.id, id, name: loc.layer.name }] };
   }
-  const node = component.patches[id];
+  const node = getOwn(component.patches, id);
+  if (node?.type === VARIABLE_BROADCASTER_TYPE) {
+    // A broadcaster's name is its variable's name (Origami names the value by its title): one field,
+    // and the receivers that read the variable follow the rename in the same batch.
+    const name = op.name.trim();
+    const change: OpOf<"updatePatch"> = { op: "updatePatch", component: component.id, id, settings: { name: name || null } };
+    if (node.name !== undefined) change.name = "";
+    return updatePatch(ctx, change);
+  }
   if (node) {
     const next = { ...node };
     if (op.name === "") delete next.name;
@@ -124,7 +135,7 @@ export function rename(ctx: OpContext, op: OpOf<"rename">): OpOutcome {
       suggestions: [{ description: "Change the comment's text", ops: [{ op: "updateComment", component: component.id, id, text: op.name }] }],
     });
   }
-  const target = ctx.doc.components[id];
+  const target = getOwn(ctx.doc.components, id);
   if (target && op.component === undefined) {
     if (!op.name.trim()) fail("invalid_value", "Component names can't be empty.");
     commitComponent(ctx, { ...target, name: op.name });

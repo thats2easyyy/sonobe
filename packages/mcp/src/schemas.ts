@@ -32,7 +32,7 @@ export const InputValueSchema = z
     'A literal (1, true, "text", "#FF3B30FF", [x, y]) or a wrapper: { "link": "patchId.port" | "@layerId.prop" | "$ref.port" }, { "layer": "layerId" | "$ref" }, { "loop": [..] }, { "json": .. }, { "asset": "assetId" }, { "gradient": .. }. null resets to the default.',
   );
 
-export const OP_HELP = `One op. Kinds: ${OP_KINDS.join(", ")}. Shapes: addLayer { parent?, index?, layer: { ref?, id?, type, name?, props?, children? } } · updateLayer { id, props?, name?, locked?, collapsed? } · moveLayer { id, parent?, index? } · removeLayer { id } · addPatch { patch: { ref?, id?, type, name?, typeParam?, inputCount?, inputs?, settings?, component?, ui? } } · updatePatch { id, name?, typeParam?, inputCount?, muted?, settings?, ui? } · removePatch { id } · setInput { target, value } · connect { from, to } · disconnect { to } · rename { id, name } · addComment { comment: { text, rect, color? } } · createComponent { name, layerIds?, patchIds? } · updateInterface { component, inputs?, outputs? } · updateComponent { id, name?, notes?, size? } · setProject { changes }. Every op may name "component". Later ops can use "$ref" for items earlier ops created with "ref".`;
+export const OP_HELP = `One op. Kinds: ${OP_KINDS.join(", ")}. Shapes: addLayer { parent?, index?, layer: { ref?, id?, type, name?, props?, children? } } · updateLayer { id, props?, name?, locked?, collapsed? } · moveLayer { id, parent?, index? } · removeLayer { id } · addPatch { patch: { ref?, id?, type, name?, typeParam?, inputCount?, inputs?, settings?, component?, ui? } } · updatePatch { id, name?, typeParam?, inputCount?, muted?, settings?, ui? } · removePatch { id } · setInput { target, value } · connect { from, to } · disconnect { to } · rename { id, name } · addComment { comment: { text, rect, color? } } · createComponent { name, layerIds?, patchIds? } · updateInterface { component, inputs?, outputs? } · updateComponent { id, name?, notes?, size? } · setProject { changes }. Every op may name "component". Give a new item "ref" and write "$ref" in any op of the batch, before or after the op that creates it.`;
 
 export const OpSchema = z
   .looseObject({ op: z.string().describe(`Op kind: ${OP_KINDS.join(" | ")}.`) })
@@ -257,6 +257,18 @@ export const WriteOutputSchema = z.looseObject({
     .optional(),
   diagnostics: DiagnosticsDeltaOutput.optional(),
   saved: z.boolean().optional(),
+  /** Batches with destructive ops: what was (or on a dry run, would be) removed, cascades included. */
+  removed: z
+    .looseObject({
+      layers: z.number(),
+      patches: z.number(),
+      comments: z.number(),
+      components: z.number(),
+      assets: z.number(),
+      scripts: z.number(),
+      total: z.number(),
+    })
+    .optional(),
 });
 
 export const SimStateOutputSchema = z.looseObject({

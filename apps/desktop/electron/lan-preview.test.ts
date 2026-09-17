@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { WebSocket } from "ws";
-import { lanAddresses, matchPreviewPath, previewUrl, resolveUnder, startLanPreview, type LanPreviewHandle, type PreviewDocument, type PreviewMessage } from "./lan-preview.ts";
+import { etagMatches, lanAddresses, matchPreviewPath, previewUrl, resolveUnder, startLanPreview, type LanPreviewHandle, type PreviewDocument, type PreviewMessage } from "./lan-preview.ts";
 
 interface Player {
   ws: WebSocket;
@@ -123,6 +123,39 @@ describe("startLanPreview", () => {
     const redirect = await fetch(`${base()}/p/${s.token}`, { redirect: "manual" });
     expect(redirect.status).toBe(308);
     expect(redirect.headers.get("location")).toBe(`/p/${s.token}/`);
+  });
+
+  it("compresses text files and answers revalidation with 304", async () => {
+    const s = server!;
+    const source = "console.log('a player bundle line');\n".repeat(400);
+    await writeFile(path.join(dir, "big.js"), source);
+    const zipped = await fetch(`${s.url}big.js`, { headers: { "Accept-Encoding": "gzip" } });
+    expect(zipped.status).toBe(200);
+    expect(zipped.headers.get("content-encoding")).toBe("gzip");
+    expect(zipped.headers.get("vary")).toBe("Accept-Encoding");
+    expect(Number(zipped.headers.get("content-length"))).toBeLessThan(source.length / 4);
+    expect(await zipped.text()).toBe(source);
+    const etag = zipped.headers.get("etag")!;
+    expect(etag).toMatch(/^W\/"/);
+
+    const again = await fetch(`${s.url}big.js`, { headers: { "If-None-Match": etag } });
+    expect(again.status).toBe(304);
+    expect(again.headers.get("etag")).toBe(etag);
+    // A changed file gets a new tag, so the stale one downloads again.
+    await writeFile(path.join(dir, "big.js"), `${source}// edited\n`);
+    const changed = await fetch(`${s.url}big.js`, { headers: { "If-None-Match": etag, "Accept-Encoding": "gzip" } });
+    expect(changed.status).toBe(200);
+    expect(await changed.text()).toBe(`${source}// edited\n`);
+    // Byte ranges stay uncompressed.
+    const ranged = await fetch(`${s.url}big.js`, { headers: { Range: "bytes=0-6", "Accept-Encoding": "gzip" } });
+    expect(ranged.status).toBe(206);
+    expect(ranged.headers.get("content-encoding")).toBeNull();
+    expect(await ranged.text()).toBe("console");
+    // The page itself is never cached.
+    const page = await fetch(s.url, { headers: { "If-None-Match": "*" } });
+    expect(page.status).toBe(200);
+    expect(etagMatches('"abc", W/"def"', 'W/"def"')).toBe(true);
+    expect(etagMatches(undefined, 'W/"def"')).toBe(false);
   });
 
   it("serves the document as JSON and assets with byte ranges", async () => {

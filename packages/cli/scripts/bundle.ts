@@ -1,15 +1,18 @@
 #!/usr/bin/env node
 /**
- * Bundle the `sonobe` CLI into one self-contained ESM file (shebang, no runtime dependencies)
+ * Bundle the `sonobe` CLI into one self-contained ESM file (shebang, no JavaScript dependencies)
  * with the agent guides beside it, so it runs outside the repo: npx, global installs, the Claude
- * Code plugin and the Claude Desktop extension.
+ * Code plugin and the Claude Desktop extension. The native screenshot rasterizer (@resvg/resvg-js
+ * and the platform binaries installed with it) is copied to node_modules beside the bundle, which
+ * loads it at runtime for headless get_screenshot.
  *
- *   node packages/cli/scripts/bundle.ts [--outfile <path>] [--no-guides]
+ *   node packages/cli/scripts/bundle.ts [--outfile <path>] [--no-guides] [--no-rasterizer]
  *
- * Default output: packages/cli/dist/sonobe.mjs and packages/cli/dist/guides/.
+ * Default output: packages/cli/dist/sonobe.mjs, packages/cli/dist/guides/ and packages/cli/dist/node_modules/@resvg/.
  */
 
-import { chmod, cp, mkdir, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { chmod, cp, mkdir, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { createRequire } from "node:module";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { parseArgs } from "node:util";
@@ -29,6 +32,8 @@ export interface BundleOptions {
   outfile?: string;
   /** Copy the agent guides to <outfile dir>/guides (default true). */
   guides?: boolean;
+  /** Copy the screenshot rasterizer to <outfile dir>/node_modules/@resvg (default true). */
+  rasterizer?: boolean;
   /** esbuild log level (default "warning"). */
   logLevel?: "silent" | "error" | "warning" | "info";
 }
@@ -37,6 +42,8 @@ export interface BundleResult {
   outfile: string;
   /** Where the guides were copied, when they were. */
   guidesDir?: string;
+  /** Where the rasterizer packages were copied, when they were installed and copied. */
+  rasterizerDir?: string;
   bytes: number;
 }
 
@@ -72,7 +79,38 @@ export async function bundleCli(options: BundleOptions = {}): Promise<BundleResu
     await cp(GUIDES_SOURCE, guidesDir, { recursive: true });
     result.guidesDir = guidesDir;
   }
+  if (options.rasterizer !== false) {
+    const rasterizerDir = await copyRasterizer(path.dirname(outfile));
+    if (rasterizerDir) result.rasterizerDir = rasterizerDir;
+  }
   return result;
+}
+
+/**
+ * Copy @resvg/resvg-js and the platform binary packages installed beside it (only this machine's
+ * platform, as npm installs them) into <dir>/node_modules/@resvg, so a bundle in <dir> can load the
+ * rasterizer. Returns the folder, or undefined when the rasterizer isn't installed.
+ */
+export async function copyRasterizer(dir: string): Promise<string | undefined> {
+  const require = createRequire(import.meta.url);
+  let manifest: string;
+  try {
+    manifest = require.resolve("@resvg/resvg-js/package.json", { paths: [REPO_ROOT, CLI_ROOT] });
+  } catch {
+    return undefined;
+  }
+  const scope = path.dirname(path.dirname(manifest));
+  const target = path.join(dir, "node_modules", "@resvg");
+  await rm(target, { recursive: true, force: true });
+  await mkdir(target, { recursive: true });
+  for (const name of await readdir(scope)) {
+    if (name !== "resvg-js" && !name.startsWith("resvg-js-")) continue;
+    await cp(path.join(scope, name), path.join(target, name), {
+      recursive: true,
+      dereference: true,
+    });
+  }
+  return target;
 }
 
 const invokedDirectly =
@@ -80,11 +118,16 @@ const invokedDirectly =
 
 if (invokedDirectly) {
   const { values } = parseArgs({
-    options: { outfile: { type: "string" }, "no-guides": { type: "boolean" } },
+    options: {
+      outfile: { type: "string" },
+      "no-guides": { type: "boolean" },
+      "no-rasterizer": { type: "boolean" },
+    },
   });
   const r = await bundleCli({
     ...(values.outfile ? { outfile: values.outfile } : {}),
     guides: !values["no-guides"],
+    rasterizer: !values["no-rasterizer"],
   });
   console.log(
     `Bundled sonobe CLI → ${path.relative(process.cwd(), r.outfile) || r.outfile} (${(r.bytes / 1024 / 1024).toFixed(1)} MB)${r.guidesDir ? ` with guides in ${path.relative(process.cwd(), r.guidesDir)}` : ""}.`,

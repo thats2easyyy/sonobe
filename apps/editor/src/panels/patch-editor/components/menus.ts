@@ -1,10 +1,11 @@
 /** Context menu entries for patches, cables, comments, layer targets, and the canvas. */
 
-import { getPatchSpec, type Id, type Registry, type SonobeDocument } from "@sonobe/core";
+import { getPatchSpec, VARIABLE_RECEIVER_TYPE, type Id, type Registry, type SonobeDocument } from "@sonobe/core";
 import type { MenuEntry } from "../../../ui/Menu.tsx";
 import { VALUE_TYPE_LABELS } from "../../../ui/PortGlyph.tsx";
 import { COMMENT_COLORS } from "../model/editOps.ts";
-import type { CableData, CommentNodeData, LayerNodeData, PatchNodeData } from "../model/types.ts";
+import { publishedKeyOf } from "../model/publish.ts";
+import type { CableData, CommentNodeData, GraphNodeData, LayerNodeData, PatchNodeData, PortModel } from "../model/types.ts";
 import type { PatchEditorActions } from "../state/actions.ts";
 
 export interface MenuContext {
@@ -63,15 +64,69 @@ export function patchMenu(ctx: MenuContext, data: PatchNodeData): MenuEntry[] {
   entries.push({ id: "comment", label: "Comment Selection", shortcut: "Ctrl+Alt+C", onSelect: () => actions.commentSelection() });
   entries.push({ id: "component", label: "Group into Component", shortcut: "Mod+Ctrl+G", onSelect: () => actions.groupIntoComponent() });
   if (!single) {
-    entries.push({ id: "alignLeft", label: "Align Left Edges", shortcut: "Mod+[", onSelect: () => actions.align("left") });
-    entries.push({ id: "alignTop", label: "Align Top Edges", shortcut: "Mod+]", onSelect: () => actions.align("top") });
+    entries.push({
+      id: "align",
+      label: "Align",
+      submenu: [
+        { id: "alignLeft", label: "Left Edges", shortcut: "Mod+[", onSelect: () => actions.align("left") },
+        { id: "alignRight", label: "Right Edges", shortcut: "Mod+]", onSelect: () => actions.align("right") },
+        { id: "alignTop", label: "Top Edges", shortcut: "Mod+Shift+[", onSelect: () => actions.align("top") },
+        { id: "alignBottom", label: "Bottom Edges", shortcut: "Mod+Shift+]", onSelect: () => actions.align("bottom") },
+      ],
+    });
     entries.push({ id: "tidy", label: "Tidy Up Selection", shortcut: "Ctrl+T", onSelect: () => void actions.tidyUp() });
   }
-  if (single && data.componentTarget) entries.push({ id: "enter", label: "Enter Component", shortcut: "Alt+Down", onSelect: () => actions.enterComponent(data.patchId) });
+  if (single && data.componentTarget) {
+    entries.push({ id: "enter", label: "Enter Component", shortcut: "Alt+Down", onSelect: () => actions.enterComponent(data.patchId) });
+    entries.push({ id: "componentInfo", label: "Component Info", description: "Name, notes, and published ports", onSelect: () => actions.openComponentInfo(data.patchId) });
+  }
+  if (single && data.type === VARIABLE_RECEIVER_TYPE) entries.push({ id: "jump", label: "Jump to Broadcaster", onSelect: () => actions.jumpToBroadcaster(data.patchId) });
   if (single && data.layerRef) entries.push({ id: "reveal", label: "Reveal Layer", onSelect: () => actions.revealLayer(data.layerRef!) });
   entries.push(sep("s3"));
   entries.push({ id: "delete", label: "Delete", shortcut: "Backspace", danger: true, onSelect: () => actions.deleteSelection() });
   return entries;
+}
+
+/**
+ * A port row's menu: publish it as a component input or output (or unpublish it), disconnect it, then
+ * the node's own entries. On a published input or output node: remove that published port.
+ */
+export function portMenu(ctx: MenuContext, data: GraphNodeData, port: PortModel): MenuEntry[] {
+  const { actions } = ctx;
+  if (data.kind === "comment") return [];
+  if (data.kind === "interface") {
+    const side = data.side === "inputs" ? "in" : "out";
+    return [
+      {
+        id: "unpublish",
+        label: side === "in" ? `Remove Published Input “${port.name}”` : `Remove Published Output “${port.name}”`,
+        description: side === "in" ? "Its patches keep their current values" : "Patches outside the component stop reading it",
+        danger: true,
+        onSelect: () => actions.unpublishPort(port.key, side),
+      },
+    ];
+  }
+  const component = ctx.doc.components[ctx.componentId];
+  const side = port.side;
+  const published = component ? publishedKeyOf(component, port.address, side) : undefined;
+  const entries: MenuEntry[] = [];
+  if (published !== undefined) {
+    entries.push({ id: "unpublish", label: side === "in" ? "Unpublish Input" : "Unpublish Output", shortcut: "Alt+P", onSelect: () => actions.unpublishPort(published, side) });
+  } else {
+    const inPrototype = component?.kind === "prototype";
+    const driven = side === "in" && port.connected;
+    entries.push({
+      id: "publish",
+      label: side === "in" ? "Publish as Component Input" : "Publish as Component Output",
+      shortcut: "Alt+P",
+      disabled: inPrototype || driven,
+      ...(inPrototype ? { description: "Ports publish from inside a component. Group patches into a component first." } : driven ? { description: "Disconnect this input first" } : {}),
+      onSelect: () => void actions.publishPort(port.address, side),
+    });
+  }
+  if (side === "in" && port.connected && published === undefined) entries.push({ id: "disconnect", label: "Disconnect", onSelect: () => actions.disconnect([port.address]) });
+  const rest = data.kind === "patch" ? patchMenu(ctx, data) : layerMenu(ctx, data);
+  return rest.length ? [...entries, sep("port-sep"), ...rest] : entries;
 }
 
 export function cableMenu(ctx: MenuContext, data: CableData): MenuEntry[] {

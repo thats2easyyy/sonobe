@@ -16,7 +16,7 @@ Level 2 · Next: [07 Loops](07-loops.md)
 | Press | Interaction's Down | True while a finger is on the layer | State |
 | Tap | Interaction's Tap | A pulse on release, if the finger moved less than 10 points | Pulse |
 | Long press | Long Press | True once the finger has stayed still for the duration | State |
-| Drag | Drag, or Interaction's Position and Velocity | Where the finger is and how fast it's moving | Numbers |
+| Drag | Drag, or Gesture | Where the layer should be (Drag) or how far the finger has moved (Gesture), and how fast it's moving | Numbers |
 | Scroll | Scroll | A content offset, with momentum and rubber banding | Numbers |
 | Swipe | Swipe | A quick directional flick | Pulse |
 | Hover | Hover | True while the pointer is over the layer (desktop only) | State |
@@ -61,9 +61,11 @@ Switch:      0 ────────────────1─────�
 
 ## Drag
 
-Interaction's Position tells you where the finger is, in prototype coordinates measured from the top-left of the screen. Its Velocity tells you how fast the finger is moving, in points per second, smoothed so a single jittery frame doesn't spike it. On the frame Tap fires, Position still holds the spot where the finger lifted.
+Interaction's Position tells you where the finger is, in prototype coordinates measured from the top-left of the screen. On the frame Tap fires, Position still holds the spot where the finger lifted.
 
-The Drag patch does the bookkeeping for moving a layer with a finger. It remembers where you grabbed the layer, so the layer doesn't jump to put its anchor under your finger.
+For speed, use Drag's or Gesture's Velocity, in points per second on each axis. Both keep the fling's speed on the frame the finger lifts, which is the frame a spring reads when it takes over.
+
+The Drag patch does the bookkeeping for moving a layer with a finger. It remembers where you grabbed the layer, so the layer doesn't jump to put its anchor under your finger. Gesture is the lower-level version. It reports how far the finger has moved since it landed (Translation) and how fast it's going (Velocity), and leaves the rest to you.
 
 ### Example: a picture-in-picture that snaps to a side
 
@@ -79,24 +81,35 @@ A PiP at x 150, flicked right at 600 points per second, projects to 150 + 300 = 
 
 The 0.5 comes from momentum, which the next section explains.
 
+A spring moves the PiP once the finger lifts, so this graph follows the finger with Gesture. Drag remembers where it last put the layer and doesn't see the spring move it, so the next grab would jump. Translation X and Velocity X are the X parts of Gesture's point outputs, split with a Point Unpack.
+
 ```
-Stage 1: pick a side from where the throw would land
+Stage 1: follow the finger from where the PiP was when it was grabbed
 
-  Interaction . Velocity X ─▶ Multiply × 0.5 ─┐
-  Drag X ─────────────────────────────────────┴─▶ Add ─▶ Greater Than 201 ─▶ Option Picker (76, 326) ─▶ snap X
+  Spring Animation ─▶ Delay One Frame ─▶ Sample and Hold . Value      where the PiP was last frame
+  Gesture . Down ─▶ Not ─▶ Sample and Hold . Sample                  copy until a finger lands, then hold
+  Sample and Hold ────────┐
+  Gesture . Translation X ┴─▶ Add ─▶ finger X
 
-Stage 2: follow the finger while it's down, head for the side once it lifts
+Stage 2: pick a side from where the throw would land
 
-  Interaction . Down ─────▶ Option Picker (snap X, Drag X) ─▶ Spring Animation . Number
-  Interaction . Down ─────────────────────────────────────▶ Spring Animation . Gesture Active
-  Interaction . Velocity X ───────────────────────────────▶ Spring Animation . Gesture Velocity
+  Gesture . Velocity X ─▶ Multiply × 0.5 ─┐
+  Delay One Frame ────────────────────────┴─▶ Add ─▶ Greater Than 201 ─▶ Option Picker (76, 326) ─▶ snap X
+
+Stage 3: follow the finger while it's down, head for the side once it lifts
+
+  Gesture . Down ───────▶ Option Picker (snap X, finger X) ─▶ Spring Animation . Number
+  Gesture . Down ───────────────────────────────────────────▶ Spring Animation . Gesture Active
+  Gesture . Velocity X ─────────────────────────────────────▶ Spring Animation . Gesture Velocity
 
   Spring Animation ─▶ PiP . Position X
 ```
 
-A boolean picks an Option Picker value by index: false picks the first value and true picks the second. So Greater Than chooses between 76 and 326, and Down chooses between the snap target and the finger's position.
+A boolean picks an Option Picker value by index: false picks the first value and true picks the second. So Greater Than chooses between 76 and 326, and Down chooses between the snap target and the finger.
 
-While you drag, Gesture Active is on and the spring follows the finger. When you let go, the spring heads for the snap target, starting at the finger's speed. Guide 05 explains why that matters.
+The projection starts from where the PiP was on the previous frame, not from finger X. On the frame the finger lifts, Sample and Hold starts copying again while Gesture still reports the drag, so finger X would count the drag twice.
+
+While you drag, Gesture Active is on and the spring follows the finger. When you let go, the spring heads for the snap target, starting at the finger's speed. Guide 05 explains why that matters. The Drag and Snap recipe in `examples/09-drag-and-snap` builds the same graph in two dimensions.
 
 ## Scroll, momentum and rubber banding
 

@@ -2,6 +2,7 @@ import type { EngineRegistry } from "@sonobe/engine";
 import { createMockRegistry } from "@sonobe/engine/testing";
 import { createPatchRegistry } from "@sonobe/patches";
 import { afterEach, describe, expect, it } from "vitest";
+import { createSimulationManager } from "./sim.ts";
 import {
   buildGrowCard,
   connectClient,
@@ -149,6 +150,40 @@ describe.skipIf(missing.length > 0)(`simulation with real patches (${ISAT.join("
   });
 });
 
+describe("simulation settling with feedback loops", () => {
+  // The documented Delay One Frame example: each frame adds 3 degrees to last frame's angle.
+  const SPINNER = [
+    { op: "addLayer", layer: { ref: "spinner", type: "rectangle", name: "Spinner", props: { position: [181, 420], size: [40, 40] } } },
+    { op: "addPatch", patch: { ref: "spin", type: "add", name: "Spin", inputs: { value2: 3 } } },
+    { op: "addPatch", patch: { ref: "last", type: "delay1", name: "Last Angle" } },
+    { op: "connect", from: "$spin.output", to: "$last.value" },
+    { op: "connect", from: "$last.output", to: "$spin.value1" },
+    { op: "connect", from: "$spin.output", to: "@$spinner.rotation" },
+  ];
+
+  it("reports a spinning feedback loop as still animating in previews and sim_step", async () => {
+    project = await tempProject();
+    client = await connectClient(project.host);
+    const built = await client.call("apply_ops", { ops: SPINNER });
+    expect(built.isError, built.text).toBe(false);
+    const { doc } = await project.host.getDocument();
+    const sim = createSimulationManager({ registry: realRegistry, getDocument: () => ({ docId: "doc", doc, revision: 1 }) });
+    try {
+      expect(sim.previewScene("doc", { maxMs: 200 }).settled).toBe(false);
+      expect(sim.previewScene("doc", { atMs: 100 }).settled).toBe(false);
+    } finally {
+      sim.dispose();
+    }
+    const reset = await client.call("sim_reset", {});
+    const simId = reset.structured.simId as string;
+    const step = await client.call("sim_step", { simId, frames: 10 });
+    expect(step.isError, step.text).toBe(false);
+    expect(step.structured.settled).toBe(false);
+    const values = await client.call("sim_get_values", { simId, targets: ["@spinner.rotation"] });
+    expect((values.structured.values as Record<string, number>)["@spinner.rotation"]).toBe(33);
+  });
+});
+
 describe("simulation with mock patches", () => {
   it("runs independent sessions by simId", async () => {
     const { c, simId } = await setup(createMockRegistry());
@@ -169,6 +204,21 @@ describe("simulation with mock patches", () => {
     expect(info.text).toContain(`Simulations: ${simId}`);
   });
 
+  it("refuses traces on a copy once a simulation has run past its replay budget", { timeout: 120_000 }, async () => {
+    const { c, simId } = await setup(createMockRegistry());
+    await c.call("sim_dispatch", { simId, events: [{ kind: "tap", target: "@card" }] });
+    for (let i = 0; i < 3; i++) {
+      const stepped = await c.call("sim_step", { simId, frames: 7200 });
+      expect(stepped.isError, stepped.text).toBe(false);
+    }
+    const copy = await c.call("sim_trace", { simId, targets: ["card_grown.on"], durationMs: 100 });
+    expect(copy.isError).toBe(true);
+    expect(copy.text).toContain("run too long to copy");
+    const moving = await c.call("sim_trace", { simId, targets: ["card_grown.on"], durationMs: 100, advance: true });
+    expect(moving.isError, moving.text).toBe(false);
+    expect((moving.structured.values as Record<string, unknown[]>)["card_grown.on"]!.every((v) => v === true)).toBe(true);
+  });
+
   it("never changes the document", async () => {
     const { c, simId } = await setup(createMockRegistry());
     const before = (await c.call("get_document_info", {})).structured.revision;
@@ -183,11 +233,11 @@ describe("simulation with mock patches", () => {
     expect((await c.call("get_document_info", {})).structured.revision).toBe(before);
   });
 
-  it("explains that screenshots need the app", async () => {
-    const { c } = await setup(createMockRegistry());
-    const shot = await c.call("get_screenshot", {});
-    expect(shot.isError).toBe(true);
-    expect(shot.structured.error).toMatchObject({ code: "screenshots_unavailable" });
-    expect(shot.text).toContain("Open the project in the Sonobe app for screenshots");
+  it("draws simulation screenshots headlessly", async () => {
+    const { c, simId } = await setup(createMockRegistry());
+    const shot = await c.call("get_screenshot", { simId, target: "@card" });
+    expect(shot.isError, shot.text).toBe(false);
+    expect(shot.content[0]).toMatchObject({ type: "image", mimeType: "image/png" });
+    expect(shot.text).toContain(`@card · 358×220 · 0 ms · ${simId}`);
   });
 });

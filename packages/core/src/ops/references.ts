@@ -5,6 +5,7 @@
  */
 
 import { parseAddress } from "../address.ts";
+import { getOwn } from "../ids.ts";
 import { walkLayers } from "../registry.ts";
 import type { Component, Id, InputValue, LayerNode, NewLayer, NewPatch, Op, PatchNode } from "../types.ts";
 import { isLayerInput, isLinkInput } from "../values.ts";
@@ -46,19 +47,21 @@ export function listInputs(component: Component): InputEntry[] {
 
 export function readInput(component: Component, target: InputTarget): InputValue | undefined {
   switch (target.kind) {
-    case "patch":
-      return component.patches[target.id]?.inputs[target.key];
+    case "patch": {
+      const node = getOwn(component.patches, target.id);
+      return node ? getOwn(node.inputs, target.key) : undefined;
+    }
     case "layer": {
       let found: InputValue | undefined;
       walkLayers(component.layers, (l) => {
         if (l.id !== target.id) return;
-        found = l.props[target.key];
+        found = getOwn(l.props, target.key);
         return "stop";
       });
       return found;
     }
     case "componentOutput": {
-      const link = component.interface.outputs[target.key]?.link;
+      const link = getOwn(component.interface.outputs, target.key)?.link;
       return link === undefined ? undefined : { link };
     }
   }
@@ -68,7 +71,7 @@ export function readInput(component: Component, target: InputTarget): InputValue
 export function writeInput(component: Component, target: InputTarget, value: InputValue | undefined): Component {
   switch (target.kind) {
     case "patch": {
-      const node = component.patches[target.id];
+      const node = getOwn(component.patches, target.id);
       if (!node) return component;
       const inputs = { ...node.inputs };
       if (value === undefined) delete inputs[target.key];
@@ -85,7 +88,7 @@ export function writeInput(component: Component, target: InputTarget, value: Inp
       return layers === component.layers ? component : { ...component, layers };
     }
     case "componentOutput": {
-      const port = component.interface.outputs[target.key];
+      const port = getOwn(component.interface.outputs, target.key);
       if (!port) return component;
       const next = { ...port };
       if (value === undefined || !isLinkInput(value)) delete next.link;
