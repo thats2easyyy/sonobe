@@ -4,14 +4,11 @@
  * runtimes without variable support), where nothing resolves, so it outputs the type's zero value.
  */
 
-import type { RuntimePatchDefinition } from "@sonobe/engine";
 import { definePatch, zeroValue } from "../infra/index.ts";
 
-export const variableReceiver: RuntimePatchDefinition = {
-  ...definePatch("variableReceiver", {
-    evaluate(ctx) {
-      ctx.output("output", zeroValue(ctx.typeParam ?? "number"));
-    },
-  }),
+export const variableReceiver = definePatch("variableReceiver", {
   mutedBehavior: "zero",
-};
+  evaluate(ctx) {
+    ctx.output("output", zeroValue(ctx.typeParam ?? "number"));
+  },
+});

@@ -6,8 +6,7 @@
 
 import type { DeviceInfo, PatchContext, RuntimeServices } from "@sonobe/engine";
 import { definePatch, toBool, toText, warnOnce } from "../infra/index.ts";
-import { orientationAngleOf } from "./platform.ts";
-import { findPreset, normalizeDegrees, withMutedBehavior } from "./shared.ts";
+import { findPreset, normalizeDegrees, orientationAngleOf, restartGeneration } from "./shared.ts";
 
 export type InterfaceOrientation = "portrait" | "landscapeLeft" | "landscapeRight" | "upsideDown";
 
@@ -15,7 +14,7 @@ const ORIENTATIONS: readonly InterfaceOrientation[] = ["portrait", "landscapeLef
 
 const isOrientation = (value: string): value is InterfaceOrientation => (ORIENTATIONS as readonly string[]).includes(value);
 
-/** The device's rotation: the proposed angle (0, 90, 180, 270) when present, else landscape → landscapeLeft. */
+/** The device's rotation: the host's angle (0, 90, 180, 270) when it reports one, else landscape → landscapeLeft. */
 export function deviceOrientation(device: DeviceInfo): InterfaceOrientation {
   const angle = orientationAngleOf(device);
   if (angle !== undefined) {
@@ -39,6 +38,7 @@ interface OrientationState {
 
 interface Census {
   frame: number;
+  restartCount: number | undefined;
   current: Set<string>;
   previous: Set<string>;
 }
@@ -53,7 +53,8 @@ function noteController(ctx: PatchContext): void {
     return;
   }
   let census = censuses.get(ctx.services);
-  if (!census || ctx.frame < census.frame) censuses.set(ctx.services, (census = { frame: ctx.frame, current: new Set(), previous: new Set() }));
+  const restartCount = restartGeneration(ctx.services);
+  if (!census || census.restartCount !== restartCount || ctx.frame < census.frame) censuses.set(ctx.services, (census = { frame: ctx.frame, restartCount, current: new Set(), previous: new Set() }));
   if (ctx.frame !== census.frame) census = Object.assign(census, { frame: ctx.frame, previous: census.current, current: new Set<string>() });
   census.current.add(ctx.id);
   for (const set of [census.current, census.previous]) {
@@ -66,28 +67,26 @@ function noteController(ctx: PatchContext): void {
   }
 }
 
-export const interfaceOrientationPatch = withMutedBehavior(
-  definePatch<OrientationState>("interfaceOrientation", {
-    state: () => ({ current: "portrait", lastDevice: null }),
-    evaluate(ctx) {
-      const s = ctx.state;
-      const d = ctx.services.device();
-      const device = deviceOrientation(d);
-      const allowed = (o: InterfaceOrientation) => toBool(ctx.input(o)) && deviceSupports(d, o);
-      if (s.lastDevice === null) {
-        const startIn = toText(ctx.input("startIn"));
-        let start: InterfaceOrientation = "portrait";
-        if (isOrientation(startIn)) start = startIn;
-        else warnOnce(ctx, "unknownStart", `Interface Orientation: "${startIn}" isn't an orientation, so it starts in portrait.`);
-        s.current = deviceSupports(d, start) ? start : "portrait";
-      } else if ((device !== s.lastDevice || ctx.changed(device)) && device !== s.current && allowed(device)) {
-        s.current = device;
-      }
-      s.lastDevice = device;
-      noteController(ctx);
-      ctx.output("orientation", s.current);
-      ctx.output("landscape", s.current === "landscapeLeft" || s.current === "landscapeRight");
-    },
-  }),
-  "zero",
-);
+export const interfaceOrientationPatch = definePatch<OrientationState>("interfaceOrientation", {
+  mutedBehavior: "zero",
+  state: () => ({ current: "portrait", lastDevice: null }),
+  evaluate(ctx) {
+    const s = ctx.state;
+    const d = ctx.services.device();
+    const device = deviceOrientation(d);
+    const allowed = (o: InterfaceOrientation) => toBool(ctx.input(o)) && deviceSupports(d, o);
+    if (s.lastDevice === null) {
+      const startIn = toText(ctx.input("startIn"));
+      let start: InterfaceOrientation = "portrait";
+      if (isOrientation(startIn)) start = startIn;
+      else warnOnce(ctx, "unknownStart", `Interface Orientation: "${startIn}" isn't an orientation, so it starts in portrait.`);
+      s.current = deviceSupports(d, start) ? start : "portrait";
+    } else if ((device !== s.lastDevice || ctx.changed(device)) && device !== s.current && allowed(device)) {
+      s.current = device;
+    }
+    s.lastDevice = device;
+    noteController(ctx);
+    ctx.output("orientation", s.current);
+    ctx.output("landscape", s.current === "landscapeLeft" || s.current === "landscapeRight");
+  },
+});

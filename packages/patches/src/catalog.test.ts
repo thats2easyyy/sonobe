@@ -89,7 +89,7 @@ const OPTIONAL_FIELDS = [
   "statusReason", "platforms", "variadic", "variants", "variantDefaults", "settings", "dynamicPortsRule",
   "shortcut", "importAliases", "origamiPorts", "defaultNotes",
 ];
-const PORT_FIELDS = ["key", "name", "type", "subtype", "default", "min", "max", "step", "enumOptions", "description", "wholeLoop", "advanced"];
+const PORT_FIELDS = ["key", "name", "type", "subtype", "default", "min", "max", "step", "enumOptions", "description", "wholeLoop", "advanced", "acceptsPulse"];
 const VARIADIC_FIELDS = ["key", "name", "type", "default", "min", "max", "defaultCount", "startIndex", "direction", "description"];
 
 // ---------------------------------------------------------------------------

@@ -26,6 +26,25 @@ export function success(text: string, structured?: Record<string, unknown>): Cal
   return result;
 }
 
+/**
+ * Put the complete teaching text into structuredContent as its first field, `text`. Some clients
+ * (Claude Code) give the model only structuredContent when a result has it, so metadata alone
+ * would hide the outline, guide or trace the text carries. Results without structuredContent
+ * (images, plain text) pass through unchanged.
+ */
+export function withCompleteText(result: CallToolResult): CallToolResult {
+  const structured = result.structuredContent;
+  if (structured === undefined || structured === null || typeof structured !== "object")
+    return result;
+  const text = (result.content ?? [])
+    .map((c) => (c.type === "text" ? c.text : ""))
+    .filter(Boolean)
+    .join("\n");
+  if (!text) return result;
+  const { text: _previous, ...rest } = structured as Record<string, unknown>;
+  return { ...result, structuredContent: { text, ...rest } };
+}
+
 /** Suggestions as numbered lines with compact ops JSON. */
 export function formatSuggestions(
   suggestions: readonly Suggestion[] | undefined,

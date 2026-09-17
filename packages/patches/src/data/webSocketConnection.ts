@@ -1,8 +1,8 @@
 /** WebSocket Connection: keeps a WebSocket open while Connect is on and relays its messages. */
 
-import type { PatchContext, RuntimePatchDefinition } from "@sonobe/engine";
+import type { PatchContext } from "@sonobe/engine";
 import { MAX_LOOP_LENGTH, definePatch, isPlainObject, toBool, toText, warnOnce } from "../infra/index.ts";
-import { errorText, withMutedBehavior } from "./shared.ts";
+import { errorText } from "./shared.ts";
 import {
   connectionRecords,
   createConnectionRecord,
@@ -146,90 +146,88 @@ function drain(ctx: PatchContext, s: WebSocketConnectionState, record: Connectio
   }
 }
 
-export const webSocketConnection: RuntimePatchDefinition<WebSocketConnectionState> = withMutedBehavior(
-  definePatch<WebSocketConnectionState>("webSocketConnection", {
-    state: () => ({
-      socket: null,
-      phase: "idle",
-      target: null,
-      error: false,
-      errorMessage: "",
-      events: [],
-      generation: 0,
-      previousConnect: false,
-      key: "",
-      handle: null,
-    }),
-    evaluate(ctx) {
-      const s = ctx.state;
-      const key = `${ctx.componentPath}/${ctx.id}`;
-      if (!s.handle || s.key !== key) {
-        s.key = key;
-        s.handle = Object.freeze({ kind: "webSocket" as const, key });
-      }
-      const records = connectionRecords(ctx.services);
-      let record = records.get(key);
-      if (!record) records.set(key, (record = createConnectionRecord()));
-
-      if (ctx.node.muted) {
-        closeSocket(s);
-        s.previousConnect = false;
-        record.socket = null;
-        record.phase = "idle";
-        record.messages = [];
-        ctx.output("connection", null);
-        ctx.output("connected", false);
-        ctx.output("connecting", false);
-        ctx.output("error", false);
-        ctx.output("errorMessage", "");
-        return;
-      }
-
-      const connectItems = ctx.inputItems("connect");
-      const urlItems = ctx.inputItems("url");
-      const headerItems = ctx.inputItems("headers");
-      if (connectItems.length > 1 || urlItems.length > 1 || headerItems.length > 1) {
-        warnOnce(ctx, "loop", "WebSocket Connection can't be looped; using the first item.");
-      }
-      const connect = toBool(connectItems[0] ?? false);
-      const url = toText(urlItems[0] ?? "").trim();
-      const headers = headerItems.length > 0 ? headerItems[0] : {};
-
-      record.messages = [];
-      record.frame = ctx.frame;
-      drain(ctx, s, record);
-      if (record.sendError !== null) {
-        s.error = true;
-        s.errorMessage = record.sendError;
-        record.sendError = null;
-      } else if (record.sendOk && s.phase === "open" && s.error) {
-        s.error = false;
-        s.errorMessage = "";
-      }
-      record.sendOk = false;
-
-      const rose = connect && !s.previousConnect;
-      s.previousConnect = connect;
-      const next: Target = { url, headersKey: stableStringify(headers) };
-      if (!connect || url === "") closeSocket(s);
-      else if (s.phase === "idle" || rose || !s.target || s.target.url !== next.url || s.target.headersKey !== next.headersKey) {
-        closeSocket(s);
-        openSocket(ctx, s, next, headers);
-      }
-      record.socket = s.socket;
-      record.phase = s.phase;
-
-      ctx.output("connection", s.handle as never);
-      ctx.output("connected", s.phase === "open");
-      ctx.output("connecting", s.phase === "connecting");
-      ctx.output("error", s.error);
-      ctx.output("errorMessage", s.errorMessage);
-      if (s.phase === "connecting" || s.phase === "open") ctx.requestNextFrame();
-    },
-    dispose(state, services) {
-      closeSocket(state);
-      if (state.key) connectionRecords(services).delete(state.key);
-    },
+export const webSocketConnection = definePatch<WebSocketConnectionState>("webSocketConnection", {
+  mutedBehavior: "evaluate",
+  state: () => ({
+    socket: null,
+    phase: "idle",
+    target: null,
+    error: false,
+    errorMessage: "",
+    events: [],
+    generation: 0,
+    previousConnect: false,
+    key: "",
+    handle: null,
   }),
-  "evaluate",
-);
+  evaluate(ctx) {
+    const s = ctx.state;
+    const key = `${ctx.componentPath}/${ctx.id}`;
+    if (!s.handle || s.key !== key) {
+      s.key = key;
+      s.handle = Object.freeze({ kind: "webSocket" as const, key });
+    }
+    const records = connectionRecords(ctx.services);
+    let record = records.get(key);
+    if (!record) records.set(key, (record = createConnectionRecord()));
+
+    if (ctx.muted) {
+      closeSocket(s);
+      s.previousConnect = false;
+      record.socket = null;
+      record.phase = "idle";
+      record.messages = [];
+      ctx.output("connection", null);
+      ctx.output("connected", false);
+      ctx.output("connecting", false);
+      ctx.output("error", false);
+      ctx.output("errorMessage", "");
+      return;
+    }
+
+    const connectItems = ctx.inputItems("connect");
+    const urlItems = ctx.inputItems("url");
+    const headerItems = ctx.inputItems("headers");
+    if (connectItems.length > 1 || urlItems.length > 1 || headerItems.length > 1) {
+      warnOnce(ctx, "loop", "WebSocket Connection can't be looped; using the first item.");
+    }
+    const connect = toBool(connectItems[0] ?? false);
+    const url = toText(urlItems[0] ?? "").trim();
+    const headers = headerItems.length > 0 ? headerItems[0] : {};
+
+    record.messages = [];
+    record.frame = ctx.frame;
+    drain(ctx, s, record);
+    if (record.sendError !== null) {
+      s.error = true;
+      s.errorMessage = record.sendError;
+      record.sendError = null;
+    } else if (record.sendOk && s.phase === "open" && s.error) {
+      s.error = false;
+      s.errorMessage = "";
+    }
+    record.sendOk = false;
+
+    const rose = connect && !s.previousConnect;
+    s.previousConnect = connect;
+    const next: Target = { url, headersKey: stableStringify(headers) };
+    if (!connect || url === "") closeSocket(s);
+    else if (s.phase === "idle" || rose || !s.target || s.target.url !== next.url || s.target.headersKey !== next.headersKey) {
+      closeSocket(s);
+      openSocket(ctx, s, next, headers);
+    }
+    record.socket = s.socket;
+    record.phase = s.phase;
+
+    ctx.output("connection", s.handle as never);
+    ctx.output("connected", s.phase === "open");
+    ctx.output("connecting", s.phase === "connecting");
+    ctx.output("error", s.error);
+    ctx.output("errorMessage", s.errorMessage);
+    if (s.phase === "connecting" || s.phase === "open") ctx.requestNextFrame();
+  },
+  dispose(state, services) {
+    closeSocket(state);
+    if (state.key) connectionRecords(services).delete(state.key);
+  },
+});

@@ -1,24 +1,16 @@
 /**
- * The shared WebSocket plumbing: the structural platform socket (PlatformServices has no
- * WebSocket member yet, CONVENTIONS.md §19.7), per-runtime connection records that Connection
- * fills and Send and Receive read, and the connection handle that travels on `any` ports.
+ * The shared WebSocket plumbing: the host's socket factory (`platform.webSocket`), per-runtime
+ * connection records that Connection fills and Send and Receive read, and the connection handle
+ * that travels on "connection" ports.
  */
 
-import type { RuntimeServices } from "@sonobe/engine";
+import type { PlatformServices, PlatformWebSocket, RuntimeServices } from "@sonobe/engine";
 import { isPlainObject } from "../infra/index.ts";
 
-/** A socket as a host provides it through `platform.webSocket`. */
-export interface PlatformWebSocket {
-  send(text: string): void;
-  close(code?: number, reason?: string): void;
-  readonly bufferedAmount?: number;
-  onopen?: (() => void) | null;
-  onmessage?: ((text: string) => void) | null;
-  onclose?: ((code: number, reason?: string) => void) | null;
-  onerror?: ((message?: string) => void) | null;
-}
+export type { PlatformWebSocket } from "@sonobe/engine";
 
-export type PlatformWebSocketFactory = (url: string, options: { protocols: string[]; headers: Record<string, string> }) => PlatformWebSocket;
+/** The host's socket factory: `platform.webSocket(url, { protocols, headers })`. */
+export type PlatformWebSocketFactory = NonNullable<PlatformServices["webSocket"]>;
 
 export type ConnectionPhase = "idle" | "connecting" | "open" | "ended";
 
@@ -38,6 +30,7 @@ export interface ConnectionRecord {
   sendOk: boolean;
 }
 
+/** The opaque value on a Connection output: which connection record to use. */
 export interface ConnectionHandle {
   readonly kind: "webSocket";
   readonly key: string;
@@ -67,8 +60,8 @@ export function lookupRecord(services: RuntimeServices, handle: unknown): Connec
 
 /** The host's socket factory, when it has one. */
 export function webSocketFactory(services: RuntimeServices): PlatformWebSocketFactory | undefined {
-  const factory = (services.platform as { webSocket?: unknown }).webSocket;
-  return typeof factory === "function" ? (factory as PlatformWebSocketFactory) : undefined;
+  const factory = services.platform.webSocket;
+  return typeof factory === "function" ? factory : undefined;
 }
 
 /** JSON text with object keys sorted, for comparing header sets. */

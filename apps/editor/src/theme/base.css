@@ -77,6 +77,30 @@ h3 {
   transition: none !important;
 }
 
+/*
+ * Reduced motion (Settings → Motion, or the OS setting while it's "System"): interface animation
+ * becomes instant. Prototypes in the viewer are drawn by the runtime and keep animating.
+ */
+:root[data-motion="reduce"] *,
+:root[data-motion="reduce"] *::before,
+:root[data-motion="reduce"] *::after {
+  animation-duration: 0.01ms !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 0.01ms !important;
+  scroll-behavior: auto !important;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root:not([data-motion="full"]) *,
+  :root:not([data-motion="full"]) *::before,
+  :root:not([data-motion="full"]) *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
 /* App chrome behaves like a native app: no accidental text selection. */
 .sb-app {
   user-select: none;

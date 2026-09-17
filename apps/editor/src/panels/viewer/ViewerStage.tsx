@@ -18,7 +18,8 @@ import { EmptyState } from "../../ui/EmptyState.tsx";
 import { cx } from "../../ui/lib/cx.ts";
 import { useLatest } from "../../ui/lib/hooks.ts";
 import { useElementSize } from "../../ui/lib/useElementSize.ts";
-import { fitScale, interactiveLayerIds, nodesForLayers, outlinePoints, presetForDevice, sceneKeysForLayers, type HighlightScope, type ViewerZoom } from "./viewerModel.ts";
+import { registerBoundsProvider } from "./hostBridge.ts";
+import { fitScale, interactiveLayerIds, layerScreenRect, nodesForLayers, outlinePoints, presetForDevice, sceneKeysForLayers, type HighlightScope, type ViewerZoom } from "./viewerModel.ts";
 import "./viewer.css";
 
 export interface ViewerStageProps {
@@ -160,6 +161,24 @@ export function ViewerStage({ session, showFrame, zoom, showHitTargets, primary 
   useEffect(() => {
     onScale.current?.(scale);
   }, [scale, onScale]);
+
+  // Screenshots of one layer (MCP get_screenshot): the union of the layer's visible copies on screen,
+  // from the live scene. Scene keys, and layers this stage can't find, go to the viewer's own measure.
+  useEffect(() => {
+    if (!primary) return;
+    const registration = registerBoundsProvider(session, "viewer.layerBounds", (params) => {
+      const p = (params && typeof params === "object" ? params : {}) as { layerId?: unknown; id?: unknown; key?: unknown };
+      const viewer = viewerRef.current;
+      if (!viewer) return null;
+      const key = typeof p.key === "string" ? p.key : null;
+      const layerId = typeof params === "string" ? params : typeof p.layerId === "string" ? p.layerId : typeof p.id === "string" ? p.id : null;
+      const measureElement = () => (typeof viewer.layerBounds === "function" && (key || layerId) ? viewer.layerBounds({ ...(layerId ? { layerId } : {}), ...(key ? { key } : {}) }) : null);
+      if (key || !layerId) return measureElement();
+      const r = viewer.renderer.stage.getBoundingClientRect();
+      return layerScreenRect(session.runtime.scene(), layerId, { x: r.left, y: r.top, width: r.width, height: r.height }) ?? measureElement();
+    });
+    return registration.dispose;
+  }, [session, primary]);
 
   // Outline hovered and selected layers of the component being edited.
   useEffect(() => {

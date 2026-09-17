@@ -27,6 +27,13 @@ describe("definePatch", () => {
     expect(def.dynamicPorts).toBe(dynamicPorts);
   });
 
+  it("carries muted behavior, and leaves it unset for the default bypass", () => {
+    expect(definePatch("switch", { evaluate() {}, mutedBehavior: "zero" }).mutedBehavior).toBe("zero");
+    expect(definePatch("switch", { evaluate() {}, mutedBehavior: "evaluate" }).mutedBehavior).toBe("evaluate");
+    expect(definePatch("switch", { evaluate() {} })).not.toHaveProperty("mutedBehavior");
+    expect(() => definePatch("switch", { evaluate() {}, mutedBehavior: "mute" as never })).toThrow(/mutedBehavior must be/);
+  });
+
   it("throws with a suggestion for unknown types", () => {
     expect(() => definePatch("swtich", { evaluate() {} })).toThrow(/"swtich" isn't a catalog patch type\. Did you mean "switch"/);
     expect(() => definePatch("constructor", { evaluate() {} })).toThrow(/isn't a catalog patch type/);

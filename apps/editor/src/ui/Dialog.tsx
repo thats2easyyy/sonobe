@@ -5,6 +5,7 @@ import { cx } from "./lib/cx.ts";
 import { getFocusable, trapFocus } from "./lib/focus.ts";
 import { useLatest } from "./lib/hooks.ts";
 import { useDismissableLayer } from "./lib/layerStack.ts";
+import "./Surface.css";
 import "./Dialog.css";
 
 export interface DialogProps {

@@ -11,12 +11,14 @@ import {
   type Id,
   type InputValue,
   type Op,
+  type PatchNode,
   type ValueType,
 } from "@sonobe/core";
 import type { PatchRegistry } from "@sonobe/patches";
 import type { ReactFlowInstance } from "@xyflow/react";
 import { createComponentFromSelection, duplicateSelection, exitComponent as exitComponentAction } from "../../../state/editActions.ts";
 import type { EditorSession } from "../../../state/session.ts";
+import type { Placement } from "../../../ui/lib/position.ts";
 import { toast } from "../../../ui/Toast.tsx";
 import { VALUE_TYPE_LABELS } from "../../../ui/PortGlyph.tsx";
 import { checkConnection, placeSuggestion, portTypeAt } from "../model/connect.ts";
@@ -35,17 +37,21 @@ import {
   type InsertOptions,
 } from "../model/editOps.ts";
 import { estimateNodeSize, HEADER_HEIGHT, ROW_HEIGHT, type Rect } from "../model/geometry.ts";
+import { instanceChoiceKey } from "../model/instances.ts";
+import { nodePositionsMetaOp } from "../model/meta.ts";
+import { documentObstacles, estimatePatchSize, findFreePosition, type PlacementBias, type PlacementObstacles } from "../model/placement.ts";
 import { tidyLayout, type TidyGroupInput, type TidyNodeInput } from "../model/tidy.ts";
 import {
   commentIdOfNode,
   commentNodeId,
   flowNodeKind,
+  INPUTS_NODE_ID,
   layerIdOfNode,
   type CableFlowEdge,
   type FlowNode,
   type GraphNodeData,
 } from "../model/types.ts";
-import type { SessionPositionsStore } from "./sessionPositions.ts";
+import { patchEditorBridge } from "./bridge.ts";
 import type { UiStore } from "./uiStore.ts";
 
 export type XY = { x: number; y: number };
@@ -66,6 +72,19 @@ export interface LinkSearchRequest {
   address: string;
   type: ValueType;
   patchType?: string;
+  /** Only this layer's properties (a cable dropped on a layer node or a layer row). */
+  layer?: Id;
+  /** Choosing what drives a layer property: outputs in the graph first, then patches. */
+  drive?: boolean;
+  /** A picked-up cable end being moved off this input. */
+  reroute?: string;
+  /** The node the cable came from (left out of "in this graph"). */
+  sourceNode?: string;
+  /** Name of the property being driven ("Scale"), for the placeholder. */
+  targetName?: string;
+  /** No cable: choose a property of `layer` to drive. */
+  chooseProperty?: boolean;
+  placement?: Placement;
 }
 
 export interface ActionDeps {
@@ -73,7 +92,6 @@ export interface ActionDeps {
   registry: PatchRegistry;
   componentId: Id;
   ui: UiStore;
-  positions: SessionPositionsStore;
   flow: () => ReactFlowInstance<FlowNode, CableFlowEdge> | null;
   /** Last pointer position over the canvas in flow coordinates. */
   pointer: () => XY | null;
@@ -81,9 +99,16 @@ export interface ActionDeps {
   openInfo: (patchId: Id) => void;
 }
 
+export interface InsertPatchOptions extends InsertOptions {
+  /** Connect the new patch to a port ("out": the address drives the new patch's `portKey`). */
+  connect?: { address: string; side: "in" | "out"; portKey: string };
+  /** "exact" uses the position as given; otherwise the nearest free spot, looking to that side first. Default "any". */
+  placement?: "exact" | PlacementBias;
+}
+
 export interface PatchEditorActions {
   apply(ops: readonly Op[], label: string, options?: { coalesceKey?: string; quiet?: boolean }): ApplyOpsResult;
-  insertPatch(type: string, position: XY, options?: InsertOptions & { connect?: { address: string; side: "in" | "out"; portKey: string } }): Id | undefined;
+  insertPatch(type: string, position: XY, options?: InsertPatchOptions): Id | undefined;
   insertAtPointer(type: string): void;
   connect(from: string, to: string): boolean;
   reroute(from: string, oldTo: string, newTo: string): void;
@@ -101,7 +126,8 @@ export interface PatchEditorActions {
   deleteSelection(): void;
   selectAll(): void;
   moveNodes(positions: ReadonlyMap<string, XY>, label?: string, coalesceKey?: string): void;
-  moveAndSplice(patchId: Id, position: XY, cable: { from: string; to: string }): void;
+  /** Move a patch and splice it into a cable, through the chosen ports (default: the best fit). */
+  moveAndSplice(patchId: Id, position: XY, cable: { from: string; to: string }, choice?: { inputKey: string; outputKey: string }): void;
   cutCables(edgeIds: readonly string[]): void;
   align(mode: AlignMode): void;
   tidyUp(): Promise<void>;
@@ -111,6 +137,10 @@ export interface PatchEditorActions {
   enterComponent(patchId: Id): boolean;
   exitComponent(): boolean;
   revealLayer(layerId: Id): void;
+  /** Show a layer property on its node and open the picker to choose what drives it. */
+  driveLayerProp(layerId: Id, prop: string): void;
+  /** Hide undriven property targets (of one layer, or all). */
+  removeLayerTargets(layerId?: Id): void;
   selectedPatchIds(): Id[];
   openPicker(request?: PickerRequest): void;
   openInfo(patchId: Id): void;
@@ -126,12 +156,31 @@ export function createPatchEditorActions(deps: ActionDeps): PatchEditorActions {
   const doc = () => docState().doc;
   const component = () => doc().components[componentId];
   const selection = () => session.selection.getState();
+  const bridge = () => patchEditorBridge(session).getState();
 
   const nodeRect = (node: FlowNode): Rect => {
     const size = node.measured?.width && node.measured.height ? { width: node.measured.width, height: node.measured.height } : estimateNodeSize(node.data as GraphNodeData);
     return { x: node.position.x, y: node.position.y, ...size };
   };
   const flowNodes = () => deps.flow()?.getNodes() ?? [];
+
+  /** What new patches must not overlap: rendered nodes (measured) and comment frames. */
+  const obstacles = (): PlacementObstacles => {
+    const nodes = flowNodes();
+    if (nodes.length === 0) {
+      const c = component();
+      return c ? documentObstacles(doc(), c, registry) : { nodes: [] };
+    }
+    return {
+      nodes: nodes.filter((n) => n.type !== "comment").map(nodeRect),
+      comments: nodes.filter((n) => n.type === "comment").map((n) => ({ x: n.position.x, y: n.position.y, width: n.width ?? n.measured?.width ?? 240, height: n.height ?? n.measured?.height ?? 120 })),
+    };
+  };
+
+  const freeSpot = (node: PatchNode, preferred: XY, bias: PlacementBias, extra: readonly Rect[] = []): XY => {
+    const base = obstacles();
+    return findFreePosition(estimatePatchSize(doc(), registry, node), preferred, { ...base, nodes: [...base.nodes, ...extra] }, { bias });
+  };
 
   const apply: PatchEditorActions["apply"] = (ops, label, options = {}) => {
     const result = docState().apply(ops, { label, defaultComponent: componentId, ...(options.coalesceKey ? { coalesceKey: options.coalesceKey } : {}) });
@@ -149,6 +198,8 @@ export function createPatchEditorActions(deps: ActionDeps): PatchEditorActions {
     return c ? selection().patches.filter((id) => id in c.patches) : [];
   };
 
+  const connected = (addresses: readonly string[]) => bridge().removeTargets(componentId, addresses);
+
   const actions: PatchEditorActions = {
     apply,
     selectedPatchIds,
@@ -159,15 +210,27 @@ export function createPatchEditorActions(deps: ActionDeps): PatchEditorActions {
         quietToast(`There's no patch type "${type}".`);
         return undefined;
       }
-      const { connect, ...insert } = options;
-      const ops = insertPatchOps(componentId, type, position, { ...insert, ref: "inserted" });
+      const { connect, placement = "any", ...insert } = options;
+      let at = position;
+      if (placement !== "exact") {
+        const virtual: PatchNode = { type, inputs: {}, ui: { x: 0, y: 0 } };
+        if (insert.typeParam) virtual.typeParam = insert.typeParam;
+        if (insert.inputCount !== undefined) virtual.inputCount = insert.inputCount;
+        if (insert.component !== undefined) virtual.component = insert.component;
+        if (insert.name) virtual.name = insert.name;
+        at = freeSpot(virtual, position, placement);
+      }
+      const ops = insertPatchOps(componentId, type, at, { ...insert, ref: "inserted" });
       if (connect) {
         ops.push(connect.side === "out" ? { op: "connect", component: componentId, from: connect.address, to: `$inserted.${connect.portKey}` } : { op: "connect", component: componentId, from: `$inserted.${connect.portKey}`, to: connect.address });
       }
       const name = options.name ?? spec.name;
       const result = apply(ops, connect ? `Add ${name} and connect` : `Add ${name}`);
       const id = result.ok ? result.idMap.inserted : undefined;
-      if (id) select([id]);
+      if (id) {
+        select([id]);
+        if (connect?.side === "in") connected([connect.address]);
+      }
       return id;
     },
 
@@ -186,7 +249,7 @@ export function createPatchEditorActions(deps: ActionDeps): PatchEditorActions {
       if (!result.ok) {
         const flow = deps.flow();
         actions.explainConnection(from, to, deps.pointer() ?? (flow ? centerOfView(flow) : { x: 0, y: 0 }));
-      }
+      } else connected([to]);
       return result.ok;
     },
 
@@ -204,7 +267,7 @@ export function createPatchEditorActions(deps: ActionDeps): PatchEditorActions {
       if (!result.ok) {
         const flow = deps.flow();
         actions.explainConnection(from, newTo, deps.pointer() ?? (flow ? centerOfView(flow) : { x: 0, y: 0 }));
-      }
+      } else connected([newTo]);
     },
 
     disconnect(addresses, label) {
@@ -241,9 +304,21 @@ export function createPatchEditorActions(deps: ActionDeps): PatchEditorActions {
               action: {
                 label: `Insert ${converter.name}`,
                 onClick: () => {
-                  const result = apply(placeSuggestion(suggestion, componentId, position), `Insert ${converter.name} between ${portLabel(doc(), componentId, registry, from)} and ${portLabel(doc(), componentId, registry, to)}`);
+                  const placed: Rect[] = [];
+                  const ops = placeSuggestion(suggestion, componentId, position).map((op): Op => {
+                    if (op.op !== "addPatch" || !op.patch.ui) return op;
+                    const node: PatchNode = { type: op.patch.type, inputs: {}, ui: { x: op.patch.ui.x, y: op.patch.ui.y } };
+                    if (op.patch.typeParam) node.typeParam = op.patch.typeParam;
+                    const at = freeSpot(node, op.patch.ui, "any", placed);
+                    placed.push({ ...at, ...estimatePatchSize(doc(), registry, node) });
+                    return { ...op, patch: { ...op.patch, ui: { ...op.patch.ui, ...at } } };
+                  });
+                  const result = apply(ops, `Insert ${converter.name} between ${portLabel(doc(), componentId, registry, from)} and ${portLabel(doc(), componentId, registry, to)}`);
                   const id = Object.values(result.idMap)[0];
-                  if (result.ok && id) select([id]);
+                  if (result.ok && id) {
+                    select([id]);
+                    connected([to]);
+                  }
                 },
               },
             }
@@ -353,12 +428,16 @@ export function createPatchEditorActions(deps: ActionDeps): PatchEditorActions {
       const layerNodes = flowNodes().filter((n) => n.selected && flowNodeKind(n.id) === "layer");
       for (const n of layerNodes) {
         const layerId = layerIdOfNode(n.id)!;
+        actions.removeLayerTargets(layerId);
         const layer = findLayer(c.layers, layerId)?.layer;
         for (const [key, value] of Object.entries(layer?.props ?? {})) if (isLinkInput(value)) disconnect(`@${layerId}.${key}`);
       }
       ops.push(...patches.map((id): Op => ({ op: "removePatch", component: componentId, id })));
       ops.push(...comments.map((id): Op => ({ op: "removeComment", component: componentId, id })));
-      if (ops.length === 0) return;
+      if (ops.length === 0) {
+        if (layerNodes.length) selection().clear();
+        return;
+      }
       const count = patches.length + comments.length + disconnected.size;
       const label =
         patches.length === 1 && count === 1
@@ -387,8 +466,9 @@ export function createPatchEditorActions(deps: ActionDeps): PatchEditorActions {
       const c = component();
       if (!c) return;
       const patchPositions = new Map<string, XY>();
-      const sessionPositions = new Map<string, XY>();
+      const nodePositions = new Map<string, XY>();
       const ops: Op[] = [];
+      let commentsMoved = 0;
       for (const [nodeId, pos] of positions) {
         const kind = flowNodeKind(nodeId);
         if (kind === "patch") patchPositions.set(nodeId, pos);
@@ -396,25 +476,39 @@ export function createPatchEditorActions(deps: ActionDeps): PatchEditorActions {
           const comment = c.comments.find((x) => x.id === commentIdOfNode(nodeId));
           if (!comment) continue;
           const rect: [number, number, number, number] = [Math.round(pos.x), Math.round(pos.y), comment.rect[2], comment.rect[3]];
-          if (rect[0] !== comment.rect[0] || rect[1] !== comment.rect[1]) ops.push({ op: "updateComment", component: componentId, id: comment.id, rect });
-        } else sessionPositions.set(nodeId, pos);
+          if (rect[0] !== comment.rect[0] || rect[1] !== comment.rect[1]) {
+            ops.push({ op: "updateComment", component: componentId, id: comment.id, rect });
+            commentsMoved++;
+          }
+        } else nodePositions.set(nodeId, pos);
       }
-      deps.positions.getState().setPositions(componentId, sessionPositions);
       const moves = movePatchOps(c, patchPositions);
       ops.push(...moves);
+      const metaOp = nodePositions.size ? nodePositionsMetaOp(c, nodePositions) : undefined;
+      if (metaOp) ops.push(metaOp);
       if (ops.length === 0) return;
       const movedPatches = moves.map((op) => (op.op === "updatePatch" ? op.id : "")).filter(Boolean);
-      const commentsMoved = ops.length - moves.length;
-      apply(
-        ops,
-        label ?? (commentsMoved > 0 ? (commentsMoved === 1 && movedPatches.length === 0 ? "Move comment" : `Move ${ops.length} items`) : `Move ${patchesLabel(c, movedPatches, registry)}`),
-        coalesceKey ? { coalesceKey } : {},
-      );
+      const movedNodes = metaOp ? nodePositions.size : 0;
+      const total = movedPatches.length + commentsMoved + movedNodes;
+      const nodeName = (nodeId: string) => {
+        const layerId = layerIdOfNode(nodeId);
+        if (layerId !== undefined) return findLayer(c.layers, layerId)?.layer.name ?? layerId;
+        return nodeId === INPUTS_NODE_ID ? "component inputs" : "component outputs";
+      };
+      const fallback =
+        total === movedPatches.length
+          ? `Move ${patchesLabel(c, movedPatches, registry)}`
+          : total === 1 && commentsMoved === 1
+            ? "Move comment"
+            : total === 1 && movedNodes === 1
+              ? `Move ${nodeName([...nodePositions.keys()][0]!)}`
+              : `Move ${total} items`;
+      apply(ops, label ?? fallback, coalesceKey ? { coalesceKey } : {});
     },
 
-    moveAndSplice(patchId, position, cable) {
+    moveAndSplice(patchId, position, cable, choice) {
       const c = component();
-      const plan = splicePatchOps(doc(), componentId, registry, patchId, cable);
+      const plan = splicePatchOps(doc(), componentId, registry, patchId, cable, choice);
       if ("error" in plan) {
         quietToast(plan.error);
         actions.moveNodes(new Map([[patchId, position]]));
@@ -473,14 +567,15 @@ export function createPatchEditorActions(deps: ActionDeps): PatchEditorActions {
       const current = component();
       if (!current) return;
       const patchPositions = new Map<string, XY>();
-      const sessionPositions = new Map<string, XY>();
-      for (const [id, pos] of result.nodes) (flowNodeKind(id) === "patch" ? patchPositions : sessionPositions).set(id, pos);
+      const nodePositions = new Map<string, XY>();
+      for (const [id, pos] of result.nodes) (flowNodeKind(id) === "patch" ? patchPositions : nodePositions).set(id, pos);
       const ops: Op[] = movePatchOps(current, patchPositions);
       for (const [id, rect] of result.groups) {
         const commentId = commentIdOfNode(id);
         if (commentId && current.comments.some((x) => x.id === commentId)) ops.push({ op: "updateComment", component: componentId, id: commentId, rect: [rect.x, rect.y, rect.width, rect.height] });
       }
-      deps.positions.getState().setPositions(componentId, sessionPositions);
+      const metaOp = nodePositions.size ? nodePositionsMetaOp(current, nodePositions) : undefined;
+      if (metaOp) ops.push(metaOp);
       if (ops.length) apply(ops, `Tidy up ${patchPositions.size === 1 ? "1 patch" : `${patchPositions.size} patches`}`);
     },
 
@@ -520,6 +615,7 @@ export function createPatchEditorActions(deps: ActionDeps): PatchEditorActions {
     enterComponent(patchId) {
       const node = component()?.patches[patchId];
       if (!node?.component || !doc().components[node.component]) return false;
+      bridge().chooseInstance(instanceChoiceKey(componentId, node.component), patchId);
       selection().enterComponent(node.component);
       return true;
     },
@@ -529,6 +625,20 @@ export function createPatchEditorActions(deps: ActionDeps): PatchEditorActions {
     revealLayer(layerId) {
       selection().select({ layers: [layerId], patches: [], comments: [] });
       selection().requestReveal(componentId, [layerId]);
+    },
+
+    driveLayerProp(layerId, prop) {
+      const layer = component() ? findLayer(component()!.layers, layerId)?.layer : undefined;
+      if (!layer) return;
+      const address = `@${layerId}.${prop}`;
+      if (!isLinkInput(layer.props[prop])) bridge().addTarget(componentId, address);
+      bridge().requestDrive(componentId, address);
+    },
+
+    removeLayerTargets(layerId) {
+      const current = bridge().targets[componentId] ?? [];
+      const drop = layerId === undefined ? current : current.filter((a) => a.startsWith(`@${layerId}.`));
+      if (drop.length) bridge().removeTargets(componentId, drop);
     },
 
     openPicker: (request = {}) => deps.openPicker(request),

@@ -1,14 +1,14 @@
 import type { AssetRef } from "@sonobe/core";
 import { runPatch } from "@sonobe/engine/testing";
 import { describe, expect, it } from "vitest";
+import type { MediaInfo } from "@sonobe/engine";
 import { createPatchHarness, loopOf } from "../infra/index.ts";
 import { baseName, densityFromName, imageInfoPatch, rawNameOf } from "./imageInfo.ts";
-import type { MediaInfo } from "./platform.ts";
 
 const EMPTY = { naturalSize: [0, 0], scale: 1, name: "", aspectRatio: 0, loading: false };
 
 function harness(mediaInfo: (ref: AssetRef) => MediaInfo | undefined, inputs: Record<string, unknown> = {}) {
-  return createPatchHarness(imageInfoPatch, { inputs, services: { platform: { mediaInfo } as never } });
+  return createPatchHarness(imageInfoPatch, { inputs, services: { mediaInfo } });
 }
 
 describe("file names", () => {

@@ -84,6 +84,20 @@ describe("state patches in the runtime", () => {
     expect(column(rows, 8)[15] as number).toBeCloseTo(0.5, 9);
   });
 
+  it("launches a staggered entrance: a launch pulse into a looped boolean Delay fires every item on time", () => {
+    const { record } = setup({
+      patches: {
+        launch: { type: "whenPrototypeStarts" },
+        stagger: { type: "delay", typeParam: "boolean", inputs: { value: { link: "launch.started" }, duration: { loop: [0.05, 0.1, 0.15] } } },
+        shown: { type: "switch", inputs: { turnOn: { link: "stagger.output" } } },
+      },
+    });
+    const rows = record(14, ["stagger.output#0", "stagger.output#1", "stagger.output#2", "shown.on#0", "shown.on#2"]);
+    expect([0, 1, 2].map((i) => framesWhere(column(rows, i), (v) => v === true))).toEqual([[3], [6], [9]]);
+    expect(framesWhere(column(rows, 3), (v) => v === true)[0]).toBe(3);
+    expect(framesWhere(column(rows, 4), (v) => v === true)).toEqual([9, 10, 11, 12, 13]);
+  });
+
   it("steps a counter on a metronome and picks titles, pulsing when the step changes", () => {
     const { rt, record } = setup({
       layers: [{ id: "title", type: "text", name: "Title", props: { text: { link: "title_text.output" } } }],

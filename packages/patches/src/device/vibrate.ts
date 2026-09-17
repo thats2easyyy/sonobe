@@ -4,7 +4,6 @@
  */
 
 import { definePatch, toNumber } from "../infra/index.ts";
-import { devicePlatform } from "./platform.ts";
 
 interface VibrateState {
   /** This instance started a buzz, so dispose stops it. */
@@ -20,7 +19,7 @@ export function vibrationMs(seconds: unknown): number {
 export const vibratePatch = definePatch<VibrateState>("vibrate", {
   state: () => ({ buzzed: false }),
   evaluate(ctx) {
-    const vibrate = devicePlatform(ctx.services).vibrate;
+    const vibrate = ctx.services.platform.vibrate;
     ctx.output("available", typeof vibrate === "function");
     if (!ctx.pulsed("vibrate")) return;
     const ms = vibrationMs(toNumber(ctx.input("duration"), Number.NaN));
@@ -33,6 +32,6 @@ export const vibratePatch = definePatch<VibrateState>("vibrate", {
     }
   },
   dispose(state, services) {
-    if (state?.buzzed) devicePlatform(services).vibrate?.(0);
+    if (state?.buzzed) services.platform.vibrate?.(0);
   },
 });

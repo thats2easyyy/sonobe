@@ -1,7 +1,7 @@
 /** Layer Info: a layer's previous-frame geometry from `services.layerInfo`. */
 
 import type { LayerRef } from "@sonobe/core";
-import type { PatchContext, RuntimePatchDefinition } from "@sonobe/engine";
+import type { PatchContext } from "@sonobe/engine";
 import { definePatch, warnOnce } from "../infra/index.ts";
 
 const LABELS: Readonly<Record<string, string>> = { size: "Size", position: "Position", scale: "Scale", anchor: "Anchor", contentSize: "Content Size" };
@@ -26,9 +26,11 @@ function outputMissing(ctx: PatchContext): void {
   ctx.output("contentSize", [0, 0]);
 }
 
-const definition = definePatch("layerInfo", {
+export const layerInfo = definePatch("layerInfo", {
+  // Muted: every output takes the missing-layer values (the default bypass would pass Layer into Parent).
+  mutedBehavior: "evaluate",
   evaluate(ctx) {
-    if (ctx.node.muted === true) {
+    if (ctx.muted) {
       outputMissing(ctx);
       return;
     }
@@ -49,12 +51,8 @@ const definition = definePatch("layerInfo", {
     }
     ctx.output("anchor", finitePair(ctx, "anchor", info.anchor));
     ctx.output("enabled", info.enabled === true);
-    const parent: LayerRef | null =
-      info.parent === null || info.parent === undefined ? null : ref.instance === undefined ? { layerId: info.parent } : { layerId: info.parent, instance: ref.instance };
-    ctx.output("parent", parent);
+    // The engine scopes the parent reference like the child's (loop instance, component prefix), so pass it on as is.
+    ctx.output("parent", info.parent ?? null);
     ctx.output("contentSize", finitePair(ctx, "contentSize", info.contentSize));
   },
 });
-
-/** Muted: every output takes the missing-layer values (the default bypass would pass Layer into Parent). */
-export const layerInfo: RuntimePatchDefinition = { ...definition, mutedBehavior: "evaluate" };

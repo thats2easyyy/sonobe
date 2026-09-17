@@ -10,7 +10,7 @@
 import { mkdirSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { chromium, type Page } from "playwright";
+import { chromium, type BrowserContext, type Page } from "playwright";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const shotsDir = resolve(here, "../../../../screenshots");
@@ -95,11 +95,19 @@ async function drag(page: Page, from: Point, to: Point, options: { steps?: numbe
   await page.waitForTimeout(80);
 }
 
+/** Open a menu from its trigger button and pick an item by its title. */
+async function chooseMenu(page: Page, trigger: string | RegExp, item: string) {
+  await page.getByRole("button", { name: trigger }).first().click();
+  await page.waitForTimeout(150);
+  await page.locator('[role^="menuitem"]').filter({ has: page.locator(".sb-menu__title", { hasText: new RegExp(`^${item.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`) }) }).first().click();
+  await page.waitForTimeout(250);
+}
+
 const selection = (page: Page) => sessionEval(page, (s) => s.selection.getState().layers as string[]);
 /** Every layer in the root component, depth first. */
 const allLayers = (page: Page) =>
   sessionEval(page, (s) => {
-    const out: { id: string; type: string; props: { text?: string } }[] = [];
+    const out: { id: string; type: string; props: { text?: string; image?: { asset?: string } } }[] = [];
     const walk = (layers: { id: string; type: string; props: { text?: string }; children?: unknown[] }[]) => {
       for (const l of layers) {
         out.push(l);
@@ -112,12 +120,14 @@ const allLayers = (page: Page) =>
 const historyLabels = (page: Page) => sessionEval(page, (s) => (s.document.getState().historyEntries() as { label: string }[]).map((e) => e.label));
 const mod = process.platform === "darwin" ? "Meta" : "Control";
 
-async function viewerQa(page: Page) {
+async function viewerQa(context: BrowserContext, page: Page) {
   await open(page, "panels=both");
   await page.waitForSelector(".sonobe-device .sonobe-stage");
   await page.waitForTimeout(600);
   check("viewer renders the device frame", (await page.locator(".sonobe-device").count()) === 1);
   check("viewer shows the fps readout", (await page.locator(".sb-vw__pill-meta").first().textContent())?.includes("fps") ?? false);
+  check("viewer header has no second device picker", (await page.locator('[data-testid=viewer-column] .sb-panel__header [aria-label="Device"]').count()) === 0);
+  check("viewer header names the device when there's room", await page.locator(".sb-vw__device-name").isVisible());
   await shot(page, "viewer-01-default");
 
   await sessionEval(page, (s) => s.selection.getState().select({ layers: ["card"] }));
@@ -135,28 +145,31 @@ async function viewerQa(page: Page) {
   await shot(page, "viewer-03-hit-targets", "[data-testid=viewer-column]");
   await page.getByRole("button", { name: "Show hit targets" }).click();
 
-  await page.getByRole("button", { name: "Rotate to landscape" }).click();
-  await page.waitForTimeout(500);
+  await chooseMenu(page, "More viewer options", "Rotate to Landscape");
+  await page.waitForTimeout(400);
   const device = await sessionEval(page, (s) => s.document.getState().doc.project.device);
   check("rotate writes project.device via setProject", (device as { orientation?: string }).orientation === "landscape");
   await shot(page, "viewer-04-landscape", "[data-testid=viewer-column]");
-  await page.getByRole("button", { name: "Rotate to portrait" }).click();
+  await chooseMenu(page, "More viewer options", "Rotate to Portrait");
 
   await page.locator("body").click({ position: { x: 5, y: 5 } });
   await page.keyboard.press("Alt+KeyD");
-  await page.getByRole("button", { name: "Actual size (1:1)" }).click();
-  await page.waitForTimeout(400);
+  await chooseMenu(page, /^Viewer zoom:/, "Actual Size (1:1)");
+  await page.waitForTimeout(300);
   check("⌥D hides the device frame", (await page.locator(".sonobe-device[data-frame=off]").count()) === 1);
+  check("the zoom menu switches to 1:1", (await page.getByRole("button", { name: "Viewer zoom: 1:1" }).count()) === 1);
   await shot(page, "viewer-05-no-frame-1to1", "[data-testid=viewer-column]");
-  await page.getByRole("button", { name: "Fit to panel" }).click();
+  await chooseMenu(page, /^Viewer zoom:/, "Fit to Panel");
   await page.keyboard.press("Alt+KeyD");
 
-  await page.getByRole("button", { name: /^Device:/ }).click();
-  await page.waitForTimeout(250);
-  await shot(page, "viewer-06-device-picker");
-  await page.getByRole("option", { name: /iPhone SE/ }).click();
+  await page.getByRole("button", { name: "More viewer options" }).click();
+  await page.waitForTimeout(150);
+  await page.getByRole("menuitem", { name: /^Device/ }).hover();
   await page.waitForTimeout(400);
-  check("device picker changes project.device", ((await sessionEval(page, (s) => s.document.getState().doc.project.device.preset)) as string) === "iphone-se");
+  await shot(page, "viewer-06-device-menu");
+  await page.getByRole("menuitemcheckbox", { name: /iPhone SE/ }).click();
+  await page.waitForTimeout(400);
+  check("the device menu changes project.device", ((await sessionEval(page, (s) => s.document.getState().doc.project.device.preset)) as string) === "iphone-se");
   await shot(page, "viewer-07-iphone-se", "[data-testid=viewer-column]");
   await sessionEval(page, (s) => s.document.getState().undo());
 
@@ -171,9 +184,10 @@ async function viewerQa(page: Page) {
   check("pause shows the frame counter", (await page.locator(".sb-vw__pill").first().textContent())?.includes("Paused") ?? false);
   await page.getByRole("button", { name: "Play prototype" }).click();
 
-  await page.getByRole("button", { name: "Pop out viewer" }).click();
-  await page.waitForTimeout(700);
+  await chooseMenu(page, "More viewer options", "Pop Out Viewer");
+  await page.waitForTimeout(600);
   check("pop out floats the viewer", (await page.locator(".sb-float .sonobe-device").count()) === 1);
+  check("the floating window keeps restart", (await page.locator('.sb-float button[aria-label="Restart prototype"]').count()) === 1);
   await drag(page, [1100, 102], [760, 140], { steps: 6 });
   await shot(page, "viewer-09-floating");
   await page.getByRole("button", { name: "Dock viewer" }).first().click();
@@ -198,12 +212,88 @@ async function viewerQa(page: Page) {
   await sessionEval(page, (s) => s.selection.getState().select({ layers: ["like_button"] }));
   await page.waitForTimeout(400);
   await shot(page, "viewer-12-light", "[data-testid=viewer-column]");
+
+  // The header at the default shell width (296) and near the minimum (250).
+  for (const width of [296, 250]) {
+    await open(page, `panels=both&viewerWidth=${width}`);
+    await page.waitForSelector(".sonobe-device .sonobe-stage");
+    const layout = await page.evaluate(() => {
+      const header = document.querySelector("[data-testid=viewer-column] .sb-panel__header") as HTMLElement;
+      const box = header.getBoundingClientRect();
+      const visible = [...header.querySelectorAll<HTMLElement>(".sb-panel__actions > *, .sb-panel__actions button")].filter((el) => el.getBoundingClientRect().width > 0);
+      const labels = visible.map((el) => el.getAttribute("aria-label") ?? el.querySelector("button")?.getAttribute("aria-label") ?? "").filter(Boolean);
+      return { overflow: Math.max(0, ...visible.map((el) => el.getBoundingClientRect().right - box.right)), labels: [...new Set(labels)] };
+    });
+    check(`viewer header fits at ${width}px`, layout.overflow <= 0.5, `overflows by ${layout.overflow}px`);
+    for (const needed of ["Restart prototype", "Device frame", "More viewer options"]) check(`"${needed}" stays in the header at ${width}px`, layout.labels.includes(needed), JSON.stringify(layout.labels));
+    check(`zoom stays in the header at ${width}px`, layout.labels.some((l) => l.startsWith("Viewer zoom:")), JSON.stringify(layout.labels));
+    await shot(page, `viewer-13-header-${width}`, "[data-testid=viewer-column] .sb-panel__header");
+  }
+  await shot(page, "viewer-14-narrow", "[data-testid=viewer-column]");
+
+  // Desktop host: the phone preview server and a host viewer window.
+  const hostPage = await context.newPage();
+  await hostPage.addInitScript(() => {
+    const stopped = { running: false, url: null, urls: [], lanReachable: true, clients: 0, error: null };
+    const running = { running: true, url: "http://192.168.1.24:5204/p?token=7f3a9c", urls: ["http://192.168.1.24:5204/p?token=7f3a9c", "http://10.0.0.12:5204/p?token=7f3a9c"], lanReachable: true, clients: 1, error: null };
+    let status: object = stopped;
+    const listeners = new Set<(s: object) => void>();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (window as any).sonobeHost = {
+      getPreviewStatus: async () => status,
+      startPreview: async () => {
+        await new Promise((r) => setTimeout(r, 250));
+        status = running;
+        for (const l of listeners) l(status);
+        return status;
+      },
+      stopPreview: async () => {
+        status = stopped;
+        return status;
+      },
+      onPreviewStatus: (cb: (s: object) => void) => {
+        listeners.add(cb);
+        return () => listeners.delete(cb);
+      },
+      popOutViewer: async (options?: { alwaysOnTop?: boolean }) => {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        (window as any).__poppedOut = ((window as any).__poppedOut ?? 0) + 1;
+        return { open: true, alwaysOnTop: options?.alwaysOnTop ?? false, error: null };
+      },
+      closeViewerWindow: async () => ({ open: false, alwaysOnTop: false, error: null }),
+      getViewerWindowStatus: async () => ({ open: false, alwaysOnTop: false, error: null }),
+      onViewerWindowStatus: () => () => undefined,
+    };
+  });
+  await open(hostPage, "panels=both&lan=host");
+  await hostPage.waitForSelector(".sonobe-device .sonobe-stage");
+  await hostPage.getByRole("button", { name: "On phone" }).click();
+  await hostPage.waitForTimeout(300);
+  check("host phone preview offers to start the server", (await hostPage.getByRole("button", { name: "Start phone preview" }).count()) === 1);
+  await shot(hostPage, "viewer-15-phone-start");
+  await hostPage.getByRole("button", { name: "Start phone preview" }).click();
+  await hostPage.waitForSelector(".sb-phone__qr[data-state=ready]", { timeout: 5000 }).catch(() => undefined);
+  await hostPage.waitForTimeout(200);
+  check("host phone preview shows the player URL", (await hostPage.locator(".sb-phone__url code").textContent())?.includes("192.168.1.24") ?? false);
+  check("host phone preview counts phones", (await hostPage.locator(".sb-phone__status").textContent())?.includes("1 phone connected") ?? false);
+  await shot(hostPage, "viewer-16-phone-running");
+  await hostPage.keyboard.press("Escape");
+  await chooseMenu(hostPage, "More viewer options", "Open in New Window");
+  await hostPage.waitForTimeout(300);
+  check("pop out uses the host window", ((await hostPage.evaluate(() => (window as unknown as { __poppedOut?: number }).__poppedOut ?? 0)) as number) === 1 && (await hostPage.locator(".sb-float").count()) === 0);
+  await hostPage.getByRole("button", { name: "More viewer options" }).click();
+  await hostPage.waitForTimeout(200);
+  check("an open viewer window can be closed or kept on top", (await hostPage.getByRole("menuitem", { name: "Close Viewer Window" }).count()) === 1 && (await hostPage.getByRole("menuitemcheckbox", { name: "Keep Viewer Window on Top" }).count()) === 1);
+  await shot(hostPage, "viewer-17-window-open-menu");
+  await hostPage.keyboard.press("Escape");
+  await hostPage.close();
 }
 
 async function canvasQa(page: Page) {
   await open(page, "panels=canvas&autoplay=0");
   await page.waitForSelector(".sb-cv__artboard .sonobe-stage");
   await page.waitForTimeout(300);
+  check("rulers show by default", (await page.locator(".sb-cv__ruler").count()) === 2);
   await shot(page, "canvas-01-default");
 
   let ab = await artboard(page);
@@ -361,6 +451,105 @@ async function canvasQa(page: Page) {
   await page.mouse.click(...toPage(ab, [346, 186]));
   await page.waitForTimeout(250);
   await shot(page, "canvas-15-light-both");
+
+  // Rulers highlight the selection; ⇧R hides and shows them.
+  await open(page, "panels=canvas&autoplay=0");
+  await page.waitForSelector(".sb-cv__artboard .sonobe-stage");
+  ab = await artboard(page);
+  await page.mouse.click(...toPage(ab, [200, 520]));
+  await page.waitForTimeout(200);
+  await shot(page, "canvas-16-rulers-selection", "[data-testid=canvas-column]");
+  await page.keyboard.press("Shift+KeyR");
+  await page.waitForTimeout(300);
+  check("⇧R hides the rulers", (await page.locator(".sb-cv__ruler").count()) === 0);
+  await page.keyboard.press("Shift+KeyR");
+  await page.waitForTimeout(300);
+  check("⇧R shows the rulers again", (await page.locator(".sb-cv__ruler").count()) === 2);
+
+  // Equal spacing: c is 23 pt from b, a → b is 20 pt; dragging near it snaps to 20.
+  await page.keyboard.press("Escape");
+  await sessionEval(page, (s) =>
+    s.document.getState().apply(
+      [
+        { op: "addLayer", layer: { id: "tile_a", type: "rectangle", name: "Tile A", props: { position: [40, 640], size: [70, 60], color: "#FF6F91FF", cornerRadius: 12 } } },
+        { op: "addLayer", layer: { id: "tile_b", type: "rectangle", name: "Tile B", props: { position: [130, 640], size: [70, 60], color: "#FFB36BFF", cornerRadius: 12 } } },
+        { op: "addLayer", layer: { id: "tile_c", type: "rectangle", name: "Tile C", props: { position: [250, 640], size: [70, 60], color: "#6A5ACDFF", cornerRadius: 12 } } },
+      ],
+      { label: "Add tiles" },
+    ),
+  );
+  await page.waitForTimeout(250);
+  ab = await artboard(page);
+  let spacingMarks = 0;
+  await drag(page, toPage(ab, [285, 670]), toPage(ab, [258, 670]), {
+    steps: 10,
+    hold: async (p) => {
+      spacingMarks = await p.locator(".sb-cv__spacing").count();
+      await shot(p, "canvas-17-equal-spacing", "[data-testid=canvas-column]");
+    },
+  });
+  check("dragging shows equal-spacing marks", spacingMarks >= 2, `${spacingMarks} marks`);
+  check("equal spacing snaps the gap to match", JSON.stringify(await layerProp(page, "tile_c", "position")) === "[220,640]", JSON.stringify(await layerProp(page, "tile_c", "position")));
+
+  // Drop an image file on the card.
+  ab = await artboard(page);
+  const dropAt = toPage(ab, [200, 360]);
+  await page.evaluate(async ([x, y]) => {
+    const canvas = document.createElement("canvas");
+    canvas.width = 720;
+    canvas.height = 480;
+    const ctx = canvas.getContext("2d")!;
+    const gradient = ctx.createLinearGradient(0, 0, 0, 480);
+    gradient.addColorStop(0, "#FFB36B");
+    gradient.addColorStop(0.6, "#FF6F91");
+    gradient.addColorStop(1, "#3B2A66");
+    ctx.fillStyle = gradient;
+    ctx.fillRect(0, 0, 720, 480);
+    ctx.fillStyle = "rgba(255, 233, 176, 0.95)";
+    ctx.beginPath();
+    ctx.arc(520, 200, 70, 0, Math.PI * 2);
+    ctx.fill();
+    const blob = await new Promise<Blob>((r) => canvas.toBlob((b) => r(b!), "image/png"));
+    const dt = new DataTransfer();
+    dt.items.add(new File([blob], "golden-hour.png", { type: "image/png" }));
+    const target = document.querySelector("[data-testid=canvas-column] .sb-cv")!;
+    target.dispatchEvent(new DragEvent("dragenter", { bubbles: true, cancelable: true, clientX: x, clientY: y, dataTransfer: dt }));
+    target.dispatchEvent(new DragEvent("dragover", { bubbles: true, cancelable: true, clientX: x, clientY: y, dataTransfer: dt }));
+    (window as unknown as { __qaDrop?: unknown }).__qaDrop = { dt, x, y };
+  }, dropAt);
+  await page.waitForTimeout(200);
+  check("dragging files over the canvas shows the drop target", (await page.locator(".sb-cv__drop-target").count()) === 1 && ((await page.locator(".sb-cv__drop-label").textContent()) ?? "").includes("Add image"));
+  await shot(page, "canvas-18-drop-hover", "[data-testid=canvas-column]");
+  await page.evaluate(() => {
+    const { dt, x, y } = (window as unknown as { __qaDrop: { dt: DataTransfer; x: number; y: number } }).__qaDrop;
+    document.querySelector("[data-testid=canvas-column] .sb-cv")!.dispatchEvent(new DragEvent("drop", { bubbles: true, cancelable: true, clientX: x, clientY: y, dataTransfer: dt }));
+  });
+  await page.waitForTimeout(900);
+  const images = (await allLayers(page)).filter((l) => l.type === "image");
+  check("dropping an image adds an Image layer", images.length === 1 && typeof images[0]?.props.image?.asset === "string", JSON.stringify(images));
+  check("the dropped image is selected", JSON.stringify(await selection(page)) === JSON.stringify(images.map((l) => l.id)), JSON.stringify(await selection(page)));
+  const decoded = await page.evaluate((id) => {
+    const img = document.querySelector<HTMLImageElement>(`[data-testid=canvas-column] .sb-cv__artboard [data-layer="${id}"] img`);
+    return img ? { width: img.naturalWidth, height: img.naturalHeight } : null;
+  }, images[0]?.id ?? "");
+  check("the dropped image draws its pixels", !!decoded && decoded.width === 720 && decoded.height === 480, JSON.stringify(decoded));
+  check("the dropped image fits the group it landed in", JSON.stringify((images[0]?.props as { size?: number[] } | undefined)?.size) === "[370,247]", JSON.stringify(images[0]?.props));
+  check("the drop is one undo entry", (await historyLabels(page))[0] === "Add image “golden-hour”", JSON.stringify((await historyLabels(page))[0]));
+  await shot(page, "canvas-19-dropped", "[data-testid=canvas-column]");
+
+  // Re-fit when the window (and so the panel) shrinks.
+  await open(page, "panels=both&autoplay=0");
+  await page.waitForSelector(".sb-cv__artboard .sonobe-stage");
+  await page.setViewportSize({ width: 1000, height: 640 });
+  await page.waitForTimeout(500);
+  const fit = await page.evaluate(() => {
+    const cv = document.querySelector("[data-testid=canvas-column] .sb-cv")!.getBoundingClientRect();
+    const board = document.querySelector("[data-testid=canvas-column] .sb-cv__artboard")!.getBoundingClientRect();
+    return board.left >= cv.left && board.right <= cv.right && board.top >= cv.top && board.bottom <= cv.bottom;
+  });
+  check("the canvas re-fits when the panel shrinks", fit);
+  await shot(page, "canvas-20-refit-small");
+  await page.setViewportSize({ width: 1440, height: 900 });
 }
 
 async function main() {
@@ -369,12 +558,16 @@ async function main() {
   const context = await browser.newContext({ viewport: { width: 1440, height: 900 }, deviceScaleFactor: 2 });
   const page = await context.newPage();
   const errors: string[] = [];
-  page.on("pageerror", (err) => errors.push(err.message));
-  page.on("console", (msg) => {
-    if (msg.type() === "error") errors.push(msg.text());
-  });
+  const watch = (p: Page) => {
+    p.on("pageerror", (err) => errors.push(err.message));
+    p.on("console", (msg) => {
+      if (msg.type() === "error") errors.push(msg.text());
+    });
+  };
+  watch(page);
+  context.on("page", watch);
   try {
-    await viewerQa(page);
+    await viewerQa(context, page);
     await canvasQa(page);
   } finally {
     await browser.close();

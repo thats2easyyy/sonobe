@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { drag, pointerEvent, tap } from "@sonobe/engine/testing";
 import { loopOf } from "../infra/index.ts";
-import { interaction, snapshotPressure } from "./interaction.ts";
+import type { InputEvent } from "@sonobe/engine";
+import { interaction } from "./interaction.ts";
 import { createInteractionRig, type RigLayer } from "./testing.ts";
 
 const card: RigLayer = { id: "card", rect: [100, 200, 200, 100] };
@@ -136,10 +137,22 @@ describe("interaction", () => {
     expect(up.pulseItems.tap).toEqual([true]);
   });
 
-  it("reads Force from a snapshot pressure when present", () => {
-    expect(snapshotPressure({ pressure: 0.4 })).toBe(0.4);
-    expect(snapshotPressure({ pressure: 3 })).toBe(1);
-    expect(snapshotPressure({ pressure: Number.NaN })).toBe(0);
-    expect(snapshotPressure({})).toBe(0);
+  it("reports Force from the pointer's pressure while down", () => {
+    const press = (phase: "down" | "move" | "up", pointerType: "touch" | "mouse", pressure?: number): InputEvent => {
+      const event: InputEvent = { kind: "pointer", phase, pointerId: 1, pointerType, x: 150, y: 250 };
+      if (pressure !== undefined) event.pressure = pressure;
+      return event;
+    };
+    const r = rig();
+    r.step();
+    expect(r.step({ events: [press("down", "touch", 0.4)] }).outputs.force).toBe(0.4);
+    expect(r.step({ events: [press("move", "touch", 0.9)] }).outputs.force).toBe(0.9);
+    expect(r.step({ events: [press("up", "touch")] }).outputs.force).toBe(0);
+    expect(r.step({ events: [press("down", "touch")] }).outputs.force).toBe(0.5);
+    r.step({ events: [press("up", "touch")] });
+    expect(r.step({ events: [press("down", "mouse")] }).outputs.force).toBe(0);
+    const disabled = rig({ layer: { layerId: "card" }, enabled: false });
+    disabled.step();
+    expect(disabled.step({ events: [press("down", "touch", 0.7)] }).outputs.force).toBe(0);
   });
 });

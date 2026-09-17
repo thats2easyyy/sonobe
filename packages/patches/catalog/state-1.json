@@ -207,7 +207,8 @@
           "name": "On",
           "type": "boolean",
           "default": false,
-          "description": "The on/off state to watch, such as Down from an Interaction or the result of a comparison."
+          "description": "The on/off state to watch, such as Down from an Interaction or the result of a comparison.",
+          "acceptsPulse": true
         }
       ],
       "outputs": [
@@ -439,7 +440,8 @@
           "name": "Sample",
           "type": "boolean",
           "default": false,
-          "description": "While true, Output follows Value; when false, Output keeps the last sampled value. Wire a pulse to capture a single frame."
+          "description": "While true, Output follows Value; when false, Output keeps the last sampled value. Wire a pulse to capture a single frame.",
+          "acceptsPulse": true
         },
         {
           "key": "reset",

@@ -157,11 +157,15 @@ export function installCompatGlobals(global: Record<string, unknown>, bridge: Co
     const response = fetched.then((res: unknown) =>
       promiseResolve(callValue(getProp(res, "text"), res, [])).then((text: unknown) => {
         const bodyText = String(text);
+        const headers: Record<string, string> = {};
+        const source = getProp(res, "headers");
+        const forEach = isObjectLike(source) ? getProp(source, "forEach") : undefined;
+        if (typeof forEach === "function") callValue(forEach, source, [(value: unknown, name: unknown) => void (headers[String(name)] = String(value))]);
         return {
           ok: getProp(res, "ok"),
           status: getProp(res, "status"),
           statusCode: getProp(res, "status"),
-          headers: {},
+          headers,
           text: () => bodyText,
           json: () => {
             try {

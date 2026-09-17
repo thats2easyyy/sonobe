@@ -3,7 +3,7 @@ import { applyOps, createEmptyDocument, type Op, type SonobeDocument } from "@so
 import { createPatchRegistry } from "@sonobe/patches";
 import { describe, expect, it } from "vitest";
 import { createDemoDocument } from "../../../state/demoDocument.ts";
-import { alignPositions, commentAroundOps, duplicatePatchOps, insertPatchOps, movePatchOps, replacePatchOps, splicePatchOps } from "./editOps.ts";
+import { alignPositions, commentAroundOps, duplicatePatchOps, insertPatchOps, movePatchOps, replacePatchOps, spliceOptions, splicePatchOps } from "./editOps.ts";
 import { pickerItems, searchPicker } from "./picker.ts";
 
 const registry = createPatchRegistry();
@@ -72,6 +72,33 @@ describe("splicePatchOps", () => {
     const doc = apply(demo, insertPatchOps("main", "variableBroadcaster", { x: 0, y: 900 }));
     const plan = splicePatchOps(doc.doc, "main", registry, doc.idMap.inserted!, { from: "zoom_spring.output", to: "photo_scale.progress" });
     expect(plan).toMatchObject({ error: expect.stringMatching(/no output/) });
+  });
+});
+
+describe("spliceOptions", () => {
+  const cable = { from: "zoom_spring.output", to: "photo_scale.progress" };
+
+  it("offers every input that takes the cable and every output that drives on, best fit first", () => {
+    const withTransition = apply(demo, insertPatchOps("main", "transition", { x: 600, y: 900 }, { typeParam: "number" }));
+    const id = withTransition.idMap.inserted!;
+    const options = spliceOptions(withTransition.doc, "main", registry, id, cable);
+    if ("error" in options) throw new Error(options.error);
+    expect(options.length).toBeGreaterThan(1);
+    expect(options[0]).toMatchObject({ inputKey: "progress", outputKey: "output", conversions: [] });
+    expect(options.map((o) => o.inputKey)).toEqual(expect.arrayContaining(["start", "end"]));
+    const plan = splicePatchOps(withTransition.doc, "main", registry, id, cable, { inputKey: "end", outputKey: "output" });
+    if ("error" in plan) throw new Error(plan.error);
+    const r = apply(withTransition.doc, plan.ops);
+    expect(r.doc.components.main!.patches[id]!.inputs.end).toEqual({ link: "zoom_spring.output" });
+    expect(r.doc.components.main!.patches.photo_scale!.inputs.progress).toEqual({ link: `${id}.output` });
+  });
+
+  it("gives one option when only one pair fits, and the same errors as splicing", () => {
+    const withReverse = apply(demo, insertPatchOps("main", "reverseProgress", { x: 600, y: 900 }));
+    const one = spliceOptions(withReverse.doc, "main", registry, withReverse.idMap.inserted!, cable);
+    expect(Array.isArray(one) && one.length).toBe(1);
+    const withBroadcaster = apply(demo, insertPatchOps("main", "variableBroadcaster", { x: 0, y: 900 }));
+    expect(spliceOptions(withBroadcaster.doc, "main", registry, withBroadcaster.idMap.inserted!, cable)).toMatchObject({ error: expect.stringMatching(/no output/) });
   });
 });
 

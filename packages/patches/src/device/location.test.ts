@@ -1,8 +1,8 @@
 import { runPatch } from "@sonobe/engine/testing";
 import { describe, expect, it } from "vitest";
+import type { GeoFix } from "@sonobe/engine";
 import { createPatchHarness, loopOf } from "../infra/index.ts";
 import { PLACES, formatCoordinates, locationPatch } from "./location.ts";
-import type { GeoFix } from "./platform.ts";
 
 function fakeGeo() {
   const watches: { onFix: (fix: GeoFix) => void; onError: (message: string) => void; stopped: boolean }[] = [];
@@ -38,7 +38,7 @@ describe("location", () => {
   it("explains that the real location isn't available in simulation or without a service", () => {
     const sim = createPatchHarness(locationPatch);
     expect(sim.step().outputs).toMatchObject({ available: false, loading: false, errorMessage: "Location isn't available in simulation." });
-    const live = createPatchHarness(locationPatch, { services: { now: () => Date.UTC(2026, 8, 16) } });
+    const live = createPatchHarness(locationPatch, { services: { deterministic: false } });
     expect(live.step().outputs.errorMessage).toBe("Location isn't available here. Choose an override city.");
   });
 

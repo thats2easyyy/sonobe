@@ -21,8 +21,15 @@ describe("Claude Code plugin", () => {
       string,
       { command: string; args: string[] }
     >;
-    expect(servers.sonobe!.command).toContain("sonobe");
-    expect(servers.sonobe!.args).toEqual(["mcp"]);
+    // The bundled CLI inside the plugin, so nothing but Node has to be on PATH.
+    expect(servers.sonobe).toEqual({
+      command: "node",
+      args: ["${CLAUDE_PLUGIN_ROOT}/dist/sonobe.mjs", "mcp"],
+    });
+    const build = read("claude-code/build.ts");
+    expect(build).toContain("bundleCli");
+    expect(build).toContain('"dist", "sonobe.mjs"');
+    expect(read("claude-code/README.md")).toContain("node integrations/claude-code/build.ts");
   });
 
   it("ships a skill that teaches real tools and guide topics", () => {
@@ -77,6 +84,7 @@ describe("Claude Desktop bundle", () => {
     });
     expect(manifest.user_config.sonobe_home!.type).toBe("directory");
     expect(existsSync(`${root}claude-desktop/build.ts`)).toBe(true);
+    expect(read("claude-desktop/build.ts")).toContain("bundleCli");
     expect(read("claude-desktop/README.md")).toContain("mcpb pack");
   });
 

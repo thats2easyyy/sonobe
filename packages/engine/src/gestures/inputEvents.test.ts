@@ -50,6 +50,55 @@ describe("PointerTracker: contract input fields", () => {
   });
 });
 
+describe("PointerTracker: pointer detail", () => {
+  it("reports pressure, buttons, pointer type and cancelled presses", () => {
+    const t = new PointerTracker();
+    const mouse = frame(t, [pointer("down", 10, 10, { pointerType: "mouse" })], () => t.snapshot("button"));
+    expect([mouse.pressure, mouse.buttons, mouse.pointerType, mouse.cancelled]).toEqual([0, 1, "mouse", false]);
+    const chord = frame(t, [pointer("move", 12, 10, { buttons: 3, pressure: 0.25 })], () => t.snapshot("button"));
+    expect([chord.pressure, chord.buttons]).toEqual([0.25, 3]);
+    const cancelled = frame(t, [pointer("cancel", 12, 10)], () => t.snapshot("button"));
+    expect([cancelled.ended, cancelled.cancelled, cancelled.tapped, cancelled.buttons, cancelled.pressure]).toEqual([true, true, false, 0, 0]);
+    expect(frame(t, [], () => t.snapshot("button").cancelled)).toBe(false);
+
+    const u = new PointerTracker();
+    const touch = frame(u, [pointer("down", 10, 10, { pointerType: "touch", pointerId: 2 })], () => u.snapshot("button"));
+    expect([touch.pressure, touch.buttons, touch.pointerType]).toEqual([0.5, 1, "touch"]);
+    const right = frame(u, [pointer("down", 20, 20, { pointerId: 3, button: 2, pressure: 2 })], () => u.snapshot("button"));
+    expect([right.pressure, right.buttons, right.pointerCount]).toEqual([0.5, 3, 2]);
+    const released = frame(u, [pointer("up", 10, 10, { pointerType: "touch", pointerId: 2 })], () => u.snapshot("button"));
+    expect([released.cancelled, released.tapped, released.pressure, released.buttons]).toEqual([false, true, 1, 2]);
+  });
+
+  it("mice and pens keep hovering while held and re-hit-test as they move; touches never hover", () => {
+    const t = new PointerTracker();
+    frame(t, [pointer("down", 10, 10, { pointerType: "pen" })], () => undefined);
+    expect(frame(t, [], () => t.snapshot("button").hovering)).toBe(true);
+    expect(frame(t, [pointer("move", 150, 10, { pointerType: "pen" })], () => [t.snapshot("button").hovering, t.snapshot("button").down])).toEqual([false, true]);
+    expect(frame(t, [pointer("move", 50, 50, { pointerType: "pen" })], () => t.snapshot("button").hovering)).toBe(true);
+    expect(frame(t, [pointer("up", 50, 50, { pointerType: "pen" })], () => t.snapshot("button").hovering)).toBe(true);
+
+    const u = new PointerTracker();
+    expect(frame(u, [pointer("down", 10, 10, { pointerType: "touch" })], () => u.snapshot("button").hovering)).toBe(false);
+    expect(frame(u, [pointer("move", 20, 20, { pointerType: "touch" })], () => u.snapshot("button").hovering)).toBe(false);
+  });
+
+  it("lists pressed pointers per target by press time, then id", () => {
+    const t = new PointerTracker();
+    frame(t, [pointer("down", 10, 10, { pointerId: 7, pointerType: "touch", pressure: 0.8 })], () => undefined);
+    frame(t, [pointer("down", 150, 10, { pointerId: 5, pointerType: "touch" }), pointer("down", 20, 20, { pointerId: 3, buttons: 4 })], () => undefined);
+    expect(t.pointers(null).map((p) => p.id)).toEqual([7, 3, 5]);
+    expect(t.pointers("button")).toEqual([
+      { id: 7, position: [10, 10], pressure: 0.8, startTime: 1 / 60, buttons: 1 },
+      { id: 3, position: [20, 20], pressure: 0, startTime: 2 / 60, buttons: 4 },
+    ]);
+    expect(t.pointers("card/button", true).map((p) => p.id)).toEqual([7, 3]);
+    expect(t.pointers("button", true)).toEqual([]);
+    frame(t, [pointer("up", 10, 10, { pointerId: 7, pointerType: "touch" })], () => undefined);
+    expect(t.pointers(null).map((p) => p.id)).toEqual([3, 5]);
+  });
+});
+
 describe("TextInputTracker", () => {
   it("tracks typed text, focus and one-frame submits by key", () => {
     const text = new TextInputTracker();

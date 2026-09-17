@@ -1,4 +1,4 @@
-import { buildDoc, createMockRegistry, mockRandom } from "@sonobe/engine/testing";
+import { buildDoc, createMockRegistry, defineMock, mockRandom, port } from "@sonobe/engine/testing";
 import { describe, expect, it } from "vitest";
 import { createSimulation } from "./simulation.ts";
 
@@ -51,6 +51,25 @@ describe("simulation", () => {
     expect(trace.times.length).toBe(61);
     expect(trace.summaries["pop.output"]).toMatchObject({ start: 1, end: 1 });
     expect(sim.snapshot().frame).toBe(-1);
+    sim.dispose();
+  });
+
+  it("never gets platform services", () => {
+    const probe = defineMock({
+      type: "probe",
+      name: "Probe",
+      inputs: [],
+      outputs: [port("hasFetch", "boolean"), port("hasAudio", "boolean"), port("deterministic", "boolean")],
+      evaluate(ctx) {
+        ctx.output("hasFetch", typeof ctx.services.platform.fetch === "function");
+        ctx.output("hasAudio", ctx.services.platform.audio !== undefined);
+        ctx.output("deterministic", ctx.services.deterministic);
+      },
+    });
+    const probeRegistry = createMockRegistry([probe]);
+    const sim = createSimulation({ registry: probeRegistry, document: buildDoc({ patches: { probe: { type: "probe" } } }, probeRegistry) });
+    sim.step();
+    expect(sim.values(["probe.hasFetch", "probe.hasAudio", "probe.deterministic"]).values).toEqual({ "probe.hasFetch": false, "probe.hasAudio": false, "probe.deterministic": true });
     sim.dispose();
   });
 });

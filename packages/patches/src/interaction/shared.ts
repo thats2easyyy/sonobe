@@ -1,10 +1,10 @@
 /**
  * Helpers shared by the interaction patches: reading Layer inputs, ancestor scales for parent-space
- * gestures, finite number and point inputs that warn once, and the engine's muted-behavior extension.
+ * gestures, and finite number and point inputs that warn once.
  */
 
 import type { LayerRef } from "@sonobe/core";
-import type { MutedBehavior, PatchContext, PatchDefinition, RuntimePatchDefinition, RuntimeServices } from "@sonobe/engine";
+import type { PatchContext, RuntimeServices } from "@sonobe/engine";
 import { findSpecPort, warnOnce } from "../infra/index.ts";
 import { getSpec } from "../specs.ts";
 
@@ -25,7 +25,7 @@ function portLabel(ctx: Pick<PatchContext, "node">, key: string): string {
   return `${spec?.name ?? ctx.node.type}'s ${port ?? key}`;
 }
 
-type WarnContext = Pick<PatchContext, "id" | "componentPath" | "frame" | "services" | "node" | "input">;
+type WarnContext = Pick<PatchContext, "id" | "componentPath" | "frame" | "services" | "node" | "input"> & { warnOnce?: PatchContext["warnOnce"] };
 
 /** A number input; non-finite values read as 0 with one warning per restart. */
 export function finiteInput(ctx: WarnContext, key: string): number {
@@ -61,6 +61,8 @@ function usableScale(scale: number | undefined): number {
   return typeof scale === "number" && Number.isFinite(scale) && Math.abs(scale) > 1e-6 ? scale : 1;
 }
 
+const refKey = (ref: LayerRef) => `${ref.layerId}#${ref.instance ?? ""}`;
+
 /**
  * Product of the ancestor layers' scales (previous frame's layout), so pointer deltas in prototype
  * points convert to the layer's parent space. Rotations aren't compensated; zero or non-finite scales count as 1.
@@ -69,26 +71,20 @@ export function ancestorScale(services: RuntimeServices, ref: LayerRef | null): 
   if (!ref) return [1, 1];
   let sx = 1;
   let sy = 1;
-  const seen = new Set<string>();
-  let info = services.layerInfo(ref);
-  while (info?.parent && !seen.has(info.parent) && seen.size < 64) {
-    seen.add(info.parent);
-    info = services.layerInfo(ref.instance === undefined ? { layerId: info.parent } : { layerId: info.parent, instance: ref.instance });
+  const seen = new Set<string>([refKey(ref)]);
+  let parent = services.layerInfo(ref)?.parent ?? null;
+  while (parent && !seen.has(refKey(parent)) && seen.size <= 64) {
+    seen.add(refKey(parent));
+    const info = services.layerInfo(parent);
     if (!info) break;
     sx *= usableScale(info.scale[0]);
     sy *= usableScale(info.scale[1]);
+    parent = info.parent;
   }
   return [sx, sy];
 }
 
-/** The parent layer of `ref` (same loop instance), or null for root layers and missing layers. */
+/** The parent layer of `ref` with its loop instance, or null for root layers and missing layers. */
 export function parentRef(services: RuntimeServices, ref: LayerRef | null): LayerRef | null {
-  const parent = ref ? services.layerInfo(ref)?.parent : null;
-  if (!ref || !parent) return null;
-  return ref.instance === undefined ? { layerId: parent } : { layerId: parent, instance: ref.instance };
-}
-
-/** Declare what the runtime does while the patch is muted (engine extension to the contract). */
-export function withMutedBehavior<S>(definition: PatchDefinition<S>, mutedBehavior: MutedBehavior): RuntimePatchDefinition<S> {
-  return Object.assign(definition, { mutedBehavior });
+  return ref ? (services.layerInfo(ref)?.parent ?? null) : null;
 }

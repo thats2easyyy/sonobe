@@ -1,4 +1,3 @@
-import type { RuntimePatchDefinition } from "@sonobe/engine";
 import { describe, expect, it } from "vitest";
 import { CATALOG_CHUNKS, getSpec } from "../specs.ts";
 import { definitions } from "./index.ts";
@@ -22,7 +21,7 @@ describe("animation definitions", () => {
 
   it("declare muted behavior where the default bypass would be wrong", () => {
     const muted = Object.fromEntries(
-      definitions.filter((d) => (d as RuntimePatchDefinition).mutedBehavior !== undefined).map((d) => [d.type, (d as RuntimePatchDefinition).mutedBehavior]),
+      definitions.filter((d) => d.mutedBehavior !== undefined).map((d) => [d.type, d.mutedBehavior]),
     );
     expect(muted).toEqual({
       transition: "evaluate",

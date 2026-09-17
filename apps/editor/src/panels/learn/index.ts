@@ -44,3 +44,4 @@ export {
 } from "./guides.ts";
 export { examplesForGuide, examplesUsingPatch, getExamples, groupExampleFiles, loadExampleDocument, openExample, type ExampleProject, type OpenExampleResult, type OpenExampleTarget } from "./examples.ts";
 export { formatPortDefault, listPatchReference, patchAvailability, patchPortRows, searchPatchReference, type PatchReferenceItem, type PortRow } from "./patchReference.ts";
+export * from "./lessons/index.ts";

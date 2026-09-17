@@ -1,19 +1,13 @@
 /**
- * Helpers shared by the device patches: declaring a muted behavior, finite vectors that warn once,
- * preset lookup without a fallback, the simulation-clock check, and per-instance stores for state
- * one patch instance shares across its loop indices.
+ * Helpers shared by the device patches: finite vectors that warn once, preset lookup without a
+ * fallback, per-instance stores for state one patch instance shares across its loop indices, and
+ * promise and error plumbing.
  */
 
 import { DEVICE_PRESETS } from "@sonobe/core";
 import type { DevicePreset } from "@sonobe/core";
-import { DETERMINISTIC_EPOCH_MS } from "@sonobe/engine";
-import type { MutedBehavior, PatchContext, PatchDefinition, RuntimePatchDefinition, RuntimeServices } from "@sonobe/engine";
+import type { PatchContext, RuntimeServices } from "@sonobe/engine";
 import { warnOnce } from "../infra/index.ts";
-
-/** Attach the engine's `mutedBehavior` extension to a definition. */
-export function withMutedBehavior<S>(definition: PatchDefinition<S>, mutedBehavior: MutedBehavior): RuntimePatchDefinition<S> {
-  return Object.assign(definition, { mutedBehavior });
-}
 
 /**
  * `value` as `length` finite numbers. Missing components read 0; non-finite ones read 0 and log
@@ -37,19 +31,16 @@ export function findPreset(id: unknown): DevicePreset | undefined {
   return typeof id === "string" ? DEVICE_PRESETS.find((p) => p.id === id) : undefined;
 }
 
-/**
- * True when `services.now()` is the deterministic simulation clock (the fixed epoch plus
- * prototype time). The contract doesn't expose `deterministic` to patches, so this is how Device
- * Time picks UTC and Location picks its simulation message.
- */
-export function isSimulationClock(ctx: Pick<PatchContext, "services" | "time">): boolean {
-  const now = ctx.services.now();
-  return typeof now === "number" && Math.abs(now - (DETERMINISTIC_EPOCH_MS + ctx.time * 1000)) < 1e-3;
+/** A device's physical rotation in degrees counterclockwise, when the host reports one. */
+export function orientationAngleOf(device: { orientationAngle?: number }): number | undefined {
+  const angle = device.orientationAngle;
+  return typeof angle === "number" && Number.isFinite(angle) ? angle : undefined;
 }
 
 interface StoreEntry<T> {
   value: T;
   frame: number;
+  restartCount: number | undefined;
 }
 
 const stores = new WeakMap<RuntimeServices, Map<string, StoreEntry<unknown>>>();
@@ -59,17 +50,24 @@ export function instanceKey(ctx: Pick<PatchContext, "componentPath" | "id">): st
   return `${ctx.componentPath}/${ctx.id}`;
 }
 
+/** The runtime's restart generation, or undefined for hosts that don't count restarts. */
+export function restartGeneration(services: RuntimeServices): number | undefined {
+  const count = (services as { restartCount?: unknown }).restartCount;
+  return typeof count === "number" ? count : undefined;
+}
+
 /**
- * State shared by every loop index of one patch instance, created on first use. A frame counter
- * that went backwards (a restart) creates it again.
+ * State shared by every loop index of one patch instance, created on first use and again after
+ * every restart (`services.restartCount` changed, or the frame counter went backwards).
  */
 export function instanceStore<T>(ctx: Pick<PatchContext, "componentPath" | "id" | "frame" | "services">, create: () => T): T {
   let map = stores.get(ctx.services);
   if (!map) stores.set(ctx.services, (map = new Map()));
   const key = instanceKey(ctx);
+  const restartCount = restartGeneration(ctx.services);
   let entry = map.get(key) as StoreEntry<T> | undefined;
-  if (!entry || ctx.frame < entry.frame) {
-    entry = { value: create(), frame: ctx.frame };
+  if (!entry || entry.restartCount !== restartCount || ctx.frame < entry.frame) {
+    entry = { value: create(), frame: ctx.frame, restartCount };
     map.set(key, entry);
   }
   entry.frame = ctx.frame;
@@ -86,6 +84,11 @@ export function normalizeDegrees(angle: number): number {
   const r = angle % 360;
   const out = r < 0 ? r + 360 : r;
   return out === 0 || Object.is(out, -0) ? 0 : out;
+}
+
+/** True for promises and other thenables. */
+export function isThenable<T = unknown>(value: unknown): value is PromiseLike<T> {
+  return (typeof value === "object" || typeof value === "function") && value !== null && typeof (value as { then?: unknown }).then === "function";
 }
 
 /** An error or rejection as readable text. */

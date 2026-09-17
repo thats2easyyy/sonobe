@@ -1,10 +1,9 @@
-import { createEmptyDocument } from "@sonobe/core";
+import { createEmptyDocument, createRegistry, resolveNodePorts } from "@sonobe/core";
 import type { PatchNode } from "@sonobe/core";
 import { runPatch } from "@sonobe/engine/testing";
 import { describe, expect, it } from "vitest";
 import { createPatchHarness, loopOf } from "../infra/index.ts";
 import { loopBuilderPatch } from "./loopBuilder.ts";
-import { variantInputPorts } from "./shared.ts";
 
 describe("loopBuilder", () => {
   it("collects the items in order with matching indices", () => {
@@ -47,15 +46,19 @@ describe("loopBuilder", () => {
     expect(h.logs.map((l) => l.message)).toEqual(["Loop Builder: each item takes one value, so only the first item of a looped input is used."]);
   });
 
-  it("declares 0-based item ports with per-variant defaults", () => {
+  it("gets 0-based item ports with per-variant defaults from core port resolution", () => {
+    expect(loopBuilderPatch.dynamicPorts).toBeUndefined();
+    const registry = createRegistry([loopBuilderPatch]);
+    const doc = createEmptyDocument({ name: "Doc" });
     const node: PatchNode = { type: "loopBuilder", typeParam: "text", inputCount: 2, inputs: {}, ui: { x: 0, y: 0 } };
-    const ports = loopBuilderPatch.dynamicPorts!(node, createEmptyDocument({ name: "Doc" }));
-    expect(ports.outputs).toEqual([]);
+    const ports = resolveNodePorts(doc, node, registry)!;
     expect(ports.inputs.map((p) => [p.key, p.name, p.type, p.default])).toEqual([
       ["item0", "Item 0", "text", ""],
       ["item1", "Item 1", "text", ""],
     ]);
-    expect(variantInputPorts("loopBuilder", undefined, undefined).map((p) => [p.key, p.default])).toEqual([
+    expect(ports.outputs.map((p) => p.key)).toEqual(["loop", "index"]);
+    const number = resolveNodePorts(doc, { type: "loopBuilder", inputs: {}, ui: { x: 0, y: 0 } }, registry)!;
+    expect(number.inputs.map((p) => [p.key, p.default])).toEqual([
       ["item0", 0],
       ["item1", 0],
       ["item2", 0],

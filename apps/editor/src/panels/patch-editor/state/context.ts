@@ -5,6 +5,7 @@ import type { PatchRegistry } from "@sonobe/patches";
 import { createContext, useCallback, useContext, useSyncExternalStore } from "react";
 import { useStore } from "zustand";
 import type { EditorSession } from "../../../state/session.ts";
+import type { LiveScope } from "../model/instances.ts";
 import type { CableGeometry } from "../model/knife.ts";
 import type { PatchEditorActions } from "./actions.ts";
 import type { LiveStore } from "./liveStore.ts";
@@ -20,8 +21,12 @@ export interface PatchEditorContextValue {
   geometry: Map<string, CableGeometry>;
   actions: PatchEditorActions;
   reducedMotion: boolean;
-  /** Live values only exist for the root component (engine limitation). */
+  /** The component runs in the prototype (the root, or through an instance), so live values exist. */
   liveEnabled: boolean;
+  /** Which instance live values come from. */
+  liveScope: LiveScope;
+  /** Call before moving the viewport on the user's behalf, so panel resizes keep their view instead of re-fitting. */
+  markViewportManual: () => void;
 }
 
 export const PatchEditorContext = createContext<PatchEditorContextValue | null>(null);

@@ -1,10 +1,10 @@
 /** Base64 Decode: decodes base64 text into text, JSON, or an image or sound data URL. */
 
 import type { Value } from "@sonobe/core";
-import type { PatchContext, RuntimePatchDefinition } from "@sonobe/engine";
+import type { PatchContext } from "@sonobe/engine";
 import { definePatch, toBool, toText, zeroValue } from "../infra/index.ts";
 import { concatBytes, decodeBase64, normalizeBase64, sniffImageMime, sniffSoundMime, utf8Decode } from "./base64.ts";
-import { variantOf, warnIndexed, withMutedBehavior } from "./shared.ts";
+import { variantOf, warnIndexed } from "./shared.ts";
 
 /** Base64 characters decoded per frame (a multiple of 4). */
 export const DECODE_CHARS_PER_FRAME = 2_000_000;
@@ -103,36 +103,34 @@ function submit(ctx: PatchContext, s: Base64DecodeState, text: string, variant: 
   }
 }
 
-export const base64Decode: RuntimePatchDefinition<Base64DecodeState> = withMutedBehavior(
-  definePatch<Base64DecodeState>("base64Decode", {
-    state: () => ({ generation: 0, job: null, queue: [], variant: undefined, output: null, loading: false, error: false, errorMessage: "", started: false }),
-    evaluate(ctx) {
-      const s = ctx.state;
-      const variant = variantOf(ctx, base64Decode);
-      if (s.variant !== variant) {
-        s.variant = variant;
-        s.output = zeroValue(variant);
-        s.started = false;
-      }
-      if (!s.started || ctx.changed("base64")) {
-        s.started = true;
-        submit(ctx, s, toText(ctx.input("base64")), variant);
-      }
-      let finishedThisFrame = false;
-      if (s.job) finishedThisFrame = advance(s, s.job, variant);
-      if (!s.job && !finishedThisFrame && s.queue.length > 0) start(s, s.queue.shift()!, variant);
-      s.loading = s.job !== null;
-      if (s.loading || s.queue.length > 0) ctx.requestNextFrame();
-      ctx.output("output", s.output);
-      ctx.output("loading", s.loading);
-      ctx.output("error", s.error);
-      ctx.output("errorMessage", s.errorMessage);
-    },
-    dispose(state) {
-      state.generation++;
-      state.job = null;
-      state.queue = [];
-    },
-  }),
-  "zero",
-);
+export const base64Decode = definePatch<Base64DecodeState>("base64Decode", {
+  mutedBehavior: "zero",
+  state: () => ({ generation: 0, job: null, queue: [], variant: undefined, output: null, loading: false, error: false, errorMessage: "", started: false }),
+  evaluate(ctx) {
+    const s = ctx.state;
+    const variant = variantOf(ctx, base64Decode);
+    if (s.variant !== variant) {
+      s.variant = variant;
+      s.output = zeroValue(variant);
+      s.started = false;
+    }
+    if (!s.started || ctx.changed("base64")) {
+      s.started = true;
+      submit(ctx, s, toText(ctx.input("base64")), variant);
+    }
+    let finishedThisFrame = false;
+    if (s.job) finishedThisFrame = advance(s, s.job, variant);
+    if (!s.job && !finishedThisFrame && s.queue.length > 0) start(s, s.queue.shift()!, variant);
+    s.loading = s.job !== null;
+    if (s.loading || s.queue.length > 0) ctx.requestNextFrame();
+    ctx.output("output", s.output);
+    ctx.output("loading", s.loading);
+    ctx.output("error", s.error);
+    ctx.output("errorMessage", s.errorMessage);
+  },
+  dispose(state) {
+    state.generation++;
+    state.job = null;
+    state.queue = [];
+  },
+});

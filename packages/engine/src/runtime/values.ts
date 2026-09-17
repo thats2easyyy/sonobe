@@ -4,6 +4,7 @@ import {
   coerce,
   decodeInput,
   decodeLiteral,
+  defaultForPort,
   defaultValue,
   inferValueType,
   isDecodedLoop,
@@ -47,6 +48,16 @@ export function zeroValue(type: ValueType, enumOptions?: readonly EnumOption[]):
   if (type === "color") return { r: 0, g: 0, b: 0, a: 0 };
   if (type === "enum") return enumOptions?.[0]?.key ?? "";
   return defaultValue(type);
+}
+
+/**
+ * Runtime value for a resolved port or prop with no stored value: its declared default (decoded),
+ * the first enum option, or the type default. A color without a declared default is the zero
+ * value, transparent `{ r: 0, g: 0, b: 0, a: 0 }` (CONVENTIONS.md §8), not opaque black.
+ */
+export function portDefault(port: { type: ValueType; default?: Value; enumOptions?: readonly EnumOption[] }): Value {
+  if (port.default === undefined && port.type === "color") return { r: 0, g: 0, b: 0, a: 0 };
+  return defaultForPort({ type: port.type, default: port.default, enumOptions: port.enumOptions ? [...port.enumOptions] : undefined });
 }
 
 /** On/off reading of a value for pulses and rising edges (numbers > 0 are on). */

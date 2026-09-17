@@ -178,4 +178,109 @@ describe("createPatchHarness", () => {
     expect(point.step().outputs).toEqual({ output: [3, 3], connected: true });
     expect(createPatchHarness(variant, { inputs: { value: 3 }, connected: [] }).step().outputs.connected).toBe(false);
   });
+
+  it("applies the definition's muted behavior", () => {
+    const passthrough: PatchDefinition = {
+      type: "tint",
+      name: "Tint",
+      category: "color",
+      summary: "Tints a value.",
+      variants: ["number", "color"],
+      inputs: [
+        { key: "amount", name: "Amount", type: "number", default: 0.5, description: "How much." },
+        { key: "value", name: "Value", type: "variant", default: 2, description: "In." },
+      ],
+      outputs: [
+        { key: "output", name: "Output", type: "variant", description: "Out." },
+        { key: "strength", name: "Strength", type: "number", description: "Amount used." },
+        { key: "changed", name: "Changed", type: "pulse", description: "Pulses." },
+      ],
+      evaluate(ctx) {
+        ctx.output("output", ctx.muted ? "muted" : 99);
+        ctx.output("strength", 7);
+        ctx.pulse("changed");
+      },
+    };
+    expect(createPatchHarness(passthrough, { muted: true, inputs: { value: 4 } }).step()).toMatchObject({ outputs: { output: 4, strength: 0.5 }, pulses: new Set() });
+    expect(createPatchHarness({ ...passthrough, mutedBehavior: "zero" }, { muted: true, typeParam: "color" }).step().outputs).toEqual({ output: { r: 0, g: 0, b: 0, a: 0 }, strength: 0 });
+    const evaluated = createPatchHarness({ ...passthrough, mutedBehavior: "evaluate" }, { muted: true }).step();
+    expect(evaluated.outputs.output).toBe("muted");
+    expect(evaluated.pulses.has("changed")).toBe(true);
+  });
+
+  it("reports pulse sources, feedback reads, issues, once-warnings, and restarts", () => {
+    const seen: { source: boolean; feedback: boolean; pulsed: boolean; restarts: number }[] = [];
+    const probe: PatchDefinition = {
+      ...doubler,
+      evaluate(ctx) {
+        seen.push({ source: ctx.isPulseSource("value"), feedback: ctx.isFeedback("value"), pulsed: ctx.pulsed("value"), restarts: ctx.services.restartCount });
+        ctx.warnOnce("k", "once per restart");
+        ctx.services.issue("probe_issue", "warning", "raised");
+        ctx.services.issue("probe_issue", "warning", "raised");
+        ctx.output("output", ctx.input("value"));
+      },
+    };
+    const h = createPatchHarness(probe, { feedback: ["value"] });
+    expect(h.step({ pulses: ["value"] }).outputs.output).toBe(1);
+    expect(h.step().outputs.output).toBe(2);
+    expect(seen.slice(0, 2)).toEqual([
+      { source: true, feedback: true, pulsed: true, restarts: 0 },
+      { source: true, feedback: true, pulsed: false, restarts: 0 },
+    ]);
+    expect(h.logs.map((l) => l.message)).toEqual(["once per restart"]);
+    expect(h.issues).toEqual([{ code: "probe_issue", severity: "warning", message: "raised" }]);
+    h.restart();
+    h.step();
+    expect(seen.at(-1)!.restarts).toBe(1);
+    expect(h.logs).toHaveLength(2);
+    expect(h.issues).toHaveLength(1);
+
+    const held = createPatchHarness(probe, { inputs: { value: 1 }, pulseSources: ["value"] });
+    held.run(2);
+    expect(seen.slice(-2).map((s) => s.pulsed)).toEqual([true, true]);
+    expect(createPatchHarness(doubler).services).toMatchObject({ deterministic: true, restartCount: 0 });
+    expect(createPatchHarness(doubler).services.device().timeZone).toBe("UTC");
+  });
+
+  it("resolves dynamic ports, variadic start indexes, and inputCountRange counts like the runtime", () => {
+    const counts: number[] = [];
+    const stops: PatchDefinition = {
+      type: "stops",
+      name: "Stops",
+      category: "animation",
+      summary: "Repeats stop groups.",
+      inputCountRange: { min: 1, max: 4, defaultCount: 2 },
+      inputs: [],
+      outputs: [{ key: "sum", name: "Sum", type: "number", description: "Sum of the stops." }],
+      dynamicPorts: (node) => ({
+        inputs: Array.from({ length: Math.min(4, Math.max(1, node.inputCount ?? 2)) }, (_, i) => ({ key: `stop${i + 1}`, name: `Stop ${i + 1}`, type: "number" as const, default: i + 1, description: "A stop." })),
+        outputs: [],
+      }),
+      evaluate(ctx) {
+        counts.push(ctx.inputCount);
+        let sum = 0;
+        for (let i = 1; i <= ctx.inputCount; i++) sum += ctx.input<number>(`stop${i}`);
+        ctx.output("sum", sum);
+      },
+    };
+    expect(createPatchHarness(stops).step().outputs.sum).toBe(3);
+    const h = createPatchHarness(stops, { inputCount: 9 });
+    expect(h.ports.inputs.map((p) => p.key)).toEqual(["stop1", "stop2", "stop3", "stop4"]);
+    expect(h.step({ inputs: { stop4: 10 } }).outputs.sum).toBe(16);
+    expect(counts).toEqual([2, 4]);
+
+    const options: PatchDefinition = {
+      type: "picker",
+      name: "Picker",
+      category: "state",
+      summary: "Picks.",
+      inputs: [{ key: "option", name: "Option", type: "index", default: 0, description: "Which." }],
+      outputs: [],
+      variadic: { key: "choice", name: "Choice", type: "number", default: 5, min: 2, max: 8, defaultCount: 3, startIndex: 0, direction: "outputs", description: "One choice." },
+      evaluate() {},
+    };
+    const picker = createPatchHarness(options);
+    expect(picker.ports.inputs.map((p) => p.key)).toEqual(["option"]);
+    expect(picker.ports.outputs.map((p) => p.key)).toEqual(["choice0", "choice1", "choice2"]);
+  });
 });

@@ -40,7 +40,7 @@ export function useShellCommands(handlers: ShellCommandHandlers): void {
       { id: "view.showPerformance", title: "Show Performance", category: "View", icon: Gauge, keywords: ["fps", "frame time"], run: () => layout().setHudTab("performance") },
       { id: "view.resetLayout", title: "Reset Panel Layout", category: "View", icon: PanelLeft, keywords: ["default", "restore"], run: () => layout().reset() },
       { id: "help.learn", title: "Open Learn", category: "Help", shortcut: "Mod+/", icon: BookOpen, keywords: ["tutorial", "lessons", "docs", "guides"], run: () => layout().toggleDrawer("learn") },
-      { id: "view.toggleTheme", title: "Toggle Light and Dark Theme", category: "Appearance", icon: Moon, keywords: ["dark mode", "light mode", "appearance"], run: () => latestToggleTheme.current() },
+      { id: "view.toggleTheme", title: "Toggle Light and Dark Theme", category: "View", icon: Moon, keywords: ["dark mode", "light mode", "appearance"], run: () => latestToggleTheme.current() },
       {
         id: "help.gallery",
         title: "Open Widget Gallery",

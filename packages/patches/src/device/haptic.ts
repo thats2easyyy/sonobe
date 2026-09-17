@@ -3,9 +3,9 @@
  * a Vibration API pattern (Custom Pattern converts Core Haptics AHAP JSON), else logs.
  */
 
+import type { HapticServices } from "@sonobe/engine";
 import { definePatch, isPlainObject, toText, warnOnce } from "../infra/index.ts";
-import { devicePlatform } from "./platform.ts";
-import type { HapticService } from "./platform.ts";
+
 
 /** Vibration patterns in milliseconds (on, off, on, …) per type; null where a phone has no equivalent. */
 export const VIBRATION_PLANS: Readonly<Record<string, readonly number[] | null>> = {
@@ -73,7 +73,7 @@ interface HapticState {
   played: boolean;
 }
 
-function supports(native: HapticService, type: string): boolean {
+function supports(native: HapticServices, type: string): boolean {
   try {
     return native.supports(type) === true;
   } catch {
@@ -85,7 +85,7 @@ export const hapticPatch = definePatch<HapticState>("haptic", {
   state: () => ({ pattern: undefined, plan: null, problem: undefined, cached: false, played: false }),
   evaluate(ctx) {
     const s = ctx.state;
-    const platform = devicePlatform(ctx.services);
+    const platform = ctx.services.platform;
     let type = toText(ctx.input("type"));
     if (!Object.hasOwn(VIBRATION_PLANS, type)) {
       warnOnce(ctx, "unknownType", `Haptic: "${type}" isn't a feedback type, so it plays Impact Light.`);
@@ -114,6 +114,6 @@ export const hapticPatch = definePatch<HapticState>("haptic", {
     } else ctx.services.log("log", `Haptic: ${type} (no haptics on this device)`);
   },
   dispose(state, services) {
-    if (state?.played) devicePlatform(services).vibrate?.(0);
+    if (state?.played) services.platform.vibrate?.(0);
   },
 });

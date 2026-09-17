@@ -4,15 +4,10 @@ import { Dialog } from "./Dialog.tsx";
 import { Kbd } from "./Kbd.tsx";
 import { SearchList } from "./SearchList.tsx";
 import { useCommandList, useCommands } from "./commands/CommandProvider.tsx";
-import type { Command } from "./commands/commandRegistry.ts";
+import { orderPaletteItems, type PaletteItem } from "./commands/paletteOrder.ts";
 import { matchesChord, parseShortcut } from "./commands/shortcutManager.ts";
 import type { FuzzyKey } from "./lib/fuzzy.ts";
 import "./CommandPalette.css";
-
-interface PaletteItem {
-  command: Command;
-  group: string;
-}
 
 const KEYS: FuzzyKey<PaletteItem>[] = [
   { name: "title", get: (i) => i.command.title },
@@ -40,24 +35,12 @@ function PaletteBody({ placeholder, onClose }: { placeholder: string; onClose: (
   const { registry, platform } = useCommands();
   const all = useCommandList();
 
-  const items = useMemo<PaletteItem[]>(() => {
-    const available = registry.available();
-    const byId = new Map(available.map((c) => [c.id, c]));
-    const recentIds = registry.recent().filter((id) => byId.has(id)).slice(0, 5);
-    const recent = recentIds.map((id) => ({ command: byId.get(id)!, group: "Recent" }));
-    const categoryOrder = new Map<string, number>();
-    for (const c of available) {
-      const category = c.category ?? "General";
-      if (!categoryOrder.has(category)) categoryOrder.set(category, categoryOrder.size);
-    }
-    const rest = available
-      .filter((c) => !recentIds.includes(c.id))
-      .map((c) => ({ command: c, group: c.category ?? "General" }))
-      .sort((a, b) => categoryOrder.get(a.group)! - categoryOrder.get(b.group)!);
-    return [...recent, ...rest];
+  const items = useMemo<PaletteItem[]>(
+    () => orderPaletteItems(registry.available(), registry.recent()),
     // `all` changes whenever the registry does.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [registry, all]);
+    [registry, all],
+  );
 
   const closeChord = useMemo(() => parseShortcut("Mod+K", platform), [platform]);
 

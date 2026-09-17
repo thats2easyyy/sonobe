@@ -36,6 +36,16 @@ export interface DesktopHostApi {
   setTitle(title: string): void;
   rpc: RpcRegistrar;
   getMcpStatus(): Promise<unknown>;
+  /** Push the live document's revision to main (LAN player sync, MCP resource notifications). Optional: older preloads lack it. */
+  notifyDocumentChanged?(revision: number): void;
+  /** Open a web or mail link in the system browser. Optional: older preloads lack it. */
+  openExternal?(url: string): boolean | void | Promise<boolean | void>;
+  /** True when the app was started muted (SONOBE_MUTE, automated runs). */
+  readonly muted?: boolean;
+  getPreviewStatus?(): Promise<unknown>;
+  startPreview?(): Promise<unknown>;
+  stopPreview?(): Promise<unknown>;
+  onPreviewStatus?(cb: (status: unknown) => void): () => void;
 }
 
 export interface HostCapabilities {
@@ -91,5 +101,20 @@ export interface HostAdapter {
   displayName(path: string): string;
   /** The desktop RPC bridge; null in the browser. */
   readonly rpc: RpcRegistrar | null;
+  /**
+   * Keep an asset file's bytes for a project (null: the unsaved document). They are served by
+   * resolveAssetUrl right away and written into assets/ on the next writeProject.
+   */
+  putAssetBytes?(path: string | null, file: string, bytes: ArrayBuffer | Uint8Array): void;
+  /** Bytes of an asset file the host already holds in memory (synchronous; for clipboard copies). */
+  peekAssetBytes?(path: string | null, file: string): ArrayBuffer | undefined;
+  /** Bytes of an asset file, reading the project from disk or storage when needed. */
+  readAssetBytes?(path: string | null, file: string): Promise<ArrayBuffer | undefined>;
+  /** Open a link outside the editor (system browser in the desktop app). False when it didn't open. */
+  openExternal?(url: string): boolean | Promise<boolean>;
+  /** Tell the host the live document moved to `revision`. */
+  notifyDocumentChanged?(revision: number): void;
+  /** The host asks for silence (SONOBE_MUTE, automated runs). */
+  readonly muted?: boolean;
   dispose(): void;
 }

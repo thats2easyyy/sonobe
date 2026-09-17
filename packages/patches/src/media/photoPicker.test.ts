@@ -1,8 +1,8 @@
 import type { AssetRef } from "@sonobe/core";
 import { runPatch } from "@sonobe/engine/testing";
 import { describe, expect, it } from "vitest";
+import type { PickedMedia } from "@sonobe/engine";
 import { createPatchHarness, loopOf } from "../infra/index.ts";
-import type { PickedMedia } from "./platform.ts";
 import { photoPickerPatch, toPickedMedia } from "./photoPicker.ts";
 
 const flush = () => new Promise((resolve) => setTimeout(resolve, 0));

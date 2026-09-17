@@ -1,13 +1,14 @@
 /** Watch: shows a value as text, counts its changes, and logs them at most 4 lines a second. */
 
 import { formatColor, isColor } from "@sonobe/core";
-import type { RuntimePatchDefinition } from "@sonobe/engine";
 import { definePatch, isPlainObject, roundDecimal } from "../infra/index.ts";
 
 export interface WatchState {
   count: number;
   lastLogged: string | null;
   lastLogTime: number;
+  /** This loop index has evaluated before (a held boolean that starts on doesn't count as turning on). */
+  started: boolean;
 }
 
 /** Minimum seconds between console lines for one loop index. */
@@ -100,34 +101,35 @@ export function formatWatchValue(value: unknown, type: string): string {
   }
 }
 
-export const watch: RuntimePatchDefinition<WatchState> = {
-  ...definePatch<WatchState>("watch", {
-    state: () => ({ count: 0, lastLogged: null, lastLogTime: -Infinity }),
-    evaluate(ctx) {
-      const state = ctx.state;
-      const type = ctx.typeParam ?? "number";
-      const text = formatWatchValue(ctx.input("value"), type);
-      if (ctx.pulsed("reset")) state.count = 0;
-      else if (type === "boolean" ? ctx.pulsed("value") : ctx.changed("value")) state.count += 1;
-
-      const label = String(ctx.input("label") ?? "").trim();
-      const suffix = type === "boolean" && state.count > 0 ? ` · on ${state.count}×` : "";
-      ctx.output("display", (label ? `${label}: ` : "") + text + suffix);
-      ctx.output("changeCount", state.count);
-
-      if (ctx.input<boolean>("logChanges") && text !== state.lastLogged) {
-        if (ctx.time - state.lastLogTime >= WATCH_LOG_INTERVAL - TIME_EPSILON) {
-          const who = label || ctx.node.name || ctx.id;
-          const item = ctx.loopCount > 1 ? ` #${ctx.loopIndex}` : "";
-          ctx.services.log("log", `${who}${item}: ${text}`);
-          state.lastLogged = text;
-          state.lastLogTime = ctx.time;
-        } else {
-          ctx.requestNextFrame();
-        }
-      }
-    },
-  }),
+export const watch = definePatch<WatchState>("watch", {
   // The default bypass would pass Label into Display; a muted Watch shows nothing and logs nothing.
   mutedBehavior: "zero",
-};
+  state: () => ({ count: 0, lastLogged: null, lastLogTime: -Infinity, started: false }),
+  evaluate(ctx) {
+    const state = ctx.state;
+    const type = ctx.typeParam ?? "number";
+    const text = formatWatchValue(ctx.input("value"), type);
+    // Upstream pulses always count; a boolean state that's already on when this index starts doesn't.
+    const turnedOn = type === "boolean" && ctx.pulsed("value") && (state.started || ctx.isPulseSource("value"));
+    state.started = true;
+    if (ctx.pulsed("reset")) state.count = 0;
+    else if (type === "boolean" ? turnedOn : ctx.changed("value")) state.count += 1;
+
+    const label = String(ctx.input("label") ?? "").trim();
+    const suffix = type === "boolean" && state.count > 0 ? ` · on ${state.count}×` : "";
+    ctx.output("display", (label ? `${label}: ` : "") + text + suffix);
+    ctx.output("changeCount", state.count);
+
+    if (ctx.input<boolean>("logChanges") && text !== state.lastLogged) {
+      if (ctx.time - state.lastLogTime >= WATCH_LOG_INTERVAL - TIME_EPSILON) {
+        const who = label || ctx.node.name || ctx.id;
+        const item = ctx.loopCount > 1 ? ` #${ctx.loopIndex}` : "";
+        ctx.services.log("log", `${who}${item}: ${text}`);
+        state.lastLogged = text;
+        state.lastLogTime = ctx.time;
+      } else {
+        ctx.requestNextFrame();
+      }
+    }
+  },
+});

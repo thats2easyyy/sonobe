@@ -11,7 +11,13 @@ import { ProjectFormatError, slugify, uniqueId, type Id } from "@sonobe/core";
 import { loadProjectFromDisk, saveProjectToDisk } from "@sonobe/core/node";
 import type { EngineRegistry } from "@sonobe/engine";
 import { createPatchRegistry } from "@sonobe/patches";
-import { HostError, type DocumentSummary, type SonobeHost, type WorkIntent } from "./host.ts";
+import {
+  HostError,
+  type DocumentChange,
+  type DocumentSummary,
+  type SonobeHost,
+  type WorkIntent,
+} from "./host.ts";
 import { createDocumentSession, type DocumentSession } from "./session.ts";
 import { createSimulationManager, type SimulationManager } from "./sim.ts";
 import { createTemplateDocument, TEMPLATES } from "./templates.ts";
@@ -26,6 +32,9 @@ export interface HeadlessHostOptions {
 }
 
 export interface HeadlessHost extends SonobeHost {
+  /** Simulations, including scene(simId) for rendering a session's frame. */
+  readonly sim: SimulationManager;
+  onDocumentChange(listener: (change: DocumentChange) => void): () => void;
   /** Dispose simulations. Unsaved changes stay unsaved. */
   close(): Promise<void>;
 }
@@ -45,7 +54,18 @@ export function createHeadlessHost(options: HeadlessHostOptions = {}): HeadlessH
   const now = options.now ?? (() => Date.now());
   const entries = new Map<Id, Entry>();
   const working = new Map<Id, Map<string, WorkIntent>>();
+  const listeners = new Set<(change: DocumentChange) => void>();
   let active: Id | undefined;
+
+  const emit = (change: DocumentChange) => {
+    for (const listener of [...listeners]) {
+      try {
+        listener(change);
+      } catch {
+        // A listener failing (a closed transport) never breaks an edit.
+      }
+    }
+  };
 
   const summary = (entry: Entry): DocumentSummary => ({
     docId: entry.docId,
@@ -145,6 +165,7 @@ export function createHeadlessHost(options: HeadlessHostOptions = {}): HeadlessH
       }
       const entry = addEntry(dir, doc, true);
       active = entry.docId;
+      emit({ kind: "opened", docId: entry.docId });
       return summary(entry);
     },
 
@@ -177,6 +198,7 @@ export function createHeadlessHost(options: HeadlessHostOptions = {}): HeadlessH
       await saveProjectToDisk(dir, doc);
       const entry = addEntry(dir, doc, true);
       if (request.open !== false) active = entry.docId;
+      emit({ kind: "opened", docId: entry.docId });
       return summary(entry);
     },
 
@@ -205,11 +227,14 @@ export function createHeadlessHost(options: HeadlessHostOptions = {}): HeadlessH
 
     async apply(ops, applyOptions) {
       const entry = resolve(applyOptions.docId);
+      const before = entry.session.revision;
       const result = entry.session.apply(ops, applyOptions);
       if (result.ok && !result.dryRun && result.txnId !== undefined && autosave) {
         await save(entry);
         result.saved = true;
       }
+      if (entry.session.revision !== before)
+        emit({ kind: "revision", docId: entry.docId, revision: entry.session.revision });
       return result;
     },
 
@@ -279,16 +304,27 @@ export function createHeadlessHost(options: HeadlessHostOptions = {}): HeadlessH
       },
       async undo(undoOptions) {
         const entry = resolve(undoOptions.docId);
+        const before = entry.session.revision;
         const result = entry.session.undo(undoOptions);
         if (autosave) {
           await save(entry);
           result.saved = true;
         }
+        if (entry.session.revision !== before)
+          emit({ kind: "revision", docId: entry.docId, revision: entry.session.revision });
         return result;
       },
     },
 
+    onDocumentChange(listener) {
+      listeners.add(listener);
+      return () => {
+        listeners.delete(listener);
+      };
+    },
+
     async close() {
+      listeners.clear();
       sim.dispose();
     },
   };

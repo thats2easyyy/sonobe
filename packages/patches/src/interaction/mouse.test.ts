@@ -41,6 +41,19 @@ describe("mouse", () => {
     expect(r.step().outputs.scrollDelta).toEqual([0, 0]);
   });
 
+  it("reports which buttons are held from the pointer's buttons bitmask", () => {
+    const r = createInteractionRig(mouse);
+    r.step();
+    const right = r.step({ events: [{ kind: "pointer", phase: "down", pointerId: 1, pointerType: "mouse", x: 10, y: 10, button: 2, buttons: 2 }] });
+    expect([right.outputs.left, right.outputs.right, right.outputs.middle]).toEqual([false, true, false]);
+    const both = r.step({ events: [{ kind: "pointer", phase: "move", pointerId: 1, pointerType: "mouse", x: 12, y: 10, buttons: 6 }] });
+    expect([both.outputs.left, both.outputs.right, both.outputs.middle]).toEqual([false, true, true]);
+    const up = r.step({ events: [{ kind: "pointer", phase: "up", pointerId: 1, pointerType: "mouse", x: 12, y: 10, button: 2, buttons: 0 }] });
+    expect([up.outputs.left, up.outputs.right, up.outputs.middle]).toEqual([false, false, false]);
+    const finger = r.step({ events: [pointerEvent("down", 30, 30, { pointerType: "touch" })] });
+    expect([finger.outputs.left, finger.outputs.right]).toEqual([true, false]);
+  });
+
   it("resets on restart", () => {
     const r = createInteractionRig(mouse);
     r.step({ events: [pointerEvent("move", 40, 60)] });

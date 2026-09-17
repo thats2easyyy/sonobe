@@ -36,8 +36,17 @@ export interface ApplyInput {
   label: string;
   /** Default {kind: "human", name: "You"}. */
   author?: Author;
-  /** Consecutive applies with the same key and author merge into one undo group (scrubbing). */
+  /**
+   * Consecutive applies with the same key and author merge into one undo group. Without `gesture`
+   * they merge while they arrive within the history's coalesce window (1 s by default).
+   */
   coalesceKey?: string;
+  /**
+   * Explicit gesture phases for `coalesceKey` (a scrub, a drag): "begin" starts a new group, and
+   * "update" and "end" merge into it however long the gesture lasts, until "end" or `endGesture`.
+   * An "update" or "end" without an open gesture starts one.
+   */
+  gesture?: "begin" | "update" | "end";
   dryRun?: boolean;
   /** Fail with "revision_mismatch" unless the store is at this revision. */
   expectedRevision?: number;
@@ -128,12 +137,15 @@ export interface DocumentState {
   externalChange: PendingExternalChange | null;
 
   apply: (ops: readonly Op[], input: ApplyInput) => ApplyOpsResult;
+  /** Close the open gesture (optionally only when it has this coalesce key); the next apply starts a new undo group. */
+  endGesture: (coalesceKey?: string) => void;
   undo: (author?: Author) => HistoryStepResult;
   redo: (author?: Author) => HistoryStepResult;
   /** Undo every group up to and including `txnId`. */
   undoTo: (txnId: string, author?: Author) => HistoryStepResult;
   replaceDocument: (doc: SonobeDocument, options?: ReplaceOptions) => void;
-  newDocument: (options?: CreateDocumentOptions) => void;
+  /** Start an unsaved document: empty (from `options`), or `document` when given (templates). */
+  newDocument: (options?: CreateDocumentOptions, document?: SonobeDocument) => void;
   /** Open `path`, or ask the host for one. */
   open: (path?: string) => Promise<FileResult>;
   save: () => Promise<FileResult>;
@@ -204,11 +216,31 @@ function sameDocumentContent(a: SonobeDocument, b: SonobeDocument): boolean {
 const errorMessage = (err: unknown) => (err instanceof Error ? err.message : String(err));
 const errorCode = (err: unknown) => (err && typeof err === "object" && typeof (err as { code?: unknown }).code === "string" ? (err as { code: string }).code : "io_error");
 
+const sameAuthor = (a: Author, b: Author) => a.kind === b.kind && a.name === b.name;
+
+/** The undo group applies with a coalesce key are merging into. */
+interface CoalesceGroup {
+  key: string;
+  /** Unique per group, so core History merges only what this store decides to merge. */
+  stored: string;
+  author: Author;
+  txnId: string;
+  at: number;
+  /** Started by an explicit gesture (no time window). */
+  gesture: boolean;
+  /** The gesture hasn't ended. */
+  open: boolean;
+}
+
 export function createDocumentStore(options: DocumentStoreOptions): DocumentStore {
   const registry = options.registry;
   const host = options.host ?? null;
   const now = options.now ?? (() => Date.now());
-  const history = createHistory({ ...options.history, now: options.history?.now ?? now });
+  const coalesceWindowMs = options.history?.coalesceWindowMs ?? 1000;
+  // The store decides what merges (time windows and gestures); History merges whatever shares a key.
+  const history = createHistory({ ...options.history, coalesceWindowMs: Number.POSITIVE_INFINITY, now: options.history?.now ?? now });
+  let group: CoalesceGroup | null = null;
+  let groupCounter = 0;
   /** Ids removed this session; never generated again (ARCHITECTURE §3.2). */
   const removedIds = new Set<Id>();
   let savedKey = "";
@@ -244,6 +276,7 @@ export function createDocumentStore(options: DocumentStoreOptions): DocumentStor
     };
 
     const replay = (kind: "undo" | "redo", steps: HistoryStep[], author: Author): HistoryStepResult => {
+      group = null;
       let doc = get().doc;
       const affected = { components: new Set<Id>(), layers: new Set<Id>(), patches: new Set<Id>() };
       let opCount = 0;
@@ -292,6 +325,7 @@ export function createDocumentStore(options: DocumentStoreOptions): DocumentStor
     };
 
     const replaceDocument = (doc: SonobeDocument, replaceOptions: ReplaceOptions = {}) => {
+      group = null;
       if (replaceOptions.keepHistory) history.bump();
       else {
         history.clear();
@@ -380,17 +414,44 @@ export function createDocumentStore(options: DocumentStoreOptions): DocumentStor
           defaultComponent: input.defaultComponent,
           reservedIds: removedIds,
         });
-        if (input.dryRun || result.doc === s.doc || result.applied.length === 0) return result;
+        if (input.dryRun) return result;
+        if (result.doc === s.doc || result.applied.length === 0) {
+          if (input.gesture === "end") get().endGesture(input.coalesceKey);
+          return result;
+        }
         trackRemoved(s.doc, result.doc, result.affected.components);
+        const key = input.coalesceKey;
+        if (key !== undefined) {
+          const top = history.peekUndo();
+          const sameGroup = group !== null && group.key === key && sameAuthor(group.author, author) && top?.txnId === group.txnId;
+          const continuing =
+            sameGroup && (group!.gesture ? group!.open && input.gesture !== "begin" : input.gesture === undefined && now() - group!.at <= coalesceWindowMs);
+          if (!continuing) {
+            const gesture = input.gesture !== undefined;
+            group = { key, stored: `${key} ${++groupCounter}`, author: { ...author }, txnId: "", at: 0, gesture, open: gesture };
+          }
+        }
+        const coalescing = key !== undefined ? group : null;
         const entry = history.push({
           label: input.label,
           author,
           ops: result.applied,
           inverse: result.inverse,
-          ...(input.coalesceKey !== undefined ? { coalesceKey: input.coalesceKey } : {}),
+          ...(coalescing ? { coalesceKey: coalescing.stored } : {}),
         });
+        if (coalescing) {
+          coalescing.txnId = entry.txnId;
+          coalescing.at = now();
+          if (input.gesture === "end") coalescing.open = false;
+        } else {
+          group = null;
+        }
         commit(result.doc, { kind: "apply", revision: history.revision, author, label: input.label, txnId: entry.txnId, affected: result.affected, opCount: result.applied.length, timestamp: now() });
         return result;
+      },
+
+      endGesture(coalesceKey) {
+        if (group?.gesture && (coalesceKey === undefined || group.key === coalesceKey)) group.open = false;
       },
 
       undo(author = HUMAN_AUTHOR) {
@@ -413,9 +474,9 @@ export function createDocumentStore(options: DocumentStoreOptions): DocumentStor
 
       replaceDocument,
 
-      newDocument(createOptions) {
+      newDocument(createOptions, document) {
         watch(null);
-        replaceDocument(createEmptyDocument(createOptions), { projectPath: null, saved: true, label: "New prototype" });
+        replaceDocument(document ?? createEmptyDocument(createOptions), { projectPath: null, saved: true, label: "New prototype" });
       },
 
       async open(path) {

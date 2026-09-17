@@ -5,8 +5,7 @@
  */
 
 import { clamp, definePatch, normalizeZero, toBool } from "../infra/index.ts";
-import { devicePlatform } from "./platform.ts";
-import { finiteVector, withMutedBehavior } from "./shared.ts";
+import { finiteVector } from "./shared.ts";
 
 interface MotionState {
   tilt: number[];
@@ -34,31 +33,28 @@ export function tiltFromGravity(g: readonly number[], previous: readonly number[
 
 const NON_FINITE = "Device Motion: the sensor reported a value that isn't a finite number, so it reads 0.";
 
-export const deviceMotionPatch = withMutedBehavior(
-  definePatch<MotionState>("deviceMotion", {
-    state: () => ({ tilt: [0, 0, 0], acceleration: [0, 0, 0], rotationRate: [0, 0, 0], available: false }),
-    evaluate(ctx) {
-      const s = ctx.state;
-      if (toBool(ctx.input("enabled"))) {
-        const sample = devicePlatform(ctx.services).deviceMotion?.();
-        if (sample) {
-          s.available = true;
-          s.acceleration = finiteVector(ctx, sample.acceleration, 3, "nonFinite", NON_FINITE);
-          s.rotationRate = finiteVector(ctx, sample.rotationRate, 3, "nonFinite", NON_FINITE);
-          // The engine's simulated sample carries attitude [0, 0, 0]; treat an all-zero attitude as absent.
-          const attitude = sample.attitude;
-          const hasAttitude = Array.isArray(attitude) && attitude.some((v) => v !== 0);
-          s.tilt = hasAttitude ? finiteVector(ctx, attitude, 3, "nonFinite", NON_FINITE) : tiltFromGravity(s.acceleration, s.tilt);
-        }
-        ctx.requestNextFrame();
-      } else {
-        s.available = false;
+export const deviceMotionPatch = definePatch<MotionState>("deviceMotion", {
+  mutedBehavior: "zero",
+  state: () => ({ tilt: [0, 0, 0], acceleration: [0, 0, 0], rotationRate: [0, 0, 0], available: false }),
+  evaluate(ctx) {
+    const s = ctx.state;
+    if (toBool(ctx.input("enabled"))) {
+      const sample = ctx.services.platform.deviceMotion?.();
+      if (sample) {
+        s.available = true;
+        s.acceleration = finiteVector(ctx, sample.acceleration, 3, "nonFinite", NON_FINITE);
+        s.rotationRate = finiteVector(ctx, sample.rotationRate, 3, "nonFinite", NON_FINITE);
+        // Samples without attitude (simulation, hosts without an orientation sensor) derive Tilt from gravity.
+        const attitude = sample.attitude;
+        s.tilt = Array.isArray(attitude) ? finiteVector(ctx, attitude, 3, "nonFinite", NON_FINITE) : tiltFromGravity(s.acceleration, s.tilt);
       }
-      ctx.output("tilt", [...s.tilt]);
-      ctx.output("acceleration", [...s.acceleration]);
-      ctx.output("rotationRate", [...s.rotationRate]);
-      ctx.output("available", s.available);
-    },
-  }),
-  "zero",
-);
+      ctx.requestNextFrame();
+    } else {
+      s.available = false;
+    }
+    ctx.output("tilt", [...s.tilt]);
+    ctx.output("acceleration", [...s.acceleration]);
+    ctx.output("rotationRate", [...s.rotationRate]);
+    ctx.output("available", s.available);
+  },
+});

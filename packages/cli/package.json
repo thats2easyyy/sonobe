@@ -2,12 +2,26 @@
   "name": "@sonobe/cli",
   "version": "0.1.0",
   "private": true,
+  "description": "The sonobe command: create, validate, simulate and serve Sonobe prototypes over MCP.",
+  "license": "MIT",
   "type": "module",
   "bin": {
-    "sonobe": "./src/main.ts"
+    "sonobe": "./dist/sonobe.mjs"
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=22"
   },
   "exports": {
     ".": "./src/index.ts"
+  },
+  "scripts": {
+    "build": "node scripts/bundle.ts",
+    "prepack": "node scripts/bundle.ts",
+    "dev": "node src/main.ts"
   },
   "dependencies": {
     "@sonobe/core": "*",

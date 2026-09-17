@@ -2,15 +2,10 @@
 
 import type { PatchContext, PointerSnapshot } from "@sonobe/engine";
 import { definePatch, finiteOr } from "../infra/index.ts";
-import { TOUCH_SLOP, layerInput, withMutedBehavior } from "./shared.ts";
+import { TOUCH_SLOP, layerInput } from "./shared.ts";
 
 interface SwipeState {
   blocked: boolean;
-}
-
-/** True when the snapshot says the press was cancelled (a field the contract doesn't have yet). */
-function wasCancelled(snap: PointerSnapshot): boolean {
-  return (snap as { cancelled?: unknown }).cancelled === true;
 }
 
 function judge(ctx: PatchContext<SwipeState>, snap: PointerSnapshot): void {
@@ -32,17 +27,15 @@ function judge(ctx: PatchContext<SwipeState>, snap: PointerSnapshot): void {
   else ctx.pulse(direction < 0 ? "swipedUp" : "swipedDown");
 }
 
-export const swipe = withMutedBehavior(
-  definePatch<SwipeState>("swipe", {
-    state: () => ({ blocked: false }),
-    evaluate(ctx) {
-      const state = ctx.state;
-      const snap = ctx.services.pointer(layerInput(ctx));
-      const enabled = ctx.input<boolean>("enabled") === true;
-      if (!enabled && (snap.down || snap.ended)) state.blocked = true;
-      if (enabled && !state.blocked && snap.ended && !wasCancelled(snap)) judge(ctx, snap);
-      if (!snap.down) state.blocked = false;
-    },
-  }),
-  "zero",
-);
+export const swipe = definePatch<SwipeState>("swipe", {
+  state: () => ({ blocked: false }),
+  evaluate(ctx) {
+    const state = ctx.state;
+    const snap = ctx.services.pointer(layerInput(ctx));
+    const enabled = ctx.input<boolean>("enabled") === true;
+    if (!enabled && (snap.down || snap.ended)) state.blocked = true;
+    if (enabled && !state.blocked && snap.ended && !snap.cancelled) judge(ctx, snap); // a cancelled press (the browser took over) never swipes
+    if (!snap.down) state.blocked = false;
+  },
+  mutedBehavior: "zero",
+});

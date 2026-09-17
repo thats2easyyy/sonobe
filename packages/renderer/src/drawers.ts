@@ -21,10 +21,17 @@ const finite = (n: unknown, fallback = 0) => (typeof n === "number" && Number.is
 export const nodeWidth = (node: SceneNode) => Math.max(0, finite(node.width));
 export const nodeHeight = (node: SceneNode) => Math.max(0, finite(node.height));
 
-/** Corner radii [topLeft, topRight, bottomRight, bottomLeft]: cornerRadii when set, else cornerRadius. */
+/**
+ * Corner radii [topLeft, topRight, bottomRight, bottomLeft]: cornerRadii when it rounds any corner,
+ * else cornerRadius. The engine resolves every prop, so an unset cornerRadii (default null) arrives
+ * as its type's zero value [0, 0, 0, 0]; that must not override cornerRadius.
+ */
 export function readRadii(p: PropReader): [number, number, number, number] {
   const raw = p.raw("cornerRadii");
-  if (Array.isArray(raw) && raw.length > 0) return readVec(raw, 4, [0, 0, 0, 0]).map((r) => Math.max(0, r)) as [number, number, number, number];
+  if (Array.isArray(raw) && raw.length > 0) {
+    const radii = readVec(raw, 4, [0, 0, 0, 0]).map((r) => Math.max(0, r)) as [number, number, number, number];
+    if (radii.some((r) => r > 0)) return radii;
+  }
   const r = Math.max(0, p.num("cornerRadius", 0));
   return [r, r, r, r];
 }

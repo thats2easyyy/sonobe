@@ -1,5 +1,5 @@
 /**
- * Helpers shared by the animation patches: variant lookup, muted behavior, finite targets, the
+ * Helpers shared by the animation patches: variant lookup, finite targets, the
  * gesture-handoff spring behind Spring Animation and Fluid Spring Animation, and CSS cubic Bézier
  * easing with straight-line extension outside 0–1.
  */
@@ -7,7 +7,7 @@
 import { resolveTypeParam } from "@sonobe/core";
 import type { PatchSpec, ValueType } from "@sonobe/core";
 import { SPRING_MAX_DELTA_TIME, SPRING_SOLVER_TIMESTEP, createVectorSpringState, cubicBezier, setVectorSpringTarget, stepVectorSpring } from "@sonobe/engine";
-import type { MutedBehavior, PatchContext, PatchDefinition, RuntimePatchDefinition, SpringConfig, VectorSpringState } from "@sonobe/engine";
+import type { PatchContext, SpringConfig, VectorSpringState } from "@sonobe/engine";
 import { clamp, components, sameComponents, warnOnce } from "../infra/index.ts";
 import type { OnceContext } from "../infra/index.ts";
 import { getSpec } from "../specs.ts";
@@ -22,13 +22,6 @@ export function requireSpec(type: string): PatchSpec {
 /** The effective variant: the node's typeParam when the spec allows it, else the first variant. */
 export function variantOf(ctx: Pick<PatchContext, "typeParam">, spec: PatchSpec): ValueType {
   return resolveTypeParam(spec, ctx.typeParam) ?? "number";
-}
-
-/** Declare how the runtime treats the patch while muted (engine extension, see engine README). */
-export function withMutedBehavior<S>(definition: PatchDefinition<S>, mutedBehavior: MutedBehavior): RuntimePatchDefinition<S> {
-  const runtimeDefinition: RuntimePatchDefinition<S> = definition;
-  runtimeDefinition.mutedBehavior = mutedBehavior;
-  return runtimeDefinition;
 }
 
 /**

@@ -2,9 +2,10 @@ import type { RuntimeServices } from "@sonobe/engine";
 import { describe, expect, it } from "vitest";
 import { logOnce, resetOnceLog, warnOnce } from "./warn.ts";
 
-function setup() {
+function setup(extra: Record<string, unknown> = {}) {
   const logs: string[] = [];
   const services = { log: (level: string, ...args: unknown[]) => logs.push(`${level}: ${String(args[0])}`) } as unknown as RuntimeServices;
+  Object.defineProperties(services, Object.getOwnPropertyDescriptors(extra));
   const ctx = (frame: number, id = "divide_1") => ({ id, componentPath: "main", frame, services });
   return { logs, ctx, services };
 }
@@ -19,6 +20,34 @@ describe("warnOnce", () => {
     expect(warnOnce(ctx(4), "zero", "still quiet")).toBe(false);
     expect(warnOnce(ctx(0), "zero", "after restart")).toBe(true);
     expect(logs).toEqual(["warn: divide_1: Value 2 is 0, so the output is 0.", "warn: other key", "warn: other patch", "warn: after restart"]);
+  });
+
+  it("repeats after a restart even when the warning only fires on frame 0", () => {
+    const restarts = { count: 0 };
+    const { logs, ctx } = setup({
+      get restartCount() {
+        return restarts.count;
+      },
+    });
+    expect(warnOnce(ctx(0), "start", "launch warning")).toBe(true);
+    expect(warnOnce(ctx(0), "start", "same frame, same run")).toBe(false);
+    restarts.count = 1;
+    expect(warnOnce(ctx(0), "start", "after restart")).toBe(true);
+    expect(warnOnce(ctx(12), "start", "later in that run")).toBe(false);
+    restarts.count = 2;
+    expect(warnOnce(ctx(20), "start", "frames went forward, but the prototype restarted")).toBe(true);
+    expect(logs).toEqual(["warn: launch warning", "warn: after restart", "warn: frames went forward, but the prototype restarted"]);
+  });
+
+  it("warns through ctx.warnOnce when the context has it", () => {
+    const { logs, services } = setup({ restartCount: 0 });
+    const delegated: string[] = [];
+    const ctx = { id: "p", componentPath: "main", frame: 0, services, warnOnce: (key: string, message: string) => delegated.push(`${key}: ${message}`) };
+    expect(warnOnce(ctx, "k", "through the engine")).toBe(true);
+    expect(warnOnce(ctx, "k", "deduplicated")).toBe(false);
+    expect(logOnce(ctx, "error", "k", "errors still log directly")).toBe(true);
+    expect(delegated).toEqual(["k: through the engine"]);
+    expect(logs).toEqual(["error: errors still log directly"]);
   });
 
   it("keeps levels and runtimes separate, and can be reset", () => {

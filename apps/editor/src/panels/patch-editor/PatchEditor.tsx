@@ -1,10 +1,12 @@
 /**
  * The patch editor: the current component's patch graph on React Flow. Patches, layer property
  * targets, comments, and cables are derived from the document; every edit goes through the
- * document store with an undo label; live values and pulse sparks come from the RuntimeHost.
+ * document store with an undo label; live values and pulse sparks come from the RuntimeHost (inside
+ * component instances too).
  */
 
-import { canConnect, type Id } from "@sonobe/core";
+import { canConnect, findLayer, getPatchSpec, isLinkInput, parseAddress, type Id } from "@sonobe/core";
+import { isLoop } from "@sonobe/engine";
 import {
   applyNodeChanges,
   Background,
@@ -42,20 +44,24 @@ import { useLatest } from "../../ui/lib/hooks.ts";
 import { useContextMenu } from "../../ui/Menu.tsx";
 import { toast } from "../../ui/Toast.tsx";
 import { CableEdgeView, ConnectionLineView } from "./components/CableEdge.tsx";
-import { ArmedHint, EmptyGraph, PatchEditorBreadcrumbs, Toolbar, ZoomControls } from "./components/Chrome.tsx";
-import { LinkDragSearch, PatchInfoDialog, PatchPickerDialog } from "./components/Dialogs.tsx";
+import { ArmedHint, EmptyGraph, LiveScopeChip, PatchEditorBreadcrumbs, Toolbar, ZoomControls } from "./components/Chrome.tsx";
+import { LinkDragSearch, PatchInfoDialog, PatchPickerDialog, SpliceChooser, type SpliceChoiceRequest } from "./components/Dialogs.tsx";
 import { cableMenu, commentMenu, layerMenu, paneMenu, patchMenu, type MenuContext } from "./components/menus.ts";
 import { CommentNodeView, InterfaceNodeView, LayerNodeView, PatchNodeView } from "./components/NodeViews.tsx";
 import { PortHoverCard } from "./components/PortHoverCard.tsx";
 import { orientConnection, portAtHandle, quickConnectCheck, type HandleRef } from "./model/connect.ts";
-import { estimateNodeSize, HEADER_HEIGHT, pointInRect, rectContains, ROW_HEIGHT, sampleCable, type Point, type Rect } from "./model/geometry.ts";
+import { patchTitle, spliceOptions, type SpliceOption } from "./model/editOps.ts";
+import { boundsOf, boundsVisible, estimateNodeSize, HEADER_HEIGHT, pointInRect, readableViewport, rectContains, ROW_HEIGHT, sampleCable, type Point, type Rect } from "./model/geometry.ts";
 import { deriveGraph } from "./model/graph.ts";
+import { resolveLiveScope, scopedAddress, type LiveScope } from "./model/instances.ts";
 import { cablesCutByKnife, simplifyStroke, type CableGeometry } from "./model/knife.ts";
-import type { LinkSearchItem } from "./model/linkSearch.ts";
+import type { LinkCandidate } from "./model/linkSearch.ts";
 import type { PickerItem } from "./model/picker.ts";
-import { singleKeyInserts } from "./model/singleKey.ts";
+import { estimatePatchSize } from "./model/placement.ts";
 import { reconcileNodes } from "./model/reconcile.ts";
+import { singleKeyInserts } from "./model/singleKey.ts";
 import {
+  addressNode,
   commentIdOfNode,
   commentNodeId,
   flowNodeKind,
@@ -70,12 +76,12 @@ import {
   type GraphNodeData,
   type PortModel,
   type PortSide,
-  type SessionPositions,
 } from "./model/types.ts";
 import { centerOfView, createPatchEditorActions, type LinkSearchRequest, type PatchEditorActions, type PickerRequest, type XY } from "./state/actions.ts";
+import { patchEditorBridge, registerPatchEditor } from "./state/bridge.ts";
 import { PatchEditorContext, type PatchEditorContextValue } from "./state/context.ts";
+import { completeConnectionToLayerProp, dropTargetAt } from "./state/linkToLayer.ts";
 import { createLiveStore } from "./state/liveStore.ts";
-import { sessionPositionsStore } from "./state/sessionPositions.ts";
 import { createUiStore, type UiStore } from "./state/uiStore.ts";
 import { useReducedMotion } from "./state/useReducedMotion.ts";
 import "./patch-editor.css";
@@ -98,11 +104,13 @@ export interface PatchEditorProps {
 
 const NODE_TYPES = { patch: PatchNodeView, layer: LayerNodeView, interface: InterfaceNodeView, comment: CommentNodeView } as unknown as NodeTypes;
 const EDGE_TYPES = { cable: CableEdgeView } as unknown as EdgeTypes;
-const EMPTY_POSITIONS: SessionPositions = {};
+const EMPTY_TARGETS: readonly string[] = [];
 const PAN_BUTTONS = [1];
 const MULTI_SELECT_KEYS = ["Meta", "Shift", "Control"];
 const ZOOM_KEYS = ["Meta", "Control"];
-const FIT_OPTIONS = { padding: 0.14, maxZoom: 1 };
+const MIN_ZOOM = 0.1;
+/** Below this size the canvas is hidden or collapsing; don't fit to it. */
+const MIN_CANVAS = 48;
 
 type Flow = ReactFlowInstance<FlowNode, CableFlowEdge>;
 
@@ -139,12 +147,19 @@ interface CanvasProps {
 
 /** The modifier keys drag handlers read (React Flow passes mouse or touch events). */
 type ModifierEvent = { altKey: boolean; metaKey: boolean; ctrlKey: boolean };
+type DragEvent = ModifierEvent & (MouseEvent | TouchEvent | ReactMouseEvent);
 
 interface DragState {
   start: Map<string, XY>;
   duplicate: boolean;
   /** Nodes inside dragged comments: id → the comment and the child's start position. */
   children: Map<string, { commentId: string; start: XY }>;
+}
+
+interface PendingSplice extends SpliceChoiceRequest {
+  patchId: Id;
+  position: XY;
+  cable: { from: string; to: string };
 }
 
 function nodeRect(node: FlowNode): Rect {
@@ -154,11 +169,14 @@ function nodeRect(node: FlowNode): Rect {
   return { x: node.position.x, y: node.position.y, ...size };
 }
 
-function clientPoint(event: MouseEvent | TouchEvent): XY {
+function clientPoint(event: MouseEvent | TouchEvent | ReactMouseEvent): XY {
   if ("changedTouches" in event && event.changedTouches.length) return { x: event.changedTouches[0]!.clientX, y: event.changedTouches[0]!.clientY };
   const e = event as MouseEvent;
   return { x: e.clientX, y: e.clientY };
 }
+
+/** A string that changes only when the live scope does, so the context value stays stable across edits. */
+const scopeKey = (scope: LiveScope) => `${scope.prefix ?? "∅"}|${scope.steps.map((s) => `${s.parent}>${s.component}:${s.instance}:${s.instances.map((i) => `${i.id}=${i.name}`).join(",")}`).join(";")}`;
 
 function Canvas({ session, componentId, showBreadcrumbs, showToolbar, defaultMinimap, commands }: CanvasProps) {
   const registry = session.registry;
@@ -169,21 +187,37 @@ function Canvas({ session, componentId, showBreadcrumbs, showToolbar, defaultMin
   const [ui] = useState(() => createUiStore({ minimap: defaultMinimap }));
   const [live] = useState(createLiveStore);
   const [geometry] = useState(() => new Map<string, CableGeometry>());
-  const positionsStore = sessionPositionsStore(session);
+  const bridge = patchEditorBridge(session);
   const reducedMotion = useReducedMotion();
   const pointerRef = useRef<XY | null>(null);
   const hoveringRef = useRef(false);
+  const mountedRef = useRef(true);
   const [picker, setPicker] = useState<PickerRequest | null>(null);
   const [linkSearch, setLinkSearch] = useState<LinkSearchRequest | null>(null);
+  const [splice, setSplice] = useState<PendingSplice | null>(null);
+  const spliceRef = useRef<PendingSplice | null>(null);
   const [infoId, setInfoId] = useState<Id | null>(null);
   const menu = useContextMenu();
 
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
+
   // -- Document → graph ------------------------------------------------------
   const doc = useStore(session.document, (s) => s.doc);
-  const liveEnabled = componentId === doc.project.root;
+  const componentPath = useStore(session.selection, (s) => s.componentPath);
+  const instanceChoices = useStore(bridge, (s) => s.instanceChoices);
+  const pendingTargets = useStore(bridge, (s) => s.targets[componentId]) ?? EMPTY_TARGETS;
+  const scope = resolveLiveScope(doc, componentPath, instanceChoices);
+  const liveScopeKey = scopeKey(scope);
+  const liveScope = useMemo(() => scope, [liveScopeKey]); // eslint-disable-line react-hooks/exhaustive-deps
+  const livePrefix = liveScope.prefix;
+  const liveEnabled = livePrefix !== null;
   const runtimeDiagnostics = useStore(session.runtime.state, (s) => s.diagnostics);
   const working = useStore(session.presence, (s) => s.working);
-  const positions = useStore(positionsStore, (s) => s.byComponent[componentId]) ?? EMPTY_POSITIONS;
   const selectedPatches = useStore(session.selection, (s) => s.patches);
   const selectedComments = useStore(session.selection, (s) => s.comments);
   const selectedLayers = useStore(session.selection, (s) => s.layers);
@@ -200,15 +234,17 @@ function Canvas({ session, componentId, showBreadcrumbs, showToolbar, defaultMin
     return map;
   }, [working, componentId]);
 
+  // Runtime issues are attributed to the root component (engine limitation).
+  const rootComponent = componentId === doc.project.root;
   const diagnostics = useMemo(() => {
     const base = diagnosticsFor(doc, registry);
-    return liveEnabled && runtimeDiagnostics.length ? [...base, ...runtimeDiagnostics] : base;
-  }, [doc, registry, liveEnabled, runtimeDiagnostics]);
+    return rootComponent && runtimeDiagnostics.length ? [...base, ...runtimeDiagnostics] : base;
+  }, [doc, registry, rootComponent, runtimeDiagnostics]);
 
   const modelRef = useRef<GraphModel | null>(null);
   const model = useMemo(
-    () => deriveGraph({ doc, componentId, registry, diagnostics, working: workingMap, positions, previous: modelRef.current }),
-    [doc, componentId, registry, diagnostics, workingMap, positions],
+    () => deriveGraph({ doc, componentId, registry, diagnostics, working: workingMap, pendingTargets, previous: modelRef.current }),
+    [doc, componentId, registry, diagnostics, workingMap, pendingTargets],
   );
   modelRef.current = model;
   const edgeById = useMemo(() => new Map(model.edges.map((e) => [e.id, e])), [model.edges]);
@@ -220,16 +256,27 @@ function Canvas({ session, componentId, showBreadcrumbs, showToolbar, defaultMin
         registry,
         componentId,
         ui,
-        positions: positionsStore,
         flow: () => flowRef.current,
         pointer: () => pointerRef.current,
         openPicker: (request) => setPicker(request),
         openInfo: (patchId) => setInfoId(patchId),
       }),
-    [session, registry, componentId, ui, positionsStore],
+    [session, registry, componentId, ui],
   );
 
-  const context = useMemo<PatchEditorContextValue>(() => ({ session, registry, componentId, ui, live, geometry, actions, reducedMotion, liveEnabled }), [session, registry, componentId, ui, live, geometry, actions, reducedMotion, liveEnabled]);
+  // -- Viewport: readable first fit, and re-fit or keep the center when the panel resizes ---------
+  const savedViewport = useMemo(() => session.selection.getState().patchViewports[componentId], [session, componentId]);
+  /** The view was placed by an automatic fit and the user hasn't moved it since. */
+  const fitModeRef = useRef(!savedViewport);
+  const [fitted, setFitted] = useState(!!savedViewport);
+  const markViewportManual = useCallback(() => {
+    fitModeRef.current = false;
+  }, []);
+
+  const context = useMemo<PatchEditorContextValue>(
+    () => ({ session, registry, componentId, ui, live, geometry, actions, reducedMotion, liveEnabled, liveScope, markViewportManual }),
+    [session, registry, componentId, ui, live, geometry, actions, reducedMotion, liveEnabled, liveScope, markViewportManual],
+  );
 
   // -- React Flow node state ------------------------------------------------
   const [nodes, setNodes] = useState<FlowNode[]>([]);
@@ -247,6 +294,59 @@ function Canvas({ session, componentId, showBreadcrumbs, showToolbar, defaultMin
     const next = reconcileNodes(nodesRef.current, model.nodes, { selected: selectedSet, dragging: draggingRef.current });
     if (next !== nodesRef.current) commit(next);
   }, [model.nodes, selectedSet, tick, commit]);
+
+  const autoFit = useCallback((): boolean => {
+    const el = wrapperRef.current;
+    if (!el || el.clientWidth < MIN_CANVAS || el.clientHeight < MIN_CANVAS) return false;
+    const bounds = boundsOf(nodesRef.current.map(nodeRect));
+    fitModeRef.current = true;
+    setFitted(true);
+    if (!bounds) return true;
+    void flowRef.current.setViewport(readableViewport(bounds, el.clientWidth, el.clientHeight, { maxZoom: 1, minZoom: MIN_ZOOM }));
+    return true;
+  }, []);
+
+  const onInit = useCallback(() => {
+    if (savedViewport) return;
+    requestAnimationFrame(() => {
+      if (mountedRef.current && fitModeRef.current) autoFit();
+    });
+  }, [savedViewport, autoFit]);
+
+  useEffect(() => {
+    const el = wrapperRef.current;
+    if (!el || typeof ResizeObserver === "undefined") return;
+    let before = { width: el.clientWidth, height: el.clientHeight };
+    let frame = 0;
+    const observer = new ResizeObserver(() => {
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(() => {
+        const next = { width: el.clientWidth, height: el.clientHeight };
+        const prev = before;
+        before = next;
+        if (next.width === prev.width && next.height === prev.height) return;
+        if (next.width < MIN_CANVAS || next.height < MIN_CANVAS) return;
+        const f = flowRef.current;
+        const hiddenBefore = prev.width < MIN_CANVAS || prev.height < MIN_CANVAS;
+        if (hiddenBefore) {
+          if (fitModeRef.current) autoFit();
+          return;
+        }
+        const viewport = f.getViewport();
+        const bounds = boundsOf(nodesRef.current.map(nodeRect));
+        if (fitModeRef.current || (bounds && boundsVisible(bounds, viewport, prev.width, prev.height, 8))) {
+          autoFit();
+          return;
+        }
+        void f.setViewport({ x: viewport.x + (next.width - prev.width) / 2, y: viewport.y + (next.height - prev.height) / 2, zoom: viewport.zoom });
+      });
+    });
+    observer.observe(el);
+    return () => {
+      observer.disconnect();
+      cancelAnimationFrame(frame);
+    };
+  }, [autoFit]);
 
   const edges = useMemo(() => {
     if (selectedEdges.length === 0) return model.edges;
@@ -299,6 +399,59 @@ function Canvas({ session, componentId, showBreadcrumbs, showToolbar, defaultMin
     },
     [ui],
   );
+
+  // -- Bridge: other panels drive layer properties through this editor -------------------
+  useEffect(() => registerPatchEditor(session, { componentId, connect: (from, to) => actions.connect(from, to) }), [session, componentId, actions]);
+
+  useEffect(() => {
+    if (pendingTargets.length === 0) return;
+    const c = doc.components[componentId];
+    const stale = pendingTargets.filter((address) => {
+      const a = parseAddress(address);
+      const layer = a?.kind === "layer" && c ? findLayer(c.layers, a.id)?.layer : undefined;
+      return !layer || !a || isLinkInput(layer.props[a.key]);
+    });
+    if (stale.length) bridge.getState().removeTargets(componentId, stale);
+  }, [doc, componentId, pendingTargets, bridge]);
+
+  /** Where an input handle sits in flow coordinates (measured when rendered, else estimated from its row). */
+  const inputPoint = useCallback((nodeId: string, handleId: string): XY => {
+    const internal = flowRef.current.getInternalNode(nodeId);
+    const bounds = internal?.internals.handleBounds?.target?.find((h) => h.id === handleId);
+    if (internal && bounds) return { x: internal.internals.positionAbsolute.x + bounds.x + bounds.width / 2, y: internal.internals.positionAbsolute.y + bounds.y + bounds.height / 2 };
+    const node = nodesRef.current.find((n) => n.id === nodeId);
+    const data = node?.data as GraphNodeData | undefined;
+    const index = data && data.kind !== "comment" ? Math.max(0, data.inputs.findIndex((p) => p.handleId === handleId)) : 0;
+    return { x: node?.position.x ?? 0, y: (node?.position.y ?? 0) + HEADER_HEIGHT + index * ROW_HEIGHT + ROW_HEIGHT / 2 };
+  }, []);
+
+  const driveRequest = useStore(bridge, (s) => s.request);
+  useEffect(() => {
+    if (!driveRequest || driveRequest.component !== componentId) return;
+    const target = addressNode(driveRequest.address);
+    const port = model.ports.get(portKey("in", driveRequest.address));
+    if (!target || !port || !model.nodeIds.has(target.nodeId)) return;
+    bridge.getState().consumeRequest(driveRequest.nonce);
+    markViewportManual();
+    const address = driveRequest.address;
+    ui.getState().set({ highlightPort: address, hoverPort: null });
+    const run = async () => {
+      const f = flowRef.current;
+      const at = inputPoint(target.nodeId, port.handleId);
+      const zoom = Math.min(1.2, Math.max(0.85, f.getZoom()));
+      const width = wrapperRef.current?.clientWidth ?? 800;
+      await f.setCenter(at.x - Math.min(180, width * 0.2) / zoom, at.y, { zoom, duration: reducedMotion ? 0 : 220 });
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      if (!mountedRef.current) return;
+      const point = inputPoint(target.nodeId, port.handleId);
+      const client = f.flowToScreenPosition(point);
+      setLinkSearch({ client: { x: client.x - 10, y: client.y - 12 }, position: point, side: "in", address, type: port.type, drive: true, targetName: port.name, placement: "left-start" });
+    };
+    void run();
+    setTimeout(() => {
+      if (mountedRef.current && ui.getState().highlightPort === address) ui.getState().set({ highlightPort: null });
+    }, 2400);
+  }, [driveRequest, componentId, model, bridge, ui, inputPoint, markViewportManual, reducedMotion]);
 
   // -- Dragging nodes -------------------------------------------------------
   const findSpliceTarget = useCallback(
@@ -360,14 +513,29 @@ function Canvas({ session, componentId, showBreadcrumbs, showToolbar, defaultMin
         }
         commit(nodesRef.current.map((n) => (moves.has(n.id) ? { ...n, position: moves.get(n.id)! } : n)));
       }
-      const splice = (event.metaKey || event.ctrlKey) && dragged.length === 1 && dragged[0]!.type === "patch" ? findSpliceTarget(dragged[0]!) : null;
-      if (ui.getState().spliceEdge !== splice) ui.getState().set({ spliceEdge: splice });
+      const splicing = (event.metaKey || event.ctrlKey) && dragged.length === 1 && dragged[0]!.type === "patch" ? findSpliceTarget(dragged[0]!) : null;
+      if (ui.getState().spliceEdge !== splicing) ui.getState().set({ spliceEdge: splicing });
     },
     [commit, findSpliceTarget, ui],
   );
 
+  const resolveSplice = useCallback(
+    (option: SpliceOption | null) => {
+      const pending = spliceRef.current;
+      if (!pending) return;
+      spliceRef.current = null;
+      setSplice(null);
+      draggingRef.current = new Set();
+      ui.getState().set({ spliceEdge: null });
+      setTick((t) => t + 1);
+      if (option) actions.moveAndSplice(pending.patchId, pending.position, pending.cable, { inputKey: option.inputKey, outputKey: option.outputKey });
+      else actions.moveNodes(new Map([[pending.patchId, pending.position]]));
+    },
+    [actions, ui],
+  );
+
   const onDragStop = useCallback(
-    (_event: ModifierEvent, dragged: FlowNode[]) => {
+    (event: DragEvent, dragged: FlowNode[]) => {
       const d = dragRef.current;
       dragRef.current = null;
       const spliceEdge = ui.getState().spliceEdge;
@@ -395,12 +563,28 @@ function Canvas({ session, componentId, showBreadcrumbs, showToolbar, defaultMin
       }
       const edge = spliceEdge ? edgeById.get(spliceEdge) : undefined;
       if (edge?.data && dragged.length === 1) {
-        actions.moveAndSplice(dragged[0]!.id, finalPositions.get(dragged[0]!.id)!, { from: edge.data.from, to: edge.data.to });
+        const patchId = dragged[0]!.id;
+        const position = finalPositions.get(patchId)!;
+        const cable = { from: edge.data.from, to: edge.data.to };
+        const current = session.document.getState().doc;
+        const options = spliceOptions(current, componentId, registry, patchId, cable);
+        if (!("error" in options) && options.length > 1) {
+          // Hold the patch where it was dropped while the chooser is open.
+          draggingRef.current = new Set([patchId]);
+          ui.getState().set({ spliceEdge: edge.id });
+          const node = current.components[componentId]?.patches[patchId];
+          const pending: PendingSplice = { client: clientPoint(event), title: patchTitle(node, node ? getPatchSpec(registry, node.type) : undefined), options, patchId, position, cable };
+          spliceRef.current = pending;
+          setSplice(pending);
+          return;
+        }
+        const only = Array.isArray(options) ? options[0] : undefined;
+        actions.moveAndSplice(patchId, position, cable, only ? { inputKey: only.inputKey, outputKey: only.outputKey } : undefined);
         return;
       }
       actions.moveNodes(finalPositions);
     },
-    [actions, commit, edgeById, ui],
+    [actions, commit, componentId, edgeById, registry, session, ui],
   );
 
   // -- Connecting -----------------------------------------------------------
@@ -419,12 +603,14 @@ function Canvas({ session, componentId, showBreadcrumbs, showToolbar, defaultMin
         const edge = m.edges.find((e) => e.data?.to === port.address);
         if (edge?.data) {
           ui.getState().set({ detaching: { edgeId: edge.id, from: port.link, to: port.address, sourceNode: edge.source, sourceHandle: edge.sourceHandle!, sourceType: edge.data.sourceType }, draggingType: edge.data.sourceType });
+          bridge.getState().setCableDrag({ component: componentId, from: port.link, type: edge.data.sourceType });
           return;
         }
       }
       ui.getState().set({ draggingType: port?.type ?? null });
+      if (port && parsed.side === "out") bridge.getState().setCableDrag({ component: componentId, from: port.address, type: port.type });
     },
-    [ui],
+    [bridge, componentId, ui],
   );
 
   const otherEnd = (c: Connection | Edge, origin: HandleRef | null): HandleRef => {
@@ -463,19 +649,26 @@ function Canvas({ session, componentId, showBreadcrumbs, showToolbar, defaultMin
     [actions, ui],
   );
 
+  /** A cable released over a node body: connect the best-fitting port, or list a layer's properties. */
   const dropOnNode = useCallback(
-    (origin: HandleRef & { side: PortSide }, client: XY, fromType: PortModel["type"], fromAddress: string): boolean => {
+    (origin: HandleRef & { side: PortSide }, client: XY, fromType: PortModel["type"], fromAddress: string, reroute?: string): "connected" | "picker" | false => {
       const nodeEl = document.elementFromPoint(client.x, client.y)?.closest(".react-flow__node");
       const targetId = nodeEl?.getAttribute("data-id");
       const target = targetId && targetId !== origin.nodeId ? modelRef.current!.nodes.find((n) => n.id === targetId) : undefined;
       if (!target || target.data.kind === "comment") return false;
+      if (target.data.kind === "layer") {
+        setLinkSearch({ client, position: flowRef.current.screenToFlowPosition(client), side: origin.side, address: fromAddress, type: fromType, layer: target.data.layerId, sourceNode: origin.nodeId, ...(reroute ? { reroute } : {}) });
+        return "picker";
+      }
       const candidates = origin.side === "out" ? target.data.inputs : target.data.outputs;
       const fits = candidates.filter((p) => (origin.side === "out" ? canConnect(fromType, p.type).ok : canConnect(p.type, fromType).ok) && p.type !== "layer");
       const port = fits.find((p) => !p.connected && p.type === fromType) ?? fits.find((p) => !p.connected && p.type !== "any") ?? fits.find((p) => !p.connected) ?? fits[0];
       if (!port) return false;
-      if (origin.side === "out") actions.connect(fromAddress, port.address);
-      else actions.connect(port.address, fromAddress);
-      return true;
+      if (origin.side === "out") {
+        if (reroute) actions.reroute(fromAddress, reroute, port.address);
+        else actions.connect(fromAddress, port.address);
+      } else actions.connect(port.address, fromAddress);
+      return "connected";
     },
     [actions],
   );
@@ -486,6 +679,7 @@ function Canvas({ session, componentId, showBreadcrumbs, showToolbar, defaultMin
       originRef.current = null;
       const detaching = ui.getState().detaching;
       ui.getState().set({ detaching: null, draggingType: null });
+      bridge.getState().setCableDrag(null);
       if (!origin || state.isValid) return;
       const client = clientPoint(event);
       const position = flowRef.current.screenToFlowPosition(client);
@@ -497,30 +691,62 @@ function Canvas({ session, componentId, showBreadcrumbs, showToolbar, defaultMin
         if (oriented && oriented.to !== detaching?.to) actions.explainConnection(oriented.from, oriented.to, position);
         return;
       }
-      if (detaching) {
-        if (!dropOnNode({ nodeId: detaching.sourceNode, handleId: detaching.sourceHandle, side: "out" }, client, detaching.sourceType, detaching.from)) actions.disconnect([detaching.to]);
-        else actions.disconnect([detaching.to], "Move cable");
+      const port = portAtHandle(m, origin);
+      // Released over another panel: Inspector property rows and Layers rows accept cables.
+      const under = document.elementFromPoint(client.x, client.y);
+      if (under && wrapperRef.current && !wrapperRef.current.contains(under)) {
+        const target = dropTargetAt(under);
+        const from = detaching ? detaching.from : port?.address;
+        const type = detaching ? detaching.sourceType : port?.type;
+        if (target?.kind === "prop" && (target.target.component ?? componentId) === componentId) {
+          const address = `@${target.target.layerId}.${target.target.prop}`;
+          if (detaching) actions.reroute(detaching.from, detaching.to, address);
+          else if (port && origin.side === "out") completeConnectionToLayerProp(port.address, target.target, { session });
+          else if (port) actions.connect(address, port.address);
+        } else if (target?.kind === "layer" && (target.component ?? componentId) === componentId && from && type) {
+          setLinkSearch({ client, position, side: detaching ? "out" : origin.side, address: from, type, layer: target.layerId, sourceNode: detaching ? detaching.sourceNode : origin.nodeId, ...(detaching ? { reroute: detaching.to } : {}) });
+        } else if (detaching) actions.disconnect([detaching.to]);
         return;
       }
-      const port = portAtHandle(m, origin);
+      if (detaching) {
+        if (dropOnNode({ nodeId: detaching.sourceNode, handleId: detaching.sourceHandle, side: "out" }, client, detaching.sourceType, detaching.from, detaching.to) === false) actions.disconnect([detaching.to]);
+        return;
+      }
       if (!port) return;
       if (dropOnNode(origin, client, port.type, port.address)) return;
       const patchType = flowNodeKind(origin.nodeId) === "patch" ? session.document.getState().doc.components[componentId]?.patches[origin.nodeId]?.type : undefined;
-      setLinkSearch({ client, position, side: origin.side, address: port.address, type: port.type, ...(patchType ? { patchType } : {}) });
+      setLinkSearch({ client, position, side: origin.side, address: port.address, type: port.type, sourceNode: origin.nodeId, ...(patchType ? { patchType } : {}) });
     },
-    [actions, componentId, dropOnNode, session, ui],
+    [actions, bridge, componentId, dropOnNode, session, ui],
   );
 
   const onLinkPick = useCallback(
-    (item: LinkSearchItem, request: LinkSearchRequest) => {
+    (item: LinkCandidate, request: LinkSearchRequest) => {
+      if (item.kind === "layer") {
+        if (request.chooseProperty) actions.driveLayerProp(item.layerId, item.port.key);
+        else if (request.side === "out") {
+          if (request.reroute) actions.reroute(request.address, request.reroute, item.address);
+          else actions.connect(request.address, item.address);
+        } else actions.connect(item.address, request.address);
+        return;
+      }
+      if (item.kind === "output") {
+        actions.connect(item.address, request.address);
+        return;
+      }
       const list = request.side === "out" ? item.spec.inputs.filter((p) => !p.advanced) : item.spec.outputs;
+      const declared = list.findIndex((p) => p.key === item.port.key);
       const variadicIndex = item.port.key.match(/(\d+)$/)?.[1];
-      const row = Math.max(0, list.findIndex((p) => p.key === item.port.key) >= 0 ? list.findIndex((p) => p.key === item.port.key) : variadicIndex ? list.length + Number(variadicIndex) - 1 : 0);
+      const row = Math.max(0, declared >= 0 ? declared : variadicIndex ? list.length + Number(variadicIndex) - 1 : 0);
       const y = request.position.y - (HEADER_HEIGHT + row * ROW_HEIGHT + ROW_HEIGHT / 2);
-      const x = request.side === "out" ? request.position.x + 16 : request.position.x - 196;
-      actions.insertPatch(item.spec.type, { x, y }, { ...(item.typeParam ? { typeParam: item.typeParam } : {}), connect: { address: request.address, side: request.side, portKey: item.port.key } });
+      let x = request.position.x + 16;
+      if (request.side === "in") {
+        const width = estimatePatchSize(session.document.getState().doc, registry, { type: item.spec.type, inputs: {}, ui: { x: 0, y: 0 }, ...(item.typeParam ? { typeParam: item.typeParam } : {}) }).width;
+        x = request.position.x - width - (request.drive ? 72 : 16);
+      }
+      actions.insertPatch(item.spec.type, { x, y }, { ...(item.typeParam ? { typeParam: item.typeParam } : {}), connect: { address: request.address, side: request.side, portKey: item.port.key }, placement: request.side === "out" ? "right" : "left" });
     },
-    [actions],
+    [actions, registry, session],
   );
 
   const onPickerPick = useCallback(
@@ -534,6 +760,13 @@ function Canvas({ session, componentId, showBreadcrumbs, showToolbar, defaultMin
     },
     [actions],
   );
+
+  const chooseLayerProperty = useCallback((layerId: Id) => {
+    const node = nodesRef.current.find((n) => n.id === layerNodeId(layerId));
+    if (!node) return;
+    const client = flowRef.current.flowToScreenPosition({ x: node.position.x, y: node.position.y + HEADER_HEIGHT });
+    setLinkSearch({ client, position: node.position, side: "out", address: "", type: "any", layer: layerId, chooseProperty: true });
+  }, []);
 
   // -- Knife cut (⌃ + right-drag) -------------------------------------------
   const knifeRef = useRef<{ id: number; points: Point[]; moved: boolean; origin: DOMRect } | null>(null);
@@ -569,10 +802,12 @@ function Canvas({ session, componentId, showBreadcrumbs, showToolbar, defaultMin
     if (k.moved) {
       suppressMenuRef.current = true;
       setTimeout(() => (suppressMenuRef.current = false), 300);
-      const stroke = simplifyStroke(k.points.map(([x, y]) => {
-        const p = flowRef.current.screenToFlowPosition({ x, y });
-        return [p.x, p.y] as const;
-      }));
+      const stroke = simplifyStroke(
+        k.points.map(([x, y]) => {
+          const p = flowRef.current.screenToFlowPosition({ x, y });
+          return [p.x, p.y] as const;
+        }),
+      );
       const cut = cablesCutByKnife(stroke, geometry.values());
       if (cut.length) actions.cutCables(cut);
     }
@@ -607,6 +842,7 @@ function Canvas({ session, componentId, showBreadcrumbs, showToolbar, defaultMin
     fitView: () => void flowRef.current.fitView({ duration: 200, padding: 0.12 }),
     paste: () => void paste(),
     rename: (nodeId) => ui.getState().set({ editingTitle: nodeId }),
+    chooseLayerProperty,
   });
 
   const onNodeContextMenu = useCallback(
@@ -622,7 +858,7 @@ function Canvas({ session, componentId, showBreadcrumbs, showToolbar, defaultMin
       if (entries.length) menu.open(event, entries);
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [actions, session, ui, menu.open],
+    [actions, session, ui, menu.open, chooseLayerProperty],
   );
 
   /** A plain click on a node inside a multi-selection selects just that node (drags keep the group). */
@@ -668,34 +904,78 @@ function Canvas({ session, componentId, showBreadcrumbs, showToolbar, defaultMin
     [actions, menu.open],
   );
 
-  // -- Live values and pulses -----------------------------------------------
+  // -- Live values and pulses (root, or inside the watched component instance) ---------------
   const addressesKey = model.outputAddresses.join("\n");
+  const pulseKey = useMemo(
+    () =>
+      [...model.ports.values()]
+        .filter((p) => p.side === "out" && p.type === "pulse")
+        .map((p) => p.address)
+        .join("\n"),
+    [model.ports],
+  );
   useEffect(() => {
-    if (!liveEnabled) {
+    if (livePrefix === null) {
       live.clear();
       return;
     }
     const addresses = addressesKey ? addressesKey.split("\n") : [];
-    const unsubscribeValues = addresses.length ? session.runtime.subscribeValues(addresses, (values) => live.setValues(values), { hz: 20 }) : () => undefined;
-    const unsubscribePulses = session.runtime.subscribePulses((fire) => live.firePulses(fire.addresses));
+    const scoped = addresses.map((a) => scopedAddress(livePrefix, a));
+    const local = new Map(scoped.map((s, i) => [s, addresses[i]!]));
+    const unsubscribeValues = addresses.length
+      ? session.runtime.subscribeValues(
+          scoped,
+          (values) => {
+            if (livePrefix === "") {
+              live.setValues(values);
+              return;
+            }
+            const out: Record<string, unknown> = {};
+            for (const [address, value] of Object.entries(values)) out[local.get(address) ?? address] = value;
+            live.setValues(out);
+          },
+          { hz: 20 },
+        )
+      : () => undefined;
+    let unsubscribePulses: () => void = () => undefined;
+    if (livePrefix === "") unsubscribePulses = session.runtime.subscribePulses((fire) => live.firePulses(fire.addresses));
+    else if (pulseKey && typeof session.runtime.subscribeFrame === "function") {
+      // The runtime host only reports root pulses, so read this instance's pulse outputs each frame.
+      const pulses = pulseKey.split("\n").map((address) => [address, scopedAddress(livePrefix, address)] as const);
+      unsubscribePulses = session.runtime.subscribeFrame(() => {
+        const fired: string[] = [];
+        for (const [address, scopedPulse] of pulses) {
+          const v = session.runtime.runtime.getRawValue(scopedPulse);
+          if (v === true || (isLoop(v) && v.items.some((item) => item === true))) fired.push(address);
+        }
+        if (fired.length) live.firePulses(fired);
+      });
+    }
     return () => {
       unsubscribeValues();
       unsubscribePulses();
+      live.clear();
     };
-  }, [session, liveEnabled, addressesKey, live]);
+  }, [session, livePrefix, addressesKey, pulseKey, live]);
 
   // -- Reveal requests ------------------------------------------------------
   const reveal = useStore(session.selection, (s) => s.reveal);
   useEffect(() => {
     if (!reveal || reveal.component !== componentId) return;
-    const ids = reveal.ids.filter((id) => modelRef.current!.nodeIds.has(id) && flowNodeKind(id) === "patch").map((id) => ({ id }));
-    if (ids.length) void flowRef.current.fitView({ nodes: ids, duration: 260, padding: 0.6, maxZoom: 1.2 });
-  }, [reveal, componentId]);
+    const m = modelRef.current!;
+    const ids = reveal.ids
+      .map((id) => (m.nodeIds.has(id) && flowNodeKind(id) === "patch" ? id : m.nodeIds.has(layerNodeId(id)) ? layerNodeId(id) : undefined))
+      .filter((id): id is string => id !== undefined)
+      .map((id) => ({ id }));
+    if (ids.length) {
+      markViewportManual();
+      void flowRef.current.fitView({ nodes: ids, duration: 260, padding: 0.6, maxZoom: 1.2 });
+    }
+  }, [reveal, componentId, markViewportManual]);
 
   // -- Commands -------------------------------------------------------------
-  const activate = useCommandTarget(commands, { actions, ui, flow: () => flowRef.current, session, componentId, hovering: () => hoveringRef.current });
+  const activate = useCommandTarget(commands, { actions, ui, flow: () => flowRef.current, session, componentId, hovering: () => hoveringRef.current, markManual: markViewportManual });
 
-  const savedViewport = useMemo(() => session.selection.getState().patchViewports[componentId], [session, componentId]);
   const empty = model.nodes.length === 0;
 
   return (
@@ -703,7 +983,7 @@ function Canvas({ session, componentId, showBreadcrumbs, showToolbar, defaultMin
       <div
         ref={wrapperRef}
         className="sb-pe__canvas"
-        data-knife={undefined}
+        data-fitting={(!fitted && !empty) || undefined}
         onPointerEnter={activate}
         onPointerDownCapture={onPointerDownCapture}
         onPointerMove={onPointerMove}
@@ -748,9 +1028,16 @@ function Canvas({ session, componentId, showBreadcrumbs, showToolbar, defaultMin
           onSelectionContextMenu={onSelectionContextMenu}
           onNodeClick={onNodeClick}
           onPaneClick={() => ui.getState().set({ armed: null })}
-          onMoveEnd={(_e, viewport) => session.selection.getState().setPatchViewport(componentId, viewport)}
-          {...(savedViewport ? { defaultViewport: savedViewport } : { fitView: true, fitViewOptions: FIT_OPTIONS })}
-          minZoom={0.1}
+          onInit={onInit}
+          onMove={() => {
+            if (ui.getState().hoverPort) ui.getState().set({ hoverPort: null });
+          }}
+          onMoveEnd={(event, viewport) => {
+            session.selection.getState().setPatchViewport(componentId, viewport);
+            if (event) fitModeRef.current = false;
+          }}
+          {...(savedViewport ? { defaultViewport: savedViewport } : {})}
+          minZoom={MIN_ZOOM}
           maxZoom={2.5}
           onlyRenderVisibleElements
           selectionOnDrag
@@ -765,7 +1052,6 @@ function Canvas({ session, componentId, showBreadcrumbs, showToolbar, defaultMin
           connectOnClick={false}
           elevateNodesOnSelect={false}
           nodeDragThreshold={2}
-          attributionPosition="bottom-left"
           aria-label="Patch graph"
         >
           <Background variant={BackgroundVariant.Dots} gap={16} size={1.2} className="sb-pe-background" />
@@ -790,6 +1076,7 @@ function Canvas({ session, componentId, showBreadcrumbs, showToolbar, defaultMin
         </ReactFlow>
         <KnifeOverlay ui={ui} />
         {showBreadcrumbs && <PatchEditorBreadcrumbs session={session} className="sb-pe-crumbs--overlay" />}
+        <LiveScopeChip offset={showBreadcrumbs} />
         {showToolbar && <Toolbar />}
         <ZoomControls />
         <ArmedHint />
@@ -798,7 +1085,15 @@ function Canvas({ session, componentId, showBreadcrumbs, showToolbar, defaultMin
         {menu.element}
       </div>
       <PatchPickerDialog request={picker} onClose={() => setPicker(null)} onPick={onPickerPick} />
-      <LinkDragSearch request={linkSearch} onClose={() => setLinkSearch(null)} onPick={onLinkPick} />
+      <LinkDragSearch
+        request={linkSearch}
+        onClose={() => {
+          setLinkSearch(null);
+          if (ui.getState().highlightPort) ui.getState().set({ highlightPort: null });
+        }}
+        onPick={onLinkPick}
+      />
+      <SpliceChooser request={splice} onChoose={(option) => resolveSplice(option)} onCancel={() => resolveSplice(null)} />
       <PatchInfoDialog patchId={infoId} onClose={() => setInfoId(null)} />
     </PatchEditorContext.Provider>
   );
@@ -828,6 +1123,8 @@ interface CommandTarget {
   session: EditorSession;
   componentId: Id;
   hovering: () => boolean;
+  /** The viewport is about to move on the user's request (resizes keep it instead of re-fitting). */
+  markManual: () => void;
 }
 
 interface CommandEntry {
@@ -882,9 +1179,39 @@ function registerPatchEditorCommands(cmds: CommandsContextValue, entry: CommandE
     { id: "patchEditor.exitComponent", title: "Exit Component", category, scope, shortcut: "Alt+Up", when: () => (target()?.session.selection.getState().componentPath.length ?? 0) > 1, run: run((t) => void t.actions.exitComponent()) },
     { id: "patchEditor.patchInfo", title: "Patch Info", category, scope, shortcut: "Mod+I", keywords: ["docs", "help"], when: () => !!singlePatch(), run: run((t) => t.actions.openInfo(singlePatch()!)) },
     { id: "patchEditor.rename", title: "Rename Patch", category, scope, shortcut: "Enter", when: () => !!singlePatch(), run: run((t) => t.ui.getState().set({ editingTitle: singlePatch()! })) },
-    { id: "patchEditor.zoomIn", title: "Zoom In", category, scope, shortcut: ["Mod+=", "Mod++"], run: run((t) => void t.flow().zoomIn({ duration: 120 })) },
-    { id: "patchEditor.zoomOut", title: "Zoom Out", category, scope, shortcut: "Mod+-", run: run((t) => void t.flow().zoomOut({ duration: 120 })) },
-    { id: "patchEditor.zoomReset", title: "Zoom to 100%", category, scope, shortcut: "Mod+0", run: run((t) => void t.flow().zoomTo(1, { duration: 160 })) },
+    {
+      id: "patchEditor.zoomIn",
+      title: "Zoom In",
+      category,
+      scope,
+      shortcut: ["Mod+=", "Mod++"],
+      run: run((t) => {
+        t.markManual();
+        void t.flow().zoomIn({ duration: 120 });
+      }),
+    },
+    {
+      id: "patchEditor.zoomOut",
+      title: "Zoom Out",
+      category,
+      scope,
+      shortcut: "Mod+-",
+      run: run((t) => {
+        t.markManual();
+        void t.flow().zoomOut({ duration: 120 });
+      }),
+    },
+    {
+      id: "patchEditor.zoomReset",
+      title: "Zoom to 100%",
+      category,
+      scope,
+      shortcut: "Mod+0",
+      run: run((t) => {
+        t.markManual();
+        void t.flow().zoomTo(1, { duration: 160 });
+      }),
+    },
     { id: "patchEditor.zoomToFit", title: "Zoom to Fit Patches", category, scope, shortcut: "Shift+1", run: run((t) => void t.flow().fitView({ duration: 200, padding: 0.12 })) },
     { id: "patchEditor.toggleMinimap", title: "Show or Hide Minimap", category, scope, shortcut: "Shift+M", run: run((t) => t.ui.getState().set({ minimap: !t.ui.getState().minimap })) },
     { id: "patchEditor.cancelConnect", title: "Cancel Connecting", category, scope, shortcut: "Escape", hidden: true, when: () => !!target()?.ui.getState().armed, run: run((t) => t.ui.getState().set({ armed: null })) },

@@ -1,18 +1,13 @@
 /**
  * Helpers shared by the data patches: converting port values to plain JSON, JSON equality,
  * reading found JSON as a variant type, own-property writes that treat `__proto__` as an ordinary
- * key, per-index warnings, and declaring a muted behavior on a definition.
+ * key, and per-index warnings.
  */
 
 import { coerce } from "@sonobe/core";
 import type { Value, ValueType } from "@sonobe/core";
-import type { MutedBehavior, PatchContext, PatchDefinition, RuntimePatchDefinition } from "@sonobe/engine";
+import type { PatchContext } from "@sonobe/engine";
 import { equalValues, isPlainObject, toJson, warnOnce, zeroValue } from "../infra/index.ts";
-
-/** Attach the engine's `mutedBehavior` extension to a definition. */
-export function withMutedBehavior<S>(definition: PatchDefinition<S>, mutedBehavior: MutedBehavior): RuntimePatchDefinition<S> {
-  return Object.assign(definition, { mutedBehavior });
-}
 
 /** `warnOnce` scoped to this loop index. */
 export function warnIndexed(ctx: PatchContext, key: string, message: string): boolean {

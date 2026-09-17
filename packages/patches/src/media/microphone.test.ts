@@ -1,9 +1,17 @@
 import type { AssetRef } from "@sonobe/core";
+import type { PatchDefinition } from "@sonobe/engine";
 import { describe, expect, it } from "vitest";
 import { createPatchHarness } from "../infra/index.ts";
 import { microphonePatch } from "./microphone.ts";
 
 const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
+
+/** The definition with a switch for `ctx.muted`, so a test can mute a running patch. */
+function muteSwitch<S>(definition: PatchDefinition<S>) {
+  let muted = false;
+  const switched: PatchDefinition<S> = { ...definition, evaluate: (ctx) => definition.evaluate(Object.create(ctx, { muted: { get: () => muted } })) };
+  return { definition: switched, mute: (on: boolean) => void (muted = on) };
+}
 
 function fakeMedia() {
   const log: unknown[][] = [];
@@ -38,10 +46,10 @@ describe("microphone", () => {
     const f0 = h.step();
     expect(f0.outputs.available).toBe(false);
     expect(m.log).toEqual([["open", "main/patch_1"]]);
-    m.opens[0]!.resolve({ url: "sonobe-live:microphone/main/patch_1" });
+    m.opens[0]!.resolve({ live: "microphone/main/patch_1" });
     await flush();
     const live = h.step();
-    expect(live.outputs).toMatchObject({ available: true, metering: { url: "sonobe-live:microphone/main/patch_1" } });
+    expect(live.outputs).toMatchObject({ available: true, metering: { live: "microphone/main/patch_1" } });
     expect(m.log.at(-1)).toEqual(["record", "main/patch_1", { audio: true }]);
     h.step({ inputs: { recording: false } });
     m.recordings[0]!.resolve({ url: "blob:voice" });
@@ -62,7 +70,7 @@ describe("microphone", () => {
     expect(m.opens).toHaveLength(1);
     h.step({ inputs: { enabled: false } });
     h.step({ inputs: { enabled: true } });
-    m.opens[1]!.resolve({ url: "sonobe-live:microphone/x" });
+    m.opens[1]!.resolve({ live: "microphone/x" });
     await flush();
     h.step();
     h.step({ inputs: { enabled: false } });
@@ -71,17 +79,18 @@ describe("microphone", () => {
 
   it("releases the microphone while muted and on dispose", async () => {
     const m = fakeMedia();
-    const h = createPatchHarness(microphonePatch, { inputs: { enabled: true }, services: { platform: m.platform as never } });
+    const { definition, mute } = muteSwitch(microphonePatch);
+    const h = createPatchHarness(definition, { inputs: { enabled: true }, services: { platform: m.platform as never } });
     h.step();
-    m.opens[0]!.resolve({ url: "sonobe-live:microphone/x" });
+    m.opens[0]!.resolve({ live: "microphone/x" });
     await flush();
     h.step();
-    h.node.muted = true;
+    mute(true);
     expect(h.step().outputs).toEqual({ sound: null, metering: null, available: false });
     expect(m.log.at(-1)).toEqual(["close", "main/patch_1"]);
-    h.node.muted = false;
+    mute(false);
     h.step();
-    m.opens[1]!.resolve({ url: "sonobe-live:microphone/y" });
+    m.opens[1]!.resolve({ live: "microphone/y" });
     await flush();
     h.step();
     h.dispose();

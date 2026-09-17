@@ -5,20 +5,12 @@
 
 import { definePatch } from "../infra/index.ts";
 
-export interface RestartPrototypeState {
-  /** This index already warned about a first-frame pulse (state resets with every restart). */
-  warned: boolean;
-}
-
-export const restartPrototype = definePatch<RestartPrototypeState>("restartPrototype", {
-  state: () => ({ warned: false }),
+export const restartPrototype = definePatch("restartPrototype", {
   evaluate(ctx) {
     if (!ctx.pulsed("restart")) return;
     if (ctx.frame === 0) {
-      if (!ctx.state.warned) {
-        ctx.state.warned = true;
-        ctx.services.log("warn", `${ctx.id} ignored a restart pulse on the first frame; restarting there would repeat forever`);
-      }
+      // The engine's once-ledger resets with every restart, so the warning returns after each one.
+      ctx.warnOnce("firstFrame", `${ctx.id} ignored a restart pulse on the first frame; restarting there would repeat forever`);
       return;
     }
     ctx.services.restart();

@@ -5,10 +5,9 @@
  */
 
 import type { AssetRef } from "@sonobe/core";
+import type { MediaInfo } from "@sonobe/engine";
 import { definePatch, logOnce, warnOnce } from "../infra/index.ts";
-import { mediaInfoReader } from "./platform.ts";
-import type { MediaInfo } from "./platform.ts";
-import { isAssetRef, refKey, withMutedBehavior } from "./shared.ts";
+import { isAssetRef, refKey } from "./shared.ts";
 
 interface Info {
   size: [number, number];
@@ -58,62 +57,60 @@ interface ImageInfoState {
   loading: boolean;
 }
 
-export const imageInfoPatch = withMutedBehavior(
-  definePatch<ImageInfoState>("imageInfo", {
-    state: () => ({ key: "", info: EMPTY, loading: false }),
-    evaluate(ctx) {
-      const s = ctx.state;
-      if (ctx.node.muted) {
-        ctx.output("naturalSize", [0, 0]);
-        ctx.output("scale", 1);
-        ctx.output("name", "");
-        ctx.output("aspectRatio", 0);
-        ctx.output("loading", false);
-        return;
+export const imageInfoPatch = definePatch<ImageInfoState>("imageInfo", {
+  mutedBehavior: "evaluate",
+  state: () => ({ key: "", info: EMPTY, loading: false }),
+  evaluate(ctx) {
+    const s = ctx.state;
+    if (ctx.muted) {
+      ctx.output("naturalSize", [0, 0]);
+      ctx.output("scale", 1);
+      ctx.output("name", "");
+      ctx.output("aspectRatio", 0);
+      ctx.output("loading", false);
+      return;
+    }
+    const raw = ctx.input("image");
+    const ref = isAssetRef(raw) ? raw : null;
+    const key = refKey(ref);
+    if (key !== s.key) {
+      s.key = key;
+      if (ref === null) {
+        s.info = EMPTY;
+        s.loading = false;
+      } else {
+        s.loading = true;
       }
-      const raw = ctx.input("image");
-      const ref = isAssetRef(raw) ? raw : null;
-      const key = refKey(ref);
-      if (key !== s.key) {
-        s.key = key;
-        if (ref === null) {
-          s.info = EMPTY;
+    }
+    if (s.loading && ref !== null) {
+      const read = ctx.services.mediaInfo;
+      if (!read) {
+        logOnce(ctx, "log", "noMediaInfo", "imageInfo: this host can't describe pictures yet, so Image Info outputs empty values.");
+        s.info = EMPTY;
+        s.loading = false;
+      } else {
+        let info: MediaInfo | undefined;
+        try {
+          info = read.call(ctx.services, ref);
+        } catch {
+          info = undefined;
+        }
+        if (info?.status === "ready") {
+          s.info = describe(ref, info);
           s.loading = false;
+        } else if (info === undefined || info.status === "error") {
+          s.info = { ...EMPTY, name: baseName(rawNameOf(ref, info)) };
+          s.loading = false;
+          warnOnce(ctx, `load:${key}`, `imageInfo: couldn't load the picture${s.info.name ? ` "${s.info.name}"` : ""}.`);
         } else {
-          s.loading = true;
+          ctx.requestNextFrame();
         }
       }
-      if (s.loading && ref !== null) {
-        const read = mediaInfoReader(ctx.services);
-        if (!read) {
-          logOnce(ctx, "log", "noMediaInfo", "imageInfo: this host can't describe pictures yet, so Image Info outputs empty values.");
-          s.info = EMPTY;
-          s.loading = false;
-        } else {
-          let info: MediaInfo | undefined;
-          try {
-            info = read(ref);
-          } catch {
-            info = undefined;
-          }
-          if (info?.status === "ready") {
-            s.info = describe(ref, info);
-            s.loading = false;
-          } else if (info === undefined || info.status === "error") {
-            s.info = { ...EMPTY, name: baseName(rawNameOf(ref, info)) };
-            s.loading = false;
-            warnOnce(ctx, `load:${key}`, `imageInfo: couldn't load the picture${s.info.name ? ` "${s.info.name}"` : ""}.`);
-          } else {
-            ctx.requestNextFrame();
-          }
-        }
-      }
-      ctx.output("naturalSize", [...s.info.size]);
-      ctx.output("scale", s.info.scale);
-      ctx.output("name", s.info.name);
-      ctx.output("aspectRatio", s.info.aspectRatio);
-      ctx.output("loading", s.loading);
-    },
-  }),
-  "evaluate",
-);
+    }
+    ctx.output("naturalSize", [...s.info.size]);
+    ctx.output("scale", s.info.scale);
+    ctx.output("name", s.info.name);
+    ctx.output("aspectRatio", s.info.aspectRatio);
+    ctx.output("loading", s.loading);
+  },
+});

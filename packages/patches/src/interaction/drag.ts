@@ -2,7 +2,7 @@
 
 import { decayPosition, decayTimeToReach, decayVelocity } from "@sonobe/engine";
 import { clamp, definePatch, finiteOr } from "../infra/index.ts";
-import { ancestorScale, finitePointInput, layerInput, withMutedBehavior, type Vec2 } from "./shared.ts";
+import { ancestorScale, finitePointInput, layerInput, type Vec2 } from "./shared.ts";
 
 interface DragState {
   position: Vec2;
@@ -62,89 +62,94 @@ function coast(state: DragState, dt: number, deceleration: number, bounds: Bound
   }
 }
 
-export const drag = withMutedBehavior(
-  definePatch<DragState>("drag", {
-    state: () => ({
-      position: [0, 0],
-      velocity: [0, 0],
-      dragging: false,
-      coasting: false,
-      touched: false,
-      grab: [0, 0],
-      ignoreUntilRelease: false,
-      initialized: false,
-    }),
-    evaluate(ctx) {
-      const state = ctx.state;
-      const start = finitePointInput(ctx, "startPosition");
-      if (ctx.node.muted) {
-        ctx.output("position", start);
-        ctx.output("dragging", false);
-        ctx.output("velocity", [0, 0]);
-        return;
-      }
-      const enabled = ctx.input<boolean>("enabled") === true;
-      const clip = ctx.input<boolean>("clip") === true;
-      const min = finitePointInput(ctx, "min");
-      const max = finitePointInput(ctx, "max");
-      const bounds: Bounds = {
-        lo: [Math.min(min[0], max[0]), Math.min(min[1], max[1])],
-        hi: [Math.max(min[0], max[0]), Math.max(min[1], max[1])],
-      };
-      const limit = (p: Vec2): Vec2 => (clip ? [clamp(p[0], bounds.lo[0], bounds.hi[0]), clamp(p[1], bounds.lo[1], bounds.hi[1])] : [p[0], p[1]]);
-      const axis = ctx.input<string>("axis");
-      const mask: Vec2 = axis === "horizontal" ? [1, 0] : axis === "vertical" ? [0, 1] : [1, 1];
-      const ref = layerInput(ctx);
-      const p = ctx.services.pointer(ref);
-      if (!state.initialized) {
-        state.position = limit(start);
-        state.initialized = true;
-      }
-
-      if (ctx.pulsed("reset")) {
-        state.position = limit(start);
-        state.velocity = [0, 0];
-        state.dragging = false;
-        state.coasting = false;
-        state.touched = false;
-        state.ignoreUntilRelease = p.down;
-      } else if (!enabled) {
-        if (state.dragging) state.ignoreUntilRelease = p.down;
-        state.dragging = false;
-        state.coasting = false;
-        state.velocity = [0, 0];
-      } else {
-        if (!state.touched) state.position = limit(start);
-        if (!state.dragging && p.began && !state.ignoreUntilRelease) {
-          state.dragging = true;
-          state.coasting = false;
-          state.touched = true;
-          state.grab = state.position; // catches a coasting layer
-        }
-        if (state.dragging) {
-          const scale = ancestorScale(ctx.services, ref);
-          const t: Vec2 = [finiteOr(p.translation[0], 0) / scale[0], finiteOr(p.translation[1], 0) / scale[1]];
-          state.position = limit([state.grab[0] + t[0] * mask[0], state.grab[1] + t[1] * mask[1]]);
-          const v: Vec2 = [finiteOr(p.velocity[0], 0) / scale[0], finiteOr(p.velocity[1], 0) / scale[1]];
-          state.velocity = [v[0] * mask[0], v[1] * mask[1]];
-          if (p.ended || !p.down) {
-            state.dragging = false;
-            if (p.ended && ctx.input<boolean>("momentum") === true && Math.hypot(state.velocity[0], state.velocity[1]) > REST_SPEED) state.coasting = true;
-            else state.velocity = [0, 0];
-          }
-          if (state.dragging || state.coasting) ctx.requestNextFrame();
-        } else if (state.coasting) {
-          coast(state, ctx.dt, dragDeceleration(ctx.input<number>("momentumFriction")), clip ? bounds : null);
-          if (state.coasting) ctx.requestNextFrame();
-        } else if (state.touched) {
-          state.position = limit(state.position); // Clip, Min, or Max changed
-        }
-      }
-      if (!p.down) state.ignoreUntilRelease = false;
-      ctx.output("position", state.position);
-      ctx.output("dragging", state.dragging);
-      ctx.output("velocity", state.velocity);
-    },
+export const drag = definePatch<DragState>("drag", {
+  state: () => ({
+    position: [0, 0],
+    velocity: [0, 0],
+    dragging: false,
+    coasting: false,
+    touched: false,
+    grab: [0, 0],
+    ignoreUntilRelease: false,
+    initialized: false,
   }),
-  "evaluate",
-);
+  evaluate(ctx) {
+    const state = ctx.state;
+    const start = finitePointInput(ctx, "startPosition");
+    if (ctx.muted) {
+      ctx.output("position", start);
+      ctx.output("dragging", false);
+      ctx.output("velocity", [0, 0]);
+      return;
+    }
+    const enabled = ctx.input<boolean>("enabled") === true;
+    const clip = ctx.input<boolean>("clip") === true;
+    const min = finitePointInput(ctx, "min");
+    const max = finitePointInput(ctx, "max");
+    const bounds: Bounds = {
+      lo: [Math.min(min[0], max[0]), Math.min(min[1], max[1])],
+      hi: [Math.max(min[0], max[0]), Math.max(min[1], max[1])],
+    };
+    const limit = (p: Vec2): Vec2 => (clip ? [clamp(p[0], bounds.lo[0], bounds.hi[0]), clamp(p[1], bounds.lo[1], bounds.hi[1])] : [p[0], p[1]]);
+    const axis = ctx.input<string>("axis");
+    const mask: Vec2 = axis === "horizontal" ? [1, 0] : axis === "vertical" ? [0, 1] : [1, 1];
+    const ref = layerInput(ctx);
+    const p = ctx.services.pointer(ref);
+    if (!state.initialized) {
+      state.position = limit(start);
+      state.initialized = true;
+    }
+    /** On the release frame Velocity still reports the fling, so a spring handing off on Dragging's falling edge reads it. */
+    let releaseVelocity: Vec2 | null = null;
+
+    if (ctx.pulsed("reset")) {
+      state.position = limit(start);
+      state.velocity = [0, 0];
+      state.dragging = false;
+      state.coasting = false;
+      state.touched = false;
+      state.ignoreUntilRelease = p.down;
+    } else if (!enabled) {
+      if (state.dragging) state.ignoreUntilRelease = p.down;
+      state.dragging = false;
+      state.coasting = false;
+      state.velocity = [0, 0];
+    } else {
+      if (!state.touched) state.position = limit(start);
+      if (!state.dragging && p.began && !state.ignoreUntilRelease) {
+        state.dragging = true;
+        state.coasting = false;
+        state.touched = true;
+        state.grab = state.position; // catches a coasting layer
+      }
+      if (state.dragging) {
+        const scale = ancestorScale(ctx.services, ref);
+        const t: Vec2 = [finiteOr(p.translation[0], 0) / scale[0], finiteOr(p.translation[1], 0) / scale[1]];
+        state.position = limit([state.grab[0] + t[0] * mask[0], state.grab[1] + t[1] * mask[1]]);
+        const v: Vec2 = [finiteOr(p.velocity[0], 0) / scale[0], finiteOr(p.velocity[1], 0) / scale[1]];
+        state.velocity = [v[0] * mask[0], v[1] * mask[1]];
+        if (p.ended || !p.down) {
+          state.dragging = false;
+          if (p.ended && ctx.input<boolean>("momentum") === true && Math.hypot(state.velocity[0], state.velocity[1]) > REST_SPEED) {
+            state.coasting = true;
+          } else {
+            // A release without momentum keeps its velocity for this frame only; a vanished pointer reports none.
+            if (p.ended) releaseVelocity = state.velocity;
+            state.velocity = [0, 0];
+          }
+        }
+        if (state.dragging || state.coasting || releaseVelocity) ctx.requestNextFrame();
+      } else if (state.coasting) {
+        coast(state, ctx.dt, dragDeceleration(ctx.input<number>("momentumFriction")), clip ? bounds : null);
+        if (state.coasting) ctx.requestNextFrame();
+      } else if (state.touched) {
+        state.position = limit(state.position); // Clip, Min, or Max changed
+      }
+    }
+    if (!p.down) state.ignoreUntilRelease = false;
+    ctx.output("position", state.position);
+    ctx.output("dragging", state.dragging);
+    ctx.output("velocity", releaseVelocity ?? state.velocity);
+  },
+  mutedBehavior: "evaluate",
+});

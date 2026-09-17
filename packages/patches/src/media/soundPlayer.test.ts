@@ -1,39 +1,50 @@
 import type { AssetRef } from "@sonobe/core";
 import { describe, expect, it } from "vitest";
+import type { AudioServices, AudioVoiceOptions, AudioVoiceState, PatchDefinition } from "@sonobe/engine";
 import { createPatchHarness, loopOf } from "../infra/index.ts";
 import type { PatchHarnessOptions } from "../infra/index.ts";
-import type { VoiceOptions, VoiceState } from "./platform.ts";
 import { MAX_VOICES, soundPlayerPatch } from "./soundPlayer.ts";
 
 const CHIME = { assetId: "chime" };
 const resolveAssetUrl = (id: string) => (id === "missing" ? undefined : `blob:${id}`);
 const ready = (duration: number) => () => ({ status: "ready" as const, width: 0, height: 0, duration, name: "chime.mp3" });
 
-function harness(options: { duration?: number; platform?: Record<string, unknown>; inputs?: Record<string, unknown> } = {}, extra: PatchHarnessOptions = {}) {
-  const platform: Record<string, unknown> = { ...options.platform };
-  if (options.duration !== undefined) platform.mediaInfo = ready(options.duration);
-  return createPatchHarness(soundPlayerPatch, { inputs: { sound: CHIME, ...options.inputs }, services: { resolveAssetUrl, platform: platform as never }, ...extra });
+function harness(options: { duration?: number; audio?: AudioServices; inputs?: Record<string, unknown>; definition?: PatchDefinition } = {}, extra: PatchHarnessOptions = {}) {
+  const services: PatchHarnessOptions["services"] = { resolveAssetUrl, platform: options.audio ? { audio: options.audio } : {} };
+  if (options.duration !== undefined) services.mediaInfo = ready(options.duration);
+  return createPatchHarness(options.definition ?? soundPlayerPatch, { inputs: { sound: CHIME, ...options.inputs }, services, ...extra });
 }
 
-function fakeExtendedAudio() {
+function fakeAudio() {
   const calls: unknown[][] = [];
-  const voices = new Map<string, VoiceState>();
-  const audio = {
-    play: (key: string, source: AssetRef, opts: VoiceOptions & { from: number }) => {
+  const options: (AudioVoiceOptions & { from?: number })[] = [];
+  const voices = new Map<string, AudioVoiceState>();
+  const audio: AudioServices = {
+    play: (key, source: AssetRef, opts) => {
       calls.push(["play", key, source.assetId ?? source.url, opts.from]);
+      options.push(opts);
       voices.set(key, { status: "loading", currentTime: opts.from, duration: 0, ended: false, loops: 0 });
     },
-    pause: (key: string) => calls.push(["pause", key]),
-    seek: (key: string, t: number) => calls.push(["seek", key, t]),
-    update: (key: string, opts: VoiceOptions) => calls.push(["update", key, opts.volume]),
-    stop: (key: string) => {
+    pause: (key) => void calls.push(["pause", key]),
+    seek: (key, t) => void calls.push(["seek", key, t]),
+    update: (key, opts) => {
+      calls.push(["update", key, opts.volume]);
+      options.push(opts);
+    },
+    stop: (key) => {
       calls.push(["stop", key]);
       voices.delete(key);
     },
-    state: (key: string) => voices.get(key),
-    currentTime: () => 0,
+    state: (key) => voices.get(key),
   };
-  return { calls, voices, audio };
+  return { calls, options, voices, audio };
+}
+
+/** Sound Player with a switch for `ctx.muted`, so a test can mute a running patch. */
+function muteSwitch() {
+  let muted = false;
+  const definition: PatchDefinition = { ...soundPlayerPatch, evaluate: (ctx) => soundPlayerPatch.evaluate(Object.create(ctx, { muted: { get: () => muted } })) };
+  return { definition, mute: (on: boolean) => void (muted = on) };
 }
 
 describe("soundPlayer", () => {
@@ -49,7 +60,7 @@ describe("soundPlayer", () => {
   it("plays while Playing is on: Is Playing on frame 0, the playhead advances by dt × rate from the next frame, and Finished fires at the end", () => {
     const h = harness({ duration: 1, inputs: { playing: true } });
     const f0 = h.step({ dt: 0.25 });
-    expect(f0.outputs).toMatchObject({ currentTime: 0, duration: 1, progress: 0, isPlaying: true, metering: { url: "sonobe-live:audio/main/patch_1#0" } });
+    expect(f0.outputs).toMatchObject({ currentTime: 0, duration: 1, progress: 0, isPlaying: true, metering: { live: "audio/main/patch_1#0" } });
     expect(f0.requestedNextFrame).toBe(true);
     expect(h.step({ dt: 0.25 }).outputs.currentTime).toBe(0.25);
     h.step({ dt: 0.25 });
@@ -127,7 +138,7 @@ describe("soundPlayer", () => {
   });
 
   it("treats a Metering handle as empty with one warning, and bad options use their defaults with one warning each", () => {
-    const live = harness({ inputs: { sound: { url: "sonobe-live:microphone/main/mic" }, playing: true } });
+    const live = harness({ inputs: { sound: { live: "microphone/main/mic" }, playing: true } });
     expect(live.run(3).outputs.isPlaying).toBe(false);
     expect(live.logs.filter((l) => l.level === "warn")).toHaveLength(1);
     const bad = harness({ inputs: { playing: true, rate: Number.NaN, volume: Number.POSITIVE_INFINITY } });
@@ -135,27 +146,21 @@ describe("soundPlayer", () => {
     expect(bad.logs.filter((l) => l.level === "warn")).toHaveLength(2);
   });
 
-  it("drives the contract audio service with play and stop on audible edges", () => {
-    const calls: unknown[][] = [];
-    const audio = { play: (key: string, id: string, o: unknown) => calls.push(["play", key, id, o]), stop: (key: string) => calls.push(["stop", key]), currentTime: () => 0 };
-    const h = harness({ duration: 1, platform: { audio } });
-    h.step({ pulses: ["play"], inputs: { volume: 0.5 } });
+  it("plays sounds from web addresses and sends Pitch to the host in semitones", () => {
+    const { calls, options, audio } = fakeAudio();
+    const h = harness({ audio, inputs: { sound: { url: "https://sounds.test/chime.mp3" }, playing: true, pitch: 1200, pan: -0.5, loop: true } });
     h.step();
-    h.step({ pulses: ["play"] });
-    h.step({ pulses: ["reset"] });
-    expect(calls).toEqual([
-      ["play", "main/patch_1#0", "chime", { loop: false, volume: 0.5, rate: 1 }],
-      ["stop", "main/patch_1#0"],
-      ["play", "main/patch_1#0", "chime", { loop: false, volume: 0.5, rate: 1 }],
-      ["stop", "main/patch_1#0"],
-    ]);
+    expect(calls).toEqual([["play", "main/patch_1#0", "https://sounds.test/chime.mp3", 0]]);
+    expect(options[0]).toEqual({ from: 0, loop: true, volume: 1, rate: 1, pitch: 12, pan: -0.5 });
+    h.step({ inputs: { pitch: -300 } });
+    expect(options[1]).toEqual({ loop: true, volume: 1, rate: 1, pitch: -3, pan: -0.5 });
     expect(h.logs).toEqual([]);
   });
 
-  it("drives the proposed audio service: resume from position, seek, live updates, and the platform clock", () => {
-    const { calls, voices, audio } = fakeExtendedAudio();
+  it("drives the platform voice: resume from position, seek, live updates, and the platform clock", () => {
+    const { calls, voices, audio } = fakeAudio();
     const key = "main/patch_1#0";
-    const h = harness({ platform: { audio }, inputs: { playing: true } });
+    const h = harness({ audio, inputs: { playing: true } });
     const start = h.step();
     expect(calls).toEqual([["play", key, "chime", 0]]);
     expect(start.outputs.isPlaying).toBe(false);
@@ -176,9 +181,20 @@ describe("soundPlayer", () => {
     expect(done.outputs).toMatchObject({ currentTime: 2, progress: 1, isPlaying: false });
   });
 
+  it("holds the position while the browser blocks autoplay, then follows the voice once it plays", () => {
+    const { voices, audio } = fakeAudio();
+    const key = "main/patch_1#0";
+    const h = harness({ audio, duration: 2, inputs: { playing: true } });
+    h.step();
+    voices.set(key, { status: "blocked", currentTime: 0, duration: 0, ended: false, loops: 0 });
+    expect(h.run(3, { dt: 0.25 }).outputs).toMatchObject({ isPlaying: false, currentTime: 0, duration: 2 });
+    voices.set(key, { status: "playing", currentTime: 0.1, duration: 2, ended: false, loops: 0 });
+    expect(h.step().outputs).toMatchObject({ isPlaying: true, currentTime: 0.1 });
+  });
+
   it("a voice that fails to load warns once and behaves as empty", () => {
-    const { voices, audio } = fakeExtendedAudio();
-    const h = harness({ platform: { audio }, inputs: { playing: true } });
+    const { voices, audio } = fakeAudio();
+    const h = harness({ audio, inputs: { playing: true } });
     h.step();
     voices.set("main/patch_1#0", { status: "error", currentTime: 0, duration: 0, ended: false, loops: 0 });
     const f = h.run(3);
@@ -187,28 +203,29 @@ describe("soundPlayer", () => {
   });
 
   it("plays one voice per loop index, at most 32 at once", () => {
-    const calls: string[] = [];
-    const audio = { play: (key: string) => calls.push(key), stop: () => {}, currentTime: () => 0 };
+    const { calls, audio } = fakeAudio();
     const sounds = loopOf(Array.from({ length: MAX_VOICES + 2 }, (_, i) => ({ assetId: `s${i}` })));
-    const h = harness({ platform: { audio }, inputs: { sound: sounds, playing: true } });
+    const h = harness({ audio, inputs: { sound: sounds, playing: true } });
     const f = h.step();
-    expect(calls).toHaveLength(MAX_VOICES);
-    expect(new Set(calls).size).toBe(MAX_VOICES);
-    expect((f.outputs.isPlaying as { items: boolean[] }).items.every(Boolean)).toBe(true);
+    const plays = calls.filter((c) => c[0] === "play").map((c) => c[1]);
+    expect(plays).toHaveLength(MAX_VOICES);
+    expect(new Set(plays).size).toBe(MAX_VOICES);
+    // Voices without a slot run on the simulated clock.
+    expect((f.outputs.isPlaying as { items: boolean[] }).items.slice(MAX_VOICES)).toEqual([true, true]);
     expect(h.logs.filter((l) => l.level === "warn")).toHaveLength(1);
   });
 
   it("stops every voice while muted and on dispose", () => {
-    const stops: string[] = [];
-    const audio = { play: () => {}, stop: (key: string) => stops.push(key), currentTime: () => 0 };
-    const h = harness({ platform: { audio }, inputs: { playing: true } });
+    const { calls, audio } = fakeAudio();
+    const { definition, mute } = muteSwitch();
+    const h = harness({ audio, definition, inputs: { playing: true } });
     h.step();
-    h.node.muted = true;
+    mute(true);
     expect(h.step().outputs).toEqual({ currentTime: 0, duration: 0, progress: 0, isPlaying: false, metering: null });
-    expect(stops).toEqual(["main/patch_1#0"]);
-    h.node.muted = false;
+    expect(calls.filter((c) => c[0] === "stop")).toEqual([["stop", "main/patch_1#0"]]);
+    mute(false);
     h.step();
     h.dispose();
-    expect(stops).toEqual(["main/patch_1#0", "main/patch_1#0"]);
+    expect(calls.filter((c) => c[0] === "stop")).toEqual([["stop", "main/patch_1#0"], ["stop", "main/patch_1#0"]]);
   });
 });

@@ -1,0 +1,15 @@
+/* A docked Learn drawer takes room from the panels instead of covering them. */
+
+.sb-shell__main[data-drawer-docked] > .sb-shell__row,
+.sb-shell__main[data-drawer-docked] > .sb-shell__hud,
+.sb-shell__main[data-drawer-docked] > .sb-splitter {
+  margin-right: var(--sb-drawer-w);
+}
+
+.sb-drawer[data-docked] {
+  box-shadow: none;
+}
+
+[data-theme="light"] .sb-drawer[data-docked] {
+  box-shadow: none;
+}

@@ -1,7 +1,7 @@
 /** Interaction: presses, taps, and pointer position on a layer or the whole screen. */
 
 import { clamp01, definePatch } from "../infra/index.ts";
-import { layerInput, withMutedBehavior, type Vec2 } from "./shared.ts";
+import { layerInput, type Vec2 } from "./shared.ts";
 
 interface InteractionState {
   lastPosition: Vec2;
@@ -10,32 +10,24 @@ interface InteractionState {
   blocked: boolean;
 }
 
-/** Pressure 0–1 when the pointer snapshot reports one (not yet in the contract), else 0. */
-export function snapshotPressure(snap: object): number {
-  const pressure = (snap as { pressure?: unknown }).pressure;
-  return typeof pressure === "number" && Number.isFinite(pressure) ? clamp01(pressure) : 0;
-}
-
-export const interaction = withMutedBehavior(
-  definePatch<InteractionState>("interaction", {
-    state: () => ({ lastPosition: [0, 0], lastLocal: [0, 0], blocked: false }),
-    evaluate(ctx) {
-      const state = ctx.state;
-      const snap = ctx.services.pointer(layerInput(ctx));
-      const enabled = ctx.input<boolean>("enabled") === true;
-      if (!enabled && (snap.down || snap.ended)) state.blocked = true;
-      const live = enabled && !state.blocked;
-      if (live && (snap.down || snap.ended)) {
-        state.lastPosition = [snap.position[0], snap.position[1]];
-        state.lastLocal = [snap.localPosition[0], snap.localPosition[1]];
-      }
-      ctx.output("down", live && snap.down);
-      if (live && snap.tapped) ctx.pulse("tap");
-      ctx.output("position", state.lastPosition);
-      ctx.output("localPosition", state.lastLocal);
-      ctx.output("force", live && snap.down ? snapshotPressure(snap) : 0);
-      if (!snap.down) state.blocked = false;
-    },
-  }),
-  "zero",
-);
+export const interaction = definePatch<InteractionState>("interaction", {
+  state: () => ({ lastPosition: [0, 0], lastLocal: [0, 0], blocked: false }),
+  evaluate(ctx) {
+    const state = ctx.state;
+    const snap = ctx.services.pointer(layerInput(ctx));
+    const enabled = ctx.input<boolean>("enabled") === true;
+    if (!enabled && (snap.down || snap.ended)) state.blocked = true;
+    const live = enabled && !state.blocked;
+    if (live && (snap.down || snap.ended)) {
+      state.lastPosition = [snap.position[0], snap.position[1]];
+      state.lastLocal = [snap.localPosition[0], snap.localPosition[1]];
+    }
+    ctx.output("down", live && snap.down);
+    if (live && snap.tapped) ctx.pulse("tap");
+    ctx.output("position", state.lastPosition);
+    ctx.output("localPosition", state.lastLocal);
+    ctx.output("force", live && snap.down && Number.isFinite(snap.pressure) ? clamp01(snap.pressure) : 0);
+    if (!snap.down) state.blocked = false;
+  },
+  mutedBehavior: "zero",
+});

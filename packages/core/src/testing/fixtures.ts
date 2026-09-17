@@ -107,6 +107,95 @@ export const MOCK_PATCH_SPECS: PatchSpec[] = [
 
 export const mockRegistry = createRegistry(MOCK_PATCH_SPECS);
 
+/**
+ * Specs for contract features the core mocks don't exercise: variantDefaults and loop-literal
+ * defaults, 0-based and output-side variadics, inputCountRange, variants declared by dynamicPorts,
+ * and state inputs that take pulses (logic merges, acceptsPulse).
+ */
+export const EXTRA_PATCH_SPECS: PatchSpec[] = [
+  {
+    type: "blend",
+    name: "Blend",
+    category: "animation",
+    summary: "Blends between two values.",
+    variants: ["number", "color", "point"],
+    inputs: [port("progress", "number", { default: 0 }), port("start", "variant", { default: 0 }), port("end", "variant", { default: 1 }), port("points", "variant", { default: { loop: [0, 100] }, wholeLoop: true })],
+    outputs: [port("output", "variant")],
+    variantDefaults: { color: { start: "#FFFFFFFF" } },
+  },
+  {
+    type: "picker",
+    name: "Option Picker",
+    category: "state",
+    summary: "Outputs the option at an index.",
+    variants: ["number", "text", "color"],
+    inputs: [port("option", "index", { default: 0 })],
+    outputs: [port("output", "variant")],
+    variadic: { key: "option", name: "Option", type: "variant", default: 0, min: 2, max: 6, defaultCount: 2, startIndex: 0, description: "An option to pick." },
+    variantDefaults: { color: { option: "#FFFFFFFF" } },
+  },
+  {
+    type: "sender",
+    name: "Option Sender",
+    category: "state",
+    summary: "Sends a value to the selected option's output.",
+    variants: ["number", "text"],
+    inputs: [port("option", "index", { default: 0 }), port("value", "variant", { default: 1 })],
+    outputs: [port("selected", "index")],
+    variadic: { key: "option", name: "Option", type: "variant", default: 0, min: 2, max: 6, defaultCount: 3, startIndex: 0, direction: "outputs", description: "The value while this option is selected." },
+  },
+  {
+    type: "stops",
+    name: "Gradient Builder",
+    category: "color",
+    summary: "Builds a gradient from stops.",
+    inputs: [],
+    outputs: [port("gradient", "gradient")],
+    inputCountRange: { min: 1, max: 4, defaultCount: 2 },
+    dynamicPorts: (node) => {
+      const n = Math.min(4, Math.max(1, Math.round(node.inputCount ?? 2)));
+      const keys = Array.from({ length: n }, (_, i) => i + 1);
+      return { inputs: keys.map((k) => port(`stop${k}`, "number", { default: 0 })), outputs: keys.map((k) => port(`at${k}`, "number")) };
+    },
+  },
+  {
+    type: "script",
+    name: "Script",
+    category: "scripting",
+    summary: "A script that declares its own types.",
+    inputs: [],
+    outputs: [],
+    dynamicPorts: (node) => ({ inputs: [port("value", "variant")], outputs: [port("output", "variant")], variants: (node.settings?.variants ?? []) as ValueType[] }),
+  },
+  {
+    type: "or",
+    name: "Or",
+    category: "logic",
+    summary: "On when any input is on.",
+    inputs: [],
+    outputs: [port("output", "boolean")],
+    variadic: { key: "value", name: "Value", type: "boolean", default: false, min: 2, max: 8, defaultCount: 2, description: "An on/off value." },
+  },
+  {
+    type: "roundDown",
+    name: "Round Down",
+    category: "logic",
+    summary: "Rounds a number down.",
+    inputs: [port("amount", "number", { default: 0 })],
+    outputs: [port("output", "number")],
+  },
+  {
+    type: "sampler",
+    name: "Sample and Hold",
+    category: "state",
+    summary: "Captures a value while Sample is on.",
+    inputs: [port("value", "number", { default: 0 }), port("sample", "boolean", { default: false, acceptsPulse: true })],
+    outputs: [port("output", "number")],
+  },
+];
+
+export const extendedRegistry = createRegistry([...MOCK_PATCH_SPECS, ...EXTRA_PATCH_SPECS]);
+
 export function emptyDoc(): SonobeDocument {
   return createEmptyDocument({ name: "Test", device: "custom" });
 }

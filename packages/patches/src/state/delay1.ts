@@ -1,7 +1,8 @@
 /**
- * Delay One Frame: outputs last frame's input. The engine evaluates `delay1` natively, because breaking a
- * feedback cycle at its input needs the compiled graph; this evaluator is the same register for hosts and
- * harnesses that run definitions directly (outside a cycle).
+ * Delay One Frame: outputs last frame's input. When the compiler breaks a feedback cycle at this patch's
+ * Value (`ctx.isFeedback("value")`), the back-edge read already is last frame's value, so it passes
+ * through; otherwise the patch keeps a one-frame register. The engine still evaluates `delay1` with its
+ * own built-in copy of this evaluator.
  */
 
 import type { Value, ValueType } from "@sonobe/core";
@@ -20,6 +21,11 @@ const SPEC = getSpec("delay1")!;
 export const delay1Patch = definePatch<Delay1State>("delay1", {
   state: () => ({ seeded: false, variant: undefined, held: undefined }),
   evaluate(ctx) {
+    if (ctx.isFeedback("value")) {
+      // The driver evaluates later this frame, so the read is already one frame late (the port default on frame 0).
+      ctx.output("output", ctx.input<Value>("value"));
+      return;
+    }
     const s = ctx.state;
     const variant = variantOf(ctx, SPEC);
     const v = ctx.input<Value>("value");

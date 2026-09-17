@@ -72,6 +72,14 @@ describe("swipe", () => {
     expect(fired(r.script(drag([300, 500], [100, 500], { frames: 4 })))).toEqual([]);
   });
 
+  it("never swipes a cancelled press", () => {
+    const r = rig();
+    r.step();
+    const cancelled = sequence(drag([300, 200], [100, 200], { frames: 4, release: false }), [[pointerEvent("cancel", 100, 200)]]);
+    expect(fired(r.script(cancelled))).toEqual([]);
+    expect(fired(r.script(drag([300, 200], [100, 200], { frames: 4 })))).toEqual([["swiped", "swipedLeft"]]);
+  });
+
   it("treats negative thresholds as 0", () => {
     const r = rig({ minDistance: -5, minVelocity: -5 });
     r.step();

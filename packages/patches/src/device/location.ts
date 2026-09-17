@@ -3,10 +3,9 @@
  * Override. Callbacks only store fixes; the next evaluate applies them.
  */
 
+import type { GeoFix } from "@sonobe/engine";
 import { definePatch, toBool, toText, warnOnce } from "../infra/index.ts";
-import { devicePlatform } from "./platform.ts";
-import type { GeoFix } from "./platform.ts";
-import { describeError, isSimulationClock, withMutedBehavior } from "./shared.ts";
+import { describeError } from "./shared.ts";
 
 export interface Place {
   name: string;
@@ -64,82 +63,80 @@ function stopWatch(s: LocationState): void {
   }
 }
 
-export const locationPatch = withMutedBehavior(
-  definePatch<LocationState>("location", {
-    state: () => ({ latitude: 0, longitude: 0, name: "", accuracy: 0, available: false, loading: false, errorMessage: "", watch: null, gen: 0, fix: null, fixError: null }),
-    evaluate(ctx) {
-      const s = ctx.state;
-      const override = toText(ctx.input("override"));
-      if (!toBool(ctx.input("enabled"))) {
-        stopWatch(s);
-        s.available = false;
-        s.loading = false;
-      } else if (override !== "current") {
-        stopWatch(s);
-        let place = Object.hasOwn(PLACES, override) ? PLACES[override] : undefined;
-        if (!place) {
-          warnOnce(ctx, "unknownOverride", `Location: "${override}" isn't an override city, so it uses San Francisco.`);
-          place = PLACES.sanFrancisco!;
-        }
-        Object.assign(s, { latitude: place.latitude, longitude: place.longitude, name: place.name, accuracy: 0, available: true, loading: false, errorMessage: "" });
-      } else {
-        const geo = devicePlatform(ctx.services).geolocation;
-        if (!geo) {
-          const message = isSimulationClock(ctx) ? "Location isn't available in simulation." : "Location isn't available here. Choose an override city.";
-          Object.assign(s, { available: false, loading: false, errorMessage: message });
-        } else {
-          if (!s.watch) {
-            s.loading = !s.available;
-            const gen = ++s.gen;
-            try {
-              s.watch = geo.watch(
-                (fix) => {
-                  if (s.gen === gen) s.fix = fix;
-                },
-                (message) => {
-                  if (s.gen === gen) s.fixError = typeof message === "string" ? message : describeError(message);
-                },
-              );
-            } catch (error) {
-              s.watch = null;
-              s.fixError = describeError(error);
-            }
-          }
-          const fix = s.fix;
-          if (fix) {
-            s.fix = null;
-            const { latitude, longitude, accuracy } = fix;
-            if (Number.isFinite(latitude) && Number.isFinite(longitude)) {
-              Object.assign(s, {
-                latitude,
-                longitude,
-                accuracy: Number.isFinite(accuracy) && accuracy > 0 ? accuracy : 0,
-                name: formatCoordinates(latitude, longitude),
-                available: true,
-                loading: false,
-                errorMessage: "",
-              });
-            }
-          }
-          if (s.fixError !== null) {
-            s.loading = false;
-            s.errorMessage = s.fixError;
-            s.fixError = null;
-          }
-          if (s.loading) ctx.requestNextFrame();
-        }
+export const locationPatch = definePatch<LocationState>("location", {
+  mutedBehavior: "zero",
+  state: () => ({ latitude: 0, longitude: 0, name: "", accuracy: 0, available: false, loading: false, errorMessage: "", watch: null, gen: 0, fix: null, fixError: null }),
+  evaluate(ctx) {
+    const s = ctx.state;
+    const override = toText(ctx.input("override"));
+    if (!toBool(ctx.input("enabled"))) {
+      stopWatch(s);
+      s.available = false;
+      s.loading = false;
+    } else if (override !== "current") {
+      stopWatch(s);
+      let place = Object.hasOwn(PLACES, override) ? PLACES[override] : undefined;
+      if (!place) {
+        warnOnce(ctx, "unknownOverride", `Location: "${override}" isn't an override city, so it uses San Francisco.`);
+        place = PLACES.sanFrancisco!;
       }
-      ctx.output("latitude", s.latitude);
-      ctx.output("longitude", s.longitude);
-      ctx.output("name", s.name);
-      ctx.output("available", s.available);
-      ctx.output("accuracy", s.accuracy);
-      ctx.output("loading", s.loading);
-      ctx.output("errorMessage", s.errorMessage);
-    },
-    dispose(state) {
-      if (state) stopWatch(state);
-    },
-  }),
-  "zero",
-);
+      Object.assign(s, { latitude: place.latitude, longitude: place.longitude, name: place.name, accuracy: 0, available: true, loading: false, errorMessage: "" });
+    } else {
+      const geo = ctx.services.platform.geolocation;
+      if (!geo) {
+        const message = ctx.services.deterministic ? "Location isn't available in simulation." : "Location isn't available here. Choose an override city.";
+        Object.assign(s, { available: false, loading: false, errorMessage: message });
+      } else {
+        if (!s.watch) {
+          s.loading = !s.available;
+          const gen = ++s.gen;
+          try {
+            s.watch = geo.watch(
+              (fix) => {
+                if (s.gen === gen) s.fix = fix;
+              },
+              (message) => {
+                if (s.gen === gen) s.fixError = typeof message === "string" ? message : describeError(message);
+              },
+            );
+          } catch (error) {
+            s.watch = null;
+            s.fixError = describeError(error);
+          }
+        }
+        const fix = s.fix;
+        if (fix) {
+          s.fix = null;
+          const { latitude, longitude, accuracy } = fix;
+          if (Number.isFinite(latitude) && Number.isFinite(longitude)) {
+            Object.assign(s, {
+              latitude,
+              longitude,
+              accuracy: Number.isFinite(accuracy) && accuracy > 0 ? accuracy : 0,
+              name: formatCoordinates(latitude, longitude),
+              available: true,
+              loading: false,
+              errorMessage: "",
+            });
+          }
+        }
+        if (s.fixError !== null) {
+          s.loading = false;
+          s.errorMessage = s.fixError;
+          s.fixError = null;
+        }
+        if (s.loading) ctx.requestNextFrame();
+      }
+    }
+    ctx.output("latitude", s.latitude);
+    ctx.output("longitude", s.longitude);
+    ctx.output("name", s.name);
+    ctx.output("available", s.available);
+    ctx.output("accuracy", s.accuracy);
+    ctx.output("loading", s.loading);
+    ctx.output("errorMessage", s.errorMessage);
+  },
+  dispose(state) {
+    if (state) stopWatch(state);
+  },
+});

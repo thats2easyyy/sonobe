@@ -5,6 +5,7 @@
 
 import { parseAddress } from "./address.ts";
 import { componentDependencies, listComponentIds } from "./document.ts";
+import { DELAY_ONE_FRAME_TYPE, feedbackLoops, type FeedbackEdge, type FeedbackLoop } from "./graph.ts";
 import { isValidId } from "./ids.ts";
 import { listInputs } from "./ops/references.ts";
 import {
@@ -12,13 +13,14 @@ import {
   COMPONENT_INSTANCE_LAYER_TYPE,
   COMPONENT_PATCH_TYPE,
   findLayer,
+  getInputCountRange,
   getPatchSpec,
   interfacePortToPort,
   resolveNodePorts,
   walkLayers,
 } from "./registry.ts";
 import { didYouMean, didYouMeanText } from "./suggest.ts";
-import type { Component, Diagnostic, Id, Registry, Severity, SonobeDocument, SonobeError, Suggestion } from "./types.ts";
+import type { Component, Diagnostic, Id, Registry, Severity, SonobeDocument, SonobeError, Suggestion, ValueType } from "./types.ts";
 import { checkInputValue, checkLink, checkLiteral, insertPatchSuggestion, resolveSource, resolveTarget, type PortTarget, type ValidateOptions } from "./validate.ts";
 import { isAssetInput, isLayerInput, isLinkInput } from "./values.ts";
 
@@ -27,8 +29,9 @@ export interface DiagnosticsOptions {
   components?: Id[];
 }
 
-function diag(severity: Severity, code: string, message: string, component: Id, itemIds: Id[], extra: { port?: string; suggestions?: Suggestion[] } = {}): Diagnostic {
+function diag(severity: Severity, code: string, message: string, component: Id, itemIds: Id[], extra: { port?: string; hint?: string; suggestions?: Suggestion[] } = {}): Diagnostic {
   const d: Diagnostic = { code, severity, message, component, itemIds };
+  if (extra.hint !== undefined) d.hint = extra.hint;
   if (extra.port !== undefined) d.port = extra.port;
   if (extra.suggestions?.length) d.suggestions = extra.suggestions;
   return d;
@@ -37,6 +40,48 @@ function diag(severity: Severity, code: string, message: string, component: Id, 
 const withHint = (e: SonobeError) => (e.hint ? `${e.message} ${e.hint}` : e.message);
 
 const STATE_TYPES = new Set(["boolean", "number", "index"]);
+
+/** "a", "a and b", "a, b and c". */
+const listText = (items: readonly string[]) => (items.length <= 1 ? items.join("") : `${items.slice(0, -1).join(", ")} and ${items.at(-1)}`);
+
+/** feedback_loop: names the cables that read the previous frame and offers to make each delay explicit. */
+function feedbackDiagnostic(doc: SonobeDocument, c: Component, registry: Registry, loop: FeedbackLoop): Diagnostic {
+  const delayName = getPatchSpec(registry, DELAY_ONE_FRAME_TYPE)?.name ?? "Delay One Frame";
+  const cable = (e: FeedbackEdge) => `${e.from} → ${e.to}`;
+  const connections = (edges: readonly FeedbackEdge[]) => `The ${edges.length === 1 ? "connection" : "connections"} ${listText(edges.map(cable))}`;
+  const delayed = loop.feedback.filter((e) => e.reason === "delay1");
+  const backwards = loop.feedback.filter((e) => e.reason === "backwards");
+  const byOrder = loop.feedback.filter((e) => e.reason === "id");
+  const parts = [`Patches ${loop.patchIds.map((x) => `"${x}"`).join(", ")} form a feedback loop.`];
+  if (delayed.length) {
+    const one = delayed.length === 1;
+    parts.push(`${delayName} ${listText(delayed.map((e) => `"${e.targetId}"`))} ${one ? "gives" : "give"} it one frame of delay: ${listText(delayed.map(cable))} ${one ? "reads last frame's value" : "read last frame's values"}.`);
+  }
+  if (backwards.length) {
+    parts.push(`${connections(backwards)} ${backwards.length === 1 ? "runs right to left, so it reads last frame's value" : "run right to left, so they read last frame's values"}.`);
+  }
+  if (byOrder.length) parts.push(`${connections(byOrder)} ${byOrder.length === 1 ? "reads last frame's value" : "read last frame's values"}.`);
+
+  const implicit = loop.feedback.filter((e) => e.reason !== "delay1");
+  const validate: ValidateOptions = { registry, lenient: false };
+  const suggestions: Suggestion[] = [];
+  for (const e of implicit.slice(0, 3)) {
+    const src = resolveSource(doc, c, e.from, validate);
+    const tgt = resolveTarget(doc, c, e.to, validate);
+    const fromType: ValueType = src.ok && src.value.port ? src.value.port.type : "any";
+    const toType: ValueType = tgt.ok && tgt.value.port ? tgt.value.port.type : "any";
+    const s = insertPatchSuggestion(doc, registry, c.id, DELAY_ONE_FRAME_TYPE, `Insert a ${delayName} on ${cable(e)}`, { address: e.from, type: fromType }, { address: e.to, type: toType });
+    if (!s) continue;
+    const add = s.ops?.[0];
+    const a = c.patches[e.sourceId]?.ui;
+    const b = c.patches[e.targetId]?.ui;
+    if (add?.op === "addPatch" && a && b && Number.isFinite(a.x + a.y + b.x + b.y)) add.patch.ui = { x: Math.round((a.x + b.x) / 2), y: Math.round((a.y + b.y) / 2) };
+    suggestions.push(s);
+  }
+  const extra: { hint?: string; suggestions: Suggestion[] } = { suggestions };
+  if (implicit.length) extra.hint = `To make the delay explicit, insert a ${delayName} patch on ${implicit.length === 1 ? "that connection" : "one of those connections"}.`;
+  return diag("info", "feedback_loop", parts.join(" "), c.id, loop.patchIds, extra);
+}
 
 function checkComponent(doc: SonobeDocument, c: Component, registry: Registry, out: Diagnostic[]): void {
   const validate: ValidateOptions = { registry, lenient: false };
@@ -65,6 +110,14 @@ function checkComponent(doc: SonobeDocument, c: Component, registry: Registry, o
     }
   };
 
+  /** State inputs that take pulses on purpose: ports declared acceptsPulse, and boolean inputs of logic patches (Or and And merge taps). */
+  const acceptsPulses = (target: PortTarget): boolean => {
+    if (target.port?.acceptsPulse) return true;
+    if (target.kind !== "patch" || target.itemId === undefined || target.port?.type !== "boolean") return false;
+    const node = c.patches[target.itemId];
+    return !!node && getPatchSpec(registry, node.type)?.category === "logic";
+  };
+
   const checkValue = (target: PortTarget, value: unknown) => {
     const itemIds = target.itemId ? [target.itemId] : [];
     const r = checkInputValue(doc, c, target, value, validate);
@@ -88,6 +141,7 @@ function checkComponent(doc: SonobeDocument, c: Component, registry: Registry, o
     if (!isLinkInput(value) || !target.port) return;
     const src = resolveSource(doc, c, value.link, validate);
     if (!src.ok || !src.value.port || src.value.port.type !== "pulse" || !STATE_TYPES.has(target.port.type)) return;
+    if (acceptsPulses(target)) return;
     const suggestions: Suggestion[] = [];
     const s = insertPatchSuggestion(doc, registry, c.id, "switch", "Insert a Switch: each pulse flips it on or off, and it holds that state.", { address: src.value.address, type: "pulse" }, { address: target.address, type: target.port.type });
     if (s) suggestions.push(s);
@@ -131,8 +185,9 @@ function checkComponent(doc: SonobeDocument, c: Component, registry: Registry, o
       }));
       continue;
     }
+    const ports = resolveNodePorts(doc, node, registry);
     if (node.typeParam !== undefined) {
-      const variants = spec.variants ?? [];
+      const variants = ports?.variants ?? [];
       if (!variants.length) push(diag("warning", "invalid_type_param", `Patch "${id}" sets typeParam "${node.typeParam}", but ${spec.name} has no type options.`, c.id, [id]));
       else if (!(variants as string[]).includes(node.typeParam)) {
         push(diag("error", "invalid_type_param", `Patch "${id}" is set to type "${node.typeParam}", which ${spec.name} doesn't support (${variants.join(", ")}).`, c.id, [id], {
@@ -140,11 +195,14 @@ function checkComponent(doc: SonobeDocument, c: Component, registry: Registry, o
         }));
       }
     }
-    if (node.inputCount !== undefined && spec.variadic && (node.inputCount < spec.variadic.min || node.inputCount > spec.variadic.max)) {
-      push(diag("warning", "input_count_out_of_range", `Patch "${id}" has ${node.inputCount} ${spec.variadic.name.toLowerCase()} inputs; ${spec.name} supports ${spec.variadic.min}–${spec.variadic.max}.`, c.id, [id]));
+    const range = getInputCountRange(spec);
+    if (node.inputCount !== undefined && range && (node.inputCount < range.min || node.inputCount > range.max)) {
+      const message = spec.variadic
+        ? `Patch "${id}" has ${node.inputCount} ${spec.variadic.name.toLowerCase()} inputs; ${spec.name} supports ${range.min}–${range.max}.`
+        : `Patch "${id}" has an input count of ${node.inputCount}; ${spec.name} supports ${range.min}–${range.max}.`;
+      push(diag("warning", "input_count_out_of_range", message, c.id, [id]));
     }
     if (node.type === COMPONENT_PATCH_TYPE) componentRef(id, node.component, "patchComponent", "Component patch");
-    const ports = resolveNodePorts(doc, node, registry);
     if (ports?.dynamicPortsError) push(diag("warning", "dynamic_ports_failed", `Patch "${id}" couldn't work out its ports: ${ports.dynamicPortsError}`, c.id, [id]));
     for (const [key, value] of Object.entries(node.inputs)) {
       const target = resolveTarget(doc, c, `${id}.${key}`, validate);
@@ -172,21 +230,13 @@ function checkComponent(doc: SonobeDocument, c: Component, registry: Registry, o
   }
 
   // Graph: feedback loops and unused patches.
-  const edges = new Map<Id, Set<Id>>();
   const consumed = new Set<Id>();
   for (const e of listInputs(c)) {
     if (!isLinkInput(e.value)) continue;
     const a = parseAddress(e.value.link);
-    if (!a || a.kind !== "patch") continue;
-    consumed.add(a.id);
-    if (e.target.kind === "patch" && c.patches[a.id] && a.id !== e.target.id) {
-      if (!edges.has(a.id)) edges.set(a.id, new Set());
-      edges.get(a.id)!.add(e.target.id);
-    }
+    if (a && a.kind === "patch") consumed.add(a.id);
   }
-  for (const loop of stronglyConnected(Object.keys(c.patches), edges)) {
-    push(diag("info", "feedback_loop", `Patches ${loop.map((x) => `"${x}"`).join(", ")} form a feedback loop. The connection that closes the loop reads the previous frame's value.`, c.id, loop));
-  }
+  for (const loop of feedbackLoops(doc, c.id, registry)) push(feedbackDiagnostic(doc, c, registry, loop));
   for (const [id, node] of Object.entries(c.patches)) {
     if (consumed.has(id)) continue;
     const ports = resolveNodePorts(doc, node, registry);
@@ -230,43 +280,6 @@ function checkComponent(doc: SonobeDocument, c: Component, registry: Registry, o
       push(diag("warning", "untouchable_layer", `Layer "${value.layer}" can't receive touches because ${reasons.join(" and ")}, so ${spec.name} "${id}" will never fire.`, c.id, [value.layer, id], { port: port.key, suggestions: fixes }));
     }
   }
-}
-
-/** Strongly connected components with more than one node (Tarjan). */
-function stronglyConnected(nodes: Id[], edges: Map<Id, Set<Id>>): Id[][] {
-  let index = 0;
-  const indexes = new Map<Id, number>();
-  const low = new Map<Id, number>();
-  const stack: Id[] = [];
-  const onStack = new Set<Id>();
-  const out: Id[][] = [];
-  const visit = (v: Id) => {
-    indexes.set(v, index);
-    low.set(v, index);
-    index++;
-    stack.push(v);
-    onStack.add(v);
-    for (const w of edges.get(v) ?? []) {
-      if (!indexes.has(w)) {
-        visit(w);
-        low.set(v, Math.min(low.get(v)!, low.get(w)!));
-      } else if (onStack.has(w)) {
-        low.set(v, Math.min(low.get(v)!, indexes.get(w)!));
-      }
-    }
-    if (low.get(v) === indexes.get(v)) {
-      const group: Id[] = [];
-      let w: Id;
-      do {
-        w = stack.pop()!;
-        onStack.delete(w);
-        group.push(w);
-      } while (w !== v);
-      if (group.length > 1) out.push(group.sort());
-    }
-  };
-  for (const v of [...nodes].sort()) if (!indexes.has(v)) visit(v);
-  return out;
 }
 
 /** Diagnose a whole document (or selected components). */

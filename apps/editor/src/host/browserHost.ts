@@ -5,7 +5,8 @@
  */
 
 import { parseDocumentFiles, ProjectFormatError } from "@sonobe/core";
-import { assetBinaries, createAssetUrlCache, documentFiles, planProjectWrite, projectDisplayName, sanitizeProjectName } from "./projectFiles.ts";
+import { getDefaultDialogs, type DialogService } from "../state/dialogs.ts";
+import { assetBinaries, createAssetUrlCache, documentFiles, planProjectWrite, projectDisplayName, sanitizeProjectName, toArrayBuffer } from "./projectFiles.ts";
 import type { HostAdapter } from "./types.ts";
 
 export interface StoredProject {
@@ -32,9 +33,6 @@ export interface ProjectStorage {
 // ---------------------------------------------------------------------------
 // Storage backends
 // ---------------------------------------------------------------------------
-
-const toArrayBuffer = (bytes: ArrayBuffer | Uint8Array): ArrayBuffer =>
-  bytes instanceof Uint8Array ? (bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer) : bytes;
 
 export function createMemoryProjectStorage(initial: Record<string, StoredProject> = {}): ProjectStorage {
   const projects = new Map<string, StoredProject>(Object.entries(initial).map(([k, v]) => [k, { files: { ...v.files }, binaries: { ...v.binaries } }]));
@@ -252,9 +250,35 @@ type PickerWindow = {
   document?: { title: string };
 };
 
+/** BrowserDialogs shown through a dialog service (in-app dialogs instead of window.prompt). */
+export function browserDialogsFrom(service: DialogService): BrowserDialogs {
+  return {
+    pickProject: (names) =>
+      service.pick({
+        title: "Open a prototype",
+        message: "Prototypes saved in this browser.",
+        items: names.map((name) => ({ value: name, label: name })),
+        confirmLabel: "Open",
+        emptyMessage: "No saved prototypes yet.",
+      }),
+    promptName: (defaultName) =>
+      service.prompt({
+        title: "Save prototype",
+        message: "Prototypes you save here stay in this browser. Give it a name you’ll recognize.",
+        label: "Prototype name",
+        defaultValue: defaultName,
+        confirmLabel: "Save",
+        validate: (value) => (value.trim() ? null : "Enter a name."),
+      }),
+  };
+}
+
 export interface BrowserHostOptions {
   storage?: ProjectStorage | Promise<ProjectStorage>;
+  /** Default: in-app dialogs through `dialogService`. */
   dialogs?: Partial<BrowserDialogs>;
+  /** Where default dialogs are shown. Default: getDefaultDialogs(). */
+  dialogService?: DialogService;
   /** Use showDirectoryPicker when the browser has it. Default true. */
   fileSystemAccess?: boolean;
   /** Window used for dialogs, title, and beforeunload. Default globalThis.window. */
@@ -302,20 +326,11 @@ export function createBrowserHost(options: BrowserHostOptions = {}): BrowserHost
     };
   }
 
+  let fallbackDialogs: BrowserDialogs | null = null;
+  const inApp = () => (fallbackDialogs ??= browserDialogsFrom(options.dialogService ?? getDefaultDialogs()));
   const dialogs: BrowserDialogs = {
-    pickProject:
-      options.dialogs?.pickProject ??
-      (async (names) => {
-        if (!win?.prompt) return null;
-        const answer = win.prompt(`Open which project?\n\n${names.join("\n")}`, names[0] ?? "");
-        return answer && names.includes(answer.trim()) ? answer.trim() : null;
-      }),
-    promptName:
-      options.dialogs?.promptName ??
-      (async (defaultName) => {
-        if (!win?.prompt) return defaultName;
-        return win.prompt("Name your prototype", defaultName);
-      }),
+    pickProject: options.dialogs?.pickProject ?? ((names) => inApp().pickProject(names)),
+    promptName: options.dialogs?.promptName ?? ((defaultName) => inApp().promptName(defaultName)),
   };
 
   const nameOf = (path: string) => path.slice(BROWSER_PREFIX.length);
@@ -418,20 +433,34 @@ export function createBrowserHost(options: BrowserHostOptions = {}): BrowserHost
     async writeProject(path, doc, writeOptions = {}) {
       const previous = known.get(path) ?? (await readStored(path).catch(() => undefined))?.files;
       const plan = planProjectWrite(doc, previous ? documentFiles(previous) : undefined);
-      let binaries: Record<string, ArrayBuffer> | undefined;
-      const from = writeOptions.copyAssetsFrom;
-      if (from && from !== path && Object.keys(doc.assets).length > 0) {
-        const source = assets.getBinaries(from) ?? assetBinaries((await readStored(from))?.binaries);
-        const wanted = new Set(Object.values(doc.assets).map((a) => `assets/${a.file}`));
-        binaries = Object.fromEntries(Object.entries(source).filter(([p]) => wanted.has(p)));
+      const from = writeOptions.copyAssetsFrom && writeOptions.copyAssetsFrom !== path ? writeOptions.copyAssetsFrom : null;
+      const binaries = assets.pending(path, doc, from);
+      if (from && !assets.hasProject(from) && Object.keys(doc.assets).length > 0) {
+        const source = assetBinaries((await readStored(from))?.binaries);
+        for (const record of Object.values(doc.assets)) {
+          const rel = `assets/${record.file}`;
+          if (!binaries[rel] && source[rel]) binaries[rel] = source[rel];
+        }
       }
-      await writeStored(path, { files: plan.files, deleted: plan.deleted, ...(binaries && Object.keys(binaries).length ? { binaries } : {}) });
+      const hasBinaries = Object.keys(binaries).length > 0;
+      await writeStored(path, { files: plan.files, deleted: plan.deleted, ...(hasBinaries ? { binaries } : {}) });
       known.set(path, plan.all);
-      if (binaries) assets.setBinaries(path, { ...(assets.getBinaries(path) ?? {}), ...binaries });
+      if (hasBinaries) assets.markWritten(path, binaries);
       touchRecent(path);
       const changed = [...Object.keys(plan.files), ...plan.deleted];
       if (channel && changed.length) channel.postMessage({ path, paths: changed.sort(), origin });
-      return { written: [...Object.keys(plan.files), ...Object.keys(binaries ?? {})], deleted: plan.deleted, unchanged: plan.unchanged };
+      return { written: [...Object.keys(plan.files), ...Object.keys(binaries)], deleted: plan.deleted, unchanged: plan.unchanged };
+    },
+
+    putAssetBytes: (path, file, bytes) => assets.put(path, file, toArrayBuffer(bytes)),
+    peekAssetBytes: (path, file) => assets.get(path, file),
+
+    async readAssetBytes(path, file) {
+      const held = assets.get(path, file);
+      if (held || path === null) return held;
+      const bytes = (await readStored(path).catch(() => undefined))?.binaries?.[`assets/${file}`];
+      if (bytes) assets.markWritten(path, { [`assets/${file}`]: bytes });
+      return bytes;
     },
 
     watchProject(path, cb) {

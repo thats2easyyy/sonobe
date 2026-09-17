@@ -22,6 +22,11 @@ Related: `simulation`, `gestures`, `graph-basics`
 - **It hit a different layer:** something in front (text, an overlay) catches the touch. Group them, or turn off `hitTest` on the covering layer.
 - **Nothing heard it:** no interaction patch has `layer` set to this layer or one of its parents.
 - **The switch changed but the layer didn't:** the chain isn't connected to a layer property, or a Transition's `start` equals its `end`. Look for `unused_patch` info.
+- **Only the first tap works:** an `or` merges a state such as `down`, which stays on, so Or never turns on again. Merge `tap` pulses instead.
+
+## It stops dead when released
+
+A thrown layer needs the release speed. Wire the gesture's `down` into the spring's `gestureActive` and its `velocity` into `gestureVelocity` (see `gestures`). A `velocity` patch on a position reads 0 on the release frame.
 
 ## It snaps back on release
 

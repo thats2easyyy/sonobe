@@ -1,16 +1,42 @@
 import { describe, expect, it } from "vitest";
 import type { LayerRef } from "@sonobe/core";
+import { mat4 } from "@sonobe/engine";
 import type { LayerInfoSnapshot } from "@sonobe/engine";
 import { runPatch } from "@sonobe/engine/testing";
 import { createPatchHarness, loopOf } from "../infra/index.ts";
 import { convertPosition } from "./convertPosition.ts";
 
-/** A card inside a panel scaled 2× about its center. The card is disabled, which doesn't matter. */
-function scene(panel: Partial<LayerInfoSnapshot> = {}): Record<string, LayerInfoSnapshot> {
+interface Frame {
+  position: [number, number];
+  size: [number, number];
+  scale?: [number, number];
+  rotation?: number;
+  enabled?: boolean;
+  contentSize?: [number, number];
+}
+
+/** A snapshot the way the engine builds one: the local transform composed onto the parent's world transform. */
+function snapshot(frame: Frame, parent: { ref: LayerRef; world: number[] } | null): LayerInfoSnapshot {
+  const scale = frame.scale ?? [1, 1];
+  const local = mat4.compose({ position: frame.position, size: frame.size, scale: [scale[0], scale[1], 1], rotationZ: frame.rotation ?? 0 });
   return {
-    panel: { enabled: true, position: [40, 100], size: [200, 200], scale: [2, 2], anchor: [0, 0], parent: null, contentSize: [60, 70], ...panel },
-    card: { enabled: false, position: [10, 20], size: [50, 50], scale: [1, 1], anchor: [0, 0], parent: "panel", contentSize: [0, 0] },
+    type: "rectangle",
+    enabled: frame.enabled ?? true,
+    position: frame.position,
+    size: frame.size,
+    scale,
+    anchor: [0, 0],
+    parent: parent?.ref ?? null,
+    worldTransform: parent ? mat4.multiply(parent.world, local) : local,
+    contentSize: frame.contentSize ?? [0, 0],
   };
+}
+
+/** A card inside a panel scaled 2× about its center. The card is disabled, which doesn't matter. */
+function scene(panel: Partial<Frame> = {}): Record<string, LayerInfoSnapshot> {
+  const panelInfo = snapshot({ position: [40, 100], size: [200, 200], scale: [2, 2], contentSize: [60, 70], ...panel }, null);
+  const card = snapshot({ position: [10, 20], size: [50, 50], enabled: false }, { ref: { layerId: "panel" }, world: panelInfo.worldTransform });
+  return { panel: panelInfo, card };
 }
 
 function harness(inputs: Record<string, unknown>, infos = scene()) {
@@ -28,6 +54,22 @@ describe("convertPosition", () => {
     expect(h.step().outputs).toEqual({ convertedPosition: [50, 0], error: false });
     h.set({ toAnchor: [0.5, 0.5] });
     expect(h.step().outputs.convertedPosition).toEqual([25, -25]);
+  });
+
+  it("follows rotation exactly, in both directions", () => {
+    const rotated = scene({ scale: [1, 1], rotation: 90 });
+    const card = rotated.card!;
+    const [x, y] = mat4.transformPoint(card.worldTransform, [50, 50]);
+    const out = harness({ fromLayer: { layerId: "card" }, anchor: [1, 1] }, rotated).step().outputs.convertedPosition as number[];
+    expect(out[0]).toBeCloseTo(x, 9);
+    expect(out[1]).toBeCloseTo(y, 9);
+    // The panel turns 90° clockwise on screen about its center (140, 200): the card's corner (60, 70) in panel space,
+    // 40 left of and 30 above the pivot, lands 30 right of and 40 above it.
+    expect(out[0]).toBeCloseTo(170, 9);
+    expect(out[1]).toBeCloseTo(160, 9);
+    const back = harness({ position: [170, 160], toLayer: { layerId: "card" } }, rotated).step().outputs.convertedPosition as number[];
+    expect(back[0]).toBeCloseTo(50, 9);
+    expect(back[1]).toBeCloseTo(50, 9);
   });
 
   it("converts screen to screen when both layers are empty", () => {
@@ -57,7 +99,7 @@ describe("convertPosition", () => {
     expect(h.logs).toEqual([]);
   });
 
-  it("raises Error when To Layer's chain can't be inverted, but a flat From Layer collapses toward its pivot", () => {
+  it("raises Error when To Layer's transform can't be inverted, but a flat From Layer collapses toward its pivot", () => {
     const flat = scene({ scale: [0, 2] });
     expect(harness({ position: [60, 40], toLayer: { layerId: "card" } }, flat).step().outputs.error).toBe(true);
     const collapsed = scene({ scale: [0, 0] });

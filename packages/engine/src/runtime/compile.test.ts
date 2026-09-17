@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildDoc, createMockRegistry, createTestRuntime, port, sequenceDefinition } from "../testing/index.ts";
+import { buildDoc, createMockRegistry, createTestRuntime, port, sequenceDefinition, type ComponentInput } from "../testing/index.ts";
 import { createEngineRegistry } from "./builtins.ts";
 import { compileDocument } from "./compile.ts";
 
@@ -116,5 +116,88 @@ describe("compile: issues", () => {
     expect(calls).toBe(3);
     expect(seen).toEqual([10, 10, 12]);
     expect(rt.issues().filter((i) => i.code === "patch_threw")).toHaveLength(1);
+  });
+});
+
+describe("compile: back-edge selection (core's feedback rule)", () => {
+  const place = (doc: ReturnType<typeof buildDoc>, positions: Record<string, number>) => {
+    const next = structuredClone(doc);
+    for (const [id, x] of Object.entries(positions)) next.components.main!.patches[id]!.ui = { x, y: 0 };
+    return next;
+  };
+
+  it("a visually backwards cable reads the previous frame, whatever the ids", () => {
+    const doc = place(
+      buildDoc({
+        patches: {
+          a_second: { type: "add", inputs: { value1: { link: "z_first.output" }, value2: 1 } },
+          z_first: { type: "splitter", inputs: { value: { link: "a_second.output" } } },
+        },
+      }),
+      { z_first: 0, a_second: 200 },
+    );
+    const graph = compileDocument(doc, registry);
+    expect(graph.order.map((n) => [n.id, n.feedback])).toEqual([
+      ["z_first", [true]],
+      ["a_second", [false, false]],
+    ]);
+    const rt = createTestRuntime(doc);
+    expect(values(rt, 2, ["z_first.output", "a_second.output"])).toEqual([
+      [0, 1],
+      [1, 2],
+    ]);
+  });
+
+  it("in the same column, the cable into the lowest target id reads the previous frame", () => {
+    const doc = place(
+      buildDoc({
+        patches: {
+          c_split: { type: "splitter", inputs: { value: { link: "b_add.output" } } },
+          b_add: { type: "add", inputs: { value1: { link: "c_split.output" }, value2: 1 } },
+        },
+      }),
+      { c_split: 0, b_add: 0 },
+    );
+    expect(compileDocument(doc, registry).order.map((n) => [n.id, n.feedback])).toEqual([
+      ["b_add", [true, false]],
+      ["c_split", [false]],
+    ]);
+  });
+
+  it("edges into Delay One Frame win over visually backwards cables", () => {
+    const doc = place(
+      buildDoc({
+        patches: {
+          sum: { type: "add", inputs: { value1: { link: "d.output" }, value2: 1 } },
+          d: { type: "delay1", inputs: { value: { link: "sum.output" } } },
+        },
+      }),
+      { sum: 0, d: 600 },
+    );
+    expect(compileDocument(doc, registry).order.map((n) => [n.id, n.feedback])).toEqual([
+      ["d", [true]],
+      ["sum", [false, false]],
+    ]);
+  });
+
+  it("patches inside a component are placed where their component patch sits", () => {
+    const doubler: ComponentInput = {
+      id: "doubler",
+      kind: "patchComponent",
+      inputs: { x: { type: "number", default: 3 } },
+      outputs: { y: { type: "number", link: "mul.output" } },
+      patches: { mul: { type: "multiply", inputs: { a: { link: "$in.x" }, b: 2 } } },
+    };
+    const doc = buildDoc({
+      components: [doubler],
+      patches: {
+        acc: { type: "add", inputs: { value1: { link: "dbl.y" }, value2: 1 } },
+        dbl: { type: "component", component: "doubler", inputs: { x: { link: "acc.output" } } },
+      },
+    });
+    // Default placement puts acc left of dbl: the cable back into acc reads the previous frame.
+    expect(values(createTestRuntime(doc), 3, ["acc.output"]).flat()).toEqual([1, 3, 7]);
+    // Moving the component patch to the left makes the cable into it the backwards one.
+    expect(values(createTestRuntime(place(doc, { dbl: 0, acc: 400 })), 3, ["acc.output"]).flat()).toEqual([7, 15, 31]);
   });
 });

@@ -54,8 +54,9 @@ export const SPLIT_LIMITS = [0.15, 0.85] as const;
 
 export const DEFAULT_LAYOUT: LayoutState = {
   sizes: { layers: 232, viewer: 296, inspector: 272, hud: 164, drawer: 360 },
-  split: 0.5,
-  collapsed: { layers: false, viewer: false, inspector: false, hud: false },
+  // The patch editor gets the larger share, and the console starts as a tab strip (it opens on the first error).
+  split: 0.42,
+  collapsed: { layers: false, viewer: false, inspector: false, hud: true },
   viewMode: "split",
   splitDirection: "rows",
   drawer: null,

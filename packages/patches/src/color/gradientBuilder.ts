@@ -1,25 +1,31 @@
 /**
  * Gradient Builder: a linear, radial, or angular GradientValue from N stops (a Stop and a Color port
- * each). N comes from `node.inputCount`, clamped to 1…32 (default 2), through dynamic ports.
+ * each). N is the node's inputCount within the catalog's `inputCountRange` (1…32, default 2); the
+ * stop ports come from dynamic ports.
  */
 
+import { getInputCountRange } from "@sonobe/core";
 import type { Color, GradientStop, GradientValue, PatchNode, PortSpec } from "@sonobe/core";
 import { clamp01, components, definePatch, toNumber, toText, warnOnce } from "../infra/index.ts";
+import { getSpec } from "../specs.ts";
 import { finiteOrZero, hexByte, readColor } from "./channels.ts";
 
-export const MAX_GRADIENT_STOPS = 32;
-export const DEFAULT_GRADIENT_STOPS = 2;
+const RANGE = getInputCountRange(getSpec("gradientBuilder")!) ?? { min: 1, max: 32, defaultCount: 2 };
+
+export const MIN_GRADIENT_STOPS = RANGE.min;
+export const MAX_GRADIENT_STOPS = RANGE.max;
+export const DEFAULT_GRADIENT_STOPS = RANGE.defaultCount;
 
 const KINDS: ReadonlySet<string> = new Set(["linear", "radial", "angular"]);
 
-/** A GradientValue plus the proposed radial stretch (not yet in the contract; renderers ignore it). */
-export type BuiltGradient = GradientValue & { ratio?: number };
+/** The Gradient output: a GradientValue, with `ratio` set only for a stretched radial gradient. */
+export type BuiltGradient = GradientValue;
 
 /** How many stops a node has: `inputCount` rounded and clamped to 1…32, or 2 when unset. */
 export function gradientStopCount(node: Pick<PatchNode, "inputCount">): number {
   const n = node.inputCount;
   if (typeof n !== "number" || !Number.isFinite(n)) return DEFAULT_GRADIENT_STOPS;
-  return Math.min(MAX_GRADIENT_STOPS, Math.max(1, Math.round(n)));
+  return Math.min(MAX_GRADIENT_STOPS, Math.max(MIN_GRADIENT_STOPS, Math.round(n)));
 }
 
 /** Stop n's default position, evenly spaced from 0 to 1 (0 when there's one stop). */
@@ -52,7 +58,8 @@ export function gradientStopPorts(count: number): PortSpec[] {
 export const gradientBuilderPatch = definePatch("gradientBuilder", {
   dynamicPorts: (node) => ({ inputs: gradientStopPorts(gradientStopCount(node)), outputs: [] }),
   evaluate(ctx) {
-    const count = gradientStopCount(ctx.node);
+    // ctx.inputCount is node.inputCount clamped to the catalog's inputCountRange.
+    const count = gradientStopCount({ inputCount: ctx.inputCount });
     let kind = toText(ctx.input("type"));
     if (!KINDS.has(kind)) {
       warnOnce(ctx, "type", `Gradient Builder: "${kind}" isn't a gradient type, so it draws Linear.`);

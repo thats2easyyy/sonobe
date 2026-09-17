@@ -1,8 +1,9 @@
 import { expect, test } from "@playwright/test";
-import { collectConsoleProblems } from "./helpers.ts";
+import { collectConsoleProblems, skipWelcome } from "./helpers.ts";
 
 test("the widget gallery route still loads", async ({ page }) => {
   const problems = collectConsoleProblems(page);
+  await skipWelcome(page);
   await page.goto("/#gallery");
   await expect(page.locator(".sb-gallery").first()).toBeVisible({ timeout: 30_000 });
   expect(await page.evaluate(() => window.__sonobe === undefined)).toBe(true);

@@ -51,6 +51,12 @@ async function verifyInput(tab, scale) {
   check(down && near(down.x, 201) && near(down.y, 316), `pointer down in prototype coords (scale ${scale})`, JSON.stringify(down));
   check(up && near(up.x, 231) && near(up.y, 326), "pointer up after drag", JSON.stringify(up));
   check(pointers.some((e) => e.phase === "move"), "pointer moves while dragging");
+  // Hover moves before the press report 0; drag moves between down and up report the held primary button.
+  const downAt = pointers.indexOf(down);
+  const upAt = pointers.indexOf(up);
+  const hoverMoves = pointers.slice(0, downAt).filter((e) => e.phase === "move");
+  const dragMoves = pointers.slice(downAt + 1, upAt).filter((e) => e.phase === "move");
+  check(down?.buttons === 1 && up?.buttons === 0 && dragMoves.length > 0 && dragMoves.every((e) => e.buttons === 1) && hoverMoves.every((e) => e.buttons === 0), "pointer events carry the buttons bitmask (0 hovering, 1 while pressed, 0 after release)", JSON.stringify(pointers.map((e) => `${e.phase}:${e.buttons}`)));
   const times = pointers.map((e) => e.timeStamp);
   check(pointers.every((e) => e.pointerType === "mouse" && typeof e.timeStamp === "number") && times.every((t, i) => i === 0 || t >= times[i - 1]), "pointer events carry pointerType and increasing timeStamps", JSON.stringify(times.slice(0, 6)));
   const rafClock = await tab.evaluate(() => new Promise((resolve) => requestAnimationFrame((t) => resolve(t))));

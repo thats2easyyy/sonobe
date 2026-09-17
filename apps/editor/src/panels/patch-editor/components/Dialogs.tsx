@@ -1,8 +1,8 @@
-/** Patch picker, link-drag search, and patch info: registry-backed search and docs. */
+/** Patch picker, link-drag search, splice chooser, and patch info: registry-backed search and docs. */
 
-import { getPatchSpec, resolveNodePorts, type Id, type PatchSpec, type ValueType } from "@sonobe/core";
+import { findLayer, getPatchSpec, resolveNodePorts, type Id, type PatchSpec, type ValueType } from "@sonobe/core";
 import { isPatchImplemented } from "../../../state/registry.ts";
-import { ArrowRight, CornerDownLeft } from "lucide-react";
+import { ArrowRight, CornerDownLeft, Layers } from "lucide-react";
 import { Fragment, useMemo, type CSSProperties, type ReactNode } from "react";
 import { useStore } from "zustand";
 import { CATEGORY_LABELS, categoryColorVar } from "../../../theme/tokens.ts";
@@ -10,14 +10,16 @@ import { Badge } from "../../../ui/Badge.tsx";
 import { Button } from "../../../ui/Button.tsx";
 import { Dialog } from "../../../ui/Dialog.tsx";
 import { Kbd } from "../../../ui/Kbd.tsx";
+import { MenuList, type MenuEntry } from "../../../ui/Menu.tsx";
 import { Popover } from "../../../ui/Popover.tsx";
 import { PortGlyph, VALUE_TYPE_LABELS } from "../../../ui/PortGlyph.tsx";
-import { SearchList } from "../../../ui/SearchList.tsx";
-import { LINK_SEARCH_KEYS, linkSearchItems, type LinkSearchItem } from "../model/linkSearch.ts";
+import { SearchList, type SearchListRenderContext } from "../../../ui/SearchList.tsx";
+import type { SpliceOption } from "../model/editOps.ts";
+import { LINK_SEARCH_KEYS, linkCandidateGroup, linkCandidates, type LayerLinkItem, type LinkCandidate, type LinkSearchItem, type OutputLinkItem } from "../model/linkSearch.ts";
 import { PICKER_KEYS, pickerItems, type PickerItem } from "../model/picker.ts";
-import type { LinkSearchRequest, PickerRequest } from "../state/actions.ts";
+import type { LinkSearchRequest, PickerRequest, XY } from "../state/actions.ts";
 import { usePatchEditor } from "../state/context.ts";
-import { CATEGORY_ICONS } from "./icons.ts";
+import { CATEGORY_ICONS, LAYER_ICONS } from "./icons.ts";
 
 // ---------------------------------------------------------------------------
 // Patch picker
@@ -176,20 +178,26 @@ function PatchPreview({ item, onInsert, replacing }: { item: PickerItem; onInser
 export interface LinkDragSearchProps {
   request: LinkSearchRequest | null;
   onClose: () => void;
-  onPick: (item: LinkSearchItem, request: LinkSearchRequest) => void;
+  onPick: (item: LinkCandidate, request: LinkSearchRequest) => void;
 }
 
-/** Drop a cable on empty canvas: pick a patch to connect it to, pre-filtered to ports that fit. */
+function searchLabel(request: LinkSearchRequest | null): string {
+  if (request?.layer) return "Connect to a layer property";
+  if (request?.drive) return "Choose what drives this property";
+  return "Connect to a new patch";
+}
+
+/** Drop a cable on empty canvas (or a layer): pick a patch, a layer property, or an output to connect it to. */
 export function LinkDragSearch({ request, onClose, onPick }: LinkDragSearchProps) {
   return (
     <Popover
       open={request !== null}
       onOpenChange={(open) => !open && onClose()}
       anchor={request ? { x: request.client.x, y: request.client.y, width: 0, height: 0 } : null}
-      placement="bottom-start"
+      placement={request?.placement ?? "bottom-start"}
       offset={8}
       initialFocus="none"
-      aria-label="Connect to a new patch"
+      aria-label={searchLabel(request)}
       className="sb-pe-linksearch"
     >
       {request && <LinkSearchBody request={request} onClose={onClose} onPick={onPick} />}
@@ -197,53 +205,184 @@ export function LinkDragSearch({ request, onClose, onPick }: LinkDragSearchProps
   );
 }
 
-function LinkSearchBody({ request, onClose, onPick }: { request: LinkSearchRequest; onClose: () => void; onPick: LinkDragSearchProps["onPick"] }) {
-  const { session, registry } = usePatchEditor();
-  const items = useMemo(
-    () => linkSearchItems(session.document.getState().doc, registry, { side: request.side, type: request.type, ...(request.patchType ? { patchType: request.patchType } : {}) }),
-    [session, registry, request],
+function PatchCandidate({ item, ctx, side }: { item: LinkSearchItem; ctx: SearchListRenderContext; side: "in" | "out" }) {
+  const Icon = CATEGORY_ICONS[item.spec.category];
+  return (
+    <div className="sb-pe-linksearch__item" style={{ "--sb-cat": categoryColorVar(item.spec.category) } as CSSProperties}>
+      <span className="sb-pe-picker__icon" aria-hidden>
+        <Icon size={12} strokeWidth={2} />
+      </span>
+      <span className="sb-pe-picker__name">{ctx.highlight("name", item.spec.name)}</span>
+      {item.typeParam && item.spec.variants && item.typeParam !== item.spec.variants[0] && <span className="sb-pe-chip">{VALUE_TYPE_LABELS[item.typeParam]}</span>}
+      <span className="sb-pe-linksearch__port" data-exact={item.exact || undefined} title={item.conversion ? `Converted: ${item.conversion}` : undefined}>
+        {side === "out" && <ArrowRight size={10} strokeWidth={2.25} aria-hidden />}
+        <PortGlyph type={item.port.type} size={7} />
+        {ctx.highlight("port", item.port.name)}
+      </span>
+    </div>
+  );
+}
+
+function LayerCandidate({ item, ctx, singleLayer }: { item: LayerLinkItem; ctx: SearchListRenderContext; singleLayer: boolean }) {
+  const Icon = LAYER_ICONS[item.layerType] ?? Layers;
+  const name = singleLayer ? (
+    ctx.highlight("prop", item.port.name)
+  ) : ctx.matches.label ? (
+    ctx.highlight("label", item.label)
+  ) : (
+    <>
+      {ctx.highlight("layer", item.layerName)}
+      <span className="sb-pe-linksearch__sep" aria-hidden>
+        {" › "}
+      </span>
+      {ctx.highlight("prop", item.port.name)}
+    </>
   );
   return (
-    <SearchList
-      aria-label="Compatible patches"
-      placeholder={request.side === "out" ? `Connect ${VALUE_TYPE_LABELS[request.type].toLowerCase()} to…` : `Drive this ${VALUE_TYPE_LABELS[request.type].toLowerCase()} from…`}
+    <div className="sb-pe-linksearch__item" style={{ "--sb-cat": "var(--category-layers)" } as CSSProperties}>
+      <span className="sb-pe-picker__icon" aria-hidden>
+        <Icon size={12} strokeWidth={2} />
+      </span>
+      <span className="sb-pe-picker__name">{name}</span>
+      {!singleLayer && item.parents.length > 0 && <span className="sb-pe-picker__alias">in {item.parents.at(-1)}</span>}
+      {item.driver && (
+        <span className="sb-pe-chip" title={`Driven by ${item.driver}. Connecting replaces it.`}>
+          Driven
+        </span>
+      )}
+      <span className="sb-pe-linksearch__port" data-exact={item.exact || undefined} title={item.conversion ? `Converted: ${item.conversion}` : undefined}>
+        <PortGlyph type={item.port.type} size={7} />
+        {VALUE_TYPE_LABELS[item.port.type]}
+      </span>
+    </div>
+  );
+}
+
+function OutputCandidate({ item, ctx }: { item: OutputLinkItem; ctx: SearchListRenderContext }) {
+  const { session, registry, componentId } = usePatchEditor();
+  const node = session.document.getState().doc.components[componentId]?.patches[item.nodeId];
+  const spec = node ? getPatchSpec(registry, node.type) : undefined;
+  const category = spec?.category ?? "components";
+  const Icon = CATEGORY_ICONS[category];
+  return (
+    <div className="sb-pe-linksearch__item" style={{ "--sb-cat": categoryColorVar(category) } as CSSProperties}>
+      <span className="sb-pe-picker__icon" aria-hidden>
+        <Icon size={12} strokeWidth={2} />
+      </span>
+      <span className="sb-pe-picker__name">
+        {ctx.matches.label ? (
+          ctx.highlight("label", item.label)
+        ) : (
+          <>
+            {ctx.highlight("layer", item.nodeTitle)}
+            <span className="sb-pe-linksearch__sep" aria-hidden>
+              {" › "}
+            </span>
+            {ctx.highlight("prop", item.port.name)}
+          </>
+        )}
+      </span>
+      <span className="sb-pe-linksearch__port" data-exact={item.exact || undefined} title={item.conversion ? `Converted: ${item.conversion}` : undefined}>
+        <PortGlyph type={item.port.type} size={7} />
+        {VALUE_TYPE_LABELS[item.port.type]}
+      </span>
+    </div>
+  );
+}
+
+function LinkSearchBody({ request, onClose, onPick }: { request: LinkSearchRequest; onClose: () => void; onPick: LinkDragSearchProps["onPick"] }) {
+  const { session, registry, componentId } = usePatchEditor();
+  const items = useMemo(() => {
+    const doc = session.document.getState().doc;
+    return linkCandidates(doc, componentId, registry, {
+      side: request.side,
+      type: request.type,
+      ...(request.patchType ? { patchType: request.patchType } : {}),
+      ...(request.layer !== undefined ? { layerId: request.layer } : {}),
+      ...(request.sourceNode !== undefined ? { exclude: request.sourceNode } : {}),
+      ...(request.drive ? { drive: true } : {}),
+      selectedLayers: session.selection.getState().layers,
+    });
+  }, [session, registry, componentId, request]);
+  const doc = session.document.getState().doc;
+  const component = doc.components[componentId];
+  const layerName = request.layer !== undefined && component ? (findLayer(component.layers, request.layer)?.layer.name ?? request.layer) : undefined;
+  const typeName = VALUE_TYPE_LABELS[request.type].toLowerCase();
+  const placeholder =
+    layerName !== undefined
+      ? request.chooseProperty
+        ? `Choose a property of ${layerName} to drive…`
+        : request.side === "out"
+          ? `Drive a property of ${layerName}…`
+          : `Read a property of ${layerName}…`
+      : request.drive
+        ? `Drive ${request.targetName ?? "this property"} from…`
+        : request.side === "out"
+          ? `Connect ${typeName} to…`
+          : `Drive this ${typeName} from…`;
+  return (
+    <SearchList<LinkCandidate>
+      aria-label={layerName !== undefined ? `Properties of ${layerName}` : "Compatible patches and properties"}
+      placeholder={placeholder}
       items={items}
       keys={LINK_SEARCH_KEYS}
       getId={(item) => item.id}
-      limit={60}
+      limit={80}
       leading={<PortGlyph type={request.type} size={9} />}
+      {...(layerName === undefined ? { groupBy: linkCandidateGroup } : {})}
       onSelect={(item) => {
         onClose();
         onPick(item, request);
       }}
-      emptyState={(query) => `No patch has a port that fits “${query}”.`}
-      renderItem={(item, ctx) => {
-        const Icon = CATEGORY_ICONS[item.spec.category];
-        return (
-          <div className="sb-pe-linksearch__item" style={{ "--sb-cat": categoryColorVar(item.spec.category) } as CSSProperties}>
-            <span className="sb-pe-picker__icon" aria-hidden>
-              <Icon size={12} strokeWidth={2} />
-            </span>
-            <span className="sb-pe-picker__name">{ctx.highlight("name", item.spec.name)}</span>
-            {item.typeParam && item.spec.variants && item.typeParam !== item.spec.variants[0] && <span className="sb-pe-chip">{VALUE_TYPE_LABELS[item.typeParam]}</span>}
-            <span className="sb-pe-linksearch__port" data-exact={item.exact || undefined} title={item.conversion ? `Converted: ${item.conversion}` : undefined}>
-              {request.side === "out" && <ArrowRight size={10} strokeWidth={2.25} aria-hidden />}
-              <PortGlyph type={item.port.type} size={7} />
-              {ctx.highlight("port", item.port.name)}
-            </span>
-          </div>
-        );
-      }}
+      emptyState={(query) => (layerName !== undefined ? `${layerName} has no property that fits “${query}”.` : `Nothing that fits “${query}”.`)}
+      renderItem={(item, ctx) =>
+        item.kind === "patch" ? <PatchCandidate item={item} ctx={ctx} side={request.side} /> : item.kind === "layer" ? <LayerCandidate item={item} ctx={ctx} singleLayer={layerName !== undefined} /> : <OutputCandidate item={item} ctx={ctx} />
+      }
       footer={
         <span className="sb-pe-picker__hint">
           <Kbd>
             <CornerDownLeft size={10} strokeWidth={2.25} />
           </Kbd>
-          add and connect
+          connect
         </span>
       }
       size="md"
     />
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Splice chooser
+// ---------------------------------------------------------------------------
+
+export interface SpliceChoiceRequest {
+  /** Viewport point to open at (the drop). */
+  client: XY;
+  /** The patch being spliced ("Photo Scale"). */
+  title: string;
+  options: readonly SpliceOption[];
+}
+
+/** ⌘-drag a patch onto a cable where several ports fit: choose which input takes the cable and which output drives on. */
+export function SpliceChooser({ request, onChoose, onCancel }: { request: SpliceChoiceRequest | null; onChoose: (option: SpliceOption) => void; onCancel: () => void }) {
+  if (!request) return null;
+  const entries: MenuEntry[] = [
+    { type: "label", id: "title", label: `Splice ${request.title} into the cable` },
+    ...request.options.map(
+      (o): MenuEntry => ({
+        id: `${o.inputKey}>${o.outputKey}`,
+        label: `${o.inputName} → ${o.outputName}`,
+        description: o.conversions.length ? `Converts ${o.conversions.join(" · ")}` : `${VALUE_TYPE_LABELS[o.inputType]} in, ${VALUE_TYPE_LABELS[o.outputType]} out`,
+        onSelect: () => onChoose(o),
+      }),
+    ),
+    { type: "separator", id: "sep" },
+    { id: "move", label: "Just Move It", description: "Leave the cable as it is", onSelect: onCancel },
+  ];
+  return (
+    <Popover open anchor={{ x: request.client.x, y: request.client.y, width: 0, height: 0 }} onOpenChange={(open) => !open && onCancel()} placement="bottom-start" offset={8} initialFocus="none" role="presentation" className="sb-menu-popover sb-pe-splice">
+      <MenuList entries={entries} autoFocus="first" aria-label="Choose ports for the splice" onClose={(reason) => reason !== "select" && onCancel()} />
+    </Popover>
   );
 }
 

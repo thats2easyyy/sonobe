@@ -1,7 +1,26 @@
 import { applyOps, createEmptyDocument, createRegistry, deviceScreenSize } from "@sonobe/core";
 import { buildDoc, createTestRuntime } from "@sonobe/engine/testing";
 import { describe, expect, it } from "vitest";
-import { devicePresetOps, fitScale, formatFps, interactiveLayerIds, nodesForLayers, outlinePoints, presetForDevice, qrPath, rotateDeviceOps, sceneKeysForLayers } from "./viewerModel.ts";
+import { devicePresetOps, fitScale, formatFps, interactiveLayerIds, layerScreenRect, nodesForLayers, outlinePoints, phoneClientsLabel, presetForDevice, qrPath, rotateDeviceOps, sceneKeysForLayers } from "./viewerModel.ts";
+
+describe("layerScreenRect", () => {
+  it("maps a layer's box through the stage's client rect", () => {
+    const rt = createTestRuntime(buildDoc({ layers: [{ id: "card", type: "rectangle", props: { position: [40, 80], size: [100, 50] } }] }));
+    const scene = rt.step();
+    rt.dispose();
+    const stage = { x: 10, y: 20, width: scene.size[0] / 2, height: scene.size[1] / 2 };
+    expect(layerScreenRect(scene, "card", stage)).toEqual({ x: 30, y: 60, width: 50, height: 25, scale: 0.5 });
+    expect(layerScreenRect(scene, "missing", stage)).toBeNull();
+    expect(layerScreenRect(null, "card", stage)).toBeNull();
+    expect(layerScreenRect(scene, "card", { ...stage, width: 0 })).toBeNull();
+  });
+
+  it("counts connected phones", () => {
+    expect(phoneClientsLabel(0)).toBe("Waiting for a phone");
+    expect(phoneClientsLabel(1)).toBe("1 phone connected");
+    expect(phoneClientsLabel(4)).toBe("4 phones connected");
+  });
+});
 
 describe("device settings", () => {
   it("applies size overrides to presets", () => {

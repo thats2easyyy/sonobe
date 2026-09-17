@@ -36,6 +36,10 @@ This patch adds ports based on how it's set up, so these tables list only the po
 | **Curve**<br>`curve` | `enum` | `linear` | The easing applied within every segment between neighboring keyframes. Options: Linear (`linear`), Quadratic In (`quadraticIn`), Quadratic Out (`quadraticOut`), Quadratic In & Out (`quadraticInOut`), Cubic In (`cubicIn`), Cubic Out (`cubicOut`), Cubic In & Out (`cubicInOut`), Exponential In (`exponentialIn`), Exponential Out (`exponentialOut`), Exponential In & Out (`exponentialInOut`), Sinusoidal In (`sinusoidalIn`), Sinusoidal Out (`sinusoidalOut`), Sinusoidal In & Out (`sinusoidalInOut`). |
 | **Extrapolate**<br>`extrapolate` | `boolean` · advanced | `false` | When on, progress beyond the first or last stop continues that end segment instead of holding its value. |
 
+### Repeating inputs
+
+The inputs this patch adds come in repeating groups. A patch can have 2 to 32 groups, and a new patch starts with 3.
+
 ## Outputs
 
 | Output | Type | Description |

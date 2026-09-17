@@ -1,12 +1,12 @@
 /** Shape patches wired into real runtime documents: gestures and animations driving Shape layers. */
 
 import { describe, expect, it } from "vitest";
+import { squirclePath } from "@sonobe/engine";
 import type { SceneNode, SonobeRuntime } from "@sonobe/engine";
 import { buildDoc, createMockRegistry, createTestRuntime, runFrames, tap } from "@sonobe/engine/testing";
 import { createPatchRegistry } from "../registry.ts";
 import { definitions } from "./index.ts";
 import { formatPath, parsePath } from "./path.ts";
-import { squirclePath } from "./squircle.ts";
 
 const registry = createMockRegistry(definitions);
 

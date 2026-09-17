@@ -10,28 +10,83 @@
     var(--canvas-bg);
 }
 
-.sb-vw__header {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
+/* The header reflows by panel width: the device name goes first, then the hit targets button. Everything
+   stays reachable from the "More viewer options" menu. */
+.sb-vw-panel {
+  container: sb-viewer / inline-size;
+}
+
+.sb-vw__device-name {
   min-width: 0;
-}
-
-.sb-vw__device-select {
-  max-width: 172px;
-}
-
-.sb-vw__meta {
-  flex: none;
+  overflow: hidden;
   color: var(--text-tertiary);
   font-size: var(--font-size-xs);
+  text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+@container sb-viewer (max-width: 379px) {
+  .sb-vw__device-name {
+    display: none;
+  }
+}
+
+@container sb-viewer (max-width: 279px) {
+  .sb-vw__hdr-hit {
+    display: none;
+  }
+}
+
+.sb-vw__zoom {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 52px;
+  height: var(--control-h-sm);
+  padding: 0 var(--space-3) 0 var(--space-4);
+  border: 0;
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--text-secondary);
+  font: inherit;
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-medium);
+  cursor: pointer;
+  transition:
+    background-color var(--duration-fast) var(--ease-out),
+    color var(--duration-fast) var(--ease-out);
+}
+
+.sb-vw__zoom > span {
+  flex: 1 1 auto;
+  text-align: right;
+}
+
+@media (hover: hover) {
+  .sb-vw__zoom:hover {
+    background: var(--bg-hover);
+    color: var(--text-primary);
+  }
+}
+
+.sb-vw__zoom[aria-expanded="true"],
+.sb-vw__more[aria-expanded="true"] {
+  background: var(--bg-pressed);
+  color: var(--text-primary);
+}
+
+.sb-vw__zoom:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 1px;
 }
 
 .sb-vw__viewport {
   position: relative;
   flex: 1 1 auto;
   min-height: 0;
+  /* The renderer layers use z-index: keep them below dialogs, menus, and the issue banner. */
+  isolation: isolate;
 }
 
 .sb-vw__scroll {
@@ -54,6 +109,7 @@
   position: absolute;
   top: 0;
   left: 0;
+  isolation: isolate;
 }
 
 .sb-vw__device > .sonobe-device {
@@ -246,6 +302,12 @@
 
 .sb-vw__phone[aria-expanded="true"] {
   color: var(--text-primary);
+}
+
+.sb-vw__phone[data-live] .sb-vw__dot,
+.sb-phone__status[data-connected] .sb-vw__dot {
+  background: var(--success);
+  box-shadow: 0 0 0 3px var(--success-soft);
 }
 
 .sb-vw__dot {
@@ -447,4 +509,70 @@
 .sb-phone__note svg {
   flex: none;
   margin-top: 2px;
+}
+
+.sb-phone__note[data-tone="warn"] {
+  color: var(--warn-text);
+}
+
+.sb-phone__intro {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: var(--font-size-sm);
+  line-height: var(--line-height-normal);
+  text-align: center;
+  text-wrap: pretty;
+}
+
+.sb-phone__error {
+  box-sizing: border-box;
+  width: 100%;
+  margin: 0;
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--danger) 12%, transparent);
+  color: var(--danger-text);
+  font-size: var(--font-size-xs);
+  line-height: var(--line-height-normal);
+}
+
+.sb-phone__status {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-3);
+  color: var(--text-secondary);
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-medium);
+}
+
+.sb-phone__alts {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  color: var(--text-tertiary);
+  font-size: var(--font-size-xs);
+}
+
+.sb-phone__alt {
+  padding: 1px var(--space-3);
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: var(--bg-field);
+  color: var(--text-secondary);
+  font: inherit;
+  font-family: var(--font-mono);
+  cursor: pointer;
+}
+
+@media (hover: hover) {
+  .sb-phone__alt:hover {
+    color: var(--text-primary);
+  }
+}
+
+.sb-phone__alt:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 1px;
 }

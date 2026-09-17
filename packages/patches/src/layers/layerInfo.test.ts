@@ -6,12 +6,14 @@ import { createPatchHarness, loopOf } from "../infra/index.ts";
 import { layerInfo } from "./layerInfo.ts";
 
 const snapshot = (over: Partial<LayerInfoSnapshot> = {}): LayerInfoSnapshot => ({
+  type: "text",
   enabled: true,
   position: [16, 96],
   size: [120, 40],
   scale: [1.5, 2],
   anchor: [0.5, 0.5],
-  parent: "panel",
+  parent: { layerId: "panel" },
+  worldTransform: [1.5, 0, 0, 0, 0, 2, 0, 0, 0, 0, 1, 0, -14, 56, 0, 1],
   contentSize: [100, 30],
   ...over,
 });
@@ -41,9 +43,12 @@ describe("layerInfo", () => {
     expect(outputs.enabled).toBe(false);
   });
 
-  it("carries a looped layer's instance into Parent", () => {
-    const h = createPatchHarness(layerInfo, { inputs: { layer: { layerId: "badge", instance: 2 } }, services: { layerInfo: () => snapshot({ parent: "card" }) } });
-    expect(h.step().outputs.parent).toEqual({ layerId: "card", instance: 2 });
+  it("passes the snapshot's parent reference on unchanged, with the parent's own loop instance", () => {
+    const parent: LayerRef = { layerId: "card", instance: 2 };
+    const h = createPatchHarness(layerInfo, { inputs: { layer: { layerId: "badge", instance: 5 } }, services: { layerInfo: () => snapshot({ parent }) } });
+    const out = h.step().outputs.parent;
+    expect(out).toEqual({ layerId: "card", instance: 2 });
+    expect(out).toBe(parent);
   });
 
   it("outputs the missing-layer values for an empty or unknown layer", () => {
@@ -68,12 +73,12 @@ describe("layerInfo", () => {
   it("evaluates once per copy of a looped layer", () => {
     const h = createPatchHarness(layerInfo, {
       inputs: { layer: loopOf([{ layerId: "row", instance: 0 }, { layerId: "row", instance: 1 }, { layerId: "row", instance: 5 }]) },
-      services: { layerInfo: (ref) => (ref.instance === 5 ? undefined : snapshot({ position: [0, 60 * (ref.instance ?? 0)], parent: "list" })) },
+      services: { layerInfo: (ref) => (ref.instance === 5 ? undefined : snapshot({ position: [0, 60 * (ref.instance ?? 0)], parent: { layerId: "list" } })) },
     });
     const { outputs } = h.step();
     expect(outputs.position).toEqual(loopOf([[0, 0], [0, 60], [0, 0]]));
     expect(outputs.scale).toEqual(loopOf([1.5, 1.5, 1]));
-    expect(outputs.parent).toEqual(loopOf([{ layerId: "list", instance: 0 }, { layerId: "list", instance: 1 }, null]));
+    expect(outputs.parent).toEqual(loopOf([{ layerId: "list" }, { layerId: "list" }, null]));
   });
 
   it("outputs the missing-layer values while muted", () => {

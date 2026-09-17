@@ -29,6 +29,20 @@ describe("delay1", () => {
     expect(h.step().outputs.output).toEqual(loopOf([3, 4, 5]));
   });
 
+  it("passes a feedback read straight through, since it already is last frame's value", () => {
+    const h = createPatchHarness(delay1Patch, { inputs: { value: 3 }, feedback: ["value"] });
+    expect(h.step().outputs.output).toBe(3);
+    expect(h.step({ inputs: { value: 4 } }).outputs.output).toBe(4);
+    expect(h.state()!.seeded).toBe(false);
+  });
+
+  it("seeds false for a pulse on the first frame, so the pulse appears one frame later", () => {
+    const h = createPatchHarness(delay1Patch, { typeParam: "boolean", pulseSources: ["value"] });
+    expect(h.step({ pulses: ["value"] }).outputs.output).toBe(false);
+    expect(h.step().outputs.output).toBe(true);
+    expect(h.step().outputs.output).toBe(false);
+  });
+
   it("seeds again after a restart", () => {
     const h = createPatchHarness(delay1Patch, { inputs: { value: 1 } });
     h.step();

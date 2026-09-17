@@ -129,6 +129,71 @@ describe("createPatchRegistry", () => {
   });
 });
 
+describe("catalog ports through core", () => {
+  const registry = createPatchRegistry();
+  const ui = { x: 0, y: 0 };
+  const keys = (ports: { key: string }[]) => ports.map((p) => p.key);
+
+  it("expands every variadic from its startIndex on the side it names, with no extra ports", () => {
+    const doc = testDocument();
+    const problems: string[] = [];
+    for (const spec of Object.values(SPECS)) {
+      const v = spec.variadic;
+      if (!v) continue;
+      for (const count of [v.min, v.defaultCount, v.max]) {
+        const ports = resolveNodePorts(doc, { type: spec.type, inputCount: count, inputs: {}, ui }, registry)!;
+        const expanded = Array.from({ length: count }, (_, i) => `${v.key}${(v.startIndex ?? 1) + i}`);
+        const side = (v.direction ?? "inputs") === "outputs";
+        const inputs = [...keys(spec.inputs), ...(side ? [] : expanded)];
+        const outputs = [...keys(spec.outputs), ...(side ? expanded : [])];
+        if (JSON.stringify(keys(ports.inputs)) !== JSON.stringify(inputs)) problems.push(`${spec.type}[${count}] inputs: ${keys(ports.inputs).join(",")}`);
+        if (JSON.stringify(keys(ports.outputs)) !== JSON.stringify(outputs)) problems.push(`${spec.type}[${count}] outputs: ${keys(ports.outputs).join(",")}`);
+      }
+    }
+    expect(problems).toEqual([]);
+    const sender = resolveNodePorts(doc, { type: "optionSender", typeParam: "boolean", inputCount: 3, inputs: {}, ui }, registry)!;
+    expect(keys(sender.outputs)).toEqual(["option0", "option1", "option2"]);
+    expect(sender.outputs.map((p) => p.type)).toEqual(["boolean", "boolean", "boolean"]);
+  });
+
+  it("keeps dynamic ports only where the catalog has a dynamicPortsRule", () => {
+    const withDynamicPorts = builtinDefinitions()
+      .filter((d) => ["interaction", "animation", "state", "logic", "math", "loops", "text", "color"].includes(d.category) && d.dynamicPorts !== undefined)
+      .map((d) => d.type);
+    expect(withDynamicPorts.sort()).toEqual(["gradientBuilder", "keyframes", "mathExpression"]);
+  });
+
+  it("starts unconnected loop-literal defaults as whole loops, for Snap's Points in every variant", () => {
+    const doc = testDocument();
+    for (const typeParam of SPECS.snap!.variants ?? []) {
+      const ports = resolveNodePorts(doc, { type: "snap", typeParam, inputs: {}, ui }, registry)!;
+      expect(ports.inputs.find((p) => p.key === "points")!.default, typeParam).toEqual(SPECS.snap!.inputs.find((p) => p.key === "points")!.default);
+    }
+  });
+
+  it("accepts inputCount on Keyframes and Gradient Builder through ops, within their inputCountRange", () => {
+    const result = applyOps(
+      testDocument(),
+      [
+        { op: "addPatch", patch: { id: "timeline", type: "keyframes", inputCount: 4 } },
+        { op: "addPatch", patch: { id: "fill", type: "gradientBuilder" } },
+        { op: "updatePatch", id: "fill", inputCount: 32 },
+      ],
+      { registry },
+    );
+    expect(result.errors).toEqual([]);
+    const patches = result.doc.components.main!.patches;
+    const timeline = resolveNodePorts(result.doc, patches.timeline!, registry)!;
+    expect(timeline.inputCount).toBe(4);
+    expect(keys(timeline.inputs)).toEqual(["progress", "curve", "extrapolate", "stop1", "value1", "stop2", "value2", "stop3", "value3", "stop4", "value4"]);
+    const fill = resolveNodePorts(result.doc, patches.fill!, registry)!;
+    expect(fill.inputCount).toBe(32);
+    expect(keys(fill.inputs).at(-1)).toBe("color32");
+    const tooMany = applyOps(result.doc, [{ op: "updatePatch", id: "fill", inputCount: 99 }], { registry });
+    expect(tooMany.errors.map((e) => e.code)).toEqual(["invalid_value"]);
+  });
+});
+
 describe("fallback definitions", () => {
   it("outputs zero values, never pulses, and warns once per restart", () => {
     const def = createFallbackDefinition(SPECS.interaction!);

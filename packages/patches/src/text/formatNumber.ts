@@ -1,6 +1,5 @@
 /** Format Number: a number as display text with decimals, separators, a percent or K/M/B/T unit, and a prefix and suffix. */
 
-import type { RuntimePatchDefinition } from "@sonobe/engine";
 import type { RoundingMode } from "../infra/index.ts";
 import { definePatch, groupThousands, numberToText, roundDecimal, toBool, toText, warnOnce, wholeInRange } from "../infra/index.ts";
 
@@ -52,26 +51,24 @@ export function formatNumberText(value: number, options: NumberFormatOptions): s
   return (negative ? "-" : "") + intPart + (fraction ? decimal + fraction : "") + unit;
 }
 
-export const formatNumberPatch: RuntimePatchDefinition = {
-  ...definePatch("formatNumber", {
-    evaluate(ctx) {
-      const value = ctx.input<number>("value");
-      if (ctx.node.muted) {
-        ctx.output("text", numberToText(value));
-        return;
-      }
-      if (!Number.isFinite(value)) warnOnce(ctx, "value", "Format Number: Value isn't a finite number, so it shows as 0.");
-      const body = formatNumberText(value, {
-        style: toText(ctx.input("style")),
-        decimals: ctx.input<number>("decimals"),
-        rounding: toText(ctx.input("rounding")),
-        trailingZeros: toBool(ctx.input("trailingZeros")),
-        minimumDigits: ctx.input<number>("minimumDigits"),
-        separators: toText(ctx.input("separators")),
-        groupThousands: toBool(ctx.input("groupThousands")),
-      });
-      ctx.output("text", toText(ctx.input("prefix")) + body + toText(ctx.input("suffix")));
-    },
-  }),
+export const formatNumberPatch = definePatch("formatNumber", {
+  evaluate(ctx) {
+    const value = ctx.input<number>("value");
+    if (ctx.muted) {
+      ctx.output("text", numberToText(value));
+      return;
+    }
+    if (!Number.isFinite(value)) warnOnce(ctx, "value", "Format Number: Value isn't a finite number, so it shows as 0.");
+    const body = formatNumberText(value, {
+      style: toText(ctx.input("style")),
+      decimals: ctx.input<number>("decimals"),
+      rounding: toText(ctx.input("rounding")),
+      trailingZeros: toBool(ctx.input("trailingZeros")),
+      minimumDigits: ctx.input<number>("minimumDigits"),
+      separators: toText(ctx.input("separators")),
+      groupThousands: toBool(ctx.input("groupThousands")),
+    });
+    ctx.output("text", toText(ctx.input("prefix")) + body + toText(ctx.input("suffix")));
+  },
   mutedBehavior: "evaluate",
-};
+});

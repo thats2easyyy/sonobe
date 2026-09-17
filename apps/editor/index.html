@@ -22,6 +22,15 @@
               : "dark";
         document.documentElement.setAttribute("data-theme", theme);
       })();
+      // Apply the saved motion preference (Settings → Motion) before first paint, too.
+      (function () {
+        var motion = "system";
+        try {
+          motion = (JSON.parse(localStorage.getItem("sonobe.settings.v1") || "{}") || {}).motion || "system";
+        } catch (e) {}
+        var reduce = motion === "reduce" || (motion === "system" && window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches);
+        document.documentElement.setAttribute("data-motion", reduce ? "reduce" : "full");
+      })();
     </script>
   </head>
   <body>

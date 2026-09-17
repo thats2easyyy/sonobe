@@ -20,7 +20,7 @@ import type {
 /** Every value type, in contract order. */
 export const VALUE_TYPES: readonly ValueType[] = [
   "number", "boolean", "pulse", "text", "color", "point", "point3d", "point4d", "size", "anchor", "index",
-  "enum", "json", "layer", "image", "video", "sound", "gradient", "shape", "textStyle", "layerEffect", "transform", "any",
+  "enum", "json", "layer", "image", "video", "sound", "gradient", "shape", "textStyle", "layerEffect", "transform", "connection", "any",
 ];
 
 const VALUE_TYPE_SET: ReadonlySet<string> = new Set(VALUE_TYPES);
@@ -37,7 +37,7 @@ export function vectorSize(type: ValueType): number | undefined {
 }
 
 /** Types whose "nothing" value is `null` at runtime. */
-const NULLABLE_TYPES: ReadonlySet<ValueType> = new Set(["json", "layer", "image", "video", "sound", "gradient", "shape", "layerEffect", "any"]);
+const NULLABLE_TYPES: ReadonlySet<ValueType> = new Set(["json", "layer", "image", "video", "sound", "gradient", "shape", "layerEffect", "connection", "any"]);
 
 export function isNullableType(type: ValueType): boolean {
   return NULLABLE_TYPES.has(type);
@@ -215,8 +215,47 @@ export function defaultValue(type: ValueType): Value {
 }
 
 /**
+ * The zero value of a type in document encoding (CONVENTIONS.md §8): what a variant port
+ * starts with for a variant that has no declared default. Numbers 0, booleans false, text "",
+ * colors "#00000000" (transparent), vectors all zeros, enums their first option, text styles {},
+ * references, media and other objects null. Pulses have no literal (undefined).
+ */
+export function zeroLiteral(type: ValueType, enumOptions?: readonly { key: string }[]): Value | undefined {
+  switch (type) {
+    case "number":
+    case "index":
+      return 0;
+    case "boolean":
+      return false;
+    case "pulse":
+      return undefined;
+    case "text":
+      return "";
+    case "enum":
+      return enumOptions?.[0]?.key ?? "";
+    case "color":
+      return "#00000000";
+    case "point":
+    case "size":
+    case "anchor":
+      return [0, 0];
+    case "point3d":
+      return [0, 0, 0];
+    case "point4d":
+      return [0, 0, 0, 0];
+    case "transform":
+      return [...IDENTITY_TRANSFORM];
+    case "textStyle":
+      return {};
+    default:
+      return null;
+  }
+}
+
+/**
  * Default runtime value for a declared (resolved) port: its default, the first enum
- * option, or the type default. Spec colors written as "#RRGGBBAA" text are decoded.
+ * option, or the type's zero value (a transparent color). Spec colors written as
+ * "#RRGGBBAA" text are decoded.
  */
 export function defaultForPort(port: { type: ValueType | "variant"; default?: Value; enumOptions?: { key: string }[] }): Value {
   const type = port.type === "variant" ? "any" : port.type;
@@ -226,6 +265,7 @@ export function defaultForPort(port: { type: ValueType | "variant"; default?: Va
     return port.default;
   }
   if (type === "enum" && port.enumOptions?.length) return port.enumOptions[0]!.key;
+  if (type === "color") return { r: 0, g: 0, b: 0, a: 0 };
   return defaultValue(type);
 }
 
@@ -261,14 +301,18 @@ export function inferValueType(value: Value): ValueType {
   return "json";
 }
 
+const isRatio = (n: unknown): n is number => typeof n === "number" && Number.isFinite(n) && n > 0;
+
 function decodeGradient(lit: GradientLiteral): GradientValue {
   const g = lit.gradient;
-  return {
+  const out: GradientValue = {
     kind: g.kind,
     stops: (g.stops ?? []).map(([offset, color]) => ({ offset, color: parseColor(color) ?? { r: 0, g: 0, b: 0, a: 0 } })),
     start: [g.start?.[0] ?? 0.5, g.start?.[1] ?? 0],
     end: [g.end?.[0] ?? 0.5, g.end?.[1] ?? 1],
   };
+  if (isRatio(g.ratio)) out.ratio = g.ratio;
+  return out;
 }
 
 /** Decode a single literal for a port of `type`. */
@@ -322,7 +366,7 @@ export function decodeInput(input: InputValue | undefined, portType: ValueType, 
 // ---------------------------------------------------------------------------
 
 function encodeGradient(g: GradientValue): GradientLiteral {
-  return {
+  const out: GradientLiteral = {
     gradient: {
       kind: g.kind,
       stops: g.stops.map((s) => [s.offset, formatColor(s.color)] as [number, string]),
@@ -330,6 +374,8 @@ function encodeGradient(g: GradientValue): GradientLiteral {
       end: [g.end[0], g.end[1]],
     },
   };
+  if (isRatio(g.ratio)) out.gradient.ratio = g.ratio;
+  return out;
 }
 
 const finite = (n: unknown) => (typeof n === "number" && Number.isFinite(n) ? n : 0);
@@ -381,6 +427,9 @@ export function encodeValue(value: Value | DecodedLoop, type: ValueType): InputV
     case "textStyle":
     case "layerEffect":
       return value === null ? null : { json: value };
+    case "connection":
+      // Runtime handles (a WebSocket connection) have no document encoding.
+      return null;
     case "json":
     case "any":
     default:
@@ -476,7 +525,8 @@ export function coerce(value: Value, fromType: ValueType, toType: ValueType): Va
     case "number":
       return toNumber(value);
     case "index":
-      return Math.max(0, Math.floor(toNumber(value)));
+      // The epsilon keeps float noise like 2.9999999999999996 from reading as 2.
+      return Math.max(0, Math.floor(toNumber(value) + 1e-6));
     case "boolean":
     case "pulse":
       return toBoolean(value);
@@ -502,7 +552,7 @@ export function coerce(value: Value, fromType: ValueType, toType: ValueType): Va
     case "video":
     case "sound":
       if (typeof value === "string") return { url: value };
-      return isPlainObject(value) && (typeof value.assetId === "string" || typeof value.url === "string") ? value : null;
+      return isPlainObject(value) && (typeof value.assetId === "string" || typeof value.url === "string" || typeof value.live === "string") ? value : null;
     case "gradient":
       return isPlainObject(value) && Array.isArray(value.stops) ? value : null;
     case "shape":
@@ -512,6 +562,8 @@ export function coerce(value: Value, fromType: ValueType, toType: ValueType): Va
       return isPlainObject(value) ? value : {};
     case "layerEffect":
       return isPlainObject(value) && typeof value.kind === "string" ? value : null;
+    case "connection":
+      return isPlainObject(value) ? value : null;
     default:
       return defaultValue(toType);
   }
@@ -554,6 +606,7 @@ const TYPE_LABELS: Record<ValueType, string> = {
   textStyle: "text style",
   layerEffect: "layer effect",
   transform: "transform",
+  connection: "connection",
   any: "any value",
 };
 
@@ -588,6 +641,8 @@ function findConverter(from: ValueType, to: ValueType) {
  */
 export function canConnect(from: ValueType, to: ValueType): ConnectCheck {
   if (from === to || to === "any" || from === "any") return { ok: true };
+  if (from === "connection") return { ok: false, reason: "A connection handle can only go into a connection input." };
+  if (to === "connection") return { ok: false, reason: `Connection inputs take a connection from a patch that opens one (such as WebSocket Connection), not a ${typeLabel(from)}.` };
   if (from === "json") return { ok: true, conversion: `JSON is read as ${typeLabel(to)} (best effort)` };
   if (to === "json") return { ok: true, conversion: `${typeLabel(from)} is wrapped as JSON` };
 

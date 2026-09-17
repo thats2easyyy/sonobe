@@ -74,6 +74,20 @@ describe("deriveGraph", () => {
     expect(Math.abs(photo.position.y - card.position.y)).toBeGreaterThan(20);
   });
 
+  it("shows properties someone asked to drive as open inputs, after the driven ones", () => {
+    const m = deriveGraph({ doc, componentId: "main", registry, pendingTargets: ["@photo.opacity", "@photo.scale", "@sun.rotation", "@missing.scale", "@photo.nope"] });
+    const photo = m.nodes.find((n): n is LayerFlowNode => n.id === "@photo")!;
+    expect(photo.data.inputs.map((p) => [p.key, p.connected])).toEqual([
+      ["scale", true],
+      ["opacity", false],
+    ]);
+    const sun = m.nodes.find((n): n is LayerFlowNode => n.id === "@sun")!;
+    expect(sun.data.inputs.map((p) => p.key)).toEqual(["rotation"]);
+    expect(sun.position.x).toBeGreaterThan(900);
+    expect(m.ports.get("in|@sun.rotation")?.connected).toBe(false);
+    expect(m.nodes.some((n) => n.id === "@missing")).toBe(false);
+  });
+
   it("uses session positions for layer targets when given", () => {
     const moved = deriveGraph({ doc, componentId: "main", registry, positions: { "@photo": { x: 5, y: 6 } } });
     expect(moved.nodes.find((n) => n.id === "@photo")!.position).toEqual({ x: 5, y: 6 });

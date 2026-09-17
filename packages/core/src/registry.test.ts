@@ -14,15 +14,19 @@ import {
   COMPONENT_PATCH_SPEC,
   createRegistry,
   findLayer,
+  getInputCountRange,
   isDescendantLayer,
   layerPath,
+  resolveInputCount,
   resolveLayerOutputs,
   resolveLayerProps,
   resolveNodePorts,
+  resolveNodeVariants,
   resolvePatchPorts,
+  resolveTypeParam,
   walkLayers,
 } from "./registry.ts";
-import { MOCK_PATCH_SPECS, mockRegistry } from "./testing/fixtures.ts";
+import { extendedRegistry, MOCK_PATCH_SPECS, mockRegistry, port } from "./testing/fixtures.ts";
 import type { LayerNode, PatchNode, SonobeDocument } from "./types.ts";
 
 const node = (type: string, extra: Partial<PatchNode> = {}): PatchNode => ({ type, inputs: {}, ui: { x: 0, y: 0 }, ...extra });
@@ -67,11 +71,64 @@ describe("resolveNodePorts", () => {
     expect(ports.outputs[0]!.type).toBe("number");
   });
 
-  it("resolves an explicit typeParam and coerces variant defaults", () => {
+  it("resolves an explicit typeParam; other variants start at their zero value", () => {
     const ports = resolveNodePorts(doc, node("transition", { typeParam: "color" }), mockRegistry)!;
-    expect(ports.inputs[1]).toMatchObject({ key: "start", type: "color", default: { r: 0, g: 0, b: 0, a: 1 } });
+    expect(ports.inputs[1]).toMatchObject({ key: "start", type: "color", default: "#00000000" });
+    expect(ports.inputs[2]).toMatchObject({ key: "end", type: "color", default: "#00000000" });
+    expect(ports.variants).toEqual(["number", "point", "color"]);
+    expect(resolveNodePorts(doc, node("transition"), mockRegistry)!.inputs.map((p) => p.default)).toEqual([0, 0, 1]);
     const bad = resolveNodePorts(doc, node("transition", { typeParam: "sound" }), mockRegistry)!;
     expect(bad.typeParam).toBe("number");
+  });
+
+  it("applies variantDefaults and never converts loop literals", () => {
+    const defaults = (typeParam?: string) => {
+      const ports = resolveNodePorts(doc, node("blend", typeParam ? { typeParam } : {}), extendedRegistry)!;
+      return Object.fromEntries(ports.inputs.map((p) => [p.key, p.default]));
+    };
+    expect(defaults()).toEqual({ progress: 0, start: 0, end: 1, points: { loop: [0, 100] } });
+    expect(defaults("color")).toEqual({ progress: 0, start: "#FFFFFFFF", end: "#00000000", points: { loop: [0, 100] } });
+    expect(defaults("point")).toEqual({ progress: 0, start: [0, 0], end: [0, 0], points: { loop: [0, 100] } });
+    expect(resolveNodePorts(doc, node("blend", { typeParam: "point" }), extendedRegistry)!.outputs[0]).not.toHaveProperty("default");
+  });
+
+  it("expands variadic ports from startIndex, on the side named by direction", () => {
+    const picker = resolveNodePorts(doc, node("picker", { inputCount: 3, typeParam: "color" }), extendedRegistry)!;
+    expect(picker.inputs.map((p) => `${p.key}:${p.type}:${p.name}:${p.variadicIndex ?? "-"}`)).toEqual(["option:index:Option:-", "option0:color:Option 0:1", "option1:color:Option 1:2", "option2:color:Option 2:3"]);
+    expect(picker.inputs.map((p) => p.default)).toEqual([0, "#FFFFFFFF", "#FFFFFFFF", "#FFFFFFFF"]);
+    expect(resolveNodePorts(doc, node("picker", { typeParam: "text" }), extendedRegistry)!.inputs.map((p) => p.default)).toEqual([0, "", ""]);
+    const sender = resolveNodePorts(doc, node("sender", { inputCount: 2 }), extendedRegistry)!;
+    expect(sender.inputs.map((p) => p.key)).toEqual(["option", "value"]);
+    expect(sender.outputs.map((p) => `${p.key}:${p.variadicIndex ?? "-"}`)).toEqual(["selected:-", "option0:1", "option1:2"]);
+  });
+
+  it("clamps inputCount with inputCountRange for repeated groups outside VariadicSpec", () => {
+    const stops = extendedRegistry.patches.get("stops")!;
+    expect(getInputCountRange(stops)).toEqual({ min: 1, max: 4, defaultCount: 2 });
+    expect(getInputCountRange(mockRegistry.patches.get("add")!)).toEqual({ min: 2, max: 6, defaultCount: 2 });
+    expect(getInputCountRange(mockRegistry.patches.get("switch")!)).toBeUndefined();
+    expect([resolveInputCount(stops, undefined), resolveInputCount(stops, 0), resolveInputCount(stops, 3.4), resolveInputCount(stops, 99)]).toEqual([2, 1, 3, 4]);
+    const ports = resolveNodePorts(doc, node("stops", { inputCount: 9 }), extendedRegistry)!;
+    expect(ports.inputCount).toBe(4);
+    expect(ports.inputs.map((p) => p.key)).toEqual(["stop1", "stop2", "stop3", "stop4"]);
+    expect(resolveNodePorts(doc, node("switch", { inputCount: 3 }), mockRegistry)!.inputCount).toBeUndefined();
+  });
+
+  it("lets dynamicPorts declare a node's variants", () => {
+    const script = node("script", { typeParam: "color", settings: { variants: ["text", "color", "sparkle"] } });
+    const ports = resolveNodePorts(doc, script, extendedRegistry)!;
+    expect(ports.variants).toEqual(["text", "color"]);
+    expect(ports.typeParam).toBe("color");
+    expect(ports.outputs[0]!.type).toBe("color");
+    expect(resolveNodeVariants(doc, script, extendedRegistry)).toEqual(["text", "color"]);
+    const undeclared = resolveNodePorts(doc, node("script", { typeParam: "color" }), extendedRegistry)!;
+    expect([undeclared.typeParam, undeclared.variants, undeclared.outputs[0]!.type]).toEqual([undefined, undefined, "any"]);
+    const spec = extendedRegistry.patches.get("script")!;
+    expect(resolveTypeParam(spec, "number", ["text", "number"])).toBe("number");
+    expect(resolveTypeParam(spec, "point", ["text", "number"])).toBe("text");
+    expect(resolveTypeParam(mockRegistry.patches.get("transition")!, "color", [])).toBe("color");
+    const junk = createRegistry([{ type: "junk", name: "Junk", category: "utility", summary: "Returns nothing useful.", inputs: [port("a", "number")], outputs: [], dynamicPorts: () => ({}) as never }]);
+    expect(resolveNodePorts(doc, node("junk"), junk)!.inputs.map((p) => p.key)).toEqual(["a"]);
   });
 
   it("expands variadic ports and clamps the count", () => {

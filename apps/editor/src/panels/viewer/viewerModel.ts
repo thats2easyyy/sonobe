@@ -80,17 +80,65 @@ export function sceneKeysForLayers(scene: SceneFrame | null, ids: ReadonlySet<Id
   return nodesForLayers(scene, ids, "root").map((n) => n.key);
 }
 
-/** SVG polygon points for a node's box in prototype coordinates. */
-export function outlinePoints(node: Pick<SceneNode, "worldTransform" | "width" | "height">): string {
+/** A node's box corners in prototype coordinates (top-left, top-right, bottom-right, bottom-left). */
+export function nodeCorners(node: Pick<SceneNode, "worldTransform" | "width" | "height">): [number, number][] {
   const m = node.worldTransform;
-  const corner = (x: number, y: number) => {
+  const corner = (x: number, y: number): [number, number] => {
     const w = m[3]! * x + m[7]! * y + m[15]!;
     const d = w === 0 ? 1 : w;
-    const px = (m[0]! * x + m[4]! * y + m[12]!) / d;
-    const py = (m[1]! * x + m[5]! * y + m[13]!) / d;
-    return `${Math.round(px * 100) / 100},${Math.round(py * 100) / 100}`;
+    return [(m[0]! * x + m[4]! * y + m[12]!) / d, (m[1]! * x + m[5]! * y + m[13]!) / d];
   };
-  return [corner(0, 0), corner(node.width, 0), corner(node.width, node.height), corner(0, node.height)].join(" ");
+  return [corner(0, 0), corner(node.width, 0), corner(node.width, node.height), corner(0, node.height)];
+}
+
+/** SVG polygon points for a node's box in prototype coordinates. */
+export function outlinePoints(node: Pick<SceneNode, "worldTransform" | "width" | "height">): string {
+  return nodeCorners(node)
+    .map(([x, y]) => `${Math.round(x * 100) / 100},${Math.round(y * 100) / 100}`)
+    .join(" ");
+}
+
+export interface ScreenRect {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+/**
+ * Where a layer shows up on screen: the union of its visible scene nodes (every loop copy), mapped
+ * through the stage's client rect. `scale` is CSS pixels per prototype point. Root-component nodes
+ * win; nodes inside component instances are used when the root has none. Null when it isn't drawn.
+ */
+export function layerScreenRect(scene: SceneFrame | null, layerId: Id, stage: ScreenRect): (ScreenRect & { scale: number }) | null {
+  if (!scene || scene.size[0] <= 0 || scene.size[1] <= 0 || stage.width <= 0 || stage.height <= 0) return null;
+  const ids = new Set([layerId]);
+  let nodes = nodesForLayers(scene, ids, "root");
+  if (nodes.length === 0) nodes = nodesForLayers(scene, ids, "instance");
+  if (nodes.length === 0) return null;
+  let minX = Infinity;
+  let minY = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+  for (const node of nodes) {
+    for (const [x, y] of nodeCorners(node)) {
+      if (!Number.isFinite(x) || !Number.isFinite(y)) continue;
+      minX = Math.min(minX, x);
+      minY = Math.min(minY, y);
+      maxX = Math.max(maxX, x);
+      maxY = Math.max(maxY, y);
+    }
+  }
+  if (minX === Infinity) return null;
+  const sx = stage.width / scene.size[0];
+  const sy = stage.height / scene.size[1];
+  return { x: stage.x + minX * sx, y: stage.y + minY * sy, width: (maxX - minX) * sx, height: (maxY - minY) * sy, scale: sx };
+}
+
+/** "Waiting for a phone" / "1 phone connected" / "3 phones connected". */
+export function phoneClientsLabel(clients: number): string {
+  if (clients <= 0) return "Waiting for a phone";
+  return `${clients} ${clients === 1 ? "phone" : "phones"} connected`;
 }
 
 /** "60 fps" / "59.8 fps". */

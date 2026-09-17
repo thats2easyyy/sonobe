@@ -1,8 +1,8 @@
 import type { AssetRef } from "@sonobe/core";
 import { buildDoc, createMockRegistry, createTestRuntime, runFrames, tap } from "@sonobe/engine/testing";
 import { describe, expect, it } from "vitest";
+import type { AudioMeterSource, AudioServices, AudioVoiceState, MediaInfo, SonobeRuntime } from "@sonobe/engine";
 import { definitions } from "./index.ts";
-import type { MeterSource } from "./platform.ts";
 
 describe("media patches in a runtime document", () => {
   it("tapping a button plays a sound whose live level drives a layer, while an image asset feeds a layer and Image Info", () => {
@@ -32,28 +32,40 @@ describe("media patches in a runtime document", () => {
     );
 
     const records = doc.assets;
-    const voices = new Set<string>();
+    let rt!: SonobeRuntime;
+    /** A host voice whose clock follows prototype time from the moment it starts playing. */
+    const voices = new Map<string, { from: number; startedAt: number; playing: boolean; duration: number }>();
     const played: unknown[][] = [];
-    const platform = {
-      audio: {
-        play: (key: string, assetId: string, options: unknown) => {
-          voices.add(key);
-          played.push(["play", key, assetId, options]);
-        },
-        stop: (key: string) => {
-          voices.delete(key);
-          played.push(["stop", key]);
-        },
-        currentTime: () => 0,
-        meter: (source: MeterSource, bands: number) =>
-          "live" in source && voices.has(source.live.replace(/^audio\//, "")) ? { rms: 1, peak: 1, bands: new Array(bands).fill(-30) } : undefined,
+    const audio: AudioServices = {
+      play: (key, source, options) => {
+        voices.set(key, { from: options.from, startedAt: rt.time, playing: true, duration: records[source.assetId ?? ""]?.duration ?? 0 });
+        played.push(["play", key, source.assetId, { from: options.from, loop: options.loop, volume: options.volume, rate: options.rate, pitch: options.pitch, pan: options.pan }]);
       },
-      mediaInfo: (ref: AssetRef) => {
-        const record = ref.assetId ? records[ref.assetId] : undefined;
-        return record ? { status: "ready", width: record.width ?? 0, height: record.height ?? 0, duration: record.duration ?? 0, name: record.name } : { status: "error", width: 0, height: 0, duration: 0, name: "" };
+      pause: (key) => {
+        const voice = voices.get(key);
+        if (voice) Object.assign(voice, { from: Math.min(voice.duration, voice.from + rt.time - voice.startedAt), startedAt: rt.time, playing: false });
+        played.push(["pause", key]);
       },
+      seek: (key, seconds) => played.push(["seek", key, seconds]),
+      update: (key) => played.push(["update", key]),
+      stop: (key) => {
+        voices.delete(key);
+        played.push(["stop", key]);
+      },
+      state: (key): AudioVoiceState | undefined => {
+        const voice = voices.get(key);
+        if (!voice) return undefined;
+        const currentTime = Math.min(voice.duration, voice.from + (voice.playing ? rt.time - voice.startedAt : 0));
+        const ended = currentTime >= voice.duration;
+        return { status: ended ? "ended" : voice.playing ? "playing" : "paused", currentTime, duration: voice.duration, ended, loops: 0 };
+      },
+      meter: (source: AudioMeterSource, bands: number) => ("live" in source && voices.get(source.live.replace(/^audio\//, ""))?.playing ? { rms: 1, peak: 1, bands: new Array(bands).fill(-30) } : undefined),
     };
-    const rt = createTestRuntime(doc, registry, { platform: platform as never, resolveAssetUrl: (id) => (records[id] ? `/assets/${records[id]!.file}` : undefined) });
+    const mediaInfo = (ref: AssetRef): MediaInfo => {
+      const record = ref.assetId ? records[ref.assetId] : undefined;
+      return record ? { status: "ready", width: record.width ?? 0, height: record.height ?? 0, duration: record.duration ?? 0, name: record.name } : { status: "error", width: 0, height: 0, duration: 0, name: "" };
+    };
+    rt = createTestRuntime(doc, registry, { platform: { audio }, mediaInfo, resolveAssetUrl: (id) => (records[id] ? `/assets/${records[id]!.file}` : undefined) });
 
     const [first] = runFrames(rt, 1);
     const photo = first!.roots.find((n) => n.layerId === "photo")!;
@@ -65,10 +77,11 @@ describe("media patches in a runtime document", () => {
     expect(rt.getValue("@bar.opacity")).toBe(0);
 
     runFrames(rt, 2, tap(60, 50));
-    expect(rt.getValue("player.isPlaying")).toBe(true);
-    expect(played).toEqual([["play", "main/player#0", "chime", { loop: false, volume: 1, rate: 1 }]]);
-    expect(rt.getValue("player.metering")).toEqual({ url: "sonobe-live:audio/main/player#0" });
+    expect(played).toEqual([["play", "main/player#0", "chime", { from: 0, loop: false, volume: 1, rate: 1, pitch: 0, pan: 0 }]]);
+    expect(rt.getValue("player.metering")).toEqual({ live: "audio/main/player#0" });
     expect(rt.getValue("meter.volume")).toBe(1);
+    runFrames(rt, 1);
+    expect(rt.getValue("player.isPlaying")).toBe(true);
     expect(rt.getValue("@bar.opacity")).toBe(1);
 
     let finishedFrames = 0;
@@ -79,8 +92,9 @@ describe("media patches in a runtime document", () => {
     expect(finishedFrames).toBe(1);
     expect(rt.getValue("player.isPlaying")).toBe(false);
     expect(rt.getValue("player.progress")).toBe(1);
-    expect(played.at(-1)).toEqual(["stop", "main/player#0"]);
+    expect(played.at(-1)).toEqual(["pause", "main/player#0"]);
     expect(rt.getValue("meter.volume")).toBe(0);
+    runFrames(rt, 1);
     expect(rt.getValue("@bar.opacity")).toBe(0);
     expect(rt.issues().filter((i) => i.severity === "error")).toEqual([]);
   });

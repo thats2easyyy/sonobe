@@ -11,7 +11,7 @@ export function connectClaudeCommand(open: () => void = () => connectClaudeStore
   return {
     id: CONNECT_CLAUDE_COMMAND_ID,
     title: "Connect Claude…",
-    category: "AI",
+    category: "Help",
     description: "Use Claude Desktop or Claude Code with your own plan",
     keywords: ["mcp", "claude desktop", "claude code", "setup", "connect", "ai"],
     icon: Plug,

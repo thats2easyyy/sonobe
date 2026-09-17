@@ -27,15 +27,19 @@ describe("optionPicker", () => {
     expect(h.step({ inputs: { option1: loopOf(["x", "y"]) } }).outputs.output).toEqual(loopOf(["x", "a", "x"]));
   });
 
-  it("declares 0-based option inputs with variant defaults through dynamicPorts", () => {
+  it("gets 0-based option inputs with variant defaults from core port resolution", () => {
+    expect(optionPickerPatch.dynamicPorts).toBeUndefined();
     const registry = createRegistry([optionPickerPatch]);
     const doc = createEmptyDocument();
     const color = resolveNodePorts(doc, { type: "optionPicker", typeParam: "color", inputCount: 3, inputs: {}, ui: { x: 0, y: 0 } }, registry)!;
-    const option0 = color.inputs.find((p) => p.key === "option0")!;
-    expect(option0.type).toBe("color");
-    expect(option0.default).toBe("#00000000");
-    expect(color.inputs.find((p) => p.key === "option2")?.type).toBe("color");
-    const number = optionPickerPatch.dynamicPorts!({ type: "optionPicker", inputs: {}, ui: { x: 0, y: 0 } }, doc);
-    expect(number.inputs.map((p) => [p.key, p.default])).toEqual([["option0", 0], ["option1", 0]]);
+    expect(color.inputs.map((p) => [p.key, p.type, p.default])).toEqual([
+      ["option", "index", 0],
+      ["option0", "color", "#00000000"],
+      ["option1", "color", "#00000000"],
+      ["option2", "color", "#00000000"],
+    ]);
+    expect(color.outputs.map((p) => [p.key, p.type])).toEqual([["output", "color"]]);
+    const number = resolveNodePorts(doc, { type: "optionPicker", inputs: {}, ui: { x: 0, y: 0 } }, registry)!;
+    expect(number.inputs.map((p) => [p.key, p.default])).toEqual([["option", 0], ["option0", 0], ["option1", 0]]);
   });
 });

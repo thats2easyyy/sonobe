@@ -129,6 +129,6 @@ export function evaluate(patch) { setTimeout(() => { patch.output("done", true);
     const rt = createTestRuntime(doc, [javascript, component]);
     runFrames(rt, 3);
     expect(rt.getValue("clock.frame")).toBe(2);
-    expect(rt.issues()).toEqual([{ code: "patch_error", severity: "error", message: "scripts/spin.js:2:30 The script took too long. Check for a loop that never ends.", patchId: "spin" }]);
+    expect(rt.issues()).toEqual([{ code: "script_error", severity: "error", message: "scripts/spin.js:2:30 The script took too long. Check for a loop that never ends.", patchId: "spin" }]);
   });
 });

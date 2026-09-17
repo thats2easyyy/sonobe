@@ -1,7 +1,68 @@
 import { describe, expect, it } from "vitest";
-import { formatMeasurement, measureBetween, measureGaps, snapRect } from "./snapping.ts";
+import { formatMeasurement, measureBetween, measureGaps, measurementMatchesMark, snapMove, snapRect, snapSpacingAxis, spacingMarks } from "./snapping.ts";
 
 const artboard = { x: 0, y: 0, width: 400, height: 800 };
+
+describe("equal spacing", () => {
+  const a = { x: 0, y: 100, width: 50, height: 50 };
+  const b = { x: 80, y: 100, width: 50, height: 50 };
+
+  it("snaps to the gap two siblings in the row already have", () => {
+    // 163 − 130 = 33; a → b is 30.
+    expect(snapSpacingAxis({ x: 163, y: 100, width: 50, height: 50 }, [a, b], "x", 5)).toBe(-3);
+    expect(snapSpacingAxis({ x: 38, y: 90, width: 30, height: 70 }, [{ x: 100, y: 100, width: 40, height: 40 }, { x: 175, y: 100, width: 40, height: 40 }], "x", 5)).toBe(-3);
+    expect(snapSpacingAxis({ x: 175, y: 100, width: 50, height: 50 }, [a, b], "x", 5)).toBeNull();
+  });
+
+  it("centers between two neighbors", () => {
+    const right = { x: 200, y: 100, width: 50, height: 50 };
+    expect(snapSpacingAxis({ x: 97, y: 110, width: 50, height: 20 }, [a, right], "x", 5)).toBe(3);
+    expect(snapSpacingAxis({ x: 80, y: 110, width: 50, height: 20 }, [a, right], "x", 5)).toBeNull();
+  });
+
+  it("ignores siblings outside the row", () => {
+    const below = { x: 80, y: 400, width: 50, height: 50 };
+    expect(snapSpacingAxis({ x: 163, y: 100, width: 50, height: 50 }, [a, below], "x", 5)).toBeNull();
+  });
+
+  it("marks every equal gap after snapping", () => {
+    const marks = spacingMarks({ x: 160, y: 100, width: 50, height: 50 }, [a, b], "x");
+    expect(marks).toEqual([
+      { axis: "x", rect: { x: 130, y: 100, width: 30, height: 50 }, value: 30 },
+      { axis: "x", rect: { x: 50, y: 100, width: 30, height: 50 }, value: 30 },
+    ]);
+    expect(spacingMarks({ x: 170, y: 100, width: 50, height: 50 }, [a, b], "x")).toEqual([]);
+  });
+
+  it("marks vertical gaps in a column", () => {
+    const top = { x: 20, y: 0, width: 100, height: 40 };
+    const middle = { x: 20, y: 60, width: 100, height: 40 };
+    const marks = spacingMarks({ x: 20, y: 120, width: 100, height: 40 }, [top, middle], "y");
+    expect(marks.map((m) => m.rect)).toEqual([
+      { x: 20, y: 100, width: 100, height: 20 },
+      { x: 20, y: 40, width: 100, height: 20 },
+    ]);
+  });
+
+  it("snapMove picks the nearer of alignment and spacing per axis", () => {
+    const r = snapMove({ x: 163, y: 102, width: 50, height: 50 }, [a, b, artboard], [a, b], { threshold: 5 });
+    expect(r.dx).toBe(-3);
+    expect(r.dy).toBe(-2);
+    expect(r.spacing).toHaveLength(2);
+    expect(r.guides.some((g) => g.axis === "y" && g.at === 100)).toBe(true);
+    // An edge 1 pt away beats a gap 3 pt away.
+    const edge = { x: 162, y: 400, width: 10, height: 10 };
+    expect(snapMove({ x: 163, y: 100, width: 50, height: 50 }, [a, b, edge], [a, b], { threshold: 5 }).dx).toBe(-1);
+    expect(snapMove({ x: 163, y: 100, width: 50, height: 50 }, [a, b], [a, b], { threshold: 5, spacing: false })).toMatchObject({ dx: 0, spacing: [] });
+  });
+
+  it("matches gap measurements to the marks that draw the same gap", () => {
+    const mark = { axis: "x" as const, rect: { x: 130, y: 100, width: 30, height: 50 }, value: 30 };
+    expect(measurementMatchesMark({ axis: "x", from: [130, 125], to: [160, 125], value: 30 }, mark)).toBe(true);
+    expect(measurementMatchesMark({ axis: "x", from: [50, 125], to: [80, 125], value: 30 }, mark)).toBe(false);
+    expect(measurementMatchesMark({ axis: "y", from: [130, 125], to: [130, 155], value: 30 }, mark)).toBe(false);
+  });
+});
 
 describe("snapRect", () => {
   it("snaps the nearest edge within the threshold and reports guides", () => {

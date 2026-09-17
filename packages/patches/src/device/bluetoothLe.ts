@@ -4,11 +4,9 @@
  * callbacks only store results, which the next evaluate applies.
  */
 
-import type { PatchContext } from "@sonobe/engine";
+import type { BluetoothLink, PatchContext } from "@sonobe/engine";
 import { definePatch, toBool, toText, warnOnce } from "../infra/index.ts";
-import { devicePlatform } from "./platform.ts";
-import type { BleLink } from "./platform.ts";
-import { describeError, withMutedBehavior } from "./shared.ts";
+import { describeError } from "./shared.ts";
 
 const BASE_UUID_SUFFIX = "-0000-1000-8000-00805f9b34fb";
 const MAX_WRITE_BYTES = 512;
@@ -119,7 +117,7 @@ export function encodeWriteValue(value: string, format: string): { bytes: Uint8A
 
 interface BleState {
   gen: number;
-  link: BleLink | null;
+  link: BluetoothLink | null;
   connectError: string | null;
   dropped: boolean;
   incoming: Uint8Array | null;
@@ -151,7 +149,7 @@ function fail(s: BleState, message: string): void {
 }
 
 /** Chain a GATT operation so operations run one at a time; failures land in `opError`. */
-function queue(s: BleState, op: (link: BleLink) => Promise<unknown> | unknown): void {
+function queue(s: BleState, op: (link: BluetoothLink) => Promise<unknown> | unknown): void {
   const gen = s.gen;
   s.ops = s.ops
     .then(async () => {
@@ -192,159 +190,157 @@ function outputAll(ctx: PatchContext, s: BleState, available: boolean): void {
   ctx.output("error", s.error);
 }
 
-export const bluetoothLePatch = withMutedBehavior(
-  definePatch<BleState>("bluetoothLe", {
-    state: () => ({
-      gen: 0,
-      link: null,
-      connectError: null,
-      dropped: false,
-      incoming: null,
-      ops: Promise.resolve(),
-      opError: null,
-      connected: false,
-      loading: false,
-      value: 0,
-      text: "",
-      deviceName: "",
-      errorMessage: "",
-      error: false,
-      notifying: null,
-      target: "",
-    }),
-    evaluate(ctx) {
-      const s = ctx.state;
-      if (ctx.node.muted) {
-        if (s.link || s.loading) disconnect(s);
-        ctx.output("value", 0);
-        ctx.output("text", "");
-        for (const key of ["connected", "loading", "available", "error"]) ctx.output(key, false);
-        ctx.output("deviceName", "");
-        ctx.output("errorMessage", "");
-        return;
-      }
-      const ble = devicePlatform(ctx.services).bluetooth;
-      const available = ble?.available === true;
-      const format = toText(ctx.input("format"));
+export const bluetoothLePatch = definePatch<BleState>("bluetoothLe", {
+  mutedBehavior: "evaluate",
+  state: () => ({
+    gen: 0,
+    link: null,
+    connectError: null,
+    dropped: false,
+    incoming: null,
+    ops: Promise.resolve(),
+    opError: null,
+    connected: false,
+    loading: false,
+    value: 0,
+    text: "",
+    deviceName: "",
+    errorMessage: "",
+    error: false,
+    notifying: null,
+    target: "",
+  }),
+  evaluate(ctx) {
+    const s = ctx.state;
+    if (ctx.muted) {
+      if (s.link || s.loading) disconnect(s);
+      ctx.output("value", 0);
+      ctx.output("text", "");
+      for (const key of ["connected", "loading", "available", "error"]) ctx.output(key, false);
+      ctx.output("deviceName", "");
+      ctx.output("errorMessage", "");
+      return;
+    }
+    const ble = ctx.services.platform.bluetooth;
+    const available = ble?.available === true;
+    const format = toText(ctx.input("format"));
 
-      // 1. Apply results stored by callbacks.
-      if (s.link && !s.connected) {
-        s.connected = true;
-        s.loading = false;
-        s.deviceName = typeof s.link.name === "string" ? s.link.name : "";
+    // 1. Apply results stored by callbacks.
+    if (s.link && !s.connected) {
+      s.connected = true;
+      s.loading = false;
+      s.deviceName = typeof s.link.name === "string" ? s.link.name : "";
+      s.error = false;
+      s.errorMessage = "";
+      if (s.link.canRead) {
+        const store = storeValue(s);
+        queue(s, (link) => link.read().then(store));
+      }
+    }
+    if (s.connectError !== null) {
+      s.loading = false;
+      fail(s, s.connectError);
+      s.connectError = null;
+    }
+    if (s.dropped) {
+      resetLink(s);
+      fail(s, "The device disconnected.");
+      s.dropped = false;
+    }
+    if (s.opError !== null) {
+      fail(s, s.opError);
+      s.opError = null;
+    }
+
+    // 2. Commands: Disconnect beats Connect; Write runs before Read.
+    const service = toText(ctx.input("serviceUuid"));
+    const characteristic = toText(ctx.input("characteristicUuid"));
+    const namePrefix = toText(ctx.input("namePrefix"));
+    const target = `${normalizeUuid(service)}|${normalizeUuid(characteristic)}|${namePrefix}`;
+    if (ctx.pulsed("disconnect")) {
+      disconnect(s);
+    } else if (ctx.pulsed("connect") && !s.connected && !s.loading) {
+      if (!ble || !available) {
+        fail(s, "Bluetooth LE isn't available in this browser.");
+        ctx.services.log("log", "Bluetooth LE: connect (no Bluetooth here)");
+      } else if (service.trim() === "") {
+        fail(s, "Service UUID is empty.");
+      } else if (characteristic.trim() === "") {
+        fail(s, "Characteristic UUID is empty.");
+      } else {
+        const gen = ++s.gen;
+        s.loading = true;
         s.error = false;
         s.errorMessage = "";
-        if (s.link.canRead) {
-          const store = storeValue(s);
-          queue(s, (link) => link.read().then(store));
+        s.target = target;
+        const options: { service: string; characteristic: string; namePrefix?: string } = { service: normalizeUuid(service), characteristic: normalizeUuid(characteristic) };
+        if (namePrefix !== "") options.namePrefix = namePrefix;
+        let pending: Promise<BluetoothLink>;
+        try {
+          pending = Promise.resolve(ble.connect(options));
+        } catch (error) {
+          pending = Promise.reject(error);
         }
+        pending.then(
+          (link) => {
+            if (s.gen !== gen) {
+              link?.disconnect?.();
+              return;
+            }
+            link.onValue((bytes) => {
+              if (s.gen === gen && bytes instanceof Uint8Array) s.incoming = bytes;
+            });
+            link.onDisconnect(() => {
+              if (s.gen === gen) s.dropped = true;
+            });
+            s.link = link;
+          },
+          (error: unknown) => {
+            if (s.gen === gen) s.connectError = describeError(error);
+          },
+        );
       }
-      if (s.connectError !== null) {
-        s.loading = false;
-        fail(s, s.connectError);
-        s.connectError = null;
+    }
+    if (ctx.pulsed("write")) {
+      if (!s.connected) fail(s, "Connect before writing.");
+      else {
+        const encoded = encodeWriteValue(toText(ctx.input("writeValue")), format);
+        if ("error" in encoded) fail(s, encoded.error);
+        else queue(s, (link) => link.write(encoded.bytes));
       }
-      if (s.dropped) {
-        resetLink(s);
-        fail(s, "The device disconnected.");
-        s.dropped = false;
+    }
+    if (ctx.pulsed("read")) {
+      if (!s.connected) fail(s, "Connect before reading.");
+      else {
+        const store = storeValue(s);
+        queue(s, (link) => link.read().then(store));
       }
-      if (s.opError !== null) {
-        fail(s, s.opError);
-        s.opError = null;
+    }
+    if (s.connected && s.link) {
+      const wantNotify = toBool(ctx.input("notifications")) && s.link.canNotify === true;
+      if (s.notifying !== wantNotify) {
+        const wasOn = s.notifying === true;
+        s.notifying = wantNotify;
+        if (wantNotify || wasOn) queue(s, (link) => link.setNotifications(wantNotify));
       }
+      if (target !== s.target) {
+        warnOnce(ctx, "retarget", "Bluetooth LE: the new Service UUID, Characteristic UUID, or Name Prefix applies on the next Connect.");
+      }
+    }
 
-      // 2. Commands: Disconnect beats Connect; Write runs before Read.
-      const service = toText(ctx.input("serviceUuid"));
-      const characteristic = toText(ctx.input("characteristicUuid"));
-      const namePrefix = toText(ctx.input("namePrefix"));
-      const target = `${normalizeUuid(service)}|${normalizeUuid(characteristic)}|${namePrefix}`;
-      if (ctx.pulsed("disconnect")) {
-        disconnect(s);
-      } else if (ctx.pulsed("connect") && !s.connected && !s.loading) {
-        if (!ble || !available) {
-          fail(s, "Bluetooth LE isn't available in this browser.");
-          ctx.services.log("log", "Bluetooth LE: connect (no Bluetooth here)");
-        } else if (service.trim() === "") {
-          fail(s, "Service UUID is empty.");
-        } else if (characteristic.trim() === "") {
-          fail(s, "Characteristic UUID is empty.");
-        } else {
-          const gen = ++s.gen;
-          s.loading = true;
-          s.error = false;
-          s.errorMessage = "";
-          s.target = target;
-          const options: { service: string; characteristic: string; namePrefix?: string } = { service: normalizeUuid(service), characteristic: normalizeUuid(characteristic) };
-          if (namePrefix !== "") options.namePrefix = namePrefix;
-          let pending: Promise<BleLink>;
-          try {
-            pending = Promise.resolve(ble.connect(options));
-          } catch (error) {
-            pending = Promise.reject(error);
-          }
-          pending.then(
-            (link) => {
-              if (s.gen !== gen) {
-                link?.disconnect?.();
-                return;
-              }
-              link.onValue((bytes) => {
-                if (s.gen === gen && bytes instanceof Uint8Array) s.incoming = bytes;
-              });
-              link.onDisconnect(() => {
-                if (s.gen === gen) s.dropped = true;
-              });
-              s.link = link;
-            },
-            (error: unknown) => {
-              if (s.gen === gen) s.connectError = describeError(error);
-            },
-          );
-        }
-      }
-      if (ctx.pulsed("write")) {
-        if (!s.connected) fail(s, "Connect before writing.");
-        else {
-          const encoded = encodeWriteValue(toText(ctx.input("writeValue")), format);
-          if ("error" in encoded) fail(s, encoded.error);
-          else queue(s, (link) => link.write(encoded.bytes));
-        }
-      }
-      if (ctx.pulsed("read")) {
-        if (!s.connected) fail(s, "Connect before reading.");
-        else {
-          const store = storeValue(s);
-          queue(s, (link) => link.read().then(store));
-        }
-      }
-      if (s.connected && s.link) {
-        const wantNotify = toBool(ctx.input("notifications")) && s.link.canNotify === true;
-        if (s.notifying !== wantNotify) {
-          const wasOn = s.notifying === true;
-          s.notifying = wantNotify;
-          if (wantNotify || wasOn) queue(s, (link) => link.setNotifications(wantNotify));
-        }
-        if (target !== s.target) {
-          warnOnce(ctx, "retarget", "Bluetooth LE: the new Service UUID, Characteristic UUID, or Name Prefix applies on the next Connect.");
-        }
-      }
-
-      // 3. Deliver the newest value.
-      if (s.incoming) {
-        const decoded = decodeBytes(s.incoming, format);
-        if (decoded.short) warnOnce(ctx, "shortValue", `Bluetooth LE: the value has too few bytes for ${format}, so Value reads 0.`);
-        s.value = decoded.value;
-        s.text = decoded.text;
-        s.incoming = null;
-        ctx.pulse("received");
-      }
-      if (s.loading || s.connected) ctx.requestNextFrame();
-      outputAll(ctx, s, available);
-    },
-    dispose(state) {
-      if (state) disconnect(state);
-    },
-  }),
-  "evaluate",
-);
+    // 3. Deliver the newest value.
+    if (s.incoming) {
+      const decoded = decodeBytes(s.incoming, format);
+      if (decoded.short) warnOnce(ctx, "shortValue", `Bluetooth LE: the value has too few bytes for ${format}, so Value reads 0.`);
+      s.value = decoded.value;
+      s.text = decoded.text;
+      s.incoming = null;
+      ctx.pulse("received");
+    }
+    if (s.loading || s.connected) ctx.requestNextFrame();
+    outputAll(ctx, s, available);
+  },
+  dispose(state) {
+    if (state) disconnect(state);
+  },
+});

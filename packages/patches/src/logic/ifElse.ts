@@ -3,17 +3,15 @@
  * True through (the variant input), so a boolean variant never passes Condition instead.
  */
 
-import type { RuntimePatchDefinition } from "@sonobe/engine";
 import { definePatch, toBool } from "../infra/index.ts";
 
-const definition = definePatch("ifElse", {
+export const ifElse = definePatch("ifElse", {
   evaluate(ctx) {
-    if (ctx.node.muted === true) {
+    if (ctx.muted) {
       ctx.output("output", ctx.input("ifTrue"));
       return;
     }
     ctx.output("output", toBool(ctx.input("condition")) ? ctx.input("ifTrue") : ctx.input("ifFalse"));
   },
+  mutedBehavior: "evaluate",
 });
-
-export const ifElse: RuntimePatchDefinition = { ...definition, mutedBehavior: "evaluate" };

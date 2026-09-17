@@ -23,25 +23,39 @@ export {
 export {
   ADDITIVE,
   authorFromClientName,
+  conformErrorResult,
   createSonobeMcpServer,
   DESTRUCTIVE,
   PROMPT_NAMES,
   READ_ONLY,
   serverInstructions,
   SIMULATION,
+  subscribedResources,
   TOOL_NAMES,
   UI_ONLY,
   type SonobeMcpServerOptions,
+  type SonobeServerContext,
   type ToolName,
 } from "./server.ts";
 export {
   createHttpHandler,
+  documentResourceUris,
+  publishDocumentChange,
   serveStdioHost,
   type NodeMcpHandler,
+  type ResourceNotifier,
   type StdioHandle,
   type StdioOptions,
   type TransportOptions,
 } from "./transports.ts";
+export {
+  instanceIds,
+  instancePathTo,
+  resolveInstancePath,
+  splitInstanceAddress,
+  type InstanceResolution,
+  type InstanceStep,
+} from "./instances.ts";
 export { createTemplateDocument, TEMPLATES, templateOps, type TemplateInfo } from "./templates.ts";
 export { explain, type Audience, type ExplainOptions } from "./explain.ts";
 export {
@@ -63,6 +77,13 @@ export {
   valueTypesText,
 } from "./catalog.ts";
 export { formatValue, roundForDisplay, sampleIndices, table, toJsonValue } from "./format.ts";
-export { parseSimEvents, SimEventSchema, SimEventsSchema } from "./schemas.ts";
+export {
+  parseSimEvents,
+  SimEventSchema,
+  SimEventsSchema,
+  ToolErrorOutputSchema,
+  toolOutputSchema,
+  type ToolOutputSchema,
+} from "./schemas.ts";
 export { summaryText, traceTable } from "./tools/simulate.ts";
 export { tidyOps, type TidyOptions } from "./tidy.ts";

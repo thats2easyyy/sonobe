@@ -1,0 +1,8 @@
+/* Raised surface shared by dialogs, popovers, and menus. Imported by each widget that uses it, so a page never renders one transparent. */
+.sb-surface {
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+  background: var(--bg-elevated);
+  box-shadow: var(--shadow-popover);
+  color: var(--text-primary);
+}

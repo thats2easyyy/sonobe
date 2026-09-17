@@ -76,6 +76,24 @@ patch liked switch "Liked" flip←tap_like.tap
 
 The new component gets id `like_button`; the instance layer in `main` gets `like_button_2`. Read inside with `get_outline` and `component: "like_button"`.
 
+## Inside instances
+
+Simulations and `get_items` reach into an instance through its **instance path**: the instance id, a slash, then the address inside (`#n` picks a copy of a looped instance).
+
+```json tool:sim_reset
+{}
+```
+
+```json tool:sim_dispatch
+{ "simId": "sim_1", "events": [{ "kind": "tap", "target": "@like_button_2/like_button" }] }
+```
+
+```json tool:sim_get_values
+{ "simId": "sim_1", "targets": ["like_button_2/liked.on", "@like_button_2/like_button.color"] }
+```
+
+After the tap, `like_button_2/liked.on` is true. Each instance keeps its own state.
+
 ## Building a patch component
 
 ```json tool:apply_ops
@@ -173,4 +191,4 @@ patch press_spring popAnimation<number> "Press Spring" number←$in.down bouncin
 ## Limits
 
 - Layer references (`{ "layer": … }`) only reach layers in the same component.
-- Simulations read values in the root component. To inspect a value inside a component, publish it as an output and read it from the instance.
+- Links can't reach inside an instance. To use a value from inside a component elsewhere, publish it as an output and connect from the instance.

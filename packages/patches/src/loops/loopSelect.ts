@@ -1,10 +1,9 @@
 /** Loop Select: pick items by position, in any order, with repeats. */
 
 import { definePatch, loopOf } from "../infra/index.ts";
-import { indices, variantPortsFor } from "./shared.ts";
+import { indices } from "./shared.ts";
 
 export const loopSelectPatch = definePatch("loopSelect", {
-  dynamicPorts: variantPortsFor("loopSelect"),
   evaluate(ctx) {
     const items = ctx.inputItems("loop");
     const picks = ctx.inputItems<unknown>("index");

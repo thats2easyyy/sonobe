@@ -1,7 +1,6 @@
 /** SVG Path Shape: SVG path data (or pasted `<svg>` markup) fitted into a size without stretching. */
 
 import type { ShapeValue } from "@sonobe/core";
-import type { RuntimePatchDefinition } from "@sonobe/engine";
 import { definePatch, sameComponents, toText } from "../infra/index.ts";
 import { formatPath, parsePath, readSvgMarkup, transformSegments } from "./path.ts";
 import type { Segment } from "./path.ts";
@@ -51,7 +50,9 @@ export function buildSvgShape(pathData: string, viewBoxInput: readonly number[],
   return done(parsed.segments, problems);
 }
 
-const definition = definePatch<SvgPathState>("svgPathShape", {
+/** Muted: Shape null, Error false, Error Message "" (the default bypass would copy Path Data into Error Message). */
+export const svgPathShape = definePatch<SvgPathState>("svgPathShape", {
+  mutedBehavior: "zero",
   state: () => ({ cache: null }),
   evaluate(ctx) {
     const text = toText(ctx.input<unknown>("pathData"));
@@ -69,6 +70,3 @@ const definition = definePatch<SvgPathState>("svgPathShape", {
     ctx.output("errorMessage", cache.result.errorMessage);
   },
 });
-
-/** Muted: Shape null, Error false, Error Message "" (the default bypass would copy Path Data into Error Message). */
-export const svgPathShape: RuntimePatchDefinition<SvgPathState> = { ...definition, mutedBehavior: "zero" };

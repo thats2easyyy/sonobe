@@ -5,10 +5,9 @@
 
 import type { DeviceInfo } from "@sonobe/engine";
 import { definePatch } from "../infra/index.ts";
-import { orientationAngleOf } from "./platform.ts";
-import { findPreset, finiteVector, normalizeDegrees } from "./shared.ts";
+import { findPreset, finiteVector, normalizeDegrees, orientationAngleOf } from "./shared.ts";
 
-/** Physical rotation in degrees: the proposed `orientationAngle`, else portrait 0 and landscape 90. */
+/** Physical rotation in degrees: the host's `orientationAngle`, else portrait 0 and landscape 90. */
 export function orientationAngle(device: DeviceInfo): number {
   const angle = orientationAngleOf(device);
   if (angle !== undefined) return normalizeDegrees(angle);

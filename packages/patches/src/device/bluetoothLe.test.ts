@@ -1,16 +1,23 @@
 import { describe, expect, it } from "vitest";
+import type { BluetoothLink, PatchDefinition } from "@sonobe/engine";
 import { createPatchHarness } from "../infra/index.ts";
 import { bluetoothLePatch, decodeBytes, encodeWriteValue, normalizeUuid } from "./bluetoothLe.ts";
-import type { BleLink } from "./platform.ts";
 
 const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
+
+/** The definition with a switch for `ctx.muted`, so a test can mute a running patch. */
+function muteSwitch<S>(definition: PatchDefinition<S>) {
+  let muted = false;
+  const switched: PatchDefinition<S> = { ...definition, evaluate: (ctx) => definition.evaluate(Object.create(ctx, { muted: { get: () => muted } })) };
+  return { definition: switched, mute: (on: boolean) => void (muted = on) };
+}
 
 function fakeBle(options: { canRead?: boolean; canNotify?: boolean; readValue?: number[] } = {}) {
   const log: string[] = [];
   let valueCallback: ((bytes: Uint8Array) => void) | undefined;
   let disconnectCallback: (() => void) | undefined;
-  const pendingConnects: { resolve: (link: BleLink) => void; reject: (error: unknown) => void; options: unknown }[] = [];
-  const link: BleLink = {
+  const pendingConnects: { resolve: (link: BluetoothLink) => void; reject: (error: unknown) => void; options: unknown }[] = [];
+  const link: BluetoothLink = {
     name: "Heart Strap",
     canRead: options.canRead ?? true,
     canNotify: options.canNotify ?? true,
@@ -34,20 +41,21 @@ function fakeBle(options: { canRead?: boolean; canNotify?: boolean; readValue?: 
   };
   const bluetooth = {
     available: true,
-    connect: (opts: unknown) => new Promise<BleLink>((resolve, reject) => pendingConnects.push({ resolve, reject, options: opts })),
+    connect: (opts: unknown) => new Promise<BluetoothLink>((resolve, reject) => pendingConnects.push({ resolve, reject, options: opts })),
   };
   return { log, link, bluetooth, pendingConnects, emit: (bytes: number[]) => valueCallback?.(new Uint8Array(bytes)), drop: () => disconnectCallback?.() };
 }
 
 async function connected(extra: Parameters<typeof fakeBle>[0] = {}) {
   const ble = fakeBle(extra);
-  const h = createPatchHarness(bluetoothLePatch, { services: { platform: { bluetooth: ble.bluetooth } as never } });
+  const { definition, mute } = muteSwitch(bluetoothLePatch);
+  const h = createPatchHarness(definition, { services: { platform: { bluetooth: ble.bluetooth } as never } });
   h.step({ pulses: ["connect"] });
   ble.pendingConnects[0]!.resolve(ble.link);
   await flush();
   h.step();
   await flush();
-  return { ...ble, h };
+  return { ...ble, h, mute };
 }
 
 describe("normalizeUuid", () => {
@@ -184,8 +192,8 @@ describe("bluetoothLe", () => {
   });
 
   it("disconnects and outputs zeros while muted", async () => {
-    const { h, log } = await connected();
-    h.node.muted = true;
+    const { h, log, mute } = await connected();
+    mute(true);
     const f = h.step();
     expect(f.outputs).toMatchObject({ connected: false, value: 0, available: false, text: "" });
     expect(log).toContain("disconnect");

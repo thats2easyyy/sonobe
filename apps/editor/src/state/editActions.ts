@@ -107,12 +107,18 @@ export function deleteSelection(session: EditorSession): ActionResult {
   return fromResult(result);
 }
 
+/** Fragment of the current selection, carrying asset bytes the session holds. */
+function fragmentOf(session: EditorSession, ctx: Context, items: { layers: readonly Id[]; patches: readonly Id[]; comments: readonly Id[] }): ClipboardFragment | null {
+  const assets = (session as Partial<Pick<EditorSession, "assets">>).assets;
+  return createClipboardFragment(ctx.doc, ctx.componentId, items, assets ? { readAssetBytes: (record) => assets.peekBytes(record.file) } : {});
+}
+
 /** Copy the selection into a fragment (also kept on the session as the paste fallback). */
 export function copySelection(session: EditorSession): ClipboardFragment | null {
   const ctx = context(session);
   const s = session.selection.getState();
   if (!ctx) return null;
-  const fragment = createClipboardFragment(ctx.doc, ctx.componentId, { layers: s.layers, patches: s.patches });
+  const fragment = fragmentOf(session, ctx, { layers: s.layers, patches: s.patches, comments: s.comments });
   if (fragment) session.clipboard = fragment;
   return fragment;
 }
@@ -120,13 +126,18 @@ export function copySelection(session: EditorSession): ClipboardFragment | null 
 /** Copy, then delete. */
 export function cutSelection(session: EditorSession): ActionResult & { fragment?: ClipboardFragment } {
   const fragment = copySelection(session);
-  if (!fragment) return failed("Select layers or patches to cut.");
+  if (!fragment) return failed("Select layers, patches, or comments to cut.");
   const ctx = context(session)!;
   const s = session.selection.getState();
   const layers = topLevelLayerIds(ctx.component, s.layers);
   const patches = s.patches.filter((id) => id in ctx.component.patches);
-  const ops: Op[] = [...layers.map((id): Op => ({ op: "removeLayer", component: ctx.componentId, id })), ...patches.map((id): Op => ({ op: "removePatch", component: ctx.componentId, id }))];
-  const result = apply(session, ops, `Cut ${itemLabel(ctx.component, layers, patches)}`, ctx.componentId);
+  const comments = s.comments.filter((id) => ctx.component.comments.some((c) => c.id === id));
+  const ops: Op[] = [
+    ...layers.map((id): Op => ({ op: "removeLayer", component: ctx.componentId, id })),
+    ...patches.map((id): Op => ({ op: "removePatch", component: ctx.componentId, id })),
+    ...comments.map((id): Op => ({ op: "removeComment", component: ctx.componentId, id })),
+  ];
+  const result = apply(session, ops, `Cut ${itemLabel(ctx.component, layers, patches, comments)}`, ctx.componentId);
   if (result.ok) session.selection.getState().clear();
   return { ...fromResult(result), fragment };
 }
@@ -134,6 +145,8 @@ export function cutSelection(session: EditorSession): ActionResult & { fragment?
 export interface PasteActionResult extends ActionResult {
   layers: Id[];
   patches: Id[];
+  /** Pasted comment ids. */
+  comments?: Id[];
   droppedLinks: number;
 }
 
@@ -150,31 +163,38 @@ export function pasteFragment(session: EditorSession, fragment: ClipboardFragmen
     parent = anchor.parent?.id ?? null;
     index = anchor.index + 1;
   }
-  const overlapping = Object.entries(fragment.patches).some(([, node]) => Object.values(ctx.component.patches).some((p) => p.ui.x === node.ui.x && p.ui.y === node.ui.y));
+  const overlapping =
+    Object.values(fragment.patches).some((node) => Object.values(ctx.component.patches).some((p) => p.ui.x === node.ui.x && p.ui.y === node.ui.y)) ||
+    (fragment.comments ?? []).some((c) => ctx.component.comments.some((existing) => existing.rect[0] === c.rect[0] && existing.rect[1] === c.rect[1]));
   const plan = planPaste(ctx.doc, ctx.componentId, fragment, {
     parent,
     ...(index !== undefined ? { index } : {}),
     patchOffset: overlapping ? [24, 24] : [0, 0],
     isReserved: session.document.getState().isReservedId,
   });
-  const count = fragment.layers.length + Object.keys(fragment.patches).length;
-  const label = options.label ?? `Paste ${count === 1 ? (fragment.layers[0]?.name ?? Object.values(fragment.patches)[0]?.name ?? "1 item") : `${count} items`}`;
+  const comments = fragment.comments ?? [];
+  const count = fragment.layers.length + Object.keys(fragment.patches).length + comments.length;
+  const single = fragment.layers[0]?.name ?? Object.values(fragment.patches)[0]?.name ?? (comments.length ? "comment" : "1 item");
+  const label = options.label ?? `Paste ${count === 1 ? single : `${count} items`}`;
+  // Bytes first, so the runtime can load pasted media as soon as the document changes.
+  const assets = (session as Partial<Pick<EditorSession, "assets">>).assets;
+  if (assets) for (const [file, bytes] of Object.entries(plan.assetBytes)) if (!assets.peekBytes(file)) assets.storeBytes(file, bytes);
   const outcome = applyPastePlan(plan, (ops) => apply(session, ops, label, ctx.componentId));
-  if (outcome.result.ok) session.selection.getState().select({ layers: outcome.layers, patches: outcome.patches, comments: [] });
-  return { ...fromResult(outcome.result), layers: outcome.layers, patches: outcome.patches, droppedLinks: outcome.droppedLinks };
+  if (outcome.result.ok) session.selection.getState().select({ layers: outcome.layers, patches: outcome.patches, comments: outcome.comments });
+  return { ...fromResult(outcome.result), layers: outcome.layers, patches: outcome.patches, comments: outcome.comments, droppedLinks: outcome.droppedLinks };
 }
 
-/** Duplicate the selection in place (patches shift so the copies are visible). */
+/** Duplicate the selection in place (patches and comments shift so the copies are visible). */
 export function duplicateSelection(session: EditorSession): PasteActionResult {
   const ctx = context(session);
   const s = session.selection.getState();
   if (!ctx) return { ...failed("Select layers or patches to duplicate."), layers: [], patches: [], droppedLinks: 0 };
-  const fragment = createClipboardFragment(ctx.doc, ctx.componentId, { layers: s.layers, patches: s.patches });
+  const fragment = fragmentOf(session, ctx, { layers: s.layers, patches: s.patches, comments: s.comments });
   if (!fragment) return { ...failed("Select layers or patches to duplicate."), layers: [], patches: [], droppedLinks: 0 };
   const top = topLevelLayerIds(ctx.component, s.layers);
   const last = top.length ? findLayer(ctx.component.layers, top.at(-1)!) : undefined;
   if (last) session.selection.getState().select({ layers: [last.layer.id], patches: [], comments: [] });
-  return pasteFragment(session, fragment, { label: `Duplicate ${itemLabel(ctx.component, top, Object.keys(fragment.patches))}` });
+  return pasteFragment(session, fragment, { label: `Duplicate ${itemLabel(ctx.component, top, Object.keys(fragment.patches), fragment.comments?.map((c) => c.id))}` });
 }
 
 /** Wrap the selected layers in a new group that hugs them. */

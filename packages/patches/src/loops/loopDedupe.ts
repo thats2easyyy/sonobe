@@ -2,7 +2,7 @@
 
 import { isColor } from "@sonobe/core";
 import { definePatch, isPlainObject, loopOf } from "../infra/index.ts";
-import { indices, passThroughWhenMuted, variantPortsFor, withMutedBehavior } from "./shared.ts";
+import { indices, passThroughWhenMuted } from "./shared.ts";
 
 const MAX_JSON_DEPTH = 64;
 
@@ -100,15 +100,12 @@ export function dedupe(items: readonly unknown[], variant: string): unknown[] {
   return unique;
 }
 
-export const loopDedupePatch = withMutedBehavior(
-  definePatch("loopDedupe", {
-    dynamicPorts: variantPortsFor("loopDedupe"),
-    evaluate(ctx) {
-      if (passThroughWhenMuted(ctx, "index")) return;
-      const unique = dedupe(ctx.inputItems("loop"), ctx.typeParam ?? "number");
-      ctx.output("output", loopOf(unique));
-      ctx.output("index", loopOf(indices(unique.length)));
-    },
-  }),
-  "evaluate",
-);
+export const loopDedupePatch = definePatch("loopDedupe", {
+  evaluate(ctx) {
+    if (passThroughWhenMuted(ctx, "index")) return;
+    const unique = dedupe(ctx.inputItems("loop"), ctx.typeParam ?? "number");
+    ctx.output("output", loopOf(unique));
+    ctx.output("index", loopOf(indices(unique.length)));
+  },
+  mutedBehavior: "evaluate",
+});

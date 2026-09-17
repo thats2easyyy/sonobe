@@ -5,10 +5,8 @@
  */
 
 import { EASINGS } from "@sonobe/engine";
-import type { DeviceInfo } from "@sonobe/engine";
+import type { DeviceInfo, SoftKeyboardSnapshot } from "@sonobe/engine";
 import { definePatch, toText } from "../infra/index.ts";
-import { devicePlatform } from "./platform.ts";
-import type { SoftKeyboardSnapshot } from "./platform.ts";
 import { dropInstanceStore, findPreset, instanceKey, instanceStore } from "./shared.ts";
 
 /** Slide duration in seconds. */
@@ -54,7 +52,7 @@ export const softKeyboardPatch = definePatch<KeyboardState>("softKeyboard", {
     const slide = instanceStore<Slide>(ctx, () => ({ from: 0, to: 0, elapsed: KEYBOARD_SLIDE_DURATION, progress: 0, frame: -1, measured: {} }));
     let kb: SoftKeyboardSnapshot | undefined;
     try {
-      kb = devicePlatform(ctx.services).softKeyboard?.();
+      kb = ctx.services.platform.softKeyboard?.();
     } catch {
       kb = undefined;
     }

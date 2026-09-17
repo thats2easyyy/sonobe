@@ -1,8 +1,8 @@
 import { runPatch } from "@sonobe/engine/testing";
 import { describe, expect, it } from "vitest";
+import type { GamepadSnapshot } from "@sonobe/engine";
 import { createPatchHarness, loopOf } from "../infra/index.ts";
 import { applyDeadZone, gameControllerPatch } from "./gameController.ts";
-import type { GamepadSnapshot } from "./platform.ts";
 
 function pad(pressed: number[], overrides: Partial<GamepadSnapshot> = {}): GamepadSnapshot {
   return {

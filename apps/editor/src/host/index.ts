@@ -4,6 +4,7 @@ export type { DesktopHostApi, HostAdapter, HostCapabilities, RpcRegistrar, Write
 export { createDesktopHost } from "./desktopHost.ts";
 export {
   BROWSER_PREFIX,
+  browserDialogsFrom,
   createBrowserHost,
   createDefaultProjectStorage,
   createDirectoryProjectStorage,
@@ -24,4 +25,4 @@ export {
 } from "./browserHost.ts";
 export { createHostAdapter, getDesktopHostApi } from "./detect.ts";
 export { assetMimeType, documentFiles, isDocumentFile, planProjectWrite, projectDisplayName, PROJECT_EXTENSION, sanitizeProjectName, type ProjectWritePlan } from "./projectFiles.ts";
-export { registerRpcHandlers, RPC_METHODS, type RpcHandlerOptions, type RpcMethod } from "./rpcHandlers.ts";
+export { OPTIONAL_RPC_METHODS, registerRpcHandlers, RPC_METHODS, type RpcHandlerOptions, type RpcMethod } from "./rpcHandlers.ts";

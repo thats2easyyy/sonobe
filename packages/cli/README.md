@@ -1,6 +1,16 @@
 # @sonobe/cli
 
-The `sonobe` command. It runs on Node 22.18+ with type stripping: `node packages/cli/src/main.ts <command>`. You can also run `npm link -w @sonobe/cli` to put `sonobe` on your PATH.
+The `sonobe` command.
+
+- **In the repo** (development): `node packages/cli/src/main.ts <command>` or `npm run dev -w @sonobe/cli -- <command>`. This runs the TypeScript sources with Node 22.18+ type stripping.
+- **Anywhere else**: build the bundle, one self-contained file with no runtime dependencies:
+
+  ```sh
+  npm run build -w @sonobe/cli      # or: node packages/cli/scripts/bundle.ts [--outfile <path>]
+  node packages/cli/dist/sonobe.mjs --help
+  ```
+
+  `dist/sonobe.mjs` has a shebang and runs on Node 22+, outside the repo. The agent guides are copied to `dist/guides/` beside it. The package's `bin` points at the bundle (`prepack` builds it), so `npm link -w @sonobe/cli` after a build puts `sonobe` on your PATH. `bundleCli({ outfile })` from `scripts/bundle.ts` builds it programmatically; the Claude Code plugin and the Claude Desktop extension use it.
 
 | Command                                                                                                 | Does                                                                    |
 | ------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------- |

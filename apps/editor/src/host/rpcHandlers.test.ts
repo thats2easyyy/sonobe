@@ -136,7 +136,9 @@ describe("rpc handlers", () => {
     expect(s.presence.getState().recent[0]).toMatchObject({ kind: "finish", description: "Claude: done" });
     expect(await call("presence.begin", { ids: [] })).toMatchObject({ failed: true, code: "invalid_params" });
 
-    expect(await call("reveal", { ids: ["card", "pop", "ghost"] })).toEqual({ component: "main", componentPath: ["main"], revealed: ["card", "pop"], missing: ["ghost"] });
+    expect(await call("reveal", { ids: ["card", "pop", "ghost"] })).toEqual({ component: "main", componentPath: ["main"], revealed: ["card", "pop"], missing: ["ghost"], focused: false });
+    expect(s.selection.getState()).toMatchObject({ layers: [], patches: [], reveal: { component: "main", ids: ["card", "pop"] } });
+    expect(await call("reveal", { ids: ["card", "pop"], focus: true })).toMatchObject({ revealed: ["card", "pop"], focused: true });
     expect(s.selection.getState()).toMatchObject({ layers: ["card"], patches: ["pop"], reveal: { component: "main", ids: ["card", "pop"] } });
     expect(await call("selection.get")).toMatchObject({ component: "main", componentPath: ["main"], layers: ["card"], patches: ["pop"], comments: [] });
     expect(await call("viewer.bounds")).toMatchObject({ failed: true, code: "no_viewer" });
@@ -152,5 +154,53 @@ describe("rpc handlers", () => {
     const opened = await call("document.open", { path: "browser:Agent Proto" });
     expect(opened).toMatchObject({ ok: true, name: "Test", projectPath: "browser:Agent Proto", dirty: false, canUndo: false });
     expect(await call("document.open", { path: "browser:Missing" })).toMatchObject({ failed: true, code: "open_failed" });
+  });
+});
+
+describe("rpc handlers: bridge additions", () => {
+  it("returns the transaction id and the applied ops", async () => {
+    const { call, session: s } = setup();
+    const reply = await call<{ txnId?: string; applied: { op: string; layer?: { id?: string } }[]; result: { applied: number } }>("document.apply", { ops: [{ op: "addLayer", layer: { type: "oval", name: "Badge" } }], label: "added badge" });
+    expect(reply.result.applied).toBe(1);
+    expect(reply.applied).toEqual([expect.objectContaining({ op: "addLayer", layer: expect.objectContaining({ id: "badge" }) })]);
+    expect(reply.txnId).toBe(s.document.getState().historyEntries()[0]!.txnId);
+    const dry = await call<{ txnId?: string }>("document.apply", { ops: [{ op: "removeLayer", id: "badge" }], dryRun: true });
+    expect(dry.txnId).toBeUndefined();
+    const failed = await call<{ txnId?: string; applied: unknown[] }>("document.apply", { ops: [{ op: "removeLayer", id: "ghost" }] });
+    expect(failed).toMatchObject({ applied: [] });
+    expect(failed.txnId).toBeUndefined();
+  });
+
+  it("lists presence and starts new documents", async () => {
+    const { call, session: s } = setup();
+    await call("presence.begin", { ids: ["card"], intent: "tidying the card" });
+    expect(await call("presence.list")).toMatchObject({ working: [{ ids: ["card"], intent: "tidying the card", author: { kind: "agent", name: "Claude" } }], recent: [] });
+    expect(await call("presence.list", { limit: "x" })).toMatchObject({ failed: true, code: "invalid_params" });
+
+    expect(await call("document.new", { template: "poster" })).toMatchObject({ failed: true, code: "invalid_params" });
+    expect(await call("document.new", { device: "toaster" })).toMatchObject({ failed: true, code: "invalid_params" });
+    const created = await call("document.new", { name: "Checkout", device: "iphone-se" });
+    expect(created).toMatchObject({ ok: true, name: "Checkout", projectPath: null, dirty: false, device: { preset: "iphone-se" }, scripts: { count: 0, required: false, trusted: true } });
+    expect(s.document.getState().doc.components.main!.layers).toEqual([]);
+  });
+
+  it("exposes panel bounds only while a panel provides them", async () => {
+    const { call, handlers, session: s, off } = setup();
+    expect(handlers.has("canvas.bounds")).toBe(false);
+    let rect: { x: number; y: number; width: number; height: number; scale?: number } | null = { x: 10, y: 20, width: 300, height: 200, scale: 1.5 };
+    const unregister = s.bounds.register("canvas.bounds", () => rect);
+    expect(handlers.has("canvas.bounds")).toBe(true);
+    expect(await call("canvas.bounds")).toEqual({ x: 10, y: 20, width: 300, height: 200, scale: 1.5 });
+    rect = null;
+    expect(await call("canvas.bounds")).toMatchObject({ failed: true, code: "target_unavailable" });
+    unregister();
+    expect(handlers.has("canvas.bounds")).toBe(false);
+
+    s.bounds.register("viewer.layerBounds", ({ layerId }) => (layerId === "card" ? { x: 0, y: 0, width: 50, height: 40 } : null));
+    expect(await call("viewer.layerBounds", {})).toMatchObject({ failed: true, code: "invalid_params" });
+    expect(await call("viewer.layerBounds", { layerId: "card" })).toEqual({ x: 0, y: 0, width: 50, height: 40 });
+    expect(await call("viewer.layerBounds", { layerId: "ghost" })).toMatchObject({ failed: true, code: "target_unavailable" });
+    off();
+    expect(handlers.size).toBe(0);
   });
 });

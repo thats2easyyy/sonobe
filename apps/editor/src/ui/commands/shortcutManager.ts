@@ -22,19 +22,52 @@ export type ShortcutScope =
 
 export const SCOPE_ATTRIBUTE = "data-shortcut-scope";
 
-interface NavigatorLike {
+export interface NavigatorLike {
   platform?: string;
   userAgent?: string;
   userAgentData?: { platform?: string };
 }
 
-/** Detect the host platform from a navigator-like object. */
-export function detectPlatform(nav?: NavigatorLike): Platform {
+/** Anything with a Node-style platform string (window.sonobeHost in the desktop app). */
+export interface HostPlatformLike {
+  readonly platform?: string;
+}
+
+/** A platform name from Node ("darwin", "win32", "linux") or a browser ("macOS", "MacIntel", "Windows", "Linux x86_64"). */
+export function platformFromName(name: string | null | undefined): Platform | undefined {
+  const text = (name ?? "").trim().toLowerCase();
+  if (!text) return undefined;
+  if (text === "darwin" || /mac|iphone|ipad|ipod/.test(text)) return "mac";
+  if (text === "win32" || /^win|windows/.test(text)) return "windows";
+  if (/linux|cros|x11|bsd|android/.test(text)) return "linux";
+  return undefined;
+}
+
+function globalHost(): HostPlatformLike | undefined {
+  try {
+    return (globalThis as { sonobeHost?: HostPlatformLike }).sonobeHost;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Detect the platform: the desktop host's platform first (it's the real OS even when the web view
+ * reports something else), then navigator.userAgentData, navigator.platform, and the user agent.
+ * Passing `nav` without `host` ignores window.sonobeHost.
+ */
+export function detectPlatform(nav?: NavigatorLike, host?: HostPlatformLike | null): Platform {
+  const desktop = host !== undefined ? host : nav ? null : globalHost();
+  const fromHost = platformFromName(desktop?.platform);
+  if (fromHost) return fromHost;
   const source = nav ?? (typeof navigator === "undefined" ? undefined : (navigator as NavigatorLike));
-  const text = (source?.userAgentData?.platform || source?.platform || source?.userAgent || "").toLowerCase();
-  if (/mac|iphone|ipad|ipod/.test(text)) return "mac";
-  if (/win/.test(text)) return "windows";
-  return "linux";
+  return platformFromName(source?.userAgentData?.platform) ?? platformFromName(source?.platform) ?? platformFromName(source?.userAgent) ?? "linux";
+}
+
+/** The Node-style platform name ("darwin" | "win32" | "linux"), for paths and shell commands. */
+export function detectHostPlatform(nav?: NavigatorLike, host?: HostPlatformLike | null): "darwin" | "win32" | "linux" {
+  const platform = detectPlatform(nav, host);
+  return platform === "mac" ? "darwin" : platform === "windows" ? "win32" : "linux";
 }
 
 export interface KeyChord {

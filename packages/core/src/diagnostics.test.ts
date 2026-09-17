@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { getDiagnostics } from "./diagnostics.ts";
+import { feedbackEdges } from "./graph.ts";
 import { applyOps } from "./ops/index.ts";
-import { buildSampleDocument, emptyDoc, mockRegistry, mustApply } from "./testing/fixtures.ts";
+import { buildSampleDocument, emptyDoc, extendedRegistry, mockRegistry, mustApply } from "./testing/fixtures.ts";
 import type { Component, SonobeDocument } from "./types.ts";
 
 const codes = (doc: SonobeDocument) => getDiagnostics(doc, mockRegistry).map((d) => `${d.severity}:${d.code}`);
@@ -61,6 +62,52 @@ describe("getDiagnostics", () => {
     const info = getDiagnostics(loop, mockRegistry).find((d) => d.code === "feedback_loop")!;
     expect(info.severity).toBe("info");
     expect(info.itemIds).toEqual(["d1", "grow", "pop"]);
+    expect(info.message).toBe('Patches "d1", "grow", "pop" form a feedback loop. Delay 1 "d1" gives it one frame of delay: grow.output → d1.value reads last frame\'s value.');
+    expect(info.hint).toBeUndefined();
+    expect(info.suggestions).toBeUndefined();
+  });
+
+  it("names the cable that reads the previous frame and offers a Delay One Frame", () => {
+    const loop = mustApply(buildSampleDocument(), [{ op: "connect", from: "grow.output", to: "pop.number" }]).doc;
+    const info = getDiagnostics(loop, mockRegistry).find((d) => d.code === "feedback_loop")!;
+    expect(info.itemIds).toEqual(["grow", "pop"]);
+    expect(info.message).toBe('Patches "grow", "pop" form a feedback loop. The connection grow.output → pop.number runs right to left, so it reads last frame\'s value.');
+    expect(info.hint).toBe("To make the delay explicit, insert a Delay 1 patch on that connection.");
+    const insert = info.suggestions![0]!;
+    expect(insert.description).toBe("Insert a Delay 1 on grow.output → pop.number");
+    expect(insert.ops![0]).toMatchObject({ op: "addPatch", patch: { type: "delay1", ui: { x: 540, y: 40 } } });
+    const fixed = mustApply(loop, insert.ops!).doc;
+    expect(feedbackEdges(fixed, "main", mockRegistry).map((e) => `${e.from} → ${e.to} (${e.reason})`)).toEqual(["grow.output → delay1.value (delay1)"]);
+    const after = getDiagnostics(fixed, mockRegistry).find((d) => d.code === "feedback_loop")!;
+    expect(after.itemIds).toEqual(["delay1", "grow", "pop"]);
+    expect(after.suggestions).toBeUndefined();
+  });
+
+  it("doesn't warn about pulses into ports that take them on purpose", () => {
+    const doc = mustApply(
+      buildSampleDocument(),
+      [
+        { op: "addPatch", patch: { id: "any_tap", type: "or", inputs: { value1: { link: "tap_card.tap" } } } },
+        { op: "addPatch", patch: { id: "hold", type: "sampler", inputs: { sample: { link: "tap_card.tap" } } } },
+        { op: "addPatch", patch: { id: "floor", type: "roundDown", inputs: { amount: { link: "tap_card.tap" } } } },
+      ],
+      { registry: extendedRegistry },
+    ).doc;
+    const warnings = getDiagnostics(doc, extendedRegistry).filter((d) => d.code === "pulse_into_state");
+    expect(warnings.map((d) => d.itemIds)).toEqual([["floor", "tap_card"]]);
+  });
+
+  it("checks input counts against inputCountRange and typeParams against dynamic variants", () => {
+    const counted = edit(buildSampleDocument(), (c) => (c.patches.grad = { type: "stops", inputCount: 9, inputs: {}, ui: { x: 0, y: 0 } }));
+    expect(getDiagnostics(counted, extendedRegistry).find((d) => d.code === "input_count_out_of_range")).toMatchObject({
+      severity: "warning",
+      itemIds: ["grad"],
+      message: 'Patch "grad" has an input count of 9; Gradient Builder supports 1–4.',
+    });
+    const scripted = edit(emptyDoc(), (c) => (c.patches.js = { type: "script", typeParam: "color", settings: { variants: ["number", "color"] }, inputs: {}, ui: { x: 0, y: 0 } }));
+    expect(getDiagnostics(scripted, extendedRegistry).filter((d) => d.code === "invalid_type_param")).toEqual([]);
+    const wrong = edit(scripted, (c) => (c.patches.js!.typeParam = "sound"));
+    expect(getDiagnostics(wrong, extendedRegistry).find((d) => d.code === "invalid_type_param")!.message).toContain("(number, color)");
   });
 
   it("hints when a pulse drives a state input and offers a Switch", () => {

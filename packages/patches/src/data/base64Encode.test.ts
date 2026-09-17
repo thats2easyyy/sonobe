@@ -52,13 +52,15 @@ describe("base64Encode", () => {
   });
 
   it("reads other media through the platform's byte reader on a later frame", async () => {
-    let finish!: (bytes: Uint8Array) => void;
-    const platform = { readBytes: () => new Promise<Uint8Array>((resolve) => (finish = resolve)) } as unknown as PlatformServices;
+    let finish!: (bytes: ArrayBuffer) => void;
+    const reads: unknown[] = [];
+    const platform: PlatformServices = { readBytes: (ref) => (reads.push(ref), new Promise<ArrayBuffer>((resolve) => (finish = resolve))) };
     const h = createPatchHarness(base64Encode, { typeParam: "sound", inputs: { value: { assetId: "ding" } }, services: { resolveAssetUrl: (id) => `asset://${id}`, platform } });
     const f0 = h.step();
     expect(f0.outputs).toMatchObject({ base64: "", loading: true });
     expect(f0.requestedNextFrame).toBe(true);
-    finish(Uint8Array.from([0x49, 0x44, 0x33]));
+    expect(reads).toEqual([{ assetId: "ding" }]);
+    finish(Uint8Array.from([0x49, 0x44, 0x33]).buffer);
     await flush();
     expect(h.step().outputs).toEqual({ base64: "SUQz", loading: false, error: false, errorMessage: "" });
 

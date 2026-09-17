@@ -79,6 +79,15 @@ describe("watch", () => {
     expect(h.step({ inputs: { value: false } }).outputs).toEqual({ display: "Card taps: false · on 2×", changeCount: 2 });
   });
 
+  it("doesn't count an on/off value that's already on at launch, but counts a launch pulse", () => {
+    const held = createPatchHarness(watch, { typeParam: "boolean", inputs: { value: true } });
+    expect(held.step().outputs).toEqual({ display: "true", changeCount: 0 });
+    held.step({ inputs: { value: false } });
+    expect(held.step({ inputs: { value: true } }).outputs.changeCount).toBe(1);
+    const pulsed = createPatchHarness(watch, { typeParam: "boolean" });
+    expect(pulsed.step({ pulses: ["value"] }).outputs.changeCount).toBe(1);
+  });
+
   it("lets Reset beat a change on the same frame", () => {
     const h = createPatchHarness(watch, { inputs: { value: 1 } });
     h.step();

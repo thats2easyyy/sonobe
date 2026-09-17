@@ -7,6 +7,7 @@ import { IconButton } from "../../ui/IconButton.tsx";
 import { SegmentedControl } from "../../ui/SegmentedControl.tsx";
 import { TextField } from "../../ui/TextField.tsx";
 import { toast } from "../../ui/Toast.tsx";
+import { detectHostPlatform } from "../../ui/commands/shortcutManager.ts";
 import { readString, writeString } from "../../ui/lib/storage.ts";
 import { claudeDesktopBundle, detectRepoPath, IS_DEV_BUILD } from "./buildInfo.ts";
 import { claudeCodeCommand, claudeDesktopConfig, claudeDesktopConfigPath, EXAMPLE_PROMPTS, mcpLaunchSpec, shellForPlatform, tildePath, type LaunchMode, type ShellFlavor } from "./connectInfo.ts";
@@ -43,11 +44,9 @@ export interface ConnectClaudeDialogProps {
   initialTab?: ConnectTab;
 }
 
+/** The desktop host's platform, else navigator.userAgentData / navigator.platform (never guessed from the user agent first). */
 function guessPlatform(): string {
-  const agent = typeof navigator === "undefined" ? "" : navigator.userAgent;
-  if (/Mac|iPhone|iPad/i.test(agent)) return "darwin";
-  if (/Win/i.test(agent)) return "win32";
-  return "linux";
+  return detectHostPlatform();
 }
 
 function useStoredString(key: string): [string, (value: string) => void] {
@@ -401,7 +400,7 @@ function DesktopSteps({ spec, platform, launchSettings, mode, browser }: { spec:
         <p className="sb-connect__text">
           In Claude Desktop, open <strong>Settings → Developer → Edit Config</strong> and add this to <code>claude_desktop_config.json</code>:
         </p>
-        <CopyBlock text={claudeDesktopConfig(spec)} label="Claude Desktop config" />
+        <CopyBlock text={claudeDesktopConfig(spec)} label="Claude Desktop config" kind="config" />
         <p className="sb-connect__hint">
           {configPath ? (
             <>
@@ -426,6 +425,7 @@ function PromptExamples() {
   const copy = async (prompt: string) => {
     try {
       await navigator.clipboard.writeText(prompt);
+      connectClaudeStore.getState().markCopied("prompt");
       toast.success("Prompt copied", { description: "Paste it into Claude." });
     } catch {
       toast.error("Couldn't copy", { description: "Select the text and copy it instead." });

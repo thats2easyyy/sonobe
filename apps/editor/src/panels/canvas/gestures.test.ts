@@ -55,6 +55,25 @@ const doc = () =>
   });
 
 describe("move", () => {
+  it("snaps to equal spacing between siblings and draws the equal gaps once", () => {
+    const d = buildDoc({
+      layers: [
+        { id: "a", type: "rectangle", props: { position: [0, 100], size: [50, 50] } },
+        { id: "b", type: "rectangle", props: { position: [80, 100], size: [50, 50] } },
+        { id: "c", type: "rectangle", props: { position: [200, 100], size: [50, 50] } },
+      ],
+    });
+    const s = beginMove(indexFor(d), "main", ["c"], artboard) as MoveSnapshot;
+    const r = moveGesture(s, [225, 125], [188, 125], { snap: true, threshold: 5 });
+    expect(prop(applied(d, r.ops).doc, "c", "position")).toEqual([160, 100]);
+    expect(r.spacing?.map((m) => [m.rect.x, m.value])).toEqual([
+      [130, 30],
+      [50, 30],
+    ]);
+    expect(r.measurements.some((m) => m.axis === "x" && m.value === 30)).toBe(false);
+    expect(moveGesture(s, [225, 125], [188, 125], noSnap).spacing).toEqual([]);
+  });
+
   it("moves layers by whole points and respects anchors", () => {
     const d = doc();
     const index = indexFor(d);

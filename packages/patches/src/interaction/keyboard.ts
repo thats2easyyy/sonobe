@@ -2,7 +2,6 @@
 
 import { normalizeKey } from "@sonobe/engine";
 import { definePatch, toText } from "../infra/index.ts";
-import { withMutedBehavior } from "./shared.ts";
 
 const MAX_CACHED_KEYS = 256;
 const parsed = new Map<string, readonly string[]>();
@@ -27,18 +26,16 @@ export function parseKeyCombination(raw: string): readonly string[] {
   return names;
 }
 
-export const keyboard = withMutedBehavior(
-  definePatch("keyboard", {
-    evaluate(ctx) {
-      const names = parseKeyCombination(toText(ctx.input("key")));
-      const enabled = ctx.input<boolean>("enabled") === true;
-      if (!enabled || names.length === 0) {
-        ctx.output("down", false);
-        return;
-      }
-      const pressed = ctx.services.keyboard().pressed;
-      ctx.output("down", names.every((key) => pressed.has(key)));
-    },
-  }),
-  "zero",
-);
+export const keyboard = definePatch("keyboard", {
+  evaluate(ctx) {
+    const names = parseKeyCombination(toText(ctx.input("key")));
+    const enabled = ctx.input<boolean>("enabled") === true;
+    if (!enabled || names.length === 0) {
+      ctx.output("down", false);
+      return;
+    }
+    const pressed = ctx.services.keyboard().pressed;
+    ctx.output("down", names.every((key) => pressed.has(key)));
+  },
+  mutedBehavior: "zero",
+});

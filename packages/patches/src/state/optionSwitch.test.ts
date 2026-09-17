@@ -33,10 +33,16 @@ describe("optionSwitch", () => {
     expect(h.step({ pulses: ["setTo1"] }).outputs.option).toEqual(loopOf([1, 1]));
   });
 
-  it("declares 0-based Set to ports through dynamicPorts", () => {
+  it("gets 0-based Set to ports from core port resolution", () => {
+    expect(optionSwitchPatch.dynamicPorts).toBeUndefined();
     const registry = createRegistry([optionSwitchPatch]);
     const ports = resolveNodePorts(createEmptyDocument(), { type: "optionSwitch", inputCount: 3, inputs: {}, ui: { x: 0, y: 0 } }, registry)!;
-    for (const key of ["setTo0", "setTo1", "setTo2"]) expect(ports.inputs.find((p) => p.key === key)?.type, key).toBe("pulse");
-    expect(optionSwitchPatch.dynamicPorts!({ type: "optionSwitch", inputCount: 2, inputs: {}, ui: { x: 0, y: 0 } }, createEmptyDocument()).inputs.map((p) => p.key)).toEqual(["setTo0", "setTo1"]);
+    expect(ports.inputs.map((p) => [p.key, p.type])).toEqual([
+      ["setTo0", "pulse"],
+      ["setTo1", "pulse"],
+      ["setTo2", "pulse"],
+    ]);
+    const two = resolveNodePorts(createEmptyDocument(), { type: "optionSwitch", inputCount: 2, inputs: {}, ui: { x: 0, y: 0 } }, registry)!;
+    expect(two.inputs.map((p) => p.key)).toEqual(["setTo0", "setTo1"]);
   });
 });

@@ -1,9 +1,17 @@
 import type { AssetRef } from "@sonobe/core";
+import type { PatchDefinition } from "@sonobe/engine";
 import { describe, expect, it } from "vitest";
 import { createPatchHarness, loopOf } from "../infra/index.ts";
 import { cameraPatch } from "./camera.ts";
 
 const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
+
+/** The definition with a switch for `ctx.muted`, so a test can mute a running patch. */
+function muteSwitch<S>(definition: PatchDefinition<S>) {
+  let muted = false;
+  const switched: PatchDefinition<S> = { ...definition, evaluate: (ctx) => definition.evaluate(Object.create(ctx, { muted: { get: () => muted } })) };
+  return { definition: switched, mute: (on: boolean) => void (muted = on) };
+}
 
 interface Deferred<T> {
   resolve(value: T): void;
@@ -39,12 +47,13 @@ function fakeMedia() {
 
 async function liveCamera(inputs: Record<string, unknown> = {}) {
   const m = fakeMedia();
-  const h = createPatchHarness(cameraPatch, { inputs: { enabled: true, ...inputs }, services: { platform: m.platform as never } });
+  const { definition, mute } = muteSwitch(cameraPatch);
+  const h = createPatchHarness(definition, { inputs: { enabled: true, ...inputs }, services: { platform: m.platform as never } });
   h.step();
-  m.opens[0]!.resolve({ url: "sonobe-live:camera/main/patch_1" });
+  m.opens[0]!.resolve({ live: "camera/main/patch_1" });
   await flush();
   h.step();
-  return { ...m, h };
+  return { ...m, h, mute };
 }
 
 describe("camera", () => {
@@ -64,9 +73,9 @@ describe("camera", () => {
     expect(m.log).toEqual([["open", "main/patch_1", { facing: "front", quality: "high" }]]);
     expect(f0.outputs).toMatchObject({ available: false, stream: null });
     expect(f0.requestedNextFrame).toBe(true);
-    m.opens[0]!.resolve({ url: "sonobe-live:camera/main/patch_1" });
+    m.opens[0]!.resolve({ live: "camera/main/patch_1" });
     await flush();
-    expect(h.step().outputs).toMatchObject({ available: true, stream: { url: "sonobe-live:camera/main/patch_1" } });
+    expect(h.step().outputs).toMatchObject({ available: true, stream: { live: "camera/main/patch_1" } });
   });
 
   it("captures photos while live and warns once when Capture arrives before the camera runs", async () => {
@@ -75,7 +84,7 @@ describe("camera", () => {
     h.step({ pulses: ["capture"] });
     h.step({ pulses: ["capture"] });
     expect(h.logs.filter((l) => l.level === "warn")).toHaveLength(1);
-    m.opens[0]!.resolve({ url: "sonobe-live:camera/x" });
+    m.opens[0]!.resolve({ live: "camera/x" });
     await flush();
     h.step({ pulses: ["capture"] });
     m.captures[0]!.resolve({ url: "blob:photo1" });
@@ -112,10 +121,10 @@ describe("camera", () => {
     const { h, log, opens } = await liveCamera({ recording: true });
     const f = h.step({ inputs: { camera: "front" } });
     expect(log.slice(-2)).toEqual([["stopRecording", "main/patch_1"], ["open", "main/patch_1", { facing: "front", quality: "medium" }]]);
-    expect(f.outputs).toMatchObject({ available: false, stream: { url: "sonobe-live:camera/main/patch_1" } });
-    opens[1]!.resolve({ url: "sonobe-live:camera/front" });
+    expect(f.outputs).toMatchObject({ available: false, stream: { live: "camera/main/patch_1" } });
+    opens[1]!.resolve({ live: "camera/front" });
     await flush();
-    expect(h.step().outputs).toMatchObject({ available: true, stream: { url: "sonobe-live:camera/front" } });
+    expect(h.step().outputs).toMatchObject({ available: true, stream: { live: "camera/front" } });
     expect(log.at(-1)).toEqual(["record", "main/patch_1", { audio: false }]);
   });
 
@@ -124,7 +133,7 @@ describe("camera", () => {
     const h = createPatchHarness(cameraPatch, { inputs: { enabled: true }, services: { platform: m.platform as never } });
     h.step();
     h.step({ inputs: { quality: "low" } });
-    m.opens[0]!.resolve({ url: "sonobe-live:camera/old" });
+    m.opens[0]!.resolve({ live: "camera/old" });
     m.opens[1]!.reject(new Error("Camera permission was denied."));
     await flush();
     const f = h.run(3);
@@ -149,7 +158,7 @@ describe("camera", () => {
 
   it("releases the camera while muted and on dispose", async () => {
     const muted = await liveCamera();
-    muted.h.node.muted = true;
+    muted.mute(true);
     expect(muted.h.step().outputs).toEqual({ stream: null, image: null, video: null, available: false });
     expect(muted.log.at(-1)).toEqual(["close", "main/patch_1"]);
 
@@ -164,7 +173,7 @@ describe("camera", () => {
     const h = createPatchHarness(cameraPatch, { inputs: { enabled: loopOf([true, false, true]) }, services: { platform: m.platform as never } });
     h.step();
     expect(m.opens).toHaveLength(1);
-    m.opens[0]!.resolve({ url: "sonobe-live:camera/one" });
+    m.opens[0]!.resolve({ live: "camera/one" });
     await flush();
     const f = h.step();
     expect(f.outputs.available).toEqual(loopOf([true, true, true]));

@@ -48,6 +48,30 @@ describe("addComponent / updateComponent / removeComponent", () => {
     expect(firstError(doc, [{ op: "updateComponent", id: "main", size: [0, 10] }]).code).toBe("invalid_value");
   });
 
+  it("merges, replaces and clears component metadata", () => {
+    const doc = emptyDoc();
+    const first = mustApply(doc, [{ op: "updateComponent", id: "main", meta: { patchEditor: { nodes: { card: [10, 20] } }, zoom: 1.5 } }]);
+    expect(first.doc.components.main!.meta).toEqual({ patchEditor: { nodes: { card: [10, 20] } }, zoom: 1.5 });
+    expect(first.inverse).toEqual([{ op: "updateComponent", id: "main", meta: null }]);
+    expectRoundTrip(doc, first);
+
+    const second = mustApply(first.doc, [{ op: "updateComponent", id: "main", meta: { zoom: null, grid: true, patchEditor: { nodes: {} } } }]);
+    expect(second.doc.components.main!.meta).toEqual({ patchEditor: { nodes: {} }, grid: true });
+    expect(second.inverse).toEqual([{ op: "updateComponent", id: "main", meta: { zoom: 1.5, grid: null, patchEditor: { nodes: { card: [10, 20] } } } }]);
+    expectRoundTrip(first.doc, second);
+
+    const cleared = mustApply(second.doc, [{ op: "updateComponent", id: "main", meta: null }]);
+    expect(cleared.doc.components.main!.meta).toBeUndefined();
+    expectRoundTrip(second.doc, cleared);
+
+    const removedNothing = mustApply(doc, [{ op: "updateComponent", id: "main", meta: { gone: null } }]);
+    expect(removedNothing.doc.components.main!.meta).toBeUndefined();
+    expectRoundTrip(doc, removedNothing);
+
+    expect(firstError(doc, [{ op: "updateComponent", id: "main", meta: [1] as never }]).code).toBe("invalid_value");
+    expect(firstError(doc, [{ op: "updateComponent", id: "main", meta: { bad: Number.NaN } }])).toMatchObject({ code: "invalid_value", message: expect.stringContaining("meta.bad") });
+  });
+
   it("refuses to remove the root or components still in use", () => {
     const doc = mustApply(emptyDoc(), [
       { op: "addComponent", component: { name: "Chip", kind: "layerComponent" } },

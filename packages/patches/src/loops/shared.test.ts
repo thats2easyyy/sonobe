@@ -1,8 +1,11 @@
+import { createEmptyDocument, resolveNodePorts } from "@sonobe/core";
+import type { PatchNode } from "@sonobe/core";
 import { runPatch } from "@sonobe/engine/testing";
 import { describe, expect, it } from "vitest";
 import { loopOf } from "../infra/index.ts";
+import { createPatchRegistry } from "../registry.ts";
 import { definitions } from "./index.ts";
-import { cachedReplay, indices, sameItems, snapshot, variantInputPorts } from "./shared.ts";
+import { cachedReplay, indices, sameItems, snapshot } from "./shared.ts";
 
 describe("loops shared helpers", () => {
   it("makes index loops", () => {
@@ -33,15 +36,21 @@ describe("loops shared helpers", () => {
     expect(sameItems([1], [1, 2])).toBe(false);
   });
 
-  it("declares variant inputs with catalog defaults for every variant", () => {
-    const byKey = (type: string, typeParam?: string) => Object.fromEntries(variantInputPorts(type, typeParam, undefined).map((p) => [p.key, [p.type, p.default]]));
+  it("gets variant inputs with catalog defaults for every variant from core port resolution", () => {
+    const registry = createPatchRegistry();
+    const doc = createEmptyDocument();
+    const byKey = (type: string, typeParam?: string) => {
+      const node: PatchNode = { type, inputs: {}, ui: { x: 0, y: 0 } };
+      if (typeParam !== undefined) node.typeParam = typeParam;
+      const ports = resolveNodePorts(doc, node, registry)!;
+      return Object.fromEntries(ports.inputs.filter((p) => p.key === "loop" || p.key === "value").map((p) => [p.key, [p.type, p.default]]));
+    };
     expect(byKey("loopInsert")).toEqual({ loop: ["number", { loop: [] }], value: ["number", 0] });
     expect(byKey("loopInsert", "text")).toEqual({ loop: ["text", { loop: [] }], value: ["text", ""] });
-    expect(byKey("loopAppend", "color")).toEqual({ loop: ["color", { loop: [] }], value: ["color", { r: 0, g: 0, b: 0, a: 0 }] });
+    expect(byKey("loopAppend", "color")).toEqual({ loop: ["color", { loop: [] }], value: ["color", "#00000000"] });
     expect(byKey("loopAppend", "image")).toEqual({ loop: ["image", { loop: [] }], value: ["image", null] });
     expect(byKey("loopSum", "point")).toEqual({ loop: ["point", { loop: [] }] });
-    expect(variantInputPorts("loopCount", undefined, undefined)).toEqual([]);
-    expect(variantInputPorts("notAPatch", undefined, undefined)).toEqual([]);
+    for (const def of definitions) expect(def.dynamicPorts, def.type).toBeUndefined();
   });
 
   it("starts unconnected variant loop inputs as empty loops in the runtime, for every type", () => {

@@ -3,11 +3,9 @@
  * the same POP decay Scroll momentum uses. Points arrive as a whole loop; every other input zips.
  */
 
-import type { Value, ValueType } from "@sonobe/core";
+import type { Value } from "@sonobe/core";
 import { DECELERATION_FAST, DECELERATION_NORMAL, decayFinalPosition } from "@sonobe/engine";
-import type { PatchContext } from "@sonobe/engine";
-import { MAX_LOOP_LENGTH, components, definePatch, fromComponents, loopItems, loopOf, normalizeZero, resolvePortDefault } from "../infra/index.ts";
-import { getSpec } from "../specs.ts";
+import { MAX_LOOP_LENGTH, components, definePatch, fromComponents, loopOf, normalizeZero } from "../infra/index.ts";
 import { finiteComponents, roundHalfAwayFromZero, variantResolver, warnNonFinite } from "./shared.ts";
 
 const variantOf = variantResolver("snap");
@@ -72,22 +70,6 @@ export function snapItem(
   return { output, index: normalizeZero(index ?? 0), projected };
 }
 
-const defaultPoints = new Map<ValueType, readonly unknown[]>();
-
-/**
- * The Points items. Unconnected with no stored literal, the catalog default is used directly: core
- * port resolution coerces the loop-literal default of a variant port into a scalar.
- */
-function pointItems(ctx: PatchContext, variant: ValueType): readonly unknown[] {
-  if (ctx.isConnected("points") || ctx.node.inputs?.points !== undefined) return ctx.inputItems("points");
-  let items = defaultPoints.get(variant);
-  if (!items) {
-    items = loopItems(resolvePortDefault(getSpec("snap")!, "points", variant));
-    defaultPoints.set(variant, items);
-  }
-  return items;
-}
-
 const at = (items: readonly unknown[], i: number): unknown => items[i % items.length];
 
 export const snap = definePatch("snap", {
@@ -102,7 +84,7 @@ export const snap = definePatch("snap", {
     }
     count = empty ? 0 : Math.min(count, MAX_LOOP_LENGTH);
     const [values, velocities, modes, steps, offsets, decelerations] = zipped as [unknown[], unknown[], unknown[], unknown[], unknown[], unknown[]];
-    const points = pointItems(ctx, variant).map((p) => components(p, variant));
+    const points = ctx.inputItems("points").map((p) => components(p, variant));
 
     const outputs: Value[] = [];
     const indices: number[] = [];
