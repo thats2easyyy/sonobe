@@ -18,6 +18,7 @@ import type {
   Suggestion,
 } from "@sonobe/core";
 import type { EngineRegistry, InputEvent, TraceSummary } from "@sonobe/engine";
+import type { DesignCapture, ImportFile, ResolvedImage } from "@sonobe/import";
 
 export type HostKind = "app" | "headless";
 
@@ -232,6 +233,41 @@ export interface UndoResult {
   saved?: boolean;
   /** Autosave hosts: why the undo wasn't written to disk. */
   saveError?: SaveProblem;
+}
+
+// ---------------------------------------------------------------------------
+// Design import
+// ---------------------------------------------------------------------------
+
+/** A page to render and capture for import_design. */
+export interface DesignCaptureRequest {
+  /** An http(s) page, such as the person's app on a dev server. */
+  url?: string;
+  /** A complete HTML document (or fragment) to render. */
+  html?: string;
+  /** Viewport in points (CSS pixels). */
+  width: number;
+  height: number;
+  /** Capture only the first element matching this selector. */
+  selector?: string;
+  /** Wait until an element matches this selector before capturing. */
+  waitFor?: string;
+  /** Extra milliseconds to wait once the page settles. */
+  waitMs?: number;
+  /** Capture the whole page height (default true). */
+  fullPage?: boolean;
+  /** prefers-color-scheme for the page. */
+  colorScheme?: "light" | "dark";
+  /** Also return a screenshot of the page as the browser drew it. */
+  screenshot?: boolean;
+}
+
+export interface CapturedDesign {
+  capture: DesignCapture;
+  /** Downloaded image bytes by capture image key (null: couldn't download). */
+  images: ReadonlyMap<string, ResolvedImage | null>;
+  /** The page as the browser drew it (when requested). */
+  screenshot?: Screenshot;
 }
 
 // ---------------------------------------------------------------------------
@@ -453,6 +489,22 @@ export interface SonobeHost {
     list(options: HistoryListOptions): Promise<HistoryItem[]>;
     undo(options: UndoOptions): Promise<UndoResult>;
   };
+
+  /**
+   * Optional: render a URL or HTML page in a browser and capture it for import_design. Hosts without
+   * a browser leave it out (import_design then accepts only ready-made captures).
+   */
+  captureDesign?(request: DesignCaptureRequest): Promise<CapturedDesign>;
+  /**
+   * Optional: download a capture's http(s) images (for captures made elsewhere). Default: Node's fetch
+   * where it exists.
+   */
+  fetchImage?(url: string, signal: AbortSignal): Promise<{ bytes: Uint8Array; mime: string } | null>;
+  /**
+   * Hold asset files (assets/<sha256>.<ext>) for a document so addAsset ops that name them draw right
+   * away and save with the project. Required by import_design when the import brings new images.
+   */
+  putAssetFiles?(files: readonly ImportFile[], options: { docId?: Id }): Promise<void>;
 
   /**
    * Optional: subscribe to document changes (new revisions, opened and closed documents).

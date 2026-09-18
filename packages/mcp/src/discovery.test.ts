@@ -22,7 +22,8 @@ describe("server surface", () => {
     expect(tools.map((t) => t.name).sort()).toEqual([...TOOL_NAMES].sort());
     const byName = new Map(tools.map((t) => [t.name, t]));
     for (const t of tools) {
-      expect(t.annotations?.openWorldHint, t.name).toBe(false);
+      // import_design loads pages from outside Sonobe (the person's dev server, any URL); nothing else does.
+      expect(t.annotations?.openWorldHint, t.name).toBe(t.name === "import_design");
       expect(t.description?.length, t.name).toBeGreaterThan(40);
       expect(t.inputSchema.type).toBe("object");
     }
@@ -52,6 +53,7 @@ describe("server surface", () => {
       "connect",
       "create_component",
       "create_document",
+      "import_design",
     ]) {
       expect(byName.get(name)!.annotations, name).toMatchObject({
         readOnlyHint: false,

@@ -78,6 +78,7 @@
       "description": "Turn layers and patches into a reusable component."
     },
     { "name": "tidy_graph", "description": "Arrange patches by dataflow." },
+    { "name": "import_design", "description": "Import a screen from a running app, HTML, or a design capture as layers." },
     { "name": "sim_reset", "description": "Start a deterministic simulation." },
     { "name": "sim_dispatch", "description": "Simulate taps, drags, keys and more." },
     { "name": "sim_step", "description": "Advance a simulation until idle or a condition." },
@@ -97,6 +98,12 @@
     { "name": "undo", "description": "Undo Claude's latest change group." }
   ],
   "prompts": [
+    {
+      "name": "import_screen",
+      "description": "Import a screen from your app or code as layers, then prototype on it.",
+      "arguments": ["screen", "interaction"],
+      "text": "Import this screen into Sonobe: ${arguments.screen}. Then prototype: ${arguments.interaction}"
+    },
     {
       "name": "prototype_interaction",
       "description": "Build an interaction, verify it in simulation, and explain the result.",

@@ -5,7 +5,7 @@
 
 import { contextBridge, ipcRenderer, type IpcRendererEvent } from "electron";
 import { attachAssistantBridge } from "./assistant/preload.ts";
-import type { McpStatus, PreviewStatus, ProjectChange, ProjectFiles, ProjectWrite, RpcHandler, SecretsStatus, SonobeCommandId, SonobeHost, ViewerWindowStatus } from "./host-api.d.ts";
+import type { DesignCaptureReply, McpStatus, PreviewStatus, ProjectChange, ProjectFiles, ProjectWrite, RpcHandler, SecretsStatus, SonobeCommandId, SonobeHost, ViewerWindowStatus } from "./host-api.d.ts";
 import { isCommandId, listCommands, toHostPlatform } from "./commands.ts";
 import { IPC } from "./ipc.ts";
 import { createRpcFailure, createRpcServer } from "./rpc.ts";
@@ -160,6 +160,10 @@ const host: SonobeHost = {
   },
 
   openExternal: (url) => invoke<boolean>(IPC.openExternal, String(url)),
+
+  fetchCaptureFile: (url) => invoke<{ bytes: Uint8Array; mime: string } | null>(IPC.fetchCaptureFile, String(url)),
+
+  captureDesign: (request) => invoke<DesignCaptureReply>(IPC.captureDesign, request && typeof request === "object" ? { ...request } : {}),
 
   popOutViewer: (options) => invoke<ViewerWindowStatus>(IPC.viewerWindowOpen, typeof options?.alwaysOnTop === "boolean" ? { alwaysOnTop: options.alwaysOnTop } : {}),
   closeViewerWindow: () => invoke<ViewerWindowStatus>(IPC.viewerWindowClose),

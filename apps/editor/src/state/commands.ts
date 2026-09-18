@@ -87,6 +87,17 @@ const TEXT_EDIT_COMMANDS: Readonly<Record<string, string>> = {
   "edit.delete": "delete",
 };
 
+/** Text that holds a design capture (a browser extension or plugin copied a screen). */
+export function isDesignCaptureText(text: string | null | undefined): boolean {
+  return !!text && text.trimStart().startsWith("{") && text.includes('"sonobe.design-capture"');
+}
+
+/** Import a pasted design capture; the importer loads on first use. */
+async function pasteCapture(session: EditorSession, text: string, notify: Notify): Promise<void> {
+  const { pasteDesignCapture } = await import("../panels/import/importDesign.ts");
+  await pasteDesignCapture(session, text, notify);
+}
+
 function reportAction(notify: Notify, result: ActionResult): void {
   if (result.ok || !result.message) return;
   notify({ title: result.message, ...(result.hint ? { description: result.hint } : {}), tone: "warn" });
@@ -232,7 +243,12 @@ export function registerDocumentCommands(registry: CommandRegistry, session: Edi
       run: async () => {
         let fragment: ClipboardFragment | null = null;
         try {
-          fragment = parseClipboardFragment(await clipboard?.readText());
+          const text = await clipboard?.readText();
+          fragment = parseClipboardFragment(text);
+          if (!fragment && isDesignCaptureText(text)) {
+            await pasteCapture(session, text!, notify);
+            return;
+          }
         } catch {
           // Permission denied: fall back to the session clipboard.
         }
@@ -368,8 +384,15 @@ export function attachClipboardEvents(target: Document, session: EditorSession, 
     const e = event as ClipboardEvent;
     if (e.defaultPrevented || isEditableTarget(e.target) || isEditableTarget(target.activeElement)) return;
     const data = e.clipboardData;
-    const fragment = parseClipboardFragment(data?.getData(CLIPBOARD_MIME) || data?.getData("text/plain") || "");
-    if (!fragment) return;
+    const text = data?.getData(CLIPBOARD_MIME) || data?.getData("text/plain") || "";
+    const fragment = parseClipboardFragment(text);
+    if (!fragment) {
+      if (isDesignCaptureText(text)) {
+        e.preventDefault();
+        void pasteCapture(session, text, notify);
+      }
+      return;
+    }
     e.preventDefault();
     reportPaste(notify, pasteFragment(session, fragment));
   };

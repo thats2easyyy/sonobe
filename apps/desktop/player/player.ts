@@ -7,7 +7,7 @@
 import type { SonobeDocument } from "@sonobe/core";
 import { createRuntime, type SonobeRuntime } from "@sonobe/engine";
 import { createPatchRegistry } from "@sonobe/patches";
-import { createDomRenderer, DomTextMeasurer, type DomRenderer, type LottiePlayerLike } from "@sonobe/renderer";
+import { createDomRenderer, createFontAssetRegistry, DomTextMeasurer, type DomRenderer, type LottiePlayerLike } from "@sonobe/renderer";
 
 let lottiePlayer: Promise<LottiePlayerLike> | null = null;
 
@@ -88,9 +88,12 @@ function run(): void {
   requestAnimationFrame(frame);
 }
 
+const fontAssets = createFontAssetRegistry((assetId) => resolveAssetUrl(assetId));
+
 function show(message: Extract<Message, { type: "document" }>): void {
   const otherDocument = docId !== null && message.docId !== docId;
   doc = message.doc;
+  fontAssets.sync(message.doc.assets);
   document.title = `${message.name} · Sonobe`;
   if (!runtime || !renderer || otherDocument) {
     runtime?.dispose();

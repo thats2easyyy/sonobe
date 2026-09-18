@@ -24,7 +24,7 @@ import {
   type SonobeRuntime,
   type TextMeasurer,
 } from "@sonobe/engine";
-import { createDomRenderer, DomTextMeasurer, type DomRenderer, type MediaState } from "@sonobe/renderer";
+import { createDomRenderer, createFontAssetRegistry, DomTextMeasurer, type DomRenderer, type MediaState } from "@sonobe/renderer";
 import { createStore, type StoreApi } from "zustand/vanilla";
 import type { ConsoleStore } from "../state/console.ts";
 import type { DocumentStore } from "../state/document.ts";
@@ -297,6 +297,9 @@ export function createRuntimeHost(options: RuntimeHostOptions): RuntimeHost {
   const registry = withScriptTrust(options.registry, () => trust.allowed());
 
   const mediaInfo = createMediaInfoCache({ resolveAssetUrl, assetRecord });
+  // Imported web fonts: every surface on this page (viewers, canvas) draws their families.
+  const fontAssets = createFontAssetRegistry(resolveAssetUrl);
+  fontAssets.sync(currentDoc.assets);
 
   const viewers = new Set<ViewerHandle>();
   let primaryViewer: ViewerHandle | null = null;
@@ -523,6 +526,7 @@ export function createRuntimeHost(options: RuntimeHostOptions): RuntimeHost {
 
   const setDocument = (doc: SonobeDocument) => {
     if (disposed || doc === currentDoc) return;
+    if (doc.assets !== currentDoc.assets) fontAssets.sync(doc.assets);
     currentDoc = doc;
     pendingDoc = doc;
     pulseAddresses = null;
@@ -826,6 +830,7 @@ export function createRuntimeHost(options: RuntimeHostOptions): RuntimeHost {
       runtime.dispose();
       browserPlatform?.dispose();
       mediaInfo.dispose();
+      fontAssets.dispose();
       if (ownsMeasurer) domMeasurer?.dispose();
     },
   };

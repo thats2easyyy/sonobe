@@ -17,7 +17,7 @@ describe("bundled guides", () => {
     expect(catalog.levels[0]!.guides.map((g) => g.slug)).toEqual(["01-first-prototype", "02-isat"]);
     expect(catalog.levels[0]!.audience).toMatch(/new to prototyping/i);
     expect(catalog.levels[4]!.guides).toContainEqual({ slug: "05-springs-and-feel", anchor: "handoff-to-engineers", label: "handoff to engineers" });
-    expect(catalog.anyLevel.map((g) => g.slug)).toEqual(["10-coming-from-origami", "11-working-with-claude"]);
+    expect(catalog.anyLevel.map((g) => g.slug)).toEqual(["10-coming-from-origami", "11-working-with-claude", "12-importing-designs"]);
   });
 
   it("links between guides resolve to guides that exist", () => {

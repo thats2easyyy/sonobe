@@ -1,0 +1,20 @@
+{
+  "name": "@sonobe/import",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./walker": "./src/dom/walk.ts",
+    "./node": "./src/node.ts"
+  },
+  "scripts": {
+    "build:walker": "node scripts/build-walker.ts",
+    "fidelity": "node scripts/fidelity.ts"
+  },
+  "dependencies": {
+    "@sonobe/core": "*",
+    "zod": "^4.6.5"
+  },
+  "sideEffects": false
+}

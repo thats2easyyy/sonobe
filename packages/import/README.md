@@ -1,0 +1,30 @@
+# @sonobe/import
+
+Bring real designs into Sonobe as layers people can prototype with. Every source produces a **design capture** (`capture.ts`), and one converter turns captures into ops.
+
+| Source | Where it runs | Writes a capture with |
+|---|---|---|
+| A URL or HTML | The desktop app's hidden window, the browser editor's sandboxed iframe, Playwright in headless servers | The DOM walker (`dom/walk.ts`, injected as `WALKER_SOURCE`) |
+| Any page in Chrome | `integrations/chrome-extension` | The same walker |
+| A Figma selection | `integrations/figma-plugin` | `figmaToCapture` (`figma.ts`) |
+
+```ts
+import { planImport, resolveCaptureFiles } from "@sonobe/import";
+
+const images = await resolveCaptureFiles(capture, { fetch: globalFetcher() }); // images and web fonts
+const plan = await planImport(capture, doc, images, { name: "Profile" });       // or { replace: "profile" }
+host.putAssetFiles(plan.files);                                                 // new image and font files
+host.apply(plan.ops, { label: `imported ${plan.screenName}` });                 // one undo step
+```
+
+`planImport` maps frames to groups (rectangles when empty), borders to strokes or thin rectangles, gradients and background images to child layers, text to text layers (single lines hug, paragraphs keep their width, mixed styles split into per-line runs), images and SVG icons to image assets, inputs to text fields, web fonts to font assets, and scrolling pages and scroll containers to Scroll patches. `replace` swaps an earlier screen while keeping the ids and wiring of layers found again.
+
+## Scripts
+
+```sh
+node packages/import/scripts/build-walker.ts            # rebundle the walker after changing src/dom (a test checks it)
+node packages/import/scripts/fidelity.ts                # fixtures → source | imported | difference images in fidelity-out/
+node packages/import/scripts/fidelity.ts http://localhost:3000/   # the same for a running app
+```
+
+The fidelity script needs Playwright's Chromium (`npx playwright install chromium`).

@@ -258,6 +258,9 @@ export const AssetRecordSchema = z.strictObject({
   height: z.number().optional(),
   duration: z.number().optional(),
   sha256: z.string().optional(),
+  font: z
+    .strictObject({ family: z.string().min(1).max(200), weight: z.string().max(40).optional(), style: z.string().max(40).optional(), unicodeRange: z.string().max(4000).optional() })
+    .optional(),
 }) as unknown as z.ZodType<AssetRecord>;
 
 export const AssetRegistrySchema = z.record(IdSchema, AssetRecordSchema).superRefine((assets, ctx) => {

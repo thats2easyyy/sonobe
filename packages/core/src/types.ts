@@ -268,6 +268,19 @@ export interface AssetRecord {
   height?: number;
   duration?: number;
   sha256?: string;
+  /** Font assets: the face this file provides, so text layers naming `family` draw with it. */
+  font?: AssetFont;
+}
+
+/** A font face, with CSS @font-face descriptor values. */
+export interface AssetFont {
+  family: string;
+  /** "400", "700", or a range for variable fonts ("100 900"). */
+  weight?: string;
+  /** "normal" | "italic" | "oblique". */
+  style?: string;
+  /** The characters the file covers ("U+0000-00FF, U+0131"). */
+  unicodeRange?: string;
 }
 
 export interface SonobeDocument {

@@ -20,6 +20,8 @@ import {
   TEMPLATES,
   type DocumentSummary,
   type HistoryItem,
+  type CapturedDesign,
+  type DesignCaptureRequest,
   type HostApplyResult,
   type Screenshot,
   type ScreenshotOptions,
@@ -72,6 +74,10 @@ export interface AppHostOptions {
    * SimulationManager has no `scene(simId)`), simulation screenshots explain that they're unavailable.
    */
   renderScene?(request: SceneRenderRequest): Promise<CapturedImage | null>;
+  /** Render a URL or HTML page in a hidden browser window and capture it (import_design). */
+  captureDesign?(request: DesignCaptureRequest): Promise<CapturedDesign>;
+  /** Download an image for a capture made elsewhere (default: Node's fetch). */
+  fetchImage?(url: string, signal: AbortSignal): Promise<{ bytes: Uint8Array; mime: string } | null>;
   /** A window's document appeared, reached a new revision, or went away (drives MCP resource notifications). */
   onDocumentChange?(change: DocumentChange): void;
   /** Creates the simulation manager. Default: @sonobe/mcp createSimulationManager (tests wrap it). */
@@ -683,6 +689,15 @@ export function createAppHost(options: AppHostOptions): AppHost {
         if (typeof reply.txnId === "string") out.txnId = reply.txnId;
       }
       return out;
+    },
+
+    ...(options.captureDesign ? { captureDesign: options.captureDesign } : {}),
+    ...(options.fetchImage ? { fetchImage: options.fetchImage } : {}),
+
+    async putAssetFiles(files, fileOptions) {
+      const entry = await resolve(fileOptions.docId);
+      if (!files.length) return;
+      await call(entry.target, "assets.put", { files: files.map((f) => ({ file: f.file, mime: f.mime, data: Buffer.from(f.bytes).toString("base64") })) }, APPLY_TIMEOUT_MS);
     },
 
     async diagnostics(docId) {

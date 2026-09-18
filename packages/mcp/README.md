@@ -73,7 +73,7 @@ The tools are listed in `TOOL_NAMES`.
 | Discovery            | `get_guide`, `list_patch_types`, `describe_patch_types`, `describe_layer_types`, `list_value_types`                                            |
 | Documents            | `list_documents`, `open_document`, `create_document`, `get_document_info`, `save_document`                                                     |
 | Read                 | `get_outline`, `get_layers`, `get_patches`, `get_items`, `find`, `get_selection`, `get_diagnostics`, `explain`                                 |
-| Write                | `apply_ops`, `add_layers`, `add_patches`, `connect`, `set_values`, `update_layers`, `delete_items`, `rename`, `create_component`, `tidy_graph` |
+| Write                | `apply_ops`, `add_layers`, `add_patches`, `connect`, `set_values`, `update_layers`, `delete_items`, `rename`, `create_component`, `tidy_graph`, `import_design` |
 | Simulate             | `sim_reset`, `sim_dispatch`, `sim_step`, `sim_trace`, `sim_get_values`, `get_screenshot`                                                       |
 | Presence and history | `begin_work`, `finish_work`, `reveal`, `list_history`, `undo`                                                                                  |
 
@@ -95,7 +95,7 @@ Conventions:
 
 Resources: `sonobe://guides/{topic}`, `sonobe://patches/{type}`, `sonobe://documents/{docId}/outline`, `sonobe://documents/{docId}/diagnostics`.
 
-Prompts: `prototype_interaction`, `debug_interaction`, `explain_prototype`.
+Prompts: `import_screen`, `prototype_interaction`, `debug_interaction`, `explain_prototype`.
 
 ## Guides
 

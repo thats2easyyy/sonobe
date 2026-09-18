@@ -1,0 +1,14 @@
+:root { color-scheme: light dark; --bg: #FFFFFF; --text: #1C1C22; --muted: #6B6B76; --border: #E3E3E8; --accent: #5B5CF6; --field: #F4F4F6; }
+@media (prefers-color-scheme: dark) { :root { --bg: #1C1C22; --text: #F4F4F6; --muted: #A0A0AA; --border: #34343C; --field: #26262D; } }
+body { width: 300px; margin: 0; padding: 14px; background: var(--bg); color: var(--text); font: 13px/1.45 system-ui, -apple-system, sans-serif; }
+header { display: flex; gap: 10px; align-items: flex-start; }
+h1 { margin: 0; font-size: 14px; font-weight: 600; }
+header p, .hint { margin: 2px 0 0; color: var(--muted); font-size: 12px; }
+.actions { display: flex; gap: 8px; margin: 14px 0 10px; }
+button { flex: 1; height: 32px; border: 1px solid var(--border); border-radius: 8px; background: var(--field); color: var(--text); font: inherit; font-weight: 500; cursor: pointer; }
+button.primary { border-color: transparent; background: var(--accent); color: #fff; }
+button:disabled { opacity: .6; cursor: default; }
+.option { display: flex; gap: 6px; align-items: center; margin: 4px 0; color: var(--muted); font-size: 12px; }
+#status { min-height: 18px; margin: 10px 0 0; font-weight: 500; }
+#status[data-tone="error"] { color: #E5484D; }
+.hint { margin-top: 8px; }

@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <header>
+    <img src="icons/48.png" width="28" height="28" alt="">
+    <div>
+      <h1>Sonobe Capture</h1>
+      <p>Copy this page or one element, then paste it into Sonobe (⌘V) as real layers.</p>
+    </div>
+  </header>
+  <div class="actions">
+    <button id="page" class="primary">Copy page</button>
+    <button id="pick">Pick an element…</button>
+  </div>
+  <label class="option"><input type="checkbox" id="full" checked> Whole page height</label>
+  <label class="option"><input type="checkbox" id="remote"> Embed images from other sites</label>
+  <p id="status" role="status"></p>
+  <p class="hint">Tip: turn on device mode in Chrome's developer tools first to capture a phone layout.</p>
+  <script src="popup.js"></script>
+</body>
+</html>

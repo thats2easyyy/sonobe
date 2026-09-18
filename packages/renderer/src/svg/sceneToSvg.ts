@@ -238,10 +238,16 @@ function readShadow(p: PropReader): Shadow | null {
   return { color, opacity, dx: finite(dx), dy: finite(dy), radius: Math.max(0, p.num("shadowRadius", 0)) };
 }
 
-/** A CSS box-shadow: the blurred shape behind the fill, drawn only outside the shape when the fill is see-through. */
-function boxShadowEl(ctx: Ctx, geometry: Geometry, s: Shadow, w: number, h: number, fillOpaque: boolean): string {
+/**
+ * A CSS box-shadow: the blurred shape behind the fill, drawn only outside the shape when the fill is
+ * see-through. A shadow whose blur region misses the drawn area is left out: resvg panics on a filter
+ * whose region doesn't meet the canvas.
+ */
+function boxShadowEl(ctx: Ctx, geometry: Geometry, s: Shadow, w: number, h: number, fillOpaque: boolean, world: Affine): string {
   const std = s.radius / 2;
   const pad = std * 3 + 2;
+  const reach = transformRect(world, { x: s.dx - pad, y: s.dy - pad, width: w + pad * 2, height: h + pad * 2 });
+  if (!intersectRect(ctx.rebase ? transformRect(ctx.rebase, reach) : reach, ctx.viewport)) return "";
   const attrs: Attrs = { ...paintAttrs(s.color, "fill", s.opacity), transform: s.dx || s.dy ? `translate(${num(s.dx)} ${num(s.dy)})` : null };
   if (std > 0) {
     const blur = newId(ctx, "blur");
@@ -703,7 +709,7 @@ function renderNode(ctx: Ctx, node: SceneNode, parentWorld: Affine, cloneRoot = 
   const squircle = shape === "box" && smoothing > 0 && radii.some((r) => r > 0);
   const shadow = readShadow(p);
   const boxShadow = !!shadow && shadowOnBox && !squircle && geometry !== null;
-  const shadowMarkup = boxShadow ? boxShadowEl(ctx, geometry!, shadow!, w, h, fillOpaque) : "";
+  const shadowMarkup = boxShadow ? boxShadowEl(ctx, geometry!, shadow!, w, h, fillOpaque, world) : "";
   const strokeMarkup = stroke && shape !== "none" ? strokeRing(p, shape as "box" | "ellipse", radii, smoothing, w, h) : "";
   const showHit = (ctx.hitAreas && node.type === "hitArea") || ctx.hitKeys.has(node.key) || ctx.hitKeys.has(node.layerId);
   const overlay = showHit

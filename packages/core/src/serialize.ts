@@ -58,7 +58,9 @@ const PROJECT = obj(["formatVersion", "minReaderVersion", "name", "generator", "
   meta: SORTED,
 });
 
-const ASSET = obj(["id", "kind", "name", "file", "mime", "width", "height", "duration", "sha256"]);
+const ASSET = obj(["id", "kind", "name", "file", "mime", "width", "height", "duration", "sha256", "font"], {
+  font: obj(["family", "weight", "style", "unicodeRange"]),
+});
 const ASSETS: Shape = { kind: "map", value: ASSET };
 
 const isPlainObject = (v: unknown): v is Record<string, unknown> => !!v && typeof v === "object" && !Array.isArray(v);

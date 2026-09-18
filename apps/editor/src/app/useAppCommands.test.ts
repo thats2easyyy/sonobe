@@ -41,7 +41,7 @@ describe("appCommands", () => {
 
   it("keeps menu aliases out of the palette, listing patch editor aliases only while the patch editor isn't mounted", () => {
     const visible = () => registry.available().map((c) => c.id);
-    expect(visible()).toEqual(["file.new", "file.close", "app.settings", "layer.insert", "patch.insert", "patch.tidyUp", "patch.commentAroundSelection", "viewer.fullscreen", "ai.connectClaude", "help.lessons", "help.patchReference", "help.welcome", "help.reportIssue", "help.about", "help.shortcuts"]);
+    expect(visible()).toEqual(["file.new", "file.importDesign", "file.close", "app.settings", "layer.insert", "patch.insert", "patch.tidyUp", "patch.commentAroundSelection", "viewer.fullscreen", "ai.connectClaude", "help.lessons", "help.patchReference", "help.welcome", "help.reportIssue", "help.about", "help.shortcuts"]);
     expect(registry.get("patch.alignRight")).toMatchObject({ title: "Align Right Edges", category: "Patches", disabledReason: "Select 2 or more patches" });
     session.selection.getState().select({ patches: ["tap_photo", "zoomed"] });
     expect(visible()).toContain("patch.alignBottom");

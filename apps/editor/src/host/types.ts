@@ -50,6 +50,10 @@ export interface DesktopHostApi {
   secrets?: DesktopSecretsApi;
   /** The in-app assistant bridge; panels/assistant/types.ts describes it (AssistantApi). */
   assistant?: unknown;
+  /** Render a URL or HTML page in a hidden window and capture it (DesignCaptureReply in host-api.d.ts). Optional: older preloads lack it. */
+  captureDesign?(request: DesktopCaptureParams): Promise<DesktopCaptureReply>;
+  /** Download a pasted capture's http(s) file in the main process. Optional: older preloads lack it. */
+  fetchCaptureFile?(url: string): Promise<{ bytes: Uint8Array; mime: string } | null>;
   /** Show the prototype in its own window, or focus it when it's open. */
   popOutViewer?(options?: DesktopViewerWindowOptions): Promise<DesktopViewerWindowStatus>;
   closeViewerWindow?(): Promise<DesktopViewerWindowStatus>;
@@ -57,6 +61,24 @@ export interface DesktopHostApi {
   /** The pop-out viewer window opened, closed, or changed. Returns unsubscribe. */
   onViewerWindowStatus?(cb: (status: DesktopViewerWindowStatus) => void): () => void;
 }
+
+/** DesignCaptureParams in host-api.d.ts. */
+export interface DesktopCaptureParams {
+  url?: string;
+  html?: string;
+  width: number;
+  height: number;
+  selector?: string;
+  waitFor?: string;
+  waitMs?: number;
+  fullPage?: boolean;
+  colorScheme?: "light" | "dark";
+}
+
+/** DesignCaptureReply in host-api.d.ts. */
+export type DesktopCaptureReply =
+  | { ok: true; capture: unknown; images: [string, { bytes: Uint8Array; mime: string; width?: number; height?: number } | null][] }
+  | { ok: false; code: string; message: string; hint?: string };
 
 /** SecretsStatus in host-api.d.ts. */
 export interface DesktopSecretsStatus {

@@ -33,6 +33,7 @@ sonobe/
 │   │                                physics (springs, decay), layout, hit testing, gesture recognition
 │   ├── patches/    @sonobe/patches  built-in patch library: definitions + evaluators + docs + examples
 │   ├── renderer/   @sonobe/renderer DOM renderer for SceneFrame, pointer/keyboard capture, device frames
+│   ├── import/     @sonobe/import   design capture format, DOM walker (reads a rendered page), capture → layers converter
 │   ├── mcp/        @sonobe/mcp      MCP tools over a SonobeHost interface, headless host, HTTP + stdio transports
 │   └── cli/        @sonobe/cli      `sonobe` CLI: new, validate, fmt, outline, describe, sim, mcp (stdio relay; --headless <dir>)
 ├── apps/
@@ -40,12 +41,14 @@ sonobe/
 │   └── desktop/    Electron main + preload: windows, menus, file IO, MCP HTTP server, LAN preview server
 ├── integrations/
 │   ├── claude-code/     Claude Code plugin (.mcp.json + skills)
-│   └── claude-desktop/  .mcpb bundle manifest
+│   ├── claude-desktop/  .mcpb bundle manifest
+│   ├── chrome-extension/ Sonobe Capture for Chrome: copy a page or an element as a design capture
+│   └── figma-plugin/    Sonobe Capture for Figma: copy a selection as a design capture
 ├── examples/       canonical example prototypes (*.sonobe folders), used by docs, lessons, tests
 └── docs/           research/, guides/ (numbered tutorials), patches/ (generated reference), assets/ (README screenshots)
 ```
 
-Dependency direction (no cycles): `core ← engine ← patches ← renderer ← editor ← desktop`, and `mcp ← cli`, where `mcp` depends on `core`, `engine`, and `patches`.
+Dependency direction (no cycles): `core ← engine ← patches ← renderer ← editor ← desktop`, and `mcp ← cli`, where `mcp` depends on `core`, `engine`, and `patches`. `import` depends only on `core`; `mcp`, `editor`, and `desktop` use it.
 
 Tooling: TypeScript (strict, ESM), Vite 8 for the editor, esbuild for Electron main/preload and the CLI, Vitest for unit tests, Playwright for e2e (Chromium via `npm run e2e`; `_electron` in the desktop smoke test and package verification). Formatting uses Prettier defaults.
 
@@ -62,7 +65,7 @@ Checkout Flow.sonobe/
 │   ├── main.json           root prototype (kind "prototype")
 │   └── primary_button.json one file per document component
 ├── scripts/<patchId>.js    JavaScript patch sources (real files; diffable, lintable)
-├── assets/assets.json      asset registry: id → {file, kind, name, width, height, sha256}
+├── assets/assets.json      asset registry: id → {file, kind, name, width, height, sha256, font?}
 ├── assets/<sha256>.<ext>   content-addressed media
 └── .sonobe/session.json    per-user editor state (camera, selection, panel sizes). Gitignored.
 ```
@@ -441,6 +444,7 @@ Layer types are declared in `@sonobe/core` (`layerTypes.ts`) with typed props (k
   interface SonobeHost {
     listDocuments(); openDocument(ref); getDocument(docId?); apply(ops, { label, author, dryRun, expectedRevision });
     getSelection(); screenshot(target, opts); reveal(ids); setWorking(ids, intent | null);
+    captureDesign?(request); fetchImage?(url, signal); putAssetFiles?(files, { docId });   // design import (§13)
     sim: { reset(opts); dispatch(simId, events); step(simId, opts); trace(simId, opts); values(simId, targets) };
     history: { list(opts); undo(txnId?); };
   }
@@ -453,12 +457,12 @@ Layer types are declared in `@sonobe/core` (`layerTypes.ts`) with typed props (k
 | Discovery | `get_guide`, `list_patch_types`, `describe_patch_types`, `describe_layer_types`, `list_value_types` |
 | Documents | `list_documents`, `open_document`, `create_document`, `get_document_info`, `save_document` |
 | Read | `get_outline` (compact text projection), `get_layers`, `get_patches`, `get_items`, `find`, `get_selection`, `get_diagnostics`, `explain` |
-| Write | `apply_ops`, `add_layers`, `add_patches`, `connect`, `set_values`, `update_layers`, `delete_items`, `rename`, `create_component`, `tidy_graph` |
+| Write | `apply_ops`, `add_layers`, `add_patches`, `connect`, `set_values`, `update_layers`, `delete_items`, `rename`, `create_component`, `tidy_graph`, `import_design` |
 | Simulate | `sim_reset`, `sim_dispatch`, `sim_step`, `sim_trace`, `sim_get_values`, `get_screenshot` |
 | Presence and history | `begin_work`, `finish_work`, `reveal`, `list_history`, `undo` |
 
 - **Resources:** guides, patch reference, document outline.
-- **Prompts:** `prototype_interaction`, `debug_interaction`, `explain_prototype`.
+- **Prompts:** `import_screen`, `prototype_interaction`, `debug_interaction`, `explain_prototype`.
 - **Distribution:** Claude Code plugin (`integrations/claude-code`) and `.mcpb` bundle (`integrations/claude-desktop`), both built from a checkout. The app's **Connect Claude** screen shows copy-paste setup for Claude Code and Claude Desktop, filled in for this machine (the app's bundled CLI, or Node plus a checkout). In a source checkout it also shows the commands that build and pack the `.mcpb`.
 
 **Outline projection** (token-lean, read-only):
@@ -494,3 +498,28 @@ patch grow transition<number> progress←pop.output start=1 end=1.08
 - `npm run smoke -w @sonobe/desktop`: the muted Electron end-to-end run (`apps/desktop/tests/smoke.mjs`, Playwright `_electron`) covering the host API, the MCP loop, the phone preview and the pop-out viewer. It builds the shell and editor, runs by hand, and isn't part of `npm run e2e` or CI. `SONOBE_SMOKE_SKIP_EDITOR_BUILD=1` reuses `apps/editor/dist`.
 - Examples must load, validate with zero errors, and simulate their scripted interactions (`examples/*/test.json`).
 - Automated app and QA runs are muted (`--mute-audio`).
+
+---
+
+## 13. Design import (`@sonobe/import`)
+
+People prototype with their real screens instead of redrawing them. Every source produces a **design capture**, and one converter turns captures into ops.
+
+```
+ a URL (the person's dev server) ─┐                                   ┌─▶ addAsset (content-addressed images)
+ HTML (pasted, or Claude from     ├─▶ render ─▶ DOM walker ─▶ capture ─┼─▶ addLayer (the screen as one tree)
+   any codebase)                  │                                   └─▶ addPatch + connect (Scroll patches)
+ a capture (paste, a plugin) ─────┘
+```
+
+- **Capture format** (`capture.ts`): JSON with `format: "sonobe.design-capture"`, `version: 1`, the viewport, a root frame, and images by key. Boxes are `[x, y, w, h]` in root coordinates (CSS pixels = points); colors are `#RRGGBBAA`. Nodes are `frame` (fill, gradients, background image, radii, per-side borders, shadows, clip, blur, `scroll` for scroll containers, `scrollContent` for a page's content), `text` (one style, `wraps`, `maxLines`), `image`, and `input`. `parseCapture` validates captures from outside with zod.
+- **DOM walker** (`dom/walk.ts`): runs inside the rendered page and reads only layout and computed styles, so it works with any framework and CSS. It waits for load, a selector, fonts, images and a quiet DOM; resolves any CSS color through a canvas; collapses paintless wrappers; joins inline text into paragraphs positioned by their line boxes; serializes inline SVG with computed paint; captures absolutely positioned `::before`/`::after`; sorts siblings into CSS painting order; moves `position: fixed` elements to the screen level; collects the `@font-face` rules the captured text uses (re-fetching cross-origin sheets); and names nodes from `data-name`, React and Vue component names, `aria-label`, ids, icon classes and roles. `scripts/build-walker.ts` bundles it into `WALKER_SOURCE`, a string every host injects; a test keeps it in sync.
+- **Figma** (`figma.ts`): `figmaToCapture(selection, { exportSvg, imageData })` maps structural Figma nodes (frames, instances, rectangles, circles, text, and vectors as SVG exports) onto the capture format; the plugin in `integrations/figma-plugin` supplies the plugin API and copies the result.
+- **Converter** (`convert.ts`): `planImport(capture, doc, images, options)` returns the ops, the asset files to store first, the screen's ref, a summary and notes. Frames become groups (rectangles when empty, hit areas when they're only tap targets), uniform borders become strokes and other borders thin rectangles, gradients and background images become child layers, the largest outer shadow becomes the layer shadow (a spread-only ring becomes an outside stroke), single-line text hugs its text and grows from its alignment edge, and paragraphs keep their width. Identical image bytes reuse an existing asset. `replace` swaps an earlier screen in the same batch: layers found again at the same name path keep their ids and linked properties, other items' connections to them are restored, and content that already scrolls doesn't get a second Scroll patch. Web fonts become font assets whose `font` field (family, weight, style, unicode-range) the renderer's `createFontAssetRegistry` turns into FontFaces in the editor and the phone player.
+- **Hosts**:
+  - Desktop: `apps/desktop/electron/design-capture.ts` renders in a hidden window with its own session partition (sandboxed, no preload, no permissions, downloads and new windows refused, only http(s) navigations), injects the walker with `executeJavaScript` (outside the page's CSP), and downloads images with that session. `AppHost.captureDesign` serves `import_design`; `putAssetFiles` sends bytes to the editor over the `assets.put` RPC. The preload's `sonobeHost.captureDesign` serves the editor's Import Design dialog.
+  - Browser editor: HTML renders in a sandboxed iframe (`allow-scripts`, opaque origin) that posts the capture back; URLs need the desktop app.
+  - Headless: `@sonobe/import/node` renders with Playwright's Chromium when it's installed, and writes new asset files straight into the project's `assets/` folder.
+- **Front doors**: File → Import Design… (URL, HTML, or a Claude prompt), pasting a capture on the canvas, the `import_design` MCP tool (`url`, `html`, or `capture`), and the Chrome extension (`integrations/chrome-extension`: the service worker runs the walker in the tab's main world, embeds cross-origin images when the person allows it, and copies the capture; the element picker marks one element for the walker's `selector`). Each import is one history group.
+- **Checks**: `packages/import/scripts/fidelity.ts` renders fixture pages, imports them, draws the document with the DOM renderer, and writes source, imported and difference images side by side. `apps/desktop/tests/import-smoke.mjs` runs the desktop path against a local dev server.
+

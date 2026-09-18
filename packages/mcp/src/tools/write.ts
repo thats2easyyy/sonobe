@@ -61,7 +61,7 @@ function createdItems(applied: readonly Op[]): string[] {
 /** The standard write response: summary, ids, refs, diagnostics delta, or a teaching failure. */
 export function writeResult(
   result: HostApplyResult,
-  extra: { notes?: string[]; data?: Record<string, unknown> } = {},
+  extra: { notes?: string[]; data?: Record<string, unknown>; summarizeCreated?: boolean } = {},
 ): CallToolResult {
   const failed = result.results.filter(
     (r): r is OpResult & { error: NonNullable<OpResult["error"]> } =>
@@ -149,9 +149,11 @@ export function writeResult(
     lines.push(
       `Applied ${plural(appliedCount, "op")} · revision ${result.revision} · ${result.txnId}`,
     );
-  if (created.length)
+  if (created.length && extra.summarizeCreated && created.length > 12)
+    lines.push(`${result.dryRun ? "Would create" : "Created"} ${plural(created.length, "item")}.`);
+  else if (created.length)
     lines.push(`${result.dryRun ? "Would create" : "Created"}: ${created.join(", ")}`);
-  const refs = Object.entries(result.idMap);
+  const refs = Object.entries(result.idMap).filter(([ref]) => !extra.summarizeCreated || !/_\d+$/.test(ref));
   if (refs.length)
     lines.push(
       `Refs: ${refs.map(([ref, id]) => `${ref.startsWith("$") ? ref : `$${ref}`} → ${id}`).join(", ")}`,

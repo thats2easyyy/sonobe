@@ -20,6 +20,7 @@ import { guarded, withCompleteText } from "./results.ts";
 import { toolOutputSchema, type ToolOutputSchema } from "./schemas.ts";
 import { registerDiscoveryTools } from "./tools/discovery.ts";
 import { registerDocumentTools } from "./tools/documents.ts";
+import { registerImportTools } from "./tools/import.ts";
 import { registerPresenceTools } from "./tools/presence.ts";
 import { registerReadTools } from "./tools/read.ts";
 import { registerSimulationTools } from "./tools/simulate.ts";
@@ -66,6 +67,7 @@ export const TOOL_NAMES = [
   "rename",
   "create_component",
   "tidy_graph",
+  "import_design",
   "sim_reset",
   "sim_dispatch",
   "sim_step",
@@ -80,6 +82,7 @@ export const TOOL_NAMES = [
 ] as const;
 
 export const PROMPT_NAMES = [
+  "import_screen",
   "prototype_interaction",
   "debug_interaction",
   "explain_prototype",
@@ -273,6 +276,7 @@ export function createSonobeMcpServer(
   registerDocumentTools(tc);
   registerReadTools(tc);
   registerWriteTools(tc);
+  registerImportTools(tc);
   registerSimulationTools(tc);
   registerPresenceTools(tc);
   registerResources(tc);

@@ -75,6 +75,8 @@ export function buildMenuSpec(ctx: MenuContext): MenuNode[] {
       cmd("file.open"),
       { kind: "submenu", label: "Open Recent", items: recentItems },
       sep,
+      cmd("file.importDesign"),
+      sep,
       cmd("file.close"),
       cmd("file.save"),
       cmd("file.saveAs"),

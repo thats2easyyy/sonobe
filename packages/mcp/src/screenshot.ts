@@ -18,7 +18,7 @@ import {
   type SvgAsset,
   type SvgRect,
 } from "@sonobe/renderer/svg";
-import { HostError, type Screenshot } from "./host.ts";
+import { HostError, isHostError, type Screenshot } from "./host.ts";
 
 /** Largest PNG a screenshot returns (bytes); bigger renders are redrawn smaller. */
 export const MAX_SCREENSHOT_BYTES = 2_500_000;
@@ -78,10 +78,22 @@ const unavailable = () =>
 /**
  * The rasterizer runs in its own Node process: a native panic in resvg aborts the process it runs
  * in, and that must never take the MCP server down. Requests are length-prefixed JSON on stdin;
- * replies are length-prefixed frames on stdout ([1][width][height][png] or [0][error text]).
+ * replies are length-prefixed frames on stdout ([1][width][height][png] or [0][error text]). A request
+ * with a pixel `crop` renders the whole drawing and cuts the region out itself (encoding the PNG with
+ * zlib), for drawings resvg can't render with a cropped viewBox.
  */
 const WORKER_SOURCE = `"use strict";
 const { Resvg } = require(process.argv[1]);
+const zlib = require("zlib");
+const CRC = Array.from({ length: 256 }, (_, n) => { let c = n; for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1; return c >>> 0; });
+const crc32 = (buf) => { let c = 0xffffffff; for (const b of buf) c = CRC[(c ^ b) & 255] ^ (c >>> 8); return (c ^ 0xffffffff) >>> 0; };
+const pngChunk = (type, data) => { const len = Buffer.alloc(4); len.writeUInt32BE(data.length, 0); const body = Buffer.concat([Buffer.from(type, "latin1"), data]); const crc = Buffer.alloc(4); crc.writeUInt32BE(crc32(body), 0); return Buffer.concat([len, body, crc]); };
+const encodePng = (rgba, w, h) => {
+  const raw = Buffer.alloc((w * 4 + 1) * h);
+  for (let y = 0; y < h; y++) rgba.copy(raw, y * (w * 4 + 1) + 1, y * w * 4, (y + 1) * w * 4);
+  const ihdr = Buffer.alloc(13); ihdr.writeUInt32BE(w, 0); ihdr.writeUInt32BE(h, 4); ihdr[8] = 8; ihdr[9] = 6;
+  return Buffer.concat([Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]), pngChunk("IHDR", ihdr), pngChunk("IDAT", zlib.deflateSync(raw)), pngChunk("IEND", Buffer.alloc(0))]);
+};
 let buffer = Buffer.alloc(0);
 const send = (parts) => {
   const body = Buffer.concat(parts);
@@ -100,9 +112,22 @@ process.stdin.on("data", (chunk) => {
       const image = new Resvg(request.svg, request.options).render();
       const meta = Buffer.alloc(9);
       meta[0] = 1;
-      meta.writeUInt32BE(image.width, 1);
-      meta.writeUInt32BE(image.height, 5);
-      send([meta, image.asPng()]);
+      if (request.crop) {
+        const x = Math.max(0, Math.min(image.width - 1, Math.round(request.crop.x)));
+        const y = Math.max(0, Math.min(image.height - 1, Math.round(request.crop.y)));
+        const w = Math.max(1, Math.min(image.width - x, Math.round(request.crop.width)));
+        const h = Math.max(1, Math.min(image.height - y, Math.round(request.crop.height)));
+        const pixels = Buffer.from(image.pixels);
+        const out = Buffer.alloc(w * h * 4);
+        for (let row = 0; row < h; row++) pixels.copy(out, row * w * 4, ((y + row) * image.width + x) * 4, ((y + row) * image.width + x + w) * 4);
+        meta.writeUInt32BE(w, 1);
+        meta.writeUInt32BE(h, 5);
+        send([meta, encodePng(out, w, h)]);
+      } else {
+        meta.writeUInt32BE(image.width, 1);
+        meta.writeUInt32BE(image.height, 5);
+        send([meta, image.asPng()]);
+      }
     } catch (err) {
       send([Buffer.from([0]), Buffer.from(String((err && err.message) || err))]);
     }
@@ -188,13 +213,14 @@ async function renderInWorker(
   resvgPath: string,
   svg: string,
   options: Record<string, unknown>,
+  crop?: SvgRect,
 ): Promise<RasterImage> {
   const w = (worker ??= startWorker(resvgPath));
   setRef(w, true);
   try {
     const frame = await new Promise<Buffer | null>((resolve) => {
       w.waiting = resolve;
-      const body = Buffer.from(JSON.stringify({ svg, options }), "utf8");
+      const body = Buffer.from(JSON.stringify({ svg, options, ...(crop ? { crop } : {}) }), "utf8");
       const head = Buffer.alloc(4);
       head.writeUInt32BE(body.length, 0);
       w.child.stdin!.write(Buffer.concat([head, body]));
@@ -234,7 +260,7 @@ async function renderInWorker(
  */
 export async function rasterizeSvg(
   svg: string,
-  options: { hasText: boolean },
+  options: { hasText: boolean; crop?: SvgRect },
 ): Promise<RasterImage> {
   // resvg falls back to a regular-weight face when a layer's font isn't installed unless the default
   // families name an installed UI font, so bold text stays bold with the fallback.
@@ -250,7 +276,7 @@ export async function rasterizeSvg(
   };
   const resvgPath = resolveResvg();
   if (resvgPath) {
-    const run = queue.then(() => renderInWorker(resvgPath, svg, resvgOptions));
+    const run = queue.then(() => renderInWorker(resvgPath, svg, resvgOptions, options.crop));
     queue = run.catch(() => undefined);
     return run;
   }
@@ -386,7 +412,15 @@ export async function renderSceneScreenshot(request: SceneScreenshotRequest): Pr
       scale,
       ...(request.assets ? { resolveAsset: request.assets } : {}),
     });
-    const image = await rasterizeSvg(drawing.svg, { hasText: drawing.hasText });
+    let image: RasterImage;
+    try {
+      image = await rasterizeSvg(drawing.svg, { hasText: drawing.hasText });
+    } catch (err) {
+      // resvg panics on some clipped images inside a cropped viewBox: draw the whole screen and cut the layer out.
+      if (target.kind !== "layer" || !isHostError(err) || err.code !== "screenshot_renderer_crashed") throw err;
+      const whole = renderSceneSvg(scene, { scale, ...(request.assets ? { resolveAsset: request.assets } : {}) });
+      image = await rasterizeSvg(whole.svg, { hasText: whole.hasText, crop: { x: crop.x * scale, y: crop.y * scale, width: crop.width * scale, height: crop.height * scale } });
+    }
     if (image.png.byteLength <= maxBytes) {
       return {
         data: Buffer.from(image.png).toString("base64"),

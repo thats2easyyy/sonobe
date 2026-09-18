@@ -1,10 +1,10 @@
 /**
- * App commands: New (the welcome screen), Close, Settings, Rename, Insert Layer, Use as Mask, Align
+ * App commands: New (the welcome screen), Import Design, Close, Settings, Rename, Insert Layer, Use as Mask, Align
  * Right and Bottom, full-screen viewer, Connect Claude, lessons, About, and Report an Issue; plus
  * hidden aliases so every native menu item reaches the panel that owns it.
  */
 
-import { AlignEndHorizontal, AlignEndVertical, AlignStartHorizontal, AlignStartVertical, BookMarked, Bug, FilePlus, FileX, GraduationCap, Info, Keyboard, LayoutTemplate, Maximize, MessageSquarePlus, Pencil, Scissors, Settings, SquarePlus, Workflow } from "lucide-react";
+import { AlignEndHorizontal, AlignEndVertical, AlignStartHorizontal, AlignStartVertical, BookMarked, Bug, FilePlus, FileX, GraduationCap, Info, Keyboard, LayoutTemplate, Maximize, MessageSquarePlus, Pencil, ScanLine, Scissors, Settings, SquarePlus, Workflow } from "lucide-react";
 import { connectClaudeCommand } from "../panels/connect/commands.ts";
 import { connectClaudeStore } from "../panels/connect/connectStore.ts";
 import { layoutStore } from "../shell/layoutStore.ts";
@@ -86,6 +86,7 @@ export function appCommands(session: EditorSession, registry: CommandRegistry, o
   return [
     // File
     { id: "file.new", title: "New Prototype…", category: "File", description: "Blank, from a template, or a lesson", shortcut: "Mod+N", allowInInput: true, icon: FilePlus, keywords: ["blank", "create", "template", "welcome", "start"], run: () => welcomeStore.getState().show("new") },
+    { id: "file.importDesign", title: "Import Design…", category: "File", description: "Screens from your running app, HTML, or Claude", icon: ScanLine, keywords: ["import", "html", "url", "code", "website", "web page", "screen", "capture", "localhost", "storybook", "paste"], run: () => appPanels.getState().show("importDesign") },
     { id: "file.close", title: "Close Prototype", category: "File", icon: FileX, keywords: ["close", "shut"], run: async () => void (await closePrototype(session)) },
     { id: "app.settings", title: "Settings…", category: "File", shortcut: "Mod+,", allowInInput: true, icon: Settings, keywords: ["preferences", "theme", "motion", "device", "permissions", "trust"], run: () => appPanels.getState().show("settings") },
     // Edit
