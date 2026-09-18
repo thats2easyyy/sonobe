@@ -177,7 +177,7 @@ patch zoom_spring popAnimation<number> "Zoom Spring" number←card_zoomed.on bou
 patch card_scale transition<number> "Card Scale" progress←zoom_spring.output start=1 end=1.12
 ```
 
-Sonobe also offers three ready-made prompts: `prototype_interaction`, `debug_interaction` and `explain_prototype`.
+Sonobe also offers four ready-made prompts: `import_screen`, `prototype_interaction`, `debug_interaction` and `explain_prototype`.
 
 ## Watching and undoing
 

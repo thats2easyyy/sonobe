@@ -146,6 +146,7 @@ export const EXAMPLE_PROMPTS: readonly PromptGroup[] = [
       "Build a bottom sheet I can drag down to dismiss. Hand the finger's velocity to the spring when I let go.",
       "Turn this into three tabs with an underline that slides. Name each patch by its effect.",
       "The like button feels mushy. Make it snappy with a tiny bounce, then show me the numbers you changed.",
+      "Import the profile screen from my app (localhost:3000/profile) into Sonobe, then make the Follow button bounce when I tap it.",
     ],
   },
   {

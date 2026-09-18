@@ -11,6 +11,7 @@ import { createHttpHandler, isHostError, loadGuides, type NodeMcpHandler } from 
 import { createPatchRegistry } from "@sonobe/patches";
 import { toBuffer as qrPng } from "qrcode";
 import { createAppHost, type AppHost, type CapturedImage, type DocumentChange, type RendererTarget, type SceneRenderRequest } from "./app-host.ts";
+import { captureDesignInWindow, fetchCaptureImage } from "./design-capture.ts";
 import { createAppWindow, type AppWindow, type WindowContentSource } from "./app-window.ts";
 import { registerAssistant } from "./assistant/register.ts";
 import { captureWebContents } from "./capture.ts";
@@ -819,6 +820,50 @@ function main(): void {
       return true;
     });
 
+    ipcMain.handle(IPC.captureDesign, async (event, request: unknown) => {
+      requireWindow(event);
+      const r = (request && typeof request === "object" ? request : {}) as Record<string, unknown>;
+      const str = (key: string) => (typeof r[key] === "string" ? (r[key] as string) : undefined);
+      const num = (key: string, fallback: number) => (typeof r[key] === "number" && Number.isFinite(r[key]) ? (r[key] as number) : fallback);
+      try {
+        const url = str("url");
+        const html = str("html");
+        if ((url === undefined) === (html === undefined)) return { ok: false, code: "invalid_source", message: "Pass a URL or HTML to import." };
+        const colorScheme = str("colorScheme");
+        const captured = await captureDesignInWindow(
+          {
+            ...(url !== undefined ? { url } : { html: html! }),
+            width: num("width", 402),
+            height: num("height", 874),
+            ...(str("selector") ? { selector: str("selector")! } : {}),
+            ...(str("waitFor") ? { waitFor: str("waitFor")! } : {}),
+            ...(typeof r.waitMs === "number" ? { waitMs: num("waitMs", 0) } : {}),
+            ...(r.fullPage === false ? { fullPage: false } : {}),
+            ...(colorScheme === "light" || colorScheme === "dark" ? { colorScheme } : {}),
+          },
+          { log },
+        );
+        return { ok: true, capture: captured.capture, images: [...captured.images.entries()] };
+      } catch (err) {
+        const e = err as { code?: unknown; message?: unknown; hint?: unknown };
+        return { ok: false, code: typeof e.code === "string" ? e.code : "capture_failed", message: typeof e.message === "string" ? e.message : String(err), ...(typeof e.hint === "string" ? { hint: e.hint } : {}) };
+      }
+    });
+
+    ipcMain.handle(IPC.fetchCaptureFile, async (event, url: unknown) => {
+      requireWindow(event);
+      if (typeof url !== "string" || url.length > 8192) return null;
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 15_000);
+      try {
+        return await fetchCaptureImage(url, controller.signal);
+      } catch {
+        return null;
+      } finally {
+        clearTimeout(timer);
+      }
+    });
+
     ipcMain.handle(IPC.viewerWindowOpen, (event, options: unknown) => {
       requireWindow(event);
       const alwaysOnTop = options && typeof options === "object" ? (options as { alwaysOnTop?: unknown }).alwaysOnTop : undefined;
@@ -881,6 +926,8 @@ function main(): void {
       projectExists: async (dir) => existsSync(path.join(dir, "project.json")),
       writeProject: writeNewProject,
       renderScene,
+      captureDesign: (request) => captureDesignInWindow(request, { log }),
+      fetchImage: fetchCaptureImage,
       onDocumentChange,
     });
 

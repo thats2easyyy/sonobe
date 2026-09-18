@@ -35,6 +35,16 @@ Layers and patches connect in both directions. Press a layer's Touch button to a
 
 ![Choosing what drives the Photo layer's opacity from a list of patch outputs in the patch editor, with the layer's properties in the inspector](docs/assets/drive-with-a-patch.png)
 
+## Import your designs
+
+Prototype with the real thing instead of redrawing it. **File → Import Design…** opens a screen from your running app (`http://localhost:3000/settings`, a Storybook story, any page) in a hidden browser window, reads the finished layout, and adds it to your prototype as ordinary layers: groups with fills, borders, radii and shadows, text in the page's own web fonts, images and SVG icons saved as assets, and text fields you can type into. Fixed bars stay put, long pages and scroll areas come with Scroll patches, and layers take their names from `data-name`, React and Vue component names, labels and roles. One undo removes it.
+
+![A profile screen imported from a web page: named layers in the layer list, the screen running in the viewer, and the import summary](docs/assets/import-design.png)
+
+In Chrome, the [Sonobe Capture extension](integrations/chrome-extension/README.md) copies any page or a single element you pick, even on signed-in pages, and ⌘V pastes it into Sonobe the same way. A [Figma plugin](integrations/figma-plugin/README.md) does the same for frames (not yet verified inside Figma).
+
+Your design doesn't have to be a web app. Paste HTML, or ask Claude from your app's folder: *"Rebuild ProfileView from my SwiftUI code as HTML, import it into Sonobe, then make the Follow button bounce when I tap it."* Claude reproduces the screen, imports it with the `import_design` tool, compares a screenshot with the source, and wires the interaction onto the imported layers. It can also design new screens this way. [Guide 12](docs/guides/12-importing-designs.md) has the details.
+
 ## Install
 
 Sonobe needs Node 22.18 or later. There are no prebuilt downloads yet, so you build the app from a checkout.
@@ -166,10 +176,11 @@ The runs also showed where Claude struggled, and those problems are fixed. Tool 
 - **15 layer types**, including text fields, Lottie, shaders, clones, and component instances, with row, column, and grid layout.
 - **15 examples** in [examples/](examples/README.md), from Tap to Grow to Swipe Cards. Each is a project folder with a step-by-step README and scripted tests that simulate the interaction. Open them from the welcome screen or the Learn drawer.
 - **5 interactive lessons** that check your work as you go: Your first prototype, States vs pulses, Spring feel, Lists with loops, and Building with Claude.
-- **11 guides** in [docs/guides](docs/guides/README.md), from your first prototype through debugging, coming from Origami, and working with Claude.
-- **An MCP server with 39 tools** in six groups: discovery (patch and layer docs, workflow guides), documents, reading (outline, search, diagnostics, plain-language explanations), writing (atomic batches of typed ops), simulation (taps, drags, traces, screenshots), and presence and history (show what Claude is doing, undo). It also offers three prompts: `prototype_interaction`, `debug_interaction`, and `explain_prototype`. The [MCP README](packages/mcp/README.md) lists every tool.
+- **Design import** from a running app, HTML, or Claude, into real layers ([guide 12](docs/guides/12-importing-designs.md)).
+- **12 guides** in [docs/guides](docs/guides/README.md), from your first prototype through debugging, coming from Origami, working with Claude, and importing designs.
+- **An MCP server with 40 tools** in six groups: discovery (patch and layer docs, workflow guides), documents, reading (outline, search, diagnostics, plain-language explanations), writing (atomic batches of typed ops, and importing designs), simulation (taps, drags, traces, screenshots), and presence and history (show what Claude is doing, undo). It also offers four prompts: `import_screen`, `prototype_interaction`, `debug_interaction`, and `explain_prototype`. The [MCP README](packages/mcp/README.md) lists every tool.
 - **The `sonobe` CLI** with `new`, `validate`, `fmt`, `outline`, `describe`, `sim`, and `mcp`.
-- **A Claude Code plugin and a Claude Desktop extension** in [integrations/](integrations/).
+- **A Claude Code plugin, a Claude Desktop extension, and a Chrome extension** in [integrations/](integrations/).
 - **Phone preview and a pop-out viewer.** Scan a QR code to run the live prototype in your phone's browser on the same network.
 - **An optional in-app Assistant** in the desktop app, for people who'd rather use their own Anthropic API key than Claude Code or Claude Desktop. The key is kept in your operating system's keychain.
 
@@ -181,11 +192,12 @@ The runs also showed where Claude struggled, and those problems are fixed. Tool 
 | `packages/engine` | Runtime: patch evaluation, springs, layout, hit testing, gestures |
 | `packages/patches` | The built-in patch library, with specs, behavior, and docs |
 | `packages/renderer` | DOM renderer and input capture for the viewer |
+| `packages/import` | Design import: the capture format, the DOM walker that reads a rendered page, and the converter into layers |
 | `packages/mcp` | MCP server: the tools Claude uses, and the headless host |
 | `packages/cli` | `sonobe` CLI: new, validate, format, outline, describe, simulate, MCP relay |
 | `apps/editor` | The editor UI (React) |
 | `apps/desktop` | The Electron shell, MCP endpoint, phone preview, and packaging |
-| `integrations` | The Claude Code plugin and the Claude Desktop extension |
+| `integrations` | The Claude Code plugin, the Claude Desktop extension, and the Sonobe Capture extension for Chrome and plugin for Figma |
 | `examples` | 15 runnable example projects with scripted tests |
 | `docs/guides` | Concept guides and recipes |
 | `docs/patches` | The generated patch reference |
@@ -195,7 +207,7 @@ Read [ARCHITECTURE.md](ARCHITECTURE.md) before contributing code.
 
 ## Learn
 
-Start with [docs/guides](docs/guides/README.md): your first prototype, states vs pulses, springs and feel, gestures, loops, components, debugging, and working with Claude. The same guides, the lessons, and the patch reference are in the app under Help → Learn Sonobe.
+Start with [docs/guides](docs/guides/README.md): your first prototype, states vs pulses, springs and feel, gestures, loops, components, debugging, working with Claude, and importing designs. The same guides, the lessons, and the patch reference are in the app under Help → Learn Sonobe.
 
 ## Contributing
 

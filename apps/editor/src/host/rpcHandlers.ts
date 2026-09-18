@@ -11,6 +11,7 @@ import { isTraceUnavailable, type InputEvent, type TraceInput } from "@sonobe/en
 import type { Simulation } from "../runtime/simulation.ts";
 import { BOUNDS_METHODS, type BoundsMethod } from "../state/bounds.ts";
 import { CLAUDE_AUTHOR, historyListEntry, normalizeAuthor, type FileResult } from "../state/document.ts";
+import { base64ToBytes } from "../state/bytes.ts";
 import { diagnosticsFor } from "../state/registry.ts";
 import { saveDocumentInteractively } from "../state/saveFlow.ts";
 import { currentComponentId, itemKindOf } from "../state/selection.ts";
@@ -37,6 +38,7 @@ export const RPC_METHODS = [
   "presence.finish",
   "presence.list",
   "reveal",
+  "assets.put",
 ] as const;
 
 export type RpcMethod = (typeof RPC_METHODS)[number];
@@ -205,6 +207,24 @@ export function registerRpcHandlers(session: EditorSession, options: RpcHandlerO
 
   const handlers: Record<RpcMethod, (p: Params) => unknown> = {
     "document.info": () => info(),
+
+    "assets.put": (p) => {
+      const files = p.files;
+      if (!Array.isArray(files)) throw invalid('"files" is required: a list of { "file": "<sha256>.png", "data": "<base64>" }.');
+      let stored = 0;
+      for (const [i, entry] of files.entries()) {
+        const f = asParams(entry);
+        const file = optString(f, "file");
+        const data = optString(f, "data");
+        if (!file || !/^[A-Za-z0-9_][A-Za-z0-9_.-]*$/.test(file)) throw invalid(`files[${i}].file must be a plain file name like "3f2a….png".`);
+        const bytes = data === undefined ? null : base64ToBytes(data);
+        if (!bytes) throw invalid(`files[${i}].data must be base64.`);
+        // Content-addressed: bytes the editor already holds for this name are the same bytes.
+        if (!session.assets.peekBytes(file)) session.assets.storeBytes(file, bytes);
+        stored++;
+      }
+      return { stored };
+    },
 
     "document.get": (p) => {
       const s = doc();

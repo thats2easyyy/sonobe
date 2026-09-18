@@ -38,6 +38,10 @@ export const IPC = {
   viewerWindowStatus: "sonobe:viewer-window:status",
   /** main → renderer: the pop-out viewer window opened, closed, or changed. */
   viewerWindowChanged: "sonobe:viewer-window:changed",
+  /** renderer → main: render a URL or HTML page in a hidden window and capture it for import. */
+  captureDesign: "sonobe:design:capture",
+  /** renderer → main: download a pasted capture's image or font (no CORS in main). */
+  fetchCaptureFile: "sonobe:design:fetch-file",
   rpcRequest: "sonobe:rpc:request",
   rpcResponse: "sonobe:rpc:response",
   /** renderer → main: the full list of registered rpc method names. */

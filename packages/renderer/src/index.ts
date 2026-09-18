@@ -25,6 +25,7 @@ export type { FragmentSource, ShaderCompileError, ShaderInputs, TextureFilter, T
 export { advancePlayhead, frameForTime, isLottieData, loadLottiePlayer, readLottieSource } from "./lottie.ts";
 export type { LottieLoader, LottiePlayerLike, LottieSource } from "./lottie.ts";
 
+export { createFontAssetRegistry, type FontAssetRegistry } from "./fonts.ts";
 export { cssGradient } from "./gradient.ts";
 export { squirclePath } from "./squircle.ts";
 export type { CornerRadii } from "./squircle.ts";

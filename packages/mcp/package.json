@@ -13,6 +13,7 @@
     "@resvg/resvg-js": "^2.6.2",
     "@sonobe/core": "*",
     "@sonobe/engine": "*",
+    "@sonobe/import": "*",
     "@sonobe/patches": "*",
     "@sonobe/renderer": "*",
     "zod": "^4.6.5"

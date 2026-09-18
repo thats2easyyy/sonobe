@@ -1,0 +1,23 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Now Playing</title>
+<style>
+  body { margin: 0; min-height: 100vh; background: linear-gradient(180deg, #2B1A14 0%, #17100D 42%, #0C0A09 100%); color: #F4EFE6; font-family: -apple-system, system-ui, sans-serif; }
+  .art { margin: 96px 32px 0; aspect-ratio: 1; border-radius: 12px; background: radial-gradient(circle at 50% 70%, #D9542B 0 28%, transparent 28.5%), linear-gradient(#E9DCC3 60%, #2F5D8A 60%); box-shadow: 0 24px 48px rgba(0,0,0,.45); }
+  h1 { margin: 28px 32px 4px; font-size: 26px; }
+  p { margin: 0 32px; opacity: .6; }
+  .bar { margin: 24px 32px 0; height: 4px; border-radius: 2px; background: rgba(244,239,230,.16); position: relative; }
+  .bar::after { content: ""; position: absolute; left: 0; top: 0; width: 38%; height: 4px; border-radius: 2px; background: #F4EFE6; }
+  .play { display: block; margin: 40px auto 0; width: 80px; height: 80px; border-radius: 40px; border: 0; background: #F4EFE6; box-shadow: 0 8px 24px rgba(0,0,0,.35); }
+</style>
+</head>
+<body>
+  <div class="art" data-name="Artwork"></div>
+  <h1>Slow Current</h1>
+  <p>Hana Ito</p>
+  <div class="bar" data-name="Progress"></div>
+  <button class="play" data-name="Play Button" aria-label="Play"></button>
+</body>
+</html>

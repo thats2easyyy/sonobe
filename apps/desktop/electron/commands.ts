@@ -31,6 +31,7 @@ export const COMMANDS: Readonly<Record<SonobeCommandId, CommandSpec>> = {
   "file.open": { label: "Open…", accelerator: "CmdOrCtrl+O" },
   "file.save": { label: "Save", accelerator: "CmdOrCtrl+S" },
   "file.saveAs": { label: "Save As…", accelerator: "CmdOrCtrl+Shift+S" },
+  "file.importDesign": { label: "Import Design…" },
   "file.reveal": { label: "Show in Folder", labels: { darwin: "Show in Finder", win32: "Show in File Explorer", linux: "Show in File Manager" } },
   "file.close": { label: "Close", accelerator: "CmdOrCtrl+W" },
   "app.settings": { label: "Settings…", accelerator: "CmdOrCtrl+," },

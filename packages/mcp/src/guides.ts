@@ -9,6 +9,7 @@ import { fileURLToPath } from "node:url";
 
 export const GUIDE_TOPICS = [
   "start-here",
+  "importing",
   "graph-basics",
   "gestures",
   "animation",

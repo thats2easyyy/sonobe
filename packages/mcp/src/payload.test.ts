@@ -109,6 +109,16 @@ describe("structuredContent carries the complete payload", () => {
     await call("rename", { updates: [{ id: "dot", name: "Dot Two" }] });
     await call("create_component", { name: "Badge Piece", layerIds: ["badge"] });
     await call("tidy_graph");
+    await call("import_design", {
+      capture: {
+        format: "sonobe.design-capture",
+        version: 1,
+        source: { kind: "html" },
+        viewport: { width: 402, height: 874 },
+        root: { kind: "frame", name: "Receipt", box: [0, 0, 402, 200], fill: "#FFFFFFFF", children: [] },
+        images: {},
+      },
+    });
     await call("delete_items", { ids: ["other_switch"] });
     const reset = await call("sim_reset");
     simId = reset.structuredContent!.simId as string;

@@ -236,3 +236,14 @@ describe("rpc handlers: bridge additions", () => {
     expect(handlers.size).toBe(0);
   });
 });
+
+describe("assets.put", () => {
+  it("holds asset files for addAsset ops and refuses bad names or data", async () => {
+    const { call, session: s } = setup();
+    expect(await call("assets.put", { files: [{ file: "abc123.png", mime: "image/png", data: "iVBORw0KGgo=" }] })).toEqual({ stored: 1 });
+    expect(new Uint8Array(s.assets.peekBytes("abc123.png")!)[1]).toBe(0x50);
+    expect(await call("assets.put", { files: [{ file: "../escape.png", data: "AAAA" }] })).toMatchObject({ failed: true, code: "invalid_params", message: expect.stringContaining("plain file name") });
+    expect(await call("assets.put", {})).toMatchObject({ failed: true, message: expect.stringContaining('"files" is required') });
+  });
+});
+

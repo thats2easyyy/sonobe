@@ -1,6 +1,6 @@
 ---
 name: sonobe
-description: Build, debug and explain interaction prototypes in Sonobe (layers plus a patch graph with a live viewer) using the sonobe MCP tools. Use when someone asks to prototype an interaction, animation, gesture or screen flow in Sonobe, to fix a Sonobe prototype that doesn't behave, or to explain what one does.
+description: Build, debug and explain interaction prototypes in Sonobe (layers plus a patch graph with a live viewer) using the sonobe MCP tools. Use when someone asks to prototype an interaction, animation, gesture or screen flow in Sonobe, to import screens from their app or code into Sonobe, to fix a Sonobe prototype that doesn't behave, or to explain what one does.
 ---
 
 # Prototyping in Sonobe
@@ -16,6 +16,14 @@ Sonobe prototypes are layers (what people see) plus patches (logic nodes with ty
    - existing diagnostics
 3. Call `get_outline` to see what exists. Use ids exactly as printed.
 4. Call `list_patch_types` (search by intent: "spring", "drag", "tabs") and `describe_patch_types` for every patch type you'll wire. Never invent port keys.
+
+## Importing screens from the person's app
+
+When they have an app or a design in code, start from it instead of drawing layers by hand. Read the `importing` guide first.
+
+- A web app: find or start its dev server (read `package.json` scripts), then `import_design` with `url` for each screen. `selector` imports one component; `waitFor` waits for data.
+- Anything else (SwiftUI, React Native, Flutter, a screen that needs a backend) or a new design: read the screen's code and theme, write one faithful static HTML page at the device width with real copy, colors, fonts, spacing and inline SVG icons, and `data-name` on elements you'll wire. Import it with `html`.
+- Read the result's outline, compare `get_screenshot` with the source (`screenshot: true` returns the page), then wire interactions onto the imported ids.
 
 ## Building
 
@@ -56,4 +64,4 @@ Sonobe prototypes are layers (what people see) plus patches (logic nodes with ty
 
 ## Guides
 
-`get_guide` topics: `start-here`, `graph-basics`, `gestures`, `animation`, `layout`, `loops`, `components`, `simulation`, `troubleshooting`. Read the one that matches the task before building something unfamiliar.
+`get_guide` topics: `start-here`, `importing`, `graph-basics`, `gestures`, `animation`, `layout`, `loops`, `components`, `simulation`, `troubleshooting`. Read the one that matches the task before building something unfamiliar.

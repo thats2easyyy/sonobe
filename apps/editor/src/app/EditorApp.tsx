@@ -9,7 +9,7 @@
  */
 
 import { getDevicePreset, type Op } from "@sonobe/core";
-import { FilePlus, FolderOpen, FolderSearch, Save, SaveAll, X } from "lucide-react";
+import { FilePlus, FolderOpen, FolderSearch, Save, SaveAll, ScanLine, X } from "lucide-react";
 import { lazy, Suspense, useEffect, useState, type ReactNode } from "react";
 import { getDesktopHostApi } from "../host/detect.ts";
 import { registerRpcHandlers } from "../host/rpcHandlers.ts";
@@ -60,6 +60,7 @@ const ConnectClaudeHost = lazy(() => import("../panels/connect/ConnectClaudeDial
 const WelcomeScreen = lazy(() => import("./welcome/WelcomeScreen.tsx").then((m) => ({ default: m.WelcomeScreen })));
 const SettingsDialog = lazy(() => import("./SettingsDialog.tsx").then((m) => ({ default: m.SettingsDialog })));
 const AboutDialog = lazy(() => import("./AboutDialog.tsx").then((m) => ({ default: m.AboutDialog })));
+const ImportDesignDialog = lazy(() => import("../panels/import/ImportDesignDialog.tsx").then((m) => ({ default: m.ImportDesignDialog })));
 const KeyboardShortcutsDialog = lazy(() => import("./KeyboardShortcutsDialog.tsx").then((m) => ({ default: m.KeyboardShortcutsDialog })));
 const AssistantHost = lazy(() => import("../panels/assistant/AssistantHost.tsx").then((m) => ({ default: m.AssistantHost })));
 
@@ -115,6 +116,7 @@ function Overlays() {
       {panel === "settings" && <SettingsDialog open onOpenChange={(open) => !open && appPanels.getState().hide()} />}
       {panel === "about" && <AboutDialog open onOpenChange={(open) => !open && appPanels.getState().hide()} onReportIssue={() => reportIssue(session)} />}
       {panel === "shortcuts" && <KeyboardShortcutsDialog open onOpenChange={(open) => !open && appPanels.getState().hide()} />}
+      {panel === "importDesign" && <ImportDesignDialog open onOpenChange={(open) => !open && appPanels.getState().hide()} />}
     </Suspense>
   );
 }
@@ -122,6 +124,7 @@ function Overlays() {
 const FILE_MENU: readonly (readonly [id: string, icon: ReactNode] | "separator")[] = [
   ["file.new", <FilePlus size={14} />],
   ["file.open", <FolderOpen size={14} />],
+  ["file.importDesign", <ScanLine size={14} />],
   "separator",
   ["file.save", <Save size={14} />],
   ["file.saveAs", <SaveAll size={14} />],

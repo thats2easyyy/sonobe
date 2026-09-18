@@ -1,0 +1,40 @@
+<!doctype html>
+<html>
+<head>
+<style>
+  body { margin: 0; padding: 14px; font: 12px/1.45 Inter, system-ui, sans-serif; color: var(--figma-color-text, #1c1c22); background: var(--figma-color-bg, #fff); }
+  p { margin: 0 0 8px; }
+  button { height: 28px; padding: 0 12px; border: 0; border-radius: 6px; background: var(--figma-color-bg-brand, #5b5cf6); color: #fff; font: inherit; font-weight: 600; cursor: pointer; }
+  textarea { position: fixed; left: -9999px; }
+</style>
+</head>
+<body>
+  <p id="status">Preparing the design for Sonobe…</p>
+  <button id="copy" hidden>Copy for Sonobe</button>
+  <textarea id="text"></textarea>
+  <script>
+    const status = document.getElementById("status");
+    const button = document.getElementById("copy");
+    const area = document.getElementById("text");
+    // Figma's plugin iframe has no Clipboard API; a selected textarea and execCommand still work.
+    const copy = () => {
+      area.select();
+      let ok = false;
+      try { ok = document.execCommand("copy"); } catch (e) { ok = false; }
+      parent.postMessage({ pluginMessage: { type: "copied", ok } }, "*");
+      return ok;
+    };
+    window.onmessage = (event) => {
+      const message = event.data && event.data.pluginMessage;
+      if (!message || message.type !== "copy") return;
+      area.value = message.text;
+      status.textContent = `“${message.name}” is ready.`;
+      if (!copy()) {
+        status.textContent = `“${message.name}” is ready. Click to copy it.`;
+        button.hidden = false;
+      }
+    };
+    button.onclick = copy;
+  </script>
+</body>
+</html>

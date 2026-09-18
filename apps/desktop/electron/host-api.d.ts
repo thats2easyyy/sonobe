@@ -12,6 +12,7 @@ export type SonobeCommandId =
   | "file.open"
   | "file.save"
   | "file.saveAs"
+  | "file.importDesign"
   | "file.reveal"
   | "file.close"
   | "app.settings"
@@ -177,6 +178,24 @@ export interface ViewerWindowStatus {
   error: string | null;
 }
 
+/** What the Import dialog asks the app to render and capture. */
+export interface DesignCaptureParams {
+  url?: string;
+  html?: string;
+  width: number;
+  height: number;
+  selector?: string;
+  waitFor?: string;
+  waitMs?: number;
+  fullPage?: boolean;
+  colorScheme?: "light" | "dark";
+}
+
+/** A capture (a DesignCapture from @sonobe/import) with its downloaded images, or why it failed. */
+export type DesignCaptureReply =
+  | { ok: true; capture: unknown; images: [string, { bytes: Uint8Array; mime: string; width?: number; height?: number } | null][] }
+  | { ok: false; code: string; message: string; hint?: string };
+
 export type RpcHandler = (params: unknown) => unknown | Promise<unknown>;
 
 /**
@@ -255,6 +274,11 @@ export interface SonobeHost {
 
   /** Open an http(s) or mailto link in the default browser or mail app. Resolves false for any other URL. */
   openExternal(url: string): Promise<boolean>;
+
+  /** Render a URL or HTML page in a hidden, sandboxed window and capture it for import. */
+  captureDesign(request: DesignCaptureParams): Promise<DesignCaptureReply>;
+  /** Download an http(s) image or font for a pasted capture, without the renderer's CORS limits. */
+  fetchCaptureFile(url: string): Promise<{ bytes: Uint8Array; mime: string } | null>;
 
   /** Show the prototype in its own window (a live player that follows edits), or focus it when it's open. */
   popOutViewer(options?: ViewerWindowOptions): Promise<ViewerWindowStatus>;

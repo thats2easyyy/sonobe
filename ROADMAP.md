@@ -8,11 +8,11 @@ A checked item is done. An unchecked item marked "partial" says what's left.
 
 1. **Signing.** Developer ID signing and notarization for macOS, and code signing for Windows, so builds can be shared.
 2. **Windows and Linux.** Build and verify the installers that are configured but untested.
-3. **Figma import.** Bring frames and their layers in from Figma.
+3. **Figma plugin, verified.** Run the Sonobe Capture plugin inside Figma against real files, fix what it finds, and publish it.
 4. **Origami JSON import.** Open existing Origami prototypes as Sonobe documents.
 5. **Collaboration.** Several people, and Claude, working in one document.
 
-The first two finish Stage 4. The last three are Stage 5.
+The first two finish Stage 4. The rest are Stage 5.
 
 ## Stage 1: Foundations
 - [x] `@sonobe/core`: document model, ops and inverse, history, diagnostics, canonical file format, outline
@@ -55,7 +55,11 @@ The first two finish Stage 4. The last three are Stage 5.
 - [ ] Docs site generated from the patch catalog and guides (partial: `generate-docs.ts` writes the Markdown patch reference, and the Learn drawer shows the guides and reference in the app; a website remains)
 
 ## Stage 5: Bring work in, build together
-- [ ] Figma import: frames and their layers, through a Figma plugin or the REST API
+- [x] Import designs from code: `@sonobe/import` reads a rendered page (computed layout and styles, so any framework and any CSS) into a neutral design capture and converts it into layers, image assets, text fields and Scroll patches. The desktop app renders URLs and HTML in a hidden sandboxed window (File → Import Design…), the browser editor renders HTML in a sandboxed iframe, headless servers use Playwright, and pasting a capture imports it. Claude imports with `import_design` from a dev server, from HTML it writes from any codebase, or from a capture
+- [x] Import fidelity: web fonts come along as font assets that every renderer registers
+- [ ] Rich text layers (partial: an imported paragraph that mixes styles becomes a group of single-style runs per line, which looks right but edits in pieces; paragraphs over 16 lines flatten to their main style)
+- [x] Chrome extension (`integrations/chrome-extension`): copy a page, or pick an element, with the same DOM walker, and paste it into Sonobe. Built and loaded unpacked from a checkout (partial: not published to the Chrome Web Store)
+- [ ] Figma import (partial: `integrations/figma-plugin` copies a selection as a design capture that pastes into Sonobe; the mapping has unit tests and the bundle runs against a stand-in API, but it hasn't been verified inside Figma or published)
 - [ ] Origami JSON import (stretch): map layers and patches onto their Sonobe equivalents, using the Origami names the patch catalog already records
 - [ ] Collaboration: several people and Claude in one document, building on today's per-author history, presence, and conflict checks
 

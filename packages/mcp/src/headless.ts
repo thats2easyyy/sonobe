@@ -11,10 +11,12 @@
  */
 
 import { existsSync } from "node:fs";
+import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { ProjectFormatError, readProjectFiles, saveProject, slugify, uniqueId, type Id, type SaveResult, type SonobeDocument } from "@sonobe/core";
 import { createNodeFs, loadProjectFilesFromDisk } from "@sonobe/core/node";
 import type { EngineRegistry } from "@sonobe/engine";
+import { capturePage, CaptureFailedError, CaptureUnavailableError } from "@sonobe/import/node";
 import { createPatchRegistry } from "@sonobe/patches";
 import {
   HostError,
@@ -327,6 +329,39 @@ export function createHeadlessHost(options: HeadlessHostOptions = {}): HeadlessH
         comments: [],
         note: "Headless mode has no editor, so nothing is selected. Ask the person which layers or patches they mean.",
       };
+    },
+
+    async captureDesign(request) {
+      try {
+        const result = await capturePage(request);
+        return {
+          capture: result.capture,
+          images: result.images,
+          ...(result.screenshot ? { screenshot: { data: result.screenshot.data, mimeType: "image/png" as const, width: result.screenshot.width, height: result.screenshot.height } } : {}),
+        };
+      } catch (err) {
+        if (err instanceof CaptureUnavailableError)
+          throw new HostError("design_capture_unavailable", err.message, {
+            hint: "Install Playwright's Chromium where Sonobe runs (npm install playwright && npx playwright install chromium), or open the project in the Sonobe app, which renders pages itself. You can also pass a ready-made capture.",
+          });
+        if (err instanceof CaptureFailedError)
+          throw new HostError("capture_failed", err.message, {
+            hint: request.url ? "Check that the dev server is running and the address opens in a browser." : "Check the HTML and the selector.",
+          });
+        throw err;
+      }
+    },
+
+    async putAssetFiles(files, fileOptions) {
+      const entry = resolve(fileOptions.docId);
+      const dir = path.join(entry.path, "assets");
+      await mkdir(dir, { recursive: true });
+      for (const f of files) {
+        if (!/^[A-Za-z0-9_][A-Za-z0-9_.-]*$/.test(f.file)) throw new HostError("invalid_asset_file", `"${f.file}" isn't a valid asset file name.`);
+        const target = path.join(dir, f.file);
+        // Content-addressed: a file that exists already holds these bytes.
+        if (!existsSync(target)) await writeFile(target, f.bytes);
+      }
     },
 
     async screenshot(target, shotOptions) {

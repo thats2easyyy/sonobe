@@ -1,4 +1,4 @@
-/** Prompts (user-initiated recipes; slash commands in Claude Code): prototype_interaction, debug_interaction, explain_prototype. */
+/** Prompts (user-initiated recipes; slash commands in Claude Code): import_screen, prototype_interaction, debug_interaction, explain_prototype. */
 
 import { z } from "zod";
 import { explain } from "./explain.ts";
@@ -10,6 +10,33 @@ const user = (text: string) => ({
 
 export function registerPrompts(tc: ToolContext): void {
   const { host, server } = tc;
+
+  server.registerPrompt(
+    "import_screen",
+    {
+      title: "Import a screen",
+      description: "Bring a screen from the person's app or code into the open Sonobe document as layers, check it against the source, and get it ready to prototype.",
+      argsSchema: z.object({
+        screen: z.string().describe('Which screen, and where it lives, e.g. "the settings screen, localhost:3000/settings" or "ProfileView.swift".'),
+        interaction: z.string().optional().describe('What to prototype on it afterwards, e.g. "the Follow button bounces when tapped".'),
+      }),
+    },
+    async ({ screen, interaction }) =>
+      user(
+        [
+          `Import this screen into Sonobe: ${screen}`,
+          ...(interaction ? [`Then prototype: ${interaction}`] : []),
+          "",
+          "Work like this:",
+          '1. get_guide("importing") if you haven\'t this conversation, then get_document_info for the device size.',
+          "2. If the screen is part of a web app you can run, find its dev server (package.json scripts; start it if it isn't running) and call import_design with its url. Use selector for a single component and waitFor for data that loads late.",
+          "3. Otherwise read the screen's code and theme files and write one faithful static HTML page at the device width (real copy, colors, fonts, spacing, inline SVG icons, data-name on elements to wire), then call import_design with html.",
+          "4. Compare get_screenshot with the source (import_design with screenshot: true returns the page). Fix what matters by importing again with replace set to the screen's id.",
+          ...(interaction ? ["5. begin_work, wire the interaction onto the imported layer ids, verify it with sim_reset, sim_dispatch and sim_trace, then finish_work."] : []),
+          `${interaction ? 6 : 5}. Tell me what came across, what you approximated, and which layers are named for wiring, in plain words.`,
+        ].join("\n"),
+      ),
+  );
 
   server.registerPrompt(
     "prototype_interaction",

@@ -12,6 +12,7 @@
   "dependencies": {
     "@sonobe/core": "*",
     "@sonobe/engine": "*",
+    "@sonobe/import": "*",
     "@sonobe/patches": "*",
     "@sonobe/renderer": "*",
     "@xyflow/react": "^12.11.6",

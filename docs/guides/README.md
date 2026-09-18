@@ -35,7 +35,7 @@ You don't need to know any code. A few guides end with code for engineers, and y
  │              │   │    layout      │   │                │   │    and variables│   │               │
  └──────────────┘   └────────────────┘   └────────────────┘   └─────────────────┘   └───────────────┘
 
- Any level:   10 Coming from Origami   ·   11 Working with Claude
+ Any level:   10 Coming from Origami   ·   11 Working with Claude   ·   12 Importing designs
 ```
 
 | Level | You are | Read | Afterwards you can build |
@@ -46,10 +46,11 @@ You don't need to know any code. A few guides end with code for engineers, and y
 | 3 | You want whole flows, not single interactions | [07 Loops](07-loops.md), [08 Components and variables](08-components-and-variables.md) | Feeds, carousels with page dots, photo grids, stories, onboarding |
 | 4 | You build for other people and it has to hold up | [09 Debugging](09-debugging.md), plus [handoff to engineers](05-springs-and-feel.md#handoff-to-engineers) in 05 | Anything, backed by traces, performance checks and exact numbers for engineers |
 
-Two guides fit at any level:
+Three guides fit at any level:
 
 - [10 Coming from Origami](10-coming-from-origami.md) maps Origami Studio's names, patches and shortcuts to Sonobe, and lists the few places where Sonobe behaves differently on purpose.
 - [11 Working with Claude](11-working-with-claude.md) shows how to connect Claude Desktop or Claude Code to Sonobe with your own Claude plan, and has prompt recipes for every level.
+- [12 Importing designs](12-importing-designs.md) brings screens from your running app, from HTML, or through Claude onto the canvas as real layers, so you prototype with your actual design.
 
 Not sure where to start? Start at 01. It takes five minutes, and if it all feels familiar you've only spent five minutes.
 
