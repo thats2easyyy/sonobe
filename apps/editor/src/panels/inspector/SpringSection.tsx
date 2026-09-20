@@ -1,10 +1,11 @@
 /** Spring patches: perceptual presets, a live curve with a motion preview, and handoff code for engineers. */
 
-import type { Id, PatchNode, PatchSpec } from "@sonobe/core";
+import { effectiveKnobLiteral, type Id, type PatchNode, type PatchSpec } from "@sonobe/core";
 import { springPreset, toDurationBounce, type SpringConfig, type SpringPresetKey } from "@sonobe/engine";
 import { Copy, Play } from "lucide-react";
-import { useEffect, useId, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent } from "react";
-import { useSelection } from "../../state/EditorProvider.tsx";
+import { useCallback, useEffect, useId, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent } from "react";
+import { useDocument, useSelection } from "../../state/EditorProvider.tsx";
+import { knobIdOf } from "../knobs/model.ts";
 import { currentComponentId } from "../../state/selection.ts";
 import { IconButton } from "../../ui/IconButton.tsx";
 import { TabPanel, Tabs } from "../../ui/Tabs.tsx";
@@ -35,15 +36,21 @@ function presetGlyph(key: SpringPresetKey): string {
 export function SpringSection({ patchId, node, spec, subject }: SpringSectionProps) {
   const edit = useInspectorEdit();
   const componentId = useSelection(currentComponentId);
-  const reading = useMemo(() => springConfigForNode(node, spec), [node, spec]);
-  const active = activePreset(node, spec);
+  // Inputs a knob drives preview, match presets and hand off with the knob's running value.
+  const knobs = useDocument((s) => s.doc.knobs);
+  const readLink = useCallback((link: string) => {
+    const id = knobIdOf({ link });
+    return id !== undefined && knobs ? effectiveKnobLiteral(knobs, id) : undefined;
+  }, [knobs]);
+  const reading = useMemo(() => springConfigForNode(node, spec, readLink), [node, spec, readLink]);
+  const active = activePreset(node, spec, readLink);
   const [preview, setPreview] = useState<SpringPresetKey | null>(null);
   const buttons = useRef(new Map<SpringPresetKey, HTMLButtonElement>());
   if (!reading) return null;
   const described = SPRING_PRESETS.find((p) => p.key === (preview ?? active));
   const apply = (key: SpringPresetKey) => {
     const preset = SPRING_PRESETS.find((p) => p.key === key)!;
-    edit.apply(planPreset(componentId, patchId, node.type, key), `Apply ${preset.name} spring to ${subject}`);
+    edit.apply(planPreset(componentId, patchId, node.type, key, (port) => knobIdOf(node.inputs[port])), `Apply ${preset.name} spring to ${subject}`);
   };
   const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
     const index = Math.max(0, SPRING_PRESETS.findIndex((p) => p.key === active));

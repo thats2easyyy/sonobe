@@ -32,6 +32,11 @@ describe("sanitizeLayout", () => {
   it("keeps the Learn drawer", () => {
     expect(sanitizeLayout({ drawer: "learn" }).drawer).toBe("learn");
   });
+
+  it("keeps the Inspector's Knobs tab, and reads anything else as Properties", () => {
+    expect(sanitizeLayout({ inspectorTab: "knobs" }).inspectorTab).toBe("knobs");
+    expect(sanitizeLayout({ inspectorTab: "dials" }).inspectorTab).toBe("properties");
+  });
 });
 
 describe("createLayoutStore", () => {

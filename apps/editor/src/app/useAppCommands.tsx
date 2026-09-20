@@ -1,12 +1,13 @@
 /**
  * App commands: New (the welcome screen), Import Design, Close, Settings, Rename, Insert Layer, Use as Mask, Align
- * Right and Bottom, full-screen viewer, Connect Claude, lessons, About, and Report an Issue; plus
- * hidden aliases so every native menu item reaches the panel that owns it.
+ * Right and Bottom, full-screen viewer, the knob commands, Connect Claude, lessons, About, and Report
+ * an Issue; plus hidden aliases so every native menu item reaches the panel that owns it.
  */
 
 import { AlignEndHorizontal, AlignEndVertical, AlignStartHorizontal, AlignStartVertical, BookMarked, Bug, FilePlus, FileX, GraduationCap, Info, Keyboard, LayoutTemplate, Maximize, MessageSquarePlus, Pencil, ScanLine, Scissors, Settings, SquarePlus, Workflow } from "lucide-react";
 import { connectClaudeCommand } from "../panels/connect/commands.ts";
 import { connectClaudeStore } from "../panels/connect/connectStore.ts";
+import { knobCommands } from "../panels/knobs/commands.ts";
 import { layoutStore } from "../shell/layoutStore.ts";
 import type { EditorSession } from "../state/session.ts";
 import { useCommands, useRegisterCommands } from "../ui/commands/CommandProvider.tsx";
@@ -114,6 +115,8 @@ export function appCommands(session: EditorSession, registry: CommandRegistry, o
     editorAlias("patch.commentAroundSelection", "patchEditor.commentSelection", { title: "Comment Selected Patches", icon: MessageSquarePlus, keywords: ["note", "frame", "group"] }),
     // Prototype
     { id: "viewer.fullscreen", title: "Full Screen Viewer", category: "Prototype", shortcut: "Mod+Shift+F", icon: Maximize, keywords: ["present", "presentation", "demo", "fullscreen"], run: () => toggleViewerFullscreen() },
+    // Knobs: Show Knobs (Mod+5), Flip Presets (Mod+'), New Knob…, New Preset, Copy Knob Differences, Convert Variables to Knobs…
+    ...knobCommands(session),
     // Help
     connectClaudeCommand(showConnect),
     { id: "help.lessons", title: "Lessons", category: "Help", icon: GraduationCap, keywords: ["tutorial", "learn", "course", "beginner", "onboarding"], run: () => learnNav.getState().open({ kind: "lessons" }) },

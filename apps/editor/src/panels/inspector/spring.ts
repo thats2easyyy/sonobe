@@ -38,10 +38,15 @@ export const SPRING_INPUTS: Readonly<Record<string, readonly string[]>> = {
   springPreset: ["preset", "duration", "bounce"],
 };
 
-function reader(node: PatchNode, spec: PatchSpec, linked: string[]) {
+/** The value a link reads when it's known without running the prototype (a knob's running value), else undefined. */
+export type LinkReader = (link: string) => unknown;
+
+function reader(node: PatchNode, spec: PatchSpec, linked: string[], readLink?: LinkReader) {
   const raw = (key: string): unknown => {
     const stored = node.inputs[key];
     if (isLinkInput(stored)) {
+      const known = readLink?.(stored.link);
+      if (known !== undefined) return known;
       linked.push(key);
       return spec.inputs.find((p) => p.key === key)?.default;
     }
@@ -59,10 +64,13 @@ function reader(node: PatchNode, spec: PatchSpec, linked: string[]) {
   };
 }
 
-/** The spring a patch node describes (exactly as its evaluator computes it); undefined for other types. */
-export function springConfigForNode(node: PatchNode, spec: PatchSpec): SpringReading | undefined {
+/**
+ * The spring a patch node describes (exactly as its evaluator computes it); undefined for other types.
+ * `readLink` supplies what linked inputs read when that's known (knobs); other linked inputs use their defaults.
+ */
+export function springConfigForNode(node: PatchNode, spec: PatchSpec, readLink?: LinkReader): SpringReading | undefined {
   const linked: string[] = [];
-  const read = reader(node, spec, linked);
+  const read = reader(node, spec, linked, readLink);
   let config: SpringConfig;
   switch (node.type) {
     case "popAnimation":
@@ -108,15 +116,20 @@ export function presetInputs(type: string, key: SpringPresetKey): Record<string,
 }
 
 /** setInput ops applying a preset to a spring patch. */
-export function planPreset(componentId: Id, patchId: Id, type: string, key: SpringPresetKey): Op[] {
+export function planPreset(componentId: Id, patchId: Id, type: string, key: SpringPresetKey, knobOf?: (port: string) => Id | undefined): Op[] {
   const inputs = presetInputs(type, key) ?? {};
-  return Object.entries(inputs).map(([port, value]): Op => ({ op: "setInput", component: componentId, target: `${patchId}.${port}`, value }));
+  return Object.entries(inputs).map(([port, value]): Op => {
+    // An input a knob drives keeps its knob: the preset tunes the knob instead.
+    const knob = knobOf?.(port);
+    return knob !== undefined ? { op: "setKnobValue", id: knob, value } : { op: "setInput", component: componentId, target: `${patchId}.${port}`, value };
+  });
 }
 
-/** The preset the node's literal inputs currently match, if any. */
-export function activePreset(node: PatchNode, spec: PatchSpec): SpringPresetKey | null {
+/** The preset the node's inputs currently match (literals, and links `readLink` knows), if any. */
+export function activePreset(node: PatchNode, spec: PatchSpec, readLink?: LinkReader): SpringPresetKey | null {
   const valueOf = (key: string): unknown => {
     const stored = node.inputs[key];
+    if (isLinkInput(stored)) return readLink?.(stored.link);
     return stored === undefined ? spec.inputs.find((p) => p.key === key)?.default : stored;
   };
   for (const preset of SPRING_PRESETS) {

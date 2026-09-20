@@ -178,7 +178,8 @@ The runs also showed where Claude struggled, and those problems are fixed. Tool 
 - **15 examples** in [examples/](examples/README.md), from Tap to Grow to Swipe Cards. Each is a project folder with a step-by-step README and scripted tests that simulate the interaction. Open them from the welcome screen or the Learn drawer.
 - **5 interactive lessons** that check your work as you go: Your first prototype, States vs pulses, Spring feel, Lists with loops, and Building with Claude.
 - **Design import** from a running app, HTML, or Claude, into real layers ([guide 12](docs/guides/12-importing-designs.md)).
-- **12 guides** in [docs/guides](docs/guides/README.md), from your first prototype through debugging, coming from Origami, working with Claude, and importing designs.
+- **Knobs and presets.** Turn any number, color or switch into a knob with a slider, tune it while the prototype runs, and flip between presets like "Shipped app" and "Proposal" with ⌘' ([guide 13](docs/guides/13-knobs-and-presets.md)).
+- **13 guides** in [docs/guides](docs/guides/README.md), from your first prototype through debugging, coming from Origami, working with Claude, importing designs, and knobs and presets.
 - **An MCP server with 45 tools** in seven groups: discovery (patch and layer docs, workflow guides), documents, reading (outline, search, diagnostics, plain-language explanations), writing (atomic batches of typed ops, and importing designs), knobs (named values to tune, and presets like "Shipped app" to compare), simulation (taps, drags, traces, simulation-only overrides and presets, screenshots), and presence and history (show what Claude is doing, restart the live viewer, undo). It also offers four prompts: `import_screen`, `prototype_interaction`, `debug_interaction`, and `explain_prototype`. The [MCP README](packages/mcp/README.md) lists every tool.
 - **The `sonobe` CLI** with `new`, `validate`, `fmt`, `outline`, `describe`, `sim`, and `mcp`.
 - **A Claude Code plugin, a Claude Desktop extension, and a Chrome extension** in [integrations/](integrations/).
@@ -209,7 +210,7 @@ Read [ARCHITECTURE.md](ARCHITECTURE.md) before contributing code.
 
 ## Learn
 
-Start with [docs/guides](docs/guides/README.md): your first prototype, states vs pulses, springs and feel, gestures, loops, components, debugging, working with Claude, and importing designs. The same guides, the lessons, and the patch reference are in the app under Help → Learn Sonobe.
+Start with [docs/guides](docs/guides/README.md): your first prototype, states vs pulses, springs and feel, gestures, loops, components, debugging, working with Claude, importing designs, and knobs and presets. The same guides, the lessons, and the patch reference are in the app under Help → Learn Sonobe.
 
 ## Contributing
 

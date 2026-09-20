@@ -75,6 +75,29 @@ describe("document store: gestures", () => {
     expect(labels()).toEqual(["Move Card", "Move Card", "Add Card"]);
   });
 
+  it("merges a run however far apart its steps come, keeps no gesture open, and ends at any other edit", () => {
+    const { store, move, labels, position, tick } = setup();
+    move(1, "begin");
+    move(2, "end");
+    const flip = (x: number) => store.getState().apply([{ op: "updateLayer", id: "card", props: { position: [x, 0] } }], { label: "Switch Presets", coalesceKey: "switch", run: true });
+    for (let x = 3; x <= 6; x++) {
+      tick(5000);
+      flip(x);
+      expect(store.getState().gesture).toBeNull();
+    }
+    expect(labels()).toEqual(["Switch Presets", "Move Card", "Add Card"]);
+    store.getState().undo();
+    expect(position()).toEqual([2, 0]);
+    store.getState().redo();
+
+    move(7);
+    flip(8);
+    expect(labels()).toEqual(["Switch Presets", "Move Card", "Switch Presets", "Move Card", "Add Card"]);
+    // A run's key without `run` doesn't join it.
+    move(9, undefined, "switch");
+    expect(labels()).toHaveLength(6);
+  });
+
   it("keeps gestures with different keys apart, and time windows without a gesture", () => {
     const { move, labels, tick } = setup();
     move(1, "begin", "a");

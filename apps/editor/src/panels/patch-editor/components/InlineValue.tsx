@@ -1,7 +1,7 @@
 /**
  * In-node literal editors for unconnected inputs: scrub or type numbers, toggle booleans, pick
  * options, layers, and colors, edit text. Each change is one undoable setInput; scrubbing merges
- * into a single history step.
+ * into a single history step. Inputs a knob drives show the knob's chip instead.
  */
 
 import { allLayers, decodeInput, defaultValue, encodeValue, formatColor, isColor, isDecodedLoop, type Value } from "@sonobe/core";
@@ -13,6 +13,7 @@ import { useContextMenu, type MenuEntry } from "../../../ui/Menu.tsx";
 import { Popover } from "../../../ui/Popover.tsx";
 import { createScrubSession, formatNumber, nudgeValue, parseNumberInput, type ScrubSession } from "../../../ui/lib/scrubMath.ts";
 import { formatNumberShort, formatValue, shortHex } from "@sonobe/core/graph";
+import { showKnobs } from "../../knobs/knobsStore.ts";
 import type { PortModel } from "../model/types.ts";
 import { usePatchEditor } from "../state/context.ts";
 
@@ -57,6 +58,36 @@ export const InlineValue = memo(function InlineValue({ port }: { port: PortModel
       return text === "—" ? null : <span className="sb-pe-value sb-pe-value--static">{text}</span>;
     }
   }
+});
+
+/**
+ * An input a knob drives: a chip with the knob's name and running value instead of a cable (the node
+ * size model in @sonobe/core/graph sizes it: 5 each side, a 10 pt glyph, 4 between the parts, the
+ * name in the 10 pt sans and the value in the 10 pt mono, at most 110 wide). Clicking it shows the
+ * knob in the Inspector's Knobs tab.
+ */
+export const KnobChip = memo(function KnobChip({ knob }: { knob: NonNullable<PortModel["knob"]> }) {
+  const { session } = usePatchEditor();
+  return (
+    <button
+      type="button"
+      className="sb-pe-value sb-pe-value--knob nodrag nopan"
+      aria-label={`Knob ${knob.name}${knob.valueText ? `, ${knob.valueText}` : ""}. Show it in Knobs`}
+      onPointerDown={stop}
+      onDoubleClick={stop}
+      onClick={(event) => {
+        event.stopPropagation();
+        showKnobs(session, knob.id);
+      }}
+    >
+      <svg className="sb-pe-value__knob" width="10" height="10" viewBox="0 0 10 10" aria-hidden>
+        <circle cx="5" cy="5" r="4" fill="none" stroke="currentColor" strokeWidth="1.25" />
+        <circle cx="5" cy="5" r="1.75" fill="currentColor" />
+      </svg>
+      <span className="sb-pe-value__name">{knob.name}</span>
+      {knob.valueText && <span className="sb-pe-value__knob-value sb-tabular">{knob.valueText}</span>}
+    </button>
+  );
 });
 
 interface ScrubProps {

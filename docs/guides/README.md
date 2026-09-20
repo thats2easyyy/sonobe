@@ -42,7 +42,7 @@ You don't need to know any code. A few guides end with code for engineers, and y
 |---|---|---|---|
 | 0 | New to prototyping, or new to patch editors | [01 Your first prototype](01-first-prototype.md), [02 ISAT](02-isat.md) | Tap to zoom, a like button, a card that expands |
 | 1 | You can make something move, but it breaks in surprising ways | [03 States and pulses](03-states-and-pulses.md), [04 Layers and layout](04-layers-and-layout.md) | Tab bars, a modal with a backdrop, a toast that hides itself, screens that lay themselves out |
-| 2 | Your prototypes work but don't feel right yet | [05 Springs and feel](05-springs-and-feel.md), [06 Gestures](06-gestures.md) | Bottom sheets, drag and snap, long-press menus, pull to refresh, collapsing headers |
+| 2 | Your prototypes work but don't feel right yet | [05 Springs and feel](05-springs-and-feel.md), [06 Gestures](06-gestures.md), then [13 Knobs and presets](13-knobs-and-presets.md) | Bottom sheets, drag and snap, long-press menus, pull to refresh, collapsing headers, and a tuned version to compare with the shipped one |
 | 3 | You want whole flows, not single interactions | [07 Loops](07-loops.md), [08 Components and variables](08-components-and-variables.md) | Feeds, carousels with page dots, photo grids, stories, onboarding |
 | 4 | You build for other people and it has to hold up | [09 Debugging](09-debugging.md), plus [handoff to engineers](05-springs-and-feel.md#handoff-to-engineers) in 05 | Anything, backed by traces, performance checks and exact numbers for engineers |
 
