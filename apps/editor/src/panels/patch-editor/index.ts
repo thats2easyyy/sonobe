@@ -58,7 +58,7 @@ export {
 } from "./model/linkSearch.ts";
 export { cablesCutByKnife, polylinesIntersect, segmentsIntersect, simplifyStroke, type CableGeometry } from "./model/knife.ts";
 export { chordFromEvent, chordOf, DEFAULT_SINGLE_KEYS, resolveSingleKeyInsert, singleKeyInserts, type SingleKeyInsert } from "./model/singleKey.ts";
-export { tidyLayout, type TidyInput, type TidyResult } from "./model/tidy.ts";
+export { elkGroupLayout } from "./model/tidy.ts";
 export { pickerItems, searchPicker, PICKER_KEYS, type PickerItem } from "./model/picker.ts";
 export {
   alignPositions,

@@ -85,6 +85,14 @@ describe("read tools", () => {
     expect(items.text).toContain("number: number = ←card_grown.on");
     expect(items.text).toContain("nope_1: not found");
     expect(items.structured.missing).toEqual(["nope_1"]);
+    // The card's scale is driven, so it has a node in the graph: automatic until someone places it.
+    expect(items.text).toContain("graph node: placed automatically next to its drivers (not saved)");
+    const card = () => (items.structured.items as { id: string; graphNode?: unknown }[]).find((i) => i.id === "card");
+    expect(card()?.graphNode).toEqual({ position: null });
+    await client.call("apply_ops", { ops: [{ op: "setNodePositions", positions: { "@card": [900, 40] } }] });
+    const placed = await client.call("get_items", { ids: ["card"] });
+    expect(placed.text).toContain("graph node: 900,40 (saved; move it with setNodePositions)");
+    expect((placed.structured.items as { graphNode?: unknown }[])[0]?.graphNode).toEqual({ position: [900, 40] });
 
     const find = await client.call("find", { patchType: "interaction" });
     expect(find.text).toContain("patch tap_card interaction");

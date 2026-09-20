@@ -3,8 +3,10 @@
  * right and bottom, full-screen viewer, and report an issue.
  */
 
-import { findLayer, resolveNodePorts, type Id } from "@sonobe/core";
+import { findLayer, type Id } from "@sonobe/core";
+import { componentNodeBoxes, HEADER_HEIGHT, NODE_MIN_WIDTH } from "@sonobe/core/graph";
 import { getDesktopHostApi } from "../host/detect.ts";
+import { nodeTextMeasurer } from "../panels/patch-editor/model/measure.ts";
 import { layoutStore } from "../shell/layoutStore.ts";
 import type { DialogService } from "../state/dialogs.ts";
 import type { EditorSession } from "../state/session.ts";
@@ -103,16 +105,8 @@ export function alignSelection(session: EditorSession, edge: AlignEdge, root: Pa
   const component = doc.components[componentId];
   const ids = session.selection.getState().patches;
   if (!component || ids.length < 2) return false;
-  const rects = patchRects(
-    component,
-    ids,
-    (id) => {
-      const node = component.patches[id];
-      const ports = node ? resolveNodePorts(doc, node, session.registry) : undefined;
-      return { inputs: ports?.inputs.length ?? 1, outputs: ports?.outputs.length ?? 1 };
-    },
-    root,
-  );
+  const boxes = componentNodeBoxes(doc, session.registry, componentId, { measure: nodeTextMeasurer() });
+  const rects = patchRects(component, ids, (id) => boxes.get(id) ?? { width: NODE_MIN_WIDTH, height: HEADER_HEIGHT }, root);
   const ops = alignOps(component, alignPatchRects(rects, edge));
   if (ops.length === 0) return false;
   return session.document.getState().apply(ops, { label: `Align ${edge} edges`, defaultComponent: componentId }).ok;

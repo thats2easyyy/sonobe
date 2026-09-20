@@ -5,6 +5,7 @@
  */
 
 import { listComponentIds } from "./document.ts";
+import { INPUTS_NODE_ID, layerNodeId, layersWithGraphNodes, OUTPUTS_NODE_ID, readNodePositions } from "./graph/graphNodes.ts";
 import { getOwn } from "./ids.ts";
 import { LAYER_TYPES } from "./layerTypes.ts";
 import { createRegistry, findPort, resolveLayerProps, resolveNodePorts, type ResolvedPort } from "./registry.ts";
@@ -17,7 +18,7 @@ export interface OutlineOptions {
   /**
    * compact: structure and connections only.
    * normal (default): plus non-default values, notes and comments.
-   * full: plus editor positions, flags and settings.
+   * full: plus editor positions (patches, and layer and interface nodes in the graph), flags and settings.
    */
   detail?: OutlineDetail;
   /** Registry for patch defaults and port order; layer defaults come from built-in layer types otherwise. */
@@ -91,7 +92,7 @@ function valueTokens(values: Record<string, InputValue>, ports: readonly Resolve
   return tokens;
 }
 
-function layerLines(doc: SonobeDocument, c: Component, layer: LayerNode, depth: number, detail: OutlineDetail, registry: Registry, out: string[]): void {
+function layerLines(doc: SonobeDocument, c: Component, layer: LayerNode, depth: number, detail: OutlineDetail, registry: Registry, out: string[], graphNodes?: ReadonlyMap<Id, string>): void {
   const props = resolveLayerProps(doc, c.id, layer, registry) ?? resolveLayerProps(doc, c.id, layer, LAYER_REGISTRY);
   const parts = [`layer ${layer.id} ${layer.type}${layer.component ? `:${layer.component}` : ""} ${quote(layer.name)}`];
   const skip = new Set<string>();
@@ -116,9 +117,11 @@ function layerLines(doc: SonobeDocument, c: Component, layer: LayerNode, depth: 
   if (detail === "full") {
     if (layer.locked) parts.push("locked");
     if (layer.collapsed) parts.push("collapsed");
+    const node = graphNodes?.get(layer.id);
+    if (node) parts.push(`node=${node}`);
   }
   out.push("  ".repeat(depth) + parts.join(" "));
-  for (const child of layer.children ?? []) layerLines(doc, c, child, depth + 1, detail, registry, out);
+  for (const child of layer.children ?? []) layerLines(doc, c, child, depth + 1, detail, registry, out, graphNodes);
 }
 
 /** Patches in dataflow order: sources before consumers, ties by editor x, then id. */
@@ -183,8 +186,17 @@ function componentOutline(doc: SonobeDocument, c: Component, detail: OutlineDeta
     if (port.link) line += ` ←${port.link}`;
     out.push(line);
   }
+  // Full detail: where graph nodes the document doesn't place on an item sit (setNodePositions), or "auto".
+  let graphNodes: Map<Id, string> | undefined;
+  if (detail === "full") {
+    const saved = readNodePositions(c);
+    const at = (nodeId: string) => (saved[nodeId] ? `${formatNumber(saved[nodeId].x)},${formatNumber(saved[nodeId].y)}` : "auto");
+    graphNodes = new Map([...layersWithGraphNodes(c)].map((id) => [id, at(layerNodeId(id))]));
+    const sides = [Object.keys(c.interface.inputs).length ? `${INPUTS_NODE_ID}=${at(INPUTS_NODE_ID)}` : "", Object.keys(c.interface.outputs).length ? `${OUTPUTS_NODE_ID}=${at(OUTPUTS_NODE_ID)}` : ""].filter(Boolean);
+    if (sides.length) out.push(`nodes ${sides.join(" ")}`);
+  }
   const layerRegistry = registry ?? LAYER_REGISTRY;
-  for (const layer of c.layers) layerLines(doc, c, layer, 0, detail, layerRegistry, out);
+  for (const layer of c.layers) layerLines(doc, c, layer, 0, detail, layerRegistry, out, graphNodes);
   for (const id of patchOrder(c)) out.push(patchLine(doc, id, c.patches[id]!, detail, registry));
   if (detail !== "compact") {
     for (const comment of c.comments) {
