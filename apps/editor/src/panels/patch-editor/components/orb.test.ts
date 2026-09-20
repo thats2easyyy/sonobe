@@ -1,11 +1,27 @@
 import { describe, expect, it } from "vitest";
-import { arrivalTime, cableArc, cubicBezier, invertEase, LANDING_MS, orbDuration, orbEase, orbGap, orbPlan, orbSampleTimes, ORB_INSET, ORB_RADIUS, ORB_SLOTS, ORB_TRAILS, profileAt, ribbon } from "./orb.ts";
+import { cablePoint } from "../model/geometry.ts";
+import { arrivalTime, cableArc, cubicBezier, invertEase, LANDING_MS, orbDuration, orbEase, orbGap, orbPlan, orbSampleTimes, ORB_INSET, ORB_RADIUS, ORB_SLOTS, ORB_TRAILS, profileAt, ribbon, sweepKeyframes, SWEEP_LENGTH, tabulate } from "./orb.ts";
 
 const px = (value: unknown) => Number(String(value).replace("px", ""));
 const points = (d: unknown) => [...String(d).matchAll(/(-?[\d.]+) (-?[\d.]+)/g)].map((m) => [Number(m[1]), Number(m[2])] as const);
+/** How far (x, y) is from the cable drawn from (sx, sy) to (tx, ty), carried on ORB_INSET past each end. */
+function offWire(sx: number, sy: number, tx: number, ty: number) {
+  const curve: [number, number][] = [];
+  for (let i = 0; i <= 3000; i++) curve.push(cablePoint(i / 3000, sx, sy, tx, ty));
+  for (let k = 0; k <= ORB_INSET; k += 0.25) curve.push([sx - k, sy], [tx + k, ty]);
+  return (x: number, y: number) => Math.sqrt(Math.min(...curve.map(([cx, cy]) => (cx - x) ** 2 + (cy - y) ** 2)));
+}
+/** Keyframes' value `pick` at time t, as the browser plays them: straight lines between keyframes. */
+function between<T>(keyframes: Keyframe[], t: number, pick: (k: Keyframe) => T, lerp: (a: T, b: T, u: number) => T): T {
+  let i = keyframes.findIndex((k) => Number(k.offset) > t) - 1;
+  if (i < 0) i = keyframes.length - 2;
+  const [a, b] = [keyframes[i]!, keyframes[i + 1]!];
+  return lerp(pick(a), pick(b), (t - Number(a.offset)) / (Number(b.offset) - Number(a.offset)));
+}
+const lerpPoints = (a: (readonly [number, number])[], b: (readonly [number, number])[], u: number) => a.map(([x, y], i) => [x + (b[i]![0] - x) * u, y + (b[i]![1] - y) * u] as const);
 /** A ribbon's stations: the midpoint and width across it at each point along it (the far end first). */
-const stations = (d: unknown) => {
-  const p = points(d);
+const stations = (d: unknown) => sides(points(d));
+const sides = (p: readonly (readonly [number, number])[]) => {
   const m = p.length / 2;
   return Array.from({ length: m }, (_, i) => {
     const [a, b] = [p[i]!, p[p.length - 1 - i]!];
@@ -60,6 +76,14 @@ describe("easing", () => {
   it("inverts", () => {
     for (const progress of [0.1, 0.5, 0.95]) expect(orbEase(invertEase(orbEase, progress))).toBeCloseTo(progress, 5);
   });
+
+  it("is looked up from a table that matches the curve", () => {
+    const exact = cubicBezier(0.2, 0.55, 0.45, 0.9);
+    const table = tabulate(exact);
+    for (let t = 0; t <= 1; t += 0.037) expect(table(t)).toBeCloseTo(exact(t), 4);
+    expect(table(0)).toBe(0);
+    expect(table(1)).toBe(1);
+  });
 });
 
 describe("cableArc", () => {
@@ -91,6 +115,34 @@ describe("cableArc", () => {
     expect(inset.pointAt(inset.length)).toEqual([520 + ORB_INSET, 260]);
   });
 
+  it("counts how far the cable has turned", () => {
+    const straight = cableArc(0, 0, 300, 0, ORB_INSET);
+    expect(straight.turnAt(straight.length)).toBeCloseTo(0, 6);
+    // An S-bend turns down and back level: about twice its steepest angle, all told.
+    const bend = cableArc(0, 0, 60, 500, ORB_INSET);
+    let previous = 0;
+    for (let d = 0; d <= bend.length; d += 10) {
+      expect(bend.turnAt(d)).toBeGreaterThanOrEqual(previous);
+      previous = bend.turnAt(d);
+    }
+    expect(bend.turnAt(bend.length)).toBeGreaterThan(2.4);
+    expect(bend.turnAt(bend.length)).toBeLessThan(Math.PI + 0.1);
+  });
+
+  it("spreads points closer together where it bends", () => {
+    const straight = cableArc(0, 0, 300, 0);
+    const even = [...straight.spread(20, 220, 5)];
+    even.forEach((d, i) => expect(d).toBeCloseTo(20 + 50 * i, 6));
+    const bend = cableArc(0, 0, 60, 500, ORB_INSET);
+    const along = [...bend.spread(0, 200, 8)];
+    expect(along[0]).toBe(0);
+    expect(along.at(-1)).toBeCloseTo(200, 6);
+    const gaps = along.slice(1).map((d, i) => d - along[i]!);
+    // The first stretch, round the bend out of the output, gets the closest points.
+    expect(Math.min(...gaps)).toBeLessThan(Math.max(...gaps) / 2);
+    expect(gaps.indexOf(Math.min(...gaps))).toBeLessThan(3);
+  });
+
   it("gives unit normals across the direction of travel", () => {
     const arc = cableArc(0, 0, 400, 300, ORB_INSET);
     expect(arc.normalAt(0)[0]).toBeCloseTo(0, 6);
@@ -118,16 +170,26 @@ describe("profileAt", () => {
 });
 
 describe("orbSampleTimes", () => {
-  it("runs 0 to 1 in order, denser for longer cables, and stays small", () => {
-    const short = orbSampleTimes(80);
-    const long = orbSampleTimes(800);
-    for (const times of [short, long]) {
+  const trails = [{ max: 120, lag: 0.3, points: 8 }];
+
+  it("runs 0 to 1 in order, and has a keyframe at each break", () => {
+    for (const arc of [cableArc(0, 0, 80, 10, ORB_INSET), cableArc(0, 0, 900, 200, ORB_INSET), cableArc(0, 0, 60, 500, ORB_INSET)]) {
+      const times = orbSampleTimes(arc, trails, [0.37]);
       expect(times[0]).toBe(0);
       expect(times.at(-1)).toBe(1);
       for (let i = 1; i < times.length; i++) expect(times[i]!).toBeGreaterThan(times[i - 1]!);
+      expect(times.some((t) => Math.abs(t - 0.37) < 0.021)).toBe(true);
     }
-    expect(long.length).toBeGreaterThan(short.length);
-    expect(orbSampleTimes(5000).length).toBeLessThanOrEqual(13 + 15);
+  });
+
+  it("comes closer together where the cable bends, and stays small", () => {
+    const flat = orbSampleTimes(cableArc(0, 0, 500, 0, ORB_INSET), trails);
+    const steep = orbSampleTimes(cableArc(0, 0, 60, 500, ORB_INSET), trails);
+    expect(steep.length).toBeGreaterThan(flat.length);
+    // A cable doubling back on itself is about the worst.
+    expect(orbSampleTimes(cableArc(0, 0, -300, 120, ORB_INSET), trails).length).toBeLessThan(60);
+    // A straight one needs only the easing's.
+    expect(flat.length).toBeLessThanOrEqual(20);
   });
 });
 
@@ -189,16 +251,49 @@ describe("orbPlan", () => {
   it("keeps each trail behind the head, its widest point on it", () => {
     for (const name of ORB_TRAILS) {
       const keyframes = full.trails()[name];
-      expect(keyframes.map((k) => k.offset)).toEqual(full.head.map((k) => k.offset));
+      expect(keyframes[0]!.offset).toBe(0);
+      expect(keyframes.at(-1)!.offset).toBe(1);
       const size = points(keyframes[0]!.d).length;
-      keyframes.forEach((k, i) => {
+      for (const k of keyframes) {
         expect(points(k.d)).toHaveLength(size);
         const s = stations(k.d);
-        const head = s.at(-3)!;
-        expect(head.x).toBeCloseTo(px(full.head[i]!.cx), 1);
-        expect(head.y).toBeCloseTo(px(full.head[i]!.cy), 1);
+        const front = s.at(-3)!;
+        const [hx, hy] = arc.pointAt(arc.length * orbEase(Number(k.offset)));
+        expect(front.x).toBeCloseTo(hx, 0);
+        expect(front.y).toBeCloseTo(hy, 0);
         expect(s[0]!.width).toBeCloseTo(0, 1);
-      });
+      }
+    }
+  });
+
+  it("stays on the wire between keyframes, round a tight bend too", () => {
+    // Tick to a node straight below it, which cut across the bend: the head was 7 units off it.
+    for (const [sx, sy, tx, ty] of [
+      [100, 50, 160, 550],
+      [100, 50, 80, 350],
+      [100, 50, -200, 170],
+      [100, 50, 380, -10],
+    ] as const) {
+      const bent = cableArc(sx, sy, tx, ty, ORB_INSET);
+      const plan = orbPlan(bent, "full");
+      const trails = plan.trails();
+      const off = offWire(sx, sy, tx, ty);
+      let worst = 0;
+      for (let t = 0; t <= 1; t += 1 / 150) {
+        const [x, y] = between(plan.head, t, (k) => [px(k.cx), px(k.cy)] as const, (a, b, u) => [a[0] + (b[0] - a[0]) * u, a[1] + (b[1] - a[1]) * u] as const);
+        worst = Math.max(worst, off(x, y));
+        for (const name of ORB_TRAILS) {
+          if (between(trails[name], t, (k) => Number(k.fillOpacity), (a, b, u) => a + (b - a) * u) < 0.05) continue;
+          const middle = sides(between(trails[name], t, (k) => points(k.d), lerpPoints)).slice(0, -2);
+          // Each point's midline, and halfway along the straight edge to the next.
+          middle.forEach((m, i) => {
+            worst = Math.max(worst, off(m.x, m.y));
+            const next = middle[i + 1];
+            if (next) worst = Math.max(worst, off((m.x + next.x) / 2, (m.y + next.y) / 2));
+          });
+        }
+      }
+      expect(worst).toBeLessThan(1.2);
     }
   });
 
@@ -223,8 +318,80 @@ describe("orbPlan", () => {
   });
 
   it("sends a smaller, fainter orb for a boolean turning off", () => {
+    // Its head's fainter color is a gradient of its own, per theme (patch-editor.css).
     expect(Math.max(...dim.head.map((k) => px(k.r)))).toBeLessThan(ORB_RADIUS * 0.7);
-    expect(Math.max(...dim.head.map((k) => Number(k.fillOpacity)))).toBeLessThan(0.7);
+    for (const name of ORB_TRAILS) expect(Math.max(...dim.trails()[name].map((k) => Number(k.fillOpacity)))).toBeLessThan(0.8);
+    expect(Math.max(...dim.flare.map((k) => Number(k.fillOpacity)))).toBeLessThan(0.8);
     expect(dim.duration).toBe(full.duration);
+  });
+
+  it("measures how much of the wire the head has passed", () => {
+    expect(full.front(0)).toBe(0);
+    expect(full.front(1)).toBe(1);
+    expect(full.front(0.5)).toBeGreaterThan(0.5);
+    let previous = 0;
+    for (let t = 0; t <= 1; t += 0.05) {
+      expect(full.front(t)).toBeGreaterThanOrEqual(previous);
+      previous = full.front(t);
+    }
+  });
+});
+
+describe("sweepKeyframes", () => {
+  const plan = orbPlan(cableArc(100, 50, 520, 260, ORB_INSET), "full");
+  /** The stretches a keyframe's dashes light, as fractions of the cable: [0, a] and [a + b, a + b + c]. */
+  const lit = (k: Keyframe) => {
+    const [a, b, c, gap] = String(k.strokeDasharray).split(" ").map(Number) as [number, number, number, number];
+    expect(gap).toBe(SWEEP_LENGTH);
+    return [
+      [0, a / SWEEP_LENGTH],
+      [(a + b) / SWEEP_LENGTH, Math.min(1, (a + b + c) / SWEEP_LENGTH)],
+    ].filter(([from, to]) => to - from > 1e-6);
+  };
+
+  it("lights the wire behind the head for a boolean turning on", () => {
+    const keyframes = sweepKeyframes(plan, true);
+    expect(keyframes.map((k) => k.offset)).toEqual(plan.times);
+    expect(lit(keyframes[0]!)).toEqual([]);
+    expect(lit(keyframes.at(-1)!)).toEqual([[0, 1]]);
+    for (const k of keyframes.slice(1, -1)) {
+      const [first, ...rest] = lit(k);
+      expect(rest).toEqual([]);
+      expect(first![0]).toBe(0);
+      expect(first![1]).toBeCloseTo(plan.front(Number(k.offset)), 4);
+    }
+  });
+
+  it("darkens it behind the head for one turning off", () => {
+    const keyframes = sweepKeyframes(plan, false);
+    expect(lit(keyframes[0]!)).toEqual([[0, 1]]);
+    expect(lit(keyframes.at(-1)!)).toEqual([]);
+    const middle = keyframes[Math.floor(keyframes.length / 2)]!;
+    const [only] = lit(middle);
+    expect(only![0]).toBeCloseTo(plan.front(Number(middle.offset)), 4);
+    expect(only![1]).toBe(1);
+  });
+
+  it("lets the lit stretch between a quick tap's two orbs travel on", () => {
+    // Off 150 ms after on: lit from the second head up to the first.
+    const elapsed = 150;
+    const keyframes = sweepKeyframes(plan, false, { plan, elapsed });
+    for (const k of keyframes) {
+      const t = Number(k.offset);
+      const stretch = lit(k);
+      const first = plan.front(Math.min(1, (elapsed + t * plan.duration) / plan.duration));
+      if (first - plan.front(t) < 1e-3) continue;
+      expect(stretch).toHaveLength(1);
+      expect(stretch[0]![0]).toBeCloseTo(plan.front(t), 3);
+      expect(stretch[0]![1]).toBeCloseTo(first, 3);
+    }
+    expect(lit(keyframes.at(-1)!)).toEqual([]);
+    // And on again, after an off: lit behind the new head and ahead of the old one's.
+    const again = sweepKeyframes(plan, true, { plan, elapsed });
+    const middle = again[Math.floor(again.length / 3)]!;
+    const stretches = lit(middle);
+    expect(stretches[0]![0]).toBe(0);
+    expect(stretches.at(-1)![1]).toBe(1);
+    expect(lit(again.at(-1)!)).toEqual([[0, 1]]);
   });
 });

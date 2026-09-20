@@ -7,7 +7,7 @@
  * doesn't stall the frame it fires in.
  */
 
-import { cableArc, LANDING_MS, orbGap, orbPlan, ORB_INSET, ORB_SLOTS, ORB_TRAILS, type CableArc, type OrbPlan, type OrbTone } from "./orb.ts";
+import { cableArc, LANDING_MS, orbGap, orbPlan, ORB_INSET, ORB_SLOTS, ORB_TRAILS, sweepKeyframes, type CableArc, type OrbPlan, type OrbTone } from "./orb.ts";
 import { createFrameQueue, type FrameQueue } from "./orbSchedule.ts";
 
 const FLASH_MS = 320;
@@ -31,6 +31,16 @@ export interface OrbFlight {
    * another and play again.
    */
   play(root: Element, landing: Element | null, tone: OrbTone, ends: OrbEnds, reduced: boolean): { done: number; gap: number } | null;
+  /**
+   * Carry a boolean's glow along the cable with the orb that just left: light `sweep` (a copy of the
+   * cable's glow) behind the head for `on`, or darken it, and call `done` once the head is in. A
+   * sweep still going when the next starts hands its front on to it.
+   */
+  sweep(sweep: Element | null, tone: OrbTone, ends: OrbEnds, on: boolean, done: () => void): void;
+  /** Whether a sweep is going. */
+  sweeping(): boolean;
+  /** Stop the sweep without calling its `done`. */
+  stopSweep(): void;
   /** The elements unmounted: drop the animations built for them. */
   reset(): void;
 }
@@ -68,6 +78,7 @@ export function createOrbFlight(): OrbFlight {
   let arc: CableArc | null = null;
   let plans: Partial<Record<OrbTone, OrbPlan>> = {};
   let slots: (Slot | undefined)[] = [];
+  let sweep: { animation: Animation; plan: OrbPlan; el: Element } | null = null;
 
   const planFor = (tone: OrbTone, { sx, sy, tx, ty }: OrbEnds): OrbPlan => {
     const ends = `${sx} ${sy} ${tx} ${ty}`;
@@ -78,6 +89,12 @@ export function createOrbFlight(): OrbFlight {
       for (const slot of slots) slot?.built.clear();
     }
     return (plans[tone] ??= orbPlan(arc, tone));
+  };
+
+  const stopSweep = () => {
+    sweep?.animation.cancel();
+    sweep?.el.removeAttribute("data-sweep");
+    sweep = null;
   };
 
   return {
@@ -107,6 +124,9 @@ export function createOrbFlight(): OrbFlight {
       for (const running of slot?.playing ?? []) running.cancel();
       if (!slot || slot.el !== el || slot.land !== land || slot.far !== far) slots[index] = slot = { el, land, far, built: new Map(), playing: [], until: 0 };
       slot.until = now + done;
+      // The dim head's gradient, per theme (patch-editor.css).
+      el.setAttribute("data-tone", tone);
+      land?.setAttribute("data-tone", tone);
       let list = slot.built.get(plan);
       if (list) {
         for (const a of list) a.play();
@@ -131,7 +151,26 @@ export function createOrbFlight(): OrbFlight {
       slot.playing = list;
       return { done, gap };
     },
+    sweep(el, tone, ends, on, done) {
+      const plan = planFor(tone, ends);
+      const running = sweep?.animation.playState === "running" ? sweep : null;
+      const before = running ? { plan: running.plan, elapsed: Number(running.animation.currentTime ?? 0) } : undefined;
+      stopSweep();
+      if (!el) return done();
+      // Held at its end, then let go along with the cable's hold (in `done`), so nothing flickers.
+      const animation = el.animate(sweepKeyframes(plan, on, before), { duration: plan.duration, fill: "forwards" });
+      el.setAttribute("data-sweep", "");
+      sweep = { animation, plan, el };
+      animation.onfinish = () => {
+        if (sweep?.animation !== animation) return;
+        stopSweep();
+        done();
+      };
+    },
+    sweeping: () => sweep !== null,
+    stopSweep,
     reset() {
+      stopSweep();
       slots = [];
     },
   };

@@ -1041,6 +1041,8 @@ textarea.sb-pe-title-input {
   --sb-orb-core: #fff;
   --sb-orb-hot: color-mix(in oklab, var(--sb-cable) 30%, #fff);
   --sb-orb-halo: var(--sb-cable);
+  /* A lighter shade of the cable's color, for the trails over the wire. */
+  --sb-orb-lit: color-mix(in oklab, var(--sb-cable) 62%, #fff);
   pointer-events: none;
 }
 
@@ -1082,6 +1084,31 @@ textarea.sb-pe-title-input {
   stop-opacity: 0;
 }
 
+/* A boolean turning off sends a smaller orb that's all color, no white-hot core. */
+.sb-pe-orb__slot[data-tone="dim"] .sb-pe-orb__head {
+  fill: var(--sb-orb-dim);
+}
+
+.sb-pe-orb__dim-core {
+  stop-color: var(--sb-orb-lit);
+  stop-opacity: 0.95;
+}
+
+.sb-pe-orb__dim-hot {
+  stop-color: var(--sb-cable);
+  stop-opacity: 0.8;
+}
+
+.sb-pe-orb__dim-color {
+  stop-color: var(--sb-cable);
+  stop-opacity: 0.4;
+}
+
+.sb-pe-orb__dim-glow {
+  stop-color: var(--sb-orb-halo);
+  stop-opacity: 0.1;
+}
+
 /* The landing's flare lights the input's dot from inside. */
 .sb-pe-orb__flare-core {
   stop-color: var(--sb-orb-core);
@@ -1099,11 +1126,11 @@ textarea.sb-pe-title-input {
 
 /* The trails are filled shapes, over `.sb-pe-cable path { fill: none }`. */
 .sb-pe-orb .sb-pe-orb__wake {
-  fill: color-mix(in srgb, var(--sb-orb-hot) 60%, transparent);
+  fill: color-mix(in srgb, var(--sb-orb-lit) 70%, transparent);
 }
 
 .sb-pe-orb .sb-pe-orb__tail {
-  fill: color-mix(in srgb, var(--sb-cable) 85%, transparent);
+  fill: color-mix(in srgb, var(--sb-orb-lit) 88%, transparent);
 }
 
 .sb-pe-orb .sb-pe-orb__streak {
@@ -1116,6 +1143,37 @@ textarea.sb-pe-title-input {
 }
 
 /*
+ * A boolean's glow changes with its orb. From the change until the orb is in, the cable hides its own
+ * glow (Orb sets data-orb-hold to what it showed before), and the sweep, a copy of that glow, shows it
+ * instead: on or off as it was, then lit or darkened behind the head as the orb carries the change.
+ */
+.sb-pe-cable[data-orb-hold]:not([data-selected], [data-splice]) .sb-pe-cable__glow,
+.sb-pe-cable:is([data-selected], [data-splice]) .sb-pe-orb__sweep {
+  visibility: hidden;
+}
+
+.sb-pe-orb .sb-pe-orb__sweep {
+  stroke: var(--sb-cable);
+  stroke-width: 7;
+  stroke-linecap: butt;
+  stroke-opacity: 0;
+}
+
+/* The glow's opacity (.sb-pe-cable__glow). */
+.sb-pe-cable[data-orb-hold="on"] .sb-pe-orb__sweep,
+.sb-pe-orb .sb-pe-orb__sweep[data-sweep] {
+  stroke-opacity: 0.2;
+}
+
+.sb-pe-cable[data-orb-hold="off"][data-live]:not([data-selected]) .sb-pe-cable__wire {
+  stroke-width: 2;
+}
+
+.sb-pe-cable[data-orb-hold="on"]:not([data-live], [data-selected]) .sb-pe-cable__wire {
+  stroke-width: 2.5;
+}
+
+/*
  * On a light canvas white reads as a gap in the wire, so nothing is white: the orb is a lighter, more
  * vivid shade of the cable's color, in a pale tint of it, like colored light on paper, and the landing
  * glows around the input's dot instead of covering it. (Without relative colors, the fallback is a
@@ -1125,6 +1183,7 @@ textarea.sb-pe-title-input {
   --sb-orb-core: var(--sb-cable);
   --sb-orb-hot: var(--sb-cable);
   --sb-orb-halo: color-mix(in oklab, var(--sb-cable) 55%, #fff);
+  --sb-orb-lit: var(--sb-cable);
 }
 
 @supports (color: oklch(from red l c h)) {
@@ -1132,6 +1191,7 @@ textarea.sb-pe-title-input {
     --sb-orb-core: oklch(from var(--sb-cable) calc(l + 0.16) calc(c * 1.2) h);
     --sb-orb-hot: oklch(from var(--sb-cable) calc(l + 0.08) calc(c * 1.25) h);
     --sb-orb-halo: oklch(from var(--sb-cable) calc(l + 0.14) calc(c * 1.1) h);
+    --sb-orb-lit: oklch(from var(--sb-cable) calc(l + 0.06) calc(c * 1.2) h);
   }
 }
 
@@ -1141,6 +1201,25 @@ textarea.sb-pe-title-input {
 
 [data-theme="light"] .sb-pe-orb__glow {
   stop-opacity: 0.32;
+}
+
+/* The turn-off orb keeps a strong core, so it still reads on the pale canvas. */
+[data-theme="light"] .sb-pe-orb__dim-core {
+  stop-color: var(--sb-orb-core);
+  stop-opacity: 1;
+}
+
+[data-theme="light"] .sb-pe-orb__dim-hot {
+  stop-color: var(--sb-orb-hot);
+  stop-opacity: 0.95;
+}
+
+[data-theme="light"] .sb-pe-orb__dim-color {
+  stop-opacity: 0.6;
+}
+
+[data-theme="light"] .sb-pe-orb__dim-glow {
+  stop-opacity: 0.22;
 }
 
 [data-theme="light"] .sb-pe-orb .sb-pe-orb__wake {
@@ -1181,9 +1260,23 @@ textarea.sb-pe-title-input {
   stroke: color-mix(in srgb, var(--sb-cable) 40%, transparent);
 }
 
-/* The Settings motion switch, like the OS setting, keeps the output's pulse ring from growing. */
-:root[data-reduced-motion="true"] .sb-pe-pulse-ring {
-  animation-name: sb-pe-fade;
+/*
+ * And the output's pulse ring fades in place instead of growing, with Settings → Motion → Reduce or
+ * with the OS setting while Motion is System (base.css makes other interface animation instant).
+ */
+:root:is([data-motion="reduce"], [data-reduced-motion="true"]) .sb-pe-pulse-ring {
+  animation: sb-pe-fade 420ms var(--ease-out) forwards !important;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root:not([data-motion="full"]) .sb-pe-pulse-ring {
+    animation: sb-pe-fade 420ms var(--ease-out) forwards !important;
+  }
+
+  /* Motion → Full grows it whatever the OS says. */
+  :root[data-motion="full"] .sb-pe-pulse-ring {
+    animation-name: sb-pe-pulse-ring;
+  }
 }
 
 .sb-pe-cable__glyph circle:first-of-type {

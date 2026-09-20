@@ -32,7 +32,7 @@ The first two finish Stage 4. The rest are Stage 5.
 
 ## Stage 3: Parity and polish
 - [x] Patch editor power features: link-drag search, knife cut, ⌘-drag splice onto a wire, option-drag duplicate, single-key inserts, Tidy Up (within each comment frame), comments, components (enter/exit, publish ports), variables, live values on hover, cable orbs, loop badges
-- [x] Cable orbs: a pulse, or a boolean turning on, sends a glowing orb with a tapered comet tail along its cables that flares and ripples on the input's dot; a boolean turning off sends a fainter one. A node's outgoing orbs wait for the one flying into it to land. Two in flight per cable (a boolean's last change is held, never dropped), simplified at far zoom, a still flash with reduced motion, and no white in the light theme
+- [x] Cable orbs: a pulse, or a boolean turning on, sends a glowing orb with a tapered comet tail along its cables that flares and ripples on the input's dot; a boolean turning off sends a fainter one, and its cable's glow changes with the orb. A node's outgoing orbs wait for the one flying into it to land. Tails follow tight bends. Two in flight per cable (a boolean's last change is held, never dropped), simplified at far zoom, a still flash with reduced motion, and no white in the light theme
 - [x] Canvas: direct manipulation, snapping, insert shapes and text, alignment tools
 - [x] Layer ↔ patch bridges: Touch button, inspector property links, drag a cable onto a property
 - [x] Viewer: device picker, frame, restart, hit-target overlay, pop-out window, LAN web player with QR code

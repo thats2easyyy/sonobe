@@ -1,32 +1,48 @@
 /**
  * Cable orbs: a pulse sends a glowing orb along its cable, and a boolean sends one when it turns on
  * and a fainter one when it turns off. They're Web Animations on reused elements, an orb out of a
- * node waits for the one flying into it to land, a quick tap still shows its turn-off, reduced motion
- * flashes the cable instead, and a cable that goes quiet unmounts its orb.
+ * node waits for the one flying into it to land, a boolean's glow keeps its old state until its orb
+ * leaves, a quick tap still shows its turn-off, reduced motion flashes the cable instead, and a cable
+ * that goes quiet unmounts its orb.
  */
 
 import { expect, test, type Page } from "@playwright/test";
 import { collectConsoleProblems, hook, openEditor } from "./helpers.ts";
 
-/** Record every orb head that starts playing: when, on which cable, and its tone. */
+interface Launch {
+  t: number;
+  cable: string;
+  tone: string;
+  /** The glow the cable was holding (data-orb-hold), and whether its own glow showed. */
+  hold: string | null;
+  glow: boolean;
+}
+
+/** Record every orb head that starts playing: when, on which cable, its tone, and the cable's glow then. */
 async function recordLaunches(page: Page) {
   await page.addInitScript(() => {
-    const launches: { t: number; cable: string | null | undefined; tone: string }[] = [];
+    const launches: Launch[] = [];
     (window as unknown as { __orbLaunches: typeof launches }).__orbLaunches = launches;
     const play = Animation.prototype.play;
     Animation.prototype.play = function (this: Animation) {
-      const effect = this.effect as KeyframeEffect | null;
-      const target = effect?.target as Element | null | undefined;
-      if (effect && target?.classList.contains("sb-pe-orb__head")) {
-        const peak = Math.max(...effect.getKeyframes().map((k) => Number(k.fillOpacity ?? 0)));
-        launches.push({ t: performance.now(), cable: target.closest(".react-flow__edge")?.getAttribute("data-id"), tone: peak === 1 ? "full" : "dim" });
+      const target = (this.effect as KeyframeEffect | null)?.target as Element | null | undefined;
+      if (target?.classList.contains("sb-pe-orb__head")) {
+        const cable = target.closest(".sb-pe-cable");
+        const glow = cable?.querySelector(".sb-pe-cable__glow");
+        launches.push({
+          t: performance.now(),
+          cable: target.closest(".react-flow__edge")?.getAttribute("data-id") ?? "",
+          tone: target.closest(".sb-pe-orb__slot")?.getAttribute("data-tone") ?? "",
+          hold: cable?.getAttribute("data-orb-hold") ?? null,
+          glow: !!glow && getComputedStyle(glow).visibility === "visible",
+        });
       }
       return play.call(this);
     };
   });
 }
 
-const launches = (page: Page) => page.evaluate(() => (window as unknown as { __orbLaunches: { t: number; cable: string; tone: string }[] }).__orbLaunches);
+const launches = (page: Page) => page.evaluate(() => (window as unknown as { __orbLaunches: Launch[] }).__orbLaunches);
 
 async function buildTicker(page: Page) {
   await hook(page, (s) => s.layout().setViewMode("patches"));
@@ -65,6 +81,13 @@ test("pulses and boolean changes send orbs along their cables, each waiting for 
   const follows = seen.filter((l) => l.cable === value).map((l) => l.t - Math.max(...pulses.filter((t) => t <= l.t)));
   expect(Math.max(...follows)).toBeGreaterThan(180);
 
+  // Its glow changes with it, not before: until the orb leaves, the cable holds the glow it had
+  // (off before a turn-on, on before a turn-off) and hides its own.
+  for (const l of seen.filter((l) => l.cable === value)) {
+    expect(l.hold).toBe(l.tone === "full" ? "off" : "on");
+    expect(l.glow).toBe(false);
+  }
+
   // The landing is drawn above the nodes, in React Flow's viewport portal.
   await expect(page.locator(".react-flow__viewport-portal .sb-pe-orb-landing").first()).toBeAttached();
 
@@ -78,6 +101,7 @@ test("pulses and boolean changes send orbs along their cables, each waiting for 
   expect((await hook(page, (s) => s.apply([{ op: "setInput", target: "orb_tick.enabled", value: false }], "Stop ticking"))).ok).toBe(true);
   await expect(page.locator(".sb-pe-orb")).toHaveCount(0, { timeout: 10_000 });
   await expect(page.locator(".sb-pe-orb-landing")).toHaveCount(0);
+  await expect(page.locator(".sb-pe-cable[data-orb-hold]")).toHaveCount(0);
   expect(problems).toEqual([]);
 });
 
