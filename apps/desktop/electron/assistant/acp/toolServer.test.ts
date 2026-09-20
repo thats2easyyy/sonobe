@@ -126,6 +126,12 @@ describe("the Assistant's tool endpoint", () => {
     expect(calls.map((c) => [c.args, c.toolUseId])).toEqual([[{ detail: "compact" }, "toolu_02"]]);
   });
 
+  it("sends no MCP instructions: the tool guide is in the session's system prompt, and Claude Code would add them to the first message too", async () => {
+    const client = await connectLegacy(server.register("7", chat().handler));
+    expect(client.getServerVersion()).toMatchObject({ name: "sonobe", version: "0.1.0-test" });
+    expect(client.getInstructions()).toBeUndefined();
+  });
+
   it("forwards the handler's progress to the call's progress token", async () => {
     const { handler } = chat(async (_name, _args, options) => {
       options.onProgress("Rendering the HTML");

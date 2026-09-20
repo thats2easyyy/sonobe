@@ -2,7 +2,8 @@ import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
 import path from "node:path";
 import type { BetaTextBlockParam } from "@anthropic-ai/sdk/resources/beta/messages/messages";
-import type { SonobeHost } from "@sonobe/mcp";
+import { createHeadlessHost, type HeadlessHost, type SonobeHost } from "@sonobe/mcp";
+import { createPatchRegistry } from "@sonobe/patches";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { buildHandoffScript, handoffMcpConfig, type HandoffOptions } from "../claude-handoff.ts";
 import { createSecretStore, createTestCipher, type SecretStore } from "../secrets.ts";
@@ -12,9 +13,9 @@ import { CODE_TOOL_NAMES, CodeFolderError, type CodeFolderKey, type CodeFolderSt
 import { createConnectionStore } from "./connection.ts";
 import { emptyUsage } from "./models.ts";
 import { ASSISTANT_IPC, ASSISTANT_KEY_SECRET, type AssistantCodeFolderLinkResult, type AssistantCodeFolderStatus, type AssistantEvent, type AssistantRunResult, type AssistantSendRequest, type AssistantStatus, type AssistantSubscriptionStatus, type HandoffResult } from "./protocol.ts";
-import { keyHint, registerAssistant, type AssistantIpcEvent, type AssistantIpcMain, type AssistantSender, type RegisterAssistantOptions } from "./register.ts";
+import { keyHint, registerAssistant, type AssistantIpcEvent, type AssistantIpcMain, type AssistantSender, type RegisterAssistantOptions, type SubscriptionSetup } from "./register.ts";
 import { FAKE_TOOLS, fakeBridge, scriptedClient, text, type FakeTurn, type ScriptedClient } from "./testing.ts";
-import type { LocalTools } from "./toolBridge.ts";
+import type { LocalTools, ToolBridge } from "./toolBridge.ts";
 
 interface FakeSender extends AssistantSender {
   sent: { channel: string; payload: unknown }[];
@@ -485,6 +486,10 @@ function fakeSubscription() {
       state.calls.push("sign in");
       return { ok: true };
     },
+    async shutdown() {
+      state.calls.push("shutdown");
+      state.running.clear();
+    },
     async dispose() {
       state.disposed = true;
     },
@@ -495,13 +500,13 @@ function fakeSubscription() {
 describe("the Claude subscription (experimental)", () => {
   const KEY = "sk-ant-api03-abcdefghijklmnop3f9a";
 
-  function withSubscription(turns: FakeTurn[] = [], register: Partial<RegisterAssistantOptions> = {}) {
+  function withSubscription(turns: FakeTurn[] = [], register: Partial<RegisterAssistantOptions> = {}, subscription: Partial<SubscriptionSetup> = {}) {
     const sub = fakeSubscription();
     const logs: string[] = [];
     const bridges: string[] = [];
     const h = setup(turns, {
       register: {
-        subscription: { sessionsDir: path.join(dir, "assistant", "claude"), createAgent: () => sub.engine },
+        subscription: { sessionsDir: path.join(dir, "assistant", "claude"), createAgent: () => sub.engine, ...subscription },
         createToolBridge: (_host, _guides, provider) => {
           bridges.push(provider);
           return fakeBridge(() => text("ok"));
@@ -518,7 +523,7 @@ describe("the Claude subscription (experimental)", () => {
   it("starts with the switch off and the API key, and says so", async () => {
     const { invoke, logs } = withSubscription();
     expect(await invoke<AssistantStatus>(fakeSender(1), ASSISTANT_IPC.status)).toMatchObject({
-      connection: { subscriptionEnabled: false, provider: "api_key", active: "api_key" },
+      connection: { available: true, subscriptionEnabled: false, provider: "api_key", active: "api_key" },
       subscription: { state: "unknown", kind: null },
       chatProvider: null,
     });
@@ -563,12 +568,13 @@ describe("the Claude subscription (experimental)", () => {
     expect(sub.state.calls).toEqual([]);
     await invoke(window, ASSISTANT_IPC.setConnection, { provider: "subscription" });
     await invoke(window, ASSISTANT_IPC.setConnection, { subscriptionEnabled: false });
-    expect(sub.state.calls).toEqual(["reset 1", "reset 1"]);
+    // Turning the switch off also stops the subscription everywhere.
+    expect(sub.state.calls).toEqual(["reset 1", "reset 1", "shutdown"]);
     // Fields and values it doesn't know change nothing.
     for (const junk of [{ provider: "claude_ai" }, { subscriptionEnabled: "yes" }, { active: "subscription" }, "subscription", null]) {
-      expect((await invoke<AssistantStatus>(window, ASSISTANT_IPC.setConnection, junk)).connection).toEqual({ subscriptionEnabled: false, provider: "subscription", active: "api_key" });
+      expect((await invoke<AssistantStatus>(window, ASSISTANT_IPC.setConnection, junk)).connection).toEqual({ available: true, subscriptionEnabled: false, provider: "subscription", active: "api_key" });
     }
-    expect(sub.state.calls).toHaveLength(2);
+    expect(sub.state.calls).toHaveLength(3);
   });
 
   it("refuses a subscription chat once the switch is off, until New chat runs it on the API key", async () => {
@@ -585,6 +591,75 @@ describe("the Claude subscription (experimental)", () => {
     await invoke(subWindow, ASSISTANT_IPC.reset);
     expect(await invoke<AssistantRunResult>(subWindow, ASSISTANT_IPC.send, { text: "again" })).toMatchObject({ outcome: "completed" });
     expect(api.requests).toHaveLength(1);
+  });
+
+  it("stops the subscription in every window when the switch goes off, and keeps their chats", async () => {
+    const { invoke, sub } = withSubscription();
+    await invoke(fakeSender(1), ASSISTANT_IPC.setConnection, on);
+    await invoke(fakeSender(2), ASSISTANT_IPC.send, { text: "design a checkout" });
+    sub.state.running.add("2");
+    // Settings in window 1 turns it off: window 1's chat starts over, and the engine stops window 2's reply and the adapter.
+    await invoke(fakeSender(1), ASSISTANT_IPC.setConnection, { subscriptionEnabled: false });
+    expect(sub.state.calls).toEqual(["reset 1", "reset 1", "shutdown"]);
+    // Window 2 keeps its chat, which says the subscription is off until New chat.
+    expect(await invoke<AssistantStatus>(fakeSender(2), ASSISTANT_IPC.status)).toMatchObject({ chatProvider: "subscription", messageCount: 2 });
+    // Already off: nothing more to stop.
+    await invoke(fakeSender(2), ASSISTANT_IPC.setConnection, { subscriptionEnabled: false });
+    expect(sub.state.calls).toEqual(["reset 1", "reset 1", "shutdown"]);
+  });
+
+  it("keeps the switch off in a build that doesn't offer it, and starts nothing on the subscription", async () => {
+    const file = path.join(dir, "connection.json");
+    // Turned on in a build that offered it.
+    createConnectionStore({ file }).update(on);
+    const { invoke, sub, api, logs } = withSubscription([{ content: [{ type: "text", text: "On your key." }] }], { connection: createConnectionStore({ file }) }, { available: false });
+    const window = fakeSender(1);
+    expect((await invoke<AssistantStatus>(window, ASSISTANT_IPC.status)).connection).toEqual({ available: false, subscriptionEnabled: false, provider: "subscription", active: "api_key" });
+    expect(logs).toContain("Assistant ready (your Anthropic API key; Claude subscription: not in this build)");
+    expect((await invoke<AssistantStatus>(window, ASSISTANT_IPC.setConnection, on)).connection).toEqual({ available: false, subscriptionEnabled: false, provider: "subscription", active: "api_key" });
+    await store.set(ASSISTANT_KEY_SECRET, KEY);
+    expect(await invoke<AssistantRunResult>(window, ASSISTANT_IPC.send, { text: "hello" })).toMatchObject({ outcome: "completed" });
+    expect(api.requests).toHaveLength(1);
+    expect(await invoke(window, ASSISTANT_IPC.checkSubscription)).toMatchObject({ state: "unknown" });
+    expect(await invoke(window, ASSISTANT_IPC.signInToClaude)).toMatchObject({ ok: false });
+    expect([sub.state.runs, sub.state.calls]).toEqual([[], []]);
+    // The saved choice waits for a build that offers the switch.
+    expect(JSON.parse(await readFile(file, "utf8"))).toEqual({ subscriptionEnabled: true, provider: "subscription" });
+  });
+
+  it("gives the subscription's engine preview_design, and hides it from the API key's", async () => {
+    const host = createHeadlessHost({ registry: createPatchRegistry() });
+    await host.createDocument({ path: path.join(dir, "Noddit.sonobe"), template: "photo-zoom" });
+    // The app's canvas draws previews.
+    const canvas = Object.create(host) as HeadlessHost;
+    Object.defineProperty(canvas, "capabilities", { value: { ...host.capabilities, designPreview: true } });
+    let subscriptionTools: (() => ToolBridge) | null = null;
+    const sub = fakeSubscription();
+    const { invoke, api, registration } = setup([{ content: [{ type: "text", text: "hi" }] }], {
+      register: {
+        host: () => canvas,
+        subscription: {
+          sessionsDir: path.join(dir, "assistant", "claude"),
+          createAgent: (options) => {
+            subscriptionTools = options.tools;
+            return sub.engine;
+          },
+        },
+      },
+    });
+    try {
+      const names = (await subscriptionTools!().tools()).map((t) => t.name);
+      expect(names).toContain("preview_design");
+      expect(names).toContain("import_design");
+      await store.set(ASSISTANT_KEY_SECRET, KEY);
+      await invoke(fakeSender(1), ASSISTANT_IPC.send, { text: "hello" });
+      const apiNames = (api.requests[0]!.tools ?? []).map((t) => (t as { name: string }).name);
+      expect(apiNames).toContain("import_design");
+      expect(apiNames).not.toContain("preview_design");
+    } finally {
+      await registration.dispose();
+      await host.close();
+    }
   });
 
   it("keeps one reply at a time per window across both engines", async () => {
@@ -646,7 +721,7 @@ describe("the Claude subscription (experimental)", () => {
     expect(sub.state.disposed).toBe(true);
   });
 
-  it("wires the real engine: it says the adapter isn't installed, and lists the tools preview_design included", async () => {
+  it("wires the real engine: it says the adapter isn't installed", async () => {
     const bridges: string[] = [];
     const { invoke } = setup([], {
       register: {

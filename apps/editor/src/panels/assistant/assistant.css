@@ -55,6 +55,16 @@
   text-overflow: ellipsis;
 }
 
+/* The Claude subscription billed to something other than the plan (an API key, a gateway). */
+.sb-assistant__subtitle[data-tone="warn"] {
+  color: var(--warn-text);
+}
+
+.sb-assistant__subtitle-icon {
+  margin-right: 3px;
+  vertical-align: -1px;
+}
+
 .sb-assistant__actions {
   display: flex;
   flex: none;

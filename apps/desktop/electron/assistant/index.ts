@@ -16,7 +16,7 @@
  *                 pickFolder,                                             // the native folder dialog
  *                 handoff: { platform, dir, server, openPath },           // Open in Claude Code (../claude-handoff.ts)
  *                 connection: createConnectionStore({ file }),            // the subscription switch and pick (connection.ts)
- *                 subscription: { sessionsDir, signIn: { platform, dir, openPath } } })  // the Claude subscription (acp/)
+ *                 subscription: { available, sessionsDir, signIn: { platform, dir, openPath } } })  // the Claude subscription (acp/); available: unpackaged, or SONOBE_CLAUDE_SUBSCRIPTION=1
  *   preload.ts  attachAssistantBridge(host, ipcRenderer)   // before contextBridge.exposeInMainWorld
  *
  * Designing on the canvas (design.ts, draftStream.ts, designGuard.ts): the Design with Claude box
@@ -31,7 +31,7 @@
 export { createSubscriptionAgent, type SubscriptionAgent, type SubscriptionAgentOptions } from "./acp/engine.ts";
 export { startAssistantToolServer, type AssistantToolServer, type ToolServerHandler } from "./acp/toolServer.ts";
 export { createAssistantAgent, DEFAULT_LIMITS, requestParams, resolveLimits, systemPrompt, toAssistantError, UNPINNED_TOOLS, type AnthropicClientLike, type AssistantAgent, type AssistantAgentOptions, type AssistantEngine, type ConversationSnapshot, type MessageStreamLike } from "./agent.ts";
-export { createConnectionStore, type ConnectionStore } from "./connection.ts";
+export { createConnectionStore, type ConnectionStore, type SavedConnection } from "./connection.ts";
 export { applyOpsDeletion, DELETE_CONFIRM_THRESHOLD, deleteConfirmation, isReadOnlyRefusal, type ConfirmPrompt, type DeletionPrompt } from "./guardrails.ts";
 export { addUsage, DEFAULT_MODEL, emptyUsage, estimateCostUsd, FALLBACK_BETA, isModelId, modelInfos, MODELS, resolveModel, type ModelSpec } from "./models.ts";
 export * from "./protocol.ts";

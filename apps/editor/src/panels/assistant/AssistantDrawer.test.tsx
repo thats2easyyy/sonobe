@@ -5,6 +5,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { appPanels } from "../../app/appPanels.ts";
 import { createAssistantStore } from "./assistantStore.ts";
 import { AssistantDrawer } from "./AssistantDrawer.tsx";
+import type { AssistantController } from "./controller.ts";
+import { SubscriptionSetup } from "./SubscriptionSetup.tsx";
 import { fakeAssistantHost, NOT_INSTALLED_MESSAGE, SIGNED_OUT_MESSAGE, signedIn, subscriptionStatus, usage, type FakeAssistantHost } from "./testing.ts";
 import { ANTHROPIC_CONSOLE_KEYS_URL, ASSISTANT_KEY_SECRET } from "./types.ts";
 
@@ -258,12 +260,23 @@ describe("AssistantDrawer on the Claude subscription (experimental)", () => {
     await click(buttonByText("Sign in…"));
     expect(container.querySelector('[role="alert"]')?.textContent).toBe("Run claude-agent-acp --cli auth login in a terminal, then check again.");
 
-    // Signed in meanwhile: Check again finds it, and the chat opens.
-    host.nextCheck = signedIn;
+    // Signed in meanwhile: Check again finds it, and the chat opens. While it looks, the setup stays, with its spinner.
+    let answer!: () => void;
+    host.assistant!.checkSubscription = () =>
+      new Promise((resolve) => {
+        host.checks++;
+        answer = () => resolve(signedIn());
+      });
     await click(buttonByText("Check again"));
     expect(host.checks).toBe(2);
+    expect(text()).toContain("Checking Claude…");
+    expect(text()).toContain("Use your Claude subscription");
+    expect(text()).not.toContain("What should we build?");
+    expect(container.querySelector("textarea")).toBeNull();
+    await act(async () => answer());
+    await flush();
     expect(text()).toContain("What should we build?");
-    expect(container.querySelector(".sb-assistant__subtitle")?.textContent).toBe("Claude subscription · Claude Max");
+    expect(container.querySelector(".sb-assistant__subtitle")?.textContent).toBe("Claude Max · subscription");
   });
 
   it("shows the install command when the adapter isn't there, and copies it", async () => {
@@ -301,6 +314,97 @@ describe("AssistantDrawer on the Claude subscription (experimental)", () => {
     expect(text()).toContain("What should we build?");
   });
 
+  it("doesn't say signed in when the adapter never said which login it uses", async () => {
+    const host = fakeAssistantHost({ ...subscriptionOn, subscription: subscriptionStatus({ state: "ready", adapterVersion: "0.79.0" }) });
+    await mount(host);
+    await click(buttonByLabel("Claude subscription"));
+    expect(text()).toContain("Claude's agent adapter is running, but it didn't say which Claude account it uses. If it isn't signed in, your first message will say so.");
+    expect(text()).not.toContain("Signed in");
+    expect(container.querySelector(".sb-assistant-key__ok")).toBeNull();
+    expect(buttonByText("Check again")).toBeTruthy();
+    expect(buttonByText("Use Claude subscription")).toBeTruthy();
+  });
+
+  it("asks for the login when main says it's still being read, instead of spinning", async () => {
+    // Another window's check was running when this window read the status.
+    const host = fakeAssistantHost({ ...subscriptionOn, subscription: subscriptionStatus({ state: "checking" }) });
+    const store = await mount(host);
+    expect(host.checks).toBe(1);
+    expect(store.getState().status?.subscription).toMatchObject({ state: "ready", label: "Claude Max" });
+  });
+
+  it("says what pays when it isn't the plan: the header, the meter and the models", async () => {
+    const host = fakeAssistantHost({ ...subscriptionOn, subscription: subscriptionStatus({ state: "ready", kind: "api_key", label: "Anthropic API key", adapterVersion: "0.79.0" }) });
+    host.nextResult = (_request, emit) => {
+      emit({ type: "run_started", runId: "r1", model: "claude-sonnet-5", provider: "subscription" });
+      emit({ type: "run_finished", runId: "r1", outcome: "completed", usage: usage(21_500) });
+      return { runId: "r1", outcome: "completed", usage: usage(21_500) };
+    };
+    await mount(host);
+    const subtitle = container.querySelector(".sb-assistant__subtitle")!;
+    // What pays comes first, so a narrow header doesn't cut it; the tooltip has it all.
+    expect(subtitle.textContent).toBe("Billed to Anthropic API key");
+    expect(subtitle.getAttribute("data-tone")).toBe("warn");
+    expect(subtitle.getAttribute("title")).toBe("Claude subscription · billed to Anthropic API key");
+    await click(buttonByText("Explain how this prototype works"));
+    expect(container.querySelector(".sb-assistant-usage__text")?.textContent).toBe("22K tokens · billed to Anthropic API key");
+    expect(container.querySelector(".sb-assistant-usage")?.getAttribute("title")).toContain("not your Claude plan");
+    await click(container.querySelector('button[aria-label^="Model"]') ?? buttonByText(/Sonnet 5/));
+    expect(document.body.textContent).toContain("Billed to Anthropic API key.");
+    expect(document.body.textContent).not.toContain("Uses your Claude plan's limits.");
+  });
+
+  it("puts the plan first in the header, and says the whole subtitle on hover", async () => {
+    await mount(fakeAssistantHost({ ...subscriptionOn, subscription: signedIn() }));
+    const subtitle = container.querySelector(".sb-assistant__subtitle")!;
+    expect(subtitle.textContent).toBe("Claude Max · subscription");
+    expect(subtitle.getAttribute("title")).toBe("Claude Max · subscription");
+    expect(subtitle.getAttribute("data-tone")).toBeNull();
+  });
+
+  it("with the switch on, the API key's setup points to the subscription beside it", async () => {
+    const host = fakeAssistantHost({ connection: { subscriptionEnabled: true } });
+    await mount(host);
+    expect(text()).toContain("Use your own Anthropic API key");
+    expect(text()).not.toContain("never asks for your claude.ai login");
+    expect(text()).toContain("Sonobe never reads Claude credentials.");
+    expect(text()).toContain("Choose Claude subscription above, or connect Claude Desktop or Claude Code to Sonobe");
+  });
+
+  it("moves focus to the field once a permission card is answered, so Escape still stops the reply", async () => {
+    const host = fakeAssistantHost({ ...subscriptionOn, subscription: signedIn() });
+    host.nextResult = (_request, emit) =>
+      new Promise(() => {
+        emit({ type: "run_started", runId: "r1", model: "claude-sonnet-5", provider: "subscription" });
+        emit({
+          type: "confirm_required",
+          runId: "r1",
+          confirmationId: "p1",
+          toolUseId: "toolu_1",
+          kind: "permission",
+          title: "Allow Claude to save this prototype?",
+          message: "Claude wants to save this prototype. Claude Code asks before steps that reach outside this prototype.",
+          count: 0,
+          options: [
+            { id: "allow-once", label: "Allow", kind: "allow_once" },
+            { id: "reject", label: "Don't allow", kind: "reject_once" },
+          ],
+        });
+      });
+    await mount(host);
+    await click(buttonByText("Explain how this prototype works"));
+    expect(document.activeElement).toBe(container.querySelector('[role="alertdialog"]'));
+    await click(buttonByText("Allow"));
+    expect(host.confirmations).toEqual([["p1", true, "allow-once"]]);
+    expect(container.querySelector(".sb-assistant-confirm__result")?.textContent).toBe("Allowed");
+    const field = container.querySelector("textarea")!;
+    expect(document.activeElement).toBe(field);
+    await act(async () => {
+      document.activeElement!.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }));
+    });
+    expect(host.stops).toBe(1);
+  });
+
   it("chats on the plan: its label in the header, tokens only, and the plan's limits on the models", async () => {
     const host = fakeAssistantHost({ ...subscriptionOn, subscription: signedIn() });
     host.nextResult = (_request, emit) => {
@@ -312,7 +416,7 @@ describe("AssistantDrawer on the Claude subscription (experimental)", () => {
     };
     await mount(host);
     expect(host.checks).toBe(0);
-    expect(container.querySelector(".sb-assistant__subtitle")?.textContent).toBe("Claude subscription · Claude Max");
+    expect(container.querySelector(".sb-assistant__subtitle")?.textContent).toBe("Claude Max · subscription");
     expect(buttonByLabel("API key")).toBeNull();
     await click(buttonByText("Explain how this prototype works"));
     expect(container.querySelector(".sb-assistant-usage__text")?.textContent).toBe("22K tokens · your Claude plan");
@@ -336,6 +440,18 @@ describe("AssistantDrawer on the Claude subscription (experimental)", () => {
     await click(note!.querySelector("button"));
     expect(host.resets).toBe(1);
     expect(container.querySelector(".sb-assistant-provider-note")).toBeNull();
-    expect(container.querySelector(".sb-assistant__subtitle")?.textContent).toBe("Claude subscription · Claude Max");
+    expect(container.querySelector(".sb-assistant__subtitle")?.textContent).toBe("Claude Max · subscription");
+  });
+});
+
+describe("SubscriptionSetup", () => {
+  it("reads the login when it opens on a check it didn't start, sharing one that's running", async () => {
+    const checks = vi.fn(async () => signedIn());
+    const controller = { checkSubscription: checks, signInToClaude: vi.fn() } as unknown as AssistantController;
+    await act(async () => {
+      root.render(<SubscriptionSetup controller={controller} subscription={subscriptionStatus({ state: "checking" })} />);
+    });
+    expect(checks).toHaveBeenCalledTimes(1);
+    expect(text()).toContain("Checking Claude…");
   });
 });

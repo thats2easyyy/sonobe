@@ -12,7 +12,7 @@ import { canvasContextBlock } from "../design.ts";
 import type { AssistantCanvasContext, AssistantEvent, AssistantSendRequest } from "../protocol.ts";
 import { FAKE_TOOLS, fakeBridge, text } from "../testing.ts";
 import type { AssistantToolInfo, LocalTools, ToolCallResult } from "../toolBridge.ts";
-import { createSubscriptionAgent, NO_RUN, NOT_INSTALLED, RESTARTED, USAGE_LIMIT, type SubscriptionAgentOptions } from "./engine.ts";
+import { createSubscriptionAgent, exitDetail, MODE_NOT_SET, modelValue, NO_RUN, NOT_INSTALLED, parseCliLogin, permissionPrompt, RATE_LIMITED, RESTARTED, SESSION_ENDED, UNANNOUNCED, usageLimitMessage, type SubscriptionAgentOptions } from "./engine.ts";
 import type { AssistantToolServer, ToolServerHandler } from "./toolServer.ts";
 import { AgentExitedError, AgentStartError, type AcpAgentProcess, type AcpAgentProcessOptions, type AgentAuthStatus, type AgentExit, type ClaudeAgentSpec, type PermissionHandler } from "./types.ts";
 
@@ -27,7 +27,10 @@ const OPTIONS: PermissionOption[] = [
   { optionId: "allow-with-updates", name: "Yes, and don't ask again for Save commands", kind: "allow_always" },
   { optionId: "reject", name: "No", kind: "reject_once" },
 ];
-const MODEL_OPTIONS: SessionConfigOption[] = [{ id: "model", name: "Model", category: "model", type: "select", currentValue: "claude-sonnet-5", options: [{ value: "claude-sonnet-5", name: "Sonnet" }, { value: "claude-opus-5", name: "Opus" }, { value: "claude-haiku-4-5-20251001", name: "Haiku" }] }];
+/** The real adapter's model option (0.79.0): aliases, not model ids. */
+const MODEL_OPTIONS: SessionConfigOption[] = [{ id: "model", name: "Model", category: "model", type: "select", currentValue: "default", options: ["default", "opus[1m]", "sonnet", "sonnet[1m]", "haiku"].map((value) => ({ value, name: value })) }];
+const MODES = ["default", "acceptEdits", "plan", "auto"].map((id) => ({ id, name: id }));
+const modeConfig = (mode: string): SessionConfigOption => ({ id: "mode", name: "Mode", category: "mode", type: "select", currentValue: mode, options: MODES.map((m) => ({ value: m.id, name: m.name })) });
 
 const tool = (name: string, properties: Record<string, unknown> = {}, readOnly = false): AssistantToolInfo => ({ name, title: name.replace(/_/g, " ").replace(/^./, (c) => c.toUpperCase()), description: `${name}.`, inputSchema: { type: "object", properties: { docId: { type: "string" }, ...properties } }, readOnly });
 const TOOLS: AssistantToolInfo[] = [...FAKE_TOOLS, tool("preview_design", { component: { type: "string" }, name: { type: "string" }, html: { type: "string" }, append: { type: "string" } }), tool("save_document", { path: { type: "string" } }), tool("open_document", { ref: { type: "string" } })];
@@ -58,10 +61,22 @@ interface Behavior {
   /** Pushed right after initialize (default ACCOUNT); null pushes nothing. */
   auth?: AgentAuthStatus | null;
   startError?: Error;
+  /** initialize's answer waits for it. */
+  starting?: Promise<void>;
   newSessionError?: Error;
   /** session/new waits for it. */
   opening?: Promise<void>;
   configOptions?: SessionConfigOption[];
+  /** The permission mode session/new reports, with a "mode" config option (the person's own default); none when unset. */
+  mode?: string;
+  /** Setting the mode fails with it. */
+  modeError?: Error;
+  /** The mode a set leaves the session in (default: the one asked for). */
+  modeAfter?: string;
+  /** Setting the model fails with it. */
+  modelError?: Error;
+  /** What `--cli auth status --json` reports (null: nothing it could read). */
+  cliLogin?: AgentAuthStatus | null;
   script: Script;
 }
 
@@ -69,6 +84,7 @@ interface FakeSession {
   params: NewSessionRequest;
   listeners: Set<(notification: SessionNotification) => void>;
   permission: PermissionHandler | null;
+  mode: string | null;
 }
 
 /** An in-memory AcpAgentProcess: what the engine sees of Claude's agent adapter. */
@@ -101,7 +117,7 @@ class FakeAgent implements AcpAgentProcess {
     this.behavior = behavior;
     this.endpoints = endpoints;
     this.exited = new Promise((resolve) => (this.settleExit = resolve));
-    this.ready = behavior.startError ? Promise.reject(behavior.startError) : Promise.resolve(INIT);
+    this.ready = behavior.startError ? Promise.reject(behavior.startError) : (behavior.starting ?? Promise.resolve()).then(() => INIT);
     this.ready.catch(() => undefined);
     if (!behavior.startError && behavior.auth !== null) queueMicrotask(() => this.pushAuth(behavior.auth ?? ACCOUNT));
   }
@@ -141,8 +157,10 @@ class FakeAgent implements AcpAgentProcess {
       await this.behavior.opening;
       if (this.behavior.newSessionError) throw this.behavior.newSessionError;
       const sessionId = `fake-${++this.count}`;
-      this.sessions.set(sessionId, { params, listeners: new Set(), permission: null });
-      return { sessionId, ...(this.behavior.configOptions ? { configOptions: this.behavior.configOptions } : {}) };
+      const mode = this.behavior.mode ?? null;
+      this.sessions.set(sessionId, { params, listeners: new Set(), permission: null, mode });
+      const configOptions = [...(this.behavior.configOptions ?? []), ...(mode !== null ? [modeConfig(mode)] : [])];
+      return { sessionId, ...(mode !== null ? { modes: { currentModeId: mode, availableModes: MODES } } : {}), ...(configOptions.length ? { configOptions } : {}) };
     });
   }
 
@@ -158,6 +176,13 @@ class FakeAgent implements AcpAgentProcess {
 
   async setSessionConfigOption(params: SetSessionConfigOptionRequest) {
     this.configs.push(params);
+    if (params.configId === "mode") {
+      if (this.behavior.modeError) throw this.behavior.modeError;
+      const session = this.sessions.get(params.sessionId)!;
+      session.mode = this.behavior.modeAfter ?? String(params.value);
+      return { configOptions: [modeConfig(session.mode)] };
+    }
+    if (this.behavior.modelError) throw this.behavior.modelError;
     return { configOptions: [] };
   }
 
@@ -268,6 +293,8 @@ function harness(behavior: Partial<Behavior> = {}, options: Partial<Subscription
   const bridge = fakeBridge((name, args) => (name === "import_design" ? text("Imported “Checkout”") : name === "preview_design" ? { content: [{ type: "text", text: "Showing “Checkout” on the canvas" }], structuredContent: { docId: args.docId } } : text(`${name}: ok`)));
   bridge.tools = async () => TOOLS;
   const events: AssistantEvent[] = [];
+  const logs: string[] = [];
+  const logins: { spec: ClaudeAgentSpec; env: Record<string, string> }[] = [];
   let ids = 0;
   const agent = createSubscriptionAgent({
     tools: () => bridge,
@@ -284,6 +311,12 @@ function harness(behavior: Partial<Behavior> = {}, options: Partial<Subscription
     platform: "darwin",
     home: "/Users/test",
     documentFor: async () => ({ docId: "noddit", projectPath: "/Users/test/Noddit.sonobe" }),
+    log: (level, message) => void logs.push(`${level}: ${message}`),
+    readLogin: async (spec, env) => {
+      logins.push({ spec, env });
+      return b.cliLogin ?? null;
+    },
+    announceWaitMs: 100,
     ...options,
   });
   const send = (message: string, extra: Partial<AssistantSendRequest> = {}, onEvent?: (event: AssistantEvent) => void, id = "w1") =>
@@ -291,7 +324,7 @@ function harness(behavior: Partial<Behavior> = {}, options: Partial<Subscription
       events.push(event);
       onEvent?.(event);
     });
-  return { agent, agents, bridge, events, send, registered, revoked, endpoints, behavior: b, last: () => agents.at(-1)! };
+  return { agent, agents, bridge, events, logs, logins, send, registered, revoked, endpoints, behavior: b, last: () => agents.at(-1)! };
 }
 
 const ofType = <T extends AssistantEvent["type"]>(events: AssistantEvent[], type: T) => events.filter((e): e is Extract<AssistantEvent, { type: T }> => e.type === type);
@@ -324,6 +357,7 @@ describe("subscription engine: sessions", () => {
             settingSources: [],
             persistSession: false,
             strictMcpConfig: true,
+            allowDangerouslySkipPermissions: false,
             model: "claude-sonnet-5",
             maxTurns: 30,
             // Every tool but the ones that reach outside the prototype, which ask first.
@@ -403,38 +437,62 @@ describe("subscription engine: tools", () => {
     await h.send("a checkout", { context });
     expect(h.bridge.calls).toEqual([
       { name: "preview_design", args: { name: "Checkout", html: "<main>", docId: "noddit", component: "main" } },
-      { name: "import_design", args: { preview: true, docId: "noddit", component: "main" } },
+      // The draft already has its component.
+      { name: "import_design", args: { preview: true, docId: "noddit" } },
     ]);
   });
 
-  it("announces a call that reaches Sonobe before its tool_call, and finds the chip of a call without a tool_use id", async () => {
+  it("runs a call that reaches Sonobe just before its tool_call, once the tool_call comes", async () => {
     const h = harness({
       script: async (turn) => {
-        await turn.call("get_outline", { detail: "compact" }, { toolUseId: "toolu_early" });
+        const early = turn.call("get_outline", { detail: "compact" }, { toolUseId: "toolu_early" });
+        await tick();
         turn.update({ sessionUpdate: "tool_call", toolCallId: "toolu_early", name: "mcp__sonobe__get_outline", title: "mcp__sonobe__get_outline", kind: "other", status: "pending", rawInput: {} });
-        turn.update({ sessionUpdate: "tool_call_update", toolCallId: "toolu_early", rawInput: { detail: "compact" } });
+        expect((await early).isError).toBeFalsy();
         turn.update({ sessionUpdate: "tool_call_update", toolCallId: "toolu_early", status: "completed", content: [] });
-        turn.update({ sessionUpdate: "tool_call", toolCallId: "toolu_a", name: "mcp__sonobe__add_layers", title: "mcp__sonobe__add_layers", kind: "other", status: "pending", rawInput: {} });
-        turn.update({ sessionUpdate: "tool_call", toolCallId: "toolu_b", name: "mcp__sonobe__add_layers", title: "mcp__sonobe__add_layers", kind: "other", status: "pending", rawInput: {} });
-        await turn.call("add_layers", { layers: [] }, { toolUseId: null });
-        await turn.call("apply_ops", { ops: [] }, { toolUseId: null });
         return END;
       },
     });
     await h.send("go");
-    expect(ofType(h.events, "tool_started").map((e) => [e.toolUseId, e.detail])).toEqual([
-      ["toolu_early", ""],
-      ["toolu_a", ""],
-      ["toolu_b", ""],
-      ["sonobe-1", "0 ops"],
-    ]);
-    expect(ofType(h.events, "tool_finished").map((e) => [e.toolUseId, e.status])).toEqual([
-      ["toolu_early", "done"],
-      ["toolu_a", "done"],
-      ["sonobe-1", "done"],
-      // Announced, never called: the reply ended under it.
-      ["toolu_b", "skipped"],
-    ]);
+    expect(h.bridge.calls).toEqual([{ name: "get_outline", args: { detail: "compact" } }]);
+    expect(ofType(h.events, "tool_started").map((e) => e.toolUseId)).toEqual(["toolu_early"]);
+    expect(ofType(h.events, "tool_finished").map((e) => [e.toolUseId, e.status])).toEqual([["toolu_early", "done"]]);
+  });
+
+  it("runs only calls Claude announced on the ACP stream, each once, for the tool it named", async () => {
+    // The endpoint's URL and token sit in Claude Code's command line; the tool_use ids don't.
+    const results: ToolCallResult[] = [];
+    const h = harness({
+      script: async (turn) => {
+        turn.update({ sessionUpdate: "tool_call", toolCallId: "toolu_a", name: "mcp__sonobe__add_layers", title: "mcp__sonobe__add_layers", kind: "other", status: "pending", rawInput: {} });
+        results.push(await turn.call("add_layers", { layers: [] }, { toolUseId: null }));
+        results.push(await turn.call("add_layers", { layers: [] }, { toolUseId: "toolu_forged" }));
+        results.push(await turn.call("delete_items", { ids: ["card"] }, { toolUseId: "toolu_a" }));
+        results.push(await turn.call("add_layers", { layers: [] }, { toolUseId: "toolu_a" }));
+        results.push(await turn.call("add_layers", { layers: [] }, { toolUseId: "toolu_a" }));
+        return END;
+      },
+    });
+    await h.send("go");
+    const refused = { content: [{ type: "text", text: UNANNOUNCED }], isError: true };
+    expect(UNANNOUNCED).toBe("Sonobe only runs tools Claude asked for in this chat.");
+    expect(results).toEqual([refused, refused, refused, text("add_layers: ok"), refused]);
+    expect(h.bridge.calls).toEqual([{ name: "add_layers", args: { layers: [] } }]);
+    expect(h.logs.filter((l) => l.includes("refused"))).toHaveLength(4);
+    expect(ofType(h.events, "tool_finished").map((e) => [e.toolUseId, e.status])).toEqual([["toolu_a", "done"]]);
+  });
+
+  it("reports a call Claude Code ended before it reached Sonobe by its first line that says something, and logs all of it", async () => {
+    const h = harness({
+      script: async (turn) => {
+        turn.update({ sessionUpdate: "tool_call", toolCallId: "toolu_x", name: "mcp__sonobe__get_outline", title: "mcp__sonobe__get_outline", kind: "other", status: "pending", rawInput: {} });
+        turn.update({ sessionUpdate: "tool_call_update", toolCallId: "toolu_x", status: "failed", content: [{ type: "content", content: { type: "text", text: "```\nError: MCP server \"sonobe\" isn't connected\n  (it's still starting)\n```" } }] });
+        return END;
+      },
+    });
+    await h.send("go");
+    expect(ofType(h.events, "tool_finished")).toEqual([expect.objectContaining({ toolUseId: "toolu_x", status: "error", detail: 'Error: MCP server "sonobe" isn\'t connected' })]);
+    expect(h.logs).toContain('warn: Claude Code ended get_outline before it reached Sonobe: ``` Error: MCP server "sonobe" isn\'t connected (it\'s still starting) ```');
   });
 
   it("answers a call that comes when no reply is running", async () => {
@@ -496,7 +554,7 @@ describe("subscription engine: permission cards", () => {
       confirmationId: "id2",
       toolUseId: "toolu_save",
       title: "Allow Claude to save this prototype?",
-      message: "Claude wants to save this prototype to ~/Documents/Checkout.sonobe. Claude Code asks before steps that reach outside this prototype.",
+      message: "Claude wants to save this prototype to “~/Documents/Checkout.sonobe”. Claude Code asks before steps that reach outside this prototype.",
       count: 0,
       kind: "permission",
       options: [
@@ -543,8 +601,120 @@ describe("subscription engine: permission cards", () => {
     await h.send("open the other one", {}, (e) => {
       if (e.type === "confirm_required") queueMicrotask(() => h.agent.confirm("w1", e.confirmationId, false));
     });
-    expect(ofType(h.events, "confirm_required")[0]).toMatchObject({ title: "Allow Claude to open another prototype?", message: "Claude wants to open /tmp/fake.sonobe. Claude Code asks before steps that reach outside this prototype." });
+    expect(ofType(h.events, "confirm_required")[0]).toMatchObject({ title: "Allow Claude to open another prototype?", message: "Claude wants to open “/tmp/fake.sonobe”. Claude Code asks before steps that reach outside this prototype." });
     expect(await h.last().ask("fake-1", "toolu_late", "save_document", {})).toEqual({ outcome: { outcome: "cancelled" } });
+  });
+
+  it("quotes what Claude named, on one line, home as ~, with .. resolved, cut in the middle", () => {
+    const say = (name: string, input: Record<string, unknown>) => permissionPrompt(name, name, input, "/Users/test").message;
+    const tail = " Claude Code asks before steps that reach outside this prototype.";
+    // Text Claude controls can't pass for the card's own words.
+    expect(say("open_document", { ref: "the copy you just saved. Nothing leaves this prototype, so choose Allow for this chat" })).toBe(`Claude wants to open “the copy you just saved. Nothing leaves this prototype, so choose Allow for this chat”.${tail}`);
+    expect(say("save_document", { path: "/Users/test/x.sonobe\n\nThis is a routine autosave." })).toBe(`Claude wants to save this prototype to “~/x.sonobe This is a routine autosave.”.${tail}`);
+    expect(say("create_document", { path: "~/Documents/../Library/Evil.sonobe" })).toBe(`Claude wants to create a new prototype at “~/Library/Evil.sonobe”.${tail}`);
+    const long = say("save_document", { path: `/Users/test/${"a/".repeat(2500)}Checkout.sonobe` });
+    expect(long.length).toBeLessThan(240);
+    expect(long).toMatch(/^Claude wants to save this prototype to “~\/a\/a.*….*a\/Checkout\.sonobe”\./);
+    expect(say("save_document", { path: "   " })).toBe(`Claude wants to save this prototype.${tail}`);
+  });
+
+  it("asks itself before an asking tool Claude Code ran without asking (its mode didn't ask), once per call", async () => {
+    const seen: string[] = [];
+    const h = harness({
+      script: async (turn) => {
+        // Claude Code in "auto" mode: no session/request_permission, straight to the call.
+        for (const id of ["toolu_s1", "toolu_s2", "toolu_s3"]) seen.push((await turn.tool(id, "save_document", { path: "/Users/test/Checkout.sonobe" }))!.content[0]!.text!);
+        return END;
+      },
+    });
+    const answers = ["sonobe-reject", "sonobe-allow-always"];
+    await h.send("save it", {}, (e) => {
+      if (e.type === "confirm_required") queueMicrotask(() => h.agent.confirm("w1", e.confirmationId, false, answers.shift()));
+    });
+    // One card each for the first two; "Allow for this chat" covers the third.
+    const cards = ofType(h.events, "confirm_required");
+    expect(cards).toHaveLength(2);
+    expect(cards[0]).toMatchObject({
+      toolUseId: "toolu_s1",
+      kind: "permission",
+      title: "Allow Claude to save this prototype?",
+      message: "Claude wants to save this prototype to “~/Checkout.sonobe”. Claude Code asks before steps that reach outside this prototype.",
+      options: [
+        { id: "sonobe-allow-once", label: "Allow", kind: "allow_once" },
+        { id: "sonobe-allow-always", label: "Allow for this chat", kind: "allow_always" },
+        { id: "sonobe-reject", label: "Don't allow", kind: "reject_once" },
+      ],
+    });
+    expect(ofType(h.events, "confirm_resolved").map((e) => [e.approved, e.optionId])).toEqual([
+      [false, "sonobe-reject"],
+      [true, "sonobe-allow-always"],
+    ]);
+    expect(seen[0]).toBe("The person chose not to allow save_document in Sonobe, so it didn't run. Ask what they'd like to do instead.");
+    expect(h.bridge.calls.map((c) => c.name)).toEqual(["save_document", "save_document"]);
+    expect(ofType(h.events, "tool_finished").map((e) => [e.toolUseId, e.status])).toEqual([
+      ["toolu_s1", "declined"],
+      ["toolu_s2", "done"],
+      ["toolu_s3", "done"],
+    ]);
+  });
+
+  it("doesn't ask again for a call the person allowed on Claude Code's card, or a tool they allowed for this chat there", async () => {
+    const h = harness({
+      script: async (turn) => {
+        await turn.tool("toolu_o1", "open_document", { ref: "/tmp/a.sonobe" }, { ask: true });
+        // Allowed for this chat: Claude Code doesn't ask about the next one.
+        await turn.tool("toolu_o2", "open_document", { ref: "/tmp/b.sonobe" });
+        return END;
+      },
+    });
+    await h.send("open both", {}, (e) => {
+      if (e.type === "confirm_required") queueMicrotask(() => h.agent.confirm("w1", e.confirmationId, true, "allow-with-updates"));
+    });
+    expect(ofType(h.events, "confirm_required").map((e) => e.toolUseId)).toEqual(["toolu_o1"]);
+    expect(h.bridge.calls.map((c) => c.args.ref)).toEqual(["/tmp/a.sonobe", "/tmp/b.sonobe"]);
+  });
+
+  it("cancels its own question on Stop, and the call doesn't run", async () => {
+    const h = harness({
+      script: async (turn) => {
+        const result = await turn.tool("toolu_s", "save_document", {});
+        expect(result!.content[0]!.text).toMatch(/^The person chose not to allow save_document/);
+        await turn.cancelled;
+        return { stopReason: "cancelled" };
+      },
+    });
+    const result = await h.send("save it", {}, (e) => {
+      if (e.type === "confirm_required") queueMicrotask(() => h.agent.stop("w1"));
+    });
+    expect(result.outcome).toBe("stopped");
+    expect(ofType(h.events, "confirm_resolved")).toEqual([expect.objectContaining({ approved: false })]);
+    expect(h.bridge.calls).toEqual([]);
+  });
+});
+
+describe("subscription engine: Claude Code's permission mode", () => {
+  it("puts a session the adapter started in the person's own mode back in the mode that asks", async () => {
+    const h = harness({ mode: "auto" });
+    expect((await h.send("hello")).outcome).toBe("completed");
+    expect(h.last().configs).toEqual([{ sessionId: "fake-1", configId: "mode", value: "default" }]);
+    expect(h.last().sessions.get("fake-1")!.mode).toBe("default");
+    expect(h.logs).toContain('info: Claude Code started this chat\'s session in "auto" mode (from the person\'s own settings); Sonobe put it in "default", which asks.');
+    // Already asking: nothing to set.
+    const asking = harness({ mode: "default" });
+    await asking.send("hello");
+    expect(asking.last().configs).toEqual([]);
+  });
+
+  it("runs nothing when the mode can't be set", async () => {
+    for (const behavior of [{ mode: "acceptEdits", modeError: new RequestError(-32603, "Internal error", { details: "Invalid Mode" }) }, { mode: "plan", modeAfter: "plan" }]) {
+      const h = harness(behavior);
+      const result = await h.send("save it");
+      expect(result).toMatchObject({ outcome: "error", error: { code: "agent_failed", message: MODE_NOT_SET } });
+      expect(MODE_NOT_SET).toBe("Sonobe couldn't set Claude Code to ask before it saves or opens files, so nothing ran. Try again; if it keeps happening, update the adapter: npm install -g @agentclientprotocol/claude-agent-acp@latest");
+      expect(h.last().prompts).toEqual([]);
+      expect(h.last().closed).toEqual(["fake-1"]);
+      expect(h.revoked).toEqual(["w1#1/1"]);
+    }
   });
 });
 
@@ -655,8 +825,8 @@ describe("subscription engine: when the adapter fails", () => {
   it("says Claude isn't signed in when a session or prompt needs auth, and opens a fresh session next time", async () => {
     const h = harness({ auth: SIGNED_OUT, script: async () => Promise.reject(RequestError.authRequired()) });
     const result = await h.send("hello");
-    expect(result).toMatchObject({ outcome: "error", error: { code: "not_signed_in", message: "Claude isn't signed in on this computer. Choose Sign in (it opens Terminal), or run claude auth login in Terminal, then send your message again." } });
-    expect(h.agent.status()).toMatchObject({ state: "signed_out", kind: "none", label: "Not logged in", message: "Claude isn't signed in on this computer. Choose Sign in (it opens Terminal), or run claude auth login in Terminal, then check again." });
+    expect(result).toMatchObject({ outcome: "error", error: { code: "not_signed_in", message: "Claude isn't signed in on this computer. Choose Sign in… (it opens Terminal), or run claude-agent-acp --cli auth login in Terminal, then send your message again." } });
+    expect(h.agent.status()).toMatchObject({ state: "signed_out", kind: "none", label: "Not logged in", message: "Claude isn't signed in on this computer. Choose Sign in… (it opens Terminal), or run claude-agent-acp --cli auth login in Terminal, then choose Check again." });
     expect(h.last().closed).toEqual(["fake-1"]);
     // Signed in since: a new session, with no restart notice (the old one remembered nothing).
     h.behavior.script = echo;
@@ -668,7 +838,8 @@ describe("subscription engine: when the adapter fails", () => {
     expect(h.agent.status()).toMatchObject({ state: "ready", kind: "account", label: "Claude Max", email: "tyler@example.com", message: null });
 
     const other = harness({ newSessionError: new RequestError(-32000, "Authentication required") }, { platform: "linux" });
-    expect(await other.send("hello")).toMatchObject({ error: { code: "not_signed_in", message: "Claude isn't signed in on this computer. Run claude-agent-acp --cli auth login in a terminal, then send your message again." } });
+    expect(await other.send("hello")).toMatchObject({ error: { code: "not_signed_in", message: "Claude isn't signed in on this computer. In a terminal, run claude-agent-acp --cli auth login, then send your message again." } });
+    expect(other.agent.status().message).toBe("Claude isn't signed in on this computer. In a terminal, run claude-agent-acp --cli auth login, then choose Check again.");
   });
 
   it("teaches the install when Sonobe can't find the adapter", async () => {
@@ -697,32 +868,91 @@ describe("subscription engine: when the adapter fails", () => {
     expect(timeout.agent.status()).toMatchObject({ state: "failed", message: `Claude's agent adapter didn't start: it didn't answer within 20 seconds. ${hint}` });
     expect(timeout.last().disposed).toBe(true);
 
-    const exited = harness({ startError: new AgentExitedError({ code: 1, signal: null, stderrTail: "Error: Node.js 22 or later is required" }) });
+    const exited = harness({ startError: new AgentExitedError({ code: 1, signal: null, stderrTail: "Error: Node.js 22 or later is required\n\nNode.js v24.21.0" }) });
     expect(await exited.send("hello")).toMatchObject({ error: { code: "agent_failed", message: `Claude's agent adapter didn't start: it exited before answering (exit code 1: Error: Node.js 22 or later is required). ${hint}` } });
 
     const session = harness({ newSessionError: new Error("Internal error: the CLI didn't start.") });
     expect(await session.send("hello")).toMatchObject({ error: { code: "agent_failed", message: `Claude's agent adapter didn't start: Internal error: the CLI didn't start. ${hint}` } });
   });
 
-  it("says the plan's usage limit is reached, from a rejection or the limit's short reply", async () => {
-    const rejected = harness({ script: async () => Promise.reject(new RequestError(-32603, "Claude AI usage limit reached|1760000000")) });
-    expect(await rejected.send("hello")).toMatchObject({ error: { code: "usage_limit", message: USAGE_LIMIT } });
+  it("says the plan's usage limit is reached, quoting Claude Code's notice, from a rejection or the notice as the reply", async () => {
+    const limit = (text: string, data?: Record<string, unknown>) =>
+      harness({
+        script: async (turn) => {
+          // The adapter streams the notice, then rejects with it.
+          turn.say(text);
+          throw RequestError.internalError(data, text);
+        },
+      });
+    expect(await limit("You've hit your limit · resets 3pm", { errorKind: "rate_limit" }).send("hello")).toMatchObject({ outcome: "error", error: { code: "usage_limit", message: "Your Claude plan's usage limit is reached (“You've hit your limit · resets 3pm”). Try again once it resets, or switch the Assistant to your API key." } });
+    for (const text of ["You've reached your weekly limit · resets Mon 9am", "You're out of extra usage · resets 5pm", "Your org is out of usage · contact your admin"]) {
+      expect(await limit(text).send("hello")).toMatchObject({ error: { code: "usage_limit", message: usageLimitMessage(text) } });
+    }
+    expect(await limit("Credit balance is too low", { errorKind: "billing_error" }).send("hello")).toMatchObject({ error: { code: "usage_limit", message: usageLimitMessage("Credit balance is too low") } });
+    expect(usageLimitMessage(null)).toBe("Your Claude plan's usage limit is reached. Try again once it resets, or switch the Assistant to your API key.");
     const replied = harness({
       script: async (turn) => {
-        turn.say("Claude AI usage limit reached. Your limit resets at 5pm.");
+        turn.say("You've hit your limit · resets 5pm");
         return END;
       },
     });
-    expect(await replied.send("hello")).toMatchObject({ outcome: "error", error: { code: "usage_limit" } });
-    // A real answer that mentions rate limits is just an answer.
+    expect(await replied.send("hello")).toMatchObject({ outcome: "error", error: { code: "usage_limit", message: usageLimitMessage("You've hit your limit · resets 5pm") } });
+  });
+
+  it("tells a transient rate limit from the plan's limit", async () => {
+    for (const text of ["API Error: 429 rate_limit_error", "Server is temporarily limiting requests (not your usage limit)"]) {
+      const h = harness({ script: async () => Promise.reject(RequestError.internalError({ errorKind: "rate_limit" }, text)) });
+      expect(await h.send("hello")).toMatchObject({ error: { code: "rate_limited", message: RATE_LIMITED } });
+    }
+    expect(RATE_LIMITED).toBe("Claude is limiting requests right now (not your plan's usage limit). Wait a minute, then send your message again.");
+    // Without the adapter's error kind, it's any other failure.
+    const plain = harness({ script: async () => Promise.reject(RequestError.internalError(undefined, "Server is temporarily limiting requests (not your usage limit)")) });
+    expect(await plain.send("hello")).toMatchObject({ error: { code: "unknown" } });
+    // A real answer that mentions limits is just an answer.
     const answer = harness({
       script: async (turn) => {
-        turn.say("Here's a rate limit banner for your settings screen.");
-        await turn.tool("toolu_1", "add_layers", { layers: [] });
+        turn.say("Here's a usage limit banner for your settings screen.");
         return END;
       },
     });
-    expect((await answer.send("a rate limit banner")).outcome).toBe("completed");
+    expect((await answer.send("a usage limit banner")).outcome).toBe("completed");
+  });
+
+  it("starts a new session after the adapter ended this one while it kept running", async () => {
+    for (const ended of [RequestError.internalError(undefined, "The Claude Agent process exited unexpectedly. Please start a new session."), new RequestError(-32603, "Internal error", { details: "Session not found" }), RequestError.internalError(undefined, "The Claude Agent session has ended. Please start a new session.")]) {
+      const h = harness({
+        script: async (turn) => {
+          if (turn.message === "crash") {
+            turn.say("Working on it…");
+            throw ended;
+          }
+          return echo(turn);
+        },
+      });
+      await h.send("hello");
+      expect(await h.send("crash")).toMatchObject({ outcome: "error", error: { code: "agent_crashed", message: SESSION_ENDED } });
+      h.events.length = 0;
+      expect((await h.send("again")).outcome).toBe("completed");
+      expect(h.agents).toHaveLength(1);
+      expect(h.last().prompts.map((p) => p.sessionId)).toEqual(["fake-1", "fake-1", "fake-2"]);
+      expect(h.last().closed).toEqual(["fake-1"]);
+      expect(ofType(h.events, "notice").map((n) => n.message)).toEqual([RESTARTED]);
+    }
+    expect(SESSION_ENDED).toBe("Claude Code stopped unexpectedly during this reply. Send your message again to restart it; it won't remember the earlier messages in this chat. If it keeps happening, update the adapter: npm install -g @agentclientprotocol/claude-agent-acp@latest");
+    // Another internal error keeps the session (and the chat's history).
+    const flaky = harness({ script: async (turn) => (turn.message === "fail" ? Promise.reject(RequestError.internalError(undefined, "API Error: 500 overloaded")) : echo(turn)) });
+    expect(await flaky.send("fail")).toMatchObject({ error: { code: "unknown", message: "Claude's agent adapter couldn't finish the reply: Internal error: API Error: 500 overloaded. Send your message again." } });
+    await flaky.send("hello");
+    expect(flaky.last().prompts.map((p) => p.sessionId)).toEqual(["fake-1", "fake-1"]);
+  });
+
+  it("names the stderr line that says what went wrong", () => {
+    const crash = "file:///x.mjs:1\nthrow new TypeError(\"adapter needs X\");\n^\n\nTypeError: adapter needs X\n    at file:///x.mjs:1:7\n    at ModuleJob.run (node:internal/modules/esm/module_job:561:25)\n\nNode.js v24.21.0";
+    expect(exitDetail({ code: 1, signal: null, stderrTail: crash })).toBe("exit code 1: TypeError: adapter needs X");
+    expect(exitDetail({ code: null, signal: "SIGKILL", stderrTail: "[session/create] phase=cli 812 ms\nfetching the model list\n[session/prompt] phase=send 3 ms" })).toBe("signal SIGKILL: fetching the model list");
+    expect(exitDetail({ code: 1, signal: null, stderrTail: "Error: bad key sk-ant-api03-SECRET\nNode.js v24.21.0" })).toBe("exit code 1: Error: bad key sk-ant-…");
+    expect(exitDetail({ code: 1, signal: null, stderrTail: "Node.js v24.21.0" })).toBe("exit code 1: Node.js v24.21.0");
+    expect(exitDetail({ code: 3, signal: null, stderrTail: "" })).toBe("exit code 3");
   });
 
   it("maps the prompt's stop reasons like the API key's", async () => {
@@ -769,13 +999,24 @@ describe("subscription engine: usage and models", () => {
     expect((await big.send("two")).outcome).toBe("completed");
   });
 
-  it("switches the session's model when the adapter offers it, and otherwise says the chat keeps its own", async () => {
+  it("switches the session's model to the adapter's value for it, and otherwise says the chat keeps its own", async () => {
     const h = harness({ configOptions: MODEL_OPTIONS });
     await h.send("hi");
     await h.send("hi", { model: "claude-opus-5" });
     await h.send("hi", { model: "claude-opus-5" });
-    expect(h.last().configs).toEqual([{ sessionId: "fake-1", configId: "model", value: "claude-opus-5" }]);
+    await h.send("hi", { model: "claude-haiku-4-5-20251001" });
+    expect(h.last().configs).toEqual([
+      { sessionId: "fake-1", configId: "model", value: "opus[1m]" },
+      { sessionId: "fake-1", configId: "model", value: "haiku" },
+    ]);
     expect(ofType(h.events, "notice")).toEqual([]);
+    expect([modelValue(["default", "sonnet", "sonnet[1m]"], "claude-sonnet-5"), modelValue(["claude-opus-5", "opus"], "claude-opus-5"), modelValue(["default", "sonnet"], "claude-haiku-4-5-20251001"), modelValue(["default"], "gpt-5")]).toEqual(["sonnet", "claude-opus-5", null, null]);
+
+    // The adapter refuses the switch: the chat keeps its model, and says so.
+    const refused = harness({ configOptions: MODEL_OPTIONS, modelError: new Error("Invalid value for config option model: opus[1m]") });
+    await refused.send("hi");
+    await refused.send("hi", { model: "claude-opus-5" });
+    expect(ofType(refused.events, "notice").map((n) => n.message)).toEqual(["This chat keeps Claude Sonnet 5. Start a new chat to use Claude Opus 5."]);
 
     const fixed = harness();
     await fixed.send("hi", { model: "claude-haiku-4-5-20251001" });
@@ -848,25 +1089,23 @@ describe("subscription engine: the Claude login", () => {
     h.last().pushAuth({ kind: "api_key", label: "Anthropic API key", email: null, plan: null, detail: "ANTHROPIC_API_KEY" });
     expect(h.agent.status()).toMatchObject({ state: "ready", kind: "api_key", label: "Anthropic API key" });
     h.last().pushAuth(SIGNED_OUT);
-    expect(h.agent.status()).toMatchObject({ state: "signed_out", kind: "none", message: expect.stringContaining("Choose Sign in") });
-    // While a reply runs, a check doesn't restart the adapter.
-    expect(await h.agent.checkSubscription()).toMatchObject({ state: "signed_out" });
+    expect(h.agent.status()).toMatchObject({ state: "signed_out", kind: "none", message: expect.stringContaining("Choose Sign in…") });
+    // While a reply runs, a check reads the login without restarting the adapter.
+    h.behavior.cliLogin = ACCOUNT;
+    expect(await h.agent.checkSubscription()).toMatchObject({ state: "ready", kind: "account" });
     expect(h.agents).toHaveLength(1);
+    expect(h.logins).toEqual([{ spec: SPEC, env: expect.objectContaining({ ELECTRON_RUN_AS_NODE: "1" }) }]);
     h.agent.stop("w1");
     await running;
   });
 
-  it("checks with a fresh adapter each time nothing is running, so a login done in Terminal is seen", async () => {
+  it("checks with a fresh adapter when no chat is on it, so a login done in Terminal is seen", async () => {
     const h = harness({ auth: SIGNED_OUT });
     expect(await h.agent.checkSubscription()).toMatchObject({ state: "signed_out", adapterVersion: "0.79.0" });
-    await h.send("hi");
     h.behavior.auth = ACCOUNT;
     expect(await h.agent.checkSubscription()).toMatchObject({ state: "ready", kind: "account", email: "tyler@example.com" });
     expect(h.agents.map((a) => a.disposed)).toEqual([true, false]);
-    // A chat whose session went with the old adapter says so.
-    h.events.length = 0;
-    await h.send("hi");
-    expect(ofType(h.events, "notice").map((n) => n.message)).toEqual([RESTARTED]);
+    expect(h.logins).toEqual([]);
 
     const quiet = harness({ auth: null }, { authWaitMs: 20 });
     expect(await quiet.agent.checkSubscription()).toMatchObject({ state: "ready", kind: null, label: null });
@@ -874,6 +1113,53 @@ describe("subscription engine: the Claude login", () => {
     expect(await missing.agent.checkSubscription()).toMatchObject({ state: "not_installed", message: NOT_INSTALLED });
     const broken = harness({ startError: new AgentStartError("Sonobe couldn't run ~/bin/claude-agent-acp (EACCES)") });
     expect(await broken.agent.checkSubscription()).toMatchObject({ state: "failed", message: expect.stringContaining("(EACCES)") });
+  });
+
+  it("leaves other windows' chats their sessions when one window checks the login", async () => {
+    const h = harness({}, { authWaitMs: 20 });
+    await h.send("hello", {}, undefined, "w1");
+    // Another window's setup: Check again, signed out in Terminal meanwhile.
+    h.behavior.cliLogin = SIGNED_OUT;
+    expect(await h.agent.checkSubscription()).toMatchObject({ state: "signed_out", kind: "none" });
+    expect(h.agents.map((a) => a.disposed)).toEqual([false]);
+    h.events.length = 0;
+    h.last().pushAuth(ACCOUNT);
+    expect((await h.send("still here?", {}, undefined, "w1")).outcome).toBe("completed");
+    expect(h.last().prompts.map((p) => p.sessionId)).toEqual(["fake-1", "fake-1"]);
+    expect(ofType(h.events, "notice")).toEqual([]);
+    // Claude Code couldn't say: the last login the adapter reported stands.
+    h.behavior.cliLogin = null;
+    expect(await h.agent.checkSubscription()).toMatchObject({ state: "ready", kind: "account" });
+  });
+
+  it("never leaves the login at checking: an adapter that exits before reporting one says why", async () => {
+    // It answers initialize, then exits during the wait for its login.
+    const h = harness({ auth: null }, { authWaitMs: 500 });
+    const checking = h.agent.checkSubscription();
+    await waitFor(() => h.agents.length === 1);
+    await tick();
+    h.last().crash(1, "Error: the native Claude Code binary is missing\n\nNode.js v24.21.0");
+    expect(await checking).toMatchObject({ state: "failed", message: "Claude's agent adapter didn't start: it exited (exit code 1: Error: the native Claude Code binary is missing). Check that it's installed (npm install -g @agentclientprotocol/claude-agent-acp), then try again." });
+
+    // A reply whose adapter goes before it reports a login.
+    const run = harness({
+      auth: null,
+      script: async (turn) => {
+        turn.agent.crash(7, "fake crash: something broke");
+        return new Promise<PromptResponse>(() => undefined);
+      },
+    });
+    expect(await run.send("hi")).toMatchObject({ error: { code: "agent_crashed" } });
+    expect(run.agent.status()).toMatchObject({ state: "failed", message: expect.stringContaining("it exited (exit code 7: fake crash: something broke)") });
+  });
+
+  it("reads Claude Code's own login report like the adapter does", () => {
+    expect(parseCliLogin('{"loggedIn":true,"authMethod":"claude.ai","apiProvider":"firstParty","email":"fake@example.com","subscriptionType":"max"}')).toEqual({ kind: "account", label: "Claude Max", email: "fake@example.com", plan: "max", detail: null });
+    expect(parseCliLogin('{"loggedIn":true,"subscriptionType":"Claude Pro"}')).toMatchObject({ kind: "account", label: "Claude Pro" });
+    expect(parseCliLogin('{"loggedIn":false,"authMethod":"none","apiProvider":"firstParty"}')).toEqual({ kind: "none", label: "Not logged in", email: null, plan: null, detail: null });
+    expect(parseCliLogin('{"loggedIn":false,"apiKeySource":"ANTHROPIC_API_KEY"}')).toMatchObject({ kind: "api_key", label: "Anthropic API key", detail: "ANTHROPIC_API_KEY" });
+    expect(parseCliLogin('{"loggedIn":false,"apiProvider":"bedrock"}')).toMatchObject({ kind: "external", label: "AWS Bedrock" });
+    for (const junk of ["", "not json", "[]", '{"email":"x"}']) expect(parseCliLogin(junk)).toBeNull();
   });
 
   it("opens the sign-in with the adapter it found, and teaches when it can't", async () => {
@@ -886,6 +1172,43 @@ describe("subscription engine: the Claude login", () => {
     expect(await harness({}, { locate: () => ({ ok: false, searched: [] }) }).agent.signIn()).toEqual({ ok: false, error: NOT_INSTALLED });
     const failing = harness({}, { signIn: { open: async () => Promise.reject(new Error("EACCES")), options: signInOptions } });
     expect(await failing.agent.signIn()).toEqual({ ok: false, error: "Sonobe couldn't open Terminal: EACCES. Run claude-agent-acp --cli auth login in a terminal, then check again." });
+  });
+
+  it("stops every reply, session and the adapter when the switch goes off, and starts over when it's back on", async () => {
+    const h = harness({ script: async (turn) => (turn.message === "hang" ? turn.cancelled.then(() => ({ stopReason: "cancelled" as const })) : echo(turn)) });
+    await h.send("hello", {}, undefined, "w1");
+    const running = h.send("hang", {}, undefined, "w2");
+    await waitFor(() => h.last()?.prompts.length === 2);
+    await h.agent.shutdown();
+    expect((await running).outcome).toBe("stopped");
+    expect(h.last().disposed).toBe(true);
+    expect(h.last().closed).toEqual(["fake-1", "fake-2"]);
+    expect(h.revoked).toEqual(["w1#1/1", "w2#2/1"]);
+    // The chats keep what they had, and say the next reply starts over.
+    expect(h.agent.snapshot("w1")).toMatchObject({ messageCount: 2, usage: { inputTokens: 1200 } });
+    h.events.length = 0;
+    expect((await h.send("back on", {}, undefined, "w1")).outcome).toBe("completed");
+    expect(h.agents).toHaveLength(2);
+    expect(ofType(h.events, "notice").map((n) => n.message)).toEqual([RESTARTED]);
+  });
+
+  it("stops an adapter that was still starting when the switch went off", async () => {
+    let started: () => void = () => undefined;
+    const h = harness({ auth: null, starting: new Promise<void>((resolve) => (started = resolve)) });
+    const running = h.send("hi");
+    await waitFor(() => h.agents.length === 1);
+    expect(h.agent.status().state).toBe("checking");
+    await h.agent.shutdown();
+    expect((await running).outcome).toBe("stopped");
+    expect(h.agent.status().state).toBe("unknown");
+    started();
+    await waitFor(() => h.agents[0]!.disposed);
+    expect(h.agents[0]!.disposed).toBe(true);
+    // Back on: a fresh adapter.
+    h.behavior.starting = undefined;
+    expect((await h.send("hi again")).outcome).toBe("completed");
+    expect(h.agents).toHaveLength(2);
+    expect(h.agents[0]!.prompts).toEqual([]);
   });
 
   it("stops everything on dispose", async () => {

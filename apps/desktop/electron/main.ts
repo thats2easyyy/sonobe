@@ -1151,6 +1151,8 @@ function main(): void {
       // Experimental and off by default (Settings → Claude): the Assistant on the person's Claude subscription.
       connection: createConnectionStore({ file: path.join(app.getPath("userData"), "assistant-connection.json"), log }),
       subscription: {
+        // Not in a release by accident: a packaged build offers the switch only when started with SONOBE_CLAUDE_SUBSCRIPTION=1.
+        available: !app.isPackaged || process.env.SONOBE_CLAUDE_SUBSCRIPTION === "1",
         sessionsDir: path.join(app.getPath("userData"), "assistant", "claude"),
         signIn: { platform: process.platform, dir: path.join(app.getPath("userData"), "handoff"), openPath: (file) => shell.openPath(file) },
       },

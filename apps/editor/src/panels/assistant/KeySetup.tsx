@@ -15,6 +15,8 @@ export interface KeySetupProps {
   onConnectClaude: () => void;
   /** Shown when a key is already saved: go back to the chat. */
   onDone?: () => void;
+  /** The experimental switch is on, so the Claude subscription is a choice beside this one: the copy points to it. */
+  subscriptionEnabled?: boolean;
 }
 
 const BACKEND_NAMES: Record<string, string> = {
@@ -28,9 +30,9 @@ const BACKEND_NAMES: Record<string, string> = {
 
 /**
  * Bring-your-own-key setup: where to get a key, a password field, what happens to the key, and the
- * subscription alternative (Connect Claude over MCP).
+ * subscription alternatives (Connect Claude over MCP, and with the experimental switch on, the choice above).
  */
-export function KeySetup({ controller, status, keyCheck, onConnectClaude, onDone }: KeySetupProps) {
+export function KeySetup({ controller, status, keyCheck, onConnectClaude, onDone, subscriptionEnabled = false }: KeySetupProps) {
   const fieldId = useId();
   const hintId = useId();
   const [value, setValue] = useState("");
@@ -72,7 +74,11 @@ export function KeySetup({ controller, status, keyCheck, onConnectClaude, onDone
         <Plug size={15} aria-hidden className="sb-assistant-callout__icon" />
         <div>
           <p className="sb-assistant-callout__title">Prefer your Claude subscription?</p>
-          <p className="sb-assistant-callout__body">Connect Claude Desktop or Claude Code to Sonobe and build with your own Claude plan. No API key needed.</p>
+          <p className="sb-assistant-callout__body">
+            {subscriptionEnabled
+              ? "Choose Claude subscription above, or connect Claude Desktop or Claude Code to Sonobe and build with your own Claude plan there. No API key needed."
+              : "Connect Claude Desktop or Claude Code to Sonobe and build with your own Claude plan. No API key needed."}
+          </p>
           <Button size="sm" variant="ghost" className="sb-assistant-callout__action" onClick={onConnectClaude}>
             Connect Claude Desktop or Claude Code
           </Button>
@@ -187,7 +193,8 @@ export function KeySetup({ controller, status, keyCheck, onConnectClaude, onDone
         <ul>
           <li>Your key is encrypted with {backend} and kept in Sonobe's app data, never in your project files. Only Sonobe's main process reads it, to call Anthropic's API.</li>
           <li>When you chat, your messages, the parts of this prototype the Assistant reads, and any files it reads from a code folder you link are sent to Anthropic's API.</li>
-          <li>Sonobe never asks for your claude.ai login and never reads Claude credentials.</li>
+          {/* The Claude subscription's Sign in… opens Claude Code's own login in Terminal. */}
+          <li>{subscriptionEnabled ? "Sonobe never reads Claude credentials." : "Sonobe never asks for your claude.ai login and never reads Claude credentials."}</li>
         </ul>
       </div>
     </div>

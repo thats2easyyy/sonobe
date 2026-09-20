@@ -144,10 +144,14 @@ describe("Transcript", () => {
     const items: ChatItem[] = [
       { kind: "notice", id: "n1", tone: "error", text: "Claude isn't signed in on this computer.", code: "not_signed_in" },
       { kind: "notice", id: "n2", tone: "error", text: "Anthropic didn't accept this API key.", code: "invalid_key" },
-      { kind: "notice", id: "n3", tone: "error", text: "Claude's agent adapter stopped unexpectedly.", code: "agent_crashed" },
+      { kind: "notice", id: "n3", tone: "error", text: "Claude Code stopped unexpectedly during this reply.", code: "agent_crashed" },
+      // The message says what to do: wait, or switch to the API key.
+      { kind: "notice", id: "n4", tone: "error", text: "Your Claude plan's usage limit is reached.", code: "usage_limit" },
+      { kind: "notice", id: "n5", tone: "error", text: "Claude is limiting requests right now (not your plan's usage limit).", code: "rate_limited" },
+      { kind: "notice", id: "n6", tone: "error", text: "Sonobe couldn't set Claude Code to ask before it saves or opens files, so nothing ran.", code: "agent_failed" },
     ];
     act(() => root.render(<Transcript items={items} running={false} thinking={false} onConfirm={() => undefined} onManageKey={onManageKey} onSuggestion={() => undefined} />));
-    expect(buttons()).toEqual(["Set up…", "API key"]);
+    expect(buttons()).toEqual(["Set up…", "API key", "Set up…"]);
     act(() => (container.querySelector("button") as HTMLButtonElement).click());
     expect(onManageKey).toHaveBeenCalledTimes(1);
   });

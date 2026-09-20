@@ -3,7 +3,7 @@
  * (experimental, off by default) their Claude subscription through Claude's agent adapter.
  */
 
-import type { AssistantProvider, AssistantStatus, AssistantSubscriptionState } from "./types.ts";
+import type { AssistantProvider, AssistantStatus, AssistantSubscriptionState, AssistantSubscriptionStatus } from "./types.ts";
 
 /** The command that installs Claude's agent adapter. */
 export const CLAUDE_AGENT_INSTALL = "npm install -g @agentclientprotocol/claude-agent-acp";
@@ -29,10 +29,32 @@ export function providerReady(status: AssistantStatus, provider: AssistantProvid
   return !NOT_READY.has(status.subscription?.state ?? "unknown");
 }
 
-/** The header's subtitle: "Claude subscription · Claude Max", "Your API key · sk-ant-…1234", or what's missing. */
-export function providerSubtitle(status: AssistantStatus | null, provider: AssistantProvider): string {
-  if (provider === "subscription") return status?.subscription?.label ? `Claude subscription · ${status.subscription.label}` : "Claude subscription";
-  return status?.hasKey ? `Your API key · ${status.keyHint ?? ""}` : "Bring your own API key";
+/** The logins that bill something other than the person's Claude plan: an API key or Console login (at API rates), a gateway, another provider. */
+const OTHER_BILLING: ReadonlySet<string> = new Set(["api_key", "gateway", "external"]);
+
+/**
+ * What pays on the Claude subscription when it isn't the person's plan: the adapter's label ("Anthropic API key").
+ * Null for a plan, and while the adapter hasn't said (the copy then speaks of the plan).
+ */
+export function billedElsewhere(subscription: AssistantSubscriptionStatus | null | undefined): string | null {
+  return subscription?.kind && OTHER_BILLING.has(subscription.kind) ? (subscription.label ?? "another account") : null;
+}
+
+/**
+ * The header's subtitle, and its whole wording for the tooltip. What matters comes first, since a narrow header cuts the end:
+ * "Claude Max · subscription"; "Billed to Anthropic API key" when the plan doesn't pay (whole: "Claude subscription · billed to
+ * Anthropic API key"); "Your API key · sk-ant-…1234"; or what's missing.
+ */
+export function providerSubtitle(status: AssistantStatus | null, provider: AssistantProvider): { text: string; full: string } {
+  const same = (text: string) => ({ text, full: text });
+  if (provider === "subscription") {
+    const subscription = status?.subscription;
+    const elsewhere = billedElsewhere(subscription);
+    if (elsewhere) return { text: `Billed to ${elsewhere}`, full: `Claude subscription · billed to ${elsewhere}` };
+    if (!subscription?.label) return same("Claude subscription");
+    return same(subscription.kind === "none" ? `Claude subscription · ${subscription.label}` : `${subscription.label} · subscription`);
+  }
+  return same(status?.hasKey ? `Your API key · ${status.keyHint ?? ""}` : "Bring your own API key");
 }
 
 /** "your API key", "your Claude subscription": for sentences. */

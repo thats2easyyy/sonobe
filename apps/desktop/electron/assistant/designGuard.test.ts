@@ -430,6 +430,9 @@ describe("replaceDeclinedMessage and replaceDeclinedDetail", () => {
     const handEdited: ReplaceCheck = { reason: "hand_edited", target: { id: "checkout", name: "Checkout" }, changed: ["Title"], changedCount: 1 };
     expect(replaceDeclinedMessage(untargeted)).toBe("The person kept “Home” as it is, so nothing changed. Import your design as a new screen instead (leave out replace), or ask what they'd like.");
     expect(replaceDeclinedMessage(handEdited)).toBe("The person kept their changes to “Checkout”, so nothing changed. Import your design as a new screen instead (leave out replace), or ask them what to change.");
+    // Leaving out replace on a preview import keeps the draft's, so it would ask again.
+    expect(replaceDeclinedMessage(untargeted, { preview: true })).toBe('The person kept “Home” as it is, so nothing changed. Import your design as a new screen instead (import_design with "preview": true and "replace": null), or ask what they\'d like.');
+    expect(replaceDeclinedMessage(handEdited, { preview: true })).toBe('The person kept their changes to “Checkout”, so nothing changed. Import your design as a new screen instead (import_design with "preview": true and "replace": null), or ask them what to change.');
     expect(replaceDeclinedDetail(untargeted)).toBe("You kept “Home”");
     expect(replaceDeclinedDetail(handEdited)).toBe("You kept your changes");
   });

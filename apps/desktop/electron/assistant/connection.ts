@@ -2,17 +2,20 @@
  * What the Assistant runs on, app-wide: the experimental subscription switch (Settings → Claude, off
  * by default and awaiting Anthropic's permission) and the person's pick in the Assistant's setup. The
  * main process keeps them in userData/assistant-connection.json (0600) and enforces them; the renderer
- * only asks (setConnection).
+ * only asks (setConnection). Whether this build offers the switch at all is main's call (register.ts).
  */
 
 import { readFileSync } from "node:fs";
 import { atomicWriteFileSync } from "../fs-utils.ts";
 import type { AssistantConnection, AssistantConnectionUpdate, AssistantProvider } from "./protocol.ts";
 
+/** The settings as saved: everything but whether this build offers the switch. */
+export type SavedConnection = Omit<AssistantConnection, "available">;
+
 export interface ConnectionStore {
-  get(): AssistantConnection;
+  get(): SavedConnection;
   /** Applies the fields it knows, with well-formed values, and saves them when they changed. */
-  update(patch: AssistantConnectionUpdate): AssistantConnection;
+  update(patch: AssistantConnectionUpdate): SavedConnection;
 }
 
 export interface ConnectionStoreOptions {
@@ -21,7 +24,7 @@ export interface ConnectionStoreOptions {
   log?(level: "info" | "warn" | "error", message: string): void;
 }
 
-type Stored = Omit<AssistantConnection, "active">;
+type Stored = Omit<SavedConnection, "active">;
 
 const DEFAULTS: Stored = { subscriptionEnabled: false, provider: "api_key" };
 
@@ -37,7 +40,7 @@ function sanitize(raw: unknown, base: Stored): Stored {
 }
 
 /** The pick counts only while the switch is on. */
-export function withActive(stored: Stored): AssistantConnection {
+export function withActive(stored: Stored): SavedConnection {
   return { ...stored, active: stored.subscriptionEnabled && stored.provider === "subscription" ? "subscription" : "api_key" };
 }
 

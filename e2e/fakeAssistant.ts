@@ -63,6 +63,10 @@ export const DRAFT_EVENTS = 40;
 /** The linked folder linkCodeFolder() reports. */
 export const FAKE_CODE_FOLDER = { name: "noddit", path: "~/code/noddit", persisted: true } as const;
 
+/** The engine's words on macOS while Claude is signed out: status.subscription.message (it says Check again), and a reply's not_signed_in error. */
+export const SIGNED_OUT_STATUS = "Claude isn't signed in on this computer. Choose Sign in… (it opens Terminal), or run claude-agent-acp --cli auth login in Terminal, then choose Check again.";
+export const SIGNED_OUT_ERROR = "Claude isn't signed in on this computer. Choose Sign in… (it opens Terminal), or run claude-agent-acp --cli auth login in Terminal, then send your message again.";
+
 declare global {
   interface Window {
     __sonobeFakeAssistant?: AssistantHostLike;
@@ -84,7 +88,7 @@ declare global {
 
 /** Define window.__sonobeFakeAssistant before the app loads (per page; call before openEditor). */
 export async function installFakeAssistant(page: Page, options: FakeAssistantOptions): Promise<void> {
-  await page.addInitScript(fakeAssistant, { ...options, draftEvents: DRAFT_EVENTS, codeFolder: FAKE_CODE_FOLDER });
+  await page.addInitScript(fakeAssistant, { ...options, draftEvents: DRAFT_EVENTS, codeFolder: FAKE_CODE_FOLDER, signedOutError: SIGNED_OUT_ERROR });
 }
 
 /** The prompts Open in Claude Code handed off so far. */
@@ -118,7 +122,7 @@ export function fakeSignIns(page: Page): Promise<number> {
 }
 
 /** Runs in the page before the app's scripts, so it uses nothing from this module but its argument. */
-function fakeAssistant(options: FakeAssistantOptions & { draftEvents: number; codeFolder: { name: string; path: string; persisted: boolean } }): void {
+function fakeAssistant(options: FakeAssistantOptions & { draftEvents: number; codeFolder: { name: string; path: string; persisted: boolean }; signedOutError: string }): void {
   const KEY_SECRET = "anthropic.apiKey";
   const MODELS: AssistantModelInfo[] = [
     { id: "claude-sonnet-5", label: "Claude Sonnet 5", description: "Fast and capable. The best fit for most prototyping.", pricing: { input: 2, output: 10 } },
@@ -158,7 +162,7 @@ function fakeAssistant(options: FakeAssistantOptions & { draftEvents: number; co
   const connectionOf = (c: { subscriptionEnabled?: boolean; provider?: AssistantProvider } = {}): AssistantConnection => {
     const subscriptionEnabled = c.subscriptionEnabled ?? false;
     const provider = c.provider ?? "api_key";
-    return { subscriptionEnabled, provider, active: subscriptionEnabled ? provider : "api_key" };
+    return { available: true, subscriptionEnabled, provider, active: subscriptionEnabled ? provider : "api_key" };
   };
   let connection = connectionOf(options.connection);
   const found: AssistantSubscriptionStatus = { state: "ready", kind: "account", label: "Claude Max", email: "ava@example.com", adapterVersion: "0.79.0", message: null, ...options.subscription };
@@ -416,7 +420,7 @@ function fakeAssistant(options: FakeAssistantOptions & { draftEvents: number; co
   /** What a send on the subscription fails with before it starts, as the engine says it. */
   const subscriptionError = (): AssistantRunResult | null => {
     if (!connection.subscriptionEnabled) return { runId: "", outcome: "error", error: { code: "subscription_off", message: "Claude subscription is off in Settings → Claude. Turn it back on, or start a new chat to use your API key." }, usage: copy(usage) };
-    if (subscription.state === "signed_out") return { runId: "", outcome: "error", error: { code: "not_signed_in", message: subscription.message ?? "Claude isn't signed in on this computer." }, usage: copy(usage) };
+    if (subscription.state === "signed_out") return { runId: "", outcome: "error", error: { code: "not_signed_in", message: options.signedOutError }, usage: copy(usage) };
     if (subscription.state === "not_installed") return { runId: "", outcome: "error", error: { code: "agent_not_installed", message: subscription.message ?? "Sonobe couldn't find Claude's agent adapter." }, usage: copy(usage) };
     return null;
   };

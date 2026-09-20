@@ -120,4 +120,12 @@ describe("Composer", () => {
     mount({ usage: usage(900_000), provider: "subscription", usageThreshold: 0.5 });
     expect(container.querySelector(".sb-assistant-usage")).toBeNull();
   });
+
+  it("on the Claude subscription, says what pays when it isn't the plan", () => {
+    mount({ usage: usage(12_400), provider: "subscription", billedTo: "Anthropic API key" });
+    expect(container.querySelector(".sb-assistant-usage__text")?.textContent).toBe("12K tokens · billed to Anthropic API key");
+    expect(container.querySelector(".sb-assistant-usage")?.getAttribute("title")).toBe(
+      "Tokens this chat used, as Claude's agent adapter counts them. Claude's adapter is set to use Anthropic API key, so that pays for them at its own rates, not your Claude plan.",
+    );
+  });
 });

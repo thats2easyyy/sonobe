@@ -122,6 +122,12 @@ function updateDraft(state: DesignData, toolUseId: string, update: (draft: Desig
   return { drafts: state.drafts.map((d, i) => (i === index ? update(d) : d)) };
 }
 
+/** The Assistant's own preview_design drafts of `runId` (the subscription path) that `which` picks. */
+function updateRunDraft(state: DesignData, runId: string, which: (draft: DesignDraft) => boolean, update: (draft: DesignDraft) => DesignDraft): Partial<DesignData> {
+  const picked = (d: DesignDraft) => !!d.mcp && d.runId === runId && which(d);
+  return state.drafts.some(picked) ? { drafts: state.drafts.map((d) => (picked(d) ? update(d) : d)) } : {};
+}
+
 function reduceDraft(state: DesignData, event: Extract<AssistantEvent, { type: "design_draft" }>, now: number): Partial<DesignData> {
   const index = state.drafts.findIndex((d) => d.toolUseId === event.toolUseId);
   const current = index === -1 ? null : state.drafts[index]!;
@@ -159,16 +165,24 @@ export function reduceDesignEvent(state: DesignData, event: AssistantEvent, now:
     }
     case "design_draft":
       return reduceDraft(state, event, now);
-    case "tool_progress":
-      return updateDraft(state, event.toolUseId, (d) => ({ ...d, progress: event.detail }));
+    case "tool_progress": {
+      const patch = updateDraft(state, event.toolUseId, (d) => ({ ...d, progress: event.detail }));
+      // The subscription path: import_design { preview: true } adds the run's preview_design draft, which has no toolUseId.
+      // Only that import has it adding (a dry run leaves it writing), so no other tool's progress lands on it.
+      return patch.drafts ? patch : updateRunDraft(state, event.runId, (d) => d.status === "adding", (d) => ({ ...d, progress: event.detail }));
+    }
     case "tool_finished": {
       if (event.name !== "import_design") return {};
       // A dry run or a declined replace finishes without adding anything: the draft stops rather than fails.
       const status: DraftStatus = event.imported ? "added" : event.status === "error" ? "failed" : "stopped";
-      let patch = updateDraft(state, event.toolUseId, (d) => ({ ...d, status, since: now, progress: null, error: status === "failed" ? event.detail : d.error }));
-      // import_design { preview: true } on the subscription path: its run's preview draft is the one added (its cleared update may come later, or not at all).
-      if (event.imported && !patch.drafts && state.drafts.some((d) => d.mcp && d.runId === event.runId && d.status === "adding")) {
-        patch = { drafts: state.drafts.map((d) => (d.mcp && d.runId === event.runId && d.status === "adding" ? { ...d, status: "added", since: now, progress: null } : d)) };
+      const finish = (d: DesignDraft): DesignDraft => ({ ...d, status, since: now, progress: null, error: status === "failed" ? event.detail : d.error });
+      let patch = updateDraft(state, event.toolUseId, finish);
+      if (!patch.drafts) {
+        // import_design { preview: true } on the subscription path finishes the run's preview draft: added (its cleared update may come
+        // later, or not at all), declined by the replace check (no update comes), or failed (the server's "writing" update came first).
+        // A preview dry run finishes done without adding: the draft stays as it is.
+        if (event.imported) patch = updateRunDraft(state, event.runId, (d) => d.status === "adding", finish);
+        else if (event.status !== "done") patch = updateRunDraft(state, event.runId, (d) => isLive(d.status), finish);
       }
       if (event.imported && request?.runId === event.runId) return { ...patch, request: { ...request, imported: (request.imported ?? 0) + 1 } };
       return patch;
@@ -243,10 +257,14 @@ export function reducePreviewUpdate(state: DesignData, update: DesignPreviewUpda
     return replaceCurrent({ ...live, status: added ? "added" : "stopped", since: now, mcp: { ...mcp, draftRevision: update.draftRevision, touchedAt: now } });
   }
 
+  const byAssistant = update.author.name === ASSISTANT_AUTHOR;
+  // A call still in flight when its reply ended (Stop) draws after run_finished: the reply's stopped draft stays stopped, rather than
+  // coming back as a stranger's draft for minutes. The next reply's first update takes the draft over.
+  if (byAssistant && !target.assistantRunId && current && current.runId !== "" && !live) return {};
   // The document's revision when adding began: the import's change comes after it.
   const addingFrom = update.status === "adding" ? ((live?.status === "adding" ? mcp?.addingFrom : null) ?? target.revision) : null;
   // The Assistant's own drafts belong to its running reply, so the box follows them as its own and the reply's end stops one left writing.
-  const runId = update.author.name === ASSISTANT_AUTHOR ? (target.assistantRunId ?? live?.runId ?? "") : "";
+  const runId = byAssistant ? (target.assistantRunId ?? live?.runId ?? "") : "";
   const next: DesignDraft = {
     source: "mcp",
     key,

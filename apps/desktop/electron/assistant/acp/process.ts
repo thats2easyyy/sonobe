@@ -37,8 +37,13 @@ const AUTH_STATUS_METHOD = "_auth/status_update";
 const AUTH_KINDS: ReadonlySet<string> = new Set<AgentAuthStatus["kind"]>(["account", "api_key", "gateway", "external", "none"]);
 const CANCELLED: RequestPermissionResponse = { outcome: { outcome: "cancelled" } };
 
-const messageOf = (err: unknown) => (err instanceof Error ? err.message : String(err));
 const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === "object" && value !== null && !Array.isArray(value);
+/** The agent's plain errors reach Sonobe as -32603 "Internal error" with the text in data.details. */
+const detailsOf = (err: unknown) => (err instanceof RequestError && isRecord(err.data) && typeof err.data.details === "string" ? err.data.details : null);
+const messageOf = (err: unknown) => {
+  const details = detailsOf(err);
+  return err instanceof Error ? `${err.message}${details ? `: ${details}` : ""}` : String(err);
+};
 
 /**
  * The adapter's environment: `base` without REMOVED_ENV, plus the spec's own variables, with the
@@ -320,7 +325,8 @@ export const createAcpAgentProcess: CreateAcpAgentProcess = (options) => {
       try {
         await request((conn) => conn.closeSession({ sessionId }));
       } catch (err) {
-        if (!(err instanceof AgentExitedError)) log("warn", `Claude's agent adapter didn't close its session: ${messageOf(err)}`);
+        // "Session not found": the adapter ended it already (its Claude Code died), so it's closed.
+        if (!(err instanceof AgentExitedError) && detailsOf(err) !== "Session not found") log("warn", `Claude's agent adapter didn't close its session: ${messageOf(err)}`);
       }
     },
     onSessionUpdate(sessionId, listener) {

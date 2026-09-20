@@ -9,8 +9,10 @@
  *
  * Two engines run chats: the API key's agent loop (agent.ts), and, behind the experimental switch
  * (off by default, awaiting Anthropic's permission), the Claude subscription's (acp/engine.ts). The
- * switch and the pick live here (connection.ts), and main enforces them. A window's chat keeps the
- * engine its first message ran on until New chat.
+ * switch and the pick live here (connection.ts), and main enforces them. A build offers the switch
+ * only when main says so (SubscriptionSetup.available: unpackaged builds, or SONOBE_CLAUDE_SUBSCRIPTION=1),
+ * so no release offers it by accident. A window's chat keeps the engine its first message ran on until
+ * New chat; turning the switch off stops every subscription reply and the adapter.
  *
  * Each window's chat is pinned to the document that window shows (documentFor), and a code folder
  * is linked only from the native dialog main shows (pickFolder), never from the renderer's word.
@@ -36,6 +38,7 @@ import {
   ASSISTANT_KEY_SECRET,
   type AssistantCodeFolderLinkResult,
   type AssistantCodeFolderStatus,
+  type AssistantConnection,
   type AssistantError,
   type AssistantEvent,
   type AssistantKeyCheck,
@@ -102,6 +105,12 @@ export interface RegisterAssistantOptions {
 }
 
 export interface SubscriptionSetup {
+  /**
+   * This build offers the switch (main's build gate: every unpackaged build, a packaged one only when
+   * started with SONOBE_CLAUDE_SUBSCRIPTION=1). False: the switch reads off, can't be turned on, and no
+   * subscription reply, check or sign-in starts. Default true.
+   */
+  available?: boolean;
   /** The adapter's working folder and every session's cwd (userData/assistant/claude). */
   sessionsDir: string;
   /** Sign in (macOS Terminal): where the one-time script goes and shell.openPath. */
@@ -235,6 +244,13 @@ export function registerAssistant(options: RegisterAssistantOptions): AssistantR
       })
     : null;
 
+  /** The switch and the pick as this build applies them: a build that doesn't offer the switch runs every chat on the API key. */
+  const available = !!subscription && setup?.available !== false;
+  const connection = (): AssistantConnection => {
+    const saved = connections.get();
+    return available ? { available: true, ...saved } : { available: false, subscriptionEnabled: false, provider: saved.provider, active: "api_key" };
+  };
+
   /** What each window's chat runs on: set by its first message that got going, kept until New chat. */
   const chatProviders = new Map<string, AssistantProvider>();
   const engineOf = (provider: AssistantProvider): AssistantEngine | null => (provider === "subscription" ? subscription : agent);
@@ -283,7 +299,7 @@ export function registerAssistant(options: RegisterAssistantOptions): AssistantR
       running: snap.running,
       messageCount: snap.messageCount,
       codeFolder: await codeFolderStatus(id),
-      connection: connections.get(),
+      connection: connection(),
       subscription: subscription?.status() ?? NO_SUBSCRIPTION,
       chatProvider,
     };
@@ -293,9 +309,9 @@ export function registerAssistant(options: RegisterAssistantOptions): AssistantR
     const fail = (error: AssistantError): AssistantRunResult => ({ runId: globalThis.crypto.randomUUID(), outcome: "error", error, usage: chatEngine(id).snapshot(id).usage });
     // One reply at a time per window, whichever engine runs it.
     if (engines().some((engine) => engine.snapshot(id).running)) return fail(BUSY_ERROR);
-    const connection = connections.get();
-    const provider = chatProviders.get(id) ?? connection.active;
-    if (provider === "subscription" && !connection.subscriptionEnabled) return fail(SUBSCRIPTION_OFF);
+    const current = connection();
+    const provider = chatProviders.get(id) ?? current.active;
+    if (provider === "subscription" && !current.subscriptionEnabled) return fail(SUBSCRIPTION_OFF);
     const engine = engineOf(provider);
     if (!engine) return fail({ code: "agent_failed", message: NOT_SET_UP });
     chatProviders.set(id, provider);
@@ -335,26 +351,34 @@ export function registerAssistant(options: RegisterAssistantOptions): AssistantR
     // The switch and the pick are the app's; a change of what this window's chat runs on starts a new chat in it.
     [ASSISTANT_IPC.setConnection]: (event, update) => {
       const id = conversationOf(event);
+      // A build that doesn't offer the switch keeps it off, whatever the renderer asks.
+      if (!available) return status(id);
       const body = update && typeof update === "object" ? (update as Record<string, unknown>) : {};
-      const before = connections.get().active;
-      const after = connections.update({
+      const before = connection();
+      connections.update({
         ...(typeof body.subscriptionEnabled === "boolean" ? { subscriptionEnabled: body.subscriptionEnabled } : {}),
         ...(body.provider === "api_key" || body.provider === "subscription" ? { provider: body.provider } : {}),
-      }).active;
-      if (after !== before) resetChat(id);
+      });
+      const after = connection();
+      if (after.active !== before.active) resetChat(id);
+      // Off means off in every window: their replies stop (their transcripts stay), and so does the adapter.
+      if (before.subscriptionEnabled && !after.subscriptionEnabled && subscription) {
+        log("info", "Claude subscription turned off: stopping its replies and Claude's agent adapter.");
+        subscription.shutdown().catch((err: unknown) => log("warn", `Stopping Claude's agent adapter failed: ${errorMessage(err)}`));
+      }
       return status(id);
     },
     // Off by default: Sonobe never starts Claude's agent adapter while the switch is off.
     [ASSISTANT_IPC.checkSubscription]: (event): Promise<AssistantSubscriptionStatus> => {
       conversationOf(event);
       if (!subscription) return Promise.resolve(NO_SUBSCRIPTION);
-      if (!connections.get().subscriptionEnabled) return Promise.resolve(subscription.status());
+      if (!connection().subscriptionEnabled) return Promise.resolve(subscription.status());
       return subscription.checkSubscription();
     },
     [ASSISTANT_IPC.signInToClaude]: async (event): Promise<AssistantSignInResult> => {
       conversationOf(event);
-      if (!subscription) return { ok: false, error: NOT_SET_UP };
-      if (!connections.get().subscriptionEnabled) return { ok: false, error: SWITCH_OFF };
+      if (!subscription || !available) return { ok: false, error: NOT_SET_UP };
+      if (!connection().subscriptionEnabled) return { ok: false, error: SWITCH_OFF };
       return subscription.signIn();
     },
     [ASSISTANT_IPC.checkKey]: (event): Promise<AssistantKeyCheck> => {
@@ -396,7 +420,7 @@ export function registerAssistant(options: RegisterAssistantOptions): AssistantR
   };
 
   for (const [channel, handler] of Object.entries(handlers)) options.ipcMain.handle(channel, handler);
-  log("info", `Assistant ready (your Anthropic API key; Claude subscription: ${connections.get().subscriptionEnabled ? "on" : "off"})`);
+  log("info", `Assistant ready (your Anthropic API key; Claude subscription: ${!available ? "not in this build" : connection().subscriptionEnabled ? "on" : "off"})`);
 
   return {
     agent,

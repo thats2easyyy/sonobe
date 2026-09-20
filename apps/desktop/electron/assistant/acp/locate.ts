@@ -1,9 +1,9 @@
 /**
  * Finding Claude's agent adapter (@agentclientprotocol/claude-agent-acp). It's ~270 MB with its
  * native Claude Code, so Sonobe doesn't bundle it: the person installs it with npm, and Sonobe looks
- * where npm, Homebrew, Volta, Bun and pnpm put global commands, since an app opened from the Finder
- * gets a bare PATH. Its bin is a Node script, which Sonobe runs with Electron's own Node, so no system
- * Node is needed to run it. Pure apart from reading the file system.
+ * where npm, Homebrew, Volta, Bun, pnpm and the Node version managers put global commands, since an
+ * app opened from the Finder gets a bare PATH. Its bin is a Node script, which Sonobe runs with
+ * Electron's own Node, so no system Node is needed to run it. Pure apart from reading the file system.
  */
 
 import { accessSync, closeSync, constants, openSync, readdirSync, readFileSync, readSync, realpathSync, statSync } from "node:fs";
@@ -24,22 +24,46 @@ export function displayPath(file: string, home: string): string {
 
 /**
  * The folders besides PATH where global npm commands end up: Homebrew's and the Node installer's,
- * npm's own prefix, ~/.local, Volta, Bun, pnpm on macOS, npm on Windows, and each nvm Node, newest
- * first. ./process.ts adds them to the adapter's PATH too.
+ * npm's own prefix (~/.npm-global, or the one ~/.npmrc sets), ~/.local, Volta, Bun, pnpm on macOS,
+ * npm on Windows, then each Node that nvm, mise, asdf or fnm installed (newest first; a global npm
+ * install lands in that Node's bin) and mise's and asdf's shims. ./process.ts adds them to the
+ * adapter's PATH too.
  */
 export function wellKnownBinDirs(options: { platform: NodeJS.Platform; home: string; env: Record<string, string | undefined> }): string[] {
   const { platform, home, env } = options;
   const dirs = platform === "win32" ? [] : ["/opt/homebrew/bin", "/usr/local/bin"];
   if (home) {
-    dirs.push(...[".npm-global/bin", ".local/bin", ".volta/bin", ".bun/bin"].map((dir) => path.join(home, dir)));
+    dirs.push(path.join(home, ".npm-global", "bin"));
+    const prefix = npmrcPrefix(home);
+    if (prefix) dirs.push(platform === "win32" ? prefix : path.join(prefix, "bin"));
+    dirs.push(...[".local/bin", ".volta/bin", ".bun/bin"].map((dir) => path.join(home, dir)));
     if (platform === "darwin") dirs.push(path.join(home, "Library", "pnpm"));
   }
   if (platform === "win32" && env.APPDATA) dirs.push(path.join(env.APPDATA, "npm"));
-  if (home && platform !== "win32") dirs.push(...nvmBinDirs(path.join(home, ".nvm", "versions", "node")));
+  if (home && platform !== "win32") dirs.push(...nodeManagerBinDirs(platform, home, env));
   return dirs;
 }
 
-function nvmBinDirs(versions: string): string[] {
+/** Each Node that nvm, mise, asdf and fnm installed, newest first, then mise's and asdf's shims: only what's there. */
+function nodeManagerBinDirs(platform: NodeJS.Platform, home: string, env: Record<string, string | undefined>): string[] {
+  const absolute = (value: string | undefined) => (value && path.isAbsolute(value) ? value : null);
+  const data = absolute(env.XDG_DATA_HOME) ?? path.join(home, ".local", "share");
+  const mise = absolute(env.MISE_DATA_DIR) ?? path.join(data, "mise");
+  const asdf = absolute(env.ASDF_DATA_DIR) ?? path.join(home, ".asdf");
+  // fnm's folder moved over the years: FNM_DIR, else the XDG one, macOS's older one, and the oldest.
+  const fnmDir = absolute(env.FNM_DIR);
+  const fnm = fnmDir ? [fnmDir] : [path.join(data, "fnm"), ...(platform === "darwin" ? [path.join(home, "Library", "Application Support", "fnm")] : []), path.join(home, ".fnm")];
+  return [
+    ...versionDirs(path.join(home, ".nvm", "versions", "node"), "bin"),
+    ...versionDirs(path.join(mise, "installs", "node"), "bin"),
+    ...versionDirs(path.join(asdf, "installs", "nodejs"), "bin"),
+    ...fnm.flatMap((dir) => versionDirs(path.join(dir, "node-versions"), "installation", "bin")),
+    ...[path.join(mise, "shims"), path.join(asdf, "shims")].filter(isDir),
+  ];
+}
+
+/** `<versions>/<version>/<...rest>` for each version folder there ("v22.12.0" or "22.12.0"), newest first; aliases like "lts" left out. */
+function versionDirs(versions: string, ...rest: string[]): string[] {
   let names: string[];
   try {
     names = readdirSync(versions);
@@ -52,7 +76,29 @@ function nvmBinDirs(versions: string): string[] {
     for (let i = 0; i < Math.max(x.length, y.length); i++) if ((x[i] ?? 0) !== (y[i] ?? 0)) return (y[i] ?? 0) - (x[i] ?? 0);
     return 0;
   };
-  return names.filter((name) => /^v\d/.test(name)).sort(newestFirst).map((name) => path.join(versions, name, "bin"));
+  return names.filter((name) => /^v?\d/.test(name)).sort(newestFirst).map((name) => path.join(versions, name, ...rest));
+}
+
+/** The global prefix ~/.npmrc sets (`prefix=~/.npm-packages`), when it's an absolute path once ~ and $HOME are expanded. */
+function npmrcPrefix(home: string): string | null {
+  let text: string;
+  try {
+    text = readFileSync(path.join(home, ".npmrc"), "utf8");
+  } catch {
+    return null;
+  }
+  const line = /^\s*prefix\s*=\s*(.+?)\s*$/m.exec(text);
+  if (!line) return null;
+  const value = line[1]!.replace(/^["']|["']$/g, "").replace(/^~(?=$|[/\\])/, home).replace(/\$\{HOME\}|\$HOME\b/g, home);
+  return path.isAbsolute(value) ? path.normalize(value) : null;
+}
+
+function isDir(dir: string): boolean {
+  try {
+    return statSync(dir).isDirectory();
+  } catch {
+    return false;
+  }
 }
 
 function isFile(file: string): boolean {

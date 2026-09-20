@@ -23,18 +23,25 @@ export interface ComposerProps {
   usageThreshold?: number;
   /** What the chat runs on. The subscription has no budget here (the plan's own limits apply): the meter shows tokens only, and a threshold hides it. */
   provider?: AssistantProvider;
+  /** On the subscription, what pays when it isn't the person's Claude plan (billedElsewhere: "Anthropic API key"). */
+  billedTo?: string | null;
 }
 
 /** What the budget counts: billed-weight tokens, or the plain total from older hosts. */
 const budgetUsed = (usage: AssistantUsage | null) => usage?.budgetTokens ?? usage?.totalTokens ?? 0;
 
-/** Tokens used in this chat against its budget, with a list-price estimate. On the subscription, the tokens only. */
-export function UsageMeter({ usage, limits, provider = "api_key" }: { usage: AssistantUsage | null; limits: AssistantLimits | null; provider?: AssistantProvider }) {
+/** Tokens used in this chat against its budget, with a list-price estimate. On the subscription, the tokens only, and what pays for them. */
+export function UsageMeter({ usage, limits, provider = "api_key", billedTo = null }: { usage: AssistantUsage | null; limits: AssistantLimits | null; provider?: AssistantProvider; billedTo?: string | null }) {
   if (provider === "subscription") {
     const total = usage?.totalTokens ?? 0;
+    const title = billedTo
+      ? `Tokens this chat used, as Claude's agent adapter counts them. Claude's adapter is set to use ${billedTo}, so that pays for them at its own rates, not your Claude plan.`
+      : "Tokens this chat used, as Claude's agent adapter counts them. Your Claude plan's own usage limits apply.";
     return (
-      <div className="sb-assistant-usage" title="Tokens this chat used, as Claude's agent adapter counts them. Your Claude plan's own usage limits apply.">
-        <span className="sb-assistant-usage__text">{formatTokens(total)} tokens · your Claude plan</span>
+      <div className="sb-assistant-usage" title={title}>
+        <span className="sb-assistant-usage__text">
+          {formatTokens(total)} tokens · {billedTo ? `billed to ${billedTo}` : "your Claude plan"}
+        </span>
       </div>
     );
   }
@@ -65,7 +72,7 @@ export function UsageMeter({ usage, limits, provider = "api_key" }: { usage: Ass
 }
 
 /** Message field with Send and Stop. Enter sends; Shift+Enter adds a line. */
-export const Composer = forwardRef<HTMLTextAreaElement, ComposerProps>(function Composer({ running, disabled = false, onSend, onStop, usage, limits, placeholder, ariaLabel, ariaDescribedBy, sendLabel = "Send", usageThreshold = 0, provider = "api_key" }, ref) {
+export const Composer = forwardRef<HTMLTextAreaElement, ComposerProps>(function Composer({ running, disabled = false, onSend, onStop, usage, limits, placeholder, ariaLabel, ariaDescribedBy, sendLabel = "Send", usageThreshold = 0, provider = "api_key", billedTo = null }, ref) {
   const [text, setText] = useState("");
   const canSend = !disabled && !running && text.trim().length > 0;
   const showMeter = provider === "subscription" ? usageThreshold === 0 : budgetFraction(budgetUsed(usage), limits?.tokenBudget ?? 0) >= usageThreshold;
@@ -111,7 +118,7 @@ export const Composer = forwardRef<HTMLTextAreaElement, ComposerProps>(function 
           <IconButton icon={<ArrowUp size={15} strokeWidth={2.25} />} label={sendLabel} shortcut="Enter" variant="solid" size="sm" className="sb-assistant-composer__send" disabled={!canSend} onClick={send} />
         )}
       </div>
-      {showMeter ? <UsageMeter usage={usage} limits={limits} provider={provider} /> : null}
+      {showMeter ? <UsageMeter usage={usage} limits={limits} provider={provider} billedTo={billedTo} /> : null}
     </div>
   );
 });

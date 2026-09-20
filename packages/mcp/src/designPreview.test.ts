@@ -122,7 +122,7 @@ describe("preview_design", () => {
     await c.call("preview_design", { append: "<main>Items</main>" });
     const third = await c.call("preview_design", { append: "<footer>Pay</footer></body>" });
     const html = "<head><style>body{margin:0}</style></head><body><header>Checkout</header><main>Items</main><footer>Pay</footer></body>";
-    expect(third.structured).toEqual({ text: third.text, docId: "test", name: "Checkout", bytes: html.length, revision: 0, draftRevision: 3 });
+    expect(third.structured).toEqual({ text: third.text, docId: "test", name: "Checkout", component: null, replace: null, bytes: html.length, revision: 0, draftRevision: 3 });
     expect(updates.map((u) => [u.draftRevision, u.status, u.html])).toEqual([
       [1, "writing", "<head><style>body{margin:0}</style></head><body><header>Checkout</header>"],
       [2, "writing", "<head><style>body{margin:0}</style></head><body><header>Checkout</header><main>Items</main>"],
@@ -139,8 +139,10 @@ describe("preview_design", () => {
     expect((await c.call("import_design", { capture: CHECKOUT, name: "Home" })).isError).toBe(false);
     await c.call("preview_design", { name: "Home v2", replace: "home", width: 390, html: "<body>" });
     await c.call("preview_design", { height: 844, position: [0, 20], append: "<p>Hi</p>" });
-    await c.call("preview_design", { name: "Home v3", append: "</body>" });
+    const last = await c.call("preview_design", { name: "Home v3", append: "</body>" });
     expect(updates.at(-1)).toMatchObject({ name: "Home v3", component: null, replace: "home", width: 390, height: 844, position: [0, 20], html: "<body><p>Hi</p></body>" });
+    // The result names the fields as the calls left them: what a preview import would replace.
+    expect(last.structured).toMatchObject({ name: "Home v3", component: null, replace: "home" });
     // A replace the component doesn't have teaches, and changes nothing.
     const bad = await c.call("preview_design", { replace: "nope", append: "<p>more</p>" });
     expect(bad.isError).toBe(true);
@@ -148,6 +150,8 @@ describe("preview_design", () => {
     expect(updates).toHaveLength(3);
     const component = await c.call("preview_design", { component: "nowhere", append: "<p>more</p>" });
     expect(component.structured.error).toMatchObject({ code: "unknown_component" });
+    // html starts the page over and keeps the fields.
+    expect((await c.call("preview_design", { component: "main", html: "<body>" })).structured).toMatchObject({ name: "Home v3", component: "main", replace: "home" });
   });
 
   it("notes a new screen placed entirely outside the device screen, where the canvas and viewer won't show it", async () => {
@@ -199,7 +203,7 @@ describe("preview_design", () => {
     expect(cleared.text).toBe("Removed the draft “Checkout” from the canvas. Nothing changed.");
     expect(updates.at(-1)).toMatchObject({ status: "cleared", html: null, name: "Checkout", draftRevision: 2 });
     expect((await c.call("preview_design", { append: "<p>" })).structured.error).toMatchObject({ code: "no_draft" });
-    expect((await c.call("preview_design", { clear: true })).text).toBe("There's no draft to remove, so nothing changed.");
+    expect((await c.call("preview_design", { clear: true })).structured).toMatchObject({ text: "There's no draft to remove, so nothing changed.", name: null, component: null, replace: null, draftRevision: null });
     expect(updates).toHaveLength(2);
     // The session's next draft continues the count, so the canvas can tell it's newer.
     await c.call("preview_design", { html: "<body>new</body>" });
@@ -392,6 +396,14 @@ describe("import_design with preview", () => {
     expect(requests[0]).toMatchObject({ html: "<body>Pay</body>" });
     expect(statuses()).toEqual(["writing 1"]);
     expect((await c.call("preview_design", { append: "<p>" })).structured).toMatchObject({ draftRevision: 2 });
+  });
+
+  it("names the draft's replace and component in a dry run's _meta, for a client that didn't write the draft", async () => {
+    const c = await session(withCanvas(project.host));
+    expect((await c.call("import_design", { capture: CHECKOUT, name: "Checkout" })).isError).toBe(false);
+    await c.call("preview_design", { name: "Checkout v2", replace: "checkout", html: "<body>Pay</body>" });
+    expect((await importPreview(c, { dryRun: true })).meta).toMatchObject({ component: "main", dryRun: true, replaced: "checkout" });
+    expect((await importPreview(c, { dryRun: true, replace: null })).meta).toMatchObject({ component: "main", replaced: null });
   });
 
   it("teaches without a draft, and counts preview as a source", async () => {

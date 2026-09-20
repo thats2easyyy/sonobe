@@ -19,7 +19,15 @@
  *    phone preview: HTTP, live sync over WebSocket (polling, then revisions pushed with
  *    notifyDocumentChanged), the player rendering in a browser window (screenshots/lan-player.png), the
  *    pop-out viewer window (screenshots/viewer-window.png), and the "no window" error.
- * 3. Relaunches for window-state restore, file-loaded IPC trust, and the dev-server fallback.
+ * 3. With the built editor, the Assistant on the Claude subscription (experimental, off by default),
+ *    with tests/fake-claude-agent.mjs in place of Claude's agent adapter (SONOBE_CLAUDE_AGENT) and
+ *    FAKE_CLAUDE_MODE=auto: off by default on the API key; the Settings switch; the Assistant's choice and
+ *    the fake's login; the canvas box drawing “Checkout” through preview_design and adding it as the
+ *    Assistant's undo step (screenshots/subscription-design.png), with its tool steps streamed; the
+ *    isolated session options and the mode put back to "default"; a permission card for save
+ *    (screenshots/subscription-permission.png); Stop; a crash and the restart; signed out; not installed;
+ *    and turning it off, which stops the adapter.
+ * 4. Relaunches for window-state restore, file-loaded IPC trust, and the dev-server fallback.
  *
  *   node apps/desktop/tests/smoke.mjs
  *   SONOBE_SMOKE_SKIP_EDITOR_BUILD=1 node apps/desktop/tests/smoke.mjs    reuse apps/editor/dist
@@ -48,6 +56,8 @@ const editorScreenshotPath = path.join(screenshotsDir, "mcp-editor.png");
 const lanScreenshotPath = path.join(screenshotsDir, "lan-player.png");
 const simScreenshotPath = path.join(screenshotsDir, "mcp-sim-screenshot.png");
 const viewerWindowScreenshotPath = path.join(screenshotsDir, "viewer-window.png");
+const subscriptionDesignScreenshotPath = path.join(screenshotsDir, "subscription-design.png");
+const subscriptionPermissionScreenshotPath = path.join(screenshotsDir, "subscription-permission.png");
 const started = Date.now();
 
 const log = (msg) => console.log(`[smoke +${((Date.now() - started) / 1000).toFixed(1)}s] ${msg}`);
@@ -206,10 +216,20 @@ const launch = async (launchEnv, { pipeStdout = false } = {}) => {
   return next;
 };
 
-const readConnection = async () => {
-  await poll(() => existsSync(tokenFile), { message: "mcp.json" });
-  return JSON.parse(readFileSync(tokenFile, "utf8"));
+const readConnection = async (file = tokenFile) => {
+  await poll(() => existsSync(file), { message: "mcp.json" });
+  return JSON.parse(readFileSync(file, "utf8"));
 };
+
+/** Fresh user data means a first launch: dismiss the welcome screen so it doesn't cover the editor. */
+async function dismissWelcome(page) {
+  const welcome = page.getByRole("dialog", { name: "Welcome to Sonobe" });
+  if (!(await welcome.waitFor({ timeout: 3000 }).then(() => true, () => false))) return;
+  const keepWorking = welcome.getByRole("button", { name: /Keep working on/ });
+  if (!(await keepWorking.click({ timeout: 3000 }).then(() => true, () => false))) await page.keyboard.press("Escape");
+  await welcome.waitFor({ state: "hidden", timeout: 5000 }).catch(() => undefined);
+  log("dismissed the first-launch welcome screen");
+}
 
 /** Quit even when a document has unsaved changes (destroying windows skips the prompt). */
 const quit = async () => {
@@ -231,6 +251,296 @@ const PRESS_CONNECTIONS = [
   { from: "press_spring.output", to: "press_scale.progress" },
   { from: "press_scale.output", to: "@next_card.scale" },
 ];
+
+/** CI's stand-in for Claude's agent adapter: no Claude account, API key or network. */
+const FAKE_AGENT = path.join(appDir, "tests", "fake-claude-agent.mjs");
+/** The engine's copy (electron/assistant/acp/engine.ts). */
+const INSTALL_ADAPTER = "npm install -g @agentclientprotocol/claude-agent-acp";
+const NOT_INSTALLED = `Sonobe couldn't find Claude's agent adapter. It needs Node.js 22 or later: in Terminal, run ${INSTALL_ADAPTER}, then try again.`;
+const RESTARTED = "Claude's adapter restarted, so this reply doesn't remember the earlier messages in this chat.";
+const notSignedIn = (then) =>
+  `Claude isn't signed in on this computer. ${process.platform === "darwin" ? `Choose Sign in… (it opens Terminal), or run claude-agent-acp --cli auth login in Terminal, then ${then}.` : `In a terminal, run claude-agent-acp --cli auth login, then ${then}.`}`;
+const ASKING_TOOLS = ["save_document", "open_document", "create_document"];
+
+/**
+ * The Assistant on the person's Claude subscription (experimental, off by default), in the built app
+ * with the fake ACP agent in the adapter's place (SONOBE_CLAUDE_AGENT). FAKE_CLAUDE_MODE=auto starts
+ * each session the way the adapter does for someone whose Claude Code defaults to auto mode, so the
+ * permission card shows that Sonobe puts the session back in the mode that asks. The UI is driven where
+ * the behavior is the UI's; the rest goes through window.sonobeHost.assistant and the fake's log.
+ */
+async function subscriptionSmoke() {
+  const dir = path.join(temp, "subscription");
+  const subUserData = path.join(dir, "userData");
+  const subHome = path.join(dir, "home");
+  const fakeLog = path.join(dir, "fake-claude.jsonl");
+  const documents = path.join(dir, "Documents");
+  mkdirSync(documents, { recursive: true });
+  const subEnv = { ...env, SONOBE_USER_DATA: subUserData, SONOBE_HOME: subHome, SONOBE_CLAUDE_AGENT: FAKE_AGENT, FAKE_CLAUDE_LOG: fakeLog, FAKE_CLAUDE_MODE: "auto" };
+  for (const key of ["SONOBE_EDITOR_DIST", "SONOBE_CLAUDE_SUBSCRIPTION", "FAKE_CLAUDE_AUTH", "FAKE_CLAUDE_MODE_LOCKED", "FAKE_CLAUDE_NO_CLOSE"]) delete subEnv[key];
+  app = await launch(subEnv);
+  // Main's log (stdout and stderr): the adapter's starts and exits, and the switch going off.
+  let mainLog = "";
+  app.process().stdout?.on("data", (d) => (mainLog += d));
+  app.process().stderr?.on("data", (d) => (mainLog += d));
+  const count = (text) => mainLog.split(text).length - 1;
+
+  const page = await app.firstWindow();
+  await page.waitForLoadState("domcontentloaded");
+  await poll(() => app.evaluate(() => globalThis.__sonobeTest.hasRendererMethod("document.apply") === true), { timeout: 20_000, message: "the editor's MCP bridge" });
+  await dismissWelcome(page);
+  const command = (id) => app.evaluate((_electron, commandId) => globalThis.__sonobeTest.sendCommand(commandId), id);
+  const hostStatus = () => page.evaluate(() => window.sonobeHost.assistant.status());
+  /** Once entrance animations are over (spinners run on), so a screenshot shows the page settled. */
+  const settled = () => page.evaluate(() => Promise.all(document.getAnimations().filter((a) => a.effect?.getComputedTiming().endTime !== Infinity).map((a) => a.finished.catch(() => undefined))));
+  const fakeLines = () => (existsSync(fakeLog) ? readFileSync(fakeLog, "utf8").split("\n").filter(Boolean).map((line) => JSON.parse(line)) : []);
+
+  // Off by default: every chat runs on the API key, and Sonobe never starts the adapter.
+  const defaults = await page.evaluate(async () => {
+    const assistant = window.sonobeHost.assistant;
+    const status = await assistant.status();
+    const picked = await assistant.setConnection({ provider: "subscription" });
+    const restored = await assistant.setConnection({ provider: "api_key" });
+    const checked = await assistant.checkSubscription();
+    const signIn = await assistant.signInToClaude();
+    const sent = await assistant.send({ text: "echo hello" });
+    return { status, picked: picked.connection, restored: restored.connection, checked: checked.state, signIn, sent: sent.error?.code ?? sent.outcome };
+  });
+  const { connection } = defaults.status;
+  assert(connection.available === true && connection.subscriptionEnabled === false && connection.provider === "api_key" && connection.active === "api_key", "the switch is offered (unpackaged) and off, on the API key", connection);
+  assert(defaults.status.subscription.state === "unknown" && defaults.status.chatProvider === null && defaults.status.hasKey === false, "nothing checked, no chat, no key", defaults.status);
+  assert(defaults.picked.provider === "subscription" && defaults.picked.active === "api_key", "picking the subscription with the switch off keeps the API key active", defaults.picked);
+  assert(defaults.restored.provider === "api_key" && defaults.checked === "unknown", "checkSubscription with the switch off checks nothing", defaults);
+  assert(defaults.signIn.ok === false && defaults.signIn.error.includes("Settings → Claude"), "sign-in with the switch off", defaults.signIn);
+  assert(defaults.sent === "no_key", "a message with the switch off runs on the API key", defaults.sent);
+  assert(!existsSync(fakeLog) && count("Starting Claude's agent adapter") === 0, "the adapter never started", fakeLines());
+
+  // Settings → Claude: the switch says it awaits Anthropic's permission, and main keeps it.
+  await command("app.settings");
+  const settings = page.getByRole("dialog", { name: "Settings" });
+  const toggle = settings.getByRole("switch", { name: "Use my Claude subscription in the Assistant" });
+  await toggle.waitFor({ timeout: 10_000 });
+  assert((await toggle.getAttribute("aria-checked")) === "false", "the switch is off in Settings", await toggle.getAttribute("aria-checked"));
+  const described = await toggle.evaluate((el) => document.getElementById(el.getAttribute("aria-describedby") ?? "")?.textContent ?? "");
+  assert(described.startsWith("Experimental · awaiting Anthropic's permission. Off by default and not part of any release until Anthropic agrees."), "the switch says it awaits Anthropic's permission", described);
+  await toggle.scrollIntoViewIfNeeded();
+  await toggle.click();
+  await poll(async () => (await toggle.getAttribute("aria-checked")) === "true", { message: "the switch to turn on" });
+  const switchedOn = (await hostStatus()).connection;
+  assert(switchedOn.subscriptionEnabled === true && switchedOn.active === "api_key", "main has the switch on (the pick is still the API key)", switchedOn);
+  const connectionFile = path.join(subUserData, "assistant-connection.json");
+  assert(JSON.parse(readFileSync(connectionFile, "utf8")).subscriptionEnabled === true, "assistant-connection.json keeps the switch", readFileSync(connectionFile, "utf8"));
+  if (process.platform !== "win32") assert((statSync(connectionFile).mode & 0o777) === 0o600, "assistant-connection.json is 0600");
+  await settings.getByRole("button", { name: "Done" }).click();
+  await settings.waitFor({ state: "hidden", timeout: 5000 });
+  assert(!existsSync(fakeLog), "turning the switch on doesn't start the adapter");
+  log("subscription: off by default on the API key; the Settings switch awaits Anthropic's permission and turns it on in main");
+
+  // The Assistant offers both; picking the subscription reads the fake's login.
+  const sheet = page.locator(".sb-assistant-sheet");
+  await command("view.toggleAssistant");
+  const subscriptionChoice = sheet.getByRole("radio", { name: /Claude subscription/ });
+  await subscriptionChoice.waitFor({ timeout: 10_000 });
+  assert((await sheet.getByRole("radio", { name: "API key" }).getAttribute("aria-checked")) === "true" && (await subscriptionChoice.textContent()).includes("Experimental"), "the setup offers Claude subscription (Experimental) and API key");
+  await subscriptionChoice.click();
+  await sheet.getByText("Signed in · Claude Max · fake@example.com").waitFor({ timeout: 15_000 });
+  await sheet.getByText("Experimental: awaiting Anthropic's permission, so it's off by default and not in any release.").waitFor({ timeout: 5000 });
+  const ready = await hostStatus();
+  assert(ready.connection.active === "subscription" && ready.subscription.state === "ready" && ready.subscription.kind === "account" && ready.subscription.adapterVersion === "0.0.0-fake", "main reads the fake's login", ready.subscription);
+  const initialize = fakeLines().find((l) => l.kind === "initialize");
+  assert(initialize?.params.clientInfo.name === "sonobe" && initialize.params.clientCapabilities.terminal === false, "Sonobe starts the adapter as an ACP client", initialize);
+  await sheet.getByRole("button", { name: "Use Claude subscription" }).click();
+  const messageField = sheet.getByRole("textbox", { name: "Message the Assistant" });
+  await messageField.waitFor({ timeout: 5000 });
+  assert((await sheet.locator(".sb-assistant__subtitle").textContent()).includes("Claude Max"), "the header names the plan", await sheet.locator(".sb-assistant__subtitle").textContent());
+  await sheet.getByRole("button", { name: "Close Assistant" }).click();
+  await sheet.waitFor({ state: "hidden", timeout: 5000 });
+  log("subscription: the Assistant offers Claude subscription and API key; the fake is signed in to Claude Max");
+
+  // Every Assistant event this window gets, and whether the canvas ever showed the draft.
+  await page.evaluate(() => {
+    window.__assistantEvents = [];
+    window.sonobeHost.assistant.onEvent((event) => window.__assistantEvents.push(event));
+    window.__sawDesignPreview = false;
+    const look = () => {
+      if (document.querySelector("iframe[title='Design preview']")) window.__sawDesignPreview = true;
+    };
+    new MutationObserver(look).observe(document.body, { childList: true, subtree: true });
+  });
+  const events = () => page.evaluate(() => window.__assistantEvents);
+  const replies = async () => (await events()).filter((e) => e.type === "run_started").length;
+  /** The events of reply number `index` (from 0), once it has finished. */
+  const reply = (index, timeout = 20_000) =>
+    poll(
+      async () => {
+        const all = await events();
+        const started = all.filter((e) => e.type === "run_started")[index];
+        const own = started ? all.filter((e) => e.runId === started.runId) : [];
+        return own.some((e) => e.type === "run_finished") ? own : null;
+      },
+      { timeout, message: `reply ${index + 1} to finish` },
+    );
+  const finishedOf = (run) => run.find((e) => e.type === "run_finished");
+
+  // The canvas box: the screen draws through preview_design, then imports as the Assistant's layers.
+  await command("edit.deselectAll");
+  await page.locator(".sb-cv__design").click();
+  const designField = page.getByRole("textbox", { name: "Describe a screen for Claude" });
+  await designField.waitFor({ timeout: 5000 });
+  await designField.fill("a checkout screen with Apple Pay and a promo code");
+  await designField.press("Enter");
+  const box = page.locator(".sb-design-box");
+  await box.getByRole("status").filter({ hasText: "Added “Checkout”." }).waitFor({ timeout: 30_000 });
+  await box.getByText("Added a checkout screen with Apple Pay and a promo code.").waitFor({ timeout: 5000 });
+  const design = await reply(0);
+  const started = design.find((e) => e.type === "run_started");
+  const toolsStarted = design.filter((e) => e.type === "tool_started").map((e) => e.name);
+  const toolsFinished = design.filter((e) => e.type === "tool_finished");
+  const importFinished = toolsFinished.find((e) => e.name === "import_design");
+  assert(started.provider === "subscription" && finishedOf(design).outcome === "completed", "the box's reply ran on the subscription", finishedOf(design));
+  assert(design.filter((e) => e.type === "text_delta").map((e) => e.delta).join("").includes("I'll design a checkout screen that matches your prototype."), "the reply streamed its text", design.filter((e) => e.type === "text_delta"));
+  assert(["get_outline", "preview_design", "import_design"].every((name) => toolsStarted.includes(name)), "tool steps shown as they start", toolsStarted);
+  assert(toolsFinished.filter((e) => e.name === "preview_design").length === 3 && toolsFinished.every((e) => e.status === "done"), "every tool step finished", toolsFinished);
+  assert(importFinished?.imported?.name === "Checkout" && importFinished.changedDocument === true, "import_design reports the screen it added", importFinished);
+  assert(!design.some((e) => e.type === "design_draft"), "this path draws through preview_design, not streamed drafts");
+  assert(await page.evaluate(() => window.__sawDesignPreview), "the canvas drew the page while Claude wrote it");
+  await page.locator("iframe[title='Design preview']").waitFor({ state: "detached", timeout: 5000 });
+  await settled();
+  await page.screenshot({ path: subscriptionDesignScreenshotPath });
+
+  const subMcp = await connectMcp(await readConnection(path.join(subHome, "mcp.json")));
+  const subOutline = await subMcp.call("get_outline", { detail: "compact" });
+  assert(subOutline.text.includes('"Checkout"') && subOutline.text.includes('"Pay Button"'), "the Checkout screen is in the window's document", subOutline.text.slice(0, 600));
+  const byAssistant = await subMcp.call("list_history", { author: "Assistant" });
+  const imported = byAssistant.structuredContent.entries.find((e) => e.author.name === "Assistant" && e.txnId === importFinished.imported.txnId);
+  assert(imported && imported.author.kind === "agent", "the import is one undo step authored “Assistant”", byAssistant.text);
+  const afterDesign = await hostStatus();
+  const secretsFile = path.join(subUserData, "secrets.json");
+  assert(afterDesign.hasKey === false && (!existsSync(secretsFile) || !readFileSync(secretsFile, "utf8").includes("anthropic.apiKey")), "no API key was ever stored");
+  assert(afterDesign.chatProvider === "subscription" && afterDesign.usage.estimatedCostUsd === 0 && afterDesign.usage.totalTokens > 0, "the chat counts tokens, not dollars", afterDesign.usage);
+
+  // How Sonobe opened the session: isolated from the person's Claude Code, and back in the mode that asks.
+  const opened = fakeLines().find((l) => l.kind === "session/new")?.params;
+  const options = opened?._meta?.claudeCode?.options ?? {};
+  assert(Array.isArray(options.tools) && options.tools.length === 0 && Array.isArray(options.settingSources) && options.settingSources.length === 0, "no built-in tools and none of the person's settings", options);
+  assert(options.strictMcpConfig === true && options.persistSession === false && options.allowDangerouslySkipPermissions === false, "only Sonobe's MCP server, nothing saved to resume, no bypass mode", options);
+  assert(options.allowedTools.includes("mcp__sonobe__preview_design") && options.allowedTools.includes("mcp__sonobe__import_design") && !ASKING_TOOLS.some((name) => options.allowedTools.includes(`mcp__sonobe__${name}`)), "tools that reach outside the prototype ask first", options.allowedTools);
+  assert(options.env?.ENABLE_TOOL_SEARCH === "false" && options.env?.MCP_TOOL_TIMEOUT === "1800000" && String(options.env?.CLAUDE_AGENT_SDK_CLIENT_APP).startsWith("sonobe/"), "the session's environment", options.env);
+  assert(opened.cwd === path.join(subUserData, "assistant", "claude"), "sessions run in Sonobe's own empty folder", opened.cwd);
+  assert(opened.mcpServers.length === 1 && opened.mcpServers[0].type === "http" && opened.mcpServers[0].url.startsWith("http://127.0.0.1:") && opened.mcpServers[0].headers.every((h) => h.value === "<redacted>"), "one loopback MCP endpoint, its token only in the header", opened.mcpServers);
+  assert(typeof opened._meta.systemPrompt === "string" && opened._meta.systemPrompt.includes("preview_design"), "the system prompt carries the tool guide", String(opened._meta.systemPrompt).slice(0, 200));
+  assert(fakeLines().some((l) => l.kind === "mode" && l.from === "auto" && l.to === "default" && l.via === "config_option"), "a session the adapter starts in auto mode is put back in default", fakeLines().filter((l) => l.kind === "mode"));
+  assert(fakeLines().some((l) => l.kind === "session/prompt" && l.text.startsWith("<canvas_context>")), "the box's message leads with the canvas context");
+  log(`subscription: the canvas box drew “Checkout” through preview_design (${toolsStarted.length} tool steps), then added it as the Assistant's undo step; isolated session in default mode → ${path.relative(process.cwd(), subscriptionDesignScreenshotPath)}`);
+
+  // The chat sheet: Claude Code's permission card for a save, answered in the app.
+  await app.evaluate(({ app: electronApp }, folder) => electronApp.setPath("documents", folder), documents);
+  await box.getByRole("button", { name: "Close", exact: true }).click();
+  await box.waitFor({ state: "hidden", timeout: 5000 });
+  await command("view.toggleAssistant");
+  await messageField.waitFor({ timeout: 5000 });
+  const say = async (text) => {
+    await messageField.fill(text);
+    await messageField.press("Enter");
+  };
+  let index = await replies();
+  await say("save it");
+  const card = sheet.getByRole("alertdialog", { name: "Allow Claude to save this prototype?" });
+  await card.waitFor({ timeout: 15_000 });
+  const choices = await card.getByRole("button").allTextContents();
+  assert(choices.join(" | ") === "Allow | Allow for this chat | Don't allow", "the card shows Claude Code's choices", choices);
+  await settled();
+  await page.screenshot({ path: subscriptionPermissionScreenshotPath });
+  await card.getByRole("button", { name: "Allow", exact: true }).click();
+  await sheet.getByText("Saved it.", { exact: true }).waitFor({ timeout: 15_000 });
+  await sheet.getByText("Allowed", { exact: true }).waitFor({ timeout: 5000 });
+  const saved = await reply(index);
+  assert(finishedOf(saved).outcome === "completed" && saved.filter((e) => e.type === "confirm_required").length === 1, "one card, then the save ran", saved.filter((e) => e.type.startsWith("confirm")));
+  const answered = fakeLines().find((l) => l.kind === "permission" && l.tool === "save_document");
+  assert(answered?.optionKind === "allow_once" && fakeLines().some((l) => l.kind === "mcp_result" && l.tool === "save_document" && !l.isError), "Allow answered Claude Code, and save_document ran", fakeLines().filter((l) => l.tool === "save_document"));
+  assert(existsSync(path.join(documents, "Photo Zoom.sonobe", "project.json")), "the prototype was saved");
+  assert(!fakeLines().some((l) => l.kind === "unasked"), "Claude Code never ran an asking tool without a question", fakeLines().filter((l) => l.kind === "unasked"));
+  log(`subscription: “save” asked on a permission card (Allow / Allow for this chat / Don't allow) although the fake starts in auto mode; Allow saved it → ${path.relative(process.cwd(), subscriptionPermissionScreenshotPath)}`);
+
+  // Stop.
+  index = await replies();
+  await say("hang on");
+  await sheet.getByText("Working on it…", { exact: true }).waitFor({ timeout: 10_000 });
+  const stopAt = Date.now();
+  await sheet.getByRole("button", { name: "Stop" }).click();
+  const hung = await reply(index, 5000);
+  assert(finishedOf(hung).outcome === "stopped", "Stop ends the reply as stopped", finishedOf(hung));
+  await sheet.getByText("Stopped.", { exact: true }).waitFor({ timeout: 5000 });
+  assert(fakeLines().some((l) => l.kind === "session/cancel"), "Stop sent session/cancel");
+  log(`subscription: Stop ended a hanging reply in ${Date.now() - stopAt} ms`);
+
+  // The adapter crashes; the next message starts it again and says the chat starts over.
+  const startsBefore = count("Starting Claude's agent adapter");
+  index = await replies();
+  await say("crash now");
+  const crashed = finishedOf(await reply(index));
+  assert(crashed.outcome === "error" && crashed.error.code === "agent_crashed" && crashed.error.message.includes("(exit code 7: fake crash: something broke)") && crashed.error.message.includes(`${INSTALL_ADAPTER}@latest`), "a crash says what happened and what to do", crashed.error);
+  await sheet.getByText(crashed.error.message, { exact: true }).waitFor({ timeout: 5000 });
+  index = await replies();
+  await say("echo once more");
+  const again = await reply(index);
+  assert(finishedOf(again).outcome === "completed" && again.some((e) => e.type === "notice" && e.message === RESTARTED), "the next message restarts the adapter, with the notice", again.filter((e) => e.type === "notice" || e.type === "run_finished"));
+  await sheet.getByText(RESTARTED, { exact: true }).waitFor({ timeout: 5000 });
+  await sheet.getByText("Echo: echo once more", { exact: true }).waitFor({ timeout: 5000 });
+  assert(count("Starting Claude's agent adapter") === startsBefore + 1 && fakeLines().filter((l) => l.kind === "initialize").length === 2, "one restart", { startsBefore, now: count("Starting Claude's agent adapter") });
+  log("subscription: a crash explained itself, and the next message restarted the adapter with the notice");
+
+  // Signed out: the reply says how to sign in, and the setup offers Sign in… (never clicked: it opens Terminal).
+  index = await replies();
+  await say("signedout");
+  const signedOut = finishedOf(await reply(index));
+  assert(signedOut.error?.code === "not_signed_in" && signedOut.error.message === notSignedIn("send your message again"), "not signed in says how to sign in", signedOut.error);
+  await sheet.getByRole("button", { name: "Sign in…" }).waitFor({ timeout: 5000 });
+  await sheet.getByText(notSignedIn("choose Check again"), { exact: true }).waitFor({ timeout: 5000 });
+  assert((await hostStatus()).subscription.state === "signed_out", "main reads signed out");
+  await sheet.getByRole("button", { name: "Check again" }).click();
+  await messageField.waitFor({ timeout: 15_000 });
+  log("subscription: signed out offered Sign in… and Check again; checking again found the login");
+
+  // Not installed: the setup shows the command that installs the adapter, and a message says the same.
+  await sheet.getByRole("button", { name: "Claude subscription", exact: true }).click();
+  await app.evaluate((_electron, file) => {
+    process.env.SONOBE_CLAUDE_AGENT = file;
+  }, path.join(dir, "missing", "claude-agent-acp.js"));
+  await sheet.getByRole("button", { name: "Check again" }).click();
+  await sheet.getByText("Install Claude's agent adapter (it needs Node.js 22 or later):", { exact: true }).waitFor({ timeout: 15_000 });
+  assert((await sheet.locator(".sb-assistant-sub__command code").textContent()) === INSTALL_ADAPTER, "the setup shows the install command");
+  const missing = await hostStatus();
+  assert(missing.subscription.state === "not_installed" && missing.subscription.message === NOT_INSTALLED, "main reads not installed", missing.subscription);
+  const notInstalled = await page.evaluate(() => window.sonobeHost.assistant.send({ text: "echo hello" }));
+  assert(notInstalled.outcome === "error" && notInstalled.error.code === "agent_not_installed" && notInstalled.error.message === NOT_INSTALLED, "a message says how to install it", notInstalled);
+  await app.evaluate((_electron, file) => {
+    process.env.SONOBE_CLAUDE_AGENT = file;
+  }, FAKE_AGENT);
+  await sheet.getByRole("button", { name: "Check again" }).click();
+  await sheet.getByText("Signed in · Claude Max · fake@example.com").waitFor({ timeout: 15_000 });
+  await sheet.getByRole("button", { name: "Back to chat" }).click();
+  await messageField.waitFor({ timeout: 5000 });
+  log("subscription: without the adapter, the setup and the reply show the npm command; found again, it's signed in");
+
+  // Off again: the chat goes back to the API key, and the adapter stops.
+  const initialized = fakeLines().filter((l) => l.kind === "initialize").length;
+  await command("app.settings");
+  await toggle.waitFor({ timeout: 5000 });
+  await toggle.click();
+  await poll(async () => (await toggle.getAttribute("aria-checked")) === "false", { message: "the switch to turn off" });
+  await settings.getByRole("button", { name: "Done" }).click();
+  const off = await hostStatus();
+  assert(off.connection.subscriptionEnabled === false && off.connection.active === "api_key" && off.chatProvider === null, "off: new chats run on the API key", off.connection);
+  await poll(() => mainLog.includes("Claude subscription turned off") && count("Claude's agent adapter exited (") === count("Starting Claude's agent adapter"), { message: "every adapter to have exited", timeout: 10_000 });
+  assert((await page.evaluate(() => window.sonobeHost.assistant.checkSubscription())).state !== "checking" && fakeLines().filter((l) => l.kind === "initialize").length === initialized, "checking with the switch off starts nothing");
+  log(`subscription: off stopped the adapter (${count("Starting Claude's agent adapter")} started, all exited)`);
+  // Not here: a second window. The app opens one editor window (ensureWindow), so keeping each chat's edits in its
+  // own window's prototype is left to toolRunner.test.ts and acp/engine.test.ts, which pin calls to the window's document.
+
+  await subMcp.close();
+  await quit();
+}
 
 try {
   log("building main + preload + player");
@@ -560,14 +870,7 @@ try {
     const bridged = await settle(() => app.evaluate(() => globalThis.__sonobeTest.hasRendererMethod("document.apply") === true), { timeout: 20_000 });
     if (bridged) {
       log("the built editor mounts the MCP bridge");
-      // Fresh user data means a first launch: dismiss the welcome screen so it doesn't cover the editor.
-      const welcome = page.getByRole("dialog", { name: "Welcome to Sonobe" });
-      if (await welcome.waitFor({ timeout: 3000 }).then(() => true, () => false)) {
-        const keepWorking = welcome.getByRole("button", { name: /Keep working on/ });
-        if (!(await keepWorking.click({ timeout: 3000 }).then(() => true, () => false))) await page.keyboard.press("Escape");
-        await welcome.waitFor({ state: "hidden", timeout: 5000 }).catch(() => undefined);
-        log("dismissed the first-launch welcome screen");
-      }
+      await dismissWelcome(page);
     } else {
       const probe = await connectMcp(await readConnection());
       const outline = await probe.call("get_outline");
@@ -860,7 +1163,14 @@ try {
   app = null;
 
   // ---------------------------------------------------------------------------------------------
-  // 3. Relaunches
+  // 3. The Assistant on the Claude subscription (experimental), with the fake ACP agent
+  // ---------------------------------------------------------------------------------------------
+
+  if (mode === "editor") await subscriptionSmoke();
+  else log("WARN skipped the Claude subscription section: it drives the built editor's Assistant, and this build doesn't mount the bridge");
+
+  // ---------------------------------------------------------------------------------------------
+  // 4. Relaunches
   // ---------------------------------------------------------------------------------------------
 
   log("relaunching against a stub editor build");

@@ -21,7 +21,8 @@ const KIND_LABELS: Record<DevicePreset["kind"], string> = { phone: "Phones", tab
 
 const DEVICE_OPTIONS: SelectOption[] = DEVICE_PRESETS.map((d) => ({ value: d.id, label: d.name, group: KIND_LABELS[d.kind], trailing: `${d.size[0]}×${d.size[1]}`, keywords: [d.platform, d.kind] }));
 
-function Row({ name, description, children, stack = false }: { name: string; description?: ReactNode; children: ReactNode; stack?: boolean }) {
+/** `descriptionId`: the description's id, for the control's aria-describedby. */
+function Row({ name, description, descriptionId, children, stack = false }: { name: string; description?: ReactNode; descriptionId?: string; children: ReactNode; stack?: boolean }) {
   const id = useId();
   return (
     <div className="sb-settings__row" data-stack={stack || undefined} role="group" aria-labelledby={id}>
@@ -29,7 +30,11 @@ function Row({ name, description, children, stack = false }: { name: string; des
         <span className="sb-settings__name" id={id}>
           {name}
         </span>
-        {description && <span className="sb-settings__desc">{description}</span>}
+        {description && (
+          <span className="sb-settings__desc" id={descriptionId}>
+            {description}
+          </span>
+        )}
       </div>
       <div className="sb-settings__control">{children}</div>
     </div>
@@ -67,11 +72,14 @@ export const SUBSCRIPTION_SWITCH_DESCRIPTION =
 
 /**
  * The experimental switch (desktop, with a preload that has it): the Assistant on the person's Claude
- * subscription. Main keeps it, off by default; this asks main and shows what main says.
+ * subscription. Main keeps it, off by default; this asks main and shows what main says. A build that
+ * doesn't offer it (a release, unless started with SONOBE_CLAUDE_SUBSCRIPTION=1) shows nothing, and so
+ * does one whose answer hasn't come yet, so a release never shows the switch even for a moment.
  */
 function SubscriptionSwitch() {
   const controller = useMemo(() => sharedAssistantController(), []);
   const connection = useAssistant((s) => s.status?.connection);
+  const descriptionId = useId();
   const [saving, setSaving] = useState(false);
   useEffect(() => {
     void controller.refresh();
@@ -82,9 +90,11 @@ function SubscriptionSwitch() {
     setSaving(false);
     if (result && !result.ok) toast.error("Couldn't change the setting", { description: result.error });
   };
+  if (!connection || connection.available === false) return null;
   return (
-    <Row name={SUBSCRIPTION_SWITCH_LABEL} description={SUBSCRIPTION_SWITCH_DESCRIPTION}>
-      <Toggle aria-label={SUBSCRIPTION_SWITCH_LABEL} checked={connection?.subscriptionEnabled === true} disabled={!connection || saving} onChange={(checked) => void change(checked)} />
+    // The description is the switch's too: a screen reader says it's experimental and awaiting Anthropic's permission.
+    <Row name={SUBSCRIPTION_SWITCH_LABEL} description={SUBSCRIPTION_SWITCH_DESCRIPTION} descriptionId={descriptionId}>
+      <Toggle aria-label={SUBSCRIPTION_SWITCH_LABEL} aria-describedby={descriptionId} checked={connection.subscriptionEnabled} disabled={saving} onChange={(checked) => void change(checked)} />
     </Row>
   );
 }

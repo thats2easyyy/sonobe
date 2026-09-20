@@ -1,8 +1,8 @@
-import { CircleAlert, CircleCheck, CircleUserRound, Copy, LoaderCircle, ShieldCheck, TriangleAlert } from "lucide-react";
+import { CircleAlert, CircleCheck, CircleUserRound, Copy, Info, LoaderCircle, ShieldCheck, TriangleAlert } from "lucide-react";
 import { useEffect, useState } from "react";
 import { Button } from "../../ui/Button.tsx";
 import type { AssistantController } from "./controller.ts";
-import { CLAUDE_AGENT_INSTALL } from "./provider.ts";
+import { billedElsewhere, CLAUDE_AGENT_INSTALL } from "./provider.ts";
 import type { AssistantSubscriptionStatus } from "./types.ts";
 
 export interface SubscriptionSetupProps {
@@ -15,9 +15,6 @@ export interface SubscriptionSetupProps {
   doneLabel?: string;
 }
 
-/** The kinds of login that bill something other than the person's Claude plan. */
-const OTHER_BILLING = new Set(["api_key", "gateway", "external"]);
-
 /**
  * Setup for the experimental Claude subscription path (off by default, awaiting Anthropic's
  * permission): what it does, whether Claude's agent adapter is installed and signed in, and how to fix
@@ -28,8 +25,10 @@ export function SubscriptionSetup({ controller, subscription, onDone, doneLabel 
   const [signIn, setSignIn] = useState<{ state: "idle" | "opening" | "opened" } | { state: "error"; message: string }>({ state: "idle" });
   const [copied, setCopied] = useState<"idle" | "copied" | "failed">("idle");
 
+  // Also on a "checking" main answered with (another window's check, or the adapter starting): the controller's check waits
+  // for it, rather than the setup spinning until something else reads the status. It shares a check that's already running.
   useEffect(() => {
-    if (state === "unknown") void controller.checkSubscription();
+    if (state === "unknown" || state === "checking") void controller.checkSubscription();
   }, [state, controller]);
 
   useEffect(() => {
@@ -74,19 +73,25 @@ export function SubscriptionSetup({ controller, subscription, onDone, doneLabel 
       </p>
     );
   } else if (state === "ready") {
-    const billsElsewhere = subscription?.kind && OTHER_BILLING.has(subscription.kind);
+    const elsewhere = billedElsewhere(subscription);
     body = (
       <>
-        {billsElsewhere ? (
+        {elsewhere ? (
           <p className="sb-assistant-key__status" data-tone="warn" role="status">
             <TriangleAlert size={13} aria-hidden className="sb-assistant-sub__status-icon" />
-            <span>Claude's adapter is set to use {subscription?.label ?? "another account"}, so this bills that, not your Claude plan.</span>
+            <span>Claude's adapter is set to use {elsewhere}, so this bills that, not your Claude plan.</span>
           </p>
-        ) : (
+        ) : subscription?.kind === "account" ? (
           <div className="sb-assistant-key__saved-row sb-assistant-sub__account" role="status">
             <CircleCheck size={15} aria-hidden className="sb-assistant-key__ok" />
-            <span className="sb-assistant-sub__account-text">{["Signed in", subscription?.label, subscription?.email].filter(Boolean).join(" · ")}</span>
+            <span className="sb-assistant-sub__account-text">{["Signed in", subscription.label, subscription.email].filter(Boolean).join(" · ")}</span>
           </div>
+        ) : (
+          // The adapter answered but never said which login it uses: Sonobe doesn't know that it's signed in.
+          <p className="sb-assistant-key__status" role="status">
+            <Info size={13} aria-hidden className="sb-assistant-sub__status-icon" />
+            <span>Claude's agent adapter is running, but it didn't say which Claude account it uses. If it isn't signed in, your first message will say so.</span>
+          </p>
         )}
         {subscription?.adapterVersion ? <p className="sb-assistant-key__replace">Claude's agent adapter {subscription.adapterVersion}</p> : null}
         <div className="sb-assistant-key__actions">

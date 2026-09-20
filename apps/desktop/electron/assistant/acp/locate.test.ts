@@ -95,6 +95,44 @@ describe("locateClaudeAgent", () => {
     expect(locate({ PATH: "/usr/bin" })).toMatchObject({ ok: true, spec: { displayPath: `~/.nvm/versions/node/v24.18.0/bin/${CLAUDE_AGENT_BIN}`, version: "0.79.0" } });
   });
 
+  it.skipIf(!posix || installedHere)("finds the adapter npm put in a Node that mise, asdf or fnm installed, newest first, or where ~/.npmrc's prefix says", async () => {
+    const managers: [string, string[]][] = [
+      ["mise", [".local", "share", "mise", "installs", "node", "%v"]],
+      ["asdf", [".asdf", "installs", "nodejs", "%v"]],
+      ["fnm", [".local", "share", "fnm", "node-versions", "v%v", "installation"]],
+      ["fnm on macOS", ["Library", "Application Support", "fnm", "node-versions", "v%v", "installation"]],
+      ["fnm, the oldest folder", [".fnm", "node-versions", "v%v", "installation"]],
+    ];
+    for (const [manager, parts] of managers) {
+      home = path.join(dir, manager);
+      const prefix = (version: string) => path.join(home, ...parts.map((part) => part.replace("%v", version)));
+      await npmInstall(prefix("20.18.0"), "0.70.0");
+      const { bin, entry } = await npmInstall(prefix("24.1.0"), "0.79.0");
+      await mkdir(path.join(prefix("lts"), "bin"), { recursive: true });
+      expect(locate({ PATH: "/usr/bin" }), manager).toEqual({ ok: true, spec: { command: ELECTRON, args: [entry], env: { ELECTRON_RUN_AS_NODE: "1" }, displayPath: displayPath(bin, home), version: "0.79.0", source: "path" } });
+    }
+
+    home = path.join(dir, "npmrc");
+    const { entry } = await npmInstall(path.join(home, ".npm-packages"));
+    await writeFile(path.join(home, ".npmrc"), "; where npm -g puts things\nprefix = ~/.npm-packages\n");
+    expect(locate({ PATH: "/usr/bin" })).toMatchObject({ ok: true, spec: { args: [entry], displayPath: `~/.npm-packages/bin/${CLAUDE_AGENT_BIN}` } });
+    await writeFile(path.join(home, ".npmrc"), "prefix=${HOME}/.npm-packages\n");
+    expect(locate({ PATH: "/usr/bin" })).toMatchObject({ ok: true, spec: { args: [entry] } });
+  });
+
+  it.skipIf(!posix || installedHere)("follows MISE_DATA_DIR, ASDF_DATA_DIR and FNM_DIR, and runs a manager's shim as it is", async () => {
+    const { entry } = await npmInstall(path.join(dir, "mise-data", "installs", "node", "22.12.0"));
+    expect(locate({ PATH: "/usr/bin", MISE_DATA_DIR: path.join(dir, "mise-data") })).toMatchObject({ ok: true, spec: { args: [entry] } });
+    const asdf = await npmInstall(path.join(dir, "asdf-data", "installs", "nodejs", "22.12.0"));
+    expect(locate({ PATH: "/usr/bin", ASDF_DATA_DIR: path.join(dir, "asdf-data") })).toMatchObject({ ok: true, spec: { args: [asdf.entry] } });
+    const fnm = await npmInstall(path.join(dir, "fnm-data", "node-versions", "v22.12.0", "installation"));
+    expect(locate({ PATH: "/usr/bin", FNM_DIR: path.join(dir, "fnm-data") })).toMatchObject({ ok: true, spec: { args: [fnm.entry] } });
+
+    // asdf's shim is a shell script that runs the tool through asdf.
+    const shim = await script(path.join(home, ".asdf", "shims", CLAUDE_AGENT_BIN), "#!/usr/bin/env bash\nexec asdf exec claude-agent-acp \"$@\"\n");
+    expect(locate({ PATH: "/usr/bin" })).toEqual({ ok: true, spec: { command: shim, args: [], env: {}, displayPath: `~/.asdf/shims/${CLAUDE_AGENT_BIN}`, version: null, source: "path" } });
+  });
+
   it.skipIf(!posix || installedHere)("lists every folder it looked in, home as ~, when the adapter isn't installed", () => {
     const empty = path.join(dir, "empty");
     expect(locate({ PATH: `${empty}:relative/bin::${empty}` })).toEqual({
@@ -102,6 +140,28 @@ describe("locateClaudeAgent", () => {
       searched: [empty, "/opt/homebrew/bin", "/usr/local/bin", "~/.npm-global/bin", "~/.local/bin", "~/.volta/bin", "~/.bun/bin", "~/Library/pnpm"],
     });
     expect(locate({}, "linux")).toEqual({ ok: false, searched: ["/opt/homebrew/bin", "/usr/local/bin", "~/.npm-global/bin", "~/.local/bin", "~/.volta/bin", "~/.bun/bin"] });
+  });
+
+  it.skipIf(!posix || installedHere)("lists the version managers' folders it looked in only when they're there", async () => {
+    await mkdir(path.join(home, ".local", "share", "mise", "installs", "node", "22.12.0", "bin"), { recursive: true });
+    await mkdir(path.join(home, ".local", "share", "mise", "shims"), { recursive: true });
+    await mkdir(path.join(home, ".nvm", "versions", "node", "v24.1.0", "bin"), { recursive: true });
+    await mkdir(path.join(home, ".asdf", "installs", "nodejs"), { recursive: true });
+    expect(locate({ PATH: "" })).toEqual({
+      ok: false,
+      searched: [
+        "/opt/homebrew/bin",
+        "/usr/local/bin",
+        "~/.npm-global/bin",
+        "~/.local/bin",
+        "~/.volta/bin",
+        "~/.bun/bin",
+        "~/Library/pnpm",
+        "~/.nvm/versions/node/v24.1.0/bin",
+        "~/.local/share/mise/installs/node/22.12.0/bin",
+        "~/.local/share/mise/shims",
+      ],
+    });
   });
 
   it("runs the script beside npm's .cmd shim on Windows", async () => {
@@ -119,6 +179,13 @@ describe("wellKnownBinDirs and displayPath", () => {
   it("names the folders by platform", () => {
     expect(wellKnownBinDirs({ platform: "darwin", home: "/Users/me", env: {} })).toEqual(["/opt/homebrew/bin", "/usr/local/bin", "/Users/me/.npm-global/bin", "/Users/me/.local/bin", "/Users/me/.volta/bin", "/Users/me/.bun/bin", "/Users/me/Library/pnpm"]);
     expect(wellKnownBinDirs({ platform: "win32", home: "", env: { APPDATA: "/c/Users/me/AppData/Roaming" } })).toEqual(["/c/Users/me/AppData/Roaming/npm"]);
+  });
+
+  it.skipIf(!posix)("adds ~/.npmrc's prefix after npm's own, and leaves out one that isn't a path", async () => {
+    await writeFile(path.join(home, ".npmrc"), 'registry=https://registry.npmjs.org/\nprefix="/opt/npm-global"\n');
+    expect(wellKnownBinDirs({ platform: "linux", home, env: {} }).slice(2, 4)).toEqual([path.join(home, ".npm-global", "bin"), "/opt/npm-global/bin"]);
+    await writeFile(path.join(home, ".npmrc"), "prefix=npm-packages\n");
+    expect(wellKnownBinDirs({ platform: "linux", home, env: {} })).toHaveLength(6);
   });
 
   it.skipIf(!posix)("shows home as ~, and nothing else", () => {

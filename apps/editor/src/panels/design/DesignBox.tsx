@@ -8,7 +8,7 @@
  */
 
 import { artboardSize } from "@sonobe/core";
-import { Check, CircleAlert, Copy, EyeOff, FolderCode, KeyRound, LoaderCircle, LogIn, MessageSquare, ScanLine, SendToBack, Sparkles, SquareTerminal, TriangleAlert, Undo2, Wrench, X } from "lucide-react";
+import { Check, CircleAlert, Copy, EyeOff, FolderCode, KeyRound, LoaderCircle, LogIn, MessageSquare, RefreshCw, ScanLine, SendToBack, Sparkles, SquareTerminal, TriangleAlert, Undo2, Wrench, X } from "lucide-react";
 import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type JSX, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import { useStore } from "zustand";
 import { appPanels } from "../../app/appPanels.ts";
@@ -95,8 +95,10 @@ function DesignBoxPanel({ session, bounds, onHeightChange }: DesignBoxProps): JS
   const noticeId = useId();
   // A send was held because what the chat runs on isn't ready (no API key; Claude signed out, not installed, or failing).
   const [noKey, setNoKey] = useState(false);
-  // The subscription's login is being read again before a send.
+  // The subscription's login is being read again before a send, or for Check again.
   const [checking, setChecking] = useState(false);
+  // Check again found Claude ready: the held request goes on the next Return.
+  const [readyAgain, setReadyAgain] = useState(false);
   const [codeError, setCodeError] = useState<string | null>(null);
   const [handingOff, setHandingOff] = useState(false);
   const [mcpSource] = useState<McpStatusSource | null>(() => {
@@ -132,9 +134,10 @@ function DesignBoxPanel({ session, bounds, onHeightChange }: DesignBoxProps): JS
 
   const provider = chatProvider(assistant.status);
   const ready = !assistant.status || providerReady(assistant.status, provider);
+  // Not while the box reads the login again: "checking" counts as ready, and the notice (with its Check again) stays until the answer.
   useEffect(() => {
-    if (ready) setNoKey(false);
-  }, [ready]);
+    if (ready && !checking) setNoKey(false);
+  }, [ready, checking]);
 
   if (!shows) return null;
 
@@ -153,7 +156,13 @@ function DesignBoxPanel({ session, bounds, onHeightChange }: DesignBoxProps): JS
       : `Designing on the canvas uses your own Anthropic API key, kept in your keychain.${controller.canOpenInClaudeCode ? " With a Claude plan, open it in Claude Code instead: it draws on this canvas as it writes." : ""}`;
   // A reply without an import (a question, or wiring patches) is the status line itself. Without a key, the
   // notice below shows why nothing was sent, and the (hidden) live region says so to screen readers.
-  const line: DesignStatusLine | null = checking ? { text: "Checking Claude…", tone: "busy" } : noKey ? null : designStatusLine(design, assistant, now, placement);
+  const line: DesignStatusLine | null = checking
+    ? { text: "Checking Claude…", tone: "busy" }
+    : noKey
+      ? null
+      : readyAgain && runState === "idle"
+        ? { text: "Claude is ready. Press Return to send your request.", tone: "done" }
+        : designStatusLine(design, assistant, now, placement);
   const noKeyAnnouncement =
     provider === "subscription" ? notReadyAnnouncement(subscription) : `Nothing was sent. Designing here needs your own Anthropic API key${controller.canOpenInClaudeCode ? ", or you can open it in Claude Code" : ""}.`;
   const confirms = assistant.items.filter((i): i is Extract<ChatItem, { kind: "confirm" }> => i.kind === "confirm" && i.status === "pending" && i.runId === assistant.runId);
@@ -172,6 +181,7 @@ function DesignBoxPanel({ session, bounds, onHeightChange }: DesignBoxProps): JS
 
   const submit = (text: string): boolean | Promise<boolean> => {
     if (!controller.available || busy || boxRun || checking) return false;
+    setReadyAgain(false);
     const status = assistant.status;
     if (status && !providerReady(status, provider)) {
       // Signed in or installed since the last look? Read the login again, then send.
@@ -197,6 +207,17 @@ function DesignBoxPanel({ session, bounds, onHeightChange }: DesignBoxProps): JS
     if (assistantStore.getState().running) return false;
     void sendDesign(session, text, bounds);
     return true;
+  };
+
+  // The signed-out notice's Check again (the status message says to choose it): read the login, and once Claude is ready, Return sends.
+  const checkAgain = async (status: AssistantStatus) => {
+    setChecking(true);
+    const subscription = await controller.checkSubscription();
+    setChecking(false);
+    const ready = !!subscription && providerReady({ ...status, subscription }, "subscription");
+    setNoKey(!ready);
+    setReadyAgain(ready);
+    composerRef.current?.focus({ preventScroll: true });
   };
 
   const signIn = async () => {
@@ -371,7 +392,15 @@ function DesignBoxPanel({ session, bounds, onHeightChange }: DesignBoxProps): JS
       ) : null}
 
       {confirms.map((item) => (
-        <ConfirmCard key={item.id} item={item} onConfirm={(id, approved, optionId) => void controller.confirm(id, approved, optionId)} />
+        <ConfirmCard
+          key={item.id}
+          item={item}
+          onConfirm={(id, approved, optionId) => {
+            void controller.confirm(id, approved, optionId);
+            // The answered card leaves the box: focus moves to the field, where Escape still stops the reply.
+            composerRef.current?.focus({ preventScroll: true });
+          }}
+        />
       ))}
 
       {!controller.available ? (
@@ -391,9 +420,17 @@ function DesignBoxPanel({ session, bounds, onHeightChange }: DesignBoxProps): JS
           <p id={noticeId}>{noKeyText}</p>
           <div className="sb-design-box__actions">
             {subscription?.state === "signed_out" ? (
-              <Button size="sm" variant="ai" icon={<LogIn size={13} />} onClick={() => void signIn()}>
-                Sign in…
-              </Button>
+              <>
+                <Button size="sm" variant="ai" icon={<LogIn size={13} />} onClick={() => void signIn()}>
+                  Sign in…
+                </Button>
+                <Button size="sm" icon={<RefreshCw size={13} />} loading={checking} onClick={() => {
+                    if (assistant.status) void checkAgain(assistant.status);
+                  }}
+                >
+                  Check again
+                </Button>
+              </>
             ) : (
               <Button size="sm" variant="ai" icon={<Wrench size={13} />} onClick={() => assistantStore.getState().showSetup()}>
                 Set up…

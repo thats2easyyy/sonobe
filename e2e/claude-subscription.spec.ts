@@ -7,11 +7,10 @@
  */
 
 import { expect, test, type Locator, type Page } from "@playwright/test";
-import { fakeConfirms, fakeConnectionCalls, fakeSignIns, installFakeAssistant, releaseFakeGate } from "./fakeAssistant.ts";
+import { fakeAssistantSent, fakeConfirms, fakeConnectionCalls, fakeSignIns, installFakeAssistant, releaseFakeGate, SIGNED_OUT_STATUS } from "./fakeAssistant.ts";
 import { collectConsoleProblems, hook, openEditor, runCommand, screenshot } from "./helpers.ts";
 
 const ON = { subscriptionEnabled: true, provider: "subscription" as const };
-const SIGNED_OUT = "Claude isn't signed in on this computer. Choose Sign in (it opens Terminal), or run claude auth login in Terminal, then send your message again.";
 const NOT_INSTALLED = "Sonobe couldn't find Claude's agent adapter. It needs Node.js 22 or later: in Terminal, run npm install -g @agentclientprotocol/claude-agent-acp, then try again.";
 
 /** A checkout page in the pieces the fake sends with preview_design: the head and header, the order, the pay bar. */
@@ -81,7 +80,7 @@ test.describe("The Assistant on your Claude subscription (experimental)", () => 
     await screenshot(page, "subscription-02-setup");
     await sheet(page).getByRole("button", { name: "Use Claude subscription" }).click();
     await expect(sheet(page).getByText("What should we build?")).toBeVisible();
-    await expect(sheet(page).locator(".sb-assistant__subtitle")).toHaveText("Claude subscription · Claude Max");
+    await expect(sheet(page).locator(".sb-assistant__subtitle")).toHaveText("Claude Max · subscription");
     expect(problems).toEqual([]);
   });
 
@@ -132,6 +131,8 @@ test.describe("The Assistant on your Claude subscription (experimental)", () => 
 
     await card.getByRole("button", { name: "Allow", exact: true }).click();
     await expect(sheet(page).getByText("Allowed", { exact: true })).toBeVisible();
+    // The answered card has no buttons left: focus is on the field, where Escape still stops the reply.
+    await expect(field).toBeFocused();
     expect(await fakeConfirms(page)).toEqual([["perm-1", true, "allow-once"]]);
     await expect(sheet(page).getByText("Saved.", { exact: true })).toBeVisible();
     await expect(sheet(page).locator(".sb-assistant-usage__text")).toHaveText("22K tokens · your Claude plan");
@@ -140,19 +141,24 @@ test.describe("The Assistant on your Claude subscription (experimental)", () => 
 
   test("signed out, the box keeps the request and offers Sign in…", async ({ page }) => {
     const problems = collectConsoleProblems(page);
-    await installFakeAssistant(page, { html: CHECKOUT, connection: ON, subscription: { state: "signed_out", kind: "none", label: "Not logged in", email: null, message: SIGNED_OUT } });
+    await installFakeAssistant(page, { html: CHECKOUT, connection: ON, subscription: { state: "signed_out", kind: "none", label: "Not logged in", email: null, message: SIGNED_OUT_STATUS } });
     await openEditor(page);
     await openBox(page);
     await designField(page).fill("a checkout screen");
     await designField(page).press("Enter");
     const notice = page.locator(".sb-design-box__notice");
-    await expect(notice).toContainText(SIGNED_OUT);
+    await expect(notice).toContainText(SIGNED_OUT_STATUS);
     await expect(designField(page)).toHaveValue("a checkout screen");
-    await expect(notice.getByRole("button").first()).toHaveText("Sign in…");
+    await expect(notice.getByRole("button")).toHaveText(["Sign in…", "Check again", "Open in Claude Code"]);
     await screenshot(page, "subscription-06-signed-out");
     await notice.getByRole("button", { name: "Sign in…" }).click();
     await expect(page.locator(".sb-toast", { hasText: "Sign in to Claude in Terminal" })).toContainText("When it's done, come back and send your message again.");
     expect(await fakeSignIns(page)).toBe(1);
+    // Check again: still signed out, the request stays.
+    await notice.getByRole("button", { name: "Check again" }).click();
+    await expect(notice).toContainText(SIGNED_OUT_STATUS);
+    await expect(designField(page)).toHaveValue("a checkout screen");
+    expect(await fakeAssistantSent(page)).toEqual([]);
     expect(problems).toEqual([]);
   });
 

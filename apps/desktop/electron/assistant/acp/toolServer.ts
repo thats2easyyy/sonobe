@@ -11,6 +11,10 @@
  * before it finished, or (2025-era clients, like Claude Code) by a notifications/cancelled naming it,
  * which arrives on a POST of its own. Stop in Sonobe cancels the chat's calls itself, through its
  * handler.
+ *
+ * The URL and token reach Claude Code's command line (the SDK passes MCP servers as --mcp-config), where
+ * other accounts on the Mac can read them, so they aren't enough on their own: the engine's handler
+ * runs only the tool uses Claude announced on the chat's ACP stream (the tool_use id in _meta).
  */
 
 import { AsyncLocalStorage } from "node:async_hooks";
@@ -134,6 +138,8 @@ export async function startAssistantToolServer(options: AssistantToolServerOptio
   /** One server per request, for the chat whose URL it came to. */
   const serverFor = (scope: RequestScope, era: "legacy" | "modern"): Server => {
     const { endpoint } = scope;
+    // No `instructions`: the tool guide is in the session's system prompt, and Claude Code would also
+    // add a server's instructions to the first message as a reminder, sending the guide twice.
     const server = new Server({ name: "sonobe", title: "Sonobe", version: options.version ?? "0.0.0" }, { capabilities: { tools: {} } });
     if (era === "legacy") {
       server.setNotificationHandler("notifications/cancelled", (notification) => {

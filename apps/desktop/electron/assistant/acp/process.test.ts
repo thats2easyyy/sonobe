@@ -3,12 +3,14 @@
  * test's own Node the way the app runs the real adapter with Electron's. No Claude account, no network.
  */
 
+import { spawn, spawnSync } from "node:child_process";
 import { existsSync } from "node:fs";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { Readable, Writable } from "node:stream";
 import { fileURLToPath } from "node:url";
-import { RequestError, type RequestPermissionRequest, type SessionNotification } from "@agentclientprotocol/sdk";
+import { ClientSideConnection, ndJsonStream, PROTOCOL_VERSION, RequestError, type RequestPermissionRequest, type SessionNotification } from "@agentclientprotocol/sdk";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { locateClaudeAgent, wellKnownBinDirs } from "./locate.ts";
 import { agentEnvironment, createAcpAgentProcess, parseAuthStatus } from "./process.ts";
@@ -115,7 +117,7 @@ describe("the adapter's process", { timeout: 15_000 }, () => {
     const a = await session(agent);
     const b = await session(agent);
     expect(a.sessionId).not.toBe(b.sessionId);
-    expect(a.configOptions?.[0]).toMatchObject({ id: "model", category: "model", currentValue: "default" });
+    expect(a.configOptions?.find((o) => o.category === "model")).toMatchObject({ id: "model", currentValue: "default" });
     const [ofA, ofB] = [updatesOf(agent, a.sessionId), updatesOf(agent, b.sessionId)];
     const stopped: SessionNotification["update"][] = [];
     agent.onSessionUpdate(a.sessionId, (n) => stopped.push(n.update))();
@@ -185,12 +187,100 @@ describe("the adapter's process", { timeout: 15_000 }, () => {
     expect(logs).toContain("warn: Answering Claude's permission question failed, so it's cancelled: The window closed.");
   });
 
-  it("sets a session's model, and the agent's refusal stays a RequestError", async () => {
+  it("sets a session's model, which the adapter offers by alias, and the agent's refusal stays a RequestError", async () => {
     const agent = start();
-    const { sessionId } = await agent.newSession({ cwd: dir, mcpServers: [], _meta: { claudeCode: { options: { model: "claude-sonnet-5" } } } });
-    const set = await agent.setSessionConfigOption({ sessionId, configId: "model", value: "claude-opus-5" });
-    expect(set.configOptions[0]).toMatchObject({ id: "model", currentValue: "claude-opus-5" });
-    await expect(agent.setSessionConfigOption({ sessionId, configId: "model", value: "gpt-5" })).rejects.toBeInstanceOf(RequestError);
+    const created = await agent.newSession({ cwd: dir, mcpServers: [], _meta: { claudeCode: { options: { model: "claude-sonnet-5" } } } });
+    const { sessionId } = created;
+    // Like the adapter (0.79.0): aliases, and "default" whatever options.model asked for.
+    const offered = created.configOptions?.find((o) => o.id === "model");
+    expect(offered).toMatchObject({ category: "model", type: "select", currentValue: "default" });
+    expect((offered as { options: { value: string }[] }).options.map((o) => o.value)).toEqual(["default", "opus[1m]", "sonnet", "sonnet[1m]", "haiku"]);
+    const modelAfter = async (value: string) => (await agent.setSessionConfigOption({ sessionId, configId: "model", value })).configOptions.find((o) => o.id === "model")?.currentValue;
+    // A model id resolves to its family's alias, as the adapter's resolveModelPreference does.
+    expect(await modelAfter("claude-opus-5")).toBe("opus[1m]");
+    expect(await modelAfter("claude-haiku-4-5-20251001")).toBe("haiku");
+    expect(await modelAfter("claude-sonnet-5")).toBe("sonnet");
+    expect(await modelAfter("sonnet[1m]")).toBe("sonnet[1m]");
+    const refused = await agent.setSessionConfigOption({ sessionId, configId: "model", value: "gpt-5" }).catch((err: unknown) => err);
+    expect(refused).toBeInstanceOf(RequestError);
+    expect(refused).toMatchObject({ code: -32603, data: { details: "Invalid value for config option model: gpt-5" } });
+  });
+
+  it("starts a session in the mode FAKE_CLAUDE_MODE names, as the adapter takes the person's own default, and changes it through the mode option", async () => {
+    const agent = start({ FAKE_CLAUDE_MODE: "auto" });
+    const created = await session(agent);
+    expect(created.modes).toMatchObject({ currentModeId: "auto" });
+    expect(created.modes!.availableModes.map((m) => m.id)).toEqual(["default", "acceptEdits", "plan", "auto", "bypassPermissions"]);
+    expect(created.configOptions?.find((o) => o.id === "mode")).toMatchObject({ category: "mode", type: "select", currentValue: "auto" });
+    const updates = updatesOf(agent, created.sessionId);
+
+    // In auto, Claude Code runs a tool outside allowedTools without asking.
+    let asked = 0;
+    agent.setPermissionHandler(created.sessionId, async () => (asked++, { outcome: { outcome: "selected", optionId: "allow-once" } }));
+    await agent.prompt({ sessionId: created.sessionId, prompt: [{ type: "text", text: "save it" }] });
+    expect(asked).toBe(0);
+    expect((await fakeLog()).find((l) => l.kind === "unasked")).toMatchObject({ tool: "save_document", mode: "auto" });
+
+    const set = await agent.setSessionConfigOption({ sessionId: created.sessionId, configId: "mode", value: "default" });
+    expect(set.configOptions.find((o) => o.id === "mode")?.currentValue).toBe("default");
+    expect(updates).toContainEqual({ sessionUpdate: "current_mode_update", currentModeId: "default" });
+    expect((await fakeLog()).filter((l) => l.kind === "mode")).toEqual([{ kind: "mode", sessionId: created.sessionId, from: "auto", to: "default", via: "config_option" }]);
+    await agent.prompt({ sessionId: created.sessionId, prompt: [{ type: "text", text: "save it" }] });
+    expect(asked).toBe(1);
+    await expect(agent.setSessionConfigOption({ sessionId: created.sessionId, configId: "mode", value: "yolo" })).rejects.toMatchObject({ data: { details: "Invalid value for config option mode: yolo" } });
+  });
+
+  it("clamps bypassPermissions to default, and offers it no more, when the session doesn't allow skipping permissions", async () => {
+    const agent = start({ FAKE_CLAUDE_MODE: "bypassPermissions" });
+    const allowed = await session(agent);
+    expect(allowed.modes?.currentModeId).toBe("bypassPermissions");
+    const clamped = await agent.newSession({ cwd: dir, mcpServers: [], _meta: { claudeCode: { options: { allowDangerouslySkipPermissions: false } } } });
+    expect(clamped.modes?.currentModeId).toBe("default");
+    expect(clamped.modes!.availableModes.map((m) => m.id)).not.toContain("bypassPermissions");
+    await expect(agent.setSessionConfigOption({ sessionId: clamped.sessionId, configId: "mode", value: "bypassPermissions" })).rejects.toBeInstanceOf(RequestError);
+  });
+
+  it("refuses a tool that makes changes in plan mode, without asking", async () => {
+    const agent = start({ FAKE_CLAUDE_MODE: "plan" });
+    const { sessionId } = await session(agent);
+    const updates = updatesOf(agent, sessionId);
+    let asked = 0;
+    agent.setPermissionHandler(sessionId, async () => (asked++, { outcome: { outcome: "selected", optionId: "allow-once" } }));
+    expect((await agent.prompt({ sessionId, prompt: [{ type: "text", text: "save it" }] })).stopReason).toBe("end_turn");
+    expect(asked).toBe(0);
+    expect(updates.find((u) => u.sessionUpdate === "tool_call_update" && u.status === "failed")).toMatchObject({ content: [{ type: "content", content: { type: "text", text: "Claude Code is in plan mode, so it didn't run a tool that makes changes." } }] });
+    expect(textOf(updates)).toBe("I'm in plan mode, so I didn't change anything.");
+  });
+
+  it("with sessionend, fails the prompt as the adapter does when its Claude Code dies, and forgets the session while it keeps running", async () => {
+    const agent = start();
+    const { sessionId } = await session(agent);
+    const updates = updatesOf(agent, sessionId);
+    const failed = await agent.prompt({ sessionId, prompt: [{ type: "text", text: "sessionend" }] }).catch((err: unknown) => err);
+    expect(failed).toBeInstanceOf(RequestError);
+    expect(failed).toMatchObject({ code: -32603, message: "Internal error: The Claude Agent process exited unexpectedly. Please start a new session." });
+    expect(textOf(updates)).toBe("About to end the session.");
+    // The adapter evicted it: a later prompt gets the SDK's plain "Session not found".
+    const gone = await agent.prompt({ sessionId, prompt: [{ type: "text", text: "echo hi" }] }).catch((err: unknown) => err);
+    expect(gone).toBeInstanceOf(RequestError);
+    expect(gone).toMatchObject({ code: -32603, message: "Internal error", data: { details: "Session not found" } });
+    expect(agent.alive).toBe(true);
+    const fresh = await session(agent);
+    expect((await agent.prompt({ sessionId: fresh.sessionId, prompt: [{ type: "text", text: "echo hi" }] })).stopReason).toBe("end_turn");
+  });
+
+  it("with limit and ratelimit, says the CLI's text and fails the prompt with it, the way the adapter does for a client that isn't AIR", async () => {
+    const agent = start();
+    const { sessionId } = await session(agent);
+    const updates = updatesOf(agent, sessionId);
+    const limited = await agent.prompt({ sessionId, prompt: [{ type: "text", text: "limit" }] }).catch((err: unknown) => err);
+    expect(limited).toBeInstanceOf(RequestError);
+    expect(limited).toMatchObject({ code: -32603, message: "Internal error: You've hit your limit · resets 3pm", data: { errorKind: "rate_limit" } });
+    expect(textOf(updates)).toBe("You've hit your limit · resets 3pm");
+    const throttled = await agent.prompt({ sessionId, prompt: [{ type: "text", text: "ratelimit" }] }).catch((err: unknown) => err);
+    expect(throttled).toMatchObject({ code: -32603, message: "Internal error: API Error: 429 rate_limit_error", data: { errorKind: "rate_limit" } });
+    // The session is still there.
+    expect((await agent.prompt({ sessionId, prompt: [{ type: "text", text: "echo" }] })).stopReason).toBe("end_turn");
   });
 
   it("closes a session only when the adapter offers session/close", async () => {
@@ -198,7 +288,11 @@ describe("the adapter's process", { timeout: 15_000 }, () => {
     const { sessionId } = await session(offering);
     await offering.closeSession(sessionId);
     expect((await fakeLog()).filter((l) => l.kind === "session/close")).toHaveLength(1);
-    await expect(offering.prompt({ sessionId, prompt: [{ type: "text", text: "echo" }] })).rejects.toBeInstanceOf(RequestError);
+    await expect(offering.prompt({ sessionId, prompt: [{ type: "text", text: "echo" }] })).rejects.toMatchObject({ code: -32603, data: { details: "Session not found" } });
+    // Closing one the adapter no longer has (it ended it, say) is what Sonobe wanted: nothing to warn about.
+    await offering.closeSession(sessionId);
+    expect((await fakeLog()).filter((l) => l.kind === "session/close")).toHaveLength(2);
+    expect(logs.filter((l) => l.startsWith("warn:"))).toEqual([]);
     await offering.dispose();
 
     await rm(logFile);
@@ -298,6 +392,52 @@ describe("the adapter's process", { timeout: 15_000 }, () => {
   });
 });
 
+describe("the fake agent, directly", { timeout: 15_000 }, () => {
+  const run = (args: string[], env: Record<string, string> = {}) => spawnSync(process.execPath, [FAKE, ...args], { encoding: "utf8", env: { ...process.env, FAKE_CLAUDE_LOG: logFile, ...env } });
+
+  it("changes the mode with session/set_mode, which process.ts doesn't send, and refuses every change under FAKE_CLAUDE_MODE_LOCKED", async () => {
+    const child = spawn(process.execPath, [FAKE], { env: { ...process.env, FAKE_CLAUDE_LOG: logFile, FAKE_CLAUDE_MODE: "acceptEdits" }, stdio: ["pipe", "pipe", "inherit"] });
+    const updates: SessionNotification["update"][] = [];
+    const client = { sessionUpdate: async (n: SessionNotification) => void updates.push(n.update), requestPermission: async () => ({ outcome: { outcome: "cancelled" as const } }) };
+    const conn = new ClientSideConnection(() => client, ndJsonStream(Writable.toWeb(child.stdin) as WritableStream<Uint8Array>, Readable.toWeb(child.stdout) as ReadableStream<Uint8Array>));
+    try {
+      await conn.initialize({ protocolVersion: PROTOCOL_VERSION, clientCapabilities: {} });
+      const { sessionId, modes } = await conn.newSession({ cwd: dir, mcpServers: [] });
+      expect(modes?.currentModeId).toBe("acceptEdits");
+      await conn.setSessionMode({ sessionId, modeId: "default" });
+      expect(updates.find((u) => u.sessionUpdate === "config_option_update")).toMatchObject({ configOptions: expect.arrayContaining([expect.objectContaining({ id: "mode", currentValue: "default" })]) });
+      expect((await fakeLog()).find((l) => l.kind === "mode")).toMatchObject({ from: "acceptEdits", to: "default", via: "set_mode" });
+      await expect(conn.setSessionMode({ sessionId, modeId: "yolo" })).rejects.toMatchObject({ data: { details: "Mode yolo is not available in this session" } });
+    } finally {
+      child.stdin.end();
+      await new Promise((resolve) => child.once("exit", resolve));
+    }
+
+    const locked = start({ FAKE_CLAUDE_MODE: "auto", FAKE_CLAUDE_MODE_LOCKED: "1" });
+    const { sessionId } = await session(locked);
+    await expect(locked.setSessionConfigOption({ sessionId, configId: "mode", value: "default" })).rejects.toMatchObject({ data: { details: "Invalid Mode" } });
+  });
+
+  it("answers auth status --json with the CLI's JSON, and exits 1 signed out while still printing it", async () => {
+    const signedIn = run(["--cli", "auth", "status", "--json"]);
+    expect(signedIn.status).toBe(0);
+    expect(JSON.parse(signedIn.stdout)).toEqual({ loggedIn: true, authMethod: "claude.ai", apiProvider: "firstParty", email: "fake@example.com", subscriptionType: "max" });
+    const signedOut = run(["--cli", "auth", "status", "--json"], { FAKE_CLAUDE_AUTH: "none" });
+    expect(signedOut.status).toBe(1);
+    expect(JSON.parse(signedOut.stdout)).toEqual({ loggedIn: false, authMethod: "none", apiProvider: "firstParty" });
+    expect((await fakeLog()).filter((l) => l.kind === "cli")).toEqual([
+      { kind: "cli", args: ["auth", "status", "--json"] },
+      { kind: "cli", args: ["auth", "status", "--json"] },
+    ]);
+  });
+
+  it("prints its version and the login, and says what it doesn't fake", () => {
+    expect(run(["--version"])).toMatchObject({ status: 0, stdout: "0.0.0-fake\n" });
+    expect(run(["--cli", "auth", "login", "--claudeai"])).toMatchObject({ status: 0, stdout: "fake claude login\n" });
+    expect(run(["--cli", "doctor"])).toMatchObject({ status: 2, stderr: "fake claude: doctor isn't faked\n" });
+  });
+});
+
 describe("agentEnvironment", () => {
   const JS: ClaudeAgentSpec = { command: "/Applications/Sonobe.app/Contents/MacOS/Sonobe", args: ["/opt/homebrew/lib/node_modules/@agentclientprotocol/claude-agent-acp/dist/index.js"], env: { ELECTRON_RUN_AS_NODE: "1" }, displayPath: "/opt/homebrew/bin/claude-agent-acp", version: "0.79.0", source: "path" };
   const DIRECT: ClaudeAgentSpec = { ...JS, command: "/usr/local/bin/claude-agent-acp", args: [], env: {} };
@@ -334,6 +474,14 @@ describe("agentEnvironment", () => {
     });
     expect(agentEnvironment(base, DIRECT)).not.toHaveProperty("ELECTRON_RUN_AS_NODE");
     expect(agentEnvironment({ HOME: "/Users/me" }, DIRECT).PATH).toBe(wellKnownBinDirs({ platform: process.platform, home: "/Users/me", env: {} }).join(":"));
+  });
+
+  it.skipIf(process.platform === "win32")("puts the Node version managers' folders on PATH too, when they're there", async () => {
+    const home = path.join(dir, "home");
+    const mise = path.join(home, ".local", "share", "mise", "installs", "node", "22.12.0", "bin");
+    await mkdir(mise, { recursive: true });
+    await mkdir(path.join(home, ".asdf", "shims"), { recursive: true });
+    expect(agentEnvironment({ HOME: home, PATH: "/usr/bin" }, DIRECT).PATH.split(":").slice(-2)).toEqual([mise, path.join(home, ".asdf", "shims")]);
   });
 });
 
