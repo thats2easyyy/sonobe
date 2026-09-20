@@ -5,6 +5,7 @@
 
 import type { Op, SonobeDocument, Value } from "@sonobe/core";
 import type { ApplyOpsResult } from "@sonobe/core";
+import { importDesign, type ImportOutcome } from "../panels/import/importDesign.ts";
 import type { SelectionState } from "../state/selection.ts";
 import type { EditorSession } from "../state/session.ts";
 import { layoutStore, type LayoutStore } from "../shell/layoutStore.ts";
@@ -20,6 +21,8 @@ export interface SonobeTestHook {
   selection(): SelectionState;
   layout(): LayoutStore;
   apply(ops: Op[], label?: string): Pick<ApplyOpsResult, "ok" | "errors" | "idMap">;
+  /** Import an HTML page into the current component the way the browser editor does (a sandboxed iframe capture), as one undo step. */
+  importHtml(html: string, options?: { name?: string; replace?: string }): Promise<ImportOutcome>;
 }
 
 declare global {
@@ -52,6 +55,7 @@ export function installTestHook(session: EditorSession, target: Window = window)
       const { ok, errors, idMap } = session.document.getState().apply(ops, { label });
       return { ok, errors, idMap };
     },
+    importHtml: (html, options = {}) => importDesign(session, { html, ...options }, { desktop: null }),
   };
   target.__sonobe = hook;
   return () => {
