@@ -1,4 +1,4 @@
-import { CircleUserRound, KeyRound, LoaderCircle, MessageSquarePlus, Monitor, ScanLine, Sparkles, X } from "lucide-react";
+import { CircleUserRound, KeyRound, LoaderCircle, MessageSquarePlus, Monitor, ScanLine, Sparkles, TriangleAlert, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { StoreApi } from "zustand/vanilla";
 import { appPanels } from "../../app/appPanels.ts";
@@ -14,10 +14,10 @@ import { assistantStore as defaultStore, useAssistant, type AssistantState } fro
 import { Composer } from "./Composer.tsx";
 import { createAssistantController, sharedAssistantController, type AssistantController } from "./controller.ts";
 import { KeySetup } from "./KeySetup.tsx";
-import { activeProvider, chatProvider, providerName, providerReady, providerSubtitle } from "./provider.ts";
+import { activeProvider, billedElsewhere, chatProvider, providerName, providerReady, providerSubtitle } from "./provider.ts";
 import { SubscriptionSetup } from "./SubscriptionSetup.tsx";
 import { Transcript } from "./Transcript.tsx";
-import { FALLBACK_MODELS, getAssistantHost, type AssistantHostLike, type AssistantProvider } from "./types.ts";
+import { FALLBACK_MODELS, getAssistantHost, type AssistantHostLike, type AssistantProvider, type AssistantSubscriptionState } from "./types.ts";
 import "./assistant.css";
 
 export interface AssistantDrawerProps {
@@ -65,6 +65,8 @@ export function AssistantDrawer({ onClose, onConnectClaude, onImportDesign, host
   const managing = useAssistant((s) => s.setup, store);
   const setManaging = (setup: boolean) => store.getState().setSetup(setup);
   const composerRef = useRef<HTMLTextAreaElement>(null);
+  // The login's last answer (not "checking" or "unknown"): a check from the setup keeps it up until it answers.
+  const settled = useRef<AssistantSubscriptionState | null>(null);
 
   useEffect(() => {
     void controller.refresh();
@@ -77,12 +79,24 @@ export function AssistantDrawer({ onClose, onConnectClaude, onImportDesign, host
   // The window's chat keeps what its first message ran on; a new chat runs on what's active.
   const active = activeProvider(status);
   const provider = chatProvider(status);
+  // On the subscription, what pays when the adapter's login isn't a Claude plan (an API key, a gateway, another provider).
+  const billedTo = provider === "subscription" ? billedElsewhere(status?.subscription) : null;
   const modelOptions: SelectOption[] = models.map((m) => ({
     value: m.id,
     label: m.label,
-    description: provider === "subscription" ? `${m.description} Uses your Claude plan's limits.` : `${m.description} $${m.pricing.input}/$${m.pricing.output} per million tokens (in/out).`,
+    description:
+      provider !== "subscription"
+        ? `${m.description} $${m.pricing.input}/$${m.pricing.output} per million tokens (in/out).`
+        : billedTo
+          ? `${m.description} Billed to ${billedTo}.`
+          : `${m.description} Uses your Claude plan's limits.`,
   }));
-  const showSetup = controller.available && status !== null && (!providerReady(status, provider) || managing);
+  const subscriptionState = status?.subscription?.state;
+  if (subscriptionState && subscriptionState !== "checking" && subscriptionState !== "unknown") settled.current = subscriptionState;
+  // "Checking" counts as ready, but a check that started from signed out, not installed or failed (Check again, a sign-in)
+  // keeps the setup up with its spinner, rather than showing the chat until the answer comes. Ready from there opens the chat.
+  const rechecking = provider === "subscription" && subscriptionState === "checking" && settled.current !== null && settled.current !== "ready";
+  const showSetup = controller.available && status !== null && (!providerReady(status, provider) || rechecking || managing);
   // Which setup shows: the person's pick while the switch is on, else the key.
   const setupProvider: AssistantProvider = subscriptionOn ? (status?.connection?.provider ?? "api_key") : "api_key";
 
@@ -95,6 +109,8 @@ export function AssistantDrawer({ onClose, onConnectClaude, onImportDesign, host
   const send = (text: string) => {
     void controller.send(text);
   };
+
+  const subtitle = controller.available ? providerSubtitle(status, provider) : { text: "Desktop only", full: "Desktop only" };
 
   let body;
   if (!controller.available) {
@@ -160,7 +176,7 @@ export function AssistantDrawer({ onClose, onConnectClaude, onImportDesign, host
         {setupProvider === "subscription" ? (
           <SubscriptionSetup controller={controller} subscription={status.subscription} onDone={done} doneLabel={items.length ? "Back to chat" : "Use Claude subscription"} />
         ) : (
-          <KeySetup controller={controller} status={status} keyCheck={keyCheck} onConnectClaude={connect} {...(status.hasKey ? { onDone: done } : {})} />
+          <KeySetup controller={controller} status={status} keyCheck={keyCheck} onConnectClaude={connect} subscriptionEnabled={subscriptionOn} {...(status.hasKey ? { onDone: done } : {})} />
         )}
       </div>
     );
@@ -171,7 +187,11 @@ export function AssistantDrawer({ onClose, onConnectClaude, onImportDesign, host
           items={items}
           running={running}
           thinking={thinking}
-          onConfirm={(id, approved, optionId) => void controller.confirm(id, approved, optionId)}
+          onConfirm={(id, approved, optionId) => {
+            void controller.confirm(id, approved, optionId);
+            // The button goes away with the answer: focus moves to the field, where Escape still stops the reply.
+            composerRef.current?.focus({ preventScroll: true });
+          }}
           onManageKey={() => setManaging(true)}
           onSuggestion={(text) => {
             send(text);
@@ -186,7 +206,7 @@ export function AssistantDrawer({ onClose, onConnectClaude, onImportDesign, host
             </button>
           </p>
         ) : null}
-        <Composer ref={composerRef} running={running} onSend={send} onStop={() => void controller.stop()} usage={usage} limits={limits} provider={provider} />
+        <Composer ref={composerRef} running={running} onSend={send} onStop={() => void controller.stop()} usage={usage} limits={limits} provider={provider} billedTo={billedTo} />
       </>
     );
   }
@@ -209,7 +229,10 @@ export function AssistantDrawer({ onClose, onConnectClaude, onImportDesign, host
         </span>
         <div className="sb-assistant__heading">
           <h2 className="sb-assistant__title">Assistant</h2>
-          <p className="sb-assistant__subtitle">{controller.available ? providerSubtitle(status, provider) : "Desktop only"}</p>
+          <p className="sb-assistant__subtitle" data-tone={billedTo ? "warn" : undefined} title={subtitle.full}>
+            {billedTo ? <TriangleAlert size={11} aria-hidden className="sb-assistant__subtitle-icon" /> : null}
+            {subtitle.text}
+          </p>
         </div>
         <div className="sb-assistant__actions">
           {controller.available && status && !showSetup ? (

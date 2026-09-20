@@ -16,7 +16,7 @@ import { createPatchRegistry } from "@sonobe/patches";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { AssistantCanvasContext, AssistantEvent, AssistantSendRequest } from "../protocol.ts";
 import { createMcpToolBridge, type ToolBridge } from "../toolBridge.ts";
-import { createSubscriptionAgent, RESTARTED, type SubscriptionAgent } from "./engine.ts";
+import { createSubscriptionAgent, MODE_NOT_SET, RATE_LIMITED, RESTARTED, SESSION_ENDED, type SubscriptionAgent } from "./engine.ts";
 import { locateClaudeAgent } from "./locate.ts";
 import { CLAUDE_AGENT_ENV } from "./types.ts";
 
@@ -65,17 +65,28 @@ beforeEach(async () => {
   Object.defineProperty(canvas, "showDesignPreview", { value: async (update: DesignPreviewUpdate) => void previews.push(structuredClone(update)) });
   Object.defineProperty(canvas, "captureDesign", { value: async (): Promise<CapturedDesign> => ({ capture: CHECKOUT_CAPTURE as never, images: new Map() }) });
   bridge = createMcpToolBridge({ host: canvas, version: "0.1.0-test", hidden: new Map() });
-  agent = createSubscriptionAgent({
+  agent = startAgent();
+});
+
+/** The engine over the fake agent, with `env` added to the fake's environment. */
+function startAgent(env: Record<string, string> = {}): SubscriptionAgent {
+  return createSubscriptionAgent({
     tools: () => bridge,
     version: "0.1.0-test",
     sessionsDir: path.join(dir, "assistant", "claude"),
     locate: () => locateClaudeAgent({ env: { [CLAUDE_AGENT_ENV]: FAKE }, execPath: process.execPath }),
-    env: { ...process.env, FAKE_CLAUDE_LOG: logFile },
+    env: { ...process.env, FAKE_CLAUDE_LOG: logFile, ...env },
     documentFor: async () => ({ docId, projectPath: path.join(dir, "Placemark.sonobe") }),
     readDocument: async (id) => (await host.getDocument(id)).doc,
     platform: "darwin",
   });
-});
+}
+
+/** Start over with the fake in another environment. */
+async function restartAgent(env: Record<string, string>) {
+  await agent.dispose();
+  agent = startAgent(env);
+}
 
 afterEach(async () => {
   await agent.dispose();
@@ -141,7 +152,7 @@ describe("the Assistant on the Claude subscription, over the fake agent", () => 
     expect(opened.params._meta.systemPrompt).toContain("start with preview_design (component from the context; name; replace for a redesign)");
     expect(opened.params._meta.systemPrompt).toContain("preview_design");
     const options = opened.params._meta.claudeCode.options;
-    expect(options).toMatchObject({ tools: [], settingSources: [], persistSession: false, strictMcpConfig: true, model: "claude-sonnet-5", maxTurns: 30, env: { ENABLE_TOOL_SEARCH: "false", MCP_TOOL_TIMEOUT: "1800000", CLAUDE_AGENT_SDK_CLIENT_APP: "sonobe/0.1.0-test" } });
+    expect(options).toMatchObject({ tools: [], settingSources: [], persistSession: false, strictMcpConfig: true, allowDangerouslySkipPermissions: false, model: "claude-sonnet-5", maxTurns: 30, env: { ENABLE_TOOL_SEARCH: "false", MCP_TOOL_TIMEOUT: "1800000", CLAUDE_AGENT_SDK_CLIENT_APP: "sonobe/0.1.0-test" } });
     expect(options.allowedTools).toContain("mcp__sonobe__preview_design");
     expect(options.allowedTools).not.toContain("mcp__sonobe__save_document");
     expect(agent.snapshot("w1").usage).toMatchObject({ inputTokens: 1200, outputTokens: 300, cacheReadTokens: 20_000, estimatedCostUsd: 0 });
@@ -184,6 +195,29 @@ describe("the Assistant on the Claude subscription, over the fake agent", () => 
     expect(reply()).toBe("Okay, I won't.");
   });
 
+  it("still asks before a save when the person's own Claude Code mode wouldn't: the session is put in the mode that asks", async () => {
+    await restartAgent({ FAKE_CLAUDE_MODE: "auto" });
+    const result = await send("save it", {}, (e) => {
+      if (e.type === "confirm_required") queueMicrotask(() => agent.confirm("w1", e.confirmationId, false));
+    });
+    expect(result.outcome).toBe("completed");
+    expect(ofType("confirm_required")).toEqual([expect.objectContaining({ kind: "permission", title: "Allow Claude to save this prototype?" })]);
+    const log = await fakeLog();
+    expect(log.filter((l) => l.kind === "mode")).toEqual([expect.objectContaining({ from: "auto", to: "default", via: "config_option" })]);
+    expect(log.filter((l) => l.kind === "unasked" || l.kind === "mcp_result")).toEqual([]);
+    expect(reply()).toBe("Okay, I won't.");
+  });
+
+  it("runs nothing when Claude Code's mode can't be set to ask", async () => {
+    await restartAgent({ FAKE_CLAUDE_MODE: "auto", FAKE_CLAUDE_MODE_LOCKED: "1" });
+    expect(await send("save it")).toMatchObject({ outcome: "error", error: { code: "agent_failed", message: MODE_NOT_SET } });
+    // The session it opened is closed (without waiting for the answer).
+    for (let i = 0; i < 100 && !(await fakeLog()).some((l) => l.kind === "session/close"); i++) await new Promise((resolve) => setTimeout(resolve, 10));
+    const log = await fakeLog();
+    expect(log.some((l) => l.kind === "session/close")).toBe(true);
+    expect(log.some((l) => l.kind === "session/prompt")).toBe(false);
+  });
+
   it("stops a reply that hangs", async () => {
     const result = await send("hang", {}, (e) => {
       if (e.type === "text_delta") queueMicrotask(() => agent.stop("w1"));
@@ -202,6 +236,45 @@ describe("the Assistant on the Claude subscription, over the fake agent", () => 
     expect((await send("echo hello")).outcome).toBe("completed");
     expect(ofType("notice").map((n) => n.message)).toEqual([RESTARTED]);
     expect((await fakeLog()).filter((l) => l.kind === "initialize")).toHaveLength(2);
+  });
+
+  it("starts a new session when Claude Code dies under the adapter, which keeps running", async () => {
+    expect((await send("echo hello")).outcome).toBe("completed");
+    expect(await send("sessionend")).toMatchObject({ outcome: "error", error: { code: "agent_crashed", message: SESSION_ENDED } });
+    events = [];
+    expect((await send("echo again")).outcome).toBe("completed");
+    expect(reply()).toBe("Echo: echo again");
+    expect(ofType("notice").map((n) => n.message)).toEqual([RESTARTED]);
+    const log = await fakeLog();
+    expect(log.filter((l) => l.kind === "initialize")).toHaveLength(1);
+    expect(log.filter((l) => l.kind === "session/new")).toHaveLength(2);
+  });
+
+  it("tells the plan's usage limit from a transient rate limit", async () => {
+    expect(await send("limit")).toMatchObject({ outcome: "error", error: { code: "usage_limit", message: "Your Claude plan's usage limit is reached (“You've hit your limit · resets 3pm”). Try again once it resets, or switch the Assistant to your API key." } });
+    expect(await send("ratelimit")).toMatchObject({ outcome: "error", error: { code: "rate_limited", message: RATE_LIMITED } });
+    // Neither costs the chat its session.
+    expect((await send("echo hello")).outcome).toBe("completed");
+    expect((await fakeLog()).filter((l) => l.kind === "session/new")).toHaveLength(1);
+  });
+
+  it("switches the chat's model to the adapter's own value for it", async () => {
+    await send("echo hello");
+    events = [];
+    expect((await send("echo again", { model: "claude-opus-5" })).outcome).toBe("completed");
+    expect(ofType("notice")).toEqual([]);
+    expect((await fakeLog()).filter((l) => l.kind === "session/set_config_option")).toEqual([expect.objectContaining({ params: expect.objectContaining({ configId: "model", value: "opus[1m]" }) })]);
+  });
+
+  it("checks the login without restarting the adapter under a chat", async () => {
+    await send("echo hello");
+    expect(await agent.checkSubscription()).toMatchObject({ state: "ready", kind: "account", label: "Claude Max", email: "fake@example.com" });
+    const log = await fakeLog();
+    expect(log.filter((l) => l.kind === "initialize")).toHaveLength(1);
+    expect(log.filter((l) => l.kind === "cli")).toEqual([expect.objectContaining({ args: ["auth", "status", "--json"] })]);
+    events = [];
+    expect((await send("echo again")).outcome).toBe("completed");
+    expect(ofType("notice")).toEqual([]);
   });
 
   it("says Claude isn't signed in", async () => {

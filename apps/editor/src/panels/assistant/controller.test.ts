@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { createAssistantStore } from "./assistantStore.ts";
 import { createAssistantController } from "./controller.ts";
-import { fakeAssistantHost, NOT_INSTALLED_MESSAGE, SIGNED_OUT_MESSAGE, signedIn, subscriptionStatus, usage } from "./testing.ts";
+import { fakeAssistantHost, NOT_INSTALLED_MESSAGE, SIGNED_OUT_ERROR, SIGNED_OUT_MESSAGE, signedIn, subscriptionStatus, usage } from "./testing.ts";
 import { ANTHROPIC_CONSOLE_KEYS_URL, ASSISTANT_KEY_SECRET, type AssistantCanvasContext } from "./types.ts";
 
 describe("assistant controller", () => {
@@ -270,7 +270,7 @@ describe("assistant controller on the Claude subscription", () => {
     const store = createAssistantStore({ persistModel: false });
     const controller = createAssistantController(host, store);
     await controller.refresh();
-    expect(store.getState().status?.connection).toEqual({ subscriptionEnabled: false, provider: "api_key", active: "api_key" });
+    expect(store.getState().status?.connection).toEqual({ available: true, subscriptionEnabled: false, provider: "api_key", active: "api_key" });
     await controller.send("hi");
     expect(store.getState().items).toHaveLength(2);
 
@@ -287,6 +287,26 @@ describe("assistant controller on the Claude subscription", () => {
     await Promise.resolve();
     expect(host.checks).toBe(1);
     expect(host.connectionCalls).toEqual([{ subscriptionEnabled: true }, { provider: "subscription" }]);
+  });
+
+  it("clears the transcript from main's answer, not from a connection another window changed since", async () => {
+    const host = fakeAssistantHost({ connection: { subscriptionEnabled: true, provider: "subscription" }, subscription: signedIn() });
+    const store = createAssistantStore({ persistModel: false });
+    const controller = createAssistantController(host, store);
+    await controller.refresh();
+    await controller.send("hi");
+    expect(host.chatProvider).toBe("subscription");
+    expect(store.getState().items).toHaveLength(2);
+    // Another window turned the switch off: what a new chat runs on is the API key already, so main keeps this chat.
+    host.connection = { available: true, subscriptionEnabled: false, provider: "subscription", active: "api_key" };
+    await controller.setConnection({ provider: "api_key" });
+    expect(host.chatProvider).toBe("subscription");
+    expect(store.getState().items).toHaveLength(2);
+    // Main resets it (a change of what a new chat runs on, here): the transcript goes too.
+    host.connection = { available: true, subscriptionEnabled: true, provider: "api_key", active: "api_key" };
+    await controller.setConnection({ provider: "subscription" });
+    expect(host.chatProvider).toBeNull();
+    expect(store.getState().items).toEqual([]);
   });
 
   it("says why the connection didn't change", async () => {
@@ -320,6 +340,24 @@ describe("assistant controller on the Claude subscription", () => {
     // A later check asks again.
     void controller.checkSubscription();
     expect(host.checks).toBe(2);
+  });
+
+  it("asks for the login when main answers that it's still reading it, after a refresh, a pick or a new chat", async () => {
+    const reading = subscriptionStatus({ state: "checking" });
+    const host = fakeAssistantHost({ connection: { subscriptionEnabled: true, provider: "subscription" }, subscription: reading });
+    const store = createAssistantStore({ persistModel: false });
+    const controller = createAssistantController(host, store);
+    await controller.refresh();
+    expect(host.checks).toBe(1);
+    expect(store.getState().status?.subscription?.state).toBe("ready");
+    host.subscription = reading;
+    await controller.newChat();
+    expect(host.checks).toBe(2);
+    host.subscription = reading;
+    await controller.setConnection({ provider: "subscription" });
+    expect(host.checks).toBe(3);
+    await Promise.resolve();
+    expect(store.getState().status?.subscription?.state).toBe("ready");
   });
 
   it("doesn't check on refresh while the API key is what new chats use, or once the login is known", async () => {
@@ -384,7 +422,7 @@ describe("assistant controller on the Claude subscription", () => {
     const host = fakeAssistantHost({ connection: { subscriptionEnabled: true, provider: "subscription" }, subscription: signedIn() });
     host.nextResult = () => {
       host.subscription = subscriptionStatus({ state: "signed_out", kind: "none", label: "Not logged in", message: SIGNED_OUT_MESSAGE });
-      return { runId: "r1", outcome: "error", error: { code: "not_signed_in", message: SIGNED_OUT_MESSAGE }, usage: usage() };
+      return { runId: "r1", outcome: "error", error: { code: "not_signed_in", message: SIGNED_OUT_ERROR }, usage: usage() };
     };
     const store = createAssistantStore({ persistModel: false });
     const controller = createAssistantController(host, store);

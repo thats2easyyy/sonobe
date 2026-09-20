@@ -358,6 +358,52 @@ describe("the Assistant's own preview drafts (the Claude subscription path)", ()
     expect(reduceDesignEvent(adding, { ...finished("toolu_9", { imported: imported() }), runId: "r2" }, 2000).drafts).toBeUndefined();
   });
 
+  it("stop when the replace check is declined, fail with the import's detail, and stay put through a dry run", () => {
+    // preview_design with replace, then import_design { preview: true }: "Keep it" means no import and no update from the server.
+    const writing = play([[update({ replace: "checkout-old" }), during("r1")]]);
+    const declined = reduceDesignEvent(writing, finished("toolu_9", { status: "declined", detail: "You kept “Checkout”", changedDocument: false }), 2000);
+    expect(declined.drafts?.[0]).toMatchObject({ key: "mcp:Assistant", status: "stopped", since: 2000, error: null });
+    // A failed import: the server put the draft back to writing (for Claude to fix) before the runner's tool_finished.
+    const failed = play(
+      [
+        [update({ draftRevision: 2, status: "adding" }), during("r1")],
+        [update({ draftRevision: 3, status: "writing" }), during("r1")],
+      ],
+      writing,
+    );
+    expect(reduceDesignEvent(failed, finished("toolu_9", { status: "error", detail: "The page didn't load", changedDocument: false }), 2000).drafts?.[0]).toMatchObject({ status: "failed", error: "The page didn't load" });
+    // The replace check's own dry run (and preview_design's result) finish done without adding: the draft keeps writing.
+    expect(reduceDesignEvent(writing, finished("toolu_9", { changedDocument: false }), 2000)).toEqual({});
+    // Another run's declined import, and an MCP client's draft, are left alone.
+    expect(reduceDesignEvent(writing, { ...finished("toolu_9", { status: "declined" }), runId: "r2" }, 2000)).toEqual({});
+    const stranger = play([[update({ key: "cc-1", author: { kind: "agent", name: "Claude" } }), during("r1")]]);
+    expect(reduceDesignEvent(stranger, finished("toolu_9", { status: "declined" }), 2000)).toEqual({});
+  });
+
+  it("show the import's progress while they're added", () => {
+    const adding = play([
+      [update(), during("r1")],
+      [update({ draftRevision: 2, status: "adding" }), during("r1")],
+    ]);
+    const progress = (state: DesignData, runId = "r1") => reduceDesignEvent(state, { type: "tool_progress", runId, toolUseId: "toolu_9", detail: "Downloading images: 3 of 7" }, 2000);
+    expect(progress(adding).drafts?.[0]).toMatchObject({ status: "adding", progress: "Downloading images: 3 of 7" });
+    // Not while it's written (the replace check's dry run), and not another run's.
+    expect(progress(play([[update(), during("r1")]]))).toEqual({});
+    expect(progress(adding, "r2")).toEqual({});
+  });
+
+  it("stay stopped when a call still in flight at Stop draws after the reply ended", () => {
+    let state = play([[update(), during("r1")]]);
+    state = { ...state, ...reduceDesignEvent(state, { type: "run_finished", runId: "r1", outcome: "stopped", usage: usage() }, 1200) };
+    state = play([[update({ draftRevision: 2, html: "<html><body><header>Checkout</header><main>Total</main>" }), during(null)]], state, 1300);
+    expect(state.drafts).toHaveLength(1);
+    expect(state.drafts[0]).toMatchObject({ key: "mcp:Assistant", runId: "r1", status: "stopped", since: 1200 });
+    expect(liveMcpDraft(state, 1300)).toBeNull();
+    // The next reply's first update takes it over.
+    state = play([[update({ draftRevision: 3 }), during("r2")]], state, 5000);
+    expect(state.drafts[0]).toMatchObject({ runId: "r2", status: "writing" });
+  });
+
   it("link to the running reply when applied, from the Assistant's store", () => {
     designStore.setState(initialDesignData());
     assistantStore.setState({ ...initialAssistantData(), running: true, runId: "r7" });

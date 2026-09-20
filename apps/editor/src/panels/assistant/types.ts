@@ -45,6 +45,11 @@ export type AssistantProvider = "api_key" | "subscription";
 
 /** The Assistant's connection settings, app-wide and kept by the main process. */
 export interface AssistantConnection {
+  /**
+   * This build offers the experimental switch: every unpackaged build, and a packaged one only when started with
+   * SONOBE_CLAUDE_SUBSCRIPTION=1, so no release can offer it by accident. False: the switch is hidden and off. Older preloads don't send it (treat as true).
+   */
+  available?: boolean;
   /** The experimental switch in Settings → Claude. Off by default: awaiting Anthropic's permission. */
   subscriptionEnabled: boolean;
   /** The person's pick in the Assistant's setup. "subscription" counts only while subscriptionEnabled is on. */

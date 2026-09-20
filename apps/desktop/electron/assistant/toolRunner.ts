@@ -1,9 +1,10 @@
 /**
  * The Assistant's tool runner, shared by both engines: the API-key agent loop (agent.ts) and the
  * subscription engine's MCP endpoint (acp/). One call at a time, it pins document tools to the
- * window's document, asks before a replace the person may not want and before big deletions, keeps
- * the replace guard's records, and reports the call as activity chips. It returns what goes back to
- * Claude as a neutral ToolCallResult; each engine turns that into its own wire shape.
+ * window's document (and refuses a write that names another window's), asks before a replace the
+ * person may not want and before big deletions, keeps the replace guard's records, and reports the
+ * call as activity chips. It returns what goes back to Claude as a neutral ToolCallResult; each engine
+ * turns that into its own wire shape.
  */
 
 import type { SonobeDocument } from "@sonobe/core";
@@ -17,7 +18,8 @@ import { describeToolInput, describeToolResult, type AssistantToolInfo, type Loc
 export interface ReplaceGuardKit {
   create(): ReplaceGuard;
   prompt(check: ReplaceCheck, impact: ReplaceImpact | null): ConfirmPrompt;
-  declinedMessage(check: ReplaceCheck): string;
+  /** `preview`: the declined call was import_design { preview: true }. */
+  declinedMessage(check: ReplaceCheck, options?: { preview?: boolean }): string;
   declinedDetail(check: ReplaceCheck): string;
 }
 
@@ -30,8 +32,9 @@ export interface WindowDocument {
 }
 
 /**
- * What a document's preview_design draft holds for the replace guard, as this chat's calls left it
- * (the server merges each call's fields the same way): import_design { preview: true } imports it.
+ * What a document's preview_design draft holds for the replace guard, as the server's last answer to
+ * this chat said (preview_design's result names the draft's merged fields): import_design
+ * { preview: true } imports it.
  */
 export interface PreviewDraft {
   component: string | null;
@@ -99,10 +102,19 @@ const WAITING = "Waiting for your answer in Sonobe";
 /** Nothing runs when the window's document can't be told: it could land in another window's document. */
 const NO_WINDOW_DOCUMENT = "Sonobe couldn't tell which prototype this window has open, so nothing ran. Try again in a moment.";
 const NO_REPLACE_CHECK = "Sonobe couldn't read the prototype to check what this replace would change, so nothing ran. Try again in a moment.";
+/** A write that names another window's document: a chat's edits stay in its own window's prototype. */
+const otherWindow = (tool: string, docId: string) =>
+  `This chat edits the prototype in its own window, so ${tool} didn't run on “${docId}”. Leave out docId to change this window's prototype, or ask the person to open the chat in the other window.`;
 
 const errorMessage = (err: unknown) => (err instanceof Error ? err.message : String(err));
 
 const isRecord = (value: unknown): value is Record<string, unknown> => !!value && typeof value === "object" && !Array.isArray(value);
+
+/** A teaching error's code (results.ts `failure` in @sonobe/mcp), or null. */
+const errorCode = (result: ToolCallResult): string | null => {
+  const error = result.structuredContent?.error;
+  return isRecord(error) && typeof error.code === "string" ? error.code : null;
+};
 
 /** The tool's input schema has a `key` property. */
 function declares(info: AssistantToolInfo, key: string): boolean {
@@ -118,13 +130,15 @@ export function importMeta(result: ToolCallResult): ImportResultMeta | null {
   const str = (value: unknown) => (typeof value === "string" ? value : null);
   const count = (value: unknown) => (typeof value === "number" && Number.isFinite(value) ? value : 0);
   const docId = str(m.docId);
-  if (docId === null) return null;
+  const component = str(m.component);
+  if (docId === null || component === null) return null;
   const dropped = (Array.isArray(m.dropped) ? m.dropped : []).flatMap((d: unknown) => {
     const { id, name } = (d ?? {}) as { id?: unknown; name?: unknown };
     return typeof id === "string" && typeof name === "string" ? [{ id, name }] : [];
   });
   return {
     docId,
+    component,
     dryRun: m.dryRun === true,
     screenId: str(m.screenId),
     screenName: str(m.screenName) ?? "",
@@ -257,19 +271,30 @@ export function createToolRunner(scope: ToolRunScope): ToolRunner {
     }
   };
 
-  /** A preview_design call that went through leaves the server's draft like this (mergeFields in @sonobe/mcp's import tools). */
-  const trackPreview = (input: Record<string, unknown>, result: ToolCallResult): void => {
-    const docId = typeof result.structuredContent?.docId === "string" ? result.structuredContent.docId : typeof input.docId === "string" ? input.docId : null;
-    if (docId === null || result.isError) return;
-    if (input.clear === true) {
-      scope.previews.delete(docId);
+  /**
+   * Keep this chat's view of the server's preview_design draft: preview_design's result names the
+   * draft's fields as the server merged them (a draft an earlier chat left keeps its replace), a draft
+   * the server doesn't have is forgotten, and a preview import drops it once it's layers. A failed call
+   * leaves the draft as it was. A result without the fields leaves the draft unknown, and the next
+   * preview import asks the server with a dry run.
+   */
+  const trackDraft = (name: string, input: Record<string, unknown>, result: ToolCallResult): void => {
+    if (name !== PREVIEW_TOOL && !(name === DESIGN_TOOL && input.preview === true)) return;
+    const data = result.structuredContent;
+    const docId = typeof data?.docId === "string" ? data.docId : typeof input.docId === "string" ? input.docId : null;
+    if (docId === null) return;
+    if (result.isError) {
+      if (errorCode(result) === "no_draft") scope.previews.delete(docId);
       return;
     }
-    const draft = scope.previews.get(docId) ?? { component: null, replace: null };
-    scope.previews.set(docId, {
-      component: typeof input.component === "string" ? input.component : draft.component,
-      replace: input.replace === null ? null : typeof input.replace === "string" ? input.replace : draft.replace,
-    });
+    if (name === DESIGN_TOOL) {
+      const meta = importMeta(result);
+      if (meta && !meta.dryRun && meta.screenId) scope.previews.delete(meta.docId);
+      return;
+    }
+    const field = (value: unknown) => (typeof value === "string" ? value : null);
+    if (input.clear !== true && data && Object.hasOwn(data, "replace")) scope.previews.set(docId, { component: field(data.component), replace: field(data.replace) });
+    else scope.previews.delete(docId);
   };
 
   const declined = (id: string, name: string): ToolRunResult => {
@@ -309,31 +334,50 @@ export function createToolRunner(scope: ToolRunScope): ToolRunner {
       if (!input) return failed("The tool input wasn't a JSON object, so nothing ran.");
 
       const own = localTools && localNames.has(name) ? localTools : null;
-      const pinDocId = !own && input.docId === undefined && declares(info, "docId");
-      const documentFor = pinDocId || own ? scope.documentFor : undefined;
+      const documentTool = !own && declares(info, "docId");
+      const pinDocId = documentTool && input.docId === undefined;
+      // Claude may read another window's prototype (to copy from it), but not change it.
+      const namesOther = documentTool && input.docId !== undefined && !info.readOnly;
+      const documentFor = pinDocId || namesOther || own ? scope.documentFor : undefined;
       const shown = documentFor ? await windowDocument(documentFor) : null;
       if (documentFor && !shown) return failed(NO_WINDOW_DOCUMENT);
+      if (namesOther && shown && input.docId !== shown.docId) return failed(otherWindow(name, String(input.docId)));
       if (own) {
         const result = await callLocal(own, name, input, shown?.projectPath ?? null);
         return signal.aborted ? stopped(id, name, result) : finished(id, info, result);
       }
 
       // The input as it runs, never written back to history: pinned to this window's document, and a
-      // design from the canvas box goes into the component the box was showing.
+      // design the canvas box starts goes into the component the box was showing. An append, or an
+      // import of the preview draft, keeps the draft's own component, wherever Claude started it.
       const callInput: Record<string, unknown> = { ...input };
       if (pinDocId && shown) callInput.docId = shown.docId;
-      if ((name === DESIGN_TOOL || name === PREVIEW_TOOL) && request.context && callInput.component === undefined) callInput.component = request.context.component.id;
+      const previewImport = name === DESIGN_TOOL && callInput.preview === true;
+      const startsDesign = (name === PREVIEW_TOOL && callInput.html !== undefined) || (name === DESIGN_TOOL && !previewImport);
+      if (startsDesign && request.context && callInput.component === undefined) callInput.component = request.context.component.id;
+      const progress = { toolUseId: id, hooks: options };
 
       // An import of the preview draft takes the draft's replace and component unless it names its own.
-      const draft = name === DESIGN_TOOL && callInput.preview === true && typeof callInput.docId === "string" ? scope.previews.get(callInput.docId) : undefined;
+      // A draft this chat has no word of (one an earlier chat left, which the server keeps for the
+      // Assistant) is asked about with a dry run, whose summary names its replace.
+      const docId = typeof callInput.docId === "string" ? callInput.docId : null;
+      let draft = previewImport && docId !== null ? scope.previews.get(docId) : undefined;
+      let dryRun: ToolCallResult | undefined;
+      if (previewImport && !draft && callInput.replace === undefined && callInput.dryRun !== true && scope.readDocument && docId !== null) {
+        dryRun = await callTool(DESIGN_TOOL, { ...callInput, dryRun: true, screenshot: false }, progress);
+        trackDraft(name, callInput, dryRun);
+        if (signal.aborted) return stopped(id, name, dryRun);
+        if (dryRun.isError) return finished(id, info, dryRun);
+        const meta = importMeta(dryRun);
+        if (meta) draft = { component: meta.component, replace: meta.replaced };
+      }
       const component = typeof callInput.component === "string" ? callInput.component : (draft?.component ?? undefined);
       const replace = typeof callInput.replace === "string" ? callInput.replace : callInput.replace === undefined ? (draft?.replace ?? undefined) : undefined;
 
       // Replacing a layer the person didn't pick, or a screen they changed since the Assistant made it,
       // asks first, naming what would go (from a dry run). The guard needs to know the document.
       let before: SonobeDocument | undefined;
-      if (name === DESIGN_TOOL && replace !== undefined && callInput.dryRun !== true && scope.readDocument && typeof callInput.docId === "string") {
-        const docId = callInput.docId;
+      if (name === DESIGN_TOOL && replace !== undefined && callInput.dryRun !== true && scope.readDocument && docId !== null) {
         let check: ReplaceCheck | null;
         try {
           const doc = await scope.readDocument(docId);
@@ -344,14 +388,15 @@ export function createToolRunner(scope: ToolRunScope): ToolRunner {
           return failed(NO_REPLACE_CHECK);
         }
         if (check) {
-          const preview = await callTool(DESIGN_TOOL, { ...callInput, dryRun: true, screenshot: false }, { toolUseId: id, hooks: options });
+          const preview = dryRun ?? (await callTool(DESIGN_TOOL, { ...callInput, dryRun: true, screenshot: false }, progress));
+          trackDraft(name, callInput, preview);
           if (signal.aborted) return stopped(id, name, preview);
           if (preview.isError) return finished(id, info, preview);
           const meta = importMeta(preview);
           const impact: ReplaceImpact | null = meta ? { dropped: meta.dropped.map((d) => d.name), droppedCount: meta.droppedCount, lostConnections: meta.lostConnections } : null;
           if (!(await confirm(id, replaceGuard.prompt(check, impact), options))) {
             emit({ type: "tool_finished", runId, toolUseId: id, name, status: "declined", detail: replaceGuard.declinedDetail(check), changedDocument: false });
-            return plain(replaceGuard.declinedMessage(check));
+            return plain(replaceGuard.declinedMessage(check, { preview: previewImport }));
           }
         }
       }
@@ -372,8 +417,9 @@ export function createToolRunner(scope: ToolRunScope): ToolRunner {
         if (!(await confirm(id, prompt, options))) return declined(id, name);
         approved = true;
       }
-      const progress = { toolUseId: id, hooks: options };
       let result = await callTool(name, callInput, progress);
+      // The server's draft moved on even when Stop came after it answered.
+      trackDraft(name, callInput, result);
       if (signal.aborted) return stopped(id, name, result);
       if (name === "delete_items") {
         const pending = deleteConfirmation(result);
@@ -392,14 +438,11 @@ export function createToolRunner(scope: ToolRunScope): ToolRunner {
         if (done) active.removedWithoutAsking += done.total;
       }
 
-      if (name === PREVIEW_TOOL) trackPreview(callInput, result);
       const meta = name === DESIGN_TOOL && !result.isError ? importMeta(result) : null;
       const imported: AssistantImported | undefined =
         meta && !meta.dryRun && meta.screenId
           ? { docId: meta.docId, screenId: meta.screenId, txnId: meta.txnId, name: meta.screenName, replaced: meta.replaced, dropped: meta.dropped.slice(0, 20).map((d) => d.name), droppedCount: meta.droppedCount, lostConnections: meta.lostConnections }
           : undefined;
-      // The server drops the draft once it's layers.
-      if (imported && callInput.preview === true) scope.previews.delete(imported.docId);
       await track(info, callInput, component, result, imported, before);
       return finished(id, info, result, imported);
     },

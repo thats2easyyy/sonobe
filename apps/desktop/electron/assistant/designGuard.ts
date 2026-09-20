@@ -367,12 +367,16 @@ export function replacePrompt(check: ReplaceCheck, impact: ReplaceImpact | null)
   };
 }
 
-/** The tool result Claude gets when the person keeps what's there. */
-export function replaceDeclinedMessage(check: ReplaceCheck): string {
+/**
+ * The tool result Claude gets when the person keeps what's there. `preview`: the declined call imported
+ * the preview_design draft, where leaving out replace keeps the draft's, so it takes "replace": null.
+ */
+export function replaceDeclinedMessage(check: ReplaceCheck, options: { preview?: boolean } = {}): string {
   const name = shown(check.target.name);
+  const instead = options.preview ? 'import_design with "preview": true and "replace": null' : "leave out replace";
   return check.reason === "hand_edited"
-    ? `The person kept their changes to “${name}”, so nothing changed. Import your design as a new screen instead (leave out replace), or ask them what to change.`
-    : `The person kept “${name}” as it is, so nothing changed. Import your design as a new screen instead (leave out replace), or ask what they'd like.`;
+    ? `The person kept their changes to “${name}”, so nothing changed. Import your design as a new screen instead (${instead}), or ask them what to change.`
+    : `The person kept “${name}” as it is, so nothing changed. Import your design as a new screen instead (${instead}), or ask what they'd like.`;
 }
 
 /** The declined chip's detail: "You kept “Home”" or "You kept your changes". */

@@ -2,7 +2,8 @@
  * Visual harness for the Assistant drawer with a fake desktop host (no network, no API calls). Served by
  * the editor dev server at /src/panels/assistant/preview/index.html?view=<view>&theme=dark|light.
  * Views: browser, key, key-unavailable, empty, chat; with the experimental subscription switch on: sub-choice
- * (the key setup with the choice), sub-ready, sub-api-key (the adapter bills an API key), sub-signed-out,
+ * (the key setup with the choice), sub-ready, sub-api-key (the adapter bills an API key), sub-api-key-chat (a chat
+ * it bills: the header and the meter say so), sub-unknown (ready, but the adapter didn't say which login), sub-signed-out,
  * sub-not-installed, sub-failed, sub-chat (a permission card and the plan's meter), sub-mismatch (a chat on the
  * API key while new chats use the subscription). See screenshots.mjs. Dev only; not part of `vite build`.
  */
@@ -60,6 +61,8 @@ const SUBSCRIPTION_VIEWS: Record<string, AssistantSubscriptionStatus> = {
   "sub-chat": signedIn(),
   "sub-mismatch": signedIn(),
   "sub-api-key": subscriptionStatus({ state: "ready", kind: "api_key", label: "Anthropic API key", adapterVersion: "0.79.0" }),
+  "sub-api-key-chat": subscriptionStatus({ state: "ready", kind: "api_key", label: "Anthropic API key", adapterVersion: "0.79.0" }),
+  "sub-unknown": subscriptionStatus({ state: "ready", adapterVersion: "0.79.0" }),
   "sub-signed-out": subscriptionStatus({ state: "signed_out", kind: "none", label: "Not logged in", adapterVersion: "0.79.0", message: SIGNED_OUT_MESSAGE }),
   "sub-not-installed": subscriptionStatus({ state: "not_installed", message: NOT_INSTALLED_MESSAGE }),
   "sub-failed": subscriptionStatus({ state: "failed", adapterVersion: "0.79.0", message: "Claude's agent adapter didn't start: it didn't answer within 20 seconds. Check that it's installed (npm install -g @agentclientprotocol/claude-agent-acp), then try again." }),
@@ -113,7 +116,7 @@ function Preview() {
         return new Promise(() => undefined);
       };
       // The ready views show their setup, as when the person opens it from the header.
-      if (view === "sub-ready" || view === "sub-api-key") store.getState().setSetup(true);
+      if (view === "sub-ready" || view === "sub-api-key" || view === "sub-unknown") store.getState().setSetup(true);
       return { store, host, controller: createAssistantController(host, store) };
     }
     const host = fakeAssistantHost({ ...(view === "key" || view === "key-unavailable" ? {} : { key: "sk-ant-api03-preview-key-3f9a" }), ...(view === "key-unavailable" ? { secretsAvailable: false } : {}) });
@@ -133,7 +136,7 @@ function Preview() {
   useEffect(() => {
     // StrictMode runs effects twice in development; script the chat once.
     if (scripted) return;
-    if (view === "sub-chat" || view === "sub-mismatch") {
+    if (view === "sub-chat" || view === "sub-mismatch" || view === "sub-api-key-chat") {
       scripted = true;
       void (async () => {
         await state.controller.refresh();

@@ -8,7 +8,7 @@ import { createEditorSession, type EditorSession } from "../../state/session.ts"
 import { Toaster, toast } from "../../ui/Toast.tsx";
 import { assistantStore, initialAssistantData } from "../assistant/assistantStore.ts";
 import { createAssistantController, type AssistantController } from "../assistant/controller.ts";
-import { fakeAssistantHost, NOT_INSTALLED_MESSAGE, SIGNED_OUT_MESSAGE, signedIn, subscriptionStatus, usage, type FakeAssistantHost } from "../assistant/testing.ts";
+import { fakeAssistantHost, NOT_INSTALLED_MESSAGE, SIGNED_OUT_ERROR, SIGNED_OUT_MESSAGE, signedIn, subscriptionStatus, usage, type FakeAssistantHost } from "../assistant/testing.ts";
 import type { AssistantEvent, AssistantRunResult } from "../assistant/types.ts";
 import type { Rect } from "../canvas/geometry.ts";
 import { canvasContext, designTarget } from "./context.ts";
@@ -328,6 +328,11 @@ describe("DesignBox", () => {
     expect(host!.confirmations).toEqual([["c1", false]]);
     emit({ type: "confirm_resolved", runId: "r1", confirmationId: "c1", approved: false });
     expect(container.querySelector('.sb-design-box [role="alertdialog"]')).toBeNull();
+    // The answered card left the box: focus is on the field, so Escape still stops the reply.
+    expect(document.activeElement).toBe(field());
+    press("Escape", document.activeElement!);
+    await settle();
+    expect(host!.stops).toBe(1);
     await reply.end();
   });
 
@@ -730,8 +735,8 @@ describe("DesignBox", () => {
 
   it("offers Sign in… and Set up… for the Claude subscription's errors", async () => {
     await mount(fakeAssistantHost({ connection: { subscriptionEnabled: true, provider: "subscription" }, subscription: signedIn() }));
-    act(() => designStore.setState({ request: request({ outcome: "error", error: { code: "not_signed_in", message: SIGNED_OUT_MESSAGE } }) }));
-    expect(statusText()).toBe(SIGNED_OUT_MESSAGE);
+    act(() => designStore.setState({ request: request({ outcome: "error", error: { code: "not_signed_in", message: SIGNED_OUT_ERROR } }) }));
+    expect(statusText()).toBe(SIGNED_OUT_ERROR);
     await act(async () => {
       buttonNamed("Sign in…")!.click();
       await Promise.resolve();
@@ -877,24 +882,60 @@ describe("DesignBox on the Claude subscription (experimental)", () => {
     expect(statusText()).toBe("Nothing was sent. Claude isn't signed in on this computer.");
     expect(field().getAttribute("aria-describedby")).toBe(container.querySelector(".sb-design-box__notice p")!.id);
     const notice = container.querySelector(".sb-design-box__notice")!;
-    expect([...notice.querySelectorAll("button")].map((b) => b.textContent)).toEqual(["Sign in…", "Open in Claude Code"]);
+    // The status message says to choose Check again, so the notice has it.
+    expect(SIGNED_OUT_MESSAGE).toMatch(/then choose Check again\.$/);
+    expect([...notice.querySelectorAll("button")].map((b) => b.textContent)).toEqual(["Sign in…", "Check again", "Open in Claude Code"]);
 
     await act(async () => {
       buttonNamed("Sign in…")!.click();
       await Promise.resolve();
     });
     expect(fake.signIns).toBe(1);
+    // Still signed out: Check again reads the login (the notice stays while it looks) and keeps the request.
+    let answer!: () => void;
+    const check = fake.assistant!.checkSubscription!;
+    fake.assistant!.checkSubscription = () => new Promise((resolve) => (answer = () => void check().then(resolve)));
+    click(buttonNamed("Check again"));
+    expect(statusText()).toBe("Checking Claude…");
+    expect(container.querySelector(".sb-design-box__notice p")?.textContent).toBe(SIGNED_OUT_MESSAGE);
+    await act(async () => answer());
+    await settle();
+    fake.assistant!.checkSubscription = check;
+    expect(fake.checks).toBe(2);
+    expect(fake.sent).toEqual([]);
+    expect(container.querySelector(".sb-design-box__notice p")?.textContent).toBe(SIGNED_OUT_MESSAGE);
 
     // Signed in in Terminal: the next Return reads the login again and sends.
     fake.nextCheck = signedIn;
     press("Enter");
     await settle();
     await settle();
-    expect(fake.checks).toBe(2);
+    expect(fake.checks).toBe(3);
     expect(fake.sent).toHaveLength(1);
     expect(fake.sent[0]!.text).toBe("a checkout screen");
     expect(field().value).toBe("");
     expect(container.querySelector(".sb-design-box__notice")).toBeNull();
+  });
+
+  it("when Claude is signed in by the time of Check again, says Return sends the request", async () => {
+    const signedOut = subscriptionStatus({ state: "signed_out", kind: "none", label: "Not logged in", message: SIGNED_OUT_MESSAGE });
+    const fake = on(signedOut);
+    fake.nextCheck = () => signedOut;
+    await mount(fake);
+    type("a checkout screen");
+    press("Enter");
+    await settle();
+    fake.nextCheck = signedIn;
+    click(buttonNamed("Check again"));
+    await settle();
+    expect(container.querySelector(".sb-design-box__notice")).toBeNull();
+    expect(statusText()).toBe("Claude is ready. Press Return to send your request.");
+    expect(document.activeElement).toBe(field());
+    expect(fake.sent).toEqual([]);
+    press("Enter");
+    await settle();
+    expect(fake.sent.map((r) => r.text)).toEqual(["a checkout screen"]);
+    expect(statusText()).not.toBe("Claude is ready. Press Return to send your request.");
   });
 
   it("when the adapter isn't installed, offers Set up…, which opens the Assistant's setup", async () => {

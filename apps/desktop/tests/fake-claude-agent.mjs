@@ -13,6 +13,9 @@
  *
  *   FAKE_CLAUDE_AUTH=none, "signedout"  session/prompt fails with auth_required (-32000)
  *   "crash"                             says "About to crash.", writes to stderr, exits with code 7
+ *   "sessionend"                        its Claude Code dies: the prompt fails with the adapter's "process exited
+ *                                       unexpectedly", and later ones with "Session not found"; the fake runs on
+ *   "limit" / "ratelimit"               says the CLI's usage-limit / 429 text, then fails the prompt with it
  *   "hang"                              says "Working on it…", then waits for session/cancel
  *   "save" / "open"                     save_document {} / open_document { ref: "/tmp/fake.sonobe" }
  *   "replace <id>"                      the design flow, replacing layer <id>
@@ -20,9 +23,18 @@
  *   a <canvas_context> block, "design"  the design flow: get_outline, preview_design ×3, import_design { preview: true }
  *   anything else, "echo"               "Echo: <message>" in three chunks
  *
- * Also: `--version` prints 0.0.0-fake; `--cli auth login …` prints "fake claude login". FAKE_CLAUDE_LOG=<file>
- * appends a JSON line per message it gets (header values redacted) and per MCP result, for tests to read.
- * FAKE_CLAUDE_NO_CLOSE=1 leaves session/close out of its capabilities.
+ * Permission modes, like the adapter's (which reads the person's own Claude Code settings for the
+ * first one): FAKE_CLAUDE_MODE picks the mode a session starts in (default "default"), clamped to
+ * "default" when bypassPermissions isn't allowed. session/set_mode and the "mode" config option change
+ * it (FAKE_CLAUDE_MODE_LOCKED=1: they fail). "default" asks before a tool outside allowedTools;
+ * "acceptEdits", "auto" and "bypassPermissions" run it without asking (the worst case); "plan" refuses
+ * every tool the MCP server doesn't mark read-only.
+ *
+ * Also: `--version` prints 0.0.0-fake; `--cli auth login …` prints "fake claude login"; `--cli auth status
+ * --json` prints the CLI's JSON (exit 1 when signed out, as the CLI does). FAKE_CLAUDE_LOG=<file> appends
+ * a JSON line for tests to read per message it gets (header values redacted), `--cli` run ("cli"),
+ * mode change ("mode"), tool run without asking ("unasked") or refused in plan mode ("plan_refused"),
+ * and MCP result. FAKE_CLAUDE_NO_CLOSE=1 leaves session/close out of its capabilities.
  */
 
 import { appendFileSync, writeSync } from "node:fs";
@@ -31,32 +43,64 @@ import { AgentSideConnection, ndJsonStream, RequestError } from "@agentclientpro
 import { Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
 
 const VERSION = "0.0.0-fake";
-const args = process.argv.slice(2);
-if (args.includes("--cli")) {
-  if (args.includes("auth") && args.includes("login")) {
-    console.log("fake claude login");
-    process.exit(0);
-  }
-  console.error(`fake claude: ${args.join(" ")} isn't faked`);
-  process.exit(2);
-}
-if (args.includes("--version")) {
-  console.log(VERSION);
-  process.exit(0);
-}
-
 const signedOut = process.env.FAKE_CLAUDE_AUTH === "none";
-const MODELS = [
-  { value: "claude-sonnet-5", name: "Claude Sonnet 5" },
-  { value: "claude-opus-5", name: "Claude Opus 5" },
-  { value: "claude-haiku-4-5-20251001", name: "Claude Haiku 4.5" },
-];
-const USAGE = { inputTokens: 1200, outputTokens: 300, cachedReadTokens: 20000, cachedWriteTokens: 0, totalTokens: 21500 };
-const DECLINED_TEXT = "The user doesn't want to proceed with this tool use.";
 
 function log(kind, data) {
   if (process.env.FAKE_CLAUDE_LOG) appendFileSync(process.env.FAKE_CLAUDE_LOG, `${JSON.stringify({ kind, ...data })}\n`);
 }
+
+/** stdout at once: a pipe is asynchronous, and these exit right after. */
+const print = (text) => writeSync(1, `${text}\n`);
+
+const args = process.argv.slice(2);
+if (args.includes("--cli")) {
+  // The adapter hands everything after --cli to its Claude Code.
+  const cli = args.filter((arg) => arg !== "--cli");
+  log("cli", { args: cli });
+  if (cli[0] === "auth" && cli[1] === "login") {
+    print("fake claude login");
+    process.exit(0);
+  }
+  if (cli[0] === "auth" && cli[1] === "status" && cli.includes("--json")) {
+    // `claude auth status --json`, the shape the adapter's fromCliStatus reads.
+    const account = { loggedIn: true, authMethod: "claude.ai", apiProvider: "firstParty", email: "fake@example.com", subscriptionType: "max" };
+    print(JSON.stringify(signedOut ? { loggedIn: false, authMethod: "none", apiProvider: "firstParty" } : account));
+    process.exit(signedOut ? 1 : 0);
+  }
+  console.error(`fake claude: ${cli.join(" ")} isn't faked`);
+  process.exit(2);
+}
+if (args.includes("--version")) {
+  print(VERSION);
+  process.exit(0);
+}
+
+/** The adapter's model option (0.79.0): aliases, not the model ids Sonobe's catalog uses. */
+const MODELS = [
+  { value: "default", name: "Default (recommended)", description: "Opus (1M context)" },
+  { value: "opus[1m]", name: "Opus 5", description: "Opus 5 with 1M context" },
+  { value: "sonnet", name: "Sonnet 5", description: "Sonnet 5" },
+  { value: "sonnet[1m]", name: "Sonnet 5 (1M context)", description: "Sonnet 5 for long sessions" },
+  { value: "haiku", name: "Haiku 4.5", description: "Haiku 4.5" },
+];
+/** The adapter's permission modes; bypassPermissions only when the session allows it. */
+const MODES = [
+  { id: "default", name: "Manual", description: "Always ask before making changes" },
+  { id: "acceptEdits", name: "Accept edits", description: "Automatically accept all file edits" },
+  { id: "plan", name: "Plan", description: "Create a plan before making changes" },
+  { id: "auto", name: "Auto", description: "Claude handles permission decisions" },
+  { id: "bypassPermissions", name: "Bypass permissions", description: "Accepts all permissions" },
+];
+/** The modes that ask before a tool outside allowedTools. */
+const ASKING_MODES = new Set(["default", "plan"]);
+const USAGE = { inputTokens: 1200, outputTokens: 300, cachedReadTokens: 20000, cachedWriteTokens: 0, totalTokens: 21500 };
+const DECLINED_TEXT = "The user doesn't want to proceed with this tool use.";
+const PLAN_TEXT = "Claude Code is in plan mode, so it didn't run a tool that makes changes.";
+/** What the adapter rejects a prompt with when its Claude Code dies (acp-agent.js, 0.79.0). */
+const SESSION_DIED = "The Claude Agent process exited unexpectedly. Please start a new session.";
+/** The CLI's texts for a plan's usage limit and a transient 429. */
+const USAGE_LIMIT_TEXT = "You've hit your limit · resets 3pm";
+const RATE_LIMIT_TEXT = "API Error: 429 rate_limit_error";
 
 /** session/new's params as logged: every MCP header value replaced, so the bearer token never lands in a file. */
 function redacted(params) {
@@ -139,7 +183,33 @@ let sessionCount = 0;
 let messageCount = 0;
 let toolCount = 0;
 
-const modelOption = (session) => ({ id: "model", name: "Model", category: "model", type: "select", currentValue: session.model, options: MODELS });
+/** Like the adapter's: an unknown session is a plain Error, which the SDK sends as -32603 with data.details. */
+function sessionOf(sessionId) {
+  const session = sessions.get(sessionId);
+  if (!session) throw new Error("Session not found");
+  return session;
+}
+
+const modeOption = (session) => ({ id: "mode", name: "Mode", description: "Session permission mode", category: "mode", type: "select", currentValue: session.mode, options: session.modes.map((m) => ({ value: m.id, name: m.name, description: m.description })) });
+const modelOption = (session) => ({ id: "model", name: "Model", description: "AI model to use", category: "model", type: "select", currentValue: session.model, options: MODELS });
+const configOptions = (session) => [modeOption(session), modelOption(session)];
+
+/** A value of the model option, or the one a model id names by its family (claude-opus-5 → opus[1m]), like the adapter's resolveModelPreference. */
+function resolveModel(value) {
+  const exact = MODELS.find((m) => m.value === value);
+  if (exact) return exact;
+  const family = /\b(opus|sonnet|haiku)\b/.exec(value.toLowerCase())?.[1];
+  const candidates = MODELS.filter((m) => family && m.value.startsWith(family));
+  const long = /\[1m\]$/i.test(value);
+  return candidates.find((m) => m.value.endsWith("[1m]") === long) ?? candidates[0] ?? null;
+}
+
+function setMode(session, mode, via) {
+  if (!session.modes.some((m) => m.id === mode)) throw new Error(via === "set_mode" ? `Mode ${mode} is not available in this session` : `Invalid value for config option mode: ${mode}`);
+  if (process.env.FAKE_CLAUDE_MODE_LOCKED === "1") throw new Error("Invalid Mode");
+  log("mode", { sessionId: session.id, from: session.mode, to: mode, via });
+  session.mode = mode;
+}
 
 /** The session's MCP client, connected on first use to the http server session/new named. */
 function mcpClient(session) {
@@ -155,6 +225,15 @@ function mcpClient(session) {
     throw err;
   });
   return session.mcp;
+}
+
+/** Whether the session's MCP server marks `name` read-only (readOnlyHint), the only tools plan mode runs. A server it can't list marks none. */
+async function readOnly(session, name, signal) {
+  session.readOnly ??= mcpClient(session)
+    .then((client) => client.listTools())
+    .then(({ tools }) => new Set(tools.filter((t) => t.annotations?.readOnlyHint === true).map((t) => t.name)))
+    .catch(() => new Set());
+  return (await unlessAborted(session.readOnly, signal)).has(name);
 }
 
 /** One reply (a prompt turn) of one session. */
@@ -178,7 +257,16 @@ function turn(conn, session, signal) {
     await update({ sessionUpdate: "tool_call", toolCallId, name: full, title: full, kind: "other", status: "pending", rawInput: {}, _meta: meta });
     await sleep(10, signal);
     await update({ sessionUpdate: "tool_call_update", toolCallId, rawInput: input, _meta: meta });
-    if (!session.allowed.has(full)) {
+    if (session.mode === "plan" && !(await readOnly(session, name, signal))) {
+      log("plan_refused", { sessionId: session.id, toolCallId, tool: name });
+      await update({ sessionUpdate: "tool_call_update", toolCallId, status: "failed", content: [{ type: "content", content: { type: "text", text: PLAN_TEXT } }] });
+      await say("I'm in plan mode, so I didn't change anything.");
+      throw new Declined();
+    }
+    if (!session.allowed.has(full) && !ASKING_MODES.has(session.mode)) {
+      // Claude Code runs it without a question in these modes.
+      log("unasked", { sessionId: session.id, toolCallId, tool: name, mode: session.mode });
+    } else if (!session.allowed.has(full)) {
       const options = [
         { optionId: "allow-once", name: "Yes", kind: "allow_once" },
         { optionId: "allow-with-updates", name: `Yes, and don't ask again for ${name.replace(/^\w/, (c) => c.toUpperCase())} commands`, kind: "allow_always" },
@@ -211,7 +299,13 @@ function turn(conn, session, signal) {
     return { ...result, text: texts.join("\n") };
   };
 
-  return { say, tool, signal };
+  /** Claude Code died under the adapter: it forgets the session, closes its MCP connection, and keeps running. */
+  const end = async () => {
+    sessions.delete(session.id);
+    await (await session.mcp?.catch(() => null))?.close();
+  };
+
+  return { say, tool, end, signal };
 }
 
 /** The design flow: draw the checkout on the canvas part by part, then import the draft. */
@@ -258,6 +352,17 @@ async function reply(t, message, context) {
     writeSync(2, "fake crash: something broke\n");
     process.exit(7);
   }
+  if (has(/\bsessionend\b/i)) {
+    await t.say("About to end the session.");
+    await t.end();
+    throw RequestError.internalError(undefined, SESSION_DIED);
+  }
+  // A client that isn't AIR gets the CLI's own text streamed, then the prompt fails with it ("Internal error: <text>").
+  const limit = has(/\blimit\b/i) ? USAGE_LIMIT_TEXT : has(/\bratelimit\b/i) ? RATE_LIMIT_TEXT : null;
+  if (limit) {
+    await t.say(limit);
+    throw RequestError.internalError({ errorKind: "rate_limit" }, limit);
+  }
   if (has(/\bhang\b/i)) {
     await t.say("Working on it…");
     return new Promise((_resolve, reject) => t.signal.addEventListener("abort", () => reject(t.signal.reason), { once: true }));
@@ -300,24 +405,39 @@ const agent = (conn) => ({
   async newSession(params) {
     log("session/new", { params: redacted(params) });
     const options = params._meta?.claudeCode?.options ?? {};
-    const session = { id: `fake-${++sessionCount}`, params, allowed: new Set(options.allowedTools ?? []), model: options.model ?? "default", mcp: null, running: null };
+    const modes = MODES.filter((m) => m.id !== "bypassPermissions" || options.allowDangerouslySkipPermissions !== false);
+    const requested = process.env.FAKE_CLAUDE_MODE ?? "default";
+    // The model option reads "default" whatever options.model asked for, as the adapter's does.
+    const session = { id: `fake-${++sessionCount}`, params, allowed: new Set(options.allowedTools ?? []), model: "default", modes, mode: modes.some((m) => m.id === requested) ? requested : "default", mcp: null, readOnly: null, running: null };
     sessions.set(session.id, session);
-    return { sessionId: session.id, configOptions: [modelOption(session)] };
+    return { sessionId: session.id, modes: { currentModeId: session.mode, availableModes: modes }, configOptions: configOptions(session) };
+  },
+  async setSessionMode(params) {
+    log("session/set_mode", { params });
+    const session = sessionOf(params.sessionId);
+    setMode(session, params.modeId, "set_mode");
+    await conn.sessionUpdate({ sessionId: session.id, update: { sessionUpdate: "config_option_update", configOptions: configOptions(session) } });
+    return {};
   },
   async setSessionConfigOption(params) {
     log("session/set_config_option", { params });
-    const session = sessions.get(params.sessionId);
-    if (!session) throw RequestError.resourceNotFound(params.sessionId);
-    if (params.configId !== "model" || !MODELS.some((m) => m.value === params.value)) throw RequestError.invalidParams({ configId: params.configId, value: params.value });
-    session.model = params.value;
-    return { configOptions: [modelOption(session)] };
+    const session = sessionOf(params.sessionId);
+    if (params.configId === "mode") {
+      setMode(session, params.value, "config_option");
+      await conn.sessionUpdate({ sessionId: session.id, update: { sessionUpdate: "current_mode_update", currentModeId: session.mode } });
+    } else if (params.configId === "model") {
+      const model = typeof params.value === "string" ? resolveModel(params.value) : null;
+      if (!model) throw new Error(`Invalid value for config option model: ${params.value}`);
+      session.model = model.value;
+    } else throw new Error(`Unknown config option: ${params.configId}`);
+    return { configOptions: configOptions(session) };
   },
   async closeSession(params) {
     log("session/close", { params });
-    const session = sessions.get(params.sessionId);
+    const session = sessionOf(params.sessionId);
     sessions.delete(params.sessionId);
-    session?.running?.abort();
-    await (await session?.mcp?.catch(() => null))?.close();
+    session.running?.abort();
+    await (await session.mcp?.catch(() => null))?.close();
     return {};
   },
   async authenticate() {
@@ -331,8 +451,7 @@ const agent = (conn) => ({
     const texts = params.prompt.filter((b) => b.type === "text").map((b) => b.text);
     const message = texts.at(-1) ?? "";
     log("session/prompt", { sessionId: params.sessionId, text: texts.join("\n\n"), message });
-    const session = sessions.get(params.sessionId);
-    if (!session) throw RequestError.resourceNotFound(params.sessionId);
+    const session = sessionOf(params.sessionId);
     if (signedOut || /signedout/i.test(message)) throw RequestError.authRequired();
     const context = canvasContext(texts.slice(0, -1).find((text) => text.startsWith("<canvas_context>")));
     const running = new AbortController();

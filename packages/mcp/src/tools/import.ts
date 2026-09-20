@@ -28,6 +28,8 @@ export const IMPORT_META_KEY = "dev.sonobe/import";
 /** On every successful import_design result (also when a screenshot drops structuredContent). */
 export interface ImportResultMeta {
   docId: string;
+  /** The component the screen goes into (a preview import's is the draft's unless the call names one). */
+  component: string;
   dryRun: boolean;
   /** The new screen's layer id; null for a dry run. */
   screenId: string | null;
@@ -177,7 +179,7 @@ export function registerImportTools(tc: ToolContext): void {
       return withDraft(host, now, snap.docId, key, async (drafts) => {
         const current = drafts.get();
         if (args.clear) {
-          if (!current) return success("There's no draft to remove, so nothing changed.", { docId: snap.docId, name: null, bytes: 0, revision: snap.revision, draftRevision: null });
+          if (!current) return success("There's no draft to remove, so nothing changed.", { docId: snap.docId, name: null, component: null, replace: null, bytes: 0, revision: snap.revision, draftRevision: null });
           drafts.drop(current);
           const note = await drafts.update(current, "cleared");
           const name = current.fields.name;
@@ -327,6 +329,7 @@ export function registerImportTools(tc: ToolContext): void {
     const importNotes = [...(away ? [away] : []), ...plan.notes, ...(captured.notes ?? [])];
     const meta = (screenId: string | null, txnId: string | null): ImportResultMeta => ({
       docId: snap.docId,
+      component: component.id,
       dryRun: !!args.dryRun,
       screenId,
       screenName: plan.screenName,
@@ -500,12 +503,14 @@ function definedArgs(args: ImportDesignArgs): Partial<ImportDesignArgs> {
 }
 
 /**
- * preview_design's result: the text, a note when the canvas didn't take the update, the draft's size and
- * update count, and the document's revision (`revision` means the document's in every result, which a
- * preview doesn't change).
+ * preview_design's result: the text, a note when the canvas didn't take the update, the draft's name,
+ * component and replace as its calls left them (so a client can tell what import_design { preview: true }
+ * would replace), its size and update count, and the document's revision (`revision` means the
+ * document's in every result, which a preview doesn't change).
  */
 function draftResult(text: string, snap: DocumentSnapshot, draft: DesignDraft, bytes: number, note: string | null): CallToolResult {
-  return success([text, ...(note ? [`Note: ${note}`] : [])].join("\n"), { docId: draft.docId, name: draft.fields.name, bytes, revision: snap.revision, draftRevision: draft.revision });
+  const { name, component, replace } = draft.fields;
+  return success([text, ...(note ? [`Note: ${note}`] : [])].join("\n"), { docId: draft.docId, name, component, replace, bytes, revision: snap.revision, draftRevision: draft.revision });
 }
 
 /** The failure for a draft whose replace, kept from an earlier preview_design call, names a layer that's gone. */

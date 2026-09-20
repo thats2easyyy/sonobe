@@ -49,6 +49,10 @@ describe("designStatusLine while the box's reply runs", () => {
     expect(line(design({ drafts: [preview] }), running([turn([chip("preview_design", { title: "Preview design", status: "done" })])]))).toEqual({ text: "Writing “Checkout”…", tone: "busy", detail: "14 KB" });
     expect(line(design({ drafts: [{ ...preview, status: "adding" }] }), running([turn([chip("import_design", { title: "Import design" })])]))).toEqual({ text: "Adding the layers…", tone: "busy" });
     expect(line(design({ drafts: [{ ...preview, status: "added" }], request: request({ imported: 1 }), result: result() }), running(), 10_000, here)).toEqual({ text: "Added “Checkout”.", tone: "done" });
+    // The import's progress, and an import that didn't work, read as they do on the API path.
+    expect(line(design({ drafts: [{ ...preview, status: "adding", progress: "Downloading images: 3 of 7" }] }), running([turn([chip("import_design")])]))).toEqual({ text: "Adding the layers… Downloading images: 3 of 7", tone: "busy" });
+    const failed = { ...preview, status: "failed" as const, error: "The page didn't load" };
+    expect(line(design({ request: request({ outcome: "completed" }), drafts: [failed] }), idle([turn([chip("import_design", { status: "error", detail: "The page didn't load" })], "Sorry.")]))).toEqual({ text: "Adding the layers didn't work: The page didn't load", tone: "error" });
   });
 
   it("thinks before any text or tool", () => {
@@ -188,8 +192,10 @@ describe("designStatusLine when the reply is done", () => {
     expect(action("agent_not_installed")).toBe("setup");
     expect(action("agent_failed")).toBe("setup");
     expect(action("subscription_off")).toBe("settings");
+    // The message says what to do: send again, wait, or switch to the API key.
     expect(action("agent_crashed")).toBeUndefined();
     expect(action("usage_limit")).toBeUndefined();
+    expect(action("rate_limited")).toBeUndefined();
   });
 
   it("covers the other ways a reply ends", () => {

@@ -28,7 +28,9 @@ export const subscriptionStatus = (extra: Partial<AssistantSubscriptionStatus> =
 /** Signed in with a Claude Max plan. */
 export const signedIn = (): AssistantSubscriptionStatus => subscriptionStatus({ state: "ready", kind: "account", label: "Claude Max", email: "ava@example.com", adapterVersion: "0.79.0" });
 
-export const SIGNED_OUT_MESSAGE = "Claude isn't signed in on this computer. Choose Sign in (it opens Terminal), or run claude auth login in Terminal, then send your message again.";
+/** The engine's words on macOS while Claude is signed out: status.subscription.message (it says Check again), and a reply's not_signed_in error. */
+export const SIGNED_OUT_MESSAGE = "Claude isn't signed in on this computer. Choose Sign in… (it opens Terminal), or run claude-agent-acp --cli auth login in Terminal, then choose Check again.";
+export const SIGNED_OUT_ERROR = "Claude isn't signed in on this computer. Choose Sign in… (it opens Terminal), or run claude-agent-acp --cli auth login in Terminal, then send your message again.";
 export const NOT_INSTALLED_MESSAGE = "Sonobe couldn't find Claude's agent adapter. It needs Node.js 22 or later: in Terminal, run npm install -g @agentclientprotocol/claude-agent-acp, then try again.";
 
 type SendRequest = { text: string; model?: string; context?: AssistantCanvasContext };
@@ -52,7 +54,7 @@ export interface FakeAssistantHost extends AssistantHostLike {
   handoffs: string[];
   /** What openInClaudeCode() answers (default: opens in ~/code/placemark, linking it when no folder is). */
   nextHandoff: () => HandoffResult;
-  /** The connection status() reports; setConnection changes it (active follows the switch and the pick). */
+  /** The connection status() reports; setConnection changes it (active follows the switch and the pick). With `available: false` the switch stays off, as main keeps it. */
   connection: AssistantConnection;
   /** What status().subscription reports. checkSubscription() sets it to nextCheck(). */
   subscription: AssistantSubscriptionStatus;
@@ -73,9 +75,10 @@ export interface FakeAssistantHost extends AssistantHostLike {
 
 export function fakeAssistantHost(options: { secretsAvailable?: boolean; key?: string; connection?: Partial<Omit<AssistantConnection, "active">>; subscription?: AssistantSubscriptionStatus } = {}): FakeAssistantHost {
   const connection = (update: Partial<Omit<AssistantConnection, "active">> = {}): AssistantConnection => {
-    const subscriptionEnabled = update.subscriptionEnabled ?? false;
+    const available = update.available ?? true;
+    const subscriptionEnabled = available && (update.subscriptionEnabled ?? false);
     const provider = update.provider ?? "api_key";
-    return { subscriptionEnabled, provider, active: subscriptionEnabled ? provider : "api_key" };
+    return { available, subscriptionEnabled, provider, active: subscriptionEnabled ? provider : "api_key" };
   };
   const host: FakeAssistantHost = {
     platform: "darwin",

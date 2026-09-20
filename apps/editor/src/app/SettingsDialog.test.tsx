@@ -70,6 +70,17 @@ describe("Settings → Claude → the experimental subscription switch", () => {
     expect(row.textContent).toContain(SUBSCRIPTION_SWITCH_DESCRIPTION);
     expect(row.closest("section")?.getAttribute("aria-label")).toBe("Claude");
     expect(host.connectionCalls).toEqual([]);
+    // A screen reader hears the whole description with the switch.
+    expect(document.getElementById(toggle.getAttribute("aria-describedby")!)?.textContent).toBe(SUBSCRIPTION_SWITCH_DESCRIPTION);
+  });
+
+  it("isn't there, and says nothing, in a build that doesn't offer it", async () => {
+    const host = fakeAssistantHost({ connection: { available: false } });
+    await mount(host);
+    expect(assistantStore.getState().status?.connection?.available).toBe(false);
+    expect(subscriptionSwitch()).toBeNull();
+    expect(document.body.textContent).not.toContain("awaiting Anthropic's permission");
+    expect(document.body.textContent).not.toContain("Claude subscription");
   });
 
   it("asks main to turn it on and off, and shows what main says", async () => {

@@ -481,7 +481,7 @@ const done = (reply = "Added it."): FakeTurn => ({ content: [{ type: "text", tex
 
 /** A successful import_design result: its _meta summary (IMPORT_META_KEY), the way the MCP tool reports it. */
 function imported(meta: Partial<ImportResultMeta> = {}, extra: Partial<ToolCallResult> = {}): ToolCallResult {
-  const full: ImportResultMeta = { docId: "photo_zoom", dryRun: false, screenId: "profile", screenName: "Profile", txnId: "txn_7", replaced: null, dropped: [], droppedCount: 0, lostConnections: 0, kept: null, ...meta };
+  const full: ImportResultMeta = { docId: "photo_zoom", component: "main", dryRun: false, screenId: "profile", screenName: "Profile", txnId: "txn_7", replaced: null, dropped: [], droppedCount: 0, lostConnections: 0, kept: null, ...meta };
   return { content: [{ type: "text", text: `Imported “${full.screenName}”` }], meta: { [IMPORT_META_KEY]: full }, ...extra };
 }
 
@@ -646,7 +646,7 @@ describe("assistant agent: the canvas context and the cached prefix", () => {
 });
 
 describe("assistant agent: pinning to the window's document", () => {
-  it("adds docId only where the schema takes it, lets an explicit docId win, and keeps Claude's input in history", async () => {
+  it("adds docId only where the schema takes it, refuses a write to another window's document, and keeps Claude's input in history", async () => {
     const lookups: string[] = [];
     const h = harness(
       [
@@ -672,11 +672,16 @@ describe("assistant agent: pinning to the window's document", () => {
     expect(h.bridge.calls).toEqual([
       { name: "get_outline", args: {} },
       { name: "import_design", args: { name: "A", html: "<p>a</p>", docId: "photo_zoom" } },
-      { name: "import_design", args: { docId: "other_doc", name: "B", html: "<p>b</p>" } },
     ]);
-    expect(lookups).toEqual(["w1"]);
+    expect(lookups).toEqual(["w1", "w1"]);
     const uses = (h.agent.history("w1")[1]!.content as BetaToolUseBlockParam[]).map((b) => b.input);
     expect(uses).toEqual([{}, { name: "A", html: "<p>a</p>" }, { docId: "other_doc", name: "B", html: "<p>b</p>" }]);
+    expect(h.api.requests[1]!.messages.at(-1)!.content).toContainEqual({
+      type: "tool_result",
+      tool_use_id: "b",
+      is_error: true,
+      content: "This chat edits the prototype in its own window, so import_design didn't run on “other_doc”. Leave out docId to change this window's prototype, or ask the person to open the chat in the other window.",
+    });
   });
 
   it("puts a box message's import into the component the box shows, unless Claude named one", async () => {

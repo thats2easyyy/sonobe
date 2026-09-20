@@ -260,7 +260,7 @@ The Connect Claude screen has more of these under **Try asking**. Click one to c
 
 ## Experimental: the Assistant on your Claude subscription
 
-The desktop app's own Assistant, and its Design with Claude box, use your Anthropic API key. An experimental switch lets them run on your Claude subscription instead, through Claude's agent adapter. It's off by default, it's awaiting Anthropic's permission, and it isn't part of any release until Anthropic agrees. Anthropic's support article on [using the Agent SDK with your Claude plan](https://support.claude.com/en/articles/15036540-use-the-claude-agent-sdk-with-your-claude-plan) says: "Claude Agent SDK, claude -p, and third-party app usage still draw from your subscription's usage limits."
+The desktop app's own Assistant, and its Design with Claude box, use your Anthropic API key. An experimental switch lets them run on your Claude subscription instead, through Claude's agent adapter. It's off by default and awaiting Anthropic's permission. Anthropic's support article on [using the Agent SDK with your Claude plan](https://support.claude.com/en/articles/15036540-use-the-claude-agent-sdk-with-your-claude-plan) says: "For now, nothing has changed: Claude Agent SDK, claude -p, and third-party app usage still draw from your subscription's usage limits." But Claude Code's [legal page](https://code.claude.com/docs/en/legal-and-compliance) says Anthropic doesn't let third-party developers "route requests through Free, Pro, or Max plan credentials on behalf of their users", so Sonobe will ask Anthropic whether this option is allowed. Until Anthropic agrees, no release offers it: packaged builds, like the DMG, hide the switch unless Sonobe is started with `SONOBE_CLAUDE_SUBSCRIPTION=1`.
 
 To try it:
 
@@ -270,16 +270,23 @@ To try it:
    npm install -g @agentclientprotocol/claude-agent-acp
    ```
 
-2. In Sonobe, open **Settings → Claude** and turn on **Use my Claude subscription in the Assistant** under Experimental.
-3. Open the Assistant and choose **Claude subscription**. If Claude isn't signed in on this computer, choose **Sign in…**, which opens Terminal for Claude's sign-in, then **Check again**.
+2. Start Sonobe so it offers the switch. A build you run from a checkout (`npm run desktop`) always does. For a packaged build, run this in Terminal:
+
+   ```sh
+   SONOBE_CLAUDE_SUBSCRIPTION=1 /Applications/Sonobe.app/Contents/MacOS/Sonobe
+   ```
+
+3. Open **Settings → Claude** and turn on **Use my Claude subscription in the Assistant** (its description starts with “Experimental”).
+4. Open the Assistant and choose **Claude subscription**. If Claude isn't signed in on this computer, choose **Sign in…**, which opens Terminal for Claude's sign-in, or run `claude-agent-acp --cli auth login` in Terminal yourself. Then choose **Check again**.
 
 What to expect:
 
 - Replies stream with their tool steps, and **Stop** works, as with a key. In the Design with Claude box, Claude draws the screen over the artboard as it writes, one part at a time (`preview_design`), then imports it as layers in one undo step.
-- Claude changes only the prototype in its window, and asks before replacing a screen you changed by hand. It also asks before it saves, opens or creates a prototype.
+- Claude changes only the prototype in its window, and asks before replacing a screen you changed by hand. It also asks before it saves, opens or creates a prototype, even if your own Claude Code is set to auto mode: Sonobe runs its sessions in Claude Code's default mode, and asks you itself if Claude Code didn't.
 - It uses your plan's usage limits. The Assistant shows how many tokens a chat used, with no price. If the adapter is set to use an API key instead of your Claude account, the setup says so, because then the key pays.
-- A chat keeps what it started on. Switching between Claude subscription and API key starts a new chat.
-- Sonobe never sees your Claude login: the adapter uses the one Claude Code keeps on this computer. Your messages, the parts of the prototype Claude reads and files from a linked code folder go to Anthropic under your Claude account.
+- A chat keeps what it started on. Switching between Claude subscription and API key starts a new chat, and turning the switch off stops any reply running on your subscription, in every window.
+- When your plan's usage limit is reached, the Assistant says so in Claude's own words, such as when it resets. Wait for it, or switch to your API key. If Claude Code stops in the middle of a reply, send your message again: it starts a new session, which doesn't remember the chat's earlier messages.
+- Sonobe never reads or stores your Claude login: the adapter uses the one Claude Code keeps on this computer. Your messages, the parts of the prototype Claude reads and files from a linked code folder go to Anthropic under your Claude account.
 
 ## Privacy
 

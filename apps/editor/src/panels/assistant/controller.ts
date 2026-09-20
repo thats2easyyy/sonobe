@@ -142,9 +142,14 @@ export function createAssistantController(host: AssistantHostLike | null, store:
     return checking;
   };
 
-  /** A new chat runs on the subscription, and this launch hasn't looked at its login yet. */
+  /**
+   * A new chat runs on the subscription, and this launch hasn't looked at its login yet, or main is still looking (another
+   * window's check, or the adapter starting). Main shares the check that's running, and nothing pushes its answer, so this
+   * window asks for it rather than showing "checking" until something else reads the status.
+   */
   const checkIfUnknown = (status: AssistantStatus) => {
-    if (status.connection?.active === "subscription" && status.subscription?.state === "unknown") void checkSubscription();
+    const state = status.subscription?.state;
+    if (status.connection?.active === "subscription" && (state === "unknown" || state === "checking")) void checkSubscription();
   };
 
   const refresh = async () => {
@@ -245,6 +250,7 @@ export function createAssistantController(host: AssistantHostLike | null, store:
       try {
         const status = await assistant.reset();
         store.setState({ items: [], running: false, runId: null, thinking: false, status, usage: status.usage, limits: status.limits });
+        checkIfUnknown(status);
       } catch (err) {
         addNotice("error", `Couldn't start a new chat: ${messageOf(err)}`);
       }
@@ -262,7 +268,6 @@ export function createAssistantController(host: AssistantHostLike | null, store:
     },
     async setConnection(update) {
       if (!assistant.setConnection) return null;
-      const before = store.getState().status?.connection?.active ?? "api_key";
       let status: AssistantStatus;
       try {
         status = await assistant.setConnection(update);
@@ -270,8 +275,9 @@ export function createAssistantController(host: AssistantHostLike | null, store:
         return { ok: false, error: `Sonobe couldn't change the Assistant's connection: ${messageOf(err)}` };
       }
       if (disposed) return { ok: true, status };
-      // Main reset this window's chat when what a new chat runs on changed.
-      const reset = (status.connection?.active ?? "api_key") !== before;
+      // Main reset this window's chat when what a new chat runs on changed. Its answer says so, not this window's copy of the
+      // connection, which is stale when another window changed it: the chat is gone (no provider, no messages, not running).
+      const reset = (status.chatProvider ?? null) === null && status.messageCount === 0 && !status.running;
       store.setState({ status, usage: status.usage, limits: status.limits, ...(reset ? { items: [], running: false, runId: null, thinking: false } : {}) });
       checkIfUnknown(status);
       return { ok: true, status };

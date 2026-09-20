@@ -97,10 +97,21 @@ beforeEach(async () => {
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", () => resolve()));
   url = `http://127.0.0.1:${(server.address() as { port: number }).port}/mcp`;
 
+  agent = startAgent();
+});
+
+/** The fake agent's process, with `env` added to this test's. */
+function startAgent(env: Record<string, string> = {}): AcpAgentProcess {
   const found = locateClaudeAgent({ env: { [CLAUDE_AGENT_ENV]: FAKE } });
   if (!found.ok) throw new Error(`The fake agent isn't at ${FAKE}.`);
-  agent = createAcpAgentProcess({ spec: found.spec, cwd: path.join(dir, "claude"), baseEnv: { ...process.env, FAKE_CLAUDE_LOG: logFile }, clientVersion: "0.1.0-test" });
-});
+  return createAcpAgentProcess({ spec: found.spec, cwd: path.join(dir, "claude"), baseEnv: { ...process.env, FAKE_CLAUDE_LOG: logFile, ...env }, clientVersion: "0.1.0-test" });
+}
+
+/** Swap the agent for one started with `env` (FAKE_CLAUDE_MODE, say). */
+async function restartAgent(env: Record<string, string>): Promise<void> {
+  await agent.dispose();
+  agent = startAgent(env);
+}
 
 afterEach(async () => {
   await agent.dispose();
@@ -263,6 +274,32 @@ describe("the fake Claude agent over Sonobe's MCP tools", () => {
     await ask(sessionId, "save");
     expect(asked).toBe(1);
     expect(toolCalls().map((c) => c.name)).toEqual(["save_document", "save_document"]);
+  }, 20_000);
+
+  it("in auto mode, calls save_document without asking, as Claude Code does when the person's own default is auto", async () => {
+    await restartAgent({ FAKE_CLAUDE_MODE: "auto" });
+    const { sessionId, updates } = await openSession();
+    let asked = 0;
+    agent.setPermissionHandler(sessionId, async () => (asked++, { outcome: { outcome: "selected", optionId: "reject" } }));
+    expect((await ask(sessionId, "save my prototype")).stopReason).toBe("end_turn");
+    expect(asked).toBe(0);
+    // Still announced first, so the endpoint can match the call to its chip.
+    const chips = updates.flatMap((u) => (u.sessionUpdate === "tool_call" ? [u.toolCallId] : []));
+    expect(toolCalls().map((c) => [c.name, c._meta?.["claudecode/toolUseId"]])).toEqual([["save_document", chips[0]]]);
+    expect(textOf(updates)).toBe("Saved it.");
+    expect((await fakeLog()).filter((l) => l.kind === "unasked").map((l) => [l.tool, l.mode])).toEqual([["save_document", "auto"]]);
+  }, 20_000);
+
+  it("in plan mode, runs the read-only get_outline but refuses preview_design, which changes the canvas", async () => {
+    await restartAgent({ FAKE_CLAUDE_MODE: "plan" });
+    const { sessionId, updates } = await openSession();
+    expect((await ask(sessionId, contextBlock(), "A checkout screen")).stopReason).toBe("end_turn");
+    expect(toolCalls().map((c) => c.name)).toEqual(["get_outline"]);
+    expect(toolsOf(updates)).toEqual(["get_outline", "preview_design"]);
+    expect(updates.filter((u) => u.sessionUpdate === "tool_call_update" && u.status).map((u) => (u as { status: string }).status)).toEqual(["completed", "failed"]);
+    expect(textOf(updates)).toBe("I'll design a checkout screen that matches your prototype.I'm in plan mode, so I didn't change anything.");
+    expect(previews).toEqual([]);
+    expect((await fakeLog()).find((l) => l.kind === "plan_refused")).toMatchObject({ tool: "preview_design" });
   }, 20_000);
 
   it("redesigns a screen with replace <id>: the draft draws over it and the import replaces it", async () => {

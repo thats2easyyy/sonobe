@@ -244,7 +244,7 @@ describe("import_design dry runs and _meta", () => {
     expect(dry.isError, dry.text).toBe(false);
     expect(dry.text).toContain("Dry run: importing would add “Checkout”: 4 layers (1 text, 1 image). Nothing changed.");
     expect(dry.structured).toMatchObject({ ok: true, changed: "none", dryRun: true, revision: 0 });
-    expect(dry.meta).toEqual({ docId: "test", dryRun: true, screenId: null, screenName: "Checkout", txnId: null, replaced: null, dropped: [], droppedCount: 0, lostConnections: 0, kept: null });
+    expect(dry.meta).toEqual({ docId: "test", component: "main", dryRun: true, screenId: null, screenName: "Checkout", txnId: null, replaced: null, dropped: [], droppedCount: 0, lostConnections: 0, kept: null });
     expect((await project.host.getDocument()).revision).toBe(0);
     expect(assetFiles()).toEqual([]);
     expect((await client.call("list_history", {})).text).not.toContain("imported");
@@ -264,7 +264,7 @@ describe("import_design dry runs and _meta", () => {
     expect(lines).toContain("Note: 1 layer of the old “Checkout” wouldn't be found again and would be removed: Promo Badge. Give layers you'll import again a data-name so they're found.");
     expect(lines.some((line) => line.startsWith("Note: 1 connection to layers the new screen doesn't have would be removed: "))).toBe(true);
     expect(replace.text).not.toMatch(/\b(was|were) removed\b/);
-    expect(replace.meta).toEqual({ docId: "test", dryRun: true, screenId: null, screenName: "Checkout", txnId: null, replaced: "checkout", dropped: [{ id: "promo_badge", name: "Promo Badge" }], droppedCount: 1, lostConnections: 1, kept: 4 });
+    expect(replace.meta).toEqual({ docId: "test", component: "main", dryRun: true, screenId: null, screenName: "Checkout", txnId: null, replaced: "checkout", dropped: [{ id: "promo_badge", name: "Promo Badge" }], droppedCount: 1, lostConnections: 1, kept: 4 });
     expect((await project.host.getDocument()).revision).toBe(revision);
     expect(assetFiles()).toEqual(files);
     expect((await client.call("get_outline", {})).text).toContain('layer promo_badge rectangle "Promo Badge"');
