@@ -203,6 +203,31 @@ describe("InspectorPanel", () => {
     expect(findLayer(main(s).layers, "card")!.layer.props.scale).toBeUndefined();
   });
 
+  it("edits Repeat in Basics under Enabled: Auto until a count is typed, copies from a linked loop", () => {
+    const s = mount(
+      build([
+        { op: "addLayer", layer: { id: "card", type: "group", name: "Card" } },
+        { op: "addPatch", patch: { id: "names", type: "loopBuilder", typeParam: "text", inputCount: 4, ui: { x: 0, y: 0 } } },
+      ]),
+    );
+    select(s, { layers: ["card"] });
+    const names = [...container.querySelectorAll(".sb-insp-row__name")].map((el) => el.textContent);
+    expect(names.slice(names.indexOf("Enabled"), names.indexOf("Enabled") + 2)).toEqual(["Enabled", "Repeat"]);
+    const repeat = input("Repeat");
+    expect(repeat.value).toBe("");
+    expect(repeat.placeholder).toBe("Auto");
+    act(() => repeat.focus());
+    type(repeat, "4");
+    key(repeat, "Enter");
+    expect(findLayer(main(s).layers, "card")!.layer.props.repeat).toBe(4);
+    expect(s.document.getState().undoLabel).toBe("You: Set Repeat on Card");
+    act(() => void s.document.getState().apply([{ op: "setInput", target: "@card.repeat", value: { link: "names.loop" } }], { label: "Link" }));
+    const chip = [...container.querySelectorAll(".sb-insp-chip")].find((el) => el.textContent?.includes("← names.loop"));
+    expect(chip).toBeTruthy();
+    act(() => void s.runtime.stepFrame());
+    expect(s.runtime.readValue("@card.repeat")).toBe(4);
+  });
+
   it("drives a layer property with a patch from its port and its context menu", () => {
     layoutStore.getState().setViewMode("canvas");
     const s = mount(fixture());

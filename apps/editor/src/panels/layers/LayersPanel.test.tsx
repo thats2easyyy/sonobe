@@ -135,6 +135,31 @@ describe("LayersPanel", () => {
     expect(rowNamed("B").querySelector('[aria-label="Locked"]')).not.toBeNull();
   });
 
+  it("badges layers that make copies (with a repeat icon when Repeat decides) and layers with a Z Position", () => {
+    mount(
+      build([
+        { op: "addPatch", patch: { id: "names", type: "loopBuilder", typeParam: "text", inputCount: 4, ui: { x: 0, y: 0 } } },
+        { op: "addPatch", patch: { id: "dots", type: "loop", inputs: { count: 3 }, ui: { x: 0, y: 200 } } },
+        { op: "addLayer", layer: { id: "card", type: "group", name: "Card", props: { zPosition: 2 }, children: [{ id: "title", type: "text", name: "Card Title" }] } },
+        { op: "addLayer", layer: { id: "dot", type: "oval", name: "Dot" } },
+        { op: "addLayer", layer: { id: "plain", type: "rectangle", name: "Plain" } },
+        { op: "setInput", target: "@card.repeat", value: { link: "names.loop" } },
+        { op: "connect", from: "names.loop", to: "@title.text" },
+        { op: "connect", from: "dots.index", to: "@dot.opacity" },
+      ]),
+    );
+    const badges = (name: string) => [...rowNamed(name).querySelectorAll(".sb-layerspanel__badge")].map((b) => [b.getAttribute("data-kind"), b.textContent, !!b.querySelector("svg")]);
+    expect(badges("Card")).toEqual([
+      ["copies", "×4", true],
+      ["z", "z2", false],
+    ]);
+    expect(rowNamed("Card").querySelector('[data-kind="copies"]')!.getAttribute("aria-label")).toBe("Repeat makes 4 copies, and everything inside follows.");
+    // A child follows its parent's copies; it doesn't make its own.
+    expect(badges("Card Title")).toEqual([]);
+    expect(badges("Dot")).toEqual([["copies", "×3", false]]);
+    expect(badges("Plain")).toEqual([]);
+  });
+
   it("renames a layer in place", () => {
     const s = mount(fixture());
     act(() => {

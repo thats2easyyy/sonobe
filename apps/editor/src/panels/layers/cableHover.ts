@@ -53,5 +53,7 @@ export function useCableHover(active: boolean): string | null {
 export function layerAcceptsCable(doc: SonobeDocument, componentId: Id, registry: Registry, layer: LayerNode, drag: CableDrag | null): boolean {
   if (!drag || drag.component !== componentId) return false;
   const props = resolveLayerProps(doc, componentId, layer, registry) ?? [];
-  return props.some((prop) => prop.bindable !== false && acceptsCable(drag, prop.type));
+  // Repeat counts a loop of anything, so it would light up every row for every cable; rows light up
+  // for the layer's other properties (Repeat still takes cables from its Inspector row).
+  return props.some((prop) => prop.bindable !== false && prop.subtype !== "count" && acceptsCable(drag, prop.type));
 }

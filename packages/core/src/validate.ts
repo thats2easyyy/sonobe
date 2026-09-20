@@ -6,6 +6,7 @@
 
 import { formatAddress, parseAddress, type ParsedAddress } from "./address.ts";
 import { getOwn, isValidId } from "./ids.ts";
+import { MAX_REPEAT } from "./layerTypes.ts";
 import {
   allLayerIds,
   findLayer,
@@ -477,6 +478,28 @@ function checkGradient(value: { gradient: Record<string, unknown> }, address: st
   return ok({ gradient: normalized });
 }
 
+const COUNT_HINT = `Type a whole number like 4, or link a loop to make one copy per item: { "link": "names.loop" }. null goes back to Auto.`;
+
+/** A copy count (subtype "count", Repeat): null for Auto or a whole number of copies. Loops come in through links. */
+function checkCount(value: InputValue, port: ResolvedPort, address: string): Check<InputValue> {
+  if (value === null) return ok(null);
+  if (typeof value === "number" && Number.isInteger(value) && value >= 0 && value <= MAX_REPEAT) return ok(value);
+  const label = `${address} (${port.name})`;
+  if (isLoopLiteral(value)) {
+    return fail("invalid_value", `${label} counts copies, so it takes a number, not a loop of ${value.loop.length} item${value.loop.length === 1 ? "" : "s"}.`, {
+      address,
+      hint: `To make one copy per item, link the loop instead of typing it, like { "link": "names.loop" }, or type ${value.loop.length}.`,
+    });
+  }
+  const need = `a whole number of copies from 0 to ${MAX_REPEAT.toLocaleString("en-US")}`;
+  const n = typeof value === "number" ? value : typeof value === "string" && value.trim() !== "" ? Number(value) : NaN;
+  let hint = COUNT_HINT;
+  if (typeof value === "string" && Number.isInteger(n) && n >= 0 && n <= MAX_REPEAT) hint = `Write the number without quotes: ${n}.`;
+  else if (typeof value === "number" && Number.isFinite(value) && value > 0 && value < MAX_REPEAT && !Number.isInteger(value)) hint = `Copies come in whole numbers: use ${Math.floor(value)} or ${Math.ceil(value)}.`;
+  else if (typeof value === "number" && value > MAX_REPEAT) hint = `Layers make at most ${MAX_REPEAT.toLocaleString("en-US")} copies.`;
+  return fail("invalid_value", `${label} needs ${need}, but got ${preview(value)}.`, { address, hint });
+}
+
 /** Check a non-link input value against a declared port; returns a normalized value. */
 export function checkLiteral(doc: SonobeDocument, component: Component, value: unknown, port: ResolvedPort | undefined, address: string, opts: ValidateOptions): Check<InputValue> {
   if (!isInputValue(value)) return fail("invalid_value", `${address} got a value that can't be stored: ${preview(value)}.`, { address, hint: INPUT_VALUE_HINT });
@@ -484,6 +507,7 @@ export function checkLiteral(doc: SonobeDocument, component: Component, value: u
   if (isLayerInput(value) && !isValidId(value.layer)) return fail("invalid_value", `${address} refers to layer "${value.layer}", which isn't a valid id.`, { address });
   if (isAssetInput(value) && !isValidId(value.asset)) return fail("invalid_value", `${address} refers to asset "${value.asset}", which isn't a valid id.`, { address });
   if (opts.lenient || !port) return ok(value);
+  if (port.subtype === "count") return checkCount(value, port, address);
   const type = port.type;
   const label = `${address} (${port.name})`;
   if (isLayerInput(value)) {

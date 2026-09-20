@@ -8,12 +8,19 @@ Related: `layout`, `components`, `simulation`
 
 - A **loop** is a list of values on one cable. `loop` makes indices `0…count−1`; `loopBuilder<type>` collects your own values (`item0`, `item1`, …).
 - A patch fed a loop evaluates **once per index**. Stateful patches (Switch, springs) keep separate state per index.
-- When several loops meet, the output is as long as the longest; shorter loops **wrap**. Keep loops that feed one layer the same length.
+- When several loops meet, the output is as long as the longest; shorter loops **wrap**. `loop_length_mismatch` flags loops of different lengths meeting (info when it looks deliberate, like 2 colors striping 6 rows).
 - An **empty loop wins**: a patch fed one runs 0 times and outputs empty loops, and a layer or component bound to one makes 0 copies, whatever the other loops hold.
-- A **layer bound to a looped value repeats**, once per index. Copies sit on top of each other unless each gets its own position, usually from `gridLayout`.
-- Copies draw in index order, so the last copy is in front (as in Origami). For copy 0 in front, such as the top card of a deck, feed index × −1 into `zPosition` (`multiply` with `value2: -1`). Keep other layers of the same group, such as a backdrop, earlier in the layer list. The front copy is also the one that gets touches, and `sim_dispatch` names it (`hit card#0`).
 - An interaction on a repeated layer gives a loop of taps, one per copy. `loopOptionSwitch` remembers which copy pulsed last, and `loopSelect` picks items by index.
 - Loops are capped at 10,000 items.
+
+## Copies: how many, which is on top, what happens at zero
+
+- **How many.** A layer makes one copy per item of the longest loop on its own properties (Auto). Its `repeat` decides instead when set: a whole number, or a link to a loop for one copy per item (`{ "link": "names.loop" }`). Other looped properties then wrap per copy, and an empty one reads its default. Copies sit on top of each other unless each gets a position, usually from `gridLayout`.
+- **Children follow.** Each layer inside a copy gets one copy, reading item `copy % length` of its own loops. The children of a layer that makes one copy repeat _inside_ it: a card with a looped title holds four stacked titles, and a drag on the card moves them all. Set the card's `repeat` (`loops_inside_single_copy` suggests the op).
+- A Repeat inside a layer that already makes copies is ignored (`repeat_inside_repeat`); loops of loops need a layer component. Link Repeat to the data the copies show, never to a gesture on the copies (`repeat_from_own_gesture`).
+- **Which is on top.** Copies draw in index order, so the last copy is in front (as in Origami). For copy 0 in front, such as the top card of a deck, feed index × −1 into `zPosition` (`multiply` with `value2: -1`). Keep other layers of the same group, such as a backdrop, earlier in the layer list. The front copy is also the one that gets touches, and `sim_dispatch` names it (`hit card#0`).
+- **At zero.** `repeat: 0` makes none, quietly. An empty loop makes 0 copies, on Repeat or on an Auto layer's properties; when it erased real items, sim results carry `empty_loop` (below).
+- **Reading copies.** `@card.repeat` reads how many copies the layer drew. `sim_get_values` notes say "Layer "Card" has 1 copy, so there's no #2", or "copy #0 of 4" for a read without `#n`.
 
 ## Empty loops and Loop Select
 
@@ -99,7 +106,7 @@ patch chosen_name loopSelect<text> "Chosen Name" loop←names.loop index←tappe
 ## Simulating loops
 
 - Tap one copy with the target `"@row#2"`.
-- Read one item with an index suffix after the property: `@row.position#2`. Without it you get item 0.
+- Read one item with an index suffix after the property: `@row.position#2`. Without it you get copy 0, and the note says so ("copy #0 of 3").
 - See one copy on its own with `get_screenshot` of `"@row#2"` and `isolate: true`. `sim_override` changes every copy at once, so it refuses `#n` targets.
 - A value that reads `null` comes with a note in `sim_get_values`: the layer drew 0 copies (and why), `#n` is past the end, or the instance path runs into a component with 0 copies.
 
@@ -116,3 +123,53 @@ patch chosen_name loopSelect<text> "Chosen Name" loop←names.loop index←tappe
 ```
 
 After tapping the third row, `tapped_row.option` is 2 and `chosen_name.output` is "Katherine".
+
+## Example: repeat a whole card
+
+A card moved by its own drag gets its copies from Repeat, so the drag runs once per card:
+
+```json tool:apply_ops
+{
+  "ops": [
+    {
+      "op": "addLayer",
+      "layer": {
+        "ref": "card",
+        "type": "group",
+        "name": "Card",
+        "props": { "size": [370, 120], "color": "#FFFFFFFF", "cornerRadius": 16 },
+        "children": [
+          { "ref": "who", "type": "text", "name": "Card Name", "props": { "position": [16, 16] } }
+        ]
+      }
+    },
+    { "op": "connect", "from": "names.loop", "to": "@$who.text" },
+    {
+      "op": "addPatch",
+      "patch": {
+        "ref": "drag",
+        "type": "drag",
+        "name": "Drag Card",
+        "inputs": { "layer": { "layer": "$card" }, "startPosition": [16, 520] }
+      }
+    },
+    { "op": "connect", "from": "$drag.position", "to": "@$card.position" },
+    { "op": "setInput", "target": "@$card.repeat", "value": { "link": "names.loop" } }
+  ]
+}
+```
+
+```text outline
+layer card group "Card" 370x120 repeat←names.loop position←drag_card.position color=#FFFFFFFF cornerRadius=16
+  layer card_name text "Card Name" @16,16 text←names.loop
+```
+
+```json tool:sim_reset
+{}
+```
+
+```json tool:sim_get_values
+{ "simId": "sim_1", "targets": ["@card.repeat", "@card_name.text#2"] }
+```
+
+`@card.repeat` is 3, one copy per name, and each card shows its own name.

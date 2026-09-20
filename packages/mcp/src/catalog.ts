@@ -135,6 +135,9 @@ function range(p: PortSpec): string {
 }
 
 function portLine(p: PortSpec, typeParam?: string): string {
+  // A copy count (Repeat) reads better as what it takes than as "any".
+  if (p.subtype === "count")
+    return `  ${p.key}: count (whole number or loop) = ${p.default === null || p.default === undefined ? "auto" : formatValue(p.default)} — ${p.description}`;
   const def = p.default !== undefined ? ` = ${formatValue(p.default)}` : "";
   const subtype = p.subtype ? `/${p.subtype}` : "";
   const options = p.enumOptions?.length

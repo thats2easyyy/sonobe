@@ -53,9 +53,9 @@ export function useFieldActions(field: InspectorField, subject: string): FieldAc
 }
 
 /** A live runtime value that subscribes on its own, so only this readout re-renders while the prototype plays. */
-export function LiveValue({ address, type }: { address: string; type: ValueType }) {
+export function LiveValue({ address, type, copies }: { address: string; type: ValueType; copies?: boolean }) {
   const values = useLiveValues([address], { hz: 15 });
-  return <LiveReadout value={values[address]} type={type} />;
+  return <LiveReadout value={values[address]} type={type} {...(copies ? { copies } : {})} />;
 }
 
 /** A row's state while a patch editor drags a cable. */
@@ -232,7 +232,7 @@ export function FieldRow({ field, subject, liveAddress, excludeLayers, drive, ca
                   <span className="sb-insp-chip__text sb-mono">{field.link ? `← ${chipText(field.link)}` : "Mixed connections"}</span>
                 </button>
               </Tooltip>
-              {field.link && liveAddress && <LiveValue address={liveAddress} type={field.type} />}
+              {field.link && liveAddress && <LiveValue address={liveAddress} type={field.type} {...(field.port.subtype === "count" ? { copies: true } : {})} />}
               <IconButton size="xs" icon={<Link2Off size={12} />} label={`Disconnect ${name}`} tooltip="Disconnect" className="sb-insp-linked__unlink" onClick={actions.disconnect} />
             </div>
           ) : (
