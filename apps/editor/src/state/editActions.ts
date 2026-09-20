@@ -214,6 +214,7 @@ export function pasteFragment(session: EditorSession, source: ClipboardFragment,
     ...(index !== undefined ? { index } : {}),
     patchOffset: freePasteOffset(ctx.doc, ctx.componentId, fragment, session.registry),
     isReserved: (id) => session.document.getState().isRetiredId(ctx.componentId, id),
+    isRetiredComponent: (id) => session.document.getState().isRetiredComponentId(id),
   });
   const comments = fragment.comments ?? [];
   const count = fragment.layers.length + Object.keys(fragment.patches).length + comments.length;

@@ -110,6 +110,24 @@ describe("edit actions", () => {
     expect(pasteFragment(s, fragment).layers).toEqual(["x"]);
   });
 
+  it("pastes an instance of a component removed this session under a new component id", () => {
+    const s = start(twoRects());
+    s.selection.getState().select({ layers: ["a"] });
+    const created = createComponentFromSelection(s);
+    const fragment = copySelection(s)!;
+    expect(Object.keys(fragment.components ?? {})).toEqual([created.componentId]);
+    s.document.getState().undo();
+    expect(s.document.getState().doc.components[created.componentId!]).toBeUndefined();
+    expect(s.document.getState().isRetiredComponentId(created.componentId!.toUpperCase())).toBe(true);
+
+    const pasted = pasteFragment(s, fragment);
+    expect(pasted).toMatchObject({ ok: true, droppedInstances: 0 });
+    const doc = s.document.getState().doc;
+    const instance = findLayer(doc.components.main!.layers, pasted.layers[0]!)!.layer;
+    expect(instance.component).toBe(`${created.componentId}_2`);
+    expect(doc.components[instance.component!]).toMatchObject({ name: "A", kind: "layerComponent" });
+  });
+
   it("pastes patches where they were when that spot is free", () => {
     const s = start(twoRects());
     s.selection.getState().select({ patches: ["tap"] });
