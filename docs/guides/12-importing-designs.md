@@ -33,6 +33,8 @@ This needs the desktop app. A browser tab isn't allowed to read another site's l
 
 The screen lands on top of your prototype, selected, and named after the page title. It's sized to your device (the size shows in the dialog), so switch devices first if you want a tablet or desktop layout.
 
+While the page loads, the dialog shows each step, like "Downloading images: 7 of 28". To stop, click **Cancel**. Nothing is added, and the dialog stays open so you can change the address or the options. An import that takes more than about 90 seconds stops by itself and says which step was slow.
+
 **More options** covers the rest:
 
 | Option | Use it when |
