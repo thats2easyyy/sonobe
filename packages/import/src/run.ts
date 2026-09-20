@@ -5,7 +5,7 @@
  * out of time, and work a step abandons can't raise unhandled rejections later. Browser-safe.
  */
 
-export type CaptureStage = "starting" | "loading" | "color-scheme" | "walking" | "images" | "screenshot";
+export type CaptureStage = "starting" | "loading" | "color-scheme" | "walking" | "symbols" | "images" | "screenshot";
 
 /** What a capture is doing now, for progress reports. */
 export interface CaptureProgress {
@@ -33,6 +33,8 @@ export const CAPTURE_BUDGETS = {
   colorScheme: 5_000,
   /** Plus waitMs. */
   walk: 45_000,
+  /** Drawing the page's SF Symbols, and putting the drawings in. */
+  symbols: 20_000,
   screenshot: 15_000,
 } as const;
 
@@ -44,6 +46,7 @@ const STAGE_TEXT: Record<CaptureStage, string> = {
   loading: "loading the page",
   "color-scheme": "switching the color scheme",
   walking: "reading the page's layers",
+  symbols: "drawing SF Symbols",
   images: "downloading images",
   screenshot: "taking the page screenshot",
 };
@@ -53,6 +56,7 @@ const STAGE_HINT: Record<CaptureStage, string> = {
   loading: "Check that the page opens quickly in a browser. A dev server that's still compiling can be slow, so open the page once first.",
   "color-scheme": "Import without colorScheme, or set the color scheme in the page itself.",
   walking: "The page may be busy or stuck in a loop. Try waitFor with a selector that appears once the screen has loaded, or import one part with selector.",
+  symbols: "Try the import again. If it keeps stopping here, use inline <svg> icons instead of data-sf-symbol placeholders.",
   images: "Reference fewer or smaller images, or images on a faster host.",
   screenshot: "Import without screenshot, then compare with get_screenshot.",
 };

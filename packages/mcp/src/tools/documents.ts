@@ -51,7 +51,7 @@ export async function documentInfo(
     `Device: ${preset.name} ${w}×${h}${doc.project.device.orientation === "landscape" ? " landscape" : ""} · ${doc.project.fps ?? 60} fps`,
     `Components: ${components.map((c) => `${c.id} "${c.name}" (${c.kind}; ${plural(c.layers, "layer")}, ${plural(c.patches, "patch", "patches")}, ${plural(c.connections, "connection")})`).join("; ")}`,
     `Diagnostics: ${plural(totals.errors, "error")}, ${plural(totals.warnings, "warning")}, ${totals.info} info${totals.errors + totals.warnings ? " (get_diagnostics for details)" : ""}`,
-    `Host: ${host.kind === "app" ? "Sonobe app" : "headless"}${host.capabilities.screenshots ? "" : " · no screenshots"}${host.capabilities.selection ? "" : " · no selection"}${host.kind === "headless" ? (host.capabilities.autosave ? " · changes save automatically" : " · call save_document to write to disk") : ""}`,
+    `Host: ${host.kind === "app" ? "Sonobe app" : "headless"}${host.capabilities.screenshots ? "" : " · no screenshots"}${host.capabilities.selection ? "" : " · no selection"}${host.kind === "headless" ? (host.capabilities.autosave ? " · changes save automatically" : " · call save_document to write to disk") : ""}${host.capabilities.sfSymbols ? " · imports draw SF Symbols" : " · imports show SF Symbols as placeholders"}`,
   ];
   if (presence.length)
     lines.push(`Working: ${presence.map((p) => `${p.author.name} — ${p.intent}`).join("; ")}`);
@@ -177,7 +177,7 @@ export function registerDocumentTools(tc: ToolContext): void {
     {
       title: "Get document info",
       description:
-        "Name, revision, device size, components with counts, diagnostics totals, what this host can do (screenshots, autosave), who's working and open simulations. Call first.",
+        "Name, revision, device size, components with counts, diagnostics totals, what this host can do (screenshots, autosave, SF Symbols in imports), who's working and open simulations. Call first.",
       input: z.object({ docId: DocIdSchema.optional() }),
       output: DocumentInfoOutputSchema,
       annotations: READ_ONLY,
