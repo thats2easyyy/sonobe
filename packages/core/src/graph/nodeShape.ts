@@ -17,7 +17,8 @@ import type { GraphNodeData, InterfaceNodeData, LayerNodeData, PatchNodeData, Po
 export type ValueChip =
   | { kind: "number"; text: string }
   | { kind: "vector"; texts: readonly string[] }
-  | { kind: "check" }
+  /** A checkbox: checked or not, and whether that's the port's default (the editor tones a default check down). */
+  | { kind: "check"; on: boolean; isDefault: boolean }
   | { kind: "menu"; text: string }
   | { kind: "color"; hex: string }
   | { kind: "text"; text: string }
@@ -81,7 +82,7 @@ export function valueChip(port: PortModel, layerName?: (id: Id) => string | unde
     case "index":
       return { kind: "number", text: formatNumberShort(Number(v) || 0) };
     case "boolean":
-      return { kind: "check" };
+      return { kind: "check", on: v === true, isDefault: port.literal === undefined };
     case "enum": {
       const key = String(v ?? "");
       const name = port.enumOptions?.find((o) => o.key === key)?.name ?? key;
