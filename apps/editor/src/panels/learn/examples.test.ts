@@ -68,7 +68,7 @@ describe("examples", () => {
     expect(Array.isArray(getExamples())).toBe(true);
   });
 
-  it("bundles an example's knobs and asset files", () => {
+  it("bundles an example's knobs and asset files", async () => {
     const deck = getExamples().find((e) => e.folder === "16-noddit-deck");
     expect(deck).toBeDefined();
     const doc = loadExampleDocument(deck!);
@@ -78,7 +78,9 @@ describe("examples", () => {
     ]);
     const files = Object.values(doc.assets).map((a) => a.file);
     expect(files.length).toBeGreaterThan(20);
-    expect(files.filter((file) => !deck!.assetUrls[file])).toEqual([]);
+    expect(files.filter((file) => !deck!.assets[file])).toEqual([]);
+    // A data: URL, which fetch() reads in the browser and in the desktop app's file:// pages alike.
+    expect(await deck!.assets[doc.assets.malasadas!.file]!()).toMatch(/^data:image\/jpeg;base64,/);
   });
 
   it("hands an example's asset files to the host before the copy opens", async () => {
@@ -88,8 +90,8 @@ describe("examples", () => {
     doc = r.doc;
     const files = Object.fromEntries(Object.entries(serializeDocument(doc)).map(([path, text]) => [`../../../../../examples/photo/${path}`, text]));
     const svg = '<svg xmlns="http://www.w3.org/2000/svg"/>';
-    const [example] = groupExampleFiles(files, { "../../../../../examples/photo/assets/abc.svg": `data:image/svg+xml,${encodeURIComponent(svg)}` });
-    expect(example!.assetUrls).toEqual({ "abc.svg": expect.stringMatching(/^data:/) });
+    const [example] = groupExampleFiles(files, { "../../../../../examples/photo/assets/abc.svg": async () => `data:image/svg+xml,${encodeURIComponent(svg)}` });
+    expect(Object.keys(example!.assets)).toEqual(["abc.svg"]);
 
     const document = createDocumentStore({ registry });
     const put: { path: string | null; file: string; name: string; bytes: number }[] = [];
