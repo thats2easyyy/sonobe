@@ -83,6 +83,8 @@ export interface DesktopDraftsApi {
   remove(id: string): Promise<DesktopDraftReply>;
   list(): Promise<DraftInfo[]>;
   read(id: string): Promise<DesktopDraftReply<{ info: DraftInfo; manifest: Record<string, unknown>; files: Record<string, string>; binaries: Record<string, ArrayBuffer> }>>;
+  /** Give back a draft read but not opened. Optional: older preloads lack it. */
+  release?(id: string): Promise<void>;
   reveal(id: string): void;
 }
 

@@ -2,7 +2,7 @@
 
 import { parseDocumentFiles } from "@sonobe/core";
 import { assetBinaries, createAssetUrlCache, createDraftFiles, documentFiles, draftBaseChanged, planProjectWrite, projectDisplayName, readDraftContents } from "./projectFiles.ts";
-import type { DesktopDraftReply, DesktopDraftsApi, DesktopHostApi, HostAdapter, HostDrafts } from "./types.ts";
+import type { DesktopDraftReply, DesktopDraftsApi, DesktopHostApi, HostAdapter, HostDrafts, RecoveredDraft } from "./types.ts";
 
 type OpenWindow = { open?: (url?: string, target?: string, features?: string) => unknown };
 
@@ -34,7 +34,14 @@ export function createDesktopHost(api: DesktopHostApi): HostAdapter {
     list: () => draftsApi.list(),
     async open(id) {
       const { info, manifest, files, binaries } = unwrap(await draftsApi.read(id));
-      const recovered = readDraftContents(info, manifest, files, binaries);
+      let recovered: RecoveredDraft;
+      try {
+        recovered = readDraftContents(info, manifest, files, binaries);
+      } catch (err) {
+        // It doesn't make a document here (a newer format, damaged files): leave it listed, and keep closing the window from deleting it.
+        await draftsApi.release?.(id).catch(() => undefined);
+        throw err;
+      }
       draftFiles.read(id, documentFiles(files), recovered);
       return recovered;
     },

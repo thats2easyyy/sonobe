@@ -156,4 +156,39 @@ describe("desktop host", () => {
     host.drafts!.reveal!("draft-0001");
     expect(api.drafts.reveal).toHaveBeenCalledWith("draft-0001");
   });
+
+  it("gives back a draft it can't read, and keeps a restored draft's base", async () => {
+    const saved = createEmptyDocument({ name: "Checkout" });
+    const project = serializeDocument(saved);
+    const { api } = fakeApi({ "/p/Checkout.sonobe": { files: project } });
+    const info = { id: "draft-0001", name: "Checkout", projectPath: "/p/Checkout.sonobe", createdAt: 1, updatedAt: 2, revision: 3, counts: { components: 1, layers: 0, patches: 0 } };
+    const stored: Record<string, { files: Record<string, string>; manifest: Record<string, unknown> }> = {
+      "draft-0001": { files: serializeDocument(edit(saved)), manifest: { base: { "project.json": "then" } } },
+      "draft-0002": { files: { ...project, "project.json": project["project.json"]!.replace(/"formatVersion": \d+/, '"formatVersion": 999') }, manifest: {} },
+    };
+    const draftWrites: Record<string, unknown>[] = [];
+    api.drafts = {
+      write: vi.fn(async (_id, _changes, meta) => {
+        draftWrites.push(meta as unknown as Record<string, unknown>);
+        return { ok: true as const };
+      }),
+      remove: vi.fn(async () => ({ ok: true as const })),
+      list: vi.fn(async () => []),
+      read: vi.fn(async (id: string) => ({ ok: true as const, info: { ...info, id }, manifest: stored[id]!.manifest, files: stored[id]!.files, binaries: {} })),
+      release: vi.fn(async () => undefined),
+      reveal: vi.fn(),
+    };
+    const host = createDesktopHost(api);
+
+    await expect(host.drafts!.open("draft-0002")).rejects.toMatchObject({ code: "tooNew" });
+    expect(api.drafts.release).toHaveBeenCalledWith("draft-0002");
+
+    const recovered = await host.drafts!.open("draft-0001");
+    expect(api.drafts.release).toHaveBeenCalledTimes(1);
+    await host.readProject("/p/Checkout.sonobe");
+    expect(host.drafts!.diskChanged("/p/Checkout.sonobe", recovered)).toBe(true);
+    const meta = { name: "Checkout", projectPath: "/p/Checkout.sonobe", revision: 4, createdAt: 1, counts: info.counts, seenIds: { items: {}, components: [], knobs: [], presets: [] } };
+    await host.drafts!.write("draft-0001", recovered.doc, meta);
+    expect(draftWrites[0]!.base).toEqual({ "project.json": "then" });
+  });
 });
