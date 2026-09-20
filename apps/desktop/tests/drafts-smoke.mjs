@@ -6,9 +6,11 @@
  *    Claude Code background task sends): the app keeps the draft and exits with code 0 at once, with
  *    no unsaved-changes prompt left waiting.
  * 2. Relaunch: the welcome screen's Recovered section lists it (screenshots/drafts-recovered.png),
- *    list_documents offers draft:<id>, open_document brings it back, and more edits keep going to
- *    the same draft. Then SIGKILL, which nothing can catch.
- * 3. Relaunch: the draft is there with both edits. save_document without a path refuses to name an
+ *    list_documents offers draft:<id>, open_document on the draft's folder refuses (draft_folder),
+ *    open_document brings it back, and more edits keep going to the same draft. Then SIGKILL, which
+ *    nothing can catch.
+ * 3. Relaunch: opening the draft's folder like a project (Show in Finder, then a double-click) brings
+ *    it back as the draft, kept out of Recents, with both edits. save_document without a path refuses to name an
  *    Untitled folder (path_needed), with a path it saves there with no dialog, the draft goes away,
  *    and a path inside that project is refused (inside_project).
  * 4. An unsaved change to that project, then the editor's renderer crashes: a call it was working on
@@ -170,6 +172,9 @@ try {
   mcp = await connectMcp();
   const listed = await mcp.call("list_documents");
   assert(listed.text.includes(`draft:${draftId} "Untitled" · never saved`), "list_documents offers the draft", listed.text);
+  const draftFolder = path.join(draftsDir, `${draftId}.sonobe`);
+  const byPath = await mcp.call("open_document", { ref: draftFolder });
+  assert(byPath.isError && byPath.text.includes("draft_folder") && byPath.text.includes(`draft:${draftId}`), "open_document on a draft's folder refuses and names draft:<id>", byPath.text);
   const opened = await mcp.call("open_document", { ref: `draft:${draftId}` });
   assert(!opened.isError && opened.text.startsWith("Recovered the draft"), "open_document brings the draft back", opened.text);
   await recovered.waitFor({ state: "hidden", timeout: 5000 });
@@ -197,8 +202,15 @@ try {
   const afterKill = await mcp.call("list_documents");
   assert(afterKill.text.includes(`draft:${draftId}`), "the draft survived SIGKILL", afterKill.text);
   assert(!afterKill.text.includes("its last changes may be missing"), "the draft isn't torn", afterKill.text);
-  const reopened = await mcp.call("open_document", { ref: `draft:${draftId}` });
-  assert(!reopened.isError, "open_document after SIGKILL", reopened.text);
+  // Show in Finder on the Recovered row, then a double-click on the folder: it comes back as the draft, not as a project saved inside Drafts.
+  await app.evaluate((_electron, dir) => globalThis.__sonobeTest.openProject(dir), draftFolder);
+  const reopened = await poll(async () => {
+    const r = await mcp.call("get_document_info");
+    return r.structuredContent?.draft?.id === draftId ? r : null;
+  }, { message: "the draft's folder to come back as the draft" });
+  assert(!reopened.text.includes(draftsDir), "the draft's folder isn't the document's project", reopened.text);
+  const recentsFile = path.join(userData, "recent-projects.json");
+  assert(!existsSync(recentsFile) || !readFileSync(recentsFile, "utf8").includes(draftsDir), "the draft's folder stays out of Recents", existsSync(recentsFile) ? readFileSync(recentsFile, "utf8") : null);
   const both = await mcp.call("get_outline", { detail: "compact" });
   assert(both.text.includes("An hour of Claude's work") && both.text.includes("Work after the restart"), "both edits came back", both.text);
 

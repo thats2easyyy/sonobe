@@ -1,5 +1,5 @@
 import { existsSync } from "node:fs";
-import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readdir, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -142,6 +142,87 @@ describe("draft store", () => {
     expect((await store.list()).find((d) => d.id === other)!.torn).toBeUndefined();
   });
 
+  it("is whole again once a recovered torn draft is written, with or without a draft.json", async () => {
+    const folder = path.join(dir, `${ID}.sonobe`);
+    await store.write(WINDOW, ID, { files: { ...files, "scripts/js_1.js": "one();\n", "scripts/js_2.js": "two();\n" } }, meta());
+    store.release(WINDOW);
+    // A write cut off after js_1.js landed, before draft.json.
+    await writeFile(path.join(folder, "scripts", "js_1.js"), "one(later);\n");
+    expect((await store.read(OTHER, ID)).info.torn).toBe(true);
+    // The editor carries on from the files it read and later sends only what it changes.
+    await store.write(OTHER, ID, { files: { "scripts/js_2.js": "two(edited);\n" } }, meta({ revision: 4 }));
+    store.release(OTHER);
+    expect((await store.list())[0]!.torn).toBeUndefined();
+    expect((await createDraftStore({ dir, version: "0.1.0-test", now: () => now }).read(WINDOW, ID)).info.torn).toBeUndefined();
+
+    // The first write cut off before its manifest: the next one lists the files it didn't send too.
+    const other = "abcdefgh-0000";
+    await mkdir(path.join(dir, `${other}.sonobe`, "components"), { recursive: true });
+    await writeFile(path.join(dir, `${other}.sonobe`, "project.json"), files["project.json"]);
+    await writeFile(path.join(dir, `${other}.sonobe`, "components", "main.json"), files["components/main.json"]);
+    expect((await store.read(OTHER, other)).info).toMatchObject({ name: "Untitled", torn: true });
+    await store.write(OTHER, other, { files: { "components/card.json": '{\n  "id": "card"\n}\n' } }, meta());
+    store.release(OTHER);
+    expect((await store.list()).find((d) => d.id === other)!.torn).toBeUndefined();
+  });
+
+  it("gives back a draft the editor couldn't use: it's listed again, and a closing window doesn't delete it", async () => {
+    // A first write cut off after project.json: listed, but its files don't make a document.
+    await mkdir(path.join(dir, `${ID}.sonobe`), { recursive: true });
+    await writeFile(path.join(dir, `${ID}.sonobe`, "project.json"), files["project.json"]);
+    await store.read(WINDOW, ID);
+    expect(await store.list()).toEqual([]);
+    store.release(WINDOW, ID);
+    expect((await store.list()).map((d) => d.id)).toEqual([ID]);
+
+    // Only that one: the window's own draft stays claimed, and closing after Don't Save deletes only it.
+    const own = "keptkept-0001";
+    await store.write(WINDOW, own, { files }, meta());
+    await store.read(WINDOW, ID);
+    store.release(WINDOW, ID);
+    expect(store.holder(own)).toBe(WINDOW);
+    expect(store.holder(ID)).toBeUndefined();
+    await store.discard(WINDOW);
+    expect(existsSync(path.join(dir, `${own}.sonobe`))).toBe(false);
+    expect(existsSync(path.join(dir, `${ID}.sonobe`, "project.json"))).toBe(true);
+  });
+
+  it.skipIf(process.platform === "win32" || process.getuid?.() === 0)("keeps a draft at launch whose files are there but can't be read", async () => {
+    const warnings: string[] = [];
+    const folder = path.join(dir, `${ID}.sonobe`);
+    await store.write(WINDOW, ID, { files, binaries: { "assets/abc.png": new Uint8Array([1, 2, 3]) } }, meta());
+    store.release(WINDOW);
+    await chmod(path.join(folder, "draft.json"), 0o000);
+    await chmod(path.join(folder, "project.json"), 0o000);
+    try {
+      const launch = createDraftStore({ dir, version: "0.1.0-test", now: () => now + 1000, log: (_level, message) => warnings.push(message) });
+      expect(await launch.prune()).toBe(0);
+      expect(existsSync(path.join(folder, "assets", "abc.png"))).toBe(true);
+      expect(warnings).toEqual([`Kept draft ${ID}: its files are there but couldn't be read`]);
+    } finally {
+      await chmod(path.join(folder, "draft.json"), 0o644);
+      await chmod(path.join(folder, "project.json"), 0o644);
+    }
+  });
+
+  it("tells its own draft folders from projects", async () => {
+    await store.write(WINDOW, ID, { files }, meta());
+    const folder = path.join(dir, `${ID}.sonobe`);
+    expect(await store.idAt(folder)).toBe(ID);
+    expect(await store.idAt(`${folder}/`)).toBe(ID);
+    // Not written yet, but a folder this store would take for a draft (a Save As into Drafts).
+    expect(await store.idAt(path.join(dir, "Mockups1.sonobe"))).toBe("Mockups1");
+    const link = path.join(path.dirname(dir), "linked");
+    await symlink(dir, link);
+    expect(await store.idAt(path.join(link, `${ID}.sonobe`))).toBe(ID);
+
+    expect(await store.idAt(path.join(dir, "My Mockups.sonobe"))).toBeNull();
+    expect(await store.idAt(path.join(folder, "components"))).toBeNull();
+    expect(await store.idAt(path.join(path.dirname(dir), `${ID}.sonobe`))).toBeNull();
+    expect(await store.idAt(path.join(dir, ID))).toBeNull();
+    expect(await store.idAt(`Drafts/${ID}.sonobe`)).toBeNull();
+  });
+
   it("removes a draft, discards a closing window's drafts, and prunes empty and old ones at launch", async () => {
     await store.write(WINDOW, ID, { files }, meta());
     await store.remove(WINDOW, ID);
@@ -178,9 +259,11 @@ describe("draft store", () => {
     expect(await call(IPC.draftsWrite, OTHER, ID, { files }, meta())).toMatchObject({ ok: false, code: "draft_in_use" });
     expect(await call(IPC.draftsRead, OTHER, "../nope")).toMatchObject({ ok: false, code: "invalid_draft" });
     expect(await call(IPC.draftsList, OTHER)).toEqual([]);
-    await call(IPC.draftsRelease, WINDOW, ID);
-    expect((await call(IPC.draftsList, OTHER)) as unknown[]).toHaveLength(1);
+    await call(IPC.draftsRelease, OTHER, ID);
+    expect(await call(IPC.draftsList, OTHER)).toEqual([]);
     await call(IPC.draftsRelease, WINDOW, "../nope");
+    await call(IPC.draftsRelease, WINDOW, ID);
+    expect(await call(IPC.draftsList, OTHER)).toMatchObject([{ id: ID }]);
     await call(IPC.draftsReveal, WINDOW, ID);
     expect(revealed).toEqual([path.join(dir, `${ID}.sonobe`)]);
     expect(await call(IPC.draftsRemove, WINDOW, ID)).toEqual({ ok: true });
