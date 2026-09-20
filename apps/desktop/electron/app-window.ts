@@ -6,7 +6,7 @@ import { DARK_BACKGROUND, placeholderHtml, toDataUrl } from "./placeholder.ts";
 import type { RendererRpcHub } from "./rpc.ts";
 import { isAppUrl, isExternalUrl, isMailtoUrl, type AppContent } from "./security.ts";
 import { ZOOM_MAX, ZOOM_MIN, loadWindowState, saveWindowStateSync, type WindowState } from "./window-state.ts";
-import { IPC } from "./ipc.ts";
+import { IPC, MUTED_ARG } from "./ipc.ts";
 import type { NativeAction } from "./menu.ts";
 
 export const WINDOW_DEFAULTS = { width: 1440, height: 900, minWidth: 1024, minHeight: 680 } as const;
@@ -96,6 +96,8 @@ export async function createAppWindow(opts: AppWindowOptions): Promise<AppWindow
       navigateOnDragDrop: false,
       spellcheck: false,
       safeDialogs: true,
+      // System speech plays through the OS, past setAudioMuted, so the editor has to know to stay quiet.
+      ...(opts.mute ? { additionalArguments: [MUTED_ARG] } : {}),
     },
   });
   const wc = win.webContents;

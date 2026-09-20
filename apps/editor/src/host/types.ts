@@ -46,7 +46,7 @@ export interface DesktopHostApi {
   notifyPrototypeRestarted?(): void;
   /** Open a web or mail link in the system browser. Optional: older preloads lack it. */
   openExternal?(url: string): boolean | void | Promise<boolean | void>;
-  /** True when the app was started muted (SONOBE_MUTE, automated runs). */
+  /** True when the app runs with SONOBE_MUTE (the preload reads it from process.argv). */
   readonly muted?: boolean;
   getPreviewStatus?(): Promise<unknown>;
   startPreview?(): Promise<unknown>;
