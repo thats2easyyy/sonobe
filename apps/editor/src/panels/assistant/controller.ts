@@ -1,14 +1,24 @@
 /**
- * The Assistant drawer's controller: talks to window.sonobeHost (assistant, secrets, openExternal)
- * and folds everything into an AssistantState store. Host-agnostic and DOM-free, so it's unit-tested
- * with a fake host. In the browser (no host) every action is a no-op and the drawer shows a
- * desktop-only notice.
+ * The Assistant's controller, shared by the drawer and the canvas's Design with Claude box: talks to
+ * window.sonobeHost (assistant, secrets, openExternal) and folds everything into an AssistantState
+ * store. Host-agnostic and DOM-free, so it's unit-tested with a fake host. In the browser (no host)
+ * every action is a no-op and the drawer shows a desktop-only notice.
  */
 
 import type { StoreApi } from "zustand/vanilla";
 import { assistantStore, nextItemId, reduceEvent, type AssistantState } from "./assistantStore.ts";
 import { validateApiKey } from "./format.ts";
-import { ANTHROPIC_CONSOLE_KEYS_URL, ASSISTANT_KEY_SECRET, getAssistantHost, supportsAssistant, type AssistantHostLike, type AssistantRunResult } from "./types.ts";
+import {
+  ANTHROPIC_CONSOLE_KEYS_URL,
+  ASSISTANT_KEY_SECRET,
+  getAssistantHost,
+  supportsAssistant,
+  type AssistantCanvasContext,
+  type AssistantCodeFolderLinkResult,
+  type AssistantCodeFolderStatus,
+  type AssistantHostLike,
+  type AssistantRunResult,
+} from "./types.ts";
 
 export interface SaveKeyResult {
   ok: boolean;
@@ -24,10 +34,16 @@ export interface AssistantController {
   saveKey(raw: string): Promise<SaveKeyResult>;
   removeKey(): Promise<void>;
   checkKey(): Promise<void>;
-  send(text: string): Promise<AssistantRunResult | null>;
+  /** With `context`, the message comes from the canvas's Design with Claude box (its transcript item says so). */
+  send(text: string, options?: { context?: AssistantCanvasContext }): Promise<AssistantRunResult | null>;
   stop(): Promise<void>;
   newChat(): Promise<void>;
   confirm(confirmationId: string, approved: boolean): Promise<void>;
+  /** The code folder linked to this window's prototype, into status.codeFolder. Null when the host can't link one. */
+  codeFolder(): Promise<AssistantCodeFolderStatus | null>;
+  /** Shows the native folder dialog (Match my code…). Null when the host can't link one. */
+  linkCodeFolder(): Promise<AssistantCodeFolderLinkResult | null>;
+  unlinkCodeFolder(): Promise<AssistantCodeFolderStatus | null>;
   /** Open console.anthropic.com's API keys page in the browser. */
   openConsole(): void;
   /** Subscribe to host events again after dispose() (React StrictMode remounts). Controllers start attached. */
@@ -51,6 +67,9 @@ export function createAssistantController(host: AssistantHostLike | null, store:
       stop: noop,
       newChat: noop,
       confirm: noop,
+      codeFolder: async () => null,
+      linkCodeFolder: async () => null,
+      unlinkCodeFolder: async () => null,
       openConsole: () => openLink(host, ANTHROPIC_CONSOLE_KEYS_URL),
       attach: () => undefined,
       dispose: () => undefined,
@@ -83,6 +102,8 @@ export function createAssistantController(host: AssistantHostLike | null, store:
       if (!disposed) store.setState({ statusError: messageOf(err) });
     }
   };
+
+  const setCodeFolder = (codeFolder: AssistantCodeFolderStatus) => store.setState((s) => (s.status ? { status: { ...s.status, codeFolder } } : {}));
 
   const checkKey = async () => {
     store.setState({ keyCheck: { state: "checking" } });
@@ -120,14 +141,15 @@ export function createAssistantController(host: AssistantHostLike | null, store:
       await refresh();
     },
     checkKey,
-    async send(raw) {
+    async send(raw, options = {}) {
       const text = raw.trim();
       const state = store.getState();
       if (!text || state.running) return null;
-      store.setState((s) => ({ items: [...s.items, { kind: "user", id: nextItemId("user"), text }], running: true, runId: null }));
+      const { context } = options;
+      store.setState((s) => ({ items: [...s.items, { kind: "user", id: nextItemId("user"), text, ...(context ? { origin: "canvas" as const } : {}) }], running: true, runId: null }));
       let result: AssistantRunResult;
       try {
-        result = await assistant.send({ text, model: store.getState().model });
+        result = await assistant.send({ text, model: store.getState().model, ...(context ? { context } : {}) });
       } catch (err) {
         store.setState({ running: false, runId: null, thinking: false });
         addNotice("error", `The Assistant couldn't start: ${messageOf(err)}`);
@@ -163,6 +185,38 @@ export function createAssistantController(host: AssistantHostLike | null, store:
         await assistant.confirm(confirmationId, approved);
       } catch (err) {
         addNotice("error", `Couldn't send your answer: ${messageOf(err)}`);
+      }
+    },
+    async codeFolder() {
+      if (!assistant.codeFolder) return null;
+      try {
+        const status = await assistant.codeFolder();
+        setCodeFolder(status);
+        return status;
+      } catch {
+        // The status keeps the last folder it knew; the next refresh tries again.
+        return null;
+      }
+    },
+    async linkCodeFolder() {
+      if (!assistant.linkCodeFolder) return null;
+      try {
+        const result = await assistant.linkCodeFolder();
+        setCodeFolder(result.status);
+        return result;
+      } catch (err) {
+        return { status: store.getState().status?.codeFolder ?? { linked: null, missing: false }, error: `Sonobe couldn't link the folder: ${messageOf(err)}` };
+      }
+    },
+    async unlinkCodeFolder() {
+      if (!assistant.unlinkCodeFolder) return null;
+      try {
+        const status = await assistant.unlinkCodeFolder();
+        setCodeFolder(status);
+        return status;
+      } catch (err) {
+        addNotice("error", `Couldn't unlink the code folder: ${messageOf(err)}`);
+        return null;
       }
     },
     openConsole: () => openLink(host, ANTHROPIC_CONSOLE_KEYS_URL),

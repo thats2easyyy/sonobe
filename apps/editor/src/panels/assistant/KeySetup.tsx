@@ -186,7 +186,7 @@ export function KeySetup({ controller, status, keyCheck, onConnectClaude, onDone
         <ShieldCheck size={15} aria-hidden className="sb-assistant-privacy__icon" />
         <ul>
           <li>Your key is encrypted with {backend} and kept in Sonobe's app data, never in your project files. Only Sonobe's main process reads it, to call Anthropic's API.</li>
-          <li>When you chat, your messages and the parts of this prototype the Assistant reads are sent to Anthropic's API.</li>
+          <li>When you chat, your messages, the parts of this prototype the Assistant reads, and any files it reads from a code folder you link are sent to Anthropic's API.</li>
           <li>Sonobe never asks for your claude.ai login and never reads Claude credentials.</li>
         </ul>
       </div>

@@ -126,6 +126,76 @@ describe("reduceEvent", () => {
   });
 });
 
+describe("reduceEvent: Design with Claude", () => {
+  const draft = (offset: number, append: string, extra: Partial<Extract<AssistantEvent, { type: "design_draft" }>> = {}): AssistantEvent => ({ type: "design_draft", runId: "r1", turn: 1, toolUseId: "t1", offset, append, done: false, ...extra });
+  const chipOf = (state: AssistantData) => (state.items.find((i) => i.kind === "assistant") as Extract<ChatItem, { kind: "assistant" }> | undefined)?.tools[0];
+  const started = fold([
+    { type: "run_started", runId: "r1", model: "claude-sonnet-5" },
+    { type: "turn_started", runId: "r1", turn: 1 },
+  ]);
+
+  it("shows import_design's chip while Claude writes the page, changing only with the rounded size, the name, or done", () => {
+    let state = { ...started, ...reduceEvent(started, draft(0, "<html>")) };
+    expect(chipOf(state)).toMatchObject({ toolUseId: "t1", name: "import_design", title: "Import design", detail: "Writing the screen · 1 KB", status: "running" });
+
+    // Still 1 KB, no name: nothing to re-render.
+    expect(reduceEvent(state, draft(6, "<body>"))).toEqual({});
+
+    state = { ...state, ...reduceEvent(state, draft(6, "x".repeat(600), { fields: { name: "Checkout" } })) };
+    expect(chipOf(state)?.detail).toBe("Writing “Checkout” · 1 KB");
+    // A later event without fields keeps the name; the same rounded KB changes nothing.
+    expect(reduceEvent(state, draft(606, "y".repeat(100)))).toEqual({});
+
+    state = { ...state, ...reduceEvent(state, draft(706, "z".repeat(14_000))) };
+    expect(chipOf(state)?.detail).toBe("Writing “Checkout” · 14 KB");
+
+    const html = "<html>" + "x".repeat(15_000);
+    state = { ...state, ...reduceEvent(state, draft(14_706, "", { done: true, html })) };
+    expect(chipOf(state)).toMatchObject({ detail: "Writing “Checkout” · 15 KB", draft: { done: true } });
+
+    // The tool starts: its own chip replaces the draft's, and late drafts are ignored.
+    state = { ...state, ...reduceEvent(state, { type: "tool_started", runId: "r1", toolUseId: "t1", name: "import_design", title: "Import design", detail: "Checkout" }) };
+    expect(chipOf(state)).toEqual({ toolUseId: "t1", name: "import_design", title: "Import design", detail: "Checkout", status: "running", changedDocument: false });
+    expect(reduceEvent(state, draft(0, "late"))).toEqual({});
+  });
+
+  it("names the screen before any html arrives", () => {
+    const state = { ...started, ...reduceEvent(started, draft(0, "", { fields: { name: "Checkout" } })) };
+    expect(chipOf(state)?.detail).toBe("Writing “Checkout”");
+  });
+
+  it("drops a retried turn's draft chip", () => {
+    let state = { ...started, ...reduceEvent(started, draft(0, "x".repeat(3000), { fields: { name: "Home" } })) };
+    expect(chipOf(state)?.draft).toBeDefined();
+    state = { ...state, ...reduceEvent(state, { type: "turn_started", runId: "r1", turn: 1 }) };
+    expect(chipOf(state)).toBeUndefined();
+  });
+
+  it("carries a replace confirmation's kind and labels", () => {
+    const state = fold([
+      { type: "run_started", runId: "r1", model: "claude-sonnet-5" },
+      { type: "confirm_required", runId: "r1", confirmationId: "c1", toolUseId: "t1", title: "Replace “Home”?", message: "Claude wants to rebuild “Home”, which you didn't ask it to change. You can undo it afterwards.", count: 0, kind: "replace", approveLabel: "Replace", declineLabel: "Keep “Home”" },
+      { type: "confirm_required", runId: "r1", confirmationId: "c2", toolUseId: "t2", title: "Delete 12 items?", message: "…", count: 12 },
+    ]);
+    expect(state.items[0]).toMatchObject({ kind: "confirm", id: "c1", confirmKind: "replace", approveLabel: "Replace", declineLabel: "Keep “Home”", status: "pending" });
+    expect(state.items[1]).not.toHaveProperty("confirmKind");
+    expect(state.items[1]).not.toHaveProperty("approveLabel");
+  });
+
+  it("keeps a message's canvas origin through the reply", () => {
+    const state = fold(
+      [
+        { type: "run_started", runId: "r1", model: "claude-sonnet-5" },
+        { type: "turn_started", runId: "r1", turn: 1 },
+        { type: "text_delta", runId: "r1", turn: 1, delta: "Added a checkout." },
+        { type: "run_finished", runId: "r1", outcome: "completed", usage: usage(10) },
+      ],
+      { items: [{ kind: "user", id: "u1", text: "a checkout", origin: "canvas" }], running: true },
+    );
+    expect(state.items[0]).toEqual({ kind: "user", id: "u1", text: "a checkout", origin: "canvas" });
+  });
+});
+
 describe("assistant store", () => {
   it("opens, closes, toggles, and remembers the model in memory", () => {
     const store = createAssistantStore({ persistModel: false });
