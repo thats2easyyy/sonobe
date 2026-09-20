@@ -35,6 +35,14 @@ const OP_FIELDS: Record<OpKind, readonly string[]> = {
   addAsset: ["component", "asset"],
   removeAsset: ["component", "id"],
   setProject: ["component", "changes"],
+  addKnob: ["component", "knob", "index"],
+  updateKnob: ["component", "id", "name", "group", "description", "type", "min", "max", "step", "unit", "options", "index"],
+  removeKnob: ["component", "id"],
+  setKnobValue: ["component", "id", "value", "preset"],
+  addKnobPreset: ["component", "preset", "copyFrom", "index"],
+  updateKnobPreset: ["component", "id", "name", "locked", "index"],
+  removeKnobPreset: ["component", "id"],
+  applyKnobPreset: ["component", "id"],
 };
 
 /** Ops that wrap a new item in one field, and that item's fields. */
@@ -44,6 +52,8 @@ const WRAPPED: Partial<Record<OpKind, { field: string; keys: readonly string[]; 
   replacePatch: { field: "patch", keys: ["type", "typeParam", "inputCount", "settings", "name"], example: '{ "op": "replacePatch", "id": "spring", "patch": { "type": "classicAnimation" } }' },
   addComment: { field: "comment", keys: ["ref", "id", "text", "rect", "color"], example: '{ "op": "addComment", "comment": { "text": "Press states", "rect": [0, 0, 400, 200] } }' },
   addComponent: { field: "component", keys: ["id", "name", "kind", "interface", "layers", "patches", "comments", "notes", "size", "meta"], example: '{ "op": "addComponent", "component": { "name": "Card", "kind": "layerComponent" } }' },
+  addKnob: { field: "knob", keys: ["id", "name", "type", "group", "description", "min", "max", "step", "unit", "options", "value", "values"], example: '{ "op": "addKnob", "knob": { "name": "Commit Distance", "type": "number", "value": 95 } }' },
+  addKnobPreset: { field: "preset", keys: ["id", "name", "locked"], example: '{ "op": "addKnobPreset", "preset": { "name": "Shipped app" } }' },
 };
 
 /** Guesses for a whole-interface update. */

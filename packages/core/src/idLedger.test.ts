@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { createHistory } from "./history.ts";
-import { createIdLedger, retiredIds, seenIdsFromJSON, seenIdsToJSON } from "./idLedger.ts";
+import { createIdLedger, retiredIds, seenIdsExcept, seenIdsFromJSON, seenIdsToJSON } from "./idLedger.ts";
 import { applyOps } from "./ops/index.ts";
 import { ID_SCENARIO_SETUP, ID_SCENARIOS, runIdScenario, type IdScenarioHost } from "./testing/idScenarios.ts";
 import { emptyDoc, expectRoundTrip, mockRegistry, mustApply } from "./testing/fixtures.ts";
@@ -103,6 +103,23 @@ describe("id ledger", () => {
       const r = mustApply(doc, ops, { seenIds: ids });
       expectRoundTrip(doc, r);
     }
+  });
+
+  it("records knob and preset ids in their own namespaces, whichever components an edit names", () => {
+    const doc = mustApply(emptyDoc(), [{ op: "addKnobPreset", preset: { name: "Proposal" } }, { op: "addKnob", knob: { id: "gap", name: "Gap", type: "number" } }]).doc;
+    const ids = createIdLedger();
+    ids.observe(doc, []);
+    expect([...ids.knobs]).toEqual(["gap"]);
+    expect([...ids.presets]).toEqual(["proposal"]);
+    expect(seenIdsToJSON(ids)).toMatchObject({ knobs: ["gap"], presets: ["proposal"] });
+    expect(seenIdsFromJSON(seenIdsToJSON(ids)).knobs.has("gap")).toBe(true);
+    const gone = mustApply(doc, [{ op: "removeKnob", id: "gap" }, { op: "addKnobPreset", preset: { name: "Other" } }, { op: "removeKnobPreset", id: "proposal" }]).doc;
+    // A knob id is its own namespace: an item may still be called "gap".
+    const r = mustApply(gone, [{ op: "addKnob", knob: { name: "Gap", type: "number" } }, { op: "addKnobPreset", preset: { name: "Proposal" } }, { op: "addPatch", patch: { id: "gap", type: "switch" } }], { seenIds: ids });
+    expect(r.doc.knobs!.knobs[0]!.id).toBe("gap_2");
+    expect(r.doc.knobs!.presets.map((p) => p.id)).toEqual(["other", "proposal_2"]);
+    expect(Object.keys(r.doc.components.main!.patches)).toEqual(["gap"]);
+    expect(seenIdsExcept(ids, doc).knobs.size).toBe(0);
   });
 
   it("is ignored by lenient applies (undo and redo)", () => {

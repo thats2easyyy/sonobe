@@ -10,6 +10,7 @@ import {
   didYouMean,
   didYouMeanText,
   findLayer,
+  getKnob,
   isLinkInput,
   layersWithGraphNodes,
   parseAddress,
@@ -826,7 +827,7 @@ export function registerWriteTools(tc: ToolContext): void {
     {
       title: "Set values",
       description:
-        'Set literal values on patch inputs or layer properties: [{ "target": "pop.bounciness", "value": 8 }, { "target": "@card.color", "value": "#FFD60AFF" }]. null resets to the default. Targets driven by a connection are skipped (and reported) unless replaceConnections is true.',
+        'Set literal values on patch inputs or layer properties: [{ "target": "pop.bounciness", "value": 8 }, { "target": "@card.color", "value": "#FFD60AFF" }]. null resets to the default. Targets driven by a connection or a knob are skipped (and reported) unless replaceConnections is true; tune knobs with set_knobs.',
       input: z.object({
         docId: DocIdSchema.optional(),
         component: ComponentIdSchema.optional(),
@@ -863,9 +864,14 @@ export function registerWriteTools(tc: ToolContext): void {
               ? findLayer(c.layers, a.id)?.layer.props[a.key]
               : undefined;
         if (!args.replaceConnections && isLinkInput(current) && !isLinkInput(u.value)) {
+          const knob = parseAddress(current.link);
+          const knobName = knob?.kind === "knob" ? (getKnob(snap.doc.knobs, knob.key)?.name ?? knob.key) : undefined;
           ignored.push({
             target: u.target,
-            reason: `driven by ${current.link}; pass replaceConnections: true to overwrite it`,
+            reason:
+              knobName !== undefined
+                ? `reads knob ${knobName}; tune it with set_knobs, or pass replaceConnections: true to unlink it`
+                : `driven by ${current.link}; pass replaceConnections: true to overwrite it`,
           });
           continue;
         }

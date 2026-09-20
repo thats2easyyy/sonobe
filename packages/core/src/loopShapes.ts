@@ -148,9 +148,10 @@ export function loopShapes(doc: SonobeDocument, componentId: Id, registry: Regis
       case "layer":
         return layerSource(a.id, a.key);
       // Published inputs come from outside the component, so only the running prototype knows them.
-      // Constants never loop: K1's "$knob.<id>" address joins these cases.
+      // A knob is one constant for every copy, so it never loops.
       case "componentInput":
       case "componentOutput":
+      case "knob":
         return null;
       default: {
         const unhandled: never = a;

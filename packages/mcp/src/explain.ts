@@ -9,9 +9,12 @@ import {
   decodeInput,
   defaultForPort,
   findLayer,
+  formatKnobValue,
   formatOutlineValue,
   getDiagnostics,
+  getKnob,
   getPatchSpec,
+  knobLiteral,
   isDecodedLoop,
   isLayerInput,
   isLinkInput,
@@ -144,7 +147,20 @@ function sourceLabel(ctx: Ctx, link: string): string {
     return ctx.audience === "beginner"
       ? `the component's "${a.key}" input`
       : `published input ${a.key}`;
+  if (a.kind === "knob") return knobLabelText(ctx.doc, a.key);
   return link;
+}
+
+/** "the knob Commit Distance (95 pt in Proposal, 80 pt in Shipped app)". */
+function knobLabelText(doc: SonobeDocument, id: Id): string {
+  const set = doc.knobs;
+  const knob = getKnob(set, id);
+  if (!set || !knob) return `the knob "${id}" (missing)`;
+  const values = set.presets.map(
+    (p) =>
+      `${formatKnobValue(knob, knobLiteral(set, knob, p.id))}${set.presets.length > 1 ? ` in ${p.name}` : ""}`,
+  );
+  return `the knob ${knob.name} (${values.join(", ")})`;
 }
 
 function literal(value: InputValue | undefined, port?: ResolvedPort): string | undefined {
@@ -158,7 +174,18 @@ function settingsText(ctx: Ctx, node: PatchNode, skip: readonly string[] = []): 
   const ports = portsOf(ctx, node);
   const parts: string[] = [];
   for (const [key, value] of Object.entries(node.inputs)) {
-    if (skip.includes(key) || isLinkInput(value) || isLayerInput(value)) continue;
+    if (skip.includes(key)) continue;
+    // A knob-driven input is a setting too: name the knob and its values.
+    if (isLinkInput(value) && parseAddress(value.link)?.kind === "knob") {
+      const port = ports?.inputs.find((p) => p.key === key);
+      if (ctx.audience === "engineer") parts.push(`${key} ${value.link}`);
+      else
+        parts.push(
+          `${(port?.name ?? key).toLowerCase()} ${knobLabelText(ctx.doc, value.link.slice("$knob.".length))}`,
+        );
+      continue;
+    }
+    if (isLinkInput(value) || isLayerInput(value)) continue;
     const port = ports?.inputs.find((p) => p.key === key);
     if (port) {
       const decoded = decodeInput(value, port.type);

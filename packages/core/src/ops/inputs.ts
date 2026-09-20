@@ -1,5 +1,6 @@
 /** setInput, connect, disconnect, rename. */
 
+import { parseAddress } from "../address.ts";
 import { VARIABLE_BROADCASTER_TYPE } from "../graph.ts";
 import { getOwn } from "../ids.ts";
 import { findLayer } from "../registry.ts";
@@ -59,7 +60,8 @@ export function connect(ctx: OpContext, op: OpOf<"connect">): OpOutcome {
   const to = resolveAddress(ctx, op.to);
   const targetCheck = resolveTarget(ctx.doc, component, to, ctx.validate);
   if (!targetCheck.ok) {
-    const swapped = resolveSource(ctx.doc, component, to, ctx.validate).ok && resolveTarget(ctx.doc, component, from, ctx.validate).ok;
+    // A knob as "to" gets the knob's own message: knobs are read, and tuned with setKnobValue.
+    const swapped = parseAddress(to)?.kind !== "knob" && resolveSource(ctx.doc, component, to, ctx.validate).ok && resolveTarget(ctx.doc, component, from, ctx.validate).ok;
     if (swapped) {
       fail("wrong_direction", `"${to}" is an output and "${from}" is an input, so this connection points the wrong way.`, {
         address: to,

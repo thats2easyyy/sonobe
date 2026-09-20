@@ -58,6 +58,35 @@ describe("createDiagnosticsCache", () => {
     for (const ops of edits) doc = step(cache, doc, ops);
   });
 
+  it("equals getDiagnostics across knob value edits, preset switches, declaration edits and removals", () => {
+    const cache = createDiagnosticsCache(mockRegistry);
+    let doc = mustApply(buildSampleDocument(), [
+      { op: "addKnobPreset", preset: { name: "Proposal" } },
+      { op: "addKnobPreset", preset: { name: "Shipped app" } },
+      { op: "addKnob", knob: { id: "bounce", name: "Bounce", type: "number", value: 8, min: 0, max: 20 } },
+      { op: "addComponent", component: { id: "logic", name: "Logic", kind: "patchComponent" } },
+      { op: "addPatch", component: "logic", patch: { id: "spring", type: "popAnimation", inputs: { speed: { link: "$knob.bounce" } } } },
+    ]).doc;
+    expect(cache.get(doc)).toEqual(getDiagnostics(doc, mockRegistry));
+    const edits: Op[][] = [
+      [{ op: "setInput", target: "pop.bounciness", value: { link: "$knob.bounce" } }],
+      [{ op: "setKnobValue", id: "bounce", value: 30 }],
+      [{ op: "applyKnobPreset", id: "shipped_app" }],
+      [{ op: "setKnobValue", id: "bounce", value: 3 }],
+      [{ op: "updateKnob", id: "bounce", max: 50, name: "Bounciness" }],
+      [{ op: "updateKnob", id: "bounce", type: "boolean" }],
+      [{ op: "updateKnob", id: "bounce", type: "number" }],
+      [{ op: "addKnob", knob: { id: "tint", name: "Tint", type: "color", value: "#FF0000FF" } }],
+      [{ op: "setInput", target: "grow.start", value: { link: "$knob.tint" } }],
+      [{ op: "updateKnob", id: "tint", type: "text" }],
+      [{ op: "removeKnob", id: "tint" }],
+      [{ op: "addKnobPreset", preset: { name: "Wild" } }],
+      [{ op: "removeKnobPreset", id: "wild" }],
+      [{ op: "removeKnob", id: "bounce" }],
+    ];
+    for (const ops of edits) doc = step(cache, doc, ops);
+  });
+
   it("re-checks copies when a Repeat, a Loop's Count or a loop literal changes", () => {
     const cache = createDiagnosticsCache(loopRegistry);
     const stepWith = (doc: SonobeDocument, ops: Op[]) => {

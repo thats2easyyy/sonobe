@@ -16,7 +16,7 @@ Shares a value under a name, so any Variable Receiver with that name can use it 
 ## How it works
 A Variable Broadcaster gives a value a name. Every Variable Receiver set to the same name outputs that value on the same frame, as if a cable connected them.
 
-- **Value** is the value to share. Leave it unconnected and type a value to make a constant you change in one place.
+- **Value** is the value to share. To tune a constant while the prototype runs, or compare it with a reference, make it a knob instead: knobs have a range and presets, and any input reads one directly.
 - **Name** is the variable's name: rename the patch (press Return on it, or type in the Inspector's name field), and every receiver that reads the variable follows. Names are case-sensitive, and an empty name shares nothing.
 - **Scope** decides who can receive it. **Local**, the default, reaches receivers in this patch graph only. **Global** also reaches receivers inside every component placed here, and inside their components, all the way down. Global variables never flow up to a parent.
 - **Type:** right-click to change the value's type. Receivers match on name, scope, and type.
@@ -104,6 +104,7 @@ patch card_color optionPicker<color> option←dark_mode.output option0=#FFFFFFFF
 - A receiver outputs 0 and shows a warning: its name, scope, or type doesn't match the broadcaster, often because of different capitalization. Pick the variable from the receiver's Variable menu in the Inspector, which copies all three.
 - Receivers inside a component get nothing: the broadcaster's scope is Local, which stops at the component's edge. Set Scope to Global.
 - Two broadcasters show an error: they share a name, scope, and type in the same patch graph, so receivers can't tell them apart. Rename one of them.
+- Reference values encoded in names, like "Commit Distance (app: 95)": nothing can read or switch to them. Make the value a knob and keep the reference in a locked preset.
 
 ## Pairs well with
 
