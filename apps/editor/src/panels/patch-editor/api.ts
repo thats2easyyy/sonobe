@@ -6,8 +6,8 @@
 
 export { PatchEditorBreadcrumbs, type PatchEditorBreadcrumbsProps } from "./components/Breadcrumbs.tsx";
 export { checkConnection, orientConnection, placeSuggestion, portTypeAt, quickConnectCheck, type ConnectionCheck, type HandleRef, type OrientedConnection } from "./model/connect.ts";
-export { documentObstacles, estimatePatchSize, findFreePosition, freeInsertPosition, type PlacementBias, type PlacementObstacles, type PlacementOptions } from "./model/placement.ts";
-export { nodePositionsMetaOp, readNodePositions, PATCH_EDITOR_META_KEY } from "./model/meta.ts";
+export { documentObstacles, estimatePatchSize, findFreePosition, freeInsertPosition, type PlacementBias, type PlacementObstacles, type PlacementOptions } from "@sonobe/core/graph";
+export { nodePositionsOp, readNodePositions, PATCH_EDITOR_META_KEY } from "@sonobe/core";
 export { patchEditorBridge, type CableDrag, type DriveRequest, type LayerPropTarget, type PatchEditorBridge, type PatchEditorBridgeState } from "./state/bridge.ts";
 export {
   acceptsCable,

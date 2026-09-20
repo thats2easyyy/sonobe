@@ -1,6 +1,7 @@
 /** Compact value formatting for port rows, cables, and hover cards. */
 
-import { formatColor, isColor, type EnumOption, type Value, type ValueType } from "@sonobe/core";
+import type { EnumOption, Value, ValueType } from "../types.ts";
+import { formatColor, isColor } from "../values.ts";
 
 export interface LoopLike {
   __loop: true;

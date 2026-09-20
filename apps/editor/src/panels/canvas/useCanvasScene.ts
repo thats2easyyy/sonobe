@@ -3,7 +3,7 @@
  * runtime, re-run on every document change), or the live prototype's latest frame.
  */
 
-import { DEFAULT_LAYER_COMPONENT_SIZE, deviceScreenSize, type Id, type SonobeDocument } from "@sonobe/core";
+import { artboardSize, componentDocument, type Id } from "@sonobe/core";
 import { createRuntime, type SceneFrame, type SonobeRuntime } from "@sonobe/engine";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useStore } from "zustand";
@@ -11,21 +11,6 @@ import type { EditorSession } from "../../state/session.ts";
 
 /** "design": frame 0 with authored values. "live": the running prototype (root component only). */
 export type SceneSource = "design" | "live";
-
-/** Artboard size: the device screen for the root prototype, the component's own size otherwise. */
-export function artboardSize(doc: SonobeDocument, componentId: Id): [number, number] {
-  const component = doc.components[componentId];
-  if (!component || componentId === doc.project.root) return deviceScreenSize(doc.project.device);
-  const size = component.size ?? DEFAULT_LAYER_COMPONENT_SIZE;
-  return [size[0], size[1]];
-}
-
-/** A document that runs `componentId` as its root, at its artboard size. */
-export function componentDocument(doc: SonobeDocument, componentId: Id): SonobeDocument {
-  if (componentId === doc.project.root || !doc.components[componentId]) return doc;
-  const [w, h] = artboardSize(doc, componentId);
-  return { ...doc, project: { ...doc.project, root: componentId, device: { preset: "custom", size: [w, h] } } };
-}
 
 export interface CanvasSceneState {
   scene: SceneFrame | null;

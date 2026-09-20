@@ -2,7 +2,7 @@ import { applyOps, createEmptyDocument, getDiagnostics, type Op, type SonobeDocu
 import { createPatchRegistry } from "@sonobe/patches";
 import { describe, expect, it } from "vitest";
 import { createPlacementIndex, estimateNodeSize, padRect, rectsOverlap, type Rect } from "./geometry.ts";
-import { deriveGraph } from "./graph.ts";
+import { deriveGraph } from "@sonobe/core/graph";
 
 /** Deterministic pseudo-random numbers (mulberry32). */
 function random(seed: number): () => number {

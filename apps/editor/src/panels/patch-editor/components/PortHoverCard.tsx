@@ -5,7 +5,7 @@ import { useEffect } from "react";
 import { Portal } from "../../../ui/Portal.tsx";
 import { PortGlyph, VALUE_TYPE_LABELS } from "../../../ui/PortGlyph.tsx";
 import { useFloating } from "../../../ui/lib/useFloating.ts";
-import { formatValueLong } from "../model/format.ts";
+import { formatValueLong } from "@sonobe/core/graph";
 import { portKey, type GraphModel } from "../model/types.ts";
 import { usePatchEditor, useLiveValue, useUi } from "../state/context.ts";
 

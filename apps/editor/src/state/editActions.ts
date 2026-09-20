@@ -22,7 +22,7 @@ import {
   type Registry,
   type SonobeDocument,
 } from "@sonobe/core";
-import { estimatePatchSize } from "../panels/patch-editor/model/placement.ts";
+import { estimatePatchSize } from "@sonobe/core/graph";
 import { applyPastePlan, createClipboardFragment, planPaste, topLevelLayerIds, type ClipboardFragment } from "./clipboard.ts";
 import { currentComponentId, hasSelection } from "./selection.ts";
 import type { EditorSession } from "./session.ts";
