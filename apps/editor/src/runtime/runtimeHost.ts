@@ -5,7 +5,8 @@
  * runtime issues into diagnostics for the component they came from, feeds throttled live values and
  * per-frame pulse fires to the UI (inside component instances too), exposes per-patch timings,
  * drives DOM renderers, provides platform services with a global mute, gates project scripts on
- * trust, and creates independent deterministic simulations for MCP.
+ * trust, offers a restart when an edit leaves state from before it (staleState.ts), and creates
+ * independent deterministic simulations for MCP.
  */
 
 import { deviceScreenSize, type AssetRecord, type Diagnostic, type Id, type LayerRef, type SonobeDocument, type Value } from "@sonobe/core";
@@ -24,18 +25,31 @@ import {
   type SonobeRuntime,
   type TextMeasurer,
 } from "@sonobe/engine";
-import { createDomRenderer, createFontAssetRegistry, DomTextMeasurer, type DomRenderer, type MediaState } from "@sonobe/renderer";
+import {
+  createBrowserPlatform,
+  createDomRenderer,
+  createFontAssetRegistry,
+  createLiveVideoOverlays,
+  DomTextMeasurer,
+  getMuteStore,
+  type BrowserPlatform,
+  type BrowserPlatformOptions,
+  type DomRenderer,
+  type LiveVideoOverlays,
+  type MediaState,
+  type MuteStore,
+} from "@sonobe/renderer";
 import { createStore, type StoreApi } from "zustand/vanilla";
 import type { ConsoleStore } from "../state/console.ts";
 import type { DocumentStore } from "../state/document.ts";
 import { pulseOutputAddresses } from "../state/registry.ts";
 import { createFpsMeter } from "./fpsMeter.ts";
 import { componentIdForInstancePath, qualifyAddress } from "./instances.ts";
-import { createMediaInfoCache, findSceneNode, mediaRefOf, type MediaInfoCache } from "./mediaInfo.ts";
-import { createBrowserPlatform, getMuteStore, liveKeyOf, type BrowserPlatform, type BrowserPlatformOptions, type MuteState } from "./platform.ts";
+import { createMediaInfoCache, findSceneNode, type MediaInfoCache } from "./mediaInfo.ts";
 import { createAnimationFrameScheduler, type FrameScheduler } from "./scheduler.ts";
 import { createScriptTrustStore, withScriptTrust, type ScriptTrustStore } from "./scriptTrust.ts";
 import { createSimulation, type Simulation } from "./simulation.ts";
+import { freshStartDraws, stillStale, type StaleState } from "./staleState.ts";
 
 export interface RuntimeHostOptions {
   registry: EngineRegistry;
@@ -56,7 +70,7 @@ export interface RuntimeHostOptions {
   /** Extra options for the browser platform (openExternal, readAssetBytes, fetch). */
   platformOptions?: Omit<BrowserPlatformOptions, "resolveAssetUrl" | "layerElement" | "mute">;
   /** Mute switch. Default: the app-wide switch (SONOBE_MUTE, ?mute=1, automation). */
-  mute?: StoreApi<MuteState>;
+  mute?: MuteStore;
   /** Trust gate for project scripts. Default: a store remembering trust in localStorage. */
   scriptTrust?: ScriptTrustStore;
   /**
@@ -91,6 +105,8 @@ export interface RuntimeHostState {
   viewers: number;
   /** Instance path live values and pulses follow ("" root, null when the component isn't instantiated). */
   scope: string | null;
+  /** A layer this prototype draws no copies of since an edit, while a fresh start draws it: restarting helps. */
+  staleState: StaleState | null;
 }
 
 export type LiveValues = Record<string, Value | Loop | undefined>;
@@ -180,6 +196,8 @@ export interface RuntimeHost {
   isPlaying(): boolean;
   /** Start the prototype over on the next frame. */
   restart(): void;
+  /** Called whenever restart() is asked for (the desktop restarts phones with it). Returns unsubscribe. */
+  subscribeRestart(cb: () => void): () => void;
   /** Advance one frame now (for stepping while paused). */
   stepFrame(dtSeconds?: number): SceneFrame;
   /** Last produced scene, if any. */
@@ -236,6 +254,9 @@ function mediaOutputs(state: MediaState): Record<string, Value> {
   for (const [key, value] of Object.entries(state)) if (value !== undefined) out[key] = value as Value;
   return out;
 }
+
+/** How long after an edit the restart offer's fresh copy runs (edits in a burst run it once). */
+const STALE_CHECK_DELAY_MS = 300;
 
 const issueKey = (issues: readonly RuntimeIssue[]) => issues.map((i) => `${i.code}|${i.severity}|${i.patchId ?? ""}|${i.layerId ?? ""}|${i.componentPath ?? ""}|${i.message}`).join("\n");
 
@@ -348,10 +369,11 @@ export function createRuntimeHost(options: RuntimeHostOptions): RuntimeHost {
     if (state.getState().profiling !== on) state.setState({ profiling: on });
   };
 
-  const state = createStore<RuntimeHostState>()(() => ({ playing: false, fps: 0, frame: -1, time: 0, frameMs: 0, diagnostics: [], muted: mute.getState().muted, profiling: false, viewers: 0, scope }));
+  const state = createStore<RuntimeHostState>()(() => ({ playing: false, fps: 0, frame: -1, time: 0, frameMs: 0, diagnostics: [], muted: mute.getState().muted, profiling: false, viewers: 0, scope, staleState: null }));
   if (explicitProfiling) applyProfiling();
   const meter = createFpsMeter();
   const frameListeners = new Set<(scene: SceneFrame) => void>();
+  const restartListeners = new Set<() => void>();
   const pulseListeners = new Set<(fire: PulseFire) => void>();
   interface ValueSub {
     addresses: string[];
@@ -376,6 +398,10 @@ export function createRuntimeHost(options: RuntimeHostOptions): RuntimeHost {
   let lastStatsAt = -Infinity;
   let lastIssues = "";
   let pulseAddresses: { component: Id; addresses: string[] } | null = null;
+  /** The restart offer: an edit arrived while an empty_loop warning (or the offer) was up. */
+  let staleArmed = false;
+  /** Check once the swapped-in document has run a few frames: warnings come back after two. */
+  let staleCheck: { afterFrame: number; notBefore: number } | null = null;
 
   const schedule = () => {
     if (handle === null && !disposed) handle = scheduler.request(tick);
@@ -405,7 +431,18 @@ export function createRuntimeHost(options: RuntimeHostOptions): RuntimeHost {
       lastIssues = key;
       next.diagnostics = issuesToDiagnostics(issues, currentDoc.project.root, currentDoc);
     }
+    // The copies came back without a restart (a pending check decides after an edit).
+    const stale = state.getState().staleState;
+    if (stale && !staleCheck && !stillStale(stale, issues)) next.staleState = null;
     state.setState(next);
+  };
+
+  const checkStale = (now: number) => {
+    if (!staleCheck || runtime.frame < staleCheck.afterFrame || now < staleCheck.notBefore) return;
+    staleCheck = null;
+    const found = freshStartDraws(currentDoc, runtime.issues(), { registry, ...(measurer ? { textMeasurer: measurer } : {}), resolveAssetUrl, mediaInfo: (ref) => mediaInfo.info(ref) });
+    const shown = state.getState().staleState;
+    if (found?.layerId !== shown?.layerId || found?.componentPath !== shown?.componentPath || found?.copies !== shown?.copies) state.setState({ staleState: found });
   };
 
   const readValues = (sub: ValueSub): { values: LiveValues; changed: boolean } => {
@@ -462,12 +499,19 @@ export function createRuntimeHost(options: RuntimeHostOptions): RuntimeHost {
       pendingDoc = null;
       runtime.updateDocument(doc);
       pulseAddresses = null;
+      if (staleArmed) {
+        staleArmed = false;
+        staleCheck = { afterFrame: runtime.frame + 3, notBefore: now + STALE_CHECK_DELAY_MS };
+      }
     }
     if (pendingRestart) {
       pendingRestart = false;
       runtime.restart();
       browserPlatform?.reset();
       meter.reset();
+      staleArmed = false;
+      staleCheck = null;
+      if (state.getState().staleState) state.setState({ staleState: null });
     }
     const t0 = scheduler.now();
     let scene: SceneFrame;
@@ -488,6 +532,7 @@ export function createRuntimeHost(options: RuntimeHostOptions): RuntimeHost {
     for (const cb of [...frameListeners]) cb(scene);
     emitPulses(scene.frame);
     emitValues(now, force);
+    checkStale(now);
     publishStats(now, force);
     return scene;
   };
@@ -529,6 +574,7 @@ export function createRuntimeHost(options: RuntimeHostOptions): RuntimeHost {
 
   const setDocument = (doc: SonobeDocument) => {
     if (disposed || doc === currentDoc) return;
+    if (!staleArmed) staleArmed = staleCheck !== null || state.getState().staleState !== null || runtime.issues().some((i) => i.code === "empty_loop");
     if (doc.assets !== currentDoc.assets) fontAssets.sync(doc.assets);
     currentDoc = doc;
     pendingDoc = doc;
@@ -541,6 +587,7 @@ export function createRuntimeHost(options: RuntimeHostOptions): RuntimeHost {
     pendingRestart = true;
     logSink?.getState().push("info", "Prototype restarted", { source: "prototype" });
     refresh();
+    for (const cb of [...restartListeners]) cb();
   };
 
   const unsubscribeDoc = docStore?.getState().subscribeRevision((s, previous) => {
@@ -590,59 +637,21 @@ export function createRuntimeHost(options: RuntimeHostOptions): RuntimeHost {
   };
 
   // Camera feeds (live references) drawn as <video> overlays inside video layers.
-  const liveOverlays = new WeakMap<ViewerHandle, Map<string, { el: HTMLVideoElement; live: string }>>();
+  const liveOverlays = new WeakMap<ViewerHandle, LiveVideoOverlays>();
   let liveMediaWarned = false;
   function syncLiveMediaSafely(viewer: ViewerHandle, scene: SceneFrame) {
+    if (!browserPlatform) return;
     try {
-      syncLiveMedia(viewer, scene);
+      let overlays = liveOverlays.get(viewer);
+      if (!overlays) {
+        overlays = createLiveVideoOverlays(viewer.renderer, browserPlatform);
+        liveOverlays.set(viewer, overlays);
+      }
+      overlays.sync(scene);
     } catch (err) {
       if (liveMediaWarned) return;
       liveMediaWarned = true;
       logSink?.getState().push("warn", [`The viewer couldn't show a camera feed: ${err instanceof Error ? err.message : String(err)}`], { source: "prototype" });
-    }
-  }
-  function syncLiveMedia(viewer: ViewerHandle, scene: SceneFrame) {
-    const overlays = liveOverlays.get(viewer);
-    const sources = browserPlatform?.liveSources() ?? [];
-    if (!sources.length && !overlays?.size) return;
-    const wanted = new Map<string, { live: string; node: SceneNode }>();
-    if (sources.length) {
-      const stack: SceneNode[] = [...scene.roots];
-      while (stack.length) {
-        const node = stack.pop()!;
-        stack.push(...node.children);
-        if (node.type !== "video") continue;
-        const live = liveKeyOf(mediaRefOf(node.props.video));
-        if (live && browserPlatform?.liveStream(live)) wanted.set(node.key, { live, node });
-      }
-    }
-    const map = overlays ?? new Map<string, { el: HTMLVideoElement; live: string }>();
-    if (!overlays) liveOverlays.set(viewer, map);
-    for (const [key, overlay] of map) {
-      if (wanted.get(key)?.live === overlay.live && overlay.el.isConnected) continue;
-      overlay.el.srcObject = null;
-      overlay.el.remove();
-      map.delete(key);
-    }
-    for (const [key, { live, node }] of wanted) {
-      const host = viewer.renderer.elementForKey(key);
-      if (!host) continue;
-      let overlay = map.get(key);
-      if (!overlay) {
-        const el = host.ownerDocument.createElement("video");
-        el.className = "sonobe-media";
-        el.setAttribute("data-sonobe-live", live);
-        el.muted = true;
-        el.playsInline = true;
-        el.autoplay = true;
-        el.srcObject = browserPlatform!.liveStream(live) ?? null;
-        (host.querySelector(".sonobe-body") ?? host).appendChild(el);
-        void el.play?.()?.catch?.(() => undefined);
-        overlay = { el, live };
-        map.set(key, overlay);
-      }
-      const fit = ({ fill: "cover", fit: "contain", stretch: "fill", tile: "none" } as Record<string, string>)[String(node.props.fillMode ?? "fill")] ?? "cover";
-      if (overlay.el.style.objectFit !== fit) overlay.el.style.objectFit = fit;
     }
   }
 
@@ -660,6 +669,13 @@ export function createRuntimeHost(options: RuntimeHostOptions): RuntimeHost {
     togglePlay: () => (playing ? pause() : play()),
     isPlaying: () => playing,
     restart,
+
+    subscribeRestart(cb) {
+      restartListeners.add(cb);
+      return () => {
+        restartListeners.delete(cb);
+      };
+    },
 
     stepFrame(dtSeconds = 1 / 60) {
       return runFrame(dtSeconds, scheduler.now(), true);
@@ -784,10 +800,7 @@ export function createRuntimeHost(options: RuntimeHostOptions): RuntimeHost {
         dispose() {
           if (disposedViewer) return;
           disposedViewer = true;
-          for (const overlay of liveOverlays.get(viewer)?.values() ?? []) {
-            overlay.el.srcObject = null;
-            overlay.el.remove();
-          }
+          liveOverlays.get(viewer)?.dispose();
           liveOverlays.delete(viewer);
           viewers.delete(viewer);
           if (primaryViewer === viewer) primaryViewer = viewers.values().next().value ?? null;
@@ -828,6 +841,7 @@ export function createRuntimeHost(options: RuntimeHostOptions): RuntimeHost {
       unsubscribeMute();
       for (const viewer of [...viewers]) viewer.dispose();
       frameListeners.clear();
+      restartListeners.clear();
       pulseListeners.clear();
       valueSubs.clear();
       runtime.dispose();

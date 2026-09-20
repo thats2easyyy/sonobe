@@ -42,6 +42,8 @@ export interface DesktopHostApi {
   onMcpStatus?(cb: (status: unknown) => void): () => void;
   /** Push the live document's revision (and the Edit menu's Undo and Redo titles) to main. Optional: older preloads lack it. */
   notifyDocumentChanged?(revision: number, history?: { undo: string; redo: string }): void;
+  /** The prototype restarted, so players (phones, the pop-out viewer) restart too. Optional: older preloads lack it. */
+  notifyPrototypeRestarted?(): void;
   /** Open a web or mail link in the system browser. Optional: older preloads lack it. */
   openExternal?(url: string): boolean | void | Promise<boolean | void>;
   /** True when the app was started muted (SONOBE_MUTE, automated runs). */
@@ -278,6 +280,8 @@ export interface HostAdapter {
   openExternal?(url: string): boolean | Promise<boolean>;
   /** Tell the host the live document moved to `revision`; `history` holds the current Undo and Redo titles. */
   notifyDocumentChanged?(revision: number, history?: { undo: string; redo: string }): void;
+  /** Tell the host the prototype restarted, so its players restart too. */
+  notifyPrototypeRestarted?(): void;
   /** The host asks for silence (SONOBE_MUTE, automated runs). */
   readonly muted?: boolean;
   /** Where drafts of unsaved work are kept; absent when the host can't keep them (memory storage). */

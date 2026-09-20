@@ -78,6 +78,7 @@ Nothing changed when a write fails. Fix the call and retry.
 ## Other surprises
 
 - **Values look wrong in simulation right after edits.** The session hot-swapped the document and kept compatible state, such as springs mid-flight and switches that are on. `sim_reset` gives a clean start. An empty loop is not leftover state: a list that went empty comes back on its own, so if it stays empty, the wiring empties it (see the `empty_loop` warning).
+- **The person's viewer shows leftover state after your edits.** The live viewer takes edits without restarting, too: a count, a switch that's on, an intro that already played. `restart_viewer` starts it over, on their phone as well. When a fresh start would draw a layer the running prototype doesn't, the Live viewer section of `get_diagnostics` says so with `stale_state` (info), and the viewer offers Restart.
 - **"isn't implemented yet"** in runtime issues: that patch outputs default values for now. Pick another patch, or tell the person.
 - **A loop shows one copy.** Every copy sits at the same position. Feed `gridLayout` positions into the layer.
 - **Only the text repeats, stacked inside one card**, and a drag moves them all: the loop reaches the card's children, not the card. Link the loop to the card's `repeat` (see `loops`).

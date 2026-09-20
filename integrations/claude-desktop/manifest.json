@@ -98,6 +98,7 @@
     { "name": "begin_work", "description": "Show what Claude is about to change." },
     { "name": "finish_work", "description": "Clear Claude's working badge." },
     { "name": "reveal", "description": "Point at items in the editor." },
+    { "name": "restart_viewer", "description": "Start the person's live prototype over from its first frame." },
     { "name": "list_history", "description": "Undoable change groups with authors." },
     { "name": "undo", "description": "Undo Claude's latest change group." }
   ],

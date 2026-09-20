@@ -79,7 +79,7 @@ The tools are listed in `TOOL_NAMES`.
 | Read                 | `get_outline`, `get_layers`, `get_patches`, `get_items`, `find`, `get_selection`, `get_diagnostics`, `explain`                                 |
 | Write                | `apply_ops`, `add_layers`, `add_patches`, `connect`, `set_values`, `update_layers`, `delete_items`, `rename`, `create_component`, `tidy_graph`, `import_design` |
 | Simulate             | `sim_reset`, `sim_dispatch`, `sim_step`, `sim_trace`, `sim_get_values`, `sim_override`, `get_screenshot`                                       |
-| Presence and history | `begin_work`, `finish_work`, `reveal`, `list_history`, `undo`                                                                                  |
+| Presence and history | `begin_work`, `finish_work`, `reveal`, `restart_viewer`, `list_history`, `undo`                                                                |
 
 Conventions:
 

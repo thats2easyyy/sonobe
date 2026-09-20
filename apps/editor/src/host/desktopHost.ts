@@ -129,6 +129,14 @@ export function createDesktopHost(api: DesktopHostApi): HostAdapter {
       }
     },
 
+    notifyPrototypeRestarted() {
+      try {
+        api.notifyPrototypeRestarted?.();
+      } catch {
+        // The bridge went away (window closing).
+      }
+    },
+
     onCommand: (cb) => api.onCommand(cb),
     onOpenProject: (cb) => api.onOpenProject(cb),
     setDocumentEdited: (edited) => api.setDocumentEdited(edited),

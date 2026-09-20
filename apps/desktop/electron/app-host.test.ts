@@ -474,6 +474,37 @@ describe("app host presence, selection and screenshots", () => {
     expect(await host.presence()).toEqual([]);
   });
 
+  it("restarts the live prototype (restart_viewer) and says what the players show", async () => {
+    const w = editorWindow(1);
+    const host = appHost([w]);
+    const restarts = vi.fn();
+    w.session.runtime.subscribeRestart(restarts);
+    for (let i = 0; i < 5; i++) w.session.runtime.stepFrame();
+    expect(w.session.runtime.runtime.frame).toBe(4);
+    expect(await host.restartViewer!({})).toEqual({ docId: "photo_zoom", playing: false });
+    expect(restarts).toHaveBeenCalledTimes(1);
+    w.session.runtime.stepFrame();
+    expect(w.session.runtime.runtime.frame).toBe(0);
+    // The desktop restarts phones only for the window whose document they show, and holds scripts the editor holds.
+    expect(host.activeTargetId()).toBe(1);
+    expect(host.scriptsPaused("photo_zoom")).toBe(false);
+    expect(await rejection(host.restartViewer!({ docId: "missing_doc" }))).toMatchObject({ code: "unknown_document" });
+
+    const old = editorWindow(2);
+    old.target.hasMethod = (method) => method !== "viewer.restart" && old.server.methods().includes(method);
+    expect(await rejection(appHost([old]).restartViewer!({}))).toMatchObject({ code: "viewer_restart_unavailable", hint: expect.stringContaining("Restart Prototype") });
+  });
+
+  it("adds the restart offer to the Live viewer diagnostics", async () => {
+    const w = editorWindow(1);
+    const host = appHost([w]);
+    w.session.runtime.stepFrame();
+    w.session.runtime.state.setState({ staleState: { layerId: "card", copies: 1 } });
+    expect((await host.diagnostics()).runtime?.diagnostics).toEqual([
+      expect.objectContaining({ code: "stale_state", severity: "info", component: "main", itemIds: ["card"], message: expect.stringContaining('kept state from before the last edit: it draws no copies of Layer "Event Card"'), hint: expect.stringContaining("restart_viewer") }),
+    ]);
+  });
+
   it("crops screenshots to the visible viewer stage", async () => {
     const w = editorWindow(1);
     const host = appHost([w]);
@@ -738,6 +769,10 @@ describe("desktop MCP endpoint", () => {
     await client.callTool({ name: "sim_step", arguments: { simId, until: "idle" } });
     const values = await client.callTool({ name: "sim_get_values", arguments: { simId, targets: ["next_pressed.on"] } });
     expect(values.structuredContent).toMatchObject({ values: { "next_pressed.on": true } });
+
+    const restarted = await client.callTool({ name: "restart_viewer", arguments: {} });
+    expect(restarted.isError).toBeFalsy();
+    expect(restarted.structuredContent).toMatchObject({ docId: "photo_zoom", playing: false, text: expect.stringContaining("Restarted the live prototype (paused on its first frame") });
 
     const noViewer = await client.callTool({ name: "get_screenshot", arguments: {} });
     expect(noViewer.isError).toBe(true);
