@@ -389,6 +389,80 @@ describe("re-import edge cases", () => {
     expect(findLayer(result.doc.components.main!.layers, "b_2")).toBeDefined();
   });
 
+  it("lists a layer added by hand inside the screen that the new design doesn't have, and names it in a note", async () => {
+    const first = await imported(screen(["A", "B"]));
+    expect(first.plan.dropped).toEqual([]);
+    expect(first.plan.summary.dropped).toBeUndefined();
+    const edited = applyOps(first.doc, [{ op: "addLayer", parent: "tabs", layer: { type: "rectangle", name: "Promo Badge" } }], { registry });
+    expect(edited.errors).toEqual([]);
+    const again = await planImport(screen(["A", "B"]), edited.doc, new Map(), { replace: "tabs" });
+    expect(again.dropped).toEqual([{ id: "promo_badge", name: "Promo Badge" }]);
+    expect(again.summary).toMatchObject({ kept: 3, dropped: 1 });
+    expect(again.notes).toContain("1 layer of the old “Tabs” wasn't found again and was removed: Promo Badge. Give layers you'll import again a data-name so they're found.");
+    const result = applyOps(edited.doc, again.ops, { registry });
+    expect(result.errors).toEqual([]);
+    expect(findLayer(result.doc.components.main!.layers, "promo_badge")).toBeUndefined();
+    // Nothing dropped, nothing listed.
+    const same = await planImport(screen(["A", "B"]), result.doc, new Map(), { replace: "tabs" });
+    expect(same.dropped).toEqual([]);
+    expect(same.summary.dropped).toBe(0);
+    expect(same.notes.join(" ")).not.toContain("found again");
+  });
+
+  it("lists a dropped group once and counts its children, and names five before “and N more”", async () => {
+    const first = await imported(screen(["A", "B"]));
+    const edited = applyOps(first.doc, [
+      { op: "addLayer", parent: "tabs", layer: { type: "group", name: "Promo", children: [{ type: "rectangle", name: "Promo Fill" }, { type: "text", name: "Promo Label", props: { text: "20% off" } }] } },
+    ], { registry });
+    expect(edited.errors).toEqual([]);
+    const again = await planImport(screen(["A"]), edited.doc, new Map(), { replace: "tabs" });
+    expect(again.dropped).toEqual([{ id: "b", name: "B" }, { id: "promo", name: "Promo" }]);
+    expect(again.summary.dropped).toBe(4);
+    expect(again.notes).toContain("2 layers of the old “Tabs” weren't found again and were removed: B, Promo. Give layers you'll import again a data-name so they're found.");
+
+    const many = await imported(screen(["A", "B", "C", "D", "E", "F", "G"]));
+    const emptied = await planImport(screen([]), many.doc, new Map(), { replace: "tabs" });
+    expect(emptied.dropped.map((l) => l.id)).toEqual(["a", "b", "c", "d", "e", "f", "g"]);
+    expect(emptied.notes).toContain("7 layers of the old “Tabs” weren't found again and were removed: A, B, C, D, E and 2 more. Give layers you'll import again a data-name so they're found.");
+  });
+
+  it("replaces a card inside a screen from a capture of the card alone, as a selector import makes", async () => {
+    const style = { fontFamily: "system-ui", fontSize: 17, fontWeight: 600, color: "#111118FF", lineHeight: 22 };
+    const card = (title: string): CaptureFrame => ({
+      kind: "frame",
+      name: "Card",
+      nameRank: 5,
+      box: [16, 100, 370, 200],
+      fill: "#FFFFFFFF",
+      radii: [24, 24, 24, 24],
+      children: [
+        { kind: "text", name: "Card Title", nameRank: 5, text: title, box: [32, 116, 200, 22], style },
+        { kind: "frame", name: "Buy Button", nameRank: 5, box: [32, 240, 120, 44], fill: "#0A84FFFF", radii: [22, 22, 22, 22], children: [] },
+      ],
+    });
+    const first = await imported(capture({ name: "Shop", children: [card("Sneakers"), { kind: "frame", name: "Tab Bar", nameRank: 5, box: [0, 790, 402, 84], fill: "#F2F2F7FF", children: [] }] }));
+    const wired = applyOps(first.doc, [{ op: "addPatch", patch: { ref: "tap", type: "interaction", name: "Tap Buy", inputs: { layer: { layer: "buy_button" } } } }], { registry });
+    expect(wired.errors).toEqual([]);
+
+    // import_design with selector "#card" captures the card alone, its boxes still in page coordinates.
+    const cardOnly = capture({ ...card("Sneakers, 2 colors"), clip: false }, { viewport: { width: 402, height: 874 } });
+    const again = await planImport(cardOnly, wired.doc, new Map(), { replace: "card" });
+    expect(again.screenName).toBe("Card");
+    expect(again.summary).toMatchObject({ kept: 3, dropped: 0, lostConnections: 0 });
+    expect(again.dropped).toEqual([]);
+    const result = applyOps(wired.doc, again.ops, { registry });
+    expect(result.errors).toEqual([]);
+    const main = result.doc.components.main!;
+    expect(main.layers.map((l) => l.id)).toEqual(["shop"]);
+    const shop = main.layers[0]!;
+    expect(shop.children!.map((l) => l.id)).toEqual(["card", "tab_bar"]);
+    const newCard = shop.children![0]!;
+    expect(newCard.props).toMatchObject({ position: [16, 100], size: [370, 200], cornerRadius: 24 });
+    expect(newCard.children!.map((l) => [l.id, l.props.position])).toEqual([["card_title", [16, 16]], ["buy_button", [16, 140]]]);
+    expect(newCard.children![0]!.props.text).toBe("Sneakers, 2 colors");
+    expect(main.patches.tap_buy!.inputs.layer).toEqual({ layer: "buy_button" });
+  });
+
   it("doesn't let a new layer take a kept id", async () => {
     // "Tab 2" outside the screen pushes the imported one to tab_3; an unmatched "Tab 2" comes first next time.
     const doc = applyOps(createEmptyDocument(), [{ op: "addLayer", layer: { type: "rectangle", name: "Tab 2" } }], { registry }).doc;

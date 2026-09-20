@@ -3,9 +3,11 @@
 import {
   didYouMean,
   didYouMeanText,
+  formatStyleDigest,
   getOutline,
   layersWithGraphNodes,
   listComponentIds,
+  styleDigest,
   type Diagnostic,
   type PatchCategory,
 } from "@sonobe/core";
@@ -80,10 +82,10 @@ export function registerReadTools(tc: ToolContext): void {
           "Component id (default: all components, root first).",
         ),
         detail: z
-          .enum(["compact", "normal", "full"])
+          .enum(["compact", "normal", "full", "styles"])
           .optional()
           .describe(
-            "compact: structure and links; normal (default): plus values and notes; full: plus editor positions (patch ui, and node=x,y or node=auto for layer and interface nodes) and settings.",
+            "compact: structure and links; normal (default): plus values and notes; full: plus editor positions (patch ui, and node=x,y or node=auto for layer and interface nodes) and settings. styles: the most used colors, fonts, font sizes, radii and shadows instead of the outline, to match a new design to what's there.",
           ),
         maxLines: z.number().int().min(10).max(2000).optional().describe("Default 300."),
         offset: z
@@ -98,10 +100,15 @@ export function registerReadTools(tc: ToolContext): void {
     async ({ docId, component, detail, maxLines, offset }) => {
       const snap = await host.getDocument(docId);
       if (component !== undefined) requireComponent(snap.doc, component);
-      const text = getOutline(snap.doc, component, {
-        detail: detail ?? "normal",
-        registry: host.registry,
-      });
+      const text =
+        detail === "styles"
+          ? (component !== undefined ? [component] : listComponentIds(snap.doc))
+              .map((id) => formatStyleDigest(styleDigest(snap.doc, id)))
+              .join("\n\n")
+          : getOutline(snap.doc, component, {
+              detail: detail ?? "normal",
+              registry: host.registry,
+            });
       const t = truncateLines(text, maxLines ?? 300, offset ?? 0);
       return success(`revision ${snap.revision}\n${t.text}`, {
         docId: snap.docId,

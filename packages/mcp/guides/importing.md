@@ -10,7 +10,7 @@ Related: `start-here`, `animation`, `gestures`, `layout`
 | ---------------------------------------------------------------------- | ------------------------------------------------------------------------------------------- |
 | a web app you can run (React, Next, Vue, Svelte, Rails, Storybook)     | Start its dev server, then `import_design` with `url` per screen                            |
 | code Sonobe can't render (SwiftUI, UIKit, Compose, React Native, Flutter) | Read the screen's code, write one static HTML page that reproduces it, import with `html` |
-| nowhere yet (the person describes a new design)                        | Write the design as HTML, import with `html`, iterate by importing again                    |
+| nowhere yet (the person describes a new design)                        | Match what's there first (below), write the design as HTML, import with `html`, iterate with `replace` |
 | a capture from the browser extension or a plugin                       | `import_design` with `capture`                                                              |
 
 - `selector` imports one element, like a card or a sheet (`"#pricing-card"`, `"[data-testid=checkout]"`).
@@ -28,6 +28,7 @@ Related: `start-here`, `animation`, `gestures`, `layout`
 
 ## Write HTML that imports well
 
+- **Match what's there**: read the prototype's styles with `get_outline` (`"detail": "styles"`: its most used colors, fonts, sizes and radii) and look at one screen with `get_screenshot` (`isolate: true`). Reuse those values exactly.
 - **One screen per page**, laid out for the device width (`get_document_info` shows it). The viewer draws the status bar, so leave the top safe area empty (62 points on iPhone 17 Pro).
 - **Real content**: the app's actual copy, numbers, avatars and photos (https or data: URLs), and icons as inline `<svg>`.
 - **SF Symbols**: don't draw them. Write `<svg data-sf-symbol="heart.fill"></svg>`, styled like SwiftUI's `.font` and `.foregroundStyle`: `font-size` is the point size, `font-weight` the weight, `color` the color. `data-sf-palette="#0A84FF,#34C759"` sets palette colors, `data-sf-scale="large"` the image scale.
@@ -63,7 +64,7 @@ For example, pass this page as `html` with `"name": "Post"`:
 2. **Compare.** `get_screenshot` against the source (or `screenshot: true`). Fix what matters for the prototype with `update_layers`, or change the HTML and import again with `replace` set to the screen's id.
 3. **Name what you wire.** Rename generic "Group" layers the person will talk about.
 4. **Wire the interaction** onto the imported ids, then verify it with `sim_reset`, `sim_dispatch` and `sim_trace`.
-5. **Iterate.** When the design changes (the person edits their app, or you revise the HTML), import again with `replace`. Layers found again at the same name path keep their ids, links and connections, so the wiring survives. Text an earlier import named by its words is found again by those words, even once a `data-name` renames it. The result says how many layers kept their ids and names every connection it had to drop (`@open_until_9_pm.text`), so you can wire those again. Text named by its words that now says something else counts as a new layer, so give text you wire a `data-name`.
+5. **Iterate.** When the design changes (the person edits their app, or you revise the HTML), import again with `replace`. Layers found again at the same name path keep their ids, links and connections, so the wiring survives. Text an earlier import named by its words is found again by those words, even once a `data-name` renames it. The result says how many layers kept their ids and names every connection it had to drop (`@open_until_9_pm.text`), so you can wire those again. Text named by its words that now says something else counts as a new layer, so give text you wire a `data-name`. Before a replace over a screen the person may have changed, `dryRun: true` plans the import without changing anything and names the layers that wouldn't be found again. The result's notes name them after a real replace too.
 
 A design captured elsewhere imports the same way:
 
@@ -101,6 +102,12 @@ A design captured elsewhere imports the same way:
     "images": {}
   }
 }
+```
+
+Read the styles an import brought, to match the next screen to them:
+
+```json tool:get_outline
+{ "detail": "styles" }
 ```
 
 Then make the imported button pop when it's tapped:

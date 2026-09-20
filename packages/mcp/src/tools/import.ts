@@ -2,16 +2,18 @@
  * import_design: bring a real design onto the canvas. Renders the person's running app (a URL), HTML
  * Claude wrote from their code, or a ready-made capture (a browser extension, a Figma plugin), then
  * adds it as one screen of real layers in one undo step, with Scroll patches for content that scrolls.
+ * A dry run plans it and changes nothing. Every successful result carries an ImportResultMeta in its
+ * _meta, which a result with a screenshot keeps when it leaves out structuredContent.
  */
 
-import { deviceScreenSize, getOutline, type Id } from "@sonobe/core";
-import { CAPTURE_TIMEOUT_MS, CaptureFormatError, globalFetcher, ImportPlanError, parseCapture, planImport, resolveCaptureFiles, type ImportPlan } from "@sonobe/import";
+import { deviceScreenSize, findLayer, getOutline, type Id } from "@sonobe/core";
+import { CAPTURE_TIMEOUT_MS, CaptureFormatError, globalFetcher, ImportPlanError, parseCapture, planImport, resolveCaptureFiles, type ImportPlan, type ImportSummary } from "@sonobe/import";
 import type { CallToolResult } from "@modelcontextprotocol/server";
 import { z } from "zod";
 import { plural } from "../format.ts";
 import { requireComponent } from "../graph.ts";
 import { HostError, type CapturedDesign } from "../host.ts";
-import { failure } from "../results.ts";
+import { failure, success } from "../results.ts";
 import { ADDITIVE, type ToolContext } from "../server.ts";
 import { ComponentIdSchema, DocIdSchema, ExpectedRevisionSchema, LabelSchema } from "../schemas.ts";
 import { writeResult } from "./write.ts";
@@ -37,6 +39,8 @@ export interface ImportResultMeta {
 
 /** Most outline lines the result shows for the imported screen. */
 const OUTLINE_LINES = 70;
+/** Most dropped layers ImportResultMeta lists (droppedCount counts them all). */
+const MAX_META_DROPPED = 20;
 
 /**
  * The tool's own limit on a capture: a safety net and a heartbeat longer than the host's deadline
@@ -80,16 +84,20 @@ export function registerImportTools(tc: ToolContext): void {
         'Sources (pass exactly one): "url" renders a live page, such as the person\'s app on its dev server (http://localhost:3000/settings) or a Storybook story; "html" renders a page you write, for designs that live in code Sonobe can\'t run (SwiftUI, React Native, Flutter, a component with a backend) or a new design you\'re vibe coding; "capture" imports a design capture made elsewhere.',
         'For HTML: write one complete static page that reproduces the screen faithfully (real copy, colors, spacing, fonts, icons as inline SVG, and SF Symbols as <svg data-sf-symbol="heart.fill"></svg> sized and colored by CSS font-size, font-weight and color, which Sonobe on a Mac draws as the real symbol), size the layout for "width", and put data-name="Like Button" on elements you\'ll wire, text included, so their layers get those names. <style> and CDN scripts such as Tailwind work.',
         'To iterate on a design, import it again with "replace" set to the earlier screen\'s id: layers found again keep their ids, and the interactions wired to them keep working.',
+        "dryRun plans the import without changing anything; with replace it names the layers that wouldn't be found again.",
         'The screen lands at [0, 0] of the component (or "parent"/"position"), sized to the document\'s device unless width/height say otherwise. Pages taller than the screen get a Content layer with a Scroll patch, and so do scroll containers. Read get_guide("importing") before your first import.',
         "A capture sends progress while it runs and stops after 90 seconds plus waitMs with an error naming the step; cancelling the call before the screen is added changes nothing.",
       ].join(" "),
+      // The sources come last: models write keys in schema order, so the small fields arrive before a
+      // long html, and a preview of the page as it streams knows its name and place.
       input: z.object({
         docId: DocIdSchema.optional(),
         component: ComponentIdSchema.optional(),
-        url: z.string().url().max(8000).optional().describe("An http(s) page to render."),
-        html: z.string().max(1_500_000).optional().describe("A complete HTML page to render."),
-        capture: z.unknown().optional().describe('A design capture ({ "format": "sonobe.design-capture", ... }).'),
         name: z.string().max(80).optional().describe('Screen layer name (default: the page title). "Home", "Checkout".'),
+        replace: z.string().optional().describe("Id of an earlier imported screen to replace, keeping the ids and wiring of layers found again."),
+        parent: z.string().optional().describe("Container layer for the screen (default: the component root)."),
+        position: z.tuple([z.number(), z.number()]).optional().describe("Screen position in its parent (default [0, 0])."),
+        index: z.number().int().optional().describe("Insert position among siblings (default: front)."),
         width: z.number().int().min(100).max(4000).optional().describe("Viewport width in points (default: the device width)."),
         height: z.number().int().min(100).max(8000).optional().describe("Viewport height in points (default: the device height)."),
         selector: z.string().max(500).optional().describe('Import only the first element matching this CSS selector ("#pricing-card").'),
@@ -97,14 +105,14 @@ export function registerImportTools(tc: ToolContext): void {
         waitMs: z.number().int().min(0).max(20_000).optional().describe("Extra milliseconds to wait after the page settles."),
         fullPage: z.boolean().optional().describe("Import the whole page height (default true); false imports only what fits the viewport."),
         colorScheme: z.enum(["light", "dark"]).optional().describe('The page\'s prefers-color-scheme: "dark" imports its dark mode, "light" its light mode.'),
-        parent: z.string().optional().describe("Container layer for the screen (default: the component root)."),
-        position: z.tuple([z.number(), z.number()]).optional().describe("Screen position in its parent (default [0, 0])."),
-        replace: z.string().optional().describe("Id of an earlier imported screen to replace, keeping the ids and wiring of layers found again."),
-        index: z.number().int().optional().describe("Insert position among siblings (default: front)."),
         scrolling: z.boolean().optional().describe("Add Scroll patches so long pages and scroll containers scroll (default true)."),
         screenshot: z.boolean().optional().describe("Also return an image of the page as the browser drew it, to compare with get_screenshot."),
+        dryRun: z.boolean().optional().describe("Plan the import and report what it would add, keep and remove (with replace) without changing anything."),
         label: LabelSchema.optional(),
         expectedRevision: ExpectedRevisionSchema.optional(),
+        url: z.string().url().max(8000).optional().describe("An http(s) page to render."),
+        capture: z.unknown().optional().describe('A design capture ({ "format": "sonobe.design-capture", ... }).'),
+        html: z.string().max(1_500_000).optional().describe("A complete HTML page to render."),
       }),
       // No outputSchema: a result with the page screenshot sends content only, so clients show the image.
       annotations: { ...ADDITIVE, openWorldHint: true },
@@ -211,6 +219,49 @@ export function registerImportTools(tc: ToolContext): void {
         throw err;
       }
       work.throwIfCancelled();
+      const s = plan.summary;
+      const importNotes = [...plan.notes, ...(captured.notes ?? [])];
+      const meta = (screenId: string | null, txnId: string | null): ImportResultMeta => ({
+        docId: snap.docId,
+        dryRun: !!args.dryRun,
+        screenId,
+        screenName: plan.screenName,
+        txnId,
+        replaced: args.replace ?? null,
+        dropped: plan.dropped.slice(0, MAX_META_DROPPED),
+        droppedCount: plan.dropped.length,
+        lostConnections: s.lostConnections ?? 0,
+        kept: s.kept ?? null,
+      });
+      // Clients that read only structuredContent would hide the image, so an image result sends content alone.
+      const withPageImage = (out: CallToolResult): CallToolResult => {
+        if (!captured.screenshot || out.isError) return out;
+        const { structuredContent: _structured, ...rest } = out;
+        return { ...rest, content: [...(out.content ?? []), { type: "text", text: "The page as the browser drew it:" }, { type: "image", data: captured.screenshot.data, mimeType: captured.screenshot.mimeType }] };
+      };
+
+      if (args.dryRun) {
+        let text: string;
+        if (args.replace !== undefined) {
+          const old = findLayer(current.doc.components[component.id]?.layers ?? [], args.replace)?.layer;
+          const drops = plan.dropped.length ? ` and remove ${plan.dropped.length} that ${plan.dropped.length === 1 ? "isn't" : "aren't"} in the new design: ${listNames(plan.dropped.map((l) => l.name))}` : "";
+          const lost = s.lostConnections ? `, and drop ${plural(s.lostConnections, "connection")}` : "";
+          text = `Dry run: importing over “${old?.name ?? args.replace}” (${args.replace}) would keep ${s.kept ?? 0} of its layers${drops}${lost}. Nothing changed.`;
+        } else text = `Dry run: importing would add “${plan.screenName}”: ${summaryLine(s)}. Nothing changed.`;
+        const out = success([text, ...importNotes.map((note) => `Note: ${note}`)].join("\n"), {
+          ok: true,
+          changed: "none",
+          docId: snap.docId,
+          revision: current.revision,
+          dryRun: true,
+          screenName: plan.screenName,
+          summary: s,
+          dropped: plan.dropped.slice(0, MAX_META_DROPPED),
+          importNotes,
+        });
+        return withPageImage({ ...out, _meta: { [IMPORT_META_KEY]: meta(null, null) } });
+      }
+
       if (plan.files.length) {
         if (!host.putAssetFiles)
           return failure({ code: "assets_unavailable", message: "This Sonobe host can't store image files, so the import can't bring images.", hint: "Open the project in the Sonobe app or a headless server over a project folder." });
@@ -226,25 +277,29 @@ export function registerImportTools(tc: ToolContext): void {
         signal: work.signal,
       });
       const screenId = result.idMap[plan.screenRef] ?? result.idMap[`$${plan.screenRef}`];
-      const s = plan.summary;
       const notes: string[] = [];
       if (result.txnId && screenId) {
-        notes.push(`${args.replace ? "Re-imported" : "Imported"} "${plan.screenName}" as layer ${screenId}: ${plural(s.layers, "layer")} (${plural(s.texts, "text")}, ${plural(s.images, "image")}${s.fields ? `, ${plural(s.fields, "text field")}` : ""}${s.fonts ? `, ${plural(s.fonts, "web font")}` : ""})${s.scrolls ? ` and ${plural(s.scrolls, "Scroll patch", "Scroll patches")}` : ""}.`);
+        notes.push(`${args.replace ? "Re-imported" : "Imported"} "${plan.screenName}" as layer ${screenId}: ${summaryLine(s)}.`);
         if (s.kept !== undefined) notes.push(`${plural(s.kept, "layer")} kept their ids, so interactions wired to them still work.`);
         const after = await host.getDocument(snap.docId);
         const lines = screenOutline(getOutline(after.doc, component.id, { detail: "compact", registry: host.registry }), screenId);
         if (lines.length) notes.push("Screen outline:", ...lines);
-        for (const note of plan.notes) notes.push(`Note: ${note}`);
-        for (const note of captured.notes ?? []) notes.push(`Note: ${note}`);
+        for (const note of importNotes) notes.push(`Note: ${note}`);
         notes.push("Next: compare get_screenshot with the source, rename layers people will talk about, then wire interactions (Interaction → Switch → Pop Animation → Transition) onto these layer ids.");
       }
-      const out = writeResult(result, { notes, summarizeCreated: true, data: { ...(screenId ? { screenId } : {}), summary: s, importNotes: [...plan.notes, ...(captured.notes ?? [])] } });
-      if (captured.screenshot && !out.isError) {
-        // Clients that read only structuredContent would hide the image, so an image result sends content alone.
-        const { structuredContent: _structured, ...rest } = out;
-        return { ...rest, content: [...(out.content ?? []), { type: "text", text: "The page as the browser drew it:" }, { type: "image", data: captured.screenshot.data, mimeType: captured.screenshot.mimeType }] };
-      }
-      return out;
+      const out = writeResult(result, { notes, summarizeCreated: true, data: { ...(screenId ? { screenId } : {}), summary: s, importNotes } });
+      // The screen id and txnId also ride in _meta, which a screenshot result keeps.
+      return withPageImage(out.isError ? out : { ...out, _meta: { [IMPORT_META_KEY]: meta(screenId ?? null, result.txnId ?? null) } });
     },
   );
+}
+
+/** "12 layers (3 texts, 1 image) and 1 Scroll patch": what an import adds. */
+function summaryLine(s: ImportSummary): string {
+  return `${plural(s.layers, "layer")} (${plural(s.texts, "text")}, ${plural(s.images, "image")}${s.fields ? `, ${plural(s.fields, "text field")}` : ""}${s.fonts ? `, ${plural(s.fonts, "web font")}` : ""})${s.scrolls ? ` and ${plural(s.scrolls, "Scroll patch", "Scroll patches")}` : ""}`;
+}
+
+/** The first five names, then "and N more". */
+function listNames(names: readonly string[]): string {
+  return `${names.slice(0, 5).join(", ")}${names.length > 5 ? ` and ${names.length - 5} more` : ""}`;
 }
