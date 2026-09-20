@@ -39,12 +39,19 @@ export interface AssistantToolInfo {
   readOnly: boolean;
 }
 
+export interface ToolCallOptions {
+  /** Aborting cancels the call (the server gets notifications/cancelled, and a cancelled call never changes the document). */
+  signal?: AbortSignal;
+  /** Where a long call is ("Downloading images: 7 of 28"), from the tool's progress notifications. */
+  onProgress?(message: string): void;
+}
+
 export interface ToolBridge {
   /** Every tool, in the server's registration order (stable, so prompt caching holds). */
   tools(): Promise<readonly AssistantToolInfo[]>;
   /** The MCP server's instructions. */
   instructions(): Promise<string>;
-  call(name: string, args: Record<string, unknown>): Promise<ToolCallResult>;
+  call(name: string, args: Record<string, unknown>, options?: ToolCallOptions): Promise<ToolCallResult>;
   close(): Promise<void>;
 }
 
@@ -94,9 +101,20 @@ export function createMcpToolBridge(options: McpToolBridgeOptions): ToolBridge {
   return {
     tools: async () => (await connect()).tools,
     instructions: async () => (await connect()).instructions,
-    async call(name, args) {
+    async call(name, args, callOptions = {}) {
       const { client } = await connect();
-      const result = (await client.callTool({ name, arguments: args })) as unknown as ToolCallResult;
+      // Asking for progress sends a progressToken, so long calls (import_design) report steps and
+      // heartbeats, and each one restarts the SDK's 60 s request timeout.
+      const result = (await client.callTool(
+        { name, arguments: args },
+        {
+          ...(callOptions.signal ? { signal: callOptions.signal } : {}),
+          onprogress: (progress) => {
+            if (progress.message) callOptions.onProgress?.(progress.message);
+          },
+          resetTimeoutOnProgress: true,
+        },
+      )) as unknown as ToolCallResult;
       return { content: Array.isArray(result.content) ? result.content : [], ...(result.structuredContent ? { structuredContent: result.structuredContent } : {}), ...(result.isError ? { isError: true } : {}) };
     },
     async close() {
