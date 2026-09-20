@@ -12,7 +12,8 @@
  *    Untitled folder (path_needed), with a path it saves there with no dialog, the draft goes away,
  *    and a path inside that project is refused (inside_project).
  * 4. An unsaved change to that project, then the editor's renderer crashes: the window reloads, and
- *    the draft comes back over its project. Closing the window with Don't Save removes the draft.
+ *    the draft comes back over its project. Save As through the (stubbed) Save panel refuses a folder
+ *    inside the project and reopens next to it. Closing the window with Don't Save removes a draft.
  *
  * SONOBE_SMOKE_VERBOSE=1 shows the app's own log.
  *
@@ -231,10 +232,35 @@ try {
   assert(!back.isError && back.text.includes(`Path: ${target}`) && back.text.includes("unsaved changes"), "the draft comes back over its project", back.text);
   const three = await mcp.call("get_outline", { detail: "compact" });
   assert(three.text.includes("Badge after saving"), "the unsaved change came back", three.text);
-  await mcp.close();
   log("recovered unsaved changes to a saved project after a renderer crash");
 
+  // The person's Save As panel (stubbed): a folder inside the project is refused and the panel reopens next to it.
+  const copy = path.join(temp, "Projects", "Copy.sonobe");
+  await app.evaluate(({ dialog }, choices) => {
+    globalThis.__panels = [];
+    globalThis.__messages = [];
+    dialog.showSaveDialog = async (_win, options) => {
+      globalThis.__panels.push(options.defaultPath);
+      return { canceled: false, filePath: choices.shift() };
+    };
+    dialog.showMessageBox = async (_win, options) => {
+      globalThis.__messages.push(options.message);
+      return { response: 0, checkboxChecked: false };
+    };
+  }, [path.join(target, "Nested.sonobe"), copy]);
+  const savedAs = await app.evaluate(() => globalThis.__sonobeTest.invokeRenderer("document.save", { saveAs: true }, { timeoutMs: 20_000 }));
+  const panels = await app.evaluate(() => ({ panels: globalThis.__panels, messages: globalThis.__messages }));
+  assert(savedAs?.path === copy && existsSync(path.join(copy, "project.json")), "Save As saved to the second choice", savedAs);
+  assert(panels.messages.length === 1 && panels.messages[0].includes("would be inside the project") && panels.panels[1] === path.join(temp, "Projects", "Nested.sonobe"), "the panel refused the nested folder and reopened next to the project", panels);
+  assert(!existsSync(path.join(target, "Nested.sonobe")), "nothing was written inside the project");
+  await poll(() => Object.keys(draftsOnDisk()).length === 0, { message: "saving to remove the draft" });
+  log("the Save panel refused a folder inside a project and reopened next to it");
+
   // Closing the window with Don't Save (the native prompt answered by a stub) removes the draft.
+  const badge = await mcp.call("add_layers", { label: "added another badge", layers: [{ type: "oval", name: "Unsaved again" }] });
+  assert(!badge.isError, "add_layers before closing", badge.text);
+  await poll(() => Object.keys(draftsOnDisk()).length === 1, { message: "a draft of the new edit" });
+  await mcp.close();
   await app.evaluate(({ dialog }) => {
     dialog.showMessageBox = async () => ({ response: 1, checkboxChecked: false });
   });
