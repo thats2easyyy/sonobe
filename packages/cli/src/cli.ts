@@ -442,6 +442,26 @@ async function cmdSim(args: string[], io: CliIo): Promise<number> {
   }
 }
 
+/**
+ * SIGINT and SIGTERM stop the relay like stdin closing does. Claude Code ends stdio servers with
+ * SIGINT, and without this the relay died before its goodbye, so the session stayed listed for 75 s.
+ * A second signal still kills the process.
+ */
+function stopOnSignals(): { signal: AbortSignal; dispose(): void } {
+  const controller = new AbortController();
+  const stop = () => controller.abort();
+  const signals = ["SIGINT", "SIGTERM"] as const;
+  for (const name of signals) process.once(name, stop);
+  return {
+    signal: controller.signal,
+    dispose() {
+      for (const name of signals) process.removeListener(name, stop);
+      // stdin is still open when a signal stopped the relay; let the process exit.
+      if (controller.signal.aborted) process.stdin.destroy();
+    },
+  };
+}
+
 async function cmdMcp(args: string[], io: CliIo): Promise<number> {
   const { values, positionals } = parse("mcp", args, {
     headless: { type: "string" },
@@ -453,17 +473,24 @@ async function cmdMcp(args: string[], io: CliIo): Promise<number> {
       `Unexpected argument "${positionals[0]}". Did you mean --headless "${positionals[0]}"?`,
       "mcp",
     );
-  if (values.headless === undefined)
-    return runRelay({
-      home: sonobeHome(io.env),
-      stdin: io.stdin,
-      stdout: io.stdout,
-      stderr: io.stderr,
-      fetch: io.fetch,
-      env: io.env,
-      cwd: io.cwd,
-      version: VERSION,
-    });
+  if (values.headless === undefined) {
+    const signals = io.stdin === process.stdin ? stopOnSignals() : null;
+    try {
+      return await runRelay({
+        home: sonobeHome(io.env),
+        stdin: io.stdin,
+        stdout: io.stdout,
+        stderr: io.stderr,
+        fetch: io.fetch,
+        env: io.env,
+        cwd: io.cwd,
+        version: VERSION,
+        ...(signals ? { stop: signals.signal } : {}),
+      });
+    } finally {
+      signals?.dispose();
+    }
+  }
   const dir = path.resolve(io.cwd, values.headless);
   const autosave = !values["no-autosave"];
   const host = createHeadlessHost({ autosave });

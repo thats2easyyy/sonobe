@@ -32,6 +32,7 @@ interface RelayTestOptions {
   env?: Record<string, string | undefined>;
   cwd?: string;
   heartbeatMs?: number;
+  stop?: AbortSignal;
 }
 
 /** The relay over a fake app: /health answers, /clients answers `clients`, /mcp POSTs go to `app`. */
@@ -70,6 +71,7 @@ function relay(app: AppHandler, options: RelayTestOptions = {}) {
     version: "0.1.0-test",
     randomId: () => "11111111-aaaa-4bbb-8ccc-000000000001",
     ...(options.heartbeatMs !== undefined ? { heartbeatMs: options.heartbeatMs } : {}),
+    ...(options.stop ? { stop: options.stop } : {}),
   });
   const send = (message: Record<string, unknown>) => stdin.write(`${JSON.stringify({ jsonrpc: "2.0", ...message })}\n`);
   return { stdin, lines, seen, errors, done, send };
@@ -197,6 +199,20 @@ describe("sonobe mcp relay: sessions", () => {
     const hellos = r.seen.filter((s) => s.path === "/clients" && s.method === "POST");
     expect(hellos.length).toBeGreaterThanOrEqual(2);
     expect(hellos.every((h) => h.body?.name === "claude-code" && h.body?.version === "2.2.0" && h.body?.folder === "/Users/me/app")).toBe(true);
+  });
+
+  it("stops and says goodbye when asked to stop, as Claude Code does with SIGINT", async () => {
+    const stop = new AbortController();
+    const record = { aborted: false };
+    const r = relay((message, signal) => (message.method === "tools/call" ? hanging(record)(message, signal) : answering(message, signal)), { stop: stop.signal });
+    r.send(INITIALIZE);
+    await until(() => r.lines.length === 1);
+    r.send(call(7));
+    await until(() => r.seen.some((s) => s.body?.method === "tools/call"));
+    stop.abort();
+    expect(await r.done).toBe(0);
+    expect(record.aborted).toBe(true);
+    expect(r.seen.at(-1)).toMatchObject({ method: "DELETE", path: `/clients/${ID}` });
   });
 
   it("keeps relaying for an older app without /clients, with one line on stderr", async () => {
