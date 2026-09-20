@@ -24,7 +24,9 @@ interface Batch {
 describe("estimateGraphGeometry", () => {
   it("sizes nodes within 3 pt of the DOM for 98% of the fixture, with exact heights", () => {
     const rows: { id: string; dw: number; dh: number }[] = [];
-    for (const file of readdirSync(dir).filter((f) => f.endsWith(".json")).sort()) {
+    for (const file of readdirSync(dir)
+      .filter((f) => f.endsWith(".json"))
+      .sort()) {
       const { doc, sizes } = JSON.parse(readFileSync(path.join(dir, file), "utf8")) as Batch;
       const geometry = estimateGraphGeometry(doc, registry, doc.project.root);
       expect(geometry.measured).toBe(false);
@@ -36,7 +38,10 @@ describe("estimateGraphGeometry", () => {
     }
     expect(rows.length).toBeGreaterThanOrEqual(240);
     const off = rows.filter((r) => Math.abs(r.dw) > 3);
-    expect(off.length / rows.length, `wider than 3 pt off: ${off.map((r) => `${r.id} ${r.dw > 0 ? "+" : ""}${Math.round(r.dw)}`).join(", ")}`).toBeLessThanOrEqual(0.02);
+    expect(
+      off.length / rows.length,
+      `wider than 3 pt off: ${off.map((r) => `${r.id} ${r.dw > 0 ? "+" : ""}${Math.round(r.dw)}`).join(", ")}`,
+    ).toBeLessThanOrEqual(0.02);
     expect(rows.filter((r) => r.dh !== 0).map((r) => `${r.id} ${r.dh}`)).toEqual([]);
   });
 });

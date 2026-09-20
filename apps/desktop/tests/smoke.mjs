@@ -570,6 +570,9 @@ try {
   // The live viewer's runtime problems (viewer.diagnostics RPC), read fresh on every call.
   assert(/Live viewer \(frame [\d,]+, (playing|paused)\)/.test(diagnostics.text) && Array.isArray(diagnostics.structuredContent.runtime?.diagnostics), "get_diagnostics has a Live viewer section", diagnostics.text);
   log(`ISAT chain built (revision ${wired.structuredContent.revision})`);
+  // tidy_graph lays out with ELK inside the bundled main process.
+  const tidied = await mcp.call("tidy_graph", { dryRun: true });
+  assert(!tidied.isError, "tidy_graph", tidied.text);
 
   const reset = await mcp.call("sim_reset", { seed: 1 });
   assert(!reset.isError && typeof reset.structuredContent.simId === "string", "sim_reset", reset.text);

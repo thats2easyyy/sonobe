@@ -21,7 +21,6 @@ import {
   type Op,
   type OpResult,
   type PatchNode,
-  type Registry,
   type SonobeDocument,
 } from "@sonobe/core";
 import {
@@ -301,7 +300,12 @@ function patchNodeOf(p: NewPatch): PatchNode {
  * How big each new patch will draw, live values included: the batch applied to a scratch copy of the
  * document (at a provisional spot) and measured there. Undefined when the batch doesn't apply.
  */
-function previewSizes(doc: SonobeDocument, registry: EngineRegistry, componentId: Id, ops: readonly Op[]): Map<number, { width: number; height: number }> | undefined {
+function previewSizes(
+  doc: SonobeDocument,
+  registry: EngineRegistry,
+  componentId: Id,
+  ops: readonly Op[],
+): Map<number, { width: number; height: number }> | undefined {
   const preview = applyOps(doc, ops, { registry, defaultComponent: componentId });
   if (!preview.ok) return undefined;
   const boxes = estimateGraphGeometry(preview.doc, registry, componentId).nodes;
@@ -321,14 +325,23 @@ function previewSizes(doc: SonobeDocument, registry: EngineRegistry, componentId
  * widest patch draws in the editor, and the whole block in free space below the graph, clear of
  * patches, layer nodes and comment frames.
  */
-function placeNewPatches(doc: SonobeDocument, registry: EngineRegistry, componentId: Id, patches: readonly NewPatch[], depthOf: (index: number) => number, drawn?: Map<number, { width: number; height: number }>): Map<number, { x: number; y: number }> {
+function placeNewPatches(
+  doc: SonobeDocument,
+  registry: EngineRegistry,
+  componentId: Id,
+  patches: readonly NewPatch[],
+  depthOf: (index: number) => number,
+  drawn?: Map<number, { width: number; height: number }>,
+): Map<number, { x: number; y: number }> {
   const out = new Map<number, { x: number; y: number }>();
   const component = doc.components[componentId];
   const pending = patches.map((p, i) => ({ p, i })).filter(({ p }) => !p.ui);
   if (!component || !pending.length) return out;
-  const size = (p: NewPatch, i: number) => drawn?.get(i) ?? estimatePatchSize(doc, registry, patchNodeOf(p), { component: componentId });
+  const size = (p: NewPatch, i: number) =>
+    drawn?.get(i) ?? estimatePatchSize(doc, registry, patchNodeOf(p), { component: componentId });
   const columns = new Map<number, { i: number; width: number; height: number }[]>();
-  for (const { p, i } of pending) columns.set(depthOf(i), [...(columns.get(depthOf(i)) ?? []), { i, ...size(p, i) }]);
+  for (const { p, i } of pending)
+    columns.set(depthOf(i), [...(columns.get(depthOf(i)) ?? []), { i, ...size(p, i) }]);
   const relative = new Map<number, { x: number; y: number }>();
   let x = 0;
   let height = 0;
@@ -342,10 +355,18 @@ function placeNewPatches(doc: SonobeDocument, registry: EngineRegistry, componen
     x += Math.max(...columns.get(depth)!.map((e) => e.width)) + COLUMN_GAP;
   }
   const obstacles = documentObstacles(doc, component, registry);
-  const nodes = [...obstacles.nodes, ...patches.flatMap((p, i) => (p.ui ? [{ ...p.ui, ...size(p, i) }] : []))];
+  const nodes = [
+    ...obstacles.nodes,
+    ...patches.flatMap((p, i) => (p.ui ? [{ ...p.ui, ...size(p, i) }] : [])),
+  ];
   const all = [...nodes, ...(obstacles.comments ?? [])];
-  const preferred = all.length ? { x: Math.min(...all.map((r) => r.x)), y: Math.max(...all.map((r) => r.y + r.height)) + 40 } : { x: 40, y: 40 };
-  const at = findFreePosition({ width: x - COLUMN_GAP, height }, preferred, { nodes, comments: obstacles.comments ?? [] });
+  const preferred = all.length
+    ? { x: Math.min(...all.map((r) => r.x)), y: Math.max(...all.map((r) => r.y + r.height)) + 40 }
+    : { x: 40, y: 40 };
+  const at = findFreePosition({ width: x - COLUMN_GAP, height }, preferred, {
+    nodes,
+    comments: obstacles.comments ?? [],
+  });
   for (const [i, r] of relative) out.set(i, { x: at.x + r.x, y: at.y + r.y });
   return out;
 }
@@ -363,7 +384,11 @@ function waitingNodeNotes(applied: readonly Op[], doc: SonobeDocument): string[]
       if (value && layerId && !shown.has(layerId)) waiting.push(key);
     }
   }
-  return waiting.length ? [`Saved positions for ${capped(waiting)}; they apply once a cable drives or reads those layers, which gives them a node in the graph.`] : [];
+  return waiting.length
+    ? [
+        `Saved positions for ${capped(waiting)}; they apply once a cable drives or reads those layers, which gives them a node in the graph.`,
+      ]
+    : [];
 }
 
 /** A comment for messages: its id and the first line of its text. */
@@ -377,19 +402,41 @@ function tidyRequest(
   doc: SonobeDocument,
   registry: EngineRegistry,
   c: Component,
-  args: { ids?: string[] | undefined; frames?: string[] | undefined; frameMode?: "keep" | "arrange" | undefined; direction?: "LR" | "TB" | undefined },
+  args: {
+    ids?: string[] | undefined;
+    frames?: string[] | undefined;
+    frameMode?: "keep" | "arrange" | undefined;
+    direction?: "LR" | "TB" | undefined;
+  },
 ): TidyRequest {
   if (args.ids?.length && args.frames?.length)
     throw new HostError("invalid_arguments", "Pass ids or frames, not both.", {
       hint: "frames tidies everything inside those comment frames; ids tidies just those nodes, each within its own frame.",
     });
+  if (args.frameMode === "arrange" && (args.ids?.length || args.frames?.length))
+    throw new HostError(
+      "invalid_arguments",
+      'frameMode "arrange" lays out the whole graph, frames included.',
+      {
+        hint: "Leave out ids and frames to arrange everything, or leave out frameMode to tidy just those.",
+      },
+    );
   for (const id of args.frames ?? [])
     if (!c.comments.some((m) => m.id === id))
-      throw new HostError("unknown_frame", `There's no comment "${id}" in ${c.id}.${didYouMeanText(didYouMean(id, c.comments.map((m) => m.id)))}`, {
-        hint: c.comments.length
-          ? `Comments here: ${c.comments.map(commentName).join(", ")}.`
-          : `${c.id} has no comments. Frame a section with addComment { "comment": { "text": "Places", "rect": [x, y, width, height] } }.`,
-      });
+      throw new HostError(
+        "unknown_frame",
+        `There's no comment "${id}" in ${c.id}.${didYouMeanText(
+          didYouMean(
+            id,
+            c.comments.map((m) => m.id),
+          ),
+        )}`,
+        {
+          hint: c.comments.length
+            ? `Comments here: ${c.comments.map(commentName).join(", ")}.`
+            : `${c.id} has no comments. Frame a section with addComment { "comment": { "text": "Places", "rect": [x, y, width, height] } }.`,
+        },
+      );
   const geometry = estimateGraphGeometry(doc, registry, c.id);
   const model = deriveGraph({ doc, componentId: c.id, registry });
   const nodes: TidyNode[] = [];
@@ -399,21 +446,47 @@ function tidyRequest(
     const data = node.data;
     const shape = { collapsed: data.kind === "patch" && data.collapsed };
     const ports = [
-      ...data.inputs.map((p, i) => ({ id: p.handleId, side: "in" as const, y: portCenterY(shape, i) })),
-      ...data.outputs.map((p, i) => ({ id: p.handleId, side: "out" as const, y: portCenterY(shape, i) })),
+      ...data.inputs.map((p, i) => ({
+        id: p.handleId,
+        side: "in" as const,
+        y: portCenterY(shape, i),
+      })),
+      ...data.outputs.map((p, i) => ({
+        id: p.handleId,
+        side: "out" as const,
+        y: portCenterY(shape, i),
+      })),
     ];
     nodes.push({ id: node.id, ...box, ports });
   }
   for (const id of args.ids ?? [])
     if (!nodes.some((n) => n.id === id))
-      throw new HostError("unknown_node", `"${id}" isn't a node in the graph of ${c.id}.${didYouMeanText(didYouMean(id, nodes.map((n) => n.id)))}`, {
-        hint: 'Nodes are patch ids, "@layerId" for a layer that a cable drives or reads, and "$in" / "$out" for the component\'s published inputs and outputs.',
-      });
+      throw new HostError(
+        "unknown_node",
+        `"${id}" isn't a node in the graph of ${c.id}.${didYouMeanText(
+          didYouMean(
+            id,
+            nodes.map((n) => n.id),
+          ),
+        )}`,
+        {
+          hint: 'Nodes are patch ids, "@layerId" for a layer that a cable drives or reads, and "$in" / "$out" for the component\'s published inputs and outputs.',
+        },
+      );
   return {
     nodes,
-    edges: model.edges.map((e) => ({ source: e.source, sourceHandle: e.sourceHandle, target: e.target, targetHandle: e.targetHandle })),
+    edges: model.edges.map((e) => ({
+      source: e.source,
+      sourceHandle: e.sourceHandle,
+      target: e.target,
+      targetHandle: e.targetHandle,
+    })),
     frames: [...geometry.frames].map(([id, r]) => ({ id, ...r })),
-    scope: args.frames?.length ? { kind: "frames", ids: args.frames } : args.ids?.length ? { kind: "nodes", ids: args.ids } : { kind: "all" },
+    scope: args.frames?.length
+      ? { kind: "frames", ids: args.frames }
+      : args.ids?.length
+        ? { kind: "nodes", ids: args.ids }
+        : { kind: "all" },
     ...(args.frameMode ? { frameMode: args.frameMode } : {}),
     ...(args.direction ? { direction: args.direction } : {}),
   };
@@ -422,7 +495,9 @@ function tidyRequest(
 /** Node pairs whose boxes overlap: "a × b". */
 function overlappingPairs(nodes: readonly TidyNode[]): string[] {
   const out: string[] = [];
-  for (let i = 0; i < nodes.length; i++) for (let j = i + 1; j < nodes.length; j++) if (rectsOverlap(nodes[i]!, nodes[j]!)) out.push(`${nodes[i]!.id} × ${nodes[j]!.id}`);
+  for (let i = 0; i < nodes.length; i++)
+    for (let j = i + 1; j < nodes.length; j++)
+      if (rectsOverlap(nodes[i]!, nodes[j]!)) out.push(`${nodes[i]!.id} × ${nodes[j]!.id}`);
   return out;
 }
 
@@ -437,11 +512,16 @@ function describeTidy(c: Component, plan: TidyPlan): string[] {
   for (const [id, r] of plan.frames) {
     const before = c.comments.find((m) => m.id === id)?.rect;
     if (!before) continue;
-    if (r.width !== before[2] || r.height !== before[3]) frames.push(`${name(id)} ${r.width * r.height >= before[2] * before[3] ? "grew" : "shrank"} to ${r.width}×${r.height}`);
+    if (r.width !== before[2] || r.height !== before[3])
+      frames.push(
+        `${name(id)} ${r.width * r.height >= before[2] * before[3] ? "grew" : "shrank"} to ${r.width}×${r.height}`,
+      );
     else frames.push(`${name(id)} moved to ${r.x},${r.y}`);
   }
   if (frames.length) lines.push(`Frames: ${frames.join("; ")}.`);
-  const pushes = plan.pushed.map((p) => `${name(p.id)} ${p.dx ? `right ${p.dx}` : `down ${p.dy}`} pt, clear of ${name(p.by)}`);
+  const pushes = plan.pushed.map(
+    (p) => `${name(p.id)} ${p.dx ? `right ${p.dx}` : `down ${p.dy}`} pt, clear of ${name(p.by)}`,
+  );
   if (pushes.length) lines.push(`Pushed apart: ${pushes.join("; ")}.`);
   return lines;
 }
@@ -591,7 +671,7 @@ export function registerWriteTools(tc: ToolContext): void {
     {
       title: "Add patches",
       description:
-        'Add patches and wire them in one atomic batch. Give each a "ref" and a name describing its effect; inputs take literals or { "link": "$ref.port" | "patchId.port" | "@layerId.prop" } and { "layer": "layerId" }, and may name patches later in the list (loops too). connections run after every patch exists, e.g. { "from": "$grow.output", "to": "@card.scale" }. Patches without ui are placed below the existing graph.',
+        'Add patches and wire them in one atomic batch. Give each a "ref" and a name describing its effect; inputs take literals or { "link": "$ref.port" | "patchId.port" | "@layerId.prop" } and { "layer": "layerId" }, and may name patches later in the list (loops too). connections run after every patch exists, e.g. { "from": "$grow.output", "to": "@card.scale" }. Patches without ui go in free space below the graph, in columns as wide as the editor draws them, clear of comment frames.',
       input: z.object({
         docId: DocIdSchema.optional(),
         component: ComponentIdSchema.optional(),
@@ -639,14 +719,24 @@ export function registerWriteTools(tc: ToolContext): void {
       };
       const patches = args.patches as unknown as NewPatch[];
       const ops: Op[] = patches.map((p) =>
-        withComponent({ op: "addPatch" as const, patch: { ...p, ui: p.ui ?? { x: 0, y: 0 } } }, args.component),
+        withComponent(
+          { op: "addPatch" as const, patch: { ...p, ui: p.ui ?? { x: 0, y: 0 } } },
+          args.component,
+        ),
       );
       for (const cn of args.connections ?? [])
         ops.push(
           withComponent({ op: "connect" as const, from: cn.from, to: cn.to }, args.component),
         );
       // Sizes as the batch will draw (live values too), then the real spots.
-      const placed = placeNewPatches(snap.doc, host.registry, c.id, patches, depthOf, previewSizes(snap.doc, host.registry, c.id, ops));
+      const placed = placeNewPatches(
+        snap.doc,
+        host.registry,
+        c.id,
+        patches,
+        depthOf,
+        previewSizes(snap.doc, host.registry, c.id, ops),
+      );
       patches.forEach((p, i) => {
         if (!p.ui) (ops[i] as Extract<Op, { op: "addPatch" }>).patch.ui = placed.get(i)!;
       });
@@ -979,7 +1069,7 @@ export function registerWriteTools(tc: ToolContext): void {
     {
       title: "Tidy graph",
       description:
-        'Lay the graph out in left-to-right columns by dataflow, as the editor\'s Tidy Up does. Comment frames are sections: each frame\'s nodes are laid out inside it, the frame is refit around them, and frames that would overlap are pushed apart, so sections keep their place. frames: tidy only inside those comments. ids: only those nodes, each kept in its own frame. frameMode "arrange" also lays out the frames as blocks. Layer and interface nodes move too. Changes editor positions only; dryRun previews. Sizes are estimated as the editor draws nodes.',
+        "Lay the graph out in left-to-right columns by dataflow, as the editor's Tidy Up does. Comment frames are sections: each frame's nodes are laid out inside it, the frame is refit around them, and frames that would overlap are pushed apart, so sections keep their place. frames: tidy only inside those comments. ids: only those nodes, each kept in its own frame. frameMode \"arrange\" also lays out the frames as blocks (whole graph only). Layer and interface nodes move too. Changes editor positions only; dryRun previews. Sizes are estimated as the editor draws nodes.",
       input: z.object({
         docId: DocIdSchema.optional(),
         component: ComponentIdSchema.optional(),
@@ -996,7 +1086,9 @@ export function registerWriteTools(tc: ToolContext): void {
         frameMode: z
           .enum(["keep", "arrange"])
           .optional()
-          .describe("keep (default): frames stay put, refit and pushed apart. arrange: frames move as blocks too."),
+          .describe(
+            "keep (default): frames stay put, refit and pushed apart. arrange: frames move as blocks too.",
+          ),
         direction: z.enum(["LR", "TB"]).optional().describe("Default LR."),
         dryRun: z.boolean().optional().describe("Report what would move, and change nothing."),
         label: LabelSchema.optional(),
@@ -1025,7 +1117,11 @@ export function registerWriteTools(tc: ToolContext): void {
       ];
       return writeResult(await apply(ctx, ops, { ...args, label: args.label ?? "tidied graph" }), {
         notes,
-        data: { moved: [...plan.nodes.keys()], frames: Object.fromEntries(plan.frames), pushed: plan.pushed },
+        data: {
+          moved: [...plan.nodes.keys()],
+          frames: Object.fromEntries(plan.frames),
+          pushed: plan.pushed,
+        },
       });
     },
   );
