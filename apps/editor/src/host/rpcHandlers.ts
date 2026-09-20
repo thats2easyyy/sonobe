@@ -2,12 +2,14 @@
  * RPC handlers the desktop MCP bridge calls to reach the live document: document info, read, apply
  * (with dry runs and optimistic concurrency), save, open, new; selection; viewer bounds and the
  * panels' registered bounds for screenshots; the patch editor's node geometry; the live prototype's runtime diagnostics and restart;
- * deterministic simulations; history; agent presence; and reveal. Errors are returned through
- * `rpc.fail(code, message, data)` because the context bridge strips Error properties.
+ * deterministic simulations; history; agent presence; reveal; and the canvas's preview of a design
+ * an MCP client is writing. Errors are returned through `rpc.fail(code, message, data)` because the
+ * context bridge strips Error properties.
  */
 
 import { allLayerIds, DEVICE_PRESETS, findComponentInstances, getOutline, listComponentIds, serializeDocument, type Diagnostic, type Id, type OutlineDetail, type SonobeDocument } from "@sonobe/core";
 import { isTraceUnavailable, type InputEvent, type TraceInput } from "@sonobe/engine";
+import { applyPreviewUpdate } from "../panels/design/designStore.ts";
 import { issuesToDiagnostics } from "../runtime/runtimeHost.ts";
 import type { Simulation } from "../runtime/simulation.ts";
 import { staleStateDiagnostic } from "../runtime/staleState.ts";
@@ -19,7 +21,7 @@ import { diagnosticsFor } from "../state/registry.ts";
 import { saveDocumentInteractively } from "../state/saveFlow.ts";
 import { currentComponentId, itemKindOf } from "../state/selection.ts";
 import { DOCUMENT_TEMPLATES, type DocumentTemplate, type EditorSession } from "../state/session.ts";
-import type { RpcRegistrar } from "./types.ts";
+import type { DesignPreviewUpdate, RpcRegistrar } from "./types.ts";
 
 export const RPC_METHODS = [
   "document.info",
@@ -46,6 +48,7 @@ export const RPC_METHODS = [
   "presence.list",
   "reveal",
   "assets.put",
+  "design.preview",
 ] as const;
 
 export type RpcMethod = (typeof RPC_METHODS)[number];
@@ -148,6 +151,74 @@ function traceEvents(value: unknown): TraceInput[] {
     }
     return eventList([entry], `events[${i}]`)[0]!;
   });
+}
+
+/** The most html a design.preview draft carries: preview_design's limit (its html_too_large error). */
+const PREVIEW_HTML_CHARS = 1_500_000;
+const PREVIEW_STATUSES: ReadonlySet<string> = new Set<DesignPreviewUpdate["status"]>(["writing", "adding", "cleared"]);
+const PREVIEW_ID_CHARS = 200;
+const PREVIEW_NAME_CHARS = 120;
+const CLIENT_LABEL_CHARS = 64;
+const PREVIEW_EXTENT = 100_000;
+
+function cappedString(p: Params, key: string, max: number): string | null {
+  const v = optString(p, key);
+  if (v === undefined) return null;
+  if (v.length > max) throw invalid(`"${key}" can be at most ${max.toLocaleString("en-US")} characters.`);
+  return v;
+}
+
+function previewSize(p: Params, key: string): number | null {
+  const v = optNumber(p, key);
+  if (v === undefined) return null;
+  if (v <= 0 || v > PREVIEW_EXTENT) throw invalid(`"${key}" must be a size in points, above 0 and at most ${PREVIEW_EXTENT}.`);
+  return v;
+}
+
+function previewPosition(p: Params): [number, number] | null {
+  const v = p.position;
+  if (v === undefined || v === null) return null;
+  if (!Array.isArray(v) || v.length !== 2 || !v.every((n) => typeof n === "number" && Number.isFinite(n) && Math.abs(n) <= PREVIEW_EXTENT)) throw invalid('"position" must be two numbers, like [0, 0].');
+  return [v[0] as number, v[1] as number];
+}
+
+/** design.preview's params, checked: they come from main, where an MCP client wrote them. */
+function designPreviewUpdate(p: Params): DesignPreviewUpdate {
+  const status = p.status;
+  if (typeof status !== "string" || !PREVIEW_STATUSES.has(status)) throw invalid('"status" must be "writing", "adding" or "cleared".');
+  const docId = cappedString(p, "docId", PREVIEW_ID_CHARS);
+  const key = cappedString(p, "key", PREVIEW_ID_CHARS);
+  if (!docId || !key) throw invalid('"docId" and "key" are required: the document the draft is for, and the session writing it.');
+  const revision = optNumber(p, "revision");
+  if (revision === undefined || !Number.isInteger(revision) || revision < 0) throw invalid('"revision" is required: how many times the draft was updated, a whole number.');
+  const html = cappedString(p, "html", PREVIEW_HTML_CHARS);
+  if (html === null && status !== "cleared") throw invalid('"html" is required while the draft is written or added: the whole page so far.');
+  const client = workClient(p);
+  return {
+    docId,
+    key,
+    author: normalizeAuthor(p.author, CLAUDE_AUTHOR),
+    ...(client ? { client: { ...client, label: client.label.slice(0, CLIENT_LABEL_CHARS) } } : {}),
+    name: cappedString(p, "name", PREVIEW_NAME_CHARS),
+    component: cappedString(p, "component", PREVIEW_ID_CHARS),
+    replace: cappedString(p, "replace", PREVIEW_ID_CHARS),
+    width: previewSize(p, "width"),
+    height: previewSize(p, "height"),
+    position: previewPosition(p),
+    html: status === "cleared" ? null : html,
+    status: status as DesignPreviewUpdate["status"],
+    revision,
+  };
+}
+
+/**
+ * design.preview: draw an MCP client's preview_design draft over the artboard (panels/design). It
+ * changes nothing, so it isn't in AGENT_WRITE_METHODS and Read only still shows it; the import that
+ * follows goes through document.apply. Throws a teaching error for malformed params. `applied` is
+ * false when the update changed nothing (older than what's shown, or nothing left to clear).
+ */
+export function handleDesignPreview(session: EditorSession, params: unknown): { applied: boolean } {
+  return { applied: applyPreviewUpdate(session, designPreviewUpdate(asParams(params))) };
 }
 
 /** Component path from the root to `componentId`, following instances. */
@@ -577,6 +648,8 @@ export function registerRpcHandlers(session: EditorSession, options: RpcHandlerO
       if (revealed.length && inView) session.selection.getState().requestReveal(componentId, revealed);
       return { component: componentId, componentPath: session.selection.getState().componentPath, revealed, missing, focused: focus && revealed.length > 0, shown, inView, opened: shown !== before };
     },
+
+    "design.preview": (p) => handleDesignPreview(session, p),
   };
 
   const wrap = (fn: (p: Params) => unknown) => async (params: unknown) => {
