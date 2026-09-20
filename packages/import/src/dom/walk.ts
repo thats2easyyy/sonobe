@@ -15,7 +15,10 @@
  * - position: fixed elements move to the screen level, and a page taller than the viewport goes into
  *   a "Content" frame marked as scrolling, so the importer can make it scroll.
  * - Names come from data-name, framework component names (React and Vue dev builds), aria-label,
- *   ids and test ids, icon classes, and semantic tags.
+ *   ids and test ids, icon classes, and semantic tags. Text takes the name a person gave the element
+ *   holding it (data-name, aria-label, ids) over its words, but not a component, role or tag name,
+ *   which every instance shares. A named inline element (<span data-name>) becomes a text layer of its
+ *   own, and <body data-name> names the screen.
  */
 
 import type { Box, CaptureBorder, CaptureFont, CaptureFrame, CaptureImage, CaptureImageSource, CaptureInput, CaptureNode, CaptureText, CaptureTextStyle, DesignCapture, ImageFit } from "../capture.ts";
@@ -156,9 +159,32 @@ function createColorResolver(): ColorFn {
   };
 }
 
+/**
+ * Where a name came from. "explicit", "aria" and "id" name this element (a person chose them for it);
+ * "component", "role" and "semantic" name its kind, which every instance shares.
+ */
+type NameKind = "explicit" | "component" | "aria" | "icon" | "id" | "role" | "semantic" | "generic";
+
 interface NameInfo {
   name: string;
   rank: number;
+  kind: NameKind;
+}
+
+/**
+ * Whether an element's name beats the words of the text it holds. Names people gave this element do
+ * (data-name, aria-label, a test id or id); names of its kind don't (a component type every card
+ * shares, a role, a tag), because the words tell instances apart. An icon class names a glyph ("♥").
+ */
+function namesText(kind: NameKind | undefined, text: string): boolean {
+  if (kind === "explicit" || kind === "aria" || kind === "id") return true;
+  return kind === "icon" && !/[\p{L}\p{N}]/u.test(text);
+}
+
+/** data-sonobe-name, data-name or data-layer. */
+function explicitName(el: Element): string | undefined {
+  const explicit = el.getAttribute("data-sonobe-name") ?? el.getAttribute("data-name") ?? el.getAttribute("data-layer");
+  return explicit?.trim() ? explicit.trim().slice(0, 80) : undefined;
 }
 
 /** Nearest framework component whose root element is `el` (React and Vue dev builds keep names). */
@@ -220,6 +246,8 @@ interface Counters {
   missingImages: number;
   unsupportedBackgrounds: number;
   unsupportedControls: number;
+  /** Names on inline elements inside a paragraph that became one text layer, so no layer carries them. */
+  unplacedNames: Set<string>;
 }
 
 class Walker {
@@ -229,10 +257,17 @@ class Walker {
   readonly imageKeys = new Map<string, string>();
   readonly pending: Promise<void>[] = [];
   readonly fixed: CaptureNode[] = [];
-  readonly counters: Counters = { flattenedText: 0, approximateTransforms: 0, placeholders: new Set(), missingImages: 0, unsupportedBackgrounds: 0, unsupportedControls: 0 };
+  readonly counters: Counters = { flattenedText: 0, approximateTransforms: 0, placeholders: new Set(), missingImages: 0, unsupportedBackgrounds: 0, unsupportedControls: 0, unplacedNames: new Set() };
   readonly paintKeys = new WeakMap<CaptureNode, number>();
   readonly plainInline = new WeakMap<Element, boolean>();
   readonly gradientText = new WeakMap<Element, string>();
+  /** Where each frame's name came from, so finish() knows whether it beats the words of a text it wraps. */
+  readonly nameKinds = new WeakMap<CaptureNode, NameKind>();
+  /** Plain inline elements whose own name beats their words, or null (see namedInline). */
+  readonly inlineNames = new WeakMap<Element, NameInfo | null>();
+  /** Run keys for inline elements with data-name (see paragraph()). */
+  readonly runIds = new WeakMap<Element, number>();
+  runCount = 0;
   /** Font families named by captured text, lowercased. */
   readonly families = new Set<string>();
   origin: [number, number] = [0, 0];
@@ -312,7 +347,15 @@ class Walker {
         children = [content, ...this.fixed];
       } else children = [...pageNodes, ...this.fixed];
       const title = document.title.trim();
-      root = { kind: "frame", name: o.name ?? (title ? title.slice(0, 60) : "Screen"), nameRank: 5, box: [0, 0, round2(vw), round2(viewportHeight)], fill: canvasPaint.fill ?? "#FFFFFFFF", clip: true, keep: true, children };
+      const pageName = (body ? explicitName(body) : undefined) ?? explicitName(docEl);
+      root = { kind: "frame", name: o.name ?? pageName ?? (title ? title.slice(0, 60) : "Screen"), nameRank: 5, box: [0, 0, round2(vw), round2(viewportHeight)], fill: canvasPaint.fill ?? "#FFFFFFFF", clip: true, keep: true, children };
+      // A <body> that stays a layer (it paints over the page's background) doesn't repeat the screen's name.
+      for (const node of pageNodes) {
+        if (node.name === root.name && node.source?.tag === "body") {
+          node.name = SEMANTIC_NAMES.body;
+          node.nameRank = 1;
+        }
+      }
       if (!scrolls) {
         if (canvasPaint.gradients) root.gradients = canvasPaint.gradients;
         if (canvasPaint.backgroundImage) root.backgroundImage = canvasPaint.backgroundImage;
@@ -400,6 +443,11 @@ class Walker {
     if (c.missingImages) out.push(`${c.missingImages} image${c.missingImages === 1 ? " hadn't" : "s hadn't"} loaded, so ${c.missingImages === 1 ? "it's" : "they're"} gray placeholders.`);
     if (c.unsupportedBackgrounds) out.push(`${c.unsupportedBackgrounds} background${c.unsupportedBackgrounds === 1 ? "" : "s"} used CSS Sonobe can't draw (image-set, cross-fade...) and ${c.unsupportedBackgrounds === 1 ? "was" : "were"} left out.`);
     if (c.unsupportedControls) out.push(`${c.unsupportedControls} form control${c.unsupportedControls === 1 ? "" : "s"} (sliders, date or file pickers) became plain boxes.`);
+    if (c.unplacedNames.size) {
+      const one = c.unplacedNames.size === 1;
+      const names = [...c.unplacedNames].slice(0, 5).map((n) => `“${n}”`).join(", ");
+      out.push(`${names} ${one ? "names" : "name"} part of a long paragraph that became one text layer, so no layer has ${one ? "that name" : "those names"}. Split the paragraph, or make ${one ? "that element" : "those elements"} display: inline-block.`);
+    }
     if (c.placeholders.size) out.push(`Placeholders stand in for ${[...c.placeholders].join(", ")}.`);
     return out;
   }
@@ -524,6 +572,7 @@ class Walker {
     const name = this.nameOf(el, tag);
     frame.name = name.name;
     frame.nameRank = name.rank;
+    this.nameKinds.set(frame, name.kind);
     const source = this.sourceOf(el, tag);
     if (source) frame.source = source;
     const opacity = Number(cs.opacity);
@@ -624,28 +673,63 @@ class Walker {
   }
 
   nameOf(el: Element, tag: string): NameInfo {
-    const explicit = el.getAttribute("data-sonobe-name") ?? el.getAttribute("data-name") ?? el.getAttribute("data-layer");
-    if (explicit?.trim()) return { name: explicit.trim().slice(0, 80), rank: 5 };
+    const explicit = explicitName(el);
+    if (explicit) return { name: explicit, rank: 5, kind: "explicit" };
     const component = componentName(el);
-    if (component) return { name: titleize(component), rank: 4 };
+    if (component) return { name: titleize(component), rank: 4, kind: "component" };
     const aria = el.getAttribute("aria-label") ?? (tag === "svg" || tag === "img" ? (el.getAttribute("title") ?? el.querySelector?.(":scope > title")?.textContent) : null);
     if (aria?.trim()) {
       const role = ROLE_NAMES[el.getAttribute("role") ?? ""] ?? SEMANTIC_NAMES[tag];
       const label = aria.trim().slice(0, 60);
-      return { name: role && (tag === "button" || tag === "a" || el.hasAttribute("role")) && !label.toLowerCase().includes(role.toLowerCase()) ? `${label} ${role}` : label, rank: 3 };
+      return { name: role && (tag === "button" || tag === "a" || el.hasAttribute("role")) && !label.toLowerCase().includes(role.toLowerCase()) ? `${label} ${role}` : label, rank: 3, kind: "aria" };
     }
     const icon = iconName(el);
-    if (icon) return { name: icon, rank: 2 };
+    if (icon) return { name: icon, rank: 2, kind: "icon" };
     const testId = el.getAttribute("data-testid") ?? el.getAttribute("data-test-id") ?? el.getAttribute("data-cy");
-    if (testId && readableId(testId)) return { name: titleize(testId), rank: 2 };
-    if (el.id && readableId(el.id)) return { name: titleize(el.id), rank: 2 };
+    if (testId && readableId(testId)) return { name: titleize(testId), rank: 2, kind: "id" };
+    if (el.id && readableId(el.id)) return { name: titleize(el.id), rank: 2, kind: "id" };
     const semantic = ROLE_NAMES[el.getAttribute("role") ?? ""] ?? SEMANTIC_NAMES[tag];
     if (semantic && (tag === "button" || tag === "a" || el.getAttribute("role") === "button" || el.getAttribute("role") === "tab")) {
       const text = collapseWhitespace(el.textContent ?? "", "normal").trim();
-      if (text && text.length <= 32) return { name: `${text} ${semantic}`, rank: 2 };
+      if (text && text.length <= 32) return { name: `${text} ${semantic}`, rank: 2, kind: "role" };
     }
-    if (semantic) return { name: semantic, rank: 1 };
-    return { name: "Group", rank: 0 };
+    if (semantic) return { name: semantic, rank: 1, kind: "semantic" };
+    return { name: "Group", rank: 0, kind: "generic" };
+  }
+
+  /**
+   * The nearest plain inline element from `owner` up to (not including) `block` whose own name beats
+   * its words (<span data-name="City">, <b aria-label="Price">). With `explicitOnly`, only data-name and
+   * friends count: those ask for a layer, so their text becomes a run of its own (see paragraph()).
+   */
+  namedInline(owner: Element, block: Element, explicitOnly = false): { el: Element; info: NameInfo } | null {
+    for (let el: Element | null = owner; el && el !== block; el = el.parentElement) {
+      let info = this.inlineNames.get(el);
+      if (info === undefined) {
+        const candidate = this.nameOf(el, el.localName);
+        info = namesText(candidate.kind, el.textContent ?? "") ? candidate : null;
+        this.inlineNames.set(el, info);
+      }
+      if (info && (!explicitOnly || info.kind === "explicit")) return { el, info };
+    }
+    return null;
+  }
+
+  /**
+   * Name a text layer after the named inline element its text came from. An element with data-name
+   * always does, since its text is a run of its own; any other strong name only when the element holds
+   * all of this text (<b id="price-now">$4.99</b> <b>each</b> stays "$4.99 each").
+   */
+  nameFromInline(node: CaptureText, owner: Element, block: Element): CaptureText {
+    const named = this.namedInline(owner, block);
+    if (named && (named.info.kind === "explicit" || holdsAll(named.el, node.text))) this.nameAfter(node, named.el, named.info);
+    return node;
+  }
+
+  nameAfter(node: CaptureText, el: Element, info: NameInfo): void {
+    node.name = info.name;
+    node.nameRank = info.rank;
+    node.source = this.sourceOf(el, el.localName);
   }
 
   /** CSS painting order among siblings: negative z-index, in flow, positioned, positive z-index. */
@@ -711,10 +795,12 @@ class Walker {
     return frame;
   }
 
-  /** Drop paintless wrappers, handing their identity to the child they wrap. */
+  /**
+   * Drop paintless wrappers, handing their identity to the child they wrap. Text takes the wrapper's name
+   * only when it's a name a person gave that element (see namesText).
+   */
   finish(frame: CaptureFrame): CaptureNode[] {
-    const paints = !!(frame.fill || frame.gradients?.length || frame.backgroundImage || frame.border || frame.shadows?.length || frame.backgroundBlur || frame.blur || frame.blendMode);
-    if (paints || frame.keep || frame.scroll) return [frame];
+    if (paints(frame) || frame.keep || frame.scroll) return [frame];
     const children = frame.children;
     // A plain <body> or <html> passes its children up: the screen already is the page.
     if ((frame.source?.tag === "body" || frame.source?.tag === "html") && !frame.clip && frame.opacity === undefined && frame.rotation === undefined && frame.scale === undefined) return children;
@@ -726,7 +812,7 @@ class Walker {
       const inside = contains(frame.box, child.box);
       if ((!frame.clip || inside) && !transformed && !(frame.interactive && !sameBox(frame.box, child.box) && child.kind !== "frame")) {
         if (faded) child.opacity = round2((child.opacity ?? 1) * frame.opacity!);
-        if ((frame.nameRank ?? 0) > (child.nameRank ?? 0) && child.kind !== "text") {
+        if ((frame.nameRank ?? 0) > (child.nameRank ?? 0) && (child.kind !== "text" || namesText(this.nameKinds.get(frame), child.text))) {
           child.name = frame.name;
           child.nameRank = frame.nameRank;
           if (frame.source) child.source = { ...child.source, ...frame.source };
@@ -873,11 +959,24 @@ class Walker {
     const lines = lineTops.length;
 
     const styleKey = (cs: CSSStyleDeclaration) => [cs.fontFamily, cs.fontSize, cs.fontWeight, cs.fontStyle, cs.color, cs.textDecorationLine, cs.letterSpacing, cs.textTransform].join("|");
+    // An inline element with data-name (<span data-name="Closing Time">) is a run of its own, like a
+    // change of style, so its text becomes a layer that can carry the name.
+    const runKey = (owner: Element) => {
+      const key = styleKey(getComputedStyle(owner));
+      const named = this.namedInline(owner, block, true);
+      if (!named) return key;
+      if (!this.runIds.has(named.el)) this.runIds.set(named.el, ++this.runCount);
+      return `${key}|#${this.runIds.get(named.el)}`;
+    };
     const withText = runs.filter((r) => r.node && r.text.trim() !== "");
+    // Runs decide between one text layer and several; styles alone decide what flattening loses.
     const keys = new Map<string, number>();
+    const styles = new Map<string, number>();
     for (const run of withText) {
-      const k = styleKey(getComputedStyle(run.owner));
+      const k = runKey(run.owner);
       keys.set(k, (keys.get(k) ?? 0) + run.text.length);
+      const s = styleKey(getComputedStyle(run.owner));
+      styles.set(s, (styles.get(s) ?? 0) + run.text.length);
     }
 
     if (keys.size > 1 && lines === 1) {
@@ -893,13 +992,13 @@ class Walker {
         const t = current.runs.map((x) => x.text).join("").trim();
         if (t && bounds.width > 0) {
           const owner = current.runs[0]!.owner;
-          out.push(this.textNode(owner, getComputedStyle(owner), t, bounds, [...r.getClientRects()], 1, block, blockCs));
+          out.push(this.nameFromInline(this.textNode(owner, getComputedStyle(owner), t, bounds, [...r.getClientRects()], 1, block, blockCs), owner, block));
         }
         current = null;
       };
       for (const run of runs) {
         if (!run.node) continue;
-        const k = styleKey(getComputedStyle(run.owner));
+        const k = runKey(run.owner);
         if (current && current.key !== k) emit();
         if (!current) current = { runs: [], key: k };
         current.runs.push(run);
@@ -910,20 +1009,32 @@ class Walker {
 
     let owner = block;
     if (keys.size > 1) {
-      const split = lines <= 16 ? this.splitStyledLines(runs, block, blockCs, text, range.getBoundingClientRect(), styleKey) : null;
+      const split = lines <= 16 ? this.splitStyledLines(runs, block, blockCs, text, range.getBoundingClientRect(), runKey) : null;
       if (split) return [split];
-      this.counters.flattenedText++;
-      const dominant = [...keys.entries()].sort((a, b) => b[1] - a[1])[0]![0];
+      if (styles.size > 1) this.counters.flattenedText++;
+      const dominant = [...styles.entries()].sort((a, b) => b[1] - a[1])[0]![0];
       owner = withText.find((r) => styleKey(getComputedStyle(r.owner)) === dominant)?.owner ?? block;
-    } else if (withText[0]) owner = withText[0].owner;
-    return [this.textNode(owner, owner === block ? blockCs : getComputedStyle(owner), text, range.getBoundingClientRect(), rects, lines, block, blockCs, lineTops)];
+      // One text layer for the whole paragraph: a data-name inside it has no layer to go to, unless its
+      // element holds all of the text.
+      const node = this.textNode(owner, owner === block ? blockCs : getComputedStyle(owner), text, range.getBoundingClientRect(), rects, lines, block, blockCs, lineTops);
+      for (const run of withText) {
+        const named = this.namedInline(run.owner, block, true);
+        if (!named) continue;
+        if (holdsAll(named.el, text)) this.nameAfter(node, named.el, named.info);
+        else this.counters.unplacedNames.add(named.info.name);
+      }
+      return [node];
+    }
+    if (withText[0]) owner = withText[0].owner;
+    return [this.nameFromInline(this.textNode(owner, owner === block ? blockCs : getComputedStyle(owner), text, range.getBoundingClientRect(), rects, lines, block, blockCs, lineTops), owner, block)];
   }
 
   /**
    * A paragraph that mixes styles over several lines (a bold phrase, a link) as a group of single-line
-   * text layers, one per styled run on each line, so it looks the same as the page.
+   * text layers, one per styled run on each line, so it looks the same as the page. `runKey` tells runs
+   * apart: by style, and by the named inline element they belong to.
    */
-  splitStyledLines(runs: { text: string; owner: Element; node: Text | null }[], block: Element, blockCs: CSSStyleDeclaration, text: string, bounds: DOMRect, styleKey: (cs: CSSStyleDeclaration) => string): CaptureFrame | null {
+  splitStyledLines(runs: { text: string; owner: Element; node: Text | null }[], block: Element, blockCs: CSSStyleDeclaration, text: string, bounds: DOMRect, runKey: (owner: Element) => string): CaptureFrame | null {
     interface Word {
       text: string;
       rect: DOMRect;
@@ -937,7 +1048,7 @@ class Walker {
       if (!run.node) continue;
       const data = run.node.data;
       const cs = getComputedStyle(run.owner);
-      const key = styleKey(cs);
+      const key = runKey(run.owner);
       const collapses = !/^(?:pre|pre-wrap|break-spaces)$/.test(cs.whiteSpace);
       for (const m of data.matchAll(/\S+/g)) {
         range.setStart(run.node, m.index);
@@ -974,7 +1085,7 @@ class Walker {
       const top = Math.min(...segment.map((w) => w.rect.top));
       const height = Math.max(...segment.map((w) => w.rect.height));
       const cs = getComputedStyle(first.owner);
-      const node = this.textNode(first.owner, cs, segmentText, new DOMRect(left, top, right - left, height), [new DOMRect(left, top, right - left, height)], 1, block, blockCs);
+      const node = this.nameFromInline(this.textNode(first.owner, cs, segmentText, new DOMRect(left, top, right - left, height), [new DOMRect(left, top, right - left, height)], 1, block, blockCs), first.owner, block);
       delete node.wraps;
       children.push(node);
       segment = [];
@@ -1044,9 +1155,15 @@ class Walker {
     return this.box({ left: rect.left + l, top: rect.top + t, width: Math.max(0, rect.width - l - r), height: Math.max(0, rect.height - t - b) });
   }
 
-  imageNode(key: string, box: Box, fit: ImageFit, frame: CaptureFrame, name: string): CaptureImage {
+  /**
+   * An image drawn inside `frame`. It takes the frame's name when the frame will disappear around it (no
+   * paint); inside a frame that stays (a bordered avatar), the name stays on the frame and the image is
+   * "<name> Image", so the two don't share a name. `inherit: false` keeps `name` (a checkbox's mark).
+   */
+  imageNode(key: string, box: Box, fit: ImageFit, frame: CaptureFrame, name: string, inherit = true): CaptureImage {
     this.nodes++;
-    const node: CaptureImage = { kind: "image", image: key, fit, box, name: (frame.nameRank ?? 0) >= 2 ? frame.name! : name, nameRank: Math.max(frame.nameRank ?? 0, 1) };
+    const named = inherit && (frame.nameRank ?? 0) >= 2;
+    const node: CaptureImage = { kind: "image", image: key, fit, box, name: named ? (paints(frame) ? `${frame.name!} Image` : frame.name!) : name, nameRank: named ? frame.nameRank! : 1 };
     // An image clips to its own rounded corners.
     if (frame.radii && !frame.border) node.radii = frame.radii;
     return node;
@@ -1081,11 +1198,11 @@ class Walker {
     }
     const key = this.imageKey(`data:image/svg+xml;base64,${utf8Base64(markup)}`, { width: Math.round(rect.width), height: Math.round(rect.height), name: frame.name && frame.nameRank! >= 2 ? frame.name : "icon" });
     if (!key) return;
+    // Paint on the <svg> element itself (fill, stroke) is inside the drawing, not a box.
+    delete frame.fill;
     const node = this.imageNode(key, this.box(rect), "stretch", frame, "Icon");
     delete node.radii;
     frame.children = [node];
-    // Paint on the <svg> element itself (fill, stroke) is inside the drawing, not a box.
-    delete frame.fill;
   }
 
   /** The SVG with computed paint written onto every element, so classes and currentColor survive on their own. */
@@ -1191,7 +1308,7 @@ class Walker {
           ? `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16"><circle cx="8" cy="8" r="3.5" fill="#FFFFFF"/></svg>`
           : `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16"><path d="M3.5 8.5l3 3 6-7" fill="none" stroke="#FFFFFF" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
         const key = this.imageKey(`data:image/svg+xml;base64,${utf8Base64(mark)}`, { width: 16, height: 16, name: type === "radio" ? "radio dot" : "checkmark" });
-        if (key) frame.children = [this.imageNode(key, this.box(rect), "stretch", frame, type === "radio" ? "Dot" : "Checkmark")];
+        if (key) frame.children = [this.imageNode(key, this.box(rect), "stretch", frame, type === "radio" ? "Dot" : "Checkmark", false)];
       } else {
         frame.fill = "#FFFFFFFF";
         frame.border = { widths: [1, 1, 1, 1], colors: ["#767676FF", "#767676FF", "#767676FF", "#767676FF"] };
@@ -1236,7 +1353,10 @@ class Walker {
     if (keyboard) input.keyboard = keyboard;
     frame.children = [input];
     frame.keep = true;
-    frame.name = input.name!.replace(/ Field$/, "") + (multiline ? " Box" : " Input");
+    // The field keeps the element's name; its box gets another ("Email Input Group", not "Email Input Input").
+    const suffix = multiline ? " Box" : " Input";
+    const base = input.name!.replace(/ Field$/, "");
+    frame.name = base.endsWith(suffix) ? `${base} Group` : base + suffix;
     frame.nameRank = Math.max(frame.nameRank ?? 0, 2);
     return true;
   }
@@ -1310,6 +1430,16 @@ function lineClusters(rects: DOMRect[]): number[] {
     if (last === undefined || r.top > last + Math.max(2, r.height * 0.5)) tops.push(r.top);
   }
   return tops;
+}
+
+/** The frame draws something of its own, so finish() keeps it. */
+function paints(frame: CaptureFrame): boolean {
+  return !!(frame.fill || frame.gradients?.length || frame.backgroundImage || frame.border || frame.shadows?.length || frame.backgroundBlur || frame.blur || frame.blendMode);
+}
+
+/** `el` holds all of `text` (whitespace aside), so its name can stand for that text. */
+function holdsAll(el: Element, text: string): boolean {
+  return (el.textContent ?? "").replace(/\s+/g, "") === text.replace(/\s+/g, "");
 }
 
 function contains(outer: Box, inner: Box): boolean {
