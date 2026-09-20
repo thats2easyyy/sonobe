@@ -312,8 +312,8 @@ function drawComment(node: GraphNode): string {
 }
 
 /** Where a cable starts or ends: the row of the port on the node's edge. */
-function portPoint(model: GraphModel, shapes: ReadonlyMap<string, NodeShape>, boxes: ReadonlyMap<string, Rect>, nodeId: string, handleId: string, side: "in" | "out"): [number, number] | undefined {
-  const node = model.nodes.find((n) => n.id === nodeId);
+function portPoint(nodes: ReadonlyMap<string, GraphNode>, shapes: ReadonlyMap<string, NodeShape>, boxes: ReadonlyMap<string, Rect>, nodeId: string, handleId: string, side: "in" | "out"): [number, number] | undefined {
+  const node = nodes.get(nodeId);
   const box = boxes.get(nodeId);
   const shape = shapes.get(nodeId);
   if (!node || !box || !shape || node.data.kind === "comment") return undefined;
@@ -356,20 +356,21 @@ export function graphToSvg(model: GraphModel, options: GraphSvgOptions): GraphSv
   for (const node of model.nodes) if (node.data.kind !== "comment") shapes.set(node.id, nodeShapeFromData(node.data, shapeOptions));
   const parts: string[] = [el("rect", { x: view.x, y: view.y, width: view.width, height: view.height, fill: THEME.canvas })];
   for (const node of model.nodes) if (node.data.kind === "comment") parts.push(drawComment(node));
+  const byId = new Map(model.nodes.map((n) => [n.id, n]));
   for (const edge of model.edges) {
-    const from = portPoint(model, shapes, options.boxes, edge.source, edge.sourceHandle, "out");
-    const to = portPoint(model, shapes, options.boxes, edge.target, edge.targetHandle, "in");
+    const from = portPoint(byId, shapes, options.boxes, edge.source, edge.sourceHandle, "out");
+    const to = portPoint(byId, shapes, options.boxes, edge.target, edge.targetHandle, "in");
     if (!from || !to) continue;
     const invalid = !!edge.data.invalid;
     parts.push(el("path", { d: cablePath(from[0], from[1], to[0], to[1]), fill: "none", stroke: invalid ? THEME.danger : portColor(edge.data.sourceType), "stroke-width": edge.data.loop ? 3 : 2, "stroke-opacity": 0.9, ...(invalid ? { "stroke-dasharray": "5 4" } : {}) }));
   }
-  let hasText = parts.some((p) => p.includes("<text"));
   for (const node of model.nodes) {
     const box = options.boxes.get(node.id);
     const shape = shapes.get(node.id);
     if (box && shape) parts.push(drawNode(node, box, shape));
   }
-  hasText ||= shapes.size > 0;
+  // Every node has a title; a graph of only comments has text when a comment does.
+  const hasText = shapes.size > 0 || model.nodes.some((n) => n.data.kind === "comment" && n.data.text.trim() !== "");
   const width = Math.max(1, Math.round(view.width * scale));
   const height = Math.max(1, Math.round(view.height * scale));
   const svg = el("svg", { xmlns: "http://www.w3.org/2000/svg", width, height, viewBox: `${num(view.x)} ${num(view.y)} ${num(view.width)} ${num(view.height)}` }, parts.join(""));
