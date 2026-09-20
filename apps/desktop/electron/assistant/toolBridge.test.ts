@@ -8,7 +8,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { Client } from "@modelcontextprotocol/client";
-import { createHeadlessHost, IMPORT_META_KEY, TOOL_NAMES, type DesignCaptureRequest, type HeadlessHost, type HostCallControl } from "@sonobe/mcp";
+import { createHeadlessHost, IMPORT_META_KEY, TOOL_NAMES, type CapturedDesign, type DesignCaptureRequest, type HeadlessHost, type HostCallControl } from "@sonobe/mcp";
 import { createPatchRegistry } from "@sonobe/patches";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createAssistantAgent, UNPINNED_TOOLS } from "./agent.ts";
@@ -111,6 +111,106 @@ describe("MCP tool bridge", () => {
     // The system prompt carries the MCP server's instructions.
     expect(JSON.stringify(api.requests[0]!.system)).toContain("get_guide");
     expect(api.requests[0]!.tools).toHaveLength(TOOL_NAMES.length);
+  });
+});
+
+/** A checkout screen as the capture window would read it (no browser in tests). */
+const CHECKOUT_CAPTURE = {
+  format: "sonobe.design-capture",
+  version: 1,
+  source: { kind: "html", title: "Checkout" },
+  viewport: { width: 402, height: 874 },
+  root: {
+    kind: "frame",
+    name: "Checkout",
+    box: [0, 0, 402, 874],
+    fill: "#F5F5F7FF",
+    children: [
+      { kind: "text", name: "Title", text: "Checkout", box: [20, 80, 200, 40], style: { fontFamily: "system-ui", fontSize: 34, fontWeight: 700, color: "#111118FF", lineHeight: 40 } },
+      { kind: "frame", name: "Pay Button", box: [16, 780, 370, 52], fill: "#277FFFFF", radii: [14, 14, 14, 14], children: [] },
+    ],
+  },
+  images: {},
+};
+
+/** The headless host with a capture window that reads every page as CHECKOUT_CAPTURE, with a page image when asked. */
+function capturingHost(base: HeadlessHost): HeadlessHost {
+  const capturing = Object.create(base) as HeadlessHost;
+  Object.defineProperty(capturing, "captureDesign", {
+    value: async (request: DesignCaptureRequest): Promise<CapturedDesign> => ({
+      capture: CHECKOUT_CAPTURE as never,
+      images: new Map(),
+      ...(request.screenshot ? { screenshot: { data: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8DwHwAFBQIAX8jx0gAAAABJRU5ErkJggg==", mimeType: "image/png" as const, width: 1, height: 1 } } : {}),
+    }),
+  });
+  return capturing;
+}
+
+describe("MCP tool bridge: designing on the canvas", () => {
+  it("passes import_design's _meta on from the real server, also when a screenshot leaves out structuredContent", async () => {
+    const designBridge = createMcpToolBridge({ host: capturingHost(host), version: "0.1.0-test" });
+    try {
+      const plain = await designBridge.call("import_design", { capture: CHECKOUT_CAPTURE });
+      expect(plain.isError, JSON.stringify(plain.content)).toBeFalsy();
+      expect(plain.meta?.[IMPORT_META_KEY]).toMatchObject({ dryRun: false, screenId: "checkout", screenName: "Checkout", replaced: null });
+
+      const shot = await designBridge.call("import_design", { html: "<main>Checkout</main>", replace: "checkout", screenshot: true });
+      expect(shot.isError, JSON.stringify(shot.content)).toBeFalsy();
+      expect(shot.structuredContent).toBeUndefined();
+      expect(shot.meta?.[IMPORT_META_KEY]).toMatchObject({ dryRun: false, screenId: "checkout", replaced: "checkout", txnId: expect.any(String) });
+    } finally {
+      await designBridge.close();
+    }
+  });
+
+  it("streams the page as drafts, imports it, and asks before replacing a screen the person changed since", async () => {
+    const designBridge = createMcpToolBridge({ host: capturingHost(host), version: "0.1.0-test" });
+    const { docId } = await host.getDocument();
+    const html = '<main data-name="Checkout"><h1 data-name="Title">Pay “now” \\ — ✓ 😀</h1>\n<button data-name="Pay Button">Pay</button></main>';
+    const api = scriptedClient([
+      { content: [{ type: "tool_use", id: "tu_new", name: "import_design", input: { name: "Checkout", html } }] },
+      { content: [{ type: "text", text: "Added a checkout." }] },
+      { content: [{ type: "tool_use", id: "tu_replace", name: "import_design", input: { name: "Checkout", replace: "checkout", html } }] },
+      { content: [{ type: "text", text: "I kept your version." }] },
+    ]);
+    const agent = createAssistantAgent({
+      tools: () => designBridge,
+      apiKey: async () => "sk-ant-test-key-1234",
+      createClient: () => api.client,
+      documentFor: async () => ({ docId, projectPath: null }),
+      readDocument: async (id) => (await host.getDocument(id)).doc,
+    });
+    const context = { component: { id: "main", name: "Main", size: [402, 874] as [number, number] }, screens: [] };
+    try {
+      const events: AssistantEvent[] = [];
+      expect((await agent.run("w1", { text: "a checkout", context }, (e) => events.push(e))).outcome).toBe("completed");
+      const drafts = events.filter((e): e is Extract<AssistantEvent, { type: "design_draft" }> => e.type === "design_draft");
+      expect(drafts.length).toBeGreaterThan(1);
+      expect(drafts.every((d) => d.toolUseId === "tu_new")).toBe(true);
+      expect(drafts.map((d) => d.append).join("")).toBe(html);
+      expect(drafts.at(-1)).toMatchObject({ done: true, html, fields: { name: "Checkout" } });
+      expect(events.findIndex((e) => e.type === "design_draft" && e.done)).toBeLessThan(events.findIndex((e) => e.type === "tool_started"));
+      const imported = events.find((e) => e.type === "tool_finished" && e.name === "import_design");
+      expect(imported).toMatchObject({ status: "done", imported: { docId, screenId: "checkout", name: "Checkout", replaced: null } });
+
+      // The person retitles the screen by hand, then Claude wants to replace it: Sonobe asks, naming the change.
+      const title = (await host.getDocument()).doc.components.main!.layers.find((l) => l.id === "checkout")!.children!.find((l) => l.name === "Title")!;
+      await host.apply([{ op: "updateLayer", component: "main", id: title.id, props: { textColor: "#FF0000FF" } }], { label: "Recolor the title", author: { kind: "human", name: "Tyler" } });
+      const revision = (await host.getDocument()).revision;
+      const second: AssistantEvent[] = [];
+      const run = agent.run("w1", { text: "make it bigger", context }, (e) => {
+        second.push(e);
+        if (e.type === "confirm_required") queueMicrotask(() => agent.confirm("w1", e.confirmationId, false));
+      });
+      expect((await run).outcome).toBe("completed");
+      expect(second.find((e) => e.type === "confirm_required")).toMatchObject({ kind: "replace", title: "Replace your changes to “Checkout”?", approveLabel: "Replace", declineLabel: "Keep my changes" });
+      expect((second.find((e) => e.type === "confirm_required") as { message: string }).message).toMatch(/^You changed Title after Claude made this screen\./);
+      expect(second.find((e) => e.type === "tool_finished")).toMatchObject({ toolUseId: "tu_replace", status: "declined", detail: "You kept your changes" });
+      expect((await host.getDocument()).revision).toBe(revision);
+      expect(JSON.stringify(api.requests[3]!.messages.at(-1))).toContain("The person kept their changes to “Checkout”, so nothing changed.");
+    } finally {
+      await designBridge.close();
+    }
   });
 });
 

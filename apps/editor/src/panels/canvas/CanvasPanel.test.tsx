@@ -12,10 +12,6 @@ import { KeyboardShortcutManager } from "../../ui/commands/shortcutManager.ts";
 import { designStore, initialDesignData } from "../design/designStore.ts";
 import { CanvasPanel } from "./CanvasPanel.tsx";
 
-// The Design with Claude box asks these of the design state package while it's open: stand-ins for its stubs.
-vi.mock("../design/context.ts", () => ({ designTarget: () => null, canvasContext: () => ({ component: { id: "main", name: "Main", size: [402, 874] }, screens: [] }) }));
-vi.mock("../design/status.ts", () => ({ designStatusLine: () => null, toolStatusText: () => "" }));
-
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 // happy-dom has no layout: give the canvas body a size so the artboard fits at zoom 1, offset (199, 63).
@@ -132,6 +128,12 @@ const artboardOffset = () => {
   const match = /translate\((-?[\d.]+)px, (-?[\d.]+)px\)/.exec(container.querySelector<HTMLElement>(".sb-cv__artboard")!.style.transform);
   return match ? [Number(match[1]), Number(match[2])] : null;
 };
+
+/** Where the fit puts the 402 × 874 artboard in a canvas of `size` with `padding`. */
+function fitRectOffset(size: [number, number], padding: number): [number, number] {
+  const zoom = Math.min(1, (size[0] - padding * 2) / 402, (size[1] - padding * 2) / 874);
+  return [(size[0] - 402 * zoom) / 2, (size[1] - 874 * zoom) / 2];
+}
 
 const position = (id: string) => findLayer(session.document.getState().doc.components.main!.layers, id)!.layer.props.position;
 
@@ -400,6 +402,34 @@ describe("CanvasPanel", () => {
       body().dispatchEvent(new WheelEvent("wheel", { bubbles: true, cancelable: true, deltaY: 120, ...at(200, 300) }));
     });
     expect(artboardOffset()).not.toEqual(before);
+  });
+
+  it("fits the artboard above the Design with Claude box while it's open, when there's room there", async () => {
+    const offsetHeight = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "offsetHeight");
+    Object.defineProperty(HTMLElement.prototype, "offsetHeight", { configurable: true, get() { return (this as HTMLElement).classList?.contains("sb-design-box") ? 300 : 0; } });
+    try {
+      mount();
+      // Fitted in the whole body: 402 × 874 at zoom 1, centered.
+      expect(artboardOffset()).toEqual([199, 63]);
+      act(() => designButton().click());
+      await openedBox();
+      // Above the box (300 px, 16 px from the bottom, a 12 px gap): the 672 px left, less 28 px of padding each side.
+      const zoom = (672 - 56) / 874;
+      const [x, y] = artboardOffset()!;
+      expect(x).toBeCloseTo((800 - 402 * zoom) / 2, 0);
+      expect(y).toBeCloseTo((672 - 874 * zoom) / 2, 0);
+
+      // Too little room above it: the artboard fits the whole canvas, as without the box.
+      resize(800, 450);
+      const small = fitRectOffset([800, 450], 56);
+      expect(artboardOffset()![1]).toBeCloseTo(small[1], 0);
+
+      resize(800, 1000);
+      act(() => designStore.getState().closeBox());
+      expect(artboardOffset()).toEqual([199, 63]);
+    } finally {
+      if (offsetHeight) Object.defineProperty(HTMLElement.prototype, "offsetHeight", offsetHeight);
+    }
   });
 
   it("opens the box from the empty artboard's hint, which starts no canvas gesture", async () => {

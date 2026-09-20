@@ -7,7 +7,7 @@
 
 export { canvasContext, designTarget, type DesignTarget } from "./context.ts";
 export { designCommands } from "./commands.ts";
-export { DesignBox } from "./DesignBox.tsx";
+export { DesignBox, type DesignBoxProps } from "./DesignBox.tsx";
 export { DesignPreview, PREVIEW_POST_MS, previewFrame, type DesignPreviewProps, type PreviewFrameOptions } from "./DesignPreview.tsx";
 export {
   activeDraft,
@@ -15,6 +15,7 @@ export {
   designStore,
   initialDesignData,
   reduceDesignEvent,
+  runReply,
   sendDesign,
   useDesign,
   type DesignData,
@@ -25,5 +26,6 @@ export {
   type DraftStatus,
 } from "./designStore.ts";
 export { PREVIEW_BOOTSTRAP, PREVIEW_MESSAGE_TYPE, PREVIEW_SCRIPT_PREFIXES, previewCsp, previewShellHtml, renderablePrefix } from "./previewShell.ts";
-export { claudePrompt } from "./prompt.ts";
-export { designStatusLine, toolStatusText, type DesignStatusLine } from "./status.ts";
+export { DESIGN_CANVAS_SPLIT, followDesignBox } from "./layout.ts";
+export { claudePrompt, designFollowUp, type DesignFollowUpKind } from "./prompt.ts";
+export { designResultChips, designRunState, designStatusLine, toolStatusText, type DesignResultChip, type DesignStatusLine } from "./status.ts";

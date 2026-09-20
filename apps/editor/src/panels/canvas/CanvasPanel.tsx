@@ -93,6 +93,11 @@ const RULERS_KEY = "sonobe.canvas.rulers";
 const TOOL_LABELS: Record<InsertTool, string> = { rectangle: "Rectangle", oval: "Oval", text: "Text" };
 /** The presence pill in the artboard label is cut to this many characters. */
 const AGENT_PILL_CHARS = 60;
+/** The Design with Claude box's offset from the canvas's bottom (design.css), plus a gap above it. */
+const DESIGN_BOX_CLEARANCE = 16 + 12;
+/** Fit padding in the area above the box, and the least room there that's worth fitting into. */
+const DESIGN_FIT_PADDING = 28;
+const DESIGN_FIT_MIN_HEIGHT = 200;
 
 // The Design with Claude box loads the first time it opens.
 const DesignBox = lazy(() => import("../design/DesignBox.tsx").then((m) => ({ default: m.DesignBox })));
@@ -210,6 +215,9 @@ export function CanvasPanel({ session: sessionProp, sceneSource, onSceneSourceCh
   const working = useStore(session.presence, (s) => s.working);
   const designOpen = useDesign((s) => s.open);
   const [designLoaded, setDesignLoaded] = useState(designOpen);
+  /** The tallest the Design with Claude box has been since it opened (0 while it's closed), so the fit doesn't shift with every status line. */
+  const [designHeight, setDesignHeight] = useState(0);
+  const onDesignHeight = useCallback((height: number) => setDesignHeight((tallest) => (height === 0 ? 0 : Math.max(tallest, height))), []);
 
   const [internalSource, setInternalSource] = useState<SceneSource>("design");
   const source = sceneSource ?? internalSource;
@@ -249,7 +257,10 @@ export function CanvasPanel({ session: sessionProp, sceneSource, onSceneSourceCh
   );
   const hoverId = hovered && hovered.kind === "layer" && hovered.component === componentId ? hovered.id : null;
 
-  const latest = useLatest({ index, viewport, componentId, component, tool, artboard, chrome, spaceHeld, box, editing });
+  // While the box is open, the artboard fits (and reveals land) in the canvas above it, when there's room there.
+  const designReserve = designHeight > 0 && box.height - (rulers ? RULER_SIZE : 0) - designHeight - DESIGN_BOX_CLEARANCE >= DESIGN_FIT_MIN_HEIGHT ? designHeight + DESIGN_BOX_CLEARANCE : 0;
+
+  const latest = useLatest({ index, viewport, componentId, component, tool, artboard, chrome, spaceHeld, box, editing, designReserve });
   const layerBounds = useCallback((id: string) => latest.current.index.bounds(id), [latest]);
 
   useEffect(() => {
@@ -259,10 +270,10 @@ export function CanvasPanel({ session: sessionProp, sceneSource, onSceneSourceCh
   const fitViewport = useCallback((): Viewport | null => {
     if (box.width <= 0 || box.height <= 0) return null;
     const inset = rulers ? RULER_SIZE : 0;
-    const vp = fitRect(artboard, [Math.max(1, box.width - inset), Math.max(1, box.height - inset)], { padding: FIT_PADDING, maxZoom: 1 });
+    const vp = fitRect(artboard, [Math.max(1, box.width - inset), Math.max(1, box.height - inset - designReserve)], { padding: designReserve ? DESIGN_FIT_PADDING : FIT_PADDING, maxZoom: 1 });
     return { ...vp, x: vp.x + inset, y: vp.y + inset };
-  }, [artboard, box.width, box.height, rulers]);
-  const fitKey = `${artboard.width}x${artboard.height}:${rulers ? 1 : 0}`;
+  }, [artboard, box.width, box.height, rulers, designReserve]);
+  const fitKey = `${artboard.width}x${artboard.height}:${rulers ? 1 : 0}:${designReserve}`;
 
   // Restore (or fit) the viewport when the component changes or the panel first gets a size.
   useEffect(() => {
@@ -840,11 +851,12 @@ export function CanvasPanel({ session: sessionProp, sceneSource, onSceneSourceCh
   const revealNonce = reveal?.nonce;
   useEffect(() => {
     const r = session.selection.getState().reveal;
-    const { index: idx, viewport: vp, box: size, componentId: cid } = latest.current;
+    const { index: idx, viewport: vp, box: size, componentId: cid, designReserve: reserve } = latest.current;
     if (!r || r.component !== cid || !vp) return;
     const bounds = unionRects(r.ids.map((id) => idx.bounds(id)).filter((b): b is Rect => b !== null));
     if (!bounds) return;
-    const next = ensureVisible(vp, bounds, [size.width, size.height]);
+    // Above the box, the fit's own padding is margin enough: a screen that fills the fitted artboard stays put.
+    const next = reserve ? ensureVisible(vp, bounds, [size.width, size.height - reserve], DESIGN_FIT_PADDING) : ensureVisible(vp, bounds, [size.width, size.height]);
     if (next === vp) return;
     autoFit.current = false;
     setViewport(next);
@@ -1137,7 +1149,7 @@ export function CanvasPanel({ session: sessionProp, sceneSource, onSceneSourceCh
       </div>
       {designLoaded && (
         <Suspense fallback={null}>
-          <DesignBox session={session} bounds={layerBounds} />
+          <DesignBox session={session} bounds={layerBounds} onHeightChange={onDesignHeight} />
         </Suspense>
       )}
     </Panel>

@@ -1,5 +1,5 @@
 import { fileURLToPath } from "node:url";
-import { applyOps, createEmptyDocument, type SonobeDocument, type StyleDigest } from "@sonobe/core";
+import { applyOps, createEmptyDocument, formatStyleDigest, styleDigest, type SonobeDocument, type StyleDigest } from "@sonobe/core";
 import { loadProjectFromDisk } from "@sonobe/core/node";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { createManualScheduler } from "../../runtime/scheduler.ts";
@@ -8,15 +8,11 @@ import { createEditorSession, type EditorSession } from "../../state/session.ts"
 import { canvasContext, designTarget } from "./context.ts";
 import type { DesignResult } from "./designStore.ts";
 
-// The digest itself is tested in packages/core (styles.test.ts). Here it stands in, so the cap is exercised.
-const digest = vi.hoisted(() => ({ text: "styles main (64 layers)" }));
+// The digest itself is tested in packages/core (styles.test.ts). A longer stand-in exercises the cap.
+const digest = vi.hoisted(() => ({ text: null as string | null }));
 vi.mock("@sonobe/core", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@sonobe/core")>();
-  return {
-    ...actual,
-    styleDigest: (_doc: SonobeDocument, component = "main"): StyleDigest => ({ component, layers: 0, colors: [], fonts: [], fontSizes: [], radii: [], shadows: [] }),
-    formatStyleDigest: (d: StyleDigest) => digest.text.replace("main", d.component),
-  };
+  return { ...actual, formatStyleDigest: (d: StyleDigest) => digest.text ?? actual.formatStyleDigest(d) };
 });
 
 let tabBar: SonobeDocument;
@@ -26,7 +22,10 @@ beforeAll(async () => {
   tabBar = await loadProjectFromDisk(fileURLToPath(new URL("../../../../../examples/05-tab-bar", import.meta.url)));
 });
 
-afterEach(() => session?.dispose());
+afterEach(() => {
+  session?.dispose();
+  digest.text = null;
+});
 
 const open = (doc: SonobeDocument) => (session = createEditorSession({ host: null, document: doc, autoplay: false, scheduler: createManualScheduler(), textMeasurer: "approximate" }));
 const noBounds = () => null;
@@ -66,8 +65,9 @@ describe("canvasContext", () => {
         { id: "app_status_bar", name: "Status Bar" },
         { id: "screens", name: "Screens" },
       ],
-      styles: "styles main (64 layers)",
+      styles: formatStyleDigest(styleDigest(tabBar, "main")),
     });
+    expect(canvasContext(session, null, noBounds).styles).toMatch(/^styles main \(\d+ layers\)\ncolors /);
   });
 
   it("gives the picked layer's frame from the canvas and the screen holding it", () => {

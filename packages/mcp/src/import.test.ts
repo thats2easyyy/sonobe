@@ -225,7 +225,10 @@ describe("import_design dry runs and _meta", () => {
     expect(replace.isError, replace.text).toBe(false);
     const lines = replace.text.split("\n");
     expect(lines[0]).toBe("Dry run: importing over “Checkout” (checkout) would keep 4 of its layers and remove 1 that isn't in the new design: Promo Badge, and drop 1 connection. Nothing changed.");
-    expect(lines).toContain("Note: 1 layer of the old “Checkout” wasn't found again and was removed: Promo Badge. Give layers you'll import again a data-name so they're found.");
+    // Nothing changed, so the notes say what would go.
+    expect(lines).toContain("Note: 1 layer of the old “Checkout” wouldn't be found again and would be removed: Promo Badge. Give layers you'll import again a data-name so they're found.");
+    expect(lines.some((line) => line.startsWith("Note: 1 connection to layers the new screen doesn't have would be removed: "))).toBe(true);
+    expect(replace.text).not.toMatch(/\b(was|were) removed\b/);
     expect(replace.meta).toEqual({ docId: "test", dryRun: true, screenId: null, screenName: "Checkout", txnId: null, replaced: "checkout", dropped: [{ id: "promo_badge", name: "Promo Badge" }], droppedCount: 1, lostConnections: 1, kept: 4 });
     expect((await project.host.getDocument()).revision).toBe(revision);
     expect(assetFiles()).toEqual(files);

@@ -6,7 +6,7 @@
 
 import { artboardSize, findLayer } from "@sonobe/core";
 import { Check, CircleAlert, Copy, FolderCode, KeyRound, LoaderCircle, MessageSquare, ScanLine, SendToBack, Sparkles, TriangleAlert, Undo2, X } from "lucide-react";
-import { useEffect, useMemo, useRef, useState, type JSX, type KeyboardEvent as ReactKeyboardEvent } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type JSX, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import { useStore } from "zustand";
 import { appPanels } from "../../app/appPanels.ts";
 import { getDesktopHostApi } from "../../host/detect.ts";
@@ -18,11 +18,13 @@ import { IconButton } from "../../ui/IconButton.tsx";
 import { toast } from "../../ui/Toast.tsx";
 import { Tooltip } from "../../ui/Tooltip.tsx";
 import { useOptionalCommands } from "../../ui/commands/CommandProvider.tsx";
+import { useLatest } from "../../ui/lib/hooks.ts";
+import { observeResize } from "../../ui/lib/observeResize.ts";
 import { assistantStore, useAssistant, type ChatItem } from "../assistant/assistantStore.ts";
 import { Composer } from "../assistant/Composer.tsx";
 import { sharedAssistantController } from "../assistant/controller.ts";
 import { ConfirmCard } from "../assistant/Transcript.tsx";
-import { getAssistantHost, type AssistantCodeFolderStatus } from "../assistant/types.ts";
+import type { AssistantCodeFolderStatus } from "../assistant/types.ts";
 import type { Rect } from "../canvas/geometry.ts";
 import { connectedSessions, folderName } from "../connect/connectInfo.ts";
 import { connectClaudeStore } from "../connect/connectStore.ts";
@@ -30,20 +32,9 @@ import { useMcpStatus, type McpStatusSource } from "../connect/useMcpStatus.ts";
 import { canvasContext, designTarget, type DesignTarget } from "./context.ts";
 import { designStore, sendDesign, useDesign, type DesignResult } from "./designStore.ts";
 import { claudePrompt } from "./prompt.ts";
-import { designStatusLine, type DesignStatusLine } from "./status.ts";
+import { designResultChips, designRunState, designStatusLine, type DesignResultChip, type DesignStatusLine } from "./status.ts";
 import "../assistant/assistant.css";
 import "./design.css";
-
-const REPLY_CHARS = 280;
-
-/** The chips after an import: follow-ups Claude gets as box messages about the screen it made. */
-export const followUps = (name: string) => ({
-  interactive: `Make “${name}” interactive: wire its buttons and controls with patches so they respond, and tell me what you wired.`,
-  knobs: `Turn the main colors, corner radius and spacing of “${name}” into knobs I can tune, and link its layers to them. Group them under “${name}”.`,
-  darker: `Try a darker version of “${name}”.`,
-});
-
-const clip = (text: string, max: number) => (text.length > max ? `${text.slice(0, max).trimEnd()}…` : text);
 
 /** The chip and field copy for what the box will change. */
 function chipCopy(target: DesignTarget | null, size: [number, number]): { chip: string; placeholder: string; ariaLabel: string } {
@@ -52,15 +43,7 @@ function chipCopy(target: DesignTarget | null, size: [number, number]): { chip: 
   return { chip: `Redesign “${target.name}”`, placeholder: `What should change in “${target.name}”?`, ariaLabel: `Describe a change to “${target.name}”` };
 }
 
-/** The newest reply text of a run, or of the replies after `from` in the transcript. */
-function replyText(items: readonly ChatItem[], runId: string | null, from: number): string {
-  for (let i = items.length - 1; i >= 0; i--) {
-    const item = items[i]!;
-    if (item.kind !== "assistant" || !item.text.trim()) continue;
-    if (runId !== null ? item.runId === runId : i >= from) return item.text.trim();
-  }
-  return "";
-}
+const CHIP_ICONS: Partial<Record<DesignResultChip["id"], JSX.Element>> = { undo: <Undo2 size={13} />, sendToBack: <SendToBack size={13} /> };
 
 const STATUS_ICONS: Record<DesignStatusLine["tone"], JSX.Element | null> = {
   busy: <LoaderCircle size={13} className="sb-spin" aria-hidden />,
@@ -70,25 +53,21 @@ const STATUS_ICONS: Record<DesignStatusLine["tone"], JSX.Element | null> = {
   error: <CircleAlert size={13} aria-hidden />,
 };
 
-/** Renders when designStore.open. */
-export function DesignBox({ session, bounds }: { session: EditorSession; bounds(id: string): Rect | null }): JSX.Element | null {
-  const open = useDesign((s) => s.open);
-
-  // The chip's × means "New screen" until the selection changes.
-  useEffect(
-    () =>
-      session.selection.subscribe((s, previous) => {
-        if (s.layers !== previous.layers && designStore.getState().newScreen) designStore.getState().setNewScreen(false);
-      }),
-    [session],
-  );
-
-  return open ? <DesignBoxPanel session={session} bounds={bounds} /> : null;
+export interface DesignBoxProps {
+  session: EditorSession;
+  bounds(id: string): Rect | null;
+  /** The box's height in px while it shows, then 0: the canvas keeps the artboard above it. */
+  onHeightChange?(height: number): void;
 }
 
-function DesignBoxPanel({ session, bounds }: { session: EditorSession; bounds(id: string): Rect | null }): JSX.Element | null {
+/** Renders when designStore.open. attachDesign (EditorApp) follows the Assistant's events and the selection for it. */
+export function DesignBox(props: DesignBoxProps): JSX.Element | null {
+  const open = useDesign((s) => s.open);
+  return open ? <DesignBoxPanel {...props} /> : null;
+}
+
+function DesignBoxPanel({ session, bounds, onHeightChange }: DesignBoxProps): JSX.Element | null {
   const controller = useMemo(() => sharedAssistantController(), []);
-  const [host] = useState(() => getAssistantHost());
   const commands = useOptionalCommands();
   const design = useDesign((s) => s);
   const assistant = useAssistant((s) => s);
@@ -99,11 +78,6 @@ function DesignBoxPanel({ session, bounds }: { session: EditorSession; bounds(id
   const topTxn = useStore(session.document, (s) => s.historyEntries(1)[0]?.txnId ?? null);
   const composerRef = useRef<HTMLTextAreaElement>(null);
   const boxRef = useRef<HTMLElement>(null);
-  const [sending, setSending] = useState(false);
-  /** Where the box's latest message sits in the transcript (its reply comes after it). */
-  const [sentAt, setSentAt] = useState<number | null>(null);
-  /** The result that was showing when the box sent again: it belongs to the earlier message. */
-  const [staleResult, setStaleResult] = useState<DesignResult | null>(null);
   const [noKey, setNoKey] = useState(false);
   const [codeError, setCodeError] = useState<string | null>(null);
   const [sentBack, setSentBack] = useState<string | null>(null);
@@ -112,6 +86,21 @@ function DesignBoxPanel({ session, bounds }: { session: EditorSession; bounds(id
     return typeof api?.getMcpStatus === "function" ? (api as McpStatusSource) : null;
   });
   const mcp = useMcpStatus(noKey ? mcpSource : null, { intervalMs: 10_000 });
+  const reportHeight = useLatest(onHeightChange);
+  const component = doc.components[componentId];
+  const shows = !!component && component.kind !== "patchComponent";
+
+  useLayoutEffect(() => {
+    const el = boxRef.current;
+    if (!shows || !el) return;
+    const measure = () => reportHeight.current?.(el.offsetHeight);
+    measure();
+    const stop = observeResize([el], measure);
+    return () => {
+      stop();
+      reportHeight.current?.(0);
+    };
+  }, [shows, reportHeight]);
 
   useEffect(() => {
     void controller.refresh();
@@ -122,20 +111,19 @@ function DesignBoxPanel({ session, bounds }: { session: EditorSession; bounds(id
     if (assistant.status?.hasKey) setNoKey(false);
   }, [assistant.status?.hasKey]);
 
-  const component = doc.components[componentId];
-  if (!component || component.kind === "patchComponent") return null;
+  if (!shows) return null;
 
   const target = designTarget(session, { newScreen: design.newScreen, result: design.result });
   const copy = chipCopy(target, artboardSize(doc, componentId));
-  const boxRun = sending || (assistant.running && design.request?.runId != null && design.request.runId === assistant.runId);
-  const busy = assistant.running && !boxRun;
+  const runState = designRunState(design, assistant);
+  const boxRun = runState === "running";
+  const busy = runState === "busy";
+  // A reply without an import (a question, or wiring patches) is the status line itself.
   const line = designStatusLine(design, assistant, Date.now());
   const confirms = assistant.items.filter((i): i is Extract<ChatItem, { kind: "confirm" }> => i.kind === "confirm" && i.status === "pending" && i.runId === assistant.runId);
-  // A result whose screen is gone (undone, deleted) has nothing left to follow up on.
-  const shown = !boxRun && design.result && design.result !== staleResult ? design.result : null;
-  const result = shown && findLayer(doc.components[shown.component]?.layers ?? [], shown.layerId) ? shown : null;
-  // A reply without an import (a question, or wiring patches) shows the reply alone.
-  const reply = boxRun ? "" : result ? result.reply : sentAt !== null ? replyText(assistant.items, design.request?.runId ?? null, sentAt) : "";
+  // The chips follow the box's own finished import; a result whose screen is gone (undone, deleted) has nothing left to follow up on.
+  const result = design.result && findLayer(doc.components[design.result.component]?.layers ?? [], design.result.layerId) ? design.result : null;
+  const chips = result ? designResultChips(design, topTxn) : [];
   const codeFolder: AssistantCodeFolderStatus | undefined = assistant.status?.codeFolder;
 
   const focusCanvas = () => boxRef.current?.closest(".sb-panel__body")?.querySelector<HTMLElement>(".sb-cv")?.focus({ preventScroll: true });
@@ -151,11 +139,7 @@ function DesignBoxPanel({ session, bounds }: { session: EditorSession; bounds(id
       return false;
     }
     setNoKey(false);
-    setSending(true);
-    setSentAt(assistant.items.length);
-    setStaleResult(designStore.getState().result);
-    const done = () => setSending(false);
-    void sendDesign(session, text, bounds).then(done, done);
+    void sendDesign(session, text, bounds);
     return true;
   };
 
@@ -189,30 +173,15 @@ function DesignBoxPanel({ session, bounds }: { session: EditorSession; bounds(id
     );
   };
 
-  const showCodeFolder = (status: AssistantCodeFolderStatus) => assistantStore.setState((s) => (s.status ? { status: { ...s.status, codeFolder: status } } : {}));
-
   const linkCodeFolder = async () => {
-    const api = host?.assistant;
-    if (!api?.linkCodeFolder) return;
     setCodeError(null);
-    try {
-      const linked = await api.linkCodeFolder();
-      showCodeFolder(linked.status);
-      if (linked.error) setCodeError(linked.error);
-    } catch (err) {
-      setCodeError(`Sonobe couldn't link the folder: ${err instanceof Error ? err.message : String(err)}`);
-    }
+    const linked = await controller.linkCodeFolder();
+    if (linked?.error) setCodeError(linked.error);
   };
 
   const unlinkCodeFolder = async () => {
-    const api = host?.assistant;
-    if (!api?.unlinkCodeFolder) return;
     setCodeError(null);
-    try {
-      showCodeFolder(await api.unlinkCodeFolder());
-    } catch (err) {
-      setCodeError(`Sonobe couldn't unlink the folder: ${err instanceof Error ? err.message : String(err)}`);
-    }
+    await controller.unlinkCodeFolder();
   };
 
   const undo = (r: DesignResult) => {
@@ -229,6 +198,12 @@ function DesignBoxPanel({ session, bounds }: { session: EditorSession; bounds(id
       if (!arranged.ok && arranged.message) toast({ title: arranged.message, ...(arranged.hint ? { description: arranged.hint } : {}), tone: "warn" });
     }
     setSentBack(r.layerId);
+  };
+
+  const runChip = (chip: DesignResultChip, r: DesignResult) => {
+    if (chip.id === "undo") undo(r);
+    else if (chip.id === "sendToBack") sendToBack(r);
+    else if (chip.message) submit(chip.message);
   };
 
   const runAction = (action: NonNullable<DesignStatusLine["action"]>) => {
@@ -266,30 +241,19 @@ function DesignBoxPanel({ session, bounds }: { session: EditorSession; bounds(id
         ) : null}
       </div>
 
-      {reply ? <p className="sb-design-box__reply">{clip(reply, REPLY_CHARS)}</p> : null}
-
-      {result ? (
-        <div className="sb-design-box__chips" role="group" aria-label="Next steps">
-          {result.txnId && topTxn === result.txnId ? (
-            <Button size="sm" icon={<Undo2 size={13} />} onClick={() => undo(result)}>
-              Undo
-            </Button>
-          ) : null}
-          {result.kind === "added" && result.coveredScreen && sentBack !== result.layerId ? (
-            <Button size="sm" icon={<SendToBack size={13} />} onClick={() => sendToBack(result)}>
-              Send to Back
-            </Button>
-          ) : null}
-          <Button size="sm" variant="ai" onClick={() => submit(followUps(result.name).interactive)}>
-            Make it interactive
-          </Button>
-          <Button size="sm" variant="ai" onClick={() => submit(followUps(result.name).knobs)}>
-            Add knobs
-          </Button>
-          <Button size="sm" variant="ai" onClick={() => submit(followUps(result.name).darker)}>
-            Try a darker version
-          </Button>
-        </div>
+      {result && chips.length ? (
+        <>
+          {result.reply ? <p className="sb-design-box__reply">{result.reply}</p> : null}
+          <div className="sb-design-box__chips" role="group" aria-label="Next steps">
+            {chips
+              .filter((chip) => chip.id !== "sendToBack" || sentBack !== result.layerId)
+              .map((chip) => (
+                <Button key={chip.id} size="sm" variant={chip.message ? "ai" : undefined} icon={CHIP_ICONS[chip.id]} onClick={() => runChip(chip, result)}>
+                  {chip.label}
+                </Button>
+              ))}
+          </div>
+        </>
       ) : null}
 
       {confirms.map((item) => (
