@@ -194,17 +194,19 @@ A `.sonobez` zip of the same layout is used for sharing (later).
 - `expectedRevision` enables optimistic concurrency.
 - Every op validates against the registry: unknown port → did-you-mean; type mismatch → converter suggestion.
 - A field an op kind doesn't take fails with `unknown_field` and a did-you-mean, instead of being ignored (lenient undo and redo replays skip this check).
-- Update ops merge by key, and `null` removes a key (props, settings, meta, published ports). `updateInterface` also takes `replace: true`, which makes each side it's given (inputs, outputs) the whole set. Unpublishing a port disconnects its cables inside the component and on every instance, including reads of a layer instance's prop (`@chip_1.label`), and the inverse restores them. An output declared again without `link` keeps its cable; `link: null` disconnects it.
+- Update ops merge by key, and `null` removes a key (props, settings, meta, published ports). `updateInterface` also takes `replace: true`, which makes each side it's given (inputs, outputs) the whole set. Unpublishing a port disconnects its cables inside the component and on every instance, including reads of a layer instance's prop (`@chip_1.label`), and the inverse restores them. A port declared again with a type (or options) its cables and instance values no longer fit drops those the same way. A layer instance's own properties (`position`, `enabled`…) resolve before published inputs with the same key, so these cascades leave them alone. An output declared again without `link` keeps its cable; `link: null` disconnects it.
 - A batch may replace an item under its id (remove, then add); ids removed by earlier batches are retired (§3.2).
+- `replacePatch` changes a patch's type in place (the editor's Replace With): it keeps the id, position, custom name and bypass, and every value and cable whose port the new type has under the same key (or the one `inputMap` / `outputMap` names) with a type that fits. The rest are dropped, listed in the op result's `dropped`, and restored by the inverse.
+- An op's side effects are spelled out in `applied` (the values `replacePatch`, a `typeParam` change or a retyped published port drop), so lenient undo and redo replays land on the same documents.
 
-Op kinds (see `Op` in `packages/core/src/types.ts`): `addLayer, updateLayer, moveLayer, removeLayer, addPatch, updatePatch, removePatch, setInput, connect, disconnect, rename, addComment, updateComment, removeComment, addComponent, removeComponent, createComponent, updateInterface, updateComponent, setScript, addAsset, removeAsset, setProject`, and the project-level knob ops `addKnob, updateKnob, removeKnob, setKnobValue, addKnobPreset, updateKnobPreset, removeKnobPreset, applyKnobPreset`. There is no separate layer-prop op: `setInput` and `connect` accept `@layer.prop` addresses, and `$knob.<id>` as a source.
+Op kinds (see `Op` in `packages/core/src/types.ts`): `addLayer, updateLayer, moveLayer, removeLayer, addPatch, updatePatch, replacePatch, removePatch, setInput, connect, disconnect, rename, addComment, updateComment, removeComment, addComponent, removeComponent, createComponent, updateInterface, updateComponent, setScript, addAsset, removeAsset, setProject`, and the project-level knob ops `addKnob, updateKnob, removeKnob, setKnobValue, addKnobPreset, updateKnobPreset, removeKnobPreset, applyKnobPreset`. There is no separate layer-prop op: `setInput` and `connect` accept `@layer.prop` addresses, and `$knob.<id>` as a source.
 
 Knob ops:
 - The first `addKnob` makes a "Default" preset; removing the last knob of a project that never had other presets removes `knobs.json` again.
 - `setKnobValue` tunes the running preset (or `preset`) and is refused on a locked one, except in lenient undo and redo; creating a knob or changing its type may still write a locked preset.
 - `updateKnob` with a new `type` converts every value through the link coercions, and is refused when a value can't convert or an input that reads the knob can't take the new type.
 - `removeKnob` leaves every reader holding the running value, converted to what it takes, so the prototype behaves as it did.
-- `removeKnobPreset` refuses the last preset and a locked one; `applyKnobPreset` switches the running preset. `createComponent` keeps knob links inside and publishes nothing for them.
+- `removeKnobPreset` refuses a locked preset, and the last one while knobs remain; `applyKnobPreset` switches the running preset. `createComponent` keeps knob links inside and publishes nothing for them.
 - `planVariablesToKnobs` (core) turns constant Variable Broadcasters into one undoable batch of these ops.
 
 Errors are `{ code, message, hint, address, opIndex, suggestions: [{ description, ops }] }` and are written for humans first. Links may also read layer outputs or props: `{ "link": "@layerId.key" }`.
@@ -445,6 +447,8 @@ Layer types are declared in `@sonobe/core` (`layerTypes.ts`) with typed props (k
 
 **Common props:** `enabled, repeat, position, size, anchor, pivot, opacity, scale, rotation (point3d), zPosition, cornerRadius, cornerSmoothing, color/fill, stroke, shadow (color, opacity, radius, offset), blur, blendMode, clip, layout (group), sizing, hitSlop`.
 
+**Text Field.** `text` and `focused` reach the field only when they change, so typing isn't overwritten every frame. Its pulse props act every time: `setText` puts `textToSet` in the field, and `beginEditing` / `endEditing` focus and dismiss it. A layer's pulse prop fires like a patch's pulse input (a pulse output's true, or a connected boolean turning on). The engine applies these commands through its text-input tracker on the step they fire, and a field with state its props don't show carries it on its SceneNode (`textField`: the text it holds, plus a `textRevision` and an `editRevision`). Renderers act when a revision changes, so no one-frame flag has to be caught; the SVG renderer draws the text the field holds.
+
 ---
 
 ## 8. Renderer (`@sonobe/renderer`)
@@ -477,6 +481,7 @@ Layer types are declared in `@sonobe/core` (`layerTypes.ts`) with typed props (k
 - **Stack:** React 19, Zustand store holding `SonobeDocument` and editor state. All mutations go through `store.apply(ops, label)`, which wraps `applyOps` and history.
 - **Patch editor** is built on `@xyflow/react` with custom node rendering:
   - Port colors by type, a distinct pulse glyph, a "×N" loop badge, and live values on hover.
+  - One watched loop copy per session (the patch editor bridge's `watchedCopy`): inline values, hover cards and inspector read-outs show item k of a loop (k mod its length) instead of the "×N" summary, and inside a looped layer instance the live scope reads copy k (`card#3/…`). A looped port's hover card lists every copy, and hovering a row watches it. The "Copy #k of N" chip steps through copies, the live scope chip lists a looped instance's copies, and clicking a copy on the canvas watches it.
   - A pulse "spark" animation along cables, and a glow for true state.
   - Links:
     - drag an output → input

@@ -49,8 +49,9 @@ Some connections convert automatically: number to boolean (on when > 0), boolean
 - `dryRun: true` previews the diagnostics without changing anything.
 - `expectedRevision` refuses to apply when the document moved on.
 - A batch can replace an item under its id: remove it, then add the new one. Ids removed by an earlier batch are retired, so new items skip them (`card_2`, reported on a "Retired ids skipped" line) and an explicit retired `id` fails with `id_retired`. Rebuild in one batch to keep ids.
+- To swap a patch for another type, change it in place: `{ "op": "replacePatch", "id": "grow_spring", "patch": { "type": "classicAnimation" } }` keeps its id, position, name, and every value and cable that still fits a port with the same key. `inputMap` / `outputMap` (`{ "number": "progress" }`) carry one to a port with another key. The result lists what it dropped.
 
-Op kinds: `addLayer`, `updateLayer`, `moveLayer`, `removeLayer`, `addPatch`, `updatePatch`, `removePatch`, `setInput` (literal or link; `null` resets), `connect`, `disconnect`, `rename`, `addComment`, `updateComment`, `removeComment`, `addComponent`, `removeComponent`, `createComponent`, `updateInterface` (by key; `null` unpublishes; `replace: true` sets a whole side), `updateComponent`, `setScript`, `addAsset`, `removeAsset`, `setProject`. Every op may name a `component`; a field an op doesn't take fails with `unknown_field` and a did-you-mean.
+Op kinds: `addLayer`, `updateLayer`, `moveLayer`, `removeLayer`, `addPatch`, `updatePatch`, `replacePatch` (a new type in place), `removePatch`, `setInput` (literal or link; `null` resets), `connect`, `disconnect`, `rename`, `addComment`, `updateComment`, `removeComment`, `addComponent`, `removeComponent`, `createComponent`, `updateInterface` (by key; `null` unpublishes; `replace: true` sets a whole side), `updateComponent`, `setScript`, `addAsset`, `removeAsset`, `setProject`. Every op may name a `component`; a field an op doesn't take fails with `unknown_field` and a did-you-mean.
 
 ## Example: dim a dot while it's pressed
 

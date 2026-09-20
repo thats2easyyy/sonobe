@@ -262,6 +262,11 @@ export const LAYER_TYPES: LayerTypeSpec[] = [
       prop("secure", "Secure", "boolean", false, "content", "Hide characters (passwords)."),
       prop("keyboardType", "Keyboard", "enum", "default", "content", "Keyboard hint on mobile.", { enumOptions: opts(["default", "Default"], ["number", "Number"], ["email", "Email"], ["url", "URL"], ["phone", "Phone"]) }),
       prop("focused", "Focused", "boolean", false, "content", "Set true to focus the field."),
+      // Text and Focused only act when they change. These pulses act every time, whatever the field holds.
+      prop("setText", "Set Text", "pulse", false, "content", "Replaces what's in the field with Text to Set, even when it's the same text (clear a composer after Send).", { advanced: true }),
+      prop("textToSet", "Text to Set", "text", "", "content", "The text Set Text puts in the field. Empty clears it.", { advanced: true }),
+      prop("beginEditing", "Begin Editing", "pulse", false, "content", "Focuses the field, as if the person tapped it.", { advanced: true }),
+      prop("endEditing", "End Editing", "pulse", false, "content", "Ends editing and dismisses the keyboard.", { advanced: true }),
     ],
     outputs: outputs(
       { key: "value", name: "Text", type: "text", description: "What's currently typed." },

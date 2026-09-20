@@ -1,7 +1,7 @@
-/** Patch editor chrome: toolbar, zoom and minimap controls, live scope, hints, empty state. */
+/** Patch editor chrome: toolbar, zoom and minimap controls, live scope and watched copy, hints, empty state. */
 
 import { useReactFlow, useViewport } from "@xyflow/react";
-import { ChevronDown, Map as MapIcon, MessageSquarePlus, Minus, Plus, Scan, WandSparkles, X } from "lucide-react";
+import { ChevronDown, ChevronLeft, ChevronRight, Map as MapIcon, MessageSquarePlus, Minus, Plus, Scan, WandSparkles, X } from "lucide-react";
 import { createPortal } from "react-dom";
 import { IconButton } from "../../../ui/IconButton.tsx";
 import { Kbd } from "../../../ui/Kbd.tsx";
@@ -11,6 +11,7 @@ import { FIT_VIEW_PADDING } from "../model/geometry.ts";
 import { instanceChoiceKey } from "../model/instances.ts";
 import { patchEditorBridge } from "../state/bridge.ts";
 import { usePatchEditor, useUi } from "../state/context.ts";
+import { useWatchedCopy } from "../state/watch.ts";
 
 export { PatchEditorBreadcrumbs, type PatchEditorBreadcrumbsProps } from "./Breadcrumbs.tsx";
 
@@ -80,12 +81,17 @@ export function ZoomControls() {
   );
 }
 
+/** Copies listed by name in the live scope menu; the watched copy chip steps through more. */
+const LISTED_COPIES = 24;
+
 /**
  * Inside a component: where live values come from ("Live · Press Card"), with a menu to switch
- * instances when the component is used several times, or a note that it doesn't run anywhere.
+ * instances when the component is used several times or to pick one copy of a looped instance
+ * ("Card #3"), or a note that it doesn't run anywhere.
  */
 export function LiveScopeChip() {
-  const { liveScope, session } = usePatchEditor();
+  const { liveScope, session, instanceCopies } = usePatchEditor();
+  const watched = useWatchedCopy(session);
   const menu = useContextMenu();
   if (liveScope.steps.length === 0 && liveScope.prefix !== null) return null;
   if (liveScope.prefix === null) {
@@ -100,6 +106,10 @@ export function LiveScopeChip() {
   const current = last.instances.find((x) => x.id === last.instance) ?? last.instances[0]!;
   const path = liveScope.steps.map((s) => s.instances.find((x) => x.id === s.instance)?.name ?? s.instance).join(" › ");
   const several = last.instances.length > 1;
+  // A looped instance draws one copy per item; values come from the watched one (copy 0 until you pick).
+  const copies = instanceCopies ?? 0;
+  const copy = copies ? (watched ?? 0) % copies : null;
+  const bridge = patchEditorBridge(session).getState();
   const entries: MenuEntry[] = [
     { type: "label", id: "title", label: "Show live values from" },
     ...last.instances.map(
@@ -108,23 +118,61 @@ export function LiveScopeChip() {
         label: instance.name,
         description: instance.kind === "patch" ? `Patch ${instance.id}` : `Layer ${instance.id}`,
         checked: instance.id === current.id,
-        onSelect: () => patchEditorBridge(session).getState().chooseInstance(instanceChoiceKey(last.parent, last.component), instance.id),
+        onSelect: () => bridge.chooseInstance(instanceChoiceKey(last.parent, last.component), instance.id),
       }),
     ),
   ];
+  if (copies) {
+    entries.push({ type: "separator", id: "copies" }, { type: "label", id: "copies-title", label: `${current.name} has ${copies === 1 ? "1 copy" : `${copies} copies`}` });
+    for (let i = 0; i < Math.min(copies, LISTED_COPIES); i++) {
+      entries.push({ id: `copy-${i}`, label: `${current.name} #${i}`, description: `${current.id}#${i}`, checked: i === copy, onSelect: () => bridge.watchCopy(i) });
+    }
+  }
+  const name = copy === null ? current.name : `${current.name} #${copy}`;
   return (
-    <div className="sb-pe-live" data-state="on" title={`Live values from ${path}`}>
+    <div className="sb-pe-live" data-state="on" title={`Live values from ${path}${copy === null ? "" : ` #${copy}`}`}>
       <span className="sb-pe-live__dot" aria-hidden />
       <span className="sb-pe-live__label">Live</span>
-      {several ? (
-        <button type="button" className="sb-pe-live__pick" aria-haspopup="menu" aria-label={`Live values from ${current.name}. Choose another instance`} onClick={(event) => menu.open(event, entries)}>
-          {current.name}
+      {several || copies > 1 ? (
+        <button type="button" className="sb-pe-live__pick" aria-haspopup="menu" aria-label={`Live values from ${name}. Choose another ${several ? "instance" : "copy"}`} onClick={(event) => menu.open(event, entries)}>
+          {name}
           <ChevronDown size={11} strokeWidth={2.25} aria-hidden />
         </button>
       ) : (
-        <span className="sb-pe-live__name">{current.name}</span>
+        <span className="sb-pe-live__name">{name}</span>
       )}
       {menu.element}
+    </div>
+  );
+}
+
+/**
+ * "Copy #3 of 12": the loop copy live values show here and in the inspector, with arrows to step
+ * through the copies and × to go back to the "×N" summary. It counts the longest loop shown, or,
+ * inside a looped component instance, its copies.
+ */
+export function WatchedCopyChip() {
+  const { session, liveEnabled, instanceCopies } = usePatchEditor();
+  const loopCopies = useUi((s) => s.loopCopies);
+  const watched = useWatchedCopy(session);
+  const count = instanceCopies ?? loopCopies;
+  if (!liveEnabled || (count === 0 && watched === null)) return null;
+  const bridge = patchEditorBridge(session).getState();
+  const step = (delta: number) => {
+    if (!count) return;
+    const from = watched === null ? (delta > 0 ? -1 : 0) : watched % count;
+    bridge.watchCopy((from + delta + count) % count);
+  };
+  const shown = watched === null ? null : count ? watched % count : watched;
+  const label = shown === null ? `${count} ${count === 1 ? "copy" : "copies"}` : count ? `Copy #${shown} of ${count}` : `Copy #${shown}`;
+  return (
+    <div className="sb-pe-copy" role="group" aria-label="Watched loop copy" data-watching={shown !== null || undefined}>
+      <IconButton size="xs" icon={<ChevronLeft size={12} />} label="Watch the previous copy" disabled={count === 0} onClick={() => step(-1)} />
+      <span className="sb-pe-copy__label sb-tabular" aria-live="polite" title={shown === null ? "Loops show their size and first item. Step to one copy to see its values here and in the inspector." : "Live values show this copy of every loop."}>
+        {label}
+      </span>
+      <IconButton size="xs" icon={<ChevronRight size={12} />} label="Watch the next copy" disabled={count === 0} onClick={() => step(1)} />
+      {shown !== null && <IconButton size="xs" icon={<X size={12} />} label="Show every copy" onClick={() => bridge.watchCopy(null)} />}
     </div>
   );
 }

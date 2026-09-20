@@ -280,6 +280,24 @@ describe("apply_ops", () => {
     expect(fresh.structured).toMatchObject({ ok: true, revision: 3 });
   });
 
+  it("replaces a patch's type in place and lists what didn't fit", async () => {
+    await buildGrowCard(client);
+    const r = await client.call("apply_ops", {
+      ops: [{ op: "replacePatch", id: "grow_spring", patch: { type: "classicAnimation" } }],
+    });
+    expect(r.isError, r.text).toBe(false);
+    expect(r.text).toContain("Dropped what the new patch type has no fitting port for: grow_spring.bounciness (5), grow_spring.speed (12). The undo tool brings them back.");
+    expect(r.structured.dropped).toEqual([
+      { to: "grow_spring.bounciness", value: 5 },
+      { to: "grow_spring.speed", value: 12 },
+    ]);
+    const outline = (await client.call("get_outline", {})).text;
+    expect(outline).toContain('patch grow_spring classicAnimation<number> "Grow Spring" number←card_grown.on');
+    expect(outline).toContain("progress←grow_spring.output");
+    const history = await client.call("list_history", {});
+    expect(history.text).toContain("replaced 1 patch");
+  });
+
   it("creates patch components with published ports", async () => {
     const r = await client.call("apply_ops", {
       ops: [
@@ -507,6 +525,16 @@ describe("rebuilding a component", () => {
     { op: "removePatch", component: "swipe_card", id: "went_left" },
     { op: "updateInterface", component: "swipe_card", replace: true, inputs: { down: { name: "Down", type: "boolean" } }, outputs: { gone: { name: "Gone", type: "boolean" } } },
   ];
+
+  it("a port declared again with another type lists the cables it no longer fits", async () => {
+    await buildSwipeCard();
+    const r = await client.call("apply_ops", { ops: [{ op: "updateInterface", component: "swipe_card", inputs: { swipedLeft: { name: "Swipe Color", type: "color" } } }] });
+    expect(r.isError, r.text).toBe(false);
+    expect(r.text).toContain("Disconnected 1 cable in main: tap.tap → card_1_swipe.swipedLeft.");
+    expect(r.text).toContain("Disconnected 1 cable in swipe_card: $in.swipedLeft → went_left.turnOn.");
+    expect(r.text).toContain("The undo tool brings them back.");
+    expect(r.structured.diagnostics).toMatchObject({ totals: { errors: 0 } });
+  });
 
   it("replace: true unpublishes old ports, and the result lists every cable it cut; undo restores them", async () => {
     await buildSwipeCard();

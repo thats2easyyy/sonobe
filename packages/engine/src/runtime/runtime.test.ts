@@ -393,6 +393,63 @@ describe("runtime: services and issues", () => {
     expect(rt.getValue("submits.count")).toBe(1);
   });
 
+  it("Text Field pulses: Set Text clears what was typed every time, Begin and End Editing focus it", () => {
+    const rt = createTestRuntime(
+      buildDoc({
+        layers: [
+          { id: "send", type: "rectangle", name: "Send", props: { position: [0, 0], size: [100, 100] } },
+          { id: "edit", type: "rectangle", name: "Edit", props: { position: [200, 0], size: [100, 100] } },
+          {
+            id: "field",
+            type: "textField",
+            name: "Composer",
+            props: { position: [0, 300], size: [300, 44], setText: { link: "tap_send.tap" }, endEditing: { link: "tap_send.tap" }, beginEditing: { link: "editing.on" } },
+          },
+          { id: "other", type: "textField", name: "Other", props: { position: [0, 400], size: [300, 44], text: "untouched" } },
+        ],
+        patches: {
+          tap_send: { type: "interaction", inputs: { layer: { layer: "send" } } },
+          tap_edit: { type: "interaction", inputs: { layer: { layer: "edit" } } },
+          editing: { type: "switch", inputs: { turnOn: { link: "tap_edit.tap" } } },
+          typed: { type: "splitter", typeParam: "text", inputs: { value: { link: "@field.value" } } },
+          focused: { type: "splitter", typeParam: "boolean", inputs: { value: { link: "@field.isFocused" } } },
+        },
+      }),
+    );
+    const field = () => rt.scene().roots.find((n) => n.layerId === "field")!;
+    rt.step();
+    // Nothing typed or commanded yet: the scene is what it always was.
+    expect(field().textField).toBeUndefined();
+    expect(rt.scene().roots.find((n) => n.layerId === "other")!.textField).toBeUndefined();
+
+    const sendAndRead = (typed: string) => {
+      rt.dispatch([{ kind: "text", layerId: "field", value: typed }]);
+      rt.step();
+      expect(rt.getValue("typed.output")).toBe(typed);
+      runFrames(rt, 2, tap(50, 50));
+      rt.step();
+      return rt.getValue("typed.output");
+    };
+    expect(sendAndRead("hi")).toBe("");
+    expect(field().textField).toMatchObject({ text: "", textRevision: 1, editing: false });
+    // Text to Set is "" both times: a second Send still clears, where setting Text to "" again wouldn't.
+    expect(sendAndRead("hi again")).toBe("");
+    expect(field().textField!.textRevision).toBeGreaterThan(1);
+
+    // Begin Editing from a Switch fires once when it turns on, not on every frame it stays on.
+    runFrames(rt, 2, tap(250, 50));
+    rt.step();
+    expect(rt.getValue("editing.on")).toBe(true);
+    expect(rt.getValue("focused.output")).toBe(true);
+    const began = field().textField!;
+    expect(began.editing).toBe(true);
+    runFrames(rt, 3);
+    expect(field().textField!.editRevision).toBe(began.editRevision);
+    rt.restart();
+    rt.step();
+    expect(field().textField).toBeUndefined();
+  });
+
   it("keyboard input reaches patches", () => {
     const keys = defineMock({
       type: "keys",

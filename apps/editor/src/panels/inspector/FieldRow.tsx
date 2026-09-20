@@ -16,7 +16,7 @@ import { PortGlyph } from "../../ui/PortGlyph.tsx";
 import { toast } from "../../ui/Toast.tsx";
 import { Tooltip } from "../../ui/Tooltip.tsx";
 import { useLatest } from "../../ui/lib/hooks.ts";
-import { layerPropDropAttributes, startLinkToLayerProp, type LayerPropTarget } from "../patch-editor/api.ts";
+import { layerPropDropAttributes, startLinkToLayerProp, useWatchedScope, type LayerPropTarget } from "../patch-editor/api.ts";
 import { controlKind, LiveReadout, STACKED_CONTROLS, useAssetFieldImport, ValueControl, type FieldActions } from "./controls.tsx";
 import { editLabel, linkSourceItem, planFieldDisconnect, planFieldReset, planFieldSet, type InspectorField } from "./model.ts";
 import { useInspectorEdit } from "./useInspectorEdit.ts";
@@ -52,10 +52,15 @@ export function useFieldActions(field: InspectorField, subject: string): FieldAc
   }, [session, edit, latest, subject]);
 }
 
-/** A live runtime value that subscribes on its own, so only this readout re-renders while the prototype plays. */
+/**
+ * A live runtime value that subscribes on its own, so only this readout re-renders while the
+ * prototype plays. It reads what the patch editor watches: the same instance (and copy of a looped
+ * instance), and the watched copy of a looped value.
+ */
 export function LiveValue({ address, type, copies }: { address: string; type: ValueType; copies?: boolean }) {
-  const values = useLiveValues([address], { hz: 15 });
-  return <LiveReadout value={values[address]} type={type} {...(copies ? { copies } : {})} />;
+  const { prefix, copy } = useWatchedScope(useEditorSession());
+  const values = useLiveValues([address], { hz: 15, ...(prefix !== null ? { scope: { instancePath: prefix } } : {}) });
+  return <LiveReadout value={values[address]} type={type} copy={copy} {...(copies ? { copies } : {})} />;
 }
 
 /** A row's state while a patch editor drags a cable. */

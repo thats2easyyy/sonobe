@@ -107,13 +107,36 @@ describe("TextInputTracker", () => {
       { kind: "text", layerId: "field", key: "field#2", value: "hello" },
       { kind: "submit", layerId: "field" },
     ]);
-    expect(text.snapshot("field")).toEqual({ value: undefined, focused: true, submitted: true });
-    expect(text.snapshot("field#2")).toEqual({ value: "hello", focused: undefined, submitted: false });
+    const untouched = { textRevision: 0, editRevision: 0, editing: false };
+    expect(text.snapshot("field")).toEqual({ value: undefined, focused: true, submitted: true, ...untouched });
+    expect(text.snapshot("field#2")).toEqual({ value: "hello", focused: undefined, submitted: false, ...untouched });
     text.endFrame();
     expect(text.snapshot("field").submitted).toBe(false);
     text.setValue("field#2", "reset");
-    expect(text.snapshot("field#2").value).toBe("reset");
+    expect(text.snapshot("field#2")).toMatchObject({ value: "reset", textRevision: 0 });
     text.reset();
-    expect(text.snapshot("field")).toEqual({ value: undefined, focused: undefined, submitted: false });
+    expect(text.snapshot("field")).toEqual({ value: undefined, focused: undefined, submitted: false, ...untouched });
+    expect(text.has("field")).toBe(false);
+  });
+
+  it("counts Set Text and Begin/End Editing as revisions that keep rising across restarts", () => {
+    const text = new TextInputTracker();
+    text.update([{ kind: "text", layerId: "field", value: "hi" }]);
+    text.setText("field", "");
+    expect(text.snapshot("field")).toMatchObject({ value: "", textRevision: 1, editRevision: 0 });
+    // Setting the same text again is still a new revision: that's what clears a field twice.
+    text.setText("field", "");
+    expect(text.snapshot("field").textRevision).toBe(2);
+    text.setEditing("field", true);
+    expect(text.snapshot("field")).toMatchObject({ focused: true, editing: true, editRevision: 3 });
+    // The renderer's blur wins until the next command.
+    text.update([{ kind: "focus", layerId: "field", focused: false }]);
+    expect(text.snapshot("field")).toMatchObject({ focused: false, editing: true, editRevision: 3 });
+    text.setEditing("field", false);
+    expect(text.snapshot("field")).toMatchObject({ focused: false, editing: false, editRevision: 4 });
+    text.reset();
+    expect(text.has("field")).toBe(false);
+    text.setText("field", "again");
+    expect(text.snapshot("field").textRevision).toBe(5);
   });
 });
