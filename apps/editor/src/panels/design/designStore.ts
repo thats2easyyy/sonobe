@@ -60,8 +60,11 @@ export interface DesignRequest {
   outcome?: AssistantOutcome;
   error?: AssistantError;
 }
-/** The screen the box's import made. What it covers is read from the document when it's shown (status.ts resultPlacement). */
-export interface DesignResult { kind: "added" | "updated"; layerId: string; component: string; name: string; txnId: string | null; dropped: string[]; droppedCount: number; reply: string }
+/**
+ * The screen the box's import made. What it covers is read from the document when it's shown (status.ts resultPlacement).
+ * `undone`: Undo put its import on the redo stack. Redo clears it, and a later edit that empties the redo stack leaves it set.
+ */
+export interface DesignResult { kind: "added" | "updated"; layerId: string; component: string; name: string; txnId: string | null; dropped: string[]; droppedCount: number; reply: string; undone?: boolean }
 export interface DesignData {
   open: boolean;
   newScreen: boolean;
@@ -362,20 +365,40 @@ function holdsImport(session: EditorSession, imported: AssistantImported): boole
 }
 
 /**
+ * Mark the result undone while Undo has put its import on the redo stack, and not after Redo brings it
+ * back. Once a later edit empties the redo stack, it stays undone: a redesign keeps its layer's id, so the
+ * old layer Undo brought back would otherwise read as Claude's result again. Returns unsubscribe.
+ */
+function followResultUndo(session: EditorSession): () => void {
+  return session.document.subscribe((state, previous) => {
+    const { result } = designStore.getState();
+    const txnId = result?.txnId;
+    // Undo, Redo and edits each move the revision.
+    if (!result || !txnId || state.revision === previous.revision) return;
+    // Neither stack holding it (the redo stack emptied, or the undo limit dropped it) keeps what it was.
+    const undone = state.redoEntries().some((e) => e.txnId === txnId) || (!!result.undone && !state.historyEntries().some((e) => e.txnId === txnId));
+    if (undone !== !!result.undone) designStore.setState({ result: { ...result, undone } });
+  });
+}
+
+/**
  * Subscribe to host.assistant.onEvent (default getAssistantHost()); on tool_finished.imported into this
  * window's document, select and reveal the screen when it's in the current component and the selection
- * hasn't changed since the run started; set result. Also ends MCP drafts that go idle. Returns detach.
+ * hasn't changed since the run started; set result. Also follows Undo of the result, and ends MCP drafts
+ * that go idle. Returns detach.
  */
 export function attachDesign(session: EditorSession, host: AssistantHostLike | null = getAssistantHost()): () => void {
   // The chip's × means "New screen" until the selection changes.
   const stopSelection = session.selection.subscribe((state, previous) => {
     if (state.layers !== previous.layers && designStore.getState().newScreen) designStore.getState().setNewScreen(false);
   });
+  const stopUndo = followResultUndo(session);
   const stopIdle = endIdleDrafts();
   const onEvent = host?.assistant?.onEvent;
   if (!onEvent) {
     return () => {
       stopSelection();
+      stopUndo();
       stopIdle();
     };
   }
@@ -443,6 +466,7 @@ export function attachDesign(session: EditorSession, host: AssistantHostLike | n
   return () => {
     unsubscribe();
     stopSelection();
+    stopUndo();
     stopIdle();
   };
 }

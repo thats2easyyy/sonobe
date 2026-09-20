@@ -367,6 +367,51 @@ describe("DesignBox", () => {
     expect(container.querySelector(".sb-design-box__chips")).toBeNull();
   });
 
+  it("keeps an undone redesign undone through the next edit, and the layer Undo brought back isn't Claude's", async () => {
+    await mount();
+    const card = () => findLayer(session.document.getState().doc.components.main!.layers, "card")!.layer;
+    const rename = (id: string, name: string) =>
+      act(() => {
+        session.document.getState().apply([{ op: "updateLayer", component: "main", id, name }], { label: "Rename" });
+      });
+    // A replace keeps the layer's id, as import_design's does.
+    let txnId = "";
+    act(() => {
+      session.document.getState().apply([{ op: "removeLayer", component: "main", id: "card" }, { op: "addLayer", component: "main", layer: { id: "card", type: "group", name: "Card v2", props: { position: [16, 146], size: [370, 300] } } }], { label: "Import “Card v2”" });
+      txnId = session.document.getState().lastChange!.txnId!;
+    });
+    select(["card"]);
+    showResult({ kind: "updated", layerId: "card", name: "Card v2", txnId, reply: "A bolder card." });
+    expect(statusText()).toBe("Updated “Card v2”.");
+    expect(chip()).toBe("Change “Card v2”");
+
+    click(buttonNamed("Undo"));
+    expect(card().name).toBe("Event Card");
+    expect(statusText()).toBe("Undid the new version of “Card v2”.");
+    expect(chip()).toBe("Redesign “Event Card”");
+    // Redo, then an edit: the redesign is back, and stays Claude's.
+    act(() => {
+      session.document.getState().redo();
+    });
+    rename("next_card", "Upcoming Card");
+    expect(statusText()).toBe("Updated “Card v2”.");
+    expect(chipLabels()).toEqual(["Make it interactive", "Add knobs", "Try a darker version"]);
+    expect(chip()).toBe("Change “Card v2”");
+
+    // Undo it again, then edit: the edit empties the redo stack, and the old card is still the person's.
+    act(() => {
+      session.document.getState().undo();
+      session.document.getState().undo();
+    });
+    rename("like_button", "Heart");
+    expect(session.document.getState().redoEntries()).toEqual([]);
+    expect(card().name).toBe("Event Card");
+    expect(statusText()).toBe("Undid the new version of “Card v2”.");
+    expect(container.querySelector(".sb-design-box__chips")).toBeNull();
+    expect(container.querySelector(".sb-design-box__reply")).toBeNull();
+    expect(chip()).toBe("Redesign “Event Card”");
+  });
+
   it("offers Send to Back while a new screen is in front of other layers, and says where it is after", async () => {
     await mount();
     const screen = addScreen("Checkout");

@@ -63,7 +63,8 @@ export function Splitter({
     if (!d || d.pointerId !== event.pointerId) return;
     const { min: lo, max: hi, invert: inv, onResize: resize } = latest.current;
     const delta = (vertical ? event.clientX : event.clientY) - d.start;
-    const next = Math.round(clamp(d.startSize + (inv ? -delta : delta), { min: lo, max: hi }));
+    // Back where it started (or moving only across it): the size it started at, not that size rounded.
+    const next = delta === 0 ? d.startSize : Math.round(clamp(d.startSize + (inv ? -delta : delta), { min: lo, max: hi }));
     if (next !== d.last) {
       d.last = next;
       resize(next);
@@ -76,7 +77,9 @@ export function Splitter({
     drag.current = null;
     setDragging(false);
     document.documentElement.removeAttribute("data-resizing");
-    latest.current.onResizeEnd?.(d.last);
+    // A click, or a drag that ended where it started, resized nothing. Reporting it would send back a size worked
+    // out from a ratio (the canvas split's), which can come back a hair off and read as a new one.
+    if (d.last !== d.startSize) latest.current.onResizeEnd?.(d.last);
   };
 
   const setSize = (next: number) => {

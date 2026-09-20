@@ -78,9 +78,6 @@ function DesignBoxPanel({ session, bounds, onHeightChange }: DesignBoxProps): JS
   useStore(session.selection, (s) => s.layers);
   const doc = useStore(session.document, (s) => s.doc);
   const topTxn = useStore(session.document, (s) => s.historyEntries(1)[0]?.txnId ?? null);
-  const resultTxn = design.result?.txnId ?? null;
-  // Undo (the chip, ⌘Z or History) puts the result's import on the redo stack.
-  const resultUndone = useStore(session.document, (s) => resultTxn !== null && s.redoEntries().some((e) => e.txnId === resultTxn));
   const composerRef = useRef<HTMLTextAreaElement>(null);
   const boxRef = useRef<HTMLElement>(null);
   const noticeId = useId();
@@ -130,8 +127,8 @@ function DesignBoxPanel({ session, bounds, onHeightChange }: DesignBoxProps): JS
   const boxRun = runState === "running";
   const busy = runState === "busy";
   const now = Date.now();
-  // Where the result is now: the line and chips follow Undo, Send to Back and deletes.
-  const placement = design.result ? resultPlacement(doc, design.result, resultUndone) : undefined;
+  // Where the result is now: the line and chips follow Undo (the chip, ⌘Z or History; attachDesign marks it), Send to Back and deletes.
+  const placement = design.result ? resultPlacement(doc, design.result) : undefined;
   const noKeyText = `Designing on the canvas uses your own Anthropic API key, kept in your keychain.${controller.canOpenInClaudeCode ? " With a Claude plan, open it in Claude Code instead: it draws on this canvas as it writes." : ""}`;
   // A reply without an import (a question, or wiring patches) is the status line itself. Without a key, the
   // notice below shows why nothing was sent, and the (hidden) live region says so to screen readers.
