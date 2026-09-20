@@ -27,9 +27,13 @@ export const LANDING_MS = 440;
  */
 export const ORB_TOLERANCE = 0.8;
 
-/** Flight time for a cable of this length, so short and long cables feel alike. */
+/**
+ * Flight time for a cable of this length, so short and long cables feel alike: quick enough that the
+ * orb reads as the change arriving, not as something after it (the value, the viewer and the port
+ * dots change at once).
+ */
 export function orbDuration(length: number): number {
-  return Math.round(Math.min(900, Math.max(300, 220 + length * 0.55)));
+  return Math.round(Math.min(450, Math.max(180, 150 + length * 0.4)));
 }
 
 /**

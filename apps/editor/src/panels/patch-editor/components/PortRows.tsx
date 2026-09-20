@@ -143,11 +143,11 @@ function PulseRing({ address }: { address: string }) {
   return shown > 0 ? <span key={shown} className="sb-pe-pulse-ring" aria-hidden /> : null;
 }
 
-const OutputPort = memo(function OutputPort({ nodeId, port }: { nodeId: string; port: PortModel }) {
+const OutputPort = memo(function OutputPort({ nodeId, port, showsLive }: { nodeId: string; port: PortModel; showsLive: boolean }) {
   const { liveEnabled, ui, session, componentId } = usePatchEditor();
   const hover = useHoverCard(nodeId, port);
   const onContextMenu = usePortMenu(nodeId, port);
-  const live = useLiveValue(liveEnabled ? port.address : null);
+  const live = useLiveValue(liveEnabled && showsLive ? port.address : null);
   const copy = useWatchedCopy(session);
   const armed = useUi((s) => s.armed?.address === port.address);
   const truthy = copy === null ? isTruthyState(live) : pickCopy(live, copy).value === true;
@@ -158,14 +158,15 @@ const OutputPort = memo(function OutputPort({ nodeId, port }: { nodeId: string; 
     ui.getState().set({ armed: armed ? null : { nodeId, handleId: port.handleId, address: port.address, type: port.type, label } });
   };
   const text = liveText(port, live, copy);
-  // The slot is as wide as the longest value its type prints, so the node holds still while the
-  // value changes (a longer one ends in "…"), and no wider than a long row has room for, so its
+  // The slot is as wide as the longest value its type prints, whichever loop copy is watched, and is
+  // there before the first value, so the node mounts at the width it keeps and holds still while the
+  // value changes (a longer one ends in "…"). It's no wider than a long row has room for, so its
   // labels stay whole.
-  const reserve = text ? liveReserve(port, live, copy) : 0;
+  const reserve = showsLive ? liveReserve(port, live) : 0;
   const slot = reserve ? ({ "--sb-pe-live-reserve": `${reserve}ch`, ...(port.liveRoom !== undefined ? { "--sb-pe-live-room": `${port.liveRoom}px` } : {}) } as CSSProperties) : undefined;
   return (
     <div className="sb-pe-port sb-pe-port--out" data-connected={port.connected || undefined} data-live={truthy || undefined} data-armed={armed || undefined} onClick={onClick} onContextMenu={onContextMenu} {...hover}>
-      {text && (
+      {(text || reserve > 0) && (
         <span className="sb-pe-port__live sb-tabular" style={slot}>
           {text}
         </span>
@@ -184,6 +185,8 @@ export interface PortRowsProps {
   inputs: readonly PortModel[];
   outputs: readonly PortModel[];
   editable: boolean;
+  /** Outputs show live values in their slots (all but Component Inputs, whose ports never have one). */
+  showsLive?: boolean;
 }
 
 /**
@@ -202,7 +205,7 @@ function useRemeasureOnHandleChange(nodeId: string, inputs: readonly PortModel[]
 }
 
 /** Inputs down the left, outputs down the right, one row each. */
-export const PortRows = memo(function PortRows({ nodeId, inputs, outputs, editable }: PortRowsProps) {
+export const PortRows = memo(function PortRows({ nodeId, inputs, outputs, editable, showsLive = true }: PortRowsProps) {
   useRemeasureOnHandleChange(nodeId, inputs, outputs);
   const rows = Math.max(inputs.length, outputs.length);
   if (rows === 0) return <div className="sb-pe-rows sb-pe-rows--empty" />;
@@ -214,7 +217,7 @@ export const PortRows = memo(function PortRows({ nodeId, inputs, outputs, editab
         return (
           <div key={i} className="sb-pe-row">
             {input ? <InputPort nodeId={nodeId} port={input} editable={editable} /> : <span className="sb-pe-port sb-pe-port--spacer" />}
-            {output ? <OutputPort nodeId={nodeId} port={output} /> : null}
+            {output ? <OutputPort nodeId={nodeId} port={output} showsLive={showsLive} /> : null}
           </div>
         );
       })}

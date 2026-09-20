@@ -453,7 +453,7 @@
         "start": 0,
         "value": { "link": "burst_spring.output" }
       },
-      "ui": { "x": 1080, "y": 790 }
+      "ui": { "x": 1116, "y": 802 }
     },
     "burst_scale": {
       "type": "transition",
@@ -464,7 +464,7 @@
         "progress": { "link": "burst_spring.output" },
         "start": 0.3
       },
-      "ui": { "x": 1080, "y": 640 }
+      "ui": { "x": 1116, "y": 640 }
     },
     "burst_shape": {
       "type": "svgPathShape",
@@ -485,7 +485,7 @@
         "number": { "link": "burst_visible.on" },
         "speed": 16
       },
-      "ui": { "x": 820, "y": 1240 }
+      "ui": { "x": 856, "y": 1286 }
     },
     "burst_timer": {
       "type": "wait",
@@ -494,7 +494,7 @@
         "duration": 0.55,
         "start": { "link": "double_tap_photo.doubleTap" }
       },
-      "ui": { "x": 300, "y": 790 }
+      "ui": { "x": 336, "y": 802 }
     },
     "burst_visible": {
       "type": "switch",
@@ -503,13 +503,13 @@
         "turnOff": { "link": "burst_timer.finished" },
         "turnOn": { "link": "double_tap_photo.doubleTap" }
       },
-      "ui": { "x": 560, "y": 940 }
+      "ui": { "x": 596, "y": 952 }
     },
     "double_tap_photo": {
       "type": "doubleTap",
       "name": "Double-Tap Photo",
       "inputs": { "layer": { "layer": "post_photo" } },
-      "ui": { "x": 40, "y": 790 }
+      "ui": { "x": 40, "y": 802 }
     },
     "heart_fill": {
       "type": "transition",
@@ -520,7 +520,7 @@
         "progress": { "link": "like_spring.output" },
         "start": "#FF3D7100"
       },
-      "ui": { "x": 820, "y": 790 }
+      "ui": { "x": 856, "y": 802 }
     },
     "heart_outline": {
       "type": "transition",
@@ -531,7 +531,7 @@
         "progress": { "link": "like_spring.output" },
         "start": "#111118FF"
       },
-      "ui": { "x": 820, "y": 940 }
+      "ui": { "x": 856, "y": 952 }
     },
     "heart_scale": {
       "type": "transition",
@@ -542,7 +542,7 @@
         "progress": { "link": "like_spring.output" },
         "start": 0.9
       },
-      "ui": { "x": 820, "y": 640 }
+      "ui": { "x": 856, "y": 640 }
     },
     "heart_shape": {
       "type": "svgPathShape",
@@ -563,7 +563,7 @@
         "value1": 128,
         "value2": { "link": "liked.on" }
       },
-      "ui": { "x": 560, "y": 790 }
+      "ui": { "x": 596, "y": 802 }
     },
     "like_label": {
       "type": "formatNumber",
@@ -572,7 +572,7 @@
         "suffix": " likes",
         "value": { "link": "like_count.output" }
       },
-      "ui": { "x": 820, "y": 1090 }
+      "ui": { "x": 856, "y": 1102 }
     },
     "like_spring": {
       "type": "popAnimation",
@@ -583,7 +583,7 @@
         "number": { "link": "liked.on" },
         "speed": 14
       },
-      "ui": { "x": 560, "y": 640 }
+      "ui": { "x": 596, "y": 640 }
     },
     "liked": {
       "type": "switch",
@@ -592,7 +592,7 @@
         "flip": { "link": "tap_heart.tap" },
         "turnOn": { "link": "double_tap_photo.doubleTap" }
       },
-      "ui": { "x": 300, "y": 640 }
+      "ui": { "x": 336, "y": 640 }
     },
     "tap_heart": {
       "type": "interaction",

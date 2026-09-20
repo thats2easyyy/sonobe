@@ -363,7 +363,7 @@
         "progress": { "link": "zoom_spring.output" },
         "start": 0.08
       },
-      "ui": { "x": 820, "y": 340 }
+      "ui": { "x": 820, "y": 352 }
     },
     "card_shadow_radius": {
       "type": "transition",
@@ -374,7 +374,7 @@
         "progress": { "link": "zoom_spring.output" },
         "start": 18
       },
-      "ui": { "x": 820, "y": 190 }
+      "ui": { "x": 820, "y": 202 }
     },
     "card_zoomed": {
       "type": "switch",

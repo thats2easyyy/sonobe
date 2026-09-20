@@ -1611,7 +1611,7 @@
         "start": 0,
         "value": { "link": "tracks_scroll.y" }
       },
-      "ui": { "x": 300, "y": 340 }
+      "ui": { "x": 343, "y": 340 }
     },
     "cover_fade": {
       "type": "transition",
@@ -1622,7 +1622,7 @@
         "progress": { "link": "collapse.progress" },
         "start": 1
       },
-      "ui": { "x": 560, "y": 640 }
+      "ui": { "x": 603, "y": 696 }
     },
     "cover_scale": {
       "type": "transition",
@@ -1633,7 +1633,7 @@
         "progress": { "link": "collapse.progress" },
         "start": 1
       },
-      "ui": { "x": 560, "y": 490 }
+      "ui": { "x": 603, "y": 546 }
     },
     "header_size": {
       "type": "transition",
@@ -1644,7 +1644,7 @@
         "progress": { "link": "collapse.progress" },
         "start": [402, 300]
       },
-      "ui": { "x": 560, "y": 340 }
+      "ui": { "x": 603, "y": 340 }
     },
     "play_icon_shape": {
       "type": "svgPathShape",
@@ -1665,7 +1665,7 @@
         "progress": { "link": "collapse.progress" },
         "start": [322, 244]
       },
-      "ui": { "x": 560, "y": 1090 }
+      "ui": { "x": 603, "y": 1146 }
     },
     "play_scale": {
       "type": "transition",
@@ -1676,7 +1676,7 @@
         "progress": { "link": "collapse.progress" },
         "start": 1
       },
-      "ui": { "x": 560, "y": 1240 }
+      "ui": { "x": 603, "y": 1296 }
     },
     "title_position": {
       "type": "transition",
@@ -1687,7 +1687,7 @@
         "progress": { "link": "collapse.progress" },
         "start": [24, 228]
       },
-      "ui": { "x": 560, "y": 790 }
+      "ui": { "x": 603, "y": 846 }
     },
     "title_size": {
       "type": "transition",
@@ -1698,7 +1698,7 @@
         "progress": { "link": "collapse.progress" },
         "start": 34
       },
-      "ui": { "x": 560, "y": 940 }
+      "ui": { "x": 603, "y": 996 }
     },
     "tracks_scroll": {
       "type": "scroll",

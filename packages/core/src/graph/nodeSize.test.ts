@@ -62,11 +62,12 @@ describe("measureNode", () => {
     expect(width({ kind: "layer", title: "Card", chips: [], rows: [{ in: { label: label(20), drive: true } }] })).toBe(12 + 120 + 6 + 14 + 36);
   });
 
-  it("keeps a live value's slot at its reserve (in characters of the mono font, and half a point), at most 96 pt, and only while a value shows", () => {
+  it("keeps a live value's slot at its reserve (in characters of the mono font, and half a point), at most 96 pt, before a value shows too", () => {
     expect(width(patch([{ in: { label: label(20) }, out: { label: "Output", live: "Off", reserve: 3 } }]))).toBe(Math.ceil(12 + 120 + 12 + 18.5 + 6 + 36 + 12));
     expect(width(patch([{ in: { label: label(20) }, out: { label: "Output", live: "0", reserve: 8 } }]))).toBe(Math.ceil(12 + 120 + 12 + 48.5 + 6 + 36 + 12));
     expect(width(patch([{ in: { label: label(20) }, out: { label: "Output", live: "0, 0", reserve: 18 } }]))).toBe(12 + 120 + 12 + 96 + 6 + 36 + 12);
-    expect(width(patch([{ in: { label: label(20) }, out: { label: "Output", reserve: 8 } }]))).toBe(12 + 120 + 12 + 36 + 12);
+    expect(width(patch([{ in: { label: label(20) }, out: { label: "Output", reserve: 8 } }]))).toBe(width(patch([{ in: { label: label(20) }, out: { label: "Output", live: "0", reserve: 8 } }])));
+    expect(width(patch([{ in: { label: label(20) }, out: { label: "Output" } }]))).toBe(12 + 120 + 12 + 36 + 12);
   });
 
   it("ends a value longer than its reserve in an ellipsis instead of widening the node", () => {
@@ -96,6 +97,9 @@ describe("measureNode", () => {
     const header = 16 + 16 + 6 + 120;
     expect(width(patch([], { title, chips: [{ kind: "chip", text: "Number" }] }))).toBe(header + 6 + 10 + 36);
     expect(width(patch([], { title, chips: [{ kind: "loop", text: "×4" }] }))).toBe(header + 6 + 22);
+    // The loop badge keeps the room of its reserve, so its count gaining a digit doesn't widen the node.
+    expect(width(patch([], { title, chips: [{ kind: "loop", text: "×4", reserve: "×00" }] }))).toBe(header + 6 + 28);
+    expect(width(patch([], { title, chips: [{ kind: "loop", text: "×12", reserve: "×00" }] }))).toBe(header + 6 + 28);
     expect(width(patch([], { title, chips: [{ kind: "badge" }, { kind: "enter" }] }))).toBe(header + 6 + 16 + 6 + 11);
     expect(width(patch([], { title, chips: [{ kind: "working", text: "Claude" }] }))).toBe(header + 6 + 11 + 10 + 36);
   });
@@ -120,7 +124,8 @@ describe("node shapes from the graph", () => {
     const grow = shapes.get("grow")!;
     expect(grow.chips).toEqual([]);
     expect(grow.rows.map((r) => r.in)).toEqual([{ label: "Progress" }, { label: "Start", value: { kind: "number", text: "1" } }, { label: "End", value: { kind: "number", text: "1.08" } }]);
-    expect(grow.rows[0]!.out).toEqual({ label: "Output" });
+    // Its output keeps a number's slot before the prototype runs.
+    expect(grow.rows[0]!.out).toEqual({ label: "Output", reserve: 8 });
     const card = shapes.get("@card")!;
     expect(card).toMatchObject({ kind: "layer", title: "Card", chips: [{ kind: "chip", text: "Group" }] });
     expect(card.rows).toEqual([{ in: { label: "Scale" } }]);
@@ -150,9 +155,14 @@ describe("node shapes from the graph", () => {
     expect(liveReserve(port("pulse"), true)).toBe(0);
     expect(liveReserve(port("number", "progress"), 0.5)).toBe(6);
     expect(liveReserve(port("number", "distance"), 0.5)).toBe(8);
+    // Before the first value, the same slot; a json or any port waits for its value's kind.
+    expect(liveReserve(port("number", "progress"), undefined)).toBe(6);
+    expect(liveReserve(port("point"), undefined)).toBe(liveReserve(port("point"), [0, 0]));
+    expect(liveReserve({ type: "point", loop: true }, undefined)).toBe(liveReserve(port("point"), { __loop: true, items: [[0, 0]] }));
+    expect(liveReserve(port("json"), undefined)).toBe(0);
   });
 
-  it("prints live values when given them, in a slot as wide as the longest number, which widens the node", () => {
+  it("prints live values when given them, in a slot as wide as the longest number, which the node keeps before they arrive", () => {
     const doc = buildSampleDocument();
     const data = deriveGraph({ doc, componentId: "main", registry: mockRegistry }).nodes.find((n) => n.id === "grow")!.data as PatchNodeData;
     const shape = nodeShapeFromData(data, { live: (address) => (address === "grow.output" ? 1.04 : undefined) });
@@ -161,7 +171,7 @@ describe("node shapes from the graph", () => {
     const at = (value: number) => estimateNodeSize(data, { live: () => value, measure: mono6 }).width;
     expect(at(-1234.567)).toBe(Math.ceil(12 + 48 + 12 + 48.5 + 6 + 36 + 12));
     expect(new Set([0, 0.5, -12.35, 100, 1.04, -99999.9].map(at))).toEqual(new Set([at(-1234.567)]));
-    expect(estimateNodeSize(data, { measure: mono6 }).width).toBe(164);
+    expect(estimateNodeSize(data, { measure: mono6 }).width).toBe(at(-1234.567));
   });
 
   it("gives an output in a long row its room for a live value, which the patch editor caps the reserve to", () => {

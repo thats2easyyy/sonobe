@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { OrbTone } from "./orb.ts";
-import { CAUSE_MS, createFrameQueue, createOrbQueue, createOrbRelay, RELAY_MAX_MS, type RelaySend } from "./orbSchedule.ts";
+import { CAUSE_MS, createFrameQueue, createOrbBudget, createOrbQueue, createOrbRelay, FAR_ORB_CAP, RELAY_MAX_MS, RELAY_STAGGER_MS, staleOrb, type RelaySend } from "./orbSchedule.ts";
 
 /** Drives a queue the way Orb does, with a fake clock: returns [time, tone] for each orb that leaves. */
 function drive(sends: [now: number, tone: OrbTone][], { hold, gap = 200 }: { hold: boolean; gap?: number }) {
@@ -83,19 +83,20 @@ describe("createOrbQueue", () => {
   });
 });
 
-/** A relay whose batches flush when told, and sends that record when they were told to leave. */
+/** A relay whose batches flush when told, and sends that record when they were told to leave (no earlier than `gate`, as a cable still drawing in holds its orb). */
 function relayHarness(flightMs = 300) {
   let pending: (() => void) | null = null;
   const relay = createOrbRelay((flush) => (pending = flush));
   const launched = new Map<string, number>();
-  const send = (from: string, to: string, event: number, arrives = true): RelaySend => {
+  const send = (from: string, to: string, event: number, { arrives = true, gate = -Infinity }: { arrives?: boolean; gate?: number } = {}): RelaySend => {
     const s: RelaySend = {
       from,
       to,
       event,
       launch: (ready) => {
-        launched.set(`${from}→${to}`, ready);
-        return arrives ? ready + flightMs : null;
+        const leave = Math.max(ready, gate);
+        launched.set(`${from}→${to}`, leave);
+        return arrives ? { leave, arrive: leave + flightMs } : null;
       },
     };
     relay.send(s);
@@ -110,22 +111,30 @@ function relayHarness(flightMs = 300) {
 }
 
 describe("createOrbRelay", () => {
-  it("launches an orb out of a node when the orb into it lands, whatever order they came in", () => {
+  it("sends an orb out of a node RELAY_STAGGER_MS behind the orb into it, whatever order they came in", () => {
     const { send, flush, launched } = relayHarness();
     send("sw", "not", 0);
     send("not", "out", 0);
     send("tick", "sw", 0);
     flush();
-    expect(Object.fromEntries(launched)).toEqual({ "tick→sw": 0, "sw→not": 300, "not→out": 600 });
+    expect(Object.fromEntries(launched)).toEqual({ "tick→sw": 0, "sw→not": RELAY_STAGGER_MS, "not→out": 2 * RELAY_STAGGER_MS });
   });
 
-  it("waits on an orb sent a moment before, in an earlier batch", () => {
+  it("follows an orb sent a moment before, in an earlier batch", () => {
     const { send, flush, launched } = relayHarness();
     send("tick", "sw", 0);
     flush();
     send("sw", "not", 45);
     flush();
-    expect(launched.get("sw→not")).toBe(300);
+    expect(launched.get("sw→not")).toBe(RELAY_STAGGER_MS);
+  });
+
+  it("leaves once the orb before has landed, after a flight shorter than the stagger", () => {
+    const { send, flush, launched } = relayHarness(50);
+    send("a", "b", 0);
+    send("b", "c", 0);
+    flush();
+    expect(launched.get("b→c")).toBe(50);
   });
 
   it("doesn't wait on an orb from an unrelated moment", () => {
@@ -139,18 +148,28 @@ describe("createOrbRelay", () => {
 
   it("doesn't wait on a send that sent no orb", () => {
     const { send, flush, launched } = relayHarness();
-    send("tick", "sw", 0, false);
+    send("tick", "sw", 0, { arrives: false });
     send("sw", "not", 0);
     flush();
     expect(launched.get("sw→not")).toBe(0);
   });
 
-  it("caps the wait, so a long chain can't fall far behind", () => {
-    const { send, flush, launched } = relayHarness(RELAY_MAX_MS * 2);
-    send("a", "b", 0);
+  it("caps the wait, so a long chain keeps up with its values", () => {
+    const { send, flush, launched } = relayHarness();
+    const chain = ["a", "b", "c", "d", "e", "f", "g"];
+    for (let i = 0; i < chain.length - 1; i++) send(chain[i]!, chain[i + 1]!, 0);
+    flush();
+    const leaves = chain.slice(0, -1).map((node, i) => launched.get(`${node}→${chain[i + 1]}`));
+    expect(leaves).toEqual([0, RELAY_STAGGER_MS, 2 * RELAY_STAGGER_MS, 3 * RELAY_STAGGER_MS, RELAY_MAX_MS, RELAY_MAX_MS]);
+  });
+
+  it("never sends an orb ahead of the one it follows, which its cable drawing in may hold back", () => {
+    const { send, flush, launched } = relayHarness();
+    send("a", "b", 0, { gate: 600 });
     send("b", "c", 0);
     flush();
-    expect(launched.get("b→c")).toBe(RELAY_MAX_MS);
+    expect(launched.get("a→b")).toBe(600);
+    expect(launched.get("b→c")).toBe(600);
   });
 
   it("gets through a loop", () => {
@@ -160,6 +179,32 @@ describe("createOrbRelay", () => {
     send("c", "c", 0);
     flush();
     expect(launched.size).toBe(3);
+  });
+});
+
+describe("staleOrb", () => {
+  it("drops an orb whose cable draws in more than the relay's longest wait after its change", () => {
+    expect(staleOrb(1000, 900)).toBe(false);
+    expect(staleOrb(1000, 1000 + RELAY_MAX_MS)).toBe(false);
+    expect(staleOrb(1000, 1001 + RELAY_MAX_MS)).toBe(true);
+    // A reveal: Done turned on 208 ms in, and its cable finished drawing at 715 ms.
+    expect(staleOrb(208, 715)).toBe(true);
+  });
+});
+
+describe("createOrbBudget", () => {
+  it("lets FAR_ORB_CAP orbs fly at once zoomed far out, and any number closer in", () => {
+    const budget = createOrbBudget();
+    const taken = Array.from({ length: FAR_ORB_CAP + 10 }, () => budget.take(0, 400, true));
+    expect(taken.filter(Boolean)).toHaveLength(FAR_ORB_CAP);
+    expect(budget.take(10, 400, false)).toBe(true);
+    // Once they land there's room again.
+    expect(budget.take(400, 800, true)).toBe(true);
+    expect(budget.take(400, 800, true)).toBe(true);
+    // Orbs closer in don't count against it.
+    const near = createOrbBudget(2);
+    for (let i = 0; i < 5; i++) expect(near.take(0, 400, false)).toBe(true);
+    expect([near.take(0, 400, true), near.take(0, 400, true), near.take(0, 400, true)]).toEqual([true, true, false]);
   });
 });
 

@@ -77,7 +77,7 @@ describe("getDiagnostics", () => {
     expect(warning.hint).toBe("If the loop is on purpose, insert a Delay 1 patch on that connection to make the delay explicit. Otherwise disconnect the cable that loops back.");
     const [insert, disconnect] = warning.suggestions!;
     expect(insert!.description).toBe("Insert a Delay 1 on grow.output → pop.number");
-    expect(insert!.ops![0]).toMatchObject({ op: "addPatch", patch: { type: "delay1", ui: { x: 630, y: 40 } } });
+    expect(insert!.ops![0]).toMatchObject({ op: "addPatch", patch: { type: "delay1", ui: { x: 644, y: 40 } } });
     expect(disconnect).toEqual({ description: "Disconnect grow.output → pop.number", ops: [{ op: "disconnect", component: "main", to: "pop.number" }] });
     expect(applyOps(loop, disconnect!.ops!, { registry: mockRegistry }).ok).toBe(true);
     const fixed = mustApply(loop, insert!.ops!).doc;

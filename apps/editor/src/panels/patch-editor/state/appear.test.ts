@@ -5,6 +5,9 @@ import {
   BATCH_MAX_MS,
   BATCH_STEP_MS,
   batchDelays,
+  BRIEF_LAG_MS,
+  BRIEF_MS,
+  BRIEF_WAVE_MS,
   CABLE_LAG_MS,
   CABLE_MS,
   cableStart,
@@ -318,6 +321,64 @@ describe("the appear store", () => {
     store.start();
     expect(store.appearance("node", "a")).toBeDefined();
     expect(store.appearance("node", "b")).toBeDefined();
+  });
+
+  it("reveals briefly after navigation: a short wave without rings, frames fading with the nodes, cables drawing quickly", () => {
+    store = createAppearStore({ now: () => clock, reducedMotion: () => reduced, brief: true });
+    const row = Array.from({ length: 12 }, (_, i) => node(`n${i}`, i * 200));
+    store.sync([node("comment:c", -40, -40, "comment"), ...row], [cable("n0", "n1"), cable("n10", "n11")], human);
+    store.start();
+    expect(store.appearance("node", "comment:c")).toMatchObject({ mode: "fade", start: 1000, end: 1000 + FADE_MS });
+    const first = store.appearance("node", "n0")!;
+    const last = store.appearance("node", "n11")!;
+    expect(first).toEqual({ mode: "brief", start: 1000, end: 1000 + BRIEF_MS });
+    expect(last.start - first.start).toBe(BRIEF_WAVE_MS);
+    expect(store.appearance("cable", "cable:n1.in")).toEqual({ mode: "brief", start: first.start + BRIEF_LAG_MS, end: first.start + BRIEF_LAG_MS + BRIEF_MS });
+    // All of it is in within about a third of a second, not the whole wave's second.
+    expect(store.busyFor()).toBeLessThanOrEqual(BRIEF_WAVE_MS + BRIEF_MS + BRIEF_LAG_MS);
+    expect(BRIEF_WAVE_MS + BRIEF_MS + BRIEF_LAG_MS).toBeLessThan((WAVE_MS + ACCENT_MS) / 2);
+    // What arrives later arrives as it always does.
+    advance(1000);
+    store.sync([node("comment:c", -40, -40, "comment"), ...row, node("late", 3000)], [], claude);
+    expect(store.appearance("node", "late")!.mode).toBe("node");
+  });
+
+  it("reveals in full a document that replaces the graph a brief reveal was waiting on, and fades with reduced motion", () => {
+    store = createAppearStore({ now: () => clock, reducedMotion: () => reduced, brief: true });
+    store.sync([node("a", 0)], [], human);
+    store.reset();
+    store.start();
+    expect(store.appearance("node", "a")!.mode).toBe("node");
+    const canvas = document.createElement("div");
+    reduced = true;
+    const calm = createAppearStore({ now: () => clock, reducedMotion: () => reduced, brief: true });
+    calm.observe(canvas);
+    calm.sync([node("a", 0)], [], human);
+    calm.start();
+    expect(calm.appearance("node", "a")).toBeUndefined();
+    expect(canvas.hasAttribute("data-appear-fade")).toBe(true);
+  });
+
+  it("says when a node or cable is all there, which cable orbs wait for", () => {
+    store.sync([node("a", 0), node("b", 400)], [cable("a", "b")], human);
+    // Nothing shows before the first reveal.
+    expect(store.readyAt("cable", "cable:b.in")).toBe(Infinity);
+    store.start();
+    const drawing = store.appearance("cable", "cable:b.in")!;
+    expect(store.readyAt("cable", "cable:b.in")).toBe(drawing.end);
+    expect(store.readyAt("node", "b")).toBe(store.appearance("node", "b")!.end);
+    advance(drawing.end - clock + 1);
+    expect(store.readyAt("cable", "cable:b.in")).toBe(clock);
+    // A cable nobody animates is there at once.
+    expect(store.readyAt("cable", "cable:nothing.in")).toBe(clock);
+  });
+
+  it("holds cables of a graph fading in with the viewport until the fade is over", () => {
+    const canvas = document.createElement("div");
+    store.observe(canvas);
+    store.sync(Array.from({ length: LARGE_REVEAL + 1 }, (_, i) => node(`n${i}`, i * 10)), [cable("n0", "n1")], human);
+    store.start();
+    expect(store.readyAt("cable", "cable:n1.in")).toBe(clock + FADE_MS);
   });
 
   describe("on React Flow's wrappers", () => {

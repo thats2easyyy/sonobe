@@ -4,11 +4,13 @@
  * an appearance plays once: never again when React Flow remounts a node panned back into view
  * (onlyRenderVisibleElements), or on a drag, collapse, rename or re-measure.
  *
- * - The first reveal (mount, entering a component, a replaced document) waits for the first fit.
- *   When the viewport shows, comment frames fade in, then the nodes in view materialize in a wave
- *   that follows the signal flow left to right, and each cable draws from its output as that node
- *   comes in, its tip reaching an input node that's there or arriving. More than LARGE_REVEAL
- *   nodes, or reduced motion, fade in with the viewport.
+ * - The first reveal (opening the editor, a replaced document, entering or leaving a component)
+ *   waits for the first fit. When the viewport shows, comment frames fade in, then the nodes in view
+ *   materialize in a wave that follows the signal flow left to right, and each cable draws from its
+ *   output as that node comes in, its tip reaching an input node that's there or arriving. Entering
+ *   or leaving a component is navigation, done many times a session, so its reveal is brief: a
+ *   short wave with no rings, over in about a third of a second. More than LARGE_REVEAL nodes, or
+ *   reduced motion, fade in with the viewport.
  * - Later, a node the canvas isn't showing (inserted, pasted, duplicated, brought back by undo,
  *   added by Claude) animates in at once, several in one change in a short wave. New cables that
  *   come with new nodes, or from someone else (Claude, undo and redo), draw in; a cable the person
@@ -55,6 +57,16 @@ export const RING_LIMIT = 64;
 export const PLACED_MS = 1000;
 /** The viewport fade (large graphs, reduced motion) and other plain fades. */
 export const FADE_MS = 180;
+/**
+ * A brief reveal (entering or leaving a component: navigation, done many times a session): nodes fade
+ * and travel 4 px in this long, with no ring, and cables draw as fast...
+ */
+export const BRIEF_MS = 200;
+/** ...in a wave over at most this long, at most BRIEF_STEP_MS a node... */
+export const BRIEF_WAVE_MS = 100;
+export const BRIEF_STEP_MS = 15;
+/** ...each cable leaving its output this far into its node's appearance. */
+export const BRIEF_LAG_MS = 50;
 /** How long past its end an animation keeps its attributes, since CSS starts it on the next frame. */
 const SWEEP_SLACK_MS = 60;
 /** How much the wave weighs y against x, so a column cascades top to bottom. */
@@ -65,9 +77,10 @@ const DEFAULT_SIZE = { width: 200, height: 120 };
 /**
  * node: fade, travel and ring. slide: fade and travel (a wave over RING_LIMIT). still: fade and ring,
  * no travel (the node at the end of a cable the person drew). placed: the ring only (a node the person
- * already sees where it lands). comment: fade. fade: a plain quick fade. draw: a cable drawing from its output.
+ * already sees where it lands). comment: fade. fade: a plain quick fade. draw: a cable drawing from its
+ * output. brief: a brief reveal's quicker node (fade and a short travel) or cable (drawing).
  */
-export type AppearMode = "node" | "slide" | "still" | "placed" | "comment" | "fade" | "draw";
+export type AppearMode = "node" | "slide" | "still" | "placed" | "comment" | "fade" | "draw" | "brief";
 
 export interface Appearance {
   mode: AppearMode;
@@ -122,7 +135,7 @@ export interface AppearPlaced {
  * Delays for a first reveal: a wave across the nodes' x, with y as a slight diagonal so a column
  * cascades top to bottom. It spreads over at most `spread` ms, and over less for a few nodes.
  */
-export function waveDelays(points: readonly AppearPoint[], spread = WAVE_MS): Map<string, number> {
+export function waveDelays(points: readonly AppearPoint[], spread = WAVE_MS, step = WAVE_STEP_MS): Map<string, number> {
   const out = new Map<string, number>();
   if (points.length === 0) return out;
   let minX = Infinity;
@@ -136,7 +149,7 @@ export function waveDelays(points: readonly AppearPoint[], spread = WAVE_MS): Ma
     maxY = Math.max(maxY, p.y);
   }
   const range = maxX - minX + (maxY - minY) * Y_WEIGHT;
-  const total = Math.min(spread, WAVE_STEP_MS * (points.length - 1));
+  const total = Math.min(spread, step * (points.length - 1));
   for (const p of points) out.set(p.id, range > 0 ? Math.round(((p.x - minX + (p.y - minY) * Y_WEIGHT) / range) * total) : 0);
   return out;
 }
@@ -155,7 +168,7 @@ export function batchDelays(points: readonly AppearPoint[]): Map<string, number>
  */
 export function cableStart(output: Appearance | undefined, input: Appearance | undefined, now: number): number {
   let start = now;
-  if (output && output.end > now) start = Math.max(start, output.start + CABLE_LAG_MS);
+  if (output && output.end > now) start = Math.max(start, output.start + (output.mode === "brief" ? BRIEF_LAG_MS : CABLE_LAG_MS));
   if (input && input.end > now) start = Math.max(start, input.start);
   return start;
 }
@@ -171,6 +184,7 @@ export function durationOf(mode: AppearMode): number {
   if (mode === "slide") return NODE_MS;
   if (mode === "comment") return COMMENT_MS;
   if (mode === "draw") return CABLE_MS;
+  if (mode === "brief") return BRIEF_MS;
   return FADE_MS;
 }
 
@@ -182,6 +196,12 @@ export interface AppearStoreOptions {
   now?: () => number;
   /** Reduced motion is on (the OS or the app). Default never. */
   reducedMotion?: () => boolean;
+  /**
+   * The first reveal is brief: the canvas arrives by navigation (entering or leaving a component),
+   * so it plays a short wave (BRIEF_MS, BRIEF_WAVE_MS) without rings. A reset's reveal (another
+   * document) plays the whole wave again.
+   */
+  brief?: boolean;
 }
 
 export interface AppearStore {
@@ -197,6 +217,12 @@ export interface AppearStore {
   observe(canvas: HTMLElement): () => void;
   /** A node's or cable's appearance, while it lasts. */
   appearance(kind: "node" | "cable", id: string): Appearance | undefined;
+  /**
+   * When a node or cable is all there (clock time): now once it has appeared, the end of its
+   * appearance or of the viewport's fade while it's arriving, and Infinity while the viewport waits
+   * for its first reveal. Cable orbs wait for it, so none flies along a wire that hasn't drawn yet.
+   */
+  readyAt(kind: "node" | "cable", id: string): number;
   /** Milliseconds until nothing is appearing (0 when idle). */
   busyFor(): number;
   /** True until the first start, and again after a reset. */
@@ -222,6 +248,7 @@ interface CableEntry {
 export function createAppearStore(options: AppearStoreOptions = {}): AppearStore {
   const now = options.now ?? (() => performance.now());
   const reduced = options.reducedMotion ?? (() => false);
+  let brief = options.brief ?? false;
   let waiting = true;
   let gen = 0;
   /** Nodes on the canvas, with where they are (a batch waves by position). */
@@ -260,7 +287,7 @@ export function createAppearStore(options: AppearStoreOptions = {}): AppearStore
     if (t >= a.end) return;
     el.setAttribute("data-appear", a.mode);
     (el as HTMLElement).style.setProperty("--sb-appear-delay", `${Math.round(a.start - t)}ms`);
-    if (a.mode === "draw") el.querySelector(".sb-pe-cable__wire")?.setAttribute("pathLength", "1");
+    if (a.mode === "draw" || a.mode === "brief") el.querySelector(".sb-pe-cable__wire")?.setAttribute("pathLength", "1");
     styled.set(el, key);
   };
 
@@ -315,12 +342,12 @@ export function createAppearStore(options: AppearStoreOptions = {}): AppearStore
    * (not those they placed), and only new cables that come with one of them draw in: a cable they
    * connected themselves is there already, even to a node still arriving from an earlier change.
    */
-  const planCables = (entries: Iterable<[string, CableEntry]>, t: number, broughtByHand: ReadonlySet<string> | null, keys: Set<string>) => {
+  const planCables = (entries: Iterable<[string, CableEntry]>, t: number, broughtByHand: ReadonlySet<string> | null, keys: Set<string>, draw: AppearMode = "draw") => {
     for (const [id, c] of entries) {
       if (broughtByHand && !broughtByHand.has(c.source) && !broughtByHand.has(c.target)) continue;
       const ends = [arriving(c.source, t), arriving(c.target, t)] as const;
       const start = cableStart(ends[0], ends[1], t);
-      const mode: AppearMode = c.invalid || reduced() || ends.some((a) => a?.mode === "fade") ? "fade" : "draw";
+      const mode: AppearMode = c.invalid || reduced() || ends.some((a) => a?.mode === "fade") ? "fade" : draw;
       shown.set(cableKey(id), { mode, start, end: start + durationOf(mode) });
       keys.add(cableKey(id));
     }
@@ -421,6 +448,8 @@ export function createAppearStore(options: AppearStoreOptions = {}): AppearStore
     start(view, size) {
       if (!waiting) return;
       waiting = false;
+      const quick = brief;
+      brief = false;
       const t = now();
       const revealed: AppearPoint[] = [];
       const comments: string[] = [];
@@ -438,13 +467,15 @@ export function createAppearStore(options: AppearStoreOptions = {}): AppearStore
         return;
       }
       const keys = new Set<string>();
+      // A brief reveal fades frames in with the nodes, which follow at once in a short wave without rings.
+      const frame: AppearMode = quick ? "fade" : "comment";
       for (const id of comments) {
-        shown.set(nodeKey(id), { mode: "comment", start: t, end: t + COMMENT_MS });
+        shown.set(nodeKey(id), { mode: frame, start: t, end: t + durationOf(frame) });
         keys.add(nodeKey(id));
       }
-      const lead = comments.length ? NODE_LEAD_MS : 0;
-      const mode: AppearMode = revealed.length > RING_LIMIT ? "slide" : "node";
-      for (const [id, delay] of waveDelays(revealed)) {
+      const lead = comments.length && !quick ? NODE_LEAD_MS : 0;
+      const mode: AppearMode = quick ? "brief" : revealed.length > RING_LIMIT ? "slide" : "node";
+      for (const [id, delay] of quick ? waveDelays(revealed, BRIEF_WAVE_MS, BRIEF_STEP_MS) : waveDelays(revealed)) {
         const start = t + lead + delay;
         shown.set(nodeKey(id), { mode, start, end: start + durationOf(mode) });
         keys.add(nodeKey(id));
@@ -455,14 +486,16 @@ export function createAppearStore(options: AppearStoreOptions = {}): AppearStore
         t,
         null,
         keys,
+        quick ? "brief" : "draw",
       );
       paintMounted(keys);
       sweep();
     },
 
     reset() {
-      // What's on the canvas stays known (the next graph may share it), and all of it reveals at the next start.
+      // What's on the canvas stays known (the next graph may share it), and all of it reveals at the next start, in the whole wave.
       waiting = true;
+      brief = false;
       shown.clear();
       hint = null;
       sweep();
@@ -512,6 +545,13 @@ export function createAppearStore(options: AppearStoreOptions = {}): AppearStore
     appearance(kind, id) {
       const a = shown.get(kind === "node" ? nodeKey(id) : cableKey(id));
       return a && a.end > now() ? a : undefined;
+    },
+
+    readyAt(kind, id) {
+      if (waiting) return Infinity;
+      const t = now();
+      const a = shown.get(kind === "node" ? nodeKey(id) : cableKey(id));
+      return Math.max(t, fadeUntil, a ? a.end : t);
     },
 
     busyFor() {

@@ -225,7 +225,7 @@ export function measureNode(shape: NodeShape, measure: NodeTextMeasurer = tableM
   for (const c of shape.chips) {
     header += B.headerGap;
     if (c.kind === "chip") header += B.chipPaddingX + measure(c.text, "chip");
-    else if (c.kind === "loop") header += Math.max(B.loopMin, B.chipPaddingX + measure(c.text, "badge"));
+    else if (c.kind === "loop") header += Math.max(B.loopMin, B.chipPaddingX + Math.max(measure(c.text, "badge"), c.reserve ? measure(c.reserve, "badge") : 0));
     else if (c.kind === "working") header += B.workingPaddingX + B.workingDot + measure(c.text, "working");
     else if (c.kind === "badge") header += B.badge;
     else header += B.enterIcon;
@@ -234,7 +234,7 @@ export function measureNode(shape: NodeShape, measure: NodeTextMeasurer = tableM
   if (!shape.collapsed) {
     for (const r of shape.rows) {
       const w = rowWidth(r, measure);
-      const slot = r.out?.live ? (r.out.reserve ? reservedSlot(r.out.reserve, measure, roomBeside(w)) : measure(r.out.live, "mono10")) : 0;
+      const slot = r.out?.reserve ? reservedSlot(r.out.reserve, measure, roomBeside(w)) : r.out?.live ? measure(r.out.live, "mono10") : 0;
       rows = Math.max(rows, w + (slot ? Math.min(B.liveMaxWidth, slot) + B.portGap : 0));
     }
   }
