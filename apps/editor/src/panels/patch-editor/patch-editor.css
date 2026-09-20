@@ -254,6 +254,12 @@
   animation: sb-pe-appear-accent 560ms linear var(--sb-appear-delay, 0ms) both;
 }
 
+/* An option-drag copy lands selected: its ring glows just outside the selection outline, where it shows. */
+.sb-pe .react-flow__node[data-appear="placed"] .sb-pe-node::before {
+  inset: -3px;
+  border-radius: calc(var(--sb-pe-node-radius) + 3px);
+}
+
 /* Claude's nodes flash the AI ring instead; at far zoom the ring is too small to see. */
 .sb-pe .react-flow__node[data-appear] .sb-pe-node[data-flash]::before,
 .sb-pe__canvas[data-lod="far"] .react-flow__node[data-appear] .sb-pe-node::before {
@@ -353,9 +359,10 @@
   }
 }
 
+/* Even-paced, so the skeleton crossfades with the wave arriving instead of cutting away. */
 .sb-pe-loading[data-leaving] {
   opacity: 0;
-  transition-duration: 240ms;
+  transition: opacity 300ms cubic-bezier(0.45, 0, 0.55, 1);
 }
 
 .sb-pe-loading__cables {

@@ -201,6 +201,31 @@ describe("the appear store", () => {
     expect(store.appearance("cable", "cable:e.in")!.mode).toBe("fade");
   });
 
+  it("shows a cable the person connects to a node still arriving as it is, since they drew it", () => {
+    store.sync([node("a", 0)], [], human);
+    store.start();
+    advance(2000);
+    store.sync([node("a", 0), node("b", 300)], [], claude);
+    expect(store.appearance("node", "b")).toBeDefined();
+    advance(100);
+    store.sync([node("a", 0), node("b", 300)], [cable("a", "b")], human);
+    expect(store.appearance("cable", "cable:b.in")).toBeUndefined();
+    // Claude's cable to the same node still waits for it and draws.
+    store.sync([node("a", 0), node("b", 300), node("c", 600)], [cable("a", "b"), cable("b", "c", "b.out")], claude);
+    expect(store.appearance("cable", "cable:c.in")).toMatchObject({ mode: "draw" });
+  });
+
+  it("keeps an option-drag copy's cable while its source is still in the first reveal", () => {
+    store.sync([node("a", 0), node("b", 300)], [cable("a", "b")], human);
+    store.start();
+    advance(60);
+    expect(store.appearance("node", "a")).toBeDefined();
+    store.placed({ nodes: ["b2"] });
+    store.sync([node("a", 0), node("b", 300), node("b2", 300, 200)], [cable("a", "b"), cable("a", "b2")], human);
+    expect(store.appearance("node", "b2")).toMatchObject({ mode: "placed" });
+    expect(store.appearance("cable", "cable:b2.in")).toBeUndefined();
+  });
+
   it("travels without the ring in a wave of more than RING_LIMIT nodes", () => {
     store.sync(Array.from({ length: RING_LIMIT + 1 }, (_, i) => node(`n${i}`, i * 10)), [], human);
     store.start();

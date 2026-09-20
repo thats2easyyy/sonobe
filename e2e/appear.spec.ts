@@ -31,6 +31,15 @@ async function recordAppearances(page: Page): Promise<void> {
 const appeared = (page: Page) => page.evaluate(() => window.__appeared ?? []);
 const clearAppeared = (page: Page) => page.evaluate(() => void (window.__appeared = []));
 const settled = (page: Page) => expect.poll(() => page.locator(".sb-pe [data-appear]").count()).toBe(0);
+/**
+ * Wait for a reveal to start and play out. It starts once the view is in place, which can be well
+ * after the nodes are there (openEditor returns before the first fit), and until it starts nothing
+ * carries data-appear, so settled() alone would pass too early.
+ */
+async function revealPlayed(page: Page): Promise<void> {
+  await expect.poll(async () => (await appeared(page)).length).toBeGreaterThan(0);
+  await settled(page);
+}
 
 test.describe("patch editor: nodes and cables arriving", () => {
   test("a component entered again, at its saved view, reveals every node in view, its interface nodes too", async ({ page }) => {
@@ -38,6 +47,7 @@ test.describe("patch editor: nodes and cables arriving", () => {
     await recordAppearances(page);
     await openEditor(page);
     await runCommand(page, "Patches Only");
+    await revealPlayed(page);
     expect(await hook(page, (s) => s.apply([{ op: "createComponent", component: "main", name: "Heart Logic", patchIds: ["liked", "like_spring"] }], "Group").ok)).toBe(true);
     const enter = () => hook(page, (s) => s.session.selection.getState().enterComponent("heart_logic"));
 
@@ -45,8 +55,7 @@ test.describe("patch editor: nodes and cables arriving", () => {
       await clearAppeared(page);
       await enter();
       await expect(flowNode(page, "$in")).toBeVisible();
-      await expect.poll(async () => (await appeared(page)).length).toBeGreaterThan(0);
-      await settled(page);
+      await revealPlayed(page);
       const inView = await page.locator(".sb-pe .react-flow__node").evaluateAll((els) => {
         const pane = document.querySelector(".sb-pe .react-flow__pane")!.getBoundingClientRect();
         return els
@@ -60,8 +69,11 @@ test.describe("patch editor: nodes and cables arriving", () => {
       expect(inView, pass).toEqual(["$in", "$out", "like_spring", "liked"]);
       const revealed = new Set((await appeared(page)).filter((a) => a.kind === "node").map((a) => a.id));
       expect([...revealed].sort(), pass).toEqual(inView);
+      // Back at the root, its own reveal plays before the next entry.
+      await clearAppeared(page);
       await hook(page, (s) => s.session.selection.getState().setComponentPath(["main"]));
       await expect(flowNode(page, "tap_photo")).toBeVisible();
+      await revealPlayed(page);
       await expect.poll(() => hook(page, (s) => !!s.selection().patchViewports.heart_logic)).toBe(true);
     }
     expect(problems).toEqual([]);
@@ -72,7 +84,7 @@ test.describe("patch editor: nodes and cables arriving", () => {
     await recordAppearances(page);
     await openEditor(page);
     await runCommand(page, "Patches Only");
-    await settled(page);
+    await revealPlayed(page);
     const before = await patchIds(page);
     const title = (await flowNode(page, "zoom_spring").locator(".sb-pe-node__title").boundingBox())!;
     const from = { x: title.x + title.width / 2, y: title.y + title.height / 2 };
@@ -98,7 +110,7 @@ test.describe("patch editor: nodes and cables arriving", () => {
     await recordAppearances(page);
     await openEditor(page);
     await runCommand(page, "Patches Only");
-    await settled(page);
+    await revealPlayed(page);
     await clearAppeared(page);
     const id = await connectNewPatch(page, "zoom_spring", "output", "transition", "transition");
     await settled(page);
