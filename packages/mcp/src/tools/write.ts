@@ -31,7 +31,6 @@ import {
   findFreePosition,
   planTidy,
   portCenterY,
-  rectsOverlap,
   tidyPlanOps,
   type TidyNode,
   type TidyPlan,
@@ -69,8 +68,10 @@ import {
   WriteOutputSchema,
 } from "../schemas.ts";
 import {
+  boxLabel,
   elkGroupLayout,
   estimateGraphGeometry,
+  overlappingPairs,
   resolveGraphGeometry,
   sizesNote,
   type GraphGeometry,
@@ -161,12 +162,22 @@ function droppedText(entry: DroppedInput): string {
   return `${entry.to} (${json.length > 24 ? `${json.slice(0, 23)}…` : json})`;
 }
 
-/** What replacePatch ops dropped because the new type had no port for it, or one it didn't fit. */
+/**
+ * What the batch dropped because a patch's ports changed: replacePatch's new type had no port for
+ * it (or one it didn't fit), or an updatePatch typeParam or inputCount left it without one.
+ */
 function droppedLines(result: HostApplyResult): { lines: string[]; data: Record<string, unknown> } {
   const dropped = result.results.flatMap((r) => (r.ok ? (r.dropped ?? []) : []));
   if (!dropped.length) return { lines: [], data: {} };
+  const replaced = result.applied.some((op) => op.op === "replacePatch");
+  const reshaped = result.applied.some((op) => op.op === "updatePatch" && (op.typeParam !== undefined || op.inputCount !== undefined));
+  const what = replaced && !reshaped
+    ? "what the new patch type has no fitting port for"
+    : reshaped && !replaced
+      ? "what no longer fits after the typeParam or inputCount change"
+      : "what no longer fits a port";
   return {
-    lines: [`${result.dryRun ? "Would drop" : "Dropped"} what the new patch type has no fitting port for: ${capped(dropped.map(droppedText), 8)}.${result.dryRun ? "" : " The undo tool brings them back."}`],
+    lines: [`${result.dryRun ? "Would drop" : "Dropped"} ${what}: ${capped(dropped.map(droppedText), 8)}.${result.dryRun ? "" : " The undo tool brings them back."}`],
     data: { dropped },
   };
 }
@@ -521,16 +532,20 @@ async function tidyRequest(
   return { request, geometry };
 }
 
-/** Node pairs whose boxes overlap: "a × b". */
-function overlappingPairs(nodes: readonly TidyNode[]): string[] {
-  const out: string[] = [];
-  for (let i = 0; i < nodes.length; i++)
-    for (let j = i + 1; j < nodes.length; j++)
-      if (rectsOverlap(nodes[i]!, nodes[j]!)) out.push(`${nodes[i]!.id} × ${nodes[j]!.id}`);
-  return out;
+/**
+ * How a frame's size changed, in words true of both sides: "grew to 798×188 (was 700×120)", and
+ * "got wider and shorter: 798×120 (was 700×240)" when one side grew and the other shrank.
+ */
+export function frameResize(before: readonly [number, number], after: { width: number; height: number }): string {
+  const size = `${after.width}×${after.height} (was ${before[0]}×${before[1]})`;
+  const dw = Math.sign(after.width - before[0]);
+  const dh = Math.sign(after.height - before[1]);
+  if (dw >= 0 && dh >= 0) return `grew to ${size}`;
+  if (dw <= 0 && dh <= 0) return `shrank to ${size}`;
+  return `got ${dw > 0 ? "wider" : "narrower"} and ${dh > 0 ? "taller" : "shorter"}: ${size}`;
 }
 
-/** "Frames: places ("PLACES") grew to 798×188." and "Pushed apart: chips (…) right 458 pt, clear of places (…)." */
+/** "Frames: places ("PLACES") grew to 798×188 (was 330×120)." and "Pushed apart: chips (…) right 458 pt, clear of places (…)." */
 function describeTidy(c: Component, plan: TidyPlan): string[] {
   const name = (id: string) => {
     const comment = c.comments.find((m) => m.id === id);
@@ -542,9 +557,7 @@ function describeTidy(c: Component, plan: TidyPlan): string[] {
     const before = c.comments.find((m) => m.id === id)?.rect;
     if (!before) continue;
     if (r.width !== before[2] || r.height !== before[3])
-      frames.push(
-        `${name(id)} ${r.width * r.height >= before[2] * before[3] ? "grew" : "shrank"} to ${r.width}×${r.height}`,
-      );
+      frames.push(`${name(id)} ${frameResize([before[2], before[3]], r)}`);
     else frames.push(`${name(id)} moved to ${r.x},${r.y}`);
   }
   if (frames.length) lines.push(`Frames: ${frames.join("; ")}.`);
@@ -1106,7 +1119,7 @@ export function registerWriteTools(tc: ToolContext): void {
     {
       title: "Tidy graph",
       description:
-        "Lay the graph out in left-to-right columns by dataflow, as the editor's Tidy Up does. Comment frames are sections: each frame's nodes are laid out inside it, the frame is refit around them, and frames that would overlap are pushed apart, so sections keep their place. frames: tidy only inside those comments. ids: only those nodes, each kept in its own frame. frameMode \"arrange\" also lays out the frames as blocks (whole graph only). Layer and interface nodes move too. Changes editor positions only; dryRun previews. Node sizes are the ones the open patch editor measured, or estimated as it draws them.",
+        "Lay the graph out in left-to-right columns by dataflow, as the editor's Tidy Up does. Comment frames are sections: each frame's nodes are laid out inside it, the frame is refit around them, and frames that would overlap are pushed apart, so sections keep their place. frames: tidy only inside those comments. ids: only those nodes, each kept in its own frame. frameMode \"arrange\" also lays out the frames as blocks (whole graph only). Layer and interface nodes move too. Changes editor positions only; dryRun previews, and lists the nodes that overlap now, with their boxes. Node sizes are the ones the open patch editor measured, or estimated as it draws them.",
       input: z.object({
         docId: DocIdSchema.optional(),
         component: ComponentIdSchema.optional(),
@@ -1148,9 +1161,10 @@ export function registerWriteTools(tc: ToolContext): void {
           docId: snap.docId,
           revision: snap.revision,
         });
-      const overlaps = overlappingPairs(request.nodes);
+      const overlaps = overlappingPairs(geometry.nodes);
+      const label = (id: string) => boxLabel(id, geometry.nodes.get(id)!);
       const notes = [
-        ...(overlaps.length ? [`Overlapping before: ${capped(overlaps)}.`] : []),
+        ...(overlaps.length ? [`Overlapping before: ${capped(overlaps.map(([a, b]) => `${label(a)} × ${label(b)}`))}.`] : []),
         ...describeTidy(c, plan),
         sizesNote(geometry),
       ];
@@ -1160,6 +1174,7 @@ export function registerWriteTools(tc: ToolContext): void {
           moved: [...plan.nodes.keys()],
           frames: Object.fromEntries(plan.frames),
           pushed: plan.pushed,
+          ...(overlaps.length ? { overlapping: overlaps } : {}),
         },
       });
     },

@@ -136,6 +136,30 @@ describe("read tools", () => {
       "grow_spring",
     ]);
 
+    // Placing a node on top of another shows on both, with their boxes, and on the frame (D23).
+    await client.call("apply_ops", {
+      ops: [{ op: "addPatch", patch: { id: "stacked", type: "switch", name: "Stacked", ui: { x: tap.x + 10, y: tap.y + 10 } } }],
+    });
+    const over = await client.call("get_items", { ids: ["grow_spring", "stacked", "motion"] });
+    const stacked = (over.structured.items as { id: string; box?: { x: number; y: number; width: number; height: number } }[]).find((i) => i.id === "stacked")!.box!;
+    expect(over.text).toContain(
+      `  overlaps: stacked (${stacked.x},${stacked.y} ${stacked.width}×${stacked.height}). tidy_graph separates them, or move one (updatePatch ui).`,
+    );
+    expect(over.text).toContain(`  overlaps: grow_spring (${tap.x},${tap.y} ${tap.width}×${tap.height})`);
+    expect(over.text).toContain(
+      `  overlapping: grow_spring (${tap.x},${tap.y} ${tap.width}×${tap.height}) × stacked (${stacked.x},${stacked.y} ${stacked.width}×${stacked.height}). tidy_graph({ "frames": ["motion"] }) lays this frame out.`,
+    );
+    expect((over.structured.items as { id: string; overlaps?: string[]; overlapping?: string[][] }[]).map((i) => i.overlaps ?? i.overlapping)).toEqual([
+      ["stacked"],
+      ["grow_spring"],
+      [["grow_spring", "stacked"]],
+    ]);
+    const tidyPreview = await client.call("tidy_graph", { dryRun: true });
+    expect(tidyPreview.text).toContain(
+      `Overlapping before: grow_spring (${tap.x},${tap.y} ${tap.width}×${tap.height}) × stacked (${stacked.x},${stacked.y} ${stacked.width}×${stacked.height})`,
+    );
+    expect(tidyPreview.structured.overlapping).toContainEqual(["grow_spring", "stacked"]);
+
     const find = await client.call("find", { patchType: "interaction" });
     expect(find.text).toContain("patch tap_card interaction");
     const connected = await client.call("find", { connectedTo: "card_grown" });

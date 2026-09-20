@@ -82,6 +82,9 @@ describe("structuredContent carries the complete payload", () => {
     await call("describe_patch_types", { types: ["popAnimation"] });
     await call("describe_layer_types", { types: ["rectangle"] });
     await call("list_value_types");
+    await call("list_examples", { query: "swipe" });
+    await call("get_example", { id: "01-tap-to-grow", detail: "ops" });
+    await call("get_example", { id: "nope" });
     await call("list_documents");
     await call("open_document", { ref: "test" });
     await call("create_document", {
@@ -183,6 +186,12 @@ const FAILURES: { name: ToolName; args: Record<string, unknown>; code?: string }
   { name: "tidy_graph", args: { component: "nope" } },
   { name: "set_knobs", args: { knobs: [{ name: "Label", connect: ["zoomed.flip"] }] }, code: "invalid_knob" },
   { name: "apply_knob_preset", args: { preset: "Nope" }, code: "unknown_knob_preset" },
+  {
+    name: "apply_ops",
+    args: { ops: [{ op: "rename", id: "photo", name: "Hero" }], dryrun: true },
+    code: "unknown_field",
+  },
+  { name: "sim_step", args: { simID: "sim_1" }, code: "unknown_field" },
 ];
 
 describe("teaching errors survive output-schema validation", () => {

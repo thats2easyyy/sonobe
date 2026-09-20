@@ -43,6 +43,8 @@
     },
     { "name": "describe_layer_types", "description": "Layer types and their properties." },
     { "name": "list_value_types", "description": "Value types, literals and conversions." },
+    { "name": "list_examples", "description": "Verified example prototypes: what each teaches and its key patches." },
+    { "name": "get_example", "description": "One example's patch chain, scenarios and recipe as apply_ops batches." },
     { "name": "list_documents", "description": "Documents open in Sonobe, and drafts to recover." },
     { "name": "open_document", "description": "Open a document or a recovered draft and make it active." },
     { "name": "create_document", "description": "Create a project from a template." },

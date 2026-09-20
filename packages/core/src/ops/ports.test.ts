@@ -63,6 +63,7 @@ describe("variadic startIndex and direction", () => {
     expect(apply(doc, [{ op: "setInput", target: "pick.option3", value: 1 }]).errors[0]!.code).toBe("unknown_port");
     const r = mustApply(doc, [{ op: "updatePatch", id: "pick", inputCount: 2 }], opts);
     expect(main(r.doc).patches.pick!.inputs).toEqual({ option0: 4 });
+    expect(r.results[0]!.dropped).toEqual([{ to: "pick.option2", value: 6 }]);
     expectRoundTrip(doc, r, opts);
   });
 
@@ -78,6 +79,7 @@ describe("variadic startIndex and direction", () => {
     expect(apply(doc, [{ op: "setInput", target: "send.option0", value: 1 }]).errors[0]!.code).toBe("unknown_port");
     const r = mustApply(doc, [{ op: "updatePatch", id: "send", inputCount: 2 }], opts);
     expect(main(r.doc).patches.log!.inputs).toEqual({});
+    expect(r.results[0]!.dropped).toEqual([{ to: "log.value", value: { link: "send.option2" } }]);
     expectRoundTrip(doc, r, opts);
   });
 });

@@ -228,7 +228,7 @@ export function registerReadTools(tc: ToolContext): void {
     {
       title: "Get items",
       description:
-        'Details for specific layers, patches or comments by id: every port with its current value, default or link; where outputs go; parents and children; which patches reference a layer. Patches and layer nodes show their box in the patch graph (position and width×height as the editor draws them), and comments list the nodes they frame. Reach inside component instances with an instance path: "like_button_2/liked" or "@card#2/badge".',
+        'Details for specific layers, patches or comments by id: every port with its current value, default or link; where outputs go; parents and children; which patches reference a layer. Patches and layer nodes show their box in the patch graph (position and width×height as the editor draws them) and the nodes whose boxes overlap it, and comments list the nodes they frame and which of them overlap: check your own placement here. Reach inside component instances with an instance path: "like_button_2/liked" or "@card#2/badge".',
       input: z.object({
         docId: DocIdSchema.optional(),
         component: ComponentIdSchema.optional().describe(

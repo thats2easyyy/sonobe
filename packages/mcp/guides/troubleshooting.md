@@ -54,7 +54,7 @@ Nothing changed when a write fails. Fix the call and retry.
 | `self_edge`                                          | a patch feeds its own input             | put a `delay1` in between                                                             |
 | `revision_conflict`                                  | the document changed since you read it  | re-read, then retry with the new `expectedRevision`                                   |
 | `unknown_ref`                                        | no op in the batch defines that `$ref`  | add `"ref"` on the op that creates the item; the error lists the batch's refs         |
-| `unknown_field`                                      | an op or port has no such field         | use the "did you mean"; `updateInterface` takes `replace: true` for a whole side      |
+| `unknown_field`                                      | a tool, op or port has no such field    | use the "did you mean"; `updateInterface` takes `replace: true` for a whole side      |
 | `id_taken`                                           | an item already has that id             | remove the old item earlier in the same batch, or leave `id` out                      |
 | `id_retired`                                         | an earlier batch removed that id        | undo the removal and rebuild in one batch, or leave `id` out to get `_2`              |
 | `human_edit` (undo)                                  | the newest change is the person's       | ask first; pass its `txnId` to undo it anyway                                         |

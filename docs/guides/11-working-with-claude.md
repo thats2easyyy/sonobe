@@ -166,12 +166,13 @@ Most tool calls finish in a second or two. Importing a design can take longer, b
 
 ## What Claude can do
 
-Sonobe gives Claude 45 tools in seven groups: discovery, documents, reading, writing, knobs, simulation, and presence and history. Here's what they look like in practice:
+Sonobe gives Claude 47 tools in seven groups: discovery, documents, reading, writing, knobs, simulation, and presence and history. Here's what they look like in practice:
 
 | You ask for | Claude uses tools like |
 |---|---|
 | "What does this prototype do?" | `get_outline`, `find`, `get_selection`, `explain` |
 | "Build a long-press menu on the photo." | `describe_patch_types`, `add_layers`, `add_patches`, `connect`, `set_values`, `apply_ops` |
+| "Make a swipeable card deck like the example." | `list_examples`, `get_example` (its patch chain, and its recipe as ops) |
 | "Make the title bigger and rename it." | `update_layers`, `rename` |
 | "Wrap this into a component." | `create_component`, `tidy_graph` |
 | "Tap the Save button and see what happens." | `sim_reset`, `sim_dispatch`, `sim_step`, `sim_get_values`, `get_screenshot` |

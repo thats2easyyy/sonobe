@@ -13,15 +13,18 @@ import {
 } from "@modelcontextprotocol/server";
 import type { z } from "zod";
 import { clientLabel, isClientId, type ClientRegistry } from "./clients.ts";
+import { defaultExamples, type ExampleCatalog } from "./examples.ts";
 import { defaultGuides, type GuideStore } from "./guides.ts";
 import type { SonobeHost, WorkClient } from "./host.ts";
+import { RejectedArguments, toolInputSchema, unknownFieldsError } from "./inputs.ts";
 import { callSignal, toolWork, type CallScope, type ToolWork } from "./progress.ts";
 import { registerPrompts } from "./prompts.ts";
 import { registerResources } from "./resources.ts";
-import { guarded, withCompleteText } from "./results.ts";
+import { failure, guarded, withCompleteText } from "./results.ts";
 import { toolOutputSchema, type ToolOutputSchema } from "./schemas.ts";
 import { registerDiscoveryTools } from "./tools/discovery.ts";
 import { registerDocumentTools } from "./tools/documents.ts";
+import { registerExampleTools } from "./tools/examples.ts";
 import { registerImportTools } from "./tools/import.ts";
 import { registerKnobTools } from "./tools/knobs.ts";
 import { registerPresenceTools } from "./tools/presence.ts";
@@ -36,6 +39,8 @@ export interface SonobeMcpServerOptions {
   name?: string;
   /** Guide store (default: packages/mcp/guides). */
   guides?: GuideStore;
+  /** The examples catalog (default: the examples registry, examples.ts). */
+  examples?: ExampleCatalog;
   /** Replace the default instructions. */
   instructions?: string;
   /**
@@ -52,6 +57,8 @@ export const TOOL_NAMES = [
   "describe_patch_types",
   "describe_layer_types",
   "list_value_types",
+  "list_examples",
+  "get_example",
   "list_documents",
   "open_document",
   "create_document",
@@ -141,6 +148,7 @@ export interface ToolContext {
   server: McpServer;
   options: SonobeMcpServerOptions;
   guides(): GuideStore;
+  examples(): ExampleCatalog;
   /** The agent attributed in history ("Claude", or the client's name). */
   author(ctx: ServerContext): Author;
   /** The session making the call, when it came through the relay (its sonobe-client id). */
@@ -151,8 +159,9 @@ export interface ToolContext {
    */
   signal(ctx: ServerContext): AbortSignal;
   /**
-   * Register a tool with teaching-error handling. Handlers get a ToolWork third: progress, steps
-   * with deadlines, and the call's cancellation signal (progress.ts).
+   * Register a tool with teaching-error handling. Its input refuses fields the schema doesn't take
+   * with a did-you-mean (inputs.ts). Handlers get a ToolWork third: progress, steps with deadlines,
+   * and the call's cancellation signal (progress.ts).
    */
   tool<S extends z.ZodObject>(
     name: ToolName,
@@ -195,7 +204,7 @@ export function serverInstructions(host: SonobeHost): string {
     "Workflow:",
     '1. Call get_guide("start-here") once per conversation (again after your context is compacted).',
     "2. Call get_document_info, then get_outline, before changing anything. Use ids exactly as the outline shows them; never guess.",
-    "3. Before wiring patches, look them up with list_patch_types and describe_patch_types so port keys, types and defaults are real.",
+    "3. Before wiring patches, look them up with list_patch_types and describe_patch_types so port keys, types and defaults are real. For an interaction a verified example covers (a bottom sheet, swipe cards, a carousel, a tab bar...), read it first: list_examples, then get_example for its patch chain and its recipe as apply_ops batches.",
     "4. Call begin_work with a short intent before editing, and finish_work when you're done.",
     '5. Build in small batches (one feature at a time) with add_layers, add_patches (with connections), connect, set_values or apply_ops. Give new items a "ref" and wire them with "$ref.port" in the same batch. To rebuild items, remove the old ones and add their replacements in the same apply_ops so they keep their ids (ids removed by an earlier batch are retired and get a suffix). To swap one patch for another type, replacePatch changes it in place and keeps the cables that fit. Every write returns ids, the new revision and diagnostics added/resolved; pass expectedRevision so you never overwrite edits the person made meanwhile.',
     '   Build the numbers the person will want to tune or compare (distances, spring feel, thresholds) as knobs with set_knobs, with presets such as a locked "Shipped app" next to "Proposal" (get_guide("knobs")).',
@@ -288,6 +297,7 @@ export function createSonobeMcpServer(
     server,
     options,
     guides: () => options.guides ?? defaultGuides(),
+    examples: () => options.examples ?? defaultExamples(),
     author: (ctx) => {
       const info = clientInfoOf(server, ctx);
       const announced = session(ctx);
@@ -301,14 +311,16 @@ export function createSonobeMcpServer(
     },
     signal: (ctx) => signals.get(ctx) ?? ctx.mcpReq.signal,
     tool(name, config, handler) {
-      const run = guarded(
-        handler as (args: unknown, ctx: ServerContext, work: ToolWork) => Promise<CallToolResult>,
+      const typed = handler as (args: unknown, ctx: ServerContext, work: ToolWork) => Promise<CallToolResult>;
+      // Arguments with fields the tool doesn't take never reach the handler (inputs.ts).
+      const run = guarded(async (args: unknown, ctx: ServerContext, work: ToolWork) =>
+        args instanceof RejectedArguments ? failure(unknownFieldsError(name, args.fields)) : typed(args, ctx, work),
       );
       const output = config.output ? toolOutputSchema(config.output) : undefined;
       const registration: Record<string, unknown> = {
         title: config.title,
         description: config.description,
-        inputSchema: config.input,
+        inputSchema: toolInputSchema(name, config.input),
         annotations: { title: config.title, ...config.annotations },
       };
       if (output) registration.outputSchema = output;
@@ -334,6 +346,7 @@ export function createSonobeMcpServer(
     },
   };
   registerDiscoveryTools(tc);
+  registerExampleTools(tc);
   registerDocumentTools(tc);
   registerReadTools(tc);
   registerWriteTools(tc);

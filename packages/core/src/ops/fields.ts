@@ -1,7 +1,8 @@
 /**
- * The top-level fields each op kind takes. applyOps refuses anything else, so a misspelled or
- * guessed field ("input" for "inputs", "mode": "replace") fails with a did-you-mean instead of being
- * ignored.
+ * The top-level fields each op kind takes, and the fields of the new layer, patch or comment an add
+ * op wraps. applyOps refuses anything else, so a misspelled or guessed field ("input" for "inputs",
+ * "mode": "replace", a layer's "position" outside "props") fails with a did-you-mean instead of
+ * being ignored.
  */
 
 import { didYouMean, didYouMeanText } from "../suggest.ts";
@@ -47,8 +48,8 @@ const OP_FIELDS: Record<OpKind, readonly string[]> = {
 
 /** Ops that wrap a new item in one field, and that item's fields. */
 const WRAPPED: Partial<Record<OpKind, { field: string; keys: readonly string[]; example: string }>> = {
-  addLayer: { field: "layer", keys: ["ref", "id", "type", "name", "props", "children"], example: '{ "op": "addLayer", "layer": { "type": "rectangle", "name": "Card" } }' },
-  addPatch: { field: "patch", keys: ["ref", "id", "type", "name", "typeParam", "inputCount", "inputs", "settings", "ui"], example: '{ "op": "addPatch", "patch": { "type": "switch", "name": "Liked" } }' },
+  addLayer: { field: "layer", keys: ["ref", "id", "type", "name", "props", "children", "component"], example: '{ "op": "addLayer", "layer": { "type": "rectangle", "name": "Card" } }' },
+  addPatch: { field: "patch", keys: ["ref", "id", "type", "name", "typeParam", "inputCount", "inputs", "settings", "component", "ui"], example: '{ "op": "addPatch", "patch": { "type": "switch", "name": "Liked" } }' },
   replacePatch: { field: "patch", keys: ["type", "typeParam", "inputCount", "settings", "name"], example: '{ "op": "replacePatch", "id": "spring", "patch": { "type": "classicAnimation" } }' },
   addComment: { field: "comment", keys: ["ref", "id", "text", "rect", "color"], example: '{ "op": "addComment", "comment": { "text": "Press states", "rect": [0, 0, 400, 200] } }' },
   addComponent: { field: "component", keys: ["id", "name", "kind", "interface", "layers", "patches", "comments", "notes", "size", "meta"], example: '{ "op": "addComponent", "component": { "name": "Card", "kind": "layerComponent" } }' },
@@ -71,4 +72,28 @@ export function checkOpFields(op: Record<string, unknown>, kind: OpKind): void {
     else if (kind === "removeComponent" && key === "component") hint = 'Name the component to remove with "id": { "op": "removeComponent", "id": "card" }.';
     fail("unknown_field", `${kind} has no field "${key}".${didYouMeanText(didYouMean(key, fields))}`, { hint });
   }
+  if (kind === "addLayer") checkLayerFields(op.layer, "layer");
+  else if (kind === "addPatch" || kind === "addComment") checkItemFields(kind, op[WRAPPED[kind]!.field], WRAPPED[kind]!.field);
+}
+
+/** Where values by key go in each new item, for keys that look like one ("position" on a layer). */
+const VALUES_FIELD: Partial<Record<OpKind, string>> = { addLayer: "props", addPatch: "inputs" };
+
+/** Fail when the new item an add op wraps has a field it doesn't take. `at` is its path in the op. */
+function checkItemFields(kind: OpKind, item: unknown, at: string): void {
+  if (!item || typeof item !== "object" || Array.isArray(item)) return;
+  const { keys, field } = WRAPPED[kind]!;
+  for (const key of Object.keys(item)) {
+    if (keys.includes(key)) continue;
+    const guesses = didYouMean(key, keys);
+    const values = VALUES_FIELD[kind];
+    const where = values && !guesses.length ? ` Values by key, like "${key}", go inside "${values}": { "${field}": { "${values}": { "${key}": … } } }.` : "";
+    fail("unknown_field", `${kind}'s "${at}" has no field "${key}".${didYouMeanText(guesses)}`, { hint: `A new ${field} takes: ${keys.join(", ")}.${where}` });
+  }
+}
+
+function checkLayerFields(layer: unknown, at: string): void {
+  checkItemFields("addLayer", layer, at);
+  const children = (layer as { children?: unknown } | null)?.children;
+  if (Array.isArray(children)) children.forEach((child, i) => checkLayerFields(child, `${at}.children[${i}]`));
 }
