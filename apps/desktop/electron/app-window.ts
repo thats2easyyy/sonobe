@@ -4,7 +4,7 @@ import type { SonobeCommandId } from "./host-api.d.ts";
 import { ISSUES_URL } from "./commands.ts";
 import { DARK_BACKGROUND, placeholderHtml, toDataUrl } from "./placeholder.ts";
 import type { RendererRpcHub } from "./rpc.ts";
-import { isAppUrl, isExternalUrl, isMailtoUrl, type AppContent } from "./security.ts";
+import { isAllowedSubframeUrl, isAppUrl, isExternalUrl, isMailtoUrl, type AppContent } from "./security.ts";
 import { ZOOM_MAX, ZOOM_MIN, loadWindowState, saveWindowStateSync, type WindowState } from "./window-state.ts";
 import { IPC, MUTED_ARG } from "./ipc.ts";
 import type { NativeAction } from "./menu.ts";
@@ -156,6 +156,13 @@ export async function createAppWindow(opts: AppWindowOptions): Promise<AppWindow
   };
   wc.on("will-navigate", (event) => guardNavigation(event, event.url));
   wc.on("will-redirect", (event) => guardNavigation(event, event.url));
+  // Subframes (the canvas's design preview) stay on inline documents.
+  wc.on("will-frame-navigate", (details) => {
+    if (!details.isMainFrame && !isAllowedSubframeUrl(details.url)) {
+      details.preventDefault();
+      opts.log("warn", `Blocked a frame navigating to ${details.url}`);
+    }
+  });
   wc.setWindowOpenHandler(({ url }) => {
     if (isExternalUrl(url) || isMailtoUrl(url)) void shell.openExternal(url);
     return { action: "deny" };

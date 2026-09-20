@@ -970,10 +970,6 @@ function main(): void {
       requireWindow(event);
       return requireSecrets().status();
     });
-    ipcMain.handle(IPC.secretsGet, (event, name: unknown) => {
-      requireWindow(event);
-      return requireSecrets().get(name);
-    });
     ipcMain.handle(IPC.secretsSet, async (event, name: unknown, value: unknown) => {
       requireWindow(event);
       await requireSecrets().set(name, value);
