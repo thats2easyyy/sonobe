@@ -19,7 +19,7 @@ import {
   type InputValue,
   type ValueType,
 } from "@sonobe/core";
-import { Image as ImageIcon, Plus, Trash, Upload } from "lucide-react";
+import { Image as ImageIcon, Plus, Trash, Upload, Zap } from "lucide-react";
 import { useCallback, useRef, useState, type CSSProperties, type KeyboardEvent } from "react";
 import { LayerTypeIcon } from "../../shell/icons.tsx";
 import { useCurrentComponent, useDocument, useEditorSession } from "../../state/EditorProvider.tsx";
@@ -33,11 +33,12 @@ import { Select, type SelectOption } from "../../ui/Select.tsx";
 import { TextArea, TextField } from "../../ui/TextField.tsx";
 import { toast } from "../../ui/Toast.tsx";
 import { Checkbox, Toggle } from "../../ui/Toggle.tsx";
+import { Tooltip } from "../../ui/Tooltip.tsx";
 import { VectorField } from "../../ui/VectorField.tsx";
 import { clamp01, parseHexColor, toCssColor, toHex8 } from "../../ui/lib/colorMath.ts";
 import { useLatest, usePointerDrag } from "../../ui/lib/hooks.ts";
 import { decimalsOf } from "../../ui/lib/scrubMath.ts";
-import { pickCopy } from "../patch-editor/api.ts";
+import { layerSceneKey, pickCopy, useWatchedScope } from "../patch-editor/api.ts";
 import { acceptAttribute, assetKindsFor, importAssetForField, KIND_NOUNS, type FieldImportResult } from "./assetImport.ts";
 import { formatCopies, formatLiveValue, literalValue, sameInputValue, updateVectorComponent, type FieldUpdate, type InspectorField } from "./model.ts";
 
@@ -127,7 +128,7 @@ export function ValueControl(props: ValueControlProps) {
     case "boolean":
       return <BooleanControl {...props} />;
     case "pulse":
-      return <span className="sb-insp-hint">Fires only from a connection</span>;
+      return <PulseControl {...props} />;
     case "text":
       return <TextControl {...props} variant="text" />;
     case "multiline":
@@ -153,6 +154,35 @@ export function ValueControl(props: ValueControlProps) {
     case "count":
       return <CountControl {...props} />;
   }
+}
+
+/**
+ * A layer's pulse property (a Text Field's Set Text, Begin Editing, End Editing): Fire sends it to
+ * the running prototype, in the instance and copy the live read-outs watch, and never changes the
+ * document. Patch inputs, and layers of a component the prototype doesn't run, fire only from a
+ * connection.
+ */
+function PulseControl({ field, label }: ValueControlProps) {
+  const session = useEditorSession();
+  const { prefix, copy } = useWatchedScope(session);
+  const layers = field.targets.length > 0 && field.targets.every((t) => t.address.startsWith("@"));
+  if (!layers || prefix === null) return <span className="sb-insp-hint">Fires only from a connection</span>;
+  const fire = () => {
+    const scene = session.runtime.scene();
+    const pulses = field.targets.flatMap((t) => {
+      const key = layerSceneKey(scene, prefix, t.id, copy);
+      return key ? [{ layerId: t.id, key, prop: field.key }] : [];
+    });
+    if (pulses.length) session.runtime.fireLayerPulses(pulses);
+    else toast({ id: "inspector-fire", title: `${label} didn't fire`, description: "The viewer isn't drawing this layer right now.", tone: "warn" });
+  };
+  return (
+    <Tooltip content={`Fire ${label} in the viewer, as a connection would (a paused viewer steps one frame). The document doesn't change.`} placement="left" delay={500}>
+      <Button size="sm" variant="secondary" icon={<Zap size={13} />} aria-label={`Fire ${label}`} onClick={fire}>
+        Fire
+      </Button>
+    </Tooltip>
+  );
 }
 
 function NumberControl({ field, actions, label, integer = false }: ValueControlProps & { integer?: boolean }) {

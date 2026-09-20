@@ -364,6 +364,31 @@ describe("InspectorPanel", () => {
     expect(input("Z Position")).not.toBeNull();
   });
 
+  it("fires a Text Field's pulse properties into the running prototype, never into the document", () => {
+    const s = mount(
+      build([
+        { op: "addLayer", layer: { id: "field", type: "textField", name: "Composer", props: { position: [0, 0], size: [300, 44], textToSet: "Hello" } } },
+        { op: "addPatch", patch: { id: "toggle", type: "switch", ui: { x: 0, y: 0 } } },
+      ]),
+    );
+    s.runtime.stepFrame();
+    select(s, { layers: ["field"] });
+    for (const more of [...container.querySelectorAll<HTMLButtonElement>(".sb-insp-section__more")]) click(more);
+    const revision = s.document.getState().revision;
+    const frame = s.runtime.runtime.frame;
+    click(rowNamed("Set Text").querySelector('button[aria-label="Fire Set Text"]'));
+    click(rowNamed("Begin Editing").querySelector('button[aria-label="Fire Begin Editing"]'));
+    // Paused, so each fire stepped one frame to land.
+    expect(s.runtime.runtime.frame).toBe(frame + 2);
+    expect(s.runtime.scene()!.roots.find((n) => n.layerId === "field")!.textField).toMatchObject({ text: "Hello", editing: true });
+    expect(s.document.getState().revision).toBe(revision);
+    expect(findLayer(main(s).layers, "field")!.layer.props.setText).toBeUndefined();
+    // A patch's pulse input still fires only from a connection.
+    select(s, { patches: ["toggle"] });
+    expect(rowNamed("Flip").textContent).toContain("Fires only from a connection");
+    expect(rowNamed("Flip").querySelector('button[aria-label="Fire Flip"]')).toBeNull();
+  });
+
   it("describes a patch with docs, type, linked inputs, and variadic count", () => {
     const s = mount(fixture());
     select(s, { patches: ["grow"] });

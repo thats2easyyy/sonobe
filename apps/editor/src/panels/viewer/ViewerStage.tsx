@@ -18,6 +18,7 @@ import { EmptyState } from "../../ui/EmptyState.tsx";
 import { cx } from "../../ui/lib/cx.ts";
 import { useLatest } from "../../ui/lib/hooks.ts";
 import { useElementSize } from "../../ui/lib/useElementSize.ts";
+import { watchPressedCopy } from "../patch-editor/api.ts";
 import { registerBoundsProvider } from "./hostBridge.ts";
 import { fitScale, interactiveLayerIds, layerScreenRect, nodesForLayers, outlinePoints, presetForDevice, sceneKeysForLayers, type HighlightScope, type ViewerZoom } from "./viewerModel.ts";
 import "./viewer.css";
@@ -126,7 +127,8 @@ export function ViewerStage({ session, showFrame, zoom, showHitTargets, primary 
     const frame = createDeviceFrame(host, p, { showFrame: frameOn, orientation: o });
     frameRef.current = frame;
     setLayout(frame.layout);
-    const viewer = session.runtime.attachRenderer(frame.screen, { primary: isPrimary, scale: 1 });
+    // Pressing one copy of a looped layer watches it in the patch editor and the inspector, as on the canvas.
+    const viewer = session.runtime.attachRenderer(frame.screen, { primary: isPrimary, scale: 1, onPress: (hits) => watchPressedCopy(session, hits) });
     frame.screen.setAttribute("aria-label", "Prototype. Click or tap to interact.");
     viewerRef.current = viewer;
     const overlay = createHighlightOverlay(frame.screen);

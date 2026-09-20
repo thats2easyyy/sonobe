@@ -31,8 +31,8 @@ In this example the Switch turned on, but the Pop Animation never moved. So the 
 ## Reading live values
 
 - Hover any port to see its current value. Looped ports show each index.
-- Watch one loop copy. Hover a looped port and move onto its table: each row you pass over becomes the watched copy, and every patch, hover card and inspector read-out shows that copy instead of "×N". The chip at the top of the patch editor reads "Copy #3 of 12". Its arrows step through the copies, and × goes back to the summary. Clicking one copy of a looped layer on the canvas watches it too.
-- Inside a component that runs as a looped layer instance (a deck of cards), the Live chip lists its copies. Pick "Card #2", or step with the copy arrows, to see that card's own values.
+- Watch one loop copy. Hover a looped port and move onto its table: each row you pass over becomes the watched copy, and every patch, hover card and inspector read-out shows that copy instead of "×N". The chip at the top of the patch editor reads "Copy #3 of 12". Its arrows step through the copies, and × goes back to the summary. Clicking one copy of a looped layer on the canvas, or pressing it in the viewer, watches it too.
+- Inside a component that runs looped (a deck of cards, or a component patch fed a loop), the Live chip lists its copies. Pick "Card #2", or step with the copy arrows, to see that card's own values.
 - Watch the cables. Pulses send sparks, true booleans glow, loops carry a "×N" badge, and a small glyph marks where a value gets converted, like a boolean becoming a pulse.
 - A property driven by a cable shows that it's linked in the inspector.
 - Turn on "show hit targets" in the Viewer to see what can be tapped.
