@@ -178,6 +178,16 @@ describe("applyOps", () => {
     const topRef = apply(doc, [{ op: "addLayer", ref: "card", layer: { type: "rectangle" } } as unknown as Op]).errors[0]!;
     expect(topRef.hint).toContain('Put "ref" inside "layer"');
     expect(apply(doc, [{ op: "removeComponent", component: "main" } as unknown as Op]).errors[0]!.hint).toContain('"id"');
+    // The new layer, patch or comment an add op wraps is checked too, children included.
+    const position = apply(doc, [{ op: "addLayer", layer: { type: "rectangle", position: [0, 0] } } as unknown as Op]).errors[0]!;
+    expect(position).toMatchObject({ code: "unknown_field", message: 'addLayer\'s "layer" has no field "position".' });
+    expect(position.hint).toContain('Values by key, like "position", go inside "props"');
+    const child = apply(doc, [{ op: "addLayer", layer: { type: "group", children: [{ type: "text", nmae: "Title" }] } } as unknown as Op]).errors[0]!;
+    expect(child.message).toBe('addLayer\'s "layer.children[0]" has no field "nmae". Did you mean "name"?');
+    const patch = apply(doc, [{ op: "addPatch", patch: { type: "switch", input: { flip: true } } } as unknown as Op]).errors[0]!;
+    expect(patch.message).toBe('addPatch\'s "patch" has no field "input". Did you mean "inputs" or "inputCount"?');
+    expect(apply(doc, [{ op: "addComment", comment: { text: "Hi", rect: [0, 0, 10, 10], colour: "yellow" } } as unknown as Op]).errors[0]!.message).toContain('Did you mean "color"?');
+    expect(apply(doc, [{ op: "addLayer", layer: { type: "componentInstance", component: "nope" } }]).errors[0]!.code).not.toBe("unknown_field");
     // Every op may name a component, and fields set to undefined are fine.
     expect(apply(doc, [{ op: "setProject", component: "main", changes: { name: "X" } } as Op]).ok).toBe(true);
     expect(apply(doc, [{ op: "updatePatch", id: "pop", name: undefined, muted: true }]).ok).toBe(true);
