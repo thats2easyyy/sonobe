@@ -261,6 +261,54 @@ describe("re-import edge cases", () => {
     expect(result.errors).toEqual([]);
     expect(findLayer(result.doc.components.main!.layers, "a")!.layer.props.rotation).toBeUndefined();
     expect(again.summary.lostConnections).toBe(1);
+    expect(again.notes.join(" ")).toContain("removed: @a.rotation.");
+  });
+
+  const place = (text: { name: string; nameRank: number; text: string }[]) =>
+    capture({
+      name: "Discover",
+      children: [
+        {
+          kind: "frame",
+          name: "Card 1",
+          nameRank: 5,
+          box: [16, 100, 370, 200],
+          fill: "#FFFFFFFF",
+          children: text.map((t, i) => ({ kind: "text" as const, ...t, box: [32, 120 + i * 30, 300, 20] as [number, number, number, number], style: { fontFamily: "system-ui", fontSize: 15, fontWeight: 400, color: "#000000FF", lineHeight: 20 } })),
+        },
+      ],
+    });
+
+  it("finds text an earlier import named by its words, now named by its element, and keeps its id and link", async () => {
+    // Imports before text took its element's name called it by its words.
+    const first = await imported(place([{ name: "Leonard's Bakery", nameRank: 1, text: "Leonard's Bakery" }, { name: "933 Kapahulu Ave, Honolulu", nameRank: 1, text: "933 Kapahulu Ave, Honolulu" }]));
+    const wired = applyOps(first.doc, [
+      { op: "addPatch", patch: { ref: "upper", type: "changeCase", name: "Upper", inputs: { text: "Kapahulu" } } },
+      { op: "connect", from: "$upper.output", to: "@text_933_kapahulu_ave_honolulu.text" },
+    ], { registry });
+    expect(wired.errors).toEqual([]);
+
+    const again = await planImport(place([{ name: "Card 1 Name", nameRank: 5, text: "Leonard's Bakery" }, { name: "Card 1 Address", nameRank: 5, text: "933 Kapahulu Ave, Honolulu" }]), wired.doc, new Map(), { replace: "discover" });
+    const result = applyOps(wired.doc, again.ops, { registry });
+    expect(result.errors).toEqual([]);
+    const card = findLayer(result.doc.components.main!.layers, "card_1")!.layer;
+    expect(card.children!.map((l) => [l.id, l.name])).toEqual([["leonard_s_bakery", "Card 1 Name"], ["text_933_kapahulu_ave_honolulu", "Card 1 Address"]]);
+    expect(card.children![1]!.props.text).toEqual({ link: "upper.output" });
+    expect(again.summary).toMatchObject({ kept: 4, lostConnections: 0 });
+  });
+
+  it("counts and names a connection into a layer the new screen doesn't have", async () => {
+    const first = await imported(place([{ name: "Open until 9 PM", nameRank: 1, text: "Open until 9 PM" }]));
+    const wired = applyOps(first.doc, [
+      { op: "addPatch", patch: { ref: "upper", type: "changeCase", name: "Upper", inputs: { text: "Open" } } },
+      { op: "connect", from: "$upper.output", to: "@open_until_9_pm.text" },
+    ], { registry });
+    expect(wired.errors).toEqual([]);
+    // The copy changed, so nothing finds the old text again.
+    const again = await planImport(place([{ name: "Open until 10 PM", nameRank: 1, text: "Open until 10 PM" }]), wired.doc, new Map(), { replace: "discover" });
+    expect(applyOps(wired.doc, again.ops, { registry }).errors).toEqual([]);
+    expect(again.summary.lostConnections).toBe(1);
+    expect(again.notes.join(" ")).toContain("1 connection to layers the new screen doesn't have was removed: @open_until_9_pm.text.");
   });
 
   it("doesn't let a new layer take a kept id", async () => {

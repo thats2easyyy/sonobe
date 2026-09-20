@@ -16,7 +16,8 @@
  *
  * Re-importing over an earlier screen (`replace`) swaps the screen in one step but keeps the ids of
  * layers found again at the same name path, their linked properties, and every connection other items
- * have to them, so interactions wired onto the old screen keep working.
+ * have to them, so interactions wired onto the old screen keep working. The notes name each connection
+ * it had to drop.
  */
 
 import { componentItemIds, findLayer, isLayerInput, isLinkInput, LAYER_TYPE_MAP, listInputs, parseAddress, slugify, targetAddress, uniqueId, type AssetRecord, type Id, type InputValue, type LayerNode, type NewLayer, type NewPatch, type Op, type SonobeDocument } from "@sonobe/core";
@@ -280,7 +281,8 @@ export async function planImport(capture: DesignCapture, doc: SonobeDocument, im
     // keeping it is reached. Name every new layer up front instead, against the ids in use.
     const taken = new Set([...componentItemIds(target)].filter((id) => !oldIds.has(id)));
     for (const id of newIds) taken.add(id);
-    let lost = 0;
+    // Where each connection the new screen can't keep was stored ("@card_1_address.text", "tap_like.layer").
+    const lost: string[] = [];
     const claim = (l: NewLayer) => {
       if (!l.id) {
         l.id = uniqueId(slugify(l.name ?? l.type, slugify(l.type)), taken);
@@ -291,7 +293,7 @@ export async function planImport(capture: DesignCapture, doc: SonobeDocument, im
           const referenced = referencedLayer(value);
           if (referenced !== undefined && oldIds.has(referenced) && !newIds.has(referenced)) {
             delete l.props[key];
-            lost++;
+            lost.push(`@${l.id}.${key}`);
           }
         }
       }
@@ -299,16 +301,24 @@ export async function planImport(capture: DesignCapture, doc: SonobeDocument, im
     };
     claim(screen);
     for (const entry of listInputs(target)) {
-      if (entry.target.kind === "layer" && oldIds.has(entry.target.id)) continue;
+      if (entry.target.kind === "layer" && oldIds.has(entry.target.id)) {
+        // keepIds carried this one over when its layer was found again; otherwise it goes with the layer.
+        if (!newIds.has(entry.target.id) && (isLinkInput(entry.value) || isLayerInput(entry.value))) lost.push(targetAddress(entry.target));
+        continue;
+      }
       const referenced = referencedLayer(entry.value);
       if (referenced === undefined || !oldIds.has(referenced)) continue;
       if (newIds.has(referenced)) restores.push({ op: "setInput", component, target: targetAddress(entry.target), value: entry.value });
-      else lost++;
+      else lost.push(targetAddress(entry.target));
     }
     ops.push({ op: "removeLayer", component, id: replaced.layer.id });
     summary.kept = kept;
-    summary.lostConnections = lost;
-    if (lost) notes.push(`${lost} connection${lost === 1 ? "" : "s"} pointed at layers the new screen doesn't have, so ${lost === 1 ? "it was" : "they were"} removed.`);
+    summary.lostConnections = lost.length;
+    if (lost.length) {
+      const one = lost.length === 1;
+      const listed = `${lost.slice(0, 5).join(", ")}${lost.length > 5 ? ` and ${lost.length - 5} more` : ""}`;
+      notes.push(`${lost.length} connection${one ? "" : "s"} to layers the new screen doesn't have ${one ? "was" : "were"} removed: ${listed}. Wire ${one ? "it" : "them"} to the new screen's layers again if ${one ? "it's" : "they're"} still needed.`);
+    }
   }
   ops.push(addScreen);
 
@@ -365,8 +375,9 @@ const hasProp = (type: string, key: string) => LAYER_TYPE_MAP.get(type)?.props.s
 
 /**
  * Give new layers the ids of old layers at the same name path ("Profile Card/Follow Button", the second
- * of two same-named siblings counting separately), and carry their linked properties across. Content
- * layers whose position a Scroll patch already drives don't get another one. Returns how many kept ids.
+ * of two same-named siblings counting separately), and carry their linked properties across. A text
+ * layer not found by name is looked up among its old siblings by its words. Content layers whose
+ * position a Scroll patch already drives don't get another one. Returns how many kept ids.
  */
 function keepIds(oldRoot: LayerNode, newRoot: NewLayer, skipScroll: Set<string>): number {
   let kept = 0;
@@ -391,10 +402,26 @@ function keepIds(oldRoot: LayerNode, newRoot: NewLayer, skipScroll: Set<string>)
     const oldChildren = old.children ?? [];
     const oldKeys = new Map(keyed(oldChildren).map((k, i) => [k, oldChildren[i]!] as const));
     const newChildren = next.children ?? [];
+    const used = new Set<LayerNode>();
+    const unmatched: NewLayer[] = [];
     keyed(newChildren).forEach((k, i) => {
       const previous = oldKeys.get(k);
-      if (previous) match(previous, newChildren[i]!);
+      if (previous) {
+        used.add(previous);
+        match(previous, newChildren[i]!);
+      } else unmatched.push(newChildren[i]!);
     });
+    // Earlier imports named text after its words, not the element holding it: the text layer now called
+    // "Card 1 Address" was "933 Kapahulu Ave, Honolulu" then. Find it by its words.
+    for (const child of unmatched) {
+      const text = child.type === "text" ? child.props?.text : undefined;
+      if (typeof text !== "string") continue;
+      const previous = oldChildren.find((o) => !used.has(o) && o.type === "text" && o.name === wordsName(text));
+      if (previous) {
+        used.add(previous);
+        match(previous, child);
+      }
+    }
   };
   match(oldRoot, newRoot);
   return kept;
@@ -647,8 +674,13 @@ function textLayer(ctx: BuildContext, node: CaptureText, parentBox: Box): NewLay
       props.position = [round(x + w), y];
     }
   }
-  const words = node.text.replace(/\s+/g, " ").trim();
-  return { type: "text", name: layerName(node, words.length > 40 ? `${words.slice(0, 39).trimEnd()}…` : words || "Text"), props };
+  return { type: "text", name: layerName(node, wordsName(node.text)), props };
+}
+
+/** A text layer's name from its words, as the walker names text that nothing else names. */
+function wordsName(text: string): string {
+  const words = text.replace(/\s+/g, " ").trim();
+  return words.length > 40 ? `${words.slice(0, 39).trimEnd()}…` : words || "Text";
 }
 
 function imageLayer(ctx: BuildContext, node: CaptureImage, parentBox: Box): NewLayer | null {
