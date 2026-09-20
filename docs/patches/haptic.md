@@ -21,7 +21,7 @@ Haptic makes the device tap or buzz so an interaction feels physical. Each pulse
 - **Alignment** and **Level Change** are for Force Touch trackpads.
 - **Custom Pattern** plays a Core Haptics pattern (AHAP JSON) from **Pattern**.
 
-**Available** is true when the device can play the selected type. On Android phones, the web player plays each type as a matching vibration. iPhones and computers can't play haptics from a browser.
+**Available** is true when the device can play the selected type. On an Android phone, Preview on Phone plays each type as a matching vibration. On an iPhone, open the preview in the Sonobe Viewer app to feel real haptics; Safari can't play them. Computers can't play haptics.
 
 ## Tips
 - Match the strength to the moment: Selection for scrolling through options, Impact Light for taps, Notification Success when something finishes.
@@ -81,7 +81,7 @@ patch tick haptic play←page_changed.changed type=selection
 
 ## Common mistakes
 
-- Nothing happens on an iPhone or a laptop: browsers there can't play haptics. Test on an Android phone, and always give visual feedback too.
+- Nothing happens on an iPhone or a laptop: browsers there can't play haptics. On an iPhone, open the preview in the Sonobe Viewer app; an Android phone vibrates in the browser. Always give visual feedback too.
 - Alignment and Level Change never do anything: they're for Force Touch trackpads, which a browser can't reach. On phones, use Selection or Impact Light.
 - Custom Pattern is silent: Pattern is empty or isn't AHAP JSON with a Pattern list. Load the .ahap file with a JSON File patch and wire it into Pattern.
 
@@ -95,7 +95,7 @@ patch tick haptic play←page_changed.changed type=selection
 
 ## Availability
 
-**Web-limited.** Browsers have no haptics API. Android plays each type as a short Vibration API pattern; iOS Safari, computers, and the trackpad types do nothing until a native host provides a haptics service.
+**Web-limited.** Browsers have no haptics API. Android plays each type as a short Vibration API pattern, and the Sonobe Viewer iPhone app plays real iPhone haptics; iOS Safari, computers, and the trackpad types do nothing.
 
 Works in the web player on phones and tablets.
 

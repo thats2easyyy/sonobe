@@ -160,6 +160,7 @@ describe("ViewerPanel", () => {
     expect(document.querySelector(".sb-phone__url code")?.textContent).toBe(RUNNING.url);
     expect(document.querySelector(".sb-phone__status")?.textContent).toContain("1 phone connected");
     expect([...document.querySelectorAll(".sb-phone__alt")].map((b) => b.textContent)).toEqual(["10.0.0.2:5204"]);
+    expect([...document.querySelectorAll(".sb-phone__note")].map((p) => p.textContent)).toContain("On iPhone, scan this code in the Sonobe Viewer app to feel haptics.");
     act(() => listener?.({ ...RUNNING, clients: 3 }));
     expect(buttonWithText("On phone")!.textContent).toContain("3");
     await act(async () => {

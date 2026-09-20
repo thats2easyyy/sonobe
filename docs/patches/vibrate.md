@@ -15,7 +15,7 @@ Buzzes the phone's vibration motor for a moment each time it gets a pulse.
 ## How it works
 Vibrate buzzes the device's vibration motor. Each pulse (a signal that's on for one frame) into **Vibrate** starts a buzz that lasts **Duration** seconds. A pulse that arrives while a buzz is still going restarts it with the new duration.
 
-**Available** is true when the device can vibrate. Android phones can. iPhones and computers can't from a browser, so nothing happens there.
+**Available** is true when the device can vibrate. Android phones can, and so can an iPhone playing the preview in the Sonobe Viewer app. Safari on an iPhone and computers can't, so nothing happens there.
 
 ## Tips
 - Wire an Interaction's Tap into Vibrate for confirmation feedback.
@@ -60,7 +60,7 @@ patch buzz vibrate vibrate←hold_started.turnedOn duration=0.15
 
 ## Common mistakes
 
-- Nothing buzzes on an iPhone: iOS Safari doesn't let web pages vibrate. Test on an Android phone, or show visual feedback where Available is false.
+- Nothing buzzes on an iPhone: iOS Safari doesn't let web pages vibrate. Open the preview in the Sonobe Viewer app, test on an Android phone, or show visual feedback where Available is false.
 - The phone buzzes again and again: Vibrate is wired to a state that keeps turning on and off, and every rise sends a pulse. Wire in one pulse per event, like an Interaction's Tap.
 - The first buzz at launch does nothing: browsers block vibration until the person has touched the page. Trigger it from a tap.
 
@@ -74,7 +74,7 @@ patch buzz vibrate vibrate←hold_started.turnedOn duration=0.15
 
 ## Availability
 
-**Web-limited.** Uses the Vibration API (navigator.vibrate), which Android browsers support. iOS Safari has no vibration API and computers have no motor, so nothing buzzes there.
+**Web-limited.** Uses the Vibration API (navigator.vibrate), which Android browsers support, or the haptics of the Sonobe Viewer iPhone app. iOS Safari has no vibration API and computers have no motor, so nothing buzzes there.
 
 Works in the web player on phones and tablets.
 
