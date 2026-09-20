@@ -1,6 +1,6 @@
 # Examples
 
-Fifteen runnable prototypes, from a single tap to a deck of swipeable cards. Each folder is a Sonobe project you can open in the app (Learn → Examples) or read with the CLI. Each one comes with a step-by-step README and a `test.json` that simulates the interaction and checks the numbers.
+Fifteen runnable prototypes, from a single tap to a deck of swipeable cards. Each folder is a Sonobe project you can open in the app (Learn → Examples) or read with the CLI, and Claude reads them through the MCP tools `list_examples` and `get_example`. Each one comes with a step-by-step README and a `test.json` that simulates the interaction and checks the numbers.
 
 | # | Example | You'll learn | Key patches |
 |---|---|---|---|
@@ -34,7 +34,7 @@ examples/
 └── run.test.ts            loads every example and runs its scenarios
 ```
 
-The project files are generated. To change an example, edit its recipe in `recipes/` and rebuild. README.md and test.json are written by hand.
+The project files are generated. To change an example, edit its recipe in `recipes/` and rebuild. README.md and test.json are written by hand. A new example goes in `recipes/index.ts` and gets a row in the table above: `list_examples` shows its "You'll learn" and "Key patches" columns (patch names as the patch library spells them).
 
 ```sh
 node examples/build.ts                    # regenerate every project

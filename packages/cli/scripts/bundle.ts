@@ -1,14 +1,15 @@
 #!/usr/bin/env node
 /**
  * Bundle the `sonobe` CLI into one self-contained ESM file (shebang, no JavaScript dependencies)
- * with the agent guides beside it, so it runs outside the repo: npx, global installs, the Claude
- * Code plugin and the Claude Desktop extension. The native screenshot rasterizer (@resvg/resvg-js
+ * with the agent guides and the examples' READMEs and tests beside it, so it runs outside the repo:
+ * npx, global installs, the Claude Code plugin and the Claude Desktop extension. The native screenshot rasterizer (@resvg/resvg-js
  * and the platform binaries installed with it) is copied to node_modules beside the bundle, which
  * loads it at runtime for headless get_screenshot.
  *
  *   node packages/cli/scripts/bundle.ts [--outfile <path>] [--no-guides] [--no-rasterizer]
  *
- * Default output: packages/cli/dist/sonobe.mjs, packages/cli/dist/guides/ and packages/cli/dist/node_modules/@resvg/.
+ * Default output: packages/cli/dist/sonobe.mjs, packages/cli/dist/guides/, packages/cli/dist/examples/
+ * and packages/cli/dist/node_modules/@resvg/.
  */
 
 import { chmod, cp, mkdir, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
@@ -17,6 +18,7 @@ import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { parseArgs } from "node:util";
 import { build } from "esbuild";
+import { copyExampleTexts } from "../../mcp/src/examples.ts";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 
@@ -32,6 +34,8 @@ export interface BundleOptions {
   outfile?: string;
   /** Copy the agent guides to <outfile dir>/guides (default true). */
   guides?: boolean;
+  /** Copy the examples' READMEs and tests (list_examples, get_example) to <outfile dir>/examples (default true). */
+  examples?: boolean;
   /** Copy the screenshot rasterizer to <outfile dir>/node_modules/@resvg (default true). */
   rasterizer?: boolean;
   /** esbuild log level (default "warning"). */
@@ -42,6 +46,8 @@ export interface BundleResult {
   outfile: string;
   /** Where the guides were copied, when they were. */
   guidesDir?: string;
+  /** Where the examples' READMEs and tests were copied, when they were. */
+  examplesDir?: string;
   /** Where the rasterizer packages were copied, when they were installed and copied. */
   rasterizerDir?: string;
   bytes: number;
@@ -78,6 +84,10 @@ export async function bundleCli(options: BundleOptions = {}): Promise<BundleResu
     await rm(guidesDir, { recursive: true, force: true });
     await cp(GUIDES_SOURCE, guidesDir, { recursive: true });
     result.guidesDir = guidesDir;
+  }
+  if (options.examples !== false) {
+    const examplesDir = path.join(path.dirname(outfile), "examples");
+    if (copyExampleTexts(examplesDir)) result.examplesDir = examplesDir;
   }
   if (options.rasterizer !== false) {
     const rasterizerDir = await copyRasterizer(path.dirname(outfile));
