@@ -31,7 +31,8 @@ The first two finish Stage 4. The rest are Stage 5.
 - [x] Editor integration: store and history, layer list, inspector, patch editor (xyflow), patch picker, viewer running the engine and renderer
 
 ## Stage 3: Parity and polish
-- [x] Patch editor power features: link-drag search, knife cut, ⌘-drag splice onto a wire, option-drag duplicate, single-key inserts, Tidy Up (within each comment frame), comments, components (enter/exit, publish ports), variables, live values on hover, pulse sparks, loop badges
+- [x] Patch editor power features: link-drag search, knife cut, ⌘-drag splice onto a wire, option-drag duplicate, single-key inserts, Tidy Up (within each comment frame), comments, components (enter/exit, publish ports), variables, live values on hover, cable orbs, loop badges
+- [x] Cable orbs: a pulse, or a boolean turning on, sends a glowing orb with a comet tail along its cables that ripples into the input; a boolean turning off sends a fainter one. Throttled to two in flight per cable, simplified at far zoom, and a still flash with reduced motion
 - [x] Canvas: direct manipulation, snapping, insert shapes and text, alignment tools
 - [x] Layer ↔ patch bridges: Touch button, inspector property links, drag a cable onto a property
 - [x] Viewer: device picker, frame, restart, hit-target overlay, pop-out window, LAN web player with QR code

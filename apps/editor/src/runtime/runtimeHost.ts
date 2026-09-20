@@ -241,7 +241,7 @@ export interface RuntimeHost {
   readValue(address: string, scope?: ValueScope): Value | Loop | undefined;
   /** Live values for addresses, at most `hz` times a second and only when something changed. */
   subscribeValues(addresses: readonly string[], cb: (values: LiveValues, frame: number) => void, options?: ValueSubscriptionOptions): () => void;
-  /** Pulse outputs that fired in the current scope, once per frame that had any (for spark animations). */
+  /** Pulse outputs that fired in the current scope, once per frame that had any (for the patch editor's cable orbs). */
   subscribePulses(cb: (fire: PulseFire) => void): () => void;
   /** Every produced frame. */
   subscribeFrame(cb: (scene: SceneFrame) => void): () => void;
