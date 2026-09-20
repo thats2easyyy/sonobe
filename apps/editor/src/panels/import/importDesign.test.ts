@@ -84,6 +84,55 @@ describe("importDesign", () => {
     expect(notify).toHaveBeenLastCalledWith(expect.objectContaining({ title: "That design couldn't be pasted.", tone: "warn" }));
   });
 
+  it("forwards the app's progress, and a cancel stops the capture and applies nothing", async () => {
+    const s = setup();
+    const before = s.document.getState().revision;
+    type Progress = { captureId: string; stage: string; message: string };
+    let listener: ((p: Progress) => void) | undefined;
+    let pending: ((reply: { ok: false; code: string; message: string }) => void) | undefined;
+    const desktop = {
+      captureDesign: vi.fn((request: { captureId?: string }) => {
+        listener?.({ captureId: request.captureId!, stage: "loading", message: "Loading http://localhost:3000/" });
+        listener?.({ captureId: "someone-else", stage: "loading", message: "Another capture" });
+        return new Promise<{ ok: false; code: string; message: string }>((resolve) => (pending = resolve));
+      }),
+      cancelCaptureDesign: vi.fn((captureId: string) => pending?.({ ok: false, code: "cancelled", message: `cancelled ${captureId}` })),
+      onCaptureDesignProgress: vi.fn((cb: (p: Progress) => void) => {
+        listener = cb;
+        return () => (listener = undefined);
+      }),
+    };
+    const controller = new AbortController();
+    const messages: string[] = [];
+    const running = importDesign(s, { url: "http://localhost:3000/" }, { desktop: desktop as never }, { signal: controller.signal, onProgress: (m) => messages.push(m) });
+    await Promise.resolve();
+    controller.abort();
+    const outcome = await running;
+    expect(outcome).toMatchObject({ ok: false, cancelled: true });
+    expect(messages).toEqual(["Loading http://localhost:3000/"]);
+    const captureId = (desktop.captureDesign.mock.calls[0]![0] as { captureId: string }).captureId;
+    expect(desktop.cancelCaptureDesign).toHaveBeenCalledWith(captureId);
+    expect(listener).toBeUndefined();
+    expect(s.document.getState().revision).toBe(before);
+  });
+
+  it("applies nothing when the capture comes back after a cancel", async () => {
+    const s = setup();
+    const before = s.document.getState().revision;
+    const controller = new AbortController();
+    // An older app without cancelCaptureDesign: the capture finishes anyway.
+    const desktop = { captureDesign: vi.fn(async () => (controller.abort(), { ok: true as const, capture, images: [] as [string, null][] })) };
+    const outcome = await importDesign(s, { url: "http://localhost:3000/" }, { desktop }, { signal: controller.signal });
+    expect(outcome.cancelled).toBe(true);
+    expect(s.document.getState().revision).toBe(before);
+    // In the browser, a cancel during the iframe capture removes it and imports nothing.
+    const iframe = new AbortController();
+    const html = importDesign(s, { html: "<p>hi</p>" }, { desktop: null, captureHtml: (request) => new Promise((_, reject) => request.signal?.addEventListener("abort", () => reject(request.signal?.reason))) }, { signal: iframe.signal });
+    iframe.abort();
+    expect(await html).toMatchObject({ ok: false, cancelled: true });
+    expect(s.document.getState().revision).toBe(before);
+  });
+
   it("refuses patch components", async () => {
     const s = setup();
     const r = applyOps(s.document.getState().doc, [{ op: "addComponent", component: { id: "logic", name: "Logic", kind: "patchComponent" } } as never], { registry });

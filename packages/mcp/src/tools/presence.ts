@@ -144,6 +144,7 @@ export function registerPresenceTools(tc: ToolContext): void {
     async ({ docId, txnId, allowHumanEdits }, ctx) => {
       const r = await host.history.undo({
         author: tc.author(ctx),
+        signal: tc.signal(ctx),
         ...(docId !== undefined ? { docId } : {}),
         ...(txnId !== undefined ? { txnId } : {}),
         ...(allowHumanEdits !== undefined ? { allowHumanEdits } : {}),

@@ -18,11 +18,13 @@ import {
   HostError,
   isHostError,
   TEMPLATES,
+  ToolCancelledError,
   type DocumentSummary,
   type HistoryItem,
   type CapturedDesign,
   type DesignCaptureRequest,
   type HostApplyResult,
+  type HostCallControl,
   type Screenshot,
   type ScreenshotOptions,
   type ScreenshotTarget,
@@ -75,7 +77,7 @@ export interface AppHostOptions {
    */
   renderScene?(request: SceneRenderRequest): Promise<CapturedImage | null>;
   /** Render a URL or HTML page in a hidden browser window and capture it (import_design). */
-  captureDesign?(request: DesignCaptureRequest): Promise<CapturedDesign>;
+  captureDesign?(request: DesignCaptureRequest, control?: HostCallControl): Promise<CapturedDesign>;
   /** Download an image for a capture made elsewhere (default: Node's fetch). */
   fetchImage?(url: string, signal: AbortSignal): Promise<{ bytes: Uint8Array; mime: string } | null>;
   /** A window's document appeared, reached a new revision, or went away (drives MCP resource notifications). */
@@ -637,6 +639,8 @@ export function createAppHost(options: AppHostOptions): AppHost {
       const dryRun = !!o.dryRun;
       if (o.expectedRevision !== undefined && o.expectedRevision !== before.revision) return conflictResult(entry, o.expectedRevision, before.revision, beforeDiagnostics, dryRun);
 
+      // The last moment a cancelled call can be stopped: once the editor has the batch, it lands.
+      if (o.signal?.aborted) throw new ToolCancelledError();
       const reply = await call<RendererApplyReply>(
         entry.target,
         "document.apply",
@@ -697,6 +701,7 @@ export function createAppHost(options: AppHostOptions): AppHost {
     async putAssetFiles(files, fileOptions) {
       const entry = await resolve(fileOptions.docId);
       if (!files.length) return;
+      if (fileOptions.signal?.aborted) throw new ToolCancelledError();
       await call(entry.target, "assets.put", { files: files.map((f) => ({ file: f.file, mime: f.mime, data: Buffer.from(f.bytes).toString("base64") })) }, APPLY_TIMEOUT_MS);
     },
 
@@ -809,6 +814,7 @@ export function createAppHost(options: AppHostOptions): AppHost {
         const beforeDiagnostics = diagnosticsOf(entry, before);
         // The editor checks the human-edit guard and undoes in one task, so a person's edit can't land
         // between the check and the undo. Its refusals (human_edit, not_found, nothing_to_undo) come back as HostErrors.
+        if (o.signal?.aborted) throw new ToolCancelledError();
         const reply = await call<{ revision?: unknown; undone?: Partial<RendererHistoryEntry>[] }>(entry.target, "history.undo", {
           ...(o.txnId !== undefined ? { txnId: o.txnId } : {}),
           ...(o.allowHumanEdits ? { allowHumanEdits: true } : {}),

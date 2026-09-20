@@ -5,7 +5,7 @@
 
 import { contextBridge, ipcRenderer, type IpcRendererEvent } from "electron";
 import { attachAssistantBridge } from "./assistant/preload.ts";
-import type { DesignCaptureReply, McpStatus, PreviewStatus, ProjectChange, ProjectFiles, ProjectWrite, RpcHandler, SecretsStatus, SonobeCommandId, SonobeHost, ViewerWindowStatus } from "./host-api.d.ts";
+import type { DesignCaptureProgress, DesignCaptureReply, McpStatus, PreviewStatus, ProjectChange, ProjectFiles, ProjectWrite, RpcHandler, SecretsStatus, SonobeCommandId, SonobeHost, ViewerWindowStatus } from "./host-api.d.ts";
 import { isCommandId, listCommands, toHostPlatform } from "./commands.ts";
 import { IPC } from "./ipc.ts";
 import { createRpcFailure, createRpcServer } from "./rpc.ts";
@@ -164,6 +164,16 @@ const host: SonobeHost = {
   fetchCaptureFile: (url) => invoke<{ bytes: Uint8Array; mime: string } | null>(IPC.fetchCaptureFile, String(url)),
 
   captureDesign: (request) => invoke<DesignCaptureReply>(IPC.captureDesign, request && typeof request === "object" ? { ...request } : {}),
+  cancelCaptureDesign(captureId) {
+    if (typeof captureId === "string") ipcRenderer.send(IPC.captureDesignCancel, captureId);
+  },
+  onCaptureDesignProgress(cb) {
+    const listener = (_event: IpcRendererEvent, progress: DesignCaptureProgress) => cb(progress);
+    ipcRenderer.on(IPC.captureDesignProgress, listener);
+    return () => {
+      ipcRenderer.removeListener(IPC.captureDesignProgress, listener);
+    };
+  },
 
   popOutViewer: (options) => invoke<ViewerWindowStatus>(IPC.viewerWindowOpen, typeof options?.alwaysOnTop === "boolean" ? { alwaysOnTop: options.alwaysOnTop } : {}),
   closeViewerWindow: () => invoke<ViewerWindowStatus>(IPC.viewerWindowClose),

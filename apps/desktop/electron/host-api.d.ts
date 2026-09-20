@@ -189,12 +189,27 @@ export interface DesignCaptureParams {
   waitMs?: number;
   fullPage?: boolean;
   colorScheme?: "light" | "dark";
+  /** An id the editor picks to follow the capture (onCaptureDesignProgress) and cancel it (cancelCaptureDesign). */
+  captureId?: string;
 }
 
-/** A capture (a DesignCapture from @sonobe/import) with its downloaded images, or why it failed. */
+/**
+ * A capture (a DesignCapture from @sonobe/import) with its downloaded images and notes, or why it
+ * failed. A cancelled capture fails with code "cancelled".
+ */
 export type DesignCaptureReply =
-  | { ok: true; capture: unknown; images: [string, { bytes: Uint8Array; mime: string; width?: number; height?: number } | null][] }
+  | { ok: true; capture: unknown; images: [string, { bytes: Uint8Array; mime: string; width?: number; height?: number } | null][]; notes?: string[] }
   | { ok: false; code: string; message: string; hint?: string };
+
+/** What a capture started with a captureId is doing now. */
+export interface DesignCaptureProgress {
+  captureId: string;
+  stage: "starting" | "loading" | "color-scheme" | "walking" | "images" | "screenshot";
+  /** "Downloading images: 7 of 28". */
+  message: string;
+  done?: number;
+  total?: number;
+}
 
 export type RpcHandler = (params: unknown) => unknown | Promise<unknown>;
 
@@ -275,8 +290,15 @@ export interface SonobeHost {
   /** Open an http(s) or mailto link in the default browser or mail app. Resolves false for any other URL. */
   openExternal(url: string): Promise<boolean>;
 
-  /** Render a URL or HTML page in a hidden, sandboxed window and capture it for import. */
+  /**
+   * Render a URL or HTML page in a hidden, sandboxed window and capture it for import. It stops after
+   * 90 s plus waitMs (code "capture_timeout"), when cancelled, or when this window reloads or closes.
+   */
   captureDesign(request: DesignCaptureParams): Promise<DesignCaptureReply>;
+  /** Cancel the capture started with this captureId; its captureDesign resolves with code "cancelled". */
+  cancelCaptureDesign(captureId: string): void;
+  /** Progress of captures started with a captureId. Returns unsubscribe. */
+  onCaptureDesignProgress(cb: (progress: DesignCaptureProgress) => void): () => void;
   /** Download an http(s) image or font for a pasted capture, without the renderer's CORS limits. */
   fetchCaptureFile(url: string): Promise<{ bytes: Uint8Array; mime: string } | null>;
 

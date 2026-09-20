@@ -202,11 +202,11 @@ export async function runRelay(options: RelayOptions): Promise<number> {
       single?.params?._meta && typeof single.params._meta === "object"
         ? (single.params._meta as Record<string, unknown>)[PROTOCOL_VERSION_KEY]
         : undefined;
+    const field = single?.method ? NAME_SOURCES[single.method] : undefined;
+    const name = field ? single?.params?.[field] : undefined;
     if (single?.method && typeof claim === "string") {
       headers["mcp-protocol-version"] = claim;
       headers["mcp-method"] = single.method;
-      const field = NAME_SOURCES[single.method];
-      const name = field ? single.params?.[field] : undefined;
       if (typeof name === "string") headers["mcp-name"] = encodeHeaderValue(name);
     } else if (legacyVersion && single?.method !== "initialize") {
       headers["mcp-protocol-version"] = legacyVersion;
@@ -255,10 +255,18 @@ export async function runRelay(options: RelayOptions): Promise<number> {
       );
     } catch (err) {
       if (controller.signal.aborted) return;
-      const reason =
-        (err as { cause?: { code?: string } }).cause?.code ??
-        (err instanceof Error ? err.message : String(err));
+      const code = (err as { cause?: { code?: unknown } }).cause?.code ?? (err as { code?: unknown }).code;
+      const reason = typeof code === "string" ? code : err instanceof Error ? err.message : String(err);
       stderr.write(`sonobe mcp: request failed: ${reason}\n`);
+      // Node's fetch gives up after 5 minutes without response headers or body bytes. The app is
+      // still there; it just hasn't answered this call.
+      if (reason === "UND_ERR_HEADERS_TIMEOUT" || reason === "UND_ERR_BODY_TIMEOUT") {
+        fail(
+          id,
+          `The Sonobe app didn't answer ${single?.method ?? "the request"}${typeof name === "string" ? ` ${name}` : ""} within 5 minutes, so the relay stopped waiting. The call may still be running in the app: check what changed (list_history, get_outline) before trying again.`,
+        );
+        return;
+      }
       fail(
         id,
         `Lost connection to the Sonobe app (${reason}). Reopen Sonobe, then reconnect this MCP server; or use \`sonobe mcp --headless <project>\` to work without the app.`,
@@ -300,6 +308,9 @@ export async function runRelay(options: RelayOptions): Promise<number> {
     const task = forward(message).finally(() => pending.delete(task));
     pending.add(task);
   }
+  // stdin closing is how a client shuts the server down (the MCP stdio spec). Nobody reads the
+  // answers any more, so end the calls still running; the app sees their streams close.
+  for (const controller of inflight.values()) controller.abort();
   await Promise.all([...pending]);
   return 0;
 }

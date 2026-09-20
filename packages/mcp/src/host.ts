@@ -77,6 +77,25 @@ export interface SaveOutcome {
   overwritten?: string[];
 }
 
+/** One step of a long host call. Tools forward the message as an MCP progress notification. */
+export interface ProgressStep {
+  message: string;
+  /** Items done so far within the step, for callers that draw a bar. */
+  progress?: number;
+  total?: number;
+}
+
+/**
+ * The trailing argument of host methods that can run long. Requests stay plain data (the desktop sends
+ * them over IPC), so the signal and the progress sink travel here.
+ */
+export interface HostCallControl {
+  /** Aborts when the call is cancelled: stop, free what the call holds (windows, browsers), and reject. */
+  signal?: AbortSignal;
+  /** Report what the host is doing now. */
+  progress?(step: ProgressStep): void;
+}
+
 export interface OpenDocumentOptions {
   /** Headless: read the project folder again, dropping unsaved changes and undo history. */
   reload?: boolean;
@@ -123,6 +142,11 @@ export interface HostApplyOptions {
   expectedRevision?: number;
   /** Component used by ops that don't name one. */
   defaultComponent?: Id;
+  /**
+   * The tool call's cancellation signal. Once it has aborted, apply refuses (HostError "cancelled")
+   * without changing anything, so a cancelled call never lands. An apply that has started finishes.
+   */
+  signal?: AbortSignal;
 }
 
 export interface HostApplyResult {
@@ -223,6 +247,8 @@ export interface UndoOptions {
   author: Author;
   /** Allow undoing a human's edit without naming its txnId. */
   allowHumanEdits?: boolean;
+  /** Like HostApplyOptions.signal: a cancelled call never undoes anything. */
+  signal?: AbortSignal;
 }
 
 export interface UndoResult {
@@ -260,6 +286,8 @@ export interface DesignCaptureRequest {
   colorScheme?: "light" | "dark";
   /** Also return a screenshot of the page as the browser drew it. */
   screenshot?: boolean;
+  /** The whole capture's deadline, not counting waitMs. Default 90 s; hosts may lower it, never raise it. */
+  timeoutMs?: number;
 }
 
 export interface CapturedDesign {
@@ -268,6 +296,8 @@ export interface CapturedDesign {
   images: ReadonlyMap<string, ResolvedImage | null>;
   /** The page as the browser drew it (when requested). */
   screenshot?: Screenshot;
+  /** What the capture left out or approximated (a screenshot that timed out, images cut off), in plain words. */
+  notes?: string[];
 }
 
 // ---------------------------------------------------------------------------
@@ -458,13 +488,13 @@ export interface SonobeHost {
 
   listDocuments(): Promise<DocumentSummary[]>;
   /** Open (or activate) a document by docId or project folder path. */
-  openDocument(ref: string, options?: OpenDocumentOptions): Promise<DocumentSummary>;
-  createDocument(request: CreateDocumentRequest): Promise<DocumentSummary>;
+  openDocument(ref: string, options?: OpenDocumentOptions & HostCallControl): Promise<DocumentSummary>;
+  createDocument(request: CreateDocumentRequest, control?: HostCallControl): Promise<DocumentSummary>;
   /** A document snapshot (default: the active document). */
   getDocument(docId?: Id): Promise<DocumentSnapshot>;
   /** Throws HostError("disk_changed") when the project changed outside this session, unless `force`. */
-  saveDocument(docId?: Id, options?: SaveDocumentOptions): Promise<SaveOutcome>;
-  /** Apply a batch through core applyOps as one attributed history group. */
+  saveDocument(docId?: Id, options?: SaveDocumentOptions & HostCallControl): Promise<SaveOutcome>;
+  /** Apply a batch through core applyOps as one attributed history group. Refuses once options.signal aborted. */
   apply(ops: Op[], options: HostApplyOptions): Promise<HostApplyResult>;
   /** Diagnostics for the current revision (cached). */
   diagnostics(docId?: Id): Promise<{ docId: Id; revision: number; diagnostics: Diagnostic[] }>;
@@ -493,8 +523,13 @@ export interface SonobeHost {
   /**
    * Optional: render a URL or HTML page in a browser and capture it for import_design. Hosts without
    * a browser leave it out (import_design then accepts only ready-made captures).
+   *
+   * Hosts must finish within one deadline (90 s plus waitMs, or request.timeoutMs when lower) and
+   * reject with HostError "capture_timeout" naming the stage that ran out of time; stop at once when
+   * control.signal aborts (HostError "cancelled"); report stages through control.progress; and free
+   * the browser window or process on every path.
    */
-  captureDesign?(request: DesignCaptureRequest): Promise<CapturedDesign>;
+  captureDesign?(request: DesignCaptureRequest, control?: HostCallControl): Promise<CapturedDesign>;
   /**
    * Optional: download a capture's http(s) images (for captures made elsewhere). Default: Node's fetch
    * where it exists.
@@ -504,7 +539,7 @@ export interface SonobeHost {
    * Hold asset files (assets/<sha256>.<ext>) for a document so addAsset ops that name them draw right
    * away and save with the project. Required by import_design when the import brings new images.
    */
-  putAssetFiles?(files: readonly ImportFile[], options: { docId?: Id }): Promise<void>;
+  putAssetFiles?(files: readonly ImportFile[], options: { docId?: Id } & HostCallControl): Promise<void>;
 
   /**
    * Optional: subscribe to document changes (new revisions, opened and closed documents).

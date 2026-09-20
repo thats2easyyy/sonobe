@@ -16,6 +16,7 @@ import path from "node:path";
 import { ProjectFormatError, readProjectFiles, saveProject, slugify, uniqueId, type Id, type SaveResult, type SonobeDocument } from "@sonobe/core";
 import { createNodeFs, loadProjectFilesFromDisk } from "@sonobe/core/node";
 import type { EngineRegistry } from "@sonobe/engine";
+import { CaptureCancelledError, CaptureTimeoutError } from "@sonobe/import";
 import { capturePage, CaptureFailedError, CaptureUnavailableError } from "@sonobe/import/node";
 import { createPatchRegistry } from "@sonobe/patches";
 import {
@@ -27,6 +28,7 @@ import {
   type SonobeHost,
   type WorkIntent,
 } from "./host.ts";
+import { ToolCancelledError } from "./progress.ts";
 import { loadSceneAssets, renderSceneScreenshot } from "./screenshot.ts";
 import { createDocumentSession, type DocumentSession } from "./session.ts";
 import { createSimulationManager, type SimulationManager } from "./sim.ts";
@@ -298,6 +300,7 @@ export function createHeadlessHost(options: HeadlessHostOptions = {}): HeadlessH
 
     async apply(ops, applyOptions) {
       const entry = resolve(applyOptions.docId);
+      if (applyOptions.signal?.aborted) throw new ToolCancelledError();
       const before = entry.session.revision;
       const result = entry.session.apply(ops, applyOptions);
       if (result.ok && !result.dryRun && result.txnId !== undefined && autosave) {
@@ -331,15 +334,20 @@ export function createHeadlessHost(options: HeadlessHostOptions = {}): HeadlessH
       };
     },
 
-    async captureDesign(request) {
+    async captureDesign(request, control = {}) {
       try {
-        const result = await capturePage(request);
+        const result = await capturePage(request, {
+          ...(control.signal ? { signal: control.signal } : {}),
+          onProgress: (p) => control.progress?.({ message: p.message, ...(p.done !== undefined ? { progress: p.done } : {}), ...(p.total !== undefined ? { total: p.total } : {}) }),
+        });
         return {
           capture: result.capture,
           images: result.images,
           ...(result.screenshot ? { screenshot: { data: result.screenshot.data, mimeType: "image/png" as const, width: result.screenshot.width, height: result.screenshot.height } } : {}),
+          ...(result.notes ? { notes: result.notes } : {}),
         };
       } catch (err) {
+        if (err instanceof CaptureTimeoutError || err instanceof CaptureCancelledError) throw new HostError(err.code, err.message, { hint: err.hint });
         if (err instanceof CaptureUnavailableError)
           throw new HostError("design_capture_unavailable", err.message, {
             hint: "Install Playwright's Chromium where Sonobe runs (npm install playwright && npx playwright install chromium), or open the project in the Sonobe app, which renders pages itself. You can also pass a ready-made capture.",
@@ -357,6 +365,7 @@ export function createHeadlessHost(options: HeadlessHostOptions = {}): HeadlessH
       const dir = path.join(entry.path, "assets");
       await mkdir(dir, { recursive: true });
       for (const f of files) {
+        if (fileOptions.signal?.aborted) throw new ToolCancelledError();
         if (!/^[A-Za-z0-9_][A-Za-z0-9_.-]*$/.test(f.file)) throw new HostError("invalid_asset_file", `"${f.file}" isn't a valid asset file name.`);
         const target = path.join(dir, f.file);
         // Content-addressed: a file that exists already holds these bytes.
@@ -438,6 +447,7 @@ export function createHeadlessHost(options: HeadlessHostOptions = {}): HeadlessH
       },
       async undo(undoOptions) {
         const entry = resolve(undoOptions.docId);
+        if (undoOptions.signal?.aborted) throw new ToolCancelledError();
         const before = entry.session.revision;
         const result = entry.session.undo(undoOptions);
         if (autosave) {

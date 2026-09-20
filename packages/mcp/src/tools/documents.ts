@@ -10,6 +10,13 @@ import { ADDITIVE, DESTRUCTIVE, READ_ONLY, UI_ONLY, type ToolContext } from "../
 import { DocIdSchema, DocumentInfoOutputSchema } from "../schemas.ts";
 import { TEMPLATES } from "../templates.ts";
 
+/**
+ * Opening, creating and saving can wait on the person (the app's Save panel for an untitled
+ * prototype). These steps send a heartbeat meanwhile, and outlast the app's own 120 s limit so its
+ * error comes first. They finish even when cancelled: an open or a save can't be taken back.
+ */
+const DOCUMENT_STEP = { deadlineMs: 130_000, finishOnCancel: true };
+
 /** get_document_info text and data (shared with open/create). */
 export async function documentInfo(
   host: SonobeHost,
@@ -121,8 +128,8 @@ export function registerDocumentTools(tc: ToolContext): void {
       output: DocumentInfoOutputSchema,
       annotations: UI_ONLY,
     },
-    async ({ ref, reload }) => {
-      const opened = await host.openDocument(ref, reload ? { reload: true } : {});
+    async ({ ref, reload }, _ctx, work) => {
+      const opened = await work.step("Opening the project", (control) => host.openDocument(ref, { ...(reload ? { reload: true } : {}), ...control }), DOCUMENT_STEP);
       const info = await documentInfo(host, opened.docId);
       return success(`${reload ? "Reloaded from disk" : "Opened"}.\n${info.text}`, info.data);
     },
@@ -156,8 +163,8 @@ export function registerDocumentTools(tc: ToolContext): void {
       output: DocumentInfoOutputSchema,
       annotations: ADDITIVE,
     },
-    async (args) => {
-      const created = await host.createDocument({ ...args });
+    async (args, _ctx, work) => {
+      const created = await work.step("Creating the project", (control) => host.createDocument({ ...args }, control), DOCUMENT_STEP);
       const info = await documentInfo(host, created.docId);
       return success(`Created.\n${info.text}`, info.data);
     },
@@ -196,8 +203,8 @@ export function registerDocumentTools(tc: ToolContext): void {
       }),
       annotations: DESTRUCTIVE,
     },
-    async ({ docId, force }) => {
-      const r = await host.saveDocument(docId, force ? { force: true } : {});
+    async ({ docId, force }, _ctx, work) => {
+      const r = await work.step(host.kind === "app" ? "Saving (Sonobe may ask the person where to save it)" : "Saving", (control) => host.saveDocument(docId, { ...(force ? { force: true } : {}), ...control }), DOCUMENT_STEP);
       const written = r.written.length
         ? `wrote ${r.written.join(", ")}`
         : "nothing changed on disk";

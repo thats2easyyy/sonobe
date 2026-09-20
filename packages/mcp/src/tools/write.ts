@@ -198,6 +198,7 @@ export function registerWriteTools(tc: ToolContext): void {
     host.apply(ops, {
       label: labelFor(args.label, ops),
       author: tc.author(ctx),
+      signal: tc.signal(ctx),
       ...(args.docId !== undefined ? { docId: args.docId } : {}),
       ...(args.expectedRevision !== undefined ? { expectedRevision: args.expectedRevision } : {}),
       ...(args.atomic !== undefined ? { atomic: args.atomic } : {}),
