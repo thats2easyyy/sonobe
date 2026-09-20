@@ -17,7 +17,7 @@ It uses your own Claude plan. Sonobe never sees your Claude credentials.
   node integrations/claude-code/build.ts
   ```
 
-  This writes `integrations/claude-code/dist/sonobe.mjs`: the whole CLI in one file, with the agent guides beside it. `.mcp.json` runs it with `node ${CLAUDE_PLUGIN_ROOT}/dist/sonobe.mjs mcp`, so nothing else has to be on your PATH.
+  This writes `integrations/claude-code/dist/sonobe.mjs`: the whole CLI in one file, with the agent guides and the examples' READMEs and tests (for `list_examples` and `get_example`) beside it. `.mcp.json` runs it with `node ${CLAUDE_PLUGIN_ROOT}/dist/sonobe.mjs mcp`, so nothing else has to be on your PATH.
 
 - The Sonobe app, running. Or use headless mode (below).
 
@@ -40,7 +40,7 @@ A marketplace copy must include the built `dist/` folder.
 
 Check the connection with `/mcp` in Claude Code; `sonobe` should be connected. Then ask Claude, "What's in my open Sonobe document?"
 
-The tools appear as `mcp__plugin_sonobe_sonobe__<tool>`. The prompts `prototype_interaction`, `debug_interaction` and `explain_prototype` become slash commands.
+The tools appear as `mcp__plugin_sonobe_sonobe__<tool>`. The prompts `import_screen`, `prototype_interaction`, `debug_interaction` and `explain_prototype` become slash commands.
 
 ### Without the plugin
 

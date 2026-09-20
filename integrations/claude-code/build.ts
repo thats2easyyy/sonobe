@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 /**
  * Build the Claude Code plugin's MCP server: the bundled `sonobe` CLI
- * (packages/cli/scripts/bundle.ts) at dist/sonobe.mjs with the agent guides beside it.
+ * (packages/cli/scripts/bundle.ts) at dist/sonobe.mjs with the agent guides and the examples' texts
+ * beside it.
  * .mcp.json runs it with `node ${CLAUDE_PLUGIN_ROOT}/dist/sonobe.mjs mcp`, so the plugin needs
  * nothing on PATH but Node.
  *

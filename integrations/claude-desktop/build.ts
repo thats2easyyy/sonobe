@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 /**
  * Build the Claude Desktop extension folder from the bundled `sonobe` CLI
- * (packages/cli/scripts/bundle.ts): server/sonobe.mjs, the agent guides, the manifest and the
- * license. Pack the result with `npx @anthropic-ai/mcpb pack`.
+ * (packages/cli/scripts/bundle.ts): server/sonobe.mjs with the examples' texts beside it, the agent
+ * guides, the manifest and the license. Pack the result with `npx @anthropic-ai/mcpb pack`.
  *
  *   node integrations/claude-desktop/build.ts [--out <dir>]
  */
