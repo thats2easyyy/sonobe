@@ -82,6 +82,8 @@ export interface AppHostOptions {
   captureDesign?(request: DesignCaptureRequest, control?: HostCallControl): Promise<CapturedDesign>;
   /** Download an image for a capture made elsewhere (default: Node's fetch). */
   fetchImage?(url: string, signal: AbortSignal): Promise<{ bytes: Uint8Array; mime: string } | null>;
+  /** captureDesign draws SF Symbols (the helper runs on this Mac). Default false. */
+  sfSymbols?: boolean;
   /** A window's document appeared, reached a new revision, or went away (drives MCP resource notifications). */
   onDocumentChange?(change: DocumentChange): void;
   /** Creates the simulation manager. Default: @sonobe/mcp createSimulationManager (tests wrap it). */
@@ -581,7 +583,7 @@ export function createAppHost(options: AppHostOptions): AppHost {
 
   const host: AppHost = {
     kind: "app",
-    capabilities: { screenshots: true, selection: true, presence: true, autosave: false },
+    capabilities: { screenshots: true, selection: true, presence: true, autosave: false, sfSymbols: options.sfSymbols ?? false },
     registry,
 
     async listDocuments() {

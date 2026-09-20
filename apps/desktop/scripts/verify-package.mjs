@@ -7,6 +7,7 @@
  * - the app launches, shows the editor build from Resources/editor, and exposes window.sonobeHost
  * - the MCP endpoint answers /health with the token from mcp.json, and quitting removes mcp.json
  * - the bundled CLI runs with the app's own runtime (Resources/cli/sonobe --version)
+ * - on macOS, the SF Symbols helper (Resources/bin/sfsymbol) draws a symbol
  *
  *   node scripts/verify-package.mjs                release/mac-<arch>/Sonobe.app
  *   node scripts/verify-package.mjs --dmg          mount the newest DMG read-only and check the app inside
@@ -89,6 +90,15 @@ try {
   for (const file of ["/package.json", "/dist/main.cjs", "/dist/preload.cjs", "/dist/player/index.html", "/dist/player/player.js", "/dist/scene/index.html", "/dist/scene/scene.js", "/dist/guides/start-here.md"]) assert(asarFiles.includes(file), `app.asar${file}`, asarFiles.slice(0, 20));
   assert(!asarFiles.some((f) => f.startsWith("/node_modules/") || f.endsWith(".map")), "no node_modules or source maps in app.asar", asarFiles.filter((f) => f.startsWith("/node_modules/")).slice(0, 5));
   log(`app.asar holds ${asarFiles.length} entries; editor, CLI and guides are in Resources`);
+  if (mac) {
+    // The SF Symbols helper for design imports runs from Resources/bin: a binary can't run from inside app.asar.
+    const helper = path.join(resources, "bin", "sfsymbol");
+    assert(existsSync(helper), "Resources/bin/sfsymbol (the SF Symbols helper; build.mjs needs Xcode's command line tools)", helper);
+    assert(!asarFiles.some((f) => f.startsWith("/dist/bin/")), "no SF Symbols helper inside app.asar");
+    const svg = execFileSync(helper, ["heart.fill", "--size", "17", "--color", "#F24D47"], { encoding: "utf8" });
+    assert(svg.startsWith("<svg") && svg.includes('fill="#F24D47"'), "Resources/bin/sfsymbol draws heart.fill as SVG", svg.slice(0, 200));
+    log("Resources/bin/sfsymbol draws SF Symbols");
+  }
 
   if (mac) {
     // codesign -d prints its report on stderr.

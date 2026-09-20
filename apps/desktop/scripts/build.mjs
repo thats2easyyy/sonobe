@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 /**
  * Bundles the Electron main process, the preload, the phone/pop-out web player, the scene renderer
- * for simulation screenshots, and the `sonobe` CLI with esbuild, and copies the MCP agent guides next
- * to main.cjs.
+ * for simulation screenshots, and the `sonobe` CLI with esbuild, copies the MCP agent guides next
+ * to main.cjs, and on macOS compiles the SF Symbols helper into dist/bin (scripts/sfsymbol.ts).
  *
  *   node scripts/build.mjs           one-off build into dist/
  *   node scripts/build.mjs --watch   rebuild on change (skips the CLI bundle)
@@ -20,6 +20,7 @@ import { chmodSync, cpSync, existsSync, mkdirSync, readFileSync, rmSync, statSyn
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { externalLottiePlugin, leanCatalogPlugin } from "./player-bundle.ts";
+import { buildSymbolHelper } from "./sfsymbol.ts";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const repo = path.resolve(root, "../..");
@@ -80,6 +81,11 @@ const POSIX_LAUNCHER = `#!/bin/sh
 # Runs the bundled Sonobe CLI. Uses SONOBE_NODE when set, else the app's own runtime (Electron in
 # Node mode) when this file is inside an installed Sonobe app, else \`node\` from PATH.
 DIR="$(cd "$(dirname "$0")" && pwd)"
+# Headless imports draw SF Symbols with the app's helper (Resources/bin/sfsymbol on a Mac).
+if [ -z "$SONOBE_SFSYMBOL" ] && [ -x "$DIR/../bin/sfsymbol" ]; then
+  SONOBE_SFSYMBOL="$DIR/../bin/sfsymbol"
+  export SONOBE_SFSYMBOL
+fi
 if [ -n "$SONOBE_NODE" ]; then
   exec "$SONOBE_NODE" "$DIR/sonobe.mjs" "$@"
 fi
@@ -151,17 +157,35 @@ async function buildCli() {
   return prebuilt ? `cli (prebuilt ${path.relative(repo, prebuilt)})` : `cli/sonobe.mjs ${(statSync(path.join(out, "sonobe.mjs")).size / 1024).toFixed(1)} KB`;
 }
 
+/** The SF Symbols helper in dist/bin on macOS (scripts/sfsymbol.ts). Without it imports keep placeholders, so it only warns. */
+function symbolHelper() {
+  const warn = (why) => console.warn(`[sonobe] no SF Symbols helper: ${why}. Design imports will show SF Symbols as gray placeholders.`);
+  try {
+    const helper = buildSymbolHelper({ out: path.join(dist, "bin", "sfsymbol") });
+    if (helper.skipped) {
+      if (process.platform === "darwin") warn(helper.skipped);
+      return [];
+    }
+    return [`bin/sfsymbol${helper.cached ? " (cached)" : ""}`];
+  } catch (err) {
+    warn(`swiftc failed (${String(err.message ?? err).split("\n")[0]})`);
+    return [];
+  }
+}
+
 rmSync(dist, { recursive: true, force: true });
 mkdirSync(dist, { recursive: true });
 copyStatic();
 
 if (watch) {
+  symbolHelper();
   const contexts = await Promise.all(targets.map((options) => context(options)));
   await Promise.all(contexts.map((ctx) => ctx.watch()));
   console.log("[sonobe] watching electron/, player/ and scene/ for changes…");
 } else {
   const started = performance.now();
   const [, cli] = await Promise.all([Promise.all(targets.map((options) => build(options))), buildCli()]);
+  const helper = symbolHelper();
   const sizes = targets.map((t) => `${path.relative(dist, path.join(root, t.outfile))} ${(statSync(path.join(root, t.outfile)).size / 1024).toFixed(1)} KB`);
-  console.log(`[sonobe] built ${[...sizes, cli].join(", ")} in ${Math.round(performance.now() - started)} ms`);
+  console.log(`[sonobe] built ${[...sizes, cli, ...helper].join(", ")} in ${Math.round(performance.now() - started)} ms`);
 }

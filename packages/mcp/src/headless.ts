@@ -16,8 +16,8 @@ import path from "node:path";
 import { ProjectFormatError, readProjectFiles, retiredIds, saveProject, slugify, uniqueId, type Id, type SaveResult, type SonobeDocument } from "@sonobe/core";
 import { createNodeFs, loadProjectFilesFromDisk } from "@sonobe/core/node";
 import type { EngineRegistry } from "@sonobe/engine";
-import { CaptureCancelledError, CaptureTimeoutError } from "@sonobe/import";
-import { capturePage, CaptureFailedError, CaptureUnavailableError } from "@sonobe/import/node";
+import { CaptureCancelledError, CaptureTimeoutError, unavailableSymbols, type SymbolRenderer } from "@sonobe/import";
+import { capturePage, CaptureFailedError, CaptureUnavailableError, symbolHelper } from "@sonobe/import/node";
 import { createPatchRegistry } from "@sonobe/patches";
 import {
   HostError,
@@ -41,6 +41,21 @@ export interface HeadlessHostOptions {
   autosave?: boolean;
   maxSimSessions?: number;
   now?: () => number;
+  /** Draws SF Symbols in imports. Default: the sfsymbol helper SONOBE_SFSYMBOL names, else none. */
+  symbols?: SymbolRenderer;
+}
+
+/**
+ * SF Symbols for headless imports: SONOBE_SFSYMBOL names the sfsymbol helper, which the Sonobe app ships
+ * in Resources/bin (its bundled `sonobe` CLI sets it). Without it, placeholders stay gray and say why.
+ */
+export function symbolsFromEnv(env: Record<string, string | undefined> = process.env): SymbolRenderer {
+  const helper = env.SONOBE_SFSYMBOL?.trim();
+  if (helper && !existsSync(helper)) return unavailableSymbols(`SONOBE_SFSYMBOL names ${helper}, but there's no file there. Point it at the sfsymbol helper (Sonobe.app/Contents/Resources/bin/sfsymbol) and restart the server.`);
+  if (helper) return symbolHelper(helper);
+  return unavailableSymbols(
+    "Headless Sonobe draws SF Symbols only when SONOBE_SFSYMBOL names the sfsymbol helper (Sonobe.app/Contents/Resources/bin/sfsymbol on a Mac). Import in the Sonobe app, or set it and restart the server.",
+  );
 }
 
 export interface HeadlessHost extends SonobeHost {
@@ -84,6 +99,7 @@ export function createHeadlessHost(options: HeadlessHostOptions = {}): HeadlessH
   const registry = options.registry ?? createPatchRegistry();
   const autosave = options.autosave ?? false;
   const now = options.now ?? (() => Date.now());
+  const symbols = options.symbols ?? symbolsFromEnv();
   const fs = createNodeFs();
   const entries = new Map<Id, Entry>();
   const working = new Map<Id, Map<string, WorkIntent>>();
@@ -218,7 +234,7 @@ export function createHeadlessHost(options: HeadlessHostOptions = {}): HeadlessH
 
   const host: HeadlessHost = {
     kind: "headless",
-    capabilities: { screenshots: true, selection: false, presence: false, autosave },
+    capabilities: { screenshots: true, selection: false, presence: false, autosave, sfSymbols: !symbols.unavailable },
     registry,
 
     async listDocuments() {
@@ -338,7 +354,7 @@ export function createHeadlessHost(options: HeadlessHostOptions = {}): HeadlessH
 
     async captureDesign(request, control = {}) {
       try {
-        const result = await capturePage(request, {
+        const result = await capturePage({ ...request, symbols }, {
           ...(control.signal ? { signal: control.signal } : {}),
           onProgress: (p) => control.progress?.({ message: p.message, ...(p.done !== undefined ? { progress: p.done } : {}), ...(p.total !== undefined ? { total: p.total } : {}) }),
         });

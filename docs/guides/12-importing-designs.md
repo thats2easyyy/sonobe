@@ -57,6 +57,14 @@ To give layers names you'll recognize, add `data-name` to the elements you care 
 <button data-name="Like Button" class="like">♥ Like</button>
 ```
 
+For an app that uses SF Symbols, put a placeholder where each symbol goes instead of drawing it:
+
+```html
+<svg data-sf-symbol="heart.fill" style="font-size: 22px; font-weight: 600; color: #FF3B30"></svg>
+```
+
+CSS styles it the way SwiftUI's `.font` and `.foregroundStyle` do: `font-size` is the point size, `font-weight` the weight and `color` the color. `data-sf-palette="#0A84FF,#34C759"` sets palette colors, and `data-sf-scale="large"` the image scale. On a Mac with macOS 13 or later, Sonobe draws the real symbol and names its layer after it, like heart.fill. Elsewhere, and for a name your Mac doesn't have, the import leaves a gray square of the same size and says why (with close names it knows). Symbols are drawn on your Mac when you import, so they come from your copy of macOS, and the import notes Apple's rules for the few symbols that may only refer to Apple's own features.
+
 ## Copy from Chrome
 
 The Sonobe Capture extension for Chrome copies the page you're looking at, or one element you pick, straight from the tab. It works on pages Sonobe can't open by address: signed-in dashboards, staging sites behind a VPN, any site you visit. Build and install it from [integrations/chrome-extension](../../integrations/chrome-extension/README.md), then:
@@ -79,7 +87,7 @@ Connect Claude first ([guide 11](11-working-with-claude.md)), open Claude Code i
 - "Rebuild ProfileView from my SwiftUI code as HTML, import it into Sonobe, then make the Follow button bounce when I tap it."
 - "Design a music player screen, import it into Sonobe, and make the play button morph into pause with a spring."
 
-Claude uses the `import_design` tool, checks the result against the original with a screenshot, and then wires the interaction onto the imported layers. One undo removes the import.
+Claude uses the `import_design` tool, checks the result against the original with a screenshot, and then wires the interaction onto the imported layers. One undo removes the import. For a SwiftUI or UIKit screen, Claude writes SF Symbol placeholders, so on a Mac the imported icons are the real symbols.
 
 ## What you get
 
@@ -91,6 +99,7 @@ Claude uses the `import_design` tool, checks the result against the original wit
 | Web fonts (`@font-face`) | Font assets saved with your project, so text draws in the same typeface |
 | `<img>`, CSS background images, `<canvas>` | Image layers, with the files saved in your project |
 | Inline `<svg>` icons | Image layers holding the SVG, colors included |
+| `<svg data-sf-symbol="heart.fill">` | The real SF Symbol as an image layer (Sonobe on a Mac), or a gray placeholder elsewhere |
 | `<input>`, `<textarea>` | Text Field layers you can type into in the viewer |
 | `position: fixed` bars | Layers that stay put while the page scrolls |
 | A page taller than the screen, or an `overflow: auto` area | A Content layer driven by a Scroll patch |

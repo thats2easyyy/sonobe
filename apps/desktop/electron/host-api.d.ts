@@ -235,7 +235,7 @@ export type DesignCaptureReply =
 /** What a capture started with a captureId is doing now. */
 export interface DesignCaptureProgress {
   captureId: string;
-  stage: "starting" | "loading" | "color-scheme" | "walking" | "images" | "screenshot";
+  stage: "starting" | "loading" | "color-scheme" | "walking" | "symbols" | "images" | "screenshot";
   /** "Downloading images: 7 of 28". */
   message: string;
   done?: number;
