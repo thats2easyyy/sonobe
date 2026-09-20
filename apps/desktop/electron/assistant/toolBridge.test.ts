@@ -8,12 +8,13 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { Client } from "@modelcontextprotocol/client";
-import { createHeadlessHost, IMPORT_META_KEY, TOOL_NAMES, type CapturedDesign, type DesignCaptureRequest, type HeadlessHost, type HostCallControl } from "@sonobe/mcp";
+import { InMemoryTransport } from "@modelcontextprotocol/server";
+import { createHeadlessHost, createSonobeMcpServer, IMPORT_META_KEY, TOOL_NAMES, type CapturedDesign, type DesignCaptureRequest, type HeadlessHost, type HostCallControl, type SonobeHost } from "@sonobe/mcp";
 import { createPatchRegistry } from "@sonobe/patches";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createAssistantAgent, UNPINNED_TOOLS } from "./agent.ts";
 import type { AssistantEvent } from "./protocol.ts";
-import { ASSISTANT_AUTHOR_NAME, createMcpToolBridge, describeToolInput, describeToolResult, toAnthropicTools, toolResultContent, type ToolBridge } from "./toolBridge.ts";
+import { ASSISTANT_AUTHOR_NAME, ASSISTANT_HIDDEN_TOOLS, createMcpToolBridge, describeToolInput, describeToolResult, toAnthropicTools, toolResultContent, type ToolBridge } from "./toolBridge.ts";
 import { scriptedClient } from "./testing.ts";
 
 let dir: string;
@@ -33,10 +34,25 @@ afterEach(async () => {
   await rm(dir, { recursive: true, force: true });
 });
 
+/** Every tool the MCP server lists, the ones the Assistant isn't given included, and its instructions. */
+async function serverSurface(over: SonobeHost) {
+  const server = createSonobeMcpServer(over, { version: "0.1.0-test" });
+  const [clientSide, serverSide] = InMemoryTransport.createLinkedPair();
+  await server.connect(serverSide);
+  const client = new Client({ name: "classify", version: "0.1.0-test" });
+  await client.connect(clientSide);
+  try {
+    return { tools: (await client.listTools()).tools, instructions: client.getInstructions() ?? "" };
+  } finally {
+    await client.close();
+    await server.close();
+  }
+}
+
 describe("MCP tool bridge", () => {
   it("lists every Sonobe tool in registration order, with titles and read-only hints", async () => {
     const tools = await bridge.tools();
-    expect(tools.map((t) => t.name)).toEqual([...TOOL_NAMES]);
+    expect(tools.map((t) => t.name)).toEqual(TOOL_NAMES.filter((name) => !ASSISTANT_HIDDEN_TOOLS.has(name)));
     expect(tools.find((t) => t.name === "get_outline")).toMatchObject({ readOnly: true, title: expect.any(String) });
     expect(tools.find((t) => t.name === "delete_items")?.readOnly).toBe(false);
     expect(await bridge.instructions()).toContain("get_guide");
@@ -65,8 +81,31 @@ describe("MCP tool bridge", () => {
     expect(latest?.author).toEqual({ kind: "agent", name: ASSISTANT_AUTHOR_NAME });
   });
 
+  it("hides preview_design and the instruction that teaches it: the canvas draws the Assistant's import_design html as it writes", async () => {
+    expect([...ASSISTANT_HIDDEN_TOOLS]).toEqual(["preview_design"]);
+    // A host with a canvas, like the app's, whose instructions teach preview_design.
+    const canvas = Object.create(host) as HeadlessHost;
+    Object.defineProperty(canvas, "capabilities", { value: { ...host.capabilities, designPreview: true } });
+    const direct = await serverSurface(canvas);
+    expect(direct.tools.map((t) => t.name)).toContain("preview_design");
+    expect(direct.instructions).toContain("preview_design");
+    const assistant = createMcpToolBridge({ host: canvas, version: "0.1.0-test" });
+    try {
+      expect((await assistant.tools()).map((t) => t.name)).not.toContain("preview_design");
+      const instructions = await assistant.instructions();
+      // Only that line goes: the workflow stays as it is.
+      expect(instructions).not.toContain("preview_design");
+      expect(instructions).toContain("Build the numbers the person will want to tune");
+      expect(instructions.split("\n")).toHaveLength(direct.instructions.split("\n").length - 1);
+    } finally {
+      await assistant.close();
+    }
+  });
+
   it("classifies every tool: it takes docId, so the Assistant pins it to its window's document, or it's in UNPINNED_TOOLS", async () => {
-    const tools = await bridge.tools();
+    // Over the server's own list, so the tools the Assistant isn't given (preview_design) are classified too.
+    const { tools } = await serverSurface(host);
+    expect(tools.map((t) => t.name)).toEqual([...TOOL_NAMES]);
     const unclassified = tools.filter((t) => !UNPINNED_TOOLS.has(t.name) && !Object.hasOwn((t.inputSchema.properties ?? {}) as object, "docId")).map((t) => t.name);
     const pinnedAnyway = tools.filter((t) => UNPINNED_TOOLS.has(t.name) && Object.hasOwn((t.inputSchema.properties ?? {}) as object, "docId")).map((t) => t.name);
     expect(unclassified, "Give these tools docId, or add them to UNPINNED_TOOLS in agent.ts").toEqual([]);
@@ -110,7 +149,7 @@ describe("MCP tool bridge", () => {
     expect((await host.history.list({ limit: 1 }))[0]?.author.name).toBe("Assistant");
     // The system prompt carries the MCP server's instructions.
     expect(JSON.stringify(api.requests[0]!.system)).toContain("get_guide");
-    expect(api.requests[0]!.tools).toHaveLength(TOOL_NAMES.length);
+    expect(api.requests[0]!.tools).toHaveLength(TOOL_NAMES.length - ASSISTANT_HIDDEN_TOOLS.size);
   });
 });
 

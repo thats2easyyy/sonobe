@@ -119,6 +119,10 @@ describe("structuredContent carries the complete payload", () => {
     expect(knobs.isError).not.toBe(true);
     await call("get_knobs");
     await call("apply_knob_preset", { preset: "Shipped app" });
+    await call("preview_design", { name: "Receipt", html: "<!doctype html><body><h1>Receipt</h1>" });
+    await call("preview_design", { append: "<p>Paid</p></body>" });
+    await call("preview_design", { clear: true });
+    await call("preview_design", { append: "<p>No draft</p>" });
     await call("import_design", {
       capture: {
         format: "sonobe.design-capture",

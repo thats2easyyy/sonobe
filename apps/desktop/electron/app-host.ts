@@ -702,7 +702,7 @@ export function createAppHost(options: AppHostOptions): AppHost {
 
   const host: AppHost = {
     kind: "app",
-    capabilities: { screenshots: true, selection: true, presence: true, autosave: false, sfSymbols: options.sfSymbols ?? false },
+    capabilities: { screenshots: true, selection: true, presence: true, autosave: false, sfSymbols: options.sfSymbols ?? false, designPreview: true },
     registry,
 
     ...(options.drafts
@@ -1043,6 +1043,20 @@ export function createAppHost(options: AppHostOptions): AppHost {
     async presence(docId) {
       const entry = await resolve(docId);
       return [...entry.working.values()].map((w) => w.intent);
+    },
+
+    async showDesignPreview(update) {
+      try {
+        const entry = await resolve(update.docId);
+        if (entry.target.hasMethod("design.preview") === false) {
+          if (update.status === "cleared") return;
+          throw new HostError("design_preview_unavailable", "This version of the editor can't draw design previews.", { hint: 'Ask the person to update Sonobe. The draft is kept, and import_design with "preview": true still imports it.' });
+        }
+        await call(entry.target, "design.preview", update);
+      } catch (err) {
+        // Best effort: a window that's gone (or closes meanwhile) has nowhere to draw, and nothing to clear.
+        if (!(isHostError(err) && (err.code === "unknown_document" || err.code === "no_window" || err.code === "window_closed"))) throw err;
+      }
     },
 
     sim,
