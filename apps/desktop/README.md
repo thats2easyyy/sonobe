@@ -42,7 +42,7 @@ Run these from the repository root with `-w @sonobe/desktop`, or from this folde
 - `openExternal(url)`: http(s) and mailto only.
 - `popOutViewer({ alwaysOnTop })`, `closeViewerWindow()`, `getViewerWindowStatus()`, `onViewerWindowStatus(cb)`: the live prototype in its own sandboxed window, served from a loopback-only player server. It has no host API.
 - Phone preview: `getPreviewStatus`, `startPreview`, `stopPreview`, `onPreviewStatus`.
-- `drafts.write/remove/list/read/reveal`: drafts of unsaved work, one project folder each in `userData/Drafts`. A window claims the drafts it writes or reads; `list` returns the ones nobody claims. Failures come back as `{ ok: false, code, message }` because the context bridge drops Error properties.
+- `drafts.write/remove/list/read/release/reveal`: drafts of unsaved work, one project folder each in `userData/Drafts`. A window claims the drafts it writes or reads, and `release` gives back one it read but couldn't use; `list` returns the ones nobody claims. Failures come back as `{ ok: false, code, message }` because the context bridge drops Error properties.
 - `readProjectIfExists(dir)`: `readProject`, but null for a folder that doesn't exist yet (a Save As target).
 
 ## Packaging
