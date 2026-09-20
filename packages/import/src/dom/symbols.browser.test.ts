@@ -133,6 +133,22 @@ describe.skipIf(!playwrightReady)("SF Symbols in a capture", () => {
     expect(result.capture.notes ?? []).toEqual([]);
   });
 
+  it("takes a name the placeholder's own aria-label gives it over the symbol's, but not its id's", async () => {
+    const result = await capturePage({
+      html: page(`<div class="row"><svg data-sf-symbol="heart.fill" aria-label="Like" style="font-size:20px"></svg><i data-sf-symbol="bookmark" aria-label="Save" style="font-size:20px"></i><svg data-sf-symbol="xmark" id="close-icon" style="font-size:20px"></svg><svg data-sf-symbol="hart" aria-label="Share" style="font-size:20px"></svg></div>`),
+      width: 400,
+      height: 200,
+      symbols: fakeRenderer(),
+    });
+    expect(find(result.capture.root, "Like")).toMatchObject({ kind: "image" });
+    expect(find(result.capture.root, "Save")).toMatchObject({ kind: "image" });
+    // Like an icon class, the symbol names the glyph better than an id does.
+    expect(find(result.capture.root, "xmark")).toMatchObject({ kind: "image" });
+    // A symbol that couldn't be drawn keeps the name too; the note names the symbol.
+    expect(find(result.capture.root, "Share")).toMatchObject({ kind: "frame", fill: "#E5E7EBFF" });
+    expect(find(result.capture.root, "heart.fill")).toBeUndefined();
+  });
+
   it("keeps a size the page gave the placeholder", async () => {
     const result = await capturePage({ html: page(`<div class="row"><svg data-sf-symbol="heart.fill" width="40" height="40" style="font-size:20px"></svg><svg data-sf-symbol="xmark" style="font-size:20px;width:30px;height:30px"></svg></div>`), width: 400, height: 200, symbols: fakeRenderer() });
     expect(find(result.capture.root, "heart.fill")?.box.slice(2)).toEqual([40, 40]);

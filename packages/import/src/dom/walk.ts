@@ -689,10 +689,6 @@ class Walker {
   nameOf(el: Element, tag: string): NameInfo {
     const explicit = explicitName(el);
     if (explicit) return { name: explicit, rank: 5, kind: "explicit" };
-    // An SF Symbol is named after the symbol ("heart.fill"). Like an icon class it names the glyph, so a
-    // named wrapper that disappears around it still gives it the wrapper's name.
-    const symbol = el.getAttribute("data-sf-symbol")?.trim();
-    if (symbol) return { name: symbol.slice(0, 80), rank: 2, kind: "icon" };
     const component = componentName(el);
     if (component) return { name: titleize(component), rank: 4, kind: "component" };
     const aria = el.getAttribute("aria-label") ?? (tag === "svg" || tag === "img" ? (el.getAttribute("title") ?? el.querySelector?.(":scope > title")?.textContent) : null);
@@ -701,6 +697,11 @@ class Walker {
       const label = aria.trim().slice(0, 60);
       return { name: role && (tag === "button" || tag === "a" || el.hasAttribute("role")) && !label.toLowerCase().includes(role.toLowerCase()) ? `${label} ${role}` : label, rank: 3, kind: "aria" };
     }
+    // An SF Symbol is named after the symbol ("heart.fill") when nothing above names its element. Like an
+    // icon class it names the glyph, so a named wrapper that disappears around it still gives it the
+    // wrapper's name.
+    const symbol = el.getAttribute("data-sf-symbol")?.trim();
+    if (symbol) return { name: symbol.slice(0, 80), rank: 2, kind: "icon" };
     const icon = iconName(el);
     if (icon) return { name: icon, rank: 2, kind: "icon" };
     const testId = el.getAttribute("data-testid") ?? el.getAttribute("data-test-id") ?? el.getAttribute("data-cy");

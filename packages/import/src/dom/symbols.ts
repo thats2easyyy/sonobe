@@ -8,7 +8,7 @@
  *
  * - data-sf-palette="#0A84FF,#34C759": the palette rendering mode's colors (one per layer).
  * - data-sf-scale="small" | "medium" | "large": SwiftUI's imageScale.
- * - data-name names the layer; without it the layer takes the symbol's name.
+ * - data-name or aria-label names the layer; without one the layer takes the symbol's name.
  */
 
 import type { SymbolPaint, SymbolSlot, SymbolWeight } from "../symbols.ts";
