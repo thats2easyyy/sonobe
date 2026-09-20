@@ -83,11 +83,11 @@ try {
   log(`checking ${appPath}`);
 
   // Bundle contents.
-  for (const file of ["app.asar", "editor/index.html", "cli/sonobe.mjs", "cli/sonobe", "cli/guides/start-here.md", "cli/examples/README.md"]) assert(existsSync(path.join(resources, file)), `Resources/${file}`);
+  for (const file of ["app.asar", "editor/index.html", "cli/sonobe.mjs", "cli/sonobe", "cli/guides/start-here.md", "cli/examples/README.md", "cli/examples/16-noddit-deck/design/capture.json"]) assert(existsSync(path.join(resources, file)), `Resources/${file}`);
   if (mac) assert(existsSync(path.join(resources, "icon.icns")), "Resources/icon.icns");
   const { listPackage } = await import("@electron/asar");
   const asarFiles = listPackage(path.join(resources, "app.asar")).map((f) => f.replaceAll("\\", "/"));
-  for (const file of ["/package.json", "/dist/main.cjs", "/dist/preload.cjs", "/dist/player/index.html", "/dist/player/player.js", "/dist/scene/index.html", "/dist/scene/scene.js", "/dist/guides/start-here.md", "/dist/examples/README.md"]) assert(asarFiles.includes(file), `app.asar${file}`, asarFiles.slice(0, 20));
+  for (const file of ["/package.json", "/dist/main.cjs", "/dist/preload.cjs", "/dist/player/index.html", "/dist/player/player.js", "/dist/scene/index.html", "/dist/scene/scene.js", "/dist/guides/start-here.md", "/dist/examples/README.md", "/dist/examples/16-noddit-deck/design/capture.json"]) assert(asarFiles.includes(file), `app.asar${file}`, asarFiles.slice(0, 20));
   assert(!asarFiles.some((f) => f.startsWith("/node_modules/") || f.endsWith(".map")), "no node_modules or source maps in app.asar", asarFiles.filter((f) => f.startsWith("/node_modules/")).slice(0, 5));
   log(`app.asar holds ${asarFiles.length} entries; editor, CLI and guides are in Resources`);
   if (mac) {

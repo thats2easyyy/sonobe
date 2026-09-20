@@ -110,7 +110,8 @@ export function applyOverrides(
   return { doc, kept, failed };
 }
 
-const isPresetSwitch = (entry: OverrideEntry) =>
+/** Whether an override switches the knob preset the simulation runs (applyKnobPreset). */
+export const isPresetSwitch = (entry: OverrideEntry) =>
   entry.ops.length === 1 && entry.ops[0]!.op === "applyKnobPreset";
 
 const COPY = /#\d+/;
@@ -162,6 +163,8 @@ export function overrideKeys(doc: SonobeDocument, address: string): string[] {
   const keys = [`${c}|${own}`];
   const parsed = parseAddress(own);
   if (parsed?.kind === "patch") keys.push(`${c}|mute:${parsed.id}`);
+  // A knob value set in one preset (setKnobValue with preset) shows while that preset runs.
+  if (parsed?.kind === "knob" && doc.knobs) keys.push(`${c}|${own}|${doc.knobs.active}`);
   if (!parsed && /^[A-Za-z_][A-Za-z0-9_]*$/.test(own)) keys.push(`${c}|mute:${own}`);
   return keys;
 }
@@ -262,14 +265,16 @@ export function overrideNote(entry: OverrideEntry, current: unknown): string {
 }
 
 /**
- * Turn a request's set and ops into overrides, checked against `doc` (the person's document).
- * Throws a teaching HostError for per-copy targets, outputs and structural ops; the op engine
- * checks the rest when the overrides apply.
+ * Turn a request's set and ops into overrides, checked against `doc` (the person's document, with
+ * the knob preset and values the simulation runs). `person` is the person's own document, for the
+ * preset they run. Throws a teaching HostError for per-copy targets, outputs and structural ops;
+ * the op engine checks the rest when the overrides apply.
  */
 export function overrideEntries(
   doc: SonobeDocument,
   request: SimOverrideRequest,
   registry: Registry,
+  person: SonobeDocument = doc,
 ): NewOverride[] {
   const out: NewOverride[] = [];
   const pin = (
@@ -433,7 +438,8 @@ export function overrideEntries(
             `ops[${i}]: ${preset.error.message}`,
             preset.error.hint ? { hint: preset.error.hint } : {},
           );
-        const was = getKnobPreset(set, set!.active)?.name ?? set!.active;
+        const theirs = person.knobs?.active ?? set!.active;
+        const was = getKnobPreset(set, theirs)?.name ?? theirs;
         out.push({
           key: `${doc.project.root}|knob-preset`,
           target: `preset ${preset.value.name}`,
