@@ -528,14 +528,16 @@ textarea.sb-pe-title-input {
 }
 
 /*
- * Live values keep the width of the longest text their type can print (liveReserve in
- * @sonobe/core/graph, set as --sb-pe-live-reserve in ch), right-aligned so the digits stay by the
- * label: a node holds its width while its numbers run. A row that would pass the node's 320 px
- * maximum keeps only the room its labels leave (liveRoom, --sb-pe-live-room).
+ * Live values sit in slots as wide as the longest text their type prints (liveReserve in
+ * @sonobe/core/graph, set as --sb-pe-live-reserve in ch; the half pixel covers N ch laying out a
+ * 64th narrower than N glyphs), right-aligned so the digits stay by the label, and a longer value
+ * ends in "…": a node holds its width while its numbers run. A row that would pass the node's
+ * 320 px maximum keeps only the room its labels leave (liveRoom, --sb-pe-live-room), but at least
+ * 4ch. nodeSize.ts sizes the same slot (NODE_BOX.slotPad, slotFloorChars).
  */
 .sb-pe-port__live {
   flex: none;
-  min-width: min(var(--sb-pe-live-reserve, 0ch), var(--sb-pe-live-room, 96px), 96px);
+  width: min(calc(var(--sb-pe-live-reserve) + 0.5px), max(var(--sb-pe-live-room, 96px), 4ch), 96px);
   max-width: 96px;
   overflow: hidden;
   color: var(--text-accent);
@@ -767,10 +769,23 @@ textarea.sb-pe-title-input {
   text-overflow: ellipsis;
 }
 
-/* A knob's value keeps the width of the longest value its slider reaches (knobValueReserve), so tuning it doesn't resize the node. */
+/*
+ * A knob's value keeps the width of the longest value its slider or fields reach (knobValueReserve,
+ * --sb-pe-knob-reserve in ch), so tuning it doesn't resize the node, or less when the knob's whole
+ * name needs the room (knobValueRoom, --sb-pe-knob-room), but at least 4ch. A chip that short of
+ * room is as wide as a chip gets (data-full), so a longer value only pushes into the name.
+ */
+.sb-pe-value--knob[data-full] {
+  width: 110px;
+}
+
+.sb-pe-value--knob[data-full] .sb-pe-value__name {
+  flex-grow: 1;
+}
+
 .sb-pe-value__knob-value {
   flex: none;
-  min-width: var(--sb-pe-knob-reserve, 0ch);
+  min-width: min(calc(var(--sb-pe-knob-reserve) + 0.5px), max(var(--sb-pe-knob-room, 110px), 4ch));
   color: var(--text-primary);
   font-family: var(--font-mono);
   text-align: right;

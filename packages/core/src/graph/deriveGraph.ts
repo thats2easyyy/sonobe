@@ -17,7 +17,7 @@ import { deepEqual } from "./equal.ts";
 import { knobValueReserve } from "./format.ts";
 import { createPlacementIndex, PLACEMENT_PADDING, type Rect } from "./geometry.ts";
 import { INPUTS_NODE_ID, layerNodeId, OUTPUTS_NODE_ID, readNodePositions } from "./graphNodes.ts";
-import { estimateNodeSize, liveRooms, type NodeTextMeasurer } from "./nodeSize.ts";
+import { estimateNodeSize, knobValueRoom, liveRooms, type NodeTextMeasurer } from "./nodeSize.ts";
 import {
   cableId,
   commentNodeId,
@@ -314,11 +314,19 @@ export function deriveGraph(options: DeriveGraphOptions): GraphModel {
   const patchData = new Map<Id, PatchNodeData>();
   const estimateOptions = { ...(options.measure ? { measure: options.measure } : {}), layerName: (id: Id) => findLayer(component.layers, id)?.layer.name };
   const sizeOf = (id: string, data: Parameters<typeof estimateNodeSize>[0]) => options.sizes?.get(id) ?? estimateNodeSize(data, estimateOptions);
-  /** Outputs in rows long enough to reach the maximum width get their liveRoom, which caps the live value's reserve. */
-  const capLiveValues = (data: Parameters<typeof liveRooms>[0]) =>
+  /**
+   * Outputs in rows long enough to reach the maximum width get their liveRoom, which caps the live
+   * value's slot, and knob chips whose name leaves less than the value's reserve get its valueRoom.
+   */
+  const capLiveValues = (data: Parameters<typeof liveRooms>[0]) => {
     liveRooms(data, estimateOptions).forEach((room, i) => {
       if (room !== undefined) data.outputs[i]!.liveRoom = room;
     });
+    for (const input of data.inputs) {
+      const room = input.knob ? knobValueRoom(input.knob, options.measure) : undefined;
+      if (room !== undefined) input.knob!.valueRoom = room;
+    }
+  };
 
   const previousCache = options.previous ? patchCaches.get(options.previous) : undefined;
   const loopFree = looped.size === 0 && !wholeLoopOutputs;

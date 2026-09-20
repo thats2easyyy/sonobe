@@ -1,8 +1,9 @@
 import { describe, expect, it } from "vitest";
 import { buildSampleDocument, mockRegistry, mustApply } from "../testing/fixtures.ts";
 import { deriveGraph } from "./deriveGraph.ts";
-import { componentNodeShapes, nodeShapeFromData, type NodeRowShape, type NodeShape, type ValueChip } from "./nodeShape.ts";
-import { estimateNodeSize, liveRoom, liveRooms, measureNode, NODE_BOX, portCenterY, tableMeasurer } from "./nodeSize.ts";
+import type { ValueSubtype, ValueType } from "../types.ts";
+import { componentNodeShapes, liveReserve, liveText, nodeShapeFromData, type NodeRowShape, type NodeShape, type ValueChip } from "./nodeShape.ts";
+import { estimateNodeSize, knobValueRoom, liveRoom, liveRooms, measureNode, NODE_BOX, portCenterY, tableMeasurer } from "./nodeSize.ts";
 import { componentNodeBoxes, estimatePatchSize } from "./placement.ts";
 import type { PatchNodeData } from "./types.ts";
 
@@ -37,8 +38,22 @@ describe("measureNode", () => {
     expect(valueRow({ kind: "text", text: label(30) })).toBe(base + 110);
     expect(valueRow({ kind: "static", text: "×4" }, 25)).toBe(12 + 150 + 6 + 10 + 12);
     expect(valueRow({ kind: "knob", name: "Damping", text: "0.75" })).toBe(base + 10 + 10 + 4 + 42 + 4 + 24);
-    expect(valueRow({ kind: "knob", name: "Damping", text: "0.5", reserve: 4 })).toBe(base + 10 + 10 + 4 + 42 + 4 + 24);
+    // A reserve of 4 characters is 4 ch and the half point that keeps a full-length value from ending in "…".
+    expect(valueRow({ kind: "knob", name: "Damping", text: "0.5", reserve: 4 })).toBe(Math.ceil(base + 10 + 10 + 4 + 42 + 4 + 24.5));
+    expect(valueRow({ kind: "knob", name: "Damping", text: "12.25", reserve: 4 })).toBe(base + 10 + 10 + 4 + 42 + 4 + 30);
     expect(valueRow({ kind: "knob", name: "Tint", swatch: "#FF375FFF" })).toBe(base + 10 + 10 + 4 + 24 + 4 + 10);
+  });
+
+  it("keeps a knob's whole name, and makes the chip as wide as chips get when the name leaves less than the value's reserve", () => {
+    const base = 12 + 120 + 6;
+    // 110 less 28 for the padding, glyph and gaps, 48 for "Card Ang" and 2 of slack leaves 32, more than the 30.5 "-180°" needs.
+    expect(knobValueRoom({ name: "Card Ang", valueReserve: 5 }, mono6)).toBeUndefined();
+    expect(valueRow({ kind: "knob", name: "Card Ang", text: "0°", reserve: 5 })).toBe(Math.ceil(base + 28 + 48 + 30.5));
+    // "Card Angle" leaves 20: the value keeps that, and the chip is 110 whatever the value prints.
+    expect(knobValueRoom({ name: "Card Angle", valueReserve: 5 }, mono6)).toBe(20);
+    expect(valueRow({ kind: "knob", name: "Card Angle", text: "0°", reserve: 5 })).toBe(base + 110);
+    expect(valueRow({ kind: "knob", name: "Card Angle", text: "-179°", reserve: 5 })).toBe(base + 110);
+    expect(knobValueRoom({ name: "Gap" }, mono6)).toBeUndefined();
   });
 
   it("adds live values (at most 96 pt) and the Drive button", () => {
@@ -47,11 +62,17 @@ describe("measureNode", () => {
     expect(width({ kind: "layer", title: "Card", chips: [], rows: [{ in: { label: label(20), drive: true } }] })).toBe(12 + 120 + 6 + 14 + 36);
   });
 
-  it("keeps a live value's slot at its reserve (in characters of the mono font), at most 96 pt, and only while a value shows", () => {
-    expect(width(patch([{ in: { label: label(20) }, out: { label: "Output", live: "Off", reserve: 3 } }]))).toBe(12 + 120 + 12 + 18 + 6 + 36 + 12);
-    expect(width(patch([{ in: { label: label(20) }, out: { label: "Output", live: "0", reserve: 8 } }]))).toBe(12 + 120 + 12 + 48 + 6 + 36 + 12);
+  it("keeps a live value's slot at its reserve (in characters of the mono font, and half a point), at most 96 pt, and only while a value shows", () => {
+    expect(width(patch([{ in: { label: label(20) }, out: { label: "Output", live: "Off", reserve: 3 } }]))).toBe(Math.ceil(12 + 120 + 12 + 18.5 + 6 + 36 + 12));
+    expect(width(patch([{ in: { label: label(20) }, out: { label: "Output", live: "0", reserve: 8 } }]))).toBe(Math.ceil(12 + 120 + 12 + 48.5 + 6 + 36 + 12));
     expect(width(patch([{ in: { label: label(20) }, out: { label: "Output", live: "0, 0", reserve: 18 } }]))).toBe(12 + 120 + 12 + 96 + 6 + 36 + 12);
     expect(width(patch([{ in: { label: label(20) }, out: { label: "Output", reserve: 8 } }]))).toBe(12 + 120 + 12 + 36 + 12);
+  });
+
+  it("ends a value longer than its reserve in an ellipsis instead of widening the node", () => {
+    const at = (live: string) => width(patch([{ in: { label: label(20) }, out: { label: "Output", live, reserve: 14 } }]));
+    expect(at("0, 0")).toBe(Math.ceil(12 + 120 + 12 + 84.5 + 6 + 36 + 12));
+    expect(at("1931.5, -1229.1")).toBe(at("0, 0"));
   });
 
   it("caps a live value's reserve to the room its row leaves under the maximum width, so labels stay whole", () => {
@@ -60,10 +81,14 @@ describe("measureNode", () => {
     expect(liveRoom(long("0"), mono6)).toBe(36);
     expect(width(patch([long("0")]))).toBe(276 + 36 + 6);
     expect(width(patch([long("12.5")]))).toBe(276 + 36 + 6);
-    // A value wider than the room still prints in full, as it would without a reserve.
-    expect(width(patch([long("-1234.5")]))).toBe(320);
+    // A value wider than the room ends in "…" there.
+    expect(width(patch([long("-1234.5")]))).toBe(276 + 36 + 6);
     expect(liveRoom({ in: { label: "A" }, out: { label: "B" } }, mono6)).toBe(96);
     expect(liveRoom({ in: { label: label(60) }, out: { label: "B" } }, mono6)).toBe(0);
+    // A row that leaves less than 4 characters keeps 4, and its labels give way.
+    const crowded: NodeRowShape = { in: { label: label(20) }, out: { label: label(23), live: "0", reserve: 8 } };
+    expect(liveRoom(crowded, mono6)).toBe(18);
+    expect(width(patch([crowded]))).toBe(320);
   });
 
   it("adds header chips", () => {
@@ -102,6 +127,31 @@ describe("node shapes from the graph", () => {
     expect(shapes.has("note_1")).toBe(false);
   });
 
+  it("gives every live value that prints a reserve, by the port's type and what it measures", () => {
+    const port = (type: ValueType, subtype?: ValueSubtype) => ({ type, ...(subtype ? { subtype } : {}) });
+    const values: [ValueType, unknown][] = [
+      ["number", 0.5],
+      ["index", 3],
+      ["boolean", true],
+      ["color", { r: 1, g: 0, b: 0, a: 1 }],
+      ["text", ""],
+      ["point", [0, 0]],
+      ["enum", "a"],
+      ["layer", "card"],
+      ["json", { a: 1 }],
+      ["any", null],
+      ["number", { __loop: true, items: [] }],
+    ];
+    for (const [type, value] of values) {
+      expect(liveText(port(type), value), type).not.toBe("");
+      expect(liveReserve(port(type), value), type).toBeGreaterThan(0);
+    }
+    expect(liveText(port("pulse"), true)).toBe("");
+    expect(liveReserve(port("pulse"), true)).toBe(0);
+    expect(liveReserve(port("number", "progress"), 0.5)).toBe(6);
+    expect(liveReserve(port("number", "distance"), 0.5)).toBe(8);
+  });
+
   it("prints live values when given them, in a slot as wide as the longest number, which widens the node", () => {
     const doc = buildSampleDocument();
     const data = deriveGraph({ doc, componentId: "main", registry: mockRegistry }).nodes.find((n) => n.id === "grow")!.data as PatchNodeData;
@@ -109,7 +159,7 @@ describe("node shapes from the graph", () => {
     expect(shape.rows[0]!.out).toEqual({ label: "Output", live: "1.04", reserve: 8 });
     // "1.04" and "-1234.6" both take the 8 characters of "-99999.9": the node keeps its width as the value runs.
     const at = (value: number) => estimateNodeSize(data, { live: () => value, measure: mono6 }).width;
-    expect(at(-1234.567)).toBe(12 + 48 + 12 + 48 + 6 + 36 + 12);
+    expect(at(-1234.567)).toBe(Math.ceil(12 + 48 + 12 + 48.5 + 6 + 36 + 12));
     expect(new Set([0, 0.5, -12.35, 100, 1.04, -99999.9].map(at))).toEqual(new Set([at(-1234.567)]));
     expect(estimateNodeSize(data, { measure: mono6 }).width).toBe(164);
   });
@@ -158,6 +208,21 @@ describe("node shapes from the graph", () => {
     expect(tuned(8).chip).toEqual({ kind: "knob", name: "Bounce", text: "8", reserve: 4 });
     expect(tuned(12.5).chip).toEqual({ kind: "knob", name: "Bounce", text: "12.5", reserve: 4 });
     expect(tuned(8).width).toBe(tuned(12.5).width);
+  });
+
+  it("gives a knob chip whose name leaves less than its value's reserve the room beside the name", () => {
+    const knobOf = (name: string) => {
+      const doc = mustApply(buildSampleDocument(), [
+        { op: "addKnob", knob: { id: "angle", name, type: "number", value: 0, min: -180, max: 180, step: 1, unit: "°" } },
+        { op: "addPatch", patch: { id: "wobble", type: "popAnimation", inputs: { bounciness: { link: "$knob.angle" } }, ui: { x: 0, y: 400 } } },
+      ]).doc;
+      const data = deriveGraph({ doc, componentId: "main", registry: mockRegistry, measure: mono6 }).nodes.find((n) => n.id === "wobble")!.data as PatchNodeData;
+      return data.inputs.find((p) => p.key === "bounciness")!.knob!;
+    };
+    // "-180°" is 5 characters, 30.5 pt: "Angle" leaves 50 beside it, "Card Angle" 20.
+    expect(knobOf("Angle")).toMatchObject({ valueReserve: 5 });
+    expect(knobOf("Angle").valueRoom).toBeUndefined();
+    expect(knobOf("Card Angle")).toMatchObject({ valueReserve: 5, valueRoom: 20 });
   });
 
   it("gives a color knob's chip a swatch of its running color instead of the hex", () => {

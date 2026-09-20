@@ -25,7 +25,8 @@ export type ValueChip =
   | { kind: "static"; text: string }
   /**
    * An input linked to a knob: the knob's name, and its value when known (a color knob's as a
-   * "#RRGGBBAA" swatch), in a slot `reserve` characters wide at least, so tuning it keeps the width.
+   * "#RRGGBBAA" swatch), in a slot `reserve` characters wide at least (knobValueReserve, less where
+   * the name needs the room), so tuning it keeps the width.
    */
   | { kind: "knob"; name: string; text?: string; swatch?: string; reserve?: number };
 
@@ -34,7 +35,7 @@ export type HeaderChip = { kind: "chip"; text: string } | { kind: "loop"; text: 
 
 export interface NodeRowShape {
   in?: { label: string; value?: ValueChip; drive?: boolean };
-  /** An output: its live value, in a slot `reserve` characters wide at least (liveReserve). */
+  /** An output: its live value, in a slot `reserve` characters wide (liveReserve), which a longer value ends early in. */
   out?: { label: string; live?: string; reserve?: number };
 }
 
@@ -124,7 +125,7 @@ function knobValueChip(knob: NonNullable<PortModel["knob"]>): ValueChip {
   return { kind: "knob", name: knob.name, text: knob.valueText, ...(knob.valueReserve ? { reserve: knob.valueReserve } : {}) };
 }
 
-type LivePort = Pick<PortModel, "type" | "enumOptions">;
+type LivePort = Pick<PortModel, "type" | "enumOptions" | "subtype">;
 
 const liveFormat = (port: LivePort, copy: number | null): FormatOptions => ({ maxText: 10, copy, ...(port.enumOptions ? { enumOptions: port.enumOptions } : {}) });
 
@@ -136,12 +137,13 @@ export function liveText(port: LivePort, value: unknown, copy: number | null = n
 
 /**
  * The characters an output row keeps for its live value, whatever the value is on this frame
- * (formatValueReserve: 8 for a number, 9 for a color, …), so the node doesn't grow and shrink while
- * the prototype runs. The patch editor sets it as the slot's min-width in `ch`; 0 when no value shows.
+ * (formatValueReserve: 8 for a number, 6 for a progress, 9 for a color, …), so the node doesn't grow
+ * and shrink while the prototype runs. The patch editor sets it as the slot's width in `ch`, where
+ * a longer value ends in "…"; 0 when no value shows.
  */
 export function liveReserve(port: LivePort, value: unknown, copy: number | null = null): number {
   if (value === undefined || port.type === "pulse") return 0;
-  return formatValueReserve(value, port.type, liveFormat(port, copy));
+  return formatValueReserve(value, port.type, { ...liveFormat(port, copy), ...(port.subtype ? { subtype: port.subtype } : {}) });
 }
 
 function headerChips(data: PatchNodeData | LayerNodeData | InterfaceNodeData, live: NodeShapeOptions["live"]): HeaderChip[] {

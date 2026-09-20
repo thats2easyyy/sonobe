@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { formatKnobValue } from "../knobs.ts";
 import type { EnumOption, ValueType } from "../types.ts";
-import { COORDINATE_CHARS, formatNumberShort, formatValue, formatValueLong, formatValueReserve, KNOB_RESERVE_MAX_CHARS, knobValueReserve, NUMBER_SHORT_CHARS, pickCopy } from "./format.ts";
+import { COORDINATE_CHARS, formatNumberShort, formatValue, formatValueLong, formatValueReserve, knobValueReserve, LOOP_PREVIEW_CHARS, NUMBER_SHORT_CHARS, pickCopy } from "./format.ts";
 
 const loop = (...items: unknown[]) => ({ __loop: true as const, items });
 
@@ -30,16 +30,30 @@ describe("reserved widths", () => {
   const numbers = [0, 0.5, -0.001, 1.04, -12.35, 100, -1234.567, 99999.94, -99999.9, 123456, -999999, 1234567, -999999999, -1234567890, 12345678901, 123456789012, -999999999999, -987654321098765, Infinity, -Infinity, NaN];
   /** Coordinates on a screen, which a point's reserve covers. */
   const coordinates = [0, 0.5, -0.001, 1.04, -12.35, 100, 390, -999.94, 999.9, -120.5];
+  /** Progress values, springs' overshoot included, and angles in degrees. */
+  const progresses = [0, 0.5, 1, -0.125, 1.052, -9.999, 9.9994];
+  const angles = [0, 45, -179.95, 359.9, -999.9, 12.345];
+  /** Indexes: positions in a loop of up to 10,000, "not found", frames for hours, a snap's step below its offset. */
+  const indexes = [0, 7, 9999, -1, 216000, 999999, -99999];
 
   it("reserves the longest text of the port's type", () => {
     expect(formatValueReserve(0.5, "number", live)).toBe(NUMBER_SHORT_CHARS);
-    expect(formatValueReserve(3, "index", live)).toBe(8);
     expect(formatValueReserve(false, "boolean", live)).toBe("Off".length);
     expect(formatValueReserve({ r: 1, g: 0, b: 0, a: 1 }, "color", live)).toBe("#RRGGBBAA".length);
     expect(formatValueReserve("Hi", "text", live)).toBe(12);
     expect(formatValueReserve("layer_1", "layer", live)).toBe(10);
     expect(formatValueReserve({ assetId: "a" }, "image", live)).toBe(10);
     expect(formatValueReserve(null, "number", live)).toBe(8);
+  });
+
+  it("keeps less for numbers that measure a progress or an angle, and for indexes", () => {
+    expect(formatValueReserve(0.5, "number", { ...live, subtype: "progress" })).toBe("-0.125".length);
+    expect(formatValueReserve(90, "number", { ...live, subtype: "angle" })).toBe("-179.9".length);
+    expect(formatValueReserve(3, "index", live)).toBe("123.4k".length);
+    expect(formatValueReserve(0.5, "number", { ...live, subtype: "distance" })).toBe(NUMBER_SHORT_CHARS);
+    for (const n of progresses) expect(formatValue(n, "number", live).length, `${n}`).toBeLessThanOrEqual(formatValueReserve(n, "number", { ...live, subtype: "progress" }));
+    for (const n of angles) expect(formatValue(n, "number", live).length, `${n}`).toBeLessThanOrEqual(formatValueReserve(n, "number", { ...live, subtype: "angle" }));
+    for (const n of indexes) expect(formatValue(n, "index", live).length, `${n}`).toBeLessThanOrEqual(formatValueReserve(n, "index", live));
   });
 
   it("reserves a point's coordinates as far as ±999.9, whatever the point is now", () => {
@@ -49,9 +63,9 @@ describe("reserved widths", () => {
     expect(formatValueReserve([375, 812], "size", live)).toBe(14);
     expect(formatValueReserve([0, 0, 0], "point3d", live)).toBe(3 * COORDINATE_CHARS + 4);
     expect(formatValueReserve([0, 0, 0, 0], "point4d", live)).toBe(4 * COORDINATE_CHARS + 6);
-    // Coordinates past ±999.9 can print wider than the reserve, and widen the slot while they last.
-    expect(formatValue([-1234.5, -1234.5], "point", live)).toBe("-1234.5, -1234.5");
-    expect(formatValueReserve([-1234.5, -1234.5], "point", live)).toBe(14);
+    // A flick's velocity passes ±999.9 and prints longer; its slot keeps the reserve, and the value ends in "…".
+    expect(formatValue([1931.5, -1229.1], "point", live)).toBe("1931.5, -1229.1");
+    expect(formatValueReserve([1931.5, -1229.1], "point", live)).toBe(14);
   });
 
   it("reserves nothing when nothing prints: no value, or a pulse", () => {
@@ -79,20 +93,23 @@ describe("reserved widths", () => {
     expect(formatValueReserve(null, "json", live)).toBe(1);
   });
 
-  it("reserves a loop's ×N summary, or the watched copy's #k prefix, around one item", () => {
+  it("reserves a loop's ×N summary with a short preview of its first item, or the watched copy's #k and the whole item", () => {
     const loop12 = loop(...Array.from({ length: 12 }, (_, i) => i * 1.5));
-    expect(formatValueReserve(loop12, "number", live)).toBe("×12 ".length + 8 + "…".length);
+    expect(formatValueReserve(loop12, "number", live)).toBe("×12 ".length + LOOP_PREVIEW_CHARS + "…".length);
     expect(formatValueReserve(loop12, "number", { ...live, copy: 3 })).toBe("#11 ".length + 8);
     expect(formatValueReserve(loop(true, false), "boolean", live)).toBe("×NN Off…".length);
-    expect(formatValueReserve(loop("a"), "text", live)).toBe("×NN ".length + 10 + "…".length);
-    expect(formatValueReserve(loop(), "number", live)).toBe("×NN ".length + 8 + "…".length);
-    expect(formatValueReserve(loop(...Array.from({ length: 120 }, () => 0)), "number", live)).toBe("×120 ".length + 8 + "…".length);
+    expect(formatValueReserve(loop("a"), "text", live)).toBe("×NN ".length + LOOP_PREVIEW_CHARS + "…".length);
+    expect(formatValueReserve(loop([201.5, 366.5]), "point", live)).toBe("×NN ".length + LOOP_PREVIEW_CHARS + "…".length);
+    expect(formatValueReserve(loop(), "number", live)).toBe("×NN ".length + LOOP_PREVIEW_CHARS + "…".length);
+    expect(formatValueReserve(loop(...Array.from({ length: 120 }, () => 0)), "number", live)).toBe("×120 ".length + LOOP_PREVIEW_CHARS + "…".length);
+    // Loop's Index prints "×12 0…", which fits whole.
+    expect(formatValue(loop(...Array.from({ length: 12 }, (_, i) => i)), "index", live).length).toBeLessThanOrEqual(formatValueReserve(loop(0), "index", live));
   });
 
   it("keeps two digits for a loop's count and a copy's index, so a loop growing past 9 holds still", () => {
     const ofLength = (n: number) => loop(...Array.from({ length: n }, (_, i) => i));
     const counts = [0, 1, 9, 10, 14, 99].map((n) => formatValueReserve(ofLength(n), "number", live));
-    expect(new Set(counts)).toEqual(new Set([1 + 2 + 1 + 8 + 1]));
+    expect(new Set(counts)).toEqual(new Set([1 + 2 + 1 + LOOP_PREVIEW_CHARS + 1]));
     // An empty loop prints "×0" for a watched copy, in the same room.
     const copies = [0, 1, 9, 10, 11, 14, 99].map((n) => formatValueReserve(ofLength(n), "number", { ...live, copy: 3 }));
     expect(new Set(copies)).toEqual(new Set([1 + 2 + 1 + 8]));
@@ -101,7 +118,7 @@ describe("reserved widths", () => {
     expect(formatValueReserve(loop(), "point", live)).toBe(formatValueReserve(loop([187.5, 402.25]), "point", live));
   });
 
-  it("is never shorter than what formatValue prints, for any value of the type", () => {
+  it("is never shorter than what formatValue prints for a value or a watched copy, or a loop's count and preview", () => {
     const easing: EnumOption[] = [
       { key: "quadraticInOut", name: "Quadratic In & Out" },
       { key: "linear", name: "Linear" },
@@ -109,9 +126,9 @@ describe("reserved widths", () => {
     const samples: [unknown, ValueType, EnumOption[]?][] = [
       ...numbers.flatMap((n): [unknown, ValueType][] => [
         [n, "number"],
-        [Math.round(n), "index"],
         [n, "json"],
       ]),
+      ...indexes.map((n): [unknown, ValueType] => [n, "index"]),
       ...coordinates.flatMap((n): [unknown, ValueType][] => [
         [[n, -n], "point"],
         [[n, n], "size"],
@@ -139,10 +156,13 @@ describe("reserved widths", () => {
       const plain = formatValue(value, type, options);
       expect(plain.length, `${type} ${plain}`).toBeLessThanOrEqual(formatValueReserve(value, type, options));
       const values = loop(value, value, value);
-      for (const copy of [null, 0, 2, 7]) {
+      for (const copy of [0, 2, 7]) {
         const text = formatValue(values, type, { ...options, copy });
         expect(text.length, `${type} loop ${text}`).toBeLessThanOrEqual(formatValueReserve(values, type, { ...options, copy }));
       }
+      // The summary's count and the first LOOP_PREVIEW_CHARS of its item fit; a longer item ends early.
+      const summary = formatValue(values, type, options);
+      expect(Math.min(summary.length, "×3 ".length + LOOP_PREVIEW_CHARS + 1), `${type} loop ${summary}`).toBeLessThanOrEqual(formatValueReserve(values, type, options));
     }
   });
 
@@ -165,11 +185,7 @@ describe("knob value reserves", () => {
     expect(knobValueReserve({ type: "number", min: 0, max: 400, step: 1, unit: "pt" })).toBe("400 pt".length);
     expect(knobValueReserve({ type: "number", min: 0, max: 360, step: 15, unit: "°" })).toBe("360°".length);
     expect(knobValueReserve({ type: "number", min: 0, max: 1, step: 0.001 })).toBe("0.000".length);
-  });
-
-  it("keeps at most 7 characters, so the knob's name keeps room in the chip", () => {
-    expect(knobValueReserve({ type: "number", min: 0, max: 1, step: 1e-7 })).toBe(KNOB_RESERVE_MAX_CHARS);
-    expect(knobValueReserve({ type: "number", min: -1000, max: 1000, step: 0.5, unit: "pt" })).toBe(7);
+    expect(knobValueReserve({ type: "number", min: 0, max: 1, step: 1e-7 })).toBe("0.123457".length);
   });
 
   it("covers every value the slider snaps to, from min in steps (or hundredths of the range), and its ends", () => {
@@ -191,12 +207,27 @@ describe("knob value reserves", () => {
     }
   });
 
-  it("reserves a boolean's off, and nothing for values picked from a menu or typed", () => {
+  it("reserves a number knob without a range the whole steps its field scrubs through, to -999 and 9999", () => {
+    const gap = { type: "number" as const };
+    expect(knobValueReserve(gap)).toBe("-999".length);
+    for (const v of [8, 120, -160, 9999, -999]) expect(formatKnobValue(gap, v).length).toBeLessThanOrEqual(knobValueReserve(gap));
+    expect(knobValueReserve({ type: "number", min: 0 })).toBe(4);
+    expect(knobValueReserve({ type: "number", step: 0.25, unit: "s" })).toBe("-999.25 s".length);
+  });
+
+  it("reserves a point knob's two fields, with a range the way number knobs do", () => {
+    const offset = { type: "point" as const, min: -200, max: 200, step: 1 };
+    expect(knobValueReserve(offset)).toBe("-200, -200".length);
+    for (const v of [[0, 4], [24, -120], [-160, 4], [-200, -200]]) expect(formatKnobValue(offset, v).length).toBeLessThanOrEqual(knobValueReserve(offset));
+    expect(knobValueReserve({ type: "point", min: 0, max: 10 })).toBe("10, 10".length);
+    expect(knobValueReserve({ type: "point", unit: "pt" })).toBe("-999, -999 pt".length);
+  });
+
+  it("reserves a boolean's off and an enum's longest option, and nothing for text and colors", () => {
     expect(knobValueReserve({ type: "boolean" })).toBe(3);
+    expect(knobValueReserve({ type: "enum", options: [{ key: "a", name: "Compact" }, { key: "b", name: "Comfortable" }] })).toBe("Comfortable".length);
     expect(knobValueReserve({ type: "enum" })).toBe(0);
-    expect(knobValueReserve({ type: "number" })).toBe(0);
-    expect(knobValueReserve({ type: "number", min: 0 })).toBe(0);
     expect(knobValueReserve({ type: "text" })).toBe(0);
-    expect(knobValueReserve({ type: "point", min: 0, max: 10 })).toBe(0);
+    expect(knobValueReserve({ type: "color" })).toBe(0);
   });
 });

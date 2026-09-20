@@ -63,8 +63,9 @@ export const InlineValue = memo(function InlineValue({ port }: { port: PortModel
 /**
  * An input a knob drives: a chip with the knob's name and running value instead of a cable (the node
  * size model in @sonobe/core/graph sizes it: 5 each side, a 10 pt glyph, 4 between the parts, the
- * name in the 10 pt sans and the value in the 10 pt mono, as wide as the longest value its slider
- * reaches so tuning it holds the node still, or a 10 pt swatch for a color knob, at most 110 wide).
+ * name in the 10 pt sans and the value in the 10 pt mono, as wide as the longest value its slider or
+ * fields reach so tuning it holds the node still (less when the whole name needs the room), or a
+ * 10 pt swatch for a color knob, at most 110 wide).
  * Clicking it shows the knob in the Inspector's Knobs tab.
  */
 export const KnobChip = memo(function KnobChip({ knob }: { knob: NonNullable<PortModel["knob"]> }) {
@@ -74,6 +75,7 @@ export const KnobChip = memo(function KnobChip({ knob }: { knob: NonNullable<Por
     <button
       type="button"
       className="sb-pe-value sb-pe-value--knob nodrag nopan"
+      data-full={knob.valueRoom !== undefined || undefined}
       aria-label={`Knob ${knob.name}${knob.valueText ? `, ${color ? shortHex(color) : knob.valueText}` : ""}. Show it in Knobs`}
       onPointerDown={stop}
       onDoubleClick={stop}
@@ -93,7 +95,10 @@ export const KnobChip = memo(function KnobChip({ knob }: { knob: NonNullable<Por
         </span>
       ) : (
         knob.valueText && (
-          <span className="sb-pe-value__knob-value sb-tabular" style={knob.valueReserve ? ({ "--sb-pe-knob-reserve": `${knob.valueReserve}ch` } as CSSProperties) : undefined}>
+          <span
+            className="sb-pe-value__knob-value sb-tabular"
+            style={knob.valueReserve ? ({ "--sb-pe-knob-reserve": `${knob.valueReserve}ch`, ...(knob.valueRoom !== undefined ? { "--sb-pe-knob-room": `${knob.valueRoom}px` } : {}) } as CSSProperties) : undefined}
+          >
             {knob.valueText}
           </span>
         )

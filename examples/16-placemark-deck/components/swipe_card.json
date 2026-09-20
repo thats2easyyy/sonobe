@@ -93,7 +93,7 @@
         "progress": { "link": "armed_pop.output" },
         "start": 1
       },
-      "ui": { "x": 1210, "y": 2800 }
+      "ui": { "x": 1211, "y": 2800 }
     },
     "card_above_there": {
       "type": "not",
@@ -108,7 +108,7 @@
         "turnOff": { "link": "$in.reset" },
         "turnOn": { "link": "voted.output" }
       },
-      "ui": { "x": 497, "y": 896 }
+      "ui": { "x": 492, "y": 896 }
     },
     "card_offset": {
       "type": "pointUnpack",
@@ -139,7 +139,7 @@
         "number": { "link": "card_target.output" },
         "tension": { "link": "spring_feel.tension" }
       },
-      "ui": { "x": 888, "y": 1744 }
+      "ui": { "x": 886, "y": 1744 }
     },
     "card_target": {
       "type": "ifElse",
@@ -214,7 +214,7 @@
         "option0": -1,
         "option1": 1
       },
-      "ui": { "x": 497, "y": 766 }
+      "ui": { "x": 492, "y": 766 }
     },
     "fly_out_x": {
       "type": "multiply",
@@ -225,7 +225,7 @@
         "value1": { "link": "fly_out_side.output" },
         "value2": { "link": "$knob.fly_out_distance" }
       },
-      "ui": { "x": 733, "y": 766 }
+      "ui": { "x": 728, "y": 766 }
     },
     "followed_y": {
       "type": "multiply",
@@ -383,7 +383,7 @@
         "ifFalse": { "link": "pass_badge_fade.progress" },
         "ifTrue": 1
       },
-      "ui": { "x": 945, "y": 2604 }
+      "ui": { "x": 937, "y": 2604 }
     },
     "pass_badge_fade": {
       "type": "progress",
@@ -394,7 +394,7 @@
         "start": { "link": "$knob.badge_fade_start" },
         "value": { "link": "pass_side_x.output" }
       },
-      "ui": { "x": 705, "y": 2648 }
+      "ui": { "x": 701, "y": 2648 }
     },
     "pass_side_x": {
       "type": "multiply",
@@ -405,7 +405,7 @@
         "value1": { "link": "card_offset.x" },
         "value2": -1
       },
-      "ui": { "x": 467, "y": 2648 }
+      "ui": { "x": 463, "y": 2648 }
     },
     "pass_vote": {
       "type": "and",
@@ -489,7 +489,7 @@
         "x": { "link": "finger_speed.x" },
         "y": { "link": "followed_y_speed.output" }
       },
-      "ui": { "x": 545, "y": 2048 }
+      "ui": { "x": 544, "y": 2048 }
     },
     "thrown_to": {
       "type": "point",
@@ -519,7 +519,7 @@
         "value1": { "link": "$in.down" },
         "value2": { "link": "follows_card_above.output" }
       },
-      "ui": { "x": 652, "y": 1940 }
+      "ui": { "x": 650, "y": 1940 }
     },
     "voted": {
       "type": "or",
@@ -529,7 +529,7 @@
         "value1": { "link": "went_left.output" },
         "value2": { "link": "went_right.output" }
       },
-      "ui": { "x": 258, "y": 874 }
+      "ui": { "x": 256, "y": 874 }
     },
     "was_gone_last_frame": {
       "type": "delay1",
@@ -598,7 +598,7 @@
         "ifFalse": { "link": "yes_badge_fade.progress" },
         "ifTrue": 1
       },
-      "ui": { "x": 260, "y": 2604 }
+      "ui": { "x": 256, "y": 2604 }
     },
     "yes_badge_fade": {
       "type": "progress",
@@ -637,7 +637,7 @@
     {
       "id": "section_badges",
       "text": "7 · BADGES · fade in with distance (Badge Fade Start, Badge Fade End), pop once letting go would vote (Commit Pop)",
-      "rect": [0, 2560, 1405, 362],
+      "rect": [0, 2560, 1407, 362],
       "color": "pink"
     },
     {
@@ -655,7 +655,7 @@
     {
       "id": "section_next_card",
       "text": "8 · NEXT CARD · Lift tells the card underneath how far to grow (Next Card Scale)",
-      "rect": [0, 3100, 446, 318],
+      "rect": [0, 3100, 442, 318],
       "color": "green"
     },
     {
@@ -667,7 +667,7 @@
     {
       "id": "section_spring",
       "text": "5 · ONE SPRING GETS IT THERE · starting at the finger's speed (Spring Response, Spring Damping)",
-      "rect": [0, 1700, 1115, 506],
+      "rect": [0, 1700, 1114, 506],
       "color": "green"
     },
     {
@@ -697,7 +697,7 @@
     {
       "id": "section_vote",
       "text": "3 · VOTE · a throw (Throw Card) or a tap turns Card Gone on and remembers which way",
-      "rect": [0, 722, 921, 296],
+      "rect": [0, 722, 916, 296],
       "color": "orange"
     }
   ],
