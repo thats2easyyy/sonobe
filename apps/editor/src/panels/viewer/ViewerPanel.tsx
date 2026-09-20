@@ -368,9 +368,9 @@ export function ViewerPanel({ session: sessionProp, lanPreviewUrl, onPopOut, onC
         ) : (
           <>
             {viewerWindow && windowStatus?.open && (
-              <div className="sb-vw__window-note" role="status">
+              <div className="sb-vw__window-note" role="status" title="The viewer window plays the prototype's sound and speech, so this viewer stays quiet while it's open.">
                 <PictureInPicture2 size={13} aria-hidden />
-                <span className="sb-vw__window-note-text">Also showing in its own window</span>
+                <span className="sb-vw__window-note-text">Also showing in its own window, which plays the sound</span>
                 <Button size="sm" variant="ghost" onClick={popOut}>
                   Show
                 </Button>

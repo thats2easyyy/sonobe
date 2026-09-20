@@ -38,7 +38,7 @@ import type {
 
 export interface MuteState {
   muted: boolean;
-  /** Why: "env", "query", "host", "automation", "user", or null when not muted. */
+  /** Why: "env", "query", "host", "automation", "user", "viewerWindow" (the desktop's pop-out plays instead), or null when not muted. */
   reason: string | null;
 }
 

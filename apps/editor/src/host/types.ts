@@ -282,6 +282,9 @@ export interface HostAdapter {
   notifyDocumentChanged?(revision: number, history?: { undo: string; redo: string }): void;
   /** Tell the host the prototype restarted, so its players restart too. */
   notifyPrototypeRestarted?(): void;
+  /** Whether the desktop's pop-out viewer window is open, now and whenever it opens or closes. */
+  getViewerWindowStatus?(): Promise<DesktopViewerWindowStatus>;
+  onViewerWindowStatus?(cb: (status: DesktopViewerWindowStatus) => void): () => void;
   /** The host asks for silence (SONOBE_MUTE, automated runs). */
   readonly muted?: boolean;
   /** Where drafts of unsaved work are kept; absent when the host can't keep them (memory storage). */

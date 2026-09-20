@@ -40,7 +40,7 @@ Run these from the repository root with `-w @sonobe/desktop`, or from this folde
 - `notifyPrototypeRestarted()`: the editor's prototype restarted, or it opened another document in the window. Players showing that window's document (phones, the pop-out viewer) restart too, after any revision they don't have yet.
 - `secrets.status/get/set/delete`: small secrets such as the in-app assistant's API key, encrypted with the OS keychain in `userData/secrets.json` (0600). On Linux without a keyring, `set` refuses. `SONOBE_TEST=1` swaps in a reversible test cipher so automated runs never touch the keychain.
 - `openExternal(url)`: http(s) and mailto only.
-- `popOutViewer({ alwaysOnTop })`, `closeViewerWindow()`, `getViewerWindowStatus()`, `onViewerWindowStatus(cb)`: the live prototype in its own sandboxed window, served from a loopback-only player server. It has no host API.
+- `popOutViewer({ alwaysOnTop })`, `closeViewerWindow()`, `getViewerWindowStatus()`, `onViewerWindowStatus(cb)`: the live prototype in its own sandboxed window, served from a loopback-only player server. It has no host API. While it's open, the editor mutes its own viewer, so the window plays the sound.
 - Phone preview: `getPreviewStatus`, `startPreview`, `stopPreview`, `onPreviewStatus`.
 - `drafts.write/remove/list/read/reveal`: drafts of unsaved work, one project folder each in `userData/Drafts`. A window claims the drafts it writes or reads; `list` returns the ones nobody claims. Failures come back as `{ ok: false, code, message }` because the context bridge drops Error properties.
 - `readProjectIfExists(dir)`: `readProject`, but null for a folder that doesn't exist yet (a Save As target).
