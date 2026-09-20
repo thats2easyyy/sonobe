@@ -1,10 +1,14 @@
 /**
  * Plays orbs on one cable's mounted orb elements (Orb in CableEdge.tsx) with the Web Animations API.
  * Each slot's animations are built once per path and tone and replayed after that, so a pulse that
- * fires every frame doesn't parse keyframes every time it sends an orb.
+ * fires every frame doesn't parse keyframes every time it sends an orb. The first time, only the head
+ * is built in the frame it leaves; its trails and landing follow a frame or two later, a few
+ * milliseconds a frame (they're still transparent then), so a pulse into dozens of idle cables
+ * doesn't stall the frame it fires in.
  */
 
-import { createThrottle, cableArc, LANDING_MS, orbGap, orbPlan, ORB_SLOTS, ORB_TRAILS, type CableArc, type OrbPlan, type OrbTone } from "./orb.ts";
+import { cableArc, LANDING_MS, orbGap, orbPlan, ORB_INSET, ORB_SLOTS, ORB_TRAILS, type CableArc, type OrbPlan, type OrbTone } from "./orb.ts";
+import { createFrameQueue, type FrameQueue } from "./orbSchedule.ts";
 
 const FLASH_MS = 320;
 const FLASH_KEYFRAMES: Keyframe[] = [{ strokeOpacity: 0 }, { strokeOpacity: 1, offset: 0.3 }, { strokeOpacity: 0 }];
@@ -18,78 +22,114 @@ export interface OrbEnds {
 }
 
 export interface OrbFlight {
-  /** True when a send now is far enough behind the last one (see orbGap). */
-  admit(now: number): boolean;
-  /** Start an orb, or with `reduced` the whole-cable flash, on the elements under `root`; returns ms until it's done. */
-  play(root: Element, tone: OrbTone, ends: OrbEnds, reduced: boolean): number;
+  /** Ms from an orb of this tone leaving until it reaches the input's dot. */
+  arrival(tone: OrbTone, ends: OrbEnds): number;
+  /**
+   * Start an orb on a free slot under `root`, landing on the matching one under `landing`, or with
+   * `reduced` the whole-cable flash. Returns ms until it's done and the shortest wait before the
+   * next one, or null when every mounted slot is busy and fewer than ORB_SLOTS are mounted: mount
+   * another and play again.
+   */
+  play(root: Element, landing: Element | null, tone: OrbTone, ends: OrbEnds, reduced: boolean): { done: number; gap: number } | null;
   /** The elements unmounted: drop the animations built for them. */
   reset(): void;
 }
 
 interface Slot {
   el: Element;
+  land: Element | null;
   far: boolean;
   built: Map<OrbPlan, Animation[]>;
   playing: Animation[];
+  /** When its landing has faded. */
+  until: number;
 }
 
-function build(el: Element, plan: OrbPlan, far: boolean): Animation[] {
-  const list: Animation[] = [];
-  const add = (selector: string, keyframes: Keyframe[], timing: KeyframeEffectOptions) => {
-    const target = el.querySelector(selector);
-    if (target) list.push(new Animation(new KeyframeEffect(target, keyframes, timing), document.timeline));
-  };
-  add(".sb-pe-orb__head", plan.head, { duration: plan.duration });
+let frames: FrameQueue | undefined;
+const later = (job: () => void) => (frames ??= createFrameQueue((run) => requestAnimationFrame(run), () => performance.now())).add(job);
+
+const animation = (target: Element | null | undefined, keyframes: Keyframe[], timing: KeyframeEffectOptions) => (target ? new Animation(new KeyframeEffect(target, keyframes, timing), document.timeline) : null);
+
+/** The trails and the landing: everything but the head. */
+function buildRest(slot: Slot, plan: OrbPlan): Animation[] {
+  const list: (Animation | null)[] = [];
   // Zoomed far out the trails and the landing would be a pixel or two, so only the head travels.
-  if (!far) {
-    for (const name of ORB_TRAILS) add(`.sb-pe-orb__${name}`, plan.trails[name], { duration: plan.duration });
+  if (!slot.far) {
+    const trails = plan.trails();
+    for (const name of ORB_TRAILS) list.push(animation(slot.el.querySelector(`.sb-pe-orb__${name}`), trails[name], { duration: plan.duration }));
     const landing = { duration: LANDING_MS, delay: plan.landing, easing: LANDING_EASE };
-    add(".sb-pe-orb__bloom", plan.bloom, landing);
-    add(".sb-pe-orb__ring", plan.ring, landing);
+    list.push(animation(slot.land?.querySelector(".sb-pe-orb__flare"), plan.flare, landing), animation(slot.land?.querySelector(".sb-pe-orb__ring"), plan.ring, landing));
   }
-  return list;
+  return list.filter((a) => a !== null);
 }
 
 export function createOrbFlight(): OrbFlight {
-  const throttle = createThrottle();
-  let gap = 0;
-  let next = 0;
   let key = "";
   let arc: CableArc | null = null;
   let plans: Partial<Record<OrbTone, OrbPlan>> = {};
   let slots: (Slot | undefined)[] = [];
 
+  const planFor = (tone: OrbTone, { sx, sy, tx, ty }: OrbEnds): OrbPlan => {
+    const ends = `${sx} ${sy} ${tx} ${ty}`;
+    if (key !== ends || !arc) {
+      key = ends;
+      arc = cableArc(sx, sy, tx, ty, ORB_INSET);
+      plans = {};
+      for (const slot of slots) slot?.built.clear();
+    }
+    return (plans[tone] ??= orbPlan(arc, tone));
+  };
+
   return {
-    admit: (now) => throttle(now, gap),
-    play(root, tone, { sx, sy, tx, ty }, reduced) {
+    arrival: (tone, ends) => planFor(tone, ends).landing,
+    play(root, landing, tone, ends, reduced) {
       if (reduced) {
         const flash = root.querySelector(".sb-pe-cable__flash");
         flash?.setAttribute("data-tone", tone);
         flash?.animate(FLASH_KEYFRAMES, FLASH_MS);
-        gap = orbGap(FLASH_MS);
-        return FLASH_MS;
+        return { done: FLASH_MS, gap: orbGap(FLASH_MS, FLASH_MS) };
       }
-      const ends = `${sx} ${sy} ${tx} ${ty}`;
-      if (key !== ends || !arc) {
-        key = ends;
-        arc = cableArc(sx, sy, tx, ty);
-        plans = {};
-        for (const slot of slots) slot?.built.clear();
-      }
-      const plan = (plans[tone] ??= orbPlan(arc, tone));
-      gap = orbGap(plan.duration);
-      const index = next++ % ORB_SLOTS;
-      const el = root.querySelectorAll(".sb-pe-orb__slot")[index];
-      if (!el) return 0;
+      const plan = planFor(tone, ends);
+      const done = plan.landing + LANDING_MS;
+      const gap = orbGap(plan.duration, done);
+      const els = root.querySelectorAll(".sb-pe-orb__slot");
+      const lands = landing?.querySelectorAll(".sb-pe-orb__land");
+      const now = performance.now();
+      // The first free slot; with none free, mount another, or take the one closest to done.
+      let index = -1;
+      for (let i = 0; i < els.length && index < 0; i++) if ((slots[i]?.until ?? 0) <= now) index = i;
+      if (index < 0 && els.length < ORB_SLOTS) return null;
+      if (index < 0) index = slots.reduce((best, slot, i) => ((slot?.until ?? 0) < (slots[best]?.until ?? 0) ? i : best), 0);
+      const el = els[index]!;
+      const land = lands?.[index] ?? null;
       const far = root.closest('[data-lod="far"]') !== null;
       let slot = slots[index];
       for (const running of slot?.playing ?? []) running.cancel();
-      if (!slot || slot.el !== el || slot.far !== far) slots[index] = slot = { el, far, built: new Map(), playing: [] };
+      if (!slot || slot.el !== el || slot.land !== land || slot.far !== far) slots[index] = slot = { el, land, far, built: new Map(), playing: [], until: 0 };
+      slot.until = now + done;
       let list = slot.built.get(plan);
-      if (!list) slot.built.set(plan, (list = build(el, plan, far)));
-      for (const animation of list) animation.play();
+      if (list) {
+        for (const a of list) a.play();
+      } else {
+        const head = animation(el.querySelector(".sb-pe-orb__head"), plan.head, { duration: plan.duration });
+        slot.built.set(plan, (list = head ? [head] : []));
+        head?.play();
+        const owner = slot;
+        const built = list;
+        later(() => {
+          if (!owner.el.isConnected || owner.built.get(plan) !== built) return;
+          const rest = buildRest(owner, plan);
+          built.push(...rest);
+          // In step with the head, which may be a frame or two along by now.
+          if (owner.playing !== built || !head || head.playState === "idle") return;
+          for (const a of rest) {
+            a.currentTime = head.currentTime;
+            a.play();
+          }
+        });
+      }
       slot.playing = list;
-      return plan.landing + LANDING_MS;
+      return { done, gap };
     },
     reset() {
       slots = [];
