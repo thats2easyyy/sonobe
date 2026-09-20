@@ -33,6 +33,8 @@ import {
   type Registry,
   type SonobeDocument,
 } from "@sonobe/core";
+import { homeFrame } from "@sonobe/core/graph";
+import type { GraphGeometry } from "./geometry.ts";
 import { HostError } from "./host.ts";
 
 /** A component by id (default root), or a teaching error. */
@@ -233,7 +235,7 @@ function patchHead(id: Id, node: PatchNode): string {
   return head;
 }
 
-/** One patch as a line (summary) or a block with every port (full). */
+/** One patch as a line (summary) or a block with every port (full, with its drawn size when given). */
 export function patchText(
   doc: SonobeDocument,
   c: Component,
@@ -242,6 +244,7 @@ export function patchText(
   node: PatchNode,
   detail: "ids" | "summary" | "full",
   consumers: Map<string, string[]>,
+  size?: { width: number; height: number },
 ): string {
   if (detail === "ids") return `${id} (${node.type})`;
   const ports = resolveNodePorts(doc, node, registry);
@@ -256,7 +259,9 @@ export function patchText(
     );
     return `${patchHead(id, node)}${tokens.length ? ` ${tokens.join(" ")}` : ""}${outs.length ? ` · ${outs.join(" ")}` : ""}`;
   }
-  const lines = [`patch ${patchHead(id, node)} · ui ${node.ui.x},${node.ui.y}`];
+  const lines = [
+    `patch ${patchHead(id, node)} · ui ${node.ui.x},${node.ui.y}${size ? ` · ${size.width}×${size.height}` : ""}`,
+  ];
   if (!ports) {
     lines.push(`  (unknown patch type "${node.type}")`);
     return lines.join("\n");
@@ -304,26 +309,72 @@ function defaultOrNull(p: Parameters<typeof defaultForPort>[0]): InputValue {
   return { json: d };
 }
 
-/** A detailed block for one item, as get_items shows it. */
+/** Most frame members a comment's details list by id. */
+const MAX_MEMBERS = 16;
+
+/** The graph nodes and frames whose home frame (the innermost under their title bar) is this comment. */
+function frameMembers(geometry: GraphGeometry, commentId: Id): { nodes: string[]; frames: string[] } {
+  const frames = [...geometry.frames].map(([id, r]) => ({ id, ...r }));
+  const home = (rect: { x: number; y: number; width: number; height: number }, self?: string) =>
+    homeFrame(
+      rect,
+      frames.filter((f) => f.id !== self && (!self || f.width * f.height > rect.width * rect.height)),
+    )?.id;
+  return {
+    nodes: [...geometry.nodes].filter(([, r]) => home(r) === commentId).map(([id]) => id),
+    frames: frames.filter((f) => f.id !== commentId && home(f, f.id) === commentId).map((f) => f.id),
+  };
+}
+
+const boxData = (geometry: GraphGeometry, id: string) => {
+  const box = geometry.nodes.get(id);
+  return box ? { ...box, measured: geometry.measured.has(id) } : undefined;
+};
+
+/**
+ * A detailed block for one item, as get_items shows it. With the component's graph geometry,
+ * patches and layer nodes show their drawn size and comments list the nodes they frame.
+ */
 export function itemDetails(
   doc: SonobeDocument,
   registry: Registry,
   located: LocatedItem,
   consumers: Map<string, string[]>,
+  geometry?: GraphGeometry,
 ): { text: string; data: Record<string, unknown> } {
   const c = located.component;
   if (located.kind === "patch") {
     const id = Object.entries(c.patches).find(([, n]) => n === located.patch)![0];
+    const box = geometry && boxData(geometry, id);
     return {
-      text: patchText(doc, c, registry, id, located.patch!, "full", consumers),
-      data: { id, kind: "patch", component: c.id, node: located.patch },
+      text: patchText(doc, c, registry, id, located.patch!, "full", consumers, box),
+      data: { id, kind: "patch", component: c.id, node: located.patch, ...(box ? { box } : {}) },
     };
   }
   if (located.kind === "comment") {
     const cm = located.comment!;
+    const lines = [
+      `comment ${cm.id} ${JSON.stringify(cm.text)} rect=${cm.rect.join(",")}${cm.color ? ` color=${cm.color}` : ""}`,
+    ];
+    const members = geometry ? frameMembers(geometry, cm.id) : undefined;
+    if (members) {
+      const { nodes, frames } = members;
+      lines.push(
+        nodes.length
+          ? `  frames ${nodes.length} node${nodes.length === 1 ? "" : "s"}: ${nodes.slice(0, MAX_MEMBERS).join(", ")}${nodes.length > MAX_MEMBERS ? ` (+${nodes.length - MAX_MEMBERS})` : ""}`
+          : "  frames no nodes (a node belongs to the frame under its title bar)",
+      );
+      if (frames.length) lines.push(`  frames inside it: ${frames.join(", ")}`);
+    }
     return {
-      text: `comment ${cm.id} ${JSON.stringify(cm.text)} rect=${cm.rect.join(",")}${cm.color ? ` color=${cm.color}` : ""}`,
-      data: { id: cm.id, kind: "comment", component: c.id, comment: cm },
+      text: lines.join("\n"),
+      data: {
+        id: cm.id,
+        kind: "comment",
+        component: c.id,
+        comment: cm,
+        ...(members ? { members: members.nodes, innerFrames: members.frames } : {}),
+      },
     };
   }
   const layer = located.layer!;
@@ -348,14 +399,20 @@ export function itemDetails(
     .map(([pid, n]) => `${pid} (${n.type})`);
   if (listeners.length) lines.push(`  referenced by: ${listeners.join(", ")}`);
   // Layers a cable drives or reads have a node in the patch graph: saved where someone put it, or placed automatically.
-  let graphNode: { position: [number, number] | null } | undefined;
+  let graphNode:
+    | { position: [number, number] | null; box?: ReturnType<typeof boxData> }
+    | undefined;
   if (layersWithGraphNodes(c).has(layer.id)) {
     const saved = readNodePositions(c)[layerNodeId(layer.id)];
-    graphNode = { position: saved ? [saved.x, saved.y] : null };
+    const box = geometry && boxData(geometry, layerNodeId(layer.id));
+    graphNode = { position: saved ? [saved.x, saved.y] : null, ...(box ? { box } : {}) };
+    const size = box ? ` · ${box.width}×${box.height}` : "";
     lines.push(
       saved
-        ? `  graph node: ${saved.x},${saved.y} (saved; move it with setNodePositions)`
-        : "  graph node: placed automatically next to its drivers (not saved)",
+        ? `  graph node: ${saved.x},${saved.y}${size} (saved; move it with setNodePositions)`
+        : box
+          ? `  graph node: ${box.x},${box.y}${size}, placed automatically next to its drivers (not saved)`
+          : "  graph node: placed automatically next to its drivers (not saved)",
     );
   }
   return {

@@ -4,6 +4,7 @@ import {
   didYouMean,
   didYouMeanText,
   getOutline,
+  layersWithGraphNodes,
   listComponentIds,
   type Diagnostic,
   type PatchCategory,
@@ -11,6 +12,7 @@ import {
 import { CATEGORY_ORDER } from "@sonobe/patches";
 import { z } from "zod";
 import { explain } from "../explain.ts";
+import { resolveGraphGeometry, sizesNote, type GraphGeometry } from "../geometry.ts";
 import { pageNote, paginate, plural, truncateLines } from "../format.ts";
 import {
   consumersOf,
@@ -226,7 +228,7 @@ export function registerReadTools(tc: ToolContext): void {
     {
       title: "Get items",
       description:
-        'Details for specific layers, patches or comments by id: every port with its current value, default or link; where outputs go; parents and children; which patches reference a layer. Reach inside component instances with an instance path: "like_button_2/liked" or "@card#2/badge".',
+        'Details for specific layers, patches or comments by id: every port with its current value, default or link; where outputs go; parents and children; which patches reference a layer. Patches and layer nodes show their box in the patch graph (position and width×height as the editor draws them), and comments list the nodes they frame. Reach inside component instances with an instance path: "like_button_2/liked" or "@card#2/badge".',
       input: z.object({
         docId: DocIdSchema.optional(),
         component: ComponentIdSchema.optional().describe(
@@ -243,6 +245,14 @@ export function registerReadTools(tc: ToolContext): void {
       const items: Record<string, unknown>[] = [];
       const missing: string[] = [];
       const consumerCache = new Map<string, Map<string, string[]>>();
+      const geometries = new Map<string, Promise<GraphGeometry>>();
+      const geometryOf = (componentId: string) => {
+        let geometry = geometries.get(componentId);
+        if (!geometry)
+          geometries.set(componentId, (geometry = resolveGraphGeometry(host, snap, componentId)));
+        return geometry;
+      };
+      const sizeNotes = new Set<string>();
       for (const id of ids) {
         const split = splitInstanceAddress(id);
         // "tap_card.tap" names a port; details cover the whole item.
@@ -278,11 +288,17 @@ export function registerReadTools(tc: ToolContext): void {
         }
         if (!consumerCache.has(located.component.id))
           consumerCache.set(located.component.id, consumersOf(located.component));
+        // Patches, layer nodes and comments get their box and members from the graph as drawn.
+        const inGraph =
+          located.kind !== "layer" || layersWithGraphNodes(located.component).has(located.layer!.id);
+        const geometry = inGraph ? await geometryOf(located.component.id) : undefined;
+        if (geometry) sizeNotes.add(sizesNote(geometry));
         const details = itemDetails(
           snap.doc,
           host.registry,
           located,
           consumerCache.get(located.component.id)!,
+          geometry,
         );
         if (split.path !== undefined) {
           blocks.push(
@@ -300,12 +316,10 @@ export function registerReadTools(tc: ToolContext): void {
           message: blocks.join(" "),
           hint: "get_outline shows every id.",
         });
-      return success(`revision ${snap.revision}\n${blocks.join("\n\n")}`, {
-        docId: snap.docId,
-        revision: snap.revision,
-        items,
-        missing,
-      });
+      return success(
+        [`revision ${snap.revision}`, blocks.join("\n\n"), ...sizeNotes].join("\n"),
+        { docId: snap.docId, revision: snap.revision, items, missing },
+      );
     },
   );
 

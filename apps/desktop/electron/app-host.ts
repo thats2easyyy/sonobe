@@ -892,13 +892,37 @@ export function createAppHost(options: AppHostOptions): AppHost {
 
     async reveal(ids, o) {
       const entry = await resolve(o.docId);
-      const reply = await call<{ revealed?: unknown; missing?: unknown }>(entry.target, "reveal", { ids });
+      const reply = await call<{ component?: unknown; revealed?: unknown; missing?: unknown; shown?: unknown; inView?: unknown; opened?: unknown }>(entry.target, "reveal", { ids, ...(o.component !== undefined ? { component: o.component } : {}), ...(o.focus ? { focus: true } : {}) });
       const list = (v: unknown): Id[] => (Array.isArray(v) ? v.filter((id): id is Id => typeof id === "string") : []);
       const revealed = list(reply?.revealed);
       const missing = list(reply?.missing);
+      const component = typeof reply?.component === "string" ? reply.component : o.component;
+      const where = component !== undefined ? { component } : {};
+      if (!revealed.length) return { revealed: false, ...where, reason: `None of these are in ${component ?? "the document"}: ${missing.join(", ") || ids.join(", ")}.` };
+      // Editors before inView reveal in place; a reveal into a component the person isn't viewing shows nothing.
+      if (reply?.inView === false) {
+        const doc = (await snapshot(entry)).doc;
+        const name = (id: unknown) => (typeof id === "string" ? (doc.components[id]?.name ?? id) : "another component");
+        return { revealed: false, ...where, reason: `${revealed[0]} is inside ${name(component)}, and the person is viewing ${name(reply.shown)}. Pass focus: true to open ${name(component)} for them.` };
+      }
       if (o.focus) entry.target.focus();
-      if (!revealed.length) return { revealed: false, reason: `None of these are in the document: ${missing.join(", ") || ids.join(", ")}.` };
-      return missing.length ? { revealed: true, reason: `Not found: ${missing.join(", ")}.` } : { revealed: true };
+      const opened = reply?.opened === true ? { opened: true } : {};
+      return missing.length ? { revealed: true, ...where, ...opened, reason: `Not found: ${missing.join(", ")}.` } : { revealed: true, ...where, ...opened };
+    },
+
+    async graphGeometry(o) {
+      const entry = await resolve(o.docId);
+      if (entry.target.hasMethod("graph.geometry") !== true) return null;
+      const reply = await call<{ component?: unknown; shownComponent?: unknown; revision?: unknown; nodes?: unknown }>(entry.target, "graph.geometry", { component: o.component }).catch(() => null);
+      // Boxes only count for the component asked about, drawn from the revision the caller reads.
+      if (!reply || reply.shownComponent !== o.component || reply.revision !== entry.info.revision || !Array.isArray(reply.nodes)) return null;
+      const nodes: Record<string, { x: number; y: number; width: number; height: number; measured: boolean }> = {};
+      for (const row of reply.nodes) {
+        if (!Array.isArray(row) || typeof row[0] !== "string" || !row.slice(1, 5).every((n) => typeof n === "number" && Number.isFinite(n))) continue;
+        const [id, x, y, width, height, measured] = row as [string, number, number, number, number, unknown];
+        nodes[id] = { x, y, width, height, measured: measured === 1 };
+      }
+      return { docId: entry.docId, component: o.component, revision: entry.info.revision, nodes };
     },
 
     async restartViewer(o) {

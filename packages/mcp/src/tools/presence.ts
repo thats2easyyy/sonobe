@@ -2,9 +2,11 @@
 
 import { z } from "zod";
 import { plural } from "../format.ts";
+import { requireComponent } from "../graph.ts";
+import { resolveInstancePath, splitInstanceAddress } from "../instances.ts";
 import { failure, success } from "../results.ts";
 import { DESTRUCTIVE, READ_ONLY, UI_ONLY, type ToolContext } from "../server.ts";
-import { DocIdSchema } from "../schemas.ts";
+import { ComponentIdSchema, DocIdSchema } from "../schemas.ts";
 import { formatDiagnostic } from "./read.ts";
 
 function ago(timestamp: number): string {
@@ -80,23 +82,64 @@ export function registerPresenceTools(tc: ToolContext): void {
     {
       title: "Reveal",
       description:
-        "Point the person at layers or patches in the editor (flash them; with focus, also scroll the canvas to them if their settings allow). Doesn't change the selection.",
+        'Point the person at layers, patches or comments in the editor: the canvas and patch graph scroll to them and flash them, without changing the person\'s selection or which component they\'re in. Items inside a component the person isn\'t viewing come back "not revealed" with the reason; focus: true takes the person there: it opens that component, selects the items, fits the view to them and raises the window. Name items inside a component with component, or with an instance path ("card_1/tap_photo"). To look inside a component yourself without moving the person, use get_screenshot with component.',
       input: z.object({
         docId: DocIdSchema.optional(),
-        ids: z.array(z.string()).min(1).max(50),
-        focus: z.boolean().optional(),
+        ids: z
+          .array(z.string())
+          .min(1)
+          .max(50)
+          .describe('Item ids, or instance paths like "card_1/tap_photo" (all in one component).'),
+        component: ComponentIdSchema.optional().describe(
+          "The component the ids are in (default: the one the person is viewing, else the one that has them). Instance paths start here.",
+        ),
+        focus: z
+          .boolean()
+          .optional()
+          .describe("Open the component, select the items and fit the view to them."),
       }),
       annotations: UI_ONLY,
     },
-    async ({ docId, ids, focus }) => {
-      const r = await host.reveal(ids, {
-        ...(docId !== undefined ? { docId } : {}),
+    async ({ docId, ids, component, focus }) => {
+      const snap = await host.getDocument(docId);
+      if (component !== undefined) requireComponent(snap.doc, component);
+      // Instance paths name the component to reveal in; they must all land in the same one.
+      let inside: string | undefined;
+      const items: string[] = [];
+      for (const id of ids) {
+        const split = splitInstanceAddress(id);
+        // "tap_card.tap" names a port and "row#2" a copy; reveal shows the item.
+        items.push(split.tail.split(/[.#]/)[0]!);
+        if (split.path === undefined) continue;
+        const scope = resolveInstancePath(snap.doc, split.path, component);
+        if (!scope.ok)
+          return failure({
+            code: scope.code,
+            message: `${id}: ${scope.message}`,
+            ...(scope.hint ? { hint: scope.hint } : {}),
+          });
+        if (inside !== undefined && inside !== scope.component.id)
+          return failure({
+            code: "several_components",
+            message: `reveal shows one component at a time, and these ids are in ${inside} and ${scope.component.id}.`,
+            hint: "Reveal each component's items in a call of their own.",
+          });
+        inside = scope.component.id;
+      }
+      const target = inside ?? component;
+      const r = await host.reveal(items, {
+        docId: snap.docId,
+        ...(target !== undefined ? { component: target } : {}),
         ...(focus !== undefined ? { focus } : {}),
       });
+      const where = r.component !== undefined ? ` in ${r.component}` : "";
+      const opened = r.opened ? " (opened it for the person)" : "";
       return success(
-        r.revealed
-          ? `Revealed ${ids.join(", ")}.`
-          : `Not revealed: ${r.reason ?? "the editor declined."}`,
+        !r.revealed
+          ? `Not revealed: ${r.reason ?? "the editor declined."}`
+          : r.reason
+            ? `Revealed the items found${where}${opened}. ${r.reason}`
+            : `Revealed ${items.join(", ")}${where}${opened}.`,
         { ...r },
       );
     },

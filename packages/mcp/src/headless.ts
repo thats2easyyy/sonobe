@@ -463,7 +463,7 @@ export function createHeadlessHost(options: HeadlessHostOptions = {}): HeadlessH
     },
 
     async reveal() {
-      return { revealed: false, reason: "Headless mode has no editor window to reveal items in." };
+      return { revealed: false, reason: 'Headless mode has no editor window to reveal items in. To look at them yourself, get_screenshot draws a component\'s patch graph or canvas: { "target": "graph", "component": "…" }.' };
     },
 
     async setWorking(work, workOptions) {
