@@ -80,6 +80,23 @@ describe("draft store", () => {
     await expect(store.read(OTHER, "nope-nope-nope")).rejects.toMatchObject({ code: "unknown_draft" });
   });
 
+  it("lets a window give back one draft it read (one the editor couldn't open), which closing then leaves alone", async () => {
+    const own = "ownowndr-0001";
+    await store.write(WINDOW, ID, { files }, meta());
+    store.release(WINDOW);
+    await store.write(OTHER, own, { files }, meta());
+    await store.read(OTHER, ID);
+    expect(await store.list()).toEqual([]);
+    store.release(WINDOW, ID);
+    expect(await store.list()).toEqual([]);
+    store.release(OTHER, ID);
+    expect((await store.list()).map((d) => d.id)).toEqual([ID]);
+    // Closing after Save or Don't Save deletes only the window's own draft.
+    await store.discard(OTHER);
+    expect(existsSync(path.join(dir, `${own}.sonobe`))).toBe(false);
+    expect(existsSync(path.join(dir, `${ID}.sonobe`))).toBe(true);
+  });
+
   it("notices a torn draft: a file from another moment, a missing one, or no draft.json yet", async () => {
     await store.write(WINDOW, ID, { files }, meta());
     store.release(WINDOW);
@@ -101,6 +118,28 @@ describe("draft store", () => {
     await mkdir(path.join(dir, `${other}.sonobe`, "components"), { recursive: true });
     await writeFile(path.join(dir, `${other}.sonobe`, "project.json"), '{ "formatVersion": 1, "name": "Checkout", "root": "main" }\n');
     expect((await store.list()).find((d) => d.id === other)).toMatchObject({ name: "Checkout", torn: true });
+  });
+
+  it("a torn draft that's read back and written again is whole", async () => {
+    await store.write(WINDOW, ID, { files }, meta());
+    store.release(WINDOW);
+    const folder = path.join(dir, `${ID}.sonobe`);
+    await writeFile(path.join(folder, "components", "main.json"), '{\n  "id": "main",\n  "layers": []\n}\n');
+    await writeFile(path.join(folder, "components", "card.json"), '{\n  "id": "card"\n}\n');
+    expect((await store.read(OTHER, ID)).info.torn).toBe(true);
+    // The editor restores it and writes only what the next edit changed.
+    await store.write(OTHER, ID, { files: { "components/button.json": '{\n  "id": "button"\n}\n' } }, meta());
+    store.release(OTHER);
+    expect((await store.list())[0]!.torn).toBeUndefined();
+
+    // The first write cut off before its manifest.
+    const other = "abcdefgh-0000";
+    await mkdir(path.join(dir, `${other}.sonobe`, "components"), { recursive: true });
+    for (const [rel, text] of Object.entries(files)) await writeFile(path.join(dir, `${other}.sonobe`, ...rel.split("/")), text);
+    expect((await store.read(WINDOW, other)).info.torn).toBe(true);
+    await store.write(WINDOW, other, { files: { "components/button.json": '{\n  "id": "button"\n}\n' } }, meta());
+    store.release(WINDOW);
+    expect((await store.list()).find((d) => d.id === other)!.torn).toBeUndefined();
   });
 
   it("removes a draft, discards a closing window's drafts, and prunes empty and old ones at launch", async () => {
@@ -139,6 +178,9 @@ describe("draft store", () => {
     expect(await call(IPC.draftsWrite, OTHER, ID, { files }, meta())).toMatchObject({ ok: false, code: "draft_in_use" });
     expect(await call(IPC.draftsRead, OTHER, "../nope")).toMatchObject({ ok: false, code: "invalid_draft" });
     expect(await call(IPC.draftsList, OTHER)).toEqual([]);
+    await call(IPC.draftsRelease, WINDOW, ID);
+    expect((await call(IPC.draftsList, OTHER)) as unknown[]).toHaveLength(1);
+    await call(IPC.draftsRelease, WINDOW, "../nope");
     await call(IPC.draftsReveal, WINDOW, ID);
     expect(revealed).toEqual([path.join(dir, `${ID}.sonobe`)]);
     expect(await call(IPC.draftsRemove, WINDOW, ID)).toEqual({ ok: true });
