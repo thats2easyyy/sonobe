@@ -8,6 +8,7 @@
 
 import type { Id, ValueType } from "@sonobe/core";
 import { createStore, type StoreApi } from "zustand/vanilla";
+import type { DocumentStore } from "../../../state/document.ts";
 
 /** A layer property addressed from outside the patch editor. */
 export interface LayerPropTarget {
@@ -71,10 +72,10 @@ const handles = new WeakMap<object, PatchEditorHandle[]>();
 let nonce = 0;
 
 /** The bridge store for a session (created on first use). */
-export function patchEditorBridge(session: object): PatchEditorBridge {
+export function patchEditorBridge(session: { readonly document: DocumentStore }): PatchEditorBridge {
   let store = bridges.get(session);
   if (!store) {
-    store = createStore<PatchEditorBridgeState>()((set, get) => ({
+    const created = createStore<PatchEditorBridgeState>()((set, get) => ({
       targets: {},
       request: null,
       cableDrag: null,
@@ -115,6 +116,15 @@ export function patchEditorBridge(session: object): PatchEditorBridge {
         if (get().watchedCopy !== next) set({ watchedCopy: next });
       },
     }));
+    // Another prototype replaced the document (New, Open, an example, a lesson, a restored draft): it
+    // starts on the "×N" summary and each component's first instance. A reload from disk keeps both.
+    session.document.getState().subscribeRevision((state, previous) => {
+      const change = state.lastChange;
+      if (!change || change === previous.lastChange || change.kind !== "replace") return;
+      const { watchedCopy, instanceChoices } = created.getState();
+      if (watchedCopy !== null || Object.keys(instanceChoices).length) created.setState({ watchedCopy: null, instanceChoices: {} });
+    });
+    store = created;
     bridges.set(session, store);
   }
   return store;
