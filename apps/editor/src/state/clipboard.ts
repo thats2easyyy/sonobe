@@ -307,7 +307,7 @@ export function parseClipboardFragment(input: unknown): ClipboardFragment | null
   // Knob snapshots are optional: a malformed one is left out (its links then paste without a value).
   if (isObject(value.knobs)) {
     const knobs: Record<Id, ClipboardKnob> = {};
-    for (const [id, k] of Object.entries(value.knobs)) if (isObject(k) && isKnobType(k.type) && isLiteral(k.value) && k.value !== null) knobs[id] = { type: k.type, value: clone(k.value) };
+    for (const [id, k] of Object.entries(value.knobs)) if (isValidId(id) && isObject(k) && isKnobType(k.type) && isLiteral(k.value) && k.value !== null) knobs[id] = { type: k.type, value: clone(k.value) };
     if (Object.keys(knobs).length) fragment.knobs = knobs;
   }
   return fragment;
@@ -554,7 +554,7 @@ export function planPaste(doc: SonobeDocument, componentId: Id, fragment: Clipbo
   /** A knob link stays when this document has that knob with the same type; otherwise it becomes the knob's copied value. */
   const pasteKnob = (value: { link: string }, id: Id): InputValue | undefined => {
     const here = getKnob(doc.knobs, id);
-    const copied = fragment.knobs?.[id];
+    const copied = fragment.knobs ? getOwn(fragment.knobs, id) : undefined;
     if (here && (!copied || copied.type === here.type)) return clone(value);
     return copied ? clone(copied.value) : undefined;
   };

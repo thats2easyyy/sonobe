@@ -426,3 +426,14 @@
   background: var(--warn-soft);
   color: var(--warn-text);
 }
+
+/* The Inspector header's Properties | Knobs tabs: on a narrow Inspector the title makes room for them. */
+.sb-insp-panel {
+  container: sb-inspector / inline-size;
+}
+
+@container sb-inspector (max-width: 255px) {
+  .sb-insp-panel > .sb-panel__header .sb-panel__title {
+    display: none;
+  }
+}
