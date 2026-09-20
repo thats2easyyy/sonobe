@@ -6,7 +6,7 @@
 import { z } from "zod";
 import { parseAddress } from "./address.ts";
 import { ID_PATTERN, isValidId, UNSAFE_IDS } from "./ids.ts";
-import type { AssetRecord, Component, Id, InputValue, LayerNode, PatchNode, ProjectManifest } from "./types.ts";
+import type { AssetRecord, Component, Id, InputValue, Knob, KnobSet, LayerNode, PatchNode, ProjectManifest } from "./types.ts";
 import { isLiteral, parseColor, VALUE_TYPES } from "./values.ts";
 
 export interface FormatIssue {
@@ -138,7 +138,7 @@ export function describeInputValueProblem(v: unknown): string | undefined {
   switch (key) {
     case "link": {
       const a = typeof inner === "string" ? parseAddress(inner) : undefined;
-      if (!a || a.index !== undefined) return 'link must be an address like "patch.port", "@layer.prop" or "$in.key"';
+      if (!a || a.index !== undefined) return 'link must be an address like "patch.port", "@layer.prop", "$in.key" or "$knob.id"';
       if (a.kind === "componentOutput") return "a link can't read from $out";
       if ((a.kind === "patch" || a.kind === "layer") && a.id.startsWith("$")) return `link "${inner as string}" uses a batch ref; files need real ids`;
       return undefined;
@@ -217,6 +217,7 @@ const InterfaceSchema = z
         if (direction === "outputs" && port.link !== undefined) {
           const a = parseAddress(port.link);
           if (!a || a.kind === "componentOutput" || a.index !== undefined) ctx.addIssue({ code: "custom", path: [direction, key, "link"], message: 'link must be an address like "patch.port"' });
+          else if (a.kind === "knob") ctx.addIssue({ code: "custom", path: [direction, key, "link"], message: "a published output can't read a knob; link it to a patch that passes the knob on" });
         }
       }
     }
@@ -268,6 +269,80 @@ export const AssetRegistrySchema = z.record(IdSchema, AssetRecordSchema).superRe
     if (record.id !== key) ctx.addIssue({ code: "custom", path: [key, "id"], message: `must match its map key "${key}"` });
   }
 });
+
+const KNOB_TYPE_NAMES = ["number", "boolean", "color", "enum", "point", "text"] as const;
+
+/** A stored knob value of the wrong kind for its type (text in a number knob) can't load; a bad color or option loads with a diagnostic. */
+function knobValueProblem(type: (typeof KNOB_TYPE_NAMES)[number], value: unknown): string | undefined {
+  switch (type) {
+    case "number":
+      return typeof value === "number" && Number.isFinite(value) ? undefined : "must be a number";
+    case "boolean":
+      return typeof value === "boolean" ? undefined : "must be true or false";
+    case "point":
+      return Array.isArray(value) && value.length === 2 && value.every((n) => typeof n === "number" && Number.isFinite(n)) ? undefined : "must be two numbers like [x, y]";
+    default:
+      return typeof value === "string" ? undefined : `must be text${type === "color" ? ' like "#FF3B30FF"' : type === "enum" ? " (an option key)" : ""}`;
+  }
+}
+
+const KnobOptionSchema = z.strictObject({ key: z.string().min(1), name: z.string(), description: z.string().optional() });
+
+const KnobSchema = z.strictObject({
+  id: IdSchema,
+  name: z.string().trim().min(1, "a knob needs a name").max(60),
+  group: z.string().max(40).optional(),
+  type: z.enum(KNOB_TYPE_NAMES),
+  values: z.record(IdSchema, z.unknown()),
+  min: z.number().optional(),
+  max: z.number().optional(),
+  step: z.number().positive().optional(),
+  unit: z.string().max(12).optional(),
+  options: z.array(KnobOptionSchema).optional(),
+  description: z.string().max(200).optional(),
+});
+
+export const KnobsFileSchema = z
+  .strictObject({
+    formatVersion: z.number().int().min(1),
+    active: IdSchema,
+    presets: z.array(z.strictObject({ id: IdSchema, name: z.string().trim().min(1, "a preset needs a name").max(40), locked: z.boolean().optional() })).min(1, "a project with knobs needs at least one preset"),
+    knobs: z.array(KnobSchema),
+  })
+  .superRefine((file, ctx) => {
+    const seen = (list: readonly { id: string }[], path: string) => {
+      const ids = new Set<string>();
+      list.forEach((item, i) => {
+        if (ids.has(item.id)) ctx.addIssue({ code: "custom", path: [path, i, "id"], message: `"${item.id}" is used twice` });
+        ids.add(item.id);
+      });
+    };
+    seen(file.presets, "presets");
+    seen(file.knobs, "knobs");
+    file.knobs.forEach((knob, i) => {
+      for (const [preset, value] of Object.entries(knob.values)) {
+        const problem = knobValueProblem(knob.type, value);
+        if (problem) ctx.addIssue({ code: "custom", path: ["knobs", i, "values", preset], message: `${problem} (knob "${knob.name}" is a ${knob.type})` });
+      }
+    });
+  });
+
+/** knobs.json as read: the knob set without its formatVersion, empty labels and false locks dropped. */
+function normalizeKnobSet(file: z.infer<typeof KnobsFileSchema>): KnobSet {
+  const presets = file.presets.map((p) => (p.locked ? { id: p.id, name: p.name.trim(), locked: true } : { id: p.id, name: p.name.trim() }));
+  const knobs = file.knobs.map((k) => {
+    const knob: Knob = { ...k, name: k.name.trim(), values: k.values as Knob["values"] };
+    for (const field of ["group", "unit", "description"] as const) if (knob[field] !== undefined && !knob[field]!.trim()) delete knob[field];
+    return knob;
+  });
+  return { active: file.active, presets, knobs };
+}
+
+/** Validate knobs.json (text or parsed JSON). Hand edits that only break references (a missing preset) load, with diagnostics. */
+export function parseKnobsFile(input: unknown, file = "knobs.json"): ParseResult<KnobSet> {
+  const r = parseWith(KnobsFileSchema, input, file);
+  return r.ok ? { ok: true, value: normalizeKnobSet(r.value) } : r;
+}
 
 /** "layers[0].props.color" */
 export function formatIssuePath(path: readonly PropertyKey[]): string {

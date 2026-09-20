@@ -701,6 +701,8 @@ export function updateLiterals(graph: CompiledGraph, next: SonobeDocument): bool
   const prev = graph.doc;
   if (next === prev) return true;
   if (next.project !== prev.project || next.scripts !== prev.scripts || next.assets !== prev.assets) return false;
+  // Knobs compile into constants; until their readers are tracked, any knob change recompiles.
+  if (next.knobs !== prev.knobs) return false;
   const ids = Object.keys(next.components);
   if (!sameKeys(ids, Object.keys(prev.components))) return false;
   const registry = graph.registry;

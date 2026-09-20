@@ -6,9 +6,10 @@
 
 import { listComponentIds } from "./document.ts";
 import { getOwn } from "./ids.ts";
+import { knobLiteral } from "./knobs.ts";
 import { LAYER_TYPES } from "./layerTypes.ts";
 import { createRegistry, findPort, resolveLayerProps, resolveNodePorts, type ResolvedPort } from "./registry.ts";
-import type { Component, Id, InputValue, LayerNode, PatchNode, Registry, SonobeDocument, ValueType } from "./types.ts";
+import type { Component, Id, InputValue, KnobSet, LayerNode, PatchNode, Registry, SonobeDocument, ValueType } from "./types.ts";
 import { decodeInput, defaultForPort, formatNumber, isAssetInput, isDecodedLoop, isGradientLiteral, isJsonLiteral, isLayerInput, isLinkInput, isLoopLiteral } from "./values.ts";
 
 export type OutlineDetail = "compact" | "normal" | "full";
@@ -197,17 +198,45 @@ function componentOutline(doc: SonobeDocument, c: Component, detail: OutlineDeta
 }
 
 /**
+ * The knob block: a header with the running preset and every preset, then one line per knob. Links
+ * that read a knob print as `key←$knob.<id>` on their own lines, as any link does.
+ */
+function knobLines(set: KnobSet, detail: OutlineDetail): string[] {
+  const running = set.presets.find((p) => p.id === set.active);
+  const presets = set.presets.map((p) => `${p.id} ${quote(p.name)}${p.locked ? " locked" : ""}`).join(", ");
+  const out = [`knobs ${set.knobs.length} · running ${set.active}${running ? ` ${quote(running.name)}` : ""} · presets ${presets}`];
+  for (const knob of set.knobs) {
+    if (detail === "compact") {
+      out.push(`knob ${knob.id} ${knob.type} =${formatOutlineValue(knobLiteral(set, knob), knob.type)}`);
+      continue;
+    }
+    const parts = [`knob ${knob.id} ${knob.type} ${quote(knob.name)}`];
+    if (knob.group) parts.push(`group=${quote(knob.group)}`);
+    if (knob.min !== undefined && knob.max !== undefined) parts.push(`${formatNumber(knob.min)}…${formatNumber(knob.max)}`);
+    else if (knob.min !== undefined) parts.push(`min=${formatNumber(knob.min)}`);
+    else if (knob.max !== undefined) parts.push(`max=${formatNumber(knob.max)}`);
+    if (knob.step !== undefined) parts.push(`step=${formatNumber(knob.step)}`);
+    if (knob.unit) parts.push(`unit=${knob.unit}`);
+    if (detail === "full" && knob.options?.length) parts.push(`options=${knob.options.map((o) => o.key).join("|")}`);
+    for (const preset of set.presets) if (Object.hasOwn(knob.values, preset.id)) parts.push(`${preset.id}=${formatOutlineValue(knob.values[preset.id]!, knob.type)}`);
+    if (detail === "full" && knob.description) parts.push(`description=${quote(knob.description, 200)}`);
+    out.push(parts.join(" "));
+  }
+  return out;
+}
+
+/**
  * Compact text projection of one component (or every component, root first,
- * separated by blank lines). Throws when `componentId` doesn't exist.
+ * separated by blank lines). The knob block comes first whenever the root component is shown.
+ * Throws when `componentId` doesn't exist.
  */
 export function getOutline(doc: SonobeDocument, componentId?: Id, options: OutlineOptions = {}): string {
   const detail = options.detail ?? "normal";
+  const knobs = doc.knobs && (componentId === undefined || componentId === doc.project.root) ? [knobLines(doc.knobs, detail).join("\n")] : [];
   if (componentId !== undefined) {
     const c = getOwn(doc.components, componentId);
     if (!c) throw new Error(`There's no component "${componentId}".`);
-    return componentOutline(doc, c, detail, options.registry).join("\n");
+    return [...knobs, componentOutline(doc, c, detail, options.registry).join("\n")].join("\n\n");
   }
-  return listComponentIds(doc)
-    .map((id) => componentOutline(doc, doc.components[id]!, detail, options.registry).join("\n"))
-    .join("\n\n");
+  return [...knobs, ...listComponentIds(doc).map((id) => componentOutline(doc, doc.components[id]!, detail, options.registry).join("\n"))].join("\n\n");
 }

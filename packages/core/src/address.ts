@@ -4,6 +4,7 @@
  *   "@layerId.propKey"  layer property (or layer output when used as a source)
  *   "$in.key"           component published input (source side)
  *   "$out.key"          component published output (target side)
+ *   "$knob.id"          a knob's value (source side; project-wide, never indexed)
  * Ids may be batch refs ("$tap.tap", "@$card.scale"). An optional "#n" suffix names a loop index.
  */
 
@@ -13,7 +14,9 @@ export type ParsedAddress =
   | { kind: "patch"; id: Id; key: string; index?: number }
   | { kind: "layer"; id: Id; key: string; index?: number }
   | { kind: "componentInput"; key: string; index?: number }
-  | { kind: "componentOutput"; key: string; index?: number };
+  | { kind: "componentOutput"; key: string; index?: number }
+  /** A knob is one value for every copy, so it takes no "#n". `key` is the knob id. */
+  | { kind: "knob"; key: Id; index?: undefined };
 
 const ADDRESS = /^(@)?(\$?[A-Za-z_][A-Za-z0-9_]*)\.([A-Za-z_][A-Za-z0-9_]*)(?:#(\d+))?$/;
 
@@ -25,7 +28,8 @@ export function parseAddress(address: string): ParsedAddress | undefined {
   const [, at, id, key, idx] = m as unknown as [string, string | undefined, string, string, string | undefined];
   const index = idx === undefined ? undefined : Number(idx);
   const withIndex = <T extends object>(a: T) => (index === undefined ? a : { ...a, index });
-  if (at) return id === "$in" || id === "$out" ? undefined : withIndex({ kind: "layer" as const, id, key });
+  if (at) return id === "$in" || id === "$out" || id === "$knob" ? undefined : withIndex({ kind: "layer" as const, id, key });
+  if (id === "$knob") return index === undefined ? { kind: "knob", key } : undefined;
   if (id === "$in") return withIndex({ kind: "componentInput" as const, key });
   if (id === "$out") return withIndex({ kind: "componentOutput" as const, key });
   return withIndex({ kind: "patch" as const, id, key });
@@ -43,6 +47,8 @@ export function formatAddress(address: ParsedAddress): PortAddress {
       return `$in.${address.key}${suffix}`;
     case "componentOutput":
       return `$out.${address.key}${suffix}`;
+    case "knob":
+      return `$knob.${address.key}`;
   }
 }
 
@@ -50,6 +56,7 @@ export const patchAddress = (patchId: Id, key: string): PortAddress => `${patchI
 export const layerAddress = (layerId: Id, key: string): PortAddress => `@${layerId}.${key}`;
 export const componentInputAddress = (key: string): PortAddress => `$in.${key}`;
 export const componentOutputAddress = (key: string): PortAddress => `$out.${key}`;
+export const knobAddress = (knobId: Id): PortAddress => `$knob.${knobId}`;
 
 /** The item id an address points at (patch or layer), if any. */
 export function addressItemId(address: ParsedAddress): Id | undefined {

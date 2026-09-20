@@ -168,7 +168,7 @@ function pruneAfterPortChange(ctx: OpContext, component: Component, id: string, 
       const target = resolveTarget(doc, component, targetAddress(entry.target), ctx.validate);
       if (!target.ok) return false;
       const check = checkInputValue(doc, component, target.value, entry.value, ctx.validate);
-      return !check.ok && (check.error.code === "invalid_value" || check.error.code === "type_mismatch");
+      return !check.ok && (check.error.code === "invalid_value" || check.error.code === "type_mismatch" || check.error.code === "knob_type_mismatch");
     }
     if (linkSourceId(entry.value) !== id) return false;
     const link = (entry.value as { link: string }).link;

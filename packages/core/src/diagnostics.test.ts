@@ -376,3 +376,86 @@ describe("getDiagnostics", () => {
     expect(codes(doc)).toContain("warning:dynamic_ports_failed");
   });
 });
+
+describe("knob diagnostics", () => {
+  const tuned = () =>
+    mustApply(buildSampleDocument(), [
+      { op: "addKnobPreset", preset: { name: "Proposal" } },
+      { op: "addKnobPreset", preset: { name: "Shipped app" } },
+      { op: "addKnob", knob: { id: "bounce", name: "Bounce", type: "number", value: 8, min: 0, max: 20 } },
+      { op: "setInput", target: "pop.bounciness", value: { link: "$knob.bounce" } },
+    ]).doc;
+  const knobDiags = (doc: SonobeDocument) => getDiagnostics(doc, mockRegistry).filter((d) => d.knob !== undefined || d.code.includes("knob"));
+
+  it("is quiet for knobs that are used, valid and in range", () => {
+    expect(getDiagnostics(tuned(), mockRegistry)).toEqual([]);
+  });
+
+  it("reports the knob table: unused knobs, values out of range, missing values and presets, bad values", () => {
+    const doc = mustApply(tuned(), [
+      { op: "addKnob", knob: { id: "nudge", name: "Button Nudge", type: "number", value: 20 } },
+      { op: "setKnobValue", id: "bounce", value: 25 },
+    ]).doc;
+    const edited = structuredClone(doc);
+    edited.knobs!.active = "gone";
+    delete edited.knobs!.knobs[1]!.values.shipped_app;
+    edited.knobs!.knobs[1]!.values.old = 3;
+    edited.knobs!.knobs.push({ id: "mode", name: "Mode", type: "enum", options: [{ key: "a", name: "A" }, { key: "b", name: "B" }], values: { proposal: "c", shipped_app: "a" } });
+    const d = knobDiags(edited);
+    expect(d.map((x) => `${x.severity}:${x.code}:${x.knob ?? ""}:${x.preset ?? ""}`)).toEqual([
+      "warning:unknown_knob_preset::gone",
+      "info:knob_out_of_range:bounce:proposal",
+      "warning:unknown_knob_preset:nudge:old",
+      "warning:knob_missing_value:nudge:shipped_app",
+      "info:unused_knob:nudge:",
+      "error:invalid_knob_value:mode:proposal",
+      "info:unused_knob:mode:",
+    ]);
+    expect(d.every((x) => x.component === "main" && x.itemIds.length === 0)).toBe(true);
+    expect(d[1]!.message).toBe("Bounce is 25 in Proposal, above its range 0–20.");
+    expect(d[1]!.suggestions?.[0]?.ops).toEqual([{ op: "updateKnob", id: "bounce", max: 25 }]);
+    expect(d[3]!.suggestions?.[0]?.ops).toEqual([{ op: "setKnobValue", id: "nudge", preset: "shipped_app", value: 20 }]);
+    expect(d[4]!.message).toBe('Knob "Button Nudge" isn\'t used by anything, so moving it changes nothing.');
+    expect(d[5]!.suggestions?.[0]?.ops).toEqual([{ op: "setKnobValue", id: "mode", preset: "proposal", value: "a" }]);
+  });
+
+  it("reports links to missing knobs and knobs that can't reach their input, with fixes", () => {
+    const doc = edit(tuned(), (c) => {
+      c.patches.pop!.inputs.speed = { link: "$knob.bounc" };
+      c.patches.pop!.inputs.number = { link: "$knob.speedy" };
+    });
+    doc.knobs!.knobs.push({ id: "tint", name: "Tint", type: "color", values: { proposal: "#FF0000FF", shipped_app: "#FF0000FF" } });
+    doc.components.main!.patches.grow!.inputs.start = { link: "$knob.tint" };
+    const d = getDiagnostics(doc, mockRegistry);
+    const missing = d.filter((x) => x.code === "unknown_knob");
+    expect(missing.map((x) => x.port)).toEqual(["number", "speed"]);
+    expect(missing[1]!.message).toContain("Did you mean Bounce (bounce)?");
+    expect(missing[1]!.suggestions?.map((s) => s.description)).toEqual(["Read Bounce (bounce) instead", 'Make the knob "bounc"', "Disconnect it"]);
+    expect(missing[1]!.suggestions?.[1]?.ops).toEqual([{ op: "addKnob", knob: { id: "bounc", name: "Bounc", type: "number", value: 10 } }]);
+    const mismatch = d.find((x) => x.code === "knob_type_mismatch")!;
+    expect(mismatch).toMatchObject({ severity: "error", itemIds: ["grow"], port: "start" });
+    expect(mismatch.message).toContain('Knob "Tint" is a color, but');
+  });
+
+  it("suggests turning constant Variable Broadcasters into knobs", () => {
+    const settings: PatchSpec["settings"] = [{ key: "name", name: "Name", type: "text", default: "", description: "Name." }];
+    const registry = createRegistry([
+      ...MOCK_PATCH_SPECS,
+      { type: "variableBroadcaster", name: "Variable Broadcaster", category: "utility", summary: "Shares.", variants: ["number"], settings, inputs: [port("value", "variant", { default: 0 })], outputs: [] },
+      { type: "variableReceiver", name: "Variable Receiver", category: "utility", summary: "Reads.", variants: ["number"], settings, inputs: [], outputs: [port("output", "variant")] },
+    ]);
+    const r = applyOps(
+      emptyDoc(),
+      [
+        { op: "addPatch", patch: { id: "gap", type: "variableBroadcaster", typeParam: "number", settings: { name: "Gap" }, inputs: { value: 8 } } },
+        { op: "addPatch", patch: { id: "gap_rx", type: "variableReceiver", typeParam: "number", settings: { name: "Gap" } } },
+        { op: "addPatch", patch: { id: "pop", type: "popAnimation", inputs: { number: { link: "gap_rx.output" } } } },
+      ],
+      { registry },
+    );
+    const d = getDiagnostics(r.doc, registry).find((x) => x.code === "variables_could_be_knobs")!;
+    expect(d).toMatchObject({ severity: "info", itemIds: ["gap"] });
+    expect(d.message).toBe("1 Variable Broadcaster shares a constant in Main. Knobs would let you tune it in one panel and compare presets.");
+    expect(d.hint).toContain('set_knobs({ "convertVariables": { "component": "main" } })');
+  });
+});
