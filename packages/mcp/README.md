@@ -116,7 +116,7 @@ Every `json tool:<name>` example block runs through the real tools in `src/guide
 
 ## Examples
 
-`list_examples` and `get_example` serve the verified examples (`examples/`) as a patterns catalog (`src/examples.ts`). The registry is `examples/recipes/index.ts`, so a new example appears once it's there. Each one lists with the "You'll learn" and "Key patches" columns of `examples/README.md`; `get_example` adds sections of its README, the scenario names from its `test.json`, and its recipe as `apply_ops` batches for a blank document, with the example's ids, values and layout. Recipes are bundled as code; the READMEs and tests are read from `SONOBE_EXAMPLES_DIR`, else `examples/` beside the bundle (the CLI and desktop builds copy them there), else the repository's.
+`list_examples` and `get_example` serve the verified examples (`examples/`) as a patterns catalog (`src/examples.ts`). The registry is `examples/recipes/index.ts`, so a new example appears once it's there. Each one lists with the "You'll learn" and "Key patches" columns of `examples/README.md`; `get_example` adds sections of its README, the scenario names from its `test.json`, and its recipe as `apply_ops` batches for a blank document, with the example's ids, values and layout. Recipes are bundled as code; the READMEs and tests are read from `SONOBE_EXAMPLES_DIR`, else `examples/` beside the bundle (the CLI and desktop builds copy them there), else the repository's. An example whose recipe starts from a design import, such as the Noddit Deck, is read from its project folder's JSON files, copied the same way, and its `get_example` ops say to import the stored capture first.
 
 ## Other exports
 

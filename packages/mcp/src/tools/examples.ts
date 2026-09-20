@@ -140,6 +140,7 @@ export function registerExampleTools(tc: ToolContext): void {
           hint: "This is a bug in Sonobe; pick another example meanwhile.",
         });
       const d = detail ?? "summary";
+      const design = entry.recipe.design;
       const { intro, sections } = entry.readme ? readmeSections(entry.readme) : { intro: "", sections: new Map<string, string>() };
       const scenarioCount = entry.scenarios?.length ?? 0;
       const head = [
@@ -148,6 +149,7 @@ export function registerExampleTools(tc: ToolContext): void {
         `Teaches: ${entry.teaches.replace(/\.$/, "")}.`,
         `Key patches: ${built.keyPatches.join(", ")}. All ${plural(built.patchTypes.length, "patch type")}: ${built.patchTypes.join(", ")}.`,
         `Verified: builds with no errors${scenarioCount ? ` and passes ${plural(scenarioCount, "scripted scenario")}` : ""} (examples/run.test.ts).`,
+        ...(design ? [`Starts from a design import (examples/${design.capture}); its recipe wires up the imported layers.`] : []),
       ];
       const data = {
         id: entry.id,
@@ -158,6 +160,7 @@ export function registerExampleTools(tc: ToolContext): void {
         scenarios: (entry.scenarios ?? []).map((s) => s.name),
         batches: built.batches.length,
         ops: built.batches.reduce((n, b) => n + b.length, 0),
+        ...(design ? { design: `examples/${design.capture}` } : {}),
       };
 
       if (d === "ops") {
@@ -173,7 +176,7 @@ export function registerExampleTools(tc: ToolContext): void {
         const size = built.doc.components[built.doc.project.root]?.size;
         const lines = [
           `# ${entry.name} (${entry.id}): the recipe${count > 1 ? `, batch ${index + 1} of ${count}` : ""}`,
-          `${plural(data.ops, "op")} build the example on a blank document, with its ids, values and layout${size ? `, for a ${size[0]}×${size[1]} screen` : ""}. Make one with create_document (or use an empty document), then call apply_ops with ${count > 1 ? "each batch in order" : "these ops"}: { "ops": [...] }. Then check it: get_diagnostics, and sim_reset, sim_dispatch and sim_get_values against the scenarios get_example lists.`,
+          `${plural(data.ops, "op")} build the example on a blank document, with its ids, values and layout${size ? `, for a ${size[0]}×${size[1]} screen` : ""}. Make one with create_document (or use an empty document), then ${design ? `import the design it starts from: import_design({ "capture": <the JSON in examples/${design.capture}> }), which makes the layers and images these ops name (its photos download from their URLs). Then ` : ""}call apply_ops with ${count > 1 ? "each batch in order" : "these ops"}: { "ops": [...] }. Then check it: get_diagnostics, and sim_reset, sim_dispatch and sim_get_values against the scenarios get_example lists.`,
           "",
           "```json",
           `[\n${ops.map((op) => `  ${JSON.stringify(op)}`).join(",\n")}\n]`,

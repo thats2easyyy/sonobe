@@ -4,12 +4,16 @@
  * apply_ops to a blank document, build the very document the example ships.
  */
 
+import { readFileSync } from "node:fs";
+import path from "node:path";
 import { serializeDocument } from "@sonobe/core";
 import { createPatchRegistry } from "@sonobe/patches";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { buildRecipeDocument } from "../../../examples/lib/recipe.ts";
+import { readDesignPhotos } from "../../../examples/lib/design.ts";
+import { EXAMPLES_DIR } from "../../../examples/lib/disk.ts";
+import { buildRecipe } from "../../../examples/lib/recipe.ts";
 import { RECIPES } from "../../../examples/recipes/index.ts";
-import { batchOps, defaultExamples, exampleTextFiles, loadExamples, parseExamplesTable, readmeSections } from "./examples.ts";
+import { batchOps, defaultExamples, exampleTextFiles, loadExamples, parseExamplesTable, readmeSections, readsProjectFolder } from "./examples.ts";
 import { connectClient, tempProject, type TempProject, type TestClient } from "./test-helpers.ts";
 
 const registry = createPatchRegistry();
@@ -29,6 +33,9 @@ describe("the examples catalog", () => {
     }
     expect(catalog.list()[9]).toMatchObject({ id: "10-swipe-cards", teaches: "Per-copy state with loops, throws, deck depth" });
     expect(exampleTextFiles()).toContain("10-swipe-cards/test.json");
+    // A bundle carries the document files of the examples the catalog reads from their folder.
+    for (const recipe of RECIPES.filter(readsProjectFolder))
+      expect(exampleTextFiles()).toEqual(expect.arrayContaining([`${recipe.folder}/project.json`, `${recipe.folder}/components/main.json`]));
   });
 
   it("finds examples by id, number, bare name or title, and suggests close ones", () => {
@@ -123,6 +130,18 @@ describe("list_examples and get_example", () => {
       const target = await tempProject({ name: recipe.name });
       const c = await connectClient(target.host);
       try {
+        if (recipe.design) {
+          // As the ops say: import the stored capture first. Its photos come from the design's photo list, not the network.
+          const listFile = path.join(EXAMPLES_DIR, recipe.design.photos);
+          const photos = readDesignPhotos(listFile);
+          target.host.fetchImage = async (url) => {
+            const photo = photos.get(new URL(url).href);
+            return photo ? { bytes: new Uint8Array(readFileSync(path.join(path.dirname(listFile), photo.file))), mime: "" } : null;
+          };
+          const capture = JSON.parse(readFileSync(path.join(EXAMPLES_DIR, recipe.design.capture), "utf8")) as unknown;
+          const imported = await c.call("import_design", { capture });
+          expect(imported.isError, `${recipe.folder} import: ${imported.text}`).toBe(false);
+        }
         const first = await client.call("get_example", { id: recipe.folder, detail: "ops" });
         expect(first.isError, first.text).toBe(false);
         const batches = first.structured.batches as number;
@@ -133,7 +152,7 @@ describe("list_examples and get_example", () => {
           expect(applied.isError, `${recipe.folder} batch ${i}: ${applied.text}`).toBe(false);
         }
         const { doc } = await target.host.getDocument();
-        const example = buildRecipeDocument(recipe, registry);
+        const { doc: example } = await buildRecipe(recipe, registry);
         const files = serializeDocument(doc);
         const expected = serializeDocument(example);
         for (const [file, text] of Object.entries(expected)) {
