@@ -11,7 +11,7 @@
  */
 
 import { existsSync } from "node:fs";
-import { mkdir, writeFile } from "node:fs/promises";
+import { copyFile, mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { ProjectFormatError, readProjectFiles, retiredIds, saveProject, slugify, uniqueId, type Id, type SaveResult, type SonobeDocument } from "@sonobe/core";
 import { createNodeFs, loadProjectFilesFromDisk } from "@sonobe/core/node";
@@ -24,11 +24,13 @@ import {
   isHostError,
   type DocumentChange,
   type DocumentSummary,
+  type SaveOutcome,
   type SaveProblem,
   type SonobeHost,
   type WorkIntent,
 } from "./host.ts";
 import { ToolCancelledError } from "./progress.ts";
+import { resolveProjectTarget } from "./projectTarget.ts";
 import { loadSceneAssets, renderSceneScreenshot } from "./screenshot.ts";
 import { createDocumentSession, type DocumentSession } from "./session.ts";
 import { createSimulationManager, type SimulationManager } from "./sim.ts";
@@ -188,6 +190,35 @@ export function createHeadlessHost(options: HeadlessHostOptions = {}): HeadlessH
     }
   };
 
+  /** Save As: write the document into a new folder (with its asset files) and keep working there. */
+  const saveAs = async (entry: Entry, input: string): Promise<SaveOutcome> => {
+    const dir = await resolveProjectTarget(input, { cwd: process.cwd() });
+    try {
+      const r = await saveProject(fs, dir, entry.session.doc, { removable: new Set() });
+      const copied: string[] = [];
+      for (const record of Object.values(entry.session.doc.assets)) {
+        if (path.basename(record.file) !== record.file) continue;
+        const from = path.join(entry.path, "assets", record.file);
+        const to = path.join(dir, "assets", record.file);
+        if (!existsSync(from) || existsSync(to)) continue;
+        await copyFile(from, to);
+        copied.push(`assets/${record.file}`);
+      }
+      entry.session.markSaved();
+      entry.path = dir;
+      entry.disk = await readProjectFiles(fs, dir);
+      entry.owned = new Set(Object.keys(r.files));
+      return { docId: entry.docId, path: dir, revision: entry.session.revision, written: [...r.written, ...copied], removed: [] };
+    } catch (err) {
+      if (err instanceof ProjectFormatError) {
+        throw new HostError("invalid_document", err.message, { hint: "Nothing was written. Fix what it names with ops, then save again." });
+      }
+      throw new HostError("save_failed", `Couldn't save to ${dir}: ${errorText(err)}`, {
+        hint: "Check that the folder can be written to, then try again.",
+      });
+    }
+  };
+
   /** Autosave after a write or undo: the change stays applied either way, so problems are reported, not thrown. */
   const autosaveProblem = async (entry: Entry): Promise<SaveProblem | undefined> => {
     try {
@@ -226,6 +257,10 @@ export function createHeadlessHost(options: HeadlessHostOptions = {}): HeadlessH
     },
 
     async openDocument(ref, openOptions = {}) {
+      if (ref.startsWith("draft:"))
+        throw new HostError("unknown_draft", `There's no draft "${ref.slice(6)}" here: the Sonobe app keeps drafts, and headless mode works on project folders.`, {
+          hint: "Open a project folder with open_document, or open the draft in the Sonobe app.",
+        });
       const dir = path.resolve(ref);
       const existing = entries.get(ref) ?? [...entries.values()].find((e) => e.path === dir);
       if (existing) {
@@ -247,13 +282,8 @@ export function createHeadlessHost(options: HeadlessHostOptions = {}): HeadlessH
           "Headless mode needs a folder path for the new project.",
           { hint: 'Pass path, e.g. "./Checkout Flow.sonobe".' },
         );
-      const dir = path.resolve(request.path);
-      if (existsSync(path.join(dir, "project.json"))) {
-        throw new HostError("already_exists", `${dir} already holds a Sonobe project.`, {
-          hint: "Open it with open_document instead, or pick another folder.",
-          suggestions: [],
-        });
-      }
+      // A new or empty folder, not inside another project (projectTarget.ts).
+      const dir = await resolveProjectTarget(request.path, { cwd: process.cwd() });
       if (request.template !== undefined && !TEMPLATES.some((t) => t.id === request.template)) {
         throw new HostError("unknown_template", `There's no template "${request.template}".`, {
           hint: `Templates: ${TEMPLATES.map((t) => `${t.id} (${t.description})`).join("; ")}.`,
@@ -289,6 +319,7 @@ export function createHeadlessHost(options: HeadlessHostOptions = {}): HeadlessH
 
     async saveDocument(docId, saveOptions = {}) {
       const entry = resolve(docId);
+      if (saveOptions.path !== undefined) return saveAs(entry, saveOptions.path);
       const r = await save(entry, saveOptions.force === true);
       return {
         docId: entry.docId,
