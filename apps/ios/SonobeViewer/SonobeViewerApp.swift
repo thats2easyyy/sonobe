@@ -20,6 +20,26 @@ struct RootView: View {
     @State private var reloads = 0
 
     var body: some View {
+        content
+            // Over the connect screen or a playing preview: a deep link can arrive during either.
+            .alert(Self.confirmTitle(model.pendingLink), isPresented: Binding(get: { model.pendingLink != nil }, set: { if !$0 { model.cancelPendingLink() } }), presenting: model.pendingLink) { url in
+                Button("Open") { model.confirmPendingLink(url) }
+                Button("Cancel", role: .cancel) { model.cancelPendingLink() }
+            } message: { url in
+                Text("Preview on Phone links go to your computer on this Wi-Fi. This one goes to \(Self.address(of: url)) instead. Open it only if you set up that address yourself.")
+            }
+    }
+
+    private static func address(of url: URL) -> String {
+        let host = url.host(percentEncoded: false) ?? url.absoluteString
+        return url.port.map { "\(host):\($0)" } ?? host
+    }
+
+    private static func confirmTitle(_ url: URL?) -> String {
+        "Open a preview from \(url.map(address(of:)) ?? "another address")?"
+    }
+
+    @ViewBuilder private var content: some View {
         if let url = model.playerURL {
             PlayerContainer(url: url, reloads: reloads, menuTipSeen: model.menuTipSeen, onAction: act, onFailure: { model.failure = $0 })
                 .ignoresSafeArea()

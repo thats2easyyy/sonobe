@@ -2,7 +2,7 @@
 
 import { parseDocumentFiles } from "@sonobe/core";
 import { assetBinaries, createAssetUrlCache, createDraftFiles, documentFiles, draftBaseChanged, planProjectWrite, projectDisplayName, readDraftContents } from "./projectFiles.ts";
-import type { DesktopDraftReply, DesktopDraftsApi, DesktopHostApi, HostAdapter, HostDrafts, RecoveredDraft } from "./types.ts";
+import type { DesktopDraftReply, DesktopDraftsApi, DesktopHostApi, DesktopViewerWindowStatus, HostAdapter, HostDrafts, RecoveredDraft } from "./types.ts";
 
 type OpenWindow = { open?: (url?: string, target?: string, features?: string) => unknown };
 
@@ -144,6 +144,9 @@ export function createDesktopHost(api: DesktopHostApi): HostAdapter {
         // The bridge went away (window closing).
       }
     },
+
+    ...(api.getViewerWindowStatus ? { getViewerWindowStatus: () => api.getViewerWindowStatus!() } : {}),
+    ...(api.onViewerWindowStatus ? { onViewerWindowStatus: (cb: (status: DesktopViewerWindowStatus) => void) => api.onViewerWindowStatus!(cb) } : {}),
 
     onCommand: (cb) => api.onCommand(cb),
     onOpenProject: (cb) => api.onOpenProject(cb),

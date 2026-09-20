@@ -96,15 +96,44 @@ describe("editor session", () => {
     expect(notify).toHaveBeenCalledWith(2, { undo: "Undo Add B", redo: "Redo" });
   });
 
+  it("stays quiet while the pop-out viewer window plays the prototype, so sounds and speech don't play twice", async () => {
+    let publish: (status: { open: boolean; alwaysOnTop: boolean; error: string | null }) => void = () => undefined;
+    const api = fakeApi({
+      getViewerWindowStatus: async () => ({ open: true, alwaysOnTop: false, error: null }),
+      onViewerWindowStatus: (cb) => {
+        publish = cb;
+        return () => undefined;
+      },
+    });
+    const mute = createStore<MuteState>()(() => ({ muted: false, reason: null }));
+    track(createEditorSession({ host: createDesktopHost(api), dialogStore: createDialogStore(), document: createEmptyDocument(), mute, ...headless() }));
+    // Already open when the editor loads (a reload with the window up).
+    await vi.waitFor(() => expect(mute.getState()).toEqual({ muted: true, reason: "viewerWindow" }));
+    publish({ open: false, alwaysOnTop: false, error: null });
+    expect(mute.getState()).toEqual({ muted: false, reason: null });
+    publish({ open: true, alwaysOnTop: true, error: null });
+    expect(mute.getState()).toEqual({ muted: true, reason: "viewerWindow" });
+    publish({ open: false, alwaysOnTop: false, error: null });
+
+    // A mute of the host's own outlasts the window.
+    const hostMute = createStore<MuteState>()(() => ({ muted: false, reason: null }));
+    track(createEditorSession({ host: createDesktopHost(fakeApi({ ...api, muted: true })), dialogStore: createDialogStore(), document: createEmptyDocument(), mute: hostMute, ...headless() }));
+    publish({ open: true, alwaysOnTop: false, error: null });
+    publish({ open: false, alwaysOnTop: false, error: null });
+    expect(hostMute.getState()).toEqual({ muted: true, reason: "host" });
+  });
+
   it("tells the desktop when the prototype restarts, so phones restart too", () => {
     const restarted = vi.fn();
     const session = track(createEditorSession({ host: createDesktopHost(fakeApi({ notifyPrototypeRestarted: restarted })), dialogStore: createDialogStore(), document: createEmptyDocument(), ...headless() }));
     expect(restarted).not.toHaveBeenCalled();
     session.runtime.restart();
     expect(restarted).toHaveBeenCalledTimes(1);
-    // Opening another document starts it fresh without restarting the phones' old one.
+    // Opening another document in this window keeps its docId, so the phones start over on it through a restart.
     session.document.getState().replaceDocument(createEmptyDocument());
-    expect(restarted).toHaveBeenCalledTimes(1);
+    expect(restarted).toHaveBeenCalledTimes(2);
+    session.document.getState().apply([{ op: "addLayer", layer: { id: "card", type: "rectangle", name: "Card" } }], { label: "Add Card" });
+    expect(restarted).toHaveBeenCalledTimes(2);
   });
 
   it("keeps trust for prototypes the person saves, and asks before running someone else's scripts", async () => {

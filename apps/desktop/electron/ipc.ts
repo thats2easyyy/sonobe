@@ -66,3 +66,6 @@ export const IPC = {
 } as const;
 
 export type IpcChannel = (typeof IPC)[keyof typeof IPC];
+
+/** Added to an editor window's process.argv when the app runs muted (SONOBE_MUTE); the preload reads it into sonobeHost.muted. */
+export const MUTED_ARG = "--sonobe-muted";

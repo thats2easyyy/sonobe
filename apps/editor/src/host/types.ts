@@ -46,7 +46,7 @@ export interface DesktopHostApi {
   notifyPrototypeRestarted?(): void;
   /** Open a web or mail link in the system browser. Optional: older preloads lack it. */
   openExternal?(url: string): boolean | void | Promise<boolean | void>;
-  /** True when the app was started muted (SONOBE_MUTE, automated runs). */
+  /** True when the app runs with SONOBE_MUTE (the preload reads it from process.argv). */
   readonly muted?: boolean;
   getPreviewStatus?(): Promise<unknown>;
   startPreview?(): Promise<unknown>;
@@ -284,6 +284,9 @@ export interface HostAdapter {
   notifyDocumentChanged?(revision: number, history?: { undo: string; redo: string }): void;
   /** Tell the host the prototype restarted, so its players restart too. */
   notifyPrototypeRestarted?(): void;
+  /** Whether the desktop's pop-out viewer window is open, now and whenever it opens or closes. */
+  getViewerWindowStatus?(): Promise<DesktopViewerWindowStatus>;
+  onViewerWindowStatus?(cb: (status: DesktopViewerWindowStatus) => void): () => void;
   /** The host asks for silence (SONOBE_MUTE, automated runs). */
   readonly muted?: boolean;
   /** Where drafts of unsaved work are kept; absent when the host can't keep them (memory storage). */

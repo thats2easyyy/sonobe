@@ -7,7 +7,7 @@ import { contextBridge, ipcRenderer, type IpcRendererEvent } from "electron";
 import { attachAssistantBridge } from "./assistant/preload.ts";
 import type { DesignCaptureProgress, DesignCaptureReply, DraftInfo, DraftReply, McpStatus, PreviewStatus, ProjectChange, ProjectFiles, ProjectWrite, RpcHandler, SecretsStatus, SonobeCommandId, SonobeDrafts, SonobeHost, ViewerWindowStatus } from "./host-api.d.ts";
 import { isCommandId, listCommands, toHostPlatform } from "./commands.ts";
-import { IPC } from "./ipc.ts";
+import { IPC, MUTED_ARG } from "./ipc.ts";
 import { createRpcFailure, createRpcServer } from "./rpc.ts";
 
 const platform = toHostPlatform(process.platform);
@@ -56,6 +56,7 @@ function invoke<T>(channel: string, ...args: unknown[]): Promise<T> {
 const host: SonobeHost = {
   platform,
   version: __SONOBE_VERSION__,
+  muted: process.argv.includes(MUTED_ARG),
 
   openProjectDialog: () => ipcRenderer.invoke(IPC.dialogOpenProject) as Promise<string | null>,
   saveProjectDialog: (defaultName) => ipcRenderer.invoke(IPC.dialogSaveProject, String(defaultName ?? "Untitled")) as Promise<string | null>,
