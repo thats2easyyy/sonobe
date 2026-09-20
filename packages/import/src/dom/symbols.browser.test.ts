@@ -35,6 +35,13 @@ function fakeRenderer(): SymbolRenderer & { calls: SymbolRequest[][] } {
         const w = Math.round(r.size * 1.2);
         const h = r.size;
         if (r.name === "nested.fill") return { ok: true as const, png: PNG, width: w, height: h, fallback: "masks inside masks" };
+        // A badge reaching 0.2em past the frame's left edge, like person.crop.circle.badge.plus.
+        const past = Math.round(r.size * 0.2);
+        if (r.name === "nested.badge") return { ok: true as const, png: PNG, width: w, height: h, overflow: [0, 0, 0, past] as [number, number, number, number], fallback: "masks inside masks" };
+        if (r.name.includes(".badge.")) {
+          const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${w + past}" height="${h}" viewBox="${-past} 0 ${w + past} ${h}"><path d="M0 0H${w}V${h}H0Z" fill="#34C759"/><path d="M${-past} ${h / 2}H${past}V${h}H${-past}Z" fill="#0A84FF"/></svg>`;
+          return { ok: true as const, svg, width: w, height: h, overflow: [0, 0, 0, past] as [number, number, number, number] };
+        }
         const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}"><defs><mask id="m0" maskUnits="userSpaceOnUse" x="0" y="0" width="${w}" height="${h}"><rect width="${w}" height="${h}" fill="#FFFFFF"/></mask></defs><path d="M0 0H${w}V${h}H0Z" fill="${r.colors[0]!.slice(0, 7)}" mask="url(#m0)"/></svg>`;
         return { ok: true as const, svg, width: w, height: h, ...(r.name === "airplay.audio" ? { restriction: "This symbol may only be used to refer to Apple’s AirPlay." } : {}) };
       });
@@ -131,6 +138,41 @@ describe.skipIf(!playwrightReady)("SF Symbols in a capture", () => {
     ]);
     // The host explained the placeholder, so the walker doesn't again.
     expect(result.capture.notes ?? []).toEqual([]);
+  });
+
+  it("takes a name the placeholder's own aria-label gives it over the symbol's, but not its id's", async () => {
+    const result = await capturePage({
+      html: page(`<div class="row"><svg data-sf-symbol="heart.fill" aria-label="Like" style="font-size:20px"></svg><i data-sf-symbol="bookmark" aria-label="Save" style="font-size:20px"></i><svg data-sf-symbol="xmark" id="close-icon" style="font-size:20px"></svg><svg data-sf-symbol="hart" aria-label="Share" style="font-size:20px"></svg></div>`),
+      width: 400,
+      height: 200,
+      symbols: fakeRenderer(),
+    });
+    expect(find(result.capture.root, "Like")).toMatchObject({ kind: "image" });
+    expect(find(result.capture.root, "Save")).toMatchObject({ kind: "image" });
+    // Like an icon class, the symbol names the glyph better than an id does.
+    expect(find(result.capture.root, "xmark")).toMatchObject({ kind: "image" });
+    // A symbol that couldn't be drawn keeps the name too; the note names the symbol.
+    expect(find(result.capture.root, "Share")).toMatchObject({ kind: "frame", fill: "#E5E7EBFF" });
+    expect(find(result.capture.root, "heart.fill")).toBeUndefined();
+  });
+
+  it("captures what a symbol draws past its frame, without moving what's laid out around it", async () => {
+    // 20pt symbols have 24×20 frames; the badges reach 4pt past the left edge.
+    const html = (badge: string) => page(`<div class="row">${badge}<svg data-sf-symbol="heart.fill" style="font-size:20px"></svg></div>`);
+    const { capture } = await capturePage({ html: html(`<svg data-sf-symbol="person.crop.circle.badge.plus" style="font-size:20px"></svg>`), width: 400, height: 200, symbols: fakeRenderer() });
+    const badge = find(capture.root, "person.crop.circle.badge.plus") as CaptureImage;
+    expect(badge).toMatchObject({ kind: "image", box: [16, 20, 28, 20] });
+    expect(markup(capture, badge)).toMatch(/viewBox="-4 0 28 20"/);
+    expect(find(capture.root, "heart.fill")?.box).toEqual([54, 20, 24, 20]);
+
+    // A size the page gave the placeholder scales the overflow with the drawing.
+    const sized = (await capturePage({ html: html(`<svg data-sf-symbol="person.crop.circle.badge.plus" width="48" height="40" style="font-size:20px"></svg>`), width: 400, height: 200, symbols: fakeRenderer() })).capture;
+    expect(find(sized.root, "person.crop.circle.badge.plus")?.box).toEqual([12, 20, 56, 40]);
+
+    // A bitmap drawing covers its overflow too, and its margins keep the frame where it was.
+    const bitmap = (await capturePage({ html: html(`<svg data-sf-symbol="nested.badge" style="font-size:20px"></svg>`), width: 400, height: 200, symbols: fakeRenderer() })).capture;
+    expect(find(bitmap.root, "nested.badge")).toMatchObject({ kind: "image", box: [16, 20, 28, 20] });
+    expect(find(bitmap.root, "heart.fill")?.box).toEqual([54, 20, 24, 20]);
   });
 
   it("keeps a size the page gave the placeholder", async () => {

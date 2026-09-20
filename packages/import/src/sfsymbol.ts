@@ -6,7 +6,7 @@
  */
 
 import { spawn } from "node:child_process";
-import type { SymbolRenderer, SymbolResult } from "./symbols.ts";
+import type { SymbolOverflow, SymbolRenderer, SymbolResult } from "./symbols.ts";
 
 /** Largest answer line accepted (a 3x PNG of a large symbol stays well under this). */
 const MAX_LINE = 8 * 1024 * 1024;
@@ -18,15 +18,18 @@ interface HelperAnswer {
   png?: string;
   width?: number;
   height?: number;
+  overflow?: unknown;
   fallback?: string;
   restriction?: string;
   error?: string;
   suggestions?: string[];
 }
 
+const isOverflow = (v: unknown): v is SymbolOverflow => Array.isArray(v) && v.length === 4 && v.every((n) => typeof n === "number" && Number.isFinite(n) && n >= 0);
+
 function toResult(a: HelperAnswer): SymbolResult {
   if (a.ok && (a.svg || a.png) && typeof a.width === "number" && typeof a.height === "number") {
-    return { ok: true, width: a.width, height: a.height, ...(a.svg ? { svg: a.svg } : { png: a.png! }), ...(a.fallback ? { fallback: a.fallback } : {}), ...(a.restriction ? { restriction: a.restriction } : {}) };
+    return { ok: true, width: a.width, height: a.height, ...(isOverflow(a.overflow) && a.overflow.some((n) => n > 0) ? { overflow: a.overflow } : {}), ...(a.svg ? { svg: a.svg } : { png: a.png! }), ...(a.fallback ? { fallback: a.fallback } : {}), ...(a.restriction ? { restriction: a.restriction } : {}) };
   }
   return { ok: false, error: a.error ?? "The SF Symbols helper sent no drawing.", ...(a.suggestions?.length ? { suggestions: a.suggestions } : {}) };
 }

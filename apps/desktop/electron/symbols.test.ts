@@ -100,6 +100,33 @@ describe.skipIf(!helper)(`the sfsymbol helper${built.skipped ? ` (skipped: ${bui
     expect(palette).toMatchObject({ ok: true, svg: expect.stringMatching(/#0A84FF[\s\S]*#34C759|#34C759[\s\S]*#0A84FF/) });
   });
 
+  it("covers what a symbol draws past its frame (a badge) in the SVG and the PNG", async () => {
+    const [badge, pair, heart] = await renderer().render([request("person.crop.circle.badge.plus", { size: 48, colors: ["#0A84FFFF", "#34C759FF"] }), request("ipod.and.vision.pro"), request("heart.fill")]);
+    if (!badge?.ok || !badge.svg || !badge.overflow || !pair?.ok || !heart?.ok) throw new Error(`no overflow: ${JSON.stringify([badge, pair, heart]).slice(0, 300)}`);
+    // SwiftUI lays the symbol out by its 56×58 frame, and draws the badge about 5 pt left of it.
+    const [top, right, bottom, left] = badge.overflow;
+    expect([badge.width, badge.height, top, right, bottom]).toEqual([56, 58, 0, 0, 0]);
+    expect(left).toBeGreaterThan(4);
+    expect(badge.svg).toContain(`viewBox="-${left} 0 ${56 + left} 58"`);
+    expect(pair.overflow?.[1]).toBeGreaterThan(3);
+    expect(heart.overflow).toBeUndefined();
+    // The badge fills the part left of the frame, up to the edge, in both drawings.
+    const svg = await alpha(badge.svg, Math.round((56 + left) * 3));
+    const png = execFileSync(helper!, ["person.crop.circle.badge.plus", "--size", "48", "--color", "#0A84FF,#34C759", "--format", "png"]);
+    const [pw, ph] = [png.readUInt32BE(16), png.readUInt32BE(20)];
+    expect(pw).toBe(Math.ceil((56 + left) * 3));
+    const bitmap = await alpha(`<svg xmlns="http://www.w3.org/2000/svg" width="${pw}" height="${ph}"><image href="data:image/png;base64,${png.toString("base64")}" width="${pw}" height="${ph}"/></svg>`, pw);
+    for (const drawn of [svg, bitmap]) {
+      const inkIn = (x0: number, x1: number) => {
+        let n = 0;
+        for (let y = 0; y < drawn.height; y++) for (let x = x0; x < x1; x++) if (drawn.a[y * drawn.width + x]! > 128) n++;
+        return n;
+      };
+      expect(inkIn(0, 2)).toBeGreaterThan(0);
+      expect(inkIn(0, Math.floor(left * 3))).toBeGreaterThan(200);
+    }
+  });
+
   it("lists every symbol this Mac has", () => {
     const names = execFileSync(helper!, ["--list"], { encoding: "utf8" }).trim().split("\n");
     // As many as this macOS's glyph bundle names, which grows with each release (about 4,800 on macOS 13, 8,300 on macOS 26).

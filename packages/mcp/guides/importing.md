@@ -31,7 +31,7 @@ Related: `start-here`, `animation`, `gestures`, `layout`
 - **One screen per page**, laid out for the device width (`get_document_info` shows it). The viewer draws the status bar, so leave the top safe area empty (62 points on iPhone 17 Pro).
 - **Real content**: the app's actual copy, numbers, avatars and photos (https or data: URLs), and icons as inline `<svg>`.
 - **SF Symbols**: don't draw them. Write `<svg data-sf-symbol="heart.fill"></svg>`, styled like SwiftUI's `.font` and `.foregroundStyle`: `font-size` is the point size, `font-weight` the weight, `color` the color. `data-sf-palette="#0A84FF,#34C759"` sets palette colors, `data-sf-scale="large"` the image scale.
-  - On a Mac, Sonobe draws the real symbol as an SVG image layer named after it (`heart.fill`), or after its `data-name`. `get_document_info` says whether this host can.
+  - On a Mac, Sonobe draws the real symbol as an SVG image layer named after it (`heart.fill`), or after its `data-name` or `aria-label`. `get_document_info` says whether this host can.
   - Elsewhere, and for a name the Mac doesn't have, it's a gray placeholder of that size. The result's notes say why and suggest close names.
 - **The app's tokens**: colors, font family and weights, radii, spacing, shadows. Copy them from its theme files. `<style>` works, and so does `<script src="https://cdn.tailwindcss.com"></script>` in the app.
 - **Names**: put `data-name="Like Button"` on every element the prototype will touch, text included. Its layer takes that name, so its id is predictable (`like_button`).

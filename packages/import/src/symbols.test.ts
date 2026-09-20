@@ -39,6 +39,13 @@ describe.skipIf(process.platform === "win32")("the sfsymbol helper client", () =
     expect(drawn).toEqual([1, 2, 3]);
   });
 
+  it("passes on how far a drawing reaches past its frame, and drops an overflow it can't read", async () => {
+    const helper = fakeHelper("overflow", `for (const r of lines) console.log(JSON.stringify({ id: r.id, ok: true, svg: "<svg/>", width: 56, height: 58, overflow: r.name === "bad" ? [1, 2] : [0, 0, 0, 4.79] }));`);
+    const [badge, bad] = await symbolHelper(helper).render([request("person.crop.circle.badge.plus"), request("bad")]);
+    expect(badge).toEqual({ ok: true, svg: "<svg/>", width: 56, height: 58, overflow: [0, 0, 0, 4.79] });
+    expect(bad).toEqual({ ok: true, svg: "<svg/>", width: 56, height: 58 });
+  });
+
   it("explains a missing helper, and one that stops early", async () => {
     await expect(symbolHelper(path.join(dir, "missing")).render([request("heart")])).rejects.toThrow(`the SF Symbols helper isn't at ${path.join(dir, "missing")}`);
     const crashing = fakeHelper("crash", `console.error("sfsymbol: ran out of paper"); process.exit(3);`);
