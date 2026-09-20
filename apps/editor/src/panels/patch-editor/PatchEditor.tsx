@@ -37,6 +37,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, typ
 import { LARGE_GRAPH_NODES, useGestureDocument } from "./state/gestureDocument.ts";
 import { useStore } from "zustand";
 import { rectOfElement } from "../../state/bounds.ts";
+import type { GraphGeometryNode } from "../../state/graphGeometry.ts";
 import { parseClipboardFragment } from "../../state/clipboard.ts";
 import { pasteFragment } from "../../state/editActions.ts";
 import { useEditorSession } from "../../state/EditorProvider.tsx";
@@ -125,6 +126,22 @@ const ZOOM_KEYS = ["Meta", "Control"];
 const MIN_ZOOM = 0.1;
 /** Below this size the canvas is hidden or collapsing; don't fit to it. */
 const MIN_CANVAS = 48;
+/** How long graph.bounds waits at most for the view to settle (a fit or reveal still moving). */
+const SETTLE_FRAMES = 40;
+/** The longest a view move takes (fits animate 200 to 260 ms); past it, don't wait on its promise. */
+const MOVE_MS = 600;
+
+/** The next frame, or a moment later in a window that doesn't paint (hidden windows may not run requestAnimationFrame). */
+const nextFrame = () => new Promise<void>((resolve) => {
+  const timer = setTimeout(resolve, 50);
+  requestAnimationFrame(() => {
+    clearTimeout(timer);
+    resolve();
+  });
+});
+
+/** A view move finished, or it's taking longer than any move does (React Flow can drop a fit it queued). */
+const moved = (move: Promise<unknown>) => Promise.race([move, new Promise((resolve) => setTimeout(resolve, MOVE_MS))]);
 
 type Flow = ReactFlowInstance<FlowNode, CableFlowEdge>;
 
@@ -301,8 +318,39 @@ function Canvas({ session, componentId, showBreadcrumbs, showToolbar, toolbarCon
   /** The view was placed by an automatic fit and the user hasn't moved it since. */
   const fitModeRef = useRef(!savedViewport);
   const [fitted, setFitted] = useState(!!savedViewport);
+  const fittedRef = useRef(fitted);
+  fittedRef.current = fitted;
   const markViewportManual = useCallback(() => {
     fitModeRef.current = false;
+  }, []);
+  /** The latest automatic view move (a fit, a reveal); graph.bounds waits for it before measuring. */
+  const moveRef = useRef<Promise<unknown>>(Promise.resolve());
+  /** React Flow reported its viewport ready (onInit). */
+  const initializedRef = useRef(false);
+  /** A reveal that arrived before the viewport was ready: onInit runs it instead of the first fit. */
+  const pendingRevealRef = useRef<string[] | null>(null);
+  /** Fit the view to revealed nodes. On a graph that hasn't been shown yet, jump there and then show it. */
+  const revealFit = useCallback(
+    (ids: string[]) => {
+      markViewportManual();
+      const first = !fittedRef.current;
+      const move = flowRef.current.fitView({ nodes: ids.map((id) => ({ id })), duration: first || reducedMotion ? 0 : 260, padding: 0.6, maxZoom: 1.2 });
+      moveRef.current = move;
+      if (first)
+        void moved(move).then(() => {
+          if (mountedRef.current) setFitted(true);
+        });
+    },
+    [markViewportManual, reducedMotion],
+  );
+  /** Resolves once the view stops moving: the latest fit or reveal finished and the graph is showing (at most SETTLE_FRAMES). */
+  const settleView = useCallback(async () => {
+    for (let i = 0; i < SETTLE_FRAMES && mountedRef.current; i++) {
+      const move = moveRef.current;
+      await moved(move);
+      await nextFrame();
+      if (move === moveRef.current && fittedRef.current) return;
+    }
   }, []);
 
   /** Filled in below, once the menu helpers exist; stable so the context doesn't change with it. */
@@ -338,16 +386,21 @@ function Canvas({ session, componentId, showBreadcrumbs, showToolbar, toolbarCon
     fitModeRef.current = true;
     setFitted(true);
     if (!bounds) return true;
-    void flowRef.current.setViewport(readableViewport(bounds, el.clientWidth, el.clientHeight, { maxZoom: 1, minZoom: MIN_ZOOM }));
+    moveRef.current = flowRef.current.setViewport(readableViewport(bounds, el.clientWidth, el.clientHeight, { maxZoom: 1, minZoom: MIN_ZOOM }));
     return true;
   }, []);
 
   const onInit = useCallback(() => {
-    if (savedViewport) return;
+    initializedRef.current = true;
+    const pending = pendingRevealRef.current;
+    if (!pending && savedViewport) return;
     requestAnimationFrame(() => {
-      if (mountedRef.current && fitModeRef.current) autoFit();
+      if (!mountedRef.current) return;
+      pendingRevealRef.current = null;
+      if (pending) revealFit(pending);
+      else if (fitModeRef.current) autoFit();
     });
-  }, [savedViewport, autoFit]);
+  }, [savedViewport, autoFit, revealFit]);
 
   // Another prototype replaced the document (a lesson, an example, an opened file): its root component
   // can share this component id, so fit the new graph instead of keeping the previous document's view.
@@ -425,8 +478,37 @@ function Canvas({ session, componentId, showBreadcrumbs, showToolbar, toolbarCon
     if (import.meta.env?.DEV) console.warn(`[React Flow] ${message}`);
   }, []);
 
-  // Where the graph is on screen, so the desktop MCP bridge can screenshot it (graph.bounds).
-  useEffect(() => session.bounds?.register("graph.bounds", () => rectOfElement(wrapperRef.current, flowRef.current.getZoom())), [session]);
+  // Where the graph is on screen, so the desktop MCP bridge can screenshot it (graph.bounds), once a fit or reveal has finished moving it.
+  useEffect(
+    () =>
+      session.bounds?.register("graph.bounds", async () => {
+        await settleView();
+        return rectOfElement(wrapperRef.current, flowRef.current.getZoom());
+      }),
+    [session, settleView],
+  );
+
+  // Where each node is drawn and how big (graph.geometry), so MCP tools tidy and place by real sizes.
+  // Nodes React Flow hasn't rendered (it renders what's on screen) carry the estimate, marked 0.
+  const drawnDocRef = useRef(doc);
+  drawnDocRef.current = doc;
+  useEffect(
+    () =>
+      session.graphGeometry?.register(async ({ component }) => {
+        if (component !== undefined && component !== componentId) return { component, shownComponent: componentId, revision: session.document.getState().revision, nodes: [] };
+        await nextFrame();
+        const s = session.document.getState();
+        const nodes: GraphGeometryNode[] = [];
+        for (const node of nodesRef.current) {
+          if (flowNodeKind(node.id) === "comment") continue;
+          const r = nodeRect(node);
+          nodes.push([node.id, r.x, r.y, r.width, r.height, node.measured?.width && node.measured.height ? 1 : 0]);
+        }
+        // Mid-gesture the graph can lag the document; -1 tells the caller these boxes are from an older revision.
+        return { component: componentId, shownComponent: componentId, revision: drawnDocRef.current === s.doc ? s.revision : -1, nodes };
+      }),
+    [session, componentId],
+  );
 
   const syncSelection = useCallback(
     (next: readonly FlowNode[]) => {
@@ -1080,13 +1162,15 @@ function Canvas({ session, componentId, showBreadcrumbs, showToolbar, toolbarCon
     const m = modelRef.current!;
     const ids = reveal.ids
       .map((id) => (m.nodeIds.has(id) && flowNodeKind(id) === "patch" ? id : m.nodeIds.has(layerNodeId(id)) ? layerNodeId(id) : undefined))
-      .filter((id): id is string => id !== undefined)
-      .map((id) => ({ id }));
-    if (ids.length) {
+      .filter((id): id is string => id !== undefined);
+    if (!ids.length) return;
+    // Entering a component and revealing in one tick: React Flow isn't ready yet, so onInit fits to these instead.
+    if (initializedRef.current) revealFit(ids);
+    else {
       markViewportManual();
-      void flowRef.current.fitView({ nodes: ids, duration: 260, padding: 0.6, maxZoom: 1.2 });
+      pendingRevealRef.current = ids;
     }
-  }, [reveal, componentId, markViewportManual]);
+  }, [reveal, componentId, markViewportManual, revealFit]);
 
   // -- Commands -------------------------------------------------------------
   const activate = useCommandTarget(commands, { actions, ui, flow: () => flowRef.current, session, componentId, hovering: () => hoveringRef.current, markManual: markViewportManual });

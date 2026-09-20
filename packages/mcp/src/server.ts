@@ -206,7 +206,7 @@ export function serverInstructions(host: SonobeHost): string {
   if (host.kind === "headless") {
     lines.push(
       "",
-      `This server is running headless over a project folder: there's no editor selection, and get_screenshot draws the prototype screen itself (approximate text metrics; placeholders for video, Lottie and shaders). ${host.capabilities.autosave ? "Changes are saved to disk automatically." : "Call save_document to write changes to disk."}`,
+      `This server is running headless over a project folder: there's no editor selection, and get_screenshot draws the prototype screen itself (approximate text metrics; placeholders for video, Lottie and shaders) and a component's patch graph or canvas from the document. ${host.capabilities.autosave ? "Changes are saved to disk automatically." : "Call save_document to write changes to disk."}`,
     );
   }
   return lines.join("\n");

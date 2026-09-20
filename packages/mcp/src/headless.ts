@@ -2,7 +2,8 @@
  * HeadlessHost: SonobeHost over project folders on disk, with no app running. Documents open
  * through @sonobe/core/node, edits go through core applyOps + History with author attribution,
  * simulations run on the engine runtime, presence is recorded but shown nowhere, and screenshots
- * draw the prototype screen itself (SceneFrame → SVG → PNG, see screenshot.ts). Node only.
+ * draw the prototype screen itself (SceneFrame → SVG → PNG, see screenshot.ts), and a component's
+ * patch graph or canvas from the document (componentViews.ts). Node only.
  *
  * Other writers may share the folder (the Sonobe app, git, a person, another session), so every
  * document remembers the files as it last read or wrote them. A save first reads the folder again
@@ -31,7 +32,9 @@ import {
 } from "./host.ts";
 import { ToolCancelledError } from "./progress.ts";
 import { resolveProjectTarget } from "./projectTarget.ts";
-import { loadSceneAssets, renderSceneScreenshot } from "./screenshot.ts";
+import { canvasNotes, designScene, drawComponentGraph, graphNotes } from "./componentViews.ts";
+import { cachedGraphEstimate } from "./geometry.ts";
+import { loadSceneAssets, renderGraphScreenshot, renderSceneScreenshot } from "./screenshot.ts";
 import { createDocumentSession, type DocumentSession } from "./session.ts";
 import { createSimulationManager, type SimulationManager } from "./sim.ts";
 import { createTemplateDocument, TEMPLATES } from "./templates.ts";
@@ -423,12 +426,33 @@ export function createHeadlessHost(options: HeadlessHostOptions = {}): HeadlessH
     },
 
     async screenshot(target, shotOptions) {
-      if (target.kind === "canvas" || target.kind === "graph") {
-        throw new HostError(
-          "target_unavailable",
-          `Headless mode has no ${target.kind === "graph" ? "patch graph" : "editor canvas"} to capture; its screenshots draw the prototype screen.`,
-          { hint: 'Use target "viewer" for the whole screen, or "@layerId" for one layer.' },
-        );
+      // The graph and the canvas come from the document: a component's patch graph as the editor lays
+      // it out, or the component alone on its artboard at frame 0 (also for "@layer" with a component).
+      if (target.kind === "graph") {
+        const { session } = resolve(shotOptions.docId);
+        const componentId = shotOptions.component ?? session.doc.project.root;
+        const geometry = cachedGraphEstimate(session.doc, registry, componentId);
+        const drawing = drawComponentGraph(session.doc, registry, componentId, geometry, {
+          ...(shotOptions.scale !== undefined ? { scale: shotOptions.scale } : {}),
+          ...(shotOptions.maxWidth !== undefined ? { maxWidth: shotOptions.maxWidth } : {}),
+        });
+        return renderGraphScreenshot(drawing, graphNotes(session.doc, componentId, drawing, false));
+      }
+      if (target.kind === "canvas" || (target.kind === "layer" && shotOptions.component !== undefined)) {
+        const entry = resolve(shotOptions.docId);
+        const componentId = shotOptions.component ?? entry.session.doc.project.root;
+        const scene = designScene(entry.session.doc, registry, componentId);
+        const shot = await renderSceneScreenshot({
+          scene,
+          target: target.kind === "layer" ? target : { kind: "viewer" },
+          assets: await loadSceneAssets(scene, entry.session.doc, entry.path),
+          ...(shotOptions.scale !== undefined ? { scale: shotOptions.scale } : {}),
+          ...(shotOptions.maxWidth !== undefined ? { maxWidth: shotOptions.maxWidth } : {}),
+          ...(shotOptions.isolate ? { isolate: true } : {}),
+        });
+        shot.notes = [...canvasNotes(entry.session.doc, componentId), ...(shot.notes ?? [])];
+        delete shot.timeMs;
+        return shot;
       }
       let docId = shotOptions.docId;
       let scene;
@@ -463,7 +487,7 @@ export function createHeadlessHost(options: HeadlessHostOptions = {}): HeadlessH
     },
 
     async reveal() {
-      return { revealed: false, reason: "Headless mode has no editor window to reveal items in." };
+      return { revealed: false, reason: 'Headless mode has no editor window to reveal items in. To look at them yourself, get_screenshot draws a component\'s patch graph or canvas: { "target": "graph", "component": "…" }.' };
     },
 
     async setWorking(work, workOptions) {

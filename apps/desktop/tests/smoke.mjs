@@ -14,7 +14,8 @@
  *    Streamable HTTP with the token file: list tools, build an ISAT chain with add_patches + connect on
  *    the demo document, simulate it, screenshot the viewer (screenshots/mcp-screenshot.png) and the
  *    simulation (screenshots/mcp-sim-screenshot.png, when @sonobe/mcp exposes scenes), check MCP
- *    resource notifications, the renderer's history (AI Activity), presence, reveal and undo. Then the
+ *    resource notifications, the renderer's history (AI Activity), presence, reveal (and a component's
+ *    graph drawn off screen, then opened with reveal focus) and undo. Then the
  *    phone preview: HTTP, live sync over WebSocket (polling, then revisions pushed with
  *    notifyDocumentChanged), the player rendering in a browser window (screenshots/lan-player.png), the
  *    pop-out viewer window (screenshots/viewer-window.png), and the "no window" error.
@@ -679,6 +680,30 @@ try {
   assert(revealed.structuredContent.revealed === true, "reveal", revealed.text);
   const selection = await mcp.call("get_selection");
   assert(!selection.isError && selection.text === selectionBefore.text, "reveal shows items without changing the person's selection", { before: selectionBefore.text, after: selection.text });
+
+  // A component the person isn't viewing: its graph is drawn from the document in the hidden scene
+  // window, and reveal says where it is until focus opens it; then the editor's measured sizes count.
+  const grouped = await mcp.call("create_component", { name: "Press Motion", patchIds: ["next_pressed", "press_spring"] });
+  assert(!grouped.isError && grouped.structuredContent.componentId, "create_component", grouped.text);
+  const motion = grouped.structuredContent.componentId;
+  const graphShot = await mcp.call("get_screenshot", { target: "graph", component: motion, maxWidth: 600 });
+  const graphImage = (graphShot.content ?? []).find((c) => c.type === "image");
+  const graphSize = graphImage ? pngSize(Buffer.from(graphImage.data, "base64")) : null;
+  assert(!graphShot.isError && graphSize && graphSize.width >= 200 && graphShot.text.includes("isn't showing Press Motion"), "get_screenshot of a component's graph drawn off screen", graphShot.text);
+  const away = await mcp.call("reveal", { ids: ["press_spring"] });
+  assert(away.structuredContent.revealed === false && away.text.includes("Pass focus: true"), "reveal into a component the person isn't viewing", away.text);
+  const focused = await mcp.call("reveal", { ids: ["press_spring"], focus: true });
+  assert(focused.structuredContent.revealed === true && focused.structuredContent.opened === true, "reveal with focus opens the component", focused.text);
+  if (await poll(() => app.evaluate(() => globalThis.__sonobeTest.hasRendererMethod("graph.geometry") === true), { timeout: 5000, message: "graph.geometry" }).catch(() => false)) {
+    const boxes = await mcp.call("get_items", { ids: ["press_spring"], component: motion });
+    assert(boxes.text.includes("as the patch editor measured them"), "get_items uses the patch editor's measured node sizes", boxes.text);
+    log(`component graph ${graphSize.width}×${graphSize.height} drawn off screen; reveal opened ${motion}; measured node boxes`);
+  } else {
+    log(`component graph ${graphSize.width}×${graphSize.height} drawn off screen; reveal opened ${motion} (this editor has no patch editor to measure nodes)`);
+  }
+  await mcp.call("reveal", { ids: ["press_next"], focus: true });
+  const ungrouped = await mcp.call("undo");
+  assert(!ungrouped.isError && ungrouped.text.includes("Press Motion"), "undo create_component", ungrouped.text);
   if (mode === "editor") {
     const tab = page.getByRole("tab", { name: /AI Activity/ }).first();
     if (await tab.isVisible().catch(() => false)) {

@@ -29,6 +29,19 @@ export {
 } from "./overrides.ts";
 export { isolateSceneLayer, sceneNodesFor } from "./isolate.ts";
 export {
+  cachedGraphEstimate,
+  estimateGraphGeometry,
+  resolveGraphGeometry,
+  type GraphGeometry,
+} from "./geometry.ts";
+export {
+  canvasNotes,
+  designScene,
+  drawComponentGraph,
+  graphNotes,
+  type GraphDrawing,
+} from "./componentViews.ts";
+export {
   ADDITIVE,
   authorFromClientName,
   conformErrorResult,

@@ -185,14 +185,61 @@ describe("headless screenshots", () => {
     expect(after.frame).toBe(before.frame);
     expect(after.values).toEqual(before.values);
 
-    const canvas = await c.call("get_screenshot", { target: "canvas" });
+    const canvas = await c.call("get_screenshot", { target: "canvas", simId });
     expect(canvas.structured.error).toMatchObject({ code: "target_unavailable" });
+    expect(canvas.text).toContain('"target": "graph", "component"');
     const missing = await c.call("get_screenshot", { target: "@nope" });
     expect(missing.structured.error).toMatchObject({ code: "not_found" });
     const badTarget = await c.call("get_screenshot", { target: "card" });
     expect(badTarget.structured.error).toMatchObject({ code: "invalid_target" });
     const badSim = await c.call("get_screenshot", { simId: "sim_99" });
     expect(badSim.structured.error).toMatchObject({ code: "unknown_sim" });
+  }, 30_000);
+
+  it("draws components from the document: a patch graph, a canvas at frame 0, a layer inside", async () => {
+    const c = await setup();
+    await buildGrowCard(c);
+    await c.call("add_layers", {
+      layers: [{ type: "rectangle", name: "Badge", props: { position: [60, 120], size: [120, 40], color: "#FF0000FF" } }],
+    });
+    await c.call("create_component", { name: "Grow Motion", patchIds: ["card_grown", "grow_spring"] });
+    await c.call("create_component", { name: "Badge Button", layerIds: ["badge"] });
+    await c.call("add_layers", { component: "badge_button", layers: [{ type: "rectangle", name: "Dot", props: { position: [0, 0], size: [20, 20], color: "#0000FFFF" } }] });
+
+    // The graph of a patch component nobody has open: nodes on the patch editor's dark canvas.
+    const graph = await c.call("get_screenshot", { target: "graph", component: "grow_motion", maxWidth: 600 });
+    const drawn = png(graph);
+    expect(drawn.width).toBeLessThanOrEqual(600);
+    expect(drawn.height).toBeGreaterThan(60);
+    const [r, g, b] = drawn.pixel(2, 2);
+    expect(r! < 40 && g! < 40 && b! < 40).toBe(true);
+    expect(graph.text).toContain("graph of grow_motion · ");
+    expect(graph.text).toContain("Note: Drawn from the document the way the patch editor lays it out");
+    expect(graph.text).not.toContain("start-up animations");
+    const empty = await c.call("get_screenshot", { target: "graph", component: "badge_button" });
+    expect(empty.text).toContain("Badge Button's graph is empty");
+
+    // A layer component on its own artboard at frame 0, and one layer inside it.
+    const canvas = png(await c.call("get_screenshot", { target: "canvas", component: "badge_button", scale: 2 }));
+    expect([canvas.width, canvas.height]).toEqual([240, 80]);
+    expect(isRed(canvas.pixel(200, 60))).toBe(true);
+    const dot = await c.call("get_screenshot", { target: "@dot", component: "badge_button" });
+    expect([png(dot).width, png(dot).height]).toEqual([20, 20]);
+    expect(dot.text).toContain("Note: Badge Button on its own 120×40 artboard at frame 0");
+
+    // Targets a component can't have teach the one that works.
+    const viewer = await c.call("get_screenshot", { component: "badge_button" });
+    expect(viewer.structured.error).toMatchObject({ code: "invalid_target" });
+    expect(viewer.text).toContain('{ "target": "canvas", "component": "badge_button" }');
+    const patchCanvas = await c.call("get_screenshot", { target: "canvas", component: "grow_motion" });
+    expect(patchCanvas.text).toContain("Grow Motion is a patch component");
+    expect(patchCanvas.text).toContain('{ "target": "graph", "component": "grow_motion" }');
+    const simId = (await c.call("sim_reset", {})).structured.simId as string;
+    const inSim = await c.call("get_screenshot", { target: "@dot", component: "badge_button", simId });
+    expect(inSim.text).toContain("A simulation runs the whole prototype");
+    expect(inSim.text).toMatch(/target an instance of it, such as "@\w+"/);
+    const typo = await c.call("get_screenshot", { target: "graph", component: "grow_motoin" });
+    expect(typo.text).toContain('Did you mean "grow_motion"?');
   }, 30_000);
 
   it("draws image assets from the project folder and notes placeholders", async () => {

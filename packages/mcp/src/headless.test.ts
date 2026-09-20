@@ -7,7 +7,8 @@ import { loadProjectFromDisk, saveProjectToDisk } from "@sonobe/core/node";
 import { afterEach, describe, expect, it } from "vitest";
 import { createHeadlessHost, type HeadlessHost, type HeadlessHostOptions } from "./headless.ts";
 import { isHostError } from "./host.ts";
-import { connectClient, tempProject, type TempProject } from "./test-helpers.ts";
+import { instanceIds } from "./instances.ts";
+import { buildGrowCard, connectClient, tempProject, type TempProject } from "./test-helpers.ts";
 
 let project: TempProject | undefined;
 const dirs: string[] = [];
@@ -181,6 +182,26 @@ describe("HeadlessHost", () => {
     expect((await client.call("reveal", { ids: ["card"] })).text).toContain(
       "Not revealed: Headless mode",
     );
+    await client.close();
+  });
+
+  it("reveal resolves instance paths to the component they name", async () => {
+    project = await tempProject();
+    const client = await connectClient(project.host);
+    await buildGrowCard(client);
+    await client.call("create_component", { name: "Grow", patchIds: ["card_grown", "grow_spring"] });
+    const instance = instanceIds((await project.host.getDocument()).doc.components.main!)[0]!;
+    const calls: unknown[] = [];
+    project.host.reveal = async (ids, options) => {
+      calls.push({ ids, options });
+      return { revealed: true, ...(options.component ? { component: options.component } : {}), opened: true };
+    };
+    const r = await client.call("reveal", { ids: [`${instance.id}/grow_spring.output`], focus: true });
+    expect(calls).toEqual([{ ids: ["grow_spring"], options: { docId: "test", component: instance.component, focus: true } }]);
+    expect(r.text).toBe(`Revealed grow_spring in ${instance.component} (opened it for the person).`);
+    const bad = await client.call("reveal", { ids: ["tap_card/grow_spring"] });
+    expect(bad.isError).toBe(true);
+    expect(bad.text).toContain("not a component instance");
     await client.close();
   });
 
