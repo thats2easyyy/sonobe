@@ -16,6 +16,8 @@ claude -p "<task prompt>" \
 
 `mcp.json` starts `sonobe mcp --headless <project folder>`. `--mcp-config` and `--strict-mcp-config` apply only to that invocation and leave the person's Claude configuration untouched.
 
+The tasks are now repeatable eval cases (`evals/cases/study-*`), which `node evals/run.ts` runs this way and checks by simulation. See [evals/README.md](../../evals/README.md).
+
 ## Results
 
 | Task | Prompt (summary) | Time | Turns | Tool errors | Outcome |

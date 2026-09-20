@@ -61,6 +61,15 @@ Tools register in `packages/mcp/src/tools/` with `tc.tool(name, config, async (a
 3. Pass `signal: work.signal` (or `tc.signal(ctx)`) to `host.apply` and `history.undo`, so a cancelled call never changes the document. Call `work.throwIfCancelled()` between steps. In a long synchronous loop, `await work.checkpoint()` now and then.
 4. Test it with a v1 SDK client: `client.callTool(params, undefined, { onprogress, resetTimeoutOnProgress: true, timeout: 500 })` for progress, and `{ signal }` to cancel. `packages/mcp/src/import.test.ts` has examples.
 
+## Measuring how well Claude builds with Sonobe
+
+`evals/` holds behavioral evals: Claude Code gets a prompt and a start project, builds through Sonobe's MCP tools alone, and the runner simulates the result and checks layer properties. It records pass or fail, turns, tokens, time, tools, and each error code with whether Claude recovered. Runs use your Claude account, so they're not part of `npm test` or CI.
+
+1. When you change tools, tool descriptions, guides or server instructions, run the affected cases before and after: `npm run build -w @sonobe/cli`, then `node evals/run.ts --case "retro-*" --model sonnet --runs 3`. Compare the two `summary.md` files.
+2. Add a case when you fix something Claude kept getting wrong: a start project, a prompt, a `test.json` on layer properties, and a `solution.json`. `npx vitest run evals` checks that the start fails and the solution passes.
+
+[evals/README.md](evals/README.md) has the case format and the options.
+
 ## Code style
 
 - TypeScript, strict ESM. Relative imports use explicit `.ts`/`.tsx` extensions.

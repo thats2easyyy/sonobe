@@ -45,6 +45,7 @@ The first two finish Stage 4. The rest are Stage 5.
 - [x] Headless screenshots: the scene drawn as SVG and rasterized without the app
 - [x] Optional in-app assistant (BYO Anthropic API key, kept in the OS keychain)
 - [x] Usability study: a real Claude Code session completed four tasks (a beginner's like button, a designer's bottom sheet, debugging, explaining) using only MCP tools, and the problems it found are fixed
+- [x] Behavioral evals: `node evals/run.ts` runs Claude Code headless on repeatable cases (the examples with their patches removed, the study's tasks, and regressions from test sessions) and checks what it built by simulation, with turns, tokens and error recovery per run. It runs by hand with your Claude account
 
 ## Stage 4: Distribution
 - [x] macOS packaging: `npm run package -w @sonobe/desktop` builds an arm64 DMG with the CLI inside, and `package:verify` launches it muted and checks the MCP endpoint, the editor, and the CLI
