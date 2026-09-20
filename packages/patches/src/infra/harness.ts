@@ -11,7 +11,7 @@
 import { DEFAULT_DEVICE, coerce, createEmptyDocument, createRegistry, getDevicePreset, inferValueType, resolveNodePorts } from "@sonobe/core";
 import type { PatchNode, PatchSpec, ResolvedPort, SonobeDocument, Value, ValueType } from "@sonobe/core";
 import { approximateTextMeasurer } from "@sonobe/engine";
-import type { DeviceInfo, PatchContext, PatchDefinition, PointerSnapshot, RuntimeServices } from "@sonobe/engine";
+import type { DeviceInfo, EmptyLoopFix, PatchContext, PatchDefinition, PointerSnapshot, RuntimeServices } from "@sonobe/engine";
 import { itemAt, loopItems, loopLength, loopOf } from "./loops.ts";
 import { decodeDefault, nodePorts } from "./ports.ts";
 import { equalValues, toBool, zeroValue } from "./values.ts";
@@ -90,6 +90,8 @@ export interface HarnessFrame {
   requestedNextFrame: boolean;
   /** The patch called `services.restart()`. */
   restartRequested: boolean;
+  /** What the patch said about its empty output through `ctx.explainEmpty` this frame (the last call wins). */
+  emptyExplanation?: { reason: string; fixes: readonly EmptyLoopFix[] };
 }
 
 export interface PatchHarness<S = unknown> {
@@ -359,6 +361,7 @@ export function createPatchHarness<S = any>(definition: PatchDefinition<S>, opti
     const count = loopCount ?? 1;
     const fired = new Map<string, boolean[]>();
     let requested = false;
+    let emptyExplanation: HarnessFrame["emptyExplanation"];
 
     for (let i = 0; i < count; i++) {
       if (i >= states.length) states[i] = definition.state ? definition.state() : (undefined as S);
@@ -416,6 +419,9 @@ export function createPatchHarness<S = any>(definition: PatchDefinition<S>, opti
           once.add(entry);
           services.log("warn", message);
         },
+        explainEmpty: (reason, fixes = []) => {
+          emptyExplanation = { reason, fixes };
+        },
       };
       definition.evaluate(ctx);
     }
@@ -439,7 +445,7 @@ export function createPatchHarness<S = any>(definition: PatchDefinition<S>, opti
       firedKeys.add(key);
       pulseItems[key] = Array.from({ length: count }, (_, i) => flags[i] === true);
     }
-    last = { frame, time, dt, outputs, pulses: firedKeys, pulseItems, loopCount, requestedNextFrame: requested, restartRequested };
+    last = { frame, time, dt, outputs, pulses: firedKeys, pulseItems, loopCount, requestedNextFrame: requested, restartRequested, ...(emptyExplanation ? { emptyExplanation } : {}) };
     frame += 1;
     return last;
   }

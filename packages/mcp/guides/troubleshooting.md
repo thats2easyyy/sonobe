@@ -70,12 +70,14 @@ Nothing changed when a write fails. Fix the call and retry.
 - `unused_input` (info): nothing inside a component reads that published input, so values sent to it do nothing. Read it with `$in.key`, or unpublish it.
 - `undriven_output` (warning): a cable reads an instance output that nothing inside the component drives, so it stays at its default. Connect `$out.key` inside, or disconnect the cable.
 - `dangling_link`, `missing_layer` (errors): something points at a deleted item. Disconnect it or reset the value.
+- `empty_loop` (runtime warning, in sim results and the Live viewer section): a layer or component has 0 copies because an empty loop erased real items, or a `loopSelect` picked past the end. The message says where the empty loop started; apply one of its ops (usually `outOfRange` on that Loop Select). It goes away once the copies are back.
 
 ## Other surprises
 
-- **Values look wrong in simulation right after edits.** The session hot-swapped the document and kept state. `sim_reset` gives a clean start.
+- **Values look wrong in simulation right after edits.** The session hot-swapped the document and kept compatible state, such as springs mid-flight and switches that are on. `sim_reset` gives a clean start. An empty loop is not leftover state: a list that went empty comes back on its own, so if it stays empty, the wiring empties it (see the `empty_loop` warning).
 - **"isn't implemented yet"** in runtime issues: that patch outputs default values for now. Pick another patch, or tell the person.
 - **A loop shows one copy.** Every copy sits at the same position. Feed `gridLayout` positions into the layer.
+- **A loop shows zero copies, and values read `null`.** Something feeding the layer is an empty loop, which wins over every other loop. Read the `sim_get_values` note and any `empty_loop` warning; they name where it started. The usual cause is a `loopSelect` index past the end, often in a feedback loop whose `delay1` passes one value on the first frame. Set `outOfRange` to `"fallback"` or `"clamp"` (see `loops`).
 - **A headless screenshot looks slightly off.** Headless servers draw the screen themselves: text uses approximate metrics, and video, Lottie and shaders are placeholders. Check exact values with `sim_get_values`, or open the project in the Sonobe app.
 - **A long call timed out in a script you wrote** (an MCP SDK client): the SDK gives up after 60 s by default. Pass `onprogress` together with `resetTimeoutOnProgress: true`. Without `onprogress` the client never asks for progress, so there's nothing to reset the timer. Check `list_history` before retrying: a call that got past its last step may have finished.
 - **Changes vanished** after a headless session: the host wasn't autosaving, so call `save_document`. `get_document_info` shows "unsaved changes".

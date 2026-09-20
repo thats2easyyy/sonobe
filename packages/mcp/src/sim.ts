@@ -371,8 +371,10 @@ export function createSimulationManager(options: SimulationManagerOptions): Simu
 
   const newIssues = (session: Session): SimIssue[] => {
     const out: SimIssue[] = [];
+    const current = new Set<string>();
     for (const issue of session.runtime.issues()) {
       const key = `${issue.code}|${issue.patchId ?? ""}|${issue.layerId ?? ""}|${issue.componentPath ?? ""}|${issue.message}`;
+      current.add(key);
       if (session.reportedIssues.has(key)) continue;
       session.reportedIssues.add(key);
       const out1: SimIssue = { code: issue.code, severity: issue.severity, message: issue.message };
@@ -381,8 +383,14 @@ export function createSimulationManager(options: SimulationManagerOptions): Simu
           ? `${issue.componentPath}/${issue.patchId}`
           : issue.patchId;
       if (issue.layerId !== undefined) out1.layerId = issue.layerId;
+      if (issue.hint !== undefined) out1.hint = issue.hint;
+      if (issue.suggestions?.length) out1.suggestions = issue.suggestions;
       out.push(out1);
     }
+    // An issue that went away (an empty_loop warning once the layer has copies again, or cleared by
+    // an edit) is reported again when it comes back.
+    for (const key of session.reportedIssues)
+      if (!current.has(key)) session.reportedIssues.delete(key);
     return out;
   };
 
@@ -1215,17 +1223,26 @@ export function createSimulationManager(options: SimulationManagerOptions): Simu
           hint: 'For example ["@card.scale", "toggle.on"].',
         });
       for (const target of targets) checkTarget(session, target);
+      const values: Record<string, unknown> = {};
+      const notes: Record<string, string> = {};
+      for (const target of targets) {
+        const seen = session.runtime.inspect(target);
+        values[target] = toJsonValue(seen.value);
+        const keys = session.overrides.length ? overrideKeys(docOf(session), target) : [];
+        const o = session.overrides.find((x) => keys.includes(x.key));
+        const overridden = o ? overrideNote(o, values[target]) : undefined;
+        // One note per target: the override clause, then why the value reads as nothing.
+        const note =
+          overridden && seen.note
+            ? `${overridden[0]!.toUpperCase()}${overridden.slice(1)}. ${seen.note}`
+            : (overridden ?? seen.note);
+        if (note) notes[target] = note;
+      }
       const out: SimValuesResult = {
         ...state(session),
-        values: Object.fromEntries(targets.map((t) => [t, read(session.runtime, t)])),
+        values,
+        ...(Object.keys(notes).length ? { notes } : {}),
       };
-      const notes: Record<string, string> = {};
-      for (const target of session.overrides.length ? targets : []) {
-        const keys = overrideKeys(docOf(session), target);
-        const o = session.overrides.find((x) => keys.includes(x.key));
-        if (o) notes[target] = overrideNote(o, out.values[target]);
-      }
-      if (Object.keys(notes).length) out.notes = notes;
       return out;
     },
 

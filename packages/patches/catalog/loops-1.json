@@ -261,8 +261,8 @@
         "select reorder"
       ],
       "summary": "Picks items out of a loop by position, to show the tapped item's details or to reorder a list.",
-      "docs": "## How it works\nLoop Select looks items up by their position in a loop. Give it one index to pull out one item, or a loop of indices to pick several, in any order, with repeats allowed.\n\n- **Loop** is the list to pick from.\n- **Index** is which position to take, counted from 0. A loop of indices like 2, 1, 0 returns those items in that order.\n- **Output** is the picked items.\n- **Output Index** is each picked item's position in Output: 0, 1, 2, ….\n\nAn index past the end, or below 0, is skipped and adds nothing to Output.\n\n## Tips\n- In a carousel, wire the current page number into Index to show that page's title.\n- To keep or drop items by a condition instead of by position, use Loop Filter.\n\n## Coming from Origami\nThe inputs are called Input and Index Loop in Origami. With a single index, Origami's Index output repeats the selected index; here Output Index always counts positions in Output, so it's 0.",
-      "behavior": "Stateless.\n\nEach frame:\n```\nconst items = ctx.inputItems(\"loop\");\nconst picks = ctx.inputItems<number>(\"index\");\nconst out = [];\nfor (const raw of picks) {\n  if (!Number.isFinite(raw)) continue;\n  const i = Math.floor(raw);\n  if (i < 0 || i >= items.length) continue;   // skip; never count from the end\n  out.push(items[i]);\n}\nctx.output(\"output\", out);                    // whole-loop outputs take item arrays\nctx.output(\"outputIndex\", out.map((_, k) => k));\n```\n\n- Loops: `loop` and `index` are whole-loop inputs, so the patch evaluates once per frame. The output length is the number of valid indices, not the longest input. A plain index arrives as a one-item array and gives a one-item loop, which downstream patches and layers treat like a single value.\n- Types: `typeParam` sets the item type of `loop` and `output`. There's no pulse type: select a looped Tap with the boolean type, and its one-frame true reads as a pulse downstream.\n- Frame 0: outputs on frame 0.\n- Edge cases: `index` is a number port with `step: 1`, not an `index` port, because core coerces `index` values below 0 to 0. That way −1 (for example from Option Equals when nothing matches) is skipped instead of selecting the first item. Non-integer indices round down (2.7 → 2; −0.5 → −1, skipped). NaN and ±Infinity are skipped. An empty `loop` gives empty outputs. Duplicate indices repeat items ([0, 0] gives the first item twice).\n- Restart and dispose: nothing to reset or release.\n- Coming from Origami: with a scalar index, Origami's Index output echoes that index, while with an index loop it outputs 0…m−1. Sonobe always outputs 0…m−1 so both cases follow one rule.",
+      "docs": "## How it works\nLoop Select looks items up by their position in a loop. Give it one index to pull out one item, or a loop of indices to pick several, in any order, with repeats allowed.\n\n- **Loop** is the list to pick from.\n- **Index** is which position to take, counted from 0. A loop of indices like 2, 1, 0 returns those items in that order.\n- **Out of Range** decides what an index past the end, or below 0, gives:\n  - **Skip** (the default) leaves it out, so it adds nothing to Output.\n  - **Clamp** takes the nearest end: the first item below 0, the last item past the end.\n  - **Wrap** counts around: in a loop of 3, index 3 is item 0 and −1 is item 2.\n  - **Use Fallback** gives Fallback instead.\n- **Fallback** is what Use Fallback gives. Every mode except Skip also gives it for an index that isn't a number, or when Loop is empty.\n- **Output** is the picked items. With any mode except Skip, it has exactly one item per index.\n- **Output Index** is each picked item's position in Output: 0, 1, 2, ….\n\n## Tips\n- In a carousel, wire the current page number into Index to show that page's title.\n- To read each copy's neighbor, like the card above, feed Index the loop's own Index plus 1 and set Out of Range to Use Fallback. The last copy gets Fallback instead of nothing, so everything downstream keeps running.\n- An empty Output empties everything it feeds: a patch that gets an empty loop runs 0 times, and a layer bound to one draws no copies. When that isn't what you want, choose a mode other than Skip.\n- To keep or drop items by a condition instead of by position, use Loop Filter.\n\n## Coming from Origami\nThe inputs are called Input and Index Loop in Origami. With a single index, Origami's Index output repeats the selected index; here Output Index always counts positions in Output, so it's 0. Out of Range and Fallback are Sonobe additions.",
+      "behavior": "Stateless.\n\nEach frame:\n```\nconst items = ctx.inputItems(\"loop\");\nconst picks = ctx.inputItems<number>(\"index\");\nconst mode = ctx.input(\"outOfRange\");          // \"skip\" | \"clamp\" | \"wrap\" | \"fallback\"\nconst fallback = ctx.input(\"fallback\");\nconst n = items.length;\nconst out = [];\nfor (const raw of picks) {\n  const i = Number.isFinite(raw) ? Math.floor(raw) : NaN;\n  if (i >= 0 && i < n) out.push(items[i]);\n  else if (mode === \"skip\") continue;            // never count from the end\n  else if (Number.isNaN(i) || n === 0) out.push(fallback);\n  else if (mode === \"clamp\") out.push(items[i < 0 ? 0 : n - 1]);\n  else if (mode === \"wrap\") out.push(items[((i % n) + n) % n]);\n  else out.push(fallback);\n}\nctx.output(\"output\", out);                    // whole-loop outputs take item arrays\nctx.output(\"outputIndex\", out.map((_, k) => k));\n```\n\n- Loops: `loop` and `index` are whole-loop inputs, so the patch evaluates once per frame. In Skip mode the output length is the number of valid indices, not the longest input; in the other modes it is the number of indices. `fallback` takes one value (item 0 when it gets a loop). A plain index arrives as a one-item array and gives a one-item loop, which downstream patches and layers treat like a single value.\n- Types: `typeParam` sets the item type of `loop`, `fallback` and `output`. There's no pulse type: select a looped Tap with the boolean type, and its one-frame true reads as a pulse downstream.\n- Frame 0: outputs on frame 0.\n- Edge cases: `index` is a number port with `step: 1`, not an `index` port, because core coerces `index` values below 0 to 0. That way −1 (for example from Option Equals when nothing matches) is skipped in Skip mode instead of selecting the first item. Non-integer indices round down (2.7 → 2; −0.5 → −1). In Skip mode NaN and ±Infinity are skipped and an empty `loop` gives empty outputs; in the other modes both give Fallback. Duplicate indices repeat items ([0, 0] gives the first item twice). An unknown `outOfRange` works like Skip.\n- Empty output: in Skip mode, when a non-empty Loop yields nothing because indices are past its end, the patch says so with `ctx.explainEmpty` and offers Clamp and Use Fallback as fixes. The runtime quotes that in its `empty_loop` warning when a layer or component ends up with 0 copies. Indices below 0 alone stay quiet, because −1 means \"nothing selected\".\n- Restart and dispose: nothing to reset or release.\n- Coming from Origami: with a scalar index, Origami's Index output echoes that index, while with an index loop it outputs 0…m−1. Sonobe always outputs 0…m−1 so both cases follow one rule. Out of Range and Fallback are Sonobe additions; imports get Skip.",
       "inputs": [
         {
           "key": "loop",
@@ -280,8 +280,44 @@
           "type": "number",
           "default": 0,
           "step": 1,
-          "description": "Which position to pick, counted from 0; a loop of indices picks several in that order, and out-of-range values are skipped.",
+          "description": "Which position to pick, counted from 0; a loop of indices picks several in that order. Out of Range decides what an index past the end gives.",
           "wholeLoop": true
+        },
+        {
+          "key": "outOfRange",
+          "name": "Out of Range",
+          "type": "enum",
+          "default": "skip",
+          "enumOptions": [
+            {
+              "key": "skip",
+              "name": "Skip",
+              "description": "Leave it out, so Output can be shorter than Index, or empty."
+            },
+            {
+              "key": "clamp",
+              "name": "Clamp",
+              "description": "Take the first item below 0 and the last item past the end."
+            },
+            {
+              "key": "wrap",
+              "name": "Wrap",
+              "description": "Count around the loop: past the end starts again at the first item, and −1 is the last."
+            },
+            {
+              "key": "fallback",
+              "name": "Use Fallback",
+              "description": "Give Fallback instead."
+            }
+          ],
+          "description": "What an index past the end, or below 0, gives: Skip leaves it out, Clamp takes the nearest end, Wrap counts around, and Use Fallback gives Fallback."
+        },
+        {
+          "key": "fallback",
+          "name": "Fallback",
+          "type": "variant",
+          "default": 0,
+          "description": "What an out-of-range index gives with Use Fallback. Every mode except Skip also gives it for an index that isn't a number, or when Loop is empty."
         }
       ],
       "outputs": [
@@ -289,7 +325,7 @@
           "key": "output",
           "name": "Output",
           "type": "variant",
-          "description": "The picked items, in the order of Index.",
+          "description": "The picked items, in the order of Index. With any mode except Skip, one item per index.",
           "wholeLoop": true
         },
         {
@@ -330,7 +366,8 @@
         "loopFilter"
       ],
       "commonMistakes": [
-        "Output is empty and connected layers vanish: the index is past the end (a loop of 3 has indices 0 to 2) or below 0. Keep the index between 0 and Loop Count − 1, for example with Clamp.",
+        "Output is empty and connected layers vanish: the index is past the end (a loop of 3 has indices 0 to 2) or below 0. Set Out of Range to Clamp or Use Fallback, or keep the index between 0 and Loop Count − 1.",
+        "A feedback loop through Loop Select never starts: on the first frame Delay One Frame passes one value, not a list, so every index past 0 is out of range and Output stays empty. Set Out of Range to Use Fallback, so each index gets a value from the start.",
         "Only one item comes out when you wanted the list reordered: Index is a single number, so it picks one item. Wire a loop of indices, for example from a Loop Builder set to Number, to pick several."
       ],
       "examples": [
@@ -342,6 +379,11 @@
         {
           "title": "Open a panel only when the second row is tapped",
           "outline": "layer row rectangle \"Row\" position←grid.position size←grid.size cornerRadius=12\nlayer panel rectangle \"Panel\" @0,474 402x400 cornerRadius=24 opacity←pop.output\npatch rows loop count=3\npatch grid gridLayout index←rows.index columns=1 origin=16,120 width=370 itemHeight=72 spacing=8\npatch tap_row interaction layer=@row\npatch second_tap loopSelect<boolean> loop←tap_row.tap index=1\npatch open switch turnOn←second_tap.output\npatch pop popAnimation number←open.on"
+        },
+        {
+          "title": "Dim a row while the row below it is open",
+          "description": "Each row reads its neighbor's state at Index + 1. Use Fallback gives the last row false instead of nothing, so all four rows keep drawing.",
+          "outline": "layer row rectangle \"Row\" position←grid.position size←grid.size cornerRadius=12 opacity←dim.output\npatch rows loop count=4\npatch grid gridLayout index←rows.index columns=1 origin=16,120 width=370 itemHeight=72 spacing=8\npatch tap_row interaction layer=@row\npatch open switch flip←tap_row.tap\npatch below add[2] value1←rows.index value2=1\npatch below_open loopSelect<boolean> loop←open.on index←below.output outOfRange=fallback fallback=false\npatch dim transition<number> progress←below_open.output start=1 end=0.4"
         }
       ],
       "origami": {
@@ -358,7 +400,9 @@
         "outputIndex": "Index"
       },
       "defaultNotes": {
-        "loop": "sonobe: an empty loop, like every whole-loop Loop input, so an unconnected patch outputs nothing."
+        "loop": "sonobe: an empty loop, like every whole-loop Loop input, so an unconnected patch outputs nothing.",
+        "outOfRange": "sonobe: Skip, the behavior before Out of Range existed, so −1 still means \"nothing selected\" and existing documents and Origami imports don't change.",
+        "fallback": "sonobe: the type's zero value, like other variant defaults (false for boolean, \"\" for text)."
       }
     },
     {

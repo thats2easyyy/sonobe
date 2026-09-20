@@ -184,6 +184,55 @@ describe("simulation settling with feedback loops", () => {
   });
 });
 
+describe("simulation with an empty loop", () => {
+  // Each card dims when the card after it is on; that comes from last frame's list through Loop Select.
+  // On the first frame Delay One Frame passes one value, so indices 1 to 3 are past the end.
+  const DECK = [
+    { op: "addPatch", patch: { ref: "cards", type: "loop", name: "Cards", inputs: { count: 3 } } },
+    { op: "addPatch", patch: { ref: "grid", type: "gridLayout", inputs: { index: { link: "$cards.index" }, columns: 1 } } },
+    { op: "addPatch", patch: { ref: "next", type: "add", typeParam: "number", name: "Next", inputs: { value1: { link: "$cards.index" }, value2: 1 } } },
+    { op: "addPatch", patch: { ref: "first", type: "lessThan", typeParam: "number", name: "First", inputs: { value1: { link: "$cards.index" }, value2: 1 } } },
+    { op: "addPatch", patch: { ref: "last", type: "delay1", typeParam: "boolean", name: "On Last Frame" } },
+    { op: "addPatch", patch: { ref: "pick", type: "loopSelect", typeParam: "boolean", name: "Next On", inputs: { loop: { link: "$last.output" }, index: { link: "$next.output" } } } },
+    { op: "addPatch", patch: { ref: "on", type: "ifElse", typeParam: "boolean", name: "On", inputs: { condition: { link: "$first.output" }, ifTrue: true, ifFalse: { link: "$pick.output" } } } },
+    { op: "addPatch", patch: { ref: "fade", type: "transition", typeParam: "number", name: "Fade", inputs: { progress: { link: "$on.output" }, start: 1, end: 0.5 } } },
+    { op: "connect", from: "$on.output", to: "$last.value" },
+    { op: "addLayer", layer: { ref: "card", type: "rectangle", name: "Card", props: { position: { link: "$grid.position" }, size: [200, 60], opacity: { link: "$fade.output" } } } },
+  ];
+
+  it("warns with ready fixes, explains null values, and recovers after the fix without a reset", async () => {
+    project = await tempProject();
+    client = await connectClient(project.host);
+    const built = await client.call("apply_ops", { ops: DECK });
+    expect(built.isError, built.text).toBe(false);
+    const reset = await client.call("sim_reset", {});
+    const simId = reset.structured.simId as string;
+    expect(reset.text).toContain('Runtime warning on @card: Layer "Card" has 0 copies because "Next On" (Loop Select) returned an empty loop: indices 1, 2 and 3 are past the end of its 1-item Loop.');
+    expect(reset.text).toContain('"On Last Frame" (Delay One Frame) closes a feedback loop');
+    expect(reset.text).toContain("(Or with false, Max with 0) doesn't help");
+    expect(reset.text).toContain('"target":"next_on.outOfRange","value":"fallback"');
+    const issue = (reset.structured.issues as { code: string; suggestions?: { ops: unknown[] }[] }[]).find((i) => i.code === "empty_loop")!;
+    expect(issue.suggestions).toHaveLength(2);
+
+    const values = await client.call("sim_get_values", { simId, targets: ["@card.opacity#1", "@card.size", "on.output", "cards.index#5"] });
+    expect(values.structured.values).toEqual({ "@card.opacity#1": null, "@card.size": [200, 60], "on.output": null, "cards.index#5": null });
+    const notes = values.structured.notes as Record<string, string>;
+    expect(notes["@card.opacity#1"]).toMatch(/^Not drawn: Layer "Card" has 0 copies because "Next On" \(Loop Select\) returned an empty loop/);
+    expect(notes["@card.size"]).toBe(notes["@card.opacity#1"]);
+    expect(notes["on.output"]).toMatch(/^It's an empty loop because "Next On" \(Loop Select\) returned an empty loop: .* The empty loop reached "On" \(If \/ Else\) on If False and erased the 3 items on Condition\./);
+    expect(notes["cards.index#5"]).toBe("It's a loop of 3 items (#0 to #2), so there's no #5.");
+    expect(values.text).toContain("  @card.opacity#1 = null\n    Not drawn: Layer \"Card\" has 0 copies");
+
+    // Apply the suggested fix; the running simulation picks it up and draws the cards.
+    const fixed = await client.call("apply_ops", { ops: [{ op: "setInput", target: "next_on.outOfRange", value: "fallback" }] });
+    expect(fixed.isError, fixed.text).toBe(false);
+    await client.call("sim_step", { simId, frames: 3 });
+    const after = await client.call("sim_get_values", { simId, targets: ["@card.opacity#2"] });
+    expect(after.structured.values).toEqual({ "@card.opacity#2": 1 });
+    expect(after.structured.notes).toBeUndefined();
+  });
+});
+
 describe("simulation with mock patches", () => {
   it("runs independent sessions by simId", async () => {
     const { c, simId } = await setup(createMockRegistry());
