@@ -81,10 +81,10 @@ afterEach(async () => {
 
 const LEGACY = { "content-type": "application/json", accept: "application/json, text/event-stream", "mcp-protocol-version": "2025-11-25" };
 
-function postTool(id: number, meta: Record<string, unknown> = {}, init: { signal?: AbortSignal; modern?: boolean; url?: string } = {}) {
+function postTool(id: number, meta: Record<string, unknown> = {}, init: { signal?: AbortSignal; modern?: boolean; url?: string; client?: string } = {}) {
   const headers: Record<string, string> = init.modern
     ? { "content-type": "application/json", accept: "application/json, text/event-stream", "mcp-protocol-version": "2026-07-28", "mcp-method": "tools/call", "mcp-name": "import_design" }
-    : LEGACY;
+    : { ...LEGACY, ...(init.client ? { "sonobe-client": init.client } : {}) };
   return fetch(init.url ?? url, {
     method: "POST",
     headers,
@@ -170,6 +170,27 @@ describe("createHttpHandler: long calls", () => {
     expect(calls.slice(1).map((c) => c.aborted)).toEqual([undefined, undefined]);
     for (const c of controllers) c.abort();
     await Promise.all(both);
+  });
+
+  it("keeps a relay session's calls out of other clients' cancels", async () => {
+    const RELAY = "11111111-aaaa-4bbb-8ccc-000000000001";
+    const cancel = (requestId: number, client?: string) =>
+      fetch(url, {
+        method: "POST",
+        headers: { ...LEGACY, ...(client ? { "sonobe-client": client } : {}) },
+        body: JSON.stringify({ jsonrpc: "2.0", method: "notifications/cancelled", params: { requestId } }),
+      });
+    const relayed = postTool(11, {}, { client: RELAY });
+    await until(() => calls.length === 1);
+    // Another client's late cancel of its own id 11 (its call already answered) isn't the relay's to take.
+    expect((await cancel(11)).status).toBe(202);
+    await sleep(300);
+    expect(calls[0]!.aborted).toBeUndefined();
+    // The same session's cancel still reaches it.
+    await cancel(11, RELAY);
+    await until(() => calls[0]?.aborted !== undefined, 1_000);
+    expect(calls[0]!.aborted).toBeDefined();
+    await relayed;
   });
 
   it("sends a silent 2026-07-28 call's headers at once, then keep-alives", async () => {

@@ -165,6 +165,12 @@ describe("startMcpServer", () => {
 
     expect((await send(s.port, { method: "DELETE", path: `/clients/${id}`, headers: auth })).status).toBe(204);
     expect(clients.get(id)?.state).toBe("gone");
+    // A goodbye names a relay id as it is; a malformed escape is a bad request, not a crash.
+    for (const bad of ["%E0%A4%A", "%", "..%2F..%2Fetc"]) {
+      const bye = await send(s.port, { method: "DELETE", path: `/clients/${bad}`, headers: auth });
+      expect(bye.status, bad).toBe(400);
+      expect((JSON.parse(bye.body) as { error: { message: string } }).error.message).toContain("8 to 64 letters, digits or dashes");
+    }
   });
 
   it("answers /clients with 404 without a registry, like apps from before sessions", async () => {

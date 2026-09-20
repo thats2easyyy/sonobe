@@ -254,9 +254,10 @@ export function parseHello(value: unknown): McpClientHello | string {
   const hello: McpClientHello = { id: v.id };
   for (const key of ["name", "title", "version"] as const) {
     if (v[key] === undefined) continue;
+    if (typeof v[key] !== "string") return `"${key}" must be a string when present.`;
+    // A blank field (clientInfo's version is required, so some clients send "") is left out.
     const text = clean(v[key], 120);
-    if (text === undefined) return `"${key}" must be a non-empty string when present.`;
-    hello[key] = text;
+    if (text !== undefined) hello[key] = text;
   }
   if (v.folder !== undefined) {
     const folder = typeof v.folder === "string" ? v.folder.trim() : "";

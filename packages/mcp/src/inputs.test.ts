@@ -41,6 +41,13 @@ describe("unknownFields", () => {
     expect(unknownFields(schema, { name: "a", nested: { size: 1, _meta: {} } })).toHaveLength(1);
   });
 
+  it("treats names on Object.prototype as unknown fields, not as the schema's", () => {
+    for (const key of ["constructor", "toString", "__proto__", "hasOwnProperty", "valueOf"]) {
+      const found = unknownFields(schema, JSON.parse(`{"name":"a","nested":{"size":1,"${key}":1},"${key}":1}`));
+      expect(found.map((f) => `${f.at}:${f.field}`), key).toEqual([`nested:${key}`, `:${key}`]);
+    }
+  });
+
   it("follows discriminated unions by their tag and recursive schemas by their getters", () => {
     expect(unknownFields(SimEventSchema, { kind: "drag", from: "@a", to: "@b", duration: 100 })).toMatchObject([
       { at: "", field: "duration" },
@@ -114,6 +121,8 @@ describe("every tool refuses unknown fields", () => {
     expect(layer.text).toContain('Keys like "position" go inside "props".');
     const patch = await client.call("add_patches", { patches: [{ type: "switch", nmae: "Liked" }] });
     expect(patch.text).toContain('add_patches has no field "nmae" in patches[0]. Did you mean "name"?');
+    expect((await client.call("get_outline", { constructor: "x" })).text).toContain('get_outline has no field "constructor".');
+    expect((await client.call("add_layers", { layers: [{ type: "rectangle", toString: 1 }] })).text).toContain('add_layers has no field "toString" in layers[0].');
     const value = await client.call("set_values", { updates: [{ target: "zoom_spring.bounciness", vlaue: 3 }] });
     expect(value.text).toContain('Did you mean "value"?');
     const reset = await client.call("sim_reset");
