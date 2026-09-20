@@ -356,6 +356,23 @@ describe("code tools", () => {
     ]);
   });
 
+  it("lists and searches folders named like secret files, as the whole folder's list shows their files, and still refuses the secrets in them", async () => {
+    await put("src/env/theme.ts", "export const accent = '#8B5CF6';\n");
+    await put("src/env/.env", "API_KEY=abc\n");
+    await put("lib/env/prod.env", "API_KEY=abc\n");
+    await put("config/credentials/colors.ts", "export const ink = '#111118';\n");
+    const { tools } = await linkedTools();
+
+    expect(text(await tools.call("list_code_files", { path: "src/env" }, scope())).split("\n")).toEqual(["(skipped: may hold secrets) src/env/.env", "src/env/theme.ts  33 B"]);
+    expect(text(await tools.call("search_code", { path: "src/env", query: "accent" }, scope()))).toBe("src/env/theme.ts:1: export const accent = '#8B5CF6';");
+    expect(text(await tools.call("list_code_files", { path: "config/credentials" }, scope()))).toBe("config/credentials/colors.ts  30 B");
+    expect(text(await tools.call("read_code_file", { path: "src/env" }, scope()))).toBe("“src/env” is a folder. List it with list_code_files.");
+    for (const secret of ["src/env/.env", "lib/env/prod.env"]) {
+      expect(text(await tools.call("read_code_file", { path: secret }, scope())), secret).toBe(`Sonobe doesn't read “${secret}”: files like it can hold secrets. Look for theme or token files instead.`);
+      expect(text(await tools.call("search_code", { path: secret, query: "API_KEY" }, scope())), secret).toBe(`Sonobe doesn't read “${secret}”: files like it can hold secrets. Look for theme or token files instead.`);
+    }
+  });
+
   it.skipIf(!posix)("follows links to files inside the folder only, and never walks into a linked folder", async () => {
     await put("src/theme.ts", "export const accent = '#8B5CF6';\n");
     await put("outside.txt", "outside\n", dir);
@@ -492,6 +509,25 @@ describe("code tools", () => {
       "[redacted]",
       "[redacted]",
       ...lines.slice(11),
+    ]);
+  });
+
+  it("redacts those keys right after an escape like \\n or a percent-encoded byte", async () => {
+    const lines = [
+      'const keys = "sk-proj-AbCdEfGhIjKlMnOpQrStUvWxYz0123\\nsk-proj-ZyXwVuTsRqPoNmLkJiHgFeDcBa9876";',
+      'const list = "a\\tsk_live_51HAbCdEfGhIjKlMnOpQrStUv\\ngithub_pat_11ABCDEFG0123456789_abcdefghij\\r\\nglpat-AbCdEfGhIjKlMnOpQrSt";',
+      'fetch("https://example.com/login?next=%2Fpay%3Ftoken%3Dsk_live_51HAbCdEfGhIjKlMnOpQrStUv&auth=Bearer%20sk-proj-AbCdEfGhIjKlMnOpQrStUvWxYz0123");',
+      // An escape or a byte before a word isn't one before the key's prefix.
+      '<div className="\\ndesk-admin-panel-component-wrapper %20mask-proj-image-linear-to-bottom" />',
+    ];
+    await put("src/config.ts", `${lines.join("\n")}\n`);
+    const { tools } = await linkedTools();
+    expect(text(await tools.call("read_code_file", { path: "src/config.ts" }, scope())).split("\n")).toEqual([
+      "src/config.ts (lines 1–4 of 4)",
+      'const keys = "[redacted]\\n[redacted]";',
+      'const list = "a\\t[redacted]\\n[redacted]\\r\\n[redacted]";',
+      'fetch("https://example.com/login?next=%2Fpay%3Ftoken%3D[redacted]&auth=Bearer%20[redacted]");',
+      lines[3],
     ]);
   });
 

@@ -389,6 +389,7 @@ describe("Open in Claude Code", () => {
         opened.push(file);
         return "";
       },
+      managedMcp: async () => null,
     };
     return { options, opened };
   }

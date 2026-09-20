@@ -255,11 +255,13 @@ const SECRET_EXTENSIONS = [".pem", ".key", ".p8", ".p12", ".pfx", ".ppk", ".asc"
 /** An env file by another name: "prod.env", "docker/app.env", "env". */
 const ENV_FILE = /(^|[._-])env$/;
 
+/** In a folder that holds secrets, like ".ssh" (by name, ignoring case). */
+const inSecretFolder = (rel: string) => rel.toLowerCase().split("/").slice(0, -1).some((part) => SECRET_FOLDERS.has(part));
+
 /** A file that may hold secrets (by name, ignoring case), given its path relative to the folder's top. */
 export function isSecretPath(rel: string): boolean {
-  const parts = rel.toLowerCase().split("/");
-  const base = parts.at(-1) ?? "";
-  if (parts.slice(0, -1).some((part) => SECRET_FOLDERS.has(part))) return true;
+  const base = rel.toLowerCase().split("/").at(-1) ?? "";
+  if (inSecretFolder(rel)) return true;
   return (
     SECRET_NAMES.has(base) ||
     SECRET_PREFIXES.some((prefix) => base.startsWith(prefix)) ||
@@ -278,17 +280,18 @@ const PEM_PRIVATE_KEY = /-----BEGIN (?:[A-Z0-9]+ )*PRIVATE KEY(?: BLOCK)?-----(?
 /**
  * Anthropic, OpenAI (project, service account, admin and legacy), AWS, GitHub (classic and
  * fine-grained), GitLab, Stripe secret and restricted, Slack and Google keys. The ones whose
- * prefix could end a word in CSS or code ("mask-", "desk_") need a word boundary before them.
+ * prefix could end a word in CSS or code ("mask-", "desk_") need a word boundary before them. An
+ * escape ("\n") or a percent-encoded byte ("%3D") counts as one, though it ends in a letter or digit.
  */
 const KEY_PATTERNS = [
   /sk-ant-[A-Za-z0-9_-]{10,}/g,
-  /(?<![A-Za-z0-9_-])sk-(?:proj|svcacct|admin)-[A-Za-z0-9_-]{20,}/g,
+  /(?<=^|[^A-Za-z0-9_-]|\\[A-Za-z0-9]|%[0-9A-Fa-f]{2})sk-(?:proj|svcacct|admin)-[A-Za-z0-9_-]{20,}/g,
   /sk-[A-Za-z0-9]{20,}/g,
   /AKIA[0-9A-Z]{16}/g,
   /gh[pousr]_[A-Za-z0-9]{20,}/g,
-  /(?<![A-Za-z0-9_])github_pat_[A-Za-z0-9_]{22,}/g,
-  /(?<![A-Za-z0-9_-])glpat-[A-Za-z0-9_-]{20,}/g,
-  /(?<![A-Za-z0-9_])[sr]k_(?:live|test)_[A-Za-z0-9]{16,}/g,
+  /(?<=^|[^A-Za-z0-9_]|\\[A-Za-z0-9]|%[0-9A-Fa-f]{2})github_pat_[A-Za-z0-9_]{22,}/g,
+  /(?<=^|[^A-Za-z0-9_-]|\\[A-Za-z0-9]|%[0-9A-Fa-f]{2})glpat-[A-Za-z0-9_-]{20,}/g,
+  /(?<=^|[^A-Za-z0-9_]|\\[A-Za-z0-9]|%[0-9A-Fa-f]{2})[sr]k_(?:live|test)_[A-Za-z0-9]{16,}/g,
   /xox[abprs]-[A-Za-z0-9-]{10,}/g,
   /AIza[0-9A-Za-z_-]{35}/g,
 ];
@@ -614,11 +617,12 @@ function relativePath(raw: string | undefined): string {
   return normal === "." ? "" : normal;
 }
 
-/** Refuse a relative path that's hidden or may hold secrets. */
-function checkReadable(rel: string): void {
+/** Refuse a relative path that's hidden or may hold secrets. `folder`: its own name isn't a file's ("src/env" holds code; it isn't an env file). */
+function checkReadable(rel: string, folder: boolean): void {
   if (!rel) return;
-  if (isSecretPath(rel)) throw secretError(rel);
-  if (isHiddenPath(rel)) throw hiddenError(rel);
+  if (folder ? inSecretFolder(rel) : isSecretPath(rel)) throw secretError(rel);
+  // A hidden name that is a secret file's, like ".env", says so.
+  if (isHiddenPath(rel)) throw isSecretPath(rel) ? secretError(rel) : hiddenError(rel);
 }
 
 interface Resolved { rel: string; real: string; info: Stats }
@@ -626,7 +630,8 @@ interface Resolved { rel: string; real: string; info: Stats }
 /** Resolve a path inside the folder, following links only to places still inside it. */
 async function resolveInside(folder: OpenFolder, raw: string | undefined): Promise<Resolved> {
   const rel = relativePath(raw);
-  checkReadable(rel);
+  // Before the stat it may be a folder; a file's name rules come after, for what isn't one.
+  checkReadable(rel, true);
   let real: string;
   let info: Stats;
   try {
@@ -639,7 +644,8 @@ async function resolveInside(folder: OpenFolder, raw: string | undefined): Promi
   if (!isWithin(folder.root, real)) {
     throw rel ? new CodeFolderError("outside", `“${rel}” links to a place outside the linked folder, so Sonobe won't read it. Paths are relative to its top, like “src/theme.ts”.`) : outsideError(raw ?? "");
   }
-  checkReadable(toPosix(path.relative(folder.root, real)));
+  checkReadable(rel, info.isDirectory());
+  checkReadable(toPosix(path.relative(folder.root, real)), info.isDirectory());
   return { rel, real, info };
 }
 
