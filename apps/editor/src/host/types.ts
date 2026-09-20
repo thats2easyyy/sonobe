@@ -209,8 +209,8 @@ export interface DesignPreviewUpdate {
   html: string | null;
   /** writing: Claude is writing it; adding: import_design is importing it; cleared: gone (imported, cleared or expired). */
   status: "writing" | "adding" | "cleared";
-  /** Increments with every update of this draft. */
-  revision: number;
+  /** Increments with every update of this draft (not the document's revision). */
+  draftRevision: number;
 }
 
 /** SecretsStatus in host-api.d.ts. */

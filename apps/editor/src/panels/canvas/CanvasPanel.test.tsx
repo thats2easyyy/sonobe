@@ -169,7 +169,7 @@ const draftOf = (over: Partial<DesignDraft> = {}): DesignDraft => ({
   progress: null,
   error: null,
   resync: false,
-  mcp: { author: { kind: "agent", name: "Claude" }, client: CLAUDE_CODE, revision: 1, touchedAt: Date.now(), addingFrom: null },
+  mcp: { author: { kind: "agent", name: "Claude" }, client: CLAUDE_CODE, draftRevision: 1, touchedAt: Date.now(), addingFrom: null },
   ...over,
 });
 const showDraft = (draft: DesignDraft) => act(() => designStore.setState({ drafts: [draft] }));

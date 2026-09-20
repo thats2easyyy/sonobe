@@ -13,7 +13,7 @@ import { useLatest } from "../../ui/lib/hooks.ts";
 import type { Rect } from "../canvas/geometry.ts";
 import { rectToScreen, type Viewport } from "../canvas/viewport.ts";
 import type { DesignTarget } from "./context.ts";
-import { activeDraft, designStore, MCP_DRAFT_IDLE_MS, useDesign, type DesignData, type DesignDraft, type DesignRequest } from "./designStore.ts";
+import { activeDraft, designStore, mcpDraftIdleAt, useDesign, type DesignData, type DesignDraft, type DesignRequest } from "./designStore.ts";
 import { PREVIEW_MESSAGE_TYPE, previewShellHtml, renderablePrefix } from "./previewShell.ts";
 import "./design.css";
 import "./design-layout.css";
@@ -107,7 +107,7 @@ export function DesignPreview({ viewport, bounds, componentId, rootId, artboard,
 
   useEffect(() => {
     if (!draft) return;
-    const until = !isLive(draft) ? draft.since + FADE_WINDOW_MS : draft.mcp ? draft.mcp.touchedAt + MCP_DRAFT_IDLE_MS : null;
+    const until = !isLive(draft) ? draft.since + FADE_WINDOW_MS : mcpDraftIdleAt(draft);
     if (until === null) return;
     const timer = setTimeout(() => setTick((n) => n + 1), Math.max(0, until - Date.now()) + 1);
     return () => clearTimeout(timer);

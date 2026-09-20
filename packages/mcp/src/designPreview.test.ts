@@ -95,7 +95,7 @@ async function importPreview(c: TestClient, args: Record<string, unknown>) {
   return { text: content.map((x) => x.text ?? "").join("\n"), isError: r.isError === true, meta: (r._meta as Record<string, unknown> | undefined)?.[IMPORT_META_KEY] as ImportResultMeta | undefined };
 }
 
-const statuses = () => updates.map((u) => `${u.status} ${u.revision}`);
+const statuses = () => updates.map((u) => `${u.status} ${u.draftRevision}`);
 
 beforeEach(async () => {
   project = await tempProject();
@@ -123,15 +123,15 @@ describe("preview_design", () => {
     const third = await c.call("preview_design", { append: "<footer>Pay</footer></body>" });
     const html = "<head><style>body{margin:0}</style></head><body><header>Checkout</header><main>Items</main><footer>Pay</footer></body>";
     expect(third.structured).toEqual({ text: third.text, docId: "test", name: "Checkout", bytes: html.length, revision: 0, draftRevision: 3 });
-    expect(updates.map((u) => [u.revision, u.status, u.html])).toEqual([
+    expect(updates.map((u) => [u.draftRevision, u.status, u.html])).toEqual([
       [1, "writing", "<head><style>body{margin:0}</style></head><body><header>Checkout</header>"],
       [2, "writing", "<head><style>body{margin:0}</style></head><body><header>Checkout</header><main>Items</main>"],
       [3, "writing", html],
     ]);
-    expect(updates[2]).toEqual({ docId: "test", key: "Claude", author: { kind: "agent", name: "Claude" }, name: "Checkout", component: null, replace: null, width: null, height: null, position: null, html, status: "writing", revision: 3 });
+    expect(updates[2]).toEqual({ docId: "test", key: "Claude", author: { kind: "agent", name: "Claude" }, name: "Checkout", component: null, replace: null, width: null, height: null, position: null, html, status: "writing", draftRevision: 3 });
     // html again starts the draft over, and the count goes on.
     await c.call("preview_design", { html: "<body>Again</body>" });
-    expect(updates.at(-1)).toMatchObject({ html: "<body>Again</body>", name: "Checkout", revision: 4 });
+    expect(updates.at(-1)).toMatchObject({ html: "<body>Again</body>", name: "Checkout", draftRevision: 4 });
   });
 
   it("updates the fields a call passes and keeps the rest", async () => {
@@ -172,13 +172,13 @@ describe("preview_design", () => {
     await c.call("preview_design", { name: "Checkout", html: "<body>" });
     const cleared = await c.call("preview_design", { clear: true });
     expect(cleared.text).toBe("Removed the draft “Checkout” from the canvas. Nothing changed.");
-    expect(updates.at(-1)).toMatchObject({ status: "cleared", html: null, name: "Checkout", revision: 2 });
+    expect(updates.at(-1)).toMatchObject({ status: "cleared", html: null, name: "Checkout", draftRevision: 2 });
     expect((await c.call("preview_design", { append: "<p>" })).structured.error).toMatchObject({ code: "no_draft" });
     expect((await c.call("preview_design", { clear: true })).text).toBe("There's no draft to remove, so nothing changed.");
     expect(updates).toHaveLength(2);
     // The session's next draft continues the count, so the canvas can tell it's newer.
     await c.call("preview_design", { html: "<body>new</body>" });
-    expect(updates.at(-1)).toMatchObject({ status: "writing", revision: 3, name: null });
+    expect(updates.at(-1)).toMatchObject({ status: "writing", draftRevision: 3, name: null });
   });
 
   it("keeps each session's draft apart", async () => {
@@ -188,7 +188,7 @@ describe("preview_design", () => {
     await placemark.call("preview_design", { name: "Checkout", html: "<body>checkout" });
     await sonobe.call("preview_design", { name: "Inbox", html: "<body>inbox" });
     await placemark.call("preview_design", { append: "</body>" });
-    expect(updates.map((u) => [u.key, u.client?.id, u.name, u.html, u.revision])).toEqual([
+    expect(updates.map((u) => [u.key, u.client?.id, u.name, u.html, u.draftRevision])).toEqual([
       [PLACEMARK, PLACEMARK, "Checkout", "<body>checkout", 1],
       [SONOBE, SONOBE, "Inbox", "<body>inbox", 1],
       [PLACEMARK, PLACEMARK, "Checkout", "<body>checkout</body>", 2],
@@ -215,7 +215,7 @@ describe("preview_design", () => {
     const next = placemark.call("preview_design", { append: "</body>" });
     release();
     await Promise.all([slow, next]);
-    expect(updates.map((u) => [u.key, u.revision, u.html])).toEqual([
+    expect(updates.map((u) => [u.key, u.draftRevision, u.html])).toEqual([
       [SONOBE, 1, "<body>inbox"],
       [PLACEMARK, 1, "<body>checkout"],
       [PLACEMARK, 2, "<body>checkout</body>"],

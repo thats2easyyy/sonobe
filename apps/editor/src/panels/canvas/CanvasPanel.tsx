@@ -67,7 +67,7 @@ import {
 import { hitChrome, resizeCursor, ROTATE_CURSOR, selectionChrome } from "./handles.ts";
 import { InlineTextEditor } from "./InlineTextEditor.tsx";
 import { nudgeDelta, textOps, type ArrowKey, type InsertTool } from "./ops.ts";
-import { buildCanvasIndex, hitCopy, hitLayers, isEditableLayer, marqueeLayers, pickChildOf, pickLayer, type CanvasIndex } from "./sceneIndex.ts";
+import { buildCanvasIndex, firstCopyBounds, hitCopy, hitLayers, isEditableLayer, marqueeLayers, pickChildOf, pickLayer, type CanvasIndex } from "./sceneIndex.ts";
 import { measureBetween, type Measurement } from "./snapping.ts";
 import { useCanvasScene, type SceneSource } from "./useCanvasScene.ts";
 import { clampZoom, ensureVisible, fitRect, formatZoom, nextZoomStep, panBy, rectToScreen, screenToArtboard, wheelZoom, zoomAt, type Viewport } from "./viewport.ts";
@@ -292,8 +292,9 @@ export function CanvasPanel({ session: sessionProp, sceneSource, onSceneSourceCh
 
   const latest = useLatest({ index, viewport, componentId, component, tool, artboard, chrome, spaceHeld, box, editing, designReserve, inset });
   // The box reads layers at event time; the preview reads them while it renders, so it gets this render's index.
-  const layerBounds = useCallback((id: string) => latest.current.index.bounds(id), [latest]);
-  const renderBounds = useCallback((id: string) => index.bounds(id), [index]);
+  // Both measure a repeated layer's first copy: a redesign is one row's size, not the list's.
+  const layerBounds = useCallback((id: string) => firstCopyBounds(latest.current.index, id), [latest]);
+  const renderBounds = useCallback((id: string) => firstCopyBounds(index, id), [index]);
 
   useEffect(() => {
     if (designOpen) setDesignLoaded(true);
@@ -356,7 +357,7 @@ export function CanvasPanel({ session: sessionProp, sceneSource, onSceneSourceCh
       if (!viewport) return;
       seenDraft.current = live.key;
       if (fitMode.current === null) return;
-      const frame = previewFrame(live, { componentId, rootId, artboard: size, bounds: (id) => index.bounds(id), fallbackReplace: null, request: state.request });
+      const frame = previewFrame(live, { componentId, rootId, artboard: size, bounds: renderBounds, fallbackReplace: null, request: state.request });
       const next = frame ? fitViewport(frame) : null;
       if (!frame || !next) return;
       fitMode.current = "draft";

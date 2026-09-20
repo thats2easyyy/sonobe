@@ -6,7 +6,7 @@ import type { AssistantCanvasContext } from "../assistant/types.ts";
 import type { Rect } from "../canvas/geometry.ts";
 import { rectToScreen, type Viewport } from "../canvas/viewport.ts";
 import { DesignPreview, previewFrame, previewPillText } from "./DesignPreview.tsx";
-import { designStore, initialDesignData, MCP_DRAFT_IDLE_MS, type DesignDraft, type DesignRequest, type McpDraftSession } from "./designStore.ts";
+import { designStore, initialDesignData, MCP_DRAFT_IDLE_MS, MCP_DRAFT_STALLED_MS, type DesignDraft, type DesignRequest, type McpDraftSession } from "./designStore.ts";
 import { PREVIEW_MESSAGE_TYPE } from "./previewShell.ts";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -259,7 +259,7 @@ describe("DesignPreview", () => {
 describe("an MCP client's draft", () => {
   const CLAUDE_CODE = { id: "cc-1", label: "Claude Code" };
   const mcpDraft = (over: Partial<DesignDraft> = {}, session: Partial<McpDraftSession> = {}): DesignDraft =>
-    draft({ source: "mcp", key: "mcp:cc-1", runId: "", turn: 0, toolUseId: "", mcp: { author: { kind: "agent", name: "Claude" }, client: CLAUDE_CODE, revision: 1, touchedAt: Date.now(), addingFrom: null, ...session }, ...over });
+    draft({ source: "mcp", key: "mcp:cc-1", runId: "", turn: 0, toolUseId: "", mcp: { author: { kind: "agent", name: "Claude" }, client: CLAUDE_CODE, draftRevision: 1, touchedAt: Date.now(), addingFrom: null, ...session }, ...over });
 
   it("says who is writing it: the client's label, else the author", () => {
     expect(previewPillText(mcpDraft({ fields: { name: "Checkout" } }))).toBe("Claude Code is writing “Checkout”");
@@ -291,14 +291,16 @@ describe("an MCP client's draft", () => {
     expect(iframe()).toBeNull();
   });
 
-  it("goes away when its session sends nothing for 15 minutes", () => {
+  it("goes away when its session sends nothing for 3 minutes while it's written, or 15 while it's added", () => {
     vi.useFakeTimers();
-    show([mcpDraft({ html: "<p>Hi</p>" })]);
-    render();
-    expect(wrapper()).not.toBeNull();
-    act(() => vi.advanceTimersByTime(MCP_DRAFT_IDLE_MS - 1000));
-    expect(wrapper()).not.toBeNull();
-    act(() => vi.advanceTimersByTime(1001));
-    expect(wrapper()).toBeNull();
+    for (const [status, idle] of [["writing", MCP_DRAFT_STALLED_MS], ["adding", MCP_DRAFT_IDLE_MS]] as const) {
+      show([mcpDraft({ html: "<p>Hi</p>", status }, { touchedAt: Date.now() })]);
+      render();
+      expect(wrapper(), status).not.toBeNull();
+      act(() => vi.advanceTimersByTime(idle - 1000));
+      expect(wrapper(), status).not.toBeNull();
+      act(() => vi.advanceTimersByTime(1001));
+      expect(wrapper(), status).toBeNull();
+    }
   });
 });

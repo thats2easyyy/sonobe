@@ -9,7 +9,7 @@
 export { canvasContext, designTarget, type DesignTarget } from "./context.ts";
 export { designCommands } from "./commands.ts";
 export { DesignBox, type DesignBoxProps } from "./DesignBox.tsx";
-export { DesignPreview, PREVIEW_POST_MS, previewFrame, previewPillText, type DesignPreviewProps, type PreviewFrameOptions } from "./DesignPreview.tsx";
+export { DesignPreview, liveDraftWriter, PREVIEW_POST_MS, previewFrame, previewPillText, writerKey, type DesignPreviewProps, type PreviewFrameOptions } from "./DesignPreview.tsx";
 export {
   activeDraft,
   applyPreviewUpdate,
@@ -37,6 +37,6 @@ export {
   type PreviewTarget,
 } from "./designStore.ts";
 export { PREVIEW_BOOTSTRAP, PREVIEW_MESSAGE_TYPE, PREVIEW_SCRIPT_PREFIXES, previewCsp, previewShellHtml, renderablePrefix } from "./previewShell.ts";
-export { DESIGN_CANVAS_SPLIT, followDesignBox } from "./layout.ts";
+export { DESIGN_CANVAS_SPLIT, followDesignBox, liveMcpDrafts } from "./layout.ts";
 export { claudePrompt, designFollowUp, type DesignFollowUpKind } from "./prompt.ts";
 export { designResultChips, designRunState, designStatusLine, mcpDraftText, resultPlacement, toolStatusText, type DesignResultChip, type DesignStatusLine, type ResultPlacement } from "./status.ts";

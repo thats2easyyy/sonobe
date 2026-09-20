@@ -281,7 +281,7 @@ test.describe("Design with Claude", () => {
     await openEditor(page);
     const client = { id: "cc-1", label: "Claude Code", folder: "/Users/ava/code/placemark" };
     /** What the desktop sends over design.preview for each of Claude Code's calls (the test hook takes the same path). */
-    const show = (parts: number, status: "writing" | "adding" | "cleared", revision: number) =>
+    const show = (parts: number, status: "writing" | "adding" | "cleared", draftRevision: number) =>
       hook(page, (s, update) => s.previewDesign(update), {
         docId: "photo-zoom",
         key: client.id,
@@ -295,7 +295,7 @@ test.describe("Design with Claude", () => {
         position: null,
         html: status === "cleared" ? null : CHECKOUT_PARTS.slice(0, parts).join(""),
         status,
-        revision,
+        draftRevision,
       });
     const pill = draftPill(page);
     const frame = page.frameLocator("iframe[title='Design preview']");

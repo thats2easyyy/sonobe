@@ -173,14 +173,14 @@ describe("DesignBox", () => {
 
   it("shows Claude Code's draft on the canvas, with Hide preview", async () => {
     await mount();
-    const update = { docId: "photo", key: "cc-1", author: { kind: "agent" as const, name: "Claude" }, client: { id: "cc-1", label: "Claude Code" }, name: "Checkout", component: null, replace: null, width: null, height: null, position: null, html: "<p>Hi</p>", status: "writing" as const, revision: 1 };
+    const update = { docId: "photo", key: "cc-1", author: { kind: "agent" as const, name: "Claude" }, client: { id: "cc-1", label: "Claude Code" }, name: "Checkout", component: null, replace: null, width: null, height: null, position: null, html: "<p>Hi</p>", status: "writing" as const, draftRevision: 1 };
     act(() => {
       applyPreviewUpdate(session, update);
     });
     const row = () => container.querySelector(".sb-design-box__mcp");
     expect(row()?.textContent).toBe("Claude Code is writing “Checkout” on the canvas.Hide preview");
     act(() => {
-      applyPreviewUpdate(session, { ...update, status: "adding", revision: 2 });
+      applyPreviewUpdate(session, { ...update, status: "adding", draftRevision: 2 });
     });
     expect(row()?.querySelector("p")?.textContent).toBe("Claude Code is adding “Checkout” to the canvas…");
     click(buttonNamed("Hide preview"));
