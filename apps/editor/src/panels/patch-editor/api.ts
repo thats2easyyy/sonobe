@@ -9,6 +9,8 @@ export { checkConnection, orientConnection, placeSuggestion, portTypeAt, quickCo
 export { documentObstacles, estimatePatchSize, findFreePosition, freeInsertPosition, type PlacementBias, type PlacementObstacles, type PlacementOptions } from "./model/placement.ts";
 export { nodePositionsMetaOp, readNodePositions, PATCH_EDITOR_META_KEY } from "./model/meta.ts";
 export { patchEditorBridge, type CableDrag, type DriveRequest, type LayerPropTarget, type PatchEditorBridge, type PatchEditorBridgeState } from "./state/bridge.ts";
+export { useInstanceCopies, useWatchedCopy, useWatchedScope, type WatchedScope } from "./state/watch.ts";
+export { pickCopy } from "./model/format.ts";
 export {
   acceptsCable,
   cableSourceName,

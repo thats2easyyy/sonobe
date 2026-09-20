@@ -1,4 +1,4 @@
-/** addPatch, updatePatch, removePatch. */
+/** addPatch, updatePatch, replacePatch, removePatch. */
 
 import { parseAddress, patchAddress } from "../address.ts";
 import { wouldCreateComponentCycle } from "../document.ts";
@@ -6,7 +6,7 @@ import { VARIABLE_BROADCASTER_TYPE } from "../graph.ts";
 import { getOwn } from "../ids.ts";
 import { COMPONENT_PATCH_TYPE, componentItemIds, findPort, getInputCountRange, getPatchSpec, resolveNodePorts, resolveNodeVariants } from "../registry.ts";
 import { didYouMean, didYouMeanText } from "../suggest.ts";
-import type { Component, Op, PatchNode, PatchSpec, ValueType } from "../types.ts";
+import type { Component, InputValue, Op, PatchNode, PatchSpec, ValueType } from "../types.ts";
 import { followingReceivers, sameVariable, variableKey, type VariableKey } from "../variables.ts";
 import { checkInputValue, resolveSource, resolveTarget } from "../validate.ts";
 import { canConnect } from "../values.ts";
@@ -28,7 +28,7 @@ import {
   type OpOf,
   type OpOutcome,
 } from "./context.ts";
-import { linkSourceId, referencesItems, removeInputs, restoreInputOps, restorePatchOps, targetAddress, type InputEntry } from "./references.ts";
+import { linkSourceId, listInputs, referencesItems, removeInputs, restoreInputOps, restorePatchOps, targetAddress, writeInput, type InputEntry } from "./references.ts";
 
 /** A typeParam checked against the node's allowed variants (the spec's, or those its dynamicPorts declare). */
 function validateTypeParam(spec: PatchSpec, typeParam: unknown, variants: readonly ValueType[] | undefined): string {
@@ -76,6 +76,13 @@ export function validatePatchComponent(ctx: OpContext, host: Component, id: stri
   }
 }
 
+function failUnknownType(ctx: OpContext, type: string): never {
+  const specs = [...ctx.registry.patches.values()];
+  return fail("unknown_patch_type", `There's no patch type "${type}".${didYouMeanText(didYouMean(type, specs.map((s) => ({ value: s.type, aliases: [s.name, ...(s.aliases ?? [])] }))))}`, {
+    hint: "list_patch_types shows every patch type with a one-line summary.",
+  });
+}
+
 function autoUi(component: Component): { x: number; y: number } {
   const nodes = Object.values(component.patches);
   if (!nodes.length) return { x: 40, y: 40 };
@@ -90,12 +97,7 @@ export function addPatch(ctx: OpContext, op: OpOf<"addPatch">): OpOutcome {
   const np = op.patch;
   if (!np || typeof np !== "object" || typeof np.type !== "string") fail("invalid_op", 'addPatch needs a patch, like { "type": "popAnimation" }.');
   const spec = getPatchSpec(ctx.registry, np.type);
-  if (!spec && !ctx.lenient) {
-    const specs = [...ctx.registry.patches.values()];
-    fail("unknown_patch_type", `There's no patch type "${np.type}".${didYouMeanText(didYouMean(np.type, specs.map((s) => ({ value: s.type, aliases: [s.name, ...(s.aliases ?? [])] }))))}`, {
-      hint: "list_patch_types shows every patch type with a one-line summary.",
-    });
-  }
+  if (!spec && !ctx.lenient) failUnknownType(ctx, np.type);
   if (np.name !== undefined && typeof np.name !== "string") fail("invalid_value", "Patch names must be text.");
   const id = newItemId(ctx, component, { explicit: np.id, name: np.name, fallback: np.type, taken: componentItemIds(component) });
   defineRef(ctx, np.ref, id);
@@ -282,7 +284,9 @@ export function updatePatch(ctx: OpContext, op: OpOf<"updatePatch">): OpOutcome 
     if (e.target.kind === "patch") ctx.affected.patches.add(e.target.id);
     if (e.target.kind === "layer") ctx.affected.layers.add(e.target.id);
   }
-  const outcome: OpOutcome = { ids: [id], applied, inverse: [inverse, ...restoreInputOps(component.id, removed)] };
+  // Lenient replays (redo) don't prune, so the drops are listed after the op.
+  const clears: Op[] = removed.map((e) => ({ op: "setInput", component: component.id, target: targetAddress(e.target), value: null }));
+  const outcome: OpOutcome = { ids: [id], applied: clears.length ? [applied, ...clears] : applied, inverse: [inverse, ...restoreInputOps(component.id, removed)] };
   return following?.receivers.length ? followBroadcaster(ctx, outcome, node, following.before, following.receivers) : outcome;
 }
 
@@ -305,6 +309,145 @@ function followBroadcaster(ctx: OpContext, outcome: OpOutcome, node: PatchNode, 
     inverse.unshift(...result.inverse);
   }
   return { ids: outcome.ids, applied, inverse: [...inverse, ...outcome.inverse] };
+}
+
+/** The fields replacePatch's "patch" takes, and hints for the ones people guess. */
+const REPLACE_FIELDS = ["type", "typeParam", "inputCount", "settings", "component", "name"];
+const REPLACE_HINTS: Record<string, string> = {
+  id: 'replacePatch keeps the patch\'s id: name the patch beside "patch", like { "op": "replacePatch", "id": "spring", "patch": { "type": "classicAnimation" } }.',
+  ref: "replacePatch keeps the patch's id, so there's no new item to give a ref.",
+  inputs: "Values and cables that fit carry over by themselves. Set new ones with setInput in the same batch, or carry one to a renamed port with inputMap.",
+  ui: "replacePatch keeps the patch's position. Move it with updatePatch.",
+};
+
+/** An inputMap or outputMap: old key → new key, each naming a port of its side. */
+function checkPortMap(field: "inputMap" | "outputMap", raw: unknown, oldKeys: readonly string[] | null, newKeys: readonly string[] | null, newName: string): Record<string, string> {
+  if (raw === undefined) return {};
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) fail("invalid_value", `"${field}" must map old port keys to new ones, like { "number": "progress" }.`);
+  const side = field === "inputMap" ? "input" : "output";
+  for (const [from, to] of Object.entries(raw)) {
+    if (typeof to !== "string") fail("invalid_value", `${field} must send "${from}" to a port key, but got ${JSON.stringify(to)}.`);
+    if (oldKeys && !oldKeys.includes(from)) fail("unknown_port", `${field} names "${from}", but the patch has no ${side} "${from}".${didYouMeanText(didYouMean(from, oldKeys))}`, { hint: `Its ${side}s: ${oldKeys.join(", ") || "none"}.` });
+    if (newKeys && !newKeys.includes(to)) fail("unknown_port", `${field} sends "${from}" to "${to}", but ${newName} has no ${side} "${to}".${didYouMeanText(didYouMean(to, newKeys))}`, { hint: `${newName} ${side}s: ${newKeys.join(", ") || "none"}.` });
+  }
+  return raw as Record<string, string>;
+}
+
+/**
+ * Change a patch's type in place (the editor's Replace With). The node keeps its id, position, custom
+ * name and bypass. Its values, the cables into it and the cables reading its outputs carry over when
+ * the new type has a port with the same key (or the one inputMap / outputMap names) that they still
+ * fit; the rest are dropped and reported. The inverse removes the patch and restores the old one with
+ * every cable. `applied` clears the drops first, so a lenient redo lands on the same document.
+ */
+export function replacePatch(ctx: OpContext, op: OpOf<"replacePatch">): OpOutcome {
+  const component = getTargetComponent(ctx, op.component);
+  const id = resolveId(ctx, op.id);
+  const original = requirePatch(component, id);
+  const np = op.patch as Partial<OpOf<"replacePatch">["patch"]> | undefined;
+  if (!np || typeof np !== "object" || Array.isArray(np) || typeof np.type !== "string") {
+    fail("invalid_op", 'replacePatch needs the new type in "patch", like { "op": "replacePatch", "id": "spring", "patch": { "type": "classicAnimation" } }.');
+  }
+  if (!ctx.lenient) {
+    for (const key of Object.keys(np)) {
+      if (!REPLACE_FIELDS.includes(key)) fail("unknown_field", `replacePatch's "patch" has no field "${key}".${didYouMeanText(didYouMean(key, REPLACE_FIELDS))}`, { hint: REPLACE_HINTS[key] ?? `"patch" takes: ${REPLACE_FIELDS.join(", ")}.` });
+    }
+  }
+  const spec = getPatchSpec(ctx.registry, np.type);
+  if (!spec && !ctx.lenient) failUnknownType(ctx, np.type);
+  const oldSpec = getPatchSpec(ctx.registry, original.type);
+  const sameType = np.type === original.type;
+
+  const node: PatchNode = { type: np.type, inputs: {}, ui: { ...original.ui } };
+  if (original.muted) node.muted = true;
+  if (np.name !== undefined) {
+    if (typeof np.name !== "string") fail("invalid_value", "Patch names must be text.");
+    if (np.name) node.name = np.name;
+  } else if (original.name !== undefined && (sameType || original.name !== oldSpec?.name)) {
+    // A name that only repeated the old type's name ("Pop Animation") would now mislabel the patch.
+    node.name = original.name;
+  }
+  if (np.component !== undefined) node.component = resolveId(ctx, np.component);
+  else if (sameType && original.component !== undefined) node.component = original.component;
+  if (np.type === COMPONENT_PATCH_TYPE || node.component !== undefined) validatePatchComponent(ctx, component, id, node);
+  const settings = np.settings !== undefined ? np.settings : sameType ? original.settings : undefined;
+  if (settings !== undefined && settings !== null) {
+    if (typeof settings !== "object" || Array.isArray(settings)) fail("invalid_value", '"settings" must be an object.');
+    if (Object.keys(settings).length) node.settings = { ...settings };
+  }
+  if (spec && !ctx.lenient) {
+    const variants = resolveNodeVariants(ctx.doc, node, ctx.registry);
+    if (np.typeParam !== undefined) node.typeParam = validateTypeParam(spec, np.typeParam, variants);
+    else if (variants?.length) node.typeParam = original.typeParam !== undefined && (variants as readonly string[]).includes(original.typeParam) ? original.typeParam : variants[0];
+    const range = getInputCountRange(spec);
+    if (np.inputCount !== undefined) node.inputCount = validateInputCount(spec, np.inputCount);
+    else if (range) node.inputCount = Math.min(range.max, Math.max(range.min, original.inputCount ?? range.defaultCount));
+    if (sameType && node.typeParam === original.typeParam && node.inputCount === original.inputCount && node.component === original.component && JSON.stringify(node.settings) === JSON.stringify(original.settings)) {
+      fail("invalid_op", `"${id}" is already a ${spec.name}${original.typeParam ? ` (${original.typeParam})` : ""}, so there's nothing to replace.`, { hint: "To rename it or bypass it, use updatePatch." });
+    }
+  } else {
+    if (np.typeParam !== undefined) node.typeParam = np.typeParam;
+    if (np.inputCount !== undefined) node.inputCount = np.inputCount;
+  }
+
+  let next: Component = { ...component, patches: { ...component.patches, [id]: node } };
+  const doc = withComponent(ctx.doc, next);
+  const oldPorts = resolveNodePorts(ctx.doc, original, ctx.registry);
+  const newPorts = resolveNodePorts(doc, node, ctx.registry);
+  const newName = spec?.name ?? np.type;
+  const strict = !ctx.lenient;
+  const oldInputKeys = [...new Set([...(oldPorts?.inputs.map((p) => p.key) ?? []), ...Object.keys(original.inputs)])];
+  const inputMap = checkPortMap("inputMap", op.inputMap, strict ? oldInputKeys : null, strict ? (newPorts?.inputs.map((p) => p.key) ?? []) : null, newName);
+  const outputMap = checkPortMap("outputMap", op.outputMap, strict ? (oldPorts?.outputs.map((p) => p.key) ?? []) : null, strict ? (newPorts?.outputs.map((p) => p.key) ?? []) : null, newName);
+
+  const dropped: InputEntry[] = [];
+  /** `value` as `address` on the new node stores it, or undefined when that port is missing or doesn't take it. */
+  const fit = (address: string, value: InputValue, hasPort: boolean): InputValue | undefined => {
+    if (!hasPort) return undefined;
+    if (!strict) return value;
+    const target = resolveTarget(doc, next, address, ctx.validate);
+    if (!target.ok) return undefined;
+    const check = checkInputValue(doc, next, target.value, value, ctx.validate);
+    return check.ok ? check.value : undefined;
+  };
+  // Mapped inputs first, so a value moved onto a port wins over one that already had its key.
+  const inputs = Object.entries(original.inputs).sort(([a], [b]) => Number(Object.hasOwn(inputMap, b)) - Number(Object.hasOwn(inputMap, a)));
+  for (const [key, value] of inputs) {
+    const dest = inputMap[key] ?? key;
+    const kept = Object.hasOwn(node.inputs, dest) ? undefined : fit(patchAddress(id, dest), value, !!findPort(newPorts?.inputs, dest));
+    if (kept === undefined) dropped.push({ target: { kind: "patch", id, key }, value });
+    else node.inputs[dest] = kept;
+  }
+  const outgoing = listInputs(component).filter((e) => !(e.target.kind === "patch" && e.target.id === id) && linkSourceId(e.value) === id);
+  for (const e of outgoing) {
+    const a = parseAddress((e.value as { link: string }).link);
+    if (a?.kind !== "patch") continue;
+    const dest = outputMap[a.key] ?? a.key;
+    const kept = fit(targetAddress(e.target), { link: patchAddress(id, dest) }, !!findPort(newPorts?.outputs, dest));
+    if (kept === undefined) dropped.push(e);
+    next = writeInput(next, e.target, kept);
+  }
+  commitComponent(ctx, next);
+  ctx.affected.patches.add(id);
+  for (const e of outgoing) {
+    if (e.target.kind === "patch") ctx.affected.patches.add(e.target.id);
+    if (e.target.kind === "layer") ctx.affected.layers.add(e.target.id);
+  }
+
+  const applied: OpOf<"replacePatch"> = { op: "replacePatch", component: component.id, id, patch: { type: node.type, name: node.name ?? "", settings: node.settings ?? {} } };
+  if (node.typeParam !== undefined) applied.patch.typeParam = node.typeParam;
+  if (node.inputCount !== undefined) applied.patch.inputCount = node.inputCount;
+  if (node.component !== undefined) applied.patch.component = node.component;
+  if (Object.keys(inputMap).length) applied.inputMap = { ...inputMap };
+  if (Object.keys(outputMap).length) applied.outputMap = { ...outputMap };
+  const clears: Op[] = dropped.map((e) => ({ op: "setInput", component: component.id, target: targetAddress(e.target), value: null }));
+  const restore = restorePatchOps(component.id, id, original);
+  return {
+    ids: [id],
+    applied: [...clears, applied],
+    inverse: [{ op: "removePatch", component: component.id, id }, ...restore.add, ...restore.after, ...restoreInputOps(component.id, outgoing)],
+    dropped: dropped.map((e) => ({ to: targetAddress(e.target), value: e.value })),
+  };
 }
 
 export function removePatch(ctx: OpContext, op: OpOf<"removePatch">): OpOutcome {

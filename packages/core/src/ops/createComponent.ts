@@ -91,8 +91,10 @@ export function createComponent(ctx: OpContext, op: OpOf<"createComponent">): Op
     return key;
   };
 
-  // Values flowing in from outside become published inputs.
-  const published = new Map<string, { port: InterfacePort; value: InputValue }>();
+  // Values flowing in from outside become published inputs, one per source and type: targets of
+  // another type fed by the same source (a number driving a position and an on/off) get their own
+  // input, so every inner cable type-checks as it did outside.
+  const published = new Map<string, { port: InterfacePort; value: InputValue }[]>();
   const inner = new Map<string, InputValue>();
   for (const e of entries) {
     if (!isInside(e.target)) continue;
@@ -102,18 +104,19 @@ export function createComponent(ctx: OpContext, op: OpOf<"createComponent">): Op
     if (!outside) continue;
     const address = targetAddress(e.target);
     const sourceKey = isLinkInput(e.value) ? e.value.link : `layer:${(e.value as { layer: Id }).layer}`;
-    let entry = published.get(sourceKey);
+    const target = resolveTarget(ctx.doc, component, address, lenient);
+    const targetPort = target.ok ? target.value.port : undefined;
+    let type: ValueType = isLayerInput(e.value) ? "layer" : (targetPort?.type ?? "any");
+    if (type === "any" && isLinkInput(e.value)) {
+      const src = resolveSource(ctx.doc, component, e.value.link, lenient);
+      if (src.ok && src.value.port) type = src.value.port.type;
+    }
+    const shared = published.get(sourceKey) ?? [];
+    let entry = shared.find((s) => s.port.type === type);
     if (!entry) {
-      const target = resolveTarget(ctx.doc, component, address, lenient);
-      const targetPort = target.ok ? target.value.port : undefined;
-      let type: ValueType = isLayerInput(e.value) ? "layer" : (targetPort?.type ?? "any");
-      if (type === "any" && isLinkInput(e.value)) {
-        const src = resolveSource(ctx.doc, component, e.value.link, lenient);
-        if (src.ok && src.value.port) type = src.value.port.type;
-      }
       const key = freshKey(e.target.key, usedIn);
       entry = { port: { key, name: targetPort?.name ?? key, type }, value: e.value };
-      published.set(sourceKey, entry);
+      published.set(sourceKey, [...shared, entry]);
     }
     inner.set(address, { link: `$in.${entry.port.key}` });
   }
@@ -190,7 +193,7 @@ export function createComponent(ctx: OpContext, op: OpOf<"createComponent">): Op
     name: op.name,
     kind,
     interface: {
-      inputs: Object.fromEntries([...published.values()].map((e) => [e.port.key, e.port])),
+      inputs: Object.fromEntries([...published.values()].flat().map((e) => [e.port.key, e.port])),
       outputs: Object.fromEntries([...outputs.values()].map((p) => [p.key, p])),
     },
     layers: top.map((l) => rewriteLayer(l.layer, true)),
@@ -207,7 +210,7 @@ export function createComponent(ctx: OpContext, op: OpOf<"createComponent">): Op
     for (const id of movedPatches) delete remaining[id];
     next = { ...next, patches: remaining };
   }
-  const instanceInputs: Record<string, InputValue> = Object.fromEntries([...published.values()].map((e) => [e.port.key, e.value]));
+  const instanceInputs: Record<string, InputValue> = Object.fromEntries([...published.values()].flat().map((e) => [e.port.key, e.value]));
   if (kind === "layerComponent") {
     const props: Record<string, InputValue> = { ...instanceInputs };
     if (origin) props.position = [origin[0], origin[1]];

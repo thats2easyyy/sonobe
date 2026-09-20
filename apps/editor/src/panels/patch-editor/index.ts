@@ -66,7 +66,7 @@ export {
   duplicatePatchOps,
   insertPatchOps,
   movePatchOps,
-  replacePatchOps,
+  replacePatchOp,
   spliceOptions,
   splicePatchOps,
   COMMENT_COLORS,

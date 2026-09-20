@@ -80,18 +80,11 @@ export function describeRemovals(summary: RemovalSummary): string {
 }
 
 /**
- * True for batches that can cut cables as a side effect: destructive ops, and updateInterface ops
- * that unpublish ports (a null port, or replace: true).
+ * True for batches that can cut cables as a side effect: destructive ops, and updateInterface (an
+ * unpublished port, or one declared again with a type its cables no longer fit).
  */
 export function hasCascadingOps(ops: readonly Op[] | readonly unknown[]): boolean {
-  return ops.some((op) => {
-    if (isDestructiveOp(op)) return true;
-    const o = op as { op?: unknown; replace?: unknown; inputs?: unknown; outputs?: unknown };
-    if (!o || typeof o !== "object" || o.op !== "updateInterface") return false;
-    if (o.replace === true) return true;
-    const hasNull = (side: unknown) => !!side && typeof side === "object" && Object.values(side).some((v) => v === null);
-    return hasNull(o.inputs) || hasNull(o.outputs);
-  });
+  return ops.some((op) => isDestructiveOp(op) || (!!op && typeof op === "object" && (op as { op?: unknown }).op === "updateInterface"));
 }
 
 export interface UnpublishedPorts {

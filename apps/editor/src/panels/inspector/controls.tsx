@@ -37,6 +37,7 @@ import { VectorField } from "../../ui/VectorField.tsx";
 import { clamp01, parseHexColor, toCssColor, toHex8 } from "../../ui/lib/colorMath.ts";
 import { useLatest, usePointerDrag } from "../../ui/lib/hooks.ts";
 import { decimalsOf } from "../../ui/lib/scrubMath.ts";
+import { pickCopy } from "../patch-editor/api.ts";
 import { acceptAttribute, assetKindsFor, importAssetForField, KIND_NOUNS, type FieldImportResult } from "./assetImport.ts";
 import { formatCopies, formatLiveValue, literalValue, sameInputValue, updateVectorComponent, type FieldUpdate, type InspectorField } from "./model.ts";
 
@@ -805,10 +806,11 @@ function JsonControl({ field, actions, label }: ValueControlProps) {
   );
 }
 
-/** A read-only value (a linked property's current value, or a patch output). */
-export function LiveReadout({ value, type, copies = false }: { value: unknown; type: ValueType; copies?: boolean }) {
-  const color = type === "color" && isColor(value) ? toCssColor(value) : undefined;
-  const text = copies ? formatCopies(value) : formatLiveValue(value, type);
+/** A read-only value (a linked property's current value, or a patch output); `copy` shows that copy of a loop. */
+export function LiveReadout({ value, type, copies = false, copy = null }: { value: unknown; type: ValueType; copies?: boolean; copy?: number | null }) {
+  const shown = copy === null ? value : pickCopy(value, copy).value;
+  const color = type === "color" && isColor(shown) ? toCssColor(shown) : undefined;
+  const text = copies ? formatCopies(value) : formatLiveValue(value, type, copy);
   return (
     <span className="sb-insp-live sb-mono" title={text}>
       {color && (

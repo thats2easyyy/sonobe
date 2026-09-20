@@ -678,6 +678,14 @@ export function compileDocument(doc: SonobeDocument, engineRegistry: EngineRegis
   }
   // Published outputs read only by layers or by getValue still get their pulse flag settled.
   for (const scope of scopes) for (const b of scope.outputBindings.values()) if (b) pulseOf(b);
+  // Pulse-typed layer props (a Text Field's Set Text) fire like pulse inputs, so their bindings need it too.
+  const settleLayerPulses = (layers: readonly CLayer[]): void => {
+    for (const layer of layers) {
+      for (const p of layer.bound) if (p.type === "pulse") pulseOf(p.binding);
+      settleLayerPulses(layer.children);
+    }
+  };
+  for (const scope of scopes) settleLayerPulses(scope.layers);
 
   for (const cnode of nodes) {
     const deps: CNode[] = [];

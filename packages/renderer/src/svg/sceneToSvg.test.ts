@@ -146,6 +146,19 @@ describe("sceneToSvg", () => {
     ]);
   });
 
+  it("draws what a text field holds: typed or set text, else its Text, else the placeholder", () => {
+    const field = (key: string, props: Record<string, unknown>, text?: string) => {
+      const n = node(key, "textField", { placeholder: "Message", ...props }, [0, 0, 200, 44]);
+      if (text !== undefined) n.textField = { text, textRevision: 0, editRevision: 0, editing: false };
+      return n;
+    };
+    const svg = sceneToSvg(frameOf([field("typed", { text: "" }, "Hi there"), field("authored", { text: "Draft" }), field("cleared", { text: "Draft" }, "")]));
+    const drawn = (key: string) => svg.slice(svg.indexOf(`data-layer="${key}"`)).split("</g>")[0]!;
+    expect(drawn("typed")).toContain(">Hi there</tspan>");
+    expect(drawn("authored")).toContain(">Draft</tspan>");
+    expect(drawn("cleared")).toContain(">Message</tspan>");
+  });
+
   it("draws siblings in paint order: zPosition first, and a lifted child stays inside its group", () => {
     const lifted = engineScene([
       layer("a", "rectangle", { size: [40, 40], color: "#FF0000FF", zPosition: 10 }),

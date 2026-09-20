@@ -4,10 +4,11 @@ import { canConnect } from "@sonobe/core";
 import { Handle, Position, useUpdateNodeInternals } from "@xyflow/react";
 import { memo, useEffect, useLayoutEffect, useRef, useState, type MouseEvent, type PointerEvent } from "react";
 import { PortGlyph } from "../../../ui/PortGlyph.tsx";
-import { formatValue, isTruthyState } from "../model/format.ts";
+import { formatValue, isLoopValue, isTruthyState, pickCopy } from "../model/format.ts";
 import { HEADER_HEIGHT } from "../model/geometry.ts";
 import { layerIdOfNode, type PortModel } from "../model/types.ts";
 import { usePatchEditor, useLiveValue, usePulseCount, useUi } from "../state/context.ts";
+import { useWatchedCopy } from "../state/watch.ts";
 import { InlineValue } from "./InlineValue.tsx";
 
 const HOVER_DELAY_MS = 450;
@@ -24,7 +25,7 @@ function stillHovered(el: Element): boolean {
 }
 
 function useHoverCard(nodeId: string, port: PortModel) {
-  const { ui, session, componentId } = usePatchEditor();
+  const { ui, session, componentId, live } = usePatchEditor();
   const token = useRef({});
   useEffect(
     () => () => {
@@ -58,7 +59,10 @@ function useHoverCard(nodeId: string, port: PortModel) {
     onPointerLeave() {
       clearTimeout(hoverTimer);
       hoverOwner = null;
-      if (ui.getState().hoverPort) ui.getState().set({ hoverPort: null });
+      // A card with a loop table stays open so the pointer can move onto it; the card closes itself.
+      const value = port.type === "pulse" ? undefined : live.get(port.side === "out" ? port.address : (port.link ?? ""));
+      const table = isLoopValue(value) && value.items.length > 0 && ui.getState().hoverPort?.address === port.address;
+      if (ui.getState().hoverPort && !table) ui.getState().set({ hoverPort: null });
       const pointer = ui.getState().pointerPort;
       if (pointer && pointer.nodeId === nodeId && pointer.address === port.address) ui.getState().set({ pointerPort: null });
       const hovered = session.selection.getState().hovered;
@@ -143,15 +147,16 @@ const OutputPort = memo(function OutputPort({ nodeId, port }: { nodeId: string; 
   const hover = useHoverCard(nodeId, port);
   const onContextMenu = usePortMenu(nodeId, port);
   const live = useLiveValue(liveEnabled ? port.address : null);
+  const copy = useWatchedCopy(session);
   const armed = useUi((s) => s.armed?.address === port.address);
-  const truthy = isTruthyState(live);
+  const truthy = copy === null ? isTruthyState(live) : pickCopy(live, copy).value === true;
   const onClick = (event: MouseEvent<HTMLDivElement>) => {
     if (!(event.target as Element).closest(".sb-pe-handle")) return;
     event.stopPropagation();
     const label = `${session.document.getState().doc.components[componentId]?.patches[nodeId]?.name ?? nodeId} · ${port.name}`;
     ui.getState().set({ armed: armed ? null : { nodeId, handleId: port.handleId, address: port.address, type: port.type, label } });
   };
-  const text = live === undefined || port.type === "pulse" ? "" : formatValue(live, port.type, { maxText: 10, ...(port.enumOptions ? { enumOptions: port.enumOptions } : {}) });
+  const text = live === undefined || port.type === "pulse" ? "" : formatValue(live, port.type, { maxText: 10, copy, ...(port.enumOptions ? { enumOptions: port.enumOptions } : {}) });
   return (
     <div className="sb-pe-port sb-pe-port--out" data-connected={port.connected || undefined} data-live={truthy || undefined} data-armed={armed || undefined} onClick={onClick} onContextMenu={onContextMenu} {...hover}>
       {text && <span className="sb-pe-port__live sb-tabular">{text}</span>}

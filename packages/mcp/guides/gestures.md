@@ -26,7 +26,7 @@ Related: `animation`, `simulation`, `troubleshooting`
 | `hover`       | the mouse is over a layer (desktop)    | `hovering`, `position`                                                |
 | `keyboard`    | a key is held (desktop)                | `down` (state)                                                        |
 
-Gesture patches only compute values. Nothing moves until you connect an output to a layer property (`drag.position` into `@knob.position`) or into the logic.
+Gesture patches only compute values. Nothing moves until you connect an output to a layer property (`drag.position` into `@knob.position`) or into the logic. Typing comes from a `textField` layer (`value`, `isFocused`, `submitted`); pulse its `setText` to clear what was typed, and `beginEditing` / `endEditing` to focus or dismiss it (`simulation` has an example).
 
 - **Down or Tap?** `down` turns off when the finger lifts: good for "pressed" feedback. When the change should stay, wire `tap` into a Switch's `flip`.
 - **A quick flick that springs back.** `swipe` judges where the finger lifted. Set its `lookahead` (seconds; 0.2 suits cards) to judge where the throw is heading, `translation + velocity × lookahead`, instead of building that math. Its advanced `projected` output is the estimate, for a badge that fades in as a throw nears `minDistance`.

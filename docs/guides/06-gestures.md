@@ -169,6 +169,13 @@ Hover ─▶ Pop Animation (Snappy) ─▶ Transition 0 → 0.15 ─▶ Button .
 
 Keyboard reports whether a key is held. Wire arrow keys into a Counter's Increase and Decrease to page through a carousel. Click the Viewer first so it has keyboard focus. For real typing, use a Text Field layer, which gives you its text, whether it's focused, and a pulse when Return is pressed.
 
+**Tip: clear after send.** A Text Field's Text reaches the field only when it changes. That keeps typing from being overwritten, but it also means setting Text back to empty after Send does nothing: it was already empty. Use the field's **Set Text** pulse instead. Every pulse puts **Text to Set** in the field, and Text to Set is empty unless you fill it in. **Begin Editing** and **End Editing** do the same for focus: pulse Begin Editing from an Edit button to put the cursor in the field, or End Editing to dismiss the keyboard.
+
+```
+Send · Interaction . Tap ─▶ Composer . Set Text        (Text to Set left empty)
+Composer . Submitted ─┘  (merge both with an Or to send on Return too)
+```
+
 ## Why doesn't my tap fire?
 
 Work down this list. Most problems turn up in the first five checks.

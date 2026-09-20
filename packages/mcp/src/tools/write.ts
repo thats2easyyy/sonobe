@@ -10,6 +10,7 @@ import {
   getKnob,
   isLinkInput,
   parseAddress,
+  type DroppedInput,
   type Id,
   type NewLayer,
   type NewPatch,
@@ -127,6 +128,23 @@ function renamedLines(result: HostApplyResult, extra: { summarizeCreated?: boole
   return { lines, data };
 }
 
+/** A dropped value for a result line: "zoomed.on → pop.number" for a cable, "pop.bounciness (8)" for a literal. */
+function droppedText(entry: DroppedInput): string {
+  if (isLinkInput(entry.value)) return `${entry.value.link} → ${entry.to}`;
+  const json = JSON.stringify(entry.value) ?? String(entry.value);
+  return `${entry.to} (${json.length > 24 ? `${json.slice(0, 23)}…` : json})`;
+}
+
+/** What replacePatch ops dropped because the new type had no port for it, or one it didn't fit. */
+function droppedLines(result: HostApplyResult): { lines: string[]; data: Record<string, unknown> } {
+  const dropped = result.results.flatMap((r) => (r.ok ? (r.dropped ?? []) : []));
+  if (!dropped.length) return { lines: [], data: {} };
+  return {
+    lines: [`${result.dryRun ? "Would drop" : "Dropped"} what the new patch type has no fitting port for: ${capped(dropped.map(droppedText), 8)}.${result.dryRun ? "" : " The undo tool brings them back."}`],
+    data: { dropped },
+  };
+}
+
 /** "Unpublished from Swipe Card: inputs swipedLeft, swipedRight; output wentLeft." */
 function unpublishedNote(doc: SonobeDocument, entry: UnpublishedPorts, dryRun: boolean): string {
   const sides = [
@@ -158,6 +176,7 @@ export function writeResult(
   const appliedCount = result.results.filter((r) => r.ok).length;
   const created = createdItems(result.applied);
   const renamed = renamedLines(result, extra);
+  const dropped = droppedLines(result);
   const delta = result.diagnostics;
   const deltaLines = (): string[] => {
     const lines = [
@@ -192,6 +211,7 @@ export function writeResult(
     affected: result.affected,
     diagnostics: delta,
     ...renamed.data,
+    ...dropped.data,
     ...(result.saved ? { saved: true } : {}),
     ...(result.saveError ? { saved: false, saveError: result.saveError } : {}),
     ...(extra.data ?? {}),
@@ -243,7 +263,7 @@ export function writeResult(
     lines.push(`${result.dryRun ? "Would create" : "Created"} ${plural(created.length, "item")}.`);
   else if (created.length)
     lines.push(`${result.dryRun ? "Would create" : "Created"}: ${created.join(", ")}`);
-  lines.push(...renamed.lines);
+  lines.push(...renamed.lines, ...dropped.lines);
   const refs = Object.entries(result.idMap).filter(([ref]) => !extra.summarizeCreated || !/_\d+$/.test(ref));
   if (refs.length)
     lines.push(

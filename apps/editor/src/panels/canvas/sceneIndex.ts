@@ -132,13 +132,10 @@ function isSurface(node: SceneNode): boolean {
   return true;
 }
 
-/**
- * Editable layers under an artboard point: the front-most hit first, then its ancestors. Hidden and
- * locked layers pass clicks through; transparent groups are hit only through their children.
- */
-export function hitLayers(index: CanvasIndex, p: Point): Id[] {
+/** The front-most scene node a click at an artboard point lands on (see hitLayers). */
+function hitNode(index: CanvasIndex, p: Point): SceneNode | null {
   const scene = index.scene;
-  if (!scene) return [];
+  if (!scene) return null;
   const visit = (siblings: readonly SceneNode[]): SceneNode | null => {
     // Front to back in the order the viewer draws them (zPosition first, then layer order).
     const nodes = paintOrder(siblings);
@@ -155,13 +152,31 @@ export function hitLayers(index: CanvasIndex, p: Point): Id[] {
     }
     return null;
   };
-  const hit = visit(scene.roots);
+  return visit(scene.roots);
+}
+
+/**
+ * Editable layers under an artboard point: the front-most hit first, then its ancestors. Hidden and
+ * locked layers pass clicks through; transparent groups are hit only through their children.
+ */
+export function hitLayers(index: CanvasIndex, p: Point): Id[] {
+  const hit = hitNode(index, p);
   const chain: Id[] = [];
   for (let node: SceneNode | undefined = hit ?? undefined; node; node = node.parentKey ? index.byKey.get(node.parentKey) : undefined) {
     const id = index.layerIdForKey(node.key);
     if (id && chain.at(-1) !== id && !chain.includes(id)) chain.push(id);
   }
   return chain;
+}
+
+/** Which loop copy of `layerId` a click at an artboard point lands on ("card#2" → 2); undefined when the layer isn't looped. */
+export function hitCopy(index: CanvasIndex, p: Point, layerId: Id): number | undefined {
+  for (let node: SceneNode | undefined = hitNode(index, p) ?? undefined; node; node = node.parentKey ? index.byKey.get(node.parentKey) : undefined) {
+    if (index.layerIdForKey(node.key) !== layerId) continue;
+    const copy = /#(\d+)$/.exec(node.key.split("/")[0] ?? "");
+    return copy ? Number(copy[1]) : undefined;
+  }
+  return undefined;
 }
 
 /**

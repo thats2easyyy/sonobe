@@ -173,6 +173,35 @@ One loop copy can't be overridden on its own:
 { "simId": "sim_1", "clear": "all" }
 ```
 
+## Example: clear a composer after Send
+
+A Text Field's `text` reaches the field only when it changes, so setting it to `""` again doesn't clear what someone typed. Pulse `setText` instead: every pulse puts `textToSet` (empty unless you set it) in the field. `beginEditing` and `endEditing` focus and dismiss it the same way.
+
+```json tool:apply_ops
+{
+  "ops": [
+    { "op": "addLayer", "layer": { "ref": "composer", "type": "textField", "name": "Composer", "props": { "position": [16, 800], "size": [300, 44] } } },
+    { "op": "addLayer", "layer": { "ref": "send", "type": "rectangle", "name": "Send", "props": { "position": [326, 800], "size": [60, 44] } } },
+    { "op": "addPatch", "patch": { "ref": "tap", "type": "interaction", "name": "Tap Send", "inputs": { "layer": { "layer": "$send" } } } },
+    { "op": "connect", "from": "$tap.tap", "to": "@$composer.setText" }
+  ]
+}
+```
+
+```json tool:sim_reset
+{}
+```
+
+```json tool:sim_dispatch
+{ "simId": "sim_1", "events": [{ "kind": "text", "layer": "composer", "value": "See you at 6" }, { "kind": "tap", "target": "@send", "atMs": 100 }] }
+```
+
+```json tool:sim_get_values
+{ "simId": "sim_1", "targets": ["@composer.value"] }
+```
+
+After the tap, `@composer.value` is `""`, and it is again after every later Send. To send on Return too, merge `@composer.submitted` and the tap with `or`.
+
 ## Limits
 
 - A trace covers up to 60 s, and a step call covers up to 2 minutes.
