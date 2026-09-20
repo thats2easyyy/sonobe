@@ -10,6 +10,7 @@ import {
   createHistory,
   createIdLedger,
   describeHistoryEntry,
+  fileNameKey,
   makeError,
   ProjectFormatError,
   retiredIds,
@@ -215,6 +216,8 @@ export interface DocumentState {
   subscribeRevision: (cb: (state: DocumentState, previous: DocumentState) => void) => () => void;
   /** True for an id that belonged to an item of `component` this session and is gone from it: new items never get it (ARCHITECTURE §3.2). */
   isRetiredId: (component: Id, id: Id) => boolean;
+  /** True for a component id seen this session that no component has now, ignoring case: new components never get it. */
+  isRetiredComponentId: (id: Id) => boolean;
   /** Component id → its retired item ids (only components that have any). */
   retiredIds: () => Record<Id, Id[]>;
   /** Every id seen this session, as JSON (drafts keep it so a restored draft continues the session). */
@@ -751,6 +754,11 @@ export function createDocumentStore(options: DocumentStoreOptions): DocumentStor
       },
 
       isRetiredId: (component, id) => ids.isRetired(get().doc, component, id),
+      isRetiredComponentId: (id) => {
+        const key = fileNameKey(id);
+        const has = (list: Iterable<Id>) => [...list].some((c) => fileNameKey(c) === key);
+        return has(ids.components) && !has(Object.keys(get().doc.components));
+      },
       retiredIds: () => retiredIds(ids, get().doc),
       seenIds: () => seenIdsToJSON(ids),
 
