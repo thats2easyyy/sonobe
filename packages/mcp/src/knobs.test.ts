@@ -473,6 +473,47 @@ describe("knobs in simulations", () => {
     expect(values.structured.values).toEqual({ "$knob.fly_bounce": 5, "$knob.commit_distance": 120 });
   });
 
+  it("names the preset a sim_override switch runs: in the summary, the header, value notes and screenshots", async () => {
+    const c = await deck();
+    await threePresets(c);
+    const simId = String((await c.call("sim_reset", { preset: "Shipped app" })).structured.simId);
+    const flip = await c.call("sim_override", {
+      simId,
+      ops: [{ op: "applyKnobPreset", id: "third" }],
+    });
+    expect(flip.isError, flip.text).toBe(false);
+    expect(flip.text).toContain("ov_1 runs Third (the person runs Proposal)");
+    expect(flip.text.split("\n")[0]).toContain(" · preset Third · 1 override");
+    const read = async (id: string) =>
+      (await c.call("sim_get_values", { simId: id, targets: ["$knob.commit_distance"] })).text;
+    expect(await read(simId)).toContain(
+      "$knob.commit_distance = 100 (Third in this simulation; the person's Proposal has 60)",
+    );
+    const shot = await c.call("get_screenshot", { simId });
+    expect(shot.text).toContain(`Note: ${simId} runs Third, not the person's knobs.`);
+    // A value set in the running preset says so.
+    await c.call("sim_override", {
+      simId,
+      ops: [{ op: "setKnobValue", id: "commit_distance", value: 30, preset: "third" }],
+    });
+    expect(await read(simId)).toContain(
+      "$knob.commit_distance = 30 (overridden in this simulation in Third, was 100 pt)",
+    );
+    // A preset switch without a sim_reset preset, and one back to the person's preset.
+    const alone = String((await c.call("sim_reset", {})).structured.simId);
+    await c.call("sim_override", { simId: alone, ops: [{ op: "applyKnobPreset", id: "third" }] });
+    expect(await read(alone)).toContain(
+      "$knob.commit_distance = 100 (Third in this simulation; the person's Proposal has 60)",
+    );
+    const back = String((await c.call("sim_reset", { preset: "Shipped app" })).structured.simId);
+    const theirs = await c.call("sim_override", {
+      simId: back,
+      ops: [{ op: "applyKnobPreset", id: "proposal" }],
+    });
+    expect(theirs.text.split("\n")[0]).not.toContain("preset");
+    expect(await read(back)).toMatch(/\$knob\.commit_distance = 60$/m);
+  });
+
   it("sim_override tunes knobs in one simulation, locked presets included", async () => {
     const c = await deck();
     await c.call("set_knobs", {
