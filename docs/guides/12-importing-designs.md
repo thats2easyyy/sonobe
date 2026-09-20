@@ -89,6 +89,20 @@ Connect Claude first ([guide 11](11-working-with-claude.md)), open Claude Code i
 
 Claude uses the `import_design` tool, checks the result against the original with a screenshot, and then wires the interaction onto the imported layers. One undo removes the import. For a SwiftUI or UIKit screen, Claude writes SF Symbol placeholders, so on a Mac the imported icons are the real symbols.
 
+## Design on the canvas
+
+In the desktop app, the Assistant can design a screen right where you noticed it's missing. It uses your own Anthropic API key ([guide 11](11-working-with-claude.md)).
+
+1. Click the sparkle in the canvas header (**Design with Claude**), or choose **Redesign with Claude…** on a layer in the Layers panel.
+2. Describe the screen, like "a checkout with Apple Pay and a promo code", and press Return. With a layer selected, describe what should change instead.
+3. Watch Claude write it: the page draws over the artboard as the HTML arrives. When it's done, the preview turns into real layers, named from the page, in one undo step, and the new screen is selected.
+4. Keep going in the same box: "make the header bigger", "try a darker version", or "make the Pay button bounce". **Make it interactive** and **Add knobs** under the result ask Claude to wire its buttons, or to turn its colors, corner radius and spacing into knobs you can tune ([guide 13](13-knobs-and-presets.md)).
+
+- **It matches what's there.** Claude gets the colors, fonts, sizes and corner radii your screens already use. Choose **Match my code…** and pick your app's folder, and it can read your theme and token files too. It reads only text files there, skips hidden files, `.env` files and keys, and can't change anything. What it reads goes to Anthropic's API.
+- **Where it lands.** A new screen goes in front, at the top left of the artboard, so it covers the screen behind it in the viewer too. **Send to Back** moves it behind.
+- **Replacing asks first.** When Claude wants to replace a screen you didn't pick, or one you changed since Claude made it, Sonobe asks you and names the layers that would go. **Undo** in the box, or ⌘Z, steps back.
+- **No API key?** **Copy for Claude Code** copies your request, with your screens' styles, for Claude Code in your app's folder. In the browser editor, copy the prompt for Claude, then paste the HTML it writes into File → Import Design.
+
 ## What you get
 
 | On the page | In Sonobe |
@@ -117,7 +131,7 @@ An imported screen is just layers, so everything in [02 ISAT](02-isat.md) applie
 3. Add a Switch, a Pop Animation and a Transition, and connect the Transition to the button's Scale, like the like button in guide 02.
 4. Tap the button in the viewer.
 
-When the design changes in code, import it again and pick **Replace** for the earlier screen. Your interactions stay wired to the layers it finds again, and the import names any connection it had to drop because its layer is gone.
+When the design changes in code, import it again and pick **Replace** for the earlier screen. Your interactions stay wired to the layers it finds again, and the import names any connection it had to drop because its layer is gone, and any layer of the old screen it didn't find again.
 
 Long pages already scroll: drag the page in the viewer. The Scroll patch Sonobe added is named after the layer it moves ("Scroll Content"), and its Y output is handy for headers that shrink or fade as you scroll ([06 Gestures](06-gestures.md)).
 
