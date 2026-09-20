@@ -115,9 +115,10 @@ export function knobRow(set: KnobSet, knob: Knob, partner: Id | null, uses: numb
 
 /**
  * Rows in panel order, grouped: knobs without a group first, then groups in the order of their first
- * knob. `onlyDifferences` keeps the knobs whose value differs from the partner's.
+ * knob. `onlyDifferences` keeps the knobs whose value differs from the partner's, and the ones in
+ * `keep` (a row being tuned or holding focus stays until the person leaves it).
  */
-export function knobGroups(set: KnobSet, uses: ReadonlyMap<Id, readonly unknown[]>, partner: Id | null, onlyDifferences = false): KnobGroupModel[] {
+export function knobGroups(set: KnobSet, uses: ReadonlyMap<Id, readonly unknown[]>, partner: Id | null, onlyDifferences = false, keep: ReadonlySet<Id> = new Set()): KnobGroupModel[] {
   const ungrouped: KnobGroupModel = { name: null, rows: [] };
   const groups = new Map<string, KnobGroupModel>();
   for (const knob of set.knobs) {
@@ -128,7 +129,7 @@ export function knobGroups(set: KnobSet, uses: ReadonlyMap<Id, readonly unknown[
       groups.set(knob.group, group);
     }
     const row = knobRow(set, knob, partner, uses.get(knob.id)?.length ?? 0);
-    if (onlyDifferences && partner && !row.differs) continue;
+    if (onlyDifferences && partner && !row.differs && !keep.has(knob.id)) continue;
     group.rows.push(row);
   }
   return [ungrouped, ...groups.values()].filter((g) => g.rows.length > 0);

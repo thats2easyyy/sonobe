@@ -1,4 +1,4 @@
-import { useRef, useState, type CSSProperties, type KeyboardEvent, type PointerEvent } from "react";
+import { useEffect, useRef, useState, type CSSProperties, type KeyboardEvent, type PointerEvent } from "react";
 import { cx } from "./lib/cx.ts";
 import { useLatest } from "./lib/hooks.ts";
 import { clamp, decimalsOf, roundTo, stepMultiplier } from "./lib/scrubMath.ts";
@@ -57,6 +57,16 @@ export function Slider({ value, min, max, step, onChange, onCommit, ticks = [], 
   const latest = useLatest({ value, onChange, onCommit, min, max, baseStep });
   const overflow = value > max ? "above" : value < min ? "below" : undefined;
   const text = valueText ? valueText(value) : String(roundTo(value, 6));
+
+  // Removed mid-drag, it never sees the pointer come up: end the gesture here instead.
+  useEffect(
+    () => () => {
+      const g = drag.current;
+      drag.current = null;
+      if (g) latest.current.onCommit?.(g.last);
+    },
+    [latest],
+  );
 
   const valueAt = (clientX: number, altKey: boolean) => {
     const rect = trackRef.current?.getBoundingClientRect();
