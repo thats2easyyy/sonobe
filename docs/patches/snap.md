@@ -23,7 +23,7 @@ Snap works like a magnet: it moves a value to the nearest allowed spot. Use it f
 
 ## Tips
 - Snap only on release: use If / Else to pass the raw position while the finger is down and Snap's output after, then feed a Spring Animation.
-- **Deceleration** (advanced) matches Scroll's momentum. Normal carries a flick about half a second of travel; Fast stops sooner.
+- **Deceleration** (advanced) matches Scroll's momentum. Normal carries a flick about half a second of travel and Fast about a tenth, the same projection as Swipe's Lookahead at 0.5 and 0.1.
 - Keep the result in bounds with Clamp, such as between the first and last page.
 
 ## Inputs

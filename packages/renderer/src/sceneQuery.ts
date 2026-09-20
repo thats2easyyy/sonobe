@@ -1,6 +1,7 @@
 /** Read-only queries over a rendered SceneFrame (hover cursor, overlays). */
 
 import type { SceneFrame, SceneNode } from "@sonobe/engine";
+import { paintOrder } from "@sonobe/engine";
 import { isMat4, unprojectPoint } from "./matrix.ts";
 
 export interface SceneHit {
@@ -18,7 +19,8 @@ function containsPoint(node: SceneNode, x: number, y: number): [number, number] 
   return lx >= -slop && ly >= -slop && lx <= node.width + slop && ly <= node.height + slop ? local : null;
 }
 
-function visit(nodes: readonly SceneNode[], x: number, y: number, clipped: boolean): SceneHit[] | null {
+function visit(siblings: readonly SceneNode[], x: number, y: number, clipped: boolean): SceneHit[] | null {
+  const nodes = paintOrder(siblings);
   for (let i = nodes.length - 1; i >= 0; i--) {
     const node = nodes[i]!;
     if (node.visible === false || node.props?.enabled === false) continue;
@@ -32,8 +34,8 @@ function visit(nodes: readonly SceneNode[], x: number, y: number, clipped: boole
 }
 
 /**
- * Front-most node under a prototype-space point, followed by its ancestors (bubbling order).
- * Skips hidden layers, layers with hitTest off or opacity 0, and respects clipping groups.
+ * Front-most node under a prototype-space point (in paint order, like the engine's hit test),
+ * followed by its ancestors (bubbling order). Skips hidden layers, layers with hitTest off or opacity 0, and respects clipping groups.
  */
 export function findNodesAt(frame: SceneFrame, x: number, y: number): SceneHit[] {
   return visit(frame.roots, x, y, false) ?? [];

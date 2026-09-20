@@ -27,6 +27,10 @@ export interface Host {
   strokeSvg: SVGSVGElement | null;
   overlay: HTMLElement | null;
   children: Host[];
+  /** z-index rank among siblings when zPosition reorders them ("" when they draw in document order). */
+  zIndex: string;
+  /** Children carry z-index ranks, so `body` is isolated and the ranks stay inside it. */
+  stacked: boolean;
   /** Render generation in which this host was last visited. */
   gen: number;
   /** Drawer-private state. */

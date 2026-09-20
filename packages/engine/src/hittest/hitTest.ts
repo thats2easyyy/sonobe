@@ -1,6 +1,7 @@
 /**
- * Hit testing over a SceneFrame: front to back, through each node's world transform, with
- * touches bubbling to ancestors. See ARCHITECTURE.md §5.5 and docs/research/semantics.md §8.3.
+ * Hit testing over a SceneFrame: front to back in paint order (paintOrder.ts), through each node's
+ * world transform, with touches bubbling to ancestors. See ARCHITECTURE.md §5.5 and
+ * docs/research/semantics.md §8.3.
  *
  * `worldTransform` maps a node's local space (origin at its top-left, in points) to prototype
  * coordinates, so a node's bounds are [0, width] × [0, height] in local space.
@@ -8,6 +9,7 @@
 
 import { axisScales, planeInverse, transformPoint } from "../math/matrix.ts";
 import type { SceneNode } from "../types.ts";
+import { paintOrder } from "./paintOrder.ts";
 
 /** Layers at or below this opacity are treated as invisible to touches. */
 export const HIT_OPACITY_EPSILON = 1e-5;
@@ -48,33 +50,12 @@ export function containsPoint(node: SceneNode, x: number, y: number, slop = 0): 
   return local[0] >= minX && local[0] <= maxX && local[1] >= minY && local[1] <= maxY;
 }
 
-/** Siblings front-most first: higher zPosition wins, then later in the list. */
-function frontToBack(nodes: readonly SceneNode[]): SceneNode[] {
-  let layered = false;
-  for (const n of nodes) {
-    if (typeof n.props.zPosition === "number" && n.props.zPosition !== 0) {
-      layered = true;
-      break;
-    }
-  }
-  const order = nodes.map((node, index) => ({ node, index }));
-  if (layered) {
-    const z = (n: SceneNode) =>
-      typeof n.props.zPosition === "number" && Number.isFinite(n.props.zPosition)
-        ? n.props.zPosition
-        : 0;
-    order.sort((a, b) => z(a.node) - z(b.node) || a.index - b.index);
-  }
-  const out: SceneNode[] = [];
-  for (let i = order.length - 1; i >= 0; i--) out.push(order[i]!.node);
-  return out;
-}
-
 function visit(node: SceneNode, x: number, y: number): SceneNode[] | null {
   if (!isTouchable(node)) return null;
   if (node.clip && !containsPoint(node, x, y)) return null;
-  for (const child of frontToBack(node.children)) {
-    const chain = visit(child, x, y);
+  const children = paintOrder(node.children);
+  for (let i = children.length - 1; i >= 0; i--) {
+    const chain = visit(children[i]!, x, y);
     if (chain) {
       if (isInteractive(node)) chain.push(node);
       return chain;
@@ -93,8 +74,9 @@ function visit(node: SceneNode, x: number, y: number): SceneNode[] | null {
  * and Color Fills let touches pass through but their children can still be hit.
  */
 export function hitTest(roots: readonly SceneNode[], x: number, y: number): SceneNode[] {
-  for (const root of frontToBack(roots)) {
-    const chain = visit(root, x, y);
+  const order = paintOrder(roots);
+  for (let i = order.length - 1; i >= 0; i--) {
+    const chain = visit(order[i]!, x, y);
     if (chain) return chain;
   }
   return [];

@@ -4,6 +4,7 @@
  *
  * - layers nest like the scene, each placed with the transform its worldTransform implies (3D
  *   rotations and perspective flatten to 2D), with opacity, blend mode and filters on the group
+ * - siblings draw in paint order: zPosition first, then layer order (the engine's paintOrder)
  * - fills, gradients (linear, radial, angular), corner radii and smooth corners, clipping via clipPath
  * - strokes inside, centered or outside the edge; shape layers with trimmed strokes
  * - shadows as box shadows on visible fills, else drop shadows of the content; blur and layer effects
@@ -16,6 +17,7 @@
 
 import type { Color, GradientStop, GradientValue } from "@sonobe/core";
 import type { SceneFrame, SceneNode } from "@sonobe/engine";
+import { paintOrder } from "@sonobe/engine";
 import { squirclePath, type CornerRadii } from "../squircle.ts";
 import { graphemes } from "../textMeasurer.ts";
 import { parseColor, propReader, readGradient, readLayerRef, readNumber, readShapePath, readVec, type PropReader } from "../values.ts";
@@ -700,7 +702,7 @@ function renderNode(ctx: Ctx, node: SceneNode, parentWorld: Affine, cloneRoot = 
   }
 
   const geometry = shape === "none" ? null : boxGeometry(shape, w, h, radii, smoothing);
-  let inner = content + children.map((child) => renderNode(ctx, child, world)).join("");
+  let inner = content + paintOrder(children).map((child) => renderNode(ctx, child, world)).join("");
   if (clip && geometry && inner) {
     const id = newId(ctx, "clip");
     ctx.defs.push(el("clipPath", { id }, geometryEl(geometry, {})));
@@ -782,7 +784,7 @@ export function renderSceneSvg(frame: SceneFrame, options: SceneToSvgOptions = {
     ctx.byKey.set(n.key, n);
     if (!ctx.byLayer.has(n.layerId)) ctx.byLayer.set(n.layerId, n);
   });
-  const content = (frame.roots ?? []).map((n) => renderNode(ctx, n, IDENTITY_AFFINE)).join("");
+  const content = paintOrder(frame.roots ?? []).map((n) => renderNode(ctx, n, IDENTITY_AFFINE)).join("");
   const background = options.background === undefined ? parseColor(frame.background) : options.background === null ? null : parseColor(options.background);
   const backdrop = background ? paintAttrs(background, "fill") : null;
   const svg =

@@ -66,6 +66,7 @@ To poke at one copy, use a `#n` target in the simulator: `@card#2`, or read `car
 
 - **Buttons.** Add ✕ and ♥ buttons that throw the top card. Feed their taps into Card Gone's Turn On through If / Else patches gated by `is_top.output`, and into Swiped Which Way.
 - **Up to super like.** Set Swipe's Axis to Any and add a third fly-out direction with a y component.
+- **Quick flicks.** Set Swipe Card's Lookahead to 0.2, so a short, fast flick throws the card as well as a long drag. Its Projected output says where the throw is heading.
 - **Undo.** Keep a Counter of throws. On undo, turn off the Card Gone whose index equals `top_index.output` + 1.
 - **More cards.** Raise the Loop count and add items to each Loop Builder. The graph doesn't change.
 

@@ -24,6 +24,8 @@ Main (402 × 874)
 
 Touches go the other way. When a finger lands, Sonobe checks layers from front to back, and the front-most layer under the finger gets the touch. The touch then bubbles up to that layer's parents, so both Card 1 and Feed hear about a tap on Card 1.
 
+Z Position (in the Transform section) changes that order without moving the layer in the list. Among siblings, a higher Z Position draws in front and gets touches first, and equal values keep the list order. It only reorders layers inside the same group: a lifted card never draws over the Tab Bar unless its group does. Drive it from a patch to lift a card while you drag it.
+
 The layer types you'll use most:
 
 | Layer | Use it for |
@@ -109,6 +111,8 @@ Width Mode and Height Mode decide how big a layer is inside its parent:
 Text layers default to Auto, so the layer is always exactly as big as its words.
 
 Positioning is the other layout setting on a child. A Relative child follows its parent's layout. An Absolute child ignores the layout and uses its own Position, which is what you want for a badge on a tab icon or a label over a photo.
+
+Padding only pushes in the children that follow the layout. An Absolute child ignores it too: its Position counts from the parent's top-left corner, and Percent and Grow use the parent's whole size, as in CSS. So a photo set to 100% × 100% at 0, 0 covers its card edge to edge, even when the card has padding for its caption.
 
 Layout runs after patches, so a patch that reads a measured size, like Layer Info or a text layer's Text Size, sees the new value on the next frame.
 
