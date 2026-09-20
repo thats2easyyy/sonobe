@@ -55,6 +55,20 @@ export {
   type ToolWorkOptions,
 } from "./progress.ts";
 export {
+  ANONYMOUS_CLIENT,
+  CLIENT_HEADER,
+  clientLabel,
+  createClientRegistry,
+  isClientId,
+  parseHello,
+  type ClientRegistry,
+  type ClientRegistryOptions,
+  type McpClientHello,
+  type McpClientState,
+  type McpClientStatus,
+  type McpClientVia,
+} from "./clients.ts";
+export {
   createHttpHandler,
   documentResourceUris,
   publishDocumentChange,

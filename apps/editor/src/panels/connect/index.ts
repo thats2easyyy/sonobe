@@ -1,7 +1,8 @@
 /**
  * Connect Claude: bring your own Claude plan over MCP (Claude Desktop or Claude Code; no API key,
- * no claude.ai login). A dialog with MCP status, setup commands for this machine, example prompts,
- * and privacy notes; a toolbar Claude button; an app-wide open store; and the palette command.
+ * no claude.ai login). A dialog with MCP status and the connected sessions, setup commands for this
+ * machine, example prompts, and privacy notes; a toolbar Claude button that's green only while a
+ * session is connected; an app-wide open store; and the palette command.
  *
  * Integration (inside <EditorProvider> and <CommandProvider>):
  *
@@ -27,20 +28,28 @@ export { useMcpStatus, type McpStatusOptions, type McpStatusSource, type McpStat
 export { claudeDesktopBundle, detectRepoPath, IS_DEV_BUILD, type DesktopBundleInfo } from "./buildInfo.ts";
 export {
   claudeCodeCommand,
+  claudeCodeRemoveCommand,
   claudeDesktopConfig,
   claudeDesktopConfigPath,
   CLI_ENTRY,
+  connectedSessions,
   EXAMPLE_PROMPTS,
+  folderName,
+  isHeadlessSpec,
   joinRepoPath,
   mcpLaunchSpec,
   parseMcpStatus,
+  relativeTime,
   repoPathFromDevUrl,
+  sessionSummary,
   shellForPlatform,
   shellQuote,
   tildePath,
+  type ClaudeCodeScope,
   type LaunchMode,
   type LaunchOptions,
   type LaunchSpec,
+  type McpSessionInfo,
   type McpStatusInfo,
   type PromptGroup,
   type ShellFlavor,

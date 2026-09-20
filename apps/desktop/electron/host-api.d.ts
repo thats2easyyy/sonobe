@@ -124,6 +124,37 @@ export interface McpStatus {
    * when this build has none. Connect Claude uses it so Claude launches the relay by full path.
    */
   cliPath: string | null;
+  /**
+   * MCP clients that talked to the app recently, most recently active first (@sonobe/mcp clients.ts).
+   * A running server with no connected client means nothing is connected, whatever else is set up.
+   */
+  clients: McpClientSession[];
+  /** When the main process read `clients` (epoch ms), for "active 12 s ago". */
+  checkedAt: number;
+  /** The app's version, to spot sessions running an older relay. */
+  version: string;
+}
+
+/** One MCP client session, as the app sees it. */
+export interface McpClientSession {
+  /** The relay's per-process id, or "http" for the one row of clients without the relay. */
+  id: string;
+  /** "Claude Code", "Claude Desktop", the client's own name, or "Unidentified MCP client". */
+  label: string;
+  name: string | null;
+  version: string | null;
+  /** The session's project folder (CLAUDE_PROJECT_DIR or the relay's working folder). */
+  folder: string | null;
+  /** relay: `sonobe mcp`, with hellos and heartbeats. http: a client without the relay (no id). */
+  via: "relay" | "http";
+  /** connected: heard from recently. idle: a client without the relay, quiet for 2 minutes. gone: left. */
+  state: "connected" | "idle" | "gone";
+  connectedAt: number;
+  lastSeenAt: number;
+  lastActivityAt: number | null;
+  lastTool: string | null;
+  toolCalls: number;
+  relayVersion: string | null;
 }
 
 /** The phone preview server (LAN web player). */
@@ -267,6 +298,8 @@ export interface SonobeHost {
 
   rpc: SonobeHostRpc;
   getMcpStatus(): Promise<McpStatus>;
+  /** MCP status changes: a session connected, called a tool, or left. Returns unsubscribe. */
+  onMcpStatus(cb: (status: McpStatus) => void): () => void;
 
   /** Phone preview server state (for the viewer's "On phone" QR panel). */
   getPreviewStatus(): Promise<PreviewStatus>;

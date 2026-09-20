@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { PassThrough } from "node:stream";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { runRelay } from "./relay.ts";
+import { runRelay, sessionFolder } from "./relay.ts";
 
 let home: string;
 
@@ -18,14 +18,37 @@ afterEach(async () => {
 
 type AppHandler = (message: Record<string, unknown>, signal: AbortSignal) => Promise<Response>;
 
-/** The relay over a fake app: /health answers, /mcp POSTs go to `app`. */
-function relay(app: AppHandler) {
+/** What the fake app saw besides /health: every request's method, path, sonobe-client header and body. */
+interface Seen {
+  method: string;
+  path: string;
+  client: string | null;
+  body: Record<string, unknown> | null;
+}
+
+interface RelayTestOptions {
+  /** Answers /clients (default: 204). */
+  clients?: (method: string) => Response;
+  env?: Record<string, string | undefined>;
+  cwd?: string;
+  heartbeatMs?: number;
+}
+
+/** The relay over a fake app: /health answers, /clients answers `clients`, /mcp POSTs go to `app`. */
+function relay(app: AppHandler, options: RelayTestOptions = {}) {
   const stdin = new PassThrough();
   const lines: Record<string, unknown>[] = [];
+  const seen: Seen[] = [];
+  const errors: string[] = [];
   let buffer = "";
   const fetchImpl = (async (input: string | URL, init?: RequestInit) => {
-    if (String(input).endsWith("/health")) return Response.json({ ok: true, version: "9.9.9" });
-    return app(JSON.parse(String(init?.body)) as Record<string, unknown>, init!.signal!);
+    const url = new URL(String(input));
+    if (url.pathname === "/health") return Response.json({ ok: true, version: "9.9.9" });
+    const body = init?.body ? (JSON.parse(String(init.body)) as Record<string, unknown>) : null;
+    const headers = new Headers(init?.headers);
+    seen.push({ method: init?.method ?? "GET", path: url.pathname, client: headers.get("sonobe-client"), body });
+    if (url.pathname.startsWith("/clients")) return options.clients?.(init?.method ?? "GET") ?? new Response(null, { status: 204 });
+    return app(body!, init!.signal!);
   }) as typeof fetch;
   const done = runRelay({
     home,
@@ -40,11 +63,16 @@ function relay(app: AppHandler) {
         }
       },
     },
-    stderr: { write: () => undefined },
+    stderr: { write: (s: string) => errors.push(s) },
     fetch: fetchImpl,
+    env: options.env ?? {},
+    cwd: options.cwd ?? "/",
+    version: "0.1.0-test",
+    randomId: () => "11111111-aaaa-4bbb-8ccc-000000000001",
+    ...(options.heartbeatMs !== undefined ? { heartbeatMs: options.heartbeatMs } : {}),
   });
   const send = (message: Record<string, unknown>) => stdin.write(`${JSON.stringify({ jsonrpc: "2.0", ...message })}\n`);
-  return { stdin, lines, done, send };
+  return { stdin, lines, seen, errors, done, send };
 }
 
 const call = (id: number, name = "import_design") => ({ id, method: "tools/call", params: { name, arguments: {}, _meta: { progressToken: `p${id}` } } });
@@ -127,5 +155,83 @@ describe("sonobe mcp relay: long calls", () => {
     expect(r.lines[0]!.id).toBe(5);
     expect(error.message).toContain("didn't answer tools/call import_design within 5 minutes");
     expect(error.message).not.toContain("Lost connection");
+  });
+});
+
+/** A fake app that answers requests with an empty result and notifications with 202. */
+const answering: AppHandler = async (message) =>
+  message.id === undefined
+    ? new Response(null, { status: 202 })
+    : Response.json({ jsonrpc: "2.0", id: message.id, result: message.method === "initialize" ? { protocolVersion: "2025-11-25", capabilities: {}, serverInfo: { name: "sonobe", version: "9.9.9" } } : {} });
+
+const INITIALIZE = { id: 0, method: "initialize", params: { protocolVersion: "2025-11-25", capabilities: {}, clientInfo: { name: "claude-code", title: "Claude Code", version: "2.1.278" } } };
+const ID = "11111111-aaaa-4bbb-8ccc-000000000001";
+
+describe("sonobe mcp relay: sessions", () => {
+  it("names its session on every POST and says hello with the client and folder", async () => {
+    const r = relay(answering, { env: { CLAUDE_PROJECT_DIR: "/Users/me/placemark" }, cwd: "/Users/me/placemark/src" });
+    r.send(INITIALIZE);
+    r.send({ method: "notifications/initialized" });
+    r.send(call(1, "list_documents"));
+    await until(() => r.lines.length === 2);
+    r.stdin.end();
+    await r.done;
+    const mcp = r.seen.filter((s) => s.path === "/mcp");
+    expect(mcp.map((s) => s.body?.method)).toEqual(["initialize", "notifications/initialized", "tools/call"]);
+    expect(mcp.every((s) => s.client === ID)).toBe(true);
+    const hellos = r.seen.filter((s) => s.path === "/clients" && s.method === "POST");
+    expect(hellos[0]!.body).toEqual({ id: ID, name: "claude-code", title: "Claude Code", version: "2.1.278", folder: "/Users/me/placemark", relay: { version: "0.1.0-test" } });
+    // The hello goes out before the first tool call, so the app knows whose call it is.
+    expect(r.seen.findIndex((s) => s.path === "/clients")).toBeLessThan(r.seen.findIndex((s) => s.body?.method === "tools/call"));
+    // Goodbye when stdin closes.
+    expect(r.seen.at(-1)).toMatchObject({ method: "DELETE", path: `/clients/${ID}` });
+  });
+
+  it("learns a 2026-07-28 client's name from its request metadata, and heartbeats", async () => {
+    const r = relay(answering, { cwd: "/Users/me/app", heartbeatMs: 15 });
+    const meta = { "io.modelcontextprotocol/protocolVersion": "2026-07-28", "io.modelcontextprotocol/clientInfo": { name: "claude-code", version: "2.2.0" } };
+    r.send({ id: 1, method: "server/discover", params: { _meta: meta } });
+    await until(() => r.seen.filter((s) => s.path === "/clients").length >= 3);
+    r.stdin.end();
+    await r.done;
+    const hellos = r.seen.filter((s) => s.path === "/clients" && s.method === "POST");
+    expect(hellos.length).toBeGreaterThanOrEqual(2);
+    expect(hellos.every((h) => h.body?.name === "claude-code" && h.body?.version === "2.2.0" && h.body?.folder === "/Users/me/app")).toBe(true);
+  });
+
+  it("keeps relaying for an older app without /clients, with one line on stderr", async () => {
+    const notFound = () => Response.json({ jsonrpc: "2.0", id: null, error: { code: -32000, message: "Not found" } }, { status: 404 });
+    const r = relay(answering, { clients: notFound, heartbeatMs: 10 });
+    r.send(INITIALIZE);
+    r.send(call(1, "list_documents"));
+    await until(() => r.lines.length === 2);
+    await new Promise((resolve) => setTimeout(resolve, 40));
+    r.stdin.end();
+    await r.done;
+    expect(r.lines.map((l) => l.id)).toEqual([0, 1]);
+    // One hello, no heartbeats after the 404, and no goodbye.
+    expect(r.seen.filter((s) => s.path.startsWith("/clients"))).toHaveLength(1);
+    expect(r.errors.filter((e) => e.includes("doesn't list connected sessions"))).toHaveLength(1);
+  });
+
+  it("says why when the app turns the hello down", async () => {
+    const rejected = () => Response.json({ jsonrpc: "2.0", id: null, error: { code: -32602, message: '"folder" must be an absolute path' } }, { status: 400 });
+    const r = relay(answering, { clients: rejected });
+    r.send(INITIALIZE);
+    await until(() => r.lines.length === 1);
+    r.stdin.end();
+    await r.done;
+    expect(r.errors.join("")).toContain(`didn't accept this session's hello (HTTP 400: "folder" must be an absolute path)`);
+  });
+});
+
+describe("sessionFolder", () => {
+  it("prefers CLAUDE_PROJECT_DIR, then the working folder, but never / or home", () => {
+    expect(sessionFolder({ CLAUDE_PROJECT_DIR: "/Users/me/placemark" }, "/tmp", "/Users/me")).toBe("/Users/me/placemark");
+    expect(sessionFolder({}, "/Users/me/placemark/", "/Users/me")).toBe("/Users/me/placemark");
+    expect(sessionFolder({ CLAUDE_PROJECT_DIR: " " }, "/Users/me/app", "/Users/me")).toBe("/Users/me/app");
+    expect(sessionFolder({}, "/", "/Users/me")).toBeUndefined();
+    expect(sessionFolder({}, "/Users/me", "/Users/me")).toBeUndefined();
+    expect(sessionFolder({ CLAUDE_PROJECT_DIR: "relative" }, undefined, "/Users/me")).toBeUndefined();
   });
 });

@@ -8,9 +8,12 @@ import { fileURLToPath } from "node:url";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import {
+  createClientRegistry,
   createHeadlessHost,
   createHttpHandler,
+  parseHello,
   TOOL_NAMES,
+  type ClientRegistry,
   type HeadlessHost,
   type NodeMcpHandler,
 } from "@sonobe/mcp";
@@ -253,6 +256,7 @@ describe("sonobe main.ts end to end", () => {
   let handler: NodeMcpHandler;
   let server: Server;
   let home: string;
+  let clients: ClientRegistry;
   const token = "test-token-abc";
 
   beforeAll(async () => {
@@ -261,7 +265,8 @@ describe("sonobe main.ts end to end", () => {
     home = path.join(base, "home");
     host = createHeadlessHost();
     await host.createDocument({ path: project, template: "photo-zoom" });
-    handler = createHttpHandler(host, { version: "9.9.9" });
+    clients = createClientRegistry();
+    handler = createHttpHandler(host, { version: "9.9.9", clients });
     server = createServer((req, res) => {
       if (req.headers.authorization !== `Bearer ${token}`) {
         res
@@ -273,6 +278,25 @@ describe("sonobe main.ts end to end", () => {
         res
           .writeHead(200, { "content-type": "application/json" })
           .end('{"ok":true,"version":"9.9.9"}');
+        return;
+      }
+      // The desktop's /clients route, in short (apps/desktop/electron/mcp-server.ts has the real one).
+      if (req.url?.startsWith("/clients")) {
+        if (req.method === "DELETE") {
+          clients.bye(req.url.slice("/clients/".length));
+          res.writeHead(204).end();
+          return;
+        }
+        let body = "";
+        req.on("data", (chunk: Buffer) => (body += chunk.toString()));
+        req.on("end", () => {
+          const hello = parseHello(JSON.parse(body));
+          if (typeof hello === "string") res.writeHead(400).end(hello);
+          else {
+            clients.hello(hello);
+            res.writeHead(204).end();
+          }
+        });
         return;
       }
       void handler(req, res);
@@ -352,6 +376,32 @@ describe("sonobe main.ts end to end", () => {
       "relayed_dot",
     );
     await client.close();
+  });
+
+  it("tells the app which session it is, and attributes its edits by the client's name", async () => {
+    const folder = path.join(path.dirname(project), "placemark");
+    const transport = new StdioClientTransport({
+      command: process.execPath,
+      args: [MAIN, "mcp"],
+      env: childEnv({ SONOBE_HOME: home, CLAUDE_PROJECT_DIR: folder }),
+      stderr: "pipe",
+    });
+    // Over stateless HTTP, initialize's clientInfo is gone by tools/call; the relay's hello names it.
+    const client = new Client({ name: "cursor-agent", version: "1.2.3" });
+    await client.connect(transport);
+    const r = await client.callTool({
+      name: "add_layers",
+      arguments: { layers: [{ type: "oval", name: "Session Dot" }] },
+    });
+    expect(r.isError).toBeFalsy();
+    const [latest] = await host.history.list({ limit: 1 });
+    expect(latest?.author).toEqual({ kind: "agent", name: "Cursor Agent" });
+    const session = clients.list().find((c) => c.folder === folder);
+    expect(session).toMatchObject({ label: "Cursor Agent", version: "1.2.3", via: "relay", state: "connected", toolCalls: 1, lastTool: "add_layers" });
+    await client.close();
+    const end = Date.now() + 3000;
+    while (clients.get(session!.id)?.state !== "gone" && Date.now() < end) await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(clients.get(session!.id)?.state).toBe("gone");
   });
 
   it("relays 2026-07-28 requests with Mcp-* headers", async () => {

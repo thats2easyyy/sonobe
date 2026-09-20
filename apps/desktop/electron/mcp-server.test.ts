@@ -3,6 +3,7 @@ import { mkdtemp, readFile, rm, stat } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { createClientRegistry } from "@sonobe/mcp";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { bearerMatches, isAllowedHost, isAllowedOrigin, startMcpServer, type McpConnectionFile, type McpServerHandle } from "./mcp-server.ts";
 
@@ -141,6 +142,35 @@ describe("startMcpServer", () => {
     const put = await send(s.port, { method: "PUT", path: "/mcp", headers: auth });
     expect(put.status).toBe(405);
     expect(put.headers.allow).toBe("GET, POST, DELETE");
+  });
+
+  it("takes the relay's hello and goodbye on /clients, behind the token", async () => {
+    const clients = createClientRegistry();
+    const s = await start({ clients });
+    const auth = { authorization: `Bearer ${s.token}`, "content-type": "application/json" };
+    const id = "11111111-aaaa-4bbb-8ccc-000000000001";
+    const hello = JSON.stringify({ id, name: "claude-code", title: "Claude Code", folder: "/Users/me/placemark" });
+    expect((await send(s.port, { method: "POST", path: "/clients", headers: { "content-type": "application/json" }, body: hello })).status).toBe(401);
+    expect(clients.list()).toEqual([]);
+
+    expect((await send(s.port, { method: "POST", path: "/clients", headers: auth, body: hello })).status).toBe(204);
+    expect(clients.get(id)).toMatchObject({ label: "Claude Code", folder: "/Users/me/placemark", state: "connected" });
+
+    const relative = await send(s.port, { method: "POST", path: "/clients", headers: auth, body: JSON.stringify({ id, folder: "placemark" }) });
+    expect(relative.status).toBe(400);
+    expect((JSON.parse(relative.body) as { error: { message: string } }).error.message).toContain('"folder" must be an absolute path');
+    expect((await send(s.port, { method: "POST", path: "/clients", headers: auth, body: "{nope" })).status).toBe(400);
+    expect((await send(s.port, { method: "POST", path: "/clients", headers: auth, body: JSON.stringify({ id, name: "x".repeat(20_000) }) })).status).toBe(413);
+    expect((await send(s.port, { method: "GET", path: "/clients", headers: auth })).status).toBe(405);
+
+    expect((await send(s.port, { method: "DELETE", path: `/clients/${id}`, headers: auth })).status).toBe(204);
+    expect(clients.get(id)?.state).toBe("gone");
+  });
+
+  it("answers /clients with 404 without a registry, like apps from before sessions", async () => {
+    const s = await start();
+    const res = await send(s.port, { method: "POST", path: "/clients", headers: { authorization: `Bearer ${s.token}` }, body: "{}" });
+    expect(res.status).toBe(404);
   });
 
   it("rejects declared bodies over the limit", async () => {

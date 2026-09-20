@@ -1,8 +1,27 @@
 /**
- * Connect Claude helpers: MCP status parsing, the launch command for `sonobe mcp` (a repo checkout in
- * development, the app's bundled CLI in production), the Claude Code command, the Claude Desktop config
- * snippet and its file location, shell quoting, and example prompts.
+ * Connect Claude helpers: MCP status parsing (with the connected sessions), the launch command for
+ * `sonobe mcp` (a repo checkout in development, the app's bundled CLI in production), the Claude Code
+ * install and remove commands, the Claude Desktop config snippet and its file location, shell quoting,
+ * and example prompts.
  */
+
+/** One MCP client session the app heard from (host-api.d.ts McpClientSession). */
+export interface McpSessionInfo {
+  id: string;
+  /** "Claude Code", "Claude Desktop", the client's own name, or "Unidentified MCP client". */
+  label: string;
+  version: string | null;
+  /** The session's project folder. */
+  folder: string | null;
+  /** relay: `sonobe mcp`. http: a client without the relay, which can't say which session it is. */
+  via: "relay" | "http";
+  state: "connected" | "idle" | "gone";
+  connectedAt: number;
+  lastActivityAt: number | null;
+  lastTool: string | null;
+  toolCalls: number;
+  relayVersion: string | null;
+}
 
 export interface McpStatusInfo {
   running: boolean;
@@ -13,6 +32,38 @@ export interface McpStatusInfo {
   tokenFile: string | null;
   /** The app's bundled CLI launcher ("/Applications/Sonobe.app/Contents/Resources/cli/sonobe"), or null. */
   cliPath: string | null;
+  /** Sessions the app heard from recently, most recently active first. Empty from older hosts. */
+  clients: McpSessionInfo[];
+  /** When the host read `clients` (epoch ms), or null from older hosts. */
+  checkedAt: number | null;
+  /** The app's version, or null from older hosts. */
+  version: string | null;
+}
+
+const text = (v: unknown): string | null => (typeof v === "string" && v.trim() ? v : null);
+const time = (v: unknown): number | null => (typeof v === "number" && Number.isFinite(v) ? v : null);
+
+/** One session row, or null when it's malformed (dropped, so one bad row never hides the rest). */
+function parseSession(value: unknown): McpSessionInfo | null {
+  if (!value || typeof value !== "object") return null;
+  const v = value as Record<string, unknown>;
+  const connectedAt = time(v.connectedAt);
+  if (!text(v.id) || !text(v.label) || connectedAt === null) return null;
+  if (v.via !== "relay" && v.via !== "http") return null;
+  if (v.state !== "connected" && v.state !== "idle" && v.state !== "gone") return null;
+  return {
+    id: v.id as string,
+    label: v.label as string,
+    version: text(v.version),
+    folder: text(v.folder),
+    via: v.via,
+    state: v.state,
+    connectedAt,
+    lastActivityAt: time(v.lastActivityAt),
+    lastTool: text(v.lastTool),
+    toolCalls: typeof v.toolCalls === "number" && Number.isInteger(v.toolCalls) && v.toolCalls >= 0 ? v.toolCalls : 0,
+    relayVersion: text(v.relayVersion),
+  };
 }
 
 /** Validate what `sonobeHost.getMcpStatus()` resolved (it crosses a context bridge as unknown). */
@@ -26,7 +77,35 @@ export function parseMcpStatus(value: unknown): McpStatusInfo | null {
     url: typeof v.url === "string" && v.url ? v.url : null,
     tokenFile: typeof v.tokenFile === "string" && v.tokenFile ? v.tokenFile : null,
     cliPath: typeof v.cliPath === "string" && v.cliPath.trim() ? v.cliPath : null,
+    clients: Array.isArray(v.clients) ? v.clients.map(parseSession).filter((c): c is McpSessionInfo => c !== null) : [],
+    checkedAt: time(v.checkedAt),
+    version: text(v.version),
   };
+}
+
+/** Sessions connected right now (a green dot), most recently active first. */
+export function connectedSessions(status: McpStatusInfo | null): McpSessionInfo[] {
+  return status?.running ? status.clients.filter((c) => c.state === "connected") : [];
+}
+
+/** "just now", "12 s ago", "4 min ago", "2 h ago". */
+export function relativeTime(at: number, now: number): string {
+  const s = Math.max(0, Math.round((now - at) / 1000));
+  if (s < 5) return "just now";
+  if (s < 60) return `${s} s ago`;
+  if (s < 3600) return `${Math.floor(s / 60)} min ago`;
+  return `${Math.floor(s / 3600)} h ago`;
+}
+
+/** The last path segment of a folder ("/Users/me/placemark" → "placemark"). */
+export function folderName(folder: string): string {
+  return folder.replace(/[\\/]+$/, "").split(/[\\/]/).pop() || folder;
+}
+
+/** "Claude Code · placemark · active 12 s ago": one line per session, for tooltips. */
+export function sessionSummary(session: McpSessionInfo, now: number): string {
+  const when = session.lastActivityAt !== null ? `active ${relativeTime(session.lastActivityAt, now)}` : `connected ${relativeTime(session.connectedAt, now)}`;
+  return [session.label, session.folder ? folderName(session.folder) : null, when].filter(Boolean).join(" · ");
 }
 
 export type ShellFlavor = "posix" | "windows";
@@ -82,9 +161,30 @@ export function mcpLaunchSpec(options: LaunchOptions): LaunchSpec {
   return { command: options.nodePath?.trim() || "node", args: [joinRepoPath(repo, CLI_ENTRY), ...tail] };
 }
 
-/** `claude mcp add sonobe -- <command> <args…>` */
-export function claudeCodeCommand(spec: LaunchSpec, shell: ShellFlavor = "posix"): string {
-  return ["claude", "mcp", "add", "sonobe", "--", spec.command, ...spec.args].map((part, i) => (i < 5 ? part : shellQuote(part, shell))).join(" ");
+/** Claude Code config scopes: user (every project), local (this project only, the default of `claude mcp add`). */
+export type ClaudeCodeScope = "user" | "local";
+
+/** Headless servers work on one prototype folder, so they stay with one project; the relay serves every project. */
+export function isHeadlessSpec(spec: LaunchSpec): boolean {
+  return spec.args.includes("--headless");
+}
+
+/**
+ * `claude mcp add --scope user sonobe -- <command> <args…>`. The relay installs at user scope, so every
+ * Claude Code session gets Sonobe's tools whatever folder it starts in; a headless server installs at
+ * local scope as `sonobe-headless`.
+ */
+export function claudeCodeCommand(spec: LaunchSpec, shell: ShellFlavor = "posix", options: { scope?: ClaudeCodeScope; name?: string } = {}): string {
+  const headless = isHeadlessSpec(spec);
+  const scope = options.scope ?? (headless ? "local" : "user");
+  const name = options.name ?? (headless ? "sonobe-headless" : "sonobe");
+  const prefix = ["claude", "mcp", "add", "--scope", scope, name, "--"];
+  return [...prefix, ...[spec.command, ...spec.args].map((part) => shellQuote(part, shell))].join(" ");
+}
+
+/** `claude mcp remove --scope local sonobe`: drop one entry, like an older per-folder one that shadows the user entry. */
+export function claudeCodeRemoveCommand(scope: ClaudeCodeScope, name = "sonobe"): string {
+  return `claude mcp remove --scope ${scope} ${name}`;
 }
 
 /** The `mcpServers` entry for claude_desktop_config.json. */
