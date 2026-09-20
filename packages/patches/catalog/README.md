@@ -17,7 +17,7 @@ npx vitest run packages/patches             # the validator, contract shape, cro
 
 - **199 patches** in 16 categories, spread over 23 chunk files.
 - **170** map to an Origami census id, **14** map to an Origami patch that has no published id, and **15** are Sonobe-native.
-- **177** are supported everywhere, **20** are web-limited, and **2** can't run on the web yet.
+- **176** are supported everywhere, **21** are web-limited, and **2** can't run on the web yet.
 
 ## By category
 
@@ -45,17 +45,18 @@ npx vitest run packages/patches             # the validator, contract shape, cro
 
 | Status | Meaning | Patches | Tier 1 | Tier 2 | Tier 3 |
 |---|---|---:|---:|---:|---:|
-| `supported` | Works the same in the desktop app, the web player, and headless simulation | 177 | 79 | 97 | 1 |
-| `web-limited` | Needs a permission, a secure page, a tap, a particular browser, or special hardware | 20 | 0 | 8 | 12 |
+| `supported` | Works the same in the desktop app, the web player, and headless simulation | 176 | 79 | 97 | 0 |
+| `web-limited` | Needs a permission, a secure page, a tap, a particular browser, or special hardware | 21 | 0 | 8 | 13 |
 | `unsupported-web` | Needs a model Sonobe doesn't ship; loads from files and outputs idle values | 2 | 0 | 0 | 2 |
 
-What limits the 20 web-limited patches:
+What limits the 21 web-limited patches:
 
 - **Permission or a secure page:** `camera`, `microphone`, `location`, `deviceMotion`, `gameController`
 - **A tap or key press first:** `openUrl`, `photoPicker`, `soundPlayer`, `textToSpeech`
 - **Browser coverage:** `bluetoothLe`, `qrCodeDetection`, `vibrate`, `haptic`, `glassEffect` (refraction)
 - **Cross-site rules:** `networkRequest`, `webSocketConnection`, `audioMetering`, `snapshot`, `objectDetection`
 - **Estimated:** `softKeyboard`, whose height comes from the browser's visual viewport
+- **No host reads it yet:** `interfaceOrientation`, which reports an orientation that neither the viewer nor the web player turns the interface to
 
 `faceDetection` and `handDetection` are `unsupported-web` until Sonobe ships detection models.
 

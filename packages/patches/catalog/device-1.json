@@ -20,8 +20,8 @@
         "notch"
       ],
       "summary": "Reports the screen size, safe area, orientation, dark mode, and input style of the device the prototype runs on.",
-      "docs": "## How it works\nDevice Info describes the phone, tablet, or computer your prototype is showing on: the device picked in the viewer, or the real phone when you open the web player on one. It has no inputs.\n\n- **Screen Size** is the width and height in points. They swap while the interface is in landscape.\n- **Safe Area** is how many points system UI covers on each edge, as [top, right, bottom, left]: the status bar, camera cutout, and home indicator.\n- **Screen Scale** is how many pixels make up one point, such as 3 on recent iPhones.\n- **Orientation** is how far the device is turned, in degrees. **Landscape** is true while the screen is wider than it's tall.\n- **Uses a Mouse** is true for computer devices, where people point and click instead of touching.\n- **Dark Mode** follows the system appearance.\n- **Device Name** is the device's display name, like iPhone 17 Pro.\n\n## Tips\n- Wire Screen Size into a full-screen layer's Size so it fits every device and orientation.\n- Unpack Safe Area with Edges Unpack and use Top to keep headers below the status bar.\n- Feed Dark Mode into If / Else to pick colors for each theme.\n- Rotating the viewer turns the interface only when an Interface Orientation patch allows it.\n\n## Coming from Origami\nDevice is called Device Name. Safe Area is a Point 4D in [top, right, bottom, left] order. Landscape is new.",
-      "behavior": "Stateless: reads the host's device snapshot every frame.\n\nEach frame:\n```\nconst d = ctx.services.device();\nconst preset = DEVICE_PRESETS.find((p) => p.id === d.preset); // @sonobe/core devices.ts\nconst [w, h] = finite2(d.screenSize);\nctx.output(\"screenSize\", [w, h]);\nctx.output(\"safeArea\", finite4(d.safeArea));          // [top, right, bottom, left]\nctx.output(\"screenScale\", d.screenScale > 0 && Number.isFinite(d.screenScale) ? d.screenScale : 1);\nctx.output(\"orientation\", orientationAngle(d));\nctx.output(\"landscape\", w > h);\nctx.output(\"usesMouse\", preset?.kind === \"computer\");\nctx.output(\"darkMode\", d.darkMode === true);\nctx.output(\"deviceName\", preset?.name ?? d.preset);\n```\n\n- Source of truth: the host fills `DeviceInfo` before frame 0 from the project's `device` settings (preset, size override, orientation) and keeps it current. Screen Size and Safe Area describe the **interface as drawn**: while the interface is in landscape, width and height are swapped and the insets come from the renderer's `orientSafeArea` (`packages/renderer/src/deviceFrame.ts`). The patch never re-derives them. The web player on a real phone keeps the project's screen size (it scales the prototype to fit) and reports `devicePixelRatio` as the scale, the `env(safe-area-inset-*)` insets that reach over the drawn prototype, in its points, and the rotation from `screen.orientation` (`apps/desktop/player/device.ts`). In a desktop browser it keeps the simulated device's values, like the editor's viewer.\n- Orientation: the physical rotation of the device in degrees, measured counterclockwise: 0 upright, 90 turned counterclockwise (top edge on the left), 180 upside down, 270 turned clockwise. It follows the device even while Interface Orientation keeps the interface from turning. The contract only carries `\"portrait\" | \"landscape\"`, so until `DeviceInfo.orientationAngle` exists, `orientationAngle` maps portrait → 0 and landscape → 90. Web hosts read `screen.orientation.angle`.\n- Landscape: `width > height` of Screen Size, so it describes the interface, and a square screen reads false.\n- Uses a Mouse: describes the simulated device, not the machine running the viewer. A phone preset in the desktop app reads false; the Desktop presets read true. Unknown preset ids read false.\n- Dark Mode: the system's appearance (`prefers-color-scheme: dark`) in the editor's viewer and the web player, followed while the prototype runs.\n- Updates: outputs change on the first frame after the snapshot changes (device picker, viewer rotation, a resized custom device, an `orientation` InputEvent, or the host's `runtime.setDevice` when the phone turns or the appearance switches). The host snapshot is taken at step 1 of the frame pipeline, so every patch in a frame sees the same values.\n- Frame 0: reports the starting device. There are no startup zeros.\n- Loops: no inputs, so every output is a single value.\n- Edge cases: an unknown preset id reports the raw id as Device Name. A non-positive or non-finite scale reports 1. Non-finite sizes or insets report 0 and warn once per restart.\n- Platform and simulation: the deterministic runtime merges `RuntimeOptions.device` over the project's preset (Dark Mode false unless set). `orientation` InputEvents flip the orientation and swap Screen Size and Safe Area from the next frame.\n- Restart and dispose: nothing to reset or release.\n- Coming from Origami: Device maps to `deviceName` and Uses a Mouse to `usesMouse`. Dark Mode (v72) and Safe Area (v114) are undocumented in Origami; Sonobe types Safe Area as point4d [top, right, bottom, left], matching the layout Padding property. Origami doesn't document its orientation angles, so imported comparisons against specific angles may need review.",
+      "docs": "## How it works\nDevice Info describes the phone, tablet, or computer your prototype is showing on: the device picked in the viewer, or the real phone when you open the web player on one. It has no inputs.\n\n- **Screen Size** is the width and height in points. They swap while the interface is in landscape.\n- **Safe Area** is how many points system UI covers on each edge, as [top, right, bottom, left]: the status bar, camera cutout, and home indicator.\n- **Screen Scale** is how many pixels make up one point, such as 3 on recent iPhones.\n- **Orientation** is how far the device is turned, in degrees. **Landscape** is true while the screen is wider than it's tall.\n- **Uses a Mouse** is true for computer devices, where people point and click instead of touching.\n- **Dark Mode** follows the system appearance.\n- **Device Name** is the device's display name, like iPhone 17 Pro.\n\n## Tips\n- Wire Screen Size into a full-screen layer's Size so it fits every device and orientation.\n- Unpack Safe Area with Edges Unpack and use Top to keep headers below the status bar.\n- Feed Dark Mode into If / Else to pick colors for each theme.\n- The viewer's Rotate button turns the interface and swaps Screen Size by itself. The web player on a phone keeps the project's orientation, so there only Orientation follows the phone.\n\n## Coming from Origami\nDevice is called Device Name. Safe Area is a Point 4D in [top, right, bottom, left] order. Landscape is new.",
+      "behavior": "Stateless: reads the host's device snapshot every frame.\n\nEach frame:\n```\nconst d = ctx.services.device();\nconst preset = DEVICE_PRESETS.find((p) => p.id === d.preset); // @sonobe/core devices.ts\nconst [w, h] = finite2(d.screenSize);\nctx.output(\"screenSize\", [w, h]);\nctx.output(\"safeArea\", finite4(d.safeArea));          // [top, right, bottom, left]\nctx.output(\"screenScale\", d.screenScale > 0 && Number.isFinite(d.screenScale) ? d.screenScale : 1);\nctx.output(\"orientation\", orientationAngle(d));\nctx.output(\"landscape\", w > h);\nctx.output(\"usesMouse\", preset?.kind === \"computer\");\nctx.output(\"darkMode\", d.darkMode === true);\nctx.output(\"deviceName\", preset?.name ?? d.preset);\n```\n\n- Source of truth: the host fills `DeviceInfo` before frame 0 from the project's `device` settings (preset, size override, orientation) and keeps it current. Screen Size and Safe Area describe the **interface as drawn**: while the interface is in landscape, width and height are swapped and the insets come from the renderer's `orientSafeArea` (`packages/renderer/src/deviceFrame.ts`). The patch never re-derives them. The web player on a real phone keeps the project's screen size (it scales the prototype to fit) and reports `devicePixelRatio` as the scale, the `env(safe-area-inset-*)` insets that reach over the drawn prototype, in its points, and the rotation from `screen.orientation` (`apps/desktop/player/device.ts`). In a desktop browser it keeps the simulated device's values, like the editor's viewer.\n- Orientation: the physical rotation of the device in degrees, measured counterclockwise: 0 upright, 90 turned counterclockwise (top edge on the left), 180 upside down, 270 turned clockwise. It follows the device even while the interface keeps the project's orientation, as it does in the web player on a phone. The contract only carries `\"portrait\" | \"landscape\"`, so until `DeviceInfo.orientationAngle` exists, `orientationAngle` maps portrait → 0 and landscape → 90. Web hosts read `screen.orientation.angle`.\n- Landscape: `width > height` of Screen Size, so it describes the interface, and a square screen reads false.\n- Uses a Mouse: describes the simulated device, not the machine running the viewer. A phone preset in the desktop app reads false; the Desktop presets read true. Unknown preset ids read false.\n- Dark Mode: the system's appearance (`prefers-color-scheme: dark`) in the editor's viewer and the web player, followed while the prototype runs.\n- Updates: outputs change on the first frame after the snapshot changes (device picker, viewer rotation, a resized custom device, an `orientation` InputEvent, or the host's `runtime.setDevice` when the phone turns or the appearance switches). The host snapshot is taken at step 1 of the frame pipeline, so every patch in a frame sees the same values.\n- Frame 0: reports the starting device. There are no startup zeros.\n- Loops: no inputs, so every output is a single value.\n- Edge cases: an unknown preset id reports the raw id as Device Name. A non-positive or non-finite scale reports 1. Non-finite sizes or insets report 0 and warn once per restart.\n- Platform and simulation: the deterministic runtime merges `RuntimeOptions.device` over the project's preset (Dark Mode false unless set). `orientation` InputEvents flip the orientation and swap Screen Size and Safe Area from the next frame.\n- Restart and dispose: nothing to reset or release.\n- Coming from Origami: Device maps to `deviceName` and Uses a Mouse to `usesMouse`. Dark Mode (v72) and Safe Area (v114) are undocumented in Origami; Sonobe types Safe Area as point4d [top, right, bottom, left], matching the layout Padding property. Origami doesn't document its orientation angles, so imported comparisons against specific angles may need review.",
       "inputs": [],
       "outputs": [
         {
@@ -85,7 +85,7 @@
         "popAnimation"
       ],
       "commonMistakes": [
-        "Landscape never turns true when you rotate the viewer: the interface stays upright unless an Interface Orientation patch allows landscape. Add one and leave Landscape Left and Landscape Right on.",
+        "Landscape stays false when you turn your phone: the web player keeps the project's orientation and scales it to fit, so only Orientation follows the phone. Test landscape with the viewer's Rotate button, or compare Orientation with 90 and 270.",
         "A header slides under the status bar on some devices: a fixed top padding only fits one device. Use the top value of Safe Area instead.",
         "Uses a Mouse is false while you click around in the desktop app: it describes the device you picked, not your computer. Pick a Desktop device to preview the mouse layout."
       ],
@@ -100,8 +100,8 @@
         },
         {
           "title": "Enlarge a photo in landscape",
-          "description": "Interface Orientation lets the interface turn, and Landscape drives the spring.",
-          "outline": "layer photo image \"Photo\" @16,200 370x250 scale←zoom.output\npatch rotation interfaceOrientation landscapeLeft=true landscapeRight=true\npatch info deviceInfo\npatch pop popAnimation number←info.landscape bounciness=2 speed=12\npatch zoom transition<number> progress←pop.output start=1 end=1.6"
+          "description": "Rotate the viewer, and Landscape drives the spring.",
+          "outline": "layer photo image \"Photo\" @16,200 370x250 scale←zoom.output\npatch info deviceInfo\npatch pop popAnimation number←info.landscape bounciness=2 speed=12\npatch zoom transition<number> progress←pop.output start=1 end=1.6"
         }
       ],
       "origami": {
@@ -1076,7 +1076,13 @@
       "name": "Interface Orientation",
       "category": "device",
       "tier": 3,
-      "status": "supported",
+      "status": "web-limited",
+      "statusReason": "No host turns the interface from it yet. The viewer's Rotate button turns the interface by itself, and the web player keeps the project's orientation, so the patch only reports which way the interface would face.",
+      "platforms": [
+        "desktop",
+        "web",
+        "mobile"
+      ],
       "aliases": [
         "rotation lock",
         "orientation lock",
@@ -1086,9 +1092,9 @@
         "portrait mode",
         "rotate interface"
       ],
-      "summary": "Chooses which ways the interface turns when the device rotates, and which orientation it starts in.",
-      "docs": "## How it works\nWithout this patch, the interface stays upright when you rotate the viewer or the phone. Interface Orientation lets it turn.\n\n- **Portrait**, **Landscape Left**, **Landscape Right**, and **Upside Down** say which ways the interface may turn. When the device turns to a direction that's off, the interface keeps its current orientation.\n- **Start In** is the orientation shown when the prototype starts or restarts. If the device can't show it, the prototype starts in portrait.\n- **Orientation** and **Landscape** report the interface's current orientation.\n\nLandscape Left means the device is turned counterclockwise, with its top edge on the left. Test with the viewer's rotate button. Phones with a camera cutout, like recent iPhones, never turn upside down.\n\n## Tips\n- Resize layouts from Device Info's Screen Size, which swaps when the interface turns.\n- Lock rotation while something is open: wire a Switch's On through Not into Landscape Left and Landscape Right.\n- Use one Interface Orientation patch per prototype.\n\n## Coming from Origami\nOrientation and Landscape are new outputs. Without the patch, the interface keeps the project's orientation instead of always portrait.",
-      "behavior": "State per instance: `{ current: \"portrait\", lastDevice: null }`.\n\nEach frame:\n```\nconst d = ctx.services.device();\nconst device = deviceOrientation(d);   // \"portrait\" | \"landscapeLeft\" | \"landscapeRight\" | \"upsideDown\"\nconst allowed = (o) => ctx.input(o) === true && deviceSupports(d, o);\nif (state.lastDevice === null) {\n  const start = ctx.input(\"startIn\");\n  state.current = deviceSupports(d, start) ? start : \"portrait\";\n} else if ((device !== state.lastDevice || ctx.changed(device)) && device !== state.current && allowed(device)) {\n  state.current = device;\n}\nstate.lastDevice = device;\nctx.output(\"orientation\", state.current);\nctx.output(\"landscape\", state.current === \"landscapeLeft\" || state.current === \"landscapeRight\");\n```\n\n- Rule: the interface turns only on an event, either the device rotating to an allowed direction or the input for the device's current direction turning on. Turning a direction off never turns the interface away from it, so switching off both landscape inputs while in landscape locks it there until the device turns to an allowed direction.\n- `deviceOrientation(d)`: the device's physical or simulated rotation. With `DeviceInfo.orientationAngle`, 0 → portrait, 90 → landscapeLeft, 180 → upsideDown, 270 → landscapeRight. Hosts that don't report an angle give only `\"portrait\" | \"landscape\"`, and landscape maps to landscapeLeft.\n- `deviceSupports(d, o)`: false for `upsideDown` on phone presets whose cutout is `island` or `notch`; true otherwise, including custom devices.\n- Host integration: the viewer reads the `orientation` output of the controlling patch through `rt.getValue`. It rotates the drawn interface, and from the next frame the host swaps Device Info's Screen Size and Safe Area (`orientSafeArea`). At start and restart, the desktop viewer rotates its simulated device to Start In. On a real phone, the web player can't lock the browser's own rotation, so when the physical and interface orientations differ it counter-rotates the prototype by the difference. Proposed contract alternative: `RuntimeServices.setInterfaceOrientation(o)`.\n- No patch: the interface keeps the project's `device.orientation` (portrait unless the project is landscape), and Device Info's Orientation still follows the device.\n- Controlling patch: the first interfaceOrientation patch by id in the root component. Others (and any inside components) still compute outputs but don't drive the viewer, with one warning per restart.\n- Pulses: none. Inputs are states.\n- Frame 0: applies Start In. Portrait, Landscape Left, and the others only matter from frame 1.\n- Loops: a looped input evaluates per index, but only index 0 drives the viewer.\n- Edge cases: an unknown Start In key falls back to portrait with one warning.\n- Muted: the viewer ignores a muted patch, so the interface keeps the project's orientation; Orientation outputs portrait and Landscape false.\n- Platform and simulation: `orientation` InputEvents rotate the simulated device, and the rule above decides whether the interface follows. Nothing is released headless.\n- Restart and dispose: `lastDevice` resets to null, so Start In applies again.\n- Coming from Origami: ports keep their names and defaults (Portrait, Landscape Left, and Landscape Right on; Upside Down off; Start In Portrait). Origami's viewer adds this patch from its settings; in Sonobe you insert it like any patch.",
+      "summary": "Reports which way the interface would face as the device rotates, from the directions you allow and a starting orientation.",
+      "docs": "## How it works\nInterface Orientation works out which way the interface would face as the device rotates, from the directions you allow. It only reports that: no host turns the interface from it yet. The viewer's Rotate button turns the interface by itself, with or without this patch, and the web player on a phone keeps the project's orientation.\n\n- **Portrait**, **Landscape Left**, **Landscape Right**, and **Upside Down** say which ways the interface may face. When the device turns to a direction that's off, Orientation keeps its current value.\n- **Start In** is the orientation reported when the prototype starts or restarts. If the device can't show it, Orientation starts at portrait.\n- **Orientation** and **Landscape** report the result.\n\nLandscape Left means the device is turned counterclockwise, with its top edge on the left. Phones with a camera cutout, like recent iPhones, never face upside down.\n\n## Tips\n- Resize layouts from Device Info's Screen Size, which swaps when the viewer rotates.\n- On a phone, where the web player keeps the project's orientation, use Landscape to rearrange layers for a phone turned on its side.\n- Use one Interface Orientation patch per prototype.\n\n## Coming from Origami\nOrientation and Landscape are new outputs. Origami turns the interface from this patch; Sonobe doesn't yet, and the interface keeps the project's orientation instead of always portrait.",
+      "behavior": "State per instance: `{ current: \"portrait\", lastDevice: null }`.\n\nEach frame:\n```\nconst d = ctx.services.device();\nconst device = deviceOrientation(d);   // \"portrait\" | \"landscapeLeft\" | \"landscapeRight\" | \"upsideDown\"\nconst allowed = (o) => ctx.input(o) === true && deviceSupports(d, o);\nif (state.lastDevice === null) {\n  const start = ctx.input(\"startIn\");\n  state.current = deviceSupports(d, start) ? start : \"portrait\";\n} else if ((device !== state.lastDevice || ctx.changed(device)) && device !== state.current && allowed(device)) {\n  state.current = device;\n}\nstate.lastDevice = device;\nctx.output(\"orientation\", state.current);\nctx.output(\"landscape\", state.current === \"landscapeLeft\" || state.current === \"landscapeRight\");\n```\n\n- Rule: Orientation changes only on an event, either the device rotating to an allowed direction or the input for the device's current direction turning on. Turning a direction off never turns Orientation away from it, so switching off both landscape inputs while in landscape locks it there until the device turns to an allowed direction.\n- `deviceOrientation(d)`: the device's physical or simulated rotation. With `DeviceInfo.orientationAngle`, 0 → portrait, 90 → landscapeLeft, 180 → upsideDown, 270 → landscapeRight. Hosts that don't report an angle give only `\"portrait\" | \"landscape\"`, and landscape maps to landscapeLeft.\n- `deviceSupports(d, o)`: false for `upsideDown` on phone presets whose cutout is `island` or `notch`; true otherwise, including custom devices.\n- Host integration (planned, not built; ROADMAP): the viewer would read the `orientation` output of the controlling patch through `rt.getValue`, rotate the drawn interface, and from the next frame swap Device Info's Screen Size and Safe Area (`orientSafeArea`). At start and restart, the desktop viewer would rotate its simulated device to Start In. On a real phone, the web player can't lock the browser's own rotation, so when the physical and interface orientations differ it would counter-rotate the prototype by the difference. Proposed contract alternative: `RuntimeServices.setInterfaceOrientation(o)`.\n- Today no host reads the output. With or without the patch, the interface keeps the project's `device.orientation` (portrait unless the project is landscape), which the viewer's Rotate button switches, swapping Screen Size and Safe Area. Device Info's Orientation follows the device.\n- Controlling patch: the first interfaceOrientation patch by id in the root component. Others (and any inside components) still compute outputs but won't drive the interface, with one warning per restart.\n- Pulses: none. Inputs are states.\n- Frame 0: applies Start In. Portrait, Landscape Left, and the others only matter from frame 1.\n- Loops: a looped input evaluates per index, but only index 0 counts as the controlling value.\n- Edge cases: an unknown Start In key falls back to portrait with one warning.\n- Muted: Orientation outputs portrait and Landscape false, and a muted patch won't drive the interface.\n- Platform and simulation: `orientation` InputEvents rotate the simulated device, and the rule above decides whether Orientation follows. Nothing is released headless.\n- Restart and dispose: `lastDevice` resets to null, so Start In applies again.\n- Coming from Origami: ports keep their names and defaults (Portrait, Landscape Left, and Landscape Right on; Upside Down off; Start In Portrait). Origami's viewer adds this patch from its settings; in Sonobe you insert it like any patch.",
       "inputs": [
         {
           "key": "startIn",
@@ -1117,35 +1123,35 @@
               "description": "Turned halfway around, with the top edge at the bottom."
             }
           ],
-          "description": "The orientation shown when the prototype starts or restarts; portrait if the device can't show it."
+          "description": "The orientation reported when the prototype starts or restarts; portrait if the device can't show it."
         },
         {
           "key": "portrait",
           "name": "Portrait",
           "type": "boolean",
           "default": true,
-          "description": "When on, the interface turns upright when the device is held upright."
+          "description": "When on, Orientation turns to Portrait when the device is held upright."
         },
         {
           "key": "landscapeLeft",
           "name": "Landscape Left",
           "type": "boolean",
           "default": true,
-          "description": "When on, the interface turns when the device is turned counterclockwise."
+          "description": "When on, Orientation turns to Landscape Left when the device is turned counterclockwise."
         },
         {
           "key": "landscapeRight",
           "name": "Landscape Right",
           "type": "boolean",
           "default": true,
-          "description": "When on, the interface turns when the device is turned clockwise."
+          "description": "When on, Orientation turns to Landscape Right when the device is turned clockwise."
         },
         {
           "key": "upsideDown",
           "name": "Upside Down",
           "type": "boolean",
           "default": false,
-          "description": "When on, the interface turns when the device is upside down; phones with a camera cutout never do."
+          "description": "When on, Orientation turns to Upside Down when the device is turned over; phones with a camera cutout never do."
         }
       ],
       "outputs": [
@@ -1175,13 +1181,13 @@
               "description": "Turned halfway around, with the top edge at the bottom."
             }
           ],
-          "description": "The interface's current orientation."
+          "description": "Which way the interface would face."
         },
         {
           "key": "landscape",
           "name": "Landscape",
           "type": "boolean",
-          "description": "True while the interface is in Landscape Left or Landscape Right."
+          "description": "True while Orientation is Landscape Left or Landscape Right."
         }
       ],
       "alwaysEvaluate": true,
@@ -1193,18 +1199,15 @@
         "transition"
       ],
       "commonMistakes": [
-        "Rotating the viewer doesn't turn the interface: that direction is off, or there's no Interface Orientation patch. Add one and turn on each direction you support.",
-        "The prototype starts in portrait although Start In is Upside Down: phones with a camera cutout can't show upside down. Pick another Start In or another device.",
-        "Layers keep their portrait size after the interface turns: sizes don't follow the screen by themselves. Drive them from Device Info's Screen Size."
+        "Rotating the viewer turns the interface although Landscape Left and Landscape Right are off: no host turns the interface from this patch yet, so it can't lock rotation. Its own Orientation and Landscape do stay put.",
+        "Orientation starts at portrait although Start In is Upside Down: phones with a camera cutout can't show upside down. Pick another Start In or another device.",
+        "Layers keep their portrait size after the viewer rotates: sizes don't follow the screen by themselves. Drive them from Device Info's Screen Size."
       ],
       "examples": [
         {
-          "title": "Let a video fill the screen in any orientation",
-          "outline": "layer player video \"Player\" @0,0 size←info.screenSize\npatch rotation interfaceOrientation startIn=portrait portrait=true landscapeLeft=true landscapeRight=true upsideDown=false\npatch info deviceInfo"
-        },
-        {
-          "title": "Lock rotation while a sheet is open",
-          "outline": "layer sheet_button rectangle \"Sheet Button\" @16,780 370x56 cornerRadius=14\npatch tap_button interaction layer=@sheet_button\npatch sheet_open switch flip←tap_button.tap\npatch unlocked not value←sheet_open.on\npatch rotation interfaceOrientation landscapeLeft←unlocked.output landscapeRight←unlocked.output"
+          "title": "Show a hint while the device is on its side",
+          "description": "Upside Down stays off, so turning the device over doesn't count.",
+          "outline": "layer turn_hint text \"Turn Hint\" @24,60 text=\"Turn your phone upright\" opacity←rotation.landscape\npatch rotation interfaceOrientation startIn=portrait portrait=true landscapeLeft=true landscapeRight=true upsideDown=false"
         }
       ],
       "origami": {

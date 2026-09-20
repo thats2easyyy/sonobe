@@ -45,11 +45,11 @@ interface Census {
 
 const censuses = new WeakMap<RuntimeServices, Census>();
 
-/** Warn once when this patch isn't the one that drives the viewer (first by id in the root component). */
+/** Warn once when this patch isn't the controlling one (first by id in the root component), the one hosts will read once they turn the interface. */
 function noteController(ctx: PatchContext): void {
   if (ctx.loopIndex !== 0) return;
   if (ctx.componentPath.includes("/")) {
-    warnOnce(ctx, "controller", "Interface Orientation inside a component doesn't turn the viewer; only the first Interface Orientation patch in the main prototype does.");
+    warnOnce(ctx, "controller", "Interface Orientation inside a component is ignored; only the first Interface Orientation patch in the main prototype counts.");
     return;
   }
   let census = censuses.get(ctx.services);
@@ -60,7 +60,7 @@ function noteController(ctx: PatchContext): void {
   for (const set of [census.current, census.previous]) {
     for (const other of set) {
       if (other < ctx.id) {
-        warnOnce(ctx, "controller", `Interface Orientation "${ctx.id}" doesn't turn the viewer, because "${other}" comes first; remove one of them.`);
+        warnOnce(ctx, "controller", `Interface Orientation "${ctx.id}" is ignored, because "${other}" comes first; remove one of them.`);
         return;
       }
     }

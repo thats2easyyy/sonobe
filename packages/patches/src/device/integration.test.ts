@@ -1,3 +1,4 @@
+import { applyOps } from "@sonobe/core";
 import { buildDoc, createMockRegistry, createTestRuntime, runFrames, sequence, tap } from "@sonobe/engine/testing";
 import { describe, expect, it } from "vitest";
 import { definitions } from "./index.ts";
@@ -52,9 +53,37 @@ describe("device patches in a runtime document", () => {
     runFrames(rt, 3, sequence(tap(60, 160)));
     expect(vibrations).toEqual([200]);
 
-    // Only the first Interface Orientation by id drives the viewer; the other warns once.
+    // Only the first Interface Orientation by id counts; the other warns once.
     expect(rt.issues().filter((i) => i.patchId === "orient_b" && i.severity === "warning")).toHaveLength(1);
     expect(rt.issues().filter((i) => i.patchId === "orient")).toHaveLength(0);
+  });
+
+  it("the viewer's Rotate turns the interface by itself, and Interface Orientation only reports", () => {
+    const registry = createMockRegistry(definitions);
+    const doc = buildDoc(
+      {
+        device: "iphone-17-pro",
+        layers: [{ id: "screen", type: "rectangle", name: "Screen", props: { size: { link: "info.screenSize" } } }],
+        patches: {
+          info: { type: "deviceInfo" },
+          rotation: { type: "interfaceOrientation", inputs: { landscapeLeft: false, landscapeRight: false } },
+        },
+      },
+      registry,
+    );
+    const rt = createTestRuntime(doc, registry);
+    rt.step();
+    // What the viewer's Rotate button applies (rotateDeviceOps in apps/editor): no host reads the patch.
+    const rotated = applyOps(rt.document, [{ op: "setProject", changes: { device: { preset: "iphone-17-pro", orientation: "landscape" } } }], { registry });
+    expect(rotated.ok).toBe(true);
+    rt.updateDocument(rotated.doc);
+    rt.step();
+    expect(rt.getValue("info.landscape")).toBe(true);
+    expect(rt.getValue("info.screenSize")).toEqual([874, 402]);
+    expect(rt.scene().roots.find((n) => n.layerId === "screen")!.width).toBe(874);
+    // Both landscape directions are off, so the patch's own outputs stay portrait while the interface turns.
+    expect(rt.getValue("rotation.orientation")).toBe("portrait");
+    expect(rt.getValue("rotation.landscape")).toBe(false);
   });
 
   it("reads what a phone's host reports, and follows setDevice from the next frame", () => {
