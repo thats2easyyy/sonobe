@@ -8,7 +8,7 @@ import { createEditorSession, type EditorSession } from "../../state/session.ts"
 import { Toaster, toast } from "../../ui/Toast.tsx";
 import { assistantStore, initialAssistantData } from "../assistant/assistantStore.ts";
 import { createAssistantController, type AssistantController } from "../assistant/controller.ts";
-import { fakeAssistantHost, usage, type FakeAssistantHost } from "../assistant/testing.ts";
+import { fakeAssistantHost, NOT_INSTALLED_MESSAGE, SIGNED_OUT_MESSAGE, signedIn, subscriptionStatus, usage, type FakeAssistantHost } from "../assistant/testing.ts";
 import type { AssistantEvent, AssistantRunResult } from "../assistant/types.ts";
 import type { Rect } from "../canvas/geometry.ts";
 import { canvasContext, designTarget } from "./context.ts";
@@ -728,6 +728,27 @@ describe("DesignBox", () => {
     expect(assistantStore.getState().open).toBe(true);
   });
 
+  it("offers Sign in… and Set up… for the Claude subscription's errors", async () => {
+    await mount(fakeAssistantHost({ connection: { subscriptionEnabled: true, provider: "subscription" }, subscription: signedIn() }));
+    act(() => designStore.setState({ request: request({ outcome: "error", error: { code: "not_signed_in", message: SIGNED_OUT_MESSAGE } }) }));
+    expect(statusText()).toBe(SIGNED_OUT_MESSAGE);
+    await act(async () => {
+      buttonNamed("Sign in…")!.click();
+      await Promise.resolve();
+    });
+    expect(host!.signIns).toBe(1);
+    expect(document.body.textContent).toContain("Sign in to Claude in Terminal");
+    expect(document.body.textContent).toContain("When it's done, come back and send your message again.");
+
+    act(() => designStore.setState({ request: request({ outcome: "error", error: { code: "agent_failed", message: "Claude's agent adapter didn't start: spawn EACCES." } }) }));
+    click(buttonNamed("Set up…"));
+    expect(assistantStore.getState()).toMatchObject({ open: true, setup: true });
+
+    // A crash's message says what to do: no button.
+    act(() => designStore.setState({ request: request({ outcome: "error", error: { code: "agent_crashed", message: "Claude's agent adapter stopped unexpectedly (exit code 7). Send your message again to restart it." } }) }));
+    expect(container.querySelector(".sb-design-box__status button")).toBeNull();
+  });
+
   it("links a code folder, shows it as a chip, and explains when linking fails or the folder is missing", async () => {
     await mount();
     await act(async () => {
@@ -759,5 +780,151 @@ describe("DesignBox", () => {
     expect(container.querySelector(".sb-design-box__code-label")?.textContent).toBe("Code: noddit (missing)");
     expect(buttonNamed("Link again…")).not.toBeNull();
     expect(host!.folderCalls).toEqual(["link", "unlink", "link"]);
+  });
+});
+
+describe("DesignBox on the Claude subscription (experimental)", () => {
+  const on = (subscription = signedIn()) => fakeAssistantHost({ connection: { subscriptionEnabled: true, provider: "subscription" }, subscription });
+  const preview = (extra: Partial<Parameters<typeof applyPreviewUpdate>[1]> = {}) => ({
+    docId: "photo",
+    key: "Assistant",
+    author: { kind: "agent" as const, name: "Assistant" },
+    name: "Checkout",
+    component: "main",
+    replace: null,
+    width: null,
+    height: null,
+    position: null,
+    html: `<main data-name="Checkout">${"x".repeat(14 * 1024)}</main>`,
+    status: "writing" as const,
+    draftRevision: 1,
+    ...extra,
+  });
+
+  it("follows the Assistant's own preview draft as its reply: drawing, writing, adding, then what it added", async () => {
+    const fake = on();
+    const reply = heldReply(fake, "r1");
+    await mount(fake);
+    type("a checkout screen");
+    press("Enter");
+    await settle();
+    expect(fake.sent).toHaveLength(1);
+    emit({ type: "run_started", runId: "r1", model: "claude-sonnet-5", provider: "subscription" }, { type: "turn_started", runId: "r1", turn: 1 });
+    emit({ type: "tool_started", runId: "r1", toolUseId: "toolu_1", name: "preview_design", title: "Preview design", detail: "Checkout" });
+    expect(statusText()).toBe("Drawing on the canvas…");
+
+    act(() => {
+      applyPreviewUpdate(session, preview());
+    });
+    expect(designStore.getState().drafts[0]).toMatchObject({ key: "mcp:Assistant", runId: "r1" });
+    expect(statusText()).toBe("Writing “Checkout”…");
+    expect(statusShown()).toBe("Writing “Checkout”…14 KB");
+    // It's the box's own reply, not another session's draft to hide.
+    expect(container.querySelector(".sb-design-box__mcp")).toBeNull();
+    emit({ type: "tool_finished", runId: "r1", toolUseId: "toolu_1", name: "preview_design", status: "done", detail: "Showing “Checkout”", changedDocument: false });
+    act(() => {
+      applyPreviewUpdate(session, preview({ html: `<main data-name="Checkout">${"x".repeat(15 * 1024)}</main>`, draftRevision: 2 }));
+    });
+    expect(statusShown()).toBe("Writing “Checkout”…15 KB");
+
+    emit({ type: "tool_started", runId: "r1", toolUseId: "toolu_2", name: "import_design", title: "Import design", detail: "Checkout" });
+    act(() => {
+      applyPreviewUpdate(session, preview({ status: "adding", draftRevision: 3 }));
+    });
+    expect(statusText()).toBe("Adding the layers…");
+    const screen = addScreen("Checkout");
+    act(() => {
+      applyPreviewUpdate(session, preview({ status: "cleared", html: null, draftRevision: 4 }));
+    });
+    emit(
+      { type: "tool_finished", runId: "r1", toolUseId: "toolu_2", name: "import_design", status: "done", detail: "Imported", changedDocument: true, imported: { docId: "d1", screenId: screen.id, txnId: screen.txnId, name: "Checkout", replaced: null, dropped: [], droppedCount: 0, lostConnections: 0 } },
+      { type: "turn_started", runId: "r1", turn: 2 },
+      { type: "text_delta", runId: "r1", turn: 2, delta: "Added a checkout screen with Apple Pay and a promo code." },
+    );
+    await reply.end();
+    expect(statusText()).toBe("Added “Checkout”. It's in front of the other layers in “Main”, so it covers them in the viewer too.");
+    expect(chipLabels()).toEqual(["Undo", "Send to Back", "Make it interactive", "Add knobs", "Try a darker version"]);
+  });
+
+  it("stops a draft its reply left writing", async () => {
+    const fake = on();
+    const reply = heldReply(fake, "r1");
+    await mount(fake);
+    type("a checkout screen");
+    press("Enter");
+    await settle();
+    emit({ type: "run_started", runId: "r1", model: "claude-sonnet-5", provider: "subscription" });
+    act(() => {
+      applyPreviewUpdate(session, preview());
+    });
+    await reply.end("stopped");
+    expect(designStore.getState().drafts[0]).toMatchObject({ runId: "r1", status: "stopped" });
+    expect(statusText()).toBe("Stopped. Nothing was added.");
+  });
+
+  it("when Claude is signed out, looks again, then says so and offers Sign in…", async () => {
+    const signedOut = subscriptionStatus({ state: "signed_out", kind: "none", label: "Not logged in", message: SIGNED_OUT_MESSAGE });
+    const fake = on(signedOut);
+    fake.nextCheck = () => signedOut;
+    await mount(fake);
+    type("a checkout screen");
+    press("Enter");
+    await settle();
+    expect(fake.checks).toBe(1);
+    expect(fake.sent).toEqual([]);
+    expect(field().value).toBe("a checkout screen");
+    expect(container.querySelector(".sb-design-box__notice p")?.textContent).toBe(SIGNED_OUT_MESSAGE);
+    expect(statusText()).toBe("Nothing was sent. Claude isn't signed in on this computer.");
+    expect(field().getAttribute("aria-describedby")).toBe(container.querySelector(".sb-design-box__notice p")!.id);
+    const notice = container.querySelector(".sb-design-box__notice")!;
+    expect([...notice.querySelectorAll("button")].map((b) => b.textContent)).toEqual(["Sign in…", "Open in Claude Code"]);
+
+    await act(async () => {
+      buttonNamed("Sign in…")!.click();
+      await Promise.resolve();
+    });
+    expect(fake.signIns).toBe(1);
+
+    // Signed in in Terminal: the next Return reads the login again and sends.
+    fake.nextCheck = signedIn;
+    press("Enter");
+    await settle();
+    await settle();
+    expect(fake.checks).toBe(2);
+    expect(fake.sent).toHaveLength(1);
+    expect(fake.sent[0]!.text).toBe("a checkout screen");
+    expect(field().value).toBe("");
+    expect(container.querySelector(".sb-design-box__notice")).toBeNull();
+  });
+
+  it("when the adapter isn't installed, offers Set up…, which opens the Assistant's setup", async () => {
+    const missing = subscriptionStatus({ state: "not_installed", message: NOT_INSTALLED_MESSAGE });
+    const fake = on(missing);
+    fake.nextCheck = () => missing;
+    await mount(fake);
+    type("a checkout screen");
+    press("Enter");
+    await settle();
+    expect(container.querySelector(".sb-design-box__notice p")?.textContent).toBe(NOT_INSTALLED_MESSAGE);
+    expect(statusText()).toBe("Nothing was sent. Sonobe couldn't find Claude's agent adapter.");
+    click(buttonNamed("Set up…"));
+    expect(assistantStore.getState()).toMatchObject({ open: true, setup: true });
+  });
+
+  it("sends at once while the login isn't known yet: the reply says what's wrong", async () => {
+    const fake = on(subscriptionStatus());
+    // The refresh's own check hasn't answered yet.
+    fake.assistant!.checkSubscription = () => new Promise(() => undefined);
+    await mount(fake);
+    type("a checkout screen");
+    press("Enter");
+    await settle();
+    expect(fake.sent).toHaveLength(1);
+  });
+
+  it("keeps the usage meter out of the box: the plan has no budget here", async () => {
+    await mount(on());
+    act(() => assistantStore.setState({ usage: usage(1_400_000, 1_400_000) }));
+    expect(container.querySelector(".sb-design-box .sb-assistant-usage")).toBeNull();
   });
 });

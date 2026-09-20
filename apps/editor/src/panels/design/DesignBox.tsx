@@ -3,11 +3,12 @@
  * or a redesign of the selected layer), sends to the in-app Assistant with the canvas's context, and
  * shows what Claude is doing and what it made. Without the Assistant, it copies a prompt instead, or
  * opens it in the person's own Claude Code (Open in Claude Code, macOS). While a connected session
- * (Claude Code) draws on the canvas, it says so and can hide that preview.
+ * (Claude Code) draws on the canvas, it says so and can hide that preview. The Assistant runs on the
+ * person's API key or (experimental) their Claude subscription; the box says what either needs.
  */
 
 import { artboardSize } from "@sonobe/core";
-import { Check, CircleAlert, Copy, EyeOff, FolderCode, KeyRound, LoaderCircle, MessageSquare, ScanLine, SendToBack, Sparkles, SquareTerminal, TriangleAlert, Undo2, X } from "lucide-react";
+import { Check, CircleAlert, Copy, EyeOff, FolderCode, KeyRound, LoaderCircle, LogIn, MessageSquare, ScanLine, SendToBack, Sparkles, SquareTerminal, TriangleAlert, Undo2, Wrench, X } from "lucide-react";
 import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type JSX, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import { useStore } from "zustand";
 import { appPanels } from "../../app/appPanels.ts";
@@ -25,8 +26,9 @@ import { observeResize } from "../../ui/lib/observeResize.ts";
 import { assistantStore, useAssistant, type ChatItem } from "../assistant/assistantStore.ts";
 import { Composer } from "../assistant/Composer.tsx";
 import { sharedAssistantController } from "../assistant/controller.ts";
+import { chatProvider, providerReady } from "../assistant/provider.ts";
 import { ConfirmCard } from "../assistant/Transcript.tsx";
-import type { AssistantCodeFolderStatus } from "../assistant/types.ts";
+import type { AssistantCodeFolderStatus, AssistantStatus, AssistantSubscriptionStatus } from "../assistant/types.ts";
 import type { Rect } from "../canvas/geometry.ts";
 import { connectedSessions, folderName } from "../connect/connectInfo.ts";
 import { connectClaudeStore } from "../connect/connectStore.ts";
@@ -46,6 +48,16 @@ function chipCopy(target: DesignTarget | null, size: [number, number]): { chip: 
 }
 
 const CHIP_ICONS: Partial<Record<DesignResultChip["id"], JSX.Element>> = { undo: <Undo2 size={13} />, sendToBack: <SendToBack size={13} /> };
+
+const ACTION_LABELS: Record<NonNullable<DesignStatusLine["action"]>, string> = { api_key: "API key", new_chat: "New chat", settings: "Open Settings", sign_in: "Sign in…", setup: "Set up…" };
+const ACTION_ICONS: Partial<Record<NonNullable<DesignStatusLine["action"]>, JSX.Element>> = { api_key: <KeyRound size={13} />, sign_in: <LogIn size={13} /> };
+
+/** Why a send on the Claude subscription didn't go, for the live region. */
+function notReadyAnnouncement(subscription: AssistantSubscriptionStatus | undefined): string {
+  if (subscription?.state === "signed_out") return "Nothing was sent. Claude isn't signed in on this computer.";
+  if (subscription?.state === "not_installed") return "Nothing was sent. Sonobe couldn't find Claude's agent adapter.";
+  return "Nothing was sent. Claude's agent adapter didn't start.";
+}
 
 const STATUS_ICONS: Record<DesignStatusLine["tone"], JSX.Element | null> = {
   busy: <LoaderCircle size={13} className="sb-spin" aria-hidden />,
@@ -81,7 +93,10 @@ function DesignBoxPanel({ session, bounds, onHeightChange }: DesignBoxProps): JS
   const composerRef = useRef<HTMLTextAreaElement>(null);
   const boxRef = useRef<HTMLElement>(null);
   const noticeId = useId();
+  // A send was held because what the chat runs on isn't ready (no API key; Claude signed out, not installed, or failing).
   const [noKey, setNoKey] = useState(false);
+  // The subscription's login is being read again before a send.
+  const [checking, setChecking] = useState(false);
   const [codeError, setCodeError] = useState<string | null>(null);
   const [handingOff, setHandingOff] = useState(false);
   const [mcpSource] = useState<McpStatusSource | null>(() => {
@@ -115,9 +130,11 @@ function DesignBoxPanel({ session, bounds, onHeightChange }: DesignBoxProps): JS
     composerRef.current?.focus({ preventScroll: true });
   }, [design.focusRequest]);
 
+  const provider = chatProvider(assistant.status);
+  const ready = !assistant.status || providerReady(assistant.status, provider);
   useEffect(() => {
-    if (assistant.status?.hasKey) setNoKey(false);
-  }, [assistant.status?.hasKey]);
+    if (ready) setNoKey(false);
+  }, [ready]);
 
   if (!shows) return null;
 
@@ -129,11 +146,16 @@ function DesignBoxPanel({ session, bounds, onHeightChange }: DesignBoxProps): JS
   const now = Date.now();
   // Where the result is now: the line and chips follow Undo (the chip, ⌘Z or History; attachDesign marks it), Send to Back and deletes.
   const placement = design.result ? resultPlacement(doc, design.result) : undefined;
-  const noKeyText = `Designing on the canvas uses your own Anthropic API key, kept in your keychain.${controller.canOpenInClaudeCode ? " With a Claude plan, open it in Claude Code instead: it draws on this canvas as it writes." : ""}`;
+  const subscription = provider === "subscription" ? assistant.status?.subscription : undefined;
+  const noKeyText =
+    provider === "subscription"
+      ? (subscription?.message ?? "Claude isn't ready on this computer. Set it up in the Assistant.")
+      : `Designing on the canvas uses your own Anthropic API key, kept in your keychain.${controller.canOpenInClaudeCode ? " With a Claude plan, open it in Claude Code instead: it draws on this canvas as it writes." : ""}`;
   // A reply without an import (a question, or wiring patches) is the status line itself. Without a key, the
   // notice below shows why nothing was sent, and the (hidden) live region says so to screen readers.
-  const line = noKey ? null : designStatusLine(design, assistant, now, placement);
-  const noKeyAnnouncement = `Nothing was sent. Designing here needs your own Anthropic API key${controller.canOpenInClaudeCode ? ", or you can open it in Claude Code" : ""}.`;
+  const line: DesignStatusLine | null = checking ? { text: "Checking Claude…", tone: "busy" } : noKey ? null : designStatusLine(design, assistant, now, placement);
+  const noKeyAnnouncement =
+    provider === "subscription" ? notReadyAnnouncement(subscription) : `Nothing was sent. Designing here needs your own Anthropic API key${controller.canOpenInClaudeCode ? ", or you can open it in Claude Code" : ""}.`;
   const confirms = assistant.items.filter((i): i is Extract<ChatItem, { kind: "confirm" }> => i.kind === "confirm" && i.status === "pending" && i.runId === assistant.runId);
   // The chips follow the box's own finished request; a result that's undone or gone has nothing left to follow up on.
   const result = design.result && placement?.state === "here" ? design.result : null;
@@ -148,9 +170,12 @@ function DesignBoxPanel({ session, bounds, onHeightChange }: DesignBoxProps): JS
     focusCanvas();
   };
 
-  const submit = (text: string): boolean => {
-    if (!controller.available || busy || boxRun) return false;
-    if (assistant.status && !assistant.status.hasKey) {
+  const submit = (text: string): boolean | Promise<boolean> => {
+    if (!controller.available || busy || boxRun || checking) return false;
+    const status = assistant.status;
+    if (status && !providerReady(status, provider)) {
+      // Signed in or installed since the last look? Read the login again, then send.
+      if (provider === "subscription") return recheckThenSend(status, text);
       setNoKey(true);
       return false;
     }
@@ -159,7 +184,29 @@ function DesignBoxPanel({ session, bounds, onHeightChange }: DesignBoxProps): JS
     return true;
   };
 
-  const onSend = (raw: string): boolean => {
+  const recheckThenSend = async (status: AssistantStatus, text: string): Promise<boolean> => {
+    setChecking(true);
+    const subscription = await controller.checkSubscription();
+    setChecking(false);
+    if (!subscription || !providerReady({ ...status, subscription }, "subscription")) {
+      setNoKey(true);
+      return false;
+    }
+    setNoKey(false);
+    // A reply from the chat started meanwhile: the text stays for when it's done.
+    if (assistantStore.getState().running) return false;
+    void sendDesign(session, text, bounds);
+    return true;
+  };
+
+  const signIn = async () => {
+    const result = await controller.signInToClaude();
+    if (!result) return;
+    if (result.ok) toast({ title: "Sign in to Claude in Terminal", description: "When it's done, come back and send your message again.", tone: "ai" });
+    else toast({ title: "Sign in to Claude", description: result.error, tone: "warn" });
+  };
+
+  const onSend = (raw: string): boolean | Promise<boolean> => {
     const text = raw.trim();
     if (!text) return false;
     if (!controller.available) {
@@ -212,7 +259,7 @@ function DesignBoxPanel({ session, bounds, onHeightChange }: DesignBoxProps): JS
   };
 
   // Not while the box's own reply runs: Claude Code would design on the canvas beside it.
-  const openButton = (variant: "ai" | "ghost") => (
+  const openButton = (variant: "ai" | "ghost" | "secondary") => (
     <Button size="sm" variant={variant} icon={<SquareTerminal size={13} />} loading={handingOff} disabled={boxRun} onClick={() => void openInClaudeCode()}>
       Open in Claude Code
     </Button>
@@ -252,12 +299,14 @@ function DesignBoxPanel({ session, bounds, onHeightChange }: DesignBoxProps): JS
   const runChip = (chip: DesignResultChip, r: DesignResult) => {
     if (chip.id === "undo") undo(r);
     else if (chip.id === "sendToBack") sendToBack(r);
-    else if (chip.message) submit(chip.message);
+    else if (chip.message) void submit(chip.message);
   };
 
   const runAction = (action: NonNullable<DesignStatusLine["action"]>) => {
     if (action === "settings") appPanels.getState().show("settings");
     else if (action === "new_chat") void controller.newChat();
+    else if (action === "sign_in") void signIn();
+    else if (action === "setup") assistantStore.getState().showSetup();
     else assistantStore.getState().show();
   };
 
@@ -291,8 +340,8 @@ function DesignBoxPanel({ session, bounds, onHeightChange }: DesignBoxProps): JS
           ) : null}
         </div>
         {line?.action ? (
-          <Button size="sm" variant="ghost" icon={line.action === "api_key" ? <KeyRound size={13} /> : undefined} onClick={() => runAction(line.action!)}>
-            {line.action === "settings" ? "Open Settings" : line.action === "new_chat" ? "New chat" : "API key"}
+          <Button size="sm" variant="ghost" icon={ACTION_ICONS[line.action]} onClick={() => runAction(line.action!)}>
+            {ACTION_LABELS[line.action]}
           </Button>
         ) : null}
       </div>
@@ -322,7 +371,7 @@ function DesignBoxPanel({ session, bounds, onHeightChange }: DesignBoxProps): JS
       ) : null}
 
       {confirms.map((item) => (
-        <ConfirmCard key={item.id} item={item} onConfirm={(id, approved) => void controller.confirm(id, approved)} />
+        <ConfirmCard key={item.id} item={item} onConfirm={(id, approved, optionId) => void controller.confirm(id, approved, optionId)} />
       ))}
 
       {!controller.available ? (
@@ -335,6 +384,22 @@ function DesignBoxPanel({ session, bounds, onHeightChange }: DesignBoxProps): JS
             <Button size="sm" icon={<ScanLine size={13} />} onClick={() => appPanels.getState().show("importDesign")}>
               Import Design…
             </Button>
+          </div>
+        </div>
+      ) : noKey && provider === "subscription" ? (
+        <div className="sb-design-box__notice">
+          <p id={noticeId}>{noKeyText}</p>
+          <div className="sb-design-box__actions">
+            {subscription?.state === "signed_out" ? (
+              <Button size="sm" variant="ai" icon={<LogIn size={13} />} onClick={() => void signIn()}>
+                Sign in…
+              </Button>
+            ) : (
+              <Button size="sm" variant="ai" icon={<Wrench size={13} />} onClick={() => assistantStore.getState().showSetup()}>
+                Set up…
+              </Button>
+            )}
+            {controller.canOpenInClaudeCode ? openButton("secondary") : null}
           </div>
         </div>
       ) : noKey ? (
@@ -368,6 +433,7 @@ function DesignBoxPanel({ session, bounds, onHeightChange }: DesignBoxProps): JS
         onStop={() => void controller.stop()}
         usage={assistant.usage}
         limits={assistant.limits}
+        provider={provider}
         placeholder={copy.placeholder}
         ariaLabel={copy.ariaLabel}
         ariaDescribedBy={!controller.available || noKey ? noticeId : undefined}

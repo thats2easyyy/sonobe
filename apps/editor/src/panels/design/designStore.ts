@@ -3,7 +3,8 @@
  * is writing, and the last result. A draft comes from the in-app Assistant (import_design's html,
  * before the tool runs; `reduceDesignEvent` folds its events) or from an MCP client such as Claude
  * Code (preview_design, over the design.preview RPC; `reducePreviewUpdate` folds its updates). Both
- * reducers are pure, and the canvas previews the newest draft of either.
+ * reducers are pure, and the canvas previews the newest draft of either. On the Claude subscription
+ * the Assistant draws through preview_design too: its MCP drafts belong to its run.
  */
 
 import { findLayer, type Author, type Id, type LayerLocation, type SonobeDocument } from "@sonobe/core";
@@ -37,7 +38,10 @@ export interface DesignDraft {
   source: DraftSource;
   /** Its identity: the Assistant's toolUseId, or "mcp:<session key>" (one draft per MCP session). */
   key: string;
-  /** The Assistant's run, turn and tool call ("", 0 and "" for an MCP client's draft). */
+  /**
+   * The Assistant's run, turn and tool call ("", 0 and "" for an MCP client's draft). The Assistant's
+   * own preview_design drafts (the subscription path) are MCP drafts with its runId: see assistantDraft.
+   */
   runId: string; turn: number; toolUseId: string;
   html: string; fields: AssistantDesignFields;
   status: DraftStatus; since: number;
@@ -78,6 +82,12 @@ export interface DesignState extends DesignData { openBox(): void; closeBox(): v
 
 /** DesignDraft.error when the reply hit max_tokens before the page was finished. */
 export const DRAFT_TOO_LONG = "too_long";
+
+/** The history author of the in-app Assistant's edits (apps/desktop's ASSISTANT_AUTHOR_NAME). */
+export const ASSISTANT_AUTHOR = "Assistant";
+
+/** A draft the in-app Assistant writes: its import_design html, or (the subscription path) its preview_design draft during its run. */
+export const assistantDraft = (draft: DesignDraft): boolean => draft.source === "assistant" || draft.runId !== "";
 
 const DRAFTS_KEPT = 5;
 /** How long a draft stays on the canvas after it's added, fails or stops: the preview's fade. */
@@ -155,7 +165,11 @@ export function reduceDesignEvent(state: DesignData, event: AssistantEvent, now:
       if (event.name !== "import_design") return {};
       // A dry run or a declined replace finishes without adding anything: the draft stops rather than fails.
       const status: DraftStatus = event.imported ? "added" : event.status === "error" ? "failed" : "stopped";
-      const patch = updateDraft(state, event.toolUseId, (d) => ({ ...d, status, since: now, progress: null, error: status === "failed" ? event.detail : d.error }));
+      let patch = updateDraft(state, event.toolUseId, (d) => ({ ...d, status, since: now, progress: null, error: status === "failed" ? event.detail : d.error }));
+      // import_design { preview: true } on the subscription path: its run's preview draft is the one added (its cleared update may come later, or not at all).
+      if (event.imported && !patch.drafts && state.drafts.some((d) => d.mcp && d.runId === event.runId && d.status === "adding")) {
+        patch = { drafts: state.drafts.map((d) => (d.mcp && d.runId === event.runId && d.status === "adding" ? { ...d, status: "added", since: now, progress: null } : d)) };
+      }
       if (event.imported && request?.runId === event.runId) return { ...patch, request: { ...request, imported: (request.imported ?? 0) + 1 } };
       return patch;
     }
@@ -186,6 +200,8 @@ export interface PreviewTarget {
   /** The document's revision, and its newest change: a draft cleared after its author's import went in counts as added. */
   revision: number;
   lastChange: Pick<DocumentChange, "kind" | "revision" | "author"> | null;
+  /** The in-app Assistant's running reply: a draft it writes through preview_design (the subscription path) belongs to that run. */
+  assistantRunId?: string | null;
 }
 
 const isLive = (status: DraftStatus) => status === "writing" || status === "adding";
@@ -229,10 +245,12 @@ export function reducePreviewUpdate(state: DesignData, update: DesignPreviewUpda
 
   // The document's revision when adding began: the import's change comes after it.
   const addingFrom = update.status === "adding" ? ((live?.status === "adding" ? mcp?.addingFrom : null) ?? target.revision) : null;
+  // The Assistant's own drafts belong to its running reply, so the box follows them as its own and the reply's end stops one left writing.
+  const runId = update.author.name === ASSISTANT_AUTHOR ? (target.assistantRunId ?? live?.runId ?? "") : "";
   const next: DesignDraft = {
     source: "mcp",
     key,
-    runId: "",
+    runId,
     turn: 0,
     toolUseId: "",
     html: update.html ?? "",
@@ -252,8 +270,9 @@ export function reducePreviewUpdate(state: DesignData, update: DesignPreviewUpda
 /** Show an MCP client's preview update on this window's canvas. False when it changed nothing (older than what's shown, or nothing left to clear). */
 export function applyPreviewUpdate(session: EditorSession, update: DesignPreviewUpdate, now = Date.now()): boolean {
   const { revision, lastChange } = session.document.getState();
+  const assistant = assistantStore.getState();
   // The desktop routes design.preview to the window that shows update.docId, and the editor doesn't learn the id main gave it.
-  const patch = reducePreviewUpdate(designStore.getState(), update, now, { docId: null, revision, lastChange });
+  const patch = reducePreviewUpdate(designStore.getState(), update, now, { docId: null, revision, lastChange, assistantRunId: assistant.running ? assistant.runId : null });
   if (!Object.keys(patch).length) return false;
   designStore.setState(patch);
   return true;
@@ -278,10 +297,10 @@ export function dismissDraft(key: string, now = Date.now()): boolean {
   return true;
 }
 
-/** The MCP draft the canvas shows now, while it's live. */
+/** The MCP client's draft the canvas shows now, while it's live. The Assistant's own (its run's preview_design) isn't one: the box follows it as its reply. */
 export function liveMcpDraft(state: DesignData, now: number): DesignDraft | null {
   const draft = activeDraft(state, now);
-  return draft?.mcp && isLive(draft.status) ? draft : null;
+  return draft?.mcp && !assistantDraft(draft) && isLive(draft.status) ? draft : null;
 }
 
 /** End each MCP draft once it goes idle, so the canvas and the box let go of it when that happens (activeDraft already skips it). Returns stop. */

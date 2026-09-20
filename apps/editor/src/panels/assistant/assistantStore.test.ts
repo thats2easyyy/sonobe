@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { createAssistantStore, initialAssistantData, reduceEvent, type AssistantData, type ChatItem } from "./assistantStore.ts";
-import type { AssistantEvent, AssistantUsage } from "./types.ts";
+import type { AssistantConfirmOption, AssistantEvent, AssistantStatus, AssistantUsage } from "./types.ts";
 
 const usage = (totalTokens = 0): AssistantUsage => ({ inputTokens: totalTokens, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, totalTokens, estimatedCostUsd: 0, requests: 1 });
 
@@ -182,6 +182,57 @@ describe("reduceEvent: Design with Claude", () => {
     expect(state.items[1]).not.toHaveProperty("approveLabel");
   });
 
+  it("keeps a permission card's choices and the one picked", () => {
+    const options: AssistantConfirmOption[] = [
+      { id: "allow-once", label: "Allow", kind: "allow_once" },
+      { id: "allow-with-updates", label: "Allow for this chat", kind: "allow_always" },
+      { id: "reject", label: "Don't allow", kind: "reject_once" },
+    ];
+    let state = fold([
+      { type: "run_started", runId: "r1", model: "claude-sonnet-5", provider: "subscription" },
+      { type: "confirm_required", runId: "r1", confirmationId: "p1", toolUseId: "toolu_1", title: "Allow Claude to save this prototype?", message: "…", count: 0, kind: "permission", options },
+    ]);
+    expect(state.items[0]).toMatchObject({ kind: "confirm", confirmKind: "permission", options, status: "pending" });
+    expect(state.items[0]).not.toHaveProperty("optionId");
+    state = fold([{ type: "confirm_resolved", runId: "r1", confirmationId: "p1", approved: true, optionId: "allow-with-updates" }], state);
+    expect(state.items[0]).toMatchObject({ status: "approved", optionId: "allow-with-updates" });
+  });
+
+  it("updates a chip when its tool starts again with its input, where it is and only while it runs", () => {
+    let state = fold([
+      { type: "run_started", runId: "r1", model: "claude-sonnet-5", provider: "subscription" },
+      { type: "turn_started", runId: "r1", turn: 1 },
+      { type: "tool_started", runId: "r1", toolUseId: "toolu_1", name: "get_outline", title: "Get outline", detail: "" },
+      { type: "tool_started", runId: "r1", toolUseId: "toolu_2", name: "add_layers", title: "Add layers", detail: "" },
+      { type: "turn_started", runId: "r1", turn: 2 },
+      { type: "tool_started", runId: "r1", toolUseId: "toolu_1", name: "get_outline", title: "Get outline", detail: "styles" },
+    ]);
+    const turns = state.items as Extract<ChatItem, { kind: "assistant" }>[];
+    // The chip stays in the first turn; the second has none.
+    expect(turns.map((t) => t.tools.map((c) => [c.toolUseId, c.detail]))).toEqual([
+      [
+        ["toolu_1", "styles"],
+        ["toolu_2", ""],
+      ],
+      [],
+    ]);
+    state = fold(
+      [
+        { type: "tool_finished", runId: "r1", toolUseId: "toolu_2", name: "add_layers", status: "done", detail: "Added 3 layers", changedDocument: true },
+        { type: "tool_started", runId: "r1", toolUseId: "toolu_2", name: "add_layers", title: "Add layers", detail: "Card" },
+      ],
+      state,
+    );
+    expect((state.items[0] as Extract<ChatItem, { kind: "assistant" }>).tools[1]).toMatchObject({ status: "done", detail: "Added 3 layers" });
+  });
+
+  it("learns what the chat runs on from its run", () => {
+    const status = { hasKey: false, chatProvider: null } as unknown as AssistantStatus;
+    expect(fold([{ type: "run_started", runId: "r1", model: "claude-sonnet-5", provider: "subscription" }], { status }).status?.chatProvider).toBe("subscription");
+    // Older hosts don't say: the status stays as it was.
+    expect(fold([{ type: "run_started", runId: "r1", model: "claude-sonnet-5" }], { status }).status).toBe(status);
+  });
+
   it("keeps a message's canvas origin through the reply", () => {
     const state = fold(
       [
@@ -206,5 +257,20 @@ describe("assistant store", () => {
     expect(store.getState().open).toBe(false);
     store.getState().setModel("claude-opus-5");
     expect(store.getState().model).toBe("claude-opus-5");
+  });
+
+  it("opens on the setup, and closing leaves it", () => {
+    const store = createAssistantStore({ persistModel: false });
+    store.getState().showSetup();
+    expect(store.getState()).toMatchObject({ open: true, setup: true });
+    store.getState().toggle();
+    expect(store.getState()).toMatchObject({ open: false, setup: false });
+    store.getState().showSetup();
+    store.getState().setOpen(false);
+    expect(store.getState().setup).toBe(false);
+    store.getState().show();
+    store.getState().setSetup(true);
+    store.getState().hide();
+    expect(store.getState().setup).toBe(false);
   });
 });

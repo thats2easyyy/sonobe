@@ -150,17 +150,23 @@ async function pruneScripts(dir: string, now: number): Promise<void> {
   }
 }
 
-/** Write the script for `request` into `options.dir` and open it in Terminal. Resolves with teaching errors; never rejects for expected failures. */
-export async function openInClaudeCode(request: unknown, options: HandoffOptions): Promise<HandoffResult> {
-  if (options.platform !== "darwin") return { ok: false, error: HANDOFF_NOT_MAC };
-  const checked = checkPrompt(request);
-  if ("error" in checked) return { ok: false, error: checked.error };
-  const folder = await options.folder();
-  if ("cancelled" in folder) return { ok: false, cancelled: true };
-  if ("error" in folder) return { ok: false, error: folder.error };
+/** Where a one-time Terminal script goes and how it's opened (HandoffOptions has the same fields). */
+export interface TerminalScriptOptions {
+  /** <userData>/handoff. */
+  dir: string;
+  /** Electron's shell.openPath: "" when the file opened, else why it didn't. */
+  openPath(file: string): Promise<string>;
+  now?(): number;
+  /** The script's file name without ".command" (default: 16 random bytes in hex). */
+  name?(): string;
+}
 
-  const managed = options.managedMcp ? await options.managedMcp() : await readManagedMcp();
-  const script = buildHandoffScript({ folder: folder.root, display: folder.path, prompt: checked.prompt, mcpConfig: handoffMcpConfig(options.server()), managed });
+/**
+ * Write a one-time `.command` script into `options.dir` (0700, clearing day-old ones Terminal never
+ * ran) and open it in Terminal. The script deletes itself as it starts; one Terminal didn't open is
+ * removed here. Resolves with teaching errors (also used by Sign in to Claude, ./assistant/acp/signIn.ts).
+ */
+export async function openTerminalScript(script: string, options: TerminalScriptOptions): Promise<{ ok: true } | { ok: false; error: string }> {
   const file = path.join(options.dir, `${options.name?.() ?? randomBytes(16).toString("hex")}.command`);
   try {
     await mkdir(options.dir, { recursive: true, mode: 0o700 });
@@ -176,6 +182,22 @@ export async function openInClaudeCode(request: unknown, options: HandoffOptions
     await rm(file, { force: true }).catch(() => undefined);
     return { ok: false, error: `Terminal didn't open: ${failed}` };
   }
+  return { ok: true };
+}
+
+/** Write the script for `request` into `options.dir` and open it in Terminal. Resolves with teaching errors; never rejects for expected failures. */
+export async function openInClaudeCode(request: unknown, options: HandoffOptions): Promise<HandoffResult> {
+  if (options.platform !== "darwin") return { ok: false, error: HANDOFF_NOT_MAC };
+  const checked = checkPrompt(request);
+  if ("error" in checked) return { ok: false, error: checked.error };
+  const folder = await options.folder();
+  if ("cancelled" in folder) return { ok: false, cancelled: true };
+  if ("error" in folder) return { ok: false, error: folder.error };
+
+  const managed = options.managedMcp ? await options.managedMcp() : await readManagedMcp();
+  const script = buildHandoffScript({ folder: folder.root, display: folder.path, prompt: checked.prompt, mcpConfig: handoffMcpConfig(options.server()), managed });
+  const opened = await openTerminalScript(script, options);
+  if (!opened.ok) return opened;
   return managed && !managed.sonobe ? { ok: true, folder: folder.path, withoutSonobe: true } : { ok: true, folder: folder.path };
 }
 

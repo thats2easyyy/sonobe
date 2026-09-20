@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { createAssistantStore } from "./assistantStore.ts";
 import { createAssistantController } from "./controller.ts";
-import { fakeAssistantHost, usage } from "./testing.ts";
+import { fakeAssistantHost, NOT_INSTALLED_MESSAGE, SIGNED_OUT_MESSAGE, signedIn, subscriptionStatus, usage } from "./testing.ts";
 import { ANTHROPIC_CONSOLE_KEYS_URL, ASSISTANT_KEY_SECRET, type AssistantCanvasContext } from "./types.ts";
 
 describe("assistant controller", () => {
@@ -245,5 +245,159 @@ describe("assistant controller", () => {
     store.getState().setModel("claude-opus-4-8");
     await createAssistantController(host, store).refresh();
     expect(store.getState().model).toBe("claude-sonnet-5");
+  });
+});
+
+describe("assistant controller on the Claude subscription", () => {
+  it("does nothing with the connection when the host can't", async () => {
+    const host = fakeAssistantHost();
+    delete host.assistant!.setConnection;
+    delete host.assistant!.checkSubscription;
+    delete host.assistant!.signInToClaude;
+    const controller = createAssistantController(host, createAssistantStore({ persistModel: false }));
+    expect(await controller.setConnection({ subscriptionEnabled: true })).toBeNull();
+    expect(await controller.checkSubscription()).toBeNull();
+    expect(await controller.signInToClaude()).toBeNull();
+    // In the browser too.
+    const browser = createAssistantController(null, createAssistantStore({ persistModel: false }));
+    expect(await browser.setConnection({ provider: "subscription" })).toBeNull();
+    expect(await browser.checkSubscription()).toBeNull();
+    expect(await browser.signInToClaude()).toBeNull();
+  });
+
+  it("turns the switch on and picks the subscription, clearing the transcript only when what a new chat runs on changes", async () => {
+    const host = fakeAssistantHost({ key: "sk-ant-api03-abcdefgh1234" });
+    const store = createAssistantStore({ persistModel: false });
+    const controller = createAssistantController(host, store);
+    await controller.refresh();
+    expect(store.getState().status?.connection).toEqual({ subscriptionEnabled: false, provider: "api_key", active: "api_key" });
+    await controller.send("hi");
+    expect(store.getState().items).toHaveLength(2);
+
+    // The switch alone doesn't change what a new chat runs on: the chat stays.
+    const on = await controller.setConnection({ subscriptionEnabled: true });
+    expect(on).toMatchObject({ ok: true, status: { connection: { subscriptionEnabled: true, provider: "api_key", active: "api_key" } } });
+    expect(store.getState().items).toHaveLength(2);
+    expect(host.checks).toBe(0);
+
+    // Picking the subscription does: main reset the chat, and the login is read for the first time this launch.
+    await controller.setConnection({ provider: "subscription" });
+    expect(store.getState().items).toEqual([]);
+    expect(store.getState().status?.connection?.active).toBe("subscription");
+    await Promise.resolve();
+    expect(host.checks).toBe(1);
+    expect(host.connectionCalls).toEqual([{ subscriptionEnabled: true }, { provider: "subscription" }]);
+  });
+
+  it("says why the connection didn't change", async () => {
+    const host = fakeAssistantHost();
+    host.assistant!.setConnection = async () => {
+      throw new Error("Untrusted sender");
+    };
+    const controller = createAssistantController(host, createAssistantStore({ persistModel: false }));
+    expect(await controller.setConnection({ subscriptionEnabled: true })).toEqual({ ok: false, error: "Sonobe couldn't change the Assistant's connection: Untrusted sender" });
+  });
+
+  it("reads the login once for everyone who asks, showing it's checking meanwhile", async () => {
+    const host = fakeAssistantHost({ connection: { subscriptionEnabled: true, provider: "subscription" } });
+    let answer!: () => void;
+    host.assistant!.checkSubscription = () =>
+      new Promise((resolve) => {
+        host.checks++;
+        answer = () => resolve(signedIn());
+      });
+    const store = createAssistantStore({ persistModel: false });
+    const controller = createAssistantController(host, store);
+    // A refresh with the subscription active and unknown checks on its own.
+    await controller.refresh();
+    expect(host.checks).toBe(1);
+    expect(store.getState().status?.subscription?.state).toBe("checking");
+    const again = controller.checkSubscription();
+    expect(host.checks).toBe(1);
+    answer();
+    expect(await again).toMatchObject({ state: "ready", label: "Claude Max" });
+    expect(store.getState().status?.subscription).toMatchObject({ state: "ready", kind: "account", email: "ava@example.com" });
+    // A later check asks again.
+    void controller.checkSubscription();
+    expect(host.checks).toBe(2);
+  });
+
+  it("doesn't check on refresh while the API key is what new chats use, or once the login is known", async () => {
+    const off = fakeAssistantHost();
+    await createAssistantController(off, createAssistantStore({ persistModel: false })).refresh();
+    expect(off.checks).toBe(0);
+    const known = fakeAssistantHost({ connection: { subscriptionEnabled: true, provider: "subscription" }, subscription: signedIn() });
+    await createAssistantController(known, createAssistantStore({ persistModel: false })).refresh();
+    expect(known.checks).toBe(0);
+  });
+
+  it("reports a check the bridge rejected as failed, with what happened", async () => {
+    const host = fakeAssistantHost({ connection: { subscriptionEnabled: true, provider: "subscription" }, subscription: signedIn() });
+    host.assistant!.checkSubscription = async () => {
+      throw new Error("IPC closed");
+    };
+    const store = createAssistantStore({ persistModel: false });
+    const controller = createAssistantController(host, store);
+    await controller.refresh();
+    expect(await controller.checkSubscription()).toMatchObject({ state: "failed", message: "Sonobe couldn't check Claude's login: IPC closed", adapterVersion: "0.79.0" });
+    expect(store.getState().status?.subscription?.state).toBe("failed");
+  });
+
+  it("opens Claude's sign-in and passes its answer on", async () => {
+    const host = fakeAssistantHost();
+    const controller = createAssistantController(host, createAssistantStore({ persistModel: false }));
+    expect(await controller.signInToClaude()).toEqual({ ok: true });
+    host.nextSignIn = () => ({ ok: false, error: "Run claude-agent-acp --cli auth login in a terminal, then check again." });
+    expect(await controller.signInToClaude()).toEqual({ ok: false, error: "Run claude-agent-acp --cli auth login in a terminal, then check again." });
+    host.assistant!.signInToClaude = async () => {
+      throw new Error("no Terminal");
+    };
+    expect(await controller.signInToClaude()).toEqual({ ok: false, error: "Sonobe couldn't open Terminal to sign in: no Terminal" });
+    expect(host.signIns).toBe(2);
+  });
+
+  it("answers a permission card with the option picked", async () => {
+    const host = fakeAssistantHost();
+    const store = createAssistantStore({ persistModel: false });
+    const controller = createAssistantController(host, store);
+    host.emit({ type: "run_started", runId: "r1", model: "claude-sonnet-5", provider: "subscription" });
+    host.emit({
+      type: "confirm_required",
+      runId: "r1",
+      confirmationId: "p1",
+      toolUseId: "toolu_1",
+      kind: "permission",
+      title: "Allow Claude to save this prototype?",
+      message: "…",
+      count: 0,
+      options: [
+        { id: "allow-once", label: "Allow", kind: "allow_once" },
+        { id: "reject", label: "Don't allow", kind: "reject_once" },
+      ],
+    });
+    await controller.confirm("p1", true, "allow-once");
+    expect(host.confirmations).toEqual([["p1", true, "allow-once"]]);
+    expect(store.getState().items.at(-1)).toMatchObject({ kind: "confirm", status: "approved", optionId: "allow-once" });
+  });
+
+  it("reads the status again after a subscription failure, so the setup shows what fixes it", async () => {
+    const host = fakeAssistantHost({ connection: { subscriptionEnabled: true, provider: "subscription" }, subscription: signedIn() });
+    host.nextResult = () => {
+      host.subscription = subscriptionStatus({ state: "signed_out", kind: "none", label: "Not logged in", message: SIGNED_OUT_MESSAGE });
+      return { runId: "r1", outcome: "error", error: { code: "not_signed_in", message: SIGNED_OUT_MESSAGE }, usage: usage() };
+    };
+    const store = createAssistantStore({ persistModel: false });
+    const controller = createAssistantController(host, store);
+    await controller.refresh();
+    await controller.send("a checkout");
+    expect(store.getState().status?.subscription?.state).toBe("signed_out");
+    expect(store.getState().items.at(-1)).toMatchObject({ kind: "notice", tone: "error", code: "not_signed_in" });
+
+    host.nextResult = () => {
+      host.subscription = subscriptionStatus({ state: "not_installed", message: NOT_INSTALLED_MESSAGE });
+      return { runId: "r2", outcome: "error", error: { code: "agent_not_installed", message: NOT_INSTALLED_MESSAGE }, usage: usage() };
+    };
+    await controller.send("again");
+    expect(store.getState().status?.subscription?.state).toBe("not_installed");
   });
 });

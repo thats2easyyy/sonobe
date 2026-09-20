@@ -5,6 +5,11 @@
  * streams it: import_design's html arrives as design_draft events (held at a gate when asked), then
  * the page is imported through the test hook's importHtml, as the Assistant's import_design would, and
  * the run finishes with a short reply. No test uses an API key or the network.
+ *
+ * With the experimental subscription switch on and the subscription picked (`connection`), a send plays
+ * what the desktop's ACP engine sends instead: the page arrives as the Assistant's own preview_design
+ * drafts through the test hook's previewDesign (the design.preview RPC's path), then import_design
+ * { preview: true } imports it; or (`subscriptionReply: "permission"`) Claude Code asks before saving.
  */
 
 import type { Page } from "@playwright/test";
@@ -12,13 +17,17 @@ import type { SonobeTestHook } from "../apps/editor/src/app/testHook.ts";
 import type {
   AssistantCanvasContext,
   AssistantCodeFolderStatus,
+  AssistantConnection,
+  AssistantConnectionUpdate,
   AssistantDesignFields,
   AssistantEvent,
   AssistantHostLike,
   AssistantImported,
   AssistantModelInfo,
+  AssistantProvider,
   AssistantRunResult,
   AssistantStatus,
+  AssistantSubscriptionStatus,
   AssistantUsage,
 } from "../apps/editor/src/panels/assistant/types.ts";
 
@@ -29,8 +38,16 @@ export interface FakeAssistantOptions {
   html: string;
   /** import_design's name for a new screen. Default "Profile". A redesign keeps the picked layer's name. */
   name?: string;
-  /** The design_draft (0 to DRAFT_EVENTS - 1) that waits until window.__releaseFakeGate() is called. */
+  /** The design_draft (0 to DRAFT_EVENTS - 1) that waits until window.__releaseFakeGate() is called. On the subscription: any value holds the reply after its first two preview_design calls. */
   hold?: number;
+  /** The experimental switch and the setup's pick (main keeps them). Default: off, the API key. */
+  connection?: { subscriptionEnabled?: boolean; provider?: AssistantProvider };
+  /** What checkSubscription() finds; status() says "unknown" until the first check. Default: signed in with Claude Max. */
+  subscription?: Partial<AssistantSubscriptionStatus>;
+  /** A send on the subscription: "design" draws the page through preview_design and imports it; "permission" asks before saving. Default "design". */
+  subscriptionReply?: "design" | "permission";
+  /** The pieces the subscription's design sends with preview_design (html, then appends); they join to `html`. Default: `html` in thirds. */
+  previewParts?: string[];
 }
 
 /** What the box sent: AssistantApi.send's request. */
@@ -53,6 +70,12 @@ declare global {
     __fakeAssistantSent?: FakeSendRequest[];
     /** Every prompt openInClaudeCode() received, oldest first. */
     __fakeHandoffs?: string[];
+    /** confirm() calls: [confirmationId, approved, optionId]. */
+    __fakeConfirms?: [string, boolean, string | null][];
+    /** setConnection() calls, oldest first. */
+    __fakeConnectionCalls?: AssistantConnectionUpdate[];
+    /** How many times signInToClaude() was called. */
+    __fakeSignIns?: number;
     /** Resolves when __releaseFakeGate() is called; a reply waits on it at `hold`. */
     __fakeGate?: Promise<void>;
     __releaseFakeGate?: () => void;
@@ -79,6 +102,21 @@ export function fakeAssistantSent(page: Page): Promise<FakeSendRequest[]> {
   return page.evaluate(() => window.__fakeAssistantSent ?? []);
 }
 
+/** The answers given to confirmations and permission cards: [confirmationId, approved, optionId]. */
+export function fakeConfirms(page: Page): Promise<[string, boolean, string | null][]> {
+  return page.evaluate(() => window.__fakeConfirms ?? []);
+}
+
+/** What the Settings switch and the setup asked main to change. */
+export function fakeConnectionCalls(page: Page): Promise<AssistantConnectionUpdate[]> {
+  return page.evaluate(() => window.__fakeConnectionCalls ?? []);
+}
+
+/** How many times Sign in… opened Claude's login. */
+export function fakeSignIns(page: Page): Promise<number> {
+  return page.evaluate(() => window.__fakeSignIns ?? 0);
+}
+
 /** Runs in the page before the app's scripts, so it uses nothing from this module but its argument. */
 function fakeAssistant(options: FakeAssistantOptions & { draftEvents: number; codeFolder: { name: string; path: string; persisted: boolean } }): void {
   const KEY_SECRET = "anthropic.apiKey";
@@ -99,6 +137,11 @@ function fakeAssistant(options: FakeAssistantOptions & { draftEvents: number; co
   window.__fakeAssistantSent = sent;
   const handoffs: string[] = [];
   window.__fakeHandoffs = handoffs;
+  const confirms: [string, boolean, string | null][] = [];
+  window.__fakeConfirms = confirms;
+  const connectionCalls: AssistantConnectionUpdate[] = [];
+  window.__fakeConnectionCalls = connectionCalls;
+  window.__fakeSignIns = 0;
   let openGate: () => void = () => undefined;
   window.__fakeGate = new Promise<void>((resolve) => {
     openGate = resolve;
@@ -112,6 +155,18 @@ function fakeAssistant(options: FakeAssistantOptions & { draftEvents: number; co
   let runs = 0;
   let stopRun: (() => void) | null = null;
 
+  const connectionOf = (c: { subscriptionEnabled?: boolean; provider?: AssistantProvider } = {}): AssistantConnection => {
+    const subscriptionEnabled = c.subscriptionEnabled ?? false;
+    const provider = c.provider ?? "api_key";
+    return { subscriptionEnabled, provider, active: subscriptionEnabled ? provider : "api_key" };
+  };
+  let connection = connectionOf(options.connection);
+  const found: AssistantSubscriptionStatus = { state: "ready", kind: "account", label: "Claude Max", email: "ava@example.com", adapterVersion: "0.79.0", message: null, ...options.subscription };
+  let subscription: AssistantSubscriptionStatus = { state: "unknown", kind: null, label: null, email: null, adapterVersion: null, message: null };
+  let chatProvider: AssistantProvider | null = null;
+  /** Permission cards waiting on confirm(), by confirmationId. */
+  const answers = new Map<string, (answer: { approved: boolean; optionId: string | null }) => void>();
+
   const status = (): AssistantStatus => ({
     hasKey: key !== null,
     keyHint: key ? `sk-ant-…${key.slice(-4)}` : null,
@@ -123,6 +178,9 @@ function fakeAssistant(options: FakeAssistantOptions & { draftEvents: number; co
     running: stopRun !== null,
     messageCount,
     codeFolder,
+    connection: { ...connection },
+    subscription: { ...subscription },
+    chatProvider,
   });
 
   const addUsage = (input: number, output: number) => {
@@ -242,13 +300,148 @@ function fakeAssistant(options: FakeAssistantOptions & { draftEvents: number; co
     return finish("completed");
   };
 
+  /** Splits the page into the three pieces Claude sends with preview_design (html, then two appends), never inside a surrogate pair. */
+  const previewParts = (html: string): string[] => {
+    const cuts = [0, Math.round(html.length / 3), Math.round((html.length * 2) / 3), html.length].map((at) => (at > 0 && at < html.length && /[\uD800-\uDBFF]/.test(html[at - 1]!) ? at + 1 : at));
+    return [html.slice(cuts[0], cuts[1]), html.slice(cuts[1], cuts[2]), html.slice(cuts[2])];
+  };
+
+  /** One reply on the Claude subscription, as the ACP engine sends it. */
+  const subscriptionReply = async (request: FakeSendRequest): Promise<AssistantRunResult> => {
+    const runId = `fake-run-${++runs}`;
+    let stopped = false;
+    let onStop: () => void = () => undefined;
+    const stopSignal = new Promise<void>((resolve) => {
+      onStop = () => {
+        stopped = true;
+        resolve();
+      };
+    });
+    stopRun = onStop;
+    messageCount++;
+    const plan = (input: number, output: number): AssistantUsage => ({ ...usage, inputTokens: usage.inputTokens + input, outputTokens: usage.outputTokens + output, cacheReadTokens: usage.cacheReadTokens + 20_000, totalTokens: usage.totalTokens + input + output + 20_000, budgetTokens: 0, estimatedCostUsd: 0, requests: usage.requests + 1 });
+    const finish = (outcome: AssistantRunResult["outcome"]): AssistantRunResult => {
+      stopRun = null;
+      usage = plan(1200, 300);
+      emit({ type: "usage", runId, usage, limits: LIMITS });
+      emit({ type: "run_finished", runId, outcome, usage });
+      return { runId, outcome, usage: copy(usage) };
+    };
+    let turn = 0;
+    const say = (text: string) => {
+      emit({ type: "turn_started", runId, turn: ++turn });
+      emit({ type: "text_delta", runId, turn, delta: text });
+    };
+    let calls = 0;
+    const toolUseId = () => `toolu_fake_${runs}_${++calls}`;
+
+    await pause(0);
+    emit({ type: "run_started", runId, model: request.model ?? MODELS[0]!.id, provider: "subscription" });
+
+    if (options.subscriptionReply === "permission") {
+      say("The checkout is wired up. I'll save the prototype so the change sticks.");
+      const id = toolUseId();
+      emit({ type: "tool_started", runId, toolUseId: id, name: "save_document", title: "Save document", detail: "" });
+      const confirmationId = `perm-${runs}`;
+      const answered = new Promise<{ approved: boolean; optionId: string | null }>((resolve) => answers.set(confirmationId, resolve));
+      emit({
+        type: "confirm_required",
+        runId,
+        confirmationId,
+        toolUseId: id,
+        kind: "permission",
+        title: "Allow Claude to save this prototype?",
+        message: "Claude wants to save this prototype. Claude Code asks before steps that reach outside this prototype.",
+        count: 0,
+        options: [
+          { id: "allow-once", label: "Allow", kind: "allow_once" },
+          { id: "allow-with-updates", label: "Allow for this chat", kind: "allow_always" },
+          { id: "reject", label: "Don't allow", kind: "reject_once" },
+        ],
+      });
+      const answer = await Promise.race([answered, stopSignal.then(() => ({ approved: false, optionId: null }))]);
+      answers.delete(confirmationId);
+      emit({ type: "confirm_resolved", runId, confirmationId, approved: answer.approved, ...(answer.optionId ? { optionId: answer.optionId } : {}) });
+      if (stopped) return finish("stopped");
+      if (answer.approved) {
+        emit({ type: "tool_finished", runId, toolUseId: id, name: "save_document", status: "done", detail: "Saved", changedDocument: false });
+        say("Saved.");
+      } else {
+        emit({ type: "tool_finished", runId, toolUseId: id, name: "save_document", status: "declined", detail: "You didn't allow it", changedDocument: false });
+        say("Okay, I won't.");
+      }
+      return finish("completed");
+    }
+
+    // The design flow: preview_design with the page's head and first section, two appends, then import_design { preview: true }.
+    say("I'll design a checkout screen that matches your prototype.");
+    const hook = window.__sonobe;
+    if (!hook) return finish("error");
+    const target = request.context?.target;
+    const name = target ? target.name : (options.name ?? "Checkout");
+    const component = request.context?.component.id ?? hook.session.currentComponentId();
+    const parts = options.previewParts ?? previewParts(options.html);
+    let revision = 0;
+    const show = (html: string | null, status: "writing" | "adding" | "cleared") =>
+      hook.previewDesign({ docId: "fake-doc", key: "Assistant", author: { kind: "agent", name: "Assistant" }, name, component, replace: target?.id ?? null, width: null, height: null, position: null, html, status, draftRevision: ++revision });
+    for (let i = 0; i < parts.length; i++) {
+      if (i > 0) await Promise.race([pause(150), stopSignal]);
+      if (i === 2 && options.hold !== undefined) await Promise.race([window.__fakeGate, stopSignal]);
+      if (stopped) return finish("stopped");
+      const id = toolUseId();
+      emit({ type: "turn_started", runId, turn: ++turn });
+      emit({ type: "tool_started", runId, toolUseId: id, name: "preview_design", title: "Preview design", detail: i === 0 ? name : "" });
+      show(parts.slice(0, i + 1).join(""), "writing");
+      emit({ type: "tool_finished", runId, toolUseId: id, name: "preview_design", status: "done", detail: `Showing “${name}” on the canvas`, changedDocument: false });
+    }
+    await Promise.race([pause(150), stopSignal]);
+    if (stopped) return finish("stopped");
+    const id = toolUseId();
+    emit({ type: "turn_started", runId, turn: ++turn });
+    emit({ type: "tool_started", runId, toolUseId: id, name: "import_design", title: "Import design", detail: name });
+    show(options.html, "adding");
+    const outcome = await hook.importHtml(options.html, { name, ...(target ? { replace: target.id } : {}) });
+    show(null, outcome.ok ? "cleared" : "writing");
+    if (!outcome.ok) {
+      emit({ type: "tool_finished", runId, toolUseId: id, name: "import_design", status: "error", detail: outcome.message ?? "The design couldn't be added.", changedDocument: false });
+      return finish("error");
+    }
+    const screenId = outcome.screenId ?? target?.id ?? "";
+    const imported: AssistantImported = { docId: "fake-doc", screenId, txnId: hook.session.document.getState().lastChange?.txnId ?? null, name: outcome.screenName ?? name, replaced: target?.id ?? null, dropped: [], droppedCount: 0, lostConnections: outcome.summary?.lostConnections ?? 0 };
+    emit({ type: "tool_finished", runId, toolUseId: id, name: "import_design", status: "done", detail: `Imported "${imported.name}" as layer ${screenId}.`, changedDocument: true, imported });
+    say("Added a checkout screen with Apple Pay and a promo code. Try “Make it interactive” next.");
+    return finish("completed");
+  };
+
+  /** What a send on the subscription fails with before it starts, as the engine says it. */
+  const subscriptionError = (): AssistantRunResult | null => {
+    if (!connection.subscriptionEnabled) return { runId: "", outcome: "error", error: { code: "subscription_off", message: "Claude subscription is off in Settings → Claude. Turn it back on, or start a new chat to use your API key." }, usage: copy(usage) };
+    if (subscription.state === "signed_out") return { runId: "", outcome: "error", error: { code: "not_signed_in", message: subscription.message ?? "Claude isn't signed in on this computer." }, usage: copy(usage) };
+    if (subscription.state === "not_installed") return { runId: "", outcome: "error", error: { code: "agent_not_installed", message: subscription.message ?? "Sonobe couldn't find Claude's agent adapter." }, usage: copy(usage) };
+    return null;
+  };
+
+  const resetChat = () => {
+    stopRun?.();
+    messageCount = 0;
+    chatProvider = null;
+    usage = { ...usage, inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, totalTokens: 0, budgetTokens: 0, estimatedCostUsd: 0, requests: 0 };
+  };
+
   const host: AssistantHostLike = {
     assistant: {
       status: async () => copy(status()),
       send: async (request) => {
         sent.push(copy(request));
-        if (!key) return { runId: "", outcome: "error", error: { code: "no_key", message: "Add your Anthropic API key to use the Assistant." }, usage: copy(usage) };
         if (stopRun) return { runId: "", outcome: "error", error: { code: "busy", message: "The Assistant is still working on your last message. Stop it or wait for it to finish." }, usage: copy(usage) };
+        if ((chatProvider ?? connection.active) === "subscription") {
+          const failed = subscriptionError();
+          if (failed) return failed;
+          chatProvider = "subscription";
+          return subscriptionReply(request);
+        }
+        if (!key) return { runId: "", outcome: "error", error: { code: "no_key", message: "Add your Anthropic API key to use the Assistant." }, usage: copy(usage) };
+        chatProvider = "api_key";
         return reply(request);
       },
       stop: async () => {
@@ -257,12 +450,31 @@ function fakeAssistant(options: FakeAssistantOptions & { draftEvents: number; co
         return true;
       },
       reset: async () => {
-        stopRun?.();
-        messageCount = 0;
-        usage = { ...usage, inputTokens: 0, outputTokens: 0, totalTokens: 0, budgetTokens: 0, estimatedCostUsd: 0, requests: 0 };
+        resetChat();
         return copy(status());
       },
-      confirm: async () => true,
+      confirm: async (confirmationId, approved, optionId) => {
+        confirms.push([confirmationId, approved, optionId ?? null]);
+        answers.get(confirmationId)?.({ approved, optionId: optionId ?? null });
+        return true;
+      },
+      setConnection: async (update) => {
+        connectionCalls.push(copy(update));
+        const before = connection.active;
+        connection = connectionOf({ ...connection, ...update });
+        // Main resets this window's chat when what a new chat runs on changes.
+        if (connection.active !== before) resetChat();
+        return copy(status());
+      },
+      checkSubscription: async () => {
+        await pause(50);
+        subscription = { ...found };
+        return copy(subscription);
+      },
+      signInToClaude: async () => {
+        window.__fakeSignIns = (window.__fakeSignIns ?? 0) + 1;
+        return { ok: true };
+      },
       checkKey: async () => (key ? { ok: true } : { ok: false, error: { code: "no_key", message: "Add your Anthropic API key first." } }),
       onEvent(cb) {
         listeners.add(cb);

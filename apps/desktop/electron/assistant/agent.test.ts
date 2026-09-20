@@ -51,7 +51,7 @@ describe("assistant agent: replies", () => {
     expect(result).toMatchObject({ outcome: "completed", usage: { inputTokens: 1200, outputTokens: 40, cacheWriteTokens: 9000, requests: 1 } });
     expect(ofType(h.events, "text_delta").map((e) => e.delta).join("")).toBe("Hi! Your prototype has one card.");
     expect(ofType(h.events, "thinking_delta").map((e) => e.delta)).toEqual(["Plan the card"]);
-    expect(h.events[0]).toEqual({ type: "run_started", runId: "id1", model: "claude-sonnet-5" });
+    expect(h.events[0]).toEqual({ type: "run_started", runId: "id1", model: "claude-sonnet-5", provider: "api_key" });
     expect(h.events.at(-1)).toMatchObject({ type: "run_finished", outcome: "completed" });
     expect(h.api.keys).toEqual(["sk-ant-test-key-1234"]);
 

@@ -13,7 +13,7 @@ import { useLatest } from "../../ui/lib/hooks.ts";
 import type { Rect } from "../canvas/geometry.ts";
 import { rectToScreen, type Viewport } from "../canvas/viewport.ts";
 import type { DesignTarget } from "./context.ts";
-import { activeDraft, designStore, mcpDraftIdleAt, useDesign, type DesignData, type DesignDraft, type DesignRequest } from "./designStore.ts";
+import { activeDraft, assistantDraft, designStore, mcpDraftIdleAt, useDesign, type DesignData, type DesignDraft, type DesignRequest } from "./designStore.ts";
 import { PREVIEW_MESSAGE_TYPE, previewShellHtml, renderablePrefix } from "./previewShell.ts";
 import "./design.css";
 import "./design-layout.css";
@@ -43,7 +43,7 @@ export interface PreviewFrameOptions {
 
 /** The box's request, when the draft is the Assistant's and of the request's run (or the run it's starting). */
 function draftRequest<R extends Pick<DesignRequest, "runId">>(draft: DesignDraft, request: R | null | undefined): R | null {
-  return draft.source === "assistant" && request && (request.runId === null || request.runId === draft.runId) ? request : null;
+  return assistantDraft(draft) && request && (request.runId === null || request.runId === draft.runId) ? request : null;
 }
 
 /** Where a draft draws, in artboard points: over the layer it replaces, else at its position at its size; null when it's for another component. */
@@ -67,7 +67,7 @@ function newNonce(): string {
 /** What the pill says: "Claude is writing “Checkout”" for the Assistant, "Claude Code is writing “Checkout”" for an MCP client (its label, else its author), then "Adding the layers…". */
 export function previewPillText(draft: DesignDraft): string {
   if (draft.status === "adding" || draft.status === "added") return "Adding the layers…";
-  const writer = draft.mcp ? draft.mcp.client?.label.trim() || draft.mcp.author.name : "Claude";
+  const writer = draft.mcp && !assistantDraft(draft) ? draft.mcp.client?.label.trim() || draft.mcp.author.name : "Claude";
   return draft.fields.name ? `${writer} is writing “${draft.fields.name}”` : `${writer} is writing the screen`;
 }
 
@@ -76,10 +76,10 @@ export function writerKey(author: Author, client?: { id: string } | null): strin
   return client ? `client:${client.id}` : `author:${author.kind}:${author.name}`;
 }
 
-/** The writer of the MCP draft the canvas shows on `componentId` while it's written or added, else null. Its pill says what that writer is doing there. */
+/** The writer of the MCP client's draft the canvas shows on `componentId` while it's written or added, else null. Its pill says what that writer is doing there. */
 export function liveDraftWriter(state: DesignData, now: number, componentId: string, rootId: string): string | null {
   const draft = state.drafts.length ? activeDraft(state, now) : null;
-  if (!draft?.mcp || !isLive(draft) || (draft.fields.component ?? rootId) !== componentId) return null;
+  if (!draft?.mcp || assistantDraft(draft) || !isLive(draft) || (draft.fields.component ?? rootId) !== componentId) return null;
   return writerKey(draft.mcp.author, draft.mcp.client);
 }
 
@@ -116,7 +116,7 @@ export function DesignPreview({ viewport, bounds, componentId, rootId, artboard,
   if (!draft) return null;
   const fromRequest = draftRequest(draft, request);
   // The box's target is the Assistant's to draw over; an MCP client's draft names what it replaces.
-  const target = draft.source !== "assistant" ? null : box !== undefined ? (box?.id ?? null) : (fromRequest?.context.target?.id ?? null);
+  const target = !assistantDraft(draft) ? null : box !== undefined ? (box?.id ?? null) : (fromRequest?.context.target?.id ?? null);
   // Claude writes the small fields before the html, so once html streams, a missing replace means a new screen.
   const frame = previewFrame(draft, { componentId, rootId, artboard, bounds, fallbackReplace: draft.html ? null : target, request });
   if (!frame) return null;

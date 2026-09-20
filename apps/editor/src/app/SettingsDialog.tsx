@@ -1,6 +1,9 @@
 import { DEVICE_PRESETS, type DevicePreset } from "@sonobe/core";
 import { FolderLock, Trash2, X } from "lucide-react";
-import { useEffect, useId, useState, type ReactNode } from "react";
+import { useEffect, useId, useMemo, useState, type ReactNode } from "react";
+import { useAssistant } from "../panels/assistant/assistantStore.ts";
+import { sharedAssistantController } from "../panels/assistant/controller.ts";
+import { getAssistantHost, supportsAssistant } from "../panels/assistant/types.ts";
 import { useEditorSession } from "../state/EditorProvider.tsx";
 import { useTheme, type ThemePreference } from "../theme/ThemeProvider.tsx";
 import { Button } from "../ui/Button.tsx";
@@ -8,6 +11,7 @@ import { Dialog } from "../ui/Dialog.tsx";
 import { IconButton } from "../ui/IconButton.tsx";
 import { SegmentedControl } from "../ui/SegmentedControl.tsx";
 import { Select, type SelectOption } from "../ui/Select.tsx";
+import { toast } from "../ui/Toast.tsx";
 import { Toggle } from "../ui/Toggle.tsx";
 import { trustServiceFor } from "./sessionServices.ts";
 import { settingsStore, useSettings, type AgentPermission, type MotionPreference } from "./settings.ts";
@@ -57,7 +61,35 @@ export interface SettingsDialogProps {
   onOpenChange: (open: boolean) => void;
 }
 
-/** Settings: theme, motion, the default device, the welcome screen, what Claude may do, and trusted projects. */
+export const SUBSCRIPTION_SWITCH_LABEL = "Use my Claude subscription in the Assistant";
+export const SUBSCRIPTION_SWITCH_DESCRIPTION =
+  "Experimental · awaiting Anthropic's permission. Off by default and not part of any release until Anthropic agrees. When it's on, the Assistant can run Claude through Claude's agent adapter with the Claude account you're signed in to on this computer, using your plan's usage limits.";
+
+/**
+ * The experimental switch (desktop, with a preload that has it): the Assistant on the person's Claude
+ * subscription. Main keeps it, off by default; this asks main and shows what main says.
+ */
+function SubscriptionSwitch() {
+  const controller = useMemo(() => sharedAssistantController(), []);
+  const connection = useAssistant((s) => s.status?.connection);
+  const [saving, setSaving] = useState(false);
+  useEffect(() => {
+    void controller.refresh();
+  }, [controller]);
+  const change = async (subscriptionEnabled: boolean) => {
+    setSaving(true);
+    const result = await controller.setConnection({ subscriptionEnabled });
+    setSaving(false);
+    if (result && !result.ok) toast.error("Couldn't change the setting", { description: result.error });
+  };
+  return (
+    <Row name={SUBSCRIPTION_SWITCH_LABEL} description={SUBSCRIPTION_SWITCH_DESCRIPTION}>
+      <Toggle aria-label={SUBSCRIPTION_SWITCH_LABEL} checked={connection?.subscriptionEnabled === true} disabled={!connection || saving} onChange={(checked) => void change(checked)} />
+    </Row>
+  );
+}
+
+/** Settings: theme, motion, the default device, the welcome screen, what Claude may do (and the experimental subscription switch), and trusted projects. */
 export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
   const titleId = useId();
   return (
@@ -77,6 +109,8 @@ function SettingsContent({ titleId, onClose }: { titleId: string; onClose: () =>
   const update = settingsStore.getState().update;
   const trusted = useTrustedProjects();
   const desktop = session.host?.kind === "desktop";
+  const [assistantHost] = useState(getAssistantHost);
+  const subscriptionSwitch = supportsAssistant(assistantHost) && typeof assistantHost.assistant.setConnection === "function";
 
   return (
     <>
@@ -145,7 +179,8 @@ function SettingsContent({ titleId, onClose }: { titleId: string; onClose: () =>
               ]}
             />
           </Row>
-          {!desktop && <p className="sb-settings__desc">Claude connects to open prototypes through the desktop app. This setting applies there.</p>}
+          {subscriptionSwitch ? <SubscriptionSwitch /> : null}
+          {!desktop && !subscriptionSwitch && <p className="sb-settings__desc">Claude connects to open prototypes through the desktop app. This setting applies there.</p>}
         </Section>
 
         <Section title="Trusted projects">

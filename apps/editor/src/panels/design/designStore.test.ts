@@ -297,6 +297,82 @@ describe("reducePreviewUpdate", () => {
   });
 });
 
+describe("the Assistant's own preview drafts (the Claude subscription path)", () => {
+  const ASSISTANT = { kind: "agent" as const, name: "Assistant" };
+  const update = (extra: Partial<DesignPreviewUpdate> = {}): DesignPreviewUpdate => ({
+    docId: "noddit",
+    key: "Assistant",
+    author: ASSISTANT,
+    name: "Checkout",
+    component: "main",
+    replace: null,
+    width: null,
+    height: null,
+    position: null,
+    html: "<html><body><header>Checkout</header>",
+    status: "writing",
+    draftRevision: 1,
+    ...extra,
+  });
+  const during = (assistantRunId: string | null, revision = 0, lastChange: PreviewTarget["lastChange"] = null): PreviewTarget => ({ docId: null, revision, lastChange, assistantRunId });
+  const play = (updates: [DesignPreviewUpdate, PreviewTarget][], start: DesignData = initialDesignData(), now = 1000): DesignData => updates.reduce((state, [u, target]) => ({ ...state, ...reducePreviewUpdate(state, u, now, target) }), start);
+
+  it("belong to the Assistant's running reply, and keep it through the update that clears them", () => {
+    let state = play([[update(), during("r1")]]);
+    expect(state.drafts[0]).toMatchObject({ source: "mcp", key: "mcp:Assistant", runId: "r1", turn: 0, status: "writing" });
+    state = play([[update({ draftRevision: 2, html: "<html><body><header>Checkout</header><main>Total</main>" }), during("r1")]], state);
+    expect(state.drafts[0]?.runId).toBe("r1");
+    state = play([[update({ draftRevision: 3, status: "adding" }), during(null, 4)]], state);
+    expect(state.drafts[0]).toMatchObject({ runId: "r1", status: "adding" });
+    // Its import is the Assistant's change, so the update that clears it ends it as added.
+    state = play([[update({ draftRevision: 4, status: "cleared", html: null }), during("r1", 5, { kind: "apply", revision: 5, author: ASSISTANT })]], state);
+    expect(state.drafts[0]).toMatchObject({ runId: "r1", status: "added" });
+  });
+
+  it("don't belong to a run when the Assistant isn't running, and an MCP client's never do", () => {
+    expect(play([[update(), during(null)]]).drafts[0]?.runId).toBe("");
+    expect(play([[update({ key: "cc-1", author: { kind: "agent", name: "Claude" }, client: { id: "cc-1", label: "Claude Code" } }), during("r1")]]).drafts[0]?.runId).toBe("");
+  });
+
+  it("read as the Assistant's own: no Hide preview, and the reply's end stops one left writing", () => {
+    let state = play([[update(), during("r1")]]);
+    expect(liveMcpDraft(state, 1000)).toBeNull();
+    expect(activeDraft(state, 1000)?.key).toBe("mcp:Assistant");
+    // A turn of the run doesn't drop it (the subscription path's turns aren't retries).
+    state = { ...state, ...reduceDesignEvent(state, { type: "turn_started", runId: "r1", turn: 2 }, 1100) };
+    expect(state.drafts[0]?.status).toBe("writing");
+    state = { ...state, ...reduceDesignEvent(state, { type: "run_finished", runId: "r1", outcome: "stopped", usage: usage() }, 1200) };
+    expect(state.drafts[0]).toMatchObject({ status: "stopped", since: 1200 });
+  });
+
+  it("are added when the run's import_design reports the screen, whether or not the clearing update came", () => {
+    const adding = play([
+      [update(), during("r1")],
+      [update({ draftRevision: 2, status: "adding" }), during("r1")],
+    ]);
+    const request = pending({ runId: "r1" });
+    const patch = reduceDesignEvent({ ...adding, request }, finished("toolu_9", { imported: imported() }), 2000);
+    expect(patch.drafts?.[0]).toMatchObject({ key: "mcp:Assistant", status: "added", since: 2000 });
+    expect(patch.request?.imported).toBe(1);
+    // Another run's import leaves it alone.
+    expect(reduceDesignEvent(adding, { ...finished("toolu_9", { imported: imported() }), runId: "r2" }, 2000).drafts).toBeUndefined();
+  });
+
+  it("link to the running reply when applied, from the Assistant's store", () => {
+    designStore.setState(initialDesignData());
+    assistantStore.setState({ ...initialAssistantData(), running: true, runId: "r7" });
+    const session = createEditorSession({ host: null, document: createEmptyDocument({ name: "Noddit" }), autoplay: false, scheduler: createManualScheduler(), textMeasurer: "approximate" });
+    try {
+      expect(applyPreviewUpdate(session, update(), 1000)).toBe(true);
+      expect(designStore.getState().drafts[0]).toMatchObject({ key: "mcp:Assistant", runId: "r7" });
+    } finally {
+      session.dispose();
+      designStore.setState(initialDesignData());
+      assistantStore.setState(initialAssistantData());
+    }
+  });
+});
+
 describe("runReply", () => {
   it("is the run's last text, cut at 280 characters", () => {
     const items = [

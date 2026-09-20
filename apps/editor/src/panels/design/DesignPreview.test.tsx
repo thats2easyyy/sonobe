@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AssistantCanvasContext } from "../assistant/types.ts";
 import type { Rect } from "../canvas/geometry.ts";
 import { rectToScreen, type Viewport } from "../canvas/viewport.ts";
-import { DesignPreview, previewFrame, previewPillText } from "./DesignPreview.tsx";
+import { DesignPreview, liveDraftWriter, previewFrame, previewPillText } from "./DesignPreview.tsx";
 import { designStore, initialDesignData, MCP_DRAFT_IDLE_MS, MCP_DRAFT_STALLED_MS, type DesignDraft, type DesignRequest, type McpDraftSession } from "./designStore.ts";
 import { PREVIEW_MESSAGE_TYPE } from "./previewShell.ts";
 
@@ -271,6 +271,11 @@ describe("an MCP client's draft", () => {
     // The Assistant's copy stays, and a finished import keeps saying so while it fades.
     expect(previewPillText(draft({ fields: { name: "Checkout" } }))).toBe("Claude is writing “Checkout”");
     expect(previewPillText(draft({ status: "added" }))).toBe("Adding the layers…");
+    // On the Claude subscription the Assistant draws through preview_design: its draft of a run reads as its own.
+    const own = mcpDraft({ key: "mcp:Assistant", runId: "r1", fields: { name: "Checkout" } }, { client: null, author: { kind: "agent", name: "Assistant" } });
+    expect(previewPillText(own)).toBe("Claude is writing “Checkout”");
+    expect(liveDraftWriter({ ...initialDesignData(), drafts: [own] }, Date.now(), "main", "main")).toBeNull();
+    expect(liveDraftWriter({ ...initialDesignData(), drafts: [mcpDraft()] }, Date.now(), "main", "main")).toBe("client:cc-1");
 
     show([mcpDraft({ fields: { name: "Checkout" } })]);
     render();

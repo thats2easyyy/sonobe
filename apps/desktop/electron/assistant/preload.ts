@@ -10,7 +10,9 @@ import {
   type AssistantEvent,
   type AssistantKeyCheck,
   type AssistantRunResult,
+  type AssistantSignInResult,
   type AssistantStatus,
+  type AssistantSubscriptionStatus,
   type HandoffResult,
   type SonobeAssistantApi,
 } from "./protocol.ts";
@@ -43,7 +45,8 @@ export function createAssistantApi(ipcRenderer: AssistantIpcRenderer): SonobeAss
       }),
     stop: () => invoke<boolean>(ASSISTANT_IPC.stop),
     reset: () => invoke<AssistantStatus>(ASSISTANT_IPC.reset),
-    confirm: (confirmationId, approved) => invoke<boolean>(ASSISTANT_IPC.confirm, String(confirmationId), approved === true),
+    // A permission card's choice goes as its option id alone; main picks the option by it.
+    confirm: (confirmationId, approved, optionId) => invoke<boolean>(ASSISTANT_IPC.confirm, String(confirmationId), approved === true, ...(typeof optionId === "string" && optionId.length <= 200 ? [optionId] : [])),
     checkKey: () => invoke<AssistantKeyCheck>(ASSISTANT_IPC.checkKey),
     onEvent(cb) {
       const listener = (_event: unknown, payload: unknown) => {
@@ -58,6 +61,13 @@ export function createAssistantApi(ipcRenderer: AssistantIpcRenderer): SonobeAss
     linkCodeFolder: () => invoke<AssistantCodeFolderLinkResult>(ASSISTANT_IPC.linkCodeFolder),
     unlinkCodeFolder: () => invoke<AssistantCodeFolderStatus>(ASSISTANT_IPC.unlinkCodeFolder),
     openInClaudeCode: (request) => invoke<HandoffResult>(ASSISTANT_IPC.openInClaudeCode, { prompt: String(request?.prompt ?? "") }),
+    setConnection: (update) =>
+      invoke<AssistantStatus>(ASSISTANT_IPC.setConnection, {
+        ...(typeof update?.subscriptionEnabled === "boolean" ? { subscriptionEnabled: update.subscriptionEnabled } : {}),
+        ...(update?.provider === "api_key" || update?.provider === "subscription" ? { provider: update.provider } : {}),
+      }),
+    checkSubscription: () => invoke<AssistantSubscriptionStatus>(ASSISTANT_IPC.checkSubscription),
+    signInToClaude: () => invoke<AssistantSignInResult>(ASSISTANT_IPC.signInToClaude),
   };
 }
 

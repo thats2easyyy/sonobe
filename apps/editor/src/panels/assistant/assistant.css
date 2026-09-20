@@ -1,4 +1,4 @@
-/* The in-app Assistant drawer (bring your own Anthropic API key). */
+/* The in-app Assistant drawer (bring your own Anthropic API key, or, experimentally, a Claude subscription). */
 
 .sb-assistant {
   display: flex;
@@ -294,6 +294,83 @@
   font-size: var(--font-size-xs);
 }
 
+/* --- Claude subscription setup (experimental) --------------------------------------------------- */
+
+/* What the Assistant runs on, above either setup. */
+.sb-assistant-setup__choice {
+  padding: var(--space-6) var(--space-5) 0;
+}
+
+.sb-assistant-setup__choice .sb-segmented__label {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.sb-assistant-sub .sb-assistant-key__status {
+  align-items: flex-start;
+}
+
+.sb-assistant-sub__status-icon {
+  flex: none;
+  margin-top: 2px;
+}
+
+.sb-assistant-sub__account {
+  min-width: 0;
+}
+
+.sb-assistant-sub__account-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sb-assistant-sub__lead {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: var(--font-size-sm);
+  line-height: 1.5;
+}
+
+/* The install command, with Copy. It wraps rather than scrolls in a narrow sheet. */
+.sb-assistant-sub__command {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-2) var(--space-2) var(--space-4);
+  border-radius: var(--radius-md);
+  background: var(--bg-field);
+  box-shadow: inset 0 0 0 1px var(--border-subtle);
+}
+
+.sb-assistant-sub__command code {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-family: var(--font-mono);
+  font-size: var(--font-size-xs);
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+/* The window's chat runs on something else than a new chat would: says so above the composer. */
+.sb-assistant-provider-note {
+  flex: none;
+  margin: 0;
+  padding: var(--space-3) var(--space-5);
+  border-top: 1px solid var(--border-subtle);
+  background: var(--bg-sunken);
+  color: var(--text-secondary);
+  font-size: var(--font-size-xs);
+  line-height: 1.5;
+  text-wrap: pretty;
+}
+
+.sb-assistant-provider-note + .sb-assistant-composer {
+  border-top: 0;
+}
+
 /* Callouts: the subscription alternative, keychain warnings. */
 .sb-assistant-callout {
   display: flex;
@@ -555,14 +632,16 @@
   animation: sb-assistant-in var(--duration-base) var(--ease-out);
 }
 
-/* Replacing a screen can be undone like any edit: the AI accent, not the danger one. */
-.sb-assistant-confirm[data-kind="replace"] {
+/* Replacing a screen can be undone like any edit, and a permission question isn't a warning: the AI accent, not the danger one. */
+.sb-assistant-confirm[data-kind="replace"],
+.sb-assistant-confirm[data-kind="permission"] {
   box-shadow:
     inset 0 0 0 1px color-mix(in srgb, var(--ai) 35%, var(--border-default)),
     var(--shadow-sm);
 }
 
-.sb-assistant-confirm[data-kind="replace"] .sb-assistant-confirm__icon {
+.sb-assistant-confirm[data-kind="replace"] .sb-assistant-confirm__icon,
+.sb-assistant-confirm[data-kind="permission"] .sb-assistant-confirm__icon {
   color: var(--ai-text);
 }
 
@@ -601,6 +680,12 @@
   display: flex;
   justify-content: flex-end;
   gap: var(--space-2);
+}
+
+/* Up to four choices, allows first: they start at the left and wrap in a narrow sheet. */
+.sb-assistant-confirm__actions[data-kind="permission"] {
+  flex-wrap: wrap;
+  justify-content: flex-start;
 }
 
 /* Waiting indicator. */

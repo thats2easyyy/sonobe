@@ -258,12 +258,35 @@ The Connect Claude screen has more of these under **Try asking**. Click one to c
 - Ask for one feature per request, and read the AI Activity row when it's done.
 - If you can't explain the graph Claude built, ask it to walk you through it before you move on.
 
+## Experimental: the Assistant on your Claude subscription
+
+The desktop app's own Assistant, and its Design with Claude box, use your Anthropic API key. An experimental switch lets them run on your Claude subscription instead, through Claude's agent adapter. It's off by default, it's awaiting Anthropic's permission, and it isn't part of any release until Anthropic agrees. Anthropic's support article on [using the Agent SDK with your Claude plan](https://support.claude.com/en/articles/15036540-use-the-claude-agent-sdk-with-your-claude-plan) says: "Claude Agent SDK, claude -p, and third-party app usage still draw from your subscription's usage limits."
+
+To try it:
+
+1. Install Claude's agent adapter. It needs Node.js 22 or later:
+
+   ```sh
+   npm install -g @agentclientprotocol/claude-agent-acp
+   ```
+
+2. In Sonobe, open **Settings → Claude** and turn on **Use my Claude subscription in the Assistant** under Experimental.
+3. Open the Assistant and choose **Claude subscription**. If Claude isn't signed in on this computer, choose **Sign in…**, which opens Terminal for Claude's sign-in, then **Check again**.
+
+What to expect:
+
+- Replies stream with their tool steps, and **Stop** works, as with a key. In the Design with Claude box, Claude draws the screen over the artboard as it writes, one part at a time (`preview_design`), then imports it as layers in one undo step.
+- Claude changes only the prototype in its window, and asks before replacing a screen you changed by hand. It also asks before it saves, opens or creates a prototype.
+- It uses your plan's usage limits. The Assistant shows how many tokens a chat used, with no price. If the adapter is set to use an API key instead of your Claude account, the setup says so, because then the key pays.
+- A chat keeps what it started on. Switching between Claude subscription and API key starts a new chat.
+- Sonobe never sees your Claude login: the adapter uses the one Claude Code keeps on this computer. Your messages, the parts of the prototype Claude reads and files from a linked code folder go to Anthropic under your Claude account.
+
 ## Privacy
 
 - Sonobe's MCP server listens only on your own computer (127.0.0.1). It rejects requests from web pages, and it requires a token stored in `~/.sonobe/mcp.json`, a file only your user account can read. Other devices on your network can't connect to it. The web player you use for phone previews is a separate server, and you turn it on yourself.
 - Sonobe doesn't upload your document anywhere. Anything Claude reads through Sonobe's tools, like the outline, live values or screenshots, becomes part of your conversation with Claude, handled under your Claude plan and its settings. Treat giving Claude access to a confidential file like sharing that file with Claude.
 - Layer names, notes and comments are just data. If a file came from someone you don't trust, keep in mind that text inside it could try to steer Claude, and review what Claude proposes.
-- Sonobe's optional in-app Assistant, and its Design with Claude box on the canvas, are separate from all of this. They run only in the desktop app and use your own Anthropic API key, kept in your operating system's keychain, for people who'd rather not use Claude Code or Claude Desktop. If you link a code folder there, the files the Assistant reads from it are sent to Anthropic's API too ([guide 12](12-importing-designs.md#design-on-the-canvas)).
+- Sonobe's optional in-app Assistant, and its Design with Claude box on the canvas, are separate from all of this. They run only in the desktop app and use your own Anthropic API key, kept in your operating system's keychain, for people who'd rather not use Claude Code or Claude Desktop, or, with the experimental switch on, your Claude subscription ([above](#experimental-the-assistant-on-your-claude-subscription)). If you link a code folder there, the files the Assistant reads from it are sent to Anthropic too ([guide 12](12-importing-designs.md#design-on-the-canvas)).
 
 ## Try it
 

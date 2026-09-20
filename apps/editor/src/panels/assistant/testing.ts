@@ -6,23 +6,38 @@ import {
   type AssistantCanvasContext,
   type AssistantCodeFolderLinkResult,
   type AssistantCodeFolderStatus,
+  type AssistantConnection,
+  type AssistantConnectionUpdate,
   type AssistantDesignFields,
   type AssistantEvent,
   type AssistantHostLike,
+  type AssistantProvider,
   type AssistantRunResult,
+  type AssistantSignInResult,
   type AssistantStatus,
+  type AssistantSubscriptionStatus,
   type AssistantUsage,
   type HandoffResult,
 } from "./types.ts";
 
 export const usage = (totalTokens = 0, budgetTokens = totalTokens): AssistantUsage => ({ inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, totalTokens, budgetTokens, estimatedCostUsd: 0, requests: 0 });
 
+/** A subscription status: `unknown` by default, as before any check in a launch. */
+export const subscriptionStatus = (extra: Partial<AssistantSubscriptionStatus> = {}): AssistantSubscriptionStatus => ({ state: "unknown", kind: null, label: null, email: null, adapterVersion: null, message: null, ...extra });
+
+/** Signed in with a Claude Max plan. */
+export const signedIn = (): AssistantSubscriptionStatus => subscriptionStatus({ state: "ready", kind: "account", label: "Claude Max", email: "ava@example.com", adapterVersion: "0.79.0" });
+
+export const SIGNED_OUT_MESSAGE = "Claude isn't signed in on this computer. Choose Sign in (it opens Terminal), or run claude auth login in Terminal, then send your message again.";
+export const NOT_INSTALLED_MESSAGE = "Sonobe couldn't find Claude's agent adapter. It needs Node.js 22 or later: in Terminal, run npm install -g @agentclientprotocol/claude-agent-acp, then try again.";
+
 type SendRequest = { text: string; model?: string; context?: AssistantCanvasContext };
 
 export interface FakeAssistantHost extends AssistantHostLike {
   secretsMap: Map<string, string>;
   sent: SendRequest[];
-  confirmations: [string, boolean][];
+  /** confirm() calls: [id, approved], and the optionId when one was passed. */
+  confirmations: ([string, boolean] | [string, boolean, string])[];
   opened: string[];
   stops: number;
   resets: number;
@@ -37,6 +52,17 @@ export interface FakeAssistantHost extends AssistantHostLike {
   handoffs: string[];
   /** What openInClaudeCode() answers (default: opens in ~/code/noddit, linking it when no folder is). */
   nextHandoff: () => HandoffResult;
+  /** The connection status() reports; setConnection changes it (active follows the switch and the pick). */
+  connection: AssistantConnection;
+  /** What status().subscription reports. checkSubscription() sets it to nextCheck(). */
+  subscription: AssistantSubscriptionStatus;
+  /** What this window's chat runs on: set by its first send, cleared by reset and by a change of active. */
+  chatProvider: AssistantProvider | null;
+  connectionCalls: AssistantConnectionUpdate[];
+  checks: number;
+  nextCheck: () => AssistantSubscriptionStatus;
+  signIns: number;
+  nextSignIn: () => AssistantSignInResult;
   listeners: Set<(event: AssistantEvent) => void>;
   emit(event: AssistantEvent): void;
   /** Stream `html` as import_design's draft: `chunks` design_draft events with their offsets, the last one done with the whole html. */
@@ -45,7 +71,12 @@ export interface FakeAssistantHost extends AssistantHostLike {
   nextResult: (request: SendRequest, emit: (event: AssistantEvent) => void) => AssistantRunResult | Promise<AssistantRunResult>;
 }
 
-export function fakeAssistantHost(options: { secretsAvailable?: boolean; key?: string } = {}): FakeAssistantHost {
+export function fakeAssistantHost(options: { secretsAvailable?: boolean; key?: string; connection?: Partial<Omit<AssistantConnection, "active">>; subscription?: AssistantSubscriptionStatus } = {}): FakeAssistantHost {
+  const connection = (update: Partial<Omit<AssistantConnection, "active">> = {}): AssistantConnection => {
+    const subscriptionEnabled = update.subscriptionEnabled ?? false;
+    const provider = update.provider ?? "api_key";
+    return { subscriptionEnabled, provider, active: subscriptionEnabled ? provider : "api_key" };
+  };
   const host: FakeAssistantHost = {
     platform: "darwin",
     secretsMap: new Map(options.key ? [[ASSISTANT_KEY_SECRET, options.key]] : []),
@@ -57,6 +88,14 @@ export function fakeAssistantHost(options: { secretsAvailable?: boolean; key?: s
     keyOk: true,
     folder: { linked: null, missing: false },
     folderCalls: [],
+    connection: connection(options.connection),
+    subscription: options.subscription ?? subscriptionStatus(),
+    chatProvider: null,
+    connectionCalls: [],
+    checks: 0,
+    nextCheck: signedIn,
+    signIns: 0,
+    nextSignIn: () => ({ ok: true }),
     nextLink: () => ({ status: { linked: { name: "noddit", path: "~/code/noddit", persisted: true }, missing: false } }),
     handoffs: [],
     nextHandoff: () => {
@@ -96,10 +135,14 @@ export function fakeAssistantHost(options: { secretsAvailable?: boolean; key?: s
           running: false,
           messageCount: 0,
           codeFolder: host.folder,
+          connection: { ...host.connection },
+          subscription: { ...host.subscription },
+          chatProvider: host.chatProvider,
         };
       },
       send: async (request) => {
         host.sent.push(request);
+        host.chatProvider ??= host.connection.active;
         return host.nextResult(request, (e) => host.emit(e));
       },
       stop: async () => {
@@ -108,11 +151,29 @@ export function fakeAssistantHost(options: { secretsAvailable?: boolean; key?: s
       },
       reset: async () => {
         host.resets++;
+        host.chatProvider = null;
         return host.assistant!.status();
       },
-      confirm: async (id, approved) => {
-        host.confirmations.push([id, approved]);
+      confirm: async (id, approved, optionId) => {
+        host.confirmations.push(optionId === undefined ? [id, approved] : [id, approved, optionId]);
         return true;
+      },
+      setConnection: async (update) => {
+        host.connectionCalls.push(update);
+        const before = host.connection.active;
+        host.connection = connection({ ...host.connection, ...update });
+        // Main resets the window's chat when what a new chat runs on changes.
+        if (host.connection.active !== before) host.chatProvider = null;
+        return host.assistant!.status();
+      },
+      checkSubscription: async () => {
+        host.checks++;
+        host.subscription = host.nextCheck();
+        return { ...host.subscription };
+      },
+      signInToClaude: async () => {
+        host.signIns++;
+        return host.nextSignIn();
       },
       checkKey: async () => (host.keyOk ? { ok: true } : { ok: false, error: { code: "invalid_key", message: "Anthropic didn't accept this API key." } }),
       onEvent(cb) {

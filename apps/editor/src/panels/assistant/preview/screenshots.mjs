@@ -39,6 +39,17 @@ const SHOTS = [
       await page.getByRole("button", { name: "API key" }).click();
     },
   },
+  { name: "assistant-sub-choice", view: "sub-choice" },
+  { name: "assistant-sub-ready", view: "sub-ready" },
+  { name: "assistant-sub-ready-light", view: "sub-ready", theme: "light" },
+  { name: "assistant-sub-api-key", view: "sub-api-key" },
+  { name: "assistant-sub-signed-out", view: "sub-signed-out" },
+  { name: "assistant-sub-signed-out-light", view: "sub-signed-out", theme: "light" },
+  { name: "assistant-sub-not-installed", view: "sub-not-installed" },
+  { name: "assistant-sub-failed", view: "sub-failed" },
+  { name: "assistant-sub-chat", view: "sub-chat" },
+  { name: "assistant-sub-chat-light", view: "sub-chat", theme: "light" },
+  { name: "assistant-sub-mismatch", view: "sub-mismatch" },
   {
     name: "assistant-model-picker",
     view: "empty",

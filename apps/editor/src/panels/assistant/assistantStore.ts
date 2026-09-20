@@ -1,13 +1,13 @@
 /**
- * Assistant drawer state: whether it's open, the host's status, the chat transcript, tool activity,
- * pending confirmations, usage, and the chosen model. `reduceEvent` folds host events into state and
- * is pure, so it's unit-tested without a host.
+ * Assistant drawer state: whether it's open (and on its setup), the host's status, the chat transcript,
+ * tool activity, pending confirmations, usage, and the chosen model. `reduceEvent` folds host events
+ * into state and is pure, so it's unit-tested without a host.
  */
 
 import { useStore } from "zustand";
 import { createStore, type StoreApi } from "zustand/vanilla";
 import { readString, writeString } from "../../ui/lib/storage.ts";
-import { DEFAULT_MODEL_ID, FALLBACK_MODELS, type AssistantEvent, type AssistantLimits, type AssistantStatus, type AssistantToolStatus, type AssistantUsage } from "./types.ts";
+import { DEFAULT_MODEL_ID, FALLBACK_MODELS, type AssistantConfirmOption, type AssistantEvent, type AssistantLimits, type AssistantStatus, type AssistantToolStatus, type AssistantUsage } from "./types.ts";
 
 export const MODEL_STORAGE_KEY = "sonobe.assistant.model";
 
@@ -26,13 +26,30 @@ export type ChatItem =
   | { kind: "user"; id: string; text: string; origin?: "canvas" }
   | { kind: "assistant"; id: string; runId: string; turn: number; text: string; thinking: string; tools: ToolChip[] }
   | { kind: "notice"; id: string; tone: "info" | "warn" | "error"; text: string; code?: string }
-  | { kind: "confirm"; id: string; runId: string; title: string; message: string; count: number; status: "pending" | "approved" | "declined"; confirmKind?: "delete" | "replace"; approveLabel?: string; declineLabel?: string };
+  | {
+      kind: "confirm";
+      id: string;
+      runId: string;
+      title: string;
+      message: string;
+      count: number;
+      status: "pending" | "approved" | "declined";
+      confirmKind?: "delete" | "replace" | "permission";
+      approveLabel?: string;
+      declineLabel?: string;
+      /** A permission card's choices, in the agent's order. */
+      options?: AssistantConfirmOption[];
+      /** The choice the person picked. */
+      optionId?: string;
+    };
 
 export type KeyCheckState = { state: "idle" } | { state: "checking" } | { state: "ok" } | { state: "error"; message: string };
 
 export interface AssistantState {
   /** The standalone drawer (AssistantHost) is open. */
   open: boolean;
+  /** The drawer shows its setup (the API key, or the Claude subscription) even though it's ready: the person opened it. */
+  setup: boolean;
   status: AssistantStatus | null;
   /** Why the status couldn't be loaded. */
   statusError: string | null;
@@ -50,10 +67,13 @@ export interface AssistantState {
   hide: () => void;
   toggle: () => void;
   setOpen: (open: boolean) => void;
+  /** Open the drawer on its setup. */
+  showSetup: () => void;
+  setSetup: (setup: boolean) => void;
   setModel: (model: string) => void;
 }
 
-export type AssistantData = Omit<AssistantState, "show" | "hide" | "toggle" | "setOpen" | "setModel">;
+export type AssistantData = Omit<AssistantState, "show" | "hide" | "toggle" | "setOpen" | "showSetup" | "setSetup" | "setModel">;
 
 let itemCounter = 0;
 /** Local ids for transcript items. */
@@ -96,7 +116,8 @@ const OUTCOME_NOTICES: Partial<Record<string, { tone: "info" | "warn"; text: str
 export function reduceEvent(state: AssistantData, event: AssistantEvent): Partial<AssistantData> {
   switch (event.type) {
     case "run_started":
-      return { running: true, runId: event.runId, thinking: false };
+      // The chat runs on what its first message started on; the status learns it here, before the next refresh.
+      return { running: true, runId: event.runId, thinking: false, ...(event.provider && state.status ? { status: { ...state.status, chatProvider: event.provider } } : {}) };
     case "turn_started":
       // A re-issued turn replaces the partial text and drafts of the failed attempt.
       return { items: updateTurn(state.items, event.runId, event.turn, (item) => ({ ...item, text: "", thinking: "", tools: item.tools.filter((t) => !t.draft) })), thinking: false };
@@ -105,6 +126,17 @@ export function reduceEvent(state: AssistantData, event: AssistantEvent): Partia
     case "thinking_delta":
       return { items: updateTurn(state.items, event.runId, event.turn, (item) => ({ ...item, thinking: item.thinking + event.delta })), thinking: true };
     case "tool_started": {
+      // A repeat for a chip already started (the subscription path learns a call's input after it starts) updates it where it is.
+      const known = state.items.some((item) => item.kind === "assistant" && item.runId === event.runId && item.tools.some((t) => t.toolUseId === event.toolUseId && !t.draft));
+      if (known) {
+        return {
+          items: state.items.map((item) =>
+            item.kind === "assistant" && item.runId === event.runId && item.tools.some((t) => t.toolUseId === event.toolUseId)
+              ? { ...item, tools: item.tools.map((t) => (t.toolUseId === event.toolUseId && t.status === "running" ? { ...t, title: event.title, detail: event.detail } : t)) }
+              : item,
+          ),
+        };
+      }
       const turn = latestTurn(state.items, event.runId) ?? 1;
       const chip: ToolChip = { toolUseId: event.toolUseId, name: event.name, title: event.title, detail: event.detail, status: "running", changedDocument: false };
       return { items: updateTurn(state.items, event.runId, turn, (item) => ({ ...item, tools: [...item.tools.filter((t) => t.toolUseId !== chip.toolUseId), chip] })), thinking: false };
@@ -140,11 +172,16 @@ export function reduceEvent(state: AssistantData, event: AssistantEvent): Partia
             ...(event.kind ? { confirmKind: event.kind } : {}),
             ...(event.approveLabel ? { approveLabel: event.approveLabel } : {}),
             ...(event.declineLabel ? { declineLabel: event.declineLabel } : {}),
+            ...(event.options?.length ? { options: event.options.map((o) => ({ ...o })) } : {}),
           },
         ],
       };
     case "confirm_resolved":
-      return { items: state.items.map((item) => (item.kind === "confirm" && item.id === event.confirmationId ? { ...item, status: event.approved ? "approved" : "declined" } : item)) };
+      return {
+        items: state.items.map((item) =>
+          item.kind === "confirm" && item.id === event.confirmationId ? { ...item, status: event.approved ? "approved" : "declined", ...(event.optionId !== undefined ? { optionId: event.optionId } : {}) } : item,
+        ),
+      };
     case "usage":
       return { usage: event.usage, limits: event.limits };
     case "notice":
@@ -196,7 +233,7 @@ function storedModel(): string {
 }
 
 export function initialAssistantData(model: string = DEFAULT_MODEL_ID): AssistantData {
-  return { open: false, status: null, statusError: null, items: [], running: false, runId: null, thinking: false, model, usage: null, limits: null, keyCheck: { state: "idle" } };
+  return { open: false, setup: false, status: null, statusError: null, items: [], running: false, runId: null, thinking: false, model, usage: null, limits: null, keyCheck: { state: "idle" } };
 }
 
 export function createAssistantStore(options: { persistModel?: boolean } = {}): StoreApi<AssistantState> {
@@ -204,9 +241,12 @@ export function createAssistantStore(options: { persistModel?: boolean } = {}): 
   return createStore<AssistantState>()((set) => ({
     ...initialAssistantData(persist ? storedModel() : DEFAULT_MODEL_ID),
     show: () => set({ open: true }),
-    hide: () => set({ open: false }),
-    toggle: () => set((s) => ({ open: !s.open })),
-    setOpen: (open) => set({ open }),
+    // Closing leaves the setup, as the drawer used to when it unmounted.
+    hide: () => set({ open: false, setup: false }),
+    toggle: () => set((s) => (s.open ? { open: false, setup: false } : { open: true })),
+    setOpen: (open) => set(open ? { open } : { open, setup: false }),
+    showSetup: () => set({ open: true, setup: true }),
+    setSetup: (setup) => set({ setup }),
     setModel: (model) => {
       if (persist) writeString(MODEL_STORAGE_KEY, model);
       set({ model });

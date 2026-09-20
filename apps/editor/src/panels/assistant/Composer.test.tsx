@@ -90,4 +90,34 @@ describe("Composer", () => {
     expect(container.querySelector('[role="meter"]')?.getAttribute("aria-valuetext")).toBe("250K of 1M budget used in this chat");
     expect(container.querySelector(".sb-assistant-usage")?.getAttribute("title")).not.toContain("in all");
   });
+
+  it("clears the text once an async send says it went, unless it changed meanwhile", async () => {
+    let answer!: (ok: boolean) => void;
+    const onSend = vi.fn(() => new Promise<boolean>((resolve) => (answer = resolve)));
+    const textarea = mount({ onSend });
+    type(textarea, "a checkout");
+    pressEnter(textarea);
+    expect(textarea.value).toBe("a checkout");
+    await act(async () => answer(false));
+    expect(textarea.value).toBe("a checkout");
+
+    pressEnter(textarea);
+    await act(async () => answer(true));
+    expect(textarea.value).toBe("");
+
+    type(textarea, "a profile");
+    pressEnter(textarea);
+    type(textarea, "a profile screen");
+    await act(async () => answer(true));
+    expect(textarea.value).toBe("a profile screen");
+  });
+
+  it("on the Claude subscription, shows tokens only, and a threshold hides the meter", () => {
+    mount({ usage: { ...usage(12_400), estimatedCostUsd: 0 }, provider: "subscription" });
+    expect(container.querySelector(".sb-assistant-usage__text")?.textContent).toBe("12K tokens · your Claude plan");
+    expect(container.querySelector('[role="meter"]')).toBeNull();
+    expect(container.textContent).not.toContain("$");
+    mount({ usage: usage(900_000), provider: "subscription", usageThreshold: 0.5 });
+    expect(container.querySelector(".sb-assistant-usage")).toBeNull();
+  });
 });

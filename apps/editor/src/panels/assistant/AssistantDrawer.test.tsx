@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { appPanels } from "../../app/appPanels.ts";
 import { createAssistantStore } from "./assistantStore.ts";
 import { AssistantDrawer } from "./AssistantDrawer.tsx";
-import { fakeAssistantHost, usage, type FakeAssistantHost } from "./testing.ts";
+import { fakeAssistantHost, NOT_INSTALLED_MESSAGE, SIGNED_OUT_MESSAGE, signedIn, subscriptionStatus, usage, type FakeAssistantHost } from "./testing.ts";
 import { ANTHROPIC_CONSOLE_KEYS_URL, ASSISTANT_KEY_SECRET } from "./types.ts";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -29,6 +29,9 @@ const flush = async () => {
     for (let i = 0; i < 5; i++) await new Promise((resolve) => setTimeout(resolve, 0));
   });
 };
+
+/** The drawer's own text, without a portal's (menus, tooltips). */
+const text = () => container.textContent ?? "";
 
 async function mount(host: FakeAssistantHost | null, props: { onConnectClaude?: () => void; onClose?: () => void } = {}) {
   const store = createAssistantStore({ persistModel: false });
@@ -194,5 +197,145 @@ describe("AssistantDrawer", () => {
     expect(container.textContent).toContain("Key saved");
     await click(buttonByText("Back to chat"));
     expect(container.querySelector("textarea")).not.toBeNull();
+  });
+});
+
+describe("AssistantDrawer on the Claude subscription (experimental)", () => {
+  const subscriptionOn = { connection: { subscriptionEnabled: true, provider: "subscription" as const } };
+  const KEY = "sk-ant-api03-abcdefgh1234";
+  let clipboard: string[];
+
+  beforeEach(() => {
+    clipboard = [];
+    Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText: async (value: string) => void clipboard.push(value) } });
+  });
+
+  const radios = () => [...container.querySelectorAll('[role="radio"]')].map((r) => [r.textContent, r.getAttribute("aria-checked")]);
+
+  it("with the switch off, shows only today's key setup", async () => {
+    const host = fakeAssistantHost();
+    await mount(host);
+    expect(container.querySelector('[role="radiogroup"]')).toBeNull();
+    expect(text()).toContain("Use your own Anthropic API key");
+    expect(text()).toContain("Prefer your Claude subscription?");
+    expect(text()).not.toContain("Use your Claude subscription");
+    expect(host.checks).toBe(0);
+  });
+
+  it("with the switch on, offers the subscription and the API key, and picking one tells main", async () => {
+    const host = fakeAssistantHost({ connection: { subscriptionEnabled: true } });
+    host.nextCheck = () => subscriptionStatus({ state: "signed_out", kind: "none", label: "Not logged in", message: SIGNED_OUT_MESSAGE });
+    await mount(host);
+    expect(radios()).toEqual([
+      ["Claude subscriptionExperimental", "false"],
+      ["API key", "true"],
+    ]);
+    expect(text()).toContain("Use your own Anthropic API key");
+
+    await click(container.querySelector('[role="radio"]'));
+    expect(host.connectionCalls).toEqual([{ provider: "subscription" }]);
+    expect(radios()[0]).toEqual(["Claude subscriptionExperimental", "true"]);
+    expect(text()).toContain("Use your Claude subscription");
+    expect(text()).toContain("It draws on your plan's usage limits. No API key.");
+    expect(text()).toContain("Sonobe never sees your Claude login: the adapter uses the one Claude Code keeps on this computer.");
+    expect(text()).toContain("Experimental: awaiting Anthropic's permission, so it's off by default and not in any release.");
+    // Picking it read the login: signed out.
+    expect(host.checks).toBe(1);
+    expect(text()).toContain(SIGNED_OUT_MESSAGE);
+    expect(container.querySelector(".sb-assistant__subtitle")?.textContent).toBe("Claude subscription · Not logged in");
+  });
+
+  it("signs in through Terminal, says what happened, and checks again", async () => {
+    const host = fakeAssistantHost(subscriptionOn);
+    host.nextCheck = () => subscriptionStatus({ state: "signed_out", kind: "none", label: "Not logged in", message: SIGNED_OUT_MESSAGE });
+    await mount(host);
+    expect(text()).toContain(SIGNED_OUT_MESSAGE);
+    await click(buttonByText("Sign in…"));
+    expect(host.signIns).toBe(1);
+    expect(text()).toContain("Finish signing in in Terminal, then choose Check again.");
+
+    host.nextSignIn = () => ({ ok: false, error: "Run claude-agent-acp --cli auth login in a terminal, then check again." });
+    await click(buttonByText("Sign in…"));
+    expect(container.querySelector('[role="alert"]')?.textContent).toBe("Run claude-agent-acp --cli auth login in a terminal, then check again.");
+
+    // Signed in meanwhile: Check again finds it, and the chat opens.
+    host.nextCheck = signedIn;
+    await click(buttonByText("Check again"));
+    expect(host.checks).toBe(2);
+    expect(text()).toContain("What should we build?");
+    expect(container.querySelector(".sb-assistant__subtitle")?.textContent).toBe("Claude subscription · Claude Max");
+  });
+
+  it("shows the install command when the adapter isn't there, and copies it", async () => {
+    const host = fakeAssistantHost(subscriptionOn);
+    host.nextCheck = () => subscriptionStatus({ state: "not_installed", message: NOT_INSTALLED_MESSAGE });
+    await mount(host);
+    expect(text()).toContain("Install Claude's agent adapter (it needs Node.js 22 or later):");
+    expect(container.querySelector(".sb-assistant-sub__command code")?.textContent).toBe("npm install -g @agentclientprotocol/claude-agent-acp");
+    await click(buttonByText("Copy"));
+    expect(clipboard).toEqual(["npm install -g @agentclientprotocol/claude-agent-acp"]);
+    expect(buttonByText("Copied")).toBeTruthy();
+    expect(buttonByText("Check again")).toBeTruthy();
+  });
+
+  it("says why the adapter didn't start, with Check again", async () => {
+    const host = fakeAssistantHost(subscriptionOn);
+    host.nextCheck = () => subscriptionStatus({ state: "failed", message: "Claude's agent adapter didn't start: spawn EACCES. Check that it's installed (npm install -g @agentclientprotocol/claude-agent-acp), then try again." });
+    await mount(host);
+    expect(container.querySelector('[role="alert"]')?.textContent).toContain("didn't start: spawn EACCES");
+    expect(buttonByText("Check again")).toBeTruthy();
+    expect(buttonByText("Sign in…")).toBeUndefined();
+  });
+
+  it("warns when the adapter bills an API key instead of the plan", async () => {
+    const host = fakeAssistantHost(subscriptionOn);
+    host.nextCheck = () => subscriptionStatus({ state: "ready", kind: "api_key", label: "Anthropic API key", adapterVersion: "0.79.0" });
+    const store = await mount(host);
+    // Ready: the chat shows; the header opens the setup.
+    expect(text()).toContain("What should we build?");
+    await click(buttonByLabel("Claude subscription"));
+    expect(store.getState().setup).toBe(true);
+    expect(text()).toContain("Claude's adapter is set to use Anthropic API key, so this bills that, not your Claude plan.");
+    expect(text()).toContain("Claude's agent adapter 0.79.0");
+    await click(buttonByText("Use Claude subscription"));
+    expect(text()).toContain("What should we build?");
+  });
+
+  it("chats on the plan: its label in the header, tokens only, and the plan's limits on the models", async () => {
+    const host = fakeAssistantHost({ ...subscriptionOn, subscription: signedIn() });
+    host.nextResult = (_request, emit) => {
+      emit({ type: "run_started", runId: "r1", model: "claude-sonnet-5", provider: "subscription" });
+      emit({ type: "turn_started", runId: "r1", turn: 1 });
+      emit({ type: "text_delta", runId: "r1", turn: 1, delta: "Hello!" });
+      emit({ type: "run_finished", runId: "r1", outcome: "completed", usage: { ...usage(21_500), estimatedCostUsd: 0 } });
+      return { runId: "r1", outcome: "completed", usage: usage(21_500) };
+    };
+    await mount(host);
+    expect(host.checks).toBe(0);
+    expect(container.querySelector(".sb-assistant__subtitle")?.textContent).toBe("Claude subscription · Claude Max");
+    expect(buttonByLabel("API key")).toBeNull();
+    await click(buttonByText("Explain how this prototype works"));
+    expect(container.querySelector(".sb-assistant-usage__text")?.textContent).toBe("22K tokens · your Claude plan");
+    expect(container.querySelector('[role="meter"]')).toBeNull();
+    expect(container.querySelector(".sb-assistant-provider-note")).toBeNull();
+
+    await click(container.querySelector('button[aria-label^="Model"]') ?? buttonByText(/Sonnet 5/));
+    expect(document.body.textContent).toContain("Uses your Claude plan's limits.");
+    expect(document.body.textContent).not.toContain("per million tokens");
+  });
+
+  it("says when this chat runs on something else than a new one would, with New chat", async () => {
+    const host = fakeAssistantHost({ ...subscriptionOn, key: KEY, subscription: signedIn() });
+    // This window's chat started on the API key; another window then picked the subscription.
+    host.chatProvider = "api_key";
+    await mount(host);
+    await click(buttonByText("Explain how this prototype works"));
+    expect(container.querySelector(".sb-assistant__subtitle")?.textContent).toBe("Your API key · sk-ant-…1234");
+    const note = container.querySelector(".sb-assistant-provider-note");
+    expect(note?.textContent).toBe("This chat uses your API key. A new chat uses your Claude subscription. New chat");
+    await click(note!.querySelector("button"));
+    expect(host.resets).toBe(1);
+    expect(container.querySelector(".sb-assistant-provider-note")).toBeNull();
+    expect(container.querySelector(".sb-assistant__subtitle")?.textContent).toBe("Claude subscription · Claude Max");
   });
 });

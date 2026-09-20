@@ -16,7 +16,8 @@ import { abortCaptures, captureDesignInWindow, fetchCaptureImage } from "./desig
 import { createAppWindow, type AppWindow, type WindowContentSource } from "./app-window.ts";
 import { createDraftStore, installQuitOnSignal, registerDraftIpc, type DraftStore } from "./drafts.ts";
 import { createCodeFolderStore } from "./assistant/codeFolder.ts";
-import { registerAssistant } from "./assistant/register.ts";
+import { createConnectionStore } from "./assistant/connection.ts";
+import { registerAssistant, type AssistantRegistration } from "./assistant/register.ts";
 import { captureWebContents } from "./capture.ts";
 import { bundledCliPath } from "./cli-path.ts";
 import { isCommandId, toHostPlatform } from "./commands.ts";
@@ -105,6 +106,8 @@ function main(): void {
   let creating: Promise<AppWindow> | null = null;
   let ready = false;
   let secrets: SecretStore | null = null;
+  /** Stopped on quit: it runs Claude's agent adapter as a child process when the subscription is on. */
+  let assistant: AssistantRegistration | null = null;
   /** Set once an editor pushes revisions (notifyDocumentChanged): players stop polling. */
   let pushUpdates = false;
   /** Undo and Redo titles from the front editor window ("Undo Mute Card Shadow"), for the Edit menu. */
@@ -807,6 +810,7 @@ function main(): void {
     if (resourceTimer) clearTimeout(resourceTimer);
     if (viewerWindow) void viewerWindow.server.close();
     rpc?.dispose();
+    void assistant?.dispose().catch(() => undefined);
     if (mcpHandler) void mcpHandler.close().catch(() => undefined);
     appHost?.dispose();
     if (preview) void preview.close();
@@ -1115,7 +1119,7 @@ function main(): void {
     drafts = createDraftStore({ dir: path.join(app.getPath("userData"), "Drafts"), version: VERSION, log });
     registerDraftIpc(ipcMain, drafts, { requireWindow, reveal: (folder) => shell.showItemInFolder(folder) });
     void drafts.prune().then((n) => n && log("info", `Removed ${n} empty or 90-day-old draft${n === 1 ? "" : "s"}`)).catch(() => undefined);
-    registerAssistant({
+    assistant = registerAssistant({
       ipcMain,
       isTrustedSender: (event) => trustedWindow(event as IpcMainInvokeEvent) !== null,
       host: () => appHost,
@@ -1143,6 +1147,12 @@ function main(): void {
         // Connect Claude's relay: the CLI that ships with the app, else `sonobe` on PATH.
         server: () => ({ command: mcpStatus().cliPath ?? "sonobe", args: ["mcp"] }),
         openPath: (file) => shell.openPath(file),
+      },
+      // Experimental and off by default (Settings → Claude): the Assistant on the person's Claude subscription.
+      connection: createConnectionStore({ file: path.join(app.getPath("userData"), "assistant-connection.json"), log }),
+      subscription: {
+        sessionsDir: path.join(app.getPath("userData"), "assistant", "claude"),
+        signIn: { platform: process.platform, dir: path.join(app.getPath("userData"), "handoff"), openPath: (file) => shell.openPath(file) },
       },
     });
 

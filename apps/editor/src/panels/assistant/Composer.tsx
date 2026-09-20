@@ -3,13 +3,13 @@ import { forwardRef, useState, type KeyboardEvent } from "react";
 import { IconButton } from "../../ui/IconButton.tsx";
 import { TextArea } from "../../ui/TextField.tsx";
 import { budgetFraction, formatCost, formatTokens } from "./format.ts";
-import type { AssistantLimits, AssistantUsage } from "./types.ts";
+import type { AssistantLimits, AssistantProvider, AssistantUsage } from "./types.ts";
 
 export interface ComposerProps {
   running: boolean;
   disabled?: boolean;
-  /** Return false to keep the text in the field (nothing was sent). */
-  onSend: (text: string) => boolean | void;
+  /** Return false to keep the text in the field (nothing was sent). A promise clears it once it resolves true, unless the text changed meanwhile. */
+  onSend: (text: string) => boolean | void | Promise<boolean>;
   onStop: () => void;
   usage: AssistantUsage | null;
   limits: AssistantLimits | null;
@@ -21,13 +21,23 @@ export interface ComposerProps {
   sendLabel?: string;
   /** Hide the usage meter until this share of the budget is used (0–1). Default 0: always shown. */
   usageThreshold?: number;
+  /** What the chat runs on. The subscription has no budget here (the plan's own limits apply): the meter shows tokens only, and a threshold hides it. */
+  provider?: AssistantProvider;
 }
 
 /** What the budget counts: billed-weight tokens, or the plain total from older hosts. */
 const budgetUsed = (usage: AssistantUsage | null) => usage?.budgetTokens ?? usage?.totalTokens ?? 0;
 
-/** Tokens used in this chat against its budget, with a list-price estimate. */
-export function UsageMeter({ usage, limits }: { usage: AssistantUsage | null; limits: AssistantLimits | null }) {
+/** Tokens used in this chat against its budget, with a list-price estimate. On the subscription, the tokens only. */
+export function UsageMeter({ usage, limits, provider = "api_key" }: { usage: AssistantUsage | null; limits: AssistantLimits | null; provider?: AssistantProvider }) {
+  if (provider === "subscription") {
+    const total = usage?.totalTokens ?? 0;
+    return (
+      <div className="sb-assistant-usage" title="Tokens this chat used, as Claude's agent adapter counts them. Your Claude plan's own usage limits apply.">
+        <span className="sb-assistant-usage__text">{formatTokens(total)} tokens · your Claude plan</span>
+      </div>
+    );
+  }
   const used = budgetUsed(usage);
   const budget = limits?.tokenBudget ?? 0;
   const fraction = budgetFraction(used, budget);
@@ -55,14 +65,21 @@ export function UsageMeter({ usage, limits }: { usage: AssistantUsage | null; li
 }
 
 /** Message field with Send and Stop. Enter sends; Shift+Enter adds a line. */
-export const Composer = forwardRef<HTMLTextAreaElement, ComposerProps>(function Composer({ running, disabled = false, onSend, onStop, usage, limits, placeholder, ariaLabel, ariaDescribedBy, sendLabel = "Send", usageThreshold = 0 }, ref) {
+export const Composer = forwardRef<HTMLTextAreaElement, ComposerProps>(function Composer({ running, disabled = false, onSend, onStop, usage, limits, placeholder, ariaLabel, ariaDescribedBy, sendLabel = "Send", usageThreshold = 0, provider = "api_key" }, ref) {
   const [text, setText] = useState("");
   const canSend = !disabled && !running && text.trim().length > 0;
-  const showMeter = budgetFraction(budgetUsed(usage), limits?.tokenBudget ?? 0) >= usageThreshold;
+  const showMeter = provider === "subscription" ? usageThreshold === 0 : budgetFraction(budgetUsed(usage), limits?.tokenBudget ?? 0) >= usageThreshold;
 
   const send = () => {
     if (!canSend) return;
-    if (onSend(text) === false) return;
+    const sent = onSend(text);
+    if (sent === false) return;
+    if (sent instanceof Promise) {
+      void sent.then((ok) => {
+        if (ok) setText((current) => (current === text ? "" : current));
+      });
+      return;
+    }
     setText("");
   };
 
@@ -94,7 +111,7 @@ export const Composer = forwardRef<HTMLTextAreaElement, ComposerProps>(function 
           <IconButton icon={<ArrowUp size={15} strokeWidth={2.25} />} label={sendLabel} shortcut="Enter" variant="solid" size="sm" className="sb-assistant-composer__send" disabled={!canSend} onClick={send} />
         )}
       </div>
-      {showMeter ? <UsageMeter usage={usage} limits={limits} /> : null}
+      {showMeter ? <UsageMeter usage={usage} limits={limits} provider={provider} /> : null}
     </div>
   );
 });
