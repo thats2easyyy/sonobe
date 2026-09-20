@@ -87,8 +87,9 @@ function openSocket(ctx: PatchContext, s: WebSocketConnectionState, target: Targ
   }
   const factory = webSocketFactory(ctx.services);
   if (!factory) return endWithError(s, "This viewer can't open WebSockets.");
-  if (Object.keys(headers).length > 0 && ctx.services.device().platform !== "desktop") {
-    warnOnce(ctx, "browserHeaders", "Browsers don't let prototypes set WebSocket headers; Headers only apply in the desktop app. Put a token in the URL instead.");
+  // Every host opens sockets with the browser's WebSocket (the desktop app's viewer too), which sends no custom headers.
+  if (Object.keys(headers).length > 0) {
+    warnOnce(ctx, "browserHeaders", "Sonobe can't send WebSocket headers yet, because browsers don't let pages set them; only Sec-WebSocket-Protocol reaches the server. Put a token in the URL instead.");
   }
 
   let socket: PlatformWebSocket;

@@ -102,7 +102,10 @@ describe.skipIf(!helper)(`the sfsymbol helper${built.skipped ? ` (skipped: ${bui
 
   it("lists every symbol this Mac has", () => {
     const names = execFileSync(helper!, ["--list"], { encoding: "utf8" }).trim().split("\n");
-    expect(names.length).toBeGreaterThan(8000);
+    // As many as this macOS's glyph bundle names, which grows with each release (about 4,800 on macOS 13, 8,300 on macOS 26).
+    const order = execFileSync("plutil", ["-convert", "json", "-o", "-", "/System/Library/CoreServices/CoreGlyphs.bundle/Contents/Resources/symbol_order.plist"], { encoding: "utf8" });
+    expect(names.length).toBe((JSON.parse(order) as string[]).length);
+    expect(names.length).toBeGreaterThan(4000);
     expect(names).toContain("heart.fill");
   });
 });

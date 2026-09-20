@@ -27,7 +27,7 @@ Device Info describes the phone, tablet, or computer your prototype is showing o
 - Wire Screen Size into a full-screen layer's Size so it fits every device and orientation.
 - Unpack Safe Area with Edges Unpack and use Top to keep headers below the status bar.
 - Feed Dark Mode into If / Else to pick colors for each theme.
-- Rotating the viewer turns the interface only when an Interface Orientation patch allows it.
+- The viewer's Rotate button turns the interface and swaps Screen Size by itself. The web player on a phone keeps the project's orientation, so there only Orientation follows the phone.
 
 ## Coming from Origami
 Device is called Device Name. Safe Area is a Point 4D in [top, right, bottom, left] order. Landscape is new.
@@ -68,11 +68,10 @@ patch theme ifElse<color> condition←info.darkMode ifTrue=#1C1C1EFF ifFalse=#FF
 
 ### Enlarge a photo in landscape
 
-Interface Orientation lets the interface turn, and Landscape drives the spring.
+Rotate the viewer, and Landscape drives the spring.
 
 ```text
 layer photo image "Photo" @16,200 370x250 scale←zoom.output
-patch rotation interfaceOrientation landscapeLeft=true landscapeRight=true
 patch info deviceInfo
 patch pop popAnimation number←info.landscape bounciness=2 speed=12
 patch zoom transition<number> progress←pop.output start=1 end=1.6
@@ -80,13 +79,13 @@ patch zoom transition<number> progress←pop.output start=1 end=1.6
 
 ## Common mistakes
 
-- Landscape never turns true when you rotate the viewer: the interface stays upright unless an Interface Orientation patch allows landscape. Add one and leave Landscape Left and Landscape Right on.
+- Landscape stays false when you turn your phone: the web player keeps the project's orientation and scales it to fit, so only Orientation follows the phone. Test landscape with the viewer's Rotate button, or compare Orientation with 90 and 270.
 - A header slides under the status bar on some devices: a fixed top padding only fits one device. Use the top value of Safe Area instead.
 - Uses a Mouse is false while you click around in the desktop app: it describes the device you picked, not your computer. Pick a Desktop device to preview the mouse layout.
 
 ## Pairs well with
 
-- [Interface Orientation](interfaceOrientation.md): Chooses which ways the interface turns when the device rotates, and which orientation it starts in.
+- [Interface Orientation](interfaceOrientation.md): Reports which way the interface would face as the device rotates, from the directions you allow and a starting orientation.
 - [If / Else](ifElse.md): Outputs one of two values depending on whether a condition is on or off.
 - [Edges Unpack](edgesUnpack.md): Splits an Edges value into separate top, right, bottom, and left distances.
 - [Transition](transition.md): Turns a progress value into a value between Start and End, so one animation can drive any property.

@@ -28,7 +28,7 @@ The outputs:
 ## Tips
 - Metering works whenever the microphone is on; you don't need to record.
 - Voices are noisy, so smooth Audio Metering's Volume with Pop Animation or Smooth Value before it drives a layer.
-- On a phone, the web player needs an HTTPS address to use the microphone.
+- On a phone, the web player needs an HTTPS address to use the microphone, and Preview on Phone's is plain http://, so test the microphone in the desktop app.
 
 ## Coming from Origami
 Enable is Enabled and Record is Recording. Metering no longer needs Record on. Available and Recorded are new.
@@ -78,7 +78,7 @@ patch memo soundPlayer sound←mic.sound play←tap_play.tap
 
 - Audio Metering reads 0: Enabled is still off, since the microphone starts off. Turn Enabled on and allow the permission prompt.
 - The recording is always empty: a pulse is wired into Recording, so recording lasts one frame and is discarded. Wire a state that stays on while recording, such as an Interaction's Down.
-- The microphone works on the computer but not on the phone: the web player was opened over plain http://, and browsers only allow the microphone on HTTPS or localhost. Open it through an HTTPS link.
+- The microphone works on the computer but not on the phone: the web player was opened over plain http://, and browsers only allow the microphone on HTTPS or localhost. Sonobe has no HTTPS preview yet, so test it in the desktop viewer or the pop-out window.
 
 ## Pairs well with
 

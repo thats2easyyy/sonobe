@@ -147,6 +147,19 @@ describe("webSocketConnection", () => {
     expect(h.logs.filter((l) => l.level === "warn")).toHaveLength(1);
   });
 
+  it("warns about other headers in the desktop app too, whose sockets are the browser's", () => {
+    const { platform } = sockets();
+    const web = createPatchHarness(webSocketConnection).services.device();
+    const h = createPatchHarness(webSocketConnection, {
+      inputs: { connect: true, url: "wss://a.test", headers: { Authorization: "Bearer t" } },
+      services: { platform, device: () => ({ ...web, platform: "desktop" }) },
+    });
+    h.run(2);
+    const warnings = h.logs.filter((l) => l.level === "warn").map((l) => l.message);
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]).not.toMatch(/desktop app/);
+  });
+
   it("shows send errors and clears them after a successful send", () => {
     const { h } = openConnection();
     const record = connectionRecords(h.services).get(KEY)!;

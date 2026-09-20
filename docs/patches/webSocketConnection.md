@@ -26,7 +26,7 @@ The connection doesn't retry by itself. Turn Connect off and on again to reconne
 ## Tips
 - Drive Connect from a Switch so a button can start and stop the connection.
 - Show Connected on a status dot so you can tell when messages will get through.
-- **Headers** (advanced) only reach the server in the desktop app, because browsers don't allow them. In the web player, put tokens in the URL instead.
+- **Headers** (advanced) don't reach the server yet, in the desktop app or the web player, because browsers don't let pages set them. Only Sec-WebSocket-Protocol gets through, so put tokens in the URL instead.
 
 ## Coming from Origami
 Origami's text Error output is **Error Message** here. Error (a true/false value) and Connecting are new.
@@ -37,7 +37,7 @@ Origami's text Error output is **Error Message** here. Error (a true/false value
 |---|---|---|---|
 | **Connect**<br>`connect` | `boolean` · whole loop | `false` | When on, opens the connection and keeps it open; turning it off closes it. Turn it off and on again to reconnect. |
 | **URL**<br>`url` | `text` (url) · whole loop | `""` | The server address, starting with wss:// (secure) or ws://. Changing it while connected reconnects to the new address. |
-| **Headers**<br>`headers` | `json` · whole loop · advanced | `{}` | A JSON object of headers sent when connecting, such as an Authorization token. Only the desktop app can send them. |
+| **Headers**<br>`headers` | `json` · whole loop · advanced | `{}` | A JSON object of headers for connecting. Only Sec-WebSocket-Protocol reaches the server yet, since browsers can't send others such as Authorization. |
 
 ## Outputs
 
@@ -71,7 +71,7 @@ patch live webSocketConnection connect←online.on url="wss://example.com/live"
 
 ## Common mistakes
 
-- Connected never turns on in the web player: the URL uses ws:// from a secure page, or the server needs a header browsers can't send. Use wss:// and put tokens in the URL.
+- Connected never turns on in the web player: the URL uses ws:// from a secure page, or the server needs a header Sonobe can't send yet. Use wss:// and put tokens in the URL.
 - The connection drops and never comes back: it doesn't retry by itself. Turn Connect off and on again, for example with a Switch.
 
 ## Pairs well with
@@ -83,7 +83,7 @@ patch live webSocketConnection connect←online.on url="wss://example.com/live"
 
 ## Availability
 
-**Web-limited.** Browsers can't set WebSocket headers and block ws:// from https pages, so Headers apply only in the desktop app and the web player needs wss://.
+**Web-limited.** Browsers can't set WebSocket headers and block ws:// from https pages, so no host sends Headers yet (only Sec-WebSocket-Protocol) and the web player needs wss://.
 
 Works in the desktop app, the web player in desktop browsers, and the web player on phones and tablets.
 
