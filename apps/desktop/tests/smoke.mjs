@@ -567,6 +567,8 @@ try {
   assert(!wired.isError && wired.structuredContent.ok === true, "connect", wired.text);
   const diagnostics = await mcp.call("get_diagnostics");
   assert(!diagnostics.isError && !/\b[1-9]\d* errors?\b/.test(diagnostics.text), "no diagnostic errors after wiring", diagnostics.text);
+  // The live viewer's runtime problems (viewer.diagnostics RPC), read fresh on every call.
+  assert(/Live viewer \(frame [\d,]+, (playing|paused)\)/.test(diagnostics.text) && Array.isArray(diagnostics.structuredContent.runtime?.diagnostics), "get_diagnostics has a Live viewer section", diagnostics.text);
   log(`ISAT chain built (revision ${wired.structuredContent.revision})`);
 
   const reset = await mcp.call("sim_reset", { seed: 1 });

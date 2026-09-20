@@ -178,7 +178,7 @@ export function compileDocument(doc: SonobeDocument, engineRegistry: EngineRegis
       const iport = target.interface.inputs[key]!;
       const port = interfacePortToPort(iport, "input");
       const def = iport.default !== undefined && !isLinkInput(iport.default) ? decodeStored(iport.default, iport.type) : zeroValue(iport.type, port.enumOptions);
-      const input: ScopeInput = { key, port, binding: constBinding(def, iport.type), loop: (iport.loopBehavior ?? "loop") === "loop", default: def };
+      const input: ScopeInput = { key, port, binding: constBinding(def, iport.type), loop: (iport.loopBehavior ?? "loop") === "loop", feedback: false, default: def };
       child.inputs.push(input);
       child.inputIndex.set(key, input);
     }
@@ -602,11 +602,20 @@ export function compileDocument(doc: SonobeDocument, engineRegistry: EngineRegis
   }
   const order = orderNodes(nodes);
   for (const cnode of order) {
-    if (cnode.kind === "copies") continue;
-    cnode.bindings.forEach((b, i) => {
+    const later = (b: Binding): boolean => {
       const deps: CNode[] = [];
       bindingDeps(b, deps);
-      cnode.feedback[i] = deps.some((d) => d !== cnode && d.order >= cnode.order);
+      return deps.some((d) => d !== cnode && d.order >= cnode.order);
+    };
+    if (cnode.kind === "copies") {
+      // Per loop input of the instance, then per replicator: the copy count reads last frame's value there.
+      const child = cnode.copiesOf!;
+      for (const input of child.inputs) input.feedback = input.loop && later(input.binding);
+      cnode.feedback = [...child.inputs.map((input) => input.feedback), ...child.replicators.map(later)];
+      continue;
+    }
+    cnode.bindings.forEach((b, i) => {
+      cnode.feedback[i] = later(b);
     });
   }
   const links = new Map<Scope, Map<string, { binding: Binding; type: ValueType } | null>>();

@@ -18,6 +18,8 @@ Delay One Frame outputs what its input was one frame ago. At 60 frames per secon
 - **Value** is the value to remember. Right-click the patch to change its type.
 - **Output** is Value as it was on the previous frame. On the very first frame it equals Value, so comparisons don't jump at startup.
 
+In a feedback loop, the first frame has no previous value, so Output is Value's default: one value, even when the loop carries a list. The same goes for any frame where the loop comes back empty.
+
 Use it for:
 - **Feedback loops**, where a result feeds back into its own calculation, such as adding a step to last frame's total. A patch can't drive its own input directly, so route the loop through Delay One Frame.
 - **Frame-to-frame comparisons**, such as "is this bigger than it was a moment ago?"
@@ -26,9 +28,10 @@ Use it for:
 - Loops that step once per frame run twice as fast on a 120 Hz display. For motion that looks the same everywhere, drive it from Time or an animation patch.
 - To measure how fast something changes, use Velocity. To react when it changes, use Pulse on Change.
 - For a delay you can see, use Delay.
+- A list that goes around a feedback loop starts as one value. If a Loop Select picks from it, set its Out of Range to Use Fallback, so the list can form.
 
 ## Coming from Origami
-This is Origami's Delay 1. Origami outputs the port's default on the first frame; Sonobe outputs the first input value, so you don't need startup workarounds.
+This is Origami's Delay 1. Origami outputs the port's default on the first frame; outside feedback loops, Sonobe outputs the first input value, so you don't need startup workarounds.
 
 ## Inputs
 
@@ -40,7 +43,7 @@ This is Origami's Delay 1. Origami outputs the port's default on the first frame
 
 | Output | Type | Description |
 |---|---|---|
-| **Output**<br>`output` | `variant` | Value as it was on the previous frame. On the first frame, it equals Value. |
+| **Output**<br>`output` | `variant` | Value as it was on the previous frame. On the first frame it equals Value; in a feedback loop it's Value's default instead. |
 
 ## Types
 

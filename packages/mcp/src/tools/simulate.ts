@@ -5,7 +5,7 @@ import type { TraceSummary } from "@sonobe/engine";
 import { z } from "zod";
 import { formatValue, plural, roundForDisplay, sampleIndices, table } from "../format.ts";
 import type { ScreenshotTarget, SimEvent, SimOverrideSet, SimState } from "../host.ts";
-import { failure, success } from "../results.ts";
+import { failure, formatSuggestions, success } from "../results.ts";
 import { READ_ONLY, SIMULATION, type ToolContext } from "../server.ts";
 import {
   ComponentIdSchema,
@@ -23,7 +23,8 @@ function issuesText(state: SimState): string[] {
     );
   for (const issue of state.issues.slice(0, 5))
     lines.push(
-      `Runtime ${issue.severity}${issue.patchId ? ` in ${issue.patchId}` : issue.layerId ? ` on @${issue.layerId}` : ""}: ${issue.message}`,
+      `Runtime ${issue.severity}${issue.patchId ? ` in ${issue.patchId}` : issue.layerId ? ` on @${issue.layerId}` : ""}: ${issue.message}${issue.hint ? ` ${issue.hint}` : ""}`,
+      ...formatSuggestions(issue.suggestions, "  "),
     );
   if (state.issues.length > 5) lines.push(`… ${state.issues.length - 5} more runtime issues.`);
   for (const d of state.droppedOverrides ?? [])
@@ -31,6 +32,16 @@ function issuesText(state: SimState): string[] {
       `Note: dropped the override on ${d.target}; the person's latest edit doesn't accept it (${d.reason})`,
     );
   return lines;
+}
+
+/**
+ * One sim_get_values target. A short clause ("overridden in this simulation, was 1") reads inline
+ * after the value; an explanation in sentences (why it's null or an empty loop) gets its own line.
+ */
+function valueLines(target: string, value: unknown, note: string | undefined): string[] {
+  const line = `  ${target} = ${formatValue(value)}`;
+  if (!note) return [line];
+  return /[.!?]$/.test(note) ? [line, `    ${note}`] : [`${line} (${note})`];
 }
 
 const header = (s: SimState) =>
@@ -274,7 +285,7 @@ export function registerSimulationTools(tc: ToolContext): void {
     {
       title: "Get simulation values",
       description:
-        'Current values in a simulation: patch ports ("toggle.on", inputs too) and layer properties or outputs ("@card.scale", or "@row.position#2" for one loop copy). Reach inside component instances with an instance path: "like_button_2/liked.on", "@like_button_2/like_button.color", "card#2/..." for copy 2 of a looped instance.',
+        'Current values in a simulation: patch ports ("toggle.on", inputs too) and layer properties or outputs ("@card.scale", or "@row.position#2" for one loop copy). Reach inside component instances with an instance path: "like_button_2/liked.on", "@like_button_2/like_button.color", "card#2/..." for copy 2 of a looped instance. A value that reads as null or an empty loop comes with a note saying why: the layer drew 0 copies (and where its empty loop started), "#n" is past the end, or the instance path runs into a component with 0 copies.',
       input: z.object({ simId: z.string(), targets: TargetsSchema.max(30) }),
       output: SimStateOutputSchema,
       annotations: READ_ONLY,
@@ -284,9 +295,7 @@ export function registerSimulationTools(tc: ToolContext): void {
       return success(
         [
           header(r),
-          ...targets.map(
-            (t) => `  ${t} = ${formatValue(r.values[t])}${r.notes?.[t] ? ` (${r.notes[t]})` : ""}`,
-          ),
+          ...targets.flatMap((t) => valueLines(t, r.values[t], r.notes?.[t])),
           ...issuesText(r),
         ].join("\n"),
         { ...r },

@@ -21,9 +21,16 @@ export interface SceneEnv {
   size: [number, number];
   background: Color;
   measurer: TextMeasurer;
-  read(binding: Binding, path: InstancePath): Value | Loop | undefined;
+  /** `wholeLoop`: the prop takes the whole loop, so a layer that drew 0 copies reads as an empty loop, not one reference. */
+  read(binding: Binding, path: InstancePath, wholeLoop?: boolean): Value | Loop | undefined;
   instancePaths(scope: Scope, host: InstancePath): { paths: readonly InstancePath[]; replicated: boolean };
   issue(code: string, message: string, layerId: Id): void;
+  /**
+   * A layer bound to loops made 0 copies. `emptyProp` is the index in `layer.bound` of the first prop
+   * holding an empty loop (-1: its component instance has 0 copies); `others` is the longest
+   * non-empty loop it erased (0 when there was none).
+   */
+  emptyCopies?(layer: CLayer, path: InstancePath, emptyProp: number, others: number): void;
   /** Create a layer reference scoped to a scene-key prefix ("" at the root, "card#2/" inside an instance). */
   layerRef?(layerId: Id, instance: number | undefined, prefix: string): LayerRef;
 }
@@ -90,7 +97,7 @@ export function buildScene(env: SceneEnv): SceneBuild {
       for (let j = 0; j < bound.length; j++) {
         const p = bound[j]!;
         const b = p.binding;
-        let v = b.kind === "const" ? b.value : env.read(b, path);
+        let v = b.kind === "const" ? b.value : env.read(b, path, p.wholeLoop);
         if (v === undefined) v = layer.defaults[p.key];
         else if (b.kind !== "const" && b.type !== p.type) {
           // A linked null into a prop whose default is null (cornerRadii, image...) means "unset", not a zero value.
@@ -112,6 +119,14 @@ export function buildScene(env: SceneEnv): SceneBuild {
       let count = 1;
       if (looping) {
         count = empty ? 0 : max;
+        if (count === 0 && env.emptyCopies) {
+          let emptyProp = -1;
+          for (let j = 0; j < bound.length && emptyProp < 0; j++) {
+            const v = values[j];
+            if (!bound[j]!.wholeLoop && isLoop(v) && v.items.length === 0) emptyProp = j;
+          }
+          env.emptyCopies(layer, path, emptyProp, max);
+        }
         if (count > MAX_LOOP_LENGTH) {
           env.issue("loop_limit", `Layer "${layer.id}" is bound to a loop of ${count} items; layers replicate at most ${MAX_LOOP_LENGTH} times.`, layer.id);
           count = MAX_LOOP_LENGTH;

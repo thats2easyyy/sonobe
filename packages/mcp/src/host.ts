@@ -367,6 +367,9 @@ export interface SimIssue {
   message: string;
   patchId?: Id;
   layerId?: Id;
+  hint?: string;
+  /** Ready-to-apply fixes (empty_loop warnings carry them). */
+  suggestions?: Suggestion[];
 }
 
 /** Common fields of every simulation result. */
@@ -524,7 +527,11 @@ export interface SimTraceResult extends SimState {
 
 export interface SimValuesResult extends SimState {
   values: Record<string, unknown>;
-  /** Plain-words notes on some values, by target ("overridden in this simulation, was 1"). */
+  /**
+   * Plain-words notes for targets whose value needs one, by target: that it's overridden in this
+   * simulation ("overridden in this simulation, was 1"), why it reads as null or an empty loop
+   * ("Not drawn: Layer "Card" has 0 copies because ..."), or that "#n" is past the end.
+   */
   notes?: Record<string, string>;
 }
 
@@ -553,6 +560,15 @@ export type DocumentChange =
   | { kind: "opened"; docId: Id }
   | { kind: "closed"; docId: Id };
 
+/** What the live viewer's running prototype reports (SonobeHost.diagnostics `runtime`). */
+export interface LiveRuntimeDiagnostics {
+  /** The live prototype's frame when this was read. */
+  frame: number;
+  playing: boolean;
+  /** Runtime issues as diagnostics: empty_loop warnings, script errors, loop limits... */
+  diagnostics: Diagnostic[];
+}
+
 export interface SonobeHost {
   readonly kind: HostKind;
   readonly capabilities: HostCapabilities;
@@ -569,8 +585,17 @@ export interface SonobeHost {
   saveDocument(docId?: Id, options?: SaveDocumentOptions & HostCallControl): Promise<SaveOutcome>;
   /** Apply a batch through core applyOps as one attributed history group. Refuses once options.signal aborted. */
   apply(ops: Op[], options: HostApplyOptions): Promise<HostApplyResult>;
-  /** Diagnostics for the current revision (cached). */
-  diagnostics(docId?: Id): Promise<{ docId: Id; revision: number; diagnostics: Diagnostic[] }>;
+  /**
+   * Diagnostics for the current revision (cached). Hosts with a live viewer add `runtime`: what the
+   * running prototype reports right now (empty loops, script errors, loop limits), which changes
+   * without a new revision.
+   */
+  diagnostics(docId?: Id): Promise<{
+    docId: Id;
+    revision: number;
+    diagnostics: Diagnostic[];
+    runtime?: LiveRuntimeDiagnostics;
+  }>;
 
   getSelection(docId?: Id): Promise<Selection>;
   /** Throws HostError("screenshots_unavailable") when capabilities.screenshots is false. */

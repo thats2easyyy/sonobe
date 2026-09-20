@@ -294,6 +294,8 @@ export const SimStateOutputSchema = z.looseObject({
   timeMs: z.number(),
   fps: z.number(),
   issues: z.array(z.unknown()),
+  /** sim_get_values: why a target reads as null or empty, by target. */
+  notes: z.record(z.string(), z.string()).optional(),
 });
 
 export const DocumentInfoOutputSchema = z.looseObject({
