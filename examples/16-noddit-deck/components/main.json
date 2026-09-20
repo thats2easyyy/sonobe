@@ -1093,7 +1093,7 @@
         "value1": { "link": "place_names.index" },
         "value2": 1
       },
-      "ui": { "x": 20, "y": 1784 }
+      "ui": { "x": 20, "y": 1824 }
     },
     "card_above_gone": {
       "type": "loopSelect",
@@ -1105,14 +1105,14 @@
         "loop": { "link": "swipe_card.gone" },
         "outOfRange": "fallback"
       },
-      "ui": { "x": 256, "y": 1610 }
+      "ui": { "x": 256, "y": 1650 }
     },
     "card_above_gone_last_frame": {
       "type": "delay1",
       "name": "Card Above: Gone Last Frame",
       "typeParam": "boolean",
       "inputs": { "value": { "link": "card_above_gone.output" } },
-      "ui": { "x": 558, "y": 1610 }
+      "ui": { "x": 558, "y": 1650 }
     },
     "card_above_lift": {
       "type": "loopSelect",
@@ -1124,14 +1124,14 @@
         "loop": { "link": "swipe_card.lift" },
         "outOfRange": "fallback"
       },
-      "ui": { "x": 285, "y": 1762 }
+      "ui": { "x": 285, "y": 1802 }
     },
     "card_above_lift_last_frame": {
       "type": "delay1",
       "name": "Card Above: Lift Last Frame",
       "typeParam": "number",
       "inputs": { "value": { "link": "card_above_lift.output" } },
-      "ui": { "x": 558, "y": 1762 }
+      "ui": { "x": 558, "y": 1802 }
     },
     "card_above_offset": {
       "type": "loopSelect",
@@ -1143,14 +1143,14 @@
         "loop": { "link": "swipe_card.position" },
         "outOfRange": "fallback"
       },
-      "ui": { "x": 260, "y": 1914 }
+      "ui": { "x": 260, "y": 1954 }
     },
     "card_above_offset_last_frame": {
       "type": "delay1",
       "name": "Card Above: Offset Last Frame",
       "typeParam": "point",
       "inputs": { "value": { "link": "card_above_offset.output" } },
-      "ui": { "x": 558, "y": 1914 }
+      "ui": { "x": 558, "y": 1954 }
     },
     "deck_empty_fade": {
       "type": "popAnimation",
@@ -1161,13 +1161,13 @@
         "number": { "link": "every_card_gone.output" },
         "speed": 14
       },
-      "ui": { "x": 296, "y": 2740 }
+      "ui": { "x": 276, "y": 2780 }
     },
     "drag_card": {
       "type": "gesture",
       "name": "Drag Card",
       "inputs": { "layer": { "layer": "card" } },
-      "ui": { "x": 138, "y": 1098 }
+      "ui": { "x": 138, "y": 1248 }
     },
     "end_of_deck_shown": {
       "type": "or",
@@ -1177,13 +1177,13 @@
         "value1": { "link": "$knob.card_flies_out" },
         "value2": { "link": "every_card_gone.output" }
       },
-      "ui": { "x": 256, "y": 2870 }
+      "ui": { "x": 236, "y": 2910 }
     },
     "every_card_gone": {
       "type": "loopAll",
       "name": "Every Card Gone",
       "inputs": { "loop": { "link": "swipe_card.gone" } },
-      "ui": { "x": 20, "y": 2740 }
+      "ui": { "x": 0, "y": 2780 }
     },
     "pass_button_scale": {
       "type": "transition",
@@ -1194,7 +1194,7 @@
         "progress": { "link": "pass_press_spring.output" },
         "start": 1
       },
-      "ui": { "x": 536, "y": 2142 }
+      "ui": { "x": 536, "y": 2182 }
     },
     "pass_press_spring": {
       "type": "popAnimation",
@@ -1205,7 +1205,7 @@
         "number": { "link": "tap_pass.down" },
         "speed": 20
       },
-      "ui": { "x": 300, "y": 2142 }
+      "ui": { "x": 300, "y": 2182 }
     },
     "place_addresses": {
       "type": "loopBuilder",
@@ -1254,7 +1254,7 @@
         "scrollX": "free",
         "scrollY": "off"
       },
-      "ui": { "x": 20, "y": 3040 }
+      "ui": { "x": 20, "y": 3080 }
     },
     "stack_order": {
       "type": "multiply",
@@ -1265,7 +1265,7 @@
         "value1": { "link": "place_names.index" },
         "value2": -1
       },
-      "ui": { "x": 479, "y": 1032 }
+      "ui": { "x": 479, "y": 1466 }
     },
     "swipe_card": {
       "type": "component",
@@ -1288,25 +1288,25 @@
         "yesHeld": { "link": "tap_yes.down" },
         "yesTapped": { "link": "tap_yes.tap" }
       },
-      "ui": { "x": 408, "y": 1140 }
+      "ui": { "x": 408, "y": 1072 }
     },
     "tap_find_more_places": {
       "type": "interaction",
       "name": "Tap Find More Places",
       "inputs": { "layer": { "layer": "find_more_places_button" } },
-      "ui": { "x": 20, "y": 2490 }
+      "ui": { "x": 20, "y": 2530 }
     },
     "tap_pass": {
       "type": "interaction",
       "name": "Tap Pass",
       "inputs": { "layer": { "layer": "pass_button" } },
-      "ui": { "x": 20, "y": 2142 }
+      "ui": { "x": 20, "y": 2182 }
     },
     "tap_yes": {
       "type": "interaction",
       "name": "Tap Yes",
       "inputs": { "layer": { "layer": "yes_button" } },
-      "ui": { "x": 20, "y": 2316 }
+      "ui": { "x": 20, "y": 2356 }
     },
     "throw_card": {
       "type": "swipe",
@@ -1318,7 +1318,7 @@
         "minDistance": { "link": "$knob.commit_distance" },
         "minVelocity": 10000
       },
-      "ui": { "x": 20, "y": 1316 }
+      "ui": { "x": 20, "y": 1052 }
     },
     "top_right_photos": {
       "type": "loopBuilder",
@@ -1342,7 +1342,7 @@
         "progress": { "link": "deck_empty_fade.output" },
         "start": 1
       },
-      "ui": { "x": 572, "y": 2740 }
+      "ui": { "x": 552, "y": 2780 }
     },
     "yes_button_scale": {
       "type": "transition",
@@ -1353,7 +1353,7 @@
         "progress": { "link": "yes_press_spring.output" },
         "start": 1
       },
-      "ui": { "x": 531, "y": 2316 }
+      "ui": { "x": 531, "y": 2356 }
     },
     "yes_press_spring": {
       "type": "popAnimation",
@@ -1364,7 +1364,7 @@
         "number": { "link": "tap_yes.down" },
         "speed": 20
       },
-      "ui": { "x": 295, "y": 2316 }
+      "ui": { "x": 295, "y": 2356 }
     }
   },
   "comments": [
@@ -1377,25 +1377,25 @@
     {
       "id": "section_buttons",
       "text": "BUTTONS · ✕ ♥ shrink while pressed · their taps and holds reach every card, and only the top card acts · Find more places brings the deck back",
-      "rect": [0, 2098, 956, 558],
+      "rect": [0, 2138, 956, 558],
       "color": "pink"
     },
     {
       "id": "section_card_above",
       "text": "THE CARD ABOVE · each copy reads copy index − 1, one frame late · the top card has none, so Fallback says it's gone and fully lifted",
-      "rect": [0, 1566, 876, 492],
+      "rect": [0, 1606, 876, 492],
       "color": "purple"
     },
     {
       "id": "section_category_chips",
       "text": "CATEGORY CHIPS · scroll sideways (the design import added this)",
-      "rect": [0, 2996, 565, 254],
+      "rect": [0, 3036, 565, 254],
       "color": "gray"
     },
     {
       "id": "section_deck_empty",
       "text": "DECK EMPTY · with every card gone, ✕ ♥ dim to 40% as in the app · with Card Flies Out off, End of Deck waits until then",
-      "rect": [-20, 2696, 1012, 574],
+      "rect": [-20, 2736, 992, 574],
       "color": "gray"
     },
     {
@@ -1407,27 +1407,27 @@
     {
       "id": "section_the_deck",
       "text": "THE DECK · Repeat makes one Card per place, index × −1 puts row 0 on top · Drag Card and Throw Card → Swipe Card (open it) → Card",
-      "rect": [0, 988, 919, 538],
+      "rect": [0, 988, 919, 578],
       "color": "blue"
     }
   ],
   "meta": {
     "patchEditor": {
       "nodes": {
-        "@card": [715, 1184],
-        "@card_pass_badge": [715, 1076],
+        "@card": [715, 1248],
+        "@card_pass_badge": [715, 1032],
         "@card_photo_1": [340, 500],
         "@card_photo_2": [346, 652],
         "@card_photo_3": [346, 804],
-        "@card_yes_badge": [715, 1402],
-        "@categories_content": [346, 3040],
-        "@end_of_deck": [572, 2870],
-        "@pass_button": [772, 2142],
+        "@card_yes_badge": [715, 1140],
+        "@categories_content": [346, 3080],
+        "@end_of_deck": [552, 2910],
+        "@pass_button": [772, 2182],
         "@photo_credits": [396, 348],
         "@place_address": [396, 196],
         "@place_name": [381, 44],
-        "@vote_buttons": [808, 2740],
-        "@yes_button": [767, 2316]
+        "@vote_buttons": [788, 2780],
+        "@yes_button": [767, 2356]
       }
     }
   }

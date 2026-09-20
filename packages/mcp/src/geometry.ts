@@ -33,6 +33,8 @@ export interface GraphGeometry {
   frames: Map<string, Rect>;
   /** Nodes whose size the open patch editor measured; every other size is estimated from the document. */
   measured: ReadonlySet<string>;
+  /** The diagnostics the estimate sized issue badges for, so a drawing shows the same badges. */
+  diagnostics: readonly Diagnostic[];
 }
 
 const LIVE_FRAMES = 60;
@@ -88,6 +90,7 @@ export function estimateGraphGeometry(
       ]),
     ),
     measured: new Set(),
+    diagnostics,
   };
 }
 

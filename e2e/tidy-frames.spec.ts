@@ -135,3 +135,44 @@ test("Tidy Up Frame on a comment tidies just that frame", async ({ page }) => {
   expect(after.knobs).toEqual(before.knobs);
   expect(after.label).toMatch(/Tidy up/);
 });
+
+test("Dragging a frame moves what belongs to it: a node grown past its edge, and a frame inside it", async ({ page }) => {
+  // Card Count sticks out past PLACES' right edge, its title bar still inside; INNER sits in THE DECK and holds Fly-Out X.
+  await page.evaluate(() => {
+    const r = window.__sonobe!.apply([{ op: "updatePatch", id: "count", ui: { x: 700, y: 900 } }, { op: "addComment", comment: { id: "inner", text: "INNER", rect: [680, 180, 400, 200] } }] as never, "frame drag setup");
+    if (!r.ok) throw new Error(JSON.stringify(r.errors).slice(0, 600));
+  });
+  await page.waitForTimeout(400);
+  const read = () =>
+    page.evaluate(() => {
+      const c = window.__sonobe!.doc().components.main!;
+      const at = (id: string) => c.comments.find((m) => m.id === id)!.rect.slice(0, 2);
+      const ui = (id: string) => [c.patches[id]!.ui.x, c.patches[id]!.ui.y];
+      return { places: at("places"), deck: at("deck"), inner: at("inner"), names: ui("names"), count: ui("count"), fly: ui("fly"), drag: ui("drag") };
+    });
+  const dragTitle = async (frame: string, dx: number, dy: number) => {
+    const box = (await page.locator(`.sb-pe .react-flow__node[data-id="comment:${frame}"] .sb-pe-comment__title`).boundingBox())!;
+    await page.mouse.move(box.x + 30, box.y + box.height / 2);
+    await page.mouse.down();
+    for (let i = 1; i <= 8; i++) await page.mouse.move(box.x + 30 + (dx * i) / 8, box.y + box.height / 2 + (dy * i) / 8);
+    await page.mouse.up();
+    await page.waitForTimeout(400);
+  };
+  const delta = (a: number[], b: number[]) => [b[0]! - a[0]!, b[1]! - a[1]!];
+
+  const before = await read();
+  await dragTitle("places", 0, 120);
+  const moved = await read();
+  const places = delta(before.places, moved.places);
+  expect(places[1]).toBeGreaterThan(0);
+  expect(delta(before.names, moved.names)).toEqual(places);
+  expect(delta(before.count, moved.count), "Card Count, past the frame's edge").toEqual(places);
+
+  await dragTitle("deck", 0, -80);
+  const after = await read();
+  const deck = delta(moved.deck, after.deck);
+  expect(deck[1]).toBeLessThan(0);
+  expect(delta(moved.drag, after.drag)).toEqual(deck);
+  expect(delta(moved.inner, after.inner), "the frame inside").toEqual(deck);
+  expect(delta(moved.fly, after.fly), "the inner frame's patch").toEqual(deck);
+});

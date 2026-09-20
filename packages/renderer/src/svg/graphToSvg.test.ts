@@ -3,7 +3,7 @@
 import { componentNodeBoxes, deriveGraph, NODE_BOX, tableMeasurer } from "@sonobe/core/graph";
 import { buildDoc, createMockRegistry } from "@sonobe/engine/testing";
 import { describe, expect, it } from "vitest";
-import { CATEGORY_COLORS, COMMENT_COLORS, THEME_TOKENS } from "../theme.ts";
+import { CATEGORY_COLORS, COMMENT_COLORS, PORT_GROUP_COLORS, THEME_TOKENS } from "../theme.ts";
 import { graphToSvg } from "./graphToSvg.ts";
 
 const registry = createMockRegistry();
@@ -110,6 +110,28 @@ describe("graphToSvg", () => {
     // The node border is the token's color and alpha: black at 0.1 in light, white at 0.08 in dark.
     expect(light).toContain('stroke="#000000" stroke-opacity="0.1"');
     expect(dark).toContain('stroke="#FFFFFF" stroke-opacity="0.08"');
+  });
+
+  it("draws a boolean input checked or not, as the editor's checkbox does", () => {
+    /** The Enabled checkbox of the tap patch: its box, and the check mark after it. */
+    const checkbox = (enabled?: boolean) => {
+      const d = enabled === undefined ? doc : buildDoc({ layers: [{ id: "card", type: "rectangle", name: "Card" }], patches: { tap: { type: "interaction", inputs: { layer: { layer: "card" }, enabled } } } }, registry);
+      const svg = graphToSvg(deriveGraph({ doc: d, componentId: "main", registry }), { boxes: componentNodeBoxes(d, registry, "main") }).svg;
+      const node = svg.slice(svg.indexOf('data-node="tap"'));
+      return /<rect [^>]*width="14" height="14"[^>]*\/>(<path [^>]*stroke="#1b0f16"[^>]*\/>)?/.exec(node.slice(0, node.indexOf("</g>")))!;
+    };
+    const [off, offMark] = checkbox(false);
+    expect(offMark).toBeUndefined();
+    expect(off).not.toContain(PORT_GROUP_COLORS.dark.boolean);
+    const [on, onMark] = checkbox(true);
+    expect(on).toContain(`fill="${PORT_GROUP_COLORS.dark.boolean}"`);
+    expect(on).not.toContain("fill-opacity");
+    expect(onMark).toMatch(/d="M [\d.]+ [\d.]+ L [\d.]+ [\d.]+ L [\d.]+ [\d.]+"/);
+    // Checked by default: the same box, mixed toward the node background, as the editor draws it.
+    const [byDefault, defaultMark] = checkbox();
+    expect(byDefault).toContain(`fill="${PORT_GROUP_COLORS.dark.boolean}"`);
+    expect(byDefault).toContain('fill-opacity="0.55"');
+    expect(defaultMark).toBeDefined();
   });
 
   it("crops and scales", () => {
