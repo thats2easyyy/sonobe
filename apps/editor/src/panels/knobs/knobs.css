@@ -349,6 +349,13 @@
   gap: 2px;
 }
 
+.sb-knob-form__note {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: var(--font-size-xs);
+  line-height: var(--line-height-normal);
+}
+
 .sb-knob-form__problem {
   margin: 0;
   color: var(--danger-text);

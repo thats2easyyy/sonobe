@@ -118,6 +118,23 @@ describe("knobs in Properties", () => {
     expect(prop(s, "card", "opacity")).toBe(0.5);
   });
 
+  it("says which value a knob made from a mixed selection starts at", () => {
+    const s = mount(fixture());
+    select(s, { layers: ["dot", "card"] });
+    openMenu(rowNamed("Opacity"));
+    click(menuItem("Make Knob…"));
+    expect(document.querySelector(".sb-knob-form__note")!.textContent).toBe("Mixed values: the knob starts at Dot's 0.8, and every selected field takes it.");
+    click(buttonWithText("Make Knob"));
+    expect(s.document.getState().doc.knobs!.knobs[0]!.values).toEqual({ default: 0.8 });
+    // One value, nothing to say.
+    select(s, { layers: ["card"] });
+    openMenu(rowNamed("Opacity"));
+    click(menuItem("Unlink (keep 0.8)"));
+    openMenu(rowNamed("Opacity"));
+    click(menuItem("Make Knob…"));
+    expect(document.querySelector(".sb-knob-form__note")).toBeNull();
+  });
+
   it("shows a knob-driven field as the knob: tuning it changes the knob, and Unlink keeps the running value", () => {
     const s = mount(fixture([{ op: "addKnob", knob: { id: "fade", name: "Fade", type: "number", value: 0.5, min: 0, max: 1, step: 0.01 } }, { op: "setInput", target: "@card.opacity", value: { link: "$knob.fade" } }, { op: "setInput", target: "@dot.opacity", value: { link: "$knob.fade" } }]));
     select(s, { layers: ["card"] });

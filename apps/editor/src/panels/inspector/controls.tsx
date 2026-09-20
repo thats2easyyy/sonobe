@@ -159,13 +159,14 @@ export function ValueControl(props: ValueControlProps) {
 /**
  * A layer's pulse property (a Text Field's Set Text, Begin Editing, End Editing): Fire sends it to
  * the running prototype, in the instance and copy the live read-outs watch, and never changes the
- * document. Patch inputs, and layers of a component the prototype doesn't run, fire only from a
+ * document. Patch inputs, a component instance's published pulse inputs (the engine fires only a
+ * layer type's own pulses) and layers of a component the prototype doesn't run fire only from a
  * connection.
  */
 function PulseControl({ field, label }: ValueControlProps) {
   const session = useEditorSession();
   const { prefix, copy } = useWatchedScope(session);
-  const layers = field.targets.length > 0 && field.targets.every((t) => t.address.startsWith("@"));
+  const layers = !field.port.fromInterface && field.targets.length > 0 && field.targets.every((t) => t.address.startsWith("@"));
   if (!layers || prefix === null) return <span className="sb-insp-hint">Fires only from a connection</span>;
   const fire = () => {
     const scene = session.runtime.scene();
@@ -218,7 +219,8 @@ function NumberControl({ field, actions, label, integer = false }: ValueControlP
 
 /**
  * Repeat: a whole number of copies, or empty for Auto (one per item of the longest loop on the
- * layer's own properties). Auto shows like a mixed value: no number, and scrubbing starts from 0.
+ * layer's own properties). Auto shows no number, reads out as "Auto", and scrubs from 0. A mixed
+ * selection nudges and scrubs each count from its own (Auto as 0), as numbers do.
  * Reset to Default goes back to Auto; linking a loop makes one copy per item.
  */
 function CountControl({ field, actions, label }: ValueControlProps) {
@@ -229,13 +231,13 @@ function CountControl({ field, actions, label }: ValueControlProps) {
       size="sm"
       aria-label={label}
       value={auto ? 0 : (field.value as number)}
-      mixed={field.mixed || auto}
-      placeholder={field.mixed ? "Mixed" : "Auto"}
+      mixed={field.mixed}
+      {...(auto && !field.mixed ? { emptyText: "Auto" } : {})}
       min={0}
       max={MAX_REPEAT}
       step={1}
       precision={0}
-      onChange={(value) => actions.change(fit(value))}
+      onChange={(value, meta) => actions.change(field.mixed && meta.source !== "input" ? (current) => fit((typeof current === "number" ? current : 0) + meta.delta) : fit(value))}
       onCommit={() => actions.commit()}
     />
   );

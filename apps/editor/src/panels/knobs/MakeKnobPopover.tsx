@@ -1,12 +1,14 @@
 /**
  * Make Knob… on an Inspector field: a name (the port's), a group (the last one used) and, for numbers
  * and points, the soft range worked out from the value, all editable. Return makes the knob with the
- * field's value in every preset and links every selected target to it, as one undo step.
+ * field's value in every preset and links every selected target to it, as one undo step. On a mixed
+ * selection that's the first target's value, and the popover says so.
  */
 
-import { hasKnobRange } from "@sonobe/core";
+import { findLayer, formatKnobValue, getPatchSpec, hasKnobRange, isLinkInput, parseAddress, patchDisplayName, type KnobType } from "@sonobe/core";
 import { useId, useState, type FormEvent } from "react";
 import { useEditorSession } from "../../state/EditorProvider.tsx";
+import type { EditorSession } from "../../state/session.ts";
 import { makeKnobLabel } from "../../state/undoLabels.ts";
 import { Button } from "../../ui/Button.tsx";
 import { Popover } from "../../ui/Popover.tsx";
@@ -16,7 +18,7 @@ import type { FloatingAnchor } from "../../ui/lib/useFloating.ts";
 import type { InspectorField } from "../inspector/model.ts";
 import { FormRow, RangeFields, rangeDraft, readRange, type RangeDraft } from "./KnobEditPopover.tsx";
 import { knobsUi, showKnobs } from "./knobsStore.ts";
-import { knobTypeForPort, planMakeKnob, suggestMakeKnob } from "./model.ts";
+import { knobTypeForPort, knobValueFor, planMakeKnob, suggestMakeKnob } from "./model.ts";
 
 export interface MakeKnobPopoverProps {
   field: InspectorField | null;
@@ -33,6 +35,24 @@ export function MakeKnobPopover({ field, anchor, onClose }: MakeKnobPopoverProps
   );
 }
 
+/**
+ * A mixed selection's knob starts at the first target's value (planMakeKnob), and every other target
+ * takes it: say whose and which, "Mixed values: the knob starts at Dot's 0.8, …".
+ */
+function mixedValueNote(session: EditorSession, field: InspectorField, type: KnobType): string | null {
+  const first = field.targets.find((t) => !isLinkInput(t.stored));
+  const start = knobValueFor(field.value);
+  if (!first || start === undefined) return null;
+  const component = session.document.getState().doc.components[session.currentComponentId()];
+  const a = parseAddress(first.address);
+  const node = a?.kind === "patch" ? component?.patches[a.id] : undefined;
+  let holder = first.id;
+  if (component && a?.kind === "layer") holder = findLayer(component.layers, a.id)?.layer.name ?? holder;
+  else if (node) holder = patchDisplayName(node, getPatchSpec(session.registry, node.type));
+  const value = formatKnobValue({ type, ...(field.port.enumOptions ? { options: field.port.enumOptions } : {}) }, start);
+  return `Mixed values: the knob starts at ${holder}'s ${value}, and every selected field takes it.`;
+}
+
 function MakeKnobForm({ field, onDone }: { field: InspectorField; onDone: () => void }) {
   const session = useEditorSession();
   const titleId = useId();
@@ -42,6 +62,7 @@ function MakeKnobForm({ field, onDone }: { field: InspectorField; onDone: () => 
   const [range, setRange] = useState<RangeDraft>(rangeDraft(initial));
   const [problem, setProblem] = useState<string | null>(null);
   const type = knobTypeForPort(field.port);
+  const [mixedNote] = useState(() => (field.mixed && type ? mixedValueNote(session, field, type) : null));
 
   const submit = (event?: FormEvent) => {
     event?.preventDefault();
@@ -87,6 +108,7 @@ function MakeKnobForm({ field, onDone }: { field: InspectorField; onDone: () => 
         <TextField size="sm" aria-label="Knob group" placeholder="None" value={group} onChange={(event) => setGroup(event.target.value)} />
       </FormRow>
       {type && hasKnobRange(type) && <RangeFields draft={range} onChange={setRange} />}
+      {mixedNote && <p className="sb-knob-form__note">{mixedNote}</p>}
       {problem && (
         <p className="sb-knob-form__problem" role="alert">
           {problem}
