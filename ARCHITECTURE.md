@@ -257,7 +257,7 @@ Messages name items the way the editor shows them ("Photo Scale" (Transition)); 
 
 The copy and loop-length checks read `loopShapes(doc, component, registry)`: which values carry loops and how long they are, as far as the document says (per-item patches take their longest per-item loop, a one-item loop comes out a plain value, whole-loop outputs start new loops, `$in` values and constants such as `$knob.<id>` never loop). The engine uses it too, to leave to diagnostics the mismatches they already report.
 
-Hosts that diagnose every revision use `createDiagnosticsCache(registry)`. It returns exactly what `getDiagnostics` would, but re-checks only components that changed (or that show a changed component), and inside a changed component only the inputs and layer properties whose literal values changed (plus the copy checks when a Repeat, a Loop's Count or a literal loop changed). A scrub or a drag at 1,000 patches costs well under a millisecond. A knob tune or a preset switch re-runs only the cheap knob-table checks; a change to knob ids, types or options also re-checks the components that read knobs.
+Hosts that diagnose every revision use `createDiagnosticsCache(registry)`. It returns exactly what `getDiagnostics` would, but re-checks only components that changed (or that show a changed component), and inside a changed component only the inputs and layer properties whose literal values changed (plus the copy checks when a Repeat, a Layout, a Positioning, a Loop's Count or a literal loop changed). A scrub or a drag at 1,000 patches costs well under a millisecond. A knob tune or a preset switch re-runs only the cheap knob-table checks; a change to knob ids, names, types or options also re-checks the components that read knobs.
 
 ---
 

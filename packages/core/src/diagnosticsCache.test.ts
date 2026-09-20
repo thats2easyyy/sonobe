@@ -111,6 +111,56 @@ describe("createDiagnosticsCache", () => {
     expect(mismatches()).toBe(0);
   });
 
+  it("re-checks copies when a Layout or a child's Positioning changes", () => {
+    const cache = createDiagnosticsCache(loopRegistry);
+    const stepWith = (doc: SonobeDocument, ops: Op[]) => {
+      const next = applyOps(doc, ops, { registry: loopRegistry, lenient: true, atomic: false }).doc;
+      expect(cache.get(next)).toEqual(getDiagnostics(next, loopRegistry));
+      return next;
+    };
+    // The retro's deck: a card moved by its own drag, with a looped title and photo stacked inside.
+    let doc = stepWith(emptyDoc(), [
+      { op: "addLayer", layer: { id: "card", type: "group", name: "Card" } },
+      { op: "addLayer", parent: "card", layer: { id: "title", type: "text", name: "Title" } },
+      { op: "addLayer", parent: "card", layer: { id: "photo", type: "rectangle", name: "Photo" } },
+      { op: "addPatch", patch: { id: "names", type: "loopBuilder", typeParam: "text", inputCount: 4 } },
+      { op: "addPatch", patch: { id: "drag", type: "drag", inputs: { layer: { layer: "card" } } } },
+      { op: "connect", from: "names.loop", to: "@title.text" },
+      { op: "connect", from: "names.loop", to: "@photo.opacity" },
+      { op: "connect", from: "drag.position", to: "@card.position" },
+    ]);
+    const stuck = () => cache.get(doc).filter((d) => d.code === "loops_inside_single_copy").length;
+    expect(stuck()).toBe(1);
+    const edits: [Op, number][] = [
+      [{ op: "setInput", target: "@card.layout", value: "column" }, 0],
+      [{ op: "setInput", target: "@title.positioning", value: "absolute" }, 0],
+      [{ op: "setInput", target: "@photo.positioning", value: "absolute" }, 1],
+      [{ op: "setInput", target: "@photo.positioning", value: null }, 0],
+      [{ op: "setInput", target: "@card.layout", value: null }, 1],
+    ];
+    for (const [op, count] of edits) {
+      doc = stepWith(doc, [op]);
+      expect(stuck(), JSON.stringify(op)).toBe(count);
+    }
+  });
+
+  it("re-checks the inputs that read knobs when a knob is renamed, since their messages name it", () => {
+    const cache = createDiagnosticsCache(mockRegistry);
+    let doc = mustApply(buildSampleDocument(), [
+      { op: "addKnob", knob: { id: "gap", name: "Gap", type: "number", value: 8 } },
+      { op: "addKnob", knob: { id: "tint", name: "Tint", type: "color", value: "#FF0000FF" } },
+    ]).doc;
+    expect(cache.get(doc)).toEqual(getDiagnostics(doc, mockRegistry));
+    doc = step(cache, doc, [
+      { op: "setInput", target: "pop.bounciness", value: { link: "$knob.gapp" } },
+      { op: "setInput", target: "pop.speed", value: { link: "$knob.tint" } },
+    ]);
+    expect(cache.get(doc).map((d) => d.code)).toEqual(expect.arrayContaining(["unknown_knob", "knob_type_mismatch"]));
+    doc = step(cache, doc, [{ op: "updateKnob", id: "gap", name: "Spacing" }]);
+    doc = step(cache, doc, [{ op: "updateKnob", id: "tint", name: "Accent" }]);
+    expect(cache.get(doc).find((d) => d.code === "knob_type_mismatch")!.message).toContain('Knob "Accent"');
+  });
+
   it("re-checks components that show a changed component", () => {
     const cache = createDiagnosticsCache(mockRegistry);
     let doc = mustApply(emptyDoc(), [
