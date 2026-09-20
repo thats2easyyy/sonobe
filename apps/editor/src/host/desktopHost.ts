@@ -1,7 +1,7 @@
 /** HostAdapter over the Electron preload API (`window.sonobeHost`). */
 
 import { parseDocumentFiles } from "@sonobe/core";
-import { assetBinaries, createAssetUrlCache, createDraftFiles, digestFiles, documentFiles, draftBaseChanged, planProjectWrite, projectDisplayName, readDraftContents } from "./projectFiles.ts";
+import { assetBinaries, createAssetUrlCache, createDraftFiles, documentFiles, draftBaseChanged, planProjectWrite, projectDisplayName, readDraftContents } from "./projectFiles.ts";
 import type { DesktopDraftReply, DesktopDraftsApi, DesktopHostApi, HostAdapter, HostDrafts } from "./types.ts";
 
 type OpenWindow = { open?: (url?: string, target?: string, features?: string) => unknown };
@@ -22,9 +22,9 @@ export function createDesktopHost(api: DesktopHostApi): HostAdapter {
   const desktopDrafts = (draftsApi: DesktopDraftsApi): HostDrafts => ({
     async write(id, doc, meta) {
       const plan = draftFiles.plan(id, doc, meta.projectPath);
-      const base = meta.projectPath ? known.get(meta.projectPath) : undefined;
+      const base = draftFiles.base(id, meta.projectPath, known);
       const hasBinaries = Object.keys(plan.binaries).length > 0;
-      unwrap(await draftsApi.write(id, { files: plan.files, deleted: plan.deleted, ...(hasBinaries ? { binaries: plan.binaries } : {}) }, { ...meta, ...(base ? { base: digestFiles(base) } : {}) }));
+      unwrap(await draftsApi.write(id, { files: plan.files, deleted: plan.deleted, ...(hasBinaries ? { binaries: plan.binaries } : {}) }, { ...meta, ...(base ? { base } : {}) }));
       draftFiles.wrote(id, plan);
     },
     async remove(id) {
@@ -35,7 +35,7 @@ export function createDesktopHost(api: DesktopHostApi): HostAdapter {
     async open(id) {
       const { info, manifest, files, binaries } = unwrap(await draftsApi.read(id));
       const recovered = readDraftContents(info, manifest, files, binaries);
-      draftFiles.read(id, documentFiles(files), Object.keys(recovered.binaries));
+      draftFiles.read(id, documentFiles(files), recovered);
       return recovered;
     },
     diskChanged: (projectPath, draft) => draftBaseChanged(known.get(projectPath), draft.base),
@@ -87,6 +87,7 @@ export function createDesktopHost(api: DesktopHostApi): HostAdapter {
       const hasBinaries = Object.keys(binaries).length > 0;
       await api.writeProject(dir, { files: plan.files, deleted: plan.deleted, ...(hasBinaries ? { binaries } : {}) });
       known.set(dir, plan.all);
+      draftFiles.saved(dir, plan.all);
       if (hasBinaries) assets.markWritten(dir, binaries);
       return { written: [...Object.keys(plan.files), ...Object.keys(binaries)], deleted: plan.deleted, unchanged: plan.unchanged };
     },

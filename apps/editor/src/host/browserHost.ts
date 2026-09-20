@@ -10,7 +10,6 @@ import {
   assetBinaries,
   createAssetUrlCache,
   createDraftFiles,
-  digestFiles,
   documentFiles,
   DRAFT_ID,
   DRAFT_MANIFEST,
@@ -532,8 +531,8 @@ export function createBrowserHost(options: BrowserHostOptions = {}): BrowserHost
           for (const rel of plan.deleted) delete digests[rel];
           for (const [rel, text] of Object.entries(plan.files)) digests[rel] = textDigest(text);
           for (const [rel, bytes] of Object.entries(binaries)) digests[rel] = `bytes:${bytes.byteLength}`;
-          const base = meta.projectPath ? known.get(meta.projectPath) : undefined;
-          const manifest = { formatVersion: 1, id, ...meta, updatedAt: Date.now(), ...(base ? { base: digestFiles(base) } : {}), ...(textOnly && Object.keys(doc.assets).length ? { textOnly: true } : {}), files: digests };
+          const base = draftFiles.base(id, meta.projectPath, known);
+          const manifest = { formatVersion: 1, id, ...meta, updatedAt: Date.now(), ...(base ? { base } : {}), ...(textOnly && Object.keys(doc.assets).length ? { textOnly: true } : {}), files: digests };
           await s.write(id, { files: { [DRAFT_MANIFEST]: `${JSON.stringify(manifest)}\n` }, deleted: [] });
           draftDigests.set(id, digests);
           draftFiles.wrote(id, { all: plan.all, binaries });
@@ -574,7 +573,7 @@ export function createBrowserHost(options: BrowserHostOptions = {}): BrowserHost
             // Torn: read what's there.
           }
           const recovered = readDraftContents(info, manifest, stored.files, stored.binaries);
-          draftFiles.read(id, documentFiles(stored.files), Object.keys(recovered.binaries));
+          draftFiles.read(id, documentFiles(stored.files), recovered);
           const digests: Record<string, string> = {};
           for (const [rel, text] of Object.entries(documentFiles(stored.files))) digests[rel] = textDigest(text);
           for (const [rel, bytes] of Object.entries(recovered.binaries)) digests[rel] = `bytes:${bytes.byteLength}`;
@@ -652,6 +651,7 @@ export function createBrowserHost(options: BrowserHostOptions = {}): BrowserHost
       const hasBinaries = Object.keys(binaries).length > 0;
       await writeStored(path, { files: plan.files, deleted: plan.deleted, ...(hasBinaries ? { binaries } : {}) });
       known.set(path, plan.all);
+      draftFiles.saved(path, plan.all);
       if (hasBinaries) assets.markWritten(path, binaries);
       touchRecent(path);
       const changed = [...Object.keys(plan.files), ...plan.deleted];

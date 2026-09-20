@@ -152,7 +152,7 @@ export interface HostDrafts {
   list(): Promise<DraftInfo[]>;
   /** Claim a draft for this window and read it. */
   open(id: string): Promise<RecoveredDraft>;
-  /** Whether the project changed on disk since `draft` was written. Read the project first. */
+  /** Whether the project changed on disk since the files `draft` started from. Read the project first. */
   diskChanged(projectPath: string, draft: RecoveredDraft): boolean;
   /** Show the draft's folder (desktop). */
   reveal?(id: string): void;

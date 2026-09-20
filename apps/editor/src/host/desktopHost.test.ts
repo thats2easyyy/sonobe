@@ -138,6 +138,19 @@ describe("desktop host", () => {
     await host.drafts!.write("draft-0001", renamed, { ...meta, revision: 3 });
     expect(draftWrites[1]!.changes).toEqual({ files: { "project.json": serializeDocument(renamed)["project.json"] }, deleted: [] });
 
+    // An outside change read while there are unsaved edits doesn't move the base, so restoring still notices it.
+    const base = draftWrites[0]!.meta.base;
+    const project = serializeDocument(saved);
+    api.readProject = vi.fn(async () => ({ files: { ...project, "project.json": project["project.json"]!.replace("Checkout", "Theirs") }, binaries: {} }));
+    await host.readProject("/p/Checkout.sonobe");
+    await host.drafts!.write("draft-0001", edited, { ...meta, revision: 4 });
+    expect(draftWrites[2]!.meta.base).toEqual(base);
+    // Saving moves it to what was saved.
+    await host.writeProject("/p/Checkout.sonobe", renamed);
+    await host.drafts!.write("draft-0001", edited, { ...meta, revision: 5 });
+    expect(draftWrites[3]!.meta.base).not.toEqual(base);
+    expect(Object.keys(draftWrites[3]!.meta.base as object).sort()).toEqual(["assets/assets.json", "components/main.json", "project.json"]);
+
     await expect(host.drafts!.remove("draft-0001")).rejects.toMatchObject({ code: "draft_in_use" });
     await expect(host.drafts!.open("draft-0002")).rejects.toMatchObject({ code: "unknown_draft", message: "There's no draft." });
     host.drafts!.reveal!("draft-0001");
