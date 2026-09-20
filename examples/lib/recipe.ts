@@ -96,25 +96,29 @@ export interface BuiltRecipe {
   files: ImportFile[];
 }
 
+/**
+ * Import a recipe's design into a document, as buildRecipe does before the recipe's ops, which name
+ * the layers and assets it makes. A recipe without a design leaves the document as it is. Node only.
+ */
+export async function importRecipeDesign(recipe: Recipe, doc: SonobeDocument, registry: Registry): Promise<BuiltRecipe> {
+  if (!recipe.design) return { doc, files: [] };
+  const [{ loadDesign }, { planImport }] = await Promise.all([import("./design.ts"), import("@sonobe/import")]);
+  let plan: ImportPlan;
+  try {
+    const { capture, images } = await loadDesign(recipe.design);
+    plan = await planImport(capture, doc, images);
+  } catch (err) {
+    throw new RecipeBuildError(recipe.folder, `Importing the design failed: ${err instanceof Error ? err.message : String(err)}`);
+  }
+  return { doc: apply(recipe, doc, plan.ops, registry, "Importing the design"), files: plan.files };
+}
+
 /** Build any recipe: import its design, apply its ops, then lay its graphs out. Node only. */
 export async function buildRecipe(recipe: Recipe, registry: EngineRegistry): Promise<BuiltRecipe> {
   if (!recipe.design && recipe.tidy !== "frames") return { doc: buildRecipeDocument(recipe, registry), files: [] };
   const { doc: empty, setup } = start(recipe);
-  let doc = apply(recipe, empty, setup, registry, "Setting up");
-  let files: ImportFile[] = [];
-  if (recipe.design) {
-    const [{ loadDesign }, { planImport }] = await Promise.all([import("./design.ts"), import("@sonobe/import")]);
-    let plan: ImportPlan;
-    try {
-      const { capture, images } = await loadDesign(recipe.design);
-      plan = await planImport(capture, doc, images);
-    } catch (err) {
-      throw new RecipeBuildError(recipe.folder, `Importing the design failed: ${err instanceof Error ? err.message : String(err)}`);
-    }
-    doc = apply(recipe, doc, plan.ops, registry, "Importing the design");
-    files = plan.files;
-  }
-  doc = apply(recipe, doc, recipe.ops(), registry, "Building");
+  const { doc: imported, files } = await importRecipeDesign(recipe, apply(recipe, empty, setup, registry, "Setting up"), registry);
+  let doc = apply(recipe, imported, recipe.ops(), registry, "Building");
   if (recipe.tidy !== "frames") return { doc: tidyColumns(recipe, doc, registry), files };
   const { tidyFramesOps } = await import("./tidyFrames.ts");
   for (const id of Object.keys(doc.components).sort()) doc = apply(recipe, doc, await tidyFramesOps(doc, registry, id), registry, `Tidying ${id}`);

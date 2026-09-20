@@ -30,15 +30,15 @@ node evals/run.ts --model opus --jobs 3                             # everything
 | `--check <dir>` | Check a project folder against one `--case`, without Claude. |
 | `--sonobe <path>` | The Sonobe CLI to serve (default `packages/cli/dist/sonobe.mjs`; `packages/cli/src/main.ts` runs the sources). |
 | `--claude <path>` | The `claude` command. |
-| `--user-config` | Load your own Claude Code settings, `CLAUDE.md` and skills. They're left out by default so runs on different machines compare. |
+| `--user-config` | Load your own Claude Code settings and `CLAUDE.md`. They're left out by default so runs on different machines compare. Skills stay off either way. |
 | `--out <dir>`, `--keep` | Where results go (default `evals/results/<time>`, ignored by git), and keep each run's working folder. |
 
 It exits 0 when every run passed, 1 when some failed, and 2 on a usage error. The import case renders its design with Playwright's Chromium (`npx playwright install chromium`).
 
 ### What a run does
 
-1. Copies the case's start project into a temporary folder and writes an `mcp.json` that starts `sonobe mcp --headless` on it.
-2. Runs `claude -p` with the prompt on stdin, `--output-format stream-json`, `--mcp-config` with `--strict-mcp-config`, `--tools ""` (no files, shell or web: only Sonobe's tools), `--allowedTools mcp__sonobe`, `--no-session-persistence`, and the turn budget. The runner stops it at the time budget.
+1. Copies the case's start project, with its asset files, into a temporary folder and writes an `mcp.json` that starts `sonobe mcp --headless` on it.
+2. Runs `claude -p` with the prompt on stdin, `--output-format stream-json`, `--mcp-config` with `--strict-mcp-config`, `--tools ""` (no files, shell, web or Skill tool: only Sonobe's tools), `--allowedTools mcp__sonobe`, `--disable-slash-commands` (no skills), `--no-session-persistence`, and the turn budget. The runner stops it at the time budget.
 3. Opens the finished project with the headless host and runs the case's checks.
 4. Saves the transcript and the finished project under `<results>/<case>/run-<n>/`, so you can open what Claude built in the app.
 
@@ -65,7 +65,7 @@ evals/cases/retro-knob-presets/
 
 The seed cases:
 
-- `example-*`: the 15 examples with their patches removed, and a prompt written from each README. The layers are there and Claude builds the logic. Their checks are the example's own `test.json` expectations on layer properties.
+- `example-*`: the 16 examples with their patches removed, and a prompt written from each README. The layers are there and Claude builds the logic. For the Noddit Deck, that's the imported Discover screen with its four cards. Their checks are the example's own `test.json` expectations on layer properties.
 - `study-*`: the tasks from the [usability study](../docs/research/ai-usability-study.md): read a prototype, a beginner's like button, a designer's bottom sheet, debugging a flick, and explaining a carousel before changing it.
 - `retro-*`: regressions from the Noddit test session's retro: a looped deck that must survive its last card (no empty loops), copy 0 on top through Z Position, rebuilding a component in one batch without stale ports or `_2` ids, a Repeat count on a layer driven by its own press, knobs with two presets, and an import in dark mode followed by a press animation.
 
@@ -74,7 +74,7 @@ The seed cases:
 | Field | Meaning |
 |---|---|
 | `title`, `about`, `tags` | What the case is and why it exists. |
-| `start` | `{ "project": "start" }`, a folder in the case; or `{ "example": "01-tap-to-grow", "patches": false }`, an example's layers built from its recipe (`patches` defaults to true: the whole example). Either can take `ops` to apply first, like unwiring an input for a debugging case. |
+| `start` | `{ "project": "start" }`, a folder in the case; or `{ "example": "01-tap-to-grow", "patches": false }`, an example's layers built from its recipe, after its design import when it starts from one (`patches` defaults to true: the whole example). Either can take `ops` to apply first, like unwiring an input for a debugging case. |
 | `test` | `{ "example": "<folder>" }` adds that example's layer expectations to the case's own `test.json`. |
 | `checks` | Facts about the finished document: `unchanged`; `interface` (a component's ports: `without` keys, exact `outputs` or `inputs` names); `keepsIds` (no removed id came back as `<id>_2`); `presets` (knob presets by name, `locked` when given). |
 | `answer` | `{ "mentions": [["tap"], ["grow", "bigger"]] }`: the final reply has a word from each group. For explaining tasks. |

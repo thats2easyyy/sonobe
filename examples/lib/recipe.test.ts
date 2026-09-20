@@ -97,4 +97,14 @@ describe("design imports and asset files", () => {
     expect(projectDrift(dir, doc, [{ file: "abc.svg", bytes }])).toEqual({ changed: [], extra: [] });
     expect(projectDrift(dir, doc, [])).toEqual({ changed: [], extra: ["assets/abc.svg"] });
   });
+
+  it("leaves the files an OS puts in assets/ alone, like Finder's .DS_Store", async () => {
+    const dir = temp();
+    const built = await buildRecipe(tapToGrow, registry);
+    await saveProjectToDisk(dir, built.doc);
+    mkdirSync(path.join(dir, "assets", "Originals"), { recursive: true });
+    for (const name of [".DS_Store", "._photo.jpg", "Thumbs.db"]) writeFileSync(path.join(dir, "assets", name), "x");
+    expect(projectDrift(dir, built.doc, built.files)).toEqual({ changed: [], extra: [] });
+    expect(writeAssetFiles(dir, built.files)).toEqual({ written: [], removed: [] });
+  });
 });

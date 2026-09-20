@@ -1,0 +1,22 @@
+{
+  "title": "Noddit Deck",
+  "about": "examples/16-noddit-deck with its patches removed: the imported Discover screen is there, and Claude turns its four cards into one repeated card and builds the swipe, the knobs and the presets.",
+  "tags": [
+    "example",
+    "import",
+    "gestures",
+    "loops",
+    "knobs"
+  ],
+  "start": {
+    "example": "16-noddit-deck",
+    "patches": false
+  },
+  "test": {
+    "example": "16-noddit-deck"
+  },
+  "budget": {
+    "maxTurns": 100,
+    "timeoutSec": 1200
+  }
+}

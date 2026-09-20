@@ -49,6 +49,19 @@ describe("claudeArgs", () => {
     expect(open).not.toContain("--model");
   });
 
+  it("keeps skills and slash commands off, even with the person's own settings", () => {
+    const open = claudeArgs({
+      mcpConfigPath: "m.json",
+      maxTurns: 5,
+      hideExamples: false,
+      userConfig: true,
+    });
+    for (const a of [args, open]) {
+      expect(a).toContain("--disable-slash-commands");
+      expect(flag(a, "--tools")).toBe("");
+    }
+  });
+
   it("never puts the prompt on the command line (it goes in on stdin)", () => {
     expect(args.filter((a) => !a.startsWith("--") && a !== "-p")).toEqual([
       "stream-json",
