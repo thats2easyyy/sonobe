@@ -1,0 +1,49 @@
+/*
+ * The import hologram's colors (hologramDraw.ts reads them once per run) and the canvas that draws it.
+ * Cyan for the build, a secondary blue for deeper layers, a magenta fringe at the laser.
+ */
+
+:root,
+[data-theme="dark"] {
+  --holo-veil-top: #08202d;
+  --holo-veil-bottom: #030b13;
+  --holo-line: #5ef2ff;
+  --holo-core: #e8feff;
+  --holo-tint: #7a84ff;
+  --holo-fringe: #ff5fd2;
+  --holo-rain: #3fe0f0;
+  /* The frame's outline and corners, which also sit on the UI around it. */
+  --holo-edge: #e8feff;
+  /* The closing halo outside the frame. */
+  --holo-halo: #5ef2ff;
+  --holo-grid-alpha: 0.09;
+  --holo-wire-alpha: 0.62;
+}
+
+/* The projection stays dark in the light theme; only its edge deepens to read on light surfaces. */
+[data-theme="light"] {
+  --holo-veil-top: #0b2433;
+  --holo-veil-bottom: #06121c;
+  --holo-line: #5ef2ff;
+  --holo-core: #f2ffff;
+  --holo-tint: #8a8cff;
+  --holo-fringe: #ff5fd2;
+  --holo-rain: #3fe0f0;
+  --holo-edge: #0a9fbd;
+  --holo-halo: #00b4d8;
+  --holo-grid-alpha: 0.1;
+  --holo-wire-alpha: 0.66;
+}
+
+/*
+ * The build on the canvas: over the design, under the selection chrome, never in the way. It covers
+ * only the screen's visible part; the script sizes it and moves it with a transform.
+ */
+.sb-holo {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 0;
+  height: 0;
+  pointer-events: none;
+}

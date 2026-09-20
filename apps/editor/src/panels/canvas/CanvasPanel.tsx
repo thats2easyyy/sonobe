@@ -33,6 +33,8 @@ import { useLatest } from "../../ui/lib/hooks.ts";
 import { readString, writeString } from "../../ui/lib/storage.ts";
 import { useElementSize } from "../../ui/lib/useElementSize.ts";
 import { rectOfElement } from "../../state/bounds.ts";
+import { hideCoveredChrome } from "../import/hologram.ts";
+import { HologramBuild, useCoveredScreen } from "../import/HologramBuild.tsx";
 import { patchEditorBridge } from "../patch-editor/api.ts";
 import { registerBoundsProvider } from "../viewer/hostBridge.ts";
 import { dragHasFiles, dropLabel, dropUndoLabel, mediaLayerOps, prepareDroppedFiles, type DroppedFile } from "./assetDrop.ts";
@@ -238,6 +240,8 @@ export function CanvasPanel({ session: sessionProp, sceneSource, onSceneSourceCh
     [index, selectionIds, viewport, chromeEditable, editing],
   );
   const hoverId = hovered && hovered.kind === "layer" && hovered.component === componentId ? hovered.id : null;
+  // An import hologram covering a screen hides that screen's selection chrome until it finishes.
+  const holoCovered = useCoveredScreen(session, componentId);
 
   const latest = useLatest({ index, viewport, componentId, component, tool, artboard, chrome, spaceHeld, box, editing });
 
@@ -1090,12 +1094,13 @@ export function CanvasPanel({ session: sessionProp, sceneSource, onSceneSourceCh
                 {live && <span className="sb-cv__label-live">Live frame</span>}
               </div>
               <ArtboardRenderer session={session} scene={scene} viewport={viewport} size={size} rendererRef={rendererRef} />
+              <HologramBuild session={session} componentId={componentId} index={index} viewport={viewport} width={box.width} height={box.height} />
               {component.layers.length === 0 && (
                 <div className="sb-cv__hint" style={{ left: Math.round(viewport.x + (size[0] * viewport.zoom) / 2), top: Math.round(viewport.y + (size[1] * viewport.zoom) / 2) }}>
                   Draw a rectangle (R), an oval (O), or text (T)
                 </div>
               )}
-              <CanvasOverlay index={index} viewport={viewport} selected={selectionIds} hovered={draft.hideChrome || gestureRef.current ? null : hoverId} chrome={chrome} draft={draft} altMeasure={altMeasure} />
+              <CanvasOverlay index={index} viewport={viewport} {...hideCoveredChrome(holoCovered, { selected: selectionIds, hovered: draft.hideChrome || gestureRef.current ? null : hoverId, chrome })} draft={draft} altMeasure={altMeasure} />
               {editing && editingNode && <InlineTextEditor key={editing.id} node={editingNode} viewport={viewport} initialText={editing.initial} selectAll={editing.selectAll} onCommit={commitText} />}
               {rulers && <CanvasRulers viewport={viewport} width={box.width} height={box.height} selection={chrome?.bounds ?? null} />}
             </>
