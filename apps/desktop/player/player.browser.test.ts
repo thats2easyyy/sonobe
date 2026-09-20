@@ -2,8 +2,9 @@
  * The built web player in real mobile Chromium (Playwright), served by the real LAN preview server:
  * taps reach the device as navigator.vibrate calls on Android and as bridge messages under a native
  * host like Sonobe Viewer; Sonobe's restart reaches the phone; a three-finger tap opens the menu
- * without touching the prototype; and Network Request and remote images reach other hosts through
- * the player's CSP. Skipped without Playwright's browser.
+ * without touching the prototype; Network Request and remote images reach other hosts through the
+ * player's CSP; and Device Info reads the phone's appearance, safe area, rotation and density.
+ * Skipped without Playwright's browser.
  */
 
 import { existsSync } from "node:fs";
@@ -252,6 +253,49 @@ describe.skipIf(!playwright)("web player on a phone", () => {
       await context.close();
       await network.close();
       await new Promise((resolve) => api.close(resolve));
+    }
+  });
+
+  it("tells Device Info about the phone: its appearance, safe area, rotation and density", { timeout: 60_000 }, async () => {
+    const readouts: Record<string, string> = { dark: "info.darkMode", top: "safe.top", bottom: "safe.bottom", left: "safe.left", turn: "info.orientation", scale: "info.screenScale" };
+    const doc = buildDoc(
+      {
+        name: "Device Check",
+        device: "iphone-17-pro",
+        layers: Object.entries(readouts).map(([id, link], i) => ({ id, type: "text", name: id, props: { position: [24, 200 + 60 * i], size: [354, 40], text: { link }, fontSize: 24, textColor: "#ffffff" } })),
+        patches: { info: { type: "deviceInfo" }, safe: { type: "edgesUnpack", inputs: { value: { link: "info.safeArea" } } } },
+      },
+      createPatchRegistry(),
+    );
+    const device = await servePlayer({ doc, token: "device-check" });
+    // A phone unlike the project's iPhone 17 Pro (62 pt top inset, 3× density), so every value read is the phone's.
+    const context = await browser.newContext({ viewport: { width: 402, height: 874 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true, colorScheme: "dark" });
+    try {
+      const page = await context.newPage();
+      const errors: string[] = [];
+      page.on("pageerror", (err) => errors.push(err.message));
+      const cdp = await context.newCDPSession(page);
+      const insets = (top: number, right: number, bottom: number, left: number) => cdp.send("Emulation.setSafeAreaInsetsOverride", { insets: { top, right, bottom, left } });
+      const shows = async (values: Record<string, string>) => {
+        for (const [id, value] of Object.entries(values)) await page.locator(`[data-layer="${id}"]`).getByText(value, { exact: true }).waitFor({ timeout: 5_000 });
+      };
+      await insets(59, 0, 34, 0);
+      await page.goto(device.url);
+      await page.waitForFunction(() => document.getElementById("status")?.dataset.state === "live", null, { timeout: 15_000 });
+      // The prototype fills this 402×874 screen at scale 1, so the phone's insets are the prototype's.
+      await shows({ dark: "true", top: "59", bottom: "34", left: "0", turn: "0", scale: "2" });
+
+      // Turned: the interface stays portrait, letterboxed between the side insets, so only the bottom one reaches it.
+      await insets(0, 59, 21, 59);
+      await page.setViewportSize({ width: 874, height: 402 });
+      await shows({ turn: "90", top: "0", bottom: "46", left: "0" });
+
+      await page.emulateMedia({ colorScheme: "light" });
+      await shows({ dark: "false" });
+      expect(errors).toEqual([]);
+    } finally {
+      await context.close();
+      await device.close();
     }
   });
 

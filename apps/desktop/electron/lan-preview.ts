@@ -82,10 +82,14 @@ export interface LanPreviewHandle {
   readonly pushUpdates: boolean;
   /** Switch between polling and push mode. */
   setPushUpdates(on: boolean): void;
+  /** Close every player's socket with code 1001 (up to 1 s for them to answer), then stop listening. */
   close(): Promise<void>;
 }
 
 export const OFFLINE_MESSAGE = "Open a prototype in Sonobe on your computer to preview it here.";
+
+/** How long close() waits for players to answer its goodbye before cutting them off. */
+const CLOSE_GRACE_MS = 1000;
 
 const CONTENT_TYPES: Record<string, string> = {
   ".html": "text/html; charset=utf-8",
@@ -153,6 +157,17 @@ export function lanAddresses(interfaces: NodeJS.Dict<NetworkInterfaceInfo[]> = n
 export function previewUrl(address: string, port: number, token: string): string {
   const host = address.includes(":") ? `[${address}]` : address;
   return `http://${host}:${port}/p/${token}/`;
+}
+
+/** The text of the app's own Preview on Phone dialog, for an editor that can't show its QR panel. */
+export function phonePreviewDetail(url: string, lanReachable: boolean): string {
+  return [
+    lanReachable ? "Scan the code with a phone on the same Wi-Fi, or open this link:" : "No local network was found, so only this computer can open the preview:",
+    url,
+    "",
+    ...(lanReachable ? ["On iPhone, scan the code in the Sonobe Viewer app to feel haptics. On the phone, a three-finger tap opens a menu with Restart; restarting in Sonobe restarts the phone too.", ""] : []),
+    "The link includes a private code. Anyone with it can view this prototype while the preview is on.",
+  ].join("\n");
 }
 
 function tokensMatch(candidate: string, token: string): boolean {
@@ -502,11 +517,27 @@ export async function startLanPreview(opts: LanPreviewOptions): Promise<LanPrevi
       closed = true;
       clearInterval(heartbeat);
       if (pollTimer) clearInterval(pollTimer);
-      for (const client of wss.clients) client.terminate();
-      wss.close();
+      // Say goodbye and let each player answer before cutting off the ones that don't. A player closing
+      // its own socket at that moment (a tab or window going away) would otherwise send its close
+      // frame to a socket just destroyed, which Node throws as an uncaught RangeError from
+      // TCP.onStreamRead: in the app, a JavaScript error dialog that stops the main process.
+      const players = [...wss.clients];
+      for (const client of players) client.close(1001, "The preview stopped");
       return new Promise<void>((resolve) => {
-        server.close(() => resolve());
-        server.closeAllConnections();
+        let finished = false;
+        const finish = () => {
+          if (finished) return;
+          finished = true;
+          clearTimeout(grace);
+          for (const client of wss.clients) client.terminate();
+          wss.close();
+          server.close(() => resolve());
+          server.closeAllConnections();
+        };
+        const grace = setTimeout(finish, CLOSE_GRACE_MS);
+        let open = players.length;
+        if (open === 0) finish();
+        for (const client of players) client.once("close", () => --open === 0 && finish());
       });
     },
   };

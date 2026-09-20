@@ -14,6 +14,7 @@ import {
   createRuntime,
   isLoop,
   valuesEqual,
+  type DeviceInfo,
   type EngineRegistry,
   type InputEvent,
   type Loop,
@@ -71,6 +72,11 @@ export interface RuntimeHostOptions {
   platformOptions?: Omit<BrowserPlatformOptions, "resolveAssetUrl" | "layerElement" | "mute">;
   /** Mute switch. Default: the app-wide switch (SONOBE_MUTE, ?mute=1, automation). */
   mute?: MuteStore;
+  /**
+   * What Device Info reads besides the project's device (preset, orientation, safe area): where the
+   * viewer runs (`platform`, "desktop" by default). Dark Mode follows the system's appearance unless set here.
+   */
+  device?: Partial<DeviceInfo>;
   /** Trust gate for project scripts. Default: a store remembering trust in localStorage. */
   scriptTrust?: ScriptTrustStore;
   /**
@@ -363,11 +369,16 @@ export function createRuntimeHost(options: RuntimeHostOptions): RuntimeHost {
     } else platform = {};
   } else platform = options.platform;
 
+  // The system's appearance, which the prototype's Dark Mode follows while it runs.
+  const appearance = options.device?.darkMode === undefined && typeof window !== "undefined" && typeof window.matchMedia === "function" ? window.matchMedia("(prefers-color-scheme: dark)") : null;
+  const device = (): Partial<DeviceInfo> => ({ ...options.device, ...(appearance ? { darkMode: appearance.matches } : {}) });
+
   const runtime = createRuntime(currentDoc, {
     registry,
     ...(measurer ? { textMeasurer: measurer } : {}),
     ...(options.seed !== undefined ? { seed: options.seed } : {}),
     platform,
+    device: device(),
     resolveAssetUrl,
     mediaInfo: (ref) => mediaInfo.info(ref),
     onLog: (level, args, source) => {
@@ -624,6 +635,9 @@ export function createRuntimeHost(options: RuntimeHostOptions): RuntimeHost {
     if (allowed) restart();
   });
 
+  const onAppearance = () => runtime.setDevice(device());
+  appearance?.addEventListener?.("change", onAppearance);
+
   const unsubscribeMute = mute.subscribe((s, previous) => {
     if (s.muted !== previous.muted) state.setState({ muted: s.muted });
   });
@@ -866,6 +880,7 @@ export function createRuntimeHost(options: RuntimeHostOptions): RuntimeHost {
       unsubscribeDoc?.();
       unsubscribeTrust();
       unsubscribeMute();
+      appearance?.removeEventListener?.("change", onAppearance);
       for (const viewer of [...viewers]) viewer.dispose();
       frameListeners.clear();
       restartListeners.clear();

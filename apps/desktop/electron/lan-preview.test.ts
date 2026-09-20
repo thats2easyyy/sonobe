@@ -1,9 +1,10 @@
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { connect } from "node:net";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { WebSocket } from "ws";
-import { etagMatches, lanAddresses, matchPreviewPath, previewUrl, resolveUnder, startLanPreview, type LanPreviewHandle, type PreviewDocument, type PreviewMessage } from "./lan-preview.ts";
+import { etagMatches, lanAddresses, matchPreviewPath, phonePreviewDetail, previewUrl, resolveUnder, startLanPreview, type LanPreviewHandle, type PreviewDocument, type PreviewMessage } from "./lan-preview.ts";
 
 interface Player {
   ws: WebSocket;
@@ -66,6 +67,18 @@ describe("lan preview helpers", () => {
     expect(matchPreviewPath("/p/tok/%E0%A4%A", "tok")).toBeNull();
     expect(resolveUnder("/srv/player", "../secret")).toBeNull();
     expect(resolveUnder("/srv/player", "player.js")).toBe(path.resolve("/srv/player/player.js"));
+  });
+
+  it("words the app's own Preview on Phone dialog like the editor's panel", () => {
+    const url = "http://192.168.1.24:5173/p/abc/";
+    const lan = phonePreviewDetail(url, true);
+    expect(lan.split("\n").slice(0, 2)).toEqual(["Scan the code with a phone on the same Wi-Fi, or open this link:", url]);
+    expect(lan).toContain("Sonobe Viewer app to feel haptics");
+    expect(lan).toContain("a three-finger tap opens a menu with Restart");
+    expect(lan).toContain("Anyone with it can view this prototype");
+    const local = phonePreviewDetail("http://127.0.0.1:5173/p/abc/", false);
+    expect(local).toContain("only this computer can open the preview");
+    expect(local).not.toContain("Sonobe Viewer");
   });
 });
 
@@ -268,13 +281,22 @@ describe("startLanPreview", () => {
     ws.terminate();
   });
 
-  it("closes open sockets on close", async () => {
+  it("says goodbye to players on close, and cuts off one that doesn't answer", async () => {
     const s = server!;
     const { ws } = await open(`ws://127.0.0.1:${s.port}/p/${s.token}/sync`);
-    const closed = new Promise((resolve) => ws.once("close", resolve));
+    const closed = new Promise<[number, string]>((resolve) => ws.once("close", (code, reason) => resolve([code, String(reason)])));
+    // A player that completes the handshake and then never answers a frame.
+    const silent = connect(s.port, "127.0.0.1");
+    const upgraded = new Promise<void>((resolve) => silent.once("data", () => resolve()));
+    silent.write(`GET /p/${s.token}/sync HTTP/1.1\r\nHost: 127.0.0.1:${s.port}\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Version: 13\r\n\r\n`);
+    await upgraded;
+    const cutOff = new Promise((resolve) => silent.once("close", resolve));
+    const started = Date.now();
     await s.close();
     server = null;
-    await closed;
+    expect(await closed).toEqual([1001, "The preview stopped"]);
+    await cutOff;
+    expect(Date.now() - started).toBeGreaterThanOrEqual(900);
     await expect(fetch(s.url)).rejects.toThrow();
   });
 });

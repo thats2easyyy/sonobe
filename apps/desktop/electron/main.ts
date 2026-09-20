@@ -22,7 +22,7 @@ import { isCommandId, toHostPlatform } from "./commands.ts";
 import { projectPathsFromArgv, readDesktopEnv } from "./env.ts";
 import type { McpStatus, PreviewStatus, SecretsStatus, SonobeCommandId, ViewerWindowStatus } from "./host-api.d.ts";
 import { IPC } from "./ipc.ts";
-import { resolveUnder, startLanPreview, type LanPreviewHandle } from "./lan-preview.ts";
+import { phonePreviewDetail, resolveUnder, startLanPreview, type LanPreviewHandle } from "./lan-preview.ts";
 import { defaultSonobeHome, startMcpServer, type McpServerHandle } from "./mcp-server.ts";
 import { buildMenuSpec, toMenuTemplate, type NativeAction } from "./menu.ts";
 import { OwnWriteRegistry, ProjectAccess, readProject, resolveProjectSelection, writeProject, type WriteProjectInput } from "./project-io.ts";
@@ -249,7 +249,12 @@ function main(): void {
         w.webContents.on("did-start-navigation", (details) => {
           if (details.isMainFrame && !details.isSameDocument) drafts?.release(id);
         });
-        w.webContents.on("render-process-gone", () => drafts?.release(id));
+        w.webContents.on("render-process-gone", () => {
+          drafts?.release(id);
+          appHost?.forgetTarget(id);
+        });
+        // A reloaded editor shows a document of its own: the app host forgets the old page's (docId, cached snapshot, simulations).
+        w.webContents.on("did-navigate", () => appHost?.forgetTarget(id));
         w.webContents.once("destroyed", () => {
           drafts?.release(id);
           windows.delete(id);
@@ -481,12 +486,7 @@ function main(): void {
       type: "none",
       icon: nativeImage.createFromBuffer(png),
       message: "Preview on Phone",
-      detail: [
-        status.lanReachable ? "Scan the code with a phone on the same Wi-Fi, or open this link:" : "No local network was found, so only this computer can open the preview:",
-        status.url,
-        "",
-        "The link includes a private code. Anyone with it can view this prototype while the preview is on.",
-      ].join("\n"),
+      detail: phonePreviewDetail(status.url, status.lanReachable),
       buttons: ["Done", "Copy Link", "Stop Preview"],
       defaultId: 0,
       cancelId: 0,

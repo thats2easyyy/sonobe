@@ -57,6 +57,36 @@ describe("device patches in a runtime document", () => {
     expect(rt.issues().filter((i) => i.patchId === "orient")).toHaveLength(0);
   });
 
+  it("reads what a phone's host reports, and follows setDevice from the next frame", () => {
+    const registry = createMockRegistry(definitions);
+    const doc = buildDoc({ device: "iphone-17-pro", patches: { info: { type: "deviceInfo" } } }, registry);
+    // What the web player on a phone passes: its real insets, appearance and rotation.
+    const phone = { platform: "mobile" as const, darkMode: true, safeArea: [59, 0, 34, 0] as [number, number, number, number], orientationAngle: 0 };
+    const rt = createTestRuntime(doc, registry, { device: phone });
+    rt.step();
+    expect(rt.services.device().platform).toBe("mobile");
+    expect(rt.getValue("info.darkMode")).toBe(true);
+    expect(rt.getValue("info.safeArea")).toEqual([59, 0, 34, 0]);
+    expect(rt.getValue("info.orientation")).toBe(0);
+
+    // The phone turns: Device Info's Orientation follows it, while the interface keeps the project's portrait.
+    rt.setDevice({ ...phone, darkMode: false, safeArea: [0, 59, 21, 59], orientationAngle: 90 });
+    expect(rt.getValue("info.darkMode")).toBe(true);
+    rt.step();
+    expect(rt.getValue("info.darkMode")).toBe(false);
+    expect(rt.getValue("info.safeArea")).toEqual([0, 59, 21, 59]);
+    expect(rt.getValue("info.orientation")).toBe(90);
+    expect(rt.getValue("info.screenSize")).toEqual([402, 874]);
+    expect(rt.getValue("info.landscape")).toBe(false);
+    // A trace replays with what the host reports now.
+    expect(rt.trace(["info.orientation"], 50).values["info.orientation"]!.at(-1)).toBe(90);
+    // Unlike an orientation event, what the host reports outlives a restart.
+    rt.restart();
+    rt.step();
+    expect(rt.getValue("info.orientation")).toBe(90);
+    expect(rt.services.device().platform).toBe("mobile");
+  });
+
   it("traces Device Time deterministically in UTC", () => {
     const registry = createMockRegistry(definitions);
     const doc = buildDoc({ patches: { clock: { type: "deviceTime" } } }, registry);
