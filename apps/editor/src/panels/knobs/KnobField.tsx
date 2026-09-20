@@ -46,6 +46,8 @@ export function knobFieldEntries(session: EditorSession, field: InspectorField, 
   }
   if (field.linkedCount > 0) return [];
   const type = knobTypeForPort(field.port);
+  // Fields a knob can't be made from (layers, media, gradients) offer knobs only when they take anything.
+  if (!type && field.type !== "any") return [];
   const fitting = knobsForPort(set, field.port);
   const componentId = session.currentComponentId();
   return [

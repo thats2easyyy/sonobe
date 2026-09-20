@@ -90,7 +90,7 @@ export function KnobsPanel() {
     const running = set?.presets.find((p) => p.id === set.active);
     return [
       { id: "newKnob", label: "New Knob…", icon: <Plus size={14} />, onSelect: () => openEditor({ kind: "new" }, menuRef.current) },
-      { id: "newPreset", label: "New Preset", description: set ? `A copy of ${presetName(set, set.active)}` : undefined, onSelect: () => addPreset(edit, set) },
+      { id: "newPreset", label: "New Preset", description: set ? `A copy of ${presetName(set, set.active)}` : undefined, onSelect: () => addPreset(session, edit, set) },
       ...(set && partner ? [{ id: "copy", label: "Copy Differences", description: `${presetName(set, set.active)} vs ${presetName(set, partner)}, as a table`, onSelect: () => copyDifferences(set, partner) } satisfies MenuEntry] : []),
       ...(candidates.knobs.length ? [{ id: "convert", label: "Convert Variables to Knobs…", icon: <WandSparkles size={14} />, onSelect: () => setConverting(true) } satisfies MenuEntry] : []),
       ...(set && running ? ([{ type: "separator" }, ...presetEntries(session, edit, set, running, true)] satisfies MenuEntry[]) : []),

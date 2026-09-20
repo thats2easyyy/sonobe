@@ -4,10 +4,11 @@
  * renames, locks or deletes it. With a single preset the bar offers only "Add Preset to Compare".
  */
 
-import type { Id, KnobPreset, KnobSet } from "@sonobe/core";
+import { deriveKnobPresetId, type KnobPreset, type KnobSet, type Op } from "@sonobe/core";
 import { Ellipsis, Lock, LockOpen, Pencil, Plus, Trash2 } from "lucide-react";
 import type { CSSProperties, KeyboardEvent, Ref } from "react";
 import { useEditorSession } from "../../state/EditorProvider.tsx";
+import type { EditorSession } from "../../state/session.ts";
 import { newPresetLabel } from "../../state/undoLabels.ts";
 import { Button } from "../../ui/Button.tsx";
 import { IconButton } from "../../ui/IconButton.tsx";
@@ -16,7 +17,7 @@ import { newPresetName, presetColor } from "./model.ts";
 import type { KnobEdit } from "./useKnobEdit.ts";
 
 /** Rename, lock or unlock, and delete a preset (a chip's menu, and the ⋯ menu for the running one). */
-export function presetEntries(session: ReturnType<typeof useEditorSession>, edit: KnobEdit, set: KnobSet, preset: KnobPreset, withNames = false): MenuEntry[] {
+export function presetEntries(session: EditorSession, edit: KnobEdit, set: KnobSet, preset: KnobPreset, withNames = false): MenuEntry[] {
   const suffix = withNames ? ` “${preset.name}”` : "";
   const last = set.presets.length === 1 && set.knobs.length > 0;
   return [
@@ -45,7 +46,7 @@ export function presetEntries(session: ReturnType<typeof useEditorSession>, edit
   ];
 }
 
-async function renamePreset(session: ReturnType<typeof useEditorSession>, edit: KnobEdit, set: KnobSet, preset: KnobPreset): Promise<void> {
+async function renamePreset(session: EditorSession, edit: KnobEdit, set: KnobSet, preset: KnobPreset): Promise<void> {
   const name = await session.dialogs.prompt({
     title: "Rename Preset",
     defaultValue: preset.name,
@@ -63,15 +64,22 @@ async function renamePreset(session: ReturnType<typeof useEditorSession>, edit: 
   edit.apply([{ op: "updateKnobPreset", id: preset.id, name: name.trim() }], `Rename Preset “${preset.name}” to “${name.trim()}”`);
 }
 
-async function deletePreset(session: ReturnType<typeof useEditorSession>, edit: KnobEdit, preset: KnobPreset): Promise<void> {
+async function deletePreset(session: EditorSession, edit: KnobEdit, preset: KnobPreset): Promise<void> {
   const ok = await session.dialogs.confirm({ title: `Delete “${preset.name}”?`, message: "Its value for every knob goes with it. You can undo this.", confirmLabel: "Delete", danger: true });
   if (ok) edit.apply([{ op: "removeKnobPreset", id: preset.id }], `Delete Preset “${preset.name}”`);
 }
 
-/** New Preset: a copy of the running preset's values, run right away. */
-export function addPreset(edit: KnobEdit, set: KnobSet | undefined): void {
+/**
+ * New Preset: a copy of the running preset's values that runs from then on, so tuning goes into the
+ * copy and the preset it came from stays as it was. One undo step.
+ */
+export function addPreset(session: EditorSession, edit: KnobEdit, set: KnobSet | undefined): void {
   const name = newPresetName(set);
-  edit.apply([{ op: "addKnobPreset", preset: { name }, ...(set ? { copyFrom: set.active } : {}) }], newPresetLabel(name));
+  const seen = new Set(session.document.getState().seenIds().presets);
+  const id = deriveKnobPresetId(set, name, (p) => seen.has(p));
+  const ops: Op[] = [{ op: "addKnobPreset", preset: { id, name }, ...(set ? { copyFrom: set.active } : {}) }];
+  if (set) ops.push({ op: "applyKnobPreset", id });
+  edit.apply(ops, newPresetLabel(name));
 }
 
 export interface PresetBarProps {
@@ -101,7 +109,7 @@ export function PresetBar({ set, edit, menu, menuRef }: PresetBarProps) {
   if (single) {
     return (
       <div className="sb-knobs-presets" data-single="">
-        <Button size="sm" variant="ghost" icon={<Plus size={13} />} onClick={() => addPreset(edit, set)}>
+        <Button size="sm" variant="ghost" icon={<Plus size={13} />} onClick={() => addPreset(session, edit, set)}>
           Add Preset to Compare
         </Button>
         <span className="sb-knobs-presets__spacer" />
@@ -115,7 +123,7 @@ export function PresetBar({ set, edit, menu, menuRef }: PresetBarProps) {
         {set.presets.map((preset, index) => (
           <PresetChip key={preset.id} set={set} preset={preset} entries={() => presetEntries(session, edit, set, preset)} onSelect={() => edit.switchPreset(preset.id)} onKeyDown={(event) => onKeyDown(event, index)} />
         ))}
-        <IconButton size="xs" icon={<Plus size={13} />} label="New Preset" tooltip="New preset from the running one" onClick={() => addPreset(edit, set)} />
+        <IconButton size="xs" icon={<Plus size={13} />} label="New Preset" tooltip="New preset from the running one" onClick={() => addPreset(session, edit, set)} />
       </div>
       {more}
     </div>
@@ -130,7 +138,7 @@ function PresetChip({ set, preset, entries, onSelect, onKeyDown }: { set: KnobSe
         role="radio"
         tabIndex={running ? 0 : -1}
         aria-checked={running}
-        data-preset={preset.id as Id}
+        data-preset={preset.id}
         className="sb-preset-chip"
         data-running={running || undefined}
         data-locked={preset.locked || undefined}

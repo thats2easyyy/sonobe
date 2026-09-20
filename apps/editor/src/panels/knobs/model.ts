@@ -264,10 +264,11 @@ export function planUnlinkKnob(set: KnobSet, knob: Knob, componentId: Id, target
   return targets.map((t): Op => ({ op: "setInput", component: componentId, target: t.address, value: knobValueAs(knob, running, t.type) ?? null }));
 }
 
-/** A new preset's name: "Proposal 2", or "Preset 2" with nothing to copy the name from. */
+/** A new preset's name: "Proposal 2" after Proposal, "Preset 2" after Default, "Preset 1" for a project's first. */
 export function newPresetName(set: KnobSet | undefined): string {
-  const names = new Set((set?.presets ?? []).map((p) => p.name.toLowerCase()));
-  const running = set?.presets.find((p) => p.id === set.active);
+  if (!set) return "Preset 1";
+  const names = new Set(set.presets.map((p) => p.name.toLowerCase()));
+  const running = set.presets.find((p) => p.id === set.active);
   const base = running && running.name !== "Default" ? running.name : "Preset";
   for (let n = 2; ; n++) {
     const name = `${base} ${n}`;

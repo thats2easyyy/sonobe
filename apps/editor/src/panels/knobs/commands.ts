@@ -40,7 +40,7 @@ export function knobCommands(session: EditorSession): Command[] {
       },
     },
     { id: "knobs.newKnob", title: "New Knob…", category: "Prototype", icon: Plus, keywords: ["knobs", "slider", "parameter", "tune"], run: () => showKnobs(session, undefined, { kind: "newKnob" }) },
-    { id: "knobs.newPreset", title: "New Preset", category: "Prototype", icon: Plus, keywords: ["knobs", "compare", "variant"], run: () => addPreset(knobEdit(session), set()) },
+    { id: "knobs.newPreset", title: "New Preset", category: "Prototype", icon: Plus, keywords: ["knobs", "compare", "variant"], run: () => addPreset(session, knobEdit(session), set()) },
     {
       id: "knobs.copyDifferences",
       title: "Copy Knob Differences",
