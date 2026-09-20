@@ -47,7 +47,9 @@ Sonobe fills in the setup for your machine, so start here. Any of these opens th
 - "Connect Claude…" in the command palette (⌘K).
 - **Build with Claude** on the welcome screen, or **Connect Claude** in the empty AI Activity panel.
 
-At the top, a status card says whether Sonobe is ready for Claude. Below it, choose **Claude Code** or **Claude Desktop**. A second switch, **How Claude starts Sonobe**, picks what the command runs:
+At the top, a status card lists the Claude sessions connected to Sonobe: which app, its project folder, when it last did something and the last tool it called. A session shows up once Claude starts Sonobe's server, and it's marked disconnected when Claude quits. "No Claude session is connected" means exactly that, even though Sonobe's server is running and ready. The toolbar's Claude button works the same way: its dot turns green only while a session is connected, and its tooltip names each one.
+
+Below the status card, choose **Claude Code** or **Claude Desktop**. A second switch, **How Claude starts Sonobe**, picks what the command runs:
 
 - **Sonobe app** runs the CLI that ships inside the app, by its full path. Nothing has to be on your PATH, and you don't need Node installed.
 - **From source** runs the CLI straight from a Sonobe checkout with Node 22.18 or later. Fill in your Node path and your Sonobe folder, and the commands update.
@@ -58,19 +60,24 @@ If you open the editor in a browser instead of the app, the status card says liv
 
 ## Connect Claude Code
 
-1. On the Connect Claude screen, choose **Claude Code** and copy the command under **Run this in a terminal**.
+1. On the Connect Claude screen, choose **Claude Code** and copy the command under **Run this once in a terminal, from any folder**.
 2. Run it in a terminal. With the Mac app in your Applications folder, it looks like this:
 
    ```sh
-   claude mcp add sonobe -- /Applications/Sonobe.app/Contents/Resources/cli/sonobe mcp
+   claude mcp add --scope user sonobe -- /Applications/Sonobe.app/Contents/Resources/cli/sonobe mcp
    ```
 
-3. Keep Sonobe open, start Claude Code, and ask, "List the documents open in Sonobe." Run `claude mcp list` anytime to check the connection.
+   `--scope user` adds Sonobe for every project, so any Claude Code session gets its tools, whatever folder it starts in.
+3. Keep Sonobe open, start a new Claude Code session in any folder, and ask, "List the documents open in Sonobe." The session appears on the Connect Claude screen. Run `claude mcp list` anytime to check the setup.
+
+If Claude Code says `sonobe` already exists, it's set up. To point it at a different copy of Sonobe, run `claude mcp remove --scope user sonobe`, then the command again.
+
+**Set up before?** Earlier versions added Sonobe to one folder only (Claude Code's local scope), so sessions in other folders had no Sonobe tools. That entry still works in its folder, and it wins over the user entry there. To clean it up, run `claude mcp remove --scope local sonobe` in that folder. A session that runs an older copy of the relay is flagged on the Connect Claude screen.
 
 From a source checkout, you can use the CLI bundle instead, one self-contained file that runs on Node 22 or later. Build it once with `npm run build -w @sonobe/cli`, then use its full path:
 
 ```sh
-claude mcp add sonobe -- node "/path/to/sonobe/packages/cli/dist/sonobe.mjs" mcp
+claude mcp add --scope user sonobe -- node "/path/to/sonobe/packages/cli/dist/sonobe.mjs" mcp
 ```
 
 A plain `sonobe mcp` works only after you build the CLI and run `npm link -w @sonobe/cli`, which puts `sonobe` on your PATH.
@@ -88,10 +95,10 @@ Check with `/mcp` that `sonobe` is connected. The tools appear as `mcp__plugin_s
 
 ### Without the app: headless mode
 
-Claude Code can also work on a project without the app open:
+Claude Code can also work on a project without the app open. A headless server works on one prototype folder, so add it in the folder where you start Claude:
 
 ```sh
-claude mcp add sonobe-headless -- /Applications/Sonobe.app/Contents/Resources/cli/sonobe mcp --headless "/path/to/Checkout Flow.sonobe"
+claude mcp add --scope local sonobe-headless -- /Applications/Sonobe.app/Contents/Resources/cli/sonobe mcp --headless "/path/to/Checkout Flow.sonobe"
 ```
 
 Headless mode serves a project folder directly, with editing, simulation, saving and screenshots. Changes save after every edit. Add `--no-autosave` to keep them in memory until Claude calls `save_document`. If the folder changes while Claude works, because you, git or the app wrote to it, saving stops with `disk_changed` instead of writing over it, and Claude asks whether to reload or overwrite.
@@ -144,6 +151,8 @@ Extensions you build yourself don't update automatically. To update, build and p
 - **"the Sonobe app isn't running."** Open Sonobe first. In Claude Code, reconnect with `/mcp` → `sonobe` → Reconnect. In Claude Desktop, turn the extension off and on, or restart Claude Desktop if you used a config entry.
 - **"rejected the token."** The connection file is from an earlier launch. Quit and reopen Sonobe.
 - **A custom settings folder.** If you launch Sonobe with `SONOBE_HOME`, set the same variable for the relay, or set the extension's **Sonobe settings folder**.
+- **A session has no Sonobe tools.** Run `claude mcp list` in that session's folder. If `sonobe` is missing, it was set up for another folder only: add it with `--scope user` as above.
+- **A session isn't listed on the Connect Claude screen.** Sessions appear once Claude starts Sonobe's server; in Claude Code, check `/mcp`. A client that doesn't go through the `sonobe mcp` relay, or an older copy of the relay, can't say which session it is, so it shows as one "Unidentified MCP client" row.
 - **Logs.** The relay writes what went wrong to stderr. Claude Code shows it in the `/mcp` details, and Claude Desktop writes it to its logs folder (`~/Library/Logs/Claude` on a Mac, `%APPDATA%\Claude\logs` on Windows).
 
 ## Long calls: progress and cancelling

@@ -289,10 +289,15 @@ export function createAssistantAgent(options: AssistantAgentOptions): AssistantA
       return { type: "tool_result", tool_use_id: use.id, content: "The person chose not to delete these items, so nothing changed. Ask what they'd like to do instead." };
     };
 
-    const callTool = async (name: string, input: Record<string, unknown>): Promise<ToolCallResult> => {
+    /** Run a tool. Stop cancels it (a cancelled call changes nothing unless its edit had already started); the chip follows its progress. */
+    const callTool = async (name: string, input: Record<string, unknown>, use?: BetaToolUseBlock): Promise<ToolCallResult> => {
       try {
-        return await bridge.call(name, input);
+        return await bridge.call(name, input, {
+          signal,
+          ...(use ? { onProgress: (detail: string) => emit({ type: "tool_progress", runId, toolUseId: use.id, detail }) } : {}),
+        });
       } catch (err) {
+        if (signal.aborted) return { content: [{ type: "text", text: `The person pressed Stop while ${name} was running, so it was cancelled. Anything it had already applied stays; check list_history before trying again.` }], isError: true };
         log("warn", `Assistant tool ${name} failed: ${errorMessage(err)}`);
         return { content: [{ type: "text", text: `The ${name} tool failed: ${errorMessage(err)}` }], isError: true };
       }
@@ -326,7 +331,11 @@ export function createAssistantAgent(options: AssistantAgentOptions): AssistantA
         if (!(await confirm(use, prompt))) return declined(use);
         approved = true;
       }
-      let result = await callTool(use.name, input);
+      let result = await callTool(use.name, input, use);
+      if (signal.aborted) {
+        emit({ type: "tool_finished", runId, toolUseId: use.id, name: use.name, status: "error", detail: "Stopped", changedDocument: false });
+        return { type: "tool_result", tool_use_id: use.id, content: toolResultContent(result), is_error: true };
+      }
       if (use.name === "delete_items") {
         const pending = deleteConfirmation(result);
         if (pending) {
@@ -335,7 +344,7 @@ export function createAssistantAgent(options: AssistantAgentOptions): AssistantA
             approved = await confirm(use, { count, title: count ? `Delete ${count} items?` : "Delete these items?", message: `${pending.summary} You can undo it afterwards.` });
             if (!approved) return declined(use);
           }
-          result = await callTool(use.name, { ...input, confirmToken: pending.token });
+          result = await callTool(use.name, { ...input, confirmToken: pending.token }, use);
         }
       }
       if (approved) active.removedWithoutAsking = 0;

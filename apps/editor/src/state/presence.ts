@@ -6,6 +6,15 @@
 import type { Author, Id } from "@sonobe/core";
 import { createStore, type StoreApi } from "zustand/vanilla";
 
+/** The session behind an agent's work, when the host knows it (a Claude Code session in a folder). */
+export interface WorkClient {
+  id: string;
+  /** "Claude Code", "Claude Desktop", or the client's own name. */
+  label: string;
+  /** The session's project folder. */
+  folder?: string;
+}
+
 export interface WorkingItem {
   workId: string;
   /** Items being worked on (layers, patches, comments). */
@@ -15,6 +24,7 @@ export interface WorkingItem {
   intent: string;
   author: Author;
   startedAt: number;
+  client?: WorkClient;
 }
 
 export type AgentChangeKind = "apply" | "undo" | "redo" | "replace" | "finish";
@@ -40,6 +50,7 @@ export interface BeginWorkInput {
   intent: string;
   author?: Author;
   component?: Id;
+  client?: WorkClient;
 }
 
 export type RecordChangeInput = Omit<AgentChange, "id" | "description" | "timestamp"> & { description?: string; timestamp?: number };
@@ -54,8 +65,8 @@ export interface PresenceState {
   update: (workId: string, changes: Partial<Pick<WorkingItem, "ids" | "intent" | "component">>) => void;
   /** End work; with a summary, a "finish" entry is added to the feed. */
   finish: (workId: string, options?: { summary?: string; revision?: number }) => WorkingItem | undefined;
-  /** End every work item (optionally only one author's). */
-  finishAll: (author?: Author) => void;
+  /** End every work item (optionally only one author's, or only one session's by its client id). */
+  finishAll: (author?: Author, clientId?: string) => void;
   recordChange: (change: RecordChangeInput) => AgentChange;
   clearRecent: () => void;
 }
@@ -118,6 +129,7 @@ export function createPresenceStore(options: PresenceStoreOptions = {}): Presenc
         const workId = `work_${++workCounter}`;
         const item: WorkingItem = { workId, ids: [...new Set(input.ids ?? [])], intent: input.intent, author: { ...(input.author ?? DEFAULT_AGENT) }, startedAt: now() };
         if (input.component !== undefined) item.component = input.component;
+        if (input.client !== undefined) item.client = { ...input.client };
         set({ working: [...get().working, item] });
         return workId;
       },
@@ -134,8 +146,9 @@ export function createPresenceStore(options: PresenceStoreOptions = {}): Presenc
         }
         return item;
       },
-      finishAll(author) {
-        set({ working: author ? get().working.filter((w) => !sameAuthor(w.author, author)) : [] });
+      finishAll(author, clientId) {
+        if (clientId !== undefined) set({ working: get().working.filter((w) => w.client?.id !== clientId) });
+        else set({ working: author ? get().working.filter((w) => !sameAuthor(w.author, author)) : [] });
       },
       recordChange: pushFeed,
       clearRecent() {

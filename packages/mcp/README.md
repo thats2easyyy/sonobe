@@ -50,6 +50,7 @@ mcpServerHandle.setHandler(handler); // desktop startMcpServer guards Host/Origi
 
 - `createHttpHandler` creates one `McpServer` per request and performs no auth itself; mount it behind a guard.
 - `createSonobeMcpServer(host, { version })` returns the bare `McpServer`, for custom transports.
+- Pass `clients: createClientRegistry()` to count tool calls per session (the relay's `sonobe-client` header) and name relay clients in history. The desktop also feeds it the relay's hellos on `/clients` (`parseHello`), and Connect Claude lists `clients.list()`.
 
 ### Resource notifications
 

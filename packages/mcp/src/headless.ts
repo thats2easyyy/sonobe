@@ -423,13 +423,16 @@ export function createHeadlessHost(options: HeadlessHostOptions = {}): HeadlessH
       const entry = resolve(workOptions.docId);
       const map = working.get(entry.docId) ?? new Map<string, WorkIntent>();
       working.set(entry.docId, map);
-      if (work === null) map.delete(workOptions.author.name);
+      // One badge per session, so two sessions of the same client don't replace each other's.
+      const key = workOptions.client?.id ?? workOptions.author.name;
+      if (work === null) map.delete(key);
       else
-        map.set(workOptions.author.name, {
+        map.set(key, {
           ids: [...work.ids],
           intent: work.intent,
           author: workOptions.author,
           since: now(),
+          ...(workOptions.client ? { client: { ...workOptions.client } } : {}),
         });
     },
 

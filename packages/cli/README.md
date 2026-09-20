@@ -49,4 +49,11 @@ It covers both protocol eras:
 
 `notifications/cancelled` aborts the in-flight request. When the app isn't running, or the token is stale, it explains how to start the app or use `--headless`, then exits 1.
 
+It also tells the app which session it is, so Connect Claude can list connected sessions:
+
+- Every POST carries a per-process `sonobe-client` id.
+- On the client's first message it sends a hello to `POST /clients`: the client's name and version (from `initialize`, or 2026-07-28 request metadata) and the session's folder (`CLAUDE_PROJECT_DIR`, else its working folder, but never `/` or the home folder).
+- It heartbeats every 30 s and says goodbye (`DELETE /clients/<id>`) when stdin closes or on SIGINT or SIGTERM (Claude Code stops stdio servers with SIGINT).
+- An app from before session lists answers 404: the relay writes one line to stderr and keeps relaying.
+
 `runCli(argv, io)` runs any command in-process with injectable streams (see `src/cli.test.ts`).

@@ -1,4 +1,4 @@
-/** Poll the desktop host for MCP server status. */
+/** The desktop host's MCP server status and connected sessions: pushed when they change, polled as a fallback. */
 
 import { useCallback, useEffect, useState } from "react";
 import { parseMcpStatus, type McpStatusInfo } from "./connectInfo.ts";
@@ -6,6 +6,8 @@ import { parseMcpStatus, type McpStatusInfo } from "./connectInfo.ts";
 /** Anything with `getMcpStatus()` (window.sonobeHost, or a stand-in for previews and tests). */
 export interface McpStatusSource {
   getMcpStatus(): Promise<unknown>;
+  /** Pushed status changes (a session connected, called a tool, or left). Optional: older preloads lack it. */
+  onMcpStatus?(cb: (status: unknown) => void): () => void;
 }
 
 export interface McpStatusState {
@@ -47,9 +49,14 @@ export function useMcpStatus(source: McpStatusSource | null, options: McpStatusO
       if (!cancelled && intervalMs > 0) timer = setTimeout(() => void poll(), intervalMs);
     };
     void poll();
+    const unsubscribe = source.onMcpStatus?.((value) => {
+      const status = parseMcpStatus(value);
+      if (!cancelled && status) setState({ status, loading: false, error: null });
+    });
     return () => {
       cancelled = true;
       if (timer !== undefined) clearTimeout(timer);
+      unsubscribe?.();
     };
   }, [source, enabled, intervalMs, nonce]);
 

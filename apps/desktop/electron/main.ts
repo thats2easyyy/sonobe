@@ -7,7 +7,7 @@ import { pathToFileURL } from "node:url";
 import type { SonobeDocument } from "@sonobe/core";
 import { saveProjectToDisk } from "@sonobe/core/node";
 import { plainSceneFrame } from "@sonobe/engine";
-import { createHttpHandler, isHostError, loadGuides, type NodeMcpHandler } from "@sonobe/mcp";
+import { createClientRegistry, createHttpHandler, isHostError, loadGuides, type NodeMcpHandler } from "@sonobe/mcp";
 import { createPatchRegistry } from "@sonobe/patches";
 import { toBuffer as qrPng } from "qrcode";
 import { createAppHost, type AppHost, type CapturedImage, type DocumentChange, type RendererTarget, type SceneRenderRequest } from "./app-host.ts";
@@ -91,6 +91,9 @@ function main(): void {
   let rpc: RendererRpcHub | null = null;
   let mcp: McpServerHandle | null = null;
   let mcpHandler: NodeMcpHandler | null = null;
+  /** MCP sessions that talked to the app (the relay's hellos and every tool call), for Connect Claude. */
+  const mcpClients = createClientRegistry();
+  let mcpStatusTimer: ReturnType<typeof setTimeout> | null = null;
   let appHost: AppHost | null = null;
   let preview: LanPreviewHandle | null = null;
   let previewError: string | null = null;
@@ -309,6 +312,26 @@ function main(): void {
     // A new project never deletes files already in the folder.
     await saveProjectToDisk(dir, doc, { removable: new Set() });
   };
+
+  // --- MCP status (Connect Claude) -------------------------------------------------------------
+
+  const mcpStatus = (): McpStatus => {
+    const cliPath = bundledCliPath({ packaged: app.isPackaged, resourcesPath: process.resourcesPath, mainDir: __dirname, platform: process.platform, exists: existsSync });
+    const sessions = { clients: mcpClients.list(), checkedAt: Date.now(), version: VERSION };
+    return mcp?.running
+      ? { running: true, port: mcp.port, url: mcp.url, tokenFile: mcp.tokenFile, cliPath, ...sessions }
+      : { running: false, port: null, url: null, tokenFile: path.join(env.home ?? defaultSonobeHome(), "mcp.json"), cliPath, ...sessions };
+  };
+
+  /** Push MCP status to every window when a session connects, calls a tool, or leaves (at most every 500 ms). */
+  const publishMcpStatus = () => {
+    mcpStatusTimer ??= setTimeout(() => {
+      mcpStatusTimer = null;
+      const status = mcpStatus();
+      for (const w of windows.values()) if (!w.webContents.isDestroyed()) w.webContents.send(IPC.mcpChanged, status);
+    }, 500);
+  };
+  mcpClients.subscribe(publishMcpStatus);
 
   // --- Phone preview (LAN web player) ---------------------------------------------------------
 
@@ -775,10 +798,7 @@ function main(): void {
 
     ipcMain.handle(IPC.mcpStatus, (event): McpStatus => {
       requireWindow(event);
-      const cliPath = bundledCliPath({ packaged: app.isPackaged, resourcesPath: process.resourcesPath, mainDir: __dirname, platform: process.platform, exists: existsSync });
-      return mcp?.running
-        ? { running: true, port: mcp.port, url: mcp.url, tokenFile: mcp.tokenFile, cliPath }
-        : { running: false, port: null, url: null, tokenFile: path.join(env.home ?? defaultSonobeHome(), "mcp.json"), cliPath };
+      return mcpStatus();
     });
 
     ipcMain.handle(IPC.previewStatus, (event): PreviewStatus => {
@@ -980,10 +1000,11 @@ function main(): void {
 
     if (env.mcpEnabled) {
       try {
-        mcp = await startMcpServer({ version: VERSION, port: env.mcpPort, ...(env.home ? { configDir: env.home } : {}), log });
+        mcp = await startMcpServer({ version: VERSION, port: env.mcpPort, ...(env.home ? { configDir: env.home } : {}), clients: mcpClients, log });
         mcpHandler = createHttpHandler(appHost, {
           version: VERSION,
           guides: loadGuides(bundledResource("guides", "packages/mcp/guides")),
+          clients: mcpClients,
           onError: (err) => log("warn", `MCP transport error: ${err.message}`),
         });
         mcp.setHandler(mcpHandler);
@@ -1012,7 +1033,7 @@ function main(): void {
           if (isCommandId(id)) primaryWindow()?.sendCommand(id);
         },
         openProject: (dir: string) => openProjects([dir]),
-        mcpStatus: () => (mcp ? { running: mcp.running, port: mcp.port, url: mcp.url, tokenFile: mcp.tokenFile } : null),
+        mcpStatus: () => (mcp ? { running: mcp.running, port: mcp.port, url: mcp.url, tokenFile: mcp.tokenFile, clients: mcpClients.list() } : null),
         previewStatus: () => previewStatus(),
         startPreview: () => startPreview(),
         stopPreview: () => stopPreview(),

@@ -21,6 +21,8 @@ export const IPC = {
   setDocumentEdited: "sonobe:window:set-edited",
   setTitle: "sonobe:window:set-title",
   mcpStatus: "sonobe:mcp:status",
+  /** main → renderer: MCP status changed (a session connected, called a tool, or left). */
+  mcpChanged: "sonobe:mcp:changed",
   previewStatus: "sonobe:preview:status",
   previewStart: "sonobe:preview:start",
   previewStop: "sonobe:preview:stop",

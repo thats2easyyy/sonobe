@@ -32,9 +32,10 @@ export function registerPresenceTools(tc: ToolContext): void {
     },
     async ({ docId, intent, ids }, ctx) => {
       const author = tc.author(ctx);
+      const client = tc.client(ctx);
       await host.setWorking(
         { ids: ids ?? [], intent },
-        { author, ...(docId !== undefined ? { docId } : {}) },
+        { author, ...(client ? { client } : {}), ...(docId !== undefined ? { docId } : {}) },
       );
       const note = host.capabilities.presence
         ? "The person sees your working badge."
@@ -64,8 +65,10 @@ export function registerPresenceTools(tc: ToolContext): void {
       annotations: UI_ONLY,
     },
     async ({ docId, summary }, ctx) => {
+      const client = tc.client(ctx);
       await host.setWorking(null, {
         author: tc.author(ctx),
+        ...(client ? { client } : {}),
         ...(docId !== undefined ? { docId } : {}),
       });
       return success(`Finished${summary ? `: ${summary}` : "."}`, { summary: summary ?? null });

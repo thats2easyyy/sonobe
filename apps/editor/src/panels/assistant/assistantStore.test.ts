@@ -44,6 +44,19 @@ describe("reduceEvent", () => {
     expect(third).toMatchObject({ text: "Added a Card.", tools: [] });
   });
 
+  it("shows a running tool's progress in its chip, until it finishes", () => {
+    const events: AssistantEvent[] = [
+      { type: "run_started", runId: "r1", model: "claude-sonnet-5" },
+      { type: "turn_started", runId: "r1", turn: 1 },
+      { type: "tool_started", runId: "r1", toolUseId: "t1", name: "import_design", title: "Import design", detail: "" },
+      { type: "tool_progress", runId: "r1", toolUseId: "t1", detail: "Downloading images: 7 of 28" },
+    ];
+    const running = fold(events, { items: [user], running: true });
+    expect((running.items[1] as Extract<ChatItem, { kind: "assistant" }>).tools[0]).toMatchObject({ status: "running", detail: "Downloading images: 7 of 28" });
+    const done = fold([...events, { type: "tool_finished", runId: "r1", toolUseId: "t1", name: "import_design", status: "done", detail: "Imported Profile", changedDocument: true }, { type: "tool_progress", runId: "r1", toolUseId: "t1", detail: "late" }], { items: [user], running: true });
+    expect((done.items[1] as Extract<ChatItem, { kind: "assistant" }>).tools[0]).toMatchObject({ status: "done", detail: "Imported Profile" });
+  });
+
   it("tracks thinking until text arrives", () => {
     let state = fold([
       { type: "run_started", runId: "r1", model: "claude-opus-5" },
