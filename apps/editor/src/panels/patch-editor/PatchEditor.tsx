@@ -58,7 +58,7 @@ import { CommentNodeView, InterfaceNodeView, LayerNodeView, PatchNodeView } from
 import { PortHoverCard } from "./components/PortHoverCard.tsx";
 import { orientConnection, portAtHandle, quickConnectCheck, type HandleRef } from "./model/connect.ts";
 import { patchTitle, spliceOptions, type SpliceOption } from "./model/editOps.ts";
-import { boundsOf, boundsVisible, estimateNodeSize, FIT_VIEW_PADDING, HEADER_HEIGHT, isFarZoom, pointInRect, portCenterY, readableViewport, rectContains, sampleCable, type Point, type Rect } from "./model/geometry.ts";
+import { boundsOf, boundsVisible, estimateNodeSize, FIT_VIEW_PADDING, HEADER_HEIGHT, isFarZoom, layerNameIn, pointInRect, portCenterY, readableViewport, rectContains, sampleCable, type Point, type Rect } from "./model/geometry.ts";
 import { deriveGraph, estimatePatchSize } from "@sonobe/core/graph";
 import { missingHandlesKey, parseMissingHandlesKey } from "./model/handles.ts";
 import { resolveLiveScope, scopedAddress, watchedPrefix, type LiveScope } from "./model/instances.ts";
@@ -195,10 +195,10 @@ interface PendingSplice extends SpliceChoiceRequest {
   cable: { from: string; to: string };
 }
 
-function nodeRect(node: FlowNode): Rect {
+function nodeRect(node: FlowNode, layerName?: (id: Id) => string | undefined): Rect {
   const width = node.measured?.width ?? node.width;
   const height = node.measured?.height ?? node.height;
-  const size = width && height ? { width, height } : estimateNodeSize(node.data as GraphNodeData);
+  const size = width && height ? { width, height } : estimateNodeSize(node.data as GraphNodeData, layerName);
   return { x: node.position.x, y: node.position.y, ...size };
 }
 
@@ -382,7 +382,7 @@ function Canvas({ session, componentId, showBreadcrumbs, showToolbar, toolbarCon
   const autoFit = useCallback((): boolean => {
     const el = wrapperRef.current;
     if (!el || el.clientWidth < MIN_CANVAS || el.clientHeight < MIN_CANVAS) return false;
-    const bounds = boundsOf(nodesRef.current.map(nodeRect));
+    const bounds = boundsOf(nodesRef.current.map((n) => nodeRect(n)));
     fitModeRef.current = true;
     setFitted(true);
     if (!bounds) return true;
@@ -439,7 +439,7 @@ function Canvas({ session, componentId, showBreadcrumbs, showToolbar, toolbarCon
           return;
         }
         const viewport = f.getViewport();
-        const bounds = boundsOf(nodesRef.current.map(nodeRect));
+        const bounds = boundsOf(nodesRef.current.map((n) => nodeRect(n)));
         if (fitModeRef.current || (bounds && boundsVisible(bounds, viewport, prev.width, prev.height, 8))) {
           autoFit();
           return;
@@ -499,9 +499,10 @@ function Canvas({ session, componentId, showBreadcrumbs, showToolbar, toolbarCon
         await nextFrame();
         const s = session.document.getState();
         const nodes: GraphGeometryNode[] = [];
+        const layerName = layerNameIn(drawnDocRef.current.components[componentId]);
         for (const node of nodesRef.current) {
           if (flowNodeKind(node.id) === "comment") continue;
-          const r = nodeRect(node);
+          const r = nodeRect(node, layerName);
           nodes.push([node.id, r.x, r.y, r.width, r.height, node.measured?.width && node.measured.height ? 1 : 0]);
         }
         // Mid-gesture the graph can lag the document; -1 tells the caller these boxes are from an older revision.
@@ -664,7 +665,7 @@ function Canvas({ session, componentId, showBreadcrumbs, showToolbar, toolbarCon
       for (const id of children.keys()) dragging.add(id);
       draggingRef.current = dragging;
       const duplicate = event.altKey && dragged.every((n) => n.type === "patch");
-      if (duplicate) ui.getState().set({ ghosts: dragged.map(nodeRect) });
+      if (duplicate) ui.getState().set({ ghosts: dragged.map((n) => nodeRect(n)) });
       dragRef.current = { start, duplicate, children };
     },
     [ui],
