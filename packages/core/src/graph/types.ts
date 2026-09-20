@@ -46,8 +46,16 @@ export interface PortModel {
   /**
    * Inputs linked to a knob: a chip with the knob's name (and value) instead of a cable. A color
    * knob's chip shows its running color ("#RRGGBBAA") as a swatch instead of the value text.
+   * `valueReserve` is the most characters the value prints while the knob is tuned (knobValueReserve),
+   * and `valueRoom` the points the chip has for it beside the whole name when that's less
+   * (knobValueRoom in nodeSize.ts).
    */
-  knob?: { id: string; name: string; valueText?: string; color?: string };
+  knob?: { id: string; name: string; valueText?: string; valueReserve?: number; valueRoom?: number; color?: string };
+  /**
+   * Outputs whose row is long: the most points the live value may take before the node passes its
+   * 320 pt maximum and a label is cut (liveRoom in nodeSize.ts). Unset when the 96 pt slot fits.
+   */
+  liveRoom?: number;
 }
 
 export interface NodeIssue {

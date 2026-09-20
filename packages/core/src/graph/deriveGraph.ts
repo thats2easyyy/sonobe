@@ -14,9 +14,10 @@ import { findLayer, getPatchSpec, interfacePortToPort, resolveLayerOutputs, reso
 import type { Component, Diagnostic, Id, InputValue, LayerNode, PatchNode, Registry, SonobeDocument, Suggestion, ValueType } from "../types.ts";
 import { canConnect, defaultForPort, isLayerInput, isLinkInput, isLoopLiteral, normalizeColor } from "../values.ts";
 import { deepEqual } from "./equal.ts";
+import { knobValueReserve } from "./format.ts";
 import { createPlacementIndex, PLACEMENT_PADDING, type Rect } from "./geometry.ts";
 import { INPUTS_NODE_ID, layerNodeId, OUTPUTS_NODE_ID, readNodePositions } from "./graphNodes.ts";
-import { estimateNodeSize, type NodeTextMeasurer } from "./nodeSize.ts";
+import { estimateNodeSize, knobValueRoom, liveRooms, type NodeTextMeasurer } from "./nodeSize.ts";
 import {
   cableId,
   commentNodeId,
@@ -122,7 +123,8 @@ function knobChip(doc: SonobeDocument, link: string): PortModel["knob"] {
   if (!knob) return { id: a.key, name: a.key };
   const value = effectiveKnobLiteral(doc.knobs!, knob.id);
   const color = knob.type === "color" && typeof value === "string" ? normalizeColor(value) : undefined;
-  return { id: knob.id, name: knob.name, ...(value !== undefined && value !== null ? { valueText: formatKnobValue(knob, value) } : {}), ...(color ? { color } : {}) };
+  const reserve = knobValueReserve(knob);
+  return { id: knob.id, name: knob.name, ...(value !== undefined && value !== null ? { valueText: formatKnobValue(knob, value), ...(reserve ? { valueReserve: reserve } : {}) } : {}), ...(color ? { color } : {}) };
 }
 
 function toPortModel(port: ResolvedPort, side: PortSide, address: string, connected: boolean, defaultOverride?: unknown): PortModel {
@@ -312,6 +314,19 @@ export function deriveGraph(options: DeriveGraphOptions): GraphModel {
   const patchData = new Map<Id, PatchNodeData>();
   const estimateOptions = { ...(options.measure ? { measure: options.measure } : {}), layerName: (id: Id) => findLayer(component.layers, id)?.layer.name };
   const sizeOf = (id: string, data: Parameters<typeof estimateNodeSize>[0]) => options.sizes?.get(id) ?? estimateNodeSize(data, estimateOptions);
+  /**
+   * Outputs in rows long enough to reach the maximum width get their liveRoom, which caps the live
+   * value's slot, and knob chips whose name leaves less than the value's reserve get its valueRoom.
+   */
+  const capLiveValues = (data: Parameters<typeof liveRooms>[0]) => {
+    liveRooms(data, estimateOptions).forEach((room, i) => {
+      if (room !== undefined) data.outputs[i]!.liveRoom = room;
+    });
+    for (const input of data.inputs) {
+      const room = input.knob ? knobValueRoom(input.knob, options.measure) : undefined;
+      if (room !== undefined) input.knob!.valueRoom = room;
+    }
+  };
 
   const previousCache = options.previous ? patchCaches.get(options.previous) : undefined;
   const loopFree = looped.size === 0 && !wholeLoopOutputs;
@@ -416,6 +431,7 @@ export function deriveGraph(options: DeriveGraphOptions): GraphModel {
     }
     if (node.component !== undefined) data.componentTarget = node.component;
     if (layerRef !== undefined) data.layerRef = layerRef;
+    capLiveValues(data);
     const flowNode: PatchGraphNode = { id, type: "patch", position: { x: node.ui.x, y: node.ui.y }, data };
     nodes.push(flowNode);
     patchData.set(id, data);
@@ -531,6 +547,7 @@ export function deriveGraph(options: DeriveGraphOptions): GraphModel {
       outputs,
       issues: (issuesByItem.get(layerId) ?? EMPTY_ISSUES).filter((i) => i.port === undefined || boundKeys.has(i.port)),
     };
+    capLiveValues(data);
     const size = sizeOf(nodeId, data);
     const drivers = [...(driversOf.get(layerId) ?? [])].map(rectOfPatch).filter((r): r is Rect => !!r);
     const readers = [...(readersOf.get(layerId) ?? [])].map(rectOfPatch).filter((r): r is Rect => !!r);
@@ -551,6 +568,7 @@ export function deriveGraph(options: DeriveGraphOptions): GraphModel {
   if (inPorts.length) {
     const outputs = register(inPorts.map((p) => toPortModel(interfacePortToPort(p, "input"), "out", `$in.${p.key}`, consumed.has(`$in.${p.key}`))));
     const data = { kind: "interface" as const, componentId, side: "inputs" as const, title: "Component Inputs", inputs: [], outputs };
+    capLiveValues(data);
     const size = sizeOf(INPUTS_NODE_ID, data);
     const flowNode: InterfaceGraphNode = { id: INPUTS_NODE_ID, type: "interface", position: place(INPUTS_NODE_ID, size, { x: bbox.minX - size.width - 120, y: bbox.minY }), data };
     nodes.push(flowNode);
