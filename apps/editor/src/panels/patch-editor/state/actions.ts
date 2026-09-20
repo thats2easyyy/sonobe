@@ -32,7 +32,7 @@ import {
   patchesLabel,
   patchTitle,
   portLabel,
-  replacePatchOps,
+  replacePatchOp,
   splicePatchOps,
   type AlignMode,
   type InsertOptions,
@@ -397,18 +397,18 @@ export function createPatchEditorActions(deps: ActionDeps): PatchEditorActions {
 
     replaceWith(patchId, type, componentTarget) {
       const c = component();
-      const plan = replacePatchOps(doc(), componentId, registry, patchId, type, componentTarget);
+      const plan = replacePatchOp(doc(), componentId, registry, patchId, type, componentTarget);
       if ("error" in plan) {
         quietToast(plan.error);
         return;
       }
       const spec = getPatchSpec(registry, type);
-      const result = apply(plan.ops, `Replace ${c ? patchesLabel(c, [patchId], registry) : "patch"} with ${spec?.name ?? type}`);
-      const id = result.idMap.replacement;
-      if (result.ok && id) {
-        select([id]);
-        if (plan.dropped > 0) void toast({ title: `${plan.dropped === 1 ? "1 cable" : `${plan.dropped} cables`} didn't fit ${spec?.name ?? type} and ${plan.dropped === 1 ? "was" : "were"} removed.`, tone: "neutral" });
-      }
+      const result = apply([plan.op], `Replace ${c ? patchesLabel(c, [patchId], registry) : "patch"} with ${spec?.name ?? type}`);
+      if (!result.ok) return;
+      // The patch keeps its id, so the selection and simulator paths stay on it.
+      select([patchId]);
+      const cut = result.results[0]?.dropped?.filter((d) => isLinkInput(d.value)).length ?? 0;
+      if (cut > 0) void toast({ title: `${cut === 1 ? "1 cable" : `${cut} cables`} didn't fit ${spec?.name ?? type} and ${cut === 1 ? "was" : "were"} removed.`, tone: "neutral" });
     },
 
     duplicateWithInputs(ids, positions) {

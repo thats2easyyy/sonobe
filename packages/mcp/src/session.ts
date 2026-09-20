@@ -120,6 +120,9 @@ export function describeOps(ops: readonly Op[]): string {
       case "updatePatch":
         bump("updated patch");
         break;
+      case "replacePatch":
+        bump("replaced patch");
+        break;
       case "rename":
         bump("renamed item");
         break;
