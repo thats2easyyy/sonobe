@@ -1,6 +1,8 @@
 import { existsSync, readdirSync } from "node:fs";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import type { HeadlessHost } from "./headless.ts";
+import { isHostError, type CapturedDesign, type DesignCaptureRequest, type HostCallControl } from "./host.ts";
 import { connectClient, tempProject, type TempProject, type TestClient } from "./test-helpers.ts";
 
 let project: TempProject;
@@ -71,6 +73,103 @@ describe("import_design", () => {
   });
 });
 
+/** The project's host with captureDesign replaced (like a page in a hidden window that takes a while). */
+function withCapture(host: HeadlessHost, captureDesign: (request: DesignCaptureRequest, control: HostCallControl) => Promise<CapturedDesign>): HeadlessHost {
+  const wrapped = Object.create(host) as HeadlessHost;
+  Object.defineProperty(wrapped, "captureDesign", { value: (request: DesignCaptureRequest, control: HostCallControl = {}) => captureDesign(request, control) });
+  return wrapped;
+}
+
+const captured = (): CapturedDesign => ({ capture: capture as never, images: new Map() });
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+describe("import_design progress and cancelling", () => {
+  it("stops the capture and changes nothing when the client cancels", async () => {
+    let hostSignal: AbortSignal | undefined;
+    const c = await connectClient(
+      withCapture(project.host, (_request, control) => {
+        hostSignal = control.signal;
+        return new Promise<never>(() => undefined);
+      }),
+    );
+    try {
+      const before = (await project.host.getDocument()).revision;
+      const controller = new AbortController();
+      const call = c.client.callTool({ name: "import_design", arguments: { html: "<p>slow</p>" } }, undefined, { signal: controller.signal });
+      await sleep(100);
+      controller.abort("the person pressed Esc");
+      await expect(call).rejects.toThrow();
+      await sleep(20);
+      expect(hostSignal?.aborted).toBe(true);
+      expect((await project.host.getDocument()).revision).toBe(before);
+    } finally {
+      await c.close();
+    }
+  });
+
+  it("applies nothing when the capture finishes after the cancel", async () => {
+    // A host that ignores the signal: the capture still completes, but the import must not land.
+    const c = await connectClient(withCapture(project.host, async () => (await sleep(300), captured())));
+    try {
+      const controller = new AbortController();
+      const call = c.client.callTool({ name: "import_design", arguments: { html: "<p>slow</p>" } }, undefined, { signal: controller.signal });
+      await sleep(100);
+      controller.abort();
+      await expect(call).rejects.toThrow();
+      await sleep(400);
+      expect((await c.call("list_history", {})).text).not.toContain("imported");
+      expect((await project.host.getDocument()).revision).toBe(0);
+    } finally {
+      await c.close();
+    }
+  });
+
+  it("reports the host's steps as progress, which keeps a short client timeout alive", async () => {
+    const c = await connectClient(
+      withCapture(project.host, async (_request, control) => {
+        for (const stage of ["Loading the page", "Reading the page's layers", "Downloading images: 1 of 2", "Downloading images: 2 of 2", "Taking the page screenshot"]) {
+          control.progress?.({ message: stage });
+          await sleep(300);
+        }
+        return captured();
+      }),
+    );
+    try {
+      const messages: string[] = [];
+      const r = await c.client.callTool({ name: "import_design", arguments: { html: "<p>slow</p>" } }, undefined, {
+        timeout: 700,
+        resetTimeoutOnProgress: true,
+        onprogress: (p) => messages.push(String(p.message)),
+      });
+      expect(r.isError, JSON.stringify(r.content)).toBeFalsy();
+      expect(messages[0]).toBe("Rendering the HTML");
+      expect(messages).toEqual(expect.arrayContaining(["Reading the page's layers", "Taking the page screenshot"]));
+      expect(messages.length).toBeGreaterThanOrEqual(5);
+    } finally {
+      await c.close();
+    }
+  });
+
+  it("sends no progress to a client that didn't ask for it, and lists the capture's notes", async () => {
+    const c = await connectClient(withCapture(project.host, async (_request, control) => (control.progress?.({ message: "Loading the page" }), { ...captured(), notes: ["The page screenshot is left out (it timed out). Compare with get_screenshot instead."] })));
+    try {
+      const seen: unknown[] = [];
+      const transport = (c.client as unknown as { transport: { onmessage?: (m: unknown) => void } }).transport;
+      const original = transport.onmessage;
+      transport.onmessage = (m) => {
+        if ((m as { method?: string }).method === "notifications/progress") seen.push(m);
+        original?.(m);
+      };
+      const r = await c.call("import_design", { html: "<p>fast</p>" });
+      expect(r.isError, r.text).toBe(false);
+      expect(r.text).toContain("Note: The page screenshot is left out");
+      expect(seen).toEqual([]);
+    } finally {
+      await c.close();
+    }
+  });
+});
+
 const playwrightReady = await (async () => {
   try {
     const { chromium } = (await import("playwright")) as { chromium: { executablePath(): string } };
@@ -108,5 +207,39 @@ describe.skipIf(!playwrightReady)("import_design with a browser (headless Playwr
     const r = await client.call("import_design", { url: "http://127.0.0.1:9/nothing" });
     expect(r.isError).toBe(true);
     expect(r.text).toContain("Couldn't load");
+  }, 60_000);
+
+  it("imports the page's dark mode with a screenshot", async () => {
+    // The title reads prefers-color-scheme while the page parses, so it proves the scheme was set first.
+    const html = `<!doctype html><style>body{margin:0;background:#fff}@media (prefers-color-scheme: dark){body{background:#000}}</style><body><button data-name="Buy" style="margin:40px">Buy</button><script>document.title = matchMedia("(prefers-color-scheme: dark)").matches ? "Dark" : "Light"</script></body>`;
+    const r = await client.call("import_design", { html, colorScheme: "dark", screenshot: true });
+    expect(r.isError, r.text).toBe(false);
+    expect(r.text).toContain('Imported "Dark"');
+    expect(r.content.some((c) => c.type === "image")).toBe(true);
+  }, 60_000);
+
+  it("stops a page stuck in a loop at the deadline, naming the step", async () => {
+    const busy = '<!doctype html><title>Busy</title><body>busy<script>addEventListener("load", () => setTimeout(() => { for (;;) {} }, 0))</script></body>';
+    const started = Date.now();
+    const err = await project.host.captureDesign!({ html: busy, width: 402, height: 874, timeoutMs: 3_000 }).catch((e: unknown) => e);
+    expect(Date.now() - started).toBeLessThan(10_000);
+    expect(isHostError(err) && err.code).toBe("capture_timeout");
+    expect((err as Error).message).toContain("within 3 seconds");
+    expect((err as Error).message).toContain("reading the page's layers");
+  }, 60_000);
+
+  it("closes the browser as soon as the capture is cancelled", async () => {
+    const controller = new AbortController();
+    const steps: string[] = [];
+    const capturing = project.host.captureDesign!({ html: "<p>waiting</p>", waitFor: "#never", width: 402, height: 874 }, { signal: controller.signal, progress: (s) => steps.push(s.message) });
+    const caught = capturing.catch((e: unknown) => e);
+    const deadline = Date.now() + 20_000;
+    while (!steps.some((s) => s.startsWith("Waiting for")) && Date.now() < deadline) await sleep(50);
+    const abortedAt = Date.now();
+    controller.abort();
+    const err = await caught;
+    expect(Date.now() - abortedAt).toBeLessThan(2_000);
+    expect(isHostError(err) && err.code).toBe("cancelled");
+    expect(steps).toEqual(expect.arrayContaining(["Starting a headless browser", "Rendering the HTML"]));
   }, 60_000);
 });

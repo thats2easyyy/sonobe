@@ -5,9 +5,11 @@
  * publish resource notifications when documents change. Node only.
  */
 
+import { AsyncLocalStorage } from "node:async_hooks";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import {
   createMcpHandler,
+  isJsonContentType,
   type McpHttpHandler,
   type McpServer,
   type Transport,
@@ -15,6 +17,7 @@ import {
 import { serveStdio } from "@modelcontextprotocol/server/stdio";
 import { toNodeHandler } from "@modelcontextprotocol/node";
 import type { DocumentChange, SonobeHost } from "./host.ts";
+import type { CallScope } from "./progress.ts";
 import {
   createSonobeMcpServer,
   subscribedResources,
@@ -24,6 +27,35 @@ import {
 export interface TransportOptions extends SonobeMcpServerOptions {
   /** Out-of-band transport errors (reporting only). */
   onError?: (error: Error) => void;
+  /**
+   * HTTP: SSE keep-alive interval (default 10 s). Every response streams from its first byte, so a
+   * silent long call still gets its headers at once and a comment frame every interval.
+   */
+  keepAliveMs?: number;
+}
+
+/** Largest POST body createHttpHandler reads (the desktop guard rejects larger declared lengths first). */
+const MAX_BODY_BYTES = 8 * 1024 * 1024;
+
+/** The current HTTP request's call scope (see CallScope), set around each request. */
+const httpCalls = new AsyncLocalStorage<CallScope>();
+
+type BodyRead = { ok: true; value: unknown } | { ok: false; status: number; message: string };
+
+async function readJsonBody(req: IncomingMessage): Promise<BodyRead> {
+  const chunks: Buffer[] = [];
+  let size = 0;
+  for await (const chunk of req) {
+    const buf = typeof chunk === "string" ? Buffer.from(chunk) : (chunk as Buffer);
+    size += buf.length;
+    if (size > MAX_BODY_BYTES) return { ok: false, status: 413, message: "Request body too large" };
+    chunks.push(buf);
+  }
+  try {
+    return { ok: true, value: JSON.parse(Buffer.concat(chunks).toString("utf8")) as unknown };
+  } catch {
+    return { ok: false, status: 400, message: "Parse error: Invalid JSON" };
+  }
 }
 
 /** The publish side of resource notifications (the SDK handler's `notify` has this shape). */
@@ -64,11 +96,54 @@ export type NodeMcpHandler = ((req: IncomingMessage, res: ServerResponse) => Pro
  * Host/Origin/auth checks of its own; mount it behind a guard (the desktop startMcpServer).
  * 2026-07-28 clients receive resource notifications on subscriptions/listen streams; 2025-era
  * HTTP traffic is stateless, so there's no session to push to.
+ *
+ * Cancellation (ARCHITECTURE §10, "Long calls"): the SDK's own disconnect abort follows a cloned web
+ * Request's signal, which undici stops forwarding once the Request is garbage collected. So POST
+ * bodies are parsed here (the SDK then never clones), each request holds its own AbortController
+ * that fires when the response closes unfinished, and a 2025-era notifications/cancelled, which
+ * arrives on a POST of its own, aborts the call it names when exactly one call in flight has that id.
  */
 export function createHttpHandler(host: SonobeHost, options: TransportOptions): NodeMcpHandler {
+  const inflight = new Map<string | number, Set<AbortController>>();
+  const track = (id: string | number, controller: AbortController) => {
+    const calls = inflight.get(id) ?? new Set<AbortController>();
+    calls.add(controller);
+    inflight.set(id, calls);
+    return () => {
+      calls.delete(controller);
+      if (!calls.size && inflight.get(id) === calls) inflight.delete(id);
+    };
+  };
   const handler = createMcpHandler(
-    (ctx) => createSonobeMcpServer(host, options, { era: ctx.era }),
-    { ...(options.onError ? { onerror: options.onError } : {}) },
+    (ctx) => {
+      const legacy = ctx.era !== "modern";
+      const server = createSonobeMcpServer(host, options, {
+        era: ctx.era,
+        // Only 2025-era calls are cancelled by id; 2026-07-28 clients close the stream instead.
+        callScope: () => {
+          const call = httpCalls.getStore();
+          return legacy || !call?.signal ? call : { signal: call.signal };
+        },
+      });
+      if (legacy) {
+        // Request ids are only unique per client, and stateless HTTP can't tell clients apart, so an
+        // id two calls share is ambiguous and the cancel is dropped. Only token holders can send one.
+        server.server.setNotificationHandler("notifications/cancelled", (notification) => {
+          const id = notification.params.requestId;
+          const calls = id === undefined ? undefined : inflight.get(id);
+          if (calls?.size !== 1) return;
+          for (const controller of calls) controller.abort(new Error(notification.params.reason ?? "The client cancelled the call."));
+        });
+      }
+      return server;
+    },
+    {
+      ...(options.onError ? { onerror: options.onError } : {}),
+      // Stream every modern response from the first byte: a silent call gets its headers at once and a
+      // keep-alive every interval, instead of hitting clients' time-to-headers limits.
+      responseMode: "sse",
+      keepAliveMs: options.keepAliveMs ?? 10_000,
+    },
   );
   const node = toNodeHandler(handler, { ...(options.onError ? { onerror: options.onError } : {}) });
   const documentChanged = (change: DocumentChange) => {
@@ -79,7 +154,22 @@ export function createHttpHandler(host: SonobeHost, options: TransportOptions): 
     }
   };
   const unsubscribe = host.onDocumentChange?.(documentChanged);
-  const fn = (req: IncomingMessage, res: ServerResponse) => node(req, res);
+  const fn = async (req: IncomingMessage, res: ServerResponse) => {
+    // Held by the listener's closure for as long as the response lives, so no GC can lose it.
+    const connection = new AbortController();
+    res.on("close", () => {
+      if (!res.writableFinished) connection.abort(new Error("The MCP client disconnected."));
+    });
+    const scope: CallScope = { signal: connection.signal, track };
+    if (req.method?.toUpperCase() !== "POST" || !isJsonContentType(req.headers["content-type"])) return httpCalls.run(scope, () => node(req, res));
+    const body = await readJsonBody(req);
+    if (!body.ok) {
+      const payload = JSON.stringify({ jsonrpc: "2.0", id: null, error: { code: body.status === 400 ? -32700 : -32000, message: body.message } });
+      res.writeHead(body.status, { "content-type": "application/json" }).end(payload);
+      return;
+    }
+    return httpCalls.run(scope, () => node(req, res, body.value));
+  };
   return Object.assign(fn, {
     close: async () => {
       unsubscribe?.();

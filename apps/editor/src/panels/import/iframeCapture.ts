@@ -15,6 +15,8 @@ export interface IframeCaptureRequest {
   waitMs?: number;
   fullPage?: boolean;
   timeoutMs?: number;
+  /** Removes the iframe and rejects with the signal's reason. */
+  signal?: AbortSignal;
 }
 
 const MESSAGE = "sonobe-design-capture";
@@ -46,12 +48,23 @@ export function captureHtmlInIframe(request: IframeCaptureRequest, doc: Document
     source: { kind: "html", generator: "sonobe-walker/1" },
   };
   return new Promise<DesignCapture>((resolve, reject) => {
+    const signal = request.signal;
+    if (signal?.aborted) {
+      reject(signal.reason);
+      return;
+    }
     const win = doc.defaultView ?? window;
     const cleanup = () => {
       clearTimeout(timer);
       win.removeEventListener("message", onMessage);
+      signal?.removeEventListener("abort", onAbort);
       iframe.remove();
     };
+    const onAbort = () => {
+      cleanup();
+      reject(signal?.reason);
+    };
+    signal?.addEventListener("abort", onAbort, { once: true });
     const onMessage = (event: MessageEvent) => {
       const data = event.data as { type?: unknown; nonce?: unknown; capture?: DesignCapture; error?: unknown } | null;
       if (event.source !== iframe.contentWindow || !data || data.type !== MESSAGE || data.nonce !== nonce) return;

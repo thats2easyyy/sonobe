@@ -38,6 +38,15 @@ export {
   type ToolName,
 } from "./server.ts";
 export {
+  callSignal,
+  toolWork,
+  ToolCancelledError,
+  type CallScope,
+  type StepOptions,
+  type ToolWork,
+  type ToolWorkOptions,
+} from "./progress.ts";
+export {
   createHttpHandler,
   documentResourceUris,
   publishDocumentChange,

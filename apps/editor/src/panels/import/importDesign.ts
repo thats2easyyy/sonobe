@@ -29,10 +29,12 @@ export interface ImportDesignRequest {
   replace?: Id;
 }
 
-export type CaptureOutcome = { ok: true; capture: DesignCapture; images: ReadonlyMap<string, ResolvedImage | null> } | { ok: false; message: string; hint?: string };
+export type CaptureOutcome = { ok: true; capture: DesignCapture; images: ReadonlyMap<string, ResolvedImage | null>; notes?: string[] } | { ok: false; message: string; hint?: string; cancelled?: boolean };
 
 export interface ImportOutcome {
   ok: boolean;
+  /** The import was cancelled before it changed anything. */
+  cancelled?: boolean;
   screenId?: Id;
   screenName?: string;
   summary?: ImportSummary;
@@ -42,8 +44,30 @@ export interface ImportOutcome {
 }
 
 export interface ImportDeps {
-  desktop?: Pick<DesktopHostApi, "captureDesign" | "fetchCaptureFile"> | null;
+  desktop?: Pick<DesktopHostApi, "captureDesign" | "fetchCaptureFile" | "cancelCaptureDesign" | "onCaptureDesignProgress"> | null;
   captureHtml?: typeof captureHtmlInIframe;
+}
+
+/** How the dialog follows and stops an import. */
+export interface ImportControl {
+  /** Cancels the import: the capture stops, nothing is applied, and the outcome says cancelled. */
+  signal?: AbortSignal;
+  /** What the import is doing now ("Downloading images: 7 of 28"). */
+  onProgress?(message: string): void;
+}
+
+const CANCELLED = { ok: false as const, cancelled: true, message: "The import was cancelled." };
+
+/** Settle with `promise`, or with null as soon as `signal` aborts. */
+function unlessAborted<T>(promise: Promise<T>, signal: AbortSignal | undefined): Promise<T | null> {
+  if (!signal) return promise;
+  promise.catch(() => undefined);
+  if (signal.aborted) return Promise.resolve(null);
+  return new Promise<T | null>((resolve, reject) => {
+    const onAbort = () => resolve(null);
+    signal.addEventListener("abort", onAbort, { once: true });
+    promise.then(resolve, reject).finally(() => signal.removeEventListener("abort", onAbort));
+  });
 }
 
 /** The screen size imports use: the current component's size, else the device's. */
@@ -60,25 +84,45 @@ export function canImportUrl(deps: ImportDeps = {}): boolean {
   return typeof desktop?.captureDesign === "function";
 }
 
-export async function captureDesign(session: EditorSession, request: ImportDesignRequest, deps: ImportDeps = {}): Promise<CaptureOutcome> {
+export async function captureDesign(session: EditorSession, request: ImportDesignRequest, deps: ImportDeps = {}, control: ImportControl = {}): Promise<CaptureOutcome> {
+  const { signal } = control;
+  if (signal?.aborted) return CANCELLED;
   const [deviceWidth, deviceHeight] = importViewport(session);
   const width = request.width ?? deviceWidth;
   const height = request.height ?? deviceHeight;
   const desktop = deps.desktop === undefined ? getDesktopHostApi() : deps.desktop;
   if (typeof desktop?.captureDesign === "function") {
-    const reply = await desktop.captureDesign({
-      ...(request.url !== undefined ? { url: request.url } : { html: request.html ?? "" }),
-      width,
-      height,
-      ...(request.selector ? { selector: request.selector } : {}),
-      ...(request.waitFor ? { waitFor: request.waitFor } : {}),
-      ...(request.waitMs ? { waitMs: request.waitMs } : {}),
-      ...(request.fullPage === false ? { fullPage: false } : {}),
-      ...(request.colorScheme ? { colorScheme: request.colorScheme } : {}),
+    // The main process follows and stops the capture by this id (an AbortSignal can't cross the bridge).
+    const captureId = `capture-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+    const unsubscribe = desktop.onCaptureDesignProgress?.((progress) => {
+      if (progress.captureId === captureId) control.onProgress?.(progress.message);
     });
+    const cancel = () => desktop.cancelCaptureDesign?.(captureId);
+    signal?.addEventListener("abort", cancel, { once: true });
+    let reply;
+    try {
+      reply = await unlessAborted(
+        desktop.captureDesign({
+          ...(request.url !== undefined ? { url: request.url } : { html: request.html ?? "" }),
+          width,
+          height,
+          ...(request.selector ? { selector: request.selector } : {}),
+          ...(request.waitFor ? { waitFor: request.waitFor } : {}),
+          ...(request.waitMs ? { waitMs: request.waitMs } : {}),
+          ...(request.fullPage === false ? { fullPage: false } : {}),
+          ...(request.colorScheme ? { colorScheme: request.colorScheme } : {}),
+          captureId,
+        }),
+        signal,
+      );
+    } finally {
+      unsubscribe?.();
+      signal?.removeEventListener("abort", cancel);
+    }
+    if (!reply || signal?.aborted || (!reply.ok && reply.code === "cancelled")) return CANCELLED;
     if (!reply.ok) return { ok: false, message: reply.message, ...(reply.hint ? { hint: reply.hint } : {}) };
     try {
-      return { ok: true, capture: parseCapture(reply.capture), images: new Map(reply.images.map(([key, image]) => [key, image ? { ...image, bytes: new Uint8Array(image.bytes) } : null])) };
+      return { ok: true, capture: parseCapture(reply.capture), images: new Map(reply.images.map(([key, image]) => [key, image ? { ...image, bytes: new Uint8Array(image.bytes) } : null])), ...(reply.notes?.length ? { notes: reply.notes } : {}) };
     } catch (err) {
       return { ok: false, message: err instanceof Error ? err.message : String(err) };
     }
@@ -87,6 +131,7 @@ export async function captureDesign(session: EditorSession, request: ImportDesig
     return { ok: false, message: "Importing from a URL needs the Sonobe desktop app.", hint: "A browser tab can't read another site's layout. Open Sonobe's desktop app, or paste the page's HTML instead." };
   }
   try {
+    control.onProgress?.("Rendering the HTML");
     const capture = await (deps.captureHtml ?? captureHtmlInIframe)({
       html: request.html ?? "",
       width,
@@ -95,15 +140,22 @@ export async function captureDesign(session: EditorSession, request: ImportDesig
       ...(request.waitFor ? { waitFor: request.waitFor } : {}),
       ...(request.waitMs ? { waitMs: request.waitMs } : {}),
       ...(request.fullPage === false ? { fullPage: false } : {}),
+      ...(signal ? { signal } : {}),
     });
-    return { ok: true, capture, images: await resolveCaptureFiles(capture, { fetch: globalFetcher({ mode: "cors" }) }) };
+    const images = await resolveCaptureFiles(capture, {
+      fetch: globalFetcher({ mode: "cors" }),
+      ...(signal ? { signal } : {}),
+      onFile: (_key, _status, done, total) => control.onProgress?.(`Downloading images: ${done} of ${total}`),
+    });
+    return { ok: true, capture, images };
   } catch (err) {
+    if (signal?.aborted) return CANCELLED;
     return { ok: false, message: err instanceof Error ? err.message : String(err), hint: request.selector ? `Check that "${request.selector}" matches an element in the HTML.` : undefined };
   }
 }
 
 /** Add a captured design to the current component as one undo step, and select the new screen. */
-export async function importCapture(session: EditorSession, capture: DesignCapture, images: ReadonlyMap<string, ResolvedImage | null>, options: { name?: string; scrolling?: boolean; position?: [number, number]; replace?: Id } = {}): Promise<ImportOutcome> {
+export async function importCapture(session: EditorSession, capture: DesignCapture, images: ReadonlyMap<string, ResolvedImage | null>, options: { name?: string; scrolling?: boolean; position?: [number, number]; replace?: Id; signal?: AbortSignal } = {}): Promise<ImportOutcome> {
   const state = session.document.getState();
   const componentId = session.currentComponentId();
   const component = state.doc.components[componentId];
@@ -122,6 +174,8 @@ export async function importCapture(session: EditorSession, capture: DesignCaptu
     if (err instanceof ImportPlanError) return { ok: false, message: err.message, ...(err.hint ? { hint: err.hint } : {}) };
     throw err;
   }
+  // The last point where a cancel stops the import: from here on it lands as one undo step.
+  if (options.signal?.aborted) return CANCELLED;
   for (const file of plan.files) session.assets.storeBytes(file.file, file.bytes);
   const result = session.document.getState().apply(plan.ops, { label: `${options.replace ? "Re-import" : "Import"} “${plan.screenName}”` });
   if (!result.ok) {
@@ -133,11 +187,13 @@ export async function importCapture(session: EditorSession, capture: DesignCaptu
   return { ok: true, ...(screenId ? { screenId } : {}), screenName: plan.screenName, summary: plan.summary, notes: plan.notes };
 }
 
-/** Capture and import in one go. */
-export async function importDesign(session: EditorSession, request: ImportDesignRequest, deps: ImportDeps = {}): Promise<ImportOutcome> {
-  const captured = await captureDesign(session, request, deps);
-  if (!captured.ok) return { ok: false, message: captured.message, ...(captured.hint ? { hint: captured.hint } : {}) };
-  return importCapture(session, captured.capture, captured.images, { ...(request.name ? { name: request.name } : {}), ...(request.scrolling !== undefined ? { scrolling: request.scrolling } : {}), ...(request.replace ? { replace: request.replace } : {}) });
+/** Capture and import in one go. A cancel (control.signal) never applies anything. */
+export async function importDesign(session: EditorSession, request: ImportDesignRequest, deps: ImportDeps = {}, control: ImportControl = {}): Promise<ImportOutcome> {
+  const captured = await captureDesign(session, request, deps, control);
+  if (!captured.ok) return { ok: false, message: captured.message, ...(captured.hint ? { hint: captured.hint } : {}), ...(captured.cancelled ? { cancelled: true } : {}) };
+  control.onProgress?.("Adding the layers");
+  const outcome = await importCapture(session, captured.capture, captured.images, { ...(request.name ? { name: request.name } : {}), ...(request.scrolling !== undefined ? { scrolling: request.scrolling } : {}), ...(request.replace ? { replace: request.replace } : {}), ...(control.signal ? { signal: control.signal } : {}) });
+  return outcome.ok && captured.notes?.length ? { ...outcome, notes: [...(outcome.notes ?? []), ...captured.notes] } : outcome;
 }
 
 /** A design capture in pasted text, or null when the text isn't one. Throws CaptureFormatError for a broken capture. */
