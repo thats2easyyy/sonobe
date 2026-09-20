@@ -791,6 +791,17 @@ describe("app host component screenshots", () => {
     expect(svgs).toHaveLength(1);
   });
 
+  it("draws an off-screen graph in the theme the editor shows", async () => {
+    const { w, host, svgs, motion } = await withComponents();
+    await host.screenshot({ kind: "graph" }, { component: motion });
+    expect(svgs[0]!.svg).toContain('fill="#131315"');
+    // The editor reports the light theme with its selection.
+    w.server.handle("selection.get", () => ({ component: "main", componentPath: ["main"], layers: [], patches: [], comments: [], theme: "light" }));
+    await host.screenshot({ kind: "graph" }, { component: motion });
+    expect(svgs[1]!.svg).toContain('fill="#EFEFF2"');
+    expect(svgs[1]!.svg).not.toContain('fill="#131315"');
+  });
+
   it("draws a layer component's canvas and a layer inside it at frame 0", async () => {
     const { host, scenes, button } = await withComponents();
     const canvas = await host.screenshot({ kind: "canvas" }, { component: button, scale: 2 });

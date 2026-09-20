@@ -382,7 +382,9 @@ export function registerRpcHandlers(session: EditorSession, options: RpcHandlerO
 
     "selection.get": () => {
       const s = session.selection.getState();
-      return { component: currentComponentId(s), componentPath: s.componentPath, layers: s.layers, patches: s.patches, comments: s.comments, focusedPanel: s.focusedPanel, hovered: s.hovered };
+      // theme: what the editor shows, so a graph the app draws off screen matches it.
+      const theme = globalThis.document?.documentElement.getAttribute("data-theme") === "light" ? "light" : "dark";
+      return { component: currentComponentId(s), componentPath: s.componentPath, layers: s.layers, patches: s.patches, comments: s.comments, focusedPanel: s.focusedPanel, hovered: s.hovered, theme };
     },
 
     "viewer.bounds": () => {

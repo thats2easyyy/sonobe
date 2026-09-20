@@ -3,6 +3,7 @@
 import { componentNodeBoxes, deriveGraph, NODE_BOX, tableMeasurer } from "@sonobe/core/graph";
 import { buildDoc, createMockRegistry } from "@sonobe/engine/testing";
 import { describe, expect, it } from "vitest";
+import { CATEGORY_COLORS, COMMENT_COLORS, THEME_TOKENS } from "../theme.ts";
 import { graphToSvg } from "./graphToSvg.ts";
 
 const registry = createMockRegistry();
@@ -94,6 +95,21 @@ describe("graphToSvg", () => {
     expect(node).toMatch(/<rect x="[^"]+" y="[^"]+" width="10" height="10" rx="2" fill="#FF375F" fill-opacity="0.502"\/>/);
     const chip = node.match(/<rect x="[^"]+" y="[^"]+" width="([^"]+)" height="16" rx="3" fill="#5F74E4"/);
     expect(Number(chip?.[1])).toBeCloseTo(NODE_BOX.valuePaddingX + NODE_BOX.knobIcon + NODE_BOX.valueInnerGap + tableMeasurer("Tint", "sans10") + NODE_BOX.valueInnerGap + NODE_BOX.swatch, 1);
+  });
+
+  it("draws in the editor's light theme when asked, from the same tokens the editor styles with", () => {
+    const dark = graphToSvg(model, { boxes }).svg;
+    const light = graphToSvg(model, { boxes, theme: "light" }).svg;
+    expect(dark).toContain(`fill="${THEME_TOKENS.dark["canvas-bg"]}"`);
+    expect(light).toContain(`fill="${THEME_TOKENS.light["canvas-bg"]}"`);
+    expect(light).toContain(`fill="${THEME_TOKENS.light["patch-node-bg"]}"`);
+    expect(light).toContain(`fill="${CATEGORY_COLORS.light.interaction}"`);
+    expect(light).toContain(`stroke="${COMMENT_COLORS.light.blue}"`);
+    expect(light).toContain(`fill="${THEME_TOKENS.light["text-primary"]}"`);
+    expect(light).not.toContain(THEME_TOKENS.dark["canvas-bg"]);
+    // The node border is the token's color and alpha: black at 0.1 in light, white at 0.08 in dark.
+    expect(light).toContain('stroke="#000000" stroke-opacity="0.1"');
+    expect(dark).toContain('stroke="#FFFFFF" stroke-opacity="0.08"');
   });
 
   it("crops and scales", () => {
