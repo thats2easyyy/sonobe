@@ -202,6 +202,7 @@ The runs also showed where Claude struggled, and those problems are fixed. Tool 
 | `apps/ios` | Sonobe Viewer, an iPhone app that plays phone previews with real haptics (Swift, Xcode) |
 | `integrations` | The Claude Code plugin, the Claude Desktop extension, and the Sonobe Capture extension for Chrome and plugin for Figma |
 | `examples` | 16 runnable example projects with scripted tests |
+| `evals` | Behavioral evals: Claude Code builds each case through Sonobe's tools, and a simulation checks the result |
 | `docs/guides` | Concept guides and recipes |
 | `docs/patches` | The generated patch reference |
 | `docs/research` | Research notes behind the design |
