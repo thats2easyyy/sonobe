@@ -241,6 +241,28 @@ function iconName(el: Element): string | undefined {
 /** Ids people chose ("checkout-form"), not generated ones (":r3:", "radix-4", "headlessui-menu-7"). */
 const readableId = (id: string) => id.length > 1 && id.length <= 40 && !/[:$]|^(?:radix|headlessui|mui|chakra|react-aria|downshift|ember|__)|\d{3,}|^[a-f0-9-]{16,}$/i.test(id);
 
+/**
+ * Where a drawn SF Symbol paints when it reaches past its frame (a badge), from data-sf-overflow (top,
+ * right, bottom, left, in viewBox units; dom/symbols.ts): the element's box grown to cover that drawing,
+ * and the viewBox that maps it, with the viewBox's default xMidYMid meet placement.
+ */
+function symbolOverflow(svg: SVGSVGElement, rect: DOMRect): { rect: DOMRect; viewBox: string } | null {
+  const past = svg.getAttribute("data-sf-overflow")?.trim().split(/\s+/).map(Number);
+  const vb = svg.viewBox?.baseVal;
+  if (!past || past.length !== 4 || !past.every((n) => Number.isFinite(n) && n >= 0) || !vb || vb.width <= 0 || vb.height <= 0) return null;
+  const [top, right, bottom, left] = past as [number, number, number, number];
+  // A viewBox point (u, v) lands at (x0 + k·u, y0 + k·v) on the page.
+  const k = Math.min(rect.width / vb.width, rect.height / vb.height);
+  const x0 = rect.left + (rect.width - k * vb.width) / 2 - k * vb.x;
+  const y0 = rect.top + (rect.height - k * vb.height) / 2 - k * vb.y;
+  const l = Math.min(rect.left, x0 + k * (vb.x - left));
+  const t = Math.min(rect.top, y0 + k * (vb.y - top));
+  const r = Math.max(rect.right, x0 + k * (vb.x + vb.width + right));
+  const b = Math.max(rect.bottom, y0 + k * (vb.y + vb.height + bottom));
+  const viewBox = [(l - x0) / k, (t - y0) / k, (r - l) / k, (b - t) / k].map((n) => Math.round(n * 1000) / 1000 || 0).join(" ");
+  return { rect: new DOMRect(l, t, r - l, b - t), viewBox };
+}
+
 interface Counters {
   flattenedText: number;
   approximateTransforms: number;
@@ -1204,9 +1226,12 @@ class Walker {
 
   addSvg(svg: SVGSVGElement, rect: DOMRect, frame: CaptureFrame): void {
     if (rect.width === 0 || rect.height === 0) return;
+    // An SF Symbol's badge can draw outside the element's box; the image covers it.
+    const overflow = symbolOverflow(svg, rect);
+    const drawn = overflow?.rect ?? rect;
     let markup: string | null;
     try {
-      markup = this.svgMarkup(svg, rect);
+      markup = this.svgMarkup(svg, drawn, overflow?.viewBox);
     } catch {
       markup = null;
     }
@@ -1215,11 +1240,11 @@ class Walker {
       this.counters.placeholders.add("SVGs that couldn't be read");
       return;
     }
-    const key = this.imageKey(`data:image/svg+xml;base64,${utf8Base64(markup)}`, { width: Math.round(rect.width), height: Math.round(rect.height), name: frame.name && frame.nameRank! >= 2 ? frame.name : "icon" });
+    const key = this.imageKey(`data:image/svg+xml;base64,${utf8Base64(markup)}`, { width: Math.round(drawn.width), height: Math.round(drawn.height), name: frame.name && frame.nameRank! >= 2 ? frame.name : "icon" });
     if (!key) return;
     // Paint on the <svg> element itself (fill, stroke) is inside the drawing, not a box.
     delete frame.fill;
-    const node = this.imageNode(key, this.box(rect), "stretch", frame, "Icon");
+    const node = this.imageNode(key, this.box(drawn), "stretch", frame, "Icon");
     delete node.radii;
     frame.children = [node];
   }
@@ -1237,7 +1262,7 @@ class Walker {
   }
 
   /** The SVG with computed paint written onto every element, so classes and currentColor survive on their own. */
-  svgMarkup(svg: SVGSVGElement, rect: DOMRect): string | null {
+  svgMarkup(svg: SVGSVGElement, rect: DOMRect, viewBox?: string): string | null {
     const clone = svg.cloneNode(true) as SVGSVGElement;
     const originals = [svg, ...svg.querySelectorAll("*")];
     const copies = [clone, ...clone.querySelectorAll("*")];
@@ -1272,7 +1297,8 @@ class Walker {
     clone.setAttribute("xmlns", "http://www.w3.org/2000/svg");
     clone.setAttribute("width", String(round2(rect.width)));
     clone.setAttribute("height", String(round2(rect.height)));
-    if (!clone.hasAttribute("viewBox")) clone.setAttribute("viewBox", `0 0 ${round2(rect.width)} ${round2(rect.height)}`);
+    if (viewBox) clone.setAttribute("viewBox", viewBox);
+    else if (!clone.hasAttribute("viewBox")) clone.setAttribute("viewBox", `0 0 ${round2(rect.width)} ${round2(rect.height)}`);
     try {
       return new XMLSerializer().serializeToString(clone);
     } catch {

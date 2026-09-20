@@ -28,15 +28,23 @@ export interface SymbolRequest {
   colors: string[];
 }
 
+/** Points past each edge of a symbol's frame: top, right, bottom, left. */
+export type SymbolOverflow = [number, number, number, number];
+
 export type SymbolResult =
   | {
       ok: true;
       /** SVG markup, or a PNG (base64, 3x) for symbols the SVG conversion can't express. */
       svg?: string;
       png?: string;
-      /** The symbol's frame in points. */
+      /** The symbol's frame in points, which the page lays out. */
       width: number;
       height: number;
+      /**
+       * How far the drawing reaches past the frame (top, right, bottom, left, in points), as a badge can:
+       * SwiftUI doesn't clip a symbol to its frame. The SVG's viewBox and the PNG cover that too.
+       */
+      overflow?: SymbolOverflow;
       /** Why it's a PNG ("masks inside masks"). */
       fallback?: string;
       /** Apple's usage restriction for this symbol. */
@@ -77,6 +85,8 @@ export interface SymbolPaint {
   slot: number;
   width: number;
   height: number;
+  /** How far the drawing reaches past its frame (SymbolResult.overflow). */
+  overflow?: SymbolOverflow;
   svg?: string;
   png?: string;
 }
@@ -159,7 +169,7 @@ async function drawSymbols(evaluate: PageEvaluate, run: CaptureRun, slots: reado
   }
   const paints: SymbolPaint[] = slots.map((s, i) => {
     const result = results[unique.indexOf(keys[i]!)];
-    if (result?.ok && (result.svg || result.png)) return { slot: s.slot, width: result.width, height: result.height, ...(result.svg ? { svg: result.svg } : { png: result.png! }) };
+    if (result?.ok && (result.svg || result.png)) return { slot: s.slot, width: result.width, height: result.height, ...(result.overflow ? { overflow: result.overflow } : {}), ...(result.svg ? { svg: result.svg } : { png: result.png! }) };
     return { slot: s.slot, width: s.request.size, height: s.request.size };
   });
   await run.step(evaluate(`${SYMBOL_APPLY_SOURCE};window.__sonobeApplySymbols(${JSON.stringify(paints)})`), CAPTURE_BUDGETS.symbols);
