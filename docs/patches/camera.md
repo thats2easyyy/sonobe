@@ -30,7 +30,7 @@ The outputs:
 ## Tips
 - Selfie feeds look natural mirrored: give the viewfinder layer a Scale XYZ of -1, 1, 1.
 - Face, Hand, Object, and QR Code Detection can watch the viewfinder layer.
-- On a phone, the web player needs an HTTPS address to use the camera.
+- On a phone, the web player needs an HTTPS address to use the camera, and Preview on Phone's is plain http://, so test the camera in the desktop app.
 
 ## Coming from Origami
 Record Video is Recording, and Capture Image is Capture. Quality, Record Audio, Available, Captured, and Recorded are new.
@@ -95,7 +95,7 @@ patch cam camera enabled=true recording←press_record.down recordAudio=true
 ## Common mistakes
 
 - The viewfinder stays black everywhere: Enabled is still off, since the camera starts off. Turn Enabled on and allow the permission prompt.
-- The viewfinder stays black on a phone: the web player was opened from a plain http:// address, and browsers only allow the camera on HTTPS or localhost. Open it through an HTTPS link, or test in the desktop app.
+- The viewfinder stays black on a phone: the web player was opened from a plain http:// address, and browsers only allow the camera on HTTPS or localhost. Sonobe has no HTTPS preview yet, so test it in the desktop viewer or the pop-out window.
 - Available stays off: camera permission was denied earlier, so the browser doesn't ask again. Allow the camera in the browser's site settings (or in System Settings on a Mac), then restart the prototype.
 - Capture gives nothing: the pulse arrives before the camera is running, for example from When Prototype Starts. Capture from a tap, or wait until Available turns on.
 
