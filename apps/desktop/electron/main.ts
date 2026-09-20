@@ -249,7 +249,12 @@ function main(): void {
         w.webContents.on("did-start-navigation", (details) => {
           if (details.isMainFrame && !details.isSameDocument) drafts?.release(id);
         });
-        w.webContents.on("render-process-gone", () => drafts?.release(id));
+        w.webContents.on("render-process-gone", () => {
+          drafts?.release(id);
+          appHost?.forgetTarget(id);
+        });
+        // A reloaded editor shows a document of its own: the app host forgets the old page's (docId, cached snapshot, simulations).
+        w.webContents.on("did-navigate", () => appHost?.forgetTarget(id));
         w.webContents.once("destroyed", () => {
           drafts?.release(id);
           windows.delete(id);

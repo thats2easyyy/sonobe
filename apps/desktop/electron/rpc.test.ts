@@ -136,6 +136,89 @@ describe("rpc client/server", () => {
   });
 });
 
+describe("rpc client and a page that starts, reloads or crashes", () => {
+  function client(opts: { pageWaitMs?: number; timeoutMs?: number } = {}) {
+    const sent: RpcRequestMessage[] = [];
+    const c = createRpcClient({ send: (request) => sent.push(request), defaultTimeoutMs: opts.timeoutMs ?? 15_000, ...(opts.pageWaitMs !== undefined ? { pageWaitMs: opts.pageWaitMs } : {}) });
+    return { client: c, sent, answer: (id: number, result: unknown) => c.handleResponse({ id, ok: true, result }) };
+  }
+
+  it("holds a call until the starting page registers its method", async () => {
+    vi.useFakeTimers();
+    const { client: c, sent, answer } = client();
+    c.pageStarting();
+    const info = c.invoke("document.info");
+    // The preload reports in first, then the editor registers its handlers.
+    c.setMethods([]);
+    await vi.advanceTimersByTimeAsync(2000);
+    expect(sent).toEqual([]);
+    c.setMethods(["document.info"]);
+    expect(sent).toEqual([{ id: 1, method: "document.info" }]);
+    answer(1, { name: "Main" });
+    await expect(info).resolves.toEqual({ name: "Main" });
+  });
+
+  it("sends anyway when the page's wait runs out, and doesn't wait on a page that's up", async () => {
+    vi.useFakeTimers();
+    const { client: c, sent } = client({ pageWaitMs: 1000 });
+    c.setMethods(["document.info"]);
+    void c.invoke("viewer.bounds").catch(() => undefined);
+    await vi.advanceTimersByTimeAsync(999);
+    expect(sent).toEqual([]);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(sent.map((m) => m.method)).toEqual(["viewer.bounds"]);
+    // Long after the page started, a method it never registered goes out at once (and gets no_handler).
+    void c.invoke("graph.geometry").catch(() => undefined);
+    expect(sent.map((m) => m.method)).toEqual(["viewer.bounds", "graph.geometry"]);
+  });
+
+  it("times out a held call with the call's own limit, saying it wasn't sent", async () => {
+    vi.useFakeTimers();
+    const { client: c, sent } = client({ timeoutMs: 1500 });
+    c.pageStarting();
+    const flush = c.invoke("drafts.flush");
+    const assertion = expect(flush).rejects.toMatchObject({ code: "timeout", message: "The editor didn't finish loading within 1500 ms, so drafts.flush wasn't sent" });
+    await vi.advanceTimersByTimeAsync(1500);
+    await assertion;
+    expect(sent).toEqual([]);
+    expect(c.pendingCount).toBe(0);
+  });
+
+  it("fails what the page hadn't answered when it goes, forgets its methods, and waits for the next page", async () => {
+    vi.useFakeTimers();
+    const { client: c, sent, answer } = client();
+    c.setMethods(["document.apply", "document.info"]);
+    await vi.advanceTimersByTimeAsync(20_000);
+    const apply = c.invoke("document.apply", { ops: [] });
+    expect(sent).toHaveLength(1);
+    c.pageGone("crashed");
+    await expect(apply).rejects.toMatchObject({ code: "page_gone", message: "The editor crashed before it answered document.apply", data: { reason: "crashed" } });
+    expect(c.hasMethod("document.info")).toBeUndefined();
+
+    const info = c.invoke("document.info");
+    expect(sent).toHaveLength(1);
+    // The crashed editor loads again: a held call keeps waiting through the reload.
+    await vi.advanceTimersByTimeAsync(3000);
+    c.pageGone("reloaded");
+    await vi.advanceTimersByTimeAsync(9000);
+    expect(sent).toHaveLength(1);
+    c.setMethods(["document.info"]);
+    expect(sent.at(-1)).toEqual({ id: 2, method: "document.info" });
+    answer(2, { name: "Untitled" });
+    await expect(info).resolves.toEqual({ name: "Untitled" });
+    // A late answer from the page that went away matches nothing.
+    expect(answer(1, {})).toBe(false);
+  });
+
+  it("rejects held calls on dispose", async () => {
+    const { client: c } = client();
+    c.pageStarting();
+    const held = c.invoke("document.info");
+    c.dispose("renderer_gone", "gone");
+    await expect(held).rejects.toMatchObject({ code: "renderer_gone" });
+  });
+});
+
 class FakeWebContents extends EventEmitter implements RpcTarget {
   readonly id: number;
   destroyed = false;
@@ -165,6 +248,7 @@ describe("createRendererRpcHub", () => {
     const ipc = new EventEmitter();
     const hub = createRendererRpcHub(ipc as never);
     const wc = new FakeWebContents(7);
+    ipc.emit(IPC.rpcMethods, { sender: wc }, ["document.save"]);
     const promise = hub.invoke(wc, "document.save", { reason: "close" });
     expect(wc.sent[0]).toEqual({ channel: IPC.rpcRequest, payload: { id: 1, method: "document.save", params: { reason: "close" } } });
     const request = wc.sent[0]!.payload as RpcRequestMessage;
@@ -180,7 +264,11 @@ describe("createRendererRpcHub", () => {
     const hub = createRendererRpcHub(ipc as never, { defaultTimeoutMs: 100, isTrustedSender: () => trusted });
     const a = new FakeWebContents(1);
     const b = new FakeWebContents(2);
+    trusted = true;
+    ipc.emit(IPC.rpcMethods, { sender: a }, ["x"]);
+    trusted = false;
     const promise = hub.invoke(a, "x");
+    expect(a.sent).toHaveLength(1);
     const assertion = expect(promise).rejects.toMatchObject({ code: "timeout" });
     ipc.emit(IPC.rpcResponse, { sender: a }, { id: 1, ok: true, result: "spoofed" });
     trusted = true;
@@ -198,6 +286,47 @@ describe("createRendererRpcHub", () => {
     ipc.emit(IPC.rpcMethods, { sender: wc }, ["document.save", 42]);
     expect(hub.hasMethod(wc, "document.save")).toBe(true);
     expect(hub.hasMethod(wc, "other")).toBe(false);
+    hub.dispose();
+  });
+
+  it("fails a crashed page's calls at once and holds new ones until the reloaded editor registers them", async () => {
+    vi.useFakeTimers();
+    const ipc = new EventEmitter();
+    const hub = createRendererRpcHub(ipc as never);
+    const wc = new FakeWebContents(5);
+    ipc.emit(IPC.rpcMethods, { sender: wc }, ["document.apply", "document.info"]);
+    const apply = hub.invoke(wc, "document.apply", { ops: [] });
+    expect(wc.sent).toHaveLength(1);
+    wc.emit("render-process-gone", {}, { reason: "killed" });
+    await expect(apply).rejects.toMatchObject({ code: "page_gone", data: { reason: "crashed" } });
+    // Until the new page reports, the old page's methods aren't there.
+    expect(hub.hasMethod(wc, "document.info")).toBeUndefined();
+
+    const info = hub.invoke(wc, "document.info");
+    wc.emit("did-navigate", {}, "file:///index.html");
+    ipc.emit(IPC.rpcMethods, { sender: wc }, []);
+    await vi.advanceTimersByTimeAsync(2500);
+    expect(wc.sent).toHaveLength(1);
+    expect(hub.hasMethod(wc, "document.info")).toBe(false);
+    ipc.emit(IPC.rpcMethods, { sender: wc }, ["document.info"]);
+    expect(wc.sent).toHaveLength(2);
+    const request = wc.sent[1]!.payload as RpcRequestMessage;
+    expect(request.method).toBe("document.info");
+    ipc.emit(IPC.rpcResponse, { sender: wc }, { id: request.id, ok: true, result: { name: "Untitled" } });
+    await expect(info).resolves.toEqual({ name: "Untitled" });
+    hub.dispose();
+  });
+
+  it("fails calls a reload cut off as reloaded, and leaves a window that closes cleanly to 'destroyed'", async () => {
+    const ipc = new EventEmitter();
+    const hub = createRendererRpcHub(ipc as never);
+    const wc = new FakeWebContents(6);
+    ipc.emit(IPC.rpcMethods, { sender: wc }, ["document.save"]);
+    const save = hub.invoke(wc, "document.save");
+    wc.emit("render-process-gone", {}, { reason: "clean-exit" });
+    expect(hub.hasMethod(wc, "document.save")).toBe(true);
+    wc.emit("did-navigate", {}, "file:///index.html");
+    await expect(save).rejects.toMatchObject({ code: "page_gone", message: "The editor reloaded before it answered document.save", data: { reason: "reloaded" } });
     hub.dispose();
   });
 
