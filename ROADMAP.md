@@ -32,6 +32,7 @@ The first two finish Stage 4. The rest are Stage 5.
 
 ## Stage 3: Parity and polish
 - [x] Patch editor power features: link-drag search, knife cut, ⌘-drag splice onto a wire, option-drag duplicate, single-key inserts, Tidy Up (within each comment frame), comments, components (enter/exit, publish ports), variables, live values on hover, pulse sparks, loop badges
+- [x] Patch editor arrivals: a graph opens in a wave that follows the signal flow, with cables drawing from their outputs; nodes and cables added later (by the person, by undo, by Claude) animate in once, and what the person placed themselves (option-drag copies, a cable dragged into link search) stays put; a first fit waiting on an idle page shows skeleton nodes; large graphs and reduced motion fade
 - [x] Canvas: direct manipulation, snapping, insert shapes and text, alignment tools
 - [x] Layer ↔ patch bridges: Touch button, inspector property links, drag a cable onto a property
 - [x] Viewer: device picker, frame, restart, hit-target overlay, pop-out window, LAN web player with QR code
