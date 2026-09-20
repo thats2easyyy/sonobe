@@ -2,7 +2,8 @@
  * Node sizes without a DOM: a node's shape (nodeShape.ts) plus a text measurer gives the box the
  * patch editor draws, following its stylesheet (apps/editor/src/panels/patch-editor/patch-editor.css:
  * width max-content between 164 and 320, a 28 pt header, 22 pt rows; live values and knob values
- * in slots at least as wide as the longest text they can print, in `ch`). The default measurer reads a
+ * in slots at least as wide as the longest text they can print, in `ch`, a live value's no wider
+ * than its row has room for under 320). The default measurer reads a
  * table of SF Pro and SF Mono advances (nodeMetrics.ts); the editor passes one that measures its real
  * font, like the engine's TextMeasurer.
  *
@@ -11,7 +12,7 @@
  */
 
 import { NODE_FONT_METRICS } from "./nodeMetrics.ts";
-import { nodeShapeFromData, type NodeShape, type NodeShapeOptions, type ValueChip } from "./nodeShape.ts";
+import { nodeShapeFromData, type NodeRowShape, type NodeShape, type NodeShapeOptions, type ValueChip } from "./nodeShape.ts";
 import type { GraphNodeData } from "./types.ts";
 
 /** Box model constants from patch-editor.css, in points. */
@@ -47,7 +48,7 @@ export const NODE_BOX = {
   colorPadding: 8,
   /** Knob chips (K1): a 10 pt knob glyph before the name (color knobs end in a `swatch`). */
   knobIcon: 10,
-  /** Live values (.sb-pe-port__live): at least their reserve in `ch` (liveReserve), at most 96 wide. */
+  /** Live values (.sb-pe-port__live): at least their reserve in `ch` (liveReserve) or the row's liveRoom, whichever is less, at most 96 wide. */
   liveMaxWidth: 96,
   chipPaddingX: 10,
   loopMin: 16,
@@ -101,8 +102,58 @@ export interface NodeSize {
   height: number;
 }
 
-/** Mono text in a slot at least `reserve` characters wide: CSS `min-width: <reserve>ch`, one "0" per character. */
-const monoSlot = (text: string, reserve: number | undefined, t: NodeTextMeasurer) => Math.max(t(text, "mono10"), reserve ? reserve * t("0", "mono10") : 0);
+/** Mono text in a slot at least `reserve` characters wide (CSS `min-width: <reserve>ch`, one "0" per character), or `room` points when that's less. */
+const monoSlot = (text: string, reserve: number | undefined, t: NodeTextMeasurer, room = Infinity) => Math.max(t(text, "mono10"), reserve ? Math.min(room, reserve * t("0", "mono10")) : 0);
+
+/**
+ * Points a row keeps clear of the maximum width when it caps a live value's reserve (liveRoom), so
+ * text the DOM lays out a hair wider than the measurer said doesn't cut a label.
+ */
+const LIVE_ROOM_SLACK = 2;
+
+/** A row's width without its output's live value: the input half, the gap between the halves, the output's label. */
+function rowWidth(r: NodeRowShape, measure: NodeTextMeasurer): number {
+  const B = NODE_BOX;
+  let w = 0;
+  if (r.in) {
+    w += B.portPadding + measure(r.in.label, "label");
+    if (r.in.value) w += B.portGap + valueWidth(r.in.value, measure);
+    if (r.in.drive) w += B.portGap + B.driveButton + measure("Drive…", "sans10");
+  }
+  if (r.out) w += B.rowGap + measure(r.out.label, "label") + B.portPadding;
+  return w;
+}
+
+/**
+ * The most points an output row's live value may reserve before the row passes the node's maximum
+ * width, where its labels would have to give way: 320 less everything else in the row, which stays
+ * put while the prototype runs, so a reserve capped to it holds the node still with every label
+ * whole. At most the slot's own 96. A value wider than this still prints in full, as it would
+ * without a reserve. The patch editor gets it as PortModel.liveRoom (deriveGraph).
+ */
+export function liveRoom(row: NodeRowShape, measure: NodeTextMeasurer = tableMeasurer): number {
+  return roomBeside(rowWidth(row, measure));
+}
+
+/** liveRoom from the row's width without its live value. */
+function roomBeside(rowWidth: number): number {
+  return Math.max(0, Math.min(NODE_BOX.liveMaxWidth, Math.floor(NODE_BOX.maxWidth - LIVE_ROOM_SLACK - rowWidth - NODE_BOX.portGap)));
+}
+
+/**
+ * A node's outputs' liveRoom, in order: a number for the outputs whose rows it caps (below 96),
+ * undefined for the rest, and none for a collapsed node, which shows no live values.
+ */
+export function liveRooms(data: Exclude<GraphNodeData, { kind: "comment" }>, options: EstimateNodeSizeOptions = {}): (number | undefined)[] {
+  const { measure = tableMeasurer, ...shapeOptions } = options;
+  const shape = nodeShapeFromData(data, shapeOptions);
+  if (shape.collapsed) return [];
+  return data.outputs.map((_, i) => {
+    const row = shape.rows[i]!;
+    const room = liveRoom(row, measure);
+    return room < NODE_BOX.liveMaxWidth ? room : undefined;
+  });
+}
 
 function valueWidth(v: ValueChip, t: NodeTextMeasurer): number {
   const B = NODE_BOX;
@@ -141,18 +192,9 @@ export function measureNode(shape: NodeShape, measure: NodeTextMeasurer = tableM
   let rows = 0;
   if (!shape.collapsed) {
     for (const r of shape.rows) {
-      let w = 0;
-      if (r.in) {
-        w += B.portPadding + measure(r.in.label, "label");
-        if (r.in.value) w += B.portGap + valueWidth(r.in.value, measure);
-        if (r.in.drive) w += B.portGap + B.driveButton + measure("Drive…", "sans10");
-      }
-      if (r.out) {
-        w += B.rowGap;
-        if (r.out.live) w += Math.min(B.liveMaxWidth, monoSlot(r.out.live, r.out.reserve, measure)) + B.portGap;
-        w += measure(r.out.label, "label") + B.portPadding;
-      }
-      rows = Math.max(rows, w);
+      const w = rowWidth(r, measure);
+      const live = r.out?.live ? Math.min(B.liveMaxWidth, monoSlot(r.out.live, r.out.reserve, measure, roomBeside(w))) + B.portGap : 0;
+      rows = Math.max(rows, w + live);
     }
   }
   const min = shape.collapsed ? 0 : shape.kind === "interface" ? B.interfaceMinWidth : B.minWidth;

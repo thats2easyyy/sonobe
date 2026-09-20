@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { buildSampleDocument, mockRegistry, mustApply } from "../testing/fixtures.ts";
 import { deriveGraph } from "./deriveGraph.ts";
 import { componentNodeShapes, nodeShapeFromData, type NodeRowShape, type NodeShape, type ValueChip } from "./nodeShape.ts";
-import { estimateNodeSize, measureNode, NODE_BOX, portCenterY, tableMeasurer } from "./nodeSize.ts";
+import { estimateNodeSize, liveRoom, liveRooms, measureNode, NODE_BOX, portCenterY, tableMeasurer } from "./nodeSize.ts";
 import { componentNodeBoxes, estimatePatchSize } from "./placement.ts";
 import type { PatchNodeData } from "./types.ts";
 
@@ -54,6 +54,18 @@ describe("measureNode", () => {
     expect(width(patch([{ in: { label: label(20) }, out: { label: "Output", reserve: 8 } }]))).toBe(12 + 120 + 12 + 36 + 12);
   });
 
+  it("caps a live value's reserve to the room its row leaves under the maximum width, so labels stay whole", () => {
+    const long = (live: string): NodeRowShape => ({ in: { label: label(20) }, out: { label: label(20), live, reserve: 8 } });
+    // 12 + 120 + 12 + 120 + 12 = 276 without the value: 320 less 2 of slack, 276 and the 6 pt gap leaves 36 of the 48 reserved.
+    expect(liveRoom(long("0"), mono6)).toBe(36);
+    expect(width(patch([long("0")]))).toBe(276 + 36 + 6);
+    expect(width(patch([long("12.5")]))).toBe(276 + 36 + 6);
+    // A value wider than the room still prints in full, as it would without a reserve.
+    expect(width(patch([long("-1234.5")]))).toBe(320);
+    expect(liveRoom({ in: { label: "A" }, out: { label: "B" } }, mono6)).toBe(96);
+    expect(liveRoom({ in: { label: label(60) }, out: { label: "B" } }, mono6)).toBe(0);
+  });
+
   it("adds header chips", () => {
     const title = label(20);
     const header = 16 + 16 + 6 + 120;
@@ -100,6 +112,20 @@ describe("node shapes from the graph", () => {
     expect(at(-1234.567)).toBe(12 + 48 + 12 + 48 + 6 + 36 + 12);
     expect(new Set([0, 0.5, -12.35, 100, 1.04, -99999.9].map(at))).toEqual(new Set([at(-1234.567)]));
     expect(estimateNodeSize(data, { measure: mono6 }).width).toBe(164);
+  });
+
+  it("gives an output in a long row its room for a live value, which the patch editor caps the reserve to", () => {
+    /** 15 pt a character: Transition's "Progress" and "Output" row takes 12 + 120 + 12 + 90 + 12 = 246 without its value. */
+    const wide = (text: string) => [...text].length * 15;
+    const doc = buildSampleDocument();
+    const grow = (measure: (text: string) => number) => deriveGraph({ doc, componentId: "main", registry: mockRegistry, measure }).nodes.find((n) => n.id === "grow")!.data as PatchNodeData;
+    const data = grow(wide);
+    expect(data.outputs[0]!.liveRoom).toBe(320 - 2 - 246 - 6);
+    expect(liveRooms(data, { measure: wide })).toEqual([66]);
+    const at = (value: number) => estimateNodeSize(data, { live: () => value, measure: wide }).width;
+    expect(new Set([0, 0.5, 1.04, 1.5].map(at))).toEqual(new Set([246 + 66 + 6]));
+    // With room for the whole slot, nothing is capped.
+    expect(grow(mono6).outputs[0]!.liveRoom).toBeUndefined();
   });
 
   it("says whether a boolean input's box is checked, and whether that's its default", () => {

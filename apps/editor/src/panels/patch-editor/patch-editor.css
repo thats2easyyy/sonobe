@@ -530,11 +530,12 @@ textarea.sb-pe-title-input {
 /*
  * Live values keep the width of the longest text their type can print (liveReserve in
  * @sonobe/core/graph, set as --sb-pe-live-reserve in ch), right-aligned so the digits stay by the
- * label: a node holds its width while its numbers run.
+ * label: a node holds its width while its numbers run. A row that would pass the node's 320 px
+ * maximum keeps only the room its labels leave (liveRoom, --sb-pe-live-room).
  */
 .sb-pe-port__live {
   flex: none;
-  min-width: min(var(--sb-pe-live-reserve, 0ch), 96px);
+  min-width: min(var(--sb-pe-live-reserve, 0ch), var(--sb-pe-live-room, 96px), 96px);
   max-width: 96px;
   overflow: hidden;
   color: var(--text-accent);

@@ -49,6 +49,11 @@ export interface PortModel {
    * `valueReserve` is the most characters the value prints while the knob is tuned (knobValueReserve).
    */
   knob?: { id: string; name: string; valueText?: string; valueReserve?: number; color?: string };
+  /**
+   * Outputs whose row is long: the most points the live value may reserve before the node passes
+   * its 320 pt maximum and a label is cut (liveRoom in nodeSize.ts). Unset when the 96 pt slot fits.
+   */
+  liveRoom?: number;
 }
 
 export interface NodeIssue {

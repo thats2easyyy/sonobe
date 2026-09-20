@@ -13,10 +13,12 @@ export function isLoopValue(value: unknown): value is LoopLike {
   return !!value && typeof value === "object" && (value as { __loop?: unknown }).__loop === true && Array.isArray((value as { items?: unknown }).items);
 }
 
-/** Up to 3 decimals, no trailing zeros, thousands compacted past 6 digits. */
+/** Up to 3 decimals, no trailing zeros, compacted past 6 digits ("123.5k", "1.25M", "-4.2B", "3T"). */
 export function formatNumberShort(n: number): string {
   if (!Number.isFinite(n)) return n > 0 ? "∞" : n < 0 ? "−∞" : "NaN";
   const abs = Math.abs(n);
+  if (abs >= 1e12) return `${trim((n / 1e12).toFixed(2))}T`;
+  if (abs >= 1e9) return `${trim((n / 1e9).toFixed(2))}B`;
   if (abs >= 1e6) return `${trim((n / 1e6).toFixed(2))}M`;
   if (abs >= 1e5) return `${trim((n / 1e3).toFixed(1))}k`;
   const text = abs >= 100 ? n.toFixed(1) : abs >= 10 ? n.toFixed(2) : n.toFixed(3);
@@ -117,10 +119,21 @@ export function formatValue(value: unknown, type: ValueType, options: FormatOpti
   return truncate(String(value), maxText);
 }
 
-/** The longest text formatNumberShort prints for a number under a trillion: "-99999.9", "-999.99M". */
+/** The longest text formatNumberShort prints for a number under a quadrillion (10^15): "-99999.9", "-999.99M", "-999.99T". */
 export const NUMBER_SHORT_CHARS = 8;
 
+/**
+ * What a point's coordinate keeps: "-999.9", any position on a screen. A point's reserve is these
+ * with ", " between them ("-999.9, -999.9"), and only a coordinate past ±999.9 widens the slot.
+ */
+export const COORDINATE_CHARS = 6;
+
+const AXES: Partial<Record<ValueType, number>> = { point: 2, size: 2, anchor: 2, point3d: 3, point4d: 4 };
+
 const digits = (n: number) => String(Math.max(0, Math.trunc(n))).length;
+
+/** A loop's count ("×12") and a watched copy's index ("#3") keep two digits, so loops of up to 99 hold still as they grow. */
+const countDigits = (n: number) => Math.max(2, digits(n));
 
 /** The longest text formatValue's default branch prints for a value of this kind (json and any ports). */
 function kindReserve(value: unknown, maxText: number): number {
@@ -155,6 +168,16 @@ function plainReserve(value: unknown, type: ValueType, maxText: number, enumOpti
     }
     case "color":
       return 9;
+    case "point":
+    case "size":
+    case "anchor":
+    case "point3d":
+    case "point4d": {
+      const numbers = value === undefined || value === null || (Array.isArray(value) && value.length <= 4 && value.every((n) => typeof n === "number"));
+      if (!numbers) return kindReserve(value, maxText);
+      const axes = AXES[type]!;
+      return axes * COORDINATE_CHARS + (axes - 1) * 2;
+    }
     case "text":
       return typeof value === "string" || value === undefined || value === null ? maxText + 2 : maxText;
     case "layer":
@@ -170,27 +193,29 @@ function plainReserve(value: unknown, type: ValueType, maxText: number, enumOpti
 /**
  * The most characters formatValue(value, type, options) prints while the value changes: the longest
  * text of the port's type (8 for numbers, "Off", "#RRGGBBAA", quotes around maxText characters, the
- * longest enum option), or of the value's own kind for json and any. A loop reserves its "×N" summary
- * around one item, or the watched copy's "#k " prefix, for its current length (an empty loop as a
- * one-digit loop). Output rows keep this much room for their live values (liveReserve), so a node
- * keeps its width while the prototype runs. 0 when nothing prints (no value, or a pulse).
+ * longest enum option, a point's coordinates to ±999.9), or of the value's own kind for json and any.
+ * A loop reserves its "×N" summary around one item, or the watched copy's "#k " prefix, with at
+ * least two digits for the count. Output rows keep this much room for their live values
+ * (liveReserve), so a node keeps its width while the prototype runs. 0 when nothing prints (no
+ * value, or a pulse).
  */
 export function formatValueReserve(value: unknown, type: ValueType, options: FormatOptions = {}): number {
   if (value === undefined || type === "pulse") return 0;
   const maxText = options.maxText ?? 14;
   if (!isLoopValue(value)) return plainReserve(value, type, maxText, options.enumOptions);
   const n = value.items.length;
-  if (options.copy !== undefined && options.copy !== null && n) {
-    const picked = pickCopy(value, options.copy);
-    return 1 + digits(n - 1) + 1 + plainReserve(picked.value, type, 8, options.enumOptions);
-  }
-  return 1 + digits(n) + 1 + plainReserve(value.items[0], type, 8, options.enumOptions) + 1;
+  // A watched copy of an empty loop prints "×0", which the copy's own reserve covers, so emptying the loop keeps the width.
+  if (options.copy !== undefined && options.copy !== null) return 1 + countDigits(n - 1) + 1 + plainReserve(n ? pickCopy(value, options.copy).value : undefined, type, 8, options.enumOptions);
+  return 1 + countDigits(n) + 1 + plainReserve(value.items[0], type, 8, options.enumOptions) + 1;
 }
 
-/** Decimal places in a step: 0.05 → 2, 1e-7 → 7, 5 → 0 (at most 6, like the knob fields). */
-function stepDecimals(step: number): number {
-  if (!Number.isFinite(step) || Number.isInteger(step)) return 0;
-  const [mantissa = "", exponent] = Math.abs(step).toString().split("e");
+/**
+ * Decimal places in a number's shortest form, at most 6: 0.05 → 2, 1e-7 → 6, 5 → 0. The same count
+ * as decimalsOf in the editor's scrubMath.ts, which the Slider snaps with.
+ */
+function decimalsOf(n: number): number {
+  if (!Number.isFinite(n) || Number.isInteger(n)) return 0;
+  const [mantissa = "", exponent] = Math.abs(n).toString().split("e");
   const dot = mantissa.indexOf(".");
   return Math.min(6, Math.max(0, (dot === -1 ? 0 : mantissa.length - dot - 1) - Number(exponent ?? 0)));
 }
@@ -200,17 +225,21 @@ export const KNOB_RESERVE_MAX_CHARS = 7;
 
 /**
  * The characters a knob chip keeps for its value text (formatKnobValue) while the knob is tuned in
- * the Knobs tab: a number knob's slider reaches its longer end at the slider's step precision (its
- * step, or a hundredth of the range), unit included; a boolean flips between "on" and "off". At
- * most KNOB_RESERVE_MAX_CHARS. Values picked from a menu or typed (enums, points, text, numbers
- * without a range) reserve nothing past their text.
+ * the Knobs tab: a number knob's slider reaches its longer end at the precision it snaps to (its
+ * step's or its min's decimals, whichever has more, with a hundredth of the range standing in for a
+ * missing step), unit included; a boolean flips between "on" and "off". At most
+ * KNOB_RESERVE_MAX_CHARS. Values picked from a menu or typed (enums, points, text, numbers without
+ * a range) reserve nothing past their text.
  */
 export function knobValueReserve(knob: Pick<Knob, "type" | "min" | "max" | "step" | "unit">): number {
   if (knob.type === "boolean") return 3;
   if (knob.type !== "number") return 0;
   const { min, max } = knob;
   if (min === undefined || max === undefined || !(max > min)) return 0;
-  const decimals = stepDecimals(knob.step !== undefined && knob.step > 0 ? knob.step : (max - min) / 100);
+  const step = knob.step !== undefined && knob.step > 0 ? knob.step : (max - min) / 100;
+  // The Slider snaps from min to at most 6 places, which drops a step's float noise ((0.4 - 0.1) / 100 → 0.003).
+  const rounded = Number(step.toFixed(6));
+  const decimals = Math.max(rounded > 0 ? decimalsOf(rounded) : 6, decimalsOf(min));
   const end = (n: number) => (n < 0 ? 1 : 0) + digits(Math.abs(n));
   // formatKnobValue's unit suffix (" pt", "°") is what it adds to a bare "0".
   const unit = formatKnobValue(knob, 0).length - 1;

@@ -17,7 +17,7 @@ import { deepEqual } from "./equal.ts";
 import { knobValueReserve } from "./format.ts";
 import { createPlacementIndex, PLACEMENT_PADDING, type Rect } from "./geometry.ts";
 import { INPUTS_NODE_ID, layerNodeId, OUTPUTS_NODE_ID, readNodePositions } from "./graphNodes.ts";
-import { estimateNodeSize, type NodeTextMeasurer } from "./nodeSize.ts";
+import { estimateNodeSize, liveRooms, type NodeTextMeasurer } from "./nodeSize.ts";
 import {
   cableId,
   commentNodeId,
@@ -314,6 +314,11 @@ export function deriveGraph(options: DeriveGraphOptions): GraphModel {
   const patchData = new Map<Id, PatchNodeData>();
   const estimateOptions = { ...(options.measure ? { measure: options.measure } : {}), layerName: (id: Id) => findLayer(component.layers, id)?.layer.name };
   const sizeOf = (id: string, data: Parameters<typeof estimateNodeSize>[0]) => options.sizes?.get(id) ?? estimateNodeSize(data, estimateOptions);
+  /** Outputs in rows long enough to reach the maximum width get their liveRoom, which caps the live value's reserve. */
+  const capLiveValues = (data: Parameters<typeof liveRooms>[0]) =>
+    liveRooms(data, estimateOptions).forEach((room, i) => {
+      if (room !== undefined) data.outputs[i]!.liveRoom = room;
+    });
 
   const previousCache = options.previous ? patchCaches.get(options.previous) : undefined;
   const loopFree = looped.size === 0 && !wholeLoopOutputs;
@@ -418,6 +423,7 @@ export function deriveGraph(options: DeriveGraphOptions): GraphModel {
     }
     if (node.component !== undefined) data.componentTarget = node.component;
     if (layerRef !== undefined) data.layerRef = layerRef;
+    capLiveValues(data);
     const flowNode: PatchGraphNode = { id, type: "patch", position: { x: node.ui.x, y: node.ui.y }, data };
     nodes.push(flowNode);
     patchData.set(id, data);
@@ -533,6 +539,7 @@ export function deriveGraph(options: DeriveGraphOptions): GraphModel {
       outputs,
       issues: (issuesByItem.get(layerId) ?? EMPTY_ISSUES).filter((i) => i.port === undefined || boundKeys.has(i.port)),
     };
+    capLiveValues(data);
     const size = sizeOf(nodeId, data);
     const drivers = [...(driversOf.get(layerId) ?? [])].map(rectOfPatch).filter((r): r is Rect => !!r);
     const readers = [...(readersOf.get(layerId) ?? [])].map(rectOfPatch).filter((r): r is Rect => !!r);
@@ -553,6 +560,7 @@ export function deriveGraph(options: DeriveGraphOptions): GraphModel {
   if (inPorts.length) {
     const outputs = register(inPorts.map((p) => toPortModel(interfacePortToPort(p, "input"), "out", `$in.${p.key}`, consumed.has(`$in.${p.key}`))));
     const data = { kind: "interface" as const, componentId, side: "inputs" as const, title: "Component Inputs", inputs: [], outputs };
+    capLiveValues(data);
     const size = sizeOf(INPUTS_NODE_ID, data);
     const flowNode: InterfaceGraphNode = { id: INPUTS_NODE_ID, type: "interface", position: place(INPUTS_NODE_ID, size, { x: bbox.minX - size.width - 120, y: bbox.minY }), data };
     nodes.push(flowNode);

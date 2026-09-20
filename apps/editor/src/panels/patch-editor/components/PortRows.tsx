@@ -158,12 +158,14 @@ const OutputPort = memo(function OutputPort({ nodeId, port }: { nodeId: string; 
     ui.getState().set({ armed: armed ? null : { nodeId, handleId: port.handleId, address: port.address, type: port.type, label } });
   };
   const text = liveText(port, live, copy);
-  // The slot keeps the width of the longest value it can print, so the node holds still while the value changes.
+  // The slot keeps the width of the longest value it can print, so the node holds still while the
+  // value changes, but no more than a long row has room for, so its labels stay whole.
   const reserve = text ? liveReserve(port, live, copy) : 0;
+  const slot = reserve ? ({ "--sb-pe-live-reserve": `${reserve}ch`, ...(port.liveRoom !== undefined ? { "--sb-pe-live-room": `${port.liveRoom}px` } : {}) } as CSSProperties) : undefined;
   return (
     <div className="sb-pe-port sb-pe-port--out" data-connected={port.connected || undefined} data-live={truthy || undefined} data-armed={armed || undefined} onClick={onClick} onContextMenu={onContextMenu} {...hover}>
       {text && (
-        <span className="sb-pe-port__live sb-tabular" style={reserve ? ({ "--sb-pe-live-reserve": `${reserve}ch` } as CSSProperties) : undefined}>
+        <span className="sb-pe-port__live sb-tabular" style={slot}>
           {text}
         </span>
       )}
