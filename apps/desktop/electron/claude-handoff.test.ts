@@ -1,0 +1,297 @@
+import { execFileSync, spawnSync } from "node:child_process";
+import { existsSync } from "node:fs";
+import { chmod, mkdir, mkdtemp, readFile, readdir, realpath, rm, stat, utimes, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { createCodeFolderStore, type CodeFolderKey } from "./assistant/codeFolder.ts";
+import { buildHandoffScript, HANDOFF_NOT_MAC, HANDOFF_PROMPT_LIMIT, handoffFolder, handoffMcpConfig, openInClaudeCode, shellQuote, type HandoffFolder, type HandoffOptions } from "./claude-handoff.ts";
+
+const posix = process.platform !== "win32";
+const zsh = posix && existsSync("/bin/zsh");
+
+/** Text a shell would read as something else if it weren't quoted exactly. */
+const TRICKY = [
+  "it's Tyler's app",
+  'say "hi" and "bye"',
+  "$HOME, ${PATH} and $(id)",
+  "`id` in backticks",
+  "back\\slash, \\n and \\\\",
+  "line one\nline two\n",
+  "!! and !event, which history would expand",
+  "-p --dangerously-skip-permissions, a leading dash",
+  "'",
+  "''",
+  "a'''b",
+  "é, 😀 and “curly quotes”",
+  "%s %n %d, like a printf format",
+  "* ? [a] ~ {a,b}, like globs",
+  "; rm -rf ~ && echo | > <",
+];
+
+const SERVER = { command: "/Applications/Sonobe.app/Contents/Resources/cli/sonobe", args: ["mcp"] };
+
+let dir: string;
+beforeEach(async () => {
+  dir = await mkdtemp(path.join(tmpdir(), "sonobe-handoff-"));
+});
+afterEach(async () => {
+  await rm(dir, { recursive: true, force: true });
+});
+
+describe("shellQuote", () => {
+  it.skipIf(!posix)("quotes text that sh and zsh read back byte for byte", () => {
+    const shells: [string, string[]][] = [["/bin/sh", ["-c"]], ...(zsh ? ([["/bin/zsh", ["-f", "-c"]], ["/bin/zsh", ["-f", "-o", "rcquotes", "-c"]]] as [string, string[]][]) : [])];
+    for (const value of [...TRICKY, TRICKY.join("\n"), ""]) {
+      for (const [shell, args] of shells) {
+        expect(execFileSync(shell, [...args, `printf %s ${shellQuote(value)}`], { encoding: "utf8" }), `${shell} ${JSON.stringify(value)}`).toBe(value);
+      }
+    }
+  });
+
+  it("refuses NUL, which no argument can hold", () => {
+    expect(() => shellQuote("a\0b")).toThrow("NUL");
+    expect(() => buildHandoffScript({ folder: "/Users/me/app", prompt: "a\0b", mcpConfig: "{}" })).toThrow("NUL");
+    expect(() => buildHandoffScript({ folder: "/Users/me/a\0pp", prompt: "a screen", mcpConfig: "{}" })).toThrow("NUL");
+  });
+});
+
+describe("buildHandoffScript", () => {
+  it("runs a login zsh that deletes itself, and passes the prompt after --", () => {
+    const script = buildHandoffScript({ folder: "/Users/me/code/placemark", display: "~/code/placemark", prompt: "Design a checkout", mcpConfig: handoffMcpConfig(SERVER) });
+    expect(script.split("\n")).toEqual([
+      "#!/bin/zsh -l",
+      "# Sonobe's Open in Claude Code. It deletes itself as it starts.",
+      'rm -f -- "$0"',
+      "cd -- '/Users/me/code/placemark' || { print -r -- 'Sonobe couldn'\\''t open ~/code/placemark. Check that it'\\''s still there, then try Open in Claude Code again.'; exit 1; }",
+      "if ! command -v claude >/dev/null 2>&1; then",
+      "  print -r -- 'Claude Code isn'\\''t installed, or isn'\\''t on your PATH. Install it from https://claude.com/claude-code, then try Open in Claude Code again.'",
+      "  exit 1",
+      "fi",
+      "if claude mcp get sonobe >/dev/null 2>&1; then exec claude -- 'Design a checkout'; fi",
+      `exec claude --mcp-config '{"mcpServers":{"sonobe":{"command":"/Applications/Sonobe.app/Contents/Resources/cli/sonobe","args":["mcp"]}}}' -- 'Design a checkout'`,
+      "",
+    ]);
+  });
+
+  it("adds Sonobe's relay for the session as an mcpServers entry", () => {
+    expect(JSON.parse(handoffMcpConfig(SERVER))).toEqual({ mcpServers: { sonobe: SERVER } });
+    expect(JSON.parse(handoffMcpConfig({ command: "/Users/me/My \"Apps\"/it's/sonobe", args: ["mcp"] })).mcpServers.sonobe.command).toBe("/Users/me/My \"Apps\"/it's/sonobe");
+  });
+
+  it.skipIf(!zsh)("writes a script zsh parses, whatever the prompt and folder", async () => {
+    const file = path.join(dir, "check.command");
+    for (const prompt of [...TRICKY, TRICKY.join("\n")]) {
+      await writeFile(file, buildHandoffScript({ folder: `/Users/me/My App's "Folder" $x`, prompt, mcpConfig: handoffMcpConfig({ command: "/Users/me/it's/sonobe", args: ["mcp"] }) }));
+      const parsed = spawnSync("/bin/zsh", ["-n", file], { encoding: "utf8" });
+      expect(parsed.status, `${JSON.stringify(prompt)}: ${parsed.stderr}`).toBe(0);
+    }
+  });
+
+  describe.skipIf(!zsh)("run for real, with a stand-in claude", () => {
+    let folder: string;
+    let bin: string;
+    let out: string;
+    const prompt = `Redesign “Card”:\n${TRICKY.join("\n")}`;
+    const mcpConfig = handoffMcpConfig({ command: "/Users/me/it's \"here\"/sonobe", args: ["mcp"] });
+
+    beforeEach(async () => {
+      folder = path.join(dir, `My App's "Folder" $HOME`);
+      bin = path.join(dir, "bin");
+      out = path.join(dir, "claude-args");
+      await mkdir(folder, { recursive: true });
+      await mkdir(bin);
+      // Records its working folder and every argument, NUL-separated; `claude mcp get` exits with $MCP_EXIT.
+      await writeFile(path.join(bin, "claude"), `#!/bin/sh\nif [ "$1" = mcp ]; then exit "$MCP_EXIT"; fi\nprintf '%s\\0' "$(pwd -P)" "$@" > "$OUT"\n`);
+      await chmod(path.join(bin, "claude"), 0o755);
+    });
+
+    /** Run the script as Terminal would, minus the person's shell profile (-f instead of -l). */
+    const run = async (options: { mcpExit?: number; withClaude?: boolean; into?: string } = {}) => {
+      const script = path.join(dir, "run.command");
+      await writeFile(script, buildHandoffScript({ folder: options.into ?? folder, display: "~/code/placemark", prompt, mcpConfig }), { mode: 0o700 });
+      const result = spawnSync("/bin/zsh", ["-f", script], {
+        encoding: "utf8",
+        env: { PATH: `${options.withClaude === false ? "" : `${bin}:`}/usr/bin:/bin`, OUT: out, MCP_EXIT: String(options.mcpExit ?? 1), HOME: dir },
+      });
+      const args = existsSync(out) ? (await readFile(out, "utf8")).split("\0").slice(0, -1) : null;
+      await rm(out, { force: true });
+      return { ...result, args, scriptLeft: existsSync(script) };
+    };
+
+    it("passes Sonobe's relay with --mcp-config when the folder has no sonobe server, and the exact prompt", async () => {
+      const result = await run({ mcpExit: 1 });
+      expect(result.status, result.stderr).toBe(0);
+      expect(result.args).toEqual([await realpath(folder), "--mcp-config", mcpConfig, "--", prompt]);
+      expect(result.scriptLeft).toBe(false);
+    });
+
+    it("uses the folder's own sonobe server when there is one", async () => {
+      const result = await run({ mcpExit: 0 });
+      expect(result.args).toEqual([await realpath(folder), "--", prompt]);
+    });
+
+    it("says how to install Claude Code when it isn't on the PATH", async () => {
+      const result = await run({ withClaude: false });
+      expect(result.status).toBe(1);
+      expect(result.stdout).toBe("Claude Code isn't installed, or isn't on your PATH. Install it from https://claude.com/claude-code, then try Open in Claude Code again.\n");
+      expect(result.args).toBeNull();
+    });
+
+    it("stops when the folder is gone", async () => {
+      const result = await run({ into: path.join(dir, "gone") });
+      expect(result.status).toBe(1);
+      expect(result.stdout).toBe("Sonobe couldn't open ~/code/placemark. Check that it's still there, then try Open in Claude Code again.\n");
+      expect(result.args).toBeNull();
+      expect(result.scriptLeft).toBe(false);
+    });
+  });
+});
+
+describe("openInClaudeCode", () => {
+  const PROMPT = "In my open Sonobe prototype “Placemark”, design a new screen for “Main”: a checkout";
+
+  function options(over: Partial<HandoffOptions> = {}) {
+    const opened: string[] = [];
+    const asked: number[] = [];
+    const handoff: HandoffOptions = {
+      platform: "darwin",
+      dir: path.join(dir, "userData", "handoff"),
+      folder: async (): Promise<HandoffFolder> => {
+        asked.push(1);
+        return { root: "/Users/me/code/placemark", path: "~/code/placemark" };
+      },
+      server: () => SERVER,
+      openPath: async (file) => {
+        opened.push(file);
+        return "";
+      },
+      name: () => "a1b2c3",
+      ...over,
+    };
+    return { handoff, opened, asked };
+  }
+
+  it("writes a 0700 script in userData/handoff and opens it in Terminal", async () => {
+    const { handoff, opened } = options();
+    expect(await openInClaudeCode({ prompt: PROMPT }, handoff)).toEqual({ ok: true, folder: "~/code/placemark" });
+    const file = path.join(dir, "userData", "handoff", "a1b2c3.command");
+    expect(opened).toEqual([file]);
+    expect((await stat(file)).mode & 0o777).toBe(0o700);
+    expect(await readFile(file, "utf8")).toBe(buildHandoffScript({ folder: "/Users/me/code/placemark", display: "~/code/placemark", prompt: PROMPT, mcpConfig: handoffMcpConfig(SERVER) }));
+  });
+
+  it("works on macOS only, and says what to do instead", async () => {
+    for (const platform of ["win32", "linux"]) {
+      const { handoff, opened, asked } = options({ platform });
+      expect(await openInClaudeCode({ prompt: PROMPT }, handoff)).toEqual({ ok: false, error: HANDOFF_NOT_MAC });
+      expect(HANDOFF_NOT_MAC).toBe("Open in Claude Code works on macOS for now. Copy the prompt instead, and paste it into Claude Code in your app's folder.");
+      expect([opened, asked]).toEqual([[], []]);
+    }
+  });
+
+  it("refuses prompts it can't pass on, before asking for a folder", async () => {
+    const { handoff, opened, asked } = options();
+    const refused = async (request: unknown) => {
+      const result = await openInClaudeCode(request, handoff);
+      expect(result.ok).toBe(false);
+      return result.ok ? "" : result.error;
+    };
+    for (const request of [undefined, null, "a screen", {}, { prompt: 7 }, { prompt: "  \n" }]) expect(await refused(request)).toBe("There's no request to hand to Claude Code yet. Describe the screen in the box first.");
+    expect(await refused({ prompt: `a ${"x".repeat(HANDOFF_PROMPT_LIMIT)}` })).toBe("The prompt is over 20,000 characters, too long to hand to Claude Code. Shorten the request, or copy the prompt instead.");
+    expect(await refused({ prompt: "a\0screen" })).toBe("The prompt has a NUL character, which Terminal can't pass on. Remove it and try again.");
+    // `claude -- update` would update Claude Code instead of starting a session.
+    expect(await refused({ prompt: "update" })).toBe("A one-word prompt could be one of Claude Code's own commands, like “update”. Describe the screen in a few words.");
+    expect([opened, asked.length]).toEqual([[], 0]);
+    expect(existsSync(handoff.dir)).toBe(false);
+    expect(await openInClaudeCode({ prompt: `a ${"x".repeat(HANDOFF_PROMPT_LIMIT - 2)}` }, handoff)).toMatchObject({ ok: true });
+  });
+
+  it("passes on a cancelled dialog and a folder that can't be linked, writing nothing", async () => {
+    const cancelled = options({ folder: async () => ({ cancelled: true }) });
+    expect(await openInClaudeCode({ prompt: PROMPT }, cancelled.handoff)).toEqual({ ok: false, cancelled: true });
+    const refused = options({ folder: async () => ({ error: "Pick your app's folder, not your whole home folder." }) });
+    expect(await openInClaudeCode({ prompt: PROMPT }, refused.handoff)).toEqual({ ok: false, error: "Pick your app's folder, not your whole home folder." });
+    expect([cancelled.opened, refused.opened]).toEqual([[], []]);
+    expect(existsSync(cancelled.handoff.dir)).toBe(false);
+  });
+
+  it("removes the script when Terminal doesn't open it", async () => {
+    const failing = options({ openPath: async () => "No application knows how to open this file." });
+    expect(await openInClaudeCode({ prompt: PROMPT }, failing.handoff)).toEqual({ ok: false, error: "Terminal didn't open: No application knows how to open this file." });
+    const throwing = options({ openPath: async () => Promise.reject(new Error("The file couldn't be opened.")) });
+    expect(await openInClaudeCode({ prompt: PROMPT }, throwing.handoff)).toEqual({ ok: false, error: "Terminal didn't open: The file couldn't be opened." });
+    expect(await readdir(failing.handoff.dir)).toEqual([]);
+  });
+
+  it("says so when the script can't be written", async () => {
+    await writeFile(path.join(dir, "userData"), "a file where the folder goes");
+    const { handoff, opened } = options();
+    const result = await openInClaudeCode({ prompt: PROMPT }, handoff);
+    expect(result).toMatchObject({ ok: false, error: expect.stringMatching(/^Sonobe couldn't write the script for Terminal: /) });
+    expect(opened).toEqual([]);
+  });
+
+  it("clears out day-old scripts Terminal never ran", async () => {
+    const handoffDir = path.join(dir, "userData", "handoff");
+    await mkdir(handoffDir, { recursive: true });
+    const now = Date.now();
+    for (const [name, age] of [["old.command", 25], ["recent.command", 1], ["notes.txt", 48]] as const) {
+      await writeFile(path.join(handoffDir, name), "");
+      const when = new Date(now - age * 60 * 60 * 1000);
+      await utimes(path.join(handoffDir, name), when, when);
+    }
+    const { handoff } = options({ now: () => now });
+    await openInClaudeCode({ prompt: PROMPT }, handoff);
+    expect((await readdir(handoffDir)).sort()).toEqual(["a1b2c3.command", "notes.txt", "recent.command"]);
+  });
+});
+
+describe("handoffFolder", () => {
+  let home: string;
+  let app: string;
+  const key: CodeFolderKey = { projectPath: null, windowId: "1" };
+
+  beforeEach(async () => {
+    home = path.join(dir, "home");
+    app = path.join(home, "code", "placemark");
+    await mkdir(app, { recursive: true });
+  });
+
+  const store = () => createCodeFolderStore({ file: path.join(dir, "userData", "assistant-code-folders.json"), home });
+  const picker = (...answers: (string | null)[]) => {
+    const calls: number[] = [];
+    return { calls, pick: async () => (calls.push(1), answers.shift() ?? null) };
+  };
+
+  it("links the folder the person picks in the dialog when none is linked", async () => {
+    const folders = store();
+    const dialog = picker(app);
+    expect(await handoffFolder(folders, key, dialog.pick)).toEqual({ root: await realpath(app), path: "~/code/placemark" });
+    expect(dialog.calls).toHaveLength(1);
+    expect(await folders.status(key)).toEqual({ linked: { name: "placemark", path: "~/code/placemark", persisted: false }, missing: false });
+
+    // Linked now, so the next hand-off opens there without asking.
+    expect(await handoffFolder(folders, key, dialog.pick)).toEqual({ root: await realpath(app), path: "~/code/placemark" });
+    expect(dialog.calls).toHaveLength(1);
+  });
+
+  it("passes on a cancel, and refuses what Match my code… refuses", async () => {
+    const folders = store();
+    expect(await handoffFolder(folders, key, picker(null).pick)).toEqual({ cancelled: true });
+    expect(await handoffFolder(folders, key, picker(home).pick)).toEqual({ error: "Pick your app's folder, not your whole home folder." });
+    expect(await handoffFolder(folders, key, picker("/").pick)).toEqual({ error: "Pick your app's folder, not your whole home folder." });
+    expect(await folders.status(key)).toEqual({ linked: null, missing: false });
+  });
+
+  it("asks again when the linked folder is missing", async () => {
+    const folders = store();
+    await folders.link(key, app);
+    await rm(app, { recursive: true });
+    const moved = path.join(home, "code", "placemark-2");
+    await mkdir(moved);
+    const dialog = picker(moved);
+    expect(await handoffFolder(folders, key, dialog.pick)).toEqual({ root: await realpath(moved), path: "~/code/placemark-2" });
+    expect(dialog.calls).toHaveLength(1);
+  });
+});

@@ -1,12 +1,13 @@
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
 import path from "node:path";
 import type { BetaTextBlockParam } from "@anthropic-ai/sdk/resources/beta/messages/messages";
 import type { SonobeHost } from "@sonobe/mcp";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { buildHandoffScript, handoffMcpConfig, type HandoffOptions } from "../claude-handoff.ts";
 import { createSecretStore, createTestCipher, type SecretStore } from "../secrets.ts";
 import { CODE_TOOL_NAMES, CodeFolderError, type CodeFolderKey, type CodeFolderStore } from "./codeFolder.ts";
-import { ASSISTANT_IPC, ASSISTANT_KEY_SECRET, type AssistantCodeFolderLinkResult, type AssistantCodeFolderStatus, type AssistantEvent, type AssistantStatus } from "./protocol.ts";
+import { ASSISTANT_IPC, ASSISTANT_KEY_SECRET, type AssistantCodeFolderLinkResult, type AssistantCodeFolderStatus, type AssistantEvent, type AssistantStatus, type HandoffResult } from "./protocol.ts";
 import { keyHint, registerAssistant, type AssistantIpcEvent, type AssistantIpcMain, type AssistantSender, type RegisterAssistantOptions } from "./register.ts";
 import { FAKE_TOOLS, fakeBridge, scriptedClient, text, type FakeTurn, type ScriptedClient } from "./testing.ts";
 import type { LocalTools } from "./toolBridge.ts";
@@ -369,5 +370,68 @@ describe("designing from the canvas", () => {
     await invoke(sender, ASSISTANT_IPC.send, { text: "match my app", context: { component: { id: "main", name: "Main", size: [402, 874] }, screens: [] } });
     expect(api.requests[0]!.tools!.map((t) => ("name" in t ? t.name : ""))).toEqual([...FAKE_TOOLS.map((t) => t.name), ...CODE_TOOL_NAMES]);
     expect(firstMessage(api)[0]).toContain('"codeFolder":"placemark"');
+  });
+});
+
+describe("Open in Claude Code", () => {
+  const PROJECT = "/Users/test/Documents/Placemark.sonobe";
+  const documentFor = async (id: number) => (id === 1 ? { docId: "placemark", projectPath: PROJECT } : { docId: "untitled", projectPath: null });
+  const SERVER = { command: "/Applications/Sonobe.app/Contents/Resources/cli/sonobe", args: ["mcp"] };
+  const PROMPT = "In my open Sonobe prototype “Placemark”, design a new screen for “Main”: a checkout";
+
+  function handoff() {
+    const opened: string[] = [];
+    const options: Omit<HandoffOptions, "folder"> = {
+      platform: "darwin",
+      dir: path.join(dir, "handoff"),
+      server: () => SERVER,
+      openPath: async (file) => {
+        opened.push(file);
+        return "";
+      },
+    };
+    return { options, opened };
+  }
+
+  it("needs no API key: it links a folder from the dialog, then opens Terminal there with only the prompt", async () => {
+    const folders = fakeFolderStore();
+    const picker = fakePicker("/Users/test/code/placemark");
+    const { options, opened } = handoff();
+    const { invoke, api } = setup([], { register: { codeFolders: folders, documentFor, pickFolder: picker.pickFolder, createCodeTools: fakeCodeTools, handoff: options } });
+    const window = fakeSender(1);
+
+    expect(await invoke<HandoffResult>(window, ASSISTANT_IPC.openInClaudeCode, { prompt: PROMPT, folder: "/etc", mcpConfig: "{}" })).toEqual({ ok: true, folder: "/Users/test/code/placemark" });
+    expect(picker.opened).toEqual([{ sender: 1, defaultPath: path.dirname(PROJECT) }]);
+    expect(await folders.status({ projectPath: PROJECT, windowId: "1" })).toMatchObject({ linked: { name: "placemark" } });
+    expect(opened).toHaveLength(1);
+    expect(path.dirname(opened[0]!)).toBe(path.join(dir, "handoff"));
+    expect(await readFile(opened[0]!, "utf8")).toBe(buildHandoffScript({ folder: "/Users/test/code/placemark", display: "/Users/test/code/placemark", prompt: PROMPT, mcpConfig: handoffMcpConfig(SERVER) }));
+    expect(api.keys).toEqual([]);
+
+    // The folder is linked now, so the next hand-off doesn't ask.
+    expect(await invoke<HandoffResult>(window, ASSISTANT_IPC.openInClaudeCode, { prompt: PROMPT })).toMatchObject({ ok: true });
+    expect(picker.opened).toHaveLength(1);
+    expect(opened).toHaveLength(2);
+  });
+
+  it("passes a cancelled dialog and a refused folder back, and teaches when it can't hand off", async () => {
+    const folders = fakeFolderStore();
+    const { options, opened } = handoff();
+    const { invoke } = setup([], { register: { codeFolders: folders, documentFor, pickFolder: fakePicker(null, homedir()).pickFolder, createCodeTools: fakeCodeTools, handoff: options } });
+    expect(await invoke(fakeSender(2), ASSISTANT_IPC.openInClaudeCode, { prompt: PROMPT })).toEqual({ ok: false, cancelled: true });
+    expect(await invoke(fakeSender(2), ASSISTANT_IPC.openInClaudeCode, { prompt: PROMPT })).toEqual({ ok: false, error: "Pick your app's folder, not your whole home folder." });
+    expect(await invoke(fakeSender(2), ASSISTANT_IPC.openInClaudeCode, "a checkout")).toEqual({ ok: false, error: "There's no request to hand to Claude Code yet. Describe the screen in the box first." });
+    expect(opened).toEqual([]);
+
+    expect(await setup([], { register: { handoff: options } }).invoke(fakeSender(1), ASSISTANT_IPC.openInClaudeCode, { prompt: PROMPT })).toEqual({ ok: false, error: "This version of Sonobe can't link a code folder yet." });
+    expect(await setup().invoke(fakeSender(1), ASSISTANT_IPC.openInClaudeCode, { prompt: PROMPT })).toEqual({ ok: false, error: "This version of Sonobe can't open Claude Code. Copy the prompt instead, and paste it into Claude Code in your app's folder." });
+  });
+
+  it("refuses untrusted senders before any dialog or file", async () => {
+    const picker = fakePicker("/Users/test/code/placemark");
+    const { options, opened } = handoff();
+    const { invoke } = setup([], { trusted: (event) => event.sender.id === 1, register: { codeFolders: fakeFolderStore(), documentFor, pickFolder: picker.pickFolder, createCodeTools: fakeCodeTools, handoff: options } });
+    await expect(invoke(fakeSender(2), ASSISTANT_IPC.openInClaudeCode, { prompt: PROMPT })).rejects.toThrow("Untrusted sender");
+    expect([picker.opened, opened]).toEqual([[], []]);
   });
 });

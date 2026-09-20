@@ -101,7 +101,8 @@ In the desktop app, the Assistant can design a screen right where you noticed it
 - **It matches what's there.** Claude gets the colors, fonts, sizes and corner radii your screens already use. Choose **Match my code…** and pick your app's folder, and it can read your theme and token files too. It reads only text files there, skips hidden files, `.env` files and keys, and can't change anything. What it reads goes to Anthropic's API.
 - **Where it lands.** A new screen goes in front, at the top left of the artboard, so it covers the screen behind it in the viewer too. **Send to Back** moves it behind.
 - **Replacing asks first.** When Claude wants to replace a screen you didn't pick, or one you changed since Claude made it, Sonobe asks you and names the layers that would go. **Undo** in the box, or ⌘Z, steps back.
-- **No API key?** **Copy for Claude Code** copies your request, with your screens' styles, for Claude Code in your app's folder. In the browser editor, copy the prompt for Claude, then paste the HTML it writes into File → Import Design.
+- **No API key?** On a Mac, **Open in Claude Code** opens Terminal in your app's folder and starts your own Claude Code with your request and your screens' styles, signed in with your Claude plan. You drive that session, and it draws the screen on this canvas as it writes. The first time, pick your app's folder: it's the one **Match my code…** links. **Copy for Claude Code** copies the same request instead. In the browser editor, copy the prompt for Claude, then paste the HTML it writes into File → Import Design.
+- **Claude Code and Claude Desktop draw here too.** When a connected session designs a screen, you watch the page take shape over the artboard as it writes, one part at a time (`preview_design`), and it becomes real layers in one undo step when Claude imports it.
 
 ## What you get
 

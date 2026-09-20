@@ -1137,6 +1137,13 @@ function main(): void {
         });
         return result.canceled ? null : (result.filePaths[0] ?? null);
       },
+      handoff: {
+        platform: process.platform,
+        dir: path.join(app.getPath("userData"), "handoff"),
+        // Connect Claude's relay: the CLI that ships with the app, else `sonobe` on PATH.
+        server: () => ({ command: mcpStatus().cliPath ?? "sonobe", args: ["mcp"] }),
+        openPath: (file) => shell.openPath(file),
+      },
     });
 
     appHost = createAppHost({

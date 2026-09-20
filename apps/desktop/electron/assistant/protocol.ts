@@ -6,7 +6,8 @@
  *
  * Policy: the Assistant uses only the person's own Anthropic API key, kept in the OS keychain through
  * sonobeHost.secrets under ASSISTANT_KEY_SECRET. It never offers claude.ai login and never reads Claude
- * credentials; people with a Claude plan connect Claude Desktop or Claude Code over MCP instead.
+ * credentials; people with a Claude plan connect Claude Desktop or Claude Code over MCP instead, or
+ * choose Open in Claude Code, which starts their own `claude` in Terminal (../claude-handoff.ts).
  */
 
 /** Secret name for the person's Anthropic API key (sonobeHost.secrets). */
@@ -33,6 +34,8 @@ export const ASSISTANT_IPC = {
   linkCodeFolder: "sonobe:assistant:link-code-folder",
   /** invoke → AssistantCodeFolderStatus */
   unlinkCodeFolder: "sonobe:assistant:unlink-code-folder",
+  /** invoke(HandoffRequest) → HandoffResult (writes a one-time script and opens it in Terminal; needs no API key) */
+  openInClaudeCode: "sonobe:assistant:open-claude-code",
 } as const;
 
 export type AssistantModelId = "claude-sonnet-5" | "claude-opus-5" | "claude-haiku-4-5-20251001";
@@ -151,6 +154,14 @@ export interface AssistantCodeFolderLinkResult {
   error?: string;
 }
 
+/** Open in Claude Code: the prompt the person's own `claude` starts with, at most 20,000 characters. */
+export interface HandoffRequest {
+  prompt: string;
+}
+
+/** `folder` shows home as "~". `cancelled`: the person closed the folder dialog. `error`: why nothing opened (teaching copy). */
+export type HandoffResult = { ok: true; folder: string } | { ok: false; cancelled?: boolean; error?: string };
+
 export type AssistantErrorCode =
   | "no_key"
   | "invalid_key"
@@ -244,4 +255,6 @@ export interface SonobeAssistantApi {
   /** Show the native folder dialog and link the folder the person picks. */
   linkCodeFolder(): Promise<AssistantCodeFolderLinkResult>;
   unlinkCodeFolder(): Promise<AssistantCodeFolderStatus>;
+  /** Open Terminal in the linked code folder (asking for one first when none is linked), running the person's own `claude` with the prompt. macOS only. */
+  openInClaudeCode(request: HandoffRequest): Promise<HandoffResult>;
 }

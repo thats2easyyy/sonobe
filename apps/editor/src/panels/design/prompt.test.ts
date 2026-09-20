@@ -7,22 +7,22 @@ const newScreen: AssistantCanvasContext = { component: { id: "main", name: "Main
 const redesign: AssistantCanvasContext = { ...newScreen, target: { id: "focus_card", name: "Focus Card", type: "group", frame: [24, 164, 354, 200], screen: { id: "home", name: "Home" } } };
 
 describe("claudePrompt", () => {
-  it("asks Claude Code for a new screen through import_design", () => {
+  it("asks Claude Code for a new screen drawn on the canvas as it writes, then imported from the preview", () => {
     expect(claudePrompt({ docName: "Placemark", text: " a checkout with Apple Pay ", context: newScreen, browser: false })).toBe(
       `In my open Sonobe prototype “Placemark”, design a new screen for “Main”: a checkout with Apple Pay
 
 Match what's already there, and my app's theme files in this folder if it has them. The styles the prototype uses now (get_outline with detail "styles" shows them again):
 ${styles}
 
-Write it as one static HTML page 402 points wide, with data-name on everything I'll wire and the top safe area empty, and import it with import_design (component "main"). Then iterate by importing again with replace.`,
+Write it as one static HTML page 402 points wide, with data-name on everything I'll wire and the top safe area empty, and show it on this canvas as you write: preview_design (component "main") with the page's head and first section as html, then append one part at a time, then import_design with "preview": true. Then iterate the same way with replace.`,
     );
   });
 
-  it("asks Claude Code to redesign the picked layer with replace", () => {
+  it("asks Claude Code to redesign the picked layer over it on the canvas, with replace", () => {
     expect(claudePrompt({ docName: "Placemark", text: "make it darker", context: redesign, browser: false })).toBe(
       `In my open Sonobe prototype “Placemark”, redesign “Focus Card” (layer focus_card, 354 × 200 in “Main”): make it darker
 
-Keep its layer names so its wiring survives: write it as one static HTML page whose body is just that layer at 354 × 200, and import it with import_design using replace "focus_card" and component "main". The styles the prototype uses now:
+Keep its layer names so its wiring survives: write it as one static HTML page whose body is just that layer at 354 × 200, and show it on this canvas as you write: preview_design (replace "focus_card", component "main") with the page's head and first section as html, then append one part at a time, then import_design with "preview": true. The styles the prototype uses now:
 ${styles}`,
     );
   });
@@ -46,7 +46,7 @@ ${styles}
 
 Write it as one complete HTML file 354 points wide, with data-name on everything I'll wire and the top safe area empty, that I can paste into Sonobe's File → Import Design → Paste HTML.`,
     );
-    for (const text of [prompt, redesignPrompt]) expect(text).not.toMatch(/import_design|get_outline|get_screenshot|replace "/);
+    for (const text of [prompt, redesignPrompt]) expect(text).not.toMatch(/import_design|preview_design|get_outline|get_screenshot|replace "/);
   });
 
   it("leaves out the styles when the context has none", () => {
@@ -56,7 +56,7 @@ Write it as one complete HTML file 354 points wide, with data-name on everything
 
 Match what's already there, and my app's theme files in this folder if it has them.
 
-Write it as one static HTML page 402 points wide, with data-name on everything I'll wire and the top safe area empty, and import it with import_design (component "main"). Then iterate by importing again with replace.`,
+Write it as one static HTML page 402 points wide, with data-name on everything I'll wire and the top safe area empty, and show it on this canvas as you write: preview_design (component "main") with the page's head and first section as html, then append one part at a time, then import_design with "preview": true. Then iterate the same way with replace.`,
     );
     const { styles: _s, ...bareRedesign } = redesign;
     expect(claudePrompt({ docName: "Placemark", text: "make it darker", context: bareRedesign, browser: true })).not.toContain("styles");
