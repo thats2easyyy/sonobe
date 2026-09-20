@@ -17,14 +17,14 @@ A **knob** is a named value in the Inspector's **Knobs** tab (⌘5). Any patch i
 A **preset** is a full set of knob values. A project can have several, like "Shipped app" and "Proposal", and one of them runs. Switching presets changes the prototype live: the card you're dragging stays under your finger and picks up the new values mid-gesture.
 
 ```
- Knobs tab                          the graph
- ┌─────────────────────────────┐
- │ (● Proposal) (Shipped app 🔒) │    Pop Animation
- │ THROW                         │    ├ Bounciness  ◉ Bounce 8
- │   Commit Distance ──●── 95 pt │    └ Speed       12
- │ ≠ Bounce  ─────●───────── 8   │
- └─────────────────────────────┘    Greater Than
-                                     └ Value 2     ◉ Commit Distance 95
+ Knobs tab                               the graph
+ ┌────────────────────────────────────┐
+ │ (● Proposal) (Shipped app, locked) │  Pop Animation
+ │ THROW                              │  ├ Bounciness  ◉ Bounce 8
+ │   Commit Distance ───●───── 95 pt  │  └ Speed       12
+ │ ≠ Bounce  ─────●───────────── 8    │
+ └────────────────────────────────────┘  Greater Than
+                                         └ Value 2     ◉ Commit Distance 95
 ```
 
 Knobs are saved in `knobs.json` next to `project.json`, so they go into git with the rest of the prototype, and tuning a value changes one line.
@@ -95,7 +95,7 @@ Ask Claude to "build the tunable numbers as knobs, with a locked Shipped app pre
 ## Try it
 
 1. Start from the Photo Zoom demo Sonobe opens with. Make a knob from Zoom Spring's **Bounciness** and tap the photo while you drag the slider.
-2. Add a preset, lock it, and make the proposal bouncier. Flip with ⌘' while the photo zooms.
+2. Add a preset, lock the one you started from, and make the new one bouncier. Flip with ⌘' while the photo zooms.
 3. Make a knob from Photo Scale's **End**, then use it for Heart Scale's **End** too with **Use Knob ▸**. Watch both chips change as you tune.
 4. Copy the differences and paste them somewhere.
 
