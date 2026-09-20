@@ -766,7 +766,8 @@ describe("assistant agent: the replace guard", () => {
       { name: "Home", replace: "home", html: "<main>Home</main>", docId: "photo_zoom" },
     ]);
     expect(ofType(h.events, "tool_finished")[0]).toMatchObject({ status: "done", changedDocument: true, imported: { screenId: "home", replaced: "home" } });
-    expect(stub.seen.remembered).toEqual([["photo_zoom", "main", "home", DOC]]);
+    // With the document the replace was checked against, so the guard keeps the screen it replaced.
+    expect(stub.seen.remembered).toEqual([["photo_zoom", "main", "home", DOC, DOC]]);
   });
 
   it("returns a failing dry run without asking", async () => {
@@ -806,7 +807,7 @@ describe("assistant agent: the replace guard", () => {
       { bridge, agent: { documentFor: shownDocument(), readDocument: async () => DOC, replaceGuard: stub.kit } },
     );
     await h.agent.run("w1", { text: "a profile screen" }, h.emit);
-    expect(stub.seen.remembered).toEqual([["photo_zoom", "main", "profile", DOC]]);
+    expect(stub.seen.remembered).toEqual([["photo_zoom", "main", "profile", DOC, undefined]]);
     expect(stub.seen.refreshed).toEqual([["photo_zoom", DOC, { components: ["main"], layers: ["title"] }]]);
     expect(stub.seen.created).toBe(1);
     h.agent.reset("w1");
@@ -848,8 +849,8 @@ describe("assistant agent: the replace guard over real documents", () => {
     });
     bridge.tools = async () => TOOLS;
     const h = harness(turns, { bridge, agent: { documentFor: shownDocument(), readDocument: async () => ref.doc } });
-    const send = (message: string) =>
-      h.agent.run("w1", { text: message }, (e) => {
+    const send = (message: string, context?: AssistantCanvasContext) =>
+      h.agent.run("w1", { text: message, ...(context ? { context } : {}) }, (e) => {
         h.emit(e);
         if (e.type === "confirm_required") queueMicrotask(() => h.agent.confirm("w1", e.confirmationId, false));
       });
@@ -891,6 +892,23 @@ describe("assistant agent: the replace guard over real documents", () => {
     await send("try a darker version");
     expect(ofType(h.events, "confirm_required")).toEqual([]);
     expect(h.bridge.calls.filter((c) => c.name === "import_design").map((c) => c.args.dryRun)).toEqual([undefined, undefined, undefined]);
+  });
+
+  it("goes by the pick again after the person undoes the Assistant's replace of their own screen", async () => {
+    // The person made Checkout, picks it and asks for a redesign twice, undoing the first.
+    const ref = { doc: CHECKOUT };
+    const picked: AssistantCanvasContext = { ...CONTEXT, target: { id: "checkout", name: "Checkout", type: "group", frame: [0, 0, 402, 874] } };
+    const { h, send } = real([importTurn("i1", "checkout"), done(), importTurn("i2", "checkout"), done(), importTurn("i3", "checkout"), done("I kept yours.")], ref, () => {
+      ref.doc = edit(ref.doc, [{ op: "updateLayer", id: "pay", props: { text: "Pay today" } }]).doc;
+    });
+    await send("redesign it", picked);
+    ref.doc = CHECKOUT;
+    await send("another version", picked);
+    expect(ofType(h.events, "confirm_required")).toEqual([]);
+    // Undone again, and not picked: it asks as for any screen of theirs, not about changes they didn't make.
+    ref.doc = CHECKOUT;
+    await send("rebuild the checkout");
+    expect(ofType(h.events, "confirm_required")).toEqual([expect.objectContaining({ title: "Replace “Checkout”?", message: expect.stringMatching(/^Claude wants to rebuild “Checkout”, which you didn't ask it to change\./) })]);
   });
 });
 

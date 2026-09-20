@@ -481,14 +481,15 @@ export function createAssistantAgent(options: AssistantAgentOptions): AssistantA
      * later edits inside one aren't the person's. Only a write whose result says what it changed is
      * taken in: a dry run's layers may hold the person's edits, and a call that names no layers
      * (begin_work, undo, save_document) mustn't pass the person's edits off as the Assistant's. A
-     * record that goes stale that way just asks before the next replace.
+     * record that goes stale that way just asks before the next replace. `before`: the document a
+     * replace was checked against, so the guard keeps the person's own screen it replaced.
      */
-    const track = async (info: AssistantToolInfo, input: Record<string, unknown>, result: ToolCallResult, imported: AssistantImported | undefined): Promise<void> => {
+    const track = async (info: AssistantToolInfo, input: Record<string, unknown>, result: ToolCallResult, imported: AssistantImported | undefined, before: SonobeDocument | undefined): Promise<void> => {
       if (!options.readDocument) return;
       try {
         if (imported) {
           const doc = await options.readDocument(imported.docId);
-          guard().remember(imported.docId, typeof input.component === "string" ? input.component : doc.project.root, imported.screenId, doc);
+          guard().remember(imported.docId, typeof input.component === "string" ? input.component : doc.project.root, imported.screenId, doc, imported.replaced !== null ? before : undefined);
           return;
         }
         const data = result.structuredContent;
@@ -552,11 +553,13 @@ export function createAssistantAgent(options: AssistantAgentOptions): AssistantA
 
       // Replacing a layer the person didn't pick, or a screen they changed since the Assistant made it,
       // asks first, naming what would go (from a dry run). The guard needs to know the document.
+      let before: SonobeDocument | undefined;
       if (use.name === DESIGN_TOOL && typeof callInput.replace === "string" && callInput.dryRun !== true && options.readDocument && typeof callInput.docId === "string") {
         const docId = callInput.docId;
         let check: ReplaceCheck | null;
         try {
           const doc = await options.readDocument(docId);
+          before = doc;
           const component = typeof callInput.component === "string" ? callInput.component : doc.project.root;
           check = guard().check({ docId, component, replace: callInput.replace, picked: request.context?.target?.id ?? null }, doc);
         } catch (err) {
@@ -616,7 +619,7 @@ export function createAssistantAgent(options: AssistantAgentOptions): AssistantA
         meta && !meta.dryRun && meta.screenId
           ? { docId: meta.docId, screenId: meta.screenId, txnId: meta.txnId, name: meta.screenName, replaced: meta.replaced, dropped: meta.dropped.slice(0, 20).map((d) => d.name), droppedCount: meta.droppedCount, lostConnections: meta.lostConnections }
           : undefined;
-      await track(info, callInput, result, imported);
+      await track(info, callInput, result, imported, before);
       return finished(use, info, result, imported);
     };
 

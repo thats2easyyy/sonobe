@@ -205,6 +205,38 @@ describe("createReplaceGuard", () => {
     expect(guard.check(ask("home", "home_card"), doc)?.reason).toBe("untargeted");
   });
 
+  it("goes by what the person picked again when their Undo takes their own screen back from the Assistant's replace", () => {
+    // Checkout is the person's own here. Claude redesigns it (a replace keeps the screen's id).
+    const personal = fixture();
+    const redesigned = edit(personal, [
+      { op: "updateLayer", id: "title", props: { text: "Pay" } },
+      { op: "updateLayer", id: "pay", props: { color: "#000000FF" } },
+    ]);
+    const picked = createReplaceGuard();
+    expect(picked.check(ask("checkout", "checkout"), personal)).toBeNull();
+    picked.remember(DOC, "main", "checkout", redesigned, personal);
+    // Undo: Claude didn't make this screen, and the person didn't change it.
+    expect(picked.check(ask("checkout", "checkout"), personal)).toBeNull();
+    expect(picked.check(ask("card", "checkout"), personal)).toBeNull();
+    expect(picked.check(ask("checkout"), personal)).toEqual({ reason: "untargeted", target: { id: "checkout", name: "Checkout" }, changed: [], changedCount: 0 });
+    // Nor after a change of their own to it.
+    const tweaked = edit(personal, [{ op: "updateLayer", id: "divider", props: { color: "#FF3B30FF" } }]);
+    expect(picked.check(ask("checkout", "checkout"), tweaked)).toBeNull();
+    // Claude's version is still the Assistant's, and a change to it the person's.
+    expect(picked.check(ask("checkout"), redesigned)).toBeNull();
+    expect(picked.check(ask("checkout", "checkout"), edit(redesigned, [{ op: "updateLayer", id: "divider", props: { color: "#FF3B30FF" } }]))).toMatchObject({ reason: "hand_edited", changed: ["Divider"], changedCount: 1 });
+    // A later replace keeps the person's screen: undoing both takes it back to theirs.
+    picked.remember(DOC, "main", "checkout", edit(redesigned, [{ op: "updateLayer", id: "price", props: { text: "$38" } }]), redesigned);
+    expect(picked.check(ask("checkout", "checkout"), personal)).toBeNull();
+    expect(picked.check(ask("checkout"), redesigned)).toBeNull();
+
+    // A replace of a screen they didn't pick, approved and undone, asks the same question again.
+    const unpicked = createReplaceGuard();
+    expect(unpicked.check(ask("checkout"), personal)?.reason).toBe("untargeted");
+    unpicked.remember(DOC, "main", "checkout", redesigned, personal);
+    expect(unpicked.check(ask("checkout"), personal)?.reason).toBe("untargeted");
+  });
+
   it("asks before replacing a layer the person didn't pick and the Assistant didn't make", () => {
     const { doc, guard } = remembered();
     expect(guard.check(ask("home"), doc)).toEqual({ reason: "untargeted", target: { id: "home", name: "Home" }, changed: [], changedCount: 0 });
