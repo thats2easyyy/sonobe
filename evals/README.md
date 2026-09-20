@@ -37,7 +37,7 @@ It exits 0 when every run passed, 1 when some failed, and 2 on a usage error. Th
 
 ### What a run does
 
-1. Copies the case's start project into a temporary folder and writes an `mcp.json` that starts `sonobe mcp --headless` on it.
+1. Copies the case's start project, with its asset files, into a temporary folder and writes an `mcp.json` that starts `sonobe mcp --headless` on it.
 2. Runs `claude -p` with the prompt on stdin, `--output-format stream-json`, `--mcp-config` with `--strict-mcp-config`, `--tools ""` (no files, shell, web or Skill tool: only Sonobe's tools), `--allowedTools mcp__sonobe`, `--disable-slash-commands` (no skills), `--no-session-persistence`, and the turn budget. The runner stops it at the time budget.
 3. Opens the finished project with the headless host and runs the case's checks.
 4. Saves the transcript and the finished project under `<results>/<case>/run-<n>/`, so you can open what Claude built in the app.
@@ -74,7 +74,7 @@ The seed cases:
 | Field | Meaning |
 |---|---|
 | `title`, `about`, `tags` | What the case is and why it exists. |
-| `start` | `{ "project": "start" }`, a folder in the case; or `{ "example": "01-tap-to-grow", "patches": false }`, an example's layers built from its recipe (`patches` defaults to true: the whole example). Either can take `ops` to apply first, like unwiring an input for a debugging case. |
+| `start` | `{ "project": "start" }`, a folder in the case; or `{ "example": "01-tap-to-grow", "patches": false }`, an example's layers built from its recipe, after its design import when it starts from one (`patches` defaults to true: the whole example). Either can take `ops` to apply first, like unwiring an input for a debugging case. |
 | `test` | `{ "example": "<folder>" }` adds that example's layer expectations to the case's own `test.json`. |
 | `checks` | Facts about the finished document: `unchanged`; `interface` (a component's ports: `without` keys, exact `outputs` or `inputs` names); `keepsIds` (no removed id came back as `<id>_2`); `presets` (knob presets by name, `locked` when given). |
 | `answer` | `{ "mentions": [["tap"], ["grow", "bigger"]] }`: the final reply has a word from each group. For explaining tasks. |

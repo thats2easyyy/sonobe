@@ -1,4 +1,4 @@
-import { mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -16,6 +16,7 @@ import {
   renderPrompt,
   selectCaseIds,
   targetLayer,
+  writeStartProject,
 } from "./cases.ts";
 
 const registry = createPatchRegistry();
@@ -235,8 +236,8 @@ describe("selectCaseIds", () => {
 });
 
 describe("start documents", () => {
-  it("builds an example's layers without its patches, notes or example link", () => {
-    const doc = exampleLayersDocument("01-tap-to-grow", registry);
+  it("builds an example's layers without its patches, notes or example link", async () => {
+    const doc = await exampleLayersDocument("01-tap-to-grow", registry);
     const main = doc.components[doc.project.root]!;
     expect(Object.keys(main.patches)).toEqual([]);
     expect(findLayer(main.layers, "card")).toBeDefined();
@@ -250,6 +251,64 @@ describe("start documents", () => {
     const doc = await buildStartDocument(c, registry);
     const spring = doc.components[doc.project.root]!.patches.sheet_spring!;
     expect(spring.inputs.gestureVelocity).toBeUndefined();
+  });
+
+  it("imports the design first for an example that starts from one", async () => {
+    const c = loadCase(
+      writeCase("placemark-layers", {
+        "case.json": { title: "X", start: { example: "16-placemark-deck", patches: false } },
+        "prompt.md": "Hi",
+        "test.json": TEST,
+      }),
+    );
+    const doc = await buildStartDocument(c, registry);
+    const main = doc.components[doc.project.root]!;
+    // The import's four cards and its Scroll, then the recipe's own layers on the imported screen.
+    for (const id of ["discover", "card", "card_4", "app_status_bar", "app_home_indicator"])
+      expect(findLayer(main.layers, id), id).toBeDefined();
+    expect(Object.values(main.patches).map((p) => p.type)).toEqual(["scroll"]);
+    expect(doc.assets.malasadas).toBeDefined();
+    expect(applyOps(doc, exampleSolutionOps("16-placemark-deck"), { registry }).ok).toBe(true);
+  });
+});
+
+describe("writeStartProject", () => {
+  const filesIn = (dir: string) => readdirSync(path.join(dir, "assets")).sort();
+
+  it("copies the asset files of the start project or example next to the document", async () => {
+    const withPhoto = applyOps(
+      createEmptyDocument({ name: "Photo" }),
+      [
+        {
+          op: "addAsset",
+          asset: { id: "dot", kind: "image", name: "Dot", file: "dot.svg", mime: "image/svg+xml" },
+        },
+      ],
+      { registry },
+    );
+    if (!withPhoto.ok) throw new Error(withPhoto.errors[0]!.message);
+    await saveProjectToDisk(path.join(root, "photo-project"), withPhoto.doc);
+    writeFileSync(path.join(root, "photo-project", "assets", "dot.svg"), "<svg/>");
+    const starts = [
+      { project: "../photo-project" },
+      { example: "16-placemark-deck" },
+      { example: "16-placemark-deck", patches: false },
+    ];
+    for (const [i, start] of starts.entries()) {
+      const c = loadCase(
+        writeCase(`assets-${i}`, {
+          "case.json": { title: "X", start },
+          "prompt.md": "Hi",
+          "test.json": TEST,
+        }),
+      );
+      const doc = await buildStartDocument(c, registry);
+      const out = path.join(root, `assets-${i}-out`, "Prototype.sonobe");
+      await writeStartProject(c, doc, out);
+      const records = Object.values(doc.assets).map((a) => a.file);
+      expect(records.length, JSON.stringify(start)).toBeGreaterThan(0);
+      expect(filesIn(out), JSON.stringify(start)).toEqual(["assets.json", ...records].sort());
+    }
   });
 });
 

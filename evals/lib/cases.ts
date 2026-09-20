@@ -6,6 +6,7 @@
  */
 
 import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { copyFile, mkdir } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
@@ -16,8 +17,9 @@ import {
   type Registry,
   type SonobeDocument,
 } from "@sonobe/core";
-import { loadProjectFromDisk } from "@sonobe/core/node";
+import { loadProjectFromDisk, saveProjectToDisk } from "@sonobe/core/node";
 import { EXAMPLES_DIR } from "../../examples/lib/disk.ts";
+import { importRecipeDesign } from "../../examples/lib/recipe.ts";
 import {
   ExampleTestFormatError,
   parseExampleTest,
@@ -33,7 +35,7 @@ export const CASES_DIR = path.join(EVALS_DIR, "cases");
 /** Where a case's project starts. */
 export type StartSpec =
   | { kind: "project"; dir: string; ops: Op[] }
-  /** An example folder; with `patches: false`, only its layers (built from its recipe). */
+  /** An example folder; with `patches: false`, only its layers (built from its recipe, after its design import). */
   | { kind: "example"; example: string; patches: boolean; ops: Op[] };
 
 /** A fact about the finished document that doesn't depend on Claude's own ids or wiring. */
@@ -416,16 +418,26 @@ function apply(
   );
 }
 
-/** An example's layers without its patches, built from its recipe (no notes, no example link). */
-export function exampleLayersDocument(example: string, registry: Registry): SonobeDocument {
+/**
+ * An example's layers without its patches, built from its recipe (no notes, no example link). An
+ * example that starts from a design import gets the import first, as the recipe's ops find it: its
+ * layers, its assets, and the patches the import makes itself (a Scroll for content that scrolls).
+ */
+export async function exampleLayersDocument(
+  example: string,
+  registry: Registry,
+): Promise<SonobeDocument> {
   const recipe = RECIPES.find((r) => r.folder === example);
   if (!recipe) throw new Error(`examples/${example} has no recipe.`);
   const empty = createEmptyDocument({ name: recipe.name, device: DEFAULT_DEVICE });
-  const ops: Op[] = [
-    { op: "setProject", changes: { background: recipe.background } },
-    ...recipe.ops().filter((op) => op.op === "addLayer"),
-  ];
-  return apply(empty, ops, registry, `Building the layers of ${example}`);
+  const setup: Op[] = [{ op: "setProject", changes: { background: recipe.background } }];
+  const { doc } = await importRecipeDesign(
+    recipe,
+    apply(empty, setup, registry, `Setting up ${example}`),
+    registry,
+  );
+  const layers = recipe.ops().filter((op) => op.op === "addLayer");
+  return apply(doc, layers, registry, `Building the layers of ${example}`);
 }
 
 /** The ops an example's recipe adds on top of its layers: the reference answer for a patches-removed start. */
@@ -444,8 +456,32 @@ export async function buildStartDocument(
   let doc: SonobeDocument;
   if (start.kind === "project") doc = await loadProjectFromDisk(start.dir);
   else if (start.patches) doc = await loadProjectFromDisk(path.join(EXAMPLES_DIR, start.example));
-  else doc = exampleLayersDocument(start.example, registry);
+  else doc = await exampleLayersDocument(start.example, registry);
   return apply(doc, start.ops, registry, `${evalCase.id}: start.ops`);
+}
+
+/**
+ * Save a case's start document as a project folder, with the asset files its records name copied
+ * from the start project or the example (saveProjectToDisk writes the document and assets.json
+ * only). Asset files are named by their bytes' hash, so an example's layers built from its design
+ * import find theirs in the example's folder.
+ */
+export async function writeStartProject(
+  evalCase: EvalCase,
+  doc: SonobeDocument,
+  dir: string,
+): Promise<void> {
+  await saveProjectToDisk(dir, doc);
+  const { start } = evalCase;
+  const from = path.join(
+    start.kind === "project" ? start.dir : path.join(EXAMPLES_DIR, start.example),
+    "assets",
+  );
+  const files = new Set(Object.values(doc.assets).map((asset) => asset.file));
+  if (files.size) await mkdir(path.join(dir, "assets"), { recursive: true });
+  for (const file of files)
+    if (existsSync(path.join(from, file)))
+      await copyFile(path.join(from, file), path.join(dir, "assets", file));
 }
 
 /** The prompt with {{url}} filled in. */
