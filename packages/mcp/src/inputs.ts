@@ -94,7 +94,8 @@ export function unknownFields(schema: z.ZodType, value: unknown, at = ""): Unkno
       const known = Object.keys(shape);
       const out: UnknownField[] = [];
       for (const [key, v] of Object.entries(value)) {
-        const field = shape[key];
+        // Own keys only: "constructor" or "toString" would otherwise find Object.prototype's.
+        const field = Object.hasOwn(shape, key) ? shape[key] : undefined;
         if (field) out.push(...unknownFields(field, v, keyPath(at, key)));
         else if (!open && !(at === "" && RESERVED.has(key))) {
           const records = known.filter((k) => recordLike(shape[k]!));
