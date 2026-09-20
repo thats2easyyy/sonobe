@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { formatAddress, parseAddress } from "./address.ts";
+import { deriveGraph, layerNodeId, nodeShapeFromData, type LayerNodeData, type PatchNodeData } from "./graph/index.ts";
 import {
   deriveKnobId,
   effectiveKnobLiteral,
@@ -17,7 +18,7 @@ import {
 } from "./knobs.ts";
 import { applyOps } from "./ops/index.ts";
 import { createRegistry } from "./registry.ts";
-import { emptyDoc, MOCK_PATCH_SPECS, mustApply, port } from "./testing/fixtures.ts";
+import { emptyDoc, MOCK_PATCH_SPECS, mockRegistry, mustApply, port } from "./testing/fixtures.ts";
 import type { KnobSet, Op, PatchSpec, SonobeDocument } from "./types.ts";
 
 const set: KnobSet = {
@@ -136,6 +137,23 @@ describe("knob addresses", () => {
       { knob: "gap", component: "main", target: "pop.number" },
       { knob: "gap", component: "main", target: "@card.cornerRadius" },
     ]);
+  });
+
+  it("draw as chips with the running value on graph nodes, never as cables", () => {
+    const doc = mustApply(emptyDoc(), [
+      { op: "addKnob", knob: { id: "gap", name: "Gap", type: "number", value: 8, unit: "pt" } },
+      { op: "addPatch", patch: { id: "pop", type: "popAnimation", inputs: { number: { link: "$knob.gap" } } } },
+      { op: "addLayer", layer: { id: "card", type: "rectangle", props: { cornerRadius: { link: "$knob.gap" } } } },
+    ]).doc;
+    const model = deriveGraph({ doc, componentId: "main", registry: mockRegistry });
+    const input = (m: typeof model, node: string, key: string) => (m.nodes.find((n) => n.id === node)!.data as PatchNodeData | LayerNodeData).inputs.find((p) => p.key === key)!;
+    expect(input(model, "pop", "number")).toMatchObject({ connected: true, link: "$knob.gap", knob: { id: "gap", name: "Gap", valueText: "8 pt" } });
+    expect(input(model, layerNodeId("card"), "cornerRadius").knob).toEqual({ id: "gap", name: "Gap", valueText: "8 pt" });
+    expect(model.edges).toEqual([]);
+    expect(nodeShapeFromData(model.nodes.find((n) => n.id === "pop")!.data as PatchNodeData).rows[0]!.in!.value).toEqual({ kind: "knob", name: "Gap", text: "8 pt" });
+    // A tune changes no patch, so the cached node must still pick up the new value.
+    const tuned = mustApply(doc, [{ op: "setKnobValue", id: "gap", value: 12 }]).doc;
+    expect(input(deriveGraph({ doc: tuned, componentId: "main", registry: mockRegistry, previous: model }), "pop", "number").knob?.valueText).toBe("12 pt");
   });
 });
 
