@@ -248,6 +248,18 @@ describe("Knobs tab", () => {
     expect(document.activeElement).toBe(rowOf("Card Radius").querySelector('input[aria-label="Card Radius value"]'));
   });
 
+  it("keeps a value typed past the range when → points further out", () => {
+    const s = mount(deck([{ op: "setKnobValue", id: "radius", value: 60 }]));
+    const slider = rowOf("Card Radius").querySelector<HTMLElement>('[role="slider"]')!;
+    expect(slider.getAttribute("aria-valuetext")).toBe("60 pt, above the range");
+    act(() => slider.focus());
+    act(() => {
+      slider.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true, cancelable: true }));
+    });
+    expect(knobs(s).knobs.find((k) => k.id === "radius")!.values).toEqual({ proposal: 60, shipped: 12 });
+    expect(labels(s)).toEqual([]);
+  });
+
   it("keeps option descriptions when Edit Knob changes a choice knob", () => {
     const s = mount(
       build([

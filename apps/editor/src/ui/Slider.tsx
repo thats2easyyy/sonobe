@@ -46,7 +46,8 @@ function snap(value: number, min: number, step: number): number {
 /**
  * A horizontal slider over a soft range: drag the track or the thumb, or use the keyboard (arrows
  * step, ⇧ ×10, ⌥ ×0.1, Page Up and Down ×10, Home and End). A value outside the range pins the thumb
- * to that end with an overflow caret instead of moving it; the slider itself never produces one.
+ * to that end with an overflow caret instead of moving it, and keys step back in from that end or,
+ * pointing further out, leave it be; the slider itself never produces one.
  * Ticks mark other values, such as the same knob in other presets.
  */
 export function Slider({ value, min, max, step, onChange, onCommit, ticks = [], "aria-label": ariaLabel, valueText, arrowKeys = "both", disabled = false, className }: SliderProps) {
@@ -117,7 +118,8 @@ export function Slider({ value, min, max, step, onChange, onCommit, ticks = [], 
     let next: number | undefined;
     const up = event.key === "ArrowRight" || (arrowKeys === "both" && event.key === "ArrowUp");
     const down = event.key === "ArrowLeft" || (arrowKeys === "both" && event.key === "ArrowDown");
-    // Keys step from inside the range: a value past an end starts from that end.
+    // Keys step from inside the range: a value past an end steps back in from that end, and a key
+    // pointing further out leaves it where it is.
     const from = clamp(current, { min: lo, max: hi });
     if (up) next = from + unit;
     else if (down) next = from - unit;
@@ -128,7 +130,8 @@ export function Slider({ value, min, max, step, onChange, onCommit, ticks = [], 
     else return;
     event.preventDefault();
     event.stopPropagation();
-    const snapped = clamp(roundTo(next, Math.max(decimalsOf(unit), decimalsOf(from), decimalsOf(lo))), { min: lo, max: hi });
+    const outward = (current > hi && next > from) || (current < lo && next < from);
+    const snapped = outward ? current : clamp(roundTo(next, Math.max(decimalsOf(unit), decimalsOf(from), decimalsOf(lo))), { min: lo, max: hi });
     if (snapped !== current) latest.current.onChange(snapped);
     latest.current.onCommit?.(snapped);
   };
