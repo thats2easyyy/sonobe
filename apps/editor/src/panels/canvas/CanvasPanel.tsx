@@ -357,8 +357,8 @@ export function CanvasPanel({ session: sessionProp, sceneSource, onSceneSourceCh
   }, [box.width, box.height, fitKey, fitViewport]);
 
   // The first page of a draft Claude writes, while the viewport is still an automatic fit: fit its frame at a
-  // size you can read. The canvas and the viewer show only the artboard, so that's the frame's part on it, or
-  // the artboard when the frame is off it. That fit stays through the import, until the next resize, and goes
+  // size you can read. The canvas and the viewer show only the artboard, so for a new screen that's the frame's
+  // part on it, or the artboard when the frame is off it. That fit stays through the import, until the next resize, and goes
   // back to the artboard's if nothing was added. A canvas that appears for the draft (a patches-only layout
   // making room) fits it once it has a viewport.
   const hasViewport = viewport !== null;
@@ -372,7 +372,10 @@ export function CanvasPanel({ session: sessionProp, sceneSource, onSceneSourceCh
       seenDraft.current = live.key;
       if (fitMode.current === null) return;
       const drawn = previewFrame(live, { componentId, rootId, artboard: size, bounds: renderBounds, fallbackReplace: null, request: state.request });
-      const frame = drawn && (intersectRects(drawn, artboard) ?? artboard);
+      // A redesign draws over the layer it replaces, wherever that is (a screen that slides in from the side
+      // sits off the artboard until it does), so it fits that. A new screen fits its part on the artboard.
+      const replacing = !!live.fields.replace && renderBounds(live.fields.replace) !== null;
+      const frame = drawn && (replacing ? drawn : (intersectRects(drawn, artboard) ?? artboard));
       const next = frame ? fitViewport(frame) : null;
       if (!frame || !next) return;
       fitMode.current = "draft";

@@ -110,9 +110,10 @@ export function screenOutline(outline: string, screenId: Id, max = OUTLINE_LINES
 type Frame = readonly [x: number, y: number, width: number, height: number];
 
 /**
- * The note for a screen whose frame lies entirely outside its component's artboard: the canvas and viewer
- * draw only the artboard, so nobody would see it. null when any part of it (its corner, when it has no size)
- * is on the artboard.
+ * The note for a screen whose frame lies entirely outside the device screen: the canvas and viewer draw
+ * only the screen, so nobody would see it. null when any part of it (its corner, when it has no size) is on
+ * the screen. Only the prototype's own component clips so; a layer component's instances draw what's
+ * outside its bounds, so callers pass no note there.
  */
 export function offScreenNote(name: string | null, [x, y, width, height]: Frame, [screenWidth, screenHeight]: readonly [number, number]): string | null {
   if (x < screenWidth && y < screenHeight && x + Math.max(width, 1) > 0 && y + Math.max(height, 1) > 0) return null;
@@ -214,7 +215,7 @@ export function registerImportTools(tc: ToolContext): void {
         const replacing = replaced ? `, which replaces “${replaced.name}”` : "";
         // A redesign draws over the layer it replaces; a new screen at its position.
         const artboard = artboardSize(snap.doc, component.id);
-        const away = replaced ? null : offScreenNote(fields.name, [...(fields.position ?? [0, 0]), fields.width ?? artboard[0], fields.height ?? artboard[1]], artboard);
+        const away = replaced || component.id !== snap.doc.project.root ? null : offScreenNote(fields.name, [...(fields.position ?? [0, 0]), fields.width ?? artboard[0], fields.height ?? artboard[1]], artboard);
         const text = shows
           ? `Showing ${fields.name ? `“${fields.name}”` : "the draft"} on the canvas${over} (${kb} KB so far). Add the next part with append, then import it with import_design and "preview": true.`
           : host.kind === "headless"
@@ -322,7 +323,7 @@ export function registerImportTools(tc: ToolContext): void {
     work.throwIfCancelled();
     const s = plan.summary;
     const frame = planFrame(plan);
-    const away = frame && offScreenNote(plan.screenName, frame, artboardSize(current.doc, component.id));
+    const away = frame && component.id === current.doc.project.root ? offScreenNote(plan.screenName, frame, artboardSize(current.doc, component.id)) : null;
     const importNotes = [...(away ? [away] : []), ...plan.notes, ...(captured.notes ?? [])];
     const meta = (screenId: string | null, txnId: string | null): ImportResultMeta => ({
       docId: snap.docId,

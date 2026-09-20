@@ -94,6 +94,12 @@ describe("import_design", () => {
     expect(partly.isError, partly.text).toBe(false);
     expect(partly.text).not.toContain("outside the");
     expect((await client.call("import_design", { capture, name: "Home" })).text).not.toContain("outside the");
+    // A layer component's instances draw what's outside its bounds, so there's nothing to say there.
+    const made = await client.call("apply_ops", { ops: [{ op: "addComponent", component: { id: "card_kit", name: "Card Kit", kind: "layerComponent", size: [370, 300] } }] });
+    expect(made.isError, made.text).toBe(false);
+    const kit = await client.call("import_design", { capture, component: "card_kit", name: "Card", position: [482, 0] });
+    expect(kit.isError, kit.text).toBe(false);
+    expect(kit.text).not.toContain("outside the");
   });
 
   it("teaches when the source is missing, doubled, or not a capture", async () => {

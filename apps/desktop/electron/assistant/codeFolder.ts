@@ -281,17 +281,18 @@ const PEM_PRIVATE_KEY = /-----BEGIN (?:[A-Z0-9]+ )*PRIVATE KEY(?: BLOCK)?-----(?
  * Anthropic, OpenAI (project, service account, admin and legacy), AWS, GitHub (classic and
  * fine-grained), GitLab, Stripe secret and restricted, Slack and Google keys. The ones whose
  * prefix could end a word in CSS or code ("mask-", "desk_") need a word boundary before them. An
- * escape ("\n") or a percent-encoded byte ("%3D") counts as one, though it ends in a letter or digit.
+ * escape ("\n", "\u003d", "\x3d") or a percent-encoded byte ("%3D") counts as one, though it ends in a
+ * letter or digit. The lookbehinds have a fixed longest length, so matching stays linear.
  */
 const KEY_PATTERNS = [
   /sk-ant-[A-Za-z0-9_-]{10,}/g,
-  /(?<=^|[^A-Za-z0-9_-]|\\[A-Za-z0-9]|%[0-9A-Fa-f]{2})sk-(?:proj|svcacct|admin)-[A-Za-z0-9_-]{20,}/g,
+  /(?<=^|[^A-Za-z0-9_-]|\\(?:u[0-9A-Fa-f]{4}|x[0-9A-Fa-f]{2}|[A-Za-z0-9])|%[0-9A-Fa-f]{2})sk-(?:proj|svcacct|admin)-[A-Za-z0-9_-]{20,}/g,
   /sk-[A-Za-z0-9]{20,}/g,
   /AKIA[0-9A-Z]{16}/g,
   /gh[pousr]_[A-Za-z0-9]{20,}/g,
-  /(?<=^|[^A-Za-z0-9_]|\\[A-Za-z0-9]|%[0-9A-Fa-f]{2})github_pat_[A-Za-z0-9_]{22,}/g,
-  /(?<=^|[^A-Za-z0-9_-]|\\[A-Za-z0-9]|%[0-9A-Fa-f]{2})glpat-[A-Za-z0-9_-]{20,}/g,
-  /(?<=^|[^A-Za-z0-9_]|\\[A-Za-z0-9]|%[0-9A-Fa-f]{2})[sr]k_(?:live|test)_[A-Za-z0-9]{16,}/g,
+  /(?<=^|[^A-Za-z0-9_]|\\(?:u[0-9A-Fa-f]{4}|x[0-9A-Fa-f]{2}|[A-Za-z0-9])|%[0-9A-Fa-f]{2})github_pat_[A-Za-z0-9_]{22,}/g,
+  /(?<=^|[^A-Za-z0-9_-]|\\(?:u[0-9A-Fa-f]{4}|x[0-9A-Fa-f]{2}|[A-Za-z0-9])|%[0-9A-Fa-f]{2})glpat-[A-Za-z0-9_-]{20,}/g,
+  /(?<=^|[^A-Za-z0-9_]|\\(?:u[0-9A-Fa-f]{4}|x[0-9A-Fa-f]{2}|[A-Za-z0-9])|%[0-9A-Fa-f]{2})[sr]k_(?:live|test)_[A-Za-z0-9]{16,}/g,
   /xox[abprs]-[A-Za-z0-9-]{10,}/g,
   /AIza[0-9A-Za-z_-]{35}/g,
 ];

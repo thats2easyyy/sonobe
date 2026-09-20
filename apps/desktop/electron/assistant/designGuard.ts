@@ -191,6 +191,20 @@ function changesSince(state: Map<Id, LayerPrint>, root: Id, current: Map<Id, Lay
   return names;
 }
 
+/**
+ * Whether a layer of `rootId`'s subtree is still as the Assistant's `state` left it, and not as the
+ * person's `original` screen had it (`root` is the record's root). A layer the Assistant added isn't
+ * in `original` at all, so it counts too.
+ */
+function assistantLeft(state: Map<Id, LayerPrint>, original: Map<Id, LayerPrint>, root: Id, current: Map<Id, LayerPrint>, rootId: Id): boolean {
+  const made = root === rootId ? state : recordedSubtree(state, rootId);
+  const theirs = root === rootId ? original : recordedSubtree(original, rootId);
+  for (const [id, now] of current) {
+    if (made.get(id)?.content === now.content && theirs.get(id)?.content !== now.content) return true;
+  }
+  return false;
+}
+
 export function createReplaceGuard(): ReplaceGuard {
   let records: ScreenRecord[] = [];
 
@@ -221,15 +235,17 @@ export function createReplaceGuard(): ReplaceGuard {
         // Against the closest version the Assistant left (the newest on a tie): the person's Undo can
         // take the screen back to any of them, and only what they changed after that counts.
         const current = printSubtree(doc, component, replace)!;
-        const since = (state: Map<Id, LayerPrint>) => changesSince(state, record.root, current, replace);
-        const changed = [...record.states]
-          .reverse()
-          .map(since)
-          .reduce((closest, next) => (next.length < closest.length ? next : closest));
+        let closest = record.states.at(-1)!;
+        let changed = changesSince(closest, record.root, current, replace);
+        for (const state of [...record.states].reverse().slice(1)) {
+          const next = changesSince(state, record.root, current, replace);
+          if (next.length < changed.length) [closest, changed] = [state, next];
+        }
         if (!changed.length) return null;
-        // Closer to the person's own screen that the Assistant replaced (their Undo took it back), it's
-        // theirs again: asking goes by what they picked, as for any screen of theirs.
-        if (!record.original || since(record.original).length >= changed.length) {
+        // The person's own screen that the Assistant replaced, back from their Undo (and maybe changed
+        // since): with nothing of the Assistant's version left in it, it's theirs again, and asking goes
+        // by what they picked, as for any screen of theirs.
+        if (!record.original || assistantLeft(closest, record.original, record.root, current, replace)) {
           return { reason: "hand_edited", target, changed: [...new Set(changed)].slice(0, LISTED), changedCount: changed.length };
         }
       }

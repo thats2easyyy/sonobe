@@ -237,6 +237,28 @@ describe("createReplaceGuard", () => {
     expect(unpicked.check(ask("checkout"), personal)?.reason).toBe("untargeted");
   });
 
+  it("still asks when the person deleted part of the Assistant's version of their screen, even though it's closer to theirs by count", () => {
+    const personal = fixture();
+    // Claude redesigns the person's Checkout: a new title, and a Summary section of five rows.
+    const redesigned = edit(personal, [
+      { op: "updateLayer", id: "title", props: { text: "Your order" } },
+      {
+        op: "addLayer",
+        parent: "checkout",
+        layer: { id: "summary", type: "group", name: "Summary", props: { size: [370, 200] }, children: [1, 2, 3, 4, 5].map((n) => ({ id: `row_${n}`, type: "text" as const, name: `Row ${n}`, props: { text: `Row ${n}` } })) },
+      },
+    ]);
+    const guard = createReplaceGuard();
+    guard.remember(DOC, "main", "checkout", redesigned, personal);
+    // They delete Claude's Summary by hand and keep its title: Claude's version is still there.
+    const trimmed = edit(redesigned, [{ op: "removeLayer", id: "summary" }]);
+    expect(guard.check(ask("checkout", "checkout"), trimmed)).toMatchObject({ reason: "hand_edited", changedCount: 6 });
+    // Nested: most of Claude's Summary rows deleted, the rest (and the Summary group) Claude's.
+    const rows = edit(redesigned, [1, 2, 3, 4].map((n) => ({ op: "removeLayer" as const, id: `row_${n}` })));
+    expect(guard.check(ask("summary", "summary"), rows)).toMatchObject({ reason: "hand_edited", target: { id: "summary", name: "Summary" }, changedCount: 4 });
+    expect(guard.check(ask("summary"), rows)?.reason).toBe("hand_edited");
+  });
+
   it("asks before replacing a layer the person didn't pick and the Assistant didn't make", () => {
     const { doc, guard } = remembered();
     expect(guard.check(ask("home"), doc)).toEqual({ reason: "untargeted", target: { id: "home", name: "Home" }, changed: [], changedCount: 0 });

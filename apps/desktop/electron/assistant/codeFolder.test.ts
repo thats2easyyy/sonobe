@@ -517,17 +517,20 @@ describe("code tools", () => {
       'const keys = "sk-proj-AbCdEfGhIjKlMnOpQrStUvWxYz0123\\nsk-proj-ZyXwVuTsRqPoNmLkJiHgFeDcBa9876";',
       'const list = "a\\tsk_live_51HAbCdEfGhIjKlMnOpQrStUv\\ngithub_pat_11ABCDEFG0123456789_abcdefghij\\r\\nglpat-AbCdEfGhIjKlMnOpQrSt";',
       'fetch("https://example.com/login?next=%2Fpay%3Ftoken%3Dsk_live_51HAbCdEfGhIjKlMnOpQrStUv&auth=Bearer%20sk-proj-AbCdEfGhIjKlMnOpQrStUvWxYz0123");',
+      // Gson writes "=" as \u003d, and JS strings can hold \x3d.
+      '{"url":"https://api.example.com/?key\\u003dsk-proj-AbCdEfGhIjKlMnOpQrStUvWxYz0123","alt":"key\\x3dsk_live_51HAbCdEfGhIjKlMnOpQrStUv"}',
       // An escape or a byte before a word isn't one before the key's prefix.
-      '<div className="\\ndesk-admin-panel-component-wrapper %20mask-proj-image-linear-to-bottom" />',
+      '<div className="\\ndesk-admin-panel-component-wrapper %20mask-proj-image-linear-to-bottom \\u0041task_live_51HAbCdEfGhIjKlMnOp" />',
     ];
     await put("src/config.ts", `${lines.join("\n")}\n`);
     const { tools } = await linkedTools();
     expect(text(await tools.call("read_code_file", { path: "src/config.ts" }, scope())).split("\n")).toEqual([
-      "src/config.ts (lines 1–4 of 4)",
+      "src/config.ts (lines 1–5 of 5)",
       'const keys = "[redacted]\\n[redacted]";',
       'const list = "a\\t[redacted]\\n[redacted]\\r\\n[redacted]";',
       'fetch("https://example.com/login?next=%2Fpay%3Ftoken%3D[redacted]&auth=Bearer%20[redacted]");',
-      lines[3],
+      '{"url":"https://api.example.com/?key\\u003d[redacted]","alt":"key\\x3d[redacted]"}',
+      lines[4],
     ]);
   });
 
