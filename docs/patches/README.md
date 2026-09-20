@@ -8,8 +8,8 @@ Every built-in Sonobe patch, grouped the way the patch picker groups them. Each 
 
 | Status | Meaning | Patches |
 |---|---|---:|
-| Supported | Works the same in the desktop app, the web player on desktop and mobile browsers, and headless simulation. | 177 |
-| Web-limited | Works only on some platforms or browsers, or needs a permission, a tap first, a secure page, or special hardware. | 20 |
+| Supported | Works the same in the desktop app, the web player on desktop and mobile browsers, and headless simulation. | 176 |
+| Web-limited | Works only on some platforms or browsers, or needs a permission, a tap first, a secure page, or special hardware. | 21 |
 | Not on the web yet | Loads from files and outputs idle values, but can't run on the web yet. | 2 |
 
 ## Categories
@@ -252,7 +252,7 @@ Device information, sensors, haptics, speech, and hardware.
 | [Haptic](haptic.md) | `haptic` | Plays a short tactile tap or pattern, like a light impact or a success buzz, each time it gets a pulse. | 3 | Web-limited |
 | [Location](location.md) | `location` | Reports where the device is on Earth as latitude and longitude, or a preset city so demos work anywhere. | 3 | Web-limited |
 | [Game Controller](gameController.md) | `gameController` | Reads a game controller's buttons, triggers, D-pad, and thumbsticks, for TV, console, and game prototypes. | 3 | Web-limited |
-| [Interface Orientation](interfaceOrientation.md) | `interfaceOrientation` | Chooses which ways the interface turns when the device rotates, and which orientation it starts in. | 3 | Supported |
+| [Interface Orientation](interfaceOrientation.md) | `interfaceOrientation` | Reports which way the interface would face as the device rotates, from the directions you allow and a starting orientation. | 3 | Web-limited |
 | [Soft Keyboard](softKeyboard.md) | `softKeyboard` | Reports the on-screen keyboard's height and slide progress, so text inputs and buttons can ride above it. | 3 | Web-limited |
 | [Bluetooth LE](bluetoothLe.md) | `bluetoothLe` | Connects to a Bluetooth Low Energy device to read, write, and receive values, for hardware and sensor prototypes. | 3 | Web-limited |
 
