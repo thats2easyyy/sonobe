@@ -297,6 +297,47 @@ describe("re-import edge cases", () => {
     expect(again.summary).toMatchObject({ kept: 4, lostConnections: 0 });
   });
 
+  it("finds images, checkbox marks and text field boxes an earlier import named differently", async () => {
+    const style = { fontFamily: "system-ui", fontSize: 17, fontWeight: 400, color: "#000000FF", lineHeight: 22 };
+    const avatar = { kind: "frame" as const, nameRank: 5, box: [16, 40, 48, 48] as [number, number, number, number], fill: "#FFFFFFFF", border: { widths: [2, 2, 2, 2], colors: ["#FFFFFFFF", "#FFFFFFFF", "#FFFFFFFF", "#FFFFFFFF"] } as CaptureFrame["border"] };
+    const field = (name: string, multiline = false) => ({ kind: "input" as const, name, nameRank: 2, value: "", style, box: [24, 110, 350, multiline ? 60 : 22] as [number, number, number, number], ...(multiline ? { multiline: true } : {}) });
+    const profile = (names: { image: string; field: string; bio: string; mark: string }) =>
+      capture(
+        {
+          name: "Profile",
+          children: [
+            { ...avatar, name: "Avatar", children: [{ kind: "image", name: names.image, image: "img1", fit: "cover", box: [18, 42, 44, 44] }] },
+            { kind: "frame", name: names.field, nameRank: 5, keep: true, box: [16, 100, 370, 44], fill: "#F2F2F7FF", children: [field("Email Input")] },
+            { kind: "frame", name: names.bio, nameRank: 5, keep: true, box: [16, 160, 370, 80], fill: "#F2F2F7FF", children: [field("Bio Box", true)] },
+            { kind: "frame", name: "Agree Checkbox", nameRank: 5, interactive: true, box: [16, 260, 20, 20], fill: "#0075FFFF", radii: [3, 3, 3, 3], children: [{ kind: "image", name: names.mark, image: "img2", fit: "stretch", box: [16, 260, 20, 20] }] },
+          ],
+        },
+        { images: { img1: { url: "https://example.com/avatar.png" }, img2: { url: "https://example.com/check.svg" } } },
+      );
+    const images = new Map<string, ResolvedImage | null>([["img1", { bytes: PNG.bytes, mime: "image/png" }], ["img2", { bytes: PNG.bytes, mime: "image/png" }]]);
+    // How imports before the naming change named them: the image or mark after the frame around it, and a field's box "<name> Input".
+    const first = await imported(profile({ image: "Avatar", field: "Email Input Input", bio: "Bio Box Box", mark: "Agree Checkbox" }), images);
+    expect([first.layer("avatar_2").name, first.layer("email_input_input").name, first.layer("agree_checkbox_2").name]).toEqual(["Avatar", "Email Input Input", "Agree Checkbox"]);
+    const wired = applyOps(first.doc, [
+      { op: "addPatch", patch: { ref: "tap", type: "interaction", name: "Tap Avatar", inputs: { layer: { layer: "avatar_2" } } } },
+      { op: "addPatch", patch: { ref: "fade", type: "transition", name: "Fade", typeParam: "number", inputs: { start: 1, end: 0.5 } } },
+      { op: "connect", from: "$fade.output", to: "@email_input.opacity" },
+      { op: "connect", from: "$fade.output", to: "@bio_box.opacity" },
+      { op: "connect", from: "$fade.output", to: "@agree_checkbox_2.opacity" },
+    ], { registry });
+    expect(wired.errors).toEqual([]);
+
+    const again = await planImport(profile({ image: "Avatar Image", field: "Email Input Group", bio: "Bio Box Group", mark: "Checkmark" }), wired.doc, images, { replace: "profile" });
+    const result = applyOps(wired.doc, again.ops, { registry });
+    expect(result.errors).toEqual([]);
+    const main = result.doc.components.main!;
+    const layer = (id: string) => findLayer(main.layers, id)?.layer;
+    expect([layer("avatar_2")?.name, layer("email_input_input")?.name, layer("bio_box_box")?.name, layer("agree_checkbox_2")?.name]).toEqual(["Avatar Image", "Email Input Group", "Bio Box Group", "Checkmark"]);
+    expect(main.patches.tap_avatar!.inputs.layer).toEqual({ layer: "avatar_2" });
+    for (const id of ["email_input", "bio_box", "agree_checkbox_2"]) expect(layer(id)!.props.opacity).toEqual({ link: "fade.output" });
+    expect(again.summary).toMatchObject({ layers: 9, kept: 9, lostConnections: 0 });
+  });
+
   it("counts and names a connection into a layer the new screen doesn't have", async () => {
     const first = await imported(place([{ name: "Open until 9 PM", nameRank: 1, text: "Open until 9 PM" }]));
     const wired = applyOps(first.doc, [

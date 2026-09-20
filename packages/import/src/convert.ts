@@ -377,9 +377,10 @@ const hasProp = (type: string, key: string) => LAYER_TYPE_MAP.get(type)?.props.s
 
 /**
  * Give new layers the ids of old layers at the same name path ("Profile Card/Follow Button", the second
- * of two same-named siblings counting separately), and carry their linked properties across. A text
- * layer not found by name is looked up among its old siblings by its words. Content layers whose
- * position a Scroll patch already drives don't get another one. Returns how many kept ids.
+ * of two same-named siblings counting separately), and carry their linked properties across. A layer
+ * not found by name is looked up among its old siblings by the name an earlier import gave it
+ * (formerName). Content layers whose position a Scroll patch already drives don't get another one.
+ * Returns how many kept ids.
  */
 function keepIds(oldRoot: LayerNode, newRoot: NewLayer, skipScroll: Set<string>): number {
   let kept = 0;
@@ -413,12 +414,11 @@ function keepIds(oldRoot: LayerNode, newRoot: NewLayer, skipScroll: Set<string>)
         match(previous, newChildren[i]!);
       } else unmatched.push(newChildren[i]!);
     });
-    // Earlier imports named text after its words, not the element holding it: the text layer now called
-    // "Card 1 Address" was "933 Kapahulu Ave, Honolulu" then. Find it by its words.
+    // Layers earlier imports named differently are found by the names they had then.
     for (const child of unmatched) {
-      const text = child.type === "text" ? child.props?.text : undefined;
-      if (typeof text !== "string") continue;
-      const previous = oldChildren.find((o) => !used.has(o) && o.type === "text" && o.name === wordsName(text));
+      const former = formerName(child, next.name ?? "");
+      if (former === undefined) continue;
+      const previous = oldChildren.find((o) => !used.has(o) && o.type === child.type && o.name === former);
       if (previous) {
         used.add(previous);
         match(previous, child);
@@ -427,6 +427,22 @@ function keepIds(oldRoot: LayerNode, newRoot: NewLayer, skipScroll: Set<string>)
   };
   match(oldRoot, newRoot);
   return kept;
+}
+
+/**
+ * The name an earlier import gave a layer of `parent`, where the walker names it differently now. Text
+ * was named after its words, not the element holding it ("Card 1 Address" was "933 Kapahulu Ave,
+ * Honolulu"). An image in a frame that stays took the frame's name ("Avatar Image" and a checked box's
+ * "Checkmark" were "Avatar" and "Agree Checkbox"). A text field's box was "<field> Input" or "<field> Box"
+ * ("Email Input Group" was "Email Input Input").
+ */
+function formerName(child: NewLayer, parent: string): string | undefined {
+  const text = child.type === "text" ? child.props?.text : undefined;
+  if (typeof text === "string") return wordsName(text);
+  const name = child.name ?? "";
+  if (parent && (name === `${parent} Image` || name === "Checkmark" || name === "Dot")) return parent;
+  const box = / (Input|Box) Group$/.exec(name);
+  return box ? `${name.slice(0, -" Group".length)} ${box[1]}` : undefined;
 }
 
 // ---------------------------------------------------------------------------
