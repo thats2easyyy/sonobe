@@ -277,7 +277,7 @@ async function subscriptionSmoke() {
   const documents = path.join(dir, "Documents");
   mkdirSync(documents, { recursive: true });
   const subEnv = { ...env, SONOBE_USER_DATA: subUserData, SONOBE_HOME: subHome, SONOBE_CLAUDE_AGENT: FAKE_AGENT, FAKE_CLAUDE_LOG: fakeLog, FAKE_CLAUDE_MODE: "auto" };
-  for (const key of ["SONOBE_EDITOR_DIST", "SONOBE_CLAUDE_SUBSCRIPTION", "FAKE_CLAUDE_AUTH", "FAKE_CLAUDE_MODE_LOCKED", "FAKE_CLAUDE_NO_CLOSE"]) delete subEnv[key];
+  for (const key of ["SONOBE_EDITOR_DIST", "FAKE_CLAUDE_AUTH", "FAKE_CLAUDE_MODE_LOCKED", "FAKE_CLAUDE_NO_CLOSE"]) delete subEnv[key];
   app = await launch(subEnv);
   // Main's log (stdout and stderr): the adapter's starts and exits, and the switch going off.
   let mainLog = "";
@@ -536,7 +536,9 @@ async function subscriptionSmoke() {
   assert((await page.evaluate(() => window.sonobeHost.assistant.checkSubscription())).state !== "checking" && fakeLines().filter((l) => l.kind === "initialize").length === initialized, "checking with the switch off starts nothing");
   log(`subscription: off stopped the adapter (${count("Starting Claude's agent adapter")} started, all exited)`);
   // Not here: a second window. The app opens one editor window (ensureWindow), so keeping each chat's edits in its
-  // own window's prototype is left to toolRunner.test.ts and acp/engine.test.ts, which pin calls to the window's document.
+  // own window's prototype is left to acp/engine.test.ts ("keeps each window's chat in its own window's prototype"),
+  // acp/engine.integration.test.ts ("keeps each window's design in its own window's prototype, with two chats at once")
+  // and register.test.ts ("hands the subscription's engine each window's own document, and the readers it needs").
 
   await subMcp.close();
   await quit();

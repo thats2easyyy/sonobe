@@ -244,7 +244,7 @@ describe("AssistantDrawer on the Claude subscription (experimental)", () => {
     // Picking it read the login: signed out.
     expect(host.checks).toBe(1);
     expect(text()).toContain(SIGNED_OUT_MESSAGE);
-    expect(container.querySelector(".sb-assistant__subtitle")?.textContent).toBe("Claude subscription · Not logged in");
+    expect(container.querySelector(".sb-assistant__subtitle")?.textContent).toBe("Claude subscription · not signed in");
   });
 
   it("signs in through Terminal, says what happened, and checks again", async () => {
@@ -442,6 +442,57 @@ describe("AssistantDrawer on the Claude subscription (experimental)", () => {
     expect(container.querySelector(".sb-assistant-provider-note")).toBeNull();
     expect(container.querySelector(".sb-assistant__subtitle")?.textContent).toBe("Claude Max · subscription");
   });
+
+  it("goes to the key's setup when a check answers unknown because another window turned the switch off", async () => {
+    const host = fakeAssistantHost({ ...subscriptionOn, subscription: signedIn() });
+    await mount(host);
+    await click(buttonByLabel("Claude subscription"));
+    expect(text()).toContain("Signed in · Claude Max");
+    // Window B turns the switch off while this check runs: main's shutdown turns it into "unknown".
+    host.nextCheck = () => {
+      host.connection = { ...host.connection, subscriptionEnabled: false, active: "api_key" };
+      return subscriptionStatus();
+    };
+    await click(buttonByText("Check again"));
+    expect(host.checks).toBe(1);
+    expect(text()).not.toContain("Checking Claude…");
+    expect(text()).toContain("Use your own Anthropic API key");
+    expect(container.querySelector('[role="radiogroup"]')).toBeNull();
+  });
+
+  it("shows a subscription chat whose switch another window turned off, with New chat, rather than a setup that can't fix it", async () => {
+    // This window's message failed not signed in; then window B turned the switch off (main reset only B's chat).
+    const host = fakeAssistantHost({ connection: { subscriptionEnabled: false, provider: "subscription" }, key: KEY, subscription: subscriptionStatus({ state: "signed_out", kind: "none", label: "Claude Max", message: SIGNED_OUT_MESSAGE }) });
+    host.chatProvider = "subscription";
+    await mount(host);
+    expect(container.querySelector("textarea")).not.toBeNull();
+    expect(text()).not.toContain("Use your own Anthropic API key");
+    expect(container.querySelector(".sb-assistant-provider-note")?.textContent).toBe("This chat uses your Claude subscription. A new chat uses your API key. New chat");
+    expect(buttonByLabel("New chat")).not.toBeNull();
+    // The header's setup button opens what a new chat needs, and Back to chat comes back.
+    expect(buttonByLabel("Claude subscription")).toBeNull();
+    await click(buttonByLabel("API key"));
+    expect(text()).toContain("Use your own Anthropic API key");
+    await click(buttonByText("Back to chat"));
+    expect(container.querySelector("textarea")).not.toBeNull();
+    // New chat moves to the API key.
+    await click(container.querySelector(".sb-assistant-provider-note button"));
+    expect(host.resets).toBe(1);
+    expect(container.querySelector(".sb-assistant-provider-note")).toBeNull();
+    expect(container.querySelector(".sb-assistant__subtitle")?.textContent).toBe("Your API key · sk-ant-…1234");
+  });
+
+  it("says not signed in in the header while signed out, whatever plan the last login named", async () => {
+    // A signed-in chat's next message failed with auth_required: the status can still carry the old plan's label.
+    const host = fakeAssistantHost({ ...subscriptionOn, subscription: subscriptionStatus({ state: "signed_out", kind: "none", label: "Claude Max", email: null, message: SIGNED_OUT_MESSAGE }) });
+    host.nextCheck = () => host.subscription;
+    await mount(host);
+    expect(text()).toContain(SIGNED_OUT_MESSAGE);
+    const subtitle = container.querySelector(".sb-assistant__subtitle")!;
+    expect(subtitle.textContent).toBe("Claude subscription · not signed in");
+    expect(subtitle.getAttribute("title")).toBe("Claude subscription · not signed in");
+    expect(subtitle.getAttribute("data-tone")).toBeNull();
+  });
 });
 
 describe("SubscriptionSetup", () => {
@@ -453,5 +504,39 @@ describe("SubscriptionSetup", () => {
     });
     expect(checks).toHaveBeenCalledTimes(1);
     expect(text()).toContain("Checking Claude…");
+  });
+
+  it("stops spinning when its check comes back unknown, and offers Check again", async () => {
+    // Main answered "unknown": its switch went off during the check, or it couldn't tell. Nothing else reads the status here.
+    const checks = vi.fn(async () => subscriptionStatus());
+    const controller = { checkSubscription: checks, signInToClaude: vi.fn() } as unknown as AssistantController;
+    await act(async () => {
+      root.render(<SubscriptionSetup controller={controller} subscription={subscriptionStatus()} />);
+    });
+    await flush();
+    expect(checks).toHaveBeenCalledTimes(1);
+    expect(text()).not.toContain("Checking Claude…");
+    expect(container.querySelector('[role="status"]')?.textContent).toBe("Sonobe couldn't check Claude's login this time. Choose Check again.");
+    const again = buttonByText("Check again")!;
+    expect(again.disabled).toBe(false);
+    await click(again);
+    expect(checks).toHaveBeenCalledTimes(2);
+    expect(text()).toContain("Sonobe couldn't check Claude's login this time.");
+    // Another check (the box's, another window's) shows the spinner while it runs, and its answer shows.
+    await act(async () => {
+      root.render(<SubscriptionSetup controller={controller} subscription={subscriptionStatus({ state: "checking" })} />);
+    });
+    expect(text()).toContain("Checking Claude…");
+    expect(checks).toHaveBeenCalledTimes(2);
+    await act(async () => {
+      root.render(<SubscriptionSetup controller={controller} subscription={signedIn()} />);
+    });
+    expect(text()).toContain("Signed in · Claude Max · ava@example.com");
+    // Unknown again later (the switch went off and on): it reads the login on its own again.
+    await act(async () => {
+      root.render(<SubscriptionSetup controller={controller} subscription={subscriptionStatus()} />);
+    });
+    await flush();
+    expect(checks).toHaveBeenCalledTimes(3);
   });
 });

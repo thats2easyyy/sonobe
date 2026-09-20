@@ -31,7 +31,7 @@ import type { AssistantConfirmOption, AssistantError, AssistantEvent, AssistantL
 import { describeToolInput, type AssistantToolInfo, type LocalTools, type ToolBridge, type ToolCallResult } from "../toolBridge.ts";
 import { createToolRunner, REPLACE_GUARD, type PreviewDraft, type ReplaceGuardKit, type RunGuards, type ToolRunScope, type WindowDocument } from "../toolRunner.ts";
 import { locateClaudeAgent } from "./locate.ts";
-import { agentEnvironment, createAcpAgentProcess } from "./process.ts";
+import { agentEnvironment, createAcpAgentProcess, detailsOf, messageOf } from "./process.ts";
 import { startAssistantToolServer, type AssistantToolServer, type ToolServerCallOptions, type ToolServerHandler } from "./toolServer.ts";
 import { AgentExitedError, CLAUDE_AGENT_PACKAGE, type AcpAgentProcess, type AgentAuthStatus, type AgentExit, type ClaudeAgentSpec, type ClaudeSignInOptions, type CreateAcpAgentProcess, type LocateClaudeAgent, type OpenClaudeSignIn } from "./types.ts";
 
@@ -66,6 +66,16 @@ export function usageLimitMessage(notice: string | null): string {
   return `Your Claude plan's usage limit is reached${notice ? ` (“${notice}”)` : ""}. Try again once it resets, or switch the Assistant to your API key.`;
 }
 
+/** A billing error or an account on hold, quoting the CLI's text: unlike the plan's limit, it doesn't reset on its own. */
+export function accountBlockedMessage(notice: string | null): string {
+  return `Your Claude account can't take more requests right now${notice ? ` (“${notice}”)` : ""}. Check your plan or billing at claude.ai, or switch the Assistant to your API key.`;
+}
+
+/** An organization that doesn't allow its members' Claude plans in Claude Code, quoting the CLI's text. */
+export function orgNotAllowedMessage(notice: string | null): string {
+  return `Your organization doesn't allow Claude subscription use in Claude Code${notice ? ` (“${notice}”)` : ""}, so signing in again won't help. Ask your organization's admin, or switch the Assistant to your API key.`;
+}
+
 const notStarted = (reason: string) => `Claude's agent adapter didn't start: ${reason.replace(/\.+$/, "")}. Check that it's installed (${INSTALL}), then try again.`;
 
 /**
@@ -87,8 +97,18 @@ const USAGE_LIMIT_PREFIXES = [
   "You're out of extra usage",
   "Your seat type doesn't include extra usage",
 ] as const;
-/** The adapter's error kinds (RequestError data.errorKind) that mean the plan can't pay for more. */
+/** The adapter's error kinds (RequestError data.errorKind) that mean the account can't pay for more: no credit left, or on hold. */
 const PLAN_ERROR_KINDS: ReadonlySet<string> = new Set(["billing_error", "account_on_hold"]);
+/**
+ * The adapter's error kind for a login Claude Code couldn't use (an OAuth token that expired or was
+ * revoked). It sends it as an internal error, not auth_required, when the CLI's text doesn't say
+ * "Please run /login", which it never does under the SDK.
+ */
+const LOGIN_FAILED_KIND = "authentication_failed";
+/** The adapter's error kind for an organization that doesn't allow its members' Claude plans in Claude Code: signing in again or resending won't help. */
+const ORG_NOT_ALLOWED_KIND = "oauth_org_not_allowed";
+/** How long a reason from the adapter may be in a message. */
+const REASON_MAX = 200;
 /** A reply this short that starts like a usage-limit notice is the notice, not an answer. */
 const USAGE_NOTICE_MAX = 300;
 /** How the adapter says it ended a session while it keeps running (its Claude Code died, or the session's stream closed). */
@@ -114,6 +134,8 @@ const OWN_OPTIONS: AssistantConfirmOption[] = [
   { id: "sonobe-allow-always", label: PERMISSION_LABELS.allow_always, kind: "allow_always" },
   { id: "sonobe-reject", label: PERMISSION_LABELS.reject_once, kind: "reject_once" },
 ];
+/** A card's choices for a call "Allow for this chat" can't cover (a forced save): allow_always left out, when there's another way to allow it. */
+const onceOnly = (options: AssistantConfirmOption[]) => (options.some((o) => o.kind === "allow_once") ? options.filter((o) => o.kind !== "allow_always") : options);
 const CANCELLED: RequestPermissionResponse = { outcome: { outcome: "cancelled" } };
 
 export interface SubscriptionAgentOptions {
@@ -152,7 +174,7 @@ export interface SubscriptionAgentOptions {
   /** How long checkSubscription waits for the adapter to report the login. Default 8 s. */
   authWaitMs?: number;
   /** The login a one-off `<adapter> --cli auth status --json` reports (checkSubscription while chats have sessions). Default readCliLogin. */
-  readLogin?(spec: ClaudeAgentSpec, env: Record<string, string>, timeoutMs: number): Promise<AgentAuthStatus | null>;
+  readLogin?(spec: ClaudeAgentSpec, options: CliLoginOptions): Promise<AgentAuthStatus | null>;
   /** How long a tool call that reaches the endpoint before its ACP tool_call waits for it. Default 2 s. */
   announceWaitMs?: number;
   /** How often a call waiting on Sonobe's own permission card tells Claude Code it's alive. Default 10 s. */
@@ -215,6 +237,8 @@ interface ActiveRun extends RunGuards {
   chipWaiters: Set<() => void>;
   /** Tool calls the person didn't allow (or that were cancelled) on a permission card. */
   declined: Set<string>;
+  /** The reply has started: text, thinking or a tool call arrived. */
+  replied: boolean;
   closed: boolean;
 }
 
@@ -250,22 +274,33 @@ const errorMessage = (err: unknown) => (err instanceof Error ? err.message : Str
 const isRecord = (value: unknown): value is Record<string, unknown> => !!value && typeof value === "object" && !Array.isArray(value);
 const clip = (text: string, max: number) => (text.length > max ? `${text.slice(0, max - 1).trimEnd()}…` : text);
 
-/** stderr lines that never say what went wrong: Node's version footer, stack frames, carets, Node's hints, the adapter's timing lines. */
-const STDERR_NOISE = [/^Node\.js v\d/, /^at\s/, /^\^+$/, /^\(Use `node --trace-/, /^\[session\//];
+/** A key never goes into copy or the log. */
+const redact = (text: string) => text.replace(/sk-ant-\S*/g, "sk-ant-…");
+
+/**
+ * stderr lines that never say what went wrong: Node's version footer, stack frames, carets, Node's
+ * hints, the adapter's timing lines, V8's banners around a fatal error, and what process.ts left out.
+ */
+const STDERR_NOISE = [/^Node\.js v\d/, /^at\s/, /^\^+$/, /^\(Use `node --trace-/, /^\[session\//, /^<--- .* --->$/, /^-+ Native stack trace -+$/, /^\[left out: /];
+/** A frame of Node's native stack trace (" 1: 0x1028ff10c node::OOMErrorHandler(…)"), which names no reason even when it says "Error". */
+const NATIVE_FRAME = [/^\d+: 0x[0-9a-f]+ /i, /\bnode::|\bv8::/];
+/** V8's own reason for a fatal error: "FATAL ERROR: Reached heap limit Allocation failed - JavaScript heap out of memory". */
+const OUT_OF_MEMORY = /out of memory|\bheap\b/i;
 
 /**
  * "exit code 7: fake crash: something broke": how the adapter ended and its most telling stderr line
- * (never a key): the last one naming an error, else the last that isn't noise.
+ * (never a key): the last one saying it ran out of memory, else the last naming an error, else the
+ * last that isn't noise. Native stack frames never count.
  */
 export function exitDetail(exit: AgentExit): string {
   const how = exit.code !== null ? `exit code ${exit.code}` : exit.signal ? `signal ${exit.signal}` : "no exit code";
   const lines = exit.stderrTail
     .split("\n")
     .map((l) => l.trim())
-    .filter(Boolean);
+    .filter((l) => l && !NATIVE_FRAME.some((frame) => frame.test(l)));
   const telling = lines.filter((l) => !STDERR_NOISE.some((noise) => noise.test(l)));
-  const line = telling.findLast((l) => /Error|Exception/.test(l)) ?? telling.at(-1) ?? lines.at(-1);
-  return line ? `${how}: ${clip(line.replace(/sk-ant-\S*/g, "sk-ant-…"), 200)}` : how;
+  const line = telling.findLast((l) => OUT_OF_MEMORY.test(l)) ?? telling.findLast((l) => /Error|Exception/.test(l)) ?? telling.at(-1) ?? lines.at(-1);
+  return line ? `${how}: ${clip(redact(line), 200)}` : how;
 }
 
 export const crashedMessage = (exit: AgentExit) => `Claude's agent adapter stopped unexpectedly (${exitDetail(exit)}). Send your message again to restart it. If it keeps happening, update it: ${INSTALL}@latest`;
@@ -274,6 +309,21 @@ export const crashedMessage = (exit: AgentExit) => `Claude's agent adapter stopp
 const noticeOf = (message: string) => message.replace(/^Internal error(?::\s*|$)/i, "").trim();
 const isUsageLimitNotice = (text: string) => USAGE_LIMIT_PREFIXES.some((prefix) => text.startsWith(prefix));
 const errorKindOf = (err: unknown) => (err instanceof RequestError && isRecord(err.data) && typeof err.data.errorKind === "string" ? err.data.errorKind : null);
+
+/**
+ * What went wrong, from an error the adapter sent, for the person (never a key). A plain Error in the
+ * adapter reaches Sonobe as -32603 "Internal error" with its text in data.details ("Claude Code
+ * executable not found at …"): that's the reason, not the bare "Internal error". Empty when the error
+ * says nothing more.
+ */
+function reasonOf(err: unknown): string {
+  const notice = noticeOf(err instanceof Error ? err.message : String(err));
+  const details = detailsOf(err)?.trim() ?? "";
+  return redact(details && !notice.includes(details) ? (notice ? `${notice}: ${details}` : details) : notice);
+}
+
+/** The reason as a message quotes it: clipped, and the error's own message when it gave none. */
+const reasonText = (err: unknown, reason: string) => clip(reason || redact(err instanceof Error ? err.message : String(err)), REASON_MAX);
 
 /** The adapter ended the session but keeps running: its Claude Code died, or the session's stream closed, so the session is gone. */
 function sessionEnded(err: unknown): boolean {
@@ -378,10 +428,20 @@ export function quotedInput(value: unknown, home: string): string | null {
   return `“${clipMiddle(text, QUOTED_MAX)}”`;
 }
 
+/**
+ * save_document with force: it writes over changes made to the project outside Sonobe, and they're
+ * lost. So it always asks, and "Allow for this chat" never covers it.
+ */
+export const isForcedSave = (name: string, input: unknown) => name === "save_document" && isRecord(input) && input.force === true;
+
 /** A permission card's title and message: what the call would do, from its input. */
 export function permissionPrompt(name: string, title: string, input: Record<string, unknown>, home: string): { title: string; message: string } {
   const where = quotedInput(input.path, home) ?? quotedInput(input.ref, home);
   const detail = describeToolInput(input);
+  if (isForcedSave(name, input)) {
+    const sentence = `Claude wants to save this prototype${where ? ` to ${where}` : ""} over changes made to the project outside Sonobe since it was opened or last saved. Those changes will be lost.`;
+    return { title: "Allow Claude to save over outside changes?", message: `${sentence} Claude Code asks before steps that reach outside this prototype.` };
+  }
   const sentence =
     name === "save_document"
       ? `Claude wants to save this prototype${where ? ` to ${where}` : ""}.`
@@ -419,11 +479,19 @@ export function parseCliLogin(stdout: string): AgentAuthStatus | null {
   return { kind: "account", label: /^claude(\s|$)/i.test(plan) ? titled : `Claude ${titled}`, email: text(parsed.email), plan, detail: null };
 }
 
+/** How a one-off `--cli auth status` runs: the adapter's environment, and its folder. */
+export interface CliLoginOptions {
+  env: Record<string, string>;
+  /** The sessions folder, as for the adapter: Claude Code reads project settings (an apiKeyHelper, an env) from its cwd. */
+  cwd: string;
+  timeoutMs: number;
+}
+
 /** The login Claude Code reports to a one-off `<adapter> --cli auth status --json` (no ACP, no session), or null when it can't tell in time. */
-export function readCliLogin(spec: ClaudeAgentSpec, env: Record<string, string>, timeoutMs: number): Promise<AgentAuthStatus | null> {
+export function readCliLogin(spec: ClaudeAgentSpec, { env, cwd, timeoutMs }: CliLoginOptions): Promise<AgentAuthStatus | null> {
   return new Promise((resolve) => {
     // Signed out, the CLI exits 1 and still prints its JSON.
-    execFile(spec.command, [...spec.args, "--cli", "auth", "status", "--json"], { env, timeout: timeoutMs, maxBuffer: 1024 * 1024, windowsHide: true }, (_err, stdout) => resolve(parseCliLogin(String(stdout ?? ""))));
+    execFile(spec.command, [...spec.args, "--cli", "auth", "status", "--json"], { cwd, env, timeout: timeoutMs, maxBuffer: 1024 * 1024, windowsHide: true }, (_err, stdout) => resolve(parseCliLogin(String(stdout ?? ""))));
   });
 }
 
@@ -535,7 +603,7 @@ export function createSubscriptionAgent(options: SubscriptionAgentOptions): Subs
       if (proc === p) proc = null;
       void p.dispose();
       if (started !== epoch) throw new RunFailure({ code: "unknown", message: SHUT_DOWN });
-      const message = notStarted(err instanceof AgentExitedError ? `it exited before answering (${exitDetail(err.exit)})` : errorMessage(err));
+      const message = notStarted(err instanceof AgentExitedError ? `it exited before answering (${exitDetail(err.exit)})` : reasonText(err, reasonOf(err)));
       setStatus({ state: "failed", kind: null, label: null, email: null, message });
       throw new RunFailure({ code: "agent_failed", message });
     }
@@ -578,8 +646,12 @@ export function createSubscriptionAgent(options: SubscriptionAgentOptions): Subs
   const failureOf = (err: unknown, chat: Chat, during: "session" | "prompt"): AssistantError => {
     if (err instanceof RunFailure) return err.error;
     if (err instanceof AgentExitedError) return { code: "agent_crashed", message: crashedMessage(err.exit) };
-    if (err instanceof RequestError && err.code === AUTH_REQUIRED) {
-      setStatus({ state: "signed_out", kind: "none", label: status.label ?? "Not logged in", email: null, message: notSignedIn(platform, "choose Check again") });
+    const kind = errorKindOf(err);
+    // Signed out (auth_required), or a login Claude Code couldn't use (an expired or revoked token), which it reports as an internal error.
+    if (err instanceof RequestError && (err.code === AUTH_REQUIRED || kind === LOGIN_FAILED_KIND)) {
+      if (kind === LOGIN_FAILED_KIND) log("warn", `Claude Code couldn't use the Claude login on this computer: ${redact(messageOf(err))}`);
+      // Not the last login's plan: the header and the meter stop naming it.
+      setStatus({ state: "signed_out", kind: "none", label: "Not logged in", email: null, message: notSignedIn(platform, "choose Check again") });
       // A session opened while signed out stays signed out: the next message opens one that reads the login again.
       if (chat.session) {
         chat.session.used = false;
@@ -587,20 +659,24 @@ export function createSubscriptionAgent(options: SubscriptionAgentOptions): Subs
       }
       return { code: "not_signed_in", message: notSignedIn(platform, "send your message again") };
     }
-    const message = errorMessage(err);
     // The adapter streams Claude Code's limit notice, then rejects with it as "Internal error: <notice>".
-    const notice = noticeOf(message);
-    const kind = errorKindOf(err);
-    if (isUsageLimitNotice(notice) || (kind !== null && PLAN_ERROR_KINDS.has(kind))) return { code: "usage_limit", message: usageLimitMessage(notice ? clip(notice, 160) : null) };
+    const reason = reasonOf(err);
+    if (isUsageLimitNotice(reason)) return { code: "usage_limit", message: usageLimitMessage(clip(reason, 160)) };
+    if (kind !== null && PLAN_ERROR_KINDS.has(kind)) return { code: "usage_limit", message: accountBlockedMessage(reason ? clip(reason, 160) : null) };
     if (kind === "rate_limit") return { code: "rate_limited", message: RATE_LIMITED };
-    if (during === "session") return { code: "agent_failed", message: notStarted(message) };
+    if (kind === ORG_NOT_ALLOWED_KIND) return { code: "permission_denied", message: orgNotAllowedMessage(reason ? clip(reason, 160) : null) };
+    if (during === "session") {
+      log("warn", `Claude's agent adapter didn't open a session: ${redact(messageOf(err))}`);
+      return { code: "agent_failed", message: notStarted(reasonText(err, reason)) };
+    }
     if (sessionEnded(err)) {
       // The adapter lives on without this session: the next message opens a new one (and says it starts over).
-      log("warn", `Claude's agent adapter ended this chat's session: ${message}`);
+      log("warn", `Claude's agent adapter ended this chat's session: ${redact(messageOf(err))}`);
       loseSession(chat, { close: true });
       return { code: "agent_crashed", message: SESSION_ENDED };
     }
-    return { code: "unknown", message: `Claude's agent adapter couldn't finish the reply: ${message.replace(/\.+$/, "")}. Send your message again.` };
+    log("warn", `Claude's agent adapter couldn't finish a reply: ${redact(messageOf(err))}`);
+    return { code: "unknown", message: `Claude's agent adapter couldn't finish the reply: ${reasonText(err, reason).replace(/\.+$/, "")}. Send your message again.` };
   };
 
   /** The chat's side of the tool endpoint. */
@@ -672,11 +748,13 @@ export function createSubscriptionAgent(options: SubscriptionAgentOptions): Subs
     }
     chip.called = true;
     try {
-      // Claude Code runs these without asking in a mode that doesn't ask: Sonobe asks, once per call.
+      // Claude Code runs these without asking in a mode that doesn't ask, or after "Allow for this chat":
+      // Sonobe asks, once per call. A save over outside changes asks whatever was allowed for the chat.
       const session = run.session;
-      if (ASKING_TOOLS.has(name) && !chip.permitted && !session?.allowed.has(name)) {
+      const forced = isForcedSave(name, args);
+      if (ASKING_TOOLS.has(name) && !chip.permitted && (forced || !session?.allowed.has(name))) {
         const prompt = permissionPrompt(name, chip.title, args, home);
-        const picked = await ask(run, id, prompt, OWN_OPTIONS, [signal], call.onProgress);
+        const picked = await ask(run, id, prompt, forced ? onceOnly(OWN_OPTIONS) : OWN_OPTIONS, [signal], call.onProgress);
         if (!picked || picked.kind.startsWith("reject")) {
           run.send({ type: "tool_finished", runId: run.runId, toolUseId: id, name, status: "declined", detail: "You didn't allow it", changedDocument: false });
           return { content: [{ type: "text", text: `The person chose not to allow ${name} in Sonobe, so it didn't run. Ask what they'd like to do instead.` }] };
@@ -714,6 +792,7 @@ export function createSubscriptionAgent(options: SubscriptionAgentOptions): Subs
     const run = chat.run;
     if (!run || run.closed || run.session !== session) return;
     const update = notification.update;
+    if (update.sessionUpdate === "agent_message_chunk" || update.sessionUpdate === "agent_thought_chunk" || update.sessionUpdate === "tool_call" || update.sessionUpdate === "tool_call_update") run.replied = true;
     switch (update.sessionUpdate) {
       case "agent_message_chunk":
       case "agent_thought_chunk": {
@@ -755,9 +834,12 @@ export function createSubscriptionAgent(options: SubscriptionAgentOptions): Subs
     const call = request.toolCall;
     const name = sonobeName(call) ?? run.chips.get(call.toolCallId)?.name ?? "a tool";
     announce(run, call.toolCallId, name, call.rawInput);
-    const options = request.options.flatMap((o): AssistantConfirmOption[] => (o.kind in PERMISSION_LABELS ? [{ id: o.optionId, label: PERMISSION_LABELS[o.kind as AssistantConfirmOption["kind"]], kind: o.kind as AssistantConfirmOption["kind"] }] : []));
-    if (!options.length) return CANCELLED;
-    const prompt = permissionPrompt(name, run.tools.get(name)?.title ?? name, isRecord(call.rawInput) ? call.rawInput : {}, home);
+    const offered = request.options.flatMap((o): AssistantConfirmOption[] => (o.kind in PERMISSION_LABELS ? [{ id: o.optionId, label: PERMISSION_LABELS[o.kind as AssistantConfirmOption["kind"]], kind: o.kind as AssistantConfirmOption["kind"] }] : []));
+    if (!offered.length) return CANCELLED;
+    const input = isRecord(call.rawInput) ? call.rawInput : {};
+    // "Allow for this chat" wouldn't cover the next save over outside changes, so its card doesn't offer it.
+    const options = isForcedSave(name, input) ? onceOnly(offered) : offered;
+    const prompt = permissionPrompt(name, run.tools.get(name)?.title ?? name, input, home);
     const picked = await ask(run, call.toolCallId, prompt, options, [run.controller.signal, gone]);
     if (!picked || picked.kind.startsWith("reject")) run.declined.add(call.toolCallId);
     else {
@@ -836,7 +918,7 @@ export function createSubscriptionAgent(options: SubscriptionAgentOptions): Subs
         if (chat.endpoint === endpoint) revokeEndpoint(chat);
         void p.closeSession(response.sessionId);
         if (err instanceof AgentExitedError) throw err;
-        log("error", `Claude's agent adapter didn't put the session in its "${ASKING_MODE}" mode: ${errorMessage(err)}`);
+        log("error", `Claude's agent adapter didn't put the session in its "${ASKING_MODE}" mode: ${redact(messageOf(err))}`);
         throw new RunFailure({ code: "agent_failed", message: MODE_NOT_SET });
       }
       // New chat (or the window closing) while it opened: nobody needs it.
@@ -871,7 +953,7 @@ export function createSubscriptionAgent(options: SubscriptionAgentOptions): Subs
         return;
       } catch (err) {
         if (err instanceof AgentExitedError) throw err;
-        log("warn", `Claude's agent adapter didn't switch the model: ${errorMessage(err)}`);
+        log("warn", `Claude's agent adapter didn't switch the model: ${redact(messageOf(err))}`);
       }
     }
     send({ type: "notice", runId, tone: "info", message: `This chat keeps ${modelLabel(session.model)}. Start a new chat to use ${modelLabel(model.id)}.` });
@@ -947,6 +1029,7 @@ export function createSubscriptionAgent(options: SubscriptionAgentOptions): Subs
       chips: new Map(),
       chipWaiters: new Set(),
       declined: new Set(),
+      replied: false,
       closed: false,
     };
     chat.run = active;
@@ -1028,29 +1111,44 @@ export function createSubscriptionAgent(options: SubscriptionAgentOptions): Subs
     try {
       const p = await untilAborted(ensureProcess(), signal);
       if (p === ABORTED) return finish("stopped");
-      let session: Session | typeof ABORTED;
-      try {
-        session = await untilAborted(openSession(conversationId, chat, p, model, instructions, tools.map((t) => t.name)), signal);
-      } catch (err) {
-        return finish("error", failureOf(err, chat, "session"));
-      }
-      if (session === ABORTED) return finish("stopped");
-      await matchModel(session, model, send, runId);
-      if (signal.aborted) return finish("stopped");
+      let settled: { response: PromptResponse } | { error: unknown } | "gave_up";
+      for (let attempt = 1; ; attempt++) {
+        let session: Session | typeof ABORTED;
+        try {
+          session = await untilAborted(openSession(conversationId, chat, p, model, instructions, tools.map((t) => t.name)), signal);
+        } catch (err) {
+          return finish("error", failureOf(err, chat, "session"));
+        }
+        if (session === ABORTED) return finish("stopped");
+        await matchModel(session, model, send, runId);
+        if (signal.aborted) return finish("stopped");
 
-      active.session = session;
-      session.used = true;
-      const prompting = session.process.prompt({ sessionId: session.id, prompt });
-      // Stop cancels the prompt; one that hasn't settled STOP_GRACE_MS later is given up.
-      const gaveUp = new Promise<"gave_up">((resolve) => {
-        const onStop = () => {
-          void session.process.cancel(session.id);
-          stopTimer = setTimeout(() => resolve("gave_up"), stopGraceMs);
-        };
-        if (signal.aborted) onStop();
-        else signal.addEventListener("abort", onStop, { once: true });
-      });
-      const settled = await Promise.race([prompting.then((response): { response: PromptResponse } => ({ response }), (error: unknown): { error: unknown } => ({ error })), gaveUp]);
+        active.session = session;
+        const hadMessages = session.used;
+        session.used = true;
+        const current = session;
+        const prompting = current.process.prompt({ sessionId: current.id, prompt });
+        // Stop cancels the prompt; one that hasn't settled STOP_GRACE_MS later is given up.
+        const gaveUp = new Promise<"gave_up">((resolve) => {
+          const onStop = () => {
+            void current.process.cancel(current.id);
+            stopTimer = setTimeout(() => resolve("gave_up"), stopGraceMs);
+          };
+          if (signal.aborted) onStop();
+          else signal.addEventListener("abort", onStop, { once: true });
+        });
+        settled = await Promise.race([prompting.then((response): { response: PromptResponse } => ({ response }), (error: unknown): { error: unknown } => ({ error })), gaveUp]);
+        // A session the adapter ended after an earlier error (its stream closed) refuses the next prompt before
+        // anything runs. Nothing of this reply happened, so open a new session and send it again, once.
+        if (attempt === 1 && settled !== "gave_up" && "error" in settled && !signal.aborted && !active.replied && active.chips.size === 0 && sessionEnded(settled.error)) {
+          log("warn", `Claude's agent adapter had ended this chat's session, so the message goes to a new one: ${redact(messageOf(settled.error))}`);
+          loseSession(chat, { close: true });
+          chat.lost = false;
+          if (hadMessages) send({ type: "notice", runId, tone: "info", message: RESTARTED });
+          continue;
+        }
+        break;
+      }
       if (settled === "gave_up") {
         log("warn", `Claude's agent adapter didn't stop within ${Math.round(stopGraceMs / 1000)} s, so its session was given up.`);
         loseSession(chat, { close: true });
@@ -1082,7 +1180,7 @@ export function createSubscriptionAgent(options: SubscriptionAgentOptions): Subs
       }
     } catch (err) {
       if (err instanceof RunFailure || err instanceof AgentExitedError) return finish("error", failureOf(err, chat, "prompt"));
-      log("error", `Assistant run failed: ${errorMessage(err)}`);
+      log("error", `Assistant run failed: ${redact(messageOf(err))}`);
       return finish("error", { code: "unknown", message: errorMessage(err) });
     } finally {
       clearTimeout(stopTimer);
@@ -1117,7 +1215,7 @@ export function createSubscriptionAgent(options: SubscriptionAgentOptions): Subs
           if (inUse && p?.alive && !starting) {
             // Chats have sessions on this adapter, and restarting it would cost them their history:
             // Claude Code reads the login itself (the adapter reads it again at each prompt, too).
-            const auth = await readLogin(p.spec, agentEnvironment(options.env ?? process.env, p.spec), authWaitMs);
+            const auth = await readLogin(p.spec, { env: agentEnvironment(options.env ?? process.env, p.spec), cwd: options.sessionsDir, timeoutMs: authWaitMs });
             if (began !== epoch) return status;
             if (auth) setAuth(auth);
             else {

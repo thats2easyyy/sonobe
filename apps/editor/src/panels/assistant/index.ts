@@ -30,7 +30,7 @@ export { Composer, UsageMeter, type ComposerProps } from "./Composer.tsx";
 export { createAssistantController, openLink, sharedAssistantController, type AssistantController, type ConnectionResult, type SaveKeyResult } from "./controller.ts";
 export { budgetFraction, formatCost, formatTokens, validateApiKey, type KeyValidation } from "./format.ts";
 export { KeySetup, type KeySetupProps } from "./KeySetup.tsx";
-export { activeProvider, billedElsewhere, chatProvider, CLAUDE_AGENT_INSTALL, providerName, providerReady, providerSubtitle } from "./provider.ts";
+export { activeProvider, billedElsewhere, chatProvider, CLAUDE_AGENT_INSTALL, providerName, providerReady, providerSubtitle, subscriptionSwitchedOff } from "./provider.ts";
 export { SubscriptionSetup, type SubscriptionSetupProps } from "./SubscriptionSetup.tsx";
 export { ConfirmCard, SUGGESTIONS, Transcript, type TranscriptProps } from "./Transcript.tsx";
 export * from "./types.ts";

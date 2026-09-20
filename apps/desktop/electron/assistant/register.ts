@@ -10,8 +10,8 @@
  * Two engines run chats: the API key's agent loop (agent.ts), and, behind the experimental switch
  * (off by default, awaiting Anthropic's permission), the Claude subscription's (acp/engine.ts). The
  * switch and the pick live here (connection.ts), and main enforces them. A build offers the switch
- * only when main says so (SubscriptionSetup.available: unpackaged builds, or SONOBE_CLAUDE_SUBSCRIPTION=1),
- * so no release offers it by accident. A window's chat keeps the engine its first message ran on until
+ * only when main says so (SubscriptionSetup.available: Sonobe run from a source checkout, never a
+ * packaged build), so no release offers it. A window's chat keeps the engine its first message ran on until
  * New chat; turning the switch off stops every subscription reply and the adapter.
  *
  * Each window's chat is pinned to the document that window shows (documentFor), and a code folder
@@ -106,8 +106,8 @@ export interface RegisterAssistantOptions {
 
 export interface SubscriptionSetup {
   /**
-   * This build offers the switch (main's build gate: every unpackaged build, a packaged one only when
-   * started with SONOBE_CLAUDE_SUBSCRIPTION=1). False: the switch reads off, can't be turned on, and no
+   * This build offers the switch (main's build gate: only an unpackaged build, run from a source
+   * checkout; every release is packaged). False: the switch reads off, can't be turned on, and no
    * subscription reply, check or sign-in starts. Default true.
    */
   available?: boolean;
@@ -420,7 +420,7 @@ export function registerAssistant(options: RegisterAssistantOptions): AssistantR
   };
 
   for (const [channel, handler] of Object.entries(handlers)) options.ipcMain.handle(channel, handler);
-  log("info", `Assistant ready (your Anthropic API key; Claude subscription: ${!available ? "not in this build" : connection().subscriptionEnabled ? "on" : "off"})`);
+  log("info", `Assistant ready (your Anthropic API key; Claude subscription: ${!available ? "not offered in a packaged build" : connection().subscriptionEnabled ? "on" : "off"})`);
 
   return {
     agent,

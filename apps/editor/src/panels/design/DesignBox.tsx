@@ -26,7 +26,7 @@ import { observeResize } from "../../ui/lib/observeResize.ts";
 import { assistantStore, useAssistant, type ChatItem } from "../assistant/assistantStore.ts";
 import { Composer } from "../assistant/Composer.tsx";
 import { sharedAssistantController } from "../assistant/controller.ts";
-import { chatProvider, providerReady } from "../assistant/provider.ts";
+import { chatProvider, providerReady, subscriptionSwitchedOff } from "../assistant/provider.ts";
 import { ConfirmCard } from "../assistant/Transcript.tsx";
 import type { AssistantCodeFolderStatus, AssistantStatus, AssistantSubscriptionStatus } from "../assistant/types.ts";
 import type { Rect } from "../canvas/geometry.ts";
@@ -133,7 +133,8 @@ function DesignBoxPanel({ session, bounds, onHeightChange }: DesignBoxProps): JS
   }, [design.focusRequest]);
 
   const provider = chatProvider(assistant.status);
-  const ready = !assistant.status || providerReady(assistant.status, provider);
+  // A subscription chat whose switch another window turned off isn't held here either: the send's subscription_off says what to do.
+  const ready = !assistant.status || providerReady(assistant.status, provider) || subscriptionSwitchedOff(assistant.status, provider);
   // Not while the box reads the login again: "checking" counts as ready, and the notice (with its Check again) stays until the answer.
   useEffect(() => {
     if (ready && !checking) setNoKey(false);
@@ -183,7 +184,7 @@ function DesignBoxPanel({ session, bounds, onHeightChange }: DesignBoxProps): JS
     if (!controller.available || busy || boxRun || checking) return false;
     setReadyAgain(false);
     const status = assistant.status;
-    if (status && !providerReady(status, provider)) {
+    if (status && !ready) {
       // Signed in or installed since the last look? Read the login again, then send.
       if (provider === "subscription") return recheckThenSend(status, text);
       setNoKey(true);

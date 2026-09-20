@@ -29,6 +29,18 @@ export function providerReady(status: AssistantStatus, provider: AssistantProvid
   return !NOT_READY.has(status.subscription?.state ?? "unknown");
 }
 
+/**
+ * A chat on the Claude subscription whose switch has gone off since (in another window: main resets only the chat of the window
+ * that turned it off). Its setup can't fix that, so neither the drawer nor the box holds the chat there: a send says what to do
+ * (subscription_off), and New chat moves to the API key.
+ */
+export function subscriptionSwitchedOff(status: AssistantStatus | null | undefined, provider: AssistantProvider = chatProvider(status)): boolean {
+  return provider === "subscription" && status?.connection?.subscriptionEnabled !== true;
+}
+
+/** Claude isn't signed in: the state says so, or the adapter's login is none. The label can still be an earlier login's. */
+const signedOut = (subscription: AssistantSubscriptionStatus): boolean => subscription.state === "signed_out" || subscription.kind === "none";
+
 /** The logins that bill something other than the person's Claude plan: an API key or Console login (at API rates), a gateway, another provider. */
 const OTHER_BILLING: ReadonlySet<string> = new Set(["api_key", "gateway", "external"]);
 
@@ -37,22 +49,24 @@ const OTHER_BILLING: ReadonlySet<string> = new Set(["api_key", "gateway", "exter
  * Null for a plan, and while the adapter hasn't said (the copy then speaks of the plan).
  */
 export function billedElsewhere(subscription: AssistantSubscriptionStatus | null | undefined): string | null {
-  return subscription?.kind && OTHER_BILLING.has(subscription.kind) ? (subscription.label ?? "another account") : null;
+  if (!subscription || signedOut(subscription)) return null;
+  return subscription.kind && OTHER_BILLING.has(subscription.kind) ? (subscription.label ?? "another account") : null;
 }
 
 /**
  * The header's subtitle, and its whole wording for the tooltip. What matters comes first, since a narrow header cuts the end:
  * "Claude Max · subscription"; "Billed to Anthropic API key" when the plan doesn't pay (whole: "Claude subscription · billed to
- * Anthropic API key"); "Your API key · sk-ant-…1234"; or what's missing.
+ * Anthropic API key"); "Claude subscription · not signed in", whatever plan the label still names; "Your API key · sk-ant-…1234";
+ * or what's missing.
  */
 export function providerSubtitle(status: AssistantStatus | null, provider: AssistantProvider): { text: string; full: string } {
   const same = (text: string) => ({ text, full: text });
   if (provider === "subscription") {
     const subscription = status?.subscription;
+    if (subscription && signedOut(subscription)) return same("Claude subscription · not signed in");
     const elsewhere = billedElsewhere(subscription);
     if (elsewhere) return { text: `Billed to ${elsewhere}`, full: `Claude subscription · billed to ${elsewhere}` };
-    if (!subscription?.label) return same("Claude subscription");
-    return same(subscription.kind === "none" ? `Claude subscription · ${subscription.label}` : `${subscription.label} · subscription`);
+    return same(subscription?.label ? `${subscription.label} · subscription` : "Claude subscription");
   }
   return same(status?.hasKey ? `Your API key · ${status.keyHint ?? ""}` : "Bring your own API key");
 }

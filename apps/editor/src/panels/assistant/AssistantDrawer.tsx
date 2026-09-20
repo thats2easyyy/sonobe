@@ -14,7 +14,7 @@ import { assistantStore as defaultStore, useAssistant, type AssistantState } fro
 import { Composer } from "./Composer.tsx";
 import { createAssistantController, sharedAssistantController, type AssistantController } from "./controller.ts";
 import { KeySetup } from "./KeySetup.tsx";
-import { activeProvider, billedElsewhere, chatProvider, providerName, providerReady, providerSubtitle } from "./provider.ts";
+import { activeProvider, billedElsewhere, chatProvider, providerName, providerReady, providerSubtitle, subscriptionSwitchedOff } from "./provider.ts";
 import { SubscriptionSetup } from "./SubscriptionSetup.tsx";
 import { Transcript } from "./Transcript.tsx";
 import { FALLBACK_MODELS, getAssistantHost, type AssistantHostLike, type AssistantProvider, type AssistantSubscriptionState } from "./types.ts";
@@ -93,10 +93,12 @@ export function AssistantDrawer({ onClose, onConnectClaude, onImportDesign, host
   }));
   const subscriptionState = status?.subscription?.state;
   if (subscriptionState && subscriptionState !== "checking" && subscriptionState !== "unknown") settled.current = subscriptionState;
+  // A subscription chat whose switch another window turned off: no setup fixes it, so the chat shows, with New chat.
+  const switchedOff = subscriptionSwitchedOff(status, provider);
   // "Checking" counts as ready, but a check that started from signed out, not installed or failed (Check again, a sign-in)
   // keeps the setup up with its spinner, rather than showing the chat until the answer comes. Ready from there opens the chat.
-  const rechecking = provider === "subscription" && subscriptionState === "checking" && settled.current !== null && settled.current !== "ready";
-  const showSetup = controller.available && status !== null && (!providerReady(status, provider) || rechecking || managing);
+  const rechecking = !switchedOff && provider === "subscription" && subscriptionState === "checking" && settled.current !== null && settled.current !== "ready";
+  const showSetup = controller.available && status !== null && ((!switchedOff && !providerReady(status, provider)) || rechecking || managing);
   // Which setup shows: the person's pick while the switch is on, else the key.
   const setupProvider: AssistantProvider = subscriptionOn ? (status?.connection?.provider ?? "api_key") : "api_key";
 
@@ -239,7 +241,7 @@ export function AssistantDrawer({ onClose, onConnectClaude, onImportDesign, host
             <>
               <Select options={modelOptions} value={model} onChange={(id) => store.getState().setModel(id)} aria-label="Model" size="sm" variant="ghost" disabled={running} searchable={false} renderValue={(option) => option?.label.replace(/^Claude /, "") ?? "Model"} />
               <IconButton icon={<MessageSquarePlus size={15} />} label="New chat" size="sm" disabled={items.length === 0 && !running} onClick={() => void controller.newChat()} />
-              {provider === "subscription" ? (
+              {provider === "subscription" && !switchedOff ? (
                 <IconButton icon={<CircleUserRound size={15} />} label="Claude subscription" size="sm" onClick={() => setManaging(true)} />
               ) : (
                 <IconButton icon={<KeyRound size={15} />} label="API key" size="sm" onClick={() => setManaging(true)} />

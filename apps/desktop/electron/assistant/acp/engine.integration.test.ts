@@ -68,24 +68,24 @@ beforeEach(async () => {
   agent = startAgent();
 });
 
-/** The engine over the fake agent, with `env` added to the fake's environment. */
-function startAgent(env: Record<string, string> = {}): SubscriptionAgent {
+/** The engine over the fake agent, with `env` added to the fake's environment; `shows` names the document each window shows (default: the one document). */
+function startAgent(env: Record<string, string> = {}, shows?: (windowId: string) => string): SubscriptionAgent {
   return createSubscriptionAgent({
     tools: () => bridge,
     version: "0.1.0-test",
     sessionsDir: path.join(dir, "assistant", "claude"),
     locate: () => locateClaudeAgent({ env: { [CLAUDE_AGENT_ENV]: FAKE }, execPath: process.execPath }),
     env: { ...process.env, FAKE_CLAUDE_LOG: logFile, ...env },
-    documentFor: async () => ({ docId, projectPath: path.join(dir, "Placemark.sonobe") }),
+    documentFor: async (windowId) => (shows ? { docId: shows(windowId), projectPath: null } : { docId, projectPath: path.join(dir, "Placemark.sonobe") }),
     readDocument: async (id) => (await host.getDocument(id)).doc,
     platform: "darwin",
   });
 }
 
-/** Start over with the fake in another environment. */
-async function restartAgent(env: Record<string, string>) {
+/** Start over with the fake in another environment, or with windows that show other documents. */
+async function restartAgent(env: Record<string, string>, shows?: (windowId: string) => string) {
   await agent.dispose();
-  agent = startAgent(env);
+  agent = startAgent(env, shows);
 }
 
 afterEach(async () => {
@@ -156,6 +156,23 @@ describe("the Assistant on the Claude subscription, over the fake agent", () => 
     expect(options.allowedTools).toContain("mcp__sonobe__preview_design");
     expect(options.allowedTools).not.toContain("mcp__sonobe__save_document");
     expect(agent.snapshot("w1").usage).toMatchObject({ inputTokens: 1200, outputTokens: 300, cacheReadTokens: 20_000, estimatedCostUsd: 0 });
+  });
+
+  it("keeps each window's design in its own window's prototype, with two chats at once", async () => {
+    const onboarding = (await host.createDocument({ path: path.join(dir, "Onboarding.sonobe"), template: "photo-zoom" })).docId;
+    // The prototype a call without docId would land in: neither window shows it.
+    const other = (await host.createDocument({ path: path.join(dir, "Scratch.sonobe"), template: "photo-zoom" })).docId;
+    expect((await host.getDocument()).docId).toBe(other);
+    const shows: Record<string, string> = { w1: docId, w2: onboarding };
+    await restartAgent({}, (windowId) => shows[windowId]!);
+    const design = (windowId: string) => agent.run(windowId, { text: "a checkout screen", context: CONTEXT }, (event) => events.push(event));
+    const results = await Promise.all([design("w1"), design("w2")]);
+    expect(results.map((r) => r.outcome), JSON.stringify(results)).toEqual(["completed", "completed"]);
+    const checkouts = async (id: string) => (await host.getDocument(id)).doc.components.main!.layers.filter((l) => l.name === "Checkout").length;
+    expect([await checkouts(docId), await checkouts(onboarding), await checkouts(other)]).toEqual([1, 1, 0]);
+    // Each drew live in its own window's document too.
+    expect(new Set(previews.filter((p) => p.status === "writing").map((p) => p.docId))).toEqual(new Set([docId, onboarding]));
+    expect(ofType("tool_finished").flatMap((e) => (e.imported ? [e.imported.docId] : [])).sort()).toEqual([docId, onboarding].sort());
   });
 
   it("asks before replacing a screen the person changed by hand, from the draft's replace", async () => {
@@ -248,6 +265,13 @@ describe("the Assistant on the Claude subscription, over the fake agent", () => 
     const log = await fakeLog();
     expect(log.filter((l) => l.kind === "initialize")).toHaveLength(1);
     expect(log.filter((l) => l.kind === "session/new")).toHaveLength(2);
+  });
+
+  it("says what went wrong when the adapter fails a reply with a plain Error, which reaches Sonobe as its details", async () => {
+    expect(await send("plainerror")).toMatchObject({ outcome: "error", error: { code: "unknown", message: "Claude's agent adapter couldn't finish the reply: Claude Code process exited with code 1. Send your message again." } });
+    // The chat keeps its session.
+    expect((await send("echo hello")).outcome).toBe("completed");
+    expect((await fakeLog()).filter((l) => l.kind === "session/new")).toHaveLength(1);
   });
 
   it("tells the plan's usage limit from a transient rate limit", async () => {
