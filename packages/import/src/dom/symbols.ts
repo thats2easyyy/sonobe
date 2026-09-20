@@ -3,8 +3,9 @@
  * colored by CSS like SwiftUI's .font(.system(size:weight:)) and .foregroundStyle. Runs inside the page,
  * bundled into SYMBOL_COLLECT_SOURCE and SYMBOL_APPLY_SOURCE (symbolSource.ts), before the DOM walker:
  * collectSymbols lists what to draw, the host draws it on the Mac, and applySymbols puts the drawings in
- * at the symbol's own size (unless the page sized the placeholder). Placeholders nothing drew become 1em
- * squares the walker shows as gray placeholders.
+ * at the symbol's own size (unless the page sized the placeholder). A drawing that reaches past that
+ * frame (a badge) paints around it without taking layout space, as in SwiftUI. Placeholders nothing drew
+ * become 1em squares the walker shows as gray placeholders.
  *
  * - data-sf-palette="#0A84FF,#34C759": the palette rendering mode's colors (one per layer).
  * - data-sf-scale="small" | "medium" | "large": SwiftUI's imageScale.
@@ -73,14 +74,39 @@ function adopt(markup: string, slot: number): { viewBox: string | null; nodes: N
   return { viewBox: parsed.getAttribute("viewBox"), nodes: [...parsed.childNodes].map((n) => document.importNode(n, true)) };
 }
 
+const round3 = (n: number) => Math.round(n * 1000) / 1000;
+
+/** The drawing's viewBox cut back to the symbol's frame, which the page lays out (paint.overflow reaches past it). */
+function frameViewBox(viewBox: string | null, paint: SymbolPaint): string | null {
+  if (!viewBox || !paint.overflow) return viewBox;
+  const [x, y, w, h] = viewBox.trim().split(/[\s,]+/).map(Number);
+  if (![x, y, w, h].every((n) => Number.isFinite(n))) return null;
+  const [top, right, bottom, left] = paint.overflow;
+  return [x! + left, y! + top, w! - left - right, h! - top - bottom].map(round3).join(" ");
+}
+
 /**
  * A bitmap drawing replaces its placeholder with an <img>, so it imports as a PNG asset: renderers
  * such as resvg don't draw a bitmap nested inside an SVG image.
  */
 function imgFor(el: Element, paint: SymbolPaint): HTMLImageElement {
   const img = document.createElement("img");
+  const cs = getComputedStyle(el);
   for (const attr of [...el.attributes]) if (attr.name !== "data-sf-slot") img.setAttribute(attr.name, attr.value);
   img.alt ||= el.getAttribute("data-sf-symbol") ?? "";
+  if (paint.overflow) {
+    // The bitmap covers what reaches past the frame too. Margins take that back out of the layout, so
+    // the page lays the symbol out by its frame, as SwiftUI does, and draws the rest around it.
+    const width = Number(el.getAttribute("width")) || paint.width;
+    const height = Number(el.getAttribute("height")) || paint.height;
+    const [kx, ky] = [width / paint.width, height / paint.height];
+    const [top, right, bottom, left] = paint.overflow;
+    const px = (n: number) => `${round3(n)}px`;
+    img.style.setProperty("width", px(width + (left + right) * kx));
+    img.style.setProperty("height", px(height + (top + bottom) * ky));
+    const margins = [cs.marginTop, cs.marginRight, cs.marginBottom, cs.marginLeft].map((m) => parseFloat(m) || 0);
+    img.style.setProperty("margin", [margins[0]! - top * ky, margins[1]! - right * kx, margins[2]! - bottom * ky, margins[3]! - left * kx].map(px).join(" "));
+  }
   if (!img.hasAttribute("width")) img.width = paint.width;
   if (!img.hasAttribute("height")) img.height = paint.height;
   img.src = `data:image/png;base64,${paint.png}`;
@@ -109,8 +135,14 @@ export function applySymbols(paints: SymbolPaint[]): number {
     if (!svg.hasAttribute("height")) svg.setAttribute("height", h);
     const adopted = paint.svg ? adopt(paint.svg, paint.slot) : null;
     if (adopted) {
-      svg.setAttribute("viewBox", adopted.viewBox ?? `0 0 ${w} ${h}`);
+      svg.setAttribute("viewBox", frameViewBox(adopted.viewBox, paint) ?? `0 0 ${w} ${h}`);
       svg.replaceChildren(...adopted.nodes);
+      if (paint.overflow) {
+        // What reaches past the frame (a badge) draws outside the laid-out box, as in SwiftUI. The walker
+        // reads data-sf-overflow to capture all of it.
+        svg.style.setProperty("overflow", "visible");
+        svg.setAttribute("data-sf-overflow", paint.overflow.map(round3).join(" "));
+      }
     } else {
       svg.replaceChildren();
       svg.setAttribute("data-sf-placeholder", "");
