@@ -566,6 +566,23 @@ describe("DesignBox", () => {
     expect(document.body.textContent).toContain("Prompt copied");
   });
 
+  it("says Claude Code can't reach the canvas when the organization's MCP servers leave Sonobe's out", async () => {
+    const fake = fakeAssistantHost({});
+    fake.nextHandoff = () => ({ ok: true, folder: "~/code/placemark", withoutSonobe: true });
+    await mount(fake);
+    type("a checkout screen");
+    await act(async () => {
+      buttonNamed("Open in Claude Code")!.click();
+      await Promise.resolve();
+    });
+    await settle();
+    const toastEl = document.querySelector<HTMLElement>(".sb-toast")!;
+    expect(toastEl.dataset.tone).toBe("warn");
+    expect(toastEl.textContent).toContain("Opened Claude Code without Sonobe");
+    expect(toastEl.textContent).toContain("In Terminal, in “placemark”. Your organization's MCP servers for Claude Code don't include Sonobe's, so it can't design on this canvas. Terminal says what to ask your admin.");
+    expect(toastEl.textContent).not.toContain("It designs on this canvas as it writes.");
+  });
+
   it("offers Open in Claude Code in the footer with a key, and asks for a description first", async () => {
     await mount();
     await act(async () => {

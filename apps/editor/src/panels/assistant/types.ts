@@ -108,8 +108,8 @@ export interface HandoffRequest {
   prompt: string;
 }
 
-/** `folder` shows home as "~". `cancelled`: the person closed the folder dialog. `error`: why nothing opened. */
-export type HandoffResult = { ok: true; folder: string } | { ok: false; cancelled?: boolean; error?: string };
+/** `folder` shows home as "~". `withoutSonobe`: the organization's managed MCP config leaves Sonobe's server out. `cancelled`: the person closed the folder dialog. `error`: why nothing opened. */
+export type HandoffResult = { ok: true; folder: string; withoutSonobe?: true } | { ok: false; cancelled?: boolean; error?: string };
 
 export interface AssistantError {
   code: string;

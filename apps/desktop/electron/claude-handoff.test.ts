@@ -254,7 +254,8 @@ describe("openInClaudeCode", () => {
   it("writes the script for an organization's managed MCP config", async () => {
     for (const managed of [{ sonobe: true }, { sonobe: false }]) {
       const { handoff } = options({ managedMcp: async () => managed });
-      expect(await openInClaudeCode({ prompt: PROMPT }, handoff)).toEqual({ ok: true, folder: "~/code/placemark" });
+      // Without Sonobe's server the session can't reach the canvas, so the box says so instead of its usual toast.
+      expect(await openInClaudeCode({ prompt: PROMPT }, handoff)).toEqual(managed.sonobe ? { ok: true, folder: "~/code/placemark" } : { ok: true, folder: "~/code/placemark", withoutSonobe: true });
       const file = path.join(handoff.dir, "a1b2c3.command");
       expect(await readFile(file, "utf8")).toBe(buildHandoffScript({ folder: "/Users/me/code/placemark", display: "~/code/placemark", prompt: PROMPT, mcpConfig: handoffMcpConfig(SERVER), managed }));
       await rm(file);

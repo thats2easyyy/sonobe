@@ -159,8 +159,12 @@ export interface HandoffRequest {
   prompt: string;
 }
 
-/** `folder` shows home as "~". `cancelled`: the person closed the folder dialog. `error`: why nothing opened (teaching copy). */
-export type HandoffResult = { ok: true; folder: string } | { ok: false; cancelled?: boolean; error?: string };
+/**
+ * `folder` shows home as "~". `withoutSonobe`: the organization's managed MCP config leaves Sonobe's server out, so the session
+ * can't reach the canvas (Terminal says what to ask the admin). `cancelled`: the person closed the folder dialog. `error`: why
+ * nothing opened (teaching copy).
+ */
+export type HandoffResult = { ok: true; folder: string; withoutSonobe?: true } | { ok: false; cancelled?: boolean; error?: string };
 
 export type AssistantErrorCode =
   | "no_key"
