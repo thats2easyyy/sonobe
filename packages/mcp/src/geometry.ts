@@ -91,9 +91,7 @@ let elk: Promise<ElkLike> | undefined;
 
 /** ELK's layered layout for tidy_graph, loaded on first use (the same engine the editor's Tidy Up uses). */
 export function elkGroupLayout(): Promise<GroupLayout> {
-  elk ??= import("elkjs/lib/elk.bundled.js").then(
-    (m) => new (m.default as unknown as new () => ElkLike)(),
-  );
+  elk ??= import("elkjs/lib/elk.bundled.js").then((m) => new m.default());
   elk.catch(() => {
     elk = undefined;
   });

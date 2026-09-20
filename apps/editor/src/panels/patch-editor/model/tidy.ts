@@ -3,7 +3,7 @@
  * out by ELK's layered algorithm, which loads on first use.
  */
 
-import { createElkGroupLayout, type ElkLike, type GroupLayout } from "@sonobe/core/graph";
+import { createElkGroupLayout, type GroupLayout } from "@sonobe/core/graph";
 import type { ELK } from "elkjs/lib/elk-api.js";
 import elkBundleUrl from "elkjs/lib/elk.bundled.js?url";
 
@@ -45,5 +45,5 @@ function loadElk(): Promise<ELK> {
 
 /** The group layout Tidy Up uses: ELK layered, left to right. */
 export async function elkGroupLayout(): Promise<GroupLayout> {
-  return createElkGroupLayout((await loadElk()) as unknown as ElkLike);
+  return createElkGroupLayout(await loadElk());
 }
