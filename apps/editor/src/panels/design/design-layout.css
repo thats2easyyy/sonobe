@@ -1,0 +1,27 @@
+/* Design with Claude's place on the canvas: the preview's pill kept in view, and the box's growth kept in its room. */
+
+/* No room above the frame (the ruler, the canvas's edge): the pill sits just inside its top edge, at `top` (DesignPreview). */
+.sb-design-preview__pill[data-place="inside"] {
+  bottom: auto;
+  margin: 0;
+}
+
+/*
+ * The canvas keeps room above the box for the height it opened at (CanvasPanel), so the artboard doesn't
+ * move as the box grows. It grows up to --sb-design-box-max, which leaves the canvas room above it. Past
+ * that, Claude's reply scrolls while the rest stays whole, and the box itself scrolls if even that won't fit.
+ */
+.sb-panel__body > .sb-design-box {
+  max-height: min(100% - 32px, var(--sb-design-box-max, 100%));
+}
+
+.sb-panel__body > .sb-design-box > * {
+  flex-shrink: 0;
+}
+
+.sb-panel__body > .sb-design-box > .sb-design-box__reply {
+  flex-shrink: 1;
+  min-height: 3em;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
