@@ -5,8 +5,9 @@
  * 1. Launches against a missing editor build (setup page): window + secure defaults,
  *    window.sonobeHost, native menus and command delivery, main→renderer RPC, project IO + watching,
  *    keychain secrets (with the test cipher), the MCP endpoint (token file, Host/Origin guards, tools
- *    explaining that no editor is connected), openExternal and link handling, a screenshot, and a clean
- *    quit that removes mcp.json.
+ *    explaining that no editor is connected), connected sessions (a real `sonobe mcp` relay listed with
+ *    its folder, pushed to the window, and gone after its goodbye), openExternal and link handling, a
+ *    screenshot, and a clean quit that removes mcp.json.
  * 2. Builds the editor (npm run build -w @sonobe/editor) and launches it with SONOBE_LAN=1. When the
  *    build doesn't mount the MCP bridge, it says so and uses an editor harness instead (the real
  *    editor session, RPC handlers and viewer from apps/editor/src). Then runs the whole loop over
@@ -361,13 +362,13 @@ try {
   relaySend({ method: "notifications/initialized" });
   relaySend({ id: 2, method: "tools/call", params: { name: "get_guide", arguments: { topic: "loops" } } });
   await poll(() => relayOut.includes('"id":2'), { message: "the relayed tool call" });
-  const listed = await poll(async () => {
+  const sessionStatus = await poll(async () => {
     const s = await win.evaluate(() => window.sonobeHost.getMcpStatus());
     return s.clients.find((c) => c.folder === sessionFolder && c.toolCalls >= 1) ? s : null;
   }, { message: "the relay's session in getMcpStatus" });
-  const listedSession = listed.clients.find((c) => c.folder === sessionFolder);
+  const listedSession = sessionStatus.clients.find((c) => c.folder === sessionFolder);
   assert(listedSession.label === "Claude Code" && listedSession.via === "relay" && listedSession.state === "connected" && listedSession.lastTool === "get_guide" && listedSession.relayVersion, "the relay's session", listedSession);
-  assert(listed.clients.some((c) => c.via === "http" && c.toolCalls >= 3), "the direct client shows as one anonymous row", listed.clients);
+  assert(sessionStatus.clients.some((c) => c.via === "http" && c.toolCalls === 2), "the direct client (get_guide, get_outline) shows as one anonymous row", sessionStatus.clients);
   await poll(() => win.evaluate(() => window.__mcpPushes.some((s) => s.clients.some((c) => c.lastTool === "get_guide" && c.via === "relay"))), { message: "a pushed MCP status" });
   relay.stdin.end();
   await new Promise((resolve) => relay.once("exit", resolve));

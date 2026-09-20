@@ -7,7 +7,8 @@
  *
  * It also tells the app which session it is, so Connect Claude can list connected sessions: every
  * POST carries a per-process `sonobe-client` id, and /clients gets a hello with the client's name and
- * the session's folder, a heartbeat every 30 s, and a goodbye when stdin closes. Node only.
+ * the session's folder, a heartbeat every 30 s, and a goodbye when stdin closes or `stop` aborts
+ * (the CLI aborts it on SIGINT and SIGTERM). Node only.
  */
 
 import { randomUUID } from "node:crypto";
@@ -46,6 +47,11 @@ export interface RelayOptions {
   heartbeatMs?: number;
   /** The session id (default: a random UUID per process). */
   randomId?: () => string;
+  /**
+   * Aborts when the process is asked to stop (SIGINT, SIGTERM). Claude Code ends a stdio server with
+   * SIGINT rather than by closing stdin; the relay then stops like on stdin end, goodbye included.
+   */
+  stop?: AbortSignal;
 }
 
 /**
@@ -366,6 +372,9 @@ export async function runRelay(options: RelayOptions): Promise<number> {
   };
 
   const lines = createInterface({ input: options.stdin, crlfDelay: Infinity });
+  const stopReading = () => lines.close();
+  if (options.stop?.aborted) stopReading();
+  else options.stop?.addEventListener("abort", stopReading, { once: true });
   for await (const line of lines) {
     if (!line.trim()) continue;
     let message: JsonRpcMessage | JsonRpcMessage[];
@@ -398,11 +407,13 @@ export async function runRelay(options: RelayOptions): Promise<number> {
     const task = forward(message).finally(() => pending.delete(task));
     pending.add(task);
   }
-  // stdin closing is how a client shuts the server down (the MCP stdio spec). Nobody reads the
-  // answers any more, so end the calls still running; the app sees their streams close.
+  // stdin closing (or a stop signal) is how a client shuts the server down (the MCP stdio spec).
+  // Nobody reads the answers any more, so end the calls still running; the app sees their streams close.
+  options.stop?.removeEventListener("abort", stopReading);
   clearInterval(heartbeat);
   for (const controller of inflight.values()) controller.abort();
   await Promise.all([...pending]);
+  // Goodbye, so Connect Claude marks the session gone now rather than after 75 s without a heartbeat.
   await hello;
   if (announced && announcing)
     await fetchImpl(new URL(`/clients/${clientId}`, connection.url), {

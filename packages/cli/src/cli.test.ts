@@ -404,6 +404,20 @@ describe("sonobe main.ts end to end", () => {
     expect(clients.get(session!.id)?.state).toBe("gone");
   });
 
+  it("says goodbye and exits on SIGINT, which is how Claude Code stops stdio servers", async () => {
+    const folder = path.join(path.dirname(project), "sigint");
+    const child = spawn(process.execPath, [MAIN, "mcp"], { env: childEnv({ SONOBE_HOME: home, CLAUDE_PROJECT_DIR: folder }) });
+    const exited = new Promise<number | null>((resolve) => child.once("exit", (code) => resolve(code)));
+    child.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", id: 0, method: "initialize", params: { protocolVersion: "2025-11-25", capabilities: {}, clientInfo: { name: "claude-code", version: "2.1.278" } } })}\n`);
+    const end = Date.now() + 5000;
+    while (!clients.list().some((c) => c.folder === folder) && Date.now() < end) await new Promise((resolve) => setTimeout(resolve, 20));
+    const session = clients.list().find((c) => c.folder === folder)!;
+    expect(session.state).toBe("connected");
+    child.kill("SIGINT");
+    expect(await exited).toBe(0);
+    expect(clients.get(session.id)?.state).toBe("gone");
+  });
+
   it("relays 2026-07-28 requests with Mcp-* headers", async () => {
     const meta = {
       "io.modelcontextprotocol/protocolVersion": "2026-07-28",

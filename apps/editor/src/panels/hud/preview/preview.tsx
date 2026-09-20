@@ -177,7 +177,7 @@ function PreviewApp({ view }: { view: string }) {
       <div className="pv-hud">
         <Hud defaultTab={hudTab} onToggleCollapse={() => undefined} onConnectClaude={() => setConnectOpen(true)} />
       </div>
-      <ConnectClaudeDialog open={connectOpen} onOpenChange={setConnectOpen} host={host} initialTab={view === "connect-desktop-config" ? "desktop" : "code"} onOpenGuide={() => undefined} />
+      <ConnectClaudeDialog open={connectOpen} onOpenChange={setConnectOpen} host={host} initialTab={view === "connect-desktop-config" ? "desktop" : "code"} defaults={{ repoPath: "/Users/you/sonobe" }} onOpenGuide={() => undefined} />
     </div>
   );
 }
