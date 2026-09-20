@@ -3,7 +3,9 @@
  * so the editor doesn't import from the desktop app. Keep in sync.
  *
  * The Assistant is optional and desktop-only: it runs in Electron's main process with the person's own
- * Anthropic API key, stored in the OS keychain through sonobeHost.secrets ("anthropic.apiKey").
+ * Anthropic API key, stored in the OS keychain through sonobeHost.secrets ("anthropic.apiKey"). With the
+ * experimental subscription switch on (off by default, awaiting Anthropic's permission), it can run on
+ * the person's Claude subscription instead, through Claude's agent adapter.
  */
 
 /** Secret name for the person's Anthropic API key (sonobeHost.secrets). */
@@ -38,6 +40,45 @@ export interface AssistantUsage {
   requests: number;
 }
 
+/** What the Assistant runs on: the person's Anthropic API key, or (experimental) their Claude subscription through Claude's agent adapter. */
+export type AssistantProvider = "api_key" | "subscription";
+
+/** The Assistant's connection settings, app-wide and kept by the main process. */
+export interface AssistantConnection {
+  /** The experimental switch in Settings → Claude. Off by default: awaiting Anthropic's permission. */
+  subscriptionEnabled: boolean;
+  /** The person's pick in the Assistant's setup. "subscription" counts only while subscriptionEnabled is on. */
+  provider: AssistantProvider;
+  /** What a new chat runs on: `provider` while the switch is on, else "api_key". */
+  active: AssistantProvider;
+}
+
+export interface AssistantConnectionUpdate {
+  subscriptionEnabled?: boolean;
+  provider?: AssistantProvider;
+}
+
+/**
+ * unknown: not checked in this launch. checking: the adapter is starting or reading the login. ready: signed in.
+ * signed_out: the adapter reports no login. not_installed: Sonobe couldn't find the adapter. failed: it wouldn't start or answer.
+ */
+export type AssistantSubscriptionState = "unknown" | "checking" | "ready" | "signed_out" | "not_installed" | "failed";
+
+/** The Claude login the adapter last reported, and whether Sonobe found the adapter. */
+export interface AssistantSubscriptionStatus {
+  state: AssistantSubscriptionState;
+  /** account: a Claude plan pays. api_key: an API key or an Anthropic Console login pays, at API rates. gateway, external: another provider. none: signed out. */
+  kind: "account" | "api_key" | "gateway" | "external" | "none" | null;
+  /** The adapter's label ("Claude Max", "Anthropic API key", "Not logged in"). */
+  label: string | null;
+  email: string | null;
+  adapterVersion: string | null;
+  /** What to do, for signed_out, not_installed and failed. */
+  message: string | null;
+}
+
+export type AssistantSignInResult = { ok: true } | { ok: false; error: string };
+
 export interface AssistantStatus {
   hasKey: boolean;
   keyHint: string | null;
@@ -50,6 +91,11 @@ export interface AssistantStatus {
   messageCount: number;
   /** Older preloads don't send it. */
   codeFolder?: AssistantCodeFolderStatus;
+  /** Older preloads don't send these: treat them as the API key only. */
+  connection?: AssistantConnection;
+  subscription?: AssistantSubscriptionStatus;
+  /** What this window's chat runs on: set by its first message, kept until New chat. Null before the first message. */
+  chatProvider?: AssistantProvider | null;
 }
 
 /** What the canvas knows when the person asks from the Design with Claude box. Every name comes from the document: data, not instructions. */
@@ -133,17 +179,26 @@ export interface AssistantKeyCheck {
 
 export type AssistantToolStatus = "running" | "done" | "error" | "declined" | "skipped";
 
+/** One choice on a permission card (the agent's session/request_permission), in the agent's order. */
+export interface AssistantConfirmOption {
+  id: string;
+  label: string;
+  kind: "allow_once" | "allow_always" | "reject_once" | "reject_always";
+}
+
 export type AssistantEvent =
-  | { type: "run_started"; runId: string; model: string }
+  | { type: "run_started"; runId: string; model: string; provider?: AssistantProvider }
   | { type: "turn_started"; runId: string; turn: number }
   | { type: "text_delta"; runId: string; turn: number; delta: string }
   | { type: "thinking_delta"; runId: string; turn: number; delta: string }
+  /** A repeat for a toolUseId already started updates its title and detail. */
   | { type: "tool_started"; runId: string; toolUseId: string; name: string; title: string; detail: string }
   /** Where a running tool is ("Downloading images: 7 of 28"), from its progress notifications. */
   | { type: "tool_progress"; runId: string; toolUseId: string; detail: string }
   | { type: "tool_finished"; runId: string; toolUseId: string; name: string; status: AssistantToolStatus; detail: string; changedDocument: boolean; imported?: AssistantImported }
-  | { type: "confirm_required"; runId: string; confirmationId: string; toolUseId: string; title: string; message: string; count: number; kind?: "delete" | "replace"; approveLabel?: string; declineLabel?: string }
-  | { type: "confirm_resolved"; runId: string; confirmationId: string; approved: boolean }
+  /** kind "permission": the agent asks before a tool runs; `options` are its choices, answered with confirm(id, approved, optionId). */
+  | { type: "confirm_required"; runId: string; confirmationId: string; toolUseId: string; title: string; message: string; count: number; kind?: "delete" | "replace" | "permission"; approveLabel?: string; declineLabel?: string; options?: AssistantConfirmOption[] }
+  | { type: "confirm_resolved"; runId: string; confirmationId: string; approved: boolean; optionId?: string }
   | { type: "usage"; runId: string; usage: AssistantUsage; limits: AssistantLimits }
   | { type: "notice"; runId: string; tone: "info" | "warn"; message: string }
   | { type: "run_finished"; runId: string; outcome: AssistantOutcome; error?: AssistantError; usage: AssistantUsage }
@@ -159,7 +214,7 @@ export interface AssistantApi {
   send(request: { text: string; model?: string; context?: AssistantCanvasContext }): Promise<AssistantRunResult>;
   stop(): Promise<boolean>;
   reset(): Promise<AssistantStatus>;
-  confirm(confirmationId: string, approved: boolean): Promise<boolean>;
+  confirm(confirmationId: string, approved: boolean, optionId?: string): Promise<boolean>;
   checkKey(): Promise<AssistantKeyCheck>;
   onEvent(cb: (event: AssistantEvent) => void): () => void;
   /** Optional: older preloads lack the code folder methods. */
@@ -168,6 +223,10 @@ export interface AssistantApi {
   unlinkCodeFolder?(): Promise<AssistantCodeFolderStatus>;
   /** Optional: older preloads lack it. Opens Terminal in the linked code folder running the person's own `claude` (macOS). */
   openInClaudeCode?(request: HandoffRequest): Promise<HandoffResult>;
+  /** Optional: older preloads lack the subscription methods. */
+  setConnection?(update: AssistantConnectionUpdate): Promise<AssistantStatus>;
+  checkSubscription?(): Promise<AssistantSubscriptionStatus>;
+  signInToClaude?(): Promise<AssistantSignInResult>;
 }
 
 /** The parts of window.sonobeHost the Assistant uses. All optional: older preloads lack them. */
