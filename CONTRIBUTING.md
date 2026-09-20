@@ -43,6 +43,14 @@ Node 22.18+ is required. Node 24 is what CI uses.
 - To run on your own iPhone, copy `apps/ios/Config/Local.xcconfig.example` to `Local.xcconfig` and set your team and a bundle id of your own. Git ignores `Local.xcconfig`. Never commit a team ID, a bundle id of your own, or other signing settings to the project.
 - The bridge has two sides: `apps/desktop/player/platform.ts` and `apps/ios/SonobeViewer/Haptics.swift`. Change them together, and update ARCHITECTURE.md §9.2. A player test checks that the app's haptic types exist in the catalog.
 
+## Changing how patch editor nodes look
+
+Tidy Up, MCP `tidy_graph` and `add_patches`, and automatic node placement size nodes without a DOM, from the model in `packages/core/src/graph/nodeSize.ts`, which follows `apps/editor/src/panels/patch-editor/patch-editor.css`. When you change the node CSS (padding, gaps, fonts, chips, inline values):
+
+1. Update `NODE_BOX` or `NODE_FONTS` in `nodeSize.ts` to match, and the shapes in `nodeShape.ts` when a node shows something new.
+2. On macOS, regenerate the font table with `node apps/editor/scripts/measure-node-fonts.ts`.
+3. Run `npx playwright test e2e/node-sizes.spec.ts`. It compares the estimate against the drawn nodes. With `SONOBE_UPDATE_NODE_SIZES=1` it also rewrites `packages/mcp/fixtures/node-sizes`, which `packages/mcp/src/geometry.test.ts` checks the headless estimate against.
+
 ## Adding an MCP tool that can take long
 
 Tools register in `packages/mcp/src/tools/` with `tc.tool(name, config, async (args, ctx, work) => …)`. When a call can take more than a second or two (loading a page, waiting on the person), use `work` (`packages/mcp/src/progress.ts`, ARCHITECTURE §10 "Long calls"):

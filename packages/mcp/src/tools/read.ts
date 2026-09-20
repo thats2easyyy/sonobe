@@ -81,7 +81,7 @@ export function registerReadTools(tc: ToolContext): void {
           .enum(["compact", "normal", "full"])
           .optional()
           .describe(
-            "compact: structure and links; normal (default): plus values and notes; full: plus editor positions and settings.",
+            "compact: structure and links; normal (default): plus values and notes; full: plus editor positions (patch ui, and node=x,y or node=auto for layer and interface nodes) and settings.",
           ),
         maxLines: z.number().int().min(10).max(2000).optional().describe("Default 300."),
         offset: z

@@ -109,7 +109,6 @@ Every `json tool:<name>` example block runs through the real tools in `src/guide
 ## Other exports
 
 - `explain(doc, { registry, audience })`: a deterministic plain-language description at beginner, designer or engineer level.
-- `tidyOps(component)`: layered patch layout.
 - `TEMPLATES` / `createTemplateDocument`: starter documents.
 - `SimEventSchema` / `parseSimEvents`: simulated input shapes.
 - `traceTable` / `summaryText`: trace formatting (shared with the CLI).

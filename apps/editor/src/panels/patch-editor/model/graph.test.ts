@@ -87,6 +87,16 @@ describe("deriveGraph", () => {
     expect(m.nodes.some((n) => n.id === "@missing")).toBe(false);
   });
 
+  it("places layer targets 96 pt clear of their drivers as drawn, when measured sizes are given", () => {
+    const driver = model.nodes.find((n) => n.id === "photo_scale")!;
+    const drawn = new Map([["photo_scale", { width: 290, height: 124 }]]);
+    const measured = deriveGraph({ doc, componentId: "main", registry, sizes: drawn });
+    const photo = measured.nodes.find((n) => n.id === "@photo")!;
+    const drivers = (photo.data as LayerGraphNode["data"]).inputs.map((p) => p.link!.split(".")[0]!);
+    expect(drivers).toEqual(["photo_scale"]);
+    expect(photo.position.x).toBe(driver.position.x + 290 + 96);
+  });
+
   it("uses session positions for layer targets when given", () => {
     const moved = deriveGraph({ doc, componentId: "main", registry, positions: { "@photo": { x: 5, y: 6 } } });
     expect(moved.nodes.find((n) => n.id === "@photo")!.position).toEqual({ x: 5, y: 6 });

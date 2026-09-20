@@ -50,7 +50,14 @@ Some connections convert automatically: number to boolean (on when > 0), boolean
 - `expectedRevision` refuses to apply when the document moved on.
 - A batch can replace an item under its id: remove it, then add the new one. Ids removed by an earlier batch are retired, so new items skip them (`card_2`, reported on a "Retired ids skipped" line) and an explicit retired `id` fails with `id_retired`. Rebuild in one batch to keep ids.
 
-Op kinds: `addLayer`, `updateLayer`, `moveLayer`, `removeLayer`, `addPatch`, `updatePatch`, `removePatch`, `setInput` (literal or link; `null` resets), `connect`, `disconnect`, `rename`, `addComment`, `updateComment`, `removeComment`, `addComponent`, `removeComponent`, `createComponent`, `updateInterface` (by key; `null` unpublishes; `replace: true` sets a whole side), `updateComponent`, `setScript`, `addAsset`, `removeAsset`, `setProject`. Every op may name a `component`; a field an op doesn't take fails with `unknown_field` and a did-you-mean.
+Op kinds: `addLayer`, `updateLayer`, `moveLayer`, `removeLayer`, `addPatch`, `updatePatch`, `removePatch`, `setInput` (literal or link; `null` resets), `connect`, `disconnect`, `rename`, `addComment`, `updateComment`, `removeComment`, `addComponent`, `removeComponent`, `createComponent`, `updateInterface` (by key; `null` unpublishes; `replace: true` sets a whole side), `updateComponent`, `setNodePositions`, `setScript`, `addAsset`, `removeAsset`, `setProject`. Every op may name a `component`; a field an op doesn't take fails with `unknown_field` and a did-you-mean.
+
+## Organizing the graph
+
+- **Sections are comment frames.** Frame a group of patches with `addComment { "comment": { "text": "Places", "rect": [x, y, w, h] } }`. A node belongs to the frame under its title bar.
+- **Tidy with `tidy_graph`.** It lays each frame's patches out left to right inside the frame, refits the frame, and pushes overlapping frames apart, keeping the sections where they are. `tidy_graph({ "frames": ["places"] })` tidies one section; `ids` tidies some nodes within their frames; `dryRun: true` previews. The result says what grew or moved, and which nodes overlapped before.
+- **Don't estimate node sizes.** Nodes are as wide as their names, inline values and live values; a text Loop Builder is about 280 to 300 pt wide. `add_patches` and `tidy_graph` size them as the editor draws them, so leave out `ui` or tidy afterwards instead of computing a layout.
+- **Layer and interface nodes.** A layer that a cable drives or reads gets a node (`@card`), and published ports get `$in` and `$out`. They sit next to the patches they connect to until someone places them. `get_outline` detail `full` shows `node=x,y` or `node=auto`. Move them with `{ "op": "setNodePositions", "positions": { "@card": [900, 40] } }`; `null` puts one back to automatic. Don't write `meta.patchEditor` yourself: `updateComponent` refuses a write that would drop positions someone placed.
 
 ## Example: dim a dot while it's pressed
 

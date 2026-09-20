@@ -224,6 +224,7 @@ The Connect Claude screen has more of these under **Try asking**. Click one to c
 
 - "Wrap the post card into a component with Title, Image and Liked as published ports, then build a ten-post feed from a loop."
 - "Tidy the graph, name every patch by its effect, and add a comment frame for each feature."
+- "Tidy just the Places section."
 
 ### Level 4: expert
 

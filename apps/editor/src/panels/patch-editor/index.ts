@@ -17,7 +17,8 @@
  * `aria-label`. The editor fills its parent (flex: 1), follows
  * selection.componentPath, and persists its viewport per component in selection.patchViewports.
  * Layer target and component interface node positions are saved in the component's
- * `meta.patchEditor.nodes` (updateComponent `meta`), so they're undoable and survive reloads.
+ * `meta.patchEditor.nodes` (the setNodePositions op), so they're undoable and survive reloads.
+ * The graph model itself (deriveGraph, node sizes, tidy) lives in `@sonobe/core/graph`.
  *
  * "Drive with a patch" from other panels:
  *
