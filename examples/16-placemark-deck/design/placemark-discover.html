@@ -1,0 +1,155 @@
+<!doctype html>
+<!--
+  Placemark's Discover screen, as the Placemark deck's design was captured for example 16. It's the page
+  Claude wrote in the test session, with data-name on every element that becomes a layer (so layer
+  ids read "card_photo_1", not "group_9"), alt text on the photos (so asset ids read "malasadas",
+  not "image_1280px_..."), and the top card first in the page with z-index 1 so its icons name the
+  shared assets. Photos: Wikimedia Commons, credited in ../README.md. Re-capture with
+  node examples/16-placemark-deck/design/capture.ts
+-->
+<html><head><meta charset="utf-8"><title>Placemark Discover</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { width: 402px; height: 874px; overflow: hidden; position: relative; background: #F2F2F7;
+         font-family: "SF Pro Rounded", ui-rounded, system-ui; color: #000000; -webkit-font-smoothing: antialiased; }
+  .abs { position: absolute; }
+  /* Header: 22pt side padding, 10pt below the 62pt status bar */
+  .header { left: 22px; top: 72px; width: 358px; height: 44px; display: flex; align-items: center; justify-content: space-between; }
+  .location { display: flex; align-items: center; gap: 5px; height: 44px; font-size: 17px; font-weight: 600; }
+  .round { width: 44px; height: 44px; border-radius: 22px; display: flex; align-items: center; justify-content: center; }
+  .buttons { display: flex; gap: 4px; }
+  /* Category chips: horizontal scroll, clipped to the 358pt column */
+  .categories { left: 22px; top: 138px; width: 358px; height: 45px; display: flex; gap: 8px; overflow-x: auto; }
+  .chip { flex: none; height: 45px; padding: 0 17px; border-radius: 22.5px; background: #FFFFFF; display: flex; align-items: center; gap: 7px; font-size: 15px; font-weight: 600; }
+  .chip.on { background: #000000; color: #FFFFFF; }
+  /* Deck: 358×478 at y 205 */
+  .deck { left: 22px; top: 205px; width: 358px; height: 478px; }
+  .backdrop { position: absolute; left: 13px; top: 8px; width: 332px; height: 478px; border-radius: 32px; background: rgba(242, 77, 71, 0.09); }
+  .end { position: absolute; inset: 0; border-radius: 32px; background: #FFFFFF; padding: 30px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 16px; text-align: center; }
+  .end h2 { font-size: 22px; font-weight: 700; line-height: 28px; }
+  .end p { font-size: 15px; line-height: 20px; color: #8A8A8E; }
+  .prominent { height: 34px; padding: 0 14px; border-radius: 17px; background: #F24D47; color: #FFFFFF; font-size: 17px; line-height: 34px; }
+  /* The cards get a group of their own, so their stacking never reaches the backdrop or End of Deck */
+  .cards { position: absolute; inset: 0; }
+  .card { position: absolute; inset: 0; border-radius: 32px; overflow: hidden; background: #FFFFFF; border: 1px solid rgba(0, 0, 0, 0.045); display: flex; flex-direction: column; }
+  .card.top { z-index: 1; }
+  .photos { position: relative; flex: 1; background: #F2F2F7; min-height: 0; }
+  .grid { position: absolute; inset: 0; display: flex; gap: 4px; }
+  .tile { display: block; width: 100%; height: 100%; object-fit: cover; min-height: 0; }
+  .big { width: 60%; flex: none; }
+  .col { flex: 1; display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+  .col .tile { flex: 1; height: auto; }
+  .source { position: absolute; left: 12px; bottom: 10px; padding: 2px 6px; border-radius: 4px; background: rgba(0, 0, 0, 0.65); color: #FFFFFF; font-size: 11px; line-height: 13px; }
+  .info { position: relative; padding: 22px; display: flex; flex-direction: column; gap: 8px; }
+  .title-row { display: flex; align-items: flex-start; gap: 14px; }
+  .name { flex: 1; font-size: 28px; font-weight: 700; line-height: 34px; }
+  .details { flex: none; width: 44px; height: 44px; border-radius: 22px; background: #F2F2F7; display: flex; align-items: center; justify-content: center; }
+  .address { font-size: 15px; line-height: 20px; color: #8A8A8E; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .credits { font-size: 11px; line-height: 13px; color: #8A8A8E; }
+  /* Swipe badge: 45pt symbol in a 95pt material circle, 24pt in from the top-right corner */
+  .badge { position: absolute; top: 24px; right: 24px; width: 95px; height: 95px; border-radius: 47.5px; background: rgba(250, 250, 250, 0.86);
+           box-shadow: 0 4px 16px rgba(0, 0, 0, 0.08); display: flex; align-items: center; justify-content: center; }
+  /* Vote buttons: 80pt circles, 28pt apart, centered at y 707 */
+  .controls { left: 0; top: 707px; width: 402px; height: 80px; display: flex; justify-content: center; gap: 28px; }
+  .vote { width: 80px; height: 80px; border-radius: 40px; display: flex; align-items: center; justify-content: center; background: #FFFFFF; }
+  .vote.yes { background: #F24D47; box-shadow: 0 7px 24px rgba(242, 77, 71, 0.22); }
+</style></head>
+<body data-name="Discover">
+  <div class="abs header" data-name="Header">
+    <div class="location" data-name="Location Button"><svg data-name="Location Arrow" width="12" height="12" viewBox="0 0 24 24" fill="#000000" ><path d="M21.2 2.8 3.1 10.2c-.9.4-.8 1.6.1 1.9l7.3 1.4 1.4 7.3c.2.9 1.5 1 1.9.1z"/></svg><span data-name="Location Name">Honolulu</span><svg data-name="Location Chevron" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="#000000" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round" ><path d="m5 8.5 7 7 7-7"/></svg></div>
+    <div class="buttons" data-name="Header Buttons">
+      <div class="round" data-name="Account Button" style="background:#F24D47"><svg data-name="Account Icon" width="20" height="20" viewBox="0 0 24 24" fill="#FFFFFF" ><circle cx="12" cy="7.2" r="4.4"/><path d="M3.6 20.2c0-4.1 3.8-7 8.4-7s8.4 2.9 8.4 7c0 .7-.5 1.2-1.2 1.2H4.8c-.7 0-1.2-.5-1.2-1.2z"/></svg></div>
+      <div class="round" data-name="Invite Button" style="background:#FFFFFF"><svg data-name="Invite Icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#F24D47" stroke-width="2.7" stroke-linecap="round" stroke-linejoin="round" ><path d="M12 4.5v15M4.5 12h15"/></svg></div>
+    </div>
+  </div>
+  <div class="abs categories" data-name="Categories"><div class="chip on" data-name="All Chip"><svg data-name="All Icon" width="16" height="16" viewBox="0 0 24 24" fill="#FFFFFF" ><rect x="3" y="3" width="8" height="8" rx="2"/><rect x="13" y="3" width="8" height="8" rx="2"/><rect x="3" y="13" width="8" height="8" rx="2"/><rect x="13" y="13" width="8" height="8" rx="2"/></svg><span>All</span></div><div class="chip" data-name="Eat Chip"><svg data-name="Eat Icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#000000" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" ><path d="M6.5 2.5v6.2M4 2.5v5.2a2.5 2.5 0 0 0 5 0V2.5M6.5 10.2v11.3M17 21.5V2.6c-2.6.8-4 3.8-4 7.2 0 2 .8 3.6 2.2 4.1L17 14.5"/></svg><span>Eat</span></div><div class="chip" data-name="Coffee Chip"><svg data-name="Coffee Icon" width="16" height="16" viewBox="0 0 24 24" fill="#000000" ><path d="M3.5 8h13v4.5a6.5 6.5 0 0 1-13 0z"/><path d="M16.5 9.2h1.3a2.7 2.7 0 0 1 0 5.4h-1.9" fill="none" stroke="#000000" stroke-width="2"/><rect x="1.5" y="19.5" width="18" height="2.4" rx="1.2"/></svg><span>Coffee</span></div><div class="chip" data-name="Drinks Chip"><svg data-name="Drinks Icon" width="16" height="16" viewBox="0 0 24 24" fill="#000000" ><path d="M6.3 2.5h11.4c.6 2 .9 3.8.9 5.2 0 3.9-2.7 6.3-5.4 6.8v4.9h3.3c.6 0 1 .4 1 1s-.4 1-1 1H7.5c-.6 0-1-.4-1-1s.4-1 1-1h3.3v-4.9C8.1 14 5.4 11.6 5.4 7.7c0-1.4.3-3.2.9-5.2z"/></svg><span>Drinks</span></div><div class="chip" data-name="Play Chip"><svg data-name="Play Icon" width="16" height="16" viewBox="0 0 24 24" fill="#000000" ><path d="M10 3.5c.6 4.3 2.2 5.9 6.5 6.5-4.3.6-5.9 2.2-6.5 6.5C9.4 12.2 7.8 10.6 3.5 10c4.3-.6 5.9-2.2 6.5-6.5zM18 13.5c.3 2.3 1.2 3.2 3.5 3.5-2.3.3-3.2 1.2-3.5 3.5-.3-2.3-1.2-3.2-3.5-3.5 2.3-.3 3.2-1.2 3.5-3.5zM18.2 2c.2 1.5.8 2.1 2.3 2.3-1.5.2-2.1.8-2.3 2.3-.2-1.5-.8-2.1-2.3-2.3 1.5-.2 2.1-.8 2.3-2.3z"/></svg><span>Play</span></div><div class="chip" data-name="Outside Chip"><svg data-name="Outside Icon" width="16" height="16" viewBox="0 0 24 24" fill="#000000" ><path d="M20.8 3.2C9.5 2.9 3.4 7.9 3.4 14.2c0 1.7.5 3.2 1.4 4.4C6.6 14 10 10.6 15 8.8c-4.2 2.4-7.3 6-8.6 10.9 1.3.8 2.9 1.2 4.5 1.2 6.9 0 10.3-6.6 9.9-17.7z"/></svg><span>Outside</span></div></div>
+  <div class="abs deck" data-name="Deck">
+    <div class="backdrop" data-name="Deck Backdrop"></div>
+    <div class="end" data-name="End of Deck">
+      <svg data-name="End of Deck Map" width="50" height="50" viewBox="0 0 24 24" fill="none" stroke="#F24D47" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round" ><path d="M9 4.2 3.6 6.3c-.4.1-.6.5-.6.9v12.1c0 .7.7 1.2 1.4.9L9 18.4l6 2.1 5.4-2.1c.4-.1.6-.5.6-.9V5.4c0-.7-.7-1.2-1.4-.9L15 6.3zM9 4.2v14.2M15 6.3v14.2"/></svg>
+      <h2 data-name="End of Deck Title">More places to explore?</h2>
+      <p data-name="End of Deck Message">We only suggest places with photos you can see. Try more places, another area or activity.</p>
+      <div class="prominent" data-name="Find More Places Button">Find more places</div>
+      <div class="prominent" data-name="Search Another Area Button">Search another area</div>
+    </div>
+    <div class="cards" data-name="Cards">
+      <div class="card top" data-name="Card">
+        <div class="photos" data-name="Card Photos">
+          <div class="grid" data-name="Card Photo Grid">
+            <img class="tile big" data-name="Card Photo 1" alt="Malasadas" src="https://upload.wikimedia.org/wikipedia/commons/6/64/Leonard%27s_malasadas.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail_unscaled">
+            <div class="col" data-name="Card Side Photos">
+              <img class="tile" data-name="Card Photo 2" alt="Pastry case" src="https://thumb.wikimedia.org/wikipedia/commons/thumb/c/cb/Leonard%27s_Bakery%2C_Honolulu%2C_Hawaii_%284540006860%29.jpg/1280px-Leonard%27s_Bakery%2C_Honolulu%2C_Hawaii_%284540006860%29.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail">
+              <img class="tile" data-name="Card Photo 3" alt="Bakery storefront" src="https://thumb.wikimedia.org/wikipedia/commons/thumb/5/56/Leonard%27s_Bakery_%284915217136%29.jpg/1280px-Leonard%27s_Bakery_%284915217136%29.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail">
+            </div>
+          </div>
+          <div class="source" data-name="Card Photo Source"><span data-name="Card Photo Source Label">Photos: Wikimedia Commons</span></div>
+        </div>
+        <div class="info" data-name="Card Info">
+          <div class="title-row" data-name="Card Title Row">
+            <div class="name" data-name="Place Name">Leonard's Bakery</div>
+            <div class="details" data-name="Card Details Button"><svg data-name="Card Details Icon" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="#000000" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round" ><path d="M6.5 17.5 17.5 6.5M8.5 6.5h9v9"/></svg></div>
+          </div>
+          <div class="address" data-name="Place Address">933 Kapahulu Ave, Honolulu</div>
+          <div class="credits" data-name="Photo Credits">Photos: _e.t · Ken Lund · Banzai Hiroaki</div>
+        </div>
+        <div class="badge" data-name="Card Yes Badge"><svg data-name="Card Yes Heart" width="50" height="50" viewBox="0 0 24 24" fill="#F24D47" ><path d="M12 21.2c-.3 0-.6-.1-.9-.3C5.4 17.1 2 13.4 2 9.2 2 5.9 4.5 3.4 7.6 3.4c1.9 0 3.4.9 4.4 2.4 1-1.5 2.5-2.4 4.4-2.4 3.1 0 5.6 2.5 5.6 5.8 0 4.2-3.4 7.9-9.1 11.7-.3.2-.6.3-.9.3z"/></svg></div>
+        <div class="badge" data-name="Card Pass Badge"><svg data-name="Card Pass X" width="42" height="42" viewBox="0 0 24 24" fill="none" stroke="#000000" stroke-width="3.6" stroke-linecap="round" stroke-linejoin="round" ><path d="M5.5 5.5l13 13M18.5 5.5l-13 13"/></svg></div>
+      </div>
+      <div class="card" data-name="Card 4">
+        <div class="photos" data-name="Card 4 Photos">
+          <div class="grid" data-name="Card 4 Photo Grid">
+            <img class="tile big" data-name="Card 4 Photo 1" alt="Mānoa Falls" src="https://upload.wikimedia.org/wikipedia/commons/8/8c/ManoaFalls.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail_unscaled">
+            <div class="col" data-name="Card 4 Side Photos">
+              <img class="tile" data-name="Card 4 Photo 2" alt="Forest trail" src="https://thumb.wikimedia.org/wikipedia/commons/thumb/f/f4/Manoa_Falls_Trail_%288330307443%29.jpg/1280px-Manoa_Falls_Trail_%288330307443%29.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail">
+              <img class="tile" data-name="Card 4 Photo 3" alt="Bamboo steps" src="https://thumb.wikimedia.org/wikipedia/commons/thumb/7/7a/Manoa_Falls_Trail_%288330330105%29.jpg/1280px-Manoa_Falls_Trail_%288330330105%29.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail">
+            </div>
+          </div>
+          <div class="source" data-name="Card 4 Photo Source"><span data-name="Card 4 Photo Source Label">Photos: Wikimedia Commons</span></div>
+        </div>
+        <div class="info" data-name="Card 4 Info">
+          <div class="name" data-name="Card 4 Name">Mānoa Falls Trail</div>
+          <div class="address" data-name="Card 4 Address">3860 Manoa Rd, Honolulu</div>
+          <div class="credits" data-name="Card 4 Photo Credits">Photos: Chouwawa · Daniel Ramirez</div>
+        </div>
+      </div>
+      <div class="card" data-name="Card 3">
+        <div class="photos" data-name="Card 3 Photos">
+          <div class="grid" data-name="Card 3 Photo Grid">
+            <img class="tile big" data-name="Card 3 Photo 1" alt="Museum courtyard" src="https://thumb.wikimedia.org/wikipedia/commons/thumb/9/9f/Honolulu_-_Honolulu_Museum_of_Art_-_20160727131828.jpg/1280px-Honolulu_-_Honolulu_Museum_of_Art_-_20160727131828.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail">
+            <div class="col" data-name="Card 3 Side Photos">
+              <img class="tile" data-name="Card 3 Photo 2" alt="Impressionism gallery" src="https://thumb.wikimedia.org/wikipedia/commons/thumb/8/88/HoMA_Impressionism.jpg/1280px-HoMA_Impressionism.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail">
+              <img class="tile" data-name="Card 3 Photo 3" alt="Japanese tea house" src="https://thumb.wikimedia.org/wikipedia/commons/thumb/c/c3/Japanese_tea_house_on_the_grounds_of_the_Honolulu_Museum_of_Art_.JPG/1280px-Japanese_tea_house_on_the_grounds_of_the_Honolulu_Museum_of_Art_.JPG?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail">
+            </div>
+          </div>
+          <div class="source" data-name="Card 3 Photo Source"><span data-name="Card 3 Photo Source Label">Photos: Wikimedia Commons</span></div>
+        </div>
+        <div class="info" data-name="Card 3 Info">
+          <div class="name" data-name="Card 3 Name">Honolulu Museum of Art</div>
+          <div class="address" data-name="Card 3 Address">900 S Beretania St, Honolulu</div>
+          <div class="credits" data-name="Card 3 Photo Credits">Photos: Glamorous Vagabonds · HonoluluMuseumOfArt · Wmpearl</div>
+        </div>
+      </div>
+      <div class="card" data-name="Card 2">
+        <div class="photos" data-name="Card 2 Photos">
+          <div class="grid" data-name="Card 2 Photo Grid">
+            <img class="tile big" data-name="Card 2 Photo 1" alt="Plate lunch" src="https://thumb.wikimedia.org/wikipedia/commons/thumb/1/1b/Rainbow_Drive-In_mix_plate_lunch_%282194653288%29.jpg/1280px-Rainbow_Drive-In_mix_plate_lunch_%282194653288%29.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail">
+            <div class="col" data-name="Card 2 Side Photos">
+              <img class="tile" data-name="Card 2 Photo 2" alt="Drive-in storefront" src="https://thumb.wikimedia.org/wikipedia/commons/thumb/5/59/Rainbow_Drive-In_%287442048154%29.jpg/1280px-Rainbow_Drive-In_%287442048154%29.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail">
+              <img class="tile" data-name="Card 2 Photo 3" alt="Mix plate and chili" src="https://thumb.wikimedia.org/wikipedia/commons/thumb/7/75/Rainbow_Drive-In_mix_plate_and_chili_%285636830471%29.jpg/1280px-Rainbow_Drive-In_mix_plate_and_chili_%285636830471%29.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail">
+            </div>
+          </div>
+          <div class="source" data-name="Card 2 Photo Source"><span data-name="Card 2 Photo Source Label">Photos: Wikimedia Commons</span></div>
+        </div>
+        <div class="info" data-name="Card 2 Info">
+          <div class="name" data-name="Card 2 Name">Rainbow Drive-In</div>
+          <div class="address" data-name="Card 2 Address">3308 Kanaina Ave, Honolulu</div>
+          <div class="credits" data-name="Card 2 Photo Credits">Photos: Arnold Gatilao · Eugene Kim · John Liu</div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="abs controls" data-name="Vote Buttons">
+    <div class="vote" data-name="Pass Button"><svg data-name="Pass X" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#000000" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round" ><path d="M5.5 5.5l13 13M18.5 5.5l-13 13"/></svg></div>
+    <div class="vote yes" data-name="Yes Button"><svg data-name="Yes Heart" width="30" height="30" viewBox="0 0 24 24" fill="#FFFFFF" ><path d="M12 21.2c-.3 0-.6-.1-.9-.3C5.4 17.1 2 13.4 2 9.2 2 5.9 4.5 3.4 7.6 3.4c1.9 0 3.4.9 4.4 2.4 1-1.5 2.5-2.4 4.4-2.4 3.1 0 5.6 2.5 5.6 5.8 0 4.2-3.4 7.9-9.1 11.7-.3.2-.6.3-.9.3z"/></svg></div>
+  </div>
+</body></html>

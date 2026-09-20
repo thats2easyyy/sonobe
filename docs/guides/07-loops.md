@@ -60,7 +60,7 @@ A Repeat inside a layer that already makes copies does nothing: each copy of the
 
 ### Which copy is on top
 
-Stacked copies draw in index order, so the last copy is on top, as in Origami. For a card deck where copy 0 is the top card, multiply the index by −1 and feed it into the card's Z Position. The top card is also the one that gets touches.
+Stacked copies draw in index order, so the last copy is on top, as in Origami. For a card deck where copy 0 is the top card, multiply the index by −1 and feed it into the card's Z Position. The top card is also the one that gets touches. The copies under it now have negative Z Positions, which draw behind any sibling at 0, so put the cards in a group of their own, away from a backdrop or an "all done" message. [Example 16](../../examples/16-placemark-deck/) builds this deck.
 
 The Layers panel shows ×4 next to a layer that makes four copies, with a repeat icon when its Repeat decides the count, and a small z next to a layer with a Z Position.
 

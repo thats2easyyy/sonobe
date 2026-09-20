@@ -37,7 +37,7 @@ The first two finish Stage 4. The rest are Stage 5.
 - [ ] Viewer: device picker, frame, restart, hit-target overlay, pop-out window, LAN web player with QR code, recording (partial: recording remains)
 - [ ] Native iPhone preview: Sonobe Viewer (`apps/ios`) plays the LAN web player full screen with real haptics. Haptic and Vibrate reach UIFeedbackGenerator and Core Haptics over a small bridge, the app scans the Preview on Phone code, and `npm run test:ios` runs its tests on a simulator. Android phones vibrate in the browser. The phone gets the viewer's sound, network requests, links and camera, restarts when Sonobe does, and opens a menu with a three-finger tap (partial: tested only in the Simulator, and built from source until TestFlight)
 - [x] Assets: images, video, sound, fonts, Lottie (drag and drop)
-- [x] Examples: 15 canonical recipes as runnable projects with scripted tests
+- [x] Examples: 16 canonical recipes as runnable projects with scripted tests
 - [x] Learn panel: 5 interactive lessons, the guides, the examples, and the patch reference
 - [x] Welcome screen: new blank prototype, lessons, templates from the examples, recent files
 - [x] Connect Claude screen: Claude Code command, Claude Desktop config and `.mcpb` build steps, status

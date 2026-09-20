@@ -11,7 +11,7 @@ import { createHeadlessHost } from "@sonobe/mcp";
 import { createPatchRegistry } from "@sonobe/patches";
 import { afterAll, describe, expect, it } from "vitest";
 import { EXAMPLES_DIR, listExampleFolders, projectDrift } from "./lib/disk.ts";
-import { buildRecipeDocument } from "./lib/recipe.ts";
+import { buildRecipe } from "./lib/recipe.ts";
 import { formatReport, parseExampleTest, runScenario, type ExampleTest } from "./lib/scenarios.ts";
 import { RECIPES } from "./recipes/index.ts";
 
@@ -76,9 +76,9 @@ for (const recipe of RECIPES) {
       expect(warnings.map((d) => `${d.code}: ${d.message}`)).toEqual([]);
     });
 
-    it("matches its recipe (run node examples/build.ts to regenerate)", () => {
-      const drift = projectDrift(dir, buildRecipeDocument(recipe, registry));
-      expect(drift).toEqual({ changed: [], extra: [] });
+    it("matches its recipe (run node examples/build.ts to regenerate)", async () => {
+      const built = await buildRecipe(recipe, registry);
+      expect(projectDrift(dir, built.doc, built.files)).toEqual({ changed: [], extra: [] });
     });
 
     it("uses only implemented patch types", async () => {

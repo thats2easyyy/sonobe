@@ -30,6 +30,7 @@ export {
 export { isolateSceneLayer, sceneNodesFor } from "./isolate.ts";
 export {
   cachedGraphEstimate,
+  elkGroupLayout,
   estimateGraphGeometry,
   resolveGraphGeometry,
   type GraphGeometry,
