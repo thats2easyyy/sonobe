@@ -31,7 +31,10 @@ export interface CaptureSource {
 interface CaptureNodeBase {
   /** Display name (explicit data-name, component name, aria-label, semantic role...). */
   name?: string;
-  /** How much to trust `name`: 0 generic ("Group"), 1 semantic tag, 2 id or test id, 3 aria-label, 4 component, 5 explicit. */
+  /**
+   * How much to trust `name`: 0 generic ("Group"), 1 semantic tag, 2 id or test id, 3 aria-label, 4 component, 5 explicit.
+   * Text named by its words is 1; text named by the element holding it takes that element's rank.
+   */
   nameRank?: number;
   box: Box;
   /** 0..1. Default 1. */

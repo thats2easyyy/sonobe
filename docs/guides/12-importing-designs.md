@@ -95,6 +95,8 @@ Claude uses the `import_design` tool, checks the result against the original wit
 
 Layers take their names from `data-name`, then the component that rendered them (React and Vue development builds), `aria-label`, ids, icon names and the kind of element ("Button", "Navigation"). Wrappers that draw nothing disappear, so the layer list stays short.
 
+Text works the same way when the element holding it draws nothing: `<div data-name="Card 1 Address">933 Kapahulu Ave</div>` becomes a text layer called Card 1 Address, and so does a named `<span>` inside a sentence. `data-name`, `aria-label` and ids beat the text's own words; a component name or the kind of element doesn't, because every card shares it, so that text is named by its words. A box with a background keeps the name for itself, and `<body data-name>` names the screen.
+
 ## Make it interactive
 
 An imported screen is just layers, so everything in [02 ISAT](02-isat.md) applies.
@@ -104,7 +106,7 @@ An imported screen is just layers, so everything in [02 ISAT](02-isat.md) applie
 3. Add a Switch, a Pop Animation and a Transition, and connect the Transition to the button's Scale, like the like button in guide 02.
 4. Tap the button in the viewer.
 
-When the design changes in code, import it again and pick **Replace** for the earlier screen. Your interactions stay wired to the layers it finds again.
+When the design changes in code, import it again and pick **Replace** for the earlier screen. Your interactions stay wired to the layers it finds again, and the import names any connection it had to drop because its layer is gone.
 
 Long pages already scroll: drag the page in the viewer. The Scroll patch Sonobe added is named after the layer it moves ("Scroll Content"), and its Y output is handy for headers that shrink or fade as you scroll ([06 Gestures](06-gestures.md)).
 

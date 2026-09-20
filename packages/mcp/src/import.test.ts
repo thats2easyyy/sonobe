@@ -104,6 +104,21 @@ describe.skipIf(!playwrightReady)("import_design with a browser (headless Playwr
     expect(y).toBeLessThan(-100);
   }, 60_000);
 
+  it("names text after the element holding it, and the screen after <body data-name>", async () => {
+    const html = `<!doctype html><html><body data-name="Discover" style="margin:0;font-family:system-ui">
+      <div data-name="Card 1" style="margin:80px 16px;padding:16px;border-radius:20px;background:#f2f2f7">
+        <div data-name="Card 1 Name" style="font-size:22px;font-weight:700">Leonard's Bakery</div>
+        <div data-name="Card 1 Address">933 Kapahulu Ave, Honolulu</div>
+      </div>
+    </body></html>`;
+    const r = await client.call("import_design", { html });
+    expect(r.isError, r.text).toBe(false);
+    expect(r.text).toContain('Imported "Discover" as layer discover');
+    const outline = await client.call("get_outline", {});
+    expect(outline.text).toContain('layer card_1_name text "Card 1 Name"');
+    expect(outline.text).toContain('layer card_1_address text "Card 1 Address"');
+  }, 60_000);
+
   it("explains a dead dev server", async () => {
     const r = await client.call("import_design", { url: "http://127.0.0.1:9/nothing" });
     expect(r.isError).toBe(true);
