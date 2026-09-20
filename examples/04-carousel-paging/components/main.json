@@ -811,7 +811,7 @@
         "progress": { "link": "dot_spring.output" },
         "start": "#FFFFFF66"
       },
-      "ui": { "x": 1080, "y": 190 }
+      "ui": { "x": 1119, "y": 190 }
     },
     "dot_is_current": {
       "type": "equals",
@@ -821,7 +821,7 @@
         "value1": { "link": "page_dots.index" },
         "value2": { "link": "trips_scroll.pageX" }
       },
-      "ui": { "x": 560, "y": 190 }
+      "ui": { "x": 599, "y": 190 }
     },
     "dot_position": {
       "type": "point",
@@ -830,7 +830,7 @@
         "x": { "link": "dot_x.output" },
         "y": 700
       },
-      "ui": { "x": 560, "y": 40 }
+      "ui": { "x": 599, "y": 40 }
     },
     "dot_size": {
       "type": "transition",
@@ -841,7 +841,7 @@
         "progress": { "link": "dot_spring.output" },
         "start": [8, 8]
       },
-      "ui": { "x": 1080, "y": 40 }
+      "ui": { "x": 1119, "y": 40 }
     },
     "dot_spring": {
       "type": "popAnimation",
@@ -852,7 +852,7 @@
         "number": { "link": "dot_is_current.output" },
         "speed": 18
       },
-      "ui": { "x": 820, "y": 40 }
+      "ui": { "x": 859, "y": 40 }
     },
     "dot_x": {
       "type": "mathExpression",
@@ -866,7 +866,7 @@
       "name": "Next Page X",
       "inputs": { "page": { "link": "trips_scroll.pageX" } },
       "settings": { "expression": "41 - clamp(page + 1, 0, 3) * 332" },
-      "ui": { "x": 40, "y": 340 }
+      "ui": { "x": 40, "y": 440 }
     },
     "page_dots": {
       "type": "loop",
@@ -892,7 +892,7 @@
         "option2": "$1,610",
         "option3": "$2,150"
       },
-      "ui": { "x": 560, "y": 340 }
+      "ui": { "x": 599, "y": 440 }
     },
     "trips_scroll": {
       "type": "scroll",

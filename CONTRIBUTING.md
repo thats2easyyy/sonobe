@@ -51,6 +51,7 @@ Tidy Up, MCP `tidy_graph` and `add_patches`, and automatic node placement size n
 1. Update `NODE_BOX` or `NODE_FONTS` in `nodeSize.ts` to match, and the shapes in `nodeShape.ts` when a node shows something new. When a live value or a knob value can print something longer, raise its reserve in `format.ts` (`formatValueReserve`, `knobValueReserve`), which keeps nodes from resizing while the prototype runs; a live value past its reserve ends in "…".
 2. On macOS, regenerate the font table with `node apps/editor/scripts/measure-node-fonts.ts`.
 3. Run `npx playwright test e2e/node-sizes.spec.ts`. It compares the estimate against the drawn nodes. With `SONOBE_UPDATE_NODE_SIZES=1` it also rewrites `packages/mcp/fixtures/node-sizes`, which `packages/mcp/src/geometry.test.ts` checks the headless estimate against. Knob chips (`.sb-pe-value--knob`) are checked in `e2e/knobs.spec.ts`.
+4. Rebuild the examples with `node examples/build.ts`. Their graphs are laid out from the estimated sizes, so wider nodes get the room they need, and `examples/run.test.ts` fails when two patch nodes come within 12 pt of each other.
 
 ## Adding an MCP tool
 

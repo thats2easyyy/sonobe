@@ -170,7 +170,7 @@ export const PatchNodeView = memo(function PatchNodeView({ id, data, selected }:
         )}
         {showVariant && <span className="sb-pe-chip">{typeLabel(data.typeParam!).replace(/ \[.*\]$/, "").replace(/^on\/off \(boolean\)$/, "boolean")}</span>}
         {showLoop && (
-          <span className="sb-pe-node__loop sb-tabular" data-reserve={loopBadgeReserve(loopLength)} aria-label={loopLength !== undefined ? `Loop of ${loopLength}` : "Loop"}>
+          <span className="sb-pe-node__loop sb-tabular" data-reserve={loopBadgeReserve(loopLength ?? (liveEnabled ? 0 : undefined))} aria-label={loopLength !== undefined ? `Loop of ${loopLength}` : "Loop"}>
             ×{loopLength ?? ""}
           </span>
         )}
@@ -247,7 +247,7 @@ export const InterfaceNodeView = memo(function InterfaceNodeView({ id, data, sel
         </span>
         <span className="sb-pe-node__title">{data.title}</span>
       </header>
-      <PortRows nodeId={id} inputs={data.inputs} outputs={data.outputs} editable={false} />
+      <PortRows nodeId={id} inputs={data.inputs} outputs={data.outputs} editable={false} showsLive={false} />
     </div>
   );
 });

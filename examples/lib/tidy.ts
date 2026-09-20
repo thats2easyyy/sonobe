@@ -1,7 +1,9 @@
 /**
  * The examples' patch layout: columns by dataflow depth, separate flows stacked. Positions only.
- * Kept as it was when the examples were built, so rebuilding them reproduces the committed files;
- * tidy_graph and the editor's Tidy Up use the frame-aware tidy in @sonobe/core/graph.
+ * Kept as it was when the examples were built, so rebuilding them reproduces the committed files,
+ * except that, given the node boxes, a column or row is never closer to the next than its widest or
+ * tallest node plus a clearance, so a node that grows doesn't slide under its neighbours. tidy_graph
+ * and the editor's Tidy Up use the frame-aware tidy in @sonobe/core/graph.
  */
 
 import { isLinkInput, parseAddress, type Component, type Id, type Op } from "@sonobe/core";
@@ -12,6 +14,20 @@ export interface TidyOptions {
   /** LR: sources left, consumers right. TB: sources on top. Default LR. */
   direction?: "LR" | "TB";
   spacing?: [number, number];
+  /** Node boxes as the patch editor draws them (LR); without them columns and rows are `spacing` apart. */
+  sizes?: ReadonlyMap<Id, { width: number; height: number }>;
+  /** Clear space kept after a column's widest node and a row's tallest, when `sizes` are given. */
+  clearance?: [number, number];
+}
+
+/**
+ * Where each column (or row) starts: `gap` after the one before, or farther when that one's longest
+ * node, `extents[i]` (0 for an empty one), plus `clear` needs more.
+ */
+export function trackStarts(extents: readonly number[], gap: number, clear: number): number[] {
+  const starts = [0];
+  for (let i = 0; i < extents.length - 1; i++) starts.push(starts[i]! + Math.max(gap, extents[i]! + clear));
+  return starts;
 }
 
 /** updatePatch ops that arrange patches into columns (LR) or rows (TB) by dataflow depth. */
@@ -70,7 +86,8 @@ export function tidyOps(c: Component, options: TidyOptions = {}): Op[] {
 
   const originX = Math.min(...ids.map((id) => pos(id).x));
   const originY = Math.min(...ids.map((id) => pos(id).y));
-  const placed = new Map<Id, { x: number; y: number }>();
+  /** Each node's column (its depth) and row (its band's first row plus its place in the column). */
+  const cells = new Map<Id, { column: number; row: number }>();
   let band = 0;
   for (const group of groups) {
     const columns = new Map<number, Id[]>();
@@ -90,21 +107,30 @@ export function tidyOps(c: Component, options: TidyOptions = {}): Op[] {
       list.forEach((id, i) => row.set(id, i));
       bandSize = Math.max(bandSize, list.length);
     }
-    for (const id of group) {
-      const main = depth.get(id)! * gapMain;
-      const cross = (band + row.get(id)!) * gapCross;
-      placed.set(
-        id,
-        options.direction === "TB"
-          ? { x: originX + cross * 1.6, y: originY + main * 0.6 }
-          : { x: originX + main, y: originY + cross },
-      );
-    }
+    for (const id of group) cells.set(id, { column: depth.get(id)!, row: band + row.get(id)! });
     band += bandSize + 1;
   }
+
+  // The longest node in each column and row (LR), so none reaches the next.
+  const longest = (axis: "column" | "row", length: (size: { width: number; height: number }) => number): number[] => {
+    const out: number[] = [];
+    for (const [id, cell] of cells) {
+      const size = options.direction === "TB" ? undefined : options.sizes?.get(id);
+      out[cell[axis]] = Math.max(out[cell[axis]] ?? 0, size ? length(size) : 0);
+    }
+    return Array.from(out, (n) => n ?? 0);
+  };
+  const [clearX, clearY] = options.clearance ?? [0, 0];
+  const columnAt = trackStarts(longest("column", (s) => s.width), gapMain, clearX);
+  const rowAt = trackStarts(longest("row", (s) => s.height), gapCross, clearY);
+
   const ops: Op[] = [];
   for (const id of ids) {
-    const next = placed.get(id)!;
+    const { column, row } = cells.get(id)!;
+    const next =
+      options.direction === "TB"
+        ? { x: originX + row * gapCross * 1.6, y: originY + column * gapMain * 0.6 }
+        : { x: originX + columnAt[column]!, y: originY + rowAt[row]! };
     const x = Math.round(next.x);
     const y = Math.round(next.y);
     if (pos(id).x === x && pos(id).y === y) continue;

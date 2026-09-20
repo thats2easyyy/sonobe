@@ -3,7 +3,7 @@ import { applyOps, createEmptyDocument, getDiagnostics, type Op, type SonobeDocu
 import { createPatchRegistry } from "@sonobe/patches";
 import { describe, expect, it } from "vitest";
 import { createDemoDocument } from "../../../state/demoDocument.ts";
-import { deriveGraph, type CableEdge, type LayerGraphNode, type PatchGraphNode } from "@sonobe/core/graph";
+import { deriveGraph, nodeShapeFromData, type CableEdge, type InterfaceNodeData, type LayerGraphNode, type PatchGraphNode } from "@sonobe/core/graph";
 import { reconcileNodes } from "./reconcile.ts";
 
 const registry = createPatchRegistry();
@@ -129,6 +129,45 @@ describe("deriveGraph", () => {
     expect(patchNode(m, "times").data.outputs[0]?.loop).toBe(true);
   });
 
+  it("reads a Loop Select picking one index as one value downstream, and one picking a loop of indices as a loop", () => {
+    const pickDoc = build([
+      { op: "addPatch", patch: { id: "stops", type: "loopBuilder", typeParam: "number", inputCount: 3, inputs: { item0: 470, item1: 132, item2: 760 }, ui: { x: 0, y: 0 } } },
+      { op: "addPatch", patch: { id: "count", type: "loop", inputs: { count: 2 }, ui: { x: 0, y: 200 } } },
+      { op: "addPatch", patch: { id: "one", type: "loopSelect", typeParam: "number", inputs: { loop: { link: "stops.loop" }, index: 1 }, ui: { x: 240, y: 0 } } },
+      { op: "addPatch", patch: { id: "many", type: "loopSelect", typeParam: "number", inputs: { loop: { link: "stops.loop" }, index: { link: "count.index" } }, ui: { x: 240, y: 200 } } },
+      { op: "addPatch", patch: { id: "after_one", type: "multiply", typeParam: "number", inputs: { value1: { link: "one.output" } }, ui: { x: 480, y: 0 } } },
+      { op: "addPatch", patch: { id: "after_many", type: "multiply", typeParam: "number", inputs: { value1: { link: "many.output" } }, ui: { x: 480, y: 200 } } },
+    ]);
+    const m = deriveGraph({ doc: pickDoc, componentId: "main", registry });
+    // Loop Select's own output is a one-item loop, but what reads it runs once and prints plain values.
+    expect(patchNode(m, "one").data.outputs[0]?.loop).toBe(true);
+    expect(patchNode(m, "after_one").data.looped).toBe(false);
+    expect(patchNode(m, "after_one").data.outputs[0]?.loop).toBeUndefined();
+    expect(cable(m, "after_one.value1").data?.loop).toBe(false);
+    expect(patchNode(m, "after_many").data.looped).toBe(true);
+    expect(cable(m, "after_many.value1").data?.loop).toBe(true);
+  });
+
+  it("loops the patches that follow a layer's copies, and a repeated layer's values read as loops", () => {
+    const deck = build([
+      { op: "addLayer", layer: { id: "card", type: "group", name: "Card", props: { repeat: 3 } } },
+      { op: "addLayer", parent: "card", layer: { id: "caption", type: "text", name: "Caption" } },
+      { op: "addLayer", layer: { id: "solo", type: "rectangle", name: "Solo" } },
+      { op: "addPatch", patch: { id: "drag", type: "drag", inputs: { layer: { layer: "card" } }, ui: { x: 0, y: 0 } } },
+      { op: "addPatch", patch: { id: "solo_drag", type: "drag", inputs: { layer: { layer: "solo" } }, ui: { x: 0, y: 300 } } },
+      { op: "addPatch", patch: { id: "fit", type: "sizeUnpack", ui: { x: 240, y: 0 } } },
+      { op: "connect", from: "@caption.textSize", to: "fit.value" },
+    ]);
+    const m = deriveGraph({ doc: deck, componentId: "main", registry });
+    expect(patchNode(m, "drag").data).toMatchObject({ looped: true, loopLength: 3 });
+    expect(patchNode(m, "drag").data.outputs.every((o) => o.loop)).toBe(true);
+    expect(patchNode(m, "solo_drag").data.looped).toBe(false);
+    // Each copy of the card measures its own caption.
+    const caption = m.nodes.find((n): n is LayerGraphNode => n.id === "@caption")!;
+    expect(caption.data.outputs.find((o) => o.key === "textSize")?.loop).toBe(true);
+    expect(patchNode(m, "fit").data).toMatchObject({ looped: true, loopLength: 3 });
+  });
+
   it("attaches diagnostics to nodes, ports, and invalid cables", () => {
     const base = build([
       { op: "addPatch", patch: { id: "tap", type: "interaction", ui: { x: 0, y: 0 } } },
@@ -161,6 +200,9 @@ describe("deriveGraph", () => {
     expect(outs.position.x).toBeGreaterThan(0);
     expect(cable(m, "spring.number")).toMatchObject({ source: "$in", sourceHandle: "out:pressed" });
     expect(cable(m, "$out.amount")).toMatchObject({ source: "spring", target: "$out", targetHandle: "in:amount" });
+    // Component Inputs never shows a live value, so its outputs keep no slot for one.
+    expect(nodeShapeFromData(ins.data as InterfaceNodeData).rows[0]!.out).toEqual({ label: "Pressed" });
+    expect(nodeShapeFromData(patchNode(m, "spring").data).rows[0]!.out).toEqual({ label: "Output", reserve: 8 });
   });
 });
 
