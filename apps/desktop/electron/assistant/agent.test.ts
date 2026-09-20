@@ -1,6 +1,6 @@
 import Anthropic from "@anthropic-ai/sdk";
 import type { BetaTextBlockParam, BetaToolUseBlockParam } from "@anthropic-ai/sdk/resources/beta/messages/messages";
-import type { SonobeDocument } from "@sonobe/core";
+import { applyOps, createEmptyDocument, createRegistry, type Op, type SonobeDocument } from "@sonobe/core";
 import { IMPORT_META_KEY, type ImportResultMeta } from "@sonobe/mcp";
 import { describe, expect, it } from "vitest";
 import { createAssistantAgent, resolveLimits, toAssistantError, type AssistantAgentOptions, type ReplaceGuardKit } from "./agent.ts";
@@ -8,8 +8,8 @@ import { DESIGN_GUIDE } from "./design.ts";
 import type { ReplaceCheck, ReplaceGuard, ReplaceImpact } from "./designGuard.ts";
 import { FALLBACK_BETA } from "./models.ts";
 import type { AssistantCanvasContext, AssistantEvent } from "./protocol.ts";
-import { fakeBridge, fakeDraftStreams, scriptedClient, text, tick, type FakeBridge, type FakeDraftStreams, type FakeTurn, type ScriptedClient } from "./testing.ts";
-import type { LocalTools, LocalToolScope, ToolCallResult } from "./toolBridge.ts";
+import { FAKE_TOOLS, fakeBridge, fakeDraftStreams, scriptedClient, text, tick, type FakeBridge, type FakeDraftStreams, type FakeTurn, type ScriptedClient } from "./testing.ts";
+import type { AssistantToolInfo, LocalTools, LocalToolScope, ToolCallResult } from "./toolBridge.ts";
 
 interface Harness {
   agent: ReturnType<typeof createAssistantAgent>;
@@ -807,11 +807,90 @@ describe("assistant agent: the replace guard", () => {
     );
     await h.agent.run("w1", { text: "a profile screen" }, h.emit);
     expect(stub.seen.remembered).toEqual([["photo_zoom", "main", "profile", DOC]]);
-    expect(stub.seen.refreshed).toEqual([["photo_zoom", DOC, ["title"]]]);
+    expect(stub.seen.refreshed).toEqual([["photo_zoom", DOC, { components: ["main"], layers: ["title"] }]]);
     expect(stub.seen.created).toBe(1);
     h.agent.reset("w1");
     await h.agent.run("w1", { text: "another" }, h.emit);
     expect(stub.seen.created).toBe(2);
+  });
+});
+
+describe("assistant agent: the replace guard over real documents", () => {
+  const registry = createRegistry();
+  const edit = (doc: SonobeDocument, ops: Op[]) => {
+    const result = applyOps(doc, ops, { registry });
+    if (!result.ok) throw new Error(JSON.stringify(result.errors));
+    return result;
+  };
+  const CHECKOUT = edit(createEmptyDocument({ name: "Guard" }), [
+    { op: "addLayer", layer: { id: "checkout", type: "group", name: "Checkout", props: { position: [0, 0], size: [402, 874] }, children: [{ id: "pay", type: "text", name: "Pay", props: { text: "Pay" } }] } },
+  ]).doc;
+  const tool = (name: string, properties: Record<string, unknown> = {}): AssistantToolInfo => ({ name, title: name, description: "", inputSchema: { type: "object", properties: { docId: { type: "string" }, ...properties } }, readOnly: false });
+  const TOOLS = [...FAKE_TOOLS, tool("begin_work", { intent: { type: "string" } }), tool("undo"), tool("save_document"), tool("update_layers", { updates: { type: "array" } })];
+  const importTurn = (id: string, replace?: string): FakeTurn => designUse(id, { name: "Checkout", ...(replace ? { replace } : {}), html: "<main>Checkout</main>" });
+  const use = (id: string, name: string, input: Record<string, unknown> = {}) => ({ type: "tool_use" as const, id, name, input });
+
+  /** The agent with the real guard over `ref.doc`; `write` is what a real import or update_layers does to it. */
+  function real(turns: FakeTurn[], ref: { doc: SonobeDocument }, write: (name: string, args: Record<string, unknown>) => void = () => undefined) {
+    const bridge = fakeBridge((name, args) => {
+      if (name === "import_design") {
+        if (args.dryRun) return imported({ dryRun: true, screenId: null, txnId: null, screenName: "Checkout", replaced: "checkout" });
+        write(name, args);
+        return imported({ screenId: "checkout", screenName: "Checkout", replaced: typeof args.replace === "string" ? args.replace : null });
+      }
+      if (name === "begin_work") return { content: [{ type: "text", text: "Working on it" }], structuredContent: { intent: args.intent, ids: [], author: "Assistant" } };
+      if (name === "undo") return { content: [{ type: "text", text: "Undid “recolored the badge”" }], structuredContent: { docId: "photo_zoom", revision: 9, undone: [], diagnostics: {} } };
+      if (name === "update_layers") {
+        write(name, args);
+        return { content: [{ type: "text", text: "Updated 1 layer" }], structuredContent: { ok: true, changed: "all", docId: "photo_zoom", affected: { components: ["main"], layers: ["pay"], patches: [] } } };
+      }
+      return text("Saved");
+    });
+    bridge.tools = async () => TOOLS;
+    const h = harness(turns, { bridge, agent: { documentFor: shownDocument(), readDocument: async () => ref.doc } });
+    const send = (message: string) =>
+      h.agent.run("w1", { text: message }, (e) => {
+        h.emit(e);
+        if (e.type === "confirm_required") queueMicrotask(() => h.agent.confirm("w1", e.confirmationId, false));
+      });
+    return { h, send };
+  }
+
+  it("still asks before replacing a screen the person changed, after calls that name no layers (begin_work, undo, save_document)", async () => {
+    const ref = { doc: CHECKOUT };
+    const { h, send } = real(
+      [importTurn("i1"), done(), { content: [use("b", "begin_work", { intent: "A darker checkout" }), use("u", "undo"), use("s", "save_document")] }, importTurn("i2", "checkout"), done("I kept yours.")],
+      ref,
+    );
+    await send("a checkout screen");
+    // The person changes the Pay label by hand.
+    ref.doc = edit(ref.doc, [{ op: "updateLayer", id: "pay", props: { text: "Buy now" } }]).doc;
+    await send("a darker version");
+    expect(h.bridge.calls.map((c) => c.name)).toEqual(["import_design", "begin_work", "undo", "save_document", "import_design"]);
+    expect(ofType(h.events, "confirm_required")).toEqual([expect.objectContaining({ title: "Replace your changes to “Checkout”?", message: expect.stringMatching(/^You changed Pay after Claude made this screen\./) })]);
+    expect(ofType(h.events, "tool_finished").at(-1)).toMatchObject({ toolUseId: "i2", status: "declined" });
+  });
+
+  it("takes the Assistant's own update_layers in, and goes ahead after the person undoes its replace", async () => {
+    const ref = { doc: CHECKOUT };
+    const { h, send } = real(
+      [importTurn("i1"), done(), { content: [use("t", "update_layers", { updates: [{ id: "pay", props: { text: "Pay now" } }] })] }, importTurn("i2", "checkout"), done(), importTurn("i3", "checkout"), done()],
+      ref,
+      (name, args) => {
+        // The first import adds the screen as it is; the tweak and the replace change the label.
+        const label = name === "update_layers" ? "Pay now" : args.replace ? "Pay today" : null;
+        if (label) ref.doc = edit(ref.doc, [{ op: "updateLayer", id: "pay", props: { text: label } }]).doc;
+      },
+    );
+    await send("a checkout screen");
+    const made = ref.doc;
+    await send("say Pay now, then try another version");
+    expect(ofType(h.events, "confirm_required")).toEqual([]);
+    // The person presses Undo on Claude's replace and its tweak: the screen is Claude's first version again.
+    ref.doc = made;
+    await send("try a darker version");
+    expect(ofType(h.events, "confirm_required")).toEqual([]);
+    expect(h.bridge.calls.filter((c) => c.name === "import_design").map((c) => c.args.dryRun)).toEqual([undefined, undefined, undefined]);
   });
 });
 

@@ -1,7 +1,8 @@
 /**
  * The replace guard: before import_design replaces a layer, ask the person when it's one they didn't
  * pick and the Assistant didn't make in this chat, or one they changed since the Assistant made it.
- * Per chat and in memory: it fingerprints the screens the Assistant imported, layer by layer. Pure
+ * Per chat and in memory: it fingerprints the screens the Assistant imported, layer by layer, as each
+ * of its writes left them, so undoing back to one of its versions isn't the person's change. Pure
  * functions over documents; the agent loop asks and runs the dry run.
  */
 
@@ -16,13 +17,15 @@ export interface ReplaceCheck {
   changed: string[];
   changedCount: number;
 }
+/** What a write changed, as its result's `affected` says (layer ids are unique only within a component). */
+export interface WriteAffected { components: readonly Id[]; layers: readonly Id[] }
 export interface ReplaceGuard {
   /** Null: go ahead without asking. */
   check(request: { docId: string; component: Id; replace: Id; picked: Id | null }, doc: SonobeDocument): ReplaceCheck | null;
-  /** A successful import_design: the screen is the Assistant's own now (records inside it or for the replaced id go). */
+  /** A successful import_design: the screen is the Assistant's own now (records inside it go; a replace keeps the screen's earlier versions). */
   remember(docId: string, component: Id, screenId: Id, doc: SonobeDocument): void;
-  /** Another successful Assistant write: take its own edits into the records (only `affectedLayers` when given, else every record of the document). */
-  refresh(docId: string, doc: SonobeDocument, affectedLayers?: readonly Id[]): void;
+  /** Another successful Assistant write: take the layers it changed into the records of the components it changed. */
+  refresh(docId: string, doc: SonobeDocument, affected: WriteAffected): void;
   tracks(docId: string): boolean;
   clear(): void;
 }
@@ -31,6 +34,8 @@ export interface ReplaceGuard {
 const LISTED = 5;
 /** Screens one chat remembers; the oldest go first. */
 const MAX_RECORDS = 50;
+/** Versions of one screen it keeps, for undoing back through the Assistant's writes; the oldest go first. */
+const MAX_STATES = 20;
 
 /** What the guard keeps of one layer: its content, and where it sits. */
 interface LayerPrint {
@@ -43,13 +48,21 @@ interface LayerPrint {
   index: number;
 }
 
-/** A screen the Assistant made: its layers as they were after the Assistant's last write. */
+/** A screen the Assistant made: its layers as each of the Assistant's writes left them. */
 interface ScreenRecord {
   docId: string;
   component: Id;
   root: Id;
-  layers: Map<Id, LayerPrint>;
+  /** Oldest first, at most MAX_STATES; the last is the latest. Never changed in place. */
+  states: Map<Id, LayerPrint>[];
 }
+
+const latest = (record: ScreenRecord): Map<Id, LayerPrint> => record.states.at(-1)!;
+const pushState = (record: ScreenRecord, state: Map<Id, LayerPrint>) => {
+  record.states = [...record.states, state].slice(-MAX_STATES);
+};
+const samePrint = (a: LayerPrint | undefined, b: LayerPrint | undefined) =>
+  a === b || (!!a && !!b && a.content === b.content && a.position === b.position && a.parent === b.parent && a.index === b.index);
 
 /** JSON with object keys sorted, so equal values print the same. */
 function canonical(value: unknown): string {
@@ -142,13 +155,14 @@ function movedIds(before: readonly Id[], after: readonly Id[]): Id[] {
 }
 
 /**
- * The layers of `rootId`'s subtree that changed since the record: content, position or parent that
- * differs, a new layer, a gone one, or one out of its old order among its siblings (a sibling removed
- * or added doesn't move the others). The root's own position, parent and index don't count: a replace
- * keeps them. Display names in walk order, gone layers last.
+ * The layers of `rootId`'s subtree that changed since one of the record's states (`root` is the
+ * record's root): content, position or parent that differs, a new layer, a gone one, or one out of
+ * its old order among its siblings (a sibling removed or added doesn't move the others). The root's
+ * own position, parent and index don't count: a replace keeps them. Display names in walk order,
+ * gone layers last.
  */
-function changesSince(record: ScreenRecord, current: Map<Id, LayerPrint>, rootId: Id): string[] {
-  const recorded = record.root === rootId ? record.layers : recordedSubtree(record.layers, rootId);
+function changesSince(state: Map<Id, LayerPrint>, root: Id, current: Map<Id, LayerPrint>, rootId: Id): string[] {
+  const recorded = root === rootId ? state : recordedSubtree(state, rootId);
   const changed = new Set<Id>();
   const siblings = new Map<Id, Id[]>();
   for (const [id, now] of current) {
@@ -197,7 +211,13 @@ export function createReplaceGuard(): ReplaceGuard {
       const target = { id: replace, name: layerDisplayName(loc.layer) };
       const record = nearest(docId, component, loc.path);
       if (record) {
-        const changed = changesSince(record, printSubtree(doc, component, replace)!, replace);
+        // Against the closest version the Assistant left (the newest on a tie): the person's Undo can
+        // take the screen back to any of them, and only what they changed after that counts.
+        const current = printSubtree(doc, component, replace)!;
+        const changed = [...record.states]
+          .reverse()
+          .map((state) => changesSince(state, record.root, current, replace))
+          .reduce((closest, since) => (since.length < closest.length ? since : closest));
         if (!changed.length) return null;
         return { reason: "hand_edited", target, changed: [...new Set(changed)].slice(0, LISTED), changedCount: changed.length };
       }
@@ -211,33 +231,42 @@ export function createReplaceGuard(): ReplaceGuard {
       const current = printSubtree(doc, component, screenId);
       if (!layers || !loc || !current) return;
       // Records for the replaced id, or of layers inside the new screen, are superseded by it.
-      records = records.filter((r) => !(r.docId === docId && r.component === component && findLayer(layers, r.root)?.path.includes(screenId)));
+      const superseded = (r: ScreenRecord) => r.docId === docId && r.component === component && !!findLayer(layers, r.root)?.path.includes(screenId);
+      const replaced = records.find((r) => superseded(r) && r.root === screenId);
+      records = records.filter((r) => !superseded(r));
       const outer = nearest(docId, component, loc.path);
       if (outer) {
         // Inside a screen the Assistant made: that screen's record takes the new layers in.
-        for (const id of recordedSubtree(outer.layers, screenId).keys()) outer.layers.delete(id);
-        for (const [id, print] of current) outer.layers.set(id, print);
+        const next = new Map(latest(outer));
+        for (const id of recordedSubtree(next, screenId).keys()) next.delete(id);
+        for (const [id, print] of current) next.set(id, print);
+        pushState(outer, next);
         return;
       }
-      records.push({ docId, component, root: screenId, layers: current });
+      // A replace keeps the screen's id, and its earlier versions: undoing it isn't the person's change.
+      const record: ScreenRecord = { docId, component, root: screenId, states: replaced?.states ?? [] };
+      pushState(record, current);
+      records.push(record);
       if (records.length > MAX_RECORDS) records = records.slice(-MAX_RECORDS);
     },
 
-    refresh(docId, doc, affectedLayers) {
+    refresh(docId, doc, affected) {
+      const components = new Set(affected.components);
       for (const record of records) {
-        if (record.docId !== docId) continue;
+        // Layer ids are unique only within a component, so another component's "title" isn't this one's.
+        if (record.docId !== docId || !components.has(record.component)) continue;
         const current = printSubtree(doc, record.component, record.root);
         // The screen is gone for now; an undo can bring it back as the Assistant left it.
         if (!current) continue;
-        if (!affectedLayers) {
-          record.layers = current;
-          continue;
-        }
-        for (const id of affectedLayers) {
+        const then = latest(record);
+        const next = new Map(then);
+        for (const id of affected.layers) {
           const print = current.get(id);
-          if (print) record.layers.set(id, print);
-          else record.layers.delete(id);
+          if (print) next.set(id, print);
+          else next.delete(id);
         }
+        // A write elsewhere in the component leaves this screen's versions as they are.
+        if (affected.layers.some((id) => !samePrint(then.get(id), next.get(id)))) pushState(record, next);
       }
     },
 
