@@ -1,0 +1,41 @@
+# The quality gates in ARCHITECTURE.md §12 that run on every push and pull request: typecheck, the
+# Vitest suite and the Playwright e2e run in Chromium. The Electron end-to-end run, Sonobe Viewer's
+# simulator tests and the Claude evals run by hand.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    # macOS, where Sonobe is packaged and verified: the SF Symbols helper's tests run here too.
+    runs-on: macos-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npx playwright install chromium
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run e2e
+      - if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: |
+            playwright-report/
+            test-results/
+          retention-days: 7

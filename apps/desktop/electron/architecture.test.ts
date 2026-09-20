@@ -30,6 +30,7 @@ describe("§9.1 env switches", () => {
   it("lists the switches the CLI launcher and MCP guides read", () => {
     for (const name of switches(read("../scripts/build.mjs"))) expect(documented, name).toContain(name);
     for (const name of switches(read("../../../packages/mcp/src/guides.ts"))) expect(documented, name).toContain(name);
+    for (const name of switches(read("../../../packages/mcp/src/examples.ts"))) expect(documented, name).toContain(name);
   });
 });
 
@@ -51,5 +52,22 @@ describe("§12 quality gates", () => {
     const ci = read("../../../.github/workflows/ci.yml");
     if (!ci.includes("smoke")) expect(gates).toMatch(/isn't part of `npm run e2e` or CI/);
     expect(read("../tests/smoke.mjs")).toContain("SONOBE_SMOKE_SKIP_EDITOR_BUILD");
+  });
+
+  it("runs in CI what the CI bullet says, and nothing that needs a person, Xcode or a Claude account", () => {
+    const ci = read("../../../.github/workflows/ci.yml");
+    const root = JSON.parse(read("../../../package.json")) as { scripts: Record<string, string> };
+    const runs = [...ci.matchAll(/^\s*- run: (.+)$/gm)].map((m) => m[1]!.trim());
+    for (const gate of ["npm run typecheck", "npm test", "npm run e2e"]) {
+      expect(runs, gate).toContain(gate);
+      expect(root.scripts[gate.replace(/^npm (run )?/, "")], gate).toBeDefined();
+      expect(gates, gate).toContain(`\`${gate}\``);
+    }
+    // The e2e run needs Playwright's Chromium before it starts.
+    expect(runs.findIndex((run) => /^npx playwright install\b.*chromium/.test(run))).toBeLessThan(runs.indexOf("npm run e2e"));
+    expect(ci).not.toMatch(/smoke|test:ios|evals\/run|secrets\./);
+    const bullet = gates.split("\n").find((line) => line.startsWith("- CI "))!;
+    expect(bullet).toContain("`.github/workflows/ci.yml`");
+    expect(bullet).toContain(`Node ${/node-version: (\d+)/.exec(ci)![1]}`);
   });
 });
