@@ -1,4 +1,5 @@
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { connect } from "node:net";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -280,13 +281,22 @@ describe("startLanPreview", () => {
     ws.terminate();
   });
 
-  it("closes open sockets on close", async () => {
+  it("says goodbye to players on close, and cuts off one that doesn't answer", async () => {
     const s = server!;
     const { ws } = await open(`ws://127.0.0.1:${s.port}/p/${s.token}/sync`);
-    const closed = new Promise((resolve) => ws.once("close", resolve));
+    const closed = new Promise<[number, string]>((resolve) => ws.once("close", (code, reason) => resolve([code, String(reason)])));
+    // A player that completes the handshake and then never answers a frame.
+    const silent = connect(s.port, "127.0.0.1");
+    const upgraded = new Promise<void>((resolve) => silent.once("data", () => resolve()));
+    silent.write(`GET /p/${s.token}/sync HTTP/1.1\r\nHost: 127.0.0.1:${s.port}\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Version: 13\r\n\r\n`);
+    await upgraded;
+    const cutOff = new Promise((resolve) => silent.once("close", resolve));
+    const started = Date.now();
     await s.close();
     server = null;
-    await closed;
+    expect(await closed).toEqual([1001, "The preview stopped"]);
+    await cutOff;
+    expect(Date.now() - started).toBeGreaterThanOrEqual(900);
     await expect(fetch(s.url)).rejects.toThrow();
   });
 });

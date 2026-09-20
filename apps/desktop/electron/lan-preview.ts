@@ -82,10 +82,14 @@ export interface LanPreviewHandle {
   readonly pushUpdates: boolean;
   /** Switch between polling and push mode. */
   setPushUpdates(on: boolean): void;
+  /** Close every player's socket with code 1001 (up to 1 s for them to answer), then stop listening. */
   close(): Promise<void>;
 }
 
 export const OFFLINE_MESSAGE = "Open a prototype in Sonobe on your computer to preview it here.";
+
+/** How long close() waits for players to answer its goodbye before cutting them off. */
+const CLOSE_GRACE_MS = 1000;
 
 const CONTENT_TYPES: Record<string, string> = {
   ".html": "text/html; charset=utf-8",
@@ -513,11 +517,27 @@ export async function startLanPreview(opts: LanPreviewOptions): Promise<LanPrevi
       closed = true;
       clearInterval(heartbeat);
       if (pollTimer) clearInterval(pollTimer);
-      for (const client of wss.clients) client.terminate();
-      wss.close();
+      // Say goodbye and let each player answer before cutting off the ones that don't. A player closing
+      // its own socket at that moment (a tab or window going away) would otherwise send its close
+      // frame to a socket just destroyed, which Node throws as an uncaught RangeError from
+      // TCP.onStreamRead: in the app, a JavaScript error dialog that stops the main process.
+      const players = [...wss.clients];
+      for (const client of players) client.close(1001, "The preview stopped");
       return new Promise<void>((resolve) => {
-        server.close(() => resolve());
-        server.closeAllConnections();
+        let finished = false;
+        const finish = () => {
+          if (finished) return;
+          finished = true;
+          clearTimeout(grace);
+          for (const client of wss.clients) client.terminate();
+          wss.close();
+          server.close(() => resolve());
+          server.closeAllConnections();
+        };
+        const grace = setTimeout(finish, CLOSE_GRACE_MS);
+        let open = players.length;
+        if (open === 0) finish();
+        for (const client of players) client.once("close", () => --open === 0 && finish());
       });
     },
   };
