@@ -1,0 +1,180 @@
+{
+  "formatVersion": 1,
+  "active": "proposal",
+  "presets": [
+    { "id": "proposal", "name": "Proposal" },
+    { "id": "shipped_app", "name": "Shipped app", "locked": true }
+  ],
+  "knobs": [
+    {
+      "id": "vertical_follow",
+      "name": "Vertical Follow",
+      "group": "Drag",
+      "type": "number",
+      "values": { "proposal": 0.3, "shipped_app": 0 },
+      "min": 0,
+      "max": 1,
+      "step": 0.05,
+      "description": "How much the card follows your finger up and down. 0 keeps it level."
+    },
+    {
+      "id": "tilt_per_point",
+      "name": "Tilt per Point",
+      "group": "Drag",
+      "type": "number",
+      "values": { "proposal": 0.03333333333333333, "shipped_app": 0.03333333333333333 },
+      "min": 0,
+      "max": 0.1,
+      "step": 0.001,
+      "unit": "°",
+      "description": "Degrees of tilt for each point the card moves sideways."
+    },
+    {
+      "id": "grab_tilt",
+      "name": "Grab Tilt",
+      "group": "Drag",
+      "type": "boolean",
+      "values": { "proposal": true, "shipped_app": false },
+      "description": "Grabbing the lower half tilts the card the other way, like a card held at the bottom."
+    },
+    {
+      "id": "badge_fade_start",
+      "name": "Badge Fade Start",
+      "group": "Badges",
+      "type": "number",
+      "values": { "proposal": 25, "shipped_app": 25 },
+      "min": 0,
+      "max": 200,
+      "step": 1,
+      "unit": "pt",
+      "description": "How far the card moves before the heart or ✕ starts to fade in."
+    },
+    {
+      "id": "badge_fade_end",
+      "name": "Badge Fade End",
+      "group": "Badges",
+      "type": "number",
+      "values": { "proposal": 95, "shipped_app": 25 },
+      "min": 0,
+      "max": 200,
+      "step": 1,
+      "unit": "pt",
+      "description": "Where the badge is fully shown. The same as Badge Fade Start makes it pop in."
+    },
+    {
+      "id": "commit_pop",
+      "name": "Commit Pop",
+      "group": "Badges",
+      "type": "number",
+      "values": { "proposal": 1.15, "shipped_app": 1 },
+      "min": 1,
+      "max": 1.5,
+      "step": 0.01,
+      "unit": "×",
+      "description": "How much the badge grows once letting go would vote."
+    },
+    {
+      "id": "commit_distance",
+      "name": "Commit Distance",
+      "group": "Throw",
+      "type": "number",
+      "values": { "proposal": 95, "shipped_app": 95 },
+      "min": 40,
+      "max": 200,
+      "step": 1,
+      "unit": "pt",
+      "description": "How far the card has to be headed when you let go for it to count as a vote."
+    },
+    {
+      "id": "throw_lookahead",
+      "name": "Throw Lookahead",
+      "group": "Throw",
+      "type": "number",
+      "values": { "proposal": 0.2, "shipped_app": 0 },
+      "min": 0,
+      "max": 0.5,
+      "step": 0.01,
+      "unit": "s",
+      "description": "Seconds of release speed added to the drag, so a quick flick counts. 0 judges by distance only."
+    },
+    {
+      "id": "spring_response",
+      "name": "Spring Response",
+      "group": "Spring",
+      "type": "number",
+      "values": { "proposal": 0.3, "shipped_app": 0.3 },
+      "min": 0.1,
+      "max": 1,
+      "step": 0.01,
+      "unit": "s",
+      "description": "How long the card takes to spring home or fly off."
+    },
+    {
+      "id": "spring_damping",
+      "name": "Spring Damping",
+      "group": "Spring",
+      "type": "number",
+      "values": { "proposal": 0.75, "shipped_app": 0.75 },
+      "min": 0.1,
+      "max": 1,
+      "step": 0.01,
+      "description": "Below 1 the spring overshoots a little before it settles."
+    },
+    {
+      "id": "card_flies_out",
+      "name": "Card Flies Out",
+      "group": "Fly Out",
+      "type": "boolean",
+      "values": { "proposal": true, "shipped_app": false },
+      "description": "On: a vote throws the card off screen. Off, as in the shipped app: the card never leaves, and the next place springs back from your finger."
+    },
+    {
+      "id": "fly_out_distance",
+      "name": "Fly-Out Distance",
+      "group": "Fly Out",
+      "type": "number",
+      "values": { "proposal": 600, "shipped_app": 600 },
+      "min": 200,
+      "max": 1000,
+      "step": 10,
+      "unit": "pt",
+      "description": "How far a thrown card flies."
+    },
+    {
+      "id": "next_card_scale",
+      "name": "Next Card Scale",
+      "group": "Next Card",
+      "type": "number",
+      "values": { "proposal": 0.95, "shipped_app": 1 },
+      "min": 0.8,
+      "max": 1,
+      "step": 0.01,
+      "unit": "×",
+      "description": "The card underneath starts this small and grows as the top card nears Commit Distance. 1 shows no rise."
+    },
+    {
+      "id": "button_nudge",
+      "name": "Button Nudge",
+      "group": "Buttons",
+      "type": "number",
+      "values": { "proposal": 20, "shipped_app": 0 },
+      "min": 0,
+      "max": 60,
+      "step": 1,
+      "unit": "pt",
+      "description": "Holding ✕ or ♥ nudges the top card that way."
+    },
+    {
+      "id": "button_press_scale",
+      "name": "Button Press Scale",
+      "group": "Buttons",
+      "type": "number",
+      "values": { "proposal": 0.92, "shipped_app": 1 },
+      "min": 0.8,
+      "max": 1,
+      "step": 0.01,
+      "unit": "×",
+      "description": "How small ✕ and ♥ get while pressed."
+    }
+  ]
+}

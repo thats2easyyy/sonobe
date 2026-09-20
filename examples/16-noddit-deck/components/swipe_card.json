@@ -1,0 +1,712 @@
+{
+  "formatVersion": 1,
+  "id": "swipe_card",
+  "name": "Swipe Card",
+  "kind": "patchComponent",
+  "notes": "One card of the deck. Main runs it once per place: it gets the finger (Drag Card, Throw Card), the buttons and the card above it, and says where this copy goes, how it tilts and scales, what its badges show, and whether it's gone.",
+  "interface": {
+    "inputs": {
+      "aboveLift": { "key": "aboveLift", "name": "Card Above Lift", "type": "number", "default": 1 },
+      "aboveOffset": {
+        "key": "aboveOffset",
+        "name": "Card Above Offset",
+        "type": "point",
+        "default": [0, 0]
+      },
+      "cardAboveGone": { "key": "cardAboveGone", "name": "Card Above Gone", "type": "boolean", "default": true },
+      "down": { "key": "down", "name": "Down", "type": "boolean", "default": false },
+      "grabPoint": {
+        "key": "grabPoint",
+        "name": "Grab Point",
+        "type": "point",
+        "default": [0, 0]
+      },
+      "passHeld": { "key": "passHeld", "name": "Pass Held", "type": "boolean", "default": false },
+      "passTapped": { "key": "passTapped", "name": "Pass Tapped", "type": "pulse" },
+      "projected": {
+        "key": "projected",
+        "name": "Projected Throw",
+        "type": "point",
+        "default": [0, 0]
+      },
+      "reset": { "key": "reset", "name": "Reset", "type": "pulse" },
+      "swipedLeft": { "key": "swipedLeft", "name": "Swiped Left", "type": "pulse" },
+      "swipedRight": { "key": "swipedRight", "name": "Swiped Right", "type": "pulse" },
+      "translation": {
+        "key": "translation",
+        "name": "Translation",
+        "type": "point",
+        "default": [0, 0]
+      },
+      "velocity": {
+        "key": "velocity",
+        "name": "Velocity",
+        "type": "point",
+        "default": [0, 0]
+      },
+      "yesHeld": { "key": "yesHeld", "name": "Yes Held", "type": "boolean", "default": false },
+      "yesTapped": { "key": "yesTapped", "name": "Yes Tapped", "type": "pulse" }
+    },
+    "outputs": {
+      "badgeScale": { "key": "badgeScale", "name": "Badge Scale", "type": "number", "link": "badge_scale.output" },
+      "gone": { "key": "gone", "name": "Gone", "type": "boolean", "link": "card_gone.on" },
+      "lift": { "key": "lift", "name": "Lift", "type": "number", "link": "lift.progress" },
+      "passBadge": { "key": "passBadge", "name": "Pass Badge Opacity", "type": "number", "link": "pass_badge.output" },
+      "position": { "key": "position", "name": "Position", "type": "point", "link": "card_spring.output" },
+      "rotation": { "key": "rotation", "name": "Rotation", "type": "number", "link": "card_tilt.output" },
+      "scale": { "key": "scale", "name": "Scale", "type": "number", "link": "card_scale.output" },
+      "shown": { "key": "shown", "name": "Shown", "type": "boolean", "link": "shown.output" },
+      "touchable": { "key": "touchable", "name": "Touchable", "type": "boolean", "link": "still_in_deck.output" },
+      "yesBadge": { "key": "yesBadge", "name": "Yes Badge Opacity", "type": "number", "link": "yes_badge.output" }
+    }
+  },
+  "layers": [],
+  "patches": {
+    "armed": {
+      "type": "or",
+      "name": "Armed",
+      "inputCount": 3,
+      "inputs": {
+        "value1": { "link": "would_vote.output" },
+        "value2": { "link": "holding_yes.output" },
+        "value3": { "link": "holding_pass.output" }
+      },
+      "ui": { "x": 732, "y": 2800 }
+    },
+    "armed_pop": {
+      "type": "popAnimation",
+      "name": "Armed Pop",
+      "typeParam": "number",
+      "inputs": {
+        "bounciness": 12,
+        "number": { "link": "armed.output" },
+        "speed": 20
+      },
+      "ui": { "x": 968, "y": 2800 }
+    },
+    "badge_scale": {
+      "type": "transition",
+      "name": "Badge Scale",
+      "typeParam": "number",
+      "inputs": {
+        "end": { "link": "$knob.commit_pop" },
+        "progress": { "link": "armed_pop.output" },
+        "start": 1
+      },
+      "ui": { "x": 1204, "y": 2800 }
+    },
+    "card_above_there": {
+      "type": "not",
+      "name": "Card Above There",
+      "inputs": { "value": { "link": "$in.cardAboveGone" } },
+      "ui": { "x": 98, "y": 3588 }
+    },
+    "card_gone": {
+      "type": "switch",
+      "name": "Card Gone",
+      "inputs": {
+        "turnOff": { "link": "$in.reset" },
+        "turnOn": { "link": "voted.output" }
+      },
+      "ui": { "x": 492, "y": 896 }
+    },
+    "card_offset": {
+      "type": "pointUnpack",
+      "name": "Card Offset",
+      "inputs": { "value": { "link": "card_spring.output" } },
+      "ui": { "x": 964, "y": 2290 }
+    },
+    "card_scale": {
+      "type": "transition",
+      "name": "Card Scale",
+      "typeParam": "number",
+      "inputs": {
+        "end": 1,
+        "progress": { "link": "$in.aboveLift" },
+        "start": { "link": "$knob.next_card_scale" }
+      },
+      "ui": { "x": 20, "y": 3296 }
+    },
+    "card_spring": {
+      "type": "springAnimation",
+      "name": "Card Spring",
+      "typeParam": "point",
+      "inputs": {
+        "friction": { "link": "spring_feel.friction" },
+        "gestureActive": { "link": "tracking.output" },
+        "gestureVelocity": { "link": "throw_speed.output" },
+        "mass": { "link": "spring_feel.mass" },
+        "number": { "link": "card_target.output" },
+        "tension": { "link": "spring_feel.tension" }
+      },
+      "ui": { "x": 888, "y": 1744 }
+    },
+    "card_target": {
+      "type": "ifElse",
+      "name": "Card Target",
+      "typeParam": "point",
+      "inputs": {
+        "condition": { "link": "$in.down" },
+        "ifFalse": { "link": "resting_at.output" },
+        "ifTrue": { "link": "held_at.output" }
+      },
+      "ui": { "x": 1309, "y": 1144 }
+    },
+    "card_tilt": {
+      "type": "multiply",
+      "name": "Card Tilt",
+      "typeParam": "number",
+      "inputCount": 3,
+      "inputs": {
+        "value1": { "link": "card_offset.x" },
+        "value2": { "link": "$knob.tilt_per_point" },
+        "value3": { "link": "tilt_direction.output" }
+      },
+      "ui": { "x": 1200, "y": 2354 }
+    },
+    "distance_from_center": {
+      "type": "absoluteValue",
+      "name": "Distance From Center",
+      "typeParam": "number",
+      "inputs": { "value": { "link": "card_offset.x" } },
+      "ui": { "x": 20, "y": 3144 }
+    },
+    "finger_offset": {
+      "type": "pointUnpack",
+      "name": "Finger Offset",
+      "inputs": { "value": { "link": "$in.translation" } },
+      "ui": { "x": 20, "y": 1166 }
+    },
+    "finger_speed": {
+      "type": "pointUnpack",
+      "name": "Finger Speed",
+      "inputs": { "value": { "link": "$in.velocity" } },
+      "ui": { "x": 20, "y": 2048 }
+    },
+    "flip_tilt": {
+      "type": "and",
+      "name": "Flip Tilt",
+      "inputCount": 2,
+      "inputs": {
+        "value1": { "link": "grabbed_lower_half.output" },
+        "value2": { "link": "$knob.grab_tilt" }
+      },
+      "ui": { "x": 728, "y": 2398 }
+    },
+    "flown_x": {
+      "type": "ifElse",
+      "name": "Flown X",
+      "typeParam": "number",
+      "inputs": {
+        "condition": { "link": "$knob.card_flies_out" },
+        "ifFalse": 0,
+        "ifTrue": { "link": "fly_out_x.output" }
+      },
+      "ui": { "x": 496, "y": 1274 }
+    },
+    "fly_out_side": {
+      "type": "optionPicker",
+      "name": "Fly-Out Side",
+      "typeParam": "number",
+      "inputCount": 2,
+      "inputs": {
+        "option": { "link": "which_way.option" },
+        "option0": -1,
+        "option1": 1
+      },
+      "ui": { "x": 492, "y": 766 }
+    },
+    "fly_out_x": {
+      "type": "multiply",
+      "name": "Fly-Out X",
+      "typeParam": "number",
+      "inputCount": 2,
+      "inputs": {
+        "value1": { "link": "fly_out_side.output" },
+        "value2": { "link": "$knob.fly_out_distance" }
+      },
+      "ui": { "x": 728, "y": 766 }
+    },
+    "followed_y": {
+      "type": "multiply",
+      "name": "Followed Y",
+      "typeParam": "number",
+      "inputCount": 2,
+      "inputs": {
+        "value1": { "link": "finger_offset.y" },
+        "value2": { "link": "$knob.vertical_follow" }
+      },
+      "ui": { "x": 256, "y": 1224 }
+    },
+    "followed_y_speed": {
+      "type": "multiply",
+      "name": "Followed Y Speed",
+      "typeParam": "number",
+      "inputCount": 2,
+      "inputs": {
+        "value1": { "link": "finger_speed.y" },
+        "value2": { "link": "$knob.vertical_follow" }
+      },
+      "ui": { "x": 256, "y": 2106 }
+    },
+    "follows_card_above": {
+      "type": "and",
+      "name": "Follows Card Above",
+      "inputCount": 2,
+      "inputs": {
+        "value1": { "link": "stays_in_place.output" },
+        "value2": { "link": "card_above_there.output" }
+      },
+      "ui": { "x": 334, "y": 3502 }
+    },
+    "grab_point": {
+      "type": "pointUnpack",
+      "name": "Grab Point",
+      "inputs": { "value": { "link": "$in.grabPoint" } },
+      "ui": { "x": 20, "y": 2376 }
+    },
+    "grab_y": {
+      "type": "sampleAndHold",
+      "name": "Grab Y",
+      "typeParam": "number",
+      "inputs": {
+        "sample": { "link": "press.turnedOn" },
+        "value": { "link": "grab_point.y" }
+      },
+      "ui": { "x": 256, "y": 2398 }
+    },
+    "grabbed_lower_half": {
+      "type": "greaterThan",
+      "name": "Grabbed Lower Half",
+      "typeParam": "number",
+      "inputCount": 2,
+      "inputs": {
+        "value1": { "link": "grab_y.output" },
+        "value2": 239
+      },
+      "ui": { "x": 492, "y": 2398 }
+    },
+    "heading": {
+      "type": "absoluteValue",
+      "name": "Heading",
+      "typeParam": "number",
+      "inputs": { "value": { "link": "projected_offset.x" } },
+      "ui": { "x": 256, "y": 2800 }
+    },
+    "held_at": {
+      "type": "point",
+      "name": "Held At",
+      "inputs": {
+        "x": { "link": "finger_offset.x" },
+        "y": { "link": "followed_y.output" }
+      },
+      "ui": { "x": 531, "y": 1166 }
+    },
+    "holding_pass": {
+      "type": "and",
+      "name": "Holding Pass",
+      "inputCount": 2,
+      "inputs": {
+        "value1": { "link": "$in.passHeld" },
+        "value2": { "link": "is_top_card.output" }
+      },
+      "ui": { "x": 256, "y": 344 }
+    },
+    "holding_yes": {
+      "type": "and",
+      "name": "Holding Yes",
+      "inputCount": 2,
+      "inputs": {
+        "value1": { "link": "$in.yesHeld" },
+        "value2": { "link": "is_top_card.output" }
+      },
+      "ui": { "x": 20, "y": 452 }
+    },
+    "is_top_card": {
+      "type": "and",
+      "name": "Is Top Card",
+      "inputCount": 2,
+      "inputs": {
+        "value1": { "link": "$in.cardAboveGone" },
+        "value2": { "link": "still_in_deck.output" }
+      },
+      "ui": { "x": 549, "y": 44 }
+    },
+    "lift": {
+      "type": "progress",
+      "name": "Lift",
+      "inputs": {
+        "clampToRange": true,
+        "end": { "link": "$knob.commit_distance" },
+        "start": 0,
+        "value": { "link": "distance_from_center.output" }
+      },
+      "ui": { "x": 258, "y": 3144 }
+    },
+    "nudge_side": {
+      "type": "ifElse",
+      "name": "Nudge Side",
+      "typeParam": "number",
+      "inputs": {
+        "condition": { "link": "holding_pass.output" },
+        "ifFalse": { "link": "yes_nudge.output" },
+        "ifTrue": -1
+      },
+      "ui": { "x": 492, "y": 344 }
+    },
+    "nudge_x": {
+      "type": "multiply",
+      "name": "Nudge X",
+      "typeParam": "number",
+      "inputCount": 2,
+      "inputs": {
+        "value1": { "link": "nudge_side.output" },
+        "value2": { "link": "$knob.button_nudge" }
+      },
+      "ui": { "x": 728, "y": 344 }
+    },
+    "nudged_to": {
+      "type": "point",
+      "name": "Nudged To",
+      "inputs": {
+        "x": { "link": "nudge_x.output" },
+        "y": 0
+      },
+      "ui": { "x": 601, "y": 1534 }
+    },
+    "pass_badge": {
+      "type": "ifElse",
+      "name": "Pass Badge",
+      "typeParam": "number",
+      "inputs": {
+        "condition": { "link": "holding_pass.output" },
+        "ifFalse": { "link": "pass_badge_fade.progress" },
+        "ifTrue": 1
+      },
+      "ui": { "x": 920, "y": 2604 }
+    },
+    "pass_badge_fade": {
+      "type": "progress",
+      "name": "Pass Badge Fade",
+      "inputs": {
+        "clampToRange": true,
+        "end": { "link": "$knob.badge_fade_end" },
+        "start": { "link": "$knob.badge_fade_start" },
+        "value": { "link": "pass_side_x.output" }
+      },
+      "ui": { "x": 684, "y": 2648 }
+    },
+    "pass_side_x": {
+      "type": "multiply",
+      "name": "Pass Side X",
+      "typeParam": "number",
+      "inputCount": 2,
+      "inputs": {
+        "value1": { "link": "card_offset.x" },
+        "value2": -1
+      },
+      "ui": { "x": 448, "y": 2648 }
+    },
+    "pass_vote": {
+      "type": "and",
+      "name": "Pass Button Vote",
+      "inputCount": 2,
+      "inputs": {
+        "value1": { "link": "$in.passTapped" },
+        "value2": { "link": "is_top_card.output" }
+      },
+      "ui": { "x": 20, "y": 582 }
+    },
+    "press": {
+      "type": "pulse",
+      "name": "Press",
+      "inputs": { "on": { "link": "$in.down" } },
+      "ui": { "x": 260, "y": 1404 }
+    },
+    "projected_offset": {
+      "type": "pointUnpack",
+      "name": "Projected Offset",
+      "inputs": { "value": { "link": "$in.projected" } },
+      "ui": { "x": 20, "y": 2800 }
+    },
+    "resting_at": {
+      "type": "ifElse",
+      "name": "Resting At",
+      "typeParam": "point",
+      "inputs": {
+        "condition": { "link": "card_gone.on" },
+        "ifFalse": { "link": "settled_at.output" },
+        "ifTrue": { "link": "thrown_to.output" }
+      },
+      "ui": { "x": 1073, "y": 1252 }
+    },
+    "settled_at": {
+      "type": "ifElse",
+      "name": "Settled At",
+      "typeParam": "point",
+      "inputs": {
+        "condition": { "link": "follows_card_above.output" },
+        "ifFalse": { "link": "nudged_to.output" },
+        "ifTrue": { "link": "$in.aboveOffset" }
+      },
+      "ui": { "x": 837, "y": 1490 }
+    },
+    "shown": {
+      "type": "or",
+      "name": "Shown",
+      "inputCount": 2,
+      "inputs": {
+        "value1": { "link": "$knob.card_flies_out" },
+        "value2": { "link": "is_top_card.output" }
+      },
+      "ui": { "x": 20, "y": 3674 }
+    },
+    "spring_feel": {
+      "type": "springConverter",
+      "name": "Spring Feel",
+      "inputs": {
+        "dampingFraction": { "link": "$knob.spring_damping" },
+        "response": { "link": "$knob.spring_response" }
+      },
+      "ui": { "x": 496, "y": 1766 }
+    },
+    "stays_in_place": {
+      "type": "not",
+      "name": "Stays in Place",
+      "inputs": { "value": { "link": "$knob.card_flies_out" } },
+      "ui": { "x": 20, "y": 3502 }
+    },
+    "still_in_deck": {
+      "type": "not",
+      "name": "Still in Deck",
+      "inputs": { "value": { "link": "was_gone_last_frame.output" } },
+      "ui": { "x": 313, "y": 66 }
+    },
+    "throw_speed": {
+      "type": "point",
+      "name": "Throw Speed",
+      "inputs": {
+        "x": { "link": "finger_speed.x" },
+        "y": { "link": "followed_y_speed.output" }
+      },
+      "ui": { "x": 548, "y": 2048 }
+    },
+    "thrown_to": {
+      "type": "point",
+      "name": "Thrown To",
+      "inputs": {
+        "x": { "link": "flown_x.output" },
+        "y": { "link": "y_at_release.output" }
+      },
+      "ui": { "x": 837, "y": 1274 }
+    },
+    "tilt_direction": {
+      "type": "ifElse",
+      "name": "Tilt Direction",
+      "typeParam": "number",
+      "inputs": {
+        "condition": { "link": "flip_tilt.output" },
+        "ifFalse": 1,
+        "ifTrue": -1
+      },
+      "ui": { "x": 964, "y": 2398 }
+    },
+    "tracking": {
+      "type": "or",
+      "name": "Tracking",
+      "inputCount": 2,
+      "inputs": {
+        "value1": { "link": "$in.down" },
+        "value2": { "link": "follows_card_above.output" }
+      },
+      "ui": { "x": 652, "y": 1940 }
+    },
+    "voted": {
+      "type": "or",
+      "name": "Voted",
+      "inputCount": 2,
+      "inputs": {
+        "value1": { "link": "went_left.output" },
+        "value2": { "link": "went_right.output" }
+      },
+      "ui": { "x": 256, "y": 874 }
+    },
+    "was_gone_last_frame": {
+      "type": "delay1",
+      "name": "Was Gone Last Frame",
+      "typeParam": "boolean",
+      "inputs": { "value": { "link": "card_gone.on" } },
+      "ui": { "x": 20, "y": 66 }
+    },
+    "went_left": {
+      "type": "or",
+      "name": "Went Left",
+      "inputCount": 2,
+      "inputs": {
+        "value1": { "link": "$in.swipedLeft" },
+        "value2": { "link": "pass_vote.output" }
+      },
+      "ui": { "x": 20, "y": 766 }
+    },
+    "went_right": {
+      "type": "or",
+      "name": "Went Right",
+      "inputCount": 2,
+      "inputs": {
+        "value1": { "link": "$in.swipedRight" },
+        "value2": { "link": "yes_vote.output" }
+      },
+      "ui": { "x": 20, "y": 874 }
+    },
+    "which_way": {
+      "type": "optionSwitch",
+      "name": "Which Way",
+      "inputCount": 2,
+      "inputs": {
+        "setTo0": { "link": "went_left.output" },
+        "setTo1": { "link": "went_right.output" }
+      },
+      "ui": { "x": 256, "y": 766 }
+    },
+    "would_vote": {
+      "type": "greaterThan",
+      "name": "Would Vote",
+      "typeParam": "number",
+      "inputCount": 2,
+      "inputs": {
+        "value1": { "link": "heading.output" },
+        "value2": { "link": "$knob.commit_distance" }
+      },
+      "ui": { "x": 492, "y": 2800 }
+    },
+    "y_at_release": {
+      "type": "sampleAndHold",
+      "name": "Y at Release",
+      "typeParam": "number",
+      "inputs": {
+        "sample": { "link": "press.turnedOff" },
+        "value": { "link": "followed_y.output" }
+      },
+      "ui": { "x": 531, "y": 1404 }
+    },
+    "yes_badge": {
+      "type": "ifElse",
+      "name": "Yes Badge",
+      "typeParam": "number",
+      "inputs": {
+        "condition": { "link": "holding_yes.output" },
+        "ifFalse": { "link": "yes_badge_fade.progress" },
+        "ifTrue": 1
+      },
+      "ui": { "x": 256, "y": 2604 }
+    },
+    "yes_badge_fade": {
+      "type": "progress",
+      "name": "Yes Badge Fade",
+      "inputs": {
+        "clampToRange": true,
+        "end": { "link": "$knob.badge_fade_end" },
+        "start": { "link": "$knob.badge_fade_start" },
+        "value": { "link": "card_offset.x" }
+      },
+      "ui": { "x": 20, "y": 2648 }
+    },
+    "yes_nudge": {
+      "type": "ifElse",
+      "name": "Yes Nudge",
+      "typeParam": "number",
+      "inputs": {
+        "condition": { "link": "holding_yes.output" },
+        "ifFalse": 0,
+        "ifTrue": 1
+      },
+      "ui": { "x": 256, "y": 452 }
+    },
+    "yes_vote": {
+      "type": "and",
+      "name": "Yes Button Vote",
+      "inputCount": 2,
+      "inputs": {
+        "value1": { "link": "$in.yesTapped" },
+        "value2": { "link": "is_top_card.output" }
+      },
+      "ui": { "x": 212, "y": 582 }
+    }
+  },
+  "comments": [
+    {
+      "id": "section_badges",
+      "text": "7 · BADGES · fade in with distance (Badge Fade Start, Badge Fade End), pop once letting go would vote (Commit Pop)",
+      "rect": [0, 2560, 1388, 362],
+      "color": "pink"
+    },
+    {
+      "id": "section_buttons",
+      "text": "2 · ✕ ♥ BUTTONS · holding previews the vote on the top card (Button Nudge), tapping throws it",
+      "rect": [0, 300, 916, 382],
+      "color": "pink"
+    },
+    {
+      "id": "section_from_main",
+      "text": "FROM MAIN · the finger, the buttons, and the card above this one",
+      "rect": [-640, 0, 187, 430],
+      "color": "gray"
+    },
+    {
+      "id": "section_next_card",
+      "text": "8 · NEXT CARD · Lift tells the card underneath how far to grow (Next Card Scale)",
+      "rect": [0, 3100, 442, 318],
+      "color": "green"
+    },
+    {
+      "id": "section_shipped_app",
+      "text": "9 · THE SHIPPED APP · with Card Flies Out off only the top card shows, the cards under it follow it, and the next place springs back from the finger",
+      "rect": [0, 3458, 518, 316],
+      "color": "yellow"
+    },
+    {
+      "id": "section_spring",
+      "text": "5 · ONE SPRING GETS IT THERE · starting at the finger's speed (Spring Response, Spring Damping)",
+      "rect": [0, 1700, 1072, 506],
+      "color": "green"
+    },
+    {
+      "id": "section_target",
+      "text": "4 · WHERE THE CARD WANTS TO BE · the finger while dragging (Vertical Follow), else flown off (Card Flies Out), else nudged by a held button, else home",
+      "rect": [0, 1100, 1493, 534],
+      "color": "purple"
+    },
+    {
+      "id": "section_tilt",
+      "text": "6 · TILT · Tilt per Point, flipped when you grab the lower half (Grab Tilt)",
+      "rect": [0, 2246, 1388, 274],
+      "color": "blue"
+    },
+    {
+      "id": "section_to_main",
+      "text": "TO MAIN · where this copy goes and what it shows",
+      "rect": [1800, 0, 197, 320],
+      "color": "gray"
+    },
+    {
+      "id": "section_top_card",
+      "text": "1 · IS THIS THE TOP CARD? · not gone, and the card above is (read one frame late, so one ✕ tap throws one card)",
+      "rect": [0, 0, 733, 144],
+      "color": "gray"
+    },
+    {
+      "id": "section_vote",
+      "text": "3 · VOTE · a throw (Throw Card) or a tap turns Card Gone on and remembers which way",
+      "rect": [0, 722, 916, 296],
+      "color": "orange"
+    }
+  ],
+  "meta": {
+    "patchEditor": {
+      "nodes": {
+        "$in": [-620, 44],
+        "$out": [1820, 44]
+      }
+    }
+  }
+}
