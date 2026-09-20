@@ -15,10 +15,11 @@ import type { z } from "zod";
 import { clientLabel, isClientId, type ClientRegistry } from "./clients.ts";
 import { defaultGuides, type GuideStore } from "./guides.ts";
 import type { SonobeHost, WorkClient } from "./host.ts";
+import { RejectedArguments, toolInputSchema, unknownFieldsError } from "./inputs.ts";
 import { callSignal, toolWork, type CallScope, type ToolWork } from "./progress.ts";
 import { registerPrompts } from "./prompts.ts";
 import { registerResources } from "./resources.ts";
-import { guarded, withCompleteText } from "./results.ts";
+import { failure, guarded, withCompleteText } from "./results.ts";
 import { toolOutputSchema, type ToolOutputSchema } from "./schemas.ts";
 import { registerDiscoveryTools } from "./tools/discovery.ts";
 import { registerDocumentTools } from "./tools/documents.ts";
@@ -151,8 +152,9 @@ export interface ToolContext {
    */
   signal(ctx: ServerContext): AbortSignal;
   /**
-   * Register a tool with teaching-error handling. Handlers get a ToolWork third: progress, steps
-   * with deadlines, and the call's cancellation signal (progress.ts).
+   * Register a tool with teaching-error handling. Its input refuses fields the schema doesn't take
+   * with a did-you-mean (inputs.ts). Handlers get a ToolWork third: progress, steps with deadlines,
+   * and the call's cancellation signal (progress.ts).
    */
   tool<S extends z.ZodObject>(
     name: ToolName,
@@ -301,14 +303,16 @@ export function createSonobeMcpServer(
     },
     signal: (ctx) => signals.get(ctx) ?? ctx.mcpReq.signal,
     tool(name, config, handler) {
-      const run = guarded(
-        handler as (args: unknown, ctx: ServerContext, work: ToolWork) => Promise<CallToolResult>,
+      const typed = handler as (args: unknown, ctx: ServerContext, work: ToolWork) => Promise<CallToolResult>;
+      // Arguments with fields the tool doesn't take never reach the handler (inputs.ts).
+      const run = guarded(async (args: unknown, ctx: ServerContext, work: ToolWork) =>
+        args instanceof RejectedArguments ? failure(unknownFieldsError(name, args.fields)) : typed(args, ctx, work),
       );
       const output = config.output ? toolOutputSchema(config.output) : undefined;
       const registration: Record<string, unknown> = {
         title: config.title,
         description: config.description,
-        inputSchema: config.input,
+        inputSchema: toolInputSchema(name, config.input),
         annotations: { title: config.title, ...config.annotations },
       };
       if (output) registration.outputSchema = output;

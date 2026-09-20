@@ -183,6 +183,12 @@ const FAILURES: { name: ToolName; args: Record<string, unknown>; code?: string }
   { name: "tidy_graph", args: { component: "nope" } },
   { name: "set_knobs", args: { knobs: [{ name: "Label", connect: ["zoomed.flip"] }] }, code: "invalid_knob" },
   { name: "apply_knob_preset", args: { preset: "Nope" }, code: "unknown_knob_preset" },
+  {
+    name: "apply_ops",
+    args: { ops: [{ op: "rename", id: "photo", name: "Hero" }], dryrun: true },
+    code: "unknown_field",
+  },
+  { name: "sim_step", args: { simID: "sim_1" }, code: "unknown_field" },
 ];
 
 describe("teaching errors survive output-schema validation", () => {
