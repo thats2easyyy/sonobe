@@ -128,6 +128,8 @@ const MIN_ZOOM = 0.1;
 const MIN_CANVAS = 48;
 /** How long graph.bounds waits at most for the view to settle (a fit or reveal still moving). */
 const SETTLE_FRAMES = 40;
+/** The longest a view move takes (fits animate 200 to 260 ms); past it, don't wait on its promise. */
+const MOVE_MS = 600;
 
 /** The next frame, or a moment later in a window that doesn't paint (hidden windows may not run requestAnimationFrame). */
 const nextFrame = () => new Promise<void>((resolve) => {
@@ -137,6 +139,9 @@ const nextFrame = () => new Promise<void>((resolve) => {
     resolve();
   });
 });
+
+/** A view move finished, or it's taking longer than any move does (React Flow can drop a fit it queued). */
+const moved = (move: Promise<unknown>) => Promise.race([move, new Promise((resolve) => setTimeout(resolve, MOVE_MS))]);
 
 type Flow = ReactFlowInstance<FlowNode, CableFlowEdge>;
 
@@ -332,7 +337,7 @@ function Canvas({ session, componentId, showBreadcrumbs, showToolbar, toolbarCon
       const move = flowRef.current.fitView({ nodes: ids.map((id) => ({ id })), duration: first || reducedMotion ? 0 : 260, padding: 0.6, maxZoom: 1.2 });
       moveRef.current = move;
       if (first)
-        void move.then(() => {
+        void moved(move).then(() => {
           if (mountedRef.current) setFitted(true);
         });
     },
@@ -342,7 +347,7 @@ function Canvas({ session, componentId, showBreadcrumbs, showToolbar, toolbarCon
   const settleView = useCallback(async () => {
     for (let i = 0; i < SETTLE_FRAMES && mountedRef.current; i++) {
       const move = moveRef.current;
-      await move;
+      await moved(move);
       await nextFrame();
       if (move === moveRef.current && fittedRef.current) return;
     }

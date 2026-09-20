@@ -102,3 +102,44 @@ test.describe("patch editor: align keys, publishing ports, and variables", () =>
     expect(problems).toEqual([]);
   });
 });
+
+test.describe("patch editor: reveal (MCP reveal with focus)", () => {
+  /** Main's patches, with Liked and Like Spring grouped into Heart Logic. */
+  async function withComponent(page: Parameters<typeof openEditor>[0]) {
+    await openEditor(page);
+    await runCommand(page, "Patches Only");
+    expect(await hook(page, (s) => s.apply([{ op: "createComponent", component: "main", name: "Heart Logic", patchIds: ["liked", "like_spring"] }], "Group").ok)).toBe(true);
+  }
+  const viewport = (page: Parameters<typeof openEditor>[0]) => page.locator(".sb-pe .react-flow__viewport").evaluate((el) => ({ transform: el.style.transform, opacity: getComputedStyle(el).opacity }));
+
+  test("entering a component and revealing in the same tick shows its graph, fitted to what was revealed", async ({ page }) => {
+    const problems = collectConsoleProblems(page);
+    await withComponent(page);
+    // What the reveal RPC does with focus: open the component, select, and ask the panels to reveal.
+    await hook(page, (s) => {
+      const selection = s.session.selection.getState();
+      selection.setComponentPath(["main", "heart_logic"]);
+      selection.select({ patches: ["like_spring"], layers: [], comments: [] });
+      s.session.selection.getState().requestReveal("heart_logic", ["like_spring"]);
+    });
+    await expect(page.locator(".sb-pe__canvas")).not.toHaveAttribute("data-fitting");
+    await expect(flowNode(page, "like_spring")).toBeInViewport();
+    expect((await viewport(page)).opacity).toBe("1");
+    expect(problems).toEqual([]);
+  });
+
+  test("graph.bounds waits for a reveal's fit to finish before it measures", async ({ page }) => {
+    await withComponent(page);
+    await hook(page, (s) => s.session.selection.getState().enterComponent("heart_logic"));
+    await expect(flowNode(page, "like_spring")).toBeVisible();
+    await expect(page.locator(".sb-pe__canvas")).not.toHaveAttribute("data-fitting");
+    const measured = await page.evaluate(async () => {
+      const s = window.__sonobe!;
+      s.session.selection.getState().requestReveal("heart_logic", ["liked"]);
+      await s.session.bounds.measure("graph.bounds");
+      return (document.querySelector(".sb-pe .react-flow__viewport") as HTMLElement).style.transform;
+    });
+    await page.waitForTimeout(500);
+    expect((await viewport(page)).transform).toBe(measured);
+  });
+});
