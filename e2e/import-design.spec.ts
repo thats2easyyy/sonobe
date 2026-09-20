@@ -102,6 +102,40 @@ test.describe("Import Design", () => {
     expect(problems).toEqual([]);
   });
 
+  test("lists every import note behind “N more” when there are more than the toast shows", async ({ page }) => {
+    const problems = collectConsoleProblems(page);
+    await openEditor(page);
+    await runCommand(page, "Import Design");
+    const dialog = page.getByRole("dialog", { name: "Import Design" });
+    await dialog.getByRole("radio", { name: "Paste HTML" }).click();
+    // An inner shadow, an image that can't be downloaded, and SF Symbols the browser can't draw: one note each.
+    await dialog.getByRole("textbox", { name: "HTML" }).fill(
+      [
+        '<!doctype html><body style="margin:0;font-family:system-ui">',
+        '<div data-name="Card" style="width:300px;height:120px;box-shadow:inset 0 2px 6px #0004;background:#fff">',
+        '<img data-name="Photo" src="http://127.0.0.1:9/missing.png" style="width:80px;height:80px">',
+        '<svg data-sf-symbol="heart.fill" style="font-size:24px;color:#FF375F"></svg>',
+        '<svg data-sf-symbol="star.fill" style="font-size:24px"></svg>',
+        "</div></body>",
+      ].join(""),
+    );
+    await dialog.getByRole("button", { name: "Import", exact: true }).click();
+    await expect(dialog).toBeHidden({ timeout: 30_000 });
+    const toast = page.locator(".sb-toast", { hasText: "Imported “" });
+    await expect(toast).toBeVisible();
+    const more = toast.getByRole("button", { name: /^\d+ more$/ });
+    await expect(more).toBeVisible();
+    const hidden = Number((await more.textContent())!.split(" ")[0]);
+    await more.click();
+    const notes = page.locator(".sb-toast", { hasText: "Import notes for" });
+    await expect(notes).toBeVisible();
+    await expect(notes.locator(".sb-toast__details li")).toHaveCount(hidden + 2);
+    await expect(notes).toContainText("SF Symbol");
+    await screenshot(page, "import-04-all-notes");
+    // The image that can't be downloaded logs a failed request; nothing else should.
+    expect(problems.filter((p) => !p.startsWith("Failed to load resource"))).toEqual([]);
+  });
+
   test("pastes a design capture copied from another tool", async ({ page }) => {
     await openEditor(page);
     const capture = {
