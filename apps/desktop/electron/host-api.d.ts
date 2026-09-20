@@ -332,6 +332,8 @@ export interface SonobeHostRpc {
 export interface SonobeHost {
   readonly platform: "darwin" | "win32" | "linux" | string;
   readonly version: string;
+  /** True when the app runs muted (SONOBE_MUTE). The editor then speaks silently too: system speech plays past Chromium's audio mute. */
+  readonly muted: boolean;
 
   /** Native folder picker for a *.sonobe project. Resolves the project directory or null. */
   openProjectDialog(): Promise<string | null>;
@@ -381,8 +383,9 @@ export interface SonobeHost {
   notifyDocumentChanged(revision: number, history?: { undo: string; redo: string }): void;
 
   /**
-   * Tell the host the prototype restarted (Restart Prototype, ⌘R, restart_viewer). The phone preview
-   * and the pop-out viewer restart it too when they show this window's document.
+   * Tell the host the prototype restarted (Restart Prototype, ⌘R, restart_viewer, opening another
+   * document in the window). The phone preview and the pop-out viewer restart it too when they show
+   * this window's document.
    */
   notifyPrototypeRestarted(): void;
 

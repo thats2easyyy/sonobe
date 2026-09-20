@@ -122,8 +122,10 @@ const CONTENT_TYPES: Record<string, string> = {
  * scripts), nothing may frame it, and it posts no forms. Prototypes reach other hosts the way they do
  * in the editor's viewer: Network Request, JSON File and scripts fetch any http(s) URL (connect-src),
  * WebSocket Connection opens any ws(s) URL, and the images, videos and sounds those return (remote
- * URLs, or data: from Base64 Decode) load in layers and Sound Player (img-src, media-src). Nothing
- * else is loosened.
+ * URLs, or data: from Base64 Decode) load in layers and Sound Player (img-src, media-src). The
+ * platform reads picked photos, captures and recordings (blob:) and data: files with fetch(), for
+ * Base64 Encode and Network Request uploads, so connect-src takes blob: and data: too. Nothing else is
+ * loosened.
  */
 const PLAYER_CSP = [
   "default-src 'self'",
@@ -132,7 +134,7 @@ const PLAYER_CSP = [
   "img-src 'self' data: blob: http: https:",
   "media-src 'self' data: blob: http: https:",
   "font-src 'self' data:",
-  "connect-src 'self' http: https: ws: wss:",
+  "connect-src 'self' http: https: ws: wss: blob: data:",
   "worker-src 'self' blob:",
   "base-uri 'none'",
   "frame-ancestors 'none'",

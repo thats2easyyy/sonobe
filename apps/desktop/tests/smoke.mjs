@@ -282,6 +282,7 @@ try {
     keys: Object.keys(window.sonobeHost ?? {}).sort(),
     platform: window.sonobeHost?.platform,
     version: window.sonobeHost?.version,
+    muted: window.sonobeHost?.muted,
     commandCount: window.sonobeHost?.commands().length,
     restart: window.sonobeHost?.commands().find((c) => c.id === "viewer.restart"),
     nodeRequire: typeof globalThis.require,
@@ -292,6 +293,8 @@ try {
     assert(hostInfo.keys.includes(key), `sonobeHost.${key}`, hostInfo.keys);
   }
   assert(hostInfo.platform === process.platform, "platform", hostInfo.platform);
+  // SONOBE_MUTE reaches the page too, not only through navigator.webdriver: system speech plays past setAudioMuted.
+  assert(hostInfo.muted === true, "sonobeHost.muted under SONOBE_MUTE", hostInfo.muted);
   assert(hostInfo.restart?.accelerator === "CmdOrCtrl+R", "commands() lists accelerators", hostInfo.restart);
   assert(hostInfo.nodeRequire === "undefined" && hostInfo.nodeProcess === "undefined", "no Node globals in the page", hostInfo);
   log(`sonobeHost ok (${hostInfo.commandCount} commands)`);
@@ -775,11 +778,13 @@ try {
         const layers = await w.webContents.executeJavaScript("document.querySelectorAll('.sonobe-layer').length");
         if (layers <= 5) return null;
         const prefs = w.webContents.getLastWebPreferences() ?? {};
-        return { layers, title: w.getTitle(), muted: w.webContents.isAudioMuted(), sandbox: prefs.sandbox, contextIsolation: prefs.contextIsolation, size: w.getContentSize() };
+        return { layers, title: w.getTitle(), url: w.webContents.getURL(), muted: w.webContents.isAudioMuted(), sandbox: prefs.sandbox, contextIsolation: prefs.contextIsolation, size: w.getContentSize() };
       }),
     { timeout: 15_000, interval: 250, message: "the pop-out viewer to render" },
   );
   assert(viewerWindow.muted && viewerWindow.sandbox === true && viewerWindow.contextIsolation === true, "viewer window is muted and sandboxed", viewerWindow);
+  // The window has no host API, so ?mute=1 is what makes its speech silent under SONOBE_MUTE.
+  assert(new URL(viewerWindow.url).searchParams.get("mute") === "1", "the viewer window loads with ?mute=1", viewerWindow.url);
   const noHostInViewer = await app.evaluate(async ({ BrowserWindow }) => BrowserWindow.getAllWindows().find((x) => x.webContents.getURL().startsWith("http://127.0.0.1:")).webContents.executeJavaScript("typeof window.sonobeHost"));
   assert(noHostInViewer === "undefined", "the viewer window has no host API", noHostInViewer);
   const refocused = await page.evaluate(() => window.sonobeHost.popOutViewer());
