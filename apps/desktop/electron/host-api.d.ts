@@ -293,6 +293,8 @@ export interface SonobeDrafts {
   list(): Promise<DraftInfo[]>;
   /** Claim a draft for this window and read it. */
   read(id: string): Promise<DraftReply<{ info: DraftInfo; manifest: Record<string, unknown>; files: Record<string, string>; binaries: Record<string, ArrayBuffer> }>>;
+  /** Give back a draft this window read but couldn't use (its files don't make a document): it's recoverable again. */
+  release(id: string): Promise<void>;
   /** Show the draft's folder in Finder or Explorer. */
   reveal(id: string): void;
 }

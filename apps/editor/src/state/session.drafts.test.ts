@@ -145,6 +145,17 @@ describe("restoring drafts", () => {
     expect(await drafts.list()).toEqual([]);
   });
 
+  it("keeps a draft whose files don't make a document recoverable after it fails to open", async () => {
+    const drafts = createMemoryProjectStorage();
+    // A first write cut off after project.json, before components/main.json.
+    const id = "m1x2y3z4-0badf11e";
+    await drafts.write(id, { files: { "project.json": serializeDocument(createEmptyDocument({ name: "Cut Off" }))["project.json"]! }, deleted: [] });
+    const next = tab(createMemoryProjectStorage(), drafts, sharedLocks());
+    expect((await next.recoverableDrafts()).map((d) => d.id)).toEqual([id]);
+    expect(await next.restoreDraft(id)).toMatchObject({ ok: false, errorCode: "invalidFormat" });
+    expect((await next.recoverableDrafts()).map((d) => d.id)).toEqual([id]);
+  });
+
   it("notices a draft cut off mid-write and still restores what's there", async () => {
     const storage = createMemoryProjectStorage();
     const drafts = createMemoryProjectStorage();
