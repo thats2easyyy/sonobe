@@ -67,6 +67,21 @@ describe("import_design", () => {
     expect(history.text).toContain("imported Checkout");
   });
 
+  it("marks its batch as an import whatever its label, and no other tool's", async () => {
+    const sources: unknown[] = [];
+    const spied = new Proxy(project.host, {
+      get: (target, key, receiver) => (key === "apply" ? (...args: Parameters<HeadlessHost["apply"]>) => (sources.push(args[1].source), target.apply(...args)) : Reflect.get(target, key, receiver)),
+    });
+    const spiedClient = await connectClient(spied);
+    try {
+      expect((await spiedClient.call("import_design", { capture, label: "set up checkout" })).isError).toBe(false);
+      expect((await spiedClient.call("rename", { updates: [{ id: "pay_button", name: "Buy Button" }], label: "imported the button's name" })).isError).toBe(false);
+      expect(sources).toEqual(["import", undefined]);
+    } finally {
+      await spiedClient.close();
+    }
+  });
+
   it("re-imports over a screen after one of its layers was removed", async () => {
     expect((await client.call("import_design", { capture })).isError).toBe(false);
     expect((await client.call("delete_items", { ids: ["pay_button"] })).isError).toBe(false);

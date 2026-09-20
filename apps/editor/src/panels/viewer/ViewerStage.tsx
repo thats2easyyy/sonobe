@@ -18,6 +18,7 @@ import { EmptyState } from "../../ui/EmptyState.tsx";
 import { cx } from "../../ui/lib/cx.ts";
 import { useLatest } from "../../ui/lib/hooks.ts";
 import { useElementSize } from "../../ui/lib/useElementSize.ts";
+import { attachViewerHologram } from "../import/HologramViewer.ts";
 import { watchPressedCopy } from "../patch-editor/api.ts";
 import { registerBoundsProvider } from "./hostBridge.ts";
 import { fitScale, interactiveLayerIds, layerScreenRect, nodesForLayers, outlinePoints, presetForDevice, sceneKeysForLayers, type HighlightScope, type ViewerZoom } from "./viewerModel.ts";
@@ -117,6 +118,9 @@ export function ViewerStage({ session, showFrame, zoom, showHitTargets, primary 
   const frameRef = useRef<DeviceFrame | null>(null);
   const viewerRef = useRef<ViewerHandle | null>(null);
   const overlayRef = useRef<HighlightOverlay | null>(null);
+  /** The screen an import hologram's veil covers here (its outline waits), and the highlight's refresh. */
+  const coveredRef = useRef<Id | null>(null);
+  const highlightRef = useRef<() => void>(() => undefined);
   const [layout, setLayout] = useState<DeviceFrameLayout | null>(null);
   const initial = useLatest({ preset, showFrame, orientation, primary });
 
@@ -134,7 +138,16 @@ export function ViewerStage({ session, showFrame, zoom, showHitTargets, primary 
     const overlay = createHighlightOverlay(frame.screen);
     overlayRef.current = overlay;
     const unsubscribe = session.runtime.subscribeFrame((scene) => overlay.render(scene));
+    // An import's hologram plays along here too, so the finished design doesn't show before the canvas
+    // reveals it; the screen's selection outline waits under its veil.
+    const detachHologram = attachViewerHologram(session, frame.screen, {
+      onCover: (screenId) => {
+        coveredRef.current = screenId;
+        highlightRef.current();
+      },
+    });
     return () => {
+      detachHologram();
       unsubscribe();
       overlay.dispose();
       viewer.dispose();
@@ -189,11 +202,17 @@ export function ViewerStage({ session, showFrame, zoom, showHitTargets, primary 
       const doc = session.document.getState().doc;
       const component = currentComponentId(s);
       const hovered = s.hovered && s.hovered.kind === "layer" && s.hovered.component === component && s.hovered.source !== "viewer" ? s.hovered.id : null;
-      overlayRef.current?.setTargets({ selected: new Set(s.layers), hovered, scope: component === doc.project.root ? "root" : "instance" });
+      const covered = coveredRef.current;
+      overlayRef.current?.setTargets({ selected: new Set(s.layers.filter((id) => id !== covered)), hovered: covered === null ? hovered : null, scope: component === doc.project.root ? "root" : "instance" });
       overlayRef.current?.render(session.runtime.scene());
     };
+    highlightRef.current = apply;
     apply();
-    return session.selection.subscribe(apply);
+    const unsubscribe = session.selection.subscribe(apply);
+    return () => {
+      unsubscribe();
+      highlightRef.current = () => undefined;
+    };
   }, [session]);
 
   // Tint layers that receive touches (Hit Areas plus layers wired to interaction patches).

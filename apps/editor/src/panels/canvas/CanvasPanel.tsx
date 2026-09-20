@@ -240,8 +240,10 @@ export function CanvasPanel({ session: sessionProp, sceneSource, onSceneSourceCh
     [index, selectionIds, viewport, chromeEditable, editing],
   );
   const hoverId = hovered && hovered.kind === "layer" && hovered.component === componentId ? hovered.id : null;
-  // An import hologram covering a screen hides that screen's selection chrome until it finishes.
+  // An import hologram covering a screen hides that screen's selection chrome, and the rulers' mark of
+  // it, until it lands.
   const holoCovered = useCoveredScreen(session, componentId);
+  const shownChrome = hideCoveredChrome(holoCovered, { selected: selectionIds, hovered: draft.hideChrome || gestureRef.current ? null : hoverId, chrome });
 
   const latest = useLatest({ index, viewport, componentId, component, tool, artboard, chrome, spaceHeld, box, editing });
 
@@ -1100,9 +1102,9 @@ export function CanvasPanel({ session: sessionProp, sceneSource, onSceneSourceCh
                   Draw a rectangle (R), an oval (O), or text (T)
                 </div>
               )}
-              <CanvasOverlay index={index} viewport={viewport} {...hideCoveredChrome(holoCovered, { selected: selectionIds, hovered: draft.hideChrome || gestureRef.current ? null : hoverId, chrome })} draft={draft} altMeasure={altMeasure} />
+              <CanvasOverlay index={index} viewport={viewport} {...shownChrome} draft={draft} altMeasure={altMeasure} />
               {editing && editingNode && <InlineTextEditor key={editing.id} node={editingNode} viewport={viewport} initialText={editing.initial} selectAll={editing.selectAll} onCommit={commitText} />}
-              {rulers && <CanvasRulers viewport={viewport} width={box.width} height={box.height} selection={chrome?.bounds ?? null} />}
+              {rulers && <CanvasRulers viewport={viewport} width={box.width} height={box.height} selection={shownChrome.chrome?.bounds ?? null} />}
             </>
           )
         )}
