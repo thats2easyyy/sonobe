@@ -1,6 +1,7 @@
 /** Compact value formatting for port rows, cables, and hover cards. */
 
-import type { EnumOption, Value, ValueType } from "../types.ts";
+import { formatKnobValue } from "../knobs.ts";
+import type { EnumOption, Knob, Value, ValueType } from "../types.ts";
 import { formatColor, isColor } from "../values.ts";
 
 export interface LoopLike {
@@ -114,6 +115,106 @@ export function formatValue(value: unknown, type: ValueType, options: FormatOpti
   if (typeof value === "string") return `“${truncate(value, maxText)}”`;
   if (typeof value === "object") return "{…}";
   return truncate(String(value), maxText);
+}
+
+/** The longest text formatNumberShort prints for a number under a trillion: "-99999.9", "-999.99M". */
+export const NUMBER_SHORT_CHARS = 8;
+
+const digits = (n: number) => String(Math.max(0, Math.trunc(n))).length;
+
+/** The longest text formatValue's default branch prints for a value of this kind (json and any ports). */
+function kindReserve(value: unknown, maxText: number): number {
+  if (value === undefined || value === null) return 1;
+  if (Array.isArray(value)) {
+    if (value.length <= 4 && value.every((n) => typeof n === "number")) return value.length * NUMBER_SHORT_CHARS + Math.max(0, value.length - 1) * 2;
+    return Math.max(5, 2 + digits(value.length));
+  }
+  if (isColor(value)) return 9;
+  if (typeof value === "number") return NUMBER_SHORT_CHARS;
+  if (typeof value === "boolean") return 5;
+  if (typeof value === "string") return maxText + 2;
+  if (typeof value === "object") return 3;
+  return maxText;
+}
+
+/** The longest text formatValue prints for one (non-loop) value of `type`. */
+function plainReserve(value: unknown, type: ValueType, maxText: number, enumOptions?: readonly EnumOption[]): number {
+  switch (type) {
+    case "pulse":
+      return 5;
+    case "boolean":
+      return 3;
+    case "number":
+    case "index":
+      return typeof value === "number" || value === undefined || value === null ? NUMBER_SHORT_CHARS : maxText;
+    case "enum": {
+      if (!enumOptions?.length) return maxText;
+      const known = enumOptions.some((o) => o.key === value);
+      const names = [...enumOptions.map((o) => o.name.length), known || value === undefined || value === null ? 0 : String(value).length];
+      return Math.min(maxText, Math.max(...names));
+    }
+    case "color":
+      return 9;
+    case "text":
+      return typeof value === "string" || value === undefined || value === null ? maxText + 2 : maxText;
+    case "layer":
+    case "image":
+    case "video":
+    case "sound":
+      return maxText;
+    default:
+      return kindReserve(value, maxText);
+  }
+}
+
+/**
+ * The most characters formatValue(value, type, options) prints while the value changes: the longest
+ * text of the port's type (8 for numbers, "Off", "#RRGGBBAA", quotes around maxText characters, the
+ * longest enum option), or of the value's own kind for json and any. A loop reserves its "×N" summary
+ * around one item, or the watched copy's "#k " prefix, for its current length (an empty loop as a
+ * one-digit loop). Output rows keep this much room for their live values (liveReserve), so a node
+ * keeps its width while the prototype runs. 0 when nothing prints (no value, or a pulse).
+ */
+export function formatValueReserve(value: unknown, type: ValueType, options: FormatOptions = {}): number {
+  if (value === undefined || type === "pulse") return 0;
+  const maxText = options.maxText ?? 14;
+  if (!isLoopValue(value)) return plainReserve(value, type, maxText, options.enumOptions);
+  const n = value.items.length;
+  if (options.copy !== undefined && options.copy !== null && n) {
+    const picked = pickCopy(value, options.copy);
+    return 1 + digits(n - 1) + 1 + plainReserve(picked.value, type, 8, options.enumOptions);
+  }
+  return 1 + digits(n) + 1 + plainReserve(value.items[0], type, 8, options.enumOptions) + 1;
+}
+
+/** Decimal places in a step: 0.05 → 2, 1e-7 → 7, 5 → 0 (at most 6, like the knob fields). */
+function stepDecimals(step: number): number {
+  if (!Number.isFinite(step) || Number.isInteger(step)) return 0;
+  const [mantissa = "", exponent] = Math.abs(step).toString().split("e");
+  const dot = mantissa.indexOf(".");
+  return Math.min(6, Math.max(0, (dot === -1 ? 0 : mantissa.length - dot - 1) - Number(exponent ?? 0)));
+}
+
+/** The most a knob chip keeps for its value, so the knob's name keeps room in the 110 pt chip. */
+export const KNOB_RESERVE_MAX_CHARS = 7;
+
+/**
+ * The characters a knob chip keeps for its value text (formatKnobValue) while the knob is tuned in
+ * the Knobs tab: a number knob's slider reaches its longer end at the slider's step precision (its
+ * step, or a hundredth of the range), unit included; a boolean flips between "on" and "off". At
+ * most KNOB_RESERVE_MAX_CHARS. Values picked from a menu or typed (enums, points, text, numbers
+ * without a range) reserve nothing past their text.
+ */
+export function knobValueReserve(knob: Pick<Knob, "type" | "min" | "max" | "step" | "unit">): number {
+  if (knob.type === "boolean") return 3;
+  if (knob.type !== "number") return 0;
+  const { min, max } = knob;
+  if (min === undefined || max === undefined || !(max > min)) return 0;
+  const decimals = stepDecimals(knob.step !== undefined && knob.step > 0 ? knob.step : (max - min) / 100);
+  const end = (n: number) => (n < 0 ? 1 : 0) + digits(Math.abs(n));
+  // formatKnobValue's unit suffix (" pt", "°") is what it adds to a bare "0".
+  const unit = formatKnobValue(knob, 0).length - 1;
+  return Math.min(KNOB_RESERVE_MAX_CHARS, Math.max(end(min), end(max)) + (decimals ? decimals + 1 : 0) + unit);
 }
 
 /** Longer multi-line text for hover cards. */

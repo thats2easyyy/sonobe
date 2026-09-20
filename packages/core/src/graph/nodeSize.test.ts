@@ -37,6 +37,7 @@ describe("measureNode", () => {
     expect(valueRow({ kind: "text", text: label(30) })).toBe(base + 110);
     expect(valueRow({ kind: "static", text: "×4" }, 25)).toBe(12 + 150 + 6 + 10 + 12);
     expect(valueRow({ kind: "knob", name: "Damping", text: "0.75" })).toBe(base + 10 + 10 + 4 + 42 + 4 + 24);
+    expect(valueRow({ kind: "knob", name: "Damping", text: "0.5", reserve: 4 })).toBe(base + 10 + 10 + 4 + 42 + 4 + 24);
     expect(valueRow({ kind: "knob", name: "Tint", swatch: "#FF375FFF" })).toBe(base + 10 + 10 + 4 + 24 + 4 + 10);
   });
 
@@ -44,6 +45,13 @@ describe("measureNode", () => {
     expect(width(patch([{ in: { label: label(20) }, out: { label: "Output", live: "0.5" } }]))).toBe(12 + 120 + 12 + 18 + 6 + 36 + 12);
     expect(width(patch([{ in: { label: label(20) }, out: { label: "Output", live: label(30) } }]))).toBe(12 + 120 + 12 + 96 + 6 + 36 + 12);
     expect(width({ kind: "layer", title: "Card", chips: [], rows: [{ in: { label: label(20), drive: true } }] })).toBe(12 + 120 + 6 + 14 + 36);
+  });
+
+  it("keeps a live value's slot at its reserve (in characters of the mono font), at most 96 pt, and only while a value shows", () => {
+    expect(width(patch([{ in: { label: label(20) }, out: { label: "Output", live: "Off", reserve: 3 } }]))).toBe(12 + 120 + 12 + 18 + 6 + 36 + 12);
+    expect(width(patch([{ in: { label: label(20) }, out: { label: "Output", live: "0", reserve: 8 } }]))).toBe(12 + 120 + 12 + 48 + 6 + 36 + 12);
+    expect(width(patch([{ in: { label: label(20) }, out: { label: "Output", live: "0, 0", reserve: 18 } }]))).toBe(12 + 120 + 12 + 96 + 6 + 36 + 12);
+    expect(width(patch([{ in: { label: label(20) }, out: { label: "Output", reserve: 8 } }]))).toBe(12 + 120 + 12 + 36 + 12);
   });
 
   it("adds header chips", () => {
@@ -82,12 +90,15 @@ describe("node shapes from the graph", () => {
     expect(shapes.has("note_1")).toBe(false);
   });
 
-  it("prints live values when given them, which widens the node", () => {
+  it("prints live values when given them, in a slot as wide as the longest number, which widens the node", () => {
     const doc = buildSampleDocument();
     const data = deriveGraph({ doc, componentId: "main", registry: mockRegistry }).nodes.find((n) => n.id === "grow")!.data as PatchNodeData;
     const shape = nodeShapeFromData(data, { live: (address) => (address === "grow.output" ? 1.04 : undefined) });
-    expect(shape.rows[0]!.out).toEqual({ label: "Output", live: "1.04" });
-    expect(estimateNodeSize(data, { live: () => -1234.567, measure: mono6 }).width).toBe(12 + 48 + 12 + 42 + 6 + 36 + 12);
+    expect(shape.rows[0]!.out).toEqual({ label: "Output", live: "1.04", reserve: 8 });
+    // "1.04" and "-1234.6" both take the 8 characters of "-99999.9": the node keeps its width as the value runs.
+    const at = (value: number) => estimateNodeSize(data, { live: () => value, measure: mono6 }).width;
+    expect(at(-1234.567)).toBe(12 + 48 + 12 + 48 + 6 + 36 + 12);
+    expect(new Set([0, 0.5, -12.35, 100, 1.04, -99999.9].map(at))).toEqual(new Set([at(-1234.567)]));
     expect(estimateNodeSize(data, { measure: mono6 }).width).toBe(164);
   });
 
@@ -107,6 +118,20 @@ describe("node shapes from the graph", () => {
     const data = deriveGraph({ doc, componentId: "main", registry: mockRegistry }).nodes.find((n) => n.id === "pop")!.data as PatchNodeData;
     const linked: PatchNodeData = { ...data, inputs: data.inputs.map((p) => (p.key === "bounciness" ? { ...p, connected: true, link: "$knob.bounce", knob: { id: "bounce", name: "Bounce", valueText: "8" } } : p)) };
     expect(nodeShapeFromData(linked).rows[1]!.in).toEqual({ label: "Bounciness", value: { kind: "knob", name: "Bounce", text: "8" } });
+  });
+
+  it("keeps a knob chip's value as wide as the longest value its slider reaches", () => {
+    const tuned = (value: number) => {
+      const doc = mustApply(buildSampleDocument(), [
+        { op: "addKnob", knob: { id: "bounce", name: "Bounce", type: "number", value, min: 0, max: 20, step: 0.5 } },
+        { op: "addPatch", patch: { id: "wobble", type: "popAnimation", inputs: { bounciness: { link: "$knob.bounce" } }, ui: { x: 0, y: 400 } } },
+      ]).doc;
+      const data = deriveGraph({ doc, componentId: "main", registry: mockRegistry }).nodes.find((n) => n.id === "wobble")!.data as PatchNodeData;
+      return { chip: nodeShapeFromData(data).rows.find((r) => r.in?.label === "Bounciness")!.in!.value, width: estimateNodeSize(data, { measure: mono6 }).width };
+    };
+    expect(tuned(8).chip).toEqual({ kind: "knob", name: "Bounce", text: "8", reserve: 4 });
+    expect(tuned(12.5).chip).toEqual({ kind: "knob", name: "Bounce", text: "12.5", reserve: 4 });
+    expect(tuned(8).width).toBe(tuned(12.5).width);
   });
 
   it("gives a color knob's chip a swatch of its running color instead of the hex", () => {

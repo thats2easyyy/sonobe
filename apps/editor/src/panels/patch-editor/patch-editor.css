@@ -527,13 +527,20 @@ textarea.sb-pe-title-input {
   color: var(--danger-text);
 }
 
+/*
+ * Live values keep the width of the longest text their type can print (liveReserve in
+ * @sonobe/core/graph, set as --sb-pe-live-reserve in ch), right-aligned so the digits stay by the
+ * label: a node holds its width while its numbers run.
+ */
 .sb-pe-port__live {
   flex: none;
+  min-width: min(var(--sb-pe-live-reserve, 0ch), 96px);
   max-width: 96px;
   overflow: hidden;
   color: var(--text-accent);
   font-family: var(--font-mono);
   font-size: var(--font-size-2xs);
+  text-align: right;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -759,10 +766,13 @@ textarea.sb-pe-title-input {
   text-overflow: ellipsis;
 }
 
+/* A knob's value keeps the width of the longest value its slider reaches (knobValueReserve), so tuning it doesn't resize the node. */
 .sb-pe-value__knob-value {
   flex: none;
+  min-width: var(--sb-pe-knob-reserve, 0ch);
   color: var(--text-primary);
   font-family: var(--font-mono);
+  text-align: right;
 }
 
 .sb-pe-value--input {

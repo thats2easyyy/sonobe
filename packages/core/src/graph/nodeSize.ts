@@ -1,7 +1,8 @@
 /**
  * Node sizes without a DOM: a node's shape (nodeShape.ts) plus a text measurer gives the box the
  * patch editor draws, following its stylesheet (apps/editor/src/panels/patch-editor/patch-editor.css:
- * width max-content between 164 and 320, a 28 pt header, 22 pt rows). The default measurer reads a
+ * width max-content between 164 and 320, a 28 pt header, 22 pt rows; live values and knob values
+ * in slots at least as wide as the longest text they can print, in `ch`). The default measurer reads a
  * table of SF Pro and SF Mono advances (nodeMetrics.ts); the editor passes one that measures its real
  * font, like the engine's TextMeasurer.
  *
@@ -46,6 +47,7 @@ export const NODE_BOX = {
   colorPadding: 8,
   /** Knob chips (K1): a 10 pt knob glyph before the name (color knobs end in a `swatch`). */
   knobIcon: 10,
+  /** Live values (.sb-pe-port__live): at least their reserve in `ch` (liveReserve), at most 96 wide. */
   liveMaxWidth: 96,
   chipPaddingX: 10,
   loopMin: 16,
@@ -99,6 +101,9 @@ export interface NodeSize {
   height: number;
 }
 
+/** Mono text in a slot at least `reserve` characters wide: CSS `min-width: <reserve>ch`, one "0" per character. */
+const monoSlot = (text: string, reserve: number | undefined, t: NodeTextMeasurer) => Math.max(t(text, "mono10"), reserve ? reserve * t("0", "mono10") : 0);
+
 function valueWidth(v: ValueChip, t: NodeTextMeasurer): number {
   const B = NODE_BOX;
   const chip = (text: string, font: NodeFont, min = 0) => Math.min(B.valueMaxWidth, Math.max(min, B.valuePaddingX + t(text, font)));
@@ -117,7 +122,7 @@ function valueWidth(v: ValueChip, t: NodeTextMeasurer): number {
     case "text":
       return v.text ? chip(v.text, "sans10") : chip("Empty", "italic10");
     case "knob":
-      return Math.min(B.valueMaxWidth, B.valuePaddingX + B.knobIcon + B.valueInnerGap + t(v.name, "sans10") + (v.swatch ? B.valueInnerGap + B.swatch : v.text ? B.valueInnerGap + t(v.text, "mono10") : 0));
+      return Math.min(B.valueMaxWidth, B.valuePaddingX + B.knobIcon + B.valueInnerGap + t(v.name, "sans10") + (v.swatch ? B.valueInnerGap + B.swatch : v.text ? B.valueInnerGap + monoSlot(v.text, v.reserve, t) : 0));
   }
 }
 
@@ -144,7 +149,7 @@ export function measureNode(shape: NodeShape, measure: NodeTextMeasurer = tableM
       }
       if (r.out) {
         w += B.rowGap;
-        if (r.out.live) w += Math.min(B.liveMaxWidth, measure(r.out.live, "mono10")) + B.portGap;
+        if (r.out.live) w += Math.min(B.liveMaxWidth, monoSlot(r.out.live, r.out.reserve, measure)) + B.portGap;
         w += measure(r.out.label, "label") + B.portPadding;
       }
       rows = Math.max(rows, w);
