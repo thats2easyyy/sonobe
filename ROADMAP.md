@@ -43,6 +43,7 @@ The first two finish Stage 4. The rest are Stage 5.
 - [ ] Interface Orientation in the viewer and on phones (partial: the patch computes Orientation and Landscape from the device's rotation, and the web player reports the phone's real rotation, but neither the viewer nor the web player turns the interface from the patch yet)
 - [x] Knobs and presets: named values with sliders and soft ranges in the Inspector's Knobs tab, presets such as a locked "Shipped app" to flip between while the prototype runs (⌘'), knob chips in the patch editor, and `set_knobs`, `apply_knob_preset` and simulation presets for Claude. A tune reaches the viewer and phones live
 - [ ] Preset switching on the phone (partial: a phone runs whichever preset the editor or Claude switched to, and tunes reach it live; picking a preset from the phone's three-finger menu remains)
+- [ ] WebSocket Connection Headers (partial: Sec-WebSocket-Protocol reaches the server everywhere, and other headers warn; sending them needs the desktop app to open sockets from the Electron main process instead of the viewer's browser WebSocket)
 - [x] Drafts: unsaved work survives a crash, a quit or a killed process, and comes back from the welcome screen or through Claude; `save_document` saves without a dialog
 - [x] Examples: 16 canonical recipes as runnable projects with scripted tests
 - [x] Learn panel: 5 interactive lessons, the guides, the examples, and the patch reference
