@@ -258,9 +258,16 @@ export function createDraftStore(options: DraftStoreOptions): DraftStore {
           if (!contents || contents.files["project.json"] === undefined) throw new DraftError("unknown_draft", `There's no draft "${id}".`);
           const manifest = await readManifest(id);
           const { [DRAFT_MANIFEST]: _manifestText, ...files } = contents.files;
+          const torn = !manifest || !(await intact(id, manifest, contents));
           // Without a manifest the first write was cut off; inspect names it from project.json.
-          const info = manifest ? infoOf(id, manifest, !(await intact(id, manifest, contents)), manifest) : (await inspect(id))!;
-          if (manifest) manifests.set(id, manifest);
+          const info = manifest ? infoOf(id, manifest, torn, manifest) : (await inspect(id))!;
+          if (manifest && !torn) manifests.set(id, manifest);
+          else {
+            // The next write lists the files really here, which the editor diffs against too, so one clean write makes it whole.
+            const found: Record<string, string> = {};
+            for (const [rel, data] of [...Object.entries(files), ...Object.entries(contents.binaries)]) found[rel] = sha256(data);
+            manifests.set(id, { ...(manifest ?? { formatVersion: 1, id, ...metaFrom({}), updatedAt: 0, appVersion: version }), files: found });
+          }
           return { info, manifest: (manifest ?? {}) as unknown as Record<string, unknown>, files, binaries: contents.binaries };
         } catch (err) {
           claims.delete(id);
