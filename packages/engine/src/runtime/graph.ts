@@ -19,7 +19,9 @@ export type Binding =
   /** A `{ "layer": id }` literal; replicated layers read as loops of instance references. */
   | { kind: "layerRef"; type: "layer"; pulse: false; layerId: Id; cache: Map<string, { frame: number; value: Value | Loop }> }
   /** A read-only layer output (host-reported or derived from the previous frame). */
-  | { kind: "layerOutput"; type: ValueType; pulse: boolean; layerId: Id; layerType: string; key: string; default: Value };
+  | { kind: "layerOutput"; type: ValueType; pulse: boolean; layerId: Id; layerType: string; key: string; default: Value }
+  /** "@layer.repeat" read as a source: how many copies the layer drew last frame (ARCHITECTURE §4). */
+  | { kind: "layerCount"; type: "number"; pulse: false; layer: CLayer };
 
 export interface ScopeInput {
   key: string;
@@ -132,6 +134,8 @@ export interface CLayer {
   props: Map<string, ResolvedProp>;
   outputs: ResolvedPort[];
   children: CLayer[];
+  /** The layer it sits in, in the same component (null at the top). */
+  parent: CLayer | null;
   /** The component scope a componentInstance layer renders. */
   instance: Scope | null;
   /** The document fixes how many copies this layer makes (core loopShapes), so diagnostics check its loop lengths. */

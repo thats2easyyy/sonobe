@@ -59,6 +59,8 @@ export interface CompiledGraph {
   issues: RuntimeIssue[];
   /** Some patches read last frame's value through a back-edge (a cycle's evaluation order read patch positions). */
   cyclic: boolean;
+  /** Something links a layer's Repeat, which reads the copies last frame drew. */
+  readsCounts: boolean;
   /** Knob readers, compiled to constants that updateLiterals rewrites in place (`$knob.<id>` links). */
   knobs: KnobState;
   /** Resolve an address ("patch.port", "@layer.key", "$in.key") in a scope (default: the root) to a binding and its target type. */
@@ -141,6 +143,7 @@ export function compileDocument(doc: SonobeDocument, engineRegistry: EngineRegis
   const nodePorts = new Map<CNode, ResolvedPort[]>();
   const knobSet = doc.knobs;
   const knobState: KnobState = { readers: new Map(), values: new Map(), declarations: new Map(), missing: new Set() };
+  let readsCounts = false;
   for (const knob of knobSet?.knobs ?? []) {
     knobState.values.set(knob.id, decodeStored(knobLiteral(knobSet!, knob), knob.type) as Value);
     knobState.declarations.set(knob.id, knobDeclaration(knob));
@@ -156,7 +159,7 @@ export function compileDocument(doc: SonobeDocument, engineRegistry: EngineRegis
   const rootComponent = doc.components[doc.project.root];
   if (!rootComponent) {
     issue("missing_root", "error", `The project's root component "${doc.project.root}" doesn't exist, so there's nothing to run.`);
-    return { doc, registry, root: null, order: [], scopes, issues, cyclic: false, knobs: knobState, resolveLink: () => null };
+    return { doc, registry, root: null, order: [], scopes, issues, cyclic: false, readsCounts: false, knobs: knobState, resolveLink: () => null };
   }
 
   // ---- scopes and shells -----------------------------------------------------
@@ -358,7 +361,7 @@ export function compileDocument(doc: SonobeDocument, engineRegistry: EngineRegis
     scope.layers = buildLayers(scope, c.layers);
   }
 
-  function buildLayers(scope: Scope, layers: readonly LayerNode[]): CLayer[] {
+  function buildLayers(scope: Scope, layers: readonly LayerNode[], parent: CLayer | null = null): CLayer[] {
     const out: CLayer[] = [];
     for (const node of layers) {
       const spec = registry.layers.get(node.type);
@@ -382,6 +385,7 @@ export function compileDocument(doc: SonobeDocument, engineRegistry: EngineRegis
         props: new Map(props.map((p) => [p.key, p])),
         outputs: (spec.outputs ?? []).map((p) => ({ ...p, type: p.type === "variant" ? "any" : p.type })),
         children: [],
+        parent,
         instance: null,
         countFixed: false,
         propBindings: new Map(),
@@ -396,7 +400,7 @@ export function compileDocument(doc: SonobeDocument, engineRegistry: EngineRegis
           layerInstances.push({ host: scope, layer });
         }
       }
-      if (node.children?.length) layer.children = buildLayers(scope, node.children);
+      if (node.children?.length) layer.children = buildLayers(scope, node.children, layer);
       out.push(layer);
     }
     return out;
@@ -479,6 +483,11 @@ export function compileDocument(doc: SonobeDocument, engineRegistry: EngineRegis
         const out = layer.outputs.find((o) => o.key === a.key);
         if (out) {
           return { kind: "layerOutput", type: out.type, pulse: out.type === "pulse", layerId: layer.id, layerType: layer.type, key: a.key, default: normalizeDefault(out.default, out.type) ?? zeroValue(out.type) };
+        }
+        // Read as a source, Repeat is the copy count, not the loop it counts (the layer's own copies use propBinding).
+        if (a.key === "repeat" && layer.props.has(a.key)) {
+          readsCounts = true;
+          return { kind: "layerCount", type: "number", pulse: false, layer };
         }
         if (layer.props.has(a.key)) return propBinding(layer, a.key);
         issue("dangling_link", "warning", `${label.text} reads "${address}", but layer "${a.id}" has no output or property "${a.key}".`, label);
@@ -738,7 +747,7 @@ export function compileDocument(doc: SonobeDocument, engineRegistry: EngineRegis
     return result;
   };
   const cyclic = order.some((node) => node.feedback.some(Boolean));
-  return { doc, registry, root, order, scopes, issues, cyclic, knobs: knobState, resolveLink };
+  return { doc, registry, root, order, scopes, issues, cyclic, readsCounts, knobs: knobState, resolveLink };
 }
 
 // ---------------------------------------------------------------------------
