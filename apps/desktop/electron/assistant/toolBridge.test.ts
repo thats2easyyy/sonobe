@@ -82,7 +82,7 @@ describe("MCP tool bridge", () => {
   });
 
   it("hides preview_design and the instruction that teaches it: the canvas draws the Assistant's import_design html as it writes", async () => {
-    expect([...ASSISTANT_HIDDEN_TOOLS]).toEqual(["preview_design"]);
+    expect([...ASSISTANT_HIDDEN_TOOLS.keys()]).toEqual(["preview_design"]);
     // A host with a canvas, like the app's, whose instructions teach preview_design.
     const canvas = Object.create(host) as HeadlessHost;
     Object.defineProperty(canvas, "capabilities", { value: { ...host.capabilities, designPreview: true } });
@@ -100,6 +100,27 @@ describe("MCP tool bridge", () => {
     } finally {
       await assistant.close();
     }
+  });
+
+  it("doesn't teach the Assistant the preview_design flow: no import_design preview, and the importing guide says what to do instead", async () => {
+    const direct = (await serverSurface(host)).tools.find((t) => t.name === "import_design")!;
+    expect(direct.inputSchema.properties).toHaveProperty("preview");
+    expect(direct.description).toContain("preview_design");
+
+    const tools = await bridge.tools();
+    for (const t of tools) expect(`${t.description} ${JSON.stringify(t.inputSchema)}`, t.name).not.toMatch(/preview_design/);
+    const design = tools.find((t) => t.name === "import_design")!;
+    expect(Object.keys(design.inputSchema.properties as object)).toEqual(Object.keys(direct.inputSchema.properties as object).filter((key) => key !== "preview"));
+    // Only the preview clause goes, and the sentence before it still ends.
+    for (const sentence of (direct.description ?? "").split(". ")) if (!sentence.includes("preview")) expect(design.description).toContain(sentence);
+    expect(design.description).toContain('"capture" imports a design capture made elsewhere. For HTML:');
+
+    const note = "Note: you don't have preview_design here. The person's canvas already draws import_design's html while you write it, so skip the steps that use preview_design and pass the page to import_design as html.";
+    const guide = await bridge.call("get_guide", { topic: "importing" });
+    expect(guide.content.map((c) => c.text ?? "").join("\n")).toContain("`preview_design`");
+    expect(guide.content.at(-1)).toEqual({ type: "text", text: note });
+    const start = await bridge.call("get_guide", { topic: "start-here" });
+    expect(start.content.map((c) => c.text)).not.toContain(note);
   });
 
   it("classifies every tool: it takes docId, so the Assistant pins it to its window's document, or it's in UNPINNED_TOOLS", async () => {

@@ -478,8 +478,10 @@ export function createAssistantAgent(options: AssistantAgentOptions): AssistantA
 
     /**
      * Keep the replace guard's records current: a screen the Assistant imported is its own, and its
-     * later edits inside one aren't the person's. Only a write that changed something is taken in (a
-     * dry run's layers may hold the person's edits).
+     * later edits inside one aren't the person's. Only a write whose result says what it changed is
+     * taken in: a dry run's layers may hold the person's edits, and a call that names no layers
+     * (begin_work, undo, save_document) mustn't pass the person's edits off as the Assistant's. A
+     * record that goes stale that way just asks before the next replace.
      */
     const track = async (info: AssistantToolInfo, input: Record<string, unknown>, result: ToolCallResult, imported: AssistantImported | undefined): Promise<void> => {
       if (!options.readDocument) return;
@@ -491,11 +493,15 @@ export function createAssistantAgent(options: AssistantAgentOptions): AssistantA
         }
         const data = result.structuredContent;
         const changed = data?.changed;
-        if (info.readOnly || info.name === DESIGN_TOOL || input.dryRun === true || data?.dryRun === true || changed === "none" || (result.isError && changed !== "partial")) return;
+        if (info.readOnly || info.name === DESIGN_TOOL || input.dryRun === true || data?.dryRun === true || !(changed === "all" || changed === "partial") || (result.isError && changed !== "partial")) return;
         const docId = typeof data?.docId === "string" ? data.docId : typeof input.docId === "string" ? input.docId : null;
         if (docId === null || !conv.guard?.tracks(docId)) return;
-        const layers = (data?.affected as { layers?: unknown } | undefined)?.layers;
-        conv.guard.refresh(docId, await options.readDocument(docId), Array.isArray(layers) ? layers.filter((l): l is string => typeof l === "string") : undefined);
+        const affected = data?.affected as { components?: unknown; layers?: unknown } | undefined;
+        const ids = (list: unknown) => (Array.isArray(list) ? list.filter((id): id is string => typeof id === "string") : []);
+        const components = ids(affected?.components);
+        const layers = ids(affected?.layers);
+        if (!components.length || !layers.length) return;
+        conv.guard.refresh(docId, await options.readDocument(docId), { components, layers });
       } catch (err) {
         log("warn", `Assistant couldn't update what it knows about its screens: ${errorMessage(err)}`);
       }

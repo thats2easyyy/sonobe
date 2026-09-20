@@ -119,23 +119,81 @@ describe("createReplaceGuard", () => {
     const { doc, guard } = remembered();
     const human = edit(doc, [{ op: "updateLayer", id: "divider", props: { color: "#FF3B30FF" } }]);
     const assistant = apply(human, [{ op: "updateLayer", id: "title", props: { textColor: "#8B5CF6FF", text: "Pay" } }]);
-    expect(assistant.affected.layers).toEqual(["title"]);
+    expect(assistant.affected).toMatchObject({ components: ["main"], layers: ["title"] });
     expect(guard.check(ask("checkout"), assistant.doc)?.changed).toEqual(["Title", "Divider"]);
-    guard.refresh(DOC, assistant.doc, assistant.affected.layers);
+    guard.refresh(DOC, assistant.doc, assistant.affected);
     expect(guard.check(ask("checkout"), assistant.doc)).toMatchObject({ reason: "hand_edited", changed: ["Divider"], changedCount: 1 });
-    // Without affected layers, every record of the document takes the document as it is.
-    guard.refresh(DOC, assistant.doc);
-    expect(guard.check(ask("checkout"), assistant.doc)).toBeNull();
+    // A write that names no layers takes nothing in.
+    guard.refresh(DOC, assistant.doc, { components: ["main"], layers: [] });
+    expect(guard.check(ask("checkout"), assistant.doc)).toMatchObject({ changed: ["Divider"] });
+  });
+
+  it("takes in only the components a write changed: another component's layer with the same id isn't the screen's", () => {
+    const kit = edit(fixture(), [
+      { op: "addComponent", component: { id: "card_kit", name: "Card Kit", kind: "layerComponent" } },
+      { op: "addLayer", component: "card_kit", layer: { id: "title", type: "text", name: "Title", props: { text: "Card" } } },
+    ]);
+    const guard = createReplaceGuard();
+    guard.remember(DOC, "main", "checkout", kit);
+    const human = edit(kit, [{ op: "updateLayer", id: "title", props: { text: "My checkout" } }]);
+    const assistant = apply(human, [{ op: "updateLayer", component: "card_kit", id: "title", props: { text: "Card 2" } }]);
+    expect(assistant.affected).toMatchObject({ components: ["card_kit"], layers: ["title"] });
+    guard.refresh(DOC, assistant.doc, assistant.affected);
+    expect(guard.check(ask("checkout"), assistant.doc)).toMatchObject({ reason: "hand_edited", changed: ["Title"], changedCount: 1 });
+    // Nor does it hide a layer the person removed from the screen.
+    const removed = edit(kit, [{ op: "removeLayer", id: "title" }]);
+    const again = apply(removed, [{ op: "updateLayer", component: "card_kit", id: "title", props: { text: "Card 3" } }]);
+    guard.refresh(DOC, again.doc, again.affected);
+    expect(guard.check(ask("checkout"), again.doc)).toMatchObject({ reason: "hand_edited", changed: ["Title"], changedCount: 1 });
   });
 
   it("doesn't count the siblings of a layer the Assistant removed or added", () => {
     const { doc, guard } = remembered();
     const removed = apply(doc, [{ op: "removeLayer", id: "promo" }]);
-    guard.refresh(DOC, removed.doc, removed.affected.layers);
+    guard.refresh(DOC, removed.doc, removed.affected);
     expect(guard.check(ask("checkout"), removed.doc)).toBeNull();
     const added = apply(removed.doc, [{ op: "addLayer", parent: "checkout", index: 0, layer: { id: "back", type: "text", name: "Back", props: { text: "‹" } } }]);
-    guard.refresh(DOC, added.doc, added.affected.layers);
+    guard.refresh(DOC, added.doc, added.affected);
     expect(guard.check(ask("checkout"), added.doc)).toBeNull();
+  });
+
+  it("goes ahead when the person's Undo took a screen back to a version the Assistant left, and names only what they changed after", () => {
+    const { doc: v1, guard } = remembered();
+    // Claude replaces Checkout (a replace keeps the screen's id), then tweaks its title.
+    const v2 = edit(v1, [
+      { op: "updateLayer", id: "price", props: { text: "$38" } },
+      { op: "removeLayer", id: "promo" },
+    ]);
+    guard.remember(DOC, "main", "checkout", v2);
+    const v3 = apply(v2, [{ op: "updateLayer", id: "title", props: { text: "Pay" } }]);
+    guard.refresh(DOC, v3.doc, v3.affected);
+    expect(guard.check(ask("checkout"), v3.doc)).toBeNull();
+    // Undo steps back through Claude's versions: none of them is the person's change.
+    expect(guard.check(ask("checkout"), v2)).toBeNull();
+    expect(guard.check(ask("checkout"), v1)).toBeNull();
+    expect(guard.check(ask("card"), v1)).toBeNull();
+    // An undo, then a hand edit: only the edit is named.
+    const edited = edit(v1, [{ op: "updateLayer", id: "pay", props: { color: "#000000FF" } }]);
+    expect(guard.check(ask("checkout"), edited)).toEqual({ reason: "hand_edited", target: { id: "checkout", name: "Checkout" }, changed: ["Pay Button"], changedCount: 1 });
+    // A mix of two versions (the first with the last one's title) is none of them, so it asks.
+    const mixed = edit(v1, [{ op: "updateLayer", id: "title", props: { text: "Pay" } }]);
+    expect(guard.check(ask("checkout"), mixed)).toMatchObject({ reason: "hand_edited", changedCount: 1 });
+  });
+
+  it("keeps a nested import's earlier version in its screen's record, and a write elsewhere adds no version", () => {
+    const { doc: v1, guard } = remembered();
+    const v2 = edit(v1, [{ op: "updateLayer", id: "price", props: { text: "$38" } }]);
+    guard.remember(DOC, "main", "card", v2);
+    expect(guard.check(ask("checkout"), v1)).toBeNull();
+    expect(guard.check(ask("card"), v1)).toBeNull();
+    // More Assistant writes to Home than a record keeps versions don't push Checkout's first one out.
+    let doc = v2;
+    for (let i = 0; i < 25; i++) {
+      const home = apply(doc, [{ op: "updateLayer", id: "welcome", props: { text: `Hi ${i}` } }]);
+      guard.refresh(DOC, home.doc, home.affected);
+      doc = home.doc;
+    }
+    expect(guard.check(ask("checkout"), edit(doc, [{ op: "updateLayer", id: "price", props: { text: "$42" } }]))).toBeNull();
   });
 
   it("goes ahead for the layer the person picked and its descendants when nothing's remembered", () => {

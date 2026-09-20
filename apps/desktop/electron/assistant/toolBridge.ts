@@ -18,11 +18,15 @@ export const ASSISTANT_AUTHOR_NAME = "Assistant";
 export const MAX_TOOL_RESULT_CHARS = 150_000;
 
 /**
- * MCP tools the Assistant isn't given. The canvas already draws its import_design html while Claude
- * writes it (design_draft events), so preview_design would only draw the page twice. The server
- * instructions' lines that name them are left out too.
+ * MCP tools the Assistant isn't given, and what it does instead. The canvas already draws its
+ * import_design html while Claude writes it (design_draft events), so preview_design would only draw
+ * the page twice. What names one is left out of what the Assistant sees: the server instructions'
+ * lines, the input properties (import_design's preview) and the clauses of tool descriptions. A tool
+ * result that names one (the importing guide) ends with a note saying what to do instead.
  */
-export const ASSISTANT_HIDDEN_TOOLS: ReadonlySet<string> = new Set(["preview_design"]);
+export const ASSISTANT_HIDDEN_TOOLS: ReadonlyMap<string, string> = new Map([
+  ["preview_design", "The person's canvas already draws import_design's html while you write it, so skip the steps that use preview_design and pass the page to import_design as html."],
+]);
 
 export interface ToolContentBlock {
   type: string;
@@ -87,12 +91,44 @@ interface Connection {
   close(): Promise<void>;
 }
 
+/** The hidden tools `text` names. */
+const hiddenToolsIn = (text: string): string[] => [...ASSISTANT_HIDDEN_TOOLS.keys()].filter((name) => new RegExp(`\\b${name}\\b`).test(text));
+
 /** The server instructions without the lines that teach a tool the Assistant isn't given. */
 function withoutHiddenTools(instructions: string): string {
   return instructions
     .split("\n")
-    .filter((line) => ![...ASSISTANT_HIDDEN_TOOLS].some((name) => new RegExp(`\\b${name}\\b`).test(line)))
+    .filter((line) => !hiddenToolsIn(line).length)
     .join("\n");
+}
+
+/** A tool description without its sentences and clauses (";") that name a hidden tool. */
+function withoutHiddenClauses(description: string): string {
+  const kept: string[] = [];
+  for (const clause of description.split(/(?<=[.;]) /)) {
+    if (!hiddenToolsIn(clause).length) kept.push(clause);
+    // The clause dropped ended its sentence, so the one before it ends it now.
+    else if (clause.endsWith(".") && kept.at(-1)?.endsWith(";")) kept.push(`${kept.pop()!.slice(0, -1)}.`);
+  }
+  return kept.join(" ");
+}
+
+/** An input schema without the properties whose description names a hidden tool. */
+function withoutHiddenInputs(schema: Record<string, unknown>): Record<string, unknown> {
+  const properties = schema.properties && typeof schema.properties === "object" ? (schema.properties as Record<string, { description?: unknown }>) : {};
+  const hidden = new Set(Object.keys(properties).filter((key) => typeof properties[key]?.description === "string" && hiddenToolsIn(properties[key].description).length));
+  if (!hidden.size) return schema;
+  return {
+    ...schema,
+    properties: Object.fromEntries(Object.entries(properties).filter(([key]) => !hidden.has(key))),
+    ...(Array.isArray(schema.required) ? { required: schema.required.filter((key) => !hidden.has(key)) } : {}),
+  };
+}
+
+/** A result that names a hidden tool, with a note saying what to do instead. */
+function withHiddenToolNotes(content: ToolContentBlock[]): ToolContentBlock[] {
+  const named = [...new Set(content.flatMap((block) => (block.type === "text" && typeof block.text === "string" ? hiddenToolsIn(block.text) : [])))];
+  return named.length ? [...content, ...named.map((name) => ({ type: "text", text: `Note: you don't have ${name} here. ${ASSISTANT_HIDDEN_TOOLS.get(name)}` }))] : content;
 }
 
 export function createMcpToolBridge(options: McpToolBridgeOptions): ToolBridge {
@@ -109,7 +145,7 @@ export function createMcpToolBridge(options: McpToolBridgeOptions): ToolBridge {
       const tools: AssistantToolInfo[] = listed.tools.filter((tool) => !ASSISTANT_HIDDEN_TOOLS.has(tool.name)).map((tool) => {
         const annotations = (tool.annotations ?? {}) as { title?: unknown; readOnlyHint?: unknown };
         const title = typeof tool.title === "string" ? tool.title : typeof annotations.title === "string" ? annotations.title : tool.name;
-        return { name: tool.name, title, description: tool.description ?? "", inputSchema: tool.inputSchema as Record<string, unknown>, readOnly: annotations.readOnlyHint === true };
+        return { name: tool.name, title, description: withoutHiddenClauses(tool.description ?? ""), inputSchema: withoutHiddenInputs(tool.inputSchema as Record<string, unknown>), readOnly: annotations.readOnlyHint === true };
       });
       return {
         client,
@@ -143,7 +179,7 @@ export function createMcpToolBridge(options: McpToolBridgeOptions): ToolBridge {
         },
       )) as unknown as ToolCallResult & { _meta?: Record<string, unknown> };
       return {
-        content: Array.isArray(result.content) ? result.content : [],
+        content: withHiddenToolNotes(Array.isArray(result.content) ? result.content : []),
         ...(result.structuredContent ? { structuredContent: result.structuredContent } : {}),
         ...(result.isError ? { isError: true } : {}),
         ...(result._meta ? { meta: result._meta } : {}),
