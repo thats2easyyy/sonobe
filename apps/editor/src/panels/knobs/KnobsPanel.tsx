@@ -80,19 +80,24 @@ export function KnobsPanel() {
     else openEditor(request.kind === "newKnob" ? { kind: "new" } : { kind: "edit", id: request.id }, request.kind === "editKnob" ? (rows.current.get(request.id) ?? null) : null);
   }, [request, session]);
 
-  // Show in Knobs: scroll to the row and flash it, opening its group first when it's collapsed.
+  // Show in Knobs: scroll to the row and flash it, first turning Only differences off when it hides
+  // the knob and opening its group when it's collapsed. A request that can't be shown is dropped.
   useEffect(() => {
     if (!flash) return;
+    const ui = knobsUi(session).getState();
     const el = rows.current.get(flash.id);
     if (!el) {
-      const group = session.document.getState().doc.knobs?.knobs.find((k) => k.id === flash.id)?.group;
-      if (group && knobsUi(session).getState().collapsed.has(group)) knobsUi(session).getState().toggleGroup(group);
+      const knob = session.document.getState().doc.knobs?.knobs.find((k) => k.id === flash.id);
+      const listed = groups.some((g) => g.rows.some((r) => r.knob.id === flash.id));
+      if (knob && !listed && ui.onlyDifferences) ui.set({ onlyDifferences: false });
+      else if (knob?.group && ui.collapsed.has(knob.group)) ui.toggleGroup(knob.group);
+      else ui.set({ flash: null });
       return;
     }
     el.scrollIntoView?.({ block: "nearest" });
     setFlashing(flash.id);
-    knobsUi(session).getState().set({ flash: null });
-  }, [flash, collapsed, session]);
+    ui.set({ flash: null });
+  }, [flash, collapsed, groups, session]);
 
   useEffect(() => {
     if (flashing === null) return;

@@ -307,4 +307,16 @@ describe("Knobs tab", () => {
     act(() => knobsUi(s).getState().set({ flash: { id: "bounce", at: 1 } }));
     expect(rowOf("Bounce").dataset.flash).toBe("true");
   });
+
+  it("turns Only differences off to show a knob it hides, and drops a request for a knob that's gone", () => {
+    const s = mount(deck());
+    act(() => knobsUi(s).getState().set({ onlyDifferences: true }));
+    expect(rowOf("Card Radius")).toBeNull();
+    act(() => knobsUi(s).getState().set({ flash: { id: "radius", at: 1 } }));
+    expect(knobsUi(s).getState().onlyDifferences).toBe(false);
+    expect(rowOf("Card Radius").dataset.flash).toBe("true");
+    expect(knobsUi(s).getState().flash).toBeNull();
+    act(() => knobsUi(s).getState().set({ flash: { id: "gone", at: 2 } }));
+    expect(knobsUi(s).getState().flash).toBeNull();
+  });
 });
