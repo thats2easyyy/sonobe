@@ -56,6 +56,8 @@ export interface ImportOptions {
   replace?: Id;
   /** With `replace`: ids retired in the component this session (ARCHITECTURE §3.2), which new layers must not take. */
   isRetired?: (id: Id) => boolean;
+  /** The plan won't be applied (import_design's dryRun): the replace notes say what would be removed. */
+  dryRun?: boolean;
 }
 
 /** The import can't be planned (the layer to replace doesn't exist). */
@@ -331,15 +333,18 @@ export async function planImport(capture: DesignCapture, doc: SonobeDocument, im
     ops.push({ op: "removeLayer", component, id: replaced.layer.id });
     summary.kept = kept;
     summary.lostConnections = lost.length;
+    const dry = options.dryRun === true;
     if (dropped.length) {
       const one = dropped.length === 1;
       const listed = `${dropped.slice(0, 5).map((l) => l.name).join(", ")}${dropped.length > 5 ? ` and ${dropped.length - 5} more` : ""}`;
-      notes.push(`${dropped.length} layer${one ? "" : "s"} of the old “${replaced.layer.name}” ${one ? "wasn't" : "weren't"} found again and ${one ? "was" : "were"} removed: ${listed}. Give layers you'll import again a data-name so they're found.`);
+      const fate = dry ? "wouldn't be found again and would be removed" : one ? "wasn't found again and was removed" : "weren't found again and were removed";
+      notes.push(`${dropped.length} layer${one ? "" : "s"} of the old “${replaced.layer.name}” ${fate}: ${listed}. Give layers you'll import again a data-name so they're found.`);
     }
     if (lost.length) {
       const one = lost.length === 1;
       const listed = `${lost.slice(0, 5).join(", ")}${lost.length > 5 ? ` and ${lost.length - 5} more` : ""}`;
-      notes.push(`${lost.length} connection${one ? "" : "s"} to layers the new screen doesn't have ${one ? "was" : "were"} removed: ${listed}. Wire ${one ? "it" : "them"} to the new screen's layers again if ${one ? "it's" : "they're"} still needed.`);
+      const fate = dry ? "would be removed" : one ? "was removed" : "were removed";
+      notes.push(`${lost.length} connection${one ? "" : "s"} to layers the new screen doesn't have ${fate}: ${listed}. Wire ${one ? "it" : "them"} to the new screen's layers again if ${one ? "it's" : "they're"} still needed.`);
     }
   }
   ops.push(addScreen);

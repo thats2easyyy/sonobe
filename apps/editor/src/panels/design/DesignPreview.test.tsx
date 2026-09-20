@@ -9,16 +9,6 @@ import { DesignPreview, previewFrame } from "./DesignPreview.tsx";
 import { designStore, initialDesignData, type DesignDraft, type DesignRequest } from "./designStore.ts";
 import { PREVIEW_MESSAGE_TYPE } from "./previewShell.ts";
 
-// designStore's reducers belong to the design state package; this is activeDraft as its contract describes it.
-vi.mock("./designStore.ts", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("./designStore.ts")>();
-  const live = (d: DesignDraft) => d.status === "writing" || d.status === "adding";
-  return {
-    ...actual,
-    activeDraft: (state: { drafts: DesignDraft[] }, now: number) => [...state.drafts].reverse().find(live) ?? [...state.drafts].reverse().find((d) => now - d.since < 400) ?? null,
-  };
-});
-
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 const VIEWPORT: Viewport = { x: 100, y: 50, zoom: 0.5 };

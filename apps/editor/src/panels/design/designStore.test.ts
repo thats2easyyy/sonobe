@@ -1,4 +1,4 @@
-import { applyOps, createEmptyDocument, type Op, type StyleDigest } from "@sonobe/core";
+import { applyOps, createEmptyDocument, formatStyleDigest, styleDigest, type Op } from "@sonobe/core";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { createManualScheduler } from "../../runtime/scheduler.ts";
 import { getRegistry } from "../../state/registry.ts";
@@ -8,16 +8,6 @@ import { sharedAssistantController } from "../assistant/controller.ts";
 import { fakeAssistantHost, usage } from "../assistant/testing.ts";
 import type { AssistantEvent, AssistantImported } from "../assistant/types.ts";
 import { activeDraft, attachDesign, designStore, initialDesignData, reduceDesignEvent, runReply, sendDesign, type DesignData, type DesignRequest } from "./designStore.ts";
-
-// The digest is packages/core's (styles.test.ts); canvasContext only passes it on.
-vi.mock("@sonobe/core", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@sonobe/core")>();
-  return {
-    ...actual,
-    styleDigest: (_doc: unknown, component = "main"): StyleDigest => ({ component, layers: 0, colors: [], fonts: [], fontSizes: [], radii: [], shadows: [] }),
-    formatStyleDigest: (d: StyleDigest) => `styles ${d.component} (no layers yet)`,
-  };
-});
 
 type Draft = Extract<AssistantEvent, { type: "design_draft" }>;
 const draft = (offset: number, append: string, extra: Partial<Draft> = {}): Draft => ({ type: "design_draft", runId: "r1", turn: 1, toolUseId: "t1", offset, append, done: false, ...extra });
@@ -257,8 +247,9 @@ describe("attachDesign and sendDesign", () => {
       component: { id: "main", name: "Main", size: [402, 874] },
       screens: [{ id: "home", name: "Home" }],
       target: { id: "card", name: "Card", type: "rectangle", frame: [16, 120, 370, 200], screen: { id: "home", name: "Home" } },
-      styles: "styles main (no layers yet)",
+      styles: formatStyleDigest(styleDigest(session.document.getState().doc, "main")),
     });
+    expect(sent.context?.styles).toMatch(/^styles main \(2 layers\)/);
     expect(assistantStore.getState().items[0]).toMatchObject({ kind: "user", text: "make it darker", origin: "canvas" });
     expect(designStore.getState().request).toMatchObject({ runId: "r7", text: "make it darker", selection: ["card"], outcome: "completed" });
   });

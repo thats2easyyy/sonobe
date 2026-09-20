@@ -213,6 +213,7 @@ export function registerImportTools(tc: ToolContext): void {
         ...(args.name !== undefined ? { name: args.name } : {}),
         ...(args.position !== undefined ? { position: args.position } : {}),
         ...(args.scrolling !== undefined ? { scrolling: args.scrolling } : {}),
+        ...(args.dryRun ? { dryRun: true } : {}),
         });
       } catch (err) {
         if (err instanceof ImportPlanError) return failure({ code: err.code, message: err.message, ...(err.hint ? { hint: err.hint } : {}) });

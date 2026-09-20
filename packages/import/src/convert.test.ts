@@ -399,6 +399,10 @@ describe("re-import edge cases", () => {
     expect(again.dropped).toEqual([{ id: "promo_badge", name: "Promo Badge" }]);
     expect(again.summary).toMatchObject({ kept: 3, dropped: 1 });
     expect(again.notes).toContain("1 layer of the old “Tabs” wasn't found again and was removed: Promo Badge. Give layers you'll import again a data-name so they're found.");
+    // A plan that won't be applied says what would go.
+    const planned = await planImport(screen(["A", "B"]), edited.doc, new Map(), { replace: "tabs", dryRun: true });
+    expect(planned.ops).toEqual(again.ops);
+    expect(planned.notes).toContain("1 layer of the old “Tabs” wouldn't be found again and would be removed: Promo Badge. Give layers you'll import again a data-name so they're found.");
     const result = applyOps(edited.doc, again.ops, { registry });
     expect(result.errors).toEqual([]);
     expect(findLayer(result.doc.components.main!.layers, "promo_badge")).toBeUndefined();
