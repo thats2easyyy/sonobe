@@ -49,11 +49,11 @@ sonobe/
 │   ├── claude-desktop/  .mcpb bundle manifest
 │   ├── chrome-extension/ Sonobe Capture for Chrome: copy a page or an element as a design capture
 │   └── figma-plugin/    Sonobe Capture for Figma: copy a selection as a design capture
-├── examples/       canonical example prototypes (*.sonobe folders), used by docs, lessons, tests
+├── examples/       canonical example prototypes (*.sonobe folders), used by docs, lessons, tests and list_examples
 └── docs/           research/, guides/ (numbered tutorials), patches/ (generated reference), assets/ (README screenshots)
 ```
 
-Dependency direction (no cycles): `core ← engine ← patches ← renderer ← editor ← desktop`, and `mcp ← cli`, where `mcp` depends on `core`, `engine`, and `patches`. `import` depends only on `core`; `mcp`, `editor`, and `desktop` use it.
+Dependency direction (no cycles): `core ← engine ← patches ← renderer ← editor ← desktop`, and `mcp ← cli`, where `mcp` depends on `core`, `engine`, and `patches`, and bundles the examples registry (`examples/recipes`, which uses only `core`) for `list_examples`. `import` depends only on `core`; `mcp`, `editor`, and `desktop` use it.
 
 Tooling: TypeScript (strict, ESM), Vite 8 for the editor, esbuild for Electron main/preload and the CLI, Vitest for unit tests, Playwright for e2e (Chromium via `npm run e2e`; `_electron` in the desktop smoke test and package verification). Formatting uses Prettier defaults. `apps/ios` is Swift and SwiftUI, built with Xcode, and isn't an npm workspace. The desktop build compiles `apps/desktop/native/sfsymbol` with `swiftc` on macOS.
 
@@ -597,7 +597,7 @@ The web player (`apps/desktop/player`) runs the real engine and DOM renderer ful
 
 | Group | Tools |
 |---|---|
-| Discovery | `get_guide`, `list_patch_types`, `describe_patch_types`, `describe_layer_types`, `list_value_types` |
+| Discovery | `get_guide`, `list_patch_types`, `describe_patch_types`, `describe_layer_types`, `list_value_types`, `list_examples`, `get_example` |
 | Documents | `list_documents`, `open_document`, `create_document`, `get_document_info`, `save_document` |
 | Read | `get_outline` (compact text projection), `get_layers`, `get_patches`, `get_items`, `find`, `get_selection`, `get_diagnostics`, `explain` |
 | Write | `apply_ops`, `add_layers`, `add_patches`, `connect`, `set_values`, `update_layers`, `delete_items`, `rename`, `create_component`, `tidy_graph`, `import_design` |
@@ -605,6 +605,8 @@ The web player (`apps/desktop/player`) runs the real engine and DOM renderer ful
 | Simulate | `sim_reset` (with `preset` and `knobs`), `sim_dispatch`, `sim_step`, `sim_trace`, `sim_get_values`, `sim_override`, `get_screenshot` |
 | Presence and history | `begin_work`, `finish_work`, `reveal`, `restart_viewer`, `list_history`, `undo` |
 
+- **Unknown fields fail.** Every tool's input refuses a field its schema doesn't take, at any depth, with the tool, the field and the closest known field (`packages/mcp/src/inputs.ts`, one check in the tool wrapper). zod would strip it and the call would quietly do something else. Loose objects and records stay open, core checks op fields, and MCP's `_meta` is tolerated.
+- **Examples as patterns.** `list_examples` and `get_example` serve the verified examples from their registry (`examples/recipes`): what each teaches, its key patches, its patch chain and common mistakes from its README, the scenarios its `test.json` passes, and its recipe as `apply_ops` batches that rebuild it on a blank document. The graph-basics guide maps code idioms (a tap handler, `useState`, a ternary, `ForEach`, `withSpring`) to the patches that do the same.
 - **Saving never asks.** `save_document` never opens a dialog. With `path` it saves into a new or empty folder (Save As) and keeps working there. Without one, a document that was never saved goes to `~/Documents/<Name>.sonobe`, or fails with `path_needed` while it's "Untitled". `create_document` and `save_document({ path })` follow one set of folder rules on both hosts (`projectTarget.ts`): `.sonobe` is added, and the folder must be new or empty and not inside another project. The app also keeps agent paths in home, a mounted drive or the temp folder, outside hidden folders and its own data folder. The person's Save panel refuses folders inside a project or with other files too, and reopens next to the project.
 - **Recovered drafts** (§3.5): `list_documents` lists them as `draft:<id>`, `open_document` takes that ref, and `get_document_info` says when unsaved work is kept as a draft.
 - **Graph layout.** `tidy_graph` runs the editor's frame-aware Tidy Up (§9) with ELK: `frames` tidies inside those comments, `ids` tidies some nodes within their frames, and `frameMode: "arrange"` moves frames as blocks. Its result says how each frame's size changed (wider, shorter), which frames were pushed, and which nodes overlapped before, with their boxes; a dry run is the way to check a whole graph for overlaps. `add_patches` sizes its columns by how wide each patch draws and places them in free space clear of frames.

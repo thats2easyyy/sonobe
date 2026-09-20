@@ -1,15 +1,16 @@
 #!/usr/bin/env node
 /**
  * Bundles the Electron main process, the preload, the phone/pop-out web player, the scene renderer
- * for simulation screenshots, and the `sonobe` CLI with esbuild, copies the MCP agent guides next
- * to main.cjs, and on macOS compiles the SF Symbols helper into dist/bin (scripts/sfsymbol.ts).
+ * for simulation screenshots, and the `sonobe` CLI with esbuild, copies the MCP agent guides and the
+ * examples' READMEs and tests next to main.cjs, and on macOS compiles the SF Symbols helper into
+ * dist/bin (scripts/sfsymbol.ts).
  *
  *   node scripts/build.mjs           one-off build into dist/
  *   node scripts/build.mjs --watch   rebuild on change (skips the CLI bundle)
  *
  * At runtime the main process loads ../editor/dist/index.html, or SONOBE_DEV_URL when set.
  *
- * The CLI lands in dist/cli: sonobe.mjs (one ESM file), guides/, and `sonobe` / `sonobe.cmd`
+ * The CLI lands in dist/cli: sonobe.mjs (one ESM file), guides/, examples/, and `sonobe` / `sonobe.cmd`
  * launchers that run it with the app's own runtime (Electron in Node mode), so a packaged app needs no
  * separate Node install. When packages/cli ships a prebuilt bundle (its package.json `bin` points
  * into dist/), that bundle is copied instead of bundling from source.
@@ -19,6 +20,7 @@ import { build, context } from "esbuild";
 import { chmodSync, cpSync, existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { copyExampleTexts } from "../../../packages/mcp/src/examples.ts";
 import { externalLottiePlugin, leanCatalogPlugin } from "./player-bundle.ts";
 import { buildSymbolHelper } from "./sfsymbol.ts";
 
@@ -75,6 +77,7 @@ function copyStatic() {
   for (const file of ["index.html", "player.css"]) cpSync(path.join(root, "player", file), path.join(dist, "player", file));
   cpSync(path.join(root, "scene", "index.html"), path.join(dist, "scene", "index.html"));
   cpSync(path.join(repo, "packages", "mcp", "guides"), path.join(dist, "guides"), { recursive: true });
+  copyExampleTexts(path.join(dist, "examples"), path.join(repo, "examples"));
 }
 
 const POSIX_LAUNCHER = `#!/bin/sh
@@ -151,6 +154,7 @@ async function buildCli() {
     });
   }
   cpSync(path.join(repo, "packages", "mcp", "guides"), path.join(out, "guides"), { recursive: true });
+  if (!prebuilt) copyExampleTexts(path.join(out, "examples"), path.join(repo, "examples"));
   writeFileSync(path.join(out, "sonobe"), POSIX_LAUNCHER);
   chmodSync(path.join(out, "sonobe"), 0o755);
   writeFileSync(path.join(out, "sonobe.cmd"), WINDOWS_LAUNCHER);

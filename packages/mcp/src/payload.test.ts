@@ -82,6 +82,9 @@ describe("structuredContent carries the complete payload", () => {
     await call("describe_patch_types", { types: ["popAnimation"] });
     await call("describe_layer_types", { types: ["rectangle"] });
     await call("list_value_types");
+    await call("list_examples", { query: "swipe" });
+    await call("get_example", { id: "01-tap-to-grow", detail: "ops" });
+    await call("get_example", { id: "nope" });
     await call("list_documents");
     await call("open_document", { ref: "test" });
     await call("create_document", {

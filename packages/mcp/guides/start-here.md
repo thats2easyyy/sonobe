@@ -7,7 +7,7 @@ Related: `importing`, `graph-basics`, `gestures`, `animation`, `knobs`, `simulat
 ## The loop
 
 1. **Look first.** Call `get_document_info` (device size, components, what this host can do), then `get_outline`. Use ids exactly as the outline prints them.
-2. **Look up patches.** Search with `list_patch_types` by intent ("spring", "drag", "tabs"), then call `describe_patch_types` for exact port keys, types and defaults. Never guess a port key.
+2. **Look up patches.** Search with `list_patch_types` by intent ("spring", "drag", "tabs"), then call `describe_patch_types` for exact port keys, types and defaults. Never guess a port key. When a verified example covers the interaction (a bottom sheet, swipe cards, a carousel), read it first (see Examples below).
 3. **Say what you're doing.** Call `begin_work` with a one-line intent.
 4. **Start from real screens.** When the person has an app or a design in code, bring its screens in with `import_design` (see the `importing` guide) instead of drawing layers by hand.
 5. **Build one feature per batch.** Call `add_layers`, then `add_patches` with `connections`. Give new patches a `ref` and wire them with `"$ref.port"`; refs work in any order within a batch. Name layers by what they are ("Card") and patches by what they do ("Card Grown"). Make the numbers the person will tune or compare into knobs with `set_knobs` (the `knobs` guide).
@@ -127,6 +127,16 @@ Look at the result as well. `atMs` draws a later frame without moving the sessio
 - **Look without editing.** To see under a layer or try a value, use `sim_override` inside a simulation, or `get_screenshot` with `isolate: true` for one layer alone. Editing and undoing just to look fills the person's undo history.
 - **Save it somewhere.** In the app, a prototype that was never saved is kept as a draft, so it survives a crash or quit, but it isn't a project yet. Ask the person what to call it, save it with `save_document({ "path": "~/Documents/<Name>.sonobe" })`, and tell them where it went. `save_document` never opens a dialog, and it won't make up a folder for "Untitled" (`path_needed`).
 - **Headless mode** (a project folder without the app): there's no editor selection, and `get_screenshot` draws the screen itself with approximate text. `get_document_info` says whether changes save automatically or need `save_document`.
+
+## Examples
+
+The example prototypes are verified: each one builds with no errors and passes scripted scenarios. `list_examples` says what each teaches and its key patches; `query` filters by words or patch types:
+
+```json tool:list_examples
+{ "query": "swipe" }
+```
+
+`get_example({ "id": "10-swipe-cards" })` explains one: its patch chain, what each patch does, common mistakes and the scenarios it passes. `detail: "ops"` gives its recipe as `apply_ops` batches that build it on a blank document. Follow the pattern in the person's design rather than pasting an example over their work.
 
 ## More guides
 

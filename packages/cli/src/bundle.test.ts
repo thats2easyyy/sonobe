@@ -21,7 +21,7 @@ let bundle: BundleResult;
 
 const childEnv = () =>
   Object.fromEntries(
-    Object.entries({ ...process.env, NODE_PATH: "", SONOBE_GUIDES_DIR: "" }).filter(
+    Object.entries({ ...process.env, NODE_PATH: "", SONOBE_GUIDES_DIR: "", SONOBE_EXAMPLES_DIR: "" }).filter(
       (e): e is [string, string] => typeof e[1] === "string" && e[1] !== "",
     ),
   );
@@ -56,6 +56,7 @@ describe("the bundled CLI", () => {
     expect((await stat(bundle.outfile)).mode & 0o111).not.toBe(0);
     expect(code).not.toMatch(/from\s+["']@sonobe\//);
     expect(bundle.guidesDir).toBe(path.join(dir, "bin", "guides"));
+    expect(bundle.examplesDir).toBe(path.join(dir, "bin", "examples"));
     expect(bundle.rasterizerDir).toBe(path.join(dir, "bin", "node_modules", "@resvg"));
     expect(
       (await stat(path.join(bundle.rasterizerDir!, "resvg-js", "package.json"))).isFile(),
@@ -116,6 +117,9 @@ describe("the bundled CLI", () => {
         arguments: { topic: "start-here" },
       });
       expect((guide.structuredContent as { text: string }).text).toContain("# Start here");
+      // The examples come with the bundle: recipes inside it, READMEs and tests beside it.
+      const example = await client.callTool({ name: "get_example", arguments: { id: "10" } });
+      expect((example.structuredContent as { text: string }).text).toContain("## The patch chain");
       // tidy_graph lays out with ELK, which the bundle carries.
       const tidy = await client.callTool({ name: "tidy_graph", arguments: { dryRun: true } });
       expect(tidy.isError, JSON.stringify(tidy.content)).toBeFalsy();

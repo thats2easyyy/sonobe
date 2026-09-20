@@ -16,6 +16,7 @@ Sonobe prototypes are layers (what people see) plus patches (logic nodes with ty
    - existing diagnostics
 3. Call `get_outline` to see what exists. Use ids exactly as printed.
 4. Call `list_patch_types` (search by intent: "spring", "drag", "tabs") and `describe_patch_types` for every patch type you'll wire. Never invent port keys.
+5. For an interaction a verified example covers (a bottom sheet, swipe cards, a carousel, a tab bar), call `list_examples`, then `get_example` for its patch chain, common mistakes and recipe.
 
 ## Importing screens from the person's app
 

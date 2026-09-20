@@ -76,7 +76,7 @@ The tools are listed in `TOOL_NAMES`.
 
 | Group                | Tools                                                                                                                                          |
 | -------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
-| Discovery            | `get_guide`, `list_patch_types`, `describe_patch_types`, `describe_layer_types`, `list_value_types`                                            |
+| Discovery            | `get_guide`, `list_patch_types`, `describe_patch_types`, `describe_layer_types`, `list_value_types`, `list_examples`, `get_example`            |
 | Documents            | `list_documents`, `open_document`, `create_document`, `get_document_info`, `save_document`                                                     |
 | Read                 | `get_outline`, `get_layers`, `get_patches`, `get_items`, `find`, `get_selection`, `get_diagnostics`, `explain`                                 |
 | Write                | `apply_ops`, `add_layers`, `add_patches`, `connect`, `set_values`, `update_layers`, `delete_items`, `rename`, `create_component`, `tidy_graph`, `import_design` |
@@ -89,6 +89,7 @@ Conventions:
 - **Results.** Each returns concise text plus `structuredContent`; writes, simulation and document info also declare `outputSchema`.
 - **`structuredContent.text`** always holds the complete text, as the first field. Some clients (Claude Code) give the model only `structuredContent`, so metadata alone would hide the outline, guide or trace. `get_screenshot` returns no `structuredContent`, so clients keep the image.
 - **Writes** return `revision`, `txnId`, created ids, `idMap` and diagnostics `{ added, resolved, totals }`.
+- **Inputs** refuse fields a tool doesn't take (`src/inputs.ts`): the error names the tool, the field (`layers[0]`, `events[2]` when nested) and the closest field it takes. Loose objects, records and op shapes stay open (core checks ops), and `_meta` is tolerated.
 - **Errors** are `isError` results with `{ code, message, hint, suggestions: [{ description, ops }], changed }`. Every `outputSchema` is `{ type: "object", anyOf: [success, teaching error] }` (`toolOutputSchema`), so SDK clients that validate error results (the v1 SDK does) show the teaching error instead of -32602. The wrapper drops any error `structuredContent` that wouldn't validate.
 - **Reads** paginate with `cursor` and truncate with explicit notes.
 - **Long calls** (`src/progress.ts`) send `notifications/progress` when the client passes a `progressToken`, and stop as soon as the client cancels or disconnects. Handlers get a `ToolWork` third (`work.step`, `work.progress`, `work.signal`), host methods that can run long take a trailing `{ signal, progress }`, and `apply`/`undo` refuse once their `signal` has aborted, so a cancelled call never changes the document. ARCHITECTURE §10 has the contract.
@@ -112,6 +113,10 @@ Prompts: `import_screen`, `prototype_interaction`, `debug_interaction`, `explain
 `guides/*.md` holds the agent guides served by `get_guide`: start-here, importing, graph-basics, gestures, animation, layout, loops, components, knobs, simulation and troubleshooting. `get_guide` takes `topic` for one guide or `topics` for several in order, within a combined budget of about 12,000 tokens (topics past it are listed as omitted). `SONOBE_GUIDES_DIR` overrides the folder for bundles.
 
 Every `json tool:<name>` example block runs through the real tools in `src/guides.test.ts`, and every `text outline` block must match real output. Keep examples passing when editing.
+
+## Examples
+
+`list_examples` and `get_example` serve the verified examples (`examples/`) as a patterns catalog (`src/examples.ts`). The registry is `examples/recipes/index.ts`, so a new example appears once it's there. Each one lists with the "You'll learn" and "Key patches" columns of `examples/README.md`; `get_example` adds sections of its README, the scenario names from its `test.json`, and its recipe as `apply_ops` batches for a blank document, with the example's ids, values and layout. Recipes are bundled as code; the READMEs and tests are read from `SONOBE_EXAMPLES_DIR`, else `examples/` beside the bundle (the CLI and desktop builds copy them there), else the repository's.
 
 ## Other exports
 

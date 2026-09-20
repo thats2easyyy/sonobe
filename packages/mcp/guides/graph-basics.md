@@ -53,6 +53,28 @@ Some connections convert automatically: number to boolean (on when > 0), boolean
 
 Op kinds: `addLayer`, `updateLayer`, `moveLayer`, `removeLayer`, `addPatch`, `updatePatch`, `replacePatch` (a new type in place), `removePatch`, `setInput` (literal or link; `null` resets), `connect`, `disconnect`, `rename`, `addComment`, `updateComment`, `removeComment`, `addComponent`, `removeComponent`, `createComponent`, `updateInterface` (by key; `null` unpublishes; `replace: true` sets a whole side), `updateComponent`, `setNodePositions`, `setScript`, `addAsset`, `removeAsset`, `setProject`. Every op may name a `component`; a field an op doesn't take fails with `unknown_field` and a did-you-mean.
 
+## From code to patches
+
+What you'd write in React, SwiftUI or CSS, and the patches that do it. Native patches first; `javascript` is for logic no patch expresses.
+
+| In code | In Sonobe |
+|---|---|
+| `onClick`, `.onTapGesture` | `interaction` on the layer; its `tap` pulse starts what follows |
+| `useState(false)` toggled, `@State var isOn` | `switch`, which a pulse flips, turns on or turns off |
+| a count or an index in state | `counter`; `optionSwitch` for a few named states |
+| `cond ? a : b`, `if` / `else` | `ifElse`, or `optionPicker` chosen by a boolean or an index |
+| `withSpring`, `.animation(.spring())`, a CSS transition | `popAnimation` or `springAnimation` from 0 to 1, then `transition` into real units |
+| `interpolate(x, [a, b], [0, 1])` | `progress`, and `transition` back out |
+| `Math.abs(dx) > 120`, `clamp(x, lo, hi)` | `absoluteValue`, `greaterThan` / `lessThan`, `clamp` |
+| a drag that follows the finger (`DragGesture`) | `gesture` (translation, velocity) into `springAnimation` with `gestureActive`; `snap` or `swipe` decides where it lands |
+| `items.map(item => <Card />)`, `ForEach` | one layer whose Repeat takes a `loop` or `loopBuilder`: N copies are one layer and a loop, not N layers |
+| `setTimeout`, a delay | `wait` after a pulse; `delay` holds a value back |
+| `useEffect(..., [])`, `.onAppear` | `whenPrototypeStarts` |
+| `onScroll`, a scroll offset | `scroll` on the content layer, then `progress` on its position |
+| `GeometryReader`, measuring a view | `layerInfo`, `deviceInfo` |
+
+For a whole interaction built this way, `list_examples` and `get_example` show a verified example with its patch chain and recipe.
+
 ## Organizing the graph
 
 - **Sections are comment frames.** Frame a group of patches with `addComment { "comment": { "text": "Places", "rect": [x, y, w, h] } }`. A node belongs to the frame under its title bar.

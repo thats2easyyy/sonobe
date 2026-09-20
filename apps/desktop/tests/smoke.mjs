@@ -590,6 +590,9 @@ try {
   assert(!info.isError && info.structuredContent.name === "Photo Zoom" && info.structuredContent.host.kind === "app" && info.structuredContent.host.screenshots === true, "get_document_info on the demo", info.text);
   const outline = await mcp.call("get_outline", { detail: "compact" });
   assert(outline.text.includes("patch tap_photo interaction"), "get_outline", outline.text.slice(0, 300));
+  // The examples catalog: recipes bundled into main.cjs, READMEs and tests copied beside it.
+  const example = await mcp.call("get_example", { id: "10" });
+  assert(!example.isError && example.text.includes("## The patch chain"), "get_example reads the examples beside main.cjs", example.text.slice(0, 300));
   log(`MCP (${mode}): ${tools.length} tools; ${info.text.split("\n")[0]}`);
 
   const begun = await mcp.call("begin_work", { intent: "Adding press feedback to the next card", ids: ["next_card"] });
