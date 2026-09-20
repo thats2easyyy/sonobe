@@ -76,6 +76,32 @@ test.describe("Import Design", () => {
     expect(problems).toEqual([]);
   });
 
+  test("cancels a running import without an error or a change", async ({ page }) => {
+    const problems = collectConsoleProblems(page);
+    await openEditor(page);
+    const before = await hook(page, (s) => s.revision());
+    await runCommand(page, "Import Design");
+    const dialog = page.getByRole("dialog", { name: "Import Design" });
+    await dialog.getByRole("radio", { name: "Paste HTML" }).click();
+    await dialog.getByRole("textbox", { name: "HTML" }).fill('<!doctype html><body><p data-name="Late">Loads late</p></body>');
+    // Waiting for an element that never appears keeps the import running.
+    await dialog.getByRole("button", { name: "More options" }).click();
+    await dialog.getByRole("textbox", { name: "Wait for" }).fill("#never");
+    await dialog.getByRole("button", { name: "Import", exact: true }).click();
+    await expect(dialog.getByText("Rendering the HTML")).toBeVisible();
+    await dialog.getByRole("button", { name: "Cancel" }).click();
+    await expect(dialog.getByText("Rendering the HTML")).toBeHidden();
+    // Cancel stops the import and keeps the dialog open, with no error.
+    await expect(dialog).toBeVisible();
+    await expect(dialog.getByRole("alert")).toHaveCount(0);
+    await expect(dialog.getByRole("button", { name: "Import", exact: true })).toBeEnabled();
+    expect(await page.locator("iframe[sandbox]").count()).toBe(0);
+    expect(await hook(page, (s) => s.revision())).toBe(before);
+    await dialog.getByRole("button", { name: "Cancel" }).click();
+    await expect(dialog).toBeHidden();
+    expect(problems).toEqual([]);
+  });
+
   test("pastes a design capture copied from another tool", async ({ page }) => {
     await openEditor(page);
     const capture = {

@@ -14,6 +14,7 @@ import {
 import type { z } from "zod";
 import { defaultGuides, type GuideStore } from "./guides.ts";
 import type { SonobeHost } from "./host.ts";
+import { callSignal, toolWork, type CallScope, type ToolWork } from "./progress.ts";
 import { registerPrompts } from "./prompts.ts";
 import { registerResources } from "./resources.ts";
 import { guarded, withCompleteText } from "./results.ts";
@@ -131,7 +132,15 @@ export interface ToolContext {
   guides(): GuideStore;
   /** The agent attributed in history ("Claude", or the client's name). */
   author(ctx: ServerContext): Author;
-  /** Register a tool with teaching-error handling. */
+  /**
+   * The call's cancellation signal (the handler's work.signal). Pass it to host.apply and
+   * history.undo, so a cancelled call never changes the document.
+   */
+  signal(ctx: ServerContext): AbortSignal;
+  /**
+   * Register a tool with teaching-error handling. Handlers get a ToolWork third: progress, steps
+   * with deadlines, and the call's cancellation signal (progress.ts).
+   */
   tool<S extends z.ZodObject>(
     name: ToolName,
     config: {
@@ -141,7 +150,7 @@ export interface ToolContext {
       output?: z.ZodObject;
       annotations: ToolAnnotations;
     },
-    handler: (args: z.infer<S>, ctx: ServerContext) => Promise<CallToolResult>,
+    handler: (args: z.infer<S>, ctx: ServerContext, work: ToolWork) => Promise<CallToolResult>,
   ): void;
 }
 
@@ -214,6 +223,8 @@ export function subscribedResources(server: McpServer): ReadonlySet<string> {
 export interface SonobeServerContext {
   /** The protocol era this instance serves (from the transport factory). */
   era?: "legacy" | "modern";
+  /** The transport's view of the current call (createHttpHandler: its connection and routed cancels). */
+  callScope?(): CallScope | undefined;
 }
 
 /** Build an MCP server over a host. Create one per HTTP request or stdio connection. */
@@ -247,15 +258,17 @@ export function createSonobeMcpServer(
       return {};
     });
   }
+  const signals = new WeakMap<ServerContext, AbortSignal>();
   const tc: ToolContext = {
     host,
     server,
     options,
     guides: () => options.guides ?? defaultGuides(),
     author: (ctx) => authorFromClientName(clientName(server, ctx)),
+    signal: (ctx) => signals.get(ctx) ?? ctx.mcpReq.signal,
     tool(name, config, handler) {
       const run = guarded(
-        handler as (args: unknown, ctx: ServerContext) => Promise<CallToolResult>,
+        handler as (args: unknown, ctx: ServerContext, work: ToolWork) => Promise<CallToolResult>,
       );
       const output = config.output ? toolOutputSchema(config.output) : undefined;
       const registration: Record<string, unknown> = {
@@ -268,8 +281,17 @@ export function createSonobeMcpServer(
       server.registerTool(
         name,
         registration as never,
-        (async (args: unknown, ctx: ServerContext) =>
-          conformErrorResult(withCompleteText(await run(args, ctx)), output)) as never,
+        (async (args: unknown, ctx: ServerContext) => {
+          const call = callSignal(ctx, context.callScope?.());
+          const work = toolWork(ctx, { signal: call.signal });
+          signals.set(ctx, call.signal);
+          try {
+            return conformErrorResult(withCompleteText(await run(args, ctx, work)), output);
+          } finally {
+            work.dispose();
+            call.release();
+          }
+        }) as never,
       );
     },
   };

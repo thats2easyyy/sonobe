@@ -61,6 +61,9 @@ function ImportContent({ titleId, onClose, initialTab, deps }: { titleId: string
   const [dark, setDark] = useState(false);
   const [showMore, setShowMore] = useState(false);
   const [busy, setBusy] = useState(false);
+  /** What the running import is doing ("Downloading images: 7 of 28"). */
+  const [status, setStatus] = useState<string | null>(null);
+  const running = useRef<AbortController | null>(null);
   const [problem, setProblem] = useState<{ message: string; hint?: string } | null>(null);
   const urlRef = useRef<HTMLInputElement>(null);
   const htmlRef = useRef<HTMLTextAreaElement>(null);
@@ -75,6 +78,8 @@ function ImportContent({ titleId, onClose, initialTab, deps }: { titleId: string
   });
 
   useEffect(() => writeString(TAB_KEY, tab), [tab]);
+  // Closing the dialog while an import runs cancels it.
+  useEffect(() => () => running.current?.abort(), []);
   useEffect(() => {
     setProblem(null);
     if (tab === "url") urlRef.current?.focus();
@@ -101,8 +106,17 @@ function ImportContent({ titleId, onClose, initialTab, deps }: { titleId: string
       scrolling,
     };
     if (tab === "url") writeString(URL_KEY, trimmedUrl);
+    const controller = new AbortController();
+    running.current = controller;
     try {
-      const outcome = await importDesign(session, request, deps);
+      const outcome = await importDesign(session, request, deps, {
+        signal: controller.signal,
+        onProgress: (message) => {
+          if (!controller.signal.aborted) setStatus(message);
+        },
+      });
+      // A cancel is the person's choice, not a problem to show.
+      if (outcome.cancelled || controller.signal.aborted) return;
       if (!outcome.ok) {
         setProblem({ message: outcome.message ?? "The design couldn't be imported.", ...(outcome.hint ? { hint: outcome.hint } : {}) });
         return;
@@ -110,11 +124,15 @@ function ImportContent({ titleId, onClose, initialTab, deps }: { titleId: string
       toast.success(`Imported “${outcome.screenName}”`, { description: [outcome.summary ? summaryText(outcome.summary) : "", ...(outcome.notes ?? []).slice(0, 2)].filter(Boolean).join(" ") });
       onClose();
     } catch (err) {
-      setProblem({ message: err instanceof Error ? err.message : String(err) });
+      if (!controller.signal.aborted) setProblem({ message: err instanceof Error ? err.message : String(err) });
     } finally {
+      if (running.current === controller) running.current = null;
       setBusy(false);
+      setStatus(null);
     }
   };
+
+  const cancelImport = () => running.current?.abort();
 
   return (
     <form className="sb-import" onSubmit={(event) => void submit(event)}>
@@ -257,9 +275,10 @@ function ImportContent({ titleId, onClose, initialTab, deps }: { titleId: string
 
       <footer className="sb-import__footer">
         <span className="sb-import__status" aria-live="polite">
-          {busy ? (tab === "url" ? "Loading the page…" : "Rendering the HTML…") : ""}
+          {busy ? (status ?? (tab === "url" ? "Loading the page…" : "Rendering the HTML…")) : ""}
         </span>
-        <Button onClick={onClose}>{tab === "claude" ? "Done" : "Cancel"}</Button>
+        {/* While an import runs, Cancel stops it and keeps the dialog open. */}
+        <Button onClick={busy ? cancelImport : onClose}>{tab === "claude" ? "Done" : "Cancel"}</Button>
         {tab !== "claude" && (
           <Button type="submit" variant="primary" loading={busy} disabled={!canSubmit}>
             Import

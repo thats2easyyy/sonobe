@@ -5,12 +5,12 @@
  */
 
 import { deviceScreenSize, getOutline, type Id } from "@sonobe/core";
-import { CaptureFormatError, globalFetcher, ImportPlanError, parseCapture, planImport, resolveCaptureFiles, type ImportPlan } from "@sonobe/import";
+import { CAPTURE_TIMEOUT_MS, CaptureFormatError, globalFetcher, ImportPlanError, parseCapture, planImport, resolveCaptureFiles, type ImportPlan } from "@sonobe/import";
 import type { CallToolResult } from "@modelcontextprotocol/server";
 import { z } from "zod";
 import { plural } from "../format.ts";
 import { requireComponent } from "../graph.ts";
-import type { CapturedDesign } from "../host.ts";
+import { HostError, type CapturedDesign } from "../host.ts";
 import { failure } from "../results.ts";
 import { ADDITIVE, type ToolContext } from "../server.ts";
 import { ComponentIdSchema, DocIdSchema, ExpectedRevisionSchema, LabelSchema } from "../schemas.ts";
@@ -18,6 +18,15 @@ import { writeResult } from "./write.ts";
 
 /** Most outline lines the result shows for the imported screen. */
 const OUTLINE_LINES = 70;
+
+/**
+ * The tool's own limit on a capture: a safety net and a heartbeat longer than the host's deadline
+ * (CAPTURE_TIMEOUT_MS plus waitMs), so the host's error, which names the stage, comes first.
+ */
+const CAPTURE_STEP_MS = CAPTURE_TIMEOUT_MS + 60_000;
+/** Downloading a capture's images (the capture source), and storing image files. */
+const IMAGES_STEP_MS = 75_000;
+const STORE_STEP_MS = 60_000;
 
 /**
  * The imported screen's lines from a component outline. When the screen has more layers than `max`,
@@ -53,6 +62,7 @@ export function registerImportTools(tc: ToolContext): void {
         'For HTML: write one complete static page that reproduces the screen faithfully (real copy, colors, spacing, fonts, icons as inline SVG), size the layout for "width", and put data-name="Like Button" on elements you\'ll wire, text included, so their layers get those names. <style> and CDN scripts such as Tailwind work.',
         'To iterate on a design, import it again with "replace" set to the earlier screen\'s id: layers found again keep their ids, and the interactions wired to them keep working.',
         'The screen lands at [0, 0] of the component (or "parent"/"position"), sized to the document\'s device unless width/height say otherwise. Pages taller than the screen get a Content layer with a Scroll patch, and so do scroll containers. Read get_guide("importing") before your first import.',
+        "A capture sends progress while it runs and stops after 90 seconds plus waitMs with an error naming the step; cancelling the call before the screen is added changes nothing.",
       ].join(" "),
       input: z.object({
         docId: DocIdSchema.optional(),
@@ -67,7 +77,7 @@ export function registerImportTools(tc: ToolContext): void {
         waitFor: z.string().max(500).optional().describe("Wait until an element matches this selector (data that loads late)."),
         waitMs: z.number().int().min(0).max(20_000).optional().describe("Extra milliseconds to wait after the page settles."),
         fullPage: z.boolean().optional().describe("Import the whole page height (default true); false imports only what fits the viewport."),
-        colorScheme: z.enum(["light", "dark"]).optional(),
+        colorScheme: z.enum(["light", "dark"]).optional().describe('The page\'s prefers-color-scheme: "dark" imports its dark mode, "light" its light mode.'),
         parent: z.string().optional().describe("Container layer for the screen (default: the component root)."),
         position: z.tuple([z.number(), z.number()]).optional().describe("Screen position in its parent (default [0, 0])."),
         replace: z.string().optional().describe("Id of an earlier imported screen to replace, keeping the ids and wiring of layers found again."),
@@ -80,7 +90,7 @@ export function registerImportTools(tc: ToolContext): void {
       // No outputSchema: a result with the page screenshot sends content only, so clients show the image.
       annotations: { ...ADDITIVE, openWorldHint: true },
     },
-    async (args, ctx): Promise<CallToolResult> => {
+    async (args, ctx, work): Promise<CallToolResult> => {
       const sources = [args.url, args.html, args.capture].filter((s) => s !== undefined).length;
       if (sources !== 1)
         return failure({
@@ -104,7 +114,23 @@ export function registerImportTools(tc: ToolContext): void {
           throw err;
         }
         const fetcher = host.fetchImage ? host.fetchImage.bind(host) : typeof fetch === "function" ? globalFetcher() : undefined;
-        captured = { capture, images: await resolveCaptureFiles(capture, fetcher ? { fetch: fetcher } : {}) };
+        const files = Object.keys(capture.images).length + (capture.fonts?.length ?? 0);
+        let late = 0;
+        const images = !files ? new Map() : await work.step(
+          `Downloading the capture's images: 0 of ${files}`,
+          (control) =>
+            resolveCaptureFiles(capture, {
+              ...(fetcher ? { fetch: fetcher } : {}),
+              signal: control.signal,
+              until: Date.now() + IMAGES_STEP_MS - 5_000,
+              onFile: (_key, status, done, total) => {
+                if (status === "timed-out") late++;
+                control.progress({ message: `Downloading the capture's images: ${done} of ${total}`, progress: done, total });
+              },
+            }),
+          { deadlineMs: IMAGES_STEP_MS },
+        );
+        captured = { capture, images, ...(late ? { notes: [`${plural(late, "image or font", "images or fonts")} didn't download in time and ${late === 1 ? "shows" : "show"} as a placeholder or an installed font.`] } : {}) };
       } else {
         if (!host.captureDesign)
           return failure({
@@ -112,21 +138,39 @@ export function registerImportTools(tc: ToolContext): void {
             message: host.kind === "headless" ? "This headless server has no browser to render pages with." : "This Sonobe host can't render pages.",
             hint: host.kind === "headless" ? "Install Playwright's Chromium where Sonobe runs (npx playwright install chromium), or open the project in the Sonobe app, which renders pages itself." : "Update the Sonobe app.",
           });
-        captured = await host.captureDesign({
-          ...(args.url !== undefined ? { url: args.url } : { html: args.html! }),
-          width: args.width ?? deviceWidth,
-          height: args.height ?? deviceHeight,
-          ...(args.selector !== undefined ? { selector: args.selector } : {}),
-          ...(args.waitFor !== undefined ? { waitFor: args.waitFor } : {}),
-          ...(args.waitMs !== undefined ? { waitMs: args.waitMs } : {}),
-          ...(args.fullPage !== undefined ? { fullPage: args.fullPage } : {}),
-          ...(args.colorScheme !== undefined ? { colorScheme: args.colorScheme } : {}),
-          ...(args.screenshot ? { screenshot: true } : {}),
-        });
+        const captureDesign = host.captureDesign.bind(host);
+        const stepMs = CAPTURE_STEP_MS + (args.waitMs ?? 0);
+        captured = await work.step(
+          args.url !== undefined ? `Loading ${args.url}` : "Rendering the HTML",
+          (control) =>
+            captureDesign(
+              {
+                ...(args.url !== undefined ? { url: args.url } : { html: args.html! }),
+                width: args.width ?? deviceWidth,
+                height: args.height ?? deviceHeight,
+                ...(args.selector !== undefined ? { selector: args.selector } : {}),
+                ...(args.waitFor !== undefined ? { waitFor: args.waitFor } : {}),
+                ...(args.waitMs !== undefined ? { waitMs: args.waitMs } : {}),
+                ...(args.fullPage !== undefined ? { fullPage: args.fullPage } : {}),
+                ...(args.colorScheme !== undefined ? { colorScheme: args.colorScheme } : {}),
+                ...(args.screenshot ? { screenshot: true } : {}),
+              },
+              control,
+            ),
+          {
+            deadlineMs: stepMs,
+            onTimeout: () =>
+              new HostError("capture_timeout", `The page didn't finish capturing within ${Math.round(stepMs / 1000)} seconds.`, {
+                hint: "The Sonobe app may be busy. Try again; if it keeps happening, import with html, or with a selector for one part of the page.",
+              }),
+          },
+        );
       }
 
       // A capture can take a while; plan against the document as it is now, and refuse to apply over
       // edits made after that.
+      work.throwIfCancelled();
+      work.progress("Planning the layers");
       const current = await host.getDocument(snap.docId);
       if (args.expectedRevision !== undefined && args.expectedRevision !== current.revision)
         return failure({ code: "revision_mismatch", message: `The document moved on to revision ${current.revision} while the page was captured (expected ${args.expectedRevision}).`, hint: "Re-read it with get_outline, then import again." });
@@ -145,16 +189,20 @@ export function registerImportTools(tc: ToolContext): void {
         if (err instanceof ImportPlanError) return failure({ code: err.code, message: err.message, ...(err.hint ? { hint: err.hint } : {}) });
         throw err;
       }
+      work.throwIfCancelled();
       if (plan.files.length) {
         if (!host.putAssetFiles)
           return failure({ code: "assets_unavailable", message: "This Sonobe host can't store image files, so the import can't bring images.", hint: "Open the project in the Sonobe app or a headless server over a project folder." });
-        await host.putAssetFiles(plan.files, { docId: snap.docId });
+        const putAssetFiles = host.putAssetFiles.bind(host);
+        await work.step(`Storing ${plural(plan.files.length, "image file")}`, (control) => putAssetFiles(plan.files, { docId: snap.docId, ...control }), { deadlineMs: STORE_STEP_MS });
       }
+      // The last point where a cancel stops the import: host.apply refuses once work.signal has aborted.
       const result = await host.apply(plan.ops, {
         docId: snap.docId,
         label: args.label?.trim() || `${args.replace ? "re-imported" : "imported"} ${plan.screenName}`,
         author: tc.author(ctx),
         expectedRevision: current.revision,
+        signal: work.signal,
       });
       const screenId = result.idMap[plan.screenRef] ?? result.idMap[`$${plan.screenRef}`];
       const s = plan.summary;
@@ -166,9 +214,10 @@ export function registerImportTools(tc: ToolContext): void {
         const lines = screenOutline(getOutline(after.doc, component.id, { detail: "compact", registry: host.registry }), screenId);
         if (lines.length) notes.push("Screen outline:", ...lines);
         for (const note of plan.notes) notes.push(`Note: ${note}`);
+        for (const note of captured.notes ?? []) notes.push(`Note: ${note}`);
         notes.push("Next: compare get_screenshot with the source, rename layers people will talk about, then wire interactions (Interaction → Switch → Pop Animation → Transition) onto these layer ids.");
       }
-      const out = writeResult(result, { notes, summarizeCreated: true, data: { ...(screenId ? { screenId } : {}), summary: s, importNotes: plan.notes } });
+      const out = writeResult(result, { notes, summarizeCreated: true, data: { ...(screenId ? { screenId } : {}), summary: s, importNotes: [...plan.notes, ...(captured.notes ?? [])] } });
       if (captured.screenshot && !out.isError) {
         // Clients that read only structuredContent would hide the image, so an image result sends content alone.
         const { structuredContent: _structured, ...rest } = out;

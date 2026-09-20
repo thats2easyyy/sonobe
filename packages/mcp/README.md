@@ -85,6 +85,7 @@ Conventions:
 - **Writes** return `revision`, `txnId`, created ids, `idMap` and diagnostics `{ added, resolved, totals }`.
 - **Errors** are `isError` results with `{ code, message, hint, suggestions: [{ description, ops }], changed }`. Every `outputSchema` is `{ type: "object", anyOf: [success, teaching error] }` (`toolOutputSchema`), so SDK clients that validate error results (the v1 SDK does) show the teaching error instead of -32602. The wrapper drops any error `structuredContent` that wouldn't validate.
 - **Reads** paginate with `cursor` and truncate with explicit notes.
+- **Long calls** (`src/progress.ts`) send `notifications/progress` when the client passes a `progressToken`, and stop as soon as the client cancels or disconnects. Handlers get a `ToolWork` third (`work.step`, `work.progress`, `work.signal`), host methods that can run long take a trailing `{ signal, progress }`, and `apply`/`undo` refuse once their `signal` has aborted, so a cancelled call never changes the document. ARCHITECTURE §10 has the contract.
 
 ### Simulation addressing
 

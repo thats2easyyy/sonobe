@@ -146,6 +146,15 @@ Extensions you build yourself don't update automatically. To update, build and p
 - **A custom settings folder.** If you launch Sonobe with `SONOBE_HOME`, set the same variable for the relay, or set the extension's **Sonobe settings folder**.
 - **Logs.** The relay writes what went wrong to stderr. Claude Code shows it in the `/mcp` details, and Claude Desktop writes it to its logs folder (`~/Library/Logs/Claude` on a Mac, `%APPDATA%\Claude\logs` on Windows).
 
+## Long calls: progress and cancelling
+
+Most tool calls finish in a second or two. Importing a design can take longer, because Sonobe loads the page, reads its layers and downloads its images. While it works, Sonobe reports each step as progress ("Downloading images: 7 of 28"), and Claude Code shows it.
+
+- **Every step has a limit.** An import stops after 90 seconds plus any extra wait Claude asked for, with an error that names the step it was on, so Claude can change its approach instead of waiting.
+- **Cancelling is safe.** A call that's cancelled before it changes the document changes nothing, even if the page finishes loading afterwards. A change that has already landed stays, and one undo removes it.
+- **"sent no response or progress for …".** Claude Code gives up on a tool that goes quiet for too long. Sonobe's steps report progress while they run, so this means a step stalled. You can raise Claude Code's idle limit with the `CLAUDE_CODE_MCP_TOOL_IDLE_TIMEOUT` environment variable (in milliseconds), and cap a whole call with the server's `timeout` field in your MCP configuration.
+- **Scripts that use the MCP SDK.** The SDK's client gives up after 60 seconds unless you pass `onprogress` together with `resetTimeoutOnProgress: true`. `resetTimeoutOnProgress` alone does nothing: without `onprogress`, the client never asks for progress.
+
 ## What Claude can do
 
 Sonobe gives Claude 41 tools in six groups: discovery, documents, reading, writing, simulation, and presence and history. Here's what they look like in practice:

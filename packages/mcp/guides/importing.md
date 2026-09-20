@@ -16,7 +16,15 @@ Related: `start-here`, `animation`, `gestures`, `layout`
 - `selector` imports one element, like a card or a sheet (`"#pricing-card"`, `"[data-testid=checkout]"`).
 - `waitFor` waits for data that loads late; `waitMs` adds time for entrance animations to finish.
 - The viewport defaults to the document's device. Pass `width` and `height` for tablet or desktop layouts.
+- `colorScheme: "dark"` imports the page's dark mode (its `prefers-color-scheme` styles), and `"light"` its light mode.
 - `screenshot: true` returns the page as the browser drew it, to compare with `get_screenshot`.
+
+## How long an import takes
+
+- Most imports take a few seconds. While one runs, it reports its steps as progress: loading the page, reading its layers, downloading images, taking the screenshot.
+- A capture stops after 90 seconds plus `waitMs`, with `capture_timeout` naming the step it was on. The hint for that step says what to change.
+- Images that are still downloading near the end become placeholders, and a screenshot that fails is left out. The result's notes say so.
+- Cancelling the call before the screen is added changes nothing. Once the screen is added, it's one undo step like any other import.
 
 ## Write HTML that imports well
 

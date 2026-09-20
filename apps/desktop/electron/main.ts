@@ -11,7 +11,7 @@ import { createHttpHandler, isHostError, loadGuides, type NodeMcpHandler } from 
 import { createPatchRegistry } from "@sonobe/patches";
 import { toBuffer as qrPng } from "qrcode";
 import { createAppHost, type AppHost, type CapturedImage, type DocumentChange, type RendererTarget, type SceneRenderRequest } from "./app-host.ts";
-import { captureDesignInWindow, fetchCaptureImage } from "./design-capture.ts";
+import { abortCaptures, captureDesignInWindow, fetchCaptureImage } from "./design-capture.ts";
 import { createAppWindow, type AppWindow, type WindowContentSource } from "./app-window.ts";
 import { registerAssistant } from "./assistant/register.ts";
 import { captureWebContents } from "./capture.ts";
@@ -112,6 +112,10 @@ function main(): void {
   let resourceTimer: ReturnType<typeof setTimeout> | null = null;
   /** MCP notifications published (SONOBE_TEST only). */
   const notificationLog: string[] = [];
+  /** Import dialog captures by `${webContents id}:${captureId}`, so the dialog can cancel them. */
+  const dialogCaptures = new Map<string, AbortController>();
+  /** A lower capture deadline for test runs (SONOBE_TEST only, set through __sonobeTest). */
+  let testCaptureDeadlineMs: number | undefined;
 
   const primaryWindow = (): AppWindow | undefined => {
     const focused = BrowserWindow.getFocusedWindow();
@@ -661,6 +665,7 @@ function main(): void {
   });
 
   app.on("will-quit", () => {
+    abortCaptures();
     for (const { watcher } of watchers.values()) watcher.close();
     watchers.clear();
     if (resourceTimer) clearTimeout(resourceTimer);
@@ -825,6 +830,18 @@ function main(): void {
       const r = (request && typeof request === "object" ? request : {}) as Record<string, unknown>;
       const str = (key: string) => (typeof r[key] === "string" ? (r[key] as string) : undefined);
       const num = (key: string, fallback: number) => (typeof r[key] === "number" && Number.isFinite(r[key]) ? (r[key] as number) : fallback);
+      const sender = event.sender;
+      const captureId = typeof r.captureId === "string" && r.captureId.length <= 200 ? r.captureId : undefined;
+      const key = captureId !== undefined ? `${sender.id}:${captureId}` : undefined;
+      // The dialog's Cancel, a reload of the editor, or a closed window stops the capture.
+      const controller = new AbortController();
+      const stop = () => controller.abort();
+      const onNavigate = (details: { isMainFrame: boolean; isSameDocument: boolean }) => {
+        if (details.isMainFrame && !details.isSameDocument) stop();
+      };
+      sender.once("destroyed", stop);
+      sender.on("did-start-navigation", onNavigate);
+      if (key) dialogCaptures.set(key, controller);
       try {
         const url = str("url");
         const html = str("html");
@@ -841,13 +858,33 @@ function main(): void {
             ...(r.fullPage === false ? { fullPage: false } : {}),
             ...(colorScheme === "light" || colorScheme === "dark" ? { colorScheme } : {}),
           },
-          { log },
+          {
+            log,
+            signal: controller.signal,
+            ...(testCaptureDeadlineMs ? { maxTimeoutMs: testCaptureDeadlineMs } : {}),
+            ...(captureId !== undefined
+              ? {
+                  onProgress: (progress) => {
+                    if (!sender.isDestroyed()) sender.send(IPC.captureDesignProgress, { captureId, ...progress });
+                  },
+                }
+              : {}),
+          },
         );
-        return { ok: true, capture: captured.capture, images: [...captured.images.entries()] };
+        return { ok: true, capture: captured.capture, images: [...captured.images.entries()], ...(captured.notes ? { notes: captured.notes } : {}) };
       } catch (err) {
         const e = err as { code?: unknown; message?: unknown; hint?: unknown };
         return { ok: false, code: typeof e.code === "string" ? e.code : "capture_failed", message: typeof e.message === "string" ? e.message : String(err), ...(typeof e.hint === "string" ? { hint: e.hint } : {}) };
+      } finally {
+        if (key && dialogCaptures.get(key) === controller) dialogCaptures.delete(key);
+        sender.removeListener("destroyed", stop);
+        sender.removeListener("did-start-navigation", onNavigate);
       }
+    });
+
+    ipcMain.on(IPC.captureDesignCancel, (event, captureId: unknown) => {
+      if (!trustedWindow(event) || typeof captureId !== "string") return;
+      dialogCaptures.get(`${event.sender.id}:${captureId}`)?.abort();
     });
 
     ipcMain.handle(IPC.fetchCaptureFile, async (event, url: unknown) => {
@@ -926,7 +963,13 @@ function main(): void {
       projectExists: async (dir) => existsSync(path.join(dir, "project.json")),
       writeProject: writeNewProject,
       renderScene,
-      captureDesign: (request) => captureDesignInWindow(request, { log }),
+      captureDesign: (request, control = {}) =>
+        captureDesignInWindow(request, {
+          log,
+          ...(control.signal ? { signal: control.signal } : {}),
+          ...(control.progress ? { onProgress: (p) => control.progress?.({ message: p.message, ...(p.done !== undefined ? { progress: p.done } : {}), ...(p.total !== undefined ? { total: p.total } : {}) }) } : {}),
+          ...(testCaptureDeadlineMs ? { maxTimeoutMs: testCaptureDeadlineMs } : {}),
+        }),
       fetchImage: fetchCaptureImage,
       onDocumentChange,
     });
@@ -987,6 +1030,10 @@ function main(): void {
             flushResourceUpdates();
           }
           return [...notificationLog];
+        },
+        /** Lower the design capture deadline (ms, not counting waitMs), or restore it with null. */
+        setCaptureDeadline: (ms: number | null) => {
+          testCaptureDeadlineMs = typeof ms === "number" && ms > 0 ? ms : undefined;
         },
         /** Destroy every window without the unsaved-changes prompt. */
         destroyWindows: () => {
