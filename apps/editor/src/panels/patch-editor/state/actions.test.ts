@@ -5,11 +5,11 @@ import { createManualScheduler } from "../../../runtime/scheduler.ts";
 import { createDemoDocument } from "../../../state/demoDocument.ts";
 import { getRegistry } from "../../../state/registry.ts";
 import { createEditorSession, type EditorSession } from "../../../state/session.ts";
-import { rectsOverlap } from "../model/geometry.ts";
+import { boundsOf, COMMENT_PADDING, rectsOverlap } from "../model/geometry.ts";
 import { instanceChoiceKey } from "../model/instances.ts";
 import { readNodePositions } from "@sonobe/core";
-import { documentObstacles, estimatePatchSize } from "@sonobe/core/graph";
-import { createPatchEditorActions } from "./actions.ts";
+import { componentNodeBoxes, deriveGraph, documentObstacles, estimatePatchSize } from "@sonobe/core/graph";
+import { createPatchEditorActions, type ActionDeps } from "./actions.ts";
 import { patchEditorBridge } from "./bridge.ts";
 import { createUiStore } from "./uiStore.ts";
 
@@ -21,11 +21,11 @@ afterEach(() => {
   session = null;
 });
 
-function setup(doc: SonobeDocument = createDemoDocument(registry), componentId = "main") {
+function setup(doc: SonobeDocument = createDemoDocument(registry), componentId = "main", flow: ActionDeps["flow"] = () => null) {
   session = createEditorSession({ host: null, registry, document: doc, autoplay: false, scheduler: createManualScheduler(), textMeasurer: "approximate" });
   const s = session;
   const ui = createUiStore();
-  const actions = createPatchEditorActions({ session: s, registry, componentId, ui, flow: () => null, pointer: () => null, openPicker: () => undefined, openInfo: () => undefined });
+  const actions = createPatchEditorActions({ session: s, registry, componentId, ui, flow, pointer: () => null, openPicker: () => undefined, openInfo: () => undefined });
   return { s, actions, ui, main: () => s.document.getState().doc.components.main!, component: () => s.document.getState().doc.components[componentId]! };
 }
 
@@ -101,6 +101,26 @@ describe("patch editor actions", () => {
     expect(patchEditorBridge(s).getState().targets.main).toEqual(["@card.rotation"]);
     actions.connect("zoom_spring.output", "@card.rotation");
     expect(patchEditorBridge(s).getState().targets.main).toBeUndefined();
+  });
+
+  it("sizes nodes that haven't rendered yet with the layer names they show", () => {
+    const built = applyOps(
+      createDemoDocument(registry),
+      [
+        { op: "addLayer", layer: { id: "hero", type: "rectangle", name: "Onboarding Hero Card Title" } },
+        { op: "addPatch", patch: { id: "press_hero", type: "interaction", inputs: { layer: { layer: "hero" } }, ui: { x: 2000, y: 0 } } },
+      ],
+      { registry },
+    );
+    expect(built.ok).toBe(true);
+    // Off screen, so React Flow hasn't measured it: Comment Selection frames the estimate.
+    const nodes = deriveGraph({ doc: built.doc, componentId: "main", registry }).nodes;
+    const { s, actions, main } = setup(built.doc, "main", () => ({ getNodes: () => nodes, getEdges: () => [] }) as never);
+    s.selection.getState().select({ patches: ["press_hero"] });
+    const before = new Set(main().comments.map((c) => c.id));
+    actions.commentSelection();
+    const box = componentNodeBoxes(built.doc, registry, "main").get("press_hero")!;
+    expect(main().comments.find((c) => !before.has(c.id))!.rect[2]).toBe(boundsOf([box], COMMENT_PADDING)!.width);
   });
 });
 
