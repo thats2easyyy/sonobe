@@ -3,7 +3,8 @@
  * taps reach the device as navigator.vibrate calls on Android and as bridge messages under a native
  * host like Sonobe Viewer; Sonobe's restart reaches the phone; a three-finger tap opens the menu
  * without touching the prototype; Network Request and remote images reach other hosts through the
- * player's CSP; and Device Info reads the phone's appearance, safe area, rotation and density.
+ * player's CSP, which also lets the platform read a picked photo and a data: file; and Device Info reads
+ * the phone's appearance, safe area, rotation and density.
  * Skipped without Playwright's browser.
  */
 
@@ -252,6 +253,63 @@ describe.skipIf(!playwright)("web player on a phone", () => {
     } finally {
       await context.close();
       await network.close();
+      await new Promise((resolve) => api.close(resolve));
+    }
+  });
+
+  it("reads a picked photo's bytes and uploads a data: file through the player's CSP", { timeout: 90_000 }, async () => {
+    const PNG_BASE64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=";
+    const uploads: string[] = [];
+    const api: Server = createServer((req, res) => {
+      const headers = { "Access-Control-Allow-Origin": "*", "Cache-Control": "no-store" };
+      let size = 0;
+      req.on("data", (chunk: Buffer) => (size += chunk.length));
+      req.on("end", () => {
+        uploads.push(`${req.method} ${req.headers["content-type"]?.split(";")[0]}`);
+        res.writeHead(200, { ...headers, "Content-Type": "text/plain" }).end(`Uploaded ${size} bytes`);
+      });
+    });
+    await new Promise<void>((resolve) => api.listen(0, "127.0.0.1", resolve));
+    const origin = `http://127.0.0.1:${(api.address() as AddressInfo).port}`;
+    const doc = buildDoc(
+      {
+        name: "Upload Check",
+        device: "iphone-17-pro",
+        layers: [
+          { id: "surface", type: "rectangle", name: "Surface", props: { position: [0, 0], size: [402, 874], color: "#1c1c22" } },
+          { id: "encoded", type: "text", name: "Encoded", props: { position: [24, 100], size: [354, 200], text: { link: "encode.base64" }, fontSize: 10, textColor: "#ffffff" } },
+          { id: "uploaded", type: "text", name: "Uploaded", props: { position: [24, 400], size: [354, 60], text: { link: "upload.result" }, fontSize: 14, textColor: "#ffffff" } },
+        ],
+        patches: {
+          start: { type: "whenPrototypeStarts" },
+          touch: { type: "interaction", inputs: { layer: { layer: "surface" } } },
+          // A picked photo is a blob: URL, which Base64 Encode reads with fetch().
+          picker: { type: "photoPicker", inputs: { open: { link: "touch.tap" }, mediaType: "photos" } },
+          encode: { type: "base64Encode", typeParam: "image", inputs: { value: { link: "picker.image" } } },
+          // A data: file in a form body is fetched into the multipart upload.
+          upload: { type: "networkRequest", typeParam: "text", inputs: { request: { link: "start.started" }, url: `${origin}/upload`, method: "post", body: { json: { still: { url: `data:image/png;base64,${PNG_BASE64}` } } } } },
+        },
+      },
+      createPatchRegistry(),
+    );
+    const upload = await servePlayer({ doc, token: "upload-check" });
+    const { context, page, errors } = await openPlayer(androidHost, upload.url);
+    try {
+      const violations: string[] = [];
+      page.on("console", (message) => {
+        if (/Content Security Policy/i.test(message.text())) violations.push(message.text());
+      });
+      await page.locator('[data-layer="uploaded"]').getByText(/^Uploaded \d+ bytes$/).waitFor({ timeout: 10_000 });
+      expect(uploads).toEqual(["POST multipart/form-data"]);
+      const chooser = page.waitForEvent("filechooser", { timeout: 10_000 });
+      await page.touchscreen.tap(201, 700);
+      await (await chooser).setFiles({ name: "dot.png", mimeType: "image/png", buffer: Buffer.from(PNG_BASE64, "base64") });
+      await page.locator('[data-layer="encoded"]').getByText(PNG_BASE64).waitFor({ timeout: 10_000 });
+      expect(violations).toEqual([]);
+      expect(errors).toEqual([]);
+    } finally {
+      await context.close();
+      await upload.close();
       await new Promise((resolve) => api.close(resolve));
     }
   });
