@@ -78,6 +78,7 @@ npm test                          # unit tests (Vitest)
 npm run typecheck
 npm run e2e                       # Playwright end-to-end tests
 npm run smoke -w @sonobe/desktop  # muted Electron smoke test: host API, MCP, phone preview
+npm run test:ios                  # Sonobe Viewer on an iOS Simulator (macOS with Xcode)
 ```
 
 ### The `sonobe` CLI
@@ -181,7 +182,7 @@ The runs also showed where Claude struggled, and those problems are fixed. Tool 
 - **An MCP server with 40 tools** in six groups: discovery (patch and layer docs, workflow guides), documents, reading (outline, search, diagnostics, plain-language explanations), writing (atomic batches of typed ops, and importing designs), simulation (taps, drags, traces, screenshots), and presence and history (show what Claude is doing, undo). It also offers four prompts: `import_screen`, `prototype_interaction`, `debug_interaction`, and `explain_prototype`. The [MCP README](packages/mcp/README.md) lists every tool.
 - **The `sonobe` CLI** with `new`, `validate`, `fmt`, `outline`, `describe`, `sim`, and `mcp`.
 - **A Claude Code plugin, a Claude Desktop extension, and a Chrome extension** in [integrations/](integrations/).
-- **Phone preview and a pop-out viewer.** Scan a QR code to run the live prototype in your phone's browser on the same network.
+- **Phone preview and a pop-out viewer.** Scan a QR code to run the live prototype in your phone's browser on the same network. On an iPhone, the Sonobe Viewer app plays it with real haptics ([apps/ios](apps/ios/README.md); build it with Xcode).
 - **An optional in-app Assistant** in the desktop app, for people who'd rather use their own Anthropic API key than Claude Code or Claude Desktop. The key is kept in your operating system's keychain.
 
 ## Repository layout
@@ -197,6 +198,7 @@ The runs also showed where Claude struggled, and those problems are fixed. Tool 
 | `packages/cli` | `sonobe` CLI: new, validate, format, outline, describe, simulate, MCP relay |
 | `apps/editor` | The editor UI (React) |
 | `apps/desktop` | The Electron shell, MCP endpoint, phone preview, and packaging |
+| `apps/ios` | Sonobe Viewer, an iPhone app that plays phone previews with real haptics (Swift, Xcode) |
 | `integrations` | The Claude Code plugin, the Claude Desktop extension, and the Sonobe Capture extension for Chrome and plugin for Figma |
 | `examples` | 15 runnable example projects with scripted tests |
 | `docs/guides` | Concept guides and recipes |
