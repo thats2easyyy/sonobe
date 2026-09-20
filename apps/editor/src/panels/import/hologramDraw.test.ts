@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { BLOOM, bloomReach, cornerSteps, perimeterPoints, TEXT_BAR_MAX, textBarThickness } from "./hologramDraw.ts";
+import { BLOOM, bloomGap, bloomReach, cornerSteps, growRadii, perimeterPoints, TEXT_BAR_MAX, textBarThickness } from "./hologramDraw.ts";
 
 describe("hologram drawing", () => {
   it("keeps text bars thin next to 1 px outlines however far it zooms in", () => {
@@ -29,5 +29,14 @@ describe("hologram drawing", () => {
     // The hairline clears the 8 px corner handles, and the band peaks past it.
     expect(BLOOM.gap).toBeGreaterThan(4);
     expect(BLOOM.peak).toBeGreaterThan(BLOOM.gap);
+    expect(bloomGap(85, 184)).toBe(BLOOM.gap);
+    // Around a 40 px screen (10% zoom), 5 px out would read as a second outline.
+    expect(bloomGap(40, 87)).toBeCloseTo(3.33, 2);
+    expect(bloomGap(12, 26)).toBe(2.5);
+  });
+
+  it("grows rounded corners concentrically, and keeps square ones square", () => {
+    expect(growRadii([24, 24, 0, 0], 5)).toEqual([29, 29, 0, 0]);
+    expect(growRadii([4, 4, 4, 4], -0.5)).toEqual([3.5, 3.5, 3.5, 3.5]);
   });
 });

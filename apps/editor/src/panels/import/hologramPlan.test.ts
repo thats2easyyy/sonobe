@@ -2,8 +2,9 @@ import type { SonobeDocument } from "@sonobe/core";
 import { buildDoc, createTestRuntime } from "@sonobe/engine/testing";
 import { describe, expect, it } from "vitest";
 import { buildCanvasIndex } from "../canvas/sceneIndex.ts";
-import { chromeHeldUntil, clippedRadii, collectHoloLayers, evenPicks, GLOW_PEAK, HOLO, holoFrameAt, holoShapeOf, isTextRunGroup, planHologram, radiiOf, sampleEvenly, sweepCurve, sweepProgressAt, sweepScale, textLines, traceProgress, type HoloLayer } from "./hologramPlan.ts";
-import { laserLead, visibleRegion } from "./HologramBuild.tsx";
+import { chromeHeldUntil, clippedRadii, collectHoloLayers, evenPicks, GLOW_PEAK, HOLO, holoFrameAt, holoShapeOf, isTextRunGroup, outlineHandover, planHologram, radiiOf, sampleEvenly, sweepCurve, sweepProgressAt, sweepScale, textLines, traceProgress, type HoloLayer } from "./hologramPlan.ts";
+import { visibleRegion } from "./HologramBuild.tsx";
+import { laserLead } from "./hologramDraw.ts";
 import { scanLaserAt, scannerFrame, SCAN_SWEEP_MS } from "./HologramScanner.tsx";
 
 function indexFor(doc: SonobeDocument) {
@@ -260,6 +261,15 @@ describe("collectHoloLayers", () => {
     expect(clippedRadii({ x: 0, y: 0, width: 10, height: 40 }, [30, 30, 30, 30], null)).toEqual([5, 5, 5, 5]);
   });
 
+  it("gives a rounded screen its corners, for the veil and the frame, and a full-device one none", () => {
+    const doc = buildDoc({ layers: [{ id: "card", type: "group", props: { position: [40, 220], size: [322, 400], cornerRadius: 24, clip: true }, children: [{ id: "cover", type: "image", props: { position: [0, 0], size: [322, 160] } }] }] });
+    const collected = collectHoloLayers(indexFor(doc), "card")!;
+    expect(collected.radii).toEqual([24, 24, 24, 24]);
+    expect(planHologram(collected.screen, collected.layers, { radii: collected.radii }).radii).toEqual([24, 24, 24, 24]);
+    expect(collectHoloLayers(indexFor(screenDoc()), "screen")!.radii).toEqual([0, 0, 0, 0]);
+    expect(planHologram(SCREEN, []).radii).toEqual([0, 0, 0, 0]);
+  });
+
   it("returns null for a screen that isn't drawn", () => {
     const index = indexFor(screenDoc());
     expect(collectHoloLayers(index, "missing")).toBeNull();
@@ -365,15 +375,32 @@ describe("holoFrameAt", () => {
     expect(holoFrameAt(plan, end).phase).toBe("done");
   });
 
-  it("closes with a bloom that swells fast and breathes out slow, its hairline gone by the peak", () => {
+  it("closes with a bloom that swells fast and breathes out slow, the outline gone by the peak", () => {
     const at = (u: number) => holoFrameAt(plan, upEnd + (end - upEnd) * u);
     expect(at(GLOW_PEAK / 2).glow).toBeGreaterThan(0.7);
     expect(at(0.65).glow).toBeCloseTo(0.5, 1);
-    // The hairline flashes out as the bloom swells, and is gone when the selection comes back.
-    expect(at(GLOW_PEAK / 2).hairline).toBeCloseTo(1);
-    expect(at(GLOW_PEAK).hairline).toBeLessThan(0.01);
-    expect(at(0.6).hairline).toBe(0);
-    for (const t of [0, downEnd, upStart + 10]) expect(holoFrameAt(plan, t)).toMatchObject({ glow: 0, hairline: 0 });
+    // The outline moves out to the bloom's hairline as it swells, and is gone when the selection comes back.
+    expect(at(0)).toMatchObject({ outline: 1, spread: 0 });
+    expect(at(GLOW_PEAK / 2).spread).toBeGreaterThan(0.8);
+    expect(at(GLOW_PEAK).outline).toBe(0);
+    expect(at(0.6).outline).toBe(0);
+    for (const t of [0, downEnd, upStart + 10]) expect(holoFrameAt(plan, t)).toMatchObject({ glow: 0, outline: 1, spread: 0 });
+  });
+
+  it("hands the frame's outline over as one line moving out, not a second line beside it", () => {
+    expect(outlineHandover(0)).toEqual({ outline: 1, spread: 0 });
+    expect(outlineHandover(1)).toEqual({ outline: 0, spread: 1 });
+    // Still bright while it moves out, then fading once it's nearly there.
+    let last = outlineHandover(0);
+    for (let v = 0.05; v <= 1; v += 0.05) {
+      const next = outlineHandover(v);
+      expect(next.spread).toBeGreaterThanOrEqual(last.spread);
+      expect(next.outline).toBeLessThanOrEqual(last.outline);
+      last = next;
+    }
+    expect(outlineHandover(0.25).outline).toBe(1);
+    expect(outlineHandover(0.25).spread).toBeGreaterThan(0.75);
+    expect(outlineHandover(0.6).spread).toBe(1);
   });
 
   it("holds the selection chrome back until the bloom peaks, and not at all for the reduced crossfade", () => {

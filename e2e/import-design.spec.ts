@@ -206,7 +206,7 @@ test.describe("Import Design", () => {
     await page.evaluate(() => (window as unknown as { holoClock: HoloClock }).holoClock.seek(2700));
     await expect(holo).toHaveAttribute("data-phase", "up");
     await expect(page.locator(".sb-cv__handle")).toHaveCount(0);
-    // The Viewer's veil dissolves in step, so the finished design doesn't show there first.
+    // The Viewer traces the same wireframe and materializes in step, so the finished design doesn't show there first.
     await expect(page.locator(".sb-vw-holo")).toHaveAttribute("data-phase", "up");
     await expect(page.getByText("Imported “Profile”")).toBeVisible();
     await screenshot(page, "import-02-hologram");

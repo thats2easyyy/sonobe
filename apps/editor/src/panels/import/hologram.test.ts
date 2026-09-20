@@ -8,6 +8,7 @@ import { createEditorSession, type EditorSession } from "../../state/session.ts"
 import { duplicateSelection } from "../../state/editActions.ts";
 import { agentImportTarget, createHologramStore, hideCoveredChrome, HOLOGRAM_STALE_MS, hologramStore, importedScreen, IMPORT_LABEL, pointerEndsHologram, viewerHoloMode, watchHolograms, type HologramState } from "./hologram.ts";
 import { prefersReducedMotion } from "./hologramDraw.ts";
+import type { HoloPlan } from "./hologramPlan.ts";
 import { pasteDesignCapture } from "./importDesign.ts";
 
 const registry = createPatchRegistry({ definitions: MOCK_DEFINITIONS });
@@ -25,6 +26,9 @@ function setup() {
 }
 
 const CLAUDE = { kind: "agent" as const, name: "Claude" };
+
+/** A show's plan: a phone screen's timeline, no wireframe. */
+const PLAN: HoloPlan = { screen: { x: 0, y: 0, width: 402, height: 874 }, radii: [0, 0, 0, 0], pieces: [], reduced: false, timeline: { downStart: 200, downEnd: 1800, upStart: 2100, upEnd: 3400, end: 3800 } };
 
 /** A screen with a header and a title, like import_design adds. */
 const screenOps = (id: string): Op[] => [
@@ -68,6 +72,18 @@ describe("import labels", () => {
     expect(agentImportTarget({ ...marked, author: { kind: "human", name: "You" } }, doc, before)).toBeNull();
     expect(agentImportTarget({ ...marked, kind: "undo" }, doc, before)).toBeNull();
     expect(agentImportTarget(null, doc, before)).toBeNull();
+  });
+
+  it("don't count an unmarked change that adds a layer inside an existing screen, whatever its label", () => {
+    const s = setup();
+    const screenId = s.document.getState().apply(screenOps("screen"), { label: "set up the receipt", author: CLAUDE, source: "import" }).idMap.screen!;
+    const before = s.document.getState().doc;
+    s.document.getState().apply([{ op: "addLayer", parent: screenId, layer: { ref: "badge", type: "rectangle", name: "Badge", props: { position: [300, 20], size: [60, 24] } } }], { label: "imported a badge", author: CLAUDE });
+    const { doc, lastChange } = s.document.getState();
+    expect(importedScreen(doc, lastChange!)?.screenId).not.toBe(screenId);
+    expect(agentImportTarget(lastChange, doc, before)).toBeNull();
+    // Marked by import_design (a screen placed inside a container, say), it counts wherever it lands.
+    expect(agentImportTarget({ ...lastChange!, source: "import" }, doc, before)).toEqual({ componentId: doc.project.root, screenId: importedScreen(doc, lastChange!)!.screenId });
   });
 });
 
@@ -180,8 +196,7 @@ describe("hologram requests", () => {
     const doc = () => s.document.getState();
     const result = doc().apply(screenOps("receipt"), { label: "Import “Receipt”", source: "import" });
     const target = { componentId: doc().doc.project.root, screenId: result.idMap.receipt! };
-    const timeline = { downStart: 200, downEnd: 1800, upStart: 2100, upEnd: 3400, end: 3800 };
-    store.getState().play({ ...target, nonce: 1, start: 0, timeline, reduced: false, lead: "canvas" });
+    store.getState().play({ ...target, nonce: 1, start: 0, plan: PLAN, lead: "canvas" });
     doc().apply([{ op: "updateLayer", id: "card", props: { position: [10, 10] } }], { label: "Move Card" });
     expect(store.getState().show?.endedAt).toBeNull();
     doc().undo();
@@ -191,7 +206,7 @@ describe("hologram requests", () => {
     expect(store.getState().show).toBeNull();
 
     doc().redo();
-    store.getState().play({ ...target, nonce: 2, start: 0, timeline, reduced: false, lead: "viewer" });
+    store.getState().play({ ...target, nonce: 2, start: 0, plan: PLAN, lead: "viewer" });
     doc().newDocument();
     expect(store.getState().show).toBeNull();
     stop();
@@ -201,8 +216,7 @@ describe("hologram requests", () => {
     const store = createHologramStore();
     store.getState().build({ componentId: "main", screenId: "a" });
     const request = store.getState().request!;
-    const timeline = { downStart: 200, downEnd: 1800, upStart: 2100, upEnd: 3400, end: 3800 };
-    store.getState().play({ componentId: "main", screenId: "a", nonce: request.nonce, start: 5, timeline, reduced: false, lead: "canvas" });
+    store.getState().play({ componentId: "main", screenId: "a", nonce: request.nonce, start: 5, plan: PLAN, lead: "canvas" });
     expect(store.getState()).toMatchObject({ request: null, show: { nonce: request.nonce, start: 5, lead: "canvas", endedAt: null } });
     store.getState().end(request.nonce + 1);
     expect(store.getState().show?.endedAt).toBeNull();
@@ -240,9 +254,8 @@ describe("hologram requests", () => {
 });
 
 describe("the Viewer's part", () => {
-  const timeline = { downStart: 200, downEnd: 1800, upStart: 2100, upEnd: 3400, end: 3800 };
   const request = { componentId: "main", screenId: "screen", nonce: 4, at: 1000 };
-  const show = { ...request, start: 1003, timeline, reduced: false, lead: "canvas" as const, endedAt: null };
+  const show = { ...request, start: 1003, plan: PLAN, lead: "canvas" as const, endedAt: null };
   const state = (s: Partial<Pick<HologramState, "request" | "show" | "canvases">>) => ({ request: null, show: null, canvases: [], ...s });
   const everywhere = () => true;
 

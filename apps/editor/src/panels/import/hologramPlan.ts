@@ -47,6 +47,8 @@ export interface HoloTimeline {
 
 export interface HoloPlan {
   screen: Rect;
+  /** The screen's own corners (points): the veil and the frame follow them. */
+  radii: Radii;
   pieces: HoloPiece[];
   timeline: HoloTimeline;
   /** Reduced motion: no rain or sweeps, only a crossfade from the wireframe to the design. */
@@ -242,9 +244,9 @@ export function isTextRunGroup(type: string, props: Readonly<Record<string, unkn
 /**
  * The wireframed layers inside a screen, in document order (parents before children): visible layers
  * at least `minSize` points across, clipped to the screen and to clipping ancestors, capped at the
- * `maxPieces` largest. Null when the screen isn't drawn.
+ * `maxPieces` largest; and the screen's own corners. Null when the screen isn't drawn.
  */
-export function collectHoloLayers(index: CanvasIndex, screenId: Id, options: { maxPieces?: number; minSize?: number } = {}): { screen: Rect; layers: HoloLayer[] } | null {
+export function collectHoloLayers(index: CanvasIndex, screenId: Id, options: { maxPieces?: number; minSize?: number } = {}): { screen: Rect; radii: Radii; layers: HoloLayer[] } | null {
   const maxPieces = options.maxPieces ?? HOLO.maxPieces;
   const minSize = options.minSize ?? HOLO.minSize;
   const entry = index.entry(screenId);
@@ -275,9 +277,11 @@ export function collectHoloLayers(index: CanvasIndex, screenId: Id, options: { m
     }
   };
   const screenNode = entry?.node;
-  visit(screenId, null, 1, { rect: screen, radii: screenNode?.clip ? clippedRadii(screen, radiiOf(screenNode.props ?? {}), null) : SQUARE });
+  // A rounded screen (a card rather than a whole device) keeps its corners under the veil too.
+  const screenRadii = clippedRadii(screen, radiiOf(screenNode?.props ?? {}), null);
+  visit(screenId, null, 1, { rect: screen, radii: screenNode?.clip ? screenRadii : SQUARE });
 
-  if (all.length <= maxPieces) return { screen, layers: all };
+  if (all.length <= maxPieces) return { screen, radii: screenRadii, layers: all };
   // The largest layers carry the layout. Near-equal ones (a grid of cards) rank together rather than
   // by hair-thin differences in size, which would drop whole columns, and the group the cap cuts
   // through is thinned evenly (sampleEvenly) rather than in document order, which would drop the
@@ -304,7 +308,7 @@ export function collectHoloLayers(index: CanvasIndex, screenId: Id, options: { m
     while (at !== null && !kept.has(at)) at = parentOf.get(at) ?? null;
     return at;
   };
-  return { screen, layers: all.filter((l) => kept.has(l.id)).map((l) => ({ ...l, parent: keptAncestor(l.parent) })) };
+  return { screen, radii: screenRadii, layers: all.filter((l) => kept.has(l.id)).map((l) => ({ ...l, parent: keptAncestor(l.parent) })) };
 }
 
 /** How much longer the sweeps run for a screen of this height (points). */
@@ -312,10 +316,11 @@ export function sweepScale(height: number): number {
   return clamp(Math.sqrt(Math.max(1, height) / HOLO.referenceHeight), HOLO.minScale, HOLO.maxScale);
 }
 
-/** When each wireframe traces, and when the sweeps run. */
-export function planHologram(screen: Rect, layers: readonly HoloLayer[], options: { reduced?: boolean } = {}): HoloPlan {
+/** When each wireframe traces, and when the sweeps run. `radii` are the screen's corners. */
+export function planHologram(screen: Rect, layers: readonly HoloLayer[], options: { reduced?: boolean; radii?: Radii } = {}): HoloPlan {
+  const radii = options.radii ?? SQUARE;
   if (options.reduced) {
-    return { screen, reduced: true, pieces: layers.map((l) => ({ ...l, at: 0 })), timeline: { downStart: 0, downEnd: 0, upStart: 0, upEnd: 0, end: HOLO.fadeMs } };
+    return { screen, radii, reduced: true, pieces: layers.map((l) => ({ ...l, at: 0 })), timeline: { downStart: 0, downEnd: 0, upStart: 0, upEnd: 0, end: HOLO.fadeMs } };
   }
   const scale = sweepScale(screen.height);
   const down = HOLO.downMs * scale;
@@ -345,7 +350,7 @@ export function planHologram(screen: Rect, layers: readonly HoloLayer[], options
   const traced = pieces.reduce((m, p) => Math.max(m, p.at + HOLO.traceMs), downEnd);
   const upStart = Math.round(traced + HOLO.holdMs);
   const upEnd = Math.round(upStart + up);
-  return { screen, reduced: false, pieces, timeline: { downStart, downEnd: Math.round(downEnd), upStart, upEnd, end: upEnd + HOLO.glowMs } };
+  return { screen, radii, reduced: false, pieces, timeline: { downStart, downEnd: Math.round(downEnd), upStart, upEnd, end: upEnd + HOLO.glowMs } };
 }
 
 export type HoloPhase = "power" | "down" | "hold" | "up" | "glow" | "fade" | "done";
@@ -362,8 +367,10 @@ export interface HoloFrame {
   frame: number;
   /** The closing bloom (0–1). */
   glow: number;
-  /** The bloom's hairline (0–1): it flashes out as the bloom swells, and is gone when the selection outline comes back. */
-  hairline: number;
+  /** The frame outline's strength (0–1): closing, it fades out before the selection outline comes back. */
+  outline: number;
+  /** How far the outline has moved out to the bloom's hairline (0 on the screen's edge, 1 there). */
+  spread: number;
   /** Everything's opacity. */
   alpha: number;
 }
@@ -384,8 +391,8 @@ export function chromeHeldUntil(plan: Pick<HoloPlan, "timeline" | "reduced">): n
 /** What the hologram shows `t` ms after it starts. */
 export function holoFrameAt(plan: Pick<HoloPlan, "timeline" | "reduced">, t: number): HoloFrame {
   const { downStart, downEnd, upStart, upEnd, end } = plan.timeline;
-  const off = { glow: 0, hairline: 0 };
-  if (t >= end) return { phase: "done", laser: null, direction: 1, veil: 0, frame: 1, ...off, alpha: 0 };
+  const off = { glow: 0, outline: 1, spread: 0 };
+  if (t >= end) return { phase: "done", laser: null, direction: 1, veil: 0, frame: 1, glow: 0, outline: 0, spread: 1, alpha: 0 };
   if (plan.reduced) {
     // Ease out of the veil quickly, so the fade doesn't linger half dark over the design.
     const alpha = (1 - clamp01(t / end)) ** 2;
@@ -399,11 +406,21 @@ export function holoFrameAt(plan: Pick<HoloPlan, "timeline" | "reduced">, t: num
     return { phase: "up", laser: y, direction: -1, veil: y, frame: 1, ...off, alpha: 1 };
   }
   const u = clamp01((t - upEnd) / (end - upEnd));
-  // The bloom swells quickly, then breathes out slowly. Its hairline flashes out as it swells and is
-  // gone by the peak, when the selection outline comes back inside it (chromeHeldUntil).
+  // The bloom swells quickly, then breathes out slowly.
   const glow = u < GLOW_PEAK ? 1 - (1 - u / GLOW_PEAK) ** 2 : (1 + Math.cos((Math.PI * (u - GLOW_PEAK)) / (1 - GLOW_PEAK))) / 2;
-  const hairline = u < GLOW_PEAK ? Math.sin((Math.PI * u) / GLOW_PEAK) : 0;
-  return { phase: "glow", laser: null, direction: -1, veil: 0, frame: 1, glow, hairline, alpha: 1 };
+  return { phase: "glow", laser: null, direction: -1, veil: 0, frame: 1, glow, ...outlineHandover(u / GLOW_PEAK), alpha: 1 };
+}
+
+/**
+ * The frame's outline while the bloom swells (`v`: 0 as the glow starts, 1 at its peak): one line
+ * that moves out to the bloom's hairline and fades there, so two lines never show at once, gone by
+ * the peak, when the selection outline comes back inside it (chromeHeldUntil).
+ */
+export function outlineHandover(v: number): { outline: number; spread: number } {
+  const x = clamp01(v);
+  const out = clamp01(x / 0.6);
+  const fade = clamp01((x - 0.25) / 0.75);
+  return { outline: 1 - fade * fade * (3 - 2 * fade), spread: 1 - (1 - out) ** 3 };
 }
 
 /** How far a piece's outline has traced (0–1) at `t`. */
