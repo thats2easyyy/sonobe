@@ -16,7 +16,8 @@ export interface ThumbnailResult {
 
 declare global {
   interface Window {
-    __sonobeThumbnail?: { render(files: Record<string, string>, frames: number, scale: number): ThumbnailResult };
+    /** `assetUrls` maps asset file names (assets/<file>) to URLs the page can load. */
+    __sonobeThumbnail?: { render(files: Record<string, string>, frames: number, scale: number, assetUrls?: Record<string, string>): ThumbnailResult };
   }
 }
 
@@ -32,7 +33,7 @@ function cssColor(hex: unknown): string {
 }
 
 window.__sonobeThumbnail = {
-  render(files, frames, scale) {
+  render(files, frames, scale, assetUrls = {}) {
     dispose?.();
     const doc = parseDocumentFiles(files);
     const preset = getDevicePreset(doc.project.device.preset);
@@ -44,7 +45,11 @@ window.__sonobeThumbnail = {
     stage.style.background = cssColor(doc.project.background);
     const errors: string[] = [];
     const runtime = createRuntime(doc, { registry, textMeasurer: measurer, deterministic: true, fps: 60, onLog: (level, args) => void (level === "error" && errors.push(args.map(String).join(" "))) });
-    const renderer = createDomRenderer(stage, { textMeasurer: measurer, captureInput: false, allowAudio: false, scale, resolveAssetUrl: () => undefined });
+    const resolveAssetUrl = (assetId: string) => {
+      const file = doc.assets[assetId]?.file;
+      return file ? assetUrls[file] : undefined;
+    };
+    const renderer = createDomRenderer(stage, { textMeasurer: measurer, captureInput: false, allowAudio: false, scale, resolveAssetUrl });
     for (let i = 0; i < frames; i++) renderer.render(runtime.step());
     dispose = () => {
       renderer.dispose();

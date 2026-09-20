@@ -1,0 +1,149 @@
+{
+  "description": "The deck's photos: where each came from on Wikimedia Commons, who took it and its license, and the file the capture's image URL resolves to offline. Kept by hand; capture.ts downloads the files.",
+  "photos": [
+    {
+      "place": "Leonard's Bakery",
+      "photo": 1,
+      "name": "Malasadas",
+      "file": "photos/malasadas.jpg",
+      "url": "https://upload.wikimedia.org/wikipedia/commons/6/64/Leonard%27s_malasadas.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail_unscaled",
+      "title": "File:Leonard's malasadas.jpg",
+      "page": "https://commons.wikimedia.org/wiki/File:Leonard%27s_malasadas.jpg",
+      "artist": "_e.t",
+      "license": "CC BY-SA 2.0",
+      "licenseUrl": "https://creativecommons.org/licenses/by-sa/2.0/"
+    },
+    {
+      "place": "Leonard's Bakery",
+      "photo": 2,
+      "name": "Pastry case",
+      "file": "photos/pastry-case.jpg",
+      "url": "https://thumb.wikimedia.org/wikipedia/commons/thumb/c/cb/Leonard%27s_Bakery%2C_Honolulu%2C_Hawaii_%284540006860%29.jpg/1280px-Leonard%27s_Bakery%2C_Honolulu%2C_Hawaii_%284540006860%29.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail",
+      "title": "File:Leonard's Bakery, Honolulu, Hawaii (4540006860).jpg",
+      "page": "https://commons.wikimedia.org/wiki/File:Leonard%27s_Bakery,_Honolulu,_Hawaii_(4540006860).jpg",
+      "artist": "Ken Lund",
+      "license": "CC BY-SA 2.0",
+      "licenseUrl": "https://creativecommons.org/licenses/by-sa/2.0/"
+    },
+    {
+      "place": "Leonard's Bakery",
+      "photo": 3,
+      "name": "Bakery storefront",
+      "file": "photos/bakery-storefront.jpg",
+      "url": "https://thumb.wikimedia.org/wikipedia/commons/thumb/5/56/Leonard%27s_Bakery_%284915217136%29.jpg/1280px-Leonard%27s_Bakery_%284915217136%29.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail",
+      "title": "File:Leonard's Bakery (4915217136).jpg",
+      "page": "https://commons.wikimedia.org/wiki/File:Leonard%27s_Bakery_(4915217136).jpg",
+      "artist": "Banzai Hiroaki",
+      "license": "CC BY 2.0",
+      "licenseUrl": "https://creativecommons.org/licenses/by/2.0/"
+    },
+    {
+      "place": "Rainbow Drive-In",
+      "photo": 1,
+      "name": "Plate lunch",
+      "file": "photos/plate-lunch.jpg",
+      "url": "https://thumb.wikimedia.org/wikipedia/commons/thumb/1/1b/Rainbow_Drive-In_mix_plate_lunch_%282194653288%29.jpg/1280px-Rainbow_Drive-In_mix_plate_lunch_%282194653288%29.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail",
+      "title": "File:Rainbow Drive-In mix plate lunch (2194653288).jpg",
+      "page": "https://commons.wikimedia.org/wiki/File:Rainbow_Drive-In_mix_plate_lunch_(2194653288).jpg",
+      "artist": "Arnold Gatilao",
+      "license": "CC BY 2.0",
+      "licenseUrl": "https://creativecommons.org/licenses/by/2.0/"
+    },
+    {
+      "place": "Rainbow Drive-In",
+      "photo": 2,
+      "name": "Drive-in storefront",
+      "file": "photos/drive-in-storefront.jpg",
+      "url": "https://thumb.wikimedia.org/wikipedia/commons/thumb/5/59/Rainbow_Drive-In_%287442048154%29.jpg/1280px-Rainbow_Drive-In_%287442048154%29.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail",
+      "title": "File:Rainbow Drive-In (7442048154).jpg",
+      "page": "https://commons.wikimedia.org/wiki/File:Rainbow_Drive-In_(7442048154).jpg",
+      "artist": "Eugene Kim",
+      "license": "CC BY 2.0",
+      "licenseUrl": "https://creativecommons.org/licenses/by/2.0/"
+    },
+    {
+      "place": "Rainbow Drive-In",
+      "photo": 3,
+      "name": "Mix plate and chili",
+      "file": "photos/mix-plate-and-chili.jpg",
+      "url": "https://thumb.wikimedia.org/wikipedia/commons/thumb/7/75/Rainbow_Drive-In_mix_plate_and_chili_%285636830471%29.jpg/1280px-Rainbow_Drive-In_mix_plate_and_chili_%285636830471%29.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail",
+      "title": "File:Rainbow Drive-In mix plate and chili (5636830471).jpg",
+      "page": "https://commons.wikimedia.org/wiki/File:Rainbow_Drive-In_mix_plate_and_chili_(5636830471).jpg",
+      "artist": "John Liu",
+      "license": "CC BY 2.0",
+      "licenseUrl": "https://creativecommons.org/licenses/by/2.0/"
+    },
+    {
+      "place": "Honolulu Museum of Art",
+      "photo": 1,
+      "name": "Museum courtyard",
+      "file": "photos/museum-courtyard.jpg",
+      "url": "https://thumb.wikimedia.org/wikipedia/commons/thumb/9/9f/Honolulu_-_Honolulu_Museum_of_Art_-_20160727131828.jpg/1280px-Honolulu_-_Honolulu_Museum_of_Art_-_20160727131828.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail",
+      "title": "File:Honolulu - Honolulu Museum of Art - 20160727131828.jpg",
+      "page": "https://commons.wikimedia.org/wiki/File:Honolulu_-_Honolulu_Museum_of_Art_-_20160727131828.jpg",
+      "artist": "Glamorous Vagabonds",
+      "license": "CC BY-SA 4.0",
+      "licenseUrl": "https://creativecommons.org/licenses/by-sa/4.0/"
+    },
+    {
+      "place": "Honolulu Museum of Art",
+      "photo": 2,
+      "name": "Impressionism gallery",
+      "file": "photos/impressionism-gallery.jpg",
+      "url": "https://thumb.wikimedia.org/wikipedia/commons/thumb/8/88/HoMA_Impressionism.jpg/1280px-HoMA_Impressionism.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail",
+      "title": "File:HoMA Impressionism.jpg",
+      "page": "https://commons.wikimedia.org/wiki/File:HoMA_Impressionism.jpg",
+      "artist": "HonoluluMuseumOfArt",
+      "license": "CC BY-SA 4.0",
+      "licenseUrl": "https://creativecommons.org/licenses/by-sa/4.0/"
+    },
+    {
+      "place": "Honolulu Museum of Art",
+      "photo": 3,
+      "name": "Japanese tea house",
+      "file": "photos/japanese-tea-house.jpg",
+      "url": "https://thumb.wikimedia.org/wikipedia/commons/thumb/c/c3/Japanese_tea_house_on_the_grounds_of_the_Honolulu_Museum_of_Art_.JPG/1280px-Japanese_tea_house_on_the_grounds_of_the_Honolulu_Museum_of_Art_.JPG?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail",
+      "title": "File:Japanese tea house on the grounds of the Honolulu Museum of Art .JPG",
+      "page": "https://commons.wikimedia.org/wiki/File:Japanese_tea_house_on_the_grounds_of_the_Honolulu_Museum_of_Art_.JPG",
+      "artist": "Wmpearl",
+      "license": "CC0 1.0",
+      "licenseUrl": "https://creativecommons.org/publicdomain/zero/1.0/"
+    },
+    {
+      "place": "Mānoa Falls Trail",
+      "photo": 1,
+      "name": "Mānoa Falls",
+      "file": "photos/manoa-falls.jpg",
+      "url": "https://upload.wikimedia.org/wikipedia/commons/8/8c/ManoaFalls.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail_unscaled",
+      "title": "File:ManoaFalls.jpg",
+      "page": "https://commons.wikimedia.org/wiki/File:ManoaFalls.jpg",
+      "artist": "Chouwawa",
+      "license": "CC BY-SA 4.0",
+      "licenseUrl": "https://creativecommons.org/licenses/by-sa/4.0/"
+    },
+    {
+      "place": "Mānoa Falls Trail",
+      "photo": 2,
+      "name": "Forest trail",
+      "file": "photos/forest-trail.jpg",
+      "url": "https://thumb.wikimedia.org/wikipedia/commons/thumb/f/f4/Manoa_Falls_Trail_%288330307443%29.jpg/1280px-Manoa_Falls_Trail_%288330307443%29.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail",
+      "title": "File:Manoa Falls Trail (8330307443).jpg",
+      "page": "https://commons.wikimedia.org/wiki/File:Manoa_Falls_Trail_(8330307443).jpg",
+      "artist": "Daniel Ramirez",
+      "license": "CC BY 2.0",
+      "licenseUrl": "https://creativecommons.org/licenses/by/2.0/"
+    },
+    {
+      "place": "Mānoa Falls Trail",
+      "photo": 3,
+      "name": "Bamboo steps",
+      "file": "photos/bamboo-steps.jpg",
+      "url": "https://thumb.wikimedia.org/wikipedia/commons/thumb/7/7a/Manoa_Falls_Trail_%288330330105%29.jpg/1280px-Manoa_Falls_Trail_%288330330105%29.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail",
+      "title": "File:Manoa Falls Trail (8330330105).jpg",
+      "page": "https://commons.wikimedia.org/wiki/File:Manoa_Falls_Trail_(8330330105).jpg",
+      "artist": "Daniel Ramirez",
+      "license": "CC BY 2.0",
+      "licenseUrl": "https://creativecommons.org/licenses/by/2.0/"
+    }
+  ]
+}

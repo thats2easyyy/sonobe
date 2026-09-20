@@ -10,7 +10,7 @@ Related: `graph-basics`, `animation`, `simulation`
 
 - **Knobs, not names.** Build the numbers a person will want to tune or compare as knobs. Don't share them through Variable Broadcasters, and never put reference values in names ("Commit Distance (app: 95)").
 - **A reference and a proposal.** Make a locked reference preset ("Shipped app") and a working one ("Proposal"). Every difference between them must be a knob value.
-- **Differences in kind are knobs too.** When the reference behaves differently rather than by a different amount (the shipped card never flies out), add an on/off knob that picks between the two with an Option Picker, so flipping presets flips the behavior.
+- **Differences in kind are knobs too.** When the reference behaves differently rather than by a different amount (the shipped card never flies out), add an on/off knob that picks between the two with an Option Picker, so flipping presets flips the behavior. `examples/16-noddit-deck` does all of this for a swipe deck.
 - **Ranges a finger would use.** Leave out min and max and `set_knobs` works out a range from the value and the port (95 → 0…200, step 1), then says so. Group knobs in the order the gesture happens.
 - **Compare in simulations.** Run one `sim_reset` per preset (`"preset": "Shipped app"`) and trace the same gesture in both before you report a difference. Simulations never change the person's document.
 - **Ask before switching.** `apply_knob_preset` changes what the person's viewer and phone show. Do it when they ask.

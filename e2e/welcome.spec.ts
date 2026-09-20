@@ -29,6 +29,25 @@ test.describe("welcome screen", () => {
     expect(problems).toEqual([]);
   });
 
+  test("opens the Noddit Deck with its photos and knobs", async ({ page }) => {
+    const problems = collectConsoleProblems(page);
+    await openEditor(page, { welcome: true });
+    const welcome = page.getByRole("dialog", { name: "Welcome to Sonobe" });
+    const deck = welcome.locator(".sb-template").filter({ hasText: "Noddit Deck" });
+    await deck.scrollIntoViewIfNeeded();
+    await deck.click();
+    await expect(welcome).toBeHidden();
+    await expect.poll(() => hook(page, (s) => s.doc().project.name)).toBe("Noddit Deck");
+    expect(await hook(page, (s) => s.doc().knobs?.presets.map((p) => `${p.name}${p.locked ? " (locked)" : ""}`))).toEqual(["Proposal", "Shipped app (locked)"]);
+    // The photos came with it: the example's asset files are held for the unsaved copy and drawn.
+    expect(await hook(page, (s) => typeof s.session.resolveAssetUrl("malasadas"))).toBe("string");
+    await page.waitForFunction(() => [...document.querySelectorAll("img")].some((img) => img.complete && img.naturalWidth === 800 && img.naturalHeight === 600));
+    await expect.poll(() => hook(page, (s) => s.getValue("@place_name.text#0"))).toBe("Leonard's Bakery");
+    await page.waitForTimeout(250);
+    await screenshot(page, "welcome-04-noddit-deck");
+    expect(problems).toEqual([]);
+  });
+
   test("File → New offers a blank prototype with a device", async ({ page }) => {
     const problems = collectConsoleProblems(page);
     await openEditor(page);

@@ -1,0 +1,172 @@
+{
+  "description": "The deck starts with Leonard's Bakery on top and the next card smaller behind it. A slow drag past Commit Distance throws the card and the next one rises, a short drag springs back, and a quick 60 pt flick throws under Proposal but springs back under Shipped app. ✕ and ♥ throw one card per tap, four votes empty the deck and dim the buttons, and Find more places brings every card back. Under Shipped app only the top card shows, the next place springs back from where the finger let go, and End of Deck waits until the deck is empty.",
+  "scenarios": [
+    {
+      "name": "The deck starts with Leonard's Bakery on top",
+      "events": [],
+      "durationMs": 600,
+      "expect": [
+        { "description": "Row 0 is the top card", "target": "@place_name.text#0", "at": "end", "op": "==", "value": "Leonard's Bakery" },
+        { "description": "and row 1 is under it", "target": "@place_name.text#1", "at": "end", "op": "==", "value": "Rainbow Drive-In" },
+        { "description": "Row 0 draws in front", "target": "@card.zPosition#0", "at": "end", "op": "==", "value": 0 },
+        { "description": "and row 1 behind it", "target": "@card.zPosition#1", "at": "end", "op": "==", "value": -1 },
+        { "description": "The top card is full size", "target": "@card.scale#0", "at": "end", "op": "==", "value": 1 },
+        { "description": "The card under it waits a little smaller", "target": "@card.scale#1", "at": "end", "op": "==", "value": 0.95, "tolerance": 0.002 },
+        { "description": "and so does the last one", "target": "@card.scale#3", "at": "end", "op": "==", "value": 0.95, "tolerance": 0.002 },
+        { "description": "Every card shows", "target": "@card.opacity#1", "at": "end", "op": "==", "value": 1 },
+        { "description": "No badge shows yet", "target": "@card_yes_badge.opacity#0", "at": "end", "op": "==", "value": 0 },
+        { "description": "The vote buttons are at full strength", "target": "@vote_buttons.opacity", "at": "end", "op": "==", "value": 1 }
+      ]
+    },
+    {
+      "name": "Under Shipped app only the top card shows",
+      "preset": "Shipped app",
+      "events": [],
+      "durationMs": 600,
+      "expect": [
+        { "description": "The top card shows", "target": "@card.opacity#0", "at": "end", "op": "==", "value": 1 },
+        { "description": "The card under it is hidden", "target": "@card.opacity#1", "at": "end", "op": "==", "value": 0 },
+        { "description": "and full size, with no rise to come", "target": "@card.scale#1", "at": "end", "op": "==", "value": 1 },
+        { "description": "End of Deck waits until the deck is empty", "target": "@end_of_deck.opacity", "at": "end", "op": "==", "value": 0 }
+      ]
+    },
+    {
+      "name": "A slow drag right throws the card",
+      "events": [{ "kind": "drag", "from": "@card#0", "to": [351, 444], "durationMs": 900, "atMs": 100 }],
+      "durationMs": 2000,
+      "expect": [
+        { "description": "The heart showed while dragging", "target": "@card_yes_badge.opacity#0", "at": "max", "op": "==", "value": 1, "tolerance": 0.01 },
+        { "description": "and popped once letting go would vote", "target": "@card_yes_badge.scale#0", "at": "max", "op": ">", "value": 1.1 },
+        { "description": "The card under it rose to full size", "target": "@card.scale#1", "at": 1000, "op": "==", "value": 1, "tolerance": 0.002 },
+        { "description": "The top card is gone", "target": "swipe_card.gone#0", "at": "end", "op": "==", "value": true },
+        { "description": "It flew off to the right", "target": "@card.position#0", "component": "x", "at": "end", "op": "==", "value": 600, "tolerance": 1 },
+        { "description": "tilted by Tilt per Point", "target": "@card.rotation#0", "at": "end", "op": "==", "value": 20, "tolerance": 0.1 },
+        { "description": "It can't be grabbed again", "target": "@card.hitTest#0", "at": "end", "op": "==", "value": false },
+        { "description": "Rainbow Drive-In is on top and takes touches", "target": "@card.hitTest#1", "at": "end", "op": "==", "value": true }
+      ]
+    },
+    {
+      "name": "Under Shipped app the card never leaves",
+      "preset": "Shipped app",
+      "events": [{ "kind": "drag", "from": "@card#0", "to": [351, 444], "durationMs": 900, "atMs": 100 }],
+      "durationMs": 2000,
+      "expect": [
+        { "description": "The top card is gone", "target": "swipe_card.gone#0", "at": "end", "op": "==", "value": true },
+        { "description": "and hidden", "target": "@card.opacity#0", "at": "end", "op": "==", "value": 0 },
+        { "description": "The next place shows in its place", "target": "@card.opacity#1", "at": "end", "op": "==", "value": 1 },
+        { "description": "It starts where the finger let go", "target": "@card.position#1", "component": "x", "at": "max", "op": ">", "value": 140 },
+        { "description": "and springs back to the center", "target": "@card.position#1", "component": "x", "at": "end", "op": "==", "value": 0, "tolerance": 0.5 },
+        { "description": "with the old heart on it until it's close", "target": "@card_yes_badge.opacity#1", "at": "max", "op": "==", "value": 1 },
+        { "description": "which is gone once it's back", "target": "@card_yes_badge.opacity#1", "at": "end", "op": "==", "value": 0 }
+      ]
+    },
+    {
+      "name": "A slow 60 pt drag springs back",
+      "events": [{ "kind": "drag", "from": "@card#0", "to": [261, 444], "durationMs": 600, "atMs": 100 }],
+      "durationMs": 1800,
+      "expect": [
+        { "description": "The card stays", "target": "swipe_card.gone#0", "at": "end", "op": "==", "value": false },
+        { "description": "It followed the finger", "target": "@card.position#0", "component": "x", "at": "max", "op": ">", "value": 55 },
+        { "description": "and came back to the center", "target": "@card.position#0", "component": "x", "at": "end", "op": "==", "value": 0, "tolerance": 0.5 },
+        { "description": "without its heart", "target": "@card_yes_badge.opacity#0", "at": "end", "op": "==", "value": 0, "tolerance": 0.01 }
+      ]
+    },
+    {
+      "name": "A quick 60 pt flick throws the card",
+      "events": [{ "kind": "drag", "from": "@card#0", "to": [261, 444], "durationMs": 100, "atMs": 100 }],
+      "durationMs": 1500,
+      "expect": [
+        { "description": "Throw Lookahead counts the flick's speed, so the card is gone", "target": "swipe_card.gone#0", "at": "end", "op": "==", "value": true },
+        { "description": "It flew off to the right", "target": "@card.position#0", "component": "x", "at": "end", "op": "==", "value": 600, "tolerance": 1 }
+      ]
+    },
+    {
+      "name": "The same flick springs back under Shipped app",
+      "preset": "Shipped app",
+      "events": [{ "kind": "drag", "from": "@card#0", "to": [261, 444], "durationMs": 100, "atMs": 100 }],
+      "durationMs": 1500,
+      "expect": [
+        { "description": "The shipped app judges by distance only, so the card stays", "target": "swipe_card.gone#0", "at": "end", "op": "==", "value": false },
+        { "description": "and springs back to the center", "target": "@card.position#0", "component": "x", "at": "end", "op": "==", "value": 0, "tolerance": 0.5 }
+      ]
+    },
+    {
+      "name": "The ✕ tap throws the top card left",
+      "events": [{ "kind": "tap", "target": "@pass_button", "atMs": 300 }],
+      "durationMs": 1500,
+      "expect": [
+        { "description": "The top card is gone", "target": "swipe_card.gone#0", "at": "end", "op": "==", "value": true },
+        { "description": "off to the left", "target": "@card.position#0", "component": "x", "at": "end", "op": "==", "value": -600, "tolerance": 1 },
+        { "description": "One tap throws one card", "target": "swipe_card.gone#1", "at": "end", "op": "==", "value": false },
+        { "description": "Rainbow Drive-In rose to full size", "target": "@card.scale#1", "at": "end", "op": "==", "value": 1, "tolerance": 0.002 },
+        { "description": "and takes touches", "target": "@card.hitTest#1", "at": "end", "op": "==", "value": true }
+      ]
+    },
+    {
+      "name": "Holding ♥ previews the vote, and letting go throws the card right",
+      "events": [{ "kind": "tap", "target": "@yes_button", "atMs": 200, "holdMs": 600 }],
+      "durationMs": 1800,
+      "expect": [
+        { "description": "Holding nudges the top card by Button Nudge", "target": "@card.position#0", "component": "x", "at": 750, "op": "==", "value": 20, "tolerance": 1 },
+        { "description": "and shows its heart", "target": "@card_yes_badge.opacity#0", "at": 750, "op": "==", "value": 1 },
+        { "description": "The ♥ button shrinks while pressed", "target": "@yes_button.scale", "at": 750, "op": "==", "value": 0.92, "tolerance": 0.005 },
+        { "description": "Letting go throws the card right", "target": "@card.position#0", "component": "x", "at": "end", "op": "==", "value": 600, "tolerance": 1 },
+        { "description": "and the button is back to full size", "target": "@yes_button.scale", "at": "end", "op": "==", "value": 1, "tolerance": 0.005 }
+      ]
+    },
+    {
+      "name": "Four votes empty the deck and dim the vote buttons",
+      "events": [
+        { "kind": "tap", "target": "@pass_button", "atMs": 300 },
+        { "kind": "tap", "target": "@yes_button", "atMs": 1000 },
+        { "kind": "tap", "target": "@pass_button", "atMs": 1700 },
+        { "kind": "tap", "target": "@yes_button", "atMs": 2400 }
+      ],
+      "durationMs": 3600,
+      "expect": [
+        { "description": "The deck wasn't empty before the last vote", "target": "every_card_gone.output", "at": 2350, "op": "==", "value": false },
+        { "description": "Every card is gone", "target": "every_card_gone.output", "at": "end", "op": "==", "value": true },
+        { "description": "Rainbow Drive-In went right", "target": "@card.position#1", "component": "x", "at": "end", "op": "==", "value": 600, "tolerance": 1 },
+        { "description": "and so did Mānoa Falls Trail", "target": "@card.position#3", "component": "x", "at": "end", "op": "==", "value": 600, "tolerance": 1 },
+        { "description": "The vote buttons dimmed to 40%", "target": "@vote_buttons.opacity", "at": "end", "op": "==", "value": 0.4, "tolerance": 0.01 }
+      ]
+    },
+    {
+      "name": "Find more places brings every card back",
+      "events": [
+        { "kind": "tap", "target": "@pass_button", "atMs": 300 },
+        { "kind": "tap", "target": "@yes_button", "atMs": 1000 },
+        { "kind": "tap", "target": "@pass_button", "atMs": 1700 },
+        { "kind": "tap", "target": "@yes_button", "atMs": 2400 },
+        { "kind": "tap", "target": "@find_more_places_button", "atMs": 3600 }
+      ],
+      "durationMs": 5200,
+      "expect": [
+        { "description": "Every card was gone before the tap", "target": "every_card_gone.output", "at": 3550, "op": "==", "value": true },
+        { "description": "The deck is back", "target": "every_card_gone.output", "at": "end", "op": "==", "value": false },
+        { "description": "Leonard's Bakery is centered on top again", "target": "@card.position#0", "component": "x", "at": "end", "op": "==", "value": 0, "tolerance": 1 },
+        { "description": "and so is every card under it", "target": "@card.position#3", "component": "x", "at": "end", "op": "==", "value": 0, "tolerance": 1 },
+        { "description": "and none of them is gone", "target": "swipe_card.gone#1", "at": "end", "op": "==", "value": false },
+        { "description": "The vote buttons are back to full strength", "target": "@vote_buttons.opacity", "at": "end", "op": "==", "value": 1, "tolerance": 0.01 }
+      ]
+    },
+    {
+      "name": "Under Shipped app ✕ swaps in the next place at once, and End of Deck waits",
+      "preset": "Shipped app",
+      "events": [
+        { "kind": "tap", "target": "@pass_button", "atMs": 300 },
+        { "kind": "tap", "target": "@yes_button", "atMs": 1000 },
+        { "kind": "tap", "target": "@pass_button", "atMs": 1700 },
+        { "kind": "tap", "target": "@yes_button", "atMs": 2400 }
+      ],
+      "durationMs": 3200,
+      "expect": [
+        { "description": "After the first ✕ the top card is hidden", "target": "@card.opacity#0", "at": 900, "op": "==", "value": 0 },
+        { "description": "and the next place shows", "target": "@card.opacity#1", "at": 900, "op": "==", "value": 1 },
+        { "description": "right in the center: the buttons swap content without moving anything", "target": "@card.position#1", "component": "x", "at": "max", "op": "==", "value": 0, "tolerance": 0.5 },
+        { "description": "End of Deck stayed hidden while places were left", "target": "@end_of_deck.opacity", "at": 2350, "op": "==", "value": 0 },
+        { "description": "and shows once the deck is empty", "target": "@end_of_deck.opacity", "at": "end", "op": "==", "value": 1 }
+      ]
+    }
+  ]
+}

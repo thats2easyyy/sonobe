@@ -67,4 +67,43 @@ describe("examples", () => {
   it("bundles whatever examples the repo has", () => {
     expect(Array.isArray(getExamples())).toBe(true);
   });
+
+  it("bundles an example's knobs and asset files", async () => {
+    const deck = getExamples().find((e) => e.folder === "16-noddit-deck");
+    expect(deck).toBeDefined();
+    const doc = loadExampleDocument(deck!);
+    expect(doc.knobs?.presets.map((p) => [p.name, !!p.locked])).toEqual([
+      ["Proposal", false],
+      ["Shipped app", true],
+    ]);
+    const files = Object.values(doc.assets).map((a) => a.file);
+    expect(files.length).toBeGreaterThan(20);
+    expect(files.filter((file) => !deck!.assets[file])).toEqual([]);
+    // A data: URL, which fetch() reads in the browser and in the desktop app's file:// pages alike.
+    expect(await deck!.assets[doc.assets.malasadas!.file]!()).toMatch(/^data:image\/jpeg;base64,/);
+  });
+
+  it("hands an example's asset files to the host before the copy opens", async () => {
+    let doc = createEmptyDocument({ name: "Photo" });
+    const r = applyOps(doc, [{ op: "addAsset", asset: { id: "dot", kind: "image", name: "Dot", file: "abc.svg", mime: "image/svg+xml" } }], { registry });
+    expect(r.ok).toBe(true);
+    doc = r.doc;
+    const files = Object.fromEntries(Object.entries(serializeDocument(doc)).map(([path, text]) => [`../../../../../examples/photo/${path}`, text]));
+    const svg = '<svg xmlns="http://www.w3.org/2000/svg"/>';
+    const [example] = groupExampleFiles(files, { "../../../../../examples/photo/assets/abc.svg": async () => `data:image/svg+xml,${encodeURIComponent(svg)}` });
+    expect(Object.keys(example!.assets)).toEqual(["abc.svg"]);
+
+    const document = createDocumentStore({ registry });
+    const put: { path: string | null; file: string; name: string; bytes: number }[] = [];
+    const host = { putAssetBytes: (path: string | null, file: string, bytes: ArrayBuffer | Uint8Array) => void put.push({ path, file, name: document.getState().doc.project.name, bytes: bytes.byteLength }) };
+    const opened = await openExample({ document, selection: createSelectionStore(), confirmDiscardChanges: async () => true, host }, example!);
+    expect(opened).toEqual({ ok: true });
+    // Held for the unsaved copy (path null), before the copy replaced the old document.
+    expect(put).toEqual([{ path: null, file: "abc.svg", name: "Untitled", bytes: svg.length }]);
+
+    const stored: string[] = [];
+    const again = await openExample({ document, selection: createSelectionStore(), confirmDiscardChanges: async () => true, host: null, assets: { storeBytes: (file) => void stored.push(`${file} in ${document.getState().doc.project.name}`) } }, example!);
+    expect(again).toEqual({ ok: true });
+    expect(stored).toEqual(["abc.svg in Photo"]);
+  });
 });

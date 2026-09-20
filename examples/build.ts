@@ -5,8 +5,9 @@
  *   node examples/build.ts 08-bottom-sheet    write one project
  *   node examples/build.ts --check            exit 1 when a project on disk differs from its recipe
  *
- * Only project files (project.json, components/, assets/) are written. README.md and test.json in
- * each folder are hand-written and never touched.
+ * Only project files (project.json, knobs.json, components/, assets/) are written, including the asset
+ * files a recipe's design import makes. README.md, test.json and a design/ folder are hand-written and
+ * never touched.
  */
 
 import { existsSync } from "node:fs";
@@ -15,8 +16,8 @@ import { fileURLToPath } from "node:url";
 import { getDiagnostics } from "@sonobe/core";
 import { saveProjectToDisk } from "@sonobe/core/node";
 import { createPatchRegistry } from "@sonobe/patches";
-import { EXAMPLES_DIR, projectDrift } from "./lib/disk.ts";
-import { buildRecipeDocument } from "./lib/recipe.ts";
+import { EXAMPLES_DIR, projectDrift, writeAssetFiles } from "./lib/disk.ts";
+import { buildRecipe } from "./lib/recipe.ts";
 import { RECIPES } from "./recipes/index.ts";
 
 export async function main(argv: string[]): Promise<number> {
@@ -32,7 +33,7 @@ export async function main(argv: string[]): Promise<number> {
   for (const recipe of RECIPES) {
     if (wanted.length && !wanted.includes(recipe.folder)) continue;
     const dir = path.join(EXAMPLES_DIR, recipe.folder);
-    const doc = buildRecipeDocument(recipe, registry);
+    const { doc, files } = await buildRecipe(recipe, registry);
     const errors = getDiagnostics(doc, registry).filter((d) => d.severity === "error");
     if (errors.length) {
       failures++;
@@ -43,7 +44,7 @@ export async function main(argv: string[]): Promise<number> {
       if (!existsSync(path.join(dir, file))) process.stderr.write(`! ${recipe.folder} has no ${file} yet.\n`);
     }
     if (check) {
-      const drift = projectDrift(dir, doc);
+      const drift = projectDrift(dir, doc, files);
       if (drift.changed.length || drift.extra.length) {
         failures++;
         process.stderr.write(`✗ ${recipe.folder} is out of date: ${[...drift.changed, ...drift.extra.map((f) => `${f} (extra)`)].join(", ")}. Run node examples/build.ts ${recipe.folder}\n`);
@@ -53,7 +54,10 @@ export async function main(argv: string[]): Promise<number> {
       continue;
     }
     const r = await saveProjectToDisk(dir, doc);
-    process.stdout.write(`✓ ${recipe.folder}${r.written.length ? ` wrote ${r.written.join(", ")}` : " unchanged"}${r.removed.length ? `, removed ${r.removed.join(", ")}` : ""}\n`);
+    const assets = writeAssetFiles(dir, files);
+    const written = [...r.written, ...assets.written];
+    const removed = [...r.removed, ...assets.removed];
+    process.stdout.write(`✓ ${recipe.folder}${written.length ? ` wrote ${written.join(", ")}` : " unchanged"}${removed.length ? `, removed ${removed.join(", ")}` : ""}\n`);
   }
   return failures ? 1 : 0;
 }

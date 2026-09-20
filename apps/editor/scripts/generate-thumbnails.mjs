@@ -34,7 +34,7 @@ if (folders.length === 0) {
   process.exit(2);
 }
 
-/** Project files as the editor's examples glob sees them: project.json, components, scripts, assets.json. */
+/** Project files as the editor's examples glob sees them: project.json, knobs.json, components, scripts, assets.json. */
 function projectFiles(folder) {
   const dir = path.join(examplesDir, folder);
   const files = { "project.json": readFileSync(path.join(dir, "project.json"), "utf8") };
@@ -43,9 +43,17 @@ function projectFiles(folder) {
     if (!existsSync(subDir)) continue;
     for (const name of readdirSync(subDir)) files[`${sub}/${name}`] = readFileSync(path.join(subDir, name), "utf8");
   }
-  const assets = path.join(dir, "assets/assets.json");
-  if (existsSync(assets)) files["assets/assets.json"] = readFileSync(assets, "utf8");
+  for (const rel of ["knobs.json", "assets/assets.json"]) {
+    if (existsSync(path.join(dir, rel))) files[rel] = readFileSync(path.join(dir, rel), "utf8");
+  }
   return files;
+}
+
+/** The example's asset files (photos, icons) as file URLs, by file name. */
+function assetUrls(folder) {
+  const dir = path.join(examplesDir, folder, "assets");
+  if (!existsSync(dir)) return {};
+  return Object.fromEntries(readdirSync(dir).filter((name) => name !== "assets.json").map((name) => [name, pathToFileURL(path.join(dir, name)).href]));
 }
 
 const work = mkdtempSync(path.join(tmpdir(), "sonobe-thumbnails-"));
@@ -72,8 +80,9 @@ try {
     await page.goto(pathToFileURL(path.join(work, "index.html")).href);
     await page.waitForFunction(() => !!window.__sonobeThumbnail);
     for (const folder of folders) {
-      const result = await page.evaluate(({ files, frames, scale }) => window.__sonobeThumbnail.render(files, frames, scale), { files: projectFiles(folder), frames: FRAMES, scale: SCALE });
-      // Let images and fonts paint.
+      const result = await page.evaluate(({ files, frames, scale, urls }) => window.__sonobeThumbnail.render(files, frames, scale, urls), { files: projectFiles(folder), frames: FRAMES, scale: SCALE, urls: assetUrls(folder) });
+      // Let images decode, then let them and the fonts paint.
+      await page.waitForFunction(() => [...document.querySelectorAll("#stage img")].every((img) => img.complete), undefined, { timeout: 10_000 });
       await page.waitForTimeout(120);
       const height = Math.min(result.height, Math.round((result.width * 5) / 4));
       const file = path.join(outDir, `${folder}.png`);

@@ -16,6 +16,7 @@ import { timedSequence } from "./12-timed-sequence.ts";
 import { stories } from "./13-stories.ts";
 import { onboarding } from "./14-onboarding.ts";
 import { gridWithLoops } from "./15-grid-with-loops.ts";
+import { nodditDeck } from "./16-noddit-deck.ts";
 
 export const RECIPES: readonly Recipe[] = [
   tapToGrow,
@@ -33,4 +34,5 @@ export const RECIPES: readonly Recipe[] = [
   stories,
   onboarding,
   gridWithLoops,
+  nodditDeck,
 ];

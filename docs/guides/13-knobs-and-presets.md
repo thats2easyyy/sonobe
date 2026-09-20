@@ -98,6 +98,7 @@ Ask Claude to "build the tunable numbers as knobs, with a locked Shipped app pre
 2. Add a preset, lock the one you started from, and make the new one bouncier. Flip with ⌘' while the photo zooms.
 3. Make a knob from Photo Scale's **End**, then use it for Heart Scale's **End** too with **Use Knob ▸**. Watch both chips change as you tune.
 4. Copy the differences and paste them somewhere.
+5. Open the Noddit Deck example ([examples/16-noddit-deck](../../examples/16-noddit-deck/)). Throw a card, press ⌘' and throw another: Shipped app is its locked reference, and Card Flies Out is the difference in kind.
 
 ## Common mistakes
 
