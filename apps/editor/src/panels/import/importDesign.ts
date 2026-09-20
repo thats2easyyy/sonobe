@@ -219,7 +219,39 @@ export function summaryText(summary: ImportSummary): string {
   return parts.join(" · ");
 }
 
-export type ImportNotify = (options: { title: string; description?: string; tone?: "neutral" | "info" | "success" | "warn" | "danger" | "ai" }) => void;
+export type ImportNotify = (options: {
+  title: string;
+  description?: string;
+  details?: readonly string[];
+  tone?: "neutral" | "info" | "success" | "warn" | "danger" | "ai";
+  action?: { label: string; onClick: () => void };
+  duration?: number | "persistent";
+}) => void;
+
+/** Notes the toast after an import shows before its "N more" button. */
+const TOAST_NOTES = 2;
+
+/**
+ * The toast after an import: the summary and the first notes. When there are more (host notes such
+ * as SF Symbols come after the converter's), "N more" lists every note in a toast that stays open.
+ */
+export function notifyImported(notify: ImportNotify, title: string, outcome: Pick<ImportOutcome, "screenName" | "summary" | "notes">): void {
+  const notes = outcome.notes ?? [];
+  const more = notes.length - TOAST_NOTES;
+  notify({
+    title,
+    description: [outcome.summary ? summaryText(outcome.summary) : "", ...notes.slice(0, TOAST_NOTES)].filter(Boolean).join(" "),
+    tone: "success",
+    ...(more > 0
+      ? {
+          action: {
+            label: `${more} more`,
+            onClick: () => notify({ title: outcome.screenName ? `Import notes for “${outcome.screenName}”` : "Import notes", details: notes, tone: "info", duration: "persistent" }),
+          },
+        }
+      : {}),
+  });
+}
 
 /** Paste a design capture (copied from a browser extension or a plugin) as a new screen. */
 export async function pasteDesignCapture(session: EditorSession, text: string, notify: ImportNotify, deps: ImportDeps = {}): Promise<ImportOutcome | null> {
@@ -236,7 +268,7 @@ export async function pasteDesignCapture(session: EditorSession, text: string, n
   // The desktop app downloads from any site; a browser tab only from sites that allow CORS.
   const images = await resolveCaptureFiles(capture, { fetch: fetchFile ? async (url) => fetchFile.call(desktop, url).then((file) => (file ? { bytes: new Uint8Array(file.bytes), mime: file.mime } : null)) : globalFetcher({ mode: "cors" }) });
   const outcome = await importCapture(session, capture, images);
-  if (outcome.ok) notify({ title: `Pasted “${outcome.screenName}”`, description: [outcome.summary ? summaryText(outcome.summary) : "", ...(outcome.notes ?? []).slice(0, 2)].filter(Boolean).join(" "), tone: "success" });
+  if (outcome.ok) notifyImported(notify, `Pasted “${outcome.screenName}”`, outcome);
   else notify({ title: outcome.message ?? "That design couldn't be pasted.", ...(outcome.hint ? { description: outcome.hint } : {}), tone: "warn" });
   return outcome;
 }
