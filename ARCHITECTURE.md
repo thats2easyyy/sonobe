@@ -50,6 +50,7 @@ sonobe/
 │   ├── chrome-extension/ Sonobe Capture for Chrome: copy a page or an element as a design capture
 │   └── figma-plugin/    Sonobe Capture for Figma: copy a selection as a design capture
 ├── examples/       canonical example prototypes (*.sonobe folders), used by docs, lessons, tests
+├── evals/          behavioral evals: Claude Code builds each case through MCP, checked by simulation
 └── docs/           research/, guides/ (numbered tutorials), patches/ (generated reference), assets/ (README screenshots)
 ```
 
@@ -678,6 +679,7 @@ patch pop popAnimation number←toggle.on bounciness←$knob.pop_bounce speed=10
 - `npm run smoke -w @sonobe/desktop`: the muted Electron end-to-end run (`apps/desktop/tests/smoke.mjs`, Playwright `_electron`) covering the host API, the MCP loop, the phone preview and the pop-out viewer. It builds the shell and editor, runs by hand, and isn't part of `npm run e2e` or CI. `SONOBE_SMOKE_SKIP_EDITOR_BUILD=1` reuses `apps/editor/dist`. `npm run smoke:drafts -w @sonobe/desktop` (after building both) kills the app with SIGTERM and SIGKILL and recovers the draft.
 - `npm run test:ios`: Sonobe Viewer's Swift unit tests and UI tests on an iOS Simulator (`apps/ios/scripts/test.mjs`), against the real web player and LAN preview server, followed by a check of the app's log for the haptics the UI test's taps played. It needs macOS with Xcode, runs by hand, and isn't part of `npm run e2e` or CI. The player's side of the bridge runs in `npm test` (`apps/desktop/player/*.test.ts`; `player.browser.test.ts` drives mobile Chromium and skips without Playwright's browser).
 - Examples must load, validate with zero errors, and simulate their scripted interactions (`examples/*/test.json`).
+- `node evals/run.ts`: behavioral evals (`evals/README.md`). Claude Code runs headless against `sonobe mcp --headless` on each case's start project with only Sonobe's tools, and the finished project is simulated and checked on layer properties. It records pass or fail, turns, tokens, time, tools, and each error code with whether the next call to that tool succeeded. It uses the person's Claude account, runs by hand, and isn't part of `npm test` or CI; `npm test` covers the runner and checks every case's start fails and its reference solution passes.
 - Automated app and QA runs are muted (`--mute-audio`).
 
 ---
