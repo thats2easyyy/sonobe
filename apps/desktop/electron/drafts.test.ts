@@ -120,6 +120,28 @@ describe("draft store", () => {
     expect((await store.list()).find((d) => d.id === other)).toMatchObject({ name: "Checkout", torn: true });
   });
 
+  it("a torn draft that's read back and written again is whole", async () => {
+    await store.write(WINDOW, ID, { files }, meta());
+    store.release(WINDOW);
+    const folder = path.join(dir, `${ID}.sonobe`);
+    await writeFile(path.join(folder, "components", "main.json"), '{\n  "id": "main",\n  "layers": []\n}\n');
+    await writeFile(path.join(folder, "components", "card.json"), '{\n  "id": "card"\n}\n');
+    expect((await store.read(OTHER, ID)).info.torn).toBe(true);
+    // The editor restores it and writes only what the next edit changed.
+    await store.write(OTHER, ID, { files: { "components/button.json": '{\n  "id": "button"\n}\n' } }, meta());
+    store.release(OTHER);
+    expect((await store.list())[0]!.torn).toBeUndefined();
+
+    // The first write cut off before its manifest.
+    const other = "abcdefgh-0000";
+    await mkdir(path.join(dir, `${other}.sonobe`, "components"), { recursive: true });
+    for (const [rel, text] of Object.entries(files)) await writeFile(path.join(dir, `${other}.sonobe`, ...rel.split("/")), text);
+    expect((await store.read(WINDOW, other)).info.torn).toBe(true);
+    await store.write(WINDOW, other, { files: { "components/button.json": '{\n  "id": "button"\n}\n' } }, meta());
+    store.release(WINDOW);
+    expect((await store.list()).find((d) => d.id === other)!.torn).toBeUndefined();
+  });
+
   it("removes a draft, discards a closing window's drafts, and prunes empty and old ones at launch", async () => {
     await store.write(WINDOW, ID, { files }, meta());
     await store.remove(WINDOW, ID);
