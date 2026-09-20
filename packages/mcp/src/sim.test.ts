@@ -243,6 +243,37 @@ describe("simulation with an empty loop", () => {
   });
 });
 
+describe("simulation with a repeated card", () => {
+  const DECK = [
+    { op: "addLayer", layer: { ref: "card", type: "group", name: "Card", props: { position: [50, 100], size: [300, 200], color: "#FFFFFFFF" } } },
+    { op: "addLayer", parent: "$card", layer: { ref: "title", type: "text", name: "Title", props: { size: [260, 30] } } },
+    { op: "addPatch", patch: { ref: "names", type: "loopBuilder", typeParam: "text", inputCount: 4, name: "Names", inputs: { item0: "A", item1: "B", item2: "C", item3: "D" } } },
+    { op: "addPatch", patch: { ref: "drag", type: "drag", name: "Drag Card", inputs: { layer: { layer: "$card" }, startPosition: [50, 100] } } },
+    { op: "connect", from: "$names.loop", to: "@$title.text" },
+    { op: "connect", from: "$drag.position", to: "@$card.position" },
+  ];
+
+  it("says how many copies a layer has, which copy a read got, and which copy a touch hit", async () => {
+    project = await tempProject();
+    client = await connectClient(project.host);
+    expect((await client.call("apply_ops", { ops: DECK })).isError).toBe(false);
+    const reset = await client.call("sim_reset", {});
+    const simId = reset.structured.simId as string;
+    const one = await client.call("sim_get_values", { simId, targets: ["@card.position#2", "@title.text#2"] });
+    expect(one.text).toContain('  @card.position#2 = [50, 100]\n    Layer "Card" has 1 copy, so there\'s no #2.');
+    expect(one.structured.values).toMatchObject({ "@title.text#2": "C" });
+
+    expect((await client.call("apply_ops", { ops: [{ op: "setInput", target: "@card.repeat", value: { link: "names.loop" } }] })).isError).toBe(false);
+    await client.call("sim_step", { simId, frames: 2 });
+    const four = await client.call("sim_get_values", { simId, targets: ["@card.repeat", "@card.position", "@card.position#3"] });
+    expect(four.text).toContain("  @card.repeat = 4\n");
+    expect(four.text).toContain("  @card.position = [50, 100] (copy #0 of 4)");
+    expect(four.structured.notes).toEqual({ "@card.position": "copy #0 of 4" });
+    const drag = await client.call("sim_dispatch", { simId, events: [{ kind: "drag", from: "@card", to: [300, 400] }] });
+    expect(drag.text).toContain("→ hit card#3");
+  });
+});
+
 describe("simulation with mock patches", () => {
   it("runs independent sessions by simId", async () => {
     const { c, simId } = await setup(createMockRegistry());

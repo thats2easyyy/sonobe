@@ -267,6 +267,13 @@ const PORT_FIELDS = ["key", "name", "type", "default", "category", "enumOptions"
 
 function validatePort(ctx: OpContext, component: Component, key: string, port: unknown, direction: "input" | "output", existing: InterfacePort | undefined): InterfacePort {
   if (!isValidId(key)) fail("invalid_id", `"${key}" isn't a valid port key.`, { hint: `Try "${slugify(key, "value")}".` });
+  // An instance layer's own properties win over published inputs with the same key (input_shadowed_by_prop).
+  const shadowing = direction === "input" && !existing && !ctx.lenient && component.kind === "layerComponent" ? ctx.registry.layers.get(COMPONENT_INSTANCE_LAYER_TYPE)?.props.find((q) => q.key === key) : undefined;
+  if (shadowing) {
+    fail("id_taken", `"${key}" can't be a published input of ${component.name}: every layer already has a ${shadowing.name} property with that key, so instances would set their own ${shadowing.name} and nothing would reach the input.`, {
+      hint: `Pick another key, like "${key}Value".`,
+    });
+  }
   if (!port || typeof port !== "object" || Array.isArray(port)) fail("invalid_value", `The published ${direction} "${key}" must be an object like { "name": "Label", "type": "text" }.`);
   const p = port as Partial<InterfacePortInput>;
   for (const field of Object.keys(p)) {

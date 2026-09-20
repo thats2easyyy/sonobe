@@ -1231,10 +1231,13 @@ export function createSimulationManager(options: SimulationManagerOptions): Simu
         const keys = session.overrides.length ? overrideKeys(docOf(session), target) : [];
         const o = session.overrides.find((x) => keys.includes(x.key));
         const overridden = o ? overrideNote(o, values[target]) : undefined;
-        // One note per target: the override clause, then why the value reads as nothing.
+        // One note per target: the override clause, then the runtime's note (why the value reads
+        // as nothing, or a short clause like "copy #0 of 4" that stays inline).
         const note =
           overridden && seen.note
-            ? `${overridden[0]!.toUpperCase()}${overridden.slice(1)}. ${seen.note}`
+            ? /[.!?]$/.test(seen.note)
+              ? `${overridden[0]!.toUpperCase()}${overridden.slice(1)}. ${seen.note}`
+              : `${overridden}; ${seen.note}`
             : (overridden ?? seen.note);
         if (note) notes[target] = note;
       }

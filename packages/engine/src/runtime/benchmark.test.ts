@@ -56,4 +56,20 @@ describe("runtime: performance", () => {
     expect(rt.issues().filter((i) => i.code === "empty_loop")).toHaveLength(20);
     expect(msPerFrame).toBeLessThan(THRESHOLD_MS);
   });
+
+  it("repeats a layer 5,000 times through Repeat about as fast as through its own looped property", () => {
+    const perFrame = (props: Record<string, unknown>) => {
+      const rt = createTestRuntime(buildDoc({ layers: [{ id: "dot", type: "rectangle", name: "Dot", props: props as never }], patches: { rows: { type: "loop", inputs: { count: 5000 } } } }));
+      for (let i = 0; i < 10; i++) rt.step();
+      const frames = 40;
+      const start = performance.now();
+      for (let i = 0; i < frames; i++) rt.step();
+      expect(rt.scene().roots).toHaveLength(5000);
+      return (performance.now() - start) / frames;
+    };
+    const auto = perFrame({ opacity: { link: "rows.index" } });
+    // Repeat reads the loop's length; copying the whole loop into every copy would cost 5,000² per frame.
+    const repeat = perFrame({ repeat: { link: "rows.index" } });
+    expect(repeat).toBeLessThan(Math.max(THRESHOLD_MS * 2, auto * 3));
+  });
 });
