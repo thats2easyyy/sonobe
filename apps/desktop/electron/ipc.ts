@@ -28,6 +28,8 @@ export const IPC = {
   previewChanged: "sonobe:preview:changed",
   /** renderer → main: the editor's document reached a new revision. */
   documentChanged: "sonobe:document:changed",
+  /** renderer → main: the editor restarted its prototype (players restart too). */
+  prototypeRestarted: "sonobe:prototype:restarted",
   secretsStatus: "sonobe:secrets:status",
   secretsGet: "sonobe:secrets:get",
   secretsSet: "sonobe:secrets:set",

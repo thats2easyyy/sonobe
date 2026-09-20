@@ -1,8 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { createStore } from "zustand/vanilla";
-import { createBrowserPlatform, detectMuted, liveKeyOf, type MuteState, type PlatformWindow } from "./platform.ts";
+import { createBrowserPlatform, createMuteStore, detectMuted, liveKeyOf, type PlatformWindow } from "./platform.ts";
 
-const muteStore = (muted = false) => createStore<MuteState>()(() => ({ muted, reason: muted ? "test" : null }));
+const muteStore = (muted = false) => createMuteStore({ muted, reason: muted ? "test" : null });
 const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
 
 class FakeAudio extends EventTarget {
@@ -308,6 +307,22 @@ describe("platform: speech and audio", () => {
     await flush();
     expect(platform.audio!.state("blocked")?.status).toBe("playing");
   });
+
+  it("retries again when the finger lifts: a touch counts as a gesture only on pointerup", async () => {
+    const win = fakeWindow();
+    const platform = createBrowserPlatform({ window: win, mute: muteStore() });
+    FakeAudio.playResult = () => Promise.reject(Object.assign(new Error("no"), { name: "NotAllowedError" }));
+    platform.audio!.play("tap", { url: "https://x.test/a.mp3" }, { loop: false, volume: 1, rate: 1, pitch: 0, pan: 0, from: 0 });
+    await flush();
+    // pointerdown of a touch isn't a user gesture yet: still blocked, and armed again.
+    win.dispatchEvent(new Event("pointerdown"));
+    await flush();
+    expect(platform.audio!.state("tap")?.status).toBe("blocked");
+    FakeAudio.playResult = () => Promise.resolve();
+    win.dispatchEvent(new Event("pointerup"));
+    await flush();
+    expect(platform.audio!.state("tap")?.status).toBe("playing");
+  });
 });
 
 describe("platform: devices and capture", () => {
@@ -338,6 +353,40 @@ describe("platform: devices and capture", () => {
     expect(platform.gamepads!()).toEqual([null, { connected: true, mapping: "standard", buttons: [{ pressed: true, value: 1 }], axes: [0.5, -0.5] }]);
     platform.vibrate!([10, 20]);
     expect(vibrate).toHaveBeenCalledWith([10, 20]);
+  });
+
+  it("reads device motion, asking iOS for permission inside the next tap", async () => {
+    const motion = (x: number) => Object.assign(new Event("devicemotion"), { accelerationIncludingGravity: { x: x * 9.80665, y: 0, z: 0 }, rotationRate: { alpha: 0, beta: 1, gamma: 2 } });
+    const plain = fakeWindow({ DeviceMotionEvent: class {} });
+    const desktop = createBrowserPlatform({ window: plain, mute: muteStore() });
+    expect(desktop.deviceMotion!()).toBeUndefined();
+    plain.dispatchEvent(motion(0.5));
+    expect(desktop.deviceMotion!()).toMatchObject({ acceleration: [0.5, 0, 0], rotationRate: [1, 2, 0] });
+
+    const requestPermission = vi.fn(async () => "granted");
+    const orientation = vi.fn(async () => "granted");
+    const ios = fakeWindow({ DeviceMotionEvent: Object.assign(class {}, { requestPermission }), DeviceOrientationEvent: Object.assign(class {}, { requestPermission: orientation }) });
+    const phone = createBrowserPlatform({ window: ios, mute: muteStore() });
+    expect(phone.deviceMotion!()).toBeUndefined();
+    ios.dispatchEvent(motion(1));
+    expect(phone.deviceMotion!()).toBeUndefined();
+    expect(requestPermission).not.toHaveBeenCalled();
+    ios.dispatchEvent(new Event("pointerup"));
+    expect(requestPermission).toHaveBeenCalledTimes(1);
+    expect(orientation).toHaveBeenCalledTimes(1);
+    await flush();
+    ios.dispatchEvent(motion(1));
+    expect(phone.deviceMotion!()).toMatchObject({ acceleration: [1, 0, 0] });
+    ios.dispatchEvent(new Event("pointerup"));
+    expect(requestPermission).toHaveBeenCalledTimes(1);
+
+    const denied = fakeWindow({ DeviceMotionEvent: Object.assign(class {}, { requestPermission: async () => "denied" }) });
+    const refused = createBrowserPlatform({ window: denied, mute: muteStore() });
+    refused.deviceMotion!();
+    denied.dispatchEvent(new Event("pointerup"));
+    await flush();
+    denied.dispatchEvent(motion(1));
+    expect(refused.deviceMotion!()).toBeUndefined();
   });
 
   it("opens cameras and microphones as live references", async () => {
@@ -406,6 +455,17 @@ describe("platform: devices and capture", () => {
     expect(inputs[0]!.remove).toHaveBeenCalled();
     expect(picked).toEqual([{ kind: "image", image: { url: expect.stringMatching(/^blob:/) }, video: null, width: 300, height: 200, name: "a.png" }]);
     platform.releaseMedia!(picked[0]!.image!);
+  });
+
+  it("keeps a mute switch that tells listeners what changed", () => {
+    const mute = createMuteStore();
+    const seen: [boolean, boolean][] = [];
+    const off = mute.subscribe((state, previous) => seen.push([previous.muted, state.muted]));
+    mute.setState({ muted: true, reason: "user" });
+    expect(mute.getState()).toEqual({ muted: true, reason: "user" });
+    off();
+    mute.setState({ muted: false, reason: null });
+    expect(seen).toEqual([[false, true]]);
   });
 
   it("detects mute requests from the environment", () => {

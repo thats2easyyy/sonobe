@@ -391,6 +391,13 @@
   white-space: nowrap;
 }
 
+/* The restart offer is a sentence: it wraps instead of losing its end in a narrow viewer. */
+.sb-vw__window-note[data-wrap] .sb-vw__window-note-text {
+  padding-block: var(--space-1);
+  white-space: normal;
+  text-wrap: pretty;
+}
+
 /* Floating window */
 .sb-float {
   position: fixed;

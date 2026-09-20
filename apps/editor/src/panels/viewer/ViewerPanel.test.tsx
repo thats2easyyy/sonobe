@@ -160,7 +160,9 @@ describe("ViewerPanel", () => {
     expect(document.querySelector(".sb-phone__url code")?.textContent).toBe(RUNNING.url);
     expect(document.querySelector(".sb-phone__status")?.textContent).toContain("1 phone connected");
     expect([...document.querySelectorAll(".sb-phone__alt")].map((b) => b.textContent)).toEqual(["10.0.0.2:5204"]);
-    expect([...document.querySelectorAll(".sb-phone__note")].map((p) => p.textContent)).toContain("On iPhone, scan this code in the Sonobe Viewer app to feel haptics.");
+    const notes = [...document.querySelectorAll(".sb-phone__note")].map((p) => p.textContent);
+    expect(notes).toContain("On iPhone, scan this code in the Sonobe Viewer app to feel haptics.");
+    expect(notes).toContain("On the phone, a three-finger tap opens a menu with Restart. Restarting here restarts the phone too.");
     act(() => listener?.({ ...RUNNING, clients: 3 }));
     expect(buttonWithText("On phone")!.textContent).toContain("3");
     await act(async () => {
@@ -254,5 +256,22 @@ describe("ViewerPanel", () => {
     expect(session.selection.getState().layers).toEqual(["card"]);
     act(() => session.runtime.state.setState({ diagnostics: [] }));
     expect(note()).toEqual([]);
+  });
+
+  it("offers Restart instead when an edit left state from before it", () => {
+    mount(<ViewerPanel />);
+    const note = () => [...container.querySelectorAll<HTMLElement>(".sb-vw__window-note[data-tone=warn]")];
+    const warning = { code: "empty_loop", severity: "warning" as const, message: 'Layer "Event Card" has 0 copies because ...', component: "main", itemIds: ["card"] };
+    act(() => session.runtime.state.setState({ diagnostics: [warning], staleState: { layerId: "card", copies: 4 } }));
+    expect(note()).toHaveLength(1);
+    expect(note()[0]!.textContent).toBe("The prototype kept state from before your editRestart");
+    expect(note()[0]!.title).toBe("Started fresh, Event Card draws 4 copies. Restart to see your edit from the start.");
+    const restarted = vi.fn();
+    session.runtime.subscribeRestart(restarted);
+    act(() => buttonWithText("Restart")!.click());
+    expect(restarted).toHaveBeenCalledTimes(1);
+    act(() => scheduler.frame());
+    expect(session.runtime.state.getState().staleState).toBeNull();
+    expect(note()[0]!.textContent).toBe("Event Card has no copiesWhy?");
   });
 });

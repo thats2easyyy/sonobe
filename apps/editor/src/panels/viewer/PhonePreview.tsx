@@ -4,7 +4,7 @@
  * addresses; with a fixed URL it just shows that URL.
  */
 
-import { Copy, QrCode, Vibrate, Wifi, WifiOff } from "lucide-react";
+import { Copy, Hand, QrCode, Vibrate, Wifi, WifiOff } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Button } from "../../ui/Button.tsx";
 import { IconButton } from "../../ui/IconButton.tsx";
@@ -246,6 +246,12 @@ export function PhonePreviewButton({ url: urlProp = null, preview, open: openPro
               <p className="sb-phone__note">
                 <Vibrate size={12} aria-hidden />
                 On iPhone, scan this code in the Sonobe Viewer app to feel haptics.
+              </p>
+            )}
+            {lanReachable && (
+              <p className="sb-phone__note">
+                <Hand size={12} aria-hidden />
+                On the phone, a three-finger tap opens a menu with Restart. Restarting here restarts the phone too.
               </p>
             )}
             {managed && (

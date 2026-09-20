@@ -326,7 +326,7 @@ function main(): void {
     if (!appHost || windows.size === 0) return null;
     try {
       const snap = await appHost.getDocument();
-      return { docId: snap.docId, name: snap.doc.project.name, revision: snap.revision, doc: snap.doc };
+      return { docId: snap.docId, name: snap.doc.project.name, revision: snap.revision, doc: snap.doc, scriptsPaused: appHost.scriptsPaused(snap.docId) };
     } catch (err) {
       if (isHostError(err)) return null;
       throw err;
@@ -427,6 +427,14 @@ function main(): void {
     preview?.poke();
     viewerWindow?.server.poke();
   }
+
+  /** The editor in `w` restarted its prototype: players showing its document restart too. */
+  const prototypeRestarted = (w: AppWindow) => {
+    const shown = appHost?.activeTargetId() ?? w.webContents.id;
+    if (shown !== w.webContents.id) return;
+    preview?.restart();
+    viewerWindow?.server.restart();
+  };
 
   /** The editor in `w` committed `revision` (sonobeHost.notifyDocumentChanged). */
   const documentChanged = (w: AppWindow, revision: number) => {
@@ -799,6 +807,11 @@ function main(): void {
       if (!w || typeof revision !== "number" || !Number.isFinite(revision)) return;
       documentChanged(w, revision);
       if (w === primaryWindow()) setHistoryLabels(labels);
+    });
+
+    ipcMain.on(IPC.prototypeRestarted, (event) => {
+      const w = trustedWindow(event);
+      if (w) prototypeRestarted(w);
     });
 
     ipcMain.handle(IPC.secretsStatus, (event): SecretsStatus => {

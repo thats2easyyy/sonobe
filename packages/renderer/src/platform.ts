@@ -1,5 +1,6 @@
 /**
- * Platform services for the live viewer (browser and Electron renderer): network requests, links,
+ * Platform services for live prototypes in a browser: the editor's viewer (browser and Electron
+ * renderer) and the web player (Preview on Phone, the pop-out viewer). Network requests, links,
  * speech, vibration, keyed audio voices, WebSockets, location, gamepads, device motion, the soft
  * keyboard, picking photos and videos, reading media bytes, and camera and microphone capture.
  *
@@ -30,7 +31,6 @@ import type {
   SoftKeyboardSnapshot,
   SpeechOptions,
 } from "@sonobe/engine";
-import { createStore, type StoreApi } from "zustand/vanilla";
 
 // ---------------------------------------------------------------------------
 // Mute switch
@@ -40,6 +40,13 @@ export interface MuteState {
   muted: boolean;
   /** Why: "env", "query", "host", "automation", "user", or null when not muted. */
   reason: string | null;
+}
+
+/** The mute switch's store. A zustand StoreApi<MuteState> fits it too, so the editor can pass its own. */
+export interface MuteStore {
+  getState(): MuteState;
+  setState(state: MuteState): void;
+  subscribe(listener: (state: MuteState, previous: MuteState) => void): () => void;
 }
 
 type MuteWindow = {
@@ -65,11 +72,31 @@ export function detectMuted(win: MuteWindow | undefined = typeof window === "und
   return { muted: false, reason: null };
 }
 
-let muteStore: StoreApi<MuteState> | null = null;
+/** A mute switch of its own (tests, or a page with several prototypes). */
+export function createMuteStore(initial: MuteState = { muted: false, reason: null }): MuteStore {
+  let state = { ...initial };
+  const listeners = new Set<(state: MuteState, previous: MuteState) => void>();
+  return {
+    getState: () => state,
+    setState(next) {
+      const previous = state;
+      state = { muted: next.muted, reason: next.reason };
+      for (const listener of [...listeners]) listener(state, previous);
+    },
+    subscribe(listener) {
+      listeners.add(listener);
+      return () => {
+        listeners.delete(listener);
+      };
+    },
+  };
+}
 
-/** The app-wide mute switch (seeded from detectMuted on first use). */
-export function getMuteStore(): StoreApi<MuteState> {
-  muteStore ??= createStore<MuteState>()(() => detectMuted());
+let muteStore: MuteStore | null = null;
+
+/** The page-wide mute switch (seeded from detectMuted on first use). */
+export function getMuteStore(): MuteStore {
+  muteStore ??= createMuteStore(detectMuted());
   return muteStore;
 }
 
@@ -97,7 +124,7 @@ export interface BrowserPlatformOptions {
   /** Open links outside the app (desktop shell). Default: window.open. */
   openExternal?: (url: string) => boolean | void | Promise<boolean | void>;
   /** Default: the global mute switch. */
-  mute?: StoreApi<MuteState>;
+  mute?: MuteStore;
   /** The element drawing a layer in the primary viewer (pixel reads, frame ids). */
   layerElement?: (layer: LayerRef) => HTMLElement | undefined;
   fetch?: typeof globalThis.fetch;
@@ -408,6 +435,27 @@ export function createBrowserPlatform(options: BrowserPlatformOptions = {}): Bro
     };
   }
 
+  /**
+   * Run `fn` inside the next user gesture (media and permission prompts need one). A mouse press
+   * counts on pointerdown, a touch only once the finger lifts (pointerup), as browsers decide.
+   */
+  const onNextGesture = (fn: () => void): boolean => {
+    if (typeof win?.addEventListener !== "function") return false;
+    const events = ["pointerdown", "pointerup", "keydown"];
+    const capture = { capture: true };
+    const remove = () => {
+      for (const name of events) win.removeEventListener?.(name, handler, capture);
+      cleanups.delete(remove);
+    };
+    const handler = () => {
+      remove();
+      fn();
+    };
+    for (const name of events) win.addEventListener(name, handler, capture);
+    cleanups.add(remove);
+    return true;
+  };
+
   // ---- audio voices -------------------------------------------------------------
   const voices = new Map<string, Voice>();
   const AudioCtor = win?.Audio;
@@ -417,22 +465,11 @@ export function createBrowserPlatform(options: BrowserPlatformOptions = {}): Bro
     for (const voice of voices.values()) if (voice.status === "blocked") startVoice(voice);
   };
   const armGestureRetry = () => {
-    if (gestureArmed || typeof win?.addEventListener !== "function") return;
-    gestureArmed = true;
-    const handler = () => {
-      win.removeEventListener?.("pointerdown", handler, true);
-      win.removeEventListener?.("keydown", handler, true);
-      cleanups.delete(remove);
+    if (gestureArmed) return;
+    gestureArmed = onNextGesture(() => {
       void audioContext?.resume?.();
       retryBlocked();
-    };
-    const remove = () => {
-      win.removeEventListener?.("pointerdown", handler, true);
-      win.removeEventListener?.("keydown", handler, true);
-    };
-    win.addEventListener("pointerdown", handler, true);
-    win.addEventListener("keydown", handler, true);
-    cleanups.add(remove);
+    });
   };
 
   const ensureNodes = (voice: Voice) => {
@@ -754,15 +791,34 @@ export function createBrowserPlatform(options: BrowserPlatformOptions = {}): Bro
       attitude = [e.beta ?? 0, e.gamma ?? 0, e.alpha ?? 0];
       if (sample) sample = { ...sample, attitude };
     };
+    const listen = () => {
+      if (disposed) return;
+      win.addEventListener!("devicemotion", onMotion);
+      win.addEventListener!("deviceorientation", onOrientation);
+      cleanups.add(() => {
+        win.removeEventListener?.("devicemotion", onMotion);
+        win.removeEventListener?.("deviceorientation", onOrientation);
+      });
+    };
+    type PermissionEvent = { requestPermission?: () => Promise<string> };
+    const motionPermission = (win.DeviceMotionEvent as unknown as PermissionEvent).requestPermission;
+    const orientationPermission = (win.DeviceOrientationEvent as unknown as PermissionEvent | undefined)?.requestPermission;
     platform.deviceMotion = () => {
       if (!listening) {
         listening = true;
-        win.addEventListener!("devicemotion", onMotion);
-        win.addEventListener!("deviceorientation", onOrientation);
-        cleanups.add(() => {
-          win.removeEventListener?.("devicemotion", onMotion);
-          win.removeEventListener?.("deviceorientation", onOrientation);
-        });
+        // iOS asks the person first, and only from inside a tap.
+        if (typeof motionPermission === "function") {
+          onNextGesture(() => {
+            // Both prompts start inside the gesture; attitude simply stays unknown without the second.
+            if (typeof orientationPermission === "function") void orientationPermission.call(win.DeviceOrientationEvent).catch(() => undefined);
+            void motionPermission.call(win.DeviceMotionEvent).then(
+              (state) => {
+                if (state === "granted") listen();
+              },
+              () => undefined,
+            );
+          });
+        } else listen();
       }
       return sample;
     };
