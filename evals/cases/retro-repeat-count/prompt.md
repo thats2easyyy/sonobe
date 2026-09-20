@@ -1,0 +1,1 @@
+Make four chips from the one Chip layer: four copies of the same layer, laid out side by side by the Chips row. Pressing a chip grows that chip alone to 1.15× while the finger is down, with a quick spring, and it springs back to normal when the finger lifts.

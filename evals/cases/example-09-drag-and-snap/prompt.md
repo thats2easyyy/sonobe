@@ -1,0 +1,3 @@
+Make the self view (Self View) draggable anywhere on the call. It follows the finger in 2D and lifts to 1.06× scale while it's held.
+
+When you let go, it springs to the corner that a throw at the release speed would land in (normal deceleration), starting at the finger's velocity with a spring of tension 220 and friction 22. The corners, as the self view's position: top right [266, 76] (where it starts), top left [16, 76], bottom left [16, 578] and bottom right [266, 578]. Flick it toward a corner and it travels there, place it slowly near a corner and it settles there, and a small nudge sends it back to its corner.

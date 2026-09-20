@@ -1,0 +1,7 @@
+{
+  "calls": [
+    { "tool": "get_outline" },
+    { "tool": "set_values", "args": { "updates": [{ "target": "dot_spring.bounciness", "value": 8 }] } }
+  ],
+  "answer": "A Scroll patch pages the Cards row one card at a time. Its page number drives the dots: each dot copy compares its index with the page, and a spring stretches the current one. I raised the dot spring's bounciness to 8, so it overshoots a little."
+}

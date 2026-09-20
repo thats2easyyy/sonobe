@@ -1,0 +1,19 @@
+{
+  "title": "Swipe Cards",
+  "about": "examples/10-swipe-cards with its patches removed: the layers are there, Claude builds the logic.",
+  "tags": [
+    "example",
+    "gestures",
+    "loops"
+  ],
+  "start": {
+    "example": "10-swipe-cards",
+    "patches": false
+  },
+  "test": {
+    "example": "10-swipe-cards"
+  },
+  "budget": {
+    "maxTurns": 60
+  }
+}

@@ -1,0 +1,104 @@
+{
+  "calls": [
+    {
+      "tool": "add_patches",
+      "args": {
+        "patches": [
+          {
+            "ref": "tap",
+            "type": "interaction",
+            "name": "Tap Card",
+            "inputs": {
+              "layer": {
+                "layer": "card"
+              }
+            }
+          },
+          {
+            "ref": "grown",
+            "type": "switch",
+            "name": "Card Grown",
+            "inputs": {
+              "flip": {
+                "link": "$tap.tap"
+              }
+            }
+          },
+          {
+            "ref": "spring",
+            "type": "popAnimation",
+            "name": "Grow Spring",
+            "inputs": {
+              "number": {
+                "link": "$grown.on"
+              },
+              "speed": 12
+            }
+          },
+          {
+            "ref": "scale",
+            "type": "transition",
+            "name": "Card Scale",
+            "inputs": {
+              "progress": {
+                "link": "$spring.output"
+              },
+              "start": 1,
+              "end": 1.15
+            }
+          }
+        ],
+        "connections": [
+          {
+            "from": "$scale.output",
+            "to": "@card.scale"
+          }
+        ]
+      }
+    },
+    {
+      "tool": "set_knobs",
+      "args": {
+        "presets": [
+          {
+            "name": "Proposal"
+          },
+          {
+            "name": "Shipped app",
+            "locked": true
+          }
+        ],
+        "knobs": [
+          {
+            "name": "Grow Size",
+            "group": "Grow",
+            "min": 1,
+            "max": 1.5,
+            "step": 0.01,
+            "unit": "×",
+            "connect": [
+              "card_scale.end"
+            ],
+            "values": {
+              "Proposal": 1.15,
+              "Shipped app": 1.05
+            }
+          },
+          {
+            "name": "Grow Bounce",
+            "group": "Grow",
+            "connect": [
+              "grow_spring.bounciness"
+            ],
+            "values": {
+              "Proposal": 10,
+              "Shipped app": 0
+            }
+          }
+        ],
+        "label": "grow knobs"
+      }
+    }
+  ],
+  "answer": "Grow Size and Grow Bounce are knobs; Shipped app (locked) grows to 1.05 with no bounce, Proposal to 1.15 with bounciness 10."
+}

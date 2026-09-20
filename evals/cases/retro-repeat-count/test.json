@@ -1,0 +1,25 @@
+{
+  "description": "Four chip copies, each growing on its own while pressed.",
+  "scenarios": [
+    {
+      "name": "The fourth chip exists and grows while pressed",
+      "events": [{ "kind": "tap", "target": "@chip#3", "holdMs": 500, "atMs": 100 }],
+      "durationMs": 1400,
+      "expect": [
+        { "description": "Chip 4 grows while it's held", "target": "@chip.scale#3", "at": 500, "op": ">", "value": 1.12 },
+        { "description": "and springs back after", "target": "@chip.scale#3", "at": "end", "op": "==", "value": 1, "tolerance": 0.01 },
+        { "description": "Chip 1 doesn't move", "target": "@chip.scale#0", "at": "max", "op": "<", "value": 1.001 }
+      ]
+    },
+    {
+      "name": "Only the pressed chip grows",
+      "events": [{ "kind": "tap", "target": "@chip#1", "holdMs": 500, "atMs": 100 }],
+      "durationMs": 1400,
+      "expect": [
+        { "description": "Chip 2 grows while it's held", "target": "@chip.scale#1", "at": 500, "op": ">", "value": 1.12 },
+        { "description": "Chip 3 next to it doesn't", "target": "@chip.scale#2", "at": "max", "op": "<", "value": 1.001 },
+        { "description": "nor does chip 1", "target": "@chip.scale#0", "at": "max", "op": "<", "value": 1.001 }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,7 @@
+{
+  "calls": [
+    { "tool": "get_document_info" },
+    { "tool": "get_outline" }
+  ],
+  "answer": "Tap the card and it springs bigger, to 1.12 times its size, with a little bounce, while its shadow spreads. Tap it again and it springs back. A Switch remembers whether the card is zoomed, and a Pop Animation drives the scale and shadow through three Transitions."
+}

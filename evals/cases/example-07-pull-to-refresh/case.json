@@ -1,0 +1,19 @@
+{
+  "title": "Pull to Refresh",
+  "about": "examples/07-pull-to-refresh with its patches removed: the layers are there, Claude builds the logic.",
+  "tags": [
+    "example",
+    "scroll",
+    "states"
+  ],
+  "start": {
+    "example": "07-pull-to-refresh",
+    "patches": false
+  },
+  "test": {
+    "example": "07-pull-to-refresh"
+  },
+  "budget": {
+    "maxTurns": 50
+  }
+}

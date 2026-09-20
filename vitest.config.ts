@@ -8,6 +8,7 @@ export default defineConfig({
       "apps/*/electron/**/*.test.ts",
       "apps/*/player/**/*.test.ts",
       "examples/**/*.test.ts",
+      "evals/**/*.test.ts",
     ],
     environment: "node",
   },
