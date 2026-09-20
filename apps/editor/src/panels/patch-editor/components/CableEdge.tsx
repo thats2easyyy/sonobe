@@ -1,14 +1,14 @@
 /** Cables: colored by source type, loop tint, conversion and invalid glyphs, orbs for pulses and state changes, state glow. */
 
 import { useStore as useFlowStore, useStoreApi, type ConnectionLineComponentProps, type EdgeProps } from "@xyflow/react";
-import { memo, useEffect, useId, useLayoutEffect, useRef, useState, type CSSProperties } from "react";
+import { memo, useEffect, useId, useLayoutEffect, useRef, useState, useSyncExternalStore, type CSSProperties } from "react";
 import { createPortal } from "react-dom";
 import { portColorVar } from "../../../theme/tokens.ts";
 import { isTruthyState } from "@sonobe/core/graph";
 import { cablePath, cablePoint } from "../model/geometry.ts";
 import { addressNode, type CableFlowEdge, type FlowNode } from "../model/types.ts";
 import { usePatchEditor, useLiveValue, useUi } from "../state/context.ts";
-import { ORB_INSET, ORB_RADIUS, ORB_SLOTS, ORB_TRAILS, type OrbTone } from "./orb.ts";
+import { ORB_INSET, ORB_RADIUS, ORB_SLOTS, ORB_TRAILS, SWEEP_LENGTH, type OrbTone } from "./orb.ts";
 import { createOrbFlight, type OrbEnds } from "./orbFlight.ts";
 import { createOrbQueue, orbRelayFor } from "./orbSchedule.ts";
 
@@ -30,19 +30,19 @@ interface OrbProps extends OrbEnds {
 
 /**
  * A glowing orb that travels the cable from output to input each time a pulse fires or a boolean
- * turns on, and a dimmer one when it turns off; when it gets there, the input's dot flares. With
- * reduced motion the whole cable flashes instead. Nothing mounts until the first send, a second or
- * third slot mounts only when orbs overlap, the elements unmount once the cable is idle, and each
- * send replays Web Animations on reused elements (orbFlight.ts), so an orb in flight never
- * re-renders React. When one may leave is orbSchedule.ts.
+ * turns on, and a dimmer one when it turns off; when it gets there, the input's dot flares. A
+ * boolean's glow changes with its orb: the cable keeps the glow it had until the orb leaves (the
+ * orb may wait for one flying into its node, orbSchedule.ts), and the orb carries the new one along
+ * behind it. With reduced motion the whole cable flashes instead, and the glow changes at once.
+ * Nothing mounts until the first send, a second or third slot mounts only when orbs overlap, the
+ * elements unmount once the cable is idle, and each send replays Web Animations on reused elements
+ * (orbFlight.ts), so an orb in flight never re-renders React.
  */
 const Orb = memo(function Orb(props: OrbProps) {
   const { d, tx, ty, source, color, pulse, reduced } = props;
   const { live } = usePatchEditor();
   const flow = useStoreApi();
   const gradient = `sb-pe-orb${useId().replace(/[^\w-]/g, "")}`;
-  /** Slots mounted: 0 while idle. */
-  const [slots, setSlots] = useState(0);
   const root = useRef<SVGGElement>(null);
   const landing = useRef<SVGSVGElement>(null);
   const latest = useRef(props);
@@ -53,12 +53,46 @@ const Orb = memo(function Orb(props: OrbProps) {
   const [orb] = useState(() => {
     const flight = createOrbFlight();
     const queue = createOrbQueue();
+    // Slots mounted, 0 while idle. A store rather than state, so a mount renders in the same commit
+    // as the cable's own change of glow (useLiveValue), which the hold below has to cover.
+    let slots = 0;
+    const listeners = new Set<() => void>();
+    const setSlots = (next: (n: number) => number) => {
+      const n = next(slots);
+      if (n === slots) return;
+      slots = n;
+      for (const cb of [...listeners]) cb();
+    };
     /** A send waiting for its slot to mount. */
     let unmounted: OrbTone | null = null;
     let idle: ReturnType<typeof setTimeout> | undefined;
     let wait: ReturnType<typeof setTimeout> | undefined;
     /** Unmounted: a send the relay still holds finds nothing to play. */
     let stopped = false;
+
+    // The glow a boolean's cable shows (data-orb-hold on it, which hides its own) from a change until
+    // the orb carrying it is in: on or off as it was, with the sweep lighting or darkening it behind
+    // the head. null: the cable shows its own. `after` is what it shows once the sweep ends.
+    let held: boolean | null = null;
+    let after = false;
+    let holder: Element | null = null;
+    const showHold = () => {
+      const cable = root.current?.closest(".sb-pe-cable") ?? null;
+      if (holder && holder !== cable) holder.removeAttribute("data-orb-hold");
+      holder = cable;
+      if (held === null) cable?.removeAttribute("data-orb-hold");
+      else cable?.setAttribute("data-orb-hold", held ? "on" : "off");
+    };
+    const release = () => {
+      held = null;
+      flight.stopSweep();
+      showHold();
+    };
+    /** The sweep is in: show what it carried, and hold that while a newer change waits. */
+    const settle = () => {
+      held = queue.waiting() ? after : null;
+      showHold();
+    };
 
     const launch = (tone: OrbTone) => {
       const el = root.current;
@@ -70,11 +104,18 @@ const Orb = memo(function Orb(props: OrbProps) {
         return;
       }
       queue.setGap(played.gap);
+      if (held !== null && !p.reduced) {
+        const on = tone === "full";
+        if (on !== after) {
+          after = on;
+          flight.sweep(el!.querySelector(".sb-pe-orb__sweep"), tone, p, on, settle);
+        } else if (!flight.sweeping()) settle();
+      }
       clearTimeout(idle);
       idle = setTimeout(() => {
-        if (queue.waiting()) return;
+        if (queue.waiting() || held !== null) return;
         flight.reset();
-        setSlots(0);
+        setSlots(() => 0);
       }, played.done + ORB_IDLE_MS);
     };
 
@@ -89,22 +130,36 @@ const Orb = memo(function Orb(props: OrbProps) {
         clearTimeout(idle);
         setSlots((n) => Math.max(n, 1));
         wait = setTimeout(() => {
-          const held = queue.take(performance.now());
-          if (held) launch(held);
+          const next = queue.take(performance.now());
+          if (next) launch(next);
         }, go.at - now);
       } else if (go.at <= now) launch(tone);
       return p.reduced ? null : go.at + flight.arrival(tone, p);
     };
 
     return {
+      subscribe(cb: () => void) {
+        listeners.add(cb);
+        return () => void listeners.delete(cb);
+      },
+      slots: () => slots,
       send(tone: OrbTone) {
         const p = latest.current;
         const now = performance.now();
         if (p.reduced) return void schedule(tone, now);
         orbRelayFor(live).send({ from: nodeOf(p.source), to: nodeOf(p.target), event: now, launch: (ready) => schedule(tone, ready) });
       },
-      /** Play the send that mounted a slot. */
+      /** A boolean changed from `before`: hold the glow it had until its orb carries the change. */
+      change(before: boolean) {
+        if (stopped || latest.current.reduced) return;
+        if (held === null) held = after = before;
+        setSlots((n) => Math.max(n, 1));
+        showHold();
+      },
+      release,
+      /** Slots mounted: show the hold, and play the send that mounted one. */
       mounted() {
+        showHold();
         const tone = unmounted;
         unmounted = null;
         if (tone) launch(tone);
@@ -117,13 +172,20 @@ const Orb = memo(function Orb(props: OrbProps) {
         clearTimeout(idle);
         clearTimeout(wait);
         queue.clear();
+        release();
       },
     };
   });
 
+  const slots = useSyncExternalStore(orb.subscribe, orb.slots, orb.slots);
+
   useLayoutEffect(() => {
     if (slots > 0) orb.mounted();
   }, [slots, orb]);
+
+  useLayoutEffect(() => {
+    if (reduced) orb.release();
+  }, [reduced, orb]);
 
   useEffect(() => {
     if (pulse) return live.subscribePulse(source, () => orb.send("full"));
@@ -132,9 +194,15 @@ const Orb = memo(function Orb(props: OrbProps) {
     let on = isTruthyState(live.get(source));
     return live.subscribe(source, () => {
       const value = live.get(source);
-      if (value === undefined) return void (known = false);
+      if (value === undefined) {
+        known = false;
+        return orb.release();
+      }
       const next = isTruthyState(value);
-      if (known && next !== on) orb.send(next ? "full" : "dim");
+      if (known && next !== on) {
+        orb.change(on);
+        orb.send(next ? "full" : "dim");
+      }
       known = true;
       on = next;
     });
@@ -158,7 +226,7 @@ const Orb = memo(function Orb(props: OrbProps) {
   const portal = flow.getState().domNode?.querySelector(".react-flow__viewport-portal");
   const dotX = tx + ORB_INSET;
   return (
-    <g ref={root} className="sb-pe-orb" aria-hidden>
+    <g ref={root} className="sb-pe-orb" style={{ "--sb-orb-dim": `url(#${gradient}-dim)` } as CSSProperties} aria-hidden>
       <radialGradient id={gradient}>
         <stop offset="0" className="sb-pe-orb__core" />
         <stop offset="0.16" className="sb-pe-orb__hot" />
@@ -166,6 +234,14 @@ const Orb = memo(function Orb(props: OrbProps) {
         <stop offset="0.6" className="sb-pe-orb__glow" />
         <stop offset="1" className="sb-pe-orb__fade" />
       </radialGradient>
+      <radialGradient id={`${gradient}-dim`}>
+        <stop offset="0" className="sb-pe-orb__dim-core" />
+        <stop offset="0.2" className="sb-pe-orb__dim-hot" />
+        <stop offset="0.4" className="sb-pe-orb__dim-color" />
+        <stop offset="0.66" className="sb-pe-orb__dim-glow" />
+        <stop offset="1" className="sb-pe-orb__fade" />
+      </radialGradient>
+      {!pulse && <path className="sb-pe-orb__sweep" d={d} pathLength={SWEEP_LENGTH} />}
       {Array.from({ length: slots }, (_, i) => (
         <g key={i} className="sb-pe-orb__slot">
           {ORB_TRAILS.map((name) => (
