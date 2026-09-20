@@ -142,4 +142,24 @@ describe("PREVIEW_BOOTSTRAP", () => {
     }
     expect(doc.body.textContent).toBe("Three");
   });
+
+  it("swaps the last page in again once a CDN script loads, so Tailwind's v3 CDN, which styles only later changes, sees it", async () => {
+    const doc = frame();
+    // Tailwind's v3 Play CDN watches the document from when it runs, just before its load event.
+    const seen: string[] = [];
+    doc.addEventListener(
+      "load",
+      (event) => {
+        if (!(event.target instanceof window.HTMLScriptElement)) return;
+        new window.MutationObserver((records) => {
+          for (const record of records) for (const node of record.addedNodes) if (node.textContent) seen.push(node.textContent);
+        }).observe(doc.documentElement, { childList: true, subtree: true });
+      },
+      true,
+    );
+    message(page('<head><script src="https://cdn.tailwindcss.com"></script></head><body><p class="p-8">Checkout</p></body>'));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(seen).toContain("Checkout");
+    expect(doc.body.innerHTML).toBe('<p class="p-8">Checkout</p>');
+  });
 });

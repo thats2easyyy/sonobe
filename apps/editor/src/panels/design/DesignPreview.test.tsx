@@ -211,6 +211,38 @@ describe("DesignPreview", () => {
     expect(posts.mock.calls).toEqual([[{ type: PREVIEW_MESSAGE_TYPE, nonce: nonceOf(second), html: "<p>Hi</p>" }, "*"]]);
   });
 
+  it("keeps its pill in view: in the artboard's label row, above the frame, or inside its top edge below the ruler", () => {
+    const slot = document.createElement("span");
+    document.body.appendChild(slot);
+    const pill = () => container.querySelector<HTMLElement>(".sb-design-preview__pill");
+    try {
+      // A new screen at the artboard's top, with the label (22 px above it) clear of a 20 px ruler: the pill is in the label.
+      show([draft({ fields: { name: "Checkout" }, html: "<p>Hi</p>" })]);
+      render({ labelSlot: slot, insetTop: 20 });
+      expect(slot.querySelector("[data-design-pill]")?.textContent).toBe("Claude is writing “Checkout”");
+      expect(pill()).toBeNull();
+
+      // The label is under the ruler: just inside the frame's top edge.
+      render({ labelSlot: slot, insetTop: 40 });
+      expect(slot.childElementCount).toBe(0);
+      expect(pill()!.dataset.place).toBe("inside");
+      expect(pill()!.style.top).toBe("8px");
+
+      // Scrolled so the frame's top is under the ruler: the pill stays below it.
+      render({ labelSlot: slot, insetTop: 20, viewport: { ...VIEWPORT, y: -100 } });
+      expect(pill()!.dataset.place).toBe("inside");
+      expect(-100 + parseFloat(pill()!.style.top)).toBeGreaterThanOrEqual(20);
+
+      // A layer further down has room above it.
+      show([draft({ fields: { name: "Card", replace: "card" }, html: "<p>Hi</p>" })]);
+      render({ labelSlot: slot, insetTop: 20 });
+      expect(pill()!.dataset.place).toBe("above");
+      expect(slot.childElementCount).toBe(0);
+    } finally {
+      slot.remove();
+    }
+  });
+
   it("fades out once the layers are added, then goes away", () => {
     vi.useFakeTimers();
     show([draft({ html: "<p>Hi</p>", status: "adding" })]);

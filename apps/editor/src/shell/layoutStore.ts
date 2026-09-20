@@ -1,6 +1,7 @@
 /**
  * Shell layout state: panel sizes, collapsed panels, view mode, split direction, drawers, the HUD
  * tab, and the Inspector tab. Persisted to localStorage (debounced; storage failures are ignored).
+ * A temporary layout is saved as what it replaced, so a reload never keeps it.
  */
 
 import { useStore } from "zustand";
@@ -29,6 +30,15 @@ export interface LayoutState {
   inspectorTab: InspectorTab;
 }
 
+/**
+ * Values shown for a while in place of the person's own (Design with Claude's room for the canvas,
+ * panels/design/layout.ts), and what they replaced.
+ */
+export interface TemporaryLayout {
+  viewMode?: { from: ViewMode; to: ViewMode };
+  split?: { from: number; to: number };
+}
+
 export interface LayoutActions {
   setSize: (panel: SizedPanel, size: number) => void;
   setSplit: (ratio: number) => void;
@@ -39,10 +49,14 @@ export interface LayoutActions {
   toggleDrawer: (drawer: DrawerId) => void;
   setHudTab: (tab: HudTab) => void;
   setInspectorTab: (tab: InspectorTab) => void;
+  /** Show these values for a while. Until endTemporary, each is saved as what it replaced while it still shows. */
+  showTemporary: (values: Partial<Pick<LayoutState, "viewMode" | "split">>) => void;
+  /** End the temporary layout: put back each value that still shows, or (restore false) keep them as the person's own. */
+  endTemporary: (restore: boolean) => void;
   reset: () => void;
 }
 
-export type LayoutStore = LayoutState & LayoutActions;
+export type LayoutStore = LayoutState & LayoutActions & { temporary: TemporaryLayout | null };
 
 export const LAYOUT_STORAGE_KEY = "sonobe.editor.layout.v1";
 
@@ -108,6 +122,15 @@ export function pickLayout(state: LayoutState): LayoutState {
   return { sizes, split, collapsed, viewMode, splitDirection, drawer, hudTab, inspectorTab };
 }
 
+/** What's saved: the layout, with each temporary value that still shows saved as what it replaced. */
+export function savedLayout(state: LayoutState & { temporary?: TemporaryLayout | null }): LayoutState {
+  const layout = pickLayout(state);
+  const temporary = state.temporary;
+  if (temporary?.viewMode && layout.viewMode === temporary.viewMode.to) layout.viewMode = temporary.viewMode.from;
+  if (temporary?.split && layout.split === temporary.split.to) layout.split = temporary.split.from;
+  return layout;
+}
+
 export interface LayoutStoreOptions {
   /** null disables persistence. */
   storageKey?: string | null;
@@ -119,6 +142,7 @@ export function createLayoutStore(options: LayoutStoreOptions = {}): StoreApi<La
   const initial = key ? sanitizeLayout(readJSON(key, (v): v is unknown => v !== null)) : DEFAULT_LAYOUT;
   const store = createStore<LayoutStore>()((set) => ({
     ...initial,
+    temporary: null,
     setSize: (panel, size) =>
       set((s) => {
         const next = Math.round(clampRange(size, SIZE_LIMITS[panel]));
@@ -132,13 +156,28 @@ export function createLayoutStore(options: LayoutStoreOptions = {}): StoreApi<La
     toggleDrawer: (drawer) => set((s) => ({ drawer: s.drawer === drawer ? null : drawer })),
     setHudTab: (hudTab) => set((s) => ({ hudTab, collapsed: s.collapsed.hud ? { ...s.collapsed, hud: false } : s.collapsed })),
     setInspectorTab: (inspectorTab) => set((s) => (s.inspectorTab === inspectorTab ? s : { inspectorTab })),
-    reset: () => set({ ...DEFAULT_LAYOUT }),
+    showTemporary: (values) =>
+      set((s) => {
+        const temporary: TemporaryLayout = {};
+        if (values.viewMode !== undefined && values.viewMode !== s.viewMode) temporary.viewMode = { from: s.viewMode, to: values.viewMode };
+        const split = values.split === undefined ? s.split : clampRange(values.split, SPLIT_LIMITS);
+        if (split !== s.split) temporary.split = { from: s.split, to: split };
+        return { ...(temporary.viewMode ? { viewMode: temporary.viewMode.to } : {}), ...(temporary.split ? { split } : {}), temporary };
+      }),
+    endTemporary: (restore) =>
+      set((s) => {
+        const t = s.temporary;
+        if (!t) return s;
+        if (!restore) return { temporary: null };
+        return { temporary: null, ...(t.split && s.split === t.split.to ? { split: t.split.from } : {}), ...(t.viewMode && s.viewMode === t.viewMode.to ? { viewMode: t.viewMode.from } : {}) };
+      }),
+    reset: () => set({ ...DEFAULT_LAYOUT, temporary: null }),
   }));
   if (key) {
     let timer: ReturnType<typeof setTimeout> | undefined;
     store.subscribe((state) => {
       clearTimeout(timer);
-      timer = setTimeout(() => writeJSON(key, pickLayout(state)), options.persistDelayMs ?? 200);
+      timer = setTimeout(() => writeJSON(key, savedLayout(state)), options.persistDelayMs ?? 200);
     });
   }
   return store;

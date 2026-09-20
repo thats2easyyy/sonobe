@@ -9,7 +9,7 @@ import { createEditorSession, type EditorSession } from "../../state/session.ts"
 import { CommandProvider } from "../../ui/commands/CommandProvider.tsx";
 import { CommandRegistry } from "../../ui/commands/commandRegistry.ts";
 import { KeyboardShortcutManager } from "../../ui/commands/shortcutManager.ts";
-import { designStore, initialDesignData } from "../design/designStore.ts";
+import { designStore, initialDesignData, type DesignDraft } from "../design/designStore.ts";
 import { CanvasPanel } from "./CanvasPanel.tsx";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -105,15 +105,14 @@ function dragEvent(type: string, point: { clientX: number; clientY: number }, da
   return event;
 }
 
-/** Resize the canvas body. Size observers report on the next animation frame (ui/lib/observeResize.ts), so run that frame too. */
-function resize(width: number, height: number) {
-  bodySize = [width, height];
+/** Report that `target` changed size. Size observers report on the next animation frame (ui/lib/observeResize.ts), so run that frame too. */
+function observeResized(target: Element) {
   const frames: FrameRequestCallback[] = [];
   const requestFrame = globalThis.requestAnimationFrame;
   globalThis.requestAnimationFrame = (callback) => frames.push(callback);
   try {
     act(() => {
-      for (const o of observers) if (o.targets.includes(body())) o.callback([], {} as ResizeObserver);
+      for (const o of observers) if (o.targets.includes(target)) o.callback([], {} as ResizeObserver);
     });
   } finally {
     globalThis.requestAnimationFrame = requestFrame;
@@ -123,9 +122,24 @@ function resize(width: number, height: number) {
   });
 }
 
+/** Resize the canvas body. */
+function resize(width: number, height: number) {
+  bodySize = [width, height];
+  observeResized(body());
+}
+
 /** The artboard's translate(x, y) in CSS pixels. */
 const artboardOffset = () => {
   const match = /translate\((-?[\d.]+)px, (-?[\d.]+)px\)/.exec(container.querySelector<HTMLElement>(".sb-cv__artboard")!.style.transform);
+  return match ? [Number(match[1]), Number(match[2])] : null;
+};
+
+/** The artboard's zoom (its width over the 402 pt artboard). */
+const artboardZoom = () => parseFloat(container.querySelector<HTMLElement>(".sb-cv__artboard")!.style.width) / 402;
+
+/** The live preview's translate(x, y). */
+const previewOffset = () => {
+  const match = /translate\((-?[\d.]+)px, (-?[\d.]+)px\)/.exec(container.querySelector<HTMLElement>(".sb-design-preview")!.style.transform);
   return match ? [Number(match[1]), Number(match[2])] : null;
 };
 
@@ -138,6 +152,27 @@ function fitRectOffset(size: [number, number], padding: number): [number, number
 const position = (id: string) => findLayer(session.document.getState().doc.components.main!.layers, id)!.layer.props.position;
 
 const designButton = () => container.querySelector<HTMLButtonElement>('button[aria-label="Design with Claude"]')!;
+
+const CLAUDE_CODE = { id: "cc-1", label: "Claude Code", folder: "/Users/me/placemark" };
+
+/** A draft on the canvas: Claude Code's preview_design by default. */
+const draftOf = (over: Partial<DesignDraft> = {}): DesignDraft => ({
+  source: "mcp",
+  key: "mcp:cc-1",
+  runId: "",
+  turn: 0,
+  toolUseId: "",
+  html: "<p>Checkout</p>",
+  fields: { name: "Checkout" },
+  status: "writing",
+  since: Date.now(),
+  progress: null,
+  error: null,
+  resync: false,
+  mcp: { author: { kind: "agent", name: "Claude" }, client: CLAUDE_CODE, revision: 1, touchedAt: Date.now(), addingFrom: null },
+  ...over,
+});
+const showDraft = (draft: DesignDraft) => act(() => designStore.setState({ drafts: [draft] }));
 
 /** The box, once its lazily loaded module has arrived and React has rendered it. */
 async function openedBox(): Promise<HTMLElement> {
@@ -404,34 +439,6 @@ describe("CanvasPanel", () => {
     expect(artboardOffset()).not.toEqual(before);
   });
 
-  it("fits the artboard above the Design with Claude box while it's open, when there's room there", async () => {
-    const offsetHeight = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "offsetHeight");
-    Object.defineProperty(HTMLElement.prototype, "offsetHeight", { configurable: true, get() { return (this as HTMLElement).classList?.contains("sb-design-box") ? 300 : 0; } });
-    try {
-      mount();
-      // Fitted in the whole body: 402 × 874 at zoom 1, centered.
-      expect(artboardOffset()).toEqual([199, 63]);
-      act(() => designButton().click());
-      await openedBox();
-      // Above the box (300 px, 16 px from the bottom, a 12 px gap): the 672 px left, less 28 px of padding each side.
-      const zoom = (672 - 56) / 874;
-      const [x, y] = artboardOffset()!;
-      expect(x).toBeCloseTo((800 - 402 * zoom) / 2, 0);
-      expect(y).toBeCloseTo((672 - 874 * zoom) / 2, 0);
-
-      // Too little room above it: the artboard fits the whole canvas, as without the box.
-      resize(800, 450);
-      const small = fitRectOffset([800, 450], 56);
-      expect(artboardOffset()![1]).toBeCloseTo(small[1], 0);
-
-      resize(800, 1000);
-      act(() => designStore.getState().closeBox());
-      expect(artboardOffset()).toEqual([199, 63]);
-    } finally {
-      if (offsetHeight) Object.defineProperty(HTMLElement.prototype, "offsetHeight", offsetHeight);
-    }
-  });
-
   it("opens the box from the empty artboard's hint, which starts no canvas gesture", async () => {
     mount();
     act(() => {
@@ -454,6 +461,51 @@ describe("CanvasPanel", () => {
     await openedBox();
   });
 
+  it("says what Claude Code is writing in the artboard's label, instead of repeating what it's doing there", () => {
+    mount();
+    const label = () => container.querySelector<HTMLElement>(".sb-cv__label")!;
+    act(() => {
+      session.presence.getState().begin({ intent: "designing a checkout screen", author: { kind: "agent", name: "Claude" }, client: CLAUDE_CODE });
+    });
+    expect(label().textContent).toContain("Claude Code: designing a checkout screen");
+    showDraft(draftOf());
+    expect(label().querySelector("[data-design-pill]")?.textContent).toBe("Claude Code is writing “Checkout”");
+    expect(label().textContent).not.toContain("designing a checkout screen");
+    expect(container.querySelector(".sb-design-preview [data-design-pill]")).toBeNull();
+
+    // Over a layer further down, the pill sits above the frame.
+    showDraft(draftOf({ fields: { name: "Card", replace: "card" } }));
+    expect(container.querySelector(".sb-design-preview__pill")?.getAttribute("data-place")).toBe("above");
+    expect(label().querySelector("[data-design-pill]")).toBeNull();
+
+    // Once the draft is gone, the presence pill says what it's doing again.
+    showDraft(draftOf({ status: "stopped", since: Date.now() - 1000 }));
+    expect(label().textContent).toContain("Claude Code: designing a checkout screen");
+  });
+
+  it("draws the preview over the layer it replaces as that layer moves or comes back with undo", () => {
+    mount();
+    showDraft(draftOf({ fields: { name: "Card", replace: "card" } }));
+    const expectOverCard = () => {
+      const [ax, ay] = artboardOffset()!;
+      const [cx, cy] = position("card") as [number, number];
+      const [px, py] = previewOffset()!;
+      expect(px).toBeCloseTo(ax + cx * artboardZoom(), 0);
+      expect(py).toBeCloseTo(ay + cy * artboardZoom(), 0);
+    };
+    expectOverCard();
+    act(() => {
+      session.document.getState().apply([{ op: "updateLayer", component: "main", id: "card", props: { position: [100, 300] } }], { label: "Move card" });
+    });
+    expect(position("card")).toEqual([100, 300]);
+    expectOverCard();
+    act(() => {
+      session.document.getState().undo();
+    });
+    expect(position("card")).toEqual([16, 146]);
+    expectOverCard();
+  });
+
   it("shows another agent's work in the artboard label, but not the Assistant's", () => {
     mount();
     const pill = () => container.querySelector(".sb-cv__label-agent")?.textContent ?? null;
@@ -472,5 +524,117 @@ describe("CanvasPanel", () => {
     });
     expect(pill()).toBe("Claude: rebuilding the settings screen with every toggle fr…");
     expect(pill()!.length).toBe(60);
+  });
+});
+
+describe("CanvasPanel with the Design with Claude box", () => {
+  // happy-dom has no layout: the box's height is what it reports, through offsetHeight.
+  let boxHeight = 300;
+  const offsetHeight = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "offsetHeight");
+
+  beforeEach(() => {
+    boxHeight = 300;
+    Object.defineProperty(HTMLElement.prototype, "offsetHeight", { configurable: true, get() { return (this as HTMLElement).classList?.contains("sb-design-box") ? boxHeight : 0; } });
+  });
+  afterEach(() => {
+    if (offsetHeight) Object.defineProperty(HTMLElement.prototype, "offsetHeight", offsetHeight);
+  });
+
+  async function openDesignBox() {
+    act(() => designButton().click());
+    await openedBox();
+  }
+
+  /** The box gets taller (a status line, Claude's reply and chips, a confirm card). */
+  function growBox(height: number) {
+    boxHeight = height;
+    observeResized(container.querySelector(".sb-design-box")!);
+  }
+
+  const boxMax = () => container.querySelector<HTMLElement>(".sb-panel")!.style.getPropertyValue("--sb-design-box-max");
+
+  it("fits the artboard above the box while it's open, and keeps that room as the box grows", async () => {
+    mount();
+    // Fitted in the whole body: 402 × 874 at zoom 1, centered.
+    expect(artboardOffset()).toEqual([199, 63]);
+    await openDesignBox();
+    // Above the box (300 px, 16 px from the bottom, a 12 px gap): the 672 px left, less 28 px of padding each side.
+    const zoom = (672 - 56) / 874;
+    const [x, y] = artboardOffset()!;
+    expect(x).toBeCloseTo((800 - 402 * zoom) / 2, 0);
+    expect(y).toBeCloseTo((672 - 874 * zoom) / 2, 0);
+    // The box may grow until 200 px of canvas are left above it; then its reply and cards scroll.
+    expect(boxMax()).toBe(`${1000 - 28 - 200}px`);
+
+    // A status line, then Claude's reply and chips: the artboard stays where it is.
+    const fitted = artboardOffset();
+    growBox(360);
+    growBox(460);
+    expect(artboardOffset()).toEqual(fitted);
+
+    // In a canvas too small for that room, 200 px stay above the box, rather than a fit behind it.
+    resize(800, 450);
+    expect(artboardZoom()).toBeCloseTo((200 - 56) / 874, 3);
+    expect(artboardOffset()![1]).toBeCloseTo(28, 0);
+    expect(boxMax()).toBe("300px");
+
+    resize(800, 1000);
+    act(() => designStore.getState().closeBox());
+    expect(artboardOffset()).toEqual([199, 63]);
+    expect(boxMax()).toBe("");
+  });
+
+  it("fits the first page of a draft at a size you can read, top first, and keeps it as the screen lands", async () => {
+    bodySize = [800, 600];
+    mount();
+    await openDesignBox();
+    // The whole artboard above the box: 272 px, so about 25%.
+    expect(artboardZoom()).toBeCloseTo((272 - 56) / 874, 3);
+
+    // Claude starts writing a new screen: its width fits, at most 100%, with its top at the top.
+    showDraft(draftOf({ source: "assistant", key: "t1", runId: "r1", turn: 1, toolUseId: "t1", mcp: undefined }));
+    expect(artboardZoom()).toBe(1);
+    expect(artboardOffset()).toEqual([199, 28]);
+    showDraft(draftOf({ source: "assistant", key: "t1", runId: "r1", turn: 1, toolUseId: "t1", mcp: undefined, html: "<p>Checkout</p><p>Pay</p>" }));
+    growBox(340);
+
+    // The screen lands, selected and revealed, and the box shows the result: nothing moves.
+    act(() => {
+      session.document.getState().apply([{ op: "addLayer", component: "main", layer: { id: "checkout", type: "rectangle", name: "Checkout", props: { position: [0, 0], size: [402, 874] } } }], { label: "Import Design" });
+      designStore.setState({ drafts: [draftOf({ source: "assistant", key: "t1", runId: "r1", turn: 1, toolUseId: "t1", mcp: undefined, status: "added" })] });
+      session.selection.getState().select({ layers: ["checkout"] });
+      session.selection.getState().requestReveal("main", ["checkout"]);
+    });
+    growBox(420);
+    expect(artboardZoom()).toBe(1);
+    expect(artboardOffset()).toEqual([199, 28]);
+  });
+
+  it("fits Claude Code's draft with the box closed, gives the artboard's fit back when nothing was added, and leaves a viewport someone moved", () => {
+    bodySize = [800, 400];
+    mount();
+    const whole = artboardZoom();
+    expect(whole).toBeCloseTo((400 - 112) / 874, 3);
+    showDraft(draftOf());
+    expect(artboardZoom()).toBe(1);
+    expect(artboardOffset()).toEqual([199, 56]);
+
+    showDraft(draftOf({ status: "stopped", since: Date.now() }));
+    expect(artboardZoom()).toBeCloseTo(whole, 3);
+
+    act(() => {
+      registry.run("canvas.zoomIn");
+    });
+    const zoomed = [artboardZoom(), ...artboardOffset()!];
+    showDraft(draftOf({ key: "mcp:cc-2" }));
+    expect([artboardZoom(), ...artboardOffset()!]).toEqual(zoomed);
+  });
+
+  it("fits a draft that was already being written when the canvas appeared, as when a patches-only layout makes room", () => {
+    bodySize = [800, 400];
+    showDraft(draftOf());
+    mount();
+    expect(artboardZoom()).toBe(1);
+    expect(artboardOffset()).toEqual([199, 56]);
   });
 });
