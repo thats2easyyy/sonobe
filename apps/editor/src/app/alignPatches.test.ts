@@ -1,6 +1,6 @@
 import type { Component } from "@sonobe/core";
 import { describe, expect, it } from "vitest";
-import { alignOps, alignPatchRects, estimatePatchSize, patchRects } from "./alignPatches.ts";
+import { alignOps, alignPatchRects, patchRects } from "./alignPatches.ts";
 
 const rects = [
   { id: "a", x: 40, y: 100, width: 160, height: 80 },
@@ -41,8 +41,7 @@ describe("alignOps and measuring", () => {
     expect(ops).toEqual([{ op: "updatePatch", component: "main", id: "b", ui: { x: 40, y: 200 } }]);
   });
 
-  it("estimates sizes for patches that aren't rendered", () => {
-    expect(estimatePatchSize(3, 1)).toEqual({ width: 168, height: 104 });
-    expect(patchRects(component, ["a", "nope"], () => ({ inputs: 3, outputs: 1 }), null)).toEqual([{ id: "a", x: 40, y: 100, width: 168, height: 104 }]);
+  it("uses the estimate for patches that aren't rendered", () => {
+    expect(patchRects(component, ["a", "nope"], () => ({ width: 190, height: 104 }), null)).toEqual([{ id: "a", x: 40, y: 100, width: 190, height: 104 }]);
   });
 });

@@ -37,19 +37,21 @@ import {
   type AlignMode,
   type InsertOptions,
 } from "../model/editOps.ts";
-import { estimateNodeSize, HEADER_HEIGHT, ROW_HEIGHT, type Rect } from "../model/geometry.ts";
+import { estimateNodeSize, HEADER_HEIGHT, portCenterY, type Rect } from "../model/geometry.ts";
 import { instanceChoiceKey } from "../model/instances.ts";
 import { nodePositionsOp } from "@sonobe/core";
 import { publishedKeyOf, publishPortPlan, unpublishOps, withoutDefault, type PublishSide } from "../model/publish.ts";
 import { newVariablePatch } from "../model/variables.ts";
-import { documentObstacles, estimatePatchSize, findFreePosition, type PlacementBias, type PlacementObstacles } from "@sonobe/core/graph";
-import { tidyLayout, type TidyGroupInput, type TidyNodeInput } from "../model/tidy.ts";
+import { documentObstacles, estimatePatchSize, findFreePosition, planTidy, tidyPlanOps, type PlacementBias, type PlacementObstacles, type TidyFrame, type TidyNode, type TidyScope } from "@sonobe/core/graph";
+import { nodeTextMeasurer } from "../model/measure.ts";
+import { elkGroupLayout } from "../model/tidy.ts";
 import {
   commentIdOfNode,
   commentNodeId,
   flowNodeKind,
   INPUTS_NODE_ID,
   layerIdOfNode,
+  layerNodeId,
   type CableFlowEdge,
   type FlowNode,
   type GraphNodeData,
@@ -102,6 +104,13 @@ export interface ActionDeps {
   openInfo: (patchId: Id) => void;
 }
 
+export interface TidyUpOptions {
+  /** Tidy inside these comment frames only. */
+  frames?: readonly Id[];
+  /** Tidy everything and lay the frames out as blocks too, instead of keeping them in place. */
+  arrange?: boolean;
+}
+
 export interface InsertPatchOptions extends InsertOptions {
   /** Connect the new patch to a port ("out": the address drives the new patch's `portKey`). */
   connect?: { address: string; side: "in" | "out"; portKey: string };
@@ -133,7 +142,12 @@ export interface PatchEditorActions {
   moveAndSplice(patchId: Id, position: XY, cable: { from: string; to: string }, choice?: { inputKey: string; outputKey: string }): void;
   cutCables(edgeIds: readonly string[]): void;
   align(mode: AlignMode): void;
-  tidyUp(): Promise<void>;
+  /**
+   * Tidy Up. Without options it follows the selection: selected comments tidy inside those frames,
+   * two or more selected nodes tidy those nodes (each within its frame), nothing tidies everything.
+   * Frames stay where they are, refit and pushed apart, unless `arrange` lays them out too.
+   */
+  tidyUp(options?: TidyUpOptions): Promise<void>;
   commentSelection(): void;
   updateComment(commentId: Id, changes: { text?: string; rect?: [number, number, number, number]; color?: string }, label: string): void;
   groupIntoComponent(): void;
@@ -182,7 +196,7 @@ export function createPatchEditorActions(deps: ActionDeps): PatchEditorActions {
     const nodes = flowNodes();
     if (nodes.length === 0) {
       const c = component();
-      return c ? documentObstacles(doc(), c, registry) : { nodes: [] };
+      return c ? documentObstacles(doc(), c, registry, { measure: nodeTextMeasurer() }) : { nodes: [] };
     }
     return {
       nodes: nodes.filter((n) => n.type !== "comment").map(nodeRect),
@@ -192,7 +206,7 @@ export function createPatchEditorActions(deps: ActionDeps): PatchEditorActions {
 
   const freeSpot = (node: PatchNode, preferred: XY, bias: PlacementBias, extra: readonly Rect[] = []): XY => {
     const base = obstacles();
-    return findFreePosition(estimatePatchSize(doc(), registry, node), preferred, { ...base, nodes: [...base.nodes, ...extra] }, { bias });
+    return findFreePosition(estimatePatchSize(doc(), registry, node, { component: componentId, measure: nodeTextMeasurer() }), preferred, { ...base, nodes: [...base.nodes, ...extra] }, { bias });
   };
 
   const apply: PatchEditorActions["apply"] = (ops, label, options = {}) => {
@@ -328,7 +342,7 @@ export function createPatchEditorActions(deps: ActionDeps): PatchEditorActions {
                     const node: PatchNode = { type: op.patch.type, inputs: {}, ui: { x: op.patch.ui.x, y: op.patch.ui.y } };
                     if (op.patch.typeParam) node.typeParam = op.patch.typeParam;
                     const at = freeSpot(node, op.patch.ui, "any", placed);
-                    placed.push({ ...at, ...estimatePatchSize(doc(), registry, node) });
+                    placed.push({ ...at, ...estimatePatchSize(doc(), registry, node, { component: componentId, measure: nodeTextMeasurer() }) });
                     return { ...op, patch: { ...op.patch, ui: { ...op.patch.ui, ...at } } };
                   });
                   const result = apply(ops, `Insert ${converter.name} between ${portLabel(doc(), componentId, registry, from)} and ${portLabel(doc(), componentId, registry, to)}`);
@@ -551,50 +565,51 @@ export function createPatchEditorActions(deps: ActionDeps): PatchEditorActions {
       actions.moveNodes(positions, `Align ${nodes.length} items ${ALIGN_LABELS[mode]}`);
     },
 
-    async tidyUp() {
+    async tidyUp(options = {}) {
       const c = component();
       const flow = deps.flow();
       if (!c || !flow) return;
-      const selectedIds = new Set(selectedPatchIds());
       const all = flowNodes();
-      const scoped = selectedIds.size >= 2 ? all.filter((n) => selectedIds.has(n.id)) : all.filter((n) => n.type !== "comment");
-      if (scoped.length === 0) return;
-      const tidyNodes: TidyNodeInput[] = scoped.map((n) => {
-        const rect = nodeRect(n);
+      const nodes: TidyNode[] = [];
+      const frames: TidyFrame[] = [];
+      for (const n of all) {
         const data = n.data as GraphNodeData;
-        const ports = data.kind === "comment" ? [] : [...data.inputs.map((p, i) => ({ id: p.handleId, side: "in" as const, y: portY(data, i) })), ...data.outputs.map((p, i) => ({ id: p.handleId, side: "out" as const, y: portY(data, i) }))];
-        return { id: n.id, ...rect, ports };
-      });
-      const scopedIds = new Set(scoped.map((n) => n.id));
-      const edges = flow.getEdges().filter((e) => scopedIds.has(e.source) && scopedIds.has(e.target));
-      const groups: TidyGroupInput[] = [];
-      if (selectedIds.size < 2) {
-        for (const n of all.filter((m) => m.type === "comment")) {
-          const frame = nodeRect({ ...n, measured: { width: n.width ?? n.measured?.width ?? 0, height: n.height ?? n.measured?.height ?? 0 } } as FlowNode);
-          const children = tidyNodes.filter((t) => t.x >= frame.x && t.y >= frame.y && t.x + t.width <= frame.x + frame.width && t.y + t.height <= frame.y + frame.height).map((t) => t.id);
-          if (children.length) groups.push({ id: n.id, ...frame, children });
+        if (data.kind === "comment") {
+          frames.push({ id: data.commentId, x: n.position.x, y: n.position.y, width: n.width ?? n.measured?.width ?? 240, height: n.height ?? n.measured?.height ?? 120 });
+          continue;
         }
+        const shape = { collapsed: data.kind === "patch" && data.collapsed };
+        const ports = [...data.inputs.map((p, i) => ({ id: p.handleId, side: "in" as const, y: portCenterY(shape, i) })), ...data.outputs.map((p, i) => ({ id: p.handleId, side: "out" as const, y: portCenterY(shape, i) }))];
+        nodes.push({ id: n.id, ...nodeRect(n), ports });
       }
-      let result;
+      if (nodes.length === 0) return;
+      const edges = flow.getEdges().map((e) => ({ source: e.source, sourceHandle: e.sourceHandle ?? null, target: e.target, targetHandle: e.targetHandle ?? null }));
+      // The selection picks the scope: comments → inside those frames, 2+ nodes → those nodes, nothing → everything.
+      const present = new Set(nodes.map((n) => n.id));
+      const selectedNodes = [...selectedPatchIds(), ...selection().layers.map(layerNodeId)].filter((id) => present.has(id));
+      const selectedFrames = selection().comments.filter((id) => frames.some((f) => f.id === id));
+      const scope: TidyScope = options.arrange
+        ? { kind: "all" }
+        : options.frames
+          ? { kind: "frames", ids: options.frames }
+          : selectedFrames.length
+            ? { kind: "frames", ids: selectedFrames }
+            : selectedNodes.length >= 2
+              ? { kind: "nodes", ids: selectedNodes }
+              : { kind: "all" };
+      let plan;
       try {
-        result = await tidyLayout({ nodes: tidyNodes, edges, groups });
+        plan = await planTidy({ nodes, edges, frames, scope, frameMode: options.arrange ? "arrange" : "keep" }, await elkGroupLayout());
       } catch (err) {
         quietToast("Tidy Up couldn't lay out these patches.", err instanceof Error ? err.message : undefined);
         return;
       }
       const current = component();
       if (!current) return;
-      const patchPositions = new Map<string, XY>();
-      const nodePositions = new Map<string, XY>();
-      for (const [id, pos] of result.nodes) (flowNodeKind(id) === "patch" ? patchPositions : nodePositions).set(id, pos);
-      const ops: Op[] = movePatchOps(current, patchPositions);
-      for (const [id, rect] of result.groups) {
-        const commentId = commentIdOfNode(id);
-        if (commentId && current.comments.some((x) => x.id === commentId)) ops.push({ op: "updateComment", component: componentId, id: commentId, rect: [rect.x, rect.y, rect.width, rect.height] });
-      }
-      const metaOp = nodePositions.size ? nodePositionsOp(current, nodePositions) : undefined;
-      if (metaOp) ops.push(metaOp);
-      if (ops.length) apply(ops, `Tidy up ${patchPositions.size === 1 ? "1 patch" : `${patchPositions.size} patches`}`);
+      const ops = tidyPlanOps(current, plan);
+      const patches = ops.filter((op) => op.op === "updatePatch").length;
+      const label = options.arrange ? "Arrange frames" : patches ? `Tidy up ${patches === 1 ? "1 patch" : `${patches} patches`}` : "Tidy up";
+      if (ops.length) apply(ops, label);
     },
 
     commentSelection() {
@@ -738,11 +753,6 @@ function findInput(component: ReturnType<EditorSession["document"]["getState"]>[
   }
   if (at) return findLayer(component.layers, id)?.layer.props[key];
   return component.patches[id]?.inputs[key];
-}
-
-function portY(data: GraphNodeData, index: number): number {
-  if (data.kind === "patch" && data.collapsed) return HEADER_HEIGHT / 2;
-  return HEADER_HEIGHT + index * ROW_HEIGHT + ROW_HEIGHT / 2;
 }
 
 /** The flow position at the center of the visible canvas. */

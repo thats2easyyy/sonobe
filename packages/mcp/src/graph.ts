@@ -15,8 +15,11 @@ import {
   isDecodedLoop,
   isLayerInput,
   isLinkInput,
+  layerNodeId,
+  layersWithGraphNodes,
   listComponentIds,
   listInputs,
+  readNodePositions,
   resolveLayerOutputs,
   resolveLayerProps,
   resolveNodePorts,
@@ -344,6 +347,17 @@ export function itemDetails(
     .filter(([, n]) => Object.values(n.inputs).some((v) => isLayerInput(v) && v.layer === layer.id))
     .map(([pid, n]) => `${pid} (${n.type})`);
   if (listeners.length) lines.push(`  referenced by: ${listeners.join(", ")}`);
+  // Layers a cable drives or reads have a node in the patch graph: saved where someone put it, or placed automatically.
+  let graphNode: { position: [number, number] | null } | undefined;
+  if (layersWithGraphNodes(c).has(layer.id)) {
+    const saved = readNodePositions(c)[layerNodeId(layer.id)];
+    graphNode = { position: saved ? [saved.x, saved.y] : null };
+    lines.push(
+      saved
+        ? `  graph node: ${saved.x},${saved.y} (saved; move it with setNodePositions)`
+        : "  graph node: placed automatically next to its drivers (not saved)",
+    );
+  }
   return {
     text: lines.join("\n"),
     data: {
@@ -351,6 +365,7 @@ export function itemDetails(
       kind: "layer",
       component: c.id,
       layer: { ...layer, children: layer.children?.map((k) => k.id) },
+      ...(graphNode ? { graphNode } : {}),
     },
   };
 }

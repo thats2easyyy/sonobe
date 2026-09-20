@@ -1,5 +1,8 @@
+import { readNodePositions } from "@sonobe/core";
+import { homeFrame, rectContains, rectsOverlap, type Rect } from "@sonobe/core/graph";
 import { ID_SCENARIO_SETUP, ID_SCENARIOS, runIdScenario, type IdScenarioHost } from "@sonobe/core/testing";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { estimateGraphGeometry } from "./geometry.ts";
 import {
   buildGrowCard,
   connectClient,
@@ -583,5 +586,113 @@ describe("rebuilding a component", () => {
     expect(r.isError).toBe(true);
     expect(r.text).toContain('updateInterface has no field "mode".');
     expect(r.text).toContain('pass "replace": true');
+  });
+});
+
+describe("tidy_graph with comment frames", () => {
+  const places = ["Mānoa Falls Trail", "Honolulu Museum of Art", "Rainbow Drive-In", "Leonard's Bakery"];
+  /** The sectioned deck from the retro: knobs, the deck, places and category chips, one loose patch, and a driven layer. */
+  const sectioned = [
+    { op: "addLayer", layer: { id: "card", type: "rectangle", name: "Card" } },
+    { op: "addComment", comment: { id: "knobs", text: "KNOBS", rect: [0, 0, 380, 420] } },
+    { op: "addPatch", patch: { id: "k_resp", type: "splitter", typeParam: "number", name: "Spring Response (app: 0.3)", inputs: { value: 0.3 }, ui: { x: 20, y: 40 } } },
+    { op: "addPatch", patch: { id: "k_damp", type: "splitter", typeParam: "number", name: "Spring Damping (app: 0.75)", inputs: { value: 0.75 }, ui: { x: 20, y: 130 } } },
+    { op: "addPatch", patch: { id: "k_fly", type: "splitter", typeParam: "number", name: "Fly-Out Distance (app: 600)", inputs: { value: 600 }, ui: { x: 20, y: 220 } } },
+    { op: "addComment", comment: { id: "deck", text: "THE DECK", rect: [440, 0, 1100, 420] } },
+    { op: "addPatch", patch: { id: "drag", type: "gesture", name: "Drag Card", ui: { x: 460, y: 40 } } },
+    { op: "addPatch", patch: { id: "fly", type: "multiply", name: "Fly-Out X", ui: { x: 700, y: 220 }, inputs: { value1: { link: "k_fly.output" }, value2: 1 } } },
+    { op: "addPatch", patch: { id: "spring", type: "popAnimation", name: "Card Spring", ui: { x: 1180, y: 40 }, inputs: { number: { link: "fly.output" } } } },
+    { op: "addComment", comment: { id: "places", text: "PLACES", rect: [440, 480, 330, 520] } },
+    { op: "addPatch", patch: { id: "names", type: "loopBuilder", typeParam: "text", inputCount: 4, name: "Place Names", inputs: Object.fromEntries(places.map((v, i) => [`item${i}`, v])), ui: { x: 460, y: 520 } } },
+    { op: "addPatch", patch: { id: "count", type: "loopCount", name: "Card Count", ui: { x: 460, y: 680 }, inputs: { loop: { link: "names.loop" } } } },
+    { op: "addComment", comment: { id: "chips", text: "CATEGORY CHIPS", rect: [820, 480, 400, 300] } },
+    { op: "addPatch", patch: { id: "scroll", type: "scroll", name: "Scroll Categories", ui: { x: 840, y: 520 } } },
+    { op: "addPatch", patch: { id: "loose", type: "popAnimation", name: "Next Card Rise", ui: { x: 1700, y: 600 }, inputs: { number: { link: "spring.output" } } } },
+    { op: "connect", from: "spring.output", to: "@card.scale" },
+  ];
+
+  const geometry = async () => {
+    const { doc } = await project.host.getDocument();
+    return { doc, ...estimateGraphGeometry(doc, project.host.registry, "main") };
+  };
+  const overlapping = (rects: [string, Rect][]) => rects.flatMap(([a, r], i) => rects.slice(i + 1).filter(([, s]) => rectsOverlap(r, s)).map(([b]) => `${a}×${b}`));
+
+  it("keeps every node in its frame, refits and separates the frames, and moves layer nodes too", async () => {
+    expect((await client.call("apply_ops", { ops: sectioned })).isError).toBe(false);
+    const before = await geometry();
+    const frames = [...before.frames].map(([id, f]) => ({ id, ...f }));
+    const home = new Map([...before.nodes].map(([id, r]) => [id, homeFrame(r, frames)?.id]));
+    const r = await client.call("tidy_graph", {});
+    expect(r.isError).toBe(false);
+    expect(r.text).toContain("Frames: ");
+    expect(r.text).toContain("Node sizes are estimated");
+    const after = await geometry();
+    expect(overlapping([...after.nodes])).toEqual([]);
+    expect(overlapping([...after.frames])).toEqual([]);
+    for (const [id, frame] of home) {
+      if (frame) expect(rectContains(after.frames.get(frame)!, after.nodes.get(id)!), `${id} in ${frame}`).toBe(true);
+      else for (const [fid, f] of after.frames) expect(rectsOverlap(f, after.nodes.get(id)!), `${id} clear of ${fid}`).toBe(false);
+    }
+    expect(readNodePositions(after.doc.components.main)["@card"]).toBeDefined();
+    expect((await client.call("tidy_graph", {})).text).toContain("already tidy");
+  });
+
+  it("tidies inside the named frames only, previews with dryRun, and teaches unknown ids", async () => {
+    await client.call("apply_ops", { ops: sectioned });
+    const { revision } = await project.host.getDocument();
+    const preview = await client.call("tidy_graph", { frames: ["places"], dryRun: true });
+    expect(preview.text).toContain("Dry run");
+    expect((await project.host.getDocument()).revision).toBe(revision);
+    const before = await geometry();
+    expect((await client.call("tidy_graph", { frames: ["places"] })).isError).toBe(false);
+    const after = await geometry();
+    for (const id of ["k_resp", "drag", "spring", "loose"]) expect(after.nodes.get(id), id).toEqual(before.nodes.get(id));
+    // PLACES grew into CATEGORY CHIPS, which moved clear of it with its patch.
+    const dx = after.frames.get("chips")!.x - before.frames.get("chips")!.x;
+    expect(after.nodes.get("scroll")!.x - before.nodes.get("scroll")!.x).toBe(dx);
+    expect(overlapping([...after.frames])).toEqual([]);
+    const wrong = await client.call("tidy_graph", { frames: ["plces"] });
+    expect(wrong.isError).toBe(true);
+    expect(wrong.text).toContain('There\'s no comment "plces" in main. Did you mean "places"?');
+    expect(wrong.text).toContain('places ("PLACES")');
+    expect((await client.call("tidy_graph", { ids: ["nmes"] })).text).toContain('Did you mean "names"?');
+  });
+});
+
+describe("setNodePositions through apply_ops", () => {
+  it("says when a layer has no graph node yet, and teaches updateComponent writes that would drop positions", async () => {
+    await buildGrowCard(client);
+    await client.call("add_layers", { layers: [{ type: "rectangle", name: "Badge" }] });
+    const r = await client.call("apply_ops", { ops: [{ op: "setNodePositions", positions: { "@card": [900, 40], "@badge": [900, 300] } }] });
+    expect(r.isError).toBe(false);
+    expect(r.text).toContain("Saved positions for @badge; they apply once a cable drives or reads those layers");
+    expect(r.text).not.toContain("@card;");
+    const wipe = await client.call("apply_ops", { ops: [{ op: "updateComponent", id: "main", meta: { patchEditor: { nodes: { "@card": [1, 2] } } } }] });
+    expect(wipe.isError).toBe(true);
+    expect(wipe.text).toContain("meta_conflict");
+    expect(wipe.text).toContain("setNodePositions");
+  });
+});
+
+describe("add_patches placement", () => {
+  it("sizes columns as the editor draws them, so wide Loop Builders never overlap what reads them", async () => {
+    const values = (prefix: string) => Object.fromEntries([0, 1, 2, 3].map((i) => [`item${i}`, `${prefix} ${i}: a long place name`]));
+    await client.call("apply_ops", { ops: [{ op: "addComment", comment: { id: "top", text: "Existing", rect: [0, 0, 400, 200] } }] });
+    const r = await client.call("add_patches", {
+      patches: [
+        { ref: "names", type: "loopBuilder", typeParam: "text", inputCount: 4, name: "Place Names", inputs: values("Name") },
+        { ref: "addresses", type: "loopBuilder", typeParam: "text", inputCount: 4, name: "Place Addresses", inputs: values("Address") },
+        { ref: "count", type: "loopCount", name: "Card Count", inputs: { loop: { link: "$names.loop" } } },
+      ],
+    });
+    expect(r.isError).toBe(false);
+    const { doc } = await project.host.getDocument();
+    const boxes = estimateGraphGeometry(doc, project.host.registry, "main").nodes;
+    const names = boxes.get("place_names")!;
+    expect(names.width).toBeGreaterThan(250);
+    expect(boxes.get("card_count")!.x).toBeGreaterThanOrEqual(names.x + names.width + 72);
+    const rects = [...boxes.values()];
+    for (let i = 0; i < rects.length; i++) for (let j = i + 1; j < rects.length; j++) expect(rectsOverlap(rects[i]!, rects[j]!)).toBe(false);
+    for (const rect of rects) expect(rectsOverlap(rect, { x: 0, y: 0, width: 400, height: 200 })).toBe(false);
   });
 });
