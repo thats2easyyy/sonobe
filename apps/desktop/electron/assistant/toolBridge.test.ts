@@ -7,10 +7,11 @@
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { createHeadlessHost, TOOL_NAMES, type DesignCaptureRequest, type HeadlessHost, type HostCallControl } from "@sonobe/mcp";
+import { Client } from "@modelcontextprotocol/client";
+import { createHeadlessHost, IMPORT_META_KEY, TOOL_NAMES, type DesignCaptureRequest, type HeadlessHost, type HostCallControl } from "@sonobe/mcp";
 import { createPatchRegistry } from "@sonobe/patches";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { createAssistantAgent } from "./agent.ts";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { createAssistantAgent, UNPINNED_TOOLS } from "./agent.ts";
 import type { AssistantEvent } from "./protocol.ts";
 import { ASSISTANT_AUTHOR_NAME, createMcpToolBridge, describeToolInput, describeToolResult, toAnthropicTools, toolResultContent, type ToolBridge } from "./toolBridge.ts";
 import { scriptedClient } from "./testing.ts";
@@ -62,6 +63,29 @@ describe("MCP tool bridge", () => {
     expect(photo?.name).toBe("Hero Photo");
     const [latest] = await host.history.list({ limit: 1 });
     expect(latest?.author).toEqual({ kind: "agent", name: ASSISTANT_AUTHOR_NAME });
+  });
+
+  it("classifies every tool: it takes docId, so the Assistant pins it to its window's document, or it's in UNPINNED_TOOLS", async () => {
+    const tools = await bridge.tools();
+    const unclassified = tools.filter((t) => !UNPINNED_TOOLS.has(t.name) && !Object.hasOwn((t.inputSchema.properties ?? {}) as object, "docId")).map((t) => t.name);
+    const pinnedAnyway = tools.filter((t) => UNPINNED_TOOLS.has(t.name) && Object.hasOwn((t.inputSchema.properties ?? {}) as object, "docId")).map((t) => t.name);
+    expect(unclassified, "Give these tools docId, or add them to UNPINNED_TOOLS in agent.ts").toEqual([]);
+    expect(pinnedAnyway, "These tools take docId, so take them out of UNPINNED_TOOLS").toEqual([]);
+    const names = new Set<string>(TOOL_NAMES);
+    expect([...UNPINNED_TOOLS].filter((name) => !names.has(name))).toEqual([]);
+  });
+
+  it("passes the result's _meta on as meta", async () => {
+    const meta = { [IMPORT_META_KEY]: { docId: "assistant_test", screenId: "profile", txnId: "txn_1" } };
+    const callTool = vi.spyOn(Client.prototype, "callTool");
+    try {
+      callTool.mockResolvedValueOnce({ content: [{ type: "text", text: "Imported “Profile”" }], _meta: meta });
+      expect(await bridge.call("import_design", { html: "<p>hi</p>" })).toEqual({ content: [{ type: "text", text: "Imported “Profile”" }], meta });
+    } finally {
+      callTool.mockRestore();
+    }
+    // Without _meta there's no meta key at all.
+    expect(await bridge.call("get_outline", {})).not.toHaveProperty("meta");
   });
 
   it("returns teaching errors as isError results", async () => {
@@ -132,6 +156,7 @@ describe("tool descriptions for activity chips", () => {
     expect(describeToolInput({ ops: [{}, {}] })).toBe("2 ops");
     expect(describeToolInput({ ids: ["a"] })).toBe("1 item");
     expect(describeToolInput({ query: "spring" })).toBe("“spring”");
+    expect(describeToolInput({ path: "src/theme.ts", offset: 1 })).toBe("src/theme.ts");
     expect(describeToolInput(null)).toBe("");
   });
 

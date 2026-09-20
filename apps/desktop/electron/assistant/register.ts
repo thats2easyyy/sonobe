@@ -6,12 +6,19 @@
  * The key stays in the main process: the renderer stores it through sonobeHost.secrets and only
  * ever gets a hint ("sk-ant-…3f9a") back from status(). The client is built with the person's key
  * alone (no ambient ANTHROPIC_AUTH_TOKEN, no Claude credentials).
+ *
+ * Each window's chat is pinned to the document that window shows (documentFor), and a code folder
+ * is linked only from the native dialog main shows (pickFolder), never from the renderer's word.
  */
 
+import { homedir } from "node:os";
+import path from "node:path";
 import Anthropic from "@anthropic-ai/sdk";
 import type { GuideStore, SonobeHost } from "@sonobe/mcp";
 import type { SecretStore } from "../secrets.ts";
 import { createAssistantAgent, type AnthropicClientLike, type AssistantAgent } from "./agent.ts";
+import { CodeFolderError, createCodeTools, type CodeFolderKey, type CodeFolderStore } from "./codeFolder.ts";
+import { sanitizeCanvasContext } from "./design.ts";
 import { DEFAULT_MODEL, modelInfos } from "./models.ts";
 import {
   ASSISTANT_IPC,
@@ -24,7 +31,7 @@ import {
   type AssistantSendRequest,
   type AssistantStatus,
 } from "./protocol.ts";
-import { createMcpToolBridge, type ToolBridge } from "./toolBridge.ts";
+import { createMcpToolBridge, type LocalTools, type ToolBridge } from "./toolBridge.ts";
 
 /** The webContents that sent a request (Electron's IpcMainInvokeEvent.sender). */
 export interface AssistantSender {
@@ -60,6 +67,14 @@ export interface RegisterAssistantOptions {
   /** Default: createMcpToolBridge over `host` (tests pass a fake). */
   createToolBridge?(host: SonobeHost, guides: GuideStore | undefined): ToolBridge;
   limits?: Partial<AssistantLimits>;
+  /** The document window `targetId` shows (AppHost.targetDocument), or null when it's gone: tool calls are pinned to it, and code folders are linked to its project. */
+  documentFor?(targetId: number): Promise<{ docId: string; projectPath: string | null } | null>;
+  /** Code folders linked to prototypes (Match my code…). Without it, nothing can be linked and the code tools aren't listed. */
+  codeFolders?: CodeFolderStore;
+  /** Show the native folder dialog over the sender's window: the folder the person picked, or null when they cancelled. */
+  pickFolder?(sender: AssistantSender, options: { defaultPath: string }): Promise<string | null>;
+  /** Default: createCodeTools over `codeFolders` (tests pass a fake). */
+  createCodeTools?(store: CodeFolderStore): LocalTools;
 }
 
 export interface AssistantRegistration {
@@ -68,8 +83,9 @@ export interface AssistantRegistration {
   dispose(): Promise<void>;
 }
 
-/** No code folder is linked (code folders aren't wired in yet). */
 const noCodeFolder = (): AssistantCodeFolderStatus => ({ linked: null, missing: false });
+
+const errorMessage = (err: unknown) => (err instanceof Error ? err.message : String(err));
 
 /** "sk-ant-…3f9a" for a stored key; never more than the last four characters. */
 export function keyHint(key: string): string {
@@ -107,12 +123,40 @@ export function registerAssistant(options: RegisterAssistantOptions): AssistantR
     return value?.trim() || null;
   };
 
+  const documentFor = options.documentFor;
+  const codeFolders = options.codeFolders;
+  const localTools = codeFolders ? (options.createCodeTools ?? createCodeTools)(codeFolders) : undefined;
+
+  /** Where a window's code folder link lives: its saved prototype's path, else the window alone. */
+  const folderKey = async (id: string): Promise<CodeFolderKey> => ({ projectPath: (await documentFor?.(Number(id)))?.projectPath ?? null, windowId: id });
+
+  const codeFolderStatus = async (id: string): Promise<AssistantCodeFolderStatus> => {
+    if (!codeFolders) return noCodeFolder();
+    try {
+      return await codeFolders.status(await folderKey(id));
+    } catch (err) {
+      log("warn", `Couldn't read the linked code folder: ${errorMessage(err)}`);
+      return noCodeFolder();
+    }
+  };
+
   const agent = createAssistantAgent({
     tools,
     apiKey,
     createClient: options.createClient ?? createAnthropicClient,
     ...(options.limits ? { limits: options.limits } : {}),
     log,
+    ...(documentFor ? { documentFor: (id: string) => documentFor(Number(id)) } : {}),
+    readDocument: async (docId) => {
+      const host = options.host();
+      if (!host) throw new Error("The document host isn't ready");
+      return (await host.getDocument(docId)).doc;
+    },
+    ...(localTools ? { localTools } : {}),
+    codeFolderName: async (id) => {
+      const status = await codeFolderStatus(id);
+      return status.linked && !status.missing ? status.linked.name : null;
+    },
   });
 
   const watched = new Set<number>();
@@ -124,6 +168,7 @@ export function registerAssistant(options: RegisterAssistantOptions): AssistantR
       sender.once("destroyed", () => {
         watched.delete(sender.id);
         agent.forget(String(sender.id));
+        codeFolders?.forgetWindow(String(sender.id));
       });
     }
     return String(sender.id);
@@ -149,7 +194,7 @@ export function registerAssistant(options: RegisterAssistantOptions): AssistantR
       usage: snap.usage,
       running: snap.running,
       messageCount: snap.messageCount,
-      codeFolder: noCodeFolder(),
+      codeFolder: await codeFolderStatus(id),
     };
   };
 
@@ -159,7 +204,9 @@ export function registerAssistant(options: RegisterAssistantOptions): AssistantR
       const id = conversationOf(event);
       const sender = event.sender;
       const body = request && typeof request === "object" ? (request as Partial<AssistantSendRequest>) : {};
-      return agent.run(id, { text: typeof body.text === "string" ? body.text : "", ...(typeof body.model === "string" ? { model: body.model } : {}) }, (e) => {
+      const context = body.context === undefined ? null : sanitizeCanvasContext(body.context);
+      const run = { text: typeof body.text === "string" ? body.text : "", ...(typeof body.model === "string" ? { model: body.model } : {}), ...(context ? { context } : {}) };
+      return agent.run(id, run, (e) => {
         if (!sender.isDestroyed()) sender.send(ASSISTANT_IPC.event, e);
       });
     },
@@ -174,17 +221,24 @@ export function registerAssistant(options: RegisterAssistantOptions): AssistantR
       conversationOf(event);
       return agent.checkKey();
     },
-    [ASSISTANT_IPC.codeFolder]: (event): AssistantCodeFolderStatus => {
-      conversationOf(event);
-      return noCodeFolder();
+    [ASSISTANT_IPC.codeFolder]: (event): Promise<AssistantCodeFolderStatus> => codeFolderStatus(conversationOf(event)),
+    [ASSISTANT_IPC.linkCodeFolder]: async (event): Promise<AssistantCodeFolderLinkResult> => {
+      const id = conversationOf(event);
+      if (!codeFolders || !options.pickFolder) return { status: noCodeFolder(), error: "This version of Sonobe can't link a code folder yet." };
+      const key = await folderKey(id);
+      // The dialog opens where the prototype is saved: its app's repo is often next to it.
+      const folder = await options.pickFolder(event.sender, { defaultPath: key.projectPath ? path.dirname(key.projectPath) : homedir() });
+      if (folder === null) return { status: await codeFolders.status(key), cancelled: true };
+      try {
+        return { status: await codeFolders.link(key, folder) };
+      } catch (err) {
+        if (!(err instanceof CodeFolderError)) throw err;
+        return { status: await codeFolders.status(key), error: err.message };
+      }
     },
-    [ASSISTANT_IPC.linkCodeFolder]: (event): AssistantCodeFolderLinkResult => {
-      conversationOf(event);
-      return { status: noCodeFolder(), error: "This version of Sonobe can't link a code folder yet." };
-    },
-    [ASSISTANT_IPC.unlinkCodeFolder]: (event): AssistantCodeFolderStatus => {
-      conversationOf(event);
-      return noCodeFolder();
+    [ASSISTANT_IPC.unlinkCodeFolder]: async (event): Promise<AssistantCodeFolderStatus> => {
+      const id = conversationOf(event);
+      return codeFolders ? codeFolders.unlink(await folderKey(id)) : noCodeFolder();
     },
   };
 
