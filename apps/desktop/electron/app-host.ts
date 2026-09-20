@@ -621,7 +621,10 @@ export function createAppHost(options: AppHostOptions): AppHost {
       if (!options.renderSvg) {
         throw new HostError("target_unavailable", `The patch editor isn't showing ${name}, and this build of Sonobe can't draw a graph off screen.`, { hint: "reveal with focus: true opens it for the person; then take the screenshot. To read the graph, use get_outline." });
       }
-      const drawing = drawComponentGraph(doc, registry, componentId, cachedGraphEstimate(doc, registry, componentId), { ...size, ...frame });
+      // In the editor's theme, like the patch editor the person sees (dark when it doesn't say).
+      const shown = await call<{ theme?: unknown }>(entry.target, "selection.get").catch(() => null);
+      const theme = shown?.theme === "light" ? "light" : "dark";
+      const drawing = drawComponentGraph(doc, registry, componentId, cachedGraphEstimate(doc, registry, componentId), { ...size, ...frame, theme });
       const image = await options.renderSvg({ svg: drawing.svg, size: { width: drawing.width, height: drawing.height } });
       if (!image) throw new HostError("capture_failed", `Sonobe couldn't draw ${name}'s graph.`, { hint: "Try again. To read the graph, use get_outline." });
       // A frame crop is drawn from the document even when the patch editor shows the component.

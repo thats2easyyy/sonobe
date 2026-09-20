@@ -1,13 +1,13 @@
 /**
  * graphToSvg: a patch graph as a static SVG, for screenshots of a component's graph without the
  * patch editor on screen (MCP headless hosts rasterize it; the app draws it in a hidden window). It
- * draws what the patch editor does, in its dark theme: comment frames with their titles, cables as
- * the editor's curves colored by type, and nodes with a category-tinted header, port rows, inline
- * values and live values. Boxes come from the caller (the shared node size model in
- * @sonobe/core/graph, or sizes the editor measured). DOM-free.
+ * draws what the patch editor does, in its dark or light theme (the editor's own color tokens,
+ * ../theme.ts): comment frames with their titles, cables as the editor's curves colored by type, and
+ * nodes with a category-tinted header, port rows, inline values and live values. Boxes come from the
+ * caller (the shared node size model in @sonobe/core/graph, or sizes the editor measured). DOM-free.
  */
 
-import type { PatchCategory, ValueType } from "@sonobe/core";
+import { parseColor, type PatchCategory } from "@sonobe/core";
 import {
   cablePath,
   NODE_BOX,
@@ -23,7 +23,8 @@ import {
   type Rect,
   type ValueChip,
 } from "@sonobe/core/graph";
-import { el, escapeText, num } from "./xml.ts";
+import { CATEGORY_COLORS, COMMENT_COLORS, portColor, THEME_TOKENS, type ThemeName } from "../theme.ts";
+import { el, escapeText, hex, num } from "./xml.ts";
 
 export interface GraphSvgOptions {
   /** Graph node id → its box in patch editor points. Nodes without a box aren't drawn. */
@@ -38,6 +39,8 @@ export interface GraphSvgOptions {
   padding?: number;
   /** Output pixels per point (default 1). */
   scale?: number;
+  /** The editor theme to draw in (default "dark"). */
+  theme?: ThemeName;
 }
 
 export interface GraphSvg {
@@ -50,90 +53,59 @@ export interface GraphSvg {
   hasText: boolean;
 }
 
-/** The patch editor's dark theme (apps/editor/src/theme/tokens.ts): keep these in step with it. */
-const THEME = {
-  canvas: "#131315",
-  node: "#222226",
-  border: "#FFFFFF",
-  borderOpacity: 0.08,
-  text: "#EDEDF0",
-  secondary: "#A8A8B0",
-  tertiary: "#8A8A93",
-  field: "#FFFFFF",
-  fieldOpacity: 0.05,
-  danger: "#E24947",
-  ai: "#EA8B60",
-  /** Knob chips: the accent-soft fill and the accent text (tokens.ts `accent-soft`, `text-accent`). */
-  accent: "#5F74E4",
-  accentOpacity: 0.18,
-  textAccent: "#A3B1FF",
-};
+/** A token as a color and its alpha (SVG takes opacity apart from the color). */
+interface Paint {
+  color: string;
+  opacity: number;
+}
 
-const CATEGORY: Record<PatchCategory, string> = {
-  interaction: "#BD7FE8",
-  animation: "#25AEA7",
-  state: "#DF9B44",
-  logic: "#DA6F54",
-  math: "#3E8CC9",
-  loops: "#61B565",
-  text: "#AFB96D",
-  color: "#DB6EA5",
-  data: "#B9A272",
-  device: "#7398AB",
-  media: "#CE5057",
-  shapes: "#50BDC9",
-  layers: "#5F80E0",
-  utility: "#7D8086",
-  components: "#B969BE",
-  scripting: "#E0CC55",
-};
+function paint(token: string): Paint {
+  const c = parseColor(token);
+  return c ? { color: hex(c).toUpperCase(), opacity: c.a } : { color: token, opacity: 1 };
+}
 
-/** Port colors by value type group. */
-const PORT: Record<string, string> = {
-  number: "#65B2F1",
-  boolean: "#FB89BE",
-  pulse: "#FCD948",
-  text: "#68CB6E",
-  color: "#ED7940",
-  vector: "#9575E2",
-  index: "#76E2E2",
-  json: "#F2CE9D",
-  layer: "#96A6BB",
-  media: "#D85164",
-  style: "#45A68B",
-  any: "#777A80",
-};
+/** What a drawing paints with: the editor's color tokens (../theme.ts) in one theme. */
+interface Palette {
+  theme: ThemeName;
+  canvas: string;
+  node: string;
+  border: Paint;
+  text: string;
+  secondary: string;
+  tertiary: string;
+  field: Paint;
+  danger: string;
+  warn: string;
+  ai: string;
+  /** Knob chips: the accent-soft fill and the accent text (live values use the accent text too). */
+  accentSoft: Paint;
+  textAccent: string;
+  category: Record<PatchCategory, string>;
+  comment: Record<string, string>;
+}
 
-const PORT_GROUP: Partial<Record<ValueType, keyof typeof PORT>> = {
-  point: "vector",
-  point3d: "vector",
-  point4d: "vector",
-  size: "vector",
-  anchor: "vector",
-  transform: "vector",
-  enum: "index",
-  connection: "json",
-  image: "media",
-  video: "media",
-  sound: "media",
-  gradient: "style",
-  shape: "style",
-  textStyle: "style",
-  layerEffect: "style",
-};
+function palette(theme: ThemeName): Palette {
+  const t = THEME_TOKENS[theme];
+  return {
+    theme,
+    canvas: t["canvas-bg"],
+    node: t["patch-node-bg"],
+    border: paint(t["patch-node-border"]),
+    text: t["text-primary"],
+    secondary: t["text-secondary"],
+    tertiary: t["text-tertiary"],
+    field: paint(t["bg-field"]),
+    danger: t.danger,
+    warn: t.warn,
+    ai: t.ai,
+    accentSoft: paint(t["accent-soft"]),
+    textAccent: t["text-accent"],
+    category: CATEGORY_COLORS[theme],
+    comment: COMMENT_COLORS[theme],
+  };
+}
 
-const portColor = (type: ValueType | "variant"): string =>
-  type === "variant" ? PORT.any! : (PORT[PORT_GROUP[type] ?? type] ?? PORT.any!);
-
-const COMMENT: Record<string, string> = {
-  gray: THEME.tertiary,
-  yellow: "#E2BF4F",
-  orange: "#E8934F",
-  pink: "#E0729F",
-  purple: "#A585F0",
-  blue: "#5F9EE8",
-  green: "#5DBA7F",
-};
+const PALETTES: Record<ThemeName, Palette> = { dark: palette("dark"), light: palette("light") };
 
 const SANS = "SF Pro Text, -apple-system, Helvetica Neue, Helvetica, Arial, sans-serif";
 const MONO = "SF Mono, Menlo, Monaco, Consolas, monospace";
@@ -163,9 +135,9 @@ function text(x: number, y: number, content: string, font: NodeFont, fill: strin
 }
 
 /** A port handle on the node's edge: a diamond for pulses, a dot for everything else. */
-function handle(x: number, y: number, port: PortModel): string {
-  const fill = port.connected ? portColor(port.type) : THEME.node;
-  const stroke = portColor(port.type);
+function handle(p: Palette, x: number, y: number, port: PortModel): string {
+  const stroke = portColor(port.type, p.theme);
+  const fill = port.connected ? stroke : p.node;
   if (port.type === "pulse") return el("path", { d: `M ${num(x)} ${num(y - 4.5)} L ${num(x + 4.5)} ${num(y)} L ${num(x)} ${num(y + 4.5)} L ${num(x - 4.5)} ${num(y)} Z`, fill, stroke, "stroke-width": 1.5 });
   return el("circle", { cx: x, cy: y, r: 3.5, fill, stroke, "stroke-width": 1.5 });
 }
@@ -187,59 +159,67 @@ function valueText(v: Exclude<ValueChip, { kind: "knob" }>): string {
 
 /**
  * A knob chip as InlineValue.tsx's KnobChip draws it and nodeSize.ts sizes it: the knob glyph, the
- * knob's name in the accent color (cut first when room runs out), and its running value in mono.
+ * knob's name in the accent color (cut first when room runs out), and its running value in mono, or
+ * a color knob's swatch.
  */
-function knobChip(x: number, cy: number, v: Extract<ValueChip, { kind: "knob" }>, max: number): string {
+function knobChip(p: Palette, x: number, cy: number, v: Extract<ValueChip, { kind: "knob" }>, max: number): string {
   const B = NODE_BOX;
   const room = Math.max(0, Math.min(max, B.valueMaxWidth) - B.valuePaddingX - B.knobIcon - B.valueInnerGap);
-  const value = v.text ? fit(v.text, "mono10", room) : "";
-  const valueWidth = value ? B.valueInnerGap + tableMeasurer(value, "mono10") : 0;
+  const value = !v.swatch && v.text ? fit(v.text, "mono10", room) : "";
+  const valueWidth = v.swatch ? B.valueInnerGap + B.swatch : value ? B.valueInnerGap + tableMeasurer(value, "mono10") : 0;
   const name = fit(v.name, "sans10", Math.max(0, room - valueWidth));
   const nameWidth = tableMeasurer(name, "sans10");
   const width = Math.min(B.valueMaxWidth, B.valuePaddingX + B.knobIcon + B.valueInnerGap + nameWidth + valueWidth);
   const glyph = x + B.valuePaddingX / 2 + B.knobIcon / 2;
   const nameX = x + B.valuePaddingX / 2 + B.knobIcon + B.valueInnerGap;
+  const after = nameX + nameWidth + B.valueInnerGap;
   return [
-    el("rect", { x, y: cy - 8, width, height: 16, rx: 3, fill: THEME.accent, "fill-opacity": THEME.accentOpacity }),
-    el("circle", { cx: glyph, cy, r: 4, fill: "none", stroke: THEME.textAccent, "stroke-width": 1.25 }),
-    el("circle", { cx: glyph, cy, r: 1.75, fill: THEME.textAccent }),
-    text(nameX, cy + 3.5, name, "sans10", THEME.textAccent),
-    text(nameX + nameWidth + B.valueInnerGap, cy + 3.5, value, "mono10", THEME.text),
+    el("rect", { x, y: cy - 8, width, height: 16, rx: 3, fill: p.accentSoft.color, "fill-opacity": p.accentSoft.opacity }),
+    el("circle", { cx: glyph, cy, r: 4, fill: "none", stroke: p.textAccent, "stroke-width": 1.25 }),
+    el("circle", { cx: glyph, cy, r: 1.75, fill: p.textAccent }),
+    text(nameX, cy + 3.5, name, "sans10", p.textAccent),
+    v.swatch ? swatch(after, cy, v.swatch) : text(after, cy + 3.5, value, "mono10", p.text),
   ].join("");
 }
 
-function valueChip(x: number, cy: number, v: ValueChip, max: number): string {
+/** A 10 pt color swatch ("#RRGGBBAA") centered on `cy`, as .sb-pe-swatch draws it. */
+function swatch(x: number, cy: number, color: string): string {
+  const alpha = parseInt(color.slice(7, 9) || "FF", 16) / 255;
+  return el("rect", { x, y: cy - NODE_BOX.swatch / 2, width: NODE_BOX.swatch, height: NODE_BOX.swatch, rx: 2, fill: color.slice(0, 7), ...(alpha < 1 ? { "fill-opacity": alpha } : {}) });
+}
+
+function valueChip(p: Palette, x: number, cy: number, v: ValueChip, max: number): string {
   const B = NODE_BOX;
-  if (v.kind === "knob") return knobChip(x, cy, v, max);
-  if (v.kind === "check") return el("rect", { x, y: cy - 7, width: B.check, height: B.check, rx: 3, fill: THEME.field, "fill-opacity": 0.1, stroke: THEME.secondary, "stroke-opacity": 0.4 });
+  if (v.kind === "knob") return knobChip(p, x, cy, v, max);
+  if (v.kind === "check") return el("rect", { x, y: cy - 7, width: B.check, height: B.check, rx: 3, fill: p.field.color, "fill-opacity": 0.1, stroke: p.secondary, "stroke-opacity": 0.4 });
   const font: NodeFont = v.kind === "menu" || (v.kind === "text" && v.text) ? "sans10" : v.kind === "text" ? "italic10" : "mono10";
   const label = fit(valueText(v), font, Math.max(0, Math.min(max, B.valueMaxWidth) - B.valuePaddingX - (v.kind === "color" ? B.swatch + B.valueInnerGap : 0)));
   if (!label && v.kind !== "color") return "";
   const swatch = v.kind === "color" ? B.swatch + B.valueInnerGap : 0;
   const width = Math.min(B.valueMaxWidth, B.valuePaddingX + swatch + tableMeasurer(label, font));
-  const parts = [el("rect", { x, y: cy - 8, width, height: 16, rx: 3, fill: THEME.field, "fill-opacity": THEME.fieldOpacity })];
+  const parts = [el("rect", { x, y: cy - 8, width, height: 16, rx: 3, fill: p.field.color, "fill-opacity": p.field.opacity })];
   if (v.kind === "color") parts.push(el("rect", { x: x + 3, y: cy - 5, width: B.swatch, height: B.swatch, rx: 2, fill: `#${v.hex.slice(0, 6)}` }));
-  parts.push(text(x + 5 + swatch, cy + 3.5, label, font, v.kind === "text" && !v.text ? THEME.tertiary : THEME.text));
+  parts.push(text(x + 5 + swatch, cy + 3.5, label, font, v.kind === "text" && !v.text ? p.tertiary : p.text));
   return parts.join("");
 }
 
-function headerAccent(node: GraphNode): string {
+function headerAccent(p: Palette, node: GraphNode): string {
   const data = node.data;
-  if (data.kind === "patch") return data.known ? CATEGORY[data.category] : THEME.danger;
-  if (data.kind === "layer") return CATEGORY.layers;
-  return CATEGORY.components;
+  if (data.kind === "patch") return data.known ? p.category[data.category] : p.danger;
+  if (data.kind === "layer") return p.category.layers;
+  return p.category.components;
 }
 
-function drawNode(node: GraphNode, box: Rect, shape: NodeShape): string {
+function drawNode(p: Palette, node: GraphNode, box: Rect, shape: NodeShape): string {
   const B = NODE_BOX;
   const data = node.data;
   if (data.kind === "comment") return "";
-  const accent = headerAccent(node);
+  const accent = headerAccent(p, node);
   const collapsed = !!shape.collapsed;
   const parts: string[] = [];
   const issues = data.kind === "interface" ? [] : data.issues;
-  const issue = issues.length ? (issues.some((i) => i.severity === "error") ? THEME.danger : "#E8A33D") : undefined;
-  parts.push(el("rect", { x: box.x, y: box.y, width: box.width, height: box.height, rx: 8, fill: THEME.node }));
+  const issue = issues.length ? (issues.some((i) => i.severity === "error") ? p.danger : p.warn) : undefined;
+  parts.push(el("rect", { x: box.x, y: box.y, width: box.width, height: box.height, rx: 8, fill: p.node }));
   // The header: the category color over the node background, with a hairline under it.
   parts.push(el("path", { d: collapsed ? roundedRect(box.x, box.y, box.width, B.header, 8, 8) : roundedRect(box.x, box.y, box.width, B.header, 8, 0), fill: accent, "fill-opacity": data.kind === "layer" ? 0.2 : 0.15 }));
   if (!collapsed) parts.push(el("rect", { x: box.x, y: box.y + B.header - 1, width: box.width, height: 1, fill: accent, "fill-opacity": 0.2 }));
@@ -251,22 +231,22 @@ function drawNode(node: GraphNode, box: Rect, shape: NodeShape): string {
   for (const chip of [...shape.chips].reverse()) {
     if (chip.kind === "badge") {
       right -= B.badge;
-      chips.push(el("circle", { cx: right + B.badge / 2, cy: box.y + B.header / 2, r: 5, fill: issue ?? THEME.tertiary }));
+      chips.push(el("circle", { cx: right + B.badge / 2, cy: box.y + B.header / 2, r: 5, fill: issue ?? p.tertiary }));
     } else if (chip.kind === "enter") {
       right -= B.enterIcon;
-      chips.push(text(right, box.y + 18, "›", "title", THEME.secondary));
+      chips.push(text(right, box.y + 18, "›", "title", p.secondary));
     } else {
       const font: NodeFont = chip.kind === "loop" ? "badge" : chip.kind === "working" ? "working" : "chip";
       const width = chip.kind === "loop" ? Math.max(B.loopMin, B.chipPaddingX + tableMeasurer(chip.text, font)) : chip.kind === "working" ? B.workingPaddingX + B.workingDot + tableMeasurer(chip.text, font) : B.chipPaddingX + tableMeasurer(chip.text, font);
       right -= width;
-      const fill = chip.kind === "working" ? THEME.ai : chip.kind === "loop" ? CATEGORY.loops : THEME.secondary;
+      const fill = chip.kind === "working" ? p.ai : chip.kind === "loop" ? p.category.loops : p.secondary;
       chips.push(el("rect", { x: right, y: box.y + 6, width, height: 16, rx: 8, fill, "fill-opacity": 0.18 }));
-      chips.push(text(right + width / 2, box.y + 17.5, chip.text, font, chip.kind === "chip" ? THEME.secondary : fill, { "text-anchor": "middle" }));
+      chips.push(text(right + width / 2, box.y + 17.5, chip.text, font, chip.kind === "chip" ? p.secondary : fill, { "text-anchor": "middle" }));
     }
     right -= B.headerGap;
   }
   const titleX = box.x + 8 + B.icon + B.headerGap;
-  parts.push(text(titleX, box.y + 18, fit(shape.title, "title", Math.max(0, right - titleX)), "title", THEME.text));
+  parts.push(text(titleX, box.y + 18, fit(shape.title, "title", Math.max(0, right - titleX)), "title", p.text));
   parts.push(...chips);
   // Port rows, or the handles at the header's center when collapsed.
   const inputs = data.inputs;
@@ -275,30 +255,30 @@ function drawNode(node: GraphNode, box: Rect, shape: NodeShape): string {
     const cy = box.y + portCenterY(shape, i);
     const input = inputs[i];
     const output = outputs[i];
-    if (input) parts.push(handle(box.x, cy, input));
-    if (output) parts.push(handle(box.x + box.width, cy, output));
+    if (input) parts.push(handle(p, box.x, cy, input));
+    if (output) parts.push(handle(p, box.x + box.width, cy, output));
     if (collapsed) return;
     const half = box.width / 2;
     let x = box.x + B.portPadding;
     if (row.in && input) {
-      const color = input.issue?.severity === "error" ? THEME.danger : input.connected ? THEME.text : THEME.secondary;
+      const color = input.issue?.severity === "error" ? p.danger : input.connected ? p.text : p.secondary;
       const label = fit(row.in.label, "label", (row.out ? half : box.width) - B.portPadding - 4);
       parts.push(text(x, cy + 4, label, "label", color));
       x += tableMeasurer(label, "label") + B.portGap;
-      if (row.in.value) parts.push(valueChip(x, cy, row.in.value, box.x + (row.out ? half : box.width) - x - 4));
+      if (row.in.value) parts.push(valueChip(p, x, cy, row.in.value, box.x + (row.out ? half : box.width) - x - 4));
     }
     if (row.out && output) {
       const end = box.x + box.width - B.portPadding;
       const label = fit(row.out.label, "label", half - B.portPadding - 4);
-      parts.push(text(end, cy + 4, label, "label", output.connected ? THEME.text : THEME.secondary, { "text-anchor": "end" }));
+      parts.push(text(end, cy + 4, label, "label", output.connected ? p.text : p.secondary, { "text-anchor": "end" }));
       if (row.out.live) {
         const liveEnd = end - tableMeasurer(label, "label") - B.portGap;
         const live = fit(row.out.live, "mono10", Math.min(B.liveMaxWidth, liveEnd - (box.x + half)));
-        parts.push(text(liveEnd, cy + 3.5, live, "mono10", output.type === "boolean" ? PORT.boolean! : "#8EA2F2", { "text-anchor": "end" }));
+        parts.push(text(liveEnd, cy + 3.5, live, "mono10", output.type === "boolean" ? portColor("boolean", p.theme) : p.textAccent, { "text-anchor": "end" }));
       }
     }
   });
-  parts.push(el("rect", { x: box.x + 0.5, y: box.y + 0.5, width: box.width - 1, height: box.height - 1, rx: 7.5, fill: "none", stroke: issue ?? (data.kind === "layer" ? CATEGORY.layers : THEME.border), "stroke-opacity": issue ? 0.55 : data.kind === "layer" ? 0.35 : THEME.borderOpacity }));
+  parts.push(el("rect", { x: box.x + 0.5, y: box.y + 0.5, width: box.width - 1, height: box.height - 1, rx: 7.5, fill: "none", stroke: issue ?? (data.kind === "layer" ? p.category.layers : p.border.color), "stroke-opacity": issue ? 0.55 : data.kind === "layer" ? 0.35 : p.border.opacity }));
   const muted = data.kind === "patch" && data.muted;
   return el("g", { "data-node": node.id, ...(muted ? { opacity: 0.55 } : {}) }, parts.join(""));
 }
@@ -319,20 +299,20 @@ function roundedRect(x: number, y: number, w: number, h: number, top: number, bo
   ].filter(Boolean).join(" ");
 }
 
-function drawComment(node: GraphNode): string {
+function drawComment(p: Palette, node: GraphNode): string {
   const data = node.data;
   if (data.kind !== "comment") return "";
   const [x, y, width, height] = [node.position.x, node.position.y, node.width ?? NODE_BOX.comment.width, node.height ?? NODE_BOX.comment.height];
-  const color = COMMENT[data.color ?? "gray"] ?? COMMENT.gray!;
+  const color = p.comment[data.color ?? "gray"] ?? p.comment.gray!;
   const gray = (data.color ?? "gray") === "gray";
   const title = fit(data.text.split("\n")[0]!.trim(), "comment", Math.max(0, width - 44));
   return el(
     "g",
     { "data-comment": data.commentId },
     [
-      el("rect", { x, y, width, height, rx: 12, fill: gray ? THEME.text : color, "fill-opacity": gray ? 0.025 : 0.06 }),
-      el("rect", { x: x + 0.5, y: y + 0.5, width: width - 1, height: height - 1, rx: 11.5, fill: "none", stroke: gray ? THEME.border : color, "stroke-opacity": gray ? 0.06 : 0.2 }),
-      text(x + 14, y + 21, title, "comment", gray ? THEME.tertiary : color),
+      el("rect", { x, y, width, height, rx: 12, fill: gray ? p.text : color, "fill-opacity": gray ? 0.025 : 0.06 }),
+      el("rect", { x: x + 0.5, y: y + 0.5, width: width - 1, height: height - 1, rx: 11.5, fill: "none", stroke: gray ? p.border.color : color, "stroke-opacity": gray ? 0.06 : 0.2 }),
+      text(x + 14, y + 21, title, "comment", gray ? p.tertiary : color),
     ].join(""),
   );
 }
@@ -380,20 +360,21 @@ export function graphToSvg(model: GraphModel, options: GraphSvgOptions): GraphSv
   const shapeOptions = { ...(options.live ? { live: options.live } : {}), ...(options.layerName ? { layerName: options.layerName } : {}) };
   const shapes = new Map<string, NodeShape>();
   for (const node of model.nodes) if (node.data.kind !== "comment") shapes.set(node.id, nodeShapeFromData(node.data, shapeOptions));
-  const parts: string[] = [el("rect", { x: view.x, y: view.y, width: view.width, height: view.height, fill: THEME.canvas })];
-  for (const node of model.nodes) if (node.data.kind === "comment") parts.push(drawComment(node));
+  const p = PALETTES[options.theme ?? "dark"];
+  const parts: string[] = [el("rect", { x: view.x, y: view.y, width: view.width, height: view.height, fill: p.canvas })];
+  for (const node of model.nodes) if (node.data.kind === "comment") parts.push(drawComment(p, node));
   const byId = new Map(model.nodes.map((n) => [n.id, n]));
   for (const edge of model.edges) {
     const from = portPoint(byId, shapes, options.boxes, edge.source, edge.sourceHandle, "out");
     const to = portPoint(byId, shapes, options.boxes, edge.target, edge.targetHandle, "in");
     if (!from || !to) continue;
     const invalid = !!edge.data.invalid;
-    parts.push(el("path", { d: cablePath(from[0], from[1], to[0], to[1]), fill: "none", stroke: invalid ? THEME.danger : portColor(edge.data.sourceType), "stroke-width": edge.data.loop ? 3 : 2, "stroke-opacity": 0.9, ...(invalid ? { "stroke-dasharray": "5 4" } : {}) }));
+    parts.push(el("path", { d: cablePath(from[0], from[1], to[0], to[1]), fill: "none", stroke: invalid ? p.danger : portColor(edge.data.sourceType, p.theme), "stroke-width": edge.data.loop ? 3 : 2, "stroke-opacity": 0.9, ...(invalid ? { "stroke-dasharray": "5 4" } : {}) }));
   }
   for (const node of model.nodes) {
     const box = options.boxes.get(node.id);
     const shape = shapes.get(node.id);
-    if (box && shape) parts.push(drawNode(node, box, shape));
+    if (box && shape) parts.push(drawNode(p, node, box, shape));
   }
   // Every node has a title; a graph of only comments has text when a comment does.
   const hasText = shapes.size > 0 || model.nodes.some((n) => n.data.kind === "comment" && n.data.text.trim() !== "");

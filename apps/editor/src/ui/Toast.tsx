@@ -12,6 +12,8 @@ export interface ToastOptions {
   id?: string;
   title: string;
   description?: string;
+  /** Lines listed under the description (every note of an import); the list scrolls when it's long. */
+  details?: readonly string[];
   tone?: ToastTone;
   action?: { label: string; onClick: () => void };
   /** ms, or "persistent". Defaults to a reading-time estimate. */
@@ -138,6 +140,13 @@ function ToastItem({ toast: item, paused }: { toast: ToastRecord; paused: boolea
       <div className="sb-toast__body">
         <div className="sb-toast__title">{item.title}</div>
         {item.description && <div className="sb-toast__description">{item.description}</div>}
+        {item.details?.length ? (
+          <ul className="sb-toast__details sb-scroll">
+            {item.details.map((line, i) => (
+              <li key={i}>{line}</li>
+            ))}
+          </ul>
+        ) : null}
       </div>
       {item.action && (
         <Button

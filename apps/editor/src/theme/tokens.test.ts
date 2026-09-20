@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import {
   CATEGORY_COLORS,
+  COMMENT_COLORS,
   CONTROL_HEIGHT,
   DURATION,
   EASING,
@@ -83,6 +84,22 @@ describe("port palette", () => {
     expect(portColorVar("point3d")).toBe("var(--port-vector)");
     expect(portColorVar("variant")).toBe("var(--port-any)");
     expect(portColor("enum", "light")).toBe(PORT_GROUP_COLORS.light.index);
+  });
+});
+
+describe("comment colors ↔ patch-editor.css", () => {
+  const editorCss = readFileSync(new URL("../panels/patch-editor/patch-editor.css", import.meta.url), "utf8");
+  const comments = (selector: string) => {
+    const start = editorCss.indexOf(selector);
+    const body = editorCss.slice(editorCss.indexOf("{", start) + 1, editorCss.indexOf("}", start));
+    return Object.fromEntries([...body.matchAll(/--sb-comment-([a-z]+):\s*([^;]+);/g)].map((m) => [m[1]!, m[2]!.trim()]));
+  };
+
+  it.each(THEMES)("match the frame colors graphs are drawn with in %s", (theme) => {
+    const css = theme === "dark" ? comments(".sb-pe {") : { ...comments(".sb-pe {"), ...comments('[data-theme="light"] .sb-pe,') };
+    const expected = Object.fromEntries(Object.entries(COMMENT_COLORS[theme]).map(([name, color]) => [name, name === "gray" ? "var(--text-tertiary)" : color.toLowerCase()]));
+    expect(css).toEqual(expected);
+    expect(COMMENT_COLORS[theme].gray).toBe(THEME_TOKENS[theme]["text-tertiary"]);
   });
 });
 

@@ -74,15 +74,16 @@ export interface GraphDrawing {
 
 /**
  * A component's patch graph as SVG, with every node where `geometry` puts it, sized to `scale`
- * pixels per point (default 1, at most 3) within `maxWidth` and the screenshot edge cap. `frame`
- * crops it to one comment frame (a comment id of the component).
+ * pixels per point (default 1, at most 3) within `maxWidth` and the screenshot edge cap, in the
+ * editor's dark theme unless `theme` says light. `frame` crops it to one comment frame (a comment id
+ * of the component).
  */
 export function drawComponentGraph(
   doc: SonobeDocument,
   registry: EngineRegistry,
   componentId: Id,
   geometry: GraphGeometry,
-  options: { scale?: number; maxWidth?: number; frame?: Id } = {},
+  options: { scale?: number; maxWidth?: number; frame?: Id; theme?: "dark" | "light" } = {},
 ): GraphDrawing {
   const model = deriveGraph({ doc, componentId, registry });
   const names = new Map(allLayers(doc.components[componentId]?.layers ?? []).map((l) => [l.id, l.name]));
@@ -94,8 +95,9 @@ export function drawComponentGraph(
     width: frame.width + FRAME_MARGIN * 2,
     height: frame.height + FRAME_MARGIN * 2,
   };
+  const theme = options.theme ?? "dark";
   const draw = (scale: number, live?: (address: string) => unknown) =>
-    graphToSvg(model, { boxes: geometry.nodes, layerName, scale, ...(crop ? { crop } : {}), ...(live ? { live } : {}) });
+    graphToSvg(model, { boxes: geometry.nodes, layerName, scale, theme, ...(crop ? { crop } : {}), ...(live ? { live } : {}) });
   return withLiveValues(doc, registry, componentId, (live) => {
     // Size the drawing once at 1 pt per pixel, then pick the scale that fits.
     const natural = draw(1, live);

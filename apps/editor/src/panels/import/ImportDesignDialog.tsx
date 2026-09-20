@@ -13,7 +13,7 @@ import { TextField } from "../../ui/TextField.tsx";
 import { toast } from "../../ui/Toast.tsx";
 import { Toggle } from "../../ui/Toggle.tsx";
 import { readString, writeString } from "../../ui/lib/storage.ts";
-import { canImportUrl, importDesign, importViewport, summaryText, type ImportDeps, type ImportDesignRequest } from "./importDesign.ts";
+import { canImportUrl, importDesign, importViewport, notifyImported, type ImportDeps, type ImportDesignRequest } from "./importDesign.ts";
 import "../connect/connect.css";
 import "./importDesign.css";
 
@@ -121,7 +121,7 @@ function ImportContent({ titleId, onClose, initialTab, deps }: { titleId: string
         setProblem({ message: outcome.message ?? "The design couldn't be imported.", ...(outcome.hint ? { hint: outcome.hint } : {}) });
         return;
       }
-      toast.success(`Imported “${outcome.screenName}”`, { description: [outcome.summary ? summaryText(outcome.summary) : "", ...(outcome.notes ?? []).slice(0, 2)].filter(Boolean).join(" ") });
+      notifyImported(toast, `Imported “${outcome.screenName}”`, outcome);
       onClose();
     } catch (err) {
       if (!controller.signal.aborted) setProblem({ message: err instanceof Error ? err.message : String(err) });

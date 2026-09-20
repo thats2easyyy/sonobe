@@ -450,6 +450,43 @@ describe("runtime: services and issues", () => {
     expect(field().textField).toBeUndefined();
   });
 
+  it("a layerPulse event fires a Text Field's pulse prop on that step, with nothing connected to it", () => {
+    const rt = createTestRuntime(
+      buildDoc({
+        layers: [
+          { id: "field", type: "textField", name: "Composer", props: { position: [0, 0], size: [300, 44], textToSet: "Hello" } },
+          { id: "other", type: "textField", name: "Other", props: { position: [0, 100], size: [300, 44] } },
+        ],
+        patches: {
+          typed: { type: "splitter", typeParam: "text", inputs: { value: { link: "@field.value" } } },
+          focused: { type: "splitter", typeParam: "boolean", inputs: { value: { link: "@field.isFocused" } } },
+        },
+      }),
+    );
+    const node = (id: string) => rt.scene().roots.find((n) => n.layerId === id)!;
+    rt.step();
+    rt.dispatch([
+      { kind: "layerPulse", layerId: "field", prop: "setText" },
+      { kind: "layerPulse", layerId: "field", prop: "beginEditing" },
+      // Not a pulse the field acts on, and not a Text Field: both are ignored.
+      { kind: "layerPulse", layerId: "field", prop: "toString" },
+      { kind: "layerPulse", layerId: "nowhere", prop: "setText" },
+    ]);
+    rt.step();
+    expect(node("field").textField).toMatchObject({ text: "Hello", textRevision: 1, editing: true });
+    expect(node("other").textField).toBeUndefined();
+    rt.step();
+    expect(rt.getValue("typed.output")).toBe("Hello");
+    expect(rt.getValue("focused.output")).toBe(true);
+    // It fires once: the next steps leave the field alone.
+    const revisions = node("field").textField!;
+    runFrames(rt, 2);
+    expect(node("field").textField).toMatchObject({ textRevision: revisions.textRevision, editRevision: revisions.editRevision });
+    rt.dispatch([{ kind: "layerPulse", layerId: "field", key: "field", prop: "endEditing" }]);
+    rt.step();
+    expect(node("field").textField!.editing).toBe(false);
+  });
+
   it("keyboard input reaches patches", () => {
     const keys = defineMock({
       type: "keys",

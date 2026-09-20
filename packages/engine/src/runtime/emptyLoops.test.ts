@@ -215,5 +215,12 @@ describe("inspect", () => {
     );
     empty.step();
     expect(empty.inspect("inst/s.output").note).toBe('Nothing to read: "Echo" (Component) has 0 copies because "Pick" returned an empty loop: every index is past the end of its 2-item Loop.');
+    // A component patch's ports count its copies: 2 looped, 0 emptied, 1 when it isn't looped.
+    expect(rt.inspect("inst.v").copies).toBe(2);
+    expect(rt.inspect("inst.out").copies).toBe(2);
+    expect(empty.inspect("inst.v").copies).toBe(0);
+    const single = createTestRuntime(buildDoc({ components: [echo], patches: { inst: { type: "component", component: "echo", inputs: { v: 4 } } } }, reg), reg);
+    single.step();
+    expect(single.inspect("inst.out")).toEqual({ value: 4, copies: 1 });
   });
 });

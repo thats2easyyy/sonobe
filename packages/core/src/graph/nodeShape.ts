@@ -22,8 +22,8 @@ export type ValueChip =
   | { kind: "color"; hex: string }
   | { kind: "text"; text: string }
   | { kind: "static"; text: string }
-  /** An input linked to a knob: the knob's name, and its value when known. */
-  | { kind: "knob"; name: string; text?: string };
+  /** An input linked to a knob: the knob's name, and its value when known (a color knob's as a "#RRGGBBAA" swatch). */
+  | { kind: "knob"; name: string; text?: string; swatch?: string };
 
 /** Header items after the title: text chips (variant, Muted, layer type), the loop count, badges, presence, the enter icon. */
 export type HeaderChip = { kind: "chip"; text: string } | { kind: "loop"; text: string } | { kind: "badge" } | { kind: "working"; text: string } | { kind: "enter" };
@@ -112,6 +112,12 @@ export function valueChip(port: PortModel, layerName?: (id: Id) => string | unde
   }
 }
 
+/** A knob chip: the name, then a color knob's swatch or another knob's value text. */
+function knobValueChip(knob: NonNullable<PortModel["knob"]>): ValueChip {
+  if (knob.color) return { kind: "knob", name: knob.name, swatch: knob.color };
+  return { kind: "knob", name: knob.name, ...(knob.valueText ? { text: knob.valueText } : {}) };
+}
+
 /** What an output row prints as its live value (empty for pulses and missing values). */
 export function liveText(port: PortModel, value: unknown): string {
   if (value === undefined || port.type === "pulse") return "";
@@ -149,7 +155,7 @@ export function nodeShapeFromData(data: PatchNodeData | LayerNodeData | Interfac
     const output = data.outputs[i];
     const row: NodeRowShape = {};
     if (input) {
-      const value: ValueChip | undefined = input.knob ? { kind: "knob", name: input.knob.name, ...(input.knob.valueText ? { text: input.knob.valueText } : {}) } : !input.connected && editable ? valueChip(input, options.layerName) : undefined;
+      const value: ValueChip | undefined = input.knob ? knobValueChip(input.knob) : !input.connected && editable ? valueChip(input, options.layerName) : undefined;
       row.in = { label: input.name, ...(value ? { value } : {}), ...(data.kind === "layer" && !input.connected ? { drive: true } : {}) };
     }
     if (output) {

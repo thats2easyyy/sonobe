@@ -1,7 +1,8 @@
 /**
  * Knobs in the Inspector: the field a knob drives (a chip naming the knob, "Knob · 4 uses", and the
  * knob's own control, which tunes the running preset), and the context menu entries every field
- * gets: Make Knob… and Use Knob ▸ on unconnected fields, Show in Knobs and Unlink on knob-driven ones.
+ * gets: Make Knob… and Use Knob ▸ on unconnected fields, Show in Knobs, Use Knob ▸ (to switch) and
+ * Unlink on knob-driven ones.
  */
 
 import { getKnob, knobLiteral, type Id, type KnobSet } from "@sonobe/core";
@@ -29,8 +30,37 @@ function unlinkFieldKnob(session: EditorSession, field: InspectorField, set: Kno
 }
 
 /**
+ * Use Knob ▸: the knobs that fit the field. On a field that already reads a knob (`current`), picking
+ * another switches every target to it in one undo step; the current one is checked.
+ */
+function knobChoiceEntry(session: EditorSession, field: InspectorField, set: KnobSet | undefined, current?: Id): MenuEntry {
+  const fitting = knobsForPort(set, field.port);
+  const others = fitting.filter((k) => k.id !== current);
+  const componentId = session.currentComponentId();
+  const reason = current !== undefined ? `No other knob fits ${field.port.name}` : set?.knobs.length ? `No knob fits ${field.port.name}` : "No knobs yet";
+  return {
+    id: "useKnob",
+    label: "Use Knob",
+    icon: <SlidersHorizontal size={14} />,
+    disabled: others.length === 0,
+    ...(others.length ? {} : { description: reason }),
+    submenu: fitting.map((k) => ({
+      id: `useKnob:${k.id}`,
+      label: k.name,
+      description: set ? knobValueText(k, knobLiteral(set, k)) : undefined,
+      ...(current !== undefined ? { checked: k.id === current } : {}),
+      onSelect: () => {
+        const ops = planUseKnob(componentId, field.targets, k.id);
+        if (ops.length) session.document.getState().apply(ops, { label: current !== undefined || field.linkedCount ? `Switch ${field.port.name} to ${k.name}` : `Drive ${field.port.name} with ${k.name}` });
+      },
+    })),
+  };
+}
+
+/**
  * Context menu entries for knobs on a field: Make Knob… and Use Knob ▸ when nothing drives it, Show in
- * Knobs and Unlink (keeping the value) when a knob does. Empty for fields a knob can't reach.
+ * Knobs, Use Knob ▸ (to switch knobs) and Unlink (keeping the value) when a knob does, and Use Knob ▸
+ * when the selected targets read different knobs. Empty for fields a knob can't reach.
  */
 export function knobFieldEntries(session: EditorSession, field: InspectorField, onMakeKnob: () => void): MenuEntry[] {
   if (!field.bindable || field.type === "pulse") return [];
@@ -41,30 +71,18 @@ export function knobFieldEntries(session: EditorSession, field: InspectorField, 
     const running = set && knob ? knobValueText(knob, knobLiteral(set, knob)) : undefined;
     return [
       { id: "showKnob", label: "Show in Knobs", icon: <SlidersHorizontal size={14} />, onSelect: () => showKnobs(session, knobId) },
+      knobChoiceEntry(session, field, set, knobId),
       { id: "unlinkKnob", label: running ? `Unlink (keep ${running})` : "Unlink", icon: <Unlink size={14} />, disabled: !set || !knob, onSelect: () => set && unlinkFieldKnob(session, field, set, knobId) },
     ];
   }
-  if (field.linkedCount > 0) return [];
+  // Several targets that each read a knob, not all the same one: Use Knob puts them on one.
+  if (field.linkedCount > 0) return field.targets.every((t) => knobIdOf(t.stored) !== undefined) ? [knobChoiceEntry(session, field, set)] : [];
   const type = knobTypeForPort(field.port);
   // Fields a knob can't be made from (layers, media, gradients) offer knobs only when they take anything.
   if (!type && field.type !== "any") return [];
-  const fitting = knobsForPort(set, field.port);
-  const componentId = session.currentComponentId();
   return [
     { id: "makeKnob", label: "Make Knob…", icon: <CircleDot size={14} />, disabled: !type, ...(type ? {} : { description: "Knobs hold numbers, on/off, colors, choices, points and text" }), onSelect: onMakeKnob },
-    {
-      id: "useKnob",
-      label: "Use Knob",
-      icon: <SlidersHorizontal size={14} />,
-      disabled: fitting.length === 0,
-      ...(fitting.length ? {} : { description: set?.knobs.length ? `No knob fits ${field.port.name}` : "No knobs yet" }),
-      submenu: fitting.map((k) => ({
-        id: `useKnob:${k.id}`,
-        label: k.name,
-        description: set ? knobValueText(k, knobLiteral(set, k)) : undefined,
-        onSelect: () => session.document.getState().apply(planUseKnob(componentId, field.targets, k.id), { label: `Drive ${field.port.name} with ${k.name}` }),
-      })),
-    },
+    knobChoiceEntry(session, field, set),
   ];
 }
 

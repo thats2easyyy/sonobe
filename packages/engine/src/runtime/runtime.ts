@@ -493,6 +493,11 @@ class RuntimeImpl implements SonobeRuntime {
         const sample: DeviceMotionSample = { acceleration: [...event.acceleration], rotationRate: [...event.rotationRate] };
         if (event.attitude) sample.attitude = [...event.attitude];
         this.motion = sample;
+      } else if (event.kind === "layerPulse") {
+        // Applied with this step's scene pulses (syncTextFields); a key that isn't a Text Field is dropped there.
+        const bit = Object.hasOwn(FIELD_PULSES, event.prop) ? FIELD_PULSES[event.prop]! : 0;
+        const key = event.key ?? event.layerId;
+        if (bit) this.fieldPulses.set(key, (this.fieldPulses.get(key) ?? 0) | bit);
       }
     }
     this.input.update(events, (x, y) => hitTestScene(snapshot.scene.roots, x, y), h);
@@ -1421,6 +1426,12 @@ class RuntimeImpl implements SonobeRuntime {
     const index = target.parsed.index;
     const copies = this.propCopies(target);
     const out: ValueInspection = { value: copies !== undefined ? this.copyItem(target, raw, copies) : isLoop(raw) ? raw.items[index ?? 0] : raw };
+    // A component patch's port counts the copies of its instance that ran this frame (1 when it isn't looped).
+    const instance = target.parsed.kind === "patch" ? target.scope.instances.get(target.parsed.id) : undefined;
+    if (instance) {
+      const { paths, replicated } = this.instancePaths(instance, target.path);
+      out.copies = replicated ? paths.length : 1;
+    }
     if (target.parsed.kind === "layer") {
       const layer = target.scope.layerIndex.get(target.parsed.id);
       const drawn = this.snapshot?.counts.get(target.path.layerPrefix + target.parsed.id);

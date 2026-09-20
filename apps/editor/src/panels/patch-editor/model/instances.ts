@@ -6,6 +6,7 @@
  */
 
 import { COMPONENT_INSTANCE_LAYER_TYPE, COMPONENT_PATCH_TYPE, walkLayers, type Id, type SonobeDocument } from "@sonobe/core";
+import type { SceneFrame, SceneNode } from "@sonobe/engine";
 
 export interface ComponentInstance {
   /** Patch id (patch components) or layer id (layer components) in the parent component. */
@@ -101,17 +102,63 @@ export function resolveLiveScope(doc: SonobeDocument, componentPath: readonly Id
 }
 
 /**
- * The address whose `copies` (runtime inspect) count the copies of the instance you're inside, when
- * it's a layer instance: "@card.position", "@list/card.position" inside another instance. Null at
- * the root and for patch instances.
+ * The address whose `copies` (runtime inspect) count the copies of the instance you're inside: a
+ * layer instance's position ("@card.position", "@list/card.position" inside another instance), or
+ * a component patch's first published port ("press.pressed"; a patch instance loops only through
+ * its inputs, so one without ports never has copies). Null at the root.
  */
-export function instanceCopiesAddress(scope: LiveScope): string | null {
+export function instanceCopiesAddress(scope: LiveScope, doc?: SonobeDocument): string | null {
   const last = scope.steps.at(-1);
   if (scope.prefix === null || !last) return null;
   const instance = last.instances.find((x) => x.id === last.instance);
-  if (instance?.kind !== "layer") return null;
+  if (!instance) return null;
   const parent = scope.steps.slice(0, -1).map((s) => s.instance).join("/");
-  return `@${parent ? `${parent}/` : ""}${instance.id}.position`;
+  const path = `${parent ? `${parent}/` : ""}${instance.id}`;
+  if (instance.kind === "layer") return `@${path}.position`;
+  const face = doc?.components[last.component]?.interface;
+  const port = face ? (Object.keys(face.inputs)[0] ?? Object.keys(face.outputs)[0]) : undefined;
+  return port ? `${path}.${port}` : null;
+}
+
+/**
+ * The loop copy a scene key shows for the live scope `prefix` ("" at the root, "list_row" inside an
+ * instance): inside a looped instance, the instance's copy ("list_row#2/title" → 2); otherwise the
+ * copy of a looped layer in the scope's own component ("card#3" → 3). Undefined when the key isn't
+ * in that scope or isn't a copy.
+ */
+export function copyInScope(key: string, prefix: string): number | undefined {
+  const scope = prefix ? prefix.split("/") : [];
+  const segments = key.split("/");
+  if (segments.length <= scope.length) return undefined;
+  for (let i = 0; i < scope.length; i++) if (segments[i]!.replace(/#\d+$/, "") !== scope[i]) return undefined;
+  const copyOf = (segment: string | undefined) => {
+    const m = /#(\d+)$/.exec(segment ?? "");
+    return m ? Number(m[1]) : undefined;
+  };
+  return (scope.length ? copyOf(segments[scope.length - 1]) : undefined) ?? copyOf(segments[scope.length]);
+}
+
+/**
+ * The scene key of layer `layerId` in the watched scope (`prefix` from watchedPrefix): the layer
+ * itself, or, for a looped layer, its watched copy (copy 0 without one, wrapping past the last).
+ * Undefined when the scene doesn't draw it there.
+ */
+export function layerSceneKey(scene: SceneFrame | null, prefix: string, layerId: Id, copy: number | null): string | undefined {
+  if (!scene) return undefined;
+  const base = prefix ? `${prefix}/${layerId}` : layerId;
+  const copies = new Set<number>();
+  let single = false;
+  const stack: SceneNode[] = [...scene.roots];
+  while (stack.length) {
+    const node = stack.pop()!;
+    if (node.key === base) single = true;
+    else if (node.key.startsWith(`${base}#`) && /^\d+$/.test(node.key.slice(base.length + 1))) copies.add(Number(node.key.slice(base.length + 1)));
+    for (const child of node.children) stack.push(child);
+  }
+  if (single) return base;
+  if (!copies.size) return undefined;
+  const want = copy === null ? 0 : copy % copies.size;
+  return `${base}#${copies.has(want) ? want : Math.min(...copies)}`;
 }
 
 /**

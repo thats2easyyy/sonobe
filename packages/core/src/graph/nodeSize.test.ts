@@ -36,6 +36,7 @@ describe("measureNode", () => {
     expect(valueRow({ kind: "text", text: label(30) })).toBe(base + 110);
     expect(valueRow({ kind: "static", text: "×4" }, 25)).toBe(12 + 150 + 6 + 10 + 12);
     expect(valueRow({ kind: "knob", name: "Damping", text: "0.75" })).toBe(base + 10 + 10 + 4 + 42 + 4 + 24);
+    expect(valueRow({ kind: "knob", name: "Tint", swatch: "#FF375FFF" })).toBe(base + 10 + 10 + 4 + 24 + 4 + 10);
   });
 
   it("adds live values (at most 96 pt) and the Drive button", () => {
@@ -94,6 +95,16 @@ describe("node shapes from the graph", () => {
     const data = deriveGraph({ doc, componentId: "main", registry: mockRegistry }).nodes.find((n) => n.id === "pop")!.data as PatchNodeData;
     const linked: PatchNodeData = { ...data, inputs: data.inputs.map((p) => (p.key === "bounciness" ? { ...p, connected: true, link: "$knob.bounce", knob: { id: "bounce", name: "Bounce", valueText: "8" } } : p)) };
     expect(nodeShapeFromData(linked).rows[1]!.in).toEqual({ label: "Bounciness", value: { kind: "knob", name: "Bounce", text: "8" } });
+  });
+
+  it("gives a color knob's chip a swatch of its running color instead of the hex", () => {
+    const doc = mustApply(buildSampleDocument(), [
+      { op: "addKnob", knob: { id: "tint", name: "Tint", type: "color", value: "#ff375f" } },
+      { op: "addPatch", patch: { id: "fade", type: "transition", typeParam: "color", inputs: { start: { link: "$knob.tint" } }, ui: { x: 0, y: 400 } } },
+    ]).doc;
+    const data = deriveGraph({ doc, componentId: "main", registry: mockRegistry }).nodes.find((n) => n.id === "fade")!.data as PatchNodeData;
+    expect(data.inputs.find((p) => p.key === "start")!.knob).toEqual({ id: "tint", name: "Tint", valueText: "#FF375FFF", color: "#FF375FFF" });
+    expect(nodeShapeFromData(data).rows[1]!.in).toEqual({ label: "Start", value: { kind: "knob", name: "Tint", swatch: "#FF375FFF" } });
   });
 
   it("estimates a patch on its own and every node of a component", () => {

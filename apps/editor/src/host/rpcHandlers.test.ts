@@ -152,7 +152,7 @@ describe("rpc handlers", () => {
     expect(s.selection.getState()).toMatchObject({ layers: [], patches: [], reveal: { component: "main", ids: ["card", "pop"] } });
     expect(await call("reveal", { ids: ["card", "pop"], focus: true })).toMatchObject({ revealed: ["card", "pop"], focused: true });
     expect(s.selection.getState()).toMatchObject({ layers: ["card"], patches: ["pop"], reveal: { component: "main", ids: ["card", "pop"] } });
-    expect(await call("selection.get")).toMatchObject({ component: "main", componentPath: ["main"], layers: ["card"], patches: ["pop"], comments: [] });
+    expect(await call("selection.get")).toMatchObject({ component: "main", componentPath: ["main"], layers: ["card"], patches: ["pop"], comments: [], theme: "dark" });
     expect(await call("viewer.bounds")).toMatchObject({ failed: true, code: "no_viewer" });
   });
 
