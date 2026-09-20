@@ -164,10 +164,10 @@ export function layerSceneKey(scene: SceneFrame | null, prefix: string, layerId:
 /**
  * The instance path live values come from, with the watched copy: inside a looped instance
  * (`copies` of them), "card#3" picks that copy (wrapping past the last). Without a watched copy, or
- * when the instance isn't looped, it's the scope's own path (the engine then reads copy 0).
+ * when the instance isn't looped (one copy), it's the scope's own path (the engine then reads copy 0).
  */
 export function watchedPrefix(scope: LiveScope, copies: number | undefined, copy: number | null): string | null {
-  if (scope.prefix === null || copy === null || !copies || !scope.steps.length) return scope.prefix;
+  if (scope.prefix === null || copy === null || copies === undefined || copies < 2 || !scope.steps.length) return scope.prefix;
   return `${scope.prefix}#${copy % copies}`;
 }
 

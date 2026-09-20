@@ -115,6 +115,37 @@ test.describe("one watched loop copy across the patch editor and the inspector",
     expect(problems).toEqual([]);
   });
 
+  test("inside a component instance that isn't looped, the chip steps through the component's own loops", async ({ page }) => {
+    const problems = collectConsoleProblems(page);
+    await openEditor(page);
+    const applied = await hook(page, (s) =>
+      s.apply(
+        [
+          { op: "addComponent", component: { id: "card", name: "Card", kind: "layerComponent" } },
+          { op: "addLayer", component: "card", layer: { id: "card_bg", type: "rectangle", name: "Card Background", props: { size: [200, 40] } } },
+          { op: "addPatch", component: "card", patch: { id: "card_items", type: "loop", name: "Card Items", inputs: { count: 5 }, ui: { x: 40, y: 40 } } },
+          { op: "addLayer", layer: { id: "card_1", type: "componentInstance", name: "Card", component: "card", props: { position: [40, 640] } } },
+        ],
+        "Add card",
+      ),
+    );
+    expect(applied.ok).toBe(true);
+    await hook(page, (s) => s.session.selection.getState().enterComponent("card"));
+    await fitPatches(page);
+
+    const index = flowNode(page, "card_items").locator(".sb-pe-port--out").filter({ hasText: "Index" }).locator(".sb-pe-port__live");
+    await expect(index).toHaveText("×5 0…");
+    const chip = page.getByRole("group", { name: "Watched loop copy" });
+    await expect(chip).toContainText("5 copies");
+    await expect(page.locator(".sb-pe-live__name")).toHaveText("Card");
+    await chip.getByRole("button", { name: "Watch the next copy" }).click();
+    await chip.getByRole("button", { name: "Watch the next copy" }).click();
+    await expect(chip).toContainText("Copy #1 of 5");
+    await expect(index).toHaveText("#1 1");
+    await expect(page.locator(".sb-pe-live__name")).toHaveText("Card");
+    expect(problems).toEqual([]);
+  });
+
   test("a press in the viewer on one copy of a looped layer watches that copy", async ({ page }) => {
     const problems = collectConsoleProblems(page);
     await openEditor(page);
