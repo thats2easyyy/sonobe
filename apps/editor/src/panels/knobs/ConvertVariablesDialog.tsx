@@ -5,7 +5,7 @@
  * broadcaster go.
  */
 
-import { applyOps, planVariablesToKnobs, type Op, type VariableKnobPlan } from "@sonobe/core";
+import { applyOps, planVariablesToKnobs, type Id, type Op, type Registry, type SonobeDocument, type VariableKnobPlan } from "@sonobe/core";
 import { useId, useMemo, useState } from "react";
 import { useDocument, useEditorSession } from "../../state/EditorProvider.tsx";
 import { convertVariablesLabel } from "../../state/undoLabels.ts";
@@ -22,6 +22,30 @@ export function useVariableCandidates(): VariableKnobPlan {
   const doc = useDocument((s) => s.doc);
   // Tuning a knob changes no component, so it doesn't plan again.
   return useMemo(() => planVariablesToKnobs(doc, session.registry), [doc.components, session.registry]); // eslint-disable-line react-hooks/exhaustive-deps
+}
+
+export type ConversionPlan = { ok: true; ops: Op[]; count: number } | { ok: false; component: Id; message: string };
+
+/**
+ * One batch that converts the chosen broadcasters. Broadcaster ids are per component, so each
+ * component plans on the document the one before it left (knob names and ids stay unique across
+ * them). All or nothing: when a component's part doesn't apply, nothing converts and it's named.
+ */
+export function planConversion(doc: SonobeDocument, registry: Registry, chosen: readonly { component: Id; from: Id }[], taken: (id: Id) => boolean): ConversionPlan {
+  const byComponent = new Map<Id, Id[]>();
+  for (const k of chosen) byComponent.set(k.component, [...(byComponent.get(k.component) ?? []), k.from]);
+  let scratch = doc;
+  const ops: Op[] = [];
+  let count = 0;
+  for (const [component, ids] of byComponent) {
+    const part = planVariablesToKnobs(scratch, registry, { component, ids, taken });
+    const staged = applyOps(scratch, part.ops, { registry });
+    if (!staged.ok) return { ok: false, component, message: staged.errors[0]?.message ?? "Their ops didn't apply." };
+    scratch = staged.doc;
+    ops.push(...part.ops);
+    count += part.knobs.length;
+  }
+  return { ok: true, ops, count };
 }
 
 export function ConvertVariablesDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
@@ -42,28 +66,18 @@ function ConvertVariablesContent({ onClose }: { onClose: () => void }) {
     if (!chosen.length) return;
     const state = session.document.getState();
     const seen = new Set(state.seenIds().knobs);
-    // Broadcaster ids are per component, so each component plans on the document the one before it
-    // left: knob names and ids stay unique across them, and the whole thing is still one batch.
-    const byComponent = new Map<string, string[]>();
-    for (const k of chosen) byComponent.set(k.component, [...(byComponent.get(k.component) ?? []), k.from]);
-    let scratch = state.doc;
-    const ops: Op[] = [];
-    let count = 0;
-    for (const [component, ids] of byComponent) {
-      const part = planVariablesToKnobs(scratch, session.registry, { component, ids, taken: (id) => seen.has(id) });
-      const staged = applyOps(scratch, part.ops, { registry: session.registry });
-      if (!staged.ok) break;
-      scratch = staged.doc;
-      ops.push(...part.ops);
-      count += part.knobs.length;
+    const planned = planConversion(state.doc, session.registry, chosen, (id) => seen.has(id));
+    if (!planned.ok) {
+      toast({ title: `Nothing was converted: the variables in ${name(planned.component)} couldn't become knobs.`, description: `${planned.message} Uncheck them to convert the rest.`, tone: "warn" });
+      return;
     }
-    const result = state.apply(ops, { label: convertVariablesLabel(count) });
-    if (!result.ok || !count) {
+    const result = state.apply(planned.ops, { label: convertVariablesLabel(planned.count) });
+    if (!result.ok || !planned.count) {
       const error = result.errors[0];
       toast({ title: error?.message ?? "Those variables couldn't be converted.", ...(error?.hint ? { description: error.hint } : {}), tone: "warn" });
       return;
     }
-    toast({ title: `Converted ${count} ${count === 1 ? "variable" : "variables"} to knobs`, description: "Tune them here, or add a preset to compare.", tone: "success" });
+    toast({ title: `Converted ${planned.count} ${planned.count === 1 ? "variable" : "variables"} to knobs`, description: "Tune them here, or add a preset to compare.", tone: "success" });
     onClose();
   };
 
