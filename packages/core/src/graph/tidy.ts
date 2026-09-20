@@ -4,20 +4,23 @@
  * 1. Each node belongs to the innermost frame under its title bar (frames.ts), and frames nest the
  *    same way. Frames are handled innermost first, the unframed nodes last.
  * 2. A frame's nodes get a layered left-to-right layout, anchored at the frame's top-left inside its
- *    title padding, keeping their reading order; then the frame is refit around them.
+ *    title padding, keeping their reading order where the flow allows (one the layout itself keeps:
+ *    settledLayout); then the frame is refit around them.
  * 3. The unframed nodes are laid out as one group, anchored where they were.
  * 4. Frames (and the unframed group) that now overlap are pushed apart in reading order: one that
  *    started to the right of the one it hits moves right, otherwise down.
  *
  * With frameMode "arrange", frames are laid out as blocks along with the loose nodes around them
  * instead of staying put. The layout of one group comes from a GroupLayout (ELK, in the editor and in
- * MCP), so this module stays pure and deterministic. Tidying twice changes nothing the second time.
+ * MCP), so this module stays pure and deterministic. Tidying twice changes nothing the second time:
+ * tidyPlanOps also saves the layer and interface nodes it laid out, which would otherwise be placed
+ * next to their patches again.
  */
 
 import type { Component, Op } from "../types.ts";
 import { FRAME_PADDING, fitFrame, homeFrame } from "./frames.ts";
 import { rectsOverlap, type Rect } from "./geometry.ts";
-import { isPositionedNodeId, nodePositionsOp } from "./graphNodes.ts";
+import { isPositionedNodeId, layerIdOfNode, nodePositionsOp } from "./graphNodes.ts";
 
 type XY = { x: number; y: number };
 
@@ -59,7 +62,7 @@ export interface TidyLayoutOptions {
   rowGap: number;
 }
 
-/** Lays out one group of nodes (given in reading order); positions are relative to the group's top-left at (0, 0). */
+/** Lays out one group of nodes (given in the order to keep where the flow allows); positions are relative to the group's top-left at (0, 0). */
 export type GroupLayout = (nodes: readonly TidyNode[], edges: readonly TidyEdge[], options: TidyLayoutOptions) => Promise<Map<string, XY>>;
 
 export interface TidyRequest {
@@ -91,6 +94,8 @@ export interface TidyPush {
 export interface TidyPlan {
   /** New top-left positions of the nodes that moved. */
   nodes: Map<string, XY>;
+  /** Where each node the tidy laid out ends up, moved or not; tidyPlanOps saves the layer and interface nodes among them. */
+  laidOut: Map<string, XY>;
   /** New rects of the frames that moved or changed size. */
   frames: Map<string, Rect>;
   /** Frames and groups pushed clear of another, in the order it happened. */
@@ -111,6 +116,42 @@ const bbox = (rects: readonly Rect[]): Rect => {
 const union = (a: Rect, b: Rect): Rect => bbox([a, b]);
 
 const grown = (r: Rect, by: number): Rect => ({ x: r.x - by, y: r.y - by, width: r.width + by * 2, height: r.height + by * 2 });
+
+const byId = (a: { id: string }, b: { id: string }) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
+
+/** Layouts a group tries from one starting order before falling back. */
+const SETTLE_LIMIT = 8;
+
+/**
+ * Lays out one group so that its reading order holds. ELK keeps the order it's given where the flow
+ * allows, and that order is the units' reading order, but the layout leaves a reading order of its
+ * own, which the next tidy would start from. So the group is laid out again in the order each layout
+ * leaves until the order holds. When the orders cycle, the cycle's first order by ids wins; when they
+ * neither hold nor cycle, the same search runs from the units in id order, then that order's layout
+ * is kept. Each way, tidying the result again gives the same result.
+ */
+async function settledLayout(units: readonly TidyNode[], edges: readonly TidyEdge[], options: TidyLayoutOptions, layout: GroupLayout): Promise<Map<string, XY>> {
+  const settle = async (start: readonly TidyNode[]): Promise<Map<string, XY> | undefined> => {
+    const tried = new Map<string, Map<string, XY>>();
+    let order = start;
+    for (let i = 0; i < SETTLE_LIMIT; i++) {
+      const key = order.map((u) => u.id).join("\n");
+      if (tried.has(key)) {
+        const keys = [...tried.keys()];
+        return tried.get(keys.slice(keys.indexOf(key)).sort()[0]!);
+      }
+      const laid = await layout(order, edges, options);
+      tried.set(key, laid);
+      const at = (u: TidyNode): Rect => ({ ...u, ...laid.get(u.id) });
+      const next = [...order].sort((a, b) => readingOrder(at(a), at(b)));
+      if (next.every((u, j) => u === order[j])) return laid;
+      order = next;
+    }
+    return undefined;
+  };
+  const byIds = [...units].sort(byId);
+  return (await settle(units)) ?? (await settle(byIds)) ?? layout(byIds, edges, options);
+}
 
 interface Block {
   id: string;
@@ -175,6 +216,7 @@ export async function planTidy(request: TidyRequest, layout: GroupLayout): Promi
     }
   };
   const changed = new Set<string>();
+  const laidOut = new Set<string>();
   const frameBlock = (id: string): Block => {
     const inner = contents(id);
     return { id, orig: origFrame.get(id)!, rect: rects.get(id)!, nodes: inner.nodes, frames: [id, ...inner.frames], touched: changed.has(id) };
@@ -230,9 +272,11 @@ export async function planTidy(request: TidyRequest, layout: GroupLayout): Promi
         if (!source || !target || source === target) continue;
         edges.push({ source, target, ...(source === e.source && e.sourceHandle ? { sourceHandle: e.sourceHandle } : {}), ...(target === e.target && e.targetHandle ? { targetHandle: e.targetHandle } : {}) });
       }
-      const laid = await layout(units, edges, options);
+      const laid = await settledLayout(units, edges, options, layout);
       const before = bbox(units);
-      const interior = frame ? { x: frame.x + FRAME_PADDING.left, y: frame.y + FRAME_PADDING.top } : undefined;
+      // Nested frames that stay put reach as far as the refit frame will, so its nodes start there too.
+      const kept = arranging ? [] : (childFrames.get(container) ?? []).map((id) => rects.get(id)!);
+      const interior = frame ? { x: Math.min(frame.x + FRAME_PADDING.left, ...kept.map((r) => r.x)), y: Math.min(frame.y + FRAME_PADDING.top, ...kept.map((r) => r.y)) } : undefined;
       // A frame's nodes start at its top-left; a selection stays where it was (inside its frame).
       const anchor = interior && scope.kind !== "nodes" ? interior : interior ? { x: Math.max(before.x, interior.x), y: Math.max(before.y, interior.y) } : { x: before.x, y: before.y };
       const frameUnits = new Set(blockFrames);
@@ -241,7 +285,10 @@ export async function planTidy(request: TidyRequest, layout: GroupLayout): Promi
         if (!p) continue;
         const next = { x: Math.round(anchor.x + p.x), y: Math.round(anchor.y + p.y) };
         if (frameUnits.has(unit.id)) move(frameBlock(unit.id), next.x - unit.x, next.y - unit.y);
-        else pos.set(unit.id, next);
+        else {
+          pos.set(unit.id, next);
+          laidOut.add(unit.id);
+        }
       }
     }
     // Push apart what's inside this container, when something in it moved or grew.
@@ -274,11 +321,12 @@ export async function planTidy(request: TidyRequest, layout: GroupLayout): Promi
     if (container !== ROOT && changed.has(container)) changed.add(parentOf.get(container) ?? ROOT);
   }
 
-  const plan: TidyPlan = { nodes: new Map(), frames: new Map(), pushed: pushed.filter((p) => p.dx || p.dy) };
+  const plan: TidyPlan = { nodes: new Map(), laidOut: new Map(), frames: new Map(), pushed: pushed.filter((p) => p.dx || p.dy) };
   for (const n of nodes) {
     const p = pos.get(n.id)!;
     const next = { x: Math.round(p.x), y: Math.round(p.y) };
     if (next.x !== n.x || next.y !== n.y) plan.nodes.set(n.id, next);
+    if (laidOut.has(n.id)) plan.laidOut.set(n.id, next);
   }
   for (const f of frames) {
     const r = rects.get(f.id)!;
@@ -287,7 +335,11 @@ export async function planTidy(request: TidyRequest, layout: GroupLayout): Promi
   return plan;
 }
 
-/** The ops that apply a plan: updatePatch ui, updateComment rect, and one setNodePositions for layer and interface nodes. */
+/**
+ * The ops that apply a plan: updatePatch ui, updateComment rect, and one setNodePositions for layer and
+ * interface nodes. That one also saves the layer and interface nodes the tidy laid out but didn't move:
+ * unsaved, they'd be placed next to their patches again, which the tidy may have just moved.
+ */
 export function tidyPlanOps(component: Component, plan: TidyPlan): Op[] {
   const ops: Op[] = [];
   const positioned = new Map<string, XY>();
@@ -298,6 +350,7 @@ export function tidyPlanOps(component: Component, plan: TidyPlan): Op[] {
       if (node && (node.ui.x !== p.x || node.ui.y !== p.y)) ops.push({ op: "updatePatch", component: component.id, id, ui: { x: p.x, y: p.y } });
     }
   }
+  for (const [id, p] of plan.laidOut) if (isPositionedNodeId(id) && !positioned.has(id)) positioned.set(id, p);
   for (const [id, r] of plan.frames) {
     const comment = component.comments.find((c) => c.id === id);
     const rect: [number, number, number, number] = [r.x, r.y, r.width, r.height];
@@ -333,6 +386,10 @@ export interface ElkLike {
 /**
  * A GroupLayout on ELK's layered algorithm: ports fixed at their rows, nodes kept in the given order
  * where the flow allows (the graph is flat, so model order is safe), connected groups stacked.
+ * A layer node's inputs go to its rows in id order: the patch editor lists driven properties in the
+ * order of their drivers (deriveGraph), which the layout is about to change, so their current rows
+ * would make each tidy start from the last one's result. ELK lines the drivers up with those rows,
+ * and the editor then draws the rows in that order.
  */
 export function createElkGroupLayout(elk: ElkLike): GroupLayout {
   return async (nodes, edges, options) => {
@@ -341,6 +398,13 @@ export function createElkGroupLayout(elk: ElkLike): GroupLayout {
     const lr = options.direction !== "TB";
     const ids = new Set(nodes.map((n) => n.id));
     const portIds = new Set<string>();
+    const rows = (n: TidyNode): readonly TidyPort[] => {
+      const ports = n.ports ?? [];
+      if (layerIdOfNode(n.id) === undefined) return ports;
+      const ins = ports.filter((p) => p.side === "in");
+      const ys = ins.map((p) => p.y).sort((a, b) => a - b);
+      return [...ins.sort(byId).map((p, i) => ({ ...p, y: ys[i]! })), ...ports.filter((p) => p.side === "out")];
+    };
     const graph: ElkGraphNode = {
       id: "root",
       layoutOptions: {
@@ -357,7 +421,7 @@ export function createElkGroupLayout(elk: ElkLike): GroupLayout {
       },
       children: nodes.map((n) => {
         const ports = lr
-          ? (n.ports ?? []).map((p) => {
+          ? rows(n).map((p) => {
               const id = `${n.id}::${p.id}`;
               portIds.add(id);
               return { id, x: p.side === "in" ? 0 : n.width, y: p.y, width: 0, height: 0, layoutOptions: { "elk.port.side": p.side === "in" ? "WEST" : "EAST" } };
@@ -365,13 +429,17 @@ export function createElkGroupLayout(elk: ElkLike): GroupLayout {
           : [];
         return { id: n.id, width: n.width, height: n.height, ports, layoutOptions: { "elk.portConstraints": ports.length ? "FIXED_POS" : "FREE" } };
       }),
+      // In id order: ELK keeps edge order too, and the document's order changes when it's saved.
       edges: edges
         .filter((e) => ids.has(e.source) && ids.has(e.target) && e.source !== e.target)
-        .map((e, i) => {
-          const source = e.sourceHandle ? `${e.source}::${e.sourceHandle}` : "";
-          const target = e.targetHandle ? `${e.target}::${e.targetHandle}` : "";
-          return { id: `e${i}`, sources: [portIds.has(source) ? source : e.source], targets: [portIds.has(target) ? target : e.target] };
-        }),
+        .map((e) => {
+          const sourcePort = e.sourceHandle ? `${e.source}::${e.sourceHandle}` : "";
+          const targetPort = e.targetHandle ? `${e.target}::${e.targetHandle}` : "";
+          const [source, target] = [portIds.has(sourcePort) ? sourcePort : e.source, portIds.has(targetPort) ? targetPort : e.target];
+          return { id: `${target}<${source}`, sources: [source], targets: [target] };
+        })
+        .sort(byId)
+        .map((e, i) => ({ ...e, id: `e${i}` })),
     };
     const laid = await elk.layout(graph);
     const children = laid.children ?? [];
