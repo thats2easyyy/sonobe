@@ -29,7 +29,7 @@ afterEach(() => {
 
 const open = (doc: SonobeDocument) => (session = createEditorSession({ host: null, document: doc, autoplay: false, scheduler: createManualScheduler(), textMeasurer: "approximate" }));
 const noBounds = () => null;
-const result = (layerId: string, component = "main"): DesignResult => ({ kind: "added", layerId, component, name: "Checkout", txnId: "t1", dropped: [], droppedCount: 0, coveredScreen: null, reply: "" });
+const result = (layerId: string, component = "main"): DesignResult => ({ kind: "added", layerId, component, name: "Checkout", txnId: "t1", dropped: [], droppedCount: 0, reply: "" });
 
 describe("designTarget", () => {
   it("is the one selected layer, unless the box pinned a new screen", () => {
@@ -80,6 +80,30 @@ describe("canvasContext", () => {
     // Without the canvas, the layer's own props; a top-level layer is a screen itself.
     session.selection.getState().select({ layers: ["tab_bar"] });
     expect(canvasContext(session, designTarget(session, { newScreen: false, result: null }), noBounds).target).toEqual({ id: "tab_bar", name: "Tab Bar", type: "group", frame: [0, 784, 402, 90] });
+  });
+
+  it("sizes a repeated layer at its own fixed size, not at the rect the canvas draws around all its copies", () => {
+    const built = applyOps(
+      createEmptyDocument({ name: "List" }),
+      [
+        { op: "addLayer", layer: { id: "row", type: "group", name: "Row", props: { size: [200, 80], repeat: 3 } } },
+        { op: "addLayer", layer: { id: "label", type: "text", name: "Label", props: { text: "Hi", size: [120, 20] } } },
+        { op: "addLayer", layer: { id: "bar", type: "rectangle", name: "Bar", props: { size: [300, 40], widthMode: "grow" } } },
+      ],
+      { registry: getRegistry() },
+    );
+    expect(built.ok).toBe(true);
+    open(built.doc);
+    // The canvas's rect for "row" spans its three copies, 100 apart.
+    const drawn: Record<string, { x: number; y: number; width: number; height: number }> = { row: { x: 0, y: 0, width: 200, height: 280 }, label: { x: 8, y: 300, width: 16, height: 18 }, bar: { x: 0, y: 400, width: 402, height: 40 } };
+    const frame = (id: string) => {
+      session.selection.getState().select({ layers: [id] });
+      return canvasContext(session, designTarget(session, { newScreen: false, result: null }), (layerId) => drawn[layerId] ?? null).target?.frame;
+    };
+    expect(frame("row")).toEqual([0, 0, 200, 80]);
+    // Text hugs its words, and a Grow width fills its parent: the canvas knows those sizes.
+    expect(frame("label")).toEqual([8, 300, 16, 18]);
+    expect(frame("bar")).toEqual([0, 400, 402, 40]);
   });
 
   it("keeps the first 30 screens and the first 1,500 characters of styles", () => {

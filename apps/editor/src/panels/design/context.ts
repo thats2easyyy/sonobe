@@ -3,7 +3,7 @@
  * the layer the person picked to redesign, and the style digest of what's there.
  */
 
-import { artboardSize, findLayer, formatStyleDigest, styleDigest, type InputValue, type LayerNode } from "@sonobe/core";
+import { artboardSize, findLayer, formatStyleDigest, LAYER_TYPE_MAP, styleDigest, type InputValue, type LayerNode } from "@sonobe/core";
 import type { EditorSession } from "../../state/session.ts";
 import type { AssistantCanvasContext } from "../assistant/types.ts";
 import type { DesignData } from "./designStore.ts";
@@ -28,10 +28,25 @@ export function designTarget(session: EditorSession, design: Pick<DesignData, "n
 const pair = (value: InputValue | undefined): [number, number] | null => (Array.isArray(value) && value.length === 2 && value.every((n) => typeof n === "number" && Number.isFinite(n)) ? [value[0] as number, value[1] as number] : null);
 const round = (n: number) => Math.round(n * 100) / 100;
 
-/** The layer's rect in the component, as the canvas measures it; else from its own props (relative to its parent, when the canvas can't say). */
+/** The layer's own width and height when its props fix them (a typed Size, in Fixed mode); null per side for a linked, auto, grow or percent one. */
+function fixedSize(layer: LayerNode): [number | null, number | null] {
+  const size = pair(layer.props.size);
+  if (!size) return [null, null];
+  const fixed = (key: "widthMode" | "heightMode") => (layer.props[key] ?? LAYER_TYPE_MAP.get(layer.type)?.props.find((p) => p.key === key)?.default ?? "fixed") === "fixed";
+  return [fixed("widthMode") ? size[0] : null, fixed("heightMode") ? size[1] : null];
+}
+
+/**
+ * The layer's rect in the component: where the canvas draws it, at its own fixed size when it has one
+ * (the canvas's rect spans every copy of a repeated layer and is scaled with it); else from its own
+ * props (relative to its parent, when the canvas can't say).
+ */
 function frameOf(layer: LayerNode, bounds: (id: string) => { x: number; y: number; width: number; height: number } | null): [number, number, number, number] {
   const rect = bounds(layer.id);
-  if (rect) return [round(rect.x), round(rect.y), round(rect.width), round(rect.height)];
+  if (rect) {
+    const [width, height] = fixedSize(layer);
+    return [round(rect.x), round(rect.y), round(width ?? rect.width), round(height ?? rect.height)];
+  }
   const [w, h] = pair(layer.props.size) ?? [0, 0];
   const [x, y] = pair(layer.props.position) ?? [0, 0];
   const [ax, ay] = pair(layer.props.anchor) ?? [0, 0];

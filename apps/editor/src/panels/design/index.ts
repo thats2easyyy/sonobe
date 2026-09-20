@@ -15,8 +15,12 @@ export {
   applyPreviewUpdate,
   attachDesign,
   designStore,
+  dismissDraft,
   initialDesignData,
+  liveMcpDraft,
   MCP_DRAFT_IDLE_MS,
+  MCP_DRAFT_STALLED_MS,
+  mcpDraftIdleAt,
   reduceDesignEvent,
   reducePreviewUpdate,
   runReply,
@@ -35,4 +39,4 @@ export {
 export { PREVIEW_BOOTSTRAP, PREVIEW_MESSAGE_TYPE, PREVIEW_SCRIPT_PREFIXES, previewCsp, previewShellHtml, renderablePrefix } from "./previewShell.ts";
 export { DESIGN_CANVAS_SPLIT, followDesignBox } from "./layout.ts";
 export { claudePrompt, designFollowUp, type DesignFollowUpKind } from "./prompt.ts";
-export { designResultChips, designRunState, designStatusLine, toolStatusText, type DesignResultChip, type DesignStatusLine } from "./status.ts";
+export { designResultChips, designRunState, designStatusLine, mcpDraftText, resultPlacement, toolStatusText, type DesignResultChip, type DesignStatusLine, type ResultPlacement } from "./status.ts";

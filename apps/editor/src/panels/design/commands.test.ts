@@ -53,6 +53,19 @@ describe("designCommands", () => {
     expect(designStore.getState()).toMatchObject({ open: true, newScreen: false });
   });
 
+  it("hides the preview Claude Code is drawing, only while there is one", async () => {
+    const hide = commands["ai.hidePreview"]!;
+    expect(hide).toMatchObject({ title: "Hide Design Preview", category: "Canvas" });
+    expect(hide.when?.({})).toBe(false);
+    designStore.setState({
+      drafts: [{ source: "mcp", key: "mcp:cc-1", runId: "", turn: 0, toolUseId: "", html: "<p>Hi</p>", fields: {}, status: "writing", since: Date.now(), progress: null, error: null, resync: false, mcp: { author: { kind: "agent", name: "Claude" }, client: null, revision: 1, touchedAt: Date.now(), addingFrom: null } }],
+    });
+    expect(hide.when?.({})).toBe(true);
+    await hide.run({});
+    expect(designStore.getState().drafts[0]?.status).toBe("stopped");
+    expect(hide.when?.({})).toBe(false);
+  });
+
   it("can't design in a patch component", () => {
     expect(commands["ai.design"]!.when?.({})).toBe(true);
     session.selection.getState().enterComponent("logic");

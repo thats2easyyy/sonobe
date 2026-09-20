@@ -8,7 +8,26 @@ import { assistantStore, initialAssistantData } from "../assistant/assistantStor
 import { sharedAssistantController } from "../assistant/controller.ts";
 import { fakeAssistantHost, usage } from "../assistant/testing.ts";
 import type { AssistantEvent, AssistantImported } from "../assistant/types.ts";
-import { activeDraft, applyPreviewUpdate, attachDesign, designStore, initialDesignData, MCP_DRAFT_IDLE_MS, reduceDesignEvent, reducePreviewUpdate, runReply, sendDesign, type DesignData, type DesignDraft, type DesignRequest, type PreviewTarget } from "./designStore.ts";
+import {
+  activeDraft,
+  applyPreviewUpdate,
+  attachDesign,
+  designStore,
+  dismissDraft,
+  initialDesignData,
+  liveMcpDraft,
+  MCP_DRAFT_IDLE_MS,
+  MCP_DRAFT_STALLED_MS,
+  mcpDraftIdleAt,
+  reduceDesignEvent,
+  reducePreviewUpdate,
+  runReply,
+  sendDesign,
+  type DesignData,
+  type DesignDraft,
+  type DesignRequest,
+  type PreviewTarget,
+} from "./designStore.ts";
 
 type Draft = Extract<AssistantEvent, { type: "design_draft" }>;
 const draft = (offset: number, append: string, extra: Partial<Draft> = {}): Draft => ({ type: "design_draft", runId: "r1", turn: 1, toolUseId: "t1", offset, append, done: false, ...extra });
@@ -223,12 +242,41 @@ describe("reducePreviewUpdate", () => {
     expect(activeDraft(state, 1000)?.key).toBe("mcp:cd-1");
   });
 
-  it("leaves the canvas once a draft has had no update for 15 minutes", () => {
+  it("leaves the canvas once its session stops sending: 3 minutes while it's written, 15 while it's added", () => {
+    expect(MCP_DRAFT_STALLED_MS).toBe(3 * 60_000);
+    expect(MCP_DRAFT_IDLE_MS).toBe(15 * 60_000);
     const state = play([update()], {}, at(), 1000);
-    expect(activeDraft(state, 1000 + MCP_DRAFT_IDLE_MS - 1)?.key).toBe("mcp:cc-1");
-    expect(activeDraft(state, 1000 + MCP_DRAFT_IDLE_MS)).toBeNull();
+    expect(mcpDraftIdleAt(state.drafts[0]!)).toBe(1000 + MCP_DRAFT_STALLED_MS);
+    expect(activeDraft(state, 1000 + MCP_DRAFT_STALLED_MS - 1)?.key).toBe("mcp:cc-1");
+    expect(activeDraft(state, 1000 + MCP_DRAFT_STALLED_MS)).toBeNull();
     // Another update brings it back.
-    expect(activeDraft(play([update({ revision: 2 })], state, at(), 1000 + MCP_DRAFT_IDLE_MS), 1000 + MCP_DRAFT_IDLE_MS)?.key).toBe("mcp:cc-1");
+    expect(activeDraft(play([update({ revision: 2 })], state, at(), 1000 + MCP_DRAFT_STALLED_MS), 1000 + MCP_DRAFT_STALLED_MS)?.key).toBe("mcp:cc-1");
+
+    // Adding can take a capture and the import: it waits as long as the MCP server keeps the draft.
+    const adding = play([update({ revision: 2, status: "adding" })], state, at(), 1000);
+    expect(activeDraft(adding, 1000 + MCP_DRAFT_IDLE_MS - 1)?.key).toBe("mcp:cc-1");
+    expect(activeDraft(adding, 1000 + MCP_DRAFT_IDLE_MS)).toBeNull();
+    // The Assistant's drafts end with its run, not on a clock.
+    expect(mcpDraftIdleAt({ ...state.drafts[0]!, mcp: undefined })).toBeNull();
+  });
+
+  it("hides a session's draft when the person asks, until the session sends more", () => {
+    designStore.setState({ ...initialDesignData(), ...play([update()], {}, at(), 1000) });
+    try {
+      expect(liveMcpDraft(designStore.getState(), 2000)?.key).toBe("mcp:cc-1");
+      expect(dismissDraft("mcp:cc-1", 2000)).toBe(true);
+      expect(designStore.getState().drafts[0]).toMatchObject({ status: "stopped", since: 2000 });
+      // It fades out, then it's gone; there's nothing left to hide.
+      expect(activeDraft(designStore.getState(), 2399)?.key).toBe("mcp:cc-1");
+      expect(liveMcpDraft(designStore.getState(), 2000)).toBeNull();
+      expect(dismissDraft("mcp:cc-1", 2100)).toBe(false);
+      expect(dismissDraft("t1", 2100)).toBe(false);
+      // The session's next update starts it over.
+      designStore.setState(reducePreviewUpdate(designStore.getState(), update({ revision: 2 }), 3000, at()));
+      expect(liveMcpDraft(designStore.getState(), 3000)?.key).toBe("mcp:cc-1");
+    } finally {
+      designStore.setState(initialDesignData());
+    }
   });
 
   it("reads the window's document when applied, so the import that cleared it counts as added", () => {
@@ -305,7 +353,7 @@ describe("attachDesign and sendDesign", () => {
   }
   const addCheckout = (component?: string): Op => ({ op: "addLayer", ...(component ? { component } : {}), layer: { id: "checkout", type: "group", name: "Checkout", props: { size: [402, 874] } } });
 
-  it("selects and reveals a new screen, names the one it covers, and takes Claude's closing words", () => {
+  it("selects and reveals a new screen, and takes Claude's closing words", () => {
     detach = attachDesign(session, host);
     host.emit({ type: "run_started", runId: "r1", model: "claude-sonnet-5" });
     host.emit({ type: "turn_started", runId: "r1", turn: 1 });
@@ -316,7 +364,7 @@ describe("attachDesign and sendDesign", () => {
     host.emit(finished("t1", { imported: imported({ txnId }) }));
     expect(session.selection.getState().layers).toEqual(["checkout"]);
     expect(session.selection.getState().reveal).toMatchObject({ component: "main", ids: ["checkout"] });
-    expect(designStore.getState().result).toEqual({ kind: "added", layerId: "checkout", component: "main", name: "Checkout", txnId, dropped: [], droppedCount: 0, coveredScreen: "Home", reply: "" });
+    expect(designStore.getState().result).toEqual({ kind: "added", layerId: "checkout", component: "main", name: "Checkout", txnId, dropped: [], droppedCount: 0, reply: "" });
 
     host.emit({ type: "turn_started", runId: "r1", turn: 2 });
     host.emit({ type: "text_delta", runId: "r1", turn: 2, delta: "Added a checkout with Apple Pay." });
@@ -341,7 +389,45 @@ describe("attachDesign and sendDesign", () => {
     const txnId = importScreen([addCheckout("badge")]);
     host.emit(finished("t1", { imported: imported({ txnId }) }));
     expect(session.selection.getState().layers).toEqual([]);
-    expect(designStore.getState().result).toMatchObject({ layerId: "checkout", component: "badge", coveredScreen: null });
+    expect(designStore.getState().result).toMatchObject({ layerId: "checkout", component: "badge" });
+  });
+
+  it("leaves an import into another open document alone: no result, no selection, and nothing added here", () => {
+    detach = attachDesign(session, host);
+    designStore.setState({ request: pending() });
+    host.emit({ type: "run_started", runId: "r1", model: "claude-sonnet-5" });
+    host.emitDesign("r1", "t1", "<html><body>Home</body></html>", { fields: { name: "Home" } });
+    // This window's newest change is its own; the other window's history counts txnIds from 1 too.
+    const ours = importScreen([{ op: "updateLayer", id: "card", name: "Big Card" }]);
+    host.emit(finished("t1", { imported: imported({ docId: "other", screenId: "home", txnId: ours, name: "Home" }) }));
+    expect(designStore.getState().result).toBeNull();
+    expect(designStore.getState().request?.imported).toBeUndefined();
+    expect(designStore.getState().drafts[0]?.status).toBe("stopped");
+    expect(session.selection.getState().layers).toEqual([]);
+    expect(session.selection.getState().reveal).toBeNull();
+    // A txnId from before this window's newest change isn't the import either.
+    host.emit(finished("t2", { imported: imported({ docId: "other", screenId: "card", txnId: "txn_0", name: "Card" }) }));
+    expect(designStore.getState().result).toBeNull();
+  });
+
+  it("ends a session's draft once it stops sending, so the canvas lets go of it", () => {
+    vi.useFakeTimers();
+    try {
+      detach = attachDesign(session, host);
+      const now = Date.now();
+      const update: DesignPreviewUpdate = { docId: "shop", key: "cc-1", author: { kind: "agent", name: "Claude" }, client: { id: "cc-1", label: "Claude Code" }, name: "Checkout", component: null, replace: null, width: null, height: null, position: null, html: "<p>Hi</p>", status: "writing", revision: 1 };
+      expect(applyPreviewUpdate(session, update, now)).toBe(true);
+      vi.advanceTimersByTime(MCP_DRAFT_STALLED_MS - 1000);
+      expect(designStore.getState().drafts[0]?.status).toBe("writing");
+      // Another part resets the clock.
+      expect(applyPreviewUpdate(session, { ...update, revision: 2 }, Date.now())).toBe(true);
+      vi.advanceTimersByTime(MCP_DRAFT_STALLED_MS - 1000);
+      expect(designStore.getState().drafts[0]?.status).toBe("writing");
+      vi.advanceTimersByTime(1001);
+      expect(designStore.getState().drafts[0]).toMatchObject({ status: "stopped", since: Date.now() });
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("reports a replace as an update with what it dropped", () => {
@@ -350,7 +436,7 @@ describe("attachDesign and sendDesign", () => {
     host.emit({ type: "run_started", runId: "r1", model: "claude-sonnet-5" });
     const txnId = importScreen([{ op: "updateLayer", id: "card", name: "Promo Card" }]);
     host.emit(finished("t1", { imported: imported({ screenId: "card", txnId, name: "Card", replaced: "card", dropped: ["Promo Badge", "Divider"], droppedCount: 2 }) }));
-    expect(designStore.getState().result).toMatchObject({ kind: "updated", layerId: "card", name: "Promo Card", dropped: ["Promo Badge", "Divider"], droppedCount: 2, coveredScreen: null });
+    expect(designStore.getState().result).toMatchObject({ kind: "updated", layerId: "card", name: "Promo Card", dropped: ["Promo Badge", "Divider"], droppedCount: 2 });
     expect(session.selection.getState().layers).toEqual(["card"]);
   });
 
