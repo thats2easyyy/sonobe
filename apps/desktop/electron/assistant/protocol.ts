@@ -4,10 +4,16 @@
  * the sandboxed preload can bundle it. The editor mirrors these types structurally
  * (apps/editor/src/panels/assistant/types.ts).
  *
- * Policy: the Assistant uses only the person's own Anthropic API key, kept in the OS keychain through
- * sonobeHost.secrets under ASSISTANT_KEY_SECRET. It never offers claude.ai login and never reads Claude
- * credentials; people with a Claude plan connect Claude Desktop or Claude Code over MCP instead, or
- * choose Open in Claude Code, which starts their own `claude` in Terminal (../claude-handoff.ts).
+ * Policy: by default the Assistant uses only the person's own Anthropic API key, kept in the OS keychain
+ * through sonobeHost.secrets under ASSISTANT_KEY_SECRET. People with a Claude plan connect Claude Desktop
+ * or Claude Code over MCP, or choose Open in Claude Code, which starts their own `claude` in Terminal
+ * (../claude-handoff.ts).
+ *
+ * Experimental, off by default and not released until Anthropic agrees: with the subscription switch on
+ * (AssistantConnection.subscriptionEnabled), the person can pick "Claude subscription", and the Assistant
+ * runs Claude's agent adapter (@agentclientprotocol/claude-agent-acp) as a child process over ACP with
+ * the Claude login they already have on this computer. Sonobe never reads Claude credentials itself: the
+ * adapter and Claude Code do (./acp).
  */
 
 /** Secret name for the person's Anthropic API key (sonobeHost.secrets). */
@@ -36,7 +42,53 @@ export const ASSISTANT_IPC = {
   unlinkCodeFolder: "sonobe:assistant:unlink-code-folder",
   /** invoke(HandoffRequest) → HandoffResult (writes a one-time script and opens it in Terminal; needs no API key) */
   openInClaudeCode: "sonobe:assistant:open-claude-code",
+  /** invoke(AssistantConnectionUpdate) → AssistantStatus. A change of what this window's chat runs on starts a new chat in it. */
+  setConnection: "sonobe:assistant:set-connection",
+  /** invoke → AssistantSubscriptionStatus: starts Claude's agent adapter (restarting an idle one) and reads the Claude login it reports. */
+  checkSubscription: "sonobe:assistant:check-subscription",
+  /** invoke → AssistantSignInResult: opens Terminal running the adapter's Claude sign-in (macOS). */
+  signInToClaude: "sonobe:assistant:sign-in",
 } as const;
+
+/** What the Assistant runs on: the person's Anthropic API key, or (experimental) their Claude subscription through Claude's agent adapter. */
+export type AssistantProvider = "api_key" | "subscription";
+
+/** The Assistant's connection settings, app-wide and kept by the main process. */
+export interface AssistantConnection {
+  /** The experimental switch in Settings → Claude. Off by default: awaiting Anthropic's permission. */
+  subscriptionEnabled: boolean;
+  /** The person's pick in the Assistant's setup. "subscription" counts only while subscriptionEnabled is on. */
+  provider: AssistantProvider;
+  /** What a new chat runs on: `provider` while the switch is on, else "api_key". */
+  active: AssistantProvider;
+}
+
+export interface AssistantConnectionUpdate {
+  subscriptionEnabled?: boolean;
+  provider?: AssistantProvider;
+}
+
+/**
+ * unknown: not checked in this launch. checking: the adapter is starting or reading the login. ready: signed in.
+ * signed_out: the adapter reports no login. not_installed: Sonobe couldn't find the adapter. failed: it wouldn't start or answer.
+ */
+export type AssistantSubscriptionState = "unknown" | "checking" | "ready" | "signed_out" | "not_installed" | "failed";
+
+/** The Claude login the adapter last reported (its `_auth/status_update`), and whether Sonobe found the adapter. */
+export interface AssistantSubscriptionStatus {
+  state: AssistantSubscriptionState;
+  /** account: a Claude plan pays. api_key: an API key or an Anthropic Console login pays, at API rates. gateway, external: another provider. none: signed out. */
+  kind: "account" | "api_key" | "gateway" | "external" | "none" | null;
+  /** The adapter's label ("Claude Max", "Anthropic API key", "Not logged in"). */
+  label: string | null;
+  email: string | null;
+  /** The adapter's version, when Sonobe found it. */
+  adapterVersion: string | null;
+  /** What to do, for signed_out, not_installed and failed (teaching copy). */
+  message: string | null;
+}
+
+export type AssistantSignInResult = { ok: true } | { ok: false; error: string };
 
 export type AssistantModelId = "claude-sonnet-5" | "claude-opus-5" | "claude-haiku-4-5-20251001";
 
@@ -94,6 +146,10 @@ export interface AssistantStatus {
   messageCount: number;
   /** The code folder linked to this window's prototype (Match my code…). */
   codeFolder: AssistantCodeFolderStatus;
+  connection: AssistantConnection;
+  subscription: AssistantSubscriptionStatus;
+  /** What this window's chat runs on: set by its first message, kept until New chat. Null before the first message. */
+  chatProvider: AssistantProvider | null;
 }
 
 /** What the canvas knows when the person asks from the Design with Claude box. Every name comes from the document: data, not instructions. */
@@ -180,6 +236,18 @@ export type AssistantErrorCode =
   | "busy"
   | "empty_message"
   | "no_document"
+  /** A subscription chat while the experimental switch is off. */
+  | "subscription_off"
+  /** Sonobe couldn't find Claude's agent adapter. */
+  | "agent_not_installed"
+  /** The adapter reports no Claude login (ACP auth_required). */
+  | "not_signed_in"
+  /** The adapter process exited during the reply. */
+  | "agent_crashed"
+  /** The adapter wouldn't start, answer, or open a session. */
+  | "agent_failed"
+  /** The Claude plan's usage limit is reached. */
+  | "usage_limit"
   | "unknown";
 
 export interface AssistantError {
@@ -218,19 +286,28 @@ export interface AssistantKeyCheck {
 
 export type AssistantToolStatus = "running" | "done" | "error" | "declined" | "skipped";
 
+/** One choice on a permission card (ACP session/request_permission), in the agent's order. */
+export interface AssistantConfirmOption {
+  id: string;
+  label: string;
+  kind: "allow_once" | "allow_always" | "reject_once" | "reject_always";
+}
+
 export type AssistantEvent =
-  | { type: "run_started"; runId: string; model: AssistantModelId }
+  | { type: "run_started"; runId: string; model: AssistantModelId; provider?: AssistantProvider }
   /** One API request (a reply, or the reply after a round of tools). */
   | { type: "turn_started"; runId: string; turn: number }
   | { type: "text_delta"; runId: string; turn: number; delta: string }
   /** Summarized thinking, for a quiet "thinking" indicator. */
   | { type: "thinking_delta"; runId: string; turn: number; delta: string }
+  /** A repeat for a toolUseId already started updates its title and detail (the subscription path learns a call's input as Claude writes it). */
   | { type: "tool_started"; runId: string; toolUseId: string; name: string; title: string; detail: string }
   /** Where a running tool is ("Downloading images: 7 of 28"), from its progress notifications. */
   | { type: "tool_progress"; runId: string; toolUseId: string; detail: string }
   | { type: "tool_finished"; runId: string; toolUseId: string; name: string; status: AssistantToolStatus; detail: string; changedDocument: boolean; imported?: AssistantImported }
-  | { type: "confirm_required"; runId: string; confirmationId: string; toolUseId: string; title: string; message: string; count: number; kind?: "delete" | "replace"; approveLabel?: string; declineLabel?: string }
-  | { type: "confirm_resolved"; runId: string; confirmationId: string; approved: boolean }
+  /** kind "permission": the agent asks before a tool runs (subscription path); `options` are its choices, answered with confirm(id, approved, optionId). */
+  | { type: "confirm_required"; runId: string; confirmationId: string; toolUseId: string; title: string; message: string; count: number; kind?: "delete" | "replace" | "permission"; approveLabel?: string; declineLabel?: string; options?: AssistantConfirmOption[] }
+  | { type: "confirm_resolved"; runId: string; confirmationId: string; approved: boolean; optionId?: string }
   | { type: "usage"; runId: string; usage: AssistantUsage; limits: AssistantLimits }
   | { type: "notice"; runId: string; tone: "info" | "warn"; message: string }
   | { type: "run_finished"; runId: string; outcome: AssistantOutcome; error?: AssistantError; usage: AssistantUsage }
@@ -249,7 +326,8 @@ export interface SonobeAssistantApi {
   stop(): Promise<boolean>;
   /** Start a new chat (stops any run). */
   reset(): Promise<AssistantStatus>;
-  confirm(confirmationId: string, approved: boolean): Promise<boolean>;
+  /** `optionId`: the choice picked on a permission card (confirm_required.options); its kind decides `approved`. */
+  confirm(confirmationId: string, approved: boolean, optionId?: string): Promise<boolean>;
   /** Check the stored key with one small API call. */
   checkKey(): Promise<AssistantKeyCheck>;
   /** Events for this window's runs. Returns unsubscribe. */
@@ -261,4 +339,10 @@ export interface SonobeAssistantApi {
   unlinkCodeFolder(): Promise<AssistantCodeFolderStatus>;
   /** Open Terminal in the linked code folder (asking for one first when none is linked), running the person's own `claude` with the prompt. macOS only. */
   openInClaudeCode(request: HandoffRequest): Promise<HandoffResult>;
+  /** Turn the experimental subscription switch on or off, or pick what the Assistant runs on. */
+  setConnection(update: AssistantConnectionUpdate): Promise<AssistantStatus>;
+  /** Start Claude's agent adapter and read the Claude login it reports. */
+  checkSubscription(): Promise<AssistantSubscriptionStatus>;
+  /** Open Terminal running the adapter's Claude sign-in (macOS). */
+  signInToClaude(): Promise<AssistantSignInResult>;
 }
