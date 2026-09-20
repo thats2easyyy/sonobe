@@ -90,6 +90,8 @@ export interface ImportSummary {
   /** With `replace`: layers that kept their ids, and connections to layers that are gone. */
   kept?: number;
   lostConnections?: number;
+  /** With replace: layers of the old one that weren't found again (all of them, children included). */
+  dropped?: number;
 }
 
 export interface ImportPlan {
@@ -102,6 +104,8 @@ export interface ImportPlan {
   screenName: string;
   summary: ImportSummary;
   notes: string[];
+  /** With replace: the top-most old layers not found again (a dropped group's children aren't listed). Empty otherwise. */
+  dropped: { id: Id; name: string }[];
 }
 
 const round = (n: number) => Math.round(n * 100) / 100 || 0;
@@ -349,7 +353,7 @@ export async function planImport(capture: DesignCapture, doc: SonobeDocument, im
   if (ctx.insetShadows) notes.push(`${ctx.insetShadows} inner shadow${ctx.insetShadows === 1 ? " was" : "s were"} left out (Sonobe draws outer shadows).`);
   if (ctx.missingImages) notes.push(`${ctx.missingImages} image${ctx.missingImages === 1 ? "" : "s"} couldn't be downloaded; ${ctx.missingImages === 1 ? "it's" : "they're"} gray placeholders.`);
   summary.layers = ctx.layers;
-  return { ops, files, screenRef, screenName, summary, notes };
+  return { ops, files, screenRef, screenName, summary, notes, dropped: [] };
 }
 
 // ---------------------------------------------------------------------------

@@ -73,6 +73,6 @@ describe("assistant preload bridge", () => {
     const host: Record<string, unknown> = { platform: "darwin" };
     attachAssistantBridge(host, fakeIpcRenderer().ipc);
     expect(Object.keys(host)).toEqual(["platform", "assistant"]);
-    expect(Object.keys(host.assistant as object).sort()).toEqual(["checkKey", "confirm", "onEvent", "reset", "send", "status", "stop"]);
+    expect(Object.keys(host.assistant as object).sort()).toEqual(["checkKey", "codeFolder", "confirm", "linkCodeFolder", "onEvent", "reset", "send", "status", "stop", "unlinkCodeFolder"]);
   });
 });

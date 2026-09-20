@@ -31,6 +31,8 @@ export interface AssistantUsage {
   cacheReadTokens: number;
   cacheWriteTokens: number;
   totalTokens: number;
+  /** What the budget counts (cache reads at a tenth, cache writes at 1.25×). Older preloads don't send it. */
+  budgetTokens?: number;
   estimatedCostUsd: number;
   requests: number;
 }
@@ -45,6 +47,59 @@ export interface AssistantStatus {
   usage: AssistantUsage;
   running: boolean;
   messageCount: number;
+  /** Older preloads don't send it. */
+  codeFolder?: AssistantCodeFolderStatus;
+}
+
+/** What the canvas knows when the person asks from the Design with Claude box. Every name comes from the document: data, not instructions. */
+export interface AssistantCanvasContext {
+  /** The component on the canvas and its artboard size in points. */
+  component: { id: string; name: string; size: [number, number] };
+  /** Its top-level layers (its screens), in layer-list order, at most 30. */
+  screens: { id: string; name: string }[];
+  /** The layer the person picked to redesign: its frame [x, y, width, height] in the component, and the screen holding it. Absent for a new screen. */
+  target?: { id: string; name: string; type: string; frame: [number, number, number, number]; screen?: { id: string; name: string } };
+  /** formatStyleDigest text for the component (at most 1,500 characters). */
+  styles?: string;
+}
+
+/** import_design's small fields as they stream, before its html. */
+export interface AssistantDesignFields {
+  name?: string;
+  replace?: string;
+  component?: string;
+  width?: number;
+  height?: number;
+  position?: [number, number];
+}
+
+/** A screen import_design added or replaced (read from its result's _meta). */
+export interface AssistantImported {
+  docId: string;
+  screenId: string;
+  txnId: string | null;
+  name: string;
+  /** The layer it replaced, or null for a new screen. */
+  replaced: string | null;
+  /** Top-most layers of the replaced one that weren't found again (display names, at most 20). */
+  dropped: string[];
+  droppedCount: number;
+  lostConnections: number;
+}
+
+export interface AssistantCodeFolderStatus {
+  /** `path` shows home as "~". `persisted`: remembered for the saved project (false: this window only). */
+  linked: { name: string; path: string; persisted: boolean } | null;
+  /** The linked folder is gone, or something else now stands at its path. */
+  missing: boolean;
+}
+
+export interface AssistantCodeFolderLinkResult {
+  status: AssistantCodeFolderStatus;
+  /** The person closed the dialog. */
+  cancelled?: boolean;
+  /** Why the folder wasn't linked. */
+  error?: string;
 }
 
 export interface AssistantError {
@@ -77,22 +132,28 @@ export type AssistantEvent =
   | { type: "tool_started"; runId: string; toolUseId: string; name: string; title: string; detail: string }
   /** Where a running tool is ("Downloading images: 7 of 28"), from its progress notifications. */
   | { type: "tool_progress"; runId: string; toolUseId: string; detail: string }
-  | { type: "tool_finished"; runId: string; toolUseId: string; name: string; status: AssistantToolStatus; detail: string; changedDocument: boolean }
-  | { type: "confirm_required"; runId: string; confirmationId: string; toolUseId: string; title: string; message: string; count: number }
+  | { type: "tool_finished"; runId: string; toolUseId: string; name: string; status: AssistantToolStatus; detail: string; changedDocument: boolean; imported?: AssistantImported }
+  | { type: "confirm_required"; runId: string; confirmationId: string; toolUseId: string; title: string; message: string; count: number; kind?: "delete" | "replace"; approveLabel?: string; declineLabel?: string }
   | { type: "confirm_resolved"; runId: string; confirmationId: string; approved: boolean }
   | { type: "usage"; runId: string; usage: AssistantUsage; limits: AssistantLimits }
   | { type: "notice"; runId: string; tone: "info" | "warn"; message: string }
-  | { type: "run_finished"; runId: string; outcome: AssistantOutcome; error?: AssistantError; usage: AssistantUsage };
+  | { type: "run_finished"; runId: string; outcome: AssistantOutcome; error?: AssistantError; usage: AssistantUsage }
+  /** import_design's html while Claude writes it: `append` continues the html at `offset`; the last event has done: true and the whole html. */
+  | { type: "design_draft"; runId: string; turn: number; toolUseId: string; offset: number; append: string; fields?: AssistantDesignFields; done: boolean; html?: string };
 
 /** `window.sonobeHost.assistant`. */
 export interface AssistantApi {
   status(): Promise<AssistantStatus>;
-  send(request: { text: string; model?: string }): Promise<AssistantRunResult>;
+  send(request: { text: string; model?: string; context?: AssistantCanvasContext }): Promise<AssistantRunResult>;
   stop(): Promise<boolean>;
   reset(): Promise<AssistantStatus>;
   confirm(confirmationId: string, approved: boolean): Promise<boolean>;
   checkKey(): Promise<AssistantKeyCheck>;
   onEvent(cb: (event: AssistantEvent) => void): () => void;
+  /** Optional: older preloads lack the code folder methods. */
+  codeFolder?(): Promise<AssistantCodeFolderStatus>;
+  linkCodeFolder?(): Promise<AssistantCodeFolderLinkResult>;
+  unlinkCodeFolder?(): Promise<AssistantCodeFolderStatus>;
 }
 
 /** The parts of window.sonobeHost the Assistant uses. All optional: older preloads lack them. */

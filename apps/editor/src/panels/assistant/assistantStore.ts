@@ -146,6 +146,9 @@ export function reduceEvent(state: AssistantData, event: AssistantEvent): Partia
         ...(state.status ? { status: { ...state.status, usage: event.usage, running: false } } : {}),
       };
     }
+    case "design_draft":
+      // Drafts don't show in the transcript yet.
+      return {};
   }
 }
 

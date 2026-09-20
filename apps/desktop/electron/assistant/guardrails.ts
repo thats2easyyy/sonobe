@@ -14,11 +14,9 @@ import type { ToolCallResult } from "./toolBridge.ts";
 /** Removing more than this many items in one reply without asking stops to ask. delete_items' own server-side confirmation uses the same number. */
 export const DELETE_CONFIRM_THRESHOLD = 10;
 
-export interface DeletionPrompt {
-  count: number;
-  title: string;
-  message: string;
-}
+/** What the agent asks the person before a change (a big deletion, or a replace the person may not want). */
+export interface ConfirmPrompt { count: number; title: string; message: string; kind?: "delete" | "replace"; approveLabel?: string; declineLabel?: string }
+export type DeletionPrompt = ConfirmPrompt;
 
 const plural = (count: number, word: string) => `${count} ${word}${count === 1 ? "" : "s"}`;
 

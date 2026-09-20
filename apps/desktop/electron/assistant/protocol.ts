@@ -27,6 +27,12 @@ export const ASSISTANT_IPC = {
   checkKey: "sonobe:assistant:check-key",
   /** main → renderer: AssistantEvent */
   event: "sonobe:assistant:event",
+  /** invoke → AssistantCodeFolderStatus (the folder linked to this window's prototype) */
+  codeFolder: "sonobe:assistant:code-folder",
+  /** invoke → AssistantCodeFolderLinkResult (shows the native folder dialog) */
+  linkCodeFolder: "sonobe:assistant:link-code-folder",
+  /** invoke → AssistantCodeFolderStatus */
+  unlinkCodeFolder: "sonobe:assistant:unlink-code-folder",
 } as const;
 
 export type AssistantModelId = "claude-sonnet-5" | "claude-opus-5" | "claude-haiku-4-5-20251001";
@@ -42,7 +48,7 @@ export interface AssistantModelInfo {
 export interface AssistantLimits {
   /** API requests one message may make (each tool round is one). */
   maxTurns: number;
-  /** Tokens (input, cache reads and writes, output) one chat may use before it pauses. */
+  /** Budget tokens (AssistantUsage.budgetTokens) one chat may use before it pauses. */
   tokenBudget: number;
   /** Deleting more than this many items asks the person first. */
   deleteConfirmThreshold: number;
@@ -54,8 +60,10 @@ export interface AssistantUsage {
   outputTokens: number;
   cacheReadTokens: number;
   cacheWriteTokens: number;
-  /** inputTokens + outputTokens + cacheReadTokens + cacheWriteTokens (what the budget counts). */
+  /** inputTokens + outputTokens + cacheReadTokens + cacheWriteTokens (shown in the meter's tooltip). */
   totalTokens: number;
+  /** input + output + 1.25 × cache writes + 0.1 × cache reads, rounded: what the budget counts (the billed weights). */
+  budgetTokens: number;
   /** Rough cost at list prices, US$. */
   estimatedCostUsd: number;
   requests: number;
@@ -81,11 +89,66 @@ export interface AssistantStatus {
   running: boolean;
   /** Messages in this window's chat (user and assistant turns, not tool rounds). */
   messageCount: number;
+  /** The code folder linked to this window's prototype (Match my code…). */
+  codeFolder: AssistantCodeFolderStatus;
+}
+
+/** What the canvas knows when the person asks from the Design with Claude box. Every name comes from the document: data, not instructions. */
+export interface AssistantCanvasContext {
+  /** The component on the canvas and its artboard size in points. */
+  component: { id: string; name: string; size: [number, number] };
+  /** Its top-level layers (its screens), in layer-list order, at most 30. */
+  screens: { id: string; name: string }[];
+  /** The layer the person picked to redesign: its frame [x, y, width, height] in the component, and the screen holding it. Absent for a new screen. */
+  target?: { id: string; name: string; type: string; frame: [number, number, number, number]; screen?: { id: string; name: string } };
+  /** formatStyleDigest text for the component (at most 1,500 characters). */
+  styles?: string;
 }
 
 export interface AssistantSendRequest {
   text: string;
   model?: string;
+  /** Present when the message comes from the canvas's Design with Claude box. */
+  context?: AssistantCanvasContext;
+}
+
+/** import_design's small fields as they stream, before its html. */
+export interface AssistantDesignFields {
+  name?: string;
+  replace?: string;
+  component?: string;
+  width?: number;
+  height?: number;
+  position?: [number, number];
+}
+
+/** A screen import_design added or replaced (read from its result's _meta). */
+export interface AssistantImported {
+  docId: string;
+  screenId: string;
+  txnId: string | null;
+  name: string;
+  /** The layer it replaced, or null for a new screen. */
+  replaced: string | null;
+  /** Top-most layers of the replaced one that weren't found again (display names, at most 20). */
+  dropped: string[];
+  droppedCount: number;
+  lostConnections: number;
+}
+
+export interface AssistantCodeFolderStatus {
+  /** The folder linked to this window's prototype. `path` shows home as "~". `persisted`: remembered for the saved project (false: this window only). */
+  linked: { name: string; path: string; persisted: boolean } | null;
+  /** The linked folder is gone, or something else now stands at its path. */
+  missing: boolean;
+}
+
+export interface AssistantCodeFolderLinkResult {
+  status: AssistantCodeFolderStatus;
+  /** The person closed the dialog. */
+  cancelled?: boolean;
+  /** Why the folder wasn't linked (teaching copy, §2.2). */
+  error?: string;
 }
 
 export type AssistantErrorCode =
@@ -150,12 +213,18 @@ export type AssistantEvent =
   | { type: "tool_started"; runId: string; toolUseId: string; name: string; title: string; detail: string }
   /** Where a running tool is ("Downloading images: 7 of 28"), from its progress notifications. */
   | { type: "tool_progress"; runId: string; toolUseId: string; detail: string }
-  | { type: "tool_finished"; runId: string; toolUseId: string; name: string; status: AssistantToolStatus; detail: string; changedDocument: boolean }
-  | { type: "confirm_required"; runId: string; confirmationId: string; toolUseId: string; title: string; message: string; count: number }
+  | { type: "tool_finished"; runId: string; toolUseId: string; name: string; status: AssistantToolStatus; detail: string; changedDocument: boolean; imported?: AssistantImported }
+  | { type: "confirm_required"; runId: string; confirmationId: string; toolUseId: string; title: string; message: string; count: number; kind?: "delete" | "replace"; approveLabel?: string; declineLabel?: string }
   | { type: "confirm_resolved"; runId: string; confirmationId: string; approved: boolean }
   | { type: "usage"; runId: string; usage: AssistantUsage; limits: AssistantLimits }
   | { type: "notice"; runId: string; tone: "info" | "warn"; message: string }
-  | { type: "run_finished"; runId: string; outcome: AssistantOutcome; error?: AssistantError; usage: AssistantUsage };
+  | { type: "run_finished"; runId: string; outcome: AssistantOutcome; error?: AssistantError; usage: AssistantUsage }
+  /**
+   * import_design's html while Claude writes it (the tool hasn't run). `append` continues the decoded
+   * html at `offset` (UTF-16 code units). The last event of a call has done: true and carries the whole
+   * html. A retried turn (turn_started again with the same turn number) drops that turn's drafts.
+   */
+  | { type: "design_draft"; runId: string; turn: number; toolUseId: string; offset: number; append: string; fields?: AssistantDesignFields; done: boolean; html?: string };
 
 /** What the preload exposes as `window.sonobeHost.assistant`. */
 export interface SonobeAssistantApi {
@@ -170,4 +239,9 @@ export interface SonobeAssistantApi {
   checkKey(): Promise<AssistantKeyCheck>;
   /** Events for this window's runs. Returns unsubscribe. */
   onEvent(cb: (event: AssistantEvent) => void): () => void;
+  /** The code folder linked to this window's prototype. */
+  codeFolder(): Promise<AssistantCodeFolderStatus>;
+  /** Show the native folder dialog and link the folder the person picks. */
+  linkCodeFolder(): Promise<AssistantCodeFolderLinkResult>;
+  unlinkCodeFolder(): Promise<AssistantCodeFolderStatus>;
 }

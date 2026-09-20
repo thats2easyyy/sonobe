@@ -22,6 +22,7 @@ import type {
   BetaToolResultBlockParam,
   BetaToolUseBlock,
 } from "@anthropic-ai/sdk/resources/beta/messages/messages";
+import type { SonobeDocument } from "@sonobe/core";
 import type { RemovalSummary } from "@sonobe/mcp";
 import { DELETE_CONFIRM_THRESHOLD, deleteConfirmation, deletionPrompt, estimateRemovals, isDestructiveApplyOps, isReadOnlyRefusal, removalsFromResult, type DeletionPrompt } from "./guardrails.ts";
 import { addUsage, emptyUsage, FALLBACK_BETA, resolveModel, type ModelSpec } from "./models.ts";
@@ -35,7 +36,7 @@ import type {
   AssistantSendRequest,
   AssistantUsage,
 } from "./protocol.ts";
-import { describeToolInput, describeToolResult, toAnthropicTools, toolResultContent, type AssistantToolInfo, type ToolBridge, type ToolCallResult } from "./toolBridge.ts";
+import { describeToolInput, describeToolResult, toAnthropicTools, toolResultContent, type AssistantToolInfo, type LocalTools, type ToolBridge, type ToolCallResult } from "./toolBridge.ts";
 
 /** The part of a streaming response the loop reads (the SDK's BetaMessageStream). */
 export interface MessageStreamLike extends AsyncIterable<BetaRawMessageStreamEvent> {
@@ -89,7 +90,33 @@ export interface AssistantAgentOptions {
   limits?: Partial<AssistantLimits>;
   log?(level: "info" | "warn" | "error", message: string): void;
   newId?(): string;
+  /** The document this conversation's window shows, looked up before each tool call; document tools are pinned to it. */
+  documentFor?(conversationId: string): Promise<{ docId: string; projectPath: string | null } | null>;
+  /** Read a document (the replace guard compares what the Assistant made with what's there now). */
+  readDocument?(docId: string): Promise<SonobeDocument>;
+  localTools?: LocalTools;
+  /** The linked code folder's name for <canvas_context>, or null. */
+  codeFolderName?(conversationId: string): Promise<string | null>;
 }
+
+/** Tools that don't act on one open document, so the agent never pins them to the window's document. Every other tool takes docId. */
+export const UNPINNED_TOOLS: ReadonlySet<string> = new Set([
+  "get_guide",
+  "list_patch_types",
+  "describe_patch_types",
+  "describe_layer_types",
+  "list_value_types",
+  "list_examples",
+  "get_example",
+  "list_documents",
+  "open_document",
+  "create_document",
+  "sim_dispatch",
+  "sim_step",
+  "sim_trace",
+  "sim_get_values",
+  "sim_override",
+]);
 
 export interface ConversationSnapshot {
   usage: AssistantUsage;
