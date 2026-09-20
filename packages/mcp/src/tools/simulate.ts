@@ -4,7 +4,7 @@ import type { TraceSummary } from "@sonobe/engine";
 import { z } from "zod";
 import { formatValue, roundForDisplay, sampleIndices, table } from "../format.ts";
 import type { ScreenshotTarget, SimEvent, SimState } from "../host.ts";
-import { failure, success } from "../results.ts";
+import { failure, formatSuggestions, success } from "../results.ts";
 import { READ_ONLY, SIMULATION, type ToolContext } from "../server.ts";
 import { DocIdSchema, SimEventSchema, SimStateOutputSchema } from "../schemas.ts";
 
@@ -16,7 +16,8 @@ function issuesText(state: SimState): string[] {
     );
   for (const issue of state.issues.slice(0, 5))
     lines.push(
-      `Runtime ${issue.severity}${issue.patchId ? ` in ${issue.patchId}` : issue.layerId ? ` on @${issue.layerId}` : ""}: ${issue.message}`,
+      `Runtime ${issue.severity}${issue.patchId ? ` in ${issue.patchId}` : issue.layerId ? ` on @${issue.layerId}` : ""}: ${issue.message}${issue.hint ? ` ${issue.hint}` : ""}`,
+      ...formatSuggestions(issue.suggestions, "  "),
     );
   if (state.issues.length > 5) lines.push(`… ${state.issues.length - 5} more runtime issues.`);
   return lines;
@@ -238,7 +239,7 @@ export function registerSimulationTools(tc: ToolContext): void {
     {
       title: "Get simulation values",
       description:
-        'Current values in a simulation: patch ports ("toggle.on", inputs too) and layer properties or outputs ("@card.scale", or "@row.position#2" for one loop copy). Reach inside component instances with an instance path: "like_button_2/liked.on", "@like_button_2/like_button.color", "card#2/..." for copy 2 of a looped instance.',
+        'Current values in a simulation: patch ports ("toggle.on", inputs too) and layer properties or outputs ("@card.scale", or "@row.position#2" for one loop copy). Reach inside component instances with an instance path: "like_button_2/liked.on", "@like_button_2/like_button.color", "card#2/..." for copy 2 of a looped instance. A value that reads as null or an empty loop comes with a note saying why: the layer drew 0 copies (and where its empty loop started), "#n" is past the end, or the instance path runs into a component with 0 copies.',
       input: z.object({ simId: z.string(), targets: TargetsSchema.max(30) }),
       output: SimStateOutputSchema,
       annotations: READ_ONLY,
@@ -248,7 +249,10 @@ export function registerSimulationTools(tc: ToolContext): void {
       return success(
         [
           header(r),
-          ...targets.map((t) => `  ${t} = ${formatValue(r.values[t])}`),
+          ...targets.flatMap((t) => [
+            `  ${t} = ${formatValue(r.values[t])}`,
+            ...(r.notes?.[t] ? [`    ${r.notes[t]}`] : []),
+          ]),
           ...issuesText(r),
         ].join("\n"),
         { ...r },

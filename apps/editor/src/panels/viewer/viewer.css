@@ -374,6 +374,15 @@
   color: var(--text-tertiary);
 }
 
+/* The running prototype has an empty_loop warning: something bound to a loop draws no copies. */
+.sb-vw__window-note[data-tone="warn"] {
+  color: var(--warn-text);
+}
+
+.sb-vw__window-note[data-tone="warn"] svg {
+  color: var(--warn);
+}
+
 .sb-vw__window-note-text {
   flex: 1 1 auto;
   min-width: 0;

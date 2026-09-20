@@ -1,7 +1,7 @@
 import { applyOps, createEmptyDocument, createRegistry, deviceScreenSize } from "@sonobe/core";
 import { buildDoc, createTestRuntime } from "@sonobe/engine/testing";
 import { describe, expect, it } from "vitest";
-import { devicePresetOps, fitScale, formatFps, interactiveLayerIds, layerScreenRect, nodesForLayers, outlinePoints, phoneClientsLabel, presetForDevice, qrPath, rotateDeviceOps, sceneKeysForLayers } from "./viewerModel.ts";
+import { devicePresetOps, emptyLoopNotice, fitScale, formatFps, interactiveLayerIds, layerScreenRect, nodesForLayers, outlinePoints, phoneClientsLabel, presetForDevice, qrPath, rotateDeviceOps, sceneKeysForLayers } from "./viewerModel.ts";
 
 describe("layerScreenRect", () => {
   it("maps a layer's box through the stage's client rect", () => {
@@ -94,5 +94,17 @@ describe("formatting", () => {
   it("merges QR module runs into rows of rects", () => {
     const dark = new Set(["0,0", "0,1", "1,1"]);
     expect(qrPath(2, (r, c) => dark.has(`${r},${c}`), 4)).toBe("M4 4h2v1h-2zM5 5h1v1h-1z");
+  });
+});
+
+describe("emptyLoopNotice", () => {
+  const doc = buildDoc({ layers: [{ id: "card", type: "rectangle", name: "Card" }], patches: { swipe: { type: "splitter", name: "Card Swipe" } } });
+  const warning = (itemIds: string[]) => ({ code: "empty_loop", severity: "warning" as const, message: "…", component: "main", itemIds });
+
+  it("names what has no copies, a layer before a component", () => {
+    expect(emptyLoopNotice([], doc)).toBeNull();
+    expect(emptyLoopNotice([{ ...warning(["card"]), code: "loop_limit" }], doc)).toBeNull();
+    expect(emptyLoopNotice([warning(["swipe"]), warning(["card"])], doc)).toMatchObject({ label: "Card has no copies", count: 2, diagnostic: { itemIds: ["card"] } });
+    expect(emptyLoopNotice([warning(["swipe"])], doc)?.label).toBe("Card Swipe has no copies");
   });
 });

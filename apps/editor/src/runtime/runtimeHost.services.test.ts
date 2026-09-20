@@ -114,6 +114,12 @@ describe("runtime host services", () => {
     expect(issuesToDiagnostics([{ code: "x", severity: "error", message: "m", componentPath: "main/ghost" }], "main", cardDoc())[0]!.component).toBe("main");
   });
 
+  it("keeps a runtime issue's hint and ready-to-apply suggestions", () => {
+    const suggestions = [{ description: 'On "Pick" (Loop Select), set Out of Range to Clamp.', ops: [{ op: "setInput" as const, target: "pick.outOfRange", value: "clamp" }] }];
+    const [d] = issuesToDiagnostics([{ code: "empty_loop", severity: "warning", message: 'Layer "Card" has 0 copies because ...', layerId: "card", hint: "An empty loop wins.", suggestions }], "main");
+    expect(d).toEqual({ code: "empty_loop", severity: "warning", message: 'Layer "Card" has 0 copies because ...', component: "main", itemIds: ["card"], hint: "An empty loop wins.", suggestions });
+  });
+
   it("records patch timings while someone asks for them", () => {
     const scheduler = createManualScheduler();
     const host = track(createRuntimeHost({ registry, document: cardDoc(), scheduler, textMeasurer: "approximate", platform: null }));
