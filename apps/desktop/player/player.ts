@@ -243,7 +243,8 @@ for (const type of ["pointerdown", "pointermove", "pointerup", "pointercancel", 
 // A three-finger touch makes no clicks or focus changes either (touch events follow pointer events).
 let holdingTouches = false;
 const onTouch = (e: TouchEvent) => {
-  if (e.type === "touchstart" && (e.touches.length >= 3 || gesture.claimed)) holdingTouches = true;
+  // A touchstart with one finger starts a new touch, so a lift the browser never reported can't keep this on.
+  if (e.type === "touchstart") holdingTouches = e.touches.length >= 3 || gesture.claimed || (holdingTouches && e.touches.length > 1);
   if (!holdingTouches) return;
   if (e.cancelable) e.preventDefault();
   e.stopPropagation();

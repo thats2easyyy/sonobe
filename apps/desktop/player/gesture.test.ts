@@ -77,6 +77,17 @@ describe("the three-finger menu gesture", () => {
     expect(dragged.handle(touch("pointerup", 3, 200, 300, 160))).toEqual({ swallow: true });
   });
 
+  it("forgets fingers whose lift never came when a new touch starts", () => {
+    const gesture = createMenuGesture();
+    // Two fingers down, and the browser loses their lift.
+    gesture.handle(touch("pointerdown", 1, 100, 300, 0));
+    gesture.handle(touch("pointerdown", 2, 150, 300, 5));
+    // A later two-finger touch is two fingers, not four: it reaches the prototype.
+    expect(gesture.handle({ ...touch("pointerdown", 7, 100, 300, 2000), isPrimary: true })).toEqual({ swallow: false });
+    expect(gesture.handle(touch("pointerdown", 8, 150, 300, 2010))).toEqual({ swallow: false });
+    expect(gesture.claimed).toBe(false);
+  });
+
   it("leaves the mouse and pens alone", () => {
     const gesture = createMenuGesture();
     for (const id of [1, 2, 3]) gesture.handle(touch("pointerdown", id, 100, 100, 0));

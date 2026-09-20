@@ -14,6 +14,8 @@ export interface GesturePointer {
   type: string;
   pointerId: number;
   pointerType: string;
+  /** The first finger of a new touch: no other finger is down. */
+  isPrimary?: boolean;
   clientX: number;
   clientY: number;
   timeStamp: number;
@@ -84,6 +86,11 @@ export function createMenuGesture(options: MenuGestureOptions = {}): MenuGesture
       if (e.pointerType !== "touch") return PASS;
       switch (e.type) {
         case "pointerdown": {
+          // A new touch: forget fingers whose lift the browser never reported.
+          if (e.isPrimary) {
+            touches.clear();
+            claim = null;
+          }
           owned.delete(e.pointerId);
           touches.set(e.pointerId, { x0: e.clientX, y0: e.clientY, x: e.clientX, y: e.clientY, downAt: e.timeStamp, delivered: claim === null });
           if (claim) {
