@@ -142,6 +142,15 @@ export function createEditorSession(options: EditorSessionOptions = {}): EditorS
   const appName = options.appName ?? "Sonobe";
   const mute = options.mute ?? getMuteStore();
   if (host?.muted && !mute.getState().muted) mute.setState({ muted: true, reason: "host" });
+  // The pop-out viewer window runs the prototype too and plays its sound and speech, so this window's
+  // viewer stays quiet while it's open: start sounds and loops would otherwise play twice, out of phase.
+  const followViewerWindow = (status: { open: boolean }) => {
+    const current = mute.getState();
+    if (status.open && !current.muted) mute.setState({ muted: true, reason: "viewerWindow" });
+    else if (!status.open && current.reason === "viewerWindow") mute.setState({ muted: false, reason: null });
+  };
+  const unsubscribeViewerWindow = host?.onViewerWindowStatus?.(followViewerWindow);
+  host?.getViewerWindowStatus?.().then(followViewerWindow, () => undefined);
 
   const confirmDiscard: ConfirmDiscard =
     options.confirmDiscard ??
@@ -381,6 +390,7 @@ export function createEditorSession(options: EditorSessionOptions = {}): EditorS
       unsubscribeScope();
       unsubscribeChrome();
       unsubscribeRestart();
+      unsubscribeViewerWindow?.();
       unsubscribeViewers();
       unregisterLayerBounds?.();
       unsubscribeOpen?.();
