@@ -265,7 +265,7 @@ export function updateComponent(ctx: OpContext, op: OpOf<"updateComponent">): Op
 /** The fields a published port takes. */
 const PORT_FIELDS = ["key", "name", "type", "default", "category", "enumOptions", "loopBehavior", "link"];
 
-/** The properties every layer component instance has on its own (position, opacity...), which published inputs can't override. */
+/** The properties every layer component instance has on its own (position, opacity...), which win over published inputs with the same key. */
 const instanceLayerProps = (ctx: OpContext) => ctx.registry.layers.get(COMPONENT_INSTANCE_LAYER_TYPE)?.props ?? [];
 
 function validatePort(ctx: OpContext, component: Component, key: string, port: unknown, direction: "input" | "output", existing: InterfacePort | undefined): InterfacePort {
@@ -282,15 +282,6 @@ function validatePort(ctx: OpContext, component: Component, key: string, port: u
       hint: renamed ? `To rename it, unpublish "${key}" (null) and publish "${renamed}"; cables to "${key}" are disconnected. Or leave "key" out.` : 'Leave "key" out: it defaults to the key the port is listed under.',
       ...(renamed ? { suggestions: [{ description: `Publish it as "${renamed}" and unpublish "${key}"`, ops: [{ op: "updateInterface", component: component.id, [side]: { [key]: null, [renamed]: { ...p, key: renamed } } } as Op] }] } : {}),
     });
-  }
-  if (direction === "input" && component.kind === "layerComponent" && !ctx.lenient) {
-    // Instances resolve their own layer properties first, so an input with one of those keys could never be set.
-    const shadowed = instanceLayerProps(ctx).find((prop) => prop.key === key);
-    if (shadowed) {
-      fail("invalid_id", `"${key}" is already the ${shadowed.name} property of every instance of ${component.name}, so instances could never set an input with that key.`, {
-        hint: `Publish it under another key, like "${uniqueId(key, (k) => k === key || Object.hasOwn(component.interface.inputs, k))}".`,
-      });
-    }
   }
   if (!isValueType(p.type)) fail("invalid_value", `The published ${direction} "${key}" has an unknown type ${JSON.stringify(p.type)}.${didYouMeanText(didYouMean(String(p.type), VALUE_TYPES))}`);
   if (p.name !== undefined && typeof p.name !== "string") fail("invalid_value", `The published ${direction} "${key}" needs a text name.`);
