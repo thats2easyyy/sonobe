@@ -28,7 +28,7 @@ interface Seen {
 
 interface RelayTestOptions {
   /** Answers /clients (default: 204). */
-  clients?: (method: string) => Response;
+  clients?: (method: string) => Response | Promise<Response>;
   env?: Record<string, string | undefined>;
   cwd?: string;
   heartbeatMs?: number;
@@ -121,11 +121,15 @@ describe("sonobe mcp relay: long calls", () => {
     expect(r.lines.map((l) => (l.params as { message?: string } | undefined)?.message ?? l.id)).toEqual(["Loading the page", "Downloading images: 1 of 1", 1]);
   });
 
+  // The relay reads stdin only after the connection file and /health, and a tool call waits for the
+  // hello: wait until the app has the call rather than for a fixed time, which a loaded machine outlasts.
+  const reachedApp = (r: ReturnType<typeof relay>, id: number) => until(() => r.seen.some((s) => s.body?.method === "tools/call" && s.body.id === id));
+
   it("turns a notifications/cancelled on stdin into an aborted request", async () => {
     const record = { aborted: false };
     const r = relay(hanging(record));
     r.send(call(3));
-    await new Promise((resolve) => setTimeout(resolve, 20));
+    await reachedApp(r, 3);
     r.send({ method: "notifications/cancelled", params: { requestId: 3, reason: "the person pressed Esc" } });
     await until(() => record.aborted);
     expect(record.aborted).toBe(true);
@@ -135,11 +139,26 @@ describe("sonobe mcp relay: long calls", () => {
     expect(r.lines).toEqual([]);
   });
 
+  it("drops a call cancelled while it waits for the hello, without sending it", async () => {
+    let answerHello!: (res: Response) => void;
+    const hello = new Promise<Response>((resolve) => (answerHello = resolve));
+    const r = relay(async () => Response.json({ jsonrpc: "2.0", id: 6, result: {} }), { clients: (method) => (method === "POST" ? hello : new Response(null, { status: 204 })) });
+    r.send(call(6));
+    await until(() => r.seen.some((s) => s.path === "/clients"));
+    r.send({ method: "notifications/cancelled", params: { requestId: 6 } });
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    answerHello(new Response(null, { status: 204 }));
+    r.stdin.end();
+    await r.done;
+    expect(r.seen.filter((s) => s.path === "/mcp")).toEqual([]);
+    expect(r.lines).toEqual([]);
+  });
+
   it("ends the calls still running when stdin closes, instead of waiting for them", async () => {
     const record = { aborted: false };
     const r = relay(hanging(record));
     r.send(call(4));
-    await new Promise((resolve) => setTimeout(resolve, 20));
+    await reachedApp(r, 4);
     r.stdin.end();
     expect(await r.done).toBe(0);
     expect(record.aborted).toBe(true);
