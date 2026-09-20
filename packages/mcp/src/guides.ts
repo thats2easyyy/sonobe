@@ -16,6 +16,7 @@ export const GUIDE_TOPICS = [
   "layout",
   "loops",
   "components",
+  "knobs",
   "simulation",
   "troubleshooting",
 ] as const;

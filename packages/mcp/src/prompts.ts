@@ -62,10 +62,10 @@ export function registerPrompts(tc: ToolContext): void {
           '1. get_guide("start-here") if you haven\'t this conversation, then get_document_info and get_outline.',
           "2. Plan the smallest graph that does it, usually Interaction → Switch → Animation → Transition → layer property. Say the plan in one or two plain sentences.",
           "3. describe_patch_types for every patch type you'll use.",
-          "4. begin_work, then build it in small batches with add_layers / add_patches (use refs and connections). Name layers and patches by their effect.",
+          "4. begin_work, then build it in small batches with add_layers / add_patches (use refs and connections). Name layers and patches by their effect. Build the numbers I'll want to tune (distances, spring feel, thresholds) as knobs with set_knobs.",
           "5. get_diagnostics and fix anything new.",
           "6. Verify: sim_reset, sim_dispatch the gesture, then sim_trace the layer properties that should move. Check end values, settle time and overshoot against the feel that was asked for; tune and re-trace.",
-          "7. finish_work, then tell me what you built in plain words (names, not ids), how you verified it, and what I can tweak.",
+          "7. finish_work, then tell me what you built in plain words (names, not ids), how you verified it, and which knobs I can tweak.",
         ].join("\n"),
       ),
   );

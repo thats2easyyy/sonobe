@@ -1,0 +1,1203 @@
+{
+ "knobs": [
+  {
+   "name": "Commit Distance",
+   "type": "number",
+   "value": 95,
+   "app": "95"
+  },
+  {
+   "name": "Throw Lookahead",
+   "type": "number",
+   "value": 0.2,
+   "app": "0, distance only"
+  },
+  {
+   "name": "Spring Response",
+   "type": "number",
+   "value": 0.3,
+   "app": "0.3"
+  },
+  {
+   "name": "Spring Damping",
+   "type": "number",
+   "value": 0.75,
+   "app": "0.75"
+  },
+  {
+   "name": "Fly-Out Distance",
+   "type": "number",
+   "value": 600,
+   "app": "card never leaves"
+  },
+  {
+   "name": "Tilt per Point",
+   "type": "number",
+   "value": 0.03333333333333333,
+   "app": "1/30"
+  },
+  {
+   "name": "Grab Tilt",
+   "type": "boolean",
+   "value": true,
+   "app": "off"
+  },
+  {
+   "name": "Vertical Follow",
+   "type": "number",
+   "value": 0.3,
+   "app": "0"
+  },
+  {
+   "name": "Badge Fade Start",
+   "type": "number",
+   "value": 25,
+   "app": "25"
+  },
+  {
+   "name": "Badge Fade End",
+   "type": "number",
+   "value": 95,
+   "app": "25, pops in"
+  },
+  {
+   "name": "Commit Pop",
+   "type": "number",
+   "value": 1.15,
+   "app": "1, none"
+  },
+  {
+   "name": "Next Card Scale",
+   "type": "number",
+   "value": 0.95,
+   "app": "1, no next card"
+  },
+  {
+   "name": "Button Nudge",
+   "type": "number",
+   "value": 20,
+   "app": "0"
+  },
+  {
+   "name": "Button Press Scale",
+   "type": "number",
+   "value": 0.92,
+   "app": "1"
+  }
+ ],
+ "interface": {
+  "op": "updateInterface",
+  "component": "swipe_card",
+  "inputs": {
+   "down": {
+    "key": "down",
+    "name": "Down",
+    "type": "boolean",
+    "default": false
+   },
+   "translation": {
+    "key": "translation",
+    "name": "Translation",
+    "type": "point",
+    "default": [
+     0,
+     0
+    ]
+   },
+   "velocity": {
+    "key": "velocity",
+    "name": "Velocity",
+    "type": "point",
+    "default": [
+     0,
+     0
+    ]
+   },
+   "localPosition": {
+    "key": "localPosition",
+    "name": "Grab Point",
+    "type": "point",
+    "default": [
+     0,
+     0
+    ]
+   },
+   "passTapped": {
+    "key": "passTapped",
+    "name": "Pass Tapped",
+    "type": "pulse"
+   },
+   "yesTapped": {
+    "key": "yesTapped",
+    "name": "Yes Tapped",
+    "type": "pulse"
+   },
+   "passHeld": {
+    "key": "passHeld",
+    "name": "Pass Held",
+    "type": "boolean",
+    "default": false
+   },
+   "yesHeld": {
+    "key": "yesHeld",
+    "name": "Yes Held",
+    "type": "boolean",
+    "default": false
+   },
+   "cardAboveGone": {
+    "key": "cardAboveGone",
+    "name": "Card Above Gone",
+    "type": "boolean",
+    "default": true
+   },
+   "aboveLift": {
+    "key": "aboveLift",
+    "name": "Card Above Lift",
+    "type": "number",
+    "default": 1
+   },
+   "reset": {
+    "key": "reset",
+    "name": "Reset",
+    "type": "pulse"
+   }
+  },
+  "outputs": {
+   "position": {
+    "key": "position",
+    "name": "Position",
+    "type": "point"
+   },
+   "rotation": {
+    "key": "rotation",
+    "name": "Rotation",
+    "type": "number"
+   },
+   "scale": {
+    "key": "scale",
+    "name": "Scale",
+    "type": "number"
+   },
+   "yesBadge": {
+    "key": "yesBadge",
+    "name": "Yes Badge Opacity",
+    "type": "number"
+   },
+   "passBadge": {
+    "key": "passBadge",
+    "name": "Pass Badge Opacity",
+    "type": "number"
+   },
+   "badgeScale": {
+    "key": "badgeScale",
+    "name": "Badge Scale",
+    "type": "number"
+   },
+   "gone": {
+    "key": "gone",
+    "name": "Gone",
+    "type": "boolean"
+   },
+   "touchable": {
+    "key": "touchable",
+    "name": "Touchable",
+    "type": "boolean"
+   },
+   "lift": {
+    "key": "lift",
+    "name": "Lift",
+    "type": "number"
+   }
+  }
+ },
+ "inner": [
+  {
+   "ref": "k_commit_distance",
+   "type": "variableReceiver",
+   "name": "Commit Distance",
+   "typeParam": "number",
+   "settings": {
+    "name": "Commit Distance",
+    "scope": "global"
+   },
+   "inputs": {}
+  },
+  {
+   "ref": "k_throw_lookahead",
+   "type": "variableReceiver",
+   "name": "Throw Lookahead",
+   "typeParam": "number",
+   "settings": {
+    "name": "Throw Lookahead",
+    "scope": "global"
+   },
+   "inputs": {}
+  },
+  {
+   "ref": "k_spring_response",
+   "type": "variableReceiver",
+   "name": "Spring Response",
+   "typeParam": "number",
+   "settings": {
+    "name": "Spring Response",
+    "scope": "global"
+   },
+   "inputs": {}
+  },
+  {
+   "ref": "k_spring_damping",
+   "type": "variableReceiver",
+   "name": "Spring Damping",
+   "typeParam": "number",
+   "settings": {
+    "name": "Spring Damping",
+    "scope": "global"
+   },
+   "inputs": {}
+  },
+  {
+   "ref": "k_fly_out_distance",
+   "type": "variableReceiver",
+   "name": "Fly-Out Distance",
+   "typeParam": "number",
+   "settings": {
+    "name": "Fly-Out Distance",
+    "scope": "global"
+   },
+   "inputs": {}
+  },
+  {
+   "ref": "k_tilt_per_point",
+   "type": "variableReceiver",
+   "name": "Tilt per Point",
+   "typeParam": "number",
+   "settings": {
+    "name": "Tilt per Point",
+    "scope": "global"
+   },
+   "inputs": {}
+  },
+  {
+   "ref": "k_grab_tilt",
+   "type": "variableReceiver",
+   "name": "Grab Tilt",
+   "typeParam": "boolean",
+   "settings": {
+    "name": "Grab Tilt",
+    "scope": "global"
+   },
+   "inputs": {}
+  },
+  {
+   "ref": "k_vertical_follow",
+   "type": "variableReceiver",
+   "name": "Vertical Follow",
+   "typeParam": "number",
+   "settings": {
+    "name": "Vertical Follow",
+    "scope": "global"
+   },
+   "inputs": {}
+  },
+  {
+   "ref": "k_badge_fade_start",
+   "type": "variableReceiver",
+   "name": "Badge Fade Start",
+   "typeParam": "number",
+   "settings": {
+    "name": "Badge Fade Start",
+    "scope": "global"
+   },
+   "inputs": {}
+  },
+  {
+   "ref": "k_badge_fade_end",
+   "type": "variableReceiver",
+   "name": "Badge Fade End",
+   "typeParam": "number",
+   "settings": {
+    "name": "Badge Fade End",
+    "scope": "global"
+   },
+   "inputs": {}
+  },
+  {
+   "ref": "k_commit_pop",
+   "type": "variableReceiver",
+   "name": "Commit Pop",
+   "typeParam": "number",
+   "settings": {
+    "name": "Commit Pop",
+    "scope": "global"
+   },
+   "inputs": {}
+  },
+  {
+   "ref": "k_next_card_scale",
+   "type": "variableReceiver",
+   "name": "Next Card Scale",
+   "typeParam": "number",
+   "settings": {
+    "name": "Next Card Scale",
+    "scope": "global"
+   },
+   "inputs": {}
+  },
+  {
+   "ref": "k_button_nudge",
+   "type": "variableReceiver",
+   "name": "Button Nudge",
+   "typeParam": "number",
+   "settings": {
+    "name": "Button Nudge",
+    "scope": "global"
+   },
+   "inputs": {}
+  },
+  {
+   "ref": "neg_commit",
+   "type": "multiply",
+   "name": "Minus Commit Distance",
+   "typeParam": "number",
+   "inputs": {
+    "value1": {
+     "link": "$k_commit_distance.output"
+    },
+    "value2": -1
+   }
+  },
+  {
+   "ref": "neg_fly",
+   "type": "multiply",
+   "name": "Minus Fly-Out Distance",
+   "typeParam": "number",
+   "inputs": {
+    "value1": {
+     "link": "$k_fly_out_distance.output"
+    },
+    "value2": -1
+   }
+  },
+  {
+   "ref": "neg_nudge",
+   "type": "multiply",
+   "name": "Minus Button Nudge",
+   "typeParam": "number",
+   "inputs": {
+    "value1": {
+     "link": "$k_button_nudge.output"
+    },
+    "value2": -1
+   }
+  },
+  {
+   "ref": "neg_badge_start",
+   "type": "multiply",
+   "name": "Minus Badge Fade Start",
+   "typeParam": "number",
+   "inputs": {
+    "value1": {
+     "link": "$k_badge_fade_start.output"
+    },
+    "value2": -1
+   }
+  },
+  {
+   "ref": "neg_badge_end",
+   "type": "multiply",
+   "name": "Minus Badge Fade End",
+   "typeParam": "number",
+   "inputs": {
+    "value1": {
+     "link": "$k_badge_fade_end.output"
+    },
+    "value2": -1
+   }
+  },
+  {
+   "ref": "finger",
+   "type": "pointUnpack",
+   "name": "Finger Offset",
+   "inputs": {
+    "value": {
+     "link": "$in.translation"
+    }
+   }
+  },
+  {
+   "ref": "speed",
+   "type": "pointUnpack",
+   "name": "Finger Speed",
+   "inputs": {
+    "value": {
+     "link": "$in.velocity"
+    }
+   }
+  },
+  {
+   "ref": "press",
+   "type": "pulse",
+   "name": "Press",
+   "inputs": {
+    "on": {
+     "link": "$in.down"
+    }
+   }
+  },
+  {
+   "ref": "above_was_gone",
+   "type": "delay1",
+   "name": "Card Above Was Gone",
+   "typeParam": "boolean",
+   "inputs": {
+    "value": {
+     "link": "$in.cardAboveGone"
+    }
+   }
+  },
+  {
+   "ref": "was_gone",
+   "type": "delay1",
+   "name": "Was Gone Last Frame",
+   "typeParam": "boolean",
+   "inputs": {
+    "value": {
+     "link": "$gone.on"
+    }
+   }
+  },
+  {
+   "ref": "still_here",
+   "type": "not",
+   "name": "Still in Deck",
+   "inputs": {
+    "value": {
+     "link": "$was_gone.output"
+    }
+   }
+  },
+  {
+   "ref": "is_top",
+   "type": "and",
+   "name": "Is Top Card",
+   "inputs": {
+    "value1": {
+     "link": "$above_was_gone.output"
+    },
+    "value2": {
+     "link": "$still_here.output"
+    }
+   }
+  },
+  {
+   "ref": "carry",
+   "type": "multiply",
+   "name": "Throw Carry",
+   "typeParam": "number",
+   "inputs": {
+    "value1": {
+     "link": "$speed.x"
+    },
+    "value2": {
+     "link": "$k_throw_lookahead.output"
+    }
+   }
+  },
+  {
+   "ref": "projected",
+   "type": "add",
+   "name": "Projected X",
+   "typeParam": "number",
+   "inputs": {
+    "value1": {
+     "link": "$finger.x"
+    },
+    "value2": {
+     "link": "$carry.output"
+    }
+   }
+  },
+  {
+   "ref": "past_right",
+   "type": "greaterThan",
+   "name": "Lands Past Right",
+   "typeParam": "number",
+   "inputs": {
+    "value1": {
+     "link": "$projected.output"
+    },
+    "value2": {
+     "link": "$k_commit_distance.output"
+    }
+   }
+  },
+  {
+   "ref": "past_left",
+   "type": "lessThan",
+   "name": "Lands Past Left",
+   "typeParam": "number",
+   "inputs": {
+    "value1": {
+     "link": "$projected.output"
+    },
+    "value2": {
+     "link": "$neg_commit.output"
+    }
+   }
+  },
+  {
+   "ref": "thrown_right",
+   "type": "and",
+   "name": "Thrown Right",
+   "inputCount": 3,
+   "inputs": {
+    "value1": {
+     "link": "$press.turnedOff"
+    },
+    "value2": {
+     "link": "$past_right.output"
+    },
+    "value3": {
+     "link": "$still_here.output"
+    }
+   }
+  },
+  {
+   "ref": "thrown_left",
+   "type": "and",
+   "name": "Thrown Left",
+   "inputCount": 3,
+   "inputs": {
+    "value1": {
+     "link": "$press.turnedOff"
+    },
+    "value2": {
+     "link": "$past_left.output"
+    },
+    "value3": {
+     "link": "$still_here.output"
+    }
+   }
+  },
+  {
+   "ref": "pass_vote",
+   "type": "and",
+   "name": "Pass Button Vote",
+   "inputs": {
+    "value1": {
+     "link": "$in.passTapped"
+    },
+    "value2": {
+     "link": "$is_top.output"
+    }
+   }
+  },
+  {
+   "ref": "yes_vote",
+   "type": "and",
+   "name": "Yes Button Vote",
+   "inputs": {
+    "value1": {
+     "link": "$in.yesTapped"
+    },
+    "value2": {
+     "link": "$is_top.output"
+    }
+   }
+  },
+  {
+   "ref": "pass_hold",
+   "type": "and",
+   "name": "Holding Pass",
+   "inputs": {
+    "value1": {
+     "link": "$in.passHeld"
+    },
+    "value2": {
+     "link": "$is_top.output"
+    }
+   }
+  },
+  {
+   "ref": "yes_hold",
+   "type": "and",
+   "name": "Holding Yes",
+   "inputs": {
+    "value1": {
+     "link": "$in.yesHeld"
+    },
+    "value2": {
+     "link": "$is_top.output"
+    }
+   }
+  },
+  {
+   "ref": "went_left",
+   "type": "or",
+   "name": "Went Left",
+   "inputs": {
+    "value1": {
+     "link": "$thrown_left.output"
+    },
+    "value2": {
+     "link": "$pass_vote.output"
+    }
+   }
+  },
+  {
+   "ref": "went_right",
+   "type": "or",
+   "name": "Went Right",
+   "inputs": {
+    "value1": {
+     "link": "$thrown_right.output"
+    },
+    "value2": {
+     "link": "$yes_vote.output"
+    }
+   }
+  },
+  {
+   "ref": "voted",
+   "type": "or",
+   "name": "Voted",
+   "inputs": {
+    "value1": {
+     "link": "$went_left.output"
+    },
+    "value2": {
+     "link": "$went_right.output"
+    }
+   }
+  },
+  {
+   "ref": "gone",
+   "type": "switch",
+   "name": "Card Gone",
+   "inputs": {
+    "turnOn": {
+     "link": "$voted.output"
+    },
+    "turnOff": {
+     "link": "$in.reset"
+    }
+   }
+  },
+  {
+   "ref": "side",
+   "type": "optionSwitch",
+   "name": "Which Way",
+   "inputCount": 2,
+   "inputs": {
+    "setTo0": {
+     "link": "$went_left.output"
+    },
+    "setTo1": {
+     "link": "$went_right.output"
+    }
+   }
+  },
+  {
+   "ref": "fly_x",
+   "type": "optionPicker",
+   "name": "Fly-Out X",
+   "typeParam": "number",
+   "inputCount": 2,
+   "inputs": {
+    "option": {
+     "link": "$side.option"
+    },
+    "option0": {
+     "link": "$neg_fly.output"
+    },
+    "option1": {
+     "link": "$k_fly_out_distance.output"
+    }
+   }
+  },
+  {
+   "ref": "nudge_yes",
+   "type": "ifElse",
+   "name": "Yes Nudge",
+   "typeParam": "number",
+   "inputs": {
+    "condition": {
+     "link": "$yes_hold.output"
+    },
+    "ifTrue": {
+     "link": "$k_button_nudge.output"
+    },
+    "ifFalse": 0
+   }
+  },
+  {
+   "ref": "nudge_x",
+   "type": "ifElse",
+   "name": "Button Nudge X",
+   "typeParam": "number",
+   "inputs": {
+    "condition": {
+     "link": "$pass_hold.output"
+    },
+    "ifTrue": {
+     "link": "$neg_nudge.output"
+    },
+    "ifFalse": {
+     "link": "$nudge_yes.output"
+    }
+   }
+  },
+  {
+   "ref": "resting_x",
+   "type": "ifElse",
+   "name": "Resting X",
+   "typeParam": "number",
+   "inputs": {
+    "condition": {
+     "link": "$gone.on"
+    },
+    "ifTrue": {
+     "link": "$fly_x.output"
+    },
+    "ifFalse": {
+     "link": "$nudge_x.output"
+    }
+   }
+  },
+  {
+   "ref": "target_x",
+   "type": "ifElse",
+   "name": "Finger or Resting X",
+   "typeParam": "number",
+   "inputs": {
+    "condition": {
+     "link": "$in.down"
+    },
+    "ifTrue": {
+     "link": "$finger.x"
+    },
+    "ifFalse": {
+     "link": "$resting_x.output"
+    }
+   }
+  },
+  {
+   "ref": "follow_y",
+   "type": "multiply",
+   "name": "Followed Y",
+   "typeParam": "number",
+   "inputs": {
+    "value1": {
+     "link": "$finger.y"
+    },
+    "value2": {
+     "link": "$k_vertical_follow.output"
+    }
+   }
+  },
+  {
+   "ref": "follow_vy",
+   "type": "multiply",
+   "name": "Followed Y Speed",
+   "typeParam": "number",
+   "inputs": {
+    "value1": {
+     "link": "$speed.y"
+    },
+    "value2": {
+     "link": "$k_vertical_follow.output"
+    }
+   }
+  },
+  {
+   "ref": "held_y",
+   "type": "sampleAndHold",
+   "name": "Y at Release",
+   "typeParam": "number",
+   "inputs": {
+    "value": {
+     "link": "$follow_y.output"
+    },
+    "sample": {
+     "link": "$press.turnedOff"
+    }
+   }
+  },
+  {
+   "ref": "resting_y",
+   "type": "ifElse",
+   "name": "Resting Y",
+   "typeParam": "number",
+   "inputs": {
+    "condition": {
+     "link": "$gone.on"
+    },
+    "ifTrue": {
+     "link": "$held_y.output"
+    },
+    "ifFalse": 0
+   }
+  },
+  {
+   "ref": "target_y",
+   "type": "ifElse",
+   "name": "Finger or Resting Y",
+   "typeParam": "number",
+   "inputs": {
+    "condition": {
+     "link": "$in.down"
+    },
+    "ifTrue": {
+     "link": "$follow_y.output"
+    },
+    "ifFalse": {
+     "link": "$resting_y.output"
+    }
+   }
+  },
+  {
+   "ref": "target",
+   "type": "point",
+   "name": "Card Target",
+   "inputs": {
+    "x": {
+     "link": "$target_x.output"
+    },
+    "y": {
+     "link": "$target_y.output"
+    }
+   }
+  },
+  {
+   "ref": "throw_speed",
+   "type": "point",
+   "name": "Throw Speed",
+   "inputs": {
+    "x": {
+     "link": "$speed.x"
+    },
+    "y": {
+     "link": "$follow_vy.output"
+    }
+   }
+  },
+  {
+   "ref": "feel",
+   "type": "springConverter",
+   "name": "Spring Feel",
+   "inputs": {
+    "response": {
+     "link": "$k_spring_response.output"
+    },
+    "dampingFraction": {
+     "link": "$k_spring_damping.output"
+    }
+   }
+  },
+  {
+   "ref": "spring",
+   "type": "springAnimation",
+   "name": "Card Spring",
+   "typeParam": "point",
+   "inputs": {
+    "number": {
+     "link": "$target.output"
+    },
+    "mass": {
+     "link": "$feel.mass"
+    },
+    "tension": {
+     "link": "$feel.tension"
+    },
+    "friction": {
+     "link": "$feel.friction"
+    },
+    "gestureActive": {
+     "link": "$in.down"
+    },
+    "gestureVelocity": {
+     "link": "$throw_speed.output"
+    }
+   }
+  },
+  {
+   "ref": "card_xy",
+   "type": "pointUnpack",
+   "name": "Card Offset",
+   "inputs": {
+    "value": {
+     "link": "$spring.output"
+    }
+   }
+  },
+  {
+   "ref": "grab",
+   "type": "pointUnpack",
+   "name": "Grab Point XY",
+   "inputs": {
+    "value": {
+     "link": "$in.localPosition"
+    }
+   }
+  },
+  {
+   "ref": "grab_y",
+   "type": "sampleAndHold",
+   "name": "Grab Y",
+   "typeParam": "number",
+   "inputs": {
+    "value": {
+     "link": "$grab.y"
+    },
+    "sample": {
+     "link": "$press.turnedOn"
+    }
+   }
+  },
+  {
+   "ref": "grabbed_low",
+   "type": "greaterThan",
+   "name": "Grabbed Lower Half",
+   "typeParam": "number",
+   "inputs": {
+    "value1": {
+     "link": "$grab_y.output"
+    },
+    "value2": 239
+   }
+  },
+  {
+   "ref": "flip_tilt",
+   "type": "and",
+   "name": "Flip Tilt",
+   "inputs": {
+    "value1": {
+     "link": "$grabbed_low.output"
+    },
+    "value2": {
+     "link": "$k_grab_tilt.output"
+    }
+   }
+  },
+  {
+   "ref": "tilt_sign",
+   "type": "ifElse",
+   "name": "Tilt Direction",
+   "typeParam": "number",
+   "inputs": {
+    "condition": {
+     "link": "$flip_tilt.output"
+    },
+    "ifTrue": -1,
+    "ifFalse": 1
+   }
+  },
+  {
+   "ref": "tilt",
+   "type": "multiply",
+   "name": "Card Tilt",
+   "typeParam": "number",
+   "inputCount": 3,
+   "inputs": {
+    "value1": {
+     "link": "$card_xy.x"
+    },
+    "value2": {
+     "link": "$k_tilt_per_point.output"
+    },
+    "value3": {
+     "link": "$tilt_sign.output"
+    }
+   }
+  },
+  {
+   "ref": "yes_fade",
+   "type": "progress",
+   "name": "Yes Badge Fade",
+   "inputs": {
+    "value": {
+     "link": "$card_xy.x"
+    },
+    "start": {
+     "link": "$k_badge_fade_start.output"
+    },
+    "end": {
+     "link": "$k_badge_fade_end.output"
+    },
+    "clampToRange": true
+   }
+  },
+  {
+   "ref": "pass_fade",
+   "type": "progress",
+   "name": "Pass Badge Fade",
+   "inputs": {
+    "value": {
+     "link": "$card_xy.x"
+    },
+    "start": {
+     "link": "$neg_badge_start.output"
+    },
+    "end": {
+     "link": "$neg_badge_end.output"
+    },
+    "clampToRange": true
+   }
+  },
+  {
+   "ref": "yes_badge",
+   "type": "ifElse",
+   "name": "Yes Badge",
+   "typeParam": "number",
+   "inputs": {
+    "condition": {
+     "link": "$yes_hold.output"
+    },
+    "ifTrue": 1,
+    "ifFalse": {
+     "link": "$yes_fade.progress"
+    }
+   }
+  },
+  {
+   "ref": "pass_badge",
+   "type": "ifElse",
+   "name": "Pass Badge",
+   "typeParam": "number",
+   "inputs": {
+    "condition": {
+     "link": "$pass_hold.output"
+    },
+    "ifTrue": 1,
+    "ifFalse": {
+     "link": "$pass_fade.progress"
+    }
+   }
+  },
+  {
+   "ref": "armed_right",
+   "type": "greaterThan",
+   "name": "Dragged Past Right",
+   "typeParam": "number",
+   "inputs": {
+    "value1": {
+     "link": "$finger.x"
+    },
+    "value2": {
+     "link": "$k_commit_distance.output"
+    }
+   }
+  },
+  {
+   "ref": "armed_left",
+   "type": "lessThan",
+   "name": "Dragged Past Left",
+   "typeParam": "number",
+   "inputs": {
+    "value1": {
+     "link": "$finger.x"
+    },
+    "value2": {
+     "link": "$neg_commit.output"
+    }
+   }
+  },
+  {
+   "ref": "armed",
+   "type": "or",
+   "name": "Armed",
+   "inputCount": 4,
+   "inputs": {
+    "value1": {
+     "link": "$armed_right.output"
+    },
+    "value2": {
+     "link": "$armed_left.output"
+    },
+    "value3": {
+     "link": "$yes_hold.output"
+    },
+    "value4": {
+     "link": "$pass_hold.output"
+    }
+   }
+  },
+  {
+   "ref": "armed_pop",
+   "type": "popAnimation",
+   "name": "Armed Pop",
+   "inputs": {
+    "number": {
+     "link": "$armed.output"
+    },
+    "bounciness": 12,
+    "speed": 20
+   }
+  },
+  {
+   "ref": "badge_scale",
+   "type": "transition",
+   "name": "Badge Scale",
+   "inputs": {
+    "progress": {
+     "link": "$armed_pop.output"
+    },
+    "start": 1,
+    "end": {
+     "link": "$k_commit_pop.output"
+    }
+   }
+  },
+  {
+   "ref": "abs_x",
+   "type": "absoluteValue",
+   "name": "Distance From Center",
+   "typeParam": "number",
+   "inputs": {
+    "value": {
+     "link": "$card_xy.x"
+    }
+   }
+  },
+  {
+   "ref": "lift",
+   "type": "progress",
+   "name": "Lift",
+   "inputs": {
+    "value": {
+     "link": "$abs_x.output"
+    },
+    "start": 0,
+    "end": {
+     "link": "$k_commit_distance.output"
+    },
+    "clampToRange": true
+   }
+  },
+  {
+   "ref": "scale",
+   "type": "transition",
+   "name": "Card Scale",
+   "inputs": {
+    "progress": {
+     "link": "$in.aboveLift"
+    },
+    "start": {
+     "link": "$k_next_card_scale.output"
+    },
+    "end": 1
+   }
+  }
+ ],
+ "outputs": {
+  "position": "$spring.output",
+  "rotation": "$tilt.output",
+  "scale": "$scale.output",
+  "yesBadge": "$yes_badge.output",
+  "passBadge": "$pass_badge.output",
+  "badgeScale": "$badge_scale.output",
+  "gone": "$gone.on",
+  "touchable": "$still_here.output",
+  "lift": "$lift.progress"
+ }
+}

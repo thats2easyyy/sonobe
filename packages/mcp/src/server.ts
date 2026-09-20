@@ -22,6 +22,7 @@ import { toolOutputSchema, type ToolOutputSchema } from "./schemas.ts";
 import { registerDiscoveryTools } from "./tools/discovery.ts";
 import { registerDocumentTools } from "./tools/documents.ts";
 import { registerImportTools } from "./tools/import.ts";
+import { registerKnobTools } from "./tools/knobs.ts";
 import { registerPresenceTools } from "./tools/presence.ts";
 import { registerReadTools } from "./tools/read.ts";
 import { registerSimulationTools } from "./tools/simulate.ts";
@@ -68,6 +69,9 @@ export const TOOL_NAMES = [
   "rename",
   "create_component",
   "tidy_graph",
+  "get_knobs",
+  "set_knobs",
+  "apply_knob_preset",
   "import_design",
   "sim_reset",
   "sim_dispatch",
@@ -185,6 +189,7 @@ export function serverInstructions(host: SonobeHost): string {
     "3. Before wiring patches, look them up with list_patch_types and describe_patch_types so port keys, types and defaults are real.",
     "4. Call begin_work with a short intent before editing, and finish_work when you're done.",
     '5. Build in small batches (one feature at a time) with add_layers, add_patches (with connections), connect, set_values or apply_ops. Give new items a "ref" and wire them with "$ref.port" in the same batch. To rebuild items, remove the old ones and add their replacements in the same apply_ops so they keep their ids (ids removed by an earlier batch are retired and get a suffix). Every write returns ids, the new revision and diagnostics added/resolved; pass expectedRevision so you never overwrite edits the person made meanwhile.',
+    '   Build the numbers the person will want to tune or compare (distances, spring feel, thresholds) as knobs with set_knobs, with presets such as a locked "Shipped app" next to "Proposal" (get_guide("knobs")).',
     "6. Verify before claiming it works: get_diagnostics, then sim_reset → sim_dispatch (tap, drag...) → sim_step or sim_trace on the layer properties that should change. To look under a layer or try a value, use sim_override inside the simulation (or get_screenshot with isolate: true for one layer alone) instead of editing and undoing.",
     "7. When talking to the person, name layers and patches by their display names (the Card's scale), not raw ids, addresses or JSON.",
   ];
@@ -299,6 +304,7 @@ export function createSonobeMcpServer(
   registerDocumentTools(tc);
   registerReadTools(tc);
   registerWriteTools(tc);
+  registerKnobTools(tc);
   registerImportTools(tc);
   registerSimulationTools(tc);
   registerPresenceTools(tc);

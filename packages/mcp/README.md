@@ -75,6 +75,7 @@ The tools are listed in `TOOL_NAMES`.
 | Documents            | `list_documents`, `open_document`, `create_document`, `get_document_info`, `save_document`                                                     |
 | Read                 | `get_outline`, `get_layers`, `get_patches`, `get_items`, `find`, `get_selection`, `get_diagnostics`, `explain`                                 |
 | Write                | `apply_ops`, `add_layers`, `add_patches`, `connect`, `set_values`, `update_layers`, `delete_items`, `rename`, `create_component`, `tidy_graph`, `import_design` |
+| Knobs                | `get_knobs`, `set_knobs`, `apply_knob_preset`                                                                                                  |
 | Simulate             | `sim_reset`, `sim_dispatch`, `sim_step`, `sim_trace`, `sim_get_values`, `sim_override`, `get_screenshot`                                       |
 | Presence and history | `begin_work`, `finish_work`, `reveal`, `list_history`, `undo`                                                                                  |
 
@@ -94,6 +95,7 @@ Conventions:
 - Inputs resolve their targets and compute hit reports when they fire. Traces on a copy replay the session's input log into a clone, so they report the same way. Trace times count frames.
 - The log keeps 20,000 steps since `sim_reset`. Beyond that, traces and later-frame screenshots on a copy refuse with `sim_copy_unavailable` (no copy of the current state exists). `advance: true` still traces the session itself, and keeps stepping it until the trace's events finish.
 - `sim_override` overrides are value ops on the session's own copy of the document (never the host's). They apply to every loop copy and component instance, so `#n` targets are refused. The log records each re-derived document, so traces on a copy and later-frame screenshots see them. `sim_reset` clears them unless `keepOverrides: true`.
+- `sim_reset` takes `preset` and `knobs`: the session runs `applyOverrides(withKnobOverride(doc, knobs), overrides)`, so another preset or knob values run in that simulation only. `$knob.<id>` reads a knob's value in `sim_get_values` and `sim_trace`.
 - `SimulationManager.scene(simId)` returns a session's current `SceneFrame`, for simulation screenshots.
 
 Resources: `sonobe://guides/{topic}`, `sonobe://patches/{type}`, `sonobe://documents/{docId}/outline`, `sonobe://documents/{docId}/diagnostics`.
@@ -102,7 +104,7 @@ Prompts: `import_screen`, `prototype_interaction`, `debug_interaction`, `explain
 
 ## Guides
 
-`guides/*.md` holds the agent guides served by `get_guide`: start-here, graph-basics, gestures, animation, layout, loops, components, simulation and troubleshooting. `get_guide` takes `topic` for one guide or `topics` for several in order, within a combined budget of about 12,000 tokens (topics past it are listed as omitted). `SONOBE_GUIDES_DIR` overrides the folder for bundles.
+`guides/*.md` holds the agent guides served by `get_guide`: start-here, importing, graph-basics, gestures, animation, layout, loops, components, knobs, simulation and troubleshooting. `get_guide` takes `topic` for one guide or `topics` for several in order, within a combined budget of about 12,000 tokens (topics past it are listed as omitted). `SONOBE_GUIDES_DIR` overrides the folder for bundles.
 
 Every `json tool:<name>` example block runs through the real tools in `src/guides.test.ts`, and every `text outline` block must match real output. Keep examples passing when editing.
 

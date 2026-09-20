@@ -78,6 +78,9 @@
       "description": "Turn layers and patches into a reusable component."
     },
     { "name": "tidy_graph", "description": "Arrange patches by dataflow." },
+    { "name": "get_knobs", "description": "Read the knobs and presets and how presets differ." },
+    { "name": "set_knobs", "description": "Create, tune, connect and lock knobs and presets in one step." },
+    { "name": "apply_knob_preset", "description": "Switch which knob preset the prototype runs." },
     { "name": "import_design", "description": "Import a screen from a running app, HTML, or a design capture as layers." },
     { "name": "sim_reset", "description": "Start a deterministic simulation." },
     { "name": "sim_dispatch", "description": "Simulate taps, drags, keys and more." },
