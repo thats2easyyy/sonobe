@@ -30,7 +30,7 @@ node evals/run.ts --model opus --jobs 3                             # everything
 | `--check <dir>` | Check a project folder against one `--case`, without Claude. |
 | `--sonobe <path>` | The Sonobe CLI to serve (default `packages/cli/dist/sonobe.mjs`; `packages/cli/src/main.ts` runs the sources). |
 | `--claude <path>` | The `claude` command. |
-| `--user-config` | Load your own Claude Code settings, `CLAUDE.md` and skills. They're left out by default so runs on different machines compare. |
+| `--user-config` | Load your own Claude Code settings and `CLAUDE.md`. They're left out by default so runs on different machines compare. Skills stay off either way. |
 | `--out <dir>`, `--keep` | Where results go (default `evals/results/<time>`, ignored by git), and keep each run's working folder. |
 
 It exits 0 when every run passed, 1 when some failed, and 2 on a usage error. The import case renders its design with Playwright's Chromium (`npx playwright install chromium`).
@@ -38,7 +38,7 @@ It exits 0 when every run passed, 1 when some failed, and 2 on a usage error. Th
 ### What a run does
 
 1. Copies the case's start project into a temporary folder and writes an `mcp.json` that starts `sonobe mcp --headless` on it.
-2. Runs `claude -p` with the prompt on stdin, `--output-format stream-json`, `--mcp-config` with `--strict-mcp-config`, `--tools ""` (no files, shell or web: only Sonobe's tools), `--allowedTools mcp__sonobe`, `--no-session-persistence`, and the turn budget. The runner stops it at the time budget.
+2. Runs `claude -p` with the prompt on stdin, `--output-format stream-json`, `--mcp-config` with `--strict-mcp-config`, `--tools ""` (no files, shell, web or Skill tool: only Sonobe's tools), `--allowedTools mcp__sonobe`, `--disable-slash-commands` (no skills), `--no-session-persistence`, and the turn budget. The runner stops it at the time budget.
 3. Opens the finished project with the headless host and runs the case's checks.
 4. Saves the transcript and the finished project under `<results>/<case>/run-<n>/`, so you can open what Claude built in the app.
 
