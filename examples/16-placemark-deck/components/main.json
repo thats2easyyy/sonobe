@@ -1105,14 +1105,14 @@
         "loop": { "link": "swipe_card.gone" },
         "outOfRange": "fallback"
       },
-      "ui": { "x": 283, "y": 1650 }
+      "ui": { "x": 289, "y": 1650 }
     },
     "card_above_gone_last_frame": {
       "type": "delay1",
       "name": "Card Above: Gone Last Frame",
       "typeParam": "boolean",
       "inputs": { "value": { "link": "card_above_gone.output" } },
-      "ui": { "x": 585, "y": 1650 }
+      "ui": { "x": 591, "y": 1650 }
     },
     "card_above_lift": {
       "type": "loopSelect",
@@ -1124,14 +1124,14 @@
         "loop": { "link": "swipe_card.lift" },
         "outOfRange": "fallback"
       },
-      "ui": { "x": 292, "y": 1802 }
+      "ui": { "x": 295, "y": 1802 }
     },
     "card_above_lift_last_frame": {
       "type": "delay1",
       "name": "Card Above: Lift Last Frame",
       "typeParam": "number",
       "inputs": { "value": { "link": "card_above_lift.output" } },
-      "ui": { "x": 585, "y": 1802 }
+      "ui": { "x": 591, "y": 1802 }
     },
     "card_above_offset": {
       "type": "loopSelect",
@@ -1143,14 +1143,14 @@
         "loop": { "link": "swipe_card.position" },
         "outOfRange": "fallback"
       },
-      "ui": { "x": 287, "y": 1954 }
+      "ui": { "x": 293, "y": 1954 }
     },
     "card_above_offset_last_frame": {
       "type": "delay1",
       "name": "Card Above: Offset Last Frame",
       "typeParam": "point",
       "inputs": { "value": { "link": "card_above_offset.output" } },
-      "ui": { "x": 585, "y": 1954 }
+      "ui": { "x": 591, "y": 1954 }
     },
     "deck_empty_fade": {
       "type": "popAnimation",
@@ -1167,7 +1167,7 @@
       "type": "gesture",
       "name": "Drag Card",
       "inputs": { "layer": { "layer": "card" } },
-      "ui": { "x": 140, "y": 1248 }
+      "ui": { "x": 134, "y": 1248 }
     },
     "end_of_deck_shown": {
       "type": "or",
@@ -1265,7 +1265,7 @@
         "value1": { "link": "place_names.index" },
         "value2": -1
       },
-      "ui": { "x": 500, "y": 1466 }
+      "ui": { "x": 498, "y": 1466 }
     },
     "swipe_card": {
       "type": "component",
@@ -1288,7 +1288,7 @@
         "yesHeld": { "link": "tap_yes.down" },
         "yesTapped": { "link": "tap_yes.tap" }
       },
-      "ui": { "x": 412, "y": 1072 }
+      "ui": { "x": 410, "y": 1072 }
     },
     "tap_find_more_places": {
       "type": "interaction",
@@ -1383,13 +1383,13 @@
     {
       "id": "section_card_above",
       "text": "THE CARD ABOVE · each copy reads copy index − 1, one frame late · the top card has none, so Fallback says it's gone and fully lifted",
-      "rect": [0, 1606, 903, 492],
+      "rect": [0, 1606, 909, 492],
       "color": "purple"
     },
     {
       "id": "section_category_chips",
       "text": "CATEGORY CHIPS · scroll sideways (the design import added this)",
-      "rect": [0, 3036, 631, 254],
+      "rect": [0, 3036, 627, 254],
       "color": "gray"
     },
     {
@@ -1401,31 +1401,31 @@
     {
       "id": "section_places",
       "text": "PLACES · one Loop Builder per field, one row per card, top card first · add a row to every builder to add a place",
-      "rect": [0, 0, 580, 948],
+      "rect": [0, 0, 587, 948],
       "color": "green"
     },
     {
       "id": "section_the_deck",
       "text": "THE DECK · Repeat makes one Card per place, index × −1 puts row 0 on top · Drag Card and Throw Card → Swipe Card (open it) → Card",
-      "rect": [0, 988, 967, 578],
+      "rect": [0, 988, 971, 578],
       "color": "blue"
     }
   ],
   "meta": {
     "patchEditor": {
       "nodes": {
-        "@card": [763, 1248],
-        "@card_pass_badge": [763, 1032],
-        "@card_photo_1": [346, 500],
-        "@card_photo_2": [346, 652],
-        "@card_photo_3": [346, 804],
-        "@card_yes_badge": [763, 1140],
-        "@categories_content": [412, 3080],
+        "@card": [767, 1248],
+        "@card_pass_badge": [767, 1032],
+        "@card_photo_1": [353, 500],
+        "@card_photo_2": [353, 652],
+        "@card_photo_3": [353, 804],
+        "@card_yes_badge": [767, 1140],
+        "@categories_content": [408, 3080],
         "@end_of_deck": [559, 2910],
         "@pass_button": [789, 2182],
-        "@photo_credits": [396, 348],
-        "@place_address": [396, 196],
-        "@place_name": [381, 44],
+        "@photo_credits": [403, 348],
+        "@place_address": [403, 196],
+        "@place_name": [387, 44],
         "@vote_buttons": [806, 2780],
         "@yes_button": [784, 2356]
       }

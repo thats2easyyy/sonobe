@@ -150,7 +150,7 @@
         "ifFalse": { "link": "resting_at.output" },
         "ifTrue": { "link": "held_at.output" }
       },
-      "ui": { "x": 1457, "y": 1144 }
+      "ui": { "x": 1439, "y": 1144 }
     },
     "card_tilt": {
       "type": "multiply",
@@ -300,7 +300,7 @@
         "x": { "link": "finger_offset.x" },
         "y": { "link": "followed_y.output" }
       },
-      "ui": { "x": 534, "y": 1166 }
+      "ui": { "x": 537, "y": 1166 }
     },
     "holding_pass": {
       "type": "and",
@@ -372,7 +372,7 @@
         "x": { "link": "nudge_x.output" },
         "y": 0
       },
-      "ui": { "x": 609, "y": 1534 }
+      "ui": { "x": 618, "y": 1534 }
     },
     "pass_badge": {
       "type": "ifElse",
@@ -438,7 +438,7 @@
         "ifFalse": { "link": "settled_at.output" },
         "ifTrue": { "link": "thrown_to.output" }
       },
-      "ui": { "x": 1160, "y": 1252 }
+      "ui": { "x": 1151, "y": 1252 }
     },
     "settled_at": {
       "type": "ifElse",
@@ -489,7 +489,7 @@
         "x": { "link": "finger_speed.x" },
         "y": { "link": "followed_y_speed.output" }
       },
-      "ui": { "x": 542, "y": 2048 }
+      "ui": { "x": 545, "y": 2048 }
     },
     "thrown_to": {
       "type": "point",
@@ -667,13 +667,13 @@
     {
       "id": "section_spring",
       "text": "5 · ONE SPRING GETS IT THERE · starting at the finger's speed (Spring Response, Spring Damping)",
-      "rect": [0, 1700, 1125, 506],
+      "rect": [0, 1700, 1115, 506],
       "color": "green"
     },
     {
       "id": "section_target",
       "text": "4 · WHERE THE CARD WANTS TO BE · the finger while dragging (Vertical Follow), else flown off (Card Flies Out), else nudged by a held button, else home",
-      "rect": [0, 1100, 1702, 534],
+      "rect": [0, 1100, 1675, 534],
       "color": "purple"
     },
     {
