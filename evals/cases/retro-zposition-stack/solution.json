@@ -1,0 +1,148 @@
+{
+  "calls": [
+    {
+      "tool": "apply_ops",
+      "args": {
+        "ops": [
+          {
+            "op": "addPatch",
+            "patch": {
+              "id": "cards",
+              "type": "loop",
+              "name": "Cards",
+              "inputs": {
+                "count": 3
+              }
+            }
+          },
+          {
+            "op": "connect",
+            "from": "cards.index",
+            "to": "@card.repeat"
+          },
+          {
+            "op": "addPatch",
+            "patch": {
+              "id": "card_y",
+              "type": "mathExpression",
+              "name": "Card Y",
+              "inputs": {},
+              "settings": {
+                "expression": "300 + index * 12"
+              }
+            }
+          },
+          {
+            "op": "connect",
+            "from": "cards.index",
+            "to": "card_y.index"
+          },
+          {
+            "op": "addPatch",
+            "patch": {
+              "id": "card_position",
+              "type": "point",
+              "name": "Card Position",
+              "inputs": {
+                "x": 201,
+                "y": {
+                  "link": "card_y.output"
+                }
+              }
+            }
+          },
+          {
+            "op": "connect",
+            "from": "card_position.output",
+            "to": "@card.position"
+          },
+          {
+            "op": "addPatch",
+            "patch": {
+              "id": "card_z",
+              "type": "multiply",
+              "name": "First Card on Top",
+              "inputs": {
+                "value1": {
+                  "link": "cards.index"
+                },
+                "value2": -1
+              },
+              "typeParam": "number",
+              "inputCount": 2
+            }
+          },
+          {
+            "op": "connect",
+            "from": "card_z.output",
+            "to": "@card.zPosition"
+          },
+          {
+            "op": "addPatch",
+            "patch": {
+              "id": "tap_card",
+              "type": "interaction",
+              "name": "Tap Card",
+              "inputs": {
+                "layer": {
+                  "layer": "card"
+                }
+              }
+            }
+          },
+          {
+            "op": "addPatch",
+            "patch": {
+              "id": "card_gone",
+              "type": "switch",
+              "name": "Card Gone",
+              "inputs": {
+                "turnOn": {
+                  "link": "tap_card.tap"
+                }
+              }
+            }
+          },
+          {
+            "op": "addPatch",
+            "patch": {
+              "id": "card_fade",
+              "type": "classicAnimation",
+              "name": "Card Fade",
+              "inputs": {
+                "number": {
+                  "link": "card_gone.on"
+                },
+                "duration": 0.2
+              },
+              "typeParam": "number"
+            }
+          },
+          {
+            "op": "addPatch",
+            "patch": {
+              "id": "card_opacity",
+              "type": "transition",
+              "name": "Card Opacity",
+              "inputs": {
+                "progress": {
+                  "link": "card_fade.output"
+                },
+                "start": 1,
+                "end": 0
+              },
+              "typeParam": "number"
+            }
+          },
+          {
+            "op": "connect",
+            "from": "card_opacity.output",
+            "to": "@card.opacity"
+          }
+        ],
+        "label": "stack of three"
+      }
+    }
+  ],
+  "answer": "Three copies 12 points apart; Z Position is minus the index, so copy 0 draws in front and gets the tap."
+}

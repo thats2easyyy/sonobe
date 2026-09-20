@@ -1,0 +1,1 @@
+Explain how this carousel works to someone who's new to prototyping. Then make the page dots snap bouncier: when a dot stretches to show the current page, it should overshoot a little before it settles.

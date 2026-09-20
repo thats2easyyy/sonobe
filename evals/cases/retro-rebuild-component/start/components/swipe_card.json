@@ -1,0 +1,112 @@
+{
+  "formatVersion": 1,
+  "id": "swipe_card",
+  "name": "Swipe Card",
+  "kind": "layerComponent",
+  "size": [330, 420],
+  "interface": {
+    "inputs": {},
+    "outputs": {
+      "swipedLeft": { "key": "swipedLeft", "name": "Swiped Left", "type": "pulse", "link": "card_swipe.swipedLeft" },
+      "swipedRight": { "key": "swipedRight", "name": "Swiped Right", "type": "pulse", "link": "card_swipe.swipedRight" }
+    }
+  },
+  "layers": [
+    {
+      "id": "card_face",
+      "type": "rectangle",
+      "name": "Card Face",
+      "props": {
+        "color": "#8B5CF6FF",
+        "cornerRadius": 28,
+        "position": { "link": "card_follow.output" },
+        "size": [330, 420]
+      }
+    },
+    {
+      "id": "card_label",
+      "type": "text",
+      "name": "Card Label",
+      "props": {
+        "anchor": [0.5, 0],
+        "fontSize": 22,
+        "fontWeight": 700,
+        "hitTest": false,
+        "letterSpacing": -0.2,
+        "position": [165, 196],
+        "text": "Flip me",
+        "textAlignment": "center",
+        "textColor": "#FFFFFFFF"
+      }
+    }
+  ],
+  "patches": {
+    "card_drag": {
+      "type": "gesture",
+      "name": "Drag Card",
+      "inputs": { "layer": { "layer": "card_face" } },
+      "ui": { "x": 555, "y": 40 }
+    },
+    "card_flipped": {
+      "type": "switch",
+      "name": "Card Flipped",
+      "inputs": {},
+      "ui": { "x": 1509, "y": 40 }
+    },
+    "card_follow": {
+      "type": "point",
+      "name": "Card Follows Finger",
+      "inputs": {
+        "x": { "link": "card_offset.x" },
+        "y": 0
+      },
+      "ui": { "x": 1037, "y": 40 }
+    },
+    "card_gone": {
+      "type": "switch",
+      "name": "Card Gone",
+      "inputs": { "turnOn": { "link": "card_swipe.swiped" } },
+      "ui": { "x": 319, "y": 40 }
+    },
+    "card_offset": {
+      "type": "pointUnpack",
+      "name": "Card Offset",
+      "inputs": { "value": { "link": "card_drag.translation" } },
+      "ui": { "x": 801, "y": 40 }
+    },
+    "card_swipe": {
+      "type": "swipe",
+      "name": "Swipe Card",
+      "inputs": {
+        "axis": "horizontal",
+        "layer": { "layer": "card_face" }
+      },
+      "ui": { "x": 40, "y": 40 }
+    },
+    "card_tap": {
+      "type": "interaction",
+      "name": "Card Tap",
+      "inputs": {},
+      "ui": { "x": 1273, "y": 40 }
+    },
+    "flip_scale": {
+      "type": "transition",
+      "name": "Flip Scale",
+      "typeParam": "number",
+      "inputs": {
+        "end": 1.1,
+        "progress": { "link": "flip_spring.output" },
+        "start": 1
+      },
+      "ui": { "x": 1981, "y": 40 }
+    },
+    "flip_spring": {
+      "type": "popAnimation",
+      "name": "Flip Spring",
+      "typeParam": "number",
+      "inputs": { "bounciness": 6 },
+      "ui": { "x": 1745, "y": 40 }
+    }
+  },
+  "comments": []
+}

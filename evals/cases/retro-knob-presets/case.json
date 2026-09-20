@@ -1,0 +1,14 @@
+{
+  "title": "Two feels as knob presets",
+  "about": "Retro item 6 (K1): the numbers to compare become knobs with a locked reference preset and a working one, instead of broadcasters named like \"(app: 95)\". Each scenario simulates one preset.",
+  "tags": ["retro", "knobs", "tap"],
+  "start": { "project": "start" },
+  "checks": [
+    {
+      "kind": "presets",
+      "description": "There's a locked Shipped app preset and a Proposal preset",
+      "presets": [{ "name": "Shipped app", "locked": true }, { "name": "Proposal" }]
+    }
+  ],
+  "budget": { "maxTurns": 40 }
+}

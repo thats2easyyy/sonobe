@@ -1,0 +1,52 @@
+{
+  "description": "Copy 0 is thrown first, the next copy takes over, and Reset brings back all three cards after the last is gone.",
+  "scenarios": [
+    {
+      "name": "Throwing the top card",
+      "events": [{ "kind": "drag", "from": [201, 420], "to": [40, 420], "durationMs": 120, "atMs": 100 }],
+      "durationMs": 1500,
+      "expect": [
+        { "description": "Copy 0 was on top and flew off to the left", "target": "@card.position#0", "component": "x", "at": "end", "op": "<", "value": -250 },
+        { "description": "The card under it stayed in the middle", "target": "@card.position#1", "component": "x", "at": "end", "op": "==", "value": 201, "tolerance": 1 }
+      ]
+    },
+    {
+      "name": "The next card becomes the top card",
+      "events": [
+        { "kind": "drag", "from": [201, 420], "to": [40, 420], "durationMs": 120, "atMs": 100 },
+        { "kind": "drag", "from": [201, 420], "to": [362, 420], "durationMs": 120, "atMs": 900 }
+      ],
+      "durationMs": 2300,
+      "expect": [
+        { "description": "Copy 1 flew off to the right", "target": "@card.position#1", "component": "x", "at": "end", "op": ">", "value": 650 },
+        { "description": "Copy 2 is still in the middle", "target": "@card.position#2", "component": "x", "at": "end", "op": "==", "value": 201, "tolerance": 1 }
+      ]
+    },
+    {
+      "name": "Throwing every card, then Reset",
+      "events": [
+        { "kind": "drag", "from": [201, 420], "to": [40, 420], "durationMs": 120, "atMs": 100 },
+        { "kind": "drag", "from": [201, 420], "to": [362, 420], "durationMs": 120, "atMs": 900 },
+        { "kind": "drag", "from": [201, 420], "to": [40, 420], "durationMs": 120, "atMs": 1700 },
+        { "kind": "tap", "target": "@reset", "atMs": 2700 }
+      ],
+      "durationMs": 4400,
+      "expect": [
+        { "description": "All three were gone before Reset: copy 0 on the left", "target": "@card.position#0", "component": "x", "at": 2650, "op": "<", "value": -250 },
+        { "description": "copy 2, thrown last, on the left too", "target": "@card.position#2", "component": "x", "at": 2650, "op": "<", "value": -250 },
+        { "description": "After Reset copy 0 is back in the middle", "target": "@card.position#0", "component": "x", "at": "end", "op": "==", "value": 201, "tolerance": 1 },
+        { "description": "and so is copy 1", "target": "@card.position#1", "component": "x", "at": "end", "op": "==", "value": 201, "tolerance": 1 },
+        { "description": "and copy 2", "target": "@card.position#2", "component": "x", "at": "end", "op": "==", "value": 201, "tolerance": 1 }
+      ]
+    },
+    {
+      "name": "A short drag springs back",
+      "events": [{ "kind": "drag", "from": [201, 420], "to": [261, 420], "durationMs": 600, "atMs": 100 }],
+      "durationMs": 1800,
+      "expect": [
+        { "description": "The top card moved with the finger", "target": "@card.position#0", "component": "x", "at": "max", "op": ">", "value": 240 },
+        { "description": "and came back to the middle", "target": "@card.position#0", "component": "x", "at": "end", "op": "==", "value": 201, "tolerance": 0.5 }
+      ]
+    }
+  ]
+}

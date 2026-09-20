@@ -1,0 +1,9 @@
+{
+  "title": "Explain the carousel, then make it bouncier",
+  "about": "The usability study's explain-and-tweak task on the Carousel Paging example. The study asked for bouncier snapping; Scroll's paging snap has no bounce setting, so the prompt names the page dots, whose springs are the carousel's only ones. The paging must keep working.",
+  "tags": ["study", "explain", "springs"],
+  "start": { "example": "04-carousel-paging" },
+  "test": { "example": "04-carousel-paging" },
+  "answer": { "mentions": [["scroll"], ["page"], ["dot"], ["spring", "bounc"]] },
+  "budget": { "maxTurns": 40 }
+}

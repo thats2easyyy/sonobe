@@ -1,0 +1,11 @@
+{
+  "title": "Debug a flick that feels dead",
+  "about": "The usability study's debug task: the Bottom Sheet example with the spring's Gesture Velocity unwired, so a flick loses its speed at release. The example's checks still pass without it, so one scenario of its own checks the speed handoff.",
+  "tags": ["study", "debug", "springs"],
+  "start": {
+    "example": "08-bottom-sheet",
+    "ops": [{ "op": "setInput", "target": "sheet_spring.gestureVelocity", "value": null }]
+  },
+  "test": { "example": "08-bottom-sheet" },
+  "budget": { "maxTurns": 40 }
+}

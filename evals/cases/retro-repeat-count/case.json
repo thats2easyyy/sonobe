@@ -1,0 +1,7 @@
+{
+  "title": "Four copies of a layer driven by its own press",
+  "about": "Retro item 3 (E2): a layer whose only linked property comes from its own gesture used to make one copy, since no loop said how many. A press on copy 3 only lands if the fourth copy exists, and each copy keeps its own press state.",
+  "tags": ["retro", "loops", "tap"],
+  "start": { "project": "start" },
+  "budget": { "maxTurns": 40 }
+}

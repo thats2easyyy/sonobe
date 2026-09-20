@@ -1,0 +1,1 @@
+Make the photo card zoom when I tap it. Tap it and it springs bigger, to 1.12× its size, overshooting a touch so it feels springy, and settles within about a second. Tap it again and it springs back to normal size. As it grows, lift its shadow in step: shadow radius from 18 to 44 and shadow opacity from 0.08 to 0.26. Check it works.

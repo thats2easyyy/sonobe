@@ -1,0 +1,18 @@
+{
+  "title": "Collapsing Header",
+  "about": "examples/06-collapsing-header with its patches removed: the layers are there, Claude builds the logic.",
+  "tags": [
+    "example",
+    "scroll"
+  ],
+  "start": {
+    "example": "06-collapsing-header",
+    "patches": false
+  },
+  "test": {
+    "example": "06-collapsing-header"
+  },
+  "budget": {
+    "maxTurns": 40
+  }
+}

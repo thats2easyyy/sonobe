@@ -1,0 +1,7 @@
+{
+  "title": "A designer's bottom sheet",
+  "about": "The usability study's designer task, on a start project with the map, dim layer and sheet drawn, and the stops given in numbers.",
+  "tags": ["study", "gestures", "springs"],
+  "start": { "project": "start" },
+  "budget": { "maxTurns": 60 }
+}

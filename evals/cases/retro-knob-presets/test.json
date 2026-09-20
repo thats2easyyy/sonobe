@@ -1,0 +1,44 @@
+{
+  "description": "Each preset gives its own grow, and Proposal runs by default.",
+  "scenarios": [
+    {
+      "name": "Shipped app: a small, firm grow",
+      "preset": "Shipped app",
+      "events": [{ "kind": "tap", "target": "@card", "atMs": 100 }],
+      "durationMs": 1600,
+      "expect": [
+        { "description": "The card ends at 1.05×", "target": "@card.scale", "at": "end", "op": "==", "value": 1.05, "tolerance": 0.003 },
+        { "description": "without bouncing past it", "target": "@card.scale", "at": "max", "op": "<", "value": 1.054 }
+      ]
+    },
+    {
+      "name": "Proposal: a bigger, bouncy grow",
+      "preset": "Proposal",
+      "events": [{ "kind": "tap", "target": "@card", "atMs": 100 }],
+      "durationMs": 1600,
+      "expect": [
+        { "description": "The card ends at 1.15×", "target": "@card.scale", "at": "end", "op": "==", "value": 1.15, "tolerance": 0.003 },
+        { "description": "bouncing past it on the way", "target": "@card.scale", "at": "max", "op": ">", "value": 1.155 }
+      ]
+    },
+    {
+      "name": "Proposal is the running preset",
+      "events": [{ "kind": "tap", "target": "@card", "atMs": 100 }],
+      "durationMs": 1600,
+      "expect": [{ "description": "Without picking a preset the card grows to 1.15×", "target": "@card.scale", "at": "end", "op": "==", "value": 1.15, "tolerance": 0.003 }]
+    },
+    {
+      "name": "Tapping again shrinks it back",
+      "preset": "Proposal",
+      "events": [
+        { "kind": "tap", "target": "@card", "atMs": 100 },
+        { "kind": "tap", "target": "@card", "atMs": 1300 }
+      ],
+      "durationMs": 2800,
+      "expect": [
+        { "description": "It had grown", "target": "@card.scale", "at": 1250, "op": ">", "value": 1.1 },
+        { "description": "and is back at normal size", "target": "@card.scale", "at": "end", "op": "==", "value": 1, "tolerance": 0.003 }
+      ]
+    }
+  ]
+}

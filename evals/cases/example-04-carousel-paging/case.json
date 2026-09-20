@@ -1,0 +1,19 @@
+{
+  "title": "Carousel Paging",
+  "about": "examples/04-carousel-paging with its patches removed: the layers are there, Claude builds the logic.",
+  "tags": [
+    "example",
+    "scroll",
+    "loops"
+  ],
+  "start": {
+    "example": "04-carousel-paging",
+    "patches": false
+  },
+  "test": {
+    "example": "04-carousel-paging"
+  },
+  "budget": {
+    "maxTurns": 50
+  }
+}

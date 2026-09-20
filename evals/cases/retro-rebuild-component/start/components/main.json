@@ -1,0 +1,22 @@
+{
+  "formatVersion": 1,
+  "id": "main",
+  "name": "Main",
+  "kind": "prototype",
+  "size": [402, 874],
+  "interface": { "inputs": {}, "outputs": {} },
+  "layers": [
+    {
+      "id": "card",
+      "type": "componentInstance",
+      "name": "Card",
+      "component": "swipe_card",
+      "props": {
+        "position": [36, 230],
+        "size": [330, 420]
+      }
+    }
+  ],
+  "patches": {},
+  "comments": []
+}

@@ -1,0 +1,36 @@
+{
+  "description": "Inside the Card instance, a tap flips the face to 0.9 and back, and drags no longer move it.",
+  "scenarios": [
+    {
+      "name": "Tapping flips the card",
+      "events": [{ "kind": "tap", "target": "@card", "atMs": 100 }],
+      "durationMs": 1500,
+      "expect": [
+        { "description": "The face scales down to 0.9", "target": "@card/card_face.scale", "at": "end", "op": "==", "value": 0.9, "tolerance": 0.005 },
+        { "description": "and comes to rest", "target": "@card/card_face.scale", "settled": true }
+      ]
+    },
+    {
+      "name": "Tapping again flips it back",
+      "events": [
+        { "kind": "tap", "target": "@card", "atMs": 100 },
+        { "kind": "tap", "target": "@card", "atMs": 1000 }
+      ],
+      "durationMs": 2400,
+      "expect": [
+        { "description": "It was flipped in between", "target": "@card/card_face.scale", "at": 900, "op": "<", "value": 0.92 },
+        { "description": "and is back at full size", "target": "@card/card_face.scale", "at": "end", "op": "==", "value": 1, "tolerance": 0.005 }
+      ]
+    },
+    {
+      "name": "Dragging does nothing",
+      "events": [{ "kind": "drag", "from": "@card", "to": [340, 470], "durationMs": 300, "atMs": 100 }],
+      "durationMs": 1000,
+      "expect": [
+        { "description": "The face never moves right", "target": "@card/card_face.position", "component": "x", "at": "max", "op": "<", "value": 1 },
+        { "description": "or left", "target": "@card/card_face.position", "component": "x", "at": "min", "op": ">", "value": -1 },
+        { "description": "and a drag isn't a tap", "target": "@card/card_face.scale", "at": "min", "op": ">", "value": 0.999 }
+      ]
+    }
+  ]
+}

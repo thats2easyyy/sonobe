@@ -1,0 +1,7 @@
+{
+  "title": "First copy on top",
+  "about": "Retro item 4 (E3): Z Position has to decide which copy draws on top and which one a tap reaches. The taps land where all three copies overlap, so only the front copy can take them.",
+  "tags": ["retro", "loops", "stacking"],
+  "start": { "project": "start" },
+  "budget": { "maxTurns": 40 }
+}

@@ -1,0 +1,55 @@
+{
+  "description": "The sheet follows the finger, opens with a drag up, closes with a flick down, springs back from small drags, and dims the map when open.",
+  "scenarios": [
+    {
+      "name": "The sheet starts peeking",
+      "events": [],
+      "durationMs": 300,
+      "expect": [
+        { "description": "Its top edge is at 700", "target": "@sheet.position", "component": "y", "at": "end", "op": "==", "value": 700, "tolerance": 0.5 },
+        { "description": "The map isn't dimmed", "target": "@dim.opacity", "at": "end", "op": "==", "value": 0, "tolerance": 0.005 }
+      ]
+    },
+    {
+      "name": "It follows the finger",
+      "events": [{ "kind": "drag", "from": "@grabber", "to": [201, 500], "durationMs": 400, "release": false, "atMs": 100 }],
+      "durationMs": 700,
+      "expect": [
+        { "description": "The finger moved up about 210 points and the sheet came along", "target": "@sheet.position", "component": "y", "at": "end", "op": "<", "value": 520 },
+        { "description": "but no further than the finger", "target": "@sheet.position", "component": "y", "at": "end", "op": ">", "value": 470 }
+      ]
+    },
+    {
+      "name": "A slow drag up opens it",
+      "events": [{ "kind": "drag", "from": "@grabber", "to": [201, 150], "durationMs": 900, "atMs": 100 }],
+      "durationMs": 2400,
+      "expect": [
+        { "description": "It settles open at 120", "target": "@sheet.position", "component": "y", "at": "end", "op": "==", "value": 120, "tolerance": 1 },
+        { "description": "It comes to rest", "target": "@sheet.position", "component": "y", "settled": true },
+        { "description": "The map dims to 0.4", "target": "@dim.opacity", "at": "end", "op": "==", "value": 0.4, "tolerance": 0.01 }
+      ]
+    },
+    {
+      "name": "A flick down closes it",
+      "events": [
+        { "kind": "drag", "from": "@grabber", "to": [201, 150], "durationMs": 900, "atMs": 100 },
+        { "kind": "drag", "from": [201, 140], "to": [201, 320], "durationMs": 80, "atMs": 2000 }
+      ],
+      "durationMs": 3600,
+      "expect": [
+        { "description": "It was open before the flick", "target": "@sheet.position", "component": "y", "at": 1950, "op": "==", "value": 120, "tolerance": 2 },
+        { "description": "It settles back at the peek", "target": "@sheet.position", "component": "y", "at": "end", "op": "==", "value": 700, "tolerance": 1 },
+        { "description": "The map isn't dimmed any more", "target": "@dim.opacity", "at": "end", "op": "==", "value": 0, "tolerance": 0.01 }
+      ]
+    },
+    {
+      "name": "A small slow drag springs back",
+      "events": [{ "kind": "drag", "from": "@grabber", "to": [201, 650], "durationMs": 800, "atMs": 100 }],
+      "durationMs": 2200,
+      "expect": [
+        { "description": "It moved with the finger", "target": "@sheet.position", "component": "y", "at": "min", "op": "<", "value": 680 },
+        { "description": "and went back to the peek", "target": "@sheet.position", "component": "y", "at": "end", "op": "==", "value": 700, "tolerance": 1 }
+      ]
+    }
+  ]
+}

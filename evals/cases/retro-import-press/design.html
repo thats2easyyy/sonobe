@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=402" />
+    <title>Checkout</title>
+    <style>
+      :root {
+        color-scheme: light dark;
+        --bg: #f4f4f6;
+        --card: #ffffff;
+        --ink: #111118;
+        --muted: #5f5f6b;
+        --accent: #5b5cf6;
+      }
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --bg: #0e0f1a;
+          --card: #1a1b2a;
+          --ink: #f4f4f6;
+          --muted: #a1a1aa;
+          --accent: #7c7dff;
+        }
+      }
+      * {
+        box-sizing: border-box;
+        margin: 0;
+      }
+      body {
+        font-family: -apple-system, "Helvetica Neue", Arial, sans-serif;
+        background: var(--bg);
+        color: var(--ink);
+      }
+      main {
+        position: relative;
+        width: 402px;
+        height: 874px;
+        padding: 72px 20px 0;
+        background: var(--bg);
+      }
+      h1 {
+        font-size: 34px;
+        font-weight: 700;
+        margin-bottom: 20px;
+      }
+      .item {
+        display: flex;
+        justify-content: space-between;
+        margin-bottom: 10px;
+        padding: 16px;
+        border-radius: 16px;
+        background: var(--card);
+        font-size: 17px;
+      }
+      .item span:last-child {
+        color: var(--muted);
+      }
+      .total {
+        display: flex;
+        justify-content: space-between;
+        padding: 16px 4px;
+        font-size: 20px;
+        font-weight: 700;
+      }
+      .pay {
+        position: absolute;
+        left: 20px;
+        right: 20px;
+        bottom: 60px;
+        height: 56px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        border-radius: 28px;
+        background: var(--accent);
+        color: #ffffff;
+        font-size: 17px;
+        font-weight: 600;
+      }
+    </style>
+  </head>
+  <body>
+    <main data-name="Checkout Page">
+      <h1 data-name="Title">Checkout</h1>
+      <div class="item" data-name="Latte Row"><span>Oat latte</span><span>$5.50</span></div>
+      <div class="item" data-name="Croissant Row"><span>Almond croissant</span><span>$4.25</span></div>
+      <div class="total" data-name="Total Row"><span>Total</span><span>$9.75</span></div>
+      <div class="pay" data-name="Pay Button"><span data-name="Pay Label">Pay $9.75</span></div>
+    </main>
+  </body>
+</html>

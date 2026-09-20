@@ -1,0 +1,18 @@
+{
+  "title": "Scrolling List",
+  "about": "examples/03-scrolling-list with its patches removed: the layers are there, Claude builds the logic.",
+  "tags": [
+    "example",
+    "scroll"
+  ],
+  "start": {
+    "example": "03-scrolling-list",
+    "patches": false
+  },
+  "test": {
+    "example": "03-scrolling-list"
+  },
+  "budget": {
+    "maxTurns": 40
+  }
+}

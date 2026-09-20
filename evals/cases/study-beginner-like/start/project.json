@@ -1,0 +1,8 @@
+{
+  "formatVersion": 1,
+  "name": "Like Button",
+  "generator": "Sonobe 0.1.0",
+  "root": "main",
+  "device": { "preset": "iphone-17-pro" },
+  "background": "#F4F4F6FF"
+}

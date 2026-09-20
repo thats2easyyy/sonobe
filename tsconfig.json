@@ -15,5 +15,6 @@
     "skipLibCheck": true,
     "types": ["node", "vite/client"]
   },
-  "include": ["packages/*/src", "apps/*/src", "apps/*/electron", "apps/*/player", "*.config.ts"]
+  "include": ["packages/*/src", "apps/*/src", "apps/*/electron", "apps/*/player", "evals/**/*.ts", "*.config.ts"],
+  "exclude": ["evals/results"]
 }

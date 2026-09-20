@@ -1,0 +1,21 @@
+{
+  "description": "The imported page is the dark one, and the Pay button presses down and springs back.",
+  "scenarios": [
+    {
+      "name": "The screen came in dark",
+      "events": [],
+      "durationMs": 100,
+      "expect": [{ "description": "The page background is dark", "target": "@checkout_page.color", "component": "r", "at": "end", "op": "<", "value": 0.2 }]
+    },
+    {
+      "name": "Pressing the Pay button shrinks it",
+      "events": [{ "kind": "tap", "target": "@pay_button", "holdMs": 600, "atMs": 100 }],
+      "durationMs": 1600,
+      "expect": [
+        { "description": "It's pressed down while the finger is on it", "target": "@pay_button.scale", "at": 600, "op": "<", "value": 0.96 },
+        { "description": "to about 0.95", "target": "@pay_button.scale", "at": "min", "op": ">", "value": 0.92 },
+        { "description": "and springs back after", "target": "@pay_button.scale", "at": "end", "op": "==", "value": 1, "tolerance": 0.005 }
+      ]
+    }
+  ]
+}
