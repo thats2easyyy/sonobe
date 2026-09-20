@@ -62,9 +62,9 @@ const expected = (r: Rect) => {
   return { x: Math.round(s.x), y: Math.round(s.y), width: s.width, height: s.height, frame: [r.width, r.height], scale: `scale(${VIEWPORT.zoom})` };
 };
 
-/** Replace the frame's window with a recorder of what the canvas posts to it. */
+/** Replace the frame's window with a recorder of what the canvas posts to it, and when (each call's result). */
 function recordPosts(frame: HTMLIFrameElement) {
-  const postMessage = vi.fn();
+  const postMessage = vi.fn((_message: unknown, _targetOrigin: string) => Date.now());
   Object.defineProperty(frame, "contentWindow", { configurable: true, value: { postMessage } });
   return postMessage;
 }
@@ -162,7 +162,8 @@ describe("DesignPreview", () => {
     const nonce = nonceOf(frame);
     expect(posts.mock.calls).toEqual([[{ type: PREVIEW_MESSAGE_TYPE, nonce, html: "<p>1</p>" }, "*"]]);
 
-    vi.useFakeTimers();
+    // The fake clock starts at the first post, so the throttle is timed in fake time only, however long load() took.
+    vi.useFakeTimers({ now: posts.mock.results[0]!.value as number });
     show([draft({ html: "<p>1</p><p>2</p>" })]);
     show([draft({ html: "<p>1</p><p>2</p><p>3</p>" })]);
     expect(posts).toHaveBeenCalledTimes(1);
