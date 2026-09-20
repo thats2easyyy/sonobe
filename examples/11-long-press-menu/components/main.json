@@ -663,7 +663,7 @@
         "duration": 0.18,
         "number": { "link": "menu_open.on" }
       },
-      "ui": { "x": 560, "y": 340 }
+      "ui": { "x": 587, "y": 352 }
     },
     "menu_open": {
       "type": "switch",
@@ -672,7 +672,7 @@
         "turnOff": { "link": "tap_overlay.tap" },
         "turnOn": { "link": "hold_message.longPress" }
       },
-      "ui": { "x": 300, "y": 190 }
+      "ui": { "x": 327, "y": 190 }
     },
     "menu_scale": {
       "type": "transition",
@@ -683,7 +683,7 @@
         "progress": { "link": "menu_spring.output" },
         "start": 0.7
       },
-      "ui": { "x": 820, "y": 40 }
+      "ui": { "x": 847, "y": 40 }
     },
     "menu_spring": {
       "type": "popAnimation",
@@ -694,7 +694,7 @@
         "number": { "link": "menu_open.on" },
         "speed": 18
       },
-      "ui": { "x": 560, "y": 190 }
+      "ui": { "x": 587, "y": 190 }
     },
     "message_squeeze": {
       "type": "transition",
@@ -705,7 +705,7 @@
         "progress": { "link": "squeeze_spring.output" },
         "start": 1
       },
-      "ui": { "x": 560, "y": 40 }
+      "ui": { "x": 587, "y": 40 }
     },
     "squeeze_spring": {
       "type": "popAnimation",
@@ -716,7 +716,7 @@
         "number": { "link": "hold_message.progress" },
         "speed": 16
       },
-      "ui": { "x": 300, "y": 40 }
+      "ui": { "x": 327, "y": 40 }
     },
     "tap_overlay": {
       "type": "interaction",

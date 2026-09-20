@@ -30,22 +30,22 @@ const sides = (p: readonly (readonly [number, number])[]) => {
 };
 
 describe("orbDuration", () => {
-  it("grows with the cable and stays between 300 and 900 ms", () => {
-    expect(orbDuration(0)).toBe(300);
-    expect(orbDuration(100)).toBe(300);
-    expect(orbDuration(400)).toBe(440);
-    expect(orbDuration(600)).toBe(550);
-    expect(orbDuration(5000)).toBe(900);
+  it("grows with the cable and stays between 180 and 450 ms", () => {
+    expect(orbDuration(0)).toBe(180);
+    expect(orbDuration(50)).toBe(180);
+    expect(orbDuration(250)).toBe(250);
+    expect(orbDuration(500)).toBe(350);
+    expect(orbDuration(5000)).toBe(450);
   });
 });
 
 describe("orbGap", () => {
   it("keeps at most two orbs in flight", () => {
-    for (const duration of [300, 500, 900]) expect(orbGap(duration, duration + LANDING_MS)).toBeGreaterThanOrEqual(duration / 2);
+    for (const duration of [180, 300, 450]) expect(orbGap(duration, duration + LANDING_MS)).toBeGreaterThanOrEqual(duration / 2);
   });
 
   it("doesn't reuse a slot before its landing fades", () => {
-    for (const duration of [300, 500, 900]) {
+    for (const duration of [180, 300, 450]) {
       const done = Math.round(duration * 0.9) + LANDING_MS;
       expect(orbGap(duration, done) * ORB_SLOTS).toBeGreaterThanOrEqual(done);
     }

@@ -371,7 +371,7 @@
       "typeParam": "color",
       "inputCount": 3,
       "inputs": { "item0": "#FDE68AFF", "item1": "#FECACAFF", "item2": "#C7D2FEFF" },
-      "ui": { "x": 40, "y": 1840 }
+      "ui": { "x": 40, "y": 1942 }
     },
     "card_colors": {
       "type": "loopBuilder",
@@ -379,7 +379,7 @@
       "typeParam": "color",
       "inputCount": 3,
       "inputs": { "item0": "#F59E0BFF", "item1": "#EF4444FF", "item2": "#5B5CF6FF" },
-      "ui": { "x": 40, "y": 1540 }
+      "ui": { "x": 40, "y": 1642 }
     },
     "card_depth": {
       "type": "subtract",
@@ -390,13 +390,13 @@
         "value1": { "link": "top_index.output" },
         "value2": { "link": "cards.index" }
       },
-      "ui": { "x": 1080, "y": 190 }
+      "ui": { "x": 1147, "y": 190 }
     },
     "card_gesture": {
       "type": "gesture",
       "name": "Drag Card",
       "inputs": { "layer": { "layer": "card" } },
-      "ui": { "x": 40, "y": 490 }
+      "ui": { "x": 40, "y": 536 }
     },
     "card_gone": {
       "type": "switch",
@@ -405,7 +405,7 @@
         "turnOff": { "link": "tap_start_over.tap" },
         "turnOn": { "link": "card_swipe.swiped" }
       },
-      "ui": { "x": 300, "y": 190 }
+      "ui": { "x": 367, "y": 190 }
     },
     "card_metas": {
       "type": "loopBuilder",
@@ -413,7 +413,7 @@
       "typeParam": "text",
       "inputCount": 3,
       "inputs": { "item0": "25 min · vegetarian", "item1": "30 min · a little spicy", "item2": "40 min · cozy" },
-      "ui": { "x": 40, "y": 1240 }
+      "ui": { "x": 40, "y": 1342 }
     },
     "card_position": {
       "type": "point",
@@ -422,7 +422,7 @@
         "x": { "link": "card_x.output" },
         "y": { "link": "card_y.output" }
       },
-      "ui": { "x": 2120, "y": 40 }
+      "ui": { "x": 2187, "y": 40 }
     },
     "card_rotation": {
       "type": "multiply",
@@ -433,7 +433,7 @@
         "value1": { "link": "card_spring.output" },
         "value2": 0.05
       },
-      "ui": { "x": 1600, "y": 340 }
+      "ui": { "x": 1667, "y": 374 }
     },
     "card_scale": {
       "type": "transition",
@@ -444,7 +444,7 @@
         "progress": { "link": "depth_spring.output" },
         "start": 1
       },
-      "ui": { "x": 1860, "y": 40 }
+      "ui": { "x": 1927, "y": 40 }
     },
     "card_side": {
       "type": "optionSwitch",
@@ -454,7 +454,7 @@
         "setTo0": { "link": "card_swipe.swipedLeft" },
         "setTo1": { "link": "card_swipe.swipedRight" }
       },
-      "ui": { "x": 300, "y": 40 }
+      "ui": { "x": 367, "y": 40 }
     },
     "card_spring": {
       "type": "springAnimation",
@@ -467,7 +467,7 @@
         "number": { "link": "card_target.output" },
         "tension": 180
       },
-      "ui": { "x": 1340, "y": 190 }
+      "ui": { "x": 1407, "y": 190 }
     },
     "card_swipe": {
       "type": "swipe",
@@ -489,7 +489,7 @@
         "ifFalse": { "link": "resting_x.output" },
         "ifTrue": { "link": "finger_offset.x" }
       },
-      "ui": { "x": 1080, "y": 340 }
+      "ui": { "x": 1147, "y": 374 }
     },
     "card_titles": {
       "type": "loopBuilder",
@@ -497,7 +497,7 @@
       "typeParam": "text",
       "inputCount": 3,
       "inputs": { "item0": "Lemon ricotta pasta", "item1": "Charred corn tacos", "item2": "Miso ramen" },
-      "ui": { "x": 40, "y": 940 }
+      "ui": { "x": 40, "y": 1042 }
     },
     "card_x": {
       "type": "add",
@@ -508,7 +508,7 @@
         "value1": 201,
         "value2": { "link": "card_spring.output" }
       },
-      "ui": { "x": 1600, "y": 190 }
+      "ui": { "x": 1667, "y": 190 }
     },
     "card_y": {
       "type": "transition",
@@ -519,7 +519,7 @@
         "progress": { "link": "depth_spring.output" },
         "start": 440
       },
-      "ui": { "x": 1860, "y": 190 }
+      "ui": { "x": 1927, "y": 190 }
     },
     "cards": {
       "type": "loop",
@@ -532,7 +532,7 @@
       "name": "Cards Gone",
       "typeParam": "number",
       "inputs": { "loop": { "link": "card_gone.on" } },
-      "ui": { "x": 560, "y": 190 }
+      "ui": { "x": 627, "y": 190 }
     },
     "depth_in_deck": {
       "type": "clamp",
@@ -543,7 +543,7 @@
         "min": 0,
         "value": { "link": "card_depth.output" }
       },
-      "ui": { "x": 1340, "y": 40 }
+      "ui": { "x": 1407, "y": 40 }
     },
     "depth_spring": {
       "type": "popAnimation",
@@ -554,19 +554,19 @@
         "number": { "link": "depth_in_deck.output" },
         "speed": 12
       },
-      "ui": { "x": 1600, "y": 40 }
+      "ui": { "x": 1667, "y": 40 }
     },
     "finger_offset": {
       "type": "pointUnpack",
       "name": "Finger Offset",
       "inputs": { "value": { "link": "card_gesture.translation" } },
-      "ui": { "x": 300, "y": 340 }
+      "ui": { "x": 367, "y": 374 }
     },
     "finger_speed": {
       "type": "pointUnpack",
       "name": "Finger Speed",
       "inputs": { "value": { "link": "card_gesture.velocity" } },
-      "ui": { "x": 300, "y": 490 }
+      "ui": { "x": 367, "y": 536 }
     },
     "fly_out_x": {
       "type": "optionPicker",
@@ -578,7 +578,7 @@
         "option0": -600,
         "option1": 600
       },
-      "ui": { "x": 560, "y": 40 }
+      "ui": { "x": 627, "y": 40 }
     },
     "is_top": {
       "type": "equals",
@@ -588,7 +588,7 @@
         "value1": { "link": "cards.index" },
         "value2": { "link": "top_index.output" }
       },
-      "ui": { "x": 1080, "y": 40 }
+      "ui": { "x": 1147, "y": 40 }
     },
     "like_opacity": {
       "type": "progress",
@@ -599,7 +599,7 @@
         "start": 20,
         "value": { "link": "card_spring.output" }
       },
-      "ui": { "x": 1600, "y": 490 }
+      "ui": { "x": 1667, "y": 536 }
     },
     "nope_opacity": {
       "type": "progress",
@@ -610,7 +610,7 @@
         "start": -20,
         "value": { "link": "card_spring.output" }
       },
-      "ui": { "x": 1600, "y": 640 }
+      "ui": { "x": 1667, "y": 742 }
     },
     "resting_x": {
       "type": "ifElse",
@@ -621,13 +621,13 @@
         "ifFalse": 0,
         "ifTrue": { "link": "fly_out_x.output" }
       },
-      "ui": { "x": 820, "y": 40 }
+      "ui": { "x": 887, "y": 40 }
     },
     "tap_start_over": {
       "type": "interaction",
       "name": "Tap Start Over",
       "inputs": { "layer": { "layer": "start_over" } },
-      "ui": { "x": 40, "y": 340 }
+      "ui": { "x": 40, "y": 374 }
     },
     "top_index": {
       "type": "subtract",
@@ -638,7 +638,7 @@
         "value1": 2,
         "value2": { "link": "cards_gone.sum" }
       },
-      "ui": { "x": 820, "y": 190 }
+      "ui": { "x": 887, "y": 190 }
     }
   },
   "comments": []

@@ -7,7 +7,9 @@
  */
 
 import { parseAddress } from "../address.ts";
+import { getOwn } from "../ids.ts";
 import { effectiveKnobLiteral, formatKnobValue, getKnob } from "../knobs.ts";
+import { loopShapes, ONE_ITEM_PER, type LoopShape, type LoopShapes } from "../loopShapes.ts";
 import { patchDisplayName } from "../names.ts";
 import { listInputs, targetAddress, type InputEntry } from "../ops/references.ts";
 import { findLayer, getPatchSpec, interfacePortToPort, resolveLayerOutputs, resolveLayerProps, resolveNodePorts, type ResolvedPort, type ResolvedPorts, type ResolvedProp } from "../registry.ts";
@@ -244,16 +246,44 @@ export function deriveGraph(options: DeriveGraphOptions): GraphModel {
 
   // -- Static loops ---------------------------------------------------------
   const looped = new Set<Id>();
+  // A layer that makes copies loops what reads it (a Drag on a repeated card, a repeated tile's
+  // position), as loopShapes counts its copies. One copy, or none, reads as one layer.
+  let shapes: LoopShapes | undefined;
+  const layerShapes = () => (shapes ??= loopShapes(doc, componentId, registry));
+  const manyItems = (shape: LoopShape | null) => !!shape && (shape.length === null || shape.length > 1);
+  /** The output carries a loop: it's a whole-loop output, its patch runs once per item, or it's read from a layer's copies. */
   const outputIsLoop = (address: string): boolean => {
     const a = parseAddress(address);
+    if (a?.kind === "layer") return manyItems(layerShapes().ofLink(address));
     if (!a || a.kind !== "patch") return false;
     const port = patchPorts.get(a.id)?.outputs.find((p) => p.key === a.key);
     return !!port && (port.wholeLoop === true || looped.has(a.id));
   };
+  const picking = new Set<Id>();
+  /**
+   * What reads the output runs once per item: it carries a loop, unless it's a whole-loop output with
+   * one item per item of an input that gets a single value (ONE_ITEM_PER). That one-item loop runs
+   * what reads it once, and what comes out is a plain value.
+   */
+  const outputFeedsLoop = (address: string): boolean => {
+    if (!outputIsLoop(address)) return false;
+    const a = parseAddress(address);
+    if (a?.kind !== "patch") return true;
+    const node = component.patches[a.id];
+    const picks = node ? getOwn(ONE_ITEM_PER, node.type) : undefined;
+    if (!node || picks === undefined || !patchPorts.get(a.id)?.outputs.find((p) => p.key === a.key)?.wholeLoop) return true;
+    if (picking.has(a.id)) return false;
+    picking.add(a.id);
+    const value = node.inputs[picks];
+    const loop = (isLoopLiteral(value) && value.loop.length !== 1) || (isLinkInput(value) && outputFeedsLoop(stripIndex(value.link)));
+    picking.delete(a.id);
+    return loop;
+  };
   const inputFeedsLoop = (id: Id, key: string, value: InputValue) => {
     const port = patchPorts.get(id)?.inputs.find((p) => p.key === key);
     if (port?.wholeLoop) return false;
-    return isLoopLiteral(value) || (isLinkInput(value) && outputIsLoop(stripIndex(value.link)));
+    if (isLayerInput(value)) return manyItems(layerShapes().ofValue(value, id));
+    return isLoopLiteral(value) || (isLinkInput(value) && outputFeedsLoop(stripIndex(value.link)));
   };
   for (let changed = true, guard = 0; changed && guard <= Object.keys(component.patches).length + 1; guard++) {
     changed = false;
@@ -270,6 +300,7 @@ export function deriveGraph(options: DeriveGraphOptions): GraphModel {
   const visiting = new Set<Id>();
   const outputLength = (address: string): number | null => {
     const a = parseAddress(address);
+    if (a?.kind === "layer") return layerShapes().ofLink(address)?.length ?? null;
     if (!a || a.kind !== "patch") return null;
     const ports = patchPorts.get(a.id);
     const port = ports?.outputs.find((p) => p.key === a.key);
@@ -290,7 +321,7 @@ export function deriveGraph(options: DeriveGraphOptions): GraphModel {
     let length: number | null = 0;
     for (const [key, value] of Object.entries(component.patches[id]?.inputs ?? {})) {
       if (!inputFeedsLoop(id, key, value)) continue;
-      const n = isLoopLiteral(value) ? value.loop.length : isLinkInput(value) ? outputLength(stripIndex(value.link)) : null;
+      const n = isLoopLiteral(value) ? value.loop.length : isLinkInput(value) ? outputLength(stripIndex(value.link)) : isLayerInput(value) ? (layerShapes().count(value.layer) ?? null) : null;
       if (n === null) {
         length = null;
         break;
@@ -533,7 +564,15 @@ export function deriveGraph(options: DeriveGraphOptions): GraphModel {
       .map((p) => toPortModel(p, "in", `@${layerId}.${p.key}`, false));
     const inputs = register([...driven, ...undriven]);
     const readable = [...info.outputs, ...info.props.filter((p) => !info.outputs.some((o) => o.key === p.key))];
-    const outputs = register(readable.filter((p) => readKeys.has(p.key)).map((p) => toPortModel(p, "out", `@${layerId}.${p.key}`, true)));
+    const outputs = register(
+      readable
+        .filter((p) => readKeys.has(p.key))
+        .map((p) => {
+          const model = toPortModel(p, "out", `@${layerId}.${p.key}`, true);
+          if (outputIsLoop(model.address)) model.loop = true;
+          return model;
+        }),
+    );
     for (const o of outputs) outputAddresses.push(o.address);
     const spec = registry.layers.get(info.layer.type);
     const data = {
@@ -610,7 +649,7 @@ export function deriveGraph(options: DeriveGraphOptions): GraphModel {
     const sourceType: ValueType = sourcePort(l.from)?.type ?? "any";
     const targetType: ValueType = targetPort(l.entry)?.type ?? "any";
     const check = canConnect(sourceType, targetType);
-    const data: CableData = { from: l.from, to: l.to, sourceType, targetType, loop: outputIsLoop(l.from) };
+    const data: CableData = { from: l.from, to: l.to, sourceType, targetType, loop: outputFeedsLoop(l.from) };
     if (check.conversion) data.conversion = check.conversion;
     const issue = cableIssues.get(l.to);
     if (issue) {

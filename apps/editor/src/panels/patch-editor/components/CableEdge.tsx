@@ -5,12 +5,12 @@ import { memo, useEffect, useId, useLayoutEffect, useRef, useState, useSyncExter
 import { createPortal } from "react-dom";
 import { portColorVar } from "../../../theme/tokens.ts";
 import { isTruthyState } from "@sonobe/core/graph";
-import { cablePath, cablePoint } from "../model/geometry.ts";
+import { cablePath, cablePoint, isFarZoom } from "../model/geometry.ts";
 import { addressNode, type CableFlowEdge, type FlowNode } from "../model/types.ts";
 import { usePatchEditor, useLiveValue, useUi } from "../state/context.ts";
 import { ORB_INSET, ORB_RADIUS, ORB_SLOTS, ORB_TRAILS, SWEEP_LENGTH, type OrbTone } from "./orb.ts";
 import { createOrbFlight, type OrbEnds } from "./orbFlight.ts";
-import { createOrbQueue, orbRelayFor } from "./orbSchedule.ts";
+import { createOrbQueue, orbBudgetFor, orbRelayFor, staleOrb, type OrbLeg } from "./orbSchedule.ts";
 
 /** How long a cable keeps its orb elements after the last one lands, so a cable that fires now and then doesn't rebuild them each time. */
 const ORB_IDLE_MS = 4000;
@@ -18,6 +18,8 @@ const ORB_IDLE_MS = 4000;
 const nodeOf = (address: string) => addressNode(address)?.nodeId ?? address;
 
 interface OrbProps extends OrbEnds {
+  /** The cable's edge id, whose arrival on the canvas its orbs wait for. */
+  id: string;
   d: string;
   /** The output's address, and the input's. */
   source: string;
@@ -31,16 +33,19 @@ interface OrbProps extends OrbEnds {
 /**
  * A glowing orb that travels the cable from output to input each time a pulse fires or a boolean
  * turns on, and a dimmer one when it turns off; when it gets there, the input's dot flares. A
- * boolean's glow changes with its orb: the cable keeps the glow it had until the orb leaves (the
- * orb may wait for one flying into its node, orbSchedule.ts), and the orb carries the new one along
- * behind it. With reduced motion the whole cable flashes instead, and the glow changes at once.
- * Nothing mounts until the first send, a second or third slot mounts only when orbs overlap, the
- * elements unmount once the cable is idle, and each send replays Web Animations on reused elements
- * (orbFlight.ts), so an orb in flight never re-renders React.
+ * boolean's glow changes with its orb: the cable keeps the glow it had until the orb leaves (it
+ * follows the orb flying into its node a moment behind, orbSchedule.ts), and the orb carries the new
+ * one along behind it. With reduced motion the whole cable flashes instead, and zoomed far out only
+ * the head travels, and only so many at once (FAR_ORB_CAP); either way the glow changes at once. No
+ * orb sets off before its cable has drawn in (appear.ts), and none while the graph waits to show;
+ * one whose cable draws in too long after its change (staleOrb) is dropped. Nothing mounts until
+ * the first send, a second or third slot mounts only when orbs overlap, the elements unmount once
+ * the cable is idle, and each send replays Web Animations on reused elements (orbFlight.ts), so an
+ * orb in flight never re-renders React.
  */
 const Orb = memo(function Orb(props: OrbProps) {
   const { d, tx, ty, source, color, pulse, reduced } = props;
-  const { live } = usePatchEditor();
+  const { live, appear } = usePatchEditor();
   const flow = useStoreApi();
   const gradient = `sb-pe-orb${useId().replace(/[^\w-]/g, "")}`;
   const root = useRef<SVGGElement>(null);
@@ -65,6 +70,8 @@ const Orb = memo(function Orb(props: OrbProps) {
     };
     /** A send waiting for its slot to mount. */
     let unmounted: OrbTone | null = null;
+    /** When the change behind the send waiting in the queue happened. */
+    let waitingSince = 0;
     let idle: ReturnType<typeof setTimeout> | undefined;
     let wait: ReturnType<typeof setTimeout> | undefined;
     /** Unmounted: a send the relay still holds finds nothing to play. */
@@ -119,22 +126,67 @@ const Orb = memo(function Orb(props: OrbProps) {
       }, played.done + ORB_IDLE_MS);
     };
 
-    /** Launch now or once `ready` and the cable's gap allow; returns when it reaches the input. */
-    const schedule = (tone: OrbTone, ready: number): number | null => {
+    /** When the cable is all there, so no orb flies along wire still drawing in; Infinity while the graph waits to show. */
+    const shownAt = () => appear.readyAt("cable", latest.current.id);
+
+    /**
+     * The waiting send is due. The graph may have started arriving again since it was offered (another
+     * document), so it waits on for the cable to draw in, or is dropped while the graph waits to show.
+     */
+    const due = () => {
+      const now = performance.now();
+      const shown = shownAt();
+      if (shown === Infinity || staleOrb(waitingSince, shown)) {
+        queue.clear();
+        return release();
+      }
+      if (shown > now) {
+        wait = setTimeout(due, shown - now);
+        return;
+      }
+      const next = queue.take(now);
+      if (next) launch(next);
+    };
+
+    /** Launch now or once `ready` and the cable's gap allow; returns when it leaves and reaches the input. */
+    const schedule = (tone: OrbTone, ready: number, event: number): OrbLeg | null => {
       const now = performance.now();
       const p = latest.current;
       const go = stopped ? null : queue.offer(now, tone, { ready, hold: !p.pulse });
       if (!go) return null;
+      // A new flight (not a change joining the one waiting) needs room zoomed far out.
+      const flies = go.timer || go.at <= now;
+      if (flies && !p.reduced && !orbBudgetFor(live).take(now, go.at + flight.arrival(tone, p), isFarZoom(flow.getState().transform[2]))) {
+        if (go.timer) queue.clear();
+        release();
+        return null;
+      }
+      if (go.at > now) waitingSince = event;
       if (go.timer) {
         // Mount now, so the elements are ready when it leaves.
         clearTimeout(idle);
         setSlots((n) => Math.max(n, 1));
-        wait = setTimeout(() => {
-          const next = queue.take(performance.now());
-          if (next) launch(next);
-        }, go.at - now);
+        wait = setTimeout(due, go.at - now);
       } else if (go.at <= now) launch(tone);
-      return p.reduced ? null : go.at + flight.arrival(tone, p);
+      return p.reduced ? null : { leave: go.at, arrive: go.at + flight.arrival(tone, p) };
+    };
+
+    /**
+     * Send an orb once the cable is there, following the one into its node (or, with reduced motion,
+     * flash). False when nobody would see it: the graph waits to show, or the cable draws in too long
+     * after the change.
+     */
+    const send = (tone: OrbTone): boolean => {
+      const p = latest.current;
+      const now = performance.now();
+      const shown = shownAt();
+      if (stopped || shown === Infinity || staleOrb(now, shown)) return false;
+      if (p.reduced) {
+        schedule(tone, shown, now);
+        return true;
+      }
+      orbRelayFor(live).send({ from: nodeOf(p.source), to: nodeOf(p.target), event: now, launch: (ready) => schedule(tone, Math.max(ready, shown), now) });
+      return true;
     };
 
     return {
@@ -143,15 +195,17 @@ const Orb = memo(function Orb(props: OrbProps) {
         return () => void listeners.delete(cb);
       },
       slots: () => slots,
-      send(tone: OrbTone) {
+      send,
+      /**
+       * A boolean changed from `before`: send its orb, and hold the glow it had until the orb carries
+       * the change. Zoomed far out, where only the head travels, the glow changes at once.
+       */
+      flip(before: boolean, tone: OrbTone) {
         const p = latest.current;
-        const now = performance.now();
-        if (p.reduced) return void schedule(tone, now);
-        orbRelayFor(live).send({ from: nodeOf(p.source), to: nodeOf(p.target), event: now, launch: (ready) => schedule(tone, ready) });
-      },
-      /** A boolean changed from `before`: hold the glow it had until its orb carries the change. */
-      change(before: boolean) {
-        if (stopped || latest.current.reduced) return;
+        const hold = !p.reduced && !isFarZoom(flow.getState().transform[2]);
+        // No orb to carry the change: the cable takes it now.
+        if (!send(tone)) return release();
+        if (!hold) return;
         if (held === null) held = after = before;
         setSlots((n) => Math.max(n, 1));
         showHold();
@@ -199,10 +253,7 @@ const Orb = memo(function Orb(props: OrbProps) {
         return orb.release();
       }
       const next = isTruthyState(value);
-      if (known && next !== on) {
-        orb.change(on);
-        orb.send(next ? "full" : "dim");
-      }
+      if (known && next !== on) orb.flip(on, next ? "full" : "dim");
       known = true;
       on = next;
     });
@@ -303,7 +354,7 @@ export const CableEdgeView = memo(function CableEdgeView({ id, sourceX, sourceY,
       {(live || selected || splicing) && <path className="sb-pe-cable__glow" d={d} />}
       <path className="sb-pe-cable__wire" d={d} />
       <path className="sb-pe-cable__hit react-flow__edge-interaction" d={d} />
-      {stateSource && <Orb d={d} sx={sourceX} sy={sourceY} tx={targetX} ty={targetY} source={stateSource} target={data.to} color={data.invalid ? "var(--danger)" : portColorVar(data.sourceType)} pulse={data.sourceType === "pulse"} reduced={reducedMotion} />}
+      {stateSource && <Orb id={id} d={d} sx={sourceX} sy={sourceY} tx={targetX} ty={targetY} source={stateSource} target={data.to} color={data.invalid ? "var(--danger)" : portColorVar(data.sourceType)} pulse={data.sourceType === "pulse"} reduced={reducedMotion} />}
       {glyph && (
         <g className="sb-pe-cable__glyph" data-kind={glyph} transform={`translate(${mx} ${my})`}>
           <title>{data.invalid ?? `Converted: ${data.conversion}`}</title>

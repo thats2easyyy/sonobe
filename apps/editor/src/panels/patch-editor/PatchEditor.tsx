@@ -133,10 +133,6 @@ const SETTLE_FRAMES = 40;
 const MOVE_MS = 600;
 /** How long graph.bounds waits at most for nodes and cables to finish appearing. */
 const APPEAR_WAIT_MS = 1200;
-/** A first fit slower than this shows the loading placeholder. */
-const LOADING_DELAY_MS = 250;
-/** The placeholder's crossfade out as the graph arrives. */
-const LOADING_LEAVE_MS = 300;
 
 /** The next frame, or a moment later in a window that doesn't paint (hidden windows may not run requestAnimationFrame). */
 const nextFrame = () => new Promise<void>((resolve) => {
@@ -158,6 +154,7 @@ export function PatchEditor({ session: provided, showBreadcrumbs = true, showToo
   const session = provided ?? fallback;
   const componentId = useStore(session.selection, currentComponentId);
   const cmds = useOptionalCommands();
+  const [arrivals] = useState<Arrivals>(() => ({ revealed: false, replaced: false }));
   return (
     <section
       className={cx("sb-pe", className)}
@@ -168,15 +165,28 @@ export function PatchEditor({ session: provided, showBreadcrumbs = true, showToo
       onPointerDownCapture={() => session.selection.getState().setFocusedPanel("patchEditor")}
     >
       <ReactFlowProvider key={componentId}>
-        <Canvas session={session} componentId={componentId} showBreadcrumbs={showBreadcrumbs} showToolbar={showToolbar} toolbarContainer={toolbarContainer} defaultMinimap={defaultMinimap} commands={commands} />
+        <Canvas session={session} componentId={componentId} arrivals={arrivals} showBreadcrumbs={showBreadcrumbs} showToolbar={showToolbar} toolbarContainer={toolbarContainer} defaultMinimap={defaultMinimap} commands={commands} />
       </ReactFlowProvider>
     </section>
   );
 }
 
+/**
+ * What an editor's canvases (one per component shown) tell each other about arriving graphs: a
+ * canvas that mounts once one has revealed its graph arrives by navigation (entering or leaving a
+ * component), briefly, unless a replaced document is still waiting for its reveal.
+ */
+interface Arrivals {
+  /** A canvas of this editor revealed its graph. */
+  revealed: boolean;
+  /** Another document replaced the one shown, and its graph hasn't been revealed yet. */
+  replaced: boolean;
+}
+
 interface CanvasProps {
   session: EditorSession;
   componentId: Id;
+  arrivals: Arrivals;
   showBreadcrumbs: boolean;
   showToolbar: boolean;
   /** undefined: float in the top bar. */
@@ -218,7 +228,7 @@ function clientPoint(event: MouseEvent | TouchEvent | ReactMouseEvent): XY {
 /** A string that changes only when the live scope does, so the context value stays stable across edits. */
 const scopeKey = (scope: LiveScope) => `${scope.prefix ?? "∅"}|${scope.steps.map((s) => `${s.parent}>${s.component}:${s.instance}:${s.instances.map((i) => `${i.id}=${i.name}`).join(",")}`).join(";")}`;
 
-function Canvas({ session, componentId, showBreadcrumbs, showToolbar, toolbarContainer, defaultMinimap, commands }: CanvasProps) {
+function Canvas({ session, componentId, arrivals, showBreadcrumbs, showToolbar, toolbarContainer, defaultMinimap, commands }: CanvasProps) {
   const registry = session.registry;
   const flow = useReactFlow<FlowNode, CableFlowEdge>();
   const flowRef = useRef<Flow>(flow);
@@ -230,7 +240,7 @@ function Canvas({ session, componentId, showBreadcrumbs, showToolbar, toolbarCon
   const bridge = patchEditorBridge(session);
   const reducedMotion = useReducedMotion();
   const reducedMotionRef = useLatest(reducedMotion);
-  const [appear] = useState(() => createAppearStore({ reducedMotion: () => reducedMotionRef.current }));
+  const [appear] = useState(() => createAppearStore({ reducedMotion: () => reducedMotionRef.current, brief: arrivals.revealed && !arrivals.replaced }));
   const pointerRef = useRef<XY | null>(null);
   const hoveringRef = useRef(false);
   const mountedRef = useRef(true);
@@ -368,8 +378,8 @@ function Canvas({ session, componentId, showBreadcrumbs, showToolbar, toolbarCon
   const openPortMenu = useCallback((event: ReactMouseEvent, nodeId: string, port: PortModel) => portMenuRef.current(event, nodeId, port), []);
 
   const context = useMemo<PatchEditorContextValue>(
-    () => ({ session, registry, componentId, ui, live, geometry, actions, reducedMotion, liveEnabled, liveScope, instanceCopies, markViewportManual, openPortMenu }),
-    [session, registry, componentId, ui, live, geometry, actions, reducedMotion, liveEnabled, liveScope, instanceCopies, markViewportManual, openPortMenu],
+    () => ({ session, registry, componentId, ui, live, geometry, appear, actions, reducedMotion, liveEnabled, liveScope, instanceCopies, markViewportManual, openPortMenu }),
+    [session, registry, componentId, ui, live, geometry, appear, actions, reducedMotion, liveEnabled, liveScope, instanceCopies, markViewportManual, openPortMenu],
   );
 
   // -- React Flow node state ------------------------------------------------
@@ -407,7 +417,9 @@ function Canvas({ session, componentId, showBreadcrumbs, showToolbar, toolbarCon
       const height = n?.measured?.height ?? n?.height;
       return width && height ? { width, height } : undefined;
     });
-  }, [appear, fitted]);
+    arrivals.revealed = true;
+    arrivals.replaced = false;
+  }, [appear, fitted, arrivals]);
 
   const autoFit = useCallback((): boolean => {
     const el = wrapperRef.current;
@@ -447,6 +459,8 @@ function Canvas({ session, componentId, showBreadcrumbs, showToolbar, toolbarCon
         const change = s.lastChange;
         if (!change || change === previous.lastChange || change.kind !== "replace") return;
         fitModeRef.current = true;
+        // If the new document takes this component away, the canvas that shows its root reveals it in full.
+        arrivals.replaced = true;
         appear.reset();
         setFitted(false);
         requestAnimationFrame(() =>
@@ -457,7 +471,7 @@ function Canvas({ session, componentId, showBreadcrumbs, showToolbar, toolbarCon
           }),
         );
       }),
-    [session, autoFit, appear],
+    [session, autoFit, appear, arrivals],
   );
 
   useEffect(() => {
@@ -1328,7 +1342,6 @@ function Canvas({ session, componentId, showBreadcrumbs, showToolbar, toolbarCon
           )}
         </ReactFlow>
         <KnifeOverlay ui={ui} />
-        <LoadingPlaceholder loading={!fitted && !empty} />
         <div className="sb-pe-topbar" data-scrim={(showToolbar && toolbarContainer === undefined) || undefined}>
           {showBreadcrumbs && <PatchEditorBreadcrumbs session={session} className="sb-pe-crumbs--overlay" />}
           <LiveScopeChip />
@@ -1367,79 +1380,6 @@ function KnifeOverlay({ ui }: { ui: UiStore }) {
       <polyline points={points} />
       <circle cx={last[0]} cy={last[1]} r={3} />
     </svg>
-  );
-}
-
-/**
- * The loading placeholder's skeleton graph in a 464 × 176 box: nodes (left, top, and their port rows,
- * "i" an input and "o" an output) drawn 124 wide, rows 18 px apart below a 28 px header, and cables
- * from an output row of one node to an input row of another. patch-editor.css draws the same sizes.
- */
-const SKELETON_NODES = [
-  { x: 0, y: 14, rows: "io" },
-  { x: 0, y: 104, rows: "io" },
-  { x: 170, y: 44, rows: "iio" },
-  { x: 340, y: 0, rows: "io" },
-  { x: 340, y: 104, rows: "io" },
-] as const;
-/** [from node, its output row, to node, its input row] */
-const SKELETON_LINKS = [
-  [0, 1, 2, 0],
-  [1, 1, 2, 1],
-  [2, 2, 3, 0],
-  [2, 2, 4, 0],
-] as const;
-const skeletonRowY = (node: (typeof SKELETON_NODES)[number], row: number) => node.y + 28 + 18 * row + 9;
-const SKELETON_CABLES = SKELETON_LINKS.map(([from, out, to, input]) => {
-  const a = SKELETON_NODES[from];
-  const b = SKELETON_NODES[to];
-  const [x1, y1, x2, y2] = [a.x + 124, skeletonRowY(a, out), b.x, skeletonRowY(b, input)];
-  const mid = (x1 + x2) / 2;
-  return `M ${x1} ${y1} C ${mid} ${y1} ${mid} ${y2} ${x2} ${y2}`;
-});
-/** A placeholder timer this late means the page was busy (a big graph mounting), and the fit usually follows at once. */
-const LOADING_LATE_MS = 100;
-
-/**
- * Skeleton nodes on the empty canvas when the first fit waits longer than LOADING_DELAY_MS on an idle
- * page (a hidden or collapsed canvas, a window that isn't painting). They fade out as the graph
- * arrives; a fast load never shows them, and a load that keeps the page busy until its fit doesn't either.
- */
-function LoadingPlaceholder({ loading }: { loading: boolean }) {
-  const [phase, setPhase] = useState<"hidden" | "shown" | "leaving">("hidden");
-  useEffect(() => {
-    if (loading) {
-      let timer: ReturnType<typeof setTimeout>;
-      const arm = () => {
-        const due = performance.now() + LOADING_DELAY_MS;
-        timer = setTimeout(() => {
-          if (performance.now() - due > LOADING_LATE_MS) arm();
-          else setPhase("shown");
-        }, LOADING_DELAY_MS);
-      };
-      arm();
-      return () => clearTimeout(timer);
-    }
-    setPhase((p) => (p === "shown" ? "leaving" : "hidden"));
-    const timer = setTimeout(() => setPhase("hidden"), LOADING_LEAVE_MS);
-    return () => clearTimeout(timer);
-  }, [loading]);
-  if (phase === "hidden") return null;
-  return (
-    <div className="sb-pe-loading" data-leaving={phase === "leaving" || undefined} role="status" aria-label="Loading patches">
-      <svg className="sb-pe-loading__cables" viewBox="0 0 464 176" aria-hidden>
-        {SKELETON_CABLES.map((d) => (
-          <path key={d} d={d} />
-        ))}
-      </svg>
-      {SKELETON_NODES.map((n, i) => (
-        <div key={i} className="sb-pe-loading__node" style={{ left: n.x, top: n.y, "--sb-rows": n.rows.length, "--sb-col": n.x / 170 } as CSSProperties} aria-hidden>
-          {[...n.rows].map((kind, row) => (
-            <span key={row} className="sb-pe-loading__row" data-out={kind === "o" || undefined} />
-          ))}
-        </div>
-      ))}
-    </div>
   );
 }
 

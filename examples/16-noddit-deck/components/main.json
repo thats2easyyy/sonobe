@@ -1112,7 +1112,7 @@
       "name": "Card Above: Gone Last Frame",
       "typeParam": "boolean",
       "inputs": { "value": { "link": "card_above_gone.output" } },
-      "ui": { "x": 579, "y": 1650 }
+      "ui": { "x": 586, "y": 1650 }
     },
     "card_above_lift": {
       "type": "loopSelect",
@@ -1124,14 +1124,14 @@
         "loop": { "link": "swipe_card.lift" },
         "outOfRange": "fallback"
       },
-      "ui": { "x": 288, "y": 1802 }
+      "ui": { "x": 292, "y": 1802 }
     },
     "card_above_lift_last_frame": {
       "type": "delay1",
       "name": "Card Above: Lift Last Frame",
       "typeParam": "number",
       "inputs": { "value": { "link": "card_above_lift.output" } },
-      "ui": { "x": 579, "y": 1802 }
+      "ui": { "x": 586, "y": 1802 }
     },
     "card_above_offset": {
       "type": "loopSelect",
@@ -1150,7 +1150,7 @@
       "name": "Card Above: Offset Last Frame",
       "typeParam": "point",
       "inputs": { "value": { "link": "card_above_offset.output" } },
-      "ui": { "x": 579, "y": 1954 }
+      "ui": { "x": 586, "y": 1954 }
     },
     "deck_empty_fade": {
       "type": "popAnimation",
@@ -1383,7 +1383,7 @@
     {
       "id": "section_card_above",
       "text": "THE CARD ABOVE · each copy reads copy index − 1, one frame late · the top card has none, so Fallback says it's gone and fully lifted",
-      "rect": [0, 1606, 897, 492],
+      "rect": [0, 1606, 911, 492],
       "color": "purple"
     },
     {
