@@ -211,8 +211,9 @@ export async function runRelay(options: RelayOptions): Promise<number> {
   const inflight = new Map<string | number, AbortController>();
   const pending = new Set<Promise<void>>();
 
-  // Which session this is (Connect Claude lists it): a hello once the client names itself, a
-  // heartbeat, and a goodbye when stdin closes. Older apps don't have /clients; relaying goes on.
+  // Which session this is (Connect Claude lists it): a hello on the client's first message and again
+  // once it names itself, a heartbeat, and a goodbye at the end. Older apps don't have /clients;
+  // relaying goes on.
   const clientId = (options.randomId ?? randomUUID)();
   const folder = sessionFolder(options.env ?? {}, options.cwd);
   let clientInfo: Pick<McpClientHello, "name" | "title" | "version"> = {};

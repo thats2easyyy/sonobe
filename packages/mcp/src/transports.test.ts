@@ -255,6 +255,7 @@ describe("createHttpHandler: sessions", () => {
       ["Tuning the deck", "/Users/me/noddit"],
       ["Adding a tab bar", "/Users/me/sonobe"],
     ]);
+    expect(await callAs(A, "get_document_info")).toContain("Working: Claude (Claude Code in /Users/me/noddit) — Tuning the deck; Claude (Claude Code in /Users/me/sonobe) — Adding a tab bar");
     await callAs(A, "finish_work");
     expect((await sessions.host.presence()).map((w) => w.intent)).toEqual(["Adding a tab bar"]);
     await callAs(B, "finish_work");
