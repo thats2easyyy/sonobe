@@ -5,11 +5,19 @@
   background: var(--bg-elevated);
 }
 
+/* Rows: header, body, footer. The scanner shares the body's cell, so it never changes the dialog's size. */
 .sb-import {
-  display: flex;
-  flex-direction: column;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr);
   min-height: 0;
   max-height: inherit;
+}
+
+.sb-import__body,
+.sb-import__scan {
+  grid-row: 2;
+  grid-column: 1;
 }
 
 .sb-import__header {
@@ -279,6 +287,75 @@
 
 .sb-import__status {
   flex: 1 1 auto;
-  color: var(--text-secondary);
-  font-size: var(--font-size-sm);
+}
+
+/* The scan phase: the hologram scanner and the progress, over the form while a page is captured. */
+.sb-import__scan {
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-8);
+  min-width: 0;
+  min-height: 0;
+  padding: var(--space-7);
+  background: var(--bg-elevated);
+  opacity: 0;
+  pointer-events: none;
+  /* Its content never sizes the row: the form does. */
+  contain: size;
+  transition: opacity 160ms var(--ease-out);
+}
+
+.sb-import__scan[data-active] {
+  opacity: 1;
+  pointer-events: auto;
+  transition-duration: 200ms;
+}
+
+.sb-holo-scan {
+  flex: none;
+  animation: sb-holo-scan-in 320ms var(--ease-out);
+}
+
+@keyframes sb-holo-scan-in {
+  from {
+    opacity: 0;
+    transform: scale(0.96);
+  }
+}
+
+.sb-import__scan-text {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  width: 200px;
+  min-width: 0;
+}
+
+.sb-import__scan-status {
+  color: var(--text-primary);
+  font-size: var(--font-size-md);
+  font-weight: var(--font-weight-medium);
+  line-height: 1.35;
+  text-wrap: pretty;
+}
+
+.sb-import__scan-meta {
+  overflow: hidden;
+  color: var(--text-tertiary);
+  font-size: var(--font-size-xs);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sb-holo-scan {
+    animation: none;
+  }
+}
+
+:root[data-reduced-motion="true"] .sb-holo-scan,
+:root[data-motion="reduce"] .sb-holo-scan {
+  animation: none;
 }

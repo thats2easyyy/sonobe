@@ -33,6 +33,7 @@ import { useLatest } from "../../ui/lib/hooks.ts";
 import { readString, writeString } from "../../ui/lib/storage.ts";
 import { useElementSize } from "../../ui/lib/useElementSize.ts";
 import { rectOfElement } from "../../state/bounds.ts";
+import { HologramBuild } from "../import/HologramBuild.tsx";
 import { patchEditorBridge } from "../patch-editor/api.ts";
 import { registerBoundsProvider } from "../viewer/hostBridge.ts";
 import { dragHasFiles, dropLabel, dropUndoLabel, mediaLayerOps, prepareDroppedFiles, type DroppedFile } from "./assetDrop.ts";
@@ -1090,6 +1091,7 @@ export function CanvasPanel({ session: sessionProp, sceneSource, onSceneSourceCh
                 {live && <span className="sb-cv__label-live">Live frame</span>}
               </div>
               <ArtboardRenderer session={session} scene={scene} viewport={viewport} size={size} rendererRef={rendererRef} />
+              <HologramBuild session={session} componentId={componentId} index={index} viewport={viewport} width={box.width} height={box.height} />
               {component.layers.length === 0 && (
                 <div className="sb-cv__hint" style={{ left: Math.round(viewport.x + (size[0] * viewport.zoom) / 2), top: Math.round(viewport.y + (size[1] * viewport.zoom) / 2) }}>
                   Draw a rectangle (R), an oval (O), or text (T)
