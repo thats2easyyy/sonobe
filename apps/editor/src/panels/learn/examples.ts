@@ -1,6 +1,6 @@
 /**
  * Example projects bundled at build time from examples/<name>/ (project.json, knobs.json, components,
- * scripts and the asset registry via import.meta.glob ?raw, and asset files such as photos as URLs).
+ * scripts and the asset registry via import.meta.glob ?raw, and asset files such as photos on demand).
  * "Try it" buttons appear only when examples exist; opening one replaces the document with an unsaved
  * copy whose asset files the host holds, so they show right away and are written on the first save.
  */
@@ -22,8 +22,12 @@ const EXAMPLE_FILES = import.meta.glob(
   { query: "?raw", import: "default", eager: true },
 ) as Record<string, string>;
 
-/** Asset files (examples/<name>/assets/<sha256>.<ext>) as bundled URLs, fetched when an example opens. */
-const EXAMPLE_ASSET_URLS = import.meta.glob(["../../../../../examples/*/assets/*", "!../../../../../examples/*/assets/assets.json"], { query: "?url", import: "default", eager: true }) as Record<string, string>;
+/**
+ * Asset files (examples/<name>/assets/<sha256>.<ext>), each loaded as a data: URL when an example
+ * opens. Data URLs rather than file URLs, because fetch() can't read the file:// URLs the desktop app
+ * loads the editor from.
+ */
+const EXAMPLE_ASSET_FILES = import.meta.glob(["../../../../../examples/*/assets/*", "!../../../../../examples/*/assets/assets.json"], { query: "?inline", import: "default" }) as Record<string, () => Promise<string>>;
 
 export interface ExampleProject {
   /** Folder name without ".sonobe". */
@@ -37,8 +41,8 @@ export interface ExampleProject {
   guides: string[];
   /** Document files keyed by project-relative path. */
   files: Record<string, string>;
-  /** Where each bundled asset file loads from, by file name under assets/. */
-  assetUrls: Record<string, string>;
+  /** Loads each bundled asset file as a URL fetch() can read, by file name under assets/. */
+  assets: Record<string, () => Promise<string>>;
 }
 
 const record = (value: unknown): Record<string, unknown> => (value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : {});
@@ -53,8 +57,8 @@ function parseJson(text: string | undefined): unknown {
 }
 
 /** Group globbed paths (".../examples/<folder>/<path>") by folder. */
-function byExampleFolder(files: Record<string, string>): Map<string, Record<string, string>> {
-  const byFolder = new Map<string, Record<string, string>>();
+function byExampleFolder<T>(files: Record<string, T>): Map<string, Record<string, T>> {
+  const byFolder = new Map<string, Record<string, T>>();
   for (const [path, text] of Object.entries(files)) {
     const match = /(?:^|\/)examples\/([^/]+)\/(.+)$/.exec(path);
     if (!match) continue;
@@ -67,12 +71,12 @@ function byExampleFolder(files: Record<string, string>): Map<string, Record<stri
 }
 
 /**
- * Group globbed files (".../examples/<folder>/<path>") into example projects, with the URLs of their
+ * Group globbed files (".../examples/<folder>/<path>") into example projects, with loaders for their
  * asset files (".../examples/<folder>/assets/<file>"). Folders without project.json are skipped.
  */
-export function groupExampleFiles(files: Record<string, string>, assetUrls: Record<string, string> = {}): ExampleProject[] {
+export function groupExampleFiles(files: Record<string, string>, assets: Record<string, () => Promise<string>> = {}): ExampleProject[] {
   const byFolder = byExampleFolder(files);
-  const assetsByFolder = byExampleFolder(assetUrls);
+  const assetsByFolder = byExampleFolder(assets);
   const out: ExampleProject[] = [];
   for (const [folder, projectFiles] of byFolder) {
     const project = parseJson(projectFiles["project.json"]);
@@ -98,7 +102,7 @@ export function groupExampleFiles(files: Record<string, string>, assetUrls: Reco
       patchTypes: [...types].sort(),
       guides: Array.isArray(meta.guides) ? meta.guides.filter((g): g is string => typeof g === "string") : [],
       files: projectFiles,
-      assetUrls: Object.fromEntries(Object.entries(assetsByFolder.get(folder) ?? {}).map(([rel, url]) => [rel.replace(/^assets\//, ""), url])),
+      assets: Object.fromEntries(Object.entries(assetsByFolder.get(folder) ?? {}).map(([rel, load]) => [rel.replace(/^assets\//, ""), load])),
     });
   }
   return out.sort((a, b) => a.name.localeCompare(b.name));
@@ -135,10 +139,10 @@ export interface OpenExampleResult {
 
 /** The bytes of the example's asset files that the document uses, by file name. */
 async function fetchExampleAssets(example: ExampleProject, doc: SonobeDocument): Promise<Map<string, ArrayBuffer>> {
-  const files = [...new Set(Object.values(doc.assets).map((a) => a.file))].filter((file) => example.assetUrls[file]);
+  const files = [...new Set(Object.values(doc.assets).map((a) => a.file))].filter((file) => example.assets[file]);
   const loaded = await Promise.all(
     files.map(async (file) => {
-      const response = await fetch(example.assetUrls[file]!);
+      const response = await fetch(await example.assets[file]!());
       if (!response.ok) throw new Error(`Its file assets/${file} didn't load (${response.status}).`);
       return [file, await response.arrayBuffer()] as const;
     }),
@@ -174,6 +178,6 @@ let examples: ExampleProject[] | undefined;
 
 /** The bundled examples (empty when the repo has none). */
 export function getExamples(): ExampleProject[] {
-  examples ??= groupExampleFiles(EXAMPLE_FILES, EXAMPLE_ASSET_URLS);
+  examples ??= groupExampleFiles(EXAMPLE_FILES, EXAMPLE_ASSET_FILES);
   return examples;
 }
