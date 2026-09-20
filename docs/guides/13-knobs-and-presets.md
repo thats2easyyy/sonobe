@@ -12,7 +12,7 @@ Level 2–4 · Back to [the learning path](README.md)
 
 A spring's bounciness, how far a card travels before a swipe counts, how much it tilts: these numbers live on patch inputs, spread across the graph. When you're tuning the feel, you don't want to hunt for them. You want them in one place, with sliders.
 
-A **knob** is a named value in the Inspector's **Knobs** tab (⌘5). Any patch input or layer property can read it. Wherever a knob drives an input, the patch editor shows a small chip with the knob's name and value instead of a cable.
+A **knob** is a named value in the Inspector's **Knobs** tab (⌘5). Any patch input or layer property can read it. Wherever a knob drives an input, the patch editor shows a small chip with the knob's name and value (a color knob shows a swatch) instead of a cable.
 
 A **preset** is a full set of knob values. A project can have several, like "Shipped app" and "Proposal", and one of them runs. Switching presets changes the prototype live: the card you're dragging stays under your finger and picks up the new values mid-gesture.
 
@@ -39,7 +39,7 @@ The field now shows the knob's chip and a slider. The knob holds the field's val
 
 Make Knob works on numbers, on/off switches, colors, choices, points and text. With several layers selected, one knob drives all of them.
 
-To drive another field with a knob you already have, right-click it and choose **Use Knob ▸**. Only knobs whose type fits are listed.
+To drive another field with a knob you already have, right-click it and choose **Use Knob ▸**. Only knobs whose type fits are listed. On a field a knob already drives, Use Knob ▸ switches it to another knob in one undo step.
 
 ## Tune in the Knobs tab
 

@@ -129,6 +129,43 @@ test.describe("Knobs", () => {
     expect(Math.abs(sizes.estimate.width - sizes.dom.width), JSON.stringify(sizes)).toBeLessThanOrEqual(3);
     expect(sizes.estimate.height).toBe(sizes.dom.height);
 
+    // A color knob's chip shows a swatch of its running color, not the hex, at the estimate's width.
+    // Placed under the spring, which is on screen.
+    const tinted = await hook(page, (s) => {
+      const spring = s.doc().components[s.doc().project.root]!.patches.zoom_spring!.ui;
+      return s.apply(
+        [
+          { op: "addKnob", knob: { id: "accent_tint", name: "Accent Tint", type: "color", value: "#FF375FFF" } },
+          { op: "addPatch", patch: { id: "tint_hex", type: "colorToHex", inputs: { color: { link: "$knob.accent_tint" } }, ui: { x: spring.x, y: spring.y + 220 } } },
+        ],
+        "Color knob",
+      );
+    });
+    expect(tinted.ok).toBe(true);
+    const colorChip = flowNode(page, "tint_hex").locator(".sb-pe-value--knob");
+    await expect(colorChip).toContainText("Accent Tint");
+    await expect(colorChip).not.toContainText("FF375F");
+    await expect(colorChip.locator(".sb-pe-swatch > span")).toHaveCSS("background-color", "rgb(255, 55, 95)");
+    await expect(colorChip).toHaveAttribute("aria-label", "Knob Accent Tint, #FF375F. Show it in Knobs");
+    // The estimate counts the output's live value, so wait for the node to draw it.
+    await expect(flowNode(page, "tint_hex").locator(".sb-pe-port__live").first()).toContainText("FF375F");
+    const colorSizes = await page.evaluate(
+      async ({ core }) => {
+        const s = window.__sonobe!;
+        const graph = await import(/* @vite-ignore */ core);
+        const { nodeTextMeasurer } = await import(/* @vite-ignore */ "/src/panels/patch-editor/model/measure.ts");
+        const doc = s.doc();
+        const model = graph.deriveGraph({ doc, componentId: doc.project.root, registry: s.session.registry });
+        const data = model.nodes.find((n: { id: string }) => n.id === "tint_hex")!.data;
+        const el = document.querySelector<HTMLElement>('.sb-pe .react-flow__node[data-id="tint_hex"]')!;
+        const estimate = graph.estimateNodeSize(data, { measure: nodeTextMeasurer(), live: (address: string) => s.session.runtime.runtime.getRawValue(address) });
+        return { dom: { width: el.offsetWidth, height: el.offsetHeight }, estimate };
+      },
+      { core: `/@fs${path.join(repo, "packages/core/src/graph/index.ts")}` },
+    );
+    expect(Math.abs(colorSizes.estimate.width - colorSizes.dom.width), JSON.stringify(colorSizes)).toBeLessThanOrEqual(3);
+    expect(colorSizes.estimate.height).toBe(colorSizes.dom.height);
+
     // Clicking the chip shows the knob in the Inspector's Knobs tab.
     await chip.click();
     await expect(page.getByRole("tab", { name: /Knobs/ })).toHaveAttribute("aria-selected", "true");

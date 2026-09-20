@@ -1,5 +1,13 @@
-import { expect, test } from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
 import { collectConsoleProblems, fitPatches, flowNode, hook, openEditor, screenshot } from "./helpers.ts";
+
+/** Press the prototype where a viewer element is (the device content layer takes the pointer, not the element). */
+async function pressInViewer(page: Page, selector: string): Promise<void> {
+  const target = page.locator(`#sb-viewer ${selector}`).first();
+  await expect(target).toBeVisible();
+  const box = (await target.boundingBox())!;
+  await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+}
 
 test.describe("one watched loop copy across the patch editor and the inspector", () => {
   test("a port's loop table sets the watched copy, the chip steps it, and the inspector reads the same copy", async ({ page }) => {
@@ -99,6 +107,76 @@ test.describe("one watched loop copy across the patch editor and the inspector",
     await chip.getByRole("button", { name: "Watch the next copy" }).click();
     await expect(order).toHaveText("1");
     await expect(page.getByRole("button", { name: /^Live values from List Row #1/ })).toBeVisible();
+
+    // A press in the viewer inside one copy of the instance watches that copy.
+    await pressInViewer(page, '[data-key="list_row#2/row_bg"]');
+    await expect(chip).toContainText("Copy #2 of 3");
+    await expect(order).toHaveText("2");
+    expect(problems).toEqual([]);
+  });
+
+  test("a press in the viewer on one copy of a looped layer watches that copy", async ({ page }) => {
+    const problems = collectConsoleProblems(page);
+    await openEditor(page);
+    const applied = await hook(page, (s) =>
+      s.apply(
+        [
+          { op: "addPatch", patch: { id: "dot_rows", type: "loop", name: "Dot Rows", inputs: { count: 3 }, ui: { x: 40, y: 1200 } } },
+          { op: "addPatch", patch: { id: "dot_grid", type: "gridLayout", inputs: { index: { link: "dot_rows.index" }, columns: 3, origin: [40, 700], width: 320, itemHeight: 40 }, ui: { x: 300, y: 1200 } } },
+          { op: "addLayer", layer: { id: "dots", type: "oval", name: "Dots", props: { position: { link: "dot_grid.position" }, size: [24, 24], color: "#FF6F91FF" } } },
+        ],
+        "Add dots",
+      ),
+    );
+    expect(applied.ok).toBe(true);
+    await fitPatches(page);
+    const chip = page.getByRole("group", { name: "Watched loop copy" });
+    await expect(chip).toContainText("3 copies");
+    await pressInViewer(page, '[data-key="dots#2"]');
+    await expect(chip).toContainText("Copy #2 of 3");
+    const index = flowNode(page, "dot_rows").locator(".sb-pe-port--out").filter({ hasText: "Index" });
+    await expect(index.locator(".sb-pe-port__live")).toHaveText("#2 2");
+    await pressInViewer(page, '[data-key="dots#0"]');
+    await expect(chip).toContainText("Copy #0 of 3");
+    // A press on a layer that isn't a copy leaves the watched copy alone.
+    await pressInViewer(page, '[data-layer="photo"]');
+    await expect(chip).toContainText("Copy #0 of 3");
+    await screenshot(page, "watched-copy-04-viewer-press");
+    expect(problems).toEqual([]);
+  });
+
+  test("inside a looped component patch, the live scope lists its copies and the watched copy picks one", async ({ page }) => {
+    const problems = collectConsoleProblems(page);
+    await openEditor(page);
+    const applied = await hook(page, (s) =>
+      s.apply(
+        [
+          { op: "addComponent", component: { id: "echo", name: "Echo", kind: "patchComponent" } },
+          { op: "updateInterface", component: "echo", inputs: { value: { name: "Value", type: "number" } } },
+          { op: "addPatch", component: "echo", patch: { id: "echo_value", type: "splitter", typeParam: "number", name: "Echo Value", inputs: { value: { link: "$in.value" } }, ui: { x: 40, y: 40 } } },
+          { op: "addPatch", patch: { id: "echo_rows", type: "loop", inputs: { count: 3 }, ui: { x: 40, y: 1200 } } },
+          { op: "addPatch", patch: { id: "echo_1", type: "component", component: "echo", name: "Echo", inputs: { value: { link: "echo_rows.index" } }, ui: { x: 300, y: 1200 } } },
+        ],
+        "Add echo",
+      ),
+    );
+    expect(applied.ok).toBe(true);
+    await hook(page, (s) => s.session.selection.getState().enterComponent("echo"));
+    await fitPatches(page);
+
+    const value = flowNode(page, "echo_value").locator(".sb-pe-port--out").filter({ hasText: "Output" }).locator(".sb-pe-port__live");
+    await expect(value).toHaveText("0");
+    const chip = page.getByRole("group", { name: "Watched loop copy" });
+    await expect(chip).toContainText("3 copies");
+    await page.getByRole("button", { name: /^Live values from Echo #0/ }).click();
+    const menu = page.getByRole("menu");
+    await expect(menu).toContainText("Echo has 3 copies");
+    await menu.getByRole("menuitemcheckbox", { name: /Echo #2/ }).click();
+    await expect(value).toHaveText("2");
+    await expect(chip).toContainText("Copy #2 of 3");
+    await chip.getByRole("button", { name: "Watch the next copy" }).click();
+    await expect(value).toHaveText("0");
+    await screenshot(page, "watched-copy-05-patch-instance-copy");
     expect(problems).toEqual([]);
   });
 });

@@ -222,6 +222,46 @@ describe("Knobs tab", () => {
     expect(document.activeElement).toBe(rowOf("Card Radius").querySelector('input[aria-label="Card Radius value"]'));
   });
 
+  it("keeps option descriptions when Edit Knob changes a choice knob", () => {
+    const s = mount(
+      build([
+        {
+          op: "addKnob",
+          knob: { id: "feel", name: "Feel", type: "enum", value: "snappy", options: [{ key: "snappy", name: "Snappy", description: "Settles fast." }, { key: "soft", name: "Soft", description: "Takes its time." }] },
+        },
+      ]),
+    );
+    act(() => {
+      rowOf("Feel").dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: 20, clientY: 20 }));
+    });
+    click([...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].find((el) => el.textContent?.includes("Edit Knob…")));
+    const options = document.querySelector<HTMLTextAreaElement>('textarea[aria-label="Knob options"]')!;
+    expect(options.value).toBe("snappy: Snappy\nsoft: Soft");
+    act(() => {
+      Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")!.set!.call(options, "snappy: Quick\nsoft: Soft\nlazy: Lazy");
+      options.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    click(buttonWithText("Save"));
+    expect(knobs(s).knobs[0]!.options).toEqual([
+      { key: "snappy", name: "Quick", description: "Settles fast." },
+      { key: "soft", name: "Soft", description: "Takes its time." },
+      { key: "lazy", name: "Lazy" },
+    ]);
+    // Renaming the knob leaves its options alone.
+    act(() => {
+      rowOf("Feel").dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: 20, clientY: 20 }));
+    });
+    click([...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].find((el) => el.textContent?.includes("Edit Knob…")));
+    const name = document.querySelector<HTMLInputElement>('input[aria-label="Knob name"]')!;
+    act(() => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(name, "Spring Feel");
+      name.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    click(buttonWithText("Save"));
+    expect(labels(s)[0]).toBe("Edit Knob “Spring Feel”");
+    expect(knobs(s).knobs[0]!.options![0]).toEqual({ key: "snappy", name: "Quick", description: "Settles fast." });
+  });
+
   it("flashes the row a patch editor chip or Show in Knobs asks for", () => {
     const s = mount(deck());
     act(() => knobsUi(s).getState().toggleGroup("Throw"));

@@ -9,7 +9,8 @@ export { checkConnection, orientConnection, placeSuggestion, portTypeAt, quickCo
 export { documentObstacles, estimatePatchSize, findFreePosition, freeInsertPosition, type PlacementBias, type PlacementObstacles, type PlacementOptions } from "@sonobe/core/graph";
 export { nodePositionsOp, readNodePositions, PATCH_EDITOR_META_KEY } from "@sonobe/core";
 export { patchEditorBridge, type CableDrag, type DriveRequest, type LayerPropTarget, type PatchEditorBridge, type PatchEditorBridgeState } from "./state/bridge.ts";
-export { useInstanceCopies, useWatchedCopy, useWatchedScope, type WatchedScope } from "./state/watch.ts";
+export { useInstanceCopies, useWatchedCopy, useWatchedScope, watchPressedCopy, type WatchedScope } from "./state/watch.ts";
+export { layerSceneKey } from "./model/instances.ts";
 export { pickCopy } from "@sonobe/core/graph";
 export {
   acceptsCable,

@@ -44,7 +44,7 @@ export const NODE_BOX = {
   swatch: 10,
   /** Color values: 3 left, 5 right. */
   colorPadding: 8,
-  /** Knob chips (K1): a 10 pt knob glyph before the name. */
+  /** Knob chips (K1): a 10 pt knob glyph before the name (color knobs end in a `swatch`). */
   knobIcon: 10,
   liveMaxWidth: 96,
   chipPaddingX: 10,
@@ -117,7 +117,7 @@ function valueWidth(v: ValueChip, t: NodeTextMeasurer): number {
     case "text":
       return v.text ? chip(v.text, "sans10") : chip("Empty", "italic10");
     case "knob":
-      return Math.min(B.valueMaxWidth, B.valuePaddingX + B.knobIcon + B.valueInnerGap + t(v.name, "sans10") + (v.text ? B.valueInnerGap + t(v.text, "mono10") : 0));
+      return Math.min(B.valueMaxWidth, B.valuePaddingX + B.knobIcon + B.valueInnerGap + t(v.name, "sans10") + (v.swatch ? B.valueInnerGap + B.swatch : v.text ? B.valueInnerGap + t(v.text, "mono10") : 0));
   }
 }
 

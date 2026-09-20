@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { createBrowserHost, createMemoryProjectStorage } from "../../host/browserHost.ts";
 import { createManualScheduler } from "../../runtime/scheduler.ts";
 import { createEditorSession, type EditorSession } from "../../state/session.ts";
-import { canImportUrl, captureFromText, importDesign, pasteDesignCapture, summaryText } from "./importDesign.ts";
+import { canImportUrl, captureFromText, importDesign, notifyImported, pasteDesignCapture, summaryText } from "./importDesign.ts";
 import { withCaptureScript } from "./iframeCapture.ts";
 
 const registry = createPatchRegistry({ definitions: MOCK_DEFINITIONS });
@@ -82,6 +82,19 @@ describe("importDesign", () => {
     expect(captureFromText('{"hello": "sonobe.design-capture?"}')).toBeNull();
     expect(await pasteDesignCapture(s, JSON.stringify({ format: "sonobe.design-capture", version: 1 }), notify)).toBeNull();
     expect(notify).toHaveBeenLastCalledWith(expect.objectContaining({ title: "That design couldn't be pasted.", tone: "warn" }));
+  });
+
+  it("shows the first two notes after an import, and every note behind “N more”", () => {
+    const notify = vi.fn();
+    const summary = { layers: 3, texts: 1, images: 0, fields: 0, scrolls: 0, fonts: 0, newAssets: 0 };
+    notifyImported(notify, "Imported “Profile”", { screenName: "Profile", summary, notes: ["First.", "Second."] });
+    expect(notify).toHaveBeenLastCalledWith({ title: "Imported “Profile”", description: "3 layers · 1 text First. Second.", tone: "success" });
+    const notes = ["First.", "Second.", "Third.", "SF Symbols: the browser editor can't draw heart.fill, so it's a gray placeholder."];
+    notifyImported(notify, "Imported “Profile”", { screenName: "Profile", summary, notes });
+    const shown = notify.mock.lastCall![0];
+    expect(shown).toMatchObject({ description: "3 layers · 1 text First. Second.", action: { label: "2 more notes" } });
+    shown.action.onClick();
+    expect(notify).toHaveBeenLastCalledWith({ title: "Import notes for “Profile”", details: notes, tone: "info", duration: "persistent" });
   });
 
   it("forwards the app's progress, and a cancel stops the capture and applies nothing", async () => {

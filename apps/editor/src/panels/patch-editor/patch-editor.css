@@ -736,7 +736,7 @@ textarea.sb-pe-title-input {
   padding-left: 3px;
 }
 
-/* An input a knob drives (nodeSize.ts sizes it: keep the padding, gap, glyph and fonts in step). */
+/* An input a knob drives (nodeSize.ts sizes it: keep the padding, gap, glyph, color knobs' .sb-pe-swatch and fonts in step). */
 .sb-pe-value--knob {
   overflow: hidden;
   background: var(--accent-soft);

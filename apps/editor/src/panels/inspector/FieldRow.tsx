@@ -4,7 +4,7 @@
  * the patch editor, and asset rows accept dropped files.
  */
 
-import { findLayer, type Id, type ValueType } from "@sonobe/core";
+import { findLayer, getKnob, type Id, type ValueType } from "@sonobe/core";
 import { Cable, Copy, Link2, Link2Off, RotateCcw, ScanSearch } from "lucide-react";
 import { useMemo, useRef, useState, type DragEvent } from "react";
 import { dragHasFiles, filesFromDataTransfer } from "../../state/assets.ts";
@@ -119,6 +119,9 @@ export function FieldRow({ field, subject, liveAddress, excludeLayers, drive, ca
         : (findLayer(component.layers, source.id)?.layer.name ?? source.id)
       : undefined;
   const name = field.port.name;
+  const knobName = useDocument((s) => (knobId !== undefined ? (getKnob(s.doc.knobs, knobId)?.name ?? null) : null));
+  // What the port's tooltip says drives the field: the knob by name, the patch or layer, or the link.
+  const driver = knobId !== undefined ? (knobName !== null ? `the knob ${knobName}` : `a missing knob (${knobId})`) : (sourceName ?? (field.link ? chipText(field.link) : "a patch"));
 
   const reveal = () => {
     if (source?.id) session.selection.getState().requestReveal(componentId, [source.id]);
@@ -262,7 +265,7 @@ export function FieldRow({ field, subject, liveAddress, excludeLayers, drive, ca
         {drive !== undefined && (
           <span className="sb-insp-row__port">
             {drive && (
-              <Tooltip content={linked ? `Driven by ${sourceName ?? (field.link ? chipText(field.link) : "a patch")}. Click to choose another.` : "Drive with a patch…"} placement="left" delay={400}>
+              <Tooltip content={linked ? `Driven by ${driver}. ${knobId !== undefined ? "Click to drive it with a patch instead." : "Click to choose another."}` : "Drive with a patch…"} placement="left" delay={400}>
                 <button type="button" className="sb-insp-port" aria-label={linked ? `Change what drives ${name}` : `Drive ${name} with a patch`} data-linked={linked || undefined} onClick={driveWithPatch}>
                   <PortGlyph type={field.type} size={8} />
                 </button>
