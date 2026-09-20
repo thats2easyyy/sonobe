@@ -667,6 +667,19 @@ describe("CanvasPanel with the Design with Claude box", () => {
     expect(artboardOffset()).toEqual([(800 - 202) / 2 - 200, 56]);
   });
 
+  it("fits a redesign over the layer it replaces, even one waiting off the artboard to slide in", () => {
+    bodySize = [800, 400];
+    mount();
+    act(() => {
+      session.document.getState().apply([{ op: "addLayer", component: "main", layer: { id: "profile", type: "rectangle", name: "Profile", props: { position: [402, 0], size: [402, 874] } } }], { label: "Add" });
+    });
+    showDraft(draftOf({ fields: { name: "Profile", replace: "profile" } }));
+    // The preview Claude is writing is in view: the layer's width fits, top first, where it waits.
+    expect(artboardZoom()).toBe(1);
+    expect(artboardOffset()).toEqual([(800 - 402) / 2 - 402, 56]);
+    expect(previewOffset()).toEqual([(800 - 402) / 2, 56]);
+  });
+
   it("measures a repeated layer's first copy for the preview, its fit and the box's prompt", async () => {
     const copied: string[] = [];
     Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText: async (text: string) => void copied.push(text) } });
