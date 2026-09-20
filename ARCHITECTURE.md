@@ -386,6 +386,8 @@ Layer types are declared in `@sonobe/core` (`layerTypes.ts`) with typed props (k
 
 **Common props:** `enabled, position, size, anchor, pivot, opacity, scale, rotation (point3d), zPosition, cornerRadius, cornerSmoothing, color/fill, stroke, shadow (color, opacity, radius, offset), blur, blendMode, clip, layout (group), sizing, hitSlop`.
 
+**Text Field.** `text` and `focused` reach the field only when they change, so typing isn't overwritten every frame. Its pulse props act every time: `setText` puts `textToSet` in the field, and `beginEditing` / `endEditing` focus and dismiss it. A layer's pulse prop fires like a patch's pulse input (a pulse output's true, or a connected boolean turning on). The engine applies these commands through its text-input tracker on the step they fire, and a field with state its props don't show carries it on its SceneNode (`textField`: the text it holds, plus a `textRevision` and an `editRevision`). Renderers act when a revision changes, so no one-frame flag has to be caught; the SVG renderer draws the text the field holds.
+
 ---
 
 ## 8. Renderer (`@sonobe/renderer`)

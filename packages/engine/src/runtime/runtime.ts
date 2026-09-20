@@ -63,7 +63,7 @@ import { isLoop, makeLoop, MAX_LOOP_LENGTH } from "./loop.ts";
 import { mulberry32 } from "./random.ts";
 import { buildScene, type SceneBuild } from "./scene.ts";
 import { summarizeSeries } from "./trace.ts";
-import { coerceValue, valuesEqual } from "./values.ts";
+import { coerceValue, truthy, valuesEqual } from "./values.ts";
 
 /** services.now() in deterministic mode: 2026-01-01T00:00:00Z plus prototype time. */
 export const DETERMINISTIC_EPOCH_MS = 1_767_225_600_000;
@@ -126,6 +126,9 @@ type ReplayEntry =
   | { kind: "update"; doc: SonobeDocument }
   | { kind: "refresh" }
   | { kind: "layerOutputs"; key: string; values: Record<string, Value> };
+
+/** A Text Field's command pulses, as bits of the commands one frame fired for one field. */
+const FIELD_PULSES: Readonly<Record<string, number>> = { setText: 1, beginEditing: 2, endEditing: 4 };
 
 /** Nodes with at least one back-edge input (their driver evaluates later in the frame). */
 const feedbackNodesOf = (graph: CompiledGraph): CNode[] => graph.order.filter((n) => n.kind !== "copies" && n.feedback.some(Boolean));
@@ -248,8 +251,10 @@ class RuntimeImpl implements SonobeRuntime {
   private emptySites = new Set<string>();
   /** First frame of each site's current run of suspicious empty frames. */
   private emptySince = new Map<string, number>();
-  /** The scene being built belongs to a step (not refreshScene), so its layers are checked for empty loops. */
+  /** The scene being built belongs to a step (not refreshScene), so its layers are checked for empty loops and fire their pulses. */
   private checkingEmpty = false;
+  /** Text Field commands this step's scene fired, by scene key (FIELD_PULSES bits). */
+  private fieldPulses = new Map<string, number>();
   private readonly emptyLoops: EmptyLoopEnv;
 
   constructor(doc: SonobeDocument, options: RuntimeOptions) {
@@ -525,17 +530,51 @@ class RuntimeImpl implements SonobeRuntime {
       emptyCopies: (layer, path, emptyProp, erased) => {
         if (this.checkingEmpty) this.reportEmptyLayer(layer, path, emptyProp, erased);
       },
+      pulseProp: (key, prop, value, pulseSource) => {
+        if (this.checkingEmpty) this.noteFieldPulse(key, prop, value, pulseSource);
+      },
       layerRef: (layerId, instance, prefix) => this.makeRef(layerId, instance, prefix),
     });
   }
 
-  /** A Text Field whose Text property changed replaces what was typed into it. */
+  /**
+   * A layer pulse prop fires like a pulse input: a pulse output's true, or a boolean turning on (a
+   * copy that wasn't drawn last frame counts as turning on). The previous build is still `snapshot`.
+   */
+  private noteFieldPulse(key: string, prop: string, value: Value, pulseSource: boolean): void {
+    const bit = FIELD_PULSES[prop];
+    if (!bit || !truthy(value)) return;
+    if (!pulseSource && truthy(this.snapshot?.nodes.get(key)?.props[prop])) return;
+    this.fieldPulses.set(key, (this.fieldPulses.get(key) ?? 0) | bit);
+  }
+
+  /**
+   * A Text Field whose Text property changed replaces what was typed into it, then this step's Set
+   * Text, Begin Editing and End Editing pulses apply. Fields with state their props don't show get it
+   * on their SceneNode, with revisions renderers follow.
+   */
   private syncTextFields(before: SceneBuild, after: SceneBuild): void {
+    const text = this.input.text;
     for (const [key, node] of after.nodes) {
       if (node.type !== "textField") continue;
       const previous = before.nodes.get(key)?.props.text;
-      if (previous !== undefined && previous !== node.props.text && typeof node.props.text === "string") this.input.text.setValue(key, node.props.text);
+      if (previous !== undefined && previous !== node.props.text && typeof node.props.text === "string") text.setValue(key, node.props.text);
+      const pulses = this.fieldPulses.get(key);
+      if (pulses) {
+        if (pulses & FIELD_PULSES.setText!) text.setText(key, typeof node.props.textToSet === "string" ? node.props.textToSet : "");
+        if (pulses & FIELD_PULSES.beginEditing!) text.setEditing(key, true);
+        if (pulses & FIELD_PULSES.endEditing!) text.setEditing(key, false);
+      }
+      if (!text.has(key)) continue;
+      const field = text.snapshot(key);
+      node.textField = {
+        text: field.value ?? (typeof node.props.text === "string" ? node.props.text : ""),
+        textRevision: field.textRevision,
+        editRevision: field.editRevision,
+        editing: field.editing,
+      };
     }
+    this.fieldPulses.clear();
   }
 
   private evaluate(): void {

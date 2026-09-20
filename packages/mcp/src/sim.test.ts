@@ -138,6 +138,28 @@ describe.skipIf(missing.length > 0)(`simulation with real patches (${ISAT.join("
     expect(covered.text).toContain('"cover" sits in front of "card"');
   });
 
+  it("clears a composer on every Send with the Text Field's Set Text pulse", async () => {
+    const { c, simId } = await setup();
+    const built = await c.call("apply_ops", {
+      ops: [
+        { op: "addLayer", layer: { ref: "composer", type: "textField", name: "Composer", props: { position: [16, 800], size: [300, 44] } } },
+        { op: "addLayer", layer: { ref: "send", type: "rectangle", name: "Send", props: { position: [326, 800], size: [60, 44] } } },
+        { op: "addPatch", patch: { ref: "tap", type: "interaction", name: "Tap Send", inputs: { layer: { layer: "$send" } } } },
+        { op: "connect", from: "$tap.tap", to: "@$composer.setText" },
+        { op: "connect", from: "$tap.tap", to: "@$composer.endEditing" },
+      ],
+    });
+    expect(built.isError, built.text).toBe(false);
+    for (const typed of ["See you at 6", "Running late"]) {
+      await c.call("sim_dispatch", { simId, events: [{ kind: "focus", layer: "composer", focused: true }, { kind: "text", layer: "composer", value: typed }] });
+      const before = await c.call("sim_get_values", { simId, targets: ["@composer.value", "@composer.isFocused"] });
+      expect(before.structured.values).toEqual({ "@composer.value": typed, "@composer.isFocused": true });
+      await c.call("sim_dispatch", { simId, events: [{ kind: "tap", target: "@send" }] });
+      const after = await c.call("sim_get_values", { simId, targets: ["@composer.value", "@composer.isFocused"] });
+      expect(after.structured.values).toEqual({ "@composer.value": "", "@composer.isFocused": false });
+    }
+  });
+
   it("validates addresses with suggestions", async () => {
     const { c, simId } = await setup();
     const r = await c.call("sim_get_values", { simId, targets: ["@card.scal"] });

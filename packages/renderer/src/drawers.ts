@@ -379,6 +379,9 @@ interface TextFieldState {
   multiline: boolean;
   lastText: string | null;
   lastFocused: boolean | null;
+  /** The Set Text and Begin/End Editing revisions last applied (SceneNode.textField). */
+  lastTextRevision: number;
+  lastEditRevision: number;
   /** SceneNode key of the field (loop and component instances share a layer id). */
   nodeKey: string;
   /** The input currently has DOM focus (as last reported to the engine). */
@@ -438,7 +441,7 @@ const textFieldDrawer: Drawer = {
     if (!st || st.multiline !== multiline) {
       const previous = st;
       if (previous) releaseFocus(previous.input);
-      st = { input: createInput(host, ctx, multiline), multiline, lastText: null, lastFocused: null, nodeKey: node.key, hasFocus: false };
+      st = { input: createInput(host, ctx, multiline), multiline, lastText: null, lastFocused: null, lastTextRevision: 0, lastEditRevision: 0, nodeKey: node.key, hasFocus: false };
       host.state.field = st;
       if (previous) previous.input.remove();
     }
@@ -460,15 +463,28 @@ const textFieldDrawer: Drawer = {
     // Text and focus are edge-triggered: only changes to the props push into the field,
     // so typing isn't overwritten by the unchanged authored value every frame.
     const text = p.str("text", "");
+    const fresh = st.lastText === null;
     if (st.lastText !== text) {
       if (input.value !== text) input.value = text;
       st.lastText = text;
+    }
+    // Set Text and Begin/End Editing arrive as revisions from the engine, so each applies once, on
+    // whichever frame this viewer draws. A new input starts with what the field already holds.
+    const field = node.textField;
+    if (field && (fresh || field.textRevision !== st.lastTextRevision)) {
+      if (input.value !== field.text) input.value = field.text;
+      st.lastTextRevision = field.textRevision;
     }
     const focused = p.bool("focused", false);
     if (st.lastFocused !== focused) {
       if (focused) input.focus({ preventScroll: true });
       else if (st.lastFocused !== null) releaseFocus(input);
       st.lastFocused = focused;
+    }
+    if (field && field.editRevision !== st.lastEditRevision) {
+      if (field.editing) input.focus({ preventScroll: true });
+      else releaseFocus(input);
+      st.lastEditRevision = field.editRevision;
     }
     return NO_SHAPE;
   },
