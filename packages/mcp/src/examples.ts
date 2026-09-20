@@ -7,12 +7,29 @@
  * example's README.md and test.json, and the examples/README.md table, are read from the examples
  * folder: SONOBE_EXAMPLES_DIR, else examples/ beside a bundle (the build scripts copy them), else
  * the repository's. Without them an example still lists, from its recipe alone. Node only.
+ *
+ * A recipe that starts from a design import or tidies by frame (buildRecipe, asynchronous, and for a
+ * design its capture and photos) is read from its project folder instead of rebuilt: run.test.ts keeps
+ * that folder equal to the recipe's build, and a bundle carries its JSON files, not the photos.
  */
 
-import { copyFileSync, existsSync, mkdirSync, readFileSync, rmSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { didYouMean, getOutline, type Op, type Registry, type SonobeDocument } from "@sonobe/core";
+import {
+  ASSETS_FILE,
+  COMPONENTS_DIR,
+  didYouMean,
+  getOutline,
+  KNOBS_FILE,
+  parseDocumentFiles,
+  PROJECT_FILE,
+  readNodePositions,
+  SCRIPTS_DIR,
+  type Op,
+  type Registry,
+  type SonobeDocument,
+} from "@sonobe/core";
 import { buildRecipeDocument, type Recipe } from "../../../examples/lib/recipe.ts";
 import { RECIPES } from "../../../examples/recipes/index.ts";
 
@@ -78,9 +95,35 @@ export function defaultExamplesDir(env: Record<string, string | undefined> = pro
   return undefined;
 }
 
-/** The files the catalog reads from an examples folder, relative to it: the table, and each example's README.md and test.json. */
-export function exampleTextFiles(): string[] {
-  return ["README.md", ...RECIPES.flatMap((r) => [`${r.folder}/README.md`, `${r.folder}/test.json`])];
+/** Whether the catalog reads a recipe's document from its project folder (see the module comment). */
+export function readsProjectFolder(recipe: Recipe): boolean {
+  return !!recipe.design || recipe.tidy === "frames";
+}
+
+/** A project folder's document files (project.json, knobs.json, components, scripts, assets.json), relative to it. */
+function projectFiles(dir: string): string[] {
+  const list = (sub: string, keep: (name: string) => boolean) =>
+    existsSync(path.join(dir, sub)) ? readdirSync(path.join(dir, sub)).filter(keep).sort().map((name) => `${sub}/${name}`) : [];
+  return [
+    ...[PROJECT_FILE, KNOBS_FILE, ASSETS_FILE].filter((file) => existsSync(path.join(dir, file))),
+    ...list(COMPONENTS_DIR, (name) => name.endsWith(".json")),
+    ...list(SCRIPTS_DIR, () => true),
+  ];
+}
+
+/**
+ * The files the catalog reads from an examples folder, relative to it: the table, each example's
+ * README.md and test.json, and the document files of those it reads from their project folder.
+ */
+export function exampleTextFiles(from: string | undefined = defaultExamplesDir()): string[] {
+  return [
+    "README.md",
+    ...RECIPES.flatMap((r) => [
+      `${r.folder}/README.md`,
+      `${r.folder}/test.json`,
+      ...(from && readsProjectFolder(r) ? projectFiles(path.join(from, r.folder)).map((file) => `${r.folder}/${file}`) : []),
+    ]),
+  ];
 }
 
 /**
@@ -92,7 +135,7 @@ export function copyExampleTexts(to: string, from: string | undefined = defaultE
   if (!from) return 0;
   rmSync(to, { recursive: true, force: true });
   let copied = 0;
-  for (const rel of exampleTextFiles()) {
+  for (const rel of exampleTextFiles(from)) {
     const source = path.join(from, rel);
     if (!existsSync(source)) continue;
     mkdirSync(path.dirname(path.join(to, rel)), { recursive: true });
@@ -160,18 +203,67 @@ export function readmeSections(markdown: string): { intro: string; sections: Map
 
 const normalize = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, "");
 
-/** The ops a recipe's example applies, with the positions the example gives its patches. */
+/** A recipe's example read from its project folder. Throws when the folder isn't there. */
+function storedDocument(recipe: Recipe, dir: string | undefined): SonobeDocument {
+  const folder = dir ? path.join(dir, recipe.folder) : undefined;
+  if (!folder || !existsSync(path.join(folder, PROJECT_FILE)))
+    throw new Error(`${recipe.name} is read from its project folder (examples/${recipe.folder}), which isn't here.`);
+  return parseDocumentFiles(Object.fromEntries(projectFiles(folder).map((file) => [file, readFileSync(path.join(folder, file), "utf8")])));
+}
+
+/**
+ * The ops a recipe's example applies, with the layout the example has: its patch positions, comment
+ * frames and graph node positions (a recipe tidied by frame moves all three after its ops), then the
+ * positions of what its ops didn't add, such as an imported design's patches.
+ */
 function positionedOps(recipe: Recipe, doc: SonobeDocument): Op[] {
+  const root = doc.project.root;
   const setup: Op[] = [
     { op: "setProject", changes: { background: recipe.background } },
-    { op: "updateComponent", id: doc.project.root, notes: recipe.notes },
+    { op: "updateComponent", id: root, notes: recipe.notes },
   ];
+  const added = new Map<string, { patches: Set<string>; nodes: Set<string> }>();
+  const seen = (component: string | undefined) => {
+    const id = component ?? root;
+    let entry = added.get(id);
+    if (!entry) added.set(id, (entry = { patches: new Set(), nodes: new Set() }));
+    return entry;
+  };
   const ops = recipe.ops().map((op): Op => {
-    if (op.op !== "addPatch" || op.patch.ui || !op.patch.id) return op;
-    const ui = doc.components[op.component ?? doc.project.root]?.patches[op.patch.id]?.ui;
-    return ui ? { ...op, patch: { ...op.patch, ui: { x: ui.x, y: ui.y } } } : op;
+    if (op.op === "addPatch" && op.patch.id) {
+      seen(op.component).patches.add(op.patch.id);
+      const ui = doc.components[op.component ?? root]?.patches[op.patch.id]?.ui;
+      return ui ? { ...op, patch: { ...op.patch, ui: { ...op.patch.ui, x: ui.x, y: ui.y } } } : op;
+    }
+    if (op.op === "addComment" && op.comment.id) {
+      const rect = doc.components[op.component ?? root]?.comments.find((c) => c.id === op.comment.id)?.rect;
+      return rect ? { ...op, comment: { ...op.comment, rect: [...rect] } } : op;
+    }
+    if (op.op === "setNodePositions") {
+      const saved = readNodePositions(doc.components[op.component ?? root]);
+      const nodes = seen(op.component).nodes;
+      const positions = Object.fromEntries(
+        Object.entries(op.positions).map(([id, p]): [string, [number, number] | null] => {
+          nodes.add(id);
+          const at = saved[id];
+          return [id, p && at ? [at.x, at.y] : p];
+        }),
+      );
+      return { ...op, positions };
+    }
+    return op;
   });
-  return [...setup, ...ops];
+  const rest: Op[] = [];
+  for (const id of Object.keys(doc.components).sort()) {
+    const component = doc.components[id]!;
+    const mine = added.get(id) ?? { patches: new Set<string>(), nodes: new Set<string>() };
+    const where = id === root ? {} : { component: id };
+    for (const [patchId, node] of Object.entries(component.patches))
+      if (!mine.patches.has(patchId)) rest.push({ op: "updatePatch", ...where, id: patchId, ui: { x: node.ui.x, y: node.ui.y } });
+    const unplaced = Object.entries(readNodePositions(component)).filter(([nodeId]) => !mine.nodes.has(nodeId));
+    if (unplaced.length) rest.push({ op: "setNodePositions", ...where, positions: Object.fromEntries(unplaced.map(([nodeId, p]) => [nodeId, [p.x, p.y]])) });
+  }
+  return [...setup, ...ops, ...rest];
 }
 
 /**
@@ -241,7 +333,7 @@ export function loadExamples(options: { dir?: string | undefined; recipes?: read
       if (!byId) built.set(registry, (byId = new Map()));
       const cached = byId.get(entry.id);
       if (cached) return cached;
-      const doc = buildRecipeDocument(entry.recipe, registry);
+      const doc = readsProjectFolder(entry.recipe) ? storedDocument(entry.recipe, dir) : buildRecipeDocument(entry.recipe, registry);
       const counts = new Map<string, number>();
       for (const c of Object.values(doc.components))
         for (const node of Object.values(c.patches)) counts.set(node.type, (counts.get(node.type) ?? 0) + 1);
