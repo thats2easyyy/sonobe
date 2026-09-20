@@ -10,7 +10,7 @@ Related: `start-here`, `animation`, `gestures`, `layout`
 | ---------------------------------------------------------------------- | ------------------------------------------------------------------------------------------- |
 | a web app you can run (React, Next, Vue, Svelte, Rails, Storybook)     | Start its dev server, then `import_design` with `url` per screen                            |
 | code Sonobe can't render (SwiftUI, UIKit, Compose, React Native, Flutter) | Read the screen's code, write one static HTML page that reproduces it, import with `html` |
-| nowhere yet (the person describes a new design)                        | Match what's there first (below), write the design as HTML, import with `html`, iterate with `replace` |
+| nowhere yet (the person describes a new design)                        | Match what's there first, draw it on their canvas as you write it (both below), import it, iterate with `replace` |
 | a capture from the browser extension or a plugin                       | `import_design` with `capture`                                                              |
 
 - `selector` imports one element, like a card or a sheet (`"#pricing-card"`, `"[data-testid=checkout]"`).
@@ -57,6 +57,26 @@ For example, pass this page as `html` with `"name": "Post"`:
   </body>
 </html>
 ```
+
+## Design on the person's canvas
+
+When you design a new screen, let the person watch it take shape instead of waiting for the import:
+
+1. Match what's there: `get_outline` with `"detail": "styles"`, plus one `get_screenshot` of a screen.
+2. `begin_work` with what you're designing.
+3. `preview_design` with the page's `<head>` (its theme) and first section as `html`, then `append` one visual group per call (the header, the content, the bottom bar). Each call redraws the page over the artboard.
+4. `import_design` with `"preview": true` imports the draft, with the `name`, `replace` and size you gave it.
+5. `finish_work`.
+
+```json tool:preview_design
+{ "name": "Post", "html": "<!doctype html><html><head><style>body{margin:0;font-family:system-ui}</style></head><body><header data-name=\"Top Bar\" style=\"margin-top:62px;padding:16px;font-size:20px\">Sunset picnic</header>" }
+```
+
+```json tool:preview_design
+{ "append": "<button data-name=\"Like Button\" style=\"margin:16px;border:0;border-radius:999px;padding:8px 14px;background:#FF3B30;color:#fff\">♥ Like</button></body></html>" }
+```
+
+A redesign passes `replace` with the first call, and the preview draws over that layer. `clear: true` removes a draft you won't import. Headless servers keep the draft without showing it.
 
 ## After importing
 

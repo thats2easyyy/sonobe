@@ -61,6 +61,15 @@ describe("server surface", () => {
         destructiveHint: false,
       });
     }
+    // UI only: they change what the person sees, never the document.
+    for (const name of ["begin_work", "finish_work", "reveal", "restart_viewer", "preview_design"]) {
+      expect(byName.get(name)!.annotations, name).toMatchObject({
+        readOnlyHint: false,
+        destructiveHint: false,
+      });
+    }
+    // Each append adds to the draft.
+    expect(byName.get("preview_design")!.annotations?.idempotentHint).toBe(false);
     expect(byName.get("apply_ops")!.outputSchema).toBeDefined();
     expect(byName.get("sim_trace")!.outputSchema).toBeDefined();
   });

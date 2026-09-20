@@ -25,6 +25,7 @@ When they have an app or a design in code, start from it instead of drawing laye
 - A web app: find or start its dev server (read `package.json` scripts), then `import_design` with `url` for each screen. `selector` imports one component; `waitFor` waits for data.
 - Anything else (SwiftUI, React Native, Flutter, a screen that needs a backend) or a new design: read the screen's code and theme, write one faithful static HTML page at the device width with real copy, colors, fonts, spacing and inline SVG icons, and `data-name` on elements you'll wire, text included. Write SF Symbols as `<svg data-sf-symbol="heart.fill"></svg>` (CSS `font-size`, `font-weight` and `color` style them) instead of drawing them: Sonobe on a Mac imports the real symbol. Import it with `html`.
 - For a new design, match what's there first: `get_outline` with detail "styles" lists the colors, fonts, sizes and radii the prototype uses, and `get_screenshot` of one screen (isolate: true) shows its look. Before a replace over a screen the person may have changed, dryRun: true names the layers that wouldn't be found again.
+- Design a new screen on the person's canvas, so they watch it take shape: `preview_design` with the page's head and first section as `html`, then `append` one visual group per call (header, content, bottom bar), then `import_design` with `"preview": true` to turn the draft into layers.
 - Read the result's outline, compare `get_screenshot` with the source (`screenshot: true` returns the page), then wire interactions onto the imported ids.
 
 ## Building

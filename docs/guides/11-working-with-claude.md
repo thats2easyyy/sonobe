@@ -166,7 +166,7 @@ Most tool calls finish in a second or two. Importing a design can take longer, b
 
 ## What Claude can do
 
-Sonobe gives Claude 47 tools in seven groups: discovery, documents, reading, writing, knobs, simulation, and presence and history. Here's what they look like in practice:
+Sonobe gives Claude 48 tools in seven groups: discovery, documents, reading, writing, knobs, simulation, and presence and history. Here's what they look like in practice:
 
 | You ask for | Claude uses tools like |
 |---|---|
