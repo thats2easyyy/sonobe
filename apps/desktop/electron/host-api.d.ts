@@ -379,8 +379,9 @@ export interface SonobeHost {
   notifyDocumentChanged(revision: number, history?: { undo: string; redo: string }): void;
 
   /**
-   * Tell the host the prototype restarted (Restart Prototype, ⌘R, restart_viewer). The phone preview
-   * and the pop-out viewer restart it too when they show this window's document.
+   * Tell the host the prototype restarted (Restart Prototype, ⌘R, restart_viewer, opening another
+   * document in the window). The phone preview and the pop-out viewer restart it too when they show
+   * this window's document.
    */
   notifyPrototypeRestarted(): void;
 
