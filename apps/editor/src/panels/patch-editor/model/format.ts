@@ -34,9 +34,24 @@ function truncate(text: string, max: number): string {
   return text.length > max ? `${text.slice(0, max - 1)}…` : text;
 }
 
+/**
+ * What one watched copy reads from a value: item `copy` of a loop (wrapping, as a shorter loop
+ * does when a patch runs per copy) with its index, or a plain value as it is (every copy reads it).
+ * An empty loop has no item.
+ */
+export function pickCopy(value: unknown, copy: number): { value: unknown; index: number | null; empty: boolean } {
+  if (!isLoopValue(value)) return { value, index: null, empty: false };
+  const n = value.items.length;
+  if (n === 0) return { value: undefined, index: null, empty: true };
+  const index = copy % n;
+  return { value: value.items[index], index, empty: false };
+}
+
 export interface FormatOptions {
   /** Max characters for text values. Default 14. */
   maxText?: number;
+  /** The watched loop copy: a loop shows that item ("#3 0.52") instead of its "×N" summary. */
+  copy?: number | null;
   enumOptions?: readonly EnumOption[];
   /** Layer id → layer name, for layer references. */
   layerName?: (id: string) => string | undefined;
@@ -46,7 +61,12 @@ export interface FormatOptions {
 export function formatValue(value: unknown, type: ValueType, options: FormatOptions = {}): string {
   const maxText = options.maxText ?? 14;
   if (isLoopValue(value)) {
-    const first = value.items.length ? formatValue(value.items[0], type, { ...options, maxText: 8 }) : "";
+    const { copy, ...plain } = options;
+    if (copy !== undefined && copy !== null && value.items.length) {
+      const picked = pickCopy(value, copy);
+      return `#${picked.index} ${formatValue(picked.value, type, { ...plain, maxText: 8 })}`;
+    }
+    const first = value.items.length ? formatValue(value.items[0], type, { ...plain, maxText: 8 }) : "";
     return value.items.length ? `×${value.items.length} ${first}…` : "×0";
   }
   if (value === undefined || value === null) return "—";
@@ -98,7 +118,12 @@ export function formatValue(value: unknown, type: ValueType, options: FormatOpti
 /** Longer multi-line text for hover cards. */
 export function formatValueLong(value: unknown, type: ValueType, options: FormatOptions = {}): string {
   if (isLoopValue(value)) {
-    const items = value.items.slice(0, 8).map((item) => formatValue(item, type, { ...options, maxText: 40 }));
+    const { copy, ...plain } = options;
+    if (copy !== undefined && copy !== null && value.items.length) {
+      const picked = pickCopy(value, copy);
+      return `Copy #${picked.index} of ${value.items.length}: ${formatValue(picked.value, type, { ...plain, maxText: 40 })}`;
+    }
+    const items = value.items.slice(0, 8).map((item) => formatValue(item, type, { ...plain, maxText: 40 }));
     return `Loop of ${value.items.length}: ${items.join(" · ")}${value.items.length > 8 ? " …" : ""}`;
   }
   if (type === "json" || (value && typeof value === "object" && !Array.isArray(value) && !isColor(value))) {

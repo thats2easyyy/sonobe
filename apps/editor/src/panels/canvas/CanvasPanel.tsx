@@ -33,6 +33,7 @@ import { useLatest } from "../../ui/lib/hooks.ts";
 import { readString, writeString } from "../../ui/lib/storage.ts";
 import { useElementSize } from "../../ui/lib/useElementSize.ts";
 import { rectOfElement } from "../../state/bounds.ts";
+import { patchEditorBridge } from "../patch-editor/api.ts";
 import { registerBoundsProvider } from "../viewer/hostBridge.ts";
 import { dragHasFiles, dropLabel, dropUndoLabel, mediaLayerOps, prepareDroppedFiles, type DroppedFile } from "./assetDrop.ts";
 import { CanvasOverlay, EMPTY_DRAFT, type OverlayDraft } from "./CanvasOverlay.tsx";
@@ -63,7 +64,7 @@ import {
 import { hitChrome, resizeCursor, ROTATE_CURSOR, selectionChrome } from "./handles.ts";
 import { InlineTextEditor } from "./InlineTextEditor.tsx";
 import { nudgeDelta, textOps, type ArrowKey, type InsertTool } from "./ops.ts";
-import { buildCanvasIndex, hitLayers, isEditableLayer, marqueeLayers, pickChildOf, pickLayer, type CanvasIndex } from "./sceneIndex.ts";
+import { buildCanvasIndex, hitCopy, hitLayers, isEditableLayer, marqueeLayers, pickChildOf, pickLayer, type CanvasIndex } from "./sceneIndex.ts";
 import { measureBetween, type Measurement } from "./snapping.ts";
 import { useCanvasScene, type SceneSource } from "./useCanvasScene.ts";
 import { ensureVisible, fitRect, formatZoom, nextZoomStep, panBy, screenToArtboard, wheelZoom, zoomAt, type Viewport } from "./viewport.ts";
@@ -515,6 +516,9 @@ export function CanvasPanel({ session: sessionProp, sceneSource, onSceneSourceCh
         const sel = session.selection.getState();
         const picked = pickLayer(hitLayers(idx, a), idx, sel.layers, event.metaKey || event.ctrlKey);
         if (picked) {
+          // Clicking one copy of a looped layer watches that copy in the patch editor and the inspector.
+          const copy = hitCopy(idx, a, picked);
+          if (copy !== undefined) patchEditorBridge(session).getState().watchCopy(copy);
           const wasSelected = sel.layers.includes(picked);
           if (event.shiftKey) sel.select({ layers: [picked] }, "toggle");
           else if (!wasSelected) sel.select({ layers: [picked], patches: [], comments: [] });

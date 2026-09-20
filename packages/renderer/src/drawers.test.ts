@@ -394,6 +394,49 @@ describe("layer drawing", () => {
       expect(withMeta.defaultPrevented).toBe(true);
     });
 
+    it("pushes Set Text on every revision, even when the text is the same", () => {
+      const state = (text: string, textRevision: number) => ({ textField: { text, textRevision, editRevision: 0, editing: false } });
+      draw(node("field", "textField", { text: "" }));
+      const input = body("field").querySelector("input")!;
+      input.value = "hi";
+      draw(node("field", "textField", { text: "" }, state("hi", 0)));
+      expect(input.value).toBe("hi");
+      draw(node("field", "textField", { text: "" }, state("", 1)));
+      expect(input.value).toBe("");
+      input.value = "hi again";
+      // The same revision drawn again (another frame) leaves typing alone; a new one clears again.
+      draw(node("field", "textField", { text: "" }, state("", 1)));
+      expect(input.value).toBe("hi again");
+      draw(node("field", "textField", { text: "" }, state("", 2)));
+      expect(input.value).toBe("");
+    });
+
+    it("focuses and blurs on each Begin or End Editing revision", () => {
+      const onFocusChange = vi.fn();
+      make({ onFocusChange });
+      const state = (editing: boolean, editRevision: number) => ({ textField: { text: "", textRevision: 0, editRevision, editing } });
+      draw(node("field", "textField"));
+      const input = body("field").querySelector("input")!;
+      draw(node("field", "textField", {}, state(true, 1)));
+      expect(document.activeElement).toBe(input);
+      input.blur();
+      draw(node("field", "textField", {}, state(true, 1)));
+      expect(document.activeElement).not.toBe(input);
+      draw(node("field", "textField", {}, state(true, 2)));
+      expect(document.activeElement).toBe(input);
+      draw(node("field", "textField", {}, state(false, 3)));
+      expect(document.activeElement).not.toBe(input);
+      expect(onFocusChange).toHaveBeenLastCalledWith(null);
+    });
+
+    it("gives a new input what the field already holds", () => {
+      const typed = { textField: { text: "draft", textRevision: 0, editRevision: 0, editing: false } };
+      draw(node("field", "textField", { text: "" }, typed));
+      expect(body("field").querySelector("input")!.value).toBe("draft");
+      draw(node("field", "textField", { text: "", multiline: true }, typed));
+      expect(body("field").querySelector("textarea")!.value).toBe("draft");
+    });
+
     it("reports blur when a focused field is removed", () => {
       const events: InputEvent[] = [];
       make({ onEvents: (e) => events.push(...e) });

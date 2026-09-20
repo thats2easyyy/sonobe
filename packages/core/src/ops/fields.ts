@@ -15,6 +15,7 @@ const OP_FIELDS: Record<OpKind, readonly string[]> = {
   removeLayer: ["component", "id"],
   addPatch: ["component", "patch"],
   updatePatch: ["component", "id", "name", "typeParam", "inputCount", "muted", "settings", "ui"],
+  replacePatch: ["component", "id", "patch", "inputMap", "outputMap"],
   removePatch: ["component", "id"],
   setInput: ["component", "target", "value"],
   connect: ["component", "from", "to"],
@@ -39,6 +40,7 @@ const OP_FIELDS: Record<OpKind, readonly string[]> = {
 const WRAPPED: Partial<Record<OpKind, { field: string; keys: readonly string[]; example: string }>> = {
   addLayer: { field: "layer", keys: ["ref", "id", "type", "name", "props", "children"], example: '{ "op": "addLayer", "layer": { "type": "rectangle", "name": "Card" } }' },
   addPatch: { field: "patch", keys: ["ref", "id", "type", "name", "typeParam", "inputCount", "inputs", "settings", "ui"], example: '{ "op": "addPatch", "patch": { "type": "switch", "name": "Liked" } }' },
+  replacePatch: { field: "patch", keys: ["type", "typeParam", "inputCount", "settings", "name"], example: '{ "op": "replacePatch", "id": "spring", "patch": { "type": "classicAnimation" } }' },
   addComment: { field: "comment", keys: ["ref", "id", "text", "rect", "color"], example: '{ "op": "addComment", "comment": { "text": "Press states", "rect": [0, 0, 400, 200] } }' },
   addComponent: { field: "component", keys: ["id", "name", "kind", "interface", "layers", "patches", "comments", "notes", "size", "meta"], example: '{ "op": "addComponent", "component": { "name": "Card", "kind": "layerComponent" } }' },
 };

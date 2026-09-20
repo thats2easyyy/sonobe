@@ -543,6 +543,21 @@ export type Op =
       ui?: Partial<PatchNode["ui"]>;
     })
   | (OpBase & { op: "removePatch"; id: Id })
+  /**
+   * Change a patch's type in place. It keeps its id, position, custom name and bypass, and every
+   * value and cable whose port the new type has under the same key (or the key `inputMap` /
+   * `outputMap` names) with a type that still fits; the result's `dropped` lists the rest.
+   * `patch.settings` and `patch.component` default to the old ones only when the type stays.
+   */
+  | (OpBase & {
+      op: "replacePatch";
+      id: Id;
+      patch: { type: string; typeParam?: string; inputCount?: number; settings?: PatchNode["settings"]; component?: Id; name?: string };
+      /** Old input key → the new type's input key that takes its value or cable. */
+      inputMap?: Record<string, string>;
+      /** Old output key → the new type's output key its cables read from. */
+      outputMap?: Record<string, string>;
+    })
   /** Set a literal (or link object) on a patch input or layer prop. null resets to default. */
   | (OpBase & { op: "setInput"; target: PortAddress; value: InputValue | null })
   | (OpBase & { op: "connect"; from: PortAddress; to: PortAddress })
@@ -570,7 +585,8 @@ export type Op =
    * that key whole, null unpublishes it, and keys you don't name stay. With `replace: true`, each side
    * you give (inputs, outputs) is the complete set, and its keys you leave out are unpublished; a side
    * you don't give is untouched. Unpublishing disconnects every cable to that port (inside, and on
-   * every instance), and the inverse restores them. An output declared again without `link` keeps its
+   * every instance), and the inverse restores them; so does declaring a port again with a type its
+   * cables or instance values no longer fit. An output declared again without `link` keeps its
    * cable; `link: null` disconnects it. A key can't be renamed: unpublish it and publish the new key.
    */
   | {
@@ -635,6 +651,16 @@ export interface OpResult {
   retired?: Record<Id, Id>;
   /** Derived ids that got a suffix because an item created earlier in the batch took the base: new id → that item's id. */
   suffixed?: Record<Id, Id>;
+  /** Values and cables the op had to drop (replacePatch: what the new type has no fitting port for). */
+  dropped?: DroppedInput[];
+}
+
+/** A stored value an op removed as a side effect: where it was, and what it held. */
+export interface DroppedInput {
+  /** The input it was stored on: "spring.bounciness", "@card.scale", "$out.progress". */
+  to: PortAddress;
+  /** The literal, or the { link } of the cable. */
+  value: InputValue;
 }
 
 export interface Affected {

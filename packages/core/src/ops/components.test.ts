@@ -371,6 +371,60 @@ describe("updateInterface", () => {
     expectRoundTrip(withReads, r);
   });
 
+  it("declaring a port again with another type drops the cables and instance values that no longer fit", () => {
+    const doc = mustApply(setup(), [
+      { op: "updateInterface", component: "chip", inputs: { amount: { key: "amount", name: "Amount", type: "number", default: 1 } } },
+      { op: "addPatch", component: "chip", patch: { id: "spring", type: "popAnimation", inputs: { number: { link: "$in.amount" } } } },
+      { op: "addPatch", component: "chip", patch: { id: "log", type: "logger", inputs: { value: { link: "$in.amount" } } } },
+    ]).doc;
+    const labelled = mustApply(doc, [{ op: "updateInterface", component: "chip", inputs: { label: { name: "Label", type: "color" } } }]);
+    // Text → color fits neither the Title's text nor the instance's "Buy".
+    expect(labelled.doc.components.chip!.layers[0]!.props).toEqual({});
+    expect(labelled.doc.components.main!.layers[0]!.props).toEqual({});
+    expect(labelled.applied).toEqual([
+      { op: "updateInterface", component: "chip", inputs: { label: { key: "label", name: "Label", type: "color" } } },
+      { op: "setInput", component: "chip", target: "@title.text", value: null },
+      { op: "setInput", component: "main", target: "@chip_1.label", value: null },
+    ]);
+    expect(errorsOf(labelled.doc)).toEqual([]);
+    expectRoundTrip(doc, labelled);
+    // Undo and redo replay leniently; the drops are listed, so redo still lands on the same document.
+    expect(applyOps(doc, labelled.applied, { registry: mockRegistry, lenient: true }).doc).toStrictEqual(labelled.doc);
+    // Only what no longer fits goes: a Logger reads any value.
+    const retyped = mustApply(doc, [{ op: "updateInterface", component: "chip", inputs: { amount: { name: "Amount", type: "color" } } }]);
+    expect(retyped.doc.components.chip!.patches.spring!.inputs).toEqual({});
+    expect(retyped.doc.components.chip!.patches.log!.inputs).toEqual({ value: { link: "$in.amount" } });
+    expectRoundTrip(doc, retyped);
+  });
+
+  it("an output declared again with another type disconnects readers that no longer fit", () => {
+    const doc = logicDoc();
+    const r = mustApply(doc, [{ op: "updateInterface", component: "logic", outputs: { count: { name: "Count", type: "boolean" } } }]);
+    // taps.count (number) still fits a boolean output, and so does the card's opacity reading it.
+    expect(r.doc.components.main!.layers[0]!.props).toEqual({ opacity: { link: "inst.count" } });
+    const colored = mustApply(mustApply(doc, [{ op: "addPatch", component: "logic", patch: { id: "tint", type: "hexColor" } }]).doc, [
+      { op: "updateInterface", component: "logic", outputs: { count: { name: "Count", type: "color", link: "tint.color" } } },
+    ]);
+    expect(colored.doc.components.main!.layers[0]!.props).toEqual({});
+    expect(colored.applied.at(-1)).toEqual({ op: "setInput", component: "main", target: "@card.opacity", value: null });
+    expect(errorsOf(colored.doc)).toEqual([]);
+  });
+
+  it("never cascades into the properties every layer instance has, even when an input shares a key", () => {
+    const doc = setup();
+    // Patch components have no such properties, so their instances' inputs of that key do cascade.
+    expect(apply(logicDoc(), [{ op: "updateInterface", component: "logic", inputs: { enabled: { name: "Enabled", type: "boolean" } } }]).ok).toBe(true);
+    // A layer component input named like the instance's own Enabled (loaded, or restored leniently)
+    // never reaches instances; unpublishing it keeps the instance's own value.
+    const legacy = applyOps(doc, [
+      { op: "setInput", target: "@chip_1.enabled", value: false },
+      { op: "updateInterface", component: "chip", inputs: { enabled: { name: "Enabled", type: "text" } } },
+    ], { registry: mockRegistry, lenient: true }).doc;
+    const r = mustApply(legacy, [{ op: "updateInterface", component: "chip", inputs: { enabled: null } }]);
+    expect(r.doc.components.main!.layers[0]!.props).toEqual({ label: "Buy", enabled: false });
+    expectRoundTrip(legacy, r, { lenient: true });
+  });
+
   it("teaches the right shape for guessed fields", () => {
     const doc = logicDoc();
     const typo = firstError(doc, [{ op: "updateInterface", component: "logic", input: { a: { type: "number" } } } as unknown as Op]);
@@ -477,6 +531,27 @@ describe("createComponent", () => {
     expect(r.doc.components.backdrop!.size).toEqual([390, 844]);
     expect(r.doc.components.main!.layers[0]!.props).toEqual({ position_2: { link: "tap.position" }, size: [390, 844] });
     expect(r.doc.components.backdrop!.layers[0]!.props).toEqual({ position: { link: "$in.position_2" } });
+    expectRoundTrip(doc, r);
+  });
+
+  it("gives targets of different types fed by one source their own inputs", () => {
+    const doc = mustApply(buttonDoc(), [
+      { op: "setInput", target: "@bg.position", value: { link: "pop.output" } },
+      { op: "setInput", target: "@bg.enabled", value: { link: "pop.output" } },
+      { op: "setInput", target: "@bg.scale", value: { link: "pop.output" } },
+      { op: "setInput", target: "@bg.opacity", value: { link: "pop.output" } },
+    ]).doc;
+    const r = mustApply(doc, [{ op: "createComponent", name: "Backdrop", layerIds: ["bg"] }]);
+    const backdrop = r.doc.components.backdrop!;
+    // A number drives a point, an on/off and two numbers: one input per type, shared by the two numbers.
+    expect(backdrop.interface.inputs).toEqual({
+      position_2: { key: "position_2", name: "Position", type: "point" },
+      enabled_2: { key: "enabled_2", name: "Enabled", type: "boolean" },
+      scale_2: { key: "scale_2", name: "Scale", type: "number" },
+    });
+    expect(backdrop.layers[0]!.props).toMatchObject({ position: { link: "$in.position_2" }, enabled: { link: "$in.enabled_2" }, scale: { link: "$in.scale_2" }, opacity: { link: "$in.scale_2" } });
+    expect(r.doc.components.main!.layers[0]!.props).toMatchObject({ position_2: { link: "pop.output" }, enabled_2: { link: "pop.output" }, scale_2: { link: "pop.output" } });
+    expect(errorsOf(r.doc)).toEqual([]);
     expectRoundTrip(doc, r);
   });
 

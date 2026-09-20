@@ -2,7 +2,7 @@
 import { applyOps, createEmptyDocument, type Op, type SonobeDocument } from "@sonobe/core";
 import { createPatchRegistry } from "@sonobe/patches";
 import { describe, expect, it } from "vitest";
-import { componentInstances, instanceChoiceKey, resolveLiveScope, scopedAddress } from "./instances.ts";
+import { componentInstances, instanceChoiceKey, instanceCopiesAddress, resolveLiveScope, scopedAddress, watchedPrefix } from "./instances.ts";
 
 const registry = createPatchRegistry();
 
@@ -59,6 +59,27 @@ describe("resolveLiveScope", () => {
   it("is null for components the prototype doesn't use", () => {
     expect(resolveLiveScope(withComponents, ["main", "unused"]).prefix).toBeNull();
     expect(resolveLiveScope(withComponents, ["unused"]).prefix).toBeNull();
+  });
+});
+
+describe("watched copies of looped instances", () => {
+  it("counts copies through the instance layer you're inside", () => {
+    expect(instanceCopiesAddress(resolveLiveScope(withComponents, ["main"]))).toBeNull();
+    expect(instanceCopiesAddress(resolveLiveScope(withComponents, ["main", "badge"]))).toBe("@badge_1.position");
+    // Patch instances have no layer to count, and nested layers count inside their host.
+    expect(instanceCopiesAddress(resolveLiveScope(withComponents, ["main", "press"]))).toBeNull();
+    expect(instanceCopiesAddress(resolveLiveScope(withComponents, ["main", "unused"]))).toBeNull();
+  });
+
+  it("reads the watched copy of a looped instance, wrapping past the last", () => {
+    const badge = resolveLiveScope(withComponents, ["main", "badge"]);
+    expect(watchedPrefix(badge, 12, 3)).toBe("badge_1#3");
+    expect(watchedPrefix(badge, 12, 14)).toBe("badge_1#2");
+    // Not looped, not watching, at the root, or not running: the scope's own path.
+    expect(watchedPrefix(badge, undefined, 3)).toBe("badge_1");
+    expect(watchedPrefix(badge, 12, null)).toBe("badge_1");
+    expect(watchedPrefix(resolveLiveScope(withComponents, ["main"]), 12, 3)).toBe("");
+    expect(watchedPrefix(resolveLiveScope(withComponents, ["main", "unused"]), 12, 3)).toBeNull();
   });
 });
 

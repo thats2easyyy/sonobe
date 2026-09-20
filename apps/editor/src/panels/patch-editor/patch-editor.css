@@ -1444,6 +1444,73 @@ textarea.sb-pe-title-input {
   font-size: var(--font-size-2xs);
 }
 
+/* A looped value's copies: the card takes the pointer so rows can be hovered. */
+.sb-pe-hovercard[data-interactive] {
+  pointer-events: auto;
+}
+
+.sb-pe-hovercard__loop {
+  display: flex;
+  flex-direction: column;
+  max-height: 184px;
+  margin: 0 calc(var(--space-2) * -1);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  font-family: var(--font-mono);
+  font-size: var(--font-size-2xs);
+}
+
+.sb-pe-hovercard__copy {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: var(--space-3);
+  min-height: 20px;
+  padding: 0 var(--space-2);
+  border-radius: var(--radius-sm);
+  color: var(--text-secondary);
+  cursor: default;
+}
+
+.sb-pe-hovercard__copy[aria-selected="true"] {
+  background: var(--bg-selected);
+  color: var(--text-primary);
+}
+
+.sb-pe-hovercard__index {
+  flex: none;
+  min-width: 4ch;
+  color: var(--text-tertiary);
+  text-align: right;
+}
+
+.sb-pe-hovercard__item {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sb-pe-hovercard__swatch {
+  display: inline-flex;
+  flex: none;
+  width: 10px;
+  height: 10px;
+  overflow: hidden;
+  border-radius: var(--radius-xs);
+  box-shadow: inset 0 0 0 1px var(--border-default);
+}
+
+.sb-pe-hovercard__swatch > span {
+  flex: 1 1 auto;
+}
+
+.sb-pe-hovercard__more {
+  padding: var(--space-2);
+  color: var(--text-tertiary);
+  font-family: var(--font-sans);
+}
+
 /* Patch picker and link search */
 .sb-pe-picker {
   height: min(540px, calc(100vh - 160px));
@@ -1855,6 +1922,34 @@ textarea.sb-pe-title-input {
 .sb-pe-live__pick:focus-visible {
   outline: 2px solid var(--selection);
   outline-offset: 1px;
+}
+
+/* The watched loop copy, next to the live scope */
+.sb-pe-copy {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 1px;
+  height: 26px;
+  padding: 0 var(--space-1);
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--bg-elevated) 88%, transparent);
+  box-shadow:
+    0 0 0 1px var(--border-subtle),
+    var(--shadow-sm);
+  backdrop-filter: blur(8px);
+  color: var(--text-secondary);
+  font-size: var(--font-size-xs);
+  white-space: nowrap;
+}
+
+.sb-pe-copy__label {
+  padding: 0 var(--space-2);
+}
+
+.sb-pe-copy[data-watching] .sb-pe-copy__label {
+  color: var(--text-primary);
+  font-weight: var(--font-weight-medium);
 }
 
 /* ---------------------------------------------------------------------- */

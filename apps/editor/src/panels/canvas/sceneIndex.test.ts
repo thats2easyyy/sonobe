@@ -1,7 +1,7 @@
 import type { SonobeDocument } from "@sonobe/core";
 import { buildDoc, createTestRuntime } from "@sonobe/engine/testing";
 import { describe, expect, it } from "vitest";
-import { buildCanvasIndex, hitLayers, isEditableLayer, marqueeLayers, pickChildOf, pickLayer, sceneKeyLayerId } from "./sceneIndex.ts";
+import { buildCanvasIndex, hitCopy, hitLayers, isEditableLayer, marqueeLayers, pickChildOf, pickLayer, sceneKeyLayerId } from "./sceneIndex.ts";
 
 function sceneFor(doc: SonobeDocument) {
   const rt = createTestRuntime(doc);
@@ -128,6 +128,23 @@ describe("hitLayers", () => {
     expect(hitLayers(sceneFor(locked), [200, 200])).toEqual(["badge", "card"]);
     const disabled = { ...doc, components: { main: { ...component, layers: component.layers.map((l) => (l === sticker ? { ...l, props: { ...l.props, enabled: false } } : l)) } } };
     expect(hitLayers(sceneFor(disabled), [200, 200])).toEqual(["badge", "card"]);
+  });
+});
+
+describe("hitCopy", () => {
+  it("names the loop copy a click lands on, and nothing for layers that aren't looped", () => {
+    const index = sceneFor(
+      buildDoc({
+        layers: [
+          { id: "row", type: "rectangle", props: { position: { loop: [[0, 0], [0, 100], [0, 200]] }, size: [200, 80] } },
+          { id: "footer", type: "rectangle", props: { position: [0, 400], size: [200, 80] } },
+        ],
+      }),
+    );
+    expect(hitCopy(index, [20, 120], "row")).toBe(1);
+    expect(hitCopy(index, [20, 220], "row")).toBe(2);
+    expect(hitCopy(index, [20, 420], "footer")).toBeUndefined();
+    expect(hitCopy(index, [300, 800], "row")).toBeUndefined();
   });
 });
 
