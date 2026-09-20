@@ -9,7 +9,7 @@ import { createAssetService } from "../../state/assets.ts";
 import { EditorProvider } from "../../state/EditorProvider.tsx";
 import { getRegistry } from "../../state/registry.ts";
 import { createEditorSession, type EditorSession } from "../../state/session.ts";
-import { completeConnectionToLayerProp, dropTargetAt, patchEditorBridge } from "../patch-editor/index.ts";
+import { completeConnectionToLayerProp, dropTargetAt, instanceChoiceKey, patchEditorBridge } from "../patch-editor/index.ts";
 import { InspectorPanel } from "./InspectorPanel.tsx";
 import { activePreset } from "./spring.ts";
 
@@ -387,6 +387,45 @@ describe("InspectorPanel", () => {
     select(s, { patches: ["toggle"] });
     expect(rowNamed("Flip").textContent).toContain("Fires only from a connection");
     expect(rowNamed("Flip").querySelector('button[aria-label="Fire Flip"]')).toBeNull();
+  });
+
+  it("fires inside a component instance, in the instance and copy the read-outs watch", () => {
+    const s = mount(
+      build([
+        { op: "addComponent", component: { id: "card", name: "Card", kind: "layerComponent" } },
+        { op: "addLayer", component: "card", layer: { id: "field", type: "textField", name: "Composer", props: { size: [300, 44], textToSet: "Hello" } } },
+        { op: "addLayer", layer: { id: "cards", type: "componentInstance", name: "Cards", component: "card", props: { position: { loop: [[0, 0], [0, 100], [0, 200]] } } } },
+        { op: "addLayer", layer: { id: "single", type: "componentInstance", name: "Single", component: "card", props: { position: [0, 400] } } },
+      ]),
+    );
+    s.runtime.stepFrame();
+    const bridge = patchEditorBridge(s).getState();
+    act(() => s.selection.getState().enterComponent("card"));
+    act(() => bridge.chooseInstance(instanceChoiceKey("main", "card"), "cards"));
+    select(s, { layers: ["field"] });
+    for (const more of [...container.querySelectorAll<HTMLButtonElement>(".sb-insp-section__more")]) click(more);
+    const textAt = (key: string) => {
+      const stack = [...s.runtime.scene()!.roots];
+      while (stack.length) {
+        const node = stack.pop()!;
+        if (node.key === key) return node.textField?.text;
+        stack.push(...node.children);
+      }
+      throw new Error(`No scene node ${key}`);
+    };
+    const fire = () => click(rowNamed("Set Text").querySelector('button[aria-label="Fire Set Text"]'));
+    // A looped instance without a watched copy: copy 0, as the read-outs show.
+    fire();
+    expect(textAt("cards#0/field")).toBe("Hello");
+    expect(textAt("cards#2/field")).not.toBe("Hello");
+    act(() => bridge.watchCopy(2));
+    fire();
+    expect(textAt("cards#2/field")).toBe("Hello");
+    // An instance that isn't looped, while a copy is still watched.
+    act(() => bridge.chooseInstance(instanceChoiceKey("main", "card"), "single"));
+    fire();
+    expect(textAt("single/field")).toBe("Hello");
+    expect(document.body.textContent).not.toContain("didn't fire");
   });
 
   it("describes a patch with docs, type, linked inputs, and variadic count", () => {
