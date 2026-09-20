@@ -2,11 +2,13 @@
  * The import hologram on the canvas: over a screen that was just imported, the design hides under a
  * dark veil while pixel rain falls; a laser sweeps down and each layer's wireframe traces in as the
  * laser passes it, div by div; then the laser sweeps back up and the real design materializes beneath
- * it. One 2D canvas drawn by requestAnimationFrame (no React render per frame), following the viewport
- * live. It never takes a click: a click, a key, an undo or another document ends it early.
+ * it, and a soft bloom around the frame hands the screen back to its selection. One 2D canvas drawn by
+ * requestAnimationFrame (no React render per frame), following the viewport live. It publishes its
+ * timeline as the show (hologram.ts), which the Viewer plays along with. It never takes a click: a
+ * click, a key, an undo or another document ends it early (watchHolograms).
  */
 
-import { findLayer, type Id } from "@sonobe/core";
+import type { Id } from "@sonobe/core";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useStore } from "zustand";
 import type { EditorSession } from "../../state/session.ts";
@@ -14,9 +16,9 @@ import { useLatest } from "../../ui/lib/hooks.ts";
 import type { Rect } from "../canvas/geometry.ts";
 import type { CanvasIndex } from "../canvas/sceneIndex.ts";
 import type { Viewport } from "../canvas/viewport.ts";
-import { HOLOGRAM_STALE_MS, hologramStore, watchAgentImports } from "./hologram.ts";
-import { drawFrame, drawGrid, drawLaser, drawRain, drawTips, drawVeil, fitCanvas, mixColor, prefersReducedMotion, readHoloColors, rgba, textBars, traceCross, traceOutline, traceOval, type HoloColors } from "./hologramDraw.ts";
-import { collectHoloLayers, HOLO, holoFrameAt, planHologram, traceProgress, type HoloFrame, type HoloPiece, type HoloPlan, type Radii } from "./hologramPlan.ts";
+import { HOLOGRAM_STALE_MS, hologramStore, watchHolograms } from "./hologram.ts";
+import { drawFrame, drawGrid, drawLaser, drawRain, drawRevealEdge, drawTips, drawVeil, fitCanvas, mixColor, prefersReducedMotion, readHoloColors, rgba, textBars, traceCross, traceOutline, traceOval, type HoloColors } from "./hologramDraw.ts";
+import { chromeHeldUntil, collectHoloLayers, GLOW_PEAK, HOLO, holoFrameAt, planHologram, traceProgress, type HoloFrame, type HoloPiece, type HoloPlan, type Radii } from "./hologramPlan.ts";
 import "./hologram.css";
 
 export interface HologramBuildProps {
@@ -35,14 +37,8 @@ interface Run {
   componentId: Id;
   screenId: Id;
   plan: HoloPlan;
-}
-
-/** Keys that don't end the hologram on their own (⌘-scroll zooms, space-drag pans). */
-const MODIFIER_KEYS = new Set(["Meta", "Control", "Shift", "Alt", "CapsLock", "Fn", " "]);
-
-/** Whether a pointerdown ends the hologram: not a pan (a middle-button drag, or a drag with Space held). */
-export function pointerEndsHologram(event: Pick<PointerEvent, "button">, spaceHeld: boolean): boolean {
-  return event.button !== 1 && !(event.button === 0 && spaceHeld);
+  /** performance.now() at the timeline's zero (the show's start). */
+  start: number;
 }
 
 /** The screen a hologram on this component's canvas covers now (its selection chrome waits). */
@@ -66,44 +62,50 @@ export function HologramBuild({ session, componentId, index, viewport, width, he
   /** Draws the current frame now (a pan or a resize redraws before the browser paints). */
   const redraw = useRef<(() => void) | null>(null);
 
-  useEffect(() => watchAgentImports(session), [session]);
+  useEffect(() => watchHolograms(session), [session]);
+  // Requests for this component wait for this canvas (the Viewer plays along instead of alone).
+  useEffect(() => store.getState().addCanvas(componentId), [store, componentId]);
 
-  // Take a request for this component once the canvas draws its screen.
+  // Take a request for this component once the canvas draws its screen, and publish the show.
   useLayoutEffect(() => {
-    if (!request) return;
-    const take = () => store.getState().take(request.nonce);
-    if (request.componentId !== componentId || performance.now() - request.at > HOLOGRAM_STALE_MS) return take();
+    if (!request || request.componentId !== componentId) return;
+    if (performance.now() - request.at > HOLOGRAM_STALE_MS) return store.getState().take(request.nonce);
     if (width <= 0 || height <= 0) return;
     const collected = collectHoloLayers(index, request.screenId);
     if (!collected) return;
-    take();
-    setRun({ nonce: request.nonce, componentId, screenId: request.screenId, plan: planHologram(collected.screen, collected.layers, { reduced: prefersReducedMotion() }) });
+    const plan = planHologram(collected.screen, collected.layers, { reduced: prefersReducedMotion() });
+    const start = performance.now();
+    store.getState().play({ nonce: request.nonce, componentId, screenId: request.screenId, start, timeline: plan.timeline, reduced: plan.reduced, lead: "canvas" });
+    setRun({ nonce: request.nonce, componentId, screenId: request.screenId, plan, start });
   }, [request, componentId, index, width, height, store]);
 
   // Another component: the screen isn't drawn any more.
   const active = run && run.componentId === componentId ? run : null;
   useEffect(() => {
-    if (run && run.componentId !== componentId) setRun(null);
-  }, [run, componentId]);
+    if (!run || run.componentId === componentId) return;
+    store.getState().stop(run.nonce);
+    setRun(null);
+  }, [run, componentId, store]);
+  // Unmounted mid-build (the canvas closed): the show ends with it.
+  const runRef = useLatest(run);
+  useEffect(() => () => void (runRef.current && store.getState().stop(runRef.current.nonce)), [runRef, store]);
 
   useLayoutEffect(() => {
     const canvas = canvasRef.current;
     const ctx = canvas?.getContext("2d");
     if (!active || !canvas || !ctx) return;
-    const { plan, screenId } = active;
+    const { plan, screenId, start } = active;
     const colors = readHoloColors(canvas);
     const depthColors = Array.from({ length: DEPTH_BUCKETS }, (_, i) => mixColor(colors.line, colors.tint, (i / (DEPTH_BUCKETS - 1)) * 0.75));
-    const start = performance.now();
     const seed = active.nonce * 7919;
-    let endAt: number | null = null;
+    const heldUntil = chromeHeldUntil(plan);
     let raf = 0;
     let phase = "";
     /** The part of the canvas body the canvas covers now ("x,y,w,h"). */
     let placed = "";
     let finished = false;
-    let spaceHeld = false;
     const target = { componentId: active.componentId, screenId };
-    /** Hide the screen's selection chrome while the hologram builds it; it returns for the closing flare or an early end. */
+    /** Hide the screen's selection chrome while the hologram builds it; it returns once the closing bloom peaks, or at once on an early end. */
     let covering = false;
     const setCovering = (on: boolean) => {
       if (on === covering) return;
@@ -124,14 +126,21 @@ export function HologramBuild({ session, componentId, index, viewport, width, he
 
     const draw = (now: number): boolean => {
       const { viewport: vp, width: w, height: h, index: idx } = latest.current;
-      const t = now - start;
-      const frame = holoFrameAt(plan, t);
-      const fade = endAt === null ? 1 : 1 - (now - endAt) / HOLO.endFadeMs;
-      if (frame.phase === "done" || fade <= 0) {
+      const show = store.getState().show;
+      // Stopped (undone, another document), or a newer import took over.
+      if (show?.nonce !== active.nonce) {
         finish();
         return false;
       }
-      setCovering(endAt === null && (frame.phase === "power" || frame.phase === "down" || frame.phase === "hold" || frame.phase === "up"));
+      const t = now - start;
+      const frame = holoFrameAt(plan, t);
+      const fade = show.endedAt === null ? 1 : 1 - (now - show.endedAt) / HOLO.endFadeMs;
+      if (frame.phase === "done" || fade <= 0) {
+        finish();
+        store.getState().stop(active.nonce);
+        return false;
+      }
+      setCovering(show.endedAt === null && t < heldUntil);
       // Follow the screen if it moved (Claude may keep editing while it plays).
       const current = idx.bounds(screenId) ?? plan.screen;
       const dx = current.x - plan.screen.x;
@@ -164,55 +173,27 @@ export function HologramBuild({ session, componentId, index, viewport, width, he
       return true;
     };
 
-    const loop = (now: number) => {
-      if (draw(now)) raf = requestAnimationFrame(loop);
+    // One clock for every draw (a frame's timestamp can trail performance.now(), which redraws and
+    // the Viewer read), so a phase never flickers back at its edge.
+    const loop = () => {
+      if (draw(performance.now())) raf = requestAnimationFrame(loop);
     };
     redraw.current = () => {
       if (!finished) draw(performance.now());
     };
     // The first frame goes up before the browser paints, so the design never shows before its veil.
-    if (draw(start)) raf = requestAnimationFrame(loop);
-
-    const end = () => {
-      if (endAt !== null || finished) return;
-      endAt = performance.now();
-      // The selection chrome comes back at once, over the fading hologram.
-      setCovering(false);
-    };
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === " ") spaceHeld = true;
-      if (!event.repeat && !MODIFIER_KEYS.has(event.key)) end();
-    };
-    const onKeyUp = (event: KeyboardEvent) => {
-      if (event.key === " ") spaceHeld = false;
-    };
-    const onBlur = () => (spaceHeld = false);
-    const onPointerDown = (event: PointerEvent) => {
-      if (pointerEndsHologram(event, spaceHeld)) end();
-    };
-    window.addEventListener("pointerdown", onPointerDown, true);
-    window.addEventListener("keydown", onKeyDown, true);
-    window.addEventListener("keyup", onKeyUp, true);
-    window.addEventListener("blur", onBlur);
-    const unsubscribe = session.document.getState().subscribeRevision((state) => {
-      const change = state.lastChange;
-      if (!change) return;
-      // Another document, or the import undone: nothing left to build.
-      const gone = !findLayer(state.doc.components[active.componentId]?.layers ?? [], screenId);
-      if (change.kind === "replace" || change.kind === "reload" || gone) finish();
-      else if (change.kind === "undo") end();
+    if (draw(performance.now())) raf = requestAnimationFrame(loop);
+    // An early end brings the selection chrome back at once, over the fading hologram; a stop removes it now.
+    const unsubscribe = store.subscribe((s, previous) => {
+      if (s.show !== previous.show && !finished) draw(performance.now());
     });
     return () => {
       cancelAnimationFrame(raf);
       redraw.current = null;
       setCovering(false);
-      window.removeEventListener("pointerdown", onPointerDown, true);
-      window.removeEventListener("keydown", onKeyDown, true);
-      window.removeEventListener("keyup", onKeyUp, true);
-      window.removeEventListener("blur", onBlur);
       unsubscribe();
     };
-  }, [active, latest, session, store]);
+  }, [active, latest, store]);
 
   // Pan, zoom and panel resizes redraw in the same frame as the design moves.
   useLayoutEffect(() => redraw.current?.(), [viewport, width, height, index]);
@@ -294,34 +275,18 @@ function drawBuildFrame(ctx: CanvasRenderingContext2D, { plan, frame, t, screen,
   ctx.restore();
 
   if (laserY !== null) drawLaser(ctx, screen, Math.min(screen.y + screen.height - 0.75, Math.max(screen.y + 0.75, laserY)), frame.direction, colors, { intensity: frame.phase === "hold" ? 0.85 : 1 });
-  // Closing, the viewfinder corners go first and hand the screen back to its selection outline.
+  // Closing, the outline and its viewfinder corners hand over to the bloom as its hairline flashes out,
+  // so there's one line at a time; the selection outline comes back inside it at the peak.
   const { upEnd, end } = plan.timeline;
   const release = frame.phase === "glow" ? Math.min(1, (t - upEnd) / Math.max(1, end - upEnd)) : 0;
-  drawFrame(ctx, screen, colors, { trace: frame.frame, glow: frame.glow, brackets: Math.max(0, 1 - release * 2.5) });
+  const handover = Math.min(1, release / (GLOW_PEAK / 2));
+  const outline = 1 - handover * handover * (3 - 2 * handover);
+  drawFrame(ctx, screen, colors, { trace: frame.frame, glow: frame.glow, hairline: frame.hairline, outline, brackets: outline });
 }
 
 /** How far below the laser the wireframe may reach while it sweeps down (CSS px). */
 export function laserLead(screen: Rect): number {
   return Math.min(10, Math.max(3, screen.height * 0.012));
-}
-
-/** The just-revealed design, tinted and scanlined for a moment below the laser. */
-function drawRevealEdge(ctx: CanvasRenderingContext2D, screen: Rect, y: number, c: HoloColors): void {
-  const band = Math.min(48, Math.max(12, screen.height * 0.14));
-  const tint = ctx.createLinearGradient(0, y, 0, y + band);
-  tint.addColorStop(0, rgba(c.line, 0.34));
-  tint.addColorStop(0.45, rgba(c.tint, 0.12));
-  tint.addColorStop(1, rgba(c.tint, 0));
-  ctx.fillStyle = tint;
-  ctx.fillRect(screen.x, y, screen.width, band);
-  ctx.fillStyle = rgba(c.core, 1);
-  for (let sy = y + 2, i = 0; sy < y + band; sy += 3, i++) {
-    ctx.globalAlpha = 0.22 * (1 - (sy - y) / band);
-    ctx.fillRect(screen.x, Math.round(sy), screen.width, 1);
-  }
-  ctx.globalAlpha = 1;
-  ctx.fillStyle = rgba(c.fringe, 0.4);
-  ctx.fillRect(screen.x, y + 2, screen.width, 1);
 }
 
 function wirePath(ctx: CanvasPath, piece: HoloPiece, r: Rect, p: number, zoom: number): [number, number][] {

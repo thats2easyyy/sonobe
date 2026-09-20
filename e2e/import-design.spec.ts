@@ -5,7 +5,7 @@ import { collectConsoleProblems, hook, openEditor, runCommand, screenshot } from
 
 const profileHtml = readFileSync(fileURLToPath(new URL("../packages/import/fixtures/profile.html", import.meta.url)), "utf8");
 
-/** Wait for the import hologram to finish (about 3.5 s), so screenshots show the design. */
+/** Wait for the import hologram to finish (about 3.7 s), so screenshots show the design. */
 const hologramDone = (page: Page) => expect(page.locator(".sb-holo")).toHaveCount(0, { timeout: 10_000 });
 
 /** A capture as the Chrome extension copies it. */
@@ -206,6 +206,8 @@ test.describe("Import Design", () => {
     await page.evaluate(() => (window as unknown as { holoClock: HoloClock }).holoClock.seek(2700));
     await expect(holo).toHaveAttribute("data-phase", "up");
     await expect(page.locator(".sb-cv__handle")).toHaveCount(0);
+    // The Viewer's veil dissolves in step, so the finished design doesn't show there first.
+    await expect(page.locator(".sb-vw-holo")).toHaveAttribute("data-phase", "up");
     await expect(page.getByText("Imported “Profile”")).toBeVisible();
     await screenshot(page, "import-02-hologram");
 
@@ -299,25 +301,55 @@ test.describe("Import Design", () => {
   test("builds Claude's imports as a hologram, but not its other changes", async ({ page }) => {
     const problems = collectConsoleProblems(page);
     await openEditor(page);
-    const addScreen = (label: string) =>
+    const addScreen = (label: string, source?: "import") =>
       hook(
         page,
-        (s, label) =>
+        (s, { label, source }) =>
           s.session.document.getState().apply(
             [{ op: "addLayer", component: s.doc().project.root, layer: { type: "group", name: "Receipt", props: { position: [0, 0], size: [402, 874], color: "#FFFFFFFF" }, children: [{ type: "rectangle", name: "Header", props: { position: [0, 0], size: [402, 120] } }] } }],
-            { label, author: { kind: "agent", name: "Claude" } },
+            { label, author: { kind: "agent", name: "Claude" }, ...(source ? { source } : {}) },
           ).ok,
-        label,
+        { label, source },
       );
     expect(await addScreen("added a receipt card")).toBe(true);
     await page.waitForTimeout(200);
     await expect(page.locator(".sb-holo")).toHaveCount(0);
-    expect(await addScreen("imported Receipt")).toBe(true);
+    await expect(page.locator(".sb-vw-holo")).toHaveCount(0);
+    // import_design marks its apply as an import, whatever label Claude gives it.
+    expect(await addScreen("set up the receipt screen", "import")).toBe(true);
     await expect(page.locator(".sb-holo")).toBeAttached();
-    // A click ends it early; it never takes the click from the canvas.
+    // The Viewer plays along, so it doesn't show the finished design first.
+    await expect(page.locator(".sb-vw-holo")).toBeAttached();
+    // A click ends it early, in both; it never takes the click from the canvas.
     const canvas = page.locator(".sb-cv");
     await canvas.click({ position: { x: 12, y: 40 } });
     await hologramDone(page);
+    await expect(page.locator(".sb-vw-holo")).toHaveCount(0);
+    expect(problems).toEqual([]);
+  });
+
+  test("plays in the Viewer alone when the canvas isn't showing, on the same timeline", async ({ page }) => {
+    const problems = collectConsoleProblems(page);
+    await openEditor(page);
+    await page.evaluate(() => window.__sonobe!.layout().setViewMode("patches"));
+    await expect(page.locator(".sb-cv")).toHaveCount(0);
+    const phases: string[] = [];
+    await page.exposeFunction("notePhase", (phase: string) => phases.at(-1) !== phase && phases.push(phase));
+    await page.evaluate(() => {
+      new MutationObserver(() => {
+        const phase = document.querySelector<HTMLElement>(".sb-vw-holo")?.dataset.phase;
+        if (phase) (window as unknown as { notePhase(p: string): void }).notePhase(phase);
+      }).observe(document.body, { subtree: true, childList: true, attributes: true, attributeFilter: ["data-phase"] });
+    });
+    await pasteText(page, JSON.stringify(receiptCapture));
+    await expect(page.getByText("Pasted “Receipt”")).toBeVisible();
+    await expect(page.locator(".sb-vw-holo")).toBeAttached();
+    await expect(page.locator(".sb-vw-holo")).toHaveCount(0, { timeout: 10_000 });
+    // The whole show in order, the laser sweeping down and back up (a busy machine can skip a frame's
+    // worth of a short phase, like the hold between the sweeps).
+    const order = ["power", "down", "hold", "up", "glow"];
+    expect(phases).toEqual(order.filter((phase) => phases.includes(phase)));
+    expect(phases).toEqual(expect.arrayContaining(["down", "up"]));
     expect(problems).toEqual([]);
   });
 
@@ -326,14 +358,20 @@ test.describe("Import Design", () => {
     await openEditor(page);
     // Record every phase it shows: the whole crossfade takes 300 ms.
     await page.evaluate(() => {
-      const phases: string[] = [];
-      (window as unknown as { holoPhases: string[] }).holoPhases = phases;
-      const note = () => document.querySelectorAll<HTMLElement>(".sb-holo").forEach((el) => phases.at(-1) !== el.dataset.phase && phases.push(el.dataset.phase ?? ""));
+      const phases: Record<string, string[]> = { canvas: [], viewer: [] };
+      (window as unknown as { holoPhases: typeof phases }).holoPhases = phases;
+      const note = () => {
+        for (const [surface, selector] of [["canvas", ".sb-holo"], ["viewer", ".sb-vw-holo"]] as const) {
+          const phase = document.querySelector<HTMLElement>(selector)?.dataset.phase;
+          if (phase && phases[surface]!.at(-1) !== phase) phases[surface]!.push(phase);
+        }
+      };
       new MutationObserver(note).observe(document.body, { subtree: true, childList: true, attributes: true, attributeFilter: ["data-phase"] });
     });
     await pasteText(page, JSON.stringify(receiptCapture));
     await expect(page.getByText("Pasted “Receipt”")).toBeVisible();
-    await expect(page.locator(".sb-holo")).toHaveCount(0, { timeout: 2_000 });
-    expect(await page.evaluate(() => (window as unknown as { holoPhases: string[] }).holoPhases)).toEqual(["fade"]);
+    await expect(page.locator(".sb-holo, .sb-vw-holo")).toHaveCount(0, { timeout: 2_000 });
+    // The canvas and the Viewer both crossfade, and nothing sweeps.
+    expect(await page.evaluate(() => (window as unknown as { holoPhases: Record<string, string[]> }).holoPhases)).toEqual({ canvas: ["fade"], viewer: ["fade"] });
   });
 });
