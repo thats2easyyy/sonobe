@@ -226,6 +226,46 @@ describe("components: layer components", () => {
     expect(six.step().roots.map((r) => r.children[1]!.props.text)).toEqual(["a", "b", "c", "d", "a", "b"]);
   });
 
+  it("Repeat on an instance with an empty loop on a published input: every copy reads the input's default, drawn and read alike", () => {
+    const echoed: ComponentInput = { ...card, patches: { ...card.patches, echo: { type: "splitter", typeParam: "text", inputs: { value: { link: "$in.title" } } } } };
+    const rt = createTestRuntime(
+      buildDoc({
+        components: [echoed],
+        layers: [{ id: "c1", type: "componentInstance", name: "Card", component: "card", props: { repeat: 3, title: { link: "none.output" } } }],
+        patches: { none: { type: "splitter", typeParam: "text", inputs: { value: { loop: [] } } } },
+      }),
+    );
+    runFrames(rt, 3);
+    expect(rt.scene().roots.map((r) => [r.key, r.props.title, r.children[1]!.props.text])).toEqual([
+      ["c1#0", "Untitled", "Untitled"],
+      ["c1#1", "Untitled", "Untitled"],
+      ["c1#2", "Untitled", "Untitled"],
+    ]);
+    expect(rt.getValue("@c1#1/label.text")).toBe("Untitled");
+    expect(rt.getValue("c1#1/echo.output")).toBe("Untitled");
+    expect(rt.inspect("@c1.title#1").value).toBe("Untitled");
+    expect(rt.issues()).toEqual([]);
+  });
+
+  it("a Repeat on an instance that isn't a count runs 1 copy of it, the one the scene draws", () => {
+    const rt = createTestRuntime(
+      buildDoc({
+        components: [card],
+        layers: [{ id: "c1", type: "componentInstance", name: "Card", component: "card", props: { repeat: { link: "label.output" }, title: { link: "names.output" } } }],
+        patches: {
+          label: { type: "splitter", typeParam: "text", inputs: { value: "four" } },
+          names: { type: "splitter", typeParam: "text", inputs: { value: { loop: ["a", "b", "c", "d"] } } },
+        },
+      }),
+    );
+    runFrames(rt, 2);
+    expect(rt.scene().roots.map((r) => [r.key, r.children[1]!.props.text])).toEqual([["c1#0", "a"]]);
+    expect(items(rt.getRawValue("@c1.on"))).toEqual([false]);
+    expect(rt.issues().map((i) => i.code)).toContain("repeat_not_a_count");
+    runFrames(rt, 2, tap(50, 50));
+    expect(items(rt.getRawValue("@c1.on"))).toEqual([true]);
+  });
+
   it("Repeat on an instance with no loop inputs makes copies, and a host Interaction on it runs per copy", () => {
     const rt = createTestRuntime(
       buildDoc({

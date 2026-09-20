@@ -61,7 +61,7 @@ import { beginInputs, createRecord, disposeRecord, evaluateRecord, type EvalEnv,
 import type { Binding, CLayer, CNode, CProp, InstancePath, Scope } from "./graph.ts";
 import { isLoop, makeLoop, MAX_LOOP_LENGTH } from "./loop.ts";
 import { mulberry32 } from "./random.ts";
-import { buildScene, isCount, repeatCount, type SceneBuild } from "./scene.ts";
+import { buildScene, repeatCount, type SceneBuild } from "./scene.ts";
 import { summarizeSeries } from "./trace.ts";
 import { coerceValue, truthy, valuesEqual } from "./values.ts";
 
@@ -116,9 +116,10 @@ export interface SonobeRuntime extends Runtime {
   patchTimings(): PatchTiming[];
   /**
    * Read an address like getValue, plus what a person needs when it reads as nothing: a note saying
-   * the layer drew 0 copies (and why), that "#n" is past its copies ("Card has 1 copy"), that the
-   * instance path runs into a component with 0 copies, or why the value is an empty loop. Layer
-   * addresses report `copies`, and reading a copied layer without "#n" says which copy it read.
+   * the layer, or a layer it's inside, drew 0 copies (and why), that "#n" is past its copies ("Card
+   * has 1 copy"), that the instance path runs into a component with 0 copies, or why the value is an
+   * empty loop. Layer addresses report `copies`, and reading a copied layer without "#n" says which
+   * copy it read.
    */
   inspect(address: string): ValueInspection;
 }
@@ -194,6 +195,12 @@ function nowMs(): number {
 const finite = (v: unknown): v is number => typeof v === "number" && Number.isFinite(v);
 
 const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
+
+function sameCounts(a: ReadonlyMap<string, number>, b: ReadonlyMap<string, number>): boolean {
+  if (a.size !== b.size) return false;
+  for (const [key, n] of a) if (b.get(key) !== n) return false;
+  return true;
+}
 
 function mediaName(url: string): string {
   const path = url.split(/[?#]/)[0] ?? "";
@@ -523,6 +530,8 @@ class RuntimeImpl implements SonobeRuntime {
     this.mismatchSites.clear();
     const build = this.build();
     this.checkingEmpty = false;
+    // Links to a layer's Repeat read last frame's copies: after a count changes, they read it next frame.
+    if (this.graph.readsCounts && !sameCounts(snapshot.counts, build.counts)) this.requested = true;
     this.pruneEmptyLoops();
     this.pruneMismatches();
     this.syncTextFields(snapshot, build);
@@ -724,12 +733,13 @@ class RuntimeImpl implements SonobeRuntime {
         const v = r.kind === "const" ? r.value : this.read(r, hostPath);
         if (!(node.feedback[inputs.length + k] && isLoop(v) && v.items.length === 0)) consider(v);
       }
-      // Repeat, when set, alone decides the count (an empty loop through a back-edge reads as unset).
+      // Repeat, when set, alone decides the count, and a value that isn't a count makes 1 copy, as in the
+      // scene (an empty loop through a back-edge reads as unset).
       if (child.repeat) {
         const r = child.repeat;
         const v = r.kind === "const" ? r.value : this.read(r, hostPath);
         const back = node.feedback[inputs.length + child.replicators.length] && isLoop(v) && v.items.length === 0;
-        const repeat = back || !isCount(v) ? null : repeatCount(v);
+        const repeat = back ? null : repeatCount(v);
         if (repeat !== null) {
           looping = true;
           empty = repeat === 0;
@@ -922,10 +932,6 @@ class RuntimeImpl implements SonobeRuntime {
 
   private readTarget({ parsed, scope, path }: ResolvedTarget): Value | Loop | undefined {
     if (parsed.kind === "knob") return this.graph.knobs.values.get(parsed.key);
-    // A layer's Repeat reads as the copies it drew last frame, not the loop it counts.
-    if (parsed.kind === "layer" && parsed.key === "repeat" && this.snapshot && scope.layerIndex.get(parsed.id)?.props.has("repeat")) {
-      return this.snapshot.counts.get(path.layerPrefix + parsed.id) ?? 1;
-    }
     if (parsed.kind === "patch") {
       const node = scope.nodes.get(parsed.id);
       if (node) {
@@ -992,7 +998,8 @@ class RuntimeImpl implements SonobeRuntime {
         else if (hb.type !== input.port.type) v = coerceValue(v, hb.type, input.port.type);
         if (input.loop && isLoop(v)) {
           const n = v.items.length;
-          if (own.copy !== undefined) return n ? v.items[own.copy % n] : undefined;
+          // Copies of an empty loop come from Repeat, where every copy reads the default, or from a back-edge (no value yet).
+          if (own.copy !== undefined) return n ? v.items[own.copy % n] : input.feedback ? undefined : input.default;
           // An empty loop read through a back-edge took no copies away (evaluateCopies): no value yet.
           if (n === 0 && input.feedback) return undefined;
         }
@@ -1010,6 +1017,8 @@ class RuntimeImpl implements SonobeRuntime {
         return this.readLayerRef(b, path, whole);
       case "layerOutput":
         return this.readLayerOutput(b, path, whole);
+      case "layerCount":
+        return this.drawnCopies(b.layer, path);
     }
   }
 
@@ -1371,14 +1380,41 @@ class RuntimeImpl implements SonobeRuntime {
   // ---- copies -----------------------------------------------------------------------
 
   /**
-   * How many copies the layer of a layer-property address drew last frame (1 when it isn't copied);
+   * How many copies the layer of a layer-property address drew last frame (see drawnCopies);
    * undefined for other addresses, layer outputs, and before the first frame.
    */
   private propCopies({ parsed, scope, path }: ResolvedTarget): number | undefined {
     if (parsed.kind !== "layer" || !this.snapshot) return undefined;
     const layer = scope.layerIndex.get(parsed.id);
     if (!layer?.props.has(parsed.key) || layer.outputs.some((o) => o.key === parsed.key) || layer.instance?.component.interface.outputs[parsed.key]) return undefined;
-    return this.snapshot.counts.get(path.layerPrefix + parsed.id) ?? 1;
+    return this.drawnCopies(layer, path);
+  }
+
+  /** How many copies of a layer last frame drew: 1 when it isn't copied, 0 when a layer around it drew none. */
+  private drawnCopies(layer: CLayer, path: InstancePath): number {
+    return this.snapshot?.counts.get(path.layerPrefix + layer.id) ?? (this.hiddenBy(layer, path) ? 0 : 1);
+  }
+
+  /**
+   * The nearest layer around `layer` that drew 0 copies last frame, so nothing inside it was drawn:
+   * in its own component, then around the instances that show it. Null when there's none.
+   */
+  private hiddenBy(layer: CLayer, path: InstancePath): { layer: CLayer; path: InstancePath } | null {
+    const counts = this.snapshot?.counts;
+    if (!counts) return null;
+    let up: CLayer | null | undefined = layer.parent;
+    let at = path;
+    for (;;) {
+      if (!up) {
+        const scope = at.scope;
+        if (scope.kind !== "layerInstance" || !at.parent) return null;
+        at = at.parent;
+        up = at.scope.layerIndex.get(scope.instanceId!);
+        if (!up) return null;
+      }
+      if (counts.get(at.layerPrefix + up.id) === 0) return { layer: up, path: at };
+      up = up.parent;
+    }
   }
 
   /**
@@ -1448,11 +1484,16 @@ class RuntimeImpl implements SonobeRuntime {
     if (target.parsed.kind === "layer") {
       const layer = target.scope.layerIndex.get(target.parsed.id);
       const drawn = this.snapshot?.counts.get(target.path.layerPrefix + target.parsed.id);
-      const count = drawn ?? (this.snapshot && layer ? 1 : undefined);
+      const hidden = drawn === undefined && layer ? this.hiddenBy(layer, target.path) : null;
+      const count = drawn ?? (this.snapshot && layer ? (hidden ? 0 : 1) : undefined);
       if (count !== undefined) out.copies = count;
       const name = `Layer "${layer?.node.name || target.parsed.id}"`;
       if (count === 0) {
-        out.note = `Not drawn: ${layer ? (this.emptyLayerNote(layer, target.path) ?? `${name} has 0 copies.`) : `${name} has 0 copies.`}`;
+        // Inside a layer that drew no copies, say which one, and why as inspecting it would.
+        const empty = hidden ?? (layer ? { layer, path: target.path } : null);
+        const emptyName = empty ? `Layer "${empty.layer.node.name || empty.layer.id}"` : name;
+        const why = (empty && this.emptyLayerNote(empty.layer, empty.path)) ?? `${emptyName} has 0 copies.`;
+        out.note = `Not drawn: ${hidden ? `it's inside ${emptyName}. ` : ""}${why}`;
         return out;
       }
       if (count !== undefined && index !== undefined && index >= count) {

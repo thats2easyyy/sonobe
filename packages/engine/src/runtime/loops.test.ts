@@ -456,6 +456,80 @@ describe("loops: Repeat", () => {
     expect(single.getValue("@box.repeat")).toBe(1);
   });
 
+  it("a patch linked to @card.repeat reads the copies last frame drew, whether Repeat is linked, Auto or typed", () => {
+    const lastIndex = (props: Record<string, InputValue>) => {
+      const rt = createTestRuntime(
+        buildDoc({
+          layers: [{ id: "card", type: "rectangle", name: "Card", props }],
+          patches: {
+            names: { type: "splitter", typeParam: "text", inputs: { value: { loop: ["A", "B", "C", "D"] } } },
+            rows: { type: "splitter", typeParam: "point", inputs: { value: { loop: [[0, 0], [0, 10], [0, 20], [0, 30]] } } },
+            last: { type: "add", inputs: { value1: { link: "@card.repeat" }, value2: -1 } },
+          },
+        }),
+      );
+      rt.step();
+      // The first frame changed the count from the scene before it (1 copy while no patch had run), so
+      // the runtime asks for a frame that reads the new one.
+      const asked = rt.needsNextFrame;
+      runFrames(rt, 2);
+      expect(rt.needsNextFrame).toBe(false);
+      expect(rt.issues()).toEqual([]);
+      return [rt.scene().roots.length, rt.getRawValue("last.output"), asked];
+    };
+    expect(lastIndex({ repeat: { link: "names.output" } })).toEqual([4, 3, true]);
+    expect(lastIndex({ position: { link: "rows.output" } })).toEqual([4, 3, true]);
+    expect(lastIndex({ repeat: 3 })).toEqual([3, 2, false]);
+  });
+
+  it("a layer inside a layer that drew 0 copies reads 0 copies too, and inspect says which layer hid it", () => {
+    const doc = (repeat: InputValue | undefined, others: Record<string, InputValue> = {}) =>
+      buildDoc({
+        layers: [
+          {
+            id: "card",
+            type: "group",
+            name: "Card",
+            props: { ...(repeat === undefined ? {} : { repeat }), ...others },
+            children: [
+              { id: "title", type: "text", name: "Title", props: { text: "Hi" } },
+              { id: "inner", type: "group", name: "Inner", children: [{ id: "badge", type: "rectangle", name: "Badge", props: { opacity: 0.7, color: { link: "tints.output" } } }] },
+            ],
+          },
+        ],
+        patches: {
+          none: { type: "splitter", typeParam: "point", inputs: { value: { loop: [] } } },
+          tints: { type: "splitter", typeParam: "color", inputs: { value: { loop: ["#FF0000FF", "#00FF00FF"] } } },
+        },
+      });
+    const none = createTestRuntime(doc(0));
+    runFrames(none, 2);
+    expect(none.scene().roots).toEqual([]);
+    expect(none.inspect("@card.opacity")).toEqual({ value: 1, copies: 0, note: 'Not drawn: Layer "Card" has 0 copies.' });
+    expect(none.inspect("@title.text")).toEqual({ value: "Hi", copies: 0, note: 'Not drawn: it\'s inside Layer "Card". Layer "Card" has 0 copies.' });
+    expect(none.inspect("@badge.opacity#1")).toEqual({ value: 0.7, copies: 0, note: 'Not drawn: it\'s inside Layer "Card". Layer "Card" has 0 copies.' });
+    expect(none.getValue("@title.repeat")).toBe(0);
+
+    const emptied = createTestRuntime(doc(undefined, { position: { link: "none.output" } }));
+    runFrames(emptied, 2);
+    const why = emptied.inspect("@card.position").note!;
+    expect(why).toMatch(/^Not drawn: Layer "Card" has 0 copies because its Position/);
+    expect(emptied.inspect("@badge.opacity")).toEqual({ value: 0.7, copies: 0, note: `Not drawn: it's inside Layer "Card". ${why.slice("Not drawn: ".length)}` });
+
+    const drawn = createTestRuntime(doc(2));
+    runFrames(drawn, 2);
+    expect(drawn.inspect("@badge.opacity")).toEqual({ value: 0.7, copies: 2, note: "copy #0 of 2" });
+  });
+
+  it("a component instance inside a layer that drew 0 copies isn't drawn, and inspect says so from inside it", () => {
+    const chip: ComponentInput = { id: "chip", kind: "layerComponent", size: [80, 40], layers: [{ id: "label", type: "text", name: "Label", props: { text: "Chip" } }] };
+    const rt = createTestRuntime(
+      buildDoc({ components: [chip], layers: [{ id: "row", type: "group", name: "Row", props: { repeat: 0 }, children: [{ id: "c1", type: "componentInstance", name: "Chip", component: "chip", props: {} }] }] }),
+    );
+    runFrames(rt, 2);
+    expect(rt.inspect("@c1/label.text")).toEqual({ value: "Chip", copies: 0, note: 'Not drawn: it\'s inside Layer "Row". Layer "Row" has 0 copies.' });
+  });
+
   it("inspect says how many copies a layer has and which one it read", () => {
     const one = createTestRuntime(deck());
     one.step();
