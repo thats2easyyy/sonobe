@@ -1,4 +1,4 @@
-import { Ban, Check, CircleAlert, Info, KeyRound, LoaderCircle, Sparkles, SkipForward, TriangleAlert, Trash2, X } from "lucide-react";
+import { Ban, Check, CircleAlert, Info, KeyRound, LoaderCircle, RefreshCw, Sparkles, SkipForward, TriangleAlert, Trash2, X } from "lucide-react";
 import { useEffect, useLayoutEffect, useRef } from "react";
 import { Button } from "../../ui/Button.tsx";
 import { Markdown } from "../learn/Markdown.tsx";
@@ -70,35 +70,49 @@ function Notice({ item, onManageKey }: { item: Extract<ChatItem, { kind: "notice
   );
 }
 
-function Confirm({ item, onConfirm }: { item: Extract<ChatItem, { kind: "confirm" }>; onConfirm: TranscriptProps["onConfirm"] }) {
-  const deleteRef = useRef<HTMLButtonElement>(null);
+const CONFIRM_COPY = {
+  delete: { approve: "Delete", decline: "Keep them", approved: "You allowed the deletion.", declined: "You kept them." },
+  replace: { approve: "Replace", decline: "Keep it", approved: "You allowed the change.", declined: "You kept it." },
+} as const;
+
+/**
+ * A confirmation the Assistant is waiting on: deleting items, or replacing a screen with a new design
+ * (the transcript and the canvas's Design with Claude box both show it). Focus goes to the choice
+ * that keeps the person's work: Delete for a deletion they asked for, the decline button for a replace.
+ */
+export function ConfirmCard({ item, onConfirm }: { item: Extract<ChatItem, { kind: "confirm" }>; onConfirm: TranscriptProps["onConfirm"] }) {
+  const kind = item.confirmKind ?? "delete";
+  const copy = CONFIRM_COPY[kind];
+  const approveRef = useRef<HTMLButtonElement>(null);
+  const declineRef = useRef<HTMLButtonElement>(null);
   useEffect(() => {
-    if (item.status === "pending") deleteRef.current?.focus({ preventScroll: true });
-  }, [item.status]);
+    if (item.status === "pending") (kind === "replace" ? declineRef : approveRef).current?.focus({ preventScroll: true });
+  }, [item.status, kind]);
+  const Icon = kind === "replace" ? RefreshCw : Trash2;
   return (
-    <div className="sb-assistant-confirm" data-status={item.status} role={item.status === "pending" ? "alertdialog" : undefined} aria-label={item.title}>
+    <div className="sb-assistant-confirm" data-kind={kind} data-status={item.status} role={item.status === "pending" ? "alertdialog" : undefined} aria-label={item.title}>
       <div className="sb-assistant-confirm__head">
-        <Trash2 size={15} aria-hidden className="sb-assistant-confirm__icon" />
+        <Icon size={15} aria-hidden className="sb-assistant-confirm__icon" />
         <p className="sb-assistant-confirm__title">{item.title}</p>
       </div>
       <p className="sb-assistant-confirm__message">{item.message}</p>
       {item.status === "pending" ? (
         <div className="sb-assistant-confirm__actions">
-          <Button size="sm" onClick={() => onConfirm(item.id, false)}>
-            Keep them
+          <Button ref={declineRef} size="sm" onClick={() => onConfirm(item.id, false)}>
+            {item.declineLabel ?? copy.decline}
           </Button>
-          <Button ref={deleteRef} size="sm" variant="danger" onClick={() => onConfirm(item.id, true)}>
-            Delete
+          <Button ref={approveRef} size="sm" variant={kind === "replace" ? "primary" : "danger"} onClick={() => onConfirm(item.id, true)}>
+            {item.approveLabel ?? copy.approve}
           </Button>
         </div>
       ) : (
-        <p className="sb-assistant-confirm__result">{item.status === "approved" ? "You allowed the deletion." : "You kept them."}</p>
+        <p className="sb-assistant-confirm__result">{item.status === "approved" ? copy.approved : copy.declined}</p>
       )}
     </div>
   );
 }
 
-/** The chat: messages, streamed replies with tool chips, notices, and deletion confirmations. */
+/** The chat: messages, streamed replies with tool chips, notices, and confirmations. */
 export function Transcript({ items, running, thinking, onConfirm, onManageKey, onSuggestion }: TranscriptProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const pinned = useRef(true);
@@ -146,7 +160,8 @@ export function Transcript({ items, running, thinking, onConfirm, onManageKey, o
         switch (item.kind) {
           case "user":
             return (
-              <div key={item.id} className="sb-assistant-msg" data-role="user">
+              <div key={item.id} className="sb-assistant-msg" data-role="user" data-origin={item.origin}>
+                {item.origin === "canvas" ? <span className="sb-assistant-msg__origin">From the canvas</span> : null}
                 <p className="sb-assistant-msg__user">{item.text}</p>
               </div>
             );
@@ -160,7 +175,7 @@ export function Transcript({ items, running, thinking, onConfirm, onManageKey, o
           case "notice":
             return <Notice key={item.id} item={item} onManageKey={onManageKey} />;
           case "confirm":
-            return <Confirm key={item.id} item={item} onConfirm={onConfirm} />;
+            return <ConfirmCard key={item.id} item={item} onConfirm={onConfirm} />;
         }
       })}
       {waiting ? (

@@ -1,6 +1,7 @@
-import { KeyRound, LoaderCircle, MessageSquarePlus, Monitor, Plug, Sparkles, X } from "lucide-react";
+import { KeyRound, LoaderCircle, MessageSquarePlus, Monitor, ScanLine, Sparkles, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { StoreApi } from "zustand/vanilla";
+import { appPanels } from "../../app/appPanels.ts";
 import { Button } from "../../ui/Button.tsx";
 import { EmptyState } from "../../ui/EmptyState.tsx";
 import { IconButton } from "../../ui/IconButton.tsx";
@@ -20,6 +21,8 @@ export interface AssistantDrawerProps {
   onClose?: () => void;
   /** Opens Connect Claude (default: connectClaudeStore.show()). */
   onConnectClaude?: () => void;
+  /** Opens File → Import Design, from the browser notice (default: appPanels.show("importDesign")). */
+  onImportDesign?: () => void;
   /** Default: window.sonobeHost. Null means browser mode (desktop-only notice). */
   host?: AssistantHostLike | null;
   store?: StoreApi<AssistantState>;
@@ -30,10 +33,11 @@ export interface AssistantDrawerProps {
 
 /**
  * The Assistant drawer: chat with Claude using the person's own Anthropic API key, with streamed
- * replies, tool activity chips, Stop, a model picker, deletion confirmations, and a token budget meter.
- * Without a key it shows the key setup; in the browser, a desktop-only notice. Fills its container.
+ * replies, tool activity chips, Stop, a model picker, confirmations (deleting items, replacing a
+ * screen), and a token budget meter. Without a key it shows the key setup; in the browser, a
+ * desktop-only notice that points to Import Design. Fills its container.
  */
-export function AssistantDrawer({ onClose, onConnectClaude, host, store = defaultStore, controller: providedController, className }: AssistantDrawerProps) {
+export function AssistantDrawer({ onClose, onConnectClaude, onImportDesign, host, store = defaultStore, controller: providedController, className }: AssistantDrawerProps) {
   const [api] = useState<AssistantHostLike | null>(() => (host === undefined ? getAssistantHost() : host));
   const useShared = providedController === undefined && host === undefined && store === defaultStore;
   const controller = useMemo(() => providedController ?? (useShared ? sharedAssistantController() : createAssistantController(api, store)), [providedController, useShared, api, store]);
@@ -61,6 +65,7 @@ export function AssistantDrawer({ onClose, onConnectClaude, host, store = defaul
   }, [controller]);
 
   const connect = onConnectClaude ?? (() => connectClaudeStore.getState().show());
+  const importDesign = onImportDesign ?? (() => appPanels.getState().show("importDesign"));
   const models = status?.models ?? FALLBACK_MODELS;
   const modelOptions: SelectOption[] = models.map((m) => ({ value: m.id, label: m.label, description: `${m.description} $${m.pricing.input}/$${m.pricing.output} per million tokens (in/out).` }));
   const showKeySetup = controller.available && status !== null && (!status.hasKey || managingKey);
@@ -76,10 +81,10 @@ export function AssistantDrawer({ onClose, onConnectClaude, host, store = defaul
         className="sb-assistant-browser"
         icon={<Monitor size={20} strokeWidth={1.75} />}
         title="The Assistant runs in the Sonobe desktop app"
-        description="It uses your own Anthropic API key, kept in your computer's keychain, so it isn't available in the browser. To build with Claude here, connect Claude Desktop or Claude Code over MCP."
+        description="It uses your own Anthropic API key, kept in your computer's keychain, so it isn't available in the browser. Claude's live edits need the desktop app too. Here, ask Claude for a screen as HTML and paste it into File → Import Design."
         actions={
-          <Button variant="ai" icon={<Plug size={14} />} onClick={connect}>
-            Connect Claude…
+          <Button variant="ai" icon={<ScanLine size={14} />} onClick={importDesign}>
+            Import Design…
           </Button>
         }
       />

@@ -412,6 +412,13 @@
   overflow-wrap: anywhere;
 }
 
+/* A message sent from the canvas's Design with Claude box. */
+.sb-assistant-msg__origin {
+  margin-bottom: calc(var(--space-2) - var(--space-3));
+  color: var(--text-tertiary);
+  font-size: var(--font-size-2xs);
+}
+
 .sb-assistant-msg__md {
   font-size: var(--font-size-sm);
   line-height: 1.55;
@@ -546,6 +553,17 @@
     inset 0 0 0 1px color-mix(in srgb, var(--danger) 35%, var(--border-default)),
     var(--shadow-sm);
   animation: sb-assistant-in var(--duration-base) var(--ease-out);
+}
+
+/* Replacing a screen can be undone like any edit: the AI accent, not the danger one. */
+.sb-assistant-confirm[data-kind="replace"] {
+  box-shadow:
+    inset 0 0 0 1px color-mix(in srgb, var(--ai) 35%, var(--border-default)),
+    var(--shadow-sm);
+}
+
+.sb-assistant-confirm[data-kind="replace"] .sb-assistant-confirm__icon {
+  color: var(--ai-text);
 }
 
 .sb-assistant-confirm[data-status="approved"],

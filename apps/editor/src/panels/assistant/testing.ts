@@ -1,21 +1,43 @@
 /** A fake window.sonobeHost for Assistant tests (assistant bridge, secrets, openExternal). Not imported by app code. */
 
-import { ASSISTANT_KEY_SECRET, FALLBACK_MODELS, type AssistantEvent, type AssistantHostLike, type AssistantRunResult, type AssistantStatus, type AssistantUsage } from "./types.ts";
+import {
+  ASSISTANT_KEY_SECRET,
+  FALLBACK_MODELS,
+  type AssistantCanvasContext,
+  type AssistantCodeFolderLinkResult,
+  type AssistantCodeFolderStatus,
+  type AssistantDesignFields,
+  type AssistantEvent,
+  type AssistantHostLike,
+  type AssistantRunResult,
+  type AssistantStatus,
+  type AssistantUsage,
+} from "./types.ts";
 
-export const usage = (totalTokens = 0): AssistantUsage => ({ inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, totalTokens, estimatedCostUsd: 0, requests: 0 });
+export const usage = (totalTokens = 0, budgetTokens = totalTokens): AssistantUsage => ({ inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, totalTokens, budgetTokens, estimatedCostUsd: 0, requests: 0 });
+
+type SendRequest = { text: string; model?: string; context?: AssistantCanvasContext };
 
 export interface FakeAssistantHost extends AssistantHostLike {
   secretsMap: Map<string, string>;
-  sent: { text: string; model?: string }[];
+  sent: SendRequest[];
   confirmations: [string, boolean][];
   opened: string[];
   stops: number;
   resets: number;
   keyOk: boolean;
+  /** What status().codeFolder reports; the code folder methods change it. */
+  folder: AssistantCodeFolderStatus;
+  /** Code folder calls, in order. */
+  folderCalls: ("codeFolder" | "link" | "unlink")[];
+  /** What linkCodeFolder() answers (default: links ~/code/noddit, remembered for the project). */
+  nextLink: () => AssistantCodeFolderLinkResult;
   listeners: Set<(event: AssistantEvent) => void>;
   emit(event: AssistantEvent): void;
+  /** Stream `html` as import_design's draft: `chunks` design_draft events with their offsets, the last one done with the whole html. */
+  emitDesign(runId: string, toolUseId: string, html: string, options?: { chunks?: number; fields?: AssistantDesignFields; turn?: number }): void;
   /** How send() behaves; emits the run's events through `emit`. */
-  nextResult: (request: { text: string; model?: string }, emit: (event: AssistantEvent) => void) => AssistantRunResult | Promise<AssistantRunResult>;
+  nextResult: (request: SendRequest, emit: (event: AssistantEvent) => void) => AssistantRunResult | Promise<AssistantRunResult>;
 }
 
 export function fakeAssistantHost(options: { secretsAvailable?: boolean; key?: string } = {}): FakeAssistantHost {
@@ -28,9 +50,20 @@ export function fakeAssistantHost(options: { secretsAvailable?: boolean; key?: s
     stops: 0,
     resets: 0,
     keyOk: true,
+    folder: { linked: null, missing: false },
+    folderCalls: [],
+    nextLink: () => ({ status: { linked: { name: "noddit", path: "~/code/noddit", persisted: true }, missing: false } }),
     listeners: new Set(),
     emit(event) {
       for (const l of [...host.listeners]) l(event);
+    },
+    emitDesign(runId, toolUseId, html, { chunks = 8, fields, turn = 1 } = {}) {
+      const size = Math.ceil(html.length / chunks);
+      for (let i = 0; i < chunks; i++) {
+        const offset = Math.min(html.length, i * size);
+        const done = i === chunks - 1;
+        host.emit({ type: "design_draft", runId, turn, toolUseId, offset, append: html.slice(offset, done ? html.length : offset + size), ...(fields && (i === 0 || done) ? { fields } : {}), done, ...(done ? { html } : {}) });
+      }
     },
     nextResult: (_request, emit) => {
       emit({ type: "run_started", runId: "r1", model: "claude-sonnet-5" });
@@ -52,6 +85,7 @@ export function fakeAssistantHost(options: { secretsAvailable?: boolean; key?: s
           usage: usage(),
           running: false,
           messageCount: 0,
+          codeFolder: host.folder,
         };
       },
       send: async (request) => {
@@ -76,6 +110,21 @@ export function fakeAssistantHost(options: { secretsAvailable?: boolean; key?: s
         return () => {
           host.listeners.delete(cb);
         };
+      },
+      codeFolder: async () => {
+        host.folderCalls.push("codeFolder");
+        return host.folder;
+      },
+      linkCodeFolder: async () => {
+        host.folderCalls.push("link");
+        const result = host.nextLink();
+        host.folder = result.status;
+        return result;
+      },
+      unlinkCodeFolder: async () => {
+        host.folderCalls.push("unlink");
+        host.folder = { linked: null, missing: false };
+        return host.folder;
       },
     },
     secrets: {

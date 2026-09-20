@@ -21,6 +21,7 @@ export interface AssistantModelInfo {
 
 export interface AssistantLimits {
   maxTurns: number;
+  /** Budget tokens (AssistantUsage.budgetTokens) one chat may use before it pauses. */
   tokenBudget: number;
   deleteConfirmThreshold: number;
 }
@@ -138,7 +139,10 @@ export type AssistantEvent =
   | { type: "usage"; runId: string; usage: AssistantUsage; limits: AssistantLimits }
   | { type: "notice"; runId: string; tone: "info" | "warn"; message: string }
   | { type: "run_finished"; runId: string; outcome: AssistantOutcome; error?: AssistantError; usage: AssistantUsage }
-  /** import_design's html while Claude writes it: `append` continues the html at `offset`; the last event has done: true and the whole html. */
+  /**
+   * import_design's html while Claude writes it (the tool hasn't run): `append` continues the html at
+   * `offset`; the last event has done: true and the whole html. A retried turn drops that turn's drafts.
+   */
   | { type: "design_draft"; runId: string; turn: number; toolUseId: string; offset: number; append: string; fields?: AssistantDesignFields; done: boolean; html?: string };
 
 /** `window.sonobeHost.assistant`. */
@@ -171,7 +175,10 @@ export interface AssistantHostLike {
 /** `window.sonobeHost` when running in the desktop app, else null (browser mode). */
 export function getAssistantHost(): AssistantHostLike | null {
   if (typeof window === "undefined") return null;
-  return (window as unknown as { sonobeHost?: AssistantHostLike }).sonobeHost ?? null;
+  const w = window as unknown as { sonobeHost?: AssistantHostLike; __sonobeFakeAssistant?: AssistantHostLike };
+  // e2e only (e2e/fakeAssistant.ts); never in a production build.
+  if (import.meta.env?.DEV && w.__sonobeFakeAssistant) return w.__sonobeFakeAssistant;
+  return w.sonobeHost ?? null;
 }
 
 /** Whether a host can run the Assistant (desktop with the assistant bridge and keychain secrets). */
