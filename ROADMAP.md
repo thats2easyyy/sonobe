@@ -6,7 +6,7 @@ A checked item is done. An unchecked item marked "partial" says what's left.
 
 ## Next steps
 
-1. **Signing.** Developer ID signing and notarization for macOS, and code signing for Windows, so builds can be shared.
+1. **Signing.** Developer ID signing and notarization for macOS, code signing for Windows, and TestFlight for the Sonobe Viewer iPhone app, so builds can be shared.
 2. **Windows and Linux.** Build and verify the installers that are configured but untested.
 3. **Figma plugin, verified.** Run the Sonobe Capture plugin inside Figma against real files, fix what it finds, and publish it.
 4. **Origami JSON import.** Open existing Origami prototypes as Sonobe documents.
@@ -35,6 +35,7 @@ The first two finish Stage 4. The rest are Stage 5.
 - [x] Canvas: direct manipulation, snapping, insert shapes and text, alignment tools
 - [x] Layer ↔ patch bridges: Touch button, inspector property links, drag a cable onto a property
 - [ ] Viewer: device picker, frame, restart, hit-target overlay, pop-out window, LAN web player with QR code, recording (partial: recording remains)
+- [ ] Native iPhone preview: Sonobe Viewer (`apps/ios`) plays the LAN web player full screen with real haptics. Haptic and Vibrate reach UIFeedbackGenerator and Core Haptics over a small bridge, the app scans the Preview on Phone code, and `npm run test:ios` runs its tests on a simulator. Android phones vibrate in the browser (partial: tested only in the Simulator, built from source until TestFlight, and importing SF Symbols as real icons remains)
 - [x] Assets: images, video, sound, fonts, Lottie (drag and drop)
 - [x] Examples: 15 canonical recipes as runnable projects with scripted tests
 - [x] Learn panel: 5 interactive lessons, the guides, the examples, and the patch reference
@@ -48,7 +49,7 @@ The first two finish Stage 4. The rest are Stage 5.
 ## Stage 4: Distribution
 - [x] macOS packaging: `npm run package -w @sonobe/desktop` builds an arm64 DMG with the CLI inside, and `package:verify` launches it muted and checks the MCP endpoint, the editor, and the CLI
 - [x] Claude Code plugin and Claude Desktop extension build from a checkout, and their manifests list exactly the server's tools and prompts
-- [ ] Signing: Developer ID identity, hardened runtime, and notarization on macOS; code signing on Windows (partial: local builds are ad-hoc signed with hardened runtime off, which runs only on the Mac that built them)
+- [ ] Signing: Developer ID identity, hardened runtime, and notarization on macOS; code signing on Windows; TestFlight for Sonobe Viewer (partial: local builds are ad-hoc signed with hardened runtime off, which runs only on the Mac that built them, and Sonobe Viewer installs only from Xcode with your own team)
 - [ ] Windows and Linux packaging verification (partial: electron-builder targets exist for NSIS, AppImage, and deb on x64 and arm64, and Connect Claude handles Windows paths and quoting, but none of those builds has been run and verified; the Intel macOS DMG is untested too)
 - [ ] Downloads: release builds, a prebuilt `.mcpb`, and a plugin marketplace listing (partial: all three build locally, but nothing is published, and a marketplace copy must ship the plugin's built `dist/`)
 - [ ] Publish the CLI to npm (partial: the bundle is self-contained, but the package is still private and lists workspace packages as dependencies)

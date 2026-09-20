@@ -9,3 +9,7 @@ playwright-report/
 .DS_Store
 # per-user editor state inside project folders
 **/*.sonobe/.sonobe/
+# Sonobe Viewer (apps/ios): your signing settings, and Xcode build output and per-user state
+apps/ios/Config/Local.xcconfig
+apps/ios/build/
+xcuserdata/
