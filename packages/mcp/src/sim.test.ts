@@ -223,6 +223,16 @@ describe("simulation with an empty loop", () => {
     expect(notes["cards.index#5"]).toBe("It's a loop of 3 items (#0 to #2), so there's no #5.");
     expect(values.text).toContain("  @card.opacity#1 = null\n    Not drawn: Layer \"Card\" has 0 copies");
 
+    // An overridden value that also reads as nothing gets one note: the override, then why.
+    const overridden = await client.call("sim_override", { simId, set: [{ target: "@card.size", value: [100, 60] }] });
+    expect(overridden.isError, overridden.text).toBe(false);
+    const both = await client.call("sim_get_values", { simId, targets: ["@card.size"] });
+    const note = (both.structured.notes as Record<string, string>)["@card.size"]!;
+    expect(note).toMatch(/^Overridden in this simulation, was \[200, 60\]\. Not drawn: Layer "Card" has 0 copies/);
+    expect(both.text).toContain(`  @card.size = [100, 60]\n    ${note}`);
+    const cleared = await client.call("sim_override", { simId, clear: "all" });
+    expect(cleared.isError, cleared.text).toBe(false);
+
     // Apply the suggested fix; the running simulation picks it up and draws the cards.
     const fixed = await client.call("apply_ops", { ops: [{ op: "setInput", target: "next_on.outOfRange", value: "fallback" }] });
     expect(fixed.isError, fixed.text).toBe(false);
