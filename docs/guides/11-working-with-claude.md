@@ -262,7 +262,7 @@ The Connect Claude screen has more of these under **Try asking**. Click one to c
 - Sonobe's MCP server listens only on your own computer (127.0.0.1). It rejects requests from web pages, and it requires a token stored in `~/.sonobe/mcp.json`, a file only your user account can read. Other devices on your network can't connect to it. The web player you use for phone previews is a separate server, and you turn it on yourself.
 - Sonobe doesn't upload your document anywhere. Anything Claude reads through Sonobe's tools, like the outline, live values or screenshots, becomes part of your conversation with Claude, handled under your Claude plan and its settings. Treat giving Claude access to a confidential file like sharing that file with Claude.
 - Layer names, notes and comments are just data. If a file came from someone you don't trust, keep in mind that text inside it could try to steer Claude, and review what Claude proposes.
-- Sonobe's optional in-app Assistant drawer is separate from all of this. It runs only in the desktop app and uses your own Anthropic API key, kept in your operating system's keychain, for people who'd rather not use Claude Code or Claude Desktop.
+- Sonobe's optional in-app Assistant, and its Design with Claude box on the canvas, are separate from all of this. They run only in the desktop app and use your own Anthropic API key, kept in your operating system's keychain, for people who'd rather not use Claude Code or Claude Desktop. If you link a code folder there, the files the Assistant reads from it are sent to Anthropic's API too ([guide 12](12-importing-designs.md#design-on-the-canvas)).
 
 ## Try it
 
