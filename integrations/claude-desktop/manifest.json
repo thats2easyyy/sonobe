@@ -43,14 +43,14 @@
     },
     { "name": "describe_layer_types", "description": "Layer types and their properties." },
     { "name": "list_value_types", "description": "Value types, literals and conversions." },
-    { "name": "list_documents", "description": "Documents open in Sonobe." },
-    { "name": "open_document", "description": "Open a document and make it active." },
+    { "name": "list_documents", "description": "Documents open in Sonobe, and drafts to recover." },
+    { "name": "open_document", "description": "Open a document or a recovered draft and make it active." },
     { "name": "create_document", "description": "Create a project from a template." },
     {
       "name": "get_document_info",
       "description": "Revision, device, components, diagnostics and host features."
     },
-    { "name": "save_document", "description": "Write the document to its project folder." },
+    { "name": "save_document", "description": "Write the document to its project folder, or save it as a new one." },
     { "name": "get_outline", "description": "Compact text projection of layers and patches." },
     { "name": "get_layers", "description": "The layer tree with linked properties." },
     { "name": "get_patches", "description": "Patches with inputs, links and consumers." },

@@ -14,6 +14,7 @@ import {
   ProjectFormatError,
   retiredIds,
   seenIdsExcept,
+  seenIdsToJSON,
   serializeDocument,
   type Affected,
   type ApplyOpsResult,
@@ -25,6 +26,8 @@ import {
   type Id,
   type Op,
   type Registry,
+  type SeenIds,
+  type SeenIdsJSON,
   type SonobeDocument,
   type SonobeError,
 } from "@sonobe/core";
@@ -101,6 +104,9 @@ export interface FileResult {
   error?: string;
   /** "disk_changed": the project changed on disk while there were unsaved changes (see SaveDocumentOptions). */
   errorCode?: string;
+  /** A save's files written (created or changed) and stale files removed. */
+  written?: string[];
+  deleted?: string[];
 }
 
 export interface SaveDocumentOptions {
@@ -137,6 +143,8 @@ export interface ReplaceOptions {
   kind?: "replace" | "reload";
   label?: string;
   author?: Author;
+  /** Ids an earlier session saw (a restored draft continues its session, ARCHITECTURE §3.2): merged into the ledger before the new document is observed. */
+  seenIds?: SeenIds;
 }
 
 export interface DocumentState {
@@ -182,6 +190,8 @@ export interface DocumentState {
   /** Refuses with errorCode "disk_changed" while `externalChange` is pending, unless `overwriteExternal`. */
   save: (options?: SaveDocumentOptions) => Promise<FileResult>;
   saveAs: () => Promise<FileResult>;
+  /** Save As to `path` without asking where (the path was already chosen and approved). */
+  saveTo: (path: string) => Promise<FileResult>;
   /**
    * Re-read the project from disk; reloads when clean, otherwise sets `externalChange`. Unreadable
    * files set `diskProblem`. Changes reported while saving or opening are checked once that's done.
@@ -201,6 +211,8 @@ export interface DocumentState {
   isRetiredId: (component: Id, id: Id) => boolean;
   /** Component id → its retired item ids (only components that have any). */
   retiredIds: () => Record<Id, Id[]>;
+  /** Every id seen this session, as JSON (drafts keep it so a restored draft continues the session). */
+  seenIds: () => SeenIdsJSON;
   dispose: () => void;
 }
 
@@ -417,11 +429,13 @@ export function createDocumentStore(options: DocumentStoreOptions): DocumentStor
         pruneReloads();
       } else if (replaceOptions.keepHistory) {
         history.bump();
+        if (replaceOptions.seenIds) ids.merge(replaceOptions.seenIds);
         ids.observe(doc);
       } else {
-        // A new document starts a new session.
+        // A new document starts a new session (a restored draft continues its own).
         history.clear();
         ids.clear();
+        if (replaceOptions.seenIds) ids.merge(replaceOptions.seenIds);
         ids.observe(doc);
         reloads.clear();
       }
@@ -489,7 +503,7 @@ export function createDocumentStore(options: DocumentStoreOptions): DocumentStor
       set({ status: "saving" });
       writeCount++;
       try {
-        await host.writeProject(path, doc, { copyAssetsFrom: copyAssetsFrom && copyAssetsFrom !== path ? copyAssetsFrom : null });
+        const summary = await host.writeProject(path, doc, { copyAssetsFrom: copyAssetsFrom && copyAssetsFrom !== path ? copyAssetsFrom : null });
         savedKey = key;
         savedDoc = doc;
         savedFiles = null;
@@ -498,7 +512,7 @@ export function createDocumentStore(options: DocumentStoreOptions): DocumentStor
         const moved = get().projectPath !== path;
         set({ projectPath: path, lastSavedRevision: revision, dirty: isDirty(get().doc), externalChange: null, diskProblem: null });
         if (moved || !unwatch) watch(path);
-        return { ok: true, path };
+        return { ok: true, path, ...(summary ? { written: summary.written, deleted: summary.deleted } : {}) };
       } catch (err) {
         return { ok: false, path, error: errorMessage(err), errorCode: errorCode(err) };
       } finally {
@@ -664,6 +678,8 @@ export function createDocumentStore(options: DocumentStoreOptions): DocumentStor
         return writeTo(target, get().projectPath);
       },
 
+      saveTo: (path) => writeTo(path, get().projectPath),
+
       async checkExternalChanges(paths = ["."]) {
         const path = get().projectPath;
         if (!host || !path || disposed) return;
@@ -727,6 +743,7 @@ export function createDocumentStore(options: DocumentStoreOptions): DocumentStor
 
       isRetiredId: (component, id) => ids.isRetired(get().doc, component, id),
       retiredIds: () => retiredIds(ids, get().doc),
+      seenIds: () => seenIdsToJSON(ids),
 
       dispose() {
         disposed = true;

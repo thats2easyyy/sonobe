@@ -57,6 +57,21 @@ export interface DocumentSnapshot {
   dirty: boolean;
   /** Component id → item ids retired this session (removed, so new items never get them). Hosts that don't track them leave it out. */
   retired?: Record<Id, Id[]>;
+  /** The app keeps unsaved work as a draft, so it comes back after a crash or quit. */
+  draft?: { id: string; updatedAt: number };
+}
+
+/** Unsaved work the app kept from an earlier session that no window has open (SonobeHost.listDrafts). */
+export interface DraftSummary {
+  /** Open it with open_document({ ref: "draft:<id>" }). */
+  id: string;
+  name: string;
+  /** The project it has unsaved changes to; absent when it was never saved. */
+  path?: string;
+  updatedAt: number;
+  counts: { components: number; layers: number; patches: number };
+  /** Its files come from two moments (the app stopped mid-write), so the last changes may be missing. */
+  torn?: boolean;
 }
 
 export interface CreateDocumentRequest {
@@ -112,6 +127,12 @@ export interface SaveDocumentOptions {
    * "disk_changed".
    */
   force?: boolean;
+  /**
+   * Save to this new project folder (Save As), never asking the person where. It must be new or
+   * empty and not inside another project (projectTarget.ts). Without it, a document that was never
+   * saved goes to ~/Documents/<Name>.sonobe, or fails with "path_needed" while it's still "Untitled".
+   */
+  path?: string;
 }
 
 /** Why an automatic save after a write or undo didn't happen (the change itself stays applied). */
@@ -589,7 +610,9 @@ export interface SonobeHost {
   readonly registry: EngineRegistry;
 
   listDocuments(): Promise<DocumentSummary[]>;
-  /** Open (or activate) a document by docId or project folder path. */
+  /** Optional: drafts of unsaved work from earlier sessions that no window has open (the app). */
+  listDrafts?(): Promise<DraftSummary[]>;
+  /** Open (or activate) a document by docId or project folder path, or "draft:<id>" (the app). */
   openDocument(ref: string, options?: OpenDocumentOptions & HostCallControl): Promise<DocumentSummary>;
   createDocument(request: CreateDocumentRequest, control?: HostCallControl): Promise<DocumentSummary>;
   /** A document snapshot (default: the active document). */

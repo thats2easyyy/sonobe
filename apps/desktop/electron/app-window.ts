@@ -24,6 +24,8 @@ export interface AppWindowOptions {
   log(level: "info" | "warn" | "error", message: string): void;
   /** Called once the window exists, before content loads (so IPC from the first page is trusted). */
   onCreated?(appWindow: AppWindow): void;
+  /** The person chose Save or Don't Save while closing: the window's drafts aren't needed anymore. */
+  onDiscardDrafts?(webContentsId: number): Promise<void>;
 }
 
 export interface AppWindow {
@@ -166,8 +168,14 @@ export async function createAppWindow(opts: AppWindowOptions): Promise<AppWindow
       openReady = false;
     }
   });
+  let crashReloadAt = 0;
   wc.on("render-process-gone", (_event, details) => {
     opts.log("error", `Editor renderer exited (${details.reason}, code ${details.exitCode})`);
+    // The editor's unsaved work is in its draft: load it again so the welcome screen can bring it back.
+    // Not more than once every 30 s, so an editor that crashes at start doesn't loop.
+    if (details.reason === "clean-exit" || win.isDestroyed() || Date.now() - crashReloadAt < 30_000) return;
+    crashReloadAt = Date.now();
+    wc.reload();
   });
 
   win.once("ready-to-show", () => {
@@ -177,6 +185,8 @@ export async function createAppWindow(opts: AppWindowOptions): Promise<AppWindow
   });
 
   const promptUnsaved = async () => {
+    // Nobody may answer the prompt (the app is being shut down): keep the edits in the draft meanwhile.
+    const flushed = opts.rpc.hasMethod(wc, "drafts.flush") === true ? opts.rpc.invoke(wc, "drafts.flush", undefined, { timeoutMs: 1500 }).catch(() => undefined) : Promise.resolve();
     const canSave = opts.rpc.hasMethod(wc, "document.save") === true;
     const buttons = canSave ? ["Save", "Don't Save", "Cancel"] : ["Don't Save", "Cancel"];
     const { response } = await dialog.showMessageBox(win, {
@@ -199,6 +209,9 @@ export async function createAppWindow(opts: AppWindowOptions): Promise<AppWindow
         return;
       }
     }
+    // Saved, or the person chose not to keep the changes: the draft goes with the window (after the flush lands).
+    await flushed;
+    await opts.onDiscardDrafts?.(wc.id).catch((err: unknown) => opts.log("warn", `Couldn't remove the window's draft: ${err instanceof Error ? err.message : String(err)}`));
     forceClose = true;
     win.close();
   };

@@ -104,5 +104,43 @@ describe("desktop host", () => {
     expect(host.rpc).toBe(api.rpc);
     expect(host.kind).toBe("desktop");
     expect(host.displayName("/Users/me/Checkout Flow.sonobe")).toBe("Checkout Flow");
+    expect(host.drafts).toBeUndefined();
+  });
+
+  it("keeps drafts through the app: only what changed, assets once, and failures with their code", async () => {
+    const saved = applyOps(createEmptyDocument({ name: "Checkout" }), [{ op: "addAsset", asset: { id: "old", kind: "image", name: "Old", file: "old.png" } }], { registry, lenient: true }).doc;
+    const { api } = fakeApi({ "/p/Checkout.sonobe": { files: serializeDocument(saved), binaries: { "assets/old.png": new Uint8Array([1]).buffer } } });
+    const draftWrites: { id: string; changes: { files: Record<string, string>; binaries?: Record<string, unknown>; deleted: string[] }; meta: Record<string, unknown> }[] = [];
+    api.drafts = {
+      write: vi.fn(async (id, changes, meta) => {
+        draftWrites.push({ id, changes, meta: meta as unknown as Record<string, unknown> });
+        return { ok: true as const };
+      }),
+      remove: vi.fn(async () => ({ ok: false as const, code: "draft_in_use", message: "Another Sonobe window has this draft open." })),
+      list: vi.fn(async () => []),
+      read: vi.fn(async () => ({ ok: false as const, code: "unknown_draft", message: "There's no draft." })),
+      reveal: vi.fn(),
+    };
+    const host = createDesktopHost(api);
+    const doc = await host.readProject("/p/Checkout.sonobe");
+    host.putAssetBytes!("/p/Checkout.sonobe", "new.png", new Uint8Array([7, 7]));
+    const edited = applyOps(doc, [{ op: "addAsset", asset: { id: "photo", kind: "image", name: "Photo", file: "new.png" } }, { op: "addLayer", layer: { type: "rectangle", name: "Card" } }], { registry, lenient: true }).doc;
+    const meta = { name: "Checkout", projectPath: "/p/Checkout.sonobe", revision: 2, createdAt: 1, counts: { components: 1, layers: 1, patches: 0 }, seenIds: { items: {}, components: [], knobs: [], presets: [] } };
+
+    await host.drafts!.write("draft-0001", edited, meta);
+    // A draft is a whole project, but only the asset the project folder doesn't have yet.
+    expect(Object.keys(draftWrites[0]!.changes.files).sort()).toEqual(["assets/assets.json", "components/main.json", "project.json"]);
+    expect(Object.keys(draftWrites[0]!.changes.binaries ?? {})).toEqual(["assets/new.png"]);
+    // It records what the project looked like, to notice outside changes on restore.
+    expect(Object.keys(draftWrites[0]!.meta.base as object).sort()).toEqual(["assets/assets.json", "components/main.json", "project.json"]);
+
+    const renamed = applyOps(edited, [{ op: "setProject", changes: { name: "Checkout 2" } }], { registry }).doc;
+    await host.drafts!.write("draft-0001", renamed, { ...meta, revision: 3 });
+    expect(draftWrites[1]!.changes).toEqual({ files: { "project.json": serializeDocument(renamed)["project.json"] }, deleted: [] });
+
+    await expect(host.drafts!.remove("draft-0001")).rejects.toMatchObject({ code: "draft_in_use" });
+    await expect(host.drafts!.open("draft-0002")).rejects.toMatchObject({ code: "unknown_draft", message: "There's no draft." });
+    host.drafts!.reveal!("draft-0001");
+    expect(api.drafts.reveal).toHaveBeenCalledWith("draft-0001");
   });
 });

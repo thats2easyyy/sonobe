@@ -287,7 +287,7 @@ try {
     nodeProcess: typeof globalThis.process,
   }));
   assert(hostInfo.type === "object", "window.sonobeHost exists", hostInfo);
-  for (const key of ["closeViewerWindow", "commands", "getMcpStatus", "onMcpStatus", "getPreviewStatus", "getViewerWindowStatus", "notifyDocumentChanged", "onCommand", "onOpenProject", "onPreviewStatus", "onViewerWindowStatus", "openExternal", "openProjectDialog", "platform", "popOutViewer", "readProject", "recentProjects", "revealInFinder", "rpc", "saveProjectDialog", "secrets", "setDocumentEdited", "setTitle", "startPreview", "stopPreview", "version", "watchProject", "writeProject"]) {
+  for (const key of ["closeViewerWindow", "commands", "drafts", "getMcpStatus", "onMcpStatus", "getPreviewStatus", "getViewerWindowStatus", "notifyDocumentChanged", "onCommand", "onOpenProject", "onPreviewStatus", "onViewerWindowStatus", "openExternal", "openProjectDialog", "platform", "popOutViewer", "readProject", "readProjectIfExists", "recentProjects", "revealInFinder", "rpc", "saveProjectDialog", "secrets", "setDocumentEdited", "setTitle", "startPreview", "stopPreview", "version", "watchProject", "writeProject"]) {
     assert(hostInfo.keys.includes(key), `sonobeHost.${key}`, hostInfo.keys);
   }
   assert(hostInfo.platform === process.platform, "platform", hostInfo.platform);
