@@ -43,8 +43,11 @@ export interface PortModel {
   /** Takes or produces the whole loop at once. */
   wholeLoop?: boolean;
   issue?: PortIssue;
-  /** Inputs linked to a knob: a chip with the knob's name (and value) instead of a cable. */
-  knob?: { id: string; name: string; valueText?: string };
+  /**
+   * Inputs linked to a knob: a chip with the knob's name (and value) instead of a cable. A color
+   * knob's chip shows its running color ("#RRGGBBAA") as a swatch instead of the value text.
+   */
+  knob?: { id: string; name: string; valueText?: string; color?: string };
 }
 
 export interface NodeIssue {

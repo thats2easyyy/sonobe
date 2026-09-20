@@ -150,6 +150,65 @@ describe("knobs in Properties", () => {
     expect(rowNamed("Bounciness").querySelector(".sb-insp-knob__chip")!.textContent).toBe("Bounce");
   });
 
+  it("switches a knob-driven field to another knob with Use Knob, in one undo step", () => {
+    const s = mount(
+      fixture([
+        { op: "addKnob", knob: { id: "fade", name: "Fade", type: "number", value: 0.5 } },
+        { op: "addKnob", knob: { id: "dim", name: "Dim", type: "number", value: 0.2 } },
+        { op: "setInput", target: "@card.opacity", value: { link: "$knob.fade" } },
+        { op: "setInput", target: "@dot.opacity", value: { link: "$knob.fade" } },
+      ]),
+    );
+    select(s, { layers: ["card", "dot"] });
+    openMenu(rowNamed("Opacity"));
+    click(menuItem("Use Knob"));
+    // The knob it reads is checked.
+    const choice = (label: string) => [...document.querySelectorAll<HTMLElement>('[role="menuitemcheckbox"]')].find((el) => el.querySelector(".sb-menu__title")?.textContent === label)!;
+    expect(choice("Fade").getAttribute("aria-checked")).toBe("true");
+    expect(choice("Dim").getAttribute("aria-checked")).toBe("false");
+    click(choice("Dim"));
+    expect(prop(s, "card", "opacity")).toEqual({ link: "$knob.dim" });
+    expect(prop(s, "dot", "opacity")).toEqual({ link: "$knob.dim" });
+    expect(labels(s)).toEqual(["Switch Opacity to Dim"]);
+    s.document.getState().undo();
+    expect(prop(s, "card", "opacity")).toEqual({ link: "$knob.fade" });
+    expect(prop(s, "dot", "opacity")).toEqual({ link: "$knob.fade" });
+  });
+
+  it("puts targets that read different knobs on one knob", () => {
+    const s = mount(
+      fixture([
+        { op: "addKnob", knob: { id: "fade", name: "Fade", type: "number", value: 0.5 } },
+        { op: "addKnob", knob: { id: "dim", name: "Dim", type: "number", value: 0.2 } },
+        { op: "setInput", target: "@card.opacity", value: { link: "$knob.fade" } },
+        { op: "setInput", target: "@dot.opacity", value: { link: "$knob.dim" } },
+      ]),
+    );
+    select(s, { layers: ["card", "dot"] });
+    openMenu(rowNamed("Opacity"));
+    expect(menuItem("Make Knob…")).toBeUndefined();
+    click(menuItem("Use Knob"));
+    click(menuItem("Dim"));
+    expect(prop(s, "card", "opacity")).toEqual({ link: "$knob.dim" });
+    expect(labels(s)).toEqual(["Switch Opacity to Dim"]);
+  });
+
+  it("names the knob in the port's tooltip", () => {
+    vi.useFakeTimers();
+    try {
+      const s = mount(fixture([{ op: "addKnob", knob: { id: "fade", name: "Card Fade", type: "number", value: 0.5 } }, { op: "setInput", target: "@card.opacity", value: { link: "$knob.fade" } }]));
+      select(s, { layers: ["card"] });
+      const port = rowNamed("Opacity").querySelector<HTMLElement>(".sb-insp-port")!;
+      act(() => {
+        port.dispatchEvent(new PointerEvent("pointerover", { bubbles: true, pointerType: "mouse" }));
+      });
+      act(() => vi.advanceTimersByTime(600));
+      expect(document.querySelector('[role="tooltip"]')!.textContent).toBe("Driven by the knob Card Fade. Click to drive it with a patch instead.");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("reads a locked preset's knob field without changing it", () => {
     const s = mount(fixture([{ op: "addKnob", knob: { id: "fade", name: "Fade", type: "number", value: 0.5 } }, { op: "updateKnobPreset", id: "default", locked: true }, { op: "setInput", target: "@card.opacity", value: { link: "$knob.fade" } }]));
     select(s, { layers: ["card"] });

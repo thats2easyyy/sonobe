@@ -74,8 +74,12 @@ export function FormRow({ label, children }: { label: string; children: ReactNod
   );
 }
 
-/** "snappy: Snappy" or "snappy" per line → options. */
-export function parseOptions(text: string): EnumOption[] {
+/**
+ * "snappy: Snappy" or "snappy" per line → options. The text has no room for descriptions, so an
+ * option whose key is in `previous` keeps its description.
+ */
+export function parseOptions(text: string, previous: readonly EnumOption[] = []): EnumOption[] {
+  const described = new Map(previous.filter((o) => o.description).map((o) => [o.key, o.description!]));
   return text
     .split("\n")
     .map((line) => line.trim())
@@ -84,11 +88,15 @@ export function parseOptions(text: string): EnumOption[] {
       const colon = line.indexOf(":");
       const key = (colon >= 0 ? line.slice(0, colon) : line).trim();
       const name = colon >= 0 ? line.slice(colon + 1).trim() : "";
-      return { key, name: name || key };
+      const description = described.get(key);
+      return { key, name: name || key, ...(description ? { description } : {}) };
     });
 }
 
 const optionsText = (options: readonly EnumOption[] | undefined) => (options ?? []).map((o) => (o.name && o.name !== o.key ? `${o.key}: ${o.name}` : o.key)).join("\n");
+
+/** Options compared by what they say, not by how their fields are ordered. */
+const optionsKey = (options: readonly EnumOption[] | undefined) => JSON.stringify((options ?? []).map((o) => [o.key, o.name, o.description ?? null]));
 
 export type KnobEditTarget = { kind: "new" } | { kind: "edit"; id: Id };
 
@@ -136,7 +144,7 @@ function KnobForm({ target, onDone }: { target: KnobEditTarget; onDone: () => vo
     }
     const { ok: _ok, ...bounds } = r;
     const ranged = hasKnobRange(type);
-    const parsedOptions = type === "enum" ? parseOptions(options) : undefined;
+    const parsedOptions = type === "enum" ? parseOptions(options, existing?.options) : undefined;
     let ops: Op[];
     let label: string;
     if (!existing) {
@@ -163,7 +171,7 @@ function KnobForm({ target, onDone }: { target: KnobEditTarget; onDone: () => vo
       if (ranged) {
         for (const key of ["min", "max", "step", "unit"] as const) if (bounds[key] !== existing[key]) update[key] = bounds[key] ?? null;
       }
-      if (parsedOptions && JSON.stringify(parsedOptions) !== JSON.stringify(existing.options ?? [])) update.options = parsedOptions;
+      if (parsedOptions && optionsKey(parsedOptions) !== optionsKey(existing.options)) update.options = parsedOptions;
       if (Object.keys(update).length === 2) {
         onDone();
         return;

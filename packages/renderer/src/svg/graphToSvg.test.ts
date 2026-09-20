@@ -75,6 +75,27 @@ describe("graphToSvg", () => {
     expect(Number(chip?.[1])).toBeCloseTo(NODE_BOX.valuePaddingX + NODE_BOX.knobIcon + NODE_BOX.valueInnerGap + tableMeasurer("Flip", "sans10") + NODE_BOX.valueInnerGap + tableMeasurer("on", "mono10"), 1);
   });
 
+  it("draws a color knob's chip with a swatch of its color instead of the hex", () => {
+    const tinted = {
+      ...model,
+      nodes: model.nodes.map((n) =>
+        n.id === "toggle" && n.data.kind === "patch"
+          ? ({ ...n, data: { ...n.data, inputs: n.data.inputs.map((p, i) => (i === 0 ? { ...p, connected: true, link: "$knob.tint", knob: { id: "tint", name: "Tint", valueText: "#FF375F80", color: "#FF375F80" } } : p)) } } as typeof n)
+          : n,
+      ),
+    };
+    const wide = new Map(boxes);
+    const box = boxes.get("toggle")!;
+    wide.set("toggle", { ...box, width: box.width + 100 });
+    const { svg } = graphToSvg(tinted, { boxes: wide });
+    const node = svg.slice(svg.indexOf('data-node="toggle"'));
+    expect(node).toContain(">Tint</text>");
+    expect(node).not.toContain("FF375F80</text>");
+    expect(node).toMatch(/<rect x="[^"]+" y="[^"]+" width="10" height="10" rx="2" fill="#FF375F" fill-opacity="0.502"\/>/);
+    const chip = node.match(/<rect x="[^"]+" y="[^"]+" width="([^"]+)" height="16" rx="3" fill="#5F74E4"/);
+    expect(Number(chip?.[1])).toBeCloseTo(NODE_BOX.valuePaddingX + NODE_BOX.knobIcon + NODE_BOX.valueInnerGap + tableMeasurer("Tint", "sans10") + NODE_BOX.valueInnerGap + NODE_BOX.swatch, 1);
+  });
+
   it("crops and scales", () => {
     const drawing = graphToSvg(model, { boxes, crop: { x: 0, y: 0, width: 200, height: 100 }, scale: 2 });
     expect([drawing.width, drawing.height]).toEqual([400, 200]);
