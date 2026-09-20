@@ -1,5 +1,5 @@
 import { applyOps, createEmptyDocument, findLayer, parseDocumentFiles, serializeDocument, type Op, type SonobeDocument } from "@sonobe/core";
-import { ID_SCENARIO_SETUP, ID_SCENARIOS, runIdScenario, type IdScenarioHost } from "@sonobe/core/testing";
+import { ID_REDO_SCENARIOS, ID_SCENARIO_SETUP, ID_SCENARIOS, runIdScenario, type IdScenarioHost } from "@sonobe/core/testing";
 import { describe, expect, it, vi } from "vitest";
 import { createBrowserHost, createMemoryProjectStorage } from "../host/browserHost.ts";
 import { createDesktopHost } from "../host/desktopHost.ts";
@@ -109,12 +109,13 @@ describe("document store: apply, undo, redo", () => {
       if (!r.ok) throw new Error(JSON.stringify(r.errors));
       return r.doc;
     };
-    for (const scenario of ID_SCENARIOS) {
+    for (const scenario of [...ID_SCENARIOS, ...ID_REDO_SCENARIOS]) {
       it(scenario.name, async () => {
         const store = createDocumentStore({ registry, document: setup() });
         const host: IdScenarioHost = {
           apply: async (ops, { dryRun }) => store.getState().apply(ops, { label: "edit", author: CLAUDE_AUTHOR, dryRun }),
           undo: async () => void store.getState().undo(CLAUDE_AUTHOR),
+          redo: async () => void store.getState().redo(CLAUDE_AUTHOR),
         };
         expect(await runIdScenario(host, scenario)).toEqual(scenario.expected);
       });

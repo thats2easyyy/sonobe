@@ -11,9 +11,11 @@ export interface IdScenarioHost {
   apply(ops: Op[], options: { dryRun: boolean }): Promise<{ ok: boolean; results: OpResult[]; errors: SonobeError[] }>;
   /** Undo the newest history group. */
   undo(): Promise<void>;
+  /** Redo the newest undone group (hosts with redo run ID_REDO_SCENARIOS). */
+  redo?(): Promise<void>;
 }
 
-export type IdStep = { apply: Op[]; dryRun?: boolean } | { undo: true };
+export type IdStep = { apply: Op[]; dryRun?: boolean } | { undo: true } | { redo: true };
 
 /** What the last op of the last step did: the ids it created (and why any got a suffix), or the error code. */
 export type IdOutcome = { ids: Id[]; retired?: Record<Id, Id>; suffixed?: Record<Id, Id> } | { error: string };
@@ -83,12 +85,34 @@ export const ID_SCENARIOS: IdScenario[] = [
   },
 ];
 
+/**
+ * Redo replays leniently, without the ledger, so an op that derives an id past a retired one must
+ * record it in `applied`. The last step checks the redone ids still resolve.
+ */
+export const ID_REDO_SCENARIOS: IdScenario[] = [
+  {
+    name: "redo of createComponent keeps the component id it derived past a retired one",
+    steps: [{ apply: [removeSwipeCard] }, { apply: [{ op: "createComponent", name: "Swipe Card", patchIds: ["card_gone"] }] }, { undo: true }, { redo: true }, { apply: [{ op: "updateComponent", id: "swipe_card_2", notes: "Top card" }] }],
+    expected: { ids: ["swipe_card_2"] },
+  },
+  {
+    name: "redo of createComponent keeps the instance id it derived past a retired one",
+    steps: [{ apply: [removeCardGone] }, { apply: [{ op: "createComponent", name: "Card Gone", patchIds: ["tap_card"] }] }, { undo: true }, { redo: true }, { apply: [{ op: "removePatch", id: "card_gone_2" }] }],
+    expected: { ids: ["card_gone_2"] },
+  },
+];
+
 /** Play a scenario's steps on a host set up with ID_SCENARIO_SETUP. */
 export async function runIdScenario(host: IdScenarioHost, scenario: IdScenario): Promise<IdOutcome> {
   let outcome: IdOutcome = { ids: [] };
   for (const step of scenario.steps) {
     if ("undo" in step) {
       await host.undo();
+      continue;
+    }
+    if ("redo" in step) {
+      if (!host.redo) throw new Error(`"${scenario.name}" needs a host with redo.`);
+      await host.redo();
       continue;
     }
     const r = await host.apply(step.apply, { dryRun: !!step.dryRun });
