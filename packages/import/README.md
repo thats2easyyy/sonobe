@@ -17,6 +17,8 @@ host.putAssetFiles(plan.files);                                                 
 host.apply(plan.ops, { label: `imported ${plan.screenName}` });                 // one undo step
 ```
 
+Hosts that render pages run each capture under one deadline with `createCaptureRun` (`run.ts`): 90 s plus `waitMs`, with a budget per step, an error that names the stage it stopped in, and a caller's signal that cancels it. `resolveCaptureFiles` takes that `signal`, an `until` cutoff (files still downloading then become placeholders) and an `onFile` progress callback. `capturePage` from `@sonobe/import/node` does all of this with Playwright.
+
 `planImport` maps frames to groups (rectangles when empty), borders to strokes or thin rectangles, gradients and background images to child layers, text to text layers (single lines hug, paragraphs keep their width, mixed styles split into per-line runs), images and SVG icons to image assets, inputs to text fields, web fonts to font assets, and scrolling pages and scroll containers to Scroll patches. `replace` swaps an earlier screen while keeping the ids and wiring of layers found again.
 
 ## Scripts
