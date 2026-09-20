@@ -148,12 +148,27 @@ describe("rpc handlers", () => {
     expect(s.presence.getState().recent[0]).toMatchObject({ kind: "finish", description: "Claude: done" });
     expect(await call("presence.begin", { ids: [] })).toMatchObject({ failed: true, code: "invalid_params" });
 
-    expect(await call("reveal", { ids: ["card", "pop", "ghost"] })).toEqual({ component: "main", componentPath: ["main"], revealed: ["card", "pop"], missing: ["ghost"], focused: false });
+    expect(await call("reveal", { ids: ["card", "pop", "ghost"] })).toEqual({ component: "main", componentPath: ["main"], revealed: ["card", "pop"], missing: ["ghost"], focused: false, shown: "main", inView: true, opened: false });
     expect(s.selection.getState()).toMatchObject({ layers: [], patches: [], reveal: { component: "main", ids: ["card", "pop"] } });
     expect(await call("reveal", { ids: ["card", "pop"], focus: true })).toMatchObject({ revealed: ["card", "pop"], focused: true });
     expect(s.selection.getState()).toMatchObject({ layers: ["card"], patches: ["pop"], reveal: { component: "main", ids: ["card", "pop"] } });
     expect(await call("selection.get")).toMatchObject({ component: "main", componentPath: ["main"], layers: ["card"], patches: ["pop"], comments: [] });
     expect(await call("viewer.bounds")).toMatchObject({ failed: true, code: "no_viewer" });
+  });
+
+  it("reveals inside another component only with focus, and says so", async () => {
+    const { call, session: s } = setup();
+    s.document.getState().apply([{ op: "createComponent", name: "Toggle Pop", patchIds: ["toggle", "pop"] }], { label: "Make component" });
+    const inner = Object.values(s.document.getState().doc.components).find((c) => c.name === "Toggle Pop")!;
+    s.selection.getState().select({ layers: ["card"] });
+    const before = s.selection.getState().reveal;
+    // Without focus the person stays where they are, and nothing is revealed where they can't see it.
+    expect(await call("reveal", { ids: ["pop"] })).toMatchObject({ component: inner.id, revealed: ["pop"], shown: "main", inView: false, opened: false, focused: false });
+    expect(s.selection.getState()).toMatchObject({ componentPath: ["main"], layers: ["card"] });
+    expect(s.selection.getState().reveal).toBe(before);
+    // With focus it opens the component, selects the patch and reveals it there.
+    expect(await call("reveal", { ids: ["pop"], focus: true })).toMatchObject({ component: inner.id, shown: inner.id, inView: true, opened: true, focused: true });
+    expect(s.selection.getState()).toMatchObject({ componentPath: ["main", inner.id], patches: ["pop"], reveal: { component: inner.id, ids: ["pop"] } });
   });
 
   it("saves (false when cancelled) and opens projects", async () => {
@@ -279,6 +294,26 @@ describe("rpc handlers: bridge additions", () => {
     expect(await call("viewer.layerBounds", {})).toMatchObject({ failed: true, code: "invalid_params" });
     expect(await call("viewer.layerBounds", { layerId: "card" })).toEqual({ x: 0, y: 0, width: 50, height: 40 });
     expect(await call("viewer.layerBounds", { layerId: "ghost" })).toMatchObject({ failed: true, code: "target_unavailable" });
+    off();
+    expect(handlers.size).toBe(0);
+  });
+
+  it("exposes graph.geometry only while a patch editor provides it", async () => {
+    const { call, handlers, session: s, off } = setup();
+    expect(handlers.has("graph.geometry")).toBe(false);
+    const asked: unknown[] = [];
+    const unregister = s.graphGeometry.register((params) => {
+      asked.push(params);
+      return { component: params.component ?? "main", shownComponent: "main", revision: 3, nodes: [["pop", 40, 60, 212, 124, 1]] };
+    });
+    expect(handlers.has("graph.geometry")).toBe(true);
+    expect(await call("graph.geometry", { component: "main" })).toEqual({ component: "main", shownComponent: "main", revision: 3, nodes: [["pop", 40, 60, 212, 124, 1]] });
+    expect(await call("graph.geometry")).toMatchObject({ component: "main" });
+    expect(asked).toEqual([{ component: "main" }, {}]);
+    unregister();
+    expect(handlers.has("graph.geometry")).toBe(false);
+    s.graphGeometry.register(() => null);
+    expect(await call("graph.geometry", {})).toMatchObject({ failed: true, code: "target_unavailable" });
     off();
     expect(handlers.size).toBe(0);
   });

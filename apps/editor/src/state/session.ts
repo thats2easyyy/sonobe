@@ -17,6 +17,7 @@ import type { FrameScheduler } from "../runtime/scheduler.ts";
 import { createScriptTrustStore, scriptPatchCount, type ScriptTrustStore, type TrustPersistence } from "../runtime/scriptTrust.ts";
 import { createAssetService, type AssetService } from "./assets.ts";
 import { createBoundsRegistry, type BoundsRegistry } from "./bounds.ts";
+import { createGraphGeometrySlot, type GraphGeometrySlot } from "./graphGeometry.ts";
 import type { ClipboardFragment } from "./clipboard.ts";
 import { createConsoleStore, type ConsoleStore } from "./console.ts";
 import { createDemoDocument } from "./demoDocument.ts";
@@ -92,6 +93,8 @@ export interface EditorSession {
   readonly dialogs: DialogStore;
   /** Where panels are on screen (canvas.bounds, graph.bounds, viewer.layerBounds) for screenshots. */
   readonly bounds: BoundsRegistry;
+  /** Where the patch editor draws its nodes and how big they are (graph.geometry), for MCP layout tools. */
+  readonly graphGeometry: GraphGeometrySlot;
   /** Import files as assets and hold asset bytes. */
   readonly assets: AssetService;
   /** Whether project scripts may run (same store as runtime.scriptTrust). */
@@ -161,6 +164,7 @@ export function createEditorSession(options: EditorSessionOptions = {}): EditorS
   const presence = createPresenceStore();
   const consoleStore = createConsoleStore();
   const bounds = createBoundsRegistry();
+  const graphGeometry = createGraphGeometrySlot();
   const assets = createAssetService({ document, host });
   const keeper = host?.drafts && options.drafts !== false ? createDraftKeeper({ document, drafts: host.drafts, ...(options.drafts ?? {}) }) : null;
   // A page going to the background or away writes unsaved edits right away (best effort while unloading).
@@ -287,6 +291,7 @@ export function createEditorSession(options: EditorSessionOptions = {}): EditorS
     runtime,
     dialogs,
     bounds,
+    graphGeometry,
     assets,
     scriptTrust,
     clipboard: null,

@@ -86,22 +86,55 @@ describe("read tools", () => {
     expect(items.text).toContain("nope_1: not found");
     expect(items.structured.missing).toEqual(["nope_1"]);
     // The card's scale is driven, so it has a node in the graph: automatic until someone places it.
-    expect(items.text).toContain(
-      "graph node: placed automatically next to its drivers (not saved)",
+    expect(items.text).toMatch(
+      /graph node: \d+,\d+ · \d+×\d+, placed automatically next to its drivers \(not saved\)/,
     );
     const card = () =>
       (items.structured.items as { id: string; graphNode?: unknown }[]).find(
         (i) => i.id === "card",
       );
-    expect(card()?.graphNode).toEqual({ position: null });
+    expect(card()?.graphNode).toMatchObject({ position: null, box: { measured: false } });
+    // Patches show the box the editor draws them in, live values included, so nobody estimates sizes.
+    const spring = (items.structured.items as { id: string; box?: Record<string, number> }[]).find(
+      (i) => i.id === "grow_spring",
+    )!;
+    expect(spring.box).toMatchObject({ x: expect.any(Number), width: expect.any(Number) });
+    expect(spring.box!.width).toBeGreaterThanOrEqual(164);
+    expect(items.text).toContain(
+      `· ui ${spring.box!.x},${spring.box!.y} · ${spring.box!.width}×${spring.box!.height}`,
+    );
+    expect(items.text).toContain("Node sizes are estimated as the editor draws them");
     await client.call("apply_ops", {
       ops: [{ op: "setNodePositions", positions: { "@card": [900, 40] } }],
     });
     const placed = await client.call("get_items", { ids: ["card"] });
-    expect(placed.text).toContain("graph node: 900,40 (saved; move it with setNodePositions)");
-    expect((placed.structured.items as { graphNode?: unknown }[])[0]?.graphNode).toEqual({
+    expect(placed.text).toMatch(
+      /graph node: 900,40 · \d+×\d+ \(saved; move it with setNodePositions\)/,
+    );
+    expect((placed.structured.items as { graphNode?: unknown }[])[0]?.graphNode).toMatchObject({
       position: [900, 40],
+      box: { x: 900, y: 40 },
     });
+
+    // A comment lists the nodes it frames (the ones under whose title bar it is).
+    const tap = spring.box!;
+    await client.call("apply_ops", {
+      ops: [
+        {
+          op: "addComment",
+          comment: {
+            id: "motion",
+            text: "MOTION",
+            rect: [tap.x - 20, tap.y - 44, tap.width + 40, tap.height + 64],
+          },
+        },
+      ],
+    });
+    const frame = await client.call("get_items", { ids: ["motion"] });
+    expect(frame.text).toContain("frames 1 node: grow_spring");
+    expect((frame.structured.items as { members?: string[] }[])[0]?.members).toEqual([
+      "grow_spring",
+    ]);
 
     const find = await client.call("find", { patchType: "interaction" });
     expect(find.text).toContain("patch tap_card interaction");

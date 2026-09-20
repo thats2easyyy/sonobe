@@ -26,7 +26,6 @@ import {
 } from "@sonobe/core";
 import {
   deriveGraph,
-  documentObstacles,
   estimatePatchSize,
   findFreePosition,
   planTidy,
@@ -68,7 +67,13 @@ import {
   OpSchema,
   WriteOutputSchema,
 } from "../schemas.ts";
-import { elkGroupLayout, estimateGraphGeometry } from "../geometry.ts";
+import {
+  elkGroupLayout,
+  estimateGraphGeometry,
+  resolveGraphGeometry,
+  sizesNote,
+  type GraphGeometry,
+} from "../geometry.ts";
 import { formatDiagnostic } from "./read.ts";
 
 const DELETE_CONFIRM_THRESHOLD = 10;
@@ -343,7 +348,7 @@ function previewSizes(
 /**
  * Positions for the batch's patches that have none: a column per dependency depth, as wide as its
  * widest patch draws in the editor, and the whole block in free space below the graph, clear of
- * patches, layer nodes and comment frames.
+ * patches, layer nodes and comment frames (`geometry`: the graph's boxes, measured when the editor shows it).
  */
 function placeNewPatches(
   doc: SonobeDocument,
@@ -351,6 +356,7 @@ function placeNewPatches(
   componentId: Id,
   patches: readonly NewPatch[],
   depthOf: (index: number) => number,
+  geometry: GraphGeometry,
   drawn?: Map<number, { width: number; height: number }>,
 ): Map<number, { x: number; y: number }> {
   const out = new Map<number, { x: number; y: number }>();
@@ -374,19 +380,16 @@ function placeNewPatches(
     height = Math.max(height, y - ROW_GAP);
     x += Math.max(...columns.get(depth)!.map((e) => e.width)) + COLUMN_GAP;
   }
-  const obstacles = documentObstacles(doc, component, registry);
+  const comments = [...geometry.frames.values()];
   const nodes = [
-    ...obstacles.nodes,
+    ...geometry.nodes.values(),
     ...patches.flatMap((p, i) => (p.ui ? [{ ...p.ui, ...size(p, i) }] : [])),
   ];
-  const all = [...nodes, ...(obstacles.comments ?? [])];
+  const all = [...nodes, ...comments];
   const preferred = all.length
     ? { x: Math.min(...all.map((r) => r.x)), y: Math.max(...all.map((r) => r.y + r.height)) + 40 }
     : { x: 40, y: 40 };
-  const at = findFreePosition({ width: x - COLUMN_GAP, height }, preferred, {
-    nodes,
-    comments: obstacles.comments ?? [],
-  });
+  const at = findFreePosition({ width: x - COLUMN_GAP, height }, preferred, { nodes, comments });
   for (const [i, r] of relative) out.set(i, { x: at.x + r.x, y: at.y + r.y });
   return out;
 }
@@ -417,8 +420,11 @@ function commentName(c: CommentNode): string {
   return `${c.id} (${JSON.stringify(text.length > 40 ? `${text.slice(0, 39)}…` : text)})`;
 }
 
-/** What tidy_graph lays out: every node with its estimated box and port rows, the cables, and the frames. */
-function tidyRequest(
+/**
+ * What tidy_graph lays out: every node with its box (`geometry`, read once the arguments check out)
+ * and port rows, the cables, and the frames.
+ */
+async function tidyRequest(
   doc: SonobeDocument,
   registry: EngineRegistry,
   c: Component,
@@ -428,7 +434,8 @@ function tidyRequest(
     frameMode?: "keep" | "arrange" | undefined;
     direction?: "LR" | "TB" | undefined;
   },
-): TidyRequest {
+  readGeometry: () => Promise<GraphGeometry>,
+): Promise<{ request: TidyRequest; geometry: GraphGeometry }> {
   if (args.ids?.length && args.frames?.length)
     throw new HostError("invalid_arguments", "Pass ids or frames, not both.", {
       hint: "frames tidies everything inside those comment frames; ids tidies just those nodes, each within its own frame.",
@@ -457,7 +464,7 @@ function tidyRequest(
             : `${c.id} has no comments. Frame a section with addComment { "comment": { "text": "Places", "rect": [x, y, width, height] } }.`,
         },
       );
-  const geometry = estimateGraphGeometry(doc, registry, c.id);
+  const geometry = await readGeometry();
   const model = deriveGraph({ doc, componentId: c.id, registry });
   const nodes: TidyNode[] = [];
   for (const node of model.nodes) {
@@ -493,7 +500,7 @@ function tidyRequest(
           hint: 'Nodes are patch ids, "@layerId" for a layer that a cable drives or reads, and "$in" / "$out" for the component\'s published inputs and outputs.',
         },
       );
-  return {
+  const request: TidyRequest = {
     nodes,
     edges: model.edges.map((e) => ({
       source: e.source,
@@ -510,6 +517,7 @@ function tidyRequest(
     ...(args.frameMode ? { frameMode: args.frameMode } : {}),
     ...(args.direction ? { direction: args.direction } : {}),
   };
+  return { request, geometry };
 }
 
 /** Node pairs whose boxes overlap: "a × b". */
@@ -748,18 +756,21 @@ export function registerWriteTools(tc: ToolContext): void {
         ops.push(
           withComponent({ op: "connect" as const, from: cn.from, to: cn.to }, args.component),
         );
-      // Sizes as the batch will draw (live values too), then the real spots.
-      const placed = placeNewPatches(
-        snap.doc,
-        host.registry,
-        c.id,
-        patches,
-        depthOf,
-        previewSizes(snap.doc, host.registry, c.id, ops),
-      );
-      patches.forEach((p, i) => {
-        if (!p.ui) (ops[i] as Extract<Op, { op: "addPatch" }>).patch.ui = placed.get(i)!;
-      });
+      // Sizes as the batch will draw (live values too), then the real spots, clear of the graph as drawn.
+      if (patches.some((p) => !p.ui)) {
+        const placed = placeNewPatches(
+          snap.doc,
+          host.registry,
+          c.id,
+          patches,
+          depthOf,
+          await resolveGraphGeometry(host, snap, c.id),
+          previewSizes(snap.doc, host.registry, c.id, ops),
+        );
+        patches.forEach((p, i) => {
+          if (!p.ui) (ops[i] as Extract<Op, { op: "addPatch" }>).patch.ui = placed.get(i)!;
+        });
+      }
       return writeResult(await apply(ctx, ops, args));
     },
   );
@@ -1089,7 +1100,7 @@ export function registerWriteTools(tc: ToolContext): void {
     {
       title: "Tidy graph",
       description:
-        "Lay the graph out in left-to-right columns by dataflow, as the editor's Tidy Up does. Comment frames are sections: each frame's nodes are laid out inside it, the frame is refit around them, and frames that would overlap are pushed apart, so sections keep their place. frames: tidy only inside those comments. ids: only those nodes, each kept in its own frame. frameMode \"arrange\" also lays out the frames as blocks (whole graph only). Layer and interface nodes move too. Changes editor positions only; dryRun previews. Sizes are estimated as the editor draws nodes.",
+        "Lay the graph out in left-to-right columns by dataflow, as the editor's Tidy Up does. Comment frames are sections: each frame's nodes are laid out inside it, the frame is refit around them, and frames that would overlap are pushed apart, so sections keep their place. frames: tidy only inside those comments. ids: only those nodes, each kept in its own frame. frameMode \"arrange\" also lays out the frames as blocks (whole graph only). Layer and interface nodes move too. Changes editor positions only; dryRun previews. Node sizes are the ones the open patch editor measured, or estimated as it draws them.",
       input: z.object({
         docId: DocIdSchema.optional(),
         component: ComponentIdSchema.optional(),
@@ -1119,7 +1130,9 @@ export function registerWriteTools(tc: ToolContext): void {
     async (args, ctx) => {
       const snap = await host.getDocument(args.docId);
       const c = requireComponent(snap.doc, args.component);
-      const request = tidyRequest(snap.doc, host.registry, c, args);
+      const { request, geometry } = await tidyRequest(snap.doc, host.registry, c, args, () =>
+        resolveGraphGeometry(host, snap, c.id),
+      );
       const plan = await planTidy(request, await elkGroupLayout());
       const ops = tidyPlanOps(c, plan);
       if (!ops.length)
@@ -1133,7 +1146,7 @@ export function registerWriteTools(tc: ToolContext): void {
       const notes = [
         ...(overlaps.length ? [`Overlapping before: ${capped(overlaps)}.`] : []),
         ...describeTidy(c, plan),
-        "Node sizes are estimated as the editor draws them (with live values after a second).",
+        sizesNote(geometry),
       ];
       return writeResult(await apply(ctx, ops, { ...args, label: args.label ?? "tidied graph" }), {
         notes,

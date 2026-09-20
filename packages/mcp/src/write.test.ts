@@ -685,6 +685,23 @@ describe("tidy_graph with comment frames", () => {
     expect(wrong.text).toContain('places ("PLACES")');
     expect((await client.call("tidy_graph", { ids: ["nmes"] })).text).toContain('Did you mean "names"?');
   });
+
+  it("tidies by the sizes the open patch editor measured, at the same revision only", async () => {
+    await client.call("apply_ops", { ops: sectioned });
+    const snap = await project.host.getDocument();
+    const estimated = await client.call("tidy_graph", { frames: ["places"], dryRun: true });
+    expect(estimated.text).toContain("Node sizes are estimated");
+    // An editor showing main measured Place Names wider than the estimate (say, a longer live value).
+    let revision = snap.revision;
+    project.host.graphGeometry = async ({ component }) => ({ docId: snap.docId, component, revision, nodes: { names: { x: 460, y: 520, width: 520, height: 124, measured: true } } });
+    const measured = await client.call("tidy_graph", { frames: ["places"], dryRun: true });
+    expect(measured.text).toContain("Node sizes: 1 of 11 as the patch editor measured them");
+    const places = (r: typeof measured) => (r.structured.frames as Record<string, Rect>).places!;
+    expect(places(measured).width).toBeGreaterThan(places(estimated).width + 200);
+    // Boxes the editor drew for another revision are ignored.
+    revision = snap.revision - 1;
+    expect((await client.call("tidy_graph", { frames: ["places"], dryRun: true })).text).toContain("Node sizes are estimated");
+  });
 });
 
 describe("setNodePositions through apply_ops", () => {

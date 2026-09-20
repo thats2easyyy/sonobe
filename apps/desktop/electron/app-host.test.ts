@@ -26,6 +26,7 @@ import { createManualScheduler } from "../../editor/src/runtime/scheduler.ts";
 import { createDemoDocument } from "../../editor/src/state/demoDocument.ts";
 import { createEditorSession, type EditorSession } from "../../editor/src/state/session.ts";
 import { writeResult } from "../../../packages/mcp/src/tools/write.ts";
+import { estimateGraphGeometry, resolveGraphGeometry } from "../../../packages/mcp/src/geometry.ts";
 import { createAppHost, hostErrorFromRpc, sceneLayerBounds, type AppHost, type AppHostOptions, type DocumentChange, type RendererTarget, type SceneRenderRequest } from "./app-host.ts";
 import { startMcpServer, type McpServerHandle } from "./mcp-server.ts";
 import { createRpcClient, createRpcFailure, createRpcServer, type RpcServer } from "./rpc.ts";
@@ -437,11 +438,15 @@ describe("app host presence, selection and screenshots", () => {
   it("reveals items, reads the selection, and shows working badges", async () => {
     const w = editorWindow(1);
     const host = appHost([w]);
-    w.session.selection.getState().select({ layers: ["card"], patches: ["zoomed"] });
-    expect(await host.reveal(["card", "zoomed", "ghost"], { focus: true })).toEqual({ revealed: true, reason: "Not found: ghost." });
-    expect(w.focused).toBe(1);
+    w.session.selection.getState().select({ layers: ["card"] });
+    expect(await host.reveal(["card", "zoomed", "ghost"], {})).toEqual({ revealed: true, component: "main", reason: "Not found: ghost." });
+    expect(w.focused).toBe(0);
     // Revealing shows items without replacing the person's selection; getSelection reads it.
-    expect(await host.getSelection()).toEqual({ docId: "photo_zoom", component: "main", layers: ["card"], patches: ["zoomed"], comments: [] });
+    expect(await host.getSelection()).toEqual({ docId: "photo_zoom", component: "main", layers: ["card"], patches: [], comments: [] });
+    // Focus takes the person there: it selects what it reveals and raises the window.
+    expect(await host.reveal(["card", "zoomed"], { focus: true })).toEqual({ revealed: true, component: "main" });
+    expect(w.focused).toBe(1);
+    expect(await host.getSelection()).toMatchObject({ layers: ["card"], patches: ["zoomed"] });
     expect(await host.reveal(["ghost"], {})).toMatchObject({ revealed: false, reason: expect.stringContaining("ghost") });
 
     await host.setWorking({ ids: ["card"], intent: "Tuning the zoom spring" }, { author: CLAUDE });
@@ -452,6 +457,65 @@ describe("app host presence, selection and screenshots", () => {
     await host.setWorking(null, { author: CLAUDE });
     expect(w.session.presence.getState().working).toEqual([]);
     expect(await host.presence()).toEqual([]);
+  });
+
+  it("reveals inside a component the person isn't viewing only with focus", async () => {
+    const w = editorWindow(1);
+    const host = appHost([w]);
+    const made = await host.apply([...pressChain, { op: "createComponent", name: "Press Motion", ref: "motion", patchIds: ["next_pressed", "press_spring"] }], { label: "setup", author: CLAUDE });
+    expect(made.ok).toBe(true);
+    const motion = made.idMap.motion!;
+    // Without focus the person stays on Main, so the honest answer is "not revealed", with the way to do it.
+    expect(await host.reveal(["press_spring"], { component: motion })).toEqual({
+      revealed: false,
+      component: motion,
+      reason: "press_spring is inside Press Motion, and the person is viewing Main. Pass focus: true to open Press Motion for them.",
+    });
+    expect(w.session.selection.getState().componentPath).toEqual(["main"]);
+    expect(w.focused).toBe(0);
+    // With focus the editor opens the component (found without naming it), selects and reveals.
+    expect(await host.reveal(["press_spring"], { focus: true })).toEqual({ revealed: true, component: motion, opened: true });
+    expect(w.session.selection.getState()).toMatchObject({ componentPath: ["main", motion], patches: ["press_spring"] });
+    expect(w.focused).toBe(1);
+  });
+
+  it("reads the patch editor's measured node boxes for the component it shows, at the current revision", async () => {
+    const w = editorWindow(1);
+    const host = appHost([w]);
+    expect(await host.graphGeometry!({ component: "main" })).toBeNull();
+    const { revision } = await host.getDocument();
+    let shown = "main";
+    let drawnRevision = revision;
+    w.session.graphGeometry.register(({ component }) => ({
+      component: component ?? shown,
+      shownComponent: shown,
+      revision: drawnRevision,
+      nodes: [
+        ["zoomed", 40, 60, 212.4, 74, 1],
+        ["@card", 400, 20, 180, 96, 0],
+      ],
+    }));
+    expect(await host.graphGeometry!({ component: "main" })).toEqual({
+      docId: "photo_zoom",
+      component: "main",
+      revision,
+      nodes: { zoomed: { x: 40, y: 60, width: 212.4, height: 74, measured: true }, "@card": { x: 400, y: 20, width: 180, height: 96, measured: false } },
+    });
+    // Boxes of an older revision, or of another component, don't count.
+    drawnRevision = revision - 1;
+    expect(await host.graphGeometry!({ component: "main" })).toBeNull();
+    drawnRevision = revision;
+    shown = "other";
+    expect(await host.graphGeometry!({ component: "main" })).toBeNull();
+    shown = "main";
+
+    // Layout tools lay the measured sizes over their estimates, and editor positions for layer nodes.
+    const snap = await host.getDocument();
+    const estimate = estimateGraphGeometry(snap.doc, registry, "main");
+    const resolved = await resolveGraphGeometry(host, snap, "main");
+    expect(resolved.nodes.get("zoomed")).toEqual({ ...estimate.nodes.get("zoomed"), width: 213, height: 74 });
+    expect(resolved.nodes.get("@card")).toEqual({ ...estimate.nodes.get("@card"), x: 400, y: 20 });
+    expect([...resolved.measured]).toEqual(["zoomed"]);
   });
 
   it("keeps one working badge per session, so one session's finish doesn't clear another's", async () => {
