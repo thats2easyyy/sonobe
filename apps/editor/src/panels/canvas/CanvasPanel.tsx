@@ -6,7 +6,8 @@
  * double-click to edit text or go into a group, zoom (⌘ scroll or pinch) and pan (scroll, space-drag).
  * Rulers (⇧R) follow zoom and pan. Every gesture is one undo entry; layout children reorder. The
  * artboard re-fits when the panel resizes until you zoom or pan. While the Design with Claude box is
- * open it fits above the box, and the first page of a draft Claude writes is fitted at a size you can read.
+ * open it fits above the box, and the first page of a draft Claude writes is fitted at a size you can read,
+ * until the next resize after it lands.
  */
 
 import type { Id, Op } from "@sonobe/core";
@@ -43,7 +44,7 @@ import { CanvasOverlay, EMPTY_DRAFT, type OverlayDraft } from "./CanvasOverlay.t
 import { CanvasRulers } from "./CanvasRulers.tsx";
 import { RULER_SIZE } from "./rulers.ts";
 import { createEditTransaction, type EditTransaction } from "./editTransaction.ts";
-import { pointInQuad, rectFromPoints, unionRects, type Point, type Rect } from "./geometry.ts";
+import { intersectRects, pointInQuad, rectFromPoints, unionRects, type Point, type Rect } from "./geometry.ts";
 import {
   beginMove,
   beginReorder,
@@ -311,7 +312,18 @@ export function CanvasPanel({ session: sessionProp, sceneSource, onSceneSourceCh
     },
     [artboard, box.width, box.height, inset, designReserve, designHeight],
   );
-  const autoViewport = () => (fitMode.current === "draft" && draftFit.current ? fitViewport(draftFit.current.frame) : fitViewport());
+  /** The automatic fit: the draft's while it's written or added, else the artboard's (a draft that ended hands the fit back at the next resize). */
+  const autoViewport = () => {
+    const fit = draftFit.current;
+    if (fitMode.current === "draft" && fit) {
+      const state = designStore.getState();
+      const draft = state.drafts.length ? activeDraft(state, Date.now()) : null;
+      if (draft?.key === fit.key && (draft.status === "writing" || draft.status === "adding")) return fitViewport(fit.frame);
+      fitMode.current = "artboard";
+      draftFit.current = null;
+    }
+    return fitViewport();
+  };
   const fitKey = `${artboard.width}x${artboard.height}:${rulers ? 1 : 0}:${designReserve}:${designHeight > 0 ? 1 : 0}`;
 
   // Restore (or fit) the viewport when the component changes or the panel first gets a size.
@@ -345,8 +357,10 @@ export function CanvasPanel({ session: sessionProp, sceneSource, onSceneSourceCh
   }, [box.width, box.height, fitKey, fitViewport]);
 
   // The first page of a draft Claude writes, while the viewport is still an automatic fit: fit its frame at a
-  // size you can read. That fit stays through the import, and goes back to the artboard's if nothing was added.
-  // A canvas that appears for the draft (a patches-only layout making room) fits it once it has a viewport.
+  // size you can read. The canvas and the viewer show only the artboard, so that's the frame's part on it, or
+  // the artboard when the frame is off it. That fit stays through the import, until the next resize, and goes
+  // back to the artboard's if nothing was added. A canvas that appears for the draft (a patches-only layout
+  // making room) fits it once it has a viewport.
   const hasViewport = viewport !== null;
   useEffect(() => {
     const state = designStore.getState();
@@ -357,7 +371,8 @@ export function CanvasPanel({ session: sessionProp, sceneSource, onSceneSourceCh
       if (!viewport) return;
       seenDraft.current = live.key;
       if (fitMode.current === null) return;
-      const frame = previewFrame(live, { componentId, rootId, artboard: size, bounds: renderBounds, fallbackReplace: null, request: state.request });
+      const drawn = previewFrame(live, { componentId, rootId, artboard: size, bounds: renderBounds, fallbackReplace: null, request: state.request });
+      const frame = drawn && (intersectRects(drawn, artboard) ?? artboard);
       const next = frame ? fitViewport(frame) : null;
       if (!frame || !next) return;
       fitMode.current = "draft";
@@ -920,13 +935,17 @@ export function CanvasPanel({ session: sessionProp, sceneSource, onSceneSourceCh
   const revealNonce = reveal?.nonce;
   useEffect(() => {
     const r = session.selection.getState().reveal;
-    const { index: idx, viewport: vp, box: size, componentId: cid, designReserve: reserve, inset: top } = latest.current;
+    const { index: idx, viewport: vp, box: size, componentId: cid, designReserve: reserve, inset: top, artboard: board } = latest.current;
     if (!r || r.component !== cid || !vp) return;
     const bounds = unionRects(r.ids.map((id) => idx.bounds(id)).filter((b): b is Rect => b !== null));
     if (!bounds) return;
-    // A draft's fit already shows the screen that lands there, from its top: it doesn't move as the screen lands.
-    const shown = rectToScreen(vp, bounds);
-    if (fitMode.current === "draft" && shown.x >= 0 && shown.x + shown.width <= size.width && shown.y >= top && shown.y < size.height - reserve) return;
+    // A draft's fit already shows what the artboard shows of the screen that lands there, from its top: it doesn't
+    // move as the screen lands, even when none of it is on the artboard.
+    if (fitMode.current === "draft") {
+      const onArtboard = intersectRects(bounds, board);
+      const shown = onArtboard && rectToScreen(vp, onArtboard);
+      if (!shown || (shown.x >= 0 && shown.x + shown.width <= size.width && shown.y >= top && shown.y < size.height - reserve)) return;
+    }
     // Above the box, the fit's own padding is margin enough: a screen that fills the fitted artboard stays put.
     const next = reserve ? ensureVisible(vp, bounds, [size.width, size.height - reserve], DESIGN_FIT_PADDING) : ensureVisible(vp, bounds, [size.width, size.height]);
     if (next === vp) return;

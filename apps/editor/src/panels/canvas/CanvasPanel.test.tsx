@@ -610,6 +610,97 @@ describe("CanvasPanel with the Design with Claude box", () => {
     expect(artboardOffset()).toEqual([199, 28]);
   });
 
+  it("gives the artboard its fit back at the next resize once a draft has landed, and never fits a layer that's gone", async () => {
+    bodySize = [800, 400];
+    mount();
+    await openDesignBox();
+    const assistantDraft = (over: Partial<DesignDraft> = {}) => draftOf({ source: "assistant", key: "t1", runId: "r1", turn: 1, toolUseId: "t1", mcp: undefined, ...over });
+    showDraft(assistantDraft());
+    expect(artboardZoom()).toBe(1);
+    expect(artboardOffset()).toEqual([199, 28]);
+    act(() => {
+      session.document.getState().apply([{ op: "addLayer", component: "main", layer: { id: "checkout", type: "rectangle", name: "Checkout", props: { position: [0, 0], size: [402, 874] } } }], { label: "Import Design" });
+      designStore.setState({ drafts: [assistantDraft({ status: "added" })] });
+      session.selection.getState().select({ layers: ["checkout"] });
+      session.selection.getState().requestReveal("main", ["checkout"]);
+    });
+    expect(artboardOffset()).toEqual([199, 28]);
+
+    // Closing the box fits the whole artboard again, not the page Claude wrote.
+    act(() => designStore.getState().closeBox());
+    expect(artboardZoom()).toBeCloseTo((400 - 112) / 874, 3);
+    expect(artboardOffset()![1]).toBeCloseTo(fitRectOffset([800, 400], 56)[1], 0);
+
+    // Claude Code redesigns the card with the box closed, and the card is deleted after it lands: a resize fits the artboard.
+    showDraft(draftOf({ fields: { name: "Card", replace: "card" } }));
+    // The card is 370 × 440: its fit is 288 / 440.
+    expect(artboardZoom()).toBeCloseTo(288 / 440, 3);
+    showDraft(draftOf({ fields: { name: "Card", replace: "card" }, status: "added", since: Date.now() }));
+    act(() => {
+      session.document.getState().apply([{ op: "removeLayer", component: "main", id: "card" }], { label: "Delete" });
+    });
+    resize(800, 500);
+    expect(artboardZoom()).toBeCloseTo((500 - 112) / 874, 3);
+    expect(artboardOffset()![1]).toBeCloseTo(fitRectOffset([800, 500], 56)[1], 0);
+  });
+
+  it("fits the part of a draft's frame on the artboard, or the artboard when the frame is off it, since the canvas and viewer show only the artboard", () => {
+    bodySize = [800, 400];
+    mount();
+    // Claude Code puts a new screen beside the artboard: the artboard's width fits, top first, not the empty canvas beside it.
+    const beside = { name: "Settings", position: [482, 0] as [number, number] };
+    showDraft(draftOf({ fields: beside }));
+    expect(artboardZoom()).toBe(1);
+    expect(artboardOffset()).toEqual([199, 56]);
+    // It lands there, selected and revealed: nothing moves.
+    act(() => {
+      session.document.getState().apply([{ op: "addLayer", component: "main", layer: { id: "settings", type: "rectangle", name: "Settings", props: { position: beside.position, size: [402, 874] } } }], { label: "Import Design" });
+      designStore.setState({ drafts: [draftOf({ fields: beside, status: "added" })] });
+      session.selection.getState().select({ layers: ["settings"] });
+      session.selection.getState().requestReveal("main", ["settings"]);
+    });
+    expect(artboardOffset()).toEqual([199, 56]);
+
+    // A frame half on the artboard: the half that shows fits.
+    showDraft(draftOf({ key: "mcp:cc-2", fields: { name: "Promo", position: [200, 0] } }));
+    expect(artboardZoom()).toBe(1);
+    expect(artboardOffset()).toEqual([(800 - 202) / 2 - 200, 56]);
+  });
+
+  it("measures a repeated layer's first copy for the preview, its fit and the box's prompt", async () => {
+    const copied: string[] = [];
+    Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText: async (text: string) => void copied.push(text) } });
+    mount();
+    const rows = { loop: [[0, 0], [0, 100], [0, 200]] };
+    act(() => {
+      session.document.getState().apply(
+        [
+          { op: "addLayer", component: "main", layer: { id: "row", type: "rectangle", name: "Row", props: { position: rows, size: [200, 80] } } },
+          { op: "addLayer", component: "main", layer: { id: "label", type: "text", name: "Label", props: { text: "Row", position: rows } } },
+        ],
+        { label: "Add rows" },
+      );
+    });
+    // Claude Code redesigns the row: the preview draws over its first copy, not all three, and the fit centers that copy.
+    showDraft(draftOf({ fields: { name: "Row", replace: "row" } }));
+    const preview = container.querySelector<HTMLElement>(".sb-design-preview")!;
+    expect([parseFloat(preview.style.width), parseFloat(preview.style.height)]).toEqual([200 * artboardZoom(), 80 * artboardZoom()]);
+    expect(artboardOffset()).toEqual([(800 - 200) / 2, (1000 - 80) / 2]);
+
+    // The box's prompt gives the size of one copy of a text layer (drawn, not typed).
+    act(() => designStore.setState(initialDesignData()));
+    act(() => session.selection.getState().select({ layers: ["label"], patches: [], comments: [] }));
+    await openDesignBox();
+    await act(async () => {
+      [...container.querySelectorAll<HTMLButtonElement>(".sb-design-box button")].find((b) => b.textContent === "Copy prompt")!.click();
+      await Promise.resolve();
+    });
+    const size = /redesign layer label \(([\d.]+) × ([\d.]+),/.exec(copied[0] ?? "");
+    expect(size).not.toBeNull();
+    expect(Number(size![2])).toBeGreaterThan(0);
+    expect(Number(size![2])).toBeLessThan(100);
+  });
+
   it("fits Claude Code's draft with the box closed, gives the artboard's fit back when nothing was added, and leaves a viewport someone moved", () => {
     bodySize = [800, 400];
     mount();
