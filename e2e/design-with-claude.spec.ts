@@ -9,7 +9,7 @@
 import { expect, test, type Locator, type Page } from "@playwright/test";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { fakeAssistantSent, installFakeAssistant, releaseFakeGate } from "./fakeAssistant.ts";
+import { fakeAssistantSent, fakeHandoffs, installFakeAssistant, releaseFakeGate } from "./fakeAssistant.ts";
 import { collectConsoleProblems, hook, openEditor, screenshot } from "./helpers.ts";
 
 const profileHtml = readFileSync(fileURLToPath(new URL("../packages/import/fixtures/profile.html", import.meta.url)), "utf8");
@@ -221,10 +221,20 @@ test.describe("Design with Claude", () => {
     await designField(page).press("Enter");
     await expect(page.getByText("Designing on the canvas uses your own Anthropic API key, kept in your keychain.")).toBeVisible();
     await expect(designField(page)).toHaveValue("a profile screen");
-    await expect(page.getByRole("button", { name: "Add API key…" })).toBeVisible();
-    await expect(page.getByRole("button", { name: "Copy for Claude Code" })).toBeVisible();
+    // With a Claude plan instead of a key, Open in Claude Code comes first.
+    const notice = page.locator(".sb-design-box__notice");
+    await expect(notice).toContainText("With a Claude plan, open it in Claude Code instead: it draws on this canvas as it writes.");
+    await expect(notice.getByRole("button")).toHaveText(["Open in Claude Code", "Add API key…", "Copy for Claude Code"]);
     await expect(preview(page)).toHaveCount(0);
     await screenshot(page, "design-03-no-key");
+
+    // It hands the request to the person's own Claude Code, with the prompt that teaches the live preview.
+    await notice.getByRole("button", { name: "Open in Claude Code" }).click();
+    await expect(page.locator(".sb-toast", { hasText: "Opened Claude Code" })).toContainText("In Terminal, in “noddit”. It designs on this canvas as it writes.");
+    const handoffs = await fakeHandoffs(page);
+    expect(handoffs).toHaveLength(1);
+    expect(handoffs[0]).toContain("a profile screen");
+    expect(handoffs[0]).toContain('preview_design (component "main") with the page\'s head and first section as html, then append one part at a time, then import_design with "preview": true.');
     expect(problems).toEqual([]);
   });
 

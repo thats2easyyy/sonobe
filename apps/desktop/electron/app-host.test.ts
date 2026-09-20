@@ -14,7 +14,7 @@ import type { SceneFrame, SceneNode } from "@sonobe/engine";
 import { InMemoryTransport } from "@modelcontextprotocol/server";
 import { createHttpHandler, createSimulationManager, createSonobeMcpServer, HostError, isHostError, TOOL_NAMES, type DesignPreviewUpdate, type NodeMcpHandler } from "@sonobe/mcp";
 import { createPatchRegistry } from "@sonobe/patches";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, expectTypeOf, it, vi } from "vitest";
 
 // Count full diagnostics passes in this process (behavior unchanged).
 vi.mock("@sonobe/core", async (importOriginal) => {
@@ -23,6 +23,8 @@ vi.mock("@sonobe/core", async (importOriginal) => {
 });
 import { createBrowserHost, createMemoryProjectStorage, type ProjectStorage } from "../../editor/src/host/browserHost.ts";
 import { registerRpcHandlers } from "../../editor/src/host/rpcHandlers.ts";
+import type { DesignPreviewUpdate as EditorDesignPreviewUpdate } from "../../editor/src/host/types.ts";
+import { activeDraft, designStore, initialDesignData } from "../../editor/src/panels/design/designStore.ts";
 import { createManualScheduler } from "../../editor/src/runtime/scheduler.ts";
 import { createDemoDocument } from "../../editor/src/state/demoDocument.ts";
 import { createEditorSession, type EditorSession } from "../../editor/src/state/session.ts";
@@ -37,6 +39,16 @@ import { createRpcClient, createRpcFailure, createRpcServer, type RpcServer } fr
 
 const registry = createPatchRegistry();
 const CLAUDE = { kind: "agent" as const, name: "Claude" };
+
+/** A checkout screen as the capture window reads it (import_design's preview source renders the draft into it). */
+const CHECKOUT_CAPTURE = {
+  format: "sonobe.design-capture",
+  version: 1,
+  source: { kind: "html", title: "Checkout" },
+  viewport: { width: 402, height: 874 },
+  root: { kind: "frame", name: "Page", box: [0, 0, 402, 874], fill: "#FFFFFFFF", children: [{ kind: "frame", name: "Pay Button", nameRank: 5, box: [16, 780, 370, 52], fill: "#111118FF", radii: [14, 14, 14, 14], children: [] }] },
+  images: {},
+};
 
 interface TestWindow {
   session: EditorSession;
@@ -598,6 +610,44 @@ describe("app host presence, selection and screenshots", () => {
     const oldHost = appHost([old]);
     expect(await rejection(oldHost.showDesignPreview!({ ...update, docId: "photo_zoom" }))).toMatchObject({ code: "design_preview_unavailable", hint: expect.stringContaining('"preview": true') });
     await expect(oldHost.showDesignPreview!({ ...update, docId: "photo_zoom", status: "cleared", html: null })).resolves.toBeUndefined();
+  });
+
+  it("puts preview_design's draft on the editor's canvas, and import_design with preview adds it as layers", async () => {
+    // The editor's design.preview params mirror the MCP host's update field for field.
+    expectTypeOf<EditorDesignPreviewUpdate>().toEqualTypeOf<DesignPreviewUpdate>();
+    designStore.setState(initialDesignData());
+    cleanups.push(() => designStore.setState(initialDesignData()));
+    const w = editorWindow(1);
+    const captured: { html: string | undefined; status: string | undefined }[] = [];
+    const host = appHost([w], {
+      captureDesign: async (request) => {
+        // import_design says it's adding the draft while it renders it.
+        captured.push({ html: request.html, status: activeDraft(designStore.getState(), Date.now())?.status });
+        return { capture: CHECKOUT_CAPTURE as never, images: new Map() };
+      },
+    });
+    const server = createSonobeMcpServer(host, { version: "0.1.0-test" });
+    const [clientSide, serverSide] = InMemoryTransport.createLinkedPair();
+    await server.connect(serverSide);
+    const client = new Client({ name: "claude-code", version: "2.1.278" });
+    await client.connect(clientSide as never);
+    cleanups.push(() => client.close());
+    const draft = () => activeDraft(designStore.getState(), Date.now());
+
+    const head = '<!doctype html><html><head><style>body{margin:0}</style></head><body><header data-name="Header">Checkout</header>';
+    await client.callTool({ name: "preview_design", arguments: { name: "Checkout", html: head } });
+    expect(draft()).toMatchObject({ source: "mcp", key: "mcp:Claude", status: "writing", html: head, fields: { name: "Checkout" }, mcp: { author: CLAUDE, revision: 1 } });
+    const pay = '<div data-name="Pay Button">Pay</div></body></html>';
+    await client.callTool({ name: "preview_design", arguments: { append: pay } });
+    expect(draft()).toMatchObject({ status: "writing", html: head + pay, mcp: { revision: 2 } });
+
+    const result = await client.callTool({ name: "import_design", arguments: { preview: true } });
+    expect(result.isError).not.toBe(true);
+    expect(captured).toEqual([{ html: head + pay, status: "adding" }]);
+    // The import went in before the draft was cleared, so it ends as added and fades.
+    expect(designStore.getState().drafts.at(-1)).toMatchObject({ key: "mcp:Claude", status: "added", mcp: { revision: 4 } });
+    const root = w.session.document.getState().doc.project.root;
+    expect(w.session.document.getState().doc.components[root]!.layers.map((l) => l.name)).toContain("Checkout");
   });
 
   it("restarts the live prototype (restart_viewer) and says what the players show", async () => {
