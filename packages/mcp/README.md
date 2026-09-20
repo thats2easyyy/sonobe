@@ -19,14 +19,15 @@ One server factory serves 2026-07-28 clients (per-request envelopes) and 2025-er
   - safe with other writers in the folder: a save refuses with `disk_changed` when the project changed on disk since the session read or saved it (autosave reports it as `saveError` and keeps the edit in memory); `save_document({ force: true })` overwrites, `open_document({ ref, reload: true })` loads the disk version; saves only delete stale files the session loaded or wrote
   - deterministic simulations
   - presence recorded but not shown
-  - `screenshot` draws the prototype screen without the app (`src/screenshot.ts`): the `SceneFrame` becomes SVG through `@sonobe/renderer/svg`, and `@resvg/resvg-js` (a native module loaded on first use) rasterizes it to PNG. Image assets load from the project's `assets/` folder as data URIs. Results carry `notes` about approximations (text metrics; placeholders for video, Lottie and shaders), stay under 2048 px per edge and about 2.5 MB, and throw `HostError("screenshots_unavailable")` when the rasterizer isn't installed. Targets: `viewer` or a layer; `simId` draws a session's frame, `atMs` a later frame on a copy.
+  - `screenshot` draws the prototype screen without the app (`src/screenshot.ts`): the `SceneFrame` becomes SVG through `@sonobe/renderer/svg`, and `@resvg/resvg-js` (a native module loaded on first use) rasterizes it to PNG. Image assets load from the project's `assets/` folder as data URIs. Results carry `notes` about approximations (text metrics; placeholders for video, Lottie and shaders), stay under 2048 px per edge and about 2.5 MB, and throw `HostError("screenshots_unavailable")` when the rasterizer isn't installed. Targets: `viewer` or a layer; `simId` draws a session's frame, `atMs` a later frame on a copy, and `isolate: true` only the layer's subtree.
 
 Browser-safe building blocks for other hosts:
 
 - `createDocumentSession(doc, { docId, registry })`: history, revision, id reservations, diagnostics deltas, undo that won't discard human edits.
-- `createSimulationManager({ registry, getDocument })`: `sim_*` sessions, plus `scene(simId)`, `sceneAt(simId, atMs)` (a later frame on a copy) and `previewScene(docId, { atMs })` (a fresh run, `atMs` after start or once start-up animations settle) for screenshots.
+- `createSimulationManager({ registry, getDocument })`: `sim_*` sessions, including `override(simId, request)` for `sim_override`, plus `scene(simId)`, `sceneAt(simId, atMs)` (a later frame on a copy) and `previewScene(docId, { atMs })` (a fresh run, `atMs` after start or once start-up animations settle) for screenshots. Each session simulates the host's document with its overrides applied on top (`applyOverrides` in `src/overrides.ts`).
+- `isolateSceneLayer(scene, target)`: a `SceneFrame` with only one layer's subtree, for `get_screenshot` with `isolate: true`.
 
-Node-only screenshot helpers: `renderSceneScreenshot({ scene, target, scale, maxWidth, maxBytes, assets })`, `loadSceneAssets(scene, doc, projectDir)` and `rasterizeSvg(svg, { hasText })` from `src/screenshot.ts`.
+Node-only screenshot helpers: `renderSceneScreenshot({ scene, target, isolate, scale, maxWidth, maxBytes, assets })`, `loadSceneAssets(scene, doc, projectDir)` and `rasterizeSvg(svg, { hasText })` from `src/screenshot.ts`.
 
 ## Server and transports
 
@@ -74,7 +75,7 @@ The tools are listed in `TOOL_NAMES`.
 | Documents            | `list_documents`, `open_document`, `create_document`, `get_document_info`, `save_document`                                                     |
 | Read                 | `get_outline`, `get_layers`, `get_patches`, `get_items`, `find`, `get_selection`, `get_diagnostics`, `explain`                                 |
 | Write                | `apply_ops`, `add_layers`, `add_patches`, `connect`, `set_values`, `update_layers`, `delete_items`, `rename`, `create_component`, `tidy_graph`, `import_design` |
-| Simulate             | `sim_reset`, `sim_dispatch`, `sim_step`, `sim_trace`, `sim_get_values`, `get_screenshot`                                                       |
+| Simulate             | `sim_reset`, `sim_dispatch`, `sim_step`, `sim_trace`, `sim_get_values`, `sim_override`, `get_screenshot`                                       |
 | Presence and history | `begin_work`, `finish_work`, `reveal`, `list_history`, `undo`                                                                                  |
 
 Conventions:
@@ -90,7 +91,8 @@ Conventions:
 - `patchId.port`, `@layerId.prop`, `#n` for one loop copy.
 - Inside component instances: `like_button_2/liked.on`, `@card#2/badge.scale`, and `@like_button_2/like_button` as a tap target. `get_items` takes `like_button_2/liked`.
 - Inputs resolve their targets and compute hit reports when they fire. Traces on a copy replay the session's input log into a clone, so they report the same way. Trace times count frames.
-- The log keeps 20,000 steps since `sim_reset`. Beyond that, traces and later-frame screenshots on a copy refuse with `sim_copy_unavailable` (no copy of the current state exists). `advance: true` still traces the session itself.
+- The log keeps 20,000 steps since `sim_reset`. Beyond that, traces and later-frame screenshots on a copy refuse with `sim_copy_unavailable` (no copy of the current state exists). `advance: true` still traces the session itself, and keeps stepping it until the trace's events finish.
+- `sim_override` overrides are value ops on the session's own copy of the document (never the host's). They apply to every loop copy and component instance, so `#n` targets are refused. The log records each re-derived document, so traces on a copy and later-frame screenshots see them. `sim_reset` clears them unless `keepOverrides: true`.
 - `SimulationManager.scene(simId)` returns a session's current `SceneFrame`, for simulation screenshots.
 
 Resources: `sonobe://guides/{topic}`, `sonobe://patches/{type}`, `sonobe://documents/{docId}/outline`, `sonobe://documents/{docId}/diagnostics`.
