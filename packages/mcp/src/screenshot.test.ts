@@ -185,6 +185,20 @@ describe("headless screenshots", () => {
     expect(after.frame).toBe(before.frame);
     expect(after.values).toEqual(before.values);
 
+    // The root component goes with simId: a layer in it is drawn from the simulation's frame, with
+    // its overrides, not from the canvas at frame 0.
+    await c.call("sim_override", { simId, set: [{ target: "@card.color", value: "#0000FFFF" }] });
+    const card = await c.call("get_screenshot", { simId, target: "@card" });
+    const rooted = await c.call("get_screenshot", { simId, target: "@card", component: "main" });
+    const [a, b] = [png(card), png(rooted)];
+    expect([b.width, b.height]).toEqual([a.width, a.height]);
+    expect(b.pixel(b.width >> 1, b.height >> 1)).toEqual(a.pixel(a.width >> 1, a.height >> 1));
+    expect(b.pixel(b.width >> 1, b.height >> 1)[2]).toBeGreaterThan(200);
+    const heading = `^@card of main · ${a.width}×${a.height} · [\\d.]+ ms · ${simId}`;
+    expect(rooted.text).toMatch(new RegExp(heading, "m"));
+    expect(rooted.text).not.toContain("Frame 0 with authored values");
+    await c.call("sim_override", { simId, clear: "all" });
+
     const canvas = await c.call("get_screenshot", { target: "canvas", simId });
     expect(canvas.structured.error).toMatchObject({ code: "target_unavailable" });
     expect(canvas.text).toContain('"target": "graph", "component"');
