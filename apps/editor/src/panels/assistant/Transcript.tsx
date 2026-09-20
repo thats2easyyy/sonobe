@@ -1,4 +1,4 @@
-import { Ban, Check, CircleAlert, Info, KeyRound, LoaderCircle, Sparkles, SkipForward, TriangleAlert, Trash2, X } from "lucide-react";
+import { Ban, Check, CircleAlert, Info, KeyRound, LoaderCircle, RefreshCw, Sparkles, SkipForward, TriangleAlert, Trash2, X } from "lucide-react";
 import { useEffect, useLayoutEffect, useRef } from "react";
 import { Button } from "../../ui/Button.tsx";
 import { Markdown } from "../learn/Markdown.tsx";
@@ -70,29 +70,35 @@ function Notice({ item, onManageKey }: { item: Extract<ChatItem, { kind: "notice
   );
 }
 
-function Confirm({ item, onConfirm }: { item: Extract<ChatItem, { kind: "confirm" }>; onConfirm: TranscriptProps["onConfirm"] }) {
-  const deleteRef = useRef<HTMLButtonElement>(null);
+/**
+ * A confirmation the Assistant is waiting on, in the transcript and in the canvas's Design with Claude
+ * box. A deletion focuses Delete; a replace focuses its decline button, so Return keeps the person's work.
+ */
+export function ConfirmCard({ item, onConfirm }: { item: Extract<ChatItem, { kind: "confirm" }>; onConfirm: TranscriptProps["onConfirm"] }) {
+  const replace = item.confirmKind === "replace";
+  const focusRef = useRef<HTMLButtonElement>(null);
   useEffect(() => {
-    if (item.status === "pending") deleteRef.current?.focus({ preventScroll: true });
+    if (item.status === "pending") focusRef.current?.focus({ preventScroll: true });
   }, [item.status]);
+  const Icon = replace ? RefreshCw : Trash2;
   return (
-    <div className="sb-assistant-confirm" data-status={item.status} role={item.status === "pending" ? "alertdialog" : undefined} aria-label={item.title}>
+    <div className="sb-assistant-confirm" data-status={item.status} data-kind={item.confirmKind ?? "delete"} role={item.status === "pending" ? "alertdialog" : undefined} aria-label={item.title}>
       <div className="sb-assistant-confirm__head">
-        <Trash2 size={15} aria-hidden className="sb-assistant-confirm__icon" />
+        <Icon size={15} aria-hidden className="sb-assistant-confirm__icon" />
         <p className="sb-assistant-confirm__title">{item.title}</p>
       </div>
       <p className="sb-assistant-confirm__message">{item.message}</p>
       {item.status === "pending" ? (
         <div className="sb-assistant-confirm__actions">
-          <Button size="sm" onClick={() => onConfirm(item.id, false)}>
-            Keep them
+          <Button ref={replace ? focusRef : undefined} size="sm" onClick={() => onConfirm(item.id, false)}>
+            {item.declineLabel ?? "Keep them"}
           </Button>
-          <Button ref={deleteRef} size="sm" variant="danger" onClick={() => onConfirm(item.id, true)}>
-            Delete
+          <Button ref={replace ? undefined : focusRef} size="sm" variant="danger" onClick={() => onConfirm(item.id, true)}>
+            {item.approveLabel ?? "Delete"}
           </Button>
         </div>
       ) : (
-        <p className="sb-assistant-confirm__result">{item.status === "approved" ? "You allowed the deletion." : "You kept them."}</p>
+        <p className="sb-assistant-confirm__result">{replace ? (item.status === "approved" ? "You allowed the change." : "You kept it.") : item.status === "approved" ? "You allowed the deletion." : "You kept them."}</p>
       )}
     </div>
   );
@@ -160,7 +166,7 @@ export function Transcript({ items, running, thinking, onConfirm, onManageKey, o
           case "notice":
             return <Notice key={item.id} item={item} onManageKey={onManageKey} />;
           case "confirm":
-            return <Confirm key={item.id} item={item} onConfirm={onConfirm} />;
+            return <ConfirmCard key={item.id} item={item} onConfirm={onConfirm} />;
         }
       })}
       {waiting ? (

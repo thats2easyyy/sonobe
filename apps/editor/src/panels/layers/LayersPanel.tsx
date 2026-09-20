@@ -23,6 +23,7 @@ import {
   ScanSearch,
   Search,
   SendToBack,
+  Sparkles,
   Trash,
   Ungroup,
   Upload,
@@ -59,6 +60,7 @@ import { Tooltip } from "../../ui/Tooltip.tsx";
 import { TreeView } from "../../ui/TreeView.tsx";
 import { cx } from "../../ui/lib/cx.ts";
 import { getAncestorIds } from "../../ui/lib/treeModel.ts";
+import { designStore } from "../design/designStore.ts";
 import { layerDropAttributes, useCableDrag } from "../patch-editor/api.ts";
 import { layerAcceptsCable, layerHoverKey, useCableHover } from "./cableHover.ts";
 import { displayTree, filterLayerTree, isFiltering, parentLayerIds, planInsertLayer, planLayerMove, relatedPatchIds, treeIds } from "./layerTree.ts";
@@ -372,6 +374,17 @@ export function LayersPanel({ onCollapse, className }: LayersPanelProps) {
     const instance = single && node.type === COMPONENT_INSTANCE_LAYER_TYPE && node.component ? doc.components[node.component] : undefined;
     return [
       { id: "touch", label: "Add Interaction", icon: <Pointer size={14} />, disabled: !single, ...(single ? { submenu: touchMenuEntries(session, node.id).filter((e) => e.type !== "label") } : { description: "Select one layer" }) },
+      {
+        id: "redesign",
+        label: "Redesign with Claude…",
+        icon: <Sparkles size={14} />,
+        disabled: !single,
+        ...(single ? {} : { description: "Select one layer" }),
+        onSelect: () => {
+          sel().select({ layers: [node.id] });
+          run("ai.redesign", () => designStore.getState().openBox());
+        },
+      },
       { type: "separator" },
       { id: "copy", label: "Copy", icon: <Copy size={14} />, shortcut: "Mod+C", onSelect: () => run("edit.copy", () => void copyFallback()) },
       { id: "paste", label: "Paste", icon: <ClipboardPaste size={14} />, shortcut: "Mod+V", onSelect: () => run("edit.paste", () => void pasteFallback()) },

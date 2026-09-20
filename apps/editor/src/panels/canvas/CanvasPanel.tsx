@@ -11,8 +11,8 @@
 import type { Id, Op } from "@sonobe/core";
 import type { SceneFrame } from "@sonobe/engine";
 import { createDomRenderer, DomTextMeasurer, type DomRenderer } from "@sonobe/renderer";
-import { ChevronDown, Circle, Group, MousePointer2, Ruler, Square, Type } from "lucide-react";
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type DragEvent as ReactDragEvent, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent, type RefObject } from "react";
+import { ChevronDown, Circle, Group, MousePointer2, Ruler, Sparkles, Square, Type } from "lucide-react";
+import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type DragEvent as ReactDragEvent, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent, type RefObject } from "react";
 import { useStore } from "zustand";
 import { Panel } from "../../shell/Panel.tsx";
 import { useEditorSession } from "../../state/EditorProvider.tsx";
@@ -33,6 +33,8 @@ import { useLatest } from "../../ui/lib/hooks.ts";
 import { readString, writeString } from "../../ui/lib/storage.ts";
 import { useElementSize } from "../../ui/lib/useElementSize.ts";
 import { rectOfElement } from "../../state/bounds.ts";
+import { DesignPreview } from "../design/DesignPreview.tsx";
+import { designStore, useDesign } from "../design/designStore.ts";
 import { patchEditorBridge } from "../patch-editor/api.ts";
 import { registerBoundsProvider } from "../viewer/hostBridge.ts";
 import { dragHasFiles, dropLabel, dropUndoLabel, mediaLayerOps, prepareDroppedFiles, type DroppedFile } from "./assetDrop.ts";
@@ -89,6 +91,11 @@ const NUDGE_IDLE_MS = 900;
 const FIT_PADDING = 56;
 const RULERS_KEY = "sonobe.canvas.rulers";
 const TOOL_LABELS: Record<InsertTool, string> = { rectangle: "Rectangle", oval: "Oval", text: "Text" };
+/** The presence pill in the artboard label is cut to this many characters. */
+const AGENT_PILL_CHARS = 60;
+
+// The Design with Claude box loads the first time it opens.
+const DesignBox = lazy(() => import("../design/DesignBox.tsx").then((m) => ({ default: m.DesignBox })));
 
 interface GestureBase {
   pointerId: number;
@@ -200,6 +207,9 @@ export function CanvasPanel({ session: sessionProp, sceneSource, onSceneSourceCh
   const selected = useStore(session.selection, (s) => s.layers);
   const hovered = useStore(session.selection, (s) => s.hovered);
   const reveal = useStore(session.selection, (s) => s.reveal);
+  const working = useStore(session.presence, (s) => s.working);
+  const designOpen = useDesign((s) => s.open);
+  const [designLoaded, setDesignLoaded] = useState(designOpen);
 
   const [internalSource, setInternalSource] = useState<SceneSource>("design");
   const source = sceneSource ?? internalSource;
@@ -240,6 +250,11 @@ export function CanvasPanel({ session: sessionProp, sceneSource, onSceneSourceCh
   const hoverId = hovered && hovered.kind === "layer" && hovered.component === componentId ? hovered.id : null;
 
   const latest = useLatest({ index, viewport, componentId, component, tool, artboard, chrome, spaceHeld, box, editing });
+  const layerBounds = useCallback((id: string) => latest.current.index.bounds(id), [latest]);
+
+  useEffect(() => {
+    if (designOpen) setDesignLoaded(true);
+  }, [designOpen]);
 
   const fitViewport = useCallback((): Viewport | null => {
     if (box.width <= 0 || box.height <= 0) return null;
@@ -481,7 +496,7 @@ export function CanvasPanel({ session: sessionProp, sceneSource, onSceneSourceCh
 
   const onPointerDown = (event: ReactPointerEvent<HTMLDivElement>) => {
     const { viewport: vp, index: idx, componentId: cid, artboard: board, chrome: c, tool: currentTool } = latest.current;
-    if (!vp || (event.target as Element).closest?.(".sb-cv__text-editor")) return;
+    if (!vp || (event.target as Element).closest?.(".sb-cv__text-editor, .sb-cv__hint-action")) return;
     const p = screenPoint(event);
     const a = screenToArtboard(vp, p);
     const base: GestureBase = { pointerId: event.pointerId, start: a, startScreen: p };
@@ -937,6 +952,10 @@ export function CanvasPanel({ session: sessionProp, sceneSource, onSceneSourceCh
     const result = groupSelection(session);
     if (!result.ok && result.message) toast({ title: result.message, ...(result.hint ? { description: result.hint } : {}), tone: "warn" });
   };
+  /** Design with Claude: the ai.design command when it's registered (it refreshes the Assistant first), else just the box. */
+  const openDesign = () => {
+    if (!cmds?.registry.run("ai.design")) designStore.getState().openBox();
+  };
 
   const actions = useLatest({ setTool, nudge, escape, enter, zoomBy, zoomTo, zoomToFit, zoomToSelection, group, toggleRulers });
   const cmds = useOptionalCommands();
@@ -1017,6 +1036,9 @@ export function CanvasPanel({ session: sessionProp, sceneSource, onSceneSourceCh
 
   const editingNode = editing ? index.entry(editing.id)?.node : undefined;
   const canDraw = !!component && component.kind !== "patchComponent";
+  // Another agent at work here (Claude Code, Claude Desktop); the Assistant shows its own work in the box.
+  const agent = working.find((w) => w.author.name !== "Assistant" && (!w.component || w.component === componentId));
+  const agentText = agent ? `${agent.client?.label ?? agent.author.name}: ${agent.intent}` : null;
 
   return (
     <Panel
@@ -1039,6 +1061,7 @@ export function CanvasPanel({ session: sessionProp, sceneSource, onSceneSourceCh
             ]}
           />
           <IconButton size="sm" icon={<Group size={14} />} label="Group selection" shortcut="Mod+G" disabled={selectionIds.length === 0} onClick={group} />
+          <IconButton size="sm" icon={<Sparkles size={14} />} label="Design with Claude" tooltip={canDraw ? "Design with Claude" : "Patch components have no layers to design"} className="sb-cv__design" disabled={!canDraw} onClick={openDesign} />
         </div>
       }
       actions={
@@ -1088,20 +1111,35 @@ export function CanvasPanel({ session: sessionProp, sceneSource, onSceneSourceCh
                   {size[0]} × {size[1]}
                 </span>
                 {live && <span className="sb-cv__label-live">Live frame</span>}
+                {agentText && (
+                  <span className="sb-cv__label-agent">
+                    <span className="sb-cv__label-agent-dot" aria-hidden />
+                    {agentText.length > AGENT_PILL_CHARS ? `${agentText.slice(0, AGENT_PILL_CHARS - 1).trimEnd()}…` : agentText}
+                  </span>
+                )}
               </div>
               <ArtboardRenderer session={session} scene={scene} viewport={viewport} size={size} rendererRef={rendererRef} />
               {component.layers.length === 0 && (
                 <div className="sb-cv__hint" style={{ left: Math.round(viewport.x + (size[0] * viewport.zoom) / 2), top: Math.round(viewport.y + (size[1] * viewport.zoom) / 2) }}>
-                  Draw a rectangle (R), an oval (O), or text (T)
+                  Draw a rectangle (R), an oval (O), or text (T), or{" "}
+                  <button type="button" className="sb-cv__hint-action" onClick={openDesign}>
+                    describe a screen to Claude
+                  </button>
                 </div>
               )}
               <CanvasOverlay index={index} viewport={viewport} selected={selectionIds} hovered={draft.hideChrome || gestureRef.current ? null : hoverId} chrome={chrome} draft={draft} altMeasure={altMeasure} />
+              <DesignPreview viewport={viewport} bounds={layerBounds} componentId={componentId} rootId={rootId} artboard={size} />
               {editing && editingNode && <InlineTextEditor key={editing.id} node={editingNode} viewport={viewport} initialText={editing.initial} selectAll={editing.selectAll} onCommit={commitText} />}
               {rulers && <CanvasRulers viewport={viewport} width={box.width} height={box.height} selection={chrome?.bounds ?? null} />}
             </>
           )
         )}
       </div>
+      {designLoaded && (
+        <Suspense fallback={null}>
+          <DesignBox session={session} bounds={layerBounds} />
+        </Suspense>
+      )}
     </Panel>
   );
 }
