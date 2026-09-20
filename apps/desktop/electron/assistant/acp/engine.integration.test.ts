@@ -192,6 +192,16 @@ describe("the Assistant on the Claude subscription, over the fake agent", () => 
     expect((await host.getDocument(docId)).revision).toBe(revision);
   });
 
+  it("runs a tool Claude calls by its short name, as it sometimes does after reading the guide", async () => {
+    const result = await send("bare");
+    expect(result.outcome).toBe("completed");
+    expect(reply()).toBe("Read the outline by its short name.");
+    expect(ofType("tool_finished").at(-1)).toMatchObject({ name: "get_outline", status: "done" });
+    const log = await fakeLog();
+    expect(log.some((l) => l.kind === "no_such_tool")).toBe(false);
+    expect(log.find((l) => l.kind === "mcp_result")).toMatchObject({ tool: "get_outline", isError: false });
+  });
+
   it("shows Claude Code's question before a save as a permission card, and passes the choice back", async () => {
     const result = await send("save it", {}, (e) => {
       if (e.type === "confirm_required") queueMicrotask(() => agent.confirm("w1", e.confirmationId, true, "allow-once"));

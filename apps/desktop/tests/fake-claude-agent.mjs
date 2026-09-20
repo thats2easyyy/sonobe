@@ -19,6 +19,8 @@
  *   "plainerror"                        fails the prompt with a plain Error, as the adapter does when its Claude Code
  *                                       fails otherwise: the SDK sends -32603 "Internal error" with the text in data.details
  *   "hang"                              says "Working on it…", then waits for session/cancel
+ *   "bare"                              calls get_outline by its short name, as Claude sometimes does: it runs only
+ *                                       when the session's toolAliases map it (else "No such tool available")
  *   "save" / "open"                     save_document {} / open_document { ref: "/tmp/fake.sonobe" }
  *   "replace <id>"                      the design flow, replacing layer <id>
  *   "wire", "interactive"               get_outline, then add_patches: press feedback on the first “Pay” layer
@@ -252,15 +254,26 @@ function turn(conn, session, signal) {
     await sleep(10, signal);
   };
 
-  /** A tool call as Claude Code makes it. Resolves with the MCP result and its text; throws Declined when the person says no. */
-  const tool = async (name, input) => {
+  /**
+   * A tool call as Claude Code makes it. Resolves with the MCP result and its text; throws Declined when the person says no.
+   * `bare`: Claude named the tool without its mcp__sonobe__ prefix, as it sometimes does after reading the guide: like Claude
+   * Code, the call runs only when the session's toolAliases map that name, else it fails with "No such tool available".
+   */
+  const tool = async (name, input, { bare = false } = {}) => {
     messageId = null;
     const toolCallId = `toolu_fake_${++toolCount}`;
+    const emitted = bare ? name : `mcp__sonobe__${name}`;
     const full = `mcp__sonobe__${name}`;
-    const meta = { claudeCode: { toolName: full } };
-    await update({ sessionUpdate: "tool_call", toolCallId, name: full, title: full, kind: "other", status: "pending", rawInput: {}, _meta: meta });
+    const meta = { claudeCode: { toolName: emitted } };
+    await update({ sessionUpdate: "tool_call", toolCallId, name: emitted, title: emitted, kind: "other", status: "pending", rawInput: {}, _meta: meta });
     await sleep(10, signal);
     await update({ sessionUpdate: "tool_call_update", toolCallId, rawInput: input, _meta: meta });
+    if (bare && session.params._meta?.claudeCode?.options?.toolAliases?.[name] !== full) {
+      const text = `\`\`\`\n<tool_use_error>Error: No such tool available: ${name}</tool_use_error>\n\`\`\``;
+      log("no_such_tool", { sessionId: session.id, toolCallId, tool: name });
+      await update({ sessionUpdate: "tool_call_update", toolCallId, status: "failed", content: [{ type: "content", content: { type: "text", text } }], _meta: meta });
+      return { isError: true, content: [{ type: "text", text }], text };
+    }
     if (session.mode === "plan" && !(await readOnly(session, name, signal))) {
       log("plan_refused", { sessionId: session.id, toolCallId, tool: name });
       await update({ sessionUpdate: "tool_call_update", toolCallId, status: "failed", content: [{ type: "content", content: { type: "text", text: PLAN_TEXT } }] });
@@ -374,6 +387,10 @@ async function reply(t, message, context) {
   if (has(/\bhang\b/i)) {
     await t.say("Working on it…");
     return new Promise((_resolve, reject) => t.signal.addEventListener("abort", () => reject(t.signal.reason), { once: true }));
+  }
+  if (has(/\bbare\b/i)) {
+    const read = await t.tool("get_outline", { detail: "compact" }, { bare: true });
+    return t.say(read.isError ? "That tool wasn't there." : "Read the outline by its short name.");
   }
   if (has(/\bsave\b/i)) {
     const saved = await t.tool("save_document", {});

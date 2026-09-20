@@ -366,6 +366,8 @@ describe("subscription engine: sessions", () => {
             maxTurns: 30,
             // Every tool but the ones that reach outside the prototype, which ask first.
             allowedTools: ["get_outline", "add_layers", "delete_items", "apply_ops", "import_design", "preview_design"].map((n) => `mcp__sonobe__${n}`),
+            // Every tool's short name resolves to it (Claude sometimes calls one that way).
+            toolAliases: Object.fromEntries(TOOLS.map((t) => [t.name, `mcp__sonobe__${t.name}`])),
             env: { ENABLE_TOOL_SEARCH: "false", MCP_TOOL_TIMEOUT: "1800000", CLAUDE_AGENT_SDK_CLIENT_APP: "sonobe/0.1.0-test" },
           },
         },
