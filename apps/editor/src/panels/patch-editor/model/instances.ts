@@ -138,36 +138,53 @@ export function copyInScope(key: string, prefix: string): number | undefined {
   return (scope.length ? copyOf(segments[scope.length - 1]) : undefined) ?? copyOf(segments[scope.length]);
 }
 
+/** "card#3" → ["card", 3]; "card" → ["card", undefined]. */
+function splitCopy(segment: string): [string, number | undefined] {
+  const m = /^(.*)#(\d+)$/.exec(segment);
+  return m ? [m[1]!, Number(m[2])] : [segment, undefined];
+}
+
 /**
  * The scene key of layer `layerId` in the watched scope (`prefix` from watchedPrefix): the layer
  * itself, or, for a looped layer, its watched copy (copy 0 without one, wrapping past the last).
- * Undefined when the scene doesn't draw it there.
+ * Instances match the way the engine reads the prefix: a bare instance is its copy 0 ("card" finds
+ * "card#0/field" when the instance is looped), and any copy of one that isn't looped is the
+ * instance itself ("card#2" finds "card/field"). Undefined when the scene doesn't draw it there.
  */
 export function layerSceneKey(scene: SceneFrame | null, prefix: string, layerId: Id, copy: number | null): string | undefined {
   if (!scene) return undefined;
-  const base = prefix ? `${prefix}/${layerId}` : layerId;
-  const copies = new Set<number>();
-  let single = false;
+  const scope = prefix ? prefix.split("/").map(splitCopy) : [];
+  const inScope = (segments: readonly string[]) =>
+    scope.every(([id, k], i) => {
+      const [sid, sk] = splitCopy(segments[i]!);
+      return sid === id && (sk === undefined || sk === (k ?? 0));
+    });
+  const copies = new Map<number, string>();
+  let single: string | undefined;
   const stack: SceneNode[] = [...scene.roots];
   while (stack.length) {
     const node = stack.pop()!;
-    if (node.key === base) single = true;
-    else if (node.key.startsWith(`${base}#`) && /^\d+$/.test(node.key.slice(base.length + 1))) copies.add(Number(node.key.slice(base.length + 1)));
     for (const child of node.children) stack.push(child);
+    const segments = node.key.split("/");
+    if (segments.length !== scope.length + 1 || !inScope(segments)) continue;
+    const [id, n] = splitCopy(segments[scope.length]!);
+    if (id !== layerId) continue;
+    if (n === undefined) single = node.key;
+    else copies.set(n, node.key);
   }
-  if (single) return base;
+  if (single) return single;
   if (!copies.size) return undefined;
   const want = copy === null ? 0 : copy % copies.size;
-  return `${base}#${copies.has(want) ? want : Math.min(...copies)}`;
+  return copies.get(want) ?? copies.get(Math.min(...copies.keys()));
 }
 
 /**
  * The instance path live values come from, with the watched copy: inside a looped instance
  * (`copies` of them), "card#3" picks that copy (wrapping past the last). Without a watched copy, or
- * when the instance isn't looped, it's the scope's own path (the engine then reads copy 0).
+ * when the instance isn't looped (one copy), it's the scope's own path (the engine then reads copy 0).
  */
 export function watchedPrefix(scope: LiveScope, copies: number | undefined, copy: number | null): string | null {
-  if (scope.prefix === null || copy === null || !copies || !scope.steps.length) return scope.prefix;
+  if (scope.prefix === null || copy === null || copies === undefined || copies < 2 || !scope.steps.length) return scope.prefix;
   return `${scope.prefix}#${copy % copies}`;
 }
 
