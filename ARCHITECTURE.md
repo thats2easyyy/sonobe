@@ -183,7 +183,9 @@ Errors are `{ code, message, hint, address, opIndex, suggestions: [{ description
 - invalid links and type mismatches
 - zero-latency self-cycles
 - a pulse wired into a state input ("did you mean a Switch?")
-- loop length mismatches (warning)
+- loop length mismatches (`loop_length_mismatch`): loops of different lengths meeting at a patch's per-item inputs or at a layer's copies (its own looped properties and the layers inside it), when the document fixes both lengths (Loop Builder rows, a typed Loop Count, literal loops). A warning, or info when it looks deliberate: the longer length is a whole multiple of the shorter (stripes), or a typed Repeat shows the first items. The runtime reports lengths only it knows (§5.2).
+- copies (§4): a layer people touch that makes 1 copy while looped layers side by side inside it repeat on their own (`loops_inside_single_copy`, info, with the Repeat op), a Repeat under a layer that already makes copies (`repeat_inside_repeat`), and a Repeat that follows a gesture running once per copy (`repeat_from_own_gesture`), both warnings
+- a layer component's published input keyed like a layer property, which instances can never set (`input_shadowed_by_prop`, warning; `updateInterface` refuses new ones)
 - unreachable or unused patches (info)
 - published inputs nothing inside the component reads (`unused_input`, info) and outputs nothing inside drives (`unconnected_output`, info)
 - a cable that reads an instance's output its component doesn't drive (`undriven_output`, warning, on the component holding the cable)
@@ -194,7 +196,9 @@ Errors are `{ code, message, hint, address, opIndex, suggestions: [{ description
 
 Messages name items the way the editor shows them ("Photo Scale" (Transition)); ids stay in `itemIds` and suggestion ops.
 
-Hosts that diagnose every revision use `createDiagnosticsCache(registry)`. It returns exactly what `getDiagnostics` would, but re-checks only components that changed (or that show a changed component), and inside a changed component only the inputs and layer properties whose literal values changed. A scrub or a drag at 1,000 patches costs well under a millisecond.
+The copy and loop-length checks read `loopShapes(doc, component, registry)`: which values carry loops and how long they are, as far as the document says (per-item patches take their longest per-item loop, a one-item loop comes out a plain value, whole-loop outputs start new loops, `$in` values and constants such as `$knob.<id>` never loop). The engine uses it too, to leave to diagnostics the mismatches they already report.
+
+Hosts that diagnose every revision use `createDiagnosticsCache(registry)`. It returns exactly what `getDiagnostics` would, but re-checks only components that changed (or that show a changed component), and inside a changed component only the inputs and layer properties whose literal values changed (plus the copy checks when a Repeat, a Loop's Count or a literal loop changed). A scrub or a drag at 1,000 patches costs well under a millisecond.
 
 ---
 
@@ -222,8 +226,13 @@ Runtime representation:
 **Loops.** Any port value may be a `Loop<T>` (an array tagged as a loop).
 - A patch fed loops evaluates once per index.
 - Output length is the **max** of the input loop lengths. Shorter loops **wrap** (index mod len), and scalars broadcast.
-- **An empty loop wins.** When any per-item input holds an empty loop, the patch runs 0 times and its outputs are empty loops, and a layer or component bound to one makes 0 copies, whatever the other loops hold. That's how a list filtered to nothing hides its rows. Whole-loop ports (`wholeLoop`) don't count toward this. The one exception is a value read from last frame (§5.2).
-- Layers bound to looped values replicate, one instance per index.
+- **An empty loop wins.** When any per-item input holds an empty loop, the patch runs 0 times and its outputs are empty loops, and a layer or component bound to one makes 0 copies, whatever the other loops hold (unless its Repeat decides the count; see Copies). That's how a list filtered to nothing hides its rows. Whole-loop ports (`wholeLoop`) don't count toward this. The one exception is a value read from last frame (§5.2).
+- **Copies.** Layers bound to looped values replicate, one instance per index:
+  - How many: every layer has a `repeat` property (subtype `count`). Unset (Auto), the layer makes one copy per item of the longest loop on its own per-item properties (for a component instance, its loop inputs too). A whole number (0–10,000) makes exactly that many, and a linked loop of any item type one per item. A linked plain number counts too (rounded down, at least 0); any other value makes 1 copy with a `repeat_not_a_count` warning.
+  - With Repeat set it alone decides: the layer's other looped properties are read one item per copy (`copy % length`), and an empty one reads the property's default on every copy. A typed 0 makes no copies quietly; an empty loop on Repeat is an empty loop (the `empty_loop` rules in §5.2 apply).
+  - Layers inside a copy take its copy index, one each, and read their own loops the same way. Children of a layer that makes one copy replicate as siblings inside it. A Repeat under a layer that already makes copies is ignored (loops of loops need a component).
+  - The scene's `props.repeat` and a read of `@layer.repeat` are the copy count, not the loop it counts. Layer references and layer outputs read the previous frame's count.
+  - Which is on top: copies draw in index order, the last in front, unless `zPosition` says otherwise (§5.5).
 - Stateful patches keep **per-index state**.
 - Loops are capped at 10,000 elements with a diagnostic.
 
@@ -270,6 +279,7 @@ input events (pointer/keyboard/device) ─┐
   - A component's copy count skips an empty loop it reads through a back-edge.
   - A layer that drew 0 copies last frame reads, for per-item readers (Interaction, Drag, a layer property), as one reference or its unreplicated output, exactly as before the first frame. Hit tests on it miss, so an Interaction on it runs once and stays idle. Whole-loop readers like Loop Count still see an empty loop.
   - Within a frame the rule above holds: an empty loop wins.
+- **`loop_length_mismatch` at runtime.** When a layer's copies meet a loop of another length that the document doesn't fix (a filtered list, a count from data) and it doesn't look deliberate (§3.6), the runtime warns, naming the layer, the property and both lengths. Right after a count changes, gestures still read last frame's copies, so the warning needs two frames in a row. It lasts while the lengths differ and clears on `updateDocument`.
 - **`empty_loop` warning.** When a layer or component makes 0 copies because an empty loop erased a non-empty one, or because a patch explained its empty output (`PatchContext.explainEmpty`, used by Loop Select for indices past the end), the runtime raises a warning that names the layer or component, where the empty loop started, what it erased, and any feedback cable involved, with a hint and ready-to-apply suggestions. Lists that are simply empty stay quiet. The warning lasts while the site has 0 copies, clears on `updateDocument`, and after frame 0 needs two frames in a row, so a list on its way to empty doesn't raise it. Only frames that look wrong pay for following the trail.
 - **Same-frame precedence.**
   - Switch: turnOff > turnOn > flip.
@@ -320,7 +330,8 @@ rt.updateDocument(nextDoc)                   // hot-swap graph, keep compatible 
 rt.issues()                                  // RuntimeIssue[]: code, severity, message, ids, hint?, suggestions?
 ```
 
-- `inspect` notes say that a layer drew 0 copies (quoting its `empty_loop` warning), that `#n` is past the end, that an instance path runs into a component with 0 copies, or why a value is an empty loop. sim_get_values prints them after the values. Other read-outs about a value (copy counts, simulation overrides) belong in the same accessor and the same notes, not a second mechanism.
+- `inspect` notes say that a layer drew 0 copies (quoting its `empty_loop` warning), that `#n` is past the end, that an instance path runs into a component with 0 copies, or why a value is an empty loop. Layer addresses report `copies` for every layer, with notes like "Layer "Card" has 1 copy, so there's no #2" and "copy #0 of 4" for a read without `#n`. sim_get_values prints them after the values. Other read-outs about a value (simulation overrides) belong in the same accessor and the same notes, not a second mechanism.
+- `getValue` of a layer property with `#n` reads what that copy draws: loops wrap, and an empty loop reads the default under Repeat.
 
 - `updateDocument` patches literal-only edits (input and property literals, patch positions outside cycles) into the compiled graph in place, and recompiles for anything else.
 - `trace` replays the input log since the last restart. Past its budget (7,200 frames) it throws `TraceUnavailableError` instead of tracing a restarted copy.
@@ -382,7 +393,7 @@ Layer types are declared in `@sonobe/core` (`layerTypes.ts`) with typed props (k
 
 **v1 layer types:** `group, rectangle, oval, text, image, video, shape, gradient, colorFill, hitArea, scroll? (no, scroll is a patch), textField, lottie, shader, clone, componentInstance`.
 
-**Common props:** `enabled, position, size, anchor, pivot, opacity, scale, rotation (point3d), zPosition, cornerRadius, cornerSmoothing, color/fill, stroke, shadow (color, opacity, radius, offset), blur, blendMode, clip, layout (group), sizing, hitSlop`.
+**Common props:** `enabled, repeat, position, size, anchor, pivot, opacity, scale, rotation (point3d), zPosition, cornerRadius, cornerSmoothing, color/fill, stroke, shadow (color, opacity, radius, offset), blur, blendMode, clip, layout (group), sizing, hitSlop`.
 
 ---
 
@@ -431,7 +442,8 @@ Layer types are declared in `@sonobe/core` (`layerTypes.ts`) with typed props (k
   - the **Touch** button on a layer row inserts pre-wired interactions
   - clicking an inspector property creates a property link target
   - drag a cable onto an inspector property or a layer row
-- **Inspector:** scrubbable number fields (drag, arrows ±1, ⇧ ±10, ⌥ ±0.1), color picker, segmented controls, and spring presets with a curve preview.
+- **Inspector:** scrubbable number fields (drag, arrows ±1, ⇧ ±10, ⌥ ±0.1), color picker, segmented controls, and spring presets with a curve preview. Repeat has a count field that shows Auto while unset, and "4 copies" while a loop drives it.
+- **Layers panel:** a ×N badge on layers that make copies (with a repeat icon when Repeat decides) and a z badge on layers with a Z Position. Bring to Front and Send to Back say when a sibling's Z Position still wins.
 - **Canvas:** artboard with direct manipulation (select, move, resize, rotate), rulers and snapping, insert shapes and text.
 - **Viewer:** live prototype, device picker, restart ⌘R, frame toggle, 1:1, "show hit targets", and pop-out window. Also serves a LAN web player (QR code), which the Sonobe Viewer iPhone app opens with native haptics (§9.2). While the prototype has an `empty_loop` warning, a notice above it names what has no copies, and Why? opens the warning in Diagnostics.
 - **Command palette** (⌘K) lists every command with its shortcut, so the app is discoverable.

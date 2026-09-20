@@ -6,7 +6,7 @@ Level 3 · Guides: [06 Gestures](../../docs/guides/06-gestures.md), [07 Loops](.
 
 ## What you'll learn
 
-- Building a whole deck from one layer: a loop makes three copies, and every patch fed by it runs once per card.
+- Building a whole deck from one layer: the card's Repeat makes three copies of it and everything inside, and every patch fed by the loop runs once per card.
 - Per-copy state: each card has its own switch, spring and badges without copying any patches.
 - Deciding "was that a throw?" with Swipe, and handing velocity to Spring Animation.
 - Making only the top copy touchable by wiring Receives Touches from a comparison.
@@ -15,7 +15,7 @@ Level 3 · Guides: [06 Gestures](../../docs/guides/06-gestures.md), [07 Loops](.
 ## Build it step by step
 
 1. **One card.** Add a Group named Card (`card`), 330 × 440, anchored at its center at `[201, 440]`, with Clip Contents and a corner radius of 32. Inside go two Ovals for the plate and food, a title and details text, and two badge groups at Opacity 0: `card_like` (SAVE) and `card_nope` (SKIP).
-2. **Three copies.** Add a Loop (`cards`) with Count 3, and Loop Builders for the names (`card_titles`), details (`card_metas`), card colors (`card_colors`) and food colors (`card_accents`). Connect them to the title, the details, the card's Color and the food oval's Color. Card now repeats three times. Copy 2 draws last, so it's on top.
+2. **Three copies.** Add a Loop (`cards`) with Count 3 and connect its Index to the Card's Repeat: Card now makes one copy per index, each with its own plate, text and badges. Add Loop Builders for the names (`card_titles`), details (`card_metas`), card colors (`card_colors`) and food colors (`card_accents`), and connect them to the title, the details, the card's Color and the food oval's Color. Each copy reads its own item. Copy 2 draws last, so it's on top.
 3. **Remember thrown cards.** Add a Swipe (`card_swipe`) on Card with Axis Horizontal, Min Distance 120 and Min Velocity 800. Add a Switch (`card_gone`) with Turn On from `card_swipe.swiped`, and Turn Off from Tap Start Over (`tap_start_over`).
 4. **Find the top card.** Add a Loop Sum (`cards_gone`) of `card_gone.on`, a Subtract (`top_index`) of 2 minus that sum, and Equals (`is_top`) comparing `cards.index` with `top_index.output`. Connect `is_top.output` to the Card's Receives Touches, so only the top copy can be grabbed.
 5. **Where it rests.** Add an Option Switch (`card_side`) that remembers left (Set to 0 from swipedLeft) or right (Set to 1 from swipedRight), an Option Picker (`fly_out_x`: −600, 600), and an If / Else (`resting_x`): the fly-out x once the card is gone, otherwise 0.
@@ -40,7 +40,7 @@ Top Card − index ─▶ Depth in Deck (0…2) ─▶ Depth Spring ─▶ Card 
 
 | Patch | Type | Its one job |
 |---|---|---|
-| `cards` | Loop | Indices 0, 1, 2. Every patch downstream runs once per card with its own state. |
+| `cards` | Loop | Indices 0, 1, 2. They set the Card's Repeat, and every patch downstream runs once per card with its own state. |
 | `card_titles`, `card_metas`, `card_colors`, `card_accents` | Loop Builder | Each card's content. |
 | `card_swipe` | Swipe | On release, judges whether the drag counts as a throw left or right. |
 | `card_gone` | Switch | Per card: thrown or not. |

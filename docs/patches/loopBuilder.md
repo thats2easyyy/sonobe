@@ -72,6 +72,7 @@ patch colors loopBuilder<color>[3] item0=#FF6B6BFF item1=#FFD93DFF item2=#6BCB77
 ## Common mistakes
 
 - Items don't match the positions you expect: the first input is Item 0, not Item 1. Count from 0 when you look items up with Loop Select or match them to Loop Option Switch.
+- Only the text inside a card repeats, stacked in one card, and a drag moves all of it: the loop reaches the card's children, not the card. Link the loop to the card's Repeat instead, and each card gets its own copy of everything inside.
 - Copies repeat values or show the wrong pairs: two loops of different lengths feed the same layer, and the shorter one wraps around. Give every loop that feeds one layer the same number of items.
 
 ## Pairs well with

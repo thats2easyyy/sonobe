@@ -415,6 +415,23 @@ describe("getDiagnostics: copies (Repeat and loop lengths)", () => {
       { op: "connect", from: "scroll.position", to: "@list.position" },
     ]);
     expect(getDiagnostics(doc, loopRegistry).filter((d) => d.code !== "unused_patch")).toEqual([]);
+    // Rows and labels placed one per index, or laid out by the list, are a list, not a stuck card.
+    const placed = build([
+      { op: "addLayer", layer: { id: "list", type: "group", name: "List" } },
+      { op: "addLayer", parent: "list", layer: { id: "row", type: "rectangle", name: "Row" } },
+      { op: "addLayer", parent: "list", layer: { id: "label", type: "text", name: "Label" } },
+      { op: "addPatch", patch: { id: "names", type: "loopBuilder", typeParam: "text", inputCount: 4 } },
+      { op: "addPatch", patch: { id: "rows", type: "loop", inputs: { count: 4 } } },
+      { op: "addPatch", patch: { id: "at", type: "add", inputs: { value1: { link: "rows.index" }, value2: 10 } } },
+      { op: "addPatch", patch: { id: "scroll", type: "drag", inputs: { layer: { layer: "list" } } } },
+      { op: "connect", from: "names.loop", to: "@label.text" },
+      { op: "connect", from: "at.output", to: "@label.position" },
+      { op: "connect", from: "at.output", to: "@row.position" },
+      { op: "connect", from: "scroll.position", to: "@list.position" },
+    ]);
+    expect(found(placed, "loops_inside_single_copy")).toEqual([]);
+    const column = build([...deck, { op: "setInput", target: "@card.layout", value: "column" }]);
+    expect(found(column, "loops_inside_single_copy")).toEqual([]);
   });
 
   it("loop_length_mismatch at a layer's copies: a warning when a loop wraps or loses items, info when it looks deliberate", () => {
