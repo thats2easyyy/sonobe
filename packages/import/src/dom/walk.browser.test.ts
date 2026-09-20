@@ -4,6 +4,7 @@ import { existsSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import type { CaptureFrame, CaptureNode, DesignCapture } from "../capture.ts";
 import { capturePage } from "../node.ts";
+import { WALKER_SOURCE } from "./walkerSource.ts";
 
 const playwrightReady = await (async () => {
   try {
@@ -71,6 +72,23 @@ describe.skipIf(!playwrightReady)("DOM walker in Chromium", () => {
     expect(tabBar.box).toEqual([0, 740, 400, 60]);
     const content = c.root.children.find((n) => n.name === "Content") as CaptureFrame;
     expect(find(content, "Inner Bar")?.box[1]).toBe(2000);
+  });
+
+  it("waits all of waitMs, even past the load and settle timeout", async () => {
+    const { chromium } = await import("playwright");
+    const browser = await chromium.launch();
+    try {
+      const tab = await browser.newPage({ viewport: { width: 400, height: 200 } });
+      await tab.setContent(`<!doctype html><html><body style="margin:0"><div data-name="Early" style="height:20px;background:#000"></div>
+        <script>setTimeout(() => document.body.insertAdjacentHTML("beforeend", '<div data-name="Late" style="height:20px;background:#f00"></div>'), 600)</script></body></html>`);
+      await tab.evaluate(WALKER_SOURCE);
+      // A short timeoutMs stands in for the 10 s default, which waitMs used to be cut to what was left of.
+      const c = (await tab.evaluate(`window.__sonobeCapture({ timeoutMs: 200, waitMs: 1000, settleMs: 0 })`)) as DesignCapture;
+      expect(find(c.root, "Early")).toBeDefined();
+      expect(find(c.root, "Late")).toBeDefined();
+    } finally {
+      await browser.close();
+    }
   });
 });
 

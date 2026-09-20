@@ -82,7 +82,7 @@ const round2 = (n: number) => Math.round(n * 100) / 100 || 0;
 
 const delay = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, Math.max(0, ms)));
 
-/** Wait for load, a selector, fonts, images, and a quiet DOM (bounded by timeoutMs). */
+/** Wait for load, a selector, fonts, images, and a quiet DOM (bounded by timeoutMs), then waitMs more. */
 export async function waitForPage(options: WalkOptions): Promise<void> {
   const deadline = Date.now() + (options.timeoutMs ?? 10_000);
   const left = () => Math.max(0, deadline - Date.now());
@@ -121,7 +121,8 @@ export async function waitForPage(options: WalkOptions): Promise<void> {
       img.addEventListener("error", () => resolve(), { once: true });
     }))), delay(Math.min(left(), 5000))]);
   }
-  if (options.waitMs) await delay(Math.min(options.waitMs, left()));
+  // Hosts add waitMs to their deadlines, so it isn't cut to what timeoutMs left.
+  if (options.waitMs) await delay(options.waitMs);
   await Promise.race([new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))), delay(100)]);
 }
 
