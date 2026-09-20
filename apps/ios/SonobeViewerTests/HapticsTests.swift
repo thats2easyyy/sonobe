@@ -28,6 +28,12 @@ struct BridgeMessageTests {
         #expect(Haptics.message(from: body) == nil)
     }
 
+    @Test func readsTheMenusMessages() {
+        #expect(Haptics.message(from: ["kind": "openAnother"]) == .openAnother)
+        #expect(Haptics.message(from: ["kind": "menuTipSeen"]) == .menuTipSeen)
+        #expect(Haptics.message(from: ["kind": "openanother"]) == nil)
+    }
+
     @Test func ignoresBodiesThatArentObjects() {
         #expect(Haptics.message(from: "impactMedium") == nil)
         #expect(Haptics.message(from: [["kind": "haptic", "type": "impactMedium"]]) == nil)
@@ -58,14 +64,17 @@ struct BridgeMessageTests {
     }
 
     @MainActor
-    @Test func announcesWhatThePlayerReads() throws {
-        let script = Haptics().announcementScript
+    @Test(arguments: [false, true])
+    func announcesWhatThePlayerReads(menuTipSeen: Bool) throws {
+        let script = Haptics().announcementScript(menuTipSeen: menuTipSeen)
         let start = try #require(script.range(of: "Object.freeze(")?.upperBound)
         let end = try #require(script.range(of: ") });", options: .backwards)?.lowerBound)
         let info = try #require(try JSONSerialization.jsonObject(with: Data(script[start..<end].utf8)) as? [String: Any])
-        #expect(info["version"] as? Int == 1)
+        #expect(info["version"] as? Int == 2)
         #expect(info["platform"] as? String == "ios")
         #expect(info["vibrate"] as? Bool == true)
+        #expect(info["actions"] as? [String] == ["openAnother"])
+        #expect(info["menuTipSeen"] as? Bool == menuTipSeen)
         let haptics = try #require(info["haptics"] as? [String])
         #expect(haptics.contains("impactMedium"))
         #expect(haptics.allSatisfy(Haptics.feedbackTypes.contains))

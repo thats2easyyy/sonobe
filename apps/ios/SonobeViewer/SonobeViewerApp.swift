@@ -2,7 +2,7 @@ import SwiftUI
 
 /// Sonobe Viewer plays the prototype open in Sonobe on your computer, full screen, with real haptics.
 /// It loads the same web player as Preview on Phone (a WKWebView on the LAN preview URL) and adds a
-/// native bridge the player uses for Haptic and Vibrate.
+/// native bridge the player uses for Haptic and Vibrate, and its menu for Open Another Prototype.
 @main
 struct SonobeViewerApp: App {
     @State private var model = ViewerModel()
@@ -17,12 +17,11 @@ struct SonobeViewerApp: App {
 
 struct RootView: View {
     @Bindable var model: ViewerModel
-    @State private var showMenu = false
     @State private var reloads = 0
 
     var body: some View {
         if let url = model.playerURL {
-            PlayerContainer(url: url, reloads: reloads, onMenu: { showMenu = true }, onFailure: { model.failure = $0 })
+            PlayerContainer(url: url, reloads: reloads, menuTipSeen: model.menuTipSeen, onAction: act, onFailure: { model.failure = $0 })
                 .ignoresSafeArea()
                 .background(Color.black)
                 .statusBarHidden()
@@ -34,14 +33,16 @@ struct RootView: View {
                         FailureBanner(message: failure, retry: { model.failure = nil; reloads += 1 }, disconnect: { model.close() })
                     }
                 }
-                .confirmationDialog("Sonobe Viewer", isPresented: $showMenu, titleVisibility: .visible) {
-                    Button("Reload") { reloads += 1 }
-                    Button("Disconnect", role: .destructive) { model.close() }
-                } message: {
-                    Text(url.host() ?? url.absoluteString)
-                }
         } else {
             ConnectView(model: model)
+        }
+    }
+
+    /// The player's own menu (a three-finger tap) restarts and reloads by itself and asks the app for the rest.
+    private func act(_ action: PlayerAction) {
+        switch action {
+        case .openAnother: model.close()
+        case .menuTipSeen: model.menuTipSeen = true
         }
     }
 }
