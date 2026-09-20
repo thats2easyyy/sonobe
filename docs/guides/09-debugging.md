@@ -42,7 +42,7 @@ In this example the Switch turned on, but the Pop Animation never moved. So the 
 
 A pulse lasts one frame, so there's no value to read by the time your eyes get to the port. Here are three ways to catch one:
 
-- Watch for the spark along its cable.
+- Watch for the orb that travels its cable.
 - Build a pulse counter. Wire the pulse into a Counter's Increase and read the count. If it goes up by 2 per tap, something is double-firing.
 - Ask for a trace. Claude, or the `sonobe` command line, can record chosen values on every frame of a scripted interaction.
 

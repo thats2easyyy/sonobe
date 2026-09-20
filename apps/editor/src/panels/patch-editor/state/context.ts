@@ -56,7 +56,7 @@ export function useLiveValue(address: string | null | undefined): unknown {
   return useSyncExternalStore(subscribe, get, get);
 }
 
-/** How many times a pulse output has fired (changes trigger spark animations). */
+/** How many times a pulse output has fired (changes pop the output's pulse ring). */
 export function usePulseCount(address: string | null | undefined): number {
   const { live } = usePatchEditor();
   const subscribe = useCallback((cb: () => void) => (address ? live.subscribePulse(address, cb) : noop()), [live, address]);

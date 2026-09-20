@@ -1,39 +1,120 @@
 /** Cables: colored by source type, loop tint, conversion and invalid glyphs, pulse sparks, state glow. */
 
 import { useStore as useFlowStore, type ConnectionLineComponentProps, type EdgeProps } from "@xyflow/react";
-import { memo, useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from "react";
+import { memo, useEffect, useId, useLayoutEffect, useRef, useState, type CSSProperties } from "react";
 import { portColorVar } from "../../../theme/tokens.ts";
 import { isTruthyState } from "@sonobe/core/graph";
 import { cablePath, cablePoint } from "../model/geometry.ts";
 import type { CableFlowEdge, FlowNode } from "../model/types.ts";
-import { usePatchEditor, useLiveValue, usePulseCount, useUi } from "../state/context.ts";
+import { usePatchEditor, useLiveValue, useUi } from "../state/context.ts";
+import { ORB_RADIUS, ORB_SLOTS, ORB_TRAILS, type OrbTone } from "./orb.ts";
+import { createOrbFlight, type OrbEnds } from "./orbFlight.ts";
 
-const SPARK_MS = 460;
+/** How long a cable keeps its orb elements after the last one lands, so a steady ticker doesn't remount them each time. */
+const ORB_IDLE_MS = 1500;
 
-function Spark({ d, source, reduced }: { d: string; source: string; reduced: boolean }) {
-  const count = usePulseCount(source);
-  const motion = useRef<SVGAnimateMotionElement>(null);
-  const fade = useRef<SVGAnimateElement>(null);
-  const lastBegin = useRef(-Infinity);
-  const [flash, setFlash] = useState(0);
+interface OrbProps extends OrbEnds {
+  d: string;
+  source: string;
+  pulse: boolean;
+  reduced: boolean;
+}
+
+/**
+ * A glowing orb that travels the cable from output to input each time a pulse fires or a boolean
+ * turns on, and a dimmer one when it turns off. With reduced motion the whole cable flashes instead.
+ * Nothing mounts until the first send, the elements unmount once the cable is idle, and each send
+ * replays Web Animations on reused elements (orbFlight.ts), so an orb in flight never re-renders React.
+ */
+function Orb(props: OrbProps) {
+  const { d, tx, ty, source, pulse, reduced } = props;
+  const { live } = usePatchEditor();
+  const gradient = `sb-pe-orb${useId().replace(/[^\w-]/g, "")}`;
+  const [shown, setShown] = useState(false);
+  const root = useRef<SVGGElement>(null);
+  const latest = useRef(props);
+  const [flight] = useState(createOrbFlight);
+  const state = useRef({ pending: null as OrbTone | null, idle: undefined as ReturnType<typeof setTimeout> | undefined });
   useLayoutEffect(() => {
-    if (count === 0) return;
-    const now = performance.now();
-    if (now - lastBegin.current < SPARK_MS * 0.75) return;
-    lastBegin.current = now;
-    if (reduced) setFlash(count);
+    latest.current = props;
+  });
+
+  const play = useRef((el: SVGGElement, tone: OrbTone) => {
+    const s = state.current;
+    const ms = flight.play(el, tone, latest.current, latest.current.reduced);
+    clearTimeout(s.idle);
+    s.idle = setTimeout(() => {
+      flight.reset();
+      setShown(false);
+    }, ms + ORB_IDLE_MS);
+  }).current;
+
+  const send = useRef((tone: OrbTone) => {
+    const s = state.current;
+    if (!flight.admit(performance.now())) return;
+    if (root.current) play(root.current, tone);
     else {
-      motion.current?.beginElement?.();
-      fade.current?.beginElement?.();
+      s.pending = tone;
+      setShown(true);
     }
-  }, [count, reduced]);
-  if (count === 0) return null;
-  if (reduced) return flash ? <path key={flash} className="sb-pe-cable__flash" d={d} /> : null;
+  }).current;
+
+  useLayoutEffect(() => {
+    const s = state.current;
+    if (!shown || !root.current || !s.pending) return;
+    play(root.current, s.pending);
+    s.pending = null;
+  }, [shown, play]);
+
+  useEffect(() => {
+    if (pulse) return live.subscribePulse(source, () => send("full"));
+    // Only a change sends an orb: not the first value, and not the value going away (a scope switch).
+    let known = live.get(source) !== undefined;
+    let on = isTruthyState(live.get(source));
+    return live.subscribe(source, () => {
+      const value = live.get(source);
+      if (value === undefined) return void (known = false);
+      const next = isTruthyState(value);
+      if (known && next !== on) send(next ? "full" : "dim");
+      known = true;
+      on = next;
+    });
+  }, [live, source, pulse, send]);
+
+  useEffect(() => () => clearTimeout(state.current.idle), []);
+
+  if (!shown) return null;
   return (
-    <circle r={3.5} className="sb-pe-cable__spark" opacity={0}>
-      <animateMotion ref={motion} dur={`${SPARK_MS}ms`} begin="indefinite" fill="freeze" path={d} keyPoints="0;1" keyTimes="0;1" calcMode="spline" keySplines="0.35 0 0.25 1" />
-      <animate ref={fade} attributeName="opacity" values="0;1;1;0" keyTimes="0;0.08;0.8;1" dur={`${SPARK_MS}ms`} begin="indefinite" fill="freeze" />
-    </circle>
+    <g ref={root} className="sb-pe-orb" aria-hidden>
+      {reduced ? (
+        <path className="sb-pe-cable__flash" d={d} />
+      ) : (
+        <>
+          <radialGradient id={gradient}>
+            <stop offset="0" className="sb-pe-orb__core" />
+            <stop offset="0.14" className="sb-pe-orb__hot" />
+            <stop offset="0.32" className="sb-pe-orb__color" />
+            <stop offset="0.58" className="sb-pe-orb__glow" />
+            <stop offset="1" className="sb-pe-orb__fade" />
+          </radialGradient>
+          <radialGradient id={`${gradient}-bloom`}>
+            <stop offset="0" className="sb-pe-orb__bloom-center" />
+            <stop offset="0.5" className="sb-pe-orb__bloom-mid" />
+            <stop offset="1" className="sb-pe-orb__fade" />
+          </radialGradient>
+          {Array.from({ length: ORB_SLOTS }, (_, i) => (
+            <g key={i} className="sb-pe-orb__slot">
+              {ORB_TRAILS.map((name) => (
+                <path key={name} className={`sb-pe-orb__${name}`} />
+              ))}
+              <circle className="sb-pe-orb__head" r={ORB_RADIUS} fill={`url(#${gradient})`} />
+              <circle className="sb-pe-orb__bloom" cx={tx} cy={ty} r={ORB_RADIUS} fill={`url(#${gradient}-bloom)`} />
+              <circle className="sb-pe-orb__ring" cx={tx} cy={ty} r={ORB_RADIUS} />
+            </g>
+          ))}
+        </>
+      )}
+    </g>
   );
 }
 
@@ -68,7 +149,7 @@ export const CableEdgeView = memo(function CableEdgeView({ id, sourceX, sourceY,
       {(live || selected || splicing) && <path className="sb-pe-cable__glow" d={d} />}
       <path className="sb-pe-cable__wire" d={d} />
       <path className="sb-pe-cable__hit react-flow__edge-interaction" d={d} />
-      {stateSource && data.sourceType === "pulse" && <Spark d={d} source={data.from} reduced={reducedMotion} />}
+      {stateSource && <Orb d={d} sx={sourceX} sy={sourceY} tx={targetX} ty={targetY} source={stateSource} pulse={data.sourceType === "pulse"} reduced={reducedMotion} />}
       {glyph && (
         <g className="sb-pe-cable__glyph" data-kind={glyph} transform={`translate(${mx} ${my})`}>
           <title>{data.invalid ?? `Converted: ${data.conversion}`}</title>

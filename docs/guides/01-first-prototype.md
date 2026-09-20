@@ -53,7 +53,7 @@ Add a Rectangle above it and name it Card. In the inspector, set:
 
 Hover the Card row in the Layers panel and click its Touch button. Choose Tap.
 
-An Interaction patch appears, already pointed at Card. Tap the card in the Viewer, and a spark runs out of the patch's Tap output. That spark is a pulse: a signal that lasts one frame, at the moment your finger lifts.
+An Interaction patch appears, already pointed at Card. Tap the card in the Viewer, and a ring pops out of the patch's Tap output. That ring is a pulse: a signal that lasts one frame, at the moment your finger lifts.
 
 ### 3. Remember it
 

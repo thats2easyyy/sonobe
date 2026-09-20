@@ -496,7 +496,7 @@ Layer types are declared in `@sonobe/core` (`layerTypes.ts`) with typed props (k
 - **Patch editor** is built on `@xyflow/react` with custom node rendering:
   - Port colors by type, a distinct pulse glyph, a "×N" loop badge, and live values on hover.
   - One watched loop copy per session (the patch editor bridge's `watchedCopy`): inline values, hover cards and inspector read-outs show item k of a loop (k mod its length) instead of the "×N" summary, and inside a looped layer or patch instance the live scope reads copy k (`card#3/…`). A looped port's hover card lists every copy, and hovering a row watches it. The "Copy #k of N" chip steps through copies, the live scope chip lists a looped instance's copies, and clicking a copy on the canvas or pressing it in the viewer watches it. Opening another prototype goes back to the summary.
-  - A pulse "spark" animation along cables, and a glow for true state.
+  - A glowing orb that travels a cable from output to input when a pulse fires or a boolean turns on (a smaller, fainter one when it turns off), with a comet tail and a ripple where it lands, and a glow for true state. Orbs are Web Animations replayed on reused elements, so none re-renders React; a cable has at most two in flight and mounts nothing while idle. Zoomed far out only the head travels, and with reduced motion the cable flashes in place instead.
   - Links:
     - drag an output → input
     - dropping on empty canvas opens **link-drag search** filtered to compatible ports
@@ -678,7 +678,7 @@ patch pop popAnimation number←toggle.on bounciness←$knob.pop_bounce speed=10
 - **Recipes:** 15+ canonical prototypes (tap to zoom, toggle/like, scrolling list, carousel, tab bar, collapsing header, pull to refresh, bottom sheet, drag and snap, swipe cards, long-press menu, timed sequence, stories, onboarding, grid with loops, and a swipe deck built from an imported design with knobs and a locked reference preset). Each has a runnable example project and step-by-step text, and Claude reads them as patterns through `list_examples` and `get_example` (§10).
 - **In-app lessons:** step-by-step with validation that checks document state through the same queries the MCP uses.
 - **Explain:** a deterministic plain-language description of any graph selection, at three audience levels.
-- **Visibility:** pulse sparks, state glow, loop badges, live values, spring curve previews, a "show hit targets" overlay, and diagnostics that suggest fixes.
+- **Visibility:** orbs along cables for pulses and state changes, state glow, loop badges, live values, spring curve previews, a "show hit targets" overlay, and diagnostics that suggest fixes.
 
 ---
 

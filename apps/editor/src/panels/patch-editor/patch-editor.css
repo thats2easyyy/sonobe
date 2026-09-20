@@ -1028,30 +1028,108 @@ textarea.sb-pe-title-input {
   stroke-width: 2.75;
 }
 
-.sb-pe-cable__spark {
-  fill: var(--port-pulse);
-  filter: drop-shadow(0 0 4px var(--port-pulse));
+/*
+ * The orb a pulse or a boolean change sends along a cable (Orb in CableEdge.tsx, keyframes in orb.ts).
+ * Web Animations move the head and draw the trails behind it, fading them with fill-opacity and
+ * stroke-opacity, which are 0 at rest, so each part's strength is in its color. Not opacity: with a
+ * pulse firing every frame into 40 cables, opacity animations held the graph near 30 fps, and these
+ * keep it at 60. The head is a gradient, not a blur filter.
+ */
+.sb-pe-orb {
+  --sb-orb-hot: color-mix(in oklab, var(--sb-cable) 28%, #fff);
   pointer-events: none;
 }
 
+.sb-pe-orb__slot > * {
+  fill-opacity: 0;
+  stroke-opacity: 0;
+}
+
+.sb-pe-orb__core {
+  stop-color: #fff;
+}
+
+.sb-pe-orb__hot {
+  stop-color: var(--sb-orb-hot);
+}
+
+.sb-pe-orb__color {
+  stop-color: var(--sb-cable);
+  stop-opacity: 0.8;
+}
+
+.sb-pe-orb__glow {
+  stop-color: var(--sb-cable);
+  stop-opacity: 0.28;
+}
+
+.sb-pe-orb__fade {
+  stop-color: var(--sb-cable);
+  stop-opacity: 0;
+}
+
+.sb-pe-orb__bloom-center {
+  stop-color: var(--sb-cable);
+  stop-opacity: 0.5;
+}
+
+.sb-pe-orb__bloom-mid {
+  stop-color: var(--sb-cable);
+  stop-opacity: 0.18;
+}
+
+.sb-pe-orb__wake {
+  stroke: color-mix(in srgb, var(--sb-orb-hot) 45%, transparent);
+  stroke-width: 2.4;
+}
+
+.sb-pe-orb__tail {
+  stroke: color-mix(in srgb, var(--sb-cable) 80%, transparent);
+  stroke-width: 3.5;
+}
+
+.sb-pe-orb__streak {
+  stroke: var(--sb-orb-hot);
+  stroke-width: 1.6;
+}
+
+.sb-pe-orb__ring {
+  fill: none;
+  stroke: var(--sb-cable);
+}
+
+/* On a light canvas white reads as a gap, so the wake deepens the wire instead of whitening it. */
+[data-theme="light"] .sb-pe-orb {
+  --sb-orb-hot: color-mix(in oklab, var(--sb-cable) 40%, #fff);
+}
+
+[data-theme="light"] .sb-pe-orb__glow {
+  stop-opacity: 0.34;
+}
+
+[data-theme="light"] .sb-pe-orb__wake {
+  stroke: color-mix(in srgb, var(--sb-cable) 40%, transparent);
+  stroke-width: 3.2;
+}
+
+.sb-pe__canvas[data-lod="far"] .sb-pe-orb__slot > :not(.sb-pe-orb__head) {
+  display: none;
+}
+
+/* Reduced motion: no orb travels; the whole cable flashes in place. */
 .sb-pe-cable__flash {
-  stroke: var(--port-pulse);
-  stroke-width: 4;
-  opacity: 0;
-  pointer-events: none;
-  animation: sb-pe-cable-flash 320ms linear forwards;
+  stroke: color-mix(in srgb, var(--sb-cable) 80%, transparent);
+  stroke-width: 5;
+  stroke-opacity: 0;
 }
 
-@keyframes sb-pe-cable-flash {
-  0% {
-    opacity: 0;
-  }
-  30% {
-    opacity: 0.85;
-  }
-  100% {
-    opacity: 0;
-  }
+.sb-pe-cable__flash[data-tone="dim"] {
+  stroke: color-mix(in srgb, var(--sb-cable) 40%, transparent);
+}
+
+/* The Settings motion switch, like the OS setting, keeps the output's pulse ring from growing. */
+:root[data-reduced-motion="true"] .sb-pe-pulse-ring {
+  animation-name: sb-pe-fade;
 }
 
 .sb-pe-cable__glyph circle:first-of-type {
