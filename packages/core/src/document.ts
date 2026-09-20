@@ -5,8 +5,20 @@ import { getOwn } from "./ids.ts";
 import { allLayers, COMPONENT_INSTANCE_LAYER_TYPE, COMPONENT_PATCH_TYPE } from "./registry.ts";
 import type { Component, ComponentKind, DeviceSettings, Id, SonobeDocument } from "./types.ts";
 
-/** Current on-disk format version for project and component files. */
+/** Current on-disk format version for component files (and projects without knobs). */
 export const FORMAT_VERSION = 1;
+export const COMPONENT_FORMAT_VERSION = FORMAT_VERSION;
+/**
+ * The newest project.json format this build reads. Format 2 adds knobs.json. A project is written as
+ * format 2 only when it has knobs, so projects without knobs still open in builds that read format 1.
+ */
+export const PROJECT_FORMAT_VERSION = 2;
+export const KNOBS_FORMAT_VERSION = 1;
+
+/** The project.json format a document is written in: 2 with knobs, 1 without. */
+export function projectFormatVersion(doc: Pick<SonobeDocument, "knobs">): number {
+  return doc.knobs ? PROJECT_FORMAT_VERSION : FORMAT_VERSION;
+}
 export const ROOT_COMPONENT_ID = "main";
 export const GENERATOR = "Sonobe 0.1.0";
 /** Default artboard size for new layer components. */

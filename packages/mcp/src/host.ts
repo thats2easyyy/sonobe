@@ -11,6 +11,7 @@ import type {
   Author,
   Diagnostic,
   Id,
+  Literal,
   Op,
   OpResult,
   SonobeDocument,
@@ -468,6 +469,17 @@ export interface SimState {
   droppedOverrides?: { target: string; reason: string }[];
   /** sim_reset only: the overrides the reset cleared. */
   clearedOverrides?: SimOverride[];
+  /** The knob preset and values this session runs instead of the person's (sim_reset preset and knobs); absent when none. */
+  knobs?: SimKnobOverride;
+  /** sim_reset only: the knob preset and values the reset stopped running. */
+  clearedKnobs?: SimKnobOverride;
+}
+
+export interface SimKnobOverride {
+  /** The preset the simulation runs. */
+  preset?: { id: Id; name: string };
+  /** Knob id → the value the simulation runs, over its preset. */
+  values?: Record<Id, Literal>;
 }
 
 export interface SimResetOptions {
@@ -478,6 +490,10 @@ export interface SimResetOptions {
   fps?: 60 | 120;
   /** With simId: keep the session's overrides (default: a reset clears them). */
   keepOverrides?: boolean;
+  /** Run this knob preset (id or name) in the simulation only. */
+  preset?: string;
+  /** Knob id or name → value, in the simulation only (over the preset it runs). */
+  knobs?: Record<string, unknown>;
 }
 
 /** A literal to pin on a patch input or layer property inside one simulation. */

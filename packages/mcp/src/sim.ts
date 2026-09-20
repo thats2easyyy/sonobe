@@ -13,11 +13,18 @@
  */
 
 import {
+  checkKnobLiteral,
   didYouMean,
   didYouMeanText,
+  findKnob,
   findLayer,
+  getKnob,
+  getKnobPreset,
   getPatchSpec,
+  knobLiteral,
   parseAddress,
+  resolveKnobOverride,
+  withKnobOverride,
   resolveLayerOutputs,
   resolveLayerProps,
   resolveNodePorts,
@@ -26,6 +33,8 @@ import {
   isLinkInput,
   type Component,
   type Id,
+  type KnobOverride,
+  type Literal,
   type SonobeDocument,
 } from "@sonobe/core";
 import {
@@ -47,6 +56,7 @@ import {
   type SimHit,
   type SimHost,
   type SimIssue,
+  type SimKnobOverride,
   type SimOverride,
   type SimState,
   type SimStepResult,
@@ -101,6 +111,8 @@ interface Session {
   lastUsed: number;
   /** sim_override changes, applied in order on top of the person's document. */
   overrides: OverrideEntry[];
+  /** sim_reset preset and knobs: the knob values this session runs, under the overrides. */
+  knobs: KnobOverride | undefined;
   /** Overrides the person's newer document no longer accepts, not yet reported. */
   dropped: { target: string; reason: string }[];
   /** Override ids handed out ("ov_3" is the third). */
@@ -134,7 +146,7 @@ const LONG_PRESS_MS = 600;
 const DRAG_MS = 300;
 
 const ADDRESS_HINT =
-  'Read patch ports as "patchId.port" and layer properties as "@layerId.prop"; append "#2" for one loop copy, e.g. "@row.position#2". Inside a component instance, put the instance path first: "card/tap_badge.down" or "@card#2/badge.scale".';
+  'Read patch ports as "patchId.port" and layer properties as "@layerId.prop"; append "#2" for one loop copy, e.g. "@row.position#2". Inside a component instance, put the instance path first: "card/tap_badge.down" or "@card#2/badge.scale". Read a knob as "$knob.<id>".';
 
 /** Center of a scene node in prototype coordinates. */
 function nodeCenter(node: SceneNode): [number, number] {
@@ -331,17 +343,22 @@ export function createSimulationManager(options: SimulationManagerOptions): Simu
   };
 
   /**
-   * The document a session simulates: the person's, with the session's simulation-only changes on
-   * top. Re-derived on every person revision; overrides the new revision no longer accepts are
-   * dropped and reported once. (Knob overrides compose here too, under the ops:
-   * applyOverrides(withKnobOverride(personDoc, knobs), ops).)
+   * The document a session simulates: the person's, running the session's knob preset and values
+   * (sim_reset), with its sim_override changes on top:
+   * applyOverrides(withKnobOverride(personDoc, knobs), ops). Re-derived on every person revision;
+   * a preset, knob or override the new revision no longer has is dropped and reported once.
    */
   const effectiveDoc = (
-    session: Pick<Session, "overrides" | "dropped">,
+    session: Pick<Session, "overrides" | "dropped" | "knobs">,
     personDoc: SonobeDocument,
   ): SonobeDocument => {
-    if (!session.overrides.length) return personDoc;
-    const r = applyOverrides(personDoc, session.overrides, options.registry);
+    let doc = personDoc;
+    if (session.knobs) {
+      session.knobs = keptKnobOverride(session.knobs, personDoc, session.dropped);
+      if (session.knobs) doc = withKnobOverride(personDoc, session.knobs);
+    }
+    if (!session.overrides.length) return doc;
+    const r = applyOverrides(doc, session.overrides, options.registry);
     session.overrides = r.kept;
     for (const f of r.failed)
       session.dropped.push({ target: f.entry.target, reason: f.error.message });
@@ -412,6 +429,7 @@ export function createSimulationManager(options: SimulationManagerOptions): Simu
       issues: [],
     };
     if (session.overrides.length) s.overrides = session.overrides.map(overrideInfo);
+    if (session.knobs) s.knobs = knobOverrideInfo(session.knobs, docOf(session));
     return s;
   };
 
@@ -431,11 +449,43 @@ export function createSimulationManager(options: SimulationManagerOptions): Simu
 
   const docOf = (session: Session) => session.runtime.document;
 
+  /** For "$knob.<id>" in a session that runs other knob values: what the person's document runs instead. */
+  const knobNote = (session: Session, target: string): string | undefined => {
+    const a = parseAddress(target);
+    if (a?.kind !== "knob" || !session.knobs) return undefined;
+    const person = options.getDocument(session.docId).doc.knobs;
+    const knob = getKnob(person, a.key);
+    if (!person || !knob) return undefined;
+    const theirs = `the person's ${getKnobPreset(person, person.active)?.name ?? person.active} has ${JSON.stringify(knobLiteral(person, knob))}`;
+    if (session.knobs.values && Object.hasOwn(session.knobs.values, a.key)) return `set for this simulation; ${theirs}`;
+    const preset = session.knobs.preset;
+    if (preset === undefined || preset === person.active) return undefined;
+    return `${getKnobPreset(person, preset)?.name ?? preset} in this simulation; ${theirs}`;
+  };
+
   /** Validate a value address, including "instancePath/patchId.port" and "@instancePath/layerId.prop". */
   const checkTarget = (session: Session, address: string): void => {
     const doc = docOf(session);
     const split = splitInstanceAddress(address);
     const parsed = parseAddress(split.at + split.tail);
+    if (parsed?.kind === "knob") {
+      if (split.path !== undefined)
+        throw new HostError(
+          "invalid_address",
+          `A knob has one value everywhere, so "${address}" doesn't take an instance path.`,
+          { hint: `Read "$knob.${parsed.key}".` },
+        );
+      const knob = findKnob(doc.knobs, parsed.key);
+      if (!knob.ok || knob.value.id !== parsed.key)
+        throw new HostError(
+          "unknown_knob",
+          knob.ok
+            ? `"${parsed.key}" is the name of the knob ${knob.value.id}; read it as "$knob.${knob.value.id}".`
+            : knob.error.message,
+          knob.ok || !knob.error.hint ? {} : { hint: knob.error.hint },
+        );
+      return;
+    }
     if (!parsed || (parsed.kind !== "patch" && parsed.kind !== "layer"))
       throw new HostError(
         "invalid_address",
@@ -944,9 +994,25 @@ export function createSimulationManager(options: SimulationManagerOptions): Simu
       const existing = resetOptions.simId !== undefined ? require(resetOptions.simId) : undefined;
       const current = options.getDocument(existing?.docId ?? resetOptions.docId);
       const keep = resetOptions.keepOverrides === true;
+      // A preset or knob values given here replace the session's; keepOverrides keeps the old ones otherwise.
+      let knobs = keep ? existing?.knobs : undefined;
+      if (resetOptions.preset !== undefined || resetOptions.knobs !== undefined) {
+        const resolved = resolveKnobOverride(current.doc, {
+          ...(resetOptions.preset !== undefined ? { preset: resetOptions.preset } : {}),
+          ...(resetOptions.knobs !== undefined ? { values: resetOptions.knobs } : {}),
+        });
+        if (!resolved.ok)
+          throw new HostError(
+            resolved.error.code,
+            resolved.error.message,
+            resolved.error.hint ? { hint: resolved.error.hint } : {},
+          );
+        knobs = resolved.value;
+      }
       const kept = {
         overrides: keep && existing ? existing.overrides : [],
         dropped: keep && existing ? existing.dropped : [],
+        knobs,
       };
       const cleared = !keep && existing ? existing.overrides : [];
       const doc = effectiveDoc(kept, current.doc);
@@ -980,6 +1046,7 @@ export function createSimulationManager(options: SimulationManagerOptions): Simu
         lastUsed: ++clock,
         overrides: kept.overrides,
         dropped: kept.dropped,
+        knobs: kept.knobs,
         overrideCount: existing?.overrideCount ?? 0,
       };
       advance(session, []);
@@ -991,13 +1058,16 @@ export function createSimulationManager(options: SimulationManagerOptions): Simu
       }
       const s = state(session);
       if (cleared.length) s.clearedOverrides = cleared.map(overrideInfo);
+      if (existing?.knobs && !kept.knobs) s.clearedKnobs = knobOverrideInfo(existing.knobs, current.doc);
       return s;
     },
 
     async override(simId, request) {
       const session = require(simId);
       refresh(session);
-      const person = options.getDocument(session.docId).doc;
+      // The person's document as this session runs it: its knob preset and values, under the overrides.
+      const personDoc = options.getDocument(session.docId).doc;
+      const person = session.knobs ? withKnobOverride(personDoc, session.knobs) : personDoc;
       let next = [...session.overrides];
       const cleared: OverrideEntry[] = [];
       const clear = request.clear === "all" ? "all" : (request.clear ?? []);
@@ -1230,7 +1300,7 @@ export function createSimulationManager(options: SimulationManagerOptions): Simu
         values[target] = toJsonValue(seen.value);
         const keys = session.overrides.length ? overrideKeys(docOf(session), target) : [];
         const o = session.overrides.find((x) => keys.includes(x.key));
-        const overridden = o ? overrideNote(o, values[target]) : undefined;
+        const overridden = o ? overrideNote(o, values[target]) : knobNote(session, target);
         // One note per target: the override clause, then the runtime's note (why the value reads
         // as nothing, or a short clause like "copy #0 of 4" that stays inline).
         const note =
@@ -1332,6 +1402,48 @@ export function createSimulationManager(options: SimulationManagerOptions): Simu
     },
   };
   return manager;
+}
+
+/** A knob override as results report it, with the preset's name. */
+function knobOverrideInfo(override: KnobOverride, doc: SonobeDocument): SimKnobOverride {
+  const preset = override.preset;
+  return {
+    ...(preset !== undefined ? { preset: { id: preset, name: getKnobPreset(doc.knobs, preset)?.name ?? preset } } : {}),
+    ...(override.values ? { values: { ...override.values } } : {}),
+  };
+}
+
+/**
+ * A session's knob override against the person's newer document: a preset or knob it no longer has
+ * (or a value its knob's new type refuses) drops out and is reported once.
+ */
+function keptKnobOverride(
+  override: KnobOverride,
+  doc: SonobeDocument,
+  dropped: { target: string; reason: string }[],
+): KnobOverride | undefined {
+  const set = doc.knobs;
+  const out: KnobOverride = {};
+  if (override.preset !== undefined) {
+    if (getKnobPreset(set, override.preset)) out.preset = override.preset;
+    else
+      dropped.push({
+        target: `preset ${override.preset}`,
+        reason: "the person's document no longer has that preset",
+      });
+  }
+  const values: Record<Id, Literal> = {};
+  for (const [id, value] of Object.entries(override.values ?? {})) {
+    const knob = getKnob(set, id);
+    if (knob && checkKnobLiteral(knob, value).ok) values[id] = value;
+    else
+      dropped.push({
+        target: `$knob.${id}`,
+        reason: knob ? `the knob holds ${knob.type} values now` : "the person's document no longer has that knob",
+      });
+  }
+  if (Object.keys(values).length) out.values = values;
+  return out.preset !== undefined || out.values ? out : undefined;
 }
 
 function allLayerIdsOf(layers: Parameters<typeof walkLayers>[0]): Id[] {

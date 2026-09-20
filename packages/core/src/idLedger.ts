@@ -8,16 +8,16 @@
  */
 
 import { componentItemIds } from "./registry.ts";
-import type { Component, Id, SonobeDocument } from "./types.ts";
+import type { Component, Id, KnobSet, SonobeDocument } from "./types.ts";
 
 export interface SeenIds {
   /** Component id → every item id (layer, patch, comment) seen in it this session. */
   readonly items: ReadonlyMap<Id, ReadonlySet<Id>>;
   /** Every component id seen this session. */
   readonly components: ReadonlySet<Id>;
-  /** Knob ids seen this session (none until documents have knobs). */
+  /** Knob ids seen this session: a removed knob's id isn't given to a new knob. */
   readonly knobs: ReadonlySet<Id>;
-  /** Preset ids seen this session (none until documents have presets). */
+  /** Knob preset ids seen this session, retired the same way. */
   readonly presets: ReadonlySet<Id>;
 }
 
@@ -54,6 +54,7 @@ export function createIdLedger(initial?: SonobeDocument): IdLedger {
   const components = new Set<Id>();
   const knobs = new Set<Id>();
   const presets = new Set<Id>();
+  let observedKnobs: KnobSet | undefined;
   const itemSet = (component: Id) => {
     let set = items.get(component);
     if (!set) items.set(component, (set = new Set()));
@@ -71,6 +72,12 @@ export function createIdLedger(initial?: SonobeDocument): IdLedger {
         components.add(id);
         const set = itemSet(id);
         for (const item of liveItemIds(c)) set.add(item);
+      }
+      // Knobs and presets are project-wide, so they're recorded whatever `only` names (once per knob set).
+      if (doc.knobs && doc.knobs !== observedKnobs) {
+        observedKnobs = doc.knobs;
+        for (const knob of doc.knobs.knobs) knobs.add(knob.id);
+        for (const preset of doc.knobs.presets) presets.add(preset.id);
       }
     },
     merge(seen) {
@@ -92,6 +99,7 @@ export function createIdLedger(initial?: SonobeDocument): IdLedger {
       components.clear();
       knobs.clear();
       presets.clear();
+      observedKnobs = undefined;
     },
   };
   if (initial) ledger.observe(initial);
@@ -123,7 +131,11 @@ export function seenIdsExcept(seen: SeenIds, doc: SonobeDocument): SeenIds {
     items.set(component, live ? new Set([...ids].filter((id) => !live.has(id))) : ids);
   }
   const components = new Set([...seen.components].filter((id) => !Object.hasOwn(doc.components, id)));
-  return { items, components, knobs: seen.knobs, presets: seen.presets };
+  const liveKnobs = new Set(doc.knobs?.knobs.map((k) => k.id));
+  const livePresets = new Set(doc.knobs?.presets.map((p) => p.id));
+  const knobs = new Set([...seen.knobs].filter((id) => !liveKnobs.has(id)));
+  const presets = new Set([...seen.presets].filter((id) => !livePresets.has(id)));
+  return { items, components, knobs, presets };
 }
 
 export function seenIdsToJSON(seen: SeenIds): SeenIdsJSON {

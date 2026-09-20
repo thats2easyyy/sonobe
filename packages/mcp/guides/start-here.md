@@ -2,7 +2,7 @@
 
 Sonobe prototypes are **layers** (what people see) plus a **patch graph** (the logic that makes them respond), organized in components. The root component, usually `main`, is the screen. These tools change the person's document through Sonobe's op engine. Every change is validated, becomes one entry in their undo history, and returns the new revision plus the diagnostics it added or resolved.
 
-Related: `importing`, `graph-basics`, `gestures`, `animation`, `simulation`, `troubleshooting`
+Related: `importing`, `graph-basics`, `gestures`, `animation`, `knobs`, `simulation`, `troubleshooting`
 
 ## The loop
 
@@ -10,7 +10,7 @@ Related: `importing`, `graph-basics`, `gestures`, `animation`, `simulation`, `tr
 2. **Look up patches.** Search with `list_patch_types` by intent ("spring", "drag", "tabs"), then call `describe_patch_types` for exact port keys, types and defaults. Never guess a port key.
 3. **Say what you're doing.** Call `begin_work` with a one-line intent.
 4. **Start from real screens.** When the person has an app or a design in code, bring its screens in with `import_design` (see the `importing` guide) instead of drawing layers by hand.
-5. **Build one feature per batch.** Call `add_layers`, then `add_patches` with `connections`. Give new patches a `ref` and wire them with `"$ref.port"`; refs work in any order within a batch. Name layers by what they are ("Card") and patches by what they do ("Card Grown").
+5. **Build one feature per batch.** Call `add_layers`, then `add_patches` with `connections`. Give new patches a `ref` and wire them with `"$ref.port"`; refs work in any order within a batch. Name layers by what they are ("Card") and patches by what they do ("Card Grown"). Make the numbers the person will tune or compare into knobs with `set_knobs` (the `knobs` guide).
 6. **Check.** Read the diagnostics delta in each write result, or call `get_diagnostics` for everything. Suggestions include ops you can pass straight to `apply_ops`.
 7. **Prove it.** Call `sim_reset`, `sim_dispatch` the gesture, then `sim_trace` the properties that should change. Compare end values, settle time and overshoot with the feel you were asked for.
 8. **Hand off.** Call `finish_work`, then describe the result by layer and patch _names_. Don't show raw ids, addresses or JSON to people.
@@ -26,6 +26,7 @@ Related: `importing`, `graph-basics`, `gestures`, `animation`, `simulation`, `tr
 | how many copies a layer makes                 | `@card.repeat`                     |
 | a value inside a component instance (reads)   | `like_button_2/liked.on`           |
 | a component's published input / output        | `$in.down` / `$out.scale`          |
+| a knob's value (read it anywhere)             | `$knob.commit_distance`            |
 
 An input has at most one connection; an output can feed many inputs. Literal values: numbers, `true`/`false`, text, colors as `"#RRGGBBAA"`, points and sizes as `[x, y]`, layer references as `{ "layer": "card" }`, connections as `{ "link": "pop.output" }`.
 

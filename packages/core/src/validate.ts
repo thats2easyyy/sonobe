@@ -6,7 +6,9 @@
 
 import { formatAddress, parseAddress, type ParsedAddress } from "./address.ts";
 import { getOwn, isValidId } from "./ids.ts";
+import { findKnob, getKnob, knobAsPort } from "./knobs.ts";
 import { MAX_REPEAT } from "./layerTypes.ts";
+import { layerDisplayName, patchDisplayName } from "./names.ts";
 import {
   allLayerIds,
   findLayer,
@@ -84,7 +86,7 @@ const fail = (code: string, message: string, extra: Partial<Omit<SonobeError, "c
   error: makeError(code, message, extra),
 });
 
-const ADDRESS_HINT = 'Addresses look like "patchId.port", "@layerId.prop", "$in.key" (a published input) or "$out.key" (a published output).';
+const ADDRESS_HINT = 'Addresses look like "patchId.port", "@layerId.prop", "$in.key" (a published input), "$out.key" (a published output) or "$knob.id" (a knob).';
 
 const listKeys = (ports: readonly { key: string }[], max = 12) => {
   const keys = ports.map((p) => p.key);
@@ -118,6 +120,9 @@ function layerNotFound(component: Component, id: Id, key: string, address: strin
 
 function parseForOps(address: string): Check<ParsedAddress> {
   const parsed = parseAddress(address);
+  if (!parsed && /^\$knob\.[A-Za-z_][A-Za-z0-9_]*#\d+$/.test(String(address).trim())) {
+    return fail("invalid_address", `"${address}" names a copy of a knob, but a knob is one value for every copy.`, { address, hint: `Use "${String(address).trim().replace(/#\d+$/, "")}".` });
+  }
   if (!parsed) return fail("invalid_address", `"${address}" isn't a valid port address.`, { address, hint: ADDRESS_HINT });
   if (parsed.index !== undefined) {
     const { index: _index, ...rest } = parsed;
@@ -190,6 +195,11 @@ export function resolveTarget(doc: SonobeDocument, component: Component, address
         address,
         hint: "To change its default value, use updateInterface.",
       });
+    case "knob":
+      return fail("invalid_address", `"${address}" is a knob. Knobs are read, not written.`, {
+        address,
+        hint: "Tune it with setKnobValue (or set_knobs), or connect it into an input: { \"from\": \"" + address + "\", \"to\": \"patch.port\" }.",
+      });
   }
 }
 
@@ -252,7 +262,72 @@ export function resolveSource(doc: SonobeDocument, component: Component, address
     }
     case "componentOutput":
       return fail("invalid_address", `"${address}" is a published output. It can only be written to ("to"), not read from.`, { address });
+    case "knob": {
+      const knob = getKnob(doc.knobs, parsed.key);
+      if (!knob) {
+        if (opts.lenient) return ok({ kind: "knob", address: canonical, key: parsed.key, port: undefined });
+        const found = findKnob(doc.knobs, parsed.key);
+        return fail("unknown_knob", found.ok ? `There's no knob "${parsed.key}".` : found.error.message, { address, hint: found.ok ? undefined : found.error.hint });
+      }
+      return ok({ kind: "knob", address: canonical, key: parsed.key, port: knobAsPort(knob) });
+    }
   }
+}
+
+/** "a number", "an on/off (boolean)", "text". */
+const aType = (type: ValueType) => {
+  const label = typeLabel(type);
+  return type === "text" || type === "json" ? label : `${/^[aeiou]/i.test(label) ? "an" : "a"} ${label}`;
+};
+
+/** "Spring Feel's Response", "Card's Corner Radius": a target named the way people see it. */
+function targetLabel(component: Component, target: PortTarget, registry: Registry): string {
+  const port = target.port?.name ?? target.key;
+  if (target.kind === "patch" && target.itemId) {
+    const node = getOwn(component.patches, target.itemId);
+    return node ? `${patchDisplayName(node, getPatchSpec(registry, node.type))}'s ${port}` : target.address;
+  }
+  if (target.kind === "layer" && target.itemId) {
+    const layer = findLayer(component.layers, target.itemId)?.layer;
+    return layer ? `${layerDisplayName(layer)}'s ${port}` : target.address;
+  }
+  return target.address;
+}
+
+/** Can a knob drive `target`? Its type must connect, and an enum knob's options must be ones the port has. */
+function checkKnobLink(doc: SonobeDocument, component: Component, src: SourcePort, target: PortTarget, opts: ValidateOptions): Check<LinkInput> {
+  if (target.kind === "componentOutput") {
+    return fail("knob_into_output", `${target.address} can't read a knob; a published output passes on what a patch inside computes.`, {
+      address: target.address,
+      hint: `Put a patch between them (a Splitter passes the value through): connect ${src.address} into it, and it into ${target.address}.`,
+    });
+  }
+  if (target.kind === "layer" && !target.bindable) {
+    return fail("not_bindable", `${target.address} can't be connected; it only takes a set value.`, { address: target.address, hint: "Use setInput with a literal value instead." });
+  }
+  const knob = getKnob(doc.knobs, src.key);
+  if (opts.lenient || !knob || !target.port) return ok({ link: src.address });
+  const where = targetLabel(component, target, opts.registry);
+  const check = canConnect(knob.type, target.port.type);
+  if (!check.ok) {
+    const suggestions = converterSuggestions(doc, opts.registry, component.id, { address: src.address, type: knob.type }, { address: target.address, type: target.port.type });
+    return fail("knob_type_mismatch", `Knob "${knob.name}" is ${aType(knob.type)}, but ${where} needs ${aType(target.port.type)}.`, {
+      address: target.address,
+      hint: suggestions.length ? `Try: ${suggestions[0]!.description} Or make a knob of that type.` : "Make a knob of that type, or convert the value with a patch in between.",
+      suggestions,
+    });
+  }
+  if (knob.type === "enum" && target.port.type === "enum" && target.port.enumOptions?.length) {
+    const keys = new Set(target.port.enumOptions.map((o) => o.key));
+    const extra = (knob.options ?? []).filter((o) => !keys.has(o.key)).map((o) => o.key);
+    if (extra.length) {
+      return fail("knob_type_mismatch", `Knob "${knob.name}" has the option${extra.length === 1 ? "" : "s"} ${extra.join(", ")}, which ${where} doesn't take.`, {
+        address: target.address,
+        hint: `${where} takes: ${target.port.enumOptions.map((o) => o.key).join(", ")}. Give the knob only those options.`,
+      });
+    }
+  }
+  return ok({ link: src.address });
 }
 
 function pickPort(ports: readonly ResolvedPort[], test: (p: ResolvedPort) => ConnectCheck, exactType: ValueType): ResolvedPort | undefined {
@@ -326,6 +401,7 @@ export function checkLink(doc: SonobeDocument, component: Component, link: strin
   const srcCheck = resolveSource(doc, component, link, opts);
   if (!srcCheck.ok) return srcCheck;
   const src = srcCheck.value;
+  if (src.kind === "knob") return checkKnobLink(doc, component, src, target, opts);
   if (target.kind === "layer" && !target.bindable) {
     return fail("not_bindable", `${target.address} can't be connected; it only takes a set value.`, { address: target.address, hint: "Use setInput with a literal value instead." });
   }

@@ -12,10 +12,12 @@ import {
   COMPONENT_INSTANCE_LAYER_TYPE,
   COMPONENT_PATCH_TYPE,
   describePatch,
+  getKnob,
   getPatchSpec,
   interfacePortToPort,
   isLayerInput,
   isLinkInput,
+  knobLiteral,
   loopShapes,
   parseAddress,
   resolveLayerProps,
@@ -25,7 +27,10 @@ import {
   type ComponentKind,
   type Id,
   type InputValue,
+  type Knob,
+  type KnobSet,
   type LayerNode,
+  type Literal,
   type LoopShapes,
   type PatchNode,
   type PatchSpec,
@@ -39,7 +44,7 @@ import { DELAY1_TYPE, VARIABLE_BROADCASTER_TYPE, VARIABLE_RECEIVER_TYPE, withBui
 import { bypassMap, type InputSlot, type OutputSlot } from "./evaluate.ts";
 import type { Binding, Broadcaster, CLayer, CNode, CNodeKind, Scope, ScopeInput } from "./graph.ts";
 import { makeLoop } from "./loop.ts";
-import { decodeStored, normalizeDefault, portDefault, valuesEqual, zeroValue } from "./values.ts";
+import { coerceValue, decodeStored, normalizeDefault, portDefault, valuesEqual, zeroValue } from "./values.ts";
 
 /** Component instances nest at most this deep. */
 export const MAX_COMPONENT_DEPTH = 32;
@@ -54,8 +59,38 @@ export interface CompiledGraph {
   issues: RuntimeIssue[];
   /** Some patches read last frame's value through a back-edge (a cycle's evaluation order read patch positions). */
   cyclic: boolean;
+  /** Knob readers, compiled to constants that updateLiterals rewrites in place (`$knob.<id>` links). */
+  knobs: KnobState;
   /** Resolve an address ("patch.port", "@layer.key", "$in.key") in a scope (default: the root) to a binding and its target type. */
   resolveLink(address: string, scope?: Scope): { binding: Binding; type: ValueType } | null;
+}
+
+type ConstBinding = Extract<Binding, { kind: "const" }>;
+
+/** One input or property that reads a knob: its constant binding, in the type it reads. */
+export interface KnobReader {
+  binding: ConstBinding;
+  type: ValueType;
+  /** The reading patch declares its ports from its node (dynamicPorts): a new value recompiles, as a new literal would. */
+  recompile: boolean;
+}
+
+export interface KnobState {
+  readers: Map<Id, KnobReader[]>;
+  /** Every knob's running value, decoded in its own type (getValue("$knob.<id>")). */
+  values: Map<Id, Value>;
+  /** Type and option keys per knob: a change to them recompiles. */
+  declarations: Map<Id, string>;
+  /** Knob ids links read that the document doesn't have: adding one recompiles. */
+  missing: Set<Id>;
+}
+
+const knobDeclaration = (knob: Knob) => `${knob.type}:${knob.options?.map((o) => o.key).join("|") ?? ""}`;
+
+/** A knob's value as a reader of type `type` reads it (a fresh value per reader). */
+function knobReaderValue(knob: Knob, literal: Literal, type: ValueType): Value | Loop {
+  const value = decodeStored(literal, knob.type);
+  return type === knob.type ? value : coerceValue(value, knob.type, type);
 }
 
 /** True when the spec declares port `key` on `side` as "variant" (static ports and variadic expansions). */
@@ -104,6 +139,12 @@ export function compileDocument(doc: SonobeDocument, engineRegistry: EngineRegis
   const pendingProps = new Set<string>();
   const broadcasterBindings = new Map<Broadcaster, Binding>();
   const nodePorts = new Map<CNode, ResolvedPort[]>();
+  const knobSet = doc.knobs;
+  const knobState: KnobState = { readers: new Map(), values: new Map(), declarations: new Map(), missing: new Set() };
+  for (const knob of knobSet?.knobs ?? []) {
+    knobState.values.set(knob.id, decodeStored(knobLiteral(knobSet!, knob), knob.type) as Value);
+    knobState.declarations.set(knob.id, knobDeclaration(knob));
+  }
 
   const issue = (code: string, severity: RuntimeIssue["severity"], message: string, label?: Pick<Label, "patchId" | "layerId">) => {
     const item: RuntimeIssue = { code, severity, message };
@@ -115,7 +156,7 @@ export function compileDocument(doc: SonobeDocument, engineRegistry: EngineRegis
   const rootComponent = doc.components[doc.project.root];
   if (!rootComponent) {
     issue("missing_root", "error", `The project's root component "${doc.project.root}" doesn't exist, so there's nothing to run.`);
-    return { doc, registry, root: null, order: [], scopes, issues, cyclic: false, resolveLink: () => null };
+    return { doc, registry, root: null, order: [], scopes, issues, cyclic: false, knobs: knobState, resolveLink: () => null };
   }
 
   // ---- scopes and shells -----------------------------------------------------
@@ -363,9 +404,31 @@ export function compileDocument(doc: SonobeDocument, engineRegistry: EngineRegis
 
   // ---- bindings ---------------------------------------------------------------
 
-  function compileStored(scope: Scope, stored: InputValue | undefined, type: ValueType, fallback: Value | Loop, label: Label): { binding: Binding; connected: boolean } {
+  /**
+   * A knob read as a constant of `type` (default: the knob's own type), registered so updateLiterals
+   * can rewrite it in place. Null, with an issue, when there's no such knob.
+   */
+  function knobBinding(id: Id, type: ValueType | undefined, label: Label, recompile: boolean): ConstBinding | null {
+    const knob = getKnob(knobSet, id);
+    if (!knob) {
+      knobState.missing.add(id);
+      issue("unknown_knob", "warning", `${label.text} reads the knob "${id}", which doesn't exist, so it uses its default.`, label);
+      return null;
+    }
+    const target = type ?? knob.type;
+    const binding = constBinding(knobReaderValue(knob, knobLiteral(knobSet!, knob), target), target) as ConstBinding;
+    let readers = knobState.readers.get(id);
+    if (!readers) knobState.readers.set(id, (readers = []));
+    readers.push({ binding, type: target, recompile });
+    return binding;
+  }
+
+  function compileStored(scope: Scope, stored: InputValue | undefined, type: ValueType, fallback: Value | Loop, label: Label, recompile = false): { binding: Binding; connected: boolean } {
     if (stored === undefined) return { binding: constBinding(fallback, type), connected: false };
     if (isLinkInput(stored)) {
+      // A knob-driven input behaves exactly like the literal it holds right now.
+      const knob = parseAddress(stored.link);
+      if (knob?.kind === "knob") return { binding: knobBinding(knob.key, type, label, recompile) ?? constBinding(fallback, type), connected: false };
       const binding = compileLink(scope, stored.link, label);
       return binding ? { binding, connected: true } : { binding: constBinding(fallback, type), connected: false };
     }
@@ -421,6 +484,9 @@ export function compileDocument(doc: SonobeDocument, engineRegistry: EngineRegis
         issue("dangling_link", "warning", `${label.text} reads "${address}", but layer "${a.id}" has no output or property "${a.key}".`, label);
         return null;
       }
+      case "knob":
+        // Inputs read knobs through compileStored; this reaches a published output that links one (a hand edit).
+        return knobBinding(a.key, undefined, label, false);
       default:
         issue("invalid_link", "warning", `${label.text} reads "${address}", which can't be read from.`, label);
         return null;
@@ -519,10 +585,13 @@ export function compileDocument(doc: SonobeDocument, engineRegistry: EngineRegis
     if (cnode.kind === "receiver") return bindReceiver(scope, cnode);
     const ports = nodePorts.get(cnode);
     if (!ports) return;
-    const label: Label = { patchId: cnode.id, text: describePatch(cnode.node, getPatchSpec(registry, cnode.node.type)) };
+    const spec = getPatchSpec(registry, cnode.node.type);
+    const label: Label = { patchId: cnode.id, text: describePatch(cnode.node, spec) };
+    // A knob reader recompiles on a new value when its ports come from the node, as a literal edit does.
+    const dynamic = spec?.dynamicPorts !== undefined;
     ports.forEach((port, i) => {
       const slot = cnode.inputs[i]!;
-      let { binding, connected } = compileStored(scope, cnode.node.inputs[port.key], slot.type, slot.default, label);
+      let { binding, connected } = compileStored(scope, cnode.node.inputs[port.key], slot.type, slot.default, label, dynamic);
       if (binding.kind === "output" && binding.node === cnode) {
         issue("self_edge", "error", `${label.text}: ${port.name} is wired to its own output "${cnode.outputs[binding.slot]!.key}". Put another patch in between (Delay One Frame for feedback).`, label);
         binding = constBinding(slot.default, slot.type);
@@ -669,7 +738,7 @@ export function compileDocument(doc: SonobeDocument, engineRegistry: EngineRegis
     return result;
   };
   const cyclic = order.some((node) => node.feedback.some(Boolean));
-  return { doc, registry, root, order, scopes, issues, cyclic, resolveLink };
+  return { doc, registry, root, order, scopes, issues, cyclic, knobs: knobState, resolveLink };
 }
 
 // ---------------------------------------------------------------------------
@@ -719,16 +788,42 @@ function changedConstants(next: Record<string, InputValue>, prev: Record<string,
 }
 
 /**
+ * The constant writes that carry a new knob set to every knob reader, and the knobs' new running
+ * values. Undefined when the change is structural for some reader: its knob went, changed type or
+ * options, a missing knob appeared, or a reader recompiles on a new value. Knobs nothing reads never
+ * force a recompile (adding, renaming, re-ranging knobs; adding, renaming, locking presets).
+ */
+function planKnobWrites(state: KnobState, next: KnobSet | undefined): { writes: { binding: ConstBinding; value: Value | Loop }[]; values: Map<Id, Value> } | undefined {
+  for (const id of state.missing) if (getKnob(next, id)) return undefined;
+  const values = new Map<Id, Value>();
+  for (const knob of next?.knobs ?? []) values.set(knob.id, decodeStored(knobLiteral(next!, knob), knob.type) as Value);
+  const writes: { binding: ConstBinding; value: Value | Loop }[] = [];
+  for (const [id, readers] of state.readers) {
+    const knob = getKnob(next, id);
+    if (!knob || knobDeclaration(knob) !== state.declarations.get(id)) return undefined;
+    if (valuesEqual(values.get(id), state.values.get(id))) continue;
+    if (readers.some((r) => r.recompile)) return undefined;
+    const literal = knobLiteral(next!, knob);
+    for (const r of readers) writes.push({ binding: r.binding, value: knobReaderValue(knob, literal, r.type) });
+  }
+  return { writes, values };
+}
+
+/**
  * Update a compiled graph in place for a document that differs from the one it was compiled from
- * only in literal values: patch input literals, layer property literals, and patch positions (which
- * only matter when patches form a cycle). Constant bindings are rewritten where they are, so every
- * reader of a layer property sees the new value, and patch state is untouched. Returns false, with
- * the graph unchanged, for anything else (links, new or removed items, types, names, settings,
- * component instances, variables, patches with dynamic ports): compile the document instead.
+ * only in literal values: patch input literals, layer property literals, knob values and the running
+ * preset, and patch positions (which only matter when patches form a cycle). Constant bindings are
+ * rewritten where they are, so every reader of a layer property or a knob sees the new value, and
+ * patch state is untouched. Returns false, with the graph unchanged, for anything else (links, new or
+ * removed items or knobs, types, names, settings, component instances, variables, patches with
+ * dynamic ports): compile the document instead.
  */
 export function updateLiterals(graph: CompiledGraph, next: SonobeDocument): boolean {
   const prev = graph.doc;
   if (next === prev) return true;
+  // Knob values and preset switches rewrite their readers' constants; a structural knob change recompiles.
+  const knobs = next.knobs === prev.knobs ? null : planKnobWrites(graph.knobs, next.knobs);
+  if (knobs === undefined) return false;
   if (next.project !== prev.project || next.scripts !== prev.scripts || next.assets !== prev.assets) return false;
   const ids = Object.keys(next.components);
   if (!sameKeys(ids, Object.keys(prev.components))) return false;
@@ -819,6 +914,10 @@ export function updateLiterals(graph: CompiledGraph, next: SonobeDocument): bool
     }
   }
 
+  if (knobs) {
+    writes.push(...knobs.writes);
+    graph.knobs.values = knobs.values;
+  }
   for (const { binding, value } of writes) binding.value = value;
   for (const { cnode, node } of nodeSwaps) {
     cnode.node = node;

@@ -3,6 +3,7 @@ import { newComponent } from "./document.ts";
 import { migrateFile, ProjectFormatError } from "./migrations.ts";
 import { parseComponentFile, parseProjectFile } from "./schema.ts";
 import {
+  canonicalNumber,
   createMemoryFs,
   loadProject,
   loadProjectFiles,
@@ -114,7 +115,128 @@ describe("canonical serialization", () => {
       b: { id: "b", kind: "sound", name: "B", file: "b.mp3" },
       a: { file: "a.png", name: "A", kind: "image", id: "a", width: 1.23456789 },
     });
-    expect(text).toBe('{\n  "a": { "id": "a", "kind": "image", "name": "A", "file": "a.png", "width": 1.234568 },\n  "b": { "id": "b", "kind": "sound", "name": "B", "file": "b.mp3" }\n}\n');
+    expect(text).toBe('{\n  "a": { "id": "a", "kind": "image", "name": "A", "file": "a.png", "width": 1.23456789 },\n  "b": { "id": "b", "kind": "sound", "name": "B", "file": "b.mp3" }\n}\n');
+  });
+
+  it("trims float noise but keeps every real digit, so values read back as they were", () => {
+    expect(canonicalNumber(0.1 + 0.2)).toBe(0.3);
+    expect(canonicalNumber(123.45600000000002)).toBe(123.456);
+    expect(canonicalNumber(Math.cos(Math.PI / 2))).toBe(0);
+    expect(Object.is(canonicalNumber(-0), 0)).toBe(true);
+    expect(canonicalNumber(1 / 30)).toBe(1 / 30);
+    expect(canonicalNumber(50.8102045)).toBe(50.8102045);
+    expect(canonicalNumber(Number.NaN)).toBe(0);
+    for (const n of [1 / 30, 0.1 + 0.2, 1e-7, 2 / 3, -4345500469.207764, 1e21, 5e-324]) {
+      const once = canonicalNumber(n);
+      expect(canonicalNumber(once)).toBe(once);
+      expect(canonicalNumber(JSON.parse(String(once)) as number)).toBe(once);
+    }
+    const doc = mustApply(buildSampleDocument(), [{ op: "setInput", target: "grow.end", value: 1 / 30 }]).doc;
+    expect(parseDocumentFiles(serializeDocument(doc)).components.main!.patches.grow!.inputs.end).toBe(1 / 30);
+  });
+});
+
+describe("knobs.json", () => {
+  const knobbed = () =>
+    mustApply(buildSampleDocument(), [
+      { op: "addKnobPreset", preset: { name: "Proposal" } },
+      { op: "addKnobPreset", preset: { name: "Shipped app" } },
+      { op: "addKnob", knob: { name: "Commit Distance", type: "number", group: "Throw", value: 95, min: 40, max: 200, step: 1, unit: "pt", description: "How far the card travels before letting go counts as a vote." } },
+      { op: "addKnob", knob: { name: "Grab Tilt", type: "boolean", group: "Tilt", value: true, values: { shipped_app: false } } },
+      { op: "addKnob", knob: { name: "Tilt per Point", type: "number", value: 1 / 30 } },
+      { op: "updateKnobPreset", id: "shipped_app", locked: true },
+      { op: "setInput", target: "pop.bounciness", value: { link: "$knob.commit_distance" } },
+    ]).doc;
+
+  it("writes presets, then one block per knob with its values on one line", () => {
+    const files = serializeDocument(knobbed());
+    expect(files["knobs.json"]).toBe(
+      [
+        "{",
+        '  "formatVersion": 1,',
+        '  "active": "proposal",',
+        '  "presets": [',
+        '    { "id": "proposal", "name": "Proposal" },',
+        '    { "id": "shipped_app", "name": "Shipped app", "locked": true }',
+        "  ],",
+        '  "knobs": [',
+        "    {",
+        '      "id": "commit_distance",',
+        '      "name": "Commit Distance",',
+        '      "group": "Throw",',
+        '      "type": "number",',
+        '      "values": { "proposal": 95, "shipped_app": 95 },',
+        '      "min": 40,',
+        '      "max": 200,',
+        '      "step": 1,',
+        '      "unit": "pt",',
+        '      "description": "How far the card travels before letting go counts as a vote."',
+        "    },",
+        "    {",
+        '      "id": "grab_tilt",',
+        '      "name": "Grab Tilt",',
+        '      "group": "Tilt",',
+        '      "type": "boolean",',
+        '      "values": { "proposal": true, "shipped_app": false }',
+        "    },",
+        "    {",
+        '      "id": "tilt_per_point",',
+        '      "name": "Tilt per Point",',
+        '      "type": "number",',
+        '      "values": { "proposal": 0.03333333333333333, "shipped_app": 0.03333333333333333 }',
+        "    }",
+        "  ]",
+        "}",
+        "",
+      ].join("\n"),
+    );
+    expect(JSON.parse(files["project.json"]!).formatVersion).toBe(2);
+    const loaded = parseDocumentFiles(files);
+    expect(loaded.knobs).toStrictEqual(knobbed().knobs);
+    expect(serializeDocument(loaded)).toEqual(files);
+  });
+
+  it("keeps projects without knobs at format 1, byte for byte, and older readers refuse one with knobs", () => {
+    const plain = serializeDocument(buildSampleDocument());
+    expect(plain["knobs.json"]).toBeUndefined();
+    expect(JSON.parse(plain["project.json"]!).formatVersion).toBe(1);
+    expect(serializeDocument(parseDocumentFiles(plain))).toEqual(plain);
+    expect(parseDocumentFiles(plain).project.formatVersion).toBe(1);
+    expect(() => parseDocumentFiles(serializeDocument(knobbed()), { currentVersion: 1 })).toThrow(expect.objectContaining({ code: "tooNew", message: expect.stringContaining("format 2") }));
+    expect(migrateFile("project", { formatVersion: 1 })).toEqual({ formatVersion: 2 });
+  });
+
+  it("loads hand edits that only break references, and refuses the wrong kind of value", () => {
+    const files = serializeDocument(knobbed());
+    const json = JSON.parse(files["knobs.json"]!);
+    json.active = "gone";
+    delete json.knobs[0].values.shipped_app;
+    json.knobs[1].values.old = true;
+    const loaded = parseDocumentFiles({ ...files, "knobs.json": JSON.stringify(json) });
+    expect(loaded.knobs!.active).toBe("gone");
+    json.knobs[0].values.proposal = "95";
+    expect(() => parseDocumentFiles({ ...files, "knobs.json": JSON.stringify(json) })).toThrow(expect.objectContaining({ code: "invalidFormat", message: expect.stringContaining("knobs[0].values.proposal: must be a number") }));
+    json.knobs[0].values.proposal = 95;
+    json.presets = [];
+    expect(() => parseDocumentFiles({ ...files, "knobs.json": JSON.stringify(json) })).toThrow(/at least one preset/);
+    expect(() => parseDocumentFiles({ ...files, "knobs.json": "{" })).toThrow(expect.objectContaining({ code: "corrupt" }));
+  });
+
+  it("deletes knobs.json once the last knob goes, when the session owns it", async () => {
+    const fs = createMemoryFs();
+    const dir = "/work/Knobs.sonobe";
+    const doc = mustApply(buildSampleDocument(), [{ op: "addKnob", knob: { id: "gap", name: "Gap", type: "number", value: 8 } }]).doc;
+    const first = await saveProject(fs, dir, doc);
+    expect(first.written).toContain("knobs.json");
+    const { doc: loaded, files } = await loadProjectFiles(fs, dir);
+    expect(loaded.knobs).toStrictEqual(doc.knobs);
+    const gone = mustApply(loaded, [{ op: "removeKnob", id: "gap" }]).doc;
+    expect(gone.knobs).toBeUndefined();
+    const kept = await saveProject(fs, dir, gone, { removable: new Set() });
+    expect(kept.removed).toEqual([]);
+    const second = await saveProject(fs, dir, gone, { removable: new Set(Object.keys(files)) });
+    expect(second.removed).toEqual(["knobs.json"]);
+    expect(JSON.parse(await fs.readText(`${dir}/project.json`)).formatVersion).toBe(1);
   });
 });
 
