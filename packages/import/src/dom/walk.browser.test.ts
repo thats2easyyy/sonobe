@@ -90,6 +90,17 @@ describe.skipIf(!playwrightReady)("DOM walker in Chromium", () => {
       await browser.close();
     }
   });
+
+  it("makes @font-face rules that share a file one face covering their weights, as Google Fonts serves a variable font", async () => {
+    const roman = "data:font/woff2;base64,d09GMgABAAAAAAA=";
+    const italic = "data:font/woff2;base64,d09GMgABAAAAAAE=";
+    const face = (weight: string, url = roman, style = "normal") => `@font-face { font-family: "Test Sans"; font-style: ${style}; font-weight: ${weight}; src: url(${url}) format("woff2"); }`;
+    const c = await capture(`<style>${face("400")}${face("600")}${face("700")}${face("400", italic, "italic")}</style><h1 style="font-family:'Test Sans';font-weight:700">Bold title</h1><p style="font-family:'Test Sans'">Body <i>and italic</i></p>`);
+    expect(c.fonts).toEqual([
+      { family: "Test Sans", url: roman, weight: "400 700" },
+      { family: "Test Sans", url: italic, weight: "400", style: "italic" },
+    ]);
+  });
 });
 
 function all(node: CaptureNode, out: CaptureNode[] = []): CaptureNode[] {

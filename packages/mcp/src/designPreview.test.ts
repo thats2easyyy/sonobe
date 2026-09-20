@@ -21,6 +21,8 @@ let requests: DesignCaptureRequest[];
 /** The fake canvas and browser fail while these are set. */
 let canvasFails: boolean;
 let captureFails: boolean;
+/** The fake canvas holds this session's updates until the promise settles (a window that's slow to answer). */
+let slowFor: { key: string; until: Promise<void> } | null;
 let open: TestClient[];
 
 const PLACEMARK = "11111111-aaaa-4bbb-8ccc-000000000001";
@@ -49,6 +51,7 @@ function withCanvas(host: HeadlessHost): HeadlessHost {
   Object.defineProperty(wrapped, "showDesignPreview", {
     value: async (update: DesignPreviewUpdate) => {
       if (canvasFails) throw new HostError("editor_timeout", "The editor didn't answer design.preview in time.", { hint: "It may be busy." });
+      if (slowFor?.key === update.key) await slowFor.until;
       updates.push(structuredClone(update));
     },
   });
@@ -101,6 +104,7 @@ beforeEach(async () => {
   requests = [];
   canvasFails = false;
   captureFails = false;
+  slowFor = null;
   open = [];
 });
 
@@ -118,7 +122,7 @@ describe("preview_design", () => {
     await c.call("preview_design", { append: "<main>Items</main>" });
     const third = await c.call("preview_design", { append: "<footer>Pay</footer></body>" });
     const html = "<head><style>body{margin:0}</style></head><body><header>Checkout</header><main>Items</main><footer>Pay</footer></body>";
-    expect(third.structured).toEqual({ text: third.text, docId: "test", name: "Checkout", bytes: html.length, revision: 3 });
+    expect(third.structured).toEqual({ text: third.text, docId: "test", name: "Checkout", bytes: html.length, revision: 0, draftRevision: 3 });
     expect(updates.map((u) => [u.revision, u.status, u.html])).toEqual([
       [1, "writing", "<head><style>body{margin:0}</style></head><body><header>Checkout</header>"],
       [2, "writing", "<head><style>body{margin:0}</style></head><body><header>Checkout</header><main>Items</main>"],
@@ -159,7 +163,7 @@ describe("preview_design", () => {
     expect(big.structured.error).toMatchObject({ code: "html_too_large", message: "The draft is over 1,500,000 characters. Keep the page lean: inline SVG icons instead of big data: images." });
     expect(big.text).toContain("Nothing changed.");
     // The draft is as it was.
-    expect((await c.call("preview_design", { append: "y" })).structured).toMatchObject({ bytes: 1_000_001, revision: 2 });
+    expect((await c.call("preview_design", { append: "y" })).structured).toMatchObject({ bytes: 1_000_001, draftRevision: 2 });
     expect(updates).toHaveLength(2);
   });
 
@@ -197,6 +201,39 @@ describe("preview_design", () => {
     expect((await placemark.call("preview_design", { append: "<p>still here</p>" })).isError).toBe(false);
   });
 
+  it("doesn't hold one session's draft up behind a window that's slow to show another's", async () => {
+    const host = withCanvas(project.host);
+    const placemark = await session(host, PLACEMARK);
+    const sonobe = await session(host, SONOBE);
+    let release!: () => void;
+    slowFor = { key: PLACEMARK, until: new Promise<void>((resolve) => (release = resolve)) };
+    const slow = placemark.call("preview_design", { name: "Checkout", html: "<body>checkout" });
+    const quick = await sonobe.call("preview_design", { name: "Inbox", html: "<body>inbox" });
+    expect(quick.isError, quick.text).toBe(false);
+    expect(updates.map((u) => u.key)).toEqual([SONOBE]);
+    // The slow draft's own calls still take turns, so its updates reach the canvas in order.
+    const next = placemark.call("preview_design", { append: "</body>" });
+    release();
+    await Promise.all([slow, next]);
+    expect(updates.map((u) => [u.key, u.revision, u.html])).toEqual([
+      [SONOBE, 1, "<body>inbox"],
+      [PLACEMARK, 1, "<body>checkout"],
+      [PLACEMARK, 2, "<body>checkout</body>"],
+    ]);
+  });
+
+  it("reports the document's revision, which import_design's expectedRevision takes", async () => {
+    const c = await session(withCanvas(project.host));
+    for (const name of ["Card", "Badge"]) expect((await c.call("add_layers", { layers: [{ type: "rectangle", name }] })).isError).toBe(false);
+    const { revision } = (await c.call("get_document_info")).structured;
+    expect(revision).toBe(2);
+    await c.call("preview_design", { name: "Checkout", html: "<body>" });
+    const last = await c.call("preview_design", { append: "</body>" });
+    expect(last.structured).toMatchObject({ revision: 2, draftRevision: 2 });
+    const r = await importPreview(c, { expectedRevision: last.structured.revision });
+    expect(r.isError, r.text).toBe(false);
+  });
+
   it("drops a draft left alone for 15 minutes, and clears it from the canvas", async () => {
     const host = withCanvas(project.host);
     const placemark = await session(host, PLACEMARK);
@@ -216,7 +253,7 @@ describe("preview_design", () => {
   });
 
   it("is taught in the instructions of a host with a canvas", () => {
-    const line = "   To design a new screen, show it on the canvas as you write with preview_design, then import it with import_design (preview: true).";
+    const line = "   To design a new screen, show it on the canvas as you write with preview_design. Start it within your first few steps with the page's head, theme and first section instead of planning the whole page first, append section by section, then import it with import_design (preview: true).";
     expect(serverInstructions(withCanvas(project.host)).split("\n")).toContain(line);
     expect(serverInstructions(project.host)).not.toContain("preview_design");
   });
@@ -225,7 +262,7 @@ describe("preview_design", () => {
     const headless = await session(project.host);
     const kept = await headless.call("preview_design", { name: "Checkout", html: "<body>" });
     expect(kept.text).toBe('Kept the draft “Checkout” (1 KB). This is headless mode with no canvas, so nobody sees it; import it with import_design and "preview": true.');
-    expect((await headless.call("preview_design", { append: "</body>" })).structured).toMatchObject({ revision: 2 });
+    expect((await headless.call("preview_design", { append: "</body>" })).structured).toMatchObject({ draftRevision: 2 });
 
     const c = await session(withCanvas(project.host), PLACEMARK);
     canvasFails = true;
@@ -233,7 +270,7 @@ describe("preview_design", () => {
     expect(shown.isError).toBe(false);
     expect(shown.text).toContain("Note: The canvas didn't show the draft: The editor didn't answer design.preview in time. It may be busy.");
     canvasFails = false;
-    expect((await c.call("preview_design", { append: "</body>" })).structured).toMatchObject({ bytes: 13, revision: 2 });
+    expect((await c.call("preview_design", { append: "</body>" })).structured).toMatchObject({ bytes: 13, draftRevision: 2 });
   });
 });
 
@@ -257,6 +294,41 @@ describe("import_design with preview", () => {
     expect(updates[3]).toMatchObject({ html: null, status: "cleared" });
     // The draft is gone once it's layers.
     expect((await importPreview(c, {})).text).toContain("There's no design preview to import for this session. Show one with preview_design first, or pass html.");
+  });
+
+  it("names the layer the draft replaces, teaches once it's gone, and makes a new screen with replace: null", async () => {
+    const c = await session(withCanvas(project.host));
+    expect((await c.call("import_design", { capture: CHECKOUT, name: "Checkout" })).isError).toBe(false);
+    const first = await c.call("preview_design", { name: "Checkout v2", replace: "checkout", html: "<body>" });
+    expect(first.text).toBe('Showing “Checkout v2” on the canvas over “Checkout”, which it replaces (1 KB so far). Add the next part with append, then import it with import_design and "preview": true.');
+    expect((await c.call("delete_items", { ids: ["checkout"] })).isError).toBe(false);
+    const gone = { code: "not_found", message: 'The draft replaces "checkout", which isn\'t in main now.', hint: 'Pass "replace": null to make it a new screen, or the id of the layer it replaces (get_outline shows it).' };
+    expect((await c.call("preview_design", { append: "<p>Pay</p>" })).structured.error).toMatchObject(gone);
+    expect((await c.call("preview_design", { html: "<body>again" })).structured.error).toMatchObject(gone);
+    // import_design says so before it renders the page, and leaves the draft as it was.
+    const failed = await importPreview(c, {});
+    expect(failed.text).toContain(`Error not_found: ${gone.message}`);
+    expect(requests).toEqual([]);
+    expect(statuses()).toEqual(["writing 1"]);
+    const fresh = await c.call("preview_design", { replace: null, append: "<p>Pay</p></body>" });
+    expect(fresh.text).toMatch(/^Showing “Checkout v2” on the canvas \(1 KB so far\)\./);
+    expect(updates.at(-1)).toMatchObject({ replace: null, html: "<body><p>Pay</p></body>" });
+    const r = await importPreview(c, {});
+    expect(r.isError, r.text).toBe(false);
+    expect(r.meta).toMatchObject({ screenName: "Checkout v2", replaced: null });
+  });
+
+  it("imports a new screen with replace: null, keeping the screen the draft would replace", async () => {
+    const c = await session(withCanvas(project.host));
+    expect((await c.call("import_design", { capture: CHECKOUT, name: "Checkout" })).isError).toBe(false);
+    await c.call("preview_design", { name: "Checkout B", replace: "checkout", html: "<body>Pay</body>" });
+    const r = await importPreview(c, { replace: null });
+    expect(r.isError, r.text).toBe(false);
+    expect(r.text).toContain('Imported "Checkout B" as layer checkout_b');
+    expect(r.meta).toMatchObject({ screenId: "checkout_b", replaced: null });
+    const outline = (await c.call("get_outline")).text;
+    expect(outline).toContain('layer checkout group "Checkout"');
+    expect(outline).toContain('layer checkout_b group "Checkout B"');
   });
 
   it("lets the call's own fields win over the draft's", async () => {
@@ -294,7 +366,7 @@ describe("import_design with preview", () => {
     expect(dry.meta).toMatchObject({ dryRun: true, screenId: null, screenName: "Checkout" });
     expect(requests[0]).toMatchObject({ html: "<body>Pay</body>" });
     expect(statuses()).toEqual(["writing 1"]);
-    expect((await c.call("preview_design", { append: "<p>" })).structured).toMatchObject({ revision: 2 });
+    expect((await c.call("preview_design", { append: "<p>" })).structured).toMatchObject({ draftRevision: 2 });
   });
 
   it("teaches without a draft, and counts preview as a source", async () => {

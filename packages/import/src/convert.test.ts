@@ -230,6 +230,38 @@ describe("web fonts", () => {
     expect(plan.summary.fonts).toBe(1);
     expect(plan.notes.join(" ")).toContain("“Brand Sans” couldn't be downloaded");
   });
+
+  it("makes faces that share a file one face covering their weights, as a variable font serves them", async () => {
+    const inter = { bytes: new Uint8Array([0x77, 0x4f, 0x46, 0x32, 1, 2, 3, 4]), mime: "font/woff2" };
+    const italic = { bytes: new Uint8Array([0x77, 0x4f, 0x46, 0x32, 5, 6, 7, 8]), mime: "font/woff2" };
+    const url = "https://fonts.gstatic.com/s/inter.woff2";
+    const c = capture({ children: [] }, {
+      fonts: [
+        { family: "Inter", url, weight: "400" },
+        { family: "Inter", url: `${url}?copy`, weight: "700" },
+        { family: "Inter", url: "https://fonts.gstatic.com/s/inter-italic.woff2", weight: "400", style: "italic" },
+        { family: "Inter", url: `${url}?again`, weight: "600" },
+      ],
+    });
+    const { doc, plan } = await imported(c, new Map([["font:0", inter], ["font:1", inter], ["font:2", italic], ["font:3", inter]]));
+    expect(Object.values(doc.assets).map((a) => [a.id, a.font])).toEqual([
+      ["inter_400", { family: "Inter", weight: "400 700" }],
+      ["inter_italic_400", { family: "Inter", weight: "400", style: "italic" }],
+    ]);
+    expect(plan.files).toHaveLength(2);
+    expect(plan.summary.fonts).toBe(2);
+
+    // A face an earlier import added with fewer weights is widened, in the new import's undo step.
+    const again = await planImport(capture({ children: [] }, { fonts: [{ family: "Inter", url, weight: "100 900" }] }), doc, new Map([["font:0", inter]]));
+    expect(again.files).toEqual([]);
+    const result = applyOps(doc, again.ops, { registry });
+    expect(result.errors).toEqual([]);
+    expect(result.doc.assets.inter_400!.font).toEqual({ family: "Inter", weight: "100 900" });
+    expect(Object.keys(result.doc.assets).sort()).toEqual(["inter_400", "inter_italic_400"]);
+    // One that covers it already, or another family's, stays as it is.
+    const same = await planImport(capture({ children: [] }, { fonts: [{ family: "Inter", url, weight: "700" }, { family: "Inter Display", url, weight: "900" }] }), result.doc, new Map([["font:0", inter], ["font:1", inter]]));
+    expect(same.ops.filter((op) => op.op === "addAsset" || op.op === "removeAsset")).toEqual([]);
+  });
 });
 
 describe("captures from outside", () => {
