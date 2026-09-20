@@ -119,6 +119,7 @@ describe("desktop host", () => {
       remove: vi.fn(async () => ({ ok: false as const, code: "draft_in_use", message: "Another Sonobe window has this draft open." })),
       list: vi.fn(async () => []),
       read: vi.fn(async () => ({ ok: false as const, code: "unknown_draft", message: "There's no draft." })),
+      release: vi.fn(async () => undefined),
       reveal: vi.fn(),
     };
     const host = createDesktopHost(api);
@@ -153,8 +154,15 @@ describe("desktop host", () => {
 
     await expect(host.drafts!.remove("draft-0001")).rejects.toMatchObject({ code: "draft_in_use" });
     await expect(host.drafts!.open("draft-0002")).rejects.toMatchObject({ code: "unknown_draft", message: "There's no draft." });
+    expect(api.drafts.release).not.toHaveBeenCalled();
     host.drafts!.reveal!("draft-0001");
     expect(api.drafts.reveal).toHaveBeenCalledWith("draft-0001");
+
+    // A draft read (and claimed) whose files don't make a document, like a first write cut off after project.json: the claim goes back.
+    const info = { id: "draft-0003", name: "Checkout", projectPath: null, createdAt: 1, updatedAt: 2, revision: 1, counts: { components: 1, layers: 0, patches: 0 }, torn: true };
+    vi.mocked(api.drafts.read).mockResolvedValueOnce({ ok: true, info, manifest: {}, files: { "project.json": serializeDocument(saved)["project.json"]! }, binaries: {} });
+    await expect(host.drafts!.open("draft-0003")).rejects.toMatchObject({ code: "invalidFormat" });
+    expect(api.drafts.release).toHaveBeenCalledWith("draft-0003");
   });
 
   it("gives back a draft it can't read, and keeps a restored draft's base", async () => {
