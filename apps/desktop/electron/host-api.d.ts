@@ -186,11 +186,10 @@ export interface SecretsStatus {
  * Small secrets such as the optional in-app assistant's API key. Values are encrypted with the
  * operating system's keychain (Electron safeStorage) and kept in the app's user data folder; they
  * never reach project files. Names are 1–64 letters, digits, ".", "_" or "-", e.g. "anthropic.apiKey".
+ * The renderer can store, check and delete a secret, but never read one back: only the main process reads them.
  */
 export interface SonobeSecrets {
   status(): Promise<SecretsStatus>;
-  /** The stored value, or null when it isn't set. */
-  get(name: string): Promise<string | null>;
   /** Rejects when the keychain isn't available (see status()) or the value is over 16 KB. */
   set(name: string, value: string): Promise<void>;
   /** Resolves true when something was removed. */
