@@ -35,6 +35,7 @@ When they have an app or a design in code, start from it instead of drawing laye
   - `set_values` to tune; `connect` for single wires; `apply_ops` for anything else, such as disconnects, components or moves.
   - `set_knobs` for numbers the person will want to tune or compare: named knobs with ranges, and presets like a locked "Shipped app" next to "Proposal". Never put reference values in names (see the `knobs` guide).
 - Name things for people: layers by what they are ("Like Button"), patches by what they do ("Liked", "Press Spring").
+- Leave out `ui` positions: `add_patches` places new patches as wide as the editor draws them, clear of frames. Frame each feature with a comment and lay it out with `tidy_graph` (`frames` for one section); `get_items` lists nodes whose boxes overlap.
 - Default to the ISAT chain: Interaction (tap or down) → Switch (remember) → Pop Animation or Classic Animation (move 0…1 smoothly) → Transition (0…1 into real units) → layer property.
   - `down` is a state that ends on release. Wire `tap` into a Switch when the change should stay.
 - Read every write result:
@@ -50,6 +51,7 @@ When they have an app or a design in code, start from it instead of drawing laye
 4. `sim_step` with `until: "idle"`, or `sim_get_values`, for final states.
 5. `get_screenshot` for visual QA: `"@card"` for one layer, `simId` plus `atMs` for a moment in a simulation, `"graph"` with `component` to see inside a component without moving the person. Headless servers draw it themselves with approximate text and placeholders for video. Read structure and values from tools, not pixels.
 6. To peek under a layer or A/B a value, use `sim_override` inside the simulation, or `get_screenshot` with `isolate: true` for one layer alone. Never edit and undo just to look: that clutters the person's history.
+7. The person's live viewer keeps its state through your edits (a count, a switch that's on). When they should see it from the start, `restart_viewer` restarts it, on their phone too.
 
 ## Debugging
 
@@ -67,4 +69,4 @@ When they have an app or a design in code, start from it instead of drawing laye
 
 ## Guides
 
-`get_guide` topics: `start-here`, `importing`, `graph-basics`, `gestures`, `animation`, `layout`, `loops`, `components`, `simulation`, `troubleshooting`. Read the one that matches the task before building something unfamiliar.
+`get_guide` topics: `start-here`, `importing`, `graph-basics`, `gestures`, `animation`, `layout`, `loops`, `components`, `knobs`, `simulation`, `troubleshooting`. Read the one that matches the task before building something unfamiliar.

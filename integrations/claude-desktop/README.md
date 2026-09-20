@@ -15,7 +15,7 @@ node integrations/claude-desktop/build.ts
 npx @anthropic-ai/mcpb pack integrations/claude-desktop/dist sonobe.mcpb
 ```
 
-`build.ts` builds the single-file CLI with `packages/cli/scripts/bundle.ts` (the same bundle npm installs) into `dist/server/sonobe.mjs`. It also copies the agent guides, the manifest and the license. `mcpb pack` validates the manifest and zips the folder.
+`build.ts` builds the single-file CLI with `packages/cli/scripts/bundle.ts` (the same bundle npm installs) into `dist/server/sonobe.mjs`. It also copies the agent guides, the examples' READMEs and tests (for `list_examples` and `get_example`), the manifest and the license. `mcpb pack` validates the manifest and zips the folder.
 
 ## Install
 
@@ -24,7 +24,7 @@ npx @anthropic-ai/mcpb pack integrations/claude-desktop/dist sonobe.mcpb
 3. Leave **Sonobe settings folder** at its default unless you launch Sonobe with `SONOBE_HOME`.
 4. Open Sonobe, then ask Claude: "List the documents open in Sonobe."
 
-Sonobe's tools appear under **Connectors**. The prompts `prototype_interaction`, `debug_interaction` and `explain_prototype` are available from the prompt menu.
+Sonobe's tools appear under **Connectors**. The prompts `import_screen`, `prototype_interaction`, `debug_interaction` and `explain_prototype` are available from the prompt menu.
 
 Updating: build and pack a new version, then install it the same way. Privately distributed extensions don't update automatically.
 

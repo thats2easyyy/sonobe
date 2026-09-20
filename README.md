@@ -15,7 +15,7 @@ If you've used Meta's Origami Studio, it will feel familiar. Sonobe is built so 
 - **Learnable.** Pulses light up as they travel. Every patch has plain-language docs. Errors tell you how to fix them. Lessons and guides go from "never prototyped" to expert.
 - **Open.** MIT licensed. Documents are readable JSON folders that work with git. Preview on your phone in a browser. It's an Electron app for macOS, Windows, and Linux, though so far only the macOS build is packaged and verified.
 
-> **Status: pre-1.0.** Stages 1–3 (foundations, the engine, the MCP server and CLI, editor parity and polish) are done, and distribution is in progress: the macOS app builds and runs locally, while signed downloads and verified Windows and Linux builds are still ahead. Expect rough edges and breaking changes until 1.0. See [ROADMAP.md](ROADMAP.md).
+> **Status: pre-1.0.** Stages 1–3 (foundations, the engine, the MCP server and CLI, editor parity and polish) are done apart from the items the roadmap marks partial, and distribution is in progress: the macOS app builds and runs locally, while signed downloads and verified Windows and Linux builds are still ahead. Expect rough edges and breaking changes until 1.0. See [ROADMAP.md](ROADMAP.md).
 
 ---
 
@@ -202,6 +202,7 @@ The runs also showed where Claude struggled, and those problems are fixed. Tool 
 | `apps/ios` | Sonobe Viewer, an iPhone app that plays phone previews with real haptics (Swift, Xcode) |
 | `integrations` | The Claude Code plugin, the Claude Desktop extension, and the Sonobe Capture extension for Chrome and plugin for Figma |
 | `examples` | 16 runnable example projects with scripted tests |
+| `evals` | Behavioral evals: Claude Code builds each case through Sonobe's tools, and a simulation checks the result |
 | `docs/guides` | Concept guides and recipes |
 | `docs/patches` | The generated patch reference |
 | `docs/research` | Research notes behind the design |

@@ -91,7 +91,7 @@ node integrations/claude-code/build.ts
 claude --plugin-dir ./integrations/claude-code
 ```
 
-Check with `/mcp` that `sonobe` is connected. The tools appear as `mcp__plugin_sonobe_sonobe__<tool>`, and Sonobe's three prompts become slash commands.
+Check with `/mcp` that `sonobe` is connected. The tools appear as `mcp__plugin_sonobe_sonobe__<tool>`, and Sonobe's four prompts become slash commands.
 
 ### Without the app: headless mode
 
@@ -142,7 +142,7 @@ npx @anthropic-ai/mcpb pack integrations/claude-desktop/dist sonobe.mcpb
 1. Open the new `sonobe.mcpb` in your Sonobe folder with Claude Desktop, or choose **Settings → Extensions → Advanced settings → Install Extension…** and pick the file.
 2. Claude Desktop shows what the extension will run. Confirm.
 3. Leave **Sonobe settings folder** at its default, unless you launch Sonobe with `SONOBE_HOME`.
-4. Open Sonobe and ask Claude, "List the documents open in Sonobe." Sonobe's tools appear under **Connectors**, and its three prompts are in the prompt menu.
+4. Open Sonobe and ask Claude, "List the documents open in Sonobe." Sonobe's tools appear under **Connectors**, and its four prompts are in the prompt menu.
 
 Extensions you build yourself don't update automatically. To update, build and pack again, then install the new file.
 
