@@ -120,6 +120,10 @@ describe("the bundled CLI", () => {
       // The examples come with the bundle: recipes inside it, READMEs and tests beside it.
       const example = await client.callTool({ name: "get_example", arguments: { id: "10" } });
       expect((example.structuredContent as { text: string }).text).toContain("## The patch chain");
+      // So does the design capture an example imports before its ops.
+      const design = await client.callTool({ name: "get_example", arguments: { id: "16", detail: "design" } });
+      expect(design.isError, JSON.stringify(design.content).slice(0, 300)).toBeFalsy();
+      expect((design.structuredContent as { text: string }).text).toContain('"format":"sonobe.design-capture"');
       // tidy_graph lays out with ELK, which the bundle carries.
       const tidy = await client.callTool({ name: "tidy_graph", arguments: { dryRun: true } });
       expect(tidy.isError, JSON.stringify(tidy.content)).toBeFalsy();

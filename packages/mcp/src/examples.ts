@@ -10,7 +10,8 @@
  *
  * A recipe that starts from a design import or tidies by frame (buildRecipe, asynchronous, and for a
  * design its capture and photos) is read from its project folder instead of rebuilt: run.test.ts keeps
- * that folder equal to the recipe's build, and a bundle carries its JSON files, not the photos.
+ * that folder equal to the recipe's build, and a bundle carries its JSON files, not the photos. A
+ * design's capture is carried too, so get_example can hand it to import_design before the ops.
  */
 
 import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync } from "node:fs";
@@ -56,6 +57,8 @@ export interface ExampleEntry {
   readme?: string;
   /** test.json's scenarios, when the examples folder has it. */
   scenarios?: ExampleScenario[];
+  /** The design capture JSON the recipe imports first (Recipe.design), when the examples folder has it. */
+  capture?: string;
   recipe: Recipe;
 }
 
@@ -113,7 +116,8 @@ function projectFiles(dir: string): string[] {
 
 /**
  * The files the catalog reads from an examples folder, relative to it: the table, each example's
- * README.md and test.json, and the document files of those it reads from their project folder.
+ * README.md and test.json, the document files of those it reads from their project folder, and the
+ * capture of those that start from a design.
  */
 export function exampleTextFiles(from: string | undefined = defaultExamplesDir()): string[] {
   return [
@@ -122,6 +126,7 @@ export function exampleTextFiles(from: string | undefined = defaultExamplesDir()
       `${r.folder}/README.md`,
       `${r.folder}/test.json`,
       ...(from && readsProjectFolder(r) ? projectFiles(path.join(from, r.folder)).map((file) => `${r.folder}/${file}`) : []),
+      ...(r.design ? [r.design.capture] : []),
     ]),
   ];
 }
@@ -300,6 +305,7 @@ export function loadExamples(options: { dir?: string | undefined; recipes?: read
     const readme = readText(at(path.join(recipe.folder, "README.md")));
     const test = readText(at(path.join(recipe.folder, "test.json")));
     const scenarios = test === undefined ? undefined : parseScenarios(test);
+    const capture = recipe.design ? readText(at(recipe.design.capture)) : undefined;
     return {
       id: recipe.folder,
       number: Number.parseInt(recipe.folder, 10) || 0,
@@ -310,6 +316,7 @@ export function loadExamples(options: { dir?: string | undefined; recipes?: read
       guides: [...recipe.guides],
       ...(readme !== undefined ? { readme } : {}),
       ...(scenarios ? { scenarios } : {}),
+      ...(capture !== undefined ? { capture } : {}),
       recipe,
     };
   });
