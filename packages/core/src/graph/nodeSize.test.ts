@@ -28,7 +28,8 @@ describe("measureNode", () => {
     const base = 12 + 120 + 6;
     expect(valueRow({ kind: "number", text: "0.3" })).toBe(base + 10 + 18);
     expect(valueRow({ kind: "vector", texts: ["0", "0"] })).toBe(base + 22 + 2 + 22);
-    expect(valueRow({ kind: "check" }, 25)).toBe(12 + 150 + 6 + 14);
+    expect(valueRow({ kind: "check", on: true, isDefault: true }, 25)).toBe(12 + 150 + 6 + 14);
+    expect(valueRow({ kind: "check", on: false, isDefault: false }, 25)).toBe(12 + 150 + 6 + 14);
     expect(valueRow({ kind: "menu", text: "Linear" })).toBe(base + 10 + 36 + 4 + 10);
     expect(valueRow({ kind: "color", hex: "FF375F" })).toBe(base + 8 + 10 + 4 + 36);
     expect(valueRow({ kind: "text", text: "Hello" })).toBe(base + 10 + 30);
@@ -88,6 +89,17 @@ describe("node shapes from the graph", () => {
     expect(shape.rows[0]!.out).toEqual({ label: "Output", live: "1.04" });
     expect(estimateNodeSize(data, { live: () => -1234.567, measure: mono6 }).width).toBe(12 + 48 + 12 + 42 + 6 + 36 + 12);
     expect(estimateNodeSize(data, { measure: mono6 }).width).toBe(164);
+  });
+
+  it("says whether a boolean input's box is checked, and whether that's its default", () => {
+    const enabled = (value?: boolean) => {
+      const doc = value === undefined ? buildSampleDocument() : mustApply(buildSampleDocument(), [{ op: "setInput", target: "tap_card.enabled", value }]).doc;
+      const data = deriveGraph({ doc, componentId: "main", registry: mockRegistry }).nodes.find((n) => n.id === "tap_card")!.data as PatchNodeData;
+      return nodeShapeFromData(data).rows.find((r) => r.in?.label === "Enabled")!.in!.value;
+    };
+    expect(enabled()).toEqual({ kind: "check", on: true, isDefault: true });
+    expect(enabled(true)).toEqual({ kind: "check", on: true, isDefault: false });
+    expect(enabled(false)).toEqual({ kind: "check", on: false, isDefault: false });
   });
 
   it("shows a knob-linked input as a chip with the knob's name", () => {
