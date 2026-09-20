@@ -251,11 +251,15 @@ export function editLabel(field: Pick<InspectorField, "port">, subject: string, 
 
 const trimNumber = (n: number) => String(roundNumber(n, 3));
 
-/** A runtime value in plain language, for read-only readouts of linked properties and outputs. */
-export function formatLiveValue(value: unknown, type: ValueType): string {
+/**
+ * A runtime value in plain language, for read-only readouts of linked properties and outputs. With
+ * a watched `copy`, a loop shows that item ("#3 of 12 · 0.5", wrapping like a shorter loop does).
+ */
+export function formatLiveValue(value: unknown, type: ValueType, copy: number | null = null): string {
   if (value === undefined) return "—";
   if (value && typeof value === "object" && (value as { __loop?: unknown }).__loop === true) {
     const items = (value as { items: readonly unknown[] }).items;
+    if (copy !== null && items.length) return `#${copy % items.length} of ${items.length} · ${formatLiveValue(items[copy % items.length], type)}`;
     return `×${items.length}${items.length ? ` · ${formatLiveValue(items[0], type)}` : ""}`;
   }
   if (type === "pulse") return value === true ? "Fired" : "—";

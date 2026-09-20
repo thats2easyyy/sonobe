@@ -54,6 +54,8 @@ export interface PatchEditorUiState {
   pointerPort: { nodeId: string; address: string; side: PortSide } | null;
   /** The component just created: committing `editingTitle` names the component, not the patch. */
   namingComponent: Id | null;
+  /** The most items a looped live value shown here has (0 when none is a loop): what the watched copy steps through. */
+  loopCopies: number;
   set: (partial: Partial<Omit<PatchEditorUiState, "set">>) => void;
 }
 
@@ -74,6 +76,7 @@ export function createUiStore(initial: { minimap?: boolean } = {}): UiStore {
     highlightPort: null,
     pointerPort: null,
     namingComponent: null,
+    loopCopies: 0,
     set: (partial) => set(partial),
   }));
 }
