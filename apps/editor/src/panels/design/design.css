@@ -74,11 +74,53 @@
   color: var(--danger-text);
 }
 
+.sb-design-box__status-body {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+/* Inline, so the detail that follows it sits on its line. */
 .sb-design-box__status-text {
+  display: inline;
+  margin: 0;
+}
+
+.sb-design-box__status-detail {
+  margin-left: 0.3em;
+  color: var(--text-tertiary);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* An MCP client's draft on the canvas, with Hide preview. */
+.sb-design-box__mcp {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  color: var(--text-secondary);
+  font-size: var(--font-size-sm);
+  line-height: 1.45;
+}
+
+.sb-design-box__mcp-dot {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  border-radius: var(--radius-full);
+  background: var(--ai);
+}
+
+.sb-design-box__mcp-text {
   flex: 1 1 auto;
   min-width: 0;
   margin: 0;
   overflow-wrap: anywhere;
+}
+
+.sb-design-box__mcp .sb-btn {
+  flex: none;
+  margin: -3px 0;
 }
 
 .sb-design-box__status .sb-btn {
@@ -268,6 +310,18 @@
 
 .sb-design-preview[data-state="leaving"] {
   opacity: 0;
+}
+
+/*
+ * While the person decides whether Claude may replace a screen, the screen shows through the new
+ * version, and the pill (which would say the layers are being added) steps aside.
+ */
+:root:has(.sb-assistant-confirm[data-kind="replace"][data-status="pending"]) .sb-design-preview {
+  opacity: 0.2;
+}
+
+:root:has(.sb-assistant-confirm[data-kind="replace"][data-status="pending"]) .sb-design-preview__pill {
+  visibility: hidden;
 }
 
 .sb-design-preview__frame {

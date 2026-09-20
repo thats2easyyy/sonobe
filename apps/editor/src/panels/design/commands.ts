@@ -1,15 +1,15 @@
-/** The Design with Claude commands for the command palette: design a new screen, or redesign the selected layer. */
+/** The Design with Claude commands for the command palette: design a new screen, redesign the selected layer, or hide Claude Code's preview. */
 
 import { findLayer } from "@sonobe/core";
-import { Sparkles } from "lucide-react";
+import { EyeOff, Sparkles } from "lucide-react";
 import type { EditorSession } from "../../state/session.ts";
 import type { Command } from "../../ui/commands/commandRegistry.ts";
 import { sharedAssistantController } from "../assistant/controller.ts";
-import { designStore } from "./designStore.ts";
+import { designStore, dismissDraft, liveMcpDraft } from "./designStore.ts";
 
 const KEYWORDS = ["ai", "claude", "assistant", "generate", "vibe", "screen", "html", "ui"];
 
-/** ai.design and ai.redesign; both open the canvas's Design with Claude box. */
+/** ai.design and ai.redesign, which open the canvas's Design with Claude box, and ai.hidePreview. */
 export function designCommands(session: EditorSession): Command[] {
   /** The component on the canvas, when it has layers to design. */
   const designable = () => {
@@ -51,6 +51,20 @@ export function designCommands(session: EditorSession): Command[] {
         // The box follows the selection again, even after × pinned it to a new screen.
         designStore.getState().setNewScreen(false);
         open();
+      },
+    },
+    {
+      id: "ai.hidePreview",
+      title: "Hide Design Preview",
+      category: "Canvas",
+      description: "Take the page Claude Code is drawing off the canvas, so the layers under it show",
+      icon: EyeOff,
+      keywords: ["ai", "claude", "claude code", "preview", "draft", "dismiss", "hide"],
+      when: () => liveMcpDraft(designStore.getState(), Date.now()) !== null,
+      disabledReason: "Only while Claude Code or another connected session draws a preview on the canvas",
+      run: () => {
+        const draft = liveMcpDraft(designStore.getState(), Date.now());
+        if (draft) dismissDraft(draft.key);
       },
     },
   ];

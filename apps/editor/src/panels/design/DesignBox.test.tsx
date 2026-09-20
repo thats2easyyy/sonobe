@@ -11,9 +11,9 @@ import { createAssistantController, type AssistantController } from "../assistan
 import { fakeAssistantHost, usage, type FakeAssistantHost } from "../assistant/testing.ts";
 import type { AssistantEvent, AssistantRunResult } from "../assistant/types.ts";
 import type { Rect } from "../canvas/geometry.ts";
-import { canvasContext } from "./context.ts";
+import { canvasContext, designTarget } from "./context.ts";
 import { DesignBox } from "./DesignBox.tsx";
-import { attachDesign, designStore, initialDesignData, type DesignRequest, type DesignResult } from "./designStore.ts";
+import { applyPreviewUpdate, attachDesign, designStore, initialDesignData, type DesignRequest, type DesignResult } from "./designStore.ts";
 import { claudePrompt, designFollowUp } from "./prompt.ts";
 
 // Each test gets its own controller over its own fake host; the box and sendDesign share it.
@@ -100,7 +100,10 @@ async function settle() {
 const box = () => container.querySelector<HTMLElement>(".sb-design-box");
 const field = () => container.querySelector<HTMLTextAreaElement>(".sb-design-box textarea")!;
 const chip = () => container.querySelector(".sb-design-box__chip-label")?.textContent;
+/** What the live region says (screen readers hear it). */
 const statusText = () => container.querySelector('.sb-design-box [role="status"]')?.textContent;
+/** The status line as it shows, with its detail. */
+const statusShown = () => container.querySelector(".sb-design-box__status-body")?.textContent;
 const chipLabels = () => [...container.querySelectorAll(".sb-design-box__chips button")].map((b) => b.textContent);
 const buttonNamed = (name: string) => [...document.querySelectorAll<HTMLButtonElement>("button")].find((b) => b.textContent === name || b.getAttribute("aria-label") === name) ?? null;
 
@@ -140,7 +143,7 @@ function addScreen(name: string): { id: string; txnId: string } {
   return out;
 }
 
-const result = (over: Partial<DesignResult>): DesignResult => ({ kind: "added", layerId: "card", component: "main", name: "Checkout", txnId: null, dropped: [], droppedCount: 0, coveredScreen: null, reply: "", ...over });
+const result = (over: Partial<DesignResult>): DesignResult => ({ kind: "added", layerId: "card", component: "main", name: "Checkout", txnId: null, dropped: [], droppedCount: 0, reply: "", ...over });
 
 /** The box's finished request, as its run leaves it. */
 const request = (over: Partial<DesignRequest> = {}): DesignRequest => ({ runId: "r1", text: "a checkout screen", context: { component: { id: "main", name: "Main", size: [402, 874] }, screens: [] }, selection: [], outcome: "completed", ...over });
@@ -154,6 +157,36 @@ describe("DesignBox", () => {
     expect(document.activeElement).toBe(field());
     act(() => designStore.getState().closeBox());
     expect(box()).toBeNull();
+  });
+
+  it("moves focus to its field each time it's opened, even when it's already open", async () => {
+    await mount();
+    const canvas = container.querySelector<HTMLElement>(".sb-cv")!;
+    act(() => canvas.focus());
+    expect(document.activeElement).toBe(canvas);
+    // Redesign with Claude… on another layer, from the Layers menu or ⌘K.
+    select(["card"]);
+    act(() => designStore.getState().openBox());
+    expect(chip()).toBe("Redesign “Event Card”");
+    expect(document.activeElement).toBe(field());
+  });
+
+  it("shows Claude Code's draft on the canvas, with Hide preview", async () => {
+    await mount();
+    const update = { docId: "photo", key: "cc-1", author: { kind: "agent" as const, name: "Claude" }, client: { id: "cc-1", label: "Claude Code" }, name: "Checkout", component: null, replace: null, width: null, height: null, position: null, html: "<p>Hi</p>", status: "writing" as const, revision: 1 };
+    act(() => {
+      applyPreviewUpdate(session, update);
+    });
+    const row = () => container.querySelector(".sb-design-box__mcp");
+    expect(row()?.textContent).toBe("Claude Code is writing “Checkout” on the canvas.Hide preview");
+    act(() => {
+      applyPreviewUpdate(session, { ...update, status: "adding", revision: 2 });
+    });
+    expect(row()?.querySelector("p")?.textContent).toBe("Claude Code is adding “Checkout” to the canvas…");
+    click(buttonNamed("Hide preview"));
+    expect(designStore.getState().drafts[0]?.status).toBe("stopped");
+    expect(row()).toBeNull();
+    expect(document.activeElement).toBe(field());
   });
 
   it("follows the selection: a new screen, a redesign, × for a new screen until the selection changes, and a change to Claude's screen", async () => {
@@ -206,10 +239,16 @@ describe("DesignBox", () => {
     expect(statusText()).toBe("Thinking…");
     expect(buttonNamed("Stop")).not.toBeNull();
 
-    const page = `<main data-name="Checkout">${"x".repeat(14 * 1024)}</main>`;
+    const page = `<main data-name="Checkout">${"x".repeat(15 * 1024)}</main>`;
     emit({ type: "design_draft", runId: "r1", turn: 1, toolUseId: "t1", offset: 0, append: page.slice(0, 14 * 1024), fields: { name: "Checkout" }, done: false });
-    expect(statusText()).toBe("Writing “Checkout”… 14 KB");
-    emit({ type: "design_draft", runId: "r1", turn: 1, toolUseId: "t1", offset: 14 * 1024, append: page.slice(14 * 1024), done: true, html: page });
+    // The size shows, but the live region only speaks when the phase changes.
+    expect(statusText()).toBe("Writing “Checkout”…");
+    expect(statusShown()).toBe("Writing “Checkout”…14 KB");
+    expect(container.querySelector(".sb-design-box__status-detail")?.getAttribute("aria-hidden")).toBe("true");
+    emit({ type: "design_draft", runId: "r1", turn: 1, toolUseId: "t1", offset: 14 * 1024, append: page.slice(14 * 1024, 15 * 1024), done: false });
+    expect(statusText()).toBe("Writing “Checkout”…");
+    expect(statusShown()).toBe("Writing “Checkout”…15 KB");
+    emit({ type: "design_draft", runId: "r1", turn: 1, toolUseId: "t1", offset: 15 * 1024, append: page.slice(15 * 1024), done: true, html: page });
     expect(statusText()).toBe("Adding the layers…");
     emit({ type: "tool_started", runId: "r1", toolUseId: "t1", name: "import_design", title: "Import design", detail: "Checkout" }, { type: "tool_progress", runId: "r1", toolUseId: "t1", detail: "Downloading images: 3 of 7" });
     expect(statusText()).toBe("Adding the layers… Downloading images: 3 of 7");
@@ -221,8 +260,8 @@ describe("DesignBox", () => {
       { type: "text_delta", runId: "r1", turn: 2, delta: "Added a checkout with Apple Pay and a promo code field." },
     );
     await reply.end();
-    // The new screen is in front of the demo's last top-level layer, and it's selected for follow-ups.
-    expect(statusText()).toBe("Added “Checkout”. It's in front of “Next Card”, so it covers it in the viewer too.");
+    // The new screen is in front of the demo's layers (none of them a screen), and it's selected for follow-ups.
+    expect(statusText()).toBe("Added “Checkout”. It's in front of the other layers in “Main”, so it covers them in the viewer too.");
     expect(session.selection.getState().layers).toEqual([screen.id]);
     expect(chip()).toBe("Change “Checkout”");
     expect(container.querySelector(".sb-design-box__reply")?.textContent).toBe("Added a checkout with Apple Pay and a promo code field.");
@@ -253,9 +292,16 @@ describe("DesignBox", () => {
     expect(container.querySelector(".sb-design-box__chips")).toBeNull();
   });
 
-  it("asks before a replace with the confirmation's own labels, focused on keeping the person's work", async () => {
-    await mount();
-    emit({ type: "run_started", runId: "r1", model: "claude-sonnet-5" }, {
+  it("asks before a replace with the confirmation's own labels, focused on keeping the person's work, and says it's waiting", async () => {
+    const fake = fakeAssistantHost({ key: KEY });
+    const reply = heldReply(fake, "r1");
+    await mount(fake);
+    type("a new home screen");
+    press("Enter");
+    const page = "<main data-name='Home'>Home</main>";
+    emit({ type: "run_started", runId: "r1", model: "claude-sonnet-5" }, { type: "design_draft", runId: "r1", turn: 1, toolUseId: "t1", offset: 0, append: page, fields: { name: "Home", replace: "home" }, done: true, html: page });
+    expect(statusText()).toBe("Adding the layers…");
+    emit({
       type: "confirm_required",
       runId: "r1",
       confirmationId: "c1",
@@ -268,9 +314,13 @@ describe("DesignBox", () => {
       declineLabel: "Keep “Home”",
     });
     const card = container.querySelector('.sb-design-box [role="alertdialog"]')!;
-    expect(card.getAttribute("aria-label")).toBe("Replace “Home”?");
+    // Focus lands on a button, so the card's title names it and its message describes it.
+    expect(document.getElementById(card.getAttribute("aria-labelledby")!)?.textContent).toBe("Replace “Home”?");
+    expect(document.getElementById(card.getAttribute("aria-describedby")!)?.textContent).toBe("Claude wants to rebuild “Home”, which you didn't ask it to change. You can undo it afterwards.");
     expect([...card.querySelectorAll("button")].map((b) => b.textContent)).toEqual(["Keep “Home”", "Replace"]);
     expect(document.activeElement?.textContent).toBe("Keep “Home”");
+    // Nothing is being added while the person decides.
+    expect(statusText()).toBe("Waiting for your answer…");
     await act(async () => {
       buttonNamed("Keep “Home”")!.click();
       await Promise.resolve();
@@ -278,6 +328,7 @@ describe("DesignBox", () => {
     expect(host!.confirmations).toEqual([["c1", false]]);
     emit({ type: "confirm_resolved", runId: "r1", confirmationId: "c1", approved: false });
     expect(container.querySelector('.sb-design-box [role="alertdialog"]')).toBeNull();
+    await reply.end();
   });
 
   it("offers Undo only while the import is the newest change", async () => {
@@ -294,23 +345,80 @@ describe("DesignBox", () => {
     });
     click(buttonNamed("Undo"));
     expect(findLayer(session.document.getState().doc.components.main!.layers, screen.id)).toBeUndefined();
-    // Its screen is gone, so there's nothing left to follow up on.
+    // Its screen is gone, so the line says so and there's nothing left to follow up on.
+    expect(statusText()).toBe("Undid “Checkout”.");
+    expect(container.querySelector(".sb-design-box__chips")).toBeNull();
+    // Redo brings it back, with its line and chips.
+    act(() => {
+      session.document.getState().redo();
+    });
+    expect(statusText()).toMatch(/^Added “Checkout”\./);
+    expect(buttonNamed("Undo")).not.toBeNull();
+    // ⌘Z undoes it the same way, and a delete takes it off the canvas.
+    act(() => {
+      session.document.getState().undo();
+    });
+    expect(statusText()).toBe("Undid “Checkout”.");
+    act(() => {
+      session.document.getState().redo();
+      session.document.getState().apply([{ op: "removeLayer", component: "main", id: screen.id }], { label: "Delete" });
+    });
+    expect(statusText()).toBe("“Checkout” isn't on the canvas anymore.");
     expect(container.querySelector(".sb-design-box__chips")).toBeNull();
   });
 
-  it("offers Send to Back only for a new screen that covers another, and sends it behind", async () => {
+  it("offers Send to Back while a new screen is in front of other layers, and says where it is after", async () => {
     await mount();
     const screen = addScreen("Checkout");
-    showResult({ layerId: screen.id, txnId: screen.txnId, coveredScreen: "Next Card" });
+    showResult({ layerId: screen.id, txnId: screen.txnId });
+    expect(statusText()).toBe("Added “Checkout”. It's in front of the other layers in “Main”, so it covers them in the viewer too.");
     click(buttonNamed("Send to Back"));
     expect(session.selection.getState().layers).toEqual([screen.id]);
     expect(session.document.getState().doc.components.main!.layers[0]!.id).toBe(screen.id);
     expect(buttonNamed("Send to Back")).toBeNull();
+    expect(statusText()).toBe("Added “Checkout”. It's behind the other layers in “Main” now, so they cover it in the viewer.");
+    // It reads the document, so reopening the box doesn't bring the chip back.
+    act(() => designStore.getState().closeBox());
+    act(() => designStore.getState().openBox());
+    expect(buttonNamed("Send to Back")).toBeNull();
+    // Undoing the move does.
+    act(() => {
+      session.document.getState().undo();
+    });
+    expect(buttonNamed("Send to Back")).not.toBeNull();
 
-    showResult({ layerId: screen.id, txnId: null, coveredScreen: null });
+    showResult({ kind: "updated", layerId: "card" });
     expect(buttonNamed("Send to Back")).toBeNull();
-    showResult({ kind: "updated", layerId: "card", coveredScreen: "Background" });
-    expect(buttonNamed("Send to Back")).toBeNull();
+  });
+
+  it("names the screen a new one covers", async () => {
+    await mount();
+    const home = addScreen("Home");
+    const screen = addScreen("Checkout");
+    showResult({ layerId: screen.id, txnId: screen.txnId });
+    expect(findLayer(session.document.getState().doc.components.main!.layers, home.id)).toBeDefined();
+    expect(statusText()).toBe("Added “Checkout”. It's in front of “Home”, so it covers it in the viewer too.");
+  });
+
+  it("keeps the other follow-ups after one that only wired the screen", async () => {
+    const fake = fakeAssistantHost({ key: KEY });
+    await mount(fake);
+    const screen = addScreen("Checkout");
+    select([screen.id]);
+    act(() => designStore.setState({ request: request({ imported: 1, context: canvasContext(session, designTarget(session, designStore.getState()), bounds) }), result: result({ layerId: screen.id, txnId: screen.txnId, reply: "Added a checkout." }) }));
+    fake.nextResult = (_request, send) => {
+      send({ type: "run_started", runId: "r2", model: "claude-sonnet-5" });
+      send({ type: "turn_started", runId: "r2", turn: 1 });
+      send({ type: "text_delta", runId: "r2", turn: 1, delta: "The Pay button now bounces when you tap it." });
+      send({ type: "run_finished", runId: "r2", outcome: "completed", usage: usage(1000) });
+      return { runId: "r2", outcome: "completed", usage: usage(1000) };
+    };
+    click(buttonNamed("Make it interactive"));
+    await settle();
+    expect(statusText()).toBe("The Pay button now bounces when you tap it.");
+    expect(chipLabels()).toEqual(["Add knobs", "Try a darker version"]);
+    // The status line is the new reply; the import's reply doesn't stay under it.
+    expect(container.querySelector(".sb-design-box__reply")).toBeNull();
   });
 
   it("shows no chips for a result the box's current request didn't import", async () => {
@@ -329,6 +437,9 @@ describe("DesignBox", () => {
     expect(host!.sent).toEqual([]);
     expect(field().value).toBe("a checkout screen");
     expect(box()!.textContent).toContain("Designing on the canvas uses your own Anthropic API key, kept in your keychain.");
+    // Screen readers hear why nothing was sent, and the field points at the notice.
+    expect(statusText()).toBe("Nothing was sent. Designing here needs your own Anthropic API key, or you can open it in Claude Code.");
+    expect(field().getAttribute("aria-describedby")).toBe(container.querySelector(".sb-design-box__notice p")!.id);
 
     await act(async () => {
       buttonNamed("Copy for Claude Code")!.click();
@@ -431,6 +542,25 @@ describe("DesignBox", () => {
     expect(document.body.textContent).toContain("Opened Claude Code");
   });
 
+  it("holds Open in Claude Code while the box's reply runs, then offers it the request the Assistant couldn't finish", async () => {
+    const fake = fakeAssistantHost({ key: KEY });
+    const reply = heldReply(fake, "r1");
+    await mount(fake);
+    type("a checkout screen");
+    press("Enter");
+    emit({ type: "run_started", runId: "r1", model: "claude-sonnet-5" });
+    expect(buttonNamed("Open in Claude Code")!.disabled).toBe(true);
+    await reply.end("budget");
+    expect(field().value).toBe("");
+    expect(buttonNamed("Open in Claude Code")!.disabled).toBe(false);
+    await act(async () => {
+      buttonNamed("Open in Claude Code")!.click();
+      await Promise.resolve();
+    });
+    await settle();
+    expect(fake.handoffs).toEqual([claudePrompt({ docName: "Photo Zoom", text: "a checkout screen", context: canvasContext(session, null, bounds), browser: false })]);
+  });
+
   it("leaves out Open in Claude Code on other platforms and with an older preload", async () => {
     const windows = fakeAssistantHost({});
     Object.defineProperty(windows, "platform", { value: "win32" });
@@ -456,14 +586,19 @@ describe("DesignBox", () => {
     expect(box()!.textContent).toContain("Claude designs on the canvas in the Sonobe desktop app, with your own API key or Claude Code. Here, copy a prompt for Claude, then paste the HTML it writes.");
     expect(buttonNamed("Open chat")).toBeNull();
     expect(buttonNamed("Match my code…")).toBeNull();
+    // The field's button copies too, and says so.
+    expect(field().getAttribute("aria-describedby")).toBe(container.querySelector(".sb-design-box__notice p")!.id);
+    expect(container.querySelector(".sb-assistant-composer__send")?.getAttribute("aria-label")).toBe("Copy prompt");
     select(["card"]);
     type("make it darker");
     await act(async () => {
-      buttonNamed("Copy prompt")!.click();
+      container.querySelector<HTMLButtonElement>(".sb-design-box__notice button")!.click();
       await Promise.resolve();
     });
     expect(clipboard).toHaveLength(1);
-    expect(clipboard[0]).toMatch(/^In my open Sonobe prototype “Photo Zoom”, redesign “Event Card” \(layer card, .+\): make it darker/);
+    expect(clipboard[0]).toMatch(/^In my open Sonobe prototype, redesign layer card \(.+, in component main\): make it darker/);
+    expect(clipboard[0]).toContain("Prototype: “Photo Zoom”");
+    expect(clipboard[0]).toContain("Layer card: “Event Card”");
     expect(clipboard[0]).toContain("that I can paste into Sonobe's File → Import Design → Paste HTML.");
     expect(clipboard[0]).not.toMatch(/import_design|get_outline/);
     expect(document.body.textContent).toContain("Paste it into Claude, then paste the HTML it writes into File → Import Design.");
