@@ -26,23 +26,30 @@ The first two finish Stage 4. The rest are Stage 5.
 ## Stage 2: The engine comes alive
 - [x] Runtime evaluator: topological evaluation, back edges, pulses, loops with per-index state, component instances, variables
 - [x] Patch implementations: tier 1 (ISAT core and everyday patches), then tier 2 and tier 3. All 199 patches have real implementations, and none falls back to a placeholder
-- [x] MCP server: discovery, read, write, simulate, screenshot, presence, history tools; headless host; stdio relay
+- [x] MCP server: discovery (with the verified examples as patterns), read, write, knobs, simulate, screenshot, presence, history tools; headless host; stdio relay
 - [x] CLI: `sonobe new | validate | fmt | outline | describe | sim | mcp`
 - [x] Editor integration: store and history, layer list, inspector, patch editor (xyflow), patch picker, viewer running the engine and renderer
 
 ## Stage 3: Parity and polish
-- [x] Patch editor power features: link-drag search, knife cut, ⌘-drag splice onto a wire, option-drag duplicate, single-key inserts, Tidy Up, comments, components (enter/exit, publish ports), variables, live values on hover, pulse sparks, loop badges
+- [x] Patch editor power features: link-drag search, knife cut, ⌘-drag splice onto a wire, option-drag duplicate, single-key inserts, Tidy Up (within each comment frame), comments, components (enter/exit, publish ports), variables, live values on hover, pulse sparks, loop badges
 - [x] Canvas: direct manipulation, snapping, insert shapes and text, alignment tools
 - [x] Layer ↔ patch bridges: Touch button, inspector property links, drag a cable onto a property
-- [ ] Viewer: device picker, frame, restart, hit-target overlay, pop-out window, LAN web player with QR code, recording (partial: recording remains)
-- [ ] Native iPhone preview: Sonobe Viewer (`apps/ios`) plays the LAN web player full screen with real haptics. Haptic and Vibrate reach UIFeedbackGenerator and Core Haptics over a small bridge, the app scans the Preview on Phone code, and `npm run test:ios` runs its tests on a simulator. Android phones vibrate in the browser. The phone gets the viewer's sound, network requests, links and camera, restarts when Sonobe does, and opens a menu with a three-finger tap (partial: tested only in the Simulator, and built from source until TestFlight)
+- [x] Viewer: device picker, frame, restart, hit-target overlay, pop-out window, LAN web player with QR code
+- [ ] Viewer recording and replay export (partial: the runtime already records every input since the last restart and replays it exactly for traces; recording the pop-out viewer at device size as a video to trim and share, and exporting a session's input as a replay, remain. A replay is exact only where network requests, device motion and media replay too)
+- [ ] Native iPhone preview: Sonobe Viewer (`apps/ios`) plays the LAN web player full screen with real haptics. Haptic and Vibrate reach UIFeedbackGenerator and Core Haptics over a small bridge, the app scans the Preview on Phone code, and `npm run test:ios` runs its tests on a simulator. Android phones vibrate in the browser. The phone gets the viewer's sound, network requests, links and camera, restarts when Sonobe does, opens a menu with a three-finger tap, and reports the phone's appearance, safe area and rotation to Device Info (partial: tested only in the Simulator; on a real iPhone, touch latency and frame pacing, which WKWebView likely holds at 60 Hz even on ProMotion screens, are unmeasured; and it's built from source until TestFlight)
 - [x] Assets: images, video, sound, fonts, Lottie (drag and drop)
+- [ ] Alpha masks, Origami style: a layer masks the one above it, and looped masks pair with looped layers by index (partial: groups clip their contents to their bounds and corner radius, and images take corner radii; masking by another layer's alpha remains)
+- [ ] Interface Orientation in the viewer and on phones (partial: the patch computes Orientation and Landscape from the device's rotation, and the web player reports the phone's real rotation, but neither the viewer nor the web player turns the interface from the patch yet)
+- [x] Knobs and presets: named values with sliders and soft ranges in the Inspector's Knobs tab, presets such as a locked "Shipped app" to flip between while the prototype runs (⌘'), knob chips in the patch editor, and `set_knobs`, `apply_knob_preset` and simulation presets for Claude. A tune reaches the viewer and phones live
+- [ ] Preset switching on the phone (partial: a phone runs whichever preset the editor or Claude switched to, and tunes reach it live; picking a preset from the phone's three-finger menu remains)
+- [x] Drafts: unsaved work survives a crash, a quit or a killed process, and comes back from the welcome screen or through Claude; `save_document` saves without a dialog
 - [x] Examples: 16 canonical recipes as runnable projects with scripted tests
 - [x] Learn panel: 5 interactive lessons, the guides, the examples, and the patch reference
 - [x] Welcome screen: new blank prototype, lessons, templates from the examples, recent files
 - [x] Connect Claude screen: Claude Code command, Claude Desktop config and `.mcpb` build steps, status
 - [x] AI Activity panel: what Claude is working on, and one row per change with its op count and Undo
-- [x] Headless screenshots: the scene drawn as SVG and rasterized without the app
+- [x] Headless screenshots: the scene, a single layer, or any component's patch graph or canvas, drawn as SVG and rasterized without the app
+- [ ] Headless graph drawings sized for Windows and Linux fonts (partial: node boxes and labels are sized from a table measured in SF Pro and SF Mono on a Mac, so where the drawing uses other fonts, long labels can come out cut short with an ellipsis; tables for the fonts those systems draw with remain)
 - [x] Optional in-app assistant (BYO Anthropic API key, kept in the OS keychain)
 - [x] Usability study: a real Claude Code session completed four tasks (a beginner's like button, a designer's bottom sheet, debugging, explaining) using only MCP tools, and the problems it found are fixed
 - [x] Behavioral evals: `node evals/run.ts` runs Claude Code headless on repeatable cases (the examples with their patches removed, the study's tasks, and regressions from test sessions) and checks what it built by simulation, with turns, tokens and error recovery per run. It runs by hand with your Claude account
@@ -59,7 +66,8 @@ The first two finish Stage 4. The rest are Stage 5.
 ## Stage 5: Bring work in, build together
 - [x] Import designs from code: `@sonobe/import` reads a rendered page (computed layout and styles, so any framework and any CSS) into a neutral design capture and converts it into layers, image assets, text fields and Scroll patches. The desktop app renders URLs and HTML in a hidden sandboxed window (File → Import Design…), the browser editor renders HTML in a sandboxed iframe, headless servers use Playwright, and pasting a capture imports it. Claude imports with `import_design` from a dev server, from HTML it writes from any codebase, or from a capture
 - [x] Import fidelity: web fonts come along as font assets that every renderer registers
-- [x] SF Symbols in imports: `<svg data-sf-symbol="heart.fill">` in imported HTML becomes the real symbol as an SVG image, drawn on the person's Mac by a small SwiftUI helper the app ships (macOS 13 or later; headless servers use it through `SONOBE_SFSYMBOL`). Elsewhere it stays a gray placeholder with a note. Next: an Insert → SF Symbol picker
+- [x] SF Symbols in imports: `<svg data-sf-symbol="heart.fill">` in imported HTML becomes the real symbol as an SVG image, drawn on the person's Mac by a small SwiftUI helper the app ships (macOS 13 or later; headless servers use it through `SONOBE_SFSYMBOL`). Elsewhere it stays a gray placeholder with a note
+- [ ] Insert → SF Symbol picker: search the symbols in the editor and insert one as a layer, drawn by the same helper (partial: symbols arrive only through imported HTML today)
 - [ ] Rich text layers (partial: an imported paragraph that mixes styles becomes a group of single-style runs per line, which looks right but edits in pieces; paragraphs over 16 lines flatten to their main style)
 - [x] Chrome extension (`integrations/chrome-extension`): copy a page, or pick an element, with the same DOM walker, and paste it into Sonobe. Built and loaded unpacked from a checkout (partial: not published to the Chrome Web Store)
 - [ ] Figma import (partial: `integrations/figma-plugin` copies a selection as a design capture that pastes into Sonobe; the mapping has unit tests and the bundle runs against a stand-in API, but it hasn't been verified inside Figma or published)
