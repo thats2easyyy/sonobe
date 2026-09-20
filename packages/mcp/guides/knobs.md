@@ -14,6 +14,7 @@ Related: `graph-basics`, `animation`, `simulation`
 - **Ranges a finger would use.** Leave out min and max and `set_knobs` works out a range from the value and the port (95 → 0…200, step 1), then says so. Group knobs in the order the gesture happens.
 - **Compare in simulations.** Run one `sim_reset` per preset (`"preset": "Shipped app"`) and trace the same gesture in both before you report a difference. Simulations never change the person's document.
 - **Ask before switching.** `apply_knob_preset` changes what the person's viewer and phone show. Do it when they ask.
+- **The person's side.** They tune knobs in the Inspector's Knobs tab (⌘5), flip between the running preset and the one before it with ⌘', and turn any field into a knob with Make Knob. Point them there instead of asking them to edit patches.
 
 ## Example: a card that grows, with a shipped reference
 
