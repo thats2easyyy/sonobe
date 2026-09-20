@@ -123,6 +123,7 @@ Look at the result as well. `atMs` draws a later frame without moving the sessio
 - **Read errors.** A failed call includes a hint and often ready-to-apply `ops`. Nothing changed, so fix the call and retry.
 - **Ask before destroying.** `delete_items` asks for a confirmation token when more than 10 items would go. Undo with `undo`, which refuses to throw away a human's edit unless you name it.
 - **Look without editing.** To see under a layer or try a value, use `sim_override` inside a simulation, or `get_screenshot` with `isolate: true` for one layer alone. Editing and undoing just to look fills the person's undo history.
+- **Save it somewhere.** In the app, a prototype that was never saved is kept as a draft, so it survives a crash or quit, but it isn't a project yet. Ask the person what to call it, save it with `save_document({ "path": "~/Documents/<Name>.sonobe" })`, and tell them where it went. `save_document` never opens a dialog, and it won't make up a folder for "Untitled" (`path_needed`).
 - **Headless mode** (a project folder without the app): there's no editor selection, and `get_screenshot` draws the screen itself with approximate text. `get_document_info` says whether changes save automatically or need `save_document`.
 
 ## More guides
