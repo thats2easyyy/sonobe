@@ -254,6 +254,15 @@ describe("app host writes", () => {
     expect(await host.history.list({})).toMatchObject([{ txnId: result.txnId, summary: "Claude: added press feedback (8 ops)", author: CLAUDE, opCount: pressChain.length }]);
     expect(await host.history.list({ author: "human" })).toEqual([]);
     expect((await host.getDocument()).revision).toBe(1);
+    expect(state.lastChange?.source).toBeUndefined();
+  });
+
+  it("passes on what made a batch: import_design's import is marked for the editor's hologram", async () => {
+    const w = editorWindow(1);
+    const host = appHost([w]);
+    const ops = [{ op: "addLayer" as const, layer: { type: "group", name: "Receipt", props: { size: [402, 874] } } }];
+    expect((await host.apply(ops, { label: "set up the receipt", author: CLAUDE, source: "import" })).ok).toBe(true);
+    expect(w.session.document.getState().lastChange).toMatchObject({ kind: "apply", label: "set up the receipt", source: "import" });
   });
 
   it("reuses the editor's diagnostics instead of diagnosing copies of the document", async () => {

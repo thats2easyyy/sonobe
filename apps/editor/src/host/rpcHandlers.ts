@@ -276,6 +276,9 @@ export function registerRpcHandlers(session: EditorSession, options: RpcHandlerO
       const atomic = optBoolean(p, "atomic");
       const component = optString(p, "component");
       const label = optString(p, "label")?.trim() || `applied ${p.ops.length} op${p.ops.length === 1 ? "" : "s"}`;
+      // What made the batch: "import" (import_design), which the canvas and the Viewer build as a hologram.
+      const source = optString(p, "source");
+      if (source !== undefined && source !== "import") throw invalid(`"source" must be "import", not "${source}".`);
       const before = doc().revision;
       const result = doc().apply(p.ops, {
         label,
@@ -284,6 +287,7 @@ export function registerRpcHandlers(session: EditorSession, options: RpcHandlerO
         ...(expectedRevision !== undefined ? { expectedRevision } : {}),
         ...(atomic !== undefined ? { atomic } : {}),
         ...(component !== undefined ? { defaultComponent: component } : {}),
+        ...(source !== undefined ? { source } : {}),
       });
       const after = doc();
       const committed = !dryRun && result.applied.length > 0 && after.revision !== before;

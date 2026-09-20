@@ -843,6 +843,7 @@ export function createAppHost(options: AppHostOptions): AppHost {
           ...(o.expectedRevision !== undefined ? { expectedRevision: o.expectedRevision } : {}),
           ...(o.atomic !== undefined ? { atomic: o.atomic } : {}),
           ...(o.defaultComponent !== undefined ? { component: o.defaultComponent } : {}),
+          ...(o.source !== undefined ? { source: o.source } : {}),
         },
         APPLY_TIMEOUT_MS,
       );

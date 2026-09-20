@@ -1,14 +1,17 @@
 /**
- * When the import hologram plays. Imports through the dialog and pasted captures ask for it from
- * importCapture; Claude's import_design lands as an agent change labeled "imported …" or
- * "re-imported …", which watchAgentImports turns into the same request. The canvas that draws the
- * component takes the request and plays it; a request nobody takes soon goes stale.
+ * When the import hologram plays, and on which surfaces. Imports through the dialog and pasted
+ * captures ask for it from importCapture; Claude's import_design marks its apply with source "import",
+ * which watchHolograms turns into the same request. The canvas that draws the component takes the
+ * request, builds the screen and publishes the show: its timeline, so the Viewer's device screen
+ * plays along in step. When no canvas draws that component (patches-only view, another component),
+ * the Viewer takes the request and plays it alone. A request nobody takes soon goes stale.
  */
 
-import type { Id, LayerNode, SonobeDocument } from "@sonobe/core";
+import { findLayer, type Id, type LayerNode, type SonobeDocument } from "@sonobe/core";
 import { createStore, type StoreApi } from "zustand/vanilla";
 import type { DocumentChange } from "../../state/document.ts";
 import type { EditorSession } from "../../state/session.ts";
+import type { HoloTimeline } from "./hologramPlan.ts";
 
 export interface HologramTarget {
   componentId: Id;
@@ -23,16 +26,42 @@ export interface HologramRequest extends HologramTarget {
   at: number;
 }
 
+/** A hologram playing: every surface that shows the screen draws it from this one timeline. */
+export interface HologramShow extends HologramTarget {
+  /** The request's nonce. */
+  nonce: number;
+  /** performance.now() at the timeline's zero. */
+  start: number;
+  timeline: HoloTimeline;
+  /** Reduced motion: a short crossfade. */
+  reduced: boolean;
+  /** The canvas builds it (the Viewer plays along), or the Viewer plays it alone. */
+  lead: "canvas" | "viewer";
+  /** performance.now() when a click, a key or an undo ended it early: everything fades out. */
+  endedAt: number | null;
+}
+
 export interface HologramState {
   request: HologramRequest | null;
+  show: HologramShow | null;
   /** The screen a playing hologram covers: the canvas hides its selection chrome meanwhile. */
   covering: HologramTarget | null;
+  /** Components the mounted canvases draw: a request for one waits for that canvas to take it. */
+  canvases: readonly Id[];
   /** Play the hologram over a screen that was just imported. */
   build(target: HologramTarget): void;
-  /** The canvas took the request (or dropped it). */
+  /** Drop the request (it went stale). */
   take(nonce: number): void;
+  /** Start the show for a request (taking it). */
+  play(show: Omit<HologramShow, "endedAt">): void;
+  /** End the show early: it fades out. */
+  end(nonce: number): void;
+  /** The show finished, or its screen went away. */
+  stop(nonce: number): void;
   /** Start covering a screen, or stop (null). */
   cover(target: HologramTarget | null): void;
+  /** A canvas draws this component now. Returns the unregister. */
+  addCanvas(componentId: Id): () => void;
 }
 
 /** A request the canvas hasn't taken within this long is dropped: the screen wasn't on screen. */
@@ -44,16 +73,54 @@ export function createHologramStore(): StoreApi<HologramState> {
   let nonce = 0;
   return createStore<HologramState>()((set, get) => ({
     request: null,
+    show: null,
     covering: null,
+    canvases: [],
     build: (target) => set({ request: { ...target, nonce: ++nonce, at: now() } }),
     take: (n) => {
       if (get().request?.nonce === n) set({ request: null });
+    },
+    play: (show) => set((s) => ({ show: { ...show, endedAt: null }, request: s.request?.nonce === show.nonce ? null : s.request })),
+    end: (n) => {
+      const show = get().show;
+      if (show?.nonce === n && show.endedAt === null) set({ show: { ...show, endedAt: now() } });
+    },
+    stop: (n) => {
+      if (get().show?.nonce === n) set({ show: null });
     },
     cover: (target) => {
       const current = get().covering;
       if (current?.componentId !== target?.componentId || current?.screenId !== target?.screenId) set({ covering: target });
     },
+    addCanvas: (componentId) => {
+      set((s) => ({ canvases: [...s.canvases, componentId] }));
+      let removed = false;
+      return () => {
+        if (removed) return;
+        removed = true;
+        set((s) => {
+          const i = s.canvases.indexOf(componentId);
+          return i < 0 ? {} : { canvases: [...s.canvases.slice(0, i), ...s.canvases.slice(i + 1)] };
+        });
+      };
+    },
   }));
+}
+
+/** What the Viewer does about the hologram: nothing, draw a show, cover while a canvas takes the request, or play it alone. */
+export type ViewerHoloMode = { kind: "idle" } | { kind: "follow"; show: HologramShow } | { kind: "wait"; request: HologramRequest } | { kind: "lead"; request: HologramRequest };
+
+/**
+ * The Viewer's part now. A show plays along wherever the prototype draws its component. A request
+ * waits for a canvas that draws its component, and nobody else's: then the Viewer plays it alone. A
+ * stale request is the Viewer's only if it was already covering for it (`waitingOn`, its nonce).
+ */
+export function viewerHoloMode(state: Pick<HologramState, "request" | "show" | "canvases">, shownHere: (componentId: Id) => boolean, now: number, waitingOn: number | null): ViewerHoloMode {
+  if (state.show) return shownHere(state.show.componentId) ? { kind: "follow", show: state.show } : { kind: "idle" };
+  const request = state.request;
+  if (!request || !shownHere(request.componentId)) return { kind: "idle" };
+  if (now - request.at > HOLOGRAM_STALE_MS) return waitingOn === request.nonce ? { kind: "lead", request } : { kind: "idle" };
+  return state.canvases.includes(request.componentId) ? { kind: "wait", request } : { kind: "lead", request };
 }
 
 /**
@@ -68,7 +135,7 @@ export function hideCoveredChrome<C>(covered: Id | null, overlay: { selected: re
 
 const stores = new WeakMap<EditorSession, StoreApi<HologramState>>();
 
-/** The session's hologram requests. */
+/** The session's hologram requests and show. */
 export function hologramStore(session: EditorSession): StoreApi<HologramState> {
   let store = stores.get(session);
   if (!store) {
@@ -81,9 +148,18 @@ export function hologramStore(session: EditorSession): StoreApi<HologramState> {
 /** "imported Profile", "re-imported Profile", "Import “Profile”": but not "important" or "Paste". */
 export const IMPORT_LABEL = /^(re-?)?import(s|ed|ing)?\b/i;
 
-/** An agent's change that imported a design (Claude's import_design). */
-export function isAgentImport(change: DocumentChange | null | undefined): change is DocumentChange {
-  return !!change && change.kind === "apply" && change.author.kind === "agent" && IMPORT_LABEL.test(change.label.trim());
+/**
+ * The screen an agent's change imported, when it imported one. Claude's import_design marks its apply
+ * with source "import". A change without the mark still counts when its label starts with "imported"
+ * or "re-imported" and it added a new screen: an edit that only says "imported" doesn't.
+ */
+export function agentImportTarget(change: DocumentChange | null | undefined, doc: SonobeDocument, before: SonobeDocument): HologramTarget | null {
+  if (!change || change.kind !== "apply" || change.author.kind !== "agent") return null;
+  const marked = change.source === "import";
+  if (!marked && (change.source !== undefined || !IMPORT_LABEL.test(change.label.trim()))) return null;
+  const target = importedScreen(doc, change);
+  if (target && !marked && findLayer(before.components[target.componentId]?.layers ?? [], target.screenId)) return null;
+  return target;
 }
 
 /**
@@ -114,12 +190,98 @@ export function importedScreen(doc: SonobeDocument, change: Pick<DocumentChange,
   return found ? { componentId: found.componentId, screenId: found.screenId } : null;
 }
 
-/** Play the hologram for Claude's imports. Returns the unsubscribe. */
-export function watchAgentImports(session: EditorSession): () => void {
-  return session.document.getState().subscribeRevision((state, previous) => {
+/** Keys that don't end the hologram on their own (⌘-scroll zooms, space-drag pans). */
+const MODIFIER_KEYS = new Set(["Meta", "Control", "Shift", "Alt", "CapsLock", "Fn", " "]);
+
+/** Whether a pointerdown ends the hologram: not a pan (a middle-button drag, or a drag with Space held). */
+export function pointerEndsHologram(event: Pick<PointerEvent, "button">, spaceHeld: boolean): boolean {
+  return event.button !== 1 && !(event.button === 0 && spaceHeld);
+}
+
+/**
+ * Ends a show early, wherever it plays: a click or a key (not a modifier or Space) fades it out,
+ * while wheel, Space-drag and middle-button pans keep it playing. Returns the removal.
+ */
+function listenForEarlyEnd(end: () => void): () => void {
+  if (typeof window === "undefined") return () => undefined;
+  let spaceHeld = false;
+  const onKeyDown = (event: KeyboardEvent) => {
+    if (event.key === " ") spaceHeld = true;
+    if (!event.repeat && !MODIFIER_KEYS.has(event.key)) end();
+  };
+  const onKeyUp = (event: KeyboardEvent) => {
+    if (event.key === " ") spaceHeld = false;
+  };
+  const onBlur = () => (spaceHeld = false);
+  const onPointerDown = (event: PointerEvent) => {
+    if (pointerEndsHologram(event, spaceHeld)) end();
+  };
+  window.addEventListener("pointerdown", onPointerDown, true);
+  window.addEventListener("keydown", onKeyDown, true);
+  window.addEventListener("keyup", onKeyUp, true);
+  window.addEventListener("blur", onBlur);
+  return () => {
+    window.removeEventListener("pointerdown", onPointerDown, true);
+    window.removeEventListener("keydown", onKeyDown, true);
+    window.removeEventListener("keyup", onKeyUp, true);
+    window.removeEventListener("blur", onBlur);
+  };
+}
+
+function startWatching(session: EditorSession): () => void {
+  const store = hologramStore(session);
+  const unsubscribeDocument = session.document.getState().subscribeRevision((state, previous) => {
     const change = state.lastChange;
-    if (change === previous.lastChange || !isAgentImport(change)) return;
-    const target = importedScreen(state.doc, change);
-    if (target) hologramStore(session).getState().build(target);
+    if (!change || change === previous.lastChange) return;
+    const show = store.getState().show;
+    if (show) {
+      // Another document, or the import undone: nothing left to build. Any other undo ends it early.
+      const gone = !findLayer(state.doc.components[show.componentId]?.layers ?? [], show.screenId);
+      if (change.kind === "replace" || change.kind === "reload" || gone) store.getState().stop(show.nonce);
+      else if (change.kind === "undo") store.getState().end(show.nonce);
+    }
+    const target = agentImportTarget(change, state.doc, previous.doc);
+    if (target) store.getState().build(target);
   });
+  let removeListeners: (() => void) | null = null;
+  let listeningTo: number | null = null;
+  const sync = (s: HologramState) => {
+    const playing = s.show && s.show.endedAt === null ? s.show.nonce : null;
+    if (playing === listeningTo) return;
+    removeListeners?.();
+    removeListeners = playing === null ? null : listenForEarlyEnd(() => store.getState().end(playing));
+    listeningTo = playing;
+  };
+  const unsubscribeStore = store.subscribe(sync);
+  sync(store.getState());
+  return () => {
+    unsubscribeDocument();
+    unsubscribeStore();
+    removeListeners?.();
+  };
+}
+
+const watchers = new WeakMap<EditorSession, { users: number; stop: () => void }>();
+
+/**
+ * Plays the hologram for Claude's imports and ends shows early on a click, a key or an undo. The
+ * surfaces that draw it (the canvas, the Viewer) each call it; they share one watcher per session.
+ * Returns the release.
+ */
+export function watchHolograms(session: EditorSession): () => void {
+  let watcher = watchers.get(session);
+  if (!watcher) {
+    watcher = { users: 0, stop: startWatching(session) };
+    watchers.set(session, watcher);
+  }
+  const current = watcher;
+  current.users++;
+  let released = false;
+  return () => {
+    if (released) return;
+    released = true;
+    if (--current.users > 0) return;
+    current.stop();
+    if (watchers.get(session) === current) watchers.delete(session);
+  };
 }

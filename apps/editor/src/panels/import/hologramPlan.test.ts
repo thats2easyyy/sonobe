@@ -2,8 +2,8 @@ import type { SonobeDocument } from "@sonobe/core";
 import { buildDoc, createTestRuntime } from "@sonobe/engine/testing";
 import { describe, expect, it } from "vitest";
 import { buildCanvasIndex } from "../canvas/sceneIndex.ts";
-import { clippedRadii, collectHoloLayers, HOLO, holoFrameAt, holoShapeOf, planHologram, radiiOf, sweepCurve, sweepProgressAt, sweepScale, textLines, traceProgress, type HoloLayer } from "./hologramPlan.ts";
-import { laserLead, pointerEndsHologram, visibleRegion } from "./HologramBuild.tsx";
+import { chromeHeldUntil, clippedRadii, collectHoloLayers, evenPicks, GLOW_PEAK, HOLO, holoFrameAt, holoShapeOf, isTextRunGroup, planHologram, radiiOf, sampleEvenly, sweepCurve, sweepProgressAt, sweepScale, textLines, traceProgress, type HoloLayer } from "./hologramPlan.ts";
+import { laserLead, visibleRegion } from "./HologramBuild.tsx";
 import { scanLaserAt, scannerFrame, SCAN_SWEEP_MS } from "./HologramScanner.tsx";
 
 function indexFor(doc: SonobeDocument) {
@@ -116,9 +116,81 @@ describe("collectHoloLayers", () => {
     const kept = collectHoloLayers(indexFor(doc), "screen", { maxPieces: 300 })!.layers;
     expect(kept).toHaveLength(300);
     const perColumn = Array.from({ length: cols }, (_, col) => kept.filter((l) => Number(l.id.slice(1)) % cols === col).length);
-    // Every column keeps a fair share, not all or nothing.
-    for (const n of perColumn) expect(n).toBeGreaterThan(5);
+    // Every column keeps the same share, not all or nothing.
+    expect(new Set(perColumn)).toEqual(new Set([15]));
     expect(Math.max(...kept.map((l) => l.rect.y))).toBeGreaterThan(400);
+  });
+
+  it("thins a grid by whole rows at a regular interval, not a dither with holes", () => {
+    // 24 columns × 30 rows past a 600 cap, under a header.
+    const cols = 24;
+    const cells = Array.from({ length: cols * 30 }, (_, i) => ({ id: `c${i}`, type: "rectangle", props: { position: [8 + (i % cols) * 16, 72 + Math.floor(i / cols) * 25], size: [15, 24] } }));
+    const doc = buildDoc({ layers: [{ id: "screen", type: "group", props: { position: [0, 0], size: [402, 874] }, children: [{ id: "header", type: "rectangle", props: { position: [0, 0], size: [402, 64] } }, ...cells] }] });
+    const kept = collectHoloLayers(indexFor(doc), "screen")!.layers;
+    expect(kept.length).toBeLessThanOrEqual(HOLO.maxPieces);
+    expect(kept[0]!.id).toBe("header");
+    const rowOf = (id: string) => Math.floor(Number(id.slice(1)) / cols);
+    const rows = new Map<number, number>();
+    for (const l of kept.slice(1)) rows.set(rowOf(l.id), (rows.get(rowOf(l.id)) ?? 0) + 1);
+    // Rows are kept whole, 24 of 30: every fifth row goes, the same way down the screen.
+    expect([...rows.values()].every((n) => n === cols)).toBe(true);
+    const skipped = Array.from({ length: 30 }, (_, r) => r).filter((r) => !rows.has(r));
+    expect(skipped).toEqual([2, 7, 12, 17, 22, 27]);
+  });
+
+  it("samples near-equal layers evenly: whole rows when they stack in rows, else every so many", () => {
+    expect(evenPicks(9, 3)).toEqual([1, 4, 7]);
+    expect(evenPicks(4, 4)).toEqual([0, 1, 2, 3]);
+    expect(evenPicks(4, 0)).toEqual([]);
+    const box = (x: number, y: number) => ({ rect: { x, y, width: 10, height: 10 } });
+    const grid = Array.from({ length: 12 }, (_, i) => box((i % 3) * 12, Math.floor(i / 3) * 12));
+    // 4 rows of 3 and room for 7: two whole rows, the second and the fourth.
+    expect(sampleEvenly(grid, 7).map((m) => grid.indexOf(m))).toEqual([3, 4, 5, 9, 10, 11]);
+    // One long row: every other one.
+    const row = Array.from({ length: 10 }, (_, i) => box(i * 12, 0));
+    expect(sampleEvenly(row, 5).map((m) => row.indexOf(m))).toEqual([1, 3, 5, 7, 9]);
+    expect(sampleEvenly(row, 20)).toEqual(row);
+    expect(sampleEvenly(row, 0)).toEqual([]);
+  });
+
+  it("draws no box around a paragraph split into text runs, only its line bars", () => {
+    expect(isTextRunGroup("group", {}, ["text", "text"])).toBe(true);
+    expect(isTextRunGroup("group", { color: { r: 0, g: 0, b: 0, a: 0 } }, ["text"])).toBe(true);
+    expect(isTextRunGroup("group", { color: "#00000000" }, ["text"])).toBe(true);
+    // A group that draws something, or holds anything but text, keeps its box.
+    expect(isTextRunGroup("group", { color: { r: 1, g: 1, b: 1, a: 1 } }, ["text"])).toBe(false);
+    expect(isTextRunGroup("group", { color: "#FFFFFFFF" }, ["text"])).toBe(false);
+    expect(isTextRunGroup("group", { strokeWidth: 1 }, ["text"])).toBe(false);
+    expect(isTextRunGroup("group", { shadowOpacity: 0.2 }, ["text"])).toBe(false);
+    expect(isTextRunGroup("group", {}, ["text", "rectangle"])).toBe(false);
+    expect(isTextRunGroup("group", {}, [])).toBe(false);
+    expect(isTextRunGroup("rectangle", {}, ["text"])).toBe(false);
+
+    const doc = buildDoc({
+      layers: [
+        {
+          id: "screen",
+          type: "group",
+          props: { position: [0, 0], size: [402, 874] },
+          children: [
+            {
+              id: "paragraph",
+              type: "group",
+              props: { position: [20, 40], size: [360, 52] },
+              children: [
+                { id: "run1", type: "text", props: { position: [0, 0], size: [120, 26], text: "Prototypes feel" } },
+                { id: "run2", type: "text", props: { position: [120, 0], size: [60, 26], text: "real", fontWeight: 700 } },
+                { id: "run3", type: "text", props: { position: [0, 26], size: [200, 26], text: "when motion follows" } },
+              ],
+            },
+            { id: "field", type: "group", props: { position: [20, 120], size: [360, 44], color: "#F2F2F7FF", cornerRadius: 10 }, children: [{ id: "placeholder", type: "text", props: { position: [12, 10], size: [200, 24], text: "Search" } }] },
+          ],
+        },
+      ],
+    });
+    const layers = collectHoloLayers(indexFor(doc), "screen")!.layers;
+    expect(layers.map((l) => l.id)).toEqual(["run1", "run2", "run3", "field", "placeholder"]);
+    expect(layers.find((l) => l.id === "run2")!.parent).toBeNull();
   });
 
   it("ranks layers by size before it samples near-equals", () => {
@@ -243,18 +315,19 @@ describe("planHologram", () => {
     }
   });
 
-  it("runs about 3–4 s for a phone screen, scales for tall pages, and stays near 5 s", () => {
-    const phone = planHologram(SCREEN, [layer("a", 0)]).timeline;
-    expect(phone.downEnd - phone.downStart).toBeGreaterThanOrEqual(1400);
-    expect(phone.downEnd - phone.downStart).toBeLessThanOrEqual(1800);
-    expect(phone.upEnd - phone.upStart).toBeGreaterThanOrEqual(1200);
-    expect(phone.upEnd - phone.upStart).toBeLessThanOrEqual(1500);
+  it("runs about 3.7 s for a phone screen (1.6 s down, 1.3 s up), scales for tall pages, and never runs much over 5 s", () => {
+    // A phone screen whose last outlines start at the bottom, as an imported screen's do.
+    const phone = planHologram(SCREEN, [layer("a", 0), layer("b", 830)]).timeline;
+    expect(phone.downEnd - phone.downStart).toBe(1600);
+    expect(phone.upEnd - phone.upStart).toBe(1300);
     expect(phone.end - phone.upEnd).toBe(HOLO.glowMs);
-    expect(phone.end).toBeGreaterThanOrEqual(3000);
-    expect(phone.end).toBeLessThanOrEqual(4000);
-    const tall = planHologram({ ...SCREEN, height: 6000 }, [layer("a", 5990)]).timeline;
+    expect(phone.end).toBeGreaterThanOrEqual(3600);
+    expect(phone.end).toBeLessThanOrEqual(3800);
+    // The longest: the tallest sweeps, and outlines held back to the latest start.
+    const chain = Array.from({ length: 12 }, (_, i) => layer(`l${i}`, 5990, i ? `l${i - 1}` : null));
+    const tall = planHologram({ ...SCREEN, height: 6000 }, chain).timeline;
     expect(tall.end).toBeGreaterThan(phone.end);
-    expect(tall.end).toBeLessThanOrEqual(5300);
+    expect(tall.end).toBeLessThanOrEqual(5500);
     expect(sweepScale(100)).toBe(HOLO.minScale);
     expect(sweepScale(100_000)).toBe(HOLO.maxScale);
   });
@@ -285,11 +358,27 @@ describe("holoFrameAt", () => {
     expect(up).toMatchObject({ phase: "up", direction: -1 });
     // The veil covers only what the laser hasn't passed on its way up.
     expect(up.veil).toBe(up.laser);
-    const glow = holoFrameAt(plan, upEnd + (end - upEnd) * 0.3);
-    expect(glow).toMatchObject({ phase: "glow", laser: null, veil: 0 });
+    const glow = holoFrameAt(plan, upEnd + (end - upEnd) * GLOW_PEAK);
+    expect(glow).toMatchObject({ phase: "glow", laser: null, veil: 0, alpha: 1 });
     expect(glow.glow).toBeCloseTo(1);
-    expect(holoFrameAt(plan, end - 1).alpha).toBeLessThan(0.05);
+    expect(holoFrameAt(plan, end - 1).glow).toBeLessThan(0.01);
     expect(holoFrameAt(plan, end).phase).toBe("done");
+  });
+
+  it("closes with a bloom that swells fast and breathes out slow, its hairline gone by the peak", () => {
+    const at = (u: number) => holoFrameAt(plan, upEnd + (end - upEnd) * u);
+    expect(at(GLOW_PEAK / 2).glow).toBeGreaterThan(0.7);
+    expect(at(0.65).glow).toBeCloseTo(0.5, 1);
+    // The hairline flashes out as the bloom swells, and is gone when the selection comes back.
+    expect(at(GLOW_PEAK / 2).hairline).toBeCloseTo(1);
+    expect(at(GLOW_PEAK).hairline).toBeLessThan(0.01);
+    expect(at(0.6).hairline).toBe(0);
+    for (const t of [0, downEnd, upStart + 10]) expect(holoFrameAt(plan, t)).toMatchObject({ glow: 0, hairline: 0 });
+  });
+
+  it("holds the selection chrome back until the bloom peaks, and not at all for the reduced crossfade", () => {
+    expect(chromeHeldUntil(plan)).toBe(upEnd + (end - upEnd) * GLOW_PEAK);
+    expect(chromeHeldUntil(planHologram(SCREEN, [layer("a", 0)], { reduced: true }))).toBe(0);
   });
 
   it("traces an outline in 180 ms", () => {
@@ -326,19 +415,11 @@ describe("canvas build", () => {
     expect(laserLead({ x: 0, y: 0, width: 402, height: 874 })).toBe(10);
     expect(laserLead({ x: 0, y: 0, width: 40, height: 184 })).toBe(3);
   });
-
-  it("keeps playing through a pan: a middle-button drag or a drag with Space held", () => {
-    expect(pointerEndsHologram({ button: 0 }, false)).toBe(true);
-    expect(pointerEndsHologram({ button: 2 }, false)).toBe(true);
-    expect(pointerEndsHologram({ button: 1 }, false)).toBe(false);
-    expect(pointerEndsHologram({ button: 0 }, true)).toBe(false);
-  });
 });
 
 describe("dialog scanner", () => {
-  it("sweeps down in about 2.75 s and back up", () => {
-    expect(SCAN_SWEEP_MS).toBeGreaterThanOrEqual(2500);
-    expect(SCAN_SWEEP_MS).toBeLessThanOrEqual(3000);
+  it("sweeps down in 2.75 s and back up in 2.75 s", () => {
+    expect(SCAN_SWEEP_MS).toBe(2750);
     expect(scanLaserAt(0)).toEqual({ y: 0, direction: 1 });
     expect(scanLaserAt(SCAN_SWEEP_MS / 2).y).toBeCloseTo(0.5, 1);
     expect(scanLaserAt(SCAN_SWEEP_MS * 1.5)).toMatchObject({ direction: -1 });

@@ -169,6 +169,11 @@ export interface HostApplyOptions {
   /** Component used by ops that don't name one. */
   defaultComponent?: Id;
   /**
+   * What made the batch, for views that react to it: import_design marks its batch "import", and the
+   * app's editor builds the new screen as a hologram. Hosts without such views ignore it.
+   */
+  source?: "import";
+  /**
    * The tool call's cancellation signal. Once it has aborted, apply refuses (HostError "cancelled")
    * without changing anything, so a cancelled call never lands. An apply that has started finishes.
    */

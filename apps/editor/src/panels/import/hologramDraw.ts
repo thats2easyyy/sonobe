@@ -25,8 +25,10 @@ export interface HoloColors {
   rain: RGB;
   /** The frame's outline and corners, which also sit on the UI around it. */
   edge: RGB;
-  /** The closing halo just outside the frame, on the UI around it. */
+  /** The closing bloom just outside the frame, on the UI around it: its color, peak opacity and hairline. */
   halo: RGB;
+  haloAlpha: number;
+  haloLine: RGB;
   /** How strongly the veil's grid shows (0–1). */
   gridAlpha: number;
   /** Wireframe stroke opacity once traced. */
@@ -43,6 +45,8 @@ const DEFAULT_COLORS: HoloColors = {
   rain: [63, 224, 240],
   edge: [232, 254, 255],
   halo: [94, 242, 255],
+  haloAlpha: 0.36,
+  haloLine: [160, 248, 255],
   gridAlpha: 0.09,
   wireAlpha: 0.62,
 };
@@ -81,6 +85,8 @@ export function readHoloColors(el: Element): HoloColors {
     rain: color("--holo-rain", DEFAULT_COLORS.rain),
     edge: color("--holo-edge", DEFAULT_COLORS.edge),
     halo: color("--holo-halo", DEFAULT_COLORS.halo),
+    haloAlpha: number("--holo-halo-alpha", DEFAULT_COLORS.haloAlpha),
+    haloLine: color("--holo-halo-line", DEFAULT_COLORS.haloLine),
     gridAlpha: number("--holo-grid-alpha", DEFAULT_COLORS.gridAlpha),
     wireAlpha: number("--holo-wire-alpha", DEFAULT_COLORS.wireAlpha),
   };
@@ -287,11 +293,38 @@ export function drawLaser(ctx: CanvasRenderingContext2D, r: Rect, y: number, dir
   }
 }
 
+/** The just-revealed design below the laser as it sweeps back up: tinted and scanlined for a moment. */
+export function drawRevealEdge(ctx: CanvasRenderingContext2D, screen: Rect, y: number, c: HoloColors): void {
+  const band = Math.min(48, Math.max(12, screen.height * 0.14));
+  const tint = ctx.createLinearGradient(0, y, 0, y + band);
+  tint.addColorStop(0, rgba(c.line, 0.34));
+  tint.addColorStop(0.45, rgba(c.tint, 0.12));
+  tint.addColorStop(1, rgba(c.tint, 0));
+  ctx.fillStyle = tint;
+  ctx.fillRect(screen.x, y, screen.width, band);
+  ctx.fillStyle = rgba(c.core, 1);
+  for (let sy = y + 2; sy < y + band; sy += 3) {
+    ctx.globalAlpha = 0.22 * (1 - (sy - y) / band);
+    ctx.fillRect(screen.x, Math.round(sy), screen.width, 1);
+  }
+  ctx.globalAlpha = 1;
+  ctx.fillStyle = rgba(c.fringe, 0.4);
+  ctx.fillRect(screen.x, y + 2, screen.width, 1);
+}
+
 /** Corner radii clockwise from the top left, each fitting `r`. */
 export function fitRadii(r: Rect, radius: number | Radii): [number, number, number, number] {
   const max = Math.max(0, Math.min(r.width, r.height) / 2);
   const all = typeof radius === "number" ? [radius, radius, radius, radius] : radius;
   return all.map((v) => Math.max(0, Math.min(v, max))) as [number, number, number, number];
+}
+
+/**
+ * Segments for a quarter circle of radius `rad` (CSS px) while an outline traces: about 2.5 px each,
+ * so a corner stays round at any zoom (an 900% avatar's 100 px corner as much as a 4 px chip's).
+ */
+export function cornerSteps(rad: number): number {
+  return Math.max(4, Math.min(64, Math.ceil((Math.PI * rad) / 2 / 2.5)));
 }
 
 /** Points around a rounded rect, clockwise from the middle of its top edge, closed. */
@@ -304,7 +337,7 @@ export function perimeterPoints(r: Rect, radius: number | Radii): [number, numbe
       pts.push([cx + Math.cos(from + Math.PI / 4) * rad * Math.SQRT2, cy + Math.sin(from + Math.PI / 4) * rad * Math.SQRT2]);
       return;
     }
-    const steps = rad > 12 ? 8 : 4;
+    const steps = cornerSteps(rad);
     for (let i = 0; i <= steps; i++) {
       const a = from + (Math.PI / 2) * (i / steps);
       pts.push([cx + Math.cos(a) * rad, cy + Math.sin(a) * rad]);
@@ -408,11 +441,22 @@ export function traceCross(ctx: CanvasPath, r: Rect, p: number, radius: number |
   arm(r.x + r.width - tr!, r.y + tr!, r.x + bl!, r.y + r.height - bl!);
 }
 
+/** How thick a text line bar may get, in CSS px: a few outline weights (outlines are 1 px at any zoom). */
+export const TEXT_BAR_MAX = 3.5;
+
+/**
+ * A text line bar's thickness for a line `lineHeight` CSS px tall: under half the line, but never
+ * past TEXT_BAR_MAX, so zoomed in, text reads as thin lines beside the 1 px outlines, not as pills.
+ */
+export function textBarThickness(lineHeight: number): number {
+  return Math.max(1.25, Math.min(TEXT_BAR_MAX, lineHeight * 0.44));
+}
+
 /** Text as 1–3 line bars growing from the left (the last one shorter), added as rects to the path. */
 export function textBars(ctx: CanvasPath, r: Rect, lines: number, p: number): void {
   const n = Math.max(1, lines);
   const lh = r.height / n;
-  const thick = Math.max(1.25, Math.min(10, lh * 0.44));
+  const thick = textBarThickness(lh);
   for (let i = 0; i < n; i++) {
     // Each line starts a little after the one above it.
     const q = Math.max(0, Math.min(1, (p - i * 0.18) / (1 - (n - 1) * 0.18)));
@@ -429,41 +473,96 @@ export function textBars(ctx: CanvasPath, r: Rect, lines: number, p: number): vo
 export interface FrameOptions {
   /** How far the outline has traced (0–1). */
   trace?: number;
-  /** The closing halo just outside the frame (0–1). */
+  /** The closing bloom outside the frame (0–1). */
   glow?: number;
+  /** The bloom's hairline (0–1; default the bloom's): it goes before the selection outline comes back. */
+  hairline?: number;
+  /** The outline's strength (0–1): closing, it hands the screen over to its selection outline. */
+  outline?: number;
   /** Viewfinder corners, and how strongly they show (0–1). */
   brackets?: boolean | number;
+}
+
+/**
+ * The closing bloom's shape outside the screen edge, in CSS px: a hairline `gap` out (clear of the
+ * selection outline and its 8 px corner handles), and a soft band that brightens just past it and
+ * fades out by `reach` (less around a small screen: bloomReach).
+ */
+export const BLOOM = { gap: 5, peak: 8, reach: 30 } as const;
+
+/** How far the bloom reaches around a screen `width` × `height` CSS px: a third of its short side, 14–30 px. */
+export function bloomReach(width: number, height: number): number {
+  return Math.max(14, Math.min(BLOOM.reach, Math.min(width, height) / 3));
+}
+
+/**
+ * The closing bloom: light spilling out of the frame rather than another stroke on it. A wide soft
+ * band of gradients at low alpha plus a hairline, both outside the screen, never over the design it
+ * just revealed. `glow` (0–1) scales it.
+ */
+export function drawBloom(ctx: CanvasRenderingContext2D, r: Rect, c: HoloColors, glow: number, hairline = glow): void {
+  if (glow <= 0) return;
+  const { gap, peak } = BLOOM;
+  const reach = bloomReach(r.width, r.height);
+  const x = Math.round(r.x);
+  const y = Math.round(r.y);
+  const right = Math.round(r.x + r.width);
+  const bottom = Math.round(r.y + r.height);
+  const a = c.haloAlpha * glow;
+  // One falloff for every side and corner: nothing at the edge, brightest just past the hairline, a long tail.
+  const stops: [number, number][] = [
+    [0, 0],
+    [gap / reach, a * 0.55],
+    [peak / reach, a],
+    [(peak + (reach - peak) * 0.35) / reach, a * 0.42],
+    [1, 0],
+  ];
+  const paint = (g: CanvasGradient) => {
+    for (const [at, alpha] of stops) g.addColorStop(at, rgba(c.halo, alpha));
+    ctx.fillStyle = g;
+  };
+  const side = (x0: number, y0: number, x1: number, y1: number, rx: number, ry: number, rw: number, rh: number) => {
+    paint(ctx.createLinearGradient(x0, y0, x1, y1));
+    ctx.fillRect(rx, ry, rw, rh);
+  };
+  side(0, y, 0, y - reach, x, y - reach, right - x, reach);
+  side(0, bottom, 0, bottom + reach, x, bottom, right - x, reach);
+  side(x, 0, x - reach, 0, x - reach, y, reach, bottom - y);
+  side(right, 0, right + reach, 0, right, y, reach, bottom - y);
+  for (const [cx, cy, dx, dy] of [
+    [x, y, -1, -1],
+    [right, y, 1, -1],
+    [right, bottom, 1, 1],
+    [x, bottom, -1, 1],
+  ] as const) {
+    paint(ctx.createRadialGradient(cx, cy, 0, cx, cy, reach));
+    ctx.fillRect(dx < 0 ? cx - reach : cx, dy < 0 ? cy - reach : cy, reach, reach);
+  }
+  // The hairline: crisp and square like the selection outline inside it.
+  if (hairline <= 0) return;
+  ctx.strokeStyle = rgba(c.haloLine, Math.min(1, c.haloAlpha * 2.4) * hairline);
+  ctx.lineWidth = 1;
+  ctx.strokeRect(x - gap + 0.5, y - gap + 0.5, right - x + gap * 2 - 1, bottom - y + gap * 2 - 1);
 }
 
 /** The hologram's frame: a glowing outline with viewfinder corners in the edge color. */
 export function drawFrame(ctx: CanvasRenderingContext2D, r: Rect, c: HoloColors, options: FrameOptions = {}): void {
   const trace = options.trace ?? 1;
-  const glow = options.glow ?? 0;
+  const strength = options.outline ?? 1;
   const outline = { x: Math.round(r.x) + 0.5, y: Math.round(r.y) + 0.5, width: Math.round(r.width) - 1, height: Math.round(r.height) - 1 };
-  if (glow > 0) {
-    // The closing flare: a thin halo outside the screen, never over the design it just revealed.
-    ctx.save();
+  drawBloom(ctx, r, c, options.glow ?? 0, options.hairline);
+  if (strength > 0) {
     ctx.beginPath();
-    ctx.rect(r.x - 64, r.y - 64, r.width + 128, r.height + 128);
-    ctx.rect(r.x, r.y, r.width, r.height);
-    ctx.clip("evenodd");
-    ctx.shadowColor = rgba(c.halo, glow);
-    ctx.shadowBlur = 18 * glow;
-    ctx.strokeStyle = rgba(c.halo, 0.95 * glow);
-    ctx.lineWidth = 2;
-    ctx.strokeRect(r.x - 1, r.y - 1, r.width + 2, r.height + 2);
-    ctx.restore();
+    const tips = traceOutline(ctx, outline, 0, trace);
+    ctx.lineJoin = "miter";
+    ctx.strokeStyle = rgba(c.line, 0.16 * strength);
+    ctx.lineWidth = 3;
+    ctx.stroke();
+    ctx.strokeStyle = rgba(c.line, 0.78 * strength);
+    ctx.lineWidth = 1;
+    ctx.stroke();
+    drawTips(ctx, tips, c);
   }
-  ctx.beginPath();
-  const tips = traceOutline(ctx, outline, 0, trace);
-  ctx.lineJoin = "miter";
-  ctx.strokeStyle = rgba(c.line, 0.16 * (1 - glow));
-  ctx.lineWidth = 3;
-  ctx.stroke();
-  ctx.strokeStyle = rgba(c.line, 0.78 + 0.22 * glow);
-  ctx.lineWidth = 1;
-  ctx.stroke();
-  drawTips(ctx, tips, c);
   const brackets = options.brackets === undefined || options.brackets === true ? 1 : options.brackets === false ? 0 : options.brackets;
   if (brackets <= 0 || trace < 1) return;
   const len = Math.max(5, Math.min(16, Math.min(r.width, r.height) * 0.09));

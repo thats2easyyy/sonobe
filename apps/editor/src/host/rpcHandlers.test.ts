@@ -112,11 +112,20 @@ describe("rpc handlers", () => {
     const broken = await call("document.apply", { ops: [{ op: "removeLayer", id: "ghost" }] });
     expect(broken).toMatchObject({ result: { ok: false, errors: [{ code: "not_found" }] } });
     expect(await call("document.apply", { ops: "nope" })).toMatchObject({ failed: true, code: "invalid_params" });
+    expect(s.document.getState().lastChange?.source).toBeUndefined();
 
     expect(await call("history.list")).toMatchObject({ revision: 1, entries: [{ label: "added badge", author: { kind: "agent", name: "Claude" } }] });
     expect(await call("history.undo")).toMatchObject({ ok: true, revision: 2, undone: [{ label: "added badge" }] });
     expect(findLayer(s.document.getState().doc.components.main!.layers, "badge")).toBeUndefined();
     expect(await call("history.undo")).toMatchObject({ failed: true, code: "nothing_to_undo" });
+  });
+
+  it("records what made a batch, so import_design's lands as an import whatever its label", async () => {
+    const { call, session: s } = setup();
+    const ops = [{ op: "addLayer", layer: { id: "screen", type: "group", name: "Receipt", props: { size: [402, 874] } } }];
+    expect(await call("document.apply", { ops, label: "set up the receipt", source: "import" })).toMatchObject({ result: { ok: true } });
+    expect(s.document.getState().lastChange).toMatchObject({ kind: "apply", label: "set up the receipt", source: "import", author: { kind: "agent" } });
+    expect(await call("document.apply", { ops: [], source: "paste" })).toMatchObject({ failed: true, code: "invalid_params", message: expect.stringContaining('"source" must be "import"') });
   });
 
   it("runs deterministic simulations", async () => {
