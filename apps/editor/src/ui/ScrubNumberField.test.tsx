@@ -164,6 +164,19 @@ describe("ScrubNumberField", () => {
     expect(onChange).toHaveBeenLastCalledWith(4, { source: "scrub", delta: 4 });
   });
 
+  it("names an empty value for people and screen readers, and nudges it from zero", () => {
+    const onChange = vi.fn();
+    act(() => root.render(<ScrubNumberField aria-label="Repeat" value={0} emptyText="Auto" unit="×" onChange={onChange} />));
+    expect(input().value).toBe("");
+    expect(input().placeholder).toBe("Auto");
+    expect(input().getAttribute("aria-valuetext")).toBe("Auto");
+    expect(input().hasAttribute("aria-valuenow")).toBe(false);
+    expect(container.querySelector(".sb-scrub__unit")).toBeNull();
+    act(() => input().focus());
+    press("ArrowUp");
+    expect(onChange).toHaveBeenLastCalledWith(1, { source: "keyboard", delta: 1 });
+  });
+
   it("is read-only when linked", () => {
     const onChange = vi.fn();
     act(() => root.render(<ScrubNumberField aria-label="Scale" value={1.08} linked onChange={onChange} />));
