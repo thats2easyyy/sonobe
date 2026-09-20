@@ -1,7 +1,7 @@
 /** addComponent, removeComponent, updateComponent, updateInterface. */
 
 import { layerAddress, parseAddress, patchAddress } from "../address.ts";
-import { DEFAULT_LAYER_COMPONENT_SIZE, deviceScreenSize, findComponentInstances, FORMAT_VERSION, listComponentIds } from "../document.ts";
+import { DEFAULT_LAYER_COMPONENT_SIZE, deviceScreenSize, findComponentInstances, FORMAT_VERSION } from "../document.ts";
 import { fileNameCollision, getOwn, isFileNameTaken, isValidId, slugify, uniqueId } from "../ids.ts";
 import { allLayers, COMPONENT_INSTANCE_LAYER_TYPE, COMPONENT_PATCH_TYPE, getPatchSpec, interfacePortToPort } from "../registry.ts";
 import { parseComponentFile } from "../schema.ts";
@@ -12,7 +12,7 @@ import { isLinkInput, isValueType, VALUE_TYPES } from "../values.ts";
 import { CLEAR, defineRef, fail, getTargetComponent, isClear, noteRenamed, OpFailure, resolveAddress, resolveId, unwrap, withComponent, type OpContext, type OpOf, type OpOutcome } from "./context.ts";
 import { validateInstance } from "./layers.ts";
 import { validatePatchComponent } from "./patches.ts";
-import { linkSourceId, removeInputs, restoreInputOps, type InputEntry } from "./references.ts";
+import { linkSourceId, removeInputs, restoreInputOps, targetAddress, type InputEntry } from "./references.ts";
 
 const KINDS = ["prototype", "layerComponent", "patchComponent"];
 
@@ -265,6 +265,9 @@ export function updateComponent(ctx: OpContext, op: OpOf<"updateComponent">): Op
 /** The fields a published port takes. */
 const PORT_FIELDS = ["key", "name", "type", "default", "category", "enumOptions", "loopBehavior", "link"];
 
+/** The properties every layer component instance has on its own (position, opacity...), which published inputs can't override. */
+const instanceLayerProps = (ctx: OpContext) => ctx.registry.layers.get(COMPONENT_INSTANCE_LAYER_TYPE)?.props ?? [];
+
 function validatePort(ctx: OpContext, component: Component, key: string, port: unknown, direction: "input" | "output", existing: InterfacePort | undefined): InterfacePort {
   if (!isValidId(key)) fail("invalid_id", `"${key}" isn't a valid port key.`, { hint: `Try "${slugify(key, "value")}".` });
   if (!port || typeof port !== "object" || Array.isArray(port)) fail("invalid_value", `The published ${direction} "${key}" must be an object like { "name": "Label", "type": "text" }.`);
@@ -279,6 +282,15 @@ function validatePort(ctx: OpContext, component: Component, key: string, port: u
       hint: renamed ? `To rename it, unpublish "${key}" (null) and publish "${renamed}"; cables to "${key}" are disconnected. Or leave "key" out.` : 'Leave "key" out: it defaults to the key the port is listed under.',
       ...(renamed ? { suggestions: [{ description: `Publish it as "${renamed}" and unpublish "${key}"`, ops: [{ op: "updateInterface", component: component.id, [side]: { [key]: null, [renamed]: { ...p, key: renamed } } } as Op] }] } : {}),
     });
+  }
+  if (direction === "input" && component.kind === "layerComponent" && !ctx.lenient) {
+    // Instances resolve their own layer properties first, so an input with one of those keys could never be set.
+    const shadowed = instanceLayerProps(ctx).find((prop) => prop.key === key);
+    if (shadowed) {
+      fail("invalid_id", `"${key}" is already the ${shadowed.name} property of every instance of ${component.name}, so instances could never set an input with that key.`, {
+        hint: `Publish it under another key, like "${uniqueId(key, (k) => k === key || Object.hasOwn(component.interface.inputs, k))}".`,
+      });
+    }
   }
   if (!isValueType(p.type)) fail("invalid_value", `The published ${direction} "${key}" has an unknown type ${JSON.stringify(p.type)}.${didYouMeanText(didYouMean(String(p.type), VALUE_TYPES))}`);
   if (p.name !== undefined && typeof p.name !== "string") fail("invalid_value", `The published ${direction} "${key}" needs a text name.`);
@@ -378,48 +390,60 @@ export function updateInterface(ctx: OpContext, op: OpOf<"updateInterface">): Op
 
   let doc = withComponent(ctx.doc, component);
   const restores: Op[] = [];
-  const cascade = (componentId: Id, predicate: (e: InputEntry) => boolean) => {
+  const cleared: Op[] = [];
+  const cascade = (componentId: Id, predicate: (e: InputEntry) => boolean, record = false) => {
     const { component: next, removed } = removeInputs(doc.components[componentId]!, predicate);
     if (!removed.length) return;
     doc = withComponent(doc, next);
     ctx.affected.components.add(componentId);
     restores.push(...restoreInputOps(componentId, removed));
+    if (record) for (const e of removed) cleared.push({ op: "setInput", component: componentId, target: targetAddress(e.target), value: null });
   };
-  if (removedInputs.length) {
-    const keys = new Set(removedInputs);
-    cascade(component.id, (e) => {
+  // A layer instance's own properties (position, opacity...) share its prop namespace but aren't ports.
+  const ownProps = new Set(instanceLayerProps(ctx).map((p) => p.key));
+  const isPortKey = (inst: { kind: "layer" | "patch" }, key: string) => inst.kind !== "layer" || !ownProps.has(key);
+  /** Cables and values stored on instances of this component (and its inner reads of `$in`) that name one of these keys. */
+  const touches = (inputKeys: ReadonlySet<string>, outputKeys: ReadonlySet<string>) => {
+    const inside = (e: InputEntry) => {
       if (!isLinkInput(e.value)) return false;
       const a = parseAddress(e.value.link);
-      return a?.kind === "componentInput" && keys.has(a.key);
-    });
-    for (const inst of findComponentInstances(doc, component.id)) {
-      cascade(inst.componentId, (e) => {
-        if (e.target.kind === inst.kind && e.target.id === inst.id && keys.has(e.target.key)) return true;
-        // Links that read the value off a layer instance ("@chip_1.label"), unless an output has that key.
-        if (inst.kind !== "layer" || linkSourceId(e.value) !== inst.id) return false;
-        const a = parseAddress((e.value as { link: string }).link);
-        return !!a && keys.has(a.key) && !getOwn(outputs, a.key);
-      });
-    }
+      return a?.kind === "componentInput" && inputKeys.has(a.key);
+    };
+    const onInstance = (inst: { kind: "layer" | "patch"; id: Id }) => (e: InputEntry) => {
+      if (e.target.kind === inst.kind && e.target.id === inst.id && inputKeys.has(e.target.key) && isPortKey(inst, e.target.key)) return true;
+      if (linkSourceId(e.value) !== inst.id) return false;
+      const a = parseAddress((e.value as { link: string }).link);
+      if (!a || (a.kind !== "patch" && a.kind !== "layer") || !isPortKey(inst, a.key)) return false;
+      // An output's value, or an input's read off a layer instance ("@chip_1.label") unless an output has that key.
+      return outputKeys.has(a.key) || (inst.kind === "layer" && inputKeys.has(a.key) && !getOwn(outputs, a.key));
+    };
+    return { inside, onInstance };
+  };
+  if (removedInputs.length || removedOutputs.length) {
+    const { inside, onInstance } = touches(new Set(removedInputs), new Set(removedOutputs));
+    cascade(component.id, inside);
+    for (const inst of findComponentInstances(doc, component.id)) cascade(inst.componentId, onInstance(inst));
   }
-  if (removedOutputs.length) {
-    const keys = new Set(removedOutputs);
-    for (const hostId of listComponentIds(doc)) {
-      const host = doc.components[hostId]!;
-      const instanceIds = new Set<Id>([
-        ...allLayers(host.layers).filter((l) => l.type === COMPONENT_INSTANCE_LAYER_TYPE && l.component === component.id).map((l) => l.id),
-        ...Object.entries(host.patches).filter(([, p]) => p.type === COMPONENT_PATCH_TYPE && p.component === component.id).map(([id]) => id),
-      ]);
-      if (!instanceIds.size) continue;
-      cascade(hostId, (e) => {
-        const source = linkSourceId(e.value);
-        if (source === undefined || !instanceIds.has(source)) return false;
-        const a = parseAddress((e.value as { link: string }).link);
-        return !!a && keys.has(a.key);
-      });
+  // A port declared again, or newly, can change what fits: cables and instance values that fit before
+  // and don't now (a new type, fewer options) are dropped like an unpublished port's, and the inverse
+  // restores them. Lenient replays (undo, redo) skip this; `applied` lists the drops for redo.
+  if (!ctx.lenient) {
+    const declared = (side: Record<string, InterfacePortInput | null> | undefined) => new Set(Object.entries(side ?? {}).filter(([, port]) => port !== null).map(([key]) => key));
+    const inputKeys = declared(applied.inputs);
+    const outputKeys = declared(applied.outputs);
+    if (inputKeys.size || outputKeys.size) {
+      const { inside, onInstance } = touches(inputKeys, outputKeys);
+      const fits = (d: typeof doc, hostId: Id, e: InputEntry) => {
+        const host = d.components[hostId];
+        const target = host && resolveTarget(d, host, targetAddress(e.target), ctx.validate);
+        return !!target && target.ok && checkInputValue(d, host, target.value, e.value, ctx.validate).ok;
+      };
+      const broke = (hostId: Id, predicate: (e: InputEntry) => boolean) => (e: InputEntry) => predicate(e) && !fits(doc, hostId, e) && fits(ctx.doc, hostId, e);
+      cascade(component.id, broke(component.id, inside), true);
+      for (const inst of findComponentInstances(doc, component.id)) cascade(inst.componentId, broke(inst.componentId, onInstance(inst)), true);
     }
   }
   ctx.doc = doc;
   ctx.affected.components.add(component.id);
-  return { ids: [component.id], applied, inverse: [inverse, ...restores] };
+  return { ids: [component.id], applied: cleared.length ? [applied, ...cleared] : applied, inverse: [inverse, ...restores] };
 }
