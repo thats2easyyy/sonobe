@@ -213,6 +213,7 @@ Runtime representation:
 **Loops.** Any port value may be a `Loop<T>` (an array tagged as a loop).
 - A patch fed loops evaluates once per index.
 - Output length is the **max** of the input loop lengths. Shorter loops **wrap** (index mod len), and scalars broadcast.
+- **An empty loop wins.** When any per-item input holds an empty loop, the patch runs 0 times and its outputs are empty loops, and a layer or component bound to one makes 0 copies, whatever the other loops hold. That's how a list filtered to nothing hides its rows. Whole-loop ports (`wholeLoop`) don't count toward this. The one exception is a value read from last frame (§5.2).
 - Layers bound to looped values replicate, one instance per index.
 - Stateful patches keep **per-index state**.
 - Loops are capped at 10,000 elements with a diagnostic.
@@ -254,7 +255,13 @@ input events (pointer/keyboard/device) ─┐
 - Values flow left → right. An input has ≤1 driver, and an output fans out to many.
 - v1 evaluates every patch every frame, in topological order. This is correct and simple; add dirty tracking only when profiling demands it. Patches may declare `alwaysEvaluate` for documentation.
 - **Cycles.** Back-edges are allowed and read the previous frame's value (one frame of latency). Direct self-edges are rejected. `delay1` is the documented feedback primitive.
-- **Frame 0.** Evaluate with the authored values. "Previous-frame" patches (velocity, delay1, pulseOnChange, smoothValue) seed their history with the first value, so there are no startup spikes or false pulses.
+- **Frame 0.** Evaluate with the authored values. "Previous-frame" patches (velocity, delay1, pulseOnChange, smoothValue) seed their history with the first value, so there are no startup spikes or false pulses. A back-edge has no previous frame yet, so it reads the input's default: on a back-edge `delay1` outputs one value on frame 0, even when the cycle carries a loop.
+- **Empty loops across frames.** Last frame's empty loop never erases this frame's copies, so a cycle that goes empty for a frame refills instead of staying empty for good:
+  - A back-edge that carries an empty loop into a per-item input reads as the input's default ("no value yet", like frame 0). A whole-loop input still reads the empty loop.
+  - A component's copy count skips an empty loop it reads through a back-edge.
+  - A layer that drew 0 copies last frame reads, for per-item readers (Interaction, Drag, a layer property), as one reference or its unreplicated output, exactly as before the first frame. Hit tests on it miss, so an Interaction on it runs once and stays idle. Whole-loop readers like Loop Count still see an empty loop.
+  - Within a frame the rule above holds: an empty loop wins.
+- **`empty_loop` warning.** When a layer or component makes 0 copies because an empty loop erased a non-empty one, or because a patch explained its empty output (`PatchContext.explainEmpty`, used by Loop Select for indices past the end), the runtime raises a warning that names the layer or component, where the empty loop started, what it erased, and any feedback cable involved, with a hint and ready-to-apply suggestions. Lists that are simply empty stay quiet. The warning lasts while the site has 0 copies, clears on `updateDocument`, and after frame 0 needs two frames in a row, so a list on its way to empty doesn't raise it. Only frames that look wrong pay for following the trail.
 - **Same-frame precedence.**
   - Switch: turnOff > turnOn > flip.
   - Counter: jump > (increase − decrease).
@@ -296,9 +303,13 @@ const rt = createRuntime(doc, { registry, textMeasurer, seed, fps });
 rt.dispatch(events);                         // InputEvent[]
 const frame: SceneFrame = rt.step(dtSeconds); // advance one frame
 rt.getValue("pop.output"); rt.getValue("@card.scale");
+rt.inspect("@card.position#3")               // { value, copies?, note? }: why a value reads as nothing
 rt.trace(targets, durationMs, events?)       // columnar samples + summaries
 rt.updateDocument(nextDoc)                   // hot-swap graph, keep compatible state
+rt.issues()                                  // RuntimeIssue[]: code, severity, message, ids, hint?, suggestions?
 ```
+
+- `inspect` notes say that a layer drew 0 copies (quoting its `empty_loop` warning), that `#n` is past the end, that an instance path runs into a component with 0 copies, or why a value is an empty loop. sim_get_values prints them after the values. Other read-outs about a value (copy counts, simulation overrides) belong in the same accessor and the same notes, not a second mechanism.
 
 - `updateDocument` patches literal-only edits (input and property literals, patch positions outside cycles) into the compiled graph in place, and recompiles for anything else.
 - `trace` replays the input log since the last restart. Past its budget (7,200 frames) it throws `TraceUnavailableError` instead of tracing a restarted copy.
@@ -410,7 +421,7 @@ Layer types are declared in `@sonobe/core` (`layerTypes.ts`) with typed props (k
   - drag a cable onto an inspector property or a layer row
 - **Inspector:** scrubbable number fields (drag, arrows ±1, ⇧ ±10, ⌥ ±0.1), color picker, segmented controls, and spring presets with a curve preview.
 - **Canvas:** artboard with direct manipulation (select, move, resize, rotate), rulers and snapping, insert shapes and text.
-- **Viewer:** live prototype, device picker, restart ⌘R, frame toggle, 1:1, "show hit targets", and pop-out window. Also serves a LAN web player (QR code).
+- **Viewer:** live prototype, device picker, restart ⌘R, frame toggle, 1:1, "show hit targets", and pop-out window. Also serves a LAN web player (QR code). While the prototype has an `empty_loop` warning, a notice above it names what has no copies, and Why? opens the warning in Diagnostics.
 - **Command palette** (⌘K) lists every command with its shortcut, so the app is discoverable.
 
 ### 9.1 Desktop host conventions
@@ -461,6 +472,7 @@ Layer types are declared in `@sonobe/core` (`layerTypes.ts`) with typed props (k
 | Simulate | `sim_reset`, `sim_dispatch`, `sim_step`, `sim_trace`, `sim_get_values`, `get_screenshot` |
 | Presence and history | `begin_work`, `finish_work`, `reveal`, `list_history`, `undo` |
 
+- **Runtime problems reach agents two ways.** sim_* results list the issues a simulation raised since the last call (with hints and suggestions), and in the app `get_diagnostics` adds a Live viewer section: what the person's running prototype reports right now, read through the `viewer.diagnostics` RPC because it changes without a new revision. The headless host has no live viewer and leaves the section out.
 - **Resources:** guides, patch reference, document outline.
 - **Prompts:** `import_screen`, `prototype_interaction`, `debug_interaction`, `explain_prototype`.
 - **Distribution:** Claude Code plugin (`integrations/claude-code`) and `.mcpb` bundle (`integrations/claude-desktop`), both built from a checkout. The app's **Connect Claude** screen shows copy-paste setup for Claude Code and Claude Desktop, filled in for this machine (the app's bundled CLI, or Node plus a checkout). In a source checkout it also shows the commands that build and pack the `.mcpb`.
