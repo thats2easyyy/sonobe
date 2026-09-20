@@ -9,6 +9,7 @@ The Electron shell around the editor: windows, native menus, project files, the 
 | `electron/app-host.ts` | The `SonobeHost` MCP tools run against, bridged to the editor's RPC handlers |
 | `electron/commands.ts`, `electron/menu.ts` | Menu commands and accelerators (checked against the editor's shortcuts) |
 | `electron/secrets.ts` | Keychain-backed secrets (Electron `safeStorage`) |
+| `electron/drafts.ts` | Drafts of unsaved work in `userData/Drafts`, their IPC, and quitting on SIGTERM, SIGINT or SIGHUP |
 | `player/` | The web player for phones and the pop-out viewer |
 | `scene/` | A hidden page that draws simulation frames for `get_screenshot({ simId })` |
 | `scripts/` | `build.mjs`, `icons.mjs`, `package.mjs`, `verify-package.mjs` |
@@ -24,6 +25,7 @@ Run these from the repository root with `-w @sonobe/desktop`, or from this folde
 | `npm test` | Unit and integration tests (`electron/**/*.test.ts`) |
 | `npm run smoke` | Muted end-to-end Electron run: host API, MCP loop, phone preview, pop-out viewer |
 | `npm run smoke:import` | Muted design import run against a local dev server: `import_design` by URL and HTML, the Import dialog bridge, and pasting a capture (build the editor and shell first) |
+| `npm run smoke:drafts` | Muted run that kills the app with SIGTERM and SIGKILL, crashes its renderer, and recovers the unsaved work each time; then `save_document({ path })` and Don't Save (build the editor and shell first) |
 | `npm run icons` | Rasterizes `assets/brand/sonobe-mark.svg` into `build/icon.icns`, `icon.ico`, `icons/` |
 | `npm run package` | Unsigned local build: editor, bundles, icons, then electron-builder into `release/` |
 | `npm run package:verify` | Launches the packaged app muted and checks `/health`, the editor, and the CLI (`--dmg` checks the app inside the DMG) |
@@ -35,6 +37,8 @@ Run these from the repository root with `-w @sonobe/desktop`, or from this folde
 - `openExternal(url)`: http(s) and mailto only.
 - `popOutViewer({ alwaysOnTop })`, `closeViewerWindow()`, `getViewerWindowStatus()`, `onViewerWindowStatus(cb)`: the live prototype in its own sandboxed window, served from a loopback-only player server. It has no host API.
 - Phone preview: `getPreviewStatus`, `startPreview`, `stopPreview`, `onPreviewStatus`.
+- `drafts.write/remove/list/read/reveal`: drafts of unsaved work, one project folder each in `userData/Drafts`. A window claims the drafts it writes or reads; `list` returns the ones nobody claims. Failures come back as `{ ok: false, code, message }` because the context bridge drops Error properties.
+- `readProjectIfExists(dir)`: `readProject`, but null for a folder that doesn't exist yet (a Save As target).
 
 ## Packaging
 
