@@ -12,6 +12,9 @@
 // {"id": 1, "ok": true, "svg": "<svg ...>", "width": 20.5, "height": 18.3}, or "png" (base64) with
 // "pixelScale" and "fallback" (why it isn't an SVG), or {"ok": false, "error": ..., "suggestions": [...]}
 // for a name this Mac doesn't have. "restriction" carries Apple's usage note for restricted symbols.
+// width and height are the symbol's frame, which SwiftUI lays out. SwiftUI doesn't clip a symbol to it,
+// so a badge can reach past it: "overflow" says how far past each edge (top, right, bottom, left, in
+// points), and the SVG (its viewBox starts at minus left, minus top) and the PNG cover that too.
 //
 // Apple's symbol artwork is drawn on the person's Mac at import time and never stored in this repo.
 // ImageRenderer needs macOS 13; on older systems every request answers with an error saying so.
@@ -44,6 +47,7 @@ struct Answer: Encodable {
     var pixelScale: Double?
     var width: Double?
     var height: Double?
+    var overflow: [Double]?
     var fallback: String?
     var restriction: String?
     var error: String?
@@ -185,10 +189,10 @@ func spec(_ r: Request) throws -> Spec {
     return (data as Data, frame)
 }
 
-/// A PNG at `pixelScale` with the same frame as the PDF, so PNG and SVG answers line up.
+/// A PNG at `pixelScale` with the same frame as the PDF, plus the overflow around it, so PNG and SVG answers line up.
 @available(macOS 13.0, *)
-@MainActor func drawPNG(_ s: Spec, frame: CGSize, pixelScale: CGFloat) throws -> Data {
-    let renderer = ImageRenderer(content: symbolView(s).frame(width: frame.width, height: frame.height))
+@MainActor func drawPNG(_ s: Spec, frame: CGSize, overflow o: Insets, pixelScale: CGFloat) throws -> Data {
+    let renderer = ImageRenderer(content: symbolView(s).frame(width: frame.width, height: frame.height).padding(EdgeInsets(top: o.top, leading: o.left, bottom: o.bottom, trailing: o.right)))
     renderer.scale = pixelScale
     guard let image = renderer.cgImage, let png = NSBitmapImageRep(cgImage: image).representation(using: .png, properties: [:]) else {
         throw HelperError(message: "Couldn't draw \(s.name).")
@@ -201,11 +205,36 @@ func spec(_ r: Request) throws -> Spec {
 // SwiftUI draws a symbol as filled paths. Layers that erase others (the gap around a badge, the hole
 // in a pin) arrive as luminosity soft masks, which become SVG <mask> elements.
 
+/// Points past each edge of a symbol's frame.
+struct Insets {
+    var top: CGFloat = 0, right: CGFloat = 0, bottom: CGFloat = 0, left: CGFloat = 0
+    var isEmpty: Bool { top == 0 && right == 0 && bottom == 0 && left == 0 }
+
+    init() {}
+
+    /// How far `drawn` reaches past a frame of `size` at the origin. Slivers under 0.01 pt are rounding.
+    init(drawn: CGRect, size: CGSize) {
+        guard !drawn.isNull else { return }
+        let past = { (v: CGFloat) in v > 0.01 ? (v * 1000).rounded(.up) / 1000 : 0 }
+        (top, right, bottom, left) = (past(-drawn.minY), past(drawn.maxX - size.width), past(drawn.maxY - size.height), past(-drawn.minX))
+    }
+}
+
 final class Converter {
     struct State { var ctm: CGAffineTransform; var fill: String; var alpha: CGFloat; var mask: String?; var components: Int }
     var state = State(ctm: .identity, fill: "#000000", alpha: 1, mask: nil, components: 1)
     var stack: [State] = []
     var d = ""
+    /// The path in `d`, for its bounds.
+    var path = CGMutablePath()
+    /// What the painted paths outside masks cover, in SVG coordinates. It can reach past the frame.
+    var drawn = CGRect.null
+    /// Masks cover the whole drawing, which is known only at the end.
+    static let maskArea = "@area@"
+    /// Where each mask lets paint through, when that's bounded: SwiftUI fills whole areas under some masks.
+    var reveals: [String: CGRect] = [:]
+    /// The masks being converted: whether they're luminosity masks, and where they let paint through so far.
+    var building: [(luminosity: Bool, reveal: CGRect)] = []
     var out: [String] = []
     var defs: [String] = []
     var masks = 0
@@ -222,12 +251,39 @@ final class Converter {
 
     static func of(_ info: UnsafeMutableRawPointer?) -> Converter { Unmanaged<Converter>.fromOpaque(info!).takeUnretainedValue() }
 
-    func pt(_ x: CGFloat, _ y: CGFloat) -> String {
+    /// A PDF point in SVG coordinates (y down).
+    func pt(_ x: CGFloat, _ y: CGFloat) -> CGPoint {
         let p = CGPoint(x: x, y: y).applying(state.ctm)
         // Masks paint "infinite" rectangles; pull those corners in to just outside the drawing.
         let far = 4 * max(width, height)
-        let px = min(max(p.x, -far), width + far), py = min(max(p.y, -far), height + far)
-        return "\(fmt(px)) \(fmt(height - py))"
+        return CGPoint(x: min(max(p.x, -far), width + far), y: height - min(max(p.y, -far), height + far))
+    }
+
+    func str(_ p: CGPoint) -> String { "\(fmt(p.x)) \(fmt(p.y))" }
+
+    func move(_ p: CGPoint) {
+        d += "M\(str(p)) "
+        path.move(to: p)
+    }
+
+    func line(_ p: CGPoint) {
+        d += "L\(str(p)) "
+        if path.isEmpty { path.move(to: p) } else { path.addLine(to: p) }
+    }
+
+    func curve(_ c1: CGPoint, _ c2: CGPoint, _ p: CGPoint) {
+        d += "C\(str(c1)) \(str(c2)) \(str(p)) "
+        if path.isEmpty { path.move(to: p) } else { path.addCurve(to: p, control1: c1, control2: c2) }
+    }
+
+    func close() {
+        d += "Z "
+        if !path.isEmpty { path.closeSubpath() }
+    }
+
+    func discard() {
+        d = ""
+        path = CGMutablePath()
     }
 
     func fmt(_ v: CGFloat) -> String {
@@ -239,9 +295,18 @@ final class Converter {
     }
 
     func emit(evenOdd: Bool) {
-        defer { d = "" }
+        defer { discard() }
         guard !d.isEmpty else { return }
         if maskDepth > 0 && state.mask != nil { nestedMasks = true }
+        // Bounds without control points, and only where the path's mask lets it through.
+        var box = path.boundingBoxOfPath
+        if let mask = state.mask, let reveal = reveals[mask] { box = box.intersection(reveal) }
+        if let last = building.indices.last {
+            // Black paints nothing into a luminosity mask.
+            if state.alpha > 0 && !(building[last].luminosity && state.fill == "#000000") { building[last].reveal = building[last].reveal.union(box) }
+        } else if state.alpha > 0 {
+            drawn = drawn.union(box)
+        }
         let opacity = state.alpha < 1 ? " fill-opacity=\"\(fmt(state.alpha))\"" : ""
         let mask = state.mask.map { " mask=\"url(#\($0))\"" } ?? ""
         out.append("<path d=\"\(d.trimmingCharacters(in: .whitespaces))\" fill=\"\(state.fill)\"\(evenOdd ? " fill-rule=\"evenodd\"" : "")\(opacity)\(mask)/>")
@@ -286,19 +351,24 @@ final class Converter {
         var backdrop: CGPDFReal = 0
         var bc: CGPDFArrayRef?
         if CGPDFDictionaryGetArray(smask, "BC", &bc), let bc { CGPDFArrayGetNumber(bc, 0, &backdrop) }
-        let saved = (state, stack, out, d)
+        let saved = (state, stack, out, d, path)
         state = State(ctm: state.ctm, fill: "#000000", alpha: 1, mask: nil, components: 1)
         stack = []
         out = []
+        path = CGMutablePath()
+        building.append((luminosity, .null))
         maskDepth += 1
         runForm(group)
         maskDepth -= 1
+        let reveal = building.removeLast().reveal
         let children = out.joined()
-        (state, stack, out, d) = saved
+        (state, stack, out, d, path) = saved
         let id = "m\(masks)"
         masks += 1
-        let base = luminosity ? "<rect x=\"0\" y=\"0\" width=\"\(fmt(width))\" height=\"\(fmt(height))\" fill=\"\(hex(backdrop, backdrop, backdrop))\"/>" : ""
-        defs.append("<mask id=\"\(id)\" maskUnits=\"userSpaceOnUse\" x=\"0\" y=\"0\" width=\"\(fmt(width))\" height=\"\(fmt(height))\"\(luminosity ? "" : " style=\"mask-type:alpha\"")>\(base)\(children)</mask>")
+        // A luminosity mask over a light backdrop lets everything through but what it paints black.
+        if !(luminosity && backdrop > 0) { reveals[id] = reveal }
+        let base = luminosity ? "<rect \(Converter.maskArea) fill=\"\(hex(backdrop, backdrop, backdrop))\"/>" : ""
+        defs.append("<mask id=\"\(id)\" maskUnits=\"userSpaceOnUse\" \(Converter.maskArea)\(luminosity ? "" : " style=\"mask-type:alpha\"")>\(base)\(children)</mask>")
         return id
     }
 }
@@ -343,30 +413,35 @@ func colorHex(_ n: [CGFloat]) -> String? {
     }
 }
 
-/// The PDF drawing as SVG, or why it can't be one (a bitmap, masks inside masks, drawing the converter skips).
-func svg(fromPDF data: Data, size: CGSize) -> (svg: String?, reason: String?) {
-    guard let provider = CGDataProvider(data: data as CFData), let doc = CGPDFDocument(provider), let page = doc.page(at: 1) else { return (nil, "the PDF drawing didn't parse") }
+/// The PDF drawing as SVG, or why it can't be one (a bitmap, masks inside masks, drawing the converter
+/// skips), and how far its paths reach past the frame either way.
+func svg(fromPDF data: Data, size: CGSize) -> (svg: String?, reason: String?, overflow: Insets) {
+    guard let provider = CGDataProvider(data: data as CFData), let doc = CGPDFDocument(provider), let page = doc.page(at: 1) else { return (nil, "the PDF drawing didn't parse", Insets()) }
     let table = CGPDFOperatorTableCreate()!
     defer { CGPDFOperatorTableRelease(table) }
     func op(_ name: String, _ body: @escaping CGPDFOperatorCallback) { CGPDFOperatorTableSetCallback(table, name, body) }
     op("q") { _, info in let c = Converter.of(info); c.stack.append(c.state) }
     op("Q") { _, info in let c = Converter.of(info); if let s = c.stack.popLast() { c.state = s } }
     op("cm") { s, info in let c = Converter.of(info); let n = numbers(s, 6); c.state.ctm = CGAffineTransform(a: n[0], b: n[1], c: n[2], d: n[3], tx: n[4], ty: n[5]).concatenating(c.state.ctm) }
-    op("m") { s, info in let c = Converter.of(info); let n = numbers(s, 2); c.d += "M\(c.pt(n[0], n[1])) " }
-    op("l") { s, info in let c = Converter.of(info); let n = numbers(s, 2); c.d += "L\(c.pt(n[0], n[1])) " }
-    op("c") { s, info in let c = Converter.of(info); let n = numbers(s, 6); c.d += "C\(c.pt(n[0], n[1])) \(c.pt(n[2], n[3])) \(c.pt(n[4], n[5])) " }
-    op("h") { _, info in Converter.of(info).d += "Z " }
+    op("m") { s, info in let c = Converter.of(info); let n = numbers(s, 2); c.move(c.pt(n[0], n[1])) }
+    op("l") { s, info in let c = Converter.of(info); let n = numbers(s, 2); c.line(c.pt(n[0], n[1])) }
+    op("c") { s, info in let c = Converter.of(info); let n = numbers(s, 6); c.curve(c.pt(n[0], n[1]), c.pt(n[2], n[3]), c.pt(n[4], n[5])) }
+    op("h") { _, info in Converter.of(info).close() }
     op("re") { s, info in
         let c = Converter.of(info); let n = numbers(s, 4)
-        c.d += "M\(c.pt(n[0], n[1])) L\(c.pt(n[0] + n[2], n[1])) L\(c.pt(n[0] + n[2], n[1] + n[3])) L\(c.pt(n[0], n[1] + n[3])) Z "
+        c.move(c.pt(n[0], n[1]))
+        c.line(c.pt(n[0] + n[2], n[1]))
+        c.line(c.pt(n[0] + n[2], n[1] + n[3]))
+        c.line(c.pt(n[0], n[1] + n[3]))
+        c.close()
     }
     op("f") { _, info in Converter.of(info).emit(evenOdd: false) }
     op("F") { _, info in Converter.of(info).emit(evenOdd: false) }
     op("f*") { _, info in Converter.of(info).emit(evenOdd: true) }
     // Clip paths are the forms' bounding boxes; the drawing stays inside them anyway.
-    op("n") { _, info in Converter.of(info).d = "" }
+    op("n") { _, info in Converter.of(info).discard() }
     for stroke in ["S", "s", "B", "B*", "b", "b*", "v", "y", "sh", "BI"] {
-        op(stroke) { _, info in let c = Converter.of(info); c.unsupported.insert("strokes or shadings"); c.d = "" }
+        op(stroke) { _, info in let c = Converter.of(info); c.unsupported.insert("strokes or shadings"); c.discard() }
     }
     op("cs") { s, info in
         let c = Converter.of(info)
@@ -413,14 +488,18 @@ func svg(fromPDF data: Data, size: CGSize) -> (svg: String?, reason: String?) {
     let content = CGPDFContentStreamCreateWithPage(page)
     converter.run(content)
     CGPDFContentStreamRelease(content)
+    let o = Insets(drawn: converter.drawn, size: size)
     // Reasons read as "it uses …" in Sonobe's import notes.
-    if converter.images > 0 { return (nil, "bitmap drawing") }
+    if converter.images > 0 { return (nil, "bitmap drawing", o) }
     // resvg, which draws Sonobe's headless screenshots, can't draw a mask inside a mask.
-    if converter.nestedMasks { return (nil, "masks inside masks") }
-    if !converter.unsupported.isEmpty { return (nil, converter.unsupported.sorted().joined(separator: " and ")) }
-    let w = converter.fmt(size.width), h = converter.fmt(size.height)
-    let defs = converter.defs.isEmpty ? "" : "<defs>\(converter.defs.joined())</defs>"
-    return ("<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"\(w)\" height=\"\(h)\" viewBox=\"0 0 \(w) \(h)\">\(defs)\(converter.out.joined())</svg>", nil)
+    if converter.nestedMasks { return (nil, "masks inside masks", o) }
+    if !converter.unsupported.isEmpty { return (nil, converter.unsupported.sorted().joined(separator: " and "), o) }
+    // Paths keep the frame's coordinates; the viewBox and the masks grow to cover what reaches past it.
+    let f = converter.fmt
+    let x = f(-o.left), y = f(-o.top), w = f(size.width + o.left + o.right), h = f(size.height + o.top + o.bottom)
+    let area = "x=\"\(x)\" y=\"\(y)\" width=\"\(w)\" height=\"\(h)\""
+    let defs = converter.defs.isEmpty ? "" : "<defs>\(converter.defs.joined().replacingOccurrences(of: Converter.maskArea, with: area))</defs>"
+    return ("<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"\(w)\" height=\"\(h)\" viewBox=\"\(x) \(y) \(w) \(h)\">\(defs)\(converter.out.joined())</svg>", nil, o)
 }
 
 let rounded = { (v: CGFloat) in (Double(v) * 1000).rounded() / 1000 }
@@ -437,13 +516,15 @@ let rounded = { (v: CGFloat) in (Double(v) * 1000).rounded() / 1000 }
         let (pdf, frame) = try drawPDF(s)
         out.width = rounded(frame.width)
         out.height = rounded(frame.height)
-        let converted = request.format == "png" ? (svg: nil, reason: "a PNG request") : svg(fromPDF: pdf, size: frame)
-        if let markup = converted.svg {
+        let converted = svg(fromPDF: pdf, size: frame)
+        let o = converted.overflow
+        if !o.isEmpty { out.overflow = [o.top, o.right, o.bottom, o.left].map(rounded) }
+        if let markup = converted.svg, request.format != "png" {
             out.svg = markup
         } else {
-            out.png = try drawPNG(s, frame: frame, pixelScale: 3).base64EncodedString()
+            out.png = try drawPNG(s, frame: frame, overflow: o, pixelScale: 3).base64EncodedString()
             out.pixelScale = 3
-            out.fallback = converted.reason
+            out.fallback = request.format == "png" ? "a PNG request" : converted.reason
         }
         if let note = Catalog.restrictions[s.name] { out.restriction = note }
         out.ok = true
