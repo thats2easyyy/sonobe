@@ -1,12 +1,16 @@
 /**
- * What the Design with Claude box writes for Claude: the prompt it copies when the Assistant isn't
- * available (for Claude Code on the desktop, which names Sonobe's tools, or for Claude in the
- * browser, which asks for HTML to paste), and the follow-ups its result chips send.
+ * What the Design with Claude box writes for Claude: the prompt it copies, or opens in Claude Code,
+ * for people who don't use the Assistant (for Claude Code on the desktop, which names Sonobe's tools
+ * and draws on the canvas as it writes, or for Claude in the browser, which asks for HTML to paste),
+ * and the follow-ups its result chips send.
  */
 
 import type { AssistantCanvasContext } from "../assistant/types.ts";
 
 const points = (n: number) => String(Math.round(n * 10) / 10);
+
+/** The live flow: preview_design draws the page on the canvas as Claude writes it, and import_design imports that draft. */
+const LIVE_FLOW = `with the page's head and first section as html, then append one part at a time, then import_design with "preview": true`;
 
 export function claudePrompt(input: { docName: string; text: string; context: AssistantCanvasContext; browser: boolean }): string {
   const { docName, context, browser } = input;
@@ -31,13 +35,13 @@ export function claudePrompt(input: { docName: string; text: string; context: As
   if (target) {
     return [
       opening,
-      withStyles(`Keep its layer names so its wiring survives: write it as one static HTML page whose body is just that layer at ${width} × ${height}, and import it with import_design using replace "${target.id}" and component "${component.id}".`, "The styles the prototype uses now:"),
+      withStyles(`Keep its layer names so its wiring survives: write it as one static HTML page whose body is just that layer at ${width} × ${height}, and show it on this canvas as you write: preview_design (replace "${target.id}", component "${component.id}") ${LIVE_FLOW}.`, "The styles the prototype uses now:"),
     ].join("\n\n");
   }
   return [
     opening,
     withStyles("Match what's already there, and my app's theme files in this folder if it has them.", `The styles the prototype uses now (get_outline with detail "styles" shows them again):`),
-    `Write it as one static HTML page ${width} points wide, with data-name on everything I'll wire and the top safe area empty, and import it with import_design (component "${component.id}"). Then iterate by importing again with replace.`,
+    `Write it as one static HTML page ${width} points wide, with data-name on everything I'll wire and the top safe area empty, and show it on this canvas as you write: preview_design (component "${component.id}") ${LIVE_FLOW}. Then iterate the same way with replace.`,
   ].join("\n\n");
 }
 

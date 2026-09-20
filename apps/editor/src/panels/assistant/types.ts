@@ -103,6 +103,14 @@ export interface AssistantCodeFolderLinkResult {
   error?: string;
 }
 
+/** Open in Claude Code: the prompt the person's own `claude` starts with, at most 20,000 characters. */
+export interface HandoffRequest {
+  prompt: string;
+}
+
+/** `folder` shows home as "~". `cancelled`: the person closed the folder dialog. `error`: why nothing opened. */
+export type HandoffResult = { ok: true; folder: string } | { ok: false; cancelled?: boolean; error?: string };
+
 export interface AssistantError {
   code: string;
   message: string;
@@ -158,6 +166,8 @@ export interface AssistantApi {
   codeFolder?(): Promise<AssistantCodeFolderStatus>;
   linkCodeFolder?(): Promise<AssistantCodeFolderLinkResult>;
   unlinkCodeFolder?(): Promise<AssistantCodeFolderStatus>;
+  /** Optional: older preloads lack it. Opens Terminal in the linked code folder running the person's own `claude` (macOS). */
+  openInClaudeCode?(request: HandoffRequest): Promise<HandoffResult>;
 }
 
 /** The parts of window.sonobeHost the Assistant uses. All optional: older preloads lack them. */

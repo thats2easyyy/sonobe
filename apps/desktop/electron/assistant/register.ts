@@ -15,6 +15,7 @@ import { homedir } from "node:os";
 import path from "node:path";
 import Anthropic from "@anthropic-ai/sdk";
 import type { GuideStore, SonobeHost } from "@sonobe/mcp";
+import { handoffFolder, openInClaudeCode, type HandoffOptions } from "../claude-handoff.ts";
 import type { SecretStore } from "../secrets.ts";
 import { createAssistantAgent, type AnthropicClientLike, type AssistantAgent } from "./agent.ts";
 import { CodeFolderError, createCodeTools, type CodeFolderKey, type CodeFolderStore } from "./codeFolder.ts";
@@ -30,6 +31,8 @@ import {
   type AssistantRunResult,
   type AssistantSendRequest,
   type AssistantStatus,
+  type HandoffRequest,
+  type HandoffResult,
 } from "./protocol.ts";
 import { createMcpToolBridge, type LocalTools, type ToolBridge } from "./toolBridge.ts";
 
@@ -75,6 +78,8 @@ export interface RegisterAssistantOptions {
   pickFolder?(sender: AssistantSender, options: { defaultPath: string }): Promise<string | null>;
   /** Default: createCodeTools over `codeFolders` (tests pass a fake). */
   createCodeTools?(store: CodeFolderStore): LocalTools;
+  /** Open in Claude Code (claude-handoff.ts): the platform, where scripts go, the relay's launch spec and shell.openPath. The folder is the window's code folder, picked with `pickFolder` when none is linked. */
+  handoff?: Omit<HandoffOptions, "folder">;
 }
 
 export interface AssistantRegistration {
@@ -125,10 +130,13 @@ export function registerAssistant(options: RegisterAssistantOptions): AssistantR
 
   const documentFor = options.documentFor;
   const codeFolders = options.codeFolders;
+  const pickFolder = options.pickFolder;
   const localTools = codeFolders ? (options.createCodeTools ?? createCodeTools)(codeFolders) : undefined;
 
   /** Where a window's code folder link lives: its saved prototype's path, else the window alone. */
   const folderKey = async (id: string): Promise<CodeFolderKey> => ({ projectPath: (await documentFor?.(Number(id)))?.projectPath ?? null, windowId: id });
+  // The folder dialog opens where the prototype is saved: its app's repo is often next to it.
+  const dialogPath = (key: CodeFolderKey) => (key.projectPath ? path.dirname(key.projectPath) : homedir());
 
   const codeFolderStatus = async (id: string): Promise<AssistantCodeFolderStatus> => {
     if (!codeFolders) return noCodeFolder();
@@ -224,10 +232,9 @@ export function registerAssistant(options: RegisterAssistantOptions): AssistantR
     [ASSISTANT_IPC.codeFolder]: (event): Promise<AssistantCodeFolderStatus> => codeFolderStatus(conversationOf(event)),
     [ASSISTANT_IPC.linkCodeFolder]: async (event): Promise<AssistantCodeFolderLinkResult> => {
       const id = conversationOf(event);
-      if (!codeFolders || !options.pickFolder) return { status: noCodeFolder(), error: "This version of Sonobe can't link a code folder yet." };
+      if (!codeFolders || !pickFolder) return { status: noCodeFolder(), error: "This version of Sonobe can't link a code folder yet." };
       const key = await folderKey(id);
-      // The dialog opens where the prototype is saved: its app's repo is often next to it.
-      const folder = await options.pickFolder(event.sender, { defaultPath: key.projectPath ? path.dirname(key.projectPath) : homedir() });
+      const folder = await pickFolder(event.sender, { defaultPath: dialogPath(key) });
       if (folder === null) return { status: await codeFolders.status(key), cancelled: true };
       try {
         return { status: await codeFolders.link(key, folder) };
@@ -239,6 +246,20 @@ export function registerAssistant(options: RegisterAssistantOptions): AssistantR
     [ASSISTANT_IPC.unlinkCodeFolder]: async (event): Promise<AssistantCodeFolderStatus> => {
       const id = conversationOf(event);
       return codeFolders ? codeFolders.unlink(await folderKey(id)) : noCodeFolder();
+    },
+    // Needs no API key: it starts the person's own `claude`, signed in with their plan.
+    [ASSISTANT_IPC.openInClaudeCode]: async (event, request): Promise<HandoffResult> => {
+      const id = conversationOf(event);
+      if (!options.handoff) return { ok: false, error: "This version of Sonobe can't open Claude Code. Copy the prompt instead, and paste it into Claude Code in your app's folder." };
+      const prompt = request && typeof request === "object" ? (request as Partial<HandoffRequest>).prompt : undefined;
+      return openInClaudeCode(typeof prompt === "string" ? { prompt } : {}, {
+        ...options.handoff,
+        folder: async () => {
+          if (!codeFolders || !pickFolder) return { error: "This version of Sonobe can't link a code folder yet." };
+          const key = await folderKey(id);
+          return handoffFolder(codeFolders, key, () => pickFolder(event.sender, { defaultPath: dialogPath(key) }));
+        },
+      });
     },
   };
 

@@ -1,11 +1,12 @@
 /**
  * The Design with Claude box: floats at the bottom of the canvas, follows the selection (a new screen,
  * or a redesign of the selected layer), sends to the in-app Assistant with the canvas's context, and
- * shows what Claude is doing and what it made. Without the Assistant, it copies a prompt instead.
+ * shows what Claude is doing and what it made. Without the Assistant, it copies a prompt instead, or
+ * opens it in the person's own Claude Code (Open in Claude Code, macOS).
  */
 
 import { artboardSize, findLayer } from "@sonobe/core";
-import { Check, CircleAlert, Copy, FolderCode, KeyRound, LoaderCircle, MessageSquare, ScanLine, SendToBack, Sparkles, TriangleAlert, Undo2, X } from "lucide-react";
+import { Check, CircleAlert, Copy, FolderCode, KeyRound, LoaderCircle, MessageSquare, ScanLine, SendToBack, Sparkles, SquareTerminal, TriangleAlert, Undo2, X } from "lucide-react";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type JSX, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import { useStore } from "zustand";
 import { appPanels } from "../../app/appPanels.ts";
@@ -81,6 +82,7 @@ function DesignBoxPanel({ session, bounds, onHeightChange }: DesignBoxProps): JS
   const [noKey, setNoKey] = useState(false);
   const [codeError, setCodeError] = useState<string | null>(null);
   const [sentBack, setSentBack] = useState<string | null>(null);
+  const [handingOff, setHandingOff] = useState(false);
   const [mcpSource] = useState<McpStatusSource | null>(() => {
     const api = getDesktopHostApi() as Partial<McpStatusSource> | undefined;
     return typeof api?.getMcpStatus === "function" ? (api as McpStatusSource) : null;
@@ -153,8 +155,9 @@ function DesignBoxPanel({ session, bounds, onHeightChange }: DesignBoxProps): JS
     return submit(text);
   };
 
-  const copyPrompt = async (browser: boolean) => {
-    const prompt = claudePrompt({ docName: doc.project.name, text: composerRef.current?.value.trim() ?? "", context: canvasContext(session, target, bounds), browser });
+  const promptFor = (browser: boolean) => claudePrompt({ docName: doc.project.name, text: composerRef.current?.value.trim() ?? "", context: canvasContext(session, target, bounds), browser });
+
+  const copyPrompt = async (browser: boolean, prompt = promptFor(browser)) => {
     try {
       await navigator.clipboard.writeText(prompt);
     } catch {
@@ -172,6 +175,28 @@ function DesignBoxPanel({ session, bounds, onHeightChange }: DesignBoxProps): JS
         : { title: "Prompt copied", description: "Paste it into Claude Code in your app's folder.", tone: "ai", action: { label: "Connect Claude…", onClick: () => connectClaudeStore.getState().show() } },
     );
   };
+
+  // Terminal runs the person's own `claude` in their app's folder, and it draws on this canvas through preview_design.
+  const openInClaudeCode = async () => {
+    if (!composerRef.current?.value.trim()) {
+      toast({ title: "Describe the screen first", description: "Write what Claude Code should design in the box, then choose Open in Claude Code.", tone: "warn" });
+      composerRef.current?.focus({ preventScroll: true });
+      return;
+    }
+    const prompt = promptFor(false);
+    setHandingOff(true);
+    const opened = await controller.openInClaudeCode(prompt);
+    setHandingOff(false);
+    if (!opened || (!opened.ok && opened.cancelled)) return;
+    if (opened.ok) toast({ title: "Opened Claude Code", description: `In Terminal, in “${folderName(opened.folder)}”. It designs on this canvas as it writes.`, tone: "ai" });
+    else toast.error("Couldn't open Claude Code", { description: opened.error ?? "Copy the prompt instead, and paste it into Claude Code in your app's folder.", action: { label: "Copy prompt", onClick: () => void copyPrompt(false, prompt) } });
+  };
+
+  const openButton = (variant: "ai" | "ghost") => (
+    <Button size="sm" variant={variant} icon={<SquareTerminal size={13} />} loading={handingOff} onClick={() => void openInClaudeCode()}>
+      Open in Claude Code
+    </Button>
+  );
 
   const linkCodeFolder = async () => {
     setCodeError(null);
@@ -274,9 +299,13 @@ function DesignBoxPanel({ session, bounds, onHeightChange }: DesignBoxProps): JS
         </div>
       ) : noKey ? (
         <div className="sb-design-box__notice">
-          <p>Designing on the canvas uses your own Anthropic API key, kept in your keychain.</p>
+          <p>
+            Designing on the canvas uses your own Anthropic API key, kept in your keychain.
+            {controller.canOpenInClaudeCode ? " With a Claude plan, open it in Claude Code instead: it draws on this canvas as it writes." : null}
+          </p>
           <div className="sb-design-box__actions">
-            <Button size="sm" variant="ai" icon={<KeyRound size={13} />} onClick={() => assistantStore.getState().show()}>
+            {controller.canOpenInClaudeCode ? openButton("ai") : null}
+            <Button size="sm" variant={controller.canOpenInClaudeCode ? undefined : "ai"} icon={<KeyRound size={13} />} onClick={() => assistantStore.getState().show()}>
               Add API key…
             </Button>
             <Button size="sm" icon={<Copy size={13} />} onClick={() => void copyPrompt(false)}>
@@ -334,6 +363,8 @@ function DesignBoxPanel({ session, bounds, onHeightChange }: DesignBoxProps): JS
           )
         ) : null}
         <span className="sb-design-box__spacer" />
+        {/* The no-key notice offers it first; otherwise it's here, for plan users with or without a key. */}
+        {controller.canOpenInClaudeCode && !noKey ? openButton("ghost") : null}
         {controller.available ? (
           <Button size="sm" variant="ghost" icon={<MessageSquare size={13} />} onClick={() => assistantStore.getState().show()}>
             Open chat

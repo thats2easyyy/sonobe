@@ -207,6 +207,7 @@ Sonobe also offers four ready-made prompts: `import_screen`, `prototype_interact
 ## Watching and undoing
 
 - While Claude works, the AI Activity tab in the bottom HUD shows what it's doing, and the items it's changing are highlighted in the editor.
+- When Claude designs a screen, it draws the page over the artboard as it writes, one part at a time (`preview_design`), then imports it as real layers. To start one from the canvas, describe it in the **Design with Claude** box and choose **Open in Claude Code** (on a Mac; [guide 12](12-importing-designs.md#design-on-the-canvas)).
 - Each batch of changes becomes one row in AI Activity with its op count, and one entry in Edit → Undo, labeled with who made it, like "Claude: added press feedback (4 ops)". One undo removes the whole batch, and each row has its own **Undo this** button.
 - Batches are all or nothing. If any change in a batch fails validation, none of the batch is applied, so you never end up with half a feature.
 - Claude's edits are tied to the version of the document they were based on. If you changed the document in the meantime, Sonobe rejects the edit and Claude re-reads instead of overwriting your work.

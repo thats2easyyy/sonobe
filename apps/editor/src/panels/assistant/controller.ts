@@ -18,6 +18,7 @@ import {
   type AssistantCodeFolderStatus,
   type AssistantHostLike,
   type AssistantRunResult,
+  type HandoffResult,
 } from "./types.ts";
 
 export interface SaveKeyResult {
@@ -44,6 +45,10 @@ export interface AssistantController {
   /** Shows the native folder dialog (Match my code…). Null when the host can't link one. */
   linkCodeFolder(): Promise<AssistantCodeFolderLinkResult | null>;
   unlinkCodeFolder(): Promise<AssistantCodeFolderStatus | null>;
+  /** The host can open Claude Code: it has the bridge method, on macOS (a host that doesn't say its platform gets main's teaching error instead). */
+  readonly canOpenInClaudeCode: boolean;
+  /** Open in Claude Code: Terminal in the linked code folder (its dialog first when none is linked) runs the person's own `claude` with `prompt`. Needs no API key. Null when the host can't. */
+  openInClaudeCode(prompt: string): Promise<HandoffResult | null>;
   /** Open console.anthropic.com's API keys page in the browser. */
   openConsole(): void;
   /** Subscribe to host events again after dispose() (React StrictMode remounts). Controllers start attached. */
@@ -70,6 +75,8 @@ export function createAssistantController(host: AssistantHostLike | null, store:
       codeFolder: async () => null,
       linkCodeFolder: async () => null,
       unlinkCodeFolder: async () => null,
+      canOpenInClaudeCode: false,
+      openInClaudeCode: async () => null,
       openConsole: () => openLink(host, ANTHROPIC_CONSOLE_KEYS_URL),
       attach: () => undefined,
       dispose: () => undefined,
@@ -104,6 +111,18 @@ export function createAssistantController(host: AssistantHostLike | null, store:
   };
 
   const setCodeFolder = (codeFolder: AssistantCodeFolderStatus) => store.setState((s) => (s.status ? { status: { ...s.status, codeFolder } } : {}));
+
+  const codeFolder = async () => {
+    if (!assistant.codeFolder) return null;
+    try {
+      const status = await assistant.codeFolder();
+      setCodeFolder(status);
+      return status;
+    } catch {
+      // The status keeps the last folder it knew; the next refresh tries again.
+      return null;
+    }
+  };
 
   const checkKey = async () => {
     store.setState({ keyCheck: { state: "checking" } });
@@ -187,17 +206,7 @@ export function createAssistantController(host: AssistantHostLike | null, store:
         addNotice("error", `Couldn't send your answer: ${messageOf(err)}`);
       }
     },
-    async codeFolder() {
-      if (!assistant.codeFolder) return null;
-      try {
-        const status = await assistant.codeFolder();
-        setCodeFolder(status);
-        return status;
-      } catch {
-        // The status keeps the last folder it knew; the next refresh tries again.
-        return null;
-      }
-    },
+    codeFolder,
     async linkCodeFolder() {
       if (!assistant.linkCodeFolder) return null;
       try {
@@ -218,6 +227,19 @@ export function createAssistantController(host: AssistantHostLike | null, store:
         addNotice("error", `Couldn't unlink the code folder: ${messageOf(err)}`);
         return null;
       }
+    },
+    canOpenInClaudeCode: typeof assistant.openInClaudeCode === "function" && (host.platform === undefined || host.platform === "darwin"),
+    async openInClaudeCode(prompt) {
+      if (!assistant.openInClaudeCode) return null;
+      let result: HandoffResult;
+      try {
+        result = await assistant.openInClaudeCode({ prompt });
+      } catch (err) {
+        return { ok: false, error: `Sonobe couldn't open Claude Code: ${messageOf(err)}` };
+      }
+      // A folder picked in its dialog is linked, as with Match my code….
+      if (result.ok || !result.cancelled) await codeFolder();
+      return result;
     },
     openConsole: () => openLink(host, ANTHROPIC_CONSOLE_KEYS_URL),
     attach,
