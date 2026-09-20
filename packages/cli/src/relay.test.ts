@@ -208,6 +208,16 @@ describe("sonobe mcp relay: sessions", () => {
     expect(r.seen.at(-1)).toMatchObject({ method: "DELETE", path: `/clients/${ID}` });
   });
 
+  it("leaves out clientInfo fields the client sent blank", async () => {
+    const r = relay(answering);
+    r.send({ ...INITIALIZE, params: { ...INITIALIZE.params, clientInfo: { name: " my-agent ", title: "  ", version: "" } } });
+    await until(() => r.lines.length === 1);
+    r.stdin.end();
+    await r.done;
+    const hellos = r.seen.filter((s) => s.path === "/clients" && s.method === "POST");
+    expect(hellos[0]!.body).toEqual({ id: ID, name: "my-agent", relay: { version: "0.1.0-test" } });
+  });
+
   it("learns a 2026-07-28 client's name from its request metadata, and heartbeats", async () => {
     const r = relay(answering, { cwd: "/Users/me/app", heartbeatMs: 15 });
     const meta = { "io.modelcontextprotocol/protocolVersion": "2026-07-28", "io.modelcontextprotocol/clientInfo": { name: "claude-code", version: "2.2.0" } };

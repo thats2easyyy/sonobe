@@ -108,6 +108,9 @@ describe("parseHello", () => {
     expect(parseHello({ id: A, folder: "C:\\dev\\app" })).toEqual({ id: A, folder: "C:\\dev\\app" });
     expect(parseHello({ id: A, name: "claude\u0007-code" })).toEqual({ id: A, name: "claude-code" });
     expect((parseHello({ id: A, name: "x".repeat(500) }) as { name: string }).name).toHaveLength(120);
+    // clientInfo's version is a required string that some clients leave blank; the rest still counts.
+    expect(parseHello({ id: A, name: "my-agent", version: "" })).toEqual({ id: A, name: "my-agent" });
+    expect(parseHello({ id: A, name: "my-agent", title: "  ", version: "\u0007" })).toEqual({ id: A, name: "my-agent" });
   });
 
   it("explains what's wrong with a bad hello", () => {
@@ -118,7 +121,7 @@ describe("parseHello", () => {
     expect(parseHello({ id: A, folder: "relative/path" })).toContain('"folder" must be an absolute path');
     expect(parseHello({ id: A, folder: "/a\nb" })).toContain('"folder" must be an absolute path');
     expect(parseHello({ id: A, folder: `/${"a".repeat(1100)}` })).toContain("at most 1024");
-    expect(parseHello({ id: A, name: 3 })).toContain('"name" must be a non-empty string');
+    expect(parseHello({ id: A, name: 3 })).toContain('"name" must be a string');
     expect(parseHello({ id: A, relay: "0.1.0" })).toContain('"relay" must be an object');
   });
 });

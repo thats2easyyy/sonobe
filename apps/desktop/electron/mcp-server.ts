@@ -14,7 +14,7 @@ import type { AddressInfo } from "node:net";
 import { chmodSync, mkdirSync, readFileSync, rmSync } from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
-import { parseHello, type ClientRegistry } from "@sonobe/mcp";
+import { isClientId, parseHello, type ClientRegistry } from "@sonobe/mcp";
 import { atomicWriteFileSync } from "./fs-utils.ts";
 
 export type McpRequestHandler = (req: IncomingMessage, res: ServerResponse) => void | Promise<void>;
@@ -155,7 +155,10 @@ export function createNotWiredHandler(maxBodyBytes = 8 * 1024 * 1024): McpReques
 /** POST /clients: a relay's hello or heartbeat. DELETE /clients/<id>: its goodbye. Both answer 204. */
 function serveClients(clients: ClientRegistry, pathname: string, req: IncomingMessage, res: ServerResponse): void {
   if (req.method === "DELETE" && pathname.startsWith("/clients/")) {
-    clients.bye(decodeURIComponent(pathname.slice("/clients/".length)));
+    // Relay ids need no decoding, so the segment is checked as it is (a malformed escape can't throw).
+    const id = pathname.slice("/clients/".length);
+    if (!isClientId(id)) return jsonRpcError(res, 400, -32602, "The id after /clients/ must be 8 to 64 letters, digits or dashes: the one the hello sent.");
+    clients.bye(id);
     res.writeHead(204).end();
     return;
   }
