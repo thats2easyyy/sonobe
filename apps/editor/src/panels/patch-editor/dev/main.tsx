@@ -86,7 +86,7 @@ const session = createEditorSession({ host: null, document: doc, textMeasurer: "
 setDefaultSession(session);
 if (params.get("enter")) session.selection.getState().enterComponent(params.get("enter")!);
 
-/** Tap a layer in the running prototype (for sparks and live values). */
+/** Tap a layer in the running prototype (for cable orbs and live values). */
 function tapLayer(x: number, y: number) {
   session.runtime.runtime.dispatch([{ kind: "pointer", phase: "down", pointerId: 1, x, y }]);
   setTimeout(() => session.runtime.runtime.dispatch([{ kind: "pointer", phase: "up", pointerId: 1, x, y }]), 60);

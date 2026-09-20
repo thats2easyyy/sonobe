@@ -1,7 +1,7 @@
 /**
  * The patch editor: the current component's patch graph on React Flow. Patches, layer property
  * targets, comments, and cables are derived from the document; every edit goes through the
- * document store with an undo label; live values and pulse sparks come from the RuntimeHost (inside
+ * document store with an undo label; live values and pulse fires come from the RuntimeHost (inside
  * component instances too).
  */
 

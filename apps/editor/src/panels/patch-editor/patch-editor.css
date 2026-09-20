@@ -1327,29 +1327,254 @@ textarea.sb-pe-title-input {
   stroke-width: 2.75;
 }
 
-.sb-pe-cable__spark {
-  fill: var(--port-pulse);
-  filter: drop-shadow(0 0 4px var(--port-pulse));
+/*
+ * The orb a pulse or a boolean change sends along a cable (Orb in CableEdge.tsx, keyframes in orb.ts),
+ * and its landing on the input's dot, which is drawn in React Flow's viewport portal above the nodes.
+ * Web Animations move the head and reshape the tapered trails behind it, fading them with fill-opacity
+ * and stroke-opacity, which are 0 at rest, so each part's strength is in its color. Not opacity: with
+ * a pulse firing every frame into 40 cables, opacity animations held the graph near 30 fps, and these
+ * keep it at 60. The head is a gradient, not a blur filter.
+ */
+.sb-pe-orb,
+.sb-pe-orb-landing {
+  --sb-orb-core: #fff;
+  --sb-orb-hot: color-mix(in oklab, var(--sb-cable) 30%, #fff);
+  --sb-orb-halo: var(--sb-cable);
+  /* A lighter shade of the cable's color, for the trails over the wire. */
+  --sb-orb-lit: color-mix(in oklab, var(--sb-cable) 62%, #fff);
   pointer-events: none;
 }
 
+.sb-pe-orb-landing {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 1px;
+  height: 1px;
+  overflow: visible;
+}
+
+.sb-pe-orb__slot > *,
+.sb-pe-orb__land > * {
+  fill-opacity: 0;
+  stroke-opacity: 0;
+}
+
+.sb-pe-orb__core {
+  stop-color: var(--sb-orb-core);
+}
+
+.sb-pe-orb__hot {
+  stop-color: var(--sb-orb-hot);
+}
+
+.sb-pe-orb__color {
+  stop-color: var(--sb-cable);
+  stop-opacity: 0.8;
+}
+
+.sb-pe-orb__glow {
+  stop-color: var(--sb-orb-halo);
+  stop-opacity: 0.26;
+}
+
+.sb-pe-orb__fade {
+  stop-color: var(--sb-orb-halo);
+  stop-opacity: 0;
+}
+
+/* A boolean turning off sends a smaller orb that's all color, no white-hot core. */
+.sb-pe-orb__slot[data-tone="dim"] .sb-pe-orb__head {
+  fill: var(--sb-orb-dim);
+}
+
+.sb-pe-orb__dim-core {
+  stop-color: var(--sb-orb-lit);
+  stop-opacity: 0.95;
+}
+
+.sb-pe-orb__dim-hot {
+  stop-color: var(--sb-cable);
+  stop-opacity: 0.8;
+}
+
+.sb-pe-orb__dim-color {
+  stop-color: var(--sb-cable);
+  stop-opacity: 0.4;
+}
+
+.sb-pe-orb__dim-glow {
+  stop-color: var(--sb-orb-halo);
+  stop-opacity: 0.1;
+}
+
+/* The landing's flare lights the input's dot from inside. */
+.sb-pe-orb__flare-core {
+  stop-color: var(--sb-orb-core);
+}
+
+.sb-pe-orb__flare-hot {
+  stop-color: var(--sb-orb-hot);
+  stop-opacity: 0.9;
+}
+
+.sb-pe-orb__flare-glow {
+  stop-color: var(--sb-cable);
+  stop-opacity: 0.3;
+}
+
+/* The trails are filled shapes, over `.sb-pe-cable path { fill: none }`. */
+.sb-pe-orb .sb-pe-orb__wake {
+  fill: color-mix(in srgb, var(--sb-orb-lit) 70%, transparent);
+}
+
+.sb-pe-orb .sb-pe-orb__tail {
+  fill: color-mix(in srgb, var(--sb-orb-lit) 88%, transparent);
+}
+
+.sb-pe-orb .sb-pe-orb__streak {
+  fill: var(--sb-orb-hot);
+}
+
+.sb-pe-orb__ring {
+  fill: none;
+  stroke: var(--sb-cable);
+}
+
+/*
+ * A boolean's glow changes with its orb. From the change until the orb is in, the cable hides its own
+ * glow (Orb sets data-orb-hold to what it showed before), and the sweep, a copy of that glow, shows it
+ * instead: on or off as it was, then lit or darkened behind the head as the orb carries the change.
+ */
+.sb-pe-cable[data-orb-hold]:not([data-selected], [data-splice]) .sb-pe-cable__glow,
+.sb-pe-cable:is([data-selected], [data-splice]) .sb-pe-orb__sweep {
+  visibility: hidden;
+}
+
+.sb-pe-orb .sb-pe-orb__sweep {
+  stroke: var(--sb-cable);
+  stroke-width: 7;
+  stroke-linecap: butt;
+  stroke-opacity: 0;
+}
+
+/* The glow's opacity (.sb-pe-cable__glow). */
+.sb-pe-cable[data-orb-hold="on"] .sb-pe-orb__sweep,
+.sb-pe-orb .sb-pe-orb__sweep[data-sweep] {
+  stroke-opacity: 0.2;
+}
+
+.sb-pe-cable[data-orb-hold="off"][data-live]:not([data-selected]) .sb-pe-cable__wire {
+  stroke-width: 2;
+}
+
+.sb-pe-cable[data-orb-hold="on"]:not([data-live], [data-selected]) .sb-pe-cable__wire {
+  stroke-width: 2.5;
+}
+
+/*
+ * On a light canvas white reads as a gap in the wire, so nothing is white: the orb is a lighter, more
+ * vivid shade of the cable's color, in a pale tint of it, like colored light on paper, and the landing
+ * glows around the input's dot instead of covering it. (Without relative colors, the fallback is a
+ * bead of the cable's own color.)
+ */
+[data-theme="light"] :is(.sb-pe-orb, .sb-pe-orb-landing) {
+  --sb-orb-core: var(--sb-cable);
+  --sb-orb-hot: var(--sb-cable);
+  --sb-orb-halo: color-mix(in oklab, var(--sb-cable) 55%, #fff);
+  --sb-orb-lit: var(--sb-cable);
+}
+
+@supports (color: oklch(from red l c h)) {
+  [data-theme="light"] :is(.sb-pe-orb, .sb-pe-orb-landing) {
+    --sb-orb-core: oklch(from var(--sb-cable) calc(l + 0.16) calc(c * 1.2) h);
+    --sb-orb-hot: oklch(from var(--sb-cable) calc(l + 0.08) calc(c * 1.25) h);
+    --sb-orb-halo: oklch(from var(--sb-cable) calc(l + 0.14) calc(c * 1.1) h);
+    --sb-orb-lit: oklch(from var(--sb-cable) calc(l + 0.06) calc(c * 1.2) h);
+  }
+}
+
+[data-theme="light"] .sb-pe-orb__color {
+  stop-opacity: 0.7;
+}
+
+[data-theme="light"] .sb-pe-orb__glow {
+  stop-opacity: 0.32;
+}
+
+/* The turn-off orb keeps a strong core, so it still reads on the pale canvas. */
+[data-theme="light"] .sb-pe-orb__dim-core {
+  stop-color: var(--sb-orb-core);
+  stop-opacity: 1;
+}
+
+[data-theme="light"] .sb-pe-orb__dim-hot {
+  stop-color: var(--sb-orb-hot);
+  stop-opacity: 0.95;
+}
+
+[data-theme="light"] .sb-pe-orb__dim-color {
+  stop-opacity: 0.6;
+}
+
+[data-theme="light"] .sb-pe-orb__dim-glow {
+  stop-opacity: 0.22;
+}
+
+[data-theme="light"] .sb-pe-orb .sb-pe-orb__wake {
+  fill: color-mix(in srgb, var(--sb-orb-hot) 70%, transparent);
+}
+
+[data-theme="light"] .sb-pe-orb .sb-pe-orb__streak {
+  fill: var(--sb-orb-core);
+}
+
+[data-theme="light"] .sb-pe-orb__flare-core {
+  stop-color: var(--sb-orb-halo);
+  stop-opacity: 0;
+}
+
+[data-theme="light"] .sb-pe-orb__flare-hot {
+  stop-color: var(--sb-orb-halo);
+  stop-opacity: 0.25;
+}
+
+[data-theme="light"] .sb-pe-orb__flare-glow {
+  stop-color: var(--sb-orb-halo);
+  stop-opacity: 0.5;
+}
+
+.sb-pe__canvas[data-lod="far"] :is(.sb-pe-orb__slot > :not(.sb-pe-orb__head), .sb-pe-orb-landing) {
+  display: none;
+}
+
+/* Reduced motion: no orb travels; the whole cable flashes in place. */
 .sb-pe-cable__flash {
-  stroke: var(--port-pulse);
-  stroke-width: 4;
-  opacity: 0;
-  pointer-events: none;
-  animation: sb-pe-cable-flash 320ms linear forwards;
+  stroke: color-mix(in srgb, var(--sb-cable) 80%, transparent);
+  stroke-width: 5;
+  stroke-opacity: 0;
 }
 
-@keyframes sb-pe-cable-flash {
-  0% {
-    opacity: 0;
+.sb-pe-cable__flash[data-tone="dim"] {
+  stroke: color-mix(in srgb, var(--sb-cable) 40%, transparent);
+}
+
+/*
+ * And the output's pulse ring fades in place instead of growing, with Settings → Motion → Reduce or
+ * with the OS setting while Motion is System (base.css makes other interface animation instant).
+ */
+:root:is([data-motion="reduce"], [data-reduced-motion="true"]) .sb-pe-pulse-ring {
+  animation: sb-pe-fade 420ms var(--ease-out) forwards !important;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root:not([data-motion="full"]) .sb-pe-pulse-ring {
+    animation: sb-pe-fade 420ms var(--ease-out) forwards !important;
   }
-  30% {
-    opacity: 0.85;
-  }
-  100% {
-    opacity: 0;
+
+  /* Motion → Full grows it whatever the OS says. */
+  :root[data-motion="full"] .sb-pe-pulse-ring {
+    animation-name: sb-pe-pulse-ring;
   }
 }
 
