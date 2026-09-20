@@ -66,6 +66,15 @@ export function unionRects(rects: readonly Rect[]): Rect | null {
   return boundsOf(rects.flatMap((r) => [[r.x, r.y], [r.x + r.width, r.y + r.height]]));
 }
 
+/** Where two rects overlap, or null when they don't (touching edges don't count). */
+export function intersectRects(a: Rect, b: Rect): Rect | null {
+  const x = Math.max(a.x, b.x);
+  const y = Math.max(a.y, b.y);
+  const width = Math.min(a.x + a.width, b.x + b.width) - x;
+  const height = Math.min(a.y + a.height, b.y + b.height) - y;
+  return width > 0 && height > 0 ? { x, y, width, height } : null;
+}
+
 /** Normalized rect spanning two points. */
 export function rectFromPoints(a: Point, b: Point): Rect {
   return { x: Math.min(a[0], b[0]), y: Math.min(a[1], b[1]), width: Math.abs(b[0] - a[0]), height: Math.abs(b[1] - a[1]) };

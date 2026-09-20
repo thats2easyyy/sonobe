@@ -23,6 +23,8 @@ describe("agent access", () => {
     expect(isAgentWrite("history.undo", {})).toBe(true);
     expect(isAgentWrite("document.info", {})).toBe(false);
     expect(isAgentWrite("sim.step", {})).toBe(false);
+    // An MCP client's design preview draws on the canvas and changes nothing.
+    expect(isAgentWrite("design.preview", { status: "writing", html: "<p>Hi</p>" })).toBe(false);
   });
 
   it("refuses writes while read only and passes everything else through", () => {

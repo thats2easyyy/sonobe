@@ -35,7 +35,6 @@ export const IPC = {
   /** renderer → main: the editor restarted its prototype (players restart too). */
   prototypeRestarted: "sonobe:prototype:restarted",
   secretsStatus: "sonobe:secrets:status",
-  secretsGet: "sonobe:secrets:get",
   secretsSet: "sonobe:secrets:set",
   secretsDelete: "sonobe:secrets:delete",
   openExternal: "sonobe:shell:open-external",

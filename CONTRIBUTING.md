@@ -72,6 +72,22 @@ Tools register in `packages/mcp/src/tools/` with `tc.tool(name, config, async (a
 3. Pass `signal: work.signal` (or `tc.signal(ctx)`) to `host.apply` and `history.undo`, so a cancelled call never changes the document. Call `work.throwIfCancelled()` between steps. In a long synchronous loop, `await work.checkpoint()` now and then.
 4. Test it with a v1 SDK client: `client.callTool(params, undefined, { onprogress, resetTimeoutOnProgress: true, timeout: 500 })` for progress, and `{ signal }` to cancel. `packages/mcp/src/import.test.ts` has examples.
 
+## Changing the in-app Assistant
+
+The Assistant's main-process side (`apps/desktop/electron/assistant`) and the editor (`apps/editor/src/panels/assistant`, `panels/design`) talk over IPC:
+
+1. A new request field or event goes in four places: `protocol.ts`, the editor's mirror in `panels/assistant/types.ts`, the preload (`assistant/preload.ts`) and main's sanitizer (`register.ts`, or `sanitizeCanvasContext` in `assistant/design.ts` for the canvas's context). The last two drop fields they don't know.
+2. The Assistant's own tools (the code folder's `list_code_files`, `search_code` and `read_code_file`) aren't MCP tools: keep them out of `TOOL_NAMES`, the tool tables and the counts. An MCP tool the API-key path shouldn't have goes in `ASSISTANT_HIDDEN_TOOLS` (`toolBridge.ts`) with what it does instead, as `preview_design` does, since the canvas already draws the Assistant's `import_design` html as it streams. The bridge leaves out the instruction lines, input properties and description clauses that name it, and adds that note to a result that does (a guide). The subscription path's bridge hides nothing, because Claude Code draws through `preview_design`.
+3. A new document tool takes `docId`, or goes in `UNPINNED_TOOLS` (`agent.ts`); `toolBridge.test.ts` fails until it does. Both engines call tools through `toolRunner.ts`, so pinning, the replace guard and confirmations change there once. On the subscription path, a tool that reaches outside the window's prototype goes in `ASKING_TOOLS` (`acp/engine.ts`), as `save_document`, `open_document` and `create_document` do: it stays out of the session's `allowedTools`, so Claude Code asks first, and Sonobe asks itself when Claude Code didn't.
+4. Test with fakes: `scriptedClient` and `fakeBridge` (`assistant/testing.ts`), `fakeAssistantHost` in the editor, and `e2e/fakeAssistant.ts` for Playwright. The subscription path's tests run `apps/desktop/tests/fake-claude-agent.mjs`, a fake ACP agent, in place of Claude's agent adapter, by pointing `SONOBE_CLAUDE_AGENT` at it. It calls the per-chat tool endpoint the way the adapter does, a word in the message picks what it does (`design`, `save`, `crash`, `sessionend`, `limit`, `hang` and the others its header lists), `FAKE_CLAUDE_MODE` picks the permission mode its sessions start in, and `FAKE_CLAUDE_LOG=<file>` records what it was sent. No test uses an API key, starts the real adapter or needs a Claude account.
+
+The subscription path is experimental and off by default. Only the app run from a checkout offers its switch: `electron/main.ts` sets the connection's `available` to `!app.isPackaged`, so no packaged build, and so no release, can offer it, and no environment variable changes that ([ARCHITECTURE.md](ARCHITECTURE.md) §10). Keep that gate until Anthropic agrees. To try it on your own machine:
+
+1. Install the adapter with `npm install -g @agentclientprotocol/claude-agent-acp` (it needs Node.js 22 or later). It draws on your Claude plan's usage limits.
+2. Run the desktop app from a checkout: `npm run desktop` (or `npm run start -w @sonobe/desktop`). A DMG from `npm run package -w @sonobe/desktop` doesn't offer the switch.
+3. Turn on **Use my Claude subscription in the Assistant** in Settings → Claude, and choose **Claude subscription** in the Assistant. If Claude isn't signed in, **Sign in…** opens Terminal for it, or run `claude-agent-acp --cli auth login` yourself.
+4. To use another copy of the adapter, or the fake agent without a Claude account, start the app with `SONOBE_CLAUDE_AGENT` set to its absolute path.
+
 ## Measuring how well Claude builds with Sonobe
 
 `evals/` holds behavioral evals: Claude Code gets a prompt and a start project, builds through Sonobe's MCP tools alone, and the runner simulates the result and checks layer properties. It records pass or fail, turns, tokens, time, tools, and each error code with whether Claude recovered. Runs use your Claude account, so they're not part of `npm test` or CI.

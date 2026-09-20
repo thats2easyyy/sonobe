@@ -14,10 +14,13 @@ import { toast } from "../../ui/Toast.tsx";
 import { Toggle } from "../../ui/Toggle.tsx";
 import { readString, writeString } from "../../ui/lib/storage.ts";
 import { useElementSize } from "../../ui/lib/useElementSize.ts";
+import { getAssistantHost, supportsAssistant } from "../assistant/types.ts";
+import { designStore } from "../design/designStore.ts";
 import { HologramScanner, scannerFrame } from "./HologramScanner.tsx";
 import { canImportUrl, importDesign, importViewport, notifyImported, type ImportDeps, type ImportDesignRequest } from "./importDesign.ts";
 import "../connect/connect.css";
 import "./importDesign.css";
+import "../design/design.css";
 
 export type ImportTab = "url" | "html" | "claude";
 
@@ -52,6 +55,7 @@ export function ImportDesignDialog({ open, onOpenChange, initialTab, deps }: Imp
 function ImportContent({ titleId, onClose, initialTab, deps }: { titleId: string; onClose: () => void; initialTab?: ImportTab; deps?: ImportDeps }) {
   const session = useEditorSession();
   const urlSupported = canImportUrl(deps);
+  const [assistantAvailable] = useState(() => supportsAssistant(getAssistantHost()));
   const [tab, setTab] = useState<ImportTab>(() => initialTab ?? ((readString(TAB_KEY) as ImportTab | null) ?? (urlSupported ? "url" : "html")));
   const [url, setUrl] = useState(() => readString(URL_KEY) ?? "http://localhost:3000/");
   const [html, setHtml] = useState("");
@@ -196,6 +200,22 @@ function ImportContent({ titleId, onClose, initialTab, deps }: { titleId: string
 
         {tab === "claude" && (
           <section className="sb-import__section" aria-label="With Claude">
+            {assistantAvailable && (
+              <div className="sb-import__assistant">
+                <p className="sb-import__text">Design it here: describe a screen and watch Claude draw it on the canvas, using your own API key.</p>
+                <Button
+                  size="sm"
+                  variant="ai"
+                  icon={<Sparkles size={12} />}
+                  onClick={() => {
+                    onClose();
+                    designStore.getState().openBox();
+                  }}
+                >
+                  Design on the canvas…
+                </Button>
+              </div>
+            )}
             <p className="sb-import__text">Claude can import screens straight from your code. It opens your running app, or rebuilds the screen from source when the app isn't a web app (SwiftUI, React Native, Flutter), then wires up the interactions you describe.</p>
             <ol className="sb-import__steps">
               <li>

@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createHeadlessHost, symbolsFromEnv, type HeadlessHost } from "./headless.ts";
 import { isHostError, type CapturedDesign, type DesignCaptureRequest, type HostCallControl } from "./host.ts";
 import { connectClient, tempProject, type TempProject, type TestClient } from "./test-helpers.ts";
+import { IMPORT_META_KEY, offScreenNote, type ImportResultMeta } from "./tools/import.ts";
 
 let project: TempProject;
 let client: TestClient;
@@ -92,12 +93,47 @@ describe("import_design", () => {
     expect(outline).toContain('layer product_photo image "Product Photo"');
   });
 
+  it("notes a screen that lands entirely outside the device screen, and not one that's partly on it", async () => {
+    const note = "“Checkout” is at 482, 0, outside the 402 × 874 screen, so the canvas and viewer won't show it. Put new screens at [0, 0].";
+    const dry = await client.call("import_design", { capture, position: [482, 0], dryRun: true });
+    expect(dry.text).toContain(`Note: ${note}`);
+    const r = await client.call("import_design", { capture, position: [482, 0] });
+    expect(r.isError, r.text).toBe(false);
+    expect(r.text).toContain(`Note: ${note}`);
+    expect(r.structured.importNotes).toEqual([note]);
+    // The import isn't refused: the screen is there, beside the artboard.
+    expect((await client.call("get_outline", {})).text).toMatch(/layer checkout group "Checkout" @482,0 402x874/);
+    // A replace keeps the screen's place, so it still says so.
+    expect((await client.call("import_design", { capture, replace: "checkout" })).text).toContain(`Note: ${note}`);
+    const partly = await client.call("import_design", { capture, name: "Peek", position: [-300, 800] });
+    expect(partly.isError, partly.text).toBe(false);
+    expect(partly.text).not.toContain("outside the");
+    expect((await client.call("import_design", { capture, name: "Home" })).text).not.toContain("outside the");
+    // A layer component's instances draw what's outside its bounds, so there's nothing to say there.
+    const made = await client.call("apply_ops", { ops: [{ op: "addComponent", component: { id: "card_kit", name: "Card Kit", kind: "layerComponent", size: [370, 300] } }] });
+    expect(made.isError, made.text).toBe(false);
+    const kit = await client.call("import_design", { capture, component: "card_kit", name: "Card", position: [482, 0] });
+    expect(kit.isError, kit.text).toBe(false);
+    expect(kit.text).not.toContain("outside the");
+  });
+
   it("teaches when the source is missing, doubled, or not a capture", async () => {
     expect((await client.call("import_design", {})).text).toContain("needs a source");
     expect((await client.call("import_design", { html: "<p>hi</p>", url: "http://localhost:3000" })).text).toContain("only one");
     const bad = await client.call("import_design", { capture: { format: "sonobe.design-capture", version: 1 } });
     expect(bad.isError).toBe(true);
     expect(bad.text).toContain("isn't valid");
+  });
+});
+
+describe("offScreenNote", () => {
+  it("notes only a frame with no part on the artboard", () => {
+    const screen: [number, number] = [402, 874];
+    const outside = [[402, 0, 402, 874], [-402, 0, 402, 874], [0, 874, 402, 874], [0, -874, 402, 874], [-120, 300, 100, 44], [482, 0, 0, 0]] as const;
+    for (const frame of outside) expect(offScreenNote("Profile", frame, screen), frame.join()).not.toBeNull();
+    const on = [[0, 0, 402, 874], [401, 0, 402, 874], [-401, 0, 402, 874], [0, 873, 402, 874], [-10, -10, 1000, 2000], [0, 0, 0, 0]] as const;
+    for (const frame of on) expect(offScreenNote("Profile", frame, screen), frame.join()).toBeNull();
+    expect(offScreenNote(null, [482.25, 0, 402, 874], screen)).toBe("The draft is at 482.25, 0, outside the 402 × 874 screen, so the canvas and viewer won't show it. Put new screens at [0, 0].");
   });
 });
 
@@ -195,6 +231,119 @@ describe("import_design progress and cancelling", () => {
     } finally {
       await c.close();
     }
+  });
+});
+
+/** import_design with its result's _meta, which TestClient.call leaves out. */
+async function importWithMeta(c: TestClient, args: Record<string, unknown>) {
+  const r = await c.client.callTool({ name: "import_design", arguments: args });
+  const content = (r.content ?? []) as { type: string; text?: string }[];
+  return {
+    text: content.map((x) => x.text ?? "").join("\n"),
+    isError: r.isError === true,
+    content,
+    structured: r.structuredContent as Record<string, unknown> | undefined,
+    meta: (r._meta as Record<string, unknown> | undefined)?.[IMPORT_META_KEY] as ImportResultMeta | undefined,
+  };
+}
+
+describe("import_design dry runs and _meta", () => {
+  /** Stored asset files (assets.json is the list, there from the start). */
+  const assetFiles = () => {
+    const dir = path.join(project.project, "assets");
+    return existsSync(dir) ? readdirSync(dir).filter((f) => f !== "assets.json") : [];
+  };
+
+  it("plans without changing the revision or storing files, and names what a replace would remove", async () => {
+    const dry = await importWithMeta(client, { capture, dryRun: true });
+    expect(dry.isError, dry.text).toBe(false);
+    expect(dry.text).toContain("Dry run: importing would add “Checkout”: 4 layers (1 text, 1 image). Nothing changed.");
+    expect(dry.structured).toMatchObject({ ok: true, changed: "none", dryRun: true, revision: 0 });
+    expect(dry.meta).toEqual({ docId: "test", component: "main", dryRun: true, screenId: null, screenName: "Checkout", txnId: null, replaced: null, dropped: [], droppedCount: 0, lostConnections: 0, kept: null });
+    expect((await project.host.getDocument()).revision).toBe(0);
+    expect(assetFiles()).toEqual([]);
+    expect((await client.call("list_history", {})).text).not.toContain("imported");
+
+    // Import it for real, then add a layer by hand inside the screen and wire it.
+    expect((await client.call("import_design", { capture })).isError).toBe(false);
+    expect((await client.call("add_layers", { parent: "checkout", layers: [{ type: "rectangle", name: "Promo Badge" }] })).isError).toBe(false);
+    expect((await client.call("add_patches", { patches: [{ type: "interaction", name: "Tap Promo", inputs: { layer: { layer: "promo_badge" } } }] })).isError).toBe(false);
+    const revision = (await project.host.getDocument()).revision;
+    const files = assetFiles();
+
+    const replace = await importWithMeta(client, { capture, replace: "checkout", dryRun: true });
+    expect(replace.isError, replace.text).toBe(false);
+    const lines = replace.text.split("\n");
+    expect(lines[0]).toBe("Dry run: importing over “Checkout” (checkout) would keep 4 of its layers and remove 1 that isn't in the new design: Promo Badge, and drop 1 connection. Nothing changed.");
+    // Nothing changed, so the notes say what would go.
+    expect(lines).toContain("Note: 1 layer of the old “Checkout” wouldn't be found again and would be removed: Promo Badge. Give layers you'll import again a data-name so they're found.");
+    expect(lines.some((line) => line.startsWith("Note: 1 connection to layers the new screen doesn't have would be removed: "))).toBe(true);
+    expect(replace.text).not.toMatch(/\b(was|were) removed\b/);
+    expect(replace.meta).toEqual({ docId: "test", component: "main", dryRun: true, screenId: null, screenName: "Checkout", txnId: null, replaced: "checkout", dropped: [{ id: "promo_badge", name: "Promo Badge" }], droppedCount: 1, lostConnections: 1, kept: 4 });
+    expect((await project.host.getDocument()).revision).toBe(revision);
+    expect(assetFiles()).toEqual(files);
+    expect((await client.call("get_outline", {})).text).toContain('layer promo_badge rectangle "Promo Badge"');
+
+    // The real replace names the same layers in its notes.
+    const real = await importWithMeta(client, { capture, replace: "checkout" });
+    expect(real.text).toContain("Note: 1 layer of the old “Checkout” wasn't found again and was removed: Promo Badge.");
+    expect(real.meta).toMatchObject({ dryRun: false, screenId: "checkout", replaced: "checkout", dropped: [{ id: "promo_badge", name: "Promo Badge" }], droppedCount: 1, lostConnections: 1, kept: 4 });
+  });
+
+  it("puts the screen id and txnId in _meta, also when a screenshot leaves out structuredContent", async () => {
+    const plain = await importWithMeta(client, { capture });
+    expect(plain.isError, plain.text).toBe(false);
+    expect(plain.meta).toMatchObject({ docId: "test", dryRun: false, screenId: "checkout", screenName: "Checkout", replaced: null, dropped: [], droppedCount: 0, lostConnections: 0, kept: null });
+    expect(plain.meta!.txnId).toBeTruthy();
+    expect(plain.meta!.txnId).toBe(plain.structured!.txnId);
+
+    const screenshot = { data: PIXEL.slice(PIXEL.indexOf(",") + 1), mimeType: "image/png" as const, width: 1, height: 1 };
+    const c = await connectClient(withCapture(project.host, async () => ({ ...captured(), screenshot })));
+    try {
+      const shot = await importWithMeta(c, { html: "<p>checkout</p>", replace: "checkout", screenshot: true });
+      expect(shot.isError, shot.text).toBe(false);
+      expect(shot.structured).toBeUndefined();
+      expect(shot.content.some((x) => x.type === "image")).toBe(true);
+      expect(shot.meta).toMatchObject({ dryRun: false, screenId: "checkout", screenName: "Checkout", replaced: "checkout", kept: 4, droppedCount: 0 });
+      expect(shot.meta!.txnId).toBeTruthy();
+      expect(shot.meta!.txnId).not.toBe(plain.meta!.txnId);
+      expect((await c.call("list_history", {})).text).toContain(shot.meta!.txnId!);
+
+      // A dry run keeps the page image too.
+      const revision = (await project.host.getDocument()).revision;
+      const dry = await importWithMeta(c, { html: "<p>checkout</p>", screenshot: true, dryRun: true });
+      expect(dry.content.some((x) => x.type === "image")).toBe(true);
+      expect(dry.meta).toMatchObject({ dryRun: true, screenId: null, txnId: null });
+      expect((await project.host.getDocument()).revision).toBe(revision);
+    } finally {
+      await c.close();
+    }
+  });
+
+  it("replaces one element of a screen from a selector capture, in place", async () => {
+    expect((await client.call("import_design", { capture })).isError).toBe(false);
+    const requests: DesignCaptureRequest[] = [];
+    // What the capture of `selector: "#pay"` holds: the button alone, in page coordinates.
+    const button = { ...capture.root.children[0]!, fill: "#34C759FF" };
+    const c = await connectClient(withCapture(project.host, async (request) => (requests.push(request), { capture: { ...capture, root: button } as never, images: new Map() })));
+    try {
+      const r = await importWithMeta(c, { html: "<button id=pay>Pay $24</button>", selector: "#pay", replace: "pay_button" });
+      expect(r.isError, r.text).toBe(false);
+      expect(requests[0]).toMatchObject({ selector: "#pay" });
+      expect(r.meta).toMatchObject({ screenId: "pay_button", screenName: "Pay Button", replaced: "pay_button", droppedCount: 0 });
+      const outline = (await c.call("get_outline", {})).text;
+      expect(outline).toContain('layer checkout group "Checkout"');
+      expect(outline).toMatch(/\n {2}layer pay_button group "Pay Button" @16,780 370x52 .*color=#34C759FF/);
+      expect(outline).toContain('layer product_photo image "Product Photo"');
+    } finally {
+      await c.close();
+    }
+  });
+
+  it("lists its sources last, so the small fields stream first", async () => {
+    const { tools } = await client.client.listTools();
+    const properties = Object.keys(tools.find((t) => t.name === "import_design")!.inputSchema.properties ?? {});
+    expect(properties).toEqual(["docId", "component", "name", "replace", "parent", "position", "index", "width", "height", "selector", "waitFor", "waitMs", "fullPage", "colorScheme", "scrolling", "screenshot", "dryRun", "label", "expectedRevision", "preview", "url", "capture", "html"]);
   });
 });
 

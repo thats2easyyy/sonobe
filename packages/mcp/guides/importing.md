@@ -10,12 +10,13 @@ Related: `start-here`, `animation`, `gestures`, `layout`
 | ---------------------------------------------------------------------- | ------------------------------------------------------------------------------------------- |
 | a web app you can run (React, Next, Vue, Svelte, Rails, Storybook)     | Start its dev server, then `import_design` with `url` per screen                            |
 | code Sonobe can't render (SwiftUI, UIKit, Compose, React Native, Flutter) | Read the screen's code, write one static HTML page that reproduces it, import with `html` |
-| nowhere yet (the person describes a new design)                        | Write the design as HTML, import with `html`, iterate by importing again                    |
+| nowhere yet (the person describes a new design)                        | Match what's there first, draw it on their canvas as you write it (both below), import it, iterate with `replace` |
 | a capture from the browser extension or a plugin                       | `import_design` with `capture`                                                              |
 
 - `selector` imports one element, like a card or a sheet (`"#pricing-card"`, `"[data-testid=checkout]"`).
 - `waitFor` waits for data that loads late; `waitMs` adds time for entrance animations to finish.
 - The viewport defaults to the document's device. Pass `width` and `height` for tablet or desktop layouts.
+- Leave `position` out for a new screen, which goes at [0, 0]. The canvas and viewer draw only the device screen, so a screen placed beside it can't be seen. Until navigation is wired, the new screen covers the one behind it in the viewer. That's expected: offer to wire it (a tap that slides it in, say).
 - `colorScheme: "dark"` imports the page's dark mode (its `prefers-color-scheme` styles), and `"light"` its light mode.
 - `screenshot: true` returns the page as the browser drew it, to compare with `get_screenshot`.
 
@@ -28,6 +29,7 @@ Related: `start-here`, `animation`, `gestures`, `layout`
 
 ## Write HTML that imports well
 
+- **Match what's there**: read the prototype's styles with `get_outline` (`"detail": "styles"`: its most used colors, fonts, sizes and radii) and look at one screen with `get_screenshot` (`isolate: true`). Reuse those values exactly.
 - **One screen per page**, laid out for the device width (`get_document_info` shows it). The viewer draws the status bar, so leave the top safe area empty (62 points on iPhone 17 Pro).
 - **Real content**: the app's actual copy, numbers, avatars and photos (https or data: URLs), and icons as inline `<svg>`.
 - **SF Symbols**: don't draw them. Write `<svg data-sf-symbol="heart.fill"></svg>`, styled like SwiftUI's `.font` and `.foregroundStyle`: `font-size` is the point size, `font-weight` the weight, `color` the color. `data-sf-palette="#0A84FF,#34C759"` sets palette colors, `data-sf-scale="large"` the image scale.
@@ -57,13 +59,33 @@ For example, pass this page as `html` with `"name": "Post"`:
 </html>
 ```
 
+## Design on the person's canvas
+
+When you design a new screen, let the person watch it take shape instead of waiting for the import. They see nothing until your first `preview_design`, so start it within your first few steps instead of planning the whole page first:
+
+1. Match what's there: `get_outline` with `"detail": "styles"`, plus one `get_screenshot` of a screen.
+2. `begin_work` with what you're designing.
+3. `preview_design` with the page's `<head>` (its theme) and first section as `html`, then `append` the rest section by section, one visual group per call (the header, the content, the bottom bar). Each call redraws the page over the artboard.
+4. `import_design` with `"preview": true` imports the draft, with the `name`, `replace` and size you gave it.
+5. `finish_work`.
+
+```json tool:preview_design
+{ "name": "Post", "html": "<!doctype html><html><head><style>body{margin:0;font-family:system-ui}</style></head><body><header data-name=\"Top Bar\" style=\"margin-top:62px;padding:16px;font-size:20px\">Sunset picnic</header>" }
+```
+
+```json tool:preview_design
+{ "append": "<button data-name=\"Like Button\" style=\"margin:16px;border:0;border-radius:999px;padding:8px 14px;background:#FF3B30;color:#fff\">♥ Like</button></body></html>" }
+```
+
+A redesign passes `replace` with the first call, and the preview draws over that layer; later calls keep it, and `"replace": null` makes the draft a new screen again. `clear: true` removes a draft you won't import, with its fields. Headless servers keep the draft without showing it.
+
 ## After importing
 
 1. **Read the result.** It lists the screen's layer ids (deepest levels trimmed on big screens). `get_outline` shows everything.
 2. **Compare.** `get_screenshot` against the source (or `screenshot: true`). Fix what matters for the prototype with `update_layers`, or change the HTML and import again with `replace` set to the screen's id.
 3. **Name what you wire.** Rename generic "Group" layers the person will talk about.
 4. **Wire the interaction** onto the imported ids, then verify it with `sim_reset`, `sim_dispatch` and `sim_trace`.
-5. **Iterate.** When the design changes (the person edits their app, or you revise the HTML), import again with `replace`. Layers found again at the same name path keep their ids, links and connections, so the wiring survives. Text an earlier import named by its words is found again by those words, even once a `data-name` renames it. The result says how many layers kept their ids and names every connection it had to drop (`@open_until_9_pm.text`), so you can wire those again. Text named by its words that now says something else counts as a new layer, so give text you wire a `data-name`.
+5. **Iterate.** When the design changes (the person edits their app, or you revise the HTML), import again with `replace`. Layers found again at the same name path keep their ids, links and connections, so the wiring survives. Text an earlier import named by its words is found again by those words, even once a `data-name` renames it. The result says how many layers kept their ids and names every connection it had to drop (`@open_until_9_pm.text`), so you can wire those again. Text named by its words that now says something else counts as a new layer, so give text you wire a `data-name`. Before a replace over a screen the person may have changed, `dryRun: true` plans the import without changing anything and names the layers that wouldn't be found again. The result's notes name them after a real replace too.
 
 A design captured elsewhere imports the same way:
 
@@ -101,6 +123,12 @@ A design captured elsewhere imports the same way:
     "images": {}
   }
 }
+```
+
+Read the styles an import brought, to match the next screen to them:
+
+```json tool:get_outline
+{ "detail": "styles" }
 ```
 
 Then make the imported button pop when it's tapped:

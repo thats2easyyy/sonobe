@@ -5,14 +5,16 @@
  * draw rectangles (R), ovals (O), and text (T), drop images, videos, and Lottie files to add layers,
  * double-click to edit text or go into a group, zoom (⌘ scroll or pinch) and pan (scroll, space-drag).
  * Rulers (⇧R) follow zoom and pan. Every gesture is one undo entry; layout children reorder. The
- * artboard re-fits when the panel resizes until you zoom or pan.
+ * artboard re-fits when the panel resizes until you zoom or pan. While the Design with Claude box is
+ * open it fits above the box, and the first page of a draft Claude writes is fitted at a size you can read,
+ * until the next resize after it lands.
  */
 
 import type { Id, Op } from "@sonobe/core";
 import type { SceneFrame } from "@sonobe/engine";
 import { createDomRenderer, DomTextMeasurer, type DomRenderer } from "@sonobe/renderer";
-import { ChevronDown, Circle, Group, MousePointer2, Ruler, Square, Type } from "lucide-react";
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type DragEvent as ReactDragEvent, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent, type RefObject } from "react";
+import { ChevronDown, Circle, Group, MousePointer2, Ruler, Sparkles, Square, Type } from "lucide-react";
+import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type DragEvent as ReactDragEvent, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent, type RefObject } from "react";
 import { useStore } from "zustand";
 import { Panel } from "../../shell/Panel.tsx";
 import { useEditorSession } from "../../state/EditorProvider.tsx";
@@ -33,6 +35,8 @@ import { useLatest } from "../../ui/lib/hooks.ts";
 import { readString, writeString } from "../../ui/lib/storage.ts";
 import { useElementSize } from "../../ui/lib/useElementSize.ts";
 import { rectOfElement } from "../../state/bounds.ts";
+import { DesignPreview, liveDraftWriter, previewFrame, writerKey } from "../design/DesignPreview.tsx";
+import { activeDraft, designStore, useDesign, type DesignState } from "../design/designStore.ts";
 import { hideCoveredChrome } from "../import/hologram.ts";
 import { HologramBuild, useCoveredScreen } from "../import/HologramBuild.tsx";
 import { patchEditorBridge } from "../patch-editor/api.ts";
@@ -42,7 +46,7 @@ import { CanvasOverlay, EMPTY_DRAFT, type OverlayDraft } from "./CanvasOverlay.t
 import { CanvasRulers } from "./CanvasRulers.tsx";
 import { RULER_SIZE } from "./rulers.ts";
 import { createEditTransaction, type EditTransaction } from "./editTransaction.ts";
-import { pointInQuad, rectFromPoints, unionRects, type Point, type Rect } from "./geometry.ts";
+import { intersectRects, pointInQuad, rectFromPoints, unionRects, type Point, type Rect } from "./geometry.ts";
 import {
   beginMove,
   beginReorder,
@@ -66,10 +70,10 @@ import {
 import { hitChrome, resizeCursor, ROTATE_CURSOR, selectionChrome } from "./handles.ts";
 import { InlineTextEditor } from "./InlineTextEditor.tsx";
 import { nudgeDelta, textOps, type ArrowKey, type InsertTool } from "./ops.ts";
-import { buildCanvasIndex, hitCopy, hitLayers, isEditableLayer, marqueeLayers, pickChildOf, pickLayer, type CanvasIndex } from "./sceneIndex.ts";
+import { buildCanvasIndex, firstCopyBounds, hitCopy, hitLayers, isEditableLayer, marqueeLayers, pickChildOf, pickLayer, type CanvasIndex } from "./sceneIndex.ts";
 import { measureBetween, type Measurement } from "./snapping.ts";
 import { useCanvasScene, type SceneSource } from "./useCanvasScene.ts";
-import { ensureVisible, fitRect, formatZoom, nextZoomStep, panBy, screenToArtboard, wheelZoom, zoomAt, type Viewport } from "./viewport.ts";
+import { clampZoom, ensureVisible, fitRect, formatZoom, nextZoomStep, panBy, rectToScreen, screenToArtboard, wheelZoom, zoomAt, type Viewport } from "./viewport.ts";
 import "./canvas.css";
 
 export type CanvasTool = "select" | InsertTool;
@@ -91,6 +95,18 @@ const NUDGE_IDLE_MS = 900;
 const FIT_PADDING = 56;
 const RULERS_KEY = "sonobe.canvas.rulers";
 const TOOL_LABELS: Record<InsertTool, string> = { rectangle: "Rectangle", oval: "Oval", text: "Text" };
+/** The presence pill in the artboard label is cut to this many characters. */
+const AGENT_PILL_CHARS = 60;
+/** The Design with Claude box's offset from the canvas's bottom (design.css), plus a gap above it. */
+const DESIGN_BOX_CLEARANCE = 16 + 12;
+/** Fit padding in the area above the box, and the least room there that's worth fitting into (the box grows at most to leave it). */
+const DESIGN_FIT_PADDING = 28;
+const DESIGN_FIT_MIN_HEIGHT = 200;
+/** A draft's frame is fitted whole when that's at least this zoom; otherwise its width is. */
+const DRAFT_WHOLE_ZOOM = 0.45;
+
+// The Design with Claude box loads the first time it opens.
+const DesignBox = lazy(() => import("../design/DesignBox.tsx").then((m) => ({ default: m.DesignBox })));
 
 interface GestureBase {
   pointerId: number;
@@ -160,6 +176,22 @@ function withInsertedText(ops: readonly Op[], text: string): Op[] {
   return ops.map((op) => (op.op === "addLayer" ? { ...op, layer: { ...op.layer, props: { ...op.layer.props, text } } } : op));
 }
 
+/** How the viewport follows the canvas's size: the artboard's fit, a draft's frame's fit, or where someone put it (null). */
+type FitMode = "artboard" | "draft" | null;
+
+/** A draft's frame at a size you can read, in `area`: whole when that's at least 45%, else its width fitted (at most 100%) with its top at the area's top. */
+function fitDraftFrame(frame: Rect, area: readonly [number, number], padding: number): Viewport {
+  const whole = fitRect(frame, area, { padding, maxZoom: 1 });
+  if (whole.zoom >= DRAFT_WHOLE_ZOOM) return whole;
+  const zoom = clampZoom(Math.min(1, (area[0] - padding * 2) / Math.max(1, frame.width)));
+  return { x: (area[0] - frame.width * zoom) / 2 - frame.x * zoom, y: padding - frame.y * zoom, zoom };
+}
+
+/** The drafts, as a key that changes only when their fit cares: which drafts, their status, and whether their pages have started (not with each part). */
+function draftFitCue(state: DesignState): string {
+  return state.drafts.map((d) => `${d.key}:${d.status}:${d.html ? 1 : 0}`).join("\n");
+}
+
 function ArtboardRenderer({ session, scene, viewport, size, rendererRef }: { session: EditorSession; scene: SceneFrame | null; viewport: Viewport; size: [number, number]; rendererRef: RefObject<DomRenderer | null> }) {
   const hostRef = useRef<HTMLDivElement>(null);
   const zoom = useLatest(viewport.zoom);
@@ -202,6 +234,14 @@ export function CanvasPanel({ session: sessionProp, sceneSource, onSceneSourceCh
   const selected = useStore(session.selection, (s) => s.layers);
   const hovered = useStore(session.selection, (s) => s.hovered);
   const reveal = useStore(session.selection, (s) => s.reveal);
+  const working = useStore(session.presence, (s) => s.working);
+  const designOpen = useDesign((s) => s.open);
+  const [designLoaded, setDesignLoaded] = useState(designOpen);
+  /** The Design with Claude box's height when it opened (0 while it's closed): the canvas keeps that much room, so the fit doesn't move as the box grows. */
+  const [designHeight, setDesignHeight] = useState(0);
+  const onDesignHeight = useCallback((height: number) => setDesignHeight((opened) => (height === 0 ? 0 : opened || height)), []);
+  const draftCue = useDesign(draftFitCue);
+  const drafting = useDesign((s) => liveDraftWriter(s, Date.now(), componentId, rootId));
 
   const [internalSource, setInternalSource] = useState<SceneSource>("design");
   const source = sceneSource ?? internalSource;
@@ -222,8 +262,14 @@ export function CanvasPanel({ session: sessionProp, sceneSource, onSceneSourceCh
   const [editing, setEditing] = useState<TextEditState | null>(null);
   const [altMeasure, setAltMeasure] = useState<Measurement[]>([]);
   const [rulers, setRulers] = useState(() => readString(RULERS_KEY) !== "off");
-  /** True while the viewport is the automatic fit (until someone zooms or pans). */
-  const autoFit = useRef(true);
+  /** The artboard label's slot for the preview's pill (DesignPreview). */
+  const [labelSlot, setLabelSlot] = useState<HTMLSpanElement | null>(null);
+  /** How the viewport follows the canvas's size, until someone zooms or pans. */
+  const fitMode = useRef<FitMode>("artboard");
+  /** The draft whose frame the viewport fits while fitMode is "draft". */
+  const draftFit = useRef<{ key: string; frame: Rect } | null>(null);
+  /** The live draft whose page the canvas has already seen start: each draft is fitted once. */
+  const seenDraft = useRef<string | null>(null);
   /** The container size and fit inputs the viewport was last laid out for. */
   const fitLayout = useRef<{ width: number; height: number; key: string } | null>(null);
   const rendererRef = useRef<DomRenderer | null>(null);
@@ -245,15 +291,46 @@ export function CanvasPanel({ session: sessionProp, sceneSource, onSceneSourceCh
   const holoCovered = useCoveredScreen(session, componentId);
   const shownChrome = hideCoveredChrome(holoCovered, { selected: selectionIds, hovered: draft.hideChrome || gestureRef.current ? null : hoverId, chrome });
 
-  const latest = useLatest({ index, viewport, componentId, component, tool, artboard, chrome, spaceHeld, box, editing });
+  // While the box is open, the artboard fits (and reveals land) in the canvas above it, which keeps at least DESIGN_FIT_MIN_HEIGHT.
+  const inset = rulers ? RULER_SIZE : 0;
+  const designReserve = designHeight > 0 ? Math.max(0, Math.min(designHeight + DESIGN_BOX_CLEARANCE, box.height - inset - DESIGN_FIT_MIN_HEIGHT)) : 0;
+  // The box grows up to leaving that room above it; then its reply and cards scroll (design-layout.css).
+  const designBoxMax = designHeight > 0 && box.height > 0 ? Math.max(designHeight, box.height - inset - DESIGN_BOX_CLEARANCE - DESIGN_FIT_MIN_HEIGHT) : null;
 
-  const fitViewport = useCallback((): Viewport | null => {
-    if (box.width <= 0 || box.height <= 0) return null;
-    const inset = rulers ? RULER_SIZE : 0;
-    const vp = fitRect(artboard, [Math.max(1, box.width - inset), Math.max(1, box.height - inset)], { padding: FIT_PADDING, maxZoom: 1 });
-    return { ...vp, x: vp.x + inset, y: vp.y + inset };
-  }, [artboard, box.width, box.height, rulers]);
-  const fitKey = `${artboard.width}x${artboard.height}:${rulers ? 1 : 0}`;
+  const latest = useLatest({ index, viewport, componentId, component, tool, artboard, chrome, spaceHeld, box, editing, designReserve, inset });
+  // The box reads layers at event time; the preview reads them while it renders, so it gets this render's index.
+  // Both measure a repeated layer's first copy: a redesign is one row's size, not the list's.
+  const layerBounds = useCallback((id: string) => firstCopyBounds(latest.current.index, id), [latest]);
+  const renderBounds = useCallback((id: string) => firstCopyBounds(index, id), [index]);
+
+  useEffect(() => {
+    if (designOpen) setDesignLoaded(true);
+  }, [designOpen]);
+
+  /** The artboard's fit, or with `frame` a draft's (fitDraftFrame), in the canvas above the box. */
+  const fitViewport = useCallback(
+    (frame?: Rect): Viewport | null => {
+      if (box.width <= 0 || box.height <= 0) return null;
+      const area: [number, number] = [Math.max(1, box.width - inset), Math.max(1, box.height - inset - designReserve)];
+      const padding = designHeight > 0 ? DESIGN_FIT_PADDING : FIT_PADDING;
+      const vp = frame ? fitDraftFrame(frame, area, padding) : fitRect(artboard, area, { padding, maxZoom: 1 });
+      return { ...vp, x: vp.x + inset, y: vp.y + inset };
+    },
+    [artboard, box.width, box.height, inset, designReserve, designHeight],
+  );
+  /** The automatic fit: the draft's while it's written or added, else the artboard's (a draft that ended hands the fit back at the next resize). */
+  const autoViewport = () => {
+    const fit = draftFit.current;
+    if (fitMode.current === "draft" && fit) {
+      const state = designStore.getState();
+      const draft = state.drafts.length ? activeDraft(state, Date.now()) : null;
+      if (draft?.key === fit.key && (draft.status === "writing" || draft.status === "adding")) return fitViewport(fit.frame);
+      fitMode.current = "artboard";
+      draftFit.current = null;
+    }
+    return fitViewport();
+  };
+  const fitKey = `${artboard.width}x${artboard.height}:${rulers ? 1 : 0}:${designReserve}:${designHeight > 0 ? 1 : 0}`;
 
   // Restore (or fit) the viewport when the component changes or the panel first gets a size.
   useEffect(() => {
@@ -261,21 +338,22 @@ export function CanvasPanel({ session: sessionProp, sceneSource, onSceneSourceCh
     if (viewportComponent.current === componentId && viewport) return;
     viewportComponent.current = componentId;
     const saved = session.selection.getState().canvasViewports[componentId];
-    autoFit.current = !saved;
+    fitMode.current = saved ? null : "artboard";
+    draftFit.current = null;
     fitLayout.current = { width: box.width, height: box.height, key: fitKey };
     setViewport(saved ?? fitViewport());
   }, [componentId, box.width, box.height, viewport, fitViewport, fitKey, session]);
 
-  // Panel resized, split changed, rulers toggled, or the artboard changed size: re-fit while the
-  // viewport is still the automatic fit; otherwise keep what was centered in the middle.
+  // Panel resized, split changed, rulers toggled, the box opened or closed, or the artboard changed size:
+  // re-fit while the viewport is still an automatic fit; otherwise keep what was centered in the middle.
   useEffect(() => {
     if (box.width === 0 || box.height === 0) return;
     const previous = fitLayout.current;
     if (!previous) return;
     if (previous.width === box.width && previous.height === box.height && previous.key === fitKey) return;
     fitLayout.current = { width: box.width, height: box.height, key: fitKey };
-    if (autoFit.current) {
-      const next = fitViewport();
+    if (fitMode.current !== null) {
+      const next = autoViewport();
       if (next) setViewport(next);
       return;
     }
@@ -283,6 +361,41 @@ export function CanvasPanel({ session: sessionProp, sceneSource, onSceneSourceCh
     const dy = (box.height - previous.height) / 2;
     if (dx !== 0 || dy !== 0) setViewport((vp) => (vp ? panBy(vp, dx, dy) : vp));
   }, [box.width, box.height, fitKey, fitViewport]);
+
+  // The first page of a draft Claude writes, while the viewport is still an automatic fit: fit its frame at a
+  // size you can read. The canvas and the viewer show only the artboard, so for a new screen that's the frame's
+  // part on it, or the artboard when the frame is off it. That fit stays through the import, until the next resize, and goes
+  // back to the artboard's if nothing was added. A canvas that appears for the draft (a patches-only layout
+  // making room) fits it once it has a viewport.
+  const hasViewport = viewport !== null;
+  useEffect(() => {
+    const state = designStore.getState();
+    const draft = state.drafts.length ? activeDraft(state, Date.now()) : null;
+    const live = draft && (draft.status === "writing" || draft.status === "adding") ? draft : null;
+    if (!live) seenDraft.current = null;
+    if (live?.html && seenDraft.current !== live.key) {
+      if (!viewport) return;
+      seenDraft.current = live.key;
+      if (fitMode.current === null) return;
+      const drawn = previewFrame(live, { componentId, rootId, artboard: size, bounds: renderBounds, fallbackReplace: null, request: state.request });
+      // A redesign draws over the layer it replaces, wherever that is (a screen that slides in from the side
+      // sits off the artboard until it does), so it fits that. A new screen fits its part on the artboard.
+      const replacing = !!live.fields.replace && renderBounds(live.fields.replace) !== null;
+      const frame = drawn && (replacing ? drawn : (intersectRects(drawn, artboard) ?? artboard));
+      const next = frame ? fitViewport(frame) : null;
+      if (!frame || !next) return;
+      fitMode.current = "draft";
+      draftFit.current = { key: live.key, frame };
+      setViewport(next);
+      return;
+    }
+    if (fitMode.current === "draft" && draft && !live && draft.key === draftFit.current?.key && draft.status !== "added") {
+      fitMode.current = "artboard";
+      draftFit.current = null;
+      const next = fitViewport();
+      if (next) setViewport(next);
+    }
+  }, [draftCue, hasViewport]);
 
   // Remember the viewport per component.
   useEffect(() => {
@@ -487,7 +600,7 @@ export function CanvasPanel({ session: sessionProp, sceneSource, onSceneSourceCh
 
   const onPointerDown = (event: ReactPointerEvent<HTMLDivElement>) => {
     const { viewport: vp, index: idx, componentId: cid, artboard: board, chrome: c, tool: currentTool } = latest.current;
-    if (!vp || (event.target as Element).closest?.(".sb-cv__text-editor")) return;
+    if (!vp || (event.target as Element).closest?.(".sb-cv__text-editor, .sb-cv__hint-action")) return;
     const p = screenPoint(event);
     const a = screenToArtboard(vp, p);
     const base: GestureBase = { pointerId: event.pointerId, start: a, startScreen: p };
@@ -556,7 +669,7 @@ export function CanvasPanel({ session: sessionProp, sceneSource, onSceneSourceCh
     const snap = !(event.metaKey || event.ctrlKey);
     switch (g.kind) {
       case "pan":
-        autoFit.current = false;
+        fitMode.current = null;
         setViewport(panBy(g.startViewport, p[0] - g.startScreen[0], p[1] - g.startScreen[1]));
         break;
       case "press":
@@ -777,7 +890,7 @@ export function CanvasPanel({ session: sessionProp, sceneSource, onSceneSourceCh
       if (!vp) return;
       const rect = el.getBoundingClientRect();
       const p: Point = [event.clientX - rect.left, event.clientY - rect.top];
-      autoFit.current = false;
+      fitMode.current = null;
       if (event.ctrlKey || event.metaKey) {
         setViewport(wheelZoom(vp, event.deltaY, p, event.deltaMode));
         return;
@@ -831,13 +944,21 @@ export function CanvasPanel({ session: sessionProp, sceneSource, onSceneSourceCh
   const revealNonce = reveal?.nonce;
   useEffect(() => {
     const r = session.selection.getState().reveal;
-    const { index: idx, viewport: vp, box: size, componentId: cid } = latest.current;
+    const { index: idx, viewport: vp, box: size, componentId: cid, designReserve: reserve, inset: top, artboard: board } = latest.current;
     if (!r || r.component !== cid || !vp) return;
     const bounds = unionRects(r.ids.map((id) => idx.bounds(id)).filter((b): b is Rect => b !== null));
     if (!bounds) return;
-    const next = ensureVisible(vp, bounds, [size.width, size.height]);
+    // A draft's fit already shows what the artboard shows of the screen that lands there, from its top: it doesn't
+    // move as the screen lands, even when none of it is on the artboard.
+    if (fitMode.current === "draft") {
+      const onArtboard = intersectRects(bounds, board);
+      const shown = onArtboard && rectToScreen(vp, onArtboard);
+      if (!shown || (shown.x >= 0 && shown.x + shown.width <= size.width && shown.y >= top && shown.y < size.height - reserve)) return;
+    }
+    // Above the box, the fit's own padding is margin enough: a screen that fills the fitted artboard stays put.
+    const next = reserve ? ensureVisible(vp, bounds, [size.width, size.height - reserve], DESIGN_FIT_PADDING) : ensureVisible(vp, bounds, [size.width, size.height]);
     if (next === vp) return;
-    autoFit.current = false;
+    fitMode.current = null;
     setViewport(next);
   }, [revealNonce, session, latest]);
 
@@ -911,17 +1032,18 @@ export function CanvasPanel({ session: sessionProp, sceneSource, onSceneSourceCh
 
   const center = (): Point => [latest.current.box.width / 2, latest.current.box.height / 2];
   const zoomBy = (direction: 1 | -1) => {
-    autoFit.current = false;
+    fitMode.current = null;
     setViewport((vp) => vp && zoomAt(vp, nextZoomStep(vp.zoom, direction), center()));
   };
   const zoomTo = (zoom: number) => {
-    autoFit.current = false;
+    fitMode.current = null;
     setViewport((vp) => vp && zoomAt(vp, zoom, center()));
   };
   const zoomToFit = () => {
     const next = fitViewport();
     if (!next) return;
-    autoFit.current = true;
+    fitMode.current = "artboard";
+    draftFit.current = null;
     setViewport(next);
   };
   const zoomToSelection = () => {
@@ -931,7 +1053,7 @@ export function CanvasPanel({ session: sessionProp, sceneSource, onSceneSourceCh
       zoomToFit();
       return;
     }
-    autoFit.current = false;
+    fitMode.current = null;
     setViewport(fitRect(bounds, [size.width, size.height], { padding: 96, maxZoom: 8 }));
   };
   const toggleRulers = () =>
@@ -942,6 +1064,10 @@ export function CanvasPanel({ session: sessionProp, sceneSource, onSceneSourceCh
   const group = () => {
     const result = groupSelection(session);
     if (!result.ok && result.message) toast({ title: result.message, ...(result.hint ? { description: result.hint } : {}), tone: "warn" });
+  };
+  /** Design with Claude: the ai.design command when it's registered (it refreshes the Assistant first), else just the box. */
+  const openDesign = () => {
+    if (!cmds?.registry.run("ai.design")) designStore.getState().openBox();
   };
 
   const actions = useLatest({ setTool, nudge, escape, enter, zoomBy, zoomTo, zoomToFit, zoomToSelection, group, toggleRulers });
@@ -1023,6 +1149,10 @@ export function CanvasPanel({ session: sessionProp, sceneSource, onSceneSourceCh
 
   const editingNode = editing ? index.entry(editing.id)?.node : undefined;
   const canDraw = !!component && component.kind !== "patchComponent";
+  // Another agent at work here (Claude Code, Claude Desktop); the Assistant shows its own work in the box.
+  // While the preview's pill says what that agent is writing here, it isn't said twice.
+  const agent = working.find((w) => w.author.name !== "Assistant" && (!w.component || w.component === componentId));
+  const agentText = agent && drafting !== writerKey(agent.author, agent.client) ? `${agent.client?.label ?? agent.author.name}: ${agent.intent}` : null;
 
   return (
     <Panel
@@ -1030,6 +1160,7 @@ export function CanvasPanel({ session: sessionProp, sceneSource, onSceneSourceCh
       scope="canvas"
       surface="sunken"
       className={className}
+      style={designBoxMax !== null ? ({ "--sb-design-box-max": `${designBoxMax}px` } as CSSProperties) : undefined}
       headerContent={
         <div className="sb-cv__toolbar">
           <SegmentedControl<CanvasTool>
@@ -1045,6 +1176,7 @@ export function CanvasPanel({ session: sessionProp, sceneSource, onSceneSourceCh
             ]}
           />
           <IconButton size="sm" icon={<Group size={14} />} label="Group selection" shortcut="Mod+G" disabled={selectionIds.length === 0} onClick={group} />
+          <IconButton size="sm" icon={<Sparkles size={14} />} label="Design with Claude" tooltip={canDraw ? "Design with Claude" : "Patch components have no layers to design"} className="sb-cv__design" disabled={!canDraw} onClick={openDesign} />
         </div>
       }
       actions={
@@ -1094,21 +1226,37 @@ export function CanvasPanel({ session: sessionProp, sceneSource, onSceneSourceCh
                   {size[0]} × {size[1]}
                 </span>
                 {live && <span className="sb-cv__label-live">Live frame</span>}
+                {agentText && (
+                  <span className="sb-cv__label-agent">
+                    <span className="sb-cv__label-agent-dot" aria-hidden />
+                    {agentText.length > AGENT_PILL_CHARS ? `${agentText.slice(0, AGENT_PILL_CHARS - 1).trimEnd()}…` : agentText}
+                  </span>
+                )}
+                <span ref={setLabelSlot} className="sb-cv__label-slot" />
               </div>
               <ArtboardRenderer session={session} scene={scene} viewport={viewport} size={size} rendererRef={rendererRef} />
               <HologramBuild session={session} componentId={componentId} index={index} viewport={viewport} width={box.width} height={box.height} />
               {component.layers.length === 0 && (
                 <div className="sb-cv__hint" style={{ left: Math.round(viewport.x + (size[0] * viewport.zoom) / 2), top: Math.round(viewport.y + (size[1] * viewport.zoom) / 2) }}>
-                  Draw a rectangle (R), an oval (O), or text (T)
+                  Draw a rectangle (R), an oval (O), or text (T), or{" "}
+                  <button type="button" className="sb-cv__hint-action" onClick={openDesign}>
+                    describe a screen to Claude
+                  </button>
                 </div>
               )}
               <CanvasOverlay index={index} viewport={viewport} {...shownChrome} draft={draft} altMeasure={altMeasure} />
+              <DesignPreview viewport={viewport} bounds={renderBounds} componentId={componentId} rootId={rootId} artboard={size} insetTop={inset} labelSlot={labelSlot} />
               {editing && editingNode && <InlineTextEditor key={editing.id} node={editingNode} viewport={viewport} initialText={editing.initial} selectAll={editing.selectAll} onCommit={commitText} />}
               {rulers && <CanvasRulers viewport={viewport} width={box.width} height={box.height} selection={shownChrome.chrome?.bounds ?? null} />}
             </>
           )
         )}
       </div>
+      {designLoaded && (
+        <Suspense fallback={null}>
+          <DesignBox session={session} bounds={layerBounds} onHeightChange={onDesignHeight} />
+        </Suspense>
+      )}
     </Panel>
   );
 }

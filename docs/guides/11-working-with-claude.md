@@ -166,7 +166,7 @@ Most tool calls finish in a second or two. Importing a design can take longer, b
 
 ## What Claude can do
 
-Sonobe gives Claude 47 tools in seven groups: discovery, documents, reading, writing, knobs, simulation, and presence and history. Here's what they look like in practice:
+Sonobe gives Claude 48 tools in seven groups: discovery, documents, reading, writing, knobs, simulation, and presence and history. Here's what they look like in practice:
 
 | You ask for | Claude uses tools like |
 |---|---|
@@ -207,6 +207,7 @@ Sonobe also offers four ready-made prompts: `import_screen`, `prototype_interact
 ## Watching and undoing
 
 - While Claude works, the AI Activity tab in the bottom HUD shows what it's doing, and the items it's changing are highlighted in the editor.
+- When Claude designs a screen, it draws the page over the artboard as it writes, one part at a time (`preview_design`), then imports it as real layers. To start one from the canvas, describe it in the **Design with Claude** box and choose **Open in Claude Code** (on a Mac; [guide 12](12-importing-designs.md#design-on-the-canvas)).
 - Each batch of changes becomes one row in AI Activity with its op count, and one entry in Edit → Undo, labeled with who made it, like "Claude: added press feedback (4 ops)". One undo removes the whole batch, and each row has its own **Undo this** button.
 - Batches are all or nothing. If any change in a batch fails validation, none of the batch is applied, so you never end up with half a feature.
 - Claude's edits are tied to the version of the document they were based on. If you changed the document in the meantime, Sonobe rejects the edit and Claude re-reads instead of overwriting your work.
@@ -257,12 +258,37 @@ The Connect Claude screen has more of these under **Try asking**. Click one to c
 - Ask for one feature per request, and read the AI Activity row when it's done.
 - If you can't explain the graph Claude built, ask it to walk you through it before you move on.
 
+## Experimental: the Assistant on your Claude subscription
+
+The desktop app's own Assistant, and its Design with Claude box, use your Anthropic API key. An experimental switch lets them run on your Claude subscription instead, through Claude's agent adapter. It's off by default and awaiting Anthropic's permission. Anthropic's support article on [using the Agent SDK with your Claude plan](https://support.claude.com/en/articles/15036540-use-the-claude-agent-sdk-with-your-claude-plan) says: "For now, nothing has changed: Claude Agent SDK, claude -p, and third-party app usage still draw from your subscription's usage limits." But Claude Code's [legal page](https://code.claude.com/docs/en/legal-and-compliance) says Anthropic "does not permit third-party developers to offer Claude.ai login into their own applications, or to route requests through Free, Pro, or Max plan credentials on behalf of their users", and the Agent SDK docs allow claude.ai login in other products only when "previously approved". So Sonobe will ask Anthropic two things: to approve this option's **Sign in…**, which opens Claude's login for Sonobe's Assistant, and whether running your own copy of Claude's adapter on your plan counts as routing requests on your behalf. Until Anthropic agrees, no release offers it. Only Sonobe run from a checkout shows the switch; packaged builds, like the DMG, never do.
+
+To try it:
+
+1. Install Claude's agent adapter. It needs Node.js 22 or later:
+
+   ```sh
+   npm install -g @agentclientprotocol/claude-agent-acp
+   ```
+
+2. Run Sonobe from a checkout with `npm run desktop` (the README's "From source, for development").
+3. Open **Settings → Claude** and turn on **Use my Claude subscription in the Assistant** (its description starts with “Experimental”).
+4. Open the Assistant and choose **Claude subscription**. If Claude isn't signed in on this computer, choose **Sign in…**, which opens Terminal for Claude's sign-in, or run `claude-agent-acp --cli auth login` in Terminal yourself. Then choose **Check again**.
+
+What to expect:
+
+- Replies stream with their tool steps, and **Stop** works, as with a key. In the Design with Claude box, Claude draws the screen over the artboard as it writes, one part at a time (`preview_design`), then imports it as layers in one undo step.
+- Claude changes only the prototype in its window, and asks before replacing a screen you changed by hand. It also asks before it saves, opens or creates a prototype, even if your own Claude Code is set to auto mode: Sonobe runs its sessions in Claude Code's default mode, and asks you itself if Claude Code didn't. A save that would write over changes made to the project outside Sonobe always asks, and says those changes will be lost, even after **Allow for this chat**.
+- It uses your plan's usage limits. The Assistant shows how many tokens a chat used, with no price. If the adapter is set to use an API key instead of your Claude account, the setup says so, because then the key pays.
+- A chat keeps what it started on. Switching between Claude subscription and API key starts a new chat, and turning the switch off stops any reply running on your subscription, in every window.
+- When your plan's usage limit is reached, the Assistant says so in Claude's own words, such as when it resets. Wait for it, or switch to your API key. A billing problem or an account hold says to check your plan or billing at claude.ai instead, and a sign-in that expired asks you to sign in again. If Claude Code stops in the middle of a reply, send your message again: it starts a new session, which doesn't remember the chat's earlier messages.
+- Sonobe never reads or stores your Claude login: the adapter uses the one Claude Code keeps on this computer. Your messages, the parts of the prototype Claude reads and files from a linked code folder go to Anthropic under your Claude account.
+
 ## Privacy
 
 - Sonobe's MCP server listens only on your own computer (127.0.0.1). It rejects requests from web pages, and it requires a token stored in `~/.sonobe/mcp.json`, a file only your user account can read. Other devices on your network can't connect to it. The web player you use for phone previews is a separate server, and you turn it on yourself.
 - Sonobe doesn't upload your document anywhere. Anything Claude reads through Sonobe's tools, like the outline, live values or screenshots, becomes part of your conversation with Claude, handled under your Claude plan and its settings. Treat giving Claude access to a confidential file like sharing that file with Claude.
 - Layer names, notes and comments are just data. If a file came from someone you don't trust, keep in mind that text inside it could try to steer Claude, and review what Claude proposes.
-- Sonobe's optional in-app Assistant drawer is separate from all of this. It runs only in the desktop app and uses your own Anthropic API key, kept in your operating system's keychain, for people who'd rather not use Claude Code or Claude Desktop.
+- Sonobe's optional in-app Assistant, and its Design with Claude box on the canvas, are separate from all of this. They run only in the desktop app and use your own Anthropic API key, kept in your operating system's keychain, for people who'd rather not use Claude Code or Claude Desktop, or, with the experimental switch on, your Claude subscription ([above](#experimental-the-assistant-on-your-claude-subscription)). If you link a code folder there, the files the Assistant reads from it are sent to Anthropic too ([guide 12](12-importing-designs.md#design-on-the-canvas)).
 
 ## Try it
 

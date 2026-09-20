@@ -39,7 +39,7 @@ Run these from the repository root with `-w @sonobe/desktop`, or from this folde
 - `notifyDocumentChanged(revision)`: the editor reports each new revision. Players stop polling and follow pushes, and MCP clients get `resources/updated` for `sonobe://documents/<docId>/outline` and `…/diagnostics`.
 - `muted`: true when the app runs with `SONOBE_MUTE`, so the editor speaks silently too (system speech plays past the window's audio mute).
 - `notifyPrototypeRestarted()`: the editor's prototype restarted, or it opened another document in the window. Players showing that window's document (phones, the pop-out viewer) restart too, after any revision they don't have yet.
-- `secrets.status/get/set/delete`: small secrets such as the in-app assistant's API key, encrypted with the OS keychain in `userData/secrets.json` (0600). On Linux without a keyring, `set` refuses. `SONOBE_TEST=1` swaps in a reversible test cipher so automated runs never touch the keychain.
+- `secrets.status/set/delete`: small secrets such as the in-app assistant's API key, encrypted with the OS keychain in `userData/secrets.json` (0600). The renderer can't read a secret back; only the main process does. On Linux without a keyring, `set` refuses. `SONOBE_TEST=1` swaps in a reversible test cipher so automated runs never touch the keychain.
 - `openExternal(url)`: http(s) and mailto only.
 - `popOutViewer({ alwaysOnTop })`, `closeViewerWindow()`, `getViewerWindowStatus()`, `onViewerWindowStatus(cb)`: the live prototype in its own sandboxed window, served from a loopback-only player server. It has no host API. While it's open, the editor mutes its own viewer, so the window plays the sound.
 - Phone preview: `getPreviewStatus`, `startPreview`, `stopPreview`, `onPreviewStatus`.

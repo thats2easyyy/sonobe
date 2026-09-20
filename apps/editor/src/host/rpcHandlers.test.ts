@@ -3,6 +3,7 @@ import type { InputEvent } from "@sonobe/engine";
 import { buildDoc, MOCK_DEFINITIONS } from "@sonobe/engine/testing";
 import { createPatchRegistry } from "@sonobe/patches";
 import { afterEach, describe, expect, it } from "vitest";
+import { designStore, initialDesignData } from "../panels/design/designStore.ts";
 import { createManualScheduler } from "../runtime/scheduler.ts";
 import { createEditorSession, type EditorSession } from "../state/session.ts";
 import { createBrowserHost, createMemoryProjectStorage } from "./browserHost.ts";
@@ -335,6 +336,68 @@ describe("assets.put", () => {
     expect(new Uint8Array(s.assets.peekBytes("abc123.png")!)[1]).toBe(0x50);
     expect(await call("assets.put", { files: [{ file: "../escape.png", data: "AAAA" }] })).toMatchObject({ failed: true, code: "invalid_params", message: expect.stringContaining("plain file name") });
     expect(await call("assets.put", {})).toMatchObject({ failed: true, message: expect.stringContaining('"files" is required') });
+  });
+});
+
+describe("design.preview", () => {
+  afterEach(() => designStore.setState(initialDesignData()));
+
+  const update = (extra: Record<string, unknown> = {}) => ({
+    docId: "agent-proto",
+    key: "cc-1",
+    author: { kind: "agent", name: "Claude" },
+    client: { id: "cc-1", label: "Claude Code", folder: "/Users/ava/code/placemark" },
+    name: "Checkout",
+    component: null,
+    replace: null,
+    width: 402,
+    height: null,
+    position: [0, 0],
+    html: "<html><body><h1>Checkout</h1>",
+    status: "writing",
+    draftRevision: 1,
+    ...extra,
+  });
+
+  it("shows an MCP client's draft on the canvas, and ends it when cleared", async () => {
+    const { call } = setup();
+    expect(await call("design.preview", update())).toEqual({ applied: true });
+    expect(designStore.getState().drafts).toMatchObject([
+      { source: "mcp", key: "mcp:cc-1", html: "<html><body><h1>Checkout</h1>", fields: { name: "Checkout", width: 402, position: [0, 0] }, status: "writing", mcp: { author: { kind: "agent", name: "Claude" }, client: { id: "cc-1", label: "Claude Code" }, draftRevision: 1 } },
+    ]);
+    expect(await call("design.preview", update({ draftRevision: 2, status: "adding" }))).toEqual({ applied: true });
+    expect(designStore.getState().drafts[0]?.status).toBe("adding");
+    // An older update changes nothing.
+    expect(await call("design.preview", update({ draftRevision: 1, html: "<p>old</p>" }))).toEqual({ applied: false });
+    // A cleared update may leave the html out.
+    expect(await call("design.preview", update({ draftRevision: 3, status: "cleared", html: undefined }))).toEqual({ applied: true });
+    expect(designStore.getState().drafts[0]?.status).toBe("stopped");
+  });
+
+  it("refuses malformed params with a teaching message", async () => {
+    const { call } = setup();
+    const refused = async (params: unknown, message: string) => expect(await call("design.preview", params)).toMatchObject({ failed: true, code: "invalid_params", message: expect.stringContaining(message) });
+    await refused("html", "Parameters must be an object");
+    await refused(update({ status: "done" }), '"status" must be "writing", "adding" or "cleared"');
+    await refused(update({ docId: "" }), '"docId" and "key" are required');
+    await refused(update({ key: undefined }), '"docId" and "key" are required');
+    await refused(update({ key: "k".repeat(201) }), '"key" can be at most 200 characters');
+    await refused(update({ draftRevision: 1.5 }), '"draftRevision" is required');
+    await refused(update({ draftRevision: -1 }), '"draftRevision" is required');
+    await refused(update({ html: null }), '"html" is required while the draft is written or added');
+    await refused(update({ html: 42 }), '"html" must be text');
+    await refused(update({ html: "x".repeat(1_500_001) }), '"html" can be at most 1,500,000 characters');
+    await refused(update({ name: "N".repeat(121) }), '"name" can be at most 120 characters');
+    await refused(update({ width: 0 }), '"width" must be a size in points');
+    await refused(update({ height: Number.NaN }), '"height" must be a number');
+    await refused(update({ position: [0] }), '"position" must be two numbers');
+    await refused(update({ position: [0, 1e9] }), '"position" must be two numbers');
+    await refused(update({ client: { id: "cc-1" } }), '"client" must look like');
+    expect(designStore.getState().drafts).toEqual([]);
+
+    // A long client label is cut rather than refused, and a malformed author falls back to Claude.
+    expect(await call("design.preview", update({ html: "x".repeat(1_500_000), author: "someone", client: { id: "cc-1", label: "L".repeat(100) } }))).toEqual({ applied: true });
+    expect(designStore.getState().drafts[0]?.mcp).toMatchObject({ author: { kind: "agent", name: "Claude" }, client: { label: "L".repeat(64) } });
   });
 });
 

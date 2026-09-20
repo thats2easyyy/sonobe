@@ -2,6 +2,7 @@ import { mat4 } from "@sonobe/engine";
 import { describe, expect, it } from "vitest";
 import {
   boundsOf,
+  intersectRects,
   inverseTransformPoint,
   isAxisAligned,
   nodeContainsPoint,
@@ -43,6 +44,14 @@ describe("canvas geometry", () => {
   it("tests rect overlap inclusively", () => {
     expect(rectsIntersect({ x: 0, y: 0, width: 10, height: 10 }, { x: 10, y: 10, width: 5, height: 5 })).toBe(true);
     expect(rectsIntersect({ x: 0, y: 0, width: 10, height: 10 }, { x: 10.5, y: 0, width: 5, height: 5 })).toBe(false);
+  });
+
+  it("intersects rects, with nothing where they only touch or miss", () => {
+    const artboard = { x: 0, y: 0, width: 402, height: 874 };
+    expect(intersectRects(artboard, { x: 200, y: -20, width: 402, height: 874 })).toEqual({ x: 200, y: 0, width: 202, height: 854 });
+    expect(intersectRects(artboard, { x: -10, y: -10, width: 1000, height: 1000 })).toEqual(artboard);
+    expect(intersectRects(artboard, { x: 402, y: 0, width: 402, height: 874 })).toBeNull();
+    expect(intersectRects(artboard, { x: 482, y: 0, width: 402, height: 874 })).toBeNull();
   });
 
   it("hit tests rotated quads", () => {

@@ -81,6 +81,29 @@ describe("createLayoutStore", () => {
     expect(second.getState().viewMode).toBe("patches");
   });
 
+  it("saves a temporary layout as what it replaced, and ends it by putting back what still shows", () => {
+    const store = createLayoutStore({ storageKey: "test.layout", persistDelayMs: 100 });
+    const saved = () => JSON.parse(localStorage.getItem("test.layout")!);
+    store.getState().setViewMode("patches");
+    store.getState().showTemporary({ viewMode: "split", split: 0.8 });
+    expect(store.getState()).toMatchObject({ viewMode: "split", split: 0.8 });
+    vi.advanceTimersByTime(120);
+    expect(saved()).toMatchObject({ viewMode: "patches", split: DEFAULT_LAYOUT.split });
+
+    // The person moves the split meanwhile: that's theirs.
+    store.getState().setSplit(0.6);
+    vi.advanceTimersByTime(120);
+    expect(saved()).toMatchObject({ viewMode: "patches", split: 0.6 });
+    store.getState().endTemporary(true);
+    expect(store.getState()).toMatchObject({ viewMode: "patches", split: 0.6, temporary: null });
+
+    // Ended without restoring, it's kept and saved as the person's own.
+    store.getState().showTemporary({ split: 0.8 });
+    store.getState().endTemporary(false);
+    vi.advanceTimersByTime(120);
+    expect(saved()).toMatchObject({ viewMode: "patches", split: 0.8 });
+  });
+
   it("survives corrupt storage", () => {
     localStorage.setItem("test.layout", "{not json");
     expect(createLayoutStore({ storageKey: "test.layout" }).getState().sizes).toEqual(DEFAULT_LAYOUT.sizes);

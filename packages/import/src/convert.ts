@@ -17,12 +17,12 @@
  * Re-importing over an earlier screen (`replace`) swaps the screen in one step but keeps the ids of
  * layers found again at the same name path, their linked properties, and every connection other items
  * have to them, so interactions wired onto the old screen keep working. The notes name each connection
- * it had to drop.
+ * it had to drop, and the old layers it didn't find again (`plan.dropped`).
  */
 
 import { componentItemIds, findLayer, isLayerInput, isLinkInput, LAYER_TYPE_MAP, listInputs, parseAddress, slugify, targetAddress, uniqueId, type AssetRecord, type Id, type InputValue, type LayerNode, type NewLayer, type NewPatch, type Op, type SonobeDocument } from "@sonobe/core";
 import type { Box, CaptureFrame, CaptureGradient, CaptureImage, CaptureInput, CaptureNode, CaptureShadow, CaptureText, CaptureTextStyle, DesignCapture } from "./capture.ts";
-import { hexAlpha } from "./css.ts";
+import { hexAlpha, mergeFontWeights } from "./css.ts";
 import { sha256Hex } from "./sha256.ts";
 
 export interface ResolvedImage {
@@ -56,6 +56,8 @@ export interface ImportOptions {
   replace?: Id;
   /** With `replace`: ids retired in the component this session (ARCHITECTURE §3.2), which new layers must not take. */
   isRetired?: (id: Id) => boolean;
+  /** The plan won't be applied (import_design's dryRun): the replace notes say what would be removed. */
+  dryRun?: boolean;
 }
 
 /** The import can't be planned (the layer to replace doesn't exist). */
@@ -90,10 +92,12 @@ export interface ImportSummary {
   /** With `replace`: layers that kept their ids, and connections to layers that are gone. */
   kept?: number;
   lostConnections?: number;
+  /** With replace: layers of the old one that weren't found again (all of them, children included). */
+  dropped?: number;
 }
 
 export interface ImportPlan {
-  /** addAsset ops, then the screen's addLayer, then Scroll patches and their connections. */
+  /** addAsset ops (removeAsset and addAsset to widen an earlier import's font face), then the screen's addLayer, then Scroll patches and their connections. */
   ops: Op[];
   /** Bytes of new assets. Store them before applying the ops. */
   files: ImportFile[];
@@ -102,6 +106,8 @@ export interface ImportPlan {
   screenName: string;
   summary: ImportSummary;
   notes: string[];
+  /** With replace: the top-most old layers not found again (a dropped group's children aren't listed). Empty otherwise. */
+  dropped: { id: Id; name: string }[];
 }
 
 const round = (n: number) => Math.round(n * 100) / 100 || 0;
@@ -220,8 +226,10 @@ export async function planImport(capture: DesignCapture, doc: SonobeDocument, im
     summary.newAssets++;
   }
 
-  // Fonts: one asset per face the text uses, named after its family.
+  // Fonts: one asset per face the text uses, named after its family. A file that's already a face of the
+  // same family and style (a variable font's other weights) widens that face's weights to cover this one.
   const missingFonts = new Set<string>();
+  const addedFonts = new Map<Id, AssetRecord>();
   for (const [i, font] of (capture.fonts ?? []).entries()) {
     const resolved = images.get(`font:${i}`);
     const mime = resolved ? sniffFontMime(resolved.bytes) : null;
@@ -230,7 +238,22 @@ export async function planImport(capture: DesignCapture, doc: SonobeDocument, im
       continue;
     }
     const sha256 = await sha256Hex(resolved.bytes);
-    if (bySha.has(sha256)) continue;
+    const existing = bySha.get(sha256);
+    if (existing !== undefined) {
+      const record = addedFonts.get(existing) ?? doc.assets[existing];
+      const face = record?.kind === "font" ? record.font : undefined;
+      if (!record || !face || face.family !== font.family || (face.style ?? "normal") !== (font.style ?? "normal")) continue;
+      const weight = mergeFontWeights(face.weight, font.weight);
+      if (!weight || weight === face.weight) continue;
+      if (addedFonts.has(existing)) face.weight = weight;
+      else {
+        // A face an earlier import added: put it back with the wider weights, in this import's undo step.
+        const widened: AssetRecord = { ...record, font: { ...face, weight } };
+        ops.push({ op: "removeAsset", id: existing }, { op: "addAsset", asset: widened });
+        addedFonts.set(existing, widened);
+      }
+      continue;
+    }
     const id = uniqueId(slugify(`${font.family} ${font.style === "italic" ? "italic " : ""}${font.weight ?? ""}`, "font"), takenAssetIds);
     takenAssetIds.add(id);
     bySha.set(sha256, id);
@@ -239,7 +262,9 @@ export async function planImport(capture: DesignCapture, doc: SonobeDocument, im
     if (font.style) face.style = font.style;
     if (font.unicodeRange) face.unicodeRange = font.unicodeRange;
     const file = `${sha256}.${FONT_EXTENSIONS[mime]}`;
-    ops.push({ op: "addAsset", asset: { id, kind: "font", name: font.family, file, mime, sha256, font: face } });
+    const record: AssetRecord = { id, kind: "font", name: font.family, file, mime, sha256, font: face };
+    addedFonts.set(id, record);
+    ops.push({ op: "addAsset", asset: record });
     files.push({ file, bytes: resolved.bytes, mime });
     summary.newAssets++;
     summary.fonts++;
@@ -265,6 +290,7 @@ export async function planImport(capture: DesignCapture, doc: SonobeDocument, im
 
   const skipScroll = new Set<string>();
   const restores: Op[] = [];
+  const dropped: { id: Id; name: string }[] = [];
   if (replaced && target) {
     const kept = keepIds(replaced.layer, screen, skipScroll);
     const oldIds = new Set<Id>();
@@ -279,6 +305,16 @@ export async function planImport(capture: DesignCapture, doc: SonobeDocument, im
       l.children?.forEach(visitNew);
     };
     visitNew(screen);
+    // Old layers not found again go with the old screen. A layer is only found again under a parent
+    // that was, so a dropped layer's children are dropped too: list the top-most, count them all.
+    const listDropped = (l: LayerNode) => {
+      for (const child of l.children ?? []) {
+        if (newIds.has(child.id)) listDropped(child);
+        else dropped.push({ id: child.id, name: child.name });
+      }
+    };
+    listDropped(replaced.layer);
+    summary.dropped = [...oldIds].filter((id) => !newIds.has(id)).length;
     // A new layer derives its id while the tree is built, so it could take a kept id before the layer
     // keeping it is reached. Name every new layer up front instead, against the ids in use. That includes
     // the old screen's ids nothing kept: a layer not found again doesn't take one without its connections.
@@ -316,10 +352,18 @@ export async function planImport(capture: DesignCapture, doc: SonobeDocument, im
     ops.push({ op: "removeLayer", component, id: replaced.layer.id });
     summary.kept = kept;
     summary.lostConnections = lost.length;
+    const dry = options.dryRun === true;
+    if (dropped.length) {
+      const one = dropped.length === 1;
+      const listed = `${dropped.slice(0, 5).map((l) => l.name).join(", ")}${dropped.length > 5 ? ` and ${dropped.length - 5} more` : ""}`;
+      const fate = dry ? "wouldn't be found again and would be removed" : one ? "wasn't found again and was removed" : "weren't found again and were removed";
+      notes.push(`${dropped.length} layer${one ? "" : "s"} of the old “${replaced.layer.name}” ${fate}: ${listed}. Give layers you'll import again a data-name so they're found.`);
+    }
     if (lost.length) {
       const one = lost.length === 1;
       const listed = `${lost.slice(0, 5).join(", ")}${lost.length > 5 ? ` and ${lost.length - 5} more` : ""}`;
-      notes.push(`${lost.length} connection${one ? "" : "s"} to layers the new screen doesn't have ${one ? "was" : "were"} removed: ${listed}. Wire ${one ? "it" : "them"} to the new screen's layers again if ${one ? "it's" : "they're"} still needed.`);
+      const fate = dry ? "would be removed" : one ? "was removed" : "were removed";
+      notes.push(`${lost.length} connection${one ? "" : "s"} to layers the new screen doesn't have ${fate}: ${listed}. Wire ${one ? "it" : "them"} to the new screen's layers again if ${one ? "it's" : "they're"} still needed.`);
     }
   }
   ops.push(addScreen);
@@ -349,7 +393,7 @@ export async function planImport(capture: DesignCapture, doc: SonobeDocument, im
   if (ctx.insetShadows) notes.push(`${ctx.insetShadows} inner shadow${ctx.insetShadows === 1 ? " was" : "s were"} left out (Sonobe draws outer shadows).`);
   if (ctx.missingImages) notes.push(`${ctx.missingImages} image${ctx.missingImages === 1 ? "" : "s"} couldn't be downloaded; ${ctx.missingImages === 1 ? "it's" : "they're"} gray placeholders.`);
   summary.layers = ctx.layers;
-  return { ops, files, screenRef, screenName, summary, notes };
+  return { ops, files, screenRef, screenName, summary, notes, dropped };
 }
 
 // ---------------------------------------------------------------------------

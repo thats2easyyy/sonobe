@@ -8,7 +8,11 @@
 import type { RpcRegistrar } from "../host/types.ts";
 import type { AgentPermission } from "./settings.ts";
 
-/** Bridge methods that change the document, what's on disk, or which document is open. */
+/**
+ * Bridge methods that change the document, what's on disk, or which document is open. `design.preview`
+ * isn't one: an MCP client's draft only draws over the canvas, so Read only still shows it, and the
+ * import that would add its layers is refused as a document.apply.
+ */
 export const AGENT_WRITE_METHODS: ReadonlySet<string> = new Set(["document.apply", "document.save", "document.open", "document.new", "document.recoverDraft", "history.undo"]);
 
 export const AGENT_READ_ONLY_CODE = "agent_read_only";
