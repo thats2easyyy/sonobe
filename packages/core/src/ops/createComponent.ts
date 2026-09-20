@@ -63,9 +63,10 @@ export function createComponent(ctx: OpContext, op: OpOf<"createComponent">): Op
   const isMovedSource = (a: ParsedAddress | undefined) => !!a && ((a.kind === "patch" && movedPatches.has(a.id)) || (a.kind === "layer" && movedLayers.has(a.id)));
 
   // Case-insensitive: "navBar" and "navbar" would be one components/*.json file on macOS and Windows.
-  const newId = newComponentId(ctx, op.name);
+  // `applied` records both ids, so a redo (lenient, without the ledger) doesn't derive others.
+  const newId = newComponentId(ctx, op.name, op.id);
   defineRef(ctx, op.ref, newId);
-  const instanceId = newItemId(ctx, component, { name: op.name, fallback: "component", taken: componentItemIds(component) });
+  const instanceId = newItemId(ctx, component, { explicit: op.instanceId, name: op.name, fallback: "component", taken: componentItemIds(component) });
   const lenient = { registry: ctx.registry, lenient: true };
   const entries = listInputs(component);
 
@@ -261,7 +262,7 @@ export function createComponent(ctx: OpContext, op: OpOf<"createComponent">): Op
   const removeInstance: Op = kind === "layerComponent" ? { op: "removeLayer", component: component.id, id: instanceId } : { op: "removePatch", component: component.id, id: instanceId };
   return {
     ids: [newId, instanceId],
-    applied: { op: "createComponent", component: component.id, name: op.name, layerIds, patchIds },
+    applied: { op: "createComponent", component: component.id, name: op.name, id: newId, instanceId, layerIds, patchIds },
     inverse: [removeInstance, { op: "removeComponent", id: newId }, ...adds, ...afters, ...restoreOuter, ...(moved.restore ? [{ op: "setNodePositions" as const, component: component.id, positions: moved.restore }] : [])],
   };
 }
