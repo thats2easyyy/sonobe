@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { clampRadii, collapseWhitespace, coversLatin, parseBackgroundImages, parseBoxShadows, parseFontFaceRules, parseFontFamilies, parseGradient, parseRadius, parseRgb, parseTransform, pickFontSource, splitTopLevel, titleize } from "./css.ts";
+import { clampRadii, collapseWhitespace, coversLatin, mergeFontWeights, parseBackgroundImages, parseBoxShadows, parseFontFaceRules, parseFontFamilies, parseGradient, parseRadius, parseRgb, parseTransform, pickFontSource, splitTopLevel, titleize } from "./css.ts";
 
 const color = (css: string) => parseRgb(css) ?? (css === "red" ? "#FF0000FF" : css === "blue" ? "#0000FFFF" : null);
 
@@ -99,6 +99,18 @@ describe("fonts", () => {
     expect(coversLatin("U+0000-00FF, U+0131")).toBe(true);
     expect(coversLatin("U+0400-045F, U+0490-0491")).toBe(false);
     expect(coversLatin(undefined)).toBe(true);
+  });
+
+  it("merges the weights of faces that share a file into a range", () => {
+    expect(mergeFontWeights("400", "700")).toBe("400 700");
+    expect(mergeFontWeights("400 700", "600")).toBe("400 700");
+    expect(mergeFontWeights("600", "300 500")).toBe("300 600");
+    expect(mergeFontWeights(undefined, "bold")).toBe("400 700");
+    expect(mergeFontWeights("100 900", undefined)).toBe("100 900");
+    // A single weight stays as it is.
+    expect(mergeFontWeights("400", "400")).toBe("400");
+    expect(mergeFontWeights(undefined, "normal")).toBeUndefined();
+    expect(mergeFontWeights("400", "bolder")).toBe("400");
   });
 
   it("parses @font-face rules from stylesheet text", () => {

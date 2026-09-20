@@ -88,7 +88,7 @@ Conventions:
 
 - **Results.** Each returns concise text plus `structuredContent`; writes, simulation and document info also declare `outputSchema`.
 - **`structuredContent.text`** always holds the complete text, as the first field. Some clients (Claude Code) give the model only `structuredContent`, so metadata alone would hide the outline, guide or trace. `get_screenshot` returns no `structuredContent`, so clients keep the image.
-- **Writes** return `revision`, `txnId`, created ids, `idMap` and diagnostics `{ added, resolved, totals }`.
+- **Writes** return `revision`, `txnId`, created ids, `idMap` and diagnostics `{ added, resolved, totals }`. `preview_design` changes no document, so it returns only the document's `revision`, plus `draftRevision`, which counts its draft's updates.
 - **Inputs** refuse fields a tool doesn't take (`src/inputs.ts`): the error names the tool, the field (`layers[0]`, `events[2]` when nested) and the closest field it takes. Loose objects, records and op shapes stay open (core checks ops), and `_meta` is tolerated.
 - **Errors** are `isError` results with `{ code, message, hint, suggestions: [{ description, ops }], changed }`. Every `outputSchema` is `{ type: "object", anyOf: [success, teaching error] }` (`toolOutputSchema`), so SDK clients that validate error results (the v1 SDK does) show the teaching error instead of -32602. The wrapper drops any error `structuredContent` that wouldn't validate.
 - **Reads** paginate with `cursor` and truncate with explicit notes.

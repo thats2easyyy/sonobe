@@ -24,7 +24,7 @@
 
 import type { Box, CaptureBorder, CaptureFont, CaptureFrame, CaptureImage, CaptureImageSource, CaptureInput, CaptureNode, CaptureText, CaptureTextStyle, DesignCapture, ImageFit } from "../capture.ts";
 import { CAPTURE_FORMAT, CAPTURE_VERSION } from "../constants.ts";
-import { blendModeKey, clampRadii, collapseWhitespace, coversLatin, parseBackgroundImages, parseBlur, parseBoxShadows, parseFontFaceRules, parseFontFamilies, parsePx, parseRadius, parseRgb, parseTransform, pickFontSource, titleize, toHex, type ColorFn, type FontFaceRule } from "../css.ts";
+import { blendModeKey, clampRadii, collapseWhitespace, coversLatin, mergeFontWeights, parseBackgroundImages, parseBlur, parseBoxShadows, parseFontFaceRules, parseFontFamilies, parsePx, parseRadius, parseRgb, parseTransform, pickFontSource, titleize, toHex, type ColorFn, type FontFaceRule } from "../css.ts";
 
 export const WALKER_GENERATOR = "sonobe-walker/1";
 
@@ -407,20 +407,32 @@ class Walker {
   /**
    * Web fonts the captured text uses: @font-face rules with a downloadable file, from stylesheets the
    * page can read, and from cross-origin sheets fetched again (Google Fonts allows it). When a family is
-   * split into unicode-range subsets, only the faces covering Latin letters come along.
+   * split into unicode-range subsets, only the faces covering Latin letters come along. Rules that share a
+   * file and style (a variable font's weights, as Google Fonts serves them) become one face covering
+   * their weights ("400 700").
    */
   async collectFonts(): Promise<CaptureFont[]> {
     const out: CaptureFont[] = [];
-    const seen = new Set<string>();
+    const byUrl = new Map<string, CaptureFont>();
     const add = (rule: FontFaceRule, base: string) => {
-      if (out.length >= 24 || !this.families.has(rule.family.toLowerCase()) || !coversLatin(rule.unicodeRange)) return;
+      if (!this.families.has(rule.family.toLowerCase()) || !coversLatin(rule.unicodeRange)) return;
       const url = pickFontSource(rule.src, base);
-      if (!url || seen.has(url)) return;
-      seen.add(url);
+      if (!url) return;
+      const weight = rule.weight && rule.weight !== "normal" ? (rule.weight === "bold" ? "700" : rule.weight) : undefined;
+      const style = rule.style && rule.style !== "normal" ? rule.style : undefined;
+      const same = byUrl.get(url);
+      if (same) {
+        if (same.family !== rule.family || same.style !== style) return;
+        const merged = mergeFontWeights(same.weight, weight);
+        if (merged) same.weight = merged;
+        return;
+      }
+      if (out.length >= 24) return;
       const font: CaptureFont = { family: rule.family, url };
-      if (rule.weight && rule.weight !== "normal") font.weight = rule.weight === "bold" ? "700" : rule.weight;
-      if (rule.style && rule.style !== "normal") font.style = rule.style;
+      if (weight) font.weight = weight;
+      if (style) font.style = style;
       if (rule.unicodeRange) font.unicodeRange = rule.unicodeRange;
+      byUrl.set(url, font);
       out.push(font);
     };
     const visitRules = (rules: CSSRuleList, base: string) => {

@@ -22,7 +22,7 @@
 
 import { componentItemIds, findLayer, isLayerInput, isLinkInput, LAYER_TYPE_MAP, listInputs, parseAddress, slugify, targetAddress, uniqueId, type AssetRecord, type Id, type InputValue, type LayerNode, type NewLayer, type NewPatch, type Op, type SonobeDocument } from "@sonobe/core";
 import type { Box, CaptureFrame, CaptureGradient, CaptureImage, CaptureInput, CaptureNode, CaptureShadow, CaptureText, CaptureTextStyle, DesignCapture } from "./capture.ts";
-import { hexAlpha } from "./css.ts";
+import { hexAlpha, mergeFontWeights } from "./css.ts";
 import { sha256Hex } from "./sha256.ts";
 
 export interface ResolvedImage {
@@ -97,7 +97,7 @@ export interface ImportSummary {
 }
 
 export interface ImportPlan {
-  /** addAsset ops, then the screen's addLayer, then Scroll patches and their connections. */
+  /** addAsset ops (removeAsset and addAsset to widen an earlier import's font face), then the screen's addLayer, then Scroll patches and their connections. */
   ops: Op[];
   /** Bytes of new assets. Store them before applying the ops. */
   files: ImportFile[];
@@ -226,8 +226,10 @@ export async function planImport(capture: DesignCapture, doc: SonobeDocument, im
     summary.newAssets++;
   }
 
-  // Fonts: one asset per face the text uses, named after its family.
+  // Fonts: one asset per face the text uses, named after its family. A file that's already a face of the
+  // same family and style (a variable font's other weights) widens that face's weights to cover this one.
   const missingFonts = new Set<string>();
+  const addedFonts = new Map<Id, AssetRecord>();
   for (const [i, font] of (capture.fonts ?? []).entries()) {
     const resolved = images.get(`font:${i}`);
     const mime = resolved ? sniffFontMime(resolved.bytes) : null;
@@ -236,7 +238,22 @@ export async function planImport(capture: DesignCapture, doc: SonobeDocument, im
       continue;
     }
     const sha256 = await sha256Hex(resolved.bytes);
-    if (bySha.has(sha256)) continue;
+    const existing = bySha.get(sha256);
+    if (existing !== undefined) {
+      const record = addedFonts.get(existing) ?? doc.assets[existing];
+      const face = record?.kind === "font" ? record.font : undefined;
+      if (!record || !face || face.family !== font.family || (face.style ?? "normal") !== (font.style ?? "normal")) continue;
+      const weight = mergeFontWeights(face.weight, font.weight);
+      if (!weight || weight === face.weight) continue;
+      if (addedFonts.has(existing)) face.weight = weight;
+      else {
+        // A face an earlier import added: put it back with the wider weights, in this import's undo step.
+        const widened: AssetRecord = { ...record, font: { ...face, weight } };
+        ops.push({ op: "removeAsset", id: existing }, { op: "addAsset", asset: widened });
+        addedFonts.set(existing, widened);
+      }
+      continue;
+    }
     const id = uniqueId(slugify(`${font.family} ${font.style === "italic" ? "italic " : ""}${font.weight ?? ""}`, "font"), takenAssetIds);
     takenAssetIds.add(id);
     bySha.set(sha256, id);
@@ -245,7 +262,9 @@ export async function planImport(capture: DesignCapture, doc: SonobeDocument, im
     if (font.style) face.style = font.style;
     if (font.unicodeRange) face.unicodeRange = font.unicodeRange;
     const file = `${sha256}.${FONT_EXTENSIONS[mime]}`;
-    ops.push({ op: "addAsset", asset: { id, kind: "font", name: font.family, file, mime, sha256, font: face } });
+    const record: AssetRecord = { id, kind: "font", name: font.family, file, mime, sha256, font: face };
+    addedFonts.set(id, record);
+    ops.push({ op: "addAsset", asset: record });
     files.push({ file, bytes: resolved.bytes, mime });
     summary.newAssets++;
     summary.fonts++;

@@ -59,9 +59,10 @@ export function draftKb(bytes: number): number {
   return bytes > 0 ? Math.max(1, Math.round(bytes / 1024)) : 0;
 }
 
-/** One call's view of a host's drafts (withDrafts). */
+/** One call's view of its draft (withDraft). */
 export interface DraftTurn {
-  get(docId: Id, key: string): DesignDraft | undefined;
+  /** The session's draft on this document, if it has one. */
+  get(): DesignDraft | undefined;
   /** Keep a new or changed draft as its session's draft. */
   keep(draft: DesignDraft): void;
   /** Forget a draft (imported or cleared); update it with "cleared" to take it off the canvas. */
@@ -77,65 +78,83 @@ interface HostDrafts {
   drafts: Map<string, DesignDraft>;
   /** The last revision per draft, kept after it ends so the session's next draft continues the count. */
   revisions: Map<string, number>;
-  /** The call running now. Calls take turns, so a draft's updates reach the canvas in the order they came. */
-  turn: Promise<unknown>;
+  /**
+   * The call running now on each draft. Calls on one draft take turns, so its updates reach the canvas
+   * in the order they came; other sessions' and documents' drafts don't wait for it.
+   */
+  turns: Map<string, Promise<unknown>>;
 }
 
 const hosts = new WeakMap<SonobeHost, HostDrafts>();
 
 const slot = (docId: Id, key: string) => `${docId}\n${key}`;
 
-/**
- * Run `fn` on the host's drafts once the calls before it are done. Idle drafts are dropped first, and
- * cleared from the canvas.
- */
-export function withDrafts<T>(host: SonobeHost, now: () => number, fn: (drafts: DraftTurn) => Promise<T>): Promise<T> {
-  let state = hosts.get(host);
-  if (!state) hosts.set(host, (state = { drafts: new Map(), revisions: new Map(), turn: Promise.resolve() }));
-  const { drafts, revisions } = state;
+/** Run `fn` once the calls before it on the draft at `at` are done. */
+function inTurn<T>(state: HostDrafts, at: string, fn: () => Promise<T>): Promise<T> {
+  const run = (state.turns.get(at) ?? Promise.resolve()).then(fn);
+  const done = run.catch(() => undefined);
+  state.turns.set(at, done);
+  void done.then(() => {
+    if (state.turns.get(at) === done) state.turns.delete(at);
+  });
+  return run;
+}
 
-  const turn: DraftTurn = {
-    get: (docId, key) => drafts.get(slot(docId, key)),
-    keep: (draft) => void drafts.set(slot(draft.docId, draft.key), draft),
-    drop: (draft) => {
-      const at = slot(draft.docId, draft.key);
-      if (drafts.get(at) === draft) drafts.delete(at);
-    },
-    async update(draft, status) {
-      const at = slot(draft.docId, draft.key);
-      draft.revision = (revisions.get(at) ?? 0) + 1;
-      revisions.set(at, draft.revision);
-      draft.touchedAt = now();
-      if (!showsDesignPreviews(host)) return null;
-      const update: DesignPreviewUpdate = {
-        docId: draft.docId,
-        key: draft.key,
-        author: draft.author,
-        ...(draft.client ? { client: draft.client } : {}),
-        ...draft.fields,
-        html: status === "cleared" ? null : draft.html,
-        status,
-        revision: draft.revision,
-      };
-      try {
-        await host.showDesignPreview!(update);
-        return null;
-      } catch (err) {
-        const why = isHostError(err) ? `${err.message}${err.hint ? ` ${err.hint}` : ""}` : err instanceof Error ? err.message : String(err);
-        return `The canvas didn't ${status === "cleared" ? "clear" : "show"} the draft: ${why}`;
-      }
-    },
+/**
+ * Run `fn` on the session's draft on `docId` once the calls before it on that draft are done. Drafts
+ * left alone too long are dropped and cleared from the canvas, each in its own draft's turn, so no call
+ * waits on another draft's canvas.
+ */
+export function withDraft<T>(host: SonobeHost, now: () => number, docId: Id, key: string, fn: (drafts: DraftTurn) => Promise<T>): Promise<T> {
+  let state = hosts.get(host);
+  if (!state) hosts.set(host, (state = { drafts: new Map(), revisions: new Map(), turns: new Map() }));
+  const { drafts, revisions } = state;
+  const at = slot(docId, key);
+
+  const update = async (draft: DesignDraft, status: DesignPreviewUpdate["status"]): Promise<string | null> => {
+    const draftAt = slot(draft.docId, draft.key);
+    draft.revision = (revisions.get(draftAt) ?? 0) + 1;
+    revisions.set(draftAt, draft.revision);
+    draft.touchedAt = now();
+    if (!showsDesignPreviews(host)) return null;
+    const message: DesignPreviewUpdate = {
+      docId: draft.docId,
+      key: draft.key,
+      author: draft.author,
+      ...(draft.client ? { client: draft.client } : {}),
+      ...draft.fields,
+      html: status === "cleared" ? null : draft.html,
+      status,
+      revision: draft.revision,
+    };
+    try {
+      await host.showDesignPreview!(message);
+      return null;
+    } catch (err) {
+      const why = isHostError(err) ? `${err.message}${err.hint ? ` ${err.hint}` : ""}` : err instanceof Error ? err.message : String(err);
+      return `The canvas didn't ${status === "cleared" ? "clear" : "show"} the draft: ${why}`;
+    }
   };
 
-  const run = state.turn.then(async () => {
-    const t = now();
-    for (const draft of [...drafts.values()]) {
-      if (t - draft.touchedAt <= DRAFT_IDLE_MS) continue;
-      turn.drop(draft);
-      await turn.update(draft, "cleared");
-    }
-    return fn(turn);
-  });
-  state.turn = run.catch(() => undefined);
-  return run;
+  const t = now();
+  for (const [draftAt, draft] of drafts) {
+    if (t - draft.touchedAt <= DRAFT_IDLE_MS) continue;
+    // Checked again in the draft's turn, since a call already waiting on it may touch it first.
+    void inTurn(state, draftAt, async () => {
+      if (drafts.get(draftAt) !== draft || now() - draft.touchedAt <= DRAFT_IDLE_MS) return;
+      drafts.delete(draftAt);
+      await update(draft, "cleared");
+    });
+  }
+
+  const turn: DraftTurn = {
+    get: () => drafts.get(at),
+    keep: (draft) => void drafts.set(slot(draft.docId, draft.key), draft),
+    drop: (draft) => {
+      const draftAt = slot(draft.docId, draft.key);
+      if (drafts.get(draftAt) === draft) drafts.delete(draftAt);
+    },
+    update,
+  };
+  return inTurn(state, at, () => fn(turn));
 }
