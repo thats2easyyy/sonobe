@@ -164,11 +164,14 @@ describe("sonobe CLI commands", () => {
   it("reports layers nested too deep as a format error", async () => {
     await run(["new", "Deep.sonobe"]);
     const file = path.join(dir, "Deep.sonobe", "components", "main.json");
-    const main = JSON.parse(await readFile(file, "utf8")) as { layers: unknown[] };
-    let layer: Record<string, unknown> = { id: "l5000", type: "group", name: "L", props: {} };
-    for (let i = 4999; i >= 1; i--) layer = { id: `l${i}`, type: "group", name: "L", props: {}, children: [layer] };
-    main.layers = [layer];
-    await writeFile(file, JSON.stringify(main));
+    const main = JSON.parse(await readFile(file, "utf8")) as { layers: unknown };
+    // 5000 nested groups, written as text: JSON.stringify itself recurses and runs out of stack this deep.
+    const depth = 5000;
+    let layers = "";
+    for (let i = 1; i <= depth; i++) layers += `{"id":"l${i}","type":"group","name":"L","props":{}${i < depth ? ',"children":[' : "}"}`;
+    layers += "]}".repeat(depth - 1);
+    main.layers = "LAYERS";
+    await writeFile(file, JSON.stringify(main).replace('"LAYERS"', `[${layers}]`));
     const json = await run(["validate", "Deep.sonobe", "--json"]);
     expect(json.code).toBe(1);
     expect(JSON.parse(json.stdout)).toMatchObject({ ok: false, formatError: { code: "invalidFormat", message: expect.stringContaining("nested more than 256 levels") } });
