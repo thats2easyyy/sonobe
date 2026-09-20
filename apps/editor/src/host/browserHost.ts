@@ -22,7 +22,7 @@ import {
   textDigest,
   toArrayBuffer,
 } from "./projectFiles.ts";
-import type { DraftInfo, HostAdapter, HostDrafts } from "./types.ts";
+import type { DraftInfo, HostAdapter, HostDrafts, RecoveredDraft } from "./types.ts";
 
 export interface StoredProject {
   files: Record<string, string>;
@@ -572,7 +572,14 @@ export function createBrowserHost(options: BrowserHostOptions = {}): BrowserHost
           } catch {
             // Torn: read what's there.
           }
-          const recovered = readDraftContents(info, manifest, stored.files, stored.binaries);
+          let recovered: RecoveredDraft;
+          try {
+            recovered = readDraftContents(info, manifest, stored.files, stored.binaries);
+          } catch (err) {
+            // It doesn't make a document here (a newer format, damaged files): leave it listed.
+            releaseDraft(id);
+            throw err;
+          }
           draftFiles.read(id, documentFiles(stored.files), recovered);
           const digests: Record<string, string> = {};
           for (const [rel, text] of Object.entries(documentFiles(stored.files))) digests[rel] = textDigest(text);

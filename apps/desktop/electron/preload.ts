@@ -216,6 +216,7 @@ const host: SonobeHost = {
       for (const [rel, bytes] of Object.entries(reply.binaries as unknown as Record<string, Uint8Array>)) binaries[rel] = toArrayBuffer(bytes);
       return { ...reply, binaries };
     },
+    release: (id) => invoke<void>(IPC.draftsRelease, String(id)),
     reveal(id) {
       void ipcRenderer.invoke(IPC.draftsReveal, String(id)).catch(() => undefined);
     },

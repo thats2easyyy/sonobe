@@ -187,6 +187,24 @@ describe("restoring drafts", () => {
     expect(await drafts.list()).toEqual([]);
   });
 
+  it("leaves a draft it can't read listed, for a newer Sonobe", async () => {
+    const storage = createMemoryProjectStorage();
+    const drafts = createMemoryProjectStorage();
+    const locks = sharedLocks();
+    const lost = tab(storage, drafts, locks);
+    lost.document.getState().apply([addRect("Card")], { label: "Add Card" });
+    await lost.drafts!.flush();
+    const id = lost.drafts!.current()!.id;
+    lost.host!.dispose();
+    const project = (await drafts.read(id))!.files["project.json"]!;
+    await drafts.write(id, { files: { "project.json": project.replace(/"formatVersion": \d+/, '"formatVersion": 999') }, deleted: [] });
+
+    const next = tab(storage, drafts, locks);
+    expect(await next.restoreDraft(id)).toMatchObject({ ok: false, errorCode: "tooNew" });
+    expect((await next.recoverableDrafts()).map((d) => d.id)).toEqual([id]);
+    expect((await tab(storage, drafts, locks).recoverableDrafts()).map((d) => d.id)).toEqual([id]);
+  });
+
   it("notices a draft cut off mid-write and still restores what's there", async () => {
     const storage = createMemoryProjectStorage();
     const drafts = createMemoryProjectStorage();
