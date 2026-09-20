@@ -1,6 +1,6 @@
 /**
- * The user docs agree with the code: README.md, ARCHITECTURE.md, ROADMAP.md, the guides and the example
- * READMEs. Each test checks one kind of claim against the thing it describes, so docs can't drift from
+ * The user docs agree with the code: README.md, ARCHITECTURE.md, ROADMAP.md, CLAUDE.md, the guides, the
+ * MCP and integration READMEs, and the example READMEs. Each test checks one kind of claim against the thing it describes, so docs can't drift from
  * the product without a test failing.
  */
 
@@ -450,6 +450,40 @@ describe("tool, prompt and op lists agree with the code", () => {
       expect([...names].filter((name) => !OP_KINDS.includes(name as never)), where).toEqual([]);
       expect(OP_KINDS.filter((kind) => !names.has(kind)), where).toEqual([]);
     }
+  });
+});
+
+describe("CLAUDE.md", () => {
+  const text = read("CLAUDE.md");
+
+  it("points to the contract, the conventions and the roadmap", () => {
+    for (const doc of ["ARCHITECTURE.md", "CONTRIBUTING.md", "ROADMAP.md"]) expect(text).toContain(`](${doc})`);
+  });
+
+  it("runs only commands and files that exist", () => {
+    const workspaces = new Map<string, Record<string, string>>();
+    for (const dir of ["packages", "apps"])
+      for (const name of readdirSync(path.join(ROOT, dir))) {
+        const file = path.join(ROOT, dir, name, "package.json");
+        if (existsSync(file)) {
+          const pkg = JSON.parse(readFileSync(file, "utf8")) as { name: string; scripts?: Record<string, string> };
+          workspaces.set(pkg.name, pkg.scripts ?? {});
+        }
+      }
+    const rootScripts = (JSON.parse(read("package.json")) as { scripts: Record<string, string> }).scripts;
+    const commands = fences(text).flatMap((f) => lines(f.body)).map((line) => line.replace(/#.*$/, "").trim()).filter(Boolean);
+    commands.push(...[...text.matchAll(/`(npm run [^`]+)`/g)].map((m) => m[1]!));
+    expect(commands.length).toBeGreaterThan(8);
+    for (const command of commands) {
+      const npm = /^npm (?:run )?([\w:]+)(?: -w (\S+))?/.exec(command);
+      if (npm) expect((npm[2] ? workspaces.get(npm[2]) : rootScripts)?.[npm[1]!], command).toBeDefined();
+      const node = /^(?:node|npx vitest run) (\S+)/.exec(command);
+      if (node) expect(existsSync(path.join(ROOT, node[1]!)), command).toBe(true);
+    }
+    // Build output (dist/) only exists after a build.
+    const paths = [...text.matchAll(/`((?:\.github|apps|packages|examples|evals)\/[^`\s]+)`/g)].map((m) => m[1]!).filter((file) => !file.split("/").includes("dist"));
+    expect(paths.length).toBeGreaterThan(3);
+    for (const file of paths) expect(existsSync(path.join(ROOT, file)), file).toBe(true);
   });
 });
 
