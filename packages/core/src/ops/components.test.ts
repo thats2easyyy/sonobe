@@ -398,13 +398,12 @@ describe("updateInterface", () => {
     expect(errorsOf(colored.doc)).toEqual([]);
   });
 
-  it("refuses an input named like a property every layer instance has, and never cascades into those properties", () => {
+  it("never cascades into the properties every layer instance has, even when an input shares a key", () => {
     const doc = setup();
-    const e = firstError(doc, [{ op: "updateInterface", component: "chip", inputs: { enabled: { name: "Enabled", type: "text" } } }]);
-    expect(e).toMatchObject({ code: "invalid_id", message: expect.stringContaining("Enabled property of every instance of Chip"), hint: expect.stringContaining('"enabled_2"') });
-    // Patch components have no such properties.
+    // Patch components have no such properties, so their instances' inputs of that key do cascade.
     expect(apply(logicDoc(), [{ op: "updateInterface", component: "logic", inputs: { enabled: { name: "Enabled", type: "boolean" } } }]).ok).toBe(true);
-    // A document that already has one (loaded, or restored leniently) keeps the instance's own Enabled when it's unpublished.
+    // A layer component input named like the instance's own Enabled (loaded, or restored leniently)
+    // never reaches instances; unpublishing it keeps the instance's own value.
     const legacy = applyOps(doc, [
       { op: "setInput", target: "@chip_1.enabled", value: false },
       { op: "updateInterface", component: "chip", inputs: { enabled: { name: "Enabled", type: "text" } } },
