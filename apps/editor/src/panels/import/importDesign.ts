@@ -10,7 +10,7 @@ import { globalFetcher, ImportPlanError, looksLikeCapture, parseCapture, planImp
 import { getDesktopHostApi } from "../../host/detect.ts";
 import type { DesktopHostApi } from "../../host/types.ts";
 import type { EditorSession } from "../../state/session.ts";
-import { hologramStore } from "./hologram.ts";
+import { requestHologram } from "./hologram.ts";
 import { captureHtmlInIframe } from "./iframeCapture.ts";
 
 export interface ImportDesignRequest {
@@ -187,10 +187,11 @@ export async function importCapture(session: EditorSession, capture: DesignCaptu
   const screenId = result.idMap[plan.screenRef] ?? result.idMap[`$${plan.screenRef}`];
   if (screenId) {
     session.selection.getState().select({ layers: [screenId] });
-    // The canvas builds the new screen as a hologram (the dialog, pasted captures). The import has
-    // landed either way, so a failing build animation mustn't turn it into an error.
+    // The canvas builds the new screen as a hologram (the dialog, pasted captures), unless Design with
+    // Claude's live preview drew it. The import has landed either way, so a failing build animation
+    // mustn't turn it into an error.
     try {
-      hologramStore(session).getState().build({ componentId, screenId });
+      requestHologram(session, { componentId, screenId }, null);
     } catch {
       // Only the animation is lost.
     }

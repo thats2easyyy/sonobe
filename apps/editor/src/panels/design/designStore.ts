@@ -363,6 +363,31 @@ export function activeDraft(state: DesignData, now: number): DesignDraft | null 
   return null;
 }
 
+/** The box's request, when the draft is the Assistant's and of the request's run (or the run it's starting). */
+export function draftRequest<R extends Pick<DesignRequest, "runId">>(draft: DesignDraft, request: R | null | undefined): R | null {
+  return assistantDraft(draft) && request && (request.runId === null || request.runId === draft.runId) ? request : null;
+}
+
+/** The component a draft lands in: the one its fields name, else the box request's (a draft of its run), else the project root. */
+export function draftComponent(draft: DesignDraft, request: Pick<DesignRequest, "runId" | "context"> | null | undefined, rootId: string): string {
+  return draft.fields.component ?? draftRequest(draft, request)?.context.component.id ?? rootId;
+}
+
+/**
+ * Whether an import landing in `componentId` now is one Design with Claude previewed: the draft the canvas
+ * shows is being added there, by the import's author. Its live preview is its reveal and fades onto the
+ * layers, so the import hologram doesn't build the screen again (hologram.ts requestHologram). `author`:
+ * the agent whose apply it is (the in-app Assistant's own drafts are its; an MCP client's are the session's),
+ * or null for the person's own import, which only the Assistant's own draft covers (the browser editor's
+ * stand-in Assistant imports that way). Another agent's draft never hides a hologram it isn't for.
+ */
+export function previewedImport(state: DesignData, now: number, componentId: string, rootId: string, author: Author | null): boolean {
+  const draft = state.drafts.length ? activeDraft(state, now) : null;
+  if (draft?.status !== "adding" || draftComponent(draft, state.request, rootId) !== componentId) return false;
+  if (assistantDraft(draft)) return author === null || author.name === ASSISTANT_AUTHOR;
+  return author !== null && !!draft.mcp && sameAuthor(draft.mcp.author, author);
+}
+
 /** A run's closing words: the text of its last turn that has any, cut at 280 characters. */
 export function runReply(assistant: Pick<AssistantData, "items">, runId: string | null): string {
   if (runId === null) return "";

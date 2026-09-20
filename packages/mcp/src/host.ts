@@ -172,7 +172,8 @@ export interface HostApplyOptions {
   defaultComponent?: Id;
   /**
    * What made the batch, for views that react to it: import_design marks its batch "import", and the
-   * app's editor builds the new screen as a hologram. Hosts without such views ignore it.
+   * app's editor builds the new screen as a hologram, unless its canvas previewed that design as Claude
+   * wrote it. Hosts without such views ignore it.
    */
   source?: "import";
   /**

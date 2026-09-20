@@ -2,8 +2,9 @@
  * The live preview over the artboard: the page Claude is writing, drawn in a sandboxed iframe where
  * the screen will land, with a pill saying who is doing what. The pill stays in view: in the
  * artboard's label row over a frame at its top, else above the frame, else just inside its top edge.
- * The page comes from the in-app Assistant or from an MCP client such as Claude Code. It fades out
- * onto the real layers.
+ * The page comes from the in-app Assistant or from an MCP client such as Claude Code. Once it's added,
+ * it fades out onto the real layers: it is that import's reveal, so the import hologram doesn't build
+ * the screen again (designStore's previewedImport).
  */
 
 import type { Author } from "@sonobe/core";
@@ -13,7 +14,7 @@ import { useLatest } from "../../ui/lib/hooks.ts";
 import type { Rect } from "../canvas/geometry.ts";
 import { rectToScreen, type Viewport } from "../canvas/viewport.ts";
 import type { DesignTarget } from "./context.ts";
-import { activeDraft, assistantDraft, designStore, mcpDraftIdleAt, useDesign, type DesignData, type DesignDraft, type DesignRequest } from "./designStore.ts";
+import { activeDraft, assistantDraft, designStore, draftComponent, draftRequest, mcpDraftIdleAt, useDesign, type DesignData, type DesignDraft, type DesignRequest } from "./designStore.ts";
 import { PREVIEW_MESSAGE_TYPE, previewShellHtml, renderablePrefix } from "./previewShell.ts";
 import "./design.css";
 import "./design-layout.css";
@@ -41,16 +42,10 @@ export interface PreviewFrameOptions {
   request?: Pick<DesignRequest, "runId" | "context"> | null;
 }
 
-/** The box's request, when the draft is the Assistant's and of the request's run (or the run it's starting). */
-function draftRequest<R extends Pick<DesignRequest, "runId">>(draft: DesignDraft, request: R | null | undefined): R | null {
-  return assistantDraft(draft) && request && (request.runId === null || request.runId === draft.runId) ? request : null;
-}
-
 /** Where a draft draws, in artboard points: over the layer it replaces, else at its position at its size; null when it's for another component. */
 export function previewFrame(draft: DesignDraft, o: PreviewFrameOptions): Rect | null {
   const { fields } = draft;
-  const fromRequest = draftRequest(draft, o.request)?.context.component.id;
-  if ((fields.component ?? fromRequest ?? o.rootId) !== o.componentId) return null;
+  if (draftComponent(draft, o.request, o.rootId) !== o.componentId) return null;
   const replace = fields.replace ?? o.fallbackReplace;
   const replaced = replace ? o.bounds(replace) : null;
   if (replaced) return { x: replaced.x, y: replaced.y, width: fields.width ?? replaced.width, height: fields.height ?? replaced.height };

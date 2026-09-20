@@ -8,7 +8,7 @@
 
 import { expect, test, type Locator, type Page } from "@playwright/test";
 import { fakeAssistantSent, fakeConfirms, fakeConnectionCalls, fakeSignIns, installFakeAssistant, releaseFakeGate, SIGNED_OUT_STATUS } from "./fakeAssistant.ts";
-import { collectConsoleProblems, hook, openEditor, runCommand, screenshot } from "./helpers.ts";
+import { collectConsoleProblems, hook, openEditor, runCommand, sawHologram, screenshot, watchForHologram } from "./helpers.ts";
 
 const ON = { subscriptionEnabled: true, provider: "subscription" as const };
 const NOT_INSTALLED = "Sonobe couldn't find Claude's agent adapter. It needs Node.js 22 or later: in Terminal, run npm install -g @agentclientprotocol/claude-agent-acp, then try again.";
@@ -102,6 +102,8 @@ test.describe("The Assistant on your Claude subscription (experimental)", () => 
     await expect(box.getByRole("button", { name: "Hide preview" })).toHaveCount(0);
     await screenshot(page, "subscription-03-drawing");
 
+    // Its drafts were the reveal: the layers come in with no import hologram.
+    await watchForHologram(page);
     await releaseFakeGate(page);
     await expect(statusLine(box, "Added “Checkout”.")).toBeVisible({ timeout: 30_000 });
     await expect(preview(page)).toBeHidden();
@@ -109,6 +111,7 @@ test.describe("The Assistant on your Claude subscription (experimental)", () => 
     await expect(box.getByText("Added a checkout screen with Apple Pay and a promo code. Try “Make it interactive” next.")).toBeVisible();
     // The plan has no budget here: the box shows no meter.
     await expect(box.locator(".sb-assistant-usage")).toHaveCount(0);
+    expect(await sawHologram(page)).toBe(false);
     await screenshot(page, "subscription-04-added");
     expect(problems).toEqual([]);
   });

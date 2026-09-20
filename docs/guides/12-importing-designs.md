@@ -31,7 +31,7 @@ This needs the desktop app. A browser tab isn't allowed to read another site's l
 3. On **From URL**, enter the page address, like `http://localhost:3000/settings`.
 4. Click **Import**.
 
-The screen lands on top of your prototype, selected, and named after the page title. It's sized to your device (the size shows in the dialog), so switch devices first if you want a tablet or desktop layout. The confirmation shows the first notes about what the import changed or left out; when there are more, click **N more notes** to list them all.
+The screen lands on top of your prototype, selected, and named after the page title. It builds in as a hologram: a laser traces each layer's outline, then the design fills in (click or press a key to skip ahead). It's sized to your device (the size shows in the dialog), so switch devices first if you want a tablet or desktop layout. The confirmation shows the first notes about what the import changed or left out; when there are more, click **N more notes** to list them all.
 
 While the page loads, the dialog shows each step, like "Downloading images: 7 of 28". To stop, click **Cancel**. Nothing is added, and the dialog stays open so you can change the address or the options. An import that takes more than about 90 seconds stops by itself and says which step was slow.
 
@@ -95,7 +95,7 @@ In the desktop app, the Assistant can design a screen right where you noticed it
 
 1. Click the sparkle in the canvas header (**Design with Claude**), or choose **Redesign with Claude…** on a layer in the Layers panel.
 2. Describe the screen, like "a checkout with Apple Pay and a promo code", and press Return. With a layer selected, describe what should change instead.
-3. Watch Claude write it: the canvas makes room, with the patch editor kept as a strip below, and the page draws over the artboard as the HTML arrives, large enough to read. When it's done, the preview turns into real layers, named from the page, in one undo step, and the new screen is selected.
+3. Watch Claude write it: the canvas makes room, with the patch editor kept as a strip below, and the page draws over the artboard as the HTML arrives, large enough to read. When it's done, the preview fades into real layers, named from the page, in one undo step, and the new screen is selected. You've already watched it take shape, so it doesn't build in as a hologram.
 4. Keep going in the same box: "make the header bigger", "try a darker version", or "make the Pay button bounce". **Make it interactive** and **Add knobs** under the result ask Claude to wire its buttons, or to turn its colors, corner radius and spacing into knobs you can tune ([guide 13](13-knobs-and-presets.md)).
 
 - **It matches what's there.** Claude gets the colors, fonts, sizes and corner radii your screens already use. Choose **Match my code…** and pick your app's folder, and it can read your theme and token files too. It reads only text files there, skips hidden files, `.env` files and keys, and can't change anything. What it reads goes to Anthropic, like the rest of the chat.

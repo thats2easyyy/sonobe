@@ -97,6 +97,23 @@ export async function screenshot(page: Page, name: string): Promise<void> {
   await page.screenshot({ path, animations: "disabled", caret: "hide" });
 }
 
+/** Wait for an import's hologram to finish on the canvas and in the Viewer (about 3.7 s), so screenshots show the design. */
+export const hologramDone = (page: Page) => expect(page.locator(".sb-holo, .sb-vw-holo")).toHaveCount(0, { timeout: 10_000 });
+
+/** From now on, note whether an import hologram shows on the canvas or in the Viewer, however briefly; sawHologram reads it. */
+export function watchForHologram(page: Page): Promise<void> {
+  return page.evaluate(() => {
+    const seen = window as unknown as { __sawHologram?: boolean };
+    const selector = ".sb-holo, .sb-vw-holo";
+    seen.__sawHologram = document.querySelector(selector) !== null;
+    new MutationObserver((records) => {
+      if (records.some((r) => [...r.addedNodes].some((n) => n instanceof Element && (n.matches(selector) || n.querySelector(selector) !== null)))) seen.__sawHologram = true;
+    }).observe(document.body, { childList: true, subtree: true });
+  });
+}
+
+export const sawHologram = (page: Page) => page.evaluate(() => (window as unknown as { __sawHologram?: boolean }).__sawHologram === true);
+
 /** Evaluate against the test hook. `fn` runs in the page, so it can only use `sonobe` and the serializable `arg`. */
 export function hook<T, A = undefined>(page: Page, fn: (sonobe: SonobeTestHook, arg: A) => T, arg?: A): Promise<T> {
   return page.evaluate(

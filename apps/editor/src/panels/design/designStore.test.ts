@@ -1,4 +1,4 @@
-import { applyOps, createEmptyDocument, formatStyleDigest, styleDigest, type Op } from "@sonobe/core";
+import { applyOps, createEmptyDocument, formatStyleDigest, styleDigest, type Author, type Op } from "@sonobe/core";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import type { DesignPreviewUpdate } from "../../host/types.ts";
 import { createManualScheduler } from "../../runtime/scheduler.ts";
@@ -19,6 +19,7 @@ import {
   MCP_DRAFT_IDLE_MS,
   MCP_DRAFT_STALLED_MS,
   mcpDraftIdleAt,
+  previewedImport,
   reduceDesignEvent,
   reducePreviewUpdate,
   runReply,
@@ -436,6 +437,40 @@ describe("the Assistant's own preview drafts (the Claude subscription path)", ()
       designStore.setState(initialDesignData());
       assistantStore.setState(initialAssistantData());
     }
+  });
+});
+
+describe("previewedImport", () => {
+  const adding = (over: Partial<DesignDraft> = {}): DesignDraft => ({ source: "assistant", key: "t1", runId: "r1", turn: 1, toolUseId: "t1", html: "<p>Hi</p>", fields: {}, status: "adding", since: 1000, progress: null, error: null, resync: false, ...over });
+  const state = (drafts: DesignDraft[], request: DesignRequest | null = null): DesignData => ({ ...initialDesignData(), drafts, request });
+  const ASSISTANT: Author = { kind: "agent", name: "Assistant" };
+  const CLAUDE: Author = { kind: "agent", name: "Claude" };
+  const sheet = { ...context, component: { id: "sheet", name: "Sheet", size: [402, 400] as [number, number] } };
+
+  it("is an import into the component of the draft the canvas previews, while that draft is being added", () => {
+    // The project root, when nothing names another component.
+    expect(previewedImport(state([adding()]), 1000, "main", "main", ASSISTANT)).toBe(true);
+    expect(previewedImport(state([adding()]), 1000, "sheet", "main", ASSISTANT)).toBe(false);
+    // The box request's component, for a draft of its run; the fields' component over either.
+    expect(previewedImport(state([adding()], pending({ runId: "r1", context: sheet })), 1000, "sheet", "main", ASSISTANT)).toBe(true);
+    expect(previewedImport(state([adding({ runId: "r2" })], pending({ runId: "r1", context: sheet })), 1000, "sheet", "main", ASSISTANT)).toBe(false);
+    expect(previewedImport(state([adding({ fields: { component: "sheet" } })], pending({ runId: "r1" })), 1000, "sheet", "main", ASSISTANT)).toBe(true);
+    // Only while it's being added: not while it's written, nor once it's added and fading.
+    expect(previewedImport(state([adding({ status: "writing" })]), 1000, "main", "main", ASSISTANT)).toBe(false);
+    expect(previewedImport(state([adding({ status: "added" })]), 1100, "main", "main", ASSISTANT)).toBe(false);
+    expect(previewedImport(state([]), 1000, "main", "main", ASSISTANT)).toBe(false);
+    // Another draft being written after it has the canvas; an MCP draft whose session went quiet has left it.
+    expect(previewedImport(state([adding(), adding({ key: "t2", toolUseId: "t2", status: "writing" })]), 1000, "main", "main", ASSISTANT)).toBe(false);
+    const quiet = adding({ source: "mcp", key: "mcp:cc-1", runId: "", toolUseId: "", mcp: { author: { kind: "agent", name: "Claude" }, client: null, draftRevision: 2, touchedAt: 1000, addingFrom: 0 } });
+    expect(previewedImport(state([quiet]), 1000 + MCP_DRAFT_IDLE_MS - 1, "main", "main", CLAUDE)).toBe(true);
+    expect(previewedImport(state([quiet]), 1000 + MCP_DRAFT_IDLE_MS, "main", "main", CLAUDE)).toBe(false);
+    // Only the import of the draft's own author: another agent's import, or the person's own over an MCP
+    // client's draft, still builds as a hologram. The person's own import counts only for the Assistant's draft.
+    expect(previewedImport(state([adding()]), 1000, "main", "main", CLAUDE)).toBe(false);
+    expect(previewedImport(state([adding()]), 1000, "main", "main", null)).toBe(true);
+    expect(previewedImport(state([quiet]), 1000, "main", "main", ASSISTANT)).toBe(false);
+    expect(previewedImport(state([quiet]), 1000, "main", "main", null)).toBe(false);
+    expect(previewedImport(state([quiet]), 1000, "main", "main", { kind: "agent", name: "Claude Desktop" })).toBe(false);
   });
 });
 
