@@ -8,6 +8,7 @@ export * from "./capture.ts";
 export * from "./convert.ts";
 export * from "./figma.ts";
 export * from "./resolve.ts";
+export * from "./run.ts";
 export { sha256Hex } from "./sha256.ts";
 export { WALKER_SOURCE } from "./dom/walkerSource.ts";
 export type { WalkOptions } from "./dom/walk.ts";
