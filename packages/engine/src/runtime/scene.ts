@@ -33,6 +33,11 @@ export interface SceneEnv {
   emptyCopies?(layer: CLayer, path: InstancePath, emptyProp: number, others: number): void;
   /** Create a layer reference scoped to a scene-key prefix ("" at the root, "card#2/" inside an instance). */
   layerRef?(layerId: Id, instance: number | undefined, prefix: string): LayerRef;
+  /**
+   * A pulse-typed prop bound on one copy (a Text Field's Set Text), with its value this frame.
+   * `pulseSource`: a pulse output drives it, so true means it fired; otherwise it fires when it turns on.
+   */
+  pulseProp?(key: string, prop: string, value: Value, pulseSource: boolean): void;
 }
 
 export interface SceneBuild {
@@ -148,6 +153,7 @@ export function buildScene(env: SceneEnv): SceneBuild {
           if (p.wholeLoop) props[p.key] = isLoop(v) ? [...v.items] : v;
           else if (isLoop(v)) props[p.key] = v.items.length ? v.items[index % v.items.length] : layer.defaults[p.key];
           else props[p.key] = v;
+          if (p.type === "pulse" && env.pulseProp) env.pulseProp(key, p.key, props[p.key]!, p.binding.pulse);
         }
         const pending: Pending = { key, type: layer.type, layer, props, children: [] };
         if (layer.instance && inst && inst.paths.length) {
