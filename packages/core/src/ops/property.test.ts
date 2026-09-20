@@ -245,7 +245,10 @@ function randomOp(doc: SonobeDocument, rand: () => number): Op | undefined {
 describe("inverse ops (property)", () => {
   it("restores deep-equal documents for random op sequences", () => {
     const succeeded = new Map<string, number>();
-    for (const seed of [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]) {
+    // 59, 71, 275 and 384 once left cables or instance values that no longer fit (a port declared
+    // again with another type, one input shared by targets of two types, an input named like a
+    // layer property), so a later inverse failed or restored the wrong document.
+    for (const seed of [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 59, 71, 275, 384]) {
       const rand = mulberry32(seed);
       const start = mustApply(emptyDoc(), SAMPLE_OPS).doc;
       let doc = start;

@@ -508,6 +508,16 @@ describe("rebuilding a component", () => {
     { op: "updateInterface", component: "swipe_card", replace: true, inputs: { down: { name: "Down", type: "boolean" } }, outputs: { gone: { name: "Gone", type: "boolean" } } },
   ];
 
+  it("a port declared again with another type lists the cables it no longer fits", async () => {
+    await buildSwipeCard();
+    const r = await client.call("apply_ops", { ops: [{ op: "updateInterface", component: "swipe_card", inputs: { swipedLeft: { name: "Swipe Color", type: "color" } } }] });
+    expect(r.isError, r.text).toBe(false);
+    expect(r.text).toContain("Disconnected 1 cable in main: tap.tap → card_1_swipe.swipedLeft.");
+    expect(r.text).toContain("Disconnected 1 cable in swipe_card: $in.swipedLeft → went_left.turnOn.");
+    expect(r.text).toContain("The undo tool brings them back.");
+    expect(r.structured.diagnostics).toMatchObject({ totals: { errors: 0 } });
+  });
+
   it("replace: true unpublishes old ports, and the result lists every cable it cut; undo restores them", async () => {
     await buildSwipeCard();
     const dry = await client.call("apply_ops", { ops: rebuild, dryRun: true });

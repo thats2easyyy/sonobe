@@ -569,7 +569,8 @@ export type Op =
    * that key whole, null unpublishes it, and keys you don't name stay. With `replace: true`, each side
    * you give (inputs, outputs) is the complete set, and its keys you leave out are unpublished; a side
    * you don't give is untouched. Unpublishing disconnects every cable to that port (inside, and on
-   * every instance), and the inverse restores them. An output declared again without `link` keeps its
+   * every instance), and the inverse restores them; so does declaring a port again with a type its
+   * cables or instance values no longer fit. An output declared again without `link` keeps its
    * cable; `link: null` disconnects it. A key can't be renamed: unpublish it and publish the new key.
    */
   | {
