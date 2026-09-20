@@ -13,7 +13,7 @@ export interface DesignTarget { id: string; name: string; type: string; isResult
 const MAX_SCREENS = 30;
 const MAX_STYLES_CHARS = 1500;
 
-/** One selected layer (unless newScreen), else null. isResult: it's the screen Claude just made. */
+/** One selected layer (unless newScreen), else null. isResult: it's the screen Claude just made (not the one Undo brought back in its place). */
 export function designTarget(session: EditorSession, design: Pick<DesignData, "newScreen" | "result">): DesignTarget | null {
   if (design.newScreen) return null;
   const layers = session.selection.getState().layers;
@@ -22,7 +22,8 @@ export function designTarget(session: EditorSession, design: Pick<DesignData, "n
   const component = session.document.getState().doc.components[componentId];
   const layer = component ? findLayer(component.layers, layers[0]!)?.layer : undefined;
   if (!layer) return null;
-  return { id: layer.id, name: layer.name, type: layer.type, isResult: design.result?.layerId === layer.id && design.result.component === componentId };
+  const { result } = design;
+  return { id: layer.id, name: layer.name, type: layer.type, isResult: result?.layerId === layer.id && result.component === componentId && !result.undone };
 }
 
 const pair = (value: InputValue | undefined): [number, number] | null => (Array.isArray(value) && value.length === 2 && value.every((n) => typeof n === "number" && Number.isFinite(n)) ? [value[0] as number, value[1] as number] : null);

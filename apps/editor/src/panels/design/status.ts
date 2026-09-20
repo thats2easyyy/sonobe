@@ -76,7 +76,7 @@ function nameList(names: readonly string[], count: number): string {
 
 /** Where the box's result is now, read from the document each time it's shown. */
 export interface ResultPlacement {
-  /** "undone": its import is on the redo stack; "gone": its screen isn't in its component anymore. */
+  /** "undone": Undo took its import back (result.undone); "gone": its screen isn't in its component anymore. */
   state: "here" | "undone" | "gone";
   /** Its component's name. */
   component: string;
@@ -94,11 +94,11 @@ function isScreen(layer: LayerNode, [width, height]: [number, number]): boolean 
   return (layer.type === "group" || layer.type === "componentInstance") && size !== null && size[0] >= width - 1 && size[1] >= height - 1;
 }
 
-/** Where the result is in `doc`. `undone`: its txnId is among the document's redo entries. */
-export function resultPlacement(doc: SonobeDocument, result: DesignResult, undone: boolean): ResultPlacement {
+/** Where the result is in `doc`. */
+export function resultPlacement(doc: SonobeDocument, result: DesignResult): ResultPlacement {
   const component = doc.components[result.component];
   const place: ResultPlacement = { state: "here", component: component?.name ?? result.component, stack: null, covers: null };
-  if (undone) return { ...place, state: "undone" };
+  if (result.undone) return { ...place, state: "undone" };
   const loc = component ? findLayer(component.layers, result.layerId) : undefined;
   if (!loc) return { ...place, state: "gone" };
   if (result.kind !== "added" || loc.parent !== null || loc.siblings.length < 2) return place;
