@@ -1,5 +1,5 @@
 import { Ban, Check, CircleAlert, Info, KeyRound, LoaderCircle, RefreshCw, Sparkles, SkipForward, TriangleAlert, Trash2, X } from "lucide-react";
-import { useEffect, useLayoutEffect, useRef } from "react";
+import { useEffect, useId, useLayoutEffect, useRef } from "react";
 import { Button } from "../../ui/Button.tsx";
 import { Markdown } from "../learn/Markdown.tsx";
 import "../learn/markdown.css";
@@ -85,17 +85,26 @@ export function ConfirmCard({ item, onConfirm }: { item: Extract<ChatItem, { kin
   const copy = CONFIRM_COPY[kind];
   const approveRef = useRef<HTMLButtonElement>(null);
   const declineRef = useRef<HTMLButtonElement>(null);
+  // The same confirmation can show in the transcript and the canvas's box at once, so the ids are per card.
+  const titleId = useId();
+  const messageId = useId();
+  const pending = item.status === "pending";
   useEffect(() => {
     if (item.status === "pending") (kind === "replace" ? declineRef : approveRef).current?.focus({ preventScroll: true });
   }, [item.status, kind]);
   const Icon = kind === "replace" ? RefreshCw : Trash2;
   return (
-    <div className="sb-assistant-confirm" data-kind={kind} data-status={item.status} role={item.status === "pending" ? "alertdialog" : undefined} aria-label={item.title}>
+    // Focus lands on a button, so the dialog's message is its description: it says what the choice changes.
+    <div className="sb-assistant-confirm" data-kind={kind} data-status={item.status} role={pending ? "alertdialog" : undefined} aria-labelledby={pending ? titleId : undefined} aria-describedby={pending ? messageId : undefined}>
       <div className="sb-assistant-confirm__head">
         <Icon size={15} aria-hidden className="sb-assistant-confirm__icon" />
-        <p className="sb-assistant-confirm__title">{item.title}</p>
+        <p id={titleId} className="sb-assistant-confirm__title">
+          {item.title}
+        </p>
       </div>
-      <p className="sb-assistant-confirm__message">{item.message}</p>
+      <p id={messageId} className="sb-assistant-confirm__message">
+        {item.message}
+      </p>
       {item.status === "pending" ? (
         <div className="sb-assistant-confirm__actions">
           <Button ref={declineRef} size="sm" onClick={() => onConfirm(item.id, false)}>

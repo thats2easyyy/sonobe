@@ -15,6 +15,10 @@ export interface ComposerProps {
   limits: AssistantLimits | null;
   placeholder?: string;
   ariaLabel?: string;
+  /** The field's aria-describedby: a notice about what sending does. */
+  ariaDescribedBy?: string;
+  /** What the send button says it does. Default "Send". */
+  sendLabel?: string;
   /** Hide the usage meter until this share of the budget is used (0–1). Default 0: always shown. */
   usageThreshold?: number;
 }
@@ -51,7 +55,7 @@ export function UsageMeter({ usage, limits }: { usage: AssistantUsage | null; li
 }
 
 /** Message field with Send and Stop. Enter sends; Shift+Enter adds a line. */
-export const Composer = forwardRef<HTMLTextAreaElement, ComposerProps>(function Composer({ running, disabled = false, onSend, onStop, usage, limits, placeholder, ariaLabel, usageThreshold = 0 }, ref) {
+export const Composer = forwardRef<HTMLTextAreaElement, ComposerProps>(function Composer({ running, disabled = false, onSend, onStop, usage, limits, placeholder, ariaLabel, ariaDescribedBy, sendLabel = "Send", usageThreshold = 0 }, ref) {
   const [text, setText] = useState("");
   const canSend = !disabled && !running && text.trim().length > 0;
   const showMeter = budgetFraction(budgetUsed(usage), limits?.tokenBudget ?? 0) >= usageThreshold;
@@ -77,6 +81,7 @@ export const Composer = forwardRef<HTMLTextAreaElement, ComposerProps>(function 
           value={text}
           rows={1}
           aria-label={ariaLabel ?? "Message the Assistant"}
+          aria-describedby={ariaDescribedBy}
           placeholder={placeholder ?? (disabled ? "Add an API key to start chatting" : "Describe what to build or ask a question…")}
           disabled={disabled}
           onChange={(event) => setText(event.target.value)}
@@ -86,7 +91,7 @@ export const Composer = forwardRef<HTMLTextAreaElement, ComposerProps>(function 
         {running ? (
           <IconButton icon={<Square size={12} fill="currentColor" />} label="Stop" shortcut="Escape" variant="solid" size="sm" className="sb-assistant-composer__stop" onClick={onStop} />
         ) : (
-          <IconButton icon={<ArrowUp size={15} strokeWidth={2.25} />} label="Send" shortcut="Enter" variant="solid" size="sm" className="sb-assistant-composer__send" disabled={!canSend} onClick={send} />
+          <IconButton icon={<ArrowUp size={15} strokeWidth={2.25} />} label={sendLabel} shortcut="Enter" variant="solid" size="sm" className="sb-assistant-composer__send" disabled={!canSend} onClick={send} />
         )}
       </div>
       {showMeter ? <UsageMeter usage={usage} limits={limits} /> : null}

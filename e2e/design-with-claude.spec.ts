@@ -138,8 +138,8 @@ test.describe("Design with Claude", () => {
     expect(added).toBeDefined();
     expect((await hook(page, (s) => s.selection().layers)) as string[]).toEqual([added!.id]);
     await expect(box.getByText("Change “Profile”")).toBeVisible();
-    // The demo's own layers are behind it, so the line says the new screen covers them, and Send to Back is offered.
-    await expect(statusLine(box, "Added “Profile”.")).toContainText(/It's in front of “.+”, so it covers it in the viewer too\./);
+    // The demo's own layers (none of them a screen) are behind it, so the line says the new screen covers them, and Send to Back is offered.
+    await expect(statusLine(box, "Added “Profile”.")).toContainText("It's in front of the other layers in “Main”, so it covers them in the viewer too.");
     for (const chip of ["Undo", "Send to Back", "Make it interactive", "Add knobs", "Try a darker version"]) await expect(box.getByRole("button", { name: chip, exact: true }), chip).toBeVisible();
     await expect(box.getByText("Added a profile screen.")).toBeVisible();
     await screenshot(page, "design-02-added");
@@ -147,13 +147,14 @@ test.describe("Design with Claude", () => {
     // Undo in the box takes the whole import back.
     await box.getByRole("button", { name: "Undo", exact: true }).click();
     await expect.poll(async () => (await screens(page)).some((l) => l.name === "Profile")).toBe(false);
+    await expect(statusLine(box, "Undid “Profile”.")).toBeVisible();
 
     // Add it again, then pick its card: the box offers to redesign that layer, and says so to Claude.
     await hook(page, (s) => s.session.selection.getState().clear());
     await expect(box.getByText("New screen · 402 × 874")).toBeVisible();
     await designField(page).fill("a profile screen");
     await designField(page).press("Enter");
-    // The first result's line may still show, so wait for the screen itself.
+    // Wait for the screen itself, then its line.
     await expect.poll(async () => (await screens(page)).filter((l) => l.name === "Profile").length, { timeout: 30_000 }).toBe(1);
     await expect(statusLine(box, "Added “Profile”.")).toBeVisible();
     // The first import's ids are retired after its undo, so the card's id is looked up, not assumed.
@@ -305,7 +306,8 @@ test.describe("Design with Claude", () => {
     // The box may still take a description to put in the prompt.
     const field = designField(page);
     if (await field.isVisible()) await field.fill("a profile screen");
-    const copyPrompt = page.getByRole("button", { name: "Copy prompt", exact: true });
+    // The notice's button (the field's own button copies the same prompt).
+    const copyPrompt = page.locator(".sb-design-box__notice").getByRole("button", { name: "Copy prompt", exact: true });
     await copyPrompt.click();
     await expect(page.locator(".sb-toast", { hasText: "Prompt copied" })).toContainText("Paste it into Claude, then paste the HTML it writes into File → Import Design.");
     const copied = await page.evaluate(() => navigator.clipboard.readText());

@@ -41,7 +41,10 @@ describe("ConfirmCard", () => {
   it("asks before a replace with its labels, focusing the choice that keeps the person's work", () => {
     const onConfirm = vi.fn();
     act(() => root.render(<ConfirmCard item={replace} onConfirm={onConfirm} />));
-    expect(container.querySelector('[role="alertdialog"]')?.getAttribute("aria-label")).toBe("Replace your changes to “Checkout”?");
+    const dialog = container.querySelector('[role="alertdialog"]')!;
+    // Focus goes to a button, so the title names the dialog and the message, what the choice changes, describes it.
+    expect(document.getElementById(dialog.getAttribute("aria-labelledby")!)?.textContent).toBe("Replace your changes to “Checkout”?");
+    expect(document.getElementById(dialog.getAttribute("aria-describedby")!)?.textContent).toBe(replace.message);
     expect(container.querySelector(".sb-assistant-confirm")?.getAttribute("data-kind")).toBe("replace");
     expect(buttons()).toEqual(["Keep my changes", "Replace"]);
     expect(document.activeElement?.textContent).toBe("Keep my changes");
@@ -50,6 +53,7 @@ describe("ConfirmCard", () => {
 
     act(() => root.render(<ConfirmCard item={{ ...replace, status: "approved" }} onConfirm={onConfirm} />));
     expect(container.textContent).toContain("You allowed the change.");
+    expect(container.querySelector("[aria-describedby]")).toBeNull();
     act(() => root.render(<ConfirmCard item={{ ...replace, status: "declined" }} onConfirm={onConfirm} />));
     expect(container.textContent).toContain("You kept it.");
   });
