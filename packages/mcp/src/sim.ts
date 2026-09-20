@@ -994,7 +994,8 @@ export function createSimulationManager(options: SimulationManagerOptions): Simu
       const existing = resetOptions.simId !== undefined ? require(resetOptions.simId) : undefined;
       const current = options.getDocument(existing?.docId ?? resetOptions.docId);
       const keep = resetOptions.keepOverrides === true;
-      // A preset or knob values given here replace the session's; keepOverrides keeps the old ones otherwise.
+      // A preset or knob values given here replace the session's, or with keepOverrides go over them:
+      // a new preset replaces the kept one, and new values join the kept ones.
       let knobs = keep ? existing?.knobs : undefined;
       if (resetOptions.preset !== undefined || resetOptions.knobs !== undefined) {
         const resolved = resolveKnobOverride(current.doc, {
@@ -1007,7 +1008,7 @@ export function createSimulationManager(options: SimulationManagerOptions): Simu
             resolved.error.message,
             resolved.error.hint ? { hint: resolved.error.hint } : {},
           );
-        knobs = resolved.value;
+        knobs = knobs ? mergeKnobOverride(knobs, resolved.value) : resolved.value;
       }
       const kept = {
         overrides: keep && existing ? existing.overrides : [],
@@ -1058,7 +1059,9 @@ export function createSimulationManager(options: SimulationManagerOptions): Simu
       }
       const s = state(session);
       if (cleared.length) s.clearedOverrides = cleared.map(overrideInfo);
-      if (existing?.knobs && !kept.knobs) s.clearedKnobs = knobOverrideInfo(existing.knobs, current.doc);
+      // Against what the reset asked for: a preset or knob the person's document dropped is reported as dropped.
+      const stopped = existing?.knobs ? knobsLeftOut(existing.knobs, knobs) : undefined;
+      if (stopped) s.clearedKnobs = knobOverrideInfo(stopped, current.doc);
       return s;
     },
 
@@ -1411,6 +1414,25 @@ function knobOverrideInfo(override: KnobOverride, doc: SonobeDocument): SimKnobO
     ...(preset !== undefined ? { preset: { id: preset, name: getKnobPreset(doc.knobs, preset)?.name ?? preset } } : {}),
     ...(override.values ? { values: { ...override.values } } : {}),
   };
+}
+
+/** `next` over `base`: its preset, if it has one, replaces base's, and its values join base's. */
+function mergeKnobOverride(base: KnobOverride, next: KnobOverride): KnobOverride {
+  const preset = next.preset ?? base.preset;
+  const values = base.values || next.values ? { ...base.values, ...next.values } : undefined;
+  return { ...(preset !== undefined ? { preset } : {}), ...(values ? { values } : {}) };
+}
+
+/**
+ * What of `before` a reset stopped running: its preset when `after` runs none, and its values for
+ * knobs `after` gives no value. A preset or value `after` names instead was asked for, so it's left out.
+ */
+function knobsLeftOut(before: KnobOverride, after: KnobOverride | undefined): KnobOverride | undefined {
+  const out: KnobOverride = {};
+  if (before.preset !== undefined && after?.preset === undefined) out.preset = before.preset;
+  const values = Object.entries(before.values ?? {}).filter(([id]) => !Object.hasOwn(after?.values ?? {}, id));
+  if (values.length) out.values = Object.fromEntries(values);
+  return out.preset !== undefined || out.values ? out : undefined;
 }
 
 /**

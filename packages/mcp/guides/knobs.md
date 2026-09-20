@@ -86,7 +86,7 @@ Simulate the reference without touching the person's viewer, then read or trace 
 { "simId": "sim_1", "targets": ["$knob.grow_bounce", "grow_spring.bounciness"] }
 ```
 
-Run a second `sim_reset` with `"preset": "Proposal"`, send both the same `sim_dispatch` tap, and compare `sim_trace` summaries of `@card.scale`. To try a value inside one simulation, pass `"knobs": { "grow_bounce": 12 }` to `sim_reset`, or `sim_override` with a `setKnobValue` op.
+Run a second `sim_reset` with `"preset": "Proposal"`, send both the same `sim_dispatch` tap, and compare `sim_trace` summaries of `@card.scale`. To try a value inside one simulation, pass `"knobs": { "grow_bounce": 12 }` to `sim_reset` (with its `simId` and `keepOverrides: true`, the value runs over the session's preset), or `sim_override` with a `setKnobValue` op.
 
 When the person asks to see the reference on their phone:
 
