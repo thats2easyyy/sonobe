@@ -136,6 +136,17 @@ describe("ScrubNumberField", () => {
     expect(field().hasAttribute("data-scrubbing")).toBe(false);
   });
 
+  it("commits a scrub it's removed in the middle of", () => {
+    const onCommit = vi.fn();
+    act(() => root.render(<Controlled onCommit={onCommit} pixelsPerStep={2} />));
+    pointer("pointerdown", 100);
+    pointer("pointermove", 110);
+    act(() => root.render(<div />));
+    expect(onCommit).toHaveBeenCalledTimes(1);
+    expect(onCommit).toHaveBeenCalledWith(15);
+    expect(document.documentElement.hasAttribute("data-scrubbing")).toBe(false);
+  });
+
   it("enters typing mode on a click without movement", () => {
     act(() => root.render(<Controlled />));
     pointer("pointerdown", 50);
@@ -151,6 +162,19 @@ describe("ScrubNumberField", () => {
     pointer("pointerdown", 0);
     pointer("pointermove", 4);
     expect(onChange).toHaveBeenLastCalledWith(4, { source: "scrub", delta: 4 });
+  });
+
+  it("names an empty value for people and screen readers, and nudges it from zero", () => {
+    const onChange = vi.fn();
+    act(() => root.render(<ScrubNumberField aria-label="Repeat" value={0} emptyText="Auto" unit="×" onChange={onChange} />));
+    expect(input().value).toBe("");
+    expect(input().placeholder).toBe("Auto");
+    expect(input().getAttribute("aria-valuetext")).toBe("Auto");
+    expect(input().hasAttribute("aria-valuenow")).toBe(false);
+    expect(container.querySelector(".sb-scrub__unit")).toBeNull();
+    act(() => input().focus());
+    press("ArrowUp");
+    expect(onChange).toHaveBeenLastCalledWith(1, { source: "keyboard", delta: 1 });
   });
 
   it("is read-only when linked", () => {

@@ -150,6 +150,32 @@ describe("Knobs tab", () => {
     expect([...container.querySelectorAll(".sb-knob-row")].map((r) => r.getAttribute("aria-label"))).toEqual(["Grab Tilt"]);
   });
 
+  it("keeps a row Only differences would hide while it's being tuned or has focus", () => {
+    const s = mount(deck());
+    act(() => knobsUi(s).getState().set({ onlyDifferences: true }));
+    const slider = rowOf("Bounce").querySelector<HTMLElement>('[role="slider"]')!;
+    // Two pixels a step: Bounce's 0…20 range over a 40 px track.
+    vi.spyOn(slider.querySelector(".sb-slider__track")!, "getBoundingClientRect").mockReturnValue({ left: 0, width: 40, top: 0, height: 4, right: 40, bottom: 4, x: 0, y: 0, toJSON: () => ({}) });
+    const bounce = () => knobs(s).knobs.find((k) => k.id === "bounce")!.values;
+    // Dragging through Shipped app's 5 doesn't pull the row out from under the pointer.
+    pointer(slider, "pointerdown", 16);
+    pointer(slider, "pointermove", 10);
+    expect(rowOf("Bounce")).not.toBeNull();
+    pointer(slider, "pointermove", 6);
+    pointer(slider, "pointerup", 6);
+    expect(bounce()).toEqual({ proposal: 3, shipped: 5 });
+    expect(s.document.getState().gesture).toBeNull();
+    // A second drag ending on 5 is its own undo step, and the row stays while its slider has focus.
+    pointer(slider, "pointerdown", 6);
+    pointer(slider, "pointermove", 10);
+    pointer(slider, "pointerup", 10);
+    expect(bounce()).toEqual({ proposal: 5, shipped: 5 });
+    expect(labels(s)).toEqual(["Tune Bounce to 5 (Proposal)", "Tune Bounce to 3 (Proposal)"]);
+    expect(rowOf("Bounce").querySelector(".sb-knob-row__diff")!.textContent).toBe("");
+    act(() => [...container.querySelectorAll<HTMLElement>('[role="checkbox"]')].find((el) => el.closest(".sb-knobs__filter"))!.focus());
+    expect(rowOf("Bounce")).toBeNull();
+  });
+
   it("makes a locked preset's rows read-only, with a way to switch or unlock", () => {
     const s = mount(deck([{ op: "updateKnobPreset", id: "proposal", locked: true }]));
     expect(container.querySelector(".sb-knobs-locked")!.textContent).toContain("Proposal is locked");
@@ -222,6 +248,18 @@ describe("Knobs tab", () => {
     expect(document.activeElement).toBe(rowOf("Card Radius").querySelector('input[aria-label="Card Radius value"]'));
   });
 
+  it("keeps a value typed past the range when → points further out", () => {
+    const s = mount(deck([{ op: "setKnobValue", id: "radius", value: 60 }]));
+    const slider = rowOf("Card Radius").querySelector<HTMLElement>('[role="slider"]')!;
+    expect(slider.getAttribute("aria-valuetext")).toBe("60 pt, above the range");
+    act(() => slider.focus());
+    act(() => {
+      slider.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true, cancelable: true }));
+    });
+    expect(knobs(s).knobs.find((k) => k.id === "radius")!.values).toEqual({ proposal: 60, shipped: 12 });
+    expect(labels(s)).toEqual([]);
+  });
+
   it("keeps option descriptions when Edit Knob changes a choice knob", () => {
     const s = mount(
       build([
@@ -268,5 +306,17 @@ describe("Knobs tab", () => {
     expect(rowOf("Bounce")).toBeNull();
     act(() => knobsUi(s).getState().set({ flash: { id: "bounce", at: 1 } }));
     expect(rowOf("Bounce").dataset.flash).toBe("true");
+  });
+
+  it("turns Only differences off to show a knob it hides, and drops a request for a knob that's gone", () => {
+    const s = mount(deck());
+    act(() => knobsUi(s).getState().set({ onlyDifferences: true }));
+    expect(rowOf("Card Radius")).toBeNull();
+    act(() => knobsUi(s).getState().set({ flash: { id: "radius", at: 1 } }));
+    expect(knobsUi(s).getState().onlyDifferences).toBe(false);
+    expect(rowOf("Card Radius").dataset.flash).toBe("true");
+    expect(knobsUi(s).getState().flash).toBeNull();
+    act(() => knobsUi(s).getState().set({ flash: { id: "gone", at: 2 } }));
+    expect(knobsUi(s).getState().flash).toBeNull();
   });
 });

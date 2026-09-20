@@ -36,6 +36,11 @@ export interface ScrubNumberFieldProps {
   pixelsPerStep?: number;
   /** Several different values are selected. */
   mixed?: boolean;
+  /**
+   * There's no number to show, and this names why (Repeat's "Auto"): it's the placeholder and what
+   * screen readers hear, and nudges and scrubs start from 0, as when mixed.
+   */
+  emptyText?: string;
   disabled?: boolean;
   /** Driven by a patch; shows the live value read-only. */
   linked?: boolean;
@@ -93,6 +98,7 @@ export function ScrubNumberField({
   precision = 3,
   pixelsPerStep = 2,
   mixed = false,
+  emptyText,
   disabled = false,
   linked = false,
   onLinkedClick,
@@ -110,7 +116,9 @@ export function ScrubNumberField({
   const [scrubbing, setScrubbing] = useState(false);
   const latest = useLatest({ value, onChange, onCommit, min, max, step, pixelsPerStep, pointerLock, mixed });
   const editable = !disabled && !linked;
-  const displayText = mixed ? "" : formatNumber(value * scale, precision);
+  // No number shows when mixed or empty.
+  const blank = mixed || emptyText !== undefined;
+  const displayText = blank ? "" : formatNumber(value * scale, precision);
 
   const setDraft = (next: string | null) => {
     draftRef.current = next;
@@ -154,11 +162,16 @@ export function ScrubNumberField({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [scrubbing]);
 
+  // Removed mid-scrub, it never sees the pointer come up: end the gesture here instead.
   useEffect(
     () => () => {
-      if (gesture.current) document.documentElement.removeAttribute("data-scrubbing");
+      const g = gesture.current;
+      if (!g) return;
+      gesture.current = null;
+      document.documentElement.removeAttribute("data-scrubbing");
+      if (g.moved) latest.current.onCommit?.(g.lastValue);
     },
-    [],
+    [latest],
   );
 
   const commitDraft = () => {
@@ -169,7 +182,7 @@ export function ScrubNumberField({
     if (parsed === null) return;
     const rounded = roundTo(parsed / scale, MAX_DECIMALS);
     const next = softRange ? rounded : clamp(rounded, { min, max });
-    if (mixed || next !== value) {
+    if (blank || next !== value) {
       onChange?.(next, { source: "input", delta: next - value });
       onCommit?.(next);
     }
@@ -182,7 +195,7 @@ export function ScrubNumberField({
     if (event.key === "ArrowUp" || event.key === "ArrowDown") {
       event.preventDefault();
       const typed = draftRef.current !== null ? parseNumberInput(draftRef.current) : null;
-      const current = typed !== null ? typed / scale : mixed ? 0 : value;
+      const current = typed !== null ? typed / scale : blank ? 0 : value;
       // A value typed past a soft range nudges from where it is instead of jumping back inside.
       const outside = softRange && ((min !== undefined && current < min) || (max !== undefined && current > max));
       const next = nudgeValue(current, event.key === "ArrowUp" ? 1 : -1, { step, ...(outside ? {} : { min, max }), modifiers: event });
@@ -211,7 +224,7 @@ export function ScrubNumberField({
     if (input && document.activeElement === input && event.target === input) return;
     event.preventDefault();
     event.currentTarget.setPointerCapture?.(event.pointerId);
-    const start = mixed ? 0 : value;
+    const start = blank ? 0 : value;
     gesture.current = {
       pointerId: event.pointerId,
       target: event.currentTarget,
@@ -304,20 +317,20 @@ export function ScrubNumberField({
         spellCheck={false}
         role="spinbutton"
         aria-label={ariaLabel ?? (typeof label === "string" ? label : undefined)}
-        aria-valuenow={mixed ? undefined : roundTo(value * scale, precision)}
+        aria-valuenow={blank ? undefined : roundTo(value * scale, precision)}
         aria-valuemin={min !== undefined ? min * scale : undefined}
         aria-valuemax={max !== undefined ? max * scale : undefined}
-        aria-valuetext={mixed ? "Mixed" : `${displayText}${unit ?? ""}`}
+        aria-valuetext={mixed ? "Mixed" : (emptyText ?? `${displayText}${unit ?? ""}`)}
         disabled={disabled}
         readOnly={linked}
         value={draft ?? displayText}
-        placeholder={mixed ? (placeholder ?? "Mixed") : placeholder}
+        placeholder={mixed ? (placeholder ?? "Mixed") : (emptyText ?? placeholder)}
         onChange={(event) => setDraft(event.target.value)}
         onFocus={onFocus}
         onBlur={commitDraft}
         onKeyDown={onKeyDown}
       />
-      {unit && !mixed && (
+      {unit && !blank && (
         <span className="sb-scrub__unit" aria-hidden>
           {unit}
         </span>

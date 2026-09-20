@@ -228,6 +228,30 @@ describe("InspectorPanel", () => {
     expect(s.runtime.readValue("@card.repeat")).toBe(4);
   });
 
+  it("says Auto for a Repeat left on Auto, and nudges a mixed selection's counts each from its own", () => {
+    const s = mount(
+      build([
+        { op: "addLayer", layer: { id: "a", type: "group", name: "A", props: { repeat: 3 } } },
+        { op: "addLayer", layer: { id: "b", type: "group", name: "B", props: { repeat: 5 } } },
+        { op: "addLayer", layer: { id: "c", type: "group", name: "C" } },
+      ]),
+    );
+    const repeat = (id: string) => findLayer(main(s).layers, id)!.layer.props.repeat;
+    select(s, { layers: ["c"] });
+    expect(input("Repeat").placeholder).toBe("Auto");
+    expect(input("Repeat").getAttribute("aria-valuetext")).toBe("Auto");
+    select(s, { layers: ["a", "b"] });
+    expect(input("Repeat").getAttribute("aria-valuetext")).toBe("Mixed");
+    act(() => input("Repeat").focus());
+    key(input("Repeat"), "ArrowUp");
+    expect([repeat("a"), repeat("b")]).toEqual([4, 6]);
+    // Auto counts as none.
+    select(s, { layers: ["a", "c"] });
+    act(() => input("Repeat").focus());
+    key(input("Repeat"), "ArrowUp");
+    expect([repeat("a"), repeat("c")]).toEqual([5, 1]);
+  });
+
   it("drives a layer property with a patch from its port and its context menu", () => {
     layoutStore.getState().setViewMode("canvas");
     const s = mount(fixture());
@@ -362,6 +386,23 @@ describe("InspectorPanel", () => {
     const transform = [...container.querySelectorAll("section")].find((el) => el.getAttribute("aria-label") === "Transform")!;
     click(buttonWithText("More (4)", transform));
     expect(input("Z Position")).not.toBeNull();
+  });
+
+  it("leaves a component's published pulse input to connections, on an instance layer", () => {
+    const s = mount(
+      build([
+        { op: "addComponent", component: { id: "chip", name: "Chip", kind: "layerComponent" } },
+        { op: "addLayer", component: "chip", layer: { id: "bg", type: "rectangle", name: "BG", props: { size: [100, 40] } } },
+        { op: "updateInterface", component: "chip", inputs: { reset: { key: "reset", name: "Reset", type: "pulse" } } },
+        { op: "addPatch", component: "chip", patch: { id: "sw", type: "switch", inputs: { flip: { link: "$in.reset" } }, ui: { x: 0, y: 0 } } },
+        { op: "addLayer", layer: { id: "c1", type: "componentInstance", name: "Chip", component: "chip", props: {} } },
+      ]),
+    );
+    s.runtime.stepFrame();
+    select(s, { layers: ["c1"] });
+    for (const more of [...container.querySelectorAll<HTMLButtonElement>(".sb-insp-section__more")]) click(more);
+    expect(rowNamed("Reset").textContent).toContain("Fires only from a connection");
+    expect(rowNamed("Reset").querySelector('button[aria-label="Fire Reset"]')).toBeNull();
   });
 
   it("fires a Text Field's pulse properties into the running prototype, never into the document", () => {
