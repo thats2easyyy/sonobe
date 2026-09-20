@@ -61,6 +61,7 @@ patch plus_one add[2] value1←rows.index value2=1
 ## Common mistakes
 
 - Only one copy of the layer shows up: every copy sits in the same spot. Put the layer in a Group with Layout turned on, or wire Grid Layout's Position and Size into it.
+- Only the text inside a card repeats, stacked in one card, and a drag moves all of it: the loop reaches the card's children, not the card. Link the loop to the card's Repeat instead, and each card gets its own copy of everything inside.
 - Labels read 0 to 4 when you expected 1 to 5: indices start at 0. Add 1 before showing an index as a number people read.
 
 ## Pairs well with

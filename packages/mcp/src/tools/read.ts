@@ -405,7 +405,7 @@ export function registerReadTools(tc: ToolContext): void {
     {
       title: "Get diagnostics",
       description:
-        "Problems and hints in the document: invalid links, type mismatches, pulses wired into states, feedback loops, untouchable layers, unused patches. Each comes with suggestions that include ready-to-apply ops for apply_ops. In the Sonobe app, a Live viewer section adds what the person's running prototype reports right now, such as empty_loop (a layer or component with 0 copies, and why).",
+        "Problems and hints in the document: invalid links, type mismatches, pulses wired into states, feedback loops, loops of different lengths, layers whose copies go wrong (children repeating inside one card, a Repeat that can't work), untouchable layers, unused patches. Each comes with suggestions that include ready-to-apply ops for apply_ops. In the Sonobe app, a Live viewer section adds what the person's running prototype reports right now, such as empty_loop (a layer or component with 0 copies, and why).",
       input: z.object({
         docId: DocIdSchema.optional(),
         component: ComponentIdSchema.optional(),

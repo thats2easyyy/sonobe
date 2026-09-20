@@ -53,6 +53,7 @@
       ],
       "commonMistakes": [
         "Only one copy of the layer shows up: every copy sits in the same spot. Put the layer in a Group with Layout turned on, or wire Grid Layout's Position and Size into it.",
+        "Only the text inside a card repeats, stacked in one card, and a drag moves all of it: the loop reaches the card's children, not the card. Link the loop to the card's Repeat instead, and each card gets its own copy of everything inside.",
         "Labels read 0 to 4 when you expected 1 to 5: indices start at 0. Add 1 before showing an index as a number people read."
       ],
       "examples": [
@@ -154,6 +155,7 @@
       ],
       "commonMistakes": [
         "Items don't match the positions you expect: the first input is Item 0, not Item 1. Count from 0 when you look items up with Loop Select or match them to Loop Option Switch.",
+        "Only the text inside a card repeats, stacked in one card, and a drag moves all of it: the loop reaches the card's children, not the card. Link the loop to the card's Repeat instead, and each card gets its own copy of everything inside.",
         "Copies repeat values or show the wrong pairs: two loops of different lengths feed the same layer, and the shorter one wraps around. Give every loop that feeds one layer the same number of items."
       ],
       "examples": [

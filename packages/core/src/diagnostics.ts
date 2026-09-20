@@ -7,6 +7,7 @@ import { parseAddress } from "./address.ts";
 import { componentDependencies, listComponentIds } from "./document.ts";
 import { DELAY_ONE_FRAME_TYPE, feedbackLoops, patchEdges, VARIABLE_RECEIVER_TYPE, type FeedbackEdge, type FeedbackLoop, type PatchEdge } from "./graph.ts";
 import { getOwn, isValidId } from "./ids.ts";
+import { loopShapes } from "./loopShapes.ts";
 import { describePatch, layerDisplayName, patchDisplayName } from "./names.ts";
 import { listInputs } from "./ops/references.ts";
 import {
@@ -18,14 +19,16 @@ import {
   getInputCountRange,
   getPatchSpec,
   interfacePortToPort,
+  resolveLayerProps,
   resolveNodePorts,
   walkLayers,
+  type ResolvedPort,
 } from "./registry.ts";
 import { didYouMean, didYouMeanText } from "./suggest.ts";
-import type { Component, Diagnostic, Id, LayerNode, PatchNode, PatchSpec, Registry, Severity, SonobeDocument, SonobeError, Suggestion, ValueType } from "./types.ts";
+import type { Component, Diagnostic, Id, InputValue, LayerNode, PatchNode, PatchSpec, Registry, Severity, SonobeDocument, SonobeError, Suggestion, ValueType } from "./types.ts";
 import { fileNameCollisions } from "./serialize.ts";
 import { checkInputValue, checkLink, checkLiteral, insertPatchSuggestion, resolveSource, resolveTarget, type PortTarget, type ValidateOptions } from "./validate.ts";
-import { isAssetInput, isLayerInput, isLinkInput } from "./values.ts";
+import { isAssetInput, isLayerInput, isLinkInput, isLoopLiteral } from "./values.ts";
 import { componentBroadcasters, followingReceivers, type VariableInfo } from "./variables.ts";
 
 export interface DiagnosticsOptions {
@@ -234,6 +237,8 @@ interface ComponentResult {
   graph: readonly Diagnostic[];
   /** Layers interactions can't touch. */
   touch: readonly Diagnostic[];
+  /** How many copies layers make, and loops of different lengths meeting. */
+  copies: readonly Diagnostic[];
   /** Components shown directly by instance layers and component patches. */
   refs: readonly Id[];
   /** `graph` holds a feedback loop, whose messages and fixes read patch positions. */
@@ -252,6 +257,7 @@ function resultList(r: ComponentResult): readonly Diagnostic[] {
   }
   for (const d of r.graph) out.push(d);
   for (const d of r.touch) out.push(d);
+  for (const d of r.copies) out.push(d);
   r.list = out;
   return out;
 }
@@ -265,6 +271,7 @@ interface ComponentChecker {
   patchInput(id: Id, key: string, value: unknown): readonly Diagnostic[];
   graph(): readonly Diagnostic[];
   touch(): readonly Diagnostic[];
+  copies(): readonly Diagnostic[];
 }
 
 function checkComponent(doc: SonobeDocument, c: Component, registry: Registry): ComponentResult {
@@ -296,7 +303,7 @@ function checkComponent(doc: SonobeDocument, c: Component, registry: Registry): 
     patches.push({ head: head.list, inputs });
   }
   const graph = check.graph();
-  return { component: c, ids, layers, patches, graph, touch: check.touch(), refs, hasFeedback: graph.some((d) => d.code === "feedback_loop") };
+  return { component: c, ids, layers, patches, graph, touch: check.touch(), copies: check.copies(), refs, hasFeedback: graph.some((d) => d.code === "feedback_loop") };
 }
 
 // ---------------------------------------------------------------------------
@@ -310,6 +317,9 @@ const LAYER_CONTENT_KEYS: ReadonlySet<string> = new Set(["props", "children", "l
 const PATCH_CONTENT_KEYS: ReadonlySet<string> = new Set(["inputs", "ui"]);
 /** Layer properties the touchability check reads. */
 const TOUCH_PROPS: ReadonlySet<string> = new Set(["enabled", "opacity", "hitTest"]);
+/** Literal edits the copy checks read: a layer's Repeat, a Loop's Count, and loop lengths. */
+const layerAffectsCopies = (key: string, before: unknown, after: unknown) => key === "repeat" || isLoopLiteral(before) || isLoopLiteral(after);
+const patchAffectsCopies = (type: string) => (key: string, before: unknown, after: unknown) => (type === "loop" && key === "count") || isLoopLiteral(before) || isLoopLiteral(after);
 const NO_KEYS: ReadonlySet<string> = new Set();
 const NO_LAYERS: readonly LayerNode[] = Object.freeze([]);
 
@@ -338,7 +348,7 @@ const isPlainLiteral = (value: unknown) => value === undefined || (!isLinkInput(
 /**
  * The input results for `next`, reusing results whose stored value is unchanged. Null when a link or
  * layer reference changed (those reach other items). `flags.touch` is set when a touchability
- * property changed.
+ * property changed, and `flags.copies` when an edit can change how many copies or loop items there are.
  */
 function updateInputs(
   next: Record<string, unknown>,
@@ -346,7 +356,8 @@ function updateInputs(
   results: ReadonlyMap<string, InputResult>,
   sensitive: ReadonlySet<string>,
   check: (key: string, value: unknown) => readonly Diagnostic[],
-  flags: { touch: boolean },
+  flags: { touch: boolean; copies: boolean },
+  affectsCopies: (key: string, before: unknown, after: unknown) => boolean,
 ): ReadonlyMap<string, InputResult> | null {
   if (next === prev) return results;
   const out = new Map<string, InputResult>();
@@ -356,14 +367,17 @@ function updateInputs(
       out.set(key, old);
       continue;
     }
-    if (!isPlainLiteral(value) || !isPlainLiteral(Object.hasOwn(prev, key) ? prev[key] : undefined)) return null;
+    const before = Object.hasOwn(prev, key) ? prev[key] : undefined;
+    if (!isPlainLiteral(value) || !isPlainLiteral(before)) return null;
     if (sensitive.has(key)) flags.touch = true;
+    if (affectsCopies(key, before, value)) flags.copies = true;
     out.set(key, { value, list: check(key, value) });
   }
   for (const key of Object.keys(prev)) {
     if (Object.hasOwn(next, key)) continue;
     if (!isPlainLiteral(prev[key])) return null;
     if (sensitive.has(key)) flags.touch = true;
+    if (affectsCopies(key, prev[key], undefined)) flags.copies = true;
   }
   return out;
 }
@@ -382,7 +396,7 @@ function updateComponent(doc: SonobeDocument, c: Component, prev: ComponentResul
   if (patchIds.length !== prev.patches.length) return null;
 
   const check = componentChecker(doc, c, registry);
-  const flags = { touch: false };
+  const flags = { touch: false, copies: false };
   let moved = false;
 
   const layers: ItemResult[] = [];
@@ -401,7 +415,7 @@ function updateComponent(doc: SonobeDocument, c: Component, prev: ComponentResul
       if (!r || !sameFields(a, b, LAYER_CONTENT_KEYS)) return false;
       if (!registry.layers.has(a.type)) layers.push(r);
       else {
-        const inputs = updateInputs(a.props, b.props, r.inputs, TOUCH_PROPS, (key, value) => check.layerProp(a, key, value), flags);
+        const inputs = updateInputs(a.props, b.props, r.inputs, TOUCH_PROPS, (key, value) => check.layerProp(a, key, value), flags, layerAffectsCopies);
         if (!inputs) return false;
         layers.push(inputs === r.inputs ? r : { head: r.head, inputs });
       }
@@ -431,7 +445,7 @@ function updateComponent(doc: SonobeDocument, c: Component, prev: ComponentResul
       continue;
     }
     if (spec.dynamicPorts) return null;
-    const inputs = updateInputs(node.inputs, b.inputs, r.inputs, NO_KEYS, (key, value) => check.patchInput(id, key, value), flags);
+    const inputs = updateInputs(node.inputs, b.inputs, r.inputs, NO_KEYS, (key, value) => check.patchInput(id, key, value), flags, patchAffectsCopies(node.type));
     if (!inputs) return null;
     patches.push(inputs === r.inputs ? r : { head: r.head, inputs });
   }
@@ -439,7 +453,8 @@ function updateComponent(doc: SonobeDocument, c: Component, prev: ComponentResul
   // Feedback loop messages and fixes read patch positions; loops can't appear or vanish when patches only move.
   const graph = moved && prev.hasFeedback ? check.graph() : prev.graph;
   const touch = flags.touch ? check.touch() : prev.touch;
-  return { component: c, ids: prev.ids, layers, patches, graph, touch, refs: prev.refs, hasFeedback: graph.some((d) => d.code === "feedback_loop") };
+  const copies = flags.copies ? check.copies() : prev.copies;
+  return { component: c, ids: prev.ids, layers, patches, graph, touch, copies, refs: prev.refs, hasFeedback: graph.some((d) => d.code === "feedback_loop") };
 }
 
 function countLayerNodes(layers: readonly LayerNode[]): number {
@@ -676,6 +691,20 @@ function componentChecker(doc: SonobeDocument, c: Component, registry: Registry)
       }),
     );
   }
+  // An instance layer's own properties win over published inputs with the same key.
+  if (c.kind === "layerComponent") {
+    const layerProps = registry.layers.get(COMPONENT_INSTANCE_LAYER_TYPE)?.props ?? [];
+    for (const [key, port] of Object.entries(c.interface.inputs)) {
+      const prop = layerProps.find((p) => p.key === key);
+      if (!prop) continue;
+      push(
+        diag("warning", "input_shadowed_by_prop", `The published input "${port.name}" of ${c.name} has the key "${key}", which every layer already uses for its ${prop.name} property, so instances set their own ${prop.name} and nothing reaches the input.`, c.id, [], {
+          port: key,
+          hint: `Publish it under another key, like "${key}Value", and read "$in.${key}Value" inside instead.`,
+        }),
+      );
+    }
+  }
   for (const [key, port] of Object.entries(c.interface.outputs)) {
     if (port.link === undefined) {
       push(
@@ -789,7 +818,217 @@ function componentChecker(doc: SonobeDocument, c: Component, registry: Registry)
   }
   }
 
-  return { ids, layerHead, layerProp, patchHead, patchInput, graph, touch };
+  const copies = () => collect(copyChecks);
+
+  /**
+   * How many copies layers make (ARCHITECTURE §4): children that repeat inside one copy of a layer
+   * people touch, a Repeat that follows a gesture on its own copies or sits inside another repeat,
+   * and loops of different lengths meeting at a patch or at a layer's copies. Only what the document
+   * fixes is checked; the running prototype reports mismatches it finds with other lengths.
+   */
+  function copyChecks(): void {
+  const shapes = loopShapes(doc, c.id, registry);
+  const quoted = (layers: readonly LayerNode[]) => {
+    const names = layers.slice(0, 3).map((l) => `"${layerDisplayName(l)}"`);
+    return layers.length > 3 ? `${names.join(", ")} and ${layers.length - 3} more` : listText(names);
+  };
+  /** Published inputs of an instance's component whose loops pass in whole (they don't make copies). */
+  const passes = (componentId: Id | undefined) => {
+    const inputs = componentId === undefined ? undefined : getOwn(doc.components, componentId)?.interface.inputs;
+    return (key: string) => getOwn(inputs ?? {}, key)?.loopBehavior === "pass";
+  };
+  type LoopedProp = { key: string; name: string; value: unknown; length: number | null; origin: Id };
+  /** The properties that loop per item on a layer (whole-loop ones like Repeat aside). */
+  const loopedProps = (layer: LayerNode): LoopedProp[] => {
+    const props = resolveLayerProps(doc, c.id, layer, registry) ?? [];
+    const pass = passes(layer.type === COMPONENT_INSTANCE_LAYER_TYPE ? layer.component : undefined);
+    const out: LoopedProp[] = [];
+    for (const [key, value] of Object.entries(layer.props)) {
+      const prop = findPort(props, key);
+      if (!prop || prop.wholeLoop || pass(key)) continue;
+      const shape = shapes.ofValue(value, layer.id);
+      if (shape) out.push({ key, name: prop.name, value, length: shape.length, origin: shape.origin });
+    }
+    return out;
+  };
+  /** Ids that name items of this component, for itemIds. */
+  const items = (ids: readonly Id[]) => [...new Set(ids.filter((id) => getOwn(c.patches, id) || findLayer(c.layers, id)))];
+
+  const gestures = new Map<Id, Id>();
+  for (const [id, node] of Object.entries(c.patches)) {
+    if (getPatchSpec(registry, node.type)?.category !== "interaction") continue;
+    for (const value of Object.values(node.inputs)) if (isLayerInput(value) && !gestures.has(value.layer)) gestures.set(value.layer, id);
+  }
+
+  const repeatInsideRepeat = (layer: LayerNode, ancestorId: Id) => {
+    const name = layerDisplayName(layer);
+    const ancestor = layerName(ancestorId);
+    push(
+      diag("warning", "repeat_inside_repeat", `"${name}" has its own Repeat, but it's inside "${ancestor}", which already makes copies, so each copy of "${ancestor}" shows one "${name}" and this Repeat is ignored.`, c.id, [layer.id, ancestorId], {
+        port: "repeat",
+        hint: `Loops of loops need a component: put the inner list in a layer component and loop the layers inside it (guide 08), or move "${name}" out of "${ancestor}".`,
+        suggestions: [{ description: `Clear the Repeat of "${name}"`, ops: [{ op: "setInput", component: c.id, target: `@${layer.id}.repeat`, value: null }] }],
+      }),
+    );
+  };
+
+  /** Repeat reaches, through per-item inputs only, a patch that runs once per copy of the layer (or of a layer inside it). */
+  const repeatFromOwnGesture = (layer: LayerNode, link: string) => {
+    const inside = new Set(allLayerIds([layer]));
+    const seen = new Set<string>();
+    const find = (address: string): Id | undefined => {
+      if (seen.has(address)) return undefined;
+      seen.add(address);
+      const a = parseAddress(address);
+      if (a?.kind === "layer") {
+        const stored = findLayer(c.layers, a.id)?.layer.props[a.key];
+        return isLinkInput(stored) ? find(stored.link) : undefined;
+      }
+      if (a?.kind !== "patch") return undefined;
+      const node = getOwn(c.patches, a.id);
+      const ports = node ? resolveNodePorts(doc, node, registry) : undefined;
+      const out = ports ? findPort(ports.outputs, a.key) : undefined;
+      // A whole-loop output (a Loop Builder, a filter) decides its own length.
+      if (!node || !ports || !out || out.wholeLoop) return undefined;
+      for (const port of ports.inputs) {
+        if (port.wholeLoop || !Object.hasOwn(node.inputs, port.key)) continue;
+        const value = node.inputs[port.key];
+        if (isLayerInput(value) && inside.has(value.layer)) return a.id;
+        const found = isLinkInput(value) ? find(value.link) : undefined;
+        if (found !== undefined) return found;
+      }
+      return undefined;
+    };
+    const gesture = find(link);
+    if (gesture === undefined) return;
+    const name = layerDisplayName(layer);
+    push(
+      diag("warning", "repeat_from_own_gesture", `The Repeat of "${name}" follows ${patchPhrase(gesture)}, which runs once per copy of "${name}", so the number of copies decides itself: it keeps what it had last frame and can get stuck at 0 or 1.`, c.id, [layer.id, gesture], {
+        port: "repeat",
+        hint: "Link Repeat to the data the copies show, like a Loop Builder's Loop or a Loop's Index, and keep gestures for moving the copies.",
+        suggestions: [{ description: `Disconnect the Repeat of "${name}"`, ops: [{ op: "setInput", component: c.id, target: `@${layer.id}.repeat`, value: null }] }],
+      }),
+    );
+  };
+
+  /**
+   * A layer people touch makes one copy while two or more layers side by side inside it repeat on
+   * their own, stacked in one spot. Copies placed apart (a looped Position, a parent with layout) are
+   * a list, not a stuck card.
+   */
+  const loopsInsideSingleCopy = (layer: LayerNode, gestureId: Id) => {
+    const byParent = new Map<Id, LayerNode[]>();
+    const visit = (parent: LayerNode) => {
+      const flows = parent.props.layout === "row" || parent.props.layout === "column" || parent.props.layout === "grid" || isLinkInput(parent.props.layout);
+      for (const child of parent.children ?? []) {
+        if (shapes.copies(child.id).kind !== "auto") {
+          visit(child);
+          continue;
+        }
+        const count = shapes.count(child.id);
+        if (typeof count === "number" && count < 2) continue;
+        const placed = (flows && child.props.positioning !== "absolute") || loopedProps(child).some((p) => p.key === "position");
+        if (placed) continue;
+        byParent.set(parent.id, [...(byParent.get(parent.id) ?? []), child]);
+      }
+    };
+    visit(layer);
+    const group = [...byParent.values()].find((g) => g.length >= 2);
+    if (!group) return;
+    // Repeat the layer once per item of the longest loop its children show.
+    let pick: { value: InputValue; length: number; text: string } | undefined;
+    for (const child of group) {
+      for (const p of loopedProps(child)) {
+        const value: InputValue | undefined = isLinkInput(p.value) ? { link: p.value.link } : isLoopLiteral(p.value) ? p.value.loop.length : undefined;
+        const length = p.length ?? 0;
+        if (value === undefined || (pick && length <= pick.length)) continue;
+        pick = { value, length, text: isLinkInput(p.value) ? p.value.link : `${length}` };
+      }
+    }
+    const name = layerDisplayName(layer);
+    const suggestions: Suggestion[] = pick
+      ? [{ description: typeof pick.value === "number" ? `Repeat "${name}" ${pick.value} times` : `Repeat "${name}" once per item of ${pick.text}`, ops: [{ op: "setInput", component: c.id, target: `@${layer.id}.repeat`, value: pick.value }] }]
+      : [];
+    push(
+      diag("info", "loops_inside_single_copy", `${quoted(group)} repeat inside one "${name}": "${name}" itself makes 1 copy, so ${patchPhrase(gestureId)} moves all of them together.`, c.id, [layer.id, ...group.map((l) => l.id), gestureId], {
+        port: "repeat",
+        hint: `To make one "${name}" per item, link the loop to the Repeat of "${name}". Its children then follow its copies.`,
+        suggestions,
+      }),
+    );
+  };
+
+  /** A layer's copies meet loops of other lengths: on its own properties, or inside it (children read their copy's item). */
+  const layerLengths = (root: LayerNode, count: number, typed: boolean) => {
+    if (count < 1) return;
+    const found: (LoopedProp & { layer: LayerNode; length: number })[] = [];
+    const collectFrom = (layer: LayerNode) => {
+      for (const p of loopedProps(layer)) if (p.length !== null && p.length > 1 && p.length !== count) found.push({ ...p, layer, length: p.length });
+      for (const child of layer.children ?? []) collectFrom(child);
+    };
+    collectFrom(root);
+    if (!found.length) return;
+    const deliberate = (f: { length: number }) => (f.length < count ? count % f.length === 0 : typed);
+    const first = found.find((f) => !deliberate(f)) ?? found[0]!;
+    const warn = !deliberate(first);
+    const what = `the ${first.name} of "${layerDisplayName(first.layer)}"`;
+    const makes = `"${layerDisplayName(root)}" makes ${count} ${count === 1 ? "copy" : "copies"}${typed ? " (its Repeat)" : ""}`;
+    let message: string;
+    if (first.length < count) {
+      message = warn
+        ? `${makes}, but ${what} is a loop of ${first.length}, so copy #${first.length} shows item #0 again.`
+        : `${makes} and ${what} is a loop of ${first.length}, so its items repeat every ${first.length} copies.`;
+    } else {
+      const lost = first.length - count === 1 ? `item #${count} never shows` : `items #${count} to #${first.length - 1} never show`;
+      message = warn ? `${makes}, but ${what} is a loop of ${first.length}, so ${lost}.` : `${makes}, so only the first ${count} of the ${first.length} items in ${what} show.`;
+    }
+    if (found.length > 1) message += ` ${found.length - 1} more ${found.length === 2 ? "property has" : "properties have"} other lengths.`;
+    const hint = warn
+      ? "A shorter loop starts over from its first item, and items past the last copy don't show. Give the loops the same number of items, or link Repeat to the loop the copies should follow."
+      : first.length > count
+        ? "To show every item, link Repeat to the loop instead of typing a number."
+        : "That's how alternating patterns like stripes are made. If you didn't mean it, give the loops the same number of items.";
+    push(diag(warn ? "warning" : "info", "loop_length_mismatch", message, c.id, items([root.id, first.layer.id, first.origin]), { port: first.key, hint }));
+  };
+
+  /** A patch's per-item inputs get loops of different lengths, so the shorter ones wrap. */
+  const patchLengths = (id: Id, node: PatchNode) => {
+    const ports = resolveNodePorts(doc, node, registry);
+    if (!ports) return;
+    const pass = passes(node.type === COMPONENT_PATCH_TYPE ? node.component : undefined);
+    const loops: { port: ResolvedPort; length: number; origin: Id }[] = [];
+    for (const port of ports.inputs) {
+      if (port.wholeLoop || pass(port.key) || !Object.hasOwn(node.inputs, port.key)) continue;
+      const shape = shapes.ofValue(node.inputs[port.key], id);
+      if (shape && shape.length !== null && shape.length > 1) loops.push({ port, length: shape.length, origin: shape.origin });
+    }
+    const lengths = [...new Set(loops.map((l) => l.length))];
+    if (lengths.length < 2) return;
+    const max = Math.max(...lengths);
+    const warn = lengths.some((n) => max % n !== 0);
+    const parts = loops.map((l, i) => `${l.port.name} has ${l.length}${i === 0 ? " items" : ""}`);
+    const shorter = lengths.length > 2 ? "the shorter loops start over from their first item" : "the shorter loop starts over from its first item";
+    const extra: { port?: string; hint: string } = {
+      hint: warn ? "If each item should pair with one item of the other loop, give the loops the same number of items." : "That's how alternating patterns like stripes are made. If you didn't mean it, give the loops the same number of items.",
+    };
+    const short = loops.find((l) => l.length !== max);
+    if (short) extra.port = short.port.key;
+    push(diag(warn ? "warning" : "info", "loop_length_mismatch", `${patchPhrase(id)} gets loops of different lengths (${listText(parts)}), so it runs ${max} times and ${shorter}.`, c.id, items([id, ...loops.map((l) => l.origin)]), extra));
+  };
+
+  walkLayers(c.layers, (layer) => {
+    const own = shapes.copies(layer.id);
+    const repeat = layer.props.repeat;
+    if (own.kind === "inherited" && repeat !== undefined && repeat !== null) repeatInsideRepeat(layer, own.ancestor);
+    if (own.kind === "repeat" && isLinkInput(repeat)) repeatFromOwnGesture(layer, repeat.link);
+    const gesture = gestures.get(layer.id);
+    if (own.kind === "single" && gesture !== undefined) loopsInsideSingleCopy(layer, gesture);
+    if ((own.kind === "repeat" || own.kind === "auto") && own.count !== null) layerLengths(layer, own.count, own.kind === "repeat" && typeof repeat === "number");
+  });
+  for (const [id, node] of Object.entries(c.patches)) patchLengths(id, node);
+  }
+
+  return { ids, layerHead, layerProp, patchHead, patchInput, graph, touch, copies };
 }
 
 /** Unpublish a port (updateInterface with null), which disconnects its cables everywhere. */

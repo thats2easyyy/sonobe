@@ -9,6 +9,7 @@ import {
   isJsonLiteral,
   isLayerInput,
   isLoopLiteral,
+  MAX_REPEAT,
   roundNumber,
   vectorSize,
   type AssetKind,
@@ -37,7 +38,7 @@ import { clamp01, parseHexColor, toCssColor, toHex8 } from "../../ui/lib/colorMa
 import { useLatest, usePointerDrag } from "../../ui/lib/hooks.ts";
 import { decimalsOf } from "../../ui/lib/scrubMath.ts";
 import { acceptAttribute, assetKindsFor, importAssetForField, KIND_NOUNS, type FieldImportResult } from "./assetImport.ts";
-import { formatLiveValue, literalValue, sameInputValue, updateVectorComponent, type FieldUpdate, type InspectorField } from "./model.ts";
+import { formatCopies, formatLiveValue, literalValue, sameInputValue, updateVectorComponent, type FieldUpdate, type InspectorField } from "./model.ts";
 
 /** What a control can do to its field. */
 export interface FieldActions {
@@ -60,11 +61,13 @@ export interface ValueControlProps {
   excludeLayers?: readonly Id[];
 }
 
-export type ControlKind = "number" | "index" | "boolean" | "pulse" | "text" | "multiline" | "code" | "color" | "vector" | "anchor" | "enum" | "layer" | "asset" | "gradient" | "json";
+export type ControlKind = "number" | "index" | "boolean" | "pulse" | "text" | "multiline" | "code" | "color" | "vector" | "anchor" | "enum" | "layer" | "asset" | "gradient" | "json" | "count";
 
 /** Which editor a field gets. "any" fields follow their current literal. */
 export function controlKind(field: Pick<InspectorField, "type" | "value" | "port" | "key">): ControlKind {
   const { type, value, port } = field;
+  // A copy count (Repeat) is "any" so it can take a loop, but people type a whole number or leave it on Auto.
+  if (port.subtype === "count") return "count";
   if (isLoopLiteral(value)) return "json";
   switch (type) {
     case "number":
@@ -146,6 +149,8 @@ export function ValueControl(props: ValueControlProps) {
       return <GradientControl {...props} />;
     case "json":
       return <JsonControl {...props} />;
+    case "count":
+      return <CountControl {...props} />;
   }
 }
 
@@ -175,6 +180,31 @@ function NumberControl({ field, actions, label, integer = false }: ValueControlP
       unit={unit}
       precision={precision}
       onChange={(value, meta) => actions.change(field.mixed && meta.source !== "input" ? (current) => (typeof current === "number" ? fit(current + meta.delta) : current) : fit(value))}
+      onCommit={() => actions.commit()}
+    />
+  );
+}
+
+/**
+ * Repeat: a whole number of copies, or empty for Auto (one per item of the longest loop on the
+ * layer's own properties). Auto shows like a mixed value: no number, and scrubbing starts from 0.
+ * Reset to Default goes back to Auto; linking a loop makes one copy per item.
+ */
+function CountControl({ field, actions, label }: ValueControlProps) {
+  const auto = field.value === null || typeof field.value !== "number";
+  const fit = (n: number) => Math.min(MAX_REPEAT, Math.max(0, Math.round(n)));
+  return (
+    <ScrubNumberField
+      size="sm"
+      aria-label={label}
+      value={auto ? 0 : (field.value as number)}
+      mixed={field.mixed || auto}
+      placeholder={field.mixed ? "Mixed" : "Auto"}
+      min={0}
+      max={MAX_REPEAT}
+      step={1}
+      precision={0}
+      onChange={(value) => actions.change(fit(value))}
       onCommit={() => actions.commit()}
     />
   );
@@ -776,16 +806,17 @@ function JsonControl({ field, actions, label }: ValueControlProps) {
 }
 
 /** A read-only value (a linked property's current value, or a patch output). */
-export function LiveReadout({ value, type }: { value: unknown; type: ValueType }) {
+export function LiveReadout({ value, type, copies = false }: { value: unknown; type: ValueType; copies?: boolean }) {
   const color = type === "color" && isColor(value) ? toCssColor(value) : undefined;
+  const text = copies ? formatCopies(value) : formatLiveValue(value, type);
   return (
-    <span className="sb-insp-live sb-mono" title={formatLiveValue(value, type)}>
+    <span className="sb-insp-live sb-mono" title={text}>
       {color && (
         <span className="sb-insp-live__swatch sb-checker" aria-hidden>
           <span style={{ background: color }} />
         </span>
       )}
-      <span className="sb-insp-live__text">{formatLiveValue(value, type)}</span>
+      <span className="sb-insp-live__text">{text}</span>
     </span>
   );
 }

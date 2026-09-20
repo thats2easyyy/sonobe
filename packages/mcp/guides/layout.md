@@ -12,6 +12,7 @@ Related: `graph-basics`, `loops`, `components`
 - `pivot` is the point scale and rotation happen around. It defaults to `[0.5, 0.5]` (center).
 - Later layers draw in front of earlier ones. Children draw in front of their parent.
 - `zPosition` reorders siblings: higher draws in front and gets touches first; ties keep layer order. It never lifts a layer out of its group.
+- Copies of a repeated layer stack the same way: in index order, last in front, unless `zPosition` differs per copy. How many copies a layer makes, and which is on top, is in `loops` (Copies).
 
 ## Containers
 
@@ -85,4 +86,4 @@ layer list group "List" @16,120 370x300 color=#F2F2F7FF cornerRadius=20 layout=c
 - To animate a position, feed a `transition<point>` (or a spring set to point) into `@layer.position`, or pack separate numbers with the `point` patch (`x`, `y`).
 - Read a layer's laid-out size and position with `layerInfo` (`layer` input). It reports the previous frame, so don't size a layer from its own Layer Info.
 - Text layers report their measured size as the read-only output `@title.textSize`.
-- For repeated layers (lists, grids), use a loop and `gridLayout`. See `loops`.
+- For repeated layers (lists, grids), use a loop and `gridLayout`. To repeat a whole card with everything inside it, set the card's `repeat`. See `loops`.

@@ -117,13 +117,35 @@ button.sb-layerspanel__crumb {
 }
 
 @media (hover: hover) {
-  .sb-layerspanel .sb-tree:not([data-dragging]) .sb-tree__row:hover .sb-layerspanel__status {
+  .sb-layerspanel .sb-tree:not([data-dragging]) .sb-tree__row:hover .sb-layerspanel__status,
+  .sb-layerspanel .sb-tree:not([data-dragging]) .sb-tree__row:hover .sb-layerspanel__badges {
     display: none;
   }
 }
 
-.sb-layerspanel .sb-tree:focus-within .sb-tree__row[data-focused] .sb-layerspanel__status {
+.sb-layerspanel .sb-tree:focus-within .sb-tree__row[data-focused] .sb-layerspanel__status,
+.sb-layerspanel .sb-tree:focus-within .sb-tree__row[data-focused] .sb-layerspanel__badges {
   display: none;
+}
+
+.sb-layerspanel__badges {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  margin-right: 2px;
+}
+
+.sb-layerspanel__badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 0 4px;
+  border-radius: var(--radius-xs);
+  background: var(--bg-field);
+  color: var(--text-secondary);
+  font-size: var(--font-size-2xs);
+  line-height: 15px;
+  white-space: nowrap;
 }
 
 .sb-layerspanel__empty {

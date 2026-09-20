@@ -49,7 +49,8 @@ export type ValueSubtype =
   | "velocity"
   | "multiline"
   | "code"
-  | "url";
+  | "url"
+  | "count"; // a copy count: a whole number, or a loop whose length counts (Repeat)
 
 /** Runtime color: straight RGBA in 0..1. Serialized as "#RRGGBBAA". */
 export interface Color {

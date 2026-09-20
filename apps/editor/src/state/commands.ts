@@ -99,6 +99,7 @@ async function pasteCapture(session: EditorSession, text: string, notify: Notify
 }
 
 function reportAction(notify: Notify, result: ActionResult): void {
+  if (result.ok && result.note) notify({ title: result.note.message, ...(result.note.hint ? { description: result.note.hint } : {}), tone: "neutral" });
   if (result.ok || !result.message) return;
   notify({ title: result.message, ...(result.hint ? { description: result.hint } : {}), tone: "warn" });
 }

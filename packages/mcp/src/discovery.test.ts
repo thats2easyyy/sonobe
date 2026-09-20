@@ -180,6 +180,7 @@ describe("discovery tools", () => {
     const rect = await client.call("describe_layer_types", { types: ["rectangle"] });
     expect(rect.text).toContain("cornerRadius: number = 0");
     expect(rect.text).toContain("@layerId.key");
+    expect(rect.text).toContain("  repeat: count (whole number or loop) = auto — Makes copies of this layer");
     const values = await client.call("list_value_types", {});
     expect(values.text).toContain("boolean → pulse: fires when it turns on");
     expect(values.text).toContain('{ "layer": "card" }');
