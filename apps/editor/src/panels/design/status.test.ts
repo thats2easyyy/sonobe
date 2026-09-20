@@ -187,18 +187,18 @@ describe("resultPlacement", () => {
 
   it("names the nearest screen behind a new one, else the other layers", () => {
     const doc = docOf([screen("home", "Home"), { op: "addLayer", layer: { id: "bg", type: "colorFill", name: "Background" } }, screen("badge", "Badge", [80, 30]), screen("checkout", "Checkout")]);
-    expect(resultPlacement(doc, result(), false)).toEqual({ state: "here", component: "Main", stack: "front", covers: "Home" });
+    expect(resultPlacement(doc, result())).toEqual({ state: "here", component: "Main", stack: "front", covers: "Home" });
     const demo = docOf([{ op: "addLayer", layer: { id: "bg", type: "colorFill", name: "Background" } }, screen("card", "Next Card", [370, 300]), screen("checkout", "Checkout")]);
-    expect(resultPlacement(demo, result(), false)).toMatchObject({ stack: "front", covers: null });
+    expect(resultPlacement(demo, result())).toMatchObject({ stack: "front", covers: null });
   });
 
   it("follows Send to Back, Undo, deletes, and what isn't a new top-level screen", () => {
     const doc = docOf([screen("checkout", "Checkout"), screen("home", "Home")]);
-    expect(resultPlacement(doc, result(), false)).toMatchObject({ state: "here", stack: "back", covers: null });
-    expect(resultPlacement(doc, result(), true).state).toBe("undone");
-    expect(resultPlacement(doc, result({ layerId: "gone" }), false).state).toBe("gone");
-    expect(resultPlacement(doc, result({ kind: "updated", layerId: "home" }), false)).toMatchObject({ state: "here", stack: null });
-    expect(resultPlacement(docOf([screen("checkout", "Checkout")]), result(), false)).toMatchObject({ state: "here", stack: null });
+    expect(resultPlacement(doc, result())).toMatchObject({ state: "here", stack: "back", covers: null });
+    expect(resultPlacement(doc, result({ undone: true })).state).toBe("undone");
+    expect(resultPlacement(doc, result({ layerId: "gone" })).state).toBe("gone");
+    expect(resultPlacement(doc, result({ kind: "updated", layerId: "home" }))).toMatchObject({ state: "here", stack: null });
+    expect(resultPlacement(docOf([screen("checkout", "Checkout")]), result())).toMatchObject({ state: "here", stack: null });
   });
 });
 

@@ -51,6 +51,8 @@ describe("designTarget", () => {
     expect(designTarget(session, { newScreen: false, result: result("screen_home") })?.isResult).toBe(true);
     expect(designTarget(session, { newScreen: false, result: result("screen_home", "card") })?.isResult).toBe(false);
     expect(designTarget(session, { newScreen: false, result: result("walk_card") })?.isResult).toBe(false);
+    // Undo put the person's own layer back under the same id.
+    expect(designTarget(session, { newScreen: false, result: { ...result("screen_home"), undone: true } })?.isResult).toBe(false);
   });
 });
 
