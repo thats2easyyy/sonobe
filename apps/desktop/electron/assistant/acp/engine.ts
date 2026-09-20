@@ -900,6 +900,10 @@ export function createSubscriptionAgent(options: SubscriptionAgentOptions): Subs
               model: model.id,
               maxTurns: limits.maxTurns,
               allowedTools: toolNames.filter((name) => !ASKING_TOOLS.has(name)).map((name) => `${TOOL_PREFIX}${name}`),
+              // Claude sometimes calls a tool by the short name the guide uses ("get_outline"), which Claude Code
+              // would refuse as "No such tool available": each short name resolves to Sonobe's tool (and still asks
+              // before the ones outside allowedTools, under that name).
+              toolAliases: Object.fromEntries(toolNames.map((name) => [name, `${TOOL_PREFIX}${name}`])),
               env: { ENABLE_TOOL_SEARCH: "false", MCP_TOOL_TIMEOUT: "1800000", CLAUDE_AGENT_SDK_CLIENT_APP: `sonobe/${options.version}` },
             },
           },
