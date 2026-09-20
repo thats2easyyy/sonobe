@@ -53,6 +53,12 @@ export interface ApplyInput {
    * An "update" or "end" without an open gesture starts one.
    */
   gesture?: "begin" | "update" | "end";
+  /**
+   * With `coalesceKey`: applies with the key merge into one group for as long as that group is the
+   * newest undo step, however far apart they come (a run of preset switches). Any other edit ends the
+   * run. Unlike a gesture it never stays open, so views and drafts don't wait for it to end.
+   */
+  run?: boolean;
   dryRun?: boolean;
   /** Fail with "revision_mismatch" unless the store is at this revision. */
   expectedRevision?: number;
@@ -286,6 +292,8 @@ interface CoalesceGroup {
   gesture: boolean;
   /** The gesture hasn't ended. */
   open: boolean;
+  /** A run (ApplyInput.run): merges while it's the newest undo step, with no time window and no open gesture. */
+  run: boolean;
 }
 
 export function createDocumentStore(options: DocumentStoreOptions): DocumentStore {
@@ -562,11 +570,12 @@ export function createDocumentStore(options: DocumentStoreOptions): DocumentStor
         if (key !== undefined) {
           const top = history.peekUndo();
           const sameGroup = group !== null && group.key === key && sameAuthor(group.author, author) && top?.txnId === group.txnId;
+          const run = input.run === true;
           const continuing =
-            sameGroup && (group!.gesture ? group!.open && input.gesture !== "begin" : input.gesture === undefined && now() - group!.at <= coalesceWindowMs);
+            sameGroup && (group!.run ? run : group!.gesture ? group!.open && input.gesture !== "begin" : !run && input.gesture === undefined && now() - group!.at <= coalesceWindowMs);
           if (!continuing) {
-            const gesture = input.gesture !== undefined;
-            group = { key, stored: `${key} ${++groupCounter}`, author: { ...author }, txnId: "", at: 0, gesture, open: gesture };
+            const gesture = !run && input.gesture !== undefined;
+            group = { key, stored: `${key} ${++groupCounter}`, author: { ...author }, txnId: "", at: 0, gesture, open: gesture, run };
           }
         }
         const coalescing = key !== undefined ? group : null;

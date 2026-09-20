@@ -26,3 +26,23 @@ export function historyStepTitle(verb: "Undo" | "Redo", description: string): st
   const action = historyAction(description);
   return `${verb === "Undo" ? "Undid" : "Redid"}${action ? ` ${action}` : " a change"}`;
 }
+
+// Knob edits (the Knobs tab, Make Knob and Use Knob in the Inspector).
+
+/** "Make Knob “Damping Fraction”" */
+export const makeKnobLabel = (name: string): string => `Make Knob “${name}”`;
+
+/** "Tune Commit Distance to 110 pt (Proposal)": a slider drag or scrub, one step however long it lasts. */
+export const tuneKnobLabel = (knob: string, value: string, preset: string): string => `Tune ${knob} to ${value} (${preset})`;
+
+/** A run of preset switches, one step until another edit. */
+export const SWITCH_PRESETS_LABEL = "Switch Presets";
+
+/** "New Preset “Proposal 2”" */
+export const newPresetLabel = (name: string): string => `New Preset “${name}”`;
+
+/** "Remove Knob “Commit Distance”" */
+export const removeKnobLabel = (name: string): string => `Remove Knob “${name}”`;
+
+/** "Convert 14 Variables to Knobs" */
+export const convertVariablesLabel = (count: number): string => `Convert ${count} ${count === 1 ? "Variable" : "Variables"} to Knobs`;

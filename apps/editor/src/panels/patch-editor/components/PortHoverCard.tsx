@@ -119,13 +119,15 @@ function Card({ rect, side, address, model }: { rect: RectLike; side: "in" | "ou
     ? "Hover a copy to watch it here, in every patch, and in the inspector"
     : side === "out"
       ? "Drag to connect · click, then ⇧-click inputs"
-      : port.connected
-        ? "Drag the cable end to move or remove it"
-        : layerTarget
-          ? "Drag a cable here, or click Drive… to pick a patch"
-          : port.literal !== undefined
-            ? "Drag to scrub · ⌥-click to reset"
-            : "Drag onto the canvas to add a patch";
+      : port.knob
+        ? "Click the chip to tune it in Knobs"
+        : port.connected
+          ? "Drag the cable end to move or remove it"
+          : layerTarget
+            ? "Drag a cable here, or click Drive… to pick a patch"
+            : port.literal !== undefined
+              ? "Drag to scrub · ⌥-click to reset"
+              : "Drag onto the canvas to add a patch";
   const placeRef = floating.ref;
   const setRefs = useCallback(
     (el: HTMLDivElement | null) => {
@@ -152,12 +154,17 @@ function Card({ rect, side, address, model }: { rect: RectLike; side: "in" | "ou
           </div>
         )}
         {loop && <LoopTable loop={loop} type={port.type} name={port.name} format={(v) => formatValue(v, port.type, { ...enumOptions, maxText: 28 })} />}
-        {port.link && (
+        {port.link && port.knob ? (
+          <div className="sb-pe-hovercard__meta">
+            From the knob {port.knob.name}
+            {port.knob.valueText ? ` · ${port.knob.valueText} in the running preset` : ""}
+          </div>
+        ) : port.link ? (
           <div className="sb-pe-hovercard__meta">
             From <code>{port.link}</code>
             {conversion ? ` · ${conversion}` : ""}
           </div>
-        )}
+        ) : null}
         {port.description && <p className="sb-pe-hovercard__docs">{port.description}</p>}
         {port.issue && (
           <p className="sb-pe-hovercard__issue" data-severity={port.issue.severity}>

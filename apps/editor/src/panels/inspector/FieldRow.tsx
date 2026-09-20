@@ -6,7 +6,7 @@
 
 import { findLayer, type Id, type ValueType } from "@sonobe/core";
 import { Cable, Copy, Link2, Link2Off, RotateCcw, ScanSearch } from "lucide-react";
-import { useMemo, useState, type DragEvent } from "react";
+import { useMemo, useRef, useState, type DragEvent } from "react";
 import { dragHasFiles, filesFromDataTransfer } from "../../state/assets.ts";
 import { useDocument, useEditorSession, useLiveValues, useSelection } from "../../state/EditorProvider.tsx";
 import { currentComponentId } from "../../state/selection.ts";
@@ -16,6 +16,8 @@ import { PortGlyph } from "../../ui/PortGlyph.tsx";
 import { toast } from "../../ui/Toast.tsx";
 import { Tooltip } from "../../ui/Tooltip.tsx";
 import { useLatest } from "../../ui/lib/hooks.ts";
+import { fieldKnobId, KnobField, knobFieldEntries } from "../knobs/KnobField.tsx";
+import { MakeKnobPopover } from "../knobs/MakeKnobPopover.tsx";
 import { layerPropDropAttributes, startLinkToLayerProp, useWatchedScope, type LayerPropTarget } from "../patch-editor/api.ts";
 import { controlKind, LiveReadout, STACKED_CONTROLS, useAssetFieldImport, ValueControl, type FieldActions } from "./controls.tsx";
 import { editLabel, linkSourceItem, planFieldDisconnect, planFieldReset, planFieldSet, type InspectorField } from "./model.ts";
@@ -102,7 +104,11 @@ export function FieldRow({ field, subject, liveAddress, excludeLayers, drive, ca
   const [fileOver, setFileOver] = useState(false);
   const linked = field.linkedCount > 0;
   const kind = controlKind(field);
-  const stacked = !linked && STACKED_CONTROLS.has(kind);
+  // A knob-driven field shows the knob's chip and control under the label.
+  const knobId = fieldKnobId(field);
+  const [makingKnob, setMakingKnob] = useState(false);
+  const rowRef = useRef<HTMLDivElement>(null);
+  const stacked = (!linked && STACKED_CONTROLS.has(kind)) || knobId !== undefined;
   const takesFiles = !linked && kind === "asset";
   const single = field.targets.length === 1 ? field.targets[0] : undefined;
   const source = field.link ? linkSourceItem(field.link) : undefined;
@@ -135,7 +141,13 @@ export function FieldRow({ field, subject, liveAddress, excludeLayers, drive, ca
     }
   };
 
+  const knobEntries = () => {
+    const list = knobFieldEntries(session, field, () => setMakingKnob(true));
+    return list.length ? ([...list, { type: "separator" }] satisfies MenuEntry[]) : [];
+  };
+
   const entries = (): MenuEntry[] => [
+    ...knobEntries(),
     ...(drive !== undefined
       ? ([
           {
@@ -150,7 +162,7 @@ export function FieldRow({ field, subject, liveAddress, excludeLayers, drive, ca
         ] satisfies MenuEntry[])
       : []),
     { id: "reset", label: "Reset to Default", icon: <RotateCcw size={14} />, disabled: !field.isSet, onSelect: actions.reset },
-    ...(linked
+    ...(linked && knobId === undefined
       ? ([
           { id: "disconnect", label: "Disconnect", icon: <Link2Off size={14} />, onSelect: actions.disconnect },
           { id: "reveal", label: "Reveal Driving Patch", icon: <ScanSearch size={14} />, disabled: !source?.id, onSelect: reveal },
@@ -203,6 +215,7 @@ export function FieldRow({ field, subject, liveAddress, excludeLayers, drive, ca
   return (
     <ContextMenu entries={entries}>
       <div
+        ref={rowRef}
         className="sb-insp-row"
         data-stacked={stacked || undefined}
         data-linked={linked || undefined}
@@ -222,7 +235,9 @@ export function FieldRow({ field, subject, liveAddress, excludeLayers, drive, ca
           </span>
         </Tooltip>
         <div className="sb-insp-row__control">
-          {linked ? (
+          {knobId !== undefined ? (
+            <KnobField field={field} knobId={knobId} label={name} />
+          ) : linked ? (
             <div className="sb-insp-linked">
               <Tooltip content={field.link ? `Driven by ${sourceName ?? chipText(field.link)}. Click to show it in the patch editor.` : `${field.linkedCount} of ${field.targets.length} selected are connected to patches.`}>
                 <button
@@ -261,6 +276,7 @@ export function FieldRow({ field, subject, liveAddress, excludeLayers, drive, ca
             <span className="sb-insp-row__drop-text">{dropHint}</span>
           </span>
         )}
+        <MakeKnobPopover field={makingKnob ? field : null} anchor={rowRef.current} onClose={() => setMakingKnob(false)} />
       </div>
     </ContextMenu>
   );

@@ -10,6 +10,7 @@ import { toast } from "../../ui/Toast.tsx";
 import { adviceSuggestions, ALL_SEVERITIES, applyDiagnosticFix, countBySeverity, filterDiagnostics, fixableSuggestions, fixLabel, SEVERITIES, type FixSuggestion, type HudDiagnostic, type SeverityFilter } from "./diagnosticsModel.ts";
 import { FilterChip } from "./FilterChip.tsx";
 import { isFiltered, toggleFilter } from "./filters.ts";
+import { showKnobs } from "../knobs/knobsStore.ts";
 import { useHudDiagnostics } from "./hooks.ts";
 import { itemDisplayName } from "./itemNames.ts";
 import { revealItems } from "./reveal.ts";
@@ -36,7 +37,11 @@ export function DiagnosticsView() {
   const visible = useMemo(() => filterDiagnostics(diagnostics, filter), [diagnostics, filter]);
 
   const reveal = (d: HudDiagnostic, ids: readonly string[] = d.itemIds) => {
-    if (ids.length === 0) return;
+    if (ids.length === 0) {
+      // Knob table diagnostics (a missing value, an unused knob) point at a knob: show it in the Knobs tab.
+      if (d.knob !== undefined) showKnobs(session, d.knob);
+      return;
+    }
     if (!revealItems(session, d.component, ids)) toast({ title: "Those items aren't in the document anymore", tone: "neutral" });
   };
 
@@ -109,7 +114,7 @@ export function DiagnosticsView() {
             const fixes = fixableSuggestions(d);
             const advice = adviceSuggestions(d);
             const component = doc.components[d.component];
-            const revealable = d.itemIds.length > 0;
+            const revealable = d.itemIds.length > 0 || d.knob !== undefined;
             return (
               <div key={d.key} className="sb-problem" data-severity={d.severity} role="listitem">
                 <span className="sb-problem__icon" aria-label={SEVERITY[d.severity].single}>

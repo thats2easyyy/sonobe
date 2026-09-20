@@ -79,6 +79,34 @@ describe("clipboard", () => {
     expect(main.patches.tap!.inputs.layer).toEqual({ layer: "card" });
   });
 
+  it("keeps knob links where the knob exists with the same type, and pastes the knob's value elsewhere", () => {
+    const doc = build(
+      [
+        { op: "addKnob", knob: { id: "bounce", name: "Bounce", type: "number", value: 12 } },
+        { op: "addKnob", knob: { id: "radius", name: "Radius", type: "number", value: 24 } },
+        { op: "setInput", target: "pop.bounciness", value: { link: "$knob.bounce" } },
+        { op: "setInput", target: "@card.cornerRadius", value: { link: "$knob.radius" } },
+      ],
+      tapToGrow(),
+    );
+    const fragment = createClipboardFragment(doc, "main", { layers: ["card"], patches: ["pop"] })!;
+    expect(fragment.knobs).toEqual({ bounce: { type: "number", value: 12 }, radius: { type: "number", value: 24 } });
+    const text = serializeClipboardFragment(fragment);
+    expect(parseClipboardFragment(text)!.knobs).toEqual(fragment.knobs);
+
+    const same = pasteInto(doc, text).result.doc.components.main!;
+    expect(same.patches.pop_2!.inputs.bounciness).toEqual({ link: "$knob.bounce" });
+    expect(findLayer(same.layers, "card_2")!.layer.props.cornerRadius).toEqual({ link: "$knob.radius" });
+
+    // Another prototype: one knob is missing and the other is a different type there.
+    const other = build([{ op: "addKnob", knob: { id: "radius", name: "Radius", type: "boolean", value: true } }]);
+    const elsewhere = pasteInto(other, text);
+    expect(elsewhere.result.ok).toBe(true);
+    const main = elsewhere.result.doc.components.main!;
+    expect(main.patches.pop!.inputs.bounciness).toBe(12);
+    expect(findLayer(main.layers, "card")!.layer.props.cornerRadius).toBe(24);
+  });
+
   it("copies subtrees without selecting descendants twice", () => {
     const doc = build([
       { op: "addLayer", layer: { id: "group", type: "group", name: "Group", children: [{ id: "dot", type: "oval", name: "Dot" }] } },

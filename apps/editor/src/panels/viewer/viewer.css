@@ -635,3 +635,49 @@
   outline: 2px solid var(--focus-ring);
   outline-offset: 1px;
 }
+
+/* The knob preset that just started running, over the stage for a moment. */
+.sb-vw__preset-caption {
+  position: absolute;
+  top: var(--space-5);
+  left: 50%;
+  z-index: 2;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  max-width: calc(100% - 32px);
+  padding: var(--space-2) var(--space-4);
+  border-radius: var(--radius-full);
+  background: color-mix(in srgb, var(--bg-elevated) 92%, transparent);
+  box-shadow:
+    0 0 0 1px var(--border-subtle),
+    var(--shadow-md);
+  color: var(--text-primary);
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-medium);
+  white-space: nowrap;
+  translate: -50% 0;
+  pointer-events: none;
+  animation: sb-vw-caption 1500ms var(--ease-out) forwards;
+}
+
+@keyframes sb-vw-caption {
+  0% {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  12%,
+  75% {
+    opacity: 1;
+    transform: none;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sb-vw__preset-caption {
+    animation: none;
+  }
+}

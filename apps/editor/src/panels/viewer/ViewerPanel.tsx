@@ -4,7 +4,8 @@
  * phone preview into a menu, so nothing truncates at narrow widths. Play/pause and fps sit under the
  * prototype, next to "On phone" (a QR code for the LAN web player). While the running prototype has
  * an empty_loop warning, a notice above the stage says what draws no copies, with Why? to reveal it,
- * or, when a fresh start would draw it (an edit left old state), offers Restart instead.
+ * or, when a fresh start would draw it (an edit left old state), offers Restart instead. Switching the
+ * knob preset shows its name over the stage for a moment.
  */
 
 import { DEVICE_PRESETS, getDevicePreset, type DevicePreset } from "@sonobe/core";
@@ -30,6 +31,7 @@ import { revealItems } from "../hud/reveal.ts";
 import { FloatingWindow } from "./FloatingWindow.tsx";
 import { getViewerWindowApi, toPreviewStatus, type ViewerWindowStatus } from "./hostBridge.ts";
 import { PhonePreviewButton, usePhonePreview, type PhonePreviewController } from "./PhonePreview.tsx";
+import { PresetCaption } from "./PresetCaption.tsx";
 import { ViewerStage } from "./ViewerStage.tsx";
 import { devicePresetOps, emptyLoopNotice, formatFps, presetForDevice, rotateDeviceOps, type ViewerZoom } from "./viewerModel.ts";
 import "./viewer.css";
@@ -314,6 +316,7 @@ export function ViewerPanel({ session: sessionProp, lanPreviewUrl, onPopOut, onC
   ];
 
   const loopNote = <EmptyLoopNote session={session} />;
+  const caption = <PresetCaption session={session} />;
   const stage = <ViewerStage session={session} showFrame={showFrame} zoom={zoom} showHitTargets={showHitTargets} onScaleChange={setScale} />;
   const transport = <ViewerTransport session={session} phone={phone} phoneOpen={phoneOpen} onPhoneOpenChange={setPhoneOpen} />;
 
@@ -379,6 +382,7 @@ export function ViewerPanel({ session: sessionProp, lanPreviewUrl, onPopOut, onC
               </div>
             )}
             {loopNote}
+            {caption}
             {stage}
             {transport}
           </>
@@ -399,6 +403,7 @@ export function ViewerPanel({ session: sessionProp, lanPreviewUrl, onPopOut, onC
         >
           <div className="sb-vw">
             {loopNote}
+            {caption}
             {stage}
             {transport}
           </div>
