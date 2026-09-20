@@ -419,6 +419,7 @@ Layer types are declared in `@sonobe/core` (`layerTypes.ts`) with typed props (k
 - **Stack:** React 19, Zustand store holding `SonobeDocument` and editor state. All mutations go through `store.apply(ops, label)`, which wraps `applyOps` and history.
 - **Patch editor** is built on `@xyflow/react` with custom node rendering:
   - Port colors by type, a distinct pulse glyph, a "×N" loop badge, and live values on hover.
+  - One watched loop copy per session (the patch editor bridge's `watchedCopy`): inline values, hover cards and inspector read-outs show item k of a loop (k mod its length) instead of the "×N" summary, and inside a looped layer instance the live scope reads copy k (`card#3/…`). A looped port's hover card lists every copy, and hovering a row watches it. The "Copy #k of N" chip steps through copies, the live scope chip lists a looped instance's copies, and clicking a copy on the canvas watches it.
   - A pulse "spark" animation along cables, and a glow for true state.
   - Links:
     - drag an output → input

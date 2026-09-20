@@ -50,7 +50,7 @@ import { useLatest } from "../../ui/lib/hooks.ts";
 import { useContextMenu } from "../../ui/Menu.tsx";
 import { toast } from "../../ui/Toast.tsx";
 import { CableEdgeView, ConnectionLineView } from "./components/CableEdge.tsx";
-import { ArmedHint, EmptyGraph, LiveScopeChip, PatchEditorBreadcrumbs, Toolbar, ZoomControls } from "./components/Chrome.tsx";
+import { ArmedHint, EmptyGraph, LiveScopeChip, PatchEditorBreadcrumbs, Toolbar, WatchedCopyChip, ZoomControls } from "./components/Chrome.tsx";
 import { LinkDragSearch, PatchInfoDialog, PatchPickerDialog, SpliceChooser, type SpliceChoiceRequest } from "./components/Dialogs.tsx";
 import { cableMenu, commentMenu, layerMenu, paneMenu, patchMenu, portMenu, type MenuContext } from "./components/menus.ts";
 import { CommentNodeView, InterfaceNodeView, LayerNodeView, PatchNodeView } from "./components/NodeViews.tsx";
@@ -60,7 +60,7 @@ import { patchTitle, spliceOptions, type SpliceOption } from "./model/editOps.ts
 import { boundsOf, boundsVisible, estimateNodeSize, FIT_VIEW_PADDING, HEADER_HEIGHT, isFarZoom, pointInRect, readableViewport, rectContains, ROW_HEIGHT, sampleCable, type Point, type Rect } from "./model/geometry.ts";
 import { deriveGraph } from "./model/graph.ts";
 import { missingHandlesKey, parseMissingHandlesKey } from "./model/handles.ts";
-import { resolveLiveScope, scopedAddress, type LiveScope } from "./model/instances.ts";
+import { resolveLiveScope, scopedAddress, watchedPrefix, type LiveScope } from "./model/instances.ts";
 import { cablesCutByKnife, simplifyStroke, type CableGeometry } from "./model/knife.ts";
 import type { LinkCandidate } from "./model/linkSearch.ts";
 import type { PickerItem } from "./model/picker.ts";
@@ -90,6 +90,7 @@ import { patchEditorBridge, registerPatchEditor } from "./state/bridge.ts";
 import { PatchEditorContext, type PatchEditorContextValue } from "./state/context.ts";
 import { completeConnectionToLayerProp, dropTargetAt } from "./state/linkToLayer.ts";
 import { createLiveStore } from "./state/liveStore.ts";
+import { useInstanceCopies, useWatchedCopy } from "./state/watch.ts";
 import { createUiStore, type UiStore } from "./state/uiStore.ts";
 import { useReducedMotion } from "./state/useReducedMotion.ts";
 import "./patch-editor.css";
@@ -234,7 +235,10 @@ function Canvas({ session, componentId, showBreadcrumbs, showToolbar, toolbarCon
   const scope = resolveLiveScope(doc, componentPath, instanceChoices);
   const liveScopeKey = scopeKey(scope);
   const liveScope = useMemo(() => scope, [liveScopeKey]); // eslint-disable-line react-hooks/exhaustive-deps
-  const livePrefix = liveScope.prefix;
+  const watchedCopy = useWatchedCopy(session);
+  const instanceCopies = useInstanceCopies(session, liveScope);
+  // Inside a looped component instance, the watched copy picks which copy's values show.
+  const livePrefix = watchedPrefix(liveScope, instanceCopies, watchedCopy);
   const liveEnabled = livePrefix !== null;
   const runtimeDiagnostics = useStore(session.runtime.state, (s) => s.diagnostics);
   const working = useStore(session.presence, (s) => s.working);
@@ -298,8 +302,8 @@ function Canvas({ session, componentId, showBreadcrumbs, showToolbar, toolbarCon
   const openPortMenu = useCallback((event: ReactMouseEvent, nodeId: string, port: PortModel) => portMenuRef.current(event, nodeId, port), []);
 
   const context = useMemo<PatchEditorContextValue>(
-    () => ({ session, registry, componentId, ui, live, geometry, actions, reducedMotion, liveEnabled, liveScope, markViewportManual, openPortMenu }),
-    [session, registry, componentId, ui, live, geometry, actions, reducedMotion, liveEnabled, liveScope, markViewportManual, openPortMenu],
+    () => ({ session, registry, componentId, ui, live, geometry, actions, reducedMotion, liveEnabled, liveScope, instanceCopies, markViewportManual, openPortMenu }),
+    [session, registry, componentId, ui, live, geometry, actions, reducedMotion, liveEnabled, liveScope, instanceCopies, markViewportManual, openPortMenu],
   );
 
   // -- React Flow node state ------------------------------------------------
@@ -998,15 +1002,23 @@ function Canvas({ session, componentId, showBreadcrumbs, showToolbar, toolbarCon
   useEffect(() => {
     if (livePrefix === null) {
       live.clear();
+      ui.getState().set({ loopCopies: 0 });
       return;
     }
     const addresses = addressesKey ? addressesKey.split("\n") : [];
     const scoped = addresses.map((a) => scopedAddress(livePrefix, a));
     const local = new Map(scoped.map((s, i) => [s, addresses[i]!]));
+    /** The watched copy chip steps through the longest loop shown here. */
+    const countLoops = (values: Readonly<Record<string, unknown>>) => {
+      let most = 0;
+      for (const value of Object.values(values)) if (isLoop(value) && value.items.length > most) most = value.items.length;
+      if (ui.getState().loopCopies !== most) ui.getState().set({ loopCopies: most });
+    };
     const unsubscribeValues = addresses.length
       ? session.runtime.subscribeValues(
           scoped,
           (values) => {
+            countLoops(values);
             if (livePrefix === "") {
               live.setValues(values);
               return;
@@ -1037,7 +1049,7 @@ function Canvas({ session, componentId, showBreadcrumbs, showToolbar, toolbarCon
       unsubscribePulses();
       live.clear();
     };
-  }, [session, livePrefix, addressesKey, pulseKey, live]);
+  }, [session, livePrefix, addressesKey, pulseKey, live, ui]);
 
   // -- Reveal requests ------------------------------------------------------
   const reveal = useStore(session.selection, (s) => s.reveal);
@@ -1162,6 +1174,7 @@ function Canvas({ session, componentId, showBreadcrumbs, showToolbar, toolbarCon
         <div className="sb-pe-topbar" data-scrim={(showToolbar && toolbarContainer === undefined) || undefined}>
           {showBreadcrumbs && <PatchEditorBreadcrumbs session={session} className="sb-pe-crumbs--overlay" />}
           <LiveScopeChip />
+          <WatchedCopyChip />
           {showToolbar && toolbarContainer === undefined && <Toolbar />}
         </div>
         {showToolbar && toolbarContainer && <Toolbar container={toolbarContainer} />}

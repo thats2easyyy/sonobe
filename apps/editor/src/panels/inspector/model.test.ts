@@ -113,6 +113,7 @@ describe("inspector fields", () => {
     expect(formatLiveValue({ r: 1, g: 0, b: 0, a: 1 }, "color")).toBe("#FF0000FF");
     expect(formatLiveValue([1.23456, 2], "point")).toBe("1.235, 2");
     expect(formatLiveValue({ __loop: true, items: [1, 2, 3] }, "number")).toBe("×3 · 1");
+    expect(formatLiveValue({ __loop: true, items: [1, 2, 3] }, "number", 4)).toBe("#1 of 3 · 2");
     expect(formatLiveValue(true, "boolean")).toBe("On");
     expect(formatLiveValue(undefined, "number")).toBe("—");
     expect(subjectLabel(["Card"], "layer")).toBe("Card");

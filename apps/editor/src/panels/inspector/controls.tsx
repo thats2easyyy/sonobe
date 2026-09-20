@@ -36,6 +36,7 @@ import { VectorField } from "../../ui/VectorField.tsx";
 import { clamp01, parseHexColor, toCssColor, toHex8 } from "../../ui/lib/colorMath.ts";
 import { useLatest, usePointerDrag } from "../../ui/lib/hooks.ts";
 import { decimalsOf } from "../../ui/lib/scrubMath.ts";
+import { pickCopy } from "../patch-editor/api.ts";
 import { acceptAttribute, assetKindsFor, importAssetForField, KIND_NOUNS, type FieldImportResult } from "./assetImport.ts";
 import { formatLiveValue, literalValue, sameInputValue, updateVectorComponent, type FieldUpdate, type InspectorField } from "./model.ts";
 
@@ -775,17 +776,19 @@ function JsonControl({ field, actions, label }: ValueControlProps) {
   );
 }
 
-/** A read-only value (a linked property's current value, or a patch output). */
-export function LiveReadout({ value, type }: { value: unknown; type: ValueType }) {
-  const color = type === "color" && isColor(value) ? toCssColor(value) : undefined;
+/** A read-only value (a linked property's current value, or a patch output); `copy` shows that copy of a loop. */
+export function LiveReadout({ value, type, copy = null }: { value: unknown; type: ValueType; copy?: number | null }) {
+  const shown = copy === null ? value : pickCopy(value, copy).value;
+  const color = type === "color" && isColor(shown) ? toCssColor(shown) : undefined;
+  const text = formatLiveValue(value, type, copy);
   return (
-    <span className="sb-insp-live sb-mono" title={formatLiveValue(value, type)}>
+    <span className="sb-insp-live sb-mono" title={text}>
       {color && (
         <span className="sb-insp-live__swatch sb-checker" aria-hidden>
           <span style={{ background: color }} />
         </span>
       )}
-      <span className="sb-insp-live__text">{formatLiveValue(value, type)}</span>
+      <span className="sb-insp-live__text">{text}</span>
     </span>
   );
 }
