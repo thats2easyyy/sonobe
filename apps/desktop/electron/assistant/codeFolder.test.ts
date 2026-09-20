@@ -146,7 +146,7 @@ describe("code folder store", () => {
     expect(names).not.toContain("project-000");
     expect(names).not.toContain("project-002");
     expect(names).toContain("project-003");
-  });
+  }, 30_000);
 });
 
 describe("glob patterns", () => {
@@ -577,13 +577,17 @@ describe("code tools", () => {
   });
 
   it("stops at the deadline and when the person presses Stop", async () => {
-    for (let i = 0; i < 1_000; i++) await put(`src/f${i}.ts`, `export const v${i} = ${i};\n`);
+    await mkdir(path.join(app, "src"));
+    for (let batch = 0; batch < 1_000; batch += 100) {
+      await Promise.all(Array.from({ length: 100 }, (_, i) => writeFile(path.join(app, "src", `f${batch + i}.ts`), `export const v${batch + i} = ${batch + i};\n`)));
+    }
     const { store } = await linkedTools();
     const slow = createCodeTools(store, { deadlineMs: 1 });
     const timedOut = await slow.call("search_code", { query: "nothing like this" }, scope());
     expect(timedOut).toEqual({ content: [{ type: "text", text: "Reading the code folder took too long, so it stopped. Ask for a narrower folder or pattern." }], isError: true });
 
-    const tools = createCodeTools(store);
+    // A deadline even a loaded machine stays inside: only Stop stops these, and the last search finishes.
+    const tools = createCodeTools(store, { deadlineMs: 30_000 });
     const stop = new AbortController();
     stop.abort();
     const stopped = await tools.call("search_code", { query: "nothing like this" }, scope({ signal: stop.signal }));
@@ -596,7 +600,7 @@ describe("code tools", () => {
     expect(text(await running)).toBe("Stopped: the person pressed Stop, so the code folder wasn't read.");
     // With time to finish, the same search goes through.
     expect((await tools.call("search_code", { query: "v999 =" }, scope())).content[0]!.text).toBe("src/f999.ts:1: export const v999 = 999;");
-  });
+  }, 30_000);
 
   it("answers at once for patterns a backtracking RegExp takes minutes or years over", async () => {
     // "********************q" took about 100 s against the first name when globs were RegExps, blocking Electron's main process.

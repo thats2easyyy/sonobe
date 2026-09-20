@@ -184,11 +184,16 @@ test.describe("Design with Claude", () => {
   test("the preview drops Claude's scripts and never navigates", async ({ page }) => {
     const problems = collectConsoleProblems(page);
     const blocked = exampleRequests(page);
+    // A refresh in the head never reaches the frame (only head styles do); the one in the body would
+    // navigate the frame off the shell if the bootstrap didn't drop it.
+    const refresh = '<meta http-equiv="refresh" content="0;url=https://example.com/">';
     const html = [
       "<!doctype html><html><head>",
-      '<meta http-equiv="refresh" content="0;url=https://example.com/">',
+      refresh,
       "<style>body{margin:0;font-family:system-ui}h1{margin:80px 20px 0;color:#7C3AED}</style>",
-      '</head><body><h1 data-name="Title">Sandboxed</h1>',
+      "</head><body>",
+      refresh,
+      '<h1 data-name="Title">Sandboxed</h1>',
       '<script>document.body.dataset.ran="yes"</script>',
       '<p data-name="After">After the script</p>',
       "</body></html>",
