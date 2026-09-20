@@ -157,7 +157,7 @@ Most tool calls finish in a second or two. Importing a design can take longer, b
 
 ## What Claude can do
 
-Sonobe gives Claude 41 tools in six groups: discovery, documents, reading, writing, simulation, and presence and history. Here's what they look like in practice:
+Sonobe gives Claude 44 tools in seven groups: discovery, documents, reading, writing, knobs, simulation, and presence and history. Here's what they look like in practice:
 
 | You ask for | Claude uses tools like |
 |---|---|
@@ -168,6 +168,7 @@ Sonobe gives Claude 41 tools in six groups: discovery, documents, reading, writi
 | "Tap the Save button and see what happens." | `sim_reset`, `sim_dispatch`, `sim_step`, `sim_get_values`, `get_screenshot` |
 | "How long does the sheet take to settle?" | `sim_trace` |
 | "Show me what's under the top card." | `sim_override`, `get_screenshot` |
+| "Let me tune the throw, and compare it with the shipped app." | `set_knobs`, `get_knobs`, `sim_reset` with a `preset`, `apply_knob_preset` |
 | "Is anything broken?" | `get_diagnostics` |
 | "Start a new prototype and save it." | `create_document`, `open_document`, `save_document` |
 | "Undo what you just did." | `list_history`, `undo` |

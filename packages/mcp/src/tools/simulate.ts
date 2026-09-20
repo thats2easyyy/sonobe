@@ -45,7 +45,20 @@ function valueLines(target: string, value: unknown, note: string | undefined): s
 }
 
 const header = (s: SimState) =>
-  `${s.simId} · frame ${s.frame} · ${roundForDisplay(s.timeMs)} ms${s.overrides?.length ? ` · ${plural(s.overrides.length, "override")}` : ""}`;
+  `${s.simId} · frame ${s.frame} · ${roundForDisplay(s.timeMs)} ms${s.knobs?.preset ? ` · preset ${s.knobs.preset.name}` : ""}${s.knobs?.values ? ` · ${plural(Object.keys(s.knobs.values).length, "knob value")}` : ""}${s.overrides?.length ? ` · ${plural(s.overrides.length, "override")}` : ""}`;
+
+/** "Shipped app with commit_distance = 110": what a session's knob override runs. */
+const knobsText = (k: NonNullable<SimState["knobs"]>) =>
+  [
+    k.preset ? k.preset.name : "",
+    k.values
+      ? Object.entries(k.values)
+          .map(([id, v]) => `$knob.${id} = ${formatValue(v)}`)
+          .join(", ")
+      : "",
+  ]
+    .filter(Boolean)
+    .join(" with ");
 
 const SIM_ONLY = "simulation only: the person's document, viewer and history are unchanged";
 
@@ -91,7 +104,7 @@ export function registerSimulationTools(tc: ToolContext): void {
     {
       title: "Reset simulation",
       description:
-        "Start a deterministic simulation of the document (fixed timestep, seeded randomness), independent of the person's live viewer, and step frame 0. Returns a simId for the other sim_* tools. Pass simId to restart an existing session; that clears its sim_override overrides unless keepOverrides is true.",
+        "Start a deterministic simulation of the document (fixed timestep, seeded randomness), independent of the person's live viewer, and step frame 0. Returns a simId for the other sim_* tools. preset and knobs run other knob values in this simulation only (the person's document and viewer keep theirs); two sessions under two presets compare them. Pass simId to restart an existing session; that clears its sim_override overrides and knob values unless keepOverrides is true.",
       input: z.object({
         docId: DocIdSchema.optional(),
         simId: z.string().optional(),
@@ -103,7 +116,16 @@ export function registerSimulationTools(tc: ToolContext): void {
         keepOverrides: z
           .boolean()
           .optional()
-          .describe("With simId: keep the session's sim_override overrides (default false)."),
+          .describe(
+            "With simId: keep the session's sim_override overrides and knob values (default false).",
+          ),
+        preset: z.string().optional().describe("Knob preset id or name to run in this simulation."),
+        knobs: z
+          .record(z.string(), z.unknown())
+          .optional()
+          .describe(
+            'Knob id or name → value to run in this simulation, e.g. { "commit_distance": 110 }.',
+          ),
       }),
       output: SimStateOutputSchema,
       annotations: SIMULATION,
@@ -115,11 +137,19 @@ export function registerSimulationTools(tc: ToolContext): void {
         ...(args.seed !== undefined ? { seed: args.seed } : {}),
         ...(args.fps !== undefined ? { fps: args.fps } : {}),
         ...(args.keepOverrides ? { keepOverrides: true } : {}),
+        ...(args.preset !== undefined ? { preset: args.preset } : {}),
+        ...(args.knobs !== undefined ? { knobs: args.knobs } : {}),
       });
       const cleared = state.clearedOverrides ?? [];
       return success(
         [
           `Simulation ready: ${header(state)} · ${state.fps} fps · seed ${state.seed}`,
+          ...(state.knobs ? [`Runs ${knobsText(state.knobs)} (${SIM_ONLY}).`] : []),
+          ...(state.clearedKnobs
+            ? [
+                `Stopped running ${knobsText(state.clearedKnobs)}; pass keepOverrides: true to keep it.`,
+              ]
+            : []),
           ...(state.overrides?.length
             ? [
                 `Kept overrides (${SIM_ONLY}):`,
@@ -285,7 +315,7 @@ export function registerSimulationTools(tc: ToolContext): void {
     {
       title: "Get simulation values",
       description:
-        'Current values in a simulation: patch ports ("toggle.on", inputs too) and layer properties or outputs ("@card.scale", or "@row.position#2" for one loop copy). Reach inside component instances with an instance path: "like_button_2/liked.on", "@like_button_2/like_button.color", "card#2/..." for copy 2 of a looped instance. A value sim_override changed says so, and a value that reads as null or an empty loop comes with a note saying why: the layer drew 0 copies (and where its empty loop started), "#n" is past the end, or the instance path runs into a component with 0 copies.',
+        'Current values in a simulation: patch ports ("toggle.on", inputs too), layer properties or outputs ("@card.scale", or "@row.position#2" for one loop copy), and knobs ("$knob.commit_distance"). Reach inside component instances with an instance path: "like_button_2/liked.on", "@like_button_2/like_button.color", "card#2/..." for copy 2 of a looped instance. A value sim_override changed says so, and a value that reads as null or an empty loop comes with a note saying why: the layer drew 0 copies (and where its empty loop started), "#n" is past the end, or the instance path runs into a component with 0 copies.',
       input: z.object({ simId: z.string(), targets: TargetsSchema.max(30) }),
       output: SimStateOutputSchema,
       annotations: READ_ONLY,
@@ -308,7 +338,7 @@ export function registerSimulationTools(tc: ToolContext): void {
     {
       title: "Override in simulation",
       description:
-        'Change values inside one simulation only, to look under a layer or try a value without editing: the person\'s document, live viewer, undo history and files stay unchanged. set pins literals on patch inputs or layer properties ([{ "target": "@card_1.opacity", "value": 0 }], null for the default); ops takes value-level ops (setInput, connect, disconnect, updateLayer { props }, updatePatch { muted }). A later override of the same target replaces the earlier one. Overrides change the layer or patch itself, so they apply to every loop copy and component instance ("#n" is refused), and "@card/badge.opacity" changes every instance of card\'s component. They stay on through the person\'s edits until clear or sim_reset (unless keepOverrides), and keep the simulation\'s state unless restart is true. With only simId, lists them. Use this instead of editing and undoing.',
+        'Change values inside one simulation only, to look under a layer or try a value without editing: the person\'s document, live viewer, undo history and files stay unchanged. set pins literals on patch inputs or layer properties ([{ "target": "@card_1.opacity", "value": 0 }], null for the default); ops takes value-level ops (setInput, connect, disconnect, updateLayer { props }, updatePatch { muted }, and setKnobValue or applyKnobPreset to tune knobs, locked presets too). A later override of the same target replaces the earlier one. Overrides change the layer or patch itself, so they apply to every loop copy and component instance ("#n" is refused), and "@card/badge.opacity" changes every instance of card\'s component. They stay on through the person\'s edits until clear or sim_reset (unless keepOverrides), and keep the simulation\'s state unless restart is true. With only simId, lists them. Use this instead of editing and undoing.',
       input: z.object({
         simId: z.string(),
         set: z
@@ -330,7 +360,7 @@ export function registerSimulationTools(tc: ToolContext): void {
           .max(50)
           .optional()
           .describe(
-            "Value-level ops: setInput, connect, disconnect, updateLayer { id, props }, updatePatch { id, muted }.",
+            "Value-level ops: setInput, connect, disconnect, updateLayer { id, props }, updatePatch { id, muted }, setKnobValue { id, value, preset? }, applyKnobPreset { id }.",
           ),
         clear: z
           .union([z.string(), z.array(z.string()).max(50)])
@@ -446,6 +476,9 @@ export function registerSimulationTools(tc: ToolContext): void {
       // Say when the picture differs from the person's document because of sim_override, or could.
       const overridden = host.sim.list().filter((s) => s.overrides?.length);
       const drawn = simId !== undefined ? overridden.find((s) => s.simId === simId) : undefined;
+      const knobbed =
+        simId !== undefined ? host.sim.list().find((s) => s.simId === simId)?.knobs : undefined;
+      if (knobbed) lines.push(`Note: ${simId} runs ${knobsText(knobbed)}, not the person's knobs.`);
       if (drawn)
         lines.push(
           `Note: ${simId} has ${plural(drawn.overrides!.length, "override")} the person's document doesn't: ${drawn.overrides!.map((o) => o.summary).join("; ")}.`,

@@ -9,6 +9,7 @@ import { success } from "../results.ts";
 import { ADDITIVE, DESTRUCTIVE, READ_ONLY, UI_ONLY, type ToolContext } from "../server.ts";
 import { DocIdSchema, DocumentInfoOutputSchema } from "../schemas.ts";
 import { TEMPLATES } from "../templates.ts";
+import { knobSetSummary } from "./knobs.ts";
 
 /**
  * Opening, creating and saving can wait on the person (the app's Save panel for an untitled
@@ -50,6 +51,7 @@ export async function documentInfo(
     ...(snap.path ? [`Path: ${snap.path}`] : []),
     `Device: ${preset.name} ${w}×${h}${doc.project.device.orientation === "landscape" ? " landscape" : ""} · ${doc.project.fps ?? 60} fps`,
     `Components: ${components.map((c) => `${c.id} "${c.name}" (${c.kind}; ${plural(c.layers, "layer")}, ${plural(c.patches, "patch", "patches")}, ${plural(c.connections, "connection")})`).join("; ")}`,
+    ...(doc.knobs ? [`Knobs: ${knobSetSummary(doc.knobs)} (get_knobs for values)`] : []),
     `Diagnostics: ${plural(totals.errors, "error")}, ${plural(totals.warnings, "warning")}, ${totals.info} info${totals.errors + totals.warnings ? " (get_diagnostics for details)" : ""}`,
     `Host: ${host.kind === "app" ? "Sonobe app" : "headless"}${host.capabilities.screenshots ? "" : " · no screenshots"}${host.capabilities.selection ? "" : " · no selection"}${host.kind === "headless" ? (host.capabilities.autosave ? " · changes save automatically" : " · call save_document to write to disk") : ""}`,
   ];
@@ -75,6 +77,15 @@ export async function documentInfo(
       fps: doc.project.fps ?? 60,
       root: doc.project.root,
       components,
+      ...(doc.knobs
+        ? {
+            knobs: {
+              count: doc.knobs.knobs.length,
+              active: doc.knobs.active,
+              presets: doc.knobs.presets.map((p) => ({ id: p.id, name: p.name, locked: !!p.locked })),
+            },
+          }
+        : {}),
       diagnostics: totals,
       host: { kind: host.kind, ...host.capabilities },
       working: presence.map((p) => ({ author: p.author.name, intent: p.intent, ids: p.ids })),

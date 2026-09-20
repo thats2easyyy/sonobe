@@ -17,6 +17,9 @@ describe("parseExampleTest", () => {
   it("accepts a valid file", () => {
     const t = parseExampleTest(valid);
     expect(t.scenarios[0]!.events[0]).toEqual({ kind: "tap", target: "@card", atMs: 100 });
+    expect(t.scenarios[0]!.preset).toBeUndefined();
+    const shipped = parseExampleTest({ ...valid, scenarios: [{ ...valid.scenarios[0]!, preset: "Shipped app" }] });
+    expect(shipped.scenarios[0]!.preset).toBe("Shipped app");
   });
 
   it("names the first problem", () => {
@@ -28,6 +31,7 @@ describe("parseExampleTest", () => {
     expect(bad((v) => (v.scenarios.push(v.scenarios[0]!), v))).toThrow(/used twice/);
     expect(bad((v) => ((v.scenarios[0]!.expect[0] as Record<string, unknown>).value = "big", v))).toThrow(/needs a number value/);
     expect(bad(() => [])).toThrow(ExampleTestFormatError);
+    expect(bad((v) => ((v.scenarios[0] as Record<string, unknown>).preset = 3, v))).toThrow(/preset must name a knob preset/);
   });
 });
 

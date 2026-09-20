@@ -63,6 +63,7 @@ Tooling: TypeScript (strict, ESM), Vite 8 for the editor, esbuild for Electron m
 ```
 Checkout Flow.sonobe/
 ├── project.json            manifest: formatVersion, name, generator, device, root component id
+├── knobs.json              knobs and presets (§3.3), only when the project has knobs
 ├── components/
 │   ├── main.json           root prototype (kind "prototype")
 │   └── primary_button.json one file per document component
@@ -76,7 +77,8 @@ Canonical serialization rules:
 - UTF-8, LF line endings, 2-space indent, trailing newline.
 - Keys in schema order; maps sorted by id.
 - Short leaf objects stay on one line, so a connection change is a one-line diff.
-- Numbers are rounded to 6 significant decimals, `-0` is written as `0`, and there are no volatile fields. Rounding is idempotent, so a saved file passes `sonobe fmt --check`.
+- Numbers keep their value: float noise within 1e-9 of the 6-decimal form is trimmed (`0.1 + 0.2` is written `0.3`), and any other number is written exactly, so `1/30` reads back as `1/30`. `-0` is written as `0`, and there are no volatile fields. The rule is idempotent, so a saved file passes `sonobe fmt --check`.
+- Format versions count per file kind. `project.json` is format 2 when the project has knobs and format 1 otherwise, whatever the manifest in memory says, so a project without knobs still opens in builds that read format 1, and those builds refuse one with knobs ("saved by a newer version").
 
 Folder rules:
 - Only regular files named like document files load: `components/*.json` and `scripts/<name>` matching `[A-Za-z0-9_][A-Za-z0-9_.-]*`. Folders and other files in `scripts/` (`lib/`, `.eslintrc.json`) are left alone: saves never read, rewrite or delete them, and never delete a folder.
@@ -93,9 +95,11 @@ A `.sonobez` zip of the same layout is used for sharing (later).
 - Renaming changes `name`, never `id`.
 - Ids aren't reused across batches within a session. An id that belonged to an item of a component at any committed revision this session, and isn't live there when a batch starts, is **retired** in that component: a derived id skips it (the op result's `retired` says so) and an explicit one fails with `id_retired`. A batch may still remove an item and add a new one under the same id (a replacement); its inverse restores the old item. Component ids retire the same way, ignoring case. Retirement protects references held outside the batch (an agent's notes, simulator paths, the selection) from silently reaching a different item.
 - Each host keeps the ids it has seen in an `IdLedger` (`createIdLedger`, passed to `applyOps` as `seenIds`) and observes every commit, undo and redo. Opening a document starts a new ledger; a reload continues it; it's never saved with the project (`seenIdsToJSON` lets a draft carry it).
+- Knob ids and preset ids follow the same rules in two project-wide namespaces of their own (the ledger's `knobs` and `presets`), apart from item ids.
 - References:
   - a patch port: `patchId.portKey`
   - a layer property: `@layerId.propKey`
+  - a knob's value: `$knob.knobId` (read-only, one value everywhere, never `#n`; `$knob` is reserved, like `$in` and `$out`)
 - Agents may pass `$ref` temp ids in a batch. `applyOps` returns an `idMap`.
 
 ### 3.3 Component file
@@ -147,9 +151,36 @@ A `.sonobez` zip of the same layout is used for sharing (later).
   - loops of literals → `{ "loop": [...] }`
   - pulses have no literal
 
+**Knobs and presets** (`knobs.json`). A knob is a named value people tune: its type (`number`, `boolean`, `color`, `enum`, `point`, `text`), a soft range and unit (number and point) or options (enum), a group and a description. A preset is a column of knob values: every preset holds a value for every knob, `active` names the one that runs, and a `locked` preset refuses value edits. Any patch input or bindable layer property reads a knob through an ordinary link, `{ "link": "$knob.commit_distance" }`, with the usual link type rules; a published output can't. A knob-driven input behaves exactly like the literal it holds.
+
+```jsonc
+{
+  "formatVersion": 1,
+  "active": "proposal",
+  "presets": [
+    { "id": "proposal", "name": "Proposal" },
+    { "id": "shipped_app", "name": "Shipped app", "locked": true }
+  ],
+  "knobs": [
+    {
+      "id": "commit_distance",
+      "name": "Commit Distance",
+      "group": "Throw",
+      "type": "number",
+      "values": { "proposal": 95, "shipped_app": 95 },   // a tune is a one-line diff
+      "min": 40, "max": 200, "step": 1, "unit": "pt"
+    }
+  ]
+}
+```
+
+- A knob's running value is its value in `active`, else the first preset's that has one, else its type's zero. Ranges are soft: typed values may go past them and are never clamped.
+- A malformed file, a duplicate id, a value of the wrong kind or an empty preset list refuses to load; a missing value or a reference to a missing preset loads, with diagnostics.
+- Up to 500 knobs and 16 presets.
+
 ### 3.4 In memory
 
-`SonobeDocument = { project, components: Record<id, Component>, scripts: Record<patchId, string>, assets: Record<id, AssetRecord> }`. It is plain immutable data. Updates produce new objects with structural sharing, so React selectors stay cheap and undo inverses stay trivial.
+`SonobeDocument = { project, components: Record<id, Component>, scripts: Record<patchId, string>, assets: Record<id, AssetRecord>, knobs?: KnobSet }`. It is plain immutable data. Updates produce new objects with structural sharing, so React selectors stay cheap and undo inverses stay trivial.
 
 ### 3.5 Ops (the only way to mutate)
 
@@ -164,7 +195,15 @@ A `.sonobez` zip of the same layout is used for sharing (later).
 - Update ops merge by key, and `null` removes a key (props, settings, meta, published ports). `updateInterface` also takes `replace: true`, which makes each side it's given (inputs, outputs) the whole set. Unpublishing a port disconnects its cables inside the component and on every instance, including reads of a layer instance's prop (`@chip_1.label`), and the inverse restores them. An output declared again without `link` keeps its cable; `link: null` disconnects it.
 - A batch may replace an item under its id (remove, then add); ids removed by earlier batches are retired (§3.2).
 
-Op kinds (see `Op` in `packages/core/src/types.ts`): `addLayer, updateLayer, moveLayer, removeLayer, addPatch, updatePatch, removePatch, setInput, connect, disconnect, rename, addComment, updateComment, removeComment, addComponent, removeComponent, createComponent, updateInterface, updateComponent, setScript, addAsset, removeAsset, setProject`. There is no separate layer-prop op: `setInput` and `connect` accept `@layer.prop` addresses.
+Op kinds (see `Op` in `packages/core/src/types.ts`): `addLayer, updateLayer, moveLayer, removeLayer, addPatch, updatePatch, removePatch, setInput, connect, disconnect, rename, addComment, updateComment, removeComment, addComponent, removeComponent, createComponent, updateInterface, updateComponent, setScript, addAsset, removeAsset, setProject`, and the project-level knob ops `addKnob, updateKnob, removeKnob, setKnobValue, addKnobPreset, updateKnobPreset, removeKnobPreset, applyKnobPreset`. There is no separate layer-prop op: `setInput` and `connect` accept `@layer.prop` addresses, and `$knob.<id>` as a source.
+
+Knob ops:
+- The first `addKnob` makes a "Default" preset; removing the last knob of a project that never had other presets removes `knobs.json` again.
+- `setKnobValue` tunes the running preset (or `preset`) and is refused on a locked one, except in lenient undo and redo; creating a knob or changing its type may still write a locked preset.
+- `updateKnob` with a new `type` converts every value through the link coercions, and is refused when a value can't convert or an input that reads the knob can't take the new type.
+- `removeKnob` leaves every reader holding the running value, converted to what it takes, so the prototype behaves as it did.
+- `removeKnobPreset` refuses the last preset and a locked one; `applyKnobPreset` switches the running preset. `createComponent` keeps knob links inside and publishes nothing for them.
+- `planVariablesToKnobs` (core) turns constant Variable Broadcasters into one undoable batch of these ops.
 
 Errors are `{ code, message, hint, address, opIndex, suggestions: [{ description, ops }] }` and are written for humans first. Links may also read layer outputs or props: `{ "link": "@layerId.key" }`.
 
@@ -189,12 +228,13 @@ Errors are `{ code, message, hint, address, opIndex, suggestions: [{ description
 - a cable that reads an instance's output its component doesn't drive (`undriven_output`, warning, on the component holding the cable)
 - missing assets
 - a layer that can't receive touches because it has opacity 0 or is disabled
-- variables: an unnamed broadcaster, broadcasters that share a name, scope, and type, and a variable nothing reads (info)
+- variables: an unnamed broadcaster, broadcasters that share a name, scope, and type, and a variable nothing reads (info); constant broadcasters that could be knobs (`variables_could_be_knobs`, info)
 - layers in a patch component, which is never drawn (ops refuse to add them)
+- knobs: a link to a missing knob (`unknown_knob`) or one whose type or options can't reach its input (`knob_type_mismatch`), a value that doesn't fit its knob (`invalid_knob_value`), a preset without a value (`knob_missing_value`), a reference to a missing preset (`unknown_knob_preset`), a value outside the soft range (`knob_out_of_range`, info) and a knob nothing reads (`unused_knob`, info). Knob-table diagnostics point at the root component with `knob` and `preset` set.
 
 Messages name items the way the editor shows them ("Photo Scale" (Transition)); ids stay in `itemIds` and suggestion ops.
 
-Hosts that diagnose every revision use `createDiagnosticsCache(registry)`. It returns exactly what `getDiagnostics` would, but re-checks only components that changed (or that show a changed component), and inside a changed component only the inputs and layer properties whose literal values changed. A scrub or a drag at 1,000 patches costs well under a millisecond.
+Hosts that diagnose every revision use `createDiagnosticsCache(registry)`. It returns exactly what `getDiagnostics` would, but re-checks only components that changed (or that show a changed component), and inside a changed component only the inputs and layer properties whose literal values changed. A scrub or a drag at 1,000 patches costs well under a millisecond. A knob tune or a preset switch re-runs only the cheap knob-table checks; a change to knob ids, types or options also re-checks the components that read knobs.
 
 ---
 
@@ -323,6 +363,7 @@ rt.issues()                                  // RuntimeIssue[]: code, severity, 
 - `inspect` notes say that a layer drew 0 copies (quoting its `empty_loop` warning), that `#n` is past the end, that an instance path runs into a component with 0 copies, or why a value is an empty loop. sim_get_values prints them after the values. Other read-outs about a value (copy counts, simulation overrides) belong in the same accessor and the same notes, not a second mechanism.
 
 - `updateDocument` patches literal-only edits (input and property literals, patch positions outside cycles) into the compiled graph in place, and recompiles for anything else.
+- Knobs compile to constants: every input that reads `$knob.<id>` gets a constant binding registered as a knob reader, so a tune or a preset switch is an in-place write too, on the viewer, the phone, simulations and trace replays alike. A knob that goes, changes type or options, appears for a link that named it, or feeds a patch whose ports come from its node recompiles, keeping state. Knobs nothing reads never force a recompile. `getValue("$knob.<id>")` returns a knob's running value.
 - `trace` replays the input log since the last restart. Past its budget (7,200 frames) it throws `TraceUnavailableError` instead of tracing a restarted copy.
 - Scene node props inherit their layer's defaults. Copy them with `plainSceneFrame` before JSON or structured clone.
 
@@ -498,10 +539,12 @@ The web player (`apps/desktop/player`) runs the real engine and DOM renderer ful
 | Documents | `list_documents`, `open_document`, `create_document`, `get_document_info`, `save_document` |
 | Read | `get_outline` (compact text projection), `get_layers`, `get_patches`, `get_items`, `find`, `get_selection`, `get_diagnostics`, `explain` |
 | Write | `apply_ops`, `add_layers`, `add_patches`, `connect`, `set_values`, `update_layers`, `delete_items`, `rename`, `create_component`, `tidy_graph`, `import_design` |
-| Simulate | `sim_reset`, `sim_dispatch`, `sim_step`, `sim_trace`, `sim_get_values`, `sim_override`, `get_screenshot` |
+| Knobs | `get_knobs`, `set_knobs`, `apply_knob_preset` |
+| Simulate | `sim_reset` (with `preset` and `knobs`), `sim_dispatch`, `sim_step`, `sim_trace`, `sim_get_values`, `sim_override`, `get_screenshot` |
 | Presence and history | `begin_work`, `finish_work`, `reveal`, `list_history`, `undo` |
 
-- **Simulation overrides** (`sim_override`) are ordinary value ops (setInput, connect, disconnect, layer props, mute) that a session applies to its own copy of the document with `applyOps`, re-derived on every new revision. They never enter history, the live viewer or disk. `get_screenshot` with `isolate: true` draws one layer's subtree from the SceneFrame, on both hosts.
+- **Simulation overrides** (`sim_override`) are ordinary value ops (setInput, connect, disconnect, layer props, mute, `setKnobValue`, `applyKnobPreset`) that a session applies to its own copy of the document with `applyOps`, re-derived on every new revision. They never enter history, the live viewer or disk. `get_screenshot` with `isolate: true` draws one layer's subtree from the SceneFrame, on both hosts.
+- **Knobs.** `set_knobs` compiles to the knob ops in one batch, in a fixed order (presets with locks held back, `convertVariables`, knobs and values, connections, removals, locks), so one call can make, fill and lock a reference preset; it matches knobs and presets by id or name and reports what it inferred (type, value, range) for new knobs. `apply_knob_preset` changes what the person's viewer runs; `sim_reset({ preset, knobs })` runs another preset or values in one simulation only. A session simulates `applyOverrides(withKnobOverride(personDoc, knobs), ops)`, one mechanism for both, and a reset clears both unless `keepOverrides`. `sim_get_values` reads `$knob.<id>`. `set_values` skips knob-driven inputs and points to `set_knobs`.
 - **Runtime problems reach agents two ways.** sim_* results list the issues a simulation raised since the last call (with hints and suggestions), and in the app `get_diagnostics` adds a Live viewer section: what the person's running prototype reports right now, read through the `viewer.diagnostics` RPC because it changes without a new revision. The headless host has no live viewer and leaves the section out.
 - **Resources:** guides, patch reference, document outline.
 - **Prompts:** `import_screen`, `prototype_interaction`, `debug_interaction`, `explain_prototype`.
@@ -531,6 +574,16 @@ patch tap_card interaction layer=@card
 patch toggle switch flip←tap_card.tap
 patch pop popAnimation number←toggle.on bounciness=5 speed=10
 patch grow transition<number> progress←pop.output start=1 end=1.08
+```
+
+With knobs, a knob block comes first whenever the root is shown, and readers print as links:
+
+```
+knobs 1 · running proposal "Proposal" · presets proposal "Proposal", shipped_app "Shipped app" locked
+knob pop_bounce number "Pop Bounce" group="Press" 0…20 step=0.5 proposal=8 shipped_app=5
+
+component main "Main" (prototype) 390x844
+patch pop popAnimation number←toggle.on bounciness←$knob.pop_bounce speed=10
 ```
 
 ---
