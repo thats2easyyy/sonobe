@@ -139,6 +139,22 @@ describe("Slider", () => {
     expect(slider().dataset.overflow).toBeUndefined();
   });
 
+  it("leaves a value past the range alone when a key points further out", () => {
+    const onChangeSpy = vi.fn();
+    const onCommit = vi.fn();
+    act(() => root.render(<Controlled initial={250} onChangeSpy={onChangeSpy} onCommit={onCommit} />));
+    for (const key of ["ArrowRight", "ArrowUp", "PageUp"]) press(key);
+    expect(slider().getAttribute("aria-valuenow")).toBe("250");
+    expect(onChangeSpy).not.toHaveBeenCalled();
+    expect(onCommit).toHaveBeenLastCalledWith(250);
+    act(() => root.render(<Controlled key="below" initial={-30} onChangeSpy={onChangeSpy} />));
+    for (const key of ["ArrowLeft", "ArrowDown", "PageDown"]) press(key);
+    expect(slider().getAttribute("aria-valuenow")).toBe("-30");
+    expect(onChangeSpy).not.toHaveBeenCalled();
+    press("ArrowRight");
+    expect(slider().getAttribute("aria-valuenow")).toBe("1");
+  });
+
   it("marks ticks and copies one on click without moving the thumb by itself", () => {
     const onSelect = vi.fn();
     const onChangeSpy = vi.fn();
