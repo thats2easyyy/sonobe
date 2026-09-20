@@ -1,7 +1,7 @@
 /** Compact value formatting for port rows, cables, and hover cards. */
 
 import { formatKnobValue } from "../knobs.ts";
-import type { EnumOption, Knob, Value, ValueType } from "../types.ts";
+import type { EnumOption, Knob, Value, ValueSubtype, ValueType } from "../types.ts";
 import { formatColor, isColor } from "../values.ts";
 
 export interface LoopLike {
@@ -123,16 +123,30 @@ export function formatValue(value: unknown, type: ValueType, options: FormatOpti
 export const NUMBER_SHORT_CHARS = 8;
 
 /**
+ * What a number keeps when its port says what it measures: a progress stays within ±10 ("-0.125",
+ * "1.052" past a spring's overshoot), an angle within ±1000° ("-179.9"), and an index counts items
+ * or frames (loops stop at 10,000 items; "123.4k" frames is half an hour). Other numbers keep
+ * NUMBER_SHORT_CHARS.
+ */
+const SHORT_NUMBER_CHARS = 6;
+
+/**
  * What a point's coordinate keeps: "-999.9", any position on a screen. A point's reserve is these
- * with ", " between them ("-999.9, -999.9"), and only a coordinate past ±999.9 widens the slot.
+ * with ", " between them ("-999.9, -999.9").
  */
 export const COORDINATE_CHARS = 6;
+
+/**
+ * What a loop's "×N" summary keeps for its first item, which it shows as a preview before "…"
+ * ("×12 0…", "×3 -0.25…"): a longer item ends early, and the hover card has the whole loop.
+ */
+export const LOOP_PREVIEW_CHARS = 6;
 
 const AXES: Partial<Record<ValueType, number>> = { point: 2, size: 2, anchor: 2, point3d: 3, point4d: 4 };
 
 const digits = (n: number) => String(Math.max(0, Math.trunc(n))).length;
 
-/** A loop's count ("×12") and a watched copy's index ("#3") keep two digits, so loops of up to 99 hold still as they grow. */
+/** A loop's count ("×12") and a watched copy's index ("#3") keep two digits, so loops of up to 99 print in full as they grow. */
 const countDigits = (n: number) => Math.max(2, digits(n));
 
 /** The longest text formatValue's default branch prints for a value of this kind (json and any ports). */
@@ -150,17 +164,26 @@ function kindReserve(value: unknown, maxText: number): number {
   return maxText;
 }
 
+export interface ReserveOptions extends FormatOptions {
+  /** What the port's numbers measure: a progress or an angle keeps less room than a number that can be anything. */
+  subtype?: ValueSubtype;
+}
+
 /** The longest text formatValue prints for one (non-loop) value of `type`. */
-function plainReserve(value: unknown, type: ValueType, maxText: number, enumOptions?: readonly EnumOption[]): number {
+function plainReserve(value: unknown, type: ValueType, maxText: number, options: ReserveOptions): number {
   switch (type) {
     case "pulse":
       return 5;
     case "boolean":
       return 3;
     case "number":
-    case "index":
-      return typeof value === "number" || value === undefined || value === null ? NUMBER_SHORT_CHARS : maxText;
+    case "index": {
+      if (typeof value !== "number" && value !== undefined && value !== null) return maxText;
+      const short = type === "index" || options.subtype === "progress" || options.subtype === "angle";
+      return short ? SHORT_NUMBER_CHARS : NUMBER_SHORT_CHARS;
+    }
     case "enum": {
+      const enumOptions = options.enumOptions;
       if (!enumOptions?.length) return maxText;
       const known = enumOptions.some((o) => o.key === value);
       const names = [...enumOptions.map((o) => o.name.length), known || value === undefined || value === null ? 0 : String(value).length];
@@ -191,22 +214,23 @@ function plainReserve(value: unknown, type: ValueType, maxText: number, enumOpti
 }
 
 /**
- * The most characters formatValue(value, type, options) prints while the value changes: the longest
- * text of the port's type (8 for numbers, "Off", "#RRGGBBAA", quotes around maxText characters, the
- * longest enum option, a point's coordinates to ±999.9), or of the value's own kind for json and any.
- * A loop reserves its "×N" summary around one item, or the watched copy's "#k " prefix, with at
- * least two digits for the count. Output rows keep this much room for their live values
- * (liveReserve), so a node keeps its width while the prototype runs. 0 when nothing prints (no
- * value, or a pulse).
+ * The characters an output keeps for formatValue(value, type, options) whatever the value is on this
+ * frame: the longest text of the port's type (8 for a number, 6 for a progress, an angle or an
+ * index, "Off", "#RRGGBBAA", quotes around maxText characters, the longest enum option, a point's
+ * coordinates to ±999.9), or of the value's own kind for json and any. A loop keeps its "×N"
+ * summary with a short preview of its first item (LOOP_PREVIEW_CHARS), or the watched copy's "#k "
+ * and the whole item, with at least two digits for the count. The patch editor draws live values in
+ * slots this wide (liveReserve), so a node keeps its width while the prototype runs; a value that
+ * prints longer ends in "…". 0 when nothing prints (no value, or a pulse).
  */
-export function formatValueReserve(value: unknown, type: ValueType, options: FormatOptions = {}): number {
+export function formatValueReserve(value: unknown, type: ValueType, options: ReserveOptions = {}): number {
   if (value === undefined || type === "pulse") return 0;
   const maxText = options.maxText ?? 14;
-  if (!isLoopValue(value)) return plainReserve(value, type, maxText, options.enumOptions);
+  if (!isLoopValue(value)) return plainReserve(value, type, maxText, options);
   const n = value.items.length;
   // A watched copy of an empty loop prints "×0", which the copy's own reserve covers, so emptying the loop keeps the width.
-  if (options.copy !== undefined && options.copy !== null) return 1 + countDigits(n - 1) + 1 + plainReserve(n ? pickCopy(value, options.copy).value : undefined, type, 8, options.enumOptions);
-  return 1 + countDigits(n) + 1 + plainReserve(value.items[0], type, 8, options.enumOptions) + 1;
+  if (options.copy !== undefined && options.copy !== null) return 1 + countDigits(n - 1) + 1 + plainReserve(n ? pickCopy(value, options.copy).value : undefined, type, 8, options);
+  return 1 + countDigits(n) + 1 + Math.min(LOOP_PREVIEW_CHARS, plainReserve(value.items[0], type, 8, options)) + 1;
 }
 
 /**
@@ -220,30 +244,48 @@ function decimalsOf(n: number): number {
   return Math.min(6, Math.max(0, (dot === -1 ? 0 : mantissa.length - dot - 1) - Number(exponent ?? 0)));
 }
 
-/** The most a knob chip keeps for its value, so the knob's name keeps room in the 110 pt chip. */
-export const KNOB_RESERVE_MAX_CHARS = 7;
+/** What a number or a point's axis keeps without a range to reach: "-999", or "9999", past which scrubbing ends in a longer number. */
+const UNRANGED_KNOB_CHARS = 4;
+
+/**
+ * The characters one number (or a point's axis) of a knob prints while it's tuned: with a range, the
+ * longer end at the precision it snaps to (its step's or its min's decimals, whichever has more; a
+ * number knob's slider takes a hundredth of the range for a missing step); without one, the
+ * UNRANGED_KNOB_CHARS its field scrubs through in whole steps.
+ */
+function knobNumberChars(knob: Pick<Knob, "type" | "min" | "max" | "step">): number {
+  const { min, max } = knob;
+  const ranged = min !== undefined && max !== undefined && max > min;
+  const step = knob.step !== undefined && knob.step > 0 ? knob.step : ranged && knob.type === "number" ? (max - min) / 100 : 1;
+  // The Slider snaps from min to at most 6 places, which drops a step's float noise ((0.4 - 0.1) / 100 → 0.003).
+  const rounded = Number(step.toFixed(6));
+  const decimals = Math.max(rounded > 0 ? decimalsOf(rounded) : 6, min !== undefined ? decimalsOf(min) : 0);
+  const end = (n: number) => (n < 0 ? 1 : 0) + digits(Math.abs(n));
+  return (ranged ? Math.max(end(min), end(max)) : UNRANGED_KNOB_CHARS) + (decimals ? decimals + 1 : 0);
+}
 
 /**
  * The characters a knob chip keeps for its value text (formatKnobValue) while the knob is tuned in
- * the Knobs tab: a number knob's slider reaches its longer end at the precision it snaps to (its
- * step's or its min's decimals, whichever has more, with a hundredth of the range standing in for a
- * missing step), unit included; a boolean flips between "on" and "off". At most
- * KNOB_RESERVE_MAX_CHARS. Values picked from a menu or typed (enums, points, text, numbers without
- * a range) reserve nothing past their text.
+ * the Knobs tab, unit included: a number knob's slider or field (knobNumberChars), a point knob's
+ * two fields with ", " between them, a boolean's "off", an enum's longest option. Text and colors
+ * reserve nothing (a color knob shows a swatch). A value typed or fine-tuned past these can still
+ * print longer. The patch editor gives it less when the knob's name needs the room (knobValueRoom).
  */
-export function knobValueReserve(knob: Pick<Knob, "type" | "min" | "max" | "step" | "unit">): number {
-  if (knob.type === "boolean") return 3;
-  if (knob.type !== "number") return 0;
-  const { min, max } = knob;
-  if (min === undefined || max === undefined || !(max > min)) return 0;
-  const step = knob.step !== undefined && knob.step > 0 ? knob.step : (max - min) / 100;
-  // The Slider snaps from min to at most 6 places, which drops a step's float noise ((0.4 - 0.1) / 100 → 0.003).
-  const rounded = Number(step.toFixed(6));
-  const decimals = Math.max(rounded > 0 ? decimalsOf(rounded) : 6, decimalsOf(min));
-  const end = (n: number) => (n < 0 ? 1 : 0) + digits(Math.abs(n));
+export function knobValueReserve(knob: Pick<Knob, "type" | "min" | "max" | "step" | "unit" | "options">): number {
   // formatKnobValue's unit suffix (" pt", "°") is what it adds to a bare "0".
-  const unit = formatKnobValue(knob, 0).length - 1;
-  return Math.min(KNOB_RESERVE_MAX_CHARS, Math.max(end(min), end(max)) + (decimals ? decimals + 1 : 0) + unit);
+  const unit = formatKnobValue({ type: "number", ...(knob.unit ? { unit: knob.unit } : {}) }, 0).length - 1;
+  switch (knob.type) {
+    case "boolean":
+      return 3;
+    case "enum":
+      return Math.max(0, ...(knob.options ?? []).map((o) => o.name.length));
+    case "number":
+      return knobNumberChars(knob) + unit;
+    case "point":
+      return 2 * knobNumberChars(knob) + 2 + unit;
+    default:
+      return 0;
+  }
 }
 
 /** Longer multi-line text for hover cards. */
