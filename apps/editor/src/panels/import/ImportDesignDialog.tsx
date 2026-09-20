@@ -1,5 +1,5 @@
 import { ChevronRight, CircleAlert, Code, Globe, ScanLine, Sparkles, X } from "lucide-react";
-import { useEffect, useId, useMemo, useRef, useState, type FormEvent } from "react";
+import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { useStore } from "zustand";
 import { connectClaudeStore } from "../connect/connectStore.ts";
 import { CopyBlock } from "../connect/CopyBlock.tsx";
@@ -13,6 +13,8 @@ import { TextField } from "../../ui/TextField.tsx";
 import { toast } from "../../ui/Toast.tsx";
 import { Toggle } from "../../ui/Toggle.tsx";
 import { readString, writeString } from "../../ui/lib/storage.ts";
+import { useElementSize } from "../../ui/lib/useElementSize.ts";
+import { HologramScanner, scannerFrame } from "./HologramScanner.tsx";
 import { canImportUrl, importDesign, importViewport, notifyImported, type ImportDeps, type ImportDesignRequest } from "./importDesign.ts";
 import "../connect/connect.css";
 import "./importDesign.css";
@@ -149,7 +151,7 @@ function ImportContent({ titleId, onClose, initialTab, deps }: { titleId: string
         <IconButton size="sm" icon={<X size={14} />} label="Close" shortcut="Escape" onClick={onClose} />
       </header>
 
-      <div className="sb-import__body sb-scroll">
+      <div className="sb-import__body sb-scroll" inert={busy}>
         <SegmentedControl<ImportTab>
           fullWidth
           aria-label="Import from"
@@ -272,11 +274,10 @@ function ImportContent({ titleId, onClose, initialTab, deps }: { titleId: string
           </div>
         )}
       </div>
+      <ImportScan busy={busy} status={status ?? (tab === "url" ? "Loading the page…" : "Rendering the HTML…")} size={[width, height]} source={tab === "url" ? hostOf(trimmedUrl) : "HTML"} />
 
       <footer className="sb-import__footer">
-        <span className="sb-import__status" aria-live="polite">
-          {busy ? (status ?? (tab === "url" ? "Loading the page…" : "Rendering the HTML…")) : ""}
-        </span>
+        <span className="sb-import__status" />
         {/* While an import runs, Cancel stops it and keeps the dialog open. */}
         <Button onClick={busy ? cancelImport : onClose}>{tab === "claude" ? "Done" : "Cancel"}</Button>
         {tab !== "claude" && (
@@ -286,5 +287,62 @@ function ImportContent({ titleId, onClose, initialTab, deps }: { titleId: string
         )}
       </footer>
     </form>
+  );
+}
+
+/** How long the scanner takes to fade out when an import stops. */
+const SCAN_FADE_MS = 160;
+
+const hostOf = (url: string) => {
+  try {
+    return new URL(url).host;
+  } catch {
+    return "";
+  }
+};
+
+/** True while `on`, and for `ms` after it turns off (for an exit fade). */
+function usePresence(on: boolean, ms: number): boolean {
+  const [lingering, setLingering] = useState(false);
+  useEffect(() => {
+    if (on) {
+      setLingering(true);
+      return;
+    }
+    const timer = setTimeout(() => setLingering(false), ms);
+    return () => clearTimeout(timer);
+  }, [on, ms]);
+  return on || lingering;
+}
+
+/**
+ * The scan phase: while a page is captured, a hologram scanner with the import's proportions covers
+ * the form, with the progress beside it. It lies over the form, so the dialog keeps its size.
+ */
+function ImportScan({ busy, status, size, source }: { busy: boolean; status: string; size: readonly [number, number]; source: string }) {
+  const present = usePresence(busy, SCAN_FADE_MS);
+  const [ref, box] = useElementSize<HTMLDivElement>();
+  // The last progress stays up while the scanner fades out.
+  const last = useRef(status);
+  useLayoutEffect(() => {
+    if (busy) last.current = status;
+  }, [busy, status]);
+  // Room for the text beside the frame, and padding around both.
+  const frame = scannerFrame(size, { width: box.width - 280, height: box.height - 56 });
+  return (
+    <div ref={ref} className="sb-import__scan" data-active={busy || undefined}>
+      {present && frame.width > 8 && frame.height > 8 && <HologramScanner width={frame.width} height={frame.height} />}
+      <div className="sb-import__scan-text">
+        <p className="sb-import__scan-status" role="status">
+          {busy ? status : present ? last.current : ""}
+        </p>
+        {present && (
+          <p className="sb-import__scan-meta sb-tabular" aria-hidden>
+            {size[0]} × {size[1]}
+            {source ? ` · ${source}` : ""}
+          </p>
+        )}
+      </div>
+    </div>
   );
 }
