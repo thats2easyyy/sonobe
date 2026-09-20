@@ -188,10 +188,27 @@ function swatch(x: number, cy: number, color: string): string {
   return el("rect", { x, y: cy - NODE_BOX.swatch / 2, width: NODE_BOX.swatch, height: NODE_BOX.swatch, rx: 2, fill: color.slice(0, 7), ...(alpha < 1 ? { "fill-opacity": alpha } : {}) });
 }
 
+/**
+ * A boolean input's checkbox, as .sb-pe-check draws it: an outlined box when off; filled with the
+ * boolean color and checked when on, toned 55% toward the node when that's the default.
+ */
+function checkbox(p: Palette, x: number, cy: number, v: Extract<ValueChip, { kind: "check" }>): string {
+  const B = NODE_BOX;
+  const y = cy - B.check / 2;
+  if (!v.on) return el("rect", { x, y, width: B.check, height: B.check, rx: 3, fill: p.field.color, "fill-opacity": 0.1, stroke: p.secondary, "stroke-opacity": 0.4 });
+  // The editor's 10 pt check mark (viewBox 0 0 10 10), centered in the box.
+  const [mx, my] = [x + (B.check - 10) / 2, y + (B.check - 10) / 2];
+  const mark = `M ${num(mx + 2)} ${num(my + 5.2)} L ${num(mx + 4.2)} ${num(my + 7.2)} L ${num(mx + 8)} ${num(my + 2.8)}`;
+  return [
+    el("rect", { x, y, width: B.check, height: B.check, rx: 3, fill: portColor("boolean", p.theme), ...(v.isDefault ? { "fill-opacity": 0.55 } : {}) }),
+    el("path", { d: mark, fill: "none", stroke: "#1b0f16", "stroke-width": 1.6, "stroke-linecap": "round", "stroke-linejoin": "round" }),
+  ].join("");
+}
+
 function valueChip(p: Palette, x: number, cy: number, v: ValueChip, max: number): string {
   const B = NODE_BOX;
   if (v.kind === "knob") return knobChip(p, x, cy, v, max);
-  if (v.kind === "check") return el("rect", { x, y: cy - 7, width: B.check, height: B.check, rx: 3, fill: p.field.color, "fill-opacity": 0.1, stroke: p.secondary, "stroke-opacity": 0.4 });
+  if (v.kind === "check") return checkbox(p, x, cy, v);
   const font: NodeFont = v.kind === "menu" || (v.kind === "text" && v.text) ? "sans10" : v.kind === "text" ? "italic10" : "mono10";
   const label = fit(valueText(v), font, Math.max(0, Math.min(max, B.valueMaxWidth) - B.valuePaddingX - (v.kind === "color" ? B.swatch + B.valueInnerGap : 0)));
   if (!label && v.kind !== "color") return "";

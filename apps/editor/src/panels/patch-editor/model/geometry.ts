@@ -4,6 +4,7 @@
  * editor's own fonts.
  */
 
+import { findLayer, type Component, type Id } from "@sonobe/core";
 import { estimateNodeSize as estimateWith, type NodeSize, type Rect } from "@sonobe/core/graph";
 import { nodeTextMeasurer } from "./measure.ts";
 import type { GraphNodeData } from "./types.ts";
@@ -37,10 +38,19 @@ export interface ViewportLike {
   zoom: number;
 }
 
-/** A size estimate before the DOM measures a node (tidy up, placement), in the editor's fonts. */
-export function estimateNodeSize(data: GraphNodeData): NodeSize {
-  return estimateWith(data, { measure: nodeTextMeasurer() });
+/**
+ * A size estimate before the DOM measures a node (tidy up, placement), in the editor's fonts.
+ * `layerName` names the layers inline values point at (layerNameIn), as the node shows them.
+ */
+export function estimateNodeSize(data: GraphNodeData, layerName?: (id: Id) => string | undefined): NodeSize {
+  return estimateWith(data, { measure: nodeTextMeasurer(), ...(layerName ? { layerName } : {}) });
 }
+
+/** Layer id → name in a component, for estimateNodeSize. */
+export const layerNameIn =
+  (component: Component | undefined) =>
+  (id: Id): string | undefined =>
+    component ? findLayer(component.layers, id)?.layer.name : undefined;
 
 /**
  * Below this zoom, node text is a few pixels tall: the patch editor stops painting port labels, values

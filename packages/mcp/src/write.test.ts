@@ -1,8 +1,12 @@
+import { cp } from "node:fs/promises";
+import path from "node:path";
 import { readNodePositions } from "@sonobe/core";
 import { homeFrame, rectContains, rectsOverlap, type Rect } from "@sonobe/core/graph";
 import { ID_SCENARIO_SETUP, ID_SCENARIOS, runIdScenario, type IdScenarioHost } from "@sonobe/core/testing";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { EXAMPLES_DIR, listExampleFolders } from "../../../examples/lib/disk.ts";
 import { estimateGraphGeometry } from "./geometry.ts";
+import { createHeadlessHost } from "./headless.ts";
 import { frameResize } from "./tools/write.ts";
 import {
   buildGrowCard,
@@ -725,6 +729,25 @@ describe("tidy_graph with comment frames", () => {
     revision = snap.revision - 1;
     expect((await client.call("tidy_graph", { frames: ["places"], dryRun: true })).text).toContain("Node sizes are estimated");
   });
+
+  it("tidies every example's graphs to themselves: the second tidy_graph is already tidy", async () => {
+    for (const folder of listExampleFolders()) {
+      const copy = path.join(project.dir, folder);
+      await cp(path.join(EXAMPLES_DIR, folder), copy, { recursive: true });
+      const host = createHeadlessHost({ autosave: false });
+      const c = await connectClient(host);
+      try {
+        await host.openDocument(copy);
+        for (const component of Object.keys((await host.getDocument()).doc.components)) {
+          expect((await c.call("tidy_graph", { component })).isError, `${folder}/${component}`).toBe(false);
+          expect((await c.call("tidy_graph", { component })).text, `${folder}/${component}`).toContain("already tidy");
+        }
+      } finally {
+        await c.close();
+        await host.close();
+      }
+    }
+  }, 60_000);
 });
 
 describe("frameResize", () => {

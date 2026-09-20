@@ -37,7 +37,7 @@ import {
   type AlignMode,
   type InsertOptions,
 } from "../model/editOps.ts";
-import { estimateNodeSize, HEADER_HEIGHT, portCenterY, type Rect } from "../model/geometry.ts";
+import { estimateNodeSize, HEADER_HEIGHT, layerNameIn, portCenterY, type Rect } from "../model/geometry.ts";
 import { instanceChoiceKey } from "../model/instances.ts";
 import { nodePositionsOp } from "@sonobe/core";
 import { publishedKeyOf, publishPortPlan, unpublishOps, withoutDefault, type PublishSide } from "../model/publish.ts";
@@ -186,7 +186,7 @@ export function createPatchEditorActions(deps: ActionDeps): PatchEditorActions {
   const bridge = () => patchEditorBridge(session).getState();
 
   const nodeRect = (node: FlowNode): Rect => {
-    const size = node.measured?.width && node.measured.height ? { width: node.measured.width, height: node.measured.height } : estimateNodeSize(node.data as GraphNodeData);
+    const size = node.measured?.width && node.measured.height ? { width: node.measured.width, height: node.measured.height } : estimateNodeSize(node.data as GraphNodeData, layerNameIn(component()));
     return { x: node.position.x, y: node.position.y, ...size };
   };
   const flowNodes = () => deps.flow()?.getNodes() ?? [];
