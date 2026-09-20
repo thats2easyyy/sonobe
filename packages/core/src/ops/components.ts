@@ -99,9 +99,25 @@ function checkNewComponent(ctx: OpContext, component: Component): Component {
   });
 }
 
-/** A component id derived from a name: free ignoring case, and not retired this session. */
-export function newComponentId(ctx: OpContext, name: string): Id {
+/** A validated explicit component id, or one derived from a name: free ignoring case, and not retired this session. */
+export function newComponentId(ctx: OpContext, name: string, explicit?: unknown): Id {
   const componentIds = Object.keys(ctx.doc.components);
+  if (explicit !== undefined) {
+    if (!isValidId(explicit)) fail("invalid_id", `"${String(explicit)}" isn't a valid component id.`, { hint: `Try "${slugify(String(explicit), "component")}".` });
+    if (Object.hasOwn(ctx.doc.components, explicit)) fail("id_taken", `There's already a component "${explicit}".`, { hint: 'Leave "id" out to get a free one. To replace it, remove it earlier in the same batch.' });
+    const clash = ctx.lenient ? undefined : fileNameCollision(componentIds, explicit);
+    if (clash !== undefined) {
+      fail("id_taken", `"${explicit}" would share a file with the component "${clash}": on macOS and Windows, components/${explicit}.json and components/${clash}.json are the same file.`, {
+        hint: 'Pick an id that differs by more than capitalization, or leave "id" out to get a free one.',
+      });
+    }
+    if (ctx.retiredComponent(explicit)) {
+      fail("id_retired", `"${explicit}" belonged to a component removed earlier in this session, so it isn't given to a new one.`, {
+        hint: 'To rebuild a component under its old id, remove it and add the new one in the same batch (if the removal is already applied, undo it first). Or leave "id" out.',
+      });
+    }
+    return explicit;
+  }
   const base = slugify(name, "component");
   const id = uniqueId(base, (x) => isFileNameTaken(componentIds, x) || ctx.retiredComponent(x));
   if (id !== base) noteRenamed(ctx, id, base, ctx.retiredComponent(base), false);
@@ -119,26 +135,7 @@ export function addComponent(ctx: OpContext, op: OpOf<"addComponent">): OpOutcom
   if (c.formatVersion !== undefined && c.formatVersion !== FORMAT_VERSION && !ctx.lenient) {
     fail("invalid_op", `formatVersion can't be set with addComponent; it's managed by Sonobe (this version writes format ${FORMAT_VERSION}).`, { hint: 'Leave "formatVersion" out.' });
   }
-  const componentIds = Object.keys(ctx.doc.components);
-  let id: Id;
-  if (c.id !== undefined) {
-    if (!isValidId(c.id)) fail("invalid_id", `"${String(c.id)}" isn't a valid component id.`, { hint: `Try "${slugify(String(c.id), "component")}".` });
-    if (Object.hasOwn(ctx.doc.components, c.id)) fail("id_taken", `There's already a component "${c.id}".`, { hint: 'Leave "id" out to get a free one. To replace it, remove it earlier in the same batch.' });
-    const clash = ctx.lenient ? undefined : fileNameCollision(componentIds, c.id);
-    if (clash !== undefined) {
-      fail("id_taken", `"${c.id}" would share a file with the component "${clash}": on macOS and Windows, components/${c.id}.json and components/${clash}.json are the same file.`, {
-        hint: 'Pick an id that differs by more than capitalization, or leave "id" out to get a free one.',
-      });
-    }
-    if (ctx.retiredComponent(c.id)) {
-      fail("id_retired", `"${c.id}" belonged to a component removed earlier in this session, so it isn't given to a new one.`, {
-        hint: 'To rebuild a component under its old id, remove it and add the new one in the same batch (if the removal is already applied, undo it first). Or leave "id" out.',
-      });
-    }
-    id = c.id;
-  } else {
-    id = newComponentId(ctx, c.name);
-  }
+  const id = newComponentId(ctx, c.name, c.id);
   defineRef(ctx, op.ref, id);
   const full: Component = {
     // In-memory components are always at the current format (loads migrate), so this is never the caller's.

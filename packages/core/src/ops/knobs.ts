@@ -92,18 +92,24 @@ function requirePreset(ctx: OpContext, set: KnobSet | undefined, id: unknown): K
   return fail(found.error.code, found.error.message, { hint: found.error.hint });
 }
 
-function checkName(value: unknown, others: readonly { name: string }[], what: "knob" | "preset"): string {
+/**
+ * With `lenient` (undo and redo replays), names, text and options are taken as given, so what a hand
+ * edit left in knobs.json (names alike ignoring case, untrimmed text, an option listed twice) comes
+ * back exactly. It loads with diagnostics.
+ */
+function checkName(value: unknown, others: readonly { name: string }[], what: "knob" | "preset", lenient: boolean): string {
   if (typeof value !== "string" || !value.trim()) fail("invalid_knob", `A ${what} needs a name.`, { hint: what === "knob" ? 'Name it after what it changes, like "Commit Distance".' : 'Name it after what it holds, like "Shipped app" or "Proposal".' });
   const name = value.trim();
   if (name.length > MAX_NAME[what]) fail("invalid_knob", `${what === "knob" ? "Knob" : "Preset"} names are at most ${MAX_NAME[what]} characters; "${name.slice(0, 24)}…" has ${name.length}.`);
-  const clash = others.find((o) => o.name.toLowerCase() === name.toLowerCase());
+  const clash = lenient ? undefined : others.find((o) => o.name.toLowerCase() === name.toLowerCase());
   if (clash) fail("invalid_knob", `There's already a ${what} named "${clash.name}".`, { hint: `${what === "knob" ? "Knob" : "Preset"} names are unique, ignoring case. Pick another name.` });
   return name;
 }
 
-function checkText(value: unknown, field: string, max: number): string | undefined {
+function checkText(value: unknown, field: string, max: number, lenient: boolean): string | undefined {
   if (value === null || value === undefined) return undefined;
   if (typeof value !== "string") fail("invalid_knob", `A knob's ${field} must be text.`);
+  if (lenient) return value;
   const text = value.trim();
   if (text.length > max) fail("invalid_knob", `A knob's ${field} is at most ${max} characters; this one has ${text.length}.`);
   return text || undefined;
@@ -115,9 +121,10 @@ function checkNumber(value: unknown, field: string): number | undefined {
   return value;
 }
 
-function checkOptions(value: unknown): EnumOption[] | undefined {
+function checkOptions(value: unknown, lenient: boolean): EnumOption[] | undefined {
   if (value === null || value === undefined) return undefined;
   if (!Array.isArray(value)) fail("invalid_knob", 'A knob\'s options are a list like [{ "key": "snappy", "name": "Snappy" }, { "key": "soft", "name": "Soft" }].');
+  if (lenient && !value.some((o) => !isObject(o))) return value.map((o: EnumOption) => ({ ...o }));
   const out: EnumOption[] = [];
   for (const raw of value) {
     const option = typeof raw === "string" ? { key: raw, name: raw } : raw;
@@ -221,39 +228,43 @@ export function addKnob(ctx: OpContext, op: OpOf<"addKnob">): OpOutcome {
   checkLimit(ctx, set.knobs.length, MAX_KNOBS, "knobs");
   if (!isKnobType(input.type)) fail("invalid_knob", `A knob's type is one of ${KNOB_TYPES.join(", ")}, but got ${JSON.stringify(input.type)}.`);
   const type = input.type;
-  const name = checkName(input.name, set.knobs, "knob");
+  const name = checkName(input.name, set.knobs, "knob", ctx.lenient);
   const id = newKnobId(ctx, set, input.id, name);
   const fields: KnobFields = {};
-  const group = checkText(input.group, "group", MAX_GROUP);
+  const group = checkText(input.group, "group", MAX_GROUP, ctx.lenient);
   if (group !== undefined) fields.group = group;
-  const description = checkText(input.description, "description", MAX_DESCRIPTION);
+  const description = checkText(input.description, "description", MAX_DESCRIPTION, ctx.lenient);
   if (description !== undefined) fields.description = description;
   for (const key of ["min", "max", "step"] as const) {
     const n = checkNumber(input[key], key);
     if (n !== undefined) fields[key] = n;
   }
-  const unit = checkText(input.unit, "unit", MAX_UNIT);
+  const unit = checkText(input.unit, "unit", MAX_UNIT, ctx.lenient);
   if (unit !== undefined) fields.unit = unit;
-  const options = checkOptions(input.options);
+  const options = checkOptions(input.options, ctx.lenient);
   if (options !== undefined) fields.options = options;
   checkFieldsFit(type, fields, name, ctx.lenient);
   const knob: Knob = { id, name, type, values: {}, ...fields };
   const given = input.values;
   if (given !== undefined && !isObject(given)) fail("invalid_knob", 'A knob\'s "values" map preset ids to values, like { "proposal": 95, "shipped_app": 80 }.');
-  for (const presetId of Object.keys(given ?? {})) requirePreset(ctx, set, presetId);
-  for (const preset of set.presets) {
-    const raw = given && Object.hasOwn(given, preset.id) ? given[preset.id] : input.value;
-    if (raw === undefined) {
-      knob.values[preset.id] = knobLiteral(set, knob, preset.id);
-      continue;
-    }
-    if (ctx.lenient && isLiteral(raw)) {
-      knob.values[preset.id] = raw;
-      continue;
-    }
-    const literal = checkKnobLiteral(knob, raw, `Knob "${name}" in ${preset.name}`);
+  const literalFor = (raw: unknown, preset: string): Literal => {
+    if (ctx.lenient && isLiteral(raw)) return raw;
+    const literal = checkKnobLiteral(knob, raw, `Knob "${name}" in ${preset}`);
     if (!literal.ok) fail(literal.error.code, literal.error.message, { hint: literal.error.hint });
-    knob.values[preset.id] = literal.value;
+    return literal.value;
+  };
+  if (ctx.lenient && given !== undefined) {
+    // Undo puts the values back as they were: a preset without one of its own stays without (it runs the fallback).
+    for (const [presetId, raw] of Object.entries(given)) {
+      if (!isValidId(presetId)) fail("invalid_id", `"${presetId}" isn't a valid preset id.`);
+      knob.values[presetId] = literalFor(raw, getKnobPreset(set, presetId)?.name ?? presetId);
+    }
+  } else {
+    for (const presetId of Object.keys(given ?? {})) requirePreset(ctx, set, presetId);
+    for (const preset of set.presets) {
+      const raw = given && Object.hasOwn(given, preset.id) ? given[preset.id] : input.value;
+      knob.values[preset.id] = raw === undefined ? knobLiteral(set, knob, preset.id) : literalFor(raw, preset.name);
+    }
   }
   const index = resolveIndex(op.index, set.knobs.length);
   const knobs = [...set.knobs];
@@ -274,10 +285,10 @@ export function updateKnob(ctx: OpContext, op: OpOf<"updateKnob">): OpOutcome {
   const old = requireKnob(ctx, set, op.id);
   const next: Knob = { ...old, values: { ...old.values } };
   const raw = op as unknown as Record<string, unknown>;
-  if (op.name !== undefined) next.name = checkName(op.name, set.knobs.filter((k) => k !== old), "knob");
+  if (op.name !== undefined) next.name = checkName(op.name, set.knobs.filter((k) => k !== old), "knob", ctx.lenient);
   for (const [field, max] of [["group", MAX_GROUP], ["description", MAX_DESCRIPTION], ["unit", MAX_UNIT]] as const) {
     if (!(field in raw)) continue;
-    const text = checkText(raw[field], field, max);
+    const text = checkText(raw[field], field, max, ctx.lenient);
     if (text === undefined) delete next[field];
     else next[field] = text;
   }
@@ -288,7 +299,7 @@ export function updateKnob(ctx: OpContext, op: OpOf<"updateKnob">): OpOutcome {
     else next[field] = n;
   }
   if ("options" in raw) {
-    const options = checkOptions(raw.options);
+    const options = checkOptions(raw.options, ctx.lenient);
     if (options === undefined) delete next.options;
     else next.options = options;
   }
@@ -455,7 +466,7 @@ export function addKnobPreset(ctx: OpContext, op: OpOf<"addKnobPreset">): OpOutc
   if (!ctx.lenient) refuseUnknownKeys(input, NEW_PRESET_KEYS, "A new preset");
   const before = ctx.doc.knobs;
   if (before) checkLimit(ctx, before.presets.length, MAX_KNOB_PRESETS, "presets");
-  const name = checkName(input.name, before?.presets ?? [], "preset");
+  const name = checkName(input.name, before?.presets ?? [], "preset", ctx.lenient);
   const id = newPresetId(ctx, before, input.id, name);
   if (input.locked !== undefined && typeof input.locked !== "boolean") fail("invalid_knob", "A preset's locked is true or false.");
   const preset: KnobPreset = { id, name };
@@ -466,14 +477,16 @@ export function addKnobPreset(ctx: OpContext, op: OpOf<"addKnobPreset">): OpOutc
     ctx.affected.presets.add(id);
     return { ids: [id], applied: { op: "addKnobPreset", preset: { ...preset } }, inverse: presetInverse(preset) };
   }
-  const from = requirePreset(ctx, before, op.copyFrom ?? before.active);
+  // Undo of removeKnobPreset copies from a running preset a hand edit left dangling; knobLiteral falls back from it.
+  const dangling = ctx.lenient && (op.copyFrom === undefined || op.copyFrom === null) && !getKnobPreset(before, before.active);
+  const from = dangling ? before.active : requirePreset(ctx, before, op.copyFrom ?? before.active).id;
   const index = resolveIndex(op.index, before.presets.length);
   const presets = [...before.presets];
   presets.splice(index, 0, preset);
-  const knobs = before.knobs.map((k) => ({ ...k, values: { ...k.values, [id]: knobLiteral(before, k, from.id) } }));
+  const knobs = before.knobs.map((k) => ({ ...k, values: { ...k.values, [id]: knobLiteral(before, k, from) } }));
   commit(ctx, { ...before, presets, knobs });
   ctx.affected.presets.add(id);
-  return { ids: [id], applied: { op: "addKnobPreset", preset: { ...preset }, copyFrom: from.id, index }, inverse: presetInverse(preset) };
+  return { ids: [id], applied: { op: "addKnobPreset", preset: { ...preset }, copyFrom: from, index }, inverse: presetInverse(preset) };
 }
 
 function presetInverse(preset: KnobPreset): Op[] {
@@ -485,7 +498,7 @@ export function updateKnobPreset(ctx: OpContext, op: OpOf<"updateKnobPreset">): 
   const set = requireSet(ctx);
   const old = requirePreset(ctx, set, op.id);
   const next: KnobPreset = { ...old };
-  if (op.name !== undefined) next.name = checkName(op.name, set.presets.filter((p) => p !== old), "preset");
+  if (op.name !== undefined) next.name = checkName(op.name, set.presets.filter((p) => p !== old), "preset", ctx.lenient);
   if (op.locked !== undefined) {
     if (typeof op.locked !== "boolean") fail("invalid_knob", "A preset's locked is true or false.");
     if (op.locked) next.locked = true;
@@ -545,9 +558,10 @@ export function removeKnobPreset(ctx: OpContext, op: OpOf<"removeKnobPreset">): 
 
 export function applyKnobPreset(ctx: OpContext, op: OpOf<"applyKnobPreset">): OpOutcome {
   const set = requireSet(ctx);
-  const preset = requirePreset(ctx, set, op.id);
+  // Undo may put back a running preset that isn't one (a hand edit; unknown_knob_preset reports it).
+  const id = ctx.lenient && isValidId(op.id) && !getKnobPreset(set, op.id) ? op.id : requirePreset(ctx, set, op.id).id;
   const previous = set.active;
-  if (previous !== preset.id) commit(ctx, { ...set, active: preset.id });
-  ctx.affected.presets.add(preset.id);
-  return { ids: [preset.id], applied: { op: "applyKnobPreset", id: preset.id }, inverse: [{ op: "applyKnobPreset", id: previous }] };
+  if (previous !== id) commit(ctx, { ...set, active: id });
+  ctx.affected.presets.add(id);
+  return { ids: [id], applied: { op: "applyKnobPreset", id }, inverse: [{ op: "applyKnobPreset", id: previous }] };
 }

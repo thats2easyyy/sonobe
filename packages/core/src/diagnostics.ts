@@ -332,8 +332,10 @@ const LAYER_CONTENT_KEYS: ReadonlySet<string> = new Set(["props", "children", "l
 const PATCH_CONTENT_KEYS: ReadonlySet<string> = new Set(["inputs", "ui"]);
 /** Layer properties the touchability check reads. */
 const TOUCH_PROPS: ReadonlySet<string> = new Set(["enabled", "opacity", "hitTest"]);
-/** Literal edits the copy checks read: a layer's Repeat, a Loop's Count, and loop lengths. */
-const layerAffectsCopies = (key: string, before: unknown, after: unknown) => key === "repeat" || isLoopLiteral(before) || isLoopLiteral(after);
+/** Layer properties the copy checks read as literals: Repeat, and whether copies are laid out apart (loops_inside_single_copy). */
+const COPY_PROPS: ReadonlySet<string> = new Set(["repeat", "layout", "positioning"]);
+/** Literal edits the copy checks read: those properties, a Loop's Count, and loop lengths. */
+const layerAffectsCopies = (key: string, before: unknown, after: unknown) => COPY_PROPS.has(key) || isLoopLiteral(before) || isLoopLiteral(after);
 const patchAffectsCopies = (type: string) => (key: string, before: unknown, after: unknown) => (type === "loop" && key === "count") || isLoopLiteral(before) || isLoopLiteral(after);
 const NO_KEYS: ReadonlySet<string> = new Set();
 const NO_LAYERS: readonly LayerNode[] = Object.freeze([]);
@@ -1088,9 +1090,9 @@ function missingKnobSuggestions(doc: SonobeDocument, c: Component, target: PortT
   return out;
 }
 
-/** What reader diagnostics depend on in the knob table: ids, types and enum options, not values. */
+/** What reader diagnostics depend on in the knob table: ids, names (messages name knobs), types and enum options, not values. */
 function knobDeclarations(set: KnobSet | undefined): string {
-  return set ? set.knobs.map((k) => `${k.id}:${k.type}:${k.options?.map((o) => o.key).join("|") ?? ""}`).join(",") : "";
+  return set ? JSON.stringify(set.knobs.map((k) => [k.id, k.name, k.type, k.options?.map((o) => o.key)])) : "";
 }
 
 /**
@@ -1259,7 +1261,7 @@ export function createDiagnosticsCache(registry: Registry): DiagnosticsCache {
       return result;
     };
 
-    // A knob's id, type or options reach every input that reads it; values and the running preset don't.
+    // A knob's id, name, type or options reach every input that reads it; values and the running preset don't.
     const knobsChanged = previous !== null && doc.knobs !== previous.doc.knobs && knobDeclarations(doc.knobs) !== knobDeclarations(previous.doc.knobs);
 
     const out: Diagnostic[] = [];

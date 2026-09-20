@@ -27,7 +27,7 @@ const OP_FIELDS: Record<OpKind, readonly string[]> = {
   removeComment: ["component", "id"],
   addComponent: ["component", "ref"],
   removeComponent: ["id"],
-  createComponent: ["component", "name", "layerIds", "patchIds", "ref"],
+  createComponent: ["component", "name", "layerIds", "patchIds", "ref", "id", "instanceId"],
   updateInterface: ["component", "inputs", "outputs", "replace"],
   updateComponent: ["component", "id", "name", "notes", "size", "meta"],
   setNodePositions: ["component", "positions"],
