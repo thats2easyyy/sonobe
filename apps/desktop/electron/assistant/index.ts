@@ -7,8 +7,15 @@
  * (sonobeHost.secrets, "anthropic.apiKey") and is read only by the main process.
  *
  * Wiring:
- *   main.ts     registerAssistant({ ipcMain, isTrustedSender, host: () => appHost, secrets: () => secrets, version, guides, log })
+ *   main.ts     registerAssistant({ ipcMain, isTrustedSender, host: () => appHost, secrets: () => secrets, version, guides, log,
+ *                 documentFor: (id) => appHost.targetDocument(id),       // pins each window's tool calls to its document
+ *                 codeFolders: createCodeFolderStore({ file, home }),     // Match my code… links (codeFolder.ts)
+ *                 pickFolder })                                           // the native folder dialog
  *   preload.ts  attachAssistantBridge(host, ipcRenderer)   // before contextBridge.exposeInMainWorld
+ *
+ * Designing on the canvas (design.ts, draftStream.ts, designGuard.ts): the Design with Claude box
+ * sends a canvas context with the message, the agent streams import_design's html back as
+ * design_draft events, and a replace the person may not want asks first.
  *
  * Import the preload side from ./preload.ts directly (it bundles into the sandboxed preload); this
  * barrel pulls in the SDK and the MCP server.

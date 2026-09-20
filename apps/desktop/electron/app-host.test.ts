@@ -28,6 +28,9 @@ import { createEditorSession, type EditorSession } from "../../editor/src/state/
 import { writeResult } from "../../../packages/mcp/src/tools/write.ts";
 import { estimateGraphGeometry, resolveGraphGeometry } from "../../../packages/mcp/src/geometry.ts";
 import { createAppHost, hostErrorFromRpc, sceneLayerBounds, type AppHost, type AppHostOptions, type DocumentChange, type RendererTarget, type SceneRenderRequest } from "./app-host.ts";
+import { createAssistantAgent } from "./assistant/agent.ts";
+import { scriptedClient } from "./assistant/testing.ts";
+import { createMcpToolBridge } from "./assistant/toolBridge.ts";
 import { startMcpServer, type McpServerHandle } from "./mcp-server.ts";
 import { createRpcClient, createRpcFailure, createRpcServer, type RpcServer } from "./rpc.ts";
 
@@ -1016,5 +1019,46 @@ describe("desktop MCP endpoint", () => {
     expect(created.isError).toBeFalsy();
     expect(text(created)).toContain(`Created /Users/test/Documents/Later.sonobe. It isn't open; call open_document({ ref: "/Users/test/Documents/Later.sonobe" })`);
     expect(created.structuredContent).toMatchObject({ docId: "later", open: false });
+  });
+});
+
+describe("app host and the in-app Assistant", () => {
+  it("tells the Assistant which document a window shows", async () => {
+    const a = editorWindow(1);
+    const b = editorWindow(2);
+    const windows = [a, b];
+    const host = appHost(windows);
+    expect(await host.targetDocument(2)).toEqual({ docId: "photo_zoom", projectPath: null });
+    expect(await host.targetDocument(1)).toEqual({ docId: "photo_zoom_2", projectPath: null });
+    expect(await host.targetDocument(3)).toBeNull();
+    windows.pop();
+    expect(await host.targetDocument(2)).toBeNull();
+  });
+
+  it("keeps a reply's edits in the window that sent it when the person focuses another window", async () => {
+    const a = editorWindow(1);
+    const b = editorWindow(2);
+    const windows = [a, b];
+    const host = appHost(windows);
+    const bridge = createMcpToolBridge({ host, version: "0.1.0-test" });
+    cleanups.push(() => bridge.close());
+    const api = scriptedClient([
+      { content: [{ type: "tool_use", id: "t1", name: "rename", input: { updates: [{ id: "photo", name: "Hero Photo" }] } }] },
+      { content: [{ type: "tool_use", id: "t2", name: "rename", input: { updates: [{ id: "card", name: "Hero Card" }] } }] },
+      { content: [{ type: "text", text: "Renamed both." }] },
+    ]);
+    const agent = createAssistantAgent({ tools: () => bridge, apiKey: async () => "sk-ant-test-key-1234", createClient: () => api.client, documentFor: (id) => host.targetDocument(Number(id)) });
+    const result = await agent.run("1", { text: "Rename the photo and the card" }, (event) => {
+      // Focus flips to window 2 (the focused window comes first) after the first edit.
+      if (event.type === "tool_finished" && event.toolUseId === "t1") windows.reverse();
+    });
+
+    expect(result.outcome).toBe("completed");
+    const names = (w: TestWindow) => ["photo", "card"].map((id) => findLayer(w.session.document.getState().doc.components.main!.layers, id)?.layer.name);
+    expect(names(a)).toEqual(["Hero Photo", "Hero Card"]);
+    expect(names(b)).toEqual(["Photo", "Event Card"]);
+    // A call without docId from anywhere else goes to the window in front, which is window 2 now.
+    expect((await bridge.call("rename", { updates: [{ id: "photo", name: "Front Photo" }] })).isError).toBeFalsy();
+    expect(names(b)).toEqual(["Front Photo", "Event Card"]);
   });
 });
