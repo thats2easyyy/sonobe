@@ -1,7 +1,7 @@
-import type { SonobeDocument } from "@sonobe/core";
+import { applyOps, type InputValue, type SonobeDocument } from "@sonobe/core";
 import { describe, expect, it } from "vitest";
 import { buildDoc, createMockRegistry, createTestRuntime, defineMock, port, probeDefinition, runFrames, sequenceDefinition, tap, type ComponentInput } from "../testing/index.ts";
-import { compileDocument } from "./compile.ts";
+import { compileDocument, updateLiterals } from "./compile.ts";
 import { isLoop, makeLoop } from "./loop.ts";
 
 const items = (v: unknown) => (isLoop(v) ? v.items : v);
@@ -292,5 +292,293 @@ describe("loops: empty loops and feedback", () => {
     expect(rt.getRawValue("copies.count")).toBe(3);
     const traced = rt.trace(["copies.count"], 50);
     expect(traced.values["copies.count"]!.every((v) => v === 3)).toBe(true);
+  });
+});
+
+describe("loops: Repeat", () => {
+  /** A card whose own props come only from an Interaction on itself, with a looped title inside. */
+  const deck = (repeat?: unknown) =>
+    buildDoc({
+      layers: [
+        {
+          id: "card",
+          type: "group",
+          name: "Card",
+          props: { size: [300, 200], scale: { link: "grow.output" }, ...(repeat === undefined ? {} : { repeat: repeat as InputValue }) },
+          children: [{ id: "title", type: "text", name: "Title", props: { text: { link: "names.output" } } }],
+        },
+      ],
+      patches: {
+        names: { type: "splitter", typeParam: "text", inputs: { value: { loop: ["A", "B", "C", "D"] } } },
+        touch: { type: "interaction", inputs: { layer: { layer: "card" } } },
+        toggle: { type: "switch", inputs: { flip: { link: "touch.tap" } } },
+        grow: { type: "transition", inputs: { progress: { link: "toggle.on" }, start: 1, end: 1.1 } },
+      },
+    });
+  const keys = (rt: ReturnType<typeof createTestRuntime>) => rt.scene().roots.map((n) => n.key);
+  /** The document with the card's Repeat set (undefined clears it), sharing everything else. */
+  const withRepeat = (doc: SonobeDocument, value: unknown) => {
+    const result = applyOps(doc, [{ op: "setInput", target: "@card.repeat", value: (value ?? null) as never }], { registry: createMockRegistry() });
+    if (!result.ok) throw new Error(JSON.stringify(result.errors));
+    return result.doc;
+  };
+
+  it("makes a card whose props come from its own gesture one copy per item, and the gesture runs per copy", () => {
+    // Without Repeat, the titles repeat inside one card (the retro's stuck deck).
+    const stuck = createTestRuntime(deck());
+    runFrames(stuck, 2);
+    expect(keys(stuck)).toEqual(["card"]);
+    expect(stuck.scene().roots[0]!.children.map((c) => c.key)).toEqual(["title#0", "title#1", "title#2", "title#3"]);
+
+    const rt = createTestRuntime(deck({ link: "names.output" }));
+    expect(rt.step().roots.map((n) => [n.key, n.children.map((c) => `${c.key}=${c.props.text}`)])).toEqual([
+      ["card#0", ["title#0=A"]],
+      ["card#1", ["title#1=B"]],
+      ["card#2", ["title#2=C"]],
+      ["card#3", ["title#3=D"]],
+    ]);
+    runFrames(rt, 2, tap(150, 100));
+    // Copies stack; the last copy is on top and gets the tap.
+    expect(items(rt.getRawValue("touch.tap"))).toHaveLength(4);
+    expect(items(rt.getRawValue("toggle.on"))).toEqual([false, false, false, true]);
+  });
+
+  it("a typed number makes that many copies, 0 makes none quietly, and a linked number rounds down", () => {
+    const rt = createTestRuntime(deck(3));
+    rt.step();
+    expect(keys(rt)).toEqual(["card#0", "card#1", "card#2"]);
+    const none = createTestRuntime(deck(0));
+    runFrames(none, 3);
+    expect(keys(none)).toEqual([]);
+    expect(none.issues()).toEqual([]);
+    const linked = createTestRuntime(
+      buildDoc({
+        layers: [{ id: "dot", type: "rectangle", name: "Dot", props: { repeat: { link: "n.output" } } }],
+        patches: { n: { type: "add", inputs: { value1: 2, value2: 0.7 } } },
+      }),
+    );
+    linked.step();
+    expect(keys(linked)).toEqual(["dot#0", "dot#1"]);
+  });
+
+  it("counts a loop of any item type by its length", () => {
+    const rt = createTestRuntime(
+      buildDoc({
+        layers: [{ id: "swatch", type: "rectangle", name: "Swatch", props: { repeat: { link: "colors.output" } } }],
+        patches: { colors: { type: "splitter", typeParam: "color", inputs: { value: { loop: ["#FF0000FF", "#00FF00FF"] } } } },
+      }),
+    );
+    rt.step();
+    expect(keys(rt)).toEqual(["swatch#0", "swatch#1"]);
+  });
+
+  it("alone decides the count: longer and shorter loops on the layer and inside it wrap per copy", () => {
+    const doc = buildDoc({
+      layers: [
+        {
+          id: "row",
+          type: "group",
+          name: "Row",
+          props: { repeat: 5, position: { link: "pos.output" }, size: [100, 20] },
+          children: [{ id: "label", type: "text", name: "Label", props: { text: { link: "names.output" } } }],
+        },
+      ],
+      patches: {
+        pos: { type: "splitter", typeParam: "point", inputs: { value: { loop: [[0, 0], [0, 30], [0, 60]] } } },
+        names: { type: "splitter", typeParam: "text", inputs: { value: { loop: ["a", "b", "c", "d", "e", "f", "g"] } } },
+      },
+    });
+    const five = createTestRuntime(doc);
+    const frame = five.step();
+    expect(frame.roots.map((n) => [n.key, n.y, n.children[0]!.props.text])).toEqual([
+      ["row#0", 0, "a"],
+      ["row#1", 30, "b"],
+      ["row#2", 60, "c"],
+      ["row#3", 0, "d"],
+      ["row#4", 30, "e"],
+    ]);
+    // Reads agree with what each copy draws.
+    expect(five.getValue("@row.position#3")).toEqual([0, 0]);
+    expect(five.getValue("@label.text#4")).toBe("e");
+  });
+
+  it("an empty looped property reads its default on every copy under Repeat, and nothing warns (the empty-loop rule gives way)", () => {
+    const doc = buildDoc({
+      layers: [{ id: "tile", type: "rectangle", name: "Tile", props: { repeat: 3, size: [40, 40], color: { link: "none.output" } } }],
+      patches: { none: { type: "splitter", typeParam: "color", inputs: { value: { loop: [] } } } },
+    });
+    const rt = createTestRuntime(doc);
+    runFrames(rt, 3);
+    const tiles = rt.scene().roots;
+    expect(tiles.map((n) => n.key)).toEqual(["tile#0", "tile#1", "tile#2"]);
+    const fallback = createTestRuntime(buildDoc({ layers: [{ id: "tile", type: "rectangle", name: "Tile" }] })).step().roots[0]!.props.color;
+    expect(tiles.map((n) => n.props.color)).toEqual([fallback, fallback, fallback]);
+    expect(rt.getValue("@tile.color#1")).toEqual(fallback);
+    expect(rt.inspect("@tile.color#1").note).toMatch(/^Every copy of "Tile" uses the default\. It's an empty loop/);
+    expect(rt.issues()).toEqual([]);
+  });
+
+  it("follows the document across hot-swaps, from a count stuck at 1 or 0", () => {
+    const rt = createTestRuntime(deck());
+    runFrames(rt, 2);
+    expect(keys(rt)).toEqual(["card"]);
+    const counts: number[] = [];
+    for (const value of [{ link: "names.output" }, 0, { link: "names.output" }, undefined]) {
+      rt.updateDocument(withRepeat(rt.document, value));
+      runFrames(rt, 2);
+      counts.push(rt.scene().roots.length);
+    }
+    expect(counts).toEqual([4, 0, 4, 4]);
+  });
+
+  it("patches literal edits in place", () => {
+    const doc = deck(5);
+    const rt = createTestRuntime(doc);
+    rt.step();
+    const graph = compileDocument(doc, createMockRegistry());
+    for (const n of [3, 0, 2]) {
+      const next = withRepeat(rt.document, n);
+      expect(updateLiterals(graph, next)).toBe(true);
+      rt.updateDocument(next);
+      rt.step();
+      expect(rt.scene().roots).toHaveLength(n);
+    }
+  });
+
+  it("draws and reads Repeat as the number of copies, not the loop it counts", () => {
+    const rt = createTestRuntime(deck({ link: "names.output" }));
+    rt.step();
+    expect(rt.scene().roots.map((n) => n.props.repeat)).toEqual([4, 4, 4, 4]);
+    expect(rt.getValue("@card.repeat")).toBe(4);
+    expect(rt.getValue("@title.repeat")).toBe(4);
+    const single = createTestRuntime(buildDoc({ layers: [{ id: "box", type: "rectangle", name: "Box" }] }));
+    single.step();
+    expect(single.getValue("@box.repeat")).toBe(1);
+  });
+
+  it("inspect says how many copies a layer has and which one it read", () => {
+    const one = createTestRuntime(deck());
+    one.step();
+    expect(one.inspect("@card.scale#2")).toEqual({ value: 1, copies: 1, note: 'Layer "Card" has 1 copy, so there\'s no #2.' });
+    expect(one.inspect("@card.scale")).toEqual({ value: 1, copies: 1 });
+    const four = createTestRuntime(deck({ link: "names.output" }));
+    four.step();
+    expect(four.inspect("@card.scale")).toEqual({ value: 1, copies: 4, note: "copy #0 of 4" });
+    expect(four.inspect("@title.text#3")).toEqual({ value: "D", copies: 4 });
+    expect(four.inspect("@card.repeat")).toEqual({ value: 4, copies: 4 });
+    expect(four.inspect("@card.scale#4").note).toBe('Layer "Card" has 4 copies (#0 to #3), so there\'s no #4.');
+  });
+
+  it("is ignored under a layer that already makes copies: one child per parent copy", () => {
+    const doc = buildDoc({
+      layers: [{ id: "card", type: "group", name: "Card", props: { repeat: 2 }, children: [{ id: "badge", type: "rectangle", name: "Badge", props: { repeat: 3 } }] }],
+    });
+    const rt = createTestRuntime(doc);
+    rt.step();
+    expect(rt.scene().roots.map((n) => [n.key, n.children.map((c) => c.key)])).toEqual([
+      ["card#0", ["badge#0"]],
+      ["card#1", ["badge#1"]],
+    ]);
+  });
+
+  it("makes 1 copy of a value that isn't a count, and says so", () => {
+    const doc = buildDoc({
+      layers: [{ id: "card", type: "rectangle", name: "Card", props: { repeat: { link: "label.output" } } }],
+      patches: { label: { type: "splitter", typeParam: "text", inputs: { value: "four" } } },
+    });
+    const rt = createTestRuntime(doc);
+    rt.step();
+    expect(keys(rt)).toEqual(["card#0"]);
+    expect(rt.issues()).toEqual([
+      expect.objectContaining({ code: "repeat_not_a_count", severity: "warning", layerId: "card", message: 'Layer "Card" gets text "four" on its Repeat, which counts copies, so it makes 1 copy. Link a loop (one copy per item) or a number.' }),
+    ]);
+  });
+});
+
+describe("loops: loop_length_mismatch", () => {
+  const mismatches = (rt: ReturnType<typeof createTestRuntime>) => rt.issues().filter((i) => i.code === "loop_length_mismatch");
+  /** A card repeated `count` times whose photo reads a loop only the running prototype knows the length of. */
+  const cards = (repeat: unknown, values: readonly unknown[]) => {
+    const colors = sequenceDefinition("colors", "color", values);
+    const reg = createMockRegistry([colors]);
+    const doc = buildDoc(
+      {
+        layers: [{ id: "card", type: "group", name: "Card", props: { repeat: repeat as never }, children: [{ id: "photo", type: "rectangle", name: "Photo", props: { color: { link: "src.value" } } }] }],
+        patches: { src: { type: "colors" } },
+      },
+      reg,
+    );
+    return createTestRuntime(doc, reg);
+  };
+  const three = makeLoop([{ r: 1, g: 0, b: 0, a: 1 }, { r: 0, g: 1, b: 0, a: 1 }, { r: 0, g: 0, b: 1, a: 1 }]);
+
+  it("warns once when a ×4 card's photo reads a loop of 3, after two frames in a row", () => {
+    const rt = cards(4, [three]);
+    rt.step();
+    expect(mismatches(rt)).toEqual([]);
+    runFrames(rt, 4);
+    expect(mismatches(rt)).toEqual([
+      {
+        code: "loop_length_mismatch",
+        severity: "warning",
+        layerId: "card",
+        message: 'Layer "Card" makes 4 copies, but the Color of "Photo" is a loop of 3 right now, so copy #3 shows item #0 again.',
+        hint: "These lengths come from the running prototype, like a filtered list or a count from data. Give the loops the same number of items, or link Repeat to the loop the copies should follow.",
+      },
+    ]);
+  });
+
+  it("stays quiet for stripes (6 copies, 2 colors) and for a typed Repeat that shows the first items", () => {
+    const two = makeLoop([{ r: 1, g: 1, b: 1, a: 1 }, { r: 0.9, g: 0.9, b: 0.9, a: 1 }]);
+    const striped = cards(6, [two]);
+    runFrames(striped, 4);
+    expect(mismatches(striped)).toEqual([]);
+    const firstTwo = cards(2, [three]);
+    runFrames(firstTwo, 4);
+    expect(mismatches(firstTwo)).toEqual([]);
+  });
+
+  it("leaves lengths the document fixes to diagnostics", () => {
+    const doc = buildDoc({
+      layers: [{ id: "card", type: "group", name: "Card", props: { repeat: 4 }, children: [{ id: "photo", type: "rectangle", name: "Photo", props: { color: { link: "colors.output" } } }] }],
+      patches: { colors: { type: "splitter", typeParam: "color", inputs: { value: { loop: ["#FF0000FF", "#00FF00FF", "#0000FFFF"] } } } },
+    });
+    const rt = createTestRuntime(doc);
+    runFrames(rt, 4);
+    expect(mismatches(rt)).toEqual([]);
+  });
+
+  it("doesn't warn on the frame after the count grows, while gestures still see last frame's copies", () => {
+    // The count goes 4 → 5; the Interaction on the card reads last frame's 4 copies for one frame.
+    const src = sequenceDefinition("src", "number", [makeLoop([0, 1, 2, 3]), makeLoop([0, 1, 2, 3]), makeLoop([0, 1, 2, 3, 4])]);
+    const reg = createMockRegistry([src]);
+    const doc = buildDoc(
+      {
+        layers: [{ id: "card", type: "rectangle", name: "Card", props: { repeat: { link: "src.value" }, scale: { link: "grow.output" } } }],
+        patches: {
+          src: { type: "src" },
+          touch: { type: "interaction", inputs: { layer: { layer: "card" } } },
+          grow: { type: "transition", inputs: { progress: { link: "touch.down" }, start: 1, end: 1.1 } },
+        },
+      },
+      reg,
+    );
+    const rt = createTestRuntime(doc, reg);
+    for (let i = 0; i < 6; i++) {
+      rt.step();
+      expect(mismatches(rt)).toEqual([]);
+    }
+    expect(rt.scene().roots).toHaveLength(5);
+  });
+
+  it("goes away when an edit makes the loops fit", () => {
+    const rt = cards(4, [three]);
+    runFrames(rt, 3);
+    expect(mismatches(rt)).toHaveLength(1);
+    const next = structuredClone(rt.document);
+    next.components.main!.layers[0]!.props.repeat = 3;
+    rt.updateDocument(next);
+    runFrames(rt, 3);
+    expect(mismatches(rt)).toEqual([]);
   });
 });

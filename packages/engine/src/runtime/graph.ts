@@ -62,6 +62,8 @@ export interface Scope {
   inputIndex: Map<string, ScopeInput>;
   /** Extra loop sources that replicate a layer instance (its bound common props). */
   replicators: Binding[];
+  /** The instance layer's Repeat when set: it alone decides the copy count (ARCHITECTURE §4). */
+  repeat: Binding | null;
   nodes: Map<Id, CNode>;
   instances: Map<Id, Scope>;
   broadcasters: Broadcaster[];
@@ -102,7 +104,7 @@ export interface CNode extends NodeSpec {
   deps: CNode[];
   /**
    * Per input slot: the driver evaluates later in the frame (reads the previous frame). On a copies
-   * node: per loop input of `copiesOf`, then per replicator.
+   * node: per loop input of `copiesOf`, then per replicator, then its Repeat when set.
    */
   feedback: boolean[];
   records: Map<string, NodeRecord>;
@@ -114,6 +116,8 @@ export interface CProp {
   type: ValueType;
   wholeLoop: boolean;
   binding: Binding;
+  /** The document fixes the length of the loop this prop gets (core loopShapes), so diagnostics check it. */
+  lengthFixed: boolean;
 }
 
 export interface CLayer {
@@ -130,5 +134,7 @@ export interface CLayer {
   children: CLayer[];
   /** The component scope a componentInstance layer renders. */
   instance: Scope | null;
+  /** The document fixes how many copies this layer makes (core loopShapes), so diagnostics check its loop lengths. */
+  countFixed: boolean;
   propBindings: Map<string, Binding | null>;
 }
