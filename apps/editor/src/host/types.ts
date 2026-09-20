@@ -25,6 +25,8 @@ export interface DesktopHostApi {
   openProjectDialog(): Promise<string | null>;
   saveProjectDialog(defaultName: string): Promise<string | null>;
   readProject(dir: string): Promise<{ files: Record<string, string>; binaries: Record<string, ArrayBuffer> }>;
+  /** Null for a folder that doesn't exist yet. Optional: older preloads lack it. */
+  readProjectIfExists?(dir: string): Promise<{ files: Record<string, string>; binaries: Record<string, ArrayBuffer> } | null>;
   writeProject(dir: string, changes: { files?: Record<string, string>; binaries?: Record<string, ArrayBuffer | Uint8Array>; deleted?: string[] }): Promise<void>;
   watchProject(dir: string, cb: (change: { dir: string; paths: string[] }) => void): () => void;
   revealInFinder(path: string): void;

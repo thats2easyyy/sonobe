@@ -128,16 +128,21 @@ function main(): void {
         .filter((w) => !w.webContents.isDestroyed() && rpc?.hasMethod(w.webContents, "drafts.flush") === true)
         .map((w) => rpc!.invoke(w.webContents, "drafts.flush", undefined, { timeoutMs: 1500 })),
     );
-  // A terminal closing, a background task ending, `kill`: keep the drafts and quit without prompts nobody would answer.
-  installQuitOnSignal({
-    flush: flushDrafts,
-    exit: () => {
-      for (const win of BrowserWindow.getAllWindows()) win.destroy();
-      app.quit();
-      setTimeout(() => app.exit(0), 2000).unref();
-    },
-    log,
-  });
+  /**
+   * A terminal closing, a background task ending, `kill`: keep the drafts and quit without prompts
+   * nobody would answer. Installed once the app is ready: Chromium sets its own SIGTERM handler during
+   * startup, which would replace one installed earlier.
+   */
+  const quitOnSignal = () =>
+    installQuitOnSignal({
+      flush: flushDrafts,
+      exit: () => {
+        for (const win of BrowserWindow.getAllWindows()) win.destroy();
+        app.quit();
+        setTimeout(() => app.exit(0), 2000).unref();
+      },
+      log,
+    });
 
   const primaryWindow = (): AppWindow | undefined => {
     const focused = BrowserWindow.getFocusedWindow();
@@ -781,6 +786,13 @@ function main(): void {
       return project;
     });
 
+    ipcMain.handle(IPC.readProjectIfExists, async (event, dir: unknown) => {
+      requireWindow(event);
+      if (!(await access.canAccess(dir))) throw new Error(`Sonobe can only open prototype folders you've chosen: ${String(dir)}`);
+      if (!existsSync(dir as string)) return null;
+      return readProject(dir as string);
+    });
+
     ipcMain.handle(IPC.writeProject, async (event, dir: unknown, changes: unknown) => {
       const w = requireWindow(event);
       if (!(await access.canAccess(dir))) throw new Error(`Sonobe can only save into prototype folders you've chosen: ${String(dir)}`);
@@ -979,6 +991,7 @@ function main(): void {
   };
 
   void app.whenReady().then(async () => {
+    quitOnSignal();
     const trustedUrl = (url: string | undefined) => {
       if (!url) return false;
       if ([...windows.values()].some((w) => isAppUrl(url, w.content()))) return true;

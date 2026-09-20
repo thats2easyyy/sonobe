@@ -218,11 +218,13 @@ function Workspace() {
     };
   }, [session]);
 
-  // A project opened from the OS, Open Recent, or Claude replaces whatever the welcome screen offered.
+  // A project opened from the OS, Open Recent, or Claude replaces whatever the welcome screen offered
+  // (so does a draft Claude recovers, which has no project path yet).
   useEffect(
     () =>
       session.document.subscribe((s, previous) => {
-        if (s.projectPath && s.projectPath !== previous.projectPath) welcomeStore.getState().hide();
+        const replaced = s.lastChange !== previous.lastChange && s.lastChange?.kind === "replace";
+        if ((s.projectPath && s.projectPath !== previous.projectPath) || replaced) welcomeStore.getState().hide();
       }),
     [session],
   );

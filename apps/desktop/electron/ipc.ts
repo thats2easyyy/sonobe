@@ -11,6 +11,8 @@ export const IPC = {
   dialogOpenProject: "sonobe:dialog:open-project",
   dialogSaveProject: "sonobe:dialog:save-project",
   readProject: "sonobe:project:read",
+  /** Like readProject, but a folder that doesn't exist yet reads as null (Save As into a new folder). */
+  readProjectIfExists: "sonobe:project:read-if-exists",
   writeProject: "sonobe:project:write",
   watchProject: "sonobe:project:watch",
   unwatchProject: "sonobe:project:unwatch",
