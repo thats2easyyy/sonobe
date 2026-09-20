@@ -37,7 +37,7 @@ Sonobe is a separate, open-source project with no affiliation to Meta. It doesn'
 | Variable Broadcaster and Receiver (formerly Wireless) | Variable Broadcaster and Receiver | |
 | Comment | Comment frame | |
 | Tidy Up | Tidy Up | ⌃T |
-| Port flashing, value popovers | Pulse sparks, state glow, "×N" loop badges, live values on hover | |
+| Port flashing, value popovers | Orbs along cables, state glow, "×N" loop badges, live values on hover | |
 | Origami Live on iOS | Web player on your local network, or the Sonobe Viewer iPhone app | Scan the QR code with any phone's camera. Works on iOS and Android. For haptics on an iPhone, scan it in Sonobe Viewer ([apps/ios](../../apps/ios/README.md)) |
 | Masks | Clip Contents on a group, Corner Radius on images | Sonobe v1 has no alpha mask layer |
 | JavaScript Patch (Hermes) | JavaScript patch, stored as a real `.js` file in the project | The script API is different, so scripts need porting |
@@ -140,7 +140,7 @@ Origami's recent versions (221 and 223) can generate the code inside a JavaScrip
 
 1. Build the tap-to-grow card from guide 01. It takes ten minutes, and the muscle memory mostly carries over.
 2. Read the coordinates section of guide 04.
-3. Skim "How to see them in Sonobe" in guide 03. Sparks and glow replace squinting at port popovers.
+3. Skim "How to see them in Sonobe" in guide 03. Orbs and glow replace squinting at port popovers.
 4. Rebuild one of your own Origami prototypes, using the patch table.
 5. Connect Claude (guide 11) and ask it to explain your rebuilt graph. Check whether its explanation matches your intent.
 

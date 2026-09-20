@@ -184,7 +184,7 @@ export interface GraphModel {
   componentId: Id;
   nodes: GraphNode[];
   edges: CableEdge[];
-  /** Cable ids by source address, for pulse sparks. */
+  /** Cable ids by source address. */
   cablesBySource: ReadonlyMap<string, readonly string[]>;
   /** Every output address shown (live value subscriptions). */
   outputAddresses: readonly string[];
