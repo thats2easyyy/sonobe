@@ -18,6 +18,7 @@ Related: `start-here`, `gestures`, `animation`, `troubleshooting`
 | `sim_step`       | advances `frames` or `ms`, or `until: "idle"`, or until a condition like `{ "target": "@card.scale", "op": ">=", "value": 1.07 }` |
 | `sim_trace`      | samples targets every frame for `durationMs` with scheduled `events`; returns a table plus summaries                              |
 | `sim_get_values` | current values right now                                                                                                          |
+| `sim_override`   | changes values inside this simulation only, never the person's document (see Overrides)                                           |
 | `get_screenshot` | a PNG of the screen or one layer, at the session's frame or `atMs` later (see Screenshots)                                        |
 
 **Events** share one shape everywhere. `atMs` is the time from the start of the call. Each input finds its target when it fires, so a tap at `atMs` 400 hits whatever is on screen by then, and the hit report describes that moment. A layer that isn't in the frame yet (a loop with fewer copies) is skipped with a warning.
@@ -45,7 +46,7 @@ Related: `start-here`, `gestures`, `animation`, `troubleshooting`
 
 ## Reading traces
 
-- By default, `sim_trace` runs on a **copy** from the session's current state, so the session doesn't move. Pass `advance: true` to move it.
+- By default, `sim_trace` runs on a **copy** from the session's current state, so the session doesn't move. Pass `advance: true` to move it; the session then keeps going until the trace's events finish, so a drag longer than the trace still releases.
 - The copy replays everything since `sim_reset`, so it gets slower as a session runs. After about 20,000 steps there's no copy to make: `sim_trace` refuses with the error code "sim_copy_unavailable". Pass `advance: true`, or `sim_reset` and replay the interaction.
 - `t_ms` counts frames from the start of the trace, so it keeps rising even when Restart Prototype fires.
 - Rows are evenly sampled down to `maxRows`; summaries always use every frame.
@@ -122,8 +123,9 @@ Hold for half a second, release, and watch the scale go down and come back:
 
 ## Screenshots
 
-- `get_screenshot` draws `"viewer"` (the whole screen) or `"@layerId"` (one layer's box; `"@row#2"` for a loop copy).
-- With `simId` it shows that session's current frame. `atMs` shows the frame that many milliseconds later, drawn on a copy, so the session doesn't move.
+- `get_screenshot` draws `"viewer"` (the whole screen) or `"@layerId"` (the screen cropped to one layer's box, so layers in front still cover it; `"@row#2"` for a loop copy).
+- `isolate: true` with a layer target draws only that layer and its children, where they are. That's how to see the card under the top card: isolate `"@card_2"`, or `"@card#2"` for a loop copy.
+- With `simId` it shows that session's current frame, overrides included. `atMs` shows the frame that many milliseconds later, drawn on a copy, so the session doesn't move.
 - Headless servers draw the screen without the app. Text uses approximate metrics, and video, Lottie and shaders show placeholders; the result's notes list what's approximate. Without `simId`, a headless screenshot shows the prototype once its start-up animations settle (up to 5 s), or `atMs` after it starts.
 - Use screenshots to check the look. For timing and exact values, trust `sim_trace` and `sim_get_values`.
 
@@ -135,6 +137,40 @@ Press the button again and look at it mid-press:
 
 ```json tool:get_screenshot
 { "simId": "sim_1", "target": "@button", "atMs": 300 }
+```
+
+## Overrides
+
+To look under a layer or try a value, change it in the simulation with `sim_override` instead of editing and undoing. The person's document, live viewer, undo history and saved files stay as they are.
+
+- `set` pins values on patch inputs and layer properties (null for the default). `ops` takes value ops: `setInput`, `connect`, `disconnect`, `updateLayer` with `props`, and `updatePatch` with `muted`. Setting a target again replaces its override; pinning a connected input replaces the connection in the simulation.
+- An override changes the layer or patch itself, so it applies to every loop copy and every instance of a component: `"@card/badge.opacity"` changes the component `card` runs. A `#n` target is refused; to see one copy alone, take an isolated screenshot.
+- Overrides stay on through the person's edits. When an edit makes one impossible (its layer was deleted), it's dropped and the next result says so.
+- `clear` takes override ids (`"ov_2"`), targets, or `"all"`. `sim_reset` clears them unless you pass `keepOverrides: true`. `restart: true` starts the simulation over from frame 0 with them.
+- Results count them in the header, `sim_get_values` marks overridden values, and screenshots say when they show overrides the person's document doesn't have.
+
+Try a bouncier press and a squarer button, without touching the document:
+
+```json tool:sim_override
+{
+  "simId": "sim_1",
+  "set": [{ "target": "press_spring.bounciness", "value": 12 }],
+  "ops": [{ "op": "updateLayer", "id": "button", "props": { "cornerRadius": 8 } }]
+}
+```
+
+```json tool:get_screenshot
+{ "simId": "sim_1", "target": "@button", "isolate": true }
+```
+
+One loop copy can't be overridden on its own:
+
+```json tool-error:sim_override
+{ "simId": "sim_1", "set": [{ "target": "@button.opacity#2", "value": 0 }] }
+```
+
+```json tool:sim_override
+{ "simId": "sim_1", "clear": "all" }
 ```
 
 ## Limits
