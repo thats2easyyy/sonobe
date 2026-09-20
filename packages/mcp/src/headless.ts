@@ -2,7 +2,8 @@
  * HeadlessHost: SonobeHost over project folders on disk, with no app running. Documents open
  * through @sonobe/core/node, edits go through core applyOps + History with author attribution,
  * simulations run on the engine runtime, presence is recorded but shown nowhere, and screenshots
- * draw the prototype screen itself (SceneFrame → SVG → PNG, see screenshot.ts). Node only.
+ * draw the prototype screen itself (SceneFrame → SVG → PNG, see screenshot.ts), and a component's
+ * patch graph or canvas from the document (componentViews.ts). Node only.
  *
  * Other writers may share the folder (the Sonobe app, git, a person, another session), so every
  * document remembers the files as it last read or wrote them. A save first reads the folder again
