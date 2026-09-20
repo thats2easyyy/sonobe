@@ -97,8 +97,8 @@ To look at one copy, use a `#n` target: `@card.position#1`, or `swipe_card.gone#
 
 - **Tune it.** Open the Knobs tab and drag Throw Lookahead or Commit Distance while you throw cards. ⌘' flips to Shipped app and back.
 - **Another place.** Add a row to every Loop Builder. Repeat, the stacking and the card-above lookups follow on their own.
-- **A haptic tick at the commit point.** Inside Swipe Card, feed Armed into a Pulse and its Turned On into a Haptic.
-- **Undo.** Keep a Counter of votes, and on undo turn off the Card Gone of the copy whose index is one below the top card.
+- **A haptic tick at the commit point.** Inside Swipe Card, feed Armed into a Pulse, and its Turned On into a Haptic's Play. Try it on a phone preview.
+- **Undo.** Keep a Counter of votes. On undo, turn off Card Gone for the card thrown last: the copy whose index is the top card's minus 1.
 
 ## Common mistakes
 
