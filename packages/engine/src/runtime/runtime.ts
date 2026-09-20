@@ -106,6 +106,12 @@ export interface SonobeRuntime extends Runtime {
   readonly services: RuntimeServices;
   /** Turn per-patch evaluate timing on or off (off discards what was collected). */
   setProfiling(on: boolean): void;
+  /**
+   * Replace the host's device overrides (RuntimeOptions.device) while the prototype runs, for what
+   * the host learns as it goes: the phone turning, the appearance switching, new safe-area insets.
+   * Patches read them from the next frame, and they outlive restarts like the options they replace.
+   */
+  setDevice(device: Partial<DeviceInfo>): void;
   /** Average evaluate time per patch over the last ~1 s of frames, slowest first; empty when profiling is off. */
   patchTimings(): PatchTiming[];
   /**
@@ -230,6 +236,8 @@ class RuntimeImpl implements SonobeRuntime {
   private currentPatch: Id | undefined;
   private orientation: DeviceInfo["orientation"] | undefined;
   private orientationAngle: number | undefined;
+  /** The host's device overrides: RuntimeOptions.device, then setDevice. */
+  private device: Partial<DeviceInfo>;
   private motion: DeviceMotionSample | undefined;
   private timeZone: string | undefined;
   private requested = false;
@@ -268,6 +276,7 @@ class RuntimeImpl implements SonobeRuntime {
     this.document = doc;
     this.logBase = doc;
     this.options = options;
+    this.device = { ...options.device };
     this.deterministic = options.deterministic === true;
     this.profiling = options.profile === true;
     this.seed = options.seed ?? 1;
@@ -407,6 +416,10 @@ class RuntimeImpl implements SonobeRuntime {
     return [...this.graph.issues, ...this.runtimeIssues.values(), ...this.emptyIssues.values(), ...this.mismatchIssues.values()];
   }
 
+  setDevice(device: Partial<DeviceInfo>): void {
+    this.device = { ...device };
+  }
+
   setProfiling(on: boolean): void {
     this.profiling = on === true;
     this.timingSums.clear();
@@ -435,7 +448,7 @@ class RuntimeImpl implements SonobeRuntime {
   trace(targets: readonly string[], durationMs: number, events: readonly TraceInput[] = []): TraceResult {
     // Past the replay log there's no way to rebuild the current state; a fresh copy would trace a restarted prototype.
     if (this.logTruncated) throw new TraceUnavailableError(this.frame);
-    const options: RuntimeOptions = { ...this.options, deterministic: true, platform: {}, onLog: undefined, profile: false };
+    const options: RuntimeOptions = { ...this.options, device: this.device, deterministic: true, platform: {}, onLog: undefined, profile: false };
     const clone = new RuntimeImpl(this.logBase, options);
     for (const [key, values] of this.logBaseOutputs) clone.layerOutputs.set(key, { ...values });
     for (const entry of this.log) {
@@ -1224,7 +1237,7 @@ class RuntimeImpl implements SonobeRuntime {
   private deviceInfo(): DeviceInfo {
     const settings = this.document.project.device;
     const preset = getDevicePreset(settings.preset);
-    const o = this.options.device ?? {};
+    const o = this.device;
     const orientation = this.orientation ?? o.orientation ?? settings.orientation ?? "portrait";
     const screenSize: [number, number] = o.screenSize ? [o.screenSize[0], o.screenSize[1]] : deviceScreenSize({ ...settings, orientation });
     const [t, r, b, l] = preset.safeArea;

@@ -204,6 +204,8 @@ export function createEditorSession(options: EditorSessionOptions = {}): EditorS
     scriptTrust,
     mute,
     scope: () => instancePathFor(document.getState().doc, selection.getState().componentPath),
+    // Device Info's platform: the desktop app, or the editor in a browser.
+    device: { platform: host?.kind === "browser" ? "web" : "desktop" },
     platformOptions: {
       readAssetBytes: (assetId) => assets.readBytes(assetId),
       ...(host?.openExternal ? { openExternal: (url: string) => host.openExternal!(url) } : {}),
