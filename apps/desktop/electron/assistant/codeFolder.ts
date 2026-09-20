@@ -248,9 +248,12 @@ export const SEARCH_MAX_BYTES = 1024 * 1024;
 const BINARY_SNIFF_BYTES = 8 * 1024;
 
 const SECRET_FOLDERS = new Set([".ssh", ".aws", ".gnupg"]);
-const SECRET_NAMES = new Set([".npmrc", ".netrc", ".pypirc", "googleservice-info.plist", "google-services.json"]);
-const SECRET_PREFIXES = [".env", "id_rsa", "id_ed25519", "id_ecdsa", "credentials"];
-const SECRET_EXTENSIONS = [".pem", ".key", ".p8", ".p12", ".pfx", ".keystore", ".jks", ".mobileprovision", ".sqlite", ".db"];
+// key.properties and keystore.properties hold Android signing passwords; local.properties often holds API keys.
+const SECRET_NAMES = new Set([".npmrc", ".netrc", ".pypirc", "googleservice-info.plist", "google-services.json", "key.properties", "keystore.properties", "local.properties"]);
+const SECRET_PREFIXES = [".env", "id_rsa", "id_dsa", "id_ed25519", "id_ecdsa", "credentials"];
+const SECRET_EXTENSIONS = [".pem", ".key", ".p8", ".p12", ".pfx", ".ppk", ".asc", ".kdbx", ".keystore", ".jks", ".mobileprovision", ".tfvars", ".tfvars.json", ".tfstate", ".tfstate.backup", ".sqlite", ".db"];
+/** An env file by another name: "prod.env", "docker/app.env", "env". */
+const ENV_FILE = /(^|[._-])env$/;
 
 /** A file that may hold secrets (by name, ignoring case), given its path relative to the folder's top. */
 export function isSecretPath(rel: string): boolean {
@@ -261,6 +264,7 @@ export function isSecretPath(rel: string): boolean {
     SECRET_NAMES.has(base) ||
     SECRET_PREFIXES.some((prefix) => base.startsWith(prefix)) ||
     SECRET_EXTENSIONS.some((ext) => base.endsWith(ext)) ||
+    ENV_FILE.test(base) ||
     base.includes("secret") ||
     (base.startsWith("service-account") && base.endsWith(".json"))
   );
@@ -269,9 +273,25 @@ export function isSecretPath(rel: string): boolean {
 const isHiddenPath = (rel: string) => rel.split("/").some((part) => part.startsWith("."));
 
 const REDACTED = "[redacted]";
-/** PEM private keys (an unfinished block runs to the end). Each line is redacted on its own, so line numbers hold. */
-const PEM_PRIVATE_KEY = /-----BEGIN (?:[A-Z0-9]+ )*PRIVATE KEY-----(?:[\s\S]*?-----END (?:[A-Z0-9]+ )*PRIVATE KEY-----|[\s\S]*$)/g;
-const KEY_PATTERNS = [/sk-ant-[A-Za-z0-9_-]{10,}/g, /sk-[A-Za-z0-9]{20,}/g, /AKIA[0-9A-Z]{16}/g, /gh[pousr]_[A-Za-z0-9]{20,}/g, /xox[abprs]-[A-Za-z0-9-]{10,}/g, /AIza[0-9A-Za-z_-]{35}/g];
+/** PEM and PGP private keys (an unfinished block runs to the end). Each line is redacted on its own, so line numbers hold. */
+const PEM_PRIVATE_KEY = /-----BEGIN (?:[A-Z0-9]+ )*PRIVATE KEY(?: BLOCK)?-----(?:[\s\S]*?-----END (?:[A-Z0-9]+ )*PRIVATE KEY(?: BLOCK)?-----|[\s\S]*$)/g;
+/**
+ * Anthropic, OpenAI (project, service account, admin and legacy), AWS, GitHub (classic and
+ * fine-grained), GitLab, Stripe secret and restricted, Slack and Google keys. The ones whose
+ * prefix could end a word in CSS or code ("mask-", "desk_") need a word boundary before them.
+ */
+const KEY_PATTERNS = [
+  /sk-ant-[A-Za-z0-9_-]{10,}/g,
+  /(?<![A-Za-z0-9_-])sk-(?:proj|svcacct|admin)-[A-Za-z0-9_-]{20,}/g,
+  /sk-[A-Za-z0-9]{20,}/g,
+  /AKIA[0-9A-Z]{16}/g,
+  /gh[pousr]_[A-Za-z0-9]{20,}/g,
+  /(?<![A-Za-z0-9_])github_pat_[A-Za-z0-9_]{22,}/g,
+  /(?<![A-Za-z0-9_-])glpat-[A-Za-z0-9_-]{20,}/g,
+  /(?<![A-Za-z0-9_])[sr]k_(?:live|test)_[A-Za-z0-9]{16,}/g,
+  /xox[abprs]-[A-Za-z0-9-]{10,}/g,
+  /AIza[0-9A-Za-z_-]{35}/g,
+];
 
 /** Replace API keys, tokens and private keys with "[redacted]". */
 export function redactSecrets(text: string): string {
@@ -395,37 +415,146 @@ function formatSize(bytes: number): string {
   return `${Number((bytes / 1024 / 1024).toFixed(1))} MB`;
 }
 
-/** A glob ("*.swift", "**\/*color*", "*.{ts,tsx}") as a case-insensitive RegExp over "/" paths. */
-function globRegExp(glob: string): RegExp {
-  const body = (text: string): string => {
-    let re = "";
-    for (let i = 0; i < text.length; i++) {
-      const c = text[i]!;
-      if (c === "*" && text[i + 1] === "*") {
-        i++;
-        if (text[i + 1] === "/") {
-          i++;
-          re += "(?:.*/)?";
-        } else re += ".*";
-      } else if (c === "*") re += "[^/]*";
-      else if (c === "?") re += "[^/]";
-      else if (c === "{" && text.indexOf("}", i) > i) {
-        const end = text.indexOf("}", i);
-        re += `(?:${text.slice(i + 1, end).split(",").map(body).join("|")})`;
-        i = end;
-      } else re += c.replace(/[.+^${}()|[\]\\]/g, "\\$&");
-    }
-    return re;
+type GlobToken =
+  | { kind: "char"; char: string }
+  /** "?": one character, but not "/". */
+  | { kind: "one" }
+  /** "*" (within a folder) or "**" (across folders). */
+  | { kind: "star"; slash: boolean }
+  /** "**\/": nothing, or folders and their "/". */
+  | { kind: "folders" }
+  /** "{a,b}": any one of the alternatives. */
+  | { kind: "either"; options: GlobToken[][] };
+
+/** A glob's tokens, lowercased. A "{" with no "}" after it is literal, and so is every other character. */
+function globTokens(text: string): GlobToken[] {
+  const tokens: GlobToken[] = [];
+  // Stars in a row match what one does ("***" is "**"), so they're kept as one.
+  const star = (slash: boolean) => {
+    const last = tokens.at(-1);
+    if (last?.kind === "star") last.slash ||= slash;
+    else tokens.push({ kind: "star", slash });
   };
-  return new RegExp(`^${body(glob)}$`, "i");
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i]!;
+    if (c === "*" && text[i + 1] === "*") {
+      i++;
+      if (text[i + 1] === "/") {
+        i++;
+        tokens.push({ kind: "folders" });
+      } else star(true);
+    } else if (c === "*") star(false);
+    else if (c === "?") tokens.push({ kind: "one" });
+    else if (c === "{" && text.indexOf("}", i) > i) {
+      const end = text.indexOf("}", i);
+      tokens.push({ kind: "either", options: text.slice(i + 1, end).split(",").map(globTokens) });
+      i = end;
+    } else tokens.push({ kind: "char", char: c.toLowerCase() });
+  }
+  return tokens;
+}
+
+type GlobState =
+  | { kind: "end" }
+  | { kind: "char"; char: string; next: number }
+  | { kind: "one"; next: number }
+  /** Takes any number of characters (not "/" unless `slash`), then goes on to `next`. */
+  | { kind: "star"; slash: boolean; next: number }
+  /** Goes on to every state in `to` without taking a character. */
+  | { kind: "split"; to: number[] };
+
+/** Add `tokens`' states, each leading to the one after, the last to `next`; returns the first. */
+function compileGlob(tokens: readonly GlobToken[], states: GlobState[], next: number): number {
+  const add = (state: GlobState) => states.push(state) - 1;
+  for (let t = tokens.length - 1; t >= 0; t--) {
+    const token = tokens[t]!;
+    if (token.kind === "char") next = add({ kind: "char", char: token.char, next });
+    else if (token.kind === "one") next = add({ kind: "one", next });
+    else if (token.kind === "star") next = add({ kind: "star", slash: token.slash, next });
+    else if (token.kind === "folders") next = add({ kind: "split", to: [next, add({ kind: "star", slash: true, next: add({ kind: "char", char: "/", next }) })] });
+    else {
+      const after = next;
+      next = add({ kind: "split", to: token.options.map((option) => compileGlob(option, states, after)) });
+    }
+  }
+  return next;
+}
+
+/**
+ * A glob ("*.swift", "**\/*color*", "*.{ts,tsx}") as a case-insensitive test of a "/" path: "*" and
+ * "?" stay inside one folder, "**" crosses folders, "**\/" also matches nothing, and "{a,b}" is either.
+ * It steps every place the pattern could be at once, one character at a time, so a test takes at most
+ * (path length × pattern length) steps. A RegExp backtracks instead: "********************q" took
+ * about 100 s against one long file name, synchronously in Electron's main process, where the
+ * call's deadline can't stop it.
+ */
+export function globMatcher(glob: string): (path: string) => boolean {
+  const END = 0;
+  const states: GlobState[] = [{ kind: "end" }];
+  const start = compileGlob(globTokens(glob), states, END);
+
+  // Reused by every test (it runs synchronously): the states the pattern could be in now and after
+  // this character, and the step each state was last entered in, so none is entered twice a step.
+  let now = new Int32Array(states.length);
+  let after = new Int32Array(states.length);
+  const enteredAt = new Int32Array(states.length);
+  const pending: number[] = [];
+  let step = 0;
+  return (path) => {
+    if (step > 2 ** 30) {
+      enteredAt.fill(0);
+      step = 0;
+    }
+    let size = 0;
+    let count = 0;
+    /** List `first` for after this character, and what it goes on to without taking one: a split's targets, a star's next. */
+    const enter = (first: number) => {
+      pending.push(first);
+      while (pending.length) {
+        const s = pending.pop()!;
+        if (enteredAt[s] === step) continue;
+        enteredAt[s] = step;
+        const state = states[s]!;
+        if (state.kind === "split") pending.push(...state.to);
+        else {
+          after[count++] = s;
+          if (state.kind === "star") pending.push(state.next);
+        }
+      }
+    };
+    const advance = () => {
+      [now, after] = [after, now];
+      size = count;
+      count = 0;
+    };
+    step++;
+    enter(start);
+    advance();
+    for (let i = 0; i < path.length && size; i++) {
+      const c = path[i]!.toLowerCase();
+      step++;
+      for (let k = 0; k < size; k++) {
+        const s = now[k]!;
+        const state = states[s]!;
+        if (state.kind === "char") {
+          if (state.char === c) enter(state.next);
+        } else if (state.kind === "one") {
+          if (c !== "/") enter(state.next);
+        } else if (state.kind === "star" && (state.slash || c !== "/")) enter(s);
+      }
+      advance();
+    }
+    // The end was entered in the last step, after the path's last character (not before it ran out of states).
+    return enteredAt[END] === step;
+  };
 }
 
 /** Matches a walked file: against its name, or with a "/" in the pattern, its path under the walk's start. */
 function fileMatcher(pattern: string | undefined, start: string): ((rel: string) => boolean) | null {
   if (!pattern) return null;
-  const re = globRegExp(pattern);
+  const matches = globMatcher(pattern);
   const byPath = pattern.includes("/");
-  return (rel) => re.test(byPath ? (start ? rel.slice(start.length + 1) : rel) : rel.slice(rel.lastIndexOf("/") + 1));
+  return (rel) => matches(byPath ? (start ? rel.slice(start.length + 1) : rel) : rel.slice(rel.lastIndexOf("/") + 1));
 }
 
 /** Stops a call: the deadline passed or the person pressed Stop. */

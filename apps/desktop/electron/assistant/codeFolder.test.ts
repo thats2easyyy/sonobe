@@ -2,7 +2,7 @@ import { chmod, mkdir, mkdtemp, readFile, rename, rm, stat, symlink, writeFile }
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { CODE_TOOL_NAMES, CodeFolderError, createCodeFolderStore, createCodeTools, MAX_CODE_FOLDER_LINKS, type CodeFolderKey, type CodeFolderStore } from "./codeFolder.ts";
+import { CODE_TOOL_NAMES, CodeFolderError, createCodeFolderStore, createCodeTools, globMatcher, MAX_CODE_FOLDER_LINKS, type CodeFolderKey, type CodeFolderStore } from "./codeFolder.ts";
 import { toAnthropicTools, type LocalTools, type LocalToolScope, type ToolCallResult } from "./toolBridge.ts";
 
 let dir: string;
@@ -149,6 +149,67 @@ describe("code folder store", () => {
   });
 });
 
+describe("glob patterns", () => {
+  it("match within a folder with * and ?, across folders with **, and either of {a,b}, ignoring case", () => {
+    const cases: [string, string[], string[]][] = [
+      ["*.swift", ["Colors.swift", ".swift", "a.SWIFT"], ["ui/Colors.swift", "Colors.swiftx"]],
+      ["**/*color*", ["colors.ts", "src/ui/Colors.swift", "a/b/c/theme-color"], ["src/colors/tokens.ts"]],
+      ["src/**", ["src/", "src/a", "src/a/b.ts"], ["src", "lib/src/a"]],
+      ["**", ["", "a", "a/b/c"], []],
+      ["ui/*", ["ui/Colors.swift", "ui/"], ["ui/x/y.swift", "src/ui/a"]],
+      ["?.ts", ["a.ts"], ["ab.ts", "/.ts", ".ts"]],
+      ["*.{ts,tsx}", ["a.ts", "a.tsx", "A.TSX"], ["a.js", "a.ts,tsx", "a.{ts,tsx}"]],
+      ["{}x", ["x"], ["{}x"]],
+      ["{a,b", ["{a,b"], ["a", "b"]],
+      ["a+b.(c)[d]^$|\\", ["a+b.(c)[d]^$|\\"], ["aab.(c)[d]^$|\\", "a+bx(c)d^$|\\"]],
+    ];
+    for (const [glob, yes, no] of cases) {
+      const matches = globMatcher(glob);
+      for (const p of yes) expect(matches(p), `${glob} ~ ${p}`).toBe(true);
+      for (const p of no) expect(matches(p), `${glob} !~ ${p}`).toBe(false);
+    }
+  });
+
+  it("match exactly what the RegExps they replaced matched", () => {
+    // The RegExp code folder globs compiled to before (too slow for some patterns, but right).
+    const regExpOf = (glob: string): RegExp => {
+      const body = (t: string): string => {
+        let re = "";
+        for (let i = 0; i < t.length; i++) {
+          const c = t[i]!;
+          if (c === "*" && t[i + 1] === "*") {
+            i++;
+            if (t[i + 1] === "/") {
+              i++;
+              re += "(?:.*/)?";
+            } else re += ".*";
+          } else if (c === "*") re += "[^/]*";
+          else if (c === "?") re += "[^/]";
+          else if (c === "{" && t.indexOf("}", i) > i) {
+            const end = t.indexOf("}", i);
+            re += `(?:${t.slice(i + 1, end).split(",").map(body).join("|")})`;
+            i = end;
+          } else re += c.replace(/[.+^${}()|[\]\\]/g, "\\$&");
+        }
+        return re;
+      };
+      return new RegExp(`^${body(glob)}$`, "i");
+    };
+    let seed = 7;
+    const pick = (from: string) => from[(seed = (seed * 48_271) % 2_147_483_647) % from.length]!;
+    const word = (from: string, most: number) => Array.from({ length: Number(pick("012345678".slice(0, most + 1))) }, () => pick(from)).join("");
+    for (let n = 0; n < 3_000; n++) {
+      const glob = word("aB/*?{},.", 7);
+      const matches = globMatcher(glob);
+      const re = regExpOf(glob);
+      for (let k = 0; k < 20; k++) {
+        const p = word("abB/.", 8);
+        expect(matches(p), `${JSON.stringify(glob)} on ${JSON.stringify(p)}`).toBe(re.test(p));
+      }
+    }
+  });
+});
+
 describe("code tools", () => {
   it("lists their names in a stable order with closed input schemas", async () => {
     const { tools } = await linkedTools();
@@ -259,6 +320,42 @@ describe("code tools", () => {
     expect(text(await tools.call("search_code", { query: "API_KEY" }, scope()))).toBe("src/theme.ts:1: API_KEY usage");
   });
 
+  it("refuses the other files where apps keep passwords and keys: *.env, Android signing, Terraform, PuTTY and PGP", async () => {
+    const secrets = [
+      "prod.env",
+      "docker/app.env",
+      "android/key.properties",
+      "android/keystore.properties",
+      "android/local.properties",
+      "deploy.ppk",
+      "id_dsa",
+      "infra/prod.auto.tfvars",
+      "infra/terraform.tfstate",
+      "infra/terraform.tfstate.backup",
+      "infra/terraform.tfvars",
+      "infra/terraform.tfvars.json",
+      "keys/release.asc",
+      "vault.kdbx",
+    ];
+    for (const secret of secrets) await put(secret, "password=hunter2\n");
+    // Names that only look close stay readable.
+    for (const kept of ["src/env.ts", "src/vite-env.d.ts", "src/environment.ts"]) await put(kept, "export const accent = 'hunter2-purple';\n");
+    const { tools } = await linkedTools();
+
+    const listed = text(await tools.call("list_code_files", {}, scope())).split("\n");
+    for (const secret of secrets) expect(listed, secret).toContain(`(skipped: may hold secrets) ${secret}`);
+    for (const secret of secrets) {
+      const read = await tools.call("read_code_file", { path: secret }, scope());
+      expect(read.isError, secret).toBe(true);
+      expect(text(read)).toBe(`Sonobe doesn't read “${secret}”: files like it can hold secrets. Look for theme or token files instead.`);
+    }
+    expect(text(await tools.call("search_code", { query: "hunter2" }, scope())).split("\n")).toEqual([
+      "src/env.ts:1: export const accent = 'hunter2-purple';",
+      "src/environment.ts:1: export const accent = 'hunter2-purple';",
+      "src/vite-env.d.ts:1: export const accent = 'hunter2-purple';",
+    ]);
+  });
+
   it.skipIf(!posix)("follows links to files inside the folder only, and never walks into a linked folder", async () => {
     await put("src/theme.ts", "export const accent = '#8B5CF6';\n");
     await put("outside.txt", "outside\n", dir);
@@ -362,6 +459,42 @@ describe("code tools", () => {
     expect(text(await tools.call("read_code_file", { path: "src/half.pem.txt" }, scope()))).toBe("src/half.pem.txt (lines 1–3 of 3)\na\n[redacted]\n[redacted]");
   });
 
+  it("redacts current OpenAI, fine-grained GitHub, GitLab and Stripe keys and PGP private keys, and leaves CSS and names alone", async () => {
+    const lines = [
+      'const openai = "sk-proj-AbCdEfGhIjKlMnOpQrStUvWxYz_0123-abcdEFGH-ijkl";',
+      'const service = "sk-svcacct-AbCdEfGhIjKlMnOpQrStUvWxYz0123";',
+      'const admin = "sk-admin-AbCdEfGhIjKlMnOpQrStUvWxYz0123";',
+      'const github = "github_pat_11ABCDEFG0123456789_abcdefghijklmnopqrstuvwxyzABCDEFGHIJ";',
+      'const gitlab = "glpat-AbCdEfGhIjKlMnOpQrSt";',
+      'const stripe = "sk_live_51HAbCdEfGhIjKlMnOpQrStUv";',
+      'const restricted = "rk_live_51HAbCdEfGhIjKlMnOpQrStUv";',
+      'const test = "sk_test_51HAbCdEfGhIjKlMnOpQrStUv";',
+      "-----BEGIN PGP PRIVATE KEY BLOCK-----",
+      "lQOYBGRabcdefghijklmnopqrstuvwxyz",
+      "-----END PGP PRIVATE KEY BLOCK-----",
+      ".hero { mask-image: var(--mask-image-linear-to-bottom-of-the-card); }",
+      '<div className="desk-admin-panel-component-wrapper" />',
+      "const task_live_AbCdEfGhIjKlMnOpQrSt = true;",
+    ];
+    await put("src/config.ts", `${lines.join("\n")}\n`);
+    const { tools } = await linkedTools();
+    expect(text(await tools.call("read_code_file", { path: "src/config.ts" }, scope())).split("\n")).toEqual([
+      "src/config.ts (lines 1–14 of 14)",
+      'const openai = "[redacted]";',
+      'const service = "[redacted]";',
+      'const admin = "[redacted]";',
+      'const github = "[redacted]";',
+      'const gitlab = "[redacted]";',
+      'const stripe = "[redacted]";',
+      'const restricted = "[redacted]";',
+      'const test = "[redacted]";',
+      "[redacted]",
+      "[redacted]",
+      "[redacted]",
+      ...lines.slice(11),
+    ]);
+  });
+
   it("refuses binaries and files over 2 MB, and search skips them", async () => {
     await put("assets/logo.png", new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x00, 0x0d, 0x0a]));
     await put("dist-big.txt", "a".repeat(2 * 1024 * 1024 + 1));
@@ -463,6 +596,33 @@ describe("code tools", () => {
     expect(text(await running)).toBe("Stopped: the person pressed Stop, so the code folder wasn't read.");
     // With time to finish, the same search goes through.
     expect((await tools.call("search_code", { query: "v999 =" }, scope())).content[0]!.text).toBe("src/f999.ts:1: export const v999 = 999;");
+  });
+
+  it("answers at once for patterns a backtracking RegExp takes minutes or years over", async () => {
+    // "********************q" took about 100 s against the first name when globs were RegExps, blocking Electron's main process.
+    const long = "a-very-long-component-file-name-for-the-button.tsx";
+    const as = `${"a".repeat(200)}.tsx`;
+    await put(`src/${long}`, "export const accent = 'purple';\n");
+    await put(`src/${as}`, "export const accent = 'purple';\n");
+    const { tools } = await linkedTools();
+    const patterns = ["*".repeat(20) + "q", "*".repeat(199) + "q", "*a".repeat(99) + "q", "?*".repeat(99) + "q", "{*,*}".repeat(39) + "q", "**/".repeat(66) + "q"];
+    for (const pattern of patterns) {
+      expect(pattern.length, pattern).toBeLessThanOrEqual(200);
+      for (const [tool, input, answer] of [
+        ["list_code_files", { pattern }, `No files match “${pattern}” in the linked folder.`],
+        ["search_code", { query: "accent", pattern }, "No matches for “accent” in the linked folder."],
+      ] as const) {
+        const started = performance.now();
+        const result = await tools.call(tool, input, scope());
+        const took = performance.now() - started;
+        expect(text(result), `${tool} ${pattern}`).toBe(answer);
+        expect(took, `${tool} ${pattern}`).toBeLessThan(1_000);
+      }
+    }
+    // The same shapes still match what they should.
+    expect(text(await tools.call("list_code_files", { pattern: "*".repeat(20) + "x" }, scope()))).toBe(`src/${long}  32 B\nsrc/${as}  32 B`);
+    expect(text(await tools.call("list_code_files", { pattern: "*a".repeat(99) + "*x" }, scope()))).toBe(`src/${as}  32 B`);
+    expect(text(await tools.call("list_code_files", { pattern: "**/".repeat(60) + "*button*" }, scope()))).toBe(`src/${long}  32 B`);
   });
 
   it(`stops walking after looking at 5,000 entries`, async () => {

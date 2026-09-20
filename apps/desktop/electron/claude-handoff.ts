@@ -3,8 +3,8 @@
  * instead of an API key. Main writes a one-time zsh script and opens it in Terminal, which runs the
  * person's own `claude` in their app's folder with the prompt they wrote. They see and drive that
  * session; Sonobe never runs Claude headlessly and never reads its output or credentials
- * (ARCHITECTURE §10). When no `sonobe` server is configured for that folder, the script passes the
- * app's relay with `--mcp-config` for that session only, so the person's Claude settings don't change.
+ * (ARCHITECTURE §10). The script passes the app's relay as `sonobe` with `--mcp-config`, for that
+ * session only, so the person's Claude settings don't change.
  *
  * Electron-free: main injects shell.openPath, the folder dialog and the relay's launch spec.
  */
@@ -24,7 +24,7 @@ const STALE_SCRIPT_MS = 24 * 60 * 60 * 1000;
 
 export const HANDOFF_NOT_MAC = "Open in Claude Code works on macOS for now. Copy the prompt instead, and paste it into Claude Code in your app's folder.";
 
-/** The MCP server a session gets when its folder has none named `sonobe`: the app's relay, as Connect Claude launches it. */
+/** The MCP server the session gets as `sonobe`: the app's relay, as Connect Claude launches it. */
 export interface HandoffServer {
   command: string;
   args: string[];
@@ -62,6 +62,15 @@ export function handoffMcpConfig(server: HandoffServer): string {
  * The one-time Terminal script (`display`: the folder as its error names it, like "~/code/placemark").
  * `claude` takes its prompt after `--`: `--mcp-config <configs...>` takes every argument after it,
  * and without `--` a prompt starting with "-" is refused as an unknown option.
+ *
+ * The script always passes Sonobe's relay, without asking `claude mcp get sonobe` first. That exits 0
+ * for any server of the name, even one in the folder's own .mcp.json that is pending approval or was
+ * rejected, so a cloned repo could stand in for the relay or leave the session without it. A
+ * `--mcp-config` server replaces a user, local or project server of the same name for the session
+ * (Claude Code 2.1 connects `{...configured, ...dynamic}`), so as `sonobe` the session has one relay,
+ * the app's, even for people who added one with Connect Claude, and their saved `mcp__sonobe__*`
+ * permissions still apply; under another name they'd get every tool twice. Claude Code still asks
+ * about the folder's own `sonobe`, but approving it doesn't replace the app's relay in this session.
  */
 export function buildHandoffScript(o: { folder: string; prompt: string; mcpConfig: string; display?: string }): string {
   const folder = shellQuote(o.folder);
@@ -75,8 +84,6 @@ export function buildHandoffScript(o: { folder: string; prompt: string; mcpConfi
     `  print -r -- ${shellQuote("Claude Code isn't installed, or isn't on your PATH. Install it from https://claude.com/claude-code, then try Open in Claude Code again.")}`,
     "  exit 1",
     "fi",
-    // `claude mcp get` exits 1 when the folder has no server by that name.
-    `if claude mcp get sonobe >/dev/null 2>&1; then exec claude -- ${prompt}; fi`,
     `exec claude --mcp-config ${shellQuote(o.mcpConfig)} -- ${prompt}`,
     "",
   ].join("\n");
