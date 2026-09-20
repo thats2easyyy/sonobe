@@ -9,9 +9,11 @@ The Electron shell around the editor: windows, native menus, project files, the 
 | `electron/app-host.ts` | The `SonobeHost` MCP tools run against, bridged to the editor's RPC handlers |
 | `electron/commands.ts`, `electron/menu.ts` | Menu commands and accelerators (checked against the editor's shortcuts) |
 | `electron/secrets.ts` | Keychain-backed secrets (Electron `safeStorage`) |
+| `electron/design-capture.ts`, `electron/symbols.ts` | Design import's hidden capture window, and the SF Symbols it draws on macOS |
+| `native/sfsymbol/` | `sfsymbol`, a small Swift program that draws SF Symbols as SVG for design imports |
 | `player/` | The web player for phones and the pop-out viewer |
 | `scene/` | A hidden page that draws simulation frames for `get_screenshot({ simId })` |
-| `scripts/` | `build.mjs`, `icons.mjs`, `package.mjs`, `verify-package.mjs` |
+| `scripts/` | `build.mjs`, `sfsymbol.ts`, `icons.mjs`, `package.mjs`, `verify-package.mjs` |
 
 ## Scripts
 
@@ -19,7 +21,7 @@ Run these from the repository root with `-w @sonobe/desktop`, or from this folde
 
 | Command | Does |
 | --- | --- |
-| `npm run build` | Bundles main, preload, player, scene renderer and the `sonobe` CLI into `dist/` |
+| `npm run build` | Bundles main, preload, player, scene renderer and the `sonobe` CLI into `dist/`, and on macOS compiles `dist/bin/sfsymbol` (needs Xcode's command line tools; cached after the first build) |
 | `npm run start` | Builds and launches against `apps/editor/dist` (or `SONOBE_DEV_URL`) |
 | `npm test` | Unit and integration tests (`electron/**/*.test.ts`) |
 | `npm run smoke` | Muted end-to-end Electron run: host API, MCP loop, phone preview, pop-out viewer |
@@ -43,3 +45,5 @@ Run these from the repository root with `-w @sonobe/desktop`, or from this folde
 Local builds are ad-hoc signed (`mac.identity: "-"`) with hardened runtime off. That's enough to run on your own Mac but not to distribute. For distribution, set a Developer ID identity, turn on `hardenedRuntime`, and notarize.
 
 The app ships the CLI in `Resources/cli`. `Resources/cli/sonobe` runs `sonobe.mjs` with the app's own runtime in Node mode, so no separate Node install is needed. For example, `/Applications/Sonobe.app/Contents/Resources/cli/sonobe mcp` is the stdio relay Claude Desktop can launch.
+
+On macOS the app also ships `Resources/bin/sfsymbol`, outside app.asar so it can run. Design imports use it to draw `<svg data-sf-symbol>` placeholders as real SF Symbols (macOS 13 or later), and the bundled CLI points headless servers at it through `SONOBE_SFSYMBOL`. Try it by hand: `sfsymbol heart.fill --size 17 --weight semibold --color '#FF3B30'` prints the SVG, and `sfsymbol --list` prints every name.

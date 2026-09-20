@@ -35,7 +35,7 @@ The first two finish Stage 4. The rest are Stage 5.
 - [x] Canvas: direct manipulation, snapping, insert shapes and text, alignment tools
 - [x] Layer ↔ patch bridges: Touch button, inspector property links, drag a cable onto a property
 - [ ] Viewer: device picker, frame, restart, hit-target overlay, pop-out window, LAN web player with QR code, recording (partial: recording remains)
-- [ ] Native iPhone preview: Sonobe Viewer (`apps/ios`) plays the LAN web player full screen with real haptics. Haptic and Vibrate reach UIFeedbackGenerator and Core Haptics over a small bridge, the app scans the Preview on Phone code, and `npm run test:ios` runs its tests on a simulator. Android phones vibrate in the browser (partial: tested only in the Simulator, built from source until TestFlight, and importing SF Symbols as real icons remains)
+- [ ] Native iPhone preview: Sonobe Viewer (`apps/ios`) plays the LAN web player full screen with real haptics. Haptic and Vibrate reach UIFeedbackGenerator and Core Haptics over a small bridge, the app scans the Preview on Phone code, and `npm run test:ios` runs its tests on a simulator. Android phones vibrate in the browser (partial: tested only in the Simulator, and built from source until TestFlight)
 - [x] Assets: images, video, sound, fonts, Lottie (drag and drop)
 - [x] Examples: 15 canonical recipes as runnable projects with scripted tests
 - [x] Learn panel: 5 interactive lessons, the guides, the examples, and the patch reference
@@ -58,6 +58,7 @@ The first two finish Stage 4. The rest are Stage 5.
 ## Stage 5: Bring work in, build together
 - [x] Import designs from code: `@sonobe/import` reads a rendered page (computed layout and styles, so any framework and any CSS) into a neutral design capture and converts it into layers, image assets, text fields and Scroll patches. The desktop app renders URLs and HTML in a hidden sandboxed window (File → Import Design…), the browser editor renders HTML in a sandboxed iframe, headless servers use Playwright, and pasting a capture imports it. Claude imports with `import_design` from a dev server, from HTML it writes from any codebase, or from a capture
 - [x] Import fidelity: web fonts come along as font assets that every renderer registers
+- [x] SF Symbols in imports: `<svg data-sf-symbol="heart.fill">` in imported HTML becomes the real symbol as an SVG image, drawn on the person's Mac by a small SwiftUI helper the app ships (macOS 13 or later; headless servers use it through `SONOBE_SFSYMBOL`). Elsewhere it stays a gray placeholder with a note. Next: an Insert → SF Symbol picker
 - [ ] Rich text layers (partial: an imported paragraph that mixes styles becomes a group of single-style runs per line, which looks right but edits in pieces; paragraphs over 16 lines flatten to their main style)
 - [x] Chrome extension (`integrations/chrome-extension`): copy a page, or pick an element, with the same DOM walker, and paste it into Sonobe. Built and loaded unpacked from a checkout (partial: not published to the Chrome Web Store)
 - [ ] Figma import (partial: `integrations/figma-plugin` copies a selection as a design capture that pastes into Sonobe; the mapping has unit tests and the bundle runs against a stand-in API, but it hasn't been verified inside Figma or published)
