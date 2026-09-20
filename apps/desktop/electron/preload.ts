@@ -67,6 +67,14 @@ const host: SonobeHost = {
     return { files: result.files, binaries };
   },
 
+  async readProjectIfExists(dir): Promise<ProjectFiles | null> {
+    const result = (await ipcRenderer.invoke(IPC.readProjectIfExists, dir)) as { files: Record<string, string>; binaries: Record<string, Uint8Array> } | null;
+    if (!result) return null;
+    const binaries: Record<string, ArrayBuffer> = {};
+    for (const [rel, bytes] of Object.entries(result.binaries)) binaries[rel] = toArrayBuffer(bytes);
+    return { files: result.files, binaries };
+  },
+
   async writeProject(dir, changes: ProjectWrite) {
     await ipcRenderer.invoke(IPC.writeProject, dir, {
       files: changes.files ?? {},

@@ -303,6 +303,8 @@ export interface SonobeHost {
   /** Native save panel; resolves a path ending in ".sonobe" (not yet created) or null. */
   saveProjectDialog(defaultName: string): Promise<string | null>;
   readProject(dir: string): Promise<ProjectFiles>;
+  /** Like readProject, but resolves null for a folder that doesn't exist yet (a Save As target). */
+  readProjectIfExists(dir: string): Promise<ProjectFiles | null>;
   /** Atomic per-file writes; creates the folder when saving to a path from saveProjectDialog. */
   writeProject(dir: string, changes: ProjectWrite): Promise<void>;
   /** Debounced change notifications for external edits. Returns unsubscribe. */

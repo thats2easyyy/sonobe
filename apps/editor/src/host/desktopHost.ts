@@ -68,7 +68,8 @@ export function createDesktopHost(api: DesktopHostApi): HostAdapter {
         // A folder this window never read (Save As onto an existing prototype the person chose to
         // replace): diff against what's there, so the old project's components and scripts go away.
         try {
-          previous = documentFiles((await api.readProject(dir)).files);
+          const existing = api.readProjectIfExists ? await api.readProjectIfExists(dir) : await api.readProject(dir);
+          previous = existing ? documentFiles(existing.files) : undefined;
         } catch {
           previous = undefined; // A new folder.
         }
