@@ -2,6 +2,7 @@ import { createServer, type Server } from "node:http";
 import v8 from "node:v8";
 import vm from "node:vm";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { ANONYMOUS_CLIENT, createClientRegistry, type ClientRegistry } from "./clients.ts";
 import type { HeadlessHost } from "./headless.ts";
 import type { CapturedDesign, DesignCaptureRequest, HostCallControl } from "./host.ts";
 import { modernMeta, tempProject, type TempProject } from "./test-helpers.ts";
@@ -187,5 +188,76 @@ describe("createHttpHandler: long calls", () => {
     const res = await fetch(url, { method: "POST", headers: LEGACY, body: "{not json" });
     expect(res.status).toBe(400);
     expect(await res.json()).toMatchObject({ jsonrpc: "2.0", id: null, error: { code: -32700 } });
+  });
+});
+
+describe("createHttpHandler: sessions", () => {
+  const A = "11111111-aaaa-4bbb-8ccc-000000000001";
+  const B = "22222222-aaaa-4bbb-8ccc-000000000002";
+  let clients: ClientRegistry;
+  let sessionUrl: string;
+  let sessions: TempProject;
+
+  beforeAll(async () => {
+    sessions = await tempProject();
+    clients = createClientRegistry();
+    const handler = createHttpHandler(sessions.host, { version: "0.1.0-test", clients });
+    const server = createServer((req, res) => void handler(req, res));
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", () => resolve()));
+    servers.push({ handler, server });
+    sessionUrl = `http://127.0.0.1:${(server.address() as { port: number }).port}/mcp`;
+  });
+
+  afterAll(async () => {
+    await sessions.cleanup();
+  });
+
+  /** One tools/call over stateless HTTP; returns the result's text. */
+  async function callAs(client: string | null, name: string, args: Record<string, unknown> = {}, modern = false): Promise<string> {
+    const headers: Record<string, string> = modern
+      ? { "content-type": "application/json", accept: "application/json, text/event-stream", "mcp-protocol-version": "2026-07-28", "mcp-method": "tools/call", "mcp-name": name }
+      : { ...LEGACY };
+    if (client) headers["sonobe-client"] = client;
+    const res = await fetch(sessionUrl, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name, arguments: args, ...(modern ? { _meta: modernMeta("cursor-agent") } : {}) } }),
+    });
+    const result = (await sseMessages(res)).find((m) => m.id === 1)?.result as { content?: { text?: string }[] } | undefined;
+    return result?.content?.map((c) => c.text ?? "").join("\n") ?? "";
+  }
+
+  it("counts tool calls per relay session, and puts clients without the relay in one row", async () => {
+    clients.hello({ id: A, name: "claude-code", title: "Claude Code", folder: "/Users/me/noddit" });
+    await callAs(A, "list_documents");
+    await callAs(A, "get_outline");
+    await callAs(null, "list_documents");
+    expect(clients.get(A)).toMatchObject({ label: "Claude Code", folder: "/Users/me/noddit", toolCalls: 2, lastTool: "get_outline", state: "connected" });
+    expect(clients.get(ANONYMOUS_CLIENT)).toMatchObject({ via: "http", label: "Unidentified MCP client", toolCalls: 1 });
+    // A 2026-07-28 client names itself on every request, relay or not.
+    await callAs(null, "list_documents", {}, true);
+    expect(clients.get(ANONYMOUS_CLIENT)).toMatchObject({ label: "Cursor Agent", toolCalls: 2 });
+  });
+
+  it("attributes a relay session's edits by the name its hello announced", async () => {
+    clients.hello({ id: B, name: "cursor-agent" });
+    expect(await callAs(B, "add_layers", { layers: [{ type: "oval", name: "Session Dot" }] })).toContain("session_dot");
+    const [latest] = await sessions.host.history.list({ limit: 1 });
+    expect(latest?.author).toEqual({ kind: "agent", name: "Cursor Agent" });
+  });
+
+  it("keeps each session's working badge, so one finish_work doesn't clear the other", async () => {
+    clients.hello({ id: A, name: "claude-code", title: "Claude Code", folder: "/Users/me/noddit" });
+    clients.hello({ id: B, name: "claude-code", title: "Claude Code", folder: "/Users/me/sonobe" });
+    await callAs(A, "begin_work", { intent: "Tuning the deck" });
+    await callAs(B, "begin_work", { intent: "Adding a tab bar" });
+    expect((await sessions.host.presence()).map((w) => [w.intent, w.client?.folder])).toEqual([
+      ["Tuning the deck", "/Users/me/noddit"],
+      ["Adding a tab bar", "/Users/me/sonobe"],
+    ]);
+    await callAs(A, "finish_work");
+    expect((await sessions.host.presence()).map((w) => w.intent)).toEqual(["Adding a tab bar"]);
+    await callAs(B, "finish_work");
+    expect(await sessions.host.presence()).toEqual([]);
   });
 });

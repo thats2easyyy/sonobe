@@ -16,6 +16,7 @@ import {
 } from "@modelcontextprotocol/server";
 import { serveStdio } from "@modelcontextprotocol/server/stdio";
 import { toNodeHandler } from "@modelcontextprotocol/node";
+import { CLIENT_HEADER, isClientId } from "./clients.ts";
 import type { DocumentChange, SonobeHost } from "./host.ts";
 import type { CallScope } from "./progress.ts";
 import {
@@ -102,6 +103,9 @@ export type NodeMcpHandler = ((req: IncomingMessage, res: ServerResponse) => Pro
  * bodies are parsed here (the SDK then never clones), each request holds its own AbortController
  * that fires when the response closes unfinished, and a 2025-era notifications/cancelled, which
  * arrives on a POST of its own, aborts the call it names when exactly one call in flight has that id.
+ *
+ * Sessions: the relay's `sonobe-client` header rides the same per-request scope, so with
+ * `options.clients` every tool call counts toward that session's row (clients.ts).
  */
 export function createHttpHandler(host: SonobeHost, options: TransportOptions): NodeMcpHandler {
   const inflight = new Map<string | number, Set<AbortController>>();
@@ -122,7 +126,7 @@ export function createHttpHandler(host: SonobeHost, options: TransportOptions): 
         // Only 2025-era calls are cancelled by id; 2026-07-28 clients close the stream instead.
         callScope: () => {
           const call = httpCalls.getStore();
-          return legacy || !call?.signal ? call : { signal: call.signal };
+          return legacy || !call?.signal ? call : { signal: call.signal, ...(call.clientId ? { clientId: call.clientId } : {}) };
         },
       });
       if (legacy) {
@@ -160,7 +164,9 @@ export function createHttpHandler(host: SonobeHost, options: TransportOptions): 
     res.on("close", () => {
       if (!res.writableFinished) connection.abort(new Error("The MCP client disconnected."));
     });
-    const scope: CallScope = { signal: connection.signal, track };
+    // The relay names its session on every POST (clients.ts); tool calls record it and name the author.
+    const clientId = req.headers[CLIENT_HEADER];
+    const scope: CallScope = { signal: connection.signal, track, ...(isClientId(clientId) ? { clientId } : {}) };
     if (req.method?.toUpperCase() !== "POST" || !isJsonContentType(req.headers["content-type"])) return httpCalls.run(scope, () => node(req, res));
     const body = await readJsonBody(req);
     if (!body.ok) {

@@ -410,6 +410,26 @@ describe("app host presence, selection and screenshots", () => {
     expect(await host.presence()).toEqual([]);
   });
 
+  it("keeps one working badge per session, so one session's finish doesn't clear another's", async () => {
+    const w = editorWindow(1);
+    const host = appHost([w]);
+    const noddit = { id: "11111111-aaaa-4bbb-8ccc-000000000001", label: "Claude Code", folder: "/Users/me/noddit" };
+    const sonobe = { id: "22222222-aaaa-4bbb-8ccc-000000000002", label: "Claude Code", folder: "/Users/me/sonobe" };
+    await host.setWorking({ ids: ["card"], intent: "Tuning the deck" }, { author: CLAUDE, client: noddit });
+    await host.setWorking({ ids: [], intent: "Adding a tab bar" }, { author: CLAUDE, client: sonobe });
+    expect(w.session.presence.getState().working).toMatchObject([
+      { intent: "Tuning the deck", client: noddit },
+      { intent: "Adding a tab bar", client: sonobe },
+    ]);
+    await host.setWorking(null, { author: CLAUDE, client: noddit });
+    expect(w.session.presence.getState().working).toMatchObject([{ intent: "Adding a tab bar" }]);
+    // A finish the host has no badge for (after an editor reload) still only clears that session's.
+    await host.setWorking(null, { author: CLAUDE, client: noddit });
+    expect(w.session.presence.getState().working).toHaveLength(1);
+    await host.setWorking(null, { author: CLAUDE, client: sonobe });
+    expect(await host.presence()).toEqual([]);
+  });
+
   it("crops screenshots to the visible viewer stage", async () => {
     const w = editorWindow(1);
     const host = appHost([w]);

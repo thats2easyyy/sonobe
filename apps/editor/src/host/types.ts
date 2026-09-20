@@ -36,6 +36,8 @@ export interface DesktopHostApi {
   setTitle(title: string): void;
   rpc: RpcRegistrar;
   getMcpStatus(): Promise<unknown>;
+  /** MCP status changes (a session connected, called a tool, or left). Optional: older preloads lack it. */
+  onMcpStatus?(cb: (status: unknown) => void): () => void;
   /** Push the live document's revision (and the Edit menu's Undo and Redo titles) to main. Optional: older preloads lack it. */
   notifyDocumentChanged?(revision: number, history?: { undo: string; redo: string }): void;
   /** Open a web or mail link in the system browser. Optional: older preloads lack it. */

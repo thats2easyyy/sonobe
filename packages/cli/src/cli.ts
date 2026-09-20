@@ -75,7 +75,7 @@ Options:
 Examples:
   sonobe new "Photo Zoom.sonobe" --template photo-zoom
   sonobe sim "Photo Zoom.sonobe" --events tap.json --trace @photo.scale --duration 800
-  claude mcp add sonobe -- sonobe mcp
+  claude mcp add --scope user sonobe -- sonobe mcp
 `;
 
 const COMMAND_HELP: Record<string, string> = {
@@ -115,13 +115,16 @@ Starts a deterministic simulation, dispatches the events, and prints every trace
        sonobe mcp --headless <dir> [--no-autosave]
 
 Without --headless: a stdio relay to the running Sonobe app. It reads ~/.sonobe/mcp.json
-(SONOBE_HOME overrides the folder) and forwards MCP messages with the app's token.
+(SONOBE_HOME overrides the folder) and forwards MCP messages with the app's token. It tells the
+app which session it is (the client's name and CLAUDE_PROJECT_DIR, or its working folder), so
+Connect Claude lists connected sessions.
 
 With --headless: serves a project folder directly (editing, simulation, saving, and screenshots
 drawn without the app).
 Changes are saved after every edit unless --no-autosave.
 
-Claude Code:     claude mcp add sonobe -- sonobe mcp
+Claude Code:     claude mcp add --scope user sonobe -- sonobe mcp
+                 (--scope user: every project gets the tools, not just the current folder)
 Claude Desktop:  install integrations/claude-desktop (see its README)`,
 };
 
@@ -457,6 +460,9 @@ async function cmdMcp(args: string[], io: CliIo): Promise<number> {
       stdout: io.stdout,
       stderr: io.stderr,
       fetch: io.fetch,
+      env: io.env,
+      cwd: io.cwd,
+      version: VERSION,
     });
   const dir = path.resolve(io.cwd, values.headless);
   const autosave = !values["no-autosave"];

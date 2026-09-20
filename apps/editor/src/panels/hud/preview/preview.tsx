@@ -21,9 +21,23 @@ import { LearnDrawer, type LearnView } from "../../learn/index.ts";
 import { Hud, type HudTabId } from "../index.ts";
 import "./preview.css";
 
+/** A session the app heard from `secondsAgo` seconds ago (Connect Claude's session rows). */
+const previewSession = (id: string, folder: string, secondsAgo: number, extra: Record<string, unknown> = {}) => {
+  const now = Date.now();
+  return { id, label: "Claude Code", name: "claude-code", version: "2.1.278", folder, via: "relay", state: "connected", connectedAt: now - 20 * 60_000, lastSeenAt: now, lastActivityAt: now - secondsAgo * 1000, lastTool: "sim_trace", toolCalls: 42, relayVersion: "0.1.0", ...extra };
+};
+
 const DESKTOP_HOST: ConnectHostLike = {
   platform: "darwin",
-  getMcpStatus: async () => ({ running: true, port: 52817, url: "http://127.0.0.1:52817/mcp", tokenFile: "/Users/you/.sonobe/mcp.json" }),
+  getMcpStatus: async () => ({
+    running: true,
+    port: 52817,
+    url: "http://127.0.0.1:52817/mcp",
+    tokenFile: "/Users/you/.sonobe/mcp.json",
+    version: "0.1.0",
+    checkedAt: Date.now(),
+    clients: [previewSession("0f6b2c1e-5d0a-4a57-9a3e-1c2d3e4f5a60", "/Users/you/workspace/noddit", 12), previewSession("7a1c9e44-2b3d-4c5e-8f60-718293a4b5c6", "/Users/you/workspace/sonobe", 540, { state: "gone", lastTool: "finish_work", toolCalls: 7 })],
+  }),
 };
 
 function withProblems(doc: SonobeDocument): SonobeDocument {

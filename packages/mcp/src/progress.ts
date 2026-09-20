@@ -21,6 +21,8 @@ export interface CallScope {
   signal?: AbortSignal;
   /** Let a notifications/cancelled naming `requestId` abort `controller`. Returns the unregister function. */
   track?(requestId: string | number, controller: AbortController): () => void;
+  /** The calling session's `sonobe-client` header (clients.ts), when the relay sent one. */
+  clientId?: string;
 }
 
 /** The call's one cancellation signal: the SDK's own, the connection's, and cancels routed by request id. */
