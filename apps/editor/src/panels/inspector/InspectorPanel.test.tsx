@@ -364,6 +364,23 @@ describe("InspectorPanel", () => {
     expect(input("Z Position")).not.toBeNull();
   });
 
+  it("leaves a component's published pulse input to connections, on an instance layer", () => {
+    const s = mount(
+      build([
+        { op: "addComponent", component: { id: "chip", name: "Chip", kind: "layerComponent" } },
+        { op: "addLayer", component: "chip", layer: { id: "bg", type: "rectangle", name: "BG", props: { size: [100, 40] } } },
+        { op: "updateInterface", component: "chip", inputs: { reset: { key: "reset", name: "Reset", type: "pulse" } } },
+        { op: "addPatch", component: "chip", patch: { id: "sw", type: "switch", inputs: { flip: { link: "$in.reset" } }, ui: { x: 0, y: 0 } } },
+        { op: "addLayer", layer: { id: "c1", type: "componentInstance", name: "Chip", component: "chip", props: {} } },
+      ]),
+    );
+    s.runtime.stepFrame();
+    select(s, { layers: ["c1"] });
+    for (const more of [...container.querySelectorAll<HTMLButtonElement>(".sb-insp-section__more")]) click(more);
+    expect(rowNamed("Reset").textContent).toContain("Fires only from a connection");
+    expect(rowNamed("Reset").querySelector('button[aria-label="Fire Reset"]')).toBeNull();
+  });
+
   it("fires a Text Field's pulse properties into the running prototype, never into the document", () => {
     const s = mount(
       build([

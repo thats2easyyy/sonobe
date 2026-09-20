@@ -159,13 +159,14 @@ export function ValueControl(props: ValueControlProps) {
 /**
  * A layer's pulse property (a Text Field's Set Text, Begin Editing, End Editing): Fire sends it to
  * the running prototype, in the instance and copy the live read-outs watch, and never changes the
- * document. Patch inputs, and layers of a component the prototype doesn't run, fire only from a
+ * document. Patch inputs, a component instance's published pulse inputs (the engine fires only a
+ * layer type's own pulses) and layers of a component the prototype doesn't run fire only from a
  * connection.
  */
 function PulseControl({ field, label }: ValueControlProps) {
   const session = useEditorSession();
   const { prefix, copy } = useWatchedScope(session);
-  const layers = field.targets.length > 0 && field.targets.every((t) => t.address.startsWith("@"));
+  const layers = !field.port.fromInterface && field.targets.length > 0 && field.targets.every((t) => t.address.startsWith("@"));
   if (!layers || prefix === null) return <span className="sb-insp-hint">Fires only from a connection</span>;
   const fire = () => {
     const scene = session.runtime.scene();
