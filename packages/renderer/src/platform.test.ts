@@ -380,6 +380,44 @@ describe("platform: devices and capture", () => {
     ios.dispatchEvent(new Event("pointerup"));
     expect(requestPermission).toHaveBeenCalledTimes(1);
 
+    // A touch is a gesture only once the finger lifts, so iOS is asked on pointerup, not pointerdown.
+    let activation = false;
+    const requires = (name: string) =>
+      vi.fn(() => {
+        asked.push(`${name} ${activation ? "inside" : "outside"} the gesture`);
+        return activation ? Promise.resolve("granted") : Promise.reject(Object.assign(new Error("requires a user gesture"), { name: "NotAllowedError" }));
+      });
+    const asked: string[] = [];
+    const touchPhone = fakeWindow({ DeviceMotionEvent: Object.assign(class {}, { requestPermission: requires("motion") }), DeviceOrientationEvent: Object.assign(class {}, { requestPermission: requires("orientation") }) });
+    const touched = createBrowserPlatform({ window: touchPhone, mute: muteStore() });
+    const tap = async (pointerType: string) => {
+      touchPhone.dispatchEvent(Object.assign(new Event("pointerdown"), { pointerType }));
+      activation = true;
+      touchPhone.dispatchEvent(Object.assign(new Event("pointerup"), { pointerType }));
+      activation = false;
+      await flush();
+    };
+    touched.deviceMotion!();
+    await tap("touch");
+    touchPhone.dispatchEvent(motion(1));
+    expect(asked).toEqual(["orientation inside the gesture", "motion inside the gesture"]);
+    expect(touched.deviceMotion!()).toMatchObject({ acceleration: [1, 0, 0] });
+
+    // A request refused for want of a gesture asks again on the next one.
+    asked.length = 0;
+    const retryPhone = fakeWindow({ DeviceMotionEvent: Object.assign(class {}, { requestPermission: requires("motion") }) });
+    const retried = createBrowserPlatform({ window: retryPhone, mute: muteStore() });
+    retried.deviceMotion!();
+    retryPhone.dispatchEvent(new Event("keydown"));
+    await flush();
+    activation = true;
+    retryPhone.dispatchEvent(new Event("keydown"));
+    activation = false;
+    await flush();
+    retryPhone.dispatchEvent(motion(1));
+    expect(asked).toEqual(["motion outside the gesture", "motion inside the gesture"]);
+    expect(retried.deviceMotion!()).toMatchObject({ acceleration: [1, 0, 0] });
+
     const denied = fakeWindow({ DeviceMotionEvent: Object.assign(class {}, { requestPermission: async () => "denied" }) });
     const refused = createBrowserPlatform({ window: denied, mute: muteStore() });
     refused.deviceMotion!();

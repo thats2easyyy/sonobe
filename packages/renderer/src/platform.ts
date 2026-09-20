@@ -437,7 +437,7 @@ export function createBrowserPlatform(options: BrowserPlatformOptions = {}): Bro
 
   /**
    * Run `fn` inside the next user gesture (media and permission prompts need one). A mouse press
-   * counts on pointerdown, a touch only once the finger lifts (pointerup), as browsers decide.
+   * counts on pointerdown, a touch or pen only once it lifts (pointerup), as browsers decide.
    */
   const onNextGesture = (fn: () => void): boolean => {
     if (typeof win?.addEventListener !== "function") return false;
@@ -447,7 +447,9 @@ export function createBrowserPlatform(options: BrowserPlatformOptions = {}): Bro
       for (const name of events) win.removeEventListener?.(name, handler, capture);
       cleanups.delete(remove);
     };
-    const handler = () => {
+    const handler = (event: Event) => {
+      const pointerType = (event as PointerEvent).pointerType;
+      if (event.type === "pointerdown" && (pointerType === "touch" || pointerType === "pen")) return;
       remove();
       fn();
     };
@@ -808,16 +810,21 @@ export function createBrowserPlatform(options: BrowserPlatformOptions = {}): Bro
         listening = true;
         // iOS asks the person first, and only from inside a tap.
         if (typeof motionPermission === "function") {
-          onNextGesture(() => {
-            // Both prompts start inside the gesture; attitude simply stays unknown without the second.
-            if (typeof orientationPermission === "function") void orientationPermission.call(win.DeviceOrientationEvent).catch(() => undefined);
-            void motionPermission.call(win.DeviceMotionEvent).then(
-              (state) => {
-                if (state === "granted") listen();
-              },
-              () => undefined,
-            );
-          });
+          const ask = () =>
+            onNextGesture(() => {
+              // Both prompts start inside the gesture; attitude simply stays unknown without the second.
+              if (typeof orientationPermission === "function") void orientationPermission.call(win.DeviceOrientationEvent).catch(() => undefined);
+              void motionPermission.call(win.DeviceMotionEvent).then(
+                (state) => {
+                  if (state === "granted") listen();
+                },
+                (err: unknown) => {
+                  // Refused for want of a gesture, not by the person: ask again on the next one.
+                  if ((err as { name?: string } | null)?.name === "NotAllowedError" && !disposed) ask();
+                },
+              );
+            });
+          ask();
         } else listen();
       }
       return sample;
