@@ -44,20 +44,20 @@ The tools appear as `mcp__plugin_sonobe_sonobe__<tool>`. The prompts `prototype_
 
 ### Without the plugin
 
-Build the CLI bundle once (`npm run build -w @sonobe/cli` writes `packages/cli/dist/sonobe.mjs`), then:
+Build the CLI bundle once (`npm run build -w @sonobe/cli` writes `packages/cli/dist/sonobe.mjs`), then, from any folder:
 
 ```sh
-claude mcp add sonobe -- node "/absolute/path/to/sonobe/packages/cli/dist/sonobe.mjs" mcp
+claude mcp add --scope user sonobe -- node "/absolute/path/to/sonobe/packages/cli/dist/sonobe.mjs" mcp
 ```
 
-Or put `sonobe` on your PATH with `npm link -w @sonobe/cli` (after building) and run `claude mcp add sonobe -- sonobe mcp`.
+`--scope user` gives every project the tools; without it, Claude Code adds the server to the current folder only. Or put `sonobe` on your PATH with `npm link -w @sonobe/cli` (after building) and run `claude mcp add --scope user sonobe -- sonobe mcp`.
 
 ## Headless mode
 
-To work on a project folder without the app running, point the server at the folder:
+To work on a project folder without the app running, point the server at the folder. It serves one prototype, so add it in the folder where you start Claude:
 
 ```sh
-claude mcp add sonobe-headless -- node "/absolute/path/to/sonobe/packages/cli/dist/sonobe.mjs" mcp --headless "/absolute/path/Checkout Flow.sonobe"
+claude mcp add --scope local sonobe-headless -- node "/absolute/path/to/sonobe/packages/cli/dist/sonobe.mjs" mcp --headless "/absolute/path/Checkout Flow.sonobe"
 ```
 
 - **Works:** editing, validation, simulation, screenshots and saving. Changes save after every edit; pass `--no-autosave` to keep them in memory until Claude calls `save_document`. If the folder changes outside the session (the app, git, you), saving stops with `disk_changed` instead of writing over it, and Claude asks whether to reload or overwrite.
@@ -70,4 +70,6 @@ claude mcp add sonobe-headless -- node "/absolute/path/to/sonobe/packages/cli/di
 - **"the Sonobe app isn't running"**: open Sonobe, then reconnect with `/mcp` → `sonobe` → Reconnect. Stdio servers don't reconnect automatically.
 - **"rejected the token"**: `~/.sonobe/mcp.json` belongs to an earlier launch. Quit and reopen Sonobe.
 - **A custom settings folder**: set `SONOBE_HOME` to the folder that holds `mcp.json`.
+- **No Sonobe tools in one project**: `claude mcp list` there shows no `sonobe`, because an earlier setup added it to another folder only. Add it with `--scope user`. An old entry with local scope wins in its own folder; remove it there with `claude mcp remove --scope local sonobe`.
+- **The session isn't listed in Connect Claude**: the app lists sessions that go through `sonobe mcp`. A client connected to the app's URL directly, or an older copy of the relay, can't say which session it is and shows as "Unidentified MCP client". An app from before session lists makes the relay log "doesn't list connected sessions" once and keep working.
 - **Server logs**: the relay writes diagnostics to stderr, which Claude Code shows in `/mcp` details.

@@ -13,6 +13,7 @@ import type { Simulation } from "../runtime/simulation.ts";
 import { BOUNDS_METHODS, type BoundsMethod } from "../state/bounds.ts";
 import { CLAUDE_AUTHOR, historyListEntry, normalizeAuthor, type FileResult } from "../state/document.ts";
 import { base64ToBytes } from "../state/bytes.ts";
+import type { WorkClient } from "../state/presence.ts";
 import { diagnosticsFor } from "../state/registry.ts";
 import { saveDocumentInteractively } from "../state/saveFlow.ts";
 import { currentComponentId, itemKindOf } from "../state/selection.ts";
@@ -98,6 +99,15 @@ function optBoolean(p: Params, key: string): boolean | undefined {
   if (v === undefined || v === null) return undefined;
   if (typeof v !== "boolean") throw invalid(`"${key}" must be true or false.`);
   return v;
+}
+
+/** presence.* `client`: the session behind an agent's call ({ id, label, folder? }), when the host knows it. */
+function workClient(p: Params): WorkClient | undefined {
+  const v = p.client;
+  if (v === undefined || v === null) return undefined;
+  const c = v as Record<string, unknown>;
+  if (typeof v !== "object" || typeof c.id !== "string" || !c.id || typeof c.label !== "string") throw invalid('"client" must look like { "id": "…", "label": "Claude Code", "folder": "/path" }.');
+  return { id: c.id, label: c.label, ...(typeof c.folder === "string" && c.folder ? { folder: c.folder } : {}) };
 }
 
 function stringList(p: Params, key: string, required: boolean): string[] {
@@ -454,7 +464,8 @@ export function registerRpcHandlers(session: EditorSession, options: RpcHandlerO
       const intent = optString(p, "intent")?.trim();
       if (!intent) throw invalid('"intent" is required: what you are about to do, in a few words.');
       const component = optString(p, "component");
-      const workId = session.presence.getState().begin({ ids: stringList(p, "ids", false), intent, author: normalizeAuthor(p.author, CLAUDE_AUTHOR), ...(component !== undefined ? { component } : {}) });
+      const client = workClient(p);
+      const workId = session.presence.getState().begin({ ids: stringList(p, "ids", false), intent, author: normalizeAuthor(p.author, CLAUDE_AUTHOR), ...(component !== undefined ? { component } : {}), ...(client ? { client } : {}) });
       return { workId };
     },
 
@@ -462,7 +473,9 @@ export function registerRpcHandlers(session: EditorSession, options: RpcHandlerO
       const workId = optString(p, "workId");
       const summary = optString(p, "summary");
       if (workId === undefined) {
-        session.presence.getState().finishAll(p.author ? normalizeAuthor(p.author, CLAUDE_AUTHOR) : undefined);
+        // One session's finish never clears another session's badge.
+        const client = workClient(p);
+        session.presence.getState().finishAll(p.author ? normalizeAuthor(p.author, CLAUDE_AUTHOR) : undefined, client?.id);
         return { finished: true };
       }
       const item = session.presence.getState().finish(workId, { ...(summary ? { summary } : {}), revision: doc().revision });
@@ -473,7 +486,7 @@ export function registerRpcHandlers(session: EditorSession, options: RpcHandlerO
       const limit = optNumber(p, "limit");
       const s = session.presence.getState();
       return {
-        working: s.working.map((w) => ({ workId: w.workId, ids: [...w.ids], intent: w.intent, author: { ...w.author }, startedAt: w.startedAt, ...(w.component !== undefined ? { component: w.component } : {}) })),
+        working: s.working.map((w) => ({ workId: w.workId, ids: [...w.ids], intent: w.intent, author: { ...w.author }, startedAt: w.startedAt, ...(w.component !== undefined ? { component: w.component } : {}), ...(w.client ? { client: { ...w.client } } : {}) })),
         recent: s.recent.slice(0, Math.max(0, Math.floor(limit ?? 20))).map((c) => ({ ...c, ids: [...c.ids], components: [...c.components] })),
       };
     },

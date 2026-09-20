@@ -475,13 +475,19 @@ The web player (`apps/desktop/player`) runs the real engine and DOM renderer ful
 - Electron main hosts Streamable HTTP MCP at `http://127.0.0.1:<port>/mcp`. It validates Host/Origin and requires a bearer token.
 - The port and token are written to `~/.sonobe/mcp.json` (0600).
 - `sonobe mcp` (the CLI) is a stdio relay to the running app. With `--headless <project>`, it serves a project folder without the app: ops, simulation, save, and screenshots drawn from the SceneFrame (SVG rasterized to PNG with `@resvg/resvg-js`, approximate text metrics, placeholders for video, Lottie and shaders). Headless mode has no editor selection and no canvas or graph capture targets.
+- **Sessions** (`clients.ts`). The app knows which sessions are connected, not just that its server listens:
+  - The relay sends a per-process id in a `sonobe-client` header on every POST. On `/clients` it says hello with the client's `clientInfo` and the session's folder (`CLAUDE_PROJECT_DIR`, else its working folder), heartbeats every 30 s, and says goodbye when stdin closes or on SIGINT/SIGTERM (Claude Code stops stdio servers with SIGINT). An app without `/clients` answers 404, and the relay keeps relaying.
+  - `createClientRegistry` holds the sessions: connected, gone after a goodbye or 75 s of silence, forgotten after 10 minutes. Clients without the relay share one anonymous row.
+  - The client id rides the HTTP transport's per-request call scope (`CallScope.clientId`), so every tool call counts toward its session. Over stateless HTTP, initialize's `clientInfo` is gone by `tools/call`, so edits are attributed by the name the hello announced.
+  - Working badges are kept per session (`WorkIntent.client`), so two sessions don't replace each other's.
+  - `getMcpStatus` returns the sessions, and the toolbar's Claude button is green only while one is connected.
 - Tool handlers run against `SonobeHost`:
 
   ```ts
   interface SonobeHost {
     listDocuments(); openDocument(ref, { reload, ...control }); createDocument(request, control?); getDocument(docId?);
     saveDocument(docId?, { force, ...control }); apply(ops, { label, author, dryRun, expectedRevision, signal });
-    getSelection(); screenshot(target, opts); reveal(ids); setWorking(ids, intent | null);
+    getSelection(); screenshot(target, opts); reveal(ids); setWorking({ ids, intent } | null, { author, client });
     captureDesign?(request, control?); fetchImage?(url, signal); putAssetFiles?(files, { docId, ...control });   // design import (§13)
     sim: { reset(opts); dispatch(simId, events); step(simId, opts); trace(simId, opts); values(simId, targets); override(simId, request) };
     history: { list(opts); undo({ txnId, signal }); };
@@ -519,7 +525,8 @@ The web player (`apps/desktop/player`) runs the real engine and DOM renderer ful
 - **Deadlines.** Hosts own the precise limits. `captureDesign` has one deadline (§13) and names the stage it stopped in. The tool's own step deadline is 60 s longer, only as a safety net, so the host's error arrives first.
 - **The relay** forwards SSE progress, turns a `notifications/cancelled` on stdin into an aborted request (the app sees the stream close), aborts calls still running when stdin closes, and tells a 5-minute fetch timeout apart from a lost connection.
 - **Clients.** A hand-written SDK client must pass `onprogress` together with `resetTimeoutOnProgress`. Without `onprogress` it sends no `progressToken`, so the server can't report progress and the client's default 60 s timeout still applies.
-- **Distribution:** Claude Code plugin (`integrations/claude-code`) and `.mcpb` bundle (`integrations/claude-desktop`), both built from a checkout. The app's **Connect Claude** screen shows copy-paste setup for Claude Code and Claude Desktop, filled in for this machine (the app's bundled CLI, or Node plus a checkout). In a source checkout it also shows the commands that build and pack the `.mcpb`.
+- **The in-app assistant** calls the same tools over an in-memory transport, passing its Stop signal and asking for progress, so Stop cancels a running tool and its chip shows the tool's steps.
+- **Distribution:** Claude Code plugin (`integrations/claude-code`) and `.mcpb` bundle (`integrations/claude-desktop`), both built from a checkout. The app's **Connect Claude** screen shows copy-paste setup for Claude Code and Claude Desktop, filled in for this machine (the app's bundled CLI, or Node plus a checkout). Its Claude Code command installs the relay at user scope (`claude mcp add --scope user sonobe`), so every project gets the tools; a headless server stays with one project (local scope). In a source checkout it also shows the commands that build and pack the `.mcpb`.
 
 **Outline projection** (token-lean, read-only):
 

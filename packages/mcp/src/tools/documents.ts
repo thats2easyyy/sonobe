@@ -54,7 +54,8 @@ export async function documentInfo(
     `Host: ${host.kind === "app" ? "Sonobe app" : "headless"}${host.capabilities.screenshots ? "" : " · no screenshots"}${host.capabilities.selection ? "" : " · no selection"}${host.kind === "headless" ? (host.capabilities.autosave ? " · changes save automatically" : " · call save_document to write to disk") : ""}`,
   ];
   if (presence.length)
-    lines.push(`Working: ${presence.map((p) => `${p.author.name} — ${p.intent}`).join("; ")}`);
+    // Name each session, so an agent can tell another session's badge from its own.
+    lines.push(`Working: ${presence.map((p) => `${p.author.name}${p.client?.folder ? ` (${p.client.label} in ${p.client.folder})` : ""} — ${p.intent}`).join("; ")}`);
   if (sims.length)
     lines.push(
       `Simulations: ${sims.map((s) => `${s.simId} (frame ${s.frame}${s.overrides?.length ? `, ${plural(s.overrides.length, "sim_override")}` : ""})`).join(", ")}`,

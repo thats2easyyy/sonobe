@@ -168,7 +168,7 @@ interface Entry {
   info: RendererInfo;
   snapshot: Snapshot | null;
   diagnostics: { doc: SonobeDocument; list: Diagnostic[] } | null;
-  /** Working badges this host started, by author name. */
+  /** Working badges this host started, by session (client id, else author name). */
   working: Map<string, { workId: string; intent: WorkIntent }>;
 }
 
@@ -829,18 +829,20 @@ export function createAppHost(options: AppHostOptions): AppHost {
 
     async setWorking(work, o) {
       const entry = await resolve(o.docId);
-      const key = o.author.name;
+      // One badge per session (the relay's client id), so two sessions don't replace each other's.
+      const key = o.client?.id ?? o.author.name;
+      const client = o.client ? { ...o.client } : undefined;
       const current = entry.working.get(key);
       if (current) {
         entry.working.delete(key);
         await call(entry.target, "presence.finish", { workId: current.workId });
       } else if (work === null) {
-        await call(entry.target, "presence.finish", { author: o.author });
+        await call(entry.target, "presence.finish", { author: o.author, ...(client ? { client } : {}) });
       }
       if (work === null) return;
-      const reply = await call<{ workId?: unknown }>(entry.target, "presence.begin", { ids: work.ids, intent: work.intent, author: o.author });
+      const reply = await call<{ workId?: unknown }>(entry.target, "presence.begin", { ids: work.ids, intent: work.intent, author: o.author, ...(client ? { client } : {}) });
       if (typeof reply?.workId !== "string") throw unexpectedReply("presence.begin");
-      entry.working.set(key, { workId: reply.workId, intent: { ids: [...work.ids], intent: work.intent, author: o.author, since: now() } });
+      entry.working.set(key, { workId: reply.workId, intent: { ids: [...work.ids], intent: work.intent, author: o.author, since: now(), ...(client ? { client } : {}) } });
     },
 
     async presence(docId) {

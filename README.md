@@ -104,20 +104,20 @@ Sonobe runs an MCP server on `127.0.0.1` that only accepts requests carrying the
 
 ### Claude Code
 
-With the packaged app in your Applications folder:
+With the packaged app in your Applications folder, run this once, from any folder:
 
 ```bash
-claude mcp add sonobe -- /Applications/Sonobe.app/Contents/Resources/cli/sonobe mcp
+claude mcp add --scope user sonobe -- /Applications/Sonobe.app/Contents/Resources/cli/sonobe mcp
 ```
 
 From a checkout, build the CLI bundle once, then use its absolute path:
 
 ```bash
 npm run build -w @sonobe/cli
-claude mcp add sonobe -- node "/absolute/path/to/sonobe/packages/cli/dist/sonobe.mjs" mcp
+claude mcp add --scope user sonobe -- node "/absolute/path/to/sonobe/packages/cli/dist/sonobe.mjs" mcp
 ```
 
-Check the connection with `claude mcp list`, keep Sonobe open, and ask Claude, "List the documents open in Sonobe."
+`--scope user` gives every Claude Code session Sonobe's tools, whatever folder it starts in. If you set Sonobe up before, an older entry may be tied to one folder, and it wins there: run `claude mcp remove --scope local sonobe` in that folder. Check the setup with `claude mcp list`, keep Sonobe open, and ask Claude, "List the documents open in Sonobe." The Connect Claude screen lists each session once it connects, with its folder and last activity, and the toolbar's Claude button turns green only while a session is connected.
 
 The Claude Code plugin adds the same server plus a skill that teaches Claude Sonobe's workflow. From a checkout:
 
@@ -126,10 +126,10 @@ node integrations/claude-code/build.ts
 claude --plugin-dir ./integrations/claude-code
 ```
 
-To let Claude work on a project folder without the app running, use headless mode. It supports editing, simulation, saving, and approximate screenshots:
+To let Claude work on a project folder without the app running, use headless mode. It supports editing, simulation, saving, and approximate screenshots. It works on one prototype, so add it in the folder where you start Claude:
 
 ```bash
-claude mcp add sonobe-headless -- node "/absolute/path/to/sonobe/packages/cli/dist/sonobe.mjs" mcp --headless "/absolute/path/to/Prototype.sonobe"
+claude mcp add --scope local sonobe-headless -- node "/absolute/path/to/sonobe/packages/cli/dist/sonobe.mjs" mcp --headless "/absolute/path/to/Prototype.sonobe"
 ```
 
 ### Claude Desktop

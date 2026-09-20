@@ -134,6 +134,13 @@ const host: SonobeHost = {
   },
 
   getMcpStatus: () => ipcRenderer.invoke(IPC.mcpStatus) as Promise<McpStatus>,
+  onMcpStatus(cb) {
+    const listener = (_event: IpcRendererEvent, status: McpStatus) => cb(status);
+    ipcRenderer.on(IPC.mcpChanged, listener);
+    return () => {
+      ipcRenderer.removeListener(IPC.mcpChanged, listener);
+    };
+  },
 
   getPreviewStatus: () => ipcRenderer.invoke(IPC.previewStatus) as Promise<PreviewStatus>,
   startPreview: () => ipcRenderer.invoke(IPC.previewStart) as Promise<PreviewStatus>,

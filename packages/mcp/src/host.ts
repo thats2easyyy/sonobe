@@ -222,12 +222,23 @@ export interface Screenshot {
   notes?: string[];
 }
 
+/** The session behind an agent's call, when the transport knows it (the relay's sonobe-client id). */
+export interface WorkClient {
+  id: string;
+  /** "Claude Code", "Claude Desktop", or the client's own name. */
+  label: string;
+  /** The session's project folder. */
+  folder?: string;
+}
+
 /** An agent's "working on" badge. */
 export interface WorkIntent {
   ids: Id[];
   intent: string;
   author: Author;
   since: number;
+  /** The session that set it; badges are kept per session, so two sessions don't replace each other's. */
+  client?: WorkClient;
 }
 
 export interface HistoryItem {
@@ -604,10 +615,13 @@ export interface SonobeHost {
     ids: Id[],
     options: { docId?: Id; focus?: boolean },
   ): Promise<{ revealed: boolean; reason?: string }>;
-  /** Show (or clear, with null) an agent's working badge. */
+  /**
+   * Show (or clear, with null) an agent's working badge. One badge per session: `client.id` when the
+   * call came through the relay, else the author's name.
+   */
   setWorking(
     work: { ids: Id[]; intent: string } | null,
-    options: { docId?: Id; author: Author },
+    options: { docId?: Id; author: Author; client?: WorkClient },
   ): Promise<void>;
   /** Current working badges. */
   presence(docId?: Id): Promise<WorkIntent[]>;
