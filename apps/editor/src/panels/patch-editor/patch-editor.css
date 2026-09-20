@@ -1029,24 +1029,38 @@ textarea.sb-pe-title-input {
 }
 
 /*
- * The orb a pulse or a boolean change sends along a cable (Orb in CableEdge.tsx, keyframes in orb.ts).
- * Web Animations move the head and draw the trails behind it, fading them with fill-opacity and
- * stroke-opacity, which are 0 at rest, so each part's strength is in its color. Not opacity: with a
- * pulse firing every frame into 40 cables, opacity animations held the graph near 30 fps, and these
+ * The orb a pulse or a boolean change sends along a cable (Orb in CableEdge.tsx, keyframes in orb.ts),
+ * and its landing on the input's dot, which is drawn in React Flow's viewport portal above the nodes.
+ * Web Animations move the head and reshape the tapered trails behind it, fading them with fill-opacity
+ * and stroke-opacity, which are 0 at rest, so each part's strength is in its color. Not opacity: with
+ * a pulse firing every frame into 40 cables, opacity animations held the graph near 30 fps, and these
  * keep it at 60. The head is a gradient, not a blur filter.
  */
-.sb-pe-orb {
-  --sb-orb-hot: color-mix(in oklab, var(--sb-cable) 28%, #fff);
+.sb-pe-orb,
+.sb-pe-orb-landing {
+  --sb-orb-core: #fff;
+  --sb-orb-hot: color-mix(in oklab, var(--sb-cable) 30%, #fff);
+  --sb-orb-halo: var(--sb-cable);
   pointer-events: none;
 }
 
-.sb-pe-orb__slot > * {
+.sb-pe-orb-landing {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 1px;
+  height: 1px;
+  overflow: visible;
+}
+
+.sb-pe-orb__slot > *,
+.sb-pe-orb__land > * {
   fill-opacity: 0;
   stroke-opacity: 0;
 }
 
 .sb-pe-orb__core {
-  stop-color: #fff;
+  stop-color: var(--sb-orb-core);
 }
 
 .sb-pe-orb__hot {
@@ -1059,38 +1073,41 @@ textarea.sb-pe-title-input {
 }
 
 .sb-pe-orb__glow {
-  stop-color: var(--sb-cable);
-  stop-opacity: 0.28;
+  stop-color: var(--sb-orb-halo);
+  stop-opacity: 0.26;
 }
 
 .sb-pe-orb__fade {
-  stop-color: var(--sb-cable);
+  stop-color: var(--sb-orb-halo);
   stop-opacity: 0;
 }
 
-.sb-pe-orb__bloom-center {
+/* The landing's flare lights the input's dot from inside. */
+.sb-pe-orb__flare-core {
+  stop-color: var(--sb-orb-core);
+}
+
+.sb-pe-orb__flare-hot {
+  stop-color: var(--sb-orb-hot);
+  stop-opacity: 0.9;
+}
+
+.sb-pe-orb__flare-glow {
   stop-color: var(--sb-cable);
-  stop-opacity: 0.5;
+  stop-opacity: 0.3;
 }
 
-.sb-pe-orb__bloom-mid {
-  stop-color: var(--sb-cable);
-  stop-opacity: 0.18;
+/* The trails are filled shapes, over `.sb-pe-cable path { fill: none }`. */
+.sb-pe-orb .sb-pe-orb__wake {
+  fill: color-mix(in srgb, var(--sb-orb-hot) 60%, transparent);
 }
 
-.sb-pe-orb__wake {
-  stroke: color-mix(in srgb, var(--sb-orb-hot) 45%, transparent);
-  stroke-width: 2.4;
+.sb-pe-orb .sb-pe-orb__tail {
+  fill: color-mix(in srgb, var(--sb-cable) 85%, transparent);
 }
 
-.sb-pe-orb__tail {
-  stroke: color-mix(in srgb, var(--sb-cable) 80%, transparent);
-  stroke-width: 3.5;
-}
-
-.sb-pe-orb__streak {
-  stroke: var(--sb-orb-hot);
-  stroke-width: 1.6;
+.sb-pe-orb .sb-pe-orb__streak {
+  fill: var(--sb-orb-hot);
 }
 
 .sb-pe-orb__ring {
@@ -1098,21 +1115,58 @@ textarea.sb-pe-title-input {
   stroke: var(--sb-cable);
 }
 
-/* On a light canvas white reads as a gap, so the wake deepens the wire instead of whitening it. */
-[data-theme="light"] .sb-pe-orb {
-  --sb-orb-hot: color-mix(in oklab, var(--sb-cable) 40%, #fff);
+/*
+ * On a light canvas white reads as a gap in the wire, so nothing is white: the orb is a lighter, more
+ * vivid shade of the cable's color, in a pale tint of it, like colored light on paper, and the landing
+ * glows around the input's dot instead of covering it. (Without relative colors, the fallback is a
+ * bead of the cable's own color.)
+ */
+[data-theme="light"] :is(.sb-pe-orb, .sb-pe-orb-landing) {
+  --sb-orb-core: var(--sb-cable);
+  --sb-orb-hot: var(--sb-cable);
+  --sb-orb-halo: color-mix(in oklab, var(--sb-cable) 55%, #fff);
+}
+
+@supports (color: oklch(from red l c h)) {
+  [data-theme="light"] :is(.sb-pe-orb, .sb-pe-orb-landing) {
+    --sb-orb-core: oklch(from var(--sb-cable) calc(l + 0.16) calc(c * 1.2) h);
+    --sb-orb-hot: oklch(from var(--sb-cable) calc(l + 0.08) calc(c * 1.25) h);
+    --sb-orb-halo: oklch(from var(--sb-cable) calc(l + 0.14) calc(c * 1.1) h);
+  }
+}
+
+[data-theme="light"] .sb-pe-orb__color {
+  stop-opacity: 0.7;
 }
 
 [data-theme="light"] .sb-pe-orb__glow {
-  stop-opacity: 0.34;
+  stop-opacity: 0.32;
 }
 
-[data-theme="light"] .sb-pe-orb__wake {
-  stroke: color-mix(in srgb, var(--sb-cable) 40%, transparent);
-  stroke-width: 3.2;
+[data-theme="light"] .sb-pe-orb .sb-pe-orb__wake {
+  fill: color-mix(in srgb, var(--sb-orb-hot) 70%, transparent);
 }
 
-.sb-pe__canvas[data-lod="far"] .sb-pe-orb__slot > :not(.sb-pe-orb__head) {
+[data-theme="light"] .sb-pe-orb .sb-pe-orb__streak {
+  fill: var(--sb-orb-core);
+}
+
+[data-theme="light"] .sb-pe-orb__flare-core {
+  stop-color: var(--sb-orb-halo);
+  stop-opacity: 0;
+}
+
+[data-theme="light"] .sb-pe-orb__flare-hot {
+  stop-color: var(--sb-orb-halo);
+  stop-opacity: 0.25;
+}
+
+[data-theme="light"] .sb-pe-orb__flare-glow {
+  stop-color: var(--sb-orb-halo);
+  stop-opacity: 0.5;
+}
+
+.sb-pe__canvas[data-lod="far"] :is(.sb-pe-orb__slot > :not(.sb-pe-orb__head), .sb-pe-orb-landing) {
   display: none;
 }
 
