@@ -136,6 +136,17 @@ describe("ScrubNumberField", () => {
     expect(field().hasAttribute("data-scrubbing")).toBe(false);
   });
 
+  it("commits a scrub it's removed in the middle of", () => {
+    const onCommit = vi.fn();
+    act(() => root.render(<Controlled onCommit={onCommit} pixelsPerStep={2} />));
+    pointer("pointerdown", 100);
+    pointer("pointermove", 110);
+    act(() => root.render(<div />));
+    expect(onCommit).toHaveBeenCalledTimes(1);
+    expect(onCommit).toHaveBeenCalledWith(15);
+    expect(document.documentElement.hasAttribute("data-scrubbing")).toBe(false);
+  });
+
   it("enters typing mode on a click without movement", () => {
     act(() => root.render(<Controlled />));
     pointer("pointerdown", 50);

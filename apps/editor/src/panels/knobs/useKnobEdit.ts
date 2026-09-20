@@ -29,6 +29,13 @@ export interface KnobEdit {
 
 const SWITCH_KEY = "knobs:switch";
 
+const tuneKey = (knobId: Id, presetId: Id) => `knobs:${knobId}:${presetId}`;
+
+/** The knob an open drag or scrub is tuning, read from the document store's `gesture`. */
+export function tuningKnob(gesture: string | null): Id | null {
+  return gesture?.match(/^knobs:(.+):[^:]+$/)?.[1] ?? null;
+}
+
 function report(result: ApplyOpsResult): ApplyOpsResult {
   if (!result.ok) {
     const error = result.errors[0];
@@ -63,7 +70,7 @@ export function knobEdit(session: EditorSession, open: { current: string | null 
         close();
         return run([op], { label });
       }
-      const key = `knobs:${knobId}:${set.active}`;
+      const key = tuneKey(knobId, set.active);
       if (open.current !== null && open.current !== key) close();
       const phase = open.current === key ? "update" : "begin";
       open.current = key;

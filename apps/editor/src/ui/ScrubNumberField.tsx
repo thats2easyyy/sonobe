@@ -154,11 +154,16 @@ export function ScrubNumberField({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [scrubbing]);
 
+  // Removed mid-scrub, it never sees the pointer come up: end the gesture here instead.
   useEffect(
     () => () => {
-      if (gesture.current) document.documentElement.removeAttribute("data-scrubbing");
+      const g = gesture.current;
+      if (!g) return;
+      gesture.current = null;
+      document.documentElement.removeAttribute("data-scrubbing");
+      if (g.moved) latest.current.onCommit?.(g.lastValue);
     },
-    [],
+    [latest],
   );
 
   const commitDraft = () => {

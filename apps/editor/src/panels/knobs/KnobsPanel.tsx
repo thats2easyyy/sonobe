@@ -22,7 +22,7 @@ import { KnobRow } from "./KnobRow.tsx";
 import { knobsUi, useKnobsUi } from "./knobsStore.ts";
 import { differenceCount, knobGroups, knobUses, partnerPreset, presetName } from "./model.ts";
 import { addPreset, PresetBar, presetEntries } from "./PresetBar.tsx";
-import { useKnobEdit } from "./useKnobEdit.ts";
+import { tuningKnob, useKnobEdit } from "./useKnobEdit.ts";
 import "./knobs.css";
 
 const FLASH_MS = 1400;
@@ -53,7 +53,12 @@ export function KnobsPanel() {
   const components = doc.components;
   const uses = useMemo(() => knobUses(doc), [components]); // eslint-disable-line react-hooks/exhaustive-deps
   const candidates = useVariableCandidates();
-  const groups = useMemo(() => (set ? knobGroups(set, uses, partner, onlyDifferences) : []), [set, uses, partner, onlyDifferences]);
+  // Only differences leaves in the row being dragged or scrubbed and the row with focus, so a value
+  // tuned onto the partner's doesn't pull the row out from under the pointer or the keyboard.
+  const tuning = useDocument((s) => tuningKnob(s.gesture));
+  const [focusedRow, setFocusedRow] = useState<Id | null>(null);
+  const keep = useMemo(() => new Set([tuning, focusedRow].filter((id): id is Id => id !== null)), [tuning, focusedRow]);
+  const groups = useMemo(() => (set ? knobGroups(set, uses, partner, onlyDifferences, keep) : []), [set, uses, partner, onlyDifferences, keep]);
   const [editing, setEditing] = useState<KnobEditTarget | null>(null);
   const [editAnchor, setEditAnchor] = useState<Element | null>(null);
   const [converting, setConverting] = useState(false);
@@ -129,7 +134,13 @@ export function KnobsPanel() {
   };
 
   return (
-    <div ref={rootRef} className="sb-knobs" onKeyDown={onKeyDown}>
+    <div
+      ref={rootRef}
+      className="sb-knobs"
+      onKeyDown={onKeyDown}
+      onFocus={(event) => setFocusedRow((event.target as HTMLElement).closest<HTMLElement>("[data-knob-row]")?.dataset.knobRow ?? null)}
+      onBlur={(event) => !event.currentTarget.contains(event.relatedTarget as Node | null) && setFocusedRow(null)}
+    >
       {selection && (
         <div className="sb-knobs__selection">
           <span>{selection}</span>

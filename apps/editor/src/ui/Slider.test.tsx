@@ -86,6 +86,17 @@ describe("Slider", () => {
     expect(onCommit).toHaveBeenCalledWith(200);
   });
 
+  it("commits a drag it's removed in the middle of", () => {
+    const onCommit = vi.fn();
+    act(() => root.render(<Controlled onCommit={onCommit} />));
+    layOut();
+    pointer("pointerdown", 150);
+    pointer("pointermove", 170);
+    act(() => root.render(<div />));
+    expect(onCommit).toHaveBeenCalledTimes(1);
+    expect(onCommit).toHaveBeenCalledWith(70);
+  });
+
   it("steps with the keyboard: arrows, Shift ×10, Alt ×0.1, Home and End", () => {
     const onCommit = vi.fn();
     act(() => root.render(<Controlled onCommit={onCommit} />));
