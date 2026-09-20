@@ -55,9 +55,12 @@ Diagnostics lives in the bottom HUD, next to the Console, AI Activity and Perfor
 | Zero-latency self-cycle | A patch feeding its own input | Put a Delay One Frame in the loop |
 | Pulse into a state input | A tap wired where a lasting value is expected | Add a Switch (guide 03) |
 | Loop length mismatch | Lists of different lengths meeting | Check whether the wrap was intended (guide 07) |
+| Empty loop (Runtime) | A layer or component has no copies because an empty loop erased real items, often a Loop Select with an index past the end | Apply the suggested Out of Range fix (guide 07) |
 | Unused patches | Leftovers that don't affect anything | Delete them, or connect them |
 | Missing asset | A media file that moved or was deleted | Relink the file |
 | Layer can't receive touches | Opacity 0, or disabled | Use a Hit Area, or enable the layer |
+
+Findings marked **Runtime** come from the running prototype rather than the document: script errors, loops that hit their size limit, and empty loops. They go away when the problem does.
 
 Info-level findings are easy to ignore. Clear them anyway. A graph with forty "unused patch" notes hides the one warning that matters.
 
@@ -83,6 +86,16 @@ Two things in Sonobe arrive a frame late, by design:
 - Values Sonobe measures during layout, like Layer Info, a text layer's Text Size, or a scroll view's content size, are readable on the next frame.
 
 If something is off by exactly one frame, one of these is almost always why.
+
+### When a list has no copies
+
+When a replicated layer disappears, the Viewer says so: a notice like "Card has no copies" appears above the prototype. Click **Why?** to open its `empty_loop` warning in Diagnostics. The warning reads like this:
+
+> Layer "Card" has 0 copies because "Card Above: Gone" (Loop Select) returned an empty loop: indices 1, 2 and 3 are past the end of its 1-item Loop. The empty loop reached "Card Above Gone" (If / Else) on If False and erased the 4 items on Condition.
+
+Read it from where the empty loop started to where it erased things. The fix buttons change the patch that started it, usually the Out of Range input of a Loop Select (guide 07). Restarting with ⌘R won't help here, because the wiring empties the list again on every frame.
+
+Claude sees the same warning in its simulations, and when it reads a value that comes back empty, `sim_get_values` adds a note saying why, such as "Not drawn: Layer "Card" has 0 copies because…".
 
 ### Ask for a trace
 
