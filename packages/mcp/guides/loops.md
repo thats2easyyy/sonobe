@@ -20,7 +20,7 @@ Related: `layout`, `components`, `simulation`
 - A Repeat inside a layer that already makes copies is ignored (`repeat_inside_repeat`); loops of loops need a layer component. Link Repeat to the data the copies show, never to a gesture on the copies (`repeat_from_own_gesture`).
 - **Which is on top.** Copies draw in index order, so the last copy is in front (as in Origami). For copy 0 in front, such as the top card of a deck, feed index × −1 into `zPosition` (`multiply` with `value2: -1`). The copies under it get negative values, which sort behind every sibling at 0, so give the copies a group of their own, apart from a backdrop or an empty state (`examples/16-placemark-deck`). The front copy is also the one that gets touches, and `sim_dispatch` names it (`hit card#0`).
 - **At zero.** `repeat: 0` makes none, quietly. An empty loop makes 0 copies, on Repeat or on an Auto layer's properties; when it erased real items, sim results carry `empty_loop` (below).
-- **Reading copies.** `@card.repeat` reads how many copies the layer drew. `sim_get_values` notes say "Layer "Card" has 1 copy, so there's no #2", or "copy #0 of 4" for a read without `#n`.
+- **Reading copies.** `@card.repeat` reads how many copies the layer drew, and a patch linked to it gets last frame's count. `sim_get_values` notes say "Layer "Card" has 1 copy, so there's no #2", or "copy #0 of 4" for a read without `#n`.
 
 ## Empty loops and Loop Select
 

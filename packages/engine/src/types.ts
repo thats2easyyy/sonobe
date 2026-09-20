@@ -704,7 +704,7 @@ export interface RuntimeIssue {
 export interface ValueInspection {
   /** What getValue returns: loop item 0 unless the address ends in "#n"; undefined when nothing is there. */
   value: Value;
-  /** For a layer bound to a loop: how many copies it drew last frame. For a component patch's port: how many copies of the instance ran. */
+  /** For a layer: how many copies it drew last frame (0 inside a layer that drew none). For a component patch's port: how many copies of the instance ran. */
   copies?: number;
   /** Why the value is missing or empty ("Layer "Card" drew 0 copies..."), when it is. */
   note?: string;

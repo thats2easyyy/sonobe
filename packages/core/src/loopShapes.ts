@@ -135,7 +135,8 @@ export function loopShapes(doc: SonobeDocument, componentId: Id, registry: Regis
     if (!entry || !c) return null;
     const layer = entry.layer;
     if (resolveLayerOutputs(doc, c.id, layer, registry).some((o) => o.key === key)) return layerLoop(layerId);
-    // A layer property read as a source carries whatever drives it.
+    // A layer property read as a source carries whatever drives it, except Repeat: that reads as the copy count, one number.
+    if (key === "repeat") return null;
     return Object.hasOwn(layer.props, key) ? ofValue(layer.props[key], layerId) : null;
   };
 

@@ -58,6 +58,8 @@ describe("loopShapes", () => {
     expect(linked.count("title")).toBe(4);
     // The drag now runs once per copy of the card.
     expect(linked.ofLink("drag.position")).toEqual({ length: 4, origin: "card" });
+    // Read as a source, Repeat is the copy count, one number, not the loop it counts.
+    expect(linked.ofLink("@card.repeat")).toBeNull();
 
     const typed = loopShapes(build([...deck, { op: "setInput", target: "@card.repeat", value: 3 }]), "main", loopRegistry);
     expect(typed.copies("card")).toEqual({ kind: "repeat", count: 3 });
