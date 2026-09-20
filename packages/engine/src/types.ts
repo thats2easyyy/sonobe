@@ -709,7 +709,8 @@ export interface Runtime {
   /**
    * Read a value (current frame, loop index 0 unless "#n"):
    * "patchId.port" | "@layerId.prop", or inside component instances
-   * "instancePath/patchId.port" | "@instancePath/layerId.prop" (instancePath like "card#2/badge").
+   * "instancePath/patchId.port" | "@instancePath/layerId.prop" (instancePath like "card#2/badge"),
+   * or a knob's running value, "$knob.<id>".
    */
   getValue(address: string): Value;
   /** Like getValue, but returns whole loops instead of one item. */
