@@ -5,6 +5,8 @@
  */
 
 import { readFileSync } from "node:fs";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import path from "node:path";
 import { serializeDocument } from "@sonobe/core";
 import { createPatchRegistry } from "@sonobe/patches";
@@ -13,7 +15,7 @@ import { readDesignPhotos } from "../../../examples/lib/design.ts";
 import { EXAMPLES_DIR } from "../../../examples/lib/disk.ts";
 import { buildRecipe } from "../../../examples/lib/recipe.ts";
 import { RECIPES } from "../../../examples/recipes/index.ts";
-import { batchOps, defaultExamples, exampleTextFiles, loadExamples, parseExamplesTable, readmeSections, readsProjectFolder } from "./examples.ts";
+import { batchOps, copyExampleTexts, defaultExamples, exampleTextFiles, loadExamples, parseExamplesTable, readmeSections, readsProjectFolder } from "./examples.ts";
 import { connectClient, tempProject, type TempProject, type TestClient } from "./test-helpers.ts";
 
 const registry = createPatchRegistry();
@@ -36,6 +38,8 @@ describe("the examples catalog", () => {
     // A bundle carries the document files of the examples the catalog reads from their folder.
     for (const recipe of RECIPES.filter(readsProjectFolder))
       expect(exampleTextFiles()).toEqual(expect.arrayContaining([`${recipe.folder}/project.json`, `${recipe.folder}/components/main.json`]));
+    // And the design captures recipes start from, for get_example's detail "design".
+    for (const recipe of RECIPES.filter((r) => r.design)) expect(exampleTextFiles()).toContain(recipe.design!.capture);
   });
 
   it("finds examples by id, number, bare name or title, and suggests close ones", () => {
@@ -74,15 +78,20 @@ describe("the examples catalog", () => {
 describe("list_examples and get_example", () => {
   let project: TempProject;
   let client: TestClient;
+  let bundle: string;
 
   beforeAll(async () => {
+    // The tools read the examples a bundle carries (copyExampleTexts), not the repository's.
+    bundle = await mkdtemp(path.join(tmpdir(), "sonobe-examples-"));
+    copyExampleTexts(bundle, EXAMPLES_DIR);
     project = await tempProject({ name: "Examples" });
-    client = await connectClient(project.host);
+    client = await connectClient(project.host, undefined, { examples: loadExamples({ dir: bundle }) });
   });
 
   afterAll(async () => {
     await client.close();
     await project.cleanup();
+    await rm(bundle, { recursive: true, force: true });
   });
 
   it("lists what each example teaches and its key patches, and filters by words and patch types", async () => {
@@ -123,6 +132,9 @@ describe("list_examples and get_example", () => {
     expect(typo.text).toContain('There\'s no example "swipe-crads". Did you mean "10-swipe-cards"?');
     const batch = await client.call("get_example", { id: "01", detail: "ops", batch: 2 });
     expect(batch.structured.error).toMatchObject({ code: "invalid_batch" });
+    const noDesign = await client.call("get_example", { id: "01", detail: "design" });
+    expect(noDesign.structured.error).toMatchObject({ code: "no_design" });
+    expect(noDesign.text).toContain('get_example({ "id": "01-tap-to-grow", "detail": "ops" })');
   });
 
   it("gives recipes as apply_ops batches that build the example itself, for every example", async () => {
@@ -130,20 +142,23 @@ describe("list_examples and get_example", () => {
       const target = await tempProject({ name: recipe.name });
       const c = await connectClient(target.host);
       try {
+        const first = await client.call("get_example", { id: recipe.folder, detail: "ops" });
+        expect(first.isError, first.text).toBe(false);
         if (recipe.design) {
-          // As the ops say: import the stored capture first. Its photos come from the design's photo list, not the network.
+          // As the ops say: import the capture detail "design" gives first. Its photos come from the design's photo list, not the network.
+          expect(first.text).toContain(`get_example({ "id": "${recipe.folder}", "detail": "design" }) gives the capture to pass to import_design`);
           const listFile = path.join(EXAMPLES_DIR, recipe.design.photos);
           const photos = readDesignPhotos(listFile);
           target.host.fetchImage = async (url) => {
             const photo = photos.get(new URL(url).href);
             return photo ? { bytes: new Uint8Array(readFileSync(path.join(path.dirname(listFile), photo.file))), mime: "" } : null;
           };
-          const capture = JSON.parse(readFileSync(path.join(EXAMPLES_DIR, recipe.design.capture), "utf8")) as unknown;
+          const design = await client.call("get_example", { id: recipe.folder, detail: "design" });
+          expect(design.isError, design.text).toBe(false);
+          const capture = JSON.parse(/```json\n([\s\S]*?)\n```/.exec(design.text)![1]!) as unknown;
           const imported = await c.call("import_design", { capture });
           expect(imported.isError, `${recipe.folder} import: ${imported.text}`).toBe(false);
         }
-        const first = await client.call("get_example", { id: recipe.folder, detail: "ops" });
-        expect(first.isError, first.text).toBe(false);
         const batches = first.structured.batches as number;
         for (let i = 1; i <= batches; i++) {
           const r = i === 1 ? first : await client.call("get_example", { id: recipe.folder, detail: "ops", batch: i });

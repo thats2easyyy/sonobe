@@ -114,12 +114,12 @@ export function registerExampleTools(tc: ToolContext): void {
     {
       title: "Get example",
       description:
-        'One verified example as a pattern to follow. detail "summary" (default): what it teaches, its key patches, the patch chain (a diagram and what each patch does), common mistakes and the scenarios it passes. "full" adds the build steps, variations and the whole outline. "ops": the recipe as apply_ops batches that build it on a blank document (create_document first), with the example\'s ids, values and layout; batch picks one when there are several. Adapt the pattern to the person\'s design rather than pasting it over their work.',
+        'One verified example as a pattern to follow. detail "summary" (default): what it teaches, its key patches, the patch chain (a diagram and what each patch does), common mistakes and the scenarios it passes. "full" adds the build steps, variations and the whole outline. "ops": the recipe as apply_ops batches that build it on a blank document (create_document first), with the example\'s ids, values and layout; batch picks one when there are several. "design": for an example that starts from a design import, the capture to pass to import_design before the ops. Adapt the pattern to the person\'s design rather than pasting it over their work.',
       input: z.object({
         id: z
           .string()
           .describe('Example id from list_examples ("10-swipe-cards"), its number ("10") or its name.'),
-        detail: z.enum(["summary", "full", "ops"]).optional().describe("Default summary."),
+        detail: z.enum(["summary", "full", "ops", "design"]).optional().describe("Default summary."),
         batch: z
           .number()
           .int()
@@ -149,7 +149,7 @@ export function registerExampleTools(tc: ToolContext): void {
         `Teaches: ${entry.teaches.replace(/\.$/, "")}.`,
         `Key patches: ${built.keyPatches.join(", ")}. All ${plural(built.patchTypes.length, "patch type")}: ${built.patchTypes.join(", ")}.`,
         `Verified: builds with no errors${scenarioCount ? ` and passes ${plural(scenarioCount, "scripted scenario")}` : ""} (examples/run.test.ts).`,
-        ...(design ? [`Starts from a design import (examples/${design.capture}); its recipe wires up the imported layers.`] : []),
+        ...(design ? [`Starts from a design import (examples/${design.capture}, which detail "design" gives); its recipe wires up the imported layers.`] : []),
       ];
       const data = {
         id: entry.id,
@@ -162,6 +162,31 @@ export function registerExampleTools(tc: ToolContext): void {
         ops: built.batches.reduce((n, b) => n + b.length, 0),
         ...(design ? { design: `examples/${design.capture}` } : {}),
       };
+
+      if (d === "design") {
+        if (!design)
+          return failure({
+            code: "no_design",
+            message: `${entry.name} doesn't start from a design import: its recipe makes its own layers.`,
+            hint: `get_example({ "id": "${entry.id}", "detail": "ops" }) builds it on a blank document.`,
+          });
+        const capture = tc.examples().design(entry);
+        if (capture === undefined)
+          return failure({
+            code: "example_unavailable",
+            message: `The design ${entry.name} starts from (examples/${design.capture}) isn't in this Sonobe's examples folder.`,
+            hint: "This is a bug in Sonobe; pick another example meanwhile.",
+          });
+        const lines = [
+          `# ${entry.name} (${entry.id}): the design it starts from`,
+          `Before the recipe's ops, pass this capture to import_design: import_design({ "capture": <the JSON below> }). It makes the layers and images the ops name (its photos download from their URLs). Then get_example({ "id": "${entry.id}", "detail": "ops" }).`,
+          "",
+          "```json",
+          JSON.stringify(capture),
+          "```",
+        ];
+        return success(lines.join("\n"), { ...data, detail: d });
+      }
 
       if (d === "ops") {
         const count = built.batches.length;
@@ -176,7 +201,7 @@ export function registerExampleTools(tc: ToolContext): void {
         const size = built.doc.components[built.doc.project.root]?.size;
         const lines = [
           `# ${entry.name} (${entry.id}): the recipe${count > 1 ? `, batch ${index + 1} of ${count}` : ""}`,
-          `${plural(data.ops, "op")} build the example on a blank document, with its ids, values and layout${size ? `, for a ${size[0]}×${size[1]} screen` : ""}. Make one with create_document (or use an empty document), then ${design ? `import the design it starts from: import_design({ "capture": <the JSON in examples/${design.capture}> }), which makes the layers and images these ops name (its photos download from their URLs). Then ` : ""}call apply_ops with ${count > 1 ? "each batch in order" : "these ops"}: { "ops": [...] }. Then check it: get_diagnostics, and sim_reset, sim_dispatch and sim_get_values against the scenarios get_example lists.`,
+          `${plural(data.ops, "op")} build the example on a blank document, with its ids, values and layout${size ? `, for a ${size[0]}×${size[1]} screen` : ""}. Make one with create_document (or use an empty document), then ${design ? `import the design it starts from: get_example({ "id": "${entry.id}", "detail": "design" }) gives the capture to pass to import_design, which makes the layers and images these ops name. Then ` : ""}call apply_ops with ${count > 1 ? "each batch in order" : "these ops"}: { "ops": [...] }. Then check it: get_diagnostics, and sim_reset, sim_dispatch and sim_get_values against the scenarios get_example lists.`,
           "",
           "```json",
           `[\n${ops.map((op) => `  ${JSON.stringify(op)}`).join(",\n")}\n]`,
