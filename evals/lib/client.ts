@@ -84,10 +84,10 @@ export function mcpConfig(options: {
 }
 
 /**
- * claude's arguments. Only Sonobe's tools are available (no files, shell or web), all of them
- * allowed without asking; the session isn't saved; and without userConfig the person's own
- * settings, CLAUDE.md and skills stay out, so runs on different machines compare. The prompt goes
- * in on stdin.
+ * claude's arguments. Only Sonobe's tools are available (no files, shell, web or Skill tool), all
+ * of them allowed without asking; skills and slash commands are off; the session isn't saved; and
+ * without userConfig the person's own settings and CLAUDE.md stay out, so runs on different
+ * machines compare. The prompt goes in on stdin.
  */
 export function claudeArgs(options: {
   mcpConfigPath: string;

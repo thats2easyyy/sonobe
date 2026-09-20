@@ -37,9 +37,16 @@ function listFiles(dir: string, sub: string, ext: string): string[] {
     .map((name) => `${sub}/${name}`);
 }
 
-/** Asset files in a project folder, other than the registry assets.json. */
+/** Files an OS leaves in folders, besides hidden ones like Finder's .DS_Store. */
+const LITTER = new Set(["Thumbs.db", "desktop.ini", "Icon\r"]);
+
+/** Asset files in a project folder, other than the registry assets.json, hidden files, OS litter and folders. */
 function assetFilesOnDisk(dir: string): string[] {
-  return listFiles(dir, "assets", "").filter((rel) => rel !== "assets/assets.json");
+  const full = path.join(dir, "assets");
+  if (!existsSync(full)) return [];
+  return readdirSync(full, { withFileTypes: true })
+    .filter((entry) => entry.isFile() && !entry.name.startsWith(".") && !LITTER.has(entry.name) && entry.name !== "assets.json")
+    .map((entry) => `assets/${entry.name}`);
 }
 
 const sameBytes = (file: string, bytes: Uint8Array) => existsSync(file) && Buffer.compare(readFileSync(file), bytes) === 0;

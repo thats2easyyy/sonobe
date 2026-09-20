@@ -1,0 +1,22 @@
+{
+  "title": "Placemark Deck",
+  "about": "examples/16-placemark-deck with its patches removed: the imported Discover screen is there, and Claude turns its four cards into one repeated card and builds the swipe, the knobs and the presets.",
+  "tags": [
+    "example",
+    "import",
+    "gestures",
+    "loops",
+    "knobs"
+  ],
+  "start": {
+    "example": "16-placemark-deck",
+    "patches": false
+  },
+  "test": {
+    "example": "16-placemark-deck"
+  },
+  "budget": {
+    "maxTurns": 100,
+    "timeoutSec": 1200
+  }
+}
