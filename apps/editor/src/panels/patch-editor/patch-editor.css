@@ -228,7 +228,8 @@
  * against the wrapper, so cables land on their ports even when a node mounts mid-animation.
  * Durations match appear.ts. Modes: node (fade, travel, ring), slide (fade, travel: a wave too big
  * for rings), still (fade, ring: the node at the end of a cable the person drew), placed (the ring
- * alone: an option-drag copy, already where the person dropped it).
+ * alone: an option-drag copy, already where the person dropped it), brief (entering or leaving a
+ * component: a quicker fade and a shorter travel, and cables drawing as fast).
  */
 .sb-pe .react-flow__node:is([data-appear="node"], [data-appear="slide"]) {
   animation:
@@ -238,6 +239,12 @@
 
 .sb-pe .react-flow__node[data-appear="still"] {
   animation: sb-pe-appear-in 260ms cubic-bezier(0.33, 1, 0.68, 1) var(--sb-appear-delay, 0ms) both;
+}
+
+.sb-pe .react-flow__node[data-appear="brief"] {
+  animation:
+    sb-pe-appear-hop 200ms cubic-bezier(0.16, 1, 0.3, 1) var(--sb-appear-delay, 0ms) both,
+    sb-pe-appear-in 160ms cubic-bezier(0.33, 1, 0.68, 1) var(--sb-appear-delay, 0ms) both;
 }
 
 /* The materialize accent: a ring in the node's category color glows in, then settles. Opacity only. */
@@ -274,18 +281,31 @@
   animation: sb-pe-appear-in 180ms var(--ease-out) var(--sb-appear-delay, 0ms) both;
 }
 
-/* Cables draw from the output (pathLength="1" while drawing); the loop tint, glow and glyph fade in with them. */
-.sb-pe .react-flow__edge[data-appear="draw"] .sb-pe-cable__wire {
+/*
+ * Cables draw from the output (pathLength="1" while drawing); the loop tint, the glow, the glyph and
+ * the orb group (with the copy of the glow a boolean's orb holds, .sb-pe-orb__sweep, and an orb still
+ * flying from before another document arrived) fade in with them. New orbs wait for the drawing to
+ * finish (Orb in CableEdge.tsx).
+ */
+.sb-pe .react-flow__edge:is([data-appear="draw"], [data-appear="brief"]) .sb-pe-cable__wire {
   stroke-dasharray: 1 2;
   animation: sb-pe-appear-draw 320ms cubic-bezier(0.45, 0, 0.2, 1) var(--sb-appear-delay, 0ms) both;
 }
 
-.sb-pe .react-flow__edge[data-appear="draw"] :is(.sb-pe-cable__loop, .sb-pe-cable__glow) {
+.sb-pe .react-flow__edge:is([data-appear="draw"], [data-appear="brief"]) :is(.sb-pe-cable__loop, .sb-pe-cable__glow, .sb-pe-orb) {
   animation: sb-pe-appear-in 320ms var(--ease-in) var(--sb-appear-delay, 0ms) both;
 }
 
 .sb-pe .react-flow__edge[data-appear="draw"] .sb-pe-cable__glyph {
   animation: sb-pe-appear-in 180ms var(--ease-out) calc(var(--sb-appear-delay, 0ms) + 170ms) both;
+}
+
+.sb-pe .react-flow__edge[data-appear="brief"] :is(.sb-pe-cable__wire, .sb-pe-cable__loop, .sb-pe-cable__glow, .sb-pe-orb) {
+  animation-duration: 200ms;
+}
+
+.sb-pe .react-flow__edge[data-appear="brief"] .sb-pe-cable__glyph {
+  animation: sb-pe-appear-in 120ms var(--ease-out) calc(var(--sb-appear-delay, 0ms) + 100ms) both;
 }
 
 /* Invalid (dashed) cables, and cables of nodes that fade, fade instead of drawing. */
@@ -307,6 +327,15 @@
 @keyframes sb-pe-appear-travel {
   from {
     translate: -8px 0;
+  }
+  to {
+    translate: 0 0;
+  }
+}
+
+@keyframes sb-pe-appear-hop {
+  from {
+    translate: -4px 0;
   }
   to {
     translate: 0 0;
@@ -337,131 +366,24 @@
 }
 
 /*
- * The loading placeholder: skeleton nodes on the empty canvas while a first fit keeps the viewport
- * hidden on an idle page for longer than LOADING_DELAY_MS (PatchEditor.tsx), fading out as the graph
- * arrives. Sizes match SKELETON_NODES. The shimmer sweeps left to right, a column at a time.
+ * Reduced motion: no travel, no accent and no drawing; what appears fades in quickly, or is simply
+ * there. The OS setting counts while Settings → Motion is System; Full keeps the wave (useReducedMotion).
  */
-.sb-pe-loading {
-  position: absolute;
-  top: 50%;
-  left: 50%;
-  width: 464px;
-  height: 176px;
-  translate: -50% -50%;
-  pointer-events: none;
-  transition: opacity 320ms var(--ease-out);
-}
-
-/* A transition, not an animation, so leaving mid-fade-in fades from wherever it got to. */
-@starting-style {
-  .sb-pe-loading {
-    opacity: 0;
-  }
-}
-
-/* Even-paced, so the skeleton crossfades with the wave arriving instead of cutting away. */
-.sb-pe-loading[data-leaving] {
-  opacity: 0;
-  transition: opacity 300ms cubic-bezier(0.45, 0, 0.55, 1);
-}
-
-.sb-pe-loading__cables {
-  position: absolute;
-  inset: 0;
-  width: 100%;
-  height: 100%;
-  overflow: visible;
-}
-
-.sb-pe-loading__cables path {
-  fill: none;
-  stroke: color-mix(in srgb, var(--text-primary) 9%, transparent);
-  stroke-width: 2;
-  stroke-linecap: round;
-}
-
-.sb-pe-loading__node {
-  position: absolute;
-  width: 124px;
-  height: calc(24px + var(--sb-rows) * 18px + 10px);
-  padding-top: 28px;
-  overflow: hidden;
-  border-radius: var(--sb-pe-node-radius);
-  background:
-    linear-gradient(color-mix(in srgb, var(--text-primary) 4%, transparent) 0 24px, transparent 24px),
-    color-mix(in srgb, var(--canvas-bg) 60%, var(--patch-node-bg));
-  box-shadow: 0 0 0 1px color-mix(in srgb, var(--text-primary) 6%, transparent);
-}
-
-.sb-pe-loading__node::before {
-  content: "";
-  position: absolute;
-  top: 9px;
-  left: 10px;
-  width: 52%;
-  height: 6px;
-  border-radius: 3px;
-  background: color-mix(in srgb, var(--text-primary) 11%, transparent);
-}
-
-.sb-pe-loading__node::after {
-  content: "";
-  position: absolute;
-  inset: 0;
-  background: linear-gradient(100deg, transparent 25%, color-mix(in srgb, var(--text-primary) 6%, transparent) 50%, transparent 75%);
-  transform: translateX(-100%);
-  animation: sb-pe-loading-shimmer 1500ms var(--ease-in-out) calc(var(--sb-col) * 160ms) infinite;
-}
-
-.sb-pe-loading__row {
-  display: flex;
-  align-items: center;
-  height: 18px;
-  padding: 0 10px;
-}
-
-.sb-pe-loading__row::before {
-  content: "";
-  width: 38%;
-  height: 5px;
-  border-radius: 3px;
-  background: color-mix(in srgb, var(--text-primary) 7%, transparent);
-}
-
-/* Output rows sit on the right, where their cables leave. */
-.sb-pe-loading__row[data-out] {
-  justify-content: flex-end;
-}
-
-@keyframes sb-pe-loading-shimmer {
-  0% {
-    transform: translateX(-100%);
-  }
-  65%,
-  100% {
-    transform: translateX(100%);
-  }
-}
-
-/* Reduced motion: no travel, no accent and no drawing; what appears fades in quickly, or is simply there. */
 @media (prefers-reduced-motion: reduce) {
-  .sb-pe .react-flow__node[data-appear] {
+  :root:not([data-motion="full"]) .sb-pe .react-flow__node[data-appear] {
     animation: sb-pe-appear-in 180ms var(--ease-out) both;
   }
-  .sb-pe .react-flow__node[data-appear] .sb-pe-node::before {
+  :root:not([data-motion="full"]) .sb-pe .react-flow__node[data-appear] .sb-pe-node::before {
     content: none;
   }
-  .sb-pe .react-flow__edge[data-appear] :is(.sb-pe-cable__wire, .sb-pe-cable__loop, .sb-pe-cable__glow, .sb-pe-cable__glyph) {
+  :root:not([data-motion="full"]) .sb-pe .react-flow__edge[data-appear] :is(.sb-pe-cable__wire, .sb-pe-cable__loop, .sb-pe-cable__glow, .sb-pe-cable__glyph, .sb-pe-orb) {
     animation: none;
   }
-  .sb-pe .react-flow__edge[data-appear="draw"] .sb-pe-cable__wire {
+  :root:not([data-motion="full"]) .sb-pe .react-flow__edge:is([data-appear="draw"], [data-appear="brief"]) .sb-pe-cable__wire {
     stroke-dasharray: none;
   }
-  .sb-pe .react-flow__edge[data-appear] .sb-pe-cable {
+  :root:not([data-motion="full"]) .sb-pe .react-flow__edge[data-appear] .sb-pe-cable {
     animation: sb-pe-appear-in 180ms var(--ease-out) both;
-  }
-  .sb-pe-loading__node::after {
-    animation: none;
   }
 }
 
@@ -473,20 +395,16 @@
   content: none;
 }
 
-:root[data-reduced-motion="true"] .sb-pe .react-flow__edge[data-appear] :is(.sb-pe-cable__wire, .sb-pe-cable__loop, .sb-pe-cable__glow, .sb-pe-cable__glyph) {
+:root[data-reduced-motion="true"] .sb-pe .react-flow__edge[data-appear] :is(.sb-pe-cable__wire, .sb-pe-cable__loop, .sb-pe-cable__glow, .sb-pe-cable__glyph, .sb-pe-orb) {
   animation: none;
 }
 
-:root[data-reduced-motion="true"] .sb-pe .react-flow__edge[data-appear="draw"] .sb-pe-cable__wire {
+:root[data-reduced-motion="true"] .sb-pe .react-flow__edge:is([data-appear="draw"], [data-appear="brief"]) .sb-pe-cable__wire {
   stroke-dasharray: none;
 }
 
 :root[data-reduced-motion="true"] .sb-pe .react-flow__edge[data-appear] .sb-pe-cable {
   animation: sb-pe-appear-in 180ms var(--ease-out) both;
-}
-
-:root[data-reduced-motion="true"] .sb-pe-loading__node::after {
-  animation: none;
 }
 
 .sb-pe-node[data-working] {
@@ -594,7 +512,10 @@ textarea.sb-pe-title-input {
 }
 
 .sb-pe-node__loop {
+  display: inline-flex;
   flex: none;
+  flex-direction: column;
+  align-items: center;
   height: 16px;
   min-width: 16px;
   padding: 0 5px;
@@ -605,6 +526,14 @@ textarea.sb-pe-title-input {
   font-weight: var(--font-weight-bold);
   line-height: 16px;
   text-align: center;
+}
+
+/* The room of its reserve ("×00", loopBadgeReserve in @sonobe/core/graph), so a count gaining a digit doesn't widen the node. */
+.sb-pe-node__loop::after {
+  content: attr(data-reserve);
+  height: 0;
+  overflow: hidden;
+  visibility: hidden;
 }
 
 .sb-pe-node__enter {

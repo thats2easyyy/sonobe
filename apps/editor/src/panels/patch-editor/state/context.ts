@@ -9,6 +9,7 @@ import type { LiveScope } from "../model/instances.ts";
 import type { CableGeometry } from "../model/knife.ts";
 import type { PortModel } from "../model/types.ts";
 import type { PatchEditorActions } from "./actions.ts";
+import type { AppearStore } from "./appear.ts";
 import type { LiveStore } from "./liveStore.ts";
 import type { PatchEditorUiState, UiStore } from "./uiStore.ts";
 
@@ -20,6 +21,8 @@ export interface PatchEditorContextValue {
   live: LiveStore;
   /** Rendered cable endpoints (flow coordinates), written by cable views. */
   geometry: Map<string, CableGeometry>;
+  /** How nodes and cables arrive on the canvas; cable orbs wait for their cable to be there. */
+  appear: AppearStore;
   actions: PatchEditorActions;
   reducedMotion: boolean;
   /** The component runs in the prototype (the root, or through an instance), so live values exist. */

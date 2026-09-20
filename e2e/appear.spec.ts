@@ -69,13 +69,39 @@ test.describe("patch editor: nodes and cables arriving", () => {
       expect(inView, pass).toEqual(["$in", "$out", "like_spring", "liked"]);
       const revealed = new Set((await appeared(page)).filter((a) => a.kind === "node").map((a) => a.id));
       expect([...revealed].sort(), pass).toEqual(inView);
-      // Back at the root, its own reveal plays before the next entry.
+      // Entering is navigation: the reveal is brief, nodes and cables alike.
+      expect([...new Set((await appeared(page)).map((a) => a.mode))], pass).toEqual(["brief"]);
+      // Back at the root, its own brief reveal plays before the next entry.
       await clearAppeared(page);
       await hook(page, (s) => s.session.selection.getState().setComponentPath(["main"]));
       await expect(flowNode(page, "tap_photo")).toBeVisible();
       await revealPlayed(page);
+      expect(new Set((await appeared(page)).filter((a) => a.kind === "node" && !a.id?.startsWith("comment:")).map((a) => a.mode)), pass).toEqual(new Set(["brief"]));
       await expect.poll(() => hook(page, (s) => !!s.selection().patchViewports.heart_logic)).toBe(true);
     }
+    expect(problems).toEqual([]);
+  });
+
+  test("a document that replaces the one shown arrives in the whole wave, even from inside a component it doesn't have", async ({ page }) => {
+    const problems = collectConsoleProblems(page);
+    await recordAppearances(page);
+    await openEditor(page);
+    await runCommand(page, "Patches Only");
+    await revealPlayed(page);
+    // The first open plays the whole wave.
+    expect((await appeared(page)).filter((a) => a.kind === "node" && !a.id?.startsWith("comment:")).map((a) => a.mode)).toContain("node");
+    const original = await hook(page, (s) => structuredClone(s.doc()));
+    expect(await hook(page, (s) => s.apply([{ op: "createComponent", component: "main", name: "Heart Logic", patchIds: ["liked", "like_spring"] }], "Group").ok)).toBe(true);
+    await hook(page, (s) => s.session.selection.getState().enterComponent("heart_logic"));
+    await expect(flowNode(page, "$in")).toBeVisible();
+    await revealPlayed(page);
+    await clearAppeared(page);
+    await hook(page, (s, doc) => s.session.document.getState().replaceDocument(doc as never), original);
+    await expect(flowNode(page, "tap_photo")).toBeVisible();
+    await revealPlayed(page);
+    const modes = new Set((await appeared(page)).filter((a) => a.kind === "node" && !a.id?.startsWith("comment:")).map((a) => a.mode));
+    expect(modes.has("brief")).toBe(false);
+    expect(modes.has("node")).toBe(true);
     expect(problems).toEqual([]);
   });
 

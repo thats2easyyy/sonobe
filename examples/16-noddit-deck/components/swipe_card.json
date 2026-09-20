@@ -649,7 +649,7 @@
     {
       "id": "section_from_main",
       "text": "FROM MAIN · the finger, the buttons, and the card above this one",
-      "rect": [-640, 0, 187, 430],
+      "rect": [-640, 0, 255, 430],
       "color": "gray"
     },
     {
