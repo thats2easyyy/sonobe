@@ -285,7 +285,7 @@ export function registerSimulationTools(tc: ToolContext): void {
     {
       title: "Get simulation values",
       description:
-        'Current values in a simulation: patch ports ("toggle.on", inputs too) and layer properties or outputs ("@card.scale", or "@row.position#2" for one loop copy). Reach inside component instances with an instance path: "like_button_2/liked.on", "@like_button_2/like_button.color", "card#2/..." for copy 2 of a looped instance. A value that reads as null or an empty loop comes with a note saying why: the layer drew 0 copies (and where its empty loop started), "#n" is past the end, or the instance path runs into a component with 0 copies.',
+        'Current values in a simulation: patch ports ("toggle.on", inputs too) and layer properties or outputs ("@card.scale", or "@row.position#2" for one loop copy). Reach inside component instances with an instance path: "like_button_2/liked.on", "@like_button_2/like_button.color", "card#2/..." for copy 2 of a looped instance. A value sim_override changed says so, and a value that reads as null or an empty loop comes with a note saying why: the layer drew 0 copies (and where its empty loop started), "#n" is past the end, or the instance path runs into a component with 0 copies.',
       input: z.object({ simId: z.string(), targets: TargetsSchema.max(30) }),
       output: SimStateOutputSchema,
       annotations: READ_ONLY,
