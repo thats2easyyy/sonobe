@@ -224,6 +224,8 @@ describe("Knobs tab", () => {
 
   it("flashes the row a patch editor chip or Show in Knobs asks for", () => {
     const s = mount(deck());
+    act(() => knobsUi(s).getState().toggleGroup("Throw"));
+    expect(rowOf("Bounce")).toBeNull();
     act(() => knobsUi(s).getState().set({ flash: { id: "bounce", at: 1 } }));
     expect(rowOf("Bounce").dataset.flash).toBe("true");
   });

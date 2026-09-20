@@ -75,16 +75,25 @@ export function KnobsPanel() {
     else openEditor(request.kind === "newKnob" ? { kind: "new" } : { kind: "edit", id: request.id }, request.kind === "editKnob" ? (rows.current.get(request.id) ?? null) : null);
   }, [request, session]);
 
-  // Show in Knobs: scroll to the row and flash it.
+  // Show in Knobs: scroll to the row and flash it, opening its group first when it's collapsed.
   useEffect(() => {
     if (!flash) return;
     const el = rows.current.get(flash.id);
-    if (!el) return;
+    if (!el) {
+      const group = session.document.getState().doc.knobs?.knobs.find((k) => k.id === flash.id)?.group;
+      if (group && knobsUi(session).getState().collapsed.has(group)) knobsUi(session).getState().toggleGroup(group);
+      return;
+    }
     el.scrollIntoView?.({ block: "nearest" });
     setFlashing(flash.id);
+    knobsUi(session).getState().set({ flash: null });
+  }, [flash, collapsed, session]);
+
+  useEffect(() => {
+    if (flashing === null) return;
     const timer = setTimeout(() => setFlashing(null), FLASH_MS);
     return () => clearTimeout(timer);
-  }, [flash]);
+  }, [flashing]);
 
   const menu = (): MenuEntry[] => {
     const running = set?.presets.find((p) => p.id === set.active);
