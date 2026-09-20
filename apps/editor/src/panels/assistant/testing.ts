@@ -12,6 +12,7 @@ import {
   type AssistantRunResult,
   type AssistantStatus,
   type AssistantUsage,
+  type HandoffResult,
 } from "./types.ts";
 
 export const usage = (totalTokens = 0, budgetTokens = totalTokens): AssistantUsage => ({ inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, totalTokens, budgetTokens, estimatedCostUsd: 0, requests: 0 });
@@ -32,6 +33,10 @@ export interface FakeAssistantHost extends AssistantHostLike {
   folderCalls: ("codeFolder" | "link" | "unlink")[];
   /** What linkCodeFolder() answers (default: links ~/code/placemark, remembered for the project). */
   nextLink: () => AssistantCodeFolderLinkResult;
+  /** The prompts openInClaudeCode() was given, in order. */
+  handoffs: string[];
+  /** What openInClaudeCode() answers (default: opens in ~/code/placemark, linking it when no folder is). */
+  nextHandoff: () => HandoffResult;
   listeners: Set<(event: AssistantEvent) => void>;
   emit(event: AssistantEvent): void;
   /** Stream `html` as import_design's draft: `chunks` design_draft events with their offsets, the last one done with the whole html. */
@@ -53,6 +58,11 @@ export function fakeAssistantHost(options: { secretsAvailable?: boolean; key?: s
     folder: { linked: null, missing: false },
     folderCalls: [],
     nextLink: () => ({ status: { linked: { name: "placemark", path: "~/code/placemark", persisted: true }, missing: false } }),
+    handoffs: [],
+    nextHandoff: () => {
+      if (!host.folder.linked) host.folder = host.nextLink().status;
+      return host.folder.linked ? { ok: true, folder: host.folder.linked.path } : { ok: false, cancelled: true };
+    },
     listeners: new Set(),
     emit(event) {
       for (const l of [...host.listeners]) l(event);
@@ -125,6 +135,10 @@ export function fakeAssistantHost(options: { secretsAvailable?: boolean; key?: s
         host.folderCalls.push("unlink");
         host.folder = { linked: null, missing: false };
         return host.folder;
+      },
+      openInClaudeCode: async (request) => {
+        host.handoffs.push(request.prompt);
+        return host.nextHandoff();
       },
     },
     secrets: {
