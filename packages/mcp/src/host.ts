@@ -32,6 +32,8 @@ export interface HostCapabilities {
   presence: boolean;
   /** Writes are saved to disk after every successful batch. */
   autosave: boolean;
+  /** import_design draws `<svg data-sf-symbol>` placeholders as real SF Symbols (Sonobe on a Mac). */
+  sfSymbols?: boolean;
 }
 
 /** One open document. */

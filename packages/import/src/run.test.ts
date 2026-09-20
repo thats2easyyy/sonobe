@@ -28,6 +28,17 @@ describe("createCaptureRun", () => {
     run.dispose();
   });
 
+  it("names the SF Symbols stage, with its own hint", async () => {
+    const run = createCaptureRun({ timeoutMs: 5_000 });
+    run.report({ stage: "symbols", message: "Drawing SF Symbols: 0 of 3" });
+    const caught = run.step(never()).catch((err: unknown) => err);
+    await vi.advanceTimersByTimeAsync(5_000);
+    const err = (await caught) as CaptureTimeoutError;
+    expect(err.message).toBe("The capture didn't finish within 5 seconds. It stopped while drawing SF Symbols.");
+    expect(err.hint).toContain("data-sf-symbol");
+    run.dispose();
+  });
+
   it("turns the caller's abort into a cancel, before or during a step", async () => {
     const early = new AbortController();
     early.abort();

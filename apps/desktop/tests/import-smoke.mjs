@@ -7,7 +7,8 @@
  *   capture session, the bytes reach the live editor (assets.put), and the screen is one undo step.
  *   Saves the viewer (screenshots/import-viewer.png) and the page as the browser drew it
  *   (screenshots/import-source.png).
- * - MCP import_design with html: a long page gets a Scroll patch.
+ * - MCP import_design with html: a long page gets a Scroll patch, and <svg data-sf-symbol> placeholders
+ *   become real SF Symbols when the app has its helper (macOS), or gray placeholders with a note.
  * - A dead dev server explains itself.
  * - The editor's own bridge: window.sonobeHost.captureDesign for the Import dialog.
  * - Pasting a capture (from the Chrome extension) downloads its linked image through the main process.
@@ -157,6 +158,27 @@ try {
   const rows = Array.from({ length: 24 }, (_, i) => `<div style="height:64px;border-bottom:1px solid #eee;display:flex;align-items:center;padding:0 16px">Row ${i + 1}</div>`).join("");
   const inbox = await call("import_design", { html: `<!doctype html><body style="margin:0;font-family:system-ui">${rows}</body>`, name: "Inbox", position: [402, 0] });
   assert(!inbox.isError && inbox.text.includes("Scroll patch"), "a long page scrolls", inbox.text);
+
+  log("import_design html with SF Symbol placeholders");
+  {
+    // The app draws SF Symbols with dist/bin/sfsymbol on macOS 13+ (build.mjs skips it without Xcode's tools).
+    const helper = existsSync(path.join(appDir, "dist", "bin", "sfsymbol"));
+    const info = await call("get_document_info");
+    assert(info.structuredContent?.host?.sfSymbols === helper, "get_document_info says whether imports draw SF Symbols", info.text);
+    const html = `<!doctype html><body style="margin:0;font-family:system-ui"><div data-name="Actions" style="display:flex;gap:24px;align-items:center;padding:80px 16px"><div data-name="Like Button" style="display:flex;width:56px;height:56px;border-radius:28px;background:#fff;box-shadow:0 4px 12px rgba(0,0,0,.15);align-items:center;justify-content:center"><svg data-sf-symbol="heart.fill" style="font-size:26px;color:#F24D47"></svg></div><svg data-sf-symbol="not.a.symbol" style="font-size:20px"></svg></div></body>`;
+    const steps = [];
+    const r = await call("import_design", { html, name: "Symbols", position: [1206, 0] }, { onprogress: (p) => steps.push(p.message), resetTimeoutOnProgress: true });
+    assert(!r.isError, "import_design with SF Symbols succeeds", r.text);
+    if (helper) {
+      assert(r.text.includes('layer heart_fill image "heart.fill"'), "the placeholder became the real symbol, named after it", r.text);
+      assert(steps.some((m) => /^Drawing SF Symbols: \d+ of \d+$/.test(m)), "drawing SF Symbols is a progress step", steps);
+      assert(r.text.includes("“not.a.symbol” isn't an SF Symbol on this Mac") && r.text.includes("gray placeholder"), "an unknown name is a placeholder with a note", r.text);
+      const symbolDoc = await app.evaluate(() => globalThis.__sonobeTest.invokeRenderer("document.get", {}));
+      assert(Object.values(symbolDoc.document.assets).some((a) => a.name === "heart.fill" && a.mime === "image/svg+xml"), "the symbol is an SVG asset", Object.values(symbolDoc.document.assets).map((a) => a.name));
+    } else {
+      assert(r.text.includes("gray placeholder"), "without the helper, symbols are placeholders with a note", r.text);
+    }
+  }
 
   log("import_design with a dead dev server");
   const closed = createServer();
