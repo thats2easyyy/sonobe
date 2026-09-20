@@ -562,4 +562,16 @@ describe("createComponent", () => {
     expect(firstError(doc, [{ op: "createComponent", name: "X", layerIds: ["nope"] }]).code).toBe("not_found");
     expect(firstError(doc, [{ op: "createComponent", name: " ", patchIds: ["pop"] }]).code).toBe("invalid_value");
   });
+
+  it("records the ids it derived in applied, and checks explicit ones like addComponent and addPatch", () => {
+    const doc = buildSampleDocument();
+    const r = mustApply(doc, [{ op: "createComponent", name: "Grow", patchIds: ["pop"] }]);
+    expect(r.applied[0]).toMatchObject({ op: "createComponent", id: "grow", instanceId: "grow_2" });
+    const explicit = mustApply(doc, [{ op: "createComponent", name: "Grow", id: "pop_logic", instanceId: "pop_instance", patchIds: ["pop"] }]);
+    expect(explicit.results[0]!.ids).toEqual(["pop_logic", "pop_instance"]);
+    expect(explicit.doc.components.main!.patches.pop_instance).toMatchObject({ component: "pop_logic" });
+    expect(firstError(doc, [{ op: "createComponent", name: "Grow", id: "Main", patchIds: ["pop"] }]).code).toBe("id_taken");
+    expect(firstError(doc, [{ op: "createComponent", name: "Grow", instanceId: "grow", patchIds: ["pop"] }]).code).toBe("id_taken");
+    expect(firstError(doc, [{ op: "createComponent", name: "Grow", instanceId: "2x", patchIds: ["pop"] }]).code).toBe("invalid_id");
+  });
 });

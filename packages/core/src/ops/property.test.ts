@@ -1,11 +1,15 @@
-/** Property test: random op sequences; every successful op's inverse restores a deep-equal document, strictly and leniently, and so does redo. */
+/**
+ * Property test: random op sequences; every successful op's inverse restores a deep-equal document,
+ * strictly and leniently, and so does redo. Knob sets a hand edit left (they load with diagnostics)
+ * restore through lenient undo and redo, the way history replays them.
+ */
 
 import { describe, expect, it } from "vitest";
 import { hasKnobRange, KNOB_TYPES } from "../knobs.ts";
 import { allLayers, resolveNodePorts, resolveLayerProps } from "../registry.ts";
-import { parseDocumentFiles, serializeDocument } from "../serialize.ts";
+import { KNOBS_FILE, parseDocumentFiles, serializeDocument } from "../serialize.ts";
 import { emptyDoc, mockRegistry, mustApply, SAMPLE_OPS } from "../testing/fixtures.ts";
-import type { InputValue, InterfacePortInput, KnobType, Literal, NewKnob, NewLayer, NewPatch, Op, SonobeDocument, ValueType } from "../types.ts";
+import type { InputValue, InterfacePortInput, KnobType, Literal, NewKnob, NewLayer, NewPatch, Op, OpKind, SonobeDocument, ValueType } from "../types.ts";
 import { applyOps, OP_KINDS } from "./apply.ts";
 import { listInputs, targetAddress } from "./references.ts";
 
@@ -20,7 +24,8 @@ function mulberry32(seed: number): () => number {
   };
 }
 
-function randomOp(doc: SonobeDocument, rand: () => number): Op | undefined {
+/** `kinds` narrows the ops drawn; `clearValues` also draws setKnobValue null (a preset's own value removed). */
+function randomOp(doc: SonobeDocument, rand: () => number, options: { kinds?: readonly OpKind[]; clearValues?: boolean } = {}): Op | undefined {
   const pick = <T>(xs: readonly T[]): T | undefined => (xs.length ? xs[Math.floor(rand() * xs.length)] : undefined);
   const int = (n: number) => Math.floor(rand() * n);
   const chance = (p: number) => rand() < p;
@@ -80,7 +85,7 @@ function randomOp(doc: SonobeDocument, rand: () => number): Op | undefined {
     }
   };
 
-  switch (pick(OP_KINDS)!) {
+  switch (pick(options.kinds ?? OP_KINDS)!) {
     case "addLayer": {
       const lcs = ofKind("layerComponent");
       if (chance(0.15) && lcs.length) return { op: "addLayer", component: cid, layer: { type: "componentInstance", component: pick(lcs)! } };
@@ -309,7 +314,7 @@ function randomOp(doc: SonobeDocument, rand: () => number): Op | undefined {
     case "setKnobValue": {
       const k = pick(knobs);
       if (!k || !set) return undefined;
-      return { op: "setKnobValue", id: k.id, value: knobValue(k.type), ...(chance(0.5) ? { preset: pick(set.presets)!.id } : {}) };
+      return { op: "setKnobValue", id: k.id, value: options.clearValues && chance(0.2) ? null : knobValue(k.type), ...(chance(0.5) ? { preset: pick(set.presets)!.id } : {}) };
     }
     case "addKnobPreset":
       return { op: "addKnobPreset", preset: { name: pick(["Proposal", "Shipped app", "Wild"])!, ...(chance(0.2) ? { locked: true } : {}) }, ...(set && chance(0.4) ? { copyFrom: pick(set.presets)!.id } : {}), ...(chance(0.3) ? { index: int(3) } : {}) };
@@ -382,5 +387,46 @@ describe("inverse ops (property)", () => {
       expect(serializeDocument(parseDocumentFiles(files))).toEqual(files);
     }
     for (const kind of OP_KINDS) expect(succeeded.get(kind) ?? 0, `op "${kind}" never succeeded`).toBeGreaterThan(0);
+  });
+
+  it("restores knob sets a hand edit left through lenient undo and redo", () => {
+    type KnobsJson = { active: string; presets: { name: string }[]; knobs: { name: string; values: Record<string, unknown> }[] };
+    const saved = serializeDocument(
+      mustApply(emptyDoc(), [
+        ...SAMPLE_OPS,
+        { op: "addKnob", knob: { id: "gap", name: "Gap", type: "number", value: 8 } },
+        { op: "addKnob", knob: { id: "tint", name: "Tint", type: "color", value: "#FF00FFFF" } },
+        { op: "addKnobPreset", preset: { id: "b", name: "B" } },
+        { op: "setKnobValue", id: "gap", preset: "b", value: 5 },
+        { op: "setInput", target: "pop.bounciness", value: { link: "$knob.gap" } },
+      ]).doc,
+    );
+    const edits: ((file: KnobsJson) => void)[] = [
+      (f) => void (f.knobs[0]!.values.old = 3),
+      (f) => void delete f.knobs[0]!.values.default,
+      (f) => void (f.active = "proposal"),
+      (f) => void ((f.knobs[1]!.name = "GAP"), (f.presets[1]!.name = "DEFAULT")),
+    ];
+    const kinds = [...OP_KINDS.filter((k) => k.includes("Knob")), "setInput"] as OpKind[];
+    edits.forEach((edit, seed) => {
+      const file = JSON.parse(saved[KNOBS_FILE]!) as KnobsJson;
+      edit(file);
+      let doc = parseDocumentFiles({ ...saved, [KNOBS_FILE]: JSON.stringify(file) });
+      const rand = mulberry32(seed + 1);
+      for (let step = 0; step < 120; step++) {
+        const op = randomOp(doc, rand, { kinds, clearValues: true });
+        if (!op) continue;
+        const r = applyOps(doc, [op], { registry: mockRegistry });
+        if (!r.ok) {
+          expect(r.errors[0]!.code).not.toBe("internal");
+          continue;
+        }
+        const undo = applyOps(r.doc, r.inverse, { registry: mockRegistry, lenient: true });
+        if (!undo.ok) throw new Error(`edit ${seed} step ${step}: lenient undo of ${JSON.stringify(op)} failed: ${JSON.stringify(undo.errors)}`);
+        expect(undo.doc, `lenient undo of ${JSON.stringify(op)}`).toStrictEqual(doc);
+        expect(applyOps(doc, r.applied, { registry: mockRegistry, lenient: true }).doc, `lenient redo of ${JSON.stringify(op)}`).toStrictEqual(r.doc);
+        doc = r.doc;
+      }
+    });
   });
 });

@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { createHistory } from "./history.ts";
 import { createIdLedger, retiredIds, seenIdsExcept, seenIdsFromJSON, seenIdsToJSON } from "./idLedger.ts";
 import { applyOps } from "./ops/index.ts";
-import { ID_SCENARIO_SETUP, ID_SCENARIOS, runIdScenario, type IdScenarioHost } from "./testing/idScenarios.ts";
+import { ID_REDO_SCENARIOS, ID_SCENARIO_SETUP, ID_SCENARIOS, runIdScenario, type IdScenarioHost } from "./testing/idScenarios.ts";
 import { emptyDoc, expectRoundTrip, mockRegistry, mustApply } from "./testing/fixtures.ts";
 import type { Op, SonobeDocument } from "./types.ts";
 
@@ -25,12 +25,17 @@ function coreHost(initial: SonobeDocument): IdScenarioHost & { doc: () => Sonobe
       return r;
     },
     async undo() {
-      const step = history.undo()!;
-      const r = applyOps(doc, step.ops, { registry: mockRegistry, lenient: true });
-      doc = r.doc;
-      ids.observe(doc, r.affected.components);
+      replay(history.undo()!.ops);
+    },
+    async redo() {
+      replay(history.redo()!.ops);
     },
   };
+  function replay(ops: Op[]) {
+    const r = applyOps(doc, ops, { registry: mockRegistry, lenient: true });
+    doc = r.doc;
+    ids.observe(doc, r.affected.components);
+  }
 }
 
 describe("id ledger", () => {
@@ -71,7 +76,7 @@ describe("id ledger", () => {
   });
 
   describe("shared scenarios on core", () => {
-    for (const scenario of ID_SCENARIOS) {
+    for (const scenario of [...ID_SCENARIOS, ...ID_REDO_SCENARIOS]) {
       it(scenario.name, async () => {
         expect(await runIdScenario(coreHost(setup()), scenario)).toEqual(scenario.expected);
       });

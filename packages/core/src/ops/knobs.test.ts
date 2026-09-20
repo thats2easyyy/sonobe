@@ -1,8 +1,9 @@
 import { describe, expect, it } from "vitest";
 import { createIdLedger } from "../idLedger.ts";
-import { DEFAULT_KNOB_PRESET, MAX_KNOB_PRESETS } from "../knobs.ts";
+import { DEFAULT_KNOB_PRESET, effectiveKnobLiteral, MAX_KNOB_PRESETS } from "../knobs.ts";
 import { createRegistry } from "../registry.ts";
-import { emptyDoc, expectRoundTrip, MOCK_PATCH_SPECS, mockRegistry, mustApply, port } from "../testing/fixtures.ts";
+import { KNOBS_FILE, parseDocumentFiles, serializeDocument } from "../serialize.ts";
+import { buildSampleDocument, emptyDoc, expectRoundTrip, MOCK_PATCH_SPECS, mockRegistry, mustApply, port } from "../testing/fixtures.ts";
 import type { Op, SonobeDocument, SonobeError } from "../types.ts";
 import { applyOps, type ApplyOpsOptions } from "./index.ts";
 
@@ -276,5 +277,60 @@ describe("knob links", () => {
     const doc = mustApply(emptyDoc(), [{ op: "addKnobPreset", preset: { ...DEFAULT_KNOB_PRESET } }]).doc;
     const r = mustApply(doc, [distance]);
     expectRoundTrip(doc, r);
+  });
+});
+
+describe("undo and redo on knob sets a hand edit left (they load, with diagnostics)", () => {
+  type KnobsJson = { active: string; presets: { id: string; name: string }[]; knobs: { id: string; name: string; group?: string; options?: unknown[]; values: Record<string, unknown> }[] };
+  /** Knobs Gap (read by pop.bounciness), Width and Mode in presets Default and B, saved, then knobs.json edited by hand and read back. */
+  function loaded(edit: (file: KnobsJson) => void): SonobeDocument {
+    const doc = mustApply(buildSampleDocument(), [
+      { op: "addKnob", knob: { id: "gap", name: "Gap", type: "number", value: 8 } },
+      { op: "addKnob", knob: { id: "width", name: "Width", type: "number", value: 100 } },
+      { op: "addKnob", knob: { id: "mode", name: "Mode", type: "enum", options: [{ key: "a", name: "A" }, { key: "b", name: "B" }] } },
+      { op: "addKnobPreset", preset: { id: "b", name: "B" } },
+      { op: "setKnobValue", id: "gap", preset: "b", value: 5 },
+      { op: "setInput", target: "pop.bounciness", value: { link: "$knob.gap" } },
+    ]).doc;
+    const files = serializeDocument(doc);
+    const file = JSON.parse(files[KNOBS_FILE]!) as KnobsJson;
+    edit(file);
+    return parseDocumentFiles({ ...files, [KNOBS_FILE]: JSON.stringify(file) });
+  }
+  const knob = (file: KnobsJson, id: string) => file.knobs.find((k) => k.id === id)!;
+  const cases: { name: string; edit: (file: KnobsJson) => void; ops: Op[] }[] = [
+    { name: "a value for a preset that isn't there", edit: (f) => void (knob(f, "gap").values.old = 3), ops: [{ op: "removeKnob", id: "gap" }, { op: "updateKnob", id: "gap", type: "boolean" }, { op: "updateKnob", id: "gap", type: "text" }] },
+    { name: "a preset without a value of its own", edit: (f) => void delete knob(f, "gap").values.default, ops: [{ op: "removeKnob", id: "gap" }, { op: "updateKnob", id: "gap", type: "boolean" }] },
+    { name: "a running preset that isn't one", edit: (f) => void (f.active = "proposal"), ops: [{ op: "applyKnobPreset", id: "default" }, { op: "removeKnobPreset", id: "b" }, { op: "removeKnob", id: "gap" }] },
+    { name: "knob names alike ignoring case", edit: (f) => void (knob(f, "width").name = "GAP"), ops: [{ op: "removeKnob", id: "gap" }, { op: "removeKnob", id: "width" }, { op: "updateKnob", id: "width", name: "Wide" }] },
+    { name: "preset names alike ignoring case", edit: (f) => void (f.presets[1]!.name = "DEFAULT"), ops: [{ op: "removeKnobPreset", id: "b" }, { op: "removeKnobPreset", id: "default" }, { op: "updateKnobPreset", id: "b", name: "Other" }] },
+    {
+      name: "a group with spaces and an option listed twice",
+      edit: (f) => void Object.assign(knob(f, "mode"), { group: " Throw ", options: [{ key: "a", name: "A" }, { key: "a", name: "" }, { key: "b", name: "B" }] }),
+      ops: [{ op: "removeKnob", id: "mode" }, { op: "updateKnob", id: "mode", group: "Tilt", options: [{ key: "a", name: "A" }, { key: "b", name: "B" }] }],
+    },
+  ];
+  for (const c of cases) {
+    it(`restore ${c.name}`, () => {
+      const doc = loaded(c.edit);
+      for (const op of c.ops) {
+        const r = apply(doc, [op]);
+        expect(r.errors, JSON.stringify(op)).toEqual([]);
+        // History replays undo and redo leniently.
+        const undo = apply(r.doc, r.inverse, { lenient: true });
+        expect(undo.errors, `undo of ${JSON.stringify(op)}`).toEqual([]);
+        expect(undo.doc, `undo of ${JSON.stringify(op)}`).toStrictEqual(doc);
+        expect(apply(doc, r.applied, { lenient: true }).doc, `redo of ${JSON.stringify(op)}`).toStrictEqual(r.doc);
+      }
+    });
+  }
+
+  it("keep what a preset without a value of its own runs", () => {
+    const doc = loaded((f) => void delete knob(f, "gap").values.default);
+    expect(effectiveKnobLiteral(doc.knobs!, "gap")).toBe(5);
+    const r = mustApply(doc, [{ op: "removeKnob", id: "gap" }]);
+    expect(r.doc.components.main!.patches.pop!.inputs.bounciness).toBe(5);
+    const undo = apply(r.doc, r.inverse, { lenient: true });
+    expect(effectiveKnobLiteral(undo.doc.knobs!, "gap")).toBe(5);
   });
 });

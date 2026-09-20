@@ -645,6 +645,10 @@ export type Op =
       layerIds?: Id[];
       patchIds?: Id[];
       ref?: string;
+      /** The new component's id; derived from `name` when left out. */
+      id?: Id;
+      /** The instance's id (a layer or patch in `component`); derived from `name` when left out. */
+      instanceId?: Id;
     })
   /**
    * Publish, change or unpublish a component's ports. Ports merge by key: a port you name replaces
