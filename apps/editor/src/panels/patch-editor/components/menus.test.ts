@@ -42,6 +42,26 @@ describe("port menu", () => {
     expect(find(entries, "Patch Info")).toBeDefined();
   });
 
+  it("unlinks a knob-driven input to the knob's running value instead of disconnecting it", () => {
+    const doc = applyOps(
+      createDemoDocument(registry),
+      [
+        { op: "addKnob", knob: { id: "bounce", name: "Bounce", type: "number", value: 12 } },
+        { op: "setInput", component: "main", target: "like_spring.bounciness", value: { link: "$knob.bounce" } },
+      ],
+      { registry },
+    ).doc;
+    const { ctx, calls, node, port } = menuFixture(doc, "main");
+    const input = port("like_spring", "in", "bounciness");
+    expect(input.knob).toMatchObject({ id: "bounce", name: "Bounce", valueText: "12" });
+    const entries = portMenu(ctx, node("like_spring"), input);
+    expect(find(entries, "Disconnect")).toBeUndefined();
+    const unlink = find(entries, "Unlink from Bounce")!;
+    expect(unlink.description).toBe("Keeps 12");
+    unlink.onSelect!();
+    expect(calls.apply).toHaveBeenCalledWith([{ op: "setInput", component: "main", target: "like_spring.bounciness", value: 12 }], "Unlink Bounciness from Bounce");
+  });
+
   it("explains why a driven input can't publish, and offers Disconnect", () => {
     const { ctx, node, port } = menuFixture(withComponent(), "heart_logic");
     const entries = portMenu(ctx, node("like_spring"), port("like_spring", "in", "number"));

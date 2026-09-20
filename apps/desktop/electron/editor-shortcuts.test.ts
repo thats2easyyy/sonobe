@@ -1,12 +1,14 @@
 /**
  * Native menu accelerators against the shortcuts the editor registers. Document commands come from the
- * real registerDocumentCommands; commands registered inside React components (shell, panels, app
+ * real registerDocumentCommands and the knob commands from knobCommands (Show Knobs is Mod+5, Flip
+ * Presets Mod+'); commands registered inside React components (shell, panels, app
  * aliases) are listed below with their source, so a change on either side shows up here.
  */
 
 import { createPatchRegistry } from "@sonobe/patches";
 import { afterAll, describe, expect, it } from "vitest";
 import { createBrowserHost, createMemoryProjectStorage } from "../../editor/src/host/browserHost.ts";
+import { FLIP_PRESETS_COMMAND, knobCommands } from "../../editor/src/panels/knobs/commands.ts";
 import { createManualScheduler } from "../../editor/src/runtime/scheduler.ts";
 import { DESKTOP_COMMAND_MAP, registerDocumentCommands } from "../../editor/src/state/commands.ts";
 import { createDemoDocument } from "../../editor/src/state/demoDocument.ts";
@@ -92,8 +94,9 @@ function documentShortcuts(platform: Platform): Map<string, string[]> {
   sessions.push(session);
   const registry = new CommandRegistry();
   registerDocumentCommands(registry, session, { platform, notify: () => undefined, clipboard: null });
+  registry.register(knobCommands(session));
   const out = new Map<string, string[]>();
-  for (const id of new Set([...COMMAND_IDS.map((c) => DESKTOP_COMMAND_MAP[c] ?? c), "prototype.togglePlay", "edit.copy", "edit.paste"])) {
+  for (const id of new Set([...COMMAND_IDS.map((c) => DESKTOP_COMMAND_MAP[c] ?? c), "prototype.togglePlay", "edit.copy", "edit.paste", FLIP_PRESETS_COMMAND])) {
     const command = registry.get(id);
     if (command?.shortcut) out.set(id, list(command.shortcut));
   }

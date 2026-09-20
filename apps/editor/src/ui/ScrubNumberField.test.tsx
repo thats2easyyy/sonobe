@@ -84,6 +84,18 @@ describe("ScrubNumberField", () => {
     expect(input().value).toBe("40");
   });
 
+  it("keeps a typed value past a soft range, and nudges it from there", () => {
+    const onCommit = vi.fn();
+    act(() => root.render(<Controlled onCommit={onCommit} min={0} max={40} softRange />));
+    act(() => input().focus());
+    type("250");
+    press("Enter");
+    expect(onCommit).toHaveBeenLastCalledWith(250);
+    expect(input().value).toBe("250");
+    press("ArrowUp");
+    expect(onCommit).toHaveBeenLastCalledWith(251);
+  });
+
   it("reverts a draft on Escape without emitting", () => {
     const onChangeSpy = vi.fn();
     act(() => root.render(<Controlled onChangeSpy={onChangeSpy} />));

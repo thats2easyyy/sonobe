@@ -52,6 +52,8 @@ export const COMMANDS: Readonly<Record<SonobeCommandId, CommandSpec>> = {
   "view.toggleConsole": { label: "Console & Diagnostics", accelerator: "CmdOrCtrl+J" },
   "view.toggleAssistant": { label: "Assistant", accelerator: "CmdOrCtrl+6" },
   "view.toggleInspector": { label: "Inspector", accelerator: "CmdOrCtrl+7" },
+  // The Inspector's Knobs tab. Mod+3, Mod+4 and Mod+6 are taken above, and Mod+' flips presets in the editor.
+  "view.showKnobs": { label: "Knobs", accelerator: "CmdOrCtrl+5" },
   "view.toggleSplitOrientation": { label: "Toggle Split Orientation", accelerator: "CmdOrCtrl+\\" },
   "view.zoomIn": { label: "Zoom In", accelerator: "CmdOrCtrl+=" },
   "view.zoomOut": { label: "Zoom Out", accelerator: "CmdOrCtrl+-" },

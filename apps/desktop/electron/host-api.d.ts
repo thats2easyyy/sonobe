@@ -33,6 +33,7 @@ export type SonobeCommandId =
   | "view.toggleConsole"
   | "view.toggleAssistant"
   | "view.toggleInspector"
+  | "view.showKnobs"
   | "view.toggleSplitOrientation"
   | "view.zoomIn"
   | "view.zoomOut"

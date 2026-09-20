@@ -1,0 +1,125 @@
+.sb-slider {
+  --sb-slider-thumb: 12px;
+  position: relative;
+  display: flex;
+  align-items: center;
+  flex: 1 1 auto;
+  min-width: 48px;
+  height: 20px;
+  padding: 0 calc(var(--sb-slider-thumb) / 2);
+  border-radius: var(--radius-xs);
+  outline: none;
+  cursor: ew-resize;
+  touch-action: none;
+}
+
+.sb-slider:focus-visible {
+  box-shadow: 0 0 0 1.5px var(--focus-ring);
+}
+
+.sb-slider[data-disabled] {
+  cursor: default;
+  opacity: 0.55;
+}
+
+.sb-slider__track {
+  position: relative;
+  flex: 1;
+  height: 4px;
+  border-radius: var(--radius-full);
+  background: var(--bg-pressed);
+  box-shadow: inset 0 0 0 1px var(--border-subtle);
+}
+
+.sb-slider__fill {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: calc(var(--sb-slider-ratio) * 100%);
+  border-radius: inherit;
+  background: var(--accent);
+}
+
+.sb-slider[data-disabled] .sb-slider__fill {
+  background: var(--text-tertiary);
+}
+
+.sb-slider__thumb {
+  position: absolute;
+  top: 50%;
+  left: calc(var(--sb-slider-ratio) * 100%);
+  width: var(--sb-slider-thumb);
+  height: var(--sb-slider-thumb);
+  border-radius: 50%;
+  background: #fff;
+  box-shadow:
+    0 0 0 1px var(--border-strong),
+    0 1px 2px rgba(0, 0, 0, 0.3);
+  translate: -50% -50%;
+  pointer-events: none;
+}
+
+.sb-slider[data-dragging] .sb-slider__thumb {
+  box-shadow:
+    0 0 0 1px var(--accent),
+    0 0 0 3px var(--accent-soft);
+}
+
+/* A typed value past the range: the thumb sits at that end and a caret points past it. */
+.sb-slider__caret {
+  position: absolute;
+  top: 50%;
+  width: 0;
+  height: 0;
+  border-block: 4px solid transparent;
+  translate: 0 -50%;
+  pointer-events: none;
+}
+
+.sb-slider[data-overflow="above"] .sb-slider__caret {
+  left: calc(100% + var(--sb-slider-thumb) / 2 + 1px);
+  border-left: 4px solid var(--warn);
+}
+
+.sb-slider[data-overflow="below"] .sb-slider__caret {
+  right: calc(100% + var(--sb-slider-thumb) / 2 + 1px);
+  border-right: 4px solid var(--warn);
+}
+
+.sb-slider__tick {
+  position: absolute;
+  top: 50%;
+  left: calc(var(--sb-tick-ratio) * 100%);
+  width: 8px;
+  height: 14px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  translate: -50% -50%;
+  cursor: pointer;
+}
+
+.sb-slider__tick::after {
+  content: "";
+  position: absolute;
+  top: 1px;
+  bottom: 1px;
+  left: 3px;
+  width: 2px;
+  border-radius: 1px;
+  background: var(--sb-tick-color, var(--text-secondary));
+}
+
+.sb-slider__tick[data-outside]::after {
+  opacity: 0.5;
+}
+
+.sb-slider__tick:disabled {
+  cursor: default;
+}
+
+@media (hover: hover) {
+  .sb-slider__tick:hover:not(:disabled)::after {
+    left: 2px;
+    width: 4px;
+  }
+}

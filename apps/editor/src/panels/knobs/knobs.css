@@ -1,0 +1,422 @@
+/* Knobs tab */
+.sb-knobs {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: var(--space-4) var(--space-5) var(--space-9);
+}
+
+.sb-knobs__selection {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  color: var(--text-tertiary);
+  font-size: var(--font-size-xs);
+}
+
+.sb-knobs__link {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--text-accent);
+  font: inherit;
+  cursor: pointer;
+}
+
+@media (hover: hover) {
+  .sb-knobs__link:hover {
+    text-decoration: underline;
+  }
+}
+
+.sb-knobs__link:focus-visible {
+  border-radius: var(--radius-xs);
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 1px;
+}
+
+.sb-knobs__note {
+  margin: 0;
+  color: var(--text-tertiary);
+  font-size: var(--font-size-xs);
+  line-height: var(--line-height-normal);
+}
+
+.sb-knobs__empty-actions {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-4);
+  text-align: center;
+}
+
+/* Preset bar */
+.sb-knobs-presets {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: var(--control-h-sm);
+}
+
+.sb-knobs-presets__chips {
+  display: flex;
+  flex: 1 1 auto;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.sb-knobs-presets__spacer {
+  flex: 1;
+}
+
+.sb-preset-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  max-width: 100%;
+  height: var(--control-h-xs);
+  padding: 0 var(--space-3);
+  border-radius: var(--radius-full);
+  box-shadow: inset 0 0 0 1px var(--border-default);
+  color: var(--text-secondary);
+  font-size: var(--font-size-xs);
+  cursor: pointer;
+  user-select: none;
+}
+
+.sb-preset-chip__dot {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  box-shadow: inset 0 0 0 1.5px var(--sb-preset-color);
+}
+
+.sb-preset-chip__name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sb-preset-chip[data-running] {
+  background: color-mix(in srgb, var(--sb-preset-color) 20%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--sb-preset-color) 55%, transparent);
+  color: var(--text-primary);
+  font-weight: var(--font-weight-medium);
+}
+
+.sb-preset-chip[data-running] .sb-preset-chip__dot {
+  background: var(--sb-preset-color);
+}
+
+@media (hover: hover) {
+  .sb-preset-chip:not([data-running]):hover {
+    background: var(--bg-hover);
+    color: var(--text-primary);
+  }
+}
+
+.sb-preset-chip:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 1px;
+}
+
+/* A locked running preset */
+.sb-knobs-locked {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2) var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius-md);
+  background: var(--warn-soft);
+  color: var(--warn-text);
+  font-size: var(--font-size-xs);
+  line-height: var(--line-height-normal);
+}
+
+.sb-knobs-locked__text {
+  flex: 1 1 140px;
+}
+
+.sb-knobs-locked__actions {
+  display: flex;
+  gap: var(--space-1);
+}
+
+.sb-knobs__filter {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  color: var(--text-secondary);
+  font-size: var(--font-size-xs);
+}
+
+.sb-knobs__filter .sb-choice {
+  flex: none;
+  white-space: nowrap;
+}
+
+.sb-knobs__filter-count {
+  overflow: hidden;
+  color: var(--text-tertiary);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Groups and rows */
+.sb-knobs__groups {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.sb-knobs-group {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.sb-knobs-group__title {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: var(--space-1) 0;
+  border: 0;
+  background: none;
+  color: var(--text-tertiary);
+  font-size: var(--font-size-2xs);
+  font-weight: var(--font-weight-semibold);
+  letter-spacing: 0.04em;
+  text-align: left;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+
+.sb-knobs-group__title:focus-visible {
+  border-radius: var(--radius-xs);
+  outline: 2px solid var(--focus-ring);
+}
+
+.sb-knob-row {
+  display: grid;
+  grid-template-areas:
+    "diff name menu"
+    ". control control"
+    ". hint hint";
+  grid-template-columns: 10px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--space-1) var(--space-2);
+  padding: var(--space-1) var(--space-1) var(--space-2) 0;
+  border-radius: var(--radius-sm);
+  transition: background-color var(--duration-slow) var(--ease-standard);
+}
+
+/* Rows whose control fits next to the name. */
+.sb-knob-row:is([data-type="boolean"], [data-type="color"], [data-type="enum"]) {
+  grid-template-areas:
+    "diff name control menu"
+    ". hint hint hint";
+  grid-template-columns: 10px minmax(64px, 38%) minmax(0, 1fr) auto;
+}
+
+.sb-knob-row[data-flash] {
+  background: var(--accent-soft);
+  transition: none;
+}
+
+.sb-knob-row[data-unused] :is(.sb-knob-row__name, .sb-knob-row__control) {
+  opacity: 0.6;
+}
+
+.sb-knob-row__head {
+  display: contents;
+}
+
+.sb-knob-row__diff {
+  grid-area: diff;
+  color: var(--warn-text);
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-semibold);
+  text-align: center;
+}
+
+.sb-knob-row__name {
+  grid-area: name;
+  overflow: hidden;
+  color: var(--text-primary);
+  font-size: var(--font-size-xs);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sb-knob-row__menu {
+  grid-area: menu;
+  opacity: 0;
+}
+
+.sb-knob-row:is(:hover, :focus-within) .sb-knob-row__menu,
+.sb-knob-row__menu[aria-expanded="true"] {
+  opacity: 1;
+}
+
+.sb-knob-row__control {
+  grid-area: control;
+  min-width: 0;
+}
+
+.sb-knob-row__hint {
+  grid-area: hint;
+  margin: 0;
+  color: var(--text-tertiary);
+  font-size: var(--font-size-2xs);
+  line-height: var(--line-height-normal);
+}
+
+.sb-knob-row__tip {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+/* A knob's control, in a row or in the Inspector */
+.sb-knob-control {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.sb-knob-control > * {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.sb-knob-control[data-slider] .sb-knob-control__field {
+  flex: 0 0 76px;
+}
+
+/* New Knob, Edit Knob and Make Knob */
+.sb-knob-popover {
+  width: 272px;
+  padding: var(--space-5);
+}
+
+.sb-knob-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.sb-knob-form__title {
+  color: var(--text-primary);
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-semibold);
+}
+
+.sb-knob-form__row {
+  display: grid;
+  grid-template-columns: 72px minmax(0, 1fr);
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.sb-knob-form__label {
+  color: var(--text-secondary);
+  font-size: var(--font-size-xs);
+}
+
+.sb-knob-form__range {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: var(--space-2);
+}
+
+.sb-knob-form__range-field {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.sb-knob-form__problem {
+  margin: 0;
+  color: var(--danger-text);
+  font-size: var(--font-size-xs);
+  line-height: var(--line-height-normal);
+}
+
+.sb-knob-form__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-2);
+  margin-top: var(--space-2);
+}
+
+/* Convert Variables to Knobs */
+.sb-knobs-convert {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  max-height: 240px;
+  margin: 0;
+  padding: 0;
+  overflow: auto;
+  list-style: none;
+}
+
+.sb-knobs-convert__item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+}
+
+.sb-knobs-convert__meta {
+  color: var(--text-tertiary);
+  font-size: var(--font-size-xs);
+}
+
+.sb-knobs-convert__refused {
+  color: var(--text-secondary);
+  font-size: var(--font-size-xs);
+}
+
+.sb-knobs-convert__refused ul {
+  margin: var(--space-2) 0 0;
+  padding-left: var(--space-6);
+}
+
+/* A knob-driven field in Properties */
+.sb-insp-knob {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.sb-insp-knob__head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.sb-insp-knob__meta {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text-tertiary);
+  font-size: var(--font-size-2xs);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sb-insp-knob[data-missing] .sb-insp-knob__chip {
+  background: var(--warn-soft);
+  color: var(--warn-text);
+}
