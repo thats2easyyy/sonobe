@@ -21,6 +21,14 @@ export {
   type SimulationManagerOptions,
 } from "./sim.ts";
 export {
+  applyOverrides,
+  overrideEntries,
+  OVERRIDE_OPS,
+  type AppliedOverrides,
+  type OverrideEntry,
+} from "./overrides.ts";
+export { isolateSceneLayer, sceneNodesFor } from "./isolate.ts";
+export {
   ADDITIVE,
   authorFromClientName,
   conformErrorResult,

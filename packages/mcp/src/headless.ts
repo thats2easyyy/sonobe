@@ -394,6 +394,7 @@ export function createHeadlessHost(options: HeadlessHostOptions = {}): HeadlessH
         ...(shotOptions.scale !== undefined ? { scale: shotOptions.scale } : {}),
         ...(shotOptions.maxWidth !== undefined ? { maxWidth: shotOptions.maxWidth } : {}),
         ...(shotOptions.simId !== undefined ? { simId: shotOptions.simId } : {}),
+        ...(shotOptions.isolate ? { isolate: true } : {}),
       });
       if (!settled)
         shot.notes = [

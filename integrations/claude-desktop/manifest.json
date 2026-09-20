@@ -88,6 +88,10 @@
     },
     { "name": "sim_get_values", "description": "Current simulated values." },
     {
+      "name": "sim_override",
+      "description": "Change values inside one simulation only, leaving the document untouched."
+    },
+    {
       "name": "get_screenshot",
       "description": "An image of the viewer, canvas, graph or a layer."
     },

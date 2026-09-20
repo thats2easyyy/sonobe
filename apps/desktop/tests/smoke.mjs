@@ -602,6 +602,18 @@ try {
     const layerSize = layerImage ? pngSize(Buffer.from(layerImage.data, "base64")) : null;
     assert(!layerShot.isError && layerSize && layerSize.width >= 50, "get_screenshot of a layer in a simulation", layerShot.text);
     log(`simulation screenshot ${simSize.width}×${simSize.height}, layer ${layerSize.width}×${layerSize.height} → ${path.relative(process.cwd(), simScreenshotPath)}`);
+
+    // Overrides and isolated layers draw in the hidden window too, and never reach the editor's history.
+    const historyBefore = (await app.evaluate(() => globalThis.__sonobeTest.invokeRenderer("history.list", { limit: 50 }))).entries.length;
+    const override = await mcp.call("sim_override", { simId, set: [{ target: "@next_card.opacity", value: 0 }] });
+    assert(!override.isError && override.structuredContent.overrides.length === 1, "sim_override", override.text);
+    const isolated = await mcp.call("get_screenshot", { simId, target: "@card", isolate: true, atMs: 500 });
+    const isolatedImage = (isolated.content ?? []).find((c) => c.type === "image");
+    const isolatedSize = isolatedImage ? pngSize(Buffer.from(isolatedImage.data, "base64")) : null;
+    assert(!isolated.isError && isolatedSize && isolatedSize.width >= 50 && isolated.text.includes("(isolated)") && isolated.text.includes("has 1 override"), "get_screenshot of an isolated layer with an override", isolated.text);
+    const historyAfter = (await app.evaluate(() => globalThis.__sonobeTest.invokeRenderer("history.list", { limit: 50 }))).entries.length;
+    assert(historyAfter === historyBefore, "sim_override leaves the editor's history alone", { historyBefore, historyAfter });
+    log(`simulation override and isolated layer ${isolatedSize.width}×${isolatedSize.height}`);
   } else {
     log("WARN @sonobe/mcp doesn't expose SimulationManager.scene yet; simulation screenshots stay unavailable");
   }
