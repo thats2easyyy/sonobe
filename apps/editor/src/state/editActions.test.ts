@@ -93,6 +93,23 @@ describe("edit actions", () => {
     expect(main(s).patches.tap_2!.ui).toEqual({ x: main(s).patches.tap!.ui.x + step, y: main(s).patches.tap!.ui.y + step });
   });
 
+  it("pastes under ids retired in another component, but not in the target", () => {
+    const s = start(
+      build([
+        { op: "addComponent", component: { id: "chip", name: "Chip", kind: "layerComponent" } },
+        { op: "addLayer", component: "chip", layer: { id: "x", type: "rectangle", name: "X" } },
+      ]),
+    );
+    s.selection.getState().setComponentPath(["main", "chip"]);
+    s.selection.getState().select({ layers: ["x"] });
+    const fragment = copySelection(s)!;
+    deleteSelection(s);
+    expect(s.document.getState().isRetiredId("chip", "x")).toBe(true);
+    expect(pasteFragment(s, fragment).layers).toEqual(["x_2"]);
+    s.selection.getState().setComponentPath(["main"]);
+    expect(pasteFragment(s, fragment).layers).toEqual(["x"]);
+  });
+
   it("pastes patches where they were when that spot is free", () => {
     const s = start(twoRects());
     s.selection.getState().select({ patches: ["tap"] });

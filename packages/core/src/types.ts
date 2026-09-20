@@ -220,6 +220,9 @@ export interface InterfacePort {
   link?: string;
 }
 
+/** A port as updateInterface takes it: `key` defaults to its record key, `name` to the key, and `link: null` disconnects an output. */
+export type InterfacePortInput = Omit<InterfacePort, "key" | "name" | "link"> & { key?: string; name?: string; link?: string | null };
+
 export type ComponentKind = "prototype" | "layerComponent" | "patchComponent";
 
 export interface Component {
@@ -561,11 +564,20 @@ export type Op =
       patchIds?: Id[];
       ref?: string;
     })
+  /**
+   * Publish, change or unpublish a component's ports. Ports merge by key: a port you name replaces
+   * that key whole, null unpublishes it, and keys you don't name stay. With `replace: true`, each side
+   * you give (inputs, outputs) is the complete set, and its keys you leave out are unpublished; a side
+   * you don't give is untouched. Unpublishing disconnects every cable to that port (inside, and on
+   * every instance), and the inverse restores them. An output declared again without `link` keeps its
+   * cable; `link: null` disconnects it. A key can't be renamed: unpublish it and publish the new key.
+   */
   | {
       op: "updateInterface";
       component: Id;
-      inputs?: Record<string, InterfacePort | null>;
-      outputs?: Record<string, InterfacePort | null>;
+      inputs?: Record<string, InterfacePortInput | null>;
+      outputs?: Record<string, InterfacePortInput | null>;
+      replace?: boolean;
     }
   /**
    * `meta` merges key by key into Component.meta: a key set to null is removed, any other value
@@ -618,6 +630,10 @@ export interface OpResult {
   error?: SonobeError;
   /** Ids created or touched by this op. */
   ids?: Id[];
+  /** Derived ids that skipped an id retired this session (ARCHITECTURE §3.2): new id → the retired id. */
+  retired?: Record<Id, Id>;
+  /** Derived ids that got a suffix because an item created earlier in the batch took the base: new id → that item's id. */
+  suffixed?: Record<Id, Id>;
 }
 
 export interface Affected {

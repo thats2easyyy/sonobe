@@ -54,6 +54,8 @@ export interface ImportOptions {
    * layers found again keep their ids, links and connections.
    */
   replace?: Id;
+  /** With `replace`: ids retired in the component this session (ARCHITECTURE §3.2), which new layers must not take. */
+  isRetired?: (id: Id) => boolean;
 }
 
 /** The import can't be planned (the layer to replace doesn't exist). */
@@ -285,7 +287,7 @@ export async function planImport(capture: DesignCapture, doc: SonobeDocument, im
     const lost: string[] = [];
     const claim = (l: NewLayer) => {
       if (!l.id) {
-        l.id = uniqueId(slugify(l.name ?? l.type, slugify(l.type)), taken);
+        l.id = uniqueId(slugify(l.name ?? l.type, slugify(l.type)), (id) => taken.has(id) || !!options.isRetired?.(id));
         taken.add(l.id);
       } else if (newIds.has(l.id) && l.props) {
         // Links carried over from the old screen can point at layers the new one doesn't have.

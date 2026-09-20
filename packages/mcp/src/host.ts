@@ -53,6 +53,8 @@ export interface DocumentSnapshot {
   doc: SonobeDocument;
   revision: number;
   dirty: boolean;
+  /** Component id → item ids retired this session (removed, so new items never get them). Hosts that don't track them leave it out. */
+  retired?: Record<Id, Id[]>;
 }
 
 export interface CreateDocumentRequest {

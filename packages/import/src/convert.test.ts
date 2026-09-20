@@ -1,4 +1,4 @@
-import { applyOps, createEmptyDocument, findLayer, type LayerNode } from "@sonobe/core";
+import { applyOps, createEmptyDocument, createIdLedger, findLayer, type LayerNode } from "@sonobe/core";
 import { createPatchRegistry } from "@sonobe/patches";
 import { describe, expect, it } from "vitest";
 import { parseCapture, type CaptureFrame, type DesignCapture } from "./capture.ts";
@@ -309,6 +309,21 @@ describe("re-import edge cases", () => {
     expect(applyOps(wired.doc, again.ops, { registry }).errors).toEqual([]);
     expect(again.summary.lostConnections).toBe(1);
     expect(again.notes.join(" ")).toContain("1 connection to layers the new screen doesn't have was removed: @open_until_9_pm.text.");
+  });
+
+  it("gives new layers ids that aren't retired this session", async () => {
+    const first = await imported(screen(["A", "B"]));
+    const ids = createIdLedger(first.doc);
+    const removed = applyOps(first.doc, [{ op: "removeLayer", id: "b" }], { registry, seenIds: ids });
+    ids.observe(removed.doc, removed.affected.components);
+    // Without isRetired, the new "B" claims the retired id b and the whole import is refused.
+    const blind = await planImport(screen(["A", "B"]), removed.doc, new Map(), { replace: "tabs" });
+    expect(applyOps(removed.doc, blind.ops, { registry, seenIds: ids }).errors[0]?.code).toBe("id_retired");
+    const again = await planImport(screen(["A", "B"]), removed.doc, new Map(), { replace: "tabs", isRetired: (id) => ids.isRetired(removed.doc, "main", id) });
+    const result = applyOps(removed.doc, again.ops, { registry, seenIds: ids });
+    expect(result.errors).toEqual([]);
+    expect(findLayer(result.doc.components.main!.layers, "a")).toBeDefined();
+    expect(findLayer(result.doc.components.main!.layers, "b_2")).toBeDefined();
   });
 
   it("doesn't let a new layer take a kept id", async () => {

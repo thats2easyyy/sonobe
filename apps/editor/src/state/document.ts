@@ -6,12 +6,14 @@
 
 import {
   applyOps,
-  componentItemIds,
   createEmptyDocument,
   createHistory,
+  createIdLedger,
   describeHistoryEntry,
   makeError,
   ProjectFormatError,
+  retiredIds,
+  seenIdsExcept,
   serializeDocument,
   type Affected,
   type ApplyOpsResult,
@@ -166,6 +168,12 @@ export interface DocumentState {
   redo: (author?: Author) => HistoryStepResult;
   /** Undo every group up to and including `txnId`. */
   undoTo: (txnId: string, author?: Author) => HistoryStepResult;
+  /**
+   * Fold a gesture's provisional steps into its final edit: undo every group up to and including
+   * `txnId`, then apply `ops` as one group. Ids those groups created aren't retired here, so the final
+   * ops can create the same items again. When the apply fails, the undone groups come back.
+   */
+  amend: (txnId: string, ops: readonly Op[], input: ApplyInput) => ApplyOpsResult;
   replaceDocument: (doc: SonobeDocument, options?: ReplaceOptions) => void;
   /** Start an unsaved document: empty (from `options`), or `document` when given (templates). */
   newDocument: (options?: CreateDocumentOptions, document?: SonobeDocument) => void;
@@ -189,8 +197,10 @@ export interface DocumentState {
   redoEntries: (limit?: number) => HistoryListEntry[];
   /** Called after every revision change with the new and previous state. */
   subscribeRevision: (cb: (state: DocumentState, previous: DocumentState) => void) => () => void;
-  /** True for ids removed this session, which new items never reuse. */
-  isReservedId: (id: Id) => boolean;
+  /** True for an id that belonged to an item of `component` this session and is gone from it: new items never get it (ARCHITECTURE §3.2). */
+  isRetiredId: (component: Id, id: Id) => boolean;
+  /** Component id → its retired item ids (only components that have any). */
+  retiredIds: () => Record<Id, Id[]>;
   dispose: () => void;
 }
 
@@ -275,9 +285,11 @@ export function createDocumentStore(options: DocumentStoreOptions): DocumentStor
   const history = createHistory({ ...options.history, coalesceWindowMs: Number.POSITIVE_INFINITY, now: options.history?.now ?? now });
   let group: CoalesceGroup | null = null;
   let groupCounter = 0;
-  /** Ids removed this session; never generated again (ARCHITECTURE §3.2). */
-  const removedIds = new Set<Id>();
   const initialDoc = options.document ?? createEmptyDocument();
+  /** Every id seen this session; ids gone from their component are retired there (ARCHITECTURE §3.2). */
+  const ids = createIdLedger(initialDoc);
+  /** While amending: the document before its undo, whose ids the final ops may use again. */
+  let amending: SonobeDocument | null = null;
   let savedKey = "";
   /** The document as last opened, saved or reloaded, and its files (computed when needed). */
   let savedDoc = initialDoc;
@@ -329,16 +341,6 @@ export function createDocumentStore(options: DocumentStoreOptions): DocumentStor
       set({ doc, revision: history.revision, lastChange: change, dirty: isDirty(doc), gesture: openGesture(), ...historyFlags() });
     };
 
-    const trackRemoved = (before: SonobeDocument, after: SonobeDocument, components: readonly Id[]) => {
-      for (const id of components) {
-        const b = before.components[id];
-        if (!b) continue;
-        const a = after.components[id];
-        const keep = a ? componentItemIds(a) : new Set<Id>();
-        for (const item of componentItemIds(b)) if (!keep.has(item)) removedIds.add(item);
-      }
-    };
-
     const replay = (kind: "undo" | "redo", steps: HistoryStep[], author: Author): HistoryStepResult => {
       group = null;
       let doc = get().doc;
@@ -372,6 +374,7 @@ export function createDocumentStore(options: DocumentStoreOptions): DocumentStor
         mergeAffected(affected, r.affected);
         opCount += step.ops.length;
       }
+      ids.observe(doc, affected.components);
       const last = steps.at(-1)!.entry;
       const label = steps.length === 1 ? `${kind === "undo" ? "Undo" : "Redo"} ${describeHistoryEntry(last)}` : `${kind === "undo" ? "Undo" : "Redo"} ${steps.length} changes`;
       commit(doc, {
@@ -407,15 +410,19 @@ export function createDocumentStore(options: DocumentStoreOptions): DocumentStor
         // A reload is its own undo step. Undoing past it restores the document older steps were recorded
         // against, instead of replaying their inverses over the outside changes; redo brings the reloaded
         // version back exactly.
-        trackRemoved(previous, doc, Object.keys(previous.components));
+        ids.observe(doc);
         const entry = history.push({ label, author, ops: [], inverse: [] });
         reloads.set(entry.txnId, { before: previous, after: doc });
         txnId = entry.txnId;
         pruneReloads();
-      } else if (replaceOptions.keepHistory) history.bump();
-      else {
+      } else if (replaceOptions.keepHistory) {
+        history.bump();
+        ids.observe(doc);
+      } else {
+        // A new document starts a new session.
         history.clear();
-        removedIds.clear();
+        ids.clear();
+        ids.observe(doc);
         reloads.clear();
       }
       diskDirty = false;
@@ -529,14 +536,14 @@ export function createDocumentStore(options: DocumentStoreOptions): DocumentStor
           atomic: input.atomic,
           dryRun: input.dryRun,
           defaultComponent: input.defaultComponent,
-          reservedIds: removedIds,
+          seenIds: amending ? seenIdsExcept(ids, amending) : ids,
         });
         if (input.dryRun) return result;
         if (result.doc === s.doc || result.applied.length === 0) {
           if (input.gesture === "end") get().endGesture(input.coalesceKey);
           return result;
         }
-        trackRemoved(s.doc, result.doc, result.affected.components);
+        ids.observe(result.doc, result.affected.components);
         const key = input.coalesceKey;
         if (key !== undefined) {
           const top = history.peekUndo();
@@ -589,6 +596,21 @@ export function createDocumentStore(options: DocumentStoreOptions): DocumentStor
           return { ok: false, entries: [], errors: [makeError("not_found", `There's no undoable change "${txnId}".`, { hint: "List the history to see which changes can be undone." })], revision: history.revision };
         }
         return replay("undo", steps, normalizeAuthor(author));
+      },
+
+      amend(txnId, ops, input) {
+        const before = get().doc;
+        const undone = get().undoTo(txnId, normalizeAuthor(input.author));
+        if (!undone.ok) return { ok: false, doc: before, results: [], errors: undone.errors, idMap: {}, inverse: [], applied: [], affected: { ...EMPTY_AFFECTED } };
+        amending = before;
+        let result: ApplyOpsResult;
+        try {
+          result = get().apply(ops, input);
+        } finally {
+          amending = null;
+        }
+        if (!result.ok || result.applied.length === 0) for (let i = 0; i < undone.entries.length; i++) get().redo(normalizeAuthor(input.author));
+        return result;
       },
 
       replaceDocument,
@@ -703,7 +725,8 @@ export function createDocumentStore(options: DocumentStoreOptions): DocumentStor
         });
       },
 
-      isReservedId: (id) => removedIds.has(id),
+      isRetiredId: (component, id) => ids.isRetired(get().doc, component, id),
+      retiredIds: () => retiredIds(ids, get().doc),
 
       dispose() {
         disposed = true;

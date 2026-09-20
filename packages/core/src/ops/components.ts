@@ -6,10 +6,10 @@ import { fileNameCollision, getOwn, isFileNameTaken, isValidId, slugify, uniqueI
 import { allLayers, COMPONENT_INSTANCE_LAYER_TYPE, COMPONENT_PATCH_TYPE, getPatchSpec, interfacePortToPort } from "../registry.ts";
 import { parseComponentFile } from "../schema.ts";
 import { didYouMean, didYouMeanText } from "../suggest.ts";
-import type { Component, Id, InputValue, InterfacePort, LayerNode, Op, PatchNode } from "../types.ts";
+import type { Component, Id, InputValue, InterfacePort, InterfacePortInput, LayerNode, Op, PatchNode } from "../types.ts";
 import { checkInputValue, checkLink, checkLiteral, resolveTarget, type PortTarget } from "../validate.ts";
 import { isLinkInput, isValueType, VALUE_TYPES } from "../values.ts";
-import { CLEAR, defineRef, fail, getTargetComponent, isClear, OpFailure, resolveAddress, resolveId, unwrap, withComponent, type OpContext, type OpOf, type OpOutcome } from "./context.ts";
+import { CLEAR, defineRef, fail, getTargetComponent, isClear, noteRenamed, OpFailure, resolveAddress, resolveId, unwrap, withComponent, type OpContext, type OpOf, type OpOutcome } from "./context.ts";
 import { validateInstance } from "./layers.ts";
 import { validatePatchComponent } from "./patches.ts";
 import { linkSourceId, removeInputs, restoreInputOps, type InputEntry } from "./references.ts";
@@ -98,6 +98,15 @@ function checkNewComponent(ctx: OpContext, component: Component): Component {
   });
 }
 
+/** A component id derived from a name: free ignoring case, and not retired this session. */
+export function newComponentId(ctx: OpContext, name: string): Id {
+  const componentIds = Object.keys(ctx.doc.components);
+  const base = slugify(name, "component");
+  const id = uniqueId(base, (x) => isFileNameTaken(componentIds, x) || ctx.retiredComponent(x));
+  if (id !== base) noteRenamed(ctx, id, base, ctx.retiredComponent(base), false);
+  return id;
+}
+
 export function addComponent(ctx: OpContext, op: OpOf<"addComponent">): OpOutcome {
   const c = op.component;
   if (!c || typeof c !== "object") fail("invalid_op", 'addComponent needs a component, like { "name": "Primary Button", "kind": "layerComponent" }.');
@@ -113,16 +122,21 @@ export function addComponent(ctx: OpContext, op: OpOf<"addComponent">): OpOutcom
   let id: Id;
   if (c.id !== undefined) {
     if (!isValidId(c.id)) fail("invalid_id", `"${String(c.id)}" isn't a valid component id.`, { hint: `Try "${slugify(String(c.id), "component")}".` });
-    if (Object.hasOwn(ctx.doc.components, c.id)) fail("id_taken", `There's already a component "${c.id}".`, { hint: 'Leave "id" out to get a free one.' });
+    if (Object.hasOwn(ctx.doc.components, c.id)) fail("id_taken", `There's already a component "${c.id}".`, { hint: 'Leave "id" out to get a free one. To replace it, remove it earlier in the same batch.' });
     const clash = ctx.lenient ? undefined : fileNameCollision(componentIds, c.id);
     if (clash !== undefined) {
       fail("id_taken", `"${c.id}" would share a file with the component "${clash}": on macOS and Windows, components/${c.id}.json and components/${clash}.json are the same file.`, {
         hint: 'Pick an id that differs by more than capitalization, or leave "id" out to get a free one.',
       });
     }
+    if (ctx.retiredComponent(c.id)) {
+      fail("id_retired", `"${c.id}" belonged to a component removed earlier in this session, so it isn't given to a new one.`, {
+        hint: 'To rebuild a component under its old id, remove it and add the new one in the same batch (if the removal is already applied, undo it first). Or leave "id" out.',
+      });
+    }
     id = c.id;
   } else {
-    id = uniqueId(slugify(c.name, "component"), (x) => isFileNameTaken(componentIds, x) || ctx.reserved.has(x));
+    id = newComponentId(ctx, c.name);
   }
   defineRef(ctx, op.ref, id);
   const full: Component = {
@@ -248,10 +262,24 @@ export function updateComponent(ctx: OpContext, op: OpOf<"updateComponent">): Op
   return { ids: [component.id], applied, inverse: [inverse] };
 }
 
-function validatePort(ctx: OpContext, component: Component, key: string, port: unknown, direction: "input" | "output"): InterfacePort {
+/** The fields a published port takes. */
+const PORT_FIELDS = ["key", "name", "type", "default", "category", "enumOptions", "loopBehavior", "link"];
+
+function validatePort(ctx: OpContext, component: Component, key: string, port: unknown, direction: "input" | "output", existing: InterfacePort | undefined): InterfacePort {
   if (!isValidId(key)) fail("invalid_id", `"${key}" isn't a valid port key.`, { hint: `Try "${slugify(key, "value")}".` });
   if (!port || typeof port !== "object" || Array.isArray(port)) fail("invalid_value", `The published ${direction} "${key}" must be an object like { "name": "Label", "type": "text" }.`);
-  const p = port as Partial<InterfacePort>;
+  const p = port as Partial<InterfacePortInput>;
+  for (const field of Object.keys(p)) {
+    if (!PORT_FIELDS.includes(field)) fail("unknown_field", `The published ${direction} "${key}" has no field "${field}".${didYouMeanText(didYouMean(field, PORT_FIELDS))}`, { hint: `A port takes: ${PORT_FIELDS.join(", ")}.` });
+  }
+  if (p.key !== undefined && p.key !== key) {
+    const renamed = isValidId(p.key) ? p.key : undefined;
+    const side = direction === "input" ? "inputs" : "outputs";
+    fail("invalid_value", `The published ${direction} "${key}" says its key is ${JSON.stringify(p.key)}. A port's key is the key it's listed under, and keys can't be renamed.`, {
+      hint: renamed ? `To rename it, unpublish "${key}" (null) and publish "${renamed}"; cables to "${key}" are disconnected. Or leave "key" out.` : 'Leave "key" out: it defaults to the key the port is listed under.',
+      ...(renamed ? { suggestions: [{ description: `Publish it as "${renamed}" and unpublish "${key}"`, ops: [{ op: "updateInterface", component: component.id, [side]: { [key]: null, [renamed]: { ...p, key: renamed } } } as Op] }] } : {}),
+    });
+  }
   if (!isValueType(p.type)) fail("invalid_value", `The published ${direction} "${key}" has an unknown type ${JSON.stringify(p.type)}.${didYouMeanText(didYouMean(String(p.type), VALUE_TYPES))}`);
   if (p.name !== undefined && typeof p.name !== "string") fail("invalid_value", `The published ${direction} "${key}" needs a text name.`);
   const out: InterfacePort = { key, name: p.name ?? key, type: p.type };
@@ -268,51 +296,81 @@ function validatePort(ctx: OpContext, component: Component, key: string, port: u
     if (isLinkInput(p.default)) fail("invalid_value", `The default for "${key}" must be a value, not a connection.`);
     out.default = unwrap(checkLiteral(ctx.doc, component, p.default, interfacePortToPort(out, direction), `${direction === "input" ? "$in" : "$out"}.${key}`, ctx.validate));
   }
-  if (p.link !== undefined) {
-    if (direction === "input") fail("invalid_value", `Published inputs can't have a link ("${key}").`, { hint: "Inside the component, read the input with { \"link\": \"$in." + key + "\" }." });
+  if (direction === "input") {
+    if (p.link !== undefined && p.link !== null) fail("invalid_value", `Published inputs can't have a link ("${key}").`, { hint: "Inside the component, read the input with { \"link\": \"$in." + key + "\" }." });
+    return out;
+  }
+  // An output declared again without "link" keeps its cable; "link": null disconnects it.
+  const kept = p.link === undefined ? existing?.link : undefined;
+  const link = p.link ?? kept;
+  if (link !== undefined) {
     const target: PortTarget = { kind: "componentOutput", address: `$out.${key}`, key, port: interfacePortToPort(out, "output"), bindable: true };
-    out.link = unwrap(checkLink(ctx.doc, component, resolveAddress(ctx, p.link), target, ctx.validate)).link;
+    const check = checkLink(ctx.doc, component, kept ?? resolveAddress(ctx, link), target, ctx.validate);
+    if (!check.ok && kept !== undefined) {
+      fail(check.error.code, `The published output "${key}" keeps its connection from ${kept}, which no longer fits: ${check.error.message}`, { hint: 'Pass "link": null to disconnect it, or give a new "link".' });
+    }
+    out.link = unwrap(check).link;
   }
   return out;
 }
 
+/** An output port with its link spelled out (null when it has none), since an output given without "link" keeps its cable. */
+const explicitLink = (port: InterfacePort): InterfacePortInput => (port.link === undefined ? { ...port, link: null } : port);
+
+/** The ports one side of updateInterface sets: as given, or with replace, also null for each current key it leaves out. */
+function interfaceSide(given: unknown, current: Readonly<Record<string, InterfacePort>>, side: "inputs" | "outputs", replace: boolean): [string, unknown][] {
+  if (!given || typeof given !== "object" || Array.isArray(given)) fail("invalid_op", `"${side}" must map port keys to ports (or null to remove).`, { hint: `Like { "${side}": { "label": { "name": "Label", "type": "text" }, "old": null } }.` });
+  const entries = Object.entries(given);
+  if (!replace) return entries;
+  return [...Object.keys(current).filter((key) => !Object.hasOwn(given, key)).map((key): [string, unknown] => [key, null]), ...entries];
+}
+
 export function updateInterface(ctx: OpContext, op: OpOf<"updateInterface">): OpOutcome {
   let component = getTargetComponent(ctx, op.component);
-  const inputs = { ...component.interface.inputs };
-  const outputs = { ...component.interface.outputs };
+  if (op.replace !== undefined && typeof op.replace !== "boolean") {
+    fail("invalid_value", `"replace" must be true or false, but got ${JSON.stringify(op.replace)}.`, { hint: "replace: true makes each side you give (inputs, outputs) the whole set of ports; its keys you leave out are unpublished." });
+  }
+  const replace = op.replace === true;
+  const before = component.interface;
+  const inputs = { ...before.inputs };
+  const outputs = { ...before.outputs };
+  // `applied` and `inverse` are explicit (a null per unpublished key, no replace flag, every output's
+  // link spelled out), so redo and undo don't depend on the document they land on.
   const inverse: OpOf<"updateInterface"> = { op: "updateInterface", component: component.id };
   const applied: OpOf<"updateInterface"> = { op: "updateInterface", component: component.id };
   const removedInputs: string[] = [];
   const removedOutputs: string[] = [];
 
   if (op.inputs !== undefined) {
-    if (!op.inputs || typeof op.inputs !== "object") fail("invalid_op", '"inputs" must map port keys to ports (or null to remove).');
+    const given = interfaceSide(op.inputs, before.inputs, "inputs", replace);
     inverse.inputs = {};
     applied.inputs = {};
-    for (const [key, port] of Object.entries(op.inputs)) {
-      inverse.inputs[key] = inputs[key] ?? null;
+    for (const [key, port] of given) {
+      inverse.inputs[key] = getOwn(inputs, key) ?? null;
       if (port === null) {
-        if (inputs[key]) removedInputs.push(key);
+        if (getOwn(inputs, key)) removedInputs.push(key);
         delete inputs[key];
         applied.inputs[key] = null;
       } else {
-        inputs[key] = applied.inputs[key] = validatePort(ctx, component, key, port, "input");
+        inputs[key] = applied.inputs[key] = validatePort(ctx, component, key, port, "input", getOwn(before.inputs, key));
       }
     }
     component = { ...component, interface: { inputs, outputs } };
   }
   if (op.outputs !== undefined) {
-    if (!op.outputs || typeof op.outputs !== "object") fail("invalid_op", '"outputs" must map port keys to ports (or null to remove).');
+    const given = interfaceSide(op.outputs, before.outputs, "outputs", replace);
     inverse.outputs = {};
     applied.outputs = {};
-    for (const [key, port] of Object.entries(op.outputs)) {
-      inverse.outputs[key] = outputs[key] ?? null;
+    for (const [key, port] of given) {
+      const current = getOwn(outputs, key);
+      inverse.outputs[key] = current ? explicitLink(current) : null;
       if (port === null) {
-        if (outputs[key]) removedOutputs.push(key);
+        if (getOwn(outputs, key)) removedOutputs.push(key);
         delete outputs[key];
         applied.outputs[key] = null;
       } else {
-        outputs[key] = applied.outputs[key] = validatePort(ctx, component, key, port, "output");
+        outputs[key] = validatePort(ctx, component, key, port, "output", getOwn(before.outputs, key));
+        applied.outputs[key] = explicitLink(outputs[key]);
       }
     }
     component = { ...component, interface: { inputs, outputs } };
@@ -335,7 +393,13 @@ export function updateInterface(ctx: OpContext, op: OpOf<"updateInterface">): Op
       return a?.kind === "componentInput" && keys.has(a.key);
     });
     for (const inst of findComponentInstances(doc, component.id)) {
-      cascade(inst.componentId, (e) => e.target.kind === inst.kind && e.target.id === inst.id && keys.has(e.target.key));
+      cascade(inst.componentId, (e) => {
+        if (e.target.kind === inst.kind && e.target.id === inst.id && keys.has(e.target.key)) return true;
+        // Links that read the value off a layer instance ("@chip_1.label"), unless an output has that key.
+        if (inst.kind !== "layer" || linkSourceId(e.value) !== inst.id) return false;
+        const a = parseAddress((e.value as { link: string }).link);
+        return !!a && keys.has(a.key) && !getOwn(outputs, a.key);
+      });
     }
   }
   if (removedOutputs.length) {

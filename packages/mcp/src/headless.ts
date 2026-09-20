@@ -13,7 +13,7 @@
 import { existsSync } from "node:fs";
 import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { ProjectFormatError, readProjectFiles, saveProject, slugify, uniqueId, type Id, type SaveResult, type SonobeDocument } from "@sonobe/core";
+import { ProjectFormatError, readProjectFiles, retiredIds, saveProject, slugify, uniqueId, type Id, type SaveResult, type SonobeDocument } from "@sonobe/core";
 import { createNodeFs, loadProjectFilesFromDisk } from "@sonobe/core/node";
 import type { EngineRegistry } from "@sonobe/engine";
 import { CaptureCancelledError, CaptureTimeoutError } from "@sonobe/import";
@@ -276,12 +276,14 @@ export function createHeadlessHost(options: HeadlessHostOptions = {}): HeadlessH
 
     async getDocument(docId) {
       const entry = resolve(docId);
+      const retired = retiredIds(entry.session.seenIds, entry.session.doc);
       return {
         docId: entry.docId,
         path: entry.path,
         doc: entry.session.doc,
         revision: entry.session.revision,
         dirty: entry.session.dirty,
+        ...(Object.keys(retired).length ? { retired } : {}),
       };
     },
 

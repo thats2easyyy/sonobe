@@ -272,7 +272,7 @@ describe("app host writes", () => {
     expect(await rejection(host.history.undo({ author: CLAUDE }))).toMatchObject({ code: "nothing_to_undo" });
   });
 
-  it("reports the ids the editor created, even when names were reserved", async () => {
+  it("reports the ids the editor created, even when names were retired", async () => {
     const w = editorWindow(1);
     const host = appHost([w]);
     const sticker = [{ op: "addLayer", layer: { type: "rectangle", name: "Sticker" } }] as Op[];
@@ -283,7 +283,10 @@ describe("app host writes", () => {
     expect(layerId(again)).toBe("sticker_2");
     expect(again.results[0]!.ids).toEqual(["sticker_2"]);
     expect(again.txnId).toBe(w.session.document.getState().historyEntries()[0]!.txnId);
-    expect(writeResult(again).structuredContent).toMatchObject({ created: ["sticker_2"] });
+    expect(writeResult(again).structuredContent).toMatchObject({ created: ["sticker_2"], retiredIds: { sticker_2: "sticker" } });
+    expect(writeResult(again).content[0]).toMatchObject({ text: expect.stringContaining("Retired ids skipped: sticker → sticker_2.") });
+    // The editor's retired ids reach the snapshot import_design plans against.
+    expect((await host.getDocument()).retired).toEqual({ main: ["sticker"] });
 
     const dry = await host.apply(sticker, { label: "try", author: CLAUDE, dryRun: true });
     expect(layerId(dry)).toBe("sticker_3");

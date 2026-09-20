@@ -20,7 +20,17 @@ import type { CallToolResult, ServerContext } from "@modelcontextprotocol/server
 import { z } from "zod";
 import { joinList, plural } from "../format.ts";
 import { requireComponent } from "../graph.ts";
-import { describeRemovals, hasDestructiveOps, removedItems, type RemovalSummary } from "../removals.ts";
+import {
+  describeRemovals,
+  disconnectedLinks,
+  hasCascadingOps,
+  hasDestructiveOps,
+  removedItems,
+  unpublishedPorts,
+  type CutCable,
+  type RemovalSummary,
+  type UnpublishedPorts,
+} from "../removals.ts";
 import type { HostApplyResult } from "../host.ts";
 import { failure, formatSonobeError, success } from "../results.ts";
 import { ADDITIVE, DESTRUCTIVE, UI_ONLY, type ToolContext } from "../server.ts";
@@ -58,6 +68,83 @@ function createdItems(applied: readonly Op[]): string[] {
   return out;
 }
 
+/** Display names of the items applied ops create, by id. */
+function createdNames(applied: readonly Op[]): Map<Id, string> {
+  const names = new Map<Id, string>();
+  const add = (id: Id | undefined, name: string | undefined) => {
+    if (id && name && !names.has(id)) names.set(id, name);
+  };
+  for (const op of applied) {
+    if (op.op === "addPatch") add(op.patch.id, op.patch.name);
+    if (op.op === "addLayer") {
+      const visit = (l: NewLayer) => {
+        add(l.id, l.name);
+        for (const k of l.children ?? []) visit(k);
+      };
+      visit(op.layer);
+    }
+    if (op.op === "addComponent") add(op.component.id, op.component.name);
+  }
+  return names;
+}
+
+/** "a, b, c (+4)" */
+const capped = (items: readonly string[], max = 6) =>
+  `${items.slice(0, max).join(", ")}${items.length > max ? ` (+${items.length - max})` : ""}`;
+
+/**
+ * Lines about derived ids that got a suffix: past an id retired this session, or past an id another
+ * item of the same batch took. On their own lines so they're seen even when "Created:" is skipped.
+ */
+function renamedLines(result: HostApplyResult, extra: { summarizeCreated?: boolean }): { lines: string[]; data: Record<string, unknown> } {
+  const retired: Record<Id, Id> = {};
+  const suffixed: Record<Id, Id> = {};
+  for (const r of result.results) {
+    if (!r.ok) continue;
+    Object.assign(retired, r.retired);
+    // An import names hundreds of layers alike; its suffixes aren't worth a line.
+    if (!extra.summarizeCreated) Object.assign(suffixed, r.suffixed);
+  }
+  const lines: string[] = [];
+  const data: Record<string, unknown> = {};
+  const retiredPairs = Object.entries(retired);
+  if (retiredPairs.length) {
+    data.retiredIds = retired;
+    lines.push(
+      `Retired ids skipped: ${capped(retiredPairs.map(([id, old]) => `${old} → ${id}`))}. Those ids belonged to items removed earlier this session; to rebuild items under their old ids, undo the removal and send it with the new items in one batch.`,
+    );
+  }
+  const suffixedPairs = Object.entries(suffixed);
+  if (suffixedPairs.length) {
+    data.suffixedIds = suffixed;
+    const names = createdNames(result.applied);
+    const named = (id: Id) => (names.has(id) ? `${id} ("${names.get(id)}")` : id);
+    lines.push(
+      `Suffixed ids: ${capped(suffixedPairs.map(([id, base]) => `${named(id)} because ${named(base)} took ${base} earlier in this batch`), 4)}. Give items names that differ in letters or digits, or explicit ids, to address them without a suffix.`,
+    );
+  }
+  return { lines, data };
+}
+
+/** "Unpublished from Swipe Card: inputs swipedLeft, swipedRight; output wentLeft." */
+function unpublishedNote(doc: SonobeDocument, entry: UnpublishedPorts, dryRun: boolean): string {
+  const sides = [
+    entry.inputs.length ? `${entry.inputs.length === 1 ? "input" : "inputs"} ${entry.inputs.join(", ")}` : "",
+    entry.outputs.length ? `${entry.outputs.length === 1 ? "output" : "outputs"} ${entry.outputs.join(", ")}` : "",
+  ].filter(Boolean);
+  return `${dryRun ? "Would unpublish" : "Unpublished"} from ${doc.components[entry.component]?.name ?? entry.component}: ${sides.join("; ")}.`;
+}
+
+/** "Disconnected 3 cables in main: a.b → c.d, …", one line per component. */
+function disconnectedNotes(cut: readonly CutCable[], dryRun: boolean): string[] {
+  const byComponent = new Map<Id, CutCable[]>();
+  for (const c of cut) byComponent.set(c.component, [...(byComponent.get(c.component) ?? []), c]);
+  return [...byComponent].map(
+    ([component, cables]) =>
+      `${dryRun ? "Would disconnect" : "Disconnected"} ${plural(cables.length, "cable")} in ${component}: ${capped(cables.map((c) => `${c.from} → ${c.to}`))}.`,
+  );
+}
+
 /** The standard write response: summary, ids, refs, diagnostics delta, or a teaching failure. */
 export function writeResult(
   result: HostApplyResult,
@@ -69,6 +156,7 @@ export function writeResult(
   );
   const appliedCount = result.results.filter((r) => r.ok).length;
   const created = createdItems(result.applied);
+  const renamed = renamedLines(result, extra);
   const delta = result.diagnostics;
   const deltaLines = (): string[] => {
     const lines = [
@@ -102,6 +190,7 @@ export function writeResult(
     idMap: result.idMap,
     affected: result.affected,
     diagnostics: delta,
+    ...renamed.data,
     ...(result.saved ? { saved: true } : {}),
     ...(result.saveError ? { saved: false, saveError: result.saveError } : {}),
     ...(extra.data ?? {}),
@@ -153,6 +242,7 @@ export function writeResult(
     lines.push(`${result.dryRun ? "Would create" : "Created"} ${plural(created.length, "item")}.`);
   else if (created.length)
     lines.push(`${result.dryRun ? "Would create" : "Created"}: ${created.join(", ")}`);
+  lines.push(...renamed.lines);
   const refs = Object.entries(result.idMap).filter(([ref]) => !extra.summarizeCreated || !/_\d+$/.test(ref));
   if (refs.length)
     lines.push(
@@ -207,23 +297,38 @@ export function registerWriteTools(tc: ToolContext): void {
     });
 
   /**
-   * apply, plus what the batch removes (or would remove, on a dry run) when it has destructive ops.
-   * Counted from the documents before and after, so a removeLayer counts its whole subtree.
+   * apply, plus what the batch removes, unpublishes and disconnects (or would, on a dry run) when it
+   * has ops that cascade. Counted from the documents before and after, so a removeLayer counts its
+   * whole subtree and an unpublished port lists the cables it cut on every instance.
    */
   const applyCounted = async (ctx: ServerContext, ops: Op[], args: Parameters<typeof apply>[2]) => {
-    if (!hasDestructiveOps(ops)) return writeResult(await apply(ctx, ops, args));
+    if (!hasCascadingOps(ops)) return writeResult(await apply(ctx, ops, args));
     const before = await host.getDocument(args.docId);
     const result = await apply(ctx, ops, args);
     let after: SonobeDocument | undefined;
     if (result.dryRun) after = result.preview;
     else if (result.revision !== before.revision) after = (await host.getDocument(args.docId)).doc;
     if (!after || result.conflict) return writeResult(result);
-    const removed: RemovalSummary = removedItems(before.doc, after);
-    const text = describeRemovals(removed);
-    return writeResult(result, {
-      data: { removed },
-      ...(text ? { notes: [`${result.dryRun ? "Would remove" : "Removed"}: ${text}.`] } : {}),
-    });
+    const notes: string[] = [];
+    const data: Record<string, unknown> = {};
+    if (hasDestructiveOps(ops)) {
+      const removed: RemovalSummary = removedItems(before.doc, after);
+      data.removed = removed;
+      const text = describeRemovals(removed);
+      if (text) notes.push(`${result.dryRun ? "Would remove" : "Removed"}: ${text}.`);
+    }
+    const unpublished = unpublishedPorts(before.doc, after);
+    if (unpublished.length) {
+      data.unpublished = unpublished;
+      for (const entry of unpublished) notes.push(unpublishedNote(before.doc, entry, !!result.dryRun));
+    }
+    const cut = disconnectedLinks(before.doc, after);
+    if (cut.length) {
+      data.disconnected = { count: cut.length, cables: cut.slice(0, 50) };
+      notes.push(...disconnectedNotes(cut, !!result.dryRun));
+    }
+    if ((unpublished.length || cut.length) && !result.dryRun) notes.push("The undo tool brings them back.");
+    return writeResult(result, { data, notes });
   };
 
   tc.tool(
@@ -649,7 +754,7 @@ export function registerWriteTools(tc: ToolContext): void {
     {
       title: "Create component",
       description:
-        "Move layers and/or patches into a new reusable component and leave an instance wired the same way. Connections crossing the boundary become published inputs and outputs. Layers make a layer component (instance layer); patches alone make a patch component (instance patch).",
+        "Move layers and/or patches into a new reusable component and leave an instance wired the same way. Connections crossing the boundary become published inputs and outputs. Layers make a layer component (instance layer); patches alone make a patch component (instance patch). Change the ports later with apply_ops updateInterface (replace: true sets a whole side).",
       input: z.object({
         docId: DocIdSchema.optional(),
         component: ComponentIdSchema.optional().describe(

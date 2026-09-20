@@ -32,6 +32,10 @@ A thrown layer needs the release speed. Wire the gesture's `down` into the sprin
 
 `down` is a state that ends when the finger lifts. For a change that stays, wire `tap` into a Switch's `flip`. The designer calls this "toggles".
 
+## Old ports stay on instances after a rebuild
+
+`updateInterface` merges ports by key. Send the whole interface with `"replace": true`, or unpublish ports with `null`. The result lists every cable it cut; reconnect the ones you still need (see `components`).
+
 ## It jumps instead of animating
 
 - A Switch or Interaction is wired straight into a Transition's `progress`, which only ever gets 0 or 1. Put `popAnimation` or `classicAnimation` in between.
@@ -50,6 +54,9 @@ Nothing changed when a write fails. Fix the call and retry.
 | `self_edge`                                          | a patch feeds its own input             | put a `delay1` in between                                                             |
 | `revision_conflict`                                  | the document changed since you read it  | re-read, then retry with the new `expectedRevision`                                   |
 | `unknown_ref`                                        | no op in the batch defines that `$ref`  | add `"ref"` on the op that creates the item; the error lists the batch's refs         |
+| `unknown_field`                                      | an op or port has no such field         | use the "did you mean"; `updateInterface` takes `replace: true` for a whole side      |
+| `id_taken`                                           | an item already has that id             | remove the old item earlier in the same batch, or leave `id` out                      |
+| `id_retired`                                         | an earlier batch removed that id        | undo the removal and rebuild in one batch, or leave `id` out to get `_2`              |
 | `human_edit` (undo)                                  | the newest change is the person's       | ask first; pass its `txnId` to undo it anyway                                         |
 | `capture_timeout` (import)                           | the page didn't finish within 90 s plus `waitMs` | the message names the step; follow its hint, such as `waitFor` for a page that loads late, or import without `screenshot` |
 | `cancelled`                                          | the call was cancelled before it changed anything | nothing to undo; call it again when ready                                  |
@@ -60,6 +67,8 @@ Nothing changed when a write fails. Fix the call and retry.
 - `feedback_loop` (info): an intentional loop. It goes through `delay1`, or values only come back when a pulse fires (a Next button's page jump, a sample-and-hold grab). Nothing to fix; describe it as part of the design.
 - `feedback_loop` (warning): values feed back every frame, so they can drift or oscillate. If it's on purpose, insert `delay1` on the named cable (the ops are included); otherwise disconnect it.
 - `unused_patch` (info): nothing uses the patch's outputs.
+- `unused_input` (info): nothing inside a component reads that published input, so values sent to it do nothing. Read it with `$in.key`, or unpublish it.
+- `undriven_output` (warning): a cable reads an instance output that nothing inside the component drives, so it stays at its default. Connect `$out.key` inside, or disconnect the cable.
 - `dangling_link`, `missing_layer` (errors): something points at a deleted item. Disconnect it or reset the value.
 
 ## Other surprises

@@ -165,6 +165,7 @@ export async function importCapture(session: EditorSession, capture: DesignCaptu
   try {
     plan = await planImport(capture, state.doc, images, {
       component: componentId,
+      isRetired: (id) => state.isRetiredId(componentId, id),
       ...(options.name?.trim() ? { name: options.name.trim() } : {}),
       ...(options.scrolling !== undefined ? { scrolling: options.scrolling } : {}),
       ...(options.position ? { position: options.position } : {}),
