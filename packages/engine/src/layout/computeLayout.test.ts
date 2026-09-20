@@ -66,21 +66,35 @@ describe("absolute positioning and size modes", () => {
     expect(frame(computeLayout(root, mono, [390, 844]), "root")).toEqual([0, 0, 390, 844]);
   });
 
-  it("percent sizes use the parent's inner size", () => {
+  it("percent sizes of positioned children use the parent's full size, padding included", () => {
     const root = n("root", "group", {}, [
       n("panel", "group", { size: [220, 120], padding: [10, 10, 10, 10] }, [
         box("half", 50, 25, { widthMode: "percent", heightMode: "percent", position: [10, 10] }),
       ]),
     ]);
     const out = computeLayout(root, mono, [400, 800]);
-    expect(frame(out, "half")).toEqual([10, 10, 100, 25]);
+    expect(frame(out, "half")).toEqual([10, 10, 110, 30]);
   });
 
-  it("grow fills the parent's inner size without layout", () => {
+  it("grow fills the parent's full size without layout, like a Color Fill", () => {
     const root = n("root", "group", { padding: 20 }, [
       box("fill", 0, 0, { widthMode: "grow", heightMode: "grow" }),
     ]);
-    expect(frame(computeLayout(root, mono, [400, 300]), "fill")).toEqual([0, 0, 360, 260]);
+    expect(frame(computeLayout(root, mono, [400, 300]), "fill")).toEqual([0, 0, 400, 300]);
+  });
+
+  it("sizes absolute children of a padded layout from the padding box, like CSS", () => {
+    // A card photo: a column with padding for its caption, and an absolute photo grid at 100% × 100%.
+    const root = n("root", "group", {}, [
+      n("photos", "group", { size: [356, 339], layout: "column", padding: [0, 0, 10, 12] }, [
+        box("grid", 100, 100, { positioning: "absolute", widthMode: "percent", heightMode: "percent" }),
+        box("caption", 50, 50, { widthMode: "percent", heightMode: "fixed" }),
+      ]),
+    ]);
+    const out = computeLayout(root, mono, [400, 800]);
+    expect(frame(out, "grid")).toEqual([0, 0, 356, 339]);
+    // Children in the flow still sit inside the padding and take shares of the space inside it.
+    expect(frame(out, "caption")).toEqual([12, 0, 172, 50]);
   });
 
   it("colorFill always fills its parent", () => {

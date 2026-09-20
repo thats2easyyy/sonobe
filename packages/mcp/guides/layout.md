@@ -33,6 +33,7 @@ Children of a container with layout:
   - `grow` (share the free space along the layout direction)
   - `percent` (`size` is a percent of the parent)
 - `positioning: "absolute"` opts a child out of layout, so it uses `position` again. With layout on, relative children ignore `position`.
+- Padding only insets children in the layout. An absolute child (or any child of a group without layout) sizes `percent` and `grow` from the parent's full size, padding included, like CSS absolute children: `100%` × `100%` at `[0, 0]` covers the parent exactly.
 
 ## Example: a list card
 

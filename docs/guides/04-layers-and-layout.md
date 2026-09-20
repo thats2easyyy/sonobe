@@ -112,6 +112,8 @@ Text layers default to Auto, so the layer is always exactly as big as its words.
 
 Positioning is the other layout setting on a child. A Relative child follows its parent's layout. An Absolute child ignores the layout and uses its own Position, which is what you want for a badge on a tab icon or a label over a photo.
 
+Padding only pushes in the children that follow the layout. An Absolute child ignores it too: its Position counts from the parent's top-left corner, and Percent and Grow use the parent's whole size, as in CSS. So a photo set to 100% × 100% at 0, 0 covers its card edge to edge, even when the card has padding for its caption.
+
 Layout runs after patches, so a patch that reads a measured size, like Layer Info or a text layer's Text Size, sees the new value on the next frame.
 
 ## Rows, columns and grids

@@ -102,7 +102,7 @@ const LAYOUT_CONTAINER_PROPS: PropSpec[] = [
   prop("layout", "Layout", "enum", "none", "layout", "Arrange children automatically: in a row, a column, or a wrapping grid.", { enumOptions: opts(["none", "None"], ["row", "Row"], ["column", "Column"], ["grid", "Grid"]) }),
   prop("spacingMode", "Spacing Mode", "enum", "fixed", "layout", "Fixed gap, space between children, or space evenly.", { enumOptions: opts(["fixed", "Fixed"], ["between", "Space Between"], ["evenly", "Space Evenly"]) }),
   prop("spacing", "Spacing", "number", 0, "layout", "Gap between children in points (Fixed mode). In Grid, used for both axes.", { min: 0 }),
-  prop("padding", "Padding", "point4d", [0, 0, 0, 0], "layout", "Inner padding [top, right, bottom, left] in points."),
+  prop("padding", "Padding", "point4d", [0, 0, 0, 0], "layout", "Inner padding [top, right, bottom, left] in points for children in the layout. Absolute children ignore it."),
   prop("alignment", "Alignment", "enum", "topLeft", "layout", "Where children sit inside the container.", { enumOptions: ALIGNMENTS }),
   prop("clip", "Clip Contents", "boolean", false, "layout", "Hide children outside the container's bounds."),
 ];
