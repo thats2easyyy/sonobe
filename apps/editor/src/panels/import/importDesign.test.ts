@@ -86,7 +86,7 @@ describe("importDesign", () => {
 
   it("shows the first two notes after an import, and every note behind “N more”", () => {
     const notify = vi.fn();
-    const summary = { layers: 3, texts: 1, images: 0, fields: 0, scrolls: 0 };
+    const summary = { layers: 3, texts: 1, images: 0, fields: 0, scrolls: 0, fonts: 0, newAssets: 0 };
     notifyImported(notify, "Imported “Profile”", { screenName: "Profile", summary, notes: ["First.", "Second."] });
     expect(notify).toHaveBeenLastCalledWith({ title: "Imported “Profile”", description: "3 layers · 1 text First. Second.", tone: "success" });
     const notes = ["First.", "Second.", "Third.", "SF Symbols: the browser editor can't draw heart.fill, so it's a gray placeholder."];
