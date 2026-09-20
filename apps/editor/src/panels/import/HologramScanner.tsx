@@ -75,7 +75,7 @@ export function HologramScanner({ width, height }: HologramScannerProps) {
 }
 
 /** The biggest frame with the import's proportions that fits `box` (CSS px), no taller than `max`. */
-export function scannerFrame(aspect: readonly [number, number], box: { width: number; height: number }, max = 340): { width: number; height: number } {
+export function scannerFrame(aspect: readonly [number, number], box: { width: number; height: number }, max = 420): { width: number; height: number } {
   const ratio = aspect[0] > 0 && aspect[1] > 0 ? aspect[0] / aspect[1] : 1;
   let height = Math.max(0, Math.min(max, box.height));
   let width = height * ratio;

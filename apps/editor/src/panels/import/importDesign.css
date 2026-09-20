@@ -349,8 +349,9 @@
   white-space: nowrap;
 }
 
+/* Choosing Full in Settings → Motion (data-motion="full") keeps the motion the OS would reduce. */
 @media (prefers-reduced-motion: reduce) {
-  .sb-holo-scan {
+  :root:not([data-motion="full"]) .sb-holo-scan {
     animation: none;
   }
 }
