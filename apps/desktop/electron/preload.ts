@@ -174,7 +174,6 @@ const host: SonobeHost = {
 
   secrets: {
     status: () => invoke<SecretsStatus>(IPC.secretsStatus),
-    get: (name) => invoke<string | null>(IPC.secretsGet, name),
     set: (name, value) => invoke<void>(IPC.secretsSet, name, value),
     delete: (name) => invoke<boolean>(IPC.secretsDelete, name),
   },

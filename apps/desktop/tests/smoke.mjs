@@ -300,20 +300,24 @@ try {
   log(`sonobeHost ok (${hostInfo.commandCount} commands)`);
 
   // Secrets (SONOBE_TEST=1 swaps safeStorage for a test cipher, so the keychain is never touched).
+  // The renderer can't read a secret back; the Assistant's status shows only a hint of the stored key.
   const secretRun = await win.evaluate(async () => {
     const s = window.sonobeHost.secrets;
+    const assistant = window.sonobeHost.assistant;
     const status = await s.status();
-    const missing = await s.get("anthropic.apiKey");
+    const getType = typeof s.get;
     await s.set("anthropic.apiKey", "sk-ant-smoke-123");
-    const stored = await s.get("anthropic.apiKey");
+    const stored = await assistant.status();
     const badName = await s.set("../escape", "x").then(() => "allowed", (e) => e.message);
     const removed = await s.delete("anthropic.apiKey");
-    const afterDelete = await s.get("anthropic.apiKey");
+    const afterDelete = await assistant.status();
     await s.set("smoke.kept", "still here");
-    return { status, missing, stored, badName, removed, afterDelete };
+    return { status, getType, stored: { hasKey: stored.hasKey, keyHint: stored.keyHint }, badName, removed, afterDelete: { hasKey: afterDelete.hasKey, keyHint: afterDelete.keyHint } };
   });
   assert(secretRun.status.available === true && ["keychain", "dpapi", "test"].includes(secretRun.status.backend), "secrets status", secretRun.status);
-  assert(secretRun.missing === null && secretRun.stored === "sk-ant-smoke-123" && secretRun.removed === true && secretRun.afterDelete === null, "secrets round trip", secretRun);
+  assert(secretRun.getType === "undefined", "the renderer can't read secrets back", secretRun.getType);
+  assert(secretRun.stored.hasKey === true && typeof secretRun.stored.keyHint === "string" && secretRun.stored.keyHint.endsWith("-123"), "a stored key shows only its hint", secretRun.stored);
+  assert(secretRun.removed === true && secretRun.afterDelete.hasKey === false, "deleting the key", secretRun);
   assert(secretRun.badName.startsWith("Secret names") && !secretRun.badName.includes("invoking remote method"), "secret errors keep a clean message", secretRun.badName);
   const secretsFile = readFileSync(path.join(userData, "secrets.json"), "utf8");
   assert(secretsFile.includes("smoke.kept") && !secretsFile.includes("still here"), "secrets.json holds ciphertext only", secretsFile);
