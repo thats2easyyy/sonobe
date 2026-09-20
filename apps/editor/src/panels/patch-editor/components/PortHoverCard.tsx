@@ -9,7 +9,7 @@ import { Portal } from "../../../ui/Portal.tsx";
 import { PortGlyph, VALUE_TYPE_LABELS } from "../../../ui/PortGlyph.tsx";
 import { toCssColor } from "../../../ui/lib/colorMath.ts";
 import { useFloating } from "../../../ui/lib/useFloating.ts";
-import { formatValue, formatValueLong, isLoopValue, pickCopy, type LoopLike } from "../model/format.ts";
+import { formatValue, formatValueLong, isLoopValue, pickCopy, type LoopLike } from "@sonobe/core/graph";
 import { portKey, type GraphModel } from "../model/types.ts";
 import { patchEditorBridge } from "../state/bridge.ts";
 import { usePatchEditor, useLiveValue, useUi } from "../state/context.ts";

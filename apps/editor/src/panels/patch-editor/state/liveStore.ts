@@ -3,7 +3,7 @@
  * it shows and re-renders only when that value changes.
  */
 
-import { deepEqual } from "../model/equal.ts";
+import { deepEqual } from "@sonobe/core/graph";
 
 export interface LiveStore {
   get(address: string): unknown;

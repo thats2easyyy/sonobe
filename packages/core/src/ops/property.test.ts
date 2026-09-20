@@ -262,6 +262,13 @@ function randomOp(doc: SonobeDocument, rand: () => number): Op | undefined {
         size: chance(0.3) ? [int(500) + 1, int(500) + 1] : undefined,
         meta: pick([undefined, undefined, null, {}, { patchEditor: { nodes: { a: [int(100), int(100)] } } }, { zoom: 2, patchEditor: null }]),
       };
+    case "setNodePositions": {
+      const keys = [...layers.map((l) => `@${l.id}`), "$in", "$out"];
+      const positions: Record<string, [number, number] | null> = {};
+      for (let i = 0; i <= int(3); i++) positions[pick(keys)!] = chance(0.25) ? null : [int(900) - 100, int(600)];
+      if (chance(0.1) && patchIds.length) positions[pick(patchIds)!] = [0, 0];
+      return { op: "setNodePositions", component: cid, positions };
+    }
     case "setScript":
       return { op: "setScript", file: pick(["a.js", "b.js"])!, source: chance(0.3) ? null : "export default () => {}\n" };
     case "addAsset":

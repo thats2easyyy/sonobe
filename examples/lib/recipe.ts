@@ -1,11 +1,11 @@
 /**
  * Recipe definitions and the deterministic document builder behind examples/build.ts. A recipe is
  * a list of core ops; building applies them to an empty document through applyOps (the same op
- * engine the editor and MCP use), then lays the patch graph out with tidy_graph's algorithm.
+ * engine the editor and MCP use), then lays the patch graph out in columns by dataflow (lib/tidy.ts).
  */
 
 import { applyOps, createEmptyDocument, DEFAULT_DEVICE, type Op, type Registry, type SonobeDocument } from "@sonobe/core";
-import { tidyOps } from "@sonobe/mcp";
+import { tidyOps } from "./tidy.ts";
 
 export interface Recipe {
   /** Folder under examples/, e.g. "01-tap-to-grow". */

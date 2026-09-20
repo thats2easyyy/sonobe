@@ -4,7 +4,7 @@ import { createPatchRegistry } from "@sonobe/patches";
 import { describe, expect, it } from "vitest";
 import { createDemoDocument } from "../../../state/demoDocument.ts";
 import { checkConnection, orientConnection, placeSuggestion, portTypeAt, quickConnectCheck } from "./connect.ts";
-import { deriveGraph } from "./graph.ts";
+import { deriveGraph } from "@sonobe/core/graph";
 import { linkSearchItems, searchLinkItems } from "./linkSearch.ts";
 
 const registry = createPatchRegistry();
