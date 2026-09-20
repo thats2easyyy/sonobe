@@ -1,7 +1,8 @@
 /**
  * Knobs in the Inspector: the field a knob drives (a chip naming the knob, "Knob · 4 uses", and the
  * knob's own control, which tunes the running preset), and the context menu entries every field
- * gets: Make Knob… and Use Knob ▸ on unconnected fields, Show in Knobs and Unlink on knob-driven ones.
+ * gets: Make Knob… and Use Knob ▸ on unconnected fields, Show in Knobs, Use Knob ▸ (to switch) and
+ * Unlink on knob-driven ones.
  */
 
 import { getKnob, knobLiteral, type Id, type KnobSet } from "@sonobe/core";
@@ -32,7 +33,7 @@ function unlinkFieldKnob(session: EditorSession, field: InspectorField, set: Kno
  * Use Knob ▸: the knobs that fit the field. On a field that already reads a knob (`current`), picking
  * another switches every target to it in one undo step; the current one is checked.
  */
-function useKnobEntry(session: EditorSession, field: InspectorField, set: KnobSet | undefined, current?: Id): MenuEntry {
+function knobChoiceEntry(session: EditorSession, field: InspectorField, set: KnobSet | undefined, current?: Id): MenuEntry {
   const fitting = knobsForPort(set, field.port);
   const others = fitting.filter((k) => k.id !== current);
   const componentId = session.currentComponentId();
@@ -70,18 +71,18 @@ export function knobFieldEntries(session: EditorSession, field: InspectorField, 
     const running = set && knob ? knobValueText(knob, knobLiteral(set, knob)) : undefined;
     return [
       { id: "showKnob", label: "Show in Knobs", icon: <SlidersHorizontal size={14} />, onSelect: () => showKnobs(session, knobId) },
-      useKnobEntry(session, field, set, knobId),
+      knobChoiceEntry(session, field, set, knobId),
       { id: "unlinkKnob", label: running ? `Unlink (keep ${running})` : "Unlink", icon: <Unlink size={14} />, disabled: !set || !knob, onSelect: () => set && unlinkFieldKnob(session, field, set, knobId) },
     ];
   }
   // Several targets that each read a knob, not all the same one: Use Knob puts them on one.
-  if (field.linkedCount > 0) return field.targets.every((t) => knobIdOf(t.stored) !== undefined) ? [useKnobEntry(session, field, set)] : [];
+  if (field.linkedCount > 0) return field.targets.every((t) => knobIdOf(t.stored) !== undefined) ? [knobChoiceEntry(session, field, set)] : [];
   const type = knobTypeForPort(field.port);
   // Fields a knob can't be made from (layers, media, gradients) offer knobs only when they take anything.
   if (!type && field.type !== "any") return [];
   return [
     { id: "makeKnob", label: "Make Knob…", icon: <CircleDot size={14} />, disabled: !type, ...(type ? {} : { description: "Knobs hold numbers, on/off, colors, choices, points and text" }), onSelect: onMakeKnob },
-    useKnobEntry(session, field, set),
+    knobChoiceEntry(session, field, set),
   ];
 }
 

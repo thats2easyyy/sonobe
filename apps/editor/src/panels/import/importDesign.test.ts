@@ -92,7 +92,7 @@ describe("importDesign", () => {
     const notes = ["First.", "Second.", "Third.", "SF Symbols: the browser editor can't draw heart.fill, so it's a gray placeholder."];
     notifyImported(notify, "Imported “Profile”", { screenName: "Profile", summary, notes });
     const shown = notify.mock.lastCall![0];
-    expect(shown).toMatchObject({ description: "3 layers · 1 text First. Second.", action: { label: "2 more" } });
+    expect(shown).toMatchObject({ description: "3 layers · 1 text First. Second.", action: { label: "2 more notes" } });
     shown.action.onClick();
     expect(notify).toHaveBeenLastCalledWith({ title: "Import notes for “Profile”", details: notes, tone: "info", duration: "persistent" });
   });

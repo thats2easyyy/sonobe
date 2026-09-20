@@ -245,7 +245,7 @@ export function notifyImported(notify: ImportNotify, title: string, outcome: Pic
     ...(more > 0
       ? {
           action: {
-            label: `${more} more`,
+            label: `${more} more ${more === 1 ? "note" : "notes"}`,
             onClick: () => notify({ title: outcome.screenName ? `Import notes for “${outcome.screenName}”` : "Import notes", details: notes, tone: "info", duration: "persistent" }),
           },
         }

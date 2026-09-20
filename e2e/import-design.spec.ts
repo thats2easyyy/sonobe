@@ -123,7 +123,7 @@ test.describe("Import Design", () => {
     await expect(dialog).toBeHidden({ timeout: 30_000 });
     const toast = page.locator(".sb-toast", { hasText: "Imported “" });
     await expect(toast).toBeVisible();
-    const more = toast.getByRole("button", { name: /^\d+ more$/ });
+    const more = toast.getByRole("button", { name: /^\d+ more notes?$/ });
     await expect(more).toBeVisible();
     const hidden = Number((await more.textContent())!.split(" ")[0]);
     await more.click();
