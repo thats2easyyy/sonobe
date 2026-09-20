@@ -40,10 +40,25 @@ import type {
   TraceInput,
   TraceResult,
   TraceSummary,
+  ValueInspection,
 } from "../types.ts";
 import { compileDocument, updateLiterals, type CompiledGraph } from "./compile.ts";
-import { beginInputs, createRecord, disposeRecord, evaluateRecord, type EvalEnv } from "./evaluate.ts";
-import type { Binding, CNode, InstancePath, Scope } from "./graph.ts";
+import {
+  describeEmpty,
+  emptyInstanceInput,
+  instanceLabel,
+  isSuspicious,
+  traceEmpty,
+  traceEmptyInstance,
+  type Collapse,
+  type EmptyEntry,
+  type EmptyExplanation,
+  type EmptyLoopEnv,
+  type EmptyReport,
+  type EmptyStep,
+} from "./emptyLoops.ts";
+import { beginInputs, createRecord, disposeRecord, evaluateRecord, type EvalEnv, type NodeRecord } from "./evaluate.ts";
+import type { Binding, CLayer, CNode, InstancePath, Scope } from "./graph.ts";
 import { isLoop, makeLoop, MAX_LOOP_LENGTH } from "./loop.ts";
 import { mulberry32 } from "./random.ts";
 import { buildScene, type SceneBuild } from "./scene.ts";
@@ -93,6 +108,12 @@ export interface SonobeRuntime extends Runtime {
   setProfiling(on: boolean): void;
   /** Average evaluate time per patch over the last ~1 s of frames, slowest first; empty when profiling is off. */
   patchTimings(): PatchTiming[];
+  /**
+   * Read an address like getValue, plus what a person needs when it reads as nothing: a note saying
+   * the layer drew 0 copies (and why), that "#n" is past the end, that the instance path runs into a
+   * component with 0 copies, or why the value is an empty loop. Layers bound to loops report `copies`.
+   */
+  inspect(address: string): ValueInspection;
 }
 
 /** Create a runtime for a document. */
@@ -119,6 +140,14 @@ interface ResolvedTarget {
   parsed: ParsedAddress;
   scope: Scope;
   path: InstancePath;
+}
+
+/** Where an instance path ran out: `scope` (an instance at `host`) has no copy `copy`. */
+interface MissingCopy {
+  scope: Scope;
+  host: InstancePath;
+  copy: number;
+  copies: number;
 }
 
 const NO_TARGET = " none";
@@ -153,6 +182,8 @@ function nowMs(): number {
 }
 
 const finite = (v: unknown): v is number => typeof v === "number" && Number.isFinite(v);
+
+const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
 
 function mediaName(url: string): string {
   const path = url.split(/[?#]/)[0] ?? "";
@@ -208,6 +239,18 @@ class RuntimeImpl implements SonobeRuntime {
   private timingSums = new Map<string, PatchTiming>();
   private timingFrames = 0;
   private publishedTimings: PatchTiming[] | null = null;
+  /** This frame's per-item evaluations an empty loop erased, and patches that explained an empty output. */
+  private collapses = new Map<NodeRecord, Collapse>();
+  private explained = new Map<NodeRecord, EmptyExplanation>();
+  /** Active empty_loop warnings by static site ("layer|main|card", "copies|main/swipe:$copies"); dropped once the site has copies again. */
+  private emptyIssues = new Map<string, RuntimeIssue>();
+  /** Sites that made 0 copies this frame (each is looked into once per frame). */
+  private emptySites = new Set<string>();
+  /** First frame of each site's current run of suspicious empty frames. */
+  private emptySince = new Map<string, number>();
+  /** The scene being built belongs to a step (not refreshScene), so its layers are checked for empty loops. */
+  private checkingEmpty = false;
+  private readonly emptyLoops: EmptyLoopEnv;
 
   constructor(doc: SonobeDocument, options: RuntimeOptions) {
     this.document = doc;
@@ -228,6 +271,25 @@ class RuntimeImpl implements SonobeRuntime {
       },
       issue: (code, severity, message, patchId) => this.addIssue(code, severity, message, patchId, undefined, this.currentPath),
       once: new Set(),
+      collapsed: (_spec, record, emptySlot, fullSlot, count) => {
+        this.collapses.set(record, { emptySlot, fullSlot, count });
+      },
+      explainEmpty: (_spec, record, reason, fixes) => {
+        this.explained.set(record, { reason, fixes: [...fixes] });
+      },
+    };
+    const runtime = this;
+    this.emptyLoops = {
+      get doc() {
+        return runtime.graph.doc;
+      },
+      get registry() {
+        return runtime.graph.registry;
+      },
+      read: (b, path, whole) => this.read(b, path, whole),
+      instancePaths: (scope, host) => this.instancePaths(scope, host),
+      collapse: (record) => this.collapses.get(record),
+      explanation: (record) => this.explained.get(record),
     };
     this.graph = compileDocument(doc, options.registry);
     this.feedbackNodes = feedbackNodesOf(this.graph);
@@ -271,6 +333,9 @@ class RuntimeImpl implements SonobeRuntime {
   updateDocument(doc: SonobeDocument): void {
     if (this.disposed || doc === this.document) return;
     this.document = doc;
+    // empty_loop warnings come back when the edit didn't fix them. What the last frame recorded stays
+    // for inspect, which reads that frame's values until the next step.
+    this.clearEmptyWarnings();
     // A scrub, a canvas drag or a small literal write only changes constant values: patch them in place.
     if (updateLiterals(this.graph, doc)) {
       this.record({ kind: "update", doc });
@@ -323,7 +388,7 @@ class RuntimeImpl implements SonobeRuntime {
   }
 
   issues(): RuntimeIssue[] {
-    return [...this.graph.issues, ...this.runtimeIssues.values()];
+    return [...this.graph.issues, ...this.runtimeIssues.values(), ...this.emptyIssues.values()];
   }
 
   setProfiling(on: boolean): void {
@@ -420,7 +485,10 @@ class RuntimeImpl implements SonobeRuntime {
     this.env.time = this.time;
     this.env.dt = h;
     this.evaluate();
+    this.checkingEmpty = true;
     const build = this.build();
+    this.checkingEmpty = false;
+    this.pruneEmptyLoops();
     this.syncTextFields(snapshot, build);
     this.produced = build;
     this.snapshot = build;
@@ -451,9 +519,12 @@ class RuntimeImpl implements SonobeRuntime {
       size,
       background: this.background(),
       measurer: this.options.textMeasurer ?? approximateTextMeasurer,
-      read: (b, p) => this.read(b, p),
+      read: (b, p, whole) => this.read(b, p, whole === true),
       instancePaths: (s, h) => this.instancePaths(s, h),
       issue: (code, message, layerId) => this.addIssue(code, "warning", message, undefined, layerId),
+      emptyCopies: (layer, path, emptyProp, erased) => {
+        if (this.checkingEmpty) this.reportEmptyLayer(layer, path, emptyProp, erased);
+      },
       layerRef: (layerId, instance, prefix) => this.makeRef(layerId, instance, prefix),
     });
   }
@@ -468,6 +539,9 @@ class RuntimeImpl implements SonobeRuntime {
   }
 
   private evaluate(): void {
+    this.collapses.clear();
+    this.explained.clear();
+    this.emptySites.clear();
     const order = this.graph.order;
     const profiling = this.profiling;
     for (let i = 0; i < order.length; i++) {
@@ -517,9 +591,13 @@ class RuntimeImpl implements SonobeRuntime {
   private readInput(node: CNode, i: number, path: InstancePath): Value | Loop {
     const b = node.bindings[i]!;
     if (b.kind === "const") return b.value;
-    const v = this.read(b, path);
     const s = node.inputs[i]!;
-    return v === undefined ? s.default : b.type === s.type ? v : coerceValue(v, b.type, s.type);
+    const v = this.read(b, path, s.wholeLoop);
+    if (v === undefined) return s.default;
+    // Last frame's empty loop never erases this frame's copies (ARCHITECTURE.md §5.2): through a
+    // back-edge, an empty loop at a per-item input reads as "no value yet", like on the first frame.
+    if (node.feedback[i] && !s.wholeLoop && isLoop(v) && v.items.length === 0) return s.default;
+    return b.type === s.type ? v : coerceValue(v, b.type, s.type);
   }
 
   private evaluateAt(node: CNode, path: InstancePath): void {
@@ -560,9 +638,22 @@ class RuntimeImpl implements SonobeRuntime {
         if (v.items.length === 0) empty = true;
         else if (v.items.length > max) max = v.items.length;
       };
-      for (const input of child.inputs) if (input.loop) consider(input.binding.kind === "const" ? input.binding.value : this.read(input.binding, hostPath));
-      for (const r of child.replicators) consider(r.kind === "const" ? r.value : this.read(r, hostPath));
+      // Like a patch's back-edge: an empty loop read from last frame doesn't take this frame's copies away.
+      const inputs = child.inputs;
+      for (let k = 0; k < inputs.length; k++) {
+        const input = inputs[k]!;
+        if (!input.loop) continue;
+        const v = input.binding.kind === "const" ? input.binding.value : this.read(input.binding, hostPath);
+        if (!(input.feedback && isLoop(v) && v.items.length === 0)) consider(v);
+      }
+      for (let k = 0; k < child.replicators.length; k++) {
+        const r = child.replicators[k]!;
+        const v = r.kind === "const" ? r.value : this.read(r, hostPath);
+        if (!(node.feedback[inputs.length + k] && isLoop(v) && v.items.length === 0)) consider(v);
+      }
       let count = looping ? (empty ? 0 : max) : 1;
+      // A layer component instance is reported by the scene, with the layer.
+      if (looping && count === 0 && child.kind === "patchInstance") this.reportEmptyInstance(node, child, hostPath, max);
       if (count > MAX_LOOP_LENGTH) {
         const label = child.kind === "patchInstance" ? { patchId: child.instanceId! } : { layerId: child.instanceId! };
         this.addIssue("loop_limit", "warning", `Component "${child.instanceId}" was looped ${count} times; components replicate at most ${MAX_LOOP_LENGTH} times.`, label.patchId, label.layerId);
@@ -619,6 +710,7 @@ class RuntimeImpl implements SonobeRuntime {
     this.produced = null;
     this.snapshot = null;
     this.runtimeIssues.clear();
+    this.clearEmptyLoops();
     this.env.once.clear();
     this.restartRequested = false;
     this.restarts++;
@@ -700,15 +792,20 @@ class RuntimeImpl implements SonobeRuntime {
    * address, the scope it lives in, and the instance path to read.
    */
   private resolveTarget(address: string): ResolvedTarget | undefined {
+    return this.locate(address).target;
+  }
+
+  /** resolveTarget, saying which instance on the path has no such copy when it fails there. */
+  private locate(address: string): { target?: ResolvedTarget; missing?: MissingCopy } {
     const root = this.graph.root;
     const rootPath = this.rootPath;
-    if (typeof address !== "string" || !root || !rootPath) return undefined;
+    if (typeof address !== "string" || !root || !rootPath) return {};
     const text = address.trim();
     const at = text.startsWith("@") ? "@" : "";
     const body = at ? text.slice(1) : text;
     const slash = body.lastIndexOf("/");
     const parsed = parseAddress(at + body.slice(slash + 1));
-    if (!parsed || parsed.kind === "componentOutput") return undefined;
+    if (!parsed || parsed.kind === "componentOutput") return {};
     let scope = root;
     let path = rootPath;
     if (slash >= 0) {
@@ -718,17 +815,17 @@ class RuntimeImpl implements SonobeRuntime {
       for (const segment of segments) {
         const m = SEGMENT.exec(segment);
         const child = m ? this.childScope(scope, m[1]!) : null;
-        if (!m || !child) return undefined;
+        if (!m || !child) return {};
         const { paths, replicated } = this.instancePaths(child, path);
         const copy = m[2] === undefined ? 0 : Number(m[2]);
         const next = replicated ? paths[copy] : paths[0];
-        if (!next) return undefined;
+        if (!next) return { missing: { scope: child, host: path, copy, copies: paths.length } };
         scope = child;
         path = next;
       }
     }
-    if (parsed.kind === "componentInput" && scope === root) return undefined;
-    return { parsed, scope, path };
+    if (parsed.kind === "componentInput" && scope === root) return {};
+    return { target: { parsed, scope, path } };
   }
 
   private childScope(scope: Scope, id: string): Scope | null {
@@ -751,7 +848,7 @@ class RuntimeImpl implements SonobeRuntime {
     if (!link) return undefined;
     const savedPath = this.currentPath;
     this.currentPath = null;
-    const v = this.read(link.binding, path);
+    const v = this.read(link.binding, path, true);
     this.currentPath = savedPath;
     if (v === undefined) return undefined;
     return link.binding.type === link.type ? v : coerceValue(v, link.binding.type, link.type);
@@ -780,7 +877,11 @@ class RuntimeImpl implements SonobeRuntime {
     return { paths: [path], replicated: false };
   }
 
-  private read(b: Binding, path: InstancePath): Value | Loop | undefined {
+  /**
+   * A binding's value at `path`. `whole`: the reader takes whole loops, so a layer that drew 0 copies
+   * last frame reads as an empty loop; per-item readers get one reference instead (readLayerRef).
+   */
+  private read(b: Binding, path: InstancePath, whole = false): Value | Loop | undefined {
     switch (b.kind) {
       case "const":
         return b.value;
@@ -793,50 +894,52 @@ class RuntimeImpl implements SonobeRuntime {
         if (!own || !host) return undefined;
         const input = b.input;
         const hb = input.binding;
-        let v = hb.kind === "const" ? hb.value : this.read(hb, host);
+        let v = hb.kind === "const" ? hb.value : this.read(hb, host, whole);
         if (v === undefined) v = input.default;
         else if (hb.type !== input.port.type) v = coerceValue(v, hb.type, input.port.type);
-        if (own.copy !== undefined && input.loop && isLoop(v)) {
+        if (input.loop && isLoop(v)) {
           const n = v.items.length;
-          return n ? v.items[own.copy % n] : undefined;
+          if (own.copy !== undefined) return n ? v.items[own.copy % n] : undefined;
+          // An empty loop read through a back-edge took no copies away (evaluateCopies): no value yet.
+          if (n === 0 && input.feedback) return undefined;
         }
         return v;
       }
       case "instanceOutput":
-        return this.readInstanceOutput(b, path);
+        return this.readInstanceOutput(b, path, whole);
       case "variable": {
         if (!b.source) return b.zero;
         let ancestor: InstancePath | null = path;
         while (ancestor && ancestor.scope.depth > b.depth) ancestor = ancestor.parent;
-        return ancestor ? this.read(b.source, ancestor) : undefined;
+        return ancestor ? this.read(b.source, ancestor, whole) : undefined;
       }
       case "layerRef":
-        return this.readLayerRef(b, path);
+        return this.readLayerRef(b, path, whole);
       case "layerOutput":
-        return this.readLayerOutput(b, path);
+        return this.readLayerOutput(b, path, whole);
     }
   }
 
-  private readInstanceOutput(b: Extract<Binding, { kind: "instanceOutput" }>, host: InstancePath): Value | Loop | undefined {
+  private readInstanceOutput(b: Extract<Binding, { kind: "instanceOutput" }>, host: InstancePath, whole: boolean): Value | Loop | undefined {
     const scope = b.scope;
     if (scope.selfMuted) {
       if (b.type === "pulse") return false;
       const input = scope.inputs.find((i) => i.port.type === b.type);
       if (!input) return b.zero;
       const hb = input.binding;
-      const v = hb.kind === "const" ? hb.value : this.read(hb, host);
+      const v = hb.kind === "const" ? hb.value : this.read(hb, host, whole);
       return v === undefined ? input.default : hb.type === b.type ? v : coerceValue(v, hb.type, b.type);
     }
     const { paths, replicated } = this.instancePaths(scope, host);
     const inner = b.inner;
     if (!replicated) {
       if (!inner) return b.zero;
-      const v = this.read(inner, paths[0]!);
+      const v = this.read(inner, paths[0]!, whole);
       return v === undefined || inner.type === b.type ? v : coerceValue(v, inner.type, b.type);
     }
     const items: Value[] = [];
     for (const p of paths) {
-      let v = inner ? this.read(inner, p) : b.zero;
+      let v = inner ? this.read(inner, p, whole) : b.zero;
       if (v === undefined) v = b.zero;
       else if (inner && inner.type !== b.type) v = coerceValue(v, inner.type, b.type);
       if (isLoop(v)) for (const item of v.items) items.push(item);
@@ -856,10 +959,14 @@ class RuntimeImpl implements SonobeRuntime {
     return ref;
   }
 
-  private readLayerRef(b: Extract<Binding, { kind: "layerRef" }>, path: InstancePath): Value | Loop {
+  private readLayerRef(b: Extract<Binding, { kind: "layerRef" }>, path: InstancePath, whole: boolean): Value | Loop {
+    const count = this.snapshot?.counts.get(path.layerPrefix + b.layerId);
+    // A layer that drew no copies last frame reads, for a per-item reader, like it does before the
+    // first frame: one reference. Otherwise the patches that listen to it run 0 times, and whatever
+    // they feed (often the layer's own copies) could never come back (ARCHITECTURE.md §5.2).
+    if (count === 0 && !whole) return this.makeRef(b.layerId, undefined, path.layerPrefix);
     const cached = b.cache.get(path.key);
     if (cached && cached.frame === this.tick) return cached.value;
-    const count = this.snapshot?.counts.get(path.layerPrefix + b.layerId);
     const value =
       count === undefined
         ? this.makeRef(b.layerId, undefined, path.layerPrefix)
@@ -868,10 +975,11 @@ class RuntimeImpl implements SonobeRuntime {
     return value;
   }
 
-  private readLayerOutput(b: Extract<Binding, { kind: "layerOutput" }>, path: InstancePath): Value | Loop {
+  private readLayerOutput(b: Extract<Binding, { kind: "layerOutput" }>, path: InstancePath, whole: boolean): Value | Loop {
     const base = path.layerPrefix + b.layerId;
     const count = this.snapshot?.counts.get(base);
-    if (count === undefined) return this.layerOutputFor(b, base);
+    // Like readLayerRef: 0 copies last frame reads as the unreplicated output for per-item readers.
+    if (count === undefined || (count === 0 && !whole)) return this.layerOutputFor(b, base);
     const items = new Array<Value>(count);
     for (let i = 0; i < count; i++) items[i] = this.layerOutputFor(b, `${base}#${i}`);
     return makeLoop(items);
@@ -1078,6 +1186,164 @@ class RuntimeImpl implements SonobeRuntime {
     }
     if (level === "log") return;
     this.addIssue(level === "error" ? "patch_error" : "patch_warning", level === "error" ? "error" : "warning", args.map(formatLogArg).join(" "), patchId, undefined, this.currentPath);
+  }
+
+  // ---- empty loops ----------------------------------------------------------------
+
+  private clearEmptyWarnings(): void {
+    this.emptyIssues.clear();
+    this.emptySites.clear();
+    this.emptySince.clear();
+  }
+
+  private clearEmptyLoops(): void {
+    this.collapses.clear();
+    this.explained.clear();
+    this.clearEmptyWarnings();
+  }
+
+  /** Drop the empty_loop warnings of sites that made copies again this frame. */
+  private pruneEmptyLoops(): void {
+    for (const site of this.emptyIssues.keys()) if (!this.emptySites.has(site)) this.emptyIssues.delete(site);
+    for (const site of this.emptySince.keys()) if (!this.emptySites.has(site)) this.emptySince.delete(site);
+  }
+
+  /**
+   * A site made 0 copies: look into it once per frame. On a frame where nothing looks wrong (no empty
+   * loop erased items, no patch explained an empty output) that costs a set lookup and retires its
+   * warning; otherwise follow the trail, and warn while it still looks like a mistake.
+   */
+  private checkEmpty(site: string, erased: number, trail: () => { head: string; entry: EmptyEntry; steps: EmptyStep[] } | null, label: { patchId?: Id; layerId?: Id }, path: InstancePath): void {
+    if (this.emptySites.has(site)) return;
+    this.emptySites.add(site);
+    const found = erased > 0 || this.collapses.size > 0 || this.explained.size > 0 ? trail() : null;
+    if (!found || !isSuspicious(found.steps, erased)) {
+      this.emptyIssues.delete(site);
+      this.emptySince.delete(site);
+      return;
+    }
+    // A list that just became empty meets last frame's items for one frame on its way to nothing, so
+    // after the first frame a warning waits for a second frame in a row.
+    const since = this.emptySince.get(site);
+    if (since === undefined) this.emptySince.set(site, this.frame);
+    if (this.frame > 0 && (since === undefined || since === this.frame)) return;
+    // Keep the first wording while the site stays empty, so the warning doesn't churn every frame.
+    if (!this.emptyIssues.has(site)) this.setEmptyIssue(site, describeEmpty(this.emptyLoops, found.head, found.entry, erased, found.steps), label, path);
+  }
+
+  private reportEmptyInstance(node: CNode, scope: Scope, host: InstancePath, erased: number): void {
+    this.checkEmpty(`copies|${node.identity}`, erased, () => this.instanceTrail(scope, host), { patchId: scope.instanceId! }, host);
+  }
+
+  private reportEmptyLayer(layer: CLayer, path: InstancePath, emptyProp: number, erased: number): void {
+    this.checkEmpty(`layer|${layer.scope.key}|${layer.id}`, erased, () => this.layerTrail(layer, path, emptyProp), { layerId: layer.id }, path);
+  }
+
+  private instanceTrail(scope: Scope, host: InstancePath): { head: string; entry: EmptyEntry; steps: EmptyStep[] } {
+    const found = emptyInstanceInput(this.emptyLoops, scope, host);
+    const site = instanceLabel(scope);
+    return {
+      head: `${site} has 0 copies`,
+      entry: { phrase: found ? `its ${found.name} input` : "one of its loop inputs", port: found?.name ?? "a loop input", noun: "inputs", site },
+      steps: found ? traceEmpty(this.emptyLoops, found.binding, host) : [],
+    };
+  }
+
+  private layerTrail(layer: CLayer, path: InstancePath, emptyProp: number): { head: string; entry: EmptyEntry; steps: EmptyStep[] } | null {
+    const site = `Layer "${layer.node.name || layer.id}"`;
+    const head = `${site} has 0 copies`;
+    const prop = layer.bound[emptyProp];
+    if (prop) {
+      const name = layer.props.get(prop.key)?.name || prop.key;
+      return { head, entry: { phrase: `its ${name}`, port: name, noun: "properties", site }, steps: traceEmpty(this.emptyLoops, prop.binding, path) };
+    }
+    if (!layer.instance) return null;
+    const found = emptyInstanceInput(this.emptyLoops, layer.instance, path);
+    return {
+      head,
+      entry: { phrase: found ? `its ${found.name}` : "one of its looped inputs", port: found?.name ?? "a looped input", noun: "properties", site },
+      steps: found ? traceEmpty(this.emptyLoops, found.binding, path) : [],
+    };
+  }
+
+  private setEmptyIssue(site: string, report: EmptyReport, label: { patchId?: Id; layerId?: Id }, path: InstancePath): void {
+    const issue: RuntimeIssue = { code: "empty_loop", severity: "warning", message: report.message, hint: report.hint };
+    if (label.patchId !== undefined) issue.patchId = label.patchId;
+    if (label.layerId !== undefined) issue.layerId = label.layerId;
+    if (path.parent) issue.componentPath = path.key;
+    if (report.suggestions.length) issue.suggestions = report.suggestions;
+    this.emptyIssues.set(site, issue);
+  }
+
+  inspect(address: string): ValueInspection {
+    const { target, missing } = this.locate(address);
+    if (!target) return { value: undefined, ...(missing ? { note: this.missingCopyNote(missing) } : {}) };
+    const raw = this.readTarget(target);
+    const index = target.parsed.index;
+    const out: ValueInspection = { value: isLoop(raw) ? raw.items[index ?? 0] : raw };
+    if (target.parsed.kind === "layer") {
+      const layer = target.scope.layerIndex.get(target.parsed.id);
+      const count = this.snapshot?.counts.get(target.path.layerPrefix + target.parsed.id);
+      if (count !== undefined) out.copies = count;
+      const name = `Layer "${layer?.node.name || target.parsed.id}"`;
+      if (count === 0) {
+        out.note = `Not drawn: ${layer ? (this.emptyLayerNote(layer, target.path) ?? `${name} has 0 copies.`) : `${name} has 0 copies.`}`;
+        return out;
+      }
+      if (count !== undefined && index !== undefined && index >= count) {
+        out.note = `${name} has ${plural(count, "copy", "copies")} (#0 to #${count - 1}), so there's no #${index}.`;
+        return out;
+      }
+    }
+    if (isLoop(raw)) {
+      const n = raw.items.length;
+      if (n === 0) out.note = this.emptyValueNote(target);
+      else if (index !== undefined && index >= n) out.note = `It's a loop of ${plural(n, "item", "items")} (#0 to #${n - 1}), so there's no #${index}.`;
+    }
+    return out;
+  }
+
+  private missingCopyNote({ scope, host, copy, copies }: MissingCopy): string {
+    const name = instanceLabel(scope);
+    if (copies > 0) return `${name} has ${plural(copies, "copy", "copies")} (#0 to #${copies - 1}), so there's no #${copy} to read inside.`;
+    const steps = traceEmptyInstance(this.emptyLoops, scope, host);
+    const first = steps[0];
+    if (first?.kind !== "instance") return `${name} has 0 copies, so there's nothing inside it to read.`;
+    const entry = { phrase: first.input ? `its ${first.input} input` : "one of its loop inputs", port: first.input ?? "a loop input", noun: "inputs", site: name };
+    return describeEmpty(this.emptyLoops, `Nothing to read: ${name} has 0 copies`, entry, first.erased, steps.slice(1)).message;
+  }
+
+  /** Why a layer drew 0 copies: its active warning, else the trail of its first empty property. */
+  private emptyLayerNote(layer: CLayer, path: InstancePath): string | undefined {
+    const inside = path.parent ? path : null;
+    const issue = [...this.emptyIssues.values()].find((i) => i.layerId === layer.id && (i.componentPath ?? null) === (inside?.key ?? null));
+    if (issue) return issue.message;
+    let emptyProp = -1;
+    let erased = 0;
+    layer.bound.forEach((p, j) => {
+      const v = p.binding.kind === "const" ? p.binding.value : this.read(p.binding, path, p.wholeLoop);
+      if (p.wholeLoop || !isLoop(v)) return;
+      if (v.items.length === 0) {
+        if (emptyProp < 0) emptyProp = j;
+      } else erased = Math.max(erased, v.items.length);
+    });
+    const trail = this.layerTrail(layer, path, emptyProp);
+    return trail ? describeEmpty(this.emptyLoops, trail.head, trail.entry, erased, trail.steps).message : undefined;
+  }
+
+  /** Why an address reads as an empty loop: the trail of the output, input or property it names. */
+  private emptyValueNote({ parsed, scope, path }: ResolvedTarget): string {
+    const node = parsed.kind === "patch" ? scope.nodes.get(parsed.id) : undefined;
+    const slot = node && node.outputIndex.get(parsed.key) === undefined ? node.inputIndex.get(parsed.key) : undefined;
+    let binding: Binding | null;
+    if (node && slot !== undefined) binding = node.bindings[slot] ?? null;
+    else {
+      const { index: _index, ...rest } = parsed;
+      binding = this.graph.resolveLink(formatAddress(rest as ParsedAddress), scope)?.binding ?? null;
+    }
+    const steps = traceEmpty(this.emptyLoops, binding, path);
+    if (!steps.length) return "It's an empty loop (0 items).";
+    return describeEmpty(this.emptyLoops, "It's an empty loop", { phrase: "it", port: "", noun: "" }, 0, steps).message;
   }
 
   /**

@@ -9,10 +9,12 @@ import type {
   Color,
   Id,
   LayerRef,
+  Literal,
   PatchNode,
   PatchSpec,
   Registry,
   SonobeDocument,
+  Suggestion,
   Value,
 } from "@sonobe/core";
 
@@ -104,7 +106,24 @@ export interface PatchContext<S = any> {
   requestNextFrame(): void;
   /** Log a warning through services.log at most once per patch instance and key until the prototype restarts. */
   warnOnce(key: string, message: string): void;
+  /**
+   * Say why this frame's output is an empty loop when that is probably a mistake (Loop Select with
+   * every index past the end). The runtime quotes `reason` in its `empty_loop` warning when a layer
+   * or component ends up with 0 copies because of it, and turns `fixes` into ready-to-apply
+   * suggestions. Optional: contexts outside the runtime may not have it.
+   */
+  explainEmpty?(reason: string, fixes?: readonly EmptyLoopFix[]): void;
   readonly services: RuntimeServices;
+}
+
+/** A change to one of the patch's own inputs that gives its empty output items again (PatchContext.explainEmpty). */
+export interface EmptyLoopFix {
+  /** Input key on the same patch. */
+  input: string;
+  /** The literal to set, encoded as in a document (an enum option's key, "#RRGGBBAA" for a color). */
+  value: Literal;
+  /** The change, then what it does ("Set Out of Range to Clamp: an index past the end takes the last item"). */
+  description: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -652,6 +671,20 @@ export interface RuntimeIssue {
   layerId?: Id;
   /** Instance path of the patch when it's inside a component instance ("main/card#2"); omitted at the root. */
   componentPath?: string;
+  /** What to try, in plain words. */
+  hint?: string;
+  /** Ready-to-apply fixes (ops for core applyOps). */
+  suggestions?: Suggestion[];
+}
+
+/** What an address reads right now, with a plain-words note when it reads as missing or empty (SonobeRuntime.inspect). */
+export interface ValueInspection {
+  /** What getValue returns: loop item 0 unless the address ends in "#n"; undefined when nothing is there. */
+  value: Value;
+  /** For a layer bound to a loop: how many copies it drew last frame. */
+  copies?: number;
+  /** Why the value is missing or empty ("Layer "Card" drew 0 copies..."), when it is. */
+  note?: string;
 }
 
 /** Average evaluate time of one patch (all instances and loop indices), per frame. */
