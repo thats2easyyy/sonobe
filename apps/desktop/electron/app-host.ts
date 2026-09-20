@@ -246,6 +246,12 @@ export function hostErrorFromRpc(err: unknown, method: string): HostError {
       return new HostError("editor_not_connected", "This Sonobe window's editor isn't connected to Claude yet.", { hint: EDITOR_NOT_CONNECTED_HINT, data: { method } });
     case "renderer_gone":
       return new HostError("window_closed", "The Sonobe window closed before it answered.", { hint: "Ask the person to open the prototype again, then retry." });
+    case "page_gone": {
+      const crashed = (e.data as { reason?: unknown } | undefined)?.reason === "crashed";
+      return new HostError("editor_reloaded", `The Sonobe window's editor ${crashed ? "crashed" : "reloaded"} before it answered ${method}, so the call may not have finished.`, {
+        hint: "The window loads its editor again by itself. Call list_documents to see what it shows now (unsaved work comes back with open_document on its draft:<id>), check the document, then retry.",
+      });
+    }
     case "timeout":
       return new HostError("editor_timeout", `The editor didn't answer ${method} in time.`, { hint: "It may be busy or showing a dialog. Ask the person to check the Sonobe window, then retry." });
     case "disposed":
@@ -402,7 +408,12 @@ export function createAppHost(options: AppHostOptions): AppHost {
 
   /** Fresh document.info for a window (creating its entry on first sight). */
   const describe = async (target: RendererTarget): Promise<Entry> => {
-    const info = asInfo(await call<unknown>(target, "document.info"));
+    // document.info changes nothing: when the page went away under it, ask the page that replaced it (the bridge waits for it).
+    const reply = await call<unknown>(target, "document.info").catch((err: unknown) => {
+      if (isHostError(err) && err.code === "editor_reloaded") return call<unknown>(target, "document.info");
+      throw err;
+    });
+    const info = asInfo(reply);
     let entry = entries.get(target.id);
     if (entry) {
       const changed = entry.info.revision !== info.revision;
@@ -708,7 +719,7 @@ export function createAppHost(options: AppHostOptions): AppHost {
         try {
           out.push(summary(await describe(target)));
         } catch (err) {
-          if (isHostError(err) && (err.code === "editor_not_connected" || err.code === "window_closed")) continue;
+          if (isHostError(err) && (err.code === "editor_not_connected" || err.code === "window_closed" || err.code === "editor_reloaded")) continue;
           throw err;
         }
       }

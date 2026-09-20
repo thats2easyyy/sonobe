@@ -11,9 +11,11 @@
  * 3. Relaunch: the draft is there with both edits. save_document without a path refuses to name an
  *    Untitled folder (path_needed), with a path it saves there with no dialog, the draft goes away,
  *    and a path inside that project is refused (inside_project).
- * 4. An unsaved change to that project, then the editor's renderer crashes: the window reloads, and
- *    the draft comes back over its project. Save As through the (stubbed) Save panel refuses a folder
- *    inside the project and reopens next to it. Closing the window with Don't Save removes a draft.
+ * 4. An unsaved change to that project, then the editor's renderer crashes: a call it was working on
+ *    fails at once (page_gone), the window reloads, an MCP call right after waits for the reloaded
+ *    editor, and the draft comes back over its project. Save As through the (stubbed) Save panel
+ *    refuses a folder inside the project and reopens next to it. Closing the window with Don't Save
+ *    removes a draft.
  *
  * SONOBE_SMOKE_VERBOSE=1 shows the app's own log.
  *
@@ -220,9 +222,18 @@ try {
   const edit = await mcp.call("add_layers", { label: "added a badge", layers: [{ type: "oval", name: "Badge after saving" }] });
   assert(!edit.isError, "add_layers on the saved project", edit.text);
   await poll(() => Object.values(draftsOnDisk()).some((d) => d.projectPath === target && d.counts.layers === 3), { message: "a draft of the unsaved changes to the project" });
+  // A call the editor is still working on when it crashes fails at once and says why, instead of timing out.
+  await page.evaluate(() => window.sonobeHost.rpc.handle("smoke.hang", () => new Promise(() => undefined)));
+  await poll(() => app.evaluate(() => globalThis.__sonobeTest.hasRendererMethod("smoke.hang") === true), { message: "the handler that never answers" });
+  const inFlight = app.evaluate(() => globalThis.__sonobeTest.invokeRenderer("smoke.hang", undefined, { timeoutMs: 30_000 }).then(() => "answered", (err) => err.code));
+  const crashedAt = Date.now();
   await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].webContents.forcefullyCrashRenderer());
-  // The window reloads its editor, and the draft it held is free to recover.
-  await poll(async () => !(await mcp.call("get_document_info")).isError, { timeout: 20_000, interval: 250, message: "the editor to reload after the crash" });
+  const cutOff = await inFlight;
+  assert(cutOff === "page_gone" && Date.now() - crashedAt < 5000, "a call in flight fails with page_gone when the editor crashes", { cutOff, afterMs: Date.now() - crashedAt });
+  // The window reloads its editor: a call right after the crash waits for it, and the draft it held is free to recover.
+  const reloaded = await mcp.call("get_document_info");
+  assert(!reloaded.isError, "get_document_info right after the crash waits for the reloaded editor", reloaded.text);
+  log(`the call in flight failed with page_gone; the next one waited ${Date.now() - crashedAt} ms for the reloaded editor`);
   const afterCrash = await poll(async () => {
     const r = await mcp.call("list_documents");
     return r.text.includes(`unsaved changes to ${target}`) ? r : null;

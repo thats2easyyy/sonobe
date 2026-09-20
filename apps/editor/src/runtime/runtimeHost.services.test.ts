@@ -195,6 +195,25 @@ describe("runtime host services", () => {
     expect(host.state.getState().muted).toBe(false);
   });
 
+  it("tells Device Info where the viewer runs and follows the system's appearance", () => {
+    const listeners = new Set<() => void>();
+    const query = { matches: true, addEventListener: (_: string, fn: () => void) => listeners.add(fn), removeEventListener: (_: string, fn: () => void) => listeners.delete(fn) };
+    const matchMedia = vi.spyOn(window, "matchMedia").mockImplementation(() => query as unknown as MediaQueryList);
+    try {
+      const host = track(createRuntimeHost({ registry, document: cardDoc(), scheduler: createManualScheduler(), textMeasurer: "approximate", platform: null, autoplay: false, device: { platform: "web" } }));
+      expect(matchMedia).toHaveBeenCalledWith("(prefers-color-scheme: dark)");
+      host.stepFrame();
+      expect(host.runtime.services.device()).toMatchObject({ platform: "web", darkMode: true });
+      query.matches = false;
+      for (const fn of listeners) fn();
+      expect(host.runtime.services.device().darkMode).toBe(false);
+      host.dispose();
+      expect(listeners.size).toBe(0);
+    } finally {
+      matchMedia.mockRestore();
+    }
+  });
+
   it("draws camera feeds into video layers", async () => {
     const scheduler = createManualScheduler();
     const videoTrack = { stop: vi.fn() };
