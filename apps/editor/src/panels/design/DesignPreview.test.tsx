@@ -5,8 +5,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AssistantCanvasContext } from "../assistant/types.ts";
 import type { Rect } from "../canvas/geometry.ts";
 import { rectToScreen, type Viewport } from "../canvas/viewport.ts";
-import { DesignPreview, previewFrame } from "./DesignPreview.tsx";
-import { designStore, initialDesignData, type DesignDraft, type DesignRequest } from "./designStore.ts";
+import { DesignPreview, previewFrame, previewPillText } from "./DesignPreview.tsx";
+import { designStore, initialDesignData, MCP_DRAFT_IDLE_MS, type DesignDraft, type DesignRequest, type McpDraftSession } from "./designStore.ts";
 import { PREVIEW_MESSAGE_TYPE } from "./previewShell.ts";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -15,7 +15,7 @@ const VIEWPORT: Viewport = { x: 100, y: 50, zoom: 0.5 };
 const CARD: Rect = { x: 16, y: 146, width: 370, height: 200 };
 const bounds = (id: string): Rect | null => (id === "card" ? CARD : null);
 
-const draft = (over: Partial<DesignDraft> = {}): DesignDraft => ({ runId: "r1", turn: 1, toolUseId: "t1", html: "", fields: {}, status: "writing", since: Date.now(), progress: null, error: null, resync: false, ...over });
+const draft = (over: Partial<DesignDraft> = {}): DesignDraft => ({ source: "assistant", key: "t1", runId: "r1", turn: 1, toolUseId: "t1", html: "", fields: {}, status: "writing", since: Date.now(), progress: null, error: null, resync: false, ...over });
 
 const context = (over: Partial<AssistantCanvasContext> = {}): AssistantCanvasContext => ({ component: { id: "main", name: "Main", size: [402, 874] }, screens: [{ id: "home", name: "Home" }], ...over });
 const request = (over: Partial<DesignRequest> = {}): DesignRequest => ({ runId: "r1", text: "a checkout", context: context(), selection: [], ...over });
@@ -219,6 +219,53 @@ describe("DesignPreview", () => {
     show([draft({ html: "<p>Hi</p>", status: "added", since: Date.now() })]);
     expect(wrapper()!.dataset.state).toBe("leaving");
     act(() => vi.advanceTimersByTime(401));
+    expect(wrapper()).toBeNull();
+  });
+});
+
+describe("an MCP client's draft", () => {
+  const CLAUDE_CODE = { id: "cc-1", label: "Claude Code" };
+  const mcpDraft = (over: Partial<DesignDraft> = {}, session: Partial<McpDraftSession> = {}): DesignDraft =>
+    draft({ source: "mcp", key: "mcp:cc-1", runId: "", turn: 0, toolUseId: "", mcp: { author: { kind: "agent", name: "Claude" }, client: CLAUDE_CODE, revision: 1, touchedAt: Date.now(), addingFrom: null, ...session }, ...over });
+
+  it("says who is writing it: the client's label, else the author", () => {
+    expect(previewPillText(mcpDraft({ fields: { name: "Checkout" } }))).toBe("Claude Code is writing “Checkout”");
+    expect(previewPillText(mcpDraft({ fields: { name: "Checkout" } }, { client: { id: "cd-1", label: "Claude Desktop" } }))).toBe("Claude Desktop is writing “Checkout”");
+    expect(previewPillText(mcpDraft({ fields: { name: "Checkout" } }, { client: null, author: { kind: "agent", name: "Cursor" } }))).toBe("Cursor is writing “Checkout”");
+    expect(previewPillText(mcpDraft({ fields: { name: "Checkout" } }, { client: { id: "x", label: " " } }))).toBe("Claude is writing “Checkout”");
+    expect(previewPillText(mcpDraft())).toBe("Claude Code is writing the screen");
+    expect(previewPillText(mcpDraft({ status: "adding" }))).toBe("Adding the layers…");
+    // The Assistant's copy stays, and a finished import keeps saying so while it fades.
+    expect(previewPillText(draft({ fields: { name: "Checkout" } }))).toBe("Claude is writing “Checkout”");
+    expect(previewPillText(draft({ status: "added" }))).toBe("Adding the layers…");
+
+    show([mcpDraft({ fields: { name: "Checkout" } })]);
+    render();
+    expect(container.querySelector(".sb-design-preview__pill")?.textContent).toBe("Claude Code is writing “Checkout”");
+  });
+
+  it("lands where its fields say, whatever the box asked for", () => {
+    const card = { id: "card", name: "Card", type: "group", frame: [16, 146, 370, 200] as [number, number, number, number] };
+    // A pending box request (runId null) in another component, with a target, belongs to the Assistant's next draft.
+    const boxRequest = request({ runId: null, context: context({ component: { id: "sheet", name: "Sheet", size: [402, 400] }, target: card }) });
+    show([mcpDraft()], boxRequest);
+    render({ box: { id: "card", name: "Card", type: "group", isResult: false } });
+    expect(placement()).toEqual(expected({ x: 0, y: 0, width: 402, height: 874 }));
+    show([mcpDraft({ fields: { replace: "card", height: 240 } })], boxRequest);
+    expect(placement()).toEqual(expected({ ...CARD, height: 240 }));
+    expect(previewFrame(mcpDraft(), { componentId: "main", rootId: "main", artboard: [402, 874], bounds, fallbackReplace: null, request: boxRequest })).toEqual({ x: 0, y: 0, width: 402, height: 874 });
+    show([mcpDraft({ fields: { component: "sheet" } })]);
+    expect(iframe()).toBeNull();
+  });
+
+  it("goes away when its session sends nothing for 15 minutes", () => {
+    vi.useFakeTimers();
+    show([mcpDraft({ html: "<p>Hi</p>" })]);
+    render();
+    expect(wrapper()).not.toBeNull();
+    act(() => vi.advanceTimersByTime(MCP_DRAFT_IDLE_MS - 1000));
+    expect(wrapper()).not.toBeNull();
+    act(() => vi.advanceTimersByTime(1001));
     expect(wrapper()).toBeNull();
   });
 });
