@@ -1,0 +1,1 @@
+Import the checkout screen at {{url}} in dark mode. Then make the Pay button press down: while a finger is on it, it shrinks to 0.95 with a quick spring, and it springs back to full size when the finger lifts.

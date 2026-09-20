@@ -1,0 +1,96 @@
+{
+  "calls": [
+    {
+      "tool": "apply_ops",
+      "args": {
+        "ops": [
+          {
+            "op": "addPatch",
+            "patch": {
+              "id": "tap_heart",
+              "type": "interaction",
+              "name": "Tap Heart",
+              "inputs": {
+                "layer": {
+                  "layer": "heart"
+                }
+              }
+            }
+          },
+          {
+            "op": "addPatch",
+            "patch": {
+              "id": "liked",
+              "type": "switch",
+              "name": "Liked",
+              "inputs": {
+                "flip": {
+                  "link": "tap_heart.tap"
+                }
+              }
+            }
+          },
+          {
+            "op": "addPatch",
+            "patch": {
+              "id": "like_spring",
+              "type": "popAnimation",
+              "name": "Like Spring",
+              "inputs": {
+                "number": {
+                  "link": "liked.on"
+                },
+                "bounciness": 10,
+                "speed": 14
+              }
+            }
+          },
+          {
+            "op": "addPatch",
+            "patch": {
+              "id": "heart_scale",
+              "type": "transition",
+              "name": "Heart Scale",
+              "inputs": {
+                "progress": {
+                  "link": "like_spring.output"
+                },
+                "start": 1,
+                "end": 1.15
+              },
+              "typeParam": "number"
+            }
+          },
+          {
+            "op": "addPatch",
+            "patch": {
+              "id": "heart_color",
+              "type": "transition",
+              "name": "Heart Color",
+              "inputs": {
+                "progress": {
+                  "link": "like_spring.output"
+                },
+                "start": "#A1A1AAFF",
+                "end": "#FF3B30FF"
+              },
+              "typeParam": "color"
+            }
+          },
+          {
+            "op": "connect",
+            "from": "heart_scale.output",
+            "to": "@heart.scale"
+          },
+          {
+            "op": "connect",
+            "from": "heart_color.output",
+            "to": "@heart.color"
+          }
+        ],
+        "label": "like button"
+      }
+    }
+  ],
+  "answer": "Tap the heart: it pops bigger with a bounce and turns red. Tap again to un-like it."
+}

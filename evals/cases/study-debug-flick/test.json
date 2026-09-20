@@ -1,0 +1,14 @@
+{
+  "description": "A flick hands its speed to the spring, so the sheet keeps moving the moment the finger lifts.",
+  "scenarios": [
+    {
+      "name": "A flick keeps its speed after the finger lifts",
+      "events": [{ "kind": "drag", "from": "@grabber", "to": [201, 640], "durationMs": 100, "atMs": 100 }],
+      "durationMs": 700,
+      "expect": [
+        { "description": "Just after the release it's already past 680, still moving at the finger's speed", "target": "@sheet.position", "component": "y", "at": 250, "op": ">", "value": 680 },
+        { "description": "and past 710 a moment later", "target": "@sheet.position", "component": "y", "at": 283, "op": ">", "value": 710 }
+      ]
+    }
+  ]
+}

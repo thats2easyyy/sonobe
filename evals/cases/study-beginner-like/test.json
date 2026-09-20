@@ -1,0 +1,31 @@
+{
+  "description": "A tap likes the heart (it pops bigger and turns red), a second tap un-likes it.",
+  "scenarios": [
+    {
+      "name": "Tapping the heart likes it",
+      "events": [{ "kind": "tap", "target": "@heart", "atMs": 100 }],
+      "durationMs": 1600,
+      "expect": [
+        { "description": "It pops bigger", "target": "@heart.scale", "at": "max", "op": ">", "value": 1.05 },
+        { "description": "It turns red: lots of red", "target": "@heart.color", "component": "r", "at": "end", "op": ">", "value": 0.75 },
+        { "description": "little green", "target": "@heart.color", "component": "g", "at": "end", "op": "<", "value": 0.35 },
+        { "description": "and little blue", "target": "@heart.color", "component": "b", "at": "end", "op": "<", "value": 0.4 },
+        { "description": "It comes to rest", "target": "@heart.scale", "settled": true }
+      ]
+    },
+    {
+      "name": "Tapping again un-likes it",
+      "events": [
+        { "kind": "tap", "target": "@heart", "atMs": 100 },
+        { "kind": "tap", "target": "@heart", "atMs": 1100 }
+      ],
+      "durationMs": 2600,
+      "expect": [
+        { "description": "It was red in between", "target": "@heart.color", "component": "r", "at": 1000, "op": ">", "value": 0.75 },
+        { "description": "It's gray again", "target": "@heart.color", "component": "r", "at": "end", "op": "==", "value": 0.631, "tolerance": 0.03 },
+        { "description": "not red", "target": "@heart.color", "component": "g", "at": "end", "op": "==", "value": 0.631, "tolerance": 0.03 },
+        { "description": "and back at its normal size", "target": "@heart.scale", "at": "end", "op": "==", "value": 1, "tolerance": 0.01 }
+      ]
+    }
+  ]
+}

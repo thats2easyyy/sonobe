@@ -1,0 +1,19 @@
+{
+  "title": "Long-Press Menu",
+  "about": "examples/11-long-press-menu with its patches removed: the layers are there, Claude builds the logic.",
+  "tags": [
+    "example",
+    "gestures",
+    "states"
+  ],
+  "start": {
+    "example": "11-long-press-menu",
+    "patches": false
+  },
+  "test": {
+    "example": "11-long-press-menu"
+  },
+  "budget": {
+    "maxTurns": 40
+  }
+}

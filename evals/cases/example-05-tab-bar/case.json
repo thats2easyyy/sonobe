@@ -1,0 +1,19 @@
+{
+  "title": "Tab Bar",
+  "about": "examples/05-tab-bar with its patches removed: the layers are there, Claude builds the logic.",
+  "tags": [
+    "example",
+    "tap",
+    "states"
+  ],
+  "start": {
+    "example": "05-tab-bar",
+    "patches": false
+  },
+  "test": {
+    "example": "05-tab-bar"
+  },
+  "budget": {
+    "maxTurns": 50
+  }
+}

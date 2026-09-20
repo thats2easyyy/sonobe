@@ -1,0 +1,19 @@
+{
+  "title": "Stories",
+  "about": "examples/13-stories with its patches removed: the layers are there, Claude builds the logic.",
+  "tags": [
+    "example",
+    "timing",
+    "loops"
+  ],
+  "start": {
+    "example": "13-stories",
+    "patches": false
+  },
+  "test": {
+    "example": "13-stories"
+  },
+  "budget": {
+    "maxTurns": 60
+  }
+}

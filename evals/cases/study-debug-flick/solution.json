@@ -1,0 +1,7 @@
+{
+  "calls": [
+    { "tool": "get_outline" },
+    { "tool": "connect", "args": { "connections": [{ "from": "drag_speed.y", "to": "sheet_spring.gestureVelocity" }] } }
+  ],
+  "answer": "Sheet Spring's Gesture Velocity wasn't connected, so every release started the spring from a standstill. Connecting Drag Speed's Y to it hands the finger's speed to the spring."
+}

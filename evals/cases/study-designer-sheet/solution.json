@@ -1,0 +1,295 @@
+{
+  "calls": [
+    {
+      "tool": "apply_ops",
+      "args": {
+        "ops": [
+          {
+            "op": "addPatch",
+            "patch": {
+              "id": "sheet_gesture",
+              "type": "gesture",
+              "name": "Drag Sheet",
+              "inputs": {
+                "layer": {
+                  "layer": "sheet"
+                }
+              }
+            }
+          },
+          {
+            "op": "addPatch",
+            "patch": {
+              "id": "sheet_idle",
+              "type": "not",
+              "name": "Not Dragging",
+              "inputs": {
+                "value": {
+                  "link": "sheet_gesture.down"
+                }
+              }
+            }
+          },
+          {
+            "op": "addPatch",
+            "patch": {
+              "id": "finger",
+              "type": "pulse",
+              "name": "Finger Down or Up",
+              "inputs": {
+                "on": {
+                  "link": "sheet_gesture.down"
+                }
+              }
+            }
+          },
+          {
+            "op": "addPatch",
+            "patch": {
+              "id": "drag_distance",
+              "type": "pointUnpack",
+              "name": "Drag Distance",
+              "inputs": {
+                "value": {
+                  "link": "sheet_gesture.translation"
+                }
+              }
+            }
+          },
+          {
+            "op": "addPatch",
+            "patch": {
+              "id": "drag_speed",
+              "type": "pointUnpack",
+              "name": "Drag Speed",
+              "inputs": {
+                "value": {
+                  "link": "sheet_gesture.velocity"
+                }
+              }
+            }
+          },
+          {
+            "op": "addPatch",
+            "patch": {
+              "id": "sheet_y_last_frame",
+              "type": "delay1",
+              "name": "Sheet Y Last Frame",
+              "inputs": {},
+              "typeParam": "number"
+            }
+          },
+          {
+            "op": "addPatch",
+            "patch": {
+              "id": "grab_y",
+              "type": "sampleAndHold",
+              "name": "Sheet Y at Grab",
+              "inputs": {
+                "value": {
+                  "link": "sheet_y_last_frame.output"
+                },
+                "sample": {
+                  "link": "sheet_idle.output"
+                }
+              },
+              "typeParam": "number"
+            }
+          },
+          {
+            "op": "addPatch",
+            "patch": {
+              "id": "finger_y",
+              "type": "add",
+              "name": "Sheet Y Under Finger",
+              "inputs": {
+                "value1": {
+                  "link": "grab_y.output"
+                },
+                "value2": {
+                  "link": "drag_distance.y"
+                }
+              },
+              "typeParam": "number",
+              "inputCount": 2
+            }
+          },
+          {
+            "op": "addPatch",
+            "patch": {
+              "id": "stops",
+              "type": "loopBuilder",
+              "name": "Stops",
+              "inputs": {
+                "item0": 700,
+                "item1": 120
+              },
+              "typeParam": "number",
+              "inputCount": 2
+            }
+          },
+          {
+            "op": "addPatch",
+            "patch": {
+              "id": "fling_stop",
+              "type": "snap",
+              "name": "Stop After Fling",
+              "inputs": {
+                "value": {
+                  "link": "sheet_y_last_frame.output"
+                },
+                "velocity": {
+                  "link": "drag_speed.y"
+                },
+                "mode": "points",
+                "points": {
+                  "link": "stops.loop"
+                },
+                "deceleration": "fast"
+              },
+              "typeParam": "number"
+            }
+          },
+          {
+            "op": "addPatch",
+            "patch": {
+              "id": "current_stop",
+              "type": "counter",
+              "name": "Current Stop",
+              "inputs": {
+                "jump": {
+                  "link": "finger.turnedOff"
+                },
+                "jumpToNumber": {
+                  "link": "fling_stop.index"
+                }
+              }
+            }
+          },
+          {
+            "op": "addPatch",
+            "patch": {
+              "id": "stop_y",
+              "type": "loopSelect",
+              "name": "Stop Y",
+              "inputs": {
+                "loop": {
+                  "link": "stops.loop"
+                },
+                "index": {
+                  "link": "current_stop.count"
+                }
+              },
+              "typeParam": "number"
+            }
+          },
+          {
+            "op": "addPatch",
+            "patch": {
+              "id": "sheet_target",
+              "type": "ifElse",
+              "name": "Finger or Stop",
+              "inputs": {
+                "condition": {
+                  "link": "sheet_gesture.down"
+                },
+                "ifTrue": {
+                  "link": "finger_y.output"
+                },
+                "ifFalse": {
+                  "link": "stop_y.output"
+                }
+              },
+              "typeParam": "number"
+            }
+          },
+          {
+            "op": "addPatch",
+            "patch": {
+              "id": "sheet_spring",
+              "type": "springAnimation",
+              "name": "Sheet Spring",
+              "inputs": {
+                "number": {
+                  "link": "sheet_target.output"
+                },
+                "tension": 300,
+                "friction": 30,
+                "gestureActive": {
+                  "link": "sheet_gesture.down"
+                },
+                "gestureVelocity": {
+                  "link": "drag_speed.y"
+                }
+              },
+              "typeParam": "number"
+            }
+          },
+          {
+            "op": "addPatch",
+            "patch": {
+              "id": "sheet_position",
+              "type": "point",
+              "name": "Sheet Position",
+              "inputs": {
+                "x": 0,
+                "y": {
+                  "link": "sheet_spring.output"
+                }
+              }
+            }
+          },
+          {
+            "op": "connect",
+            "from": "sheet_position.output",
+            "to": "@sheet.position"
+          },
+          {
+            "op": "connect",
+            "from": "sheet_spring.output",
+            "to": "sheet_y_last_frame.value"
+          },
+          {
+            "op": "addPatch",
+            "patch": {
+              "id": "sheet_openness",
+              "type": "progress",
+              "name": "Sheet Openness",
+              "inputs": {
+                "value": {
+                  "link": "sheet_spring.output"
+                },
+                "start": 700,
+                "end": 120,
+                "clampToRange": true
+              }
+            }
+          },
+          {
+            "op": "addPatch",
+            "patch": {
+              "id": "dim_opacity",
+              "type": "transition",
+              "name": "Dim Opacity",
+              "inputs": {
+                "progress": {
+                  "link": "sheet_openness.progress"
+                },
+                "start": 0,
+                "end": 0.4
+              },
+              "typeParam": "number"
+            }
+          },
+          {
+            "op": "connect",
+            "from": "dim_opacity.output",
+            "to": "@dim.opacity"
+          }
+        ],
+        "label": "bottom sheet"
+      }
+    }
+  ],
+  "answer": "The sheet peeks at y 700, drags open to y 120, flicks closed, and dims the map to 0.4 when open."
+}

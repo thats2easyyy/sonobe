@@ -1,0 +1,1 @@
+Make the card grow when I tap it and shrink back when I tap it again, with a spring. I want to compare two feels, so put the grown size and the spring's bounciness on knobs, with two presets: a locked "Shipped app" preset (grows to 1.05×, bounciness 0) and a "Proposal" preset (grows to 1.15×, bounciness 10). Leave Proposal running.

@@ -1,0 +1,7 @@
+{
+  "formatVersion": 1,
+  "name": "Checkout",
+  "generator": "Sonobe 0.1.0",
+  "root": "main",
+  "device": { "preset": "iphone-17-pro" }
+}

@@ -1,0 +1,67 @@
+{
+  "calls": [
+    {
+      "tool": "apply_ops",
+      "args": {
+        "ops": [
+          {
+            "op": "setInput",
+            "target": "@chip.repeat",
+            "value": 4
+          },
+          {
+            "op": "addPatch",
+            "patch": {
+              "id": "press_chip",
+              "type": "interaction",
+              "name": "Press Chip",
+              "inputs": {
+                "layer": {
+                  "layer": "chip"
+                }
+              }
+            }
+          },
+          {
+            "op": "addPatch",
+            "patch": {
+              "id": "press_spring",
+              "type": "popAnimation",
+              "name": "Press Spring",
+              "inputs": {
+                "number": {
+                  "link": "press_chip.down"
+                },
+                "bounciness": 4,
+                "speed": 20
+              }
+            }
+          },
+          {
+            "op": "addPatch",
+            "patch": {
+              "id": "chip_scale",
+              "type": "transition",
+              "name": "Chip Scale",
+              "inputs": {
+                "progress": {
+                  "link": "press_spring.output"
+                },
+                "start": 1,
+                "end": 1.15
+              },
+              "typeParam": "number"
+            }
+          },
+          {
+            "op": "connect",
+            "from": "chip_scale.output",
+            "to": "@chip.scale"
+          }
+        ],
+        "label": "four chips"
+      }
+    }
+  ],
+  "answer": "Repeat 4 makes four chips; each copy has its own press spring."
+}

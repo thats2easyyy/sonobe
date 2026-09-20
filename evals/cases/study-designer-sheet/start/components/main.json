@@ -1,0 +1,155 @@
+{
+  "formatVersion": 1,
+  "id": "main",
+  "name": "Main",
+  "kind": "prototype",
+  "size": [402, 874],
+  "interface": { "inputs": {}, "outputs": {} },
+  "layers": [
+    {
+      "id": "map",
+      "type": "group",
+      "name": "Map",
+      "props": {
+        "color": "#DDE8D6FF",
+        "hitTest": false,
+        "size": [402, 874]
+      },
+      "children": [
+        {
+          "id": "map_road",
+          "type": "rectangle",
+          "name": "Road",
+          "props": {
+            "color": "#FFFFFFFF",
+            "hitTest": false,
+            "position": [-40, 300],
+            "rotation": -18,
+            "size": [520, 36]
+          }
+        },
+        {
+          "id": "map_river",
+          "type": "rectangle",
+          "name": "River",
+          "props": {
+            "color": "#B9D9F2FF",
+            "hitTest": false,
+            "position": [150, -60],
+            "rotation": 12,
+            "size": [60, 700]
+          }
+        },
+        {
+          "id": "map_park",
+          "type": "rectangle",
+          "name": "Park",
+          "props": {
+            "color": "#C3DDB4FF",
+            "cornerRadius": 28,
+            "hitTest": false,
+            "position": [230, 420],
+            "size": [140, 120]
+          }
+        }
+      ]
+    },
+    {
+      "id": "dim",
+      "type": "rectangle",
+      "name": "Dim",
+      "props": {
+        "color": "#000000FF",
+        "hitTest": false,
+        "opacity": 0,
+        "size": [402, 874]
+      }
+    },
+    {
+      "id": "sheet",
+      "type": "group",
+      "name": "Sheet",
+      "props": {
+        "color": "#FFFFFFFF",
+        "cornerRadius": 24,
+        "position": [0, 700],
+        "shadowColor": "#000000FF",
+        "shadowOffset": [0, -4],
+        "shadowOpacity": 0.18,
+        "shadowRadius": 32,
+        "size": [402, 874]
+      },
+      "children": [
+        {
+          "id": "grabber",
+          "type": "rectangle",
+          "name": "Grabber",
+          "props": {
+            "color": "#D4D4D8FF",
+            "cornerRadius": 2.5,
+            "position": [181, 8],
+            "size": [40, 5]
+          }
+        },
+        {
+          "id": "sheet_title",
+          "type": "text",
+          "name": "Sheet Title",
+          "props": {
+            "fontSize": 22,
+            "fontWeight": 700,
+            "hitTest": false,
+            "letterSpacing": -0.2,
+            "position": [20, 28],
+            "text": "Nearby",
+            "textColor": "#111118FF"
+          }
+        },
+        {
+          "id": "row_1",
+          "type": "text",
+          "name": "Row 1",
+          "props": {
+            "fontSize": 17,
+            "fontWeight": 400,
+            "hitTest": false,
+            "lineHeight": 24,
+            "position": [20, 80],
+            "text": "Blue Bottle Coffee · 4 min",
+            "textColor": "#111118FF"
+          }
+        },
+        {
+          "id": "row_2",
+          "type": "text",
+          "name": "Row 2",
+          "props": {
+            "fontSize": 17,
+            "fontWeight": 400,
+            "hitTest": false,
+            "lineHeight": 24,
+            "position": [20, 120],
+            "text": "Dolores Park · 9 min",
+            "textColor": "#111118FF"
+          }
+        },
+        {
+          "id": "row_3",
+          "type": "text",
+          "name": "Row 3",
+          "props": {
+            "fontSize": 17,
+            "fontWeight": 400,
+            "hitTest": false,
+            "lineHeight": 24,
+            "position": [20, 160],
+            "text": "Tartine Bakery · 11 min",
+            "textColor": "#111118FF"
+          }
+        }
+      ]
+    }
+  ],
+  "patches": {},
+  "comments": []
+}

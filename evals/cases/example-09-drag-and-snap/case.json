@@ -1,0 +1,19 @@
+{
+  "title": "Drag and Snap",
+  "about": "examples/09-drag-and-snap with its patches removed: the layers are there, Claude builds the logic.",
+  "tags": [
+    "example",
+    "gestures",
+    "springs"
+  ],
+  "start": {
+    "example": "09-drag-and-snap",
+    "patches": false
+  },
+  "test": {
+    "example": "09-drag-and-snap"
+  },
+  "budget": {
+    "maxTurns": 50
+  }
+}
