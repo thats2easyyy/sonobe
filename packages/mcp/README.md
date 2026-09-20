@@ -122,5 +122,6 @@ Every `json tool:<name>` example block runs through the real tools in `src/guide
 
 - `explain(doc, { registry, audience })`: a deterministic plain-language description at beginner, designer or engineer level.
 - `TEMPLATES` / `createTemplateDocument`: starter documents.
+- `loadExamples` / `defaultExamples`: the examples catalog behind `list_examples` and `get_example` (pass one as `examples` to `createSonobeMcpServer`); `copyExampleTexts` copies the READMEs and tests it reads next to a bundle.
 - `SimEventSchema` / `parseSimEvents`: simulated input shapes.
 - `traceTable` / `summaryText`: trace formatting (shared with the CLI).

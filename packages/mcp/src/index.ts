@@ -122,6 +122,14 @@ export {
   type GuideTopic,
 } from "./guides.ts";
 export {
+  copyExampleTexts,
+  defaultExamples,
+  defaultExamplesDir,
+  loadExamples,
+  type ExampleCatalog,
+  type ExampleEntry,
+} from "./examples.ts";
+export {
   describeLayerType,
   describePatchType,
   isImplemented,

@@ -58,8 +58,11 @@ export function registerExampleTools(tc: ToolContext): void {
     "list_examples",
     {
       title: "List examples",
-      description:
-        "The verified example prototypes as a catalog of patterns: what each teaches and its key patches (tap to grow, like toggle, scrolling list, carousel, tab bar, collapsing header, pull to refresh, bottom sheet, drag and snap, swipe cards, long press, timed sequence, stories, onboarding, loops...). Each one builds with no errors and passes scripted scenarios. Before building an interaction one of them covers, read it with get_example. query filters by words in the name, what it teaches or its patch types.",
+      description: `The verified example prototypes as a catalog of patterns (${tc
+        .examples()
+        .list()
+        .map((e) => e.name.toLowerCase())
+        .join(", ")}): what each teaches and its key patches. Each one builds with no errors and passes scripted scenarios. Before building an interaction one of them covers, read it with get_example. query filters by words in the name, what it teaches or its patch types.`,
       input: z.object({
         query: z
           .string()
