@@ -214,6 +214,7 @@ Knob ops:
 - `updateKnob` with a new `type` converts every value through the link coercions, and is refused when a value can't convert or an input that reads the knob can't take the new type.
 - `removeKnob` leaves every reader holding the running value, converted to what it takes, so the prototype behaves as it did.
 - `removeKnobPreset` refuses a locked preset, and the last one while knobs remain; `applyKnobPreset` switches the running preset. `createComponent` keeps knob links inside and publishes nothing for them.
+- Lenient undo and redo replays put back what a hand edit left in `knobs.json`, which loads with diagnostics: a value for a preset that isn't there, a preset without a value of its own, a running preset that isn't one, and names alike ignoring case.
 - `planVariablesToKnobs` (core) turns constant Variable Broadcasters into one undoable batch of these ops.
 
 Errors are `{ code, message, hint, address, opIndex, suggestions: [{ description, ops }] }` and are written for humans first. Links may also read layer outputs or props: `{ "link": "@layerId.key" }`.
