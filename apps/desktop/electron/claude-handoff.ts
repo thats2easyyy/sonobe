@@ -176,7 +176,7 @@ export async function openInClaudeCode(request: unknown, options: HandoffOptions
     await rm(file, { force: true }).catch(() => undefined);
     return { ok: false, error: `Terminal didn't open: ${failed}` };
   }
-  return { ok: true, folder: folder.path };
+  return managed && !managed.sonobe ? { ok: true, folder: folder.path, withoutSonobe: true } : { ok: true, folder: folder.path };
 }
 
 /**

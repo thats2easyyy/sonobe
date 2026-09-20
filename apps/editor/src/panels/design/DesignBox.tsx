@@ -206,7 +206,8 @@ function DesignBoxPanel({ session, bounds, onHeightChange }: DesignBoxProps): JS
     const opened = await controller.openInClaudeCode(prompt);
     setHandingOff(false);
     if (!opened || (!opened.ok && opened.cancelled)) return;
-    if (opened.ok) toast({ title: "Opened Claude Code", description: `In Terminal, in “${folderName(opened.folder)}”. It designs on this canvas as it writes.`, tone: "ai" });
+    if (opened.ok && opened.withoutSonobe) toast({ title: "Opened Claude Code without Sonobe", description: `In Terminal, in “${folderName(opened.folder)}”. Your organization's MCP servers for Claude Code don't include Sonobe's, so it can't design on this canvas. Terminal says what to ask your admin.`, tone: "warn" });
+    else if (opened.ok) toast({ title: "Opened Claude Code", description: `In Terminal, in “${folderName(opened.folder)}”. It designs on this canvas as it writes.`, tone: "ai" });
     else toast.error("Couldn't open Claude Code", { description: opened.error ?? "Copy the prompt instead, and paste it into Claude Code in your app's folder.", action: { label: "Copy prompt", onClick: () => void copyPrompt(false, prompt) } });
   };
 
