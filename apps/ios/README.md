@@ -2,7 +2,7 @@
 
 Sonobe Viewer plays the prototype you have open in Sonobe, full screen on your iPhone, with real haptics. Safari can't play haptics, so in the browser the Haptic and Vibrate patches do nothing on an iPhone. In Sonobe Viewer they tap and buzz the way the finished app would.
 
-The app is a small shell around the same web player that Preview on Phone serves. It loads the player in a WKWebView and adds a bridge that the player uses for Haptic and Vibrate, and for the menu's Open Another Prototype. Everything else, including new patch features, sound, network requests and the camera, reaches the phone through the web player with no change to the app.
+The app is a small shell around the same web player that Preview on Phone serves. It loads the player in a WKWebView and adds a bridge that the player uses for Haptic and Vibrate, and for the menu's Open Another Prototype. Everything else, including new patch features, sound and network requests, reaches the phone through the web player with no change to the app. The player loads from a plain http:// address, so the camera, microphone, location and device motion, which WebKit keeps for secure pages, don't work in the app yet.
 
 It isn't on the App Store or TestFlight yet, so you build it yourself with Xcode.
 

@@ -84,7 +84,7 @@ patch drop popAnimation number←where.available bounciness=8 speed=14
 
 ## Common mistakes
 
-- Latitude and Longitude stay 0 on a phone: the web player opened over http://, and browsers only share location with secure pages. Use an override city, or open the prototype from a secure link.
+- Latitude and Longitude stay 0 on a phone: the web player opened over http://, and browsers only share location with secure pages. Sonobe has no HTTPS preview yet, so use an override city on the phone.
 - A permission prompt interrupts every demo: Current Location asks for access. Pick an override city for presentations.
 - The map shows the wrong spot: many map and weather services want longitude first. Check which order the URL expects.
 

@@ -89,7 +89,7 @@ describe("interfaceOrientation", () => {
     expect(result.frames[0]!.outputs).toEqual({ orientation: "portrait", landscape: false });
   });
 
-  it("warns once inside a component, where it doesn't drive the viewer", () => {
+  it("warns once inside a component, where it doesn't count", () => {
     const h = createPatchHarness(interfaceOrientationPatch, { componentPath: "main/card" });
     h.run(3);
     expect(h.logs.filter((l) => l.level === "warn")).toHaveLength(1);

@@ -1,8 +1,9 @@
-/** ARCHITECTURE.md's desktop sections (§9.1 env switches, §12 quality gates) match the desktop app. */
+/** ARCHITECTURE.md's desktop sections (§9.1 env switches, §9.2 web player, §12 quality gates) match the desktop app. */
 
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
+import { previewUrl } from "./lan-preview.ts";
 
 const read = (rel: string) => readFileSync(fileURLToPath(new URL(rel, import.meta.url)), "utf8");
 const architecture = read("../../../ARCHITECTURE.md");
@@ -69,5 +70,21 @@ describe("§12 quality gates", () => {
     const bullet = gates.split("\n").find((line) => line.startsWith("- CI "))!;
     expect(bullet).toContain("`.github/workflows/ci.yml`");
     expect(bullet).toContain(`Node ${/node-version: (\d+)/.exec(ci)![1]}`);
+  });
+});
+
+describe("§9.2 web player", () => {
+  it("doesn't promise the phone the camera: Preview on Phone is plain http://, which browsers don't trust with it", () => {
+    expect(previewUrl("192.168.1.20", 8421, "t")).toMatch(/^http:\/\//);
+    const claims = [
+      section(architecture, "9.2").split("\n").find((line) => line.startsWith("- **Platform services.**")),
+      read("../../../README.md").split("\n").find((line) => line.startsWith("- **Phone preview")),
+      read("../../../ROADMAP.md").split("\n").find((line) => line.includes("Native iPhone preview")),
+      read("../../ios/README.md").split("\n\n").find((paragraph) => paragraph.includes("reaches the phone")),
+    ];
+    for (const claim of claims) {
+      expect(claim).toBeDefined();
+      if (/\bcamera\b/.test(claim!)) expect(claim, claim!.slice(0, 80)).toMatch(/\bsecure\b/);
+    }
   });
 });

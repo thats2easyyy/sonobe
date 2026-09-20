@@ -75,7 +75,7 @@ patch shakes counter increase←shake_pulse.turnedOn
 
 - Nothing moves in the desktop viewer: computers have no motion sensors. Open the web player on a phone, or send deviceMotion events in a simulation.
 - The layer trembles even when the phone lies still: raw sensor values jitter. Put a Smooth Value with a hysteresis around 0.9 between the sensor and the layer.
-- Available stays false on an iPhone: iOS asks permission first and only on secure (https) pages. Tap Allow Motion in the player, or open the prototype from a secure link.
+- Available stays false on an iPhone: iOS asks permission first and only on secure (https) pages, and Preview on Phone's address is plain http://. Test motion on an Android phone for now.
 
 ## Pairs well with
 

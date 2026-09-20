@@ -2,42 +2,42 @@
 
 # Interface Orientation
 
-Chooses which ways the interface turns when the device rotates, and which orientation it starts in.
+Reports which way the interface would face as the device rotates, from the directions you allow and a starting orientation.
 
 | | |
 |---|---|
 | Type key | `interfaceOrientation` |
 | Category | [Device](README.md#device) |
 | Tier | 3 (hardware and platform-specific) |
-| Status | Supported |
+| Status | Web-limited |
 | Search terms | rotation lock, orientation lock, auto rotate, screen rotation, landscape mode, portrait mode, rotate interface |
 
 ## How it works
-Without this patch, the interface stays upright when you rotate the viewer or the phone. Interface Orientation lets it turn.
+Interface Orientation works out which way the interface would face as the device rotates, from the directions you allow. It only reports that: no host turns the interface from it yet. The viewer's Rotate button turns the interface by itself, with or without this patch, and the web player on a phone keeps the project's orientation.
 
-- **Portrait**, **Landscape Left**, **Landscape Right**, and **Upside Down** say which ways the interface may turn. When the device turns to a direction that's off, the interface keeps its current orientation.
-- **Start In** is the orientation shown when the prototype starts or restarts. If the device can't show it, the prototype starts in portrait.
-- **Orientation** and **Landscape** report the interface's current orientation.
+- **Portrait**, **Landscape Left**, **Landscape Right**, and **Upside Down** say which ways the interface may face. When the device turns to a direction that's off, Orientation keeps its current value.
+- **Start In** is the orientation reported when the prototype starts or restarts. If the device can't show it, Orientation starts at portrait.
+- **Orientation** and **Landscape** report the result.
 
-Landscape Left means the device is turned counterclockwise, with its top edge on the left. Test with the viewer's rotate button. Phones with a camera cutout, like recent iPhones, never turn upside down.
+Landscape Left means the device is turned counterclockwise, with its top edge on the left. Phones with a camera cutout, like recent iPhones, never face upside down.
 
 ## Tips
-- Resize layouts from Device Info's Screen Size, which swaps when the interface turns.
-- Lock rotation while something is open: wire a Switch's On through Not into Landscape Left and Landscape Right.
+- Resize layouts from Device Info's Screen Size, which swaps when the viewer rotates.
+- On a phone, where the web player keeps the project's orientation, use Landscape to rearrange layers for a phone turned on its side.
 - Use one Interface Orientation patch per prototype.
 
 ## Coming from Origami
-Orientation and Landscape are new outputs. Without the patch, the interface keeps the project's orientation instead of always portrait.
+Orientation and Landscape are new outputs. Origami turns the interface from this patch; Sonobe doesn't yet, and the interface keeps the project's orientation instead of always portrait.
 
 ## Inputs
 
 | Input | Type | Default | Description |
 |---|---|---|---|
-| **Start In**<br>`startIn` | `enum` | `portrait` | The orientation shown when the prototype starts or restarts; portrait if the device can't show it. |
-| **Portrait**<br>`portrait` | `boolean` | `true` | When on, the interface turns upright when the device is held upright. |
-| **Landscape Left**<br>`landscapeLeft` | `boolean` | `true` | When on, the interface turns when the device is turned counterclockwise. |
-| **Landscape Right**<br>`landscapeRight` | `boolean` | `true` | When on, the interface turns when the device is turned clockwise. |
-| **Upside Down**<br>`upsideDown` | `boolean` | `false` | When on, the interface turns when the device is upside down; phones with a camera cutout never do. |
+| **Start In**<br>`startIn` | `enum` | `portrait` | The orientation reported when the prototype starts or restarts; portrait if the device can't show it. |
+| **Portrait**<br>`portrait` | `boolean` | `true` | When on, Orientation turns to Portrait when the device is held upright. |
+| **Landscape Left**<br>`landscapeLeft` | `boolean` | `true` | When on, Orientation turns to Landscape Left when the device is turned counterclockwise. |
+| **Landscape Right**<br>`landscapeRight` | `boolean` | `true` | When on, Orientation turns to Landscape Right when the device is turned clockwise. |
+| **Upside Down**<br>`upsideDown` | `boolean` | `false` | When on, Orientation turns to Upside Down when the device is turned over; phones with a camera cutout never do. |
 
 **Start In options**
 
@@ -50,34 +50,25 @@ Orientation and Landscape are new outputs. Without the patch, the interface keep
 
 | Output | Type | Description |
 |---|---|---|
-| **Orientation**<br>`orientation` | `enum` | The interface's current orientation. |
-| **Landscape**<br>`landscape` | `boolean` | True while the interface is in Landscape Left or Landscape Right. |
+| **Orientation**<br>`orientation` | `enum` | Which way the interface would face. |
+| **Landscape**<br>`landscape` | `boolean` | True while Orientation is Landscape Left or Landscape Right. |
 
 ## Examples
 
-### Let a video fill the screen in any orientation
+### Show a hint while the device is on its side
+
+Upside Down stays off, so turning the device over doesn't count.
 
 ```text
-layer player video "Player" @0,0 size←info.screenSize
+layer turn_hint text "Turn Hint" @24,60 text="Turn your phone upright" opacity←rotation.landscape
 patch rotation interfaceOrientation startIn=portrait portrait=true landscapeLeft=true landscapeRight=true upsideDown=false
-patch info deviceInfo
-```
-
-### Lock rotation while a sheet is open
-
-```text
-layer sheet_button rectangle "Sheet Button" @16,780 370x56 cornerRadius=14
-patch tap_button interaction layer=@sheet_button
-patch sheet_open switch flip←tap_button.tap
-patch unlocked not value←sheet_open.on
-patch rotation interfaceOrientation landscapeLeft←unlocked.output landscapeRight←unlocked.output
 ```
 
 ## Common mistakes
 
-- Rotating the viewer doesn't turn the interface: that direction is off, or there's no Interface Orientation patch. Add one and turn on each direction you support.
-- The prototype starts in portrait although Start In is Upside Down: phones with a camera cutout can't show upside down. Pick another Start In or another device.
-- Layers keep their portrait size after the interface turns: sizes don't follow the screen by themselves. Drive them from Device Info's Screen Size.
+- Rotating the viewer turns the interface although Landscape Left and Landscape Right are off: no host turns the interface from this patch yet, so it can't lock rotation. Its own Orientation and Landscape do stay put.
+- Orientation starts at portrait although Start In is Upside Down: phones with a camera cutout can't show upside down. Pick another Start In or another device.
+- Layers keep their portrait size after the viewer rotates: sizes don't follow the screen by themselves. Drive them from Device Info's Screen Size.
 
 ## Pairs well with
 
@@ -89,7 +80,9 @@ patch rotation interfaceOrientation landscapeLeft←unlocked.output landscapeRig
 
 ## Availability
 
-**Supported.** Works the same in the desktop app, the web player on desktop and mobile browsers, and headless simulation.
+**Web-limited.** No host turns the interface from it yet. The viewer's Rotate button turns the interface by itself, and the web player keeps the project's orientation, so the patch only reports which way the interface would face.
+
+Works in the desktop app, the web player in desktop browsers, and the web player on phones and tablets.
 
 Tier 3: hardware and platform-specific.
 
