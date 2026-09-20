@@ -40,6 +40,8 @@ Every copy shares the same settings except the properties driven by loops. So on
 
 Without positions, the copies stack on top of each other and look like one layer. The easy fix is a layout group. Put the replicated layer inside a group set to Column layout and you have a list, with no math at all. Use Grid layout for a grid.
 
+Stacked copies draw in index order, so the last copy is on top, as in Origami. For a card deck where copy 0 is the top card, multiply the index by −1 and feed it into the card's Z Position. The top card is also the one that gets touches.
+
 To repeat a whole cell, like a photo, a title and a button together, make the cell a component and feed the loop into its inputs. Each item gets its own instance. Guide 08 covers components.
 
 ## Per-index state

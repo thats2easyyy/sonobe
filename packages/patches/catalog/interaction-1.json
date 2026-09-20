@@ -238,16 +238,18 @@
       "aliases": [
         "flick",
         "fling",
+        "throw",
         "swipe left",
         "swipe right",
         "swipe up",
         "swipe down",
         "swipe gesture",
-        "card swipe"
+        "card swipe",
+        "predicted end"
       ],
       "summary": "Pulses when a press on a layer ends in a swipe, with separate pulses for left, right, up, and down.",
-      "docs": "## How it works\nSwipe judges each press when the finger lifts. If the pointer traveled far enough, or was moving fast enough at release, the press counts as a swipe. **Swiped** fires along with one direction pulse.\n\n- **Axis** chooses which directions count. Any Direction uses the direction the pointer traveled most. Horizontal and Vertical ignore the other axis, so a slightly diagonal swipe on a card still counts.\n- **Min Distance** is how far a slow drag must travel, in points.\n- **Min Velocity** is how fast a short flick must be moving at release, in points per second. A fast throw decides the direction, even if the finger first dragged the other way.\n- A press that moves less than 10 points is a tap, never a swipe.\n\nThe press has to start on the layer, but it can end anywhere.\n\n## Tips\n- Pair Swipe with Gesture: Gesture moves the card with the finger, and Swipe decides whether it leaves.\n- Wire Swiped Left into a Counter's Increase and Swiped Right into Decrease to page through items.\n- Raise Min Distance for big cards so short drags snap back. Lower Min Velocity to make flicks easier.\n\n## Coming from Origami\nOrigami has no Swipe patch. Two-state swipes there use Pop Switch.",
-      "behavior": "State per loop index: `{ blocked: false }`.\n\nEach frame:\n```\nconst snap = ctx.services.pointer(ctx.input(\"layer\")); // null = whole screen\nconst enabled = ctx.input(\"enabled\");\nif (!enabled && (snap.down || snap.ended)) state.blocked = true;\nif (enabled && !state.blocked && snap.ended && !snap.cancelled) judge(snap);\nif (!snap.down) state.blocked = false;\n\nfunction judge(snap) {\n  const [tx, ty] = snap.translation; // release point − press start\n  const [vx, vy] = snap.velocity;    // release-frame estimate, points per second\n  const axis = ctx.input(\"axis\");\n  const horizontal = axis === \"horizontal\" || (axis === \"any\" && Math.abs(tx) >= Math.abs(ty));\n  const d = horizontal ? tx : ty;\n  const v = horizontal ? vx : vy;\n  if (Math.abs(d) < 10) return; // taps and small wiggles never swipe\n  const minVelocity = Math.max(0, ctx.input(\"minVelocity\"));\n  const minDistance = Math.max(0, ctx.input(\"minDistance\"));\n  let dir = 0;\n  if (v !== 0 && Math.abs(v) >= minVelocity) dir = Math.sign(v); // a flick wins, whichever way it's thrown\n  else if (Math.abs(d) >= minDistance) dir = Math.sign(d);       // a slow drag must travel far enough\n  if (dir === 0) return;\n  ctx.pulse(\"swiped\");\n  if (horizontal) ctx.pulse(dir < 0 ? \"swipedLeft\" : \"swipedRight\");\n  else ctx.pulse(dir < 0 ? \"swipedUp\" : \"swipedDown\");\n}\n```\n\n- Pulses: outputs `swiped`, `swipedLeft`, `swipedRight`, `swipedUp`, `swipedDown`, one frame each. A swipe fires exactly two on the same frame: `swiped` plus one direction. Nothing fires mid-drag; the judgment happens only on the release frame.\n- Axis: with Any Direction, the axis with the larger travel wins and ties go to horizontal. Horizontal and Vertical judge only that axis. Up and down follow y-down coordinates: negative y travel is Up.\n- Where a press can end: it must begin on the layer or a descendant (the hit chain captured at press), and may lift anywhere, including off the layer or off the screen.\n- Exclusivity: a swipe needs at least 10 pt of travel on the judged axis at release, so a press that fires Interaction's Tap (always under 10 pt) never swipes.\n- Velocity: the same engine estimate Gesture reports, 25 ms average, kept on the release frame.\n- Cancelled presses (the browser took over the gesture, so `snap.cancelled` is true on the release frame) never swipe.\n- Frame 0: no pulses unless a release is dispatched on frame 0.\n- Loops: per copy of a loop-replicated layer, with per-index state; each copy pulses independently.\n- Edge cases: negative Min Distance or Min Velocity count as 0. With Min Velocity 0, every release that traveled 10 pt and was still moving counts as a flick. A missing layer never swipes.\n- Disabled: no pulses; a press held during any disabled frame is ignored even if it lifts while enabled.\n- Platform and simulation: same everywhere; simulation reads `pointer` InputEvents, so a scripted drag path with timing produces the same velocity.\n- Restart and dispose: state resets; nothing to dispose.\n- Coming from Origami: no built-in equivalent. The Quartz-era Swipe macro took a Direction and output positions; Pop Switch (Swipe X or Y) covers two-state swipes and imports as Pop Switch.",
+      "docs": "## How it works\nSwipe judges each press when the finger lifts. If the pointer traveled far enough, or was moving fast enough at release, the press counts as a swipe. **Swiped** fires along with one direction pulse.\n\n- **Axis** chooses which directions count. Any Direction uses the direction the pointer is heading most. Horizontal and Vertical ignore the other axis.\n- **Min Distance** is how far the press must travel, in points.\n- **Min Velocity** is how fast a short flick must be moving at release, in points per second. A fast throw decides the direction, even if the finger first dragged the other way.\n- **Lookahead** adds that many seconds of release speed to the travel. At 0.2, a 60-point flick at 600 points per second counts as 180 points.\n- **Projected** is that estimate, Translation + Velocity × Lookahead, live while the finger is down.\n- A press that moves less than 10 points is a tap, never a swipe.\n\nThe press has to start on the layer, but it can end anywhere.\n\n## Tips\n- Pair Swipe with Gesture: Gesture moves the card with the finger, and Swipe decides whether it leaves.\n- Wire Swiped Left into a Counter's Increase and Swiped Right into Decrease to page through items.\n- Lookahead 0.1–0.3 suits cards; Snap's Normal and Fast decelerations match 0.5 and 0.1. To judge by the projection alone, raise Min Velocity to 10000.\n\n## Coming from Origami\nOrigami has no Swipe patch. Two-state swipes there use Pop Switch.",
+      "behavior": "State per loop index: `{ blocked: false }`.\n\nEach frame:\n```\nconst snap = ctx.services.pointer(ctx.input(\"layer\")); // null = whole screen\nconst enabled = ctx.input(\"enabled\");\nif (!enabled && (snap.down || snap.ended)) state.blocked = true;\nconst live = enabled && !state.blocked;\nconst active = live && (snap.down || snap.ended); // pressed now, or released this frame (as Gesture)\nconst lookahead = Math.max(0, finite(ctx.input(\"lookahead\")));\nconst projected = active ? add(snap.translation, scale(snap.velocity, lookahead)) : [0, 0];\nctx.output(\"projected\", projected);\nif (live && snap.ended && !snap.cancelled) judge(snap, projected);\nif (!snap.down) state.blocked = false;\n\nfunction judge(snap, [px, py]) {\n  const [tx, ty] = snap.translation; // release point − press start\n  const [vx, vy] = snap.velocity;    // release-frame estimate, points per second\n  const axis = ctx.input(\"axis\");\n  const horizontal = axis === \"horizontal\" || (axis === \"any\" && Math.abs(px) >= Math.abs(py));\n  const d = horizontal ? tx : ty;\n  const v = horizontal ? vx : vy;\n  const p = horizontal ? px : py;   // d + v × lookahead\n  if (Math.abs(d) < 10) return; // taps and small wiggles never swipe\n  const minVelocity = Math.max(0, ctx.input(\"minVelocity\"));\n  const minDistance = Math.max(0, ctx.input(\"minDistance\"));\n  let dir = 0;\n  if (v !== 0 && Math.abs(v) >= minVelocity) dir = Math.sign(v); // a flick wins, whichever way it's thrown\n  else if (Math.abs(p) >= minDistance) dir = Math.sign(p);       // otherwise the projected travel must reach Min Distance\n  if (dir === 0) return;\n  ctx.pulse(\"swiped\");\n  if (horizontal) ctx.pulse(dir < 0 ? \"swipedLeft\" : \"swipedRight\");\n  else ctx.pulse(dir < 0 ? \"swipedUp\" : \"swipedDown\");\n}\n```\n\n- Pulses: outputs `swiped`, `swipedLeft`, `swipedRight`, `swipedUp`, `swipedDown`, one frame each. A swipe fires exactly two on the same frame: `swiped` plus one direction. Nothing fires mid-drag; the judgment happens only on the release frame.\n- Projected: `translation + velocity × lookahead` per axis, in points from the press start, prototype axes, y down. It equals Gesture's Translation + Velocity × Lookahead on every frame: live while pressed, kept on the release frame (including a cancelled release), then [0, 0]. This is the projection Snap makes: POP decay from speed v at rate r travels v × r / (1000 × (1 − r)), so Snap's Normal (0.998) equals Lookahead 0.499 s and Fast (0.99) equals 0.099 s. With Lookahead 0, Projected equals Translation.\n- Lookahead: seconds, at least 0; negative or non-finite values count as 0 (no warning; the port's min is 0). Lookahead 0 judges exactly as Swipe did before the port existed. The 10 pt tap slop always applies to the raw travel `d`, never to the projection.\n- Axis: with Any Direction, the axis with the larger projected travel wins and ties go to horizontal (with Lookahead 0, the larger travel). Horizontal and Vertical judge only that axis. Up and down follow y-down coordinates: negative y is Up.\n- Where a press can end: it must begin on the layer or a descendant (the hit chain captured at press), and may lift anywhere, including off the layer or off the screen.\n- Exclusivity: a swipe needs at least 10 pt of travel on the judged axis at release, so a press that fires Interaction's Tap (always under 10 pt) never swipes.\n- Velocity: the same engine estimate Gesture reports, 25 ms average, kept on the release frame.\n- Cancelled presses (the browser took over the gesture, so `snap.cancelled` is true on the release frame) never swipe.\n- Frame 0: no pulses unless a release is dispatched on frame 0; Projected [0, 0].\n- Loops: per copy of a loop-replicated layer, with per-index state; each copy pulses and projects independently.\n- Edge cases: negative Min Distance or Min Velocity count as 0. With Min Velocity 0, every release that traveled 10 pt and was still moving counts as a flick. A missing layer never swipes and projects [0, 0]. Projected is always finite: the engine's velocity is finite and Lookahead is clamped to a finite value.\n- Disabled: no pulses and Projected [0, 0]; a press held during any disabled frame is ignored, and projects [0, 0], even if it lifts while enabled.\n- Muted: no pulses; Projected [0, 0].\n- Platform and simulation: same everywhere; simulation reads `pointer` InputEvents, so a scripted drag path with timing produces the same velocity and projection.\n- Restart and dispose: state resets; nothing to dispose.\n- Coming from Origami: no built-in equivalent. The Quartz-era Swipe macro took a Direction and output positions; Pop Switch (Swipe X or Y) covers two-state swipes and imports as Pop Switch.",
       "inputs": [
         {
           "key": "layer",
@@ -272,7 +274,7 @@
             {
               "key": "any",
               "name": "Any Direction",
-              "description": "Judges along whichever axis the pointer traveled most."
+              "description": "Judges along whichever axis the press is heading most: its travel, plus Lookahead's projection."
             },
             {
               "key": "horizontal",
@@ -295,7 +297,7 @@
           "default": 100,
           "min": 0,
           "step": 1,
-          "description": "How far a slow drag must travel along the axis to count, in points."
+          "description": "How far the press must travel along the axis to count, in points, including Lookahead's projection."
         },
         {
           "key": "minVelocity",
@@ -306,6 +308,16 @@
           "min": 0,
           "step": 10,
           "description": "How fast a short flick must be moving along the axis at release to count, in points per second."
+        },
+        {
+          "key": "lookahead",
+          "name": "Lookahead",
+          "type": "number",
+          "subtype": "duration",
+          "default": 0,
+          "min": 0,
+          "step": 0.05,
+          "description": "Seconds of release velocity added to the travel before it's compared with Min Distance, so a quick short flick can count. 0 uses only where the finger lifted."
         }
       ],
       "outputs": [
@@ -338,20 +350,29 @@
           "name": "Swiped Down",
           "type": "pulse",
           "description": "Pulses when a press ends as a swipe downward."
+        },
+        {
+          "key": "projected",
+          "name": "Projected",
+          "type": "point",
+          "subtype": "distance",
+          "description": "Where the press is heading, Translation + Velocity × Lookahead, in points from where it began; kept on the release frame, then 0,0.",
+          "advanced": true
         }
       ],
       "alwaysEvaluate": true,
       "pairsWellWith": [
         "gesture",
         "springAnimation",
+        "snap",
         "counter",
-        "switch",
-        "transition"
+        "switch"
       ],
       "commonMistakes": [
         "Swiping the card does nothing: a text layer in front of the card catches the press. Group the card with its text and set Layer to the group, or turn off Receives Touches on the text.",
         "A short drag counts as a swipe: the finger was still moving fast when it lifted. Raise Min Velocity, or raise Min Distance if slow drags count too early.",
-        "Diagonal swipes on a horizontal card are ignored: Axis is Any Direction, so mostly vertical movement becomes Swiped Up or Down. Set Axis to Horizontal."
+        "Diagonal swipes on a horizontal card are ignored: Axis is Any Direction, so mostly vertical movement becomes Swiped Up or Down. Set Axis to Horizontal.",
+        "A quick flick springs back although it looked like a throw: it lifted short of Min Distance and slower than Min Velocity. Set Lookahead to about 0.2 so the release speed counts toward the distance."
       ],
       "examples": [
         {
@@ -361,13 +382,19 @@
         {
           "title": "Swipe up to open a sheet, down to close it",
           "outline": "layer sheet rectangle \"Sheet\" @0,560 402x600 cornerRadius=24 scale←grow.output\npatch swipe_sheet swipe layer=@sheet axis=vertical minDistance=60\npatch open switch turnOn←swipe_sheet.swipedUp turnOff←swipe_sheet.swipedDown\npatch pop popAnimation number←open.on bounciness=4 speed=14\npatch grow transition<number> progress←pop.output start=1 end=1.04"
+        },
+        {
+          "title": "Throw a card with a quick flick",
+          "description": "Lookahead 0.2 adds a fifth of a second of the release speed, so a short, quick flick throws the card as well as a long drag. The badge fades in as the projected throw nears Min Distance.",
+          "outline": "layer card group \"Card\" @37,250 328x420 cornerRadius=24 opacity←fade_out.output\n  layer badge rectangle \"Throw Badge\" @24,24 96x40 cornerRadius=12 opacity←badge_in.progress\npatch throw swipe layer=@card axis=horizontal minDistance=95 lookahead=0.2\npatch heading absoluteValue value←throw.projected\npatch badge_in progress value←heading.output start=40 end=95 clampToRange=true\npatch gone switch turnOn←throw.swiped\npatch fade classicAnimation number←gone.on duration=0.25\npatch fade_out transition<number> progress←fade.output start=1 end=0"
         }
       ],
       "origami": null,
       "defaultNotes": {
         "axis": "sonobe: any direction works the moment you insert it; restrict the axis for cards and carousels.",
         "minDistance": "sonobe: 100 pt is about a third of a phone-width card, so short drags snap back.",
-        "minVelocity": "sonobe: 500 pt/s separates a deliberate flick from a slow release."
+        "minVelocity": "sonobe: 500 pt/s separates a deliberate flick from a slow release.",
+        "lookahead": "sonobe: 0 keeps the release-point judgment Swipe has always had, so existing documents and examples behave the same; 0.1–0.3 s makes quick flicks count."
       }
     },
     {

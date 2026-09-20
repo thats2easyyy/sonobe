@@ -6,6 +6,7 @@
 
 import type { Component, Id, LayerNode } from "@sonobe/core";
 import type { SceneFrame, SceneNode } from "@sonobe/engine";
+import { paintOrder } from "@sonobe/engine";
 import { nodeContainsPoint, nodeQuad, quadIntersectsRect, unionRects, boundsOf, type Point, type Rect } from "./geometry.ts";
 
 export type FlowLayout = "row" | "column" | "grid";
@@ -120,15 +121,6 @@ export function buildCanvasIndex(component: Component | undefined, scene: SceneF
   return index;
 }
 
-/** Siblings front-most first: higher zPosition wins, then later in the list. */
-function frontToBack(nodes: readonly SceneNode[]): SceneNode[] {
-  const z = (n: SceneNode) => (typeof n.props.zPosition === "number" && Number.isFinite(n.props.zPosition) ? n.props.zPosition : 0);
-  return nodes
-    .map((node, i) => ({ node, i }))
-    .sort((a, b) => z(b.node) - z(a.node) || b.i - a.i)
-    .map((e) => e.node);
-}
-
 function alphaOf(v: unknown): number {
   return v && typeof v === "object" && typeof (v as { a?: unknown }).a === "number" ? (v as { a: number }).a : 0;
 }
@@ -147,8 +139,11 @@ function isSurface(node: SceneNode): boolean {
 export function hitLayers(index: CanvasIndex, p: Point): Id[] {
   const scene = index.scene;
   if (!scene) return [];
-  const visit = (nodes: readonly SceneNode[]): SceneNode | null => {
-    for (const node of frontToBack(nodes)) {
+  const visit = (siblings: readonly SceneNode[]): SceneNode | null => {
+    // Front to back in the order the viewer draws them (zPosition first, then layer order).
+    const nodes = paintOrder(siblings);
+    for (let i = nodes.length - 1; i >= 0; i--) {
+      const node = nodes[i]!;
       if (!node.visible) continue;
       const id = index.layerIdForKey(node.key);
       if (id && index.entry(id)?.locked) continue;

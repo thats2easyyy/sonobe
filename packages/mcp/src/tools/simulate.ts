@@ -101,7 +101,7 @@ export function registerSimulationTools(tc: ToolContext): void {
     {
       title: "Dispatch input",
       description:
-        'Send input to a simulation and step through it: tap, longPress, drag, hover, scroll, key, text, focus, submit, raw pointer, orientation, deviceMotion. Targets are "@layerId" (its center), "@card/badge" for a layer inside a component instance, or [x, y]. Each input resolves its target when it fires, and reports which layer it hit, which interaction patches heard it, and warnings when it hits nothing or the wrong layer. Follow with sim_step or sim_trace to watch the result.',
+        'Send input to a simulation and step through it: tap, longPress, drag, hover, scroll, key, text, focus, submit, raw pointer, orientation, deviceMotion. Targets are "@layerId" (its center), "@card/badge" for a layer inside a component instance, or [x, y]. Each input resolves its target when it fires, and reports which layer it hit (with the loop copy, such as card#0), which interaction patches heard it, and warnings when it hits nothing or the wrong layer. Follow with sim_step or sim_trace to watch the result.',
       input: z.object({ simId: z.string(), events: z.array(SimEventSchema).min(1).max(50) }),
       output: SimStateOutputSchema,
       annotations: SIMULATION,
@@ -115,7 +115,7 @@ export function registerSimulationTools(tc: ToolContext): void {
         const at = e.point ? ` at (${Math.round(e.point[0])}, ${Math.round(e.point[1])})` : "";
         const hit = e.hit
           ? e.hit.layerId
-            ? ` → hit ${e.hit.instancePath ? `${e.hit.instancePath}/` : ""}${e.hit.layerId}${e.hit.chain.length > 1 ? ` (bubbles to ${e.hit.chain.slice(1).join(", ")})` : ""}${e.hit.handledBy.length ? ` · heard by ${e.hit.handledBy.join(", ")}` : ""}`
+            ? ` → hit ${e.hit.instancePath ? `${e.hit.instancePath}/` : ""}${e.hit.key ?? e.hit.layerId}${e.hit.chain.length > 1 ? ` (bubbles to ${e.hit.chain.slice(1).join(", ")})` : ""}${e.hit.handledBy.length ? ` · heard by ${e.hit.handledBy.join(", ")}` : ""}`
             : " → hit nothing"
           : "";
         lines.push(`${e.index}. ${e.kind}${at}${hit}`);

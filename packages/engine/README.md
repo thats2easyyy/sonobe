@@ -148,7 +148,8 @@ A receiver resolves statically by trimmed name, scope, and type: local looks onl
 - **Null defaults.** Props declared with a null default (`cornerRadii`, `gradient`, `image`, `video`, `shape`, `effects`...) stay `null` in `SceneNode.props` while unset, when the document stores `null`, and when a link delivers `null`; they never become zero arrays.
 - **Replication.** A layer whose bound props carry Loops replicates, one copy per item, keyed `layerId#n`. Descendants of copy *n* take item *n* of their own looped props and are keyed `childId#n`. They don't replicate again, because loops of loops come from components.
 - `enabled: false` sets `visible: false`. A Color Fill fills its parent. A Clone is emitted as a leaf with `props.source`, and the renderer draws the copy.
-- `SceneNode.transform` is `mat4.compose` with the laid-out top-left, pivot, scale × Scale XYZ, rotations, and zPosition. `worldTransform` is the parent's world × local. `props` holds every resolved prop, text styles included. The background comes from `project.background` (white by default), and the scene size is the device screen size.
+- `SceneNode.transform` is `mat4.compose` with the laid-out top-left, pivot, scale × Scale XYZ, rotations, and zPosition. `worldTransform` is the parent's world × local.
+- **Paint order.** `roots` and `children` stay in document order, so keys and "first copy" lookups are stable. `paintOrder(nodes)` gives the order siblings draw and take touches, back to front: zPosition ascending, ties in document order, missing or non-finite as 0. It only reorders siblings; a child never leaves its parent. The hit test, the DOM and SVG renderers, the renderer's cursor query and the editor canvas all use it. It returns the same array when nothing is lifted, and `paintIndices` returns null then. `props` holds every resolved prop, text styles included. The background comes from `project.background` (white by default), and the scene size is the device screen size.
 - Layer geometry from the previous frame feeds `services.layerInfo`: the layer `type`, the anchor-point position in parent space, the laid-out size, scale × Scale XYZ, anchor, `worldTransform`, content size, and `parent`. `parent` is a `LayerRef` to the scene parent (with its loop instance), scoped like the child's reference: a component's top-level layers have the instance layer as parent, and `services.layerInfo(info.parent)` resolves inside the right instance.
 
 ### Layer references and layer outputs
@@ -159,7 +160,7 @@ A receiver resolves statically by trimmed name, scope, and type: local looks onl
 
 ### Input and gestures
 
-- Hit tests run front to back through world transforms; touches bubble to interactive ancestors.
+- Hit tests run front to back in paint order (zPosition first, then later siblings) through world transforms; touches bubble to interactive ancestors.
 - A mouse or pen **hovers** over whatever is under it, including while a button is held (re-hit-tested every frame as it moves). Touches never hover. `leave` ends hover but not a press.
 - Snapshots carry `pressure` (event pressure clamped 0–1; without one, touch and pen press at 0.5 and mouse at 0), `buttons` (the DOM bitmask from the event's `buttons`, else from `button`, primary by default; chords update it on move), `cancelled` (every press that ended this frame was cancelled), and `pointerType`.
 
@@ -303,7 +304,7 @@ expect(rt.getValue("@card.scale")).toBe(1.2);
 - `physics/`: Rebound-exact springs and converters, curves, tweens, and momentum (`MomentumScroller`).
 - `math/`: `mat4` (`compose`, `multiply`, `planeInverse`...), `vec`, polyline simplification, and `squirclePath(x, y, w, h, radii, smoothing)`: smooth-corner rectangle path data shared by the renderer and Rounded Rectangle Shape. Non-finite inputs never produce NaN.
 - `layout/`: `computeLayout` and the approximate `TextMeasurer`.
-- `hittest/`: `hitTest` over a scene.
+- `hittest/`: `hitTest` over a scene, and `paintOrder`, `paintIndices` and `stackDepth` for the sibling order every surface draws and hits in.
 - `gestures/`: `PointerTracker` (taps, drags, velocity from event timeStamps, hover while held, pressure, buttons, cancelled presses, `pointers(target)`), `KeyboardTracker`, `WheelTracker`, `TextInputTracker`, and `InputTracker` (all together).
 - `runtime/`: `createRuntime`, `compileDocument`, `createEngineRegistry`, loop helpers (`makeLoop`, `isLoop`, `loopItemAt`...), `valuesEqual`, `zeroValue`, `portDefault`, `coerceValue`, `mulberry32`, `summarizeSeries`.
 

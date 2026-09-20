@@ -245,7 +245,7 @@ input events (pointer/keyboard/device) ─┐
   2. patch evaluation      (topological order; back-edges read previous frame)
   3. layer prop resolution (literal or linked; loop replication)
   4. layout                (flex-lite rows/columns/grid, auto/percent/grow sizing, text measure)
-  5. SceneFrame emit       (flat, z-ordered render list with world transforms)
+  5. SceneFrame emit       (nested nodes in document order, with world transforms)
   6. layer-derived outputs (Layer Info, content sizes) become readable on the NEXT frame
 ```
 
@@ -279,11 +279,13 @@ input events (pointer/keyboard/device) ─┐
 - Groups and artboards may enable **layout**: `none | row | column | grid`, with spacing, padding, and 9-point alignment.
   - Child sizing: `fixed | auto | grow | percent`.
   - Child positioning: `relative | absolute`.
+  - Padding insets only the layout flow. Children in the flow sit inside it, and their `percent` and `grow` sizes are shares of the space inside it (the content box). Children placed by Position (absolute children, and every child of a group without layout) measure Position from the parent's top-left and size `percent` and `grow` from the parent's full size, padding included. This is CSS's rule for absolutely positioned children (the padding box), so 100% × 100% at 0, 0 covers the parent exactly.
 - The engine owns layout (headless and deterministic). Text measurement is injected (`TextMeasurer`): the DOM measures with canvas, and headless mode uses approximate metrics.
 
 ### 5.5 Hit testing and gestures
 
-- Hit tests run front → back. A layer receives touches only if it is enabled, has opacity > 0, and has `hitTest !== false`.
+- Hit tests run front → back in paint order: among siblings, a higher `zPosition` is in front, and equal values keep layer order (later is in front). zPosition only reorders siblings, never lifting a layer out of its group. One function, `paintOrder`, sets this order for the hit test, both renderers, the cursor and the editor canvas, so what draws in front is what gets the touch.
+- A layer receives touches only if it is enabled, has opacity > 0, and has `hitTest !== false`.
 - Touches bubble to ancestors. Layers may declare `hitSlop`.
 - Tap fires on touch-up if the touch moved < 10 pt. On that frame, `position` still holds the last touch position (a documented deviation from Origami, where it resets first).
 - Long press = held and stationary (10 pt slop) for the duration.
@@ -373,6 +375,7 @@ Layer types are declared in `@sonobe/core` (`layerTypes.ts`) with typed props (k
   - shapes as SVG paths
   - shader layers as WebGL2 canvases (GLSL ES 3.0 fragment shaders with ShaderToy-style uniforms)
 - Keyed reconciliation. Only changed styles are written.
+- Paint order (§5.5): the DOM keeps document order. When zPosition reorders siblings, they get `z-index` ranks inside their parent's body, which is set to `isolation: isolate` (the stage, for root layers). Ranks stay under the parent's stroke and inside the stage, so they never cover the device frame, and changing a zPosition never moves an element (focused text fields keep focus). The SVG renderer behind headless screenshots draws siblings in the same order.
 - Captures pointer, keyboard, and wheel events and converts them to engine `InputEvent`s in prototype coordinates.
 - Device frames are drawn with CSS (no bitmap bezels). Device presets carry screen size, scale, safe areas, and corner radius.
 

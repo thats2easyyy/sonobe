@@ -248,6 +248,78 @@ describe("createDomRenderer", () => {
   });
 });
 
+describe("zPosition stacking", () => {
+  let container: HTMLElement;
+  let renderer: DomRenderer;
+
+  beforeEach(() => {
+    container = document.createElement("div");
+    document.body.appendChild(container);
+    renderer = createDomRenderer(container, { resolveAssetUrl: () => undefined, captureInput: false });
+  });
+
+  afterEach(() => {
+    renderer.dispose();
+    container.remove();
+  });
+
+  const lifted = (key: string, z: number, children: SceneNode[] = []) => node(key, "rectangle", { color: "#FF0000FF", zPosition: z }, children, { zPosition: z });
+  const zIndex = (key: string) => writtenStyle(renderer.elementForKey(key)!, "z-index");
+  const bodyOf = (key: string) => renderer.elementForKey(key)!.querySelector(":scope > .sonobe-body")!;
+
+  it("writes no ranks or isolation when siblings draw in layer order", () => {
+    renderer.render(frame([lifted("a", 0), lifted("b", 0), lifted("c", 3)]));
+    expect([zIndex("a"), zIndex("b"), zIndex("c")]).toEqual(["", "", ""]);
+    expect(writtenStyle(renderer.stage, "isolation")).toBe("");
+  });
+
+  it("ranks lifted siblings with z-index inside an isolated stage and never moves their elements", () => {
+    renderer.render(frame([lifted("card#0", 2), lifted("card#1", 1), lifted("card#2", 0)]));
+    expect([zIndex("card#0"), zIndex("card#1"), zIndex("card#2")]).toEqual(["2", "1", "0"]);
+    expect(writtenStyle(renderer.stage, "isolation")).toBe("isolate");
+    const moved = renderer.getStats().moved;
+    renderer.render(frame([lifted("card#0", 0), lifted("card#1", 5), lifted("card#2", 1)]));
+    expect([zIndex("card#0"), zIndex("card#1"), zIndex("card#2")]).toEqual(["0", "2", "1"]);
+    expect(renderer.getStats().moved).toBe(moved);
+    expect(stageKeys(renderer.stage)).toEqual(["card#0", "card#1", "card#2"]);
+  });
+
+  it("clears ranks and isolation when the stack returns to layer order", () => {
+    renderer.render(frame([lifted("a", 1), lifted("b", 0)]));
+    renderer.render(frame([lifted("a", 0), lifted("b", 0)]));
+    expect([zIndex("a"), zIndex("b"), writtenStyle(renderer.stage, "isolation")]).toEqual(["", "", ""]);
+  });
+
+  it("ranks children inside their parent's body, below the parent's stroke", () => {
+    const group = node("g", "group", { strokeWidth: 2, strokeColor: "#000000FF" }, [lifted("x", 3), lifted("y", 0)]);
+    renderer.render(frame([group, lifted("h", 0)]));
+    expect(writtenStyle(bodyOf("g"), "isolation")).toBe("isolate");
+    expect([zIndex("x"), zIndex("y"), zIndex("g"), zIndex("h")]).toEqual(["1", "0", "", ""]);
+    expect(writtenStyle(renderer.stage, "isolation")).toBe("");
+    // The stroke is the body's later sibling, so ranked children stay under it.
+    const g = renderer.elementForKey("g")!;
+    expect([...g.children].map((e) => e.className)).toEqual(["sonobe-body", "sonobe-stroke"]);
+  });
+
+  it("drops a rank when its layer moves to a parent that draws in layer order", () => {
+    const x = lifted("x", 3);
+    renderer.render(frame([node("g1", "group", {}, [x, lifted("y", 0)]), node("g2", "group", {}, [lifted("z", 0)])]));
+    expect(zIndex("x")).toBe("1");
+    renderer.render(frame([node("g1", "group", {}, [lifted("y", 0)]), node("g2", "group", {}, [lifted("z", 0), x])]));
+    expect([zIndex("x"), zIndex("y")]).toEqual(["", ""]);
+    expect(writtenStyle(bodyOf("g1"), "isolation")).toBe("");
+    expect(writtenStyle(bodyOf("g2"), "isolation")).toBe("");
+  });
+
+  it("writes nothing when a lifted frame renders again", () => {
+    const f = frame([lifted("a", 2), lifted("b", 1), node("g", "group", {}, [lifted("c", 1), lifted("d", 0)])]);
+    renderer.render(f);
+    const before = renderer.getStats();
+    renderer.render(structuredClone(f));
+    expect(renderer.getStats().styleWrites).toBe(before.styleWrites);
+  });
+});
+
 describe("lisIndices", () => {
   it("finds the longest increasing run and ignores new items", () => {
     expect([...lisIndices([1, 2, 3, 0])].sort()).toEqual([0, 1, 2]);

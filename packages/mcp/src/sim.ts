@@ -618,7 +618,8 @@ export function createSimulationManager(options: SimulationManagerOptions): Simu
       hit.layerId = front.layerId;
       const name = layerName(rt, front.key, front.layerId);
       if (name !== undefined) hit.layerName = name;
-      const prefix = splitKey(front.key).prefix;
+      const { prefix, own } = splitKey(front.key);
+      hit.key = own;
       if (prefix.length) hit.instancePath = prefix.join("/");
     }
     const intendedId = intended.kind === "layer" ? intended.layerId : undefined;

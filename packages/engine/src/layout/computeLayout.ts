@@ -317,7 +317,9 @@ export function computeLayout(
     for (const c of box.children) {
       if (c.isFill) c.width = box.width;
       else if (inFlow(box, c)) flow.push(c);
-      else c.width = independentWidth(c, innerW);
+      // Placed by Position, which is measured from the parent's top-left: percent and grow use the
+      // parent's full width, padding included (CSS sizes absolute children from the padding box).
+      else c.width = independentWidth(c, box.width);
     }
     if (box.layout === "row") {
       let used = box.spacing * Math.max(0, flow.length - 1);
@@ -436,7 +438,7 @@ export function computeLayout(
     for (const c of box.children) {
       if (c.isFill) c.height = box.height;
       else if (inFlow(box, c)) flow.push(c);
-      else c.height = independentHeight(c, innerH);
+      else c.height = independentHeight(c, box.height); // placed by Position: the full height, as for width
     }
 
     if (box.layout === "row") {

@@ -10,7 +10,8 @@ Related: `graph-basics`, `loops`, `components`
 - `position` is where the layer's **anchor point** sits, measured from the parent's top-left.
 - `anchor` defaults to `[0, 0]` (top-left). Set `[0.5, 0.5]` to position by center.
 - `pivot` is the point scale and rotation happen around. It defaults to `[0.5, 0.5]` (center).
-- Later layers draw in front of earlier ones. Children draw in front of their parent. `zPosition` adjusts depth.
+- Later layers draw in front of earlier ones. Children draw in front of their parent.
+- `zPosition` reorders siblings: higher draws in front and gets touches first; ties keep layer order. It never lifts a layer out of its group.
 
 ## Containers
 
@@ -32,6 +33,7 @@ Children of a container with layout:
   - `grow` (share the free space along the layout direction)
   - `percent` (`size` is a percent of the parent)
 - `positioning: "absolute"` opts a child out of layout, so it uses `position` again. With layout on, relative children ignore `position`.
+- Padding only insets children in the layout. An absolute child (or any child of a group without layout) sizes `percent` and `grow` from the parent's full size, padding included, like CSS absolute children: `100%` × `100%` at `[0, 0]` covers the parent exactly.
 
 ## Example: a list card
 

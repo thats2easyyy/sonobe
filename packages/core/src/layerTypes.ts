@@ -56,7 +56,7 @@ export const COMMON_PROPS: PropSpec[] = [
   prop("rotationX", "Rotation X", "number", 0, "transform", "3D rotation around the X axis in degrees.", { ...sub("angle"), advanced: true }),
   prop("rotationY", "Rotation Y", "number", 0, "transform", "3D rotation around the Y axis in degrees.", { ...sub("angle"), advanced: true }),
   prop("pivot", "Pivot", "anchor", [0.5, 0.5], "transform", "Point that scale and rotation happen around. [0.5,0.5] is center."),
-  prop("zPosition", "Z Position", "number", 0, "transform", "Depth offset for 3D and stacking (higher is closer).", { advanced: true }),
+  prop("zPosition", "Z Position", "number", 0, "transform", "Draw order among siblings: a higher Z Position draws in front and gets touches first; equal values keep layer-list order. It only reorders within the same parent.", { advanced: true }),
   prop("shadowColor", "Shadow Color", "color", "#000000FF", "shadow", "Drop shadow color."),
   prop("shadowOpacity", "Shadow Opacity", "number", 0, "shadow", "0 turns the shadow off.", { ...sub("progress"), min: 0, max: 1, step: 0.01 }),
   prop("shadowRadius", "Shadow Radius", "number", 0, "shadow", "Blur radius of the shadow in points.", { min: 0 }),
@@ -102,7 +102,7 @@ const LAYOUT_CONTAINER_PROPS: PropSpec[] = [
   prop("layout", "Layout", "enum", "none", "layout", "Arrange children automatically: in a row, a column, or a wrapping grid.", { enumOptions: opts(["none", "None"], ["row", "Row"], ["column", "Column"], ["grid", "Grid"]) }),
   prop("spacingMode", "Spacing Mode", "enum", "fixed", "layout", "Fixed gap, space between children, or space evenly.", { enumOptions: opts(["fixed", "Fixed"], ["between", "Space Between"], ["evenly", "Space Evenly"]) }),
   prop("spacing", "Spacing", "number", 0, "layout", "Gap between children in points (Fixed mode). In Grid, used for both axes.", { min: 0 }),
-  prop("padding", "Padding", "point4d", [0, 0, 0, 0], "layout", "Inner padding [top, right, bottom, left] in points."),
+  prop("padding", "Padding", "point4d", [0, 0, 0, 0], "layout", "Inner padding [top, right, bottom, left] in points for children in the layout. Absolute children ignore it."),
   prop("alignment", "Alignment", "enum", "topLeft", "layout", "Where children sit inside the container.", { enumOptions: ALIGNMENTS }),
   prop("clip", "Clip Contents", "boolean", false, "layout", "Hide children outside the container's bounds."),
 ];
