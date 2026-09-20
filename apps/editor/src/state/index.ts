@@ -30,7 +30,7 @@ export {
   type PickDialogOptions,
   type PromptDialogOptions,
 } from "./dialogs.ts";
-export { BOUNDS_METHODS, createBoundsRegistry, isBoundsMethod, rectOfElement, type BoundsMethod, type BoundsProvider, type BoundsRect, type BoundsRegisterOptions, type BoundsRegistry } from "./bounds.ts";
+export { BOUNDS_METHODS, createBoundsRegistry, isBoundsMethod, rectOfElement, type BoundsMethod, type BoundsProvider, type BoundsRect, type BoundsRegisterOptions, type BoundsRegistry, type BoundsSettler, type CaptureTarget } from "./bounds.ts";
 export { createGraphGeometrySlot, type GraphGeometryNode, type GraphGeometryProvider, type GraphGeometryReply, type GraphGeometrySlot } from "./graphGeometry.ts";
 export {
   assetKindFor,

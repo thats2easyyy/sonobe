@@ -10,6 +10,7 @@
 
 import { findLayer, type Id, type LayerNode, type SonobeDocument } from "@sonobe/core";
 import { createStore, type StoreApi } from "zustand/vanilla";
+import type { CaptureTarget } from "../../state/bounds.ts";
 import type { DocumentChange } from "../../state/document.ts";
 import type { EditorSession } from "../../state/session.ts";
 import type { HoloPlan } from "./hologramPlan.ts";
@@ -231,20 +232,59 @@ function listenForEarlyEnd(end: () => void): () => void {
   };
 }
 
+/** The longest a screenshot waits for a hologram to finish: a tall full-page build runs about 5 s. */
+export const HOLOGRAM_CAPTURE_WAIT_MS = 6000;
+
+/** The next frame, or a moment later in a window that doesn't paint (hidden windows may not run requestAnimationFrame). */
+const nextFrame = () =>
+  new Promise<void>((resolve) => {
+    const timer = setTimeout(resolve, 50);
+    if (typeof requestAnimationFrame !== "function") return;
+    requestAnimationFrame(() => {
+      clearTimeout(timer);
+      resolve();
+    });
+  });
+
+/**
+ * Holds a screenshot of the canvas or the Viewer back until no hologram covers them, so Claude's
+ * get_screenshot right after import_design shows the design rather than the veil, and the person's
+ * reveal plays out. The patch graph never waits.
+ */
+async function hologramSettled(store: StoreApi<HologramState>, target: CaptureTarget, doc: Document | undefined): Promise<void> {
+  if (target === "graph.bounds") return;
+  const busy = () => {
+    const s = store.getState();
+    return s.request !== null || s.show !== null || !!doc?.querySelector(".sb-holo, .sb-vw-holo");
+  };
+  if (!busy()) return;
+  const deadline = performance.now() + HOLOGRAM_CAPTURE_WAIT_MS;
+  while (busy() && performance.now() < deadline) await nextFrame();
+  // Let the design paint without the veil before the capture.
+  await nextFrame();
+}
+
 function startWatching(session: EditorSession): () => void {
   const store = hologramStore(session);
+  const removeSettler = session.bounds?.addSettler?.((target) => hologramSettled(store, target, globalThis.document));
   const unsubscribeDocument = session.document.getState().subscribeRevision((state, previous) => {
     const change = state.lastChange;
     if (!change || change === previous.lastChange) return;
-    const show = store.getState().show;
-    if (show) {
-      // Another document, or the import undone: nothing left to build. Any other undo ends it early.
-      const gone = !findLayer(state.doc.components[show.componentId]?.layers ?? [], show.screenId);
-      if (change.kind === "replace" || change.kind === "reload" || gone) store.getState().stop(show.nonce);
-      else if (change.kind === "undo") store.getState().end(show.nonce);
+    // This runs inside the change (Claude's import_design waits on it): a hologram that fails only
+    // goes without its show.
+    try {
+      const show = store.getState().show;
+      if (show) {
+        // Another document, or the import undone: nothing left to build. Any other undo ends it early.
+        const gone = !findLayer(state.doc.components[show.componentId]?.layers ?? [], show.screenId);
+        if (change.kind === "replace" || change.kind === "reload" || gone) store.getState().stop(show.nonce);
+        else if (change.kind === "undo") store.getState().end(show.nonce);
+      }
+      const target = agentImportTarget(change, state.doc, previous.doc);
+      if (target) store.getState().build(target);
+    } catch {
+      // The design landed; only its build animation is lost.
     }
-    const target = agentImportTarget(change, state.doc, previous.doc);
-    if (target) store.getState().build(target);
   });
   let removeListeners: (() => void) | null = null;
   let listeningTo: number | null = null;
@@ -261,6 +301,7 @@ function startWatching(session: EditorSession): () => void {
     unsubscribeDocument();
     unsubscribeStore();
     removeListeners?.();
+    removeSettler?.();
   };
 }
 

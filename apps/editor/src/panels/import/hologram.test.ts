@@ -231,6 +231,28 @@ describe("hologram requests", () => {
     expect(store.getState().show).toBeNull();
   });
 
+  it("holds screenshots of the canvas and the Viewer until a show is over, and never the patch graph's", async () => {
+    const s = setup();
+    const store = hologramStore(s);
+    const stop = watchHolograms(s);
+    s.bounds.register("canvas.bounds", () => ({ x: 0, y: 0, width: 10, height: 10 }));
+    store.getState().build({ componentId: "main", screenId: "a" });
+    const nonce = store.getState().request!.nonce;
+    store.getState().play({ componentId: "main", screenId: "a", nonce, start: 0, plan: PLAN, lead: "canvas" });
+    const settled: string[] = [];
+    void s.bounds.settle("viewer.bounds").then(() => settled.push("viewer"));
+    void s.bounds.measure("canvas.bounds").then(() => settled.push("canvas"));
+    await s.bounds.settle("graph.bounds");
+    await new Promise((resolve) => setTimeout(resolve, 120));
+    expect(settled).toEqual([]);
+    store.getState().stop(nonce);
+    await vi.waitFor(() => expect(settled.sort()).toEqual(["canvas", "viewer"]));
+    stop();
+    // Without a watcher, nothing holds a capture back.
+    store.getState().build({ componentId: "main", screenId: "b" });
+    await s.bounds.settle("viewer.bounds");
+  });
+
   it("knows which components the mounted canvases draw", () => {
     const store = createHologramStore();
     const one = store.getState().addCanvas("main");
