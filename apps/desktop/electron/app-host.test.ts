@@ -11,7 +11,7 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { findLayer, getDiagnostics, type Op } from "@sonobe/core";
 import type { SceneFrame, SceneNode } from "@sonobe/engine";
-import { createHttpHandler, createSimulationManager, isHostError, TOOL_NAMES, type NodeMcpHandler } from "@sonobe/mcp";
+import { createHttpHandler, createSimulationManager, HostError, isHostError, TOOL_NAMES, type NodeMcpHandler } from "@sonobe/mcp";
 import { createPatchRegistry } from "@sonobe/patches";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -20,7 +20,7 @@ vi.mock("@sonobe/core", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@sonobe/core")>();
   return { ...actual, getDiagnostics: vi.fn(actual.getDiagnostics) };
 });
-import { createBrowserHost, createMemoryProjectStorage } from "../../editor/src/host/browserHost.ts";
+import { createBrowserHost, createMemoryProjectStorage, type ProjectStorage } from "../../editor/src/host/browserHost.ts";
 import { registerRpcHandlers } from "../../editor/src/host/rpcHandlers.ts";
 import { createManualScheduler } from "../../editor/src/runtime/scheduler.ts";
 import { createDemoDocument } from "../../editor/src/state/demoDocument.ts";
@@ -40,7 +40,8 @@ interface TestWindow {
   focused: number;
   captures: { rect: unknown; size: { width: number; height: number } }[];
   captureResult: "ok" | "empty";
-  names: { save: string | null };
+  /** The browser host's Save panel: the name it answers, and how often it was asked. */
+  names: { save: string | null; asked: number };
   dispose(): void;
 }
 
@@ -50,10 +51,23 @@ afterEach(async () => {
 });
 
 /** An editor window: a real session whose RPC handlers answer through a cloning bridge. */
-function editorWindow(id: number, options: { handlers?: boolean } = {}): TestWindow {
-  const names = { save: "Agent Proto" as string | null };
-  const host = createBrowserHost({ storage: createMemoryProjectStorage(), channelName: null, recentKey: null, fileSystemAccess: false, dialogs: { promptName: async () => names.save, pickProject: async () => null } });
-  const session = createEditorSession({ host, registry, document: createDemoDocument(registry), autoplay: false, scheduler: createManualScheduler(), textMeasurer: "approximate" });
+function editorWindow(id: number, options: { handlers?: boolean; storage?: ProjectStorage; drafts?: ProjectStorage } = {}): TestWindow {
+  const names = { save: "Agent Proto" as string | null, asked: 0 };
+  const host = createBrowserHost({
+    storage: options.storage ?? createMemoryProjectStorage(),
+    ...(options.drafts ? { drafts: options.drafts, locks: null } : {}),
+    channelName: null,
+    recentKey: null,
+    fileSystemAccess: false,
+    dialogs: {
+      promptName: async () => {
+        names.asked++;
+        return names.save;
+      },
+      pickProject: async () => null,
+    },
+  });
+  const session = createEditorSession({ host, registry, document: createDemoDocument(registry), autoplay: false, scheduler: createManualScheduler(), textMeasurer: "approximate", drafts: { debounceMs: 0, maxWaitMs: 0 } });
   let client: ReturnType<typeof createRpcClient>;
   const server = createRpcServer({ send: (response) => queueMicrotask(() => client.handleResponse(structuredClone(response))) });
   client = createRpcClient({ send: (request) => queueMicrotask(() => void server.dispatch(structuredClone(request))), defaultTimeoutMs: 5000 });
@@ -130,7 +144,7 @@ describe("app host documents", () => {
     const w = editorWindow(1);
     const host = appHost([w]);
     expect(host.kind).toBe("app");
-    expect(host.capabilities).toEqual({ screenshots: true, selection: true, presence: true, autosave: false });
+    expect(host.capabilities).toEqual({ screenshots: true, selection: true, presence: true, autosave: false, sfSymbols: false });
     expect(await host.listDocuments()).toEqual([{ docId: "photo_zoom", name: "Photo Zoom", revision: 0, dirty: false, active: true }]);
     const snap = await host.getDocument();
     expect(snap).toMatchObject({ docId: "photo_zoom", revision: 0, dirty: false, doc: { project: { name: "Photo Zoom" } } });
@@ -345,27 +359,57 @@ describe("app host writes", () => {
     expect(both.undone[0]).toMatchObject({ author: { kind: "human" }, opCount: 1, revision: expect.any(Number), timestamp: expect.any(Number) });
   });
 
+  /** The browser host's paths stand in for folders on disk: "~/Documents/Deck.sonobe" saves as "browser:Deck". */
+  const browserTargets = (targets: string[] = []): Partial<AppHostOptions> => ({
+    defaultProjectDir: async (name) => `~/Documents/${name}.sonobe`,
+    newProjectTarget: async (input) => {
+      targets.push(input);
+      if (input.includes("inside.sonobe/")) throw new HostError("inside_project", `${input} would be inside the project inside.sonobe.`, { hint: "Save it next to that project instead." });
+      return `browser:${path.basename(input, ".sonobe")}`;
+    },
+  });
+
   it("passes save_document's force through and explains pending outside changes", async () => {
     const w = editorWindow(1);
-    const host = appHost([w]);
+    const host = appHost([w], browserTargets());
     await host.saveDocument();
     const store = w.session.document;
     store.getState().apply([{ op: "setInput", target: "photo_scale.end", value: 1.4 }], { label: "bigger zoom" });
     store.setState({ externalChange: { path: store.getState().projectPath!, paths: ["components/main.json"], document: store.getState().doc, detectedAt: 5 } });
     expect(await rejection(host.saveDocument())).toMatchObject({ code: "disk_changed", hint: expect.stringContaining("force: true") });
     expect(store.getState().dirty).toBe(true);
-    expect(await host.saveDocument(undefined, { force: true })).toMatchObject({ docId: "photo_zoom", path: "browser:Agent Proto" });
+    expect(await host.saveDocument(undefined, { force: true })).toMatchObject({ docId: "photo_zoom", path: "browser:Photo Zoom", written: ["components/main.json"] });
     expect(store.getState()).toMatchObject({ dirty: false, externalChange: null });
   });
 
-  it("saves through the editor and explains a cancelled save", async () => {
+  it("saves without ever asking the person where: the name picks a folder, and Untitled needs a path", async () => {
     const w = editorWindow(1);
-    const host = appHost([w]);
-    w.names.save = null;
-    expect(await rejection(host.saveDocument())).toMatchObject({ code: "save_cancelled" });
-    w.names.save = "Agent Proto";
-    expect(await host.saveDocument()).toEqual({ docId: "photo_zoom", path: "browser:Agent Proto", revision: 0, written: [], removed: [] });
-    expect((await host.listDocuments())[0]).toMatchObject({ path: "browser:Agent Proto", dirty: false });
+    const targets: string[] = [];
+    const host = appHost([w], browserTargets(targets));
+    const store = w.session.document;
+
+    // A named prototype that was never saved goes to ~/Documents/<Name>.sonobe, checked like any agent path.
+    const saved = await host.saveDocument();
+    expect(saved).toMatchObject({ docId: "photo_zoom", path: "browser:Photo Zoom", revision: 0, removed: [] });
+    expect(saved.written).toEqual(expect.arrayContaining(["project.json", "components/main.json"]));
+    expect(targets).toEqual(["~/Documents/Photo Zoom.sonobe"]);
+    expect((await host.listDocuments())[0]).toMatchObject({ path: "browser:Photo Zoom", dirty: false });
+
+    // "Untitled" says nothing about where it belongs, so no folder is made up for it.
+    store.getState().newDocument();
+    store.getState().apply([{ op: "addLayer", layer: { type: "rectangle", name: "Card" } }], { label: "Add Card" });
+    expect(await rejection(host.saveDocument())).toMatchObject({ code: "path_needed", hint: expect.stringContaining("save_document({ path") });
+    expect(store.getState()).toMatchObject({ projectPath: null, dirty: true });
+
+    // A path the rules refuse comes back as the rule's error; a good one saves there and names the prototype.
+    expect(await rejection(host.saveDocument(undefined, { path: "~/Documents/inside.sonobe/Deck.sonobe" }))).toMatchObject({ code: "inside_project" });
+    expect(await host.saveDocument(undefined, { path: "~/Documents/Noddit Deck.sonobe" })).toMatchObject({ path: "browser:Noddit Deck" });
+    expect(store.getState()).toMatchObject({ projectPath: "browser:Noddit Deck", dirty: false });
+    expect(store.getState().doc.project.name).toBe("Noddit Deck");
+
+    // Save As a saved project goes to the new folder too.
+    expect(await host.saveDocument(undefined, { path: "~/Documents/Copy.sonobe" })).toMatchObject({ path: "browser:Copy" });
+    expect(w.names.asked).toBe(0);
   });
 
   it("opens and creates documents", async () => {
@@ -408,6 +452,57 @@ describe("app host presence, selection and screenshots", () => {
     await host.setWorking(null, { author: CLAUDE });
     expect(w.session.presence.getState().working).toEqual([]);
     expect(await host.presence()).toEqual([]);
+  });
+
+  it("keeps one working badge per session, so one session's finish doesn't clear another's", async () => {
+    const w = editorWindow(1);
+    const host = appHost([w]);
+    const noddit = { id: "11111111-aaaa-4bbb-8ccc-000000000001", label: "Claude Code", folder: "/Users/me/noddit" };
+    const sonobe = { id: "22222222-aaaa-4bbb-8ccc-000000000002", label: "Claude Code", folder: "/Users/me/sonobe" };
+    await host.setWorking({ ids: ["card"], intent: "Tuning the deck" }, { author: CLAUDE, client: noddit });
+    await host.setWorking({ ids: [], intent: "Adding a tab bar" }, { author: CLAUDE, client: sonobe });
+    expect(w.session.presence.getState().working).toMatchObject([
+      { intent: "Tuning the deck", client: noddit },
+      { intent: "Adding a tab bar", client: sonobe },
+    ]);
+    await host.setWorking(null, { author: CLAUDE, client: noddit });
+    expect(w.session.presence.getState().working).toMatchObject([{ intent: "Adding a tab bar" }]);
+    // A finish the host has no badge for (after an editor reload) still only clears that session's.
+    await host.setWorking(null, { author: CLAUDE, client: noddit });
+    expect(w.session.presence.getState().working).toHaveLength(1);
+    await host.setWorking(null, { author: CLAUDE, client: sonobe });
+    expect(await host.presence()).toEqual([]);
+  });
+
+  it("restarts the live prototype (restart_viewer) and says what the players show", async () => {
+    const w = editorWindow(1);
+    const host = appHost([w]);
+    const restarts = vi.fn();
+    w.session.runtime.subscribeRestart(restarts);
+    for (let i = 0; i < 5; i++) w.session.runtime.stepFrame();
+    expect(w.session.runtime.runtime.frame).toBe(4);
+    expect(await host.restartViewer!({})).toEqual({ docId: "photo_zoom", playing: false });
+    expect(restarts).toHaveBeenCalledTimes(1);
+    w.session.runtime.stepFrame();
+    expect(w.session.runtime.runtime.frame).toBe(0);
+    // The desktop restarts phones only for the window whose document they show, and holds scripts the editor holds.
+    expect(host.activeTargetId()).toBe(1);
+    expect(host.scriptsPaused("photo_zoom")).toBe(false);
+    expect(await rejection(host.restartViewer!({ docId: "missing_doc" }))).toMatchObject({ code: "unknown_document" });
+
+    const old = editorWindow(2);
+    old.target.hasMethod = (method) => method !== "viewer.restart" && old.server.methods().includes(method);
+    expect(await rejection(appHost([old]).restartViewer!({}))).toMatchObject({ code: "viewer_restart_unavailable", hint: expect.stringContaining("Restart Prototype") });
+  });
+
+  it("adds the restart offer to the Live viewer diagnostics", async () => {
+    const w = editorWindow(1);
+    const host = appHost([w]);
+    w.session.runtime.stepFrame();
+    w.session.runtime.state.setState({ staleState: { layerId: "card", copies: 1 } });
+    expect((await host.diagnostics()).runtime?.diagnostics).toEqual([
+      expect.objectContaining({ code: "stale_state", severity: "info", component: "main", itemIds: ["card"], message: expect.stringContaining('kept state from before the last edit: it draws no copies of Layer "Event Card"'), hint: expect.stringContaining("restart_viewer") }),
+    ]);
   });
 
   it("crops screenshots to the visible viewer stage", async () => {
@@ -675,6 +770,10 @@ describe("desktop MCP endpoint", () => {
     const values = await client.callTool({ name: "sim_get_values", arguments: { simId, targets: ["next_pressed.on"] } });
     expect(values.structuredContent).toMatchObject({ values: { "next_pressed.on": true } });
 
+    const restarted = await client.callTool({ name: "restart_viewer", arguments: {} });
+    expect(restarted.isError).toBeFalsy();
+    expect(restarted.structuredContent).toMatchObject({ docId: "photo_zoom", playing: false, text: expect.stringContaining("Restarted the live prototype (paused on its first frame") });
+
     const noViewer = await client.callTool({ name: "get_screenshot", arguments: {} });
     expect(noViewer.isError).toBe(true);
     expect(JSON.stringify(noViewer.content)).toContain("no_viewer");
@@ -685,5 +784,54 @@ describe("desktop MCP endpoint", () => {
     w.server.handle("viewer.bounds", () => ({ x: 0, y: 0, width: 402, height: 874, stage: { x: 0, y: 0, width: 402, height: 874 }, scale: 1, devicePixelRatio: 1, prototypeSize: [402, 874] }));
     const shot = await client.callTool({ name: "get_screenshot", arguments: {} });
     expect(shot.content).toMatchObject([{ type: "image", mimeType: "image/png" }, { type: "text" }]);
+  });
+
+  it("lists and recovers the draft a window left behind, and creates projects it doesn't open", async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), "sonobe-desktop-mcp-"));
+    cleanups.push(() => rm(dir, { recursive: true, force: true }));
+    const storage = createMemoryProjectStorage();
+    const drafts = createMemoryProjectStorage();
+    // A window works on an Untitled prototype and goes away without saving (a crash, a killed process).
+    const lost = editorWindow(1, { storage, drafts });
+    lost.session.document.getState().newDocument();
+    lost.session.document.getState().apply([{ op: "addLayer", layer: { id: "hero", type: "rectangle", name: "An hour of work" } }], { label: "Add Hero" });
+    lost.session.document.getState().apply([{ op: "removeLayer", id: "hero" }], { label: "Remove Hero" });
+    lost.session.document.getState().apply([{ op: "addLayer", layer: { type: "rectangle", name: "An hour of work" } }], { label: "Add Hero again" });
+    await lost.session.drafts!.flush();
+    const draftId = lost.session.drafts!.current()!.id;
+
+    const w = editorWindow(2, { storage, drafts });
+    const host = appHost([w], { drafts: { list: () => w.session.host!.drafts!.list() } });
+    server = await startMcpServer({ version: "0.1.0-test", configDir: dir, port: 0 });
+    handler = createHttpHandler(host, { version: "0.1.0-test" });
+    server.setHandler(handler);
+    const client = new Client({ name: "claude-code", version: "1.0.0" });
+    await client.connect(new StreamableHTTPClientTransport(new URL(server.url), { requestInit: { headers: { Authorization: `Bearer ${server.token}` } } }));
+    cleanups.push(() => client.close());
+    const text = (r: unknown) => (((r as { content?: unknown }).content ?? []) as { type: string; text?: string }[]).map((c) => c.text ?? "").join("\n");
+
+    const listed = await client.callTool({ name: "list_documents", arguments: {} });
+    expect(text(listed)).toContain(`draft:${draftId} "Untitled" · never saved · just now · 1 layer`);
+    expect(listed.structuredContent).toMatchObject({ drafts: [{ id: draftId, name: "Untitled", counts: { layers: 1 } }] });
+
+    const opened = await client.callTool({ name: "open_document", arguments: { ref: `draft:${draftId}` } });
+    expect(opened.isError).toBeFalsy();
+    expect(text(opened)).toContain("Recovered the draft");
+    expect(text(opened)).toContain("kept as a draft");
+    const s = w.session.document.getState();
+    expect(s).toMatchObject({ dirty: true, projectPath: null });
+    expect(s.doc.components.main!.layers.map((l) => l.name)).toEqual(["An hour of work"]);
+    // The draft continues its session: "hero" was removed there, so it stays retired.
+    expect(s.retiredIds()).toMatchObject({ main: ["hero"] });
+    expect(s.isRetiredId("main", "hero")).toBe(true);
+    // It's this window's draft now, so nothing is left to recover.
+    expect(await host.listDrafts!()).toEqual([]);
+    // A draft that isn't there fails before anyone is asked about unsaved changes.
+    await expect(host.openDocument("draft:nope-nope-nope")).rejects.toMatchObject({ code: "unknown_draft", hint: expect.stringContaining("list_documents") });
+
+    const created = await client.callTool({ name: "create_document", arguments: { name: "Later", open: false } });
+    expect(created.isError).toBeFalsy();
+    expect(text(created)).toContain(`Created /Users/test/Documents/Later.sonobe. It isn't open; call open_document({ ref: "/Users/test/Documents/Later.sonobe" })`);
+    expect(created.structuredContent).toMatchObject({ docId: "later", open: false });
   });
 });

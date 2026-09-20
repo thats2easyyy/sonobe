@@ -6,6 +6,7 @@ Level 3 · Next: [08 Components and variables](08-components-and-variables.md)
 
 - Think of a loop as a list traveling along a single cable.
 - Turn one layer into a list or a grid.
+- Tell a layer how many copies to make, and repeat a whole card with everything inside it.
 - Give every item its own state, like each card remembering whether it's expanded.
 - Predict what happens when lists of different lengths meet, or when one of them is empty.
 - Pick one item out of a loop, like the page a set of dots should highlight.
@@ -35,15 +36,33 @@ Loops count from 0. A Loop with Count 6 gives you indexes 0 to 5, not 1 to 6.
 
 ## Replicated layers
 
-When a loop drives one of a layer's properties, that layer becomes one copy per item. Feed six Y positions into Row's Position Y and you get six rows. The number of copies is the length of the longest loop connected to the layer.
+When a loop drives one of a layer's properties, that layer becomes one copy per item. Feed six Y positions into Row's Position Y and you get six rows.
 
 Every copy shares the same settings except the properties driven by loops. So one copy can differ from the next in position, text, image or color, while everything else stays identical.
 
 Without positions, the copies stack on top of each other and look like one layer. The easy fix is a layout group. Put the replicated layer inside a group set to Column layout and you have a list, with no math at all. Use Grid layout for a grid.
 
+### How many copies
+
+Every layer has a **Repeat** property, in Basics right under Enabled. It decides how many copies the layer makes:
+
+| Repeat | Copies |
+|---|---|
+| Auto (empty, the default) | One per item of the longest loop connected to the layer's own properties |
+| A number you type, like 4 | Exactly that many. 0 makes none |
+| Connected to a loop | One per item of that loop, whatever the items are |
+
+With Repeat set, it alone decides. The layer's other looped properties are read one item per copy and wrap around when they're shorter, and an empty one gives every copy the property's default.
+
+Copies of a layer carry everything inside it. Each copy of a Card group gets its own Title and Photo, and each Title reads the item for its card. That's how you repeat a whole cell, like a photo, a title and a button together: loop the group's Repeat, not the text inside it. If only the children are looped, they repeat inside a single card instead, stacked on top of each other, and a drag on the card moves all of them together.
+
+A Repeat inside a layer that already makes copies does nothing: each copy of the outer layer gets one copy of the inner one. For a list inside every card, make the inner list a component. Components are also the way to reuse a cell across screens. Guide 08 covers them.
+
+### Which copy is on top
+
 Stacked copies draw in index order, so the last copy is on top, as in Origami. For a card deck where copy 0 is the top card, multiply the index by −1 and feed it into the card's Z Position. The top card is also the one that gets touches.
 
-To repeat a whole cell, like a photo, a title and a button together, make the cell a component and feed the loop into its inputs. Each item gets its own instance. Guide 08 covers components.
+The Layers panel shows ×4 next to a layer that makes four copies, with a repeat icon when its Repeat decides the count, and a small z next to a layer with a Z Position.
 
 ## Per-index state
 
@@ -76,7 +95,7 @@ When loops of different lengths meet at one patch, Sonobe follows one rule:
 
 Wrapping is handy on purpose. A two-color loop `[white, light gray]` on six rows gives you zebra stripes.
 
-It's also a quiet source of bugs. If you add a seventh notification but forget to add a seventh name, the first name shows up again at the bottom. Diagnostics warns when loop lengths don't match, so check the warning before you decide the wrap was intended.
+It's also a quiet source of bugs. If you add a seventh notification but forget to add a seventh name, the first name shows up again at the bottom. Diagnostics warns when loops of different lengths meet, at a patch or at a layer's copies, so check the warning before you decide the wrap was intended. When the longer loop is a whole multiple of the shorter one, like two stripe colors on six rows, it's only a note. Lengths that only show up while the prototype runs, like a filtered list, get the same warning marked Runtime.
 
 Loops are capped at 10,000 items. Past that, Sonobe stops and shows a diagnostic instead of freezing your prototype.
 
@@ -153,6 +172,7 @@ Page dots work the same way. Five dots in a Row group, Equals compares each inde
 
 - Off by one. A Count of 5 gives indexes 0 to 4, so the last item is index 4.
 - Forgetting layout or positions, so every copy stacks in one spot and it looks like the loop didn't work.
+- Looping the text inside a card instead of the card. The texts stack inside one card, and dragging moves them all. Connect the loop to the card's Repeat.
 - Accidental wrapping from a shorter, stale loop. Read the length-mismatch warning.
 - Loop Select with an index past the end, which empties everything downstream, often a whole deck. Set Out of Range to Clamp or Use Fallback.
 - Expecting one Switch downstream of a looped Interaction to be shared by all items. It keeps one state per index. If you want one shared value, reduce the loop to a single value first, for example with Loop Option Switch.

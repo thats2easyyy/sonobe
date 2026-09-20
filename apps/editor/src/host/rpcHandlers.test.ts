@@ -42,7 +42,7 @@ afterEach(() => {
   session = null;
 });
 
-function setup(saveName: string | null = "Agent Proto") {
+function setup(saveName: string | null = "Agent Proto", options: { drafts?: ReturnType<typeof createMemoryProjectStorage> } = {}) {
   const doc = buildDoc(
     {
       layers: [{ id: "card", type: "rectangle", props: { position: [0, 0], size: [390, 400] } }],
@@ -54,9 +54,21 @@ function setup(saveName: string | null = "Agent Proto") {
     },
     registry,
   );
-  const names = { save: saveName };
-  const host = createBrowserHost({ storage: createMemoryProjectStorage(), channelName: null, recentKey: null, fileSystemAccess: false, dialogs: { promptName: async () => names.save } });
-  session = createEditorSession({ host, registry, document: doc, autoplay: false, scheduler: createManualScheduler(), textMeasurer: "approximate" });
+  const names = { save: saveName, asked: 0 };
+  const host = createBrowserHost({
+    storage: createMemoryProjectStorage(),
+    ...(options.drafts ? { drafts: options.drafts, locks: null } : {}),
+    channelName: null,
+    recentKey: null,
+    fileSystemAccess: false,
+    dialogs: {
+      promptName: async () => {
+        names.asked++;
+        return names.save;
+      },
+    },
+  });
+  session = createEditorSession({ host, registry, document: doc, autoplay: false, scheduler: createManualScheduler(), textMeasurer: "approximate", drafts: { debounceMs: 0, maxWaitMs: 0 } });
   const { rpc, handlers, call } = fakeRpc();
   const off = registerRpcHandlers(session, { rpc });
   return { session, handlers, call, off, names };
@@ -154,6 +166,41 @@ describe("rpc handlers", () => {
     const opened = await call("document.open", { path: "browser:Agent Proto" });
     expect(opened).toMatchObject({ ok: true, name: "Test", projectPath: "browser:Agent Proto", dirty: false, canUndo: false });
     expect(await call("document.open", { path: "browser:Missing" })).toMatchObject({ failed: true, code: "open_failed" });
+  });
+
+  it("saves to a folder the host chose without the Save panel, and never opens it for noDialog", async () => {
+    const { call, session: s, names } = setup();
+    expect(await call("document.save", { noDialog: true })).toMatchObject({ failed: true, code: "path_needed", data: { hint: expect.stringContaining("path") } });
+    const saved = await call<{ ok: boolean; path: string; written: string[] }>("document.save", { path: "browser:Deck", noDialog: true });
+    expect(saved).toMatchObject({ ok: true, path: "browser:Deck", deleted: [] });
+    expect(saved.written).toEqual(expect.arrayContaining(["project.json", "components/main.json"]));
+    expect(s.document.getState()).toMatchObject({ projectPath: "browser:Deck", dirty: false });
+    // Save As a saved project with a path goes to the new folder too.
+    expect(await call("document.save", { path: "browser:Deck Copy", noDialog: true })).toMatchObject({ ok: true, path: "browser:Deck Copy" });
+    expect(names.asked).toBe(0);
+  });
+});
+
+describe("rpc handlers: drafts", () => {
+  it("recovers a draft another window left, flushes the current one, and reports it in document.info", async () => {
+    const drafts = createMemoryProjectStorage();
+    // A first window edits and goes away without saving.
+    const first = setup("Agent Proto", { drafts });
+    first.session.document.getState().apply([{ op: "addLayer", layer: { id: "hero", type: "oval", name: "Hero" } }], { label: "Add Hero" });
+    expect(await first.call("drafts.flush")).toMatchObject({ flushed: true, draft: { id: expect.any(String) } });
+    const id = (await first.call<{ draft: { id: string } }>("document.info")).draft.id;
+    first.session.dispose();
+    session = null;
+
+    const second = setup("Agent Proto", { drafts });
+    expect(await second.call("document.info")).toMatchObject({ draft: null });
+    expect(await second.call("document.recoverDraft", {})).toMatchObject({ failed: true, code: "invalid_params" });
+    expect(await second.call("document.recoverDraft", { id: "nope-nope-nope" })).toMatchObject({ failed: true, code: "unknown_draft", data: { hint: expect.stringContaining("list_documents") } });
+    const recovered = await second.call("document.recoverDraft", { id });
+    expect(recovered).toMatchObject({ ok: true, dirty: true, projectPath: null, draft: { id }, components: [{ id: "main", layerCount: 2 }] });
+    expect(findLayer(second.session.document.getState().doc.components.main!.layers, "hero")).toBeDefined();
+    // Asking again for the draft that's open is fine.
+    expect(await second.call("document.recoverDraft", { id })).toMatchObject({ ok: true });
   });
 });
 

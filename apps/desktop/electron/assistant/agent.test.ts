@@ -346,6 +346,30 @@ describe("assistant agent: stop and limits", () => {
     });
   });
 
+  it("stopping during a long tool call cancels it, after showing its progress", async () => {
+    let cancelled = false;
+    const bridge = fakeBridge((_name, _args, _index, options) => {
+      options.onProgress?.("Reading the page's layers");
+      return new Promise((_resolve, reject) =>
+        options.signal?.addEventListener("abort", () => {
+          cancelled = true;
+          reject(new Error("AbortError: This operation was aborted"));
+        }),
+      );
+    });
+    const h = harness([{ content: [{ type: "tool_use", id: "i", name: "add_layers", input: { layers: [] } }] }], { bridge });
+    const running = h.agent.run("w1", { text: "import my screen" }, (e) => {
+      h.emit(e);
+      if (e.type === "tool_progress") queueMicrotask(() => h.agent.stop("w1"));
+    });
+    expect((await running).outcome).toBe("stopped");
+    expect(cancelled).toBe(true);
+    expect(ofType(h.events, "tool_progress")).toEqual([{ type: "tool_progress", runId: expect.any(String), toolUseId: "i", detail: "Reading the page's layers" }]);
+    expect(ofType(h.events, "tool_finished")[0]).toMatchObject({ toolUseId: "i", status: "error", detail: "Stopped", changedDocument: false });
+    const last = h.agent.history("w1").at(-1)!;
+    expect(JSON.stringify(last)).toContain("pressed Stop while add_layers was running");
+  });
+
   it("pauses after the maximum number of steps", async () => {
     const loop = (i: number): FakeTurn => ({ content: [{ type: "tool_use", id: `t${i}`, name: "get_outline", input: {} }] });
     const h = harness([loop(1), loop(2), loop(3), loop(4)], { limits: { maxTurns: 3 } });

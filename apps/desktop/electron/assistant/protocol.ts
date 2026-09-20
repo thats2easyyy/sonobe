@@ -148,6 +148,8 @@ export type AssistantEvent =
   /** Summarized thinking, for a quiet "thinking" indicator. */
   | { type: "thinking_delta"; runId: string; turn: number; delta: string }
   | { type: "tool_started"; runId: string; toolUseId: string; name: string; title: string; detail: string }
+  /** Where a running tool is ("Downloading images: 7 of 28"), from its progress notifications. */
+  | { type: "tool_progress"; runId: string; toolUseId: string; detail: string }
   | { type: "tool_finished"; runId: string; toolUseId: string; name: string; status: AssistantToolStatus; detail: string; changedDocument: boolean }
   | { type: "confirm_required"; runId: string; confirmationId: string; toolUseId: string; title: string; message: string; count: number }
   | { type: "confirm_resolved"; runId: string; confirmationId: string; approved: boolean }

@@ -2,11 +2,11 @@
 import { COMPONENT_INSTANCE_LAYER_TYPE } from "@sonobe/core";
 import type { InputEvent } from "@sonobe/engine";
 import { buildDoc, createMockRegistry, defineMock, port } from "@sonobe/engine/testing";
+import type { MuteState } from "@sonobe/renderer";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createStore } from "zustand/vanilla";
 import { createConsoleStore } from "../state/console.ts";
 import { createDocumentStore } from "../state/document.ts";
-import type { MuteState } from "./platform.ts";
 import { createRuntimeHost, issuesToDiagnostics, type PulseFire, type RuntimeHost } from "./runtimeHost.ts";
 import { createManualScheduler } from "./scheduler.ts";
 import { createMemoryTrustPersistence, createScriptTrustStore } from "./scriptTrust.ts";

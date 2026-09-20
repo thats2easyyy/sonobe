@@ -33,6 +33,7 @@ Sonobe is a separate, open-source project with no affiliation to Meta. It doesn'
 | Layer component, patch component | Layer component, patch component | ⌃⌘G |
 | Publish Port, purple and blue port patches | Published inputs and outputs | Published inputs appear in the inspector on each instance |
 | Loop Behavior | Loop the component, or pass the loop in | Chosen per input |
+| Connect a loop to a group's property to repeat it | The same, or the layer's Repeat property | Repeat takes a number or a loop, and it alone decides how many copies. Guide 07 |
 | Variable Broadcaster and Receiver (formerly Wireless) | Variable Broadcaster and Receiver | |
 | Comment | Comment frame | |
 | Tidy Up | Tidy Up | ⌃T |
@@ -103,7 +104,7 @@ When several pulses land on one frame, Sonobe documents the order. For Switch, T
 
 ### Loop length mismatches
 
-When loops of different lengths meet, the output takes the longest length and shorter loops wrap around. Diagnostics warns you when lengths differ.
+When loops of different lengths meet, the output takes the longest length and shorter loops wrap around. Diagnostics warns you when lengths differ, and only notes it when the longer one is a whole multiple of the shorter, as with stripes.
 
 ### File format
 

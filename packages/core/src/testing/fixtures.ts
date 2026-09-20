@@ -196,6 +196,46 @@ export const EXTRA_PATCH_SPECS: PatchSpec[] = [
 
 export const extendedRegistry = createRegistry([...MOCK_PATCH_SPECS, ...EXTRA_PATCH_SPECS]);
 
+/** Loop sources and a gesture, for copy counts and loop lengths (loopShapes, Repeat diagnostics). */
+export const LOOP_PATCH_SPECS: PatchSpec[] = [
+  {
+    type: "loop",
+    name: "Loop",
+    category: "loops",
+    summary: "Makes the indices 0 to Count − 1.",
+    inputs: [port("count", "number", { default: 3 })],
+    outputs: [port("index", "index", { wholeLoop: true })],
+  },
+  {
+    type: "loopBuilder",
+    name: "Loop Builder",
+    category: "loops",
+    summary: "Makes a loop of the values you type.",
+    variants: ["number", "text", "color"],
+    inputs: [],
+    outputs: [port("loop", "variant", { wholeLoop: true }), port("index", "index", { wholeLoop: true })],
+    variadic: { key: "item", name: "Item", type: "variant", default: 0, min: 1, max: 32, defaultCount: 3, startIndex: 0, description: "One item." },
+  },
+  {
+    type: "loopFilter",
+    name: "Loop Filter",
+    category: "loops",
+    summary: "Keeps the items whose Include is on.",
+    inputs: [port("loop", "number", { wholeLoop: true, default: { loop: [] } }), port("include", "boolean", { wholeLoop: true, default: true })],
+    outputs: [port("output", "number", { wholeLoop: true })],
+  },
+  {
+    type: "drag",
+    name: "Drag",
+    category: "interaction",
+    summary: "Follows a finger dragging a layer.",
+    inputs: [port("layer", "layer"), port("startPosition", "point", { default: [0, 0] })],
+    outputs: [port("position", "point"), port("dragging", "boolean")],
+  },
+];
+
+export const loopRegistry = createRegistry([...MOCK_PATCH_SPECS, ...LOOP_PATCH_SPECS]);
+
 export function emptyDoc(): SonobeDocument {
   return createEmptyDocument({ name: "Test", device: "custom" });
 }

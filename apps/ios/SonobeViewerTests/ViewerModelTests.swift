@@ -47,4 +47,14 @@ struct PreviewLinkTests {
         #expect(model.inputError == nil)
         #expect(ViewerModel(defaults: defaults).recent == model.playerURL)
     }
+
+    @MainActor
+    @Test func remembersThatThePlayerTaughtItsMenu() throws {
+        let defaults = try #require(UserDefaults(suiteName: "MenuTipTests"))
+        defaults.removePersistentDomain(forName: "MenuTipTests")
+        let model = ViewerModel(defaults: defaults)
+        #expect(model.menuTipSeen == false)
+        model.menuTipSeen = true
+        #expect(ViewerModel(defaults: defaults).menuTipSeen == true)
+    }
 }

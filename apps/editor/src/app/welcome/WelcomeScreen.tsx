@@ -17,6 +17,7 @@ import { toast } from "../../ui/Toast.tsx";
 import { Toggle } from "../../ui/Toggle.tsx";
 import { learnNav } from "../learnStore.ts";
 import { settingsStore, useSettings } from "../settings.ts";
+import { RecoveredDrafts } from "./RecoveredDrafts.tsx";
 import { getTemplates, thumbnailFor } from "./templates.ts";
 import type { WelcomeReason } from "./welcomeStore.ts";
 import "./welcome.css";
@@ -168,6 +169,8 @@ function WelcomeContent({ titleId, reason, onClose, createRef }: ContentProps) {
               Create
             </Button>
           </section>
+
+          <RecoveredDrafts titleId={titleId} onOpened={onClose} />
 
           <section className="sb-welcome__section" aria-labelledby={`${titleId}-recent`}>
             <div className="sb-welcome__section-head">

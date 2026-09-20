@@ -42,6 +42,44 @@ final class ViewerUITests: XCTestCase {
         XCTAssertTrue(web.staticTexts["3"].waitForExistence(timeout: 5), "three taps didn't reach the prototype")
     }
 
+    /// A three-finger tap opens the web player's menu without reaching the prototype (the tap count stays
+    /// put), Restart Prototype starts it over, and Open Another Prototype goes back to the connect screen.
+    /// The script checks the log: one Impact Medium (the single tap; three three-finger taps play none), and
+    /// Notification Success again after Restart.
+    func testThreeFingerTapOpensTheMenu() throws {
+        let app = XCUIApplication()
+        app.launchArguments = ["-SonobePlayerURL", try playerURL(), "-menuTipSeen", "NO"]
+        app.launch()
+
+        let web = app.webViews.firstMatch
+        XCTAssertTrue(web.staticTexts["0"].waitForExistence(timeout: 15), "the prototype didn't draw its tap count")
+        XCTAssertTrue(web.staticTexts["Tap with three fingers for the menu"].waitForExistence(timeout: 5), "the player didn't teach its menu")
+        web.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.7)).tap()
+        XCTAssertTrue(web.staticTexts["1"].waitForExistence(timeout: 5), "a tap didn't reach the prototype")
+
+        // Aimed at the count: XCUITest can't find a hit point for the whole web view.
+        web.staticTexts["1"].tap(withNumberOfTaps: 1, numberOfTouches: 3)
+        let cancel = web.buttons["Cancel"]
+        XCTAssertTrue(cancel.waitForExistence(timeout: 5), "a three-finger tap didn't open the menu")
+        XCTAssertTrue(web.buttons["Restart Prototype"].exists)
+        XCTAssertTrue(web.buttons["Open Another Prototype"].exists)
+        // The open menu is a modal dialog, which hides the page from accessibility: read the count after closing it.
+        cancel.tap()
+        XCTAssertTrue(web.staticTexts["1"].waitForExistence(timeout: 5), "the three-finger tap reached the prototype")
+
+        web.staticTexts["1"].tap(withNumberOfTaps: 1, numberOfTouches: 3)
+        let restart = web.buttons["Restart Prototype"]
+        XCTAssertTrue(restart.waitForExistence(timeout: 5), "the menu didn't open again")
+        restart.tap()
+        XCTAssertTrue(web.staticTexts["0"].waitForExistence(timeout: 5), "Restart Prototype didn't start the prototype over")
+
+        web.staticTexts["0"].tap(withNumberOfTaps: 1, numberOfTouches: 3)
+        let another = web.buttons["Open Another Prototype"]
+        XCTAssertTrue(another.waitForExistence(timeout: 5), "the menu didn't open again")
+        another.tap()
+        XCTAssertTrue(app.navigationBars["Sonobe Viewer"].waitForExistence(timeout: 5), "Open Another Prototype didn't return to the connect screen")
+    }
+
     /// sonobe-viewer://open?url=<preview link>, what a QR code for the app carries, opens the preview.
     func testDeepLinkOpensThePreview() throws {
         let link = try playerURL()

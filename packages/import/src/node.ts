@@ -1,16 +1,19 @@
 /**
- * Captures in Node ("@sonobe/import/node"): render a URL or HTML page in Playwright's Chromium, run the
- * DOM walker, and download images with the page's cookies. Playwright is optional. It's found at
- * runtime where Sonobe runs (a checkout has it), and hosts explain how to install it when it isn't.
- * One deadline covers the whole capture (run.ts); a cancel or the deadline closes the browser at once.
+ * Captures in Node ("@sonobe/import/node"): render a URL or HTML page in Playwright's Chromium, draw its
+ * SF Symbol placeholders with the request's renderer (symbols.ts), run the DOM walker, and download
+ * images with the page's cookies. Playwright is optional. It's found at runtime where Sonobe runs (a
+ * checkout has it), and hosts explain how to install it when it isn't. One deadline covers the whole
+ * capture (run.ts); a cancel or the deadline closes the browser at once.
  */
 
 import type { DesignCapture } from "./capture.ts";
 import type { ResolvedImage } from "./convert.ts";
-import { WALKER_SOURCE } from "./dom/walkerSource.ts";
 import type { WalkOptions } from "./dom/walk.ts";
 import { resolveCaptureFiles } from "./resolve.ts";
 import { CAPTURE_BUDGETS, createCaptureRun, IMAGE_CUTOFF_MS, StepTimeoutError, type CaptureControl } from "./run.ts";
+import { walkPage, type SymbolRenderer } from "./symbols.ts";
+
+export { symbolHelper } from "./sfsymbol.ts";
 
 export interface PageCaptureRequest {
   url?: string;
@@ -25,6 +28,8 @@ export interface PageCaptureRequest {
   screenshot?: boolean;
   /** The whole capture's deadline, not counting waitMs. Default 90 s (CAPTURE_TIMEOUT_MS). */
   timeoutMs?: number;
+  /** Draws the page's `<svg data-sf-symbol>` placeholders. Without one they stay gray placeholders, with a note. */
+  symbols?: SymbolRenderer;
 }
 
 export interface PageCaptureResult {
@@ -140,13 +145,12 @@ export async function capturePage(request: PageCaptureRequest, control: CaptureC
       source: request.url ? { kind: "url", url: request.url, generator: "sonobe-walker/1" } : { kind: "html", generator: "sonobe-walker/1" },
     };
     let capture: DesignCapture;
+    const notes: string[] = [];
     try {
       // evaluate runs outside the page's Content Security Policy, unlike a script tag.
-      const walked = (async () => {
-        await page.evaluate(WALKER_SOURCE);
-        return page.evaluate((o: never) => (window as unknown as { __sonobeCapture(o: unknown): Promise<DesignCapture> }).__sonobeCapture(o), walkOptions);
-      })();
-      capture = await run.step(walked, walkBudget);
+      const walked = await walkPage((script) => page.evaluate(script), { run, walk: walkOptions, ...(request.symbols ? { symbols: request.symbols } : {}) });
+      capture = walked.capture;
+      notes.push(...walked.notes);
     } catch (err) {
       run.throwIfAborted();
       if (err instanceof StepTimeoutError) throw new CaptureFailedError(`The page didn't answer within ${Math.round(walkBudget / 1000)} seconds (it may be busy or stuck in a loop).`);
@@ -158,7 +162,6 @@ export async function capturePage(request: PageCaptureRequest, control: CaptureC
       if (title) capture.source.title = title;
     }
 
-    const notes: string[] = [];
     const files = Object.keys(capture.images).length + (capture.fonts?.length ?? 0);
     if (files) run.report({ stage: "images", message: `Downloading images: 0 of ${files}`, done: 0, total: files });
     let late = 0;

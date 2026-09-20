@@ -102,7 +102,10 @@ const CLI_PKG = JSON.parse(read("packages/cli/package.json")) as { private?: boo
 const CLI_BUNDLE = `packages/cli/${CLI_PKG.bin.sonobe!.replace(/^\.\//, "")}`;
 const APP_CLI = "/Applications/Sonobe.app/Contents/Resources/cli/sonobe";
 
-const claudeCommands = (text: string) => [...text.matchAll(/^\s*claude mcp add \S+ -- (.+)$/gm)].map((m) => m[1]!.trim());
+/** `claude mcp add [--scope s] <name> -- <launch>` lines: their scope, name and launch command. */
+const claudeAdds = (text: string) =>
+  [...text.matchAll(/^\s*claude mcp add (?:(?:--scope|-s) (\S+) )?(\S+) -- (.+)$/gm)].map((m) => ({ scope: m[1] ?? "local", name: m[2]!, launch: m[3]!.trim() }));
+const claudeCommands = (text: string) => claudeAdds(text).map((c) => c.launch);
 const tokens = (command: string) => [...command.matchAll(/"([^"]*)"|(\S+)/g)].map((m) => m[1] ?? m[2]!);
 
 describe("Claude setup in the README and guide 11", () => {
@@ -143,6 +146,19 @@ describe("Claude setup in the README and guide 11", () => {
     }
     expect(read("README.md")).toContain("claude --plugin-dir ./integrations/claude-code");
     expect(existsSync(path.join(ROOT, "integrations/claude-code/.mcp.json"))).toBe(true);
+  });
+
+  it("installs the relay for every project, and headless servers for one", () => {
+    const files = [...docs, { file: "integrations/claude-code/README.md", text: read("integrations/claude-code/README.md") }, { file: "packages/cli/src/cli.ts", text: read("packages/cli/src/cli.ts") }];
+    for (const { file, text } of files) {
+      const adds = claudeAdds(text);
+      expect(adds.length, file).toBeGreaterThan(0);
+      for (const add of adds) {
+        // A local entry works in one folder only, which is how a session elsewhere ended up without Sonobe.
+        if (add.launch.includes("--headless")) expect([add.name, add.scope], `${file}: ${add.launch}`).toEqual(["sonobe-headless", "local"]);
+        else expect([add.name, add.scope], `${file}: ${add.launch}`).toEqual(["sonobe", "user"]);
+      }
+    }
   });
 
   it("gives Claude Desktop full paths, since it doesn't read the shell's PATH", () => {

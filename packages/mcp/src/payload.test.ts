@@ -143,6 +143,7 @@ describe("structuredContent carries the complete payload", () => {
     await call("begin_work", { intent: "checking payloads", ids: ["photo"] });
     await call("finish_work");
     await call("reveal", { ids: ["photo"] });
+    await call("restart_viewer");
     await call("list_history");
     await call("undo");
     expect([...seen].sort()).toEqual([...TOOL_NAMES].sort());

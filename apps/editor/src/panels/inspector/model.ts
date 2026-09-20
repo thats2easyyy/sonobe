@@ -275,6 +275,11 @@ export function formatLiveValue(value: unknown, type: ValueType): string {
   }
 }
 
+/** A layer's live copy count, as the Repeat row shows it while a loop drives it: "4 copies". */
+export function formatCopies(value: unknown): string {
+  return typeof value === "number" ? `${trimNumber(value)} ${value === 1 ? "copy" : "copies"}` : formatLiveValue(value, "any");
+}
+
 /** The item id a link reads from ("grow" for "grow.output", "card" for "@card.size"). */
 export function linkSourceItem(link: string): { kind: "patch" | "layer" | "componentInput"; id?: Id; key: string } | undefined {
   const parsed = parseAddress(link);

@@ -11,6 +11,8 @@ export const IPC = {
   dialogOpenProject: "sonobe:dialog:open-project",
   dialogSaveProject: "sonobe:dialog:save-project",
   readProject: "sonobe:project:read",
+  /** Like readProject, but a folder that doesn't exist yet reads as null (Save As into a new folder). */
+  readProjectIfExists: "sonobe:project:read-if-exists",
   writeProject: "sonobe:project:write",
   watchProject: "sonobe:project:watch",
   unwatchProject: "sonobe:project:unwatch",
@@ -21,6 +23,8 @@ export const IPC = {
   setDocumentEdited: "sonobe:window:set-edited",
   setTitle: "sonobe:window:set-title",
   mcpStatus: "sonobe:mcp:status",
+  /** main → renderer: MCP status changed (a session connected, called a tool, or left). */
+  mcpChanged: "sonobe:mcp:changed",
   previewStatus: "sonobe:preview:status",
   previewStart: "sonobe:preview:start",
   previewStop: "sonobe:preview:stop",
@@ -28,6 +32,8 @@ export const IPC = {
   previewChanged: "sonobe:preview:changed",
   /** renderer → main: the editor's document reached a new revision. */
   documentChanged: "sonobe:document:changed",
+  /** renderer → main: the editor restarted its prototype (players restart too). */
+  prototypeRestarted: "sonobe:prototype:restarted",
   secretsStatus: "sonobe:secrets:status",
   secretsGet: "sonobe:secrets:get",
   secretsSet: "sonobe:secrets:set",
@@ -46,6 +52,12 @@ export const IPC = {
   captureDesignProgress: "sonobe:design:progress",
   /** renderer → main: download a pasted capture's image or font (no CORS in main). */
   fetchCaptureFile: "sonobe:design:fetch-file",
+  /** renderer → main: drafts of unsaved work (electron/drafts.ts). */
+  draftsWrite: "sonobe:drafts:write",
+  draftsRemove: "sonobe:drafts:remove",
+  draftsList: "sonobe:drafts:list",
+  draftsRead: "sonobe:drafts:read",
+  draftsReveal: "sonobe:drafts:reveal",
   rpcRequest: "sonobe:rpc:request",
   rpcResponse: "sonobe:rpc:response",
   /** renderer → main: the full list of registered rpc method names. */

@@ -10,7 +10,8 @@
  *   Wrappers with no paint and one child disappear, so the layer list stays shallow.
  * - Runs of inline text become text layers positioned by their line boxes.
  * - <img>, inline <svg> (as SVG files with their computed colors), CSS background images, <canvas>
- *   and video posters become images.
+ *   and video posters become images. SF Symbols a host drew into their <svg data-sf-symbol>
+ *   placeholders (dom/symbols.ts) are images named after the symbol; undrawn ones are gray placeholders.
  * - <input> and <textarea> become text fields.
  * - position: fixed elements move to the screen level, and a page taller than the viewport goes into
  *   a "Content" frame marked as scrolling, so the importer can make it scroll.
@@ -82,7 +83,7 @@ const round2 = (n: number) => Math.round(n * 100) / 100 || 0;
 const delay = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, Math.max(0, ms)));
 
 /** Wait for load, a selector, fonts, images, and a quiet DOM (bounded by timeoutMs). */
-async function waitForPage(options: WalkOptions): Promise<void> {
+export async function waitForPage(options: WalkOptions): Promise<void> {
   const deadline = Date.now() + (options.timeoutMs ?? 10_000);
   const left = () => Math.max(0, deadline - Date.now());
   if (document.readyState !== "complete") {
@@ -125,7 +126,7 @@ async function waitForPage(options: WalkOptions): Promise<void> {
 }
 
 /** Resolve any CSS color the browser understands (oklch, lab, color(), system colors) to "#RRGGBBAA". */
-function createColorResolver(): ColorFn {
+export function createColorResolver(): ColorFn {
   const cache = new Map<string, string | null>();
   let ctx: CanvasRenderingContext2D | null | undefined;
   return (css) => {
@@ -248,6 +249,8 @@ interface Counters {
   unsupportedControls: number;
   /** Names on inline elements inside a paragraph that became one text layer, so no layer carries them. */
   unplacedNames: Set<string>;
+  /** SF Symbol placeholders no host tried to draw (data-sf-placeholder marks the ones a host explained). */
+  undrawnSymbols: Set<string>;
 }
 
 class Walker {
@@ -257,7 +260,7 @@ class Walker {
   readonly imageKeys = new Map<string, string>();
   readonly pending: Promise<void>[] = [];
   readonly fixed: CaptureNode[] = [];
-  readonly counters: Counters = { flattenedText: 0, approximateTransforms: 0, placeholders: new Set(), missingImages: 0, unsupportedBackgrounds: 0, unsupportedControls: 0, unplacedNames: new Set() };
+  readonly counters: Counters = { flattenedText: 0, approximateTransforms: 0, placeholders: new Set(), missingImages: 0, unsupportedBackgrounds: 0, unsupportedControls: 0, unplacedNames: new Set(), undrawnSymbols: new Set() };
   readonly paintKeys = new WeakMap<CaptureNode, number>();
   readonly plainInline = new WeakMap<Element, boolean>();
   readonly gradientText = new WeakMap<Element, string>();
@@ -449,6 +452,11 @@ class Walker {
       out.push(`${names} ${one ? "names" : "name"} part of a long paragraph that became one text layer, so no layer has ${one ? "that name" : "those names"}. Split the paragraph, or make ${one ? "that element" : "those elements"} display: inline-block.`);
     }
     if (c.placeholders.size) out.push(`Placeholders stand in for ${[...c.placeholders].join(", ")}.`);
+    if (c.undrawnSymbols.size) {
+      const one = c.undrawnSymbols.size === 1;
+      const names = [...c.undrawnSymbols].slice(0, 5).map((n) => `“${n}”`).join(", ");
+      out.push(`The SF Symbol${one ? "" : "s"} ${names}${c.undrawnSymbols.size > 5 ? ` and ${c.undrawnSymbols.size - 5} more` : ""} ${one ? "is a gray placeholder" : "are gray placeholders"}: this capture didn't draw SF Symbols. Sonobe draws them when it imports in the app on a Mac with macOS 13 or later.`);
+    }
     return out;
   }
 
@@ -524,6 +532,11 @@ class Walker {
       delete frame.backgroundImage;
     }
     if (tag === "html" || tag === "body") delete frame.clip;
+    if (el.hasAttribute("data-sf-symbol") && !el.hasAttribute("data-sf-drawn")) {
+      this.addSymbolPlaceholder(el, cs, rect, frame);
+      if (force) frame.keep = true;
+      return this.finish(frame);
+    }
 
     switch (tag) {
       case "img":
@@ -675,6 +688,10 @@ class Walker {
   nameOf(el: Element, tag: string): NameInfo {
     const explicit = explicitName(el);
     if (explicit) return { name: explicit, rank: 5, kind: "explicit" };
+    // An SF Symbol is named after the symbol ("heart.fill"). Like an icon class it names the glyph, so a
+    // named wrapper that disappears around it still gives it the wrapper's name.
+    const symbol = el.getAttribute("data-sf-symbol")?.trim();
+    if (symbol) return { name: symbol.slice(0, 80), rank: 2, kind: "icon" };
     const component = componentName(el);
     if (component) return { name: titleize(component), rank: 4, kind: "component" };
     const aria = el.getAttribute("aria-label") ?? (tag === "svg" || tag === "img" ? (el.getAttribute("title") ?? el.querySelector?.(":scope > title")?.textContent) : null);
@@ -872,7 +889,7 @@ class Walker {
     if (cached !== undefined) return cached;
     let plain = false;
     if (el.localName === "br" || el.localName === "wbr") plain = true;
-    else if (!el.shadowRoot && !SKIP_TAGS.has(el.localName) && el.namespaceURI === "http://www.w3.org/1999/xhtml" && !["img", "svg", "input", "textarea", "select", "button", "video", "canvas", "iframe"].includes(el.localName)) {
+    else if (!el.shadowRoot && !SKIP_TAGS.has(el.localName) && !el.hasAttribute("data-sf-symbol") && el.namespaceURI === "http://www.w3.org/1999/xhtml" && !["img", "svg", "input", "textarea", "select", "button", "video", "canvas", "iframe"].includes(el.localName)) {
       const cs = getComputedStyle(el);
       if (cs.display === "none") plain = true;
       else if (cs.display === "inline" && cs.position !== "absolute" && cs.position !== "fixed") {
@@ -1205,6 +1222,18 @@ class Walker {
     frame.children = [node];
   }
 
+  /** An SF Symbol nothing drew (see dom/symbols.ts): a gray rounded square named after the symbol. */
+  addSymbolPlaceholder(el: Element, cs: CSSStyleDeclaration, rect: DOMRect, frame: CaptureFrame): void {
+    const size = parseFloat(cs.fontSize) || 17;
+    if (rect.width === 0 || rect.height === 0) frame.box = this.box({ left: rect.left, top: rect.top, width: size, height: size });
+    const [, , w, h] = frame.box;
+    const r = round2(Math.min(w, h) / 4);
+    frame.fill = "#E5E7EBFF";
+    frame.radii = [r, r, r, r];
+    frame.children = [];
+    if (!el.hasAttribute("data-sf-placeholder")) this.counters.undrawnSymbols.add(el.getAttribute("data-sf-symbol")!.trim() || "(no name)");
+  }
+
   /** The SVG with computed paint written onto every element, so classes and currentColor survive on their own. */
   svgMarkup(svg: SVGSVGElement, rect: DOMRect): string | null {
     const clone = svg.cloneNode(true) as SVGSVGElement;
@@ -1472,8 +1501,21 @@ function utf8Base64(text: string): string {
   return btoa(binary);
 }
 
+/**
+ * SF Symbol placeholders no host drew or sized get a 1em square, so the layout keeps their place (an
+ * empty <svg> would be 300×150). CSS sizes still win over these attributes.
+ */
+function sizeUndrawnSymbols(): void {
+  for (const el of document.querySelectorAll("svg[data-sf-symbol]:not([data-sf-drawn]):not([data-sf-placeholder])")) {
+    const size = String(parseFloat(getComputedStyle(el).fontSize) || 17);
+    if (!el.hasAttribute("width")) el.setAttribute("width", size);
+    if (!el.hasAttribute("height")) el.setAttribute("height", size);
+  }
+}
+
 /** Capture the current page (or `options.selector`) once it has settled. */
 export async function captureDom(options: WalkOptions = {}): Promise<DesignCapture> {
   await waitForPage(options);
+  sizeUndrawnSymbols();
   return new Walker(options).run();
 }

@@ -205,7 +205,7 @@ describe("document store: files", () => {
     const store = createDocumentStore({ registry, host, document: createEmptyDocument() });
     store.getState().apply([addRect("Card")], { label: "Add Card" });
     const result = await store.getState().save();
-    expect(result).toEqual({ ok: true, path: "browser:Photo Zoom" });
+    expect(result).toEqual({ ok: true, path: "browser:Photo Zoom", written: ["project.json", "components/main.json", "assets/assets.json"], deleted: [] });
     expect(store.getState()).toMatchObject({ projectPath: "browser:Photo Zoom", dirty: false });
     expect(store.getState().doc.project.name).toBe("Photo Zoom");
 

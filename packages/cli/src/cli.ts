@@ -75,7 +75,7 @@ Options:
 Examples:
   sonobe new "Photo Zoom.sonobe" --template photo-zoom
   sonobe sim "Photo Zoom.sonobe" --events tap.json --trace @photo.scale --duration 800
-  claude mcp add sonobe -- sonobe mcp
+  claude mcp add --scope user sonobe -- sonobe mcp
 `;
 
 const COMMAND_HELP: Record<string, string> = {
@@ -115,13 +115,16 @@ Starts a deterministic simulation, dispatches the events, and prints every trace
        sonobe mcp --headless <dir> [--no-autosave]
 
 Without --headless: a stdio relay to the running Sonobe app. It reads ~/.sonobe/mcp.json
-(SONOBE_HOME overrides the folder) and forwards MCP messages with the app's token.
+(SONOBE_HOME overrides the folder) and forwards MCP messages with the app's token. It tells the
+app which session it is (the client's name and CLAUDE_PROJECT_DIR, or its working folder), so
+Connect Claude lists connected sessions.
 
 With --headless: serves a project folder directly (editing, simulation, saving, and screenshots
 drawn without the app).
 Changes are saved after every edit unless --no-autosave.
 
-Claude Code:     claude mcp add sonobe -- sonobe mcp
+Claude Code:     claude mcp add --scope user sonobe -- sonobe mcp
+                 (--scope user: every project gets the tools, not just the current folder)
 Claude Desktop:  install integrations/claude-desktop (see its README)`,
 };
 
@@ -200,8 +203,10 @@ async function cmdNew(args: string[], io: CliIo): Promise<number> {
       ...(values.name ? { name: values.name } : {}),
       ...(values.device ? { device: values.device } : {}),
     });
+    // The folder gets .sonobe when its name has none.
+    const at = created.path ?? dir;
     io.stdout.write(
-      `Created "${created.name}" at ${dir}${values.template ? ` from the ${values.template} template` : ""}.\n\nNext:\n  sonobe outline "${displayPath(io.cwd, dir)}"\n  sonobe mcp --headless "${displayPath(io.cwd, dir)}"   (let Claude edit it)\n`,
+      `Created "${created.name}" at ${at}${values.template ? ` from the ${values.template} template` : ""}.\n\nNext:\n  sonobe outline "${displayPath(io.cwd, at)}"\n  sonobe mcp --headless "${displayPath(io.cwd, at)}"   (let Claude edit it)\n`,
     );
     return 0;
   } catch (err) {
@@ -439,6 +444,26 @@ async function cmdSim(args: string[], io: CliIo): Promise<number> {
   }
 }
 
+/**
+ * SIGINT and SIGTERM stop the relay like stdin closing does. Claude Code ends stdio servers with
+ * SIGINT, and without this the relay died before its goodbye, so the session stayed listed for 75 s.
+ * A second signal still kills the process.
+ */
+function stopOnSignals(): { signal: AbortSignal; dispose(): void } {
+  const controller = new AbortController();
+  const stop = () => controller.abort();
+  const signals = ["SIGINT", "SIGTERM"] as const;
+  for (const name of signals) process.once(name, stop);
+  return {
+    signal: controller.signal,
+    dispose() {
+      for (const name of signals) process.removeListener(name, stop);
+      // stdin is still open when a signal stopped the relay; let the process exit.
+      if (controller.signal.aborted) process.stdin.destroy();
+    },
+  };
+}
+
 async function cmdMcp(args: string[], io: CliIo): Promise<number> {
   const { values, positionals } = parse("mcp", args, {
     headless: { type: "string" },
@@ -450,14 +475,24 @@ async function cmdMcp(args: string[], io: CliIo): Promise<number> {
       `Unexpected argument "${positionals[0]}". Did you mean --headless "${positionals[0]}"?`,
       "mcp",
     );
-  if (values.headless === undefined)
-    return runRelay({
-      home: sonobeHome(io.env),
-      stdin: io.stdin,
-      stdout: io.stdout,
-      stderr: io.stderr,
-      fetch: io.fetch,
-    });
+  if (values.headless === undefined) {
+    const signals = io.stdin === process.stdin ? stopOnSignals() : null;
+    try {
+      return await runRelay({
+        home: sonobeHome(io.env),
+        stdin: io.stdin,
+        stdout: io.stdout,
+        stderr: io.stderr,
+        fetch: io.fetch,
+        env: io.env,
+        cwd: io.cwd,
+        version: VERSION,
+        ...(signals ? { stop: signals.signal } : {}),
+      });
+    } finally {
+      signals?.dispose();
+    }
+  }
   const dir = path.resolve(io.cwd, values.headless);
   const autosave = !values["no-autosave"];
   const host = createHeadlessHost({ autosave });

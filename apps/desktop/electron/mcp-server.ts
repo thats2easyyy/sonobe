@@ -4,7 +4,8 @@
  * Binds 127.0.0.1 only, validates Host and Origin (DNS-rebinding guard), requires a per-launch
  * 256-bit bearer token, and advertises { port, url, token, pid, version } in ~/.sonobe/mcp.json
  * (0600). Routes /mcp to a pluggable handler so a later stage can mount the MCP SDK transport,
- * e.g. `setHandler(toNodeHandler(createMcpHandler(buildServer)))`.
+ * e.g. `setHandler(toNodeHandler(createMcpHandler(buildServer)))`, and /clients to the connected-
+ * sessions registry: `sonobe mcp` says hello there (POST) and goodbye (DELETE /clients/<id>).
  */
 
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
@@ -13,6 +14,7 @@ import type { AddressInfo } from "node:net";
 import { chmodSync, mkdirSync, readFileSync, rmSync } from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
+import { parseHello, type ClientRegistry } from "@sonobe/mcp";
 import { atomicWriteFileSync } from "./fs-utils.ts";
 
 export type McpRequestHandler = (req: IncomingMessage, res: ServerResponse) => void | Promise<void>;
@@ -38,8 +40,13 @@ export interface StartMcpServerOptions {
   token?: string;
   /** Requests declaring a larger Content-Length are rejected with 413. Default 8 MiB. */
   maxBodyBytes?: number;
+  /** Connected sessions: /clients takes the relay's hello, heartbeat and goodbye. Without it, /clients is 404. */
+  clients?: ClientRegistry;
   log?(level: "info" | "warn" | "error", message: string): void;
 }
+
+/** Largest /clients hello. */
+const MAX_HELLO_BYTES = 16 * 1024;
 
 export interface McpServerHandle {
   readonly port: number;
@@ -145,6 +152,34 @@ export function createNotWiredHandler(maxBodyBytes = 8 * 1024 * 1024): McpReques
   };
 }
 
+/** POST /clients: a relay's hello or heartbeat. DELETE /clients/<id>: its goodbye. Both answer 204. */
+function serveClients(clients: ClientRegistry, pathname: string, req: IncomingMessage, res: ServerResponse): void {
+  if (req.method === "DELETE" && pathname.startsWith("/clients/")) {
+    clients.bye(decodeURIComponent(pathname.slice("/clients/".length)));
+    res.writeHead(204).end();
+    return;
+  }
+  if (req.method !== "POST" || pathname !== "/clients") return jsonRpcError(res, 405, -32000, "Method not allowed: POST /clients says hello, DELETE /clients/<id> says goodbye", null, { Allow: "POST, DELETE" });
+  const declared = Number(req.headers["content-length"] ?? 0);
+  if (Number.isFinite(declared) && declared > MAX_HELLO_BYTES) return jsonRpcError(res, 413, -32000, "Request body too large");
+  void readBody(req, MAX_HELLO_BYTES).then(
+    (body) => {
+      if (body === null) return jsonRpcError(res, 413, -32000, "Request body too large");
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(body);
+      } catch {
+        return jsonRpcError(res, 400, -32700, "Parse error: body must be JSON");
+      }
+      const hello = parseHello(parsed);
+      if (typeof hello === "string") return jsonRpcError(res, 400, -32602, hello);
+      clients.hello(hello);
+      res.writeHead(204).end();
+    },
+    () => res.destroy(),
+  );
+}
+
 function writeConnectionFile(file: string, data: McpConnectionFile): void {
   const dir = path.dirname(file);
   mkdirSync(dir, { recursive: true, mode: 0o700 });
@@ -194,6 +229,7 @@ export async function startMcpServer(opts: StartMcpServerOptions): Promise<McpSe
         });
       return;
     }
+    if (opts.clients && (pathname === "/clients" || pathname?.startsWith("/clients/"))) return serveClients(opts.clients, pathname, req, res);
     jsonRpcError(res, 404, -32000, "Not found");
   });
   server.headersTimeout = 30_000;

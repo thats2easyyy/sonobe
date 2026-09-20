@@ -1,6 +1,6 @@
 /**
  * @sonobe/renderer — DOM renderer for SceneFrames, input capture, text measurement,
- * and CSS device frames. See ARCHITECTURE.md §8.
+ * CSS device frames, and the browser's platform services for live prototypes. See ARCHITECTURE.md §8.
  */
 
 export { createDomRenderer, lisIndices } from "./renderer.ts";
@@ -26,6 +26,9 @@ export { advancePlayhead, frameForTime, isLottieData, loadLottiePlayer, readLott
 export type { LottieLoader, LottiePlayerLike, LottieSource } from "./lottie.ts";
 
 export { createFontAssetRegistry, type FontAssetRegistry } from "./fonts.ts";
+export { createBrowserPlatform, createMuteStore, detectMuted, getMuteStore, isMuted, liveKeyOf, OPENABLE_URL_SCHEMES, setMuted } from "./platform.ts";
+export type { BrowserPlatform, BrowserPlatformOptions, MuteState, MuteStore, PlatformWindow } from "./platform.ts";
+export { createLiveVideoOverlays, type LiveStreams, type LiveVideoOverlays } from "./liveMedia.ts";
 export { cssGradient } from "./gradient.ts";
 export { squirclePath } from "./squircle.ts";
 export type { CornerRadii } from "./squircle.ts";

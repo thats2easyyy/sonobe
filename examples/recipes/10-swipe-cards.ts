@@ -1,6 +1,6 @@
 /**
- * 10 Swipe Cards: a deck of three cards you throw left or right. One Group repeated by a loop; every
- * patch runs once per card, so each card has its own switch, spring, and badges.
+ * 10 Swipe Cards: a deck of three cards you throw left or right. One Group whose Repeat counts a loop;
+ * every patch runs once per card, so each card has its own switch, spring, and badges.
  */
 
 import { addLayer, addPatch, connect, group, homeIndicator, layerRef, link, oval, palette, SCREEN, shadow, statusBar, text, type } from "../lib/kit.ts";
@@ -56,8 +56,9 @@ export const swipeCards: Recipe = {
     ),
     addLayer(homeIndicator("app", "dark")),
 
-    // One card per loop index
+    // One card per loop index: Repeat decides the copies, and everything inside each card follows
     addPatch("cards", "loop", "Cards", { count: DISHES.length }),
+    connect("cards.index", "@card.repeat"),
     addPatch("card_titles", "loopBuilder", "Dish Names", Object.fromEntries(DISHES.map((d, i) => [`item${i}`, d[0]])), { typeParam: "text", inputCount: DISHES.length }),
     addPatch("card_metas", "loopBuilder", "Dish Details", Object.fromEntries(DISHES.map((d, i) => [`item${i}`, d[1]])), { typeParam: "text", inputCount: DISHES.length }),
     addPatch("card_colors", "loopBuilder", "Card Colors", Object.fromEntries(DISHES.map((d, i) => [`item${i}`, d[2]])), { typeParam: "color", inputCount: DISHES.length }),

@@ -1,8 +1,8 @@
-/** Presence and history tools: begin_work, finish_work, reveal, list_history, undo. */
+/** Presence and history tools: begin_work, finish_work, reveal, restart_viewer, list_history, undo. */
 
 import { z } from "zod";
 import { plural } from "../format.ts";
-import { success } from "../results.ts";
+import { failure, success } from "../results.ts";
 import { DESTRUCTIVE, READ_ONLY, UI_ONLY, type ToolContext } from "../server.ts";
 import { DocIdSchema } from "../schemas.ts";
 import { formatDiagnostic } from "./read.ts";
@@ -32,9 +32,10 @@ export function registerPresenceTools(tc: ToolContext): void {
     },
     async ({ docId, intent, ids }, ctx) => {
       const author = tc.author(ctx);
+      const client = tc.client(ctx);
       await host.setWorking(
         { ids: ids ?? [], intent },
-        { author, ...(docId !== undefined ? { docId } : {}) },
+        { author, ...(client ? { client } : {}), ...(docId !== undefined ? { docId } : {}) },
       );
       const note = host.capabilities.presence
         ? "The person sees your working badge."
@@ -64,8 +65,10 @@ export function registerPresenceTools(tc: ToolContext): void {
       annotations: UI_ONLY,
     },
     async ({ docId, summary }, ctx) => {
+      const client = tc.client(ctx);
       await host.setWorking(null, {
         author: tc.author(ctx),
+        ...(client ? { client } : {}),
         ...(docId !== undefined ? { docId } : {}),
       });
       return success(`Finished${summary ? `: ${summary}` : "."}`, { summary: summary ?? null });
@@ -95,6 +98,33 @@ export function registerPresenceTools(tc: ToolContext): void {
           ? `Revealed ${ids.join(", ")}.`
           : `Not revealed: ${r.reason ?? "the editor declined."}`,
         { ...r },
+      );
+    },
+  );
+
+  tc.tool(
+    "restart_viewer",
+    {
+      title: "Restart viewer",
+      description:
+        "Start the person's live prototype over from its first frame, as Restart Prototype (⌘R) does in Sonobe; the phone preview and the pop-out viewer restart too. The document doesn't change. The live viewer takes your edits without restarting and keeps its state (a count, a switch that's on, an intro that already played), so restart when a change should be seen from the start, or when get_diagnostics' Live viewer section reports stale_state. Simulations are separate: sim_reset starts one over.",
+      input: z.object({ docId: DocIdSchema.optional() }),
+      annotations: UI_ONLY,
+    },
+    async ({ docId }) => {
+      if (!host.restartViewer)
+        return failure({
+          code: "no_live_viewer",
+          message:
+            host.kind === "headless"
+              ? "There's no live viewer to restart: this Sonobe server runs headless, with no editor window and no running prototype."
+              : "This Sonobe host has no live viewer to restart.",
+          hint: "Simulations are how to run the prototype here: sim_reset starts one over from its first frame (pass simId to restart one you already have). To see a live viewer, open the project in the Sonobe app.",
+        });
+      const r = await host.restartViewer(docId !== undefined ? { docId } : {});
+      return success(
+        `Restarted the live prototype${r.playing ? "" : " (paused on its first frame; the person can press play)"}. It starts over from its first frame, and phones and the pop-out viewer showing it restart too. The document didn't change.`,
+        { docId: r.docId, playing: r.playing },
       );
     },
   );

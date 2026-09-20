@@ -1,4 +1,4 @@
-import { allLayers, COMPONENT_INSTANCE_LAYER_TYPE, findLayer, isLinkInput, wouldCreateComponentCycle, type Id, type LayerNode, type LayerTypeSpec, type Op } from "@sonobe/core";
+import { allLayers, COMPONENT_INSTANCE_LAYER_TYPE, findLayer, isLinkInput, loopShapes, wouldCreateComponentCycle, type Id, type LayerCopies, type LayerNode, type LayerTypeSpec, type Op } from "@sonobe/core";
 import {
   ArrowDownToLine,
   ArrowUpToLine,
@@ -19,6 +19,7 @@ import {
   PanelLeftClose,
   Plus,
   Pointer,
+  Repeat,
   ScanSearch,
   Search,
   SendToBack,
@@ -45,7 +46,7 @@ import {
   type ActionResult,
   type ArrangeDirection,
 } from "../../state/editActions.ts";
-import { useDocument, useEditorSession, useSelection } from "../../state/EditorProvider.tsx";
+import { useDocument, useEditorSession, useLiveValues, useSelection } from "../../state/EditorProvider.tsx";
 import { selectBreadcrumbs } from "../../state/selection.ts";
 import { Button } from "../../ui/Button.tsx";
 import { useOptionalCommands } from "../../ui/commands/CommandProvider.tsx";
@@ -54,6 +55,7 @@ import { IconButton } from "../../ui/IconButton.tsx";
 import { Menu, useContextMenu, type MenuEntry } from "../../ui/Menu.tsx";
 import { TextField } from "../../ui/TextField.tsx";
 import { toast } from "../../ui/Toast.tsx";
+import { Tooltip } from "../../ui/Tooltip.tsx";
 import { TreeView } from "../../ui/TreeView.tsx";
 import { cx } from "../../ui/lib/cx.ts";
 import { getAncestorIds } from "../../ui/lib/treeModel.ts";
@@ -92,7 +94,60 @@ const collapsedFromDocument = (layers: readonly LayerNode[]): ReadonlySet<Id> =>
 /** The layer a row element belongs to (rows carry the id on their icon). */
 const rowLayerId = (target: EventTarget | null): Id | null => (target as Element | null)?.closest?.(".sb-tree__row")?.querySelector("[data-layer-id]")?.getAttribute("data-layer-id") ?? null;
 
+/** The copies a layer drew last frame, for a ×N badge whose count only the running prototype knows. */
+function LiveCopies({ layerId }: { layerId: Id }) {
+  const address = `@${layerId}.repeat`;
+  const value = useLiveValues([address], { hz: 4 })[address];
+  return <>{typeof value === "number" ? `×${value}` : "×"}</>;
+}
+
+const zText = (z: unknown) => (typeof z === "number" ? `${Math.round(z * 100) / 100}` : "");
+
+/**
+ * A row's copy and stacking badges: ×N on a layer that makes copies of itself (with a repeat icon
+ * when its Repeat decides how many), and z on a layer with a Z Position, which orders it among its
+ * siblings before the layer list does.
+ */
+function LayerBadges({ node, copies }: { node: LayerNode; copies: LayerCopies }) {
+  const z = node.props.zPosition;
+  const zLinked = isLinkInput(z);
+  const showZ = zLinked || (typeof z === "number" && z !== 0);
+  const makes = copies.kind === "repeat" || copies.kind === "auto";
+  if (!makes && !showZ) return null;
+  const count = makes ? copies.count : null;
+  const copyTip = !makes
+    ? ""
+    : copies.kind === "repeat"
+      ? `Repeat makes ${count === null ? "one copy per item of its loop" : `${count} ${count === 1 ? "copy" : "copies"}`}, and everything inside follows.`
+      : `${count === null ? "One copy" : `${count} ${count === 1 ? "copy" : "copies"}, one`} per item of the longest loop on its own properties. Set Repeat to decide how many.`;
+  const zTip = zLinked
+    ? "Z Position comes from a patch. It orders this layer among its siblings before the layer list does."
+    : (z as number) > 0
+      ? `Z Position ${zText(z)}: draws in front of siblings with a lower Z Position, whatever the layer order.`
+      : `Z Position ${zText(z)}: draws behind siblings with a higher Z Position, whatever the layer order.`;
+  return (
+    <span className="sb-layerspanel__badges">
+      {makes && (
+        <Tooltip content={copyTip} delay={400}>
+          <span className="sb-layerspanel__badge sb-mono" data-kind="copies" aria-label={copyTip}>
+            {copies.kind === "repeat" && <Repeat size={10} strokeWidth={2} aria-hidden />}
+            {count === null ? <LiveCopies layerId={node.id} /> : `×${count}`}
+          </span>
+        </Tooltip>
+      )}
+      {showZ && (
+        <Tooltip content={zTip} delay={400}>
+          <span className="sb-layerspanel__badge sb-mono" data-kind="z" aria-label={zLinked ? "Z Position from a patch" : `Z Position ${zText(z)}`}>
+            z{zLinked ? "" : zText(z)}
+          </span>
+        </Tooltip>
+      )}
+    </span>
+  );
+}
+
 function report(result: ActionResult): void {
+  if (result.ok && result.note) toast({ title: result.note.message, ...(result.note.hint ? { description: result.note.hint } : {}), tone: "neutral" });
   if (!result.ok && result.message) toast({ title: result.message, ...(result.hint ? { description: result.hint } : {}), tone: "warn" });
 }
 
@@ -130,6 +185,8 @@ export function LayersPanel({ onCollapse, className }: LayersPanelProps) {
   const cableHover = useCableHover(cableActive);
 
   const typeName = useCallback((type: string) => registry.layers.get(type)?.name ?? type, [registry]);
+  /** How each layer makes copies, read from the document (the badges' counts). */
+  const shapes = useMemo(() => (component ? loopShapes(doc, componentId, registry) : null), [doc, component, componentId, registry]);
   const display = useMemo(() => displayTree(layers), [layers]);
   const filter = useMemo(() => ({ query, types }), [query, types]);
   const filtering = isFiltering(filter);
@@ -604,6 +661,7 @@ export function LayersPanel({ onCollapse, className }: LayersPanelProps) {
               return (
                 <>
                   {highlighted === node.id && <span className="sb-layerspanel__hover" aria-hidden />}
+                  {shapes && <LayerBadges node={node} copies={shapes.copies(node.id)} />}
                   {(isHidden(node) || node.locked) && (
                     <span className="sb-layerspanel__status">
                       {isHidden(node) && <EyeOff size={12} strokeWidth={1.75} aria-label="Hidden" />}

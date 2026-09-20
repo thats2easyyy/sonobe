@@ -24,5 +24,6 @@ export * from "./graph.ts";
 export * from "./names.ts";
 export * from "./variables.ts";
 export * from "./knobs.ts";
+export * from "./loopShapes.ts";
 export * from "./diagnostics.ts";
 export * from "./outline.ts";

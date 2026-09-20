@@ -4,7 +4,8 @@
  *
  * Every URL lives under /p/<token>/ with a random 128-bit token (the QR code carries it), pages send
  * no Referer, sockets must come from the player's own origin, and the socket is one-way: nothing a
- * phone sends can change the document. Node only.
+ * phone sends can change the document. Besides documents it carries one command, restart, sent when
+ * the prototype restarts in Sonobe. Node only.
  */
 
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
@@ -23,12 +24,16 @@ export interface PreviewDocument {
   name: string;
   revision: number;
   doc: unknown;
+  /** The editor holds the project's scripts until the person trusts it; the player holds them too. */
+  scriptsPaused?: boolean;
 }
 
 /** Messages sent to the player over the socket. */
 export type PreviewMessage =
   | { type: "hello"; version: string }
-  | { type: "document"; docId: string; name: string; revision: number; doc: unknown }
+  | { type: "document"; docId: string; name: string; revision: number; doc: unknown; scriptsPaused?: true }
+  /** Start the prototype over from its first frame (Restart in Sonobe). */
+  | { type: "restart" }
   | { type: "offline"; message: string };
 
 export interface LanPreviewOptions {
@@ -71,6 +76,8 @@ export interface LanPreviewHandle {
   clientCount(): number;
   /** Look for a new revision now (e.g. right after an edit). Does nothing while no player is connected. */
   poke(): void;
+  /** Restart the prototype in every connected player, after sending any revision they don't have yet. */
+  restart(): void;
   /** True when revisions arrive through poke() instead of polling. */
   readonly pushUpdates: boolean;
   /** Switch between polling and push mode. */
@@ -106,14 +113,22 @@ const CONTENT_TYPES: Record<string, string> = {
   ".otf": "font/otf",
 };
 
+/**
+ * The player page's policy. Code comes only from the player's own origin (no inline or remote
+ * scripts), nothing may frame it, and it posts no forms. Prototypes reach other hosts the way they do
+ * in the editor's viewer: Network Request, JSON File and scripts fetch any http(s) URL (connect-src),
+ * WebSocket Connection opens any ws(s) URL, and the images, videos and sounds those return (remote
+ * URLs, or data: from Base64 Decode) load in layers and Sound Player (img-src, media-src). Nothing
+ * else is loosened.
+ */
 const PLAYER_CSP = [
   "default-src 'self'",
   "script-src 'self'",
   "style-src 'self' 'unsafe-inline'",
-  "img-src 'self' data: blob:",
-  "media-src 'self' blob:",
+  "img-src 'self' data: blob: http: https:",
+  "media-src 'self' data: blob: http: https:",
   "font-src 'self' data:",
-  "connect-src 'self' ws: wss:",
+  "connect-src 'self' http: https: ws: wss:",
   "worker-src 'self' blob:",
   "base-uri 'none'",
   "frame-ancestors 'none'",
@@ -283,11 +298,14 @@ export async function startLanPreview(opts: LanPreviewOptions): Promise<LanPrevi
   const pollMs = Math.max(50, opts.pollMs ?? 400);
   const playerRoot = path.resolve(opts.playerRoot);
   const hello = JSON.stringify({ type: "hello", version: opts.version ?? "0.0.0" } satisfies PreviewMessage);
+  const RESTART = JSON.stringify({ type: "restart" } satisfies PreviewMessage);
 
   let lastKey: string | null = null;
   let lastPayload: string | null = null;
   let polling = false;
   let pollAgain = false;
+  /** A restart waits for the poll in flight, so players restart on the newest revision. */
+  let restartPending = false;
   let pollTimer: ReturnType<typeof setInterval> | null = null;
   let closed = false;
   let pushUpdates = opts.pushUpdates === true;
@@ -302,7 +320,10 @@ export async function startLanPreview(opts: LanPreviewOptions): Promise<LanPrevi
   const current = async (): Promise<{ key: string; payload: string }> => {
     const doc = await opts.getDocument();
     if (!doc) return { key: "offline", payload: JSON.stringify({ type: "offline", message: OFFLINE_MESSAGE } satisfies PreviewMessage) };
-    return { key: `${doc.docId}@${doc.revision}`, payload: JSON.stringify({ type: "document", docId: doc.docId, name: doc.name, revision: doc.revision, doc: doc.doc } satisfies PreviewMessage) };
+    const paused = doc.scriptsPaused === true;
+    const message: PreviewMessage = { type: "document", docId: doc.docId, name: doc.name, revision: doc.revision, doc: doc.doc, ...(paused ? { scriptsPaused: true as const } : {}) };
+    // Trusting the project changes no revision, so the key includes whether scripts wait.
+    return { key: `${doc.docId}@${doc.revision}${paused ? ":paused" : ""}`, payload: JSON.stringify(message) };
   };
 
   const poll = async () => {
@@ -326,6 +347,9 @@ export async function startLanPreview(opts: LanPreviewOptions): Promise<LanPrevi
       if (pollAgain) {
         pollAgain = false;
         void poll();
+      } else if (restartPending) {
+        restartPending = false;
+        broadcast(RESTART);
       }
     }
   };
@@ -458,6 +482,11 @@ export async function startLanPreview(opts: LanPreviewOptions): Promise<LanPrevi
     clientCount: () => wss.clients.size,
     poke: () => {
       if (wss.clients.size > 0) void poll();
+    },
+    restart: () => {
+      if (wss.clients.size === 0 || closed) return;
+      restartPending = true;
+      void poll();
     },
     get pushUpdates() {
       return pushUpdates;

@@ -414,3 +414,34 @@ describe("scripts, assets and project", () => {
     expect(firstError(doc, [{ op: "setProject", changes: { formatVersion: 2 } as never }]).code).toBe("invalid_op");
   });
 });
+
+describe("Repeat (a copy count)", () => {
+  it("takes a whole number from 0 to 10,000, null for Auto, or a link", () => {
+    const doc = buildSampleDocument();
+    const r = mustApply(doc, [
+      { op: "setInput", target: "@card.repeat", value: 4 },
+      { op: "setInput", target: "@title.repeat", value: 0 },
+    ]);
+    expect(main(r.doc).layers[0]!.props.repeat).toBe(4);
+    expect(mustApply(r.doc, [{ op: "setInput", target: "@card.repeat", value: null }]).doc.components.main!.layers[0]!.props.repeat).toBeUndefined();
+    expect(mustApply(doc, [{ op: "setInput", target: "@card.repeat", value: { link: "pop.output" } }]).ok).toBe(true);
+  });
+
+  it("refuses anything else with a teaching error", () => {
+    const doc = buildSampleDocument();
+    const refuse = (value: unknown) => firstError(doc, [{ op: "setInput", target: "@card.repeat", value: value as never }]);
+    expect(refuse("four")).toMatchObject({
+      code: "invalid_value",
+      message: '@card.repeat (Repeat) needs a whole number of copies from 0 to 10,000, but got text "four".',
+      hint: 'Type a whole number like 4, or link a loop to make one copy per item: { "link": "names.loop" }. null goes back to Auto.',
+    });
+    expect(refuse(-1).message).toBe("@card.repeat (Repeat) needs a whole number of copies from 0 to 10,000, but got the number -1.");
+    expect(refuse(2.5).hint).toBe("Copies come in whole numbers: use 2 or 3.");
+    expect(refuse("4").hint).toBe("Write the number without quotes: 4.");
+    expect(refuse(20_000).hint).toBe("Layers make at most 10,000 copies.");
+    expect(refuse({ loop: ["a", "b"] })).toMatchObject({
+      message: "@card.repeat (Repeat) counts copies, so it takes a number, not a loop of 2 items.",
+      hint: 'To make one copy per item, link the loop instead of typing it, like { "link": "names.loop" }, or type 2.',
+    });
+  });
+});

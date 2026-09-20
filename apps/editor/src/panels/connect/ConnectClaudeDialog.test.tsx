@@ -51,11 +51,69 @@ async function show(props: Omit<ConnectClaudeDialogProps, "open" | "onOpenChange
   return document.body.textContent ?? "";
 }
 
+const session = (overrides: Record<string, unknown> = {}) => ({
+  id: "11111111-aaaa-4bbb-8ccc-000000000001",
+  label: "Claude Code",
+  name: "claude-code",
+  version: "2.1.278",
+  folder: "/Users/me/workspace/noddit",
+  via: "relay",
+  state: "connected",
+  connectedAt: Date.now() - 60_000,
+  lastSeenAt: Date.now(),
+  lastActivityAt: Date.now() - 12_000,
+  lastTool: "get_outline",
+  toolCalls: 3,
+  relayVersion: "0.1.0",
+  ...overrides,
+});
+
+describe("Connect Claude sessions", () => {
+  it("says nothing is connected while the server only listens", async () => {
+    const text = await show({ host: appHost({ ...RUNNING, clients: [], version: "0.1.0" }), initialTab: "code", defaults: { mode: "installed", platform: "darwin" } });
+    expect(text).toContain("No Claude session is connected");
+    expect(text).toContain("Sessions show up here once Claude starts Sonobe's server");
+    expect(text).not.toContain("ready for Claude");
+    expect(document.querySelector(".sb-connect__status")?.getAttribute("data-tone")).toBe("neutral");
+  });
+
+  it("lists connected sessions with their folder and last activity", async () => {
+    const text = await show({ host: appHost({ ...RUNNING, clients: [session(), session({ id: "22222222-aaaa-4bbb-8ccc-000000000002", folder: "/Users/me/workspace/sonobe", state: "gone", lastTool: "finish_work" })], version: "0.1.0" }), defaults: { mode: "installed", platform: "darwin" } });
+    expect(text).toContain("Claude Code is connected");
+    expect(text).toContain("~/workspace/noddit");
+    expect(text).toContain("Active 12 s ago · get_outline · 3 tool calls");
+    expect(text).toContain("~/workspace/sonobe");
+    expect(text).toContain("Disconnected");
+    expect(text).toContain("Last active 12 s ago · finish_work");
+    expect(document.querySelector(".sb-connect__status")?.getAttribute("data-tone")).toBe("success");
+  });
+
+  it("flags a session running an older relay, and explains clients without one", async () => {
+    const text = await show({ host: appHost({ ...RUNNING, clients: [session({ relayVersion: "0.0.9" }), session({ id: "http", label: "Unidentified MCP client", name: null, version: null, folder: null, via: "http" })], version: "0.1.0" }), defaults: { mode: "installed", platform: "darwin" } });
+    expect(text).toContain("2 sessions are connected");
+    expect(text).toContain("Runs the relay from Sonobe 0.0.9, not this app's 0.1.0");
+    expect(text).toContain("Unidentified MCP client");
+    expect(text).toContain("Sonobe can't tell which session it is");
+  });
+});
+
 describe("Connect Claude setup", () => {
-  it("gives Claude Code the app's CLI by full path", async () => {
+  it("gives Claude Code the app's CLI by full path, for every project", async () => {
     const text = await show({ host: appHost({ ...RUNNING, cliPath: APP_CLI }), initialTab: "code", defaults: { mode: "installed", platform: "darwin" } });
-    expect(text).toContain(`claude mcp add sonobe -- ${APP_CLI} mcp`);
+    expect(text).toContain(`claude mcp add --scope user sonobe -- ${APP_CLI} mcp`);
+    expect(text).toContain("Run this once in a terminal, from any folder");
     expect(text).toContain("Runs the CLI that comes with the Sonobe app");
+    expect(text).toContain("claude mcp remove --scope user sonobe");
+    expect(text).toContain("Earlier versions added Sonobe to one folder only");
+    expect(text).toContain("claude mcp remove --scope local sonobe");
+    expect(text).toContain("Start a new Claude Code session in any folder");
+  });
+
+  it("keeps a headless setup with the folder where Claude starts", async () => {
+    const text = await show({ host: null, initialTab: "code", defaults: { mode: "checkout", platform: "darwin", repoPath: "/Users/me/sonobe", headlessProject: "/Users/me/Deck.sonobe" } });
+    expect(text).toContain("claude mcp add --scope local sonobe-headless -- node /Users/me/sonobe/packages/cli/src/main.ts mcp --headless /Users/me/Deck.sonobe");
+    expect(text).toContain("Run this in the folder where you start Claude");
+    expect(text).not.toContain("Earlier versions added Sonobe");
   });
 
   it("leads Claude Desktop with the config, because the app ships no .mcpb", async () => {

@@ -33,6 +33,8 @@ export interface ActionResult {
   message?: string;
   hint?: string;
   result?: ApplyOpsResult;
+  /** It worked, but the result may not be what the person expects (for a neutral toast). */
+  note?: { message: string; hint?: string };
 }
 
 const failed = (message: string, hint?: string): ActionResult => (hint ? { ok: false, message, hint } : { ok: false, message });
@@ -403,9 +405,42 @@ export function arrangeLayers(session: EditorSession, direction: ArrangeDirectio
     }
     if (index !== loc.index) ops.push({ op: "moveLayer", component: ctx.componentId, id: loc.layer.id, parent: loc.parent?.id ?? null, index });
   }
-  if (ops.length === 0) return { ok: true };
+  const note = stackingNote(locations, direction);
+  if (ops.length === 0) return note ? { ok: true, note } : { ok: true };
   const labels: Record<ArrangeDirection, string> = { forward: "Bring forward", backward: "Send backward", front: "Bring to front", back: "Send to back" };
-  return fromResult(apply(session, ops, `${labels[direction]} ${itemLabel(ctx.component, locations.map((l) => l.layer.id), [])}`, ctx.componentId));
+  const result = fromResult(apply(session, ops, `${labels[direction]} ${itemLabel(ctx.component, locations.map((l) => l.layer.id), [])}`, ctx.componentId));
+  return result.ok && note ? { ...result, note } : result;
+}
+
+/**
+ * Z Position orders siblings before the layer list does, so Bring to Front can't beat a sibling with
+ * a higher Z Position, and Send to Back can't get behind one with a lower Z Position. Say so, naming
+ * that sibling. Only typed values are compared; a patch-driven Z Position is known only while the
+ * prototype runs.
+ */
+function stackingNote(locations: readonly NonNullable<ReturnType<typeof findLayer>>[], direction: ArrangeDirection): ActionResult["note"] {
+  if (direction !== "front" && direction !== "back") return undefined;
+  const moved = new Set(locations.map((l) => l.layer.id));
+  const zOf = (layer: LayerNode) => (layer.props.zPosition === undefined ? 0 : layer.props.zPosition);
+  for (const loc of locations) {
+    const z = zOf(loc.layer);
+    if (typeof z !== "number") continue;
+    // The sibling furthest the other way (the highest Z Position for front, the lowest for back).
+    let other: LayerNode | undefined;
+    for (const sibling of loc.siblings) {
+      const sz = zOf(sibling);
+      if (moved.has(sibling.id) || typeof sz !== "number" || !(direction === "front" ? sz > z : sz < z)) continue;
+      if (!other || (direction === "front" ? sz > (zOf(other) as number) : sz < (zOf(other) as number))) other = sibling;
+    }
+    if (!other) continue;
+    const name = `“${loc.layer.name || loc.layer.id}”`;
+    const otherName = `“${other.name || other.id}”`;
+    const oz = zOf(other) as number;
+    return direction === "front"
+      ? { message: `${otherName} still draws in front of ${name}`, hint: `Its Z Position is ${oz}, higher than ${name}'s ${z}, and Z Position decides the order before the layer list does. Give ${name} a Z Position above ${oz}.` }
+      : { message: `${otherName} still draws behind ${name}`, hint: `Its Z Position is ${oz}, lower than ${name}'s ${z}, and Z Position decides the order before the layer list does. Give ${name} a Z Position below ${oz}.` };
+  }
+  return undefined;
 }
 
 /** Enter the component behind the selected instance layer or component patch. */

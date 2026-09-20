@@ -9,9 +9,15 @@ final class ViewerModel {
     var failure: String?
     var inputError: String?
     private(set) var recent: URL?
+    /// The player taught its three-finger menu once (a tip, or the person opened it); the page keeps no storage between launches.
+    var menuTipSeen: Bool {
+        didSet { defaults.set(menuTipSeen, forKey: Self.menuTipKey) }
+    }
     private let defaults: UserDefaults
 
     private static let recentKey = "recentPlayerURL"
+    /// `-menuTipSeen NO` in launch arguments shows the tip again (UI tests).
+    private static let menuTipKey = "menuTipSeen"
     /// `xcrun simctl launch booted <bundle id> -SonobePlayerURL http://…` opens a preview directly.
     private static let launchKey = "SonobePlayerURL"
 
@@ -19,6 +25,7 @@ final class ViewerModel {
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
+        menuTipSeen = defaults.bool(forKey: Self.menuTipKey)
         recent = defaults.string(forKey: Self.recentKey).flatMap(Self.playerURL(from:))
         if let launch = defaults.string(forKey: Self.launchKey).flatMap(Self.playerURL(from:)) { show(launch) }
     }

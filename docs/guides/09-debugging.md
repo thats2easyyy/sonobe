@@ -54,13 +54,14 @@ Diagnostics lives in the bottom HUD, next to the Console, AI Activity and Perfor
 | Invalid link or type mismatch | Two ports that can't talk directly | Add the converter patch it suggests |
 | Zero-latency self-cycle | A patch feeding its own input | Put a Delay One Frame in the loop |
 | Pulse into a state input | A tap wired where a lasting value is expected | Add a Switch (guide 03) |
-| Loop length mismatch | Lists of different lengths meeting | Check whether the wrap was intended (guide 07) |
+| Loop length mismatch | Lists of different lengths meeting at a patch or at a layer's copies | Check whether the wrap was intended, or connect Repeat to the list the copies follow (guide 07) |
+| Children repeat inside one copy | A card you drag makes one copy while the text inside it is looped | Apply the fix: it connects the loop to the card's Repeat (guide 07) |
 | Empty loop (Runtime) | A layer or component has no copies because an empty loop erased real items, often a Loop Select with an index past the end | Apply the suggested Out of Range fix (guide 07) |
 | Unused patches | Leftovers that don't affect anything | Delete them, or connect them |
 | Missing asset | A media file that moved or was deleted | Relink the file |
 | Layer can't receive touches | Opacity 0, or disabled | Use a Hit Area, or enable the layer |
 
-Findings marked **Runtime** come from the running prototype rather than the document: script errors, loops that hit their size limit, and empty loops. They go away when the problem does.
+Findings marked **Runtime** come from the running prototype rather than the document: script errors, loops that hit their size limit, empty loops, and loop lengths that only the running prototype knows, like a filtered list. They go away when the problem does.
 
 Info-level findings are easy to ignore. Clear them anyway. A graph with forty "unused patch" notes hides the one warning that matters.
 
@@ -94,6 +95,8 @@ When a replicated layer disappears, the Viewer says so: a notice like "Card has 
 > Layer "Card" has 0 copies because "Card Above: Gone" (Loop Select) returned an empty loop: indices 1, 2 and 3 are past the end of its 1-item Loop. The empty loop reached "Card Above Gone" (If / Else) on If False and erased the 4 items on Condition.
 
 Read it from where the empty loop started to where it erased things. The fix buttons change the patch that started it, usually the Out of Range input of a Loop Select (guide 07). Restarting with ⌘R won't help here, because the wiring empties the list again on every frame.
+
+One case is different. When you edit while this notice is up, Sonobe starts a hidden copy of the prototype from scratch and runs it for two frames. If that copy draws the layer, the wiring is fine, but the running prototype still holds state from before your edit, like a counter that already counted down. The notice then says "The prototype kept state from before your edit". Click Restart.
 
 Claude sees the same warning in its simulations, and when it reads a value that comes back empty, `sim_get_values` adds a note saying why, such as "Not drawn: Layer "Card" has 0 copies because…".
 

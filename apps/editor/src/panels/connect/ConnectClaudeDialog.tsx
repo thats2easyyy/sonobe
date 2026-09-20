@@ -10,7 +10,22 @@ import { toast } from "../../ui/Toast.tsx";
 import { detectHostPlatform } from "../../ui/commands/shortcutManager.ts";
 import { readString, writeString } from "../../ui/lib/storage.ts";
 import { claudeDesktopBundle, detectRepoPath, IS_DEV_BUILD } from "./buildInfo.ts";
-import { claudeCodeCommand, claudeDesktopConfig, claudeDesktopConfigPath, EXAMPLE_PROMPTS, mcpLaunchSpec, shellForPlatform, tildePath, type LaunchMode, type ShellFlavor } from "./connectInfo.ts";
+import {
+  claudeCodeCommand,
+  claudeCodeRemoveCommand,
+  claudeDesktopConfig,
+  claudeDesktopConfigPath,
+  connectedSessions,
+  EXAMPLE_PROMPTS,
+  isHeadlessSpec,
+  mcpLaunchSpec,
+  relativeTime,
+  shellForPlatform,
+  tildePath,
+  type LaunchMode,
+  type McpSessionInfo,
+  type ShellFlavor,
+} from "./connectInfo.ts";
 import { connectClaudeStore, useConnectClaude, type ConnectTab } from "./connectStore.ts";
 import { CopyBlock } from "./CopyBlock.tsx";
 import { useMcpStatus, type McpStatusSource, type McpStatusState } from "./useMcpStatus.ts";
@@ -165,18 +180,7 @@ function ConnectClaudeContent({ titleId, bodyRef, onClose, host, onOpenGuide, de
             ]}
           />
           {tab === "code" ? (
-            <ol className="sb-connect__steps">
-              <Step n={1} title="Run this in a terminal">
-                <CopyBlock text={claudeCodeCommand(spec, shell)} label="Claude Code command" />
-                {launchSettings}
-              </Step>
-              <Step n={2} title="Start Claude Code and ask">
-                <div className="sb-connect__ask">“{browser ? "Show me the outline of this prototype." : "List the documents open in Sonobe."}”</div>
-                <p className="sb-connect__hint">
-                  Run <code>claude mcp list</code> anytime to check the connection.
-                </p>
-              </Step>
-            </ol>
+            <ClaudeCodeSteps spec={spec} shell={shell} browser={browser} launchSettings={launchSettings} />
           ) : (
             <DesktopSteps spec={spec} platform={platform} launchSettings={launchSettings} mode={mode} browser={browser} />
           )}
@@ -239,6 +243,40 @@ function Step({ n, title, children }: { n: number; title: string; children: Reac
   );
 }
 
+/**
+ * Claude Code: the relay installs once at user scope, so every session gets Sonobe's tools wherever it
+ * starts. A headless server works on one folder, so it stays with that project (local scope).
+ */
+function ClaudeCodeSteps({ spec, shell, browser, launchSettings }: { spec: ReturnType<typeof mcpLaunchSpec>; shell: ShellFlavor; browser: boolean; launchSettings: ReactNode }) {
+  const headless = isHeadlessSpec(spec);
+  return (
+    <ol className="sb-connect__steps">
+      <Step n={1} title={headless ? "Run this in the folder where you start Claude" : "Run this once in a terminal, from any folder"}>
+        <CopyBlock text={claudeCodeCommand(spec, shell)} label="Claude Code command" />
+        {headless ? (
+          <p className="sb-connect__hint">Headless mode works on one prototype folder, so it's set up for that Claude Code project only.</p>
+        ) : (
+          <>
+            <p className="sb-connect__hint">
+              If Claude Code says <code>sonobe</code> already exists, it's set up. To point it at this copy of Sonobe, run <code>{claudeCodeRemoveCommand("user")}</code>, then the command again.
+            </p>
+            <p className="sb-connect__hint">
+              Set up before? Earlier versions added Sonobe to one folder only, and that entry wins in its folder. Run <code>{claudeCodeRemoveCommand("local")}</code> in that folder.
+            </p>
+          </>
+        )}
+        {launchSettings}
+      </Step>
+      <Step n={2} title={headless ? "Start Claude Code in that folder and ask" : "Start a new Claude Code session in any folder and ask"}>
+        <div className="sb-connect__ask">“{browser ? "Show me the outline of this prototype." : "List the documents open in Sonobe."}”</div>
+        <p className="sb-connect__hint">
+          {browser ? null : "The session shows up at the top of this screen once it connects. "}Run <code>claude mcp list</code> anytime to check the setup.
+        </p>
+      </Step>
+    </ol>
+  );
+}
+
 function StatusCard({ browser, mcp }: { browser: boolean; mcp: McpStatusState }) {
   if (browser) {
     return (
@@ -266,16 +304,32 @@ function StatusCard({ browser, mcp }: { browser: boolean; mcp: McpStatusState })
     );
   }
   if (mcp.status?.running) {
+    const status = mcp.status;
+    const connected = connectedSessions(status);
+    const server = (
+      <>
+        Sonobe's server is running{status.url ? " at " : "."}
+        {status.url && <code className="sb-connect__url">{status.url}</code>}
+        {status.url ? ". " : " "}Only apps on this computer can connect.
+      </>
+    );
+    // Green only for a connected session: a server that's listening says nothing about Claude.
     return (
-      <div className="sb-connect__status" data-tone="success" role="status">
-        <span className="sb-connect__status-dot" aria-hidden />
+      <div className="sb-connect__status" data-tone={connected.length ? "success" : "neutral"} role="status">
+        <span className="sb-connect__status-dot" data-on={connected.length > 0} aria-hidden />
         <div className="sb-connect__status-text">
-          <div className="sb-connect__status-title">Sonobe is ready for Claude</div>
+          <div className="sb-connect__status-title">{connected.length === 0 ? "No Claude session is connected" : connected.length === 1 ? `${connected[0]!.label} is connected` : `${connected.length} sessions are connected`}</div>
           <div className="sb-connect__status-desc">
-            The MCP server is running{mcp.status.url ? " at " : "."}
-            {mcp.status.url && <code className="sb-connect__url">{mcp.status.url}</code>}
-            {mcp.status.url ? ". " : " "}Only apps on this computer can connect.
+            {connected.length === 0 ? "Sessions show up here once Claude starts Sonobe's server. Set it up below, then start a new Claude Code session or restart Claude Desktop. " : null}
+            {server}
           </div>
+          {status.clients.length > 0 && (
+            <ul className="sb-connect__sessions" aria-label="Sessions">
+              {status.clients.map((session) => (
+                <SessionRow key={session.id} session={session} appVersion={status.version} />
+              ))}
+            </ul>
+          )}
         </div>
       </div>
     );
@@ -293,6 +347,41 @@ function StatusCard({ browser, mcp }: { browser: boolean; mcp: McpStatusState })
         Check again
       </Button>
     </div>
+  );
+}
+
+/** One session: who, where, and what it did last. */
+function SessionRow({ session, appVersion }: { session: McpSessionInfo; appVersion: string | null }) {
+  const now = Date.now();
+  const activity =
+    session.lastActivityAt !== null
+      ? `${session.state === "connected" ? "Active" : "Last active"} ${relativeTime(session.lastActivityAt, now)}${session.lastTool ? ` · ${session.lastTool}` : ""} · ${session.toolCalls} tool ${session.toolCalls === 1 ? "call" : "calls"}`
+      : session.state === "connected"
+        ? `Connected ${relativeTime(session.connectedAt, now)} · no tool calls yet`
+        : "No tool calls";
+  const state = session.state === "gone" ? "Disconnected" : session.state === "idle" ? "Quiet" : null;
+  const olderRelay = session.via === "relay" && session.relayVersion !== null && appVersion !== null && session.relayVersion !== appVersion;
+  return (
+    <li className="sb-connect__session" data-state={session.state}>
+      <span className="sb-connect__session-dot" aria-hidden />
+      <div className="sb-connect__session-text">
+        <div className="sb-connect__session-title">
+          {session.label}
+          {session.version && <span className="sb-connect__session-version sb-tabular"> {session.version}</span>}
+          {state && <span className="sb-connect__session-state"> · {state}</span>}
+        </div>
+        {session.folder && <code className="sb-connect__session-folder">{tildePath(session.folder)}</code>}
+        <div className="sb-connect__session-desc">{activity}</div>
+        {session.via === "http" && (
+          <div className="sb-connect__session-desc">It connected without Sonobe's relay (or through an older Sonobe's relay), so Sonobe can't tell which session it is. Sessions set up with the steps below show up by name.</div>
+        )}
+        {olderRelay && (
+          <div className="sb-connect__session-desc" data-tone="warn">
+            Runs the relay from Sonobe {session.relayVersion}, not this app's {appVersion}. Its setup points at another copy of Sonobe; set it up again with the steps below.
+          </div>
+        )}
+      </div>
+    </li>
   );
 }
 

@@ -3,13 +3,15 @@
  * (⌘R), the device frame (⌥D), and hit targets within reach and tucks rotate, device, pop-out, and
  * phone preview into a menu, so nothing truncates at narrow widths. Play/pause and fps sit under the
  * prototype, next to "On phone" (a QR code for the LAN web player). While the running prototype has
- * an empty_loop warning, a notice above the stage says what draws no copies, with Why? to reveal it.
+ * an empty_loop warning, a notice above the stage says what draws no copies, with Why? to reveal it,
+ * or, when a fresh start would draw it (an edit left old state), offers Restart instead.
  */
 
 import { DEVICE_PRESETS, getDevicePreset, type DevicePreset } from "@sonobe/core";
 import { ChevronDown, Frame, Maximize, Minimize2, Monitor, MoreHorizontal, MousePointerClick, PanelLeftClose, Pause, PictureInPicture2, Play, QrCode, RotateCcw, RotateCw, Smartphone, Tablet, TriangleAlert, Watch } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useStore } from "zustand";
+import { staleLayerName } from "../../runtime/staleState.ts";
 import { Panel } from "../../shell/Panel.tsx";
 import { useEditorSession } from "../../state/EditorProvider.tsx";
 import type { EditorSession } from "../../state/session.ts";
@@ -75,14 +77,28 @@ const ZOOM_KEY = "sonobe.viewer.zoom";
 
 /**
  * While the running prototype has an empty_loop warning: "Card has no copies · Why?". Why? opens the
- * Diagnostics tab and selects the layer or component. Restart doesn't help here (the wiring empties
- * the loop again), so the notice doesn't offer it.
+ * Diagnostics tab and selects the layer or component. Restart usually doesn't help (the wiring empties
+ * the loop again), so the notice offers it only when an edit left state from before it: a fresh start
+ * of the same document draws the layer (runtime/staleState.ts).
  */
 function EmptyLoopNote({ session }: { session: EditorSession }) {
   const diagnostics = useStore(session.runtime.state, (s) => s.diagnostics);
+  const stale = useStore(session.runtime.state, (s) => s.staleState);
   const doc = useStore(session.document, (s) => s.doc);
   const notice = useMemo(() => emptyLoopNotice(diagnostics, doc), [diagnostics, doc]);
   const cmds = useOptionalCommands();
+  if (stale) {
+    const name = staleLayerName(stale, doc);
+    return (
+      <div className="sb-vw__window-note" data-tone="warn" data-wrap="" role="status" title={`Started fresh, ${name} draws ${stale.copies} ${stale.copies === 1 ? "copy" : "copies"}. Restart to see your edit from the start.`}>
+        <RotateCcw size={13} aria-hidden />
+        <span className="sb-vw__window-note-text">The prototype kept state from before your edit</span>
+        <Button size="sm" variant="ghost" onClick={() => session.runtime.restart()}>
+          Restart
+        </Button>
+      </div>
+    );
+  }
   if (!notice) return null;
   const why = () => {
     cmds?.registry.run("view.showDiagnostics");

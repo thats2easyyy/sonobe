@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { createDiagnosticsCache, getDiagnostics } from "./diagnostics.ts";
 import { applyOps } from "./ops/index.ts";
-import { buildSampleDocument, emptyDoc, mockRegistry, mustApply } from "./testing/fixtures.ts";
+import { buildSampleDocument, emptyDoc, loopRegistry, mockRegistry, mustApply } from "./testing/fixtures.ts";
 import type { LayerNode, Op, SonobeDocument } from "./types.ts";
 
 /** Apply ops leniently (so documents can hold problems) and check the cache against a full pass. */
@@ -85,6 +85,30 @@ describe("createDiagnosticsCache", () => {
       [{ op: "removeKnob", id: "bounce" }],
     ];
     for (const ops of edits) doc = step(cache, doc, ops);
+  });
+
+  it("re-checks copies when a Repeat, a Loop's Count or a loop literal changes", () => {
+    const cache = createDiagnosticsCache(loopRegistry);
+    const stepWith = (doc: SonobeDocument, ops: Op[]) => {
+      const next = applyOps(doc, ops, { registry: loopRegistry, lenient: true, atomic: false }).doc;
+      expect(cache.get(next)).toEqual(getDiagnostics(next, loopRegistry));
+      return next;
+    };
+    let doc = stepWith(emptyDoc(), [
+      { op: "addLayer", layer: { id: "row", type: "group", name: "Row", props: { repeat: 4 } } },
+      { op: "addLayer", parent: "row", layer: { id: "label", type: "text", name: "Label" } },
+      { op: "addPatch", patch: { id: "rows", type: "loop", inputs: { count: 4 } } },
+      { op: "connect", from: "rows.index", to: "@label.opacity" },
+      { op: "addPatch", patch: { id: "sum", type: "add", inputs: { value1: { link: "rows.index" }, value2: { loop: [1, 2, 3, 4] } } } },
+    ]);
+    const mismatches = () => cache.get(doc).filter((d) => d.code === "loop_length_mismatch").length;
+    expect(mismatches()).toBe(0);
+    doc = stepWith(doc, [{ op: "setInput", target: "@row.repeat", value: 5 }]);
+    expect(mismatches()).toBe(1);
+    doc = stepWith(doc, [{ op: "setInput", target: "rows.count", value: 5 }]);
+    expect(mismatches()).toBe(1);
+    doc = stepWith(doc, [{ op: "setInput", target: "sum.value2", value: { loop: [1, 2, 3, 4, 5] } }]);
+    expect(mismatches()).toBe(0);
   });
 
   it("re-checks components that show a changed component", () => {

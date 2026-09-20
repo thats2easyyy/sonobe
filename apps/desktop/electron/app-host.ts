@@ -17,11 +17,13 @@ import {
   diffDiagnostics,
   HostError,
   isHostError,
+  isPlaceholderName,
   isolateSceneLayer,
   sceneNodesFor,
   TEMPLATES,
   ToolCancelledError,
   type DocumentSummary,
+  type DraftSummary,
   type HistoryItem,
   type CapturedDesign,
   type DesignCaptureRequest,
@@ -74,6 +76,14 @@ export interface AppHostOptions {
   /** Write a new project folder to disk (and approve it for the editor). */
   writeProject(dir: string, doc: SonobeDocument): Promise<void>;
   /**
+   * Check a folder an agent named for a new project (create_document, save_document({ path })) and
+   * approve it for the editor: @sonobe/mcp resolveProjectTarget's rules. Returns the absolute folder or
+   * throws a HostError. Without it, paths only have to be absolute.
+   */
+  newProjectTarget?(path: string): Promise<string>;
+  /** Drafts of unsaved work that no window has open (electron/drafts.ts), for list_documents. */
+  drafts?: { list(): Promise<{ id: string; name: string; projectPath: string | null; updatedAt: number; counts: DraftSummary["counts"]; torn?: boolean }[]> };
+  /**
    * Draw a simulation's frame for get_screenshot({ simId }). Without it (or when @sonobe/mcp's
    * SimulationManager has no `scene(simId)`), simulation screenshots explain that they're unavailable.
    */
@@ -82,6 +92,8 @@ export interface AppHostOptions {
   captureDesign?(request: DesignCaptureRequest, control?: HostCallControl): Promise<CapturedDesign>;
   /** Download an image for a capture made elsewhere (default: Node's fetch). */
   fetchImage?(url: string, signal: AbortSignal): Promise<{ bytes: Uint8Array; mime: string } | null>;
+  /** captureDesign draws SF Symbols (the helper runs on this Mac). Default false. */
+  sfSymbols?: boolean;
   /** A window's document appeared, reached a new revision, or went away (drives MCP resource notifications). */
   onDocumentChange?(change: DocumentChange): void;
   /** Creates the simulation manager. Default: @sonobe/mcp createSimulationManager (tests wrap it). */
@@ -116,6 +128,10 @@ export interface AppHost extends SonobeHost {
   documentChanged(targetId: number, revision: number): Promise<void>;
   /** Whether get_screenshot({ simId }) can draw a simulation's frame. */
   simulationScreenshots(): boolean;
+  /** The window whose document tools without docId (and the phone preview) use, or null with none open. */
+  activeTargetId(): number | null;
+  /** The document's scripts wait for the person's trust, as its editor last reported. */
+  scriptsPaused(docId: Id): boolean;
   dispose(): void;
 }
 
@@ -125,6 +141,10 @@ interface RendererInfo {
   projectPath: string | null;
   revision: number;
   dirty: boolean;
+  /** The draft keeping unsaved edits (older editors don't send it). */
+  draft?: { id: string; updatedAt: number };
+  /** The project's scripts wait for the person's trust (document.info `scripts`). */
+  scriptsPaused: boolean;
 }
 
 interface RendererApplyReply {
@@ -168,12 +188,14 @@ interface Entry {
   info: RendererInfo;
   snapshot: Snapshot | null;
   diagnostics: { doc: SonobeDocument; list: Diagnostic[] } | null;
-  /** Working badges this host started, by author name. */
+  /** Working badges this host started, by session (client id, else author name). */
   working: Map<string, { workId: string; intent: WorkIntent }>;
 }
 
 const OPEN_TIMEOUT_MS = 120_000;
 const APPLY_TIMEOUT_MS = 60_000;
+/** save_document never waits on the person, so it gets the apply limit, not the open one. */
+const SAVE_TIMEOUT_MS = 60_000;
 const HISTORY_SCAN = 500;
 
 const EDITOR_NOT_CONNECTED_HINT =
@@ -230,7 +252,16 @@ export function hostErrorFromRpc(err: unknown, method: string): HostError {
 function asInfo(value: unknown): RendererInfo {
   const v = (value ?? {}) as Record<string, unknown>;
   if (typeof v.name !== "string" || typeof v.revision !== "number") throw unexpectedReply("document.info");
-  return { name: v.name, projectPath: typeof v.projectPath === "string" ? v.projectPath : null, revision: v.revision, dirty: v.dirty === true };
+  const draft = v.draft as { id?: unknown; updatedAt?: unknown } | null | undefined;
+  const scripts = (v.scripts ?? {}) as { required?: unknown; trusted?: unknown };
+  return {
+    name: v.name,
+    projectPath: typeof v.projectPath === "string" ? v.projectPath : null,
+    revision: v.revision,
+    dirty: v.dirty === true,
+    scriptsPaused: scripts.required === true && scripts.trusted !== true,
+    ...(draft && typeof draft.id === "string" && typeof draft.updatedAt === "number" ? { draft: { id: draft.id, updatedAt: draft.updatedAt } } : {}),
+  };
 }
 
 function expandHome(p: string): string {
@@ -565,10 +596,12 @@ export function createAppHost(options: AppHostOptions): AppHost {
     conflict: { expectedRevision: expected, currentRevision: current },
   });
 
-  const openInto = async (target: RendererTarget, dir: string): Promise<DocumentSummary> => {
-    const reply = await call<{ ok?: unknown; cancelled?: unknown }>(target, "document.open", { path: dir }, OPEN_TIMEOUT_MS);
+  const openInto = async (target: RendererTarget, dir: string, draftId?: string): Promise<DocumentSummary> => {
+    const reply = draftId !== undefined
+      ? await call<{ ok?: unknown; cancelled?: unknown }>(target, "document.recoverDraft", { id: draftId }, OPEN_TIMEOUT_MS)
+      : await call<{ ok?: unknown; cancelled?: unknown }>(target, "document.open", { path: dir }, OPEN_TIMEOUT_MS);
     if (reply?.ok !== true) {
-      throw new HostError("open_cancelled", "The person kept their unsaved changes, so the project wasn't opened.", {
+      throw new HostError("open_cancelled", `The person kept their unsaved changes, so the ${draftId !== undefined ? "draft" : "project"} wasn't opened.`, {
         hint: "Ask them to save or discard their changes in Sonobe, then try again.",
       });
     }
@@ -579,10 +612,30 @@ export function createAppHost(options: AppHostOptions): AppHost {
     return summary(entry);
   };
 
+  /** A folder an agent named for a new project, checked and approved (projectTarget.ts), or just made absolute. */
+  const newProjectTarget = async (input: string): Promise<string> => {
+    if (options.newProjectTarget) return options.newProjectTarget(input);
+    const expanded = expandHome(input);
+    if (!path.isAbsolute(expanded)) {
+      throw new HostError("absolute_path_required", `"${input}" is a relative path, and the Sonobe app has no working folder to resolve it against.`, {
+        hint: 'Pass an absolute folder path such as "~/Documents/Checkout Flow.sonobe", or omit path to save in the Documents folder.',
+      });
+    }
+    return path.resolve(expanded);
+  };
+
   const host: AppHost = {
     kind: "app",
-    capabilities: { screenshots: true, selection: true, presence: true, autosave: false },
+    capabilities: { screenshots: true, selection: true, presence: true, autosave: false, sfSymbols: options.sfSymbols ?? false },
     registry,
+
+    ...(options.drafts
+      ? {
+          async listDrafts(): Promise<DraftSummary[]> {
+            return (await options.drafts!.list()).map((d) => ({ id: d.id, name: d.name, ...(d.projectPath ? { path: d.projectPath } : {}), updatedAt: d.updatedAt, counts: d.counts, ...(d.torn ? { torn: true } : {}) }));
+          },
+        }
+      : {}),
 
     async listDocuments() {
       const targets = options.targets();
@@ -609,6 +662,12 @@ export function createAppHost(options: AppHostOptions): AppHost {
         open.target.focus();
         return summary(await describe(open.target));
       }
+      if (ref.startsWith("draft:")) {
+        // A recovered draft (list_documents): the window's editor claims it, reads it and asks about unsaved changes first.
+        const target = activeTarget(targets) ?? (await options.ensureTarget?.()) ?? null;
+        if (!target) throw noWindow();
+        return openInto(target, "", ref.slice("draft:".length));
+      }
       const dir = path.isAbsolute(expandHome(ref)) ? await options.approveProject(path.resolve(expandHome(ref))) : null;
       if (!dir) {
         const docIds = [...entries.values()].map((e) => e.docId);
@@ -627,18 +686,8 @@ export function createAppHost(options: AppHostOptions): AppHost {
           hint: `Templates: ${TEMPLATES.map((t) => `${t.id} (${t.description})`).join("; ")}.`,
         });
       }
-      let dir: string;
-      if (request.path !== undefined) {
-        const expanded = expandHome(request.path);
-        if (!path.isAbsolute(expanded)) {
-          throw new HostError("absolute_path_required", `"${request.path}" is a relative path, and the Sonobe app has no working folder to resolve it against.`, {
-            hint: 'Pass an absolute folder path such as "~/Documents/Checkout Flow.sonobe", or omit path to save in the Documents folder.',
-          });
-        }
-        dir = path.resolve(expanded);
-      } else {
-        dir = await options.defaultProjectDir(request.name?.trim() || "Untitled");
-      }
+      // A new or empty folder, not inside another project (projectTarget.ts).
+      const dir = await newProjectTarget(request.path ?? (await options.defaultProjectDir(request.name?.trim() || "Untitled")));
       if (await options.projectExists(dir)) {
         throw new HostError("already_exists", `${dir} already holds a Sonobe project.`, { hint: "Open it with open_document instead, or pick another folder." });
       }
@@ -658,21 +707,46 @@ export function createAppHost(options: AppHostOptions): AppHost {
     async getDocument(docId) {
       const entry = await resolve(docId);
       const snap = await snapshot(entry);
-      return { docId: entry.docId, ...(entry.info.projectPath ? { path: entry.info.projectPath } : {}), doc: snap.doc, revision: snap.revision, dirty: entry.info.dirty, ...(snap.retired ? { retired: snap.retired } : {}) };
+      return {
+        docId: entry.docId,
+        ...(entry.info.projectPath ? { path: entry.info.projectPath } : {}),
+        doc: snap.doc,
+        revision: snap.revision,
+        dirty: entry.info.dirty,
+        ...(snap.retired ? { retired: snap.retired } : {}),
+        ...(entry.info.draft ? { draft: entry.info.draft } : {}),
+      };
     },
 
     async saveDocument(docId, saveOptions = {}) {
       const entry = await resolve(docId);
+      // The Save panel is the person's: an agent's save names its folder, or takes one from the document's name.
+      let dir: string | undefined;
+      if (saveOptions.path !== undefined) dir = await newProjectTarget(saveOptions.path);
+      else if (!entry.info.projectPath) {
+        if (isPlaceholderName(entry.info.name)) {
+          throw new HostError("path_needed", `"${entry.info.name || "Untitled"}" hasn't been saved to a project yet, and its name doesn't say what to call the folder.`, {
+            hint: 'Ask the person what to call it (and where it should go), then call save_document({ path: "~/Documents/<Name>.sonobe" }). Don\'t make a name up.',
+          });
+        }
+        dir = await newProjectTarget(await options.defaultProjectDir(entry.info.name));
+      }
       // Without force, the editor refuses (disk_changed) while outside changes wait for the person's decision.
-      const reply = await call<false | { ok?: unknown; path?: unknown; revision?: unknown }>(entry.target, "document.save", saveOptions.force ? { force: true } : {}, OPEN_TIMEOUT_MS);
+      const reply = await call<false | { ok?: unknown; path?: unknown; revision?: unknown; written?: unknown; deleted?: unknown }>(
+        entry.target,
+        "document.save",
+        { noDialog: true, ...(dir !== undefined ? { path: dir } : {}), ...(saveOptions.force ? { force: true } : {}) },
+        SAVE_TIMEOUT_MS,
+      );
       if (reply === false) {
         throw new HostError("save_cancelled", "Saving was cancelled.", {
-          hint: "This prototype hadn't been saved before, so Sonobe asked the person where to put it and they cancelled. Ask them where it should go, then call save_document again.",
+          hint: "Sonobe asked the person where to put it and they cancelled. Ask them where it should go, then call save_document with that path.",
         });
       }
       if (!reply || reply.ok !== true || typeof reply.revision !== "number") throw unexpectedReply("document.save");
       await describe(entry.target);
-      return { docId: entry.docId, ...(typeof reply.path === "string" ? { path: reply.path } : {}), revision: reply.revision, written: [], removed: [] };
+      const paths = (v: unknown) => (Array.isArray(v) ? v.filter((p): p is string => typeof p === "string") : []);
+      return { docId: entry.docId, ...(typeof reply.path === "string" ? { path: reply.path } : {}), revision: reply.revision, written: paths(reply.written), removed: paths(reply.deleted) };
     },
 
     async apply(ops, o) {
@@ -827,20 +901,32 @@ export function createAppHost(options: AppHostOptions): AppHost {
       return missing.length ? { revealed: true, reason: `Not found: ${missing.join(", ")}.` } : { revealed: true };
     },
 
+    async restartViewer(o) {
+      const entry = await resolve(o.docId);
+      if (entry.target.hasMethod("viewer.restart") !== true) {
+        throw new HostError("viewer_restart_unavailable", "This version of the editor can't restart its viewer from here.", { hint: "Ask the person to choose Viewer → Restart Prototype (⌘R) in Sonobe, or to update Sonobe." });
+      }
+      const reply = await call<{ restarted?: unknown; playing?: unknown }>(entry.target, "viewer.restart");
+      if (reply?.restarted !== true) throw unexpectedReply("viewer.restart");
+      return { docId: entry.docId, playing: reply.playing === true };
+    },
+
     async setWorking(work, o) {
       const entry = await resolve(o.docId);
-      const key = o.author.name;
+      // One badge per session (the relay's client id), so two sessions don't replace each other's.
+      const key = o.client?.id ?? o.author.name;
+      const client = o.client ? { ...o.client } : undefined;
       const current = entry.working.get(key);
       if (current) {
         entry.working.delete(key);
         await call(entry.target, "presence.finish", { workId: current.workId });
       } else if (work === null) {
-        await call(entry.target, "presence.finish", { author: o.author });
+        await call(entry.target, "presence.finish", { author: o.author, ...(client ? { client } : {}) });
       }
       if (work === null) return;
-      const reply = await call<{ workId?: unknown }>(entry.target, "presence.begin", { ids: work.ids, intent: work.intent, author: o.author });
+      const reply = await call<{ workId?: unknown }>(entry.target, "presence.begin", { ids: work.ids, intent: work.intent, author: o.author, ...(client ? { client } : {}) });
       if (typeof reply?.workId !== "string") throw unexpectedReply("presence.begin");
-      entry.working.set(key, { workId: reply.workId, intent: { ids: [...work.ids], intent: work.intent, author: o.author, since: now() } });
+      entry.working.set(key, { workId: reply.workId, intent: { ids: [...work.ids], intent: work.intent, author: o.author, since: now(), ...(client ? { client } : {}) } });
     },
 
     async presence(docId) {
@@ -899,6 +985,10 @@ export function createAppHost(options: AppHostOptions): AppHost {
     },
 
     simulationScreenshots: () => typeof sceneFunction() === "function" && !!options.renderScene,
+
+    activeTargetId: () => activeTarget(options.targets())?.id ?? null,
+
+    scriptsPaused: (docId) => findEntry(docId)?.info.scriptsPaused === true,
 
     dispose() {
       manager.dispose();

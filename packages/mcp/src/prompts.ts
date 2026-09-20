@@ -30,7 +30,7 @@ export function registerPrompts(tc: ToolContext): void {
           "Work like this:",
           '1. get_guide("importing") if you haven\'t this conversation, then get_document_info for the device size.',
           "2. If the screen is part of a web app you can run, find its dev server (package.json scripts; start it if it isn't running) and call import_design with its url. Use selector for a single component and waitFor for data that loads late.",
-          "3. Otherwise read the screen's code and theme files and write one faithful static HTML page at the device width (real copy, colors, fonts, spacing, inline SVG icons, data-name on elements to wire), then call import_design with html.",
+          "3. Otherwise read the screen's code and theme files and write one faithful static HTML page at the device width (real copy, colors, fonts, spacing, inline SVG icons, SF Symbols as <svg data-sf-symbol=\"heart.fill\"></svg>, data-name on elements to wire), then call import_design with html.",
           "4. Compare get_screenshot with the source (import_design with screenshot: true returns the page). Fix what matters by importing again with replace set to the screen's id.",
           ...(interaction ? ["5. begin_work, wire the interaction onto the imported layer ids, verify it with sim_reset, sim_dispatch and sim_trace, then finish_work."] : []),
           `${interaction ? 6 : 5}. Tell me what came across, what you approximated, and which layers are named for wiring, in plain words.`,

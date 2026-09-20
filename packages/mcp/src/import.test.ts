@@ -1,7 +1,10 @@
 import { existsSync, readdirSync } from "node:fs";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import path from "node:path";
+import type { SymbolRenderer } from "@sonobe/import";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import type { HeadlessHost } from "./headless.ts";
+import { createHeadlessHost, symbolsFromEnv, type HeadlessHost } from "./headless.ts";
 import { isHostError, type CapturedDesign, type DesignCaptureRequest, type HostCallControl } from "./host.ts";
 import { connectClient, tempProject, type TempProject, type TestClient } from "./test-helpers.ts";
 
@@ -266,5 +269,72 @@ describe.skipIf(!playwrightReady)("import_design with a browser (headless Playwr
     expect(Date.now() - abortedAt).toBeLessThan(2_000);
     expect(isHostError(err) && err.code).toBe("cancelled");
     expect(steps).toEqual(expect.arrayContaining(["Starting a headless browser", "Rendering the HTML"]));
+  }, 60_000);
+});
+
+describe("SF Symbols in headless imports", () => {
+  it("finds the helper through SONOBE_SFSYMBOL, and explains when it can't", () => {
+    expect(symbolsFromEnv({}).unavailable).toContain("only when SONOBE_SFSYMBOL names the sfsymbol helper");
+    expect(symbolsFromEnv({ SONOBE_SFSYMBOL: "/nowhere/sfsymbol" }).unavailable).toBe("SONOBE_SFSYMBOL names /nowhere/sfsymbol, but there's no file there. Point it at the sfsymbol helper (Sonobe.app/Contents/Resources/bin/sfsymbol) and restart the server.");
+    expect(symbolsFromEnv({ SONOBE_SFSYMBOL: process.execPath }).unavailable).toBeUndefined();
+  });
+
+  const withSymbols = async (symbols: SymbolRenderer) => {
+    const dir = await mkdtemp(path.join(tmpdir(), "sonobe-mcp-symbols-"));
+    const host = createHeadlessHost({ symbols });
+    await host.createDocument({ path: path.join(dir, "Symbols.sonobe") });
+    const c = await connectClient(host);
+    return {
+      c,
+      cleanup: async () => {
+        await c.close();
+        await host.close();
+        await rm(dir, { recursive: true, force: true });
+      },
+    };
+  };
+
+  const circles: SymbolRenderer = {
+    render: async (requests) =>
+      requests.map((r) => ({ ok: true, width: r.size, height: r.size, svg: `<svg xmlns="http://www.w3.org/2000/svg" width="${r.size}" height="${r.size}" viewBox="0 0 ${r.size} ${r.size}"><circle cx="${r.size / 2}" cy="${r.size / 2}" r="${r.size / 2}" fill="${r.colors[0]!.slice(0, 7)}"/></svg>` })),
+  };
+
+  it("says in get_document_info whether imports draw SF Symbols", async () => {
+    for (const [symbols, text, flag] of [
+      [circles, "imports draw SF Symbols", true],
+      [symbolsFromEnv({}), "imports show SF Symbols as placeholders", false],
+    ] as const) {
+      const { c, cleanup } = await withSymbols(symbols);
+      try {
+        const info = await c.call("get_document_info", {});
+        expect(info.text).toContain(text);
+        expect(info.structured.host).toMatchObject({ kind: "headless", sfSymbols: flag });
+      } finally {
+        await cleanup();
+      }
+    }
+  });
+
+  it.skipIf(!playwrightReady)("imports <svg data-sf-symbol> as an image the wrapper names, or a placeholder with a note", async () => {
+    const html = `<!doctype html><body style="margin:0"><div data-name="Like Button" style="display:flex;margin:80px 16px"><svg data-sf-symbol="heart.fill" style="font-size:28px;color:#F24D47"></svg></div></body>`;
+    const drawn = await withSymbols(circles);
+    try {
+      const r = await drawn.c.call("import_design", { html, name: "Card" });
+      expect(r.isError, r.text).toBe(false);
+      const outline = await drawn.c.call("get_outline", {});
+      expect(outline.text).toMatch(/layer like_button image "Like Button" @16,80 28x28 image=asset:heart_fill/);
+    } finally {
+      await drawn.cleanup();
+    }
+    const placeholder = await withSymbols(symbolsFromEnv({}));
+    try {
+      const r = await placeholder.c.call("import_design", { html, name: "Card" });
+      expect(r.isError, r.text).toBe(false);
+      expect(r.text).toContain("Note: The SF Symbol “heart.fill” is a gray placeholder: Headless Sonobe draws SF Symbols only when SONOBE_SFSYMBOL names the sfsymbol helper");
+      const outline = await placeholder.c.call("get_outline", {});
+      expect(outline.text).toMatch(/layer like_button rectangle "Like Button" @16,80 28x28/);
+    } finally {
+      await placeholder.cleanup();
+    }
   }, 60_000);
 });

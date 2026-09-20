@@ -18,6 +18,7 @@ import {
   isLayerInput,
   isLinkInput,
   knobLiteral,
+  loopShapes,
   parseAddress,
   resolveLayerProps,
   resolveNodePorts,
@@ -30,6 +31,7 @@ import {
   type KnobSet,
   type LayerNode,
   type Literal,
+  type LoopShapes,
   type PatchNode,
   type PatchSpec,
   type ResolvedPort,
@@ -173,6 +175,7 @@ export function compileDocument(doc: SonobeDocument, engineRegistry: EngineRegis
       inputs: [],
       inputIndex: new Map(),
       replicators: [],
+      repeat: null,
       nodes: new Map(),
       instances: new Map(),
       broadcasters: [],
@@ -380,6 +383,7 @@ export function compileDocument(doc: SonobeDocument, engineRegistry: EngineRegis
         outputs: (spec.outputs ?? []).map((p) => ({ ...p, type: p.type === "variant" ? "any" : p.type })),
         children: [],
         instance: null,
+        countFixed: false,
         propBindings: new Map(),
       };
       scope.layerIndex.set(node.id, layer);
@@ -606,6 +610,10 @@ export function compileDocument(doc: SonobeDocument, engineRegistry: EngineRegis
       bindInstanceInputs(host, child, layer.node.props, { layerId: layer.id, text: `Component layer "${layer.node.name || layer.id}"` });
       for (const key of Object.keys(layer.node.props)) {
         const prop = layer.props.get(key);
+        if (key === "repeat" && prop && !child.inputIndex.has(key)) {
+          child.repeat = propBinding(layer, key);
+          continue;
+        }
         if (!prop || child.inputIndex.has(key) || prop.wholeLoop) continue;
         const binding = propBinding(layer, key);
         if (binding.kind !== "const" || binding.value !== null) child.replicators.push(binding);
@@ -615,12 +623,24 @@ export function compileDocument(doc: SonobeDocument, engineRegistry: EngineRegis
     for (const { host, layer } of layerInstances) if (host === scope && layer.instance) bindAllInputs(layer.instance);
   }
 
+  // What the document says about loop lengths, per component: the runtime leaves the loop length
+  // mismatches diagnostics can see to diagnostics.
+  const shapes = new Map<Id, LoopShapes>();
+  const shapesOf = (component: Component) => {
+    let known = shapes.get(component.id);
+    if (!known) shapes.set(component.id, (known = loopShapes(doc, component.id, registry)));
+    return known;
+  };
+
   function bindLayers(layers: readonly CLayer[]): void {
     for (const layer of layers) {
+      const known = shapesOf(layer.scope.component);
+      layer.countFixed = typeof known.count(layer.id) === "number";
       for (const key of Object.keys(layer.node.props)) {
         const prop = layer.props.get(key);
         if (!prop) continue;
-        layer.bound.push({ key, type: prop.type, wholeLoop: prop.wholeLoop === true, binding: propBinding(layer, key) });
+        const lengthFixed = typeof known.ofValue(layer.node.props[key], layer.id)?.length === "number";
+        layer.bound.push({ key, type: prop.type, wholeLoop: prop.wholeLoop === true, binding: propBinding(layer, key), lengthFixed });
       }
       bindLayers(layer.children);
     }
@@ -665,6 +685,7 @@ export function compileDocument(doc: SonobeDocument, engineRegistry: EngineRegis
     if (cnode.copiesOf) {
       for (const input of cnode.copiesOf.inputs) if (input.loop) bindingDeps(input.binding, deps);
       for (const r of cnode.copiesOf.replicators) bindingDeps(r, deps);
+      bindingDeps(cnode.copiesOf.repeat, deps);
     }
     if (cnode.scope.copies) deps.push(cnode.scope.copies);
     cnode.deps = [...new Set(deps)];
@@ -677,10 +698,10 @@ export function compileDocument(doc: SonobeDocument, engineRegistry: EngineRegis
       return deps.some((d) => d !== cnode && d.order >= cnode.order);
     };
     if (cnode.kind === "copies") {
-      // Per loop input of the instance, then per replicator: the copy count reads last frame's value there.
+      // Per loop input of the instance, then per replicator, then Repeat: the copy count reads last frame's value there.
       const child = cnode.copiesOf!;
       for (const input of child.inputs) input.feedback = input.loop && later(input.binding);
-      cnode.feedback = [...child.inputs.map((input) => input.feedback), ...child.replicators.map(later)];
+      cnode.feedback = [...child.inputs.map((input) => input.feedback), ...child.replicators.map(later), ...(child.repeat ? [later(child.repeat)] : [])];
       continue;
     }
     cnode.bindings.forEach((b, i) => {

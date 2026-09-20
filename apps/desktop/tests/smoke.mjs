@@ -5,8 +5,9 @@
  * 1. Launches against a missing editor build (setup page): window + secure defaults,
  *    window.sonobeHost, native menus and command delivery, main→renderer RPC, project IO + watching,
  *    keychain secrets (with the test cipher), the MCP endpoint (token file, Host/Origin guards, tools
- *    explaining that no editor is connected), openExternal and link handling, a screenshot, and a clean
- *    quit that removes mcp.json.
+ *    explaining that no editor is connected), connected sessions (a real `sonobe mcp` relay listed with
+ *    its folder, pushed to the window, and gone after its goodbye), openExternal and link handling, a
+ *    screenshot, and a clean quit that removes mcp.json.
  * 2. Builds the editor (npm run build -w @sonobe/editor) and launches it with SONOBE_LAN=1. When the
  *    build doesn't mount the MCP bridge, it says so and uses an editor harness instead (the real
  *    editor session, RPC handlers and viewer from apps/editor/src). Then runs the whole loop over
@@ -286,7 +287,7 @@ try {
     nodeProcess: typeof globalThis.process,
   }));
   assert(hostInfo.type === "object", "window.sonobeHost exists", hostInfo);
-  for (const key of ["closeViewerWindow", "commands", "getMcpStatus", "getPreviewStatus", "getViewerWindowStatus", "notifyDocumentChanged", "onCommand", "onOpenProject", "onPreviewStatus", "onViewerWindowStatus", "openExternal", "openProjectDialog", "platform", "popOutViewer", "readProject", "recentProjects", "revealInFinder", "rpc", "saveProjectDialog", "secrets", "setDocumentEdited", "setTitle", "startPreview", "stopPreview", "version", "watchProject", "writeProject"]) {
+  for (const key of ["closeViewerWindow", "commands", "drafts", "getMcpStatus", "onMcpStatus", "getPreviewStatus", "getViewerWindowStatus", "notifyDocumentChanged", "notifyPrototypeRestarted", "onCommand", "onOpenProject", "onPreviewStatus", "onViewerWindowStatus", "openExternal", "openProjectDialog", "platform", "popOutViewer", "readProject", "readProjectIfExists", "recentProjects", "revealInFinder", "rpc", "saveProjectDialog", "secrets", "setDocumentEdited", "setTitle", "startPreview", "stopPreview", "version", "watchProject", "writeProject"]) {
     assert(hostInfo.keys.includes(key), `sonobeHost.${key}`, hostInfo.keys);
   }
   assert(hostInfo.platform === process.platform, "platform", hostInfo.platform);
@@ -343,6 +344,39 @@ try {
   const previewOff = await win.evaluate(() => window.sonobeHost.getPreviewStatus());
   assert(previewOff.running === false && previewOff.url === null, "phone preview is off by default", previewOff);
   log(`MCP endpoint ok on ${conn.url} (${setupTools.tools.length} tools; setup page answers editor_not_connected)`);
+
+  // Sessions: `sonobe mcp` names its session, so Connect Claude lists it with its folder, and marks it
+  // gone when the client closes stdin. The direct client above has no relay: one anonymous row.
+  await win.evaluate(() => {
+    window.__mcpPushes = [];
+    window.sonobeHost.onMcpStatus((s) => window.__mcpPushes.push(s));
+  });
+  const sessionFolder = path.join(temp, "noddit");
+  mkdirSync(sessionFolder, { recursive: true });
+  const relay = spawn(process.execPath, [path.join(repoDir, "packages/cli/src/main.ts"), "mcp"], { cwd: temp, env: { ...process.env, SONOBE_HOME: home, CLAUDE_PROJECT_DIR: sessionFolder }, stdio: ["pipe", "pipe", "pipe"] });
+  let relayOut = "";
+  relay.stdout.on("data", (d) => (relayOut += d));
+  const relaySend = (message) => relay.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", ...message })}\n`);
+  relaySend({ id: 1, method: "initialize", params: { protocolVersion: "2025-11-25", capabilities: {}, clientInfo: { name: "claude-code", title: "Claude Code", version: "smoke" } } });
+  await poll(() => relayOut.includes('"id":1'), { message: "the relay's initialize answer" });
+  relaySend({ method: "notifications/initialized" });
+  relaySend({ id: 2, method: "tools/call", params: { name: "get_guide", arguments: { topic: "loops" } } });
+  await poll(() => relayOut.includes('"id":2'), { message: "the relayed tool call" });
+  const sessionStatus = await poll(async () => {
+    const s = await win.evaluate(() => window.sonobeHost.getMcpStatus());
+    return s.clients.find((c) => c.folder === sessionFolder && c.toolCalls >= 1) ? s : null;
+  }, { message: "the relay's session in getMcpStatus" });
+  const listedSession = sessionStatus.clients.find((c) => c.folder === sessionFolder);
+  assert(listedSession.label === "Claude Code" && listedSession.via === "relay" && listedSession.state === "connected" && listedSession.lastTool === "get_guide" && listedSession.relayVersion, "the relay's session", listedSession);
+  assert(sessionStatus.clients.some((c) => c.via === "http" && c.toolCalls === 2), "the direct client (get_guide, get_outline) shows as one anonymous row", sessionStatus.clients);
+  await poll(() => win.evaluate(() => window.__mcpPushes.some((s) => s.clients.some((c) => c.lastTool === "get_guide" && c.via === "relay"))), { message: "a pushed MCP status" });
+  relay.stdin.end();
+  await new Promise((resolve) => relay.once("exit", resolve));
+  await poll(async () => {
+    const s = await win.evaluate(() => window.sonobeHost.getMcpStatus());
+    return s.clients.find((c) => c.id === listedSession.id)?.state === "gone";
+  }, { message: "the session marked gone after its goodbye" });
+  log(`sessions ok (${listedSession.label} in ${path.basename(sessionFolder)}, pushed to the window, gone after its goodbye)`);
 
   // Menus and command delivery.
   const menuLabels = await app.evaluate(({ Menu }) => Menu.getApplicationMenu()?.items.map((i) => i.label) ?? []);
@@ -548,7 +582,7 @@ try {
 
   const mcp = await connectMcp(await readConnection());
   const { tools } = await mcp.client.listTools();
-  for (const name of ["get_document_info", "get_outline", "add_patches", "connect", "apply_ops", "sim_reset", "sim_dispatch", "sim_step", "sim_get_values", "get_screenshot", "begin_work", "finish_work", "reveal", "list_history", "undo"]) {
+  for (const name of ["get_document_info", "get_outline", "add_patches", "connect", "apply_ops", "sim_reset", "sim_dispatch", "sim_step", "sim_get_values", "get_screenshot", "begin_work", "finish_work", "reveal", "restart_viewer", "list_history", "undo"]) {
     assert(tools.some((t) => t.name === name), `tool ${name}`, tools.map((t) => t.name));
   }
   const info = await mcp.call("get_document_info");
@@ -690,7 +724,13 @@ try {
     pushed = await socket.next((m) => m.type === "document" && m.revision === direct.revision);
   }
   assert(pushed.doc.components.main.patches.press_scale.inputs.end === 0.92, "pushed revisions sync players", pushed.revision);
+
+  // Restarting the live prototype (restart_viewer, like ⌘R) restarts the players too.
+  const restarted = await mcp.call("restart_viewer");
+  assert(!restarted.isError && restarted.text.startsWith("Restarted the live prototype"), "restart_viewer", restarted.text);
+  await socket.next((m) => m.type === "restart");
   socket.ws.close();
+  log("restart_viewer restarted the live prototype and the phone preview's players");
   log(`phone preview on ${preview.url}${preview.lanReachable ? "" : " (loopback only)"}; live sync ${firstSync.revision} → ${synced.revision} → ${pushed.revision} (pushed ${editorPushes ? "by the editor itself" : "with notifyDocumentChanged"})`);
 
   // Pop-out viewer window: the live prototype in its own sandboxed window.
