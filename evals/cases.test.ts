@@ -64,7 +64,7 @@ function namedLayers(evalCase: EvalCase): string[] {
 
 describe("eval cases", () => {
   it("has cases from the examples, the usability study and the retro", () => {
-    expect(ids.filter((id) => id.startsWith("example-"))).toHaveLength(15);
+    expect(ids.filter((id) => id.startsWith("example-"))).toHaveLength(16);
     expect(ids.filter((id) => id.startsWith("study-")).length).toBeGreaterThanOrEqual(4);
     expect(ids.filter((id) => id.startsWith("retro-")).length).toBeGreaterThanOrEqual(6);
   });

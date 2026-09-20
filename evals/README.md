@@ -65,7 +65,7 @@ evals/cases/retro-knob-presets/
 
 The seed cases:
 
-- `example-*`: the 15 examples with their patches removed, and a prompt written from each README. The layers are there and Claude builds the logic. Their checks are the example's own `test.json` expectations on layer properties.
+- `example-*`: the 16 examples with their patches removed, and a prompt written from each README. The layers are there and Claude builds the logic. For the Noddit Deck, that's the imported Discover screen with its four cards. Their checks are the example's own `test.json` expectations on layer properties.
 - `study-*`: the tasks from the [usability study](../docs/research/ai-usability-study.md): read a prototype, a beginner's like button, a designer's bottom sheet, debugging a flick, and explaining a carousel before changing it.
 - `retro-*`: regressions from the Noddit test session's retro: a looped deck that must survive its last card (no empty loops), copy 0 on top through Z Position, rebuilding a component in one batch without stale ports or `_2` ids, a Repeat count on a layer driven by its own press, knobs with two presets, and an import in dark mode followed by a press animation.
 
