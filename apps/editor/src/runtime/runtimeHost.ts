@@ -211,7 +211,7 @@ export interface RuntimeHost {
   isPlaying(): boolean;
   /** Start the prototype over on the next frame. */
   restart(): void;
-  /** Called whenever restart() is asked for (the desktop restarts phones with it). Returns unsubscribe. */
+  /** Called whenever restart() is asked for, and when an opened document starts over (the desktop restarts phones with it). Returns unsubscribe. */
   subscribeRestart(cb: () => void): () => void;
   /** Advance one frame now (for stepping while paused). */
   stepFrame(dtSeconds?: number): SceneFrame;
@@ -607,19 +607,27 @@ export function createRuntimeHost(options: RuntimeHostOptions): RuntimeHost {
     refresh();
   };
 
+  let restartsNotified = 0;
+  const notifyRestart = () => {
+    restartsNotified++;
+    for (const cb of [...restartListeners]) cb();
+  };
+
   const restart = () => {
     if (disposed) return;
     pendingRestart = true;
     logSink?.getState().push("info", "Prototype restarted", { source: "prototype" });
     refresh();
-    for (const cb of [...restartListeners]) cb();
+    notifyRestart();
   };
 
   const unsubscribeDoc = docStore?.getState().subscribeRevision((s, previous) => {
     const change = s.lastChange;
     const opened = !!change && change !== previous.lastChange && (change.kind === "replace" || change.kind === "reload");
+    const replaced = opened && change.kind === "replace";
+    const notifiedBefore = restartsNotified;
     if (opened) {
-      if (change.kind === "replace") {
+      if (replaced) {
         pendingRestart = true;
         mediaInfo.clear();
       }
@@ -629,6 +637,9 @@ export function createRuntimeHost(options: RuntimeHostOptions): RuntimeHost {
     }
     setDocument(s.doc);
     if (opened) refreshScopeNow();
+    // Opening a document starts it over here, so players (phones, the pop-out) start over on it too,
+    // unless trusting its scripts just restarted it.
+    if (replaced && restartsNotified === notifiedBefore) notifyRestart();
   });
 
   const unsubscribeTrust = trust.subscribeAllowed((allowed) => {

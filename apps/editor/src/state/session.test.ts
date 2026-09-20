@@ -102,9 +102,11 @@ describe("editor session", () => {
     expect(restarted).not.toHaveBeenCalled();
     session.runtime.restart();
     expect(restarted).toHaveBeenCalledTimes(1);
-    // Opening another document starts it fresh without restarting the phones' old one.
+    // Opening another document in this window keeps its docId, so the phones start over on it through a restart.
     session.document.getState().replaceDocument(createEmptyDocument());
-    expect(restarted).toHaveBeenCalledTimes(1);
+    expect(restarted).toHaveBeenCalledTimes(2);
+    session.document.getState().apply([{ op: "addLayer", layer: { id: "card", type: "rectangle", name: "Card" } }], { label: "Add Card" });
+    expect(restarted).toHaveBeenCalledTimes(2);
   });
 
   it("keeps trust for prototypes the person saves, and asks before running someone else's scripts", async () => {

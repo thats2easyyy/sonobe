@@ -97,6 +97,21 @@ describe("runtime host", () => {
     expect(host.runtime.frame).toBe(0);
   });
 
+  it("tells restart listeners when the document is replaced, so phones start over on it too, but not on an edit or a reload", () => {
+    const { scheduler, store, host } = setup();
+    const restarts = vi.fn();
+    host.subscribeRestart(restarts);
+    scheduler.frames(5);
+    store.getState().apply([{ op: "updateLayer", id: "card", props: { color: "#FF0000FF" } }], { label: "Color" });
+    expect(restarts).not.toHaveBeenCalled();
+    store.getState().replaceDocument(tapDoc(), { kind: "reload", keepHistory: true });
+    expect(restarts).not.toHaveBeenCalled();
+    store.getState().replaceDocument(tapDoc());
+    expect(restarts).toHaveBeenCalledTimes(1);
+    scheduler.frame();
+    expect(host.runtime.frame).toBe(0);
+  });
+
   it("streams live values at most hz times a second, only on change", () => {
     const { scheduler, host } = setup();
     scheduler.frame();
