@@ -196,6 +196,25 @@ describe("app host documents", () => {
     expect(changes.at(-1)).toMatchObject({ kind: "closed", docId: "photo_zoom", targetId: 1 });
   });
 
+  it("asks the reloaded editor again when its page went away under document.info, but never repeats a write", async () => {
+    const w = editorWindow(1);
+    const invoke = w.target.invoke;
+    const cutOff: string[] = [];
+    // The page crashes under the next document.info and the next document.apply.
+    w.target.invoke = <T>(method: string, params?: unknown, opts?: { timeoutMs?: number }): Promise<T> => {
+      if ((method === "document.info" || method === "document.apply") && !cutOff.includes(method)) {
+        cutOff.push(method);
+        return Promise.reject({ code: "page_gone", message: `The editor crashed before it answered ${method}`, data: { reason: "crashed" } });
+      }
+      return invoke<T>(method, params, opts);
+    };
+    const host = appHost([w]);
+    expect(await host.listDocuments()).toMatchObject([{ docId: "photo_zoom" }]);
+    const before = w.session.document.getState().revision;
+    expect(await rejection(host.apply([{ op: "setInput", target: "photo_scale.end", value: 1.4 }], { label: "bigger zoom", author: CLAUDE }))).toMatchObject({ code: "editor_reloaded" });
+    expect(w.session.document.getState().revision).toBe(before);
+  });
+
   it("explains missing windows and editors without the bridge", async () => {
     const none = appHost([]);
     expect(await none.listDocuments()).toEqual([]);
@@ -209,6 +228,11 @@ describe("app host documents", () => {
 
     expect(hostErrorFromRpc({ code: "timeout", message: "late" }, "document.get")).toMatchObject({ code: "editor_timeout" });
     expect(hostErrorFromRpc({ code: "renderer_gone", message: "gone" }, "document.get")).toMatchObject({ code: "window_closed" });
+    expect(hostErrorFromRpc({ code: "page_gone", message: "The editor crashed before it answered document.apply", data: { reason: "crashed" } }, "document.apply")).toMatchObject({
+      code: "editor_reloaded",
+      message: "The Sonobe window's editor crashed before it answered document.apply, so the call may not have finished.",
+      hint: expect.stringContaining("list_documents"),
+    });
     expect(hostErrorFromRpc({ code: "no_viewer", message: "No viewer", data: { hint: "Show it", ok: true } }, "viewer.bounds")).toMatchObject({ code: "no_viewer", message: "No viewer", hint: "Show it", data: undefined });
   });
 });
