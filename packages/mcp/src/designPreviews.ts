@@ -34,7 +34,7 @@ export interface DesignDraft {
   client?: WorkClient;
   fields: DesignDraftFields;
   html: string;
-  /** Its latest update's revision (DesignPreviewUpdate.revision). */
+  /** Its latest update's count (DesignPreviewUpdate.draftRevision, preview_design's draftRevision). */
   revision: number;
   touchedAt: number;
 }
@@ -125,7 +125,7 @@ export function withDraft<T>(host: SonobeHost, now: () => number, docId: Id, key
       ...draft.fields,
       html: status === "cleared" ? null : draft.html,
       status,
-      revision: draft.revision,
+      draftRevision: draft.revision,
     };
     try {
       await host.showDesignPreview!(message);

@@ -9,14 +9,14 @@
 
 import type { StoreApi } from "zustand/vanilla";
 import type { LayoutStore } from "../../shell/layoutStore.ts";
-import { designStore, MCP_DRAFT_IDLE_MS, type DesignData, type DesignDraft, type DesignState } from "./designStore.ts";
+import { designStore, mcpDraftIdleAt, type DesignData, type DesignDraft, type DesignState } from "./designStore.ts";
 
 /** The canvas's share of a split over the patch editor while it has the room. */
 export const DESIGN_CANVAS_SPLIT = 0.8;
 
-/** MCP clients' drafts being written or added, less those idle for MCP_DRAFT_IDLE_MS (they've left the canvas). */
+/** MCP clients' drafts being written or added, less those gone idle (mcpDraftIdleAt: they've left the canvas). */
 export function liveMcpDrafts(state: DesignData, now: number): DesignDraft[] {
-  return state.drafts.filter((d) => d.mcp !== undefined && (d.status === "writing" || d.status === "adding") && now - d.mcp.touchedAt < MCP_DRAFT_IDLE_MS);
+  return state.drafts.filter((d) => (d.status === "writing" || d.status === "adding") && now < (mcpDraftIdleAt(d) ?? -Infinity));
 }
 
 function makeRoom(layout: StoreApi<LayoutStore>): void {
@@ -43,7 +43,7 @@ export function followDesignBox(layout: StoreApi<LayoutStore>, design: StoreApi<
     const now = Date.now();
     const live = liveMcpDrafts(state, now);
     // A draft goes idle without a store change: look again then.
-    if (live.length) timer = setTimeout(check, Math.min(...live.map((d) => d.mcp!.touchedAt)) + MCP_DRAFT_IDLE_MS - now + 1);
+    if (live.length) timer = setTimeout(check, Math.min(...live.map((d) => mcpDraftIdleAt(d)!)) - now + 1);
     const wants = state.open || live.length > 0;
     if (wants && !room) makeRoom(layout);
     else if (!wants && room) {

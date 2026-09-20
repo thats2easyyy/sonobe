@@ -346,7 +346,7 @@ describe("design.preview", () => {
     position: [0, 0],
     html: "<html><body><h1>Checkout</h1>",
     status: "writing",
-    revision: 1,
+    draftRevision: 1,
     ...extra,
   });
 
@@ -354,14 +354,14 @@ describe("design.preview", () => {
     const { call } = setup();
     expect(await call("design.preview", update())).toEqual({ applied: true });
     expect(designStore.getState().drafts).toMatchObject([
-      { source: "mcp", key: "mcp:cc-1", html: "<html><body><h1>Checkout</h1>", fields: { name: "Checkout", width: 402, position: [0, 0] }, status: "writing", mcp: { author: { kind: "agent", name: "Claude" }, client: { id: "cc-1", label: "Claude Code" }, revision: 1 } },
+      { source: "mcp", key: "mcp:cc-1", html: "<html><body><h1>Checkout</h1>", fields: { name: "Checkout", width: 402, position: [0, 0] }, status: "writing", mcp: { author: { kind: "agent", name: "Claude" }, client: { id: "cc-1", label: "Claude Code" }, draftRevision: 1 } },
     ]);
-    expect(await call("design.preview", update({ revision: 2, status: "adding" }))).toEqual({ applied: true });
+    expect(await call("design.preview", update({ draftRevision: 2, status: "adding" }))).toEqual({ applied: true });
     expect(designStore.getState().drafts[0]?.status).toBe("adding");
     // An older update changes nothing.
-    expect(await call("design.preview", update({ revision: 1, html: "<p>old</p>" }))).toEqual({ applied: false });
+    expect(await call("design.preview", update({ draftRevision: 1, html: "<p>old</p>" }))).toEqual({ applied: false });
     // A cleared update may leave the html out.
-    expect(await call("design.preview", update({ revision: 3, status: "cleared", html: undefined }))).toEqual({ applied: true });
+    expect(await call("design.preview", update({ draftRevision: 3, status: "cleared", html: undefined }))).toEqual({ applied: true });
     expect(designStore.getState().drafts[0]?.status).toBe("stopped");
   });
 
@@ -373,8 +373,8 @@ describe("design.preview", () => {
     await refused(update({ docId: "" }), '"docId" and "key" are required');
     await refused(update({ key: undefined }), '"docId" and "key" are required');
     await refused(update({ key: "k".repeat(201) }), '"key" can be at most 200 characters');
-    await refused(update({ revision: 1.5 }), '"revision" is required');
-    await refused(update({ revision: -1 }), '"revision" is required');
+    await refused(update({ draftRevision: 1.5 }), '"draftRevision" is required');
+    await refused(update({ draftRevision: -1 }), '"draftRevision" is required');
     await refused(update({ html: null }), '"html" is required while the draft is written or added');
     await refused(update({ html: 42 }), '"html" must be text');
     await refused(update({ html: "x".repeat(1_500_001) }), '"html" can be at most 1,500,000 characters');

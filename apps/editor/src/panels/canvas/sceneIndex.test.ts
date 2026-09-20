@@ -1,7 +1,7 @@
 import type { SonobeDocument } from "@sonobe/core";
 import { buildDoc, createTestRuntime } from "@sonobe/engine/testing";
 import { describe, expect, it } from "vitest";
-import { buildCanvasIndex, hitCopy, hitLayers, isEditableLayer, marqueeLayers, pickChildOf, pickLayer, sceneKeyLayerId } from "./sceneIndex.ts";
+import { buildCanvasIndex, firstCopyBounds, hitCopy, hitLayers, isEditableLayer, marqueeLayers, pickChildOf, pickLayer, sceneKeyLayerId } from "./sceneIndex.ts";
 
 function sceneFor(doc: SonobeDocument) {
   const rt = createTestRuntime(doc);
@@ -145,6 +145,14 @@ describe("hitCopy", () => {
     expect(hitCopy(index, [20, 220], "row")).toBe(2);
     expect(hitCopy(index, [20, 420], "footer")).toBeUndefined();
     expect(hitCopy(index, [300, 800], "row")).toBeUndefined();
+  });
+
+  it("measures a looped layer's first copy, where bounds spans them all", () => {
+    const index = sceneFor(buildDoc({ layers: [{ id: "row", type: "rectangle", props: { position: { loop: [[0, 0], [0, 100], [0, 200]] }, size: [200, 80] } }] }));
+    expect(index.bounds("row")).toEqual({ x: 0, y: 0, width: 200, height: 280 });
+    expect(firstCopyBounds(index, "row")).toEqual({ x: 0, y: 0, width: 200, height: 80 });
+    expect(firstCopyBounds(sceneFor(demo()), "card")).toEqual({ x: 20, y: 20, width: 200, height: 200 });
+    expect(firstCopyBounds(index, "missing")).toBeNull();
   });
 });
 

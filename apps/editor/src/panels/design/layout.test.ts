@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createLayoutStore } from "../../shell/layoutStore.ts";
-import { designStore, initialDesignData, MCP_DRAFT_IDLE_MS, type DesignDraft, type DraftStatus } from "./designStore.ts";
+import { designStore, initialDesignData, MCP_DRAFT_IDLE_MS, MCP_DRAFT_STALLED_MS, type DesignDraft, type DraftStatus } from "./designStore.ts";
 import { DESIGN_CANVAS_SPLIT, followDesignBox } from "./layout.ts";
 
 let layout: ReturnType<typeof createLayoutStore>;
@@ -36,7 +36,7 @@ const mcpDraft = (status: DraftStatus, touchedAt = Date.now()): DesignDraft => (
   progress: null,
   error: null,
   resync: false,
-  mcp: { author: { kind: "agent", name: "Claude" }, client: { id: "cc-1", label: "Claude Code" }, revision: 1, touchedAt, addingFrom: status === "writing" ? null : 3 },
+  mcp: { author: { kind: "agent", name: "Claude" }, client: { id: "cc-1", label: "Claude Code" }, draftRevision: 1, touchedAt, addingFrom: status === "writing" ? null : 3 },
 });
 const draft = (status: DraftStatus) => designStore.setState({ drafts: [mcpDraft(status)] });
 
@@ -155,14 +155,17 @@ describe("followDesignBox", () => {
     expect(layout.getState().split).toBe(0.42);
   });
 
-  it("gives the room back when a draft goes idle, as it leaves the canvas", () => {
+  it("gives the room back when a draft goes idle, as it leaves the canvas: sooner while it's written than while it's added", () => {
     vi.useFakeTimers();
-    layout.getState().setSplit(0.42);
-    draft("writing");
-    expect(layout.getState().split).toBe(DESIGN_CANVAS_SPLIT);
-    vi.advanceTimersByTime(MCP_DRAFT_IDLE_MS - 1000);
-    expect(layout.getState().split).toBe(DESIGN_CANVAS_SPLIT);
-    vi.advanceTimersByTime(1001);
-    expect(layout.getState().split).toBe(0.42);
+    for (const [status, idle] of [["writing", MCP_DRAFT_STALLED_MS], ["adding", MCP_DRAFT_IDLE_MS]] as const) {
+      layout.getState().setSplit(0.42);
+      draft(status);
+      expect(layout.getState().split, status).toBe(DESIGN_CANVAS_SPLIT);
+      vi.advanceTimersByTime(idle - 1000);
+      expect(layout.getState().split, status).toBe(DESIGN_CANVAS_SPLIT);
+      vi.advanceTimersByTime(1001);
+      expect(layout.getState().split, status).toBe(0.42);
+      designStore.setState({ drafts: [] });
+    }
   });
 });

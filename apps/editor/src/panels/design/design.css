@@ -320,7 +320,8 @@
   opacity: 0.2;
 }
 
-:root:has(.sb-assistant-confirm[data-kind="replace"][data-status="pending"]) .sb-design-preview__pill {
+/* The pill is on the frame, or in the artboard's label row (DesignPreview), so it's found by its attribute. */
+:root:has(.sb-assistant-confirm[data-kind="replace"][data-status="pending"]) [data-design-pill] {
   visibility: hidden;
 }
 

@@ -586,7 +586,7 @@ describe("app host presence, selection and screenshots", () => {
     const seen: { window: number; params: unknown }[] = [];
     for (const [w, id] of [[a, 1], [b, 2]] as const) w.server.handle("design.preview", (params) => void seen.push({ window: id, params }));
     const noddit = { id: "11111111-aaaa-4bbb-8ccc-000000000001", label: "Claude Code", folder: "/Users/me/noddit" };
-    const update: DesignPreviewUpdate = { docId: second!.docId, key: noddit.id, author: CLAUDE, client: noddit, name: "Checkout", component: null, replace: null, width: null, height: null, position: null, html: "<body>Checkout", status: "writing", revision: 1 };
+    const update: DesignPreviewUpdate = { docId: second!.docId, key: noddit.id, author: CLAUDE, client: noddit, name: "Checkout", component: null, replace: null, width: null, height: null, position: null, html: "<body>Checkout", status: "writing", draftRevision: 1 };
     await host.showDesignPreview!(update);
     expect(seen).toEqual([{ window: 2, params: update }]);
     // preview_design reaches it the same way, as the session's draft.
@@ -598,7 +598,7 @@ describe("app host presence, selection and screenshots", () => {
     cleanups.push(() => client.close());
     const shown = await client.callTool({ name: "preview_design", arguments: { name: "Inbox", html: "<body>Inbox</body>" } });
     expect(JSON.stringify(shown.content)).toContain("Showing “Inbox” on the canvas");
-    expect(seen.at(-1)).toMatchObject({ window: 1, params: { docId: "photo_zoom", key: "Claude", name: "Inbox", html: "<body>Inbox</body>", status: "writing", revision: 1 } });
+    expect(seen.at(-1)).toMatchObject({ window: 1, params: { docId: "photo_zoom", key: "Claude", name: "Inbox", html: "<body>Inbox</body>", status: "writing", draftRevision: 1 } });
 
     // A window that's gone has nothing to draw on, and that's not an error.
     await expect(host.showDesignPreview!({ ...update, docId: "gone" })).resolves.toBeUndefined();
@@ -636,16 +636,16 @@ describe("app host presence, selection and screenshots", () => {
 
     const head = '<!doctype html><html><head><style>body{margin:0}</style></head><body><header data-name="Header">Checkout</header>';
     await client.callTool({ name: "preview_design", arguments: { name: "Checkout", html: head } });
-    expect(draft()).toMatchObject({ source: "mcp", key: "mcp:Claude", status: "writing", html: head, fields: { name: "Checkout" }, mcp: { author: CLAUDE, revision: 1 } });
+    expect(draft()).toMatchObject({ source: "mcp", key: "mcp:Claude", status: "writing", html: head, fields: { name: "Checkout" }, mcp: { author: CLAUDE, draftRevision: 1 } });
     const pay = '<div data-name="Pay Button">Pay</div></body></html>';
     await client.callTool({ name: "preview_design", arguments: { append: pay } });
-    expect(draft()).toMatchObject({ status: "writing", html: head + pay, mcp: { revision: 2 } });
+    expect(draft()).toMatchObject({ status: "writing", html: head + pay, mcp: { draftRevision: 2 } });
 
     const result = await client.callTool({ name: "import_design", arguments: { preview: true } });
     expect(result.isError).not.toBe(true);
     expect(captured).toEqual([{ html: head + pay, status: "adding" }]);
     // The import went in before the draft was cleared, so it ends as added and fades.
-    expect(designStore.getState().drafts.at(-1)).toMatchObject({ key: "mcp:Claude", status: "added", mcp: { revision: 4 } });
+    expect(designStore.getState().drafts.at(-1)).toMatchObject({ key: "mcp:Claude", status: "added", mcp: { draftRevision: 4 } });
     const root = w.session.document.getState().doc.project.root;
     expect(w.session.document.getState().doc.components[root]!.layers.map((l) => l.name)).toContain("Checkout");
   });

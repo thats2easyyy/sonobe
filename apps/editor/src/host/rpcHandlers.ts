@@ -189,8 +189,8 @@ function designPreviewUpdate(p: Params): DesignPreviewUpdate {
   const docId = cappedString(p, "docId", PREVIEW_ID_CHARS);
   const key = cappedString(p, "key", PREVIEW_ID_CHARS);
   if (!docId || !key) throw invalid('"docId" and "key" are required: the document the draft is for, and the session writing it.');
-  const revision = optNumber(p, "revision");
-  if (revision === undefined || !Number.isInteger(revision) || revision < 0) throw invalid('"revision" is required: how many times the draft was updated, a whole number.');
+  const draftRevision = optNumber(p, "draftRevision");
+  if (draftRevision === undefined || !Number.isInteger(draftRevision) || draftRevision < 0) throw invalid('"draftRevision" is required: how many times the draft was updated, a whole number.');
   const html = cappedString(p, "html", PREVIEW_HTML_CHARS);
   if (html === null && status !== "cleared") throw invalid('"html" is required while the draft is written or added: the whole page so far.');
   const client = workClient(p);
@@ -207,7 +207,7 @@ function designPreviewUpdate(p: Params): DesignPreviewUpdate {
     position: previewPosition(p),
     html: status === "cleared" ? null : html,
     status: status as DesignPreviewUpdate["status"],
-    revision,
+    draftRevision,
   };
 }
 

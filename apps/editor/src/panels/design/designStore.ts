@@ -26,8 +26,8 @@ export interface McpDraftSession {
   author: Author;
   /** The session's client ("Claude Code"), when the host knows it. */
   client: WorkClient | null;
-  /** The last update's revision; an older update changes nothing. */
-  revision: number;
+  /** The last update's draftRevision; an older update changes nothing. */
+  draftRevision: number;
   /** When the last update came (epoch ms). A draft with no update for a while leaves the canvas (mcpDraftIdleAt): its session may be gone. */
   touchedAt: number;
   /** The document's revision when import_design started adding it; null while it's written. */
@@ -213,7 +213,7 @@ export function reducePreviewUpdate(state: DesignData, update: DesignPreviewUpda
   const live = current && isLive(current.status) ? current : undefined;
   const mcp = live?.mcp;
   // A call overtaken by a newer one of the same session changes nothing.
-  if (mcp && update.revision < mcp.revision) return {};
+  if (mcp && update.draftRevision < mcp.draftRevision) return {};
   const replaceCurrent = (next: DesignDraft) => ({ drafts: state.drafts.map((d, i) => (i === index ? next : d)) });
 
   if (update.status === "cleared") {
@@ -221,7 +221,7 @@ export function reducePreviewUpdate(state: DesignData, update: DesignPreviewUpda
     const change = target.lastChange;
     const from = mcp.addingFrom;
     const added = live.status === "adding" && from !== null && change !== null && change.kind === "apply" && change.revision > from && sameAuthor(change.author, update.author);
-    return replaceCurrent({ ...live, status: added ? "added" : "stopped", since: now, mcp: { ...mcp, revision: update.revision, touchedAt: now } });
+    return replaceCurrent({ ...live, status: added ? "added" : "stopped", since: now, mcp: { ...mcp, draftRevision: update.draftRevision, touchedAt: now } });
   }
 
   // The document's revision when adding began: the import's change comes after it.
@@ -239,7 +239,7 @@ export function reducePreviewUpdate(state: DesignData, update: DesignPreviewUpda
     progress: null,
     error: null,
     resync: false,
-    mcp: { author: { ...update.author }, client: update.client ? { ...update.client } : null, revision: update.revision, touchedAt: now, addingFrom },
+    mcp: { author: { ...update.author }, client: update.client ? { ...update.client } : null, draftRevision: update.draftRevision, touchedAt: now, addingFrom },
   };
   if (live) return replaceCurrent(next);
   // A new draft, or one started over after it ended: it's the newest.

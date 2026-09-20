@@ -37,8 +37,8 @@ function fixedSize(layer: LayerNode): [number | null, number | null] {
 }
 
 /**
- * The layer's rect in the component: where the canvas draws it, at its own fixed size when it has one
- * (the canvas's rect spans every copy of a repeated layer and is scaled with it); else from its own
+ * The layer's rect in the component: where the canvas draws it (its first copy, when it's repeated), at
+ * its own fixed size when it has one (the drawn rect is scaled and rotated with it); else from its own
  * props (relative to its parent, when the canvas can't say).
  */
 function frameOf(layer: LayerNode, bounds: (id: string) => { x: number; y: number; width: number; height: number } | null): [number, number, number, number] {

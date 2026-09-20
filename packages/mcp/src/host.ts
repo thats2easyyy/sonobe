@@ -414,10 +414,11 @@ export interface DesignPreviewUpdate {
   /** writing: Claude is writing it; adding: import_design is importing it; cleared: gone (imported, cleared or expired). */
   status: "writing" | "adding" | "cleared";
   /**
-   * Increments with every update of this draft. A session's next draft continues the count, so a
-   * later update of `key` always has a higher revision than an earlier one.
+   * Increments with every update of this draft (preview_design's `draftRevision`; not the document's
+   * revision). A session's next draft continues the count, so a later update of `key` always has a
+   * higher one than an earlier update.
    */
-  revision: number;
+  draftRevision: number;
 }
 
 // ---------------------------------------------------------------------------

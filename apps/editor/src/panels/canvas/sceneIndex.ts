@@ -121,6 +121,12 @@ export function buildCanvasIndex(component: Component | undefined, scene: SceneF
   return index;
 }
 
+/** Artboard bounds of a layer's unreplicated node or copy #0 (index.bounds spans every copy), or null when it isn't drawn. */
+export function firstCopyBounds(index: CanvasIndex, id: Id): Rect | null {
+  const node = index.entry(id)?.node;
+  return node ? boundsOf(nodeQuad(node)) : null;
+}
+
 function alphaOf(v: unknown): number {
   return v && typeof v === "object" && typeof (v as { a?: unknown }).a === "number" ? (v as { a: number }).a : 0;
 }

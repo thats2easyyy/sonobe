@@ -58,7 +58,7 @@ describe("designCommands", () => {
     expect(hide).toMatchObject({ title: "Hide Design Preview", category: "Canvas" });
     expect(hide.when?.({})).toBe(false);
     designStore.setState({
-      drafts: [{ source: "mcp", key: "mcp:cc-1", runId: "", turn: 0, toolUseId: "", html: "<p>Hi</p>", fields: {}, status: "writing", since: Date.now(), progress: null, error: null, resync: false, mcp: { author: { kind: "agent", name: "Claude" }, client: null, revision: 1, touchedAt: Date.now(), addingFrom: null } }],
+      drafts: [{ source: "mcp", key: "mcp:cc-1", runId: "", turn: 0, toolUseId: "", html: "<p>Hi</p>", fields: {}, status: "writing", since: Date.now(), progress: null, error: null, resync: false, mcp: { author: { kind: "agent", name: "Claude" }, client: null, draftRevision: 1, touchedAt: Date.now(), addingFrom: null } }],
     });
     expect(hide.when?.({})).toBe(true);
     await hide.run({});
