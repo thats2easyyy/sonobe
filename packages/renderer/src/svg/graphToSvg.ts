@@ -84,13 +84,9 @@ interface Palette {
   comment: Record<string, string>;
 }
 
-const palettes = new Map<ThemeName, Palette>();
-
-function paletteFor(theme: ThemeName): Palette {
-  let p = palettes.get(theme);
-  if (p) return p;
+function palette(theme: ThemeName): Palette {
   const t = THEME_TOKENS[theme];
-  p = {
+  return {
     theme,
     canvas: t["canvas-bg"],
     node: t["patch-node-bg"],
@@ -107,9 +103,9 @@ function paletteFor(theme: ThemeName): Palette {
     category: CATEGORY_COLORS[theme],
     comment: COMMENT_COLORS[theme],
   };
-  palettes.set(theme, p);
-  return p;
 }
+
+const PALETTES: Record<ThemeName, Palette> = { dark: palette("dark"), light: palette("light") };
 
 const SANS = "SF Pro Text, -apple-system, Helvetica Neue, Helvetica, Arial, sans-serif";
 const MONO = "SF Mono, Menlo, Monaco, Consolas, monospace";
@@ -364,7 +360,7 @@ export function graphToSvg(model: GraphModel, options: GraphSvgOptions): GraphSv
   const shapeOptions = { ...(options.live ? { live: options.live } : {}), ...(options.layerName ? { layerName: options.layerName } : {}) };
   const shapes = new Map<string, NodeShape>();
   for (const node of model.nodes) if (node.data.kind !== "comment") shapes.set(node.id, nodeShapeFromData(node.data, shapeOptions));
-  const p = paletteFor(options.theme ?? "dark");
+  const p = PALETTES[options.theme ?? "dark"];
   const parts: string[] = [el("rect", { x: view.x, y: view.y, width: view.width, height: view.height, fill: p.canvas })];
   for (const node of model.nodes) if (node.data.kind === "comment") parts.push(drawComment(p, node));
   const byId = new Map(model.nodes.map((n) => [n.id, n]));
