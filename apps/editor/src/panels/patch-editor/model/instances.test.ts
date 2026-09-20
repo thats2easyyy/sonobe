@@ -2,7 +2,8 @@
 import { applyOps, createEmptyDocument, type Op, type SonobeDocument } from "@sonobe/core";
 import { createPatchRegistry } from "@sonobe/patches";
 import { describe, expect, it } from "vitest";
-import { componentInstances, instanceChoiceKey, instanceCopiesAddress, resolveLiveScope, scopedAddress, watchedPrefix } from "./instances.ts";
+import type { SceneFrame, SceneNode } from "@sonobe/engine";
+import { componentInstances, copyInScope, instanceChoiceKey, instanceCopiesAddress, layerSceneKey, resolveLiveScope, scopedAddress, watchedPrefix } from "./instances.ts";
 
 const registry = createPatchRegistry();
 
@@ -66,9 +67,49 @@ describe("watched copies of looped instances", () => {
   it("counts copies through the instance layer you're inside", () => {
     expect(instanceCopiesAddress(resolveLiveScope(withComponents, ["main"]))).toBeNull();
     expect(instanceCopiesAddress(resolveLiveScope(withComponents, ["main", "badge"]))).toBe("@badge_1.position");
-    // Patch instances have no layer to count, and nested layers count inside their host.
-    expect(instanceCopiesAddress(resolveLiveScope(withComponents, ["main", "press"]))).toBeNull();
-    expect(instanceCopiesAddress(resolveLiveScope(withComponents, ["main", "unused"]))).toBeNull();
+    // A patch instance loops only through its inputs: without ports it never has copies.
+    expect(instanceCopiesAddress(resolveLiveScope(withComponents, ["main", "press"]), withComponents)).toBeNull();
+    expect(instanceCopiesAddress(resolveLiveScope(withComponents, ["main", "unused"]), withComponents)).toBeNull();
+  });
+
+  it("counts a component patch's copies through its first published port", () => {
+    const doc = build([
+      { op: "addComponent", component: { id: "press", name: "Press Feedback", kind: "patchComponent" } },
+      { op: "updateInterface", component: "press", inputs: { pressed: { name: "Pressed", type: "boolean" } } },
+      { op: "addComponent", component: { id: "badge", name: "Badge", kind: "layerComponent" } },
+      { op: "addPatch", patch: { id: "press_a", type: "component", component: "press", ui: { x: 0, y: 40 } } },
+      { op: "addLayer", layer: { id: "badge_1", type: "componentInstance", name: "Badge", component: "badge" } },
+      { op: "addPatch", component: "badge", patch: { id: "inner", type: "component", component: "press", ui: { x: 0, y: 0 } } },
+    ]);
+    expect(instanceCopiesAddress(resolveLiveScope(doc, ["main", "press"]), doc)).toBe("press_a.pressed");
+    expect(instanceCopiesAddress(resolveLiveScope(doc, ["main", "badge", "press"]), doc)).toBe("badge_1/inner.pressed");
+  });
+
+  it("reads which copy a viewer press lands on, for the scope being edited", () => {
+    // At the root, the copy of a looped layer (or of a looped group's child).
+    expect(copyInScope("card#3", "")).toBe(3);
+    expect(copyInScope("card", "")).toBeUndefined();
+    expect(copyInScope("list_row#2/title", "")).toBe(2);
+    // Inside an instance, the instance's copy, else a looped layer's inside it.
+    expect(copyInScope("list_row#2/title", "list_row")).toBe(2);
+    expect(copyInScope("list_row#2/title#1", "list_row")).toBe(2);
+    expect(copyInScope("list_row/title#1", "list_row")).toBe(1);
+    expect(copyInScope("list/row#4/dot", "list/row")).toBe(4);
+    // Outside the scope, or the instance itself.
+    expect(copyInScope("other#1/title", "list_row")).toBeUndefined();
+    expect(copyInScope("list_row#2", "list_row")).toBeUndefined();
+  });
+
+  it("finds a layer's scene key in the watched scope and copy", () => {
+    const node = (key: string, layerId: string, children: SceneNode[] = []) => ({ key, layerId, children }) as unknown as SceneNode;
+    const scene = { roots: [node("field", "field"), node("dot#0", "dot"), node("dot#1", "dot"), node("dot#2", "dot"), node("row#1", "row", [node("row#1/label", "label")])] } as unknown as SceneFrame;
+    expect(layerSceneKey(scene, "", "field", 2)).toBe("field");
+    expect(layerSceneKey(scene, "", "dot", null)).toBe("dot#0");
+    expect(layerSceneKey(scene, "", "dot", 4)).toBe("dot#1");
+    expect(layerSceneKey(scene, "row#1", "label", null)).toBe("row#1/label");
+    expect(layerSceneKey(scene, "row#0", "label", null)).toBeUndefined();
+    expect(layerSceneKey(scene, "", "gone", null)).toBeUndefined();
+    expect(layerSceneKey(null, "", "field", null)).toBeUndefined();
   });
 
   it("reads the watched copy of a looped instance, wrapping past the last", () => {

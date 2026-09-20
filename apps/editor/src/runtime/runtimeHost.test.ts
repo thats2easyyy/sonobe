@@ -156,6 +156,53 @@ describe("runtime host", () => {
     container.remove();
   });
 
+  it("reports a viewer's primary presses with the layers under them, before the prototype sees them", () => {
+    const { scheduler, host } = setup();
+    scheduler.frame();
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const presses: string[][] = [];
+    const viewer = host.attachRenderer(container, { scale: 1, onPress: (hits) => presses.push(hits.map((h) => h.key)) });
+    scheduler.frame();
+    vi.spyOn(viewer.renderer.stage, "getBoundingClientRect").mockReturnValue({ left: 0, top: 0, width: 390, height: 844, right: 390, bottom: 844, x: 0, y: 0, toJSON: () => ({}) } as DOMRect);
+    const pointer = (type: string, init: PointerEventInit) => container.dispatchEvent(new PointerEvent(type, { bubbles: true, cancelable: true, pointerType: "mouse", pointerId: 1, ...init }));
+    pointer("pointerdown", { clientX: 50, clientY: 50, button: 0, buttons: 1 });
+    pointer("pointerup", { clientX: 50, clientY: 50, button: 0 });
+    pointer("pointerdown", { clientX: 300, clientY: 600, button: 0, buttons: 1 });
+    pointer("pointerup", { clientX: 300, clientY: 600, button: 0 });
+    pointer("pointerdown", { clientX: 50, clientY: 50, button: 2, buttons: 2 });
+    expect(presses).toEqual([["card"], []]);
+    scheduler.frame();
+    // The press still reached the prototype.
+    expect(host.runtime.getValue("toggle.on")).toBe(true);
+    viewer.dispose();
+    container.remove();
+  });
+
+  it("fires layer pulse props into the running prototype without touching the document, stepping a frame while paused", () => {
+    const scheduler = createManualScheduler();
+    const doc = buildDoc({ layers: [{ id: "field", type: "textField", name: "Field", props: { position: [0, 0], size: [200, 44], textToSet: "Hi" } }] }, registry);
+    const store = createDocumentStore({ registry, document: doc });
+    const host = createRuntimeHost({ registry, document: store, scheduler, textMeasurer: "approximate", autoplay: false });
+    hosts.push(host);
+    host.stepFrame();
+    const revision = store.getState().revision;
+    const frame = host.runtime.frame;
+    host.fireLayerPulses([
+      { layerId: "field", key: "field", prop: "setText" },
+      { layerId: "field", key: "field", prop: "beginEditing" },
+    ]);
+    expect(host.runtime.frame).toBe(frame + 1);
+    expect(host.scene()!.roots[0]!.textField).toMatchObject({ text: "Hi", editing: true });
+    expect(store.getState().revision).toBe(revision);
+    expect(store.getState().doc).toBe(doc);
+    host.play();
+    host.fireLayerPulses([{ layerId: "field", key: "field", prop: "endEditing" }]);
+    expect(host.runtime.frame).toBe(frame + 1);
+    scheduler.frame();
+    expect(host.scene()!.roots[0]!.textField!.editing).toBe(false);
+  });
+
   it("creates deterministic simulations independent of the live runtime", () => {
     const { scheduler, host } = setup();
     scheduler.frames(2);

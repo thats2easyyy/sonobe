@@ -142,6 +142,15 @@ export interface AttachRendererOptions {
   onFocusChange?: (layerId: string | null) => void;
   /** This viewer answers viewer.bounds (screenshots). Default: the first attached viewer. */
   primary?: boolean;
+  /** A primary press in this viewer, with the layers under it (front-most first, then the ancestors touches bubble to). */
+  onPress?: (hits: readonly { key: string; layerId: Id }[]) => void;
+}
+
+/** A layer pulse prop to fire in the running prototype: the layer, its scene key, and the prop ("beginEditing"). */
+export interface LayerPulseTarget {
+  layerId: Id;
+  key: string;
+  prop: string;
 }
 
 export interface RectLike {
@@ -200,6 +209,11 @@ export interface RuntimeHost {
   subscribeRestart(cb: () => void): () => void;
   /** Advance one frame now (for stepping while paused). */
   stepFrame(dtSeconds?: number): SceneFrame;
+  /**
+   * Fire layer pulse props in the running prototype, never in the document (the Inspector's Fire
+   * button). While paused, it steps one frame so they land.
+   */
+  fireLayerPulses(pulses: readonly LayerPulseTarget[]): void;
   /** Last produced scene, if any. */
   scene(): SceneFrame | null;
   /** Silence (or unsilence) speech and audio app-wide. */
@@ -681,6 +695,12 @@ export function createRuntimeHost(options: RuntimeHostOptions): RuntimeHost {
       return runFrame(dtSeconds, scheduler.now(), true);
     },
 
+    fireLayerPulses(pulses) {
+      if (disposed || pulses.length === 0) return;
+      runtime.dispatch(pulses.map((p): InputEvent => ({ kind: "layerPulse", layerId: p.layerId, key: p.key, prop: p.prop })));
+      if (!playing) host.stepFrame();
+    },
+
     scene: () => lastScene,
 
     setMuted(muted) {
@@ -744,9 +764,16 @@ export function createRuntimeHost(options: RuntimeHostOptions): RuntimeHost {
 
     attachRenderer(container, attachOptions = {}) {
       let scale = attachOptions.scale ?? 1;
+      const onPress = attachOptions.onPress;
       const renderer = createDomRenderer(container, {
         resolveAssetUrl,
-        onEvents: dispatchInput,
+        onEvents: onPress
+          ? (events) => {
+              // Hit-test against the frame on screen, before the press reaches the prototype.
+              for (const e of events) if (e.kind === "pointer" && e.phase === "down" && (e.button ?? 0) === 0) onPress(runtime.hitTest(e.x, e.y));
+              dispatchInput(events);
+            }
+          : dispatchInput,
         showHitTargets: attachOptions.showHitTargets ?? false,
         editorMode: attachOptions.editorMode ?? false,
         allowAudio: (attachOptions.allowAudio ?? false) && !mute.getState().muted,

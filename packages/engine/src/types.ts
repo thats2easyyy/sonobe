@@ -533,6 +533,11 @@ export type InputEvent =
   | { kind: "text"; layerId: Id; key?: string; value: string }
   | { kind: "focus"; layerId: Id; key?: string; focused: boolean }
   | { kind: "submit"; layerId: Id; key?: string }
+  /**
+   * Fire a layer's pulse property on this step, as a connection would (the editor's Inspector Fire
+   * button): a Text Field's setText, beginEditing or endEditing. Other props are ignored.
+   */
+  | { kind: "layerPulse"; layerId: Id; key?: string; prop: string }
   | { kind: "deviceMotion"; acceleration: [number, number, number]; rotationRate: [number, number, number]; attitude?: [number, number, number] }
   /** angle = physical rotation in degrees counterclockwise (DeviceInfo.orientationAngle). */
   | { kind: "orientation"; orientation: "portrait" | "landscape"; angle?: number };
@@ -699,7 +704,7 @@ export interface RuntimeIssue {
 export interface ValueInspection {
   /** What getValue returns: loop item 0 unless the address ends in "#n"; undefined when nothing is there. */
   value: Value;
-  /** For a layer bound to a loop: how many copies it drew last frame. */
+  /** For a layer bound to a loop: how many copies it drew last frame. For a component patch's port: how many copies of the instance ran. */
   copies?: number;
   /** Why the value is missing or empty ("Layer "Card" drew 0 copies..."), when it is. */
   note?: string;
