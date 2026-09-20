@@ -12,8 +12,9 @@ import {
   type ToolAnnotations,
 } from "@modelcontextprotocol/server";
 import type { z } from "zod";
+import { clientLabel, isClientId, type ClientRegistry } from "./clients.ts";
 import { defaultGuides, type GuideStore } from "./guides.ts";
-import type { SonobeHost } from "./host.ts";
+import type { SonobeHost, WorkClient } from "./host.ts";
 import { callSignal, toolWork, type CallScope, type ToolWork } from "./progress.ts";
 import { registerPrompts } from "./prompts.ts";
 import { registerResources } from "./resources.ts";
@@ -37,6 +38,11 @@ export interface SonobeMcpServerOptions {
   guides?: GuideStore;
   /** Replace the default instructions. */
   instructions?: string;
+  /**
+   * Connected sessions (the desktop's Connect Claude list): every tool call is recorded against the
+   * relay's client id, and relay clients are attributed by the name they announced (clients.ts).
+   */
+  clients?: ClientRegistry;
 }
 
 /** Every tool, in registration order (ARCHITECTURE §10). */
@@ -83,6 +89,7 @@ export const TOOL_NAMES = [
   "begin_work",
   "finish_work",
   "reveal",
+  "restart_viewer",
   "list_history",
   "undo",
 ] as const;
@@ -136,6 +143,8 @@ export interface ToolContext {
   guides(): GuideStore;
   /** The agent attributed in history ("Claude", or the client's name). */
   author(ctx: ServerContext): Author;
+  /** The session making the call, when it came through the relay (its sonobe-client id). */
+  client(ctx: ServerContext): WorkClient | undefined;
   /**
    * The call's cancellation signal (the handler's work.signal). Pass it to host.apply and
    * history.undo, so a cancelled call never changes the document.
@@ -158,17 +167,17 @@ export interface ToolContext {
   ): void;
 }
 
-function clientName(server: McpServer, ctx: ServerContext): string | undefined {
+/** The client's clientInfo: 2026-07-28 request metadata, else what initialize said on this connection. */
+function clientInfoOf(server: McpServer, ctx: ServerContext): { name?: string; title?: string; version?: string } {
   const envelope = ctx.mcpReq.envelope as Record<string, unknown> | undefined;
   const info = (envelope?.["io.modelcontextprotocol/clientInfo"] ??
-    server.server.getClientVersion()) as { name?: unknown; title?: unknown } | undefined;
-  const name =
-    typeof info?.title === "string"
-      ? info.title
-      : typeof info?.name === "string"
-        ? info.name
-        : undefined;
-  return name?.trim() || undefined;
+    server.server.getClientVersion()) as Record<string, unknown> | undefined;
+  const out: { name?: string; title?: string; version?: string } = {};
+  for (const key of ["name", "title", "version"] as const) {
+    const value = info?.[key];
+    if (typeof value === "string" && value.trim()) out[key] = value.trim();
+  }
+  return out;
 }
 
 /** "Claude" for Claude clients (claude-code, claude-ai...), otherwise the client's own name. */
@@ -190,8 +199,9 @@ export function serverInstructions(host: SonobeHost): string {
     "4. Call begin_work with a short intent before editing, and finish_work when you're done.",
     '5. Build in small batches (one feature at a time) with add_layers, add_patches (with connections), connect, set_values or apply_ops. Give new items a "ref" and wire them with "$ref.port" in the same batch. To rebuild items, remove the old ones and add their replacements in the same apply_ops so they keep their ids (ids removed by an earlier batch are retired and get a suffix). Every write returns ids, the new revision and diagnostics added/resolved; pass expectedRevision so you never overwrite edits the person made meanwhile.',
     '   Build the numbers the person will want to tune or compare (distances, spring feel, thresholds) as knobs with set_knobs, with presets such as a locked "Shipped app" next to "Proposal" (get_guide("knobs")).',
-    "6. Verify before claiming it works: get_diagnostics, then sim_reset → sim_dispatch (tap, drag...) → sim_step or sim_trace on the layer properties that should change. To look under a layer or try a value, use sim_override inside the simulation (or get_screenshot with isolate: true for one layer alone) instead of editing and undoing.",
+    "6. Verify before claiming it works: get_diagnostics, then sim_reset → sim_dispatch (tap, drag...) → sim_step or sim_trace on the layer properties that should change. To look under a layer or try a value, use sim_override inside the simulation (or get_screenshot with isolate: true for one layer alone) instead of editing and undoing. The person's live viewer keeps its state through your edits; restart_viewer starts it over.",
     "7. When talking to the person, name layers and patches by their display names (the Card's scale), not raw ids, addresses or JSON.",
+    '8. To keep work, call save_document. A prototype that was never saved needs a folder: save_document({ path: "~/Documents/<Name>.sonobe" }), then tell the person where it went (don\'t ask them to press ⌘S).',
   ];
   if (host.kind === "headless") {
     lines.push(
@@ -264,12 +274,31 @@ export function createSonobeMcpServer(
     });
   }
   const signals = new WeakMap<ServerContext, AbortSignal>();
+  /**
+   * Each call's sonobe-client id. Over stateless HTTP, initialize's clientInfo is gone by tools/call,
+   * so a relay client is named by what its hello announced.
+   */
+  const clientIds = new WeakMap<ServerContext, string>();
+  const session = (ctx: ServerContext) => {
+    const id = clientIds.get(ctx);
+    return id === undefined ? undefined : options.clients?.get(id);
+  };
   const tc: ToolContext = {
     host,
     server,
     options,
     guides: () => options.guides ?? defaultGuides(),
-    author: (ctx) => authorFromClientName(clientName(server, ctx)),
+    author: (ctx) => {
+      const info = clientInfoOf(server, ctx);
+      const announced = session(ctx);
+      return authorFromClientName(info.title ?? info.name ?? announced?.title ?? announced?.name ?? undefined);
+    },
+    client: (ctx) => {
+      const id = clientIds.get(ctx);
+      if (id === undefined) return undefined;
+      const announced = session(ctx);
+      return { id, label: announced?.label ?? clientLabel(clientInfoOf(server, ctx)), ...(announced?.folder ? { folder: announced.folder } : {}) };
+    },
     signal: (ctx) => signals.get(ctx) ?? ctx.mcpReq.signal,
     tool(name, config, handler) {
       const run = guarded(
@@ -287,9 +316,13 @@ export function createSonobeMcpServer(
         name,
         registration as never,
         (async (args: unknown, ctx: ServerContext) => {
-          const call = callSignal(ctx, context.callScope?.());
+          const scope = context.callScope?.();
+          const call = callSignal(ctx, scope);
           const work = toolWork(ctx, { signal: call.signal });
           signals.set(ctx, call.signal);
+          const clientId = isClientId(scope?.clientId) ? scope?.clientId : undefined;
+          if (clientId !== undefined) clientIds.set(ctx, clientId);
+          options.clients?.toolCall(clientId ?? null, name, clientInfoOf(server, ctx));
           try {
             return conformErrorResult(withCompleteText(await run(args, ctx, work)), output);
           } finally {

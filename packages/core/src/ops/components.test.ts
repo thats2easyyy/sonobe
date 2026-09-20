@@ -247,6 +247,18 @@ describe("updateInterface", () => {
     expect(firstError(doc, [{ op: "updateInterface", component: "chip", outputs: { t2: { key: "t2", name: "T2", type: "color", link: "tap.tap" } } }]).code).toBe("type_mismatch");
   });
 
+  it("refuses a new published input keyed like a property every layer has", () => {
+    const doc = setup();
+    expect(firstError(doc, [{ op: "updateInterface", component: "chip", inputs: { repeat: { name: "Repeat", type: "number" } } }])).toMatchObject({
+      code: "id_taken",
+      message: `"repeat" can't be a published input of Chip: every layer already has a Repeat property with that key, so instances would set their own Repeat and nothing would reach the input.`,
+      hint: 'Pick another key, like "repeatValue".',
+    });
+    // Patch components have no layer properties to collide with.
+    const logic = mustApply(emptyDoc(), [{ op: "addComponent", component: { name: "Logic", kind: "patchComponent" } }, { op: "updateInterface", component: "logic", inputs: { opacity: { name: "Opacity", type: "number" } } }]);
+    expect(logic.ok).toBe(true);
+  });
+
   it("removing ports cascades inner links and instance values, and undo restores them", () => {
     const doc = setup();
     const r = mustApply(doc, [{ op: "updateInterface", component: "chip", inputs: { label: null }, outputs: { tapped: null } }]);

@@ -3,7 +3,7 @@ import CoreHaptics
 import os
 import UIKit
 
-/// A message the player posted to the "sonobe" handler, checked and ready to play.
+/// A message the player posted to the "sonobe" handler, checked and ready to act on.
 nonisolated enum BridgeMessage: Equatable {
     /// A Haptic patch Type key other than Custom Pattern.
     case haptic(String)
@@ -11,15 +11,26 @@ nonisolated enum BridgeMessage: Equatable {
     case customPattern(NSDictionary)
     /// Vibrate: milliseconds on, off, on, …, clamped to 10 s in total. Empty stops the buzz.
     case vibrate([Double])
+    /// The player menu's Open Another Prototype: back to the connect screen.
+    case openAnother
+    /// The player showed its three-finger tip, or the person opened its menu: don't show the tip again.
+    case menuTipSeen
 }
 
-/// Plays the Haptic patch's feedback types and Vibrate patterns for the player.
+/// Plays the Haptic patch's feedback types and Vibrate patterns for the player, and announces the bridge.
 ///
 /// The bridge contract (ARCHITECTURE.md §9.2): the page reads `window.sonobeNative`, which this app
 /// defines at document start, and posts `{ kind: "haptic", type, pattern? }` or
-/// `{ kind: "vibrate", pattern }` to the "sonobe" message handler. Anything else is ignored.
+/// `{ kind: "vibrate", pattern }` to the "sonobe" message handler; from bridge version 2 also the player
+/// menu's `{ kind: "openAnother" }` and `{ kind: "menuTipSeen" }`. Anything else is ignored.
 final class Haptics {
     static let log = Logger(subsystem: "dev.sonobe.viewer", category: "haptics")
+
+    /// Bridge version 2: haptics and vibration (1), plus the player menu's actions and tip.
+    nonisolated static let bridgeVersion = 2
+
+    /// What the player menu may ask of the app, as `{ kind: action }`.
+    nonisolated static let actions = ["openAnother"]
 
     /// Haptic Type keys (packages/patches/catalog/device-1.json) this app plays. The trackpad types
     /// (alignment, levelChange) have no iPhone equivalent; Custom Pattern needs Core Haptics.
@@ -48,9 +59,9 @@ final class Haptics {
         Self.feedbackTypes.filter { $0 != "customPattern" || hasCoreHaptics }
     }
 
-    /// Runs at document start in the player page; the player reads it in playerPlatform().
-    var announcementScript: String {
-        let info: [String: Any] = ["version": 1, "platform": "ios", "haptics": supportedTypes, "vibrate": true]
+    /// Runs at document start in the player page; the player reads it in readNativeHost().
+    func announcementScript(menuTipSeen: Bool) -> String {
+        let info: [String: Any] = ["version": Self.bridgeVersion, "platform": "ios", "haptics": supportedTypes, "vibrate": true, "actions": Self.actions, "menuTipSeen": menuTipSeen]
         let json = (try? JSONSerialization.data(withJSONObject: info)).flatMap { String(data: $0, encoding: .utf8) } ?? "{}"
         return "Object.defineProperty(window, \"sonobeNative\", { value: Object.freeze(\(json)) });"
     }
@@ -61,16 +72,13 @@ final class Haptics {
         notification.prepare()
     }
 
-    /// Plays a message body from the page. Anything unrecognized is ignored.
-    func handle(_ body: Any) {
-        guard let message = Self.message(from: body) else {
-            Self.log.info("ignored a message the player sent")
-            return
-        }
+    /// Plays a haptic or vibration message. The menu's messages are the player view's to act on.
+    func play(_ message: BridgeMessage) {
         switch message {
         case let .haptic(type): play(type)
         case let .customPattern(pattern): playAHAP(pattern)
         case let .vibrate(spans): vibrate(spans)
+        case .openAnother, .menuTipSeen: break
         }
     }
 
@@ -89,6 +97,10 @@ final class Haptics {
             return .haptic(type)
         case "vibrate":
             return vibrationSpans(message["pattern"]).map(BridgeMessage.vibrate)
+        case "openAnother":
+            return .openAnother
+        case "menuTipSeen":
+            return .menuTipSeen
         default:
             return nil
         }

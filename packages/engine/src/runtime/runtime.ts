@@ -58,10 +58,10 @@ import {
   type EmptyStep,
 } from "./emptyLoops.ts";
 import { beginInputs, createRecord, disposeRecord, evaluateRecord, type EvalEnv, type NodeRecord } from "./evaluate.ts";
-import type { Binding, CLayer, CNode, InstancePath, Scope } from "./graph.ts";
+import type { Binding, CLayer, CNode, CProp, InstancePath, Scope } from "./graph.ts";
 import { isLoop, makeLoop, MAX_LOOP_LENGTH } from "./loop.ts";
 import { mulberry32 } from "./random.ts";
-import { buildScene, type SceneBuild } from "./scene.ts";
+import { buildScene, isCount, repeatCount, type SceneBuild } from "./scene.ts";
 import { summarizeSeries } from "./trace.ts";
 import { coerceValue, valuesEqual } from "./values.ts";
 
@@ -110,8 +110,9 @@ export interface SonobeRuntime extends Runtime {
   patchTimings(): PatchTiming[];
   /**
    * Read an address like getValue, plus what a person needs when it reads as nothing: a note saying
-   * the layer drew 0 copies (and why), that "#n" is past the end, that the instance path runs into a
-   * component with 0 copies, or why the value is an empty loop. Layers bound to loops report `copies`.
+   * the layer drew 0 copies (and why), that "#n" is past its copies ("Card has 1 copy"), that the
+   * instance path runs into a component with 0 copies, or why the value is an empty loop. Layer
+   * addresses report `copies`, and reading a copied layer without "#n" says which copy it read.
    */
   inspect(address: string): ValueInspection;
 }
@@ -250,6 +251,12 @@ class RuntimeImpl implements SonobeRuntime {
   private emptySince = new Map<string, number>();
   /** The scene being built belongs to a step (not refreshScene), so its layers are checked for empty loops. */
   private checkingEmpty = false;
+  /** Active loop_length_mismatch warnings by layer site ("main|card"), dropped once the loops fit again. */
+  private mismatchIssues = new Map<string, RuntimeIssue>();
+  /** Layer sites whose copies met a loop of another length this frame. */
+  private mismatchSites = new Set<string>();
+  /** First frame of each site's current run of mismatched frames. */
+  private mismatchSince = new Map<string, number>();
   private readonly emptyLoops: EmptyLoopEnv;
 
   constructor(doc: SonobeDocument, options: RuntimeOptions) {
@@ -320,9 +327,12 @@ class RuntimeImpl implements SonobeRuntime {
 
   getValue(address: string): Value {
     const target = this.resolveTarget(address);
-    const v = target ? this.readTarget(target) : undefined;
+    if (!target) return undefined;
+    const v = this.readTarget(target);
+    const copies = this.propCopies(target);
+    if (copies !== undefined) return this.copyItem(target, v, copies);
     if (!isLoop(v)) return v;
-    return v.items[target!.parsed.index ?? 0];
+    return v.items[target.parsed.index ?? 0];
   }
 
   getRawValue(address: string): Value | Loop | undefined {
@@ -336,6 +346,7 @@ class RuntimeImpl implements SonobeRuntime {
     // empty_loop warnings come back when the edit didn't fix them. What the last frame recorded stays
     // for inspect, which reads that frame's values until the next step.
     this.clearEmptyWarnings();
+    this.clearMismatches();
     // A scrub, a canvas drag or a small literal write only changes constant values: patch them in place.
     if (updateLiterals(this.graph, doc)) {
       this.record({ kind: "update", doc });
@@ -388,7 +399,7 @@ class RuntimeImpl implements SonobeRuntime {
   }
 
   issues(): RuntimeIssue[] {
-    return [...this.graph.issues, ...this.runtimeIssues.values(), ...this.emptyIssues.values()];
+    return [...this.graph.issues, ...this.runtimeIssues.values(), ...this.emptyIssues.values(), ...this.mismatchIssues.values()];
   }
 
   setProfiling(on: boolean): void {
@@ -486,9 +497,11 @@ class RuntimeImpl implements SonobeRuntime {
     this.env.dt = h;
     this.evaluate();
     this.checkingEmpty = true;
+    this.mismatchSites.clear();
     const build = this.build();
     this.checkingEmpty = false;
     this.pruneEmptyLoops();
+    this.pruneMismatches();
     this.syncTextFields(snapshot, build);
     this.produced = build;
     this.snapshot = build;
@@ -524,6 +537,9 @@ class RuntimeImpl implements SonobeRuntime {
       issue: (code, message, layerId) => this.addIssue(code, "warning", message, undefined, layerId),
       emptyCopies: (layer, path, emptyProp, erased) => {
         if (this.checkingEmpty) this.reportEmptyLayer(layer, path, emptyProp, erased);
+      },
+      lengthMismatch: (root, path, count, layer, prop, length) => {
+        if (this.checkingEmpty) this.reportMismatch(root, path, count, layer, prop, length);
       },
       layerRef: (layerId, instance, prefix) => this.makeRef(layerId, instance, prefix),
     });
@@ -651,6 +667,18 @@ class RuntimeImpl implements SonobeRuntime {
         const v = r.kind === "const" ? r.value : this.read(r, hostPath);
         if (!(node.feedback[inputs.length + k] && isLoop(v) && v.items.length === 0)) consider(v);
       }
+      // Repeat, when set, alone decides the count (an empty loop through a back-edge reads as unset).
+      if (child.repeat) {
+        const r = child.repeat;
+        const v = r.kind === "const" ? r.value : this.read(r, hostPath);
+        const back = node.feedback[inputs.length + child.replicators.length] && isLoop(v) && v.items.length === 0;
+        const repeat = back || !isCount(v) ? null : repeatCount(v);
+        if (repeat !== null) {
+          looping = true;
+          empty = repeat === 0;
+          max = repeat;
+        }
+      }
       let count = looping ? (empty ? 0 : max) : 1;
       // A layer component instance is reported by the scene, with the layer.
       if (looping && count === 0 && child.kind === "patchInstance") this.reportEmptyInstance(node, child, hostPath, max);
@@ -711,6 +739,7 @@ class RuntimeImpl implements SonobeRuntime {
     this.snapshot = null;
     this.runtimeIssues.clear();
     this.clearEmptyLoops();
+    this.clearMismatches();
     this.env.once.clear();
     this.restartRequested = false;
     this.restarts++;
@@ -836,6 +865,10 @@ class RuntimeImpl implements SonobeRuntime {
 
   private readTarget({ parsed, scope, path }: ResolvedTarget): Value | Loop | undefined {
     if (parsed.kind === "knob") return this.graph.knobs.values.get(parsed.key);
+    // A layer's Repeat reads as the copies it drew last frame, not the loop it counts.
+    if (parsed.kind === "layer" && parsed.key === "repeat" && this.snapshot && scope.layerIndex.get(parsed.id)?.props.has("repeat")) {
+      return this.snapshot.counts.get(path.layerPrefix + parsed.id) ?? 1;
+    }
     if (parsed.kind === "patch") {
       const node = scope.nodes.get(parsed.id);
       if (node) {
@@ -1278,15 +1311,81 @@ class RuntimeImpl implements SonobeRuntime {
     this.emptyIssues.set(site, issue);
   }
 
+  // ---- copies -----------------------------------------------------------------------
+
+  /**
+   * How many copies the layer of a layer-property address drew last frame (1 when it isn't copied);
+   * undefined for other addresses, layer outputs, and before the first frame.
+   */
+  private propCopies({ parsed, scope, path }: ResolvedTarget): number | undefined {
+    if (parsed.kind !== "layer" || !this.snapshot) return undefined;
+    const layer = scope.layerIndex.get(parsed.id);
+    if (!layer?.props.has(parsed.key) || layer.outputs.some((o) => o.key === parsed.key) || layer.instance?.component.interface.outputs[parsed.key]) return undefined;
+    return this.snapshot.counts.get(path.layerPrefix + parsed.id) ?? 1;
+  }
+
+  /**
+   * A layer property as copy "#n" draws it: loops wrap and an empty loop reads the default. Past the
+   * last copy it reads like any value (inspect's note says there's no such copy).
+   */
+  private copyItem(target: ResolvedTarget, v: Value | Loop | undefined, copies: number): Value {
+    const index = target.parsed.index ?? 0;
+    if (!isLoop(v)) return v;
+    if (index >= copies) return v.items[index];
+    const n = v.items.length;
+    const p = target.parsed;
+    return n ? v.items[index % n] : p.kind === "layer" ? target.scope.layerIndex.get(p.id)?.defaults[p.key] : undefined;
+  }
+
+  private clearMismatches(): void {
+    this.mismatchIssues.clear();
+    this.mismatchSites.clear();
+    this.mismatchSince.clear();
+  }
+
+  /** Drop the loop_length_mismatch warnings of layers whose loops fit their copies this frame. */
+  private pruneMismatches(): void {
+    for (const site of this.mismatchIssues.keys()) if (!this.mismatchSites.has(site)) this.mismatchIssues.delete(site);
+    for (const site of this.mismatchSince.keys()) if (!this.mismatchSites.has(site)) this.mismatchSince.delete(site);
+  }
+
+  /**
+   * A layer's copies met a loop of another length that only the running prototype knows (a filtered
+   * list, a count from data). Right after a count changes, patches reading the layer still see last
+   * frame's copies, so the warning waits for the second frame in a row.
+   */
+  private reportMismatch(root: CLayer, path: InstancePath, count: number, layer: CLayer, prop: CProp, length: number): void {
+    const site = `${root.scope.key}|${root.id}`;
+    if (this.mismatchSites.has(site)) return;
+    this.mismatchSites.add(site);
+    const since = this.mismatchSince.get(site);
+    if (since === undefined) this.mismatchSince.set(site, this.frame);
+    if (since === undefined || since === this.frame || this.mismatchIssues.has(site)) return;
+    const name = (l: CLayer) => `"${l.node.name || l.id}"`;
+    const what = `the ${layer.props.get(prop.key)?.name ?? prop.key} of ${name(layer)}`;
+    const effect = length < count ? `so copy #${length} shows item #0 again` : length - count === 1 ? `so item #${count} doesn't show` : `so items #${count} to #${length - 1} don't show`;
+    const issue: RuntimeIssue = {
+      code: "loop_length_mismatch",
+      severity: "warning",
+      message: `Layer ${name(root)} makes ${plural(count, "copy", "copies")}, but ${what} is a loop of ${length} right now, ${effect}.`,
+      hint: "These lengths come from the running prototype, like a filtered list or a count from data. Give the loops the same number of items, or link Repeat to the loop the copies should follow.",
+      layerId: root.id,
+    };
+    if (path.parent) issue.componentPath = path.key;
+    this.mismatchIssues.set(site, issue);
+  }
+
   inspect(address: string): ValueInspection {
     const { target, missing } = this.locate(address);
     if (!target) return { value: undefined, ...(missing ? { note: this.missingCopyNote(missing) } : {}) };
     const raw = this.readTarget(target);
     const index = target.parsed.index;
-    const out: ValueInspection = { value: isLoop(raw) ? raw.items[index ?? 0] : raw };
+    const copies = this.propCopies(target);
+    const out: ValueInspection = { value: copies !== undefined ? this.copyItem(target, raw, copies) : isLoop(raw) ? raw.items[index ?? 0] : raw };
     if (target.parsed.kind === "layer") {
       const layer = target.scope.layerIndex.get(target.parsed.id);
-      const count = this.snapshot?.counts.get(target.path.layerPrefix + target.parsed.id);
+      const drawn = this.snapshot?.counts.get(target.path.layerPrefix + target.parsed.id);
+      const count = drawn ?? (this.snapshot && layer ? 1 : undefined);
       if (count !== undefined) out.copies = count;
       const name = `Layer "${layer?.node.name || target.parsed.id}"`;
       if (count === 0) {
@@ -1294,7 +1393,16 @@ class RuntimeImpl implements SonobeRuntime {
         return out;
       }
       if (count !== undefined && index !== undefined && index >= count) {
-        out.note = `${name} has ${plural(count, "copy", "copies")} (#0 to #${count - 1}), so there's no #${index}.`;
+        out.note = count === 1 ? `${name} has 1 copy, so there's no #${index}.` : `${name} has ${count} copies (#0 to #${count - 1}), so there's no #${index}.`;
+        return out;
+      }
+      if (copies !== undefined && count !== undefined && count > 0) {
+        if (isLoop(raw) && raw.items.length === 0) {
+          out.note = `Every copy of "${layer?.node.name || target.parsed.id}" uses the default. ${this.emptyValueNote(target)}`;
+          return out;
+        }
+        // Reading a copied layer without "#n" reads its first copy.
+        if (index === undefined && count > 1 && target.parsed.key !== "repeat") out.note = `copy #0 of ${count}`;
         return out;
       }
     }

@@ -4,6 +4,7 @@ import { getRegistry } from "../../state/registry.ts";
 import {
   editLabel,
   encodeDefault,
+  formatCopies,
   formatLiveValue,
   intersectFields,
   layerSections,
@@ -115,6 +116,7 @@ describe("inspector fields", () => {
     expect(formatLiveValue({ __loop: true, items: [1, 2, 3] }, "number")).toBe("×3 · 1");
     expect(formatLiveValue(true, "boolean")).toBe("On");
     expect(formatLiveValue(undefined, "number")).toBe("—");
+    expect([formatCopies(4), formatCopies(1), formatCopies(undefined)]).toEqual(["4 copies", "1 copy", "—"]);
     expect(subjectLabel(["Card"], "layer")).toBe("Card");
     expect(subjectLabel(["Card", "Dot"], "patch")).toBe("2 patches");
     expect(editLabel({ port: { key: "opacity", name: "Opacity", type: "number", description: "" } }, "Card")).toBe("Set Opacity on Card");

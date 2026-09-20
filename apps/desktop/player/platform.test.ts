@@ -3,7 +3,8 @@ import { fileURLToPath } from "node:url";
 import { createRuntime } from "@sonobe/engine";
 import { runFrames, sequence, tap } from "@sonobe/engine/testing";
 import { createPatchRegistry, getSpec } from "@sonobe/patches";
-import { describe, expect, it } from "vitest";
+import { createMuteStore } from "@sonobe/renderer";
+import { describe, expect, it, vi } from "vitest";
 import { playerPlatform, readNativeHost, type PlayerWindow } from "./platform.ts";
 import { hapticCheckDocument } from "./testing.ts";
 
@@ -28,9 +29,25 @@ function nativeWindow(announcement: unknown = { version: 1, platform: "ios", hap
 }
 
 describe("playerPlatform", () => {
-  it("offers nothing in a browser without vibration or a native host", () => {
-    expect(playerPlatform({})).toEqual({});
-    expect(playerPlatform({ navigator: {} })).toEqual({});
+  it("has no haptics or vibration in a browser without them, but the editor viewer's other services", async () => {
+    for (const win of [{}, { navigator: {} }]) {
+      const platform = playerPlatform(win);
+      expect(platform.haptic).toBeUndefined();
+      expect(platform.vibrate).toBeUndefined();
+      expect(typeof platform.openUrl).toBe("function");
+      expect(typeof platform.speak).toBe("function");
+      platform.dispose();
+    }
+    // Network Request and JSON File fetch through the browser's fetch, and links open in a new tab.
+    const fetch = vi.fn(async () => new Response("hello", { status: 200 }));
+    const open = vi.fn();
+    const platform = playerPlatform({ open } as never, { fetch: fetch as never, mute: createMuteStore() });
+    const res = await platform.fetch!("https://api.example.com/greeting");
+    expect(await res.text()).toBe("hello");
+    expect(fetch).toHaveBeenCalledWith("https://api.example.com/greeting", expect.objectContaining({ method: "GET" }));
+    expect(platform.openUrl!("https://sonobe.dev/")).toBe(true);
+    expect(open).toHaveBeenCalledWith("https://sonobe.dev/", "_blank", "noopener,noreferrer");
+    platform.dispose();
   });
 
   it("forwards Vibrate to navigator.vibrate on Android and never throws", () => {
@@ -87,7 +104,17 @@ describe("playerPlatform", () => {
     }
     expect(playerPlatform({ sonobeNative: { version: 1, haptics: IOS_TYPES } }).haptic).toBeUndefined();
     expect(playerPlatform({ sonobeNative: { version: 1, haptics: IOS_TYPES }, webkit: { messageHandlers: {} } }).haptic).toBeUndefined();
-    expect(readNativeHost(nativeWindow({ version: 1, haptics: ["selection", 3, null] }).win)?.info).toEqual({ version: 1, platform: "native", haptics: ["selection"], vibrate: false });
+    expect(readNativeHost(nativeWindow({ version: 1, haptics: ["selection", 3, null] }).win)?.info).toEqual({ version: 1, platform: "native", haptics: ["selection"], vibrate: false, actions: [], menuTipSeen: false });
+  });
+
+  it("reads the menu's actions and tip from bridge version 2", () => {
+    const v2 = readNativeHost(nativeWindow({ version: 2, platform: "ios", haptics: IOS_TYPES, vibrate: true, actions: ["openAnother", 7], menuTipSeen: true }).win)!;
+    expect(v2.info).toMatchObject({ version: 2, actions: ["openAnother"], menuTipSeen: true });
+    // Version 1 hosts take no actions, whatever they announce.
+    expect(readNativeHost(nativeWindow({ version: 1, haptics: IOS_TYPES, actions: ["openAnother"] }).win)!.info.actions).toEqual([]);
+    const { win, posted } = nativeWindow({ version: 2, haptics: [], actions: ["openAnother"] });
+    readNativeHost(win)!.post({ kind: "openAnother" });
+    expect(posted).toEqual([{ kind: "openAnother" }]);
   });
 
   it("survives a host that throws while closing", () => {

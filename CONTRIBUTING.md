@@ -36,12 +36,13 @@ Node 22.18+ is required. Node 24 is what CI uses.
 
 ## Working on Sonobe Viewer (iPhone)
 
-`apps/ios` is a small Swift app built with Xcode, not npm. It plays the web player (`apps/desktop/player`) in a WKWebView and adds a haptics bridge, so player changes reach it without Swift changes. [apps/ios/README.md](apps/ios/README.md) has the details.
+`apps/ios` is a small Swift app built with Xcode, not npm. It plays the web player (`apps/desktop/player`) in a WKWebView and adds a native bridge for haptics and the player menu's Open Another Prototype, so player changes reach it without Swift changes. [apps/ios/README.md](apps/ios/README.md) has the details.
 
 - Build for the Simulator, no signing needed: `xcodebuild -project apps/ios/SonobeViewer.xcodeproj -scheme SonobeViewer -sdk iphonesimulator -derivedDataPath apps/ios/build CODE_SIGNING_ALLOWED=NO build`.
 - Test with `npm run test:ios`. It serves a test prototype with the real player, runs the Swift unit and UI tests on a simulator, and checks the haptics the app played. It isn't part of CI, so run it when you change the app, the player, or the bridge.
 - To run on your own iPhone, copy `apps/ios/Config/Local.xcconfig.example` to `Local.xcconfig` and set your team and a bundle id of your own. Git ignores `Local.xcconfig`. Never commit a team ID, a bundle id of your own, or other signing settings to the project.
-- The bridge has two sides: `apps/desktop/player/platform.ts` and `apps/ios/SonobeViewer/Haptics.swift`. Change them together, and update ARCHITECTURE.md §9.2. A player test checks that the app's haptic types exist in the catalog.
+- The bridge has two sides: `apps/desktop/player/platform.ts` and `apps/ios/SonobeViewer/Haptics.swift` (with `PlayerView.swift`, which acts on the menu's messages). Change them together, bump the bridge version when you add a message, and update ARCHITECTURE.md §9.2. A player test checks that the app's haptic types exist in the catalog.
+- The player's other services are the editor viewer's own (`packages/renderer/src/platform.ts`), so a service added there reaches phones too. Check it against the player page's CSP in `apps/desktop/electron/lan-preview.ts`, and loosen the policy only as far as the service needs.
 
 ## Adding an MCP tool that can take long
 
@@ -66,6 +67,7 @@ Sonobe reimplements interaction-prototyping concepts from public documentation a
 - Don't contribute code, assets, icons, device imagery, or text copied from Origami Studio, Meta, Apple, or any other proprietary product.
 - Describe behavior in your own words.
 - Mention other products only to describe compatibility (for example, the `origami` mapping fields in the catalog).
+- SF Symbols are Apple's. The sfsymbol helper (`apps/desktop/native/sfsymbol`) draws them on the person's Mac when they import, from their copy of macOS. Never commit symbol artwork, exported symbol SVGs or PNGs, or Apple's symbol lists, not even as test fixtures: tests draw what they need at run time.
 
 ## Pull requests
 

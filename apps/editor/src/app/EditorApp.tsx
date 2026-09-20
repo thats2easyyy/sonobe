@@ -204,11 +204,28 @@ function Workspace() {
     if (shouldShowWelcomeOnLaunch(hasSeenWelcome(), settingsStore.getState().showWelcomeOnLaunch)) welcomeStore.getState().show("launch");
   }, []);
 
-  // A project opened from the OS, Open Recent, or Claude replaces whatever the welcome screen offered.
+  // Unsaved work left by a crash or a quit: always offer it at launch (the welcome screen's Recovered section),
+  // unless something already replaced or edited the launch document (a project opened from Finder).
+  useEffect(() => {
+    let cancelled = false;
+    void session
+      .recoverableDrafts()
+      .then((drafts) => {
+        if (!cancelled && drafts.length && !welcomeStore.getState().open && session.document.getState().lastChange === null) welcomeStore.getState().show("launch");
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [session]);
+
+  // A project opened from the OS, Open Recent, or Claude replaces whatever the welcome screen offered
+  // (so does a draft Claude recovers, which has no project path yet).
   useEffect(
     () =>
       session.document.subscribe((s, previous) => {
-        if (s.projectPath && s.projectPath !== previous.projectPath) welcomeStore.getState().hide();
+        const replaced = s.lastChange !== previous.lastChange && s.lastChange?.kind === "replace";
+        if ((s.projectPath && s.projectPath !== previous.projectPath) || replaced) welcomeStore.getState().hide();
       }),
     [session],
   );

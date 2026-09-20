@@ -1,12 +1,12 @@
 import { COMPONENT_INSTANCE_LAYER_TYPE, createEmptyDocument } from "@sonobe/core";
 import { buildDoc, defineMock, MOCK_DEFINITIONS, port } from "@sonobe/engine/testing";
 import { createPatchRegistry } from "@sonobe/patches";
+import type { MuteState } from "@sonobe/renderer";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createStore } from "zustand/vanilla";
 import { createBrowserHost, createMemoryProjectStorage } from "../host/browserHost.ts";
 import { createDesktopHost } from "../host/desktopHost.ts";
 import type { DesktopHostApi } from "../host/types.ts";
-import type { MuteState } from "../runtime/platform.ts";
 import { createManualScheduler } from "../runtime/scheduler.ts";
 import { createMemoryTrustPersistence } from "../runtime/scriptTrust.ts";
 import { createDialogStore } from "./dialogs.ts";
@@ -94,6 +94,17 @@ describe("editor session", () => {
     expect(notify).toHaveBeenCalledTimes(1);
     // The Edit menu's titles travel with the revision.
     expect(notify).toHaveBeenCalledWith(2, { undo: "Undo Add B", redo: "Redo" });
+  });
+
+  it("tells the desktop when the prototype restarts, so phones restart too", () => {
+    const restarted = vi.fn();
+    const session = track(createEditorSession({ host: createDesktopHost(fakeApi({ notifyPrototypeRestarted: restarted })), dialogStore: createDialogStore(), document: createEmptyDocument(), ...headless() }));
+    expect(restarted).not.toHaveBeenCalled();
+    session.runtime.restart();
+    expect(restarted).toHaveBeenCalledTimes(1);
+    // Opening another document starts it fresh without restarting the phones' old one.
+    session.document.getState().replaceDocument(createEmptyDocument());
+    expect(restarted).toHaveBeenCalledTimes(1);
   });
 
   it("keeps trust for prototypes the person saves, and asks before running someone else's scripts", async () => {

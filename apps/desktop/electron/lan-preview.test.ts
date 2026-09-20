@@ -110,7 +110,14 @@ describe("startLanPreview", () => {
     const page = await fetch(s.url);
     expect(page.status).toBe(200);
     expect(page.headers.get("content-type")).toContain("text/html");
-    expect(page.headers.get("content-security-policy")).toContain("default-src 'self'");
+    const csp = page.headers.get("content-security-policy") ?? "";
+    expect(csp).toContain("default-src 'self'");
+    // Code only from the player; prototypes reach other hosts as in the editor's viewer (Network Request, WebSocket, remote media).
+    expect(csp).toContain("script-src 'self';");
+    expect(csp).toContain("connect-src 'self' http: https: ws: wss:");
+    expect(csp).toContain("img-src 'self' data: blob: http: https:");
+    expect(csp).toContain("media-src 'self' data: blob: http: https:");
+    expect(csp).toContain("frame-ancestors 'none'");
     expect(page.headers.get("referrer-policy")).toBe("no-referrer");
     expect(await page.text()).toContain("<title>Player</title>");
 
@@ -215,6 +222,40 @@ describe("startLanPreview", () => {
     current = { ...current!, revision: 3 };
     s.setPushUpdates(false);
     expect(await next((m) => m.type === "document")).toMatchObject({ revision: 3 });
+    ws.terminate();
+  });
+
+  it("restarts players after sending the revision they don't have yet", async () => {
+    const s = server!;
+    s.setPushUpdates(true);
+    s.restart(); // No players yet: nothing to do.
+    const { ws, next } = await open(`ws://127.0.0.1:${s.port}/p/${s.token}/sync`);
+    expect(await next((m) => m.type === "document")).toMatchObject({ revision: 1 });
+
+    current = { ...current!, revision: 2 };
+    s.restart();
+    // The new revision first, then the restart, so the phone starts over on what the editor restarted.
+    expect(await next((m) => m.type === "document" || m.type === "restart")).toMatchObject({ type: "document", revision: 2 });
+    expect(await next(() => true)).toEqual({ type: "restart" });
+
+    s.restart();
+    expect(await next(() => true)).toEqual({ type: "restart" });
+    ws.terminate();
+  });
+
+  it("says when the project's scripts wait for trust, and sends the document again once trusted", async () => {
+    const s = server!;
+    s.setPushUpdates(true);
+    current = { ...current!, scriptsPaused: true };
+    const { ws, next } = await open(`ws://127.0.0.1:${s.port}/p/${s.token}/sync`);
+    expect(await next((m) => m.type === "document")).toMatchObject({ revision: 1, scriptsPaused: true });
+    // Trusting changes no revision; the editor restarts, and the restart carries the change.
+    current = { ...current!, scriptsPaused: false };
+    s.restart();
+    const again = await next((m) => m.type === "document");
+    expect(again).toMatchObject({ revision: 1 });
+    expect("scriptsPaused" in again).toBe(false);
+    expect(await next(() => true)).toEqual({ type: "restart" });
     ws.terminate();
   });
 

@@ -61,6 +61,30 @@ describe("empty_loop warnings", () => {
     expect(emptyLoops(rt.issues())).toEqual([]);
   });
 
+  it("under Repeat, an empty loop on a property reads its default and erases nothing; an empty Repeat is explained", () => {
+    const repeated = apply(dots(), [{ op: "setInput", target: "@dot.repeat", value: 3 }]);
+    const rt = createTestRuntime(repeated, reg);
+    runFrames(rt, 3);
+    expect(rt.scene().roots.map((n) => [n.key, n.props.opacity])).toEqual([
+      ["dot#0", 1],
+      ["dot#1", 1],
+      ["dot#2", 1],
+    ]);
+    expect(emptyLoops(rt.issues())).toEqual([]);
+    // A Repeat that counts the empty loop makes 0 copies, and that's worth a warning.
+    rt.updateDocument(apply(repeated, [{ op: "setInput", target: "@dot.repeat", value: { link: "picked.output" } }]));
+    runFrames(rt, 2);
+    expect(rt.scene().roots).toEqual([]);
+    const [issue, ...rest] = emptyLoops(rt.issues());
+    expect(rest).toEqual([]);
+    expect(issue).toMatchObject({ layerId: "dot" });
+    expect(issue!.message).toBe('Layer "Dot" has 0 copies because "Picked" (Pick) returned an empty loop: every index is past the end of its 2-item Loop.');
+    // A typed 0 is on purpose.
+    rt.updateDocument(apply(repeated, [{ op: "setInput", target: "@dot.repeat", value: 0 }]));
+    runFrames(rt, 3);
+    expect(emptyLoops(rt.issues())).toEqual([]);
+  });
+
   it("stays quiet for a list that is simply empty", () => {
     const rt = createTestRuntime(
       buildDoc({ layers: [{ id: "row", type: "rectangle", name: "Row", props: { position: { link: "pos.output" } } }], patches: { pos: { type: "splitter", typeParam: "point", inputs: { value: { loop: [] } } } } }, reg),

@@ -230,6 +230,7 @@
         "cornerRadius": 32,
         "hitTest": { "link": "is_top.output" },
         "position": { "link": "card_position.output" },
+        "repeat": { "link": "cards.index" },
         "rotation": { "link": "card_rotation.output" },
         "scale": { "link": "card_scale.output" },
         "shadowColor": "#000000FF",

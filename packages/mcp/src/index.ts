@@ -55,6 +55,20 @@ export {
   type ToolWorkOptions,
 } from "./progress.ts";
 export {
+  ANONYMOUS_CLIENT,
+  CLIENT_HEADER,
+  clientLabel,
+  createClientRegistry,
+  isClientId,
+  parseHello,
+  type ClientRegistry,
+  type ClientRegistryOptions,
+  type McpClientHello,
+  type McpClientState,
+  type McpClientStatus,
+  type McpClientVia,
+} from "./clients.ts";
+export {
   createHttpHandler,
   documentResourceUris,
   publishDocumentChange,
@@ -74,6 +88,14 @@ export {
   type InstanceStep,
 } from "./instances.ts";
 export { createTemplateDocument, TEMPLATES, templateOps, type TemplateInfo } from "./templates.ts";
+export {
+  checkProjectTarget,
+  expandHome,
+  isPlaceholderName,
+  resolveProjectTarget,
+  type ProjectTargetOptions,
+  type ProjectTargetProblem,
+} from "./projectTarget.ts";
 export { explain, type Audience, type ExplainOptions } from "./explain.ts";
 export { describeRemovals, hasDestructiveOps, isDestructiveOp, removedItems, type RemovalSummary } from "./removals.ts";
 export {

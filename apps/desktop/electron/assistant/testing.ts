@@ -3,7 +3,7 @@
 import Anthropic from "@anthropic-ai/sdk";
 import type { BetaMessage, BetaMessageStreamParams, BetaRawMessageStreamEvent } from "@anthropic-ai/sdk/resources/beta/messages/messages";
 import type { AnthropicClientLike, MessageStreamLike } from "./agent.ts";
-import type { AssistantToolInfo, ToolBridge, ToolCallResult } from "./toolBridge.ts";
+import type { AssistantToolInfo, ToolBridge, ToolCallOptions, ToolCallResult } from "./toolBridge.ts";
 
 export type FakeBlock =
   | { type: "text"; text: string }
@@ -128,14 +128,14 @@ export const FAKE_TOOLS: AssistantToolInfo[] = [
   { name: "apply_ops", title: "Apply ops", description: "Apply ops.", inputSchema: { type: "object", properties: { ops: { type: "array" } } }, readOnly: false },
 ];
 
-export function fakeBridge(handler: (name: string, args: Record<string, unknown>, callIndex: number) => ToolCallResult | Promise<ToolCallResult>): FakeBridge {
+export function fakeBridge(handler: (name: string, args: Record<string, unknown>, callIndex: number, options: ToolCallOptions) => ToolCallResult | Promise<ToolCallResult>): FakeBridge {
   const bridge: FakeBridge = {
     calls: [],
     tools: async () => FAKE_TOOLS,
     instructions: async () => "Call get_outline before editing.",
-    async call(name, args) {
+    async call(name, args, options = {}) {
       bridge.calls.push({ name, args });
-      return handler(name, args, bridge.calls.length - 1);
+      return handler(name, args, bridge.calls.length - 1, options);
     },
     close: async () => undefined,
   };

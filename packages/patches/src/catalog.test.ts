@@ -57,7 +57,7 @@ const VALUE_TYPES = [
 ] as const satisfies readonly ValueType[];
 
 const SUBTYPES = [
-  "progress", "angle", "duration", "percent", "distance", "velocity", "multiline", "code", "url",
+  "progress", "angle", "duration", "percent", "distance", "velocity", "multiline", "code", "url", "count",
 ] as const satisfies readonly ValueSubtype[];
 
 type Covers<Union, Listed> = [Exclude<Union, Listed>] extends [never] ? true : false;

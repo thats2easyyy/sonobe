@@ -22,7 +22,7 @@ Sonobe prototypes are layers (what people see) plus patches (logic nodes with ty
 When they have an app or a design in code, start from it instead of drawing layers by hand. Read the `importing` guide first.
 
 - A web app: find or start its dev server (read `package.json` scripts), then `import_design` with `url` for each screen. `selector` imports one component; `waitFor` waits for data.
-- Anything else (SwiftUI, React Native, Flutter, a screen that needs a backend) or a new design: read the screen's code and theme, write one faithful static HTML page at the device width with real copy, colors, fonts, spacing and inline SVG icons, and `data-name` on elements you'll wire, text included. Import it with `html`.
+- Anything else (SwiftUI, React Native, Flutter, a screen that needs a backend) or a new design: read the screen's code and theme, write one faithful static HTML page at the device width with real copy, colors, fonts, spacing and inline SVG icons, and `data-name` on elements you'll wire, text included. Write SF Symbols as `<svg data-sf-symbol="heart.fill"></svg>` (CSS `font-size`, `font-weight` and `color` style them) instead of drawing them: Sonobe on a Mac imports the real symbol. Import it with `html`.
 - Read the result's outline, compare `get_screenshot` with the source (`screenshot: true` returns the page), then wire interactions onto the imported ids.
 
 ## Building

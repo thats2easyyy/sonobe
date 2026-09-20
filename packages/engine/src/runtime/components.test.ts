@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildDoc, createMockRegistry, createTestRuntime, probeDefinition, runFrames, sequenceDefinition, tap, type ComponentInput } from "../testing/index.ts";
+import { buildDoc, createMockRegistry, createTestRuntime, pointerEvent, probeDefinition, runFrames, sequenceDefinition, tap, type ComponentInput, type PatchInput } from "../testing/index.ts";
 import { isLoop, makeLoop } from "./loop.ts";
 
 const items = (v: unknown) => (isLoop(v) ? v.items : v);
@@ -211,5 +211,40 @@ describe("components: layer components", () => {
     runFrames(rt, 1);
     runFrames(rt, 2, tap(50, 250));
     expect(items(rt.getRawValue("@c1.on"))).toEqual([false, true]);
+  });
+
+  it("Repeat on an instance alone decides its copies: loop inputs wrap per copy, and inner patches run per copy", () => {
+    const names: PatchInput = { type: "splitter", typeParam: "text", inputs: { value: { loop: ["a", "b", "c", "d"] } } };
+    const two = createTestRuntime(buildDoc({ components: [card], layers: [{ id: "c1", type: "componentInstance", name: "Card", component: "card", props: { repeat: 2, title: { link: "names.output" } } }], patches: { names } }));
+    const frame = two.step();
+    expect(frame.roots.map((r) => [r.key, r.children[1]!.props.text])).toEqual([
+      ["c1#0", "a"],
+      ["c1#1", "b"],
+    ]);
+    expect(items(two.getRawValue("@c1.on"))).toEqual([false, false]);
+    const six = createTestRuntime(buildDoc({ components: [card], layers: [{ id: "c1", type: "componentInstance", name: "Card", component: "card", props: { repeat: 6, title: { link: "names.output" } } }], patches: { names } }));
+    expect(six.step().roots.map((r) => r.children[1]!.props.text)).toEqual(["a", "b", "c", "d", "a", "b"]);
+  });
+
+  it("Repeat on an instance with no loop inputs makes copies, and a host Interaction on it runs per copy", () => {
+    const rt = createTestRuntime(
+      buildDoc({
+        components: [card],
+        layers: [{ id: "c1", type: "componentInstance", name: "Card", component: "card", props: { repeat: { link: "count.output" }, position: { link: "slide.output" } } }],
+        patches: {
+          count: { type: "splitter", inputs: { value: 3 } },
+          touch: { type: "interaction", inputs: { layer: { layer: "c1" } } },
+          slide: { type: "transition", typeParam: "point", inputs: { progress: { link: "touch.down" }, start: [0, 0], end: [0, 300] } },
+        },
+      }),
+    );
+    runFrames(rt, 2);
+    expect(rt.scene().roots.map((r) => r.key)).toEqual(["c1#0", "c1#1", "c1#2"]);
+    expect(items(rt.getRawValue("touch.down"))).toEqual([false, false, false]);
+    runFrames(rt, 1, [[pointerEvent("down", 50, 50)]]);
+    rt.step();
+    // The top copy (last) takes the touch and moves on its own.
+    expect(items(rt.getRawValue("touch.down"))).toEqual([false, false, true]);
+    expect(rt.scene().roots.map((r) => r.y)).toEqual([0, 0, 300]);
   });
 });

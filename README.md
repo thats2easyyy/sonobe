@@ -104,20 +104,20 @@ Sonobe runs an MCP server on `127.0.0.1` that only accepts requests carrying the
 
 ### Claude Code
 
-With the packaged app in your Applications folder:
+With the packaged app in your Applications folder, run this once, from any folder:
 
 ```bash
-claude mcp add sonobe -- /Applications/Sonobe.app/Contents/Resources/cli/sonobe mcp
+claude mcp add --scope user sonobe -- /Applications/Sonobe.app/Contents/Resources/cli/sonobe mcp
 ```
 
 From a checkout, build the CLI bundle once, then use its absolute path:
 
 ```bash
 npm run build -w @sonobe/cli
-claude mcp add sonobe -- node "/absolute/path/to/sonobe/packages/cli/dist/sonobe.mjs" mcp
+claude mcp add --scope user sonobe -- node "/absolute/path/to/sonobe/packages/cli/dist/sonobe.mjs" mcp
 ```
 
-Check the connection with `claude mcp list`, keep Sonobe open, and ask Claude, "List the documents open in Sonobe."
+`--scope user` gives every Claude Code session Sonobe's tools, whatever folder it starts in. If you set Sonobe up before, an older entry may be tied to one folder, and it wins there: run `claude mcp remove --scope local sonobe` in that folder. Check the setup with `claude mcp list`, keep Sonobe open, and ask Claude, "List the documents open in Sonobe." The Connect Claude screen lists each session once it connects, with its folder and last activity, and the toolbar's Claude button turns green only while a session is connected.
 
 The Claude Code plugin adds the same server plus a skill that teaches Claude Sonobe's workflow. From a checkout:
 
@@ -126,10 +126,10 @@ node integrations/claude-code/build.ts
 claude --plugin-dir ./integrations/claude-code
 ```
 
-To let Claude work on a project folder without the app running, use headless mode. It supports editing, simulation, saving, and approximate screenshots:
+To let Claude work on a project folder without the app running, use headless mode. It supports editing, simulation, saving, and approximate screenshots. It works on one prototype, so add it in the folder where you start Claude:
 
 ```bash
-claude mcp add sonobe-headless -- node "/absolute/path/to/sonobe/packages/cli/dist/sonobe.mjs" mcp --headless "/absolute/path/to/Prototype.sonobe"
+claude mcp add --scope local sonobe-headless -- node "/absolute/path/to/sonobe/packages/cli/dist/sonobe.mjs" mcp --headless "/absolute/path/to/Prototype.sonobe"
 ```
 
 ### Claude Desktop
@@ -179,10 +179,10 @@ The runs also showed where Claude struggled, and those problems are fixed. Tool 
 - **5 interactive lessons** that check your work as you go: Your first prototype, States vs pulses, Spring feel, Lists with loops, and Building with Claude.
 - **Design import** from a running app, HTML, or Claude, into real layers ([guide 12](docs/guides/12-importing-designs.md)).
 - **12 guides** in [docs/guides](docs/guides/README.md), from your first prototype through debugging, coming from Origami, working with Claude, and importing designs.
-- **An MCP server with 44 tools** in seven groups: discovery (patch and layer docs, workflow guides), documents, reading (outline, search, diagnostics, plain-language explanations), writing (atomic batches of typed ops, and importing designs), knobs (named values to tune, and presets like "Shipped app" to compare), simulation (taps, drags, traces, simulation-only overrides and presets, screenshots), and presence and history (show what Claude is doing, undo). It also offers four prompts: `import_screen`, `prototype_interaction`, `debug_interaction`, and `explain_prototype`. The [MCP README](packages/mcp/README.md) lists every tool.
+- **An MCP server with 45 tools** in seven groups: discovery (patch and layer docs, workflow guides), documents, reading (outline, search, diagnostics, plain-language explanations), writing (atomic batches of typed ops, and importing designs), knobs (named values to tune, and presets like "Shipped app" to compare), simulation (taps, drags, traces, simulation-only overrides and presets, screenshots), and presence and history (show what Claude is doing, restart the live viewer, undo). It also offers four prompts: `import_screen`, `prototype_interaction`, `debug_interaction`, and `explain_prototype`. The [MCP README](packages/mcp/README.md) lists every tool.
 - **The `sonobe` CLI** with `new`, `validate`, `fmt`, `outline`, `describe`, `sim`, and `mcp`.
 - **A Claude Code plugin, a Claude Desktop extension, and a Chrome extension** in [integrations/](integrations/).
-- **Phone preview and a pop-out viewer.** Scan a QR code to run the live prototype in your phone's browser on the same network. On an iPhone, the Sonobe Viewer app plays it with real haptics ([apps/ios](apps/ios/README.md); build it with Xcode).
+- **Phone preview and a pop-out viewer.** Scan a QR code to run the live prototype in your phone's browser on the same network, with sound, network requests and the camera like the viewer. Restarting in Sonobe restarts it on the phone, and a three-finger tap opens a menu there. On an iPhone, the Sonobe Viewer app plays it with real haptics ([apps/ios](apps/ios/README.md); build it with Xcode).
 - **An optional in-app Assistant** in the desktop app, for people who'd rather use their own Anthropic API key than Claude Code or Claude Desktop. The key is kept in your operating system's keychain.
 
 ## Repository layout

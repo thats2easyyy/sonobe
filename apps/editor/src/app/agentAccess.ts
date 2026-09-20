@@ -9,7 +9,7 @@ import type { RpcRegistrar } from "../host/types.ts";
 import type { AgentPermission } from "./settings.ts";
 
 /** Bridge methods that change the document, what's on disk, or which document is open. */
-export const AGENT_WRITE_METHODS: ReadonlySet<string> = new Set(["document.apply", "document.save", "document.open", "document.new", "history.undo"]);
+export const AGENT_WRITE_METHODS: ReadonlySet<string> = new Set(["document.apply", "document.save", "document.open", "document.new", "document.recoverDraft", "history.undo"]);
 
 export const AGENT_READ_ONLY_CODE = "agent_read_only";
 

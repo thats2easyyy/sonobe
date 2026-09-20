@@ -3,7 +3,7 @@ import { getDiagnostics } from "./diagnostics.ts";
 import { feedbackEdges } from "./graph.ts";
 import { applyOps } from "./ops/index.ts";
 import { createRegistry } from "./registry.ts";
-import { buildSampleDocument, emptyDoc, extendedRegistry, MOCK_PATCH_SPECS, mockRegistry, mustApply, port } from "./testing/fixtures.ts";
+import { buildSampleDocument, emptyDoc, extendedRegistry, loopRegistry, MOCK_PATCH_SPECS, mockRegistry, mustApply, port } from "./testing/fixtures.ts";
 import type { Component, Op, PatchSpec, SonobeDocument } from "./types.ts";
 
 const codes = (doc: SonobeDocument) => getDiagnostics(doc, mockRegistry).map((d) => `${d.severity}:${d.code}`);
@@ -457,5 +457,147 @@ describe("knob diagnostics", () => {
     expect(d).toMatchObject({ severity: "info", itemIds: ["gap"] });
     expect(d.message).toBe("1 Variable Broadcaster shares a constant in Main. Knobs would let you tune it in one panel and compare presets.");
     expect(d.hint).toContain('set_knobs({ "convertVariables": { "component": "main" } })');
+  });
+});
+
+describe("getDiagnostics: copies (Repeat and loop lengths)", () => {
+  const build = (ops: Op[]) => mustApply(emptyDoc(), ops, { registry: loopRegistry }).doc;
+  const found = (doc: SonobeDocument, code: string) => getDiagnostics(doc, loopRegistry).filter((d) => d.code === code);
+  /** The retro's deck: a card moved by its own drag, with a looped title and photo inside. */
+  const deck: Op[] = [
+    { op: "addLayer", layer: { id: "card", type: "group", name: "Card" } },
+    { op: "addLayer", parent: "card", layer: { id: "title", type: "text", name: "Title" } },
+    { op: "addLayer", parent: "card", layer: { id: "photo", type: "rectangle", name: "Photo" } },
+    { op: "addPatch", patch: { id: "names", type: "loopBuilder", name: "Names", typeParam: "text", inputCount: 4, inputs: { item0: "A", item1: "B", item2: "C", item3: "D" } } },
+    { op: "addPatch", patch: { id: "colors", type: "loopBuilder", name: "Colors", typeParam: "color", inputCount: 3, inputs: { item0: "#FF0000FF", item1: "#00FF00FF", item2: "#0000FFFF" } } },
+    { op: "addPatch", patch: { id: "drag", type: "drag", name: "Drag Card", inputs: { layer: { layer: "card" } } } },
+    { op: "connect", from: "names.loop", to: "@title.text" },
+    { op: "connect", from: "colors.loop", to: "@photo.color" },
+    { op: "connect", from: "drag.position", to: "@card.position" },
+  ];
+
+  it("loops_inside_single_copy: children repeating inside one card that a gesture moves, with a Repeat fix", () => {
+    const doc = build(deck);
+    const [d, ...rest] = found(doc, "loops_inside_single_copy");
+    expect(rest).toEqual([]);
+    expect(d).toMatchObject({ severity: "info", itemIds: ["card", "title", "photo", "drag"], port: "repeat" });
+    expect(d!.message).toBe('"Title" and "Photo" repeat inside one "Card": "Card" itself makes 1 copy, so "Drag Card" (Drag) moves all of them together.');
+    expect(d!.suggestions).toEqual([{ description: 'Repeat "Card" once per item of names.loop', ops: [{ op: "setInput", component: "main", target: "@card.repeat", value: { link: "names.loop" } }] }]);
+    const fixed = mustApply(doc, d!.suggestions![0]!.ops!, { registry: loopRegistry }).doc;
+    expect(found(fixed, "loops_inside_single_copy")).toEqual([]);
+  });
+
+  it("stays quiet for one looped row inside a scrolled list", () => {
+    const doc = build([
+      { op: "addLayer", layer: { id: "list", type: "group", name: "List" } },
+      { op: "addLayer", parent: "list", layer: { id: "row", type: "text", name: "Row" } },
+      { op: "addLayer", parent: "list", layer: { id: "header", type: "text", name: "Header" } },
+      { op: "addPatch", patch: { id: "names", type: "loopBuilder", typeParam: "text", inputCount: 4 } },
+      { op: "addPatch", patch: { id: "scroll", type: "drag", inputs: { layer: { layer: "list" } } } },
+      { op: "connect", from: "names.loop", to: "@row.text" },
+      { op: "connect", from: "scroll.position", to: "@list.position" },
+    ]);
+    expect(getDiagnostics(doc, loopRegistry).filter((d) => d.code !== "unused_patch")).toEqual([]);
+    // Rows and labels placed one per index, or laid out by the list, are a list, not a stuck card.
+    const placed = build([
+      { op: "addLayer", layer: { id: "list", type: "group", name: "List" } },
+      { op: "addLayer", parent: "list", layer: { id: "row", type: "rectangle", name: "Row" } },
+      { op: "addLayer", parent: "list", layer: { id: "label", type: "text", name: "Label" } },
+      { op: "addPatch", patch: { id: "names", type: "loopBuilder", typeParam: "text", inputCount: 4 } },
+      { op: "addPatch", patch: { id: "rows", type: "loop", inputs: { count: 4 } } },
+      { op: "addPatch", patch: { id: "at", type: "add", inputs: { value1: { link: "rows.index" }, value2: 10 } } },
+      { op: "addPatch", patch: { id: "scroll", type: "drag", inputs: { layer: { layer: "list" } } } },
+      { op: "connect", from: "names.loop", to: "@label.text" },
+      { op: "connect", from: "at.output", to: "@label.position" },
+      { op: "connect", from: "at.output", to: "@row.position" },
+      { op: "connect", from: "scroll.position", to: "@list.position" },
+    ]);
+    expect(found(placed, "loops_inside_single_copy")).toEqual([]);
+    const column = build([...deck, { op: "setInput", target: "@card.layout", value: "column" }]);
+    expect(found(column, "loops_inside_single_copy")).toEqual([]);
+  });
+
+  it("loop_length_mismatch at a layer's copies: a warning when a loop wraps or loses items, info when it looks deliberate", () => {
+    const linked = build([...deck, { op: "setInput", target: "@card.repeat", value: { link: "names.loop" } }]);
+    expect(found(linked, "loops_inside_single_copy")).toEqual([]);
+    expect(found(linked, "loop_length_mismatch")).toEqual([
+      {
+        code: "loop_length_mismatch",
+        severity: "warning",
+        component: "main",
+        itemIds: ["card", "photo", "colors"],
+        port: "color",
+        message: '"Card" makes 4 copies, but the Color of "Photo" is a loop of 3, so copy #3 shows item #0 again.',
+        hint: "A shorter loop starts over from its first item, and items past the last copy don't show. Give the loops the same number of items, or link Repeat to the loop the copies should follow.",
+      },
+    ]);
+    // A typed Repeat that shows the first items is on purpose, and so are stripes (6 copies, 3 colors).
+    const typed = found(build([...deck, { op: "setInput", target: "@card.repeat", value: 3 }]), "loop_length_mismatch");
+    expect(typed.map((d) => [d.severity, d.message])).toEqual([["info", '"Card" makes 3 copies (its Repeat), so only the first 3 of the 4 items in the Text of "Title" show.']]);
+    const six = found(build([...deck, { op: "setInput", target: "@card.repeat", value: 6 }]), "loop_length_mismatch");
+    expect(six.map((d) => [d.severity, d.message])).toEqual([["warning", '"Card" makes 6 copies (its Repeat), but the Text of "Title" is a loop of 4, so copy #4 shows item #0 again. 1 more property has other lengths.']]);
+    const stripes = found(build([...deck, { op: "disconnect", to: "@title.text" }, { op: "setInput", target: "@card.repeat", value: 6 }]), "loop_length_mismatch");
+    expect(stripes.map((d) => [d.severity, d.message, d.hint])).toEqual([
+      ["info", '"Card" makes 6 copies (its Repeat) and the Color of "Photo" is a loop of 3, so its items repeat every 3 copies.', "That's how alternating patterns like stripes are made. If you didn't mean it, give the loops the same number of items."],
+    ]);
+  });
+
+  it("loop_length_mismatch at a patch: loops of different lengths meeting at per-item inputs", () => {
+    const doc = build([
+      { op: "addPatch", patch: { id: "six", type: "loop", name: "Six", inputs: { count: 6 } } },
+      { op: "addPatch", patch: { id: "four", type: "loop", name: "Four", inputs: { count: 4 } } },
+      { op: "addPatch", patch: { id: "two", type: "loop", name: "Two", inputs: { count: 2 } } },
+      { op: "addPatch", patch: { id: "sum", type: "add", name: "Sum", inputs: { value1: { link: "six.index" }, value2: { link: "four.index" } } } },
+      { op: "addPatch", patch: { id: "zebra", type: "add", name: "Zebra", inputs: { value1: { link: "six.index" }, value2: { link: "two.index" } } } },
+      { op: "addPatch", patch: { id: "total", type: "loopFilter", inputs: { loop: { link: "six.index" }, include: { link: "two.index" } } } },
+    ]);
+    expect(found(doc, "loop_length_mismatch").map((d) => [d.severity, d.itemIds, d.port, d.message])).toEqual([
+      ["warning", ["sum", "six", "four"], "value2", '"Sum" (Add) gets loops of different lengths (Value 1 has 6 items and Value 2 has 4), so it runs 6 times and the shorter loop starts over from its first item.'],
+      ["info", ["zebra", "six", "two"], "value2", '"Zebra" (Add) gets loops of different lengths (Value 1 has 6 items and Value 2 has 2), so it runs 6 times and the shorter loop starts over from its first item.'],
+    ]);
+  });
+
+  it("repeat_from_own_gesture: a Repeat that follows a gesture running once per copy", () => {
+    const doc = build([...deck, { op: "setInput", target: "@card.repeat", value: { link: "drag.position" } }]);
+    const [d] = found(doc, "repeat_from_own_gesture");
+    expect(d).toMatchObject({ severity: "warning", itemIds: ["card", "drag"], port: "repeat" });
+    expect(d!.message).toBe('The Repeat of "Card" follows "Drag Card" (Drag), which runs once per copy of "Card", so the number of copies decides itself: it keeps what it had last frame and can get stuck at 0 or 1.');
+    // A list the gesture edits through a whole-loop patch decides its own length.
+    const kept = build([
+      ...deck,
+      { op: "addPatch", patch: { id: "kept", type: "loopFilter", inputs: { loop: { link: "names.index" }, include: { link: "drag.dragging" } } } },
+      { op: "setInput", target: "@card.repeat", value: { link: "kept.output" } },
+    ]);
+    expect(found(kept, "repeat_from_own_gesture")).toEqual([]);
+  });
+
+  it("repeat_inside_repeat: a Repeat under a layer that already makes copies is ignored", () => {
+    const doc = build([...deck, { op: "setInput", target: "@card.repeat", value: 2 }, { op: "setInput", target: "@title.repeat", value: 3 }]);
+    const [d] = found(doc, "repeat_inside_repeat");
+    expect(d).toMatchObject({ severity: "warning", itemIds: ["title", "card"], port: "repeat" });
+    expect(d!.message).toBe('"Title" has its own Repeat, but it\'s inside "Card", which already makes copies, so each copy of "Card" shows one "Title" and this Repeat is ignored.');
+    expect(d!.suggestions![0]!.ops).toEqual([{ op: "setInput", component: "main", target: "@title.repeat", value: null }]);
+  });
+
+  it("input_shadowed_by_prop: a published input keyed like a property every layer has", () => {
+    const doc = mustApply(
+      emptyDoc(),
+      [
+        { op: "addComponent", component: { id: "chip", name: "Chip", kind: "layerComponent", interface: { inputs: { repeat: { key: "repeat", name: "Repeat", type: "number" } }, outputs: {} } } },
+        { op: "addLayer", component: "chip", layer: { id: "bg", type: "rectangle", name: "Bg", props: { opacity: { link: "$in.repeat" } } } },
+      ],
+      { registry: loopRegistry },
+    ).doc;
+    expect(found(doc, "input_shadowed_by_prop")).toEqual([
+      {
+        code: "input_shadowed_by_prop",
+        severity: "warning",
+        component: "chip",
+        itemIds: [],
+        port: "repeat",
+        message: 'The published input "Repeat" of Chip has the key "repeat", which every layer already uses for its Repeat property, so instances set their own Repeat and nothing reaches the input.',
+        hint: 'Publish it under another key, like "repeatValue", and read "$in.repeatValue" inside instead.',
+      },
+    ]);
   });
 });

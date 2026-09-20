@@ -5,7 +5,7 @@
 
 import { contextBridge, ipcRenderer, type IpcRendererEvent } from "electron";
 import { attachAssistantBridge } from "./assistant/preload.ts";
-import type { DesignCaptureProgress, DesignCaptureReply, McpStatus, PreviewStatus, ProjectChange, ProjectFiles, ProjectWrite, RpcHandler, SecretsStatus, SonobeCommandId, SonobeHost, ViewerWindowStatus } from "./host-api.d.ts";
+import type { DesignCaptureProgress, DesignCaptureReply, DraftInfo, DraftReply, McpStatus, PreviewStatus, ProjectChange, ProjectFiles, ProjectWrite, RpcHandler, SecretsStatus, SonobeCommandId, SonobeDrafts, SonobeHost, ViewerWindowStatus } from "./host-api.d.ts";
 import { isCommandId, listCommands, toHostPlatform } from "./commands.ts";
 import { IPC } from "./ipc.ts";
 import { createRpcFailure, createRpcServer } from "./rpc.ts";
@@ -62,6 +62,14 @@ const host: SonobeHost = {
 
   async readProject(dir): Promise<ProjectFiles> {
     const result = (await ipcRenderer.invoke(IPC.readProject, dir)) as { files: Record<string, string>; binaries: Record<string, Uint8Array> };
+    const binaries: Record<string, ArrayBuffer> = {};
+    for (const [rel, bytes] of Object.entries(result.binaries)) binaries[rel] = toArrayBuffer(bytes);
+    return { files: result.files, binaries };
+  },
+
+  async readProjectIfExists(dir): Promise<ProjectFiles | null> {
+    const result = (await ipcRenderer.invoke(IPC.readProjectIfExists, dir)) as { files: Record<string, string>; binaries: Record<string, Uint8Array> } | null;
+    if (!result) return null;
     const binaries: Record<string, ArrayBuffer> = {};
     for (const [rel, bytes] of Object.entries(result.binaries)) binaries[rel] = toArrayBuffer(bytes);
     return { files: result.files, binaries };
@@ -134,6 +142,13 @@ const host: SonobeHost = {
   },
 
   getMcpStatus: () => ipcRenderer.invoke(IPC.mcpStatus) as Promise<McpStatus>,
+  onMcpStatus(cb) {
+    const listener = (_event: IpcRendererEvent, status: McpStatus) => cb(status);
+    ipcRenderer.on(IPC.mcpChanged, listener);
+    return () => {
+      ipcRenderer.removeListener(IPC.mcpChanged, listener);
+    };
+  },
 
   getPreviewStatus: () => ipcRenderer.invoke(IPC.previewStatus) as Promise<PreviewStatus>,
   startPreview: () => ipcRenderer.invoke(IPC.previewStart) as Promise<PreviewStatus>,
@@ -150,6 +165,10 @@ const host: SonobeHost = {
     if (typeof revision !== "number" || !Number.isFinite(revision)) return;
     const labels = history && typeof history.undo === "string" && typeof history.redo === "string" ? { undo: history.undo.slice(0, 120), redo: history.redo.slice(0, 120) } : undefined;
     ipcRenderer.send(IPC.documentChanged, revision, labels);
+  },
+
+  notifyPrototypeRestarted() {
+    ipcRenderer.send(IPC.prototypeRestarted);
   },
 
   secrets: {
@@ -184,6 +203,22 @@ const host: SonobeHost = {
     return () => {
       ipcRenderer.removeListener(IPC.viewerWindowChanged, listener);
     };
+  },
+
+  drafts: {
+    write: (id, changes, meta) => invoke<DraftReply>(IPC.draftsWrite, String(id), { files: changes.files ?? {}, binaries: changes.binaries ?? {}, deleted: changes.deleted ?? [] }, meta),
+    remove: (id) => invoke<DraftReply>(IPC.draftsRemove, String(id)),
+    list: () => invoke<DraftInfo[]>(IPC.draftsList),
+    async read(id) {
+      const reply = await invoke<Awaited<ReturnType<SonobeDrafts["read"]>>>(IPC.draftsRead, String(id));
+      if (!reply.ok) return reply;
+      const binaries: Record<string, ArrayBuffer> = {};
+      for (const [rel, bytes] of Object.entries(reply.binaries as unknown as Record<string, Uint8Array>)) binaries[rel] = toArrayBuffer(bytes);
+      return { ...reply, binaries };
+    },
+    reveal(id) {
+      void ipcRenderer.invoke(IPC.draftsReveal, String(id)).catch(() => undefined);
+    },
   },
 };
 

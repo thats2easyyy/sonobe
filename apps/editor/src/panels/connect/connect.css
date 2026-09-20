@@ -127,6 +127,79 @@
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--success) 25%, transparent);
 }
 
+.sb-connect__status-dot[data-on="false"] {
+  background: var(--text-disabled);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--text-disabled) 25%, transparent);
+}
+
+/* Sessions (inside the status card) */
+.sb-connect__sessions {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  margin: var(--space-3) 0 0;
+  padding: var(--space-4) 0 0;
+  border-top: 1px solid var(--border-subtle);
+  list-style: none;
+}
+
+.sb-connect__session {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-4);
+}
+
+.sb-connect__session-dot {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  margin-top: 6px;
+  border-radius: 50%;
+  background: var(--text-disabled);
+}
+
+.sb-connect__session[data-state="connected"] .sb-connect__session-dot {
+  background: var(--success);
+}
+
+.sb-connect__session-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.sb-connect__session-title {
+  color: var(--text-primary);
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-medium);
+}
+
+.sb-connect__session-version,
+.sb-connect__session-state {
+  color: var(--text-tertiary);
+  font-weight: var(--font-weight-regular);
+}
+
+.sb-connect__session-folder {
+  overflow: hidden;
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
+  font-size: var(--font-size-xs);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sb-connect__session-desc {
+  color: var(--text-secondary);
+  font-size: var(--font-size-xs);
+  line-height: 1.5;
+}
+
+.sb-connect__session-desc[data-tone="warn"] {
+  color: var(--warn-text);
+}
+
 .sb-connect__status-text {
   display: flex;
   flex: 1 1 auto;
@@ -593,8 +666,13 @@
   box-shadow: 0 0 0 2px var(--bg-toolbar);
 }
 
-.sb-claudebtn[data-state="ready"] .sb-claudebtn__dot {
+/* Green means a Claude session is connected, never just that the server is listening. */
+.sb-claudebtn[data-state="connected"] .sb-claudebtn__dot {
   background: var(--success);
+}
+
+.sb-claudebtn__tooltip {
+  white-space: pre-line;
 }
 
 .sb-claudebtn[data-state="off"] .sb-claudebtn__dot {

@@ -40,9 +40,13 @@ export const ALIGNMENTS = opts(
 
 export const FILL_MODES = opts(["fill", "Fill"], ["fit", "Fit"], ["stretch", "Stretch"], ["tile", "Tile"]);
 
+/** The most copies Repeat makes: the engine caps every loop at this length. */
+export const MAX_REPEAT = 10_000;
+
 /** Props every layer has. */
 export const COMMON_PROPS: PropSpec[] = [
   prop("enabled", "Enabled", "boolean", true, "basics", "When off, the layer is hidden and ignores touches."),
+  prop("repeat", "Repeat", "any", null, "basics", "Makes copies of this layer and everything inside it: one per item of a linked loop, or the number you type. Auto (empty) makes one copy per item of the longest loop linked to this layer's own properties.", { wholeLoop: true, subtype: "count" }),
   prop("position", "Position", "point", [0, 0], "basics", "Where the layer's anchor point sits, measured from the parent's top-left, in points.", sub("distance")),
   prop("size", "Size", "size", [100, 100], "basics", "Width and height in points (or percent when a size mode is Percent).", sub("distance")),
   prop("anchor", "Anchor", "anchor", [0, 0], "basics", "Which point of the layer Position refers to. [0,0] is top-left, [0.5,0.5] is center."),
@@ -239,7 +243,7 @@ export const LAYER_TYPES: LayerTypeSpec[] = [
     category: "basic",
     summary: "An invisible touch target. Use it to make a tap region bigger or independent of visuals.",
     canHaveChildren: false,
-    props: [...COMMON_PROPS.filter((p) => ["enabled", "position", "size", "anchor", "positioning", "widthMode", "heightMode", "hitSlop", "cursor"].includes(p.key)), prop("showInEditor", "Show in Editor", "boolean", true, "basics", "Draw a translucent overlay while editing so you can see the target.")],
+    props: [...COMMON_PROPS.filter((p) => ["enabled", "repeat", "position", "size", "anchor", "positioning", "widthMode", "heightMode", "hitSlop", "cursor"].includes(p.key)), prop("showInEditor", "Show in Editor", "boolean", true, "basics", "Draw a translucent overlay while editing so you can see the target.")],
     origami: { id: "origami.hitarea", name: "Hit Area" },
   },
   {

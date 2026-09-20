@@ -1,7 +1,7 @@
 /**
  * RPC handlers the desktop MCP bridge calls to reach the live document: document info, read, apply
  * (with dry runs and optimistic concurrency), save, open, new; selection; viewer bounds and the
- * panels' registered bounds for screenshots; the live prototype's runtime diagnostics;
+ * panels' registered bounds for screenshots; the live prototype's runtime diagnostics and restart;
  * deterministic simulations; history; agent presence; and reveal. Errors are returned through
  * `rpc.fail(code, message, data)` because the context bridge strips Error properties.
  */
@@ -10,9 +10,11 @@ import { allLayerIds, DEVICE_PRESETS, findComponentInstances, getOutline, listCo
 import { isTraceUnavailable, type InputEvent, type TraceInput } from "@sonobe/engine";
 import { issuesToDiagnostics } from "../runtime/runtimeHost.ts";
 import type { Simulation } from "../runtime/simulation.ts";
+import { staleStateDiagnostic } from "../runtime/staleState.ts";
 import { BOUNDS_METHODS, type BoundsMethod } from "../state/bounds.ts";
 import { CLAUDE_AUTHOR, historyListEntry, normalizeAuthor, type FileResult } from "../state/document.ts";
 import { base64ToBytes } from "../state/bytes.ts";
+import type { WorkClient } from "../state/presence.ts";
 import { diagnosticsFor } from "../state/registry.ts";
 import { saveDocumentInteractively } from "../state/saveFlow.ts";
 import { currentComponentId, itemKindOf } from "../state/selection.ts";
@@ -26,9 +28,12 @@ export const RPC_METHODS = [
   "document.save",
   "document.open",
   "document.new",
+  "document.recoverDraft",
+  "drafts.flush",
   "selection.get",
   "viewer.bounds",
   "viewer.diagnostics",
+  "viewer.restart",
   "sim.reset",
   "sim.dispatch",
   "sim.step",
@@ -98,6 +103,15 @@ function optBoolean(p: Params, key: string): boolean | undefined {
   if (v === undefined || v === null) return undefined;
   if (typeof v !== "boolean") throw invalid(`"${key}" must be true or false.`);
   return v;
+}
+
+/** presence.* `client`: the session behind an agent's call ({ id, label, folder? }), when the host knows it. */
+function workClient(p: Params): WorkClient | undefined {
+  const v = p.client;
+  if (v === undefined || v === null) return undefined;
+  const c = v as Record<string, unknown>;
+  if (typeof v !== "object" || typeof c.id !== "string" || !c.id || typeof c.label !== "string") throw invalid('"client" must look like { "id": "…", "label": "Claude Code", "folder": "/path" }.');
+  return { id: c.id, label: c.label, ...(typeof c.folder === "string" && c.folder ? { folder: c.folder } : {}) };
 }
 
 function stringList(p: Params, key: string, required: boolean): string[] {
@@ -204,6 +218,8 @@ export function registerRpcHandlers(session: EditorSession, options: RpcHandlerO
       diskProblem: s.diskProblem ? { paths: s.diskProblem.paths.filter((p) => p !== "."), message: s.diskProblem.message, detectedAt: s.diskProblem.detectedAt } : null,
       playing: session.runtime.isPlaying(),
       ...(trust ? { scripts: { count: trust.scriptCount, required: trust.required, trusted: trust.trusted } } : {}),
+      /** The draft that keeps unsaved edits safe from a crash or quit, once it's on disk. */
+      draft: session.drafts?.current() ?? null,
     };
   };
 
@@ -293,8 +309,15 @@ export function registerRpcHandlers(session: EditorSession, options: RpcHandlerO
       const force = optBoolean(p, "force") ?? false;
       /** The person is saving (the close prompt): ask them about outside changes instead of failing. */
       const interactive = optBoolean(p, "interactive") ?? false;
+      /** A new project folder the host already checked and approved (save_document({ path })): no Save panel. */
+      const path = optString(p, "path");
+      /** Never open the Save panel (MCP): a document that was never saved needs `path`. */
+      const noDialog = optBoolean(p, "noDialog") ?? false;
       let result: FileResult;
-      if (saveAs || !doc().projectPath) result = await doc().saveAs();
+      if (path !== undefined) result = await doc().saveTo(path);
+      else if ((saveAs || !doc().projectPath) && noDialog) {
+        throw new RpcProblem("path_needed", `"${doc().doc.project.name}" hasn't been saved to a project yet, so saving it needs a folder.`, { hint: 'Pass path, e.g. "~/Documents/Checkout Flow.sonobe".' });
+      } else if (saveAs || !doc().projectPath) result = await doc().saveAs();
       else if (interactive) result = await saveDocumentInteractively(session.document, session.dialogs);
       else result = await doc().save(force ? { overwriteExternal: true } : {});
       if (result.cancelled) return false;
@@ -309,7 +332,32 @@ export function registerRpcHandlers(session: EditorSession, options: RpcHandlerO
         }
         throw new RpcProblem("save_failed", result.error ?? "The prototype couldn't be saved.", { path: result.path, code: result.errorCode });
       }
-      return { ok: true, path: result.path ?? null, revision: doc().revision };
+      return { ok: true, path: result.path ?? null, revision: doc().revision, ...(result.written ? { written: result.written, deleted: result.deleted ?? [] } : {}) };
+    },
+
+    // open_document({ ref: "draft:<id>" }): bring a recovered draft back (asking about unsaved changes first).
+    "document.recoverDraft": async (p) => {
+      const id = optString(p, "id");
+      if (!id) throw invalid('"id" is required: the draft to recover (list_documents lists them).');
+      const result = await session.restoreDraft(id);
+      if (result.cancelled) return { ok: false, cancelled: true };
+      if (!result.ok) {
+        const code = result.errorCode === "unknown_draft" || result.errorCode === "draft_in_use" || result.errorCode === "no_drafts" ? result.errorCode : "recover_failed";
+        const hints: Record<string, string> = {
+          unknown_draft: "list_documents lists the drafts that can be recovered.",
+          draft_in_use: "Another Sonobe window has it open. Ask the person to switch to that window.",
+          no_drafts: "This Sonobe build doesn't keep drafts.",
+          recover_failed: "The draft's files may be damaged. Ask the person to look at it with Show in Finder on the welcome screen.",
+        };
+        throw new RpcProblem(code, result.error ?? "The draft couldn't be recovered.", { hint: hints[code] });
+      }
+      return { ok: true, notes: result.notes ?? [], ...info() };
+    },
+
+    // Quitting on a signal: write unsaved edits to the draft before the app exits.
+    "drafts.flush": async () => {
+      await session.drafts?.flush();
+      return { flushed: session.drafts !== null, draft: session.drafts?.current() ?? null };
     },
 
     "document.open": async (p) => {
@@ -343,11 +391,20 @@ export function registerRpcHandlers(session: EditorSession, options: RpcHandlerO
       return bounds;
     },
 
-    // What the live prototype reports right now (get_diagnostics' Live viewer section).
+    // What the live prototype reports right now (get_diagnostics' Live viewer section), with the restart offer.
     "viewer.diagnostics": () => {
       const d = doc().doc;
       const live = session.runtime;
-      return { frame: live.runtime.frame, playing: live.isPlaying(), diagnostics: issuesToDiagnostics(live.runtime.issues(), d.project.root, d) };
+      const diagnostics = issuesToDiagnostics(live.runtime.issues(), d.project.root, d);
+      const stale = live.state.getState().staleState;
+      if (stale) diagnostics.push(staleStateDiagnostic(stale, d));
+      return { frame: live.runtime.frame, playing: live.isPlaying(), diagnostics };
+    },
+
+    // restart_viewer: start the live prototype over, like ⌘R (players follow through notifyPrototypeRestarted).
+    "viewer.restart": () => {
+      session.runtime.restart();
+      return { restarted: true, playing: session.runtime.isPlaying() };
     },
 
     "sim.reset": (p) => {
@@ -454,7 +511,8 @@ export function registerRpcHandlers(session: EditorSession, options: RpcHandlerO
       const intent = optString(p, "intent")?.trim();
       if (!intent) throw invalid('"intent" is required: what you are about to do, in a few words.');
       const component = optString(p, "component");
-      const workId = session.presence.getState().begin({ ids: stringList(p, "ids", false), intent, author: normalizeAuthor(p.author, CLAUDE_AUTHOR), ...(component !== undefined ? { component } : {}) });
+      const client = workClient(p);
+      const workId = session.presence.getState().begin({ ids: stringList(p, "ids", false), intent, author: normalizeAuthor(p.author, CLAUDE_AUTHOR), ...(component !== undefined ? { component } : {}), ...(client ? { client } : {}) });
       return { workId };
     },
 
@@ -462,7 +520,9 @@ export function registerRpcHandlers(session: EditorSession, options: RpcHandlerO
       const workId = optString(p, "workId");
       const summary = optString(p, "summary");
       if (workId === undefined) {
-        session.presence.getState().finishAll(p.author ? normalizeAuthor(p.author, CLAUDE_AUTHOR) : undefined);
+        // One session's finish never clears another session's badge.
+        const client = workClient(p);
+        session.presence.getState().finishAll(p.author ? normalizeAuthor(p.author, CLAUDE_AUTHOR) : undefined, client?.id);
         return { finished: true };
       }
       const item = session.presence.getState().finish(workId, { ...(summary ? { summary } : {}), revision: doc().revision });
@@ -473,7 +533,7 @@ export function registerRpcHandlers(session: EditorSession, options: RpcHandlerO
       const limit = optNumber(p, "limit");
       const s = session.presence.getState();
       return {
-        working: s.working.map((w) => ({ workId: w.workId, ids: [...w.ids], intent: w.intent, author: { ...w.author }, startedAt: w.startedAt, ...(w.component !== undefined ? { component: w.component } : {}) })),
+        working: s.working.map((w) => ({ workId: w.workId, ids: [...w.ids], intent: w.intent, author: { ...w.author }, startedAt: w.startedAt, ...(w.component !== undefined ? { component: w.component } : {}), ...(w.client ? { client: { ...w.client } } : {}) })),
         recent: s.recent.slice(0, Math.max(0, Math.floor(limit ?? 20))).map((c) => ({ ...c, ids: [...c.ids], components: [...c.components] })),
       };
     },

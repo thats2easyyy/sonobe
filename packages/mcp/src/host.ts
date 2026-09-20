@@ -33,6 +33,8 @@ export interface HostCapabilities {
   presence: boolean;
   /** Writes are saved to disk after every successful batch. */
   autosave: boolean;
+  /** import_design draws `<svg data-sf-symbol>` placeholders as real SF Symbols (Sonobe on a Mac). */
+  sfSymbols?: boolean;
 }
 
 /** One open document. */
@@ -56,6 +58,21 @@ export interface DocumentSnapshot {
   dirty: boolean;
   /** Component id → item ids retired this session (removed, so new items never get them). Hosts that don't track them leave it out. */
   retired?: Record<Id, Id[]>;
+  /** The app keeps unsaved work as a draft, so it comes back after a crash or quit. */
+  draft?: { id: string; updatedAt: number };
+}
+
+/** Unsaved work the app kept from an earlier session that no window has open (SonobeHost.listDrafts). */
+export interface DraftSummary {
+  /** Open it with open_document({ ref: "draft:<id>" }). */
+  id: string;
+  name: string;
+  /** The project it has unsaved changes to; absent when it was never saved. */
+  path?: string;
+  updatedAt: number;
+  counts: { components: number; layers: number; patches: number };
+  /** Its files come from two moments (the app stopped mid-write), so the last changes may be missing. */
+  torn?: boolean;
 }
 
 export interface CreateDocumentRequest {
@@ -111,6 +128,12 @@ export interface SaveDocumentOptions {
    * "disk_changed".
    */
   force?: boolean;
+  /**
+   * Save to this new project folder (Save As), never asking the person where. It must be new or
+   * empty and not inside another project (projectTarget.ts). Without it, a document that was never
+   * saved goes to ~/Documents/<Name>.sonobe, or fails with "path_needed" while it's still "Untitled".
+   */
+  path?: string;
 }
 
 /** Why an automatic save after a write or undo didn't happen (the change itself stays applied). */
@@ -223,12 +246,23 @@ export interface Screenshot {
   notes?: string[];
 }
 
+/** The session behind an agent's call, when the transport knows it (the relay's sonobe-client id). */
+export interface WorkClient {
+  id: string;
+  /** "Claude Code", "Claude Desktop", or the client's own name. */
+  label: string;
+  /** The session's project folder. */
+  folder?: string;
+}
+
 /** An agent's "working on" badge. */
 export interface WorkIntent {
   ids: Id[];
   intent: string;
   author: Author;
   since: number;
+  /** The session that set it; badges are kept per session, so two sessions don't replace each other's. */
+  client?: WorkClient;
 }
 
 export interface HistoryItem {
@@ -576,6 +610,13 @@ export type DocumentChange =
   | { kind: "opened"; docId: Id }
   | { kind: "closed"; docId: Id };
 
+/** What restart_viewer did (SonobeHost.restartViewer). */
+export interface ViewerRestartResult {
+  docId: Id;
+  /** The prototype plays on from its first frame; false when the person paused it (it shows frame 0). */
+  playing: boolean;
+}
+
 /** What the live viewer's running prototype reports (SonobeHost.diagnostics `runtime`). */
 export interface LiveRuntimeDiagnostics {
   /** The live prototype's frame when this was read. */
@@ -592,7 +633,9 @@ export interface SonobeHost {
   readonly registry: EngineRegistry;
 
   listDocuments(): Promise<DocumentSummary[]>;
-  /** Open (or activate) a document by docId or project folder path. */
+  /** Optional: drafts of unsaved work from earlier sessions that no window has open (the app). */
+  listDrafts?(): Promise<DraftSummary[]>;
+  /** Open (or activate) a document by docId or project folder path, or "draft:<id>" (the app). */
   openDocument(ref: string, options?: OpenDocumentOptions & HostCallControl): Promise<DocumentSummary>;
   createDocument(request: CreateDocumentRequest, control?: HostCallControl): Promise<DocumentSummary>;
   /** A document snapshot (default: the active document). */
@@ -620,10 +663,19 @@ export interface SonobeHost {
     ids: Id[],
     options: { docId?: Id; focus?: boolean },
   ): Promise<{ revealed: boolean; reason?: string }>;
-  /** Show (or clear, with null) an agent's working badge. */
+  /**
+   * Optional: start the person's live prototype over from its first frame, as Restart Prototype (⌘R)
+   * does; phones and the pop-out viewer showing it restart too. Hosts without a live viewer leave it
+   * out, and restart_viewer explains that simulations start over with sim_reset.
+   */
+  restartViewer?(options: { docId?: Id }): Promise<ViewerRestartResult>;
+  /**
+   * Show (or clear, with null) an agent's working badge. One badge per session: `client.id` when the
+   * call came through the relay, else the author's name.
+   */
   setWorking(
     work: { ids: Id[]; intent: string } | null,
-    options: { docId?: Id; author: Author },
+    options: { docId?: Id; author: Author; client?: WorkClient },
   ): Promise<void>;
   /** Current working badges. */
   presence(docId?: Id): Promise<WorkIntent[]>;

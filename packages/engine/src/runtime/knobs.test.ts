@@ -211,6 +211,25 @@ describe("knobs and empty loops", () => {
   });
 });
 
+describe("knobs and Repeat", () => {
+  it("drive a layer's copy count, and a tune changes the copies in place", () => {
+    let doc = buildDoc({ layers: [{ id: "row", type: "rectangle", name: "Row", props: { size: [10, 10] } }] });
+    doc = apply(doc, [
+      { op: "addKnob", knob: { id: "rows", name: "Rows", type: "number", value: 3 } },
+      { op: "setInput", target: "@row.repeat", value: { link: "$knob.rows" } },
+    ]);
+    const tuned = apply(doc, [{ op: "setKnobValue", id: "rows", value: 5 }]);
+    expect(updateLiterals(compileDocument(doc, registry), tuned)).toBe(true);
+    const rt = createTestRuntime(doc, registry);
+    rt.step();
+    expect(rt.scene().roots).toHaveLength(3);
+    rt.updateDocument(tuned);
+    rt.step();
+    expect(rt.scene().roots).toHaveLength(5);
+    expect(rt.getValue("@row.repeat")).toBe(5);
+  });
+});
+
 describe("knob tick cost", () => {
   it("hot-patches a knob about as fast as an ordinary literal edit", { retry: 2 }, () => {
     const patches: Record<string, PatchInput> = { p0: { type: "splitter", inputs: { value: 1 } } };

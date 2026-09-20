@@ -6,13 +6,12 @@
  * values following the component being edited).
  */
 
-import { applyOps, createEmptyDocument, DEVICE_PRESETS, type Id, type SonobeDocument } from "@sonobe/core";
+import { applyOps, createEmptyDocument, DEVICE_PRESETS, seenIdsFromJSON, type Id, type SonobeDocument } from "@sonobe/core";
 import type { PatchRegistry } from "@sonobe/patches";
-import type { StoreApi } from "zustand/vanilla";
+import { getMuteStore, type MuteStore } from "@sonobe/renderer";
 import { createHostAdapter } from "../host/detect.ts";
-import type { HostAdapter } from "../host/types.ts";
+import type { DraftInfo, HostAdapter, RecoveredDraft } from "../host/types.ts";
 import { instancePathFor } from "../runtime/instances.ts";
-import { getMuteStore, type MuteState } from "../runtime/platform.ts";
 import { createRuntimeHost, type RuntimeHost, type RuntimeHostOptions } from "../runtime/runtimeHost.ts";
 import type { FrameScheduler } from "../runtime/scheduler.ts";
 import { createScriptTrustStore, scriptPatchCount, type ScriptTrustStore, type TrustPersistence } from "../runtime/scriptTrust.ts";
@@ -23,6 +22,7 @@ import { createConsoleStore, type ConsoleStore } from "./console.ts";
 import { createDemoDocument } from "./demoDocument.ts";
 import { getDefaultDialogs, type DialogStore } from "./dialogs.ts";
 import { createDocumentStore, type DocumentState, type DocumentStore, type FileResult } from "./document.ts";
+import { createDraftKeeper, type DraftKeeper, type DraftKeeperOptions } from "./drafts.ts";
 import { createPresenceStore, type PresenceStore } from "./presence.ts";
 import { getRegistry } from "./registry.ts";
 import { saveDocumentInteractively } from "./saveFlow.ts";
@@ -68,7 +68,16 @@ export interface EditorSessionOptions {
   /** Platform services for the live viewer. Default "browser" when a DOM exists. */
   platform?: RuntimeHostOptions["platform"];
   /** Mute switch. Default: the app-wide switch. */
-  mute?: StoreApi<MuteState>;
+  mute?: MuteStore;
+  /** Draft keeper timing, or false to keep no drafts. Default: drafts whenever the host keeps them. */
+  drafts?: Pick<DraftKeeperOptions, "debounceMs" | "maxWaitMs" | "onError"> | false;
+}
+
+/** What restoring a draft did. */
+export interface RestoreDraftResult extends FileResult {
+  draft?: DraftInfo;
+  /** What the person should know ("its last changes may be missing"). */
+  notes?: string[];
 }
 
 export interface EditorSession {
@@ -98,6 +107,14 @@ export interface EditorSession {
   openProject(path?: string): Promise<FileResult>;
   /** Start a new, unsaved prototype (asking about unsaved changes first). */
   newProject(options?: NewProjectOptions): Promise<boolean>;
+  /** Keeps unsaved edits as a draft (ARCHITECTURE §3.5 Drafts); null when the host keeps none. */
+  readonly drafts: DraftKeeper | null;
+  /** Drafts left by earlier sessions that no window has open, newest first. */
+  recoverableDrafts(): Promise<DraftInfo[]>;
+  /** Bring a draft back as the document (asking about unsaved changes first): unsaved, with its project path and seen ids. */
+  restoreDraft(id: string): Promise<RestoreDraftResult>;
+  /** Delete a draft nobody has open. */
+  discardDraft(id: string): Promise<void>;
   dispose(): void;
 }
 
@@ -145,6 +162,13 @@ export function createEditorSession(options: EditorSessionOptions = {}): EditorS
   const consoleStore = createConsoleStore();
   const bounds = createBoundsRegistry();
   const assets = createAssetService({ document, host });
+  const keeper = host?.drafts && options.drafts !== false ? createDraftKeeper({ document, drafts: host.drafts, ...(options.drafts ?? {}) }) : null;
+  // A page going to the background or away writes unsaved edits right away (best effort while unloading).
+  const page = typeof globalThis.document === "undefined" ? null : globalThis.document;
+  const flushHidden = () => {
+    if (page?.visibilityState === "hidden") void keeper?.flush();
+  };
+  if (keeper) page?.addEventListener("visibilitychange", flushHidden);
 
   const resolveAssetUrl = (assetId: Id): string | undefined => {
     const { doc, projectPath } = document.getState();
@@ -231,6 +255,9 @@ export function createEditorSession(options: EditorSessionOptions = {}): EditorS
   host?.setDocumentEdited(document.getState().dirty);
   host?.setTitle(title(document.getState()));
 
+  // Restarting here restarts the phone preview and the pop-out viewer too.
+  const unsubscribeRestart = runtime.subscribeRestart(() => host?.notifyPrototypeRestarted?.());
+
   // The runtime's own layer bounds answer viewer.layerBounds while a viewer is attached (panels may override).
   let unregisterLayerBounds: (() => void) | null = null;
   const syncLayerBounds = (viewerCount: number) => {
@@ -290,13 +317,68 @@ export function createEditorSession(options: EditorSessionOptions = {}): EditorS
       return true;
     },
 
+    drafts: keeper,
+
+    recoverableDrafts: async () => (host?.drafts ? host.drafts.list() : []),
+
+    async restoreDraft(id) {
+      const drafts = host?.drafts;
+      if (!drafts || !keeper) return { ok: false, error: "Drafts aren't kept here.", errorCode: "no_drafts" };
+      if (keeper.current()?.id === id) return { ok: true, ...(document.getState().projectPath ? { path: document.getState().projectPath! } : {}) };
+      // Only ask about unsaved changes for a draft that can be recovered.
+      if (!(await drafts.list()).some((d) => d.id === id)) return { ok: false, error: `There's no draft "${id}" to recover. It may be open in another window, or discarded.`, errorCode: "unknown_draft" };
+      if (!(await session.confirmDiscardChanges("open"))) return { ok: false, cancelled: true };
+      let recovered: RecoveredDraft;
+      try {
+        recovered = await drafts.open(id);
+      } catch (err) {
+        const e = err as { message?: unknown; code?: unknown };
+        return { ok: false, error: typeof e.message === "string" ? e.message : String(err), errorCode: typeof e.code === "string" ? e.code : "open_failed" };
+      }
+      const { info } = recovered;
+      const notes: string[] = [];
+      // Unsaved changes to a saved project: open the project first (its files, assets and watcher), then put the draft over it.
+      let projectPath = info.projectPath;
+      let diskChanged = false;
+      if (projectPath) {
+        const opened = await document.getState().open(projectPath);
+        if (opened.ok) diskChanged = drafts.diskChanged(projectPath, recovered);
+        else {
+          notes.push(`Its project (${projectPath}) couldn't be opened, so it's back as a prototype that isn't saved anywhere.`);
+          projectPath = null;
+        }
+      }
+      for (const [rel, bytes] of Object.entries(recovered.binaries)) host.putAssetBytes?.(projectPath, rel.slice("assets/".length), bytes);
+      keeper.adopt(id, { createdAt: info.createdAt, projectPath: info.projectPath });
+      document.getState().replaceDocument(recovered.doc, {
+        projectPath,
+        saved: false,
+        keepHistory: projectPath !== null,
+        ...(recovered.seenIds ? { seenIds: seenIdsFromJSON(recovered.seenIds) } : {}),
+        label: `Recovered “${info.name}”`,
+      });
+      selection.getState().setComponentPath([recovered.doc.project.root]);
+      // The project changed on disk after the draft was written: ask which version to keep.
+      if (diskChanged) await document.getState().checkExternalChanges();
+      if (info.torn) notes.push("It was cut off while being written, so its last few changes may be missing.");
+      if (info.textOnly && Object.keys(recovered.doc.assets).length) notes.push("This browser kept only its text, so its images and other media are missing.");
+      return { ok: true, ...(projectPath ? { path: projectPath } : {}), draft: info, ...(notes.length ? { notes } : {}) };
+    },
+
+    async discardDraft(id) {
+      await host?.drafts?.remove(id);
+    },
+
     dispose() {
       unsubscribeRevision();
       unsubscribeScope();
       unsubscribeChrome();
+      unsubscribeRestart();
       unsubscribeViewers();
       unregisterLayerBounds?.();
       unsubscribeOpen?.();
+      keeper?.dispose();
+      page?.removeEventListener("visibilitychange", flushHidden);
       runtime.dispose();
       assets.dispose();
       document.getState().dispose();

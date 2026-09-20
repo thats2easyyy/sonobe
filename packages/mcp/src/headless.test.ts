@@ -108,6 +108,50 @@ describe("HeadlessHost", () => {
     await host.close();
   });
 
+  it("saves as a new folder with save_document({ path }) and keeps working there", async () => {
+    project = await tempProject();
+    const photo = path.join(project.project, "assets", "abc.png");
+    await writeFile(photo, Buffer.from([1, 2, 3]));
+    const client = await connectClient(project.host);
+    await client.call("apply_ops", {
+      ops: [
+        { op: "addAsset", asset: { id: "photo", kind: "image", name: "Photo", file: "abc.png" } },
+        { op: "addLayer", layer: { type: "oval", name: "Dot" } },
+      ],
+    });
+    const copy = path.join(project.dir, "Copy");
+    const saved = await client.call("save_document", { path: copy });
+    expect(saved.isError).toBe(false);
+    // ".sonobe" is added, the asset file moves with it, and the original folder is left alone.
+    expect(saved.text).toContain(`to ${copy}.sonobe: wrote`);
+    expect(saved.text).toContain("assets/abc.png");
+    expect([...(await readFile(path.join(`${copy}.sonobe`, "assets", "abc.png")))]).toEqual([1, 2, 3]);
+    expect((await loadProjectFromDisk(`${copy}.sonobe`)).components.main!.layers.map((l) => l.name)).toEqual(["Dot"]);
+    expect((await loadProjectFromDisk(project.project)).components.main!.layers).toEqual([]);
+    const info = await client.call("get_document_info", {});
+    expect(info.structured).toMatchObject({ path: `${copy}.sonobe`, dirty: false });
+
+    // Later saves go to the new folder.
+    await client.call("add_layers", { layers: [{ type: "oval", name: "Second" }] });
+    await client.call("save_document", {});
+    expect((await loadProjectFromDisk(`${copy}.sonobe`)).components.main!.layers).toHaveLength(2);
+
+    // The same folder rules as create_document: never over a project, into a full folder, or inside a project.
+    const refused = async (target: string) => (await client.call("save_document", { path: target })).text;
+    expect(await refused(project.project)).toContain("already_exists");
+    await mkdir(path.join(project.dir, "Notes.sonobe"));
+    await writeFile(path.join(project.dir, "Notes.sonobe", "notes.txt"), "mine\n");
+    expect(await refused(path.join(project.dir, "Notes.sonobe"))).toContain("folder_not_empty");
+    expect(await refused(path.join(`${copy}.sonobe`, "Nested.sonobe"))).toContain("inside_project");
+    await client.close();
+  });
+
+  it("explains that drafts belong to the app", async () => {
+    const host = createHeadlessHost();
+    await expect(host.openDocument("draft:abcdefgh-1234")).rejects.toMatchObject({ code: "unknown_draft", hint: expect.stringContaining("Sonobe app") });
+    await host.close();
+  });
+
   it("keeps folders it didn't load in scripts/ when it saves", async () => {
     project = await tempProject();
     await project.host.apply([{ op: "setScript", file: "js_1.js", source: "// one\n" }], { label: "script", author: AGENT });
@@ -137,6 +181,17 @@ describe("HeadlessHost", () => {
     expect((await client.call("reveal", { ids: ["card"] })).text).toContain(
       "Not revealed: Headless mode",
     );
+    await client.close();
+  });
+
+  it("explains that there's no live viewer to restart, and points to sim_reset", async () => {
+    project = await tempProject();
+    const client = await connectClient(project.host);
+    const r = await client.call("restart_viewer", {});
+    expect(r.isError).toBe(true);
+    expect(r.structured).toMatchObject({ ok: false, changed: "none", error: { code: "no_live_viewer" } });
+    expect(r.text).toContain("runs headless");
+    expect(r.text).toContain("sim_reset starts one over");
     await client.close();
   });
 });
@@ -251,14 +306,15 @@ describe("HeadlessHost with other writers in the same folder", () => {
     expect(await diskLayers(project)).toEqual(["theirs"]);
   });
 
-  it("creating a project in a folder never deletes what's already there", async () => {
+  it("creating a project never writes into a folder that already has files", async () => {
     const dir = await tmp();
     const project = path.join(dir, "New.sonobe");
     await mkdir(path.join(project, "components"), { recursive: true });
     await writeFile(path.join(project, "components", "draft.json"), "{}\n");
     const host = createHeadlessHost();
     hosts.push(host);
-    await host.createDocument({ path: project });
+    await expect(host.createDocument({ path: project })).rejects.toMatchObject({ code: "folder_not_empty" });
     expect(existsSync(path.join(project, "components", "draft.json"))).toBe(true);
+    expect(existsSync(path.join(project, "project.json"))).toBe(false);
   });
 });

@@ -1,8 +1,8 @@
 /** HostAdapter over the Electron preload API (`window.sonobeHost`). */
 
 import { parseDocumentFiles } from "@sonobe/core";
-import { assetBinaries, createAssetUrlCache, documentFiles, planProjectWrite, projectDisplayName } from "./projectFiles.ts";
-import type { DesktopHostApi, HostAdapter } from "./types.ts";
+import { assetBinaries, createAssetUrlCache, createDraftFiles, digestFiles, documentFiles, draftBaseChanged, planProjectWrite, projectDisplayName, readDraftContents } from "./projectFiles.ts";
+import type { DesktopDraftReply, DesktopDraftsApi, DesktopHostApi, HostAdapter, HostDrafts } from "./types.ts";
 
 type OpenWindow = { open?: (url?: string, target?: string, features?: string) => unknown };
 
@@ -10,6 +10,37 @@ export function createDesktopHost(api: DesktopHostApi): HostAdapter {
   /** Document files as last read or written, per project folder (drives minimal writes). */
   const known = new Map<string, Record<string, string>>();
   const assets = createAssetUrlCache();
+  const draftFiles = createDraftFiles(assets);
+
+  /** A failed draft reply as an error with its code. */
+  const unwrap = <T extends object>(reply: DesktopDraftReply<T>): T => {
+    if (!reply.ok) throw Object.assign(new Error(reply.message), { code: reply.code });
+    return reply;
+  };
+
+  /** Drafts in the app's data folder, written through the main process (apps/desktop/electron/drafts.ts). */
+  const desktopDrafts = (draftsApi: DesktopDraftsApi): HostDrafts => ({
+    async write(id, doc, meta) {
+      const plan = draftFiles.plan(id, doc, meta.projectPath);
+      const base = meta.projectPath ? known.get(meta.projectPath) : undefined;
+      const hasBinaries = Object.keys(plan.binaries).length > 0;
+      unwrap(await draftsApi.write(id, { files: plan.files, deleted: plan.deleted, ...(hasBinaries ? { binaries: plan.binaries } : {}) }, { ...meta, ...(base ? { base: digestFiles(base) } : {}) }));
+      draftFiles.wrote(id, plan);
+    },
+    async remove(id) {
+      unwrap(await draftsApi.remove(id));
+      draftFiles.forget(id);
+    },
+    list: () => draftsApi.list(),
+    async open(id) {
+      const { info, manifest, files, binaries } = unwrap(await draftsApi.read(id));
+      const recovered = readDraftContents(info, manifest, files, binaries);
+      draftFiles.read(id, documentFiles(files), Object.keys(recovered.binaries));
+      return recovered;
+    },
+    diskChanged: (projectPath, draft) => draftBaseChanged(known.get(projectPath), draft.base),
+    reveal: (id) => draftsApi.reveal(id),
+  });
 
   return {
     kind: "desktop",
@@ -17,6 +48,7 @@ export function createDesktopHost(api: DesktopHostApi): HostAdapter {
     capabilities: { nativeMenus: true, nativeDialogs: true, watch: true, reveal: true, persistent: true },
     rpc: api.rpc,
     muted: api.muted === true,
+    ...(api.drafts ? { drafts: desktopDrafts(api.drafts) } : {}),
 
     openProjectDialog: () => api.openProjectDialog(),
     saveProjectDialog: (defaultName) => api.saveProjectDialog(defaultName),
@@ -36,7 +68,8 @@ export function createDesktopHost(api: DesktopHostApi): HostAdapter {
         // A folder this window never read (Save As onto an existing prototype the person chose to
         // replace): diff against what's there, so the old project's components and scripts go away.
         try {
-          previous = documentFiles((await api.readProject(dir)).files);
+          const existing = api.readProjectIfExists ? await api.readProjectIfExists(dir) : await api.readProject(dir);
+          previous = existing ? documentFiles(existing.files) : undefined;
         } catch {
           previous = undefined; // A new folder.
         }
@@ -91,6 +124,14 @@ export function createDesktopHost(api: DesktopHostApi): HostAdapter {
     notifyDocumentChanged(revision, history) {
       try {
         api.notifyDocumentChanged?.(revision, history);
+      } catch {
+        // The bridge went away (window closing).
+      }
+    },
+
+    notifyPrototypeRestarted() {
+      try {
+        api.notifyPrototypeRestarted?.();
       } catch {
         // The bridge went away (window closing).
       }

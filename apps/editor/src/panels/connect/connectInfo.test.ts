@@ -1,18 +1,90 @@
 import { describe, expect, it } from "vitest";
-import { claudeCodeCommand, claudeDesktopConfig, claudeDesktopConfigPath, EXAMPLE_PROMPTS, joinRepoPath, mcpLaunchSpec, parseMcpStatus, repoPathFromDevUrl, shellForPlatform, shellQuote, tildePath } from "./connectInfo.ts";
+import {
+  claudeCodeCommand,
+  claudeCodeRemoveCommand,
+  claudeDesktopConfig,
+  claudeDesktopConfigPath,
+  connectedSessions,
+  EXAMPLE_PROMPTS,
+  joinRepoPath,
+  mcpLaunchSpec,
+  parseMcpStatus,
+  relativeTime,
+  repoPathFromDevUrl,
+  sessionSummary,
+  shellForPlatform,
+  shellQuote,
+  tildePath,
+} from "./connectInfo.ts";
+
+const SESSION = {
+  id: "11111111-aaaa-4bbb-8ccc-000000000001",
+  label: "Claude Code",
+  name: "claude-code",
+  version: "2.1.278",
+  folder: "/Users/me/placemark",
+  via: "relay",
+  state: "connected",
+  connectedAt: 1_000,
+  lastSeenAt: 50_000,
+  lastActivityAt: 40_000,
+  lastTool: "get_outline",
+  toolCalls: 3,
+  relayVersion: "0.1.0",
+};
 
 describe("parseMcpStatus", () => {
   it("accepts the host's status shape", () => {
     const cliPath = "/Applications/Sonobe.app/Contents/Resources/cli/sonobe";
-    expect(parseMcpStatus({ running: true, port: 52817, url: "http://127.0.0.1:52817/mcp", tokenFile: "/Users/me/.sonobe/mcp.json", cliPath })).toEqual({ running: true, port: 52817, url: "http://127.0.0.1:52817/mcp", tokenFile: "/Users/me/.sonobe/mcp.json", cliPath });
-    expect(parseMcpStatus({ running: false, port: null, url: null, tokenFile: "" })).toEqual({ running: false, port: null, url: null, tokenFile: null, cliPath: null });
+    expect(parseMcpStatus({ running: true, port: 52817, url: "http://127.0.0.1:52817/mcp", tokenFile: "/Users/me/.sonobe/mcp.json", cliPath, clients: [], checkedAt: 5, version: "0.1.0" })).toEqual({
+      running: true,
+      port: 52817,
+      url: "http://127.0.0.1:52817/mcp",
+      tokenFile: "/Users/me/.sonobe/mcp.json",
+      cliPath,
+      clients: [],
+      checkedAt: 5,
+      version: "0.1.0",
+    });
+    // Older hosts send no sessions.
+    expect(parseMcpStatus({ running: false, port: null, url: null, tokenFile: "" })).toEqual({ running: false, port: null, url: null, tokenFile: null, cliPath: null, clients: [], checkedAt: null, version: null });
     expect(parseMcpStatus({ running: false, port: null, url: null, tokenFile: "", cliPath: " " })?.cliPath).toBeNull();
+  });
+
+  it("keeps good session rows and drops malformed ones", () => {
+    const status = parseMcpStatus({ running: true, port: 1, url: null, tokenFile: null, clients: [SESSION, { ...SESSION, id: "" }, { ...SESSION, state: "asleep" }, { ...SESSION, via: "carrier-pigeon" }, "junk", null, { ...SESSION, id: "http", via: "http", folder: null, lastTool: 7 }] });
+    expect(status?.clients.map((c) => c.id)).toEqual([SESSION.id, "http"]);
+    expect(status?.clients[0]).toMatchObject({ label: "Claude Code", folder: "/Users/me/placemark", toolCalls: 3, lastTool: "get_outline" });
+    expect(status?.clients[1]).toMatchObject({ folder: null, lastTool: null });
+  });
+
+  it("counts only connected sessions of a running server", () => {
+    const status = parseMcpStatus({ running: true, port: 1, url: null, tokenFile: null, clients: [SESSION, { ...SESSION, id: "22222222-aaaa-4bbb-8ccc-000000000002", state: "gone" }] });
+    expect(connectedSessions(status).map((c) => c.id)).toEqual([SESSION.id]);
+    expect(connectedSessions(status && { ...status, running: false })).toEqual([]);
+    expect(connectedSessions(null)).toEqual([]);
   });
 
   it("rejects anything else", () => {
     expect(parseMcpStatus(null)).toBeNull();
     expect(parseMcpStatus("running")).toBeNull();
     expect(parseMcpStatus({ port: 1 })).toBeNull();
+  });
+});
+
+describe("session text", () => {
+  it("says how long ago, in words", () => {
+    expect(relativeTime(10_000, 12_000)).toBe("just now");
+    expect(relativeTime(0, 12_000)).toBe("12 s ago");
+    expect(relativeTime(0, 4 * 60_000 + 30_000)).toBe("4 min ago");
+    expect(relativeTime(0, 2 * 3600_000 + 60_000)).toBe("2 h ago");
+    expect(relativeTime(5_000, 0)).toBe("just now");
+  });
+
+  it("sums a session up in one line", () => {
+    const [session] = parseMcpStatus({ running: true, clients: [SESSION] })!.clients;
+    expect(sessionSummary(session!, 52_000)).toBe("Claude Code · placemark · active 12 s ago");
+    expect(sessionSummary({ ...session!, folder: null, lastActivityAt: null }, 61_000)).toBe("Claude Code · connected 1 min ago");
   });
 });
 
@@ -36,31 +108,42 @@ describe("shell quoting", () => {
 });
 
 describe("launch commands", () => {
-  it("runs a checkout with node", () => {
+  it("runs a checkout with node, installed for every project", () => {
     const spec = mcpLaunchSpec({ mode: "checkout", nodePath: "/opt/homebrew/bin/node", repoPath: "/Users/me/sonobe" });
     expect(spec).toEqual({ command: "/opt/homebrew/bin/node", args: ["/Users/me/sonobe/packages/cli/src/main.ts", "mcp"] });
-    expect(claudeCodeCommand(spec)).toBe("claude mcp add sonobe -- /opt/homebrew/bin/node /Users/me/sonobe/packages/cli/src/main.ts mcp");
+    expect(claudeCodeCommand(spec)).toBe("claude mcp add --scope user sonobe -- /opt/homebrew/bin/node /Users/me/sonobe/packages/cli/src/main.ts mcp");
   });
 
   it("uses the app's bundled CLI by full path in production", () => {
     const cliPath = "/Applications/Sonobe.app/Contents/Resources/cli/sonobe";
     const spec = mcpLaunchSpec({ mode: "installed", cliPath });
-    expect(claudeCodeCommand(spec)).toBe(`claude mcp add sonobe -- ${cliPath} mcp`);
+    expect(claudeCodeCommand(spec)).toBe(`claude mcp add --scope user sonobe -- ${cliPath} mcp`);
     expect(JSON.parse(claudeDesktopConfig(spec))).toEqual({ mcpServers: { sonobe: { command: cliPath, args: ["mcp"] } } });
     const windows = mcpLaunchSpec({ mode: "installed", cliPath: "C:\\Program Files\\Sonobe\\resources\\cli\\sonobe.cmd" });
-    expect(claudeCodeCommand(windows, "windows")).toBe('claude mcp add sonobe -- "C:\\Program Files\\Sonobe\\resources\\cli\\sonobe.cmd" mcp');
+    expect(claudeCodeCommand(windows, "windows")).toBe('claude mcp add --scope user sonobe -- "C:\\Program Files\\Sonobe\\resources\\cli\\sonobe.cmd" mcp');
   });
 
   it("falls back to sonobe on PATH when the host has no bundled CLI", () => {
     const spec = mcpLaunchSpec({ mode: "installed", cliPath: null });
-    expect(claudeCodeCommand(spec)).toBe("claude mcp add sonobe -- sonobe mcp");
+    expect(claudeCodeCommand(spec)).toBe("claude mcp add --scope user sonobe -- sonobe mcp");
     expect(JSON.parse(claudeDesktopConfig(spec))).toEqual({ mcpServers: { sonobe: { command: "sonobe", args: ["mcp"] } } });
   });
 
-  it("serves a project headless and quotes paths with spaces", () => {
+  it("keeps a headless server with one project, and quotes paths with spaces", () => {
     const spec = mcpLaunchSpec({ mode: "checkout", repoPath: "/Users/me/sonobe", headlessProject: "/Users/me/Checkout Flow.sonobe" });
-    expect(claudeCodeCommand(spec)).toBe("claude mcp add sonobe -- node /Users/me/sonobe/packages/cli/src/main.ts mcp --headless '/Users/me/Checkout Flow.sonobe'");
+    expect(claudeCodeCommand(spec)).toBe("claude mcp add --scope local sonobe-headless -- node /Users/me/sonobe/packages/cli/src/main.ts mcp --headless '/Users/me/Checkout Flow.sonobe'");
     expect(mcpLaunchSpec({ mode: "checkout", nodePath: " ", repoPath: "" })).toEqual({ command: "node", args: ["/path/to/sonobe/packages/cli/src/main.ts", "mcp"] });
+  });
+
+  it("quotes every launch part, whatever its position", () => {
+    const spec = { command: "/Users/me/My Tools/node", args: ["/Users/me/sonobe/packages/cli/src/main.ts", "mcp"] };
+    expect(claudeCodeCommand(spec)).toBe("claude mcp add --scope user sonobe -- '/Users/me/My Tools/node' /Users/me/sonobe/packages/cli/src/main.ts mcp");
+    expect(claudeCodeCommand(spec, "posix", { scope: "local", name: "sonobe-dev" })).toBe("claude mcp add --scope local sonobe-dev -- '/Users/me/My Tools/node' /Users/me/sonobe/packages/cli/src/main.ts mcp");
+  });
+
+  it("removes one scope's entry", () => {
+    expect(claudeCodeRemoveCommand("local")).toBe("claude mcp remove --scope local sonobe");
+    expect(claudeCodeRemoveCommand("user", "sonobe-headless")).toBe("claude mcp remove --scope user sonobe-headless");
   });
 
   it("knows where Claude Desktop keeps its config", () => {
