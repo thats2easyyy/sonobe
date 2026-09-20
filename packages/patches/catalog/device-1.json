@@ -184,7 +184,7 @@
       "commonMistakes": [
         "Nothing moves in the desktop viewer: computers have no motion sensors. Open the web player on a phone, or send deviceMotion events in a simulation.",
         "The layer trembles even when the phone lies still: raw sensor values jitter. Put a Smooth Value with a hysteresis around 0.9 between the sensor and the layer.",
-        "Available stays false on an iPhone: iOS asks permission first and only on secure (https) pages. Tap Allow Motion in the player, or open the prototype from a secure link."
+        "Available stays false on an iPhone: iOS asks permission first and only on secure (https) pages, and Preview on Phone's address is plain http://. Test motion on an Android phone for now."
       ],
       "examples": [
         {
@@ -832,7 +832,7 @@
         "mathExpression"
       ],
       "commonMistakes": [
-        "Latitude and Longitude stay 0 on a phone: the web player opened over http://, and browsers only share location with secure pages. Use an override city, or open the prototype from a secure link.",
+        "Latitude and Longitude stay 0 on a phone: the web player opened over http://, and browsers only share location with secure pages. Sonobe has no HTTPS preview yet, so use an override city on the phone.",
         "A permission prompt interrupts every demo: Current Location asks for access. Pick an override city for presentations.",
         "The map shows the wrong spot: many map and weather services want longitude first. Check which order the URL expects."
       ],
