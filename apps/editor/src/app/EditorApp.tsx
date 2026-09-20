@@ -204,13 +204,14 @@ function Workspace() {
     if (shouldShowWelcomeOnLaunch(hasSeenWelcome(), settingsStore.getState().showWelcomeOnLaunch)) welcomeStore.getState().show("launch");
   }, []);
 
-  // Unsaved work left by a crash or a quit: always offer it at launch (the welcome screen's Recovered section).
+  // Unsaved work left by a crash or a quit: always offer it at launch (the welcome screen's Recovered section),
+  // unless something already replaced or edited the launch document (a project opened from Finder).
   useEffect(() => {
     let cancelled = false;
     void session
       .recoverableDrafts()
       .then((drafts) => {
-        if (!cancelled && drafts.length && !welcomeStore.getState().open && !session.document.getState().dirty) welcomeStore.getState().show("launch");
+        if (!cancelled && drafts.length && !welcomeStore.getState().open && session.document.getState().lastChange === null) welcomeStore.getState().show("launch");
       })
       .catch(() => undefined);
     return () => {
