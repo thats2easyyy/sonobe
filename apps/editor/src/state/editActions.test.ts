@@ -199,4 +199,25 @@ describe("edit actions", () => {
     expect(arrangeLayers(s, "backward").ok).toBe(true);
     expect(ids(s)).toEqual(["a", "b", "c"]);
   });
+
+  it("says when Z Position keeps Bring to Front or Send to Back from working", () => {
+    const s = start(twoRects());
+    s.document.getState().apply([{ op: "setInput", target: "@c.zPosition", value: 2 }], { label: "Raise C" });
+    s.selection.getState().select({ layers: ["a"] });
+    const front = arrangeLayers(s, "front");
+    expect(ids(s)).toEqual(["b", "c", "a"]);
+    const c = findLayer(main(s).layers, "c")!.layer.name;
+    const a = findLayer(main(s).layers, "a")!.layer.name;
+    expect(front.note).toEqual({
+      message: `“${c}” still draws in front of “${a}”`,
+      hint: `Its Z Position is 2, higher than “${a}”'s 0, and Z Position decides the order before the layer list does. Give “${a}” a Z Position above 2.`,
+    });
+    // Already at the front: nothing moves, and it still says why it isn't in front.
+    expect(arrangeLayers(s, "front").note?.message).toBe(`“${c}” still draws in front of “${a}”`);
+    s.selection.getState().select({ layers: ["c"] });
+    const b = findLayer(main(s).layers, "b")!.layer.name;
+    expect(arrangeLayers(s, "back").note?.message).toBe(`“${b}” still draws behind “${c}”`);
+    s.selection.getState().select({ layers: ["b"] });
+    expect(arrangeLayers(s, "forward").note).toBeUndefined();
+  });
 });
