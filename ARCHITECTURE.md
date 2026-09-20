@@ -279,6 +279,7 @@ input events (pointer/keyboard/device) ─┐
 - Groups and artboards may enable **layout**: `none | row | column | grid`, with spacing, padding, and 9-point alignment.
   - Child sizing: `fixed | auto | grow | percent`.
   - Child positioning: `relative | absolute`.
+  - Padding insets only the layout flow. Children in the flow sit inside it, and their `percent` and `grow` sizes are shares of the space inside it (the content box). Children placed by Position (absolute children, and every child of a group without layout) measure Position from the parent's top-left and size `percent` and `grow` from the parent's full size, padding included. This is CSS's rule for absolutely positioned children (the padding box), so 100% × 100% at 0, 0 covers the parent exactly.
 - The engine owns layout (headless and deterministic). Text measurement is injected (`TextMeasurer`): the DOM measures with canvas, and headless mode uses approximate metrics.
 
 ### 5.5 Hit testing and gestures
