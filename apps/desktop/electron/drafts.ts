@@ -10,7 +10,7 @@
  */
 
 import { createHash } from "node:crypto";
-import { readdir, readFile, rm, stat } from "node:fs/promises";
+import { readdir, readFile, realpath, rm, stat } from "node:fs/promises";
 import path from "node:path";
 import type { IpcMain, IpcMainInvokeEvent } from "electron";
 import { atomicWriteFile } from "./fs-utils.ts";
@@ -68,6 +68,8 @@ export interface DraftStore {
   release(owner: number, id?: string): void;
   /** The window that claims draft `id`, if one does. */
   holder(id: string): number | undefined;
+  /** The draft `dir` is, when it's one of this store's folders: a draft, never a project to open or save into. */
+  idAt(dir: string): Promise<string | null>;
   /** Delete the drafts a window claims (it's closing after Save or Don't Save). */
   discard(owner: number): Promise<void>;
   /** At launch: delete drafts with nothing in them and drafts untouched for 90 days. Returns how many went. */
@@ -292,6 +294,19 @@ export function createDraftStore(options: DraftStoreOptions): DraftStore {
     },
 
     holder: (id) => claims.get(id),
+
+    async idAt(target) {
+      if (typeof target !== "string" || !path.isAbsolute(target)) return null;
+      const resolved = path.resolve(target);
+      const name = path.basename(resolved);
+      const id = name.slice(0, -".sonobe".length);
+      if (name.slice(-".sonobe".length).toLowerCase() !== ".sonobe" || !DRAFT_ID.test(id)) return null;
+      // The same folder by another spelling: a symlink, or another case on macOS and Windows.
+      const real = (p: string) => realpath(p).catch(() => path.resolve(p));
+      const [parent, drafts] = await Promise.all([real(path.dirname(resolved)), real(dir)]);
+      const caseless = process.platform === "darwin" || process.platform === "win32";
+      return (caseless ? parent.toLowerCase() === drafts.toLowerCase() : parent === drafts) ? id : null;
+    },
 
     async discard(owner) {
       const owned = [...claims].filter(([, holder]) => holder === owner).map(([id]) => id);

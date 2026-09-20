@@ -8,7 +8,7 @@ import { pathToFileURL } from "node:url";
 import type { SonobeDocument } from "@sonobe/core";
 import { saveProjectToDisk } from "@sonobe/core/node";
 import { plainSceneFrame } from "@sonobe/engine";
-import { checkProjectTarget, createClientRegistry, createHttpHandler, isHostError, loadGuides, resolveProjectTarget, type NodeMcpHandler } from "@sonobe/mcp";
+import { checkProjectTarget, createClientRegistry, createHttpHandler, HostError, isHostError, loadGuides, resolveProjectTarget, type NodeMcpHandler } from "@sonobe/mcp";
 import { createPatchRegistry } from "@sonobe/patches";
 import { toBuffer as qrPng } from "qrcode";
 import { createAppHost, type AppHost, type CapturedImage, type DocumentChange, type RendererTarget, type SceneRenderRequest, type SvgRenderRequest } from "./app-host.ts";
@@ -284,6 +284,29 @@ function main(): void {
     return creating;
   };
 
+  /** The draft `dir` is, when it's a folder in <userData>/Drafts: unsaved work the draft store deletes once it's saved, never a project (§3.5 Drafts). */
+  const draftAt = async (dir: unknown): Promise<string | null> => (typeof dir === "string" && drafts ? drafts.idAt(dir) : null);
+
+  const refuseDraftFolder = async (dir: unknown) => {
+    if (await draftAt(dir)) throw new Error(`${String(dir)} is a draft of unsaved work, not a prototype. Bring it back from Recovered on the welcome screen (Help > Welcome Screen), then save it where you want it.`);
+  };
+
+  /** A draft folder opened like a project (Show in Finder on a Recovered draft, then a double-click): it comes back as the draft it is, so its next save asks where to go. */
+  const recoverDraftFolder = async (id: string, into?: AppWindow): Promise<void> => {
+    const holder = drafts?.holder(id);
+    const open = holder !== undefined ? windows.get(holder) : undefined;
+    if (open) return open.focus();
+    try {
+      const w = into ?? (await ensureWindow());
+      w.focus();
+      await waitForEditor(w);
+      const failed = rpc ? await rpc.invoke(w.webContents, "document.recoverDraft", { id }, { timeoutMs: 120_000 }).then(() => null, (err: unknown) => err) : new Error("The editor isn't ready yet.");
+      if (failed && !w.win.isDestroyed()) await dialog.showMessageBox(w.win, { type: "info", message: "Sonobe couldn't bring back that draft.", detail: errorMessage(failed) });
+    } catch (err) {
+      log("warn", `Couldn't recover draft ${id}: ${errorMessage(err)}`);
+    }
+  };
+
   const openProjects = async (paths: readonly string[]) => {
     if (!ready) {
       pendingOpen.push(...paths);
@@ -293,6 +316,11 @@ function main(): void {
       const dir = await resolveProjectSelection(candidate);
       if (!dir) {
         log("warn", `Not a Sonobe project: ${candidate}`);
+        continue;
+      }
+      const draftId = await draftAt(dir);
+      if (draftId) {
+        void recoverDraftFolder(draftId);
         continue;
       }
       access.approve(dir);
@@ -335,6 +363,12 @@ function main(): void {
 
   const approveAgentProject = async (dir: string) => {
     const resolved = await resolveProjectSelection(dir);
+    const draftId = resolved ? await draftAt(resolved) : null;
+    if (draftId) {
+      throw new HostError("draft_folder", `${resolved} is a draft of unsaved work that Sonobe keeps, not a project.`, {
+        hint: `Bring it back with open_document({ ref: "draft:${draftId}" }), then save it where the person wants it with save_document({ path }).`,
+      });
+    }
     if (resolved) access.approve(resolved);
     return resolved ?? null;
   };
@@ -799,6 +833,11 @@ function main(): void {
         });
         return null;
       }
+      const draftId = await draftAt(dir);
+      if (draftId) {
+        void recoverDraftFolder(draftId, w);
+        return null;
+      }
       access.approve(dir);
       return dir;
     });
@@ -816,6 +855,11 @@ function main(): void {
         });
         if (result.canceled || !result.filePath) return null;
         const dir = result.filePath.endsWith(".sonobe") ? result.filePath : `${result.filePath}.sonobe`;
+        if (await draftAt(dir)) {
+          await dialog.showMessageBox(w.win, { type: "info", message: "Sonobe keeps drafts of unsaved work in that folder.", detail: "It deletes them once the work is saved, so choose a folder of your own, such as Documents." });
+          defaultPath = path.join(app.getPath("documents"), path.basename(dir));
+          continue;
+        }
         // The folder rules agents follow, except that replacing a prototype (the panel asked) is the person's call.
         const problem = await checkProjectTarget(dir, { allowExistingProject: true });
         if (!problem) {
@@ -830,6 +874,7 @@ function main(): void {
     ipcMain.handle(IPC.readProject, async (event, dir: unknown) => {
       const w = requireWindow(event);
       if (!(await access.canAccess(dir))) throw new Error(`Sonobe can only open prototype folders you've chosen: ${String(dir)}`);
+      await refuseDraftFolder(dir);
       const project = await readProject(dir as string);
       access.approve(dir as string);
       await addRecent(dir as string);
@@ -848,6 +893,7 @@ function main(): void {
       const w = requireWindow(event);
       if (!(await access.canAccess(dir))) throw new Error(`Sonobe can only save into prototype folders you've chosen: ${String(dir)}`);
       if (!changes || typeof changes !== "object") throw new Error("writeProject: changes must be an object");
+      await refuseDraftFolder(dir);
       await writeProject(dir as string, changes as WriteProjectInput, { ownWrites });
       await addRecent(dir as string);
       w.setRepresentedDir(dir as string);
@@ -1103,7 +1149,11 @@ function main(): void {
     });
 
     recents = new RecentProjects(path.join(app.getPath("userData"), "recent-projects.json"));
-    for (const dir of await recents.list()) access.approve(dir);
+    for (const dir of await recents.list()) {
+      // A draft folder an older build opened as a project.
+      if (await draftAt(dir)) await recents.remove(dir);
+      else access.approve(dir);
+    }
     rebuildMenu();
 
     if (env.mcpEnabled) {
