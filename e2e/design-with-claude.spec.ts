@@ -25,6 +25,28 @@ const statusLine = (box: Locator, text: string | RegExp): Locator => box.getByRo
 
 const preview = (page: Page): Locator => page.locator("iframe[title='Design preview']");
 
+/** The pill saying who is writing the draft: in the artboard's label row, or on the preview's frame. */
+const draftPill = (page: Page): Locator => page.locator("[data-design-pill]");
+
+/** Nothing covers the pill: it's inside the canvas, below its ruler and above the box. (Hit testing can't tell: the pill, the ruler and the label take no pointer events.) */
+async function expectUncovered(pill: Locator): Promise<void> {
+  await expect(pill).toBeInViewport();
+  const rects = await pill.evaluate((el) => {
+    const edges = (r: DOMRect | undefined) => (r ? { top: r.top, bottom: r.bottom, left: r.left, right: r.right } : null);
+    return { pill: edges(el.getBoundingClientRect())!, canvas: edges(document.querySelector(".sb-cv")?.getBoundingClientRect())!, ruler: edges(document.querySelector('.sb-cv__ruler[data-axis="x"]')?.getBoundingClientRect()), box: edges(document.querySelector(".sb-design-box")?.getBoundingClientRect()) };
+  });
+  expect(rects.pill.top).toBeGreaterThanOrEqual(rects.ruler?.bottom ?? rects.canvas.top);
+  expect(rects.pill.bottom).toBeLessThanOrEqual(rects.box?.top ?? rects.canvas.bottom);
+  expect(rects.pill.left).toBeGreaterThanOrEqual(rects.canvas.left);
+  expect(rects.pill.right).toBeLessThanOrEqual(rects.canvas.right);
+}
+
+/** The canvas's zoom, as its header shows it (percent). */
+const canvasZoom = async (page: Page): Promise<number> => parseFloat((await page.locator(".sb-cv__zoom").textContent()) ?? "");
+
+/** The canvas's share of the split over the patch editor. */
+const canvasSplit = (page: Page) => hook(page, (s) => s.layout().split);
+
 /** Open the box from the sparkle in the canvas header. */
 async function openBox(page: Page): Promise<void> {
   await page.locator(".sb-cv__design").click();
@@ -93,7 +115,10 @@ test.describe("Design with Claude", () => {
     await installFakeAssistant(page, { html: profileHtml, name: "Profile", hold: 25 });
     await openEditor(page);
 
+    const ownSplit = await canvasSplit(page);
     await openBox(page);
+    // The canvas takes most of the split while the box is open; the patch editor stays as a strip.
+    await expect.poll(() => canvasSplit(page)).toBe(0.8);
     const box = designBox(page);
     await expect(box.getByText("New screen · 402 × 874")).toBeVisible();
     await designField(page).fill("a profile screen");
@@ -104,7 +129,10 @@ test.describe("Design with Claude", () => {
     await expect(frame.getByText("Ava Chen", { exact: true })).toBeVisible();
     await expect(frame.getByText("Product designer")).toHaveCount(0);
     await expect(statusLine(box, "Writing “Profile”")).toBeVisible();
-    await expect(page.getByText("Claude is writing “Profile”")).toBeVisible();
+    await expect(draftPill(page)).toHaveText("Claude is writing “Profile”");
+    await expectUncovered(draftPill(page));
+    // Large enough to read as it's written.
+    expect(await canvasZoom(page)).toBeGreaterThanOrEqual(45);
     const [frameBox, artboardBox] = await Promise.all([preview(page).boundingBox(), page.locator(".sb-cv__artboard").boundingBox()]);
     expect(frameBox && artboardBox).toBeTruthy();
     for (const key of ["x", "y", "width", "height"] as const) expect(Math.abs(frameBox![key] - artboardBox![key]), key).toBeLessThanOrEqual(2);
@@ -177,6 +205,10 @@ test.describe("Design with Claude", () => {
     // Match my code… links a folder (the fake's native dialog picks ~/code/noddit).
     await box.getByRole("button", { name: "Match my code…" }).click();
     await expect(box.getByText("Code: noddit")).toBeVisible();
+
+    // Closing the box gives the person's split back.
+    await box.getByRole("button", { name: "Close", exact: true }).click();
+    await expect.poll(() => canvasSplit(page)).toBe(ownSplit);
 
     expect(withoutProbes(problems)).toEqual([]);
   });
@@ -259,14 +291,19 @@ test.describe("Design with Claude", () => {
         status,
         revision,
       });
-    const pill = page.locator(".sb-design-preview__pill");
+    const pill = draftPill(page);
     const frame = page.frameLocator("iframe[title='Design preview']");
+    const ownSplit = await canvasSplit(page);
 
     // It said what it's doing (begin_work), then showed the page's head and header.
     await hook(page, (s, c) => void s.session.presence.getState().begin({ intent: "designing a checkout screen", author: { kind: "agent", name: "Claude" }, client: c }), client);
     expect(await show(1, "writing", 1)).toEqual({ applied: true });
     await expect(pill).toHaveText("Claude Code is writing “Checkout”");
     await expect(frame.getByText("2 tickets · Sunset Picnic")).toBeVisible();
+    // With the box closed, the canvas makes room for the draft too, and shows it large enough to read.
+    await expect.poll(() => canvasSplit(page)).toBe(0.8);
+    await expectUncovered(pill);
+    expect(await canvasZoom(page)).toBeGreaterThanOrEqual(45);
     await expect(frame.getByText("General admission")).toHaveCount(0);
     const [frameBox, artboardBox] = await Promise.all([preview(page).boundingBox(), page.locator(".sb-cv__artboard").boundingBox()]);
     expect(frameBox && artboardBox).toBeTruthy();
@@ -277,7 +314,8 @@ test.describe("Design with Claude", () => {
     await expect(frame.getByText("General admission")).toBeVisible();
     await expect(frame.getByText("SUMMER10 saves $3.60")).toBeVisible();
     await expect(pill).toHaveText("Claude Code is writing “Checkout”");
-    await expect(page.locator(".sb-cv__label-agent")).toHaveText("Claude Code: designing a checkout screen");
+    // The pill says what Claude Code is doing here, so its presence pill isn't repeated beside it.
+    await expect(page.locator(".sb-cv__label")).not.toContainText("designing a checkout screen");
     await screenshot(page, "design-05-claude-code");
 
     // import_design with "preview": true says it's adding the whole page, then clears the draft once the layers are in.
@@ -286,8 +324,10 @@ test.describe("Design with Claude", () => {
     await expect(frame.getByText("Pay $32.40 with Apple Pay")).toBeVisible();
     await show(0, "cleared", 4);
     await expect(preview(page)).toBeHidden();
-    // This test sends only the previews, and they never touch the document.
+    await expect(page.locator(".sb-cv__label-agent")).toHaveText("Claude Code: designing a checkout screen");
+    // This test sends only the previews, and they never touch the document: nothing was added, so the split goes back.
     expect((await screens(page)).some((l) => l.name === "Checkout")).toBe(false);
+    await expect.poll(() => canvasSplit(page)).toBe(ownSplit);
     expect(problems).toEqual([]);
   });
 

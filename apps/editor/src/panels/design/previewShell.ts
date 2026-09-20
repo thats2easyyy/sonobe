@@ -43,7 +43,9 @@ export function previewShellHtml(nonce: string): string {
  * accepts only the parent's messages carrying that nonce, and for each one: parses the page with
  * DOMParser; drops every script (keeping Tailwind CDN sources), meta refreshes, base, frames, objects,
  * embeds, on* attributes and javascript: URLs; swaps in the page's head styles, its html and body
- * attributes and its body; and adds each allowed CDN script once. Clicks and submits are cancelled.
+ * attributes and its body; and adds each allowed CDN script once. When one loads, the last page is
+ * swapped in again: Tailwind's v3 Play CDN styles only what changes after it starts, so a page that
+ * came in one post would stay unstyled. Clicks and submits are cancelled.
  */
 export const PREVIEW_BOOTSTRAP: string = `(function () {
   "use strict";
@@ -53,6 +55,7 @@ export const PREVIEW_BOOTSTRAP: string = `(function () {
   var PREFIXES = ${JSON.stringify(PREVIEW_SCRIPT_PREFIXES)};
   var STRIP = "script, meta[http-equiv], base, iframe, frame, object, embed";
   var added = Object.create(null);
+  var last = null;
   function cancel(event) {
     event.preventDefault();
     event.stopImmediatePropagation();
@@ -131,13 +134,18 @@ export const PREVIEW_BOOTSTRAP: string = `(function () {
       added[sources[s]] = true;
       var script = document.createElement("script");
       script.setAttribute("nonce", nonce);
+      script.onload = renderLast;
       script.src = sources[s];
       head.appendChild(script);
     }
   }
+  function renderLast() {
+    if (last !== null) render(last);
+  }
   window.addEventListener("message", function (event) {
     var data = event.data;
     if (event.source !== window.parent || !data || data.type !== ${JSON.stringify(PREVIEW_MESSAGE_TYPE)} || data.nonce !== nonce || typeof data.html !== "string") return;
+    last = data.html;
     render(data.html);
   });
 })();`;

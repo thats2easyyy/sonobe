@@ -1,37 +1,64 @@
 /**
- * Room for the Design with Claude box. It floats over the canvas, so while it's open the canvas shows
- * (a patches-only layout becomes the split) and, above the patch editor, takes the larger share of the
- * split. Closing the box puts back what opening it changed, unless the person changed it meanwhile.
+ * Room for Design with Claude. While the box is open, or an MCP client such as Claude Code is writing
+ * a draft, the canvas shows (a patches-only layout becomes the split) and takes most of a split over
+ * the patch editor, which stays as a strip. It's a temporary layout, never saved: when the box closes,
+ * or the draft ends without an import, what it changed goes back, unless the person changed it
+ * meanwhile. A draft that ends in an import with the box closed keeps the room, handed to the person,
+ * so nothing jumps just as the screen lands.
  */
 
 import type { StoreApi } from "zustand/vanilla";
-import type { LayoutStore, ViewMode } from "../../shell/layoutStore.ts";
-import { designStore, type DesignState } from "./designStore.ts";
+import type { LayoutStore } from "../../shell/layoutStore.ts";
+import { designStore, MCP_DRAFT_IDLE_MS, type DesignData, type DesignDraft, type DesignState } from "./designStore.ts";
 
-/** The canvas's share of a split over the patch editor while the box is open. */
-export const DESIGN_CANVAS_SPLIT = 0.62;
+/** The canvas's share of a split over the patch editor while it has the room. */
+export const DESIGN_CANVAS_SPLIT = 0.8;
 
-/** Follow the box's open state in the shell layout. Returns unsubscribe. */
-export function followDesignBox(layout: StoreApi<LayoutStore>, design: StoreApi<DesignState> = designStore): () => void {
-  let restore: { viewMode?: ViewMode; split?: { from: number; to: number } } | null = null;
-  return design.subscribe((state, previous) => {
-    if (state.open === previous.open) return;
-    if (state.open) {
-      restore = {};
-      if (layout.getState().viewMode === "patches") {
-        restore.viewMode = "patches";
-        layout.getState().setViewMode("split");
-      }
-      const { viewMode, splitDirection, split } = layout.getState();
-      if (viewMode === "split" && splitDirection === "rows" && split < DESIGN_CANVAS_SPLIT) {
-        restore.split = { from: split, to: DESIGN_CANVAS_SPLIT };
-        layout.getState().setSplit(DESIGN_CANVAS_SPLIT);
-      }
-      return;
-    }
-    const changed = restore;
-    restore = null;
-    if (changed?.split && layout.getState().split === changed.split.to) layout.getState().setSplit(changed.split.from);
-    if (changed?.viewMode && layout.getState().viewMode === "split") layout.getState().setViewMode(changed.viewMode);
+/** MCP clients' drafts being written or added, less those idle for MCP_DRAFT_IDLE_MS (they've left the canvas). */
+export function liveMcpDrafts(state: DesignData, now: number): DesignDraft[] {
+  return state.drafts.filter((d) => d.mcp !== undefined && (d.status === "writing" || d.status === "adding") && now - d.mcp.touchedAt < MCP_DRAFT_IDLE_MS);
+}
+
+function makeRoom(layout: StoreApi<LayoutStore>): void {
+  const { viewMode, splitDirection, split } = layout.getState();
+  const mode = viewMode === "patches" ? "split" : viewMode;
+  layout.getState().showTemporary({
+    ...(mode !== viewMode ? { viewMode: mode } : {}),
+    ...(mode === "split" && splitDirection === "rows" && split < DESIGN_CANVAS_SPLIT ? { split: DESIGN_CANVAS_SPLIT } : {}),
   });
+}
+
+/** Give the canvas room in the shell layout while the box is open or an MCP draft is live. Returns unsubscribe. */
+export function followDesignBox(layout: StoreApi<LayoutStore>, design: StoreApi<DesignState> = designStore): () => void {
+  // What the last check saw: whether the canvas had the room, the box was open, and which MCP drafts were live.
+  let room = false;
+  let open = false;
+  let drafting: string[] = [];
+  let timer: ReturnType<typeof setTimeout> | undefined;
+
+  const check = () => {
+    clearTimeout(timer);
+    timer = undefined;
+    const state = design.getState();
+    const now = Date.now();
+    const live = liveMcpDrafts(state, now);
+    // A draft goes idle without a store change: look again then.
+    if (live.length) timer = setTimeout(check, Math.min(...live.map((d) => d.mcp!.touchedAt)) + MCP_DRAFT_IDLE_MS - now + 1);
+    const wants = state.open || live.length > 0;
+    if (wants && !room) makeRoom(layout);
+    else if (!wants && room) {
+      const imported = !open && drafting.some((key) => state.drafts.find((d) => d.key === key)?.status === "added");
+      layout.getState().endTemporary(!imported);
+    }
+    room = wants;
+    open = state.open;
+    drafting = live.map((d) => d.key);
+  };
+
+  const unsubscribe = design.subscribe(check);
+  check();
+  return () => {
+    unsubscribe();
+    clearTimeout(timer);
+  };
 }

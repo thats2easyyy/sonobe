@@ -189,6 +189,11 @@
   font-weight: var(--font-weight-semibold);
 }
 
+/* Where the Design with Claude preview puts its pill over a frame at the artboard's top ("Claude is writing “Checkout”"). */
+.sb-cv__label-slot {
+  display: contents;
+}
+
 .sb-cv__label-agent-dot {
   width: 5px;
   height: 5px;
