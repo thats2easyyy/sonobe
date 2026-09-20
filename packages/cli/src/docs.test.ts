@@ -196,6 +196,22 @@ describe("Claude setup in the README and guide 11", () => {
   });
 });
 
+describe("the experimental Claude subscription in the docs", () => {
+  it("is offered only from a checkout, and README and the guides (which ship in the app) give no way to turn it on in a release", () => {
+    expect(read("apps/desktop/electron/main.ts")).toMatch(/available: !app\.isPackaged\b(?!\s*\|\|)/);
+    // No variable that would switch it on, and no way to launch the packaged app with one.
+    for (const { file, text } of [{ file: "README.md", text: read("README.md") }, ...GUIDES]) expect(text, file).not.toMatch(/SONOBE_CLAUDE_[A-Z_]*SUBSCRIPTION|Sonobe\.app\/Contents\/MacOS/);
+  });
+
+  it("describes the mode reset the way the engine does it", () => {
+    const arch = read("ARCHITECTURE.md");
+    const subscription = arch.slice(arch.indexOf("**The Assistant on a Claude subscription**"), arch.indexOf("**Outline projection**"));
+    const setsMode = ["process.ts", "engine.ts"].some((file) => read(`apps/desktop/electron/assistant/acp/${file}`).includes("setSessionMode"));
+    expect(subscription).toContain("`session/set_config_option` on the adapter's `mode` option");
+    expect(/doesn't fall back to `session\/set_mode`/.test(subscription)).toBe(!setsMode);
+  });
+});
+
 // ---------------------------------------------------------------------------------------------------
 // Patch and port names
 // ---------------------------------------------------------------------------------------------------

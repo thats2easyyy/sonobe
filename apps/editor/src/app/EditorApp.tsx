@@ -18,6 +18,9 @@ import { assistantCommand } from "../panels/assistant/commands.ts";
 import { CanvasPanel } from "../panels/canvas/CanvasPanel.tsx";
 import { ConnectClaudeButton } from "../panels/connect/ConnectClaudeButton.tsx";
 import { connectClaudeStore, useConnectClaude } from "../panels/connect/connectStore.ts";
+import { designCommands } from "../panels/design/commands.ts";
+import { attachDesign } from "../panels/design/designStore.ts";
+import { followDesignBox } from "../panels/design/layout.ts";
 import { Hud } from "../panels/hud/Hud.tsx";
 import { InspectorPanel } from "../panels/inspector/InspectorPanel.tsx";
 import { LayersPanel } from "../panels/layers/LayersPanel.tsx";
@@ -180,8 +183,11 @@ function Workspace() {
   const [titlebarInset] = useState(() => (getDesktopHostApi()?.platform === "darwin" ? 80 : 0));
 
   // The in-app Assistant claims "ai.assistant" before useAppCommands, which skips ids already registered.
-  useRegisterCommands(() => [assistantCommand()], []);
+  useRegisterCommands(() => [assistantCommand(), ...designCommands(session)], [session]);
   useAppCommands(session);
+  // Design with Claude: imported screens are selected and revealed, and the canvas makes room for the box.
+  useEffect(() => attachDesign(session), [session]);
+  useEffect(() => followDesignBox(layoutStore), []);
   useHudAutoOpen(session, () => layoutStore.getState());
   useEffect(() => (shouldInstallTestHook() ? installTestHook(session) : undefined), [session]);
 

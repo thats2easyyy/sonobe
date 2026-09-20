@@ -147,4 +147,5 @@ export {
   toolOutputSchema,
   type ToolOutputSchema,
 } from "./schemas.ts";
+export { IMPORT_META_KEY, type ImportResultMeta } from "./tools/import.ts";
 export { summaryText, traceTable } from "./tools/simulate.ts";

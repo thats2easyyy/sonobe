@@ -5,6 +5,7 @@
  *
  * - the bundle's signature (ad-hoc for local builds) and the files inside app.asar and Resources
  * - the app launches, shows the editor build from Resources/editor, and exposes window.sonobeHost
+ * - the Assistant doesn't offer the experimental Claude subscription (no packaged build does)
  * - the MCP endpoint answers /health with the token from mcp.json, and quitting removes mcp.json
  * - the bundled CLI runs with the app's own runtime (Resources/cli/sonobe --version)
  * - on macOS, the SF Symbols helper (Resources/bin/sfsymbol) draws a symbol
@@ -152,13 +153,16 @@ try {
   const host = await win.evaluate(() => ({ keys: Object.keys(window.sonobeHost ?? {}).sort(), version: window.sonobeHost?.version }));
   for (const key of ["getMcpStatus", "notifyDocumentChanged", "openExternal", "popOutViewer", "secrets"]) assert(host.keys.includes(key), `sonobeHost.${key}`, host.keys);
   assert(host.version === pkg.version, "sonobeHost.version", host.version);
+  // The experimental Claude subscription is offered only from a checkout, never in a packaged build.
+  const connection = await win.evaluate(async () => (await window.sonobeHost.assistant.status()).connection);
+  assert(connection?.available === false && connection.subscriptionEnabled === false && connection.active === "api_key", "the Claude subscription isn't offered", connection);
   // The editor build mounts into #root; a blank window means the bundled editor threw at startup.
   const mounted = await poll(() => win.evaluate(() => (document.getElementById("root")?.childElementCount ?? 0) > 0), { timeout: 15_000, message: "the editor to mount" }).catch(() => false);
   await new Promise((r) => setTimeout(r, 1500));
   mkdirSync(path.join(root, "screenshots"), { recursive: true });
   await win.screenshot({ path: path.join(root, "screenshots", "packaged.png") });
   assert(mounted, "the bundled editor renders (#root has content)", pageErrors.length ? pageErrors.slice(0, 5).join("\n  ") : "no page errors reported");
-  log(`window loads and renders the bundled editor; sonobeHost v${host.version}; screenshot → screenshots/packaged.png`);
+  log(`window loads and renders the bundled editor; sonobeHost v${host.version}; the Claude subscription isn't offered; screenshot → screenshots/packaged.png`);
 
   await app.close();
   app = null;

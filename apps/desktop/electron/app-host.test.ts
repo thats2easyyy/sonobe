@@ -11,9 +11,10 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { findLayer, getDiagnostics, type Op } from "@sonobe/core";
 import type { SceneFrame, SceneNode } from "@sonobe/engine";
-import { createHttpHandler, createSimulationManager, HostError, isHostError, TOOL_NAMES, type NodeMcpHandler } from "@sonobe/mcp";
+import { InMemoryTransport } from "@modelcontextprotocol/server";
+import { createHttpHandler, createSimulationManager, createSonobeMcpServer, HostError, isHostError, TOOL_NAMES, type DesignPreviewUpdate, type NodeMcpHandler } from "@sonobe/mcp";
 import { createPatchRegistry } from "@sonobe/patches";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, expectTypeOf, it, vi } from "vitest";
 
 // Count full diagnostics passes in this process (behavior unchanged).
 vi.mock("@sonobe/core", async (importOriginal) => {
@@ -22,17 +23,32 @@ vi.mock("@sonobe/core", async (importOriginal) => {
 });
 import { createBrowserHost, createMemoryProjectStorage, type ProjectStorage } from "../../editor/src/host/browserHost.ts";
 import { registerRpcHandlers } from "../../editor/src/host/rpcHandlers.ts";
+import type { DesignPreviewUpdate as EditorDesignPreviewUpdate } from "../../editor/src/host/types.ts";
+import { activeDraft, designStore, initialDesignData } from "../../editor/src/panels/design/designStore.ts";
 import { createManualScheduler } from "../../editor/src/runtime/scheduler.ts";
 import { createDemoDocument } from "../../editor/src/state/demoDocument.ts";
 import { createEditorSession, type EditorSession } from "../../editor/src/state/session.ts";
 import { writeResult } from "../../../packages/mcp/src/tools/write.ts";
 import { estimateGraphGeometry, resolveGraphGeometry } from "../../../packages/mcp/src/geometry.ts";
 import { createAppHost, hostErrorFromRpc, sceneLayerBounds, type AppHost, type AppHostOptions, type DocumentChange, type RendererTarget, type SceneRenderRequest } from "./app-host.ts";
+import { createAssistantAgent } from "./assistant/agent.ts";
+import { scriptedClient } from "./assistant/testing.ts";
+import { createMcpToolBridge } from "./assistant/toolBridge.ts";
 import { startMcpServer, type McpServerHandle } from "./mcp-server.ts";
 import { createRpcClient, createRpcFailure, createRpcServer, type RpcServer } from "./rpc.ts";
 
 const registry = createPatchRegistry();
 const CLAUDE = { kind: "agent" as const, name: "Claude" };
+
+/** A checkout screen as the capture window reads it (import_design's preview source renders the draft into it). */
+const CHECKOUT_CAPTURE = {
+  format: "sonobe.design-capture",
+  version: 1,
+  source: { kind: "html", title: "Checkout" },
+  viewport: { width: 402, height: 874 },
+  root: { kind: "frame", name: "Page", box: [0, 0, 402, 874], fill: "#FFFFFFFF", children: [{ kind: "frame", name: "Pay Button", nameRank: 5, box: [16, 780, 370, 52], fill: "#111118FF", radii: [14, 14, 14, 14], children: [] }] },
+  images: {},
+};
 
 interface TestWindow {
   session: EditorSession;
@@ -145,7 +161,7 @@ describe("app host documents", () => {
     const w = editorWindow(1);
     const host = appHost([w]);
     expect(host.kind).toBe("app");
-    expect(host.capabilities).toEqual({ screenshots: true, selection: true, presence: true, autosave: false, sfSymbols: false });
+    expect(host.capabilities).toEqual({ screenshots: true, selection: true, presence: true, autosave: false, sfSymbols: false, designPreview: true });
     expect(await host.listDocuments()).toEqual([{ docId: "photo_zoom", name: "Photo Zoom", revision: 0, dirty: false, active: true }]);
     const snap = await host.getDocument();
     expect(snap).toMatchObject({ docId: "photo_zoom", revision: 0, dirty: false, doc: { project: { name: "Photo Zoom" } } });
@@ -569,6 +585,78 @@ describe("app host presence, selection and screenshots", () => {
     expect(w.session.presence.getState().working).toHaveLength(1);
     await host.setWorking(null, { author: CLAUDE, client: sonobe });
     expect(await host.presence()).toEqual([]);
+  });
+
+  it("draws a design preview in the window that shows its document, and lets a missing window go", async () => {
+    const a = editorWindow(1);
+    const b = editorWindow(2);
+    const host = appHost([a, b]);
+    const [, second] = await host.listDocuments();
+    const seen: { window: number; params: unknown }[] = [];
+    for (const [w, id] of [[a, 1], [b, 2]] as const) w.server.handle("design.preview", (params) => void seen.push({ window: id, params }));
+    const noddit = { id: "11111111-aaaa-4bbb-8ccc-000000000001", label: "Claude Code", folder: "/Users/me/noddit" };
+    const update: DesignPreviewUpdate = { docId: second!.docId, key: noddit.id, author: CLAUDE, client: noddit, name: "Checkout", component: null, replace: null, width: null, height: null, position: null, html: "<body>Checkout", status: "writing", draftRevision: 1 };
+    await host.showDesignPreview!(update);
+    expect(seen).toEqual([{ window: 2, params: update }]);
+    // preview_design reaches it the same way, as the session's draft.
+    const server = createSonobeMcpServer(host, { version: "0.1.0-test" });
+    const [clientSide, serverSide] = InMemoryTransport.createLinkedPair();
+    await server.connect(serverSide);
+    const client = new Client({ name: "claude-code", version: "2.1.278" });
+    await client.connect(clientSide as never);
+    cleanups.push(() => client.close());
+    const shown = await client.callTool({ name: "preview_design", arguments: { name: "Inbox", html: "<body>Inbox</body>" } });
+    expect(JSON.stringify(shown.content)).toContain("Showing “Inbox” on the canvas");
+    expect(seen.at(-1)).toMatchObject({ window: 1, params: { docId: "photo_zoom", key: "Claude", name: "Inbox", html: "<body>Inbox</body>", status: "writing", draftRevision: 1 } });
+
+    // A window that's gone has nothing to draw on, and that's not an error.
+    await expect(host.showDesignPreview!({ ...update, docId: "gone" })).resolves.toBeUndefined();
+    await expect(appHost([]).showDesignPreview!(update)).resolves.toBeUndefined();
+    expect(seen).toHaveLength(2);
+    // An editor without design.preview says so; there's nothing of its to clear.
+    const old = editorWindow(3);
+    old.target.hasMethod = (method) => method !== "design.preview" && old.server.methods().includes(method);
+    const oldHost = appHost([old]);
+    expect(await rejection(oldHost.showDesignPreview!({ ...update, docId: "photo_zoom" }))).toMatchObject({ code: "design_preview_unavailable", hint: expect.stringContaining('"preview": true') });
+    await expect(oldHost.showDesignPreview!({ ...update, docId: "photo_zoom", status: "cleared", html: null })).resolves.toBeUndefined();
+  });
+
+  it("puts preview_design's draft on the editor's canvas, and import_design with preview adds it as layers", async () => {
+    // The editor's design.preview params mirror the MCP host's update field for field.
+    expectTypeOf<EditorDesignPreviewUpdate>().toEqualTypeOf<DesignPreviewUpdate>();
+    designStore.setState(initialDesignData());
+    cleanups.push(() => designStore.setState(initialDesignData()));
+    const w = editorWindow(1);
+    const captured: { html: string | undefined; status: string | undefined }[] = [];
+    const host = appHost([w], {
+      captureDesign: async (request) => {
+        // import_design says it's adding the draft while it renders it.
+        captured.push({ html: request.html, status: activeDraft(designStore.getState(), Date.now())?.status });
+        return { capture: CHECKOUT_CAPTURE as never, images: new Map() };
+      },
+    });
+    const server = createSonobeMcpServer(host, { version: "0.1.0-test" });
+    const [clientSide, serverSide] = InMemoryTransport.createLinkedPair();
+    await server.connect(serverSide);
+    const client = new Client({ name: "claude-code", version: "2.1.278" });
+    await client.connect(clientSide as never);
+    cleanups.push(() => client.close());
+    const draft = () => activeDraft(designStore.getState(), Date.now());
+
+    const head = '<!doctype html><html><head><style>body{margin:0}</style></head><body><header data-name="Header">Checkout</header>';
+    await client.callTool({ name: "preview_design", arguments: { name: "Checkout", html: head } });
+    expect(draft()).toMatchObject({ source: "mcp", key: "mcp:Claude", status: "writing", html: head, fields: { name: "Checkout" }, mcp: { author: CLAUDE, draftRevision: 1 } });
+    const pay = '<div data-name="Pay Button">Pay</div></body></html>';
+    await client.callTool({ name: "preview_design", arguments: { append: pay } });
+    expect(draft()).toMatchObject({ status: "writing", html: head + pay, mcp: { draftRevision: 2 } });
+
+    const result = await client.callTool({ name: "import_design", arguments: { preview: true } });
+    expect(result.isError).not.toBe(true);
+    expect(captured).toEqual([{ html: head + pay, status: "adding" }]);
+    // The import went in before the draft was cleared, so it ends as added and fades.
+    expect(designStore.getState().drafts.at(-1)).toMatchObject({ key: "mcp:Claude", status: "added", mcp: { draftRevision: 4 } });
+    const root = w.session.document.getState().doc.project.root;
+    expect(w.session.document.getState().doc.components[root]!.layers.map((l) => l.name)).toContain("Checkout");
   });
 
   it("restarts the live prototype (restart_viewer) and says what the players show", async () => {
@@ -1025,5 +1113,46 @@ describe("desktop MCP endpoint", () => {
     expect(created.isError).toBeFalsy();
     expect(text(created)).toContain(`Created /Users/test/Documents/Later.sonobe. It isn't open; call open_document({ ref: "/Users/test/Documents/Later.sonobe" })`);
     expect(created.structuredContent).toMatchObject({ docId: "later", open: false });
+  });
+});
+
+describe("app host and the in-app Assistant", () => {
+  it("tells the Assistant which document a window shows", async () => {
+    const a = editorWindow(1);
+    const b = editorWindow(2);
+    const windows = [a, b];
+    const host = appHost(windows);
+    expect(await host.targetDocument(2)).toEqual({ docId: "photo_zoom", projectPath: null });
+    expect(await host.targetDocument(1)).toEqual({ docId: "photo_zoom_2", projectPath: null });
+    expect(await host.targetDocument(3)).toBeNull();
+    windows.pop();
+    expect(await host.targetDocument(2)).toBeNull();
+  });
+
+  it("keeps a reply's edits in the window that sent it when the person focuses another window", async () => {
+    const a = editorWindow(1);
+    const b = editorWindow(2);
+    const windows = [a, b];
+    const host = appHost(windows);
+    const bridge = createMcpToolBridge({ host, version: "0.1.0-test" });
+    cleanups.push(() => bridge.close());
+    const api = scriptedClient([
+      { content: [{ type: "tool_use", id: "t1", name: "rename", input: { updates: [{ id: "photo", name: "Hero Photo" }] } }] },
+      { content: [{ type: "tool_use", id: "t2", name: "rename", input: { updates: [{ id: "card", name: "Hero Card" }] } }] },
+      { content: [{ type: "text", text: "Renamed both." }] },
+    ]);
+    const agent = createAssistantAgent({ tools: () => bridge, apiKey: async () => "sk-ant-test-key-1234", createClient: () => api.client, documentFor: (id) => host.targetDocument(Number(id)) });
+    const result = await agent.run("1", { text: "Rename the photo and the card" }, (event) => {
+      // Focus flips to window 2 (the focused window comes first) after the first edit.
+      if (event.type === "tool_finished" && event.toolUseId === "t1") windows.reverse();
+    });
+
+    expect(result.outcome).toBe("completed");
+    const names = (w: TestWindow) => ["photo", "card"].map((id) => findLayer(w.session.document.getState().doc.components.main!.layers, id)?.layer.name);
+    expect(names(a)).toEqual(["Hero Photo", "Hero Card"]);
+    expect(names(b)).toEqual(["Photo", "Event Card"]);
+    // A call without docId from anywhere else goes to the window in front, which is window 2 now.
+    expect((await bridge.call("rename", { updates: [{ id: "photo", name: "Front Photo" }] })).isError).toBeFalsy();
+    expect(names(b)).toEqual(["Front Photo", "Event Card"]);
   });
 });

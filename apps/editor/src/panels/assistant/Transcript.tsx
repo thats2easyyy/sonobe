@@ -1,16 +1,18 @@
-import { Ban, Check, CircleAlert, Info, KeyRound, LoaderCircle, Sparkles, SkipForward, TriangleAlert, Trash2, X } from "lucide-react";
-import { useEffect, useLayoutEffect, useRef } from "react";
+import { Ban, Check, CircleAlert, Info, KeyRound, LoaderCircle, RefreshCw, ShieldQuestion, Sparkles, SkipForward, TriangleAlert, Trash2, X } from "lucide-react";
+import { useEffect, useId, useLayoutEffect, useRef } from "react";
 import { Button } from "../../ui/Button.tsx";
 import { Markdown } from "../learn/Markdown.tsx";
 import "../learn/markdown.css";
 import type { ChatItem, ToolChip } from "./assistantStore.ts";
+import type { AssistantConfirmOption } from "./types.ts";
 
 export interface TranscriptProps {
   items: readonly ChatItem[];
   running: boolean;
   thinking: boolean;
-  onConfirm: (confirmationId: string, approved: boolean) => void;
-  /** Opens the key setup (from "invalid key" notices). */
+  /** `optionId`: the choice on a permission card. */
+  onConfirm: (confirmationId: string, approved: boolean, optionId?: string) => void;
+  /** Opens the setup (from "invalid key" and Claude subscription notices). */
   onManageKey: () => void;
   /** Starter prompts for an empty chat. */
   onSuggestion: (text: string) => void;
@@ -19,6 +21,8 @@ export interface TranscriptProps {
 export const SUGGESTIONS = ["Explain how this prototype works", "Make the photo zoom in when I tap it", "Add a like button with a bouncy animation"];
 
 const KEY_CODES = new Set(["invalid_key", "no_key", "secrets_unavailable"]);
+/** Claude subscription errors the setup fixes (signing in, installing the adapter). */
+const SETUP_CODES = new Set(["not_signed_in", "agent_not_installed", "agent_failed"]);
 
 function ToolIcon({ status }: { status: ToolChip["status"] }) {
   switch (status) {
@@ -65,40 +69,123 @@ function Notice({ item, onManageKey }: { item: Extract<ChatItem, { kind: "notice
         <Button size="sm" variant="ghost" icon={<KeyRound size={13} />} onClick={onManageKey} className="sb-assistant-notice__action">
           API key
         </Button>
+      ) : item.code && SETUP_CODES.has(item.code) ? (
+        <Button size="sm" variant="ghost" onClick={onManageKey} className="sb-assistant-notice__action">
+          Set up…
+        </Button>
       ) : null}
     </div>
   );
 }
 
-function Confirm({ item, onConfirm }: { item: Extract<ChatItem, { kind: "confirm" }>; onConfirm: TranscriptProps["onConfirm"] }) {
-  const deleteRef = useRef<HTMLButtonElement>(null);
+const CONFIRM_COPY = {
+  delete: { approve: "Delete", decline: "Keep them", approved: "You allowed the deletion.", declined: "You kept them." },
+  replace: { approve: "Replace", decline: "Keep it", approved: "You allowed the change.", declined: "You kept it." },
+  /** A permission question without its choices. */
+  permission: { approve: "Allow", decline: "Don't allow", approved: "Allowed", declined: "Not allowed" },
+} as const;
+
+/** What a permission card says after the answer, from the chosen option's kind. */
+const PERMISSION_RESULT: Record<AssistantConfirmOption["kind"], string> = { allow_once: "Allowed", allow_always: "Allowed for this chat", reject_once: "Not allowed", reject_always: "Not allowed" };
+
+const isAllow = (option: AssistantConfirmOption) => option.kind === "allow_once" || option.kind === "allow_always";
+
+/**
+ * A permission card: Claude Code asks before a step that reaches outside this prototype (saving it,
+ * opening another). One button per choice, allows first; nothing is focused for you, so Enter can't
+ * answer it by accident, and Escape still stops the reply.
+ */
+function PermissionCard({ item, options, onConfirm }: { item: Extract<ChatItem, { kind: "confirm" }>; options: readonly AssistantConfirmOption[]; onConfirm: TranscriptProps["onConfirm"] }) {
+  const cardRef = useRef<HTMLDivElement>(null);
+  const titleId = useId();
+  const messageId = useId();
+  const pending = item.status === "pending";
   useEffect(() => {
-    if (item.status === "pending") deleteRef.current?.focus({ preventScroll: true });
+    if (item.status === "pending") cardRef.current?.focus({ preventScroll: true });
   }, [item.status]);
+  const ordered = [...options.filter(isAllow), ...options.filter((o) => !isAllow(o))];
+  const primary = ordered.find(isAllow);
+  const chosen = options.find((o) => o.id === item.optionId);
+  const result = chosen ? PERMISSION_RESULT[chosen.kind] : item.status === "approved" ? "Allowed" : "Not allowed";
   return (
-    <div className="sb-assistant-confirm" data-status={item.status} role={item.status === "pending" ? "alertdialog" : undefined} aria-label={item.title}>
+    <div ref={cardRef} className="sb-assistant-confirm" data-kind="permission" data-status={item.status} role={pending ? "alertdialog" : undefined} aria-labelledby={pending ? titleId : undefined} aria-describedby={pending ? messageId : undefined} tabIndex={pending ? -1 : undefined}>
       <div className="sb-assistant-confirm__head">
-        <Trash2 size={15} aria-hidden className="sb-assistant-confirm__icon" />
-        <p className="sb-assistant-confirm__title">{item.title}</p>
+        <ShieldQuestion size={15} aria-hidden className="sb-assistant-confirm__icon" />
+        <p id={titleId} className="sb-assistant-confirm__title">
+          {item.title}
+        </p>
       </div>
-      <p className="sb-assistant-confirm__message">{item.message}</p>
-      {item.status === "pending" ? (
-        <div className="sb-assistant-confirm__actions">
-          <Button size="sm" onClick={() => onConfirm(item.id, false)}>
-            Keep them
-          </Button>
-          <Button ref={deleteRef} size="sm" variant="danger" onClick={() => onConfirm(item.id, true)}>
-            Delete
-          </Button>
+      <p id={messageId} className="sb-assistant-confirm__message">
+        {item.message}
+      </p>
+      {pending ? (
+        <div className="sb-assistant-confirm__actions" data-kind="permission">
+          {ordered.map((option) => (
+            <Button key={option.id} size="sm" variant={option === primary ? "primary" : isAllow(option) ? "secondary" : "ghost"} onClick={() => onConfirm(item.id, isAllow(option), option.id)}>
+              {option.label}
+            </Button>
+          ))}
         </div>
       ) : (
-        <p className="sb-assistant-confirm__result">{item.status === "approved" ? "You allowed the deletion." : "You kept them."}</p>
+        <p className="sb-assistant-confirm__result">{result}</p>
       )}
     </div>
   );
 }
 
-/** The chat: messages, streamed replies with tool chips, notices, and deletion confirmations. */
+/**
+ * A confirmation the Assistant is waiting on: deleting items, replacing a screen with a new design, or
+ * (on the Claude subscription) a permission Claude Code asks for. The transcript and the canvas's
+ * Design with Claude box both show it. Focus goes to the choice that keeps the person's work: Delete for
+ * a deletion they asked for, the decline button for a replace.
+ */
+export function ConfirmCard({ item, onConfirm }: { item: Extract<ChatItem, { kind: "confirm" }>; onConfirm: TranscriptProps["onConfirm"] }) {
+  if (item.confirmKind === "permission" && item.options?.length) return <PermissionCard item={item} options={item.options} onConfirm={onConfirm} />;
+  return <YesNoCard item={item} onConfirm={onConfirm} />;
+}
+
+function YesNoCard({ item, onConfirm }: { item: Extract<ChatItem, { kind: "confirm" }>; onConfirm: TranscriptProps["onConfirm"] }) {
+  const kind = item.confirmKind ?? "delete";
+  const copy = CONFIRM_COPY[kind];
+  const approveRef = useRef<HTMLButtonElement>(null);
+  const declineRef = useRef<HTMLButtonElement>(null);
+  // The same confirmation can show in the transcript and the canvas's box at once, so the ids are per card.
+  const titleId = useId();
+  const messageId = useId();
+  const pending = item.status === "pending";
+  useEffect(() => {
+    if (item.status === "pending") (kind === "delete" ? approveRef : declineRef).current?.focus({ preventScroll: true });
+  }, [item.status, kind]);
+  const Icon = kind === "replace" ? RefreshCw : kind === "permission" ? ShieldQuestion : Trash2;
+  return (
+    // Focus lands on a button, so the dialog's message is its description: it says what the choice changes.
+    <div className="sb-assistant-confirm" data-kind={kind} data-status={item.status} role={pending ? "alertdialog" : undefined} aria-labelledby={pending ? titleId : undefined} aria-describedby={pending ? messageId : undefined}>
+      <div className="sb-assistant-confirm__head">
+        <Icon size={15} aria-hidden className="sb-assistant-confirm__icon" />
+        <p id={titleId} className="sb-assistant-confirm__title">
+          {item.title}
+        </p>
+      </div>
+      <p id={messageId} className="sb-assistant-confirm__message">
+        {item.message}
+      </p>
+      {item.status === "pending" ? (
+        <div className="sb-assistant-confirm__actions">
+          <Button ref={declineRef} size="sm" onClick={() => onConfirm(item.id, false)}>
+            {item.declineLabel ?? copy.decline}
+          </Button>
+          <Button ref={approveRef} size="sm" variant={kind === "delete" ? "danger" : "primary"} onClick={() => onConfirm(item.id, true)}>
+            {item.approveLabel ?? copy.approve}
+          </Button>
+        </div>
+      ) : (
+        <p className="sb-assistant-confirm__result">{item.status === "approved" ? copy.approved : copy.declined}</p>
+      )}
+    </div>
+  );
+}
+
+/** The chat: messages, streamed replies with tool chips, notices, and confirmations. */
 export function Transcript({ items, running, thinking, onConfirm, onManageKey, onSuggestion }: TranscriptProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const pinned = useRef(true);
@@ -146,7 +233,8 @@ export function Transcript({ items, running, thinking, onConfirm, onManageKey, o
         switch (item.kind) {
           case "user":
             return (
-              <div key={item.id} className="sb-assistant-msg" data-role="user">
+              <div key={item.id} className="sb-assistant-msg" data-role="user" data-origin={item.origin}>
+                {item.origin === "canvas" ? <span className="sb-assistant-msg__origin">From the canvas</span> : null}
                 <p className="sb-assistant-msg__user">{item.text}</p>
               </div>
             );
@@ -160,7 +248,7 @@ export function Transcript({ items, running, thinking, onConfirm, onManageKey, o
           case "notice":
             return <Notice key={item.id} item={item} onManageKey={onManageKey} />;
           case "confirm":
-            return <Confirm key={item.id} item={item} onConfirm={onConfirm} />;
+            return <ConfirmCard key={item.id} item={item} onConfirm={onConfirm} />;
         }
       })}
       {waiting ? (

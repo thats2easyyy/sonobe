@@ -2,7 +2,7 @@
 
 import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, nativeImage, safeStorage, screen, session, shell, type IpcMainEvent, type IpcMainInvokeEvent } from "electron";
 import { existsSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import type { SonobeDocument } from "@sonobe/core";
@@ -15,7 +15,9 @@ import { createAppHost, type AppHost, type CapturedImage, type DocumentChange, t
 import { abortCaptures, captureDesignInWindow, fetchCaptureImage } from "./design-capture.ts";
 import { createAppWindow, type AppWindow, type WindowContentSource } from "./app-window.ts";
 import { createDraftStore, installQuitOnSignal, registerDraftIpc, type DraftStore } from "./drafts.ts";
-import { registerAssistant } from "./assistant/register.ts";
+import { createCodeFolderStore } from "./assistant/codeFolder.ts";
+import { createConnectionStore } from "./assistant/connection.ts";
+import { registerAssistant, type AssistantRegistration } from "./assistant/register.ts";
 import { captureWebContents } from "./capture.ts";
 import { bundledCliPath } from "./cli-path.ts";
 import { isCommandId, toHostPlatform } from "./commands.ts";
@@ -104,6 +106,8 @@ function main(): void {
   let creating: Promise<AppWindow> | null = null;
   let ready = false;
   let secrets: SecretStore | null = null;
+  /** Stopped on quit: it runs Claude's agent adapter as a child process when the subscription is on. */
+  let assistant: AssistantRegistration | null = null;
   /** Set once an editor pushes revisions (notifyDocumentChanged): players stop polling. */
   let pushUpdates = false;
   /** Undo and Redo titles from the front editor window ("Undo Mute Card Shadow"), for the Edit menu. */
@@ -806,6 +810,7 @@ function main(): void {
     if (resourceTimer) clearTimeout(resourceTimer);
     if (viewerWindow) void viewerWindow.server.close();
     rpc?.dispose();
+    void assistant?.dispose().catch(() => undefined);
     if (mcpHandler) void mcpHandler.close().catch(() => undefined);
     appHost?.dispose();
     if (preview) void preview.close();
@@ -970,10 +975,6 @@ function main(): void {
       requireWindow(event);
       return requireSecrets().status();
     });
-    ipcMain.handle(IPC.secretsGet, (event, name: unknown) => {
-      requireWindow(event);
-      return requireSecrets().get(name);
-    });
     ipcMain.handle(IPC.secretsSet, async (event, name: unknown, value: unknown) => {
       requireWindow(event);
       await requireSecrets().set(name, value);
@@ -1118,7 +1119,44 @@ function main(): void {
     drafts = createDraftStore({ dir: path.join(app.getPath("userData"), "Drafts"), version: VERSION, log });
     registerDraftIpc(ipcMain, drafts, { requireWindow, reveal: (folder) => shell.showItemInFolder(folder) });
     void drafts.prune().then((n) => n && log("info", `Removed ${n} empty or 90-day-old draft${n === 1 ? "" : "s"}`)).catch(() => undefined);
-    registerAssistant({ ipcMain, isTrustedSender: (event) => trustedWindow(event as IpcMainInvokeEvent) !== null, host: () => appHost, secrets: () => secrets, version: VERSION, guides: () => loadGuides(bundledResource("guides", "packages/mcp/guides")), log });
+    assistant = registerAssistant({
+      ipcMain,
+      isTrustedSender: (event) => trustedWindow(event as IpcMainInvokeEvent) !== null,
+      host: () => appHost,
+      secrets: () => secrets,
+      version: VERSION,
+      guides: () => loadGuides(bundledResource("guides", "packages/mcp/guides")),
+      log,
+      documentFor: (id) => (appHost ? appHost.targetDocument(id) : Promise.resolve(null)),
+      codeFolders: createCodeFolderStore({ file: path.join(app.getPath("userData"), "assistant-code-folders.json"), home: homedir() }),
+      pickFolder: async (sender, { defaultPath }) => {
+        const w = windows.get(sender.id);
+        if (!w) return null;
+        const result = await dialog.showOpenDialog(w.win, {
+          title: "Match Your Code",
+          message: "Pick your app's folder. The Assistant can read its text files, like themes, tokens and components, to match your design, and sends what it reads to Anthropic's API. It skips hidden files, .env files, keys and node_modules, and it can't change anything.",
+          buttonLabel: "Link Folder",
+          properties: ["openDirectory"],
+          defaultPath,
+        });
+        return result.canceled ? null : (result.filePaths[0] ?? null);
+      },
+      handoff: {
+        platform: process.platform,
+        dir: path.join(app.getPath("userData"), "handoff"),
+        // Connect Claude's relay: the CLI that ships with the app, else `sonobe` on PATH.
+        server: () => ({ command: mcpStatus().cliPath ?? "sonobe", args: ["mcp"] }),
+        openPath: (file) => shell.openPath(file),
+      },
+      // Experimental and off by default (Settings → Claude): the Assistant on the person's Claude subscription.
+      connection: createConnectionStore({ file: path.join(app.getPath("userData"), "assistant-connection.json"), log }),
+      subscription: {
+        // Never in a release until Anthropic agrees: every release is a packaged build, and a packaged build never offers the switch.
+        available: !app.isPackaged,
+        sessionsDir: path.join(app.getPath("userData"), "assistant", "claude"),
+        signIn: { platform: process.platform, dir: path.join(app.getPath("userData"), "handoff"), openPath: (file) => shell.openPath(file) },
+      },
+    });
 
     appHost = createAppHost({
       registry: createPatchRegistry(),

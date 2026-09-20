@@ -3,7 +3,21 @@
  * protocol constants, so it bundles into the sandboxed preload.
  */
 
-import { ASSISTANT_IPC, type AssistantEvent, type AssistantKeyCheck, type AssistantRunResult, type AssistantStatus, type SonobeAssistantApi } from "./protocol.ts";
+import {
+  ASSISTANT_IPC,
+  type AssistantCodeFolderLinkResult,
+  type AssistantCodeFolderStatus,
+  type AssistantEvent,
+  type AssistantKeyCheck,
+  type AssistantRunResult,
+  type AssistantSignInResult,
+  type AssistantStatus,
+  type AssistantSubscriptionStatus,
+  type HandoffResult,
+  type SonobeAssistantApi,
+} from "./protocol.ts";
+
+const isPlainObject = (value: unknown): value is Record<string, unknown> => !!value && typeof value === "object" && !Array.isArray(value);
 
 /** The subset of Electron's ipcRenderer used here. */
 export interface AssistantIpcRenderer {
@@ -22,10 +36,17 @@ export function createAssistantApi(ipcRenderer: AssistantIpcRenderer): SonobeAss
 
   return {
     status: () => invoke<AssistantStatus>(ASSISTANT_IPC.status),
-    send: (request) => invoke<AssistantRunResult>(ASSISTANT_IPC.send, { text: String(request?.text ?? ""), ...(typeof request?.model === "string" ? { model: request.model } : {}) }),
+    // The main process sanitizes the canvas context field by field, so this bundle stays free of imports.
+    send: (request) =>
+      invoke<AssistantRunResult>(ASSISTANT_IPC.send, {
+        text: String(request?.text ?? ""),
+        ...(typeof request?.model === "string" ? { model: request.model } : {}),
+        ...(isPlainObject(request?.context) ? { context: request.context } : {}),
+      }),
     stop: () => invoke<boolean>(ASSISTANT_IPC.stop),
     reset: () => invoke<AssistantStatus>(ASSISTANT_IPC.reset),
-    confirm: (confirmationId, approved) => invoke<boolean>(ASSISTANT_IPC.confirm, String(confirmationId), approved === true),
+    // A permission card's choice goes as its option id alone; main picks the option by it.
+    confirm: (confirmationId, approved, optionId) => invoke<boolean>(ASSISTANT_IPC.confirm, String(confirmationId), approved === true, ...(typeof optionId === "string" && optionId.length <= 200 ? [optionId] : [])),
     checkKey: () => invoke<AssistantKeyCheck>(ASSISTANT_IPC.checkKey),
     onEvent(cb) {
       const listener = (_event: unknown, payload: unknown) => {
@@ -36,6 +57,17 @@ export function createAssistantApi(ipcRenderer: AssistantIpcRenderer): SonobeAss
         ipcRenderer.removeListener(ASSISTANT_IPC.event, listener);
       };
     },
+    codeFolder: () => invoke<AssistantCodeFolderStatus>(ASSISTANT_IPC.codeFolder),
+    linkCodeFolder: () => invoke<AssistantCodeFolderLinkResult>(ASSISTANT_IPC.linkCodeFolder),
+    unlinkCodeFolder: () => invoke<AssistantCodeFolderStatus>(ASSISTANT_IPC.unlinkCodeFolder),
+    openInClaudeCode: (request) => invoke<HandoffResult>(ASSISTANT_IPC.openInClaudeCode, { prompt: String(request?.prompt ?? "") }),
+    setConnection: (update) =>
+      invoke<AssistantStatus>(ASSISTANT_IPC.setConnection, {
+        ...(typeof update?.subscriptionEnabled === "boolean" ? { subscriptionEnabled: update.subscriptionEnabled } : {}),
+        ...(update?.provider === "api_key" || update?.provider === "subscription" ? { provider: update.provider } : {}),
+      }),
+    checkSubscription: () => invoke<AssistantSubscriptionStatus>(ASSISTANT_IPC.checkSubscription),
+    signInToClaude: () => invoke<AssistantSignInResult>(ASSISTANT_IPC.signInToClaude),
   };
 }
 

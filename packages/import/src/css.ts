@@ -469,6 +469,25 @@ export function coversLatin(range: string | undefined): boolean {
   return false;
 }
 
+/** An @font-face font-weight as the weights it covers ("bold" → [700, 700], "100 900"; none is normal); null when it isn't one. */
+function fontWeightRange(weight: string | undefined): [number, number] | null {
+  const parts = (weight?.trim().toLowerCase() || "normal").split(/\s+/).map((w) => (w === "normal" ? 400 : w === "bold" ? 700 : Number(w)));
+  if (parts.length > 2 || !parts.every((w) => Number.isFinite(w) && w >= 1 && w <= 1000)) return null;
+  return [Math.min(...parts), Math.max(...parts)];
+}
+
+/**
+ * The font-weight of one face covering two @font-face faces of the same file, as a variable font serves
+ * several weights from one file: "400" and "700" → "400 700". A weight that already covers the other stays
+ * as it is (undefined is normal), and so does one either side can't be read as.
+ */
+export function mergeFontWeights(a: string | undefined, b: string | undefined): string | undefined {
+  const ra = fontWeightRange(a);
+  const rb = fontWeightRange(b);
+  if (!ra || !rb || (rb[0] >= ra[0] && rb[1] <= ra[1])) return a;
+  return `${Math.min(ra[0], rb[0])} ${Math.max(ra[1], rb[1])}`;
+}
+
 export interface FontFaceRule {
   family: string;
   src: string;

@@ -12,13 +12,13 @@ One server factory serves 2026-07-28 clients (per-request envelopes) and 2025-er
 
 `SonobeHost` (`src/host.ts`) is everything the tools need: documents, `apply` (core `applyOps` + History, attributed to an author), cached diagnostics, selection, screenshots, presence, simulation and history.
 
-- **The desktop app** implements it over the live editor. Its `saveDocument` never opens the Save panel: with `path` it saves into that folder, a document that was never saved goes to `~/Documents/<Name>.sonobe`, and "Untitled" fails with `path_needed`. `listDrafts()` lists unsaved work an earlier session left, and `openDocument("draft:<id>")` brings it back.
+- **The desktop app** implements it over the live editor. Its `saveDocument` never opens the Save panel: with `path` it saves into that folder, a document that was never saved goes to `~/Documents/<Name>.sonobe`, and "Untitled" fails with `path_needed`. `listDrafts()` lists unsaved work an earlier session left, and `openDocument("draft:<id>")` brings it back. `showDesignPreview(update)` draws `preview_design`'s drafts over the artboard of the window that shows the document (the `design.preview` RPC).
 - **`createHeadlessHost({ registry?, autosave? })`** implements it over folders, through `@sonobe/core/node`:
   - `createDocument({ path, template })` and `openDocument(pathOrDocId)`
   - saving on request, or after every write with `autosave`; `saveDocument(docId, { path })` saves as a new folder (with its asset files) and keeps working there
   - safe with other writers in the folder: a save refuses with `disk_changed` when the project changed on disk since the session read or saved it (autosave reports it as `saveError` and keeps the edit in memory); `save_document({ force: true })` overwrites, `open_document({ ref, reload: true })` loads the disk version; saves only delete stale files the session loaded or wrote
   - deterministic simulations
-  - presence recorded but not shown
+  - presence recorded but not shown, and `preview_design` drafts kept but not shown
   - `screenshot` draws the prototype screen without the app (`src/screenshot.ts`): the `SceneFrame` becomes SVG through `@sonobe/renderer/svg`, and `@resvg/resvg-js` (a native module loaded on first use) rasterizes it to PNG. Image assets load from the project's `assets/` folder as data URIs. Results carry `notes` about approximations (text metrics; placeholders for video, Lottie and shaders), stay under 2048 px per edge and about 2.5 MB, and throw `HostError("screenshots_unavailable")` when the rasterizer isn't installed. Targets: `viewer` or a layer; `simId` draws a session's frame, `atMs` a later frame on a copy, and `isolate: true` only the layer's subtree. `graph` and `canvas` are drawn from the document: with `component`, that component's patch graph (`graphToSvg`) or its artboard at frame 0.
 
 Browser-safe building blocks for other hosts:
@@ -79,7 +79,7 @@ The tools are listed in `TOOL_NAMES`.
 | Discovery            | `get_guide`, `list_patch_types`, `describe_patch_types`, `describe_layer_types`, `list_value_types`, `list_examples`, `get_example`            |
 | Documents            | `list_documents`, `open_document`, `create_document`, `get_document_info`, `save_document`                                                     |
 | Read                 | `get_outline`, `get_layers`, `get_patches`, `get_items`, `find`, `get_selection`, `get_diagnostics`, `explain`                                 |
-| Write                | `apply_ops`, `add_layers`, `add_patches`, `connect`, `set_values`, `update_layers`, `delete_items`, `rename`, `create_component`, `tidy_graph`, `import_design` |
+| Write                | `apply_ops`, `add_layers`, `add_patches`, `connect`, `set_values`, `update_layers`, `delete_items`, `rename`, `create_component`, `tidy_graph`, `preview_design`, `import_design` |
 | Knobs                | `get_knobs`, `set_knobs`, `apply_knob_preset`                                                                                                  |
 | Simulate             | `sim_reset`, `sim_dispatch`, `sim_step`, `sim_trace`, `sim_get_values`, `sim_override`, `get_screenshot`                                       |
 | Presence and history | `begin_work`, `finish_work`, `reveal`, `restart_viewer`, `list_history`, `undo`                                                                |
@@ -88,7 +88,7 @@ Conventions:
 
 - **Results.** Each returns concise text plus `structuredContent`; writes, simulation and document info also declare `outputSchema`.
 - **`structuredContent.text`** always holds the complete text, as the first field. Some clients (Claude Code) give the model only `structuredContent`, so metadata alone would hide the outline, guide or trace. `get_screenshot` returns no `structuredContent`, so clients keep the image.
-- **Writes** return `revision`, `txnId`, created ids, `idMap` and diagnostics `{ added, resolved, totals }`.
+- **Writes** return `revision`, `txnId`, created ids, `idMap` and diagnostics `{ added, resolved, totals }`. `preview_design` changes no document, so it returns only the document's `revision`, plus the draft's `name`, `component` and `replace` as its calls left them and `draftRevision`, which counts its draft's updates.
 - **Inputs** refuse fields a tool doesn't take (`src/inputs.ts`): the error names the tool, the field (`layers[0]`, `events[2]` when nested) and the closest field it takes. Loose objects, records and op shapes stay open (core checks ops), and `_meta` is tolerated.
 - **Errors** are `isError` results with `{ code, message, hint, suggestions: [{ description, ops }], changed }`. Every `outputSchema` is `{ type: "object", anyOf: [success, teaching error] }` (`toolOutputSchema`), so SDK clients that validate error results (the v1 SDK does) show the teaching error instead of -32602. The wrapper drops any error `structuredContent` that wouldn't validate.
 - **Reads** paginate with `cursor` and truncate with explicit notes.
