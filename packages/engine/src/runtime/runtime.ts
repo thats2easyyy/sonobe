@@ -806,6 +806,8 @@ class RuntimeImpl implements SonobeRuntime {
     const slash = body.lastIndexOf("/");
     const parsed = parseAddress(at + body.slice(slash + 1));
     if (!parsed || parsed.kind === "componentOutput") return {};
+    // A knob is one project-wide value: "$knob.<id>", never inside an instance path.
+    if (parsed.kind === "knob") return slash < 0 ? { target: { parsed, scope: root, path: rootPath } } : {};
     let scope = root;
     let path = rootPath;
     if (slash >= 0) {
@@ -833,6 +835,7 @@ class RuntimeImpl implements SonobeRuntime {
   }
 
   private readTarget({ parsed, scope, path }: ResolvedTarget): Value | Loop | undefined {
+    if (parsed.kind === "knob") return this.graph.knobs.values.get(parsed.key);
     if (parsed.kind === "patch") {
       const node = scope.nodes.get(parsed.id);
       if (node) {
