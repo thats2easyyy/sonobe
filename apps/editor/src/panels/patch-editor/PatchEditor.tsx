@@ -1,7 +1,7 @@
 /**
  * The patch editor: the current component's patch graph on React Flow. Patches, layer property
  * targets, comments, and cables are derived from the document; every edit goes through the
- * document store with an undo label; live values and pulse sparks come from the RuntimeHost (inside
+ * document store with an undo label; live values and pulse fires come from the RuntimeHost (inside
  * component instances too).
  */
 
@@ -87,6 +87,7 @@ import {
   type PortSide,
 } from "./model/types.ts";
 import { centerOfView, createPatchEditorActions, type LinkSearchRequest, type PatchEditorActions, type PickerRequest, type XY } from "./state/actions.ts";
+import { createAppearStore } from "./state/appear.ts";
 import { patchEditorBridge, registerPatchEditor } from "./state/bridge.ts";
 import { PatchEditorContext, type PatchEditorContextValue } from "./state/context.ts";
 import { completeConnectionToLayerProp, dropTargetAt } from "./state/linkToLayer.ts";
@@ -130,6 +131,8 @@ const MIN_CANVAS = 48;
 const SETTLE_FRAMES = 40;
 /** The longest a view move takes (fits animate 200 to 260 ms); past it, don't wait on its promise. */
 const MOVE_MS = 600;
+/** How long graph.bounds waits at most for nodes and cables to finish appearing. */
+const APPEAR_WAIT_MS = 1200;
 
 /** The next frame, or a moment later in a window that doesn't paint (hidden windows may not run requestAnimationFrame). */
 const nextFrame = () => new Promise<void>((resolve) => {
@@ -151,6 +154,7 @@ export function PatchEditor({ session: provided, showBreadcrumbs = true, showToo
   const session = provided ?? fallback;
   const componentId = useStore(session.selection, currentComponentId);
   const cmds = useOptionalCommands();
+  const [arrivals] = useState<Arrivals>(() => ({ revealed: false, replaced: false }));
   return (
     <section
       className={cx("sb-pe", className)}
@@ -161,15 +165,28 @@ export function PatchEditor({ session: provided, showBreadcrumbs = true, showToo
       onPointerDownCapture={() => session.selection.getState().setFocusedPanel("patchEditor")}
     >
       <ReactFlowProvider key={componentId}>
-        <Canvas session={session} componentId={componentId} showBreadcrumbs={showBreadcrumbs} showToolbar={showToolbar} toolbarContainer={toolbarContainer} defaultMinimap={defaultMinimap} commands={commands} />
+        <Canvas session={session} componentId={componentId} arrivals={arrivals} showBreadcrumbs={showBreadcrumbs} showToolbar={showToolbar} toolbarContainer={toolbarContainer} defaultMinimap={defaultMinimap} commands={commands} />
       </ReactFlowProvider>
     </section>
   );
 }
 
+/**
+ * What an editor's canvases (one per component shown) tell each other about arriving graphs: a
+ * canvas that mounts once one has revealed its graph arrives by navigation (entering or leaving a
+ * component), briefly, unless a replaced document is still waiting for its reveal.
+ */
+interface Arrivals {
+  /** A canvas of this editor revealed its graph. */
+  revealed: boolean;
+  /** Another document replaced the one shown, and its graph hasn't been revealed yet. */
+  replaced: boolean;
+}
+
 interface CanvasProps {
   session: EditorSession;
   componentId: Id;
+  arrivals: Arrivals;
   showBreadcrumbs: boolean;
   showToolbar: boolean;
   /** undefined: float in the top bar. */
@@ -211,7 +228,7 @@ function clientPoint(event: MouseEvent | TouchEvent | ReactMouseEvent): XY {
 /** A string that changes only when the live scope does, so the context value stays stable across edits. */
 const scopeKey = (scope: LiveScope) => `${scope.prefix ?? "∅"}|${scope.steps.map((s) => `${s.parent}>${s.component}:${s.instance}:${s.instances.map((i) => `${i.id}=${i.name}`).join(",")}`).join(";")}`;
 
-function Canvas({ session, componentId, showBreadcrumbs, showToolbar, toolbarContainer, defaultMinimap, commands }: CanvasProps) {
+function Canvas({ session, componentId, arrivals, showBreadcrumbs, showToolbar, toolbarContainer, defaultMinimap, commands }: CanvasProps) {
   const registry = session.registry;
   const flow = useReactFlow<FlowNode, CableFlowEdge>();
   const flowRef = useRef<Flow>(flow);
@@ -222,6 +239,8 @@ function Canvas({ session, componentId, showBreadcrumbs, showToolbar, toolbarCon
   const [geometry] = useState(() => new Map<string, CableGeometry>());
   const bridge = patchEditorBridge(session);
   const reducedMotion = useReducedMotion();
+  const reducedMotionRef = useLatest(reducedMotion);
+  const [appear] = useState(() => createAppearStore({ reducedMotion: () => reducedMotionRef.current, brief: arrivals.revealed && !arrivals.replaced }));
   const pointerRef = useRef<XY | null>(null);
   const hoveringRef = useRef(false);
   const mountedRef = useRef(true);
@@ -317,7 +336,8 @@ function Canvas({ session, componentId, showBreadcrumbs, showToolbar, toolbarCon
   const savedViewport = useMemo(() => session.selection.getState().patchViewports[componentId], [session, componentId]);
   /** The view was placed by an automatic fit and the user hasn't moved it since. */
   const fitModeRef = useRef(!savedViewport);
-  const [fitted, setFitted] = useState(!!savedViewport);
+  /** The viewport is in place and showing. A saved view waits for React Flow too (onInit), so the reveal reads what's really in view. */
+  const [fitted, setFitted] = useState(false);
   const fittedRef = useRef(fitted);
   fittedRef.current = fitted;
   const markViewportManual = useCallback(() => {
@@ -358,8 +378,8 @@ function Canvas({ session, componentId, showBreadcrumbs, showToolbar, toolbarCon
   const openPortMenu = useCallback((event: ReactMouseEvent, nodeId: string, port: PortModel) => portMenuRef.current(event, nodeId, port), []);
 
   const context = useMemo<PatchEditorContextValue>(
-    () => ({ session, registry, componentId, ui, live, geometry, actions, reducedMotion, liveEnabled, liveScope, instanceCopies, markViewportManual, openPortMenu }),
-    [session, registry, componentId, ui, live, geometry, actions, reducedMotion, liveEnabled, liveScope, instanceCopies, markViewportManual, openPortMenu],
+    () => ({ session, registry, componentId, ui, live, geometry, appear, actions, reducedMotion, liveEnabled, liveScope, instanceCopies, markViewportManual, openPortMenu }),
+    [session, registry, componentId, ui, live, geometry, appear, actions, reducedMotion, liveEnabled, liveScope, instanceCopies, markViewportManual, openPortMenu],
   );
 
   // -- React Flow node state ------------------------------------------------
@@ -379,6 +399,28 @@ function Canvas({ session, componentId, showBreadcrumbs, showToolbar, toolbarCon
     if (next !== nodesRef.current) commit(next);
   }, [model.nodes, selectedSet, tick, commit]);
 
+  // -- Appearing: nodes and cables the canvas isn't showing animate in (state/appear.ts) --------
+  useLayoutEffect(() => (wrapperRef.current ? appear.observe(wrapperRef.current) : undefined), [appear]);
+  useLayoutEffect(() => {
+    const change = session.document.getState().lastChange;
+    appear.sync(model.nodes, model.edges, { byHand: change?.kind === "apply" && change.author.kind === "human" });
+  }, [appear, session, model.nodes, model.edges]);
+  // The first reveal starts as the viewport shows: after the first fit, or a replaced document's.
+  useLayoutEffect(() => {
+    const el = wrapperRef.current;
+    if (!fitted || !el) return;
+    const { x, y, zoom } = flowRef.current.getViewport();
+    const drawn = new Map(nodesRef.current.map((n) => [n.id, n]));
+    appear.start({ x: -x / zoom, y: -y / zoom, width: el.clientWidth / zoom, height: el.clientHeight / zoom }, (id) => {
+      const n = drawn.get(id);
+      const width = n?.measured?.width ?? n?.width;
+      const height = n?.measured?.height ?? n?.height;
+      return width && height ? { width, height } : undefined;
+    });
+    arrivals.revealed = true;
+    arrivals.replaced = false;
+  }, [appear, fitted, arrivals]);
+
   const autoFit = useCallback((): boolean => {
     const el = wrapperRef.current;
     if (!el || el.clientWidth < MIN_CANVAS || el.clientHeight < MIN_CANVAS) return false;
@@ -393,7 +435,13 @@ function Canvas({ session, componentId, showBreadcrumbs, showToolbar, toolbarCon
   const onInit = useCallback(() => {
     initializedRef.current = true;
     const pending = pendingRevealRef.current;
-    if (!pending && savedViewport) return;
+    if (!pending && savedViewport) {
+      // React Flow applies the saved view and measures the nodes before this; show them a frame later, as a fit does.
+      void nextFrame().then(() => {
+        if (mountedRef.current) setFitted(true);
+      });
+      return;
+    }
     requestAnimationFrame(() => {
       if (!mountedRef.current) return;
       pendingRevealRef.current = null;
@@ -404,19 +452,26 @@ function Canvas({ session, componentId, showBreadcrumbs, showToolbar, toolbarCon
 
   // Another prototype replaced the document (a lesson, an example, an opened file): its root component
   // can share this component id, so fit the new graph instead of keeping the previous document's view.
+  // The viewport hides until then, and the new graph arrives like a first one.
   useEffect(
     () =>
       session.document.getState().subscribeRevision((s, previous) => {
         const change = s.lastChange;
         if (!change || change === previous.lastChange || change.kind !== "replace") return;
         fitModeRef.current = true;
+        // If the new document takes this component away, the canvas that shows its root reveals it in full.
+        arrivals.replaced = true;
+        appear.reset();
+        setFitted(false);
         requestAnimationFrame(() =>
           requestAnimationFrame(() => {
-            if (mountedRef.current && fitModeRef.current) autoFit();
+            if (!mountedRef.current) return;
+            if (fitModeRef.current) autoFit();
+            else setFitted(true);
           }),
         );
       }),
-    [session, autoFit],
+    [session, autoFit, appear, arrivals],
   );
 
   useEffect(() => {
@@ -483,9 +538,11 @@ function Canvas({ session, componentId, showBreadcrumbs, showToolbar, toolbarCon
     () =>
       session.bounds?.register("graph.bounds", async () => {
         await settleView();
+        const appearing = appear.busyFor();
+        if (appearing > 0) await new Promise((resolve) => setTimeout(resolve, Math.min(appearing, APPEAR_WAIT_MS)));
         return rectOfElement(wrapperRef.current, flowRef.current.getZoom());
       }),
-    [session, settleView],
+    [session, settleView, appear],
   );
 
   // Where each node is drawn and how big (graph.geometry), so MCP tools tidy and place by real sizes.
@@ -732,6 +789,8 @@ function Canvas({ session, componentId, showBreadcrumbs, showToolbar, toolbarCon
           dragged.map((n) => n.id),
           finalPositions,
         );
+        // The copies land where the person has been holding the nodes (duplicateWithInputs selects them): they only glow in place.
+        appear.placed({ nodes: session.selection.getState().patches });
         commit(nodesRef.current.map((n) => (d.start.has(n.id) ? { ...n, position: d.start.get(n.id)! } : n)));
         return;
       }
@@ -758,7 +817,7 @@ function Canvas({ session, componentId, showBreadcrumbs, showToolbar, toolbarCon
       }
       actions.moveNodes(finalPositions);
     },
-    [actions, commit, componentId, edgeById, registry, session, ui],
+    [actions, appear, commit, componentId, edgeById, registry, session, ui],
   );
 
   // -- Connecting -----------------------------------------------------------
@@ -926,9 +985,11 @@ function Canvas({ session, componentId, showBreadcrumbs, showToolbar, toolbarCon
         const width = estimatePatchSize(session.document.getState().doc, registry, { type: item.spec.type, inputs: {}, ui: { x: 0, y: 0 }, ...(item.typeParam ? { typeParam: item.typeParam } : {}) }, { component: componentId, measure: nodeTextMeasurer() }).width;
         x = request.position.x - width - (request.drive ? 72 : 16);
       }
+      // The person dragged this cable out themselves (a Drive request didn't): it stays put while the new node arrives at its end.
+      if (!request.drive && request.address) appear.placed({ ports: [request.address] });
       actions.insertPatch(item.spec.type, { x, y }, { ...(item.typeParam ? { typeParam: item.typeParam } : {}), connect: { address: request.address, side: request.side, portKey: item.port.key }, placement: request.side === "out" ? "right" : "left" });
     },
-    [actions, registry, session, componentId],
+    [actions, appear, registry, session, componentId],
   );
 
   const onPickerPick = useCallback(

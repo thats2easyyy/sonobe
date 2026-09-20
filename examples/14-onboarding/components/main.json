@@ -659,13 +659,13 @@
         "ifFalse": "Next",
         "ifTrue": "Get started"
       },
-      "ui": { "x": 1860, "y": 190 }
+      "ui": { "x": 1900, "y": 202 }
     },
     "can_go_back": {
       "type": "not",
       "name": "Can Go Back",
       "inputs": { "value": { "link": "was_first_page.output" } },
-      "ui": { "x": 560, "y": 340 }
+      "ui": { "x": 560, "y": 386 }
     },
     "can_go_forward": {
       "type": "not",
@@ -682,7 +682,7 @@
         "progress": { "link": "dot_spring.output" },
         "start": "#D4D4D8FF"
       },
-      "ui": { "x": 2120, "y": 490 }
+      "ui": { "x": 2160, "y": 536 }
     },
     "dot_is_current": {
       "type": "equals",
@@ -692,7 +692,7 @@
         "value1": { "link": "page_dots.index" },
         "value2": { "link": "page.count" }
       },
-      "ui": { "x": 1600, "y": 340 }
+      "ui": { "x": 1640, "y": 386 }
     },
     "dot_position": {
       "type": "point",
@@ -701,7 +701,7 @@
         "x": { "link": "dot_x.output" },
         "y": 700
       },
-      "ui": { "x": 560, "y": 490 }
+      "ui": { "x": 560, "y": 536 }
     },
     "dot_size": {
       "type": "transition",
@@ -712,7 +712,7 @@
         "progress": { "link": "dot_spring.output" },
         "start": [8, 8]
       },
-      "ui": { "x": 2120, "y": 340 }
+      "ui": { "x": 2160, "y": 386 }
     },
     "dot_spring": {
       "type": "popAnimation",
@@ -723,14 +723,14 @@
         "number": { "link": "dot_is_current.output" },
         "speed": 18
       },
-      "ui": { "x": 1860, "y": 490 }
+      "ui": { "x": 1900, "y": 536 }
     },
     "dot_x": {
       "type": "mathExpression",
       "name": "Dot X",
       "inputs": { "index": { "link": "page_dots.index" } },
       "settings": { "expression": "177 + index * 24" },
-      "ui": { "x": 300, "y": 340 }
+      "ui": { "x": 300, "y": 386 }
     },
     "go_forward": {
       "type": "or",
@@ -740,7 +740,7 @@
         "value1": { "link": "tap_next.tap" },
         "value2": { "link": "swipe_forward.swipedLeft" }
       },
-      "ui": { "x": 1080, "y": 40 }
+      "ui": { "x": 1120, "y": 40 }
     },
     "on_last_page": {
       "type": "equals",
@@ -750,13 +750,13 @@
         "value1": { "link": "page.count" },
         "value2": 2
       },
-      "ui": { "x": 1600, "y": 190 }
+      "ui": { "x": 1640, "y": 202 }
     },
     "onboarding_done": {
       "type": "switch",
       "name": "Onboarding Done",
       "inputs": { "turnOn": { "link": "tap_get_started.tap" } },
-      "ui": { "x": 820, "y": 340 }
+      "ui": { "x": 820, "y": 386 }
     },
     "page": {
       "type": "counter",
@@ -767,13 +767,13 @@
         "jump": { "link": "tap_skip.tap" },
         "jumpToNumber": 2
       },
-      "ui": { "x": 1340, "y": 40 }
+      "ui": { "x": 1380, "y": 40 }
     },
     "page_dots": {
       "type": "loop",
       "name": "Page Dots",
       "inputs": { "count": 3 },
-      "ui": { "x": 40, "y": 340 }
+      "ui": { "x": 40, "y": 386 }
     },
     "page_last_frame": {
       "type": "delay1",
@@ -789,7 +789,7 @@
         "x": { "link": "pages_spring.output" },
         "y": 0
       },
-      "ui": { "x": 2120, "y": 40 }
+      "ui": { "x": 2160, "y": 40 }
     },
     "pages_spring": {
       "type": "popAnimation",
@@ -800,7 +800,7 @@
         "number": { "link": "pages_x.output" },
         "speed": 13
       },
-      "ui": { "x": 1860, "y": 40 }
+      "ui": { "x": 1900, "y": 40 }
     },
     "pages_x": {
       "type": "multiply",
@@ -811,7 +811,7 @@
         "value1": { "link": "page.count" },
         "value2": -402
       },
-      "ui": { "x": 1600, "y": 40 }
+      "ui": { "x": 1640, "y": 40 }
     },
     "skip_fade": {
       "type": "classicAnimation",
@@ -822,13 +822,13 @@
         "duration": 0.2,
         "number": { "link": "skip_visible.output" }
       },
-      "ui": { "x": 2120, "y": 190 }
+      "ui": { "x": 2160, "y": 202 }
     },
     "skip_visible": {
       "type": "not",
       "name": "Skip Visible",
       "inputs": { "value": { "link": "on_last_page.output" } },
-      "ui": { "x": 1860, "y": 340 }
+      "ui": { "x": 1900, "y": 386 }
     },
     "swipe_back": {
       "type": "swipe",
@@ -840,7 +840,7 @@
         "minDistance": 60,
         "minVelocity": 400
       },
-      "ui": { "x": 820, "y": 490 }
+      "ui": { "x": 820, "y": 536 }
     },
     "swipe_forward": {
       "type": "swipe",
@@ -852,7 +852,7 @@
         "minDistance": 60,
         "minVelocity": 400
       },
-      "ui": { "x": 820, "y": 190 }
+      "ui": { "x": 820, "y": 202 }
     },
     "tap_get_started": {
       "type": "interaction",
@@ -861,7 +861,7 @@
         "enabled": { "link": "was_last_page.output" },
         "layer": { "layer": "next_button" }
       },
-      "ui": { "x": 560, "y": 190 }
+      "ui": { "x": 560, "y": 202 }
     },
     "tap_next": {
       "type": "interaction",
@@ -876,7 +876,7 @@
       "type": "interaction",
       "name": "Tap Skip",
       "inputs": { "layer": { "layer": "skip_button" } },
-      "ui": { "x": 40, "y": 190 }
+      "ui": { "x": 40, "y": 202 }
     },
     "was_first_page": {
       "type": "equals",
@@ -886,7 +886,7 @@
         "value1": { "link": "page_last_frame.output" },
         "value2": 0
       },
-      "ui": { "x": 300, "y": 190 }
+      "ui": { "x": 300, "y": 202 }
     },
     "was_last_page": {
       "type": "equals",
@@ -907,7 +907,7 @@
         "duration": 0.35,
         "number": { "link": "onboarding_done.on" }
       },
-      "ui": { "x": 1080, "y": 190 }
+      "ui": { "x": 1120, "y": 202 }
     }
   },
   "comments": []

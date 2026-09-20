@@ -348,7 +348,7 @@
         "increase": { "link": "next_story.output" },
         "maximumCount": 3
       },
-      "ui": { "x": 560, "y": 40 }
+      "ui": { "x": 627, "y": 40 }
     },
     "fill_size": {
       "type": "size",
@@ -357,7 +357,7 @@
         "height": 3,
         "width": { "link": "fill_width.output" }
       },
-      "ui": { "x": 2120, "y": 40 }
+      "ui": { "x": 2187, "y": 40 }
     },
     "fill_width": {
       "type": "multiply",
@@ -368,7 +368,7 @@
         "value1": { "link": "segment_fill_amount.output" },
         "value2": 122
       },
-      "ui": { "x": 1860, "y": 40 }
+      "ui": { "x": 1927, "y": 40 }
     },
     "next_story": {
       "type": "or",
@@ -378,7 +378,7 @@
         "value1": { "link": "tap_forward.tap" },
         "value2": { "link": "story_timer.finished" }
       },
-      "ui": { "x": 300, "y": 190 }
+      "ui": { "x": 367, "y": 224 }
     },
     "segment_fill_amount": {
       "type": "mathExpression",
@@ -389,7 +389,7 @@
         "story": { "link": "current_story.count" }
       },
       "settings": { "expression": "clamp(story + progress - index, 0, 1)" },
-      "ui": { "x": 1600, "y": 40 }
+      "ui": { "x": 1667, "y": 40 }
     },
     "segment_grid": {
       "type": "gridLayout",
@@ -402,7 +402,7 @@
         "spacing": 6,
         "width": 378
       },
-      "ui": { "x": 300, "y": 40 }
+      "ui": { "x": 367, "y": 40 }
     },
     "start_timer": {
       "type": "or",
@@ -412,13 +412,13 @@
         "value1": { "link": "started.started" },
         "value2": { "link": "story_changed.changed" }
       },
-      "ui": { "x": 1080, "y": 40 }
+      "ui": { "x": 1147, "y": 40 }
     },
     "started": {
       "type": "whenPrototypeStarts",
       "name": "Prototype Starts",
       "inputs": {},
-      "ui": { "x": 40, "y": 190 }
+      "ui": { "x": 40, "y": 224 }
     },
     "stories": {
       "type": "loop",
@@ -432,7 +432,7 @@
       "typeParam": "color",
       "inputCount": 3,
       "inputs": { "item0": "#FDE68AFF", "item1": "#BAE6FDFF", "item2": "#FBCFE8FF" },
-      "ui": { "x": 40, "y": 1090 }
+      "ui": { "x": 40, "y": 1148 }
     },
     "story_captions": {
       "type": "loopBuilder",
@@ -444,14 +444,14 @@
         "item1": "Fog over the painted palace",
         "item2": "Sunset from the bridge"
       },
-      "ui": { "x": 40, "y": 1690 }
+      "ui": { "x": 40, "y": 1748 }
     },
     "story_changed": {
       "type": "pulseOnChange",
       "name": "Story Changed",
       "typeParam": "number",
       "inputs": { "value": { "link": "current_story.count" } },
-      "ui": { "x": 820, "y": 40 }
+      "ui": { "x": 887, "y": 40 }
     },
     "story_colors": {
       "type": "loopBuilder",
@@ -459,7 +459,7 @@
       "typeParam": "color",
       "inputCount": 3,
       "inputs": { "item0": "#F59E0BFF", "item1": "#0EA5E9FF", "item2": "#DB2777FF" },
-      "ui": { "x": 40, "y": 790 }
+      "ui": { "x": 40, "y": 848 }
     },
     "story_fade": {
       "type": "classicAnimation",
@@ -470,7 +470,7 @@
         "duration": 0.25,
         "number": { "link": "story_is_current.output" }
       },
-      "ui": { "x": 1080, "y": 190 }
+      "ui": { "x": 1147, "y": 224 }
     },
     "story_is_current": {
       "type": "equals",
@@ -480,7 +480,7 @@
         "value1": { "link": "stories.index" },
         "value2": { "link": "current_story.count" }
       },
-      "ui": { "x": 820, "y": 190 }
+      "ui": { "x": 887, "y": 224 }
     },
     "story_timer": {
       "type": "wait",
@@ -489,7 +489,7 @@
         "duration": 5,
         "start": { "link": "start_timer.output" }
       },
-      "ui": { "x": 1340, "y": 40 }
+      "ui": { "x": 1407, "y": 40 }
     },
     "story_titles": {
       "type": "loopBuilder",
@@ -497,19 +497,19 @@
       "typeParam": "text",
       "inputCount": 3,
       "inputs": { "item0": "Day 1 · Lisbon", "item1": "Day 2 · Sintra", "item2": "Day 3 · Porto" },
-      "ui": { "x": 40, "y": 1390 }
+      "ui": { "x": 40, "y": 1448 }
     },
     "tap_back": {
       "type": "interaction",
       "name": "Tap Left Side",
       "inputs": { "layer": { "layer": "tap_zone_back" } },
-      "ui": { "x": 40, "y": 340 }
+      "ui": { "x": 40, "y": 374 }
     },
     "tap_forward": {
       "type": "interaction",
       "name": "Tap Right Side",
       "inputs": { "layer": { "layer": "tap_zone_forward" } },
-      "ui": { "x": 40, "y": 490 }
+      "ui": { "x": 40, "y": 536 }
     }
   },
   "comments": []

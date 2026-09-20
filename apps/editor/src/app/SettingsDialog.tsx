@@ -101,7 +101,7 @@ function SettingsContent({ titleId, onClose }: { titleId: string; onClose: () =>
               ]}
             />
           </Row>
-          <Row name="Motion" description="Reduce turns off interface animation, like cable sparks and sliding panels. Your prototypes still animate.">
+          <Row name="Motion" description="Reduce turns off interface animation, like sliding panels and the orbs that travel along cables. Your prototypes still animate.">
             <SegmentedControl<MotionPreference>
               size="sm"
               aria-label="Motion"

@@ -40,8 +40,8 @@ describe("getOutline", () => {
     ]).doc;
     const full = getOutline(doc, "main", { detail: "full" });
     expect(full).toContain('notes "Tap the card to expand it."');
-    expect(full).toContain('patch pop popAnimation "Press" muted bounciness=8 number←toggle.on speed=10 ui=512,40 collapsed settings={"preset":"snappy"}');
-    expect(full).toContain("patch grow transition<number> end=1.08 progress←pop.output start=1 ui=748,40");
+    expect(full).toContain('patch pop popAnimation "Press" muted bounciness=8 number←toggle.on speed=10 ui=522,40 collapsed settings={"preset":"snappy"}');
+    expect(full).toContain("patch grow transition<number> end=1.08 progress←pop.output start=1 ui=765,40");
     expect(full).toContain('  layer title text "Title" "Popular Events" locked');
     expect(full).toContain('comment note_1 "Spring feel matches iOS sheet" rect=30,20,600,120 color=yellow');
   });

@@ -1,16 +1,18 @@
 /**
  * Node sizes without a DOM: a node's shape (nodeShape.ts) plus a text measurer gives the box the
  * patch editor draws, following its stylesheet (apps/editor/src/panels/patch-editor/patch-editor.css:
- * width max-content between 164 and 320, a 28 pt header, 22 pt rows). The default measurer reads a
- * table of SF Pro and SF Mono advances (nodeMetrics.ts); the editor passes one that measures its real
- * font, like the engine's TextMeasurer.
+ * width max-content between 164 and 320, a 28 pt header, 22 pt rows; live values in slots as wide
+ * as the longest text their type prints, in `ch`, or the room their row has under 320, and knob
+ * values in slots at least as wide as their slider's longest value, or the room beside the knob's
+ * name). The default measurer reads a table of SF Pro and SF Mono advances (nodeMetrics.ts); the
+ * editor passes one that measures its real font, like the engine's TextMeasurer.
  *
  * When the node CSS changes, change NODE_BOX with it, regenerate the table with
  * `node apps/editor/scripts/measure-node-fonts.ts`, and run e2e/node-sizes.spec.ts.
  */
 
 import { NODE_FONT_METRICS } from "./nodeMetrics.ts";
-import { nodeShapeFromData, type NodeShape, type NodeShapeOptions, type ValueChip } from "./nodeShape.ts";
+import { nodeShapeFromData, type NodeRowShape, type NodeShape, type NodeShapeOptions, type ValueChip } from "./nodeShape.ts";
 import type { GraphNodeData } from "./types.ts";
 
 /** Box model constants from patch-editor.css, in points. */
@@ -46,7 +48,14 @@ export const NODE_BOX = {
   colorPadding: 8,
   /** Knob chips (K1): a 10 pt knob glyph before the name (color knobs end in a `swatch`). */
   knobIcon: 10,
+  /**
+   * Live values (.sb-pe-port__live): their reserve in `ch` (liveReserve) plus slotPad, no wider than
+   * the row's liveRoom (but at least slotFloorChars) and 96. Knob values (.sb-pe-value__knob-value):
+   * at least their reserve plus slotPad, or the chip's knobValueRoom (at least slotFloorChars).
+   */
   liveMaxWidth: 96,
+  slotPad: 0.5,
+  slotFloorChars: 4,
   chipPaddingX: 10,
   loopMin: 16,
   /** Issue and jump badges: 18 wide with a -2 margin. */
@@ -99,6 +108,94 @@ export interface NodeSize {
   height: number;
 }
 
+/**
+ * A slot `reserve` characters of the mono font wide, as the stylesheet sizes live values and knob
+ * values: `calc(<reserve>ch + 0.5px)`, since N ch lays out a 64th of a point narrower than N glyphs
+ * and a full-length value would end in "…". No wider than `room`, but at least slotFloorChars.
+ */
+function reservedSlot(reserve: number, t: NodeTextMeasurer, room = Infinity): number {
+  const ch = t("0", "mono10");
+  return Math.min(reserve * ch + NODE_BOX.slotPad, Math.max(room, NODE_BOX.slotFloorChars * ch));
+}
+
+/**
+ * Points kept clear when a slot is capped to the room its labels leave (liveRoom, knobValueRoom),
+ * so text the DOM lays out a hair wider than the measurer said doesn't cut a label or a name.
+ */
+const ROOM_SLACK = 2;
+
+/** A row's width without its output's live value: the input half, the gap between the halves, the output's label. */
+function rowWidth(r: NodeRowShape, measure: NodeTextMeasurer): number {
+  const B = NODE_BOX;
+  let w = 0;
+  if (r.in) {
+    w += B.portPadding + measure(r.in.label, "label");
+    if (r.in.value) w += B.portGap + valueWidth(r.in.value, measure);
+    if (r.in.drive) w += B.portGap + B.driveButton + measure("Drive…", "sans10");
+  }
+  if (r.out) w += B.rowGap + measure(r.out.label, "label") + B.portPadding;
+  return w;
+}
+
+/**
+ * The most points an output row's live value may take before the row passes the node's maximum
+ * width, where its labels would have to give way: 320 less everything else in the row, which stays
+ * put while the prototype runs, so a slot capped to it holds the node still with every label whole
+ * (a value longer than the slot ends in "…"). At most the slot's own 96. The patch editor gets it as
+ * PortModel.liveRoom (deriveGraph).
+ */
+export function liveRoom(row: NodeRowShape, measure: NodeTextMeasurer = tableMeasurer): number {
+  return roomBeside(rowWidth(row, measure));
+}
+
+/** liveRoom from the row's width without its live value. */
+function roomBeside(rowWidth: number): number {
+  return Math.max(0, Math.min(NODE_BOX.liveMaxWidth, Math.floor(NODE_BOX.maxWidth - ROOM_SLACK - rowWidth - NODE_BOX.portGap)));
+}
+
+/**
+ * A node's outputs' liveRoom, in order: a number for the outputs whose rows it caps (below 96),
+ * undefined for the rest, and none for a collapsed node, which shows no live values.
+ */
+export function liveRooms(data: Exclude<GraphNodeData, { kind: "comment" }>, options: EstimateNodeSizeOptions = {}): (number | undefined)[] {
+  const { measure = tableMeasurer, ...shapeOptions } = options;
+  const shape = nodeShapeFromData(data, shapeOptions);
+  if (shape.collapsed) return [];
+  return data.outputs.map((_, i) => {
+    const row = shape.rows[i]!;
+    const room = liveRoom(row, measure);
+    return room < NODE_BOX.liveMaxWidth ? room : undefined;
+  });
+}
+
+/**
+ * The points a knob chip has for its value beside the knob's whole name, when that's less than the
+ * value's reserve (knobValueReserve) needs: the chip's 110 less its padding, glyph, gaps and name.
+ * Undefined when the reserve fits. The patch editor gets it as PortModel.knob.valueRoom (deriveGraph),
+ * so a long name stays whole and a value past the room pushes into it only while it's that long.
+ */
+export function knobValueRoom(knob: { name: string; valueReserve?: number }, measure: NodeTextMeasurer = tableMeasurer): number | undefined {
+  if (!knob.valueReserve) return undefined;
+  const B = NODE_BOX;
+  const room = Math.max(0, Math.floor(B.valueMaxWidth - B.valuePaddingX - B.knobIcon - 2 * B.valueInnerGap - measure(knob.name, "sans10") - ROOM_SLACK));
+  return room < reservedSlot(knob.valueReserve, measure) ? room : undefined;
+}
+
+/**
+ * A knob chip's width: the name, then a color knob's swatch or the value text in a slot of its
+ * reserve at least. A chip whose name leaves less room than that (knobValueRoom) is as wide as a
+ * chip gets, 110, so a longer value pushes into the name instead of widening the node.
+ */
+function knobChipWidth(v: Extract<ValueChip, { kind: "knob" }>, t: NodeTextMeasurer): number {
+  const B = NODE_BOX;
+  const name = B.valuePaddingX + B.knobIcon + B.valueInnerGap + t(v.name, "sans10");
+  if (v.swatch) return Math.min(B.valueMaxWidth, name + B.valueInnerGap + B.swatch);
+  if (!v.text) return Math.min(B.valueMaxWidth, name);
+  if (v.reserve && knobValueRoom({ name: v.name, valueReserve: v.reserve }, t) !== undefined) return B.valueMaxWidth;
+  const text = t(v.text, "mono10");
+  return Math.min(B.valueMaxWidth, name + B.valueInnerGap + (v.reserve ? Math.max(text, reservedSlot(v.reserve, t)) : text));
+}
+
 function valueWidth(v: ValueChip, t: NodeTextMeasurer): number {
   const B = NODE_BOX;
   const chip = (text: string, font: NodeFont, min = 0) => Math.min(B.valueMaxWidth, Math.max(min, B.valuePaddingX + t(text, font)));
@@ -117,7 +214,7 @@ function valueWidth(v: ValueChip, t: NodeTextMeasurer): number {
     case "text":
       return v.text ? chip(v.text, "sans10") : chip("Empty", "italic10");
     case "knob":
-      return Math.min(B.valueMaxWidth, B.valuePaddingX + B.knobIcon + B.valueInnerGap + t(v.name, "sans10") + (v.swatch ? B.valueInnerGap + B.swatch : v.text ? B.valueInnerGap + t(v.text, "mono10") : 0));
+      return knobChipWidth(v, t);
   }
 }
 
@@ -128,7 +225,7 @@ export function measureNode(shape: NodeShape, measure: NodeTextMeasurer = tableM
   for (const c of shape.chips) {
     header += B.headerGap;
     if (c.kind === "chip") header += B.chipPaddingX + measure(c.text, "chip");
-    else if (c.kind === "loop") header += Math.max(B.loopMin, B.chipPaddingX + measure(c.text, "badge"));
+    else if (c.kind === "loop") header += Math.max(B.loopMin, B.chipPaddingX + Math.max(measure(c.text, "badge"), c.reserve ? measure(c.reserve, "badge") : 0));
     else if (c.kind === "working") header += B.workingPaddingX + B.workingDot + measure(c.text, "working");
     else if (c.kind === "badge") header += B.badge;
     else header += B.enterIcon;
@@ -136,18 +233,9 @@ export function measureNode(shape: NodeShape, measure: NodeTextMeasurer = tableM
   let rows = 0;
   if (!shape.collapsed) {
     for (const r of shape.rows) {
-      let w = 0;
-      if (r.in) {
-        w += B.portPadding + measure(r.in.label, "label");
-        if (r.in.value) w += B.portGap + valueWidth(r.in.value, measure);
-        if (r.in.drive) w += B.portGap + B.driveButton + measure("Drive…", "sans10");
-      }
-      if (r.out) {
-        w += B.rowGap;
-        if (r.out.live) w += Math.min(B.liveMaxWidth, measure(r.out.live, "mono10")) + B.portGap;
-        w += measure(r.out.label, "label") + B.portPadding;
-      }
-      rows = Math.max(rows, w);
+      const w = rowWidth(r, measure);
+      const slot = r.out?.reserve ? reservedSlot(r.out.reserve, measure, roomBeside(w)) : r.out?.live ? measure(r.out.live, "mono10") : 0;
+      rows = Math.max(rows, w + (slot ? Math.min(B.liveMaxWidth, slot) + B.portGap : 0));
     }
   }
   const min = shape.collapsed ? 0 : shape.kind === "interface" ? B.interfaceMinWidth : B.minWidth;

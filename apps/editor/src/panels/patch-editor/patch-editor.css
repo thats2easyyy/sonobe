@@ -216,6 +216,197 @@
   }
 }
 
+/* ---------------------------------------------------------------------- */
+/* Appearing                                                               */
+/* ---------------------------------------------------------------------- */
+
+/*
+ * Nodes, comment frames and cables animate in the first time the canvas shows them. state/appear.ts
+ * puts data-appear and --sb-appear-delay on React Flow's node and edge wrappers as they mount and
+ * takes them off when the animation is over, so idle nodes carry nothing. The node wrapper travels
+ * with `translate` (React Flow owns its `transform`) and nothing scales: React Flow measures handles
+ * against the wrapper, so cables land on their ports even when a node mounts mid-animation.
+ * Durations match appear.ts. Modes: node (fade, travel, ring), slide (fade, travel: a wave too big
+ * for rings), still (fade, ring: the node at the end of a cable the person drew), placed (the ring
+ * alone: an option-drag copy, already where the person dropped it), brief (entering or leaving a
+ * component: a quicker fade and a shorter travel, and cables drawing as fast).
+ */
+.sb-pe .react-flow__node:is([data-appear="node"], [data-appear="slide"]) {
+  animation:
+    sb-pe-appear-travel 360ms cubic-bezier(0.16, 1, 0.3, 1) var(--sb-appear-delay, 0ms) both,
+    sb-pe-appear-in 260ms cubic-bezier(0.33, 1, 0.68, 1) var(--sb-appear-delay, 0ms) both;
+}
+
+.sb-pe .react-flow__node[data-appear="still"] {
+  animation: sb-pe-appear-in 260ms cubic-bezier(0.33, 1, 0.68, 1) var(--sb-appear-delay, 0ms) both;
+}
+
+.sb-pe .react-flow__node[data-appear="brief"] {
+  animation:
+    sb-pe-appear-hop 200ms cubic-bezier(0.16, 1, 0.3, 1) var(--sb-appear-delay, 0ms) both,
+    sb-pe-appear-in 160ms cubic-bezier(0.33, 1, 0.68, 1) var(--sb-appear-delay, 0ms) both;
+}
+
+/* The materialize accent: a ring in the node's category color glows in, then settles. Opacity only. */
+.sb-pe .react-flow__node:is([data-appear="node"], [data-appear="still"], [data-appear="placed"]) .sb-pe-node::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, var(--sb-cat) 68%, transparent),
+    0 0 14px -2px color-mix(in srgb, var(--sb-cat) 38%, transparent);
+  opacity: 0;
+  pointer-events: none;
+  animation: sb-pe-appear-accent 560ms linear var(--sb-appear-delay, 0ms) both;
+}
+
+/* An option-drag copy lands selected: its ring glows just outside the selection outline, where it shows. */
+.sb-pe .react-flow__node[data-appear="placed"] .sb-pe-node::before {
+  inset: -3px;
+  border-radius: calc(var(--sb-pe-node-radius) + 3px);
+}
+
+/* Claude's nodes flash the AI ring instead; at far zoom the ring is too small to see. */
+.sb-pe .react-flow__node[data-appear] .sb-pe-node[data-flash]::before,
+.sb-pe__canvas[data-lod="far"] .react-flow__node[data-appear] .sb-pe-node::before {
+  content: none;
+}
+
+.sb-pe .react-flow__node[data-appear="comment"] {
+  animation: sb-pe-appear-in 300ms var(--ease-out) var(--sb-appear-delay, 0ms) both;
+}
+
+.sb-pe .react-flow__node[data-appear="fade"] {
+  animation: sb-pe-appear-in 180ms var(--ease-out) var(--sb-appear-delay, 0ms) both;
+}
+
+/*
+ * Cables draw from the output (pathLength="1" while drawing); the loop tint, the glow, the glyph and
+ * the orb group (with the copy of the glow a boolean's orb holds, .sb-pe-orb__sweep, and an orb still
+ * flying from before another document arrived) fade in with them. New orbs wait for the drawing to
+ * finish (Orb in CableEdge.tsx).
+ */
+.sb-pe .react-flow__edge:is([data-appear="draw"], [data-appear="brief"]) .sb-pe-cable__wire {
+  stroke-dasharray: 1 2;
+  animation: sb-pe-appear-draw 320ms cubic-bezier(0.45, 0, 0.2, 1) var(--sb-appear-delay, 0ms) both;
+}
+
+.sb-pe .react-flow__edge:is([data-appear="draw"], [data-appear="brief"]) :is(.sb-pe-cable__loop, .sb-pe-cable__glow, .sb-pe-orb) {
+  animation: sb-pe-appear-in 320ms var(--ease-in) var(--sb-appear-delay, 0ms) both;
+}
+
+.sb-pe .react-flow__edge[data-appear="draw"] .sb-pe-cable__glyph {
+  animation: sb-pe-appear-in 180ms var(--ease-out) calc(var(--sb-appear-delay, 0ms) + 170ms) both;
+}
+
+.sb-pe .react-flow__edge[data-appear="brief"] :is(.sb-pe-cable__wire, .sb-pe-cable__loop, .sb-pe-cable__glow, .sb-pe-orb) {
+  animation-duration: 200ms;
+}
+
+.sb-pe .react-flow__edge[data-appear="brief"] .sb-pe-cable__glyph {
+  animation: sb-pe-appear-in 120ms var(--ease-out) calc(var(--sb-appear-delay, 0ms) + 100ms) both;
+}
+
+/* Invalid (dashed) cables, and cables of nodes that fade, fade instead of drawing. */
+.sb-pe .react-flow__edge[data-appear="fade"] .sb-pe-cable {
+  animation: sb-pe-appear-in 220ms var(--ease-out) var(--sb-appear-delay, 0ms) both;
+}
+
+/* More than LARGE_REVEAL nodes, or reduced motion: the whole graph fades in with the viewport. */
+.sb-pe__canvas[data-appear-fade] .react-flow__viewport {
+  animation: sb-pe-appear-in 180ms var(--ease-out) both;
+}
+
+@keyframes sb-pe-appear-in {
+  from {
+    opacity: 0;
+  }
+}
+
+@keyframes sb-pe-appear-travel {
+  from {
+    translate: -8px 0;
+  }
+  to {
+    translate: 0 0;
+  }
+}
+
+@keyframes sb-pe-appear-hop {
+  from {
+    translate: -4px 0;
+  }
+  to {
+    translate: 0 0;
+  }
+}
+
+@keyframes sb-pe-appear-accent {
+  0% {
+    opacity: 0;
+    animation-timing-function: cubic-bezier(0.33, 1, 0.68, 1);
+  }
+  26% {
+    opacity: 1;
+    animation-timing-function: cubic-bezier(0.45, 0, 0.55, 1);
+  }
+  100% {
+    opacity: 0;
+  }
+}
+
+@keyframes sb-pe-appear-draw {
+  from {
+    stroke-dashoffset: 1.02;
+  }
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+
+/*
+ * Reduced motion: no travel, no accent and no drawing; what appears fades in quickly, or is simply
+ * there. The OS setting counts while Settings → Motion is System; Full keeps the wave (useReducedMotion).
+ */
+@media (prefers-reduced-motion: reduce) {
+  :root:not([data-motion="full"]) .sb-pe .react-flow__node[data-appear] {
+    animation: sb-pe-appear-in 180ms var(--ease-out) both;
+  }
+  :root:not([data-motion="full"]) .sb-pe .react-flow__node[data-appear] .sb-pe-node::before {
+    content: none;
+  }
+  :root:not([data-motion="full"]) .sb-pe .react-flow__edge[data-appear] :is(.sb-pe-cable__wire, .sb-pe-cable__loop, .sb-pe-cable__glow, .sb-pe-cable__glyph, .sb-pe-orb) {
+    animation: none;
+  }
+  :root:not([data-motion="full"]) .sb-pe .react-flow__edge:is([data-appear="draw"], [data-appear="brief"]) .sb-pe-cable__wire {
+    stroke-dasharray: none;
+  }
+  :root:not([data-motion="full"]) .sb-pe .react-flow__edge[data-appear] .sb-pe-cable {
+    animation: sb-pe-appear-in 180ms var(--ease-out) both;
+  }
+}
+
+:root[data-reduced-motion="true"] .sb-pe .react-flow__node[data-appear] {
+  animation: sb-pe-appear-in 180ms var(--ease-out) both;
+}
+
+:root[data-reduced-motion="true"] .sb-pe .react-flow__node[data-appear] .sb-pe-node::before {
+  content: none;
+}
+
+:root[data-reduced-motion="true"] .sb-pe .react-flow__edge[data-appear] :is(.sb-pe-cable__wire, .sb-pe-cable__loop, .sb-pe-cable__glow, .sb-pe-cable__glyph, .sb-pe-orb) {
+  animation: none;
+}
+
+:root[data-reduced-motion="true"] .sb-pe .react-flow__edge:is([data-appear="draw"], [data-appear="brief"]) .sb-pe-cable__wire {
+  stroke-dasharray: none;
+}
+
+:root[data-reduced-motion="true"] .sb-pe .react-flow__edge[data-appear] .sb-pe-cable {
+  animation: sb-pe-appear-in 180ms var(--ease-out) both;
+}
+
 .sb-pe-node[data-working] {
   box-shadow:
     0 0 0 1.5px color-mix(in srgb, var(--ai) 75%, transparent),
@@ -321,7 +512,10 @@ textarea.sb-pe-title-input {
 }
 
 .sb-pe-node__loop {
+  display: inline-flex;
   flex: none;
+  flex-direction: column;
+  align-items: center;
   height: 16px;
   min-width: 16px;
   padding: 0 5px;
@@ -332,6 +526,14 @@ textarea.sb-pe-title-input {
   font-weight: var(--font-weight-bold);
   line-height: 16px;
   text-align: center;
+}
+
+/* The room of its reserve ("×00", loopBadgeReserve in @sonobe/core/graph), so a count gaining a digit doesn't widen the node. */
+.sb-pe-node__loop::after {
+  content: attr(data-reserve);
+  height: 0;
+  overflow: hidden;
+  visibility: hidden;
 }
 
 .sb-pe-node__enter {
@@ -527,13 +729,23 @@ textarea.sb-pe-title-input {
   color: var(--danger-text);
 }
 
+/*
+ * Live values sit in slots as wide as the longest text their type prints (liveReserve in
+ * @sonobe/core/graph, set as --sb-pe-live-reserve in ch; the half pixel covers N ch laying out a
+ * 64th narrower than N glyphs), right-aligned so the digits stay by the label, and a longer value
+ * ends in "…": a node holds its width while its numbers run. A row that would pass the node's
+ * 320 px maximum keeps only the room its labels leave (liveRoom, --sb-pe-live-room), but at least
+ * 4ch. nodeSize.ts sizes the same slot (NODE_BOX.slotPad, slotFloorChars).
+ */
 .sb-pe-port__live {
   flex: none;
+  width: min(calc(var(--sb-pe-live-reserve) + 0.5px), max(var(--sb-pe-live-room, 96px), 4ch), 96px);
   max-width: 96px;
   overflow: hidden;
   color: var(--text-accent);
   font-family: var(--font-mono);
   font-size: var(--font-size-2xs);
+  text-align: right;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -759,10 +971,26 @@ textarea.sb-pe-title-input {
   text-overflow: ellipsis;
 }
 
+/*
+ * A knob's value keeps the width of the longest value its slider or fields reach (knobValueReserve,
+ * --sb-pe-knob-reserve in ch), so tuning it doesn't resize the node, or less when the knob's whole
+ * name needs the room (knobValueRoom, --sb-pe-knob-room), but at least 4ch. A chip that short of
+ * room is as wide as a chip gets (data-full), so a longer value only pushes into the name.
+ */
+.sb-pe-value--knob[data-full] {
+  width: 110px;
+}
+
+.sb-pe-value--knob[data-full] .sb-pe-value__name {
+  flex-grow: 1;
+}
+
 .sb-pe-value__knob-value {
   flex: none;
+  min-width: min(calc(var(--sb-pe-knob-reserve) + 0.5px), max(var(--sb-pe-knob-room, 110px), 4ch));
   color: var(--text-primary);
   font-family: var(--font-mono);
+  text-align: right;
 }
 
 .sb-pe-value--input {
@@ -1028,29 +1256,254 @@ textarea.sb-pe-title-input {
   stroke-width: 2.75;
 }
 
-.sb-pe-cable__spark {
-  fill: var(--port-pulse);
-  filter: drop-shadow(0 0 4px var(--port-pulse));
+/*
+ * The orb a pulse or a boolean change sends along a cable (Orb in CableEdge.tsx, keyframes in orb.ts),
+ * and its landing on the input's dot, which is drawn in React Flow's viewport portal above the nodes.
+ * Web Animations move the head and reshape the tapered trails behind it, fading them with fill-opacity
+ * and stroke-opacity, which are 0 at rest, so each part's strength is in its color. Not opacity: with
+ * a pulse firing every frame into 40 cables, opacity animations held the graph near 30 fps, and these
+ * keep it at 60. The head is a gradient, not a blur filter.
+ */
+.sb-pe-orb,
+.sb-pe-orb-landing {
+  --sb-orb-core: #fff;
+  --sb-orb-hot: color-mix(in oklab, var(--sb-cable) 30%, #fff);
+  --sb-orb-halo: var(--sb-cable);
+  /* A lighter shade of the cable's color, for the trails over the wire. */
+  --sb-orb-lit: color-mix(in oklab, var(--sb-cable) 62%, #fff);
   pointer-events: none;
 }
 
+.sb-pe-orb-landing {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 1px;
+  height: 1px;
+  overflow: visible;
+}
+
+.sb-pe-orb__slot > *,
+.sb-pe-orb__land > * {
+  fill-opacity: 0;
+  stroke-opacity: 0;
+}
+
+.sb-pe-orb__core {
+  stop-color: var(--sb-orb-core);
+}
+
+.sb-pe-orb__hot {
+  stop-color: var(--sb-orb-hot);
+}
+
+.sb-pe-orb__color {
+  stop-color: var(--sb-cable);
+  stop-opacity: 0.8;
+}
+
+.sb-pe-orb__glow {
+  stop-color: var(--sb-orb-halo);
+  stop-opacity: 0.26;
+}
+
+.sb-pe-orb__fade {
+  stop-color: var(--sb-orb-halo);
+  stop-opacity: 0;
+}
+
+/* A boolean turning off sends a smaller orb that's all color, no white-hot core. */
+.sb-pe-orb__slot[data-tone="dim"] .sb-pe-orb__head {
+  fill: var(--sb-orb-dim);
+}
+
+.sb-pe-orb__dim-core {
+  stop-color: var(--sb-orb-lit);
+  stop-opacity: 0.95;
+}
+
+.sb-pe-orb__dim-hot {
+  stop-color: var(--sb-cable);
+  stop-opacity: 0.8;
+}
+
+.sb-pe-orb__dim-color {
+  stop-color: var(--sb-cable);
+  stop-opacity: 0.4;
+}
+
+.sb-pe-orb__dim-glow {
+  stop-color: var(--sb-orb-halo);
+  stop-opacity: 0.1;
+}
+
+/* The landing's flare lights the input's dot from inside. */
+.sb-pe-orb__flare-core {
+  stop-color: var(--sb-orb-core);
+}
+
+.sb-pe-orb__flare-hot {
+  stop-color: var(--sb-orb-hot);
+  stop-opacity: 0.9;
+}
+
+.sb-pe-orb__flare-glow {
+  stop-color: var(--sb-cable);
+  stop-opacity: 0.3;
+}
+
+/* The trails are filled shapes, over `.sb-pe-cable path { fill: none }`. */
+.sb-pe-orb .sb-pe-orb__wake {
+  fill: color-mix(in srgb, var(--sb-orb-lit) 70%, transparent);
+}
+
+.sb-pe-orb .sb-pe-orb__tail {
+  fill: color-mix(in srgb, var(--sb-orb-lit) 88%, transparent);
+}
+
+.sb-pe-orb .sb-pe-orb__streak {
+  fill: var(--sb-orb-hot);
+}
+
+.sb-pe-orb__ring {
+  fill: none;
+  stroke: var(--sb-cable);
+}
+
+/*
+ * A boolean's glow changes with its orb. From the change until the orb is in, the cable hides its own
+ * glow (Orb sets data-orb-hold to what it showed before), and the sweep, a copy of that glow, shows it
+ * instead: on or off as it was, then lit or darkened behind the head as the orb carries the change.
+ */
+.sb-pe-cable[data-orb-hold]:not([data-selected], [data-splice]) .sb-pe-cable__glow,
+.sb-pe-cable:is([data-selected], [data-splice]) .sb-pe-orb__sweep {
+  visibility: hidden;
+}
+
+.sb-pe-orb .sb-pe-orb__sweep {
+  stroke: var(--sb-cable);
+  stroke-width: 7;
+  stroke-linecap: butt;
+  stroke-opacity: 0;
+}
+
+/* The glow's opacity (.sb-pe-cable__glow). */
+.sb-pe-cable[data-orb-hold="on"] .sb-pe-orb__sweep,
+.sb-pe-orb .sb-pe-orb__sweep[data-sweep] {
+  stroke-opacity: 0.2;
+}
+
+.sb-pe-cable[data-orb-hold="off"][data-live]:not([data-selected]) .sb-pe-cable__wire {
+  stroke-width: 2;
+}
+
+.sb-pe-cable[data-orb-hold="on"]:not([data-live], [data-selected]) .sb-pe-cable__wire {
+  stroke-width: 2.5;
+}
+
+/*
+ * On a light canvas white reads as a gap in the wire, so nothing is white: the orb is a lighter, more
+ * vivid shade of the cable's color, in a pale tint of it, like colored light on paper, and the landing
+ * glows around the input's dot instead of covering it. (Without relative colors, the fallback is a
+ * bead of the cable's own color.)
+ */
+[data-theme="light"] :is(.sb-pe-orb, .sb-pe-orb-landing) {
+  --sb-orb-core: var(--sb-cable);
+  --sb-orb-hot: var(--sb-cable);
+  --sb-orb-halo: color-mix(in oklab, var(--sb-cable) 55%, #fff);
+  --sb-orb-lit: var(--sb-cable);
+}
+
+@supports (color: oklch(from red l c h)) {
+  [data-theme="light"] :is(.sb-pe-orb, .sb-pe-orb-landing) {
+    --sb-orb-core: oklch(from var(--sb-cable) calc(l + 0.16) calc(c * 1.2) h);
+    --sb-orb-hot: oklch(from var(--sb-cable) calc(l + 0.08) calc(c * 1.25) h);
+    --sb-orb-halo: oklch(from var(--sb-cable) calc(l + 0.14) calc(c * 1.1) h);
+    --sb-orb-lit: oklch(from var(--sb-cable) calc(l + 0.06) calc(c * 1.2) h);
+  }
+}
+
+[data-theme="light"] .sb-pe-orb__color {
+  stop-opacity: 0.7;
+}
+
+[data-theme="light"] .sb-pe-orb__glow {
+  stop-opacity: 0.32;
+}
+
+/* The turn-off orb keeps a strong core, so it still reads on the pale canvas. */
+[data-theme="light"] .sb-pe-orb__dim-core {
+  stop-color: var(--sb-orb-core);
+  stop-opacity: 1;
+}
+
+[data-theme="light"] .sb-pe-orb__dim-hot {
+  stop-color: var(--sb-orb-hot);
+  stop-opacity: 0.95;
+}
+
+[data-theme="light"] .sb-pe-orb__dim-color {
+  stop-opacity: 0.6;
+}
+
+[data-theme="light"] .sb-pe-orb__dim-glow {
+  stop-opacity: 0.22;
+}
+
+[data-theme="light"] .sb-pe-orb .sb-pe-orb__wake {
+  fill: color-mix(in srgb, var(--sb-orb-hot) 70%, transparent);
+}
+
+[data-theme="light"] .sb-pe-orb .sb-pe-orb__streak {
+  fill: var(--sb-orb-core);
+}
+
+[data-theme="light"] .sb-pe-orb__flare-core {
+  stop-color: var(--sb-orb-halo);
+  stop-opacity: 0;
+}
+
+[data-theme="light"] .sb-pe-orb__flare-hot {
+  stop-color: var(--sb-orb-halo);
+  stop-opacity: 0.25;
+}
+
+[data-theme="light"] .sb-pe-orb__flare-glow {
+  stop-color: var(--sb-orb-halo);
+  stop-opacity: 0.5;
+}
+
+.sb-pe__canvas[data-lod="far"] :is(.sb-pe-orb__slot > :not(.sb-pe-orb__head), .sb-pe-orb-landing) {
+  display: none;
+}
+
+/* Reduced motion: no orb travels; the whole cable flashes in place. */
 .sb-pe-cable__flash {
-  stroke: var(--port-pulse);
-  stroke-width: 4;
-  opacity: 0;
-  pointer-events: none;
-  animation: sb-pe-cable-flash 320ms linear forwards;
+  stroke: color-mix(in srgb, var(--sb-cable) 80%, transparent);
+  stroke-width: 5;
+  stroke-opacity: 0;
 }
 
-@keyframes sb-pe-cable-flash {
-  0% {
-    opacity: 0;
+.sb-pe-cable__flash[data-tone="dim"] {
+  stroke: color-mix(in srgb, var(--sb-cable) 40%, transparent);
+}
+
+/*
+ * And the output's pulse ring fades in place instead of growing, with Settings → Motion → Reduce or
+ * with the OS setting while Motion is System (base.css makes other interface animation instant).
+ */
+:root:is([data-motion="reduce"], [data-reduced-motion="true"]) .sb-pe-pulse-ring {
+  animation: sb-pe-fade 420ms var(--ease-out) forwards !important;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root:not([data-motion="full"]) .sb-pe-pulse-ring {
+    animation: sb-pe-fade 420ms var(--ease-out) forwards !important;
   }
-  30% {
-    opacity: 0.85;
-  }
-  100% {
-    opacity: 0;
+
+  /* Motion → Full grows it whatever the OS says. */
+  :root[data-motion="full"] .sb-pe-pulse-ring {
+    animation-name: sb-pe-pulse-ring;
   }
 }
 

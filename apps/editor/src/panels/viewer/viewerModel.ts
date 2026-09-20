@@ -4,7 +4,7 @@
  * code paths.
  */
 
-import { DEVICE_PRESETS, findLayer, getDevicePreset, isLayerInput, layerDisplayName, type DevicePreset, type DeviceSettings, type Diagnostic, type Id, type Op, type SonobeDocument } from "@sonobe/core";
+import { DEVICE_PRESETS, findLayer, getDevicePreset, isLayerInput, layerDisplayName, type DevicePreset, type DeviceSettings, type Diagnostic, type Id, type LayerNode, type Op, type SonobeDocument } from "@sonobe/core";
 import type { SceneFrame, SceneNode } from "@sonobe/engine";
 
 export type ViewerZoom = "fit" | "actual";
@@ -107,12 +107,12 @@ export interface ScreenRect {
 }
 
 /**
- * Where a layer shows up on screen: the union of its visible scene nodes (every loop copy), mapped
- * through the stage's client rect. `scale` is CSS pixels per prototype point. Root-component nodes
- * win; nodes inside component instances are used when the root has none. Null when it isn't drawn.
+ * Where a layer is drawn in prototype coordinates: the union of its visible scene nodes (every loop
+ * copy). Root-component nodes win; nodes inside component instances are used when the root has none.
+ * Null when it isn't drawn.
  */
-export function layerScreenRect(scene: SceneFrame | null, layerId: Id, stage: ScreenRect): (ScreenRect & { scale: number }) | null {
-  if (!scene || scene.size[0] <= 0 || scene.size[1] <= 0 || stage.width <= 0 || stage.height <= 0) return null;
+export function layerSceneRect(scene: SceneFrame | null, layerId: Id): ScreenRect | null {
+  if (!scene) return null;
   const ids = new Set([layerId]);
   let nodes = nodesForLayers(scene, ids, "root");
   if (nodes.length === 0) nodes = nodesForLayers(scene, ids, "instance");
@@ -130,10 +130,40 @@ export function layerScreenRect(scene: SceneFrame | null, layerId: Id, stage: Sc
       maxY = Math.max(maxY, y);
     }
   }
-  if (minX === Infinity) return null;
+  return minX === Infinity ? null : { x: minX, y: minY, width: maxX - minX, height: maxY - minY };
+}
+
+/**
+ * Where a layer shows up on screen: layerSceneRect mapped through the stage's client rect. `scale` is
+ * CSS pixels per prototype point. Null when it isn't drawn.
+ */
+export function layerScreenRect(scene: SceneFrame | null, layerId: Id, stage: ScreenRect): (ScreenRect & { scale: number }) | null {
+  if (!scene || scene.size[0] <= 0 || scene.size[1] <= 0 || stage.width <= 0 || stage.height <= 0) return null;
+  const r = layerSceneRect(scene, layerId);
+  if (!r) return null;
   const sx = stage.width / scene.size[0];
   const sy = stage.height / scene.size[1];
-  return { x: stage.x + minX * sx, y: stage.y + minY * sy, width: (maxX - minX) * sx, height: (maxY - minY) * sy, scale: sx };
+  return { x: stage.x + r.x * sx, y: stage.y + r.y * sy, width: r.width * sx, height: r.height * sy, scale: sx };
+}
+
+/** Whether the running prototype can draw a component's layers: the root, or a component placed in it (at any depth). */
+export function componentInPrototype(doc: SonobeDocument, componentId: Id): boolean {
+  const seen = new Set<Id>();
+  const queue: Id[] = [doc.project.root];
+  while (queue.length) {
+    const id = queue.shift()!;
+    if (id === componentId) return true;
+    if (seen.has(id)) continue;
+    seen.add(id);
+    const visit = (layers: readonly LayerNode[]) => {
+      for (const layer of layers) {
+        if (layer.type === "componentInstance" && layer.component && !seen.has(layer.component)) queue.push(layer.component);
+        if (layer.children?.length) visit(layer.children);
+      }
+    };
+    visit(doc.components[id]?.layers ?? []);
+  }
+  return false;
 }
 
 /** "Waiting for a phone" / "1 phone connected" / "3 phones connected". */
