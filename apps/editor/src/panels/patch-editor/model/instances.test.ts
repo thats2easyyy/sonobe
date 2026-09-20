@@ -2,7 +2,7 @@
 import { applyOps, createEmptyDocument, type Op, type SonobeDocument } from "@sonobe/core";
 import { createPatchRegistry } from "@sonobe/patches";
 import { describe, expect, it } from "vitest";
-import type { SceneFrame, SceneNode } from "@sonobe/engine";
+import { createRuntime, type SceneFrame, type SceneNode } from "@sonobe/engine";
 import { componentInstances, copyInScope, instanceChoiceKey, instanceCopiesAddress, layerSceneKey, resolveLiveScope, scopedAddress, watchedPrefix } from "./instances.ts";
 
 const registry = createPatchRegistry();
@@ -102,14 +102,62 @@ describe("watched copies of looped instances", () => {
 
   it("finds a layer's scene key in the watched scope and copy", () => {
     const node = (key: string, layerId: string, children: SceneNode[] = []) => ({ key, layerId, children }) as unknown as SceneNode;
-    const scene = { roots: [node("field", "field"), node("dot#0", "dot"), node("dot#1", "dot"), node("dot#2", "dot"), node("row#1", "row", [node("row#1/label", "label")])] } as unknown as SceneFrame;
+    const scene = {
+      roots: [node("field", "field"), node("dot#0", "dot"), node("dot#1", "dot"), node("dot#2", "dot"), node("row#1", "row", [node("row#1/label", "label")]), node("tile#0", "tile", [node("tile#0/title", "title")]), node("badge", "badge", [node("badge/label", "label")])],
+    } as unknown as SceneFrame;
     expect(layerSceneKey(scene, "", "field", 2)).toBe("field");
     expect(layerSceneKey(scene, "", "dot", null)).toBe("dot#0");
     expect(layerSceneKey(scene, "", "dot", 4)).toBe("dot#1");
     expect(layerSceneKey(scene, "row#1", "label", null)).toBe("row#1/label");
     expect(layerSceneKey(scene, "row#0", "label", null)).toBeUndefined();
+    // As the engine reads a prefix: a looped instance's bare path is its copy 0, and any copy of one that isn't looped is itself.
+    expect(layerSceneKey(scene, "tile", "title", null)).toBe("tile#0/title");
+    expect(layerSceneKey(scene, "row", "label", null)).toBeUndefined();
+    expect(layerSceneKey(scene, "badge#2", "label", null)).toBe("badge/label");
     expect(layerSceneKey(scene, "", "gone", null)).toBeUndefined();
     expect(layerSceneKey(null, "", "field", null)).toBeUndefined();
+  });
+
+  describe("finds the layer in the engine's scene inside an instance, in the copy read-outs watch", () => {
+    const card: Op[] = [
+      { op: "addComponent", component: { id: "card", name: "Card", kind: "layerComponent" } },
+      { op: "addLayer", component: "card", layer: { id: "field", type: "textField", name: "Field", props: { size: [200, 44] } } },
+    ];
+    const cardAt = (position: unknown) => build([...card, { op: "addLayer", layer: { id: "card_1", type: "componentInstance", name: "Card", component: "card", props: { position } } } as Op]);
+    // What the inspector's Fire does: the live scope, its instance's copies, the watched prefix, then the key.
+    const fireKey = (doc: SonobeDocument, componentPath: string[], copy: number | null) => {
+      const runtime = createRuntime(doc, { registry, deterministic: true });
+      runtime.step();
+      runtime.step();
+      const scope = resolveLiveScope(doc, componentPath);
+      const address = instanceCopiesAddress(scope, doc);
+      const prefix = watchedPrefix(scope, address ? runtime.inspect(address).copies : undefined, copy)!;
+      return layerSceneKey(runtime.scene(), prefix, "field", copy);
+    };
+
+    it("a looped instance, with and without a watched copy", () => {
+      const doc = cardAt({ loop: [[0, 0], [0, 100], [0, 200]] });
+      expect(fireKey(doc, ["main", "card"], null)).toBe("card_1#0/field");
+      expect(fireKey(doc, ["main", "card"], 1)).toBe("card_1#1/field");
+      expect(fireKey(doc, ["main", "card"], 4)).toBe("card_1#1/field");
+    });
+
+    it("an instance that isn't looped, while a copy is watched elsewhere", () => {
+      const doc = cardAt([0, 0]);
+      expect(fireKey(doc, ["main", "card"], null)).toBe("card_1/field");
+      expect(fireKey(doc, ["main", "card"], 2)).toBe("card_1/field");
+    });
+
+    it("an instance inside a looped instance, which read-outs read at its copy 0", () => {
+      const doc = build([
+        ...card,
+        { op: "addComponent", component: { id: "list", name: "List", kind: "layerComponent" } },
+        { op: "addLayer", component: "list", layer: { id: "card_1", type: "componentInstance", name: "Card", component: "card" } } as Op,
+        { op: "addLayer", layer: { id: "list_1", type: "componentInstance", name: "List", component: "list", props: { position: { loop: [[0, 0], [0, 100]] } } } } as Op,
+      ]);
+      expect(fireKey(doc, ["main", "list", "card"], null)).toBe("list_1#0/card_1/field");
+      expect(fireKey(doc, ["main", "list", "card"], 1)).toBe("list_1#0/card_1/field");
+    });
   });
 
   it("reads the watched copy of a looped instance, wrapping past the last", () => {
