@@ -235,7 +235,9 @@ export function registerRpcHandlers(session: EditorSession, options: RpcHandlerO
         case "json": {
           if (component !== undefined) return { revision: s.revision, component: s.doc.components[component] };
           // The editor keeps diagnostics incrementally; the desktop host asks for them instead of diagnosing the copy again.
-          return optBoolean(p, "diagnostics") ? { revision: s.revision, document: s.doc, diagnostics: diagnosticsFor(s.doc, session.registry) } : { revision: s.revision, document: s.doc };
+          const retired = s.retiredIds();
+          const base = { revision: s.revision, document: s.doc, ...(Object.keys(retired).length ? { retired } : {}) };
+          return optBoolean(p, "diagnostics") ? { ...base, diagnostics: diagnosticsFor(s.doc, session.registry) } : base;
         }
         case "outline": {
           const detail = optString(p, "detail");

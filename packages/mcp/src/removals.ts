@@ -3,9 +3,10 @@
  * removeLayer counts its whole subtree, a removeComponent counts the component plus every layer,
  * patch and comment inside it, and setScript with no source counts the script file. Write tools
  * report it as `removed`, and agents use a dry run's summary to decide when to ask the person first.
+ * They also report the ports a batch unpublished and the cables it cut (`unpublished`, `disconnected`).
  */
 
-import { allLayerIds, type Op, type SonobeDocument } from "@sonobe/core";
+import { allLayerIds, isLinkInput, listInputs, targetAddress, type Component, type Id, type InputEntry, type Op, type SonobeDocument } from "@sonobe/core";
 
 export interface RemovalSummary {
   layers: number;
@@ -76,4 +77,69 @@ export function describeRemovals(summary: RemovalSummary): string {
   return WORDS.filter(([key]) => summary[key] > 0)
     .map(([key, one, many]) => `${summary[key]} ${summary[key] === 1 ? one : many}`)
     .join(", ");
+}
+
+/**
+ * True for batches that can cut cables as a side effect: destructive ops, and updateInterface ops
+ * that unpublish ports (a null port, or replace: true).
+ */
+export function hasCascadingOps(ops: readonly Op[] | readonly unknown[]): boolean {
+  return ops.some((op) => {
+    if (isDestructiveOp(op)) return true;
+    const o = op as { op?: unknown; replace?: unknown; inputs?: unknown; outputs?: unknown };
+    if (!o || typeof o !== "object" || o.op !== "updateInterface") return false;
+    if (o.replace === true) return true;
+    const hasNull = (side: unknown) => !!side && typeof side === "object" && Object.values(side).some((v) => v === null);
+    return hasNull(o.inputs) || hasNull(o.outputs);
+  });
+}
+
+export interface UnpublishedPorts {
+  component: Id;
+  inputs: string[];
+  outputs: string[];
+}
+
+/** Published ports of components in both documents that `after` no longer has. */
+export function unpublishedPorts(before: SonobeDocument, after: SonobeDocument): UnpublishedPorts[] {
+  const out: UnpublishedPorts[] = [];
+  for (const [id, component] of Object.entries(before.components)) {
+    const next = after.components[id];
+    if (!next || next.interface === component.interface) continue;
+    const inputs = Object.keys(component.interface.inputs).filter((key) => !Object.hasOwn(next.interface.inputs, key));
+    const outputs = Object.keys(component.interface.outputs).filter((key) => !Object.hasOwn(next.interface.outputs, key));
+    if (inputs.length || outputs.length) out.push({ component: id, inputs, outputs });
+  }
+  return out;
+}
+
+export interface CutCable {
+  component: Id;
+  from: string;
+  to: string;
+}
+
+/** True when the input a stored value belongs to still exists in `component` (whose layer ids are `layers`). */
+function hasTarget(component: Component, layers: ReadonlySet<Id>, target: InputEntry["target"]): boolean {
+  if (target.kind === "patch") return Object.hasOwn(component.patches, target.id);
+  if (target.kind === "layer") return layers.has(target.id);
+  return Object.hasOwn(component.interface.outputs, target.key);
+}
+
+/** Cables in `before` whose input still exists in `after` but no longer holds them (cut by a cascade, or replaced). */
+export function disconnectedLinks(before: SonobeDocument, after: SonobeDocument): CutCable[] {
+  const out: CutCable[] = [];
+  for (const [id, component] of Object.entries(before.components)) {
+    const next = after.components[id];
+    if (!next || next === component) continue;
+    const layers = new Set(allLayerIds(next.layers));
+    const links = new Map<string, string>();
+    for (const entry of listInputs(next)) if (isLinkInput(entry.value)) links.set(targetAddress(entry.target), entry.value.link);
+    for (const entry of listInputs(component)) {
+      if (!isLinkInput(entry.value) || !hasTarget(next, layers, entry.target)) continue;
+      const to = targetAddress(entry.target);
+      if (links.get(to) !== entry.value.link) out.push({ component: id, from: entry.value.link, to });
+    }
+  }
+  return out;
 }

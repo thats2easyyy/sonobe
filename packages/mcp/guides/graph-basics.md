@@ -48,8 +48,9 @@ Some connections convert automatically: number to boolean (on when > 0), boolean
 - Give an item a `ref` and address it as `$ref` anywhere in the batch, even before the op that creates it. Items are created first, then the values and connections that name them, so two patches can feed each other in one batch.
 - `dryRun: true` previews the diagnostics without changing anything.
 - `expectedRevision` refuses to apply when the document moved on.
+- A batch can replace an item under its id: remove it, then add the new one. Ids removed by an earlier batch are retired, so new items skip them (`card_2`, reported on a "Retired ids skipped" line) and an explicit retired `id` fails with `id_retired`. Rebuild in one batch to keep ids.
 
-Op kinds: `addLayer`, `updateLayer`, `moveLayer`, `removeLayer`, `addPatch`, `updatePatch`, `removePatch`, `setInput` (literal or link; `null` resets), `connect`, `disconnect`, `rename`, `addComment`, `updateComment`, `removeComment`, `addComponent`, `removeComponent`, `createComponent`, `updateInterface`, `updateComponent`, `setScript`, `addAsset`, `removeAsset`, `setProject`. Every op may name a `component`.
+Op kinds: `addLayer`, `updateLayer`, `moveLayer`, `removeLayer`, `addPatch`, `updatePatch`, `removePatch`, `setInput` (literal or link; `null` resets), `connect`, `disconnect`, `rename`, `addComment`, `updateComment`, `removeComment`, `addComponent`, `removeComponent`, `createComponent`, `updateInterface` (by key; `null` unpublishes; `replace: true` sets a whole side), `updateComponent`, `setScript`, `addAsset`, `removeAsset`, `setProject`. Every op may name a `component`; a field an op doesn't take fails with `unknown_field` and a did-you-mean.
 
 ## Example: dim a dot while it's pressed
 

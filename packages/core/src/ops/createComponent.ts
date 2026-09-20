@@ -6,12 +6,13 @@
 
 import { layerAddress, parseAddress, type ParsedAddress } from "../address.ts";
 import { deviceScreenSize, FORMAT_VERSION } from "../document.ts";
-import { isFileNameTaken, isValidId, slugify, uniqueId } from "../ids.ts";
+import { isValidId, uniqueId } from "../ids.ts";
 import { allLayerIds, COMPONENT_INSTANCE_LAYER_TYPE, COMPONENT_PATCH_TYPE, componentItemIds, findPort, resolveLayerProps } from "../registry.ts";
 import type { Component, ComponentKind, Id, InputValue, InterfacePort, LayerNode, Op, PatchNode, ValueType } from "../types.ts";
 import { resolveSource, resolveTarget } from "../validate.ts";
 import { isLayerInput, isLinkInput, roundNumber } from "../values.ts";
-import { defineRef, fail, getTargetComponent, requireLayer, requirePatch, resolveId, type OpContext, type OpOf, type OpOutcome } from "./context.ts";
+import { newComponentId } from "./components.ts";
+import { defineRef, fail, getTargetComponent, newItemId, requireLayer, requirePatch, resolveId, type OpContext, type OpOf, type OpOutcome } from "./context.ts";
 import { listInputs, readInput, restoreLayerOps, restorePatchOps, targetAddress, writeInput, type InputTarget } from "./references.ts";
 import { insertLayerNode, removeLayerNode } from "./tree.ts";
 
@@ -61,11 +62,9 @@ export function createComponent(ctx: OpContext, op: OpOf<"createComponent">): Op
   const isMovedSource = (a: ParsedAddress | undefined) => !!a && ((a.kind === "patch" && movedPatches.has(a.id)) || (a.kind === "layer" && movedLayers.has(a.id)));
 
   // Case-insensitive: "navBar" and "navbar" would be one components/*.json file on macOS and Windows.
-  const componentIds = Object.keys(ctx.doc.components);
-  const newId = uniqueId(slugify(op.name, "component"), (id) => isFileNameTaken(componentIds, id) || ctx.reserved.has(id));
+  const newId = newComponentId(ctx, op.name);
   defineRef(ctx, op.ref, newId);
-  const takenItems = componentItemIds(component);
-  const instanceId = uniqueId(slugify(op.name, "component"), (id) => takenItems.has(id) || ctx.reserved.has(id));
+  const instanceId = newItemId(ctx, component, { name: op.name, fallback: "component", taken: componentItemIds(component) });
   const lenient = { registry: ctx.registry, lenient: true };
   const entries = listInputs(component);
 

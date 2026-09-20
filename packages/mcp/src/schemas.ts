@@ -32,7 +32,7 @@ export const InputValueSchema = z
     'A literal (1, true, "text", "#FF3B30FF", [x, y]) or a wrapper: { "link": "patchId.port" | "@layerId.prop" | "$ref.port" }, { "layer": "layerId" | "$ref" }, { "loop": [..] }, { "json": .. }, { "asset": "assetId" }, { "gradient": .. }. null resets to the default.',
   );
 
-export const OP_HELP = `One op. Kinds: ${OP_KINDS.join(", ")}. Shapes: addLayer { parent?, index?, layer: { ref?, id?, type, name?, props?, children? } } · updateLayer { id, props?, name?, locked?, collapsed? } · moveLayer { id, parent?, index? } · removeLayer { id } · addPatch { patch: { ref?, id?, type, name?, typeParam?, inputCount?, inputs?, settings?, component?, ui? } } · updatePatch { id, name?, typeParam?, inputCount?, muted?, settings?, ui? } · removePatch { id } · setInput { target, value } · connect { from, to } · disconnect { to } · rename { id, name } · addComment { comment: { text, rect, color? } } · createComponent { name, layerIds?, patchIds? } · updateInterface { component, inputs?, outputs? } · updateComponent { id, name?, notes?, size? } · setProject { changes }. Every op may name "component". Give a new item "ref" and write "$ref" in any op of the batch, before or after the op that creates it.`;
+export const OP_HELP = `One op. Kinds: ${OP_KINDS.join(", ")}. Shapes: addLayer { parent?, index?, layer: { ref?, id?, type, name?, props?, children? } } · updateLayer { id, props?, name?, locked?, collapsed? } · moveLayer { id, parent?, index? } · removeLayer { id } · addPatch { patch: { ref?, id?, type, name?, typeParam?, inputCount?, inputs?, settings?, component?, ui? } } · updatePatch { id, name?, typeParam?, inputCount?, muted?, settings?, ui? } · removePatch { id } · setInput { target, value } · connect { from, to } · disconnect { to } · rename { id, name } · addComment { comment: { text, rect, color? } } · createComponent { name, layerIds?, patchIds? } · updateInterface { component, inputs?, outputs?, replace? } (ports merge by key; null unpublishes one; replace: true makes each side you give the whole set; unpublishing disconnects its cables everywhere, undoably) · updateComponent { id, name?, notes?, size? } · setProject { changes }. Every op may name "component"; other fields are refused. Give a new item "ref" and write "$ref" in any op of the batch, before or after the op that creates it. To rebuild items under the same ids, remove and re-add them in one batch.`;
 
 export const OpSchema = z
   .looseObject({ op: z.string().describe(`Op kind: ${OP_KINDS.join(" | ")}.`) })
@@ -257,6 +257,21 @@ export const WriteOutputSchema = z.looseObject({
     .optional(),
   diagnostics: DiagnosticsDeltaOutput.optional(),
   saved: z.boolean().optional(),
+  /** Derived ids that skipped an id retired this session: new id → retired id. */
+  retiredIds: z.record(z.string(), z.string()).optional(),
+  /** Derived ids suffixed because another item of the batch took the base: new id → that item's id. */
+  suffixedIds: z.record(z.string(), z.string()).optional(),
+  /** Ports the batch unpublished (or would), per component. */
+  unpublished: z
+    .array(z.looseObject({ component: z.string(), inputs: z.array(z.string()), outputs: z.array(z.string()) }))
+    .optional(),
+  /** Cables the batch cut (or would) whose inputs still exist: a count and the first 50. */
+  disconnected: z
+    .looseObject({
+      count: z.number(),
+      cables: z.array(z.looseObject({ component: z.string(), from: z.string(), to: z.string() })),
+    })
+    .optional(),
   /** Batches with destructive ops: what was (or on a dry run, would be) removed, cascades included. */
   removed: z
     .looseObject({

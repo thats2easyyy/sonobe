@@ -88,7 +88,9 @@ A `.sonobez` zip of the same layout is used for sharing (later).
 - Ids are **readable, immutable slugs**: `^[A-Za-z_][A-Za-z0-9_]*$`. They are unique within a component across layers, patches, and comments. `__proto__` is reserved; other Object.prototype names are ordinary ids because lookups only read own keys.
 - Component ids are file names (`components/<id>.json`), so they're unique ignoring case: `navBar` and `navbar` can't both exist, and derived ids skip to `navbar_2`.
 - They are auto-derived from the display name on creation (`card`, `card_2`, `tap_card`, `popAnimation_1`).
-- Renaming changes `name`, never `id`. Ids are never reused within a session.
+- Renaming changes `name`, never `id`.
+- Ids aren't reused across batches within a session. An id that belonged to an item of a component at any committed revision this session, and isn't live there when a batch starts, is **retired** in that component: a derived id skips it (the op result's `retired` says so) and an explicit one fails with `id_retired`. A batch may still remove an item and add a new one under the same id (a replacement); its inverse restores the old item. Component ids retire the same way, ignoring case. Retirement protects references held outside the batch (an agent's notes, simulator paths, the selection) from silently reaching a different item.
+- Each host keeps the ids it has seen in an `IdLedger` (`createIdLedger`, passed to `applyOps` as `seenIds`) and observes every commit, undo and redo. Opening a document starts a new ledger; a reload continues it; it's never saved with the project (`seenIdsToJSON` lets a draft carry it).
 - References:
   - a patch port: `patchId.portKey`
   - a layer property: `@layerId.propKey`
@@ -156,6 +158,9 @@ A `.sonobez` zip of the same layout is used for sharing (later).
 - `dryRun` returns the would-be diff and diagnostics without applying anything.
 - `expectedRevision` enables optimistic concurrency.
 - Every op validates against the registry: unknown port → did-you-mean; type mismatch → converter suggestion.
+- A field an op kind doesn't take fails with `unknown_field` and a did-you-mean, instead of being ignored (lenient undo and redo replays skip this check).
+- Update ops merge by key, and `null` removes a key (props, settings, meta, published ports). `updateInterface` also takes `replace: true`, which makes each side it's given (inputs, outputs) the whole set. Unpublishing a port disconnects its cables inside the component and on every instance, including reads of a layer instance's prop (`@chip_1.label`), and the inverse restores them. An output declared again without `link` keeps its cable; `link: null` disconnects it.
+- A batch may replace an item under its id (remove, then add); ids removed by earlier batches are retired (§3.2).
 
 Op kinds (see `Op` in `packages/core/src/types.ts`): `addLayer, updateLayer, moveLayer, removeLayer, addPatch, updatePatch, removePatch, setInput, connect, disconnect, rename, addComment, updateComment, removeComment, addComponent, removeComponent, createComponent, updateInterface, updateComponent, setScript, addAsset, removeAsset, setProject`. There is no separate layer-prop op: `setInput` and `connect` accept `@layer.prop` addresses.
 
@@ -178,6 +183,8 @@ Errors are `{ code, message, hint, address, opIndex, suggestions: [{ description
 - a pulse wired into a state input ("did you mean a Switch?")
 - loop length mismatches (warning)
 - unreachable or unused patches (info)
+- published inputs nothing inside the component reads (`unused_input`, info) and outputs nothing inside drives (`unconnected_output`, info)
+- a cable that reads an instance's output its component doesn't drive (`undriven_output`, warning, on the component holding the cable)
 - missing assets
 - a layer that can't receive touches because it has opacity 0 or is disabled
 - variables: an unnamed broadcaster, broadcasters that share a name, scope, and type, and a variable nothing reads (info)
