@@ -4,7 +4,7 @@ Sonobe is an open-source, AI-native desktop app for interaction prototyping. It 
 
 1. **AI-native by construction.** Every capability is a typed operation in a text-diffable document. The same operations are exposed to Claude over MCP.
 2. **Learnable by construction.** Pulses and state are visible, errors teach, and every patch has generated docs, examples, and a plain-language "explain".
-3. **Open and cross-platform.** MIT-licensed Electron app for macOS, Windows, and Linux, plus a web player for phones.
+3. **Open and cross-platform.** MIT-licensed Electron app for macOS, Windows, and Linux, plus a web player for phones and an iPhone app that plays it with real haptics.
 
 This document is the **contract** every contributor (human or agent) builds against. If code and this document disagree, fix one of them in the same PR.
 
@@ -38,7 +38,9 @@ sonobe/
 │   └── cli/        @sonobe/cli      `sonobe` CLI: new, validate, fmt, outline, describe, sim, mcp (stdio relay; --headless <dir>)
 ├── apps/
 │   ├── editor/     React editor UI (Electron renderer process; also runs in a browser for dev/tests)
-│   └── desktop/    Electron main + preload: windows, menus, file IO, MCP HTTP server, LAN preview server
+│   ├── desktop/    Electron main + preload: windows, menus, file IO, MCP HTTP server, LAN preview server,
+│   │               and the web player (player/) it serves to phones and the pop-out viewer
+│   └── ios/        Sonobe Viewer: an iPhone app (Swift, Xcode) that plays the web player with native haptics
 ├── integrations/
 │   ├── claude-code/     Claude Code plugin (.mcp.json + skills)
 │   ├── claude-desktop/  .mcpb bundle manifest
@@ -50,7 +52,7 @@ sonobe/
 
 Dependency direction (no cycles): `core ← engine ← patches ← renderer ← editor ← desktop`, and `mcp ← cli`, where `mcp` depends on `core`, `engine`, and `patches`. `import` depends only on `core`; `mcp`, `editor`, and `desktop` use it.
 
-Tooling: TypeScript (strict, ESM), Vite 8 for the editor, esbuild for Electron main/preload and the CLI, Vitest for unit tests, Playwright for e2e (Chromium via `npm run e2e`; `_electron` in the desktop smoke test and package verification). Formatting uses Prettier defaults.
+Tooling: TypeScript (strict, ESM), Vite 8 for the editor, esbuild for Electron main/preload and the CLI, Vitest for unit tests, Playwright for e2e (Chromium via `npm run e2e`; `_electron` in the desktop smoke test and package verification). Formatting uses Prettier defaults. `apps/ios` is Swift and SwiftUI, built with Xcode, and isn't an npm workspace.
 
 ---
 
@@ -413,7 +415,7 @@ Layer types are declared in `@sonobe/core` (`layerTypes.ts`) with typed props (k
   - drag a cable onto an inspector property or a layer row
 - **Inspector:** scrubbable number fields (drag, arrows ±1, ⇧ ±10, ⌥ ±0.1), color picker, segmented controls, and spring presets with a curve preview.
 - **Canvas:** artboard with direct manipulation (select, move, resize, rotate), rulers and snapping, insert shapes and text.
-- **Viewer:** live prototype, device picker, restart ⌘R, frame toggle, 1:1, "show hit targets", and pop-out window. Also serves a LAN web player (QR code).
+- **Viewer:** live prototype, device picker, restart ⌘R, frame toggle, 1:1, "show hit targets", and pop-out window. Also serves a LAN web player (QR code), which the Sonobe Viewer iPhone app opens with native haptics (§9.2).
 - **Command palette** (⌘K) lists every command with its shortcut, so the app is discoverable.
 
 ### 9.1 Desktop host conventions
@@ -427,6 +429,20 @@ Layer types are declared in `@sonobe/core` (`layerTypes.ts`) with typed props (k
 - **Env switches** read by the desktop main process (`apps/desktop/electron/env.ts`): `SONOBE_DEV_URL`, `SONOBE_MUTE`, `SONOBE_MCP_PORT`, `SONOBE_MCP`, `SONOBE_HOME`, `SONOBE_USER_DATA`, `SONOBE_EDITOR_DIST`, `SONOBE_TEST`, `SONOBE_LAN` (start the phone preview server at launch) and `SONOBE_LAN_PORT` (a fixed phone preview port).
 - Two switches are read elsewhere: `SONOBE_GUIDES_DIR` overrides the MCP agent guides folder (`packages/mcp/src/guides.ts`, used by bundles), and `SONOBE_NODE` picks the Node binary for the packaged `sonobe` CLI launcher (`apps/desktop/scripts/build.mjs`), which otherwise uses the app's own runtime.
 - **Connect Claude** reads `getMcpStatus().cliPath`, the app's bundled CLI launcher (`Resources/cli/sonobe`, `sonobe.cmd` on Windows), so the setup it shows uses a full path instead of a `sonobe` on PATH.
+
+### 9.2 Web player and Sonobe Viewer
+
+The web player (`apps/desktop/player`) runs the real engine and DOM renderer full screen. The LAN preview server (`electron/lan-preview.ts`) serves it for Preview on Phone and for the pop-out viewer window, and streams each new revision over a one-way WebSocket, which hot-swaps it into the running prototype.
+
+- **Platform services.** `playerPlatform(window)` (`player/platform.ts`) gives the runtime `vibrate` where the browser has `navigator.vibrate` (Android), and `haptic` plus `vibrate` from a native host when one announces itself. The player doesn't have the editor viewer's other services yet (sound, speech, network requests, open URL; `createBrowserPlatform` in `apps/editor/src/runtime/platform.ts`).
+- **Sonobe Viewer** (`apps/ios`) is a SwiftUI app with a full-screen WKWebView on the player URL. It accepts only preview links (`http(s)://<host>:<port>/p/<token>/`, from a QR scan, a paste, `sonobe-viewer://open?url=<link>`, or the `-SonobePlayerURL` launch argument), keeps navigation on that origin, and opens other links in Safari. `NSAllowsLocalNetworking` lets it load the plain-http LAN URL. It has no renderer of its own: everything a prototype does reaches the phone through the web player.
+- **The bridge** is one-way, from the page to the app:
+  - At document start the app defines a read-only `window.sonobeNative = { version: 1, platform: "ios", haptics: string[], vibrate: boolean }`, where `haptics` lists the Haptic Type keys the device can play.
+  - The page posts `{ kind: "haptic", type, pattern? }` (`pattern` is Custom Pattern's AHAP JSON) or `{ kind: "vibrate", pattern }` (milliseconds as a number or an on/off list; 0 or `[]` stops) to `window.webkit.messageHandlers.sonobe`.
+  - `haptic.supports(type)` is "the type is in `haptics`", so Haptic's Available output stays driven by the catalog's Type keys. The player ignores a malformed announcement.
+  - The app plays messages only from the main frame on the preview's origin, ignores unknown kinds and types, and caps a vibration at 10 s. UIFeedbackGenerator plays the Haptic types; Core Haptics plays AHAP as is and turns vibrate patterns into continuous events. The app logs each one under the `dev.sonobe.viewer` subsystem, which `npm run test:ios` reads.
+- **Signing.** `apps/ios/Config/Base.xcconfig` holds the shared settings and includes an ignored `Local.xcconfig` with the developer's team and bundle id. Simulator builds pass `CODE_SIGNING_ALLOWED=NO`.
+- **Limits.** Frame pacing is WKWebView's, likely 60 Hz on ProMotion iPhones. Nothing in CI builds the app.
 
 ---
 
@@ -501,6 +517,7 @@ patch grow transition<number> progress←pop.output start=1 end=1.08
 - `npm test`: Vitest. Golden tests cover spring curves against the Rebound formulas, pulse and loop semantics, ops/inverse round-trips, and canonical serialization stability.
 - `npm run e2e`: Playwright (Chromium project only) against the editor served by Vite on port 5199, with screenshot artifacts. This is what CI runs.
 - `npm run smoke -w @sonobe/desktop`: the muted Electron end-to-end run (`apps/desktop/tests/smoke.mjs`, Playwright `_electron`) covering the host API, the MCP loop, the phone preview and the pop-out viewer. It builds the shell and editor, runs by hand, and isn't part of `npm run e2e` or CI. `SONOBE_SMOKE_SKIP_EDITOR_BUILD=1` reuses `apps/editor/dist`.
+- `npm run test:ios`: Sonobe Viewer's Swift unit tests and UI tests on an iOS Simulator (`apps/ios/scripts/test.mjs`), against the real web player and LAN preview server, followed by a check of the app's log for the haptics the UI test's taps played. It needs macOS with Xcode, runs by hand, and isn't part of `npm run e2e` or CI. The player's side of the bridge runs in `npm test` (`apps/desktop/player/*.test.ts`; `player.browser.test.ts` drives mobile Chromium and skips without Playwright's browser).
 - Examples must load, validate with zero errors, and simulate their scripted interactions (`examples/*/test.json`).
 - Automated app and QA runs are muted (`--mute-audio`).
 

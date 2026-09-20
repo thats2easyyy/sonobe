@@ -1,0 +1,9 @@
+// Your signing settings for installing Sonobe Viewer on a device. Copy this file to Local.xcconfig
+// (git-ignored) and fill it in.
+//
+// DEVELOPMENT_TEAM: your Team ID (Xcode → Settings → Accounts, or developer.apple.com → Membership).
+// A free Apple Account works too; its builds stop launching after 7 days, so reinstall then.
+// SONOBE_BUNDLE_ID: must be unique to your team, for example com.yourname.sonobe-viewer.
+
+DEVELOPMENT_TEAM = ABCDE12345
+SONOBE_BUNDLE_ID = com.yourname.sonobe-viewer

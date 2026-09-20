@@ -1,13 +1,15 @@
 /**
  * Phone web player, served by the LAN preview server (electron/lan-preview.ts). Runs the open
  * prototype full-screen with the real engine and DOM renderer, and follows edits made in Sonobe over
- * a WebSocket: new revisions hot-swap into the running prototype, keeping patch state.
+ * a WebSocket: new revisions hot-swap into the running prototype, keeping patch state. Vibrate and
+ * Haptic reach the device through platform.ts (navigator.vibrate, or a native host like Sonobe Viewer).
  */
 
 import type { SonobeDocument } from "@sonobe/core";
 import { createRuntime, type SonobeRuntime } from "@sonobe/engine";
 import { createPatchRegistry } from "@sonobe/patches";
 import { createDomRenderer, createFontAssetRegistry, DomTextMeasurer, type DomRenderer, type LottiePlayerLike } from "@sonobe/renderer";
+import { playerPlatform } from "./platform.ts";
 
 let lottiePlayer: Promise<LottiePlayerLike> | null = null;
 
@@ -40,6 +42,7 @@ const stageHost = document.getElementById("stage") as HTMLElement;
 const statusEl = document.getElementById("status") as HTMLElement;
 const registry = createPatchRegistry();
 const measurer = new DomTextMeasurer();
+const platform = playerPlatform(window);
 
 let doc: SonobeDocument | null = null;
 let docId: string | null = null;
@@ -99,7 +102,7 @@ function show(message: Extract<Message, { type: "document" }>): void {
     runtime?.dispose();
     renderer?.dispose();
     stageHost.replaceChildren();
-    const next = createRuntime(message.doc, { registry, textMeasurer: measurer, resolveAssetUrl });
+    const next = createRuntime(message.doc, { registry, textMeasurer: measurer, resolveAssetUrl, platform });
     runtime = next;
     renderer = createDomRenderer(stageHost, { resolveAssetUrl, textMeasurer: measurer, loadLottie, onEvents: (events) => next.dispatch(events) });
     size = [0, 0];

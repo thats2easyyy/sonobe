@@ -11,6 +11,7 @@ npm run desktop    # Electron app
 npm test           # unit tests (Vitest)
 npm run typecheck
 npm run e2e        # Playwright end-to-end tests
+npm run test:ios   # Sonobe Viewer on an iOS Simulator (macOS with Xcode)
 ```
 
 Node 22.18+ is required. Node 24 is what CI uses.
@@ -32,6 +33,15 @@ Node 22.18+ is required. Node 24 is what CI uses.
 2. Implement it in `packages/patches/src/<category>/<type>.ts` with `definePatch(type, { state, evaluate })`, then add it to that category's `index.ts`.
 3. Test it in `<type>.test.ts` with the harness in `@sonobe/engine/testing`. Cover pulses, loops (per-index state), and edge cases.
 4. Regenerate the reference docs with `node packages/patches/scripts/generate-docs.ts`.
+
+## Working on Sonobe Viewer (iPhone)
+
+`apps/ios` is a small Swift app built with Xcode, not npm. It plays the web player (`apps/desktop/player`) in a WKWebView and adds a haptics bridge, so player changes reach it without Swift changes. [apps/ios/README.md](apps/ios/README.md) has the details.
+
+- Build for the Simulator, no signing needed: `xcodebuild -project apps/ios/SonobeViewer.xcodeproj -scheme SonobeViewer -sdk iphonesimulator -derivedDataPath apps/ios/build CODE_SIGNING_ALLOWED=NO build`.
+- Test with `npm run test:ios`. It serves a test prototype with the real player, runs the Swift unit and UI tests on a simulator, and checks the haptics the app played. It isn't part of CI, so run it when you change the app, the player, or the bridge.
+- To run on your own iPhone, copy `apps/ios/Config/Local.xcconfig.example` to `Local.xcconfig` and set your team and a bundle id of your own. Git ignores `Local.xcconfig`. Never commit a team ID, a bundle id of your own, or other signing settings to the project.
+- The bridge has two sides: `apps/desktop/player/platform.ts` and `apps/ios/SonobeViewer/Haptics.swift`. Change them together, and update ARCHITECTURE.md §9.2. A player test checks that the app's haptic types exist in the catalog.
 
 ## Code style
 

@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>NSAppTransportSecurity</key>
+	<dict>
+		<key>NSAllowsLocalNetworking</key>
+		<true/>
+	</dict>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>Sonobe Viewer connects to Sonobe on your computer to play the prototype you have open.</string>
+	<key>NSCameraUsageDescription</key>
+	<string>Scan the Preview on Phone code that Sonobe shows on your computer.</string>
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleURLName</key>
+			<string>dev.sonobe.viewer</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>sonobe-viewer</string>
+			</array>
+		</dict>
+	</array>
+</dict>
+</plist>
