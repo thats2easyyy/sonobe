@@ -7,7 +7,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createHeadlessHost, symbolsFromEnv, type HeadlessHost } from "./headless.ts";
 import { isHostError, type CapturedDesign, type DesignCaptureRequest, type HostCallControl } from "./host.ts";
 import { connectClient, tempProject, type TempProject, type TestClient } from "./test-helpers.ts";
-import { IMPORT_META_KEY, type ImportResultMeta } from "./tools/import.ts";
+import { IMPORT_META_KEY, offScreenNote, type ImportResultMeta } from "./tools/import.ts";
 
 let project: TempProject;
 let client: TestClient;
@@ -78,12 +78,41 @@ describe("import_design", () => {
     expect(outline).toContain('layer product_photo image "Product Photo"');
   });
 
+  it("notes a screen that lands entirely outside the device screen, and not one that's partly on it", async () => {
+    const note = "“Checkout” is at 482, 0, outside the 402 × 874 screen, so the canvas and viewer won't show it. Put new screens at [0, 0].";
+    const dry = await client.call("import_design", { capture, position: [482, 0], dryRun: true });
+    expect(dry.text).toContain(`Note: ${note}`);
+    const r = await client.call("import_design", { capture, position: [482, 0] });
+    expect(r.isError, r.text).toBe(false);
+    expect(r.text).toContain(`Note: ${note}`);
+    expect(r.structured.importNotes).toEqual([note]);
+    // The import isn't refused: the screen is there, beside the artboard.
+    expect((await client.call("get_outline", {})).text).toMatch(/layer checkout group "Checkout" @482,0 402x874/);
+    // A replace keeps the screen's place, so it still says so.
+    expect((await client.call("import_design", { capture, replace: "checkout" })).text).toContain(`Note: ${note}`);
+    const partly = await client.call("import_design", { capture, name: "Peek", position: [-300, 800] });
+    expect(partly.isError, partly.text).toBe(false);
+    expect(partly.text).not.toContain("outside the");
+    expect((await client.call("import_design", { capture, name: "Home" })).text).not.toContain("outside the");
+  });
+
   it("teaches when the source is missing, doubled, or not a capture", async () => {
     expect((await client.call("import_design", {})).text).toContain("needs a source");
     expect((await client.call("import_design", { html: "<p>hi</p>", url: "http://localhost:3000" })).text).toContain("only one");
     const bad = await client.call("import_design", { capture: { format: "sonobe.design-capture", version: 1 } });
     expect(bad.isError).toBe(true);
     expect(bad.text).toContain("isn't valid");
+  });
+});
+
+describe("offScreenNote", () => {
+  it("notes only a frame with no part on the artboard", () => {
+    const screen: [number, number] = [402, 874];
+    const outside = [[402, 0, 402, 874], [-402, 0, 402, 874], [0, 874, 402, 874], [0, -874, 402, 874], [-120, 300, 100, 44], [482, 0, 0, 0]] as const;
+    for (const frame of outside) expect(offScreenNote("Profile", frame, screen), frame.join()).not.toBeNull();
+    const on = [[0, 0, 402, 874], [401, 0, 402, 874], [-401, 0, 402, 874], [0, 873, 402, 874], [-10, -10, 1000, 2000], [0, 0, 0, 0]] as const;
+    for (const frame of on) expect(offScreenNote("Profile", frame, screen), frame.join()).toBeNull();
+    expect(offScreenNote(null, [482.25, 0, 402, 874], screen)).toBe("The draft is at 482.25, 0, outside the 402 × 874 screen, so the canvas and viewer won't show it. Put new screens at [0, 0].");
   });
 });
 

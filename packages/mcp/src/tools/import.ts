@@ -9,12 +9,12 @@
  * designPreviews.ts), and import_design's preview source imports that draft.
  */
 
-import { deviceScreenSize, findLayer, getOutline, type Id } from "@sonobe/core";
+import { artboardSize, deviceScreenSize, findLayer, getOutline, type Id } from "@sonobe/core";
 import { CAPTURE_TIMEOUT_MS, CaptureFormatError, globalFetcher, ImportPlanError, parseCapture, planImport, resolveCaptureFiles, type ImportPlan, type ImportSummary } from "@sonobe/import";
 import type { CallToolResult, ServerContext } from "@modelcontextprotocol/server";
 import { z } from "zod";
 import { draftBytes, draftKb, MAX_DRAFT_CHARS, NO_DRAFT_FIELDS, sessionKey, showsDesignPreviews, withDraft, type DesignDraft, type DesignDraftFields } from "../designPreviews.ts";
-import { plural } from "../format.ts";
+import { plural, roundForDisplay } from "../format.ts";
 import { requireComponent } from "../graph.ts";
 import { HostError, type CapturedDesign, type DocumentSnapshot } from "../host.ts";
 import type { ToolWork } from "../progress.ts";
@@ -64,7 +64,7 @@ const ImportDesignInput = z.object({
   name: z.string().max(80).optional().describe('Screen layer name (default: the page title). "Home", "Checkout".'),
   replace: z.string().nullable().optional().describe("Id of an earlier imported screen to replace, keeping the ids and wiring of layers found again. null imports a new screen, also over a preview draft's replace."),
   parent: z.string().optional().describe("Container layer for the screen (default: the component root)."),
-  position: z.tuple([z.number(), z.number()]).optional().describe("Screen position in its parent (default [0, 0])."),
+  position: z.tuple([z.number(), z.number()]).optional().describe("Screen position in its parent (default [0, 0]). Leave it out for a new screen."),
   index: z.number().int().optional().describe("Insert position among siblings (default: front)."),
   width: z.number().int().min(100).max(4000).optional().describe("Viewport width in points (default: the device width)."),
   height: z.number().int().min(100).max(8000).optional().describe("Viewport height in points (default: the device height)."),
@@ -106,6 +106,28 @@ export function screenOutline(outline: string, screenId: Id, max = OUTLINE_LINES
   return out;
 }
 
+/** A screen's place in its component. */
+type Frame = readonly [x: number, y: number, width: number, height: number];
+
+/**
+ * The note for a screen whose frame lies entirely outside its component's artboard: the canvas and viewer
+ * draw only the artboard, so nobody would see it. null when any part of it (its corner, when it has no size)
+ * is on the artboard.
+ */
+export function offScreenNote(name: string | null, [x, y, width, height]: Frame, [screenWidth, screenHeight]: readonly [number, number]): string | null {
+  if (x < screenWidth && y < screenHeight && x + Math.max(width, 1) > 0 && y + Math.max(height, 1) > 0) return null;
+  return `${name ? `“${name}”` : "The draft"} is at ${roundForDisplay(x)}, ${roundForDisplay(y)}, outside the ${screenWidth} × ${screenHeight} screen, so the canvas and viewer won't show it. Put new screens at [0, 0].`;
+}
+
+/** Where a plan puts its screen: null unless it's at the component's top level with a literal position and size. */
+function planFrame(plan: ImportPlan): Frame | null {
+  const add = plan.ops.find((op) => op.op === "addLayer" && op.layer.ref === plan.screenRef);
+  if (add?.op !== "addLayer" || add.parent) return null;
+  const { position, size } = add.layer.props ?? {};
+  const point = (value: unknown): value is [number, number] => Array.isArray(value) && value.length === 2 && value.every((n) => typeof n === "number");
+  return point(position) && point(size) ? [...position, ...size] : null;
+}
+
 export function registerImportTools(tc: ToolContext): void {
   const { host } = tc;
   const now = () => (tc.options.now ?? Date.now)();
@@ -118,6 +140,7 @@ export function registerImportTools(tc: ToolContext): void {
         "Draw the screen you're designing on the person's canvas while you write it: they watch the page take shape over the artboard, in a live preview that changes nothing in the document.",
         'Start the preview within your first few steps instead of planning the whole page first: "html" with the page\'s <head> (its theme, fonts and <style>) and its first section. Then send the rest in page order with "append", section by section. Each call should add about one visual group, so the person sees it take shape every few seconds. "html" again starts the draft over, and "clear" removes it.',
         'Pass "name" and, for a redesign, "replace" (the layer the design replaces, which the preview draws over) with the first call; fields you leave out later keep their values, and "replace": null makes it a new screen again.',
+        'Leave "position" out for a new screen, which goes at [0, 0]: the canvas and viewer draw only the device screen, so a screen placed beside it can\'t be seen. Until navigation is wired, the new screen covers the one behind it in the viewer, which is expected; offer to wire it (a tap that slides it in, say).',
         'When the page is complete, import it with import_design and "preview": true, which imports this draft with its fields without sending the html again. Write the page as for import_design\'s html (get_guide("importing")).',
         "Headless servers keep the draft without showing it. A draft left alone for 15 minutes is dropped.",
       ].join(" "),
@@ -128,7 +151,7 @@ export function registerImportTools(tc: ToolContext): void {
         replace: z.string().nullable().optional().describe("Id of the layer the design will replace (the preview draws over it); null makes it a new screen again."),
         width: z.number().int().min(100).max(4000).optional().describe("Viewport width in points (default: the device width)."),
         height: z.number().int().min(100).max(8000).optional().describe("Viewport height in points (default: the device height)."),
-        position: z.tuple([z.number(), z.number()]).optional().describe("Where the screen goes in the component (default [0, 0])."),
+        position: z.tuple([z.number(), z.number()]).optional().describe("Where the screen goes in the component (default [0, 0]). Leave it out for a new screen."),
         html: z.string().optional().describe("Starts the draft, or starts it over: the page so far."),
         append: z.string().optional().describe("Adds to the end of the current draft."),
         clear: z.boolean().optional().describe("Removes the draft and its preview without importing."),
@@ -189,12 +212,15 @@ export function registerImportTools(tc: ToolContext): void {
         // Named on every call, so a replace kept from an earlier call is never a surprise.
         const over = replaced ? ` over “${replaced.name}”, which it replaces` : "";
         const replacing = replaced ? `, which replaces “${replaced.name}”` : "";
+        // A redesign draws over the layer it replaces; a new screen at its position.
+        const artboard = artboardSize(snap.doc, component.id);
+        const away = replaced ? null : offScreenNote(fields.name, [...(fields.position ?? [0, 0]), fields.width ?? artboard[0], fields.height ?? artboard[1]], artboard);
         const text = shows
           ? `Showing ${fields.name ? `“${fields.name}”` : "the draft"} on the canvas${over} (${kb} KB so far). Add the next part with append, then import it with import_design and "preview": true.`
           : host.kind === "headless"
             ? `Kept the draft${named}${replacing} (${kb} KB). This is headless mode with no canvas, so nobody sees it; import it with import_design and "preview": true.`
             : `Kept the draft${named}${replacing} (${kb} KB). This Sonobe host can't show it on the canvas; import it with import_design and "preview": true.`;
-        return draftResult(text, snap, draft, bytes, note);
+        return draftResult(away ? `${text}\nNote: ${away}` : text, snap, draft, bytes, note);
       });
     },
   );
@@ -295,7 +321,9 @@ export function registerImportTools(tc: ToolContext): void {
     }
     work.throwIfCancelled();
     const s = plan.summary;
-    const importNotes = [...plan.notes, ...(captured.notes ?? [])];
+    const frame = planFrame(plan);
+    const away = frame && offScreenNote(plan.screenName, frame, artboardSize(current.doc, component.id));
+    const importNotes = [...(away ? [away] : []), ...plan.notes, ...(captured.notes ?? [])];
     const meta = (screenId: string | null, txnId: string | null): ImportResultMeta => ({
       docId: snap.docId,
       dryRun: !!args.dryRun,
@@ -377,7 +405,8 @@ export function registerImportTools(tc: ToolContext): void {
         'For HTML: write one complete static page that reproduces the screen faithfully (real copy, colors, spacing, fonts, icons as inline SVG, and SF Symbols as <svg data-sf-symbol="heart.fill"></svg> sized and colored by CSS font-size, font-weight and color, which Sonobe on a Mac draws as the real symbol), size the layout for "width", and put data-name="Like Button" on elements you\'ll wire, text included, so their layers get those names. <style> and CDN scripts such as Tailwind work.',
         'To iterate on a design, import it again with "replace" set to the earlier screen\'s id: layers found again keep their ids, and the interactions wired to them keep working.',
         "dryRun plans the import without changing anything; with replace it names the layers that wouldn't be found again.",
-        'The screen lands at [0, 0] of the component (or "parent"/"position"), sized to the document\'s device unless width/height say otherwise. Pages taller than the screen get a Content layer with a Scroll patch, and so do scroll containers. Read get_guide("importing") before your first import.',
+        'The screen lands at [0, 0] of the component, sized to the document\'s device unless width/height say otherwise. Leave "position" out for a new screen: the canvas and viewer draw only the device screen, so a screen placed beside it can\'t be seen. Until navigation is wired, the new screen covers the one behind it in the viewer, which is expected; offer to wire it (a tap that slides it in, say).',
+        'Pages taller than the screen get a Content layer with a Scroll patch, and so do scroll containers. Read get_guide("importing") before your first import.',
         "A capture sends progress while it runs and stops after 90 seconds plus waitMs with an error naming the step; cancelling the call before the screen is added changes nothing.",
       ].join(" "),
       input: ImportDesignInput,
