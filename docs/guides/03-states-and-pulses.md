@@ -36,8 +36,8 @@ The tap existed for one frame. The Switch turned that moment into something that
 Pulses are too short to read as numbers, so Sonobe draws them for you:
 
 - Pulse ports have their own glyph, so you can tell a pulse input from a boolean input before you connect anything.
-- When a pulse fires, a spark travels along its cable. You'd miss a one-frame value, but you won't miss the spark.
-- A boolean cable glows while its value is true. A steady glow means a state is on.
+- When a pulse fires, a glowing orb travels along its cable. You'd miss a one-frame value, but you won't miss the orb.
+- A boolean cable glows while its value is true. A steady glow means a state is on. Each time the state turns on, an orb travels the cable, and a fainter one when it turns off.
 - Hovering any port shows its live value.
 - The Diagnostics panel warns you when a pulse is wired into an input that expects a state.
 
@@ -162,7 +162,7 @@ Down is wired into Flip inside a scrolling list. Down turns true the instant a f
 
 1. Wire Down into Flip. Before testing, predict whether the Switch changes on press or on release, then check.
 2. Build the self-hiding toast.
-3. Wire Tap into a Transition's Progress on purpose. Watch for the spark, then read what Diagnostics says.
+3. Wire Tap into a Transition's Progress on purpose. Watch for the orb, then read what Diagnostics says.
 4. Count taps only while a menu is open. Feed an And of Tap and the menu's Switch into a Counter's Increase.
 5. Use Pulse's Turned Off output to play a small bounce when a finger lifts off a button.
 
@@ -172,4 +172,4 @@ Down is wired into Flip inside a scrolling list. Down turns true the instant a f
 - Using Not on a pulse to mean "not tapped". It's true nearly all the time.
 - Expecting a pulse input to fire when a state turns off. Pulse inputs only see rising edges, so use Pulse's Turned Off.
 - Forgetting that touches bubble up, so a tap on a child layer is also a tap on its parent.
-- Trying to catch a pulse by hovering its port. Watch for the spark, or ask Claude for a frame-by-frame trace.
+- Trying to catch a pulse by hovering its port. Watch for the orb, or ask Claude for a frame-by-frame trace.

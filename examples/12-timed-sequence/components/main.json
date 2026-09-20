@@ -409,7 +409,7 @@
         "progress": { "link": "title_fade.output" },
         "start": [201, 462]
       },
-      "ui": { "x": 820, "y": 790 }
+      "ui": { "x": 868, "y": 790 }
     },
     "button_fade": {
       "type": "classicAnimation",
@@ -420,7 +420,7 @@
         "duration": 0.3,
         "number": { "link": "button_wait.done" }
       },
-      "ui": { "x": 560, "y": 940 }
+      "ui": { "x": 608, "y": 940 }
     },
     "button_wait": {
       "type": "wait",
@@ -429,7 +429,7 @@
         "duration": 1.5,
         "start": { "link": "started.started" }
       },
-      "ui": { "x": 300, "y": 940 }
+      "ui": { "x": 348, "y": 940 }
     },
     "check_draw": {
       "type": "classicAnimation",
@@ -440,7 +440,7 @@
         "duration": 0.45,
         "number": { "link": "check_wait.done" }
       },
-      "ui": { "x": 560, "y": 490 }
+      "ui": { "x": 608, "y": 490 }
     },
     "check_shape": {
       "type": "svgPathShape",
@@ -459,7 +459,7 @@
         "duration": 0.45,
         "start": { "link": "started.started" }
       },
-      "ui": { "x": 300, "y": 490 }
+      "ui": { "x": 348, "y": 490 }
     },
     "circle_scale": {
       "type": "transition",
@@ -470,7 +470,7 @@
         "progress": { "link": "circle_spring.output" },
         "start": 0
       },
-      "ui": { "x": 820, "y": 340 }
+      "ui": { "x": 868, "y": 340 }
     },
     "circle_spring": {
       "type": "popAnimation",
@@ -481,7 +481,7 @@
         "number": { "link": "circle_wait.done" },
         "speed": 12
       },
-      "ui": { "x": 560, "y": 340 }
+      "ui": { "x": 608, "y": 340 }
     },
     "circle_wait": {
       "type": "wait",
@@ -490,7 +490,7 @@
         "duration": 0.1,
         "start": { "link": "started.started" }
       },
-      "ui": { "x": 300, "y": 340 }
+      "ui": { "x": 348, "y": 340 }
     },
     "details_position": {
       "type": "transition",
@@ -501,7 +501,7 @@
         "progress": { "link": "details_spring.output" },
         "start": [24, 900]
       },
-      "ui": { "x": 820, "y": 940 }
+      "ui": { "x": 868, "y": 940 }
     },
     "details_spring": {
       "type": "popAnimation",
@@ -512,7 +512,7 @@
         "number": { "link": "details_wait.done" },
         "speed": 12
       },
-      "ui": { "x": 560, "y": 790 }
+      "ui": { "x": 608, "y": 790 }
     },
     "details_wait": {
       "type": "wait",
@@ -521,13 +521,13 @@
         "duration": 1.15,
         "start": { "link": "started.started" }
       },
-      "ui": { "x": 300, "y": 790 }
+      "ui": { "x": 348, "y": 790 }
     },
     "replay": {
       "type": "restartPrototype",
       "name": "Replay",
       "inputs": { "restart": { "link": "tap_replay.tap" } },
-      "ui": { "x": 300, "y": 1240 }
+      "ui": { "x": 348, "y": 1240 }
     },
     "ring_scale": {
       "type": "transition",
@@ -538,7 +538,7 @@
         "progress": { "link": "circle_spring.output" },
         "start": 0.5
       },
-      "ui": { "x": 820, "y": 490 }
+      "ui": { "x": 868, "y": 490 }
     },
     "started": {
       "type": "whenPrototypeStarts",
@@ -561,7 +561,7 @@
         "duration": 0.4,
         "number": { "link": "title_wait.done" }
       },
-      "ui": { "x": 560, "y": 640 }
+      "ui": { "x": 608, "y": 640 }
     },
     "title_rise": {
       "type": "transition",
@@ -572,7 +572,7 @@
         "progress": { "link": "title_fade.output" },
         "start": [201, 422]
       },
-      "ui": { "x": 820, "y": 640 }
+      "ui": { "x": 868, "y": 640 }
     },
     "title_wait": {
       "type": "wait",
@@ -581,7 +581,7 @@
         "duration": 0.8,
         "start": { "link": "started.started" }
       },
-      "ui": { "x": 300, "y": 640 }
+      "ui": { "x": 348, "y": 640 }
     }
   },
   "comments": []

@@ -1,7 +1,7 @@
-import { applyOps, createEmptyDocument, createRegistry, deviceScreenSize } from "@sonobe/core";
+import { applyOps, createEmptyDocument, createRegistry, deviceScreenSize, type LayerNode, type SonobeDocument } from "@sonobe/core";
 import { buildDoc, createTestRuntime } from "@sonobe/engine/testing";
 import { describe, expect, it } from "vitest";
-import { devicePresetOps, emptyLoopNotice, fitScale, formatFps, interactiveLayerIds, layerScreenRect, nodesForLayers, outlinePoints, phoneClientsLabel, presetForDevice, qrPath, rotateDeviceOps, sceneKeysForLayers } from "./viewerModel.ts";
+import { componentInPrototype, devicePresetOps, emptyLoopNotice, fitScale, formatFps, interactiveLayerIds, layerSceneRect, layerScreenRect, nodesForLayers, outlinePoints, phoneClientsLabel, presetForDevice, qrPath, rotateDeviceOps, sceneKeysForLayers } from "./viewerModel.ts";
 
 describe("layerScreenRect", () => {
   it("maps a layer's box through the stage's client rect", () => {
@@ -13,6 +13,22 @@ describe("layerScreenRect", () => {
     expect(layerScreenRect(scene, "missing", stage)).toBeNull();
     expect(layerScreenRect(null, "card", stage)).toBeNull();
     expect(layerScreenRect(scene, "card", { ...stage, width: 0 })).toBeNull();
+    expect(layerSceneRect(scene, "card")).toEqual({ x: 40, y: 80, width: 100, height: 50 });
+    expect(layerSceneRect(scene, "missing")).toBeNull();
+  });
+
+  it("knows which components the running prototype can draw: the root and what's placed in it", () => {
+    const layer = (id: string, component?: string, children: LayerNode[] = []) => ({ id, type: component ? "componentInstance" : "group", name: id, props: {}, ...(component ? { component } : {}), children });
+    const doc = {
+      project: { root: "main" },
+      components: {
+        main: { layers: [layer("stack", undefined, [layer("card_1", "card")])] },
+        card: { layers: [layer("avatar_1", "avatar"), layer("self", "card")] },
+        avatar: { layers: [] },
+        loose: { layers: [] },
+      },
+    } as unknown as SonobeDocument;
+    expect(["main", "card", "avatar", "loose"].map((id) => componentInPrototype(doc, id))).toEqual([true, true, true, false]);
   });
 
   it("counts connected phones", () => {

@@ -10,7 +10,7 @@ import { categoryColorVar } from "../../../theme/tokens.ts";
 import { Button } from "../../../ui/Button.tsx";
 import { Popover } from "../../../ui/Popover.tsx";
 import { PRESENCE_FLASH_MS } from "../../../state/presence.ts";
-import { loopLengthOf } from "@sonobe/core/graph";
+import { loopBadgeReserve, loopLengthOf } from "@sonobe/core/graph";
 import type { CommentFlowNode, InterfaceFlowNode, LayerFlowNode, NodeIssue, PatchFlowNode } from "../model/types.ts";
 import { usePatchEditor, useLiveValue, useUi } from "../state/context.ts";
 import { CATEGORY_ICONS, LAYER_ICONS } from "./icons.ts";
@@ -170,7 +170,7 @@ export const PatchNodeView = memo(function PatchNodeView({ id, data, selected }:
         )}
         {showVariant && <span className="sb-pe-chip">{typeLabel(data.typeParam!).replace(/ \[.*\]$/, "").replace(/^on\/off \(boolean\)$/, "boolean")}</span>}
         {showLoop && (
-          <span className="sb-pe-node__loop sb-tabular" aria-label={loopLength !== undefined ? `Loop of ${loopLength}` : "Loop"}>
+          <span className="sb-pe-node__loop sb-tabular" data-reserve={loopBadgeReserve(loopLength ?? (liveEnabled ? 0 : undefined))} aria-label={loopLength !== undefined ? `Loop of ${loopLength}` : "Loop"}>
             ×{loopLength ?? ""}
           </span>
         )}
@@ -247,7 +247,7 @@ export const InterfaceNodeView = memo(function InterfaceNodeView({ id, data, sel
         </span>
         <span className="sb-pe-node__title">{data.title}</span>
       </header>
-      <PortRows nodeId={id} inputs={data.inputs} outputs={data.outputs} editable={false} />
+      <PortRows nodeId={id} inputs={data.inputs} outputs={data.outputs} editable={false} showsLive={false} />
     </div>
   );
 });

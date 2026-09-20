@@ -204,6 +204,7 @@ export function registerImportTools(tc: ToolContext): void {
         label: args.label?.trim() || `${args.replace ? "re-imported" : "imported"} ${plan.screenName}`,
         author: tc.author(ctx),
         expectedRevision: current.revision,
+        source: "import",
         signal: work.signal,
       });
       const screenId = result.idMap[plan.screenRef] ?? result.idMap[`$${plan.screenRef}`];

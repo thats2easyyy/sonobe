@@ -206,6 +206,8 @@ try {
   }, { message: "the pasted screen" });
   assert(/"image":\{"asset":"[a-z_0-9]+"\}/.test(pasted.slice(pasted.indexOf("Remote Avatar") - 400)), "the linked image downloaded as an asset", pasted.slice(pasted.indexOf("Remote Avatar") - 200, pasted.indexOf("Remote Avatar") + 200));
 
+  // A pasted capture builds as a hologram on the canvas; shoot the screen once it has landed.
+  await poll(() => win.evaluate(() => document.querySelector(".sb-holo") === null), { timeout: 10_000, message: "the pasted screen's hologram" });
   await win.screenshot({ path: path.join(screenshotsDir, "import-editor.png") });
 
   log("colorScheme with a screenshot (url and html)");

@@ -7,16 +7,19 @@
  */
 
 import { parseAddress } from "../address.ts";
+import { getOwn } from "../ids.ts";
 import { effectiveKnobLiteral, formatKnobValue, getKnob } from "../knobs.ts";
+import { loopShapes, ONE_ITEM_PER, type LoopShape, type LoopShapes } from "../loopShapes.ts";
 import { patchDisplayName } from "../names.ts";
 import { listInputs, targetAddress, type InputEntry } from "../ops/references.ts";
 import { findLayer, getPatchSpec, interfacePortToPort, resolveLayerOutputs, resolveLayerProps, resolveNodePorts, type ResolvedPort, type ResolvedPorts, type ResolvedProp } from "../registry.ts";
 import type { Component, Diagnostic, Id, InputValue, LayerNode, PatchNode, Registry, SonobeDocument, Suggestion, ValueType } from "../types.ts";
 import { canConnect, defaultForPort, isLayerInput, isLinkInput, isLoopLiteral, normalizeColor } from "../values.ts";
 import { deepEqual } from "./equal.ts";
+import { knobValueReserve } from "./format.ts";
 import { createPlacementIndex, PLACEMENT_PADDING, type Rect } from "./geometry.ts";
 import { INPUTS_NODE_ID, layerNodeId, OUTPUTS_NODE_ID, readNodePositions } from "./graphNodes.ts";
-import { estimateNodeSize, type NodeTextMeasurer } from "./nodeSize.ts";
+import { estimateNodeSize, knobValueRoom, liveRooms, type NodeTextMeasurer } from "./nodeSize.ts";
 import {
   cableId,
   commentNodeId,
@@ -122,7 +125,8 @@ function knobChip(doc: SonobeDocument, link: string): PortModel["knob"] {
   if (!knob) return { id: a.key, name: a.key };
   const value = effectiveKnobLiteral(doc.knobs!, knob.id);
   const color = knob.type === "color" && typeof value === "string" ? normalizeColor(value) : undefined;
-  return { id: knob.id, name: knob.name, ...(value !== undefined && value !== null ? { valueText: formatKnobValue(knob, value) } : {}), ...(color ? { color } : {}) };
+  const reserve = knobValueReserve(knob);
+  return { id: knob.id, name: knob.name, ...(value !== undefined && value !== null ? { valueText: formatKnobValue(knob, value), ...(reserve ? { valueReserve: reserve } : {}) } : {}), ...(color ? { color } : {}) };
 }
 
 function toPortModel(port: ResolvedPort, side: PortSide, address: string, connected: boolean, defaultOverride?: unknown): PortModel {
@@ -242,16 +246,44 @@ export function deriveGraph(options: DeriveGraphOptions): GraphModel {
 
   // -- Static loops ---------------------------------------------------------
   const looped = new Set<Id>();
+  // A layer that makes copies loops what reads it (a Drag on a repeated card, a repeated tile's
+  // position), as loopShapes counts its copies. One copy, or none, reads as one layer.
+  let shapes: LoopShapes | undefined;
+  const layerShapes = () => (shapes ??= loopShapes(doc, componentId, registry));
+  const manyItems = (shape: LoopShape | null) => !!shape && (shape.length === null || shape.length > 1);
+  /** The output carries a loop: it's a whole-loop output, its patch runs once per item, or it's read from a layer's copies. */
   const outputIsLoop = (address: string): boolean => {
     const a = parseAddress(address);
+    if (a?.kind === "layer") return manyItems(layerShapes().ofLink(address));
     if (!a || a.kind !== "patch") return false;
     const port = patchPorts.get(a.id)?.outputs.find((p) => p.key === a.key);
     return !!port && (port.wholeLoop === true || looped.has(a.id));
   };
+  const picking = new Set<Id>();
+  /**
+   * What reads the output runs once per item: it carries a loop, unless it's a whole-loop output with
+   * one item per item of an input that gets a single value (ONE_ITEM_PER). That one-item loop runs
+   * what reads it once, and what comes out is a plain value.
+   */
+  const outputFeedsLoop = (address: string): boolean => {
+    if (!outputIsLoop(address)) return false;
+    const a = parseAddress(address);
+    if (a?.kind !== "patch") return true;
+    const node = component.patches[a.id];
+    const picks = node ? getOwn(ONE_ITEM_PER, node.type) : undefined;
+    if (!node || picks === undefined || !patchPorts.get(a.id)?.outputs.find((p) => p.key === a.key)?.wholeLoop) return true;
+    if (picking.has(a.id)) return false;
+    picking.add(a.id);
+    const value = node.inputs[picks];
+    const loop = (isLoopLiteral(value) && value.loop.length !== 1) || (isLinkInput(value) && outputFeedsLoop(stripIndex(value.link)));
+    picking.delete(a.id);
+    return loop;
+  };
   const inputFeedsLoop = (id: Id, key: string, value: InputValue) => {
     const port = patchPorts.get(id)?.inputs.find((p) => p.key === key);
     if (port?.wholeLoop) return false;
-    return isLoopLiteral(value) || (isLinkInput(value) && outputIsLoop(stripIndex(value.link)));
+    if (isLayerInput(value)) return manyItems(layerShapes().ofValue(value, id));
+    return isLoopLiteral(value) || (isLinkInput(value) && outputFeedsLoop(stripIndex(value.link)));
   };
   for (let changed = true, guard = 0; changed && guard <= Object.keys(component.patches).length + 1; guard++) {
     changed = false;
@@ -268,6 +300,7 @@ export function deriveGraph(options: DeriveGraphOptions): GraphModel {
   const visiting = new Set<Id>();
   const outputLength = (address: string): number | null => {
     const a = parseAddress(address);
+    if (a?.kind === "layer") return layerShapes().ofLink(address)?.length ?? null;
     if (!a || a.kind !== "patch") return null;
     const ports = patchPorts.get(a.id);
     const port = ports?.outputs.find((p) => p.key === a.key);
@@ -288,7 +321,7 @@ export function deriveGraph(options: DeriveGraphOptions): GraphModel {
     let length: number | null = 0;
     for (const [key, value] of Object.entries(component.patches[id]?.inputs ?? {})) {
       if (!inputFeedsLoop(id, key, value)) continue;
-      const n = isLoopLiteral(value) ? value.loop.length : isLinkInput(value) ? outputLength(stripIndex(value.link)) : null;
+      const n = isLoopLiteral(value) ? value.loop.length : isLinkInput(value) ? outputLength(stripIndex(value.link)) : isLayerInput(value) ? (layerShapes().count(value.layer) ?? null) : null;
       if (n === null) {
         length = null;
         break;
@@ -312,6 +345,19 @@ export function deriveGraph(options: DeriveGraphOptions): GraphModel {
   const patchData = new Map<Id, PatchNodeData>();
   const estimateOptions = { ...(options.measure ? { measure: options.measure } : {}), layerName: (id: Id) => findLayer(component.layers, id)?.layer.name };
   const sizeOf = (id: string, data: Parameters<typeof estimateNodeSize>[0]) => options.sizes?.get(id) ?? estimateNodeSize(data, estimateOptions);
+  /**
+   * Outputs in rows long enough to reach the maximum width get their liveRoom, which caps the live
+   * value's slot, and knob chips whose name leaves less than the value's reserve get its valueRoom.
+   */
+  const capLiveValues = (data: Parameters<typeof liveRooms>[0]) => {
+    liveRooms(data, estimateOptions).forEach((room, i) => {
+      if (room !== undefined) data.outputs[i]!.liveRoom = room;
+    });
+    for (const input of data.inputs) {
+      const room = input.knob ? knobValueRoom(input.knob, options.measure) : undefined;
+      if (room !== undefined) input.knob!.valueRoom = room;
+    }
+  };
 
   const previousCache = options.previous ? patchCaches.get(options.previous) : undefined;
   const loopFree = looped.size === 0 && !wholeLoopOutputs;
@@ -416,6 +462,7 @@ export function deriveGraph(options: DeriveGraphOptions): GraphModel {
     }
     if (node.component !== undefined) data.componentTarget = node.component;
     if (layerRef !== undefined) data.layerRef = layerRef;
+    capLiveValues(data);
     const flowNode: PatchGraphNode = { id, type: "patch", position: { x: node.ui.x, y: node.ui.y }, data };
     nodes.push(flowNode);
     patchData.set(id, data);
@@ -517,7 +564,15 @@ export function deriveGraph(options: DeriveGraphOptions): GraphModel {
       .map((p) => toPortModel(p, "in", `@${layerId}.${p.key}`, false));
     const inputs = register([...driven, ...undriven]);
     const readable = [...info.outputs, ...info.props.filter((p) => !info.outputs.some((o) => o.key === p.key))];
-    const outputs = register(readable.filter((p) => readKeys.has(p.key)).map((p) => toPortModel(p, "out", `@${layerId}.${p.key}`, true)));
+    const outputs = register(
+      readable
+        .filter((p) => readKeys.has(p.key))
+        .map((p) => {
+          const model = toPortModel(p, "out", `@${layerId}.${p.key}`, true);
+          if (outputIsLoop(model.address)) model.loop = true;
+          return model;
+        }),
+    );
     for (const o of outputs) outputAddresses.push(o.address);
     const spec = registry.layers.get(info.layer.type);
     const data = {
@@ -531,6 +586,7 @@ export function deriveGraph(options: DeriveGraphOptions): GraphModel {
       outputs,
       issues: (issuesByItem.get(layerId) ?? EMPTY_ISSUES).filter((i) => i.port === undefined || boundKeys.has(i.port)),
     };
+    capLiveValues(data);
     const size = sizeOf(nodeId, data);
     const drivers = [...(driversOf.get(layerId) ?? [])].map(rectOfPatch).filter((r): r is Rect => !!r);
     const readers = [...(readersOf.get(layerId) ?? [])].map(rectOfPatch).filter((r): r is Rect => !!r);
@@ -551,6 +607,7 @@ export function deriveGraph(options: DeriveGraphOptions): GraphModel {
   if (inPorts.length) {
     const outputs = register(inPorts.map((p) => toPortModel(interfacePortToPort(p, "input"), "out", `$in.${p.key}`, consumed.has(`$in.${p.key}`))));
     const data = { kind: "interface" as const, componentId, side: "inputs" as const, title: "Component Inputs", inputs: [], outputs };
+    capLiveValues(data);
     const size = sizeOf(INPUTS_NODE_ID, data);
     const flowNode: InterfaceGraphNode = { id: INPUTS_NODE_ID, type: "interface", position: place(INPUTS_NODE_ID, size, { x: bbox.minX - size.width - 120, y: bbox.minY }), data };
     nodes.push(flowNode);
@@ -592,7 +649,7 @@ export function deriveGraph(options: DeriveGraphOptions): GraphModel {
     const sourceType: ValueType = sourcePort(l.from)?.type ?? "any";
     const targetType: ValueType = targetPort(l.entry)?.type ?? "any";
     const check = canConnect(sourceType, targetType);
-    const data: CableData = { from: l.from, to: l.to, sourceType, targetType, loop: outputIsLoop(l.from) };
+    const data: CableData = { from: l.from, to: l.to, sourceType, targetType, loop: outputFeedsLoop(l.from) };
     if (check.conversion) data.conversion = check.conversion;
     const issue = cableIssues.get(l.to);
     if (issue) {

@@ -3,7 +3,8 @@
  * can screenshot them. The canvas registers "canvas.bounds", the patch editor "graph.bounds", and
  * the viewer "viewer.layerBounds" ({ layerId, key? }). Rects are viewport CSS pixels; `scale` is CSS
  * pixels per point (canvas or graph zoom, viewer scale). The RPC handlers expose each method only
- * while a provider exists, so the desktop can tell what's capturable.
+ * while a provider exists, so the desktop can tell what's capturable. Settlers hold a capture back
+ * while a surface shows something passing (the import hologram), so screenshots show the design.
  *
  * ```ts
  * useEffect(() => session.bounds.register("canvas.bounds", () => rectOfElement(ref.current, viewport.zoom)), [session, viewport.zoom]);
@@ -31,6 +32,12 @@ export interface BoundsRegisterOptions {
   fallback?: boolean;
 }
 
+/** What a screenshot captures: a bounds method, or the whole viewer ("viewer.bounds"). */
+export type CaptureTarget = BoundsMethod | "viewer.bounds";
+
+/** Resolves once `target` shows no passing animation a screenshot shouldn't catch (the import hologram). */
+export type BoundsSettler = (target: CaptureTarget) => Promise<void> | void;
+
 export interface BoundsRegistry {
   /** Register a provider; the newest one answers. Returns unregister. */
   register(method: BoundsMethod, provider: BoundsProvider, options?: BoundsRegisterOptions): () => void;
@@ -40,8 +47,12 @@ export interface BoundsRegistry {
   methods(): BoundsMethod[];
   /** Called when providers are added or removed. */
   subscribe(cb: () => void): () => void;
-  /** Ask the current provider; null when there's none or it has nothing to show. */
+  /** Ask the current provider, once the surface has settled; null when there's none or it has nothing to show. */
   measure(method: BoundsMethod, params?: Record<string, unknown>): Promise<BoundsRect | null>;
+  /** Add a wait every capture makes before it measures. Returns remove. */
+  addSettler(settler: BoundsSettler): () => void;
+  /** Wait for every settler (measure does; the viewer's own capture calls it). */
+  settle(target: CaptureTarget): Promise<void>;
 }
 
 export const isBoundsMethod = (value: unknown): value is BoundsMethod => typeof value === "string" && (BOUNDS_METHODS as readonly string[]).includes(value);
@@ -74,6 +85,10 @@ export function createBoundsRegistry(): BoundsRegistry {
   }
   const providers = new Map<BoundsMethod, Entry[]>();
   const listeners = new Set<() => void>();
+  const settlers = new Set<BoundsSettler>();
+  const settle = async (target: CaptureTarget) => {
+    await Promise.all([...settlers].map((settler) => settler(target)));
+  };
   const notify = () => {
     for (const cb of [...listeners]) cb();
   };
@@ -113,9 +128,18 @@ export function createBoundsRegistry(): BoundsRegistry {
       };
     },
     async measure(method, params = {}) {
+      if (!get(method)) return null;
+      await settle(method);
       const provider = get(method);
       if (!provider) return null;
       return normalizeRect(await provider(params));
     },
+    addSettler(settler) {
+      settlers.add(settler);
+      return () => {
+        settlers.delete(settler);
+      };
+    },
+    settle,
   };
 }

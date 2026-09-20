@@ -30,6 +30,9 @@ test.describe("one watched loop copy across the patch editor and the inspector",
     await expect(index.locator(".sb-pe-port__live")).toHaveText("×3 0…");
     const chip = page.getByRole("group", { name: "Watched loop copy" });
     await expect(chip).toContainText("3 copies");
+    // Watching a copy keeps every node's width: a loop's slot has room for its summary and any copy.
+    const widths = () => Promise.all(["dot_rows", "dot_grid"].map((id) => flowNode(page, id).evaluate((el) => (el as HTMLElement).offsetWidth)));
+    const everyCopy = await widths();
 
     // Hover the port, then sweep onto the table: each row watches its copy.
     await index.hover();
@@ -48,6 +51,7 @@ test.describe("one watched loop copy across the patch editor and the inspector",
     await expect(card).toBeHidden();
     await expect(index.locator(".sb-pe-port__live")).toHaveText("#2 2");
     await expect(chip).toContainText("Copy #2 of 3");
+    expect(await widths()).toEqual(everyCopy);
 
     // The arrows wrap around the copies.
     await chip.getByRole("button", { name: "Watch the next copy" }).click();

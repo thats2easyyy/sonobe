@@ -225,6 +225,14 @@ export const LOOP_PATCH_SPECS: PatchSpec[] = [
     outputs: [port("output", "number", { wholeLoop: true })],
   },
   {
+    type: "loopSelect",
+    name: "Loop Select",
+    category: "loops",
+    summary: "Picks items out of a loop by position.",
+    inputs: [port("loop", "number", { wholeLoop: true, default: { loop: [] } }), port("index", "number", { wholeLoop: true, default: 0 })],
+    outputs: [port("output", "number", { wholeLoop: true })],
+  },
+  {
     type: "drag",
     name: "Drag",
     category: "interaction",

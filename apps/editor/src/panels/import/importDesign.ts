@@ -10,6 +10,7 @@ import { globalFetcher, ImportPlanError, looksLikeCapture, parseCapture, planImp
 import { getDesktopHostApi } from "../../host/detect.ts";
 import type { DesktopHostApi } from "../../host/types.ts";
 import type { EditorSession } from "../../state/session.ts";
+import { hologramStore } from "./hologram.ts";
 import { captureHtmlInIframe } from "./iframeCapture.ts";
 
 export interface ImportDesignRequest {
@@ -178,13 +179,22 @@ export async function importCapture(session: EditorSession, capture: DesignCaptu
   // The last point where a cancel stops the import: from here on it lands as one undo step.
   if (options.signal?.aborted) return CANCELLED;
   for (const file of plan.files) session.assets.storeBytes(file.file, file.bytes);
-  const result = session.document.getState().apply(plan.ops, { label: `${options.replace ? "Re-import" : "Import"} “${plan.screenName}”` });
+  const result = session.document.getState().apply(plan.ops, { label: `${options.replace ? "Re-import" : "Import"} “${plan.screenName}”`, source: "import" });
   if (!result.ok) {
     const error = result.errors[0];
     return { ok: false, message: error?.message ?? "The design couldn't be added.", ...(error?.hint ? { hint: error.hint } : {}) };
   }
   const screenId = result.idMap[plan.screenRef] ?? result.idMap[`$${plan.screenRef}`];
-  if (screenId) session.selection.getState().select({ layers: [screenId] });
+  if (screenId) {
+    session.selection.getState().select({ layers: [screenId] });
+    // The canvas builds the new screen as a hologram (the dialog, pasted captures). The import has
+    // landed either way, so a failing build animation mustn't turn it into an error.
+    try {
+      hologramStore(session).getState().build({ componentId, screenId });
+    } catch {
+      // Only the animation is lost.
+    }
+  }
   return { ok: true, ...(screenId ? { screenId } : {}), screenName: plan.screenName, summary: plan.summary, notes: plan.notes };
 }
 

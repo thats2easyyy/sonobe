@@ -718,6 +718,8 @@ try {
       log(listedInPanel ? "the AI Activity panel lists Claude's changes" : "opened AI Activity (entries weren't found by text)");
     }
   }
+  // Reveal and undo bring nodes in with the patch editor's arrival wave; shoot the graph once it settles.
+  if (mode === "editor") await poll(() => page.evaluate(() => document.querySelector(".sb-pe [data-appear]") === null), { timeout: 5000, message: "the patch editor's arrivals" });
   await page.screenshot({ path: editorScreenshotPath });
   log(`renderer history has Claude's changes; presence, reveal and selection ok; window → ${path.relative(process.cwd(), editorScreenshotPath)}`);
 

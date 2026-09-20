@@ -148,9 +148,10 @@ describe("knob addresses", () => {
     const model = deriveGraph({ doc, componentId: "main", registry: mockRegistry });
     const input = (m: typeof model, node: string, key: string) => (m.nodes.find((n) => n.id === node)!.data as PatchNodeData | LayerNodeData).inputs.find((p) => p.key === key)!;
     expect(input(model, "pop", "number")).toMatchObject({ connected: true, link: "$knob.gap", knob: { id: "gap", name: "Gap", valueText: "8 pt" } });
-    expect(input(model, layerNodeId("card"), "cornerRadius").knob).toEqual({ id: "gap", name: "Gap", valueText: "8 pt" });
+    // Without a range, the chip keeps "-999 pt" for the value its field scrubs through.
+    expect(input(model, layerNodeId("card"), "cornerRadius").knob).toEqual({ id: "gap", name: "Gap", valueText: "8 pt", valueReserve: 7 });
     expect(model.edges).toEqual([]);
-    expect(nodeShapeFromData(model.nodes.find((n) => n.id === "pop")!.data as PatchNodeData).rows[0]!.in!.value).toEqual({ kind: "knob", name: "Gap", text: "8 pt" });
+    expect(nodeShapeFromData(model.nodes.find((n) => n.id === "pop")!.data as PatchNodeData).rows[0]!.in!.value).toEqual({ kind: "knob", name: "Gap", text: "8 pt", reserve: 7 });
     // A tune changes no patch, so the cached node must still pick up the new value.
     const tuned = mustApply(doc, [{ op: "setKnobValue", id: "gap", value: 12 }]).doc;
     expect(input(deriveGraph({ doc: tuned, componentId: "main", registry: mockRegistry, previous: model }), "pop", "number").knob?.valueText).toBe("12 pt");
