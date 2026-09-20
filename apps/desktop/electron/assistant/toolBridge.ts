@@ -190,7 +190,7 @@ const namesOf = (items: unknown[]): string[] =>
 export function describeToolInput(input: unknown): string {
   if (!input || typeof input !== "object") return "";
   const o = input as Record<string, unknown>;
-  for (const key of ["intent", "label", "topic", "query", "name"]) {
+  for (const key of ["intent", "label", "topic", "query", "name", "path"]) {
     if (typeof o[key] === "string" && o[key]) return clip(key === "query" ? `“${o[key] as string}”` : (o[key] as string), 80);
   }
   for (const key of ["layers", "patches", "updates"]) {

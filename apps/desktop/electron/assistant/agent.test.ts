@@ -1,21 +1,29 @@
 import Anthropic from "@anthropic-ai/sdk";
+import type { BetaTextBlockParam, BetaToolUseBlockParam } from "@anthropic-ai/sdk/resources/beta/messages/messages";
+import type { SonobeDocument } from "@sonobe/core";
+import { IMPORT_META_KEY, type ImportResultMeta } from "@sonobe/mcp";
 import { describe, expect, it } from "vitest";
-import { createAssistantAgent, resolveLimits, toAssistantError, type AssistantAgentOptions } from "./agent.ts";
+import { createAssistantAgent, resolveLimits, toAssistantError, type AssistantAgentOptions, type ReplaceGuardKit } from "./agent.ts";
+import { DESIGN_GUIDE } from "./design.ts";
+import type { ReplaceCheck, ReplaceGuard, ReplaceImpact } from "./designGuard.ts";
 import { FALLBACK_BETA } from "./models.ts";
-import type { AssistantEvent } from "./protocol.ts";
-import { fakeBridge, scriptedClient, text, tick, type FakeBridge, type FakeTurn, type ScriptedClient } from "./testing.ts";
+import type { AssistantCanvasContext, AssistantEvent } from "./protocol.ts";
+import { fakeBridge, fakeDraftStreams, scriptedClient, text, tick, type FakeBridge, type FakeDraftStreams, type FakeTurn, type ScriptedClient } from "./testing.ts";
+import type { LocalTools, LocalToolScope, ToolCallResult } from "./toolBridge.ts";
 
 interface Harness {
   agent: ReturnType<typeof createAssistantAgent>;
   api: ScriptedClient;
   bridge: FakeBridge;
+  drafts: FakeDraftStreams;
   events: AssistantEvent[];
   emit: (event: AssistantEvent) => void;
 }
 
-function harness(turns: FakeTurn[], options: { bridge?: FakeBridge; key?: string | null; limits?: AssistantAgentOptions["limits"] } = {}): Harness {
+function harness(turns: FakeTurn[], options: { bridge?: FakeBridge; key?: string | null; limits?: AssistantAgentOptions["limits"]; agent?: Partial<AssistantAgentOptions> } = {}): Harness {
   const api = scriptedClient(turns);
   const bridge = options.bridge ?? fakeBridge(() => text("outline: layer card rectangle \"Card\""));
+  const drafts = fakeDraftStreams();
   const events: AssistantEvent[] = [];
   let ids = 0;
   const agent = createAssistantAgent({
@@ -27,8 +35,10 @@ function harness(turns: FakeTurn[], options: { bridge?: FakeBridge; key?: string
     },
     ...(options.limits ? { limits: options.limits } : {}),
     newId: () => `id${++ids}`,
+    draftStreams: drafts.factory,
+    ...options.agent,
   });
-  return { agent, api, bridge, events, emit: (e) => events.push(e) };
+  return { agent, api, bridge, drafts, events, emit: (e) => events.push(e) };
 }
 
 const ofType = <T extends AssistantEvent["type"]>(events: AssistantEvent[], type: T) => events.filter((e): e is Extract<AssistantEvent, { type: T }> => e.type === type);
@@ -464,3 +474,400 @@ describe("assistant agent: stop reasons and errors", () => {
     expect(await harness([], { key: null }).agent.checkKey()).toMatchObject({ ok: false, error: { code: "no_key" } });
   });
 });
+
+const PROFILE_HTML = `<main data-name="Profile"><style>:root{--accent:#8B5CF6}</style>${Array.from({ length: 12 }, (_, i) => `<p data-name="Row ${i}">Row “${i}”</p>\n`).join("")}</main>`;
+const designUse = (id: string, input: Record<string, unknown>): FakeTurn => ({ content: [{ type: "text", text: "Drawing it." }, { type: "tool_use", id, name: "import_design", input }] });
+const done = (reply = "Added it."): FakeTurn => ({ content: [{ type: "text", text: reply }] });
+
+/** A successful import_design result: its _meta summary (IMPORT_META_KEY), the way the MCP tool reports it. */
+function imported(meta: Partial<ImportResultMeta> = {}, extra: Partial<ToolCallResult> = {}): ToolCallResult {
+  const full: ImportResultMeta = { docId: "photo_zoom", dryRun: false, screenId: "profile", screenName: "Profile", txnId: "txn_7", replaced: null, dropped: [], droppedCount: 0, lostConnections: 0, kept: null, ...meta };
+  return { content: [{ type: "text", text: `Imported “${full.screenName}”` }], meta: { [IMPORT_META_KEY]: full }, ...extra };
+}
+
+const CONTEXT: AssistantCanvasContext = {
+  component: { id: "main", name: "Main", size: [402, 874] },
+  screens: [{ id: "home", name: "Home" }],
+};
+
+const shownDocument = (docId = "photo_zoom", projectPath: string | null = "/Users/test/Photo Zoom.sonobe") => async () => ({ docId, projectPath });
+const DOC = { project: { root: "main" } } as unknown as SonobeDocument;
+
+/** A stand-in for designGuard.ts: it answers `check` with `answer`, and records what the agent tells it. */
+function stubGuard(answer: ReplaceCheck | null) {
+  const seen = { created: 0, checks: [] as unknown[], remembered: [] as unknown[][], refreshed: [] as unknown[][], prompts: [] as { check: ReplaceCheck; impact: ReplaceImpact | null }[] };
+  const guard: ReplaceGuard = {
+    check: (request) => {
+      seen.checks.push(request);
+      return answer;
+    },
+    remember: (...args) => void seen.remembered.push(args),
+    refresh: (...args) => void seen.refreshed.push(args),
+    tracks: () => seen.remembered.length > 0,
+    clear: () => undefined,
+  };
+  const kit: ReplaceGuardKit = {
+    create: () => {
+      seen.created++;
+      return guard;
+    },
+    prompt: (check, impact) => {
+      seen.prompts.push({ check, impact });
+      return { count: impact?.droppedCount ?? 0, kind: "replace", title: `Replace “${check.target.name}”?`, message: `Claude wants to rebuild “${check.target.name}”.${impact ? ` Gone: ${impact.dropped.join(", ")}.` : ""}`, approveLabel: "Replace", declineLabel: `Keep “${check.target.name}”` };
+    },
+    declinedMessage: (check) => `The person kept “${check.target.name}” as it is, so nothing changed.`,
+    declinedDetail: (check) => `You kept “${check.target.name}”`,
+  };
+  return { kit, seen };
+}
+
+const UNTARGETED: ReplaceCheck = { reason: "untargeted", target: { id: "home", name: "Home" }, changed: [], changedCount: 0 };
+
+describe("assistant agent: design drafts", () => {
+  it("streams import_design's html as design_draft events that end with done, before the tool runs", async () => {
+    const input = { name: "Profile", component: "main", html: PROFILE_HTML };
+    const h = harness([designUse("d1", input), done()]);
+    await h.agent.run("w1", { text: "a profile screen" }, h.emit);
+
+    const drafts = ofType(h.events, "design_draft");
+    const writing = drafts.slice(0, -1);
+    expect(writing.length).toBeGreaterThan(10);
+    expect(drafts.every((d) => d.runId === "id1" && d.turn === 1 && d.toolUseId === "d1")).toBe(true);
+    // The fake passes raw chunks on: the agent forwarded every one of them, in order.
+    expect(writing.map((d) => d.append).join("")).toBe(JSON.stringify(input));
+    expect(writing.every((d, i) => !d.done && d.offset === writing.slice(0, i).reduce((n, w) => n + w.append.length, 0))).toBe(true);
+    expect(drafts.at(-1)).toMatchObject({ done: true, html: PROFILE_HTML });
+    const types = h.events.map((e) => e.type);
+    expect(types.lastIndexOf("design_draft")).toBeLessThan(types.indexOf("tool_started"));
+    expect(h.drafts.created).toEqual([{ runId: "id1", turn: 1 }]);
+    expect(h.bridge.calls).toEqual([{ name: "import_design", args: input }]);
+  });
+
+  it("sends no drafts for other tools", async () => {
+    const h = harness([{ content: [{ type: "tool_use", id: "a", name: "add_layers", input: { layers: [{ type: "text", name: "html" }] } }, { type: "tool_use", id: "o", name: "get_outline", input: {} }] }, done()]);
+    await h.agent.run("w1", { text: "add a label" }, h.emit);
+    expect(ofType(h.events, "design_draft")).toEqual([]);
+    expect(h.drafts.created).toEqual([]);
+  });
+
+  it("finishes a block that streamed no input with one done", async () => {
+    const h = harness([{ content: [{ type: "tool_use", id: "d1", name: "import_design", input: { name: "Card", html: "<div>Card</div>" }, jsonChunks: [] }] }, done()]);
+    await h.agent.run("w1", { text: "a card" }, h.emit);
+    expect(ofType(h.events, "design_draft")).toEqual([{ type: "design_draft", runId: "id1", turn: 1, toolUseId: "d1", offset: 0, append: "", done: true, html: "<div>Card</div>" }]);
+  });
+
+  it("stopping while the html streams runs no tool", async () => {
+    const h = harness([{ ...designUse("d1", { name: "Profile", html: PROFILE_HTML }), hang: true }]);
+    const result = await h.agent.run("w1", { text: "a profile screen" }, (e) => {
+      h.emit(e);
+      if (e.type === "design_draft" && e.offset === 0) queueMicrotask(() => h.agent.stop("w1"));
+    });
+    expect(result.outcome).toBe("stopped");
+    expect(h.bridge.calls).toEqual([]);
+    expect(ofType(h.events, "tool_started")).toEqual([]);
+    expect(ofType(h.events, "design_draft").some((d) => d.done)).toBe(false);
+    expect(h.agent.history("w1").map((m) => m.role)).toEqual(["user"]);
+  });
+
+  it("gives a re-issued turn fresh drafts under the same turn number", async () => {
+    const h = harness([{ ...designUse("d1", { name: "Profile", html: "<p>first try</p>" }), error: new SyntaxError("Unexpected end of JSON input") }, designUse("d2", { name: "Profile", html: "<p>second try</p>" }), done()]);
+    await h.agent.run("w1", { text: "a profile screen" }, h.emit);
+    expect(h.drafts.created).toEqual([
+      { runId: "id1", turn: 1 },
+      { runId: "id1", turn: 1 },
+    ]);
+    expect(ofType(h.events, "turn_started").map((e) => e.turn)).toEqual([1, 1, 2]);
+    const starts = h.events.flatMap((e, i) => (e.type === "turn_started" ? [i] : []));
+    const attempt = (n: number) => [...new Set(ofType(h.events.slice(starts[n], starts[n + 1]), "design_draft").map((d) => d.toolUseId))];
+    expect([attempt(0), attempt(1)]).toEqual([["d1"], ["d2"]]);
+    expect(h.bridge.calls.map((c) => c.args.html)).toEqual(["<p>second try</p>"]);
+  });
+
+  it("keeps the reply going when the preview breaks, without re-issuing the turn", async () => {
+    const warnings: string[] = [];
+    let fed = 0;
+    const h = harness([designUse("d1", { name: "Profile", html: PROFILE_HTML }), done()], {
+      agent: {
+        draftStreams: () => ({
+          onEvent: () => {
+            if (++fed === 2) throw new Error("decoder bug");
+          },
+          finish: () => {
+            throw new Error("finish must not run after the preview broke");
+          },
+        }),
+        log: (level, message) => void (level === "warn" && warnings.push(message)),
+      },
+    });
+    expect((await h.agent.run("w1", { text: "a profile screen" }, h.emit)).outcome).toBe("completed");
+    expect(fed).toBe(2);
+    expect(h.api.requests).toHaveLength(2);
+    expect(h.bridge.calls.map((c) => c.name)).toEqual(["import_design"]);
+    expect(warnings).toEqual(["The design preview stopped for this turn: decoder bug"]);
+  });
+
+  it("says a design was too long when max_tokens cuts off import_design", async () => {
+    const h = harness([{ ...designUse("d1", { name: "Profile", html: PROFILE_HTML }), stop_reason: "max_tokens" }]);
+    expect((await h.agent.run("w1", { text: "a huge page" }, h.emit)).outcome).toBe("max_tokens");
+    expect(h.bridge.calls).toEqual([]);
+    expect(ofType(h.events, "notice").map((n) => n.message)).toEqual(["The design got too long to finish in one reply, so nothing was added. Ask for a simpler screen, or one part at a time."]);
+  });
+});
+
+describe("assistant agent: the canvas context and the cached prefix", () => {
+  it("leads a box message with <canvas_context>, escaped, and names the linked code folder", async () => {
+    const h = harness([done()], { agent: { codeFolderName: async (id) => (id === "w1" ? "noddit" : null) } });
+    const context: AssistantCanvasContext = { ...CONTEXT, component: { id: "main", name: "<Main>", size: [402, 874] } };
+    await h.agent.run("w1", { text: "a profile screen", context }, h.emit);
+
+    const first = h.api.requests[0]!.messages[0]!;
+    const [block, message] = first.content as BetaTextBlockParam[];
+    expect(block!.text.startsWith("<canvas_context>\n")).toBe(true);
+    expect(block!.text).toContain('"name":"\\u003cMain\\u003e"');
+    expect(block!.text).not.toContain("<Main>");
+    expect(block!.text).toContain('"codeFolder":"noddit"');
+    expect(message).toEqual({ type: "text", text: "a profile screen" });
+    expect(h.agent.history("w1")[0]).toEqual(first);
+  });
+
+  it("keeps system and tools byte-identical for box and sheet messages, local tools included", async () => {
+    const tools = fakeLocalTools();
+    const h = harness([done("one"), done("two"), done("three")], { agent: { localTools: tools } });
+    await h.agent.run("w1", { text: "a profile screen", context: CONTEXT }, h.emit);
+    await h.agent.run("w1", { text: "what's on this screen?" }, h.emit);
+    await h.agent.run("w2", { text: "hello" }, h.emit);
+    const [box, sheet, other] = h.api.requests;
+    expect(JSON.stringify(sheet!.system)).toBe(JSON.stringify(box!.system));
+    expect(JSON.stringify(other!.system)).toBe(JSON.stringify(box!.system));
+    expect(JSON.stringify(sheet!.tools)).toBe(JSON.stringify(box!.tools));
+    expect((box!.system as { text: string }[])[0]!.text.endsWith(`\n\n${DESIGN_GUIDE}`)).toBe(true);
+    expect((sheet!.messages.at(-1)!.content as BetaTextBlockParam[]).map((b) => b.text)).toEqual(["what's on this screen?"]);
+  });
+});
+
+describe("assistant agent: pinning to the window's document", () => {
+  it("adds docId only where the schema takes it, lets an explicit docId win, and keeps Claude's input in history", async () => {
+    const lookups: string[] = [];
+    const h = harness(
+      [
+        {
+          content: [
+            { type: "tool_use", id: "o", name: "get_outline", input: {} },
+            { type: "tool_use", id: "a", name: "import_design", input: { name: "A", html: "<p>a</p>" } },
+            { type: "tool_use", id: "b", name: "import_design", input: { docId: "other_doc", name: "B", html: "<p>b</p>" } },
+          ],
+        },
+        done(),
+      ],
+      {
+        agent: {
+          documentFor: async (id) => {
+            lookups.push(id);
+            return { docId: "photo_zoom", projectPath: null };
+          },
+        },
+      },
+    );
+    await h.agent.run("w1", { text: "two screens" }, h.emit);
+    expect(h.bridge.calls).toEqual([
+      { name: "get_outline", args: {} },
+      { name: "import_design", args: { name: "A", html: "<p>a</p>", docId: "photo_zoom" } },
+      { name: "import_design", args: { docId: "other_doc", name: "B", html: "<p>b</p>" } },
+    ]);
+    expect(lookups).toEqual(["w1"]);
+    const uses = (h.agent.history("w1")[1]!.content as BetaToolUseBlockParam[]).map((b) => b.input);
+    expect(uses).toEqual([{}, { name: "A", html: "<p>a</p>" }, { docId: "other_doc", name: "B", html: "<p>b</p>" }]);
+  });
+
+  it("puts a box message's import into the component the box shows, unless Claude named one", async () => {
+    const turn = (): FakeTurn => ({
+      content: [
+        { type: "tool_use", id: "a", name: "import_design", input: { html: "<p>a</p>" } },
+        { type: "tool_use", id: "b", name: "import_design", input: { component: "settings", html: "<p>b</p>" } },
+        { type: "tool_use", id: "o", name: "get_outline", input: {} },
+      ],
+    });
+    const h = harness([turn(), done(), turn(), done()]);
+    await h.agent.run("w1", { text: "from the box", context: { ...CONTEXT, component: { id: "card_kit", name: "Card Kit", size: [370, 240] } } }, h.emit);
+    await h.agent.run("w1", { text: "from the sheet" }, h.emit);
+    expect(h.bridge.calls.map((c) => c.args)).toEqual([{ html: "<p>a</p>", component: "card_kit" }, { component: "settings", html: "<p>b</p>" }, {}, { html: "<p>a</p>" }, { component: "settings", html: "<p>b</p>" }, {}]);
+  });
+
+  it("runs no document tool when the window's document can't be told", async () => {
+    const message = "Sonobe couldn't tell which prototype this window has open, so nothing ran. Try again in a moment.";
+    const turn: FakeTurn = { content: [{ type: "tool_use", id: "a", name: "import_design", input: { html: "<p>a</p>" } }, { type: "tool_use", id: "o", name: "get_outline", input: {} }] };
+    const gone = harness([turn, done()], { agent: { documentFor: async () => null } });
+    await gone.agent.run("w1", { text: "go" }, gone.emit);
+    expect(gone.bridge.calls.map((c) => c.name)).toEqual(["get_outline"]);
+    expect(ofType(gone.events, "tool_finished")[0]).toMatchObject({ toolUseId: "a", status: "error", detail: message, changedDocument: false });
+    expect(gone.api.requests[1]!.messages.at(-1)!.content).toContainEqual({ type: "tool_result", tool_use_id: "a", is_error: true, content: message });
+
+    let attempts = 0;
+    const flaky = harness([turn, done()], {
+      agent: {
+        documentFor: async () => {
+          if (++attempts === 1) throw new Error("editor_reloaded");
+          return { docId: "photo_zoom", projectPath: null };
+        },
+      },
+    });
+    await flaky.agent.run("w1", { text: "go" }, flaky.emit);
+    expect(flaky.bridge.calls[0]).toEqual({ name: "import_design", args: { html: "<p>a</p>", docId: "photo_zoom" } });
+
+    const broken = harness([turn, done()], {
+      agent: {
+        documentFor: async () => {
+          throw new Error("window_closed");
+        },
+      },
+    });
+    await broken.agent.run("w1", { text: "go" }, broken.emit);
+    expect(ofType(broken.events, "tool_finished")[0]).toMatchObject({ status: "error", detail: message });
+  });
+});
+
+describe("assistant agent: the replace guard", () => {
+  const replaceTurn = (): FakeTurn => designUse("r", { name: "Home", replace: "home", html: "<main>Home</main>" });
+  const dryRunResult = imported({ dryRun: true, screenId: null, txnId: null, screenName: "Home", replaced: "home", dropped: [{ id: "promo", name: "Promo Badge" }, { id: "divider", name: "Divider" }], droppedCount: 2, lostConnections: 1, kept: 5 });
+
+  function guarded(answer: ReplaceCheck | null, handler: (args: Record<string, unknown>) => ToolCallResult, approve: boolean | null = true, context?: AssistantCanvasContext) {
+    const stub = stubGuard(answer);
+    const bridge = fakeBridge((_name, args) => handler(args));
+    const h = harness([replaceTurn(), done()], { bridge, agent: { documentFor: shownDocument(), readDocument: async () => DOC, replaceGuard: stub.kit } });
+    const running = h.agent.run("w1", { text: "rebuild home", ...(context ? { context } : {}) }, (e) => {
+      h.emit(e);
+      if (e.type === "confirm_required" && approve !== null) queueMicrotask(() => h.agent.confirm("w1", e.confirmationId, approve));
+    });
+    return { h, stub, running };
+  }
+
+  it("asks before a replace it flags, naming what the dry run says would go", async () => {
+    const { h, stub, running } = guarded(UNTARGETED, (args) => (args.dryRun ? dryRunResult : imported({ screenId: "home", screenName: "Home", replaced: "home" })), false, { ...CONTEXT, target: { id: "card", name: "Card", type: "rectangle", frame: [0, 0, 370, 240] } });
+    await running;
+    expect(stub.seen.checks).toEqual([{ docId: "photo_zoom", component: "main", replace: "home", picked: "card" }]);
+    expect(h.bridge.calls[0]).toEqual({ name: "import_design", args: { name: "Home", replace: "home", html: "<main>Home</main>", docId: "photo_zoom", component: "main", dryRun: true, screenshot: false } });
+    expect(stub.seen.prompts).toEqual([{ check: UNTARGETED, impact: { dropped: ["Promo Badge", "Divider"], droppedCount: 2, lostConnections: 1 } }]);
+    expect(ofType(h.events, "confirm_required")[0]).toMatchObject({ toolUseId: "r", kind: "replace", title: "Replace “Home”?", message: expect.stringContaining("Promo Badge, Divider"), approveLabel: "Replace", declineLabel: "Keep “Home”", count: 2 });
+  });
+
+  it("doesn't replace when the person declines, and tells Claude what they kept", async () => {
+    const { h, running } = guarded(UNTARGETED, (args) => (args.dryRun ? dryRunResult : imported()), false);
+    await running;
+    expect(h.bridge.calls.map((c) => c.args.dryRun)).toEqual([true]);
+    expect(ofType(h.events, "tool_finished")).toEqual([{ type: "tool_finished", runId: "id1", toolUseId: "r", name: "import_design", status: "declined", detail: "You kept “Home”", changedDocument: false }]);
+    expect(h.api.requests[1]!.messages.at(-1)!.content).toEqual([{ type: "tool_result", tool_use_id: "r", content: "The person kept “Home” as it is, so nothing changed." }]);
+  });
+
+  it("replaces when the person approves, and remembers the screen as the Assistant's", async () => {
+    const { h, stub, running } = guarded(UNTARGETED, (args) => (args.dryRun ? dryRunResult : imported({ screenId: "home", screenName: "Home", replaced: "home" })), true);
+    await running;
+    expect(h.bridge.calls.map((c) => c.args)).toEqual([
+      { name: "Home", replace: "home", html: "<main>Home</main>", docId: "photo_zoom", dryRun: true, screenshot: false },
+      { name: "Home", replace: "home", html: "<main>Home</main>", docId: "photo_zoom" },
+    ]);
+    expect(ofType(h.events, "tool_finished")[0]).toMatchObject({ status: "done", changedDocument: true, imported: { screenId: "home", replaced: "home" } });
+    expect(stub.seen.remembered).toEqual([["photo_zoom", "main", "home", DOC]]);
+  });
+
+  it("returns a failing dry run without asking", async () => {
+    const failure: ToolCallResult = { content: [{ type: "text", text: "Error not_found: There's no layer home" }], isError: true };
+    const { h, running } = guarded(UNTARGETED, () => failure);
+    await running;
+    expect(h.bridge.calls).toHaveLength(1);
+    expect(ofType(h.events, "confirm_required")).toEqual([]);
+    expect(ofType(h.events, "tool_finished")[0]).toMatchObject({ status: "error", detail: "Error not_found: There's no layer home" });
+    expect(h.api.requests[1]!.messages.at(-1)!.content).toEqual([{ type: "tool_result", tool_use_id: "r", is_error: true, content: [{ type: "text", text: "Error not_found: There's no layer home" }] }]);
+  });
+
+  it("goes ahead without a dry run when the guard doesn't flag the replace", async () => {
+    const { h, stub, running } = guarded(null, () => imported({ screenId: "home" }), null);
+    await running;
+    expect(h.bridge.calls.map((c) => c.args.dryRun)).toEqual([undefined]);
+    expect(stub.seen.checks).toHaveLength(1);
+    expect(ofType(h.events, "confirm_required")).toEqual([]);
+  });
+
+  it("takes the Assistant's own later edits into its records, not its dry runs, and a new chat starts a new guard", async () => {
+    const stub = stubGuard(null);
+    const affected = { components: ["main"], layers: ["title"], patches: [] };
+    const bridge = fakeBridge((name, args) => {
+      if (name === "import_design") return args.dryRun ? imported({ dryRun: true, screenId: null, txnId: null }, { structuredContent: { docId: "photo_zoom", affected } }) : imported();
+      return args.dryRun ? { content: [{ type: "text", text: "Dry run" }], structuredContent: { ok: true, changed: "none", dryRun: true, docId: "photo_zoom", affected } } : { content: [{ type: "text", text: "Updated 1 layer" }], structuredContent: { ok: true, changed: "all", docId: "photo_zoom", affected } };
+    });
+    const h = harness(
+      [
+        designUse("d", { name: "Profile", html: PROFILE_HTML }),
+        { content: [{ type: "tool_use", id: "u", name: "add_layers", input: { layers: [] } }] },
+        { content: [{ type: "tool_use", id: "p", name: "apply_ops", input: { ops: [], dryRun: true } }, { type: "tool_use", id: "q", name: "import_design", input: { dryRun: true, html: "<p>plan</p>" } }] },
+        done(),
+        designUse("d2", { html: "<p>again</p>" }),
+        done(),
+      ],
+      { bridge, agent: { documentFor: shownDocument(), readDocument: async () => DOC, replaceGuard: stub.kit } },
+    );
+    await h.agent.run("w1", { text: "a profile screen" }, h.emit);
+    expect(stub.seen.remembered).toEqual([["photo_zoom", "main", "profile", DOC]]);
+    expect(stub.seen.refreshed).toEqual([["photo_zoom", DOC, ["title"]]]);
+    expect(stub.seen.created).toBe(1);
+    h.agent.reset("w1");
+    await h.agent.run("w1", { text: "another" }, h.emit);
+    expect(stub.seen.created).toBe(2);
+  });
+});
+
+describe("assistant agent: imports and local tools", () => {
+  it("reads tool_finished.imported from the result's _meta, even when a screenshot dropped structuredContent", async () => {
+    const withScreenshot = imported({ dropped: Array.from({ length: 25 }, (_, i) => ({ id: `l${i}`, name: `Layer ${i}` })), droppedCount: 25, replaced: "profile", lostConnections: 2 }, { content: [{ type: "text", text: "Imported “Profile”" }, { type: "image", data: "iVBORw0KGgo=", mimeType: "image/png" }] });
+    const bridge = fakeBridge((_name, args) => (args.dryRun ? imported({ dryRun: true, screenId: null, txnId: null }) : withScreenshot));
+    const h = harness([designUse("d", { name: "Profile", replace: "profile", screenshot: true, html: PROFILE_HTML }), designUse("dry", { dryRun: true, html: PROFILE_HTML }), done()], { bridge });
+    await h.agent.run("w1", { text: "redo it" }, h.emit);
+    const [real, dry] = ofType(h.events, "tool_finished");
+    expect(real!.imported).toEqual({ docId: "photo_zoom", screenId: "profile", txnId: "txn_7", name: "Profile", replaced: "profile", dropped: Array.from({ length: 20 }, (_, i) => `Layer ${i}`), droppedCount: 25, lostConnections: 2 });
+    expect(dry).not.toHaveProperty("imported");
+  });
+
+  it("lists the Assistant's own tools last and calls them with the window's project", async () => {
+    const tools = fakeLocalTools();
+    const h = harness([{ content: [{ type: "tool_use", id: "c", name: "read_code_file", input: { path: "src/theme.ts" } }] }, done()], { agent: { localTools: tools, documentFor: shownDocument("photo_zoom", "/Users/test/Noddit.sonobe") } });
+    await h.agent.run("w1", { text: "match my theme" }, h.emit);
+    expect(h.api.requests[0]!.tools!.map((t) => ("name" in t ? t.name : "")).slice(-2)).toEqual(["list_code_files", "read_code_file"]);
+    expect(h.api.requests[0]!.tools).toHaveLength(5 + 2);
+    expect(h.bridge.calls).toEqual([]);
+    expect(tools.calls).toEqual([{ name: "read_code_file", input: { path: "src/theme.ts" }, scope: { conversationId: "w1", runId: "id1", projectPath: "/Users/test/Noddit.sonobe", signal: expect.any(AbortSignal) } }]);
+    expect(ofType(h.events, "tool_finished")[0]).toMatchObject({ name: "read_code_file", status: "done", changedDocument: false, detail: "src/theme.ts (lines 1–2 of 2)" });
+    h.agent.reset("w1");
+    h.agent.forget("w2");
+    expect(tools.forgotten).toEqual(["w1", "w2"]);
+  });
+
+  it("counts the budget in billed tokens, so cache reads don't use it up", async () => {
+    const h = harness([{ content: [{ type: "tool_use", id: "t", name: "get_outline", input: {} }], usage: { input_tokens: 1000, output_tokens: 100, cache_read_input_tokens: 100_000 } }, done()], { limits: { tokenBudget: 50_000 } });
+    expect((await h.agent.run("w1", { text: "go" }, h.emit)).outcome).toBe("completed");
+    expect(h.agent.snapshot("w1").usage).toMatchObject({ totalTokens: 101_220, budgetTokens: 11_220 });
+  });
+});
+
+interface FakeLocalTools extends LocalTools {
+  calls: { name: string; input: Record<string, unknown>; scope: LocalToolScope }[];
+  forgotten: string[];
+}
+
+function fakeLocalTools(): FakeLocalTools {
+  const schema = (properties: Record<string, unknown>) => ({ type: "object", properties, additionalProperties: false });
+  const tools: FakeLocalTools = {
+    infos: [
+      { name: "list_code_files", title: "List code files", description: "List files in the linked code folder.", inputSchema: schema({ path: { type: "string" } }), readOnly: true },
+      { name: "read_code_file", title: "Read code file", description: "Read a text file from the linked code folder.", inputSchema: schema({ path: { type: "string" } }), readOnly: true },
+    ],
+    calls: [],
+    forgotten: [],
+    async call(name, input, scope) {
+      tools.calls.push({ name, input, scope });
+      return text("src/theme.ts (lines 1–2 of 2)\nexport const accent = \"#8B5CF6\";");
+    },
+    forget(id) {
+      tools.forgotten.push(id);
+    },
+  };
+  return tools;
+}

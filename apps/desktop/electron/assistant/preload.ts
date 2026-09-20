@@ -14,6 +14,8 @@ import {
   type SonobeAssistantApi,
 } from "./protocol.ts";
 
+const isPlainObject = (value: unknown): value is Record<string, unknown> => !!value && typeof value === "object" && !Array.isArray(value);
+
 /** The subset of Electron's ipcRenderer used here. */
 export interface AssistantIpcRenderer {
   invoke(channel: string, ...args: unknown[]): Promise<unknown>;
@@ -31,7 +33,13 @@ export function createAssistantApi(ipcRenderer: AssistantIpcRenderer): SonobeAss
 
   return {
     status: () => invoke<AssistantStatus>(ASSISTANT_IPC.status),
-    send: (request) => invoke<AssistantRunResult>(ASSISTANT_IPC.send, { text: String(request?.text ?? ""), ...(typeof request?.model === "string" ? { model: request.model } : {}) }),
+    // The main process sanitizes the canvas context field by field, so this bundle stays free of imports.
+    send: (request) =>
+      invoke<AssistantRunResult>(ASSISTANT_IPC.send, {
+        text: String(request?.text ?? ""),
+        ...(typeof request?.model === "string" ? { model: request.model } : {}),
+        ...(isPlainObject(request?.context) ? { context: request.context } : {}),
+      }),
     stop: () => invoke<boolean>(ASSISTANT_IPC.stop),
     reset: () => invoke<AssistantStatus>(ASSISTANT_IPC.reset),
     confirm: (confirmationId, approved) => invoke<boolean>(ASSISTANT_IPC.confirm, String(confirmationId), approved === true),

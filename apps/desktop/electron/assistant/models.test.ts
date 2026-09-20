@@ -41,4 +41,17 @@ describe("usage", () => {
   it("counts a request without usage", () => {
     expect(addUsage(emptyUsage(), null, resolveModel("claude-sonnet-5")).requests).toBe(1);
   });
+
+  it("counts budget tokens at their billed weights: cache reads a tenth, cache writes 1.25×", () => {
+    const sonnet = resolveModel("claude-sonnet-5");
+    expect(emptyUsage().budgetTokens).toBe(0);
+    let totals = addUsage(emptyUsage(), { input_tokens: 1000, output_tokens: 500, cache_creation_input_tokens: 20_000, cache_read_input_tokens: 0 }, sonnet);
+    expect(totals.budgetTokens).toBe(1000 + 500 + 25_000);
+    totals = addUsage(totals, { input_tokens: 200, output_tokens: 100, cache_read_input_tokens: 100_000 }, sonnet);
+    expect(totals).toMatchObject({ totalTokens: 121_800, budgetTokens: 1200 + 600 + 25_000 + 10_000 });
+    // Rounded from the running totals, so fractions don't pile up.
+    totals = addUsage(emptyUsage(), { cache_read_input_tokens: 5, cache_creation_input_tokens: 1 }, sonnet);
+    expect(totals.budgetTokens).toBe(Math.round(0.5 + 1.25));
+    expect(addUsage(totals, null, sonnet).budgetTokens).toBe(totals.budgetTokens);
+  });
 });

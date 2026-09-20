@@ -2,7 +2,7 @@
 
 import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, nativeImage, safeStorage, screen, session, shell, type IpcMainEvent, type IpcMainInvokeEvent } from "electron";
 import { existsSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import type { SonobeDocument } from "@sonobe/core";
@@ -15,6 +15,7 @@ import { createAppHost, type AppHost, type CapturedImage, type DocumentChange, t
 import { abortCaptures, captureDesignInWindow, fetchCaptureImage } from "./design-capture.ts";
 import { createAppWindow, type AppWindow, type WindowContentSource } from "./app-window.ts";
 import { createDraftStore, installQuitOnSignal, registerDraftIpc, type DraftStore } from "./drafts.ts";
+import { createCodeFolderStore } from "./assistant/codeFolder.ts";
 import { registerAssistant } from "./assistant/register.ts";
 import { captureWebContents } from "./capture.ts";
 import { bundledCliPath } from "./cli-path.ts";
@@ -1114,7 +1115,29 @@ function main(): void {
     drafts = createDraftStore({ dir: path.join(app.getPath("userData"), "Drafts"), version: VERSION, log });
     registerDraftIpc(ipcMain, drafts, { requireWindow, reveal: (folder) => shell.showItemInFolder(folder) });
     void drafts.prune().then((n) => n && log("info", `Removed ${n} empty or 90-day-old draft${n === 1 ? "" : "s"}`)).catch(() => undefined);
-    registerAssistant({ ipcMain, isTrustedSender: (event) => trustedWindow(event as IpcMainInvokeEvent) !== null, host: () => appHost, secrets: () => secrets, version: VERSION, guides: () => loadGuides(bundledResource("guides", "packages/mcp/guides")), log });
+    registerAssistant({
+      ipcMain,
+      isTrustedSender: (event) => trustedWindow(event as IpcMainInvokeEvent) !== null,
+      host: () => appHost,
+      secrets: () => secrets,
+      version: VERSION,
+      guides: () => loadGuides(bundledResource("guides", "packages/mcp/guides")),
+      log,
+      documentFor: (id) => (appHost ? appHost.targetDocument(id) : Promise.resolve(null)),
+      codeFolders: createCodeFolderStore({ file: path.join(app.getPath("userData"), "assistant-code-folders.json"), home: homedir() }),
+      pickFolder: async (sender, { defaultPath }) => {
+        const w = windows.get(sender.id);
+        if (!w) return null;
+        const result = await dialog.showOpenDialog(w.win, {
+          title: "Match Your Code",
+          message: "Pick your app's folder. The Assistant can read its text files, like themes, tokens and components, to match your design, and sends what it reads to Anthropic's API. It skips hidden files, .env files, keys and node_modules, and it can't change anything.",
+          buttonLabel: "Link Folder",
+          properties: ["openDirectory"],
+          defaultPath,
+        });
+        return result.canceled ? null : (result.filePaths[0] ?? null);
+      },
+    });
 
     appHost = createAppHost({
       registry: createPatchRegistry(),
