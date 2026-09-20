@@ -1393,13 +1393,13 @@ class RuntimeImpl implements SonobeRuntime {
         out.note = count === 1 ? `${name} has 1 copy, so there's no #${index}.` : `${name} has ${count} copies (#0 to #${count - 1}), so there's no #${index}.`;
         return out;
       }
-      if (copies !== undefined && count !== undefined && count > 1) {
+      if (copies !== undefined && count !== undefined && count > 0) {
         if (isLoop(raw) && raw.items.length === 0) {
           out.note = `Every copy of "${layer?.node.name || target.parsed.id}" uses the default. ${this.emptyValueNote(target)}`;
           return out;
         }
         // Reading a copied layer without "#n" reads its first copy.
-        if (index === undefined && target.parsed.key !== "repeat") out.note = `copy #0 of ${count}`;
+        if (index === undefined && count > 1 && target.parsed.key !== "repeat") out.note = `copy #0 of ${count}`;
         return out;
       }
     }

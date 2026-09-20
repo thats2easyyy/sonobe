@@ -911,10 +911,15 @@ function componentChecker(doc: SonobeDocument, c: Component, registry: Registry)
     );
   };
 
-  /** A layer people touch makes one copy while two or more layers side by side inside it repeat on their own. */
+  /**
+   * A layer people touch makes one copy while two or more layers side by side inside it repeat on
+   * their own, stacked in one spot. Copies placed apart (a looped Position, a parent with layout) are
+   * a list, not a stuck card.
+   */
   const loopsInsideSingleCopy = (layer: LayerNode, gestureId: Id) => {
     const byParent = new Map<Id, LayerNode[]>();
     const visit = (parent: LayerNode) => {
+      const flows = parent.props.layout === "row" || parent.props.layout === "column" || parent.props.layout === "grid" || isLinkInput(parent.props.layout);
       for (const child of parent.children ?? []) {
         if (shapes.copies(child.id).kind !== "auto") {
           visit(child);
@@ -922,6 +927,8 @@ function componentChecker(doc: SonobeDocument, c: Component, registry: Registry)
         }
         const count = shapes.count(child.id);
         if (typeof count === "number" && count < 2) continue;
+        const placed = (flows && child.props.positioning !== "absolute") || loopedProps(child).some((p) => p.key === "position");
+        if (placed) continue;
         byParent.set(parent.id, [...(byParent.get(parent.id) ?? []), child]);
       }
     };

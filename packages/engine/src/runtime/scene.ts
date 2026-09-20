@@ -66,7 +66,7 @@ function describeValue(v: Value | Loop | undefined): string {
   if (typeof v === "string") return `text ${JSON.stringify(v.length > 30 ? `${v.slice(0, 30)}…` : v)}`;
   if (typeof v === "boolean") return `${v}`;
   if (typeof v === "number") return `the number ${v}`;
-  if (Array.isArray(v)) return `a list of ${v.length}`;
+  if (Array.isArray(v)) return `a list of ${v.length} item${v.length === 1 ? "" : "s"}`;
   return v && typeof v === "object" ? "an object" : String(v);
 }
 
@@ -110,9 +110,9 @@ export function repeatCount(v: Value | Loop | undefined): number | null {
 export const isCount = (v: Value | Loop | undefined): boolean => v === undefined || v === null || isLoop(v) || (typeof v === "number" && !Number.isNaN(v));
 
 /**
- * A loop of `length` items read one item per copy doesn't fit `count` copies: it wraps (and the count
- * isn't a whole multiple of it, like stripes), or it has items past the last copy and Repeat wasn't
- * a typed number (a typed Repeat shows the first items on purpose).
+ * A loop of `length` items read one item per copy doesn't fit `count` copies: it wraps unevenly
+ * (2 stripe colors on 6 copies wrap evenly, on purpose), or items past the last copy don't show and
+ * Repeat isn't a typed number (a typed Repeat shows the first items on purpose).
  */
 const misfits = (length: number, count: number, typed: boolean) => length > 1 && length !== count && (length < count ? count % length !== 0 : !typed);
 

@@ -23,6 +23,7 @@ Related: `importing`, `graph-basics`, `gestures`, `animation`, `simulation`, `tr
 | a layer property or layer output              | `@card.scale`                      |
 | something created earlier in the same batch   | `$tap.tap`, `{ "layer": "$card" }` |
 | one copy of a looped value (simulation reads) | `@row.position#2`                  |
+| how many copies a layer makes                 | `@card.repeat`                     |
 | a value inside a component instance (reads)   | `like_button_2/liked.on`           |
 | a component's published input / output        | `$in.down` / `$out.scale`          |
 
