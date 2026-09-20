@@ -110,7 +110,7 @@ describe("set_knobs", () => {
     });
     expect(r.isError, r.text).toBe(false);
     expect(r.text).toContain(
-      "Knobs: created 2 (1 group), updated 0 · Presets: Proposal (running), Shipped app (locked) · Connected 2 inputs",
+      "Knobs: created 2 (commit_distance, fly_bounce; 1 group), updated 0 · Presets: Proposal (running), Shipped app (locked) · Connected 2 inputs",
     );
     expect(r.text).toContain(
       "Commit Distance: inferred type number, value 95 from swipe_card.minDistance and range 0…1000 step 10 pt from the value (pass them to set your own).",
@@ -185,6 +185,42 @@ describe("set_knobs", () => {
     });
     expect(bad.isError).toBe(true);
     expect(bad.text).toContain("takes layer, which a knob can't hold");
+  });
+
+  it("fails an explicit retired id with core's teaching, and names the id a derived one skipped to", async () => {
+    const c = await deck();
+    await c.call("set_knobs", {
+      presets: [{ name: "Proposal" }, { name: "Third" }],
+      knobs: [{ name: "Grow Bounce", type: "number", value: 5 }],
+    });
+    await c.call("set_knobs", {
+      presets: [{ id: "third", remove: true }],
+      knobs: [{ id: "grow_bounce", remove: true }],
+    });
+    const host = project!.host;
+    const apply = host.apply.bind(host);
+    let applies = 0;
+    host.apply = (...args) => {
+      applies++;
+      return apply(...args);
+    };
+    const explicit = await c.call("set_knobs", {
+      knobs: [{ id: "grow_bounce", name: "Grow Bounce", type: "number", value: 3 }],
+    });
+    expect(explicit.isError).toBe(true);
+    expect(applies).toBe(1);
+    expect(explicit.text).toContain(
+      '"grow_bounce" belonged to a knob removed earlier in this session.',
+    );
+    expect(explicit.text).toContain('Or leave "id" out to get "grow_bounce_2".');
+    const derived = await c.call("set_knobs", {
+      presets: [{ name: "Third" }],
+      knobs: [{ name: "Grow Bounce", type: "number", value: 3 }],
+    });
+    expect(derived.isError, derived.text).toBe(false);
+    expect(derived.text).toContain("Knobs: created 1 (grow_bounce_2), updated 0");
+    expect(derived.text).toContain("Retired ids skipped: third → third_2, grow_bounce → grow_bounce_2.");
+    expect(derived.structured.retiredIds).toEqual({ third_2: "third", grow_bounce_2: "grow_bounce" });
   });
 
   it("creates, copies, renames and removes presets, and disconnect and remove keep the running value", async () => {

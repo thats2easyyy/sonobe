@@ -43,6 +43,7 @@ import {
 } from "@sonobe/core";
 import { z } from "zod";
 import { joinList, plural } from "../format.ts";
+import type { HostApplyResult } from "../host.ts";
 import { failure, success } from "../results.ts";
 import { ADDITIVE, DESTRUCTIVE, READ_ONLY, type ToolContext } from "../server.ts";
 import { DocIdSchema, ExpectedRevisionSchema, LabelSchema, WriteOutputSchema } from "../schemas.ts";
@@ -114,7 +115,7 @@ const PresetInputSchema = z.object({
     .string()
     .optional()
     .describe(
-      "An existing preset's id or name to update; otherwise the new preset's id (default: derived from its name).",
+      "An existing preset's id or name to update; otherwise, with name, the new preset's id (default: derived from its name).",
     ),
   name: z.string().optional().describe("Creating: required. Updating: renames it."),
   locked: z
@@ -139,7 +140,7 @@ const KnobInputSchema = z.object({
     .string()
     .optional()
     .describe(
-      "An existing knob's id or name to update; otherwise the new knob's id (default: derived from its name).",
+      "An existing knob's id or name to update; otherwise, with name, the new knob's id (default: derived from its name).",
     ),
   name: z
     .string()
@@ -224,6 +225,10 @@ interface Compiled {
   connected: number;
   disconnected: number;
   convertedCount: number;
+  /** Ids the request gave for new knobs and presets (id with name), which never change. */
+  explicit: Set<Id>;
+  /** Derived ids that skipped one the host refused as retired: new id → the retired id. */
+  retired: Record<Id, Id>;
 }
 
 interface SetKnobsArgs {
@@ -256,6 +261,18 @@ function compileSetKnobs(
     connected: 0,
     disconnected: 0,
     convertedCount: 0,
+    explicit: new Set(),
+    retired: {},
+  };
+  /** A new knob's or preset's id: the request's (with a name), else derived from its name past `taken`. */
+  const newId = (given: Id | undefined, base: Id, taken: (id: Id) => boolean): Id => {
+    if (given !== undefined) {
+      out.explicit.add(given);
+      return given;
+    }
+    const id = uniqueId(base, taken);
+    if (id !== base && avoid.has(base)) out.retired[id] = base;
+    return id;
   };
   const stage = (ops: Op[], what: string) => {
     if (!ops.length) return;
@@ -328,8 +345,7 @@ function compileSetKnobs(
         'For example { "name": "Shipped app", "locked": true }.',
       );
     const taken = (x: Id) => !!getKnobPreset(presetSet, x) || createdPresets.has(x) || avoid.has(x);
-    const id =
-      p.id !== undefined && p.name !== undefined ? p.id : uniqueId(slugify(name, "preset"), taken);
+    const id = newId(p.name !== undefined ? p.id : undefined, slugify(name, "preset"), taken);
     createdPresets.add(id);
     const copy = p.copyFrom !== undefined ? findKnobPreset(presetSet, p.copyFrom) : undefined;
     if (copy && !copy.ok)
@@ -498,13 +514,11 @@ function compileSetKnobs(
         if (value !== undefined)
           guesses.push(`value ${JSON.stringify(value)} from ${first.target}`);
       }
-      const id =
-        k.id !== undefined && k.name !== undefined
-          ? k.id
-          : uniqueId(
-              slugify(name, "knob"),
-              (x) => !!getKnob(set(), x) || createdKnobs.has(x) || avoid.has(x),
-            );
+      const id = newId(
+        k.name !== undefined ? k.id : undefined,
+        slugify(name, "knob"),
+        (x) => !!getKnob(set(), x) || createdKnobs.has(x) || avoid.has(x),
+      );
       createdKnobs.add(id);
       const newKnob: NewKnob = { id, name: name.trim(), type };
       for (const field of ["group", "description", "unit"] as const)
@@ -800,9 +814,10 @@ export function registerKnobTools(tc: ToolContext): void {
             : {}),
           ...(args.dryRun ? { dryRun: true } : {}),
         });
-        // A derived id retired earlier this session: derive again past it.
+        // A derived id retired earlier this session: derive again past it. An id the request gave
+        // fails as it is, with the op engine's teaching.
         const retired = result.ok ? undefined : retiredIdIn(result.results, compiled.ops);
-        if (retired) {
+        if (retired && !compiled.explicit.has(retired)) {
           avoid.add(retired);
           continue;
         }
@@ -824,7 +839,7 @@ export function registerKnobTools(tc: ToolContext): void {
             `${presetLabel(set, set.active)} vs ${presetLabel(set, partner)}: ${n} of ${plural(set.knobs.length, "knob")} differ. The person's viewer runs ${presetLabel(set, set.active)}; switch with apply_knob_preset when they ask, and compare without touching it with sim_reset({ "preset": … }).`,
           );
         }
-        return writeResult(result, {
+        return writeResult(withRetired(result, compiled), {
           notes: result.ok
             ? notes
             : compiled.skipped.map((s) => `Skipped ${s.target}: ${s.reason}.`),
@@ -908,6 +923,22 @@ function retiredIdIn(results: readonly OpResult[], ops: readonly Op[]): Id | und
   return undefined;
 }
 
+/**
+ * The result with the ids this call derived past retired ones on the ops that made them, as the op
+ * engine reports the ids it derives, so the result says "Retired ids skipped".
+ */
+function withRetired(result: HostApplyResult, c: Compiled): HostApplyResult {
+  if (!result.ok || !Object.keys(c.retired).length) return result;
+  const results = result.results.map((r) => {
+    const op = c.ops[r.index];
+    const id =
+      op?.op === "addKnob" ? op.knob.id : op?.op === "addKnobPreset" ? op.preset.id : undefined;
+    const base = id !== undefined ? c.retired[id] : undefined;
+    return base === undefined || !r.ok ? r : { ...r, retired: { ...r.retired, [id!]: base } };
+  });
+  return { ...result, results };
+}
+
 function describeKnobChange(c: Compiled): string {
   const parts: string[] = [];
   if (c.convertedCount) parts.push(`converted ${plural(c.convertedCount, "variable")} to knobs`);
@@ -919,7 +950,7 @@ function describeKnobChange(c: Compiled): string {
   return parts.join(", ");
 }
 
-/** "Knobs: created 3 (2 groups), updated 1 · Presets: Proposal (running), Shipped app (locked) · Connected 4 inputs". */
+/** "Knobs: created 2 (commit_distance, fly_bounce; 1 group), updated 1 · Presets: Proposal (running), Shipped app (locked) · Connected 4 inputs". */
 function summaryLine(c: Compiled, set: KnobSet | undefined): string {
   const groups = set
     ? new Set(
@@ -929,8 +960,12 @@ function summaryLine(c: Compiled, set: KnobSet | undefined): string {
           .filter(Boolean),
       ).size
     : 0;
+  const ids = c.created.length
+    ? `${c.created.slice(0, 8).join(", ")}${c.created.length > 8 ? ", …" : ""}`
+    : "";
+  const made = [ids, groups ? plural(groups, "group") : ""].filter(Boolean).join("; ");
   const parts = [
-    `Knobs: created ${c.created.length}${groups ? ` (${plural(groups, "group")})` : ""}, updated ${c.updated.length}${c.removed.length ? `, removed ${c.removed.length}` : ""}`,
+    `Knobs: created ${c.created.length}${made ? ` (${made})` : ""}, updated ${c.updated.length}${c.removed.length ? `, removed ${c.removed.length}` : ""}`,
   ];
   if (set) parts.push(`Presets: ${presetList(set)}`);
   if (c.connected) parts.push(`Connected ${plural(c.connected, "input")}`);
