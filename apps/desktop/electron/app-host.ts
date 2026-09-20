@@ -116,6 +116,10 @@ export interface AppHost extends SonobeHost {
   documentChanged(targetId: number, revision: number): Promise<void>;
   /** Whether get_screenshot({ simId }) can draw a simulation's frame. */
   simulationScreenshots(): boolean;
+  /** The window whose document tools without docId (and the phone preview) use, or null with none open. */
+  activeTargetId(): number | null;
+  /** The document's scripts wait for the person's trust, as its editor last reported. */
+  scriptsPaused(docId: Id): boolean;
   dispose(): void;
 }
 
@@ -125,6 +129,8 @@ interface RendererInfo {
   projectPath: string | null;
   revision: number;
   dirty: boolean;
+  /** The project's scripts wait for the person's trust (document.info `scripts`). */
+  scriptsPaused: boolean;
 }
 
 interface RendererApplyReply {
@@ -230,7 +236,8 @@ export function hostErrorFromRpc(err: unknown, method: string): HostError {
 function asInfo(value: unknown): RendererInfo {
   const v = (value ?? {}) as Record<string, unknown>;
   if (typeof v.name !== "string" || typeof v.revision !== "number") throw unexpectedReply("document.info");
-  return { name: v.name, projectPath: typeof v.projectPath === "string" ? v.projectPath : null, revision: v.revision, dirty: v.dirty === true };
+  const scripts = (v.scripts ?? {}) as { required?: unknown; trusted?: unknown };
+  return { name: v.name, projectPath: typeof v.projectPath === "string" ? v.projectPath : null, revision: v.revision, dirty: v.dirty === true, scriptsPaused: scripts.required === true && scripts.trusted !== true };
 }
 
 function expandHome(p: string): string {
@@ -827,6 +834,16 @@ export function createAppHost(options: AppHostOptions): AppHost {
       return missing.length ? { revealed: true, reason: `Not found: ${missing.join(", ")}.` } : { revealed: true };
     },
 
+    async restartViewer(o) {
+      const entry = await resolve(o.docId);
+      if (entry.target.hasMethod("viewer.restart") !== true) {
+        throw new HostError("viewer_restart_unavailable", "This version of the editor can't restart its viewer from here.", { hint: "Ask the person to choose Viewer → Restart Prototype (⌘R) in Sonobe, or to update Sonobe." });
+      }
+      const reply = await call<{ restarted?: unknown; playing?: unknown }>(entry.target, "viewer.restart");
+      if (reply?.restarted !== true) throw unexpectedReply("viewer.restart");
+      return { docId: entry.docId, playing: reply.playing === true };
+    },
+
     async setWorking(work, o) {
       const entry = await resolve(o.docId);
       const key = o.author.name;
@@ -899,6 +916,10 @@ export function createAppHost(options: AppHostOptions): AppHost {
     },
 
     simulationScreenshots: () => typeof sceneFunction() === "function" && !!options.renderScene,
+
+    activeTargetId: () => activeTarget(options.targets())?.id ?? null,
+
+    scriptsPaused: (docId) => findEntry(docId)?.info.scriptsPaused === true,
 
     dispose() {
       manager.dispose();

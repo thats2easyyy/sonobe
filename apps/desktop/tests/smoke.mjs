@@ -286,7 +286,7 @@ try {
     nodeProcess: typeof globalThis.process,
   }));
   assert(hostInfo.type === "object", "window.sonobeHost exists", hostInfo);
-  for (const key of ["closeViewerWindow", "commands", "getMcpStatus", "getPreviewStatus", "getViewerWindowStatus", "notifyDocumentChanged", "onCommand", "onOpenProject", "onPreviewStatus", "onViewerWindowStatus", "openExternal", "openProjectDialog", "platform", "popOutViewer", "readProject", "recentProjects", "revealInFinder", "rpc", "saveProjectDialog", "secrets", "setDocumentEdited", "setTitle", "startPreview", "stopPreview", "version", "watchProject", "writeProject"]) {
+  for (const key of ["closeViewerWindow", "commands", "getMcpStatus", "getPreviewStatus", "getViewerWindowStatus", "notifyDocumentChanged", "notifyPrototypeRestarted", "onCommand", "onOpenProject", "onPreviewStatus", "onViewerWindowStatus", "openExternal", "openProjectDialog", "platform", "popOutViewer", "readProject", "recentProjects", "revealInFinder", "rpc", "saveProjectDialog", "secrets", "setDocumentEdited", "setTitle", "startPreview", "stopPreview", "version", "watchProject", "writeProject"]) {
     assert(hostInfo.keys.includes(key), `sonobeHost.${key}`, hostInfo.keys);
   }
   assert(hostInfo.platform === process.platform, "platform", hostInfo.platform);
@@ -548,7 +548,7 @@ try {
 
   const mcp = await connectMcp(await readConnection());
   const { tools } = await mcp.client.listTools();
-  for (const name of ["get_document_info", "get_outline", "add_patches", "connect", "apply_ops", "sim_reset", "sim_dispatch", "sim_step", "sim_get_values", "get_screenshot", "begin_work", "finish_work", "reveal", "list_history", "undo"]) {
+  for (const name of ["get_document_info", "get_outline", "add_patches", "connect", "apply_ops", "sim_reset", "sim_dispatch", "sim_step", "sim_get_values", "get_screenshot", "begin_work", "finish_work", "reveal", "restart_viewer", "list_history", "undo"]) {
     assert(tools.some((t) => t.name === name), `tool ${name}`, tools.map((t) => t.name));
   }
   const info = await mcp.call("get_document_info");
@@ -690,7 +690,13 @@ try {
     pushed = await socket.next((m) => m.type === "document" && m.revision === direct.revision);
   }
   assert(pushed.doc.components.main.patches.press_scale.inputs.end === 0.92, "pushed revisions sync players", pushed.revision);
+
+  // Restarting the live prototype (restart_viewer, like ⌘R) restarts the players too.
+  const restarted = await mcp.call("restart_viewer");
+  assert(!restarted.isError && restarted.text.startsWith("Restarted the live prototype"), "restart_viewer", restarted.text);
+  await socket.next((m) => m.type === "restart");
   socket.ws.close();
+  log("restart_viewer restarted the live prototype and the phone preview's players");
   log(`phone preview on ${preview.url}${preview.lanReachable ? "" : " (loopback only)"}; live sync ${firstSync.revision} → ${synced.revision} → ${pushed.revision} (pushed ${editorPushes ? "by the editor itself" : "with notifyDocumentChanged"})`);
 
   // Pop-out viewer window: the live prototype in its own sandboxed window.

@@ -68,6 +68,8 @@ export interface TestPlayerServer {
   /** The player URL on `host`. */
   url: string;
   port: number;
+  /** What Sonobe sends when the prototype restarts there. */
+  restart(): void;
   close(): Promise<void>;
 }
 
@@ -89,6 +91,7 @@ export async function servePlayer(options: { doc: SonobeDocument; host?: string;
     return {
       url: `http://${host}:${handle.port}/p/${token}/`,
       port: handle.port,
+      restart: () => handle.restart(),
       async close() {
         await handle.close();
         rmSync(playerRoot, { recursive: true, force: true });

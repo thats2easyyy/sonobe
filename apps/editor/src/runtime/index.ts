@@ -19,7 +19,8 @@ export {
 export { createSimulation, MAX_SIM_STEP_FRAMES, type Simulation, type SimulationLog, type SimulationOptions, type SimulationSnapshot, type SimulationStepOptions } from "./simulation.ts";
 export { createAnimationFrameScheduler, createManualScheduler, type FrameScheduler, type ManualScheduler } from "./scheduler.ts";
 export { createFpsMeter, type FpsMeter } from "./fpsMeter.ts";
-export { createBrowserPlatform, detectMuted, getMuteStore, isMuted, liveKeyOf, OPENABLE_URL_SCHEMES, setMuted, type BrowserPlatform, type BrowserPlatformOptions, type MuteState, type PlatformWindow } from "./platform.ts";
+// The browser platform and the mute switch live in @sonobe/renderer, shared with the web player.
+export { createBrowserPlatform, detectMuted, getMuteStore, isMuted, liveKeyOf, OPENABLE_URL_SCHEMES, setMuted, type BrowserPlatform, type BrowserPlatformOptions, type MuteState, type MuteStore, type PlatformWindow } from "@sonobe/renderer";
 export { createMediaInfoCache, findSceneNode, mediaRefOf, type MediaInfoCache, type MediaInfoCacheOptions, type MediaKind } from "./mediaInfo.ts";
 export {
   createLocalTrustPersistence,

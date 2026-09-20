@@ -8,11 +8,10 @@
 
 import { applyOps, createEmptyDocument, DEVICE_PRESETS, type Id, type SonobeDocument } from "@sonobe/core";
 import type { PatchRegistry } from "@sonobe/patches";
-import type { StoreApi } from "zustand/vanilla";
+import { getMuteStore, type MuteStore } from "@sonobe/renderer";
 import { createHostAdapter } from "../host/detect.ts";
 import type { HostAdapter } from "../host/types.ts";
 import { instancePathFor } from "../runtime/instances.ts";
-import { getMuteStore, type MuteState } from "../runtime/platform.ts";
 import { createRuntimeHost, type RuntimeHost, type RuntimeHostOptions } from "../runtime/runtimeHost.ts";
 import type { FrameScheduler } from "../runtime/scheduler.ts";
 import { createScriptTrustStore, scriptPatchCount, type ScriptTrustStore, type TrustPersistence } from "../runtime/scriptTrust.ts";
@@ -68,7 +67,7 @@ export interface EditorSessionOptions {
   /** Platform services for the live viewer. Default "browser" when a DOM exists. */
   platform?: RuntimeHostOptions["platform"];
   /** Mute switch. Default: the app-wide switch. */
-  mute?: StoreApi<MuteState>;
+  mute?: MuteStore;
 }
 
 export interface EditorSession {
@@ -231,6 +230,9 @@ export function createEditorSession(options: EditorSessionOptions = {}): EditorS
   host?.setDocumentEdited(document.getState().dirty);
   host?.setTitle(title(document.getState()));
 
+  // Restarting here restarts the phone preview and the pop-out viewer too.
+  const unsubscribeRestart = runtime.subscribeRestart(() => host?.notifyPrototypeRestarted?.());
+
   // The runtime's own layer bounds answer viewer.layerBounds while a viewer is attached (panels may override).
   let unregisterLayerBounds: (() => void) | null = null;
   const syncLayerBounds = (viewerCount: number) => {
@@ -294,6 +296,7 @@ export function createEditorSession(options: EditorSessionOptions = {}): EditorS
       unsubscribeRevision();
       unsubscribeScope();
       unsubscribeChrome();
+      unsubscribeRestart();
       unsubscribeViewers();
       unregisterLayerBounds?.();
       unsubscribeOpen?.();

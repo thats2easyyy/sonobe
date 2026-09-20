@@ -152,6 +152,10 @@ const host: SonobeHost = {
     ipcRenderer.send(IPC.documentChanged, revision, labels);
   },
 
+  notifyPrototypeRestarted() {
+    ipcRenderer.send(IPC.prototypeRestarted);
+  },
+
   secrets: {
     status: () => invoke<SecretsStatus>(IPC.secretsStatus),
     get: (name) => invoke<string | null>(IPC.secretsGet, name),
