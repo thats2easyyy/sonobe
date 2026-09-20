@@ -11,6 +11,10 @@
  * 3. Relaunch: the draft is there with both edits. save_document without a path refuses to name an
  *    Untitled folder (path_needed), with a path it saves there with no dialog, the draft goes away,
  *    and a path inside that project is refused (inside_project).
+ * 4. An unsaved change to that project, then the editor's renderer crashes: the window reloads, and
+ *    the draft comes back over its project. Closing the window with Don't Save removes the draft.
+ *
+ * SONOBE_SMOKE_VERBOSE=1 shows the app's own log.
  *
  * Every path is in a temp folder; nothing is written to ~/Documents.
  *
@@ -141,8 +145,10 @@ try {
   await mcp.close();
   log(`draft ${draftId} written; sending SIGTERM`);
 
-  const term = await kill("SIGTERM", 5000);
-  assert(term && term.code === 0 && term.afterMs < 3000, "SIGTERM quits with code 0 within 3 s, with no prompt waiting", term);
+  // Usually well under a second; at worst the 1.5 s flush limit plus the 2 s quit fallback. The old
+  // behavior never exited: the unsaved-changes prompt waited for an answer.
+  const term = await kill("SIGTERM", 8000);
+  assert(term && term.code === 0 && term.afterMs < 5000, "SIGTERM quits with code 0 on its own, with no prompt waiting", term);
   assert(!existsSync(tokenFile), "the quit cleaned up mcp.json");
   log(`SIGTERM: exited with code ${term.code} after ${term.afterMs} ms`);
 
@@ -204,8 +210,37 @@ try {
   assert(nested.isError && nested.text.includes("inside_project"), "create_document refuses a folder inside a project", nested.text);
   const info = await mcp.call("get_document_info");
   assert(info.text.includes(`Path: ${target}`) && !info.text.includes("unsaved"), "the document is the saved project now", info.text);
-  await mcp.close();
   log(`saved to ${target}; the draft is gone`);
+
+  // ---------------------------------------------------------------------------------------------
+  // 4. Unsaved changes to that project: the editor crashes, then the window closes with Don't Save
+  // ---------------------------------------------------------------------------------------------
+
+  const edit = await mcp.call("add_layers", { label: "added a badge", layers: [{ type: "oval", name: "Badge after saving" }] });
+  assert(!edit.isError, "add_layers on the saved project", edit.text);
+  await poll(() => Object.values(draftsOnDisk()).some((d) => d.projectPath === target && d.counts.layers === 3), { message: "a draft of the unsaved changes to the project" });
+  await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].webContents.forcefullyCrashRenderer());
+  // The window reloads its editor, and the draft it held is free to recover.
+  await poll(async () => !(await mcp.call("get_document_info")).isError, { timeout: 20_000, interval: 250, message: "the editor to reload after the crash" });
+  const afterCrash = await poll(async () => {
+    const r = await mcp.call("list_documents");
+    return r.text.includes(`unsaved changes to ${target}`) ? r : null;
+  }, { message: "the crashed window's draft to be recoverable" });
+  const crashedId = /^\s+draft:(\S+) /m.exec(afterCrash.text)[1];
+  const back = await mcp.call("open_document", { ref: `draft:${crashedId}` });
+  assert(!back.isError && back.text.includes(`Path: ${target}`) && back.text.includes("unsaved changes"), "the draft comes back over its project", back.text);
+  const three = await mcp.call("get_outline", { detail: "compact" });
+  assert(three.text.includes("Badge after saving"), "the unsaved change came back", three.text);
+  await mcp.close();
+  log("recovered unsaved changes to a saved project after a renderer crash");
+
+  // Closing the window with Don't Save (the native prompt answered by a stub) removes the draft.
+  await app.evaluate(({ dialog }) => {
+    dialog.showMessageBox = async () => ({ response: 1, checkboxChecked: false });
+  });
+  await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].close());
+  await poll(() => Object.keys(draftsOnDisk()).length === 0 && readdirSync(draftsDir).length === 0, { message: "Don't Save to remove the draft" });
+  log("Don't Save removed the draft");
 
   await app.evaluate(() => globalThis.__sonobeTest?.destroyWindows());
   await app.close();
