@@ -127,7 +127,7 @@ describe("startLanPreview", () => {
     expect(csp).toContain("default-src 'self'");
     // Code only from the player; prototypes reach other hosts as in the editor's viewer (Network Request, WebSocket, remote media).
     expect(csp).toContain("script-src 'self';");
-    expect(csp).toContain("connect-src 'self' http: https: ws: wss:");
+    expect(csp).toContain("connect-src 'self' http: https: ws: wss: blob: data:;");
     expect(csp).toContain("img-src 'self' data: blob: http: https:");
     expect(csp).toContain("media-src 'self' data: blob: http: https:");
     expect(csp).toContain("frame-ancestors 'none'");
