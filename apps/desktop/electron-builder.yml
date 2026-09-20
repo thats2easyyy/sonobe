@@ -16,6 +16,7 @@ files:
   - dist/**/*
   - "!dist/**/*.map"
   - "!dist/cli/**"
+  - "!dist/bin/**"
   - package.json
   - "!node_modules/**/*"
 
@@ -54,6 +55,13 @@ mac:
   # To distribute, set a Developer ID identity, hardenedRuntime: true, and notarize.
   identity: "-"
   hardenedRuntime: false
+  # The SF Symbols helper (native/sfsymbol, compiled by scripts/build.mjs): Resources/bin/sfsymbol draws
+  # SF Symbols for design imports. It can't run from inside app.asar, so it ships as a resource.
+  extraResources:
+    - from: dist/bin
+      to: bin
+      filter:
+        - sfsymbol
   target:
     - target: dmg
       arch: [arm64]

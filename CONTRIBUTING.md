@@ -66,6 +66,7 @@ Sonobe reimplements interaction-prototyping concepts from public documentation a
 - Don't contribute code, assets, icons, device imagery, or text copied from Origami Studio, Meta, Apple, or any other proprietary product.
 - Describe behavior in your own words.
 - Mention other products only to describe compatibility (for example, the `origami` mapping fields in the catalog).
+- SF Symbols are Apple's. The sfsymbol helper (`apps/desktop/native/sfsymbol`) draws them on the person's Mac when they import, from their copy of macOS. Never commit symbol artwork, exported symbol SVGs or PNGs, or Apple's symbol lists, not even as test fixtures: tests draw what they need at run time.
 
 ## Pull requests
 

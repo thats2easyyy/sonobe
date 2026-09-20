@@ -1,8 +1,8 @@
 /**
  * Design capture for import_design and the editor's Import dialog: render a URL or an HTML page in a
- * hidden, sandboxed window (no preload, no Node, its own session), run the DOM walker from
- * @sonobe/import in it, download the page's images with that session (so a dev server's cookies
- * and auth work), and optionally screenshot the page as drawn.
+ * hidden, sandboxed window (no preload, no Node, its own session), draw its SF Symbol placeholders
+ * (symbols.ts) and run the DOM walker from @sonobe/import in it, download the page's images with that
+ * session (so a dev server's cookies and auth work), and optionally screenshot the page as drawn.
  *
  * The page is untrusted: it runs with Chromium's sandbox and web security, can't open windows, ask for
  * permissions, download files, or navigate anywhere but http(s), and its window is destroyed afterwards.
@@ -23,10 +23,11 @@ import {
   IMAGE_CUTOFF_MS,
   resolveCaptureFiles,
   StepTimeoutError,
-  WALKER_SOURCE,
+  walkPage,
   type CaptureProgress,
   type DesignCapture,
   type ResolvedImage,
+  type SymbolRenderer,
 } from "@sonobe/import";
 import { HostError, type CapturedDesign, type DesignCaptureRequest } from "@sonobe/mcp";
 
@@ -64,6 +65,8 @@ export interface DesignCaptureOptions {
   onProgress?(progress: CaptureProgress): void;
   /** The longest deadline a capture may have, not counting waitMs (default 90 s; test runs lower it). */
   maxTimeoutMs?: number;
+  /** Draws the page's `<svg data-sf-symbol>` placeholders (symbols.ts). Without it they stay gray placeholders. */
+  symbols?: SymbolRenderer;
 }
 
 /** Captures running now, so quitting the app can end them. */
@@ -162,12 +165,11 @@ export async function captureDesignInWindow(request: DesignCaptureRequest, optio
     let capture: DesignCapture;
     try {
       // executeJavaScript runs outside the page's Content Security Policy. A page stuck in a loop never
-      // answers; the window is destroyed either way, and its pending calls are left behind.
-      const walked = (async () => {
-        await wc.executeJavaScript(WALKER_SOURCE, true);
-        return (await wc.executeJavaScript(`window.__sonobeCapture(${JSON.stringify(walk)})`, true)) as DesignCapture;
-      })();
-      capture = await run.step(walked, walkBudget);
+      // answers; the window is destroyed either way, and its pending calls are left behind. SF Symbol
+      // placeholders are drawn after the page settles and before the walker reads it.
+      const walked = await walkPage((script) => wc.executeJavaScript(script, true), { run, walk, ...(options.symbols ? { symbols: options.symbols } : {}) });
+      capture = walked.capture;
+      notes.push(...walked.notes);
     } catch (err) {
       run.throwIfAborted();
       const message = err instanceof StepTimeoutError ? `The page didn't answer within ${Math.round(walkBudget / 1000)} seconds (it may be busy or stuck in a loop).` : errorText(err).replace(/^Error: /, "");

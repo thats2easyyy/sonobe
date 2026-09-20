@@ -29,6 +29,7 @@ import { RecentProjects } from "./recent-projects.ts";
 import { createRendererRpcHub, type RendererRpcHub, type RpcIpcEvent } from "./rpc.ts";
 import { createSecretStore, createTestCipher, type SecretStore } from "./secrets.ts";
 import { ALLOWED_PERMISSIONS, isAppUrl, isExternalUrl, isMailtoUrl } from "./security.ts";
+import { desktopSymbols } from "./symbols.ts";
 
 const APP_NAME = "Sonobe";
 const VERSION = __SONOBE_VERSION__;
@@ -119,6 +120,8 @@ function main(): void {
   const dialogCaptures = new Map<string, AbortController>();
   /** A lower capture deadline for test runs (SONOBE_TEST only, set through __sonobeTest). */
   let testCaptureDeadlineMs: number | undefined;
+  /** Draws SF Symbols in design imports (macOS 13 or later, with the bundled helper). */
+  const symbols = desktopSymbols({ packaged: app.isPackaged, resourcesPath: process.resourcesPath, mainDir: __dirname, platform: process.platform, systemVersion: process.getSystemVersion(), exists: existsSync });
 
   const primaryWindow = (): AppWindow | undefined => {
     const focused = BrowserWindow.getFocusedWindow();
@@ -881,6 +884,7 @@ function main(): void {
           {
             log,
             signal: controller.signal,
+            symbols,
             ...(testCaptureDeadlineMs ? { maxTimeoutMs: testCaptureDeadlineMs } : {}),
             ...(captureId !== undefined
               ? {
@@ -986,11 +990,13 @@ function main(): void {
       captureDesign: (request, control = {}) =>
         captureDesignInWindow(request, {
           log,
+          symbols,
           ...(control.signal ? { signal: control.signal } : {}),
           ...(control.progress ? { onProgress: (p) => control.progress?.({ message: p.message, ...(p.done !== undefined ? { progress: p.done } : {}), ...(p.total !== undefined ? { total: p.total } : {}) }) } : {}),
           ...(testCaptureDeadlineMs ? { maxTimeoutMs: testCaptureDeadlineMs } : {}),
         }),
       fetchImage: fetchCaptureImage,
+      sfSymbols: !symbols.unavailable,
       onDocumentChange,
     });
 

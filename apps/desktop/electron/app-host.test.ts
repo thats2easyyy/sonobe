@@ -130,7 +130,7 @@ describe("app host documents", () => {
     const w = editorWindow(1);
     const host = appHost([w]);
     expect(host.kind).toBe("app");
-    expect(host.capabilities).toEqual({ screenshots: true, selection: true, presence: true, autosave: false });
+    expect(host.capabilities).toEqual({ screenshots: true, selection: true, presence: true, autosave: false, sfSymbols: false });
     expect(await host.listDocuments()).toEqual([{ docId: "photo_zoom", name: "Photo Zoom", revision: 0, dirty: false, active: true }]);
     const snap = await host.getDocument();
     expect(snap).toMatchObject({ docId: "photo_zoom", revision: 0, dirty: false, doc: { project: { name: "Photo Zoom" } } });
