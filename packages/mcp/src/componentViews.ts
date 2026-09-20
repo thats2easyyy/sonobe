@@ -85,7 +85,8 @@ export function drawComponentGraph(
   geometry: GraphGeometry,
   options: { scale?: number; maxWidth?: number; frame?: Id; theme?: "dark" | "light" } = {},
 ): GraphDrawing {
-  const model = deriveGraph({ doc, componentId, registry });
+  // The diagnostics the boxes were sized with: issue badges and outlines, as the editor draws them.
+  const model = deriveGraph({ doc, componentId, registry, diagnostics: geometry.diagnostics });
   const names = new Map(allLayers(doc.components[componentId]?.layers ?? []).map((l) => [l.id, l.name]));
   const layerName = (id: string) => names.get(id);
   const frame = options.frame !== undefined ? geometry.frames.get(options.frame) : undefined;
