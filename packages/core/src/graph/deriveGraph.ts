@@ -12,7 +12,7 @@ import { patchDisplayName } from "../names.ts";
 import { listInputs, targetAddress, type InputEntry } from "../ops/references.ts";
 import { findLayer, getPatchSpec, interfacePortToPort, resolveLayerOutputs, resolveLayerProps, resolveNodePorts, type ResolvedPort, type ResolvedPorts, type ResolvedProp } from "../registry.ts";
 import type { Component, Diagnostic, Id, InputValue, LayerNode, PatchNode, Registry, SonobeDocument, Suggestion, ValueType } from "../types.ts";
-import { canConnect, defaultForPort, isLayerInput, isLinkInput, isLoopLiteral } from "../values.ts";
+import { canConnect, defaultForPort, isLayerInput, isLinkInput, isLoopLiteral, normalizeColor } from "../values.ts";
 import { deepEqual } from "./equal.ts";
 import { createPlacementIndex, PLACEMENT_PADDING, type Rect } from "./geometry.ts";
 import { INPUTS_NODE_ID, layerNodeId, OUTPUTS_NODE_ID, readNodePositions } from "./graphNodes.ts";
@@ -114,14 +114,15 @@ const sameItems = <T>(a: readonly T[], b: readonly T[]) => a === b || (a.length 
 
 const issueCache = new WeakMap<Diagnostic, NodeIssue>();
 
-/** The chip for an input linked to "$knob.<id>": the knob's name and running value (K1). */
+/** The chip for an input linked to "$knob.<id>": the knob's name and running value (K1), and a color knob's color. */
 function knobChip(doc: SonobeDocument, link: string): PortModel["knob"] {
   const a = parseAddress(link);
   if (a?.kind !== "knob") return undefined;
   const knob = getKnob(doc.knobs, a.key);
   if (!knob) return { id: a.key, name: a.key };
   const value = effectiveKnobLiteral(doc.knobs!, knob.id);
-  return { id: knob.id, name: knob.name, ...(value !== undefined && value !== null ? { valueText: formatKnobValue(knob, value) } : {}) };
+  const color = knob.type === "color" && typeof value === "string" ? normalizeColor(value) : undefined;
+  return { id: knob.id, name: knob.name, ...(value !== undefined && value !== null ? { valueText: formatKnobValue(knob, value) } : {}), ...(color ? { color } : {}) };
 }
 
 function toPortModel(port: ResolvedPort, side: PortSide, address: string, connected: boolean, defaultOverride?: unknown): PortModel {

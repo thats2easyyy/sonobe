@@ -4,7 +4,7 @@
  * into a single history step. Inputs a knob drives show the knob's chip instead.
  */
 
-import { allLayers, decodeInput, defaultValue, encodeValue, formatColor, isColor, isDecodedLoop, type Value } from "@sonobe/core";
+import { allLayers, decodeInput, defaultValue, encodeValue, formatColor, isColor, isDecodedLoop, parseColor, type Color, type Value } from "@sonobe/core";
 import { ChevronDown } from "lucide-react";
 import { memo, useLayoutEffect, useRef, useState, type KeyboardEvent, type PointerEvent, type ReactNode } from "react";
 import { useStore } from "zustand";
@@ -63,16 +63,17 @@ export const InlineValue = memo(function InlineValue({ port }: { port: PortModel
 /**
  * An input a knob drives: a chip with the knob's name and running value instead of a cable (the node
  * size model in @sonobe/core/graph sizes it: 5 each side, a 10 pt glyph, 4 between the parts, the
- * name in the 10 pt sans and the value in the 10 pt mono, at most 110 wide). Clicking it shows the
- * knob in the Inspector's Knobs tab.
+ * name in the 10 pt sans and the value in the 10 pt mono, or a 10 pt swatch for a color knob, at
+ * most 110 wide). Clicking it shows the knob in the Inspector's Knobs tab.
  */
 export const KnobChip = memo(function KnobChip({ knob }: { knob: NonNullable<PortModel["knob"]> }) {
   const { session } = usePatchEditor();
+  const color = knob.color ? parseColor(knob.color) : undefined;
   return (
     <button
       type="button"
       className="sb-pe-value sb-pe-value--knob nodrag nopan"
-      aria-label={`Knob ${knob.name}${knob.valueText ? `, ${knob.valueText}` : ""}. Show it in Knobs`}
+      aria-label={`Knob ${knob.name}${knob.valueText ? `, ${color ? shortHex(color) : knob.valueText}` : ""}. Show it in Knobs`}
       onPointerDown={stop}
       onDoubleClick={stop}
       onClick={(event) => {
@@ -85,10 +86,18 @@ export const KnobChip = memo(function KnobChip({ knob }: { knob: NonNullable<Por
         <circle cx="5" cy="5" r="1.75" fill="currentColor" />
       </svg>
       <span className="sb-pe-value__name">{knob.name}</span>
-      {knob.valueText && <span className="sb-pe-value__knob-value sb-tabular">{knob.valueText}</span>}
+      {color ? (
+        <span className="sb-pe-swatch sb-checker" aria-hidden>
+          <span style={{ background: cssColor(color) }} />
+        </span>
+      ) : (
+        knob.valueText && <span className="sb-pe-value__knob-value sb-tabular">{knob.valueText}</span>
+      )}
     </button>
   );
 });
+
+const cssColor = (color: Color) => `rgba(${Math.round(color.r * 255)}, ${Math.round(color.g * 255)}, ${Math.round(color.b * 255)}, ${color.a})`;
 
 interface ScrubProps {
   value: number;
@@ -357,7 +366,7 @@ function ColorValue({ port }: { port: PortModel }) {
         }}
       >
         <span className="sb-pe-swatch sb-checker" aria-hidden>
-          <span style={{ background: `rgba(${Math.round(color.r * 255)}, ${Math.round(color.g * 255)}, ${Math.round(color.b * 255)}, ${color.a})` }} />
+          <span style={{ background: cssColor(color) }} />
         </span>
         <span className="sb-pe-value__text sb-tabular">{shortHex(color).slice(1)}</span>
       </button>

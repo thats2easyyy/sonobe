@@ -1,8 +1,9 @@
 /**
  * Headless node sizes against the patch editor's DOM. fixtures/node-sizes holds documents and the
  * sizes Chromium drew their nodes at on macOS (G1 retro: 245 nodes, Loop Builders of every type,
- * long and collapsed names, knob-style patches, layer nodes, and every patch type at its defaults),
- * measured while the prototype ran. Re-measure them when the node CSS changes.
+ * long and collapsed names, knob-style patches, knob chips of every knob type, layer nodes, and every
+ * patch type at its defaults), measured while the prototype ran. Re-measure them when the node CSS
+ * changes.
  */
 
 import { readdirSync, readFileSync } from "node:fs";

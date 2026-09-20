@@ -1,8 +1,9 @@
 /**
  * Node sizes: the shared estimate (@sonobe/core/graph, with the editor's canvas measurer and the
  * page's own live values) against the boxes the patch editor draws, for the documents in
- * packages/mcp/fixtures/node-sizes (Loop Builders of every type, long and collapsed names, layer
- * nodes, and every patch type at its defaults). It guards the estimate against drift in the node CSS.
+ * packages/mcp/fixtures/node-sizes (Loop Builders of every type, long and collapsed names, knob chips
+ * of every knob type, layer nodes, and every patch type at its defaults). It guards the estimate
+ * against drift in the node CSS.
  *
  * SONOBE_UPDATE_NODE_SIZES=1 writes the measured sizes back into the fixture, which the headless
  * test in packages/mcp/src/geometry.test.ts compares the SF Pro table against. Update it on macOS.

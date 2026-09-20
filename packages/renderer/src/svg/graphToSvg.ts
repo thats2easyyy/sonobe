@@ -187,25 +187,33 @@ function valueText(v: Exclude<ValueChip, { kind: "knob" }>): string {
 
 /**
  * A knob chip as InlineValue.tsx's KnobChip draws it and nodeSize.ts sizes it: the knob glyph, the
- * knob's name in the accent color (cut first when room runs out), and its running value in mono.
+ * knob's name in the accent color (cut first when room runs out), and its running value in mono, or
+ * a color knob's swatch.
  */
 function knobChip(x: number, cy: number, v: Extract<ValueChip, { kind: "knob" }>, max: number): string {
   const B = NODE_BOX;
   const room = Math.max(0, Math.min(max, B.valueMaxWidth) - B.valuePaddingX - B.knobIcon - B.valueInnerGap);
-  const value = v.text ? fit(v.text, "mono10", room) : "";
-  const valueWidth = value ? B.valueInnerGap + tableMeasurer(value, "mono10") : 0;
+  const value = !v.swatch && v.text ? fit(v.text, "mono10", room) : "";
+  const valueWidth = v.swatch ? B.valueInnerGap + B.swatch : value ? B.valueInnerGap + tableMeasurer(value, "mono10") : 0;
   const name = fit(v.name, "sans10", Math.max(0, room - valueWidth));
   const nameWidth = tableMeasurer(name, "sans10");
   const width = Math.min(B.valueMaxWidth, B.valuePaddingX + B.knobIcon + B.valueInnerGap + nameWidth + valueWidth);
   const glyph = x + B.valuePaddingX / 2 + B.knobIcon / 2;
   const nameX = x + B.valuePaddingX / 2 + B.knobIcon + B.valueInnerGap;
+  const after = nameX + nameWidth + B.valueInnerGap;
   return [
     el("rect", { x, y: cy - 8, width, height: 16, rx: 3, fill: THEME.accent, "fill-opacity": THEME.accentOpacity }),
     el("circle", { cx: glyph, cy, r: 4, fill: "none", stroke: THEME.textAccent, "stroke-width": 1.25 }),
     el("circle", { cx: glyph, cy, r: 1.75, fill: THEME.textAccent }),
     text(nameX, cy + 3.5, name, "sans10", THEME.textAccent),
-    text(nameX + nameWidth + B.valueInnerGap, cy + 3.5, value, "mono10", THEME.text),
+    v.swatch ? swatch(after, cy, v.swatch) : text(after, cy + 3.5, value, "mono10", THEME.text),
   ].join("");
+}
+
+/** A 10 pt color swatch ("#RRGGBBAA") centered on `cy`, as .sb-pe-swatch draws it. */
+function swatch(x: number, cy: number, hex: string): string {
+  const alpha = parseInt(hex.slice(7, 9) || "FF", 16) / 255;
+  return el("rect", { x, y: cy - NODE_BOX.swatch / 2, width: NODE_BOX.swatch, height: NODE_BOX.swatch, rx: 2, fill: hex.slice(0, 7), ...(alpha < 1 ? { "fill-opacity": alpha } : {}) });
 }
 
 function valueChip(x: number, cy: number, v: ValueChip, max: number): string {
