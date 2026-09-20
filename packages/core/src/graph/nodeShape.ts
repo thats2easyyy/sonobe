@@ -1,0 +1,180 @@
+/**
+ * Node shapes: what a patch editor node shows, as text and chips, so its size can be worked out
+ * without a DOM (nodeSize.ts). Built from the same view model the patch editor renders (deriveGraph),
+ * following its node views: header chips, then one row per input/output pair with the inline value
+ * of an unconnected input and the live value of an output.
+ */
+
+import { allLayers } from "../registry.ts";
+import { VARIABLE_RECEIVER_TYPE } from "../graph.ts";
+import type { Diagnostic, Id, Registry, SonobeDocument, Value } from "../types.ts";
+import { decodeInput, defaultValue, isColor, isDecodedLoop, typeLabel } from "../values.ts";
+import { deriveGraph } from "./deriveGraph.ts";
+import { formatNumberShort, formatValue, isLoopValue, shortHex } from "./format.ts";
+import type { GraphNodeData, InterfaceNodeData, LayerNodeData, PatchNodeData, PortModel } from "./types.ts";
+
+/** An input's inline value, as the patch editor draws it. */
+export type ValueChip =
+  | { kind: "number"; text: string }
+  | { kind: "vector"; texts: readonly string[] }
+  | { kind: "check" }
+  | { kind: "menu"; text: string }
+  | { kind: "color"; hex: string }
+  | { kind: "text"; text: string }
+  | { kind: "static"; text: string }
+  /** An input linked to a knob: the knob's name, and its value when known. */
+  | { kind: "knob"; name: string; text?: string };
+
+/** Header items after the title: text chips (variant, Muted, layer type), the loop count, badges, presence, the enter icon. */
+export type HeaderChip = { kind: "chip"; text: string } | { kind: "loop"; text: string } | { kind: "badge" } | { kind: "working"; text: string } | { kind: "enter" };
+
+export interface NodeRowShape {
+  in?: { label: string; value?: ValueChip; drive?: boolean };
+  out?: { label: string; live?: string };
+}
+
+export interface NodeShape {
+  kind: "patch" | "layer" | "interface";
+  title: string;
+  collapsed?: boolean;
+  chips: readonly HeaderChip[];
+  rows: readonly NodeRowShape[];
+}
+
+export interface NodeShapeOptions {
+  /**
+   * Live values by address (a running prototype, or a headless runtime stepped for a second):
+   * output rows print them and loop badges count them. Without it, outputs show no live value.
+   */
+  live?: (address: string) => unknown;
+  /** Layer id → name, for inline layer references. */
+  layerName?: (id: Id) => string | undefined;
+}
+
+const AXES: Record<string, number> = { point: 2, size: 2, anchor: 2, point3d: 3, point4d: 4 };
+
+/** CSS `text-transform: capitalize`. */
+const capitalize = (text: string) => text.replace(/(^|\s)(\S)/g, (_, space: string, letter: string) => space + letter.toUpperCase());
+
+/** The variant chip's text, as the patch editor labels it. */
+export function variantLabel(typeParam: string): string {
+  return typeLabel(typeParam as never)
+    .replace(/ \[.*\]$/, "")
+    .replace(/^on\/off \(boolean\)$/, "boolean");
+}
+
+function currentValue(port: PortModel): Value {
+  if (port.literal !== undefined) {
+    const decoded = decodeInput(port.literal, port.type);
+    if (decoded !== undefined && !isDecodedLoop(decoded)) return decoded;
+  }
+  return port.defaultValue ?? defaultValue(port.type);
+}
+
+/** The inline editor of an unconnected input (InlineValue), or undefined when it shows none. */
+export function valueChip(port: PortModel, layerName?: (id: Id) => string | undefined): ValueChip | undefined {
+  const decoded = port.literal !== undefined ? decodeInput(port.literal, port.type) : undefined;
+  if (isDecodedLoop(decoded)) return { kind: "static", text: `×${decoded.items.length}` };
+  const v = currentValue(port);
+  switch (port.type) {
+    case "number":
+    case "index":
+      return { kind: "number", text: formatNumberShort(Number(v) || 0) };
+    case "boolean":
+      return { kind: "check" };
+    case "enum": {
+      const key = String(v ?? "");
+      const name = port.enumOptions?.find((o) => o.key === key)?.name ?? key;
+      return { kind: "menu", text: name || "—" };
+    }
+    case "color":
+      return { kind: "color", hex: shortHex(isColor(v) ? v : { r: 0, g: 0, b: 0, a: 1 }).slice(1) };
+    case "text":
+      return { kind: "text", text: String(v ?? "") };
+    case "point":
+    case "size":
+    case "anchor":
+    case "point3d":
+    case "point4d": {
+      const values = Array.isArray(v) ? (v as number[]) : [];
+      return { kind: "vector", texts: Array.from({ length: AXES[port.type]! }, (_, i) => formatNumberShort(values[i] ?? 0)) };
+    }
+    case "layer": {
+      const layerId = v && typeof v === "object" ? (v as { layerId?: string }).layerId : undefined;
+      return { kind: "menu", text: (layerId && layerName?.(layerId)) ?? (layerId ? "Missing layer" : "None") };
+    }
+    case "pulse":
+      return undefined;
+    default: {
+      const text = formatValue(v, port.type, { maxText: 10 });
+      return text === "—" ? undefined : { kind: "static", text };
+    }
+  }
+}
+
+/** What an output row prints as its live value (empty for pulses and missing values). */
+export function liveText(port: PortModel, value: unknown): string {
+  if (value === undefined || port.type === "pulse") return "";
+  return formatValue(value, port.type, { maxText: 10, ...(port.enumOptions ? { enumOptions: port.enumOptions } : {}) });
+}
+
+function headerChips(data: PatchNodeData | LayerNodeData | InterfaceNodeData, live: NodeShapeOptions["live"]): HeaderChip[] {
+  const chips: HeaderChip[] = [];
+  if (data.kind === "patch") {
+    if (data.variants && data.typeParam && data.typeParam !== data.variants[0]) chips.push({ kind: "chip", text: capitalize(variantLabel(data.typeParam)) });
+    if (data.looped || data.outputs.some((o) => o.wholeLoop)) {
+      const loopOutput = data.outputs.find((o) => o.loop);
+      const value = loopOutput && live ? live(loopOutput.address) : undefined;
+      const length = isLoopValue(value) ? value.items.length : data.loopLength;
+      chips.push({ kind: "loop", text: `×${length ?? ""}` });
+    }
+    if (data.muted) chips.push({ kind: "chip", text: "Muted" });
+    if (data.issues.length) chips.push({ kind: "badge" });
+    if (data.working.length) chips.push({ kind: "working", text: data.working[0]! });
+    if (data.componentTarget) chips.push({ kind: "enter" });
+    if (data.type === VARIABLE_RECEIVER_TYPE) chips.push({ kind: "badge" });
+  } else if (data.kind === "layer") {
+    chips.push({ kind: "chip", text: data.layerTypeName });
+    if (data.issues.length) chips.push({ kind: "badge" });
+  }
+  return chips;
+}
+
+/** A node's shape from its view model data (deriveGraph). */
+export function nodeShapeFromData(data: PatchNodeData | LayerNodeData | InterfaceNodeData, options: NodeShapeOptions = {}): NodeShape {
+  const editable = data.kind === "patch";
+  const rows: NodeRowShape[] = [];
+  for (let i = 0; i < Math.max(data.inputs.length, data.outputs.length); i++) {
+    const input = data.inputs[i];
+    const output = data.outputs[i];
+    const row: NodeRowShape = {};
+    if (input) {
+      const value: ValueChip | undefined = input.knob ? { kind: "knob", name: input.knob.name, ...(input.knob.valueText ? { text: input.knob.valueText } : {}) } : !input.connected && editable ? valueChip(input, options.layerName) : undefined;
+      row.in = { label: input.name, ...(value ? { value } : {}), ...(data.kind === "layer" && !input.connected ? { drive: true } : {}) };
+    }
+    if (output) {
+      const text = options.live ? liveText(output, options.live(output.address)) : "";
+      row.out = { label: output.name, ...(text ? { live: text } : {}) };
+    }
+    rows.push(row);
+  }
+  return { kind: data.kind, title: data.title, ...(data.kind === "patch" && data.collapsed ? { collapsed: true } : {}), chips: headerChips(data, options.live), rows };
+}
+
+export interface ComponentShapesOptions extends Pick<NodeShapeOptions, "live"> {
+  /** Document diagnostics, for issue badges. */
+  diagnostics?: readonly Diagnostic[];
+}
+
+/** Every node of a component's graph (patches, "@layer" targets, "$in"/"$out") → its shape. Comments aren't included. */
+export function componentNodeShapes(doc: SonobeDocument, registry: Registry, componentId: Id, options: ComponentShapesOptions = {}): Map<string, NodeShape> {
+  const model = deriveGraph({ doc, componentId, registry, ...(options.diagnostics ? { diagnostics: options.diagnostics } : {}) });
+  const layers = new Map(allLayers(doc.components[componentId]?.layers ?? []).map((l) => [l.id, l.name]));
+  const shapes = new Map<string, NodeShape>();
+  for (const node of model.nodes) {
+    const data: GraphNodeData = node.data;
+    if (data.kind === "comment") continue;
+    shapes.set(node.id, nodeShapeFromData(data, { ...(options.live ? { live: options.live } : {}), layerName: (id) => layers.get(id) }));
+  }
+  return shapes;
+}

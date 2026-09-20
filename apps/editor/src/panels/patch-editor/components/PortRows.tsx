@@ -4,7 +4,7 @@ import { canConnect } from "@sonobe/core";
 import { Handle, Position, useUpdateNodeInternals } from "@xyflow/react";
 import { memo, useEffect, useLayoutEffect, useRef, useState, type MouseEvent, type PointerEvent } from "react";
 import { PortGlyph } from "../../../ui/PortGlyph.tsx";
-import { formatValue, isTruthyState } from "../model/format.ts";
+import { formatValue, isTruthyState } from "@sonobe/core/graph";
 import { HEADER_HEIGHT } from "../model/geometry.ts";
 import { layerIdOfNode, type PortModel } from "../model/types.ts";
 import { usePatchEditor, useLiveValue, usePulseCount, useUi } from "../state/context.ts";

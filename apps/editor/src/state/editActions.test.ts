@@ -1,6 +1,6 @@
 import { applyOps, createEmptyDocument, findLayer, type Op, type SonobeDocument } from "@sonobe/core";
 import { afterEach, describe, expect, it } from "vitest";
-import { estimatePatchSize } from "../panels/patch-editor/model/placement.ts";
+import { estimatePatchSize } from "@sonobe/core/graph";
 import { createManualScheduler } from "../runtime/scheduler.ts";
 import {
   arrangeLayers,

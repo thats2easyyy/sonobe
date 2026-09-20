@@ -28,6 +28,7 @@ const OP_FIELDS: Record<OpKind, readonly string[]> = {
   createComponent: ["component", "name", "layerIds", "patchIds", "ref"],
   updateInterface: ["component", "inputs", "outputs", "replace"],
   updateComponent: ["component", "id", "name", "notes", "size", "meta"],
+  setNodePositions: ["component", "positions"],
   // Every op may name a component (it's ignored where there's none to target).
   setScript: ["component", "file", "source"],
   addAsset: ["component", "asset"],

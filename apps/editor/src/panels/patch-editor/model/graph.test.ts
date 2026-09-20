@@ -3,9 +3,8 @@ import { applyOps, createEmptyDocument, getDiagnostics, type Op, type SonobeDocu
 import { createPatchRegistry } from "@sonobe/patches";
 import { describe, expect, it } from "vitest";
 import { createDemoDocument } from "../../../state/demoDocument.ts";
-import { deriveGraph } from "./graph.ts";
+import { deriveGraph, type CableEdge, type LayerGraphNode, type PatchGraphNode } from "@sonobe/core/graph";
 import { reconcileNodes } from "./reconcile.ts";
-import type { CableFlowEdge, LayerFlowNode, PatchFlowNode } from "./types.ts";
 
 const registry = createPatchRegistry();
 
@@ -15,8 +14,8 @@ function build(ops: Op[]): SonobeDocument {
   return r.doc;
 }
 
-const patchNode = (model: ReturnType<typeof deriveGraph>, id: string) => model.nodes.find((n): n is PatchFlowNode => n.id === id && n.type === "patch")!;
-const cable = (model: ReturnType<typeof deriveGraph>, to: string) => model.edges.find((e): e is CableFlowEdge => e.data?.to === to)!;
+const patchNode = (model: ReturnType<typeof deriveGraph>, id: string) => model.nodes.find((n): n is PatchGraphNode => n.id === id && n.type === "patch")!;
+const cable = (model: ReturnType<typeof deriveGraph>, to: string) => model.edges.find((e): e is CableEdge => e.data?.to === to)!;
 
 describe("deriveGraph", () => {
   const doc = createDemoDocument(registry);
@@ -58,7 +57,7 @@ describe("deriveGraph", () => {
     expect(cable(model, "zoom_spring.number").data?.conversion).toBe("on = 1, off = 0");
     const scale = cable(model, "@photo.scale");
     expect(scale).toMatchObject({ source: "photo_scale", target: "@photo", targetHandle: "in:scale" });
-    const heart = model.nodes.find((n): n is LayerFlowNode => n.id === "@heart")!;
+    const heart = model.nodes.find((n): n is LayerGraphNode => n.id === "@heart")!;
     // Ordered by driver position (Heart Color sits above Heart Scale), so the cables don't cross.
     expect(heart.data.inputs.map((p) => p.key)).toEqual(["textColor", "scale"]);
     expect(heart.data.title).toBe("Heart");
@@ -76,12 +75,12 @@ describe("deriveGraph", () => {
 
   it("shows properties someone asked to drive as open inputs, after the driven ones", () => {
     const m = deriveGraph({ doc, componentId: "main", registry, pendingTargets: ["@photo.opacity", "@photo.scale", "@sun.rotation", "@missing.scale", "@photo.nope"] });
-    const photo = m.nodes.find((n): n is LayerFlowNode => n.id === "@photo")!;
+    const photo = m.nodes.find((n): n is LayerGraphNode => n.id === "@photo")!;
     expect(photo.data.inputs.map((p) => [p.key, p.connected])).toEqual([
       ["scale", true],
       ["opacity", false],
     ]);
-    const sun = m.nodes.find((n): n is LayerFlowNode => n.id === "@sun")!;
+    const sun = m.nodes.find((n): n is LayerGraphNode => n.id === "@sun")!;
     expect(sun.data.inputs.map((p) => p.key)).toEqual(["rotation"]);
     expect(sun.position.x).toBeGreaterThan(900);
     expect(m.ports.get("in|@sun.rotation")?.connected).toBe(false);

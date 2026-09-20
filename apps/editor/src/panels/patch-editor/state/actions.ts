@@ -39,10 +39,10 @@ import {
 } from "../model/editOps.ts";
 import { estimateNodeSize, HEADER_HEIGHT, ROW_HEIGHT, type Rect } from "../model/geometry.ts";
 import { instanceChoiceKey } from "../model/instances.ts";
-import { nodePositionsMetaOp } from "../model/meta.ts";
+import { nodePositionsOp } from "@sonobe/core";
 import { publishedKeyOf, publishPortPlan, unpublishOps, withoutDefault, type PublishSide } from "../model/publish.ts";
 import { newVariablePatch } from "../model/variables.ts";
-import { documentObstacles, estimatePatchSize, findFreePosition, type PlacementBias, type PlacementObstacles } from "../model/placement.ts";
+import { documentObstacles, estimatePatchSize, findFreePosition, type PlacementBias, type PlacementObstacles } from "@sonobe/core/graph";
 import { tidyLayout, type TidyGroupInput, type TidyNodeInput } from "../model/tidy.ts";
 import {
   commentIdOfNode,
@@ -502,7 +502,7 @@ export function createPatchEditorActions(deps: ActionDeps): PatchEditorActions {
       }
       const moves = movePatchOps(c, patchPositions);
       ops.push(...moves);
-      const metaOp = nodePositions.size ? nodePositionsMetaOp(c, nodePositions) : undefined;
+      const metaOp = nodePositions.size ? nodePositionsOp(c, nodePositions) : undefined;
       if (metaOp) ops.push(metaOp);
       if (ops.length === 0) return;
       const movedPatches = moves.map((op) => (op.op === "updatePatch" ? op.id : "")).filter(Boolean);
@@ -592,7 +592,7 @@ export function createPatchEditorActions(deps: ActionDeps): PatchEditorActions {
         const commentId = commentIdOfNode(id);
         if (commentId && current.comments.some((x) => x.id === commentId)) ops.push({ op: "updateComment", component: componentId, id: commentId, rect: [rect.x, rect.y, rect.width, rect.height] });
       }
-      const metaOp = nodePositions.size ? nodePositionsMetaOp(current, nodePositions) : undefined;
+      const metaOp = nodePositions.size ? nodePositionsOp(current, nodePositions) : undefined;
       if (metaOp) ops.push(metaOp);
       if (ops.length) apply(ops, `Tidy up ${patchPositions.size === 1 ? "1 patch" : `${patchPositions.size} patches`}`);
     },

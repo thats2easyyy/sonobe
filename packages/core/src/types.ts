@@ -237,7 +237,7 @@ export interface Component {
   layers: LayerNode[];
   patches: Record<Id, PatchNode>;
   comments: CommentNode[];
-  /** Extension data (editor node positions, importer notes): plain JSON, keys sorted on save. Change it with updateComponent `meta`. */
+  /** Extension data (editor node positions, importer notes): plain JSON, keys sorted on save. Change it with updateComponent `meta`; graph node positions with setNodePositions. */
   meta?: Record<string, unknown>;
 }
 
@@ -583,8 +583,18 @@ export type Op =
    * `meta` merges key by key into Component.meta: a key set to null is removed, any other value
    * replaces that key whole (no deep merge), and untouched keys stay. `meta: null` removes all
    * metadata. Values are plain JSON and can't be null. The inverse restores every touched key.
+   * Saved graph node positions (`meta.patchEditor.nodes`) belong to setNodePositions: a
+   * `patchEditor` object that would drop or move saved positions fails with meta_conflict
+   * (`patchEditor: null` still clears everything).
    */
   | (OpBase & { op: "updateComponent"; id: Id; name?: string; notes?: string | null; size?: [number, number] | null; meta?: Record<string, unknown> | null })
+  /**
+   * Save where layer target ("@layerId") and component interface ("$in", "$out") nodes sit in the
+   * patch graph, as [x, y] rounded to whole points. Entries merge by key; null returns a node to
+   * automatic placement. Patches keep their position on the patch (updatePatch ui), comments on
+   * their rect.
+   */
+  | (OpBase & { op: "setNodePositions"; positions: Record<string, [number, number] | null> })
   | { op: "setScript"; file: string; source: string | null }
   | { op: "addAsset"; asset: AssetRecord }
   | { op: "removeAsset"; id: Id }

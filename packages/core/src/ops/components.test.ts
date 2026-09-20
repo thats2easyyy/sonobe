@@ -50,14 +50,14 @@ describe("addComponent / updateComponent / removeComponent", () => {
 
   it("merges, replaces and clears component metadata", () => {
     const doc = emptyDoc();
-    const first = mustApply(doc, [{ op: "updateComponent", id: "main", meta: { patchEditor: { nodes: { card: [10, 20] } }, zoom: 1.5 } }]);
-    expect(first.doc.components.main!.meta).toEqual({ patchEditor: { nodes: { card: [10, 20] } }, zoom: 1.5 });
+    const first = mustApply(doc, [{ op: "updateComponent", id: "main", meta: { importer: { source: { figma: "abc" } }, zoom: 1.5 } }]);
+    expect(first.doc.components.main!.meta).toEqual({ importer: { source: { figma: "abc" } }, zoom: 1.5 });
     expect(first.inverse).toEqual([{ op: "updateComponent", id: "main", meta: null }]);
     expectRoundTrip(doc, first);
 
-    const second = mustApply(first.doc, [{ op: "updateComponent", id: "main", meta: { zoom: null, grid: true, patchEditor: { nodes: {} } } }]);
-    expect(second.doc.components.main!.meta).toEqual({ patchEditor: { nodes: {} }, grid: true });
-    expect(second.inverse).toEqual([{ op: "updateComponent", id: "main", meta: { zoom: 1.5, grid: null, patchEditor: { nodes: { card: [10, 20] } } } }]);
+    const second = mustApply(first.doc, [{ op: "updateComponent", id: "main", meta: { zoom: null, grid: true, importer: { source: {} } } }]);
+    expect(second.doc.components.main!.meta).toEqual({ importer: { source: {} }, grid: true });
+    expect(second.inverse).toEqual([{ op: "updateComponent", id: "main", meta: { zoom: 1.5, grid: null, importer: { source: { figma: "abc" } } } }]);
     expectRoundTrip(first.doc, second);
 
     const cleared = mustApply(second.doc, [{ op: "updateComponent", id: "main", meta: null }]);

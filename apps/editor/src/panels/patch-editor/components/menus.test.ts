@@ -4,7 +4,7 @@ import { describe, expect, it, vi } from "vitest";
 import { createDemoDocument } from "../../../state/demoDocument.ts";
 import { getRegistry } from "../../../state/registry.ts";
 import type { MenuEntry } from "../../../ui/Menu.tsx";
-import { deriveGraph } from "../model/graph.ts";
+import { deriveGraph } from "@sonobe/core/graph";
 import type { GraphNodeData, PortSide } from "../model/types.ts";
 import type { PatchEditorActions } from "../state/actions.ts";
 import { patchMenu, portMenu, type MenuContext } from "./menus.ts";
