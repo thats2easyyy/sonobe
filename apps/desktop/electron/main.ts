@@ -624,7 +624,8 @@ function main(): void {
     viewerWindow = { win, server, origin };
     viewerWindowError = null;
     try {
-      await win.loadURL(server.url);
+      // The page has no host API, so ?mute=1 is how it learns to speak silently (system speech plays past setAudioMuted).
+      await win.loadURL(env.mute ? `${server.url}?mute=1` : server.url);
     } catch (err) {
       log("warn", `The viewer window didn't load: ${errorMessage(err)}`);
     }
