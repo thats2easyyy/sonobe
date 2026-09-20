@@ -7,7 +7,7 @@
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { createHeadlessHost, TOOL_NAMES, type HeadlessHost } from "@sonobe/mcp";
+import { createHeadlessHost, TOOL_NAMES, type DesignCaptureRequest, type HeadlessHost, type HostCallControl } from "@sonobe/mcp";
 import { createPatchRegistry } from "@sonobe/patches";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createAssistantAgent } from "./agent.ts";
@@ -87,6 +87,40 @@ describe("MCP tool bridge", () => {
     // The system prompt carries the MCP server's instructions.
     expect(JSON.stringify(api.requests[0]!.system)).toContain("get_guide");
     expect(api.requests[0]!.tools).toHaveLength(TOOL_NAMES.length);
+  });
+});
+
+describe("MCP tool bridge: long calls", () => {
+  it("passes a long call's progress on, and Stop cancels it before it changes anything", async () => {
+    const captures: { aborted: boolean }[] = [];
+    const slow = Object.create(host) as HeadlessHost;
+    Object.defineProperty(slow, "captureDesign", {
+      value: (_request: DesignCaptureRequest, control: HostCallControl = {}) => {
+        const capture = { aborted: false };
+        captures.push(capture);
+        control.progress?.({ message: "Reading the page's layers" });
+        return new Promise<never>((_resolve, reject) =>
+          control.signal?.addEventListener("abort", () => {
+            capture.aborted = true;
+            reject(new Error("aborted"));
+          }),
+        );
+      },
+    });
+    const slowBridge = createMcpToolBridge({ host: slow, version: "0.1.0-test" });
+    const before = (await host.history.list({})).length;
+    const progress: string[] = [];
+    const controller = new AbortController();
+    const call = slowBridge.call("import_design", { html: "<p>slow</p>" }, { signal: controller.signal, onProgress: (message) => progress.push(message) });
+    const end = Date.now() + 2000;
+    while (!progress.includes("Reading the page's layers") && Date.now() < end) await new Promise((resolve) => setTimeout(resolve, 5));
+    expect(progress).toEqual(expect.arrayContaining(["Rendering the HTML", "Reading the page's layers"]));
+    controller.abort();
+    await expect(call).rejects.toThrow();
+    while (!captures[0]?.aborted && Date.now() < end) await new Promise((resolve) => setTimeout(resolve, 5));
+    expect(captures[0]?.aborted).toBe(true);
+    expect((await host.history.list({})).length).toBe(before);
+    await slowBridge.close();
   });
 });
 

@@ -98,6 +98,14 @@ export function reduceEvent(state: AssistantData, event: AssistantEvent): Partia
       const chip: ToolChip = { toolUseId: event.toolUseId, name: event.name, title: event.title, detail: event.detail, status: "running", changedDocument: false };
       return { items: updateTurn(state.items, event.runId, turn, (item) => ({ ...item, tools: [...item.tools.filter((t) => t.toolUseId !== chip.toolUseId), chip] })), thinking: false };
     }
+    case "tool_progress":
+      return {
+        items: state.items.map((item) =>
+          item.kind === "assistant" && item.runId === event.runId && item.tools.some((t) => t.toolUseId === event.toolUseId && t.status === "running")
+            ? { ...item, tools: item.tools.map((t) => (t.toolUseId === event.toolUseId && t.status === "running" ? { ...t, detail: event.detail } : t)) }
+            : item,
+        ),
+      };
     case "tool_finished":
       return {
         items: state.items.map((item) =>
