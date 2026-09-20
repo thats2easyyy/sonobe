@@ -1,0 +1,142 @@
+{
+  "calls": [
+    {
+      "tool": "apply_ops",
+      "args": {
+        "ops": [
+          {
+            "op": "removePatch",
+            "component": "swipe_card",
+            "id": "card_swipe"
+          },
+          {
+            "op": "removePatch",
+            "component": "swipe_card",
+            "id": "card_gone"
+          },
+          {
+            "op": "removePatch",
+            "component": "swipe_card",
+            "id": "card_drag"
+          },
+          {
+            "op": "removePatch",
+            "component": "swipe_card",
+            "id": "card_offset"
+          },
+          {
+            "op": "removePatch",
+            "component": "swipe_card",
+            "id": "card_follow"
+          },
+          {
+            "op": "removePatch",
+            "component": "swipe_card",
+            "id": "card_tap"
+          },
+          {
+            "op": "removePatch",
+            "component": "swipe_card",
+            "id": "card_flipped"
+          },
+          {
+            "op": "removePatch",
+            "component": "swipe_card",
+            "id": "flip_spring"
+          },
+          {
+            "op": "removePatch",
+            "component": "swipe_card",
+            "id": "flip_scale"
+          },
+          {
+            "op": "updateInterface",
+            "component": "swipe_card",
+            "outputs": {
+              "flipped": {
+                "name": "Flipped",
+                "type": "boolean"
+              }
+            },
+            "replace": true
+          },
+          {
+            "op": "addPatch",
+            "component": "swipe_card",
+            "patch": {
+              "ref": "tap",
+              "type": "interaction",
+              "name": "Card Tap",
+              "inputs": {
+                "layer": {
+                  "layer": "card_face"
+                }
+              }
+            }
+          },
+          {
+            "op": "addPatch",
+            "component": "swipe_card",
+            "patch": {
+              "ref": "flipped",
+              "type": "switch",
+              "name": "Card Flipped",
+              "inputs": {
+                "flip": {
+                  "link": "$tap.tap"
+                }
+              }
+            }
+          },
+          {
+            "op": "addPatch",
+            "component": "swipe_card",
+            "patch": {
+              "ref": "spring",
+              "type": "popAnimation",
+              "name": "Flip Spring",
+              "inputs": {
+                "number": {
+                  "link": "$flipped.on"
+                },
+                "bounciness": 4,
+                "speed": 14
+              }
+            }
+          },
+          {
+            "op": "addPatch",
+            "component": "swipe_card",
+            "patch": {
+              "ref": "scale",
+              "type": "transition",
+              "typeParam": "number",
+              "name": "Flip Scale",
+              "inputs": {
+                "progress": {
+                  "link": "$spring.output"
+                },
+                "start": 1,
+                "end": 0.9
+              }
+            }
+          },
+          {
+            "op": "connect",
+            "component": "swipe_card",
+            "from": "$scale.output",
+            "to": "@card_face.scale"
+          },
+          {
+            "op": "connect",
+            "component": "swipe_card",
+            "from": "$flipped.on",
+            "to": "$out.flipped"
+          }
+        ],
+        "label": "rebuilt the card as a flip card"
+      }
+    }
+  ],
+  "answer": "Rebuilt Swipe Card in one batch as a flip card with one output, Flipped."
+}

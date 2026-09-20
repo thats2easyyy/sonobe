@@ -1,0 +1,19 @@
+{
+  "title": "Bottom Sheet",
+  "about": "examples/08-bottom-sheet with its patches removed: the layers are there, Claude builds the logic.",
+  "tags": [
+    "example",
+    "gestures",
+    "springs"
+  ],
+  "start": {
+    "example": "08-bottom-sheet",
+    "patches": false
+  },
+  "test": {
+    "example": "08-bottom-sheet"
+  },
+  "budget": {
+    "maxTurns": 50
+  }
+}

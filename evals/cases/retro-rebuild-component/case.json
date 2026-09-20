@@ -1,0 +1,17 @@
+{
+  "title": "Rebuild a component in one batch",
+  "about": "Retro item 5 (C1, C2): rebuilding a component left its old Swiped Left and Swiped Right outputs behind, and patches recreated in a later batch came back as card_gone_2. The checks look for stale ports and for numbered copies of removed ids.",
+  "tags": ["retro", "components"],
+  "start": { "project": "start" },
+  "checks": [
+    {
+      "kind": "interface",
+      "description": "Swipe Card has one output, Flipped, and no swipe ports",
+      "component": "swipe_card",
+      "without": ["swipedLeft", "swipedRight"],
+      "outputs": ["Flipped"]
+    },
+    { "kind": "keepsIds", "description": "Rebuilt patches kept their ids", "component": "swipe_card" }
+  ],
+  "budget": { "maxTurns": 40 }
+}

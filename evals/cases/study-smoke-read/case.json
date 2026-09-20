@@ -1,0 +1,9 @@
+{
+  "title": "Read a prototype and say what it does",
+  "about": "The usability study's smoke task (docs/research/ai-usability-study.md): read-only, on the Tap to Grow example. Nothing may change.",
+  "tags": ["study", "read"],
+  "start": { "example": "01-tap-to-grow" },
+  "checks": [{ "kind": "unchanged", "description": "Reading changed nothing" }],
+  "answer": { "mentions": [["tap"], ["card"], ["bigger", "grow", "scale", "zoom"], ["spring", "bounce", "animat"]] },
+  "budget": { "maxTurns": 15, "timeoutSec": 240 }
+}

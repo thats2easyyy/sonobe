@@ -1,0 +1,59 @@
+{
+  "calls": [
+    {
+      "tool": "import_design",
+      "args": {
+        "url": "{{url}}",
+        "colorScheme": "dark"
+      }
+    },
+    {
+      "tool": "add_patches",
+      "args": {
+        "patches": [
+          {
+            "ref": "press",
+            "type": "interaction",
+            "name": "Press Pay",
+            "inputs": {
+              "layer": {
+                "layer": "pay_button"
+              }
+            }
+          },
+          {
+            "ref": "spring",
+            "type": "popAnimation",
+            "name": "Press Spring",
+            "inputs": {
+              "number": {
+                "link": "$press.down"
+              },
+              "bounciness": 0,
+              "speed": 20
+            }
+          },
+          {
+            "ref": "scale",
+            "type": "transition",
+            "name": "Pay Scale",
+            "inputs": {
+              "progress": {
+                "link": "$spring.output"
+              },
+              "start": 1,
+              "end": 0.95
+            }
+          }
+        ],
+        "connections": [
+          {
+            "from": "$scale.output",
+            "to": "@pay_button.scale"
+          }
+        ]
+      }
+    }
+  ],
+  "answer": "Imported the checkout screen in dark mode; the Pay button shrinks to 0.95 while pressed."
+}

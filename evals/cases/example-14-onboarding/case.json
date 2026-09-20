@@ -1,0 +1,19 @@
+{
+  "title": "Onboarding",
+  "about": "examples/14-onboarding with its patches removed: the layers are there, Claude builds the logic.",
+  "tags": [
+    "example",
+    "states",
+    "gestures"
+  ],
+  "start": {
+    "example": "14-onboarding",
+    "patches": false
+  },
+  "test": {
+    "example": "14-onboarding"
+  },
+  "budget": {
+    "maxTurns": 60
+  }
+}

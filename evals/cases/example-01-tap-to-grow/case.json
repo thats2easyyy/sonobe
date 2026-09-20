@@ -1,0 +1,8 @@
+{
+  "title": "Tap to Grow",
+  "about": "examples/01-tap-to-grow with its patches removed: the layers are there, Claude builds the logic.",
+  "tags": ["example", "tap"],
+  "start": { "example": "01-tap-to-grow", "patches": false },
+  "test": { "example": "01-tap-to-grow" },
+  "budget": { "maxTurns": 40 }
+}

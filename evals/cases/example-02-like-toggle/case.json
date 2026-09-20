@@ -1,0 +1,19 @@
+{
+  "title": "Like Toggle",
+  "about": "examples/02-like-toggle with its patches removed: the layers are there, Claude builds the logic.",
+  "tags": [
+    "example",
+    "tap",
+    "states"
+  ],
+  "start": {
+    "example": "02-like-toggle",
+    "patches": false
+  },
+  "test": {
+    "example": "02-like-toggle"
+  },
+  "budget": {
+    "maxTurns": 40
+  }
+}

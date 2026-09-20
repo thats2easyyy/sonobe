@@ -1,0 +1,14 @@
+{
+  "description": "The current page's dot overshoots its stretch now.",
+  "scenarios": [
+    {
+      "name": "The current dot stretches with a bounce",
+      "events": [{ "kind": "drag", "from": [300, 420], "to": [140, 420], "durationMs": 150, "atMs": 100 }],
+      "durationMs": 1600,
+      "expect": [
+        { "description": "The second dot overshoots past 22 points wide", "target": "@dot.size#1", "component": "width", "at": "max", "op": ">", "value": 22.3 },
+        { "description": "then settles at 22", "target": "@dot.size#1", "component": "width", "at": "end", "op": "==", "value": 22, "tolerance": 0.1 }
+      ]
+    }
+  ]
+}

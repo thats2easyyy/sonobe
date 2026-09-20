@@ -1,0 +1,7 @@
+{
+  "title": "A beginner's like button",
+  "about": "The usability study's beginner task, on a start project with the heart already drawn so the checks can name it.",
+  "tags": ["study", "tap", "states"],
+  "start": { "project": "start" },
+  "budget": { "maxTurns": 40 }
+}

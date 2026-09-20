@@ -1,0 +1,18 @@
+{
+  "title": "Grid with Loops",
+  "about": "examples/15-grid-with-loops with its patches removed: the layers are there, Claude builds the logic.",
+  "tags": [
+    "example",
+    "loops"
+  ],
+  "start": {
+    "example": "15-grid-with-loops",
+    "patches": false
+  },
+  "test": {
+    "example": "15-grid-with-loops"
+  },
+  "budget": {
+    "maxTurns": 60
+  }
+}

@@ -1,0 +1,7 @@
+{
+  "title": "A deck that survives its last card",
+  "about": "Retro item 1 (E1): a looped deck, copy 0 on top, where each card waits for the one above it. In the retro session the deck's loop went empty, the cards stopped existing and never came back. The scenarios fail on any empty_loop warning, and a deck that locks up fails Reset.",
+  "tags": ["retro", "loops", "gestures"],
+  "start": { "project": "start" },
+  "budget": { "maxTurns": 60 }
+}

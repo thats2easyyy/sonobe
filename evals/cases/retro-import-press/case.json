@@ -1,0 +1,8 @@
+{
+  "title": "Import a design, then add a press",
+  "about": "Retro item 2 and the data-name quick win (I1, I2): import a served page in dark mode (colorScheme once hung the import), then wire a press on a layer named by data-name. The checks read the ids the import derives from data-name.",
+  "tags": ["retro", "import", "tap"],
+  "start": { "project": "start" },
+  "serve": "design.html",
+  "budget": { "maxTurns": 40, "timeoutSec": 900 }
+}

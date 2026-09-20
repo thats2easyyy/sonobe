@@ -1,0 +1,299 @@
+{
+  "calls": [
+    {
+      "tool": "apply_ops",
+      "args": {
+        "ops": [
+          {
+            "op": "addPatch",
+            "patch": {
+              "id": "cards",
+              "type": "loop",
+              "name": "Cards",
+              "inputs": {
+                "count": 3
+              }
+            }
+          },
+          {
+            "op": "connect",
+            "from": "cards.index",
+            "to": "@card.repeat"
+          },
+          {
+            "op": "addPatch",
+            "patch": {
+              "id": "card_z",
+              "type": "multiply",
+              "name": "Copy 0 on Top",
+              "inputs": {
+                "value1": {
+                  "link": "cards.index"
+                },
+                "value2": -1
+              },
+              "typeParam": "number",
+              "inputCount": 2
+            }
+          },
+          {
+            "op": "connect",
+            "from": "card_z.output",
+            "to": "@card.zPosition"
+          },
+          {
+            "op": "addPatch",
+            "patch": {
+              "id": "card_swipe",
+              "type": "swipe",
+              "name": "Swipe Card",
+              "inputs": {
+                "layer": {
+                  "layer": "card"
+                },
+                "axis": "horizontal",
+                "minDistance": 100,
+                "minVelocity": 600
+              }
+            }
+          },
+          {
+            "op": "addPatch",
+            "patch": {
+              "id": "tap_reset",
+              "type": "interaction",
+              "name": "Tap Reset",
+              "inputs": {
+                "layer": {
+                  "layer": "reset"
+                }
+              }
+            }
+          },
+          {
+            "op": "addPatch",
+            "patch": {
+              "id": "card_gone",
+              "type": "switch",
+              "name": "Card Gone",
+              "inputs": {
+                "turnOn": {
+                  "link": "card_swipe.swiped"
+                },
+                "turnOff": {
+                  "link": "tap_reset.tap"
+                }
+              }
+            }
+          },
+          {
+            "op": "addPatch",
+            "patch": {
+              "id": "cards_gone",
+              "type": "loopSum",
+              "name": "Cards Gone",
+              "inputs": {
+                "loop": {
+                  "link": "card_gone.on"
+                }
+              },
+              "typeParam": "number"
+            }
+          },
+          {
+            "op": "addPatch",
+            "patch": {
+              "id": "is_top",
+              "type": "equals",
+              "name": "Is Top Card",
+              "inputs": {
+                "value1": {
+                  "link": "cards.index"
+                },
+                "value2": {
+                  "link": "cards_gone.sum"
+                }
+              },
+              "typeParam": "number"
+            }
+          },
+          {
+            "op": "connect",
+            "from": "is_top.output",
+            "to": "@card.hitTest"
+          },
+          {
+            "op": "addPatch",
+            "patch": {
+              "id": "card_side",
+              "type": "optionSwitch",
+              "name": "Swiped Which Way",
+              "inputs": {
+                "setTo0": {
+                  "link": "card_swipe.swipedLeft"
+                },
+                "setTo1": {
+                  "link": "card_swipe.swipedRight"
+                }
+              },
+              "inputCount": 2
+            }
+          },
+          {
+            "op": "addPatch",
+            "patch": {
+              "id": "fly_out_x",
+              "type": "optionPicker",
+              "name": "Fly-Out X",
+              "inputs": {
+                "option": {
+                  "link": "card_side.option"
+                },
+                "option0": -501,
+                "option1": 499
+              },
+              "typeParam": "number",
+              "inputCount": 2
+            }
+          },
+          {
+            "op": "addPatch",
+            "patch": {
+              "id": "resting_x",
+              "type": "ifElse",
+              "name": "Resting X",
+              "inputs": {
+                "condition": {
+                  "link": "card_gone.on"
+                },
+                "ifTrue": {
+                  "link": "fly_out_x.output"
+                },
+                "ifFalse": 0
+              },
+              "typeParam": "number"
+            }
+          },
+          {
+            "op": "addPatch",
+            "patch": {
+              "id": "card_gesture",
+              "type": "gesture",
+              "name": "Drag Card",
+              "inputs": {
+                "layer": {
+                  "layer": "card"
+                }
+              }
+            }
+          },
+          {
+            "op": "addPatch",
+            "patch": {
+              "id": "finger_offset",
+              "type": "pointUnpack",
+              "name": "Finger Offset",
+              "inputs": {
+                "value": {
+                  "link": "card_gesture.translation"
+                }
+              }
+            }
+          },
+          {
+            "op": "addPatch",
+            "patch": {
+              "id": "finger_speed",
+              "type": "pointUnpack",
+              "name": "Finger Speed",
+              "inputs": {
+                "value": {
+                  "link": "card_gesture.velocity"
+                }
+              }
+            }
+          },
+          {
+            "op": "addPatch",
+            "patch": {
+              "id": "card_target",
+              "type": "ifElse",
+              "name": "Finger or Resting X",
+              "inputs": {
+                "condition": {
+                  "link": "card_gesture.down"
+                },
+                "ifTrue": {
+                  "link": "finger_offset.x"
+                },
+                "ifFalse": {
+                  "link": "resting_x.output"
+                }
+              },
+              "typeParam": "number"
+            }
+          },
+          {
+            "op": "addPatch",
+            "patch": {
+              "id": "card_spring",
+              "type": "springAnimation",
+              "name": "Card Spring",
+              "inputs": {
+                "number": {
+                  "link": "card_target.output"
+                },
+                "tension": 180,
+                "friction": 20,
+                "gestureActive": {
+                  "link": "card_gesture.down"
+                },
+                "gestureVelocity": {
+                  "link": "finger_speed.x"
+                }
+              },
+              "typeParam": "number"
+            }
+          },
+          {
+            "op": "addPatch",
+            "patch": {
+              "id": "card_x",
+              "type": "add",
+              "name": "Card X",
+              "inputs": {
+                "value1": 201,
+                "value2": {
+                  "link": "card_spring.output"
+                }
+              },
+              "typeParam": "number",
+              "inputCount": 2
+            }
+          },
+          {
+            "op": "addPatch",
+            "patch": {
+              "id": "card_position",
+              "type": "point",
+              "name": "Card Position",
+              "inputs": {
+                "x": {
+                  "link": "card_x.output"
+                },
+                "y": 420
+              }
+            }
+          },
+          {
+            "op": "connect",
+            "from": "card_position.output",
+            "to": "@card.position"
+          }
+        ],
+        "label": "deck of three"
+      }
+    }
+  ],
+  "answer": "Three stacked copies of the card, copy 0 on top. Throw the top card and the next one takes touches; Reset brings the deck back."
+}

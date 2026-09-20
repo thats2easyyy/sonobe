@@ -1,0 +1,47 @@
+{
+  "description": "Three copies 12 points apart; taps where they overlap reach copy 0 first, then copy 1, then copy 2.",
+  "scenarios": [
+    {
+      "name": "The copies stack 12 points apart",
+      "events": [],
+      "durationMs": 300,
+      "expect": [
+        { "description": "Copy 0 is at y 300", "target": "@card.position#0", "component": "y", "at": "end", "op": "==", "value": 300, "tolerance": 0.01 },
+        { "description": "copy 1 at 312", "target": "@card.position#1", "component": "y", "at": "end", "op": "==", "value": 312, "tolerance": 0.01 },
+        { "description": "and copy 2 at 324", "target": "@card.position#2", "component": "y", "at": "end", "op": "==", "value": 324, "tolerance": 0.01 }
+      ]
+    },
+    {
+      "name": "A tap reaches copy 0, the one on top",
+      "events": [{ "kind": "tap", "target": [201, 400], "atMs": 100 }],
+      "durationMs": 900,
+      "expect": [
+        { "description": "Copy 0 faded out", "target": "@card.opacity#0", "at": "end", "op": "==", "value": 0, "tolerance": 0.01 },
+        { "description": "Copy 1 is still showing", "target": "@card.opacity#1", "at": "end", "op": "==", "value": 1, "tolerance": 0.01 },
+        { "description": "and so is copy 2", "target": "@card.opacity#2", "at": "end", "op": "==", "value": 1, "tolerance": 0.01 }
+      ]
+    },
+    {
+      "name": "The next tap reaches copy 1",
+      "events": [
+        { "kind": "tap", "target": [201, 400], "atMs": 100 },
+        { "kind": "tap", "target": [201, 400], "atMs": 700 }
+      ],
+      "durationMs": 1500,
+      "expect": [
+        { "description": "Copy 1 faded out", "target": "@card.opacity#1", "at": "end", "op": "==", "value": 0, "tolerance": 0.01 },
+        { "description": "Copy 2 is still showing", "target": "@card.opacity#2", "at": "end", "op": "==", "value": 1, "tolerance": 0.01 }
+      ]
+    },
+    {
+      "name": "The third tap reaches copy 2",
+      "events": [
+        { "kind": "tap", "target": [201, 400], "atMs": 100 },
+        { "kind": "tap", "target": [201, 400], "atMs": 700 },
+        { "kind": "tap", "target": [201, 400], "atMs": 1300 }
+      ],
+      "durationMs": 2100,
+      "expect": [{ "description": "Copy 2 faded out", "target": "@card.opacity#2", "at": "end", "op": "==", "value": 0, "tolerance": 0.01 }]
+    }
+  ]
+}
