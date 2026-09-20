@@ -8,6 +8,9 @@ final class ViewerModel {
     var playerURL: URL?
     var failure: String?
     var inputError: String?
+    /// A preview link to a host outside the local network (a tunnel, or someone else's page), waiting
+    /// for the person to confirm it: Sonobe itself only serves previews on this network.
+    private(set) var pendingLink: URL?
     private(set) var recent: URL?
     /// The player taught its three-finger menu once (a tip, or the person opened it); the page keeps no storage between launches.
     var menuTipSeen: Bool {
@@ -30,13 +33,28 @@ final class ViewerModel {
         if let launch = defaults.string(forKey: Self.launchKey).flatMap(Self.playerURL(from:)) { show(launch) }
     }
 
-    /// A pasted or scanned link, or a deep link.
+    /// A pasted or scanned link, or a deep link. One to a host outside the local network waits for confirmPendingLink.
     func open(text: String) {
         guard let url = Self.playerURL(from: text) else {
             inputError = Self.notAPreviewLink
             return
         }
+        if Self.isLocalNetwork(url) {
+            show(url)
+        } else {
+            inputError = nil
+            pendingLink = url
+        }
+    }
+
+    /// The person chose to open the link to a host outside the local network.
+    func confirmPendingLink(_ url: URL) {
+        pendingLink = nil
         show(url)
+    }
+
+    func cancelPendingLink() {
+        pendingLink = nil
     }
 
     func open(deepLink: URL) {
@@ -70,6 +88,19 @@ final class ViewerModel {
             return previewURL(from: inner)
         }
         return previewURL(from: trimmed)
+    }
+
+    /// Where Preview on Phone serves from: loopback, private, link-local and shared (100.64/10, which
+    /// VPNs such as Tailscale use) addresses, and .local or single-label names.
+    nonisolated static func isLocalNetwork(_ url: URL) -> Bool {
+        guard let host = url.host(percentEncoded: false)?.lowercased(), !host.isEmpty else { return false }
+        if host.contains(":") { return host == "::1" || host.hasPrefix("fe80:") || host.hasPrefix("fc") || host.hasPrefix("fd") }
+        let octets = host.split(separator: ".", omittingEmptySubsequences: false).map { UInt8($0) }
+        if octets.count == 4, !octets.contains(nil) {
+            let a = octets[0]!, b = octets[1]!
+            return a == 127 || a == 10 || (a == 172 && (16...31).contains(b)) || (a == 192 && b == 168) || (a == 169 && b == 254) || (a == 100 && (64...127).contains(b))
+        }
+        return host.hasSuffix(".local") || !host.contains(".")
     }
 
     /// An http(s) player URL whose path is exactly /p/<token>/, without query or fragment.

@@ -10,7 +10,11 @@
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>Sonobe Viewer connects to Sonobe on your computer to play the prototype you have open.</string>
 	<key>NSCameraUsageDescription</key>
-	<string>Scan the Preview on Phone code that Sonobe shows on your computer.</string>
+	<string>Scan the Preview on Phone code that Sonobe shows on your computer, and show the camera in prototypes that use it.</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Prototypes that listen or record with the microphone use it while they play.</string>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>Prototypes that use your location read it while they play.</string>
 	<key>CFBundleURLTypes</key>
 	<array>
 		<dict>

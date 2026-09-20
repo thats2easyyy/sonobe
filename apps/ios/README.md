@@ -2,7 +2,7 @@
 
 Sonobe Viewer plays the prototype you have open in Sonobe, full screen on your iPhone, with real haptics. Safari can't play haptics, so in the browser the Haptic and Vibrate patches do nothing on an iPhone. In Sonobe Viewer they tap and buzz the way the finished app would.
 
-The app is a small shell around the same web player that Preview on Phone serves. It loads the player in a WKWebView and adds a bridge that the player uses for Haptic and Vibrate, and for the menu's Open Another Prototype. Everything else, including new patch features, sound, network requests and the camera, reaches the phone through the web player with no change to the app.
+The app is a small shell around the same web player that Preview on Phone serves. It loads the player in a WKWebView and adds a bridge that the player uses for Haptic and Vibrate, and for the menu's Open Another Prototype. Everything else, including new patch features, sound, network requests and the camera, reaches the phone through the web player with no change to the app. The camera, the microphone and location need a secure (https) link, in Safari and in the app alike, because Preview on Phone serves plain http.
 
 It isn't on the App Store or TestFlight yet, so you build it yourself with Xcode.
 
@@ -14,7 +14,7 @@ It isn't on the App Store or TestFlight yet, so you build it yourself with Xcode
 
 Your phone and your computer need to be on the same Wi-Fi. Tap the screen with three fingers for the menu: Restart Prototype, Reload, and Open Another Prototype, which goes back to scanning. Three-finger touches never reach the prototype; every other touch does. A tip teaches the gesture the first time. Restarting the prototype in Sonobe restarts it on the phone too.
 
-Sonobe makes a new link each time Preview on Phone starts. If the app says the link has expired, scan the new code. A `sonobe-viewer://open?url=<preview link>` link also opens a preview in the app.
+Sonobe makes a new link each time Preview on Phone starts. If the app says the link has expired, scan the new code. A `sonobe-viewer://open?url=<preview link>` link also opens a preview in the app. A link to an address outside your local network, such as an https tunnel you set up, asks first and names the address.
 
 ## Requirements
 
@@ -61,7 +61,7 @@ npm run test:ios
 This needs macOS with Xcode and isn't part of CI. The script (`scripts/test.mjs`):
 
 1. Serves a test prototype, Haptic Check, with the real web player and preview server (`apps/desktop/player/testing.ts`).
-2. Runs the Swift unit tests (link parsing, bridge messages, vibration limits, the remembered tip) and the UI tests (taps reach the prototype, the three-finger menu, deep links, expired links, bad links) on a simulator, with no signing.
+2. Runs the Swift unit tests (link parsing, which hosts are on the local network, bridge messages, vibration limits, the remembered tip) and the UI tests (taps reach the prototype, the three-finger menu, deep links, a link off the local network, expired links, bad links) on a simulator, with no signing.
 3. Reads the app's log to check what three taps played: Notification Success at start, then three Impact Medium haptics and three 50 ms vibrations. In the menu test, the three-finger taps play nothing and Restart plays Notification Success again.
 
 It uses a booted iPhone simulator, or the first available one. Set `SONOBE_IOS_SIMULATOR` to a simulator's name or UDID to choose. The full `xcodebuild` output goes to `build/test.log`.
@@ -72,12 +72,12 @@ The web player's side of the bridge is tested with the rest of the repo in `npm 
 
 | File | What it does |
 |---|---|
-| `SonobeViewer/SonobeViewerApp.swift` | The app, what the player menu asks of it, and the banner that explains a failed load |
+| `SonobeViewer/SonobeViewerApp.swift` | The app, what the player menu asks of it, the banner that explains a failed load, and the question before opening a link off the local network |
 | `SonobeViewer/ConnectView.swift` | Scan (VisionKit), paste, and the most recent link |
-| `SonobeViewer/ViewerModel.swift` | Accepts only preview links: `http(s)://<computer>:<port>/p/<token>/` or `sonobe-viewer://open?url=…` |
+| `SonobeViewer/ViewerModel.swift` | Accepts only preview links: `http(s)://<computer>:<port>/p/<token>/` or `sonobe-viewer://open?url=…`, and holds one whose host is off the local network until the person confirms it |
 | `SonobeViewer/PlayerView.swift` | The full-screen WKWebView, pinned to the preview's address; other links open in Safari. It routes the bridge's messages |
 | `SonobeViewer/Haptics.swift` | The bridge's announcement and messages: UIFeedbackGenerator for the Haptic types, Core Haptics for Custom Pattern and Vibrate |
-| `SonobeViewer-Info.plist` | Local network access, the camera prompt, and the `sonobe-viewer` URL scheme |
+| `SonobeViewer-Info.plist` | Local network access, the camera, microphone and location prompts, and the `sonobe-viewer` URL scheme |
 | `Config/Base.xcconfig` | Shared build settings; includes your `Local.xcconfig` |
 | `scripts/icon.mjs` | Renders the app icon from `assets/brand/sonobe-mark.svg` |
 
