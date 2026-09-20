@@ -1,6 +1,6 @@
 /** graphToSvg: a component's patch graph as SVG, from the shared graph model and node boxes. */
 
-import { componentNodeBoxes, deriveGraph } from "@sonobe/core/graph";
+import { componentNodeBoxes, deriveGraph, NODE_BOX, tableMeasurer } from "@sonobe/core/graph";
 import { buildDoc, createMockRegistry } from "@sonobe/engine/testing";
 import { describe, expect, it } from "vitest";
 import { graphToSvg } from "./graphToSvg.ts";
@@ -50,6 +50,29 @@ describe("graphToSvg", () => {
     expect(cables).toHaveLength(model.edges.length);
     const tap = boxes.get("tap")!;
     expect(cables[0]).toContain(`M ${tap.x + tap.width} `);
+  });
+
+  it("draws a knob-linked input as the knob chip, the glyph, name and value at the size model's width", () => {
+    const knobbed = {
+      ...model,
+      nodes: model.nodes.map((n) =>
+        n.id === "toggle" && n.data.kind === "patch"
+          ? ({ ...n, data: { ...n.data, inputs: n.data.inputs.map((p, i) => (i === 0 ? { ...p, connected: true, link: "$knob.flip", knob: { id: "flip", name: "Flip", valueText: "on" } } : p)) } } as typeof n)
+          : n,
+      ),
+    };
+    // The boxes were measured without the chip; give the node the room the size model would.
+    const wide = new Map(boxes);
+    const box = boxes.get("toggle")!;
+    wide.set("toggle", { ...box, width: box.width + 100 });
+    const { svg } = graphToSvg(knobbed, { boxes: wide });
+    const node = svg.slice(svg.indexOf('data-node="toggle"'));
+    expect(node).toContain('fill="#5F74E4" fill-opacity="0.18"');
+    expect(node).toContain('r="1.75"');
+    expect(node).toContain(">Flip</text>");
+    expect(node).toContain(">on</text>");
+    const chip = node.match(/<rect x="[^"]+" y="[^"]+" width="([^"]+)" height="16" rx="3" fill="#5F74E4"/);
+    expect(Number(chip?.[1])).toBeCloseTo(NODE_BOX.valuePaddingX + NODE_BOX.knobIcon + NODE_BOX.valueInnerGap + tableMeasurer("Flip", "sans10") + NODE_BOX.valueInnerGap + tableMeasurer("on", "mono10"), 1);
   });
 
   it("crops and scales", () => {

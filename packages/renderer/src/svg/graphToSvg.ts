@@ -63,6 +63,10 @@ const THEME = {
   fieldOpacity: 0.05,
   danger: "#E24947",
   ai: "#EA8B60",
+  /** Knob chips: the accent-soft fill and the accent text (tokens.ts `accent-soft`, `text-accent`). */
+  accent: "#5F74E4",
+  accentOpacity: 0.18,
+  textAccent: "#A3B1FF",
 };
 
 const CATEGORY: Record<PatchCategory, string> = {
@@ -166,7 +170,7 @@ function handle(x: number, y: number, port: PortModel): string {
   return el("circle", { cx: x, cy: y, r: 3.5, fill, stroke, "stroke-width": 1.5 });
 }
 
-function valueText(v: ValueChip): string {
+function valueText(v: Exclude<ValueChip, { kind: "knob" }>): string {
   switch (v.kind) {
     case "vector":
       return v.texts.join("  ");
@@ -174,8 +178,6 @@ function valueText(v: ValueChip): string {
       return "";
     case "color":
       return v.hex;
-    case "knob":
-      return v.text ? `${v.name} ${v.text}` : v.name;
     case "text":
       return v.text || "Empty";
     default:
@@ -183,10 +185,34 @@ function valueText(v: ValueChip): string {
   }
 }
 
+/**
+ * A knob chip as InlineValue.tsx's KnobChip draws it and nodeSize.ts sizes it: the knob glyph, the
+ * knob's name in the accent color (cut first when room runs out), and its running value in mono.
+ */
+function knobChip(x: number, cy: number, v: Extract<ValueChip, { kind: "knob" }>, max: number): string {
+  const B = NODE_BOX;
+  const room = Math.max(0, Math.min(max, B.valueMaxWidth) - B.valuePaddingX - B.knobIcon - B.valueInnerGap);
+  const value = v.text ? fit(v.text, "mono10", room) : "";
+  const valueWidth = value ? B.valueInnerGap + tableMeasurer(value, "mono10") : 0;
+  const name = fit(v.name, "sans10", Math.max(0, room - valueWidth));
+  const nameWidth = tableMeasurer(name, "sans10");
+  const width = Math.min(B.valueMaxWidth, B.valuePaddingX + B.knobIcon + B.valueInnerGap + nameWidth + valueWidth);
+  const glyph = x + B.valuePaddingX / 2 + B.knobIcon / 2;
+  const nameX = x + B.valuePaddingX / 2 + B.knobIcon + B.valueInnerGap;
+  return [
+    el("rect", { x, y: cy - 8, width, height: 16, rx: 3, fill: THEME.accent, "fill-opacity": THEME.accentOpacity }),
+    el("circle", { cx: glyph, cy, r: 4, fill: "none", stroke: THEME.textAccent, "stroke-width": 1.25 }),
+    el("circle", { cx: glyph, cy, r: 1.75, fill: THEME.textAccent }),
+    text(nameX, cy + 3.5, name, "sans10", THEME.textAccent),
+    text(nameX + nameWidth + B.valueInnerGap, cy + 3.5, value, "mono10", THEME.text),
+  ].join("");
+}
+
 function valueChip(x: number, cy: number, v: ValueChip, max: number): string {
   const B = NODE_BOX;
+  if (v.kind === "knob") return knobChip(x, cy, v, max);
   if (v.kind === "check") return el("rect", { x, y: cy - 7, width: B.check, height: B.check, rx: 3, fill: THEME.field, "fill-opacity": 0.1, stroke: THEME.secondary, "stroke-opacity": 0.4 });
-  const font: NodeFont = v.kind === "menu" || (v.kind === "text" && v.text) || v.kind === "knob" ? "sans10" : v.kind === "text" ? "italic10" : "mono10";
+  const font: NodeFont = v.kind === "menu" || (v.kind === "text" && v.text) ? "sans10" : v.kind === "text" ? "italic10" : "mono10";
   const label = fit(valueText(v), font, Math.max(0, Math.min(max, B.valueMaxWidth) - B.valuePaddingX - (v.kind === "color" ? B.swatch + B.valueInnerGap : 0)));
   if (!label && v.kind !== "color") return "";
   const swatch = v.kind === "color" ? B.swatch + B.valueInnerGap : 0;
