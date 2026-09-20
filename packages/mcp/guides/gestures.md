@@ -29,7 +29,7 @@ Related: `animation`, `simulation`, `troubleshooting`
 Gesture patches only compute values. Nothing moves until you connect an output to a layer property (`drag.position` into `@knob.position`) or into the logic. Typing comes from a `textField` layer (`value`, `isFocused`, `submitted`); pulse its `setText` to clear what was typed, and `beginEditing` / `endEditing` to focus or dismiss it (`simulation` has an example).
 
 - **Down or Tap?** `down` turns off when the finger lifts: good for "pressed" feedback. When the change should stay, wire `tap` into a Switch's `flip`.
-- **A quick flick that springs back.** `swipe` judges where the finger lifted. Set its `lookahead` (seconds; 0.2 suits cards) to judge where the throw is heading, `translation + velocity × lookahead`, instead of building that math. Its advanced `projected` output is the estimate, for a badge that fades in as a throw nears `minDistance`.
+- **A slow flick that springs back.** A release at `minVelocity` (500 pt/s) or faster swipes on speed alone; a slower one is judged where the finger lifted. Set its `lookahead` (seconds; 0.2 suits cards) to judge where the throw is heading, `translation + velocity × lookahead`, instead of building that math. Its advanced `projected` output is the estimate, for a badge that fades in as a throw nears `minDistance`.
 - **Several gestures, one effect.** An input takes one connection, so merge the pulses with `or` and wire its output into the Switch. Merge `tap` pulses, not `down` states: a held state keeps Or on, and nothing downstream sees the next tap. For a loop of taps (one per copy), use `loopAny`.
 
 ```json tool:add_layers

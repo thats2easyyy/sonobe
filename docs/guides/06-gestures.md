@@ -157,7 +157,7 @@ Swipe recognizes a quick flick in a direction. It fits things that change all at
 
 If the thing should follow the finger and then decide, use Drag with a snap instead. Swipe decides on release, and nothing moves until then. Drag shows the movement as it happens. In my experience, most designs that start as "swipe" end up wanting drag with a snap, because people like to see the card move under their thumb.
 
-The two combine well: let Gesture move a card, and let Swipe decide whether it leaves. By default Swipe judges where the finger lifted, so a quick, short flick that stops short of Min Distance springs back. Set **Lookahead** to about 0.2 seconds and Swipe judges where the throw is heading instead, the same projection as the PiP's `x + velocity × 0.5` with 0.2 in place of 0.5. Swipe's **Projected** output (advanced) is that estimate, so you can fade in a "yes" badge as the throw nears Min Distance.
+The two combine well: let Gesture move a card, and let Swipe decide whether it leaves. A release moving at Min Velocity (500 points a second by default) or faster swipes on speed alone. A slower flick is judged by where the finger lifted, so one that stops short of Min Distance springs back. Set **Lookahead** to about 0.2 seconds and Swipe judges where that throw is heading instead, the same projection as the PiP's `x + velocity × 0.5` with 0.2 in place of 0.5. Swipe's **Projected** output (advanced) is that estimate, so you can fade in a "yes" badge as the throw nears Min Distance. To judge every release by the projection alone, raise Min Velocity out of reach, as the Placemark Deck example does with 10000.
 
 ## Hover and keyboard
 
