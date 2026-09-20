@@ -161,12 +161,22 @@ function droppedText(entry: DroppedInput): string {
   return `${entry.to} (${json.length > 24 ? `${json.slice(0, 23)}…` : json})`;
 }
 
-/** What replacePatch ops dropped because the new type had no port for it, or one it didn't fit. */
+/**
+ * What the batch dropped because a patch's ports changed: replacePatch's new type had no port for
+ * it (or one it didn't fit), or an updatePatch typeParam or inputCount left it without one.
+ */
 function droppedLines(result: HostApplyResult): { lines: string[]; data: Record<string, unknown> } {
   const dropped = result.results.flatMap((r) => (r.ok ? (r.dropped ?? []) : []));
   if (!dropped.length) return { lines: [], data: {} };
+  const replaced = result.applied.some((op) => op.op === "replacePatch");
+  const reshaped = result.applied.some((op) => op.op === "updatePatch" && (op.typeParam !== undefined || op.inputCount !== undefined));
+  const what = replaced && !reshaped
+    ? "what the new patch type has no fitting port for"
+    : reshaped && !replaced
+      ? "what no longer fits after the typeParam or inputCount change"
+      : "what no longer fits a port";
   return {
-    lines: [`${result.dryRun ? "Would drop" : "Dropped"} what the new patch type has no fitting port for: ${capped(dropped.map(droppedText), 8)}.${result.dryRun ? "" : " The undo tool brings them back."}`],
+    lines: [`${result.dryRun ? "Would drop" : "Dropped"} ${what}: ${capped(dropped.map(droppedText), 8)}.${result.dryRun ? "" : " The undo tool brings them back."}`],
     data: { dropped },
   };
 }

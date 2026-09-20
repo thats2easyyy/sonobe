@@ -757,7 +757,10 @@ export interface OpResult {
   retired?: Record<Id, Id>;
   /** Derived ids that got a suffix because an item created earlier in the batch took the base: new id → that item's id. */
   suffixed?: Record<Id, Id>;
-  /** Values and cables the op had to drop (replacePatch: what the new type has no fitting port for). */
+  /**
+   * Values and cables the op had to drop: replacePatch, what the new type has no fitting port for;
+   * updatePatch, what no longer fits after a typeParam or inputCount change.
+   */
   dropped?: DroppedInput[];
 }
 
