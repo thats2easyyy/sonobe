@@ -1,9 +1,10 @@
 /**
  * Viewer model: device settings ↔ presets and ops, fit scaling, which scene nodes to outline for
- * highlighted layers, which layers take touches (hit target overlay), and QR code paths.
+ * highlighted layers, which layers take touches (hit target overlay), the empty-loop notice, and QR
+ * code paths.
  */
 
-import { DEVICE_PRESETS, getDevicePreset, isLayerInput, type DevicePreset, type DeviceSettings, type Id, type Op, type SonobeDocument } from "@sonobe/core";
+import { DEVICE_PRESETS, findLayer, getDevicePreset, isLayerInput, layerDisplayName, type DevicePreset, type DeviceSettings, type Diagnostic, type Id, type Op, type SonobeDocument } from "@sonobe/core";
 import type { SceneFrame, SceneNode } from "@sonobe/engine";
 
 export type ViewerZoom = "fit" | "actual";
@@ -166,6 +167,36 @@ export function clampFloatingRect(rect: FloatingRect, viewport: readonly [number
   const x = Math.min(Math.max(margin, rect.x), Math.max(margin, viewport[0] - width - margin));
   const y = Math.min(Math.max(margin, rect.y), Math.max(margin, viewport[1] - height - margin));
   return { x, y, width, height };
+}
+
+export interface EmptyLoopNotice {
+  /** "Card has no copies" (the first one; layers before components). */
+  label: string;
+  diagnostic: Diagnostic;
+  /** Active empty_loop warnings in all. */
+  count: number;
+}
+
+/**
+ * The viewer's notice while the running prototype has an empty_loop warning: something bound to a
+ * loop draws no copies. Prefers a layer (what's missing on screen) over the component behind it.
+ */
+export function emptyLoopNotice(diagnostics: readonly Diagnostic[], doc: SonobeDocument): EmptyLoopNotice | null {
+  const empty = diagnostics.filter((d) => d.code === "empty_loop");
+  if (!empty.length) return null;
+  const layerOf = (d: Diagnostic) => {
+    const component = doc.components[d.component];
+    for (const id of d.itemIds) {
+      const found = component ? findLayer(component.layers, id) : undefined;
+      if (found) return found.layer;
+    }
+    return undefined;
+  };
+  const diagnostic = empty.find((d) => layerOf(d)) ?? empty[0]!;
+  const layer = layerOf(diagnostic);
+  const patch = doc.components[diagnostic.component]?.patches[diagnostic.itemIds[0] ?? ""];
+  const name = layer ? layerDisplayName(layer) : patch ? (patch.name || diagnostic.itemIds[0]!) : "A loop";
+  return { label: `${name} has no copies`, diagnostic, count: empty.length };
 }
 
 /** SVG path drawing the dark modules of a QR matrix (1 unit per module, `margin` quiet zone). */

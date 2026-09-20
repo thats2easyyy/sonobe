@@ -2,7 +2,8 @@
  * The Viewer panel: the live prototype in a device frame. The header keeps zoom (fit or 1:1), restart
  * (⌘R), the device frame (⌥D), and hit targets within reach and tucks rotate, device, pop-out, and
  * phone preview into a menu, so nothing truncates at narrow widths. Play/pause and fps sit under the
- * prototype, next to "On phone" (a QR code for the LAN web player).
+ * prototype, next to "On phone" (a QR code for the LAN web player). While the running prototype has
+ * an empty_loop warning, a notice above the stage says what draws no copies, with Why? to reveal it.
  */
 
 import { DEVICE_PRESETS, getDevicePreset, type DevicePreset } from "@sonobe/core";
@@ -23,11 +24,12 @@ import { cx } from "../../ui/lib/cx.ts";
 import { useLatest } from "../../ui/lib/hooks.ts";
 import { readString, writeString } from "../../ui/lib/storage.ts";
 import { toast } from "../../ui/Toast.tsx";
+import { revealItems } from "../hud/reveal.ts";
 import { FloatingWindow } from "./FloatingWindow.tsx";
 import { getViewerWindowApi, toPreviewStatus, type ViewerWindowStatus } from "./hostBridge.ts";
 import { PhonePreviewButton, usePhonePreview, type PhonePreviewController } from "./PhonePreview.tsx";
 import { ViewerStage } from "./ViewerStage.tsx";
-import { devicePresetOps, formatFps, presetForDevice, rotateDeviceOps, type ViewerZoom } from "./viewerModel.ts";
+import { devicePresetOps, emptyLoopNotice, formatFps, presetForDevice, rotateDeviceOps, type ViewerZoom } from "./viewerModel.ts";
 import "./viewer.css";
 
 export interface ViewerPanelProps {
@@ -70,6 +72,35 @@ function deviceMenuEntries(current: string, onSelect: (id: string) => void): Men
 
 const FRAME_KEY = "sonobe.viewer.frame";
 const ZOOM_KEY = "sonobe.viewer.zoom";
+
+/**
+ * While the running prototype has an empty_loop warning: "Card has no copies · Why?". Why? opens the
+ * Diagnostics tab and selects the layer or component. Restart doesn't help here (the wiring empties
+ * the loop again), so the notice doesn't offer it.
+ */
+function EmptyLoopNote({ session }: { session: EditorSession }) {
+  const diagnostics = useStore(session.runtime.state, (s) => s.diagnostics);
+  const doc = useStore(session.document, (s) => s.doc);
+  const notice = useMemo(() => emptyLoopNotice(diagnostics, doc), [diagnostics, doc]);
+  const cmds = useOptionalCommands();
+  if (!notice) return null;
+  const why = () => {
+    cmds?.registry.run("view.showDiagnostics");
+    revealItems(session, notice.diagnostic.component, notice.diagnostic.itemIds);
+  };
+  return (
+    <div className="sb-vw__window-note" data-tone="warn" role="status" title={`${notice.diagnostic.message}\n\nRestarting won't bring the copies back while the wiring stays the same.`}>
+      <TriangleAlert size={13} aria-hidden />
+      <span className="sb-vw__window-note-text">
+        {notice.label}
+        {notice.count > 1 ? ` (+${notice.count - 1} more)` : ""}
+      </span>
+      <Button size="sm" variant="ghost" onClick={why}>
+        Why?
+      </Button>
+    </div>
+  );
+}
 
 function ViewerTransport({ session, phone, phoneOpen, onPhoneOpenChange }: { session: EditorSession; phone: PhonePreviewController; phoneOpen: boolean; onPhoneOpenChange: (open: boolean) => void }) {
   const playing = useStore(session.runtime.state, (s) => s.playing);
@@ -266,6 +297,7 @@ export function ViewerPanel({ session: sessionProp, lanPreviewUrl, onPopOut, onC
     ...(phone.available ? [{ id: "phone", label: "Preview on Phone…", icon: <QrCode size={14} />, onSelect: openPhone } satisfies MenuEntry] : []),
   ];
 
+  const loopNote = <EmptyLoopNote session={session} />;
   const stage = <ViewerStage session={session} showFrame={showFrame} zoom={zoom} showHitTargets={showHitTargets} onScaleChange={setScale} />;
   const transport = <ViewerTransport session={session} phone={phone} phoneOpen={phoneOpen} onPhoneOpenChange={setPhoneOpen} />;
 
@@ -330,6 +362,7 @@ export function ViewerPanel({ session: sessionProp, lanPreviewUrl, onPopOut, onC
                 )}
               </div>
             )}
+            {loopNote}
             {stage}
             {transport}
           </>
@@ -349,6 +382,7 @@ export function ViewerPanel({ session: sessionProp, lanPreviewUrl, onPopOut, onC
           }
         >
           <div className="sb-vw">
+            {loopNote}
             {stage}
             {transport}
           </div>

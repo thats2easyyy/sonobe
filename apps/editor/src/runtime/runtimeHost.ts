@@ -247,7 +247,10 @@ export function issuesToDiagnostics(issues: readonly RuntimeIssue[], component: 
   return issues.map((issue) => {
     const itemIds = [issue.patchId, issue.layerId].filter((id): id is Id => typeof id === "string");
     const owner = doc && issue.componentPath ? (componentIdForInstancePath(doc, issue.componentPath) ?? component) : component;
-    return { code: issue.code, severity: issue.severity, message: issue.message, component: owner, itemIds };
+    const d: Diagnostic = { code: issue.code, severity: issue.severity, message: issue.message, component: owner, itemIds };
+    if (issue.hint) d.hint = issue.hint;
+    if (issue.suggestions?.length) d.suggestions = issue.suggestions;
+    return d;
   });
 }
 

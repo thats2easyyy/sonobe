@@ -330,8 +330,10 @@ export function createSimulationManager(options: SimulationManagerOptions): Simu
 
   const newIssues = (session: Session): SimIssue[] => {
     const out: SimIssue[] = [];
+    const current = new Set<string>();
     for (const issue of session.runtime.issues()) {
       const key = `${issue.code}|${issue.patchId ?? ""}|${issue.layerId ?? ""}|${issue.componentPath ?? ""}|${issue.message}`;
+      current.add(key);
       if (session.reportedIssues.has(key)) continue;
       session.reportedIssues.add(key);
       const out1: SimIssue = { code: issue.code, severity: issue.severity, message: issue.message };
@@ -340,8 +342,14 @@ export function createSimulationManager(options: SimulationManagerOptions): Simu
           ? `${issue.componentPath}/${issue.patchId}`
           : issue.patchId;
       if (issue.layerId !== undefined) out1.layerId = issue.layerId;
+      if (issue.hint !== undefined) out1.hint = issue.hint;
+      if (issue.suggestions?.length) out1.suggestions = issue.suggestions;
       out.push(out1);
     }
+    // An issue that went away (an empty_loop warning once the layer has copies again, or cleared by
+    // an edit) is reported again when it comes back.
+    for (const key of session.reportedIssues)
+      if (!current.has(key)) session.reportedIssues.delete(key);
     return out;
   };
 
@@ -1071,9 +1079,17 @@ export function createSimulationManager(options: SimulationManagerOptions): Simu
           hint: 'For example ["@card.scale", "toggle.on"].',
         });
       for (const target of targets) checkTarget(session, target);
+      const values: Record<string, unknown> = {};
+      const notes: Record<string, string> = {};
+      for (const target of targets) {
+        const seen = session.runtime.inspect(target);
+        values[target] = toJsonValue(seen.value);
+        if (seen.note) notes[target] = seen.note;
+      }
       const out: SimValuesResult = {
         ...state(session),
-        values: Object.fromEntries(targets.map((t) => [t, read(session.runtime, t)])),
+        values,
+        ...(Object.keys(notes).length ? { notes } : {}),
       };
       return out;
     },

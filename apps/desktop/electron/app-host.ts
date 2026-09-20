@@ -178,6 +178,12 @@ function unexpectedReply(method: string): HostError {
   });
 }
 
+/** A viewer.diagnostics reply: the live prototype's frame, whether it plays, and its runtime diagnostics. */
+function isLiveDiagnostics(value: unknown): value is { frame: number; playing: boolean; diagnostics: Diagnostic[] } {
+  const v = value as { frame?: unknown; playing?: unknown; diagnostics?: unknown } | null;
+  return !!v && typeof v.frame === "number" && typeof v.playing === "boolean" && Array.isArray(v.diagnostics);
+}
+
 /** Turn a renderer RPC failure into a teaching HostError. */
 export function hostErrorFromRpc(err: unknown, method: string): HostError {
   if (isHostError(err)) return err;
@@ -703,7 +709,13 @@ export function createAppHost(options: AppHostOptions): AppHost {
     async diagnostics(docId) {
       const entry = await resolve(docId);
       const snap = await snapshot(entry);
-      return { docId: entry.docId, revision: snap.revision, diagnostics: diagnosticsOf(entry, snap) };
+      const out: Awaited<ReturnType<SonobeHost["diagnostics"]>> = { docId: entry.docId, revision: snap.revision, diagnostics: diagnosticsOf(entry, snap) };
+      // The live prototype's issues change without a new revision, so ask every time. Editors without the method leave the section out.
+      if (entry.target.hasMethod("viewer.diagnostics") === true) {
+        const live = await call<unknown>(entry.target, "viewer.diagnostics").catch(() => null);
+        if (isLiveDiagnostics(live)) out.runtime = { frame: live.frame, playing: live.playing, diagnostics: live.diagnostics };
+      }
+      return out;
     },
 
     async getSelection(docId) {

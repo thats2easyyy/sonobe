@@ -238,6 +238,33 @@ describe("app host writes", () => {
     expect(undone.diagnostics.totals.errors).toBe(0);
   });
 
+  it("adds what the live viewer's prototype reports, read fresh on every call", async () => {
+    const w = editorWindow(1);
+    const host = appHost([w]);
+    w.session.runtime.stepFrame();
+    const before = await host.diagnostics();
+    expect(before.runtime).toMatchObject({ playing: false, diagnostics: [] });
+    // Dots bound to a 3-item grid and to a Loop Select that picks past the end of its 1-item loop.
+    const dots: Op[] = [
+      { op: "addPatch", patch: { id: "dot_rows", type: "loop", inputs: { count: 3 }, ui: { x: 0, y: 1000 } } },
+      { op: "addPatch", patch: { id: "dot_grid", type: "gridLayout", inputs: { index: { link: "dot_rows.index" }, columns: 1 }, ui: { x: 200, y: 1000 } } },
+      { op: "addPatch", patch: { id: "dot_pick", type: "loopSelect", typeParam: "number", inputs: { loop: { loop: [1] }, index: { loop: [2, 3] } }, ui: { x: 200, y: 1100 } } },
+      { op: "addLayer", layer: { id: "dots", type: "rectangle", name: "Dots", props: { position: { link: "dot_grid.position" }, size: [10, 10], opacity: { link: "dot_pick.output" } } } },
+    ];
+    expect((await host.apply(dots, { label: "dots", author: CLAUDE })).ok).toBe(true);
+    w.session.runtime.stepFrame();
+    w.session.runtime.stepFrame();
+    const after = await host.diagnostics();
+    expect(after.runtime?.frame).toBeGreaterThan(before.runtime!.frame);
+    expect(after.runtime?.diagnostics).toEqual([
+      expect.objectContaining({ code: "empty_loop", severity: "warning", component: "main", itemIds: ["dots"], hint: expect.stringContaining("empty loop"), suggestions: expect.arrayContaining([expect.objectContaining({ ops: [expect.objectContaining({ target: "dot_pick.outOfRange" })] })]) }),
+    ]);
+    // An older editor build without the method: the section is left out.
+    const old = editorWindow(2);
+    old.target.hasMethod = (method) => method !== "viewer.diagnostics" && old.server.methods().includes(method);
+    expect((await appHost([old]).diagnostics()).runtime).toBeUndefined();
+  });
+
   it("previews dry runs, reports errors, and refuses stale revisions", async () => {
     const w = editorWindow(1);
     const host = appHost([w]);

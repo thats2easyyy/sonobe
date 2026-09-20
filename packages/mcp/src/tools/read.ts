@@ -23,6 +23,7 @@ import {
   requireComponent,
 } from "../graph.ts";
 import { resolveInstancePath, splitInstanceAddress } from "../instances.ts";
+import type { LiveRuntimeDiagnostics } from "../host.ts";
 import { failure, formatSuggestions, success } from "../results.ts";
 import { READ_ONLY, type ToolContext } from "../server.ts";
 import { diagnosticTotals } from "../session.ts";
@@ -42,6 +43,23 @@ export function formatDiagnostic(d: Diagnostic): string[] {
   return [
     `${d.severity} ${d.code} [${where}]: ${d.message}${d.hint ? ` ${d.hint}` : ""}`,
     ...formatSuggestions(d.suggestions, "  "),
+  ];
+}
+
+/** Most runtime problems the Live viewer section lists. */
+const MAX_LIVE_DIAGNOSTICS = 10;
+
+/** The "Live viewer" section of get_diagnostics. */
+export function liveViewerLines(live: LiveRuntimeDiagnostics): string[] {
+  const where = `Live viewer (frame ${Math.max(0, live.frame).toLocaleString("en-US")}, ${live.playing ? "playing" : "paused"})`;
+  if (!live.diagnostics.length) return [`${where}: no runtime problems.`];
+  const shown = live.diagnostics.slice(0, MAX_LIVE_DIAGNOSTICS);
+  return [
+    `${where}: ${plural(live.diagnostics.length, "runtime problem")}:`,
+    ...shown.flatMap(formatDiagnostic),
+    ...(live.diagnostics.length > shown.length
+      ? [`… ${live.diagnostics.length - shown.length} more.`]
+      : []),
   ];
 }
 
@@ -387,7 +405,7 @@ export function registerReadTools(tc: ToolContext): void {
     {
       title: "Get diagnostics",
       description:
-        "Problems and hints in the document: invalid links, type mismatches, pulses wired into states, feedback loops, untouchable layers, unused patches. Each comes with suggestions that include ready-to-apply ops for apply_ops.",
+        "Problems and hints in the document: invalid links, type mismatches, pulses wired into states, feedback loops, untouchable layers, unused patches. Each comes with suggestions that include ready-to-apply ops for apply_ops. In the Sonobe app, a Live viewer section adds what the person's running prototype reports right now, such as empty_loop (a layer or component with 0 copies, and why).",
       input: z.object({
         docId: DocIdSchema.optional(),
         component: ComponentIdSchema.optional(),
@@ -406,25 +424,34 @@ export function registerReadTools(tc: ToolContext): void {
       if (component !== undefined)
         requireComponent((await host.getDocument(r.docId)).doc, component);
       const min = SEVERITY_RANK[severity ?? "info"];
-      const list = r.diagnostics
-        .filter(
-          (d) =>
-            SEVERITY_RANK[d.severity] <= min &&
-            (!component || d.component === component) &&
-            (!codes?.length || codes.includes(d.code)),
-        )
-        .sort((a, b) => SEVERITY_RANK[a.severity] - SEVERITY_RANK[b.severity]);
+      const keep = (d: Diagnostic) =>
+        SEVERITY_RANK[d.severity] <= min &&
+        (!component || d.component === component) &&
+        (!codes?.length || codes.includes(d.code));
+      const bySeverity = (a: Diagnostic, b: Diagnostic) =>
+        SEVERITY_RANK[a.severity] - SEVERITY_RANK[b.severity];
+      const list = r.diagnostics.filter(keep).sort(bySeverity);
       const totals = diagnosticTotals(list);
+      // What the person's running prototype reports now (app host only); it changes without a new revision.
+      const live = r.runtime
+        ? { ...r.runtime, diagnostics: r.runtime.diagnostics.filter(keep).sort(bySeverity) }
+        : undefined;
+      const liveLines = live ? liveViewerLines(live) : [];
+      const liveData = live ? { runtime: live } : {};
       if (!list.length)
         return success(
-          `No ${severity && severity !== "info" ? `${severity}-level ` : ""}diagnostics at revision ${r.revision}.`,
-          { docId: r.docId, revision: r.revision, totals, diagnostics: [] },
+          [
+            `No ${severity && severity !== "info" ? `${severity}-level ` : ""}diagnostics at revision ${r.revision}.`,
+            ...liveLines,
+          ].join("\n"),
+          { docId: r.docId, revision: r.revision, totals, diagnostics: [], ...liveData },
         );
       const page = paginate(list, cursor, limit ?? 30);
       const lines = [
         `${plural(list.length, "diagnostic")} at revision ${r.revision} (${plural(totals.errors, "error")}, ${plural(totals.warnings, "warning")}, ${totals.info} info):`,
         ...page.items.flatMap(formatDiagnostic),
         pageNote(page, "diagnostics"),
+        ...liveLines,
       ];
       return success(lines.filter(Boolean).join("\n"), {
         docId: r.docId,
@@ -433,6 +460,7 @@ export function registerReadTools(tc: ToolContext): void {
         total: page.total,
         ...(page.nextCursor ? { nextCursor: page.nextCursor } : {}),
         diagnostics: page.items,
+        ...liveData,
       });
     },
   );

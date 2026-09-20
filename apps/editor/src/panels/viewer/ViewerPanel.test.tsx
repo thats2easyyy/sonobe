@@ -234,4 +234,24 @@ describe("ViewerPanel", () => {
     act(() => session.document.getState().newDocument());
     expect(container.querySelector(".sb-vw__empty-card")?.textContent).toContain("Nothing to show yet");
   });
+
+  it("says what has no copies while an empty_loop warning is active, and Why? reveals it in Diagnostics", () => {
+    const showDiagnostics = vi.fn();
+    registry.register({ id: "view.showDiagnostics", title: "Show Diagnostics", category: "View", run: showDiagnostics });
+    mount(<ViewerPanel />);
+    const note = () => [...container.querySelectorAll<HTMLElement>(".sb-vw__window-note[data-tone=warn]")];
+    expect(note()).toEqual([]);
+    const warning = { code: "empty_loop", severity: "warning" as const, message: 'Layer "Event Card" has 0 copies because ...', component: "main", itemIds: ["card"] };
+    const other = { code: "empty_loop", severity: "warning" as const, message: '"Swipe" (Component) has 0 copies because ...', component: "main", itemIds: ["tap_photo"] };
+    act(() => session.runtime.state.setState({ diagnostics: [other, warning, { code: "loop_limit", severity: "warning", message: "Too many.", component: "main", itemIds: [] }] }));
+    expect(note()).toHaveLength(1);
+    expect(note()[0]!.getAttribute("role")).toBe("status");
+    expect(note()[0]!.textContent).toBe("Event Card has no copies (+1 more)Why?");
+    expect(note()[0]!.title).toContain('Layer "Event Card" has 0 copies');
+    act(() => buttonWithText("Why?")!.click());
+    expect(showDiagnostics).toHaveBeenCalled();
+    expect(session.selection.getState().layers).toEqual(["card"]);
+    act(() => session.runtime.state.setState({ diagnostics: [] }));
+    expect(note()).toEqual([]);
+  });
 });

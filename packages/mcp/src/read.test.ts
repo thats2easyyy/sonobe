@@ -108,6 +108,40 @@ describe("read tools", () => {
     expect(r.text).toContain('"op":"addPatch"');
   });
 
+  it("adds the live viewer's runtime problems when the host has a live viewer", async () => {
+    const documentOnly = project.host.diagnostics.bind(project.host);
+    const warning = {
+      code: "empty_loop",
+      severity: "warning" as const,
+      message:
+        'Layer "Card" has 0 copies because "Pick" (Loop Select) returned an empty loop: index 3 is past the end of its 1-item Loop.',
+      hint: "An empty loop wins over every other loop.",
+      component: "main",
+      itemIds: ["card"],
+      suggestions: [
+        {
+          description:
+            'Set Out of Range to Clamp: an index past the end takes the last item. It changes "Pick" (Loop Select).',
+          ops: [{ op: "setInput" as const, target: "pick.outOfRange", value: "clamp" }],
+        },
+      ],
+    };
+    project.host.diagnostics = async (docId) => ({
+      ...(await documentOnly(docId)),
+      runtime: { frame: 1234, playing: true, diagnostics: [warning] },
+    });
+    const r = await client.call("get_diagnostics", {});
+    expect(r.text).toContain("No diagnostics at revision");
+    expect(r.text).toContain("Live viewer (frame 1,234, playing): 1 runtime problem:");
+    expect(r.text).toContain(
+      'warning empty_loop [main · card]: Layer "Card" has 0 copies because "Pick" (Loop Select) returned an empty loop',
+    );
+    expect(r.text).toContain('"target":"pick.outOfRange"');
+    expect(r.structured.runtime).toEqual({ frame: 1234, playing: true, diagnostics: [warning] });
+    const errors = await client.call("get_diagnostics", { severity: "error" });
+    expect(errors.text).toContain("Live viewer (frame 1,234, playing): no runtime problems.");
+  });
+
   it("returns an empty headless selection with a note", async () => {
     const r = await client.call("get_selection", {});
     expect(r.text).toContain("Headless mode has no editor");
