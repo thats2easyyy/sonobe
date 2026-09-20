@@ -8,6 +8,7 @@ import { createAssetService } from "../../state/assets.ts";
 import { EditorProvider } from "../../state/EditorProvider.tsx";
 import { getRegistry } from "../../state/registry.ts";
 import { createEditorSession, type EditorSession } from "../../state/session.ts";
+import { designStore } from "../design/designStore.ts";
 import { dropTargetAt, patchEditorBridge } from "../patch-editor/index.ts";
 import { planInsertLayer } from "./layerTree.ts";
 import { LayersPanel } from "./LayersPanel.tsx";
@@ -247,6 +248,32 @@ describe("LayersPanel", () => {
     click(menuItem("Group"));
     expect(main(s).layers.map((l) => l.type)).toContain("group");
     expect(findLayer(main(s).layers, "a")!.parent?.name).toBe("Group");
+  });
+
+  it("redesigns one layer with Claude from the row menu: it selects the row and opens the box", () => {
+    const s = mount(fixture());
+    designStore.setState({ open: false });
+    const openMenu = (name: string) =>
+      act(() => {
+        rowNamed(name).dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: 20, clientY: 20 }));
+      });
+    act(() => s.selection.getState().select({ layers: ["a", "b"] }));
+    openMenu("A");
+    const several = menuItem("Redesign with Claude…");
+    expect(several.getAttribute("aria-disabled")).toBe("true");
+    expect(several.querySelector(".sb-menu__description")?.textContent).toBe("Select one layer");
+    click(several);
+    expect(designStore.getState().open).toBe(false);
+    act(() => {
+      document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+    });
+
+    act(() => s.selection.getState().select({ layers: ["c"] }));
+    openMenu("Label");
+    click(menuItem("Redesign with Claude…"));
+    expect(s.selection.getState().layers).toEqual(["g2"]);
+    expect(designStore.getState().open).toBe(true);
+    designStore.setState({ open: false });
   });
 
   it("turns every row into a cable drop target while a patch editor drags a cable", () => {

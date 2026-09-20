@@ -8,7 +8,7 @@
 export { canvasContext, designTarget, type DesignTarget } from "./context.ts";
 export { designCommands } from "./commands.ts";
 export { DesignBox } from "./DesignBox.tsx";
-export { DesignPreview, previewFrame } from "./DesignPreview.tsx";
+export { DesignPreview, PREVIEW_POST_MS, previewFrame, type DesignPreviewProps, type PreviewFrameOptions } from "./DesignPreview.tsx";
 export {
   activeDraft,
   attachDesign,
@@ -24,6 +24,6 @@ export {
   type DesignState,
   type DraftStatus,
 } from "./designStore.ts";
-export { PREVIEW_BOOTSTRAP, PREVIEW_SCRIPT_PREFIXES, previewCsp, previewShellHtml, renderablePrefix } from "./previewShell.ts";
+export { PREVIEW_BOOTSTRAP, PREVIEW_MESSAGE_TYPE, PREVIEW_SCRIPT_PREFIXES, previewCsp, previewShellHtml, renderablePrefix } from "./previewShell.ts";
 export { claudePrompt } from "./prompt.ts";
 export { designStatusLine, toolStatusText, type DesignStatusLine } from "./status.ts";

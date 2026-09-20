@@ -24,7 +24,19 @@ export type ChatItem =
   | { kind: "user"; id: string; text: string }
   | { kind: "assistant"; id: string; runId: string; turn: number; text: string; thinking: string; tools: ToolChip[] }
   | { kind: "notice"; id: string; tone: "info" | "warn" | "error"; text: string; code?: string }
-  | { kind: "confirm"; id: string; runId: string; title: string; message: string; count: number; status: "pending" | "approved" | "declined" };
+  | {
+      kind: "confirm";
+      id: string;
+      runId: string;
+      title: string;
+      message: string;
+      count: number;
+      status: "pending" | "approved" | "declined";
+      /** confirm_required's `kind` (the item's own `kind` is "confirm"). Absent: a deletion. */
+      confirmKind?: "delete" | "replace";
+      approveLabel?: string;
+      declineLabel?: string;
+    };
 
 export type KeyCheckState = { state: "idle" } | { state: "checking" } | { state: "ok" } | { state: "error"; message: string };
 
@@ -115,7 +127,23 @@ export function reduceEvent(state: AssistantData, event: AssistantEvent): Partia
         ),
       };
     case "confirm_required":
-      return { items: [...state.items, { kind: "confirm", id: event.confirmationId, runId: event.runId, title: event.title, message: event.message, count: event.count, status: "pending" }] };
+      return {
+        items: [
+          ...state.items,
+          {
+            kind: "confirm",
+            id: event.confirmationId,
+            runId: event.runId,
+            title: event.title,
+            message: event.message,
+            count: event.count,
+            status: "pending",
+            ...(event.kind ? { confirmKind: event.kind } : {}),
+            ...(event.approveLabel ? { approveLabel: event.approveLabel } : {}),
+            ...(event.declineLabel ? { declineLabel: event.declineLabel } : {}),
+          },
+        ],
+      };
     case "confirm_resolved":
       return { items: state.items.map((item) => (item.kind === "confirm" && item.id === event.confirmationId ? { ...item, status: event.approved ? "approved" : "declined" } : item)) };
     case "usage":

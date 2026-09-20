@@ -8,10 +8,15 @@ import type { AssistantLimits, AssistantUsage } from "./types.ts";
 export interface ComposerProps {
   running: boolean;
   disabled?: boolean;
-  onSend: (text: string) => void;
+  /** Return false to keep the text in the field. */
+  onSend: (text: string) => boolean | void;
   onStop: () => void;
   usage: AssistantUsage | null;
   limits: AssistantLimits | null;
+  placeholder?: string;
+  ariaLabel?: string;
+  /** Hide the usage meter below this fraction of the budget. Default 0 (always shown). */
+  usageThreshold?: number;
 }
 
 /** Tokens used in this chat against its budget, with a list-price estimate. */
@@ -35,14 +40,14 @@ export function UsageMeter({ usage, limits }: { usage: AssistantUsage | null; li
 }
 
 /** Message field with Send and Stop. Enter sends; Shift+Enter adds a line. */
-export const Composer = forwardRef<HTMLTextAreaElement, ComposerProps>(function Composer({ running, disabled = false, onSend, onStop, usage, limits }, ref) {
+export const Composer = forwardRef<HTMLTextAreaElement, ComposerProps>(function Composer({ running, disabled = false, onSend, onStop, usage, limits, placeholder, ariaLabel, usageThreshold = 0 }, ref) {
   const [text, setText] = useState("");
   const canSend = !disabled && !running && text.trim().length > 0;
+  const showUsage = budgetFraction(usage?.budgetTokens ?? usage?.totalTokens ?? 0, limits?.tokenBudget ?? 0) >= usageThreshold;
 
   const send = () => {
     if (!canSend) return;
-    onSend(text);
-    setText("");
+    if (onSend(text) !== false) setText("");
   };
 
   const onKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
@@ -59,8 +64,8 @@ export const Composer = forwardRef<HTMLTextAreaElement, ComposerProps>(function 
           ref={ref}
           value={text}
           rows={1}
-          aria-label="Message the Assistant"
-          placeholder={disabled ? "Add an API key to start chatting" : "Describe what to build or ask a question…"}
+          aria-label={ariaLabel ?? "Message the Assistant"}
+          placeholder={placeholder ?? (disabled ? "Add an API key to start chatting" : "Describe what to build or ask a question…")}
           disabled={disabled}
           onChange={(event) => setText(event.target.value)}
           onKeyDown={onKeyDown}
@@ -72,7 +77,7 @@ export const Composer = forwardRef<HTMLTextAreaElement, ComposerProps>(function 
           <IconButton icon={<ArrowUp size={15} strokeWidth={2.25} />} label="Send" shortcut="Enter" variant="solid" size="sm" className="sb-assistant-composer__send" disabled={!canSend} onClick={send} />
         )}
       </div>
-      <UsageMeter usage={usage} limits={limits} />
+      {showUsage && <UsageMeter usage={usage} limits={limits} />}
     </div>
   );
 });
