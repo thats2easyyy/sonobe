@@ -10,7 +10,8 @@ Related: `graph-basics`, `loops`, `components`
 - `position` is where the layer's **anchor point** sits, measured from the parent's top-left.
 - `anchor` defaults to `[0, 0]` (top-left). Set `[0.5, 0.5]` to position by center.
 - `pivot` is the point scale and rotation happen around. It defaults to `[0.5, 0.5]` (center).
-- Later layers draw in front of earlier ones. Children draw in front of their parent. `zPosition` adjusts depth.
+- Later layers draw in front of earlier ones. Children draw in front of their parent.
+- `zPosition` reorders siblings: higher draws in front and gets touches first; ties keep layer order. It never lifts a layer out of its group.
 
 ## Containers
 

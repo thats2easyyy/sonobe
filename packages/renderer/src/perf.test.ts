@@ -24,15 +24,16 @@ function leaf(key: string, type: string, x: number, y: number, w: number, h: num
   return { key, layerId: key, type, parentKey: parent, x: x + shift, y, width: w, height: h, transform: mat(x + shift, y), worldTransform: mat(16 + x + shift, parentY + y), opacity: 1, visible: true, clip: false, props, children: [] };
 }
 
-/** `scroll` moves every row; `shift` moves every leaf inside its row. */
-function listFrame(scroll: number, shift = 0, progress = 0.5): SceneFrame {
+/** `scroll` moves every row; `shift` moves every leaf inside its row; `lifted` stacks row 0 in front (zPosition −index). */
+function listFrame(scroll: number, shift = 0, progress = 0.5, lifted = false): SceneFrame {
   const roots: SceneNode[] = [];
   for (let i = 0; i < ROWS; i++) {
     const key = `row${i}`;
     const y = 16 + i * 72 - scroll;
     roots.push({
       key, layerId: key, type: "group", parentKey: null, x: 16, y, width: 358, height: 64, transform: mat(16, y), worldTransform: mat(16, y), opacity: 1, visible: true, clip: false,
-      props: { color: "#FFFFFFFF", cornerRadius: 16, shadowOpacity: 0.08, shadowRadius: 8 },
+      ...(lifted ? { zPosition: -i } : {}),
+      props: { color: "#FFFFFFFF", cornerRadius: 16, shadowOpacity: 0.08, shadowRadius: 8, ...(lifted ? { zPosition: -i } : {}) },
       children: [
         leaf(`${key}_avatar`, "oval", 12, 12, 40, 40, { color: "#0A84FFFF" }, key, y, shift),
         leaf(`${key}_title`, "text", 64, 12, 220, 20, { text: `Event ${i}`, fontSize: 16, fontWeight: 600, lineHeight: 20 }, key, y, shift),
@@ -120,6 +121,18 @@ describe("render performance (500 nodes)", { retry: 2 }, () => {
     const { median, writesPerFrame } = measure(renderer, Array.from({ length: 40 }, (_, i) => listFrame(i + 1, i + 1)));
     expect(writesPerFrame.every((w) => w === ROWS * 5)).toBe(true);
     expect(median).toBeLessThan(BUDGET_MS);
+  });
+
+  it("keeps zPosition ranks without writes: a static lifted list writes nothing, a scrolling one only transforms", () => {
+    renderer.render(listFrame(3, 0, 0.5, true));
+    const still = measure(renderer, Array.from({ length: 40 }, () => listFrame(3, 0, 0.5, true)));
+    expect(still.writesPerFrame.every((w) => w === 0)).toBe(true);
+    expect(still.median).toBeLessThan(BUDGET_MS);
+    const moved = renderer.getStats().moved;
+    const scrolled = measure(renderer, Array.from({ length: 40 }, (_, i) => listFrame(4 + i, 0, 0.5, true)));
+    expect(scrolled.writesPerFrame.every((w) => w === ROWS)).toBe(true);
+    expect(renderer.getStats().moved).toBe(moved);
+    renderer.render(listFrame(0));
   });
 
   it("creates no elements on animated frames", () => {

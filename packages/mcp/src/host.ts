@@ -357,6 +357,8 @@ export interface SimHit {
   /** Front-most layer under the point, if any. */
   layerId?: Id;
   layerName?: string;
+  /** The front-most node's own scene key: "card#0" for a loop copy, else the layer id. */
+  key?: string;
   /** Instance path of the front-most layer when it's inside a component instance ("card#2"). */
   instancePath?: string;
   /** Front-most first, including ancestors that touches bubble to. */

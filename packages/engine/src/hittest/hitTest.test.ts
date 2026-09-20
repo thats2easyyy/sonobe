@@ -97,6 +97,32 @@ describe("hitTest", () => {
     expect(keys(hitTest(lifted, 75, 75))).toEqual(["a"]);
   });
 
+  it("hits the loop copy that draws in front", () => {
+    // zPosition = 2 − index, as in a deck where copy 0 is the top card.
+    const copies = [0, 1, 2].map((i) =>
+      build({ key: `card#${i}`, x: 0, y: 0, w: 100, h: 100, props: { zPosition: 2 - i } }),
+    );
+    expect(keys(hitTest(copies, 50, 50))).toEqual(["card#0"]);
+    const hidden = copies.map((c, i) => (i === 0 ? { ...c, visible: false } : c));
+    expect(keys(hitTest(hidden, 50, 50))).toEqual(["card#1"]);
+  });
+
+  it("reorders only among siblings: a lifted child stays inside its group", () => {
+    const roots = [
+      build({
+        key: "group",
+        type: "group",
+        x: 0,
+        y: 0,
+        w: 100,
+        h: 100,
+        children: [{ key: "deep", x: 0, y: 0, w: 100, h: 100, props: { zPosition: 100 } }],
+      }),
+      build({ key: "later", x: 0, y: 0, w: 100, h: 100 }),
+    ];
+    expect(keys(hitTest(roots, 50, 50))).toEqual(["later"]);
+  });
+
   it("respects rotation about the pivot", () => {
     const roots = [build({ key: "card", x: 100, y: 100, w: 200, h: 100, rotation: 45 })];
     expect(hitTest(roots, 110, 195)).toEqual([]);

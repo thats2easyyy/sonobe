@@ -88,6 +88,26 @@ describe("hitLayers", () => {
     expect(hitLayers(index, [200, 200])).toEqual(["sticker"]);
   });
 
+  it("picks the sibling that draws in front: higher zPosition first, then layer order", () => {
+    const doc = buildDoc({
+      layers: [
+        { id: "lifted", type: "rectangle", props: { position: [0, 0], size: [100, 100], zPosition: 10 } },
+        { id: "later", type: "rectangle", props: { position: [50, 50], size: [100, 100] } },
+        {
+          id: "group",
+          type: "group",
+          props: { position: [200, 0], size: [100, 100] },
+          children: [{ id: "deep", type: "rectangle", props: { size: [100, 100], zPosition: 100 } }],
+        },
+        { id: "cover", type: "rectangle", props: { position: [200, 0], size: [100, 100] } },
+      ],
+    });
+    const index = sceneFor(doc);
+    expect(hitLayers(index, [75, 75])).toEqual(["lifted"]);
+    // A lifted child never leaves its group: the later root sibling stays in front of it.
+    expect(hitLayers(index, [250, 50])).toEqual(["cover"]);
+  });
+
   it("respects clipping groups", () => {
     const index = sceneFor(demo());
     // badge extends past the card's clip (card ends at 220); at (230, 180) only the sticker is there.

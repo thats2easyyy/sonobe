@@ -5,3 +5,4 @@ export {
   isInteractive,
   toLocalPoint,
 } from "./hitTest.ts";
+export { paintIndices, paintOrder, stackDepth, type Stackable } from "./paintOrder.ts";

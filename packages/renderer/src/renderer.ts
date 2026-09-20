@@ -5,6 +5,7 @@
 
 import type { LayerRef } from "@sonobe/core";
 import type { InputEvent, SceneFrame, SceneNode } from "@sonobe/engine";
+import { paintIndices } from "@sonobe/engine";
 import { DRAWERS, FALLBACK_DRAWER, cssPath, hasSquircle, nodeHeight, nodeWidth } from "./drawers.ts";
 import { SVG_NS } from "./host.ts";
 import type { Drawer, Host, MediaState, RenderContext, RendererStats, ShaderErrorInfo, ShapeInfo } from "./host.ts";
@@ -242,7 +243,7 @@ export function createDomRenderer(container: HTMLElement, opts: DomRendererOptio
   const hosts = new Map<string, Host>();
   const styleMemos = new WeakMap<Host, StyleMemo>();
   const transforms = new WeakMap<Host, Float64Array>();
-  const rootHost: Host = { key: "", type: "stage", layerId: "", el: stage, body: stage, parts: [], stroke: null, strokeSvg: null, overlay: null, children: [], gen: 0, state: {} };
+  const rootHost: Host = { key: "", type: "stage", layerId: "", el: stage, body: stage, parts: [], stroke: null, strokeSvg: null, overlay: null, children: [], zIndex: "", stacked: false, gen: 0, state: {} };
 
   let gen = 0;
   let lastFrame: SceneFrame | null = null;
@@ -326,7 +327,7 @@ export function createDomRenderer(container: HTMLElement, opts: DomRendererOptio
     el.dataset.key = key;
     el.dataset.layer = node.layerId;
     el.dataset.type = node.type;
-    const host: Host = { key, type: node.type, layerId: node.layerId, el, body, parts: [], stroke: null, strokeSvg: null, overlay: null, children: [], gen, state: {} };
+    const host: Host = { key, type: node.type, layerId: node.layerId, el, body, parts: [], stroke: null, strokeSvg: null, overlay: null, children: [], zIndex: "", stacked: false, gen, state: {} };
     hosts.set(key, host);
     stats.created++;
     return host;
@@ -396,9 +397,32 @@ export function createDomRenderer(container: HTMLElement, opts: DomRendererOptio
     parent.children = next;
   }
 
+  /**
+   * zPosition stacking (paintOrder): the DOM keeps document order, so a changed zPosition never
+   * moves a host (no focus loss, no re-attached media). Lifted siblings get z-index ranks instead,
+   * inside their parent's isolated body, so they can't draw over the parent's stroke, an ancestor's
+   * later sibling, or the device frame around the stage.
+   */
+  function stack(parent: Host, next: readonly Host[], nodes: readonly SceneNode[]): void {
+    const order = paintIndices(nodes);
+    if (order) for (let rank = 0; rank < order.length; rank++) rankHost(next[order[rank]!]!, String(rank));
+    else for (let k = 0; k < next.length; k++) if (next[k]!.zIndex) rankHost(next[k]!, "");
+    const stacked = order !== null;
+    if (parent.stacked === stacked) return;
+    parent.stacked = stacked;
+    setStyle(parent.body, "isolation", stacked ? "isolate" : "", stats);
+  }
+
+  function rankHost(host: Host, zIndex: string): void {
+    if (host.zIndex === zIndex) return;
+    host.zIndex = zIndex;
+    setStyle(host.el, "z-index", zIndex, stats);
+  }
+
   function reconcile(parent: Host, nodes: readonly SceneNode[]): void {
     const next = nodes.map(acquire);
     arrange(parent, next);
+    stack(parent, next, nodes);
     for (let k = 0; k < nodes.length; k++) {
       const node = nodes[k]!;
       const host = next[k]!;

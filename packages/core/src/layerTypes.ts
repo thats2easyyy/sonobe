@@ -56,7 +56,7 @@ export const COMMON_PROPS: PropSpec[] = [
   prop("rotationX", "Rotation X", "number", 0, "transform", "3D rotation around the X axis in degrees.", { ...sub("angle"), advanced: true }),
   prop("rotationY", "Rotation Y", "number", 0, "transform", "3D rotation around the Y axis in degrees.", { ...sub("angle"), advanced: true }),
   prop("pivot", "Pivot", "anchor", [0.5, 0.5], "transform", "Point that scale and rotation happen around. [0.5,0.5] is center."),
-  prop("zPosition", "Z Position", "number", 0, "transform", "Depth offset for 3D and stacking (higher is closer).", { advanced: true }),
+  prop("zPosition", "Z Position", "number", 0, "transform", "Draw order among siblings: a higher Z Position draws in front and gets touches first; equal values keep layer-list order. It only reorders within the same parent.", { advanced: true }),
   prop("shadowColor", "Shadow Color", "color", "#000000FF", "shadow", "Drop shadow color."),
   prop("shadowOpacity", "Shadow Opacity", "number", 0, "shadow", "0 turns the shadow off.", { ...sub("progress"), min: 0, max: 1, step: 0.01 }),
   prop("shadowRadius", "Shadow Radius", "number", 0, "shadow", "Blur radius of the shadow in points.", { min: 0 }),

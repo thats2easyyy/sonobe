@@ -146,6 +146,18 @@ describe("sceneToSvg", () => {
     ]);
   });
 
+  it("draws siblings in paint order: zPosition first, and a lifted child stays inside its group", () => {
+    const lifted = engineScene([
+      layer("a", "rectangle", { size: [40, 40], color: "#FF0000FF", zPosition: 10 }),
+      layer("b", "rectangle", { size: [40, 40], color: "#0000FFFF" }),
+      layer("g", "group", { size: [40, 40] }, [layer("deep", "rectangle", { size: [40, 40], zPosition: 100 }), layer("flat", "rectangle", { size: [40, 40] })]),
+    ]);
+    const order = [...sceneToSvg(lifted).matchAll(/data-layer="([^"]+)"/g)].map((m) => m[1]);
+    expect(order).toEqual(["b", "g", "flat", "deep", "a"]);
+    const copies = engineScene([0, 1, 2].map((i) => layer(`card_${i}`, "rectangle", { size: [40, 40], zPosition: -i })));
+    expect([...sceneToSvg(copies).matchAll(/data-layer="([^"]+)"/g)].map((m) => m[1])).toEqual(["card_2", "card_1", "card_0"]);
+  });
+
   it("draws clones as copies of their source at the clone's origin", () => {
     const svg = sceneToSvg(engineScene([layer("card", "rectangle", { position: [10, 10], size: [40, 40], color: "#FF0000FF" }), layer("copy", "clone", { position: [100, 100], size: [40, 40], source: { layer: "card" } })]));
     expect(svg).toContain('<g data-layer="copy" transform="translate(100 100)"><g data-layer="card"><rect width="40" height="40" fill="#ff0000"/></g></g>');

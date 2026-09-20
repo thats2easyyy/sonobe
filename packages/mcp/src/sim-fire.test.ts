@@ -29,7 +29,7 @@ async function setup(ops: unknown[]): Promise<{ c: TestClient; simId: string; p:
 
 type Report = {
   index: number;
-  hit?: { layerId?: string; handledBy: string[]; instancePath?: string };
+  hit?: { layerId?: string; key?: string; handledBy: string[]; instancePath?: string };
   warnings: string[];
 };
 
@@ -105,6 +105,65 @@ describe("inputs resolve when they fire", () => {
       'Layer "chip#4" wasn\'t in the frame at 600 ms, so the tap was skipped',
     );
     expect(events[2]!.hit).toBeUndefined();
+  });
+
+  it("names the loop copy a tap hits: the one zPosition draws in front", async () => {
+    const deck = (zFromIndex: unknown[]) => [
+      {
+        op: "addLayer",
+        layer: {
+          ref: "card",
+          type: "rectangle",
+          name: "Card",
+          props: { position: [40, 200], size: [300, 400] },
+        },
+      },
+      {
+        op: "addPatch",
+        patch: { ref: "cards", type: "loop", name: "Cards", inputs: { count: 3 } },
+      },
+      ...zFromIndex,
+      {
+        op: "addPatch",
+        patch: { type: "interaction", name: "Tap Card", inputs: { layer: { layer: "$card" } } },
+      },
+    ];
+    const topFirst = await setup(
+      deck([
+        {
+          op: "addPatch",
+          patch: {
+            ref: "order",
+            type: "multiply",
+            name: "Card Order",
+            inputs: { value1: { link: "$cards.index" }, value2: -1 },
+          },
+        },
+        { op: "connect", from: "$order.output", to: "@$card.zPosition" },
+      ]),
+    );
+    const tap = await topFirst.c.call("sim_dispatch", {
+      simId: topFirst.simId,
+      events: [{ kind: "tap", target: "@card" }],
+    });
+    expect(tap.isError, tap.text).toBe(false);
+    expect((tap.structured.events as Report[])[0]!.hit).toMatchObject({
+      layerId: "card",
+      key: "card#0",
+      handledBy: ["tap_card"],
+    });
+    expect(tap.text).toContain("hit card#0 · heard by tap_card");
+    await client?.close();
+    await project?.cleanup();
+
+    const lastFirst = await setup(
+      deck([{ op: "connect", from: "$cards.index", to: "@$card.zPosition" }]),
+    );
+    const again = await lastFirst.c.call("sim_dispatch", {
+      simId: lastFirst.simId,
+      events: [{ kind: "tap", target: "@card" }],
+    });
+    expect(again.text).toContain("hit card#2 · heard by tap_card");
   });
 
   it("gives traces on a copy the same per-input reports without moving the session", async () => {

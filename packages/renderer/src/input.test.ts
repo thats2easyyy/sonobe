@@ -196,4 +196,11 @@ describe("scene queries", () => {
     expect(cursorAt(f, 20, 20)).toBe("");
     expect(findNodesAt(f, 390, 390)).toEqual([]);
   });
+
+  it("follows paint order, so the lifted layer's cursor wins", () => {
+    const f: SceneFrame = { frame: 0, time: 0, size: [400, 400], background: { r: 0, g: 0, b: 0, a: 1 }, roots: [node("lifted", 0, 0, { cursor: "pointer", zPosition: 10 }), node("later", 50, 50, { cursor: "text" })] };
+    expect(findNodesAt(f, 75, 75).map((h) => h.node.key)).toEqual(["lifted"]);
+    expect(cursorAt(f, 75, 75)).toBe("pointer");
+    expect(cursorAt(f, 125, 125)).toBe("text");
+  });
 });
