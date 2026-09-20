@@ -129,6 +129,9 @@ export function describeOps(ops: readonly Op[]): string {
       case "moveLayer":
         bump("moved layer");
         break;
+      case "setNodePositions":
+        bump("moved node", Object.keys(op.positions ?? {}).length || 1);
+        break;
       case "createComponent":
       case "addComponent":
         bump("created component");

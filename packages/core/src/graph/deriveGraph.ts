@@ -1,63 +1,36 @@
 /**
- * deriveGraph: a component → React Flow nodes and cables. Patch nodes carry resolved ports with
- * literals, connection state, static loop detection, and diagnostics; layers whose properties are
- * driven (or read) get a layer target node; published component ports get interface nodes; comments
- * become frames. Unchanged nodes and edges keep their identity across revisions so memoized views
- * skip re-rendering.
+ * deriveGraph: a component → graph nodes and cables, as the patch editor draws them. Patch nodes
+ * carry resolved ports with literals, connection state, static loop detection, and diagnostics;
+ * layers whose properties are driven (or read) get a layer target node; published component ports
+ * get interface nodes; comments become frames. Unchanged nodes and edges keep their identity across
+ * revisions so memoized views skip re-rendering.
  */
 
-import {
-  canConnect,
-  defaultForPort,
-  findLayer,
-  getPatchSpec,
-  interfacePortToPort,
-  isLayerInput,
-  isLinkInput,
-  isLoopLiteral,
-  listInputs,
-  parseAddress,
-  patchDisplayName,
-  resolveLayerOutputs,
-  resolveLayerProps,
-  resolveNodePorts,
-  targetAddress,
-  type Component,
-  type Diagnostic,
-  type Id,
-  type InputEntry,
-  type InputValue,
-  type LayerNode,
-  type PatchNode,
-  type Registry,
-  type ResolvedPort,
-  type ResolvedPorts,
-  type ResolvedProp,
-  type SonobeDocument,
-  type Suggestion,
-  type ValueType,
-} from "@sonobe/core";
+import { parseAddress } from "../address.ts";
+import { patchDisplayName } from "../names.ts";
+import { listInputs, targetAddress, type InputEntry } from "../ops/references.ts";
+import { findLayer, getPatchSpec, interfacePortToPort, resolveLayerOutputs, resolveLayerProps, resolveNodePorts, type ResolvedPort, type ResolvedPorts, type ResolvedProp } from "../registry.ts";
+import type { Component, Diagnostic, Id, InputValue, LayerNode, PatchNode, Registry, SonobeDocument, Suggestion, ValueType } from "../types.ts";
+import { canConnect, defaultForPort, isLayerInput, isLinkInput, isLoopLiteral } from "../values.ts";
 import { deepEqual } from "./equal.ts";
-import { createPlacementIndex, estimateNodeSize, PLACEMENT_PADDING, type Rect } from "./geometry.ts";
-import { readNodePositions } from "./meta.ts";
+import { createPlacementIndex, PLACEMENT_PADDING, type Rect } from "./geometry.ts";
+import { INPUTS_NODE_ID, layerNodeId, OUTPUTS_NODE_ID, readNodePositions } from "./graphNodes.ts";
+import { estimateNodeSize, type NodeTextMeasurer } from "./nodeSize.ts";
 import {
   cableId,
   commentNodeId,
-  INPUTS_NODE_ID,
   inHandle,
-  layerNodeId,
   outHandle,
-  OUTPUTS_NODE_ID,
   portKey,
   type CableData,
-  type CableFlowEdge,
-  type CommentFlowNode,
-  type FlowNode,
+  type CableEdge,
+  type CommentGraphNode,
   type GraphModel,
-  type InterfaceFlowNode,
-  type LayerFlowNode,
+  type GraphNode,
+  type InterfaceGraphNode,
+  type LayerGraphNode,
   type NodeIssue,
-  type PatchFlowNode,
+  type PatchGraphNode,
   type PatchNodeData,
   type PortModel,
   type PortSide,
@@ -80,6 +53,8 @@ export interface DeriveGraphOptions {
   previous?: GraphModel | null;
   /** Measured node sizes (placement of layer and interface nodes). */
   sizes?: ReadonlyMap<string, { width: number; height: number }>;
+  /** Measures node text for sizes that weren't measured (default: the SF Pro metrics table). */
+  measure?: NodeTextMeasurer;
 }
 
 const EMPTY_NAMES: readonly string[] = [];
@@ -119,7 +94,7 @@ interface PatchCacheEntry {
   consumed: string;
   working: readonly string[];
   issues: readonly NodeIssue[];
-  flowNode: PatchFlowNode;
+  flowNode: PatchGraphNode;
 }
 
 interface PatchCache {
@@ -317,11 +292,12 @@ export function deriveGraph(options: DeriveGraphOptions): GraphModel {
     for (const p of list) ports.set(portKey(p.side, p.address), p);
     return list;
   };
-  const nodes: FlowNode[] = [];
+  const nodes: GraphNode[] = [];
   const outputAddresses: string[] = [];
   const patchRects: Rect[] = [];
   const patchData = new Map<Id, PatchNodeData>();
-  const sizeOf = (id: string, data: Parameters<typeof estimateNodeSize>[0]) => options.sizes?.get(id) ?? estimateNodeSize(data);
+  const estimateOptions = { ...(options.measure ? { measure: options.measure } : {}), layerName: (id: Id) => findLayer(component.layers, id)?.layer.name };
+  const sizeOf = (id: string, data: Parameters<typeof estimateNodeSize>[0]) => options.sizes?.get(id) ?? estimateNodeSize(data, estimateOptions);
 
   const previousCache = options.previous ? patchCaches.get(options.previous) : undefined;
   const loopFree = looped.size === 0 && !wholeLoopOutputs;
@@ -424,7 +400,7 @@ export function deriveGraph(options: DeriveGraphOptions): GraphModel {
     }
     if (node.component !== undefined) data.componentTarget = node.component;
     if (layerRef !== undefined) data.layerRef = layerRef;
-    const flowNode: PatchFlowNode = { id, type: "patch", position: { x: node.ui.x, y: node.ui.y }, data };
+    const flowNode: PatchGraphNode = { id, type: "patch", position: { x: node.ui.x, y: node.ui.y }, data };
     nodes.push(flowNode);
     patchData.set(id, data);
     patchRects.push({ x: node.ui.x, y: node.ui.y, ...sizeOf(id, data) });
@@ -545,7 +521,7 @@ export function deriveGraph(options: DeriveGraphOptions): GraphModel {
       : readers.length
         ? { x: Math.min(...readers.map((r) => r.x)) - size.width - 96, y: Math.min(...readers.map((r) => r.y)) }
         : { x: graphRight + 120, y: graphTop };
-    const flowNode: LayerFlowNode = { id: nodeId, type: "layer", position: place(nodeId, size, preferred), data };
+    const flowNode: LayerGraphNode = { id: nodeId, type: "layer", position: place(nodeId, size, preferred), data };
     nodes.push(flowNode);
   }
 
@@ -558,7 +534,7 @@ export function deriveGraph(options: DeriveGraphOptions): GraphModel {
     const outputs = register(inPorts.map((p) => toPortModel(interfacePortToPort(p, "input"), "out", `$in.${p.key}`, consumed.has(`$in.${p.key}`))));
     const data = { kind: "interface" as const, componentId, side: "inputs" as const, title: "Component Inputs", inputs: [], outputs };
     const size = sizeOf(INPUTS_NODE_ID, data);
-    const flowNode: InterfaceFlowNode = { id: INPUTS_NODE_ID, type: "interface", position: place(INPUTS_NODE_ID, size, { x: bbox.minX - size.width - 120, y: bbox.minY }), data };
+    const flowNode: InterfaceGraphNode = { id: INPUTS_NODE_ID, type: "interface", position: place(INPUTS_NODE_ID, size, { x: bbox.minX - size.width - 120, y: bbox.minY }), data };
     nodes.push(flowNode);
   }
   const outPorts = Object.values(component.interface.outputs).sort((a, b) => (a.key < b.key ? -1 : 1));
@@ -572,20 +548,20 @@ export function deriveGraph(options: DeriveGraphOptions): GraphModel {
     );
     const data = { kind: "interface" as const, componentId, side: "outputs" as const, title: "Component Outputs", inputs, outputs: [] };
     const size = sizeOf(OUTPUTS_NODE_ID, data);
-    const flowNode: InterfaceFlowNode = { id: OUTPUTS_NODE_ID, type: "interface", position: place(OUTPUTS_NODE_ID, size, { x: bbox.maxX + 120, y: bbox.minY }), data };
+    const flowNode: InterfaceGraphNode = { id: OUTPUTS_NODE_ID, type: "interface", position: place(OUTPUTS_NODE_ID, size, { x: bbox.maxX + 120, y: bbox.minY }), data };
     nodes.push(flowNode);
   }
 
   // Comments sit behind everything.
   for (const c of component.comments) {
     const data = { kind: "comment" as const, componentId, commentId: c.id, text: c.text, ...(c.color !== undefined ? { color: c.color } : {}) };
-    const flowNode: CommentFlowNode = { id: commentNodeId(c.id), type: "comment", position: { x: c.rect[0], y: c.rect[1] }, width: c.rect[2], height: c.rect[3], zIndex: -1, data };
+    const flowNode: CommentGraphNode = { id: commentNodeId(c.id), type: "comment", position: { x: c.rect[0], y: c.rect[1] }, width: c.rect[2], height: c.rect[3], zIndex: -1, data };
     nodes.push(flowNode);
   }
 
   // -- Cables ---------------------------------------------------------------
   const nodeIds = new Set(nodes.map((n) => n.id));
-  const edges: CableFlowEdge[] = [];
+  const edges: CableEdge[] = [];
   const cablesBySource = new Map<string, string[]>();
   for (const l of links) {
     const src = l.src;
@@ -618,7 +594,7 @@ export function deriveGraph(options: DeriveGraphOptions): GraphModel {
   // Remember the node objects the model actually holds, so the next derive hands them back.
   for (const node of result.nodes) {
     const entry = node.type === "patch" ? cache.entries.get(node.id) : undefined;
-    if (entry) entry.flowNode = node as PatchFlowNode;
+    if (entry) entry.flowNode = node as PatchGraphNode;
   }
   patchCaches.set(result, cache);
   return result;

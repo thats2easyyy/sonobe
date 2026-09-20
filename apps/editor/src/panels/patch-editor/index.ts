@@ -17,7 +17,8 @@
  * `aria-label`. The editor fills its parent (flex: 1), follows
  * selection.componentPath, and persists its viewport per component in selection.patchViewports.
  * Layer target and component interface node positions are saved in the component's
- * `meta.patchEditor.nodes` (updateComponent `meta`), so they're undoable and survive reloads.
+ * `meta.patchEditor.nodes` (the setNodePositions op), so they're undoable and survive reloads.
+ * The graph model itself (deriveGraph, node sizes, tidy) lives in `@sonobe/core/graph`.
  *
  * "Drive with a patch" from other panels:
  *
@@ -37,7 +38,7 @@
 export * from "./api.ts";
 export { PatchEditor, type PatchEditorProps } from "./PatchEditor.tsx";
 export { LiveScopeChip, Toolbar, type ToolbarProps } from "./components/Chrome.tsx";
-export { deriveGraph, type DeriveGraphOptions } from "./model/graph.ts";
+export { deriveGraph, type DeriveGraphOptions } from "@sonobe/core/graph";
 export { edgesWithRegisteredHandles, type HandleLookup } from "./model/handles.ts";
 export {
   layerLinkItems,
@@ -58,7 +59,7 @@ export {
 } from "./model/linkSearch.ts";
 export { cablesCutByKnife, polylinesIntersect, segmentsIntersect, simplifyStroke, type CableGeometry } from "./model/knife.ts";
 export { chordFromEvent, chordOf, DEFAULT_SINGLE_KEYS, resolveSingleKeyInsert, singleKeyInserts, type SingleKeyInsert } from "./model/singleKey.ts";
-export { tidyLayout, type TidyInput, type TidyResult } from "./model/tidy.ts";
+export { elkGroupLayout } from "./model/tidy.ts";
 export { pickerItems, searchPicker, PICKER_KEYS, type PickerItem } from "./model/picker.ts";
 export {
   alignPositions,
@@ -75,6 +76,6 @@ export {
 } from "./model/editOps.ts";
 export { boundsVisible, cablePath, cablePoint, readableViewport, sampleCable, type ReadableViewportOptions } from "./model/geometry.ts";
 export { componentInstances, instanceChoiceKey, resolveLiveScope, scopedAddress, type ComponentInstance, type LiveScope, type LiveScopeStep } from "./model/instances.ts";
-export { formatValue, formatValueLong } from "./model/format.ts";
+export { formatValue, formatValueLong } from "@sonobe/core/graph";
 export type { CableData, CableFlowEdge, FlowNode, GraphModel, LayerNodeData, PatchNodeData, PortModel } from "./model/types.ts";
 export { createPatchEditorActions, type ActionDeps, type InsertPatchOptions, type LinkSearchRequest, type PatchEditorActions } from "./state/actions.ts";

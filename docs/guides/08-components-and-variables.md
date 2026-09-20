@@ -123,7 +123,11 @@ A comment is a titled, colored frame behind a set of patches. Use one per featur
 
 ### Tidy Up
 
-Select some patches and press ⌃T. Sonobe lays them out to follow the flow of data, from left to right.
+Press ⌃T. Sonobe lays patches out to follow the flow of data, from left to right. Comment frames work as sections: each frame's patches are laid out inside it, the frame grows or shrinks to fit, and frames that would overlap move apart, so your sections stay where you put them.
+
+- Select some patches first to tidy only those. They stay inside their frame.
+- Right-click a comment and choose **Tidy Up Frame** to tidy one section.
+- **Tidy Up and Arrange Frames** (in the canvas menu and the command palette) also moves the frames themselves.
 
 ### Fan out instead of copying
 

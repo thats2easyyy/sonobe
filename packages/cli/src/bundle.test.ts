@@ -116,6 +116,9 @@ describe("the bundled CLI", () => {
         arguments: { topic: "start-here" },
       });
       expect((guide.structuredContent as { text: string }).text).toContain("# Start here");
+      // tidy_graph lays out with ELK, which the bundle carries.
+      const tidy = await client.callTool({ name: "tidy_graph", arguments: { dryRun: true } });
+      expect(tidy.isError, JSON.stringify(tidy.content)).toBeFalsy();
       const reset = await client.callTool({ name: "sim_reset", arguments: {} });
       const simId = (reset.structuredContent as { simId: string }).simId;
       const tap = await client.callTool({

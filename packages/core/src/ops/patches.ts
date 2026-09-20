@@ -3,6 +3,7 @@
 import { parseAddress, patchAddress } from "../address.ts";
 import { wouldCreateComponentCycle } from "../document.ts";
 import { VARIABLE_BROADCASTER_TYPE } from "../graph.ts";
+import { estimatePatchSize } from "../graph/placement.ts";
 import { getOwn } from "../ids.ts";
 import { COMPONENT_PATCH_TYPE, componentItemIds, findPort, getInputCountRange, getPatchSpec, resolveNodePorts, resolveNodeVariants } from "../registry.ts";
 import { didYouMean, didYouMeanText } from "../suggest.ts";
@@ -83,11 +84,13 @@ function failUnknownType(ctx: OpContext, type: string): never {
   });
 }
 
-function autoUi(component: Component): { x: number; y: number } {
+/** A patch added without a position goes one column right of the rightmost patch, as wide as the editor draws it. */
+function autoUi(ctx: OpContext, component: Component): { x: number; y: number } {
   const nodes = Object.values(component.patches);
   if (!nodes.length) return { x: 40, y: 40 };
   const right = nodes.reduce((a, b) => (b.ui.x > a.ui.x ? b : a));
-  return { x: right.ui.x + 200, y: right.ui.y };
+  const width = estimatePatchSize(ctx.doc, ctx.registry, right, { component: component.id }).width;
+  return { x: right.ui.x + width + 72, y: right.ui.y };
 }
 
 const isFiniteNumber = (n: unknown): n is number => typeof n === "number" && Number.isFinite(n);
@@ -102,11 +105,11 @@ export function addPatch(ctx: OpContext, op: OpOf<"addPatch">): OpOutcome {
   const id = newItemId(ctx, component, { explicit: np.id, name: np.name, fallback: np.type, taken: componentItemIds(component) });
   defineRef(ctx, np.ref, id);
 
-  let ui = autoUi(component);
+  let ui: { x: number; y: number };
   if (np.ui !== undefined) {
     if (!np.ui || !isFiniteNumber(np.ui.x) || !isFiniteNumber(np.ui.y)) fail("invalid_value", '"ui" must be { "x": number, "y": number }.');
     ui = { x: np.ui.x, y: np.ui.y };
-  }
+  } else ui = autoUi(ctx, component);
   const node: PatchNode = { type: np.type, inputs: {}, ui };
   if (np.name) node.name = np.name;
   if (np.component !== undefined) node.component = resolveId(ctx, np.component);

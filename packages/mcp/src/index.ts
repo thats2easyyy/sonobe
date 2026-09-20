@@ -126,4 +126,3 @@ export {
   type ToolOutputSchema,
 } from "./schemas.ts";
 export { summaryText, traceTable } from "./tools/simulate.ts";
-export { tidyOps, type TidyOptions } from "./tidy.ts";

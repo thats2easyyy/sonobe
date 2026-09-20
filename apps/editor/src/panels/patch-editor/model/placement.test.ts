@@ -4,7 +4,7 @@ import { createPatchRegistry } from "@sonobe/patches";
 import { describe, expect, it } from "vitest";
 import { createDemoDocument } from "../../../state/demoDocument.ts";
 import { rectsOverlap, type Rect } from "./geometry.ts";
-import { documentObstacles, estimatePatchSize, findFreePosition, freeInsertPosition } from "./placement.ts";
+import { documentObstacles, estimatePatchSize, findFreePosition, freeInsertPosition } from "@sonobe/core/graph";
 
 const registry = createPatchRegistry();
 const size = { width: 180, height: 100 };
