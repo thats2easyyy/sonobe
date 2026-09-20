@@ -695,7 +695,7 @@ describe("tidy_graph with comment frames", () => {
     const { revision } = await project.host.getDocument();
     const preview = await client.call("tidy_graph", { frames: ["places"], dryRun: true });
     // PLACES gets wider and shorter: an area that shrank isn't a frame that shrank.
-    expect(preview.text).toContain('places ("PLACES") got wider and shorter: 562×188 (was 330×520)');
+    expect(preview.text).toContain('places ("PLACES") got wider and shorter: 563×188 (was 330×520)');
     expect(preview.text).toContain("Dry run");
     expect((await project.host.getDocument()).revision).toBe(revision);
     const before = await geometry();

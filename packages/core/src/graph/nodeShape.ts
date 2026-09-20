@@ -10,7 +10,7 @@ import { VARIABLE_RECEIVER_TYPE } from "../graph.ts";
 import type { Diagnostic, Id, Registry, SonobeDocument, Value } from "../types.ts";
 import { decodeInput, defaultValue, isColor, isDecodedLoop, typeLabel } from "../values.ts";
 import { deriveGraph } from "./deriveGraph.ts";
-import { formatNumberShort, formatValue, isLoopValue, shortHex } from "./format.ts";
+import { formatNumberShort, formatValue, formatValueReserve, isLoopValue, shortHex, type FormatOptions } from "./format.ts";
 import type { GraphNodeData, InterfaceNodeData, LayerNodeData, PatchNodeData, PortModel } from "./types.ts";
 
 /** An input's inline value, as the patch editor draws it. */
@@ -23,15 +23,20 @@ export type ValueChip =
   | { kind: "color"; hex: string }
   | { kind: "text"; text: string }
   | { kind: "static"; text: string }
-  /** An input linked to a knob: the knob's name, and its value when known (a color knob's as a "#RRGGBBAA" swatch). */
-  | { kind: "knob"; name: string; text?: string; swatch?: string };
+  /**
+   * An input linked to a knob: the knob's name, and its value when known (a color knob's as a
+   * "#RRGGBBAA" swatch), in a slot `reserve` characters wide at least (knobValueReserve, less where
+   * the name needs the room), so tuning it keeps the width.
+   */
+  | { kind: "knob"; name: string; text?: string; swatch?: string; reserve?: number };
 
 /** Header items after the title: text chips (variant, Muted, layer type), the loop count, badges, presence, the enter icon. */
 export type HeaderChip = { kind: "chip"; text: string } | { kind: "loop"; text: string } | { kind: "badge" } | { kind: "working"; text: string } | { kind: "enter" };
 
 export interface NodeRowShape {
   in?: { label: string; value?: ValueChip; drive?: boolean };
-  out?: { label: string; live?: string };
+  /** An output: its live value, in a slot `reserve` characters wide (liveReserve), which a longer value ends early in. */
+  out?: { label: string; live?: string; reserve?: number };
 }
 
 export interface NodeShape {
@@ -116,13 +121,29 @@ export function valueChip(port: PortModel, layerName?: (id: Id) => string | unde
 /** A knob chip: the name, then a color knob's swatch or another knob's value text. */
 function knobValueChip(knob: NonNullable<PortModel["knob"]>): ValueChip {
   if (knob.color) return { kind: "knob", name: knob.name, swatch: knob.color };
-  return { kind: "knob", name: knob.name, ...(knob.valueText ? { text: knob.valueText } : {}) };
+  if (!knob.valueText) return { kind: "knob", name: knob.name };
+  return { kind: "knob", name: knob.name, text: knob.valueText, ...(knob.valueReserve ? { reserve: knob.valueReserve } : {}) };
 }
 
-/** What an output row prints as its live value (empty for pulses and missing values). */
-export function liveText(port: PortModel, value: unknown): string {
+type LivePort = Pick<PortModel, "type" | "enumOptions" | "subtype">;
+
+const liveFormat = (port: LivePort, copy: number | null): FormatOptions => ({ maxText: 10, copy, ...(port.enumOptions ? { enumOptions: port.enumOptions } : {}) });
+
+/** What an output row prints as its live value, for the watched loop copy when there is one (empty for pulses and missing values). */
+export function liveText(port: LivePort, value: unknown, copy: number | null = null): string {
   if (value === undefined || port.type === "pulse") return "";
-  return formatValue(value, port.type, { maxText: 10, ...(port.enumOptions ? { enumOptions: port.enumOptions } : {}) });
+  return formatValue(value, port.type, liveFormat(port, copy));
+}
+
+/**
+ * The characters an output row keeps for its live value, whatever the value is on this frame
+ * (formatValueReserve: 8 for a number, 6 for a progress, 9 for a color, …), so the node doesn't grow
+ * and shrink while the prototype runs. The patch editor sets it as the slot's width in `ch`, where
+ * a longer value ends in "…"; 0 when no value shows.
+ */
+export function liveReserve(port: LivePort, value: unknown, copy: number | null = null): number {
+  if (value === undefined || port.type === "pulse") return 0;
+  return formatValueReserve(value, port.type, { ...liveFormat(port, copy), ...(port.subtype ? { subtype: port.subtype } : {}) });
 }
 
 function headerChips(data: PatchNodeData | LayerNodeData | InterfaceNodeData, live: NodeShapeOptions["live"]): HeaderChip[] {
@@ -160,8 +181,10 @@ export function nodeShapeFromData(data: PatchNodeData | LayerNodeData | Interfac
       row.in = { label: input.name, ...(value ? { value } : {}), ...(data.kind === "layer" && !input.connected ? { drive: true } : {}) };
     }
     if (output) {
-      const text = options.live ? liveText(output, options.live(output.address)) : "";
-      row.out = { label: output.name, ...(text ? { live: text } : {}) };
+      const value = options.live?.(output.address);
+      const text = liveText(output, value);
+      const reserve = text ? liveReserve(output, value) : 0;
+      row.out = { label: output.name, ...(text ? { live: text } : {}), ...(reserve ? { reserve } : {}) };
     }
     rows.push(row);
   }
