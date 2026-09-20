@@ -11,7 +11,8 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { findLayer, getDiagnostics, type Op } from "@sonobe/core";
 import type { SceneFrame, SceneNode } from "@sonobe/engine";
-import { createHttpHandler, createSimulationManager, HostError, isHostError, TOOL_NAMES, type NodeMcpHandler } from "@sonobe/mcp";
+import { InMemoryTransport } from "@modelcontextprotocol/server";
+import { createHttpHandler, createSimulationManager, createSonobeMcpServer, HostError, isHostError, TOOL_NAMES, type DesignPreviewUpdate, type NodeMcpHandler } from "@sonobe/mcp";
 import { createPatchRegistry } from "@sonobe/patches";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -148,7 +149,7 @@ describe("app host documents", () => {
     const w = editorWindow(1);
     const host = appHost([w]);
     expect(host.kind).toBe("app");
-    expect(host.capabilities).toEqual({ screenshots: true, selection: true, presence: true, autosave: false, sfSymbols: false });
+    expect(host.capabilities).toEqual({ screenshots: true, selection: true, presence: true, autosave: false, sfSymbols: false, designPreview: true });
     expect(await host.listDocuments()).toEqual([{ docId: "photo_zoom", name: "Photo Zoom", revision: 0, dirty: false, active: true }]);
     const snap = await host.getDocument();
     expect(snap).toMatchObject({ docId: "photo_zoom", revision: 0, dirty: false, doc: { project: { name: "Photo Zoom" } } });
@@ -563,6 +564,40 @@ describe("app host presence, selection and screenshots", () => {
     expect(w.session.presence.getState().working).toHaveLength(1);
     await host.setWorking(null, { author: CLAUDE, client: sonobe });
     expect(await host.presence()).toEqual([]);
+  });
+
+  it("draws a design preview in the window that shows its document, and lets a missing window go", async () => {
+    const a = editorWindow(1);
+    const b = editorWindow(2);
+    const host = appHost([a, b]);
+    const [, second] = await host.listDocuments();
+    const seen: { window: number; params: unknown }[] = [];
+    for (const [w, id] of [[a, 1], [b, 2]] as const) w.server.handle("design.preview", (params) => void seen.push({ window: id, params }));
+    const noddit = { id: "11111111-aaaa-4bbb-8ccc-000000000001", label: "Claude Code", folder: "/Users/me/noddit" };
+    const update: DesignPreviewUpdate = { docId: second!.docId, key: noddit.id, author: CLAUDE, client: noddit, name: "Checkout", component: null, replace: null, width: null, height: null, position: null, html: "<body>Checkout", status: "writing", revision: 1 };
+    await host.showDesignPreview!(update);
+    expect(seen).toEqual([{ window: 2, params: update }]);
+    // preview_design reaches it the same way, as the session's draft.
+    const server = createSonobeMcpServer(host, { version: "0.1.0-test" });
+    const [clientSide, serverSide] = InMemoryTransport.createLinkedPair();
+    await server.connect(serverSide);
+    const client = new Client({ name: "claude-code", version: "2.1.278" });
+    await client.connect(clientSide as never);
+    cleanups.push(() => client.close());
+    const shown = await client.callTool({ name: "preview_design", arguments: { name: "Inbox", html: "<body>Inbox</body>" } });
+    expect(JSON.stringify(shown.content)).toContain("Showing “Inbox” on the canvas");
+    expect(seen.at(-1)).toMatchObject({ window: 1, params: { docId: "photo_zoom", key: "Claude", name: "Inbox", html: "<body>Inbox</body>", status: "writing", revision: 1 } });
+
+    // A window that's gone has nothing to draw on, and that's not an error.
+    await expect(host.showDesignPreview!({ ...update, docId: "gone" })).resolves.toBeUndefined();
+    await expect(appHost([]).showDesignPreview!(update)).resolves.toBeUndefined();
+    expect(seen).toHaveLength(2);
+    // An editor without design.preview says so; there's nothing of its to clear.
+    const old = editorWindow(3);
+    old.target.hasMethod = (method) => method !== "design.preview" && old.server.methods().includes(method);
+    const oldHost = appHost([old]);
+    expect(await rejection(oldHost.showDesignPreview!({ ...update, docId: "photo_zoom" }))).toMatchObject({ code: "design_preview_unavailable", hint: expect.stringContaining('"preview": true') });
+    await expect(oldHost.showDesignPreview!({ ...update, docId: "photo_zoom", status: "cleared", html: null })).resolves.toBeUndefined();
   });
 
   it("restarts the live prototype (restart_viewer) and says what the players show", async () => {

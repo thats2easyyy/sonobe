@@ -76,7 +76,7 @@ Tools register in `packages/mcp/src/tools/` with `tc.tool(name, config, async (a
 The Assistant's main-process side (`apps/desktop/electron/assistant`) and the editor (`apps/editor/src/panels/assistant`, `panels/design`) talk over IPC:
 
 1. A new request field or event goes in four places: `protocol.ts`, the editor's mirror in `panels/assistant/types.ts`, the preload (`assistant/preload.ts`) and main's sanitizer (`register.ts`, or `sanitizeCanvasContext` in `assistant/design.ts` for the canvas's context). The last two drop fields they don't know.
-2. The Assistant's own tools (the code folder's `list_code_files`, `search_code` and `read_code_file`) aren't MCP tools: keep them out of `TOOL_NAMES`, the tool tables and the counts.
+2. The Assistant's own tools (the code folder's `list_code_files`, `search_code` and `read_code_file`) aren't MCP tools: keep them out of `TOOL_NAMES`, the tool tables and the counts. An MCP tool the Assistant shouldn't have goes in `ASSISTANT_HIDDEN_TOOLS` (`toolBridge.ts`), as `preview_design` does, since the canvas already draws the Assistant's `import_design` html as it streams.
 3. A new document tool takes `docId`, or goes in `UNPINNED_TOOLS` (`agent.ts`); `toolBridge.test.ts` fails until it does.
 4. Test with fakes: `scriptedClient` and `fakeBridge` (`assistant/testing.ts`), `fakeAssistantHost` in the editor, and `e2e/fakeAssistant.ts` for Playwright. No test uses an API key.
 

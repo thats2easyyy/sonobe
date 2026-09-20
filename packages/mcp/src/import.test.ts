@@ -293,7 +293,7 @@ describe("import_design dry runs and _meta", () => {
   it("lists its sources last, so the small fields stream first", async () => {
     const { tools } = await client.client.listTools();
     const properties = Object.keys(tools.find((t) => t.name === "import_design")!.inputSchema.properties ?? {});
-    expect(properties).toEqual(["docId", "component", "name", "replace", "parent", "position", "index", "width", "height", "selector", "waitFor", "waitMs", "fullPage", "colorScheme", "scrolling", "screenshot", "dryRun", "label", "expectedRevision", "url", "capture", "html"]);
+    expect(properties).toEqual(["docId", "component", "name", "replace", "parent", "position", "index", "width", "height", "selector", "waitFor", "waitMs", "fullPage", "colorScheme", "scrolling", "screenshot", "dryRun", "label", "expectedRevision", "preview", "url", "capture", "html"]);
   });
 });
 
