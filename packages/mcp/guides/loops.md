@@ -16,7 +16,7 @@ Related: `layout`, `components`, `simulation`
 ## Copies: how many, which is on top, what happens at zero
 
 - **How many.** A layer makes one copy per item of the longest loop on its own properties (Auto). Its `repeat` decides instead when set: a whole number, or a link to a loop for one copy per item (`{ "link": "names.loop" }`). Other looped properties then wrap per copy, and an empty one reads its default. Copies sit on top of each other unless each gets a position, usually from `gridLayout`.
-- **Children follow.** Each layer inside a copy gets one copy, reading item `copy % length` of its own loops. The children of a layer that makes one copy repeat *inside* it: a card with a looped title holds four stacked titles, and a drag on the card moves them all. Set the card's `repeat` (`loops_inside_single_copy` suggests the op).
+- **Children follow.** Each layer inside a copy gets one copy, reading item `copy % length` of its own loops. The children of a layer that makes one copy repeat _inside_ it: a card with a looped title holds four stacked titles, and a drag on the card moves them all. Set the card's `repeat` (`loops_inside_single_copy` suggests the op).
 - A Repeat inside a layer that already makes copies is ignored (`repeat_inside_repeat`); loops of loops need a layer component. Link Repeat to the data the copies show, never to a gesture on the copies (`repeat_from_own_gesture`).
 - **Which is on top.** Copies draw in index order, so the last copy is in front (as in Origami). For copy 0 in front, such as the top card of a deck, feed index × −1 into `zPosition` (`multiply` with `value2: -1`). Keep other layers of the same group, such as a backdrop, earlier in the layer list. The front copy is also the one that gets touches, and `sim_dispatch` names it (`hit card#0`).
 - **At zero.** `repeat: 0` makes none, quietly. An empty loop makes 0 copies, on Repeat or on an Auto layer's properties; when it erased real items, sim results carry `empty_loop` (below).
@@ -138,11 +138,21 @@ A card moved by its own drag gets its copies from Repeat, so the drag runs once 
         "type": "group",
         "name": "Card",
         "props": { "size": [370, 120], "color": "#FFFFFFFF", "cornerRadius": 16 },
-        "children": [{ "ref": "who", "type": "text", "name": "Card Name", "props": { "position": [16, 16] } }]
+        "children": [
+          { "ref": "who", "type": "text", "name": "Card Name", "props": { "position": [16, 16] } }
+        ]
       }
     },
     { "op": "connect", "from": "names.loop", "to": "@$who.text" },
-    { "op": "addPatch", "patch": { "ref": "drag", "type": "drag", "name": "Drag Card", "inputs": { "layer": { "layer": "$card" }, "startPosition": [16, 520] } } },
+    {
+      "op": "addPatch",
+      "patch": {
+        "ref": "drag",
+        "type": "drag",
+        "name": "Drag Card",
+        "inputs": { "layer": { "layer": "$card" }, "startPosition": [16, 520] }
+      }
+    },
     { "op": "connect", "from": "$drag.position", "to": "@$card.position" },
     { "op": "setInput", "target": "@$card.repeat", "value": { "link": "names.loop" } }
   ]
