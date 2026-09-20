@@ -16,12 +16,19 @@ export function useWatchedCopy(session: EditorSession): number | null {
   return useStore(patchEditorBridge(session), (s) => s.watchedCopy);
 }
 
-/** How many copies of the looped component instance you're inside ran last frame; undefined at the root (and for a patch instance without ports). */
+/**
+ * How many copies of the looped component instance you're inside ran last frame; undefined at the
+ * root, when the instance isn't looped (the engine counts it as 1 copy), and for a patch instance
+ * without ports.
+ */
 export function useInstanceCopies(session: EditorSession, scope: LiveScope): number | undefined {
   const doc = useStore(session.document, (s) => s.doc);
   const address = instanceCopiesAddress(scope, doc);
   const subscribe = useCallback((cb: () => void) => (address ? session.runtime.subscribeFrame(() => cb()) : none()), [session, address]);
-  const read = useCallback(() => (address ? session.runtime.runtime.inspect(address).copies : undefined), [session, address]);
+  const read = useCallback(() => {
+    const copies = address ? session.runtime.runtime.inspect(address).copies : undefined;
+    return copies !== undefined && copies > 1 ? copies : undefined;
+  }, [session, address]);
   return useSyncExternalStore(subscribe, read, read);
 }
 

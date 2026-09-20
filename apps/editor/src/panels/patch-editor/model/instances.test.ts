@@ -118,6 +118,8 @@ describe("watched copies of looped instances", () => {
     expect(watchedPrefix(badge, 12, 14)).toBe("badge_1#2");
     // Not looped, not watching, at the root, or not running: the scope's own path.
     expect(watchedPrefix(badge, undefined, 3)).toBe("badge_1");
+    // The engine counts an instance that isn't looped as 1 copy.
+    expect(watchedPrefix(badge, 1, 3)).toBe("badge_1");
     expect(watchedPrefix(badge, 12, null)).toBe("badge_1");
     expect(watchedPrefix(resolveLiveScope(withComponents, ["main"]), 12, 3)).toBe("");
     expect(watchedPrefix(resolveLiveScope(withComponents, ["main", "unused"]), 12, 3)).toBeNull();
