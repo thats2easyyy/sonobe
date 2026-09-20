@@ -6,7 +6,7 @@ export { ScriptTrustBanner } from "./ScriptTrustBanner.tsx";
 export { createAppBrowserHost, createAppSession, getAppSession, type AppSessionOptions } from "./session.ts";
 export { appCommands, runInPatchEditor, runWhenRegistered, useAppCommands, zoomTarget, type AppCommandOptions } from "./useAppCommands.tsx";
 export { alignSelection, closePrototype, insertLayer, renameSelection, reportIssue, toggleViewerFullscreen, useAsMask, type Notify } from "./appActions.ts";
-export { alignOps, alignPatchRects, estimatePatchSize, flowZoom, patchRects, type AlignEdge, type PatchRect } from "./alignPatches.ts";
+export { alignOps, alignPatchRects, flowZoom, patchRects, type AlignEdge, type PatchRect } from "./alignPatches.ts";
 export { clipParentPlan, INSERTED_LAYER_REF, insertableLayerTypes, insertLayerOps, insertParentFor, layerPickItems, prototypeSize, type ClipPlan } from "./layerActions.ts";
 export { AppDialogs } from "./AppDialogs.tsx";
 export { ServiceDialogs } from "./ServiceDialogs.tsx";

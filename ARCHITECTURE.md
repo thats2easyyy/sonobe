@@ -28,7 +28,8 @@ Research that backs these decisions lives in `docs/research/`. Origami's docs ar
 sonobe/
 ├── packages/
 │   ├── core/       @sonobe/core     document model, zod schema, ids, values & coercion, ops, history,
-│   │                                diagnostics, canonical serialization, migrations, outline projection
+│   │                                diagnostics, canonical serialization, migrations, outline projection;
+│   │                                @sonobe/core/graph: the patch graph as drawn (node shapes and sizes, tidy)
 │   ├── engine/     @sonobe/engine   runtime: graph compile + frame evaluation, loops, pulses, per-index state,
 │   │                                physics (springs, decay), layout, hit testing, gesture recognition
 │   ├── patches/    @sonobe/patches  built-in patch library: definitions + evaluators + docs + examples
@@ -130,6 +131,7 @@ A `.sonobez` zip of the same layout is used for sharing (later).
 ```
 
 - **Connections live on the input they drive**: `{ "link": "patchId.port" }`. An input can have at most one driver, so the format cannot represent two drivers into one input.
+- Patches keep their graph position in `ui`, and comments in `rect`. Layer target nodes (`@layerId`, for layers a cable drives or reads) and the component's interface nodes (`$in`, `$out`) have no item to hold a position, so theirs live in `meta.patchEditor.nodes` (`{ "@photo": [980, 20] }`), written only by `setNodePositions`. A node without a saved position is placed next to the patches it connects to. Removing a layer drops its entry.
 - A layer property is either a literal or a link. A layer-reference port holds `{ "layer": "layerId" }`.
 - Patch options:
   - `typeParam` for type-variant patches (Transition on number, point, or color)
@@ -168,7 +170,10 @@ A `.sonobez` zip of the same layout is used for sharing (later).
 - `replacePatch` changes a patch's type in place (the editor's Replace With): it keeps the id, position, custom name and bypass, and every value and cable whose port the new type has under the same key (or the one `inputMap` / `outputMap` names) with a type that fits. The rest are dropped, listed in the op result's `dropped`, and restored by the inverse.
 - An op's side effects are spelled out in `applied` (the values `replacePatch`, a `typeParam` change or a retyped published port drop), so lenient undo and redo replays land on the same documents.
 
-Op kinds (see `Op` in `packages/core/src/types.ts`): `addLayer, updateLayer, moveLayer, removeLayer, addPatch, updatePatch, replacePatch, removePatch, setInput, connect, disconnect, rename, addComment, updateComment, removeComment, addComponent, removeComponent, createComponent, updateInterface, updateComponent, setScript, addAsset, removeAsset, setProject`. There is no separate layer-prop op: `setInput` and `connect` accept `@layer.prop` addresses.
+Op kinds (see `Op` in `packages/core/src/types.ts`): `addLayer, updateLayer, moveLayer, removeLayer, addPatch, updatePatch, replacePatch, removePatch, setInput, connect, disconnect, rename, addComment, updateComment, removeComment, addComponent, removeComponent, createComponent, updateInterface, updateComponent, setNodePositions, setScript, addAsset, removeAsset, setProject`. There is no separate layer-prop op: `setInput` and `connect` accept `@layer.prop` addresses.
+
+- `setNodePositions { positions: { "@layerId" | "$in" | "$out": [x, y] | null } }` merges graph node positions entry by entry (rounded to whole points; `null` returns a node to automatic placement), and its inverse touches only the named keys. `updateComponent` refuses a `meta.patchEditor` object that would drop or move saved positions (`meta_conflict`); `patchEditor: null` still clears it.
+- An `addPatch` without `ui` goes one column right of the rightmost patch: its drawn width plus 72 pt.
 
 Errors are `{ code, message, hint, address, opIndex, suggestions: [{ description, ops }] }` and are written for humans first. Links may also read layer outputs or props: `{ "link": "@layerId.key" }`.
 
@@ -453,6 +458,9 @@ Layer types are declared in `@sonobe/core` (`layerTypes.ts`) with typed props (k
     - **Patch picker**: double-click the canvas or ⌥⏎, type-to-search over names, aliases, and ports, docs pane, return inserts
     - single-key inserts on hover (I interaction, S switch, A pop, C classic, T transition, D delay, …)
   - Organization: **Tidy Up** (⌃T, elkjs), comments (frames), components (⌃⌘G), enter/exit component (double-click / ⌥↑).
+    - Comment frames are sections. A node belongs to the innermost frame under its title bar. Tidy Up lays out each frame's nodes from the frame's top-left, refits the frame, lays out the unframed nodes where they were, and pushes frames that would overlap apart in reading order (one that started to the right of the other moves right, otherwise down). Frames otherwise stay where they are.
+    - Scope follows the selection: selected comments tidy inside those frames, two or more selected nodes tidy within their own frames, nothing selected tidies everything. A comment's menu has **Tidy Up Frame**; **Tidy Up and Arrange Frames** also lays the frames out as blocks. MCP `tidy_graph` runs the same `planTidy` (`@sonobe/core/graph`).
+    - Node sizes come from one shape model in `@sonobe/core/graph` (`nodeShape.ts`, `nodeSize.ts`), which follows `patch-editor.css`. The editor measures text with a canvas in its own fonts. Headless callers use a generated SF Pro and SF Mono table (`nodeMetrics.ts`, `apps/editor/scripts/measure-node-fonts.ts`) plus the live values of a deterministic runtime. Layer and interface nodes are placed automatically from measured sizes.
 - **Layer ↔ patch bridges:**
   - the **Touch** button on a layer row inserts pre-wired interactions
   - clicking an inspector property creates a property link target
@@ -542,6 +550,8 @@ The web player (`apps/desktop/player`) runs the real engine and DOM renderer ful
 
 - **Saving never asks.** `save_document` never opens a dialog. With `path` it saves into a new or empty folder (Save As) and keeps working there. Without one, a document that was never saved goes to `~/Documents/<Name>.sonobe`, or fails with `path_needed` while it's "Untitled". `create_document` and `save_document({ path })` follow one set of folder rules on both hosts (`projectTarget.ts`): `.sonobe` is added, and the folder must be new or empty and not inside another project. The app also keeps agent paths in home, a mounted drive or the temp folder, outside hidden folders and its own data folder. The person's Save panel refuses folders inside a project or with other files too, and reopens next to the project.
 - **Recovered drafts** (§3.5): `list_documents` lists them as `draft:<id>`, `open_document` takes that ref, and `get_document_info` says when unsaved work is kept as a draft.
+- **Graph layout.** `tidy_graph` runs the editor's frame-aware Tidy Up (§9) with ELK: `frames` tidies inside those comments, `ids` tidies some nodes within their frames, and `frameMode: "arrange"` moves frames as blocks. Its result says which frames grew or were pushed and which nodes overlapped before. `add_patches` sizes its columns by how wide each patch draws and places them in free space clear of frames. Node sizes are estimated as the editor draws them (`packages/mcp/src/geometry.ts`: the shared shape model plus a deterministic runtime's live values after a second).
+- **Graph node positions.** `get_outline` detail `full` shows `node=x,y` (or `node=auto`) on layers that have a graph node and a `nodes $in=… $out=…` line; `get_items` shows a layer's graph node. Agents move these nodes with `setNodePositions`.
 - **Simulation overrides** (`sim_override`) are ordinary value ops (setInput, connect, disconnect, layer props, mute) that a session applies to its own copy of the document with `applyOps`, re-derived on every new revision. They never enter history, the live viewer or disk. `get_screenshot` with `isolate: true` draws one layer's subtree from the SceneFrame, on both hosts.
 - **Runtime problems reach agents two ways.** sim_* results list the issues a simulation raised since the last call (with hints and suggestions), and in the app `get_diagnostics` adds a Live viewer section: what the person's running prototype reports right now, read through the `viewer.diagnostics` RPC because it changes without a new revision, including the restart offer as `stale_state` (§9). The headless host has no live viewer and leaves the section out.
 - **Restarting the live prototype.** `restart_viewer` calls the optional `SonobeHost.restartViewer`: in the app, the `viewer.restart` RPC restarts the editor's runtime as ⌘R does, and phones and the pop-out viewer follow (§9.2). The headless host has no live viewer, so the tool returns `no_live_viewer` and points to `sim_reset`.

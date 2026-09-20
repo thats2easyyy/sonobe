@@ -40,10 +40,24 @@ describe("getOutline", () => {
     ]).doc;
     const full = getOutline(doc, "main", { detail: "full" });
     expect(full).toContain('notes "Tap the card to expand it."');
-    expect(full).toContain('patch pop popAnimation "Press" muted bounciness=8 number←toggle.on speed=10 ui=440,40 collapsed settings={"preset":"snappy"}');
-    expect(full).toContain("patch grow transition<number> end=1.08 progress←pop.output start=1 ui=640,40");
+    expect(full).toContain('patch pop popAnimation "Press" muted bounciness=8 number←toggle.on speed=10 ui=512,40 collapsed settings={"preset":"snappy"}');
+    expect(full).toContain("patch grow transition<number> end=1.08 progress←pop.output start=1 ui=748,40");
     expect(full).toContain('  layer title text "Title" "Popular Events" locked');
     expect(full).toContain('comment note_1 "Spring feel matches iOS sheet" rect=30,20,600,120 color=yellow');
+  });
+
+  it("shows where layer and interface nodes sit in the graph in full detail only", () => {
+    const doc = mustApply(buildSampleDocument(), [
+      { op: "updateInterface", component: "main", inputs: { size: { key: "size", name: "Size", type: "number" } } },
+      { op: "setNodePositions", positions: { $in: [-260, 40] } },
+    ]).doc;
+    const full = getOutline(doc, "main", { detail: "full" });
+    expect(full).toContain("nodes $in=-260,40\n");
+    expect(full).toMatch(/layer card group "Card" .* node=auto\n/);
+    expect(full).not.toMatch(/layer title .*node=/);
+    const placed = getOutline(mustApply(doc, [{ op: "setNodePositions", positions: { "@card": [900, 20] } }]).doc, "main", { detail: "full" });
+    expect(placed).toMatch(/layer card group "Card" .* node=900,20\n/);
+    expect(getOutline(doc, "main")).not.toContain("node");
   });
 
   it("lists every component with its interface, root first", () => {

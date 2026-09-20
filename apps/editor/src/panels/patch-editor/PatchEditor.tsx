@@ -5,7 +5,7 @@
  * component instances too).
  */
 
-import { canConnect, findLayer, getPatchSpec, isLinkInput, parseAddress, type Id } from "@sonobe/core";
+import { canConnect, findLayer, getPatchSpec, isLinkInput, parseAddress, readNodePositions, type Id } from "@sonobe/core";
 import { isLoop } from "@sonobe/engine";
 import {
   applyNodeChanges,
@@ -57,14 +57,14 @@ import { CommentNodeView, InterfaceNodeView, LayerNodeView, PatchNodeView } from
 import { PortHoverCard } from "./components/PortHoverCard.tsx";
 import { orientConnection, portAtHandle, quickConnectCheck, type HandleRef } from "./model/connect.ts";
 import { patchTitle, spliceOptions, type SpliceOption } from "./model/editOps.ts";
-import { boundsOf, boundsVisible, estimateNodeSize, FIT_VIEW_PADDING, HEADER_HEIGHT, isFarZoom, pointInRect, readableViewport, rectContains, ROW_HEIGHT, sampleCable, type Point, type Rect } from "./model/geometry.ts";
-import { deriveGraph } from "./model/graph.ts";
+import { boundsOf, boundsVisible, estimateNodeSize, FIT_VIEW_PADDING, HEADER_HEIGHT, isFarZoom, pointInRect, portCenterY, readableViewport, rectContains, sampleCable, type Point, type Rect } from "./model/geometry.ts";
+import { deriveGraph, estimatePatchSize } from "@sonobe/core/graph";
 import { missingHandlesKey, parseMissingHandlesKey } from "./model/handles.ts";
 import { resolveLiveScope, scopedAddress, watchedPrefix, type LiveScope } from "./model/instances.ts";
 import { cablesCutByKnife, simplifyStroke, type CableGeometry } from "./model/knife.ts";
 import type { LinkCandidate } from "./model/linkSearch.ts";
 import type { PickerItem } from "./model/picker.ts";
-import { estimatePatchSize } from "./model/placement.ts";
+import { nodeTextMeasurer } from "./model/measure.ts";
 import { isSpliceDrag } from "./model/splice.ts";
 import { reconcileNodes } from "./model/reconcile.ts";
 import { singleKeyInserts } from "./model/singleKey.ts";
@@ -264,12 +264,20 @@ function Canvas({ session, componentId, showBreadcrumbs, showToolbar, toolbarCon
     return runtimeDiagnostics.length ? [...base, ...runtimeDiagnostics] : base;
   }, [doc, registry, runtimeDiagnostics]);
 
+  // The largest size each node has been drawn at, so layer and interface nodes placed automatically
+  // clear what's really on screen (live values widen nodes); estimates fill in until a node renders.
+  const measuredRef = useRef(new Map<string, { width: number; height: number }>());
+  const [measuredVersion, setMeasuredVersion] = useState(0);
+  const autoPlacedRef = useRef(false);
   const modelRef = useRef<GraphModel | null>(null);
   const model = useMemo(
-    () => deriveGraph({ doc, componentId, registry, diagnostics, working: workingMap, pendingTargets, previous: modelRef.current }),
-    [doc, componentId, registry, diagnostics, workingMap, pendingTargets],
+    () => deriveGraph({ doc, componentId, registry, diagnostics, working: workingMap, pendingTargets, previous: modelRef.current, sizes: measuredRef.current, measure: nodeTextMeasurer() }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [doc, componentId, registry, diagnostics, workingMap, pendingTargets, measuredVersion],
   );
   modelRef.current = model;
+  const savedNodePositions = readNodePositions(doc.components[componentId]);
+  autoPlacedRef.current = model.nodes.some((n) => (n.type === "layer" || n.type === "interface") && !savedNodePositions[n.id]);
   graphSizeRef.current = model.nodes.length;
   const edgeById = useMemo(() => new Map(model.edges.map((e) => [e.id, e])), [model.edges]);
 
@@ -437,10 +445,24 @@ function Canvas({ session, componentId, showBreadcrumbs, showToolbar, toolbarCon
     [session],
   );
 
+  const remeasureFrame = useRef(0);
+  useEffect(() => () => cancelAnimationFrame(remeasureFrame.current), []);
   const onNodesChange = useCallback(
     (changes: NodeChange<FlowNode>[]) => {
       const next = applyNodeChanges(changes, nodesRef.current);
       commit(next);
+      let grew = false;
+      for (const c of changes) {
+        if (c.type !== "dimensions" || !c.dimensions || flowNodeKind(c.id) === "comment") continue;
+        const known = measuredRef.current.get(c.id);
+        if (known && c.dimensions.width <= known.width + 0.5 && c.dimensions.height <= known.height + 0.5) continue;
+        measuredRef.current.set(c.id, { width: Math.max(c.dimensions.width, known?.width ?? 0), height: Math.max(c.dimensions.height, known?.height ?? 0) });
+        grew = true;
+      }
+      if (grew && autoPlacedRef.current) {
+        cancelAnimationFrame(remeasureFrame.current);
+        remeasureFrame.current = requestAnimationFrame(() => setMeasuredVersion((v) => v + 1));
+      }
       if (changes.some((c) => c.type === "select")) syncSelection(next);
       if (draggingRef.current.size === 0) {
         const nudged = new Map<string, XY>();
@@ -488,7 +510,7 @@ function Canvas({ session, componentId, showBreadcrumbs, showToolbar, toolbarCon
     const node = nodesRef.current.find((n) => n.id === nodeId);
     const data = node?.data as GraphNodeData | undefined;
     const index = data && data.kind !== "comment" ? Math.max(0, data.inputs.findIndex((p) => p.handleId === handleId)) : 0;
-    return { x: node?.position.x ?? 0, y: (node?.position.y ?? 0) + HEADER_HEIGHT + index * ROW_HEIGHT + ROW_HEIGHT / 2 };
+    return { x: node?.position.x ?? 0, y: (node?.position.y ?? 0) + portCenterY({ collapsed: data?.kind === "patch" && data.collapsed }, index) };
   }, []);
 
   const driveRequest = useStore(bridge, (s) => s.request);
@@ -812,15 +834,15 @@ function Canvas({ session, componentId, showBreadcrumbs, showToolbar, toolbarCon
       const declared = list.findIndex((p) => p.key === item.port.key);
       const variadicIndex = item.port.key.match(/(\d+)$/)?.[1];
       const row = Math.max(0, declared >= 0 ? declared : variadicIndex ? list.length + Number(variadicIndex) - 1 : 0);
-      const y = request.position.y - (HEADER_HEIGHT + row * ROW_HEIGHT + ROW_HEIGHT / 2);
+      const y = request.position.y - portCenterY({}, row);
       let x = request.position.x + 16;
       if (request.side === "in") {
-        const width = estimatePatchSize(session.document.getState().doc, registry, { type: item.spec.type, inputs: {}, ui: { x: 0, y: 0 }, ...(item.typeParam ? { typeParam: item.typeParam } : {}) }).width;
+        const width = estimatePatchSize(session.document.getState().doc, registry, { type: item.spec.type, inputs: {}, ui: { x: 0, y: 0 }, ...(item.typeParam ? { typeParam: item.typeParam } : {}) }, { component: componentId, measure: nodeTextMeasurer() }).width;
         x = request.position.x - width - (request.drive ? 72 : 16);
       }
       actions.insertPatch(item.spec.type, { x, y }, { ...(item.typeParam ? { typeParam: item.typeParam } : {}), connect: { address: request.address, side: request.side, portKey: item.port.key }, placement: request.side === "out" ? "right" : "left" });
     },
-    [actions, registry, session],
+    [actions, registry, session, componentId],
   );
 
   const onPickerPick = useCallback(
@@ -1262,6 +1284,7 @@ function registerPatchEditorCommands(cmds: CommandsContextValue, entry: CommandE
   const commands: Command[] = [
     { id: "patchEditor.insertPatch", title: "Insert Patch…", category, scope, shortcut: "Alt+Enter", keywords: ["add", "node", "library"], run: run((t) => t.actions.openPicker()) },
     { id: "patchEditor.tidyUp", title: "Tidy Up Patches", category, scope, shortcut: "Ctrl+T", keywords: ["layout", "arrange", "clean"], run: run((t) => void t.actions.tidyUp()) },
+    { id: "patchEditor.arrangeFrames", title: "Tidy Up and Arrange Frames", category, scope, keywords: ["layout", "sections", "comments", "blocks"], description: "Tidy Up that also moves comment frames", run: run((t) => void t.actions.tidyUp({ arrange: true })) },
     { id: "patchEditor.commentSelection", title: "Comment Selected Patches", category, scope, shortcut: "Ctrl+Alt+C", keywords: ["note", "frame", "group"], run: run((t) => t.actions.commentSelection()) },
     { id: "patchEditor.delete", title: "Delete Patches or Cables", category, scope, shortcut: ["Backspace", "Delete"], when: hasItems, run: run((t) => t.actions.deleteSelection()) },
     { id: "patchEditor.selectAll", title: "Select All Patches", category, scope, shortcut: "Mod+A", run: run((t) => t.actions.selectAll()) },

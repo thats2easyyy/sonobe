@@ -13,6 +13,7 @@ import { resolveSource, resolveTarget } from "../validate.ts";
 import { isLayerInput, isLinkInput, roundNumber } from "../values.ts";
 import { newComponentId } from "./components.ts";
 import { defineRef, fail, getTargetComponent, newItemId, requireLayer, requirePatch, resolveId, type OpContext, type OpOf, type OpOutcome } from "./context.ts";
+import { dropLayerNodePositions, withNodeMap } from "./graphNodes.ts";
 import { listInputs, readInput, restoreLayerOps, restorePatchOps, targetAddress, writeInput, type InputTarget } from "./references.ts";
 import { insertLayerNode, removeLayerNode } from "./tree.ts";
 
@@ -208,6 +209,10 @@ export function createComponent(ctx: OpContext, op: OpOf<"createComponent">): Op
     for (const id of movedPatches) delete remaining[id];
     next = { ...next, patches: remaining };
   }
+  // Saved graph positions of the moved layers' nodes move along with them.
+  const moved = dropLayerNodePositions(next, movedLayers);
+  next = moved.component;
+  const createdWithNodes = moved.restore ? withNodeMap(created, moved.restore) : created;
   const instanceInputs: Record<string, InputValue> = Object.fromEntries([...published.values()].flat().map((e) => [e.port.key, e.value]));
   if (kind === "layerComponent") {
     const props: Record<string, InputValue> = { ...instanceInputs };
@@ -228,7 +233,7 @@ export function createComponent(ctx: OpContext, op: OpOf<"createComponent">): Op
     next = { ...next, patches: { ...next.patches, [instanceId]: instance } };
     ctx.affected.patches.add(instanceId);
   }
-  ctx.doc = { ...ctx.doc, components: { ...ctx.doc.components, [component.id]: next, [newId]: created } };
+  ctx.doc = { ...ctx.doc, components: { ...ctx.doc.components, [component.id]: next, [newId]: createdWithNodes } };
   ctx.affected.components.add(component.id);
   ctx.affected.components.add(newId);
   for (const id of movedLayers) ctx.affected.layers.add(id);
@@ -255,6 +260,6 @@ export function createComponent(ctx: OpContext, op: OpOf<"createComponent">): Op
   return {
     ids: [newId, instanceId],
     applied: { op: "createComponent", component: component.id, name: op.name, layerIds, patchIds },
-    inverse: [removeInstance, { op: "removeComponent", id: newId }, ...adds, ...afters, ...restoreOuter],
+    inverse: [removeInstance, { op: "removeComponent", id: newId }, ...adds, ...afters, ...restoreOuter, ...(moved.restore ? [{ op: "setNodePositions" as const, component: component.id, positions: moved.restore }] : [])],
   };
 }

@@ -2,6 +2,7 @@
 
 import { layerAddress, parseAddress, patchAddress } from "../address.ts";
 import { DEFAULT_LAYER_COMPONENT_SIZE, deviceScreenSize, findComponentInstances, FORMAT_VERSION } from "../document.ts";
+import { nodePositionsIn, PATCH_EDITOR_META_KEY, readNodePositions } from "../graph/graphNodes.ts";
 import { fileNameCollision, getOwn, isFileNameTaken, isValidId, slugify, uniqueId } from "../ids.ts";
 import { allLayers, COMPONENT_INSTANCE_LAYER_TYPE, COMPONENT_PATCH_TYPE, getPatchSpec, interfacePortToPort } from "../registry.ts";
 import { parseComponentFile } from "../schema.ts";
@@ -200,6 +201,32 @@ function isJsonData(value: unknown, depth = 0): boolean {
   return (proto === Object.prototype || proto === null) && Object.values(value).every((item) => isJsonData(item, depth + 1));
 }
 
+const sameNodePositions = (a: Readonly<Record<string, { x: number; y: number }>>, b: Readonly<Record<string, { x: number; y: number }>>) =>
+  Object.keys(a).length === Object.keys(b).length && Object.entries(a).every(([id, p]) => b[id]?.x === p.x && b[id]?.y === p.y);
+
+/**
+ * A whole patchEditor object replaces the key, so writing one without the saved node positions (or
+ * with others) would silently move or forget nodes someone placed. Those go through setNodePositions.
+ */
+function checkSavedNodePositions(component: Component, value: unknown): void {
+  const saved = readNodePositions(component);
+  if (!Object.keys(saved).length) return;
+  const next = nodePositionsIn(value !== null && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : undefined);
+  const ids = new Set([...Object.keys(saved), ...Object.keys(next)]);
+  const changed = [...ids].filter((id) => saved[id]?.x !== next[id]?.x || saved[id]?.y !== next[id]?.y).sort();
+  if (!changed.length) return;
+  const dropped = changed.filter((id) => saved[id] && !next[id]);
+  fail(
+    "meta_conflict",
+    dropped.length
+      ? `This would drop the saved graph positions of ${dropped.slice(0, 6).join(", ")}${dropped.length > 6 ? ` and ${dropped.length - 6} more` : ""}: meta.patchEditor is replaced whole, and saved node positions change only through setNodePositions.`
+      : `Saved graph node positions (meta.patchEditor.nodes) change only through setNodePositions, which checks the ids and keeps the positions you don't name.`,
+    {
+      hint: `Move or clear graph nodes with { "op": "setNodePositions", "component": "${component.id}", "positions": { "${changed[0]}": [x, y] } } (null places a node automatically). To set other patchEditor keys, send the current "nodes" unchanged.`,
+    },
+  );
+}
+
 export function updateComponent(ctx: OpContext, op: OpOf<"updateComponent">): OpOutcome {
   const component = requireComponentById(ctx, op.id);
   const next: Component = { ...component };
@@ -246,6 +273,7 @@ export function updateComponent(ctx: OpContext, op: OpOf<"updateComponent">): Op
       for (const [key, value] of Object.entries(op.meta)) {
         if (value === undefined) continue;
         if (!isJsonData(value)) fail("invalid_value", `meta.${key} must be plain JSON data: text, finite numbers, true/false, null, lists and objects.`);
+        if (key === PATCH_EDITOR_META_KEY && value !== null && !ctx.lenient) checkSavedNodePositions(component, value);
         restore[key] = before !== undefined && Object.hasOwn(before, key) ? before[key] : null;
         changes[key] = value;
         if (value === null) delete merged[key];
@@ -259,7 +287,9 @@ export function updateComponent(ctx: OpContext, op: OpOf<"updateComponent">): Op
   }
   ctx.doc = withComponent(ctx.doc, next);
   ctx.affected.components.add(component.id);
-  return { ids: [component.id], applied, inverse: [inverse] };
+  // Putting back saved node positions this op cleared or added: clear patchEditor first, so the restore never conflicts with them.
+  const nodesChanged = op.meta !== undefined && !sameNodePositions(readNodePositions(component), readNodePositions(next));
+  return { ids: [component.id], applied, inverse: nodesChanged ? [{ op: "updateComponent", id: component.id, meta: { [PATCH_EDITOR_META_KEY]: CLEAR } }, inverse] : [inverse] };
 }
 
 /** The fields a published port takes. */

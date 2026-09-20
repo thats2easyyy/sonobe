@@ -10,7 +10,7 @@ import { categoryColorVar } from "../../../theme/tokens.ts";
 import { Button } from "../../../ui/Button.tsx";
 import { Popover } from "../../../ui/Popover.tsx";
 import { PRESENCE_FLASH_MS } from "../../../state/presence.ts";
-import { loopLengthOf } from "../model/format.ts";
+import { loopLengthOf } from "@sonobe/core/graph";
 import type { CommentFlowNode, InterfaceFlowNode, LayerFlowNode, NodeIssue, PatchFlowNode } from "../model/types.ts";
 import { usePatchEditor, useLiveValue, useUi } from "../state/context.ts";
 import { CATEGORY_ICONS, LAYER_ICONS } from "./icons.ts";

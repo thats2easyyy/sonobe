@@ -8,6 +8,7 @@ import { layerTreeHeight, MAX_LAYER_DEPTH } from "../schema.ts";
 import { didYouMean, didYouMeanText } from "../suggest.ts";
 import type { Component, Id, InputValue, LayerNode, NewLayer } from "../types.ts";
 import { checkInputValue, resolveTarget } from "../validate.ts";
+import { dropLayerNodePositions } from "./graphNodes.ts";
 import {
   commitComponent,
   defineRef,
@@ -225,7 +226,9 @@ export function removeLayer(ctx: OpContext, op: OpOf<"removeLayer">): OpOutcome 
   const id = resolveId(ctx, op.id);
   const loc = requireLayer(component, id);
   const subtree = new Set(allLayerIds([loc.layer]));
-  const { component: next, removed } = removeInputs({ ...component, layers: removeLayerNode(component.layers, id) }, (e) => referencesItems(e.value, subtree));
+  const { component: unlinked, removed } = removeInputs({ ...component, layers: removeLayerNode(component.layers, id) }, (e) => referencesItems(e.value, subtree));
+  // Saved graph positions go too, so a new layer that gets the same id starts from automatic placement.
+  const { component: next, restore: positions } = dropLayerNodePositions(unlinked, subtree);
   commitComponent(ctx, next);
   for (const l of subtree) ctx.affected.layers.add(l);
   for (const e of removed) {
@@ -236,6 +239,6 @@ export function removeLayer(ctx: OpContext, op: OpOf<"removeLayer">): OpOutcome 
   return {
     ids: [...subtree],
     applied: { op: "removeLayer", component: component.id, id },
-    inverse: [...restore.add, ...restore.after, ...restoreInputOps(component.id, removed)],
+    inverse: [...restore.add, ...restore.after, ...restoreInputOps(component.id, removed), ...(positions ? [{ op: "setNodePositions" as const, component: component.id, positions }] : [])],
   };
 }

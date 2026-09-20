@@ -25,7 +25,7 @@ export { CanvasPanel, type CanvasPanelProps, type CanvasTool } from "./CanvasPan
 export { CanvasOverlay, EMPTY_DRAFT, type CanvasOverlayProps, type OverlayDraft, type OverlayDropTarget } from "./CanvasOverlay.tsx";
 export { CanvasRulers, type CanvasRulersProps } from "./CanvasRulers.tsx";
 export { InlineTextEditor, type InlineTextEditorProps } from "./InlineTextEditor.tsx";
-export { artboardSize, componentDocument, useCanvasScene, type CanvasSceneState, type SceneSource } from "./useCanvasScene.ts";
+export { useCanvasScene, type CanvasSceneState, type SceneSource } from "./useCanvasScene.ts";
 export { createEditTransaction, type EditTransaction, type EditTransactionOptions } from "./editTransaction.ts";
 export * from "./geometry.ts";
 export * from "./viewport.ts";
