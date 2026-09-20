@@ -11,9 +11,14 @@ import path from "node:path";
 import { applyOps, getDiagnostics, slugify, uniqueId, type Affected, type Author, type Diagnostic, type Id, type Op, type OpResult, type SonobeDocument, type SonobeError } from "@sonobe/core";
 import type { EngineRegistry, SceneFrame, SceneNode } from "@sonobe/engine";
 import {
+  cachedGraphEstimate,
+  canvasNotes,
   createSimulationManager,
   createTemplateDocument,
+  designScene,
   diagnosticTotals,
+  drawComponentGraph,
+  graphNotes,
   diffDiagnostics,
   HostError,
   isHostError,
@@ -88,6 +93,11 @@ export interface AppHostOptions {
    * SimulationManager has no `scene(simId)`), simulation screenshots explain that they're unavailable.
    */
   renderScene?(request: SceneRenderRequest): Promise<CapturedImage | null>;
+  /**
+   * Draw an SVG at `size` pixels (the hidden scene window), for get_screenshot of a patch graph the
+   * patch editor isn't showing. Without it, such screenshots explain how to open the graph instead.
+   */
+  renderSvg?(request: SvgRenderRequest): Promise<CapturedImage | null>;
   /** Render a URL or HTML page in a hidden browser window and capture it (import_design). */
   captureDesign?(request: DesignCaptureRequest, control?: HostCallControl): Promise<CapturedDesign>;
   /** Download an image for a capture made elsewhere (default: Node's fetch). */
@@ -111,6 +121,12 @@ export interface SceneRenderRequest {
   size: Size;
   /** Asset id → absolute path of its file in the project's assets folder (none for unsaved projects). */
   assets: Record<string, string>;
+}
+
+/** What renderSvg draws: a self-contained SVG document (a component's patch graph) and its size in pixels. */
+export interface SvgRenderRequest {
+  svg: string;
+  size: Size;
 }
 
 export interface DocumentChange {
@@ -576,6 +592,46 @@ export function createAppHost(options: AppHostOptions): AppHost {
     return shot;
   };
 
+  /**
+   * The component to draw from the document for a graph, canvas or layer screenshot, or null to
+   * capture the window: a named component the editor isn't showing in that panel (layers inside a
+   * component always come from its canvas at frame 0), or the shown component when its panel is hidden.
+   */
+  const offScreenComponent = async (entry: Entry, target: ScreenshotTarget, o: ScreenshotOptions): Promise<Id | null> => {
+    if (target.kind === "viewer") return null;
+    if (target.kind === "layer") return o.component ?? null;
+    const onScreen = entry.target.hasMethod(`${target.kind}.bounds`) === true;
+    if (onScreen && o.component === undefined) return null;
+    if (!onScreen && o.component === undefined && !(target.kind === "graph" ? options.renderSvg : options.renderScene)) return null;
+    const shown = await call<{ component?: unknown }>(entry.target, "selection.get").catch(() => null);
+    const current = typeof shown?.component === "string" ? shown.component : undefined;
+    if (o.component === undefined) return current ?? null;
+    return onScreen && current === o.component ? null : o.component;
+  };
+
+  /** get_screenshot of a component no editor panel shows: drawn from the document, as headless servers do. */
+  const documentScreenshot = async (target: ScreenshotTarget, entry: Entry, componentId: Id, o: ScreenshotOptions): Promise<Screenshot> => {
+    const doc = (await snapshot(entry)).doc;
+    const name = doc.components[componentId]?.name ?? componentId;
+    const size = { ...(o.scale !== undefined ? { scale: o.scale } : {}), ...(o.maxWidth !== undefined ? { maxWidth: o.maxWidth } : {}) };
+    if (target.kind === "graph") {
+      if (!options.renderSvg) {
+        throw new HostError("target_unavailable", `The patch editor isn't showing ${name}, and this build of Sonobe can't draw a graph off screen.`, { hint: "reveal with focus: true opens it for the person; then take the screenshot. To read the graph, use get_outline." });
+      }
+      const drawing = drawComponentGraph(doc, registry, componentId, cachedGraphEstimate(doc, registry, componentId), size);
+      const image = await options.renderSvg({ svg: drawing.svg, size: { width: drawing.width, height: drawing.height } });
+      if (!image) throw new HostError("capture_failed", `Sonobe couldn't draw ${name}'s graph.`, { hint: "Try again. To read the graph, use get_outline." });
+      return { data: image.data, mimeType: "image/png", width: image.width, height: image.height, notes: graphNotes(doc, componentId, drawing, true) };
+    }
+    if (!options.renderScene) {
+      throw new HostError("target_unavailable", `The canvas isn't showing ${name}, and this build of Sonobe can't draw it off screen.`, { hint: "reveal with focus: true opens it for the person; then take the screenshot." });
+    }
+    const shot = await drawScene(target.kind === "canvas" ? { kind: "viewer" } : target, designScene(doc, registry, componentId), entry, o, `on ${name}'s canvas`);
+    delete shot.timeMs;
+    shot.notes = [...canvasNotes(doc, componentId), ...(shot.notes ?? [])];
+    return shot;
+  };
+
   const conflictResult = (entry: Entry, expected: number, current: number, diagnostics: Diagnostic[], dryRun: boolean): HostApplyResult => ({
     ok: false,
     docId: entry.docId,
@@ -845,6 +901,8 @@ export function createAppHost(options: AppHostOptions): AppHost {
     async screenshot(target, o) {
       const entry = await resolve(o.docId);
       if (o.simId !== undefined) return simScreenshot(target, o.simId, o);
+      const offScreen = await offScreenComponent(entry, target, o);
+      if (offScreen !== null) return documentScreenshot(target, entry, offScreen, o);
       if (o.isolate && target.kind === "layer") return isolatedPreview(target, entry, o);
       const scale = o.scale ?? 1;
       let rect: Rect | null;
