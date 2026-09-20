@@ -1,0 +1,11 @@
+// Build settings every Sonobe Viewer target shares.
+//
+// Simulator builds need no signing (pass CODE_SIGNING_ALLOWED=NO). To install on your own iPhone,
+// copy Local.xcconfig.example to Local.xcconfig next to this file and set your team and a bundle id of
+// your own there. Local.xcconfig is git-ignored, so your team never lands in a commit.
+
+SONOBE_BUNDLE_ID = dev.sonobe.viewer
+DEVELOPMENT_TEAM =
+CODE_SIGN_STYLE = Automatic
+
+#include? "Local.xcconfig"

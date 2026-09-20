@@ -20,6 +20,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "e2e": "playwright test",
+    "test:ios": "node apps/ios/scripts/test.mjs",
     "format": "prettier --write .",
     "sonobe": "node packages/cli/src/main.ts"
   },
