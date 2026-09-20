@@ -1,0 +1,13 @@
+{
+  "formatVersion": 2,
+  "name": "Placemark Deck",
+  "generator": "Sonobe 0.1.0",
+  "root": "main",
+  "device": { "preset": "iphone-17-pro" },
+  "background": "#F2F2F7FF",
+  "meta": {
+    "description": "A deck of places to vote on, from a real session: drag the top card and throw it, or tap ✕ and ♥. Every number that sets the feel is a knob, and a locked Shipped app preset shows what the app does today.",
+    "guides": ["07-loops", "12-importing-designs", "13-knobs-and-presets"],
+    "recipe": "16-placemark-deck"
+  }
+}

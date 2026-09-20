@@ -175,7 +175,7 @@ The runs also showed where Claude struggled, and those problems are fixed. Tool 
 
 - **199 patches** in 16 categories, from Interaction and Pop Animation to Loop Builder, Network Request, and JavaScript. Each one has hover docs in the editor and a reference page in [docs/patches](docs/patches/README.md).
 - **15 layer types**, including text fields, Lottie, shaders, clones, and component instances, with row, column, and grid layout.
-- **15 examples** in [examples/](examples/README.md), from Tap to Grow to Swipe Cards. Each is a project folder with a step-by-step README and scripted tests that simulate the interaction. Open them from the welcome screen or the Learn drawer.
+- **16 examples** in [examples/](examples/README.md), from Tap to Grow to the Placemark Deck. Each is a project folder with a step-by-step README and scripted tests that simulate the interaction. Open them from the welcome screen or the Learn drawer.
 - **5 interactive lessons** that check your work as you go: Your first prototype, States vs pulses, Spring feel, Lists with loops, and Building with Claude.
 - **Design import** from a running app, HTML, or Claude, into real layers ([guide 12](docs/guides/12-importing-designs.md)).
 - **Knobs and presets.** Turn any number, color or switch into a knob with a slider, tune it while the prototype runs, and flip between presets like "Shipped app" and "Proposal" with ⌘' ([guide 13](docs/guides/13-knobs-and-presets.md)).
@@ -201,7 +201,7 @@ The runs also showed where Claude struggled, and those problems are fixed. Tool 
 | `apps/desktop` | The Electron shell, MCP endpoint, phone preview, and packaging |
 | `apps/ios` | Sonobe Viewer, an iPhone app that plays phone previews with real haptics (Swift, Xcode) |
 | `integrations` | The Claude Code plugin, the Claude Desktop extension, and the Sonobe Capture extension for Chrome and plugin for Figma |
-| `examples` | 15 runnable example projects with scripted tests |
+| `examples` | 16 runnable example projects with scripted tests |
 | `docs/guides` | Concept guides and recipes |
 | `docs/patches` | The generated patch reference |
 | `docs/research` | Research notes behind the design |

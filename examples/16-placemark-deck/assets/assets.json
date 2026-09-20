@@ -1,0 +1,282 @@
+{
+  "account_icon": {
+    "id": "account_icon",
+    "kind": "image",
+    "name": "Account Icon",
+    "file": "5709e331395dbe6afdad564fee2191d4a17a67ab9e48d52149701a9df9bdc422.svg",
+    "mime": "image/svg+xml",
+    "width": 20,
+    "height": 20,
+    "sha256": "5709e331395dbe6afdad564fee2191d4a17a67ab9e48d52149701a9df9bdc422"
+  },
+  "all_icon": {
+    "id": "all_icon",
+    "kind": "image",
+    "name": "All Icon",
+    "file": "4d88eb69282052f1e6bf61c702f361e85d2fb45d128bc92c0a481bf883f8e7d9.svg",
+    "mime": "image/svg+xml",
+    "width": 16,
+    "height": 16,
+    "sha256": "4d88eb69282052f1e6bf61c702f361e85d2fb45d128bc92c0a481bf883f8e7d9"
+  },
+  "bakery_storefront": {
+    "id": "bakery_storefront",
+    "kind": "image",
+    "name": "Bakery storefront",
+    "file": "b7190f33c97a7480bbf6c06d078a61c25ea6e3e3c1ded763dc14827dfdcdb20d.jpg",
+    "mime": "image/jpeg",
+    "width": 1280,
+    "height": 850,
+    "sha256": "b7190f33c97a7480bbf6c06d078a61c25ea6e3e3c1ded763dc14827dfdcdb20d"
+  },
+  "bamboo_steps": {
+    "id": "bamboo_steps",
+    "kind": "image",
+    "name": "Bamboo steps",
+    "file": "4b5d32f5fda0c0e3f296b99e04704d3b003cd2e08ccf7fd3cc75baea12a32255.jpg",
+    "mime": "image/jpeg",
+    "width": 1280,
+    "height": 857,
+    "sha256": "4b5d32f5fda0c0e3f296b99e04704d3b003cd2e08ccf7fd3cc75baea12a32255"
+  },
+  "card_details_icon": {
+    "id": "card_details_icon",
+    "kind": "image",
+    "name": "Card Details Icon",
+    "file": "fd63300a19c3e9e1e5676d053383a742ec6325847a74c1d13a9e372045fa3c50.svg",
+    "mime": "image/svg+xml",
+    "width": 17,
+    "height": 17,
+    "sha256": "fd63300a19c3e9e1e5676d053383a742ec6325847a74c1d13a9e372045fa3c50"
+  },
+  "card_pass_x": {
+    "id": "card_pass_x",
+    "kind": "image",
+    "name": "Card Pass X",
+    "file": "19c8746929fca0dfdf2d4dbf12b9b741e98a9420797336f083a12a1450ff7876.svg",
+    "mime": "image/svg+xml",
+    "width": 42,
+    "height": 42,
+    "sha256": "19c8746929fca0dfdf2d4dbf12b9b741e98a9420797336f083a12a1450ff7876"
+  },
+  "card_yes_heart": {
+    "id": "card_yes_heart",
+    "kind": "image",
+    "name": "Card Yes Heart",
+    "file": "89de906d248fa0768b35837ccdd220265b5d95900a37c7fad20528fcf0eb4c3e.svg",
+    "mime": "image/svg+xml",
+    "width": 50,
+    "height": 50,
+    "sha256": "89de906d248fa0768b35837ccdd220265b5d95900a37c7fad20528fcf0eb4c3e"
+  },
+  "coffee_icon": {
+    "id": "coffee_icon",
+    "kind": "image",
+    "name": "Coffee Icon",
+    "file": "61648a967e3effa8281aeb7b47928ff8c98593a438780aa84e0e7d88030653ca.svg",
+    "mime": "image/svg+xml",
+    "width": 16,
+    "height": 16,
+    "sha256": "61648a967e3effa8281aeb7b47928ff8c98593a438780aa84e0e7d88030653ca"
+  },
+  "drinks_icon": {
+    "id": "drinks_icon",
+    "kind": "image",
+    "name": "Drinks Icon",
+    "file": "8bff15e834d66827695598504a01d9e6aa5562d20b8bbc42cd538e6ee979c913.svg",
+    "mime": "image/svg+xml",
+    "width": 16,
+    "height": 16,
+    "sha256": "8bff15e834d66827695598504a01d9e6aa5562d20b8bbc42cd538e6ee979c913"
+  },
+  "drive_in_storefront": {
+    "id": "drive_in_storefront",
+    "kind": "image",
+    "name": "Drive-in storefront",
+    "file": "700f99a3056b81f60a9ccad9e3fee33409a757971c9d69430ec38bcab385cd67.jpg",
+    "mime": "image/jpeg",
+    "width": 1280,
+    "height": 960,
+    "sha256": "700f99a3056b81f60a9ccad9e3fee33409a757971c9d69430ec38bcab385cd67"
+  },
+  "eat_icon": {
+    "id": "eat_icon",
+    "kind": "image",
+    "name": "Eat Icon",
+    "file": "9aaa0badbaf19cd797cbde44823ac1864b33ff2f32ad9182400f8177b1c30960.svg",
+    "mime": "image/svg+xml",
+    "width": 16,
+    "height": 16,
+    "sha256": "9aaa0badbaf19cd797cbde44823ac1864b33ff2f32ad9182400f8177b1c30960"
+  },
+  "end_of_deck_map": {
+    "id": "end_of_deck_map",
+    "kind": "image",
+    "name": "End of Deck Map",
+    "file": "ff05394cc48527ec52092bbf939676398972231c95ec90093820abb50e1bd473.svg",
+    "mime": "image/svg+xml",
+    "width": 50,
+    "height": 50,
+    "sha256": "ff05394cc48527ec52092bbf939676398972231c95ec90093820abb50e1bd473"
+  },
+  "forest_trail": {
+    "id": "forest_trail",
+    "kind": "image",
+    "name": "Forest trail",
+    "file": "61136ffd67ecbd0331a18239385adb81363ea7d93dd109d7e41e3737292c3b0b.jpg",
+    "mime": "image/jpeg",
+    "width": 1280,
+    "height": 857,
+    "sha256": "61136ffd67ecbd0331a18239385adb81363ea7d93dd109d7e41e3737292c3b0b"
+  },
+  "impressionism_gallery": {
+    "id": "impressionism_gallery",
+    "kind": "image",
+    "name": "Impressionism gallery",
+    "file": "b2502ae799e13114cfb0c89a338e7f725a2d94bd24066a64f9e44ecc5dc7531f.jpg",
+    "mime": "image/jpeg",
+    "width": 1280,
+    "height": 853,
+    "sha256": "b2502ae799e13114cfb0c89a338e7f725a2d94bd24066a64f9e44ecc5dc7531f"
+  },
+  "invite_icon": {
+    "id": "invite_icon",
+    "kind": "image",
+    "name": "Invite Icon",
+    "file": "18cf11694c8b60e78c82b696a422887aff3cbf4d93d508f1ba6e7b940754ab1a.svg",
+    "mime": "image/svg+xml",
+    "width": 20,
+    "height": 20,
+    "sha256": "18cf11694c8b60e78c82b696a422887aff3cbf4d93d508f1ba6e7b940754ab1a"
+  },
+  "japanese_tea_house": {
+    "id": "japanese_tea_house",
+    "kind": "image",
+    "name": "Japanese tea house",
+    "file": "a9160bcc81a96103a5edeb50b84f8ebca52ea36fd419e8374ce93aa82a6cf252.jpg",
+    "mime": "image/jpeg",
+    "width": 1280,
+    "height": 960,
+    "sha256": "a9160bcc81a96103a5edeb50b84f8ebca52ea36fd419e8374ce93aa82a6cf252"
+  },
+  "location_arrow": {
+    "id": "location_arrow",
+    "kind": "image",
+    "name": "Location Arrow",
+    "file": "31eab86cef28803434a82e652ed3fd9525fe3157d6340b8c5c344dcd03d3ec71.svg",
+    "mime": "image/svg+xml",
+    "width": 12,
+    "height": 12,
+    "sha256": "31eab86cef28803434a82e652ed3fd9525fe3157d6340b8c5c344dcd03d3ec71"
+  },
+  "location_chevron": {
+    "id": "location_chevron",
+    "kind": "image",
+    "name": "Location Chevron",
+    "file": "cd41d7197badc8dc8f04e2f9c18e298b18fbd7fde3196d1d205f1b24a5a33fb5.svg",
+    "mime": "image/svg+xml",
+    "width": 11,
+    "height": 11,
+    "sha256": "cd41d7197badc8dc8f04e2f9c18e298b18fbd7fde3196d1d205f1b24a5a33fb5"
+  },
+  "malasadas": {
+    "id": "malasadas",
+    "kind": "image",
+    "name": "Malasadas",
+    "file": "b00a1e6ec7dbcab767d08c51ccfe796c23cb457ebe87f03d4b94b2dce9d68914.jpg",
+    "mime": "image/jpeg",
+    "width": 800,
+    "height": 600,
+    "sha256": "b00a1e6ec7dbcab767d08c51ccfe796c23cb457ebe87f03d4b94b2dce9d68914"
+  },
+  "manoa_falls": {
+    "id": "manoa_falls",
+    "kind": "image",
+    "name": "Mānoa Falls",
+    "file": "dd7769cbf04057bb72119007ca0bd7a01fb65b66c8a8198065bc2c2099a1ab67.jpg",
+    "mime": "image/jpeg",
+    "width": 852,
+    "height": 1136,
+    "sha256": "dd7769cbf04057bb72119007ca0bd7a01fb65b66c8a8198065bc2c2099a1ab67"
+  },
+  "mix_plate_and_chili": {
+    "id": "mix_plate_and_chili",
+    "kind": "image",
+    "name": "Mix plate and chili",
+    "file": "1cd7e57a2e237dc3c6d251f4167eccec4e089b552d19cf23b8262c9c704f7477.jpg",
+    "mime": "image/jpeg",
+    "width": 1280,
+    "height": 850,
+    "sha256": "1cd7e57a2e237dc3c6d251f4167eccec4e089b552d19cf23b8262c9c704f7477"
+  },
+  "museum_courtyard": {
+    "id": "museum_courtyard",
+    "kind": "image",
+    "name": "Museum courtyard",
+    "file": "280a498228100066e898337b888dd621c3b00be8cf07dd6f39c7e6bccd78415c.jpg",
+    "mime": "image/jpeg",
+    "width": 1280,
+    "height": 1707,
+    "sha256": "280a498228100066e898337b888dd621c3b00be8cf07dd6f39c7e6bccd78415c"
+  },
+  "outside_icon": {
+    "id": "outside_icon",
+    "kind": "image",
+    "name": "Outside Icon",
+    "file": "2ab8016ada00bb0e3e0a5245c031fdc7228b109706984504b6da06d9999f69f7.svg",
+    "mime": "image/svg+xml",
+    "width": 16,
+    "height": 16,
+    "sha256": "2ab8016ada00bb0e3e0a5245c031fdc7228b109706984504b6da06d9999f69f7"
+  },
+  "pass_x": {
+    "id": "pass_x",
+    "kind": "image",
+    "name": "Pass X",
+    "file": "6c8fe73783770123e6f0360791ee8339b0d8e02fdefedfd5a72b8181dfcd28ee.svg",
+    "mime": "image/svg+xml",
+    "width": 28,
+    "height": 28,
+    "sha256": "6c8fe73783770123e6f0360791ee8339b0d8e02fdefedfd5a72b8181dfcd28ee"
+  },
+  "pastry_case": {
+    "id": "pastry_case",
+    "kind": "image",
+    "name": "Pastry case",
+    "file": "4dfb312ff6fdad0569c080075c068c4def5cae5876f7642748d4cf96345f9542.jpg",
+    "mime": "image/jpeg",
+    "width": 1280,
+    "height": 960,
+    "sha256": "4dfb312ff6fdad0569c080075c068c4def5cae5876f7642748d4cf96345f9542"
+  },
+  "plate_lunch": {
+    "id": "plate_lunch",
+    "kind": "image",
+    "name": "Plate lunch",
+    "file": "c8118197f584f46342d3823d3ede5c2d220c775ff2a9971822aaf03624a356bf.jpg",
+    "mime": "image/jpeg",
+    "width": 1280,
+    "height": 960,
+    "sha256": "c8118197f584f46342d3823d3ede5c2d220c775ff2a9971822aaf03624a356bf"
+  },
+  "play_icon": {
+    "id": "play_icon",
+    "kind": "image",
+    "name": "Play Icon",
+    "file": "7b4c01aaf34393ffe5b644c840b27a6bd6f714168212dbf06e76653df0625b05.svg",
+    "mime": "image/svg+xml",
+    "width": 16,
+    "height": 16,
+    "sha256": "7b4c01aaf34393ffe5b644c840b27a6bd6f714168212dbf06e76653df0625b05"
+  },
+  "yes_heart": {
+    "id": "yes_heart",
+    "kind": "image",
+    "name": "Yes Heart",
+    "file": "fefc9290785ed0f95523f8efe381b27be878d4a7d801484ed3898849e07fbdb6.svg",
+    "mime": "image/svg+xml",
+    "width": 30,
+    "height": 30,
+    "sha256": "fefc9290785ed0f95523f8efe381b27be878d4a7d801484ed3898849e07fbdb6"
+  }
+}

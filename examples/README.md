@@ -1,6 +1,6 @@
 # Examples
 
-Fifteen runnable prototypes, from a single tap to a deck of swipeable cards. Each folder is a Sonobe project you can open in the app (Learn → Examples) or read with the CLI. Each one comes with a step-by-step README and a `test.json` that simulates the interaction and checks the numbers.
+Sixteen runnable prototypes, from a single tap to a deck of places built from an imported design. Each folder is a Sonobe project you can open in the app (Learn → Examples) or read with the CLI. Each one comes with a step-by-step README and a `test.json` that simulates the interaction and checks the numbers.
 
 | # | Example | You'll learn | Key patches |
 |---|---|---|---|
@@ -19,8 +19,9 @@ Fifteen runnable prototypes, from a single tap to a deck of swipeable cards. Eac
 | 13 | [Stories](13-stories/) | Timers that restart, merging pulses, fill bars from math | Counter, Or, Pulse on Change, Wait, Math Expression |
 | 14 | [Onboarding](14-onboarding/) | Steps in order, keeping counts in bounds | Counter, Delay One Frame, Swipe, If / Else |
 | 15 | [Grid with Loops](15-grid-with-loops/) | One layer, many copies | Loop, Grid Layout, HSL Color, Delay, Loop Option Switch |
+| 16 | [Placemark Deck](16-placemark-deck/) | A real deck from an imported design: stacking copies, reading the card above, knobs with a locked reference | Loop Builder, Loop Select, Delay One Frame, Swipe, Spring Animation |
 
-Start at 01. Examples 01, 02, 05, 11 and 12 need nothing but taps, and 03, 06 and 07 add scrolling. Examples 08, 09 and 10 are the gesture-heavy ones, and 10, 13 and 15 lean on loops.
+Start at 01. Examples 01, 02, 05, 11 and 12 need nothing but taps, and 03, 06 and 07 add scrolling. Examples 08, 09 and 10 are the gesture-heavy ones, and 10, 13 and 15 lean on loops. Example 16 puts them together, and it's the one with knobs.
 
 ## Folder layout
 
@@ -28,13 +29,14 @@ Start at 01. Examples 01, 02, 05, 11 and 12 need nothing but taps, and 03, 06 an
 examples/
 ├── 01-tap-to-grow/        a project folder: project.json, components/, assets/, README.md, test.json
 ├── …
+├── 16-placemark-deck/        also knobs.json, and design/: the HTML, capture and photos it's imported from
 ├── recipes/               the ops that build each project (the source of truth)
 ├── lib/                   design kit, recipe builder, scenario runner
 ├── build.ts               regenerates the project folders from recipes/
 └── run.test.ts            loads every example and runs its scenarios
 ```
 
-The project files are generated. To change an example, edit its recipe in `recipes/` and rebuild. README.md and test.json are written by hand.
+The project files are generated. To change an example, edit its recipe in `recipes/` and rebuild. A recipe can start from a stored design import (`design`, in `lib/recipe.ts`): the build plans the capture in `design/` with the importer, offline, and writes the asset files too. README.md, test.json and `design/` are written by hand.
 
 ```sh
 node examples/build.ts                    # regenerate every project
@@ -52,7 +54,7 @@ node packages/cli/src/main.ts validate examples/08-bottom-sheet
 
 ## test.json
 
-A test file lists scenarios. Each scenario starts a fresh deterministic simulation, plays its events (the same shapes `sim_dispatch` takes), traces every target frame by frame, and checks expectations against the trace.
+A test file lists scenarios. Each scenario starts a fresh deterministic simulation (under a knob preset when it names one, like `"preset": "Shipped app"`), plays its events (the same shapes `sim_dispatch` takes), traces every target frame by frame, and checks expectations against the trace.
 
 ```json
 {

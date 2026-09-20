@@ -1,0 +1,1434 @@
+{
+  "formatVersion": 1,
+  "id": "main",
+  "name": "Main",
+  "kind": "prototype",
+  "notes": "Drag the top card and let go, or tap ✕ and ♥. Card is one layer repeated once per place; Swipe Card decides what each copy does, and each copy reads the one above it. The Knobs tab (⌘5) holds the feel, and ⌘' flips between Proposal and the locked Shipped app.",
+  "size": [402, 874],
+  "interface": { "inputs": {}, "outputs": {} },
+  "layers": [
+    {
+      "id": "discover",
+      "type": "group",
+      "name": "Discover",
+      "props": {
+        "clip": true,
+        "color": "#F2F2F7FF",
+        "position": [0, 0],
+        "size": [402, 874]
+      },
+      "children": [
+        {
+          "id": "header",
+          "type": "group",
+          "name": "Header",
+          "props": {
+            "position": [22, 72],
+            "size": [358, 44]
+          },
+          "children": [
+            {
+              "id": "location_button",
+              "type": "group",
+              "name": "Location Button",
+              "props": {
+                "position": [0, 0],
+                "size": [100.41, 44]
+              },
+              "children": [
+                {
+                  "id": "location_arrow",
+                  "type": "image",
+                  "name": "Location Arrow",
+                  "props": {
+                    "fillMode": "stretch",
+                    "image": { "asset": "location_arrow" },
+                    "position": [0, 16],
+                    "size": [12, 12]
+                  }
+                },
+                {
+                  "id": "location_name",
+                  "type": "text",
+                  "name": "Location Name",
+                  "props": {
+                    "fontFamily": "\"SF Pro Rounded\", ui-rounded, system-ui",
+                    "fontSize": 17,
+                    "fontWeight": 600,
+                    "lineHeight": 20,
+                    "position": [17, 12],
+                    "size": [67.41, 20],
+                    "text": "Honolulu",
+                    "textColor": "#000000FF",
+                    "widthMode": "auto"
+                  }
+                },
+                {
+                  "id": "location_chevron",
+                  "type": "image",
+                  "name": "Location Chevron",
+                  "props": {
+                    "fillMode": "stretch",
+                    "image": { "asset": "location_chevron" },
+                    "position": [89.41, 16.5],
+                    "size": [11, 11]
+                  }
+                }
+              ]
+            },
+            {
+              "id": "header_buttons",
+              "type": "group",
+              "name": "Header Buttons",
+              "props": {
+                "position": [266, 0],
+                "size": [92, 44]
+              },
+              "children": [
+                {
+                  "id": "account_button",
+                  "type": "group",
+                  "name": "Account Button",
+                  "props": {
+                    "color": "#F24D47FF",
+                    "cornerRadius": 22,
+                    "position": [0, 0],
+                    "size": [44, 44]
+                  },
+                  "children": [
+                    {
+                      "id": "account_icon",
+                      "type": "image",
+                      "name": "Account Icon",
+                      "props": {
+                        "fillMode": "stretch",
+                        "image": { "asset": "account_icon" },
+                        "position": [12, 12],
+                        "size": [20, 20]
+                      }
+                    }
+                  ]
+                },
+                {
+                  "id": "invite_button",
+                  "type": "group",
+                  "name": "Invite Button",
+                  "props": {
+                    "color": "#FFFFFFFF",
+                    "cornerRadius": 22,
+                    "position": [48, 0],
+                    "size": [44, 44]
+                  },
+                  "children": [
+                    {
+                      "id": "invite_icon",
+                      "type": "image",
+                      "name": "Invite Icon",
+                      "props": {
+                        "fillMode": "stretch",
+                        "image": { "asset": "invite_icon" },
+                        "position": [12, 12],
+                        "size": [20, 20]
+                      }
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "id": "categories",
+          "type": "group",
+          "name": "Categories",
+          "props": {
+            "clip": true,
+            "position": [22, 138],
+            "size": [358, 45]
+          },
+          "children": [
+            {
+              "id": "categories_content",
+              "type": "group",
+              "name": "Categories Content",
+              "props": {
+                "position": { "link": "scroll_categories.position" },
+                "size": [588.11, 45]
+              },
+              "children": [
+                {
+                  "id": "all_chip",
+                  "type": "group",
+                  "name": "All Chip",
+                  "props": {
+                    "color": "#000000FF",
+                    "cornerRadius": 22.5,
+                    "position": [0, 0],
+                    "size": [73.89, 45]
+                  },
+                  "children": [
+                    {
+                      "id": "all_icon",
+                      "type": "image",
+                      "name": "All Icon",
+                      "props": {
+                        "fillMode": "stretch",
+                        "image": { "asset": "all_icon" },
+                        "position": [17, 14.5],
+                        "size": [16, 16]
+                      }
+                    },
+                    {
+                      "id": "all",
+                      "type": "text",
+                      "name": "All",
+                      "props": {
+                        "fontFamily": "\"SF Pro Rounded\", ui-rounded, system-ui",
+                        "fontSize": 15,
+                        "fontWeight": 600,
+                        "lineHeight": 18,
+                        "position": [40, 13.5],
+                        "size": [16.89, 18],
+                        "text": "All",
+                        "textColor": "#FFFFFFFF",
+                        "widthMode": "auto"
+                      }
+                    }
+                  ]
+                },
+                {
+                  "id": "eat_chip",
+                  "type": "group",
+                  "name": "Eat Chip",
+                  "props": {
+                    "color": "#FFFFFFFF",
+                    "cornerRadius": 22.5,
+                    "position": [81.89, 0],
+                    "size": [78.45, 45]
+                  },
+                  "children": [
+                    {
+                      "id": "eat_icon",
+                      "type": "image",
+                      "name": "Eat Icon",
+                      "props": {
+                        "fillMode": "stretch",
+                        "image": { "asset": "eat_icon" },
+                        "position": [17, 14.5],
+                        "size": [16, 16]
+                      }
+                    },
+                    {
+                      "id": "eat",
+                      "type": "text",
+                      "name": "Eat",
+                      "props": {
+                        "fontFamily": "\"SF Pro Rounded\", ui-rounded, system-ui",
+                        "fontSize": 15,
+                        "fontWeight": 600,
+                        "lineHeight": 18,
+                        "position": [40, 13.5],
+                        "size": [21.45, 18],
+                        "text": "Eat",
+                        "textColor": "#000000FF",
+                        "widthMode": "auto"
+                      }
+                    }
+                  ]
+                },
+                {
+                  "id": "coffee_chip",
+                  "type": "group",
+                  "name": "Coffee Chip",
+                  "props": {
+                    "color": "#FFFFFFFF",
+                    "cornerRadius": 22.5,
+                    "position": [168.34, 0],
+                    "size": [101.94, 45]
+                  },
+                  "children": [
+                    {
+                      "id": "coffee_icon",
+                      "type": "image",
+                      "name": "Coffee Icon",
+                      "props": {
+                        "fillMode": "stretch",
+                        "image": { "asset": "coffee_icon" },
+                        "position": [17, 14.5],
+                        "size": [16, 16]
+                      }
+                    },
+                    {
+                      "id": "coffee",
+                      "type": "text",
+                      "name": "Coffee",
+                      "props": {
+                        "fontFamily": "\"SF Pro Rounded\", ui-rounded, system-ui",
+                        "fontSize": 15,
+                        "fontWeight": 600,
+                        "lineHeight": 18,
+                        "position": [40, 13.5],
+                        "size": [44.94, 18],
+                        "text": "Coffee",
+                        "textColor": "#000000FF",
+                        "widthMode": "auto"
+                      }
+                    }
+                  ]
+                },
+                {
+                  "id": "drinks_chip",
+                  "type": "group",
+                  "name": "Drinks Chip",
+                  "props": {
+                    "color": "#FFFFFFFF",
+                    "cornerRadius": 22.5,
+                    "position": [278.28, 0],
+                    "size": [99.34, 45]
+                  },
+                  "children": [
+                    {
+                      "id": "drinks_icon",
+                      "type": "image",
+                      "name": "Drinks Icon",
+                      "props": {
+                        "fillMode": "stretch",
+                        "image": { "asset": "drinks_icon" },
+                        "position": [17, 14.5],
+                        "size": [16, 16]
+                      }
+                    },
+                    {
+                      "id": "drinks",
+                      "type": "text",
+                      "name": "Drinks",
+                      "props": {
+                        "fontFamily": "\"SF Pro Rounded\", ui-rounded, system-ui",
+                        "fontSize": 15,
+                        "fontWeight": 600,
+                        "lineHeight": 18,
+                        "position": [40, 13.5],
+                        "size": [42.34, 18],
+                        "text": "Drinks",
+                        "textColor": "#000000FF",
+                        "widthMode": "auto"
+                      }
+                    }
+                  ]
+                },
+                {
+                  "id": "play_chip",
+                  "type": "group",
+                  "name": "Play Chip",
+                  "props": {
+                    "color": "#FFFFFFFF",
+                    "cornerRadius": 22.5,
+                    "position": [385.63, 0],
+                    "size": [85.25, 45]
+                  },
+                  "children": [
+                    {
+                      "id": "play_icon",
+                      "type": "image",
+                      "name": "Play Icon",
+                      "props": {
+                        "fillMode": "stretch",
+                        "image": { "asset": "play_icon" },
+                        "position": [17, 14.5],
+                        "size": [16, 16]
+                      }
+                    },
+                    {
+                      "id": "play",
+                      "type": "text",
+                      "name": "Play",
+                      "props": {
+                        "fontFamily": "\"SF Pro Rounded\", ui-rounded, system-ui",
+                        "fontSize": 15,
+                        "fontWeight": 600,
+                        "lineHeight": 18,
+                        "position": [40, 13.5],
+                        "size": [28.25, 18],
+                        "text": "Play",
+                        "textColor": "#000000FF",
+                        "widthMode": "auto"
+                      }
+                    }
+                  ]
+                },
+                {
+                  "id": "outside_chip",
+                  "type": "group",
+                  "name": "Outside Chip",
+                  "props": {
+                    "color": "#FFFFFFFF",
+                    "cornerRadius": 22.5,
+                    "position": [478.88, 0],
+                    "size": [109.23, 45]
+                  },
+                  "children": [
+                    {
+                      "id": "outside_icon",
+                      "type": "image",
+                      "name": "Outside Icon",
+                      "props": {
+                        "fillMode": "stretch",
+                        "image": { "asset": "outside_icon" },
+                        "position": [17, 14.5],
+                        "size": [16, 16]
+                      }
+                    },
+                    {
+                      "id": "outside",
+                      "type": "text",
+                      "name": "Outside",
+                      "props": {
+                        "fontFamily": "\"SF Pro Rounded\", ui-rounded, system-ui",
+                        "fontSize": 15,
+                        "fontWeight": 600,
+                        "lineHeight": 18,
+                        "position": [40, 13.5],
+                        "size": [52.23, 18],
+                        "text": "Outside",
+                        "textColor": "#000000FF",
+                        "widthMode": "auto"
+                      }
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "id": "deck",
+          "type": "group",
+          "name": "Deck",
+          "props": {
+            "position": [22, 205],
+            "size": [358, 478]
+          },
+          "children": [
+            {
+              "id": "deck_backdrop",
+              "type": "rectangle",
+              "name": "Deck Backdrop",
+              "props": {
+                "color": "#F24D4717",
+                "cornerRadius": 32,
+                "position": [13, 8],
+                "size": [332, 478]
+              }
+            },
+            {
+              "id": "end_of_deck",
+              "type": "group",
+              "name": "End of Deck",
+              "props": {
+                "color": "#FFFFFFFF",
+                "cornerRadius": 32,
+                "opacity": { "link": "end_of_deck_shown.output" },
+                "position": [0, 0],
+                "size": [358, 478]
+              },
+              "children": [
+                {
+                  "id": "end_of_deck_map",
+                  "type": "image",
+                  "name": "End of Deck Map",
+                  "props": {
+                    "fillMode": "stretch",
+                    "image": { "asset": "end_of_deck_map" },
+                    "position": [154, 114],
+                    "size": [50, 50]
+                  }
+                },
+                {
+                  "id": "end_of_deck_title",
+                  "type": "text",
+                  "name": "End of Deck Title",
+                  "props": {
+                    "anchor": [0.5, 0],
+                    "fontFamily": "\"SF Pro Rounded\", ui-rounded, system-ui",
+                    "fontSize": 22,
+                    "fontWeight": 700,
+                    "lineHeight": 28,
+                    "position": [179, 180],
+                    "size": [236.78, 28],
+                    "text": "More places to explore?",
+                    "textAlignment": "center",
+                    "textColor": "#000000FF",
+                    "widthMode": "auto"
+                  }
+                },
+                {
+                  "id": "end_of_deck_message",
+                  "type": "text",
+                  "name": "End of Deck Message",
+                  "props": {
+                    "fontFamily": "\"SF Pro Rounded\", ui-rounded, system-ui",
+                    "fontSize": 15,
+                    "fontWeight": 400,
+                    "lineHeight": 20,
+                    "position": [39.86, 224],
+                    "size": [278.27, 40],
+                    "text": "We only suggest places with photos you can see. Try more places, another area or activity.",
+                    "textAlignment": "center",
+                    "textColor": "#8A8A8EFF",
+                    "widthMode": "fixed"
+                  }
+                },
+                {
+                  "id": "find_more_places_button",
+                  "type": "group",
+                  "name": "Find More Places Button",
+                  "props": {
+                    "color": "#F24D47FF",
+                    "cornerRadius": 17,
+                    "position": [104.75, 280],
+                    "size": [148.48, 34]
+                  },
+                  "children": [
+                    {
+                      "id": "find_more_places",
+                      "type": "text",
+                      "name": "Find more places",
+                      "props": {
+                        "anchor": [0.5, 0],
+                        "fontFamily": "\"SF Pro Rounded\", ui-rounded, system-ui",
+                        "fontSize": 17,
+                        "fontWeight": 400,
+                        "lineHeight": 34,
+                        "position": [74.24, 0],
+                        "size": [120.48, 34],
+                        "text": "Find more places",
+                        "textAlignment": "center",
+                        "textColor": "#FFFFFFFF",
+                        "widthMode": "auto"
+                      }
+                    }
+                  ]
+                },
+                {
+                  "id": "search_another_area_button",
+                  "type": "group",
+                  "name": "Search Another Area Button",
+                  "props": {
+                    "color": "#F24D47FF",
+                    "cornerRadius": 17,
+                    "position": [93.92, 330],
+                    "size": [170.16, 34]
+                  },
+                  "children": [
+                    {
+                      "id": "search_another_area",
+                      "type": "text",
+                      "name": "Search another area",
+                      "props": {
+                        "anchor": [0.5, 0],
+                        "fontFamily": "\"SF Pro Rounded\", ui-rounded, system-ui",
+                        "fontSize": 17,
+                        "fontWeight": 400,
+                        "lineHeight": 34,
+                        "position": [85.08, 0],
+                        "size": [142.16, 34],
+                        "text": "Search another area",
+                        "textAlignment": "center",
+                        "textColor": "#FFFFFFFF",
+                        "widthMode": "auto"
+                      }
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "id": "cards",
+              "type": "group",
+              "name": "Cards",
+              "props": {
+                "hitTest": false,
+                "position": [0, 0],
+                "size": [358, 478]
+              },
+              "children": [
+                {
+                  "id": "card",
+                  "type": "group",
+                  "name": "Card",
+                  "props": {
+                    "clip": true,
+                    "color": "#FFFFFFFF",
+                    "cornerRadius": 32,
+                    "hitTest": { "link": "swipe_card.touchable" },
+                    "layout": "column",
+                    "opacity": { "link": "swipe_card.shown" },
+                    "padding": [1, 1, 1, 1],
+                    "position": { "link": "swipe_card.position" },
+                    "repeat": { "link": "place_names.loop" },
+                    "rotation": { "link": "swipe_card.rotation" },
+                    "scale": { "link": "swipe_card.scale" },
+                    "size": [358, 478],
+                    "spacing": 0,
+                    "strokeColor": "#0000000B",
+                    "strokeWidth": 1,
+                    "zPosition": { "link": "stack_order.output" }
+                  },
+                  "children": [
+                    {
+                      "id": "card_photos",
+                      "type": "group",
+                      "name": "Card Photos",
+                      "props": {
+                        "alignment": "bottomLeft",
+                        "color": "#F2F2F7FF",
+                        "heightMode": "grow",
+                        "layout": "column",
+                        "padding": [0, 0, 10, 12],
+                        "position": [1, 1],
+                        "size": [100, 339],
+                        "widthMode": "percent"
+                      },
+                      "children": [
+                        {
+                          "id": "card_photo_grid",
+                          "type": "group",
+                          "name": "Card Photo Grid",
+                          "props": {
+                            "heightMode": "percent",
+                            "layout": "row",
+                            "position": [0, 0],
+                            "positioning": "absolute",
+                            "size": [100, 100],
+                            "spacing": 4,
+                            "widthMode": "percent"
+                          },
+                          "children": [
+                            {
+                              "id": "card_photo_1",
+                              "type": "image",
+                              "name": "Card Photo 1",
+                              "props": {
+                                "fillMode": "fill",
+                                "heightMode": "percent",
+                                "image": { "link": "big_photos.loop" },
+                                "position": [0, 0],
+                                "size": [60, 100],
+                                "widthMode": "percent"
+                              }
+                            },
+                            {
+                              "id": "card_side_photos",
+                              "type": "group",
+                              "name": "Card Side Photos",
+                              "props": {
+                                "heightMode": "percent",
+                                "layout": "column",
+                                "position": [217.59, 0],
+                                "size": [138, 100],
+                                "spacing": 4,
+                                "widthMode": "grow"
+                              },
+                              "children": [
+                                {
+                                  "id": "card_photo_2",
+                                  "type": "image",
+                                  "name": "Card Photo 2",
+                                  "props": {
+                                    "fillMode": "fill",
+                                    "heightMode": "grow",
+                                    "image": { "link": "top_right_photos.loop" },
+                                    "position": [0, 0],
+                                    "size": [100, 167],
+                                    "widthMode": "percent"
+                                  }
+                                },
+                                {
+                                  "id": "card_photo_3",
+                                  "type": "image",
+                                  "name": "Card Photo 3",
+                                  "props": {
+                                    "fillMode": "fill",
+                                    "heightMode": "grow",
+                                    "image": { "link": "bottom_right_photos.loop" },
+                                    "position": [0, 171.5],
+                                    "size": [100, 167],
+                                    "widthMode": "percent"
+                                  }
+                                }
+                              ]
+                            }
+                          ]
+                        },
+                        {
+                          "id": "card_photo_source",
+                          "type": "group",
+                          "name": "Card Photo Source",
+                          "props": {
+                            "color": "#000000A6",
+                            "cornerRadius": 4,
+                            "position": [12, 312],
+                            "size": [147.67, 17]
+                          },
+                          "children": [
+                            {
+                              "id": "card_photo_source_label",
+                              "type": "text",
+                              "name": "Card Photo Source Label",
+                              "props": {
+                                "fontFamily": "\"SF Pro Rounded\", ui-rounded, system-ui",
+                                "fontSize": 11,
+                                "fontWeight": 400,
+                                "lineHeight": 13,
+                                "position": [6, 2],
+                                "size": [135.67, 13],
+                                "text": "Photos: Wikimedia Commons",
+                                "textColor": "#FFFFFFFF",
+                                "widthMode": "auto"
+                              }
+                            }
+                          ]
+                        }
+                      ]
+                    },
+                    {
+                      "id": "card_info",
+                      "type": "group",
+                      "name": "Card Info",
+                      "props": {
+                        "heightMode": "auto",
+                        "layout": "column",
+                        "padding": [22, 22, 22, 22],
+                        "position": [1, 340],
+                        "size": [100, 137],
+                        "spacing": 8,
+                        "widthMode": "percent"
+                      },
+                      "children": [
+                        {
+                          "id": "card_title_row",
+                          "type": "group",
+                          "name": "Card Title Row",
+                          "props": {
+                            "heightMode": "auto",
+                            "layout": "row",
+                            "position": [22, 22],
+                            "size": [100, 44],
+                            "spacing": 14,
+                            "widthMode": "percent"
+                          },
+                          "children": [
+                            {
+                              "id": "place_name",
+                              "type": "text",
+                              "name": "Place Name",
+                              "props": {
+                                "fontFamily": "\"SF Pro Rounded\", ui-rounded, system-ui",
+                                "fontSize": 28,
+                                "fontWeight": 700,
+                                "heightMode": "auto",
+                                "lineHeight": 34,
+                                "position": [0, 0],
+                                "size": [219.31, 34],
+                                "text": { "link": "place_names.loop" },
+                                "textColor": "#000000FF",
+                                "widthMode": "grow"
+                              }
+                            },
+                            {
+                              "id": "card_details_button",
+                              "type": "group",
+                              "name": "Card Details Button",
+                              "props": {
+                                "color": "#F2F2F7FF",
+                                "cornerRadius": 22,
+                                "position": [268, 0],
+                                "size": [44, 44]
+                              },
+                              "children": [
+                                {
+                                  "id": "card_details_icon",
+                                  "type": "image",
+                                  "name": "Card Details Icon",
+                                  "props": {
+                                    "fillMode": "stretch",
+                                    "image": { "asset": "card_details_icon" },
+                                    "position": [13.5, 13.5],
+                                    "size": [17, 17]
+                                  }
+                                }
+                              ]
+                            }
+                          ]
+                        },
+                        {
+                          "id": "place_address",
+                          "type": "text",
+                          "name": "Place Address",
+                          "props": {
+                            "fontFamily": "\"SF Pro Rounded\", ui-rounded, system-ui",
+                            "fontSize": 15,
+                            "fontWeight": 400,
+                            "lineHeight": 20,
+                            "position": [22, 74],
+                            "size": [178.13, 20],
+                            "text": { "link": "place_addresses.loop" },
+                            "textColor": "#8A8A8EFF",
+                            "widthMode": "auto"
+                          }
+                        },
+                        {
+                          "id": "photo_credits",
+                          "type": "text",
+                          "name": "Photo Credits",
+                          "props": {
+                            "fontFamily": "\"SF Pro Rounded\", ui-rounded, system-ui",
+                            "fontSize": 11,
+                            "fontWeight": 400,
+                            "lineHeight": 13,
+                            "position": [22, 102],
+                            "size": [176.27, 13],
+                            "text": { "link": "place_credits.loop" },
+                            "textColor": "#8A8A8EFF",
+                            "widthMode": "auto"
+                          }
+                        }
+                      ]
+                    },
+                    {
+                      "id": "card_yes_badge",
+                      "type": "group",
+                      "name": "Card Yes Badge",
+                      "props": {
+                        "color": "#FAFAFADB",
+                        "cornerRadius": 47.5,
+                        "opacity": { "link": "swipe_card.yesBadge" },
+                        "position": [238, 25],
+                        "positioning": "absolute",
+                        "scale": { "link": "swipe_card.badgeScale" },
+                        "shadowColor": "#000000FF",
+                        "shadowOffset": [0, 4],
+                        "shadowOpacity": 0.08,
+                        "shadowRadius": 16,
+                        "size": [95, 95]
+                      },
+                      "children": [
+                        {
+                          "id": "card_yes_heart",
+                          "type": "image",
+                          "name": "Card Yes Heart",
+                          "props": {
+                            "fillMode": "stretch",
+                            "image": { "asset": "card_yes_heart" },
+                            "position": [22.5, 22.5],
+                            "size": [50, 50]
+                          }
+                        }
+                      ]
+                    },
+                    {
+                      "id": "card_pass_badge",
+                      "type": "group",
+                      "name": "Card Pass Badge",
+                      "props": {
+                        "color": "#FAFAFADB",
+                        "cornerRadius": 47.5,
+                        "opacity": { "link": "swipe_card.passBadge" },
+                        "position": [238, 25],
+                        "positioning": "absolute",
+                        "scale": { "link": "swipe_card.badgeScale" },
+                        "shadowColor": "#000000FF",
+                        "shadowOffset": [0, 4],
+                        "shadowOpacity": 0.08,
+                        "shadowRadius": 16,
+                        "size": [95, 95]
+                      },
+                      "children": [
+                        {
+                          "id": "card_pass_x",
+                          "type": "image",
+                          "name": "Card Pass X",
+                          "props": {
+                            "fillMode": "stretch",
+                            "image": { "asset": "card_pass_x" },
+                            "position": [26.5, 26.5],
+                            "size": [42, 42]
+                          }
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "id": "vote_buttons",
+          "type": "group",
+          "name": "Vote Buttons",
+          "props": {
+            "opacity": { "link": "vote_buttons_opacity.output" },
+            "position": [0, 707],
+            "size": [402, 80]
+          },
+          "children": [
+            {
+              "id": "pass_button",
+              "type": "group",
+              "name": "Pass Button",
+              "props": {
+                "color": "#FFFFFFFF",
+                "cornerRadius": 40,
+                "position": [107, 0],
+                "scale": { "link": "pass_button_scale.output" },
+                "size": [80, 80]
+              },
+              "children": [
+                {
+                  "id": "pass_x",
+                  "type": "image",
+                  "name": "Pass X",
+                  "props": {
+                    "fillMode": "stretch",
+                    "image": { "asset": "pass_x" },
+                    "position": [26, 26],
+                    "size": [28, 28]
+                  }
+                }
+              ]
+            },
+            {
+              "id": "yes_button",
+              "type": "group",
+              "name": "Yes Button",
+              "props": {
+                "color": "#F24D47FF",
+                "cornerRadius": 40,
+                "position": [215, 0],
+                "scale": { "link": "yes_button_scale.output" },
+                "shadowColor": "#F24D47FF",
+                "shadowOffset": [0, 7],
+                "shadowOpacity": 0.22,
+                "shadowRadius": 24,
+                "size": [80, 80]
+              },
+              "children": [
+                {
+                  "id": "yes_heart",
+                  "type": "image",
+                  "name": "Yes Heart",
+                  "props": {
+                    "fillMode": "stretch",
+                    "image": { "asset": "yes_heart" },
+                    "position": [25, 25],
+                    "size": [30, 30]
+                  }
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "id": "app_status_bar",
+          "type": "group",
+          "name": "Status Bar",
+          "props": {
+            "hitTest": false,
+            "size": [402, 62]
+          },
+          "children": [
+            {
+              "id": "app_clock",
+              "type": "text",
+              "name": "Clock",
+              "props": {
+                "anchor": [0.5, 0],
+                "fontSize": 17,
+                "fontWeight": 600,
+                "hitTest": false,
+                "position": [72, 20],
+                "text": "9:41",
+                "textAlignment": "center",
+                "textColor": "#111118FF"
+              }
+            },
+            {
+              "id": "app_signal_1",
+              "type": "rectangle",
+              "name": "Signal 1",
+              "props": {
+                "color": "#111118FF",
+                "cornerRadius": 1,
+                "hitTest": false,
+                "position": [292, 30],
+                "size": [3, 4]
+              }
+            },
+            {
+              "id": "app_signal_2",
+              "type": "rectangle",
+              "name": "Signal 2",
+              "props": {
+                "color": "#111118FF",
+                "cornerRadius": 1,
+                "hitTest": false,
+                "position": [297, 28],
+                "size": [3, 6]
+              }
+            },
+            {
+              "id": "app_signal_3",
+              "type": "rectangle",
+              "name": "Signal 3",
+              "props": {
+                "color": "#111118FF",
+                "cornerRadius": 1,
+                "hitTest": false,
+                "position": [302, 26],
+                "size": [3, 8]
+              }
+            },
+            {
+              "id": "app_signal_4",
+              "type": "rectangle",
+              "name": "Signal 4",
+              "props": {
+                "color": "#111118FF",
+                "cornerRadius": 1,
+                "hitTest": false,
+                "position": [307, 24],
+                "size": [3, 10]
+              }
+            },
+            {
+              "id": "app_battery",
+              "type": "rectangle",
+              "name": "Battery",
+              "props": {
+                "color": "#00000000",
+                "cornerRadius": 3.5,
+                "hitTest": false,
+                "position": [322, 23],
+                "size": [25, 12],
+                "strokeColor": "#11111859",
+                "strokeWidth": 1
+              }
+            },
+            {
+              "id": "app_battery_level",
+              "type": "rectangle",
+              "name": "Battery Level",
+              "props": {
+                "color": "#111118FF",
+                "cornerRadius": 2,
+                "hitTest": false,
+                "position": [324, 25],
+                "size": [19, 8]
+              }
+            },
+            {
+              "id": "app_battery_cap",
+              "type": "rectangle",
+              "name": "Battery Cap",
+              "props": {
+                "color": "#11111859",
+                "cornerRadius": 1,
+                "hitTest": false,
+                "position": [348, 27],
+                "size": [2, 4]
+              }
+            }
+          ]
+        },
+        {
+          "id": "app_home_indicator",
+          "type": "rectangle",
+          "name": "Home Indicator",
+          "props": {
+            "anchor": [0.5, 1],
+            "color": "#111118FF",
+            "cornerRadius": 3,
+            "hitTest": false,
+            "position": [201, 866],
+            "size": [140, 5]
+          }
+        }
+      ]
+    }
+  ],
+  "patches": {
+    "big_photos": {
+      "type": "loopBuilder",
+      "name": "Big Photos",
+      "typeParam": "image",
+      "inputCount": 4,
+      "inputs": {
+        "item0": { "asset": "malasadas" },
+        "item1": { "asset": "plate_lunch" },
+        "item2": { "asset": "museum_courtyard" },
+        "item3": { "asset": "manoa_falls" }
+      },
+      "ui": { "x": 20, "y": 500 }
+    },
+    "bottom_right_photos": {
+      "type": "loopBuilder",
+      "name": "Bottom Right Photos",
+      "typeParam": "image",
+      "inputCount": 4,
+      "inputs": {
+        "item0": { "asset": "bakery_storefront" },
+        "item1": { "asset": "mix_plate_and_chili" },
+        "item2": { "asset": "japanese_tea_house" },
+        "item3": { "asset": "bamboo_steps" }
+      },
+      "ui": { "x": 20, "y": 804 }
+    },
+    "card_above": {
+      "type": "subtract",
+      "name": "Card Above",
+      "typeParam": "number",
+      "inputCount": 2,
+      "inputs": {
+        "value1": { "link": "place_names.index" },
+        "value2": 1
+      },
+      "ui": { "x": 20, "y": 1784 }
+    },
+    "card_above_gone": {
+      "type": "loopSelect",
+      "name": "Card Above: Gone",
+      "typeParam": "boolean",
+      "inputs": {
+        "fallback": true,
+        "index": { "link": "card_above.output" },
+        "loop": { "link": "swipe_card.gone" },
+        "outOfRange": "fallback"
+      },
+      "ui": { "x": 256, "y": 1610 }
+    },
+    "card_above_gone_last_frame": {
+      "type": "delay1",
+      "name": "Card Above: Gone Last Frame",
+      "typeParam": "boolean",
+      "inputs": { "value": { "link": "card_above_gone.output" } },
+      "ui": { "x": 558, "y": 1610 }
+    },
+    "card_above_lift": {
+      "type": "loopSelect",
+      "name": "Card Above: Lift",
+      "typeParam": "number",
+      "inputs": {
+        "fallback": 1,
+        "index": { "link": "card_above.output" },
+        "loop": { "link": "swipe_card.lift" },
+        "outOfRange": "fallback"
+      },
+      "ui": { "x": 285, "y": 1762 }
+    },
+    "card_above_lift_last_frame": {
+      "type": "delay1",
+      "name": "Card Above: Lift Last Frame",
+      "typeParam": "number",
+      "inputs": { "value": { "link": "card_above_lift.output" } },
+      "ui": { "x": 558, "y": 1762 }
+    },
+    "card_above_offset": {
+      "type": "loopSelect",
+      "name": "Card Above: Offset",
+      "typeParam": "point",
+      "inputs": {
+        "fallback": [0, 0],
+        "index": { "link": "card_above.output" },
+        "loop": { "link": "swipe_card.position" },
+        "outOfRange": "fallback"
+      },
+      "ui": { "x": 260, "y": 1914 }
+    },
+    "card_above_offset_last_frame": {
+      "type": "delay1",
+      "name": "Card Above: Offset Last Frame",
+      "typeParam": "point",
+      "inputs": { "value": { "link": "card_above_offset.output" } },
+      "ui": { "x": 558, "y": 1914 }
+    },
+    "deck_empty_fade": {
+      "type": "popAnimation",
+      "name": "Deck Empty Fade",
+      "typeParam": "number",
+      "inputs": {
+        "bounciness": 0,
+        "number": { "link": "every_card_gone.output" },
+        "speed": 14
+      },
+      "ui": { "x": 296, "y": 2740 }
+    },
+    "drag_card": {
+      "type": "gesture",
+      "name": "Drag Card",
+      "inputs": { "layer": { "layer": "card" } },
+      "ui": { "x": 138, "y": 1098 }
+    },
+    "end_of_deck_shown": {
+      "type": "or",
+      "name": "End of Deck Shown",
+      "inputCount": 2,
+      "inputs": {
+        "value1": { "link": "$knob.card_flies_out" },
+        "value2": { "link": "every_card_gone.output" }
+      },
+      "ui": { "x": 256, "y": 2870 }
+    },
+    "every_card_gone": {
+      "type": "loopAll",
+      "name": "Every Card Gone",
+      "inputs": { "loop": { "link": "swipe_card.gone" } },
+      "ui": { "x": 20, "y": 2740 }
+    },
+    "pass_button_scale": {
+      "type": "transition",
+      "name": "Pass Button Scale",
+      "typeParam": "number",
+      "inputs": {
+        "end": { "link": "$knob.button_press_scale" },
+        "progress": { "link": "pass_press_spring.output" },
+        "start": 1
+      },
+      "ui": { "x": 536, "y": 2142 }
+    },
+    "pass_press_spring": {
+      "type": "popAnimation",
+      "name": "Pass Press Spring",
+      "typeParam": "number",
+      "inputs": {
+        "bounciness": 0,
+        "number": { "link": "tap_pass.down" },
+        "speed": 20
+      },
+      "ui": { "x": 300, "y": 2142 }
+    },
+    "place_addresses": {
+      "type": "loopBuilder",
+      "name": "Place Addresses",
+      "typeParam": "text",
+      "inputCount": 4,
+      "inputs": {
+        "item0": "933 Kapahulu Ave, Honolulu",
+        "item1": "3308 Kanaina Ave, Honolulu",
+        "item2": "900 S Beretania St, Honolulu",
+        "item3": "3860 Manoa Rd, Honolulu"
+      },
+      "ui": { "x": 20, "y": 196 }
+    },
+    "place_credits": {
+      "type": "loopBuilder",
+      "name": "Place Credits",
+      "typeParam": "text",
+      "inputCount": 4,
+      "inputs": {
+        "item0": "Photos: _e.t · Ken Lund · Banzai Hiroaki",
+        "item1": "Photos: Arnold Gatilao · Eugene Kim · John Liu",
+        "item2": "Photos: Glamorous Vagabonds · HonoluluMuseumOfArt · Wmpearl",
+        "item3": "Photos: Chouwawa · Daniel Ramirez"
+      },
+      "ui": { "x": 20, "y": 348 }
+    },
+    "place_names": {
+      "type": "loopBuilder",
+      "name": "Place Names",
+      "typeParam": "text",
+      "inputCount": 4,
+      "inputs": {
+        "item0": "Leonard's Bakery",
+        "item1": "Rainbow Drive-In",
+        "item2": "Honolulu Museum of Art",
+        "item3": "Mānoa Falls Trail"
+      },
+      "ui": { "x": 20, "y": 44 }
+    },
+    "scroll_categories": {
+      "type": "scroll",
+      "name": "Scroll Categories",
+      "inputs": {
+        "layer": { "layer": "categories_content" },
+        "scrollX": "free",
+        "scrollY": "off"
+      },
+      "ui": { "x": 20, "y": 3040 }
+    },
+    "stack_order": {
+      "type": "multiply",
+      "name": "Stack Order",
+      "typeParam": "number",
+      "inputCount": 2,
+      "inputs": {
+        "value1": { "link": "place_names.index" },
+        "value2": -1
+      },
+      "ui": { "x": 479, "y": 1032 }
+    },
+    "swipe_card": {
+      "type": "component",
+      "name": "Swipe Card",
+      "component": "swipe_card",
+      "inputs": {
+        "aboveLift": { "link": "card_above_lift_last_frame.output" },
+        "aboveOffset": { "link": "card_above_offset_last_frame.output" },
+        "cardAboveGone": { "link": "card_above_gone_last_frame.output" },
+        "down": { "link": "drag_card.down" },
+        "grabPoint": { "link": "drag_card.localPosition" },
+        "passHeld": { "link": "tap_pass.down" },
+        "passTapped": { "link": "tap_pass.tap" },
+        "projected": { "link": "throw_card.projected" },
+        "reset": { "link": "tap_find_more_places.tap" },
+        "swipedLeft": { "link": "throw_card.swipedLeft" },
+        "swipedRight": { "link": "throw_card.swipedRight" },
+        "translation": { "link": "drag_card.translation" },
+        "velocity": { "link": "drag_card.velocity" },
+        "yesHeld": { "link": "tap_yes.down" },
+        "yesTapped": { "link": "tap_yes.tap" }
+      },
+      "ui": { "x": 408, "y": 1140 }
+    },
+    "tap_find_more_places": {
+      "type": "interaction",
+      "name": "Tap Find More Places",
+      "inputs": { "layer": { "layer": "find_more_places_button" } },
+      "ui": { "x": 20, "y": 2490 }
+    },
+    "tap_pass": {
+      "type": "interaction",
+      "name": "Tap Pass",
+      "inputs": { "layer": { "layer": "pass_button" } },
+      "ui": { "x": 20, "y": 2142 }
+    },
+    "tap_yes": {
+      "type": "interaction",
+      "name": "Tap Yes",
+      "inputs": { "layer": { "layer": "yes_button" } },
+      "ui": { "x": 20, "y": 2316 }
+    },
+    "throw_card": {
+      "type": "swipe",
+      "name": "Throw Card",
+      "inputs": {
+        "axis": "horizontal",
+        "layer": { "layer": "card" },
+        "lookahead": { "link": "$knob.throw_lookahead" },
+        "minDistance": { "link": "$knob.commit_distance" },
+        "minVelocity": 10000
+      },
+      "ui": { "x": 20, "y": 1316 }
+    },
+    "top_right_photos": {
+      "type": "loopBuilder",
+      "name": "Top Right Photos",
+      "typeParam": "image",
+      "inputCount": 4,
+      "inputs": {
+        "item0": { "asset": "pastry_case" },
+        "item1": { "asset": "drive_in_storefront" },
+        "item2": { "asset": "impressionism_gallery" },
+        "item3": { "asset": "forest_trail" }
+      },
+      "ui": { "x": 20, "y": 652 }
+    },
+    "vote_buttons_opacity": {
+      "type": "transition",
+      "name": "Vote Buttons Opacity",
+      "typeParam": "number",
+      "inputs": {
+        "end": 0.4,
+        "progress": { "link": "deck_empty_fade.output" },
+        "start": 1
+      },
+      "ui": { "x": 572, "y": 2740 }
+    },
+    "yes_button_scale": {
+      "type": "transition",
+      "name": "Yes Button Scale",
+      "typeParam": "number",
+      "inputs": {
+        "end": { "link": "$knob.button_press_scale" },
+        "progress": { "link": "yes_press_spring.output" },
+        "start": 1
+      },
+      "ui": { "x": 531, "y": 2316 }
+    },
+    "yes_press_spring": {
+      "type": "popAnimation",
+      "name": "Yes Press Spring",
+      "typeParam": "number",
+      "inputs": {
+        "bounciness": 0,
+        "number": { "link": "tap_yes.down" },
+        "speed": 20
+      },
+      "ui": { "x": 295, "y": 2316 }
+    }
+  },
+  "comments": [
+    {
+      "id": "how_to_read",
+      "text": "HOW TO READ THIS · Card is one layer, repeated once per place in PLACES · Drag Card and Throw Card → Swipe Card (open it for one card's logic) → Card · each copy reads the card above it · the feel is in the Knobs tab (⌘5), and ⌘' flips between Proposal and the locked Shipped app",
+      "rect": [0, -120, 1100, 60],
+      "color": "green"
+    },
+    {
+      "id": "section_buttons",
+      "text": "BUTTONS · ✕ ♥ shrink while pressed · their taps and holds reach every card, and only the top card acts · Find more places brings the deck back",
+      "rect": [0, 2098, 956, 558],
+      "color": "pink"
+    },
+    {
+      "id": "section_card_above",
+      "text": "THE CARD ABOVE · each copy reads copy index − 1, one frame late · the top card has none, so Fallback says it's gone and fully lifted",
+      "rect": [0, 1566, 876, 492],
+      "color": "purple"
+    },
+    {
+      "id": "section_category_chips",
+      "text": "CATEGORY CHIPS · scroll sideways (the design import added this)",
+      "rect": [0, 2996, 565, 254],
+      "color": "gray"
+    },
+    {
+      "id": "section_deck_empty",
+      "text": "DECK EMPTY · with every card gone, ✕ ♥ dim to 40% as in the app · with Card Flies Out off, End of Deck waits until then",
+      "rect": [-20, 2696, 1012, 574],
+      "color": "gray"
+    },
+    {
+      "id": "section_places",
+      "text": "PLACES · one Loop Builder per field, one row per card, top card first · add a row to every builder to add a place",
+      "rect": [0, 0, 580, 948],
+      "color": "green"
+    },
+    {
+      "id": "section_the_deck",
+      "text": "THE DECK · Repeat makes one Card per place, index × −1 puts row 0 on top · Drag Card and Throw Card → Swipe Card (open it) → Card",
+      "rect": [0, 988, 919, 538],
+      "color": "blue"
+    }
+  ],
+  "meta": {
+    "patchEditor": {
+      "nodes": {
+        "@card": [715, 1184],
+        "@card_pass_badge": [715, 1076],
+        "@card_photo_1": [340, 500],
+        "@card_photo_2": [346, 652],
+        "@card_photo_3": [346, 804],
+        "@card_yes_badge": [715, 1402],
+        "@categories_content": [346, 3040],
+        "@end_of_deck": [572, 2870],
+        "@pass_button": [772, 2142],
+        "@photo_credits": [396, 348],
+        "@place_address": [396, 196],
+        "@place_name": [381, 44],
+        "@vote_buttons": [808, 2740],
+        "@yes_button": [767, 2316]
+      }
+    }
+  }
+}
