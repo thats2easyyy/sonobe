@@ -127,6 +127,11 @@ describe("structuredContent carries the complete payload", () => {
     const trace = await call("sim_trace", { simId, targets: ["@photo.scale"], durationMs: 300 });
     expect(trace.structuredContent!.text).toContain("t_ms");
     await call("sim_get_values", { simId, targets: ["@photo.scale"] });
+    const override = await call("sim_override", {
+      simId,
+      set: [{ target: "@caption.opacity", value: 0 }],
+    });
+    expect(override.structuredContent!.text).toContain("@caption.opacity = 0");
     await call("get_screenshot");
     await call("begin_work", { intent: "checking payloads", ids: ["photo"] });
     await call("finish_work");
@@ -148,6 +153,11 @@ const FAILURES: { name: ToolName; args: Record<string, unknown>; code?: string }
   { name: "sim_trace", args: { simId: "sim_99", targets: ["@photo.scale"], durationMs: 100 } },
   { name: "sim_dispatch", args: { simId: "sim_99", events: [{ kind: "tap", target: "@photo" }] } },
   { name: "sim_reset", args: { docId: "nope" }, code: "unknown_document" },
+  {
+    name: "sim_override",
+    args: { simId: "sim_99", set: [{ target: "@photo.opacity", value: 0 }] },
+    code: "unknown_sim",
+  },
   { name: "apply_ops", args: { ops: [{ op: "addPatch", patch: { type: "swich" } }] } },
   { name: "add_patches", args: { patches: [{ type: "popAnimaton" }] } },
   {

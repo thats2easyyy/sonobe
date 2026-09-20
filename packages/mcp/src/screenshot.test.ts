@@ -311,4 +311,67 @@ describe("headless screenshots", () => {
       renderSceneScreenshot({ scene, target: { kind: "viewer" }, maxBytes: 10 }),
     ).rejects.toMatchObject({ code: "image_too_large" });
   }, 30_000);
+
+  it("isolates one layer, and draws a simulation's overrides", async () => {
+    const c = await setup();
+    const added = await c.call("add_layers", {
+      layers: [
+        {
+          type: "group",
+          name: "Card 2",
+          props: { position: [50, 100], size: [200, 200], color: "#00FF00FF" },
+          children: [
+            {
+              type: "oval",
+              name: "Dot",
+              props: { position: [80, 80], size: [40, 40], color: "#FF0000FF" },
+            },
+          ],
+        },
+        {
+          type: "rectangle",
+          name: "Card 1",
+          props: { position: [50, 100], size: [200, 200], color: "#0000FFFF" },
+        },
+      ],
+    });
+    expect(added.isError, added.text).toBe(false);
+    const isGreen = (px: number[]) => px[1]! > 200 && px[0]! < 70 && px[2]! < 70;
+    const isBlue = (px: number[]) => px[2]! > 200 && px[0]! < 70 && px[1]! < 70;
+
+    // A layer target crops the screen, so Card 1 covers Card 2; isolate draws Card 2 and its Dot alone.
+    const covered = png(await c.call("get_screenshot", { target: "@card_2" }));
+    expect(isBlue(covered.pixel(100, 100))).toBe(true);
+    const alone = await c.call("get_screenshot", { target: "@card_2", isolate: true });
+    const isolated = png(alone);
+    expect([isolated.width, isolated.height]).toEqual([200, 200]);
+    expect(isRed(isolated.pixel(100, 100))).toBe(true);
+    expect(isGreen(isolated.pixel(20, 20))).toBe(true);
+    expect(alone.text).toContain("@card_2 (isolated) · 200×200");
+    const viewer = await c.call("get_screenshot", { isolate: true });
+    expect(viewer.structured.error).toMatchObject({ code: "invalid_target" });
+
+    // Overrides draw in simulation screenshots (and later frames), never in the person's document.
+    const simId = (await c.call("sim_reset", {})).structured.simId as string;
+    await c.call("sim_override", { simId, set: [{ target: "@card_1.opacity", value: 0 }] });
+    const peek = await c.call("get_screenshot", { simId });
+    expect(isGreen(png(peek).pixel(60, 110))).toBe(true);
+    expect(peek.text).toContain(
+      `Note: ${simId} has 1 override the person's document doesn't: @card_1.opacity = 0 (was the default 1).`,
+    );
+    expect(isGreen(png(await c.call("get_screenshot", { simId, atMs: 500 })).pixel(60, 110))).toBe(
+      true,
+    );
+    const person = await c.call("get_screenshot", {});
+    expect(isBlue(png(person).pixel(60, 110))).toBe(true);
+    expect(person.text).toContain(
+      `Note: this shows the person's document, without the overrides in ${simId}; pass simId: "${simId}" to see them.`,
+    );
+
+    // Isolating a layer the simulation hides says why the picture is empty.
+    await c.call("sim_override", { simId, set: [{ target: "@card_2.opacity", value: 0 }] });
+    const hidden = await c.call("get_screenshot", { simId, target: "@card_2", isolate: true });
+    expect(hidden.text).toContain('Note: Layer "card_2" is hidden in this frame');
+    expect(isRed(png(hidden).pixel(100, 100))).toBe(false);
+  }, 30_000);
 });

@@ -1,12 +1,19 @@
-/** Simulation tools: sim_reset, sim_dispatch, sim_step, sim_trace, sim_get_values, get_screenshot. */
+/** Simulation tools: sim_reset, sim_dispatch, sim_step, sim_trace, sim_get_values, sim_override, get_screenshot. */
 
+import type { Op } from "@sonobe/core";
 import type { TraceSummary } from "@sonobe/engine";
 import { z } from "zod";
-import { formatValue, roundForDisplay, sampleIndices, table } from "../format.ts";
-import type { ScreenshotTarget, SimEvent, SimState } from "../host.ts";
+import { formatValue, plural, roundForDisplay, sampleIndices, table } from "../format.ts";
+import type { ScreenshotTarget, SimEvent, SimOverrideSet, SimState } from "../host.ts";
 import { failure, success } from "../results.ts";
 import { READ_ONLY, SIMULATION, type ToolContext } from "../server.ts";
-import { DocIdSchema, SimEventSchema, SimStateOutputSchema } from "../schemas.ts";
+import {
+  ComponentIdSchema,
+  DocIdSchema,
+  OpSchema,
+  SimEventSchema,
+  SimStateOutputSchema,
+} from "../schemas.ts";
 
 function issuesText(state: SimState): string[] {
   const lines: string[] = [];
@@ -19,10 +26,17 @@ function issuesText(state: SimState): string[] {
       `Runtime ${issue.severity}${issue.patchId ? ` in ${issue.patchId}` : issue.layerId ? ` on @${issue.layerId}` : ""}: ${issue.message}`,
     );
   if (state.issues.length > 5) lines.push(`… ${state.issues.length - 5} more runtime issues.`);
+  for (const d of state.droppedOverrides ?? [])
+    lines.push(
+      `Note: dropped the override on ${d.target}; the person's latest edit doesn't accept it (${d.reason})`,
+    );
   return lines;
 }
 
-const header = (s: SimState) => `${s.simId} · frame ${s.frame} · ${roundForDisplay(s.timeMs)} ms`;
+const header = (s: SimState) =>
+  `${s.simId} · frame ${s.frame} · ${roundForDisplay(s.timeMs)} ms${s.overrides?.length ? ` · ${plural(s.overrides.length, "override")}` : ""}`;
+
+const SIM_ONLY = "simulation only: the person's document, viewer and history are unchanged";
 
 /** "settles at 1.08 after 412 ms, overshoot 0.012 (15%), range 1…1.092". */
 export function summaryText(summary: TraceSummary | null): string {
@@ -66,7 +80,7 @@ export function registerSimulationTools(tc: ToolContext): void {
     {
       title: "Reset simulation",
       description:
-        "Start a deterministic simulation of the document (fixed timestep, seeded randomness), independent of the person's live viewer, and step frame 0. Returns a simId for the other sim_* tools. Pass simId to restart an existing session.",
+        "Start a deterministic simulation of the document (fixed timestep, seeded randomness), independent of the person's live viewer, and step frame 0. Returns a simId for the other sim_* tools. Pass simId to restart an existing session; that clears its sim_override overrides unless keepOverrides is true.",
       input: z.object({
         docId: DocIdSchema.optional(),
         simId: z.string().optional(),
@@ -75,6 +89,10 @@ export function registerSimulationTools(tc: ToolContext): void {
           .union([z.literal(60), z.literal(120)])
           .optional()
           .describe("Default: the document's fps (60)."),
+        keepOverrides: z
+          .boolean()
+          .optional()
+          .describe("With simId: keep the session's sim_override overrides (default false)."),
       }),
       output: SimStateOutputSchema,
       annotations: SIMULATION,
@@ -85,10 +103,23 @@ export function registerSimulationTools(tc: ToolContext): void {
         ...(args.simId !== undefined ? { simId: args.simId } : {}),
         ...(args.seed !== undefined ? { seed: args.seed } : {}),
         ...(args.fps !== undefined ? { fps: args.fps } : {}),
+        ...(args.keepOverrides ? { keepOverrides: true } : {}),
       });
+      const cleared = state.clearedOverrides ?? [];
       return success(
         [
           `Simulation ready: ${header(state)} · ${state.fps} fps · seed ${state.seed}`,
+          ...(state.overrides?.length
+            ? [
+                `Kept overrides (${SIM_ONLY}):`,
+                ...state.overrides.map((o) => `  ${o.id} ${o.summary}`),
+              ]
+            : []),
+          ...(cleared.length
+            ? [
+                `Cleared ${plural(cleared.length, "override")} (${cleared.map((o) => o.target).join(", ")}); pass keepOverrides: true to keep them.`,
+              ]
+            : []),
           ...issuesText(state),
         ].join("\n"),
         { ...state },
@@ -190,7 +221,7 @@ export function registerSimulationTools(tc: ToolContext): void {
     {
       title: "Trace simulation",
       description:
-        "Sample values every frame for a duration, with optional scheduled events (same shapes as sim_dispatch, with atMs), and summarize each: start, end, settle time, overshoot, range. Rows are downsampled to maxRows; summaries use every frame; times count frames from the start of the trace. By default traces a copy so the session doesn't move; advance: true moves the session through the traced time.",
+        "Sample values every frame for a duration, with optional scheduled events (same shapes as sim_dispatch, with atMs), and summarize each: start, end, settle time, overshoot, range. Rows are downsampled to maxRows; summaries use every frame; times count frames from the start of the trace. By default traces a copy so the session doesn't move; advance: true moves the session through the traced time, and on until its scheduled events finish (so a drag longer than the trace still releases).",
       input: z.object({
         simId: z.string(),
         targets: TargetsSchema.max(8).describe(
@@ -221,6 +252,11 @@ export function registerSimulationTools(tc: ToolContext): void {
         t.text,
         "Summaries:",
         ...r.targets.map((target) => `  ${target}: ${summaryText(r.summaries[target] ?? null)}`),
+        ...(r.framesAfterTrace
+          ? [
+              `The events ran past the trace, so the session stepped ${plural(r.framesAfterTrace, "more frame")} to finish them (no pointer is left down).`,
+            ]
+          : []),
         ...issuesText(r),
       ];
       const sampled = sampleIndices(r.times.length, maxRows ?? 30);
@@ -248,7 +284,9 @@ export function registerSimulationTools(tc: ToolContext): void {
       return success(
         [
           header(r),
-          ...targets.map((t) => `  ${t} = ${formatValue(r.values[t])}`),
+          ...targets.map(
+            (t) => `  ${t} = ${formatValue(r.values[t])}${r.notes?.[t] ? ` (${r.notes[t]})` : ""}`,
+          ),
           ...issuesText(r),
         ].join("\n"),
         { ...r },
@@ -257,11 +295,75 @@ export function registerSimulationTools(tc: ToolContext): void {
   );
 
   tc.tool(
+    "sim_override",
+    {
+      title: "Override in simulation",
+      description:
+        'Change values inside one simulation only, to look under a layer or try a value without editing: the person\'s document, live viewer, undo history and files stay unchanged. set pins literals on patch inputs or layer properties ([{ "target": "@card_1.opacity", "value": 0 }], null for the default); ops takes value-level ops (setInput, connect, disconnect, updateLayer { props }, updatePatch { muted }). A later override of the same target replaces the earlier one. Overrides change the layer or patch itself, so they apply to every loop copy and component instance ("#n" is refused), and "@card/badge.opacity" changes every instance of card\'s component. They stay on through the person\'s edits until clear or sim_reset (unless keepOverrides), and keep the simulation\'s state unless restart is true. With only simId, lists them. Use this instead of editing and undoing.',
+      input: z.object({
+        simId: z.string(),
+        set: z
+          .array(
+            z.object({
+              target: z
+                .string()
+                .describe(
+                  '"patchId.port" or "@layerId.prop"; "@instance/layer.prop" reaches into a component.',
+                ),
+              value: z.unknown().describe("A literal or wrapper value, or null for the default."),
+              component: ComponentIdSchema.optional(),
+            }),
+          )
+          .max(50)
+          .optional(),
+        ops: z
+          .array(OpSchema)
+          .max(50)
+          .optional()
+          .describe(
+            "Value-level ops: setInput, connect, disconnect, updateLayer { id, props }, updatePatch { id, muted }.",
+          ),
+        clear: z
+          .union([z.string(), z.array(z.string()).max(50)])
+          .optional()
+          .describe(
+            'Override ids ("ov_2") or targets to drop, or "all". Applied before set and ops.',
+          ),
+        restart: z
+          .boolean()
+          .optional()
+          .describe(
+            "Start the simulation over from frame 0 with the overrides (default: keep its state).",
+          ),
+      }),
+      output: SimStateOutputSchema,
+      annotations: SIMULATION,
+    },
+    async ({ simId, set, ops, clear, restart }) => {
+      const r = await host.sim.override(simId, {
+        ...(set ? { set: set as SimOverrideSet[] } : {}),
+        ...(ops ? { ops: ops as Op[] } : {}),
+        ...(clear !== undefined ? { clear: clear === "all" ? "all" : [clear].flat() } : {}),
+        ...(restart ? { restart } : {}),
+      });
+      const lines = [`${header(r)}${r.restarted ? " · restarted from frame 0" : ""}`];
+      if (r.overrides.length) {
+        lines.push(`Overrides (${SIM_ONLY}):`);
+        for (const o of r.overrides) lines.push(`  ${o.id} ${o.summary}`);
+      } else lines.push("No overrides: the simulation runs the person's document as it is.");
+      if (r.cleared.length)
+        lines.push(`Cleared: ${r.cleared.map((o) => `${o.id} ${o.target}`).join(", ")}`);
+      lines.push(...issuesText(r));
+      return success(lines.join("\n"), { ...r });
+    },
+  );
+
+  tc.tool(
     "get_screenshot",
     {
       title: "Get screenshot",
       description:
-        'A PNG of the prototype screen ("viewer"), one layer ("@layerId", "@row#2" for a loop copy), or in the app the canvas or patch graph. Pass simId to draw a simulation\'s current frame, plus atMs for the frame that many ms later (drawn on a copy, so the session doesn\'t move). Headless servers draw the screen themselves with approximate text metrics and placeholders for video, Lottie and shaders; without simId they show the prototype once start-up animations settle (or atMs after it starts). For visual QA; read structure and values with get_outline and sim_get_values.',
+        'A PNG of the prototype screen ("viewer"), one layer ("@layerId", "@row#2" for a loop copy), or in the app the canvas or patch graph. Pass simId to draw a simulation\'s current frame (with its sim_override overrides), plus atMs for the frame that many ms later (drawn on a copy, so the session doesn\'t move). A layer target crops the whole screen to the layer\'s box, so layers in front still cover it; isolate: true draws only that layer and its children (to see the card under the top card, isolate "@card_2" or "@card#2"). Headless servers draw the screen themselves with approximate text metrics and placeholders for video, Lottie and shaders; without simId they show the prototype once start-up animations settle (or atMs after it starts). For visual QA; read structure and values with get_outline and sim_get_values.',
       input: z.object({
         docId: DocIdSchema.optional(),
         target: z
@@ -277,12 +379,18 @@ export function registerSimulationTools(tc: ToolContext): void {
           .describe(
             "Milliseconds after the simulation's current frame. Without simId: milliseconds after the prototype starts (default: once start-up animations settle).",
           ),
+        isolate: z
+          .boolean()
+          .optional()
+          .describe(
+            'With an "@layerId" target: draw only that layer and its children where they are, without the layers in front of or behind it.',
+          ),
         scale: z.number().min(0.25).max(3).optional(),
         maxWidth: z.number().int().min(64).max(1600).optional().describe("Default 800."),
       }),
       annotations: READ_ONLY,
     },
-    async ({ docId, target, simId, atMs, scale, maxWidth }) => {
+    async ({ docId, target, simId, atMs, isolate, scale, maxWidth }) => {
       if (!host.capabilities.screenshots) {
         try {
           await host.screenshot({ kind: "viewer" }, {});
@@ -302,10 +410,17 @@ export function registerSimulationTools(tc: ToolContext): void {
           message: `"${raw}" isn't a screenshot target.`,
           hint: 'Use "viewer", "@layerId" (or "@row#2" for one loop copy), or in the app "canvas" or "graph".',
         });
+      if (isolate && shot.kind !== "layer")
+        return failure({
+          code: "invalid_target",
+          message: `isolate draws one layer on its own, so it needs an "@layerId" target, not "${raw}".`,
+          hint: 'For example { "target": "@card_2", "isolate": true }, or "@card#2" for one loop copy.',
+        });
       const image = await host.screenshot(shot, {
         ...(docId !== undefined ? { docId } : {}),
         ...(simId !== undefined ? { simId } : {}),
         ...(atMs !== undefined ? { atMs } : {}),
+        ...(isolate ? { isolate } : {}),
         ...(scale !== undefined ? { scale } : {}),
         maxWidth: maxWidth ?? 800,
       });
@@ -316,9 +431,24 @@ export function registerSimulationTools(tc: ToolContext): void {
           hint: "Pass a smaller maxWidth or scale, or capture one layer.",
         });
       const lines = [
-        `${raw} · ${image.width}×${image.height}${image.timeMs !== undefined ? ` · ${roundForDisplay(image.timeMs)} ms` : ""}${simId !== undefined ? ` · ${simId}${atMs ? ` + ${roundForDisplay(atMs)} ms (session not advanced)` : ""}` : host.kind === "headless" ? (atMs !== undefined ? ` · ${roundForDisplay(atMs)} ms after the prototype starts` : " · after start-up animations settle") : ""}`,
+        `${raw}${isolate ? " (isolated)" : ""} · ${image.width}×${image.height}${image.timeMs !== undefined ? ` · ${roundForDisplay(image.timeMs)} ms` : ""}${simId !== undefined ? ` · ${simId}${atMs ? ` + ${roundForDisplay(atMs)} ms (session not advanced)` : ""}` : host.kind === "headless" ? (atMs !== undefined ? ` · ${roundForDisplay(atMs)} ms after the prototype starts` : " · after start-up animations settle") : ""}`,
         ...(image.notes ?? []).map((n) => `Note: ${n}`),
       ];
+      // Say when the picture differs from the person's document because of sim_override, or could.
+      const overridden = host.sim.list().filter((s) => s.overrides?.length);
+      const drawn = simId !== undefined ? overridden.find((s) => s.simId === simId) : undefined;
+      if (drawn)
+        lines.push(
+          `Note: ${simId} has ${plural(drawn.overrides!.length, "override")} the person's document doesn't: ${drawn.overrides!.map((o) => o.summary).join("; ")}.`,
+        );
+      else if (simId === undefined && overridden.length) {
+        const shown = docId ?? (await host.getDocument()).docId;
+        const others = overridden.filter((s) => s.docId === shown).map((s) => s.simId);
+        if (others.length)
+          lines.push(
+            `Note: this shows the person's document, without the overrides in ${others.join(", ")}; pass simId: "${others[0]}" to see them.`,
+          );
+      }
       // No structuredContent: clients that prefer it (Claude Code) would drop the image block.
       return {
         content: [

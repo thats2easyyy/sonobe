@@ -49,7 +49,9 @@ export async function documentInfo(
   if (presence.length)
     lines.push(`Working: ${presence.map((p) => `${p.author.name} — ${p.intent}`).join("; ")}`);
   if (sims.length)
-    lines.push(`Simulations: ${sims.map((s) => `${s.simId} (frame ${s.frame})`).join(", ")}`);
+    lines.push(
+      `Simulations: ${sims.map((s) => `${s.simId} (frame ${s.frame}${s.overrides?.length ? `, ${plural(s.overrides.length, "sim_override")}` : ""})`).join(", ")}`,
+    );
   return {
     text: lines.join("\n"),
     data: {

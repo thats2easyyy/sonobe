@@ -173,6 +173,12 @@ export interface ScreenshotOptions {
    */
   atMs?: number;
   component?: Id;
+  /**
+   * With a layer target: draw only that layer and its children, where they are in the frame, without
+   * the layers in front of or behind it (or its parents' opacity and clipping). Drawn from a
+   * SceneFrame, so without simId the app draws a fresh run like headless servers do.
+   */
+  isolate?: boolean;
   /** Device pixel scale (default 1). */
   scale?: number;
   /** Downscale so the image is at most this wide. */
@@ -343,6 +349,12 @@ export interface SimState {
   documentUpdated?: boolean;
   /** Runtime issues raised since the last call (unimplemented patches, script errors...). */
   issues: SimIssue[];
+  /** sim_override changes this session simulates on top of the person's document (absent when none). */
+  overrides?: SimOverride[];
+  /** Overrides the person's newer document no longer accepts, dropped since the last call. */
+  droppedOverrides?: { target: string; reason: string }[];
+  /** sim_reset only: the overrides the reset cleared. */
+  clearedOverrides?: SimOverride[];
 }
 
 export interface SimResetOptions {
@@ -351,6 +363,54 @@ export interface SimResetOptions {
   simId?: string;
   seed?: number;
   fps?: 60 | 120;
+  /** With simId: keep the session's overrides (default: a reset clears them). */
+  keepOverrides?: boolean;
+}
+
+/** A literal to pin on a patch input or layer property inside one simulation. */
+export interface SimOverrideSet {
+  /**
+   * "patchId.port" or "@layerId.prop". An instance path ("@card/badge.opacity", "card/tap.enabled")
+   * changes the component the instance runs, so every instance of it.
+   */
+  target: string;
+  /** A literal or wrapper value, or null for the declared default. */
+  value: unknown;
+  /** The component the target lives in (default: the root, or the instance path's component). */
+  component?: Id;
+}
+
+/** sim_override: change values inside one simulation without touching the person's document. */
+export interface SimOverrideRequest {
+  set?: SimOverrideSet[];
+  /** Value-level ops: setInput, connect, disconnect, updateLayer { props }, updatePatch { muted }. */
+  ops?: Op[];
+  /** Override ids ("ov_2") or targets to drop, or "all". Applied before set and ops. */
+  clear?: string[] | "all";
+  /** Start the simulation over from frame 0 with the resulting overrides (default: keep its state). */
+  restart?: boolean;
+}
+
+/** One override a session simulates. */
+export interface SimOverride {
+  /** "ov_1": pass it to clear. */
+  id: string;
+  /** What it changes, as written ("@card_1.opacity", "grow_spring.number", "pop (muted)"). */
+  target: string;
+  /** The component it changes. */
+  component: Id;
+  /** "@card_1.opacity = 0 (was 1)". */
+  summary: string;
+}
+
+export interface SimOverrideResult extends SimState {
+  overrides: SimOverride[];
+  /** Overrides this call added or replaced. */
+  applied: SimOverride[];
+  /** Overrides this call cleared. */
+  cleared: SimOverride[];
+  /** The session started over from frame 0. */
+  restarted: boolean;
 }
 
 export interface SimHit {
@@ -421,10 +481,17 @@ export interface SimTraceResult extends SimState {
   times: number[];
   values: Record<string, unknown[]>;
   summaries: Record<string, TraceSummary | null>;
+  /**
+   * advance: true only: frames the session stepped past durationMs to finish the scheduled events
+   * (a drag's release), so no pointer is left down.
+   */
+  framesAfterTrace?: number;
 }
 
 export interface SimValuesResult extends SimState {
   values: Record<string, unknown>;
+  /** Plain-words notes on some values, by target ("overridden in this simulation, was 1"). */
+  notes?: Record<string, string>;
 }
 
 export interface SimHost {
@@ -433,6 +500,8 @@ export interface SimHost {
   step(simId: string, options: SimStepOptions): Promise<SimStepResult>;
   trace(simId: string, options: SimTraceOptions): Promise<SimTraceResult>;
   values(simId: string, targets: string[]): Promise<SimValuesResult>;
+  /** Change values inside one session only (sim_override); the person's document never changes. */
+  override(simId: string, request: SimOverrideRequest): Promise<SimOverrideResult>;
   /** Open sessions (for get_document_info). */
   list(docId?: Id): SimState[];
 }
