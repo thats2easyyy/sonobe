@@ -228,6 +228,30 @@ describe("InspectorPanel", () => {
     expect(s.runtime.readValue("@card.repeat")).toBe(4);
   });
 
+  it("says Auto for a Repeat left on Auto, and nudges a mixed selection's counts each from its own", () => {
+    const s = mount(
+      build([
+        { op: "addLayer", layer: { id: "a", type: "group", name: "A", props: { repeat: 3 } } },
+        { op: "addLayer", layer: { id: "b", type: "group", name: "B", props: { repeat: 5 } } },
+        { op: "addLayer", layer: { id: "c", type: "group", name: "C" } },
+      ]),
+    );
+    const repeat = (id: string) => findLayer(main(s).layers, id)!.layer.props.repeat;
+    select(s, { layers: ["c"] });
+    expect(input("Repeat").placeholder).toBe("Auto");
+    expect(input("Repeat").getAttribute("aria-valuetext")).toBe("Auto");
+    select(s, { layers: ["a", "b"] });
+    expect(input("Repeat").getAttribute("aria-valuetext")).toBe("Mixed");
+    act(() => input("Repeat").focus());
+    key(input("Repeat"), "ArrowUp");
+    expect([repeat("a"), repeat("b")]).toEqual([4, 6]);
+    // Auto counts as none.
+    select(s, { layers: ["a", "c"] });
+    act(() => input("Repeat").focus());
+    key(input("Repeat"), "ArrowUp");
+    expect([repeat("a"), repeat("c")]).toEqual([5, 1]);
+  });
+
   it("drives a layer property with a patch from its port and its context menu", () => {
     layoutStore.getState().setViewMode("canvas");
     const s = mount(fixture());
