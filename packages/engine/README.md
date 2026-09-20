@@ -23,6 +23,7 @@ const frame = rt.step(dt);                  // advance one frame, get the SceneF
 rt.getValue("pop.output");                  // item 0 of a loop unless "#n"
 rt.getValue("@card.scale#2");               // layer props and outputs too
 rt.getValue("card#2/toggle.on");            // inside component instances
+rt.inspect("@card.position#3");             // { value, copies?, note? }: why a value reads as nothing
 rt.trace(["pop.output"], 1000);             // simulate on a clone, with summaries
 rt.updateDocument(nextDoc);                 // hot swap, keeping compatible state
 rt.refreshScene();                          // re-layout the edited document without advancing time
@@ -38,13 +39,15 @@ rt.refreshScene();                          // re-layout the edited document wit
 | `scene()` | The last produced frame, stepping once if there is none. |
 | `getValue(address)` | Reads a value; see [Addressing values](#addressing-values). Loops give item 0 unless the address ends in `#n`; plain values broadcast to any `#n`. |
 | `getRawValue(address)` | Like `getValue`, but returns whole Loops. |
+| `inspect(address)` | `{ value, copies?, note? }`: what `getValue` reads, how many copies a layer drew last frame (or a component patch's instance ran), and a note when the value reads as nothing: the layer drew 0 copies (quoting its `empty_loop` warning), `#n` is past its copies, or why a loop is empty. |
 | `trace(targets, durationMs, events?)` | See [Trace](#trace). |
 | `updateDocument(doc)` | Recompiles and keeps state for patches whose id, type, and component path are unchanged. |
 | `refreshScene()` | Rebuilds layout and the scene from current values (after `updateDocument`) without evaluating patches or advancing time, so `hitTest` and `scene()` reflect the edit. |
 | `restart()` | Resets everything now (see [Restart](#restart)). |
 | `hitTest(x, y)` | Front-most layer under a point, then its interactive ancestors, from the last scene. |
+| `setDevice(overrides)` | Replaces the `device` overrides while the prototype runs (the phone turning, the appearance switching). Patches read them from the next frame; they outlive restarts, and traces replay with them. |
 | `setLayerOutputs(key, values)` | Host-measured layer outputs by SceneNode key (`naturalSize`, `loading`, `currentTime`, `duration`...). Readable from the next evaluation. |
-| `issues()` | Compile issues plus the most recent 200 runtime issues, deduplicated. |
+| `issues()` | Compile issues plus the most recent 200 runtime issues, deduplicated, each with an optional `hint` and `suggestions` (ops that fix it). |
 | `patchTimings()` | Average evaluate time per patch (all instances and loop indices) over the last ~1 s of frames, slowest first: `{ patchId, componentPath, ms }`. Empty while profiling is off. |
 | `setProfiling(on)` | Turns timing on or off (off discards collected timings). `options.profile` turns it on at creation. When off, evaluation does no timing work. |
 | `needsNextFrame` | Something is still moving: a patch called `requestNextFrame()` last frame, or a feedback loop's back-edge would read a different value next frame. |
@@ -76,6 +79,7 @@ Each `step`:
 | `@layerId.key` | A layer prop, layer output, or a component layer's published output. |
 | `instancePath/patchId.port` | A patch inside a component instance: live outputs and inputs of that instance. |
 | `instancePath/$in.key` | A published input as the instance sees it. |
+| `$knob.knobId` | A knob's running value: one constant everywhere, never `#n`. |
 | `@instancePath/layerId.key` | A layer inside a layer component instance. |
 
 `instancePath` is a `/`-separated list of instance ids from the root, each with an optional `#k` copy index: `card`, `card#2`, `card#2/badge`. It matches SceneNode key prefixes, so a hit-test key like `card#2/button` becomes `@card#2/button.size`. A leading root component id is accepted too (`main/card#2/toggle.on`), matching `ctx.componentPath`. An instance id may name a `component` patch or a `componentInstance` layer. Copy indices only select copies of instances that are actually replicated; an unreplicated instance ignores `#k`. The loop-index suffix still comes last: `card#2/list.output#3`. Unknown paths read as `undefined`.
@@ -111,6 +115,8 @@ Each frame an input receives its driver's value coerced to the port's declared t
 - **Per-index state.** `definition.state()` runs once per instance path × index. When the count shrinks, removed indices are disposed and dropped; new indices start fresh.
 - **Sticky outputs.** An output keeps its last written value for that index until written again. Pulse outputs reset to false before each evaluation.
 - Loops are capped at 10,000 items (`loop_limit`).
+- **Empty loops across frames.** Last frame's empty loop never erases this frame's copies. A back-edge that carries an empty loop into a per-item input reads the input's default, as on frame 0 (a whole-loop input still sees the empty loop), and a component's copy count skips an empty loop it reads through a back-edge. Within one frame an empty loop still wins.
+- **`empty_loop`.** When an empty loop erases a non-empty one, or a patch explains its empty output with `ctx.explainEmpty(reason, fixes)` (Loop Select, for indices past the end), and a layer or component makes 0 copies, the runtime raises a warning naming the site, where the empty loop started, what it erased and any feedback cable, with fixes as setInput suggestions. It needs two frames in a row after frame 0, lasts while the site has 0 copies, and clears on `updateDocument`. Only frames where something was erased or explained pay for the walk.
 
 ### Pulses
 
@@ -147,6 +153,8 @@ A receiver resolves statically by trimmed name, scope, and type: local looks onl
 - Props resolve per layer: literal, link (coerced to the prop type), or the layer type's default.
 - **Null defaults.** Props declared with a null default (`cornerRadii`, `gradient`, `image`, `video`, `shape`, `effects`...) stay `null` in `SceneNode.props` while unset, when the document stores `null`, and when a link delivers `null`; they never become zero arrays.
 - **Replication.** A layer whose bound props carry Loops replicates, one copy per item, keyed `layerId#n`. Descendants of copy *n* take item *n* of their own looped props and are keyed `childId#n`. They don't replicate again, because loops of loops come from components.
+- **Repeat.** A set `repeat` prop alone decides the count: a whole number makes that many copies, and a linked loop one per item (a linked plain number is rounded down; anything else makes 1 copy and raises `repeat_not_a_count`). The layer's other looped props are then read per copy (`copy % length`), and an empty one reads the prop's default. `props.repeat` and `@layer.repeat` hold the count. A Repeat under a layer that already makes copies is ignored.
+- A layer that drew 0 copies last frame reads, for per-item readers (Interaction, a layer property), as one reference, exactly as before the first frame, so an Interaction on it runs once and stays idle. Whole-loop readers like Loop Count still see an empty loop.
 - `enabled: false` sets `visible: false`. A Color Fill fills its parent. A Clone is emitted as a leaf with `props.source`, and the renderer draws the copy.
 - `SceneNode.transform` is `mat4.compose` with the laid-out top-left, pivot, scale × Scale XYZ, rotations, and zPosition. `worldTransform` is the parent's world × local.
 - **Paint order.** `roots` and `children` stay in document order, so keys and "first copy" lookups are stable. `paintOrder(nodes)` gives the order siblings draw and take touches, back to front: zPosition ascending, ties in document order, missing or non-finite as 0. It only reorders siblings; a child never leaves its parent. The hit test, the DOM and SVG renderers, the renderer's cursor query and the editor canvas all use it. It returns the same array when nothing is lifted, and `paintIndices` returns null then. `props` holds every resolved prop, text styles included. The background comes from `project.background` (white by default), and the scene size is the device screen size.
@@ -157,6 +165,7 @@ A receiver resolves statically by trimmed name, scope, and type: local looks onl
 - A `{ "layer": id }` input becomes a `LayerRef`. When that layer was replicated on the previous frame it becomes a Loop of references with `instance` set, so an Interaction on a looped layer evaluates per copy and its outputs loop.
 - References are scoped to the instance that created them: `services.pointer(ref)` inside `"main/card#2"` targets `card#2/button`.
 - Layer outputs: host-reported values from `setLayerOutputs`; Text `textSize` from the previous layout; Text Field `value`, `isFocused`, and `submitted` from `text`, `focus`, and `submit` events. Changing a Text Field's Text prop replaces what was typed.
+- Layer pulse props (Text Field's `setText`, `beginEditing`, `endEditing`) fire like a patch's pulse inputs, on a pulse or a connected boolean's rising edge. A `layerPulse` input event (`{ layerId, key?, prop }`) fires one directly, as the Inspector's Fire button does; traces replay it.
 
 ### Input and gestures
 
@@ -178,7 +187,7 @@ A receiver resolves statically by trimmed name, scope, and type: local looks onl
 | `layerInfo(ref)` | Previous frame's geometry (see above). |
 | `layerOutput(ref, key)` | A layer output by reference: host-reported, else derived (`textSize`, text field state), else undefined. |
 | `mediaInfo(ref)` | `{ status, width, height, duration, name }` for an AssetRef: `options.mediaInfo` first; then outputs reported for a layer showing that reference (`naturalSize`, `loading`, `duration`) over the document's asset record. An asset id missing from the document is `"error"`; an unseen URL is undefined. |
-| `device()` | `project.device` preset plus `options.device` overrides; `orientation` events swap the screen size, rotate safe areas, and set `orientationAngle` when they carry `angle`. `timeZone` is `options.device.timeZone`, else `"UTC"` when deterministic, else the host's IANA zone. |
+| `device()` | `project.device` preset plus the host's overrides (`options.device`, replaced by `setDevice`); `orientation` events swap the screen size, rotate safe areas, and set `orientationAngle` when they carry `angle`. `timeZone` is `options.device.timeZone`, else `"UTC"` when deterministic, else the host's IANA zone. |
 | `measureText(text, style, maxWidth)` | Measures with the injected `TextMeasurer` (the same rules as Text layer layout). |
 | `readScript(file)` | `doc.scripts[file]` (a leading `scripts/` is accepted), or undefined. |
 | `log(level, ...args)` | Calls `options.onLog` with the source patch. Warnings and errors also become issues (`patch_warning`, `patch_error`). |
@@ -190,7 +199,7 @@ Runtime issues raised while a patch inside a component instance evaluates carry 
 
 ### updateDocument
 
-`updateDocument` first tries `updateLiterals`: when the new document differs only in literal patch inputs, literal layer properties, or patch positions (outside cycles), it rewrites the compiled constant bindings in place, so scrubbing a value, dragging a layer, or a small agent write costs almost nothing and keeps all state. Anything else recompiles and moves per-path records to nodes with the same `componentPath:id` and type. State, sticky outputs, and input history carry over, remapped by port key, so springs keep their velocity. Outputs whose type changed restart from their defaults. Delay One Frame resets when its variant changes. Removed or retyped patches dispose. Variables re-resolve. The scene updates on the next step, or immediately with `refreshScene()`.
+`updateDocument` first tries `updateLiterals`: when the new document differs only in literal patch inputs, literal layer properties, or patch positions (outside cycles), it rewrites the compiled constant bindings in place, so scrubbing a value, dragging a layer, or a small agent write costs almost nothing and keeps all state. Inputs that read `$knob.<id>` compile to constants registered as knob readers, so a knob tune or a preset switch is written in place too; a knob that goes, changes type or options, or appears for a link that named it recompiles. Anything else recompiles and moves per-path records to nodes with the same `componentPath:id` and type. State, sticky outputs, and input history carry over, remapped by port key, so springs keep their velocity. Outputs whose type changed restart from their defaults. Delay One Frame resets when its variant changes. Removed or retyped patches dispose. Variables re-resolve. The scene updates on the next step, or immediately with `refreshScene()`.
 
 ### Restart
 

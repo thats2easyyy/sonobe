@@ -7,12 +7,14 @@ The Electron shell around the editor: windows, native menus, project files, the 
 | `electron/main.ts` | Lifecycle, windows, IPC, the MCP endpoint, phone preview, pop-out viewer, simulation frames |
 | `electron/preload.ts`, `electron/host-api.d.ts` | `window.sonobeHost`, the API the editor uses |
 | `electron/app-host.ts` | The `SonobeHost` MCP tools run against, bridged to the editor's RPC handlers |
+| `electron/rpc.ts` | Main's calls into the editor page. Calls a reloading or crashed page hadn't answered fail at once (`page_gone`, MCP `editor_reloaded`), and new calls wait for the next page's handlers |
+| `electron/lan-preview.ts` | The phone preview server: the player page and its CSP, and the WebSocket that streams revisions and restarts |
 | `electron/commands.ts`, `electron/menu.ts` | Menu commands and accelerators (checked against the editor's shortcuts) |
 | `electron/secrets.ts` | Keychain-backed secrets (Electron `safeStorage`) |
 | `electron/design-capture.ts`, `electron/symbols.ts` | Design import's hidden capture window, and the SF Symbols it draws on macOS |
 | `electron/drafts.ts` | Drafts of unsaved work in `userData/Drafts`, their IPC, and quitting on SIGTERM, SIGINT or SIGHUP |
 | `native/sfsymbol/` | `sfsymbol`, a small Swift program that draws SF Symbols as SVG for design imports |
-| `player/` | The web player for phones and the pop-out viewer |
+| `player/` | The web player for phones and the pop-out viewer: the editor viewer's platform services, the phone's device info, the three-finger menu and the Sonobe Viewer bridge |
 | `scene/` | A hidden page that draws simulation frames for `get_screenshot({ simId })` |
 | `scripts/` | `build.mjs`, `sfsymbol.ts`, `icons.mjs`, `package.mjs`, `verify-package.mjs` |
 

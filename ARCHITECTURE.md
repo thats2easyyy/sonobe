@@ -51,6 +51,7 @@ sonobe/
 │   └── figma-plugin/    Sonobe Capture for Figma: copy a selection as a design capture
 ├── examples/       canonical example prototypes (*.sonobe folders), used by docs, lessons, tests and list_examples
 ├── evals/          behavioral evals: Claude Code builds each case through MCP, checked by simulation
+├── .github/        workflows/ci.yml: the checks CI runs (§12)
 └── docs/           research/, guides/ (numbered tutorials), patches/ (generated reference), assets/ (README screenshots)
 ```
 
@@ -372,7 +373,7 @@ input events (pointer/keyboard/device) ─┐
 - Touches bubble to ancestors. Layers may declare `hitSlop`.
 - Tap fires on touch-up if the touch moved < 10 pt. On that frame, `position` still holds the last touch position (a documented deviation from Origami, where it resets first).
 - Long press = held and stationary (10 pt slop) for the duration.
-- Recognizers: interaction (down/tap/position/localPosition/force), gesture (down/tap/position/translation/velocity/startPosition/localPosition), drag (position/dragging/velocity), scroll/momentum, swipe, hover, keyboard, mouse, trackpad, device motion (player only). Finger speed comes from gesture or drag; interaction has no velocity.
+- Recognizers: interaction (down/tap/position/localPosition/force), gesture (down/tap/position/translation/velocity/startPosition/localPosition), drag (position/dragging/velocity), scroll/momentum, swipe, hover, keyboard, mouse, trackpad, device motion (on phones, through the web player). Finger speed comes from gesture or drag; interaction has no velocity.
 
 ### 5.6 Runtime API
 
@@ -541,7 +542,7 @@ Layer types are declared in `@sonobe/core` (`layerTypes.ts`) with typed props (k
   - Panels register optional methods only while they're mounted, so main can tell what's there: `canvas.bounds`, `graph.bounds` and `viewer.layerBounds` for screenshots (`graph.bounds` waits for a fit or reveal to stop moving), and the patch editor's `graph.geometry({ component })`: `{ component, shownComponent, revision, nodes: [id, x, y, width, height, measured][] }` for the component it shows, where `measured` is 0 for off-screen nodes React Flow hasn't rendered (their size is the editor's estimate) and `revision` is -1 while the drawn graph lags the document mid-gesture.
 - **Menus and clipboard.** Menu commands arrive through `sonobeHost.onCommand(id)`. Cut, Copy, and Paste are native roles, so the editor handles DOM `copy`/`cut`/`paste` events.
 - **Env switches** read by the desktop main process (`apps/desktop/electron/env.ts`): `SONOBE_DEV_URL`, `SONOBE_MUTE`, `SONOBE_MCP_PORT`, `SONOBE_MCP`, `SONOBE_HOME`, `SONOBE_USER_DATA`, `SONOBE_EDITOR_DIST`, `SONOBE_TEST`, `SONOBE_LAN` (start the phone preview server at launch) and `SONOBE_LAN_PORT` (a fixed phone preview port).
-- Three switches are read elsewhere: `SONOBE_GUIDES_DIR` overrides the MCP agent guides folder (`packages/mcp/src/guides.ts`, used by bundles); `SONOBE_NODE` picks the Node binary for the packaged `sonobe` CLI launcher (`apps/desktop/scripts/build.mjs`), which otherwise uses the app's own runtime; and `SONOBE_SFSYMBOL` names the sfsymbol helper that draws SF Symbols in headless design imports (`packages/mcp/src/headless.ts`, §13). The launcher sets it to the app's `Resources/bin/sfsymbol` when that exists; without it, headless imports keep SF Symbol placeholders.
+- Four switches are read elsewhere: `SONOBE_GUIDES_DIR` overrides the MCP agent guides folder (`packages/mcp/src/guides.ts`, used by bundles), and `SONOBE_EXAMPLES_DIR` the examples folder `list_examples` and `get_example` read (`packages/mcp/src/examples.ts`, §10); `SONOBE_NODE` picks the Node binary for the packaged `sonobe` CLI launcher (`apps/desktop/scripts/build.mjs`), which otherwise uses the app's own runtime; and `SONOBE_SFSYMBOL` names the sfsymbol helper that draws SF Symbols in headless design imports (`packages/mcp/src/headless.ts`, §13). The launcher sets it to the app's `Resources/bin/sfsymbol` when that exists; without it, headless imports keep SF Symbol placeholders.
 - **SF Symbols helper.** `apps/desktop/native/sfsymbol/main.swift` is a small macOS program. `scripts/build.mjs` compiles it with `swiftc` (cached by source and compiler) into `dist/bin/sfsymbol`, electron-builder ships it outside app.asar in `Resources/bin`, and `scripts/verify-package.mjs` checks that it draws. Without Xcode's command line tools the build only warns. `electron/symbols.ts` gives design captures its renderer on macOS 13 or later.
 - **Connect Claude** reads `getMcpStatus().cliPath`, the app's bundled CLI launcher (`Resources/cli/sonobe`, `sonobe.cmd` on Windows), so the setup it shows uses a full path instead of a `sonobe` on PATH.
 
@@ -625,7 +626,7 @@ The web player (`apps/desktop/player`) runs the real engine and DOM renderer ful
 - **Knobs.** `set_knobs` compiles to the knob ops in one batch, in a fixed order (presets with locks held back, `convertVariables`, knobs and values, connections, removals, locks), so one call can make, fill and lock a reference preset; it matches knobs and presets by id or name and reports what it inferred (type, value, range) for new knobs. `apply_knob_preset` changes what the person's viewer runs; `sim_reset({ preset, knobs })` runs another preset or values in one simulation only. A session simulates `applyOverrides(withKnobOverride(personDoc, knobs), ops)`, one mechanism for both, and a reset clears both unless `keepOverrides`. `sim_get_values` reads `$knob.<id>`. `set_values` skips knob-driven inputs and points to `set_knobs`.
 - **Runtime problems reach agents two ways.** sim_* results list the issues a simulation raised since the last call (with hints and suggestions), and in the app `get_diagnostics` adds a Live viewer section: what the person's running prototype reports right now, read through the `viewer.diagnostics` RPC because it changes without a new revision, including the restart offer as `stale_state` (§9). The headless host has no live viewer and leaves the section out.
 - **Restarting the live prototype.** `restart_viewer` calls the optional `SonobeHost.restartViewer`: in the app, the `viewer.restart` RPC restarts the editor's runtime as ⌘R does, and phones and the pop-out viewer follow (§9.2). The headless host has no live viewer, so the tool returns `no_live_viewer` and points to `sim_reset`.
-- **Resources:** guides, patch reference, document outline.
+- **Resources:** guides, patch reference, and each document's outline and diagnostics (both publish `resources/updated` on a new revision).
 - **Prompts:** `import_screen`, `prototype_interaction`, `debug_interaction`, `explain_prototype`.
 
 **Long calls: progress and cancellation** (`progress.ts`). Every tool handler gets a `ToolWork` as its third argument, `(args, ctx, work)`.
@@ -671,8 +672,8 @@ patch pop popAnimation number←toggle.on bounciness←$knob.pop_bounce speed=10
 ## 11. Learnability
 
 - **Generated reference.** Every patch has summary, behavior, ports, examples, "pairs well with", and common mistakes. The same content serves the patch picker, hover docs, `describe_patch_types`, and `docs/patches/`.
-- **Concept guides** (short, visual): ISAT (Interaction → Switch → Animation → Transition), states vs pulses, loops, coordinates and layout, springs and feel, components, debugging taps.
-- **Recipes:** 15+ canonical prototypes (tap to zoom, toggle/like, scrolling list, carousel, tab bar, collapsing header, pull to refresh, bottom sheet, drag and snap, swipe cards, long-press menu, timed sequence, stories, onboarding, grid with loops). Each has a runnable example project and step-by-step text.
+- **Concept guides** (short, visual): ISAT (Interaction → Switch → Animation → Transition), states vs pulses, loops, coordinates and layout, springs and feel, components, knobs and presets, debugging taps.
+- **Recipes:** 15+ canonical prototypes (tap to zoom, toggle/like, scrolling list, carousel, tab bar, collapsing header, pull to refresh, bottom sheet, drag and snap, swipe cards, long-press menu, timed sequence, stories, onboarding, grid with loops, and a swipe deck built from an imported design with knobs and a locked reference preset). Each has a runnable example project and step-by-step text, and Claude reads them as patterns through `list_examples` and `get_example` (§10).
 - **In-app lessons:** step-by-step with validation that checks document state through the same queries the MCP uses.
 - **Explain:** a deterministic plain-language description of any graph selection, at three audience levels.
 - **Visibility:** pulse sparks, state glow, loop badges, live values, spring curve previews, a "show hit targets" overlay, and diagnostics that suggest fixes.
@@ -683,7 +684,8 @@ patch pop popAnimation number←toggle.on bounciness←$knob.pop_bounce speed=10
 
 - `npm run typecheck`: tsc across all packages.
 - `npm test`: Vitest. Golden tests cover spring curves against the Rebound formulas, pulse and loop semantics, ops/inverse round-trips, and canonical serialization stability.
-- `npm run e2e`: Playwright (Chromium project only) against the editor served by Vite on port 5199, with screenshot artifacts. This is what CI runs.
+- `npm run e2e`: Playwright (Chromium project only) against the editor served by Vite on port 5199 (`SONOBE_E2E_PORT` picks another), with screenshot artifacts.
+- CI (`.github/workflows/ci.yml`) runs `npm run typecheck`, `npm test` and `npm run e2e` on every push to main and every pull request, on macOS with Node 24, after installing Playwright's Chromium, so `npm test` also runs the player's mobile Chromium test and builds and checks the sfsymbol helper.
 - `npm run smoke -w @sonobe/desktop`: the muted Electron end-to-end run (`apps/desktop/tests/smoke.mjs`, Playwright `_electron`) covering the host API, the MCP loop, the phone preview and the pop-out viewer. It builds the shell and editor, runs by hand, and isn't part of `npm run e2e` or CI. `SONOBE_SMOKE_SKIP_EDITOR_BUILD=1` reuses `apps/editor/dist`. `npm run smoke:drafts -w @sonobe/desktop` (after building both) kills the app with SIGTERM and SIGKILL and recovers the draft.
 - `npm run test:ios`: Sonobe Viewer's Swift unit tests and UI tests on an iOS Simulator (`apps/ios/scripts/test.mjs`), against the real web player and LAN preview server, followed by a check of the app's log for the haptics the UI test's taps played. It needs macOS with Xcode, runs by hand, and isn't part of `npm run e2e` or CI. The player's side of the bridge runs in `npm test` (`apps/desktop/player/*.test.ts`; `player.browser.test.ts` drives mobile Chromium and skips without Playwright's browser).
 - Examples must load, validate with zero errors, and simulate their scripted interactions (`examples/*/test.json`).

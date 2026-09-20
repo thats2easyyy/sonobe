@@ -1,6 +1,6 @@
 /**
- * The user docs agree with the code: README.md, ARCHITECTURE.md, ROADMAP.md, the guides and the example
- * READMEs. Each test checks one kind of claim against the thing it describes, so docs can't drift from
+ * The user docs agree with the code: README.md, ARCHITECTURE.md, ROADMAP.md, CLAUDE.md, the guides, the
+ * MCP and integration READMEs, and the example READMEs. Each test checks one kind of claim against the thing it describes, so docs can't drift from
  * the product without a test failing.
  */
 
@@ -9,9 +9,9 @@ import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { VALUE_TYPES, type PatchSpec } from "@sonobe/core";
+import { OP_KINDS, VALUE_TYPES, type PatchSpec } from "@sonobe/core";
 import { estimateSettleTime, fromBouncinessSpeed, fromDurationBounce, sampleSpringCurve, SPRING_PRESETS, summarizeSeries, toResponseDampingFraction } from "@sonobe/engine";
-import { createHeadlessHost } from "@sonobe/mcp";
+import { createHeadlessHost, GUIDE_TOPICS, PROMPT_NAMES, TOOL_NAMES } from "@sonobe/mcp";
 import { BEHAVIORS, SPECS } from "@sonobe/patches";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { runCli } from "./cli.ts";
@@ -379,6 +379,111 @@ describe("ARCHITECTURE.md contract lists", () => {
     expect([field("type"), field("name"), field("category"), field("tier"), field("summary")]).toEqual([JSON.stringify(spec.type), JSON.stringify(spec.name), JSON.stringify(spec.category), String(spec.tier), JSON.stringify(spec.summary)]);
     const ports = [...catalog!.body.matchAll(/\{ "key": "(\w+)", "name": "([^"]+)", "type": "(\w+)"/g)].map((m) => [m[1], m[2], m[3]]);
     expect(ports).toEqual([...spec.inputs, ...spec.outputs].map((p) => [p.key, p.name, p.type]));
+  });
+});
+
+// ---------------------------------------------------------------------------------------------------
+// MCP tools, prompts, guide topics and op kinds
+// ---------------------------------------------------------------------------------------------------
+
+const NUMBER_WORDS = ["zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten"];
+const countOf = (word: string) => (/^\d+$/.test(word) ? Number(word) : NUMBER_WORDS.indexOf(word.toLowerCase()));
+const backticked = (text: string) => [...text.matchAll(/`([^`]+)`/g)].map((m) => m[1]!);
+const toolLike = (text: string) => backticked(text).filter((name) => /^[a-z]+(?:_[a-z]+)+$/.test(name));
+
+/** The docs that describe the MCP surface to people and to Claude. */
+const SURFACE_DOCS = ["README.md", "ARCHITECTURE.md", "CONTRIBUTING.md", "docs/guides/11-working-with-claude.md", "packages/mcp/README.md", "integrations/claude-code/README.md", "integrations/claude-desktop/README.md", "integrations/claude-code/skills/sonobe/SKILL.md"].map((file) => ({ file, text: read(file) }));
+
+describe("tool, prompt and op lists agree with the code", () => {
+  it("each tool table lists every tool in TOOL_NAMES once, and its groups are the ones the counts name", () => {
+    const tables = [
+      { file: "ARCHITECTURE.md", rows: tableRows(section(read("ARCHITECTURE.md"), "10.")).filter(([group]) => group !== "Group") },
+      { file: "packages/mcp/README.md", rows: tableRows(section(read("packages/mcp/README.md"), "Tools")).filter(([group]) => group !== "Group") },
+    ];
+    for (const { file, rows } of tables) {
+      // Parentheses add notes ("`sim_reset` (with `preset` and `knobs`)"), not tools.
+      const listed = rows.flatMap((row) => backticked((row[1] ?? "").replace(/\([^)]*\)/g, "")));
+      expect([...listed].sort(), file).toEqual([...TOOL_NAMES].sort());
+      expect(rows.length, file).toBe(7);
+    }
+    for (const { file, text } of SURFACE_DOCS) {
+      for (const m of text.matchAll(/\b(\d+|[a-z]+) (?:MCP )?tools in (\w+) groups\b/g)) {
+        expect(countOf(m[1]!), `${file}: ${m[0]}`).toBe(TOOL_NAMES.length);
+        expect(countOf(m[2]!), `${file}: ${m[0]}`).toBe(tables[0]!.rows.length);
+      }
+      for (const m of text.matchAll(/\bMCP server with (\d+) tools\b/g)) expect(Number(m[1]), `${file}: ${m[0]}`).toBe(TOOL_NAMES.length);
+    }
+  });
+
+  it("names every prompt wherever it lists or counts them", () => {
+    let checked = 0;
+    for (const { file, text } of SURFACE_DOCS) {
+      for (const line of lines(text)) {
+        const prompts = toolLike(line).filter((name) => (PROMPT_NAMES as readonly string[]).includes(name));
+        if (prompts.length > 1) {
+          checked++;
+          expect(prompts, `${file}: ${line}`).toEqual([...PROMPT_NAMES]);
+        }
+        for (const m of line.matchAll(/\b([a-z]+|\d+) (?:ready-made )?prompts\b/gi)) {
+          if (countOf(m[1]!) < 0) continue;
+          checked++;
+          expect(countOf(m[1]!), `${file}: ${line}`).toBe(PROMPT_NAMES.length);
+        }
+      }
+    }
+    expect(checked).toBeGreaterThan(5);
+  });
+
+  it("lists every get_guide topic where the topics are listed", () => {
+    const skill = lines(read("integrations/claude-code/skills/sonobe/SKILL.md")).find((line) => line.startsWith("`get_guide` topics:"))!;
+    expect(backticked(skill).slice(1)).toEqual([...GUIDE_TOPICS]);
+    const readme = /served by `get_guide`: ([^.]+)\./.exec(read("packages/mcp/README.md"))![1]!;
+    expect(readme.split(/, | and /)).toEqual([...GUIDE_TOPICS]);
+  });
+
+  it("the op lists name every op kind applyOps takes, and nothing else", () => {
+    const opLike = (name: string) => /^[a-z]+[A-Z][A-Za-z]*$/.test(name) || OP_KINDS.includes(name as never);
+    const architecture = lines(section(read("ARCHITECTURE.md"), "3.5")).find((line) => line.startsWith("Op kinds"))!;
+    const graphBasics = lines(read("packages/mcp/guides/graph-basics.md")).find((line) => line.startsWith("Op kinds:"))!;
+    for (const [where, line] of [["ARCHITECTURE.md §3.5", architecture], ["the graph-basics guide", graphBasics]] as const) {
+      const names = new Set(backticked(line).flatMap((code) => code.split(", ")).filter((name) => /^[a-z][A-Za-z]*$/.test(name) && opLike(name)));
+      expect([...names].filter((name) => !OP_KINDS.includes(name as never)), where).toEqual([]);
+      expect(OP_KINDS.filter((kind) => !names.has(kind)), where).toEqual([]);
+    }
+  });
+});
+
+describe("CLAUDE.md", () => {
+  const text = read("CLAUDE.md");
+
+  it("points to the contract, the conventions and the roadmap", () => {
+    for (const doc of ["ARCHITECTURE.md", "CONTRIBUTING.md", "ROADMAP.md"]) expect(text).toContain(`](${doc})`);
+  });
+
+  it("runs only commands and files that exist", () => {
+    const workspaces = new Map<string, Record<string, string>>();
+    for (const dir of ["packages", "apps"])
+      for (const name of readdirSync(path.join(ROOT, dir))) {
+        const file = path.join(ROOT, dir, name, "package.json");
+        if (existsSync(file)) {
+          const pkg = JSON.parse(readFileSync(file, "utf8")) as { name: string; scripts?: Record<string, string> };
+          workspaces.set(pkg.name, pkg.scripts ?? {});
+        }
+      }
+    const rootScripts = (JSON.parse(read("package.json")) as { scripts: Record<string, string> }).scripts;
+    const commands = fences(text).flatMap((f) => lines(f.body)).map((line) => line.replace(/#.*$/, "").trim()).filter(Boolean);
+    commands.push(...[...text.matchAll(/`(npm run [^`]+)`/g)].map((m) => m[1]!));
+    expect(commands.length).toBeGreaterThan(8);
+    for (const command of commands) {
+      const npm = /^npm (?:run )?([\w:]+)(?: -w (\S+))?/.exec(command);
+      if (npm) expect((npm[2] ? workspaces.get(npm[2]) : rootScripts)?.[npm[1]!], command).toBeDefined();
+      const node = /^(?:node|npx vitest run) (\S+)/.exec(command);
+      if (node) expect(existsSync(path.join(ROOT, node[1]!)), command).toBe(true);
+    }
+    // Build output (dist/) only exists after a build.
+    const paths = [...text.matchAll(/`((?:\.github|apps|packages|examples|evals)\/[^`\s]+)`/g)].map((m) => m[1]!).filter((file) => !file.split("/").includes("dist"));
+    expect(paths.length).toBeGreaterThan(3);
+    for (const file of paths) expect(existsSync(path.join(ROOT, file)), file).toBe(true);
   });
 });
 

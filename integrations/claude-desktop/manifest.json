@@ -4,7 +4,7 @@
   "display_name": "Sonobe",
   "version": "0.1.0",
   "description": "Let Claude build, simulate and explain interaction prototypes in the Sonobe app.",
-  "long_description": "Sonobe is an open-source interaction prototyping app: layers, a patch graph, and a live viewer. This extension connects Claude Desktop to the running Sonobe app over a local, token-protected MCP connection. Claude can read your document's outline, add layers and patches, wire interactions and springs, simulate taps and drags to verify how they feel, explain graphs at your level, and undo its own changes. Everything happens on your computer and lands in Sonobe's undo history.",
+  "long_description": "Sonobe is an open-source interaction prototyping app: layers, a patch graph, and a live viewer. This extension connects Claude Desktop to the running Sonobe app over a local, token-protected MCP connection. Claude can read your document's outline, add layers and patches, wire interactions and springs, simulate taps and drags to verify how they feel, turn the numbers you tune into knobs with presets to compare, import screens from your app, explain graphs at your level, and undo its own changes. Everything happens on your computer and lands in Sonobe's undo history.",
   "author": { "name": "Sonobe contributors" },
   "license": "MIT",
   "keywords": ["prototyping", "interaction design", "animation", "design tools"],
@@ -79,7 +79,7 @@
       "name": "create_component",
       "description": "Turn layers and patches into a reusable component."
     },
-    { "name": "tidy_graph", "description": "Arrange patches by dataflow." },
+    { "name": "tidy_graph", "description": "Lay out patches by dataflow inside their comment frames, as Tidy Up does." },
     { "name": "get_knobs", "description": "Read the knobs and presets and how presets differ." },
     { "name": "set_knobs", "description": "Create, tune, connect and lock knobs and presets in one step." },
     { "name": "apply_knob_preset", "description": "Switch which knob preset the prototype runs." },

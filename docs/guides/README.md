@@ -32,7 +32,7 @@ You don't need to know any code. A few guides end with code for engineers, and y
  │ 01 First     │   │ 03 States and  │   │ 05 Springs and │   │ 07 Loops        │   │ 09 Debugging  │
  │    prototype │──▶│    pulses      │──▶│    feel        │──▶│                 │──▶│               │
  │ 02 ISAT      │   │ 04 Layers and  │   │ 06 Gestures    │   │ 08 Components   │   │ Handoff (05)  │
- │              │   │    layout      │   │                │   │    and variables│   │               │
+ │              │   │    layout      │   │ 13 Knobs       │   │    and variables│   │               │
  └──────────────┘   └────────────────┘   └────────────────┘   └─────────────────┘   └───────────────┘
 
  Any level:   10 Coming from Origami   ·   11 Working with Claude   ·   12 Importing designs
