@@ -5,6 +5,8 @@
 
 import type { Op, SonobeDocument, Value } from "@sonobe/core";
 import type { ApplyOpsResult } from "@sonobe/core";
+import { handleDesignPreview } from "../host/rpcHandlers.ts";
+import type { DesignPreviewUpdate } from "../host/types.ts";
 import { importDesign, type ImportOutcome } from "../panels/import/importDesign.ts";
 import type { SelectionState } from "../state/selection.ts";
 import type { EditorSession } from "../state/session.ts";
@@ -23,6 +25,8 @@ export interface SonobeTestHook {
   apply(ops: Op[], label?: string): Pick<ApplyOpsResult, "ok" | "errors" | "idMap">;
   /** Import an HTML page into the current component the way the browser editor does (a sandboxed iframe capture), as one undo step. */
   importHtml(html: string, options?: { name?: string; replace?: string }): Promise<ImportOutcome>;
+  /** Show an MCP client's preview_design update on the canvas, as the desktop's design.preview RPC does (the same checks). */
+  previewDesign(update: DesignPreviewUpdate): { applied: boolean };
 }
 
 declare global {
@@ -56,6 +60,7 @@ export function installTestHook(session: EditorSession, target: Window = window)
       return { ok, errors, idMap };
     },
     importHtml: (html, options = {}) => importDesign(session, { html, ...options }, { desktop: null }),
+    previewDesign: (update) => handleDesignPreview(session, update),
   };
   target.__sonobe = hook;
   return () => {

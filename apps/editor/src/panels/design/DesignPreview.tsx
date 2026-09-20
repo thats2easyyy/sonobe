@@ -1,6 +1,7 @@
 /**
  * The live preview over the artboard: the page Claude is writing, drawn in a sandboxed iframe where
- * the screen will land, with a pill saying what Claude is doing. It fades out onto the real layers.
+ * the screen will land, with a pill saying who is doing what. The page comes from the in-app
+ * Assistant or from an MCP client such as Claude Code. It fades out onto the real layers.
  */
 
 import { useEffect, useMemo, useRef, useState, type JSX } from "react";
@@ -8,7 +9,7 @@ import { useLatest } from "../../ui/lib/hooks.ts";
 import type { Rect } from "../canvas/geometry.ts";
 import { rectToScreen, type Viewport } from "../canvas/viewport.ts";
 import type { DesignTarget } from "./context.ts";
-import { activeDraft, designStore, useDesign, type DesignDraft, type DesignRequest } from "./designStore.ts";
+import { activeDraft, designStore, MCP_DRAFT_IDLE_MS, useDesign, type DesignDraft, type DesignRequest } from "./designStore.ts";
 import { PREVIEW_MESSAGE_TYPE, previewShellHtml, renderablePrefix } from "./previewShell.ts";
 import "./design.css";
 
@@ -32,10 +33,15 @@ export interface PreviewFrameOptions {
   request?: Pick<DesignRequest, "runId" | "context"> | null;
 }
 
+/** The box's request, when the draft is the Assistant's and of the request's run (or the run it's starting). */
+function draftRequest<R extends Pick<DesignRequest, "runId">>(draft: DesignDraft, request: R | null | undefined): R | null {
+  return draft.source === "assistant" && request && (request.runId === null || request.runId === draft.runId) ? request : null;
+}
+
 /** Where a draft draws, in artboard points: over the layer it replaces, else at its position at its size; null when it's for another component. */
 export function previewFrame(draft: DesignDraft, o: PreviewFrameOptions): Rect | null {
   const { fields } = draft;
-  const fromRequest = o.request && (o.request.runId === null || o.request.runId === draft.runId) ? o.request.context.component.id : undefined;
+  const fromRequest = draftRequest(draft, o.request)?.context.component.id;
   if ((fields.component ?? fromRequest ?? o.rootId) !== o.componentId) return null;
   const replace = fields.replace ?? o.fallbackReplace;
   const replaced = replace ? o.bounds(replace) : null;
@@ -50,9 +56,11 @@ function newNonce(): string {
   return Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
 }
 
-function pillText(draft: DesignDraft): string {
-  if (draft.status === "adding") return "Adding the layers…";
-  return draft.fields.name ? `Claude is writing “${draft.fields.name}”` : "Claude is writing the screen";
+/** What the pill says: "Claude is writing “Checkout”" for the Assistant, "Claude Code is writing “Checkout”" for an MCP client (its label, else its author), then "Adding the layers…". */
+export function previewPillText(draft: DesignDraft): string {
+  if (draft.status === "adding" || draft.status === "added") return "Adding the layers…";
+  const writer = draft.mcp ? draft.mcp.client?.label.trim() || draft.mcp.author.name : "Claude";
+  return draft.fields.name ? `${writer} is writing “${draft.fields.name}”` : `${writer} is writing the screen`;
 }
 
 export interface DesignPreviewProps {
@@ -68,20 +76,23 @@ export interface DesignPreviewProps {
 export function DesignPreview({ viewport, bounds, componentId, rootId, artboard, box }: DesignPreviewProps): JSX.Element | null {
   const drafts = useDesign((s) => s.drafts);
   const request = useDesign((s) => s.request);
-  // Re-render once a finished draft's fade window ends.
+  // Re-render once a finished draft's fade window ends, or an MCP client's draft goes idle.
   const [, setTick] = useState(0);
   const draft = drafts.length ? activeDraft(designStore.getState(), Date.now()) : null;
   const leaving = draft !== null && !isLive(draft);
 
   useEffect(() => {
-    if (!draft || isLive(draft)) return;
-    const timer = setTimeout(() => setTick((n) => n + 1), Math.max(0, draft.since + FADE_WINDOW_MS - Date.now()) + 1);
+    if (!draft) return;
+    const until = !isLive(draft) ? draft.since + FADE_WINDOW_MS : draft.mcp ? draft.mcp.touchedAt + MCP_DRAFT_IDLE_MS : null;
+    if (until === null) return;
+    const timer = setTimeout(() => setTick((n) => n + 1), Math.max(0, until - Date.now()) + 1);
     return () => clearTimeout(timer);
   }, [draft]);
 
   if (!draft) return null;
-  const fromRequest = request && (request.runId === null || request.runId === draft.runId) ? request : null;
-  const target = box !== undefined ? (box?.id ?? null) : (fromRequest?.context.target?.id ?? null);
+  const fromRequest = draftRequest(draft, request);
+  // The box's target is the Assistant's to draw over; an MCP client's draft names what it replaces.
+  const target = draft.source !== "assistant" ? null : box !== undefined ? (box?.id ?? null) : (fromRequest?.context.target?.id ?? null);
   // Claude writes the small fields before the html, so once html streams, a missing replace means a new screen.
   const frame = previewFrame(draft, { componentId, rootId, artboard, bounds, fallbackReplace: draft.html ? null : target, request });
   if (!frame) return null;
@@ -92,10 +103,10 @@ export function DesignPreview({ viewport, bounds, componentId, rootId, artboard,
 
   return (
     <div className="sb-design-preview" data-state={leaving ? "leaving" : "live"} style={{ transform: `translate(${x}px, ${y}px)`, width: screen.width, height: screen.height }}>
-      <PreviewFrame key={draft.toolUseId} html={draft.html} complete={draft.status !== "writing"} hold={draft.resync && draft.status === "writing"} width={frame.width} height={frame.height} zoom={viewport.zoom} />
+      <PreviewFrame key={draft.key} html={draft.html} complete={draft.status !== "writing"} hold={draft.resync && draft.status === "writing"} width={frame.width} height={frame.height} zoom={viewport.zoom} />
       <div className="sb-design-preview__pill" data-status={draft.status} data-lift={atTop || undefined}>
         <span className="sb-design-preview__dot" aria-hidden />
-        {pillText(draft)}
+        {previewPillText(draft)}
       </div>
     </div>
   );

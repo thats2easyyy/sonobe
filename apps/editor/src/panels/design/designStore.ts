@@ -1,12 +1,17 @@
 /**
  * Design with Claude state: whether the canvas's box is open, the request it sent, the drafts Claude
- * is writing (import_design's html, before the tool runs), and the last result. `reduceDesignEvent`
- * folds Assistant events into it and is pure. A draft is keyed by its toolUseId, whatever sent it.
+ * is writing, and the last result. A draft comes from the in-app Assistant (import_design's html,
+ * before the tool runs; `reduceDesignEvent` folds its events) or from an MCP client such as Claude
+ * Code (preview_design, over the design.preview RPC; `reducePreviewUpdate` folds its updates). Both
+ * reducers are pure, and the canvas previews the newest draft of either.
  */
 
-import { findLayer, type Id, type LayerLocation, type SonobeDocument } from "@sonobe/core";
+import { findLayer, type Author, type Id, type LayerLocation, type SonobeDocument } from "@sonobe/core";
 import { useStore } from "zustand";
 import { createStore, type StoreApi } from "zustand/vanilla";
+import type { DesignPreviewUpdate } from "../../host/types.ts";
+import type { DocumentChange } from "../../state/document.ts";
+import type { WorkClient } from "../../state/presence.ts";
 import type { EditorSession } from "../../state/session.ts";
 import { assistantStore, type AssistantData } from "../assistant/assistantStore.ts";
 import { sharedAssistantController } from "../assistant/controller.ts";
@@ -14,7 +19,25 @@ import { getAssistantHost, type AssistantCanvasContext, type AssistantDesignFiel
 import { canvasContext, designTarget } from "./context.ts";
 
 export type DraftStatus = "writing" | "adding" | "added" | "failed" | "stopped";
+/** Who writes a draft: the in-app Assistant, or an MCP client's preview_design. */
+export type DraftSource = "assistant" | "mcp";
+/** An MCP client's draft: who writes it, and what its updates said. */
+export interface McpDraftSession {
+  author: Author;
+  /** The session's client ("Claude Code"), when the host knows it. */
+  client: WorkClient | null;
+  /** The last update's revision; an older update changes nothing. */
+  revision: number;
+  /** When the last update came (epoch ms). A draft idle for MCP_DRAFT_IDLE_MS leaves the canvas: its session may be gone. */
+  touchedAt: number;
+  /** The document's revision when import_design started adding it; null while it's written. */
+  addingFrom: number | null;
+}
 export interface DesignDraft {
+  source: DraftSource;
+  /** Its identity: the Assistant's toolUseId, or "mcp:<session key>" (one draft per MCP session). */
+  key: string;
+  /** The Assistant's run, turn and tool call ("", 0 and "" for an MCP client's draft). */
   runId: string; turn: number; toolUseId: string;
   html: string; fields: AssistantDesignFields;
   status: DraftStatus; since: number;
@@ -24,6 +47,8 @@ export interface DesignDraft {
   error: string | null;
   /** An append arrived at the wrong offset; wait for done's html. */
   resync: boolean;
+  /** Present for an MCP client's draft. */
+  mcp?: McpDraftSession;
 }
 export interface DesignRequest {
   runId: string | null; text: string; context: AssistantCanvasContext; selection: readonly string[];
@@ -45,6 +70,8 @@ export const DRAFT_TOO_LONG = "too_long";
 const DRAFTS_KEPT = 5;
 /** How long a draft stays on the canvas after it's added, fails or stops: the preview's fade. */
 const FADE_MS = 400;
+/** How long an MCP client's draft stays on the canvas without an update (the MCP server drops it after as long). */
+export const MCP_DRAFT_IDLE_MS = 15 * 60_000;
 const REPLY_CHARS = 280;
 /** The start of the agent's notice when an edit is refused in Read only. */
 const READ_ONLY_NOTICE = "Claude is set to Read only";
@@ -76,7 +103,7 @@ function reduceDraft(state: DesignData, event: Extract<AssistantEvent, { type: "
   const current = index === -1 ? null : state.drafts[index]!;
   // Done already came, or the tool ran: late appends change nothing.
   if (current && current.status !== "writing") return {};
-  const base: DesignDraft = current ?? { runId: event.runId, turn: event.turn, toolUseId: event.toolUseId, html: "", fields: {}, status: "writing", since: now, progress: null, error: null, resync: false };
+  const base: DesignDraft = current ?? { source: "assistant", key: event.toolUseId, runId: event.runId, turn: event.turn, toolUseId: event.toolUseId, html: "", fields: {}, status: "writing", since: now, progress: null, error: null, resync: false };
   const fields = event.fields ? { ...base.fields, ...event.fields } : base.fields;
   const inSync = !base.resync && event.offset === base.html.length;
   let next: DesignDraft;
@@ -138,11 +165,94 @@ export function reduceDesignEvent(state: DesignData, event: AssistantEvent, now:
   }
 }
 
-/** The draft the canvas previews: the newest writing/adding one, else one that left those states < 400 ms ago (the fade). */
+/** The window an MCP client's preview update arrived at: what it knows. */
+export interface PreviewTarget {
+  /** The window's document id, when the editor knows it: an update for another document is ignored. */
+  docId: string | null;
+  /** The document's revision, and its newest change: a draft cleared after its author's import went in counts as added. */
+  revision: number;
+  lastChange: Pick<DocumentChange, "kind" | "revision" | "author"> | null;
+}
+
+const isLive = (status: DraftStatus) => status === "writing" || status === "adding";
+const sameAuthor = (a: Author, b: Author) => a.kind === b.kind && a.name === b.name;
+
+function previewFields(update: DesignPreviewUpdate): AssistantDesignFields {
+  return {
+    ...(update.name !== null ? { name: update.name } : {}),
+    ...(update.component !== null ? { component: update.component } : {}),
+    ...(update.replace !== null ? { replace: update.replace } : {}),
+    ...(update.width !== null ? { width: update.width } : {}),
+    ...(update.height !== null ? { height: update.height } : {}),
+    ...(update.position !== null ? { position: [update.position[0], update.position[1]] } : {}),
+  };
+}
+
+/**
+ * Fold an MCP client's preview_design update (the design.preview RPC) into design state. Pure. Each
+ * update carries the session's whole draft and its fields; "cleared" ends it, as added when the
+ * author's change went in while it was adding (import_design clears it after the import), else stopped.
+ */
+export function reducePreviewUpdate(state: DesignData, update: DesignPreviewUpdate, now: number, target: PreviewTarget): Partial<DesignData> {
+  if (target.docId !== null && update.docId !== target.docId) return {};
+  const key = `mcp:${update.key}`;
+  const index = state.drafts.findIndex((d) => d.key === key);
+  const current = index === -1 ? undefined : state.drafts[index];
+  // The session's draft while it's on the canvas (an ended one fades, and a new update starts over).
+  const live = current && isLive(current.status) ? current : undefined;
+  const mcp = live?.mcp;
+  // A call overtaken by a newer one of the same session changes nothing.
+  if (mcp && update.revision < mcp.revision) return {};
+  const replaceCurrent = (next: DesignDraft) => ({ drafts: state.drafts.map((d, i) => (i === index ? next : d)) });
+
+  if (update.status === "cleared") {
+    if (!live || !mcp) return {};
+    const change = target.lastChange;
+    const from = mcp.addingFrom;
+    const added = live.status === "adding" && from !== null && change !== null && change.kind === "apply" && change.revision > from && sameAuthor(change.author, update.author);
+    return replaceCurrent({ ...live, status: added ? "added" : "stopped", since: now, mcp: { ...mcp, revision: update.revision, touchedAt: now } });
+  }
+
+  // The document's revision when adding began: the import's change comes after it.
+  const addingFrom = update.status === "adding" ? ((live?.status === "adding" ? mcp?.addingFrom : null) ?? target.revision) : null;
+  const next: DesignDraft = {
+    source: "mcp",
+    key,
+    runId: "",
+    turn: 0,
+    toolUseId: "",
+    html: update.html ?? "",
+    fields: previewFields(update),
+    status: update.status,
+    since: live && live.status === update.status ? live.since : now,
+    progress: null,
+    error: null,
+    resync: false,
+    mcp: { author: { ...update.author }, client: update.client ? { ...update.client } : null, revision: update.revision, touchedAt: now, addingFrom },
+  };
+  if (live) return replaceCurrent(next);
+  // A new draft, or one started over after it ended: it's the newest.
+  return { drafts: [...state.drafts.filter((d) => d.key !== key), next].slice(-DRAFTS_KEPT) };
+}
+
+/** Show an MCP client's preview update on this window's canvas. False when it changed nothing (older than what's shown, or nothing left to clear). */
+export function applyPreviewUpdate(session: EditorSession, update: DesignPreviewUpdate, now = Date.now()): boolean {
+  const { revision, lastChange } = session.document.getState();
+  // The desktop routes design.preview to the window that shows update.docId, and the editor doesn't learn the id main gave it.
+  const patch = reducePreviewUpdate(designStore.getState(), update, now, { docId: null, revision, lastChange });
+  if (!Object.keys(patch).length) return false;
+  designStore.setState(patch);
+  return true;
+}
+
+/** An MCP client's draft that had no update for MCP_DRAFT_IDLE_MS: its session may have ended without clearing it. */
+const isIdleDraft = (draft: DesignDraft, now: number): boolean => draft.mcp !== undefined && now - draft.mcp.touchedAt >= MCP_DRAFT_IDLE_MS;
+
+/** The draft the canvas previews: the newest writing/adding one of any source, else one that left those states < 400 ms ago (the fade). */
 export function activeDraft(state: DesignData, now: number): DesignDraft | null {
   for (let i = state.drafts.length - 1; i >= 0; i--) {
     const draft = state.drafts[i]!;
-    if (draft.status === "writing" || draft.status === "adding") return draft;
+    if (isLive(draft.status) && !isIdleDraft(draft, now)) return draft;
   }
   for (let i = state.drafts.length - 1; i >= 0; i--) {
     const draft = state.drafts[i]!;
