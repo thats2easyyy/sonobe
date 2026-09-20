@@ -6,12 +6,16 @@
  *
  * - The first reveal (mount, entering a component, a replaced document) waits for the first fit.
  *   When the viewport shows, comment frames fade in, then the nodes in view materialize in a wave
- *   that follows the signal flow left to right, and each cable draws from its output once both of
- *   its ends are in. More than LARGE_REVEAL nodes, or reduced motion, fade in with the viewport.
+ *   that follows the signal flow left to right, and each cable draws from its output as that node
+ *   comes in, its tip reaching an input node that's there or arriving. More than LARGE_REVEAL
+ *   nodes, or reduced motion, fade in with the viewport.
  * - Later, a node the canvas isn't showing (inserted, pasted, duplicated, brought back by undo,
  *   added by Claude) animates in at once, several in one change in a short wave. New cables that
  *   come with new nodes, or from someone else (Claude, undo and redo), draw in; a cable the person
  *   connected between nodes already on the canvas appears as it is, since they drew it.
+ * - What the person already sees before their change lands (`placed`) doesn't arrive again: an
+ *   option-drag copy only glows its ring where it was dropped, and the cable they dragged into link
+ *   search is simply there, with the node picked for its end fading in without travel.
  *
  * The store styles React Flow's own node and edge wrappers as they mount (a MutationObserver on
  * the node and edge layers): `data-appear` and `--sb-appear-delay`, which the "Appearing" rules in
@@ -30,8 +34,8 @@ export const COMMENT_MS = 300;
 export const NODE_LEAD_MS = 50;
 /** A cable draws from its output to its input. */
 export const CABLE_MS = 320;
-/** A cable starts once the later of its ends is this far into appearing. */
-export const CABLE_LAG_MS = Math.round(NODE_MS * 0.6);
+/** A cable leaves its output once that node is this far into appearing (faded in, its travel almost done). */
+export const CABLE_LAG_MS = Math.round(NODE_MS * 0.4);
 /** The first reveal's wave spreads over at most this long... */
 export const WAVE_MS = 340;
 /** ...and at most this much per node, so a few nodes don't wait on each other. */
@@ -42,6 +46,10 @@ export const BATCH_STEP_MS = 30;
 export const BATCH_MAX_MS = 300;
 /** More nodes than this revealing at once fade in together, with the viewport or without a wave. */
 export const LARGE_REVEAL = 150;
+/** More nodes than this in one wave travel without the ring: a ring glowing inside each fading node costs frames. */
+export const RING_LIMIT = 100;
+/** How long a `placed` hint waits for the change that brings what it names. */
+export const PLACED_MS = 1000;
 /** The viewport fade (large graphs, reduced motion) and other plain fades. */
 export const FADE_MS = 180;
 /** How long past its end an animation keeps its attributes, since CSS starts it on the next frame. */
@@ -51,8 +59,12 @@ const Y_WEIGHT = 0.15;
 /** The size assumed for a node React Flow hasn't measured (visibility at the first reveal). */
 const DEFAULT_SIZE = { width: 200, height: 120 };
 
-/** node: fade, travel and accent. comment: fade. fade: a plain quick fade. draw: a cable drawing from its output. */
-export type AppearMode = "node" | "comment" | "fade" | "draw";
+/**
+ * node: fade, travel and ring. slide: fade and travel (a wave over RING_LIMIT). still: fade and ring,
+ * no travel (the node at the end of a cable the person drew). placed: the ring only (a node the person
+ * already sees where it lands). comment: fade. fade: a plain quick fade. draw: a cable drawing from its output.
+ */
+export type AppearMode = "node" | "slide" | "still" | "placed" | "comment" | "fade" | "draw";
 
 export interface Appearance {
   mode: AppearMode;
@@ -87,12 +99,20 @@ export interface AppearEdgeInput {
   id: string;
   source: string;
   target: string;
-  data?: { from: string; invalid?: string | undefined } | undefined;
+  data?: { from: string; to?: string; invalid?: string | undefined } | undefined;
 }
 
 export interface AppearChange {
   /** The person made the change in this editor (not Claude, not undo or redo): their new cables between nodes already shown appear at once. */
   byHand: boolean;
+}
+
+/** What the person's next change brings that they already see (AppearStore.placed). */
+export interface AppearPlaced {
+  /** Node ids that land where the person sees them already: option-drag copies. */
+  nodes?: readonly string[];
+  /** Ports the person dragged a cable from (an output) or to (an input), into link search: the new cable at that port. */
+  ports?: readonly string[];
 }
 
 /**
@@ -125,11 +145,16 @@ export function batchDelays(points: readonly AppearPoint[]): Map<string, number>
   return new Map(sorted.map((p, i) => [p.id, Math.round(i * step)]));
 }
 
-/** When a cable starts drawing: CABLE_LAG_MS after the later of its appearing ends starts, or `now` when neither end is appearing. */
-export function cableStart(ends: readonly (Appearance | undefined)[], now: number): number {
-  let latest = -Infinity;
-  for (const a of ends) if (a && a.end > now) latest = Math.max(latest, a.start);
-  return latest === -Infinity ? now : Math.max(now, latest + CABLE_LAG_MS);
+/**
+ * When a cable starts drawing from its output: CABLE_LAG_MS after its output's node starts appearing,
+ * and not before its input's node starts, so the drawing tip (CABLE_MS long) meets a node that's
+ * already there or materializing. `now` when neither end is appearing.
+ */
+export function cableStart(output: Appearance | undefined, input: Appearance | undefined, now: number): number {
+  let start = now;
+  if (output && output.end > now) start = Math.max(start, output.start + CABLE_LAG_MS);
+  if (input && input.end > now) start = Math.max(start, input.start);
+  return start;
 }
 
 /** True when a node at `point` with `size` overlaps `view` (flow coordinates). */
@@ -139,7 +164,8 @@ export function inView(point: { x: number; y: number }, size: { width: number; h
 
 /** How long an appearance of `mode` lasts from its start. */
 export function durationOf(mode: AppearMode): number {
-  if (mode === "node") return Math.max(NODE_MS, ACCENT_MS);
+  if (mode === "node" || mode === "still" || mode === "placed") return Math.max(NODE_MS, ACCENT_MS);
+  if (mode === "slide") return NODE_MS;
   if (mode === "comment") return COMMENT_MS;
   if (mode === "draw") return CABLE_MS;
   return FADE_MS;
@@ -162,7 +188,9 @@ export interface AppearStore {
   start(view?: Rect | null, size?: (id: string) => { width: number; height: number } | undefined): void;
   /** Wait for the next start, which reveals the whole graph again (another document replaced this one). */
   reset(): void;
-  /** Style the node and edge wrappers under `canvas` as React Flow mounts them. Returns a function that stops. */
+  /** The person already sees what their next change brings; call just before making it. The hint lasts until a change adds something, or PLACED_MS. */
+  placed(what: AppearPlaced): void;
+  /** Style the node and edge wrappers under `canvas` as React Flow mounts them. Returns a function that stops and clears every timer, appearance and attribute (the editor unmounted). */
   observe(canvas: HTMLElement): () => void;
   /** A node's or cable's appearance, while it lasts. */
   appearance(kind: "node" | "cable", id: string): Appearance | undefined;
@@ -170,7 +198,6 @@ export interface AppearStore {
   busyFor(): number;
   /** True until the first start, and again after a reset. */
   waiting(): boolean;
-  dispose(): void;
 }
 
 interface NodeEntry {
@@ -182,6 +209,7 @@ interface NodeEntry {
 
 interface CableEntry {
   from: string;
+  to: string;
   source: string;
   target: string;
   invalid: boolean;
@@ -204,6 +232,7 @@ export function createAppearStore(options: AppearStoreOptions = {}): AppearStore
   let fadeUntil = 0;
   let timer: ReturnType<typeof setTimeout> | null = null;
   let timerAt = Infinity;
+  let hint: { nodes: Set<string>; ports: Set<string>; until: number } | null = null;
 
   const layers = () => [canvas?.querySelector(".react-flow__nodes"), canvas?.querySelector(".react-flow__edges")].filter((l): l is Element => !!l);
   /** The wrapper for a child of the node or edge layer: nodes are children, each cable is an <svg> around its wrapper <g>. */
@@ -272,12 +301,18 @@ export function createAppearStore(options: AppearStoreOptions = {}): AppearStore
     if (next < Infinity) schedule(next);
   }
 
+  /** An end that's arriving: a node the person already saw where it is (placed) isn't. */
+  const arriving = (nodeId: string, t: number) => {
+    const a = shown.get(nodeKey(nodeId));
+    return a && a.mode !== "placed" && a.end > t ? a : undefined;
+  };
+
   const planCables = (entries: Iterable<[string, CableEntry]>, t: number, byHand: boolean, keys: Set<string>) => {
     for (const [id, c] of entries) {
-      const ends = [shown.get(nodeKey(c.source)), shown.get(nodeKey(c.target))];
-      const withNewEnd = ends.some((a) => a && a.end > t);
+      const ends = [arriving(c.source, t), arriving(c.target, t)] as const;
+      const withNewEnd = ends.some((a) => a !== undefined);
       if (byHand && !withNewEnd) continue;
-      const start = cableStart(ends, t);
+      const start = cableStart(ends[0], ends[1], t);
       const mode: AppearMode = c.invalid || reduced() || ends.some((a) => a?.mode === "fade") ? "fade" : "draw";
       shown.set(cableKey(id), { mode, start, end: start + durationOf(mode) });
       keys.add(cableKey(id));
@@ -323,7 +358,7 @@ export function createAppearStore(options: AppearStoreOptions = {}): AppearStore
           entry.invalid = !!e.data?.invalid;
           continue;
         }
-        const next: CableEntry = { from, source: e.source, target: e.target, invalid: !!e.data?.invalid, gen: g };
+        const next: CableEntry = { from, to: e.data?.to ?? e.target, source: e.source, target: e.target, invalid: !!e.data?.invalid, gen: g };
         cables.set(e.id, next);
         if (!waiting) addedCables.push([e.id, next]);
       }
@@ -335,18 +370,37 @@ export function createAppearStore(options: AppearStoreOptions = {}): AppearStore
         }
       }
       if (waiting || (added.length === 0 && addedCables.length === 0)) return;
+      const placed = hint && hint.until > t ? hint : null;
+      hint = null;
 
-      const keys = new Set<string>();
-      if (added.length) {
-        const plain = reduced() || added.length > LARGE_REVEAL;
-        const delays = plain ? null : batchDelays(added);
-        for (const p of added) {
-          const mode: AppearMode = plain ? "fade" : addedComments.has(p.id) ? "comment" : "node";
-          const start = t + (delays?.get(p.id) ?? 0);
-          shown.set(nodeKey(p.id), { mode, start, end: start + durationOf(mode) });
+      // The cable the person dragged into link search is there already; the node picked for its other end fades in without travel.
+      const drawn = new Set<string>();
+      const still = new Set<string>();
+      if (placed?.ports.size) {
+        for (const [id, c] of addedCables) {
+          if (!placed.ports.has(c.from) && !placed.ports.has(c.to)) continue;
+          drawn.add(id);
+          still.add(c.source).add(c.target);
         }
       }
-      planCables(addedCables, t, change.byHand, keys);
+
+      const keys = new Set<string>();
+      const arrivals = added.filter((p) => !placed?.nodes.has(p.id));
+      const plain = reduced() || arrivals.length > LARGE_REVEAL;
+      const delays = plain ? null : batchDelays(arrivals);
+      for (const p of added) {
+        let mode: AppearMode;
+        if (placed?.nodes.has(p.id)) {
+          if (reduced()) continue;
+          mode = "placed";
+        } else if (plain) mode = "fade";
+        else if (addedComments.has(p.id)) mode = "comment";
+        else if (still.has(p.id)) mode = "still";
+        else mode = arrivals.length > RING_LIMIT ? "slide" : "node";
+        const start = t + (delays?.get(p.id) ?? 0);
+        shown.set(nodeKey(p.id), { mode, start, end: start + durationOf(mode) });
+      }
+      planCables(addedCables.filter(([id]) => !drawn.has(id)), t, change.byHand, keys);
       // New nodes and cables mount after this and get painted then; a rerouted cable keeps its wrapper.
       paintMounted(keys);
       sweep();
@@ -377,9 +431,10 @@ export function createAppearStore(options: AppearStoreOptions = {}): AppearStore
         keys.add(nodeKey(id));
       }
       const lead = comments.length ? NODE_LEAD_MS : 0;
+      const mode: AppearMode = revealed.length > RING_LIMIT ? "slide" : "node";
       for (const [id, delay] of waveDelays(revealed)) {
         const start = t + lead + delay;
-        shown.set(nodeKey(id), { mode: "node", start, end: start + durationOf("node") });
+        shown.set(nodeKey(id), { mode, start, end: start + durationOf(mode) });
         keys.add(nodeKey(id));
       }
       // A cable with neither end in view stays as it is: nobody sees it arrive.
@@ -397,13 +452,29 @@ export function createAppearStore(options: AppearStoreOptions = {}): AppearStore
       // What's on the canvas stays known (the next graph may share it), and all of it reveals at the next start.
       waiting = true;
       shown.clear();
+      hint = null;
       sweep();
+    },
+
+    placed(what) {
+      hint = { nodes: new Set(what.nodes), ports: new Set(what.ports), until: now() + PLACED_MS };
     },
 
     observe(el) {
       canvas = el;
+      const stop = () => {
+        if (timer !== null) clearTimeout(timer);
+        timer = null;
+        timerAt = Infinity;
+        for (const wrapper of styled.keys()) unpaint(wrapper);
+        styled.clear();
+        shown.clear();
+        fadeUntil = 0;
+        el.removeAttribute("data-appear-fade");
+        if (canvas === el) canvas = null;
+      };
       const targets = layers();
-      if (typeof MutationObserver === "undefined" || targets.length === 0) return () => undefined;
+      if (typeof MutationObserver === "undefined" || targets.length === 0) return stop;
       const observer = new MutationObserver((records) => {
         if (shown.size === 0 && styled.size === 0) return;
         for (const record of records) {
@@ -422,7 +493,7 @@ export function createAppearStore(options: AppearStoreOptions = {}): AppearStore
       for (const target of targets) observer.observe(target, { childList: true });
       return () => {
         observer.disconnect();
-        if (canvas === el) canvas = null;
+        stop();
       };
     },
 
@@ -438,15 +509,5 @@ export function createAppearStore(options: AppearStoreOptions = {}): AppearStore
     },
 
     waiting: () => waiting,
-
-    dispose() {
-      if (timer !== null) clearTimeout(timer);
-      timer = null;
-      for (const el of styled.keys()) unpaint(el);
-      styled.clear();
-      shown.clear();
-      canvas?.removeAttribute("data-appear-fade");
-      canvas = null;
-    },
   };
 }

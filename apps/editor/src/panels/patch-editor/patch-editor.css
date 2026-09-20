@@ -226,16 +226,22 @@
  * takes them off when the animation is over, so idle nodes carry nothing. The node wrapper travels
  * with `translate` (React Flow owns its `transform`) and nothing scales: React Flow measures handles
  * against the wrapper, so cables land on their ports even when a node mounts mid-animation.
- * Durations match appear.ts.
+ * Durations match appear.ts. Modes: node (fade, travel, ring), slide (fade, travel: a wave too big
+ * for rings), still (fade, ring: the node at the end of a cable the person drew), placed (the ring
+ * alone: an option-drag copy, already where the person dropped it).
  */
-.sb-pe .react-flow__node[data-appear="node"] {
+.sb-pe .react-flow__node:is([data-appear="node"], [data-appear="slide"]) {
   animation:
     sb-pe-appear-travel 360ms cubic-bezier(0.16, 1, 0.3, 1) var(--sb-appear-delay, 0ms) both,
     sb-pe-appear-in 260ms cubic-bezier(0.33, 1, 0.68, 1) var(--sb-appear-delay, 0ms) both;
 }
 
+.sb-pe .react-flow__node[data-appear="still"] {
+  animation: sb-pe-appear-in 260ms cubic-bezier(0.33, 1, 0.68, 1) var(--sb-appear-delay, 0ms) both;
+}
+
 /* The materialize accent: a ring in the node's category color glows in, then settles. Opacity only. */
-.sb-pe .react-flow__node[data-appear="node"] .sb-pe-node::before {
+.sb-pe .react-flow__node:is([data-appear="node"], [data-appear="still"], [data-appear="placed"]) .sb-pe-node::before {
   content: "";
   position: absolute;
   inset: 0;
@@ -325,9 +331,9 @@
 }
 
 /*
- * The loading placeholder: skeleton nodes on the empty canvas while a slow first fit keeps the
- * viewport hidden. It shows only after LOADING_DELAY_MS (PatchEditor.tsx), and fades out as the
- * graph arrives. The shimmer sweeps left to right, a column at a time.
+ * The loading placeholder: skeleton nodes on the empty canvas while a first fit keeps the viewport
+ * hidden on an idle page for longer than LOADING_DELAY_MS (PatchEditor.tsx), fading out as the graph
+ * arrives. Sizes match SKELETON_NODES. The shimmer sweeps left to right, a column at a time.
  */
 .sb-pe-loading {
   position: absolute;
@@ -415,7 +421,8 @@
   background: color-mix(in srgb, var(--text-primary) 7%, transparent);
 }
 
-.sb-pe-loading__row:nth-child(2n) {
+/* Output rows sit on the right, where their cables leave. */
+.sb-pe-loading__row[data-out] {
   justify-content: flex-end;
 }
 
