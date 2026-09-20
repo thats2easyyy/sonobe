@@ -33,6 +33,24 @@ export function homeFrame<F extends Rect>(rect: Rect, frames: readonly F[]): F |
   return best;
 }
 
+/** The frame a frame sits in: the innermost larger frame under its title anchor. */
+export function parentFrame<F extends Rect & { id: string }>(frame: F, frames: readonly F[]): F | undefined {
+  return homeFrame(frame, frames.filter((o) => o.id !== frame.id && o.width * o.height > frame.width * frame.height));
+}
+
+/**
+ * Everything a frame holds: the nodes whose home frame is it or a frame inside it, and those inner
+ * frames. What moves with the frame when it's dragged; Tidy Up lays each part out in its own frame.
+ */
+export function frameContents<F extends Rect & { id: string }, N extends Rect>(frameId: string, frames: readonly F[], nodes: readonly N[]): { nodes: N[]; frames: F[] } {
+  const parent = new Map(frames.map((f) => [f.id, parentFrame(f, frames)?.id]));
+  const within = (id: string | undefined) => {
+    for (let p = id, depth = 0; p !== undefined && depth <= frames.length; p = parent.get(p), depth++) if (p === frameId) return true;
+    return false;
+  };
+  return { nodes: nodes.filter((n) => within(homeFrame(n, frames)?.id)), frames: frames.filter((f) => f.id !== frameId && within(parent.get(f.id))) };
+}
+
 /** The rect of a frame around `rects` with room for its title; undefined for none. */
 export function fitFrame(rects: readonly Rect[], padding: { top: number; right: number; bottom: number; left: number } = FRAME_PADDING, min: { width: number; height: number } = FRAME_MIN_SIZE): Rect | undefined {
   if (rects.length === 0) return undefined;

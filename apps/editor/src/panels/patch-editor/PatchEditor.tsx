@@ -58,8 +58,8 @@ import { CommentNodeView, InterfaceNodeView, LayerNodeView, PatchNodeView } from
 import { PortHoverCard } from "./components/PortHoverCard.tsx";
 import { orientConnection, portAtHandle, quickConnectCheck, type HandleRef } from "./model/connect.ts";
 import { patchTitle, spliceOptions, type SpliceOption } from "./model/editOps.ts";
-import { boundsOf, boundsVisible, estimateNodeSize, FIT_VIEW_PADDING, HEADER_HEIGHT, isFarZoom, layerNameIn, pointInRect, portCenterY, readableViewport, rectContains, sampleCable, type Point, type Rect } from "./model/geometry.ts";
-import { deriveGraph, estimatePatchSize } from "@sonobe/core/graph";
+import { boundsOf, boundsVisible, estimateNodeSize, FIT_VIEW_PADDING, HEADER_HEIGHT, isFarZoom, layerNameIn, pointInRect, portCenterY, readableViewport, sampleCable, type Point, type Rect } from "./model/geometry.ts";
+import { deriveGraph, estimatePatchSize, frameContents } from "@sonobe/core/graph";
 import { missingHandlesKey, parseMissingHandlesKey } from "./model/handles.ts";
 import { resolveLiveScope, scopedAddress, watchedPrefix, type LiveScope } from "./model/instances.ts";
 import { cablesCutByKnife, simplifyStroke, type CableGeometry } from "./model/knife.ts";
@@ -655,11 +655,14 @@ function Canvas({ session, componentId, showBreadcrumbs, showToolbar, toolbarCon
       const start = new Map(dragged.map((n) => [n.id, { ...n.position }]));
       const dragging = new Set(dragged.map((n) => n.id));
       const children = new Map<string, { commentId: string; start: XY }>();
+      // What a frame holds, by the rule Tidy Up uses (frames.ts): nodes under its title bars, and the frames inside it with theirs.
+      const frames = nodesRef.current.filter((n) => n.type === "comment").map((n) => ({ node: n, id: n.id, ...nodeRect(n) }));
+      const others = nodesRef.current.filter((n) => n.type !== "comment").map((n) => ({ node: n, ...nodeRect(n) }));
       for (const comment of dragged.filter((n) => n.type === "comment")) {
-        const frame = nodeRect(comment);
-        for (const n of nodesRef.current) {
-          if (n.type === "comment" || dragging.has(n.id) || children.has(n.id)) continue;
-          if (rectContains(frame, nodeRect(n))) children.set(n.id, { commentId: comment.id, start: { ...n.position } });
+        const contents = frameContents(comment.id, frames, others);
+        for (const { node: n } of [...contents.nodes, ...contents.frames]) {
+          if (dragging.has(n.id) || children.has(n.id)) continue;
+          children.set(n.id, { commentId: comment.id, start: { ...n.position } });
         }
       }
       for (const id of children.keys()) dragging.add(id);
