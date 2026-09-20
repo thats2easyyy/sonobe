@@ -1,0 +1,360 @@
+/* Design with Claude: the box at the bottom of the canvas and the live preview over the artboard. */
+
+/* --- The box ------------------------------------------------------------------------------------ */
+
+/* A sibling of .sb-cv in the canvas panel's body, so the canvas's pointer, wheel, drop and key handlers never see it. */
+.sb-design-box {
+  position: absolute;
+  bottom: 16px;
+  left: 50%;
+  z-index: var(--z-sticky);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  width: min(520px, 100% - 32px);
+  max-height: calc(100% - 32px);
+  padding: var(--space-5);
+  overflow-y: auto;
+  border-radius: var(--radius-2xl);
+  background: var(--bg-elevated);
+  box-shadow: var(--shadow-popover), var(--highlight-top);
+  color: var(--text-primary);
+  transform: translateX(-50%);
+  animation: sb-design-box-in var(--duration-base) var(--ease-out);
+}
+
+@keyframes sb-design-box-in {
+  from {
+    opacity: 0;
+    transform: translate(-50%, 8px);
+  }
+}
+
+.sb-design-box__status {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3);
+  color: var(--text-secondary);
+  font-size: var(--font-size-sm);
+  line-height: 1.45;
+}
+
+.sb-design-box__status > svg {
+  flex: none;
+  margin-top: 2px;
+}
+
+/* Empty but kept in the tree (a live region has to exist before it speaks). */
+.sb-design-box__status[data-empty] {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.sb-design-box__status[data-tone="done"] {
+  color: var(--text-primary);
+}
+
+.sb-design-box__status[data-tone="done"] > svg {
+  color: var(--success-text);
+}
+
+.sb-design-box__status[data-tone="busy"] > svg {
+  color: var(--ai-text);
+}
+
+.sb-design-box__status[data-tone="warn"] {
+  color: var(--warn-text);
+}
+
+.sb-design-box__status[data-tone="error"] {
+  color: var(--danger-text);
+}
+
+.sb-design-box__status-text {
+  flex: 1 1 auto;
+  min-width: 0;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.sb-design-box__status .sb-btn {
+  flex: none;
+  margin: -3px 0;
+}
+
+.sb-design-box__reply {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: var(--font-size-sm);
+  line-height: 1.45;
+  text-wrap: pretty;
+  overflow-wrap: anywhere;
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+.sb-design-box__chips,
+.sb-design-box__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.sb-design-box__notice {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  padding: var(--space-4) var(--space-5);
+  border-radius: var(--radius-lg);
+  background: var(--bg-field);
+  box-shadow: inset 0 0 0 1px var(--border-subtle);
+}
+
+.sb-design-box__notice p {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: var(--font-size-sm);
+  line-height: 1.45;
+  text-wrap: pretty;
+}
+
+.sb-design-box .sb-assistant-confirm {
+  margin: 0;
+}
+
+.sb-design-box__target {
+  display: flex;
+  min-width: 0;
+}
+
+.sb-design-box__chip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  max-width: 100%;
+  height: var(--control-h-sm);
+  padding: 0 var(--space-4);
+  border-radius: var(--radius-full);
+  background: var(--bg-field);
+  box-shadow: inset 0 0 0 1px var(--border-default);
+  color: var(--text-secondary);
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-medium);
+}
+
+.sb-design-box__chip[data-kind="redesign"],
+.sb-design-box__chip[data-kind="result"] {
+  padding-right: var(--space-1);
+  background: var(--ai-soft);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--ai) 28%, transparent);
+  color: var(--ai-text);
+}
+
+.sb-design-box__chip > svg {
+  flex: none;
+}
+
+.sb-design-box__chip-label {
+  overflow: hidden;
+  font-variant-numeric: tabular-nums;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sb-design-box__chip-clear.sb-iconbtn {
+  border-radius: var(--radius-full);
+  color: inherit;
+}
+
+/* The Assistant's composer, without its panel chrome. */
+.sb-design-box .sb-assistant-composer {
+  padding: 0;
+  border-top: 0;
+  background: transparent;
+}
+
+.sb-design-box__footer {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: var(--control-h-sm);
+  margin: 0 calc(-1 * var(--space-2)) calc(-1 * var(--space-2));
+}
+
+.sb-design-box__spacer {
+  flex: 1 1 auto;
+}
+
+.sb-design-box__code {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  min-width: 0;
+  height: var(--control-h-sm);
+  padding: 0 var(--space-1) 0 var(--space-4);
+  border-radius: var(--radius-full);
+  background: var(--bg-field);
+  box-shadow: inset 0 0 0 1px var(--border-default);
+  color: var(--text-secondary);
+  font-size: var(--font-size-xs);
+}
+
+.sb-design-box__code[data-missing] {
+  background: var(--warn-soft);
+  box-shadow: none;
+  color: var(--warn-text);
+}
+
+.sb-design-box__code-label {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  outline: none;
+}
+
+.sb-design-box__code-label:focus-visible {
+  border-radius: var(--radius-sm);
+  outline: 2px solid var(--focus-ring);
+}
+
+.sb-design-box__tooltip {
+  white-space: pre-line;
+}
+
+.sb-design-box__code-error {
+  margin: calc(-1 * var(--space-2)) 0 0;
+  color: var(--danger-text);
+  font-size: var(--font-size-xs);
+  line-height: 1.45;
+}
+
+/* Import Design → With Claude: the way into the box, above the prompts for an external Claude. */
+.sb-import__assistant {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-4);
+  padding-bottom: var(--space-6);
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+/* --- The live preview --------------------------------------------------------------------------- */
+
+.sb-design-preview {
+  position: absolute;
+  top: 0;
+  left: 0;
+  pointer-events: none;
+  transition: opacity var(--duration-base) var(--ease-out);
+}
+
+/* The draft's edge, so it reads as Claude's work in progress rather than the screen. */
+.sb-design-preview::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  box-shadow: 0 0 0 1.5px color-mix(in srgb, var(--ai) 75%, transparent);
+  pointer-events: none;
+}
+
+.sb-design-preview[data-state="leaving"] {
+  opacity: 0;
+}
+
+.sb-design-preview__frame {
+  display: block;
+  border: 0;
+  background: transparent;
+}
+
+.sb-design-preview__pill {
+  position: absolute;
+  bottom: 100%;
+  left: 50%;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-3);
+  max-width: max(100%, 240px);
+  margin-bottom: 8px;
+  padding: var(--space-2) var(--space-5) var(--space-2) var(--space-4);
+  overflow: hidden;
+  border-radius: var(--radius-full);
+  background: var(--bg-elevated);
+  box-shadow: var(--shadow-md), inset 0 0 0 1px color-mix(in srgb, var(--ai) 30%, transparent);
+  color: var(--text-primary);
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-medium);
+  line-height: 16px;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  transform: translateX(-50%);
+}
+
+/* Over a frame at the artboard's top, clear the artboard's label. */
+.sb-design-preview__pill[data-lift] {
+  margin-bottom: 30px;
+}
+
+.sb-design-preview__dot {
+  position: relative;
+  flex: none;
+  width: 6px;
+  height: 6px;
+  border-radius: var(--radius-full);
+  background: var(--ai);
+}
+
+/* A composited ring (transform and opacity only). */
+.sb-design-preview__dot::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: var(--ai);
+  animation: sb-design-pulse 1.4s var(--ease-out) infinite;
+}
+
+@keyframes sb-design-pulse {
+  to {
+    opacity: 0;
+    transform: scale(2.6);
+  }
+}
+
+/* --- Reduced motion: no entrance, no fade, no pulse --------------------------------------------- */
+
+:root[data-motion="reduce"] .sb-design-box {
+  animation: none;
+}
+
+:root[data-motion="reduce"] .sb-design-preview {
+  transition: none;
+}
+
+:root[data-motion="reduce"] .sb-design-preview__dot::after {
+  animation: none;
+  opacity: 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root:not([data-motion="full"]) .sb-design-box {
+    animation: none;
+  }
+
+  :root:not([data-motion="full"]) .sb-design-preview {
+    transition: none;
+  }
+
+  :root:not([data-motion="full"]) .sb-design-preview__dot::after {
+    animation: none;
+    opacity: 0;
+  }
+}

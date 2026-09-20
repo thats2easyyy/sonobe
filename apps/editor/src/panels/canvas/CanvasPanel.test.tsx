@@ -9,7 +9,12 @@ import { createEditorSession, type EditorSession } from "../../state/session.ts"
 import { CommandProvider } from "../../ui/commands/CommandProvider.tsx";
 import { CommandRegistry } from "../../ui/commands/commandRegistry.ts";
 import { KeyboardShortcutManager } from "../../ui/commands/shortcutManager.ts";
+import { designStore, initialDesignData } from "../design/designStore.ts";
 import { CanvasPanel } from "./CanvasPanel.tsx";
+
+// The Design with Claude box asks these of the design state package while it's open: stand-ins for its stubs.
+vi.mock("../design/context.ts", () => ({ designTarget: () => null, canvasContext: () => ({ component: { id: "main", name: "Main", size: [402, 874] }, screens: [] }) }));
+vi.mock("../design/status.ts", () => ({ designStatusLine: () => null, toolStatusText: () => "" }));
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -37,6 +42,10 @@ beforeAll(() => {
     }
   } as unknown as typeof ResizeObserver;
 });
+// The canvas loads the Design with Claude box on first open; load its module up front so a test doesn't wait on the transform.
+beforeAll(async () => {
+  await import("../design/DesignBox.tsx");
+}, 60_000);
 afterAll(() => {
   if (sizeDescriptors.width) Object.defineProperty(HTMLElement.prototype, "clientWidth", sizeDescriptors.width);
   if (sizeDescriptors.height) Object.defineProperty(HTMLElement.prototype, "clientHeight", sizeDescriptors.height);
@@ -64,6 +73,7 @@ beforeEach(() => {
 
 afterEach(() => {
   act(() => root.unmount());
+  designStore.setState(initialDesignData());
   session.dispose();
   container.remove();
   document.body.innerHTML = "";
@@ -124,6 +134,20 @@ const artboardOffset = () => {
 };
 
 const position = (id: string) => findLayer(session.document.getState().doc.components.main!.layers, id)!.layer.props.position;
+
+const designButton = () => container.querySelector<HTMLButtonElement>('button[aria-label="Design with Claude"]')!;
+
+/** The box, once its lazily loaded module has arrived and React has rendered it. */
+async function openedBox(): Promise<HTMLElement> {
+  for (let i = 0; i < 100 && !container.querySelector(".sb-design-box"); i++) {
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    });
+  }
+  const box = container.querySelector<HTMLElement>(".sb-design-box");
+  expect(box).not.toBeNull();
+  return box!;
+}
 
 describe("CanvasPanel", () => {
   it("renders the artboard and registers canvas commands", () => {
@@ -339,5 +363,84 @@ describe("CanvasPanel", () => {
       session.selection.getState().setComponentPath(["main", result.idMap.logic!]);
     });
     expect(container.textContent).toContain("Nothing to draw here");
+    expect(designButton().disabled).toBe(true);
+  });
+
+  it("opens the Design with Claude box from the header, outside the canvas's pointer and wheel gestures", async () => {
+    mount();
+    expect(designButton().disabled).toBe(false);
+    act(() => designButton().click());
+    expect(designStore.getState().open).toBe(true);
+    const designBox = await openedBox();
+    expect(designBox.closest(".sb-cv")).toBeNull();
+    expect(designBox.parentElement?.classList.contains("sb-panel__body")).toBe(true);
+
+    act(() => session.selection.getState().select({ layers: ["card"] }));
+    const before = artboardOffset();
+    act(() => {
+      designBox.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, pointerId: 1, button: 0, buttons: 1, ...at(10, 700) }));
+      designBox.dispatchEvent(new PointerEvent("pointermove", { bubbles: true, pointerId: 1, buttons: 1, ...at(300, 820) }));
+    });
+    pointer("pointermove", at(320, 840));
+    expect(container.querySelector(".sb-cv__marquee")).toBeNull();
+    act(() => {
+      designBox.dispatchEvent(new PointerEvent("pointerup", { bubbles: true, pointerId: 1, button: 0, buttons: 0, ...at(300, 820) }));
+    });
+    // A press on the canvas's empty space would have started a marquee and cleared the selection.
+    expect(session.selection.getState().layers).toEqual(["card"]);
+
+    const wheel = new WheelEvent("wheel", { bubbles: true, cancelable: true, deltaY: 120, ...at(200, 700) });
+    act(() => {
+      designBox.dispatchEvent(wheel);
+    });
+    expect(wheel.defaultPrevented).toBe(false);
+    expect(artboardOffset()).toEqual(before);
+    // The same wheel over the canvas pans it.
+    act(() => {
+      body().dispatchEvent(new WheelEvent("wheel", { bubbles: true, cancelable: true, deltaY: 120, ...at(200, 300) }));
+    });
+    expect(artboardOffset()).not.toEqual(before);
+  });
+
+  it("opens the box from the empty artboard's hint, which starts no canvas gesture", async () => {
+    mount();
+    act(() => {
+      const store = session.document.getState();
+      store.apply(
+        store.doc.components.main!.layers.map((l) => ({ op: "removeLayer" as const, component: "main", id: l.id })),
+        { label: "Clear" },
+      );
+    });
+    const link = container.querySelector<HTMLButtonElement>(".sb-cv__hint-action")!;
+    expect(link.closest(".sb-cv__hint")?.textContent).toBe("Draw a rectangle (R), an oval (O), or text (T), or describe a screen to Claude");
+    act(() => {
+      link.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, pointerId: 1, button: 0, buttons: 1, ...at(201, 437) }));
+    });
+    pointer("pointermove", at(20, 20));
+    expect(container.querySelector(".sb-cv__marquee")).toBeNull();
+    pointer("pointerup", at(20, 20));
+    act(() => link.click());
+    expect(designStore.getState().open).toBe(true);
+    await openedBox();
+  });
+
+  it("shows another agent's work in the artboard label, but not the Assistant's", () => {
+    mount();
+    const pill = () => container.querySelector(".sb-cv__label-agent")?.textContent ?? null;
+    act(() => {
+      session.presence.getState().begin({ intent: "designing a checkout screen", author: { kind: "agent", name: "Assistant" } });
+    });
+    expect(pill()).toBeNull();
+    let work = "";
+    act(() => {
+      work = session.presence.getState().begin({ intent: "designing a checkout screen", author: { kind: "agent", name: "Claude" }, client: { id: "s1", label: "Claude Code", folder: "/Users/me/noddit" } });
+    });
+    expect(pill()).toBe("Claude Code: designing a checkout screen");
+    act(() => {
+      session.presence.getState().finish(work);
+      session.presence.getState().begin({ intent: "rebuilding the settings screen with every toggle from the SwiftUI view", author: { kind: "agent", name: "Claude" } });
+    });
+    expect(pill()).toBe("Claude: rebuilding the settings screen with every toggle fr…");
+    expect(pill()!.length).toBe(60);
   });
 });
