@@ -13,7 +13,17 @@ import type { GuideStore, SonobeHost } from "@sonobe/mcp";
 import type { SecretStore } from "../secrets.ts";
 import { createAssistantAgent, type AnthropicClientLike, type AssistantAgent } from "./agent.ts";
 import { DEFAULT_MODEL, modelInfos } from "./models.ts";
-import { ASSISTANT_IPC, ASSISTANT_KEY_SECRET, type AssistantKeyCheck, type AssistantLimits, type AssistantRunResult, type AssistantSendRequest, type AssistantStatus } from "./protocol.ts";
+import {
+  ASSISTANT_IPC,
+  ASSISTANT_KEY_SECRET,
+  type AssistantCodeFolderLinkResult,
+  type AssistantCodeFolderStatus,
+  type AssistantKeyCheck,
+  type AssistantLimits,
+  type AssistantRunResult,
+  type AssistantSendRequest,
+  type AssistantStatus,
+} from "./protocol.ts";
 import { createMcpToolBridge, type ToolBridge } from "./toolBridge.ts";
 
 /** The webContents that sent a request (Electron's IpcMainInvokeEvent.sender). */
@@ -57,6 +67,9 @@ export interface AssistantRegistration {
   /** Remove the IPC handlers, stop runs, and close the tool bridge. */
   dispose(): Promise<void>;
 }
+
+/** No code folder is linked (code folders aren't wired in yet). */
+const noCodeFolder = (): AssistantCodeFolderStatus => ({ linked: null, missing: false });
 
 /** "sk-ant-…3f9a" for a stored key; never more than the last four characters. */
 export function keyHint(key: string): string {
@@ -136,6 +149,7 @@ export function registerAssistant(options: RegisterAssistantOptions): AssistantR
       usage: snap.usage,
       running: snap.running,
       messageCount: snap.messageCount,
+      codeFolder: noCodeFolder(),
     };
   };
 
@@ -159,6 +173,18 @@ export function registerAssistant(options: RegisterAssistantOptions): AssistantR
     [ASSISTANT_IPC.checkKey]: (event): Promise<AssistantKeyCheck> => {
       conversationOf(event);
       return agent.checkKey();
+    },
+    [ASSISTANT_IPC.codeFolder]: (event): AssistantCodeFolderStatus => {
+      conversationOf(event);
+      return noCodeFolder();
+    },
+    [ASSISTANT_IPC.linkCodeFolder]: (event): AssistantCodeFolderLinkResult => {
+      conversationOf(event);
+      return { status: noCodeFolder(), error: "This version of Sonobe can't link a code folder yet." };
+    },
+    [ASSISTANT_IPC.unlinkCodeFolder]: (event): AssistantCodeFolderStatus => {
+      conversationOf(event);
+      return noCodeFolder();
     },
   };
 

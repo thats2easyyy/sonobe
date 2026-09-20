@@ -14,9 +14,9 @@
  * barrel pulls in the SDK and the MCP server.
  */
 
-export { createAssistantAgent, DEFAULT_LIMITS, requestParams, resolveLimits, systemPrompt, toAssistantError, type AnthropicClientLike, type AssistantAgent, type AssistantAgentOptions, type ConversationSnapshot, type MessageStreamLike } from "./agent.ts";
-export { applyOpsDeletion, DELETE_CONFIRM_THRESHOLD, deleteConfirmation, isReadOnlyRefusal, type DeletionPrompt } from "./guardrails.ts";
+export { createAssistantAgent, DEFAULT_LIMITS, requestParams, resolveLimits, systemPrompt, toAssistantError, UNPINNED_TOOLS, type AnthropicClientLike, type AssistantAgent, type AssistantAgentOptions, type ConversationSnapshot, type MessageStreamLike } from "./agent.ts";
+export { applyOpsDeletion, DELETE_CONFIRM_THRESHOLD, deleteConfirmation, isReadOnlyRefusal, type ConfirmPrompt, type DeletionPrompt } from "./guardrails.ts";
 export { addUsage, DEFAULT_MODEL, emptyUsage, estimateCostUsd, FALLBACK_BETA, isModelId, modelInfos, MODELS, resolveModel, type ModelSpec } from "./models.ts";
 export * from "./protocol.ts";
 export { createAnthropicClient, keyHint, registerAssistant, type AssistantIpcEvent, type AssistantIpcMain, type AssistantRegistration, type AssistantSender, type RegisterAssistantOptions } from "./register.ts";
-export { ASSISTANT_AUTHOR_NAME, createMcpToolBridge, describeToolInput, describeToolResult, toAnthropicTools, toolResultContent, type AssistantToolInfo, type ToolBridge, type ToolCallResult } from "./toolBridge.ts";
+export { ASSISTANT_AUTHOR_NAME, createMcpToolBridge, describeToolInput, describeToolResult, toAnthropicTools, toolResultContent, type AssistantToolInfo, type LocalTools, type LocalToolScope, type ToolBridge, type ToolCallResult } from "./toolBridge.ts";

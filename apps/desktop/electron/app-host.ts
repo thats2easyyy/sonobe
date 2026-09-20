@@ -146,6 +146,8 @@ export interface AppHost extends SonobeHost {
   simulationScreenshots(): boolean;
   /** The window whose document tools without docId (and the phone preview) use, or null with none open. */
   activeTargetId(): number | null;
+  /** The document window `targetId` shows, or null when that window is gone. */
+  targetDocument(targetId: number): Promise<{ docId: Id; projectPath: string | null } | null>;
   /** The document's scripts wait for the person's trust, as its editor last reported. */
   scriptsPaused(docId: Id): boolean;
   dispose(): void;
@@ -724,6 +726,15 @@ export function createAppHost(options: AppHostOptions): AppHost {
         }
       }
       return out;
+    },
+
+    async targetDocument(targetId) {
+      const targets = options.targets();
+      prune(targets);
+      const target = targets.find((t) => t.id === targetId);
+      if (!target) return null;
+      const entry = await describe(target);
+      return { docId: entry.docId, projectPath: entry.info.projectPath };
     },
 
     async openDocument(ref) {

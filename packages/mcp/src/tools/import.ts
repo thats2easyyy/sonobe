@@ -16,6 +16,25 @@ import { ADDITIVE, type ToolContext } from "../server.ts";
 import { ComponentIdSchema, DocIdSchema, ExpectedRevisionSchema, LabelSchema } from "../schemas.ts";
 import { writeResult } from "./write.ts";
 
+/** The `_meta` key of import_design's result: an ImportResultMeta. */
+export const IMPORT_META_KEY = "dev.sonobe/import";
+/** On every successful import_design result (also when a screenshot drops structuredContent). */
+export interface ImportResultMeta {
+  docId: string;
+  dryRun: boolean;
+  /** The new screen's layer id; null for a dry run. */
+  screenId: string | null;
+  screenName: string;
+  txnId: string | null;
+  /** The layer `replace` named, or null. */
+  replaced: string | null;
+  /** Top-most layers of the replaced one that weren't found again, at most 20. */
+  dropped: { id: string; name: string }[];
+  droppedCount: number;
+  lostConnections: number;
+  kept: number | null;
+}
+
 /** Most outline lines the result shows for the imported screen. */
 const OUTLINE_LINES = 70;
 

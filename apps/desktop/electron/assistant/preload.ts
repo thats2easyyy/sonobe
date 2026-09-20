@@ -3,7 +3,16 @@
  * protocol constants, so it bundles into the sandboxed preload.
  */
 
-import { ASSISTANT_IPC, type AssistantEvent, type AssistantKeyCheck, type AssistantRunResult, type AssistantStatus, type SonobeAssistantApi } from "./protocol.ts";
+import {
+  ASSISTANT_IPC,
+  type AssistantCodeFolderLinkResult,
+  type AssistantCodeFolderStatus,
+  type AssistantEvent,
+  type AssistantKeyCheck,
+  type AssistantRunResult,
+  type AssistantStatus,
+  type SonobeAssistantApi,
+} from "./protocol.ts";
 
 /** The subset of Electron's ipcRenderer used here. */
 export interface AssistantIpcRenderer {
@@ -36,6 +45,9 @@ export function createAssistantApi(ipcRenderer: AssistantIpcRenderer): SonobeAss
         ipcRenderer.removeListener(ASSISTANT_IPC.event, listener);
       };
     },
+    codeFolder: () => invoke<AssistantCodeFolderStatus>(ASSISTANT_IPC.codeFolder),
+    linkCodeFolder: () => invoke<AssistantCodeFolderLinkResult>(ASSISTANT_IPC.linkCodeFolder),
+    unlinkCodeFolder: () => invoke<AssistantCodeFolderStatus>(ASSISTANT_IPC.unlinkCodeFolder),
   };
 }
 

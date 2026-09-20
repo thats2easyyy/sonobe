@@ -28,6 +28,8 @@ export interface ToolCallResult {
   content: ToolContentBlock[];
   structuredContent?: Record<string, unknown>;
   isError?: boolean;
+  /** The MCP result's _meta (import_design's "dev.sonobe/import"). */
+  meta?: Record<string, unknown>;
 }
 
 export interface AssistantToolInfo {
@@ -37,6 +39,16 @@ export interface AssistantToolInfo {
   inputSchema: Record<string, unknown>;
   /** The tool never changes the document. */
   readOnly: boolean;
+}
+
+export interface LocalToolScope { conversationId: string; runId: string; projectPath: string | null; signal: AbortSignal }
+/** Tools of the Assistant's own that run in the main process (the code folder tools). Not MCP tools. */
+export interface LocalTools {
+  /** Listed after the MCP tools in a fixed order, always, so the cached prefix never changes. */
+  readonly infos: readonly AssistantToolInfo[];
+  call(name: string, input: Record<string, unknown>, scope: LocalToolScope): Promise<ToolCallResult>;
+  /** A chat was reset or its window closed. */
+  forget(conversationId: string): void;
 }
 
 export interface ToolCallOptions {
@@ -114,8 +126,13 @@ export function createMcpToolBridge(options: McpToolBridgeOptions): ToolBridge {
           },
           resetTimeoutOnProgress: true,
         },
-      )) as unknown as ToolCallResult;
-      return { content: Array.isArray(result.content) ? result.content : [], ...(result.structuredContent ? { structuredContent: result.structuredContent } : {}), ...(result.isError ? { isError: true } : {}) };
+      )) as unknown as ToolCallResult & { _meta?: Record<string, unknown> };
+      return {
+        content: Array.isArray(result.content) ? result.content : [],
+        ...(result.structuredContent ? { structuredContent: result.structuredContent } : {}),
+        ...(result.isError ? { isError: true } : {}),
+        ...(result._meta ? { meta: result._meta } : {}),
+      };
     },
     async close() {
       const pending = connecting;

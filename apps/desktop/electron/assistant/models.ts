@@ -61,7 +61,7 @@ export function modelInfos(): AssistantModelInfo[] {
 }
 
 export function emptyUsage(): AssistantUsage {
-  return { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, totalTokens: 0, estimatedCostUsd: 0, requests: 0 };
+  return { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, totalTokens: 0, budgetTokens: 0, estimatedCostUsd: 0, requests: 0 };
 }
 
 /** The usage fields of an API response we count. */
@@ -94,6 +94,7 @@ export function addUsage(totals: AssistantUsage, usage: UsageLike | null | undef
     cacheReadTokens,
     cacheWriteTokens,
     totalTokens: inputTokens + outputTokens + cacheReadTokens + cacheWriteTokens,
+    budgetTokens: Math.round(inputTokens + outputTokens + cacheWriteTokens * 1.25 + cacheReadTokens * 0.1),
     estimatedCostUsd: totals.estimatedCostUsd + estimateCostUsd(usage, model),
     requests: totals.requests + 1,
   };

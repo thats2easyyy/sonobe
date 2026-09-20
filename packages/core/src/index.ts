@@ -1,6 +1,6 @@
 /**
  * @sonobe/core: the document model, values and coercion, ids and addresses, the
- * registry, ops and history, diagnostics, canonical serialization, and the outline.
+ * registry, ops and history, diagnostics, canonical serialization, the outline, and the style digest.
  * Browser-safe; the Node file system adapter lives in "@sonobe/core/node", and the patch graph
  * view model (node shapes and sizes, placement, tidy) in "@sonobe/core/graph".
  */
@@ -29,3 +29,4 @@ export * from "./knobs.ts";
 export * from "./loopShapes.ts";
 export * from "./diagnostics.ts";
 export * from "./outline.ts";
+export * from "./styles.ts";
