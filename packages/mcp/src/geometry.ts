@@ -17,6 +17,7 @@ import {
   componentNodeBoxes,
   createElkGroupLayout,
   flowNodeKind,
+  rectsOverlap,
   type ElkLike,
   type GroupLayout,
   type Rect,
@@ -154,6 +155,28 @@ export function sizesNote(geometry: GraphGeometry): string {
   if (measured)
     return `Node sizes: ${measured} of ${total} as the patch editor measured them, the rest (off screen there) estimated.`;
   return "Node sizes are estimated as the editor draws them (with live values after a second).";
+}
+
+/** A node with its box, as results list it: "names (460,520 286×124)". */
+export function boxLabel(id: string, box: Rect): string {
+  return `${id} (${box.x},${box.y} ${box.width}×${box.height})`;
+}
+
+/** Nodes whose boxes overlap, as pairs, in the order given. */
+export function overlappingPairs(boxes: Iterable<readonly [string, Rect]>): [string, string][] {
+  const list = [...boxes];
+  const out: [string, string][] = [];
+  for (let i = 0; i < list.length; i++)
+    for (let j = i + 1; j < list.length; j++)
+      if (rectsOverlap(list[i]![1], list[j]![1])) out.push([list[i]![0], list[j]![0]]);
+  return out;
+}
+
+/** The other nodes of the graph whose boxes overlap node `id`'s box. */
+export function overlapsOf(geometry: GraphGeometry, id: string): string[] {
+  const box = geometry.nodes.get(id);
+  if (!box) return [];
+  return [...geometry.nodes].filter(([other, r]) => other !== id && rectsOverlap(box, r)).map(([other]) => other);
 }
 
 let elk: Promise<ElkLike> | undefined;
