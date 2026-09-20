@@ -1068,7 +1068,7 @@ function main(): void {
     // Test runs use a reversible cipher so automated launches never touch (or prompt for) the keychain.
     secrets = createSecretStore({ file: path.join(app.getPath("userData"), "secrets.json"), cipher: env.testHooks ? createTestCipher() : safeStorage, log });
     registerIpc();
-    drafts = createDraftStore({ dir: path.join(app.getPath("userData"), "Drafts"), version: VERSION });
+    drafts = createDraftStore({ dir: path.join(app.getPath("userData"), "Drafts"), version: VERSION, log });
     registerDraftIpc(ipcMain, drafts, { requireWindow, reveal: (folder) => shell.showItemInFolder(folder) });
     void drafts.prune().then((n) => n && log("info", `Removed ${n} empty or 90-day-old draft${n === 1 ? "" : "s"}`)).catch(() => undefined);
     registerAssistant({ ipcMain, isTrustedSender: (event) => trustedWindow(event as IpcMainInvokeEvent) !== null, host: () => appHost, secrets: () => secrets, version: VERSION, guides: () => loadGuides(bundledResource("guides", "packages/mcp/guides")), log });

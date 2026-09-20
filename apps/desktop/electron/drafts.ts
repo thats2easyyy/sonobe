@@ -49,6 +49,7 @@ export interface DraftStoreOptions {
   /** Recorded in draft.json. */
   version: string;
   now?: () => number;
+  log?(level: "info" | "warn", message: string): void;
 }
 
 export interface DraftStore {
@@ -63,8 +64,10 @@ export interface DraftStore {
   list(): Promise<DraftInfo[]>;
   /** Claim a draft for `owner` and read every file in it. */
   read(owner: number, id: string): Promise<{ info: DraftInfo; manifest: Record<string, unknown>; files: Record<string, string>; binaries: Record<string, Uint8Array> }>;
-  /** A window closed, reloaded or crashed: its drafts become recoverable. */
-  release(owner: number): void;
+  /** A window closed, reloaded or crashed: its drafts become recoverable. With `id`, only that one (the editor couldn't use a draft it read). */
+  release(owner: number, id?: string): void;
+  /** The window that claims draft `id`, if one does. */
+  holder(id: string): number | undefined;
   /** Delete the drafts a window claims (it's closing after Save or Don't Save). */
   discard(owner: number): Promise<void>;
   /** At launch: delete drafts with nothing in them and drafts untouched for 90 days. Returns how many went. */
@@ -198,6 +201,13 @@ export function createDraftStore(options: DraftStoreOptions): DraftStore {
     return infoOf(id, null, true, { name, updatedAt: Math.round(mtime) });
   };
 
+  /** Whether a draft folder has no project.json at all, as opposed to one it couldn't read (EACCES, EBUSY): only then is it empty. */
+  const hasNoProject = (id: string): Promise<boolean> =>
+    stat(path.join(folder(id), "project.json")).then(
+      () => false,
+      (err: NodeJS.ErrnoException) => err.code === "ENOENT" || err.code === "ENOTDIR",
+    );
+
   const draftIds = async (): Promise<string[]> =>
     (await readdir(dir, { withFileTypes: true }).catch(() => []))
       .filter((e) => e.isDirectory() && e.name.endsWith(".sonobe"))
@@ -260,7 +270,11 @@ export function createDraftStore(options: DraftStoreOptions): DraftStore {
           const { [DRAFT_MANIFEST]: _manifestText, ...files } = contents.files;
           // Without a manifest the first write was cut off; inspect names it from project.json.
           const info = manifest ? infoOf(id, manifest, !(await intact(id, manifest, contents)), manifest) : (await inspect(id))!;
-          if (manifest) manifests.set(id, manifest);
+          // The editor carries on from these files as they are, so the next draft.json lists them as read: a torn draft is whole again after its next write.
+          const digests: Record<string, string> = {};
+          for (const [rel, text] of Object.entries(files)) digests[rel] = sha256(text);
+          for (const [rel, bytes] of Object.entries(contents.binaries)) digests[rel] = sha256(bytes);
+          manifests.set(id, { ...(manifest ?? { formatVersion: 1, id, ...metaFrom({ name: info.name }), updatedAt: info.updatedAt, appVersion: "" }), files: digests });
           return { info, manifest: (manifest ?? {}) as unknown as Record<string, unknown>, files, binaries: contents.binaries };
         } catch (err) {
           claims.delete(id);
@@ -269,13 +283,15 @@ export function createDraftStore(options: DraftStoreOptions): DraftStore {
       });
     },
 
-    release(owner) {
+    release(owner, only) {
       for (const [id, holder] of claims) {
-        if (holder !== owner) continue;
+        if (holder !== owner || (only !== undefined && id !== only)) continue;
         claims.delete(id);
         manifests.delete(id);
       }
     },
+
+    holder: (id) => claims.get(id),
 
     async discard(owner) {
       const owned = [...claims].filter(([, holder]) => holder === owner).map(([id]) => id);
@@ -288,8 +304,16 @@ export function createDraftStore(options: DraftStoreOptions): DraftStore {
         if (claims.has(id)) continue;
         const info = await inspect(id).catch(() => null);
         if (info && now() - info.updatedAt < DRAFT_RETENTION_MS) continue;
-        await rm(folder(id), { recursive: true, force: true }).catch(() => undefined);
-        removed++;
+        if (!info && !(await hasNoProject(id))) {
+          options.log?.("warn", `Kept draft ${id}: its files are there but couldn't be read`);
+          continue;
+        }
+        try {
+          await rm(folder(id), { recursive: true, force: true });
+          removed++;
+        } catch (err) {
+          options.log?.("warn", `Couldn't remove draft ${id}: ${err instanceof Error ? err.message : String(err)}`);
+        }
       }
       return removed;
     },
@@ -335,6 +359,10 @@ export function registerDraftIpc(ipcMain: Pick<IpcMain, "handle">, store: DraftS
     } catch (err) {
       return failure(err);
     }
+  });
+  ipcMain.handle(IPC.draftsRelease, (event, id: unknown) => {
+    const w = owner(event);
+    if (typeof id === "string" && DRAFT_ID.test(id)) store.release(w, id);
   });
   ipcMain.handle(IPC.draftsReveal, (event, id: unknown) => {
     owner(event);
