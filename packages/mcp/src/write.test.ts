@@ -667,6 +667,7 @@ describe("setNodePositions through apply_ops", () => {
     expect(r.isError).toBe(false);
     expect(r.text).toContain("Saved positions for @badge; they apply once a cable drives or reads those layers");
     expect(r.text).not.toContain("@card;");
+    expect((await client.call("list_history", {})).text).toContain("moved 2 nodes");
     const wipe = await client.call("apply_ops", { ops: [{ op: "updateComponent", id: "main", meta: { patchEditor: { nodes: { "@card": [1, 2] } } } }] });
     expect(wipe.isError).toBe(true);
     expect(wipe.text).toContain("meta_conflict");
