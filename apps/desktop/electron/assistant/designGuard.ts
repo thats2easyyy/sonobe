@@ -2,8 +2,9 @@
  * The replace guard: before import_design replaces a layer, ask the person when it's one they didn't
  * pick and the Assistant didn't make in this chat, or one they changed since the Assistant made it.
  * Per chat and in memory: it fingerprints the screens the Assistant imported, layer by layer, as each
- * of its writes left them, so undoing back to one of its versions isn't the person's change. Pure
- * functions over documents; the agent loop asks and runs the dry run.
+ * of its writes left them, so undoing back to one of its versions isn't the person's change, and
+ * keeps the person's own screen a replace took the place of, so undoing back to that isn't either.
+ * Pure functions over documents; the agent loop asks and runs the dry run.
  */
 
 import { findLayer, layerDisplayName, type Id, type LayerNode, type SonobeDocument } from "@sonobe/core";
@@ -22,8 +23,12 @@ export interface WriteAffected { components: readonly Id[]; layers: readonly Id[
 export interface ReplaceGuard {
   /** Null: go ahead without asking. */
   check(request: { docId: string; component: Id; replace: Id; picked: Id | null }, doc: SonobeDocument): ReplaceCheck | null;
-  /** A successful import_design: the screen is the Assistant's own now (records inside it go; a replace keeps the screen's earlier versions). */
-  remember(docId: string, component: Id, screenId: Id, doc: SonobeDocument): void;
+  /**
+   * A successful import_design: the screen is the Assistant's own now (records inside it go; a replace
+   * keeps the screen's earlier versions). `before`: the document the replace was checked against, so
+   * a person's own screen it replaced is theirs again when their Undo takes it back.
+   */
+  remember(docId: string, component: Id, screenId: Id, doc: SonobeDocument, before?: SonobeDocument): void;
   /** Another successful Assistant write: take the layers it changed into the records of the components it changed. */
   refresh(docId: string, doc: SonobeDocument, affected: WriteAffected): void;
   tracks(docId: string): boolean;
@@ -55,6 +60,8 @@ interface ScreenRecord {
   root: Id;
   /** Oldest first, at most MAX_STATES; the last is the latest. Never changed in place. */
   states: Map<Id, LayerPrint>[];
+  /** The person's own screen the Assistant's first replace of it took the place of. Not one of `states`: it's still theirs. */
+  original?: Map<Id, LayerPrint>;
 }
 
 const latest = (record: ScreenRecord): Map<Id, LayerPrint> => record.states.at(-1)!;
@@ -214,18 +221,23 @@ export function createReplaceGuard(): ReplaceGuard {
         // Against the closest version the Assistant left (the newest on a tie): the person's Undo can
         // take the screen back to any of them, and only what they changed after that counts.
         const current = printSubtree(doc, component, replace)!;
+        const since = (state: Map<Id, LayerPrint>) => changesSince(state, record.root, current, replace);
         const changed = [...record.states]
           .reverse()
-          .map((state) => changesSince(state, record.root, current, replace))
-          .reduce((closest, since) => (since.length < closest.length ? since : closest));
+          .map(since)
+          .reduce((closest, next) => (next.length < closest.length ? next : closest));
         if (!changed.length) return null;
-        return { reason: "hand_edited", target, changed: [...new Set(changed)].slice(0, LISTED), changedCount: changed.length };
+        // Closer to the person's own screen that the Assistant replaced (their Undo took it back), it's
+        // theirs again: asking goes by what they picked, as for any screen of theirs.
+        if (!record.original || since(record.original).length >= changed.length) {
+          return { reason: "hand_edited", target, changed: [...new Set(changed)].slice(0, LISTED), changedCount: changed.length };
+        }
       }
       if (picked !== null && loc.path.includes(picked)) return null;
       return { reason: "untargeted", target, changed: [], changedCount: 0 };
     },
 
-    remember(docId, component, screenId, doc) {
+    remember(docId, component, screenId, doc, before) {
       const layers = doc.components[component]?.layers;
       const loc = layers ? findLayer(layers, screenId) : undefined;
       const current = printSubtree(doc, component, screenId);
@@ -244,7 +256,9 @@ export function createReplaceGuard(): ReplaceGuard {
         return;
       }
       // A replace keeps the screen's id, and its earlier versions: undoing it isn't the person's change.
-      const record: ScreenRecord = { docId, component, root: screenId, states: replaced?.states ?? [] };
+      // The first replace of the person's own screen keeps theirs apart, as it was.
+      const original = replaced ? replaced.original : before && printSubtree(before, component, screenId);
+      const record: ScreenRecord = { docId, component, root: screenId, states: replaced?.states ?? [], ...(original ? { original } : {}) };
       pushState(record, current);
       records.push(record);
       if (records.length > MAX_RECORDS) records = records.slice(-MAX_RECORDS);

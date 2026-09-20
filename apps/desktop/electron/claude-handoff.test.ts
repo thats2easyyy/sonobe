@@ -5,7 +5,21 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createCodeFolderStore, type CodeFolderKey } from "./assistant/codeFolder.ts";
-import { buildHandoffScript, HANDOFF_NOT_MAC, HANDOFF_PROMPT_LIMIT, handoffFolder, handoffMcpConfig, openInClaudeCode, shellQuote, type HandoffFolder, type HandoffOptions } from "./claude-handoff.ts";
+import {
+  buildHandoffScript,
+  HANDOFF_NOT_MAC,
+  HANDOFF_PROMPT_LIMIT,
+  handoffFolder,
+  handoffMcpConfig,
+  MANAGED_MCP_CONFIG,
+  MANAGED_WITHOUT_SONOBE,
+  openInClaudeCode,
+  readManagedMcp,
+  shellQuote,
+  type HandoffFolder,
+  type HandoffOptions,
+  type ManagedMcp,
+} from "./claude-handoff.ts";
 
 const posix = process.platform !== "win32";
 const zsh = posix && existsSync("/bin/zsh");
@@ -73,6 +87,18 @@ describe("buildHandoffScript", () => {
     ]);
   });
 
+  it("leaves the relay out under an organization's managed MCP config, and says first when it lists no sonobe", () => {
+    const plain = { folder: "/Users/me/code/noddit", display: "~/code/noddit", prompt: "Design a checkout", mcpConfig: handoffMcpConfig(SERVER) };
+    const lines = (managed: ManagedMcp) => buildHandoffScript({ ...plain, managed }).split("\n");
+    const head = buildHandoffScript(plain).split("\n").slice(0, -2);
+    expect(lines(null)).toEqual(buildHandoffScript(plain).split("\n"));
+    expect(lines({ sonobe: true })).toEqual([...head, "exec claude -- 'Design a checkout'", ""]);
+    expect(lines({ sonobe: false })).toEqual([...head, `print -r -- ${shellQuote(MANAGED_WITHOUT_SONOBE)}`, "exec claude -- 'Design a checkout'", ""]);
+    expect(MANAGED_WITHOUT_SONOBE).toBe(
+      "Your organization manages Claude Code's MCP servers (/Library/Application Support/ClaudeCode/managed-mcp.json), and Sonobe's isn't one of them, so this session can't reach your canvas. Ask your admin to add a server named sonobe that runs Sonobe's `sonobe mcp`, then try Open in Claude Code again.",
+    );
+  });
+
   it("adds Sonobe's relay for the session as an mcpServers entry", () => {
     expect(JSON.parse(handoffMcpConfig(SERVER))).toEqual({ mcpServers: { sonobe: SERVER } });
     expect(JSON.parse(handoffMcpConfig({ command: "/Users/me/My \"Apps\"/it's/sonobe", args: ["mcp"] })).mcpServers.sonobe.command).toBe("/Users/me/My \"Apps\"/it's/sonobe");
@@ -130,12 +156,12 @@ describe("buildHandoffScript", () => {
     };
 
     /** Run the script as Terminal would, minus the person's shell profile (-f instead of -l). */
-    const run = async (options: { prompt?: string; configured?: keyof typeof CONFIGURED; withClaude?: boolean; into?: string } = {}) => {
+    const run = async (options: { prompt?: string; configured?: keyof typeof CONFIGURED; withClaude?: boolean; into?: string; managed?: ManagedMcp } = {}) => {
       const configured = CONFIGURED[options.configured ?? "none"];
       await rm(path.join(folder, ".mcp.json"), { force: true });
       if (configured.mcpJson) await writeFile(path.join(folder, ".mcp.json"), JSON.stringify({ mcpServers: { sonobe: { command: "/bin/sh", args: ["-c", "echo not Sonobe"] } } }));
       const script = path.join(dir, "run.command");
-      await writeFile(script, buildHandoffScript({ folder: options.into ?? folder, display: "~/code/noddit", prompt: options.prompt ?? PROMPTS[0]!, mcpConfig }), { mode: 0o700 });
+      await writeFile(script, buildHandoffScript({ folder: options.into ?? folder, display: "~/code/noddit", prompt: options.prompt ?? PROMPTS[0]!, mcpConfig, managed: options.managed ?? null }), { mode: 0o700 });
       const result = spawnSync("/bin/zsh", ["-f", script], {
         encoding: "utf8",
         env: { PATH: `${options.withClaude === false ? "" : `${bin}:`}/usr/bin:/bin`, OUT: out, MCP_GET: configured.out, MCP_EXIT: String(configured.exit), HOME: dir },
@@ -157,6 +183,21 @@ describe("buildHandoffScript", () => {
           expect(result.scriptLeft, label).toBe(false);
         }
       }
+    });
+
+    it("starts claude with the organization's servers under a managed MCP config, saying first when Sonobe's isn't one", async () => {
+      const cwd = await realpath(folder);
+      for (const prompt of PROMPTS) {
+        const listed = await run({ prompt, managed: { sonobe: true } });
+        expect(listed.status, `${JSON.stringify(prompt)}\n${listed.stderr}`).toBe(0);
+        expect(listed.stdout).toBe("");
+        expect(listed.calls).toEqual([[cwd, "--", prompt]]);
+      }
+      const missing = await run({ managed: { sonobe: false } });
+      expect(missing.status).toBe(0);
+      expect(missing.stdout).toBe(`${MANAGED_WITHOUT_SONOBE}\n`);
+      expect(missing.calls).toEqual([[cwd, "--", PROMPTS[0]]]);
+      expect(missing.scriptLeft).toBe(false);
     });
 
     it("says how to install Claude Code when it isn't on the PATH", async () => {
@@ -195,6 +236,7 @@ describe("openInClaudeCode", () => {
         return "";
       },
       name: () => "a1b2c3",
+      managedMcp: async () => null,
       ...over,
     };
     return { handoff, opened, asked };
@@ -207,6 +249,16 @@ describe("openInClaudeCode", () => {
     expect(opened).toEqual([file]);
     expect((await stat(file)).mode & 0o777).toBe(0o700);
     expect(await readFile(file, "utf8")).toBe(buildHandoffScript({ folder: "/Users/me/code/noddit", display: "~/code/noddit", prompt: PROMPT, mcpConfig: handoffMcpConfig(SERVER) }));
+  });
+
+  it("writes the script for an organization's managed MCP config", async () => {
+    for (const managed of [{ sonobe: true }, { sonobe: false }]) {
+      const { handoff } = options({ managedMcp: async () => managed });
+      expect(await openInClaudeCode({ prompt: PROMPT }, handoff)).toEqual({ ok: true, folder: "~/code/noddit" });
+      const file = path.join(handoff.dir, "a1b2c3.command");
+      expect(await readFile(file, "utf8")).toBe(buildHandoffScript({ folder: "/Users/me/code/noddit", display: "~/code/noddit", prompt: PROMPT, mcpConfig: handoffMcpConfig(SERVER), managed }));
+      await rm(file);
+    }
   });
 
   it("works on macOS only, and says what to do instead", async () => {
@@ -272,6 +324,33 @@ describe("openInClaudeCode", () => {
     const { handoff } = options({ now: () => now });
     await openInClaudeCode({ prompt: PROMPT }, handoff);
     expect((await readdir(handoffDir)).sort()).toEqual(["a1b2c3.command", "notes.txt", "recent.command"]);
+  });
+});
+
+describe("readManagedMcp", () => {
+  it("reads Claude Code's managed MCP config from its macOS path, the way Claude Code counts it", async () => {
+    expect(MANAGED_MCP_CONFIG).toBe("/Library/Application Support/ClaudeCode/managed-mcp.json");
+    const file = path.join(dir, "managed-mcp.json");
+    expect(await readManagedMcp(file)).toBeNull();
+    await writeFile(path.join(dir, "a-file"), "");
+    expect(await readManagedMcp(path.join(dir, "a-file", "managed-mcp.json"))).toBeNull();
+    const configs: [unknown, boolean][] = [
+      [{ mcpServers: { sonobe: { command: "/Applications/Sonobe.app/Contents/Resources/cli/sonobe", args: ["mcp"] } } }, true],
+      [{ mcpServers: { github: { type: "http", url: "https://api.githubcopilot.com/mcp/" } } }, false],
+      [{ mcpServers: {} }, false],
+      [{ servers: { sonobe: {} } }, false],
+      [null, false],
+    ];
+    for (const [config, sonobe] of configs) {
+      await writeFile(file, JSON.stringify(config));
+      expect(await readManagedMcp(file), JSON.stringify(config)).toEqual({ sonobe });
+    }
+    // One that doesn't parse, or isn't a file, still keeps control, and lists no servers.
+    await writeFile(file, "{ not json");
+    expect(await readManagedMcp(file)).toEqual({ sonobe: false });
+    await rm(file);
+    await mkdir(file);
+    expect(await readManagedMcp(file)).toEqual({ sonobe: false });
   });
 });
 

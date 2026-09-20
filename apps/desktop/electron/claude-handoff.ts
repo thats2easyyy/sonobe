@@ -4,13 +4,14 @@
  * person's own `claude` in their app's folder with the prompt they wrote. They see and drive that
  * session; Sonobe never runs Claude headlessly and never reads its output or credentials
  * (ARCHITECTURE §10). The script passes the app's relay as `sonobe` with `--mcp-config`, for that
- * session only, so the person's Claude settings don't change.
+ * session only, so the person's Claude settings don't change. When their organization manages Claude
+ * Code's MCP servers, which refuses that, the session gets the organization's own servers instead.
  *
  * Electron-free: main injects shell.openPath, the folder dialog and the relay's launch spec.
  */
 
 import { randomBytes } from "node:crypto";
-import { chmod, mkdir, readdir, rm, stat, writeFile } from "node:fs/promises";
+import { chmod, mkdir, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { CodeFolderError, type CodeFolderKey, type CodeFolderStore } from "./assistant/codeFolder.ts";
 import type { HandoffRequest, HandoffResult } from "./assistant/protocol.ts";
@@ -23,6 +24,19 @@ export const HANDOFF_PROMPT_LIMIT = 20_000;
 const STALE_SCRIPT_MS = 24 * 60 * 60 * 1000;
 
 export const HANDOFF_NOT_MAC = "Open in Claude Code works on macOS for now. Copy the prompt instead, and paste it into Claude Code in your app's folder.";
+
+/**
+ * Claude Code's managed MCP config on macOS, where an organization lists the only MCP servers its
+ * sessions load. While it's there, Claude Code 2.1 refuses `--mcp-config` at startup, or ignores it
+ * when the file doesn't parse; the path has no override.
+ */
+export const MANAGED_MCP_CONFIG = "/Library/Application Support/ClaudeCode/managed-mcp.json";
+
+/** The managed MCP config: null when there's none, else whether it lists a server named `sonobe`. */
+export type ManagedMcp = { sonobe: boolean } | null;
+
+/** What the terminal says before the session when the organization's servers don't include Sonobe's. */
+export const MANAGED_WITHOUT_SONOBE = `Your organization manages Claude Code's MCP servers (${MANAGED_MCP_CONFIG}), and Sonobe's isn't one of them, so this session can't reach your canvas. Ask your admin to add a server named sonobe that runs Sonobe's \`sonobe mcp\`, then try Open in Claude Code again.`;
 
 /** The MCP server the session gets as `sonobe`: the app's relay, as Connect Claude launches it. */
 export interface HandoffServer {
@@ -45,6 +59,22 @@ export interface HandoffOptions {
   now?(): number;
   /** The script's file name without ".command" (default: 16 random bytes in hex). */
   name?(): string;
+  /** Claude Code's managed MCP config (default: readManagedMcp()). */
+  managedMcp?(): Promise<ManagedMcp>;
+}
+
+/**
+ * Read the managed MCP config as Claude Code counts it: a file it can't stat (it isn't there, or a
+ * folder above it can't be searched) is none, and one it can't read or parse lists no servers.
+ */
+export async function readManagedMcp(file = MANAGED_MCP_CONFIG): Promise<ManagedMcp> {
+  if (!(await stat(file).catch(() => null))) return null;
+  try {
+    const servers: unknown = (JSON.parse(await readFile(file, "utf8")) as { mcpServers?: unknown } | null)?.mcpServers;
+    return { sonobe: typeof servers === "object" && servers !== null && Object.hasOwn(servers, "sonobe") };
+  } catch {
+    return { sonobe: false };
+  }
 }
 
 /** A zsh word that is exactly `value`: single-quoted, with each `'` as `'\''`. NUL can't be passed in an argument, so it's refused. */
@@ -71,10 +101,18 @@ export function handoffMcpConfig(server: HandoffServer): string {
  * the app's, even for people who added one with Connect Claude, and their saved `mcp__sonobe__*`
  * permissions still apply; under another name they'd get every tool twice. Claude Code still asks
  * about the folder's own `sonobe`, but approving it doesn't replace the app's relay in this session.
+ *
+ * With the organization's managed-mcp.json (`managed`), Claude Code won't start with `--mcp-config`,
+ * and loads only the servers that file lists, never the folder's. So the script starts `claude`
+ * without it: the session has the organization's `sonobe` if it lists one, and when it doesn't, the
+ * terminal says so first.
  */
-export function buildHandoffScript(o: { folder: string; prompt: string; mcpConfig: string; display?: string }): string {
+export function buildHandoffScript(o: { folder: string; prompt: string; mcpConfig: string; display?: string; managed?: ManagedMcp }): string {
   const folder = shellQuote(o.folder);
   const prompt = shellQuote(o.prompt);
+  const session = o.managed
+    ? [...(o.managed.sonobe ? [] : [`print -r -- ${shellQuote(MANAGED_WITHOUT_SONOBE)}`]), `exec claude -- ${prompt}`]
+    : [`exec claude --mcp-config ${shellQuote(o.mcpConfig)} -- ${prompt}`];
   return [
     "#!/bin/zsh -l",
     "# Sonobe's Open in Claude Code. It deletes itself as it starts.",
@@ -84,7 +122,7 @@ export function buildHandoffScript(o: { folder: string; prompt: string; mcpConfi
     `  print -r -- ${shellQuote("Claude Code isn't installed, or isn't on your PATH. Install it from https://claude.com/claude-code, then try Open in Claude Code again.")}`,
     "  exit 1",
     "fi",
-    `exec claude --mcp-config ${shellQuote(o.mcpConfig)} -- ${prompt}`,
+    ...session,
     "",
   ].join("\n");
 }
@@ -121,7 +159,8 @@ export async function openInClaudeCode(request: unknown, options: HandoffOptions
   if ("cancelled" in folder) return { ok: false, cancelled: true };
   if ("error" in folder) return { ok: false, error: folder.error };
 
-  const script = buildHandoffScript({ folder: folder.root, display: folder.path, prompt: checked.prompt, mcpConfig: handoffMcpConfig(options.server()) });
+  const managed = options.managedMcp ? await options.managedMcp() : await readManagedMcp();
+  const script = buildHandoffScript({ folder: folder.root, display: folder.path, prompt: checked.prompt, mcpConfig: handoffMcpConfig(options.server()), managed });
   const file = path.join(options.dir, `${options.name?.() ?? randomBytes(16).toString("hex")}.command`);
   try {
     await mkdir(options.dir, { recursive: true, mode: 0o700 });
