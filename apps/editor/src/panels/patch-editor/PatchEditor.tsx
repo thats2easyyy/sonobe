@@ -136,7 +136,7 @@ const APPEAR_WAIT_MS = 1200;
 /** A first fit slower than this shows the loading placeholder. */
 const LOADING_DELAY_MS = 250;
 /** The placeholder's crossfade out as the graph arrives. */
-const LOADING_LEAVE_MS = 240;
+const LOADING_LEAVE_MS = 300;
 
 /** The next frame, or a moment later in a window that doesn't paint (hidden windows may not run requestAnimationFrame). */
 const nextFrame = () => new Promise<void>((resolve) => {

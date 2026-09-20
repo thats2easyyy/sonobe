@@ -34,8 +34,8 @@ export const COMMENT_MS = 300;
 export const NODE_LEAD_MS = 50;
 /** A cable draws from its output to its input. */
 export const CABLE_MS = 320;
-/** A cable leaves its output once that node is this far into appearing (faded in, its travel almost done). */
-export const CABLE_LAG_MS = Math.round(NODE_MS * 0.4);
+/** A cable leaves its output once that node is this far into appearing (mostly faded in, most of its travel done), so the wiring keeps pace with the wave. */
+export const CABLE_LAG_MS = Math.round(NODE_MS * 0.25);
 /** The first reveal's wave spreads over at most this long... */
 export const WAVE_MS = 340;
 /** ...and at most this much per node, so a few nodes don't wait on each other. */
@@ -46,8 +46,11 @@ export const BATCH_STEP_MS = 30;
 export const BATCH_MAX_MS = 300;
 /** More nodes than this revealing at once fade in together, with the viewport or without a wave. */
 export const LARGE_REVEAL = 150;
-/** More nodes than this in one wave travel without the ring: a ring glowing inside each fading node costs frames. */
-export const RING_LIMIT = 100;
+/**
+ * More nodes than this in one wave travel without the ring: a ring glowing inside each fading node
+ * costs frames. Measured at 1920 × 1200: 65 rings hold 60 fps, 78 already drop a few frames.
+ */
+export const RING_LIMIT = 64;
 /** How long a `placed` hint waits for the change that brings what it names. */
 export const PLACED_MS = 1000;
 /** The viewport fade (large graphs, reduced motion) and other plain fades. */
@@ -307,11 +310,15 @@ export function createAppearStore(options: AppearStoreOptions = {}): AppearStore
     return a && a.mode !== "placed" && a.end > t ? a : undefined;
   };
 
-  const planCables = (entries: Iterable<[string, CableEntry]>, t: number, byHand: boolean, keys: Set<string>) => {
+  /**
+   * Plan cables' appearances. For the person's own change, `broughtByHand` holds the nodes it brings
+   * (not those they placed), and only new cables that come with one of them draw in: a cable they
+   * connected themselves is there already, even to a node still arriving from an earlier change.
+   */
+  const planCables = (entries: Iterable<[string, CableEntry]>, t: number, broughtByHand: ReadonlySet<string> | null, keys: Set<string>) => {
     for (const [id, c] of entries) {
+      if (broughtByHand && !broughtByHand.has(c.source) && !broughtByHand.has(c.target)) continue;
       const ends = [arriving(c.source, t), arriving(c.target, t)] as const;
-      const withNewEnd = ends.some((a) => a !== undefined);
-      if (byHand && !withNewEnd) continue;
       const start = cableStart(ends[0], ends[1], t);
       const mode: AppearMode = c.invalid || reduced() || ends.some((a) => a?.mode === "fade") ? "fade" : "draw";
       shown.set(cableKey(id), { mode, start, end: start + durationOf(mode) });
@@ -400,7 +407,12 @@ export function createAppearStore(options: AppearStoreOptions = {}): AppearStore
         const start = t + (delays?.get(p.id) ?? 0);
         shown.set(nodeKey(p.id), { mode, start, end: start + durationOf(mode) });
       }
-      planCables(addedCables.filter(([id]) => !drawn.has(id)), t, change.byHand, keys);
+      planCables(
+        addedCables.filter(([id]) => !drawn.has(id)),
+        t,
+        change.byHand ? new Set(arrivals.map((p) => p.id)) : null,
+        keys,
+      );
       // New nodes and cables mount after this and get painted then; a rerouted cable keeps its wrapper.
       paintMounted(keys);
       sweep();
@@ -441,7 +453,7 @@ export function createAppearStore(options: AppearStoreOptions = {}): AppearStore
       planCables(
         [...cables].filter(([, c]) => shown.has(nodeKey(c.source)) || shown.has(nodeKey(c.target))),
         t,
-        false,
+        null,
         keys,
       );
       paintMounted(keys);
