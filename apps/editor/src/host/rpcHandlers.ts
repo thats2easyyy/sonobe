@@ -1,7 +1,7 @@
 /**
  * RPC handlers the desktop MCP bridge calls to reach the live document: document info, read, apply
  * (with dry runs and optimistic concurrency), save, open, new; selection; viewer bounds and the
- * panels' registered bounds for screenshots; the live prototype's runtime diagnostics;
+ * panels' registered bounds for screenshots; the live prototype's runtime diagnostics and restart;
  * deterministic simulations; history; agent presence; and reveal. Errors are returned through
  * `rpc.fail(code, message, data)` because the context bridge strips Error properties.
  */
@@ -10,6 +10,7 @@ import { allLayerIds, DEVICE_PRESETS, findComponentInstances, getOutline, listCo
 import { isTraceUnavailable, type InputEvent, type TraceInput } from "@sonobe/engine";
 import { issuesToDiagnostics } from "../runtime/runtimeHost.ts";
 import type { Simulation } from "../runtime/simulation.ts";
+import { staleStateDiagnostic } from "../runtime/staleState.ts";
 import { BOUNDS_METHODS, type BoundsMethod } from "../state/bounds.ts";
 import { CLAUDE_AUTHOR, historyListEntry, normalizeAuthor, type FileResult } from "../state/document.ts";
 import { base64ToBytes } from "../state/bytes.ts";
@@ -32,6 +33,7 @@ export const RPC_METHODS = [
   "selection.get",
   "viewer.bounds",
   "viewer.diagnostics",
+  "viewer.restart",
   "sim.reset",
   "sim.dispatch",
   "sim.step",
@@ -389,11 +391,20 @@ export function registerRpcHandlers(session: EditorSession, options: RpcHandlerO
       return bounds;
     },
 
-    // What the live prototype reports right now (get_diagnostics' Live viewer section).
+    // What the live prototype reports right now (get_diagnostics' Live viewer section), with the restart offer.
     "viewer.diagnostics": () => {
       const d = doc().doc;
       const live = session.runtime;
-      return { frame: live.runtime.frame, playing: live.isPlaying(), diagnostics: issuesToDiagnostics(live.runtime.issues(), d.project.root, d) };
+      const diagnostics = issuesToDiagnostics(live.runtime.issues(), d.project.root, d);
+      const stale = live.state.getState().staleState;
+      if (stale) diagnostics.push(staleStateDiagnostic(stale, d));
+      return { frame: live.runtime.frame, playing: live.isPlaying(), diagnostics };
+    },
+
+    // restart_viewer: start the live prototype over, like ⌘R (players follow through notifyPrototypeRestarted).
+    "viewer.restart": () => {
+      session.runtime.restart();
+      return { restarted: true, playing: session.runtime.isPlaying() };
     },
 
     "sim.reset": (p) => {

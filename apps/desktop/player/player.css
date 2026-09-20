@@ -1,10 +1,11 @@
-/* Phone web player: the prototype fills the screen; a small status pill reports the connection. */
+/* Phone web player: the prototype fills the screen; a small status pill reports the connection, and a three-finger tap opens the menu. */
 
 :root {
   color-scheme: dark;
   --player-bg: #0b0b0f;
   --pill-bg: rgba(28, 28, 32, 0.86);
   --pill-fg: #f5f5f7;
+  --menu-action: #0a84ff;
   --dot-waiting: #8e8e93;
   --dot-live: #30d158;
   --dot-error: #ff453a;
@@ -83,9 +84,161 @@ body {
   background: var(--dot-error);
 }
 
+/* The menu (a three-finger tap): a small sheet over the prototype. */
+
+#menu {
+  position: fixed;
+  inset: 0;
+  z-index: 10;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  padding: 0 12px max(12px, env(safe-area-inset-bottom));
+  font: 500 17px/1.25 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+}
+
+#menu[hidden] {
+  display: none;
+}
+
+.menu-scrim {
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.4);
+  opacity: 0;
+  transition: opacity 200ms cubic-bezier(0.23, 1, 0.32, 1);
+}
+
+.menu-sheet {
+  position: relative;
+  width: 100%;
+  max-width: 400px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  outline: none;
+  opacity: 0;
+  transform: translateY(16px);
+  transition:
+    opacity 200ms cubic-bezier(0.23, 1, 0.32, 1),
+    transform 200ms cubic-bezier(0.23, 1, 0.32, 1);
+}
+
+#menu[data-open] .menu-scrim,
+#menu[data-open] .menu-sheet {
+  opacity: 1;
+  transform: none;
+}
+
+.menu-heading,
+.menu-items,
+.menu-cancel {
+  border-radius: 14px;
+  background: var(--pill-bg);
+  -webkit-backdrop-filter: blur(20px);
+  backdrop-filter: blur(20px);
+}
+
+.menu-heading {
+  padding: 12px 16px;
+  text-align: center;
+  color: var(--pill-fg);
+}
+
+.menu-title {
+  font-size: 15px;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.menu-subtitle {
+  margin-top: 2px;
+  font-size: 13px;
+  font-weight: 400;
+  color: rgba(245, 245, 247, 0.6);
+}
+
+.menu-items {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.menu-item,
+.menu-cancel {
+  appearance: none;
+  width: 100%;
+  min-height: 52px;
+  padding: 0 16px;
+  border: 0;
+  background: transparent;
+  color: var(--menu-action);
+  font: inherit;
+  cursor: pointer;
+}
+
+.menu-item + .menu-item {
+  border-top: 0.5px solid rgba(255, 255, 255, 0.14);
+}
+
+.menu-cancel {
+  background: var(--pill-bg);
+  font-weight: 600;
+}
+
+.menu-item:active,
+.menu-cancel:active {
+  background-color: rgba(255, 255, 255, 0.1);
+}
+
+.menu-item:focus-visible,
+.menu-cancel:focus-visible {
+  outline: 2px solid var(--menu-action);
+  outline-offset: -2px;
+}
+
+/* The one-time tip that teaches the gesture. */
+
+#tip {
+  position: fixed;
+  left: 50%;
+  bottom: max(16px, env(safe-area-inset-bottom));
+  z-index: 9;
+  width: max-content;
+  max-width: calc(100vw - 32px);
+  padding: 8px 14px;
+  border-radius: 18px;
+  background: var(--pill-bg);
+  color: var(--pill-fg);
+  -webkit-backdrop-filter: blur(12px);
+  backdrop-filter: blur(12px);
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.35);
+  text-align: center;
+  text-wrap: balance;
+  pointer-events: none;
+  opacity: 0;
+  transform: translate(-50%, 6px);
+  transition:
+    opacity 180ms cubic-bezier(0.23, 1, 0.32, 1),
+    transform 180ms cubic-bezier(0.23, 1, 0.32, 1);
+}
+
+#tip[data-visible] {
+  opacity: 1;
+  transform: translate(-50%, 0);
+}
+
 @media (prefers-reduced-motion: reduce) {
-  #status {
+  #status,
+  #tip {
     transition: opacity 120ms linear;
     transform: translate(-50%, 0);
+  }
+
+  .menu-sheet {
+    transition: opacity 120ms linear;
+    transform: none;
   }
 }

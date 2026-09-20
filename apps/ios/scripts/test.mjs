@@ -4,8 +4,9 @@
  *
  * Serves the Haptic Check prototype with the real web player and LAN preview server
  * (apps/desktop/player/testing.ts), runs the unit and UI tests with `xcodebuild test` and no signing,
- * then reads the app's log to check what the UI test's three taps played in the app: one Notification
- * Success at start, and three Impact Medium haptics and three 50 ms vibrations.
+ * then reads the app's log to check what the UI tests played in the app: for three taps, one
+ * Notification Success at start, and three Impact Medium haptics and three 50 ms vibrations; for the
+ * player menu, nothing from its three-finger taps, and Notification Success again after Restart.
  *
  *   npm run test:ios
  *   SONOBE_IOS_SIMULATOR="iPhone 17" npm run test:ios    pick a simulator by name or UDID
@@ -136,17 +137,30 @@ try {
   } else {
     // The unified log can lag a moment behind the app.
     let tapped;
-    for (let attempt = 0; attempt < 5 && !tapped; attempt++) {
+    let menu;
+    for (let attempt = 0; attempt < 5 && !(tapped && menu); attempt++) {
       if (attempt) await new Promise((r) => setTimeout(r, 1000));
-      tapped = readViewerLog(simulator.udid, since).find((messages) => count(messages, "haptic impactMedium") > 0);
+      const launches = readViewerLog(simulator.udid, since);
+      menu = launches.find((messages) => messages.includes("menu openAnother"));
+      tapped = launches.find((messages) => messages !== menu && count(messages, "haptic impactMedium") > 0);
     }
     const played = tapped ? { start: count(tapped, "haptic notificationSuccess"), taps: count(tapped, "haptic impactMedium"), vibrations: count(tapped, "vibrate [50]") } : null;
+    // testThreeFingerTapOpensTheMenu: one real tap, two three-finger taps the prototype never got, and a Restart.
+    const menuPlayed = menu ? { starts: count(menu, "haptic notificationSuccess"), taps: count(menu, "haptic impactMedium"), tip: count(menu, "menu tipSeen") } : null;
+    const hint = `Read the log with: xcrun simctl spawn ${simulator.udid} log show --info --start "${since}" --predicate 'subsystem == "dev.sonobe.viewer"'`;
     if (played && played.start >= 1 && played.taps === 3 && played.vibrations === 3) {
       log(`the app played ${played.start} Notification Success, ${played.taps} Impact Medium and ${played.vibrations} vibrations of 50 ms`);
     } else {
       failed = true;
       console.error(`\nThe app didn't play what three taps should: expected Notification Success, then 3 Impact Medium and 3 × "vibrate [50]" in one launch; got ${JSON.stringify(played)}.`);
-      console.error(`Read the log with: xcrun simctl spawn ${simulator.udid} log show --info --start "${since}" --predicate 'subsystem == "dev.sonobe.viewer"'`);
+      console.error(hint);
+    }
+    if (menuPlayed && menuPlayed.starts >= 2 && menuPlayed.taps === 1 && menuPlayed.tip >= 1) {
+      log(`the player menu restarted the prototype (${menuPlayed.starts} Notification Success) and its three-finger taps played nothing (${menuPlayed.taps} Impact Medium, from the one real tap)`);
+    } else {
+      failed = true;
+      console.error(`\nThe player menu launch didn't log what it should: Notification Success at start and after Restart, 1 Impact Medium (the three-finger taps play none), and "menu tipSeen"; got ${JSON.stringify(menuPlayed)}.`);
+      console.error(hint);
     }
   }
 } catch (err) {

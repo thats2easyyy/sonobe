@@ -85,6 +85,7 @@ export const TOOL_NAMES = [
   "begin_work",
   "finish_work",
   "reveal",
+  "restart_viewer",
   "list_history",
   "undo",
 ] as const;
@@ -193,7 +194,7 @@ export function serverInstructions(host: SonobeHost): string {
     "3. Before wiring patches, look them up with list_patch_types and describe_patch_types so port keys, types and defaults are real.",
     "4. Call begin_work with a short intent before editing, and finish_work when you're done.",
     '5. Build in small batches (one feature at a time) with add_layers, add_patches (with connections), connect, set_values or apply_ops. Give new items a "ref" and wire them with "$ref.port" in the same batch. To rebuild items, remove the old ones and add their replacements in the same apply_ops so they keep their ids (ids removed by an earlier batch are retired and get a suffix). Every write returns ids, the new revision and diagnostics added/resolved; pass expectedRevision so you never overwrite edits the person made meanwhile.',
-    "6. Verify before claiming it works: get_diagnostics, then sim_reset → sim_dispatch (tap, drag...) → sim_step or sim_trace on the layer properties that should change. To look under a layer or try a value, use sim_override inside the simulation (or get_screenshot with isolate: true for one layer alone) instead of editing and undoing.",
+    "6. Verify before claiming it works: get_diagnostics, then sim_reset → sim_dispatch (tap, drag...) → sim_step or sim_trace on the layer properties that should change. To look under a layer or try a value, use sim_override inside the simulation (or get_screenshot with isolate: true for one layer alone) instead of editing and undoing. The person's live viewer keeps its state through your edits; restart_viewer starts it over.",
     "7. When talking to the person, name layers and patches by their display names (the Card's scale), not raw ids, addresses or JSON.",
     '8. To keep work, call save_document. A prototype that was never saved needs a folder: save_document({ path: "~/Documents/<Name>.sonobe" }), then tell the person where it went (don\'t ask them to press ⌘S).',
   ];

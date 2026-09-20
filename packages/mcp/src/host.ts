@@ -594,6 +594,13 @@ export type DocumentChange =
   | { kind: "opened"; docId: Id }
   | { kind: "closed"; docId: Id };
 
+/** What restart_viewer did (SonobeHost.restartViewer). */
+export interface ViewerRestartResult {
+  docId: Id;
+  /** The prototype plays on from its first frame; false when the person paused it (it shows frame 0). */
+  playing: boolean;
+}
+
 /** What the live viewer's running prototype reports (SonobeHost.diagnostics `runtime`). */
 export interface LiveRuntimeDiagnostics {
   /** The live prototype's frame when this was read. */
@@ -640,6 +647,12 @@ export interface SonobeHost {
     ids: Id[],
     options: { docId?: Id; focus?: boolean },
   ): Promise<{ revealed: boolean; reason?: string }>;
+  /**
+   * Optional: start the person's live prototype over from its first frame, as Restart Prototype (⌘R)
+   * does; phones and the pop-out viewer showing it restart too. Hosts without a live viewer leave it
+   * out, and restart_viewer explains that simulations start over with sim_reset.
+   */
+  restartViewer?(options: { docId?: Id }): Promise<ViewerRestartResult>;
   /**
    * Show (or clear, with null) an agent's working badge. One badge per session: `client.id` when the
    * call came through the relay, else the author's name.

@@ -183,6 +183,17 @@ describe("HeadlessHost", () => {
     );
     await client.close();
   });
+
+  it("explains that there's no live viewer to restart, and points to sim_reset", async () => {
+    project = await tempProject();
+    const client = await connectClient(project.host);
+    const r = await client.call("restart_viewer", {});
+    expect(r.isError).toBe(true);
+    expect(r.structured).toMatchObject({ ok: false, changed: "none", error: { code: "no_live_viewer" } });
+    expect(r.text).toContain("runs headless");
+    expect(r.text).toContain("sim_reset starts one over");
+    await client.close();
+  });
 });
 
 const AGENT = { kind: "agent" as const, name: "Claude" };

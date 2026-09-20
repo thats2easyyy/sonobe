@@ -35,6 +35,7 @@ Run these from the repository root with `-w @sonobe/desktop`, or from this folde
 ## Host API additions
 
 - `notifyDocumentChanged(revision)`: the editor reports each new revision. Players stop polling and follow pushes, and MCP clients get `resources/updated` for `sonobe://documents/<docId>/outline` and `…/diagnostics`.
+- `notifyPrototypeRestarted()`: the editor's prototype restarted. Players showing that window's document (phones, the pop-out viewer) restart too, after any revision they don't have yet.
 - `secrets.status/get/set/delete`: small secrets such as the in-app assistant's API key, encrypted with the OS keychain in `userData/secrets.json` (0600). On Linux without a keyring, `set` refuses. `SONOBE_TEST=1` swaps in a reversible test cipher so automated runs never touch the keychain.
 - `openExternal(url)`: http(s) and mailto only.
 - `popOutViewer({ alwaysOnTop })`, `closeViewerWindow()`, `getViewerWindowStatus()`, `onViewerWindowStatus(cb)`: the live prototype in its own sandboxed window, served from a loopback-only player server. It has no host API.

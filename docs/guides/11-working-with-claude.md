@@ -166,7 +166,7 @@ Most tool calls finish in a second or two. Importing a design can take longer, b
 
 ## What Claude can do
 
-Sonobe gives Claude 41 tools in six groups: discovery, documents, reading, writing, simulation, and presence and history. Here's what they look like in practice:
+Sonobe gives Claude 42 tools in six groups: discovery, documents, reading, writing, simulation, and presence and history. Here's what they look like in practice:
 
 | You ask for | Claude uses tools like |
 |---|---|
@@ -178,6 +178,7 @@ Sonobe gives Claude 41 tools in six groups: discovery, documents, reading, writi
 | "How long does the sheet take to settle?" | `sim_trace` |
 | "Show me what's under the top card." | `sim_override`, `get_screenshot` |
 | "Is anything broken?" | `get_diagnostics` |
+| "Start the prototype over." | `restart_viewer` |
 | "Start a new prototype and save it." | `create_document`, `open_document`, `save_document` |
 | "Save this as Placemark Deck in Documents." | `save_document` with `path: "~/Documents/Placemark Deck.sonobe"` |
 | "Bring back what we were working on before Sonobe quit." | `list_documents`, `open_document` with `ref: "draft:…"` |

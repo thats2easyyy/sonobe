@@ -1,19 +1,27 @@
 import SwiftUI
 import WebKit
 
+/// What the player's menu (a three-finger tap in the page) asks of the app through the bridge.
+enum PlayerAction {
+    case openAnother
+    case menuTipSeen
+}
+
 /// The LAN web player in a full-screen WKWebView, pinned to the preview's origin, with the haptics bridge.
 struct PlayerContainer: UIViewControllerRepresentable {
     let url: URL
     let reloads: Int
-    let onMenu: () -> Void
+    /// The player already taught its three-finger menu in this app, so the page skips the tip.
+    let menuTipSeen: Bool
+    let onAction: (PlayerAction) -> Void
     let onFailure: (String) -> Void
 
     func makeUIViewController(context: Context) -> PlayerViewController {
-        PlayerViewController(url: url, onMenu: onMenu, onFailure: onFailure)
+        PlayerViewController(url: url, menuTipSeen: menuTipSeen, onAction: onAction, onFailure: onFailure)
     }
 
     func updateUIViewController(_ controller: PlayerViewController, context: Context) {
-        controller.onMenu = onMenu
+        controller.onAction = onAction
         controller.onFailure = onFailure
         if controller.url != url { controller.load(url) }
         if controller.reloads != reloads {
@@ -26,16 +34,18 @@ struct PlayerContainer: UIViewControllerRepresentable {
 final class PlayerViewController: UIViewController, WKNavigationDelegate, WKUIDelegate {
     private(set) var url: URL
     var reloads = 0
-    var onMenu: () -> Void
+    var onAction: (PlayerAction) -> Void
     var onFailure: (String) -> Void
+    private let menuTipSeen: Bool
     private let haptics = Haptics()
     private var webView: WKWebView!
 
     static let expiredLink = "This preview link has expired. Sonobe makes a new link each time Preview on Phone starts, so scan the code it shows now."
 
-    init(url: URL, onMenu: @escaping () -> Void, onFailure: @escaping (String) -> Void) {
+    init(url: URL, menuTipSeen: Bool, onAction: @escaping (PlayerAction) -> Void, onFailure: @escaping (String) -> Void) {
         self.url = url
-        self.onMenu = onMenu
+        self.menuTipSeen = menuTipSeen
+        self.onAction = onAction
         self.onFailure = onFailure
         super.init(nibName: nil, bundle: nil)
     }
@@ -45,7 +55,7 @@ final class PlayerViewController: UIViewController, WKNavigationDelegate, WKUIDe
 
     override func loadView() {
         let content = WKUserContentController()
-        content.addUserScript(WKUserScript(source: haptics.announcementScript, injectionTime: .atDocumentStart, forMainFrameOnly: true))
+        content.addUserScript(WKUserScript(source: haptics.announcementScript(menuTipSeen: menuTipSeen), injectionTime: .atDocumentStart, forMainFrameOnly: true))
         content.add(MessageRelay { [weak self] message in self?.received(message) }, name: "sonobe")
 
         let config = WKWebViewConfiguration()
@@ -77,20 +87,10 @@ final class PlayerViewController: UIViewController, WKNavigationDelegate, WKUIDe
         load(url)
     }
 
-    override func viewDidAppear(_ animated: Bool) {
-        super.viewDidAppear(animated)
-        becomeFirstResponder()
-    }
-
-    override var canBecomeFirstResponder: Bool { true }
+    // The menu is the web player's own (a three-finger tap): shaking belongs to Device Motion prototypes.
     override var prefersStatusBarHidden: Bool { true }
     override var prefersHomeIndicatorAutoHidden: Bool { true }
     override var preferredScreenEdgesDeferringSystemGestures: UIRectEdge { .all }
-
-    /// Shake (Device → Shake in the simulator) opens Reload / Disconnect, so every touch belongs to the prototype.
-    override func motionEnded(_ motion: UIEvent.EventSubtype, with event: UIEvent?) {
-        if motion == .motionShake { onMenu() } else { super.motionEnded(motion, with: event) }
-    }
 
     func load(_ next: URL) {
         Haptics.log.info("load \(next.absoluteString, privacy: .public)")
@@ -102,10 +102,23 @@ final class PlayerViewController: UIViewController, WKNavigationDelegate, WKUIDe
         webView.load(URLRequest(url: url))
     }
 
-    /// Only the player page itself, on the preview's origin, reaches the haptics.
+    /// Only the player page itself, on the preview's origin, reaches the haptics and the menu's actions.
     private func received(_ message: WKScriptMessage) {
         guard message.frameInfo.isMainFrame, Self.sameOrigin(message.frameInfo.securityOrigin, url) else { return }
-        haptics.handle(message.body)
+        guard let bridged = Haptics.message(from: message.body) else {
+            Haptics.log.info("ignored a message the player sent")
+            return
+        }
+        switch bridged {
+        case .openAnother:
+            Haptics.log.info("menu openAnother")
+            onAction(.openAnother)
+        case .menuTipSeen:
+            Haptics.log.info("menu tipSeen")
+            onAction(.menuTipSeen)
+        default:
+            haptics.play(bridged)
+        }
     }
 
     private static func sameOrigin(_ origin: WKSecurityOrigin, _ url: URL) -> Bool {
