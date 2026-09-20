@@ -190,7 +190,7 @@ export function registerSimulationTools(tc: ToolContext): void {
     {
       title: "Reset simulation",
       description:
-        "Start a deterministic simulation of the document (fixed timestep, seeded randomness), independent of the person's live viewer, and step frame 0. Returns a simId for the other sim_* tools. preset and knobs run other knob values in this simulation only (the person's document and viewer keep theirs); two sessions under two presets compare them. Pass simId to restart an existing session; that clears its sim_override overrides and knob values unless keepOverrides is true.",
+        "Start a deterministic simulation of the document (fixed timestep, seeded randomness), independent of the person's live viewer, and step frame 0. Returns a simId for the other sim_* tools. preset and knobs run other knob values in this simulation only (the person's document and viewer keep theirs); two sessions under two presets compare them. Pass simId to restart an existing session; that clears its sim_override overrides, knob preset and knob values unless keepOverrides is true.",
       input: z.object({
         docId: DocIdSchema.optional(),
         simId: z.string().optional(),
@@ -203,7 +203,7 @@ export function registerSimulationTools(tc: ToolContext): void {
           .boolean()
           .optional()
           .describe(
-            "With simId: keep the session's sim_override overrides and knob values (default false).",
+            "With simId: keep the session's sim_override overrides, knob preset and knob values (default false). A preset given here replaces the kept one; knobs given here join the kept values.",
           ),
         preset: z.string().optional().describe("Knob preset id or name to run in this simulation."),
         knobs: z

@@ -67,6 +67,26 @@ async function deck(): Promise<TestClient> {
 
 const SLOW_DRAG = [{ kind: "drag", from: "@card", to: [301, 410], durationMs: 800 }];
 
+/** The deck with three presets, Proposal running: Commit Distance 60, 200, 100 and Fly Bounce 5, 2, 9. */
+async function threePresets(c: TestClient): Promise<void> {
+  const r = await c.call("set_knobs", {
+    presets: [{ name: "Proposal" }, { name: "Shipped app", locked: true }, { name: "Third" }],
+    knobs: [
+      {
+        name: "Commit Distance",
+        connect: ["swipe_card.minDistance"],
+        values: { Proposal: 60, "Shipped app": 200, Third: 100 },
+      },
+      {
+        name: "Fly Bounce",
+        connect: ["fly_spring.bounciness"],
+        values: { Proposal: 5, "Shipped app": 2, Third: 9 },
+      },
+    ],
+  });
+  expect(r.isError, r.text).toBe(false);
+}
+
 describe("set_knobs", () => {
   it("makes presets and knobs in one batch, infers what it isn't told, and locks last", async () => {
     const c = await deck();
@@ -413,6 +433,44 @@ describe("knobs in simulations", () => {
       targets: ["card/$knob.commit_distance"],
     });
     expect(wrongPath.isError).toBe(true);
+  });
+
+  it("sim_reset with keepOverrides puts new knob values over the session's preset and values, and names what a reset stops running", async () => {
+    const c = await deck();
+    await threePresets(c);
+    const first = await c.call("sim_reset", { preset: "Shipped app", knobs: { fly_bounce: 3 } });
+    const simId = String(first.structured.simId);
+    const kept = await c.call("sim_reset", {
+      simId,
+      keepOverrides: true,
+      knobs: { commit_distance: 150 },
+    });
+    expect(kept.isError, kept.text).toBe(false);
+    expect(kept.text).toContain("preset Shipped app · 2 knob values");
+    expect(kept.text).toContain(
+      "Runs Shipped app with $knob.fly_bounce = 3, $knob.commit_distance = 150 (simulation only",
+    );
+    expect(kept.text).not.toContain("Stopped running");
+    expect(kept.structured.knobs).toEqual({
+      preset: { id: "shipped_app", name: "Shipped app" },
+      values: { fly_bounce: 3, commit_distance: 150 },
+    });
+    // A preset given with keepOverrides replaces the kept one, and the kept values run over it.
+    const third = await c.call("sim_reset", { simId, keepOverrides: true, preset: "Third" });
+    expect(third.text).toContain(
+      "Runs Third with $knob.fly_bounce = 3, $knob.commit_distance = 150 (simulation only",
+    );
+    // Without keepOverrides the new values replace the session's, and the reset says what stopped.
+    const replaced = await c.call("sim_reset", { simId, knobs: { commit_distance: 120 } });
+    expect(replaced.text).toContain("Runs $knob.commit_distance = 120 (simulation only");
+    expect(replaced.text).toContain(
+      "Stopped running Third with $knob.fly_bounce = 3; pass keepOverrides: true to keep it.",
+    );
+    const values = await c.call("sim_get_values", {
+      simId,
+      targets: ["$knob.fly_bounce", "$knob.commit_distance"],
+    });
+    expect(values.structured.values).toEqual({ "$knob.fly_bounce": 5, "$knob.commit_distance": 120 });
   });
 
   it("sim_override tunes knobs in one simulation, locked presets included", async () => {

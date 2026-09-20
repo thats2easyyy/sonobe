@@ -493,11 +493,11 @@ export interface SimResetOptions {
   simId?: string;
   seed?: number;
   fps?: 60 | 120;
-  /** With simId: keep the session's overrides (default: a reset clears them). */
+  /** With simId: keep the session's overrides, knob preset and knob values (default: a reset clears them). */
   keepOverrides?: boolean;
-  /** Run this knob preset (id or name) in the simulation only. */
+  /** Run this knob preset (id or name) in the simulation only; with keepOverrides it replaces the kept one. */
   preset?: string;
-  /** Knob id or name → value, in the simulation only (over the preset it runs). */
+  /** Knob id or name → value, in the simulation only (over the preset it runs); with keepOverrides they join the kept ones. */
   knobs?: Record<string, unknown>;
 }
 
