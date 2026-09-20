@@ -18,13 +18,15 @@ export interface ToolChip {
   detail: string;
   status: AssistantToolStatus;
   changedDocument: boolean;
+  /** import_design while Claude writes its html (design_draft), before the tool starts. */
+  draft?: { name?: string; kb: number; done: boolean };
 }
 
 export type ChatItem =
-  | { kind: "user"; id: string; text: string }
+  | { kind: "user"; id: string; text: string; origin?: "canvas" }
   | { kind: "assistant"; id: string; runId: string; turn: number; text: string; thinking: string; tools: ToolChip[] }
   | { kind: "notice"; id: string; tone: "info" | "warn" | "error"; text: string; code?: string }
-  | { kind: "confirm"; id: string; runId: string; title: string; message: string; count: number; status: "pending" | "approved" | "declined" };
+  | { kind: "confirm"; id: string; runId: string; title: string; message: string; count: number; status: "pending" | "approved" | "declined"; confirmKind?: "delete" | "replace"; approveLabel?: string; declineLabel?: string };
 
 export type KeyCheckState = { state: "idle" } | { state: "checking" } | { state: "ok" } | { state: "error"; message: string };
 
@@ -68,6 +70,15 @@ function updateTurn(items: ChatItem[], runId: string, turn: number, update: (ite
   return next;
 }
 
+/** A streaming draft's size as its chip and the canvas's status line show it: rounded KB, at least 1 once there's any html. */
+export const draftKb = (chars: number): number => (chars > 0 ? Math.max(1, Math.round(chars / 1024)) : 0);
+
+/** "Writing “Checkout” · 14 KB" (the name and size once they're known). */
+function draftDetail(name: string | undefined, kb: number): string {
+  const what = name ? `“${name}”` : "the screen";
+  return kb > 0 ? `Writing ${what} · ${kb} KB` : `Writing ${what}`;
+}
+
 /** The newest assistant turn of a run (tool chips attach there). */
 function latestTurn(items: ChatItem[], runId: string): number | null {
   for (let i = items.length - 1; i >= 0; i--) {
@@ -87,8 +98,8 @@ export function reduceEvent(state: AssistantData, event: AssistantEvent): Partia
     case "run_started":
       return { running: true, runId: event.runId, thinking: false };
     case "turn_started":
-      // A re-issued turn replaces the partial text of the failed attempt.
-      return { items: updateTurn(state.items, event.runId, event.turn, (item) => ({ ...item, text: "", thinking: "" })), thinking: false };
+      // A re-issued turn replaces the partial text and drafts of the failed attempt.
+      return { items: updateTurn(state.items, event.runId, event.turn, (item) => ({ ...item, text: "", thinking: "", tools: item.tools.filter((t) => !t.draft) })), thinking: false };
     case "text_delta":
       return { items: updateTurn(state.items, event.runId, event.turn, (item) => ({ ...item, text: item.text + event.delta })), thinking: false };
     case "thinking_delta":
@@ -115,7 +126,23 @@ export function reduceEvent(state: AssistantData, event: AssistantEvent): Partia
         ),
       };
     case "confirm_required":
-      return { items: [...state.items, { kind: "confirm", id: event.confirmationId, runId: event.runId, title: event.title, message: event.message, count: event.count, status: "pending" }] };
+      return {
+        items: [
+          ...state.items,
+          {
+            kind: "confirm",
+            id: event.confirmationId,
+            runId: event.runId,
+            title: event.title,
+            message: event.message,
+            count: event.count,
+            status: "pending",
+            ...(event.kind ? { confirmKind: event.kind } : {}),
+            ...(event.approveLabel ? { approveLabel: event.approveLabel } : {}),
+            ...(event.declineLabel ? { declineLabel: event.declineLabel } : {}),
+          },
+        ],
+      };
     case "confirm_resolved":
       return { items: state.items.map((item) => (item.kind === "confirm" && item.id === event.confirmationId ? { ...item, status: event.approved ? "approved" : "declined" } : item)) };
     case "usage":
@@ -146,9 +173,20 @@ export function reduceEvent(state: AssistantData, event: AssistantEvent): Partia
         ...(state.status ? { status: { ...state.status, usage: event.usage, running: false } } : {}),
       };
     }
-    case "design_draft":
-      // Drafts don't show in the transcript yet.
-      return {};
+    case "design_draft": {
+      // import_design's chip while Claude writes the page. It changes only when the rounded size, the
+      // name or done does, so a long page doesn't re-render the transcript on every append.
+      const current = state.items.find((i): i is Extract<ChatItem, { kind: "assistant" }> => i.kind === "assistant" && i.runId === event.runId && i.turn === event.turn)?.tools.find((t) => t.toolUseId === event.toolUseId);
+      if (current && !current.draft) return {};
+      const kb = draftKb(event.done ? (event.html?.length ?? event.offset + event.append.length) : event.offset + event.append.length);
+      const name = event.fields?.name ?? current?.draft?.name;
+      if (current?.draft && current.draft.kb === kb && current.draft.name === name && current.draft.done === event.done) return {};
+      const chip: ToolChip = { toolUseId: event.toolUseId, name: "import_design", title: "Import design", detail: draftDetail(name, kb), status: "running", changedDocument: false, draft: { ...(name ? { name } : {}), kb, done: event.done } };
+      return {
+        items: updateTurn(state.items, event.runId, event.turn, (item) => ({ ...item, tools: current ? item.tools.map((t) => (t.toolUseId === chip.toolUseId ? chip : t)) : [...item.tools, chip] })),
+        thinking: false,
+      };
+    }
   }
 }
 

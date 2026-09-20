@@ -8,27 +8,25 @@
  * drives Sonobe's MCP tools in process, so edits land in history as "Assistant". In the browser the
  * drawer shows a desktop-only notice.
  *
- * Integration (inside <EditorProvider> and <CommandProvider>), either:
+ * Integration (inside <EditorProvider> and <CommandProvider>): its own sheet, bound to
+ * assistantStore.open, with no shell changes.
  *
- *   // A. its own sheet, bound to assistantStore.open (no shell changes)
  *   <AssistantHost onConnectClaude={() => connectClaudeStore.getState().show()} />
  *   useRegisterCommands([assistantCommand()])   // id "ai.assistant", replaces the hidden alias that opens Connect Claude
  *
- *   // B. a shell drawer slot (DrawerId "assistant")
- *   <AssistantDrawer onClose={() => layoutStore.getState().setDrawer(null)} />
- *   useRegisterCommands([assistantCommand(() => layoutStore.getState().toggleDrawer("assistant"))])
- *
  * AssistantDrawer props (all optional): onClose, onConnectClaude (default connectClaudeStore.show()),
- * host (default window.sonobeHost; null = browser mode), store, controller, className.
+ * onImportDesign (default appPanels.show("importDesign")), host (default window.sonobeHost; null =
+ * browser mode), store, controller, className. The canvas's Design with Claude box (panels/design)
+ * is a second front door to the same chat, through sharedAssistantController().
  */
 
 export { AssistantDrawer, type AssistantDrawerProps } from "./AssistantDrawer.tsx";
 export { AssistantHost } from "./AssistantHost.tsx";
-export { assistantStore, createAssistantStore, initialAssistantData, MODEL_STORAGE_KEY, reduceEvent, useAssistant, type AssistantData, type AssistantState, type ChatItem, type KeyCheckState, type ToolChip } from "./assistantStore.ts";
+export { assistantStore, createAssistantStore, draftKb, initialAssistantData, MODEL_STORAGE_KEY, reduceEvent, useAssistant, type AssistantData, type AssistantState, type ChatItem, type KeyCheckState, type ToolChip } from "./assistantStore.ts";
 export { ASSISTANT_COMMAND_ID, assistantCommand } from "./commands.ts";
 export { Composer, UsageMeter, type ComposerProps } from "./Composer.tsx";
 export { createAssistantController, openLink, sharedAssistantController, type AssistantController, type SaveKeyResult } from "./controller.ts";
 export { budgetFraction, formatCost, formatTokens, validateApiKey, type KeyValidation } from "./format.ts";
 export { KeySetup, type KeySetupProps } from "./KeySetup.tsx";
-export { SUGGESTIONS, Transcript, type TranscriptProps } from "./Transcript.tsx";
+export { ConfirmCard, SUGGESTIONS, Transcript, type TranscriptProps } from "./Transcript.tsx";
 export * from "./types.ts";
