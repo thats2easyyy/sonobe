@@ -1,4 +1,4 @@
-/** Property test: random op sequences; every successful op's inverse restores a deep-equal document. */
+/** Property test: random op sequences; every successful op's inverse restores a deep-equal document, strictly and leniently, and so does redo. */
 
 import { describe, expect, it } from "vitest";
 import { allLayers, resolveNodePorts, resolveLayerProps } from "../registry.ts";
@@ -126,6 +126,19 @@ function randomOp(doc: SonobeDocument, rand: () => number): Op | undefined {
       if (node.type === "add" && chance(0.5)) op.inputCount = 2 + int(5);
       if (chance(0.2)) op.settings = chance(0.5) ? { a: int(3) } : { a: null };
       if (chance(0.2)) op.ui = { x: int(500), collapsed: chance(0.5), color: pick(["", "blue"])! };
+      return op;
+    }
+    case "replacePatch": {
+      const id = pick(patchIds);
+      if (!id) return undefined;
+      const type = pick(["switch", "popAnimation", "transition", "add", "counter", "delay1", "logger"].filter((t) => t !== c.patches[id]!.type))!;
+      const op: Op = { op: "replacePatch", component: cid, id, patch: { type } };
+      if (type === "transition" && chance(0.5)) op.patch.typeParam = pick(["number", "point", "color"])!;
+      if (type === "add" && chance(0.5)) op.patch.inputCount = 2 + int(4);
+      if (chance(0.2)) op.patch.name = pick(["Spring", ""])!;
+      // Carry a value or cable onto a port with another key, like the editor's Replace With.
+      const from = pick(Object.keys(c.patches[id]!.inputs));
+      if (from && type === "popAnimation" && chance(0.5)) op.inputMap = { [from]: "number" };
       return op;
     }
     case "removePatch": {
@@ -269,6 +282,9 @@ describe("inverse ops (property)", () => {
         const redo = applyOps(doc, r.applied, { registry: mockRegistry });
         if (!redo.ok) throw new Error(`seed ${seed} step ${step}: redo of ${JSON.stringify(op)} failed: ${JSON.stringify(redo.errors)}`);
         expect(redo.doc).toStrictEqual(r.doc);
+        // History replays undo and redo leniently, so what an op drops as a side effect must be spelled out.
+        expect(applyOps(doc, r.applied, { registry: mockRegistry, lenient: true }).doc, `lenient redo of ${JSON.stringify(op)}`).toStrictEqual(r.doc);
+        expect(applyOps(r.doc, r.inverse, { registry: mockRegistry, lenient: true }).doc, `lenient undo of ${JSON.stringify(op)}`).toStrictEqual(doc);
         batch.push(op);
         doc = r.doc;
       }

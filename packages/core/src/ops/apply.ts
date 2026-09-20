@@ -20,7 +20,7 @@ import { createComponent } from "./createComponent.ts";
 import { checkOpFields } from "./fields.ts";
 import { connect, disconnect, rename, setInput } from "./inputs.ts";
 import { addLayer, moveLayer, removeLayer, updateLayer } from "./layers.ts";
-import { addPatch, removePatch, updatePatch } from "./patches.ts";
+import { addPatch, removePatch, replacePatch, updatePatch } from "./patches.ts";
 import { addAsset, removeAsset, setProject, setScript } from "./project.ts";
 
 type Handler = (ctx: OpContext, op: never) => OpOutcome;
@@ -32,6 +32,7 @@ const HANDLERS = {
   removeLayer,
   addPatch,
   updatePatch,
+  replacePatch,
   removePatch,
   setInput,
   connect,
@@ -257,7 +258,7 @@ export function applyOps(doc: SonobeDocument, ops: readonly Op[], options: Apply
         recordFailure(task.index, r.error);
         continue;
       }
-      if (!task.followUp) results[task.index] = { index: task.index, ok: true, ids: r.outcome.ids, ...renamedFields(ctx.renamed) };
+      if (!task.followUp) results[task.index] = { index: task.index, ok: true, ids: r.outcome.ids, ...renamedFields(ctx.renamed), ...(r.outcome.dropped?.length ? { dropped: r.outcome.dropped } : {}) };
       if (!split.waiting.length) continue;
       const component = (appliedOps(r.outcome)[0] as { component?: Id } | undefined)?.component;
       for (const w of split.waiting) {

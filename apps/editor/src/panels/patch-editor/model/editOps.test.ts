@@ -3,7 +3,7 @@ import { applyOps, createEmptyDocument, type Op, type SonobeDocument } from "@so
 import { createPatchRegistry } from "@sonobe/patches";
 import { describe, expect, it } from "vitest";
 import { createDemoDocument } from "../../../state/demoDocument.ts";
-import { alignPositions, commentAroundOps, duplicatePatchOps, insertPatchOps, movePatchOps, replacePatchOps, spliceOptions, splicePatchOps } from "./editOps.ts";
+import { alignPositions, commentAroundOps, duplicatePatchOps, insertPatchOps, movePatchOps, replacePatchOp, spliceOptions, splicePatchOps } from "./editOps.ts";
 import { pickerItems, searchPicker } from "./picker.ts";
 
 const registry = createPatchRegistry();
@@ -37,23 +37,30 @@ describe("duplicatePatchOps", () => {
   });
 });
 
-describe("replacePatchOps", () => {
-  it("swaps the type in place and keeps cables that still fit", () => {
-    const plan = replacePatchOps(demo, "main", registry, "zoom_spring", "classicAnimation");
+describe("replacePatchOp", () => {
+  it("swaps the type in place, keeping the id and the cables that still fit", () => {
+    const plan = replacePatchOp(demo, "main", registry, "zoom_spring", "classicAnimation");
     if ("error" in plan) throw new Error(plan.error);
-    const r = apply(demo, plan.ops);
+    expect(plan.op).toEqual({ op: "replacePatch", component: "main", id: "zoom_spring", patch: { type: "classicAnimation" } });
+    const r = apply(demo, [plan.op]);
     const main = r.doc.components.main!;
-    expect(main.patches.zoom_spring).toBeUndefined();
-    const id = r.idMap.replacement!;
-    expect(main.patches[id]).toMatchObject({ type: "classicAnimation", typeParam: "number", name: "Zoom Spring", ui: { x: 480, y: 60 } });
-    expect(main.patches[id]!.inputs.number).toEqual({ link: "zoomed.on" });
-    expect(main.patches.photo_scale!.inputs.progress).toEqual({ link: `${id}.output` });
-    expect(main.patches.card_shadow!.inputs.progress).toEqual({ link: `${id}.output` });
-    expect(plan.dropped).toBe(0);
+    expect(main.patches.zoom_spring).toMatchObject({ type: "classicAnimation", typeParam: "number", name: "Zoom Spring", ui: { x: 480, y: 60 } });
+    expect(main.patches.zoom_spring!.inputs.number).toEqual({ link: "zoomed.on" });
+    expect(main.patches.photo_scale!.inputs.progress).toEqual({ link: "zoom_spring.output" });
+    expect(main.patches.card_shadow!.inputs.progress).toEqual({ link: "zoom_spring.output" });
+    expect(r.results[0]!.dropped?.filter((d) => typeof d.value === "object" && d.value !== null && "link" in d.value) ?? []).toEqual([]);
+  });
+
+  it("moves a cable whose port the new type lacks to the closest port that takes it", () => {
+    const plan = replacePatchOp(demo, "main", registry, "zoom_spring", "transition");
+    if ("error" in plan) throw new Error(plan.error);
+    expect(plan.op.inputMap).toEqual({ number: "progress" });
+    const r = apply(demo, [plan.op]);
+    expect(r.doc.components.main!.patches.zoom_spring!.inputs.progress).toEqual({ link: "zoomed.on" });
   });
 
   it("reports a missing type", () => {
-    expect(replacePatchOps(demo, "main", registry, "zoomed", "nope")).toEqual({ error: 'There\'s no patch type "nope".' });
+    expect(replacePatchOp(demo, "main", registry, "zoomed", "nope")).toEqual({ error: 'There\'s no patch type "nope".' });
   });
 });
 

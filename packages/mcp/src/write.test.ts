@@ -280,6 +280,24 @@ describe("apply_ops", () => {
     expect(fresh.structured).toMatchObject({ ok: true, revision: 3 });
   });
 
+  it("replaces a patch's type in place and lists what didn't fit", async () => {
+    await buildGrowCard(client);
+    const r = await client.call("apply_ops", {
+      ops: [{ op: "replacePatch", id: "grow_spring", patch: { type: "classicAnimation" } }],
+    });
+    expect(r.isError, r.text).toBe(false);
+    expect(r.text).toContain("Dropped what the new patch type has no fitting port for: grow_spring.bounciness (5), grow_spring.speed (12). The undo tool brings them back.");
+    expect(r.structured.dropped).toEqual([
+      { to: "grow_spring.bounciness", value: 5 },
+      { to: "grow_spring.speed", value: 12 },
+    ]);
+    const outline = (await client.call("get_outline", {})).text;
+    expect(outline).toContain('patch grow_spring classicAnimation<number> "Grow Spring" number←card_grown.on');
+    expect(outline).toContain("progress←grow_spring.output");
+    const history = await client.call("list_history", {});
+    expect(history.text).toContain("replaced 1 patch");
+  });
+
   it("creates patch components with published ports", async () => {
     const r = await client.call("apply_ops", {
       ops: [

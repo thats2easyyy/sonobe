@@ -55,6 +55,18 @@ describe("patch editor actions", () => {
     expect(main().patches[exact]!.ui).toMatchObject({ x: 262, y: 62 });
   });
 
+  it("replaces a patch with another type in place, in one undo step", () => {
+    const { s, actions, main } = setup();
+    const before = s.document.getState().doc;
+    actions.replaceWith("zoom_spring", "classicAnimation");
+    expect(main().patches.zoom_spring).toMatchObject({ type: "classicAnimation", name: "Zoom Spring", inputs: { number: { link: "zoomed.on" } } });
+    expect(main().patches.photo_scale!.inputs.progress).toEqual({ link: "zoom_spring.output" });
+    expect(s.selection.getState().patches).toEqual(["zoom_spring"]);
+    expect(s.document.getState().undoLabel).toContain("You: Replace Zoom Spring with Classic Animation");
+    expect(s.document.getState().undo().ok).toBe(true);
+    expect(s.document.getState().doc).toStrictEqual(before);
+  });
+
   it("inserts a patch beside the port it connects to and connects it", () => {
     const { actions, main } = setup();
     const id = actions.insertPatch("transition", { x: 900, y: 40 }, { typeParam: "number", connect: { address: "zoom_spring.output", side: "out", portKey: "progress" }, placement: "right" })!;
