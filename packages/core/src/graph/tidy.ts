@@ -18,7 +18,7 @@
  */
 
 import type { Component, Op } from "../types.ts";
-import { FRAME_PADDING, fitFrame, homeFrame } from "./frames.ts";
+import { FRAME_PADDING, fitFrame, homeFrame, parentFrame } from "./frames.ts";
 import { rectsOverlap, type Rect } from "./geometry.ts";
 import { isPositionedNodeId, layerIdOfNode, nodePositionsOp } from "./graphNodes.ts";
 
@@ -179,10 +179,7 @@ export async function planTidy(request: TidyRequest, layout: GroupLayout): Promi
 
   // -- Sections: which frame holds each node and each frame -------------------
   const parentOf = new Map<string, string>();
-  for (const f of frames) {
-    const parent = homeFrame(f, frames.filter((o) => o.id !== f.id && o.width * o.height > f.width * f.height));
-    parentOf.set(f.id, parent?.id ?? ROOT);
-  }
+  for (const f of frames) parentOf.set(f.id, parentFrame(f, frames)?.id ?? ROOT);
   const homeOf = new Map<string, string>(nodes.map((n) => [n.id, homeFrame(n, frames)?.id ?? ROOT]));
   const childFrames = new Map<string, string[]>();
   const childNodes = new Map<string, string[]>();
