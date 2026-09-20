@@ -1,6 +1,8 @@
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { createRuntime } from "@sonobe/engine";
 import { runFrames, sequence, tap } from "@sonobe/engine/testing";
-import { createPatchRegistry } from "@sonobe/patches";
+import { createPatchRegistry, getSpec } from "@sonobe/patches";
 import { describe, expect, it } from "vitest";
 import { playerPlatform, readNativeHost, type PlayerWindow } from "./platform.ts";
 import { hapticCheckDocument } from "./testing.ts";
@@ -146,5 +148,17 @@ describe("the player's platform in the runtime", () => {
     const result = run(playerPlatform({}));
     expect(result.available).toEqual({ haptic: false, vibrate: false });
     expect(result.logs).toEqual(expect.arrayContaining([expect.stringContaining("Haptic: notificationSuccess (no haptics on this device)")]));
+  });
+});
+
+describe("Sonobe Viewer's announcement", () => {
+  it("names only Haptic types the catalog declares", () => {
+    const swift = readFileSync(fileURLToPath(new URL("../../ios/SonobeViewer/Haptics.swift", import.meta.url)), "utf8");
+    const list = swift.match(/static let feedbackTypes(?:: \[String\])? = \[([^\]]*)\]/);
+    expect(list, "Haptics.feedbackTypes in Haptics.swift").not.toBeNull();
+    const announced = [...list![1]!.matchAll(/"([A-Za-z]+)"/g)].map((m) => m[1]);
+    const declared = getSpec("haptic")!.inputs.find((input) => input.key === "type")!.enumOptions!.map((option) => option.key);
+    expect(announced.length).toBeGreaterThan(5);
+    for (const type of announced) expect(declared, type).toContain(type);
   });
 });
