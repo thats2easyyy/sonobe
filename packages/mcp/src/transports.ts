@@ -102,14 +102,17 @@ export type NodeMcpHandler = ((req: IncomingMessage, res: ServerResponse) => Pro
  * Request's signal, which undici stops forwarding once the Request is garbage collected. So POST
  * bodies are parsed here (the SDK then never clones), each request holds its own AbortController
  * that fires when the response closes unfinished, and a 2025-era notifications/cancelled, which
- * arrives on a POST of its own, aborts the call it names when exactly one call in flight has that id.
+ * arrives on a POST of its own, aborts the call it names when exactly one call in flight from the same
+ * sender (the same `sonobe-client` header, or none) has that id.
  *
  * Sessions: the relay's `sonobe-client` header rides the same per-request scope, so with
  * `options.clients` every tool call counts toward that session's row (clients.ts).
  */
 export function createHttpHandler(host: SonobeHost, options: TransportOptions): NodeMcpHandler {
-  const inflight = new Map<string | number, Set<AbortController>>();
-  const track = (id: string | number, controller: AbortController) => {
+  // Keyed by sender and request id: a relay session's calls by its sonobe-client id, the rest together.
+  const inflight = new Map<string, Set<AbortController>>();
+  const inflightKey = (clientId: string | undefined, requestId: string | number) => JSON.stringify([clientId ?? null, requestId]);
+  const track = (id: string, controller: AbortController) => {
     const calls = inflight.get(id) ?? new Set<AbortController>();
     calls.add(controller);
     inflight.set(id, calls);
@@ -130,11 +133,12 @@ export function createHttpHandler(host: SonobeHost, options: TransportOptions): 
         },
       });
       if (legacy) {
-        // Request ids are only unique per client, and stateless HTTP can't tell clients apart, so an
-        // id two calls share is ambiguous and the cancel is dropped. Only token holders can send one.
+        // Request ids are only unique per client. A cancel reaches only calls from its own sender (the
+        // same sonobe-client header, or none); clients without the relay can't be told apart, so an id
+        // two of their calls share is ambiguous and the cancel is dropped. Only token holders can send one.
         server.server.setNotificationHandler("notifications/cancelled", (notification) => {
           const id = notification.params.requestId;
-          const calls = id === undefined ? undefined : inflight.get(id);
+          const calls = id === undefined ? undefined : inflight.get(inflightKey(httpCalls.getStore()?.clientId, id));
           if (calls?.size !== 1) return;
           for (const controller of calls) controller.abort(new Error(notification.params.reason ?? "The client cancelled the call."));
         });
@@ -165,8 +169,13 @@ export function createHttpHandler(host: SonobeHost, options: TransportOptions): 
       if (!res.writableFinished) connection.abort(new Error("The MCP client disconnected."));
     });
     // The relay names its session on every POST (clients.ts); tool calls record it and name the author.
-    const clientId = req.headers[CLIENT_HEADER];
-    const scope: CallScope = { signal: connection.signal, track, ...(isClientId(clientId) ? { clientId } : {}) };
+    const header = req.headers[CLIENT_HEADER];
+    const clientId = isClientId(header) ? header : undefined;
+    const scope: CallScope = {
+      signal: connection.signal,
+      track: (requestId, controller) => track(inflightKey(clientId, requestId), controller),
+      ...(clientId ? { clientId } : {}),
+    };
     if (req.method?.toUpperCase() !== "POST" || !isJsonContentType(req.headers["content-type"])) return httpCalls.run(scope, () => node(req, res));
     const body = await readJsonBody(req);
     if (!body.ok) {
