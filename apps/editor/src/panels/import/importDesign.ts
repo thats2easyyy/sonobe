@@ -179,7 +179,7 @@ export async function importCapture(session: EditorSession, capture: DesignCaptu
   // The last point where a cancel stops the import: from here on it lands as one undo step.
   if (options.signal?.aborted) return CANCELLED;
   for (const file of plan.files) session.assets.storeBytes(file.file, file.bytes);
-  const result = session.document.getState().apply(plan.ops, { label: `${options.replace ? "Re-import" : "Import"} “${plan.screenName}”` });
+  const result = session.document.getState().apply(plan.ops, { label: `${options.replace ? "Re-import" : "Import"} “${plan.screenName}”`, source: "import" });
   if (!result.ok) {
     const error = result.errors[0];
     return { ok: false, message: error?.message ?? "The design couldn't be added.", ...(error?.hint ? { hint: error.hint } : {}) };

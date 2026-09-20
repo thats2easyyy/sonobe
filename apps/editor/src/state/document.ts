@@ -67,7 +67,12 @@ export interface ApplyInput {
   atomic?: boolean;
   /** Component for ops without `component`. */
   defaultComponent?: Id;
+  /** What made the change, for views that react to it (DocumentChange.source). */
+  source?: ChangeSource;
 }
+
+/** "import": a design import (Claude's import_design), which the canvas and the Viewer build as a hologram. */
+export type ChangeSource = "import";
 
 export type DocumentChangeKind = "apply" | "undo" | "redo" | "replace" | "reload";
 
@@ -81,6 +86,8 @@ export interface DocumentChange {
   affected: Affected;
   opCount: number;
   timestamp: number;
+  /** An apply's ApplyInput.source, when it said what made it. */
+  source?: ChangeSource;
 }
 
 export interface HistoryListEntry {
@@ -597,7 +604,7 @@ export function createDocumentStore(options: DocumentStoreOptions): DocumentStor
           group = null;
         }
         pruneReloads();
-        commit(result.doc, { kind: "apply", revision: history.revision, author, label: input.label, txnId: entry.txnId, affected: result.affected, opCount: result.applied.length, timestamp: now() });
+        commit(result.doc, { kind: "apply", revision: history.revision, author, label: input.label, txnId: entry.txnId, affected: result.affected, opCount: result.applied.length, timestamp: now(), ...(input.source ? { source: input.source } : {}) });
         return result;
       },
 
