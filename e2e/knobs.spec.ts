@@ -55,9 +55,10 @@ test.describe("Knobs", () => {
     await page.waitForTimeout(300);
     await screenshot(page, "knobs-01-tab-dark");
 
-    // A second preset starts as a copy; tune the running one, then flip with Mod+'.
+    // A second preset starts as a copy and runs; tune it, then flip back and forth with Mod+'.
     await page.getByRole("button", { name: "Add Preset to Compare" }).click();
     await expect(page.getByRole("radiogroup", { name: "Presets" }).getByRole("radio")).toHaveCount(2);
+    await expect.poll(() => active(page)).toBe("preset_2");
     const field = page.getByRole("spinbutton", { name: "Card Fade value" });
     await field.fill("0.9");
     await field.press("Enter");
@@ -66,21 +67,21 @@ test.describe("Knobs", () => {
     const mod = await modKey(page);
     const frameBeforeFlip = await hook(page, (s) => s.frame());
     await page.keyboard.press(`${mod}+'`);
-    await expect.poll(() => active(page)).toBe("preset_2");
-    await expect(page.locator(".sb-vw__preset-caption")).toHaveText("Preset 2");
+    await expect.poll(() => active(page)).toBe("default");
+    await expect(page.locator(".sb-vw__preset-caption")).toHaveText("Default");
     await expect.poll(() => opacity(page)).toBeCloseTo(tuned, 5);
     await expect(page.locator(".sb-knob-row").first().locator(".sb-knob-row__diff")).toHaveText("≠");
     await page.keyboard.press(`${mod}+'`);
-    await expect.poll(() => active(page)).toBe("default");
-    await page.keyboard.press(`${mod}+'`);
     await expect.poll(() => active(page)).toBe("preset_2");
+    await page.keyboard.press(`${mod}+'`);
+    await expect.poll(() => active(page)).toBe("default");
     expect(await hook(page, (s) => s.frame())).toBeGreaterThan(frameBeforeFlip);
 
-    // One undo returns to the preset that ran before the flips.
+    // One undo returns to the preset that ran before the flips, and keeps the tuning.
     await page.keyboard.press(`${mod}+z`);
-    await expect.poll(() => active(page)).toBe("default");
+    await expect.poll(() => active(page)).toBe("preset_2");
     await expect.poll(() => opacity(page)).toBeCloseTo(0.9, 5);
-    expect(await hook(page, (s) => s.session.document.getState().historyEntries()[0]!.label)).toBe(`Tune Card Fade to 0.9 (Default)`);
+    expect(await hook(page, (s) => s.session.document.getState().historyEntries()[0]!.label)).toBe(`Tune Card Fade to 0.9 (Preset 2)`);
 
     await page.getByRole("button", { name: "Use light theme" }).click();
     await expect(page.locator("html")).toHaveAttribute("data-theme", "light");

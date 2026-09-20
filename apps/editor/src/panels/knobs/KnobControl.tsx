@@ -46,7 +46,16 @@ export function KnobControl({ knob, value, edit, label = knob.name, disabled = f
       .filter((t) => typeof t.value === "number")
       .map((t) => ({ value: t.value as number, label: `${t.name}: ${knobValueText(knob, t.value)}`, color: t.color, ...(disabled ? {} : { onSelect: () => edit.tune(knob.id, t.value) }) }));
     return (
-      <div className="sb-knob-control" data-slider={slider || undefined}>
+      <div
+        className="sb-knob-control"
+        data-slider={slider || undefined}
+        onKeyDown={(event) => {
+          // Return on the slider types a value instead.
+          if (event.key !== "Enter" || (event.target as Element).getAttribute("role") !== "slider") return;
+          event.preventDefault();
+          event.currentTarget.querySelector<HTMLInputElement>(".sb-knob-control__field input")?.focus();
+        }}
+      >
         {slider && (
           <Slider
             aria-label={label}

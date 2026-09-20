@@ -184,6 +184,17 @@ describe("Knobs tab", () => {
     expect(labels(s)[0]).toBe("Convert 1 Variable to Knobs");
   });
 
+  it("adds a preset to compare as a running copy, in one undo step", () => {
+    const s = mount(build([{ op: "addKnob", knob: { id: "gap", name: "Gap", type: "number", value: 8 } }]));
+    click(buttonWithText("Add Preset to Compare"));
+    expect(knobs(s)).toMatchObject({ active: "preset_2", presets: [{ id: "default", name: "Default" }, { id: "preset_2", name: "Preset 2" }] });
+    expect(knobs(s).knobs[0]!.values).toEqual({ default: 8, preset_2: 8 });
+    expect(labels(s)).toEqual(["New Preset “Preset 2”"]);
+    s.document.getState().undo();
+    expect(knobs(s).presets.map((p) => p.id)).toEqual(["default"]);
+    expect(knobs(s).active).toBe("default");
+  });
+
   it("stays on Knobs as the selection changes, with a way back to Properties", () => {
     const s = mount(deck());
     act(() => s.selection.getState().select({ patches: ["spring"] }));
@@ -192,6 +203,23 @@ describe("Knobs tab", () => {
     click(buttonWithText("Show Properties"));
     expect(layoutStore.getState().inspectorTab).toBe("properties");
     expect(container.querySelector(".sb-knobs")).toBeNull();
+  });
+
+  it("moves between rows with ↑ and ↓, steps with ← and →, and types a value on Return", () => {
+    const s = mount(deck());
+    const key = (name: string, init: KeyboardEventInit = {}) =>
+      act(() => {
+        document.activeElement!.dispatchEvent(new KeyboardEvent("keydown", { key: name, bubbles: true, cancelable: true, ...init }));
+      });
+    act(() => rowOf("Card Radius").querySelector<HTMLElement>('[role="slider"]')!.focus());
+    key("ArrowDown");
+    expect(document.activeElement).toBe(rowOf("Commit Distance").querySelector('[role="slider"]'));
+    key("ArrowRight", { shiftKey: true });
+    expect(knobs(s).knobs.find((k) => k.id === "commit")!.values.proposal).toBe(105);
+    key("ArrowUp");
+    expect(document.activeElement).toBe(rowOf("Card Radius").querySelector('[role="slider"]'));
+    key("Enter");
+    expect(document.activeElement).toBe(rowOf("Card Radius").querySelector('input[aria-label="Card Radius value"]'));
   });
 
   it("flashes the row a patch editor chip or Show in Knobs asks for", () => {

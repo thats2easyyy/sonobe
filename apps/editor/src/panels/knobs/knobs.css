@@ -215,7 +215,7 @@
 }
 
 /* Rows whose control fits next to the name. */
-.sb-knob-row:is([data-type="boolean"], [data-type="color"], [data-type="enum"]) {
+.sb-knob-row:is([data-type="boolean"], [data-type="enum"]) {
   grid-template-areas:
     "diff name control menu"
     ". hint hint hint";
@@ -295,6 +295,12 @@
 .sb-knob-control > * {
   flex: 1 1 auto;
   min-width: 0;
+}
+
+/* On/off keeps its switch size, at the end of its row. */
+.sb-knob-control > .sb-toggle {
+  flex: none;
+  margin-left: auto;
 }
 
 .sb-knob-control[data-slider] .sb-knob-control__field {

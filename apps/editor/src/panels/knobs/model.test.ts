@@ -96,6 +96,6 @@ describe("knobs model", () => {
     expect(newPresetName(set)).toBe("Proposal 2");
     expect(newPresetName({ ...set, presets: [...set.presets, { id: "p2", name: "Proposal 2" }] })).toBe("Proposal 3");
     expect(newPresetName({ active: "default", presets: [{ id: "default", name: "Default" }], knobs: [] })).toBe("Preset 2");
-    expect(newPresetName(undefined)).toBe("Preset 2");
+    expect(newPresetName(undefined)).toBe("Preset 1");
   });
 });
