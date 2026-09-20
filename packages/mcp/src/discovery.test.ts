@@ -37,6 +37,7 @@ describe("server surface", () => {
       "explain",
       "list_history",
       "sim_get_values",
+      "sim_override",
       "get_screenshot",
     ]) {
       expect(byName.get(name)!.annotations?.readOnlyHint, name).toBe(true);

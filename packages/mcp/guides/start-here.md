@@ -122,6 +122,7 @@ Look at the result as well. `atMs` draws a later frame without moving the sessio
 - **Stay in sync.** Each write returns a `revision`. Pass `expectedRevision` when you act on something you read earlier, so you never overwrite edits the person made in the meantime.
 - **Read errors.** A failed call includes a hint and often ready-to-apply `ops`. Nothing changed, so fix the call and retry.
 - **Ask before destroying.** `delete_items` asks for a confirmation token when more than 10 items would go. Undo with `undo`, which refuses to throw away a human's edit unless you name it.
+- **Look without editing.** To see under a layer or try a value, use `sim_override` inside a simulation, or `get_screenshot` with `isolate: true` for one layer alone. Editing and undoing just to look fills the person's undo history.
 - **Headless mode** (a project folder without the app): there's no editor selection, and `get_screenshot` draws the screen itself with approximate text. `get_document_info` says whether changes save automatically or need `save_document`.
 
 ## More guides

@@ -19,6 +19,18 @@ import {
   type SvgRect,
 } from "@sonobe/renderer/svg";
 import { HostError, isHostError, type Screenshot } from "./host.ts";
+import { isolateSceneLayer } from "./isolate.ts";
+
+function unionBounds(a: SvgRect, b: SvgRect): SvgRect {
+  const x = Math.min(a.x, b.x);
+  const y = Math.min(a.y, b.y);
+  return {
+    x,
+    y,
+    width: Math.max(a.x + a.width, b.x + b.width) - x,
+    height: Math.max(a.y + a.height, b.y + b.height) - y,
+  };
+}
 
 /** Largest PNG a screenshot returns (bytes); bigger renders are redrawn smaller. */
 export const MAX_SCREENSHOT_BYTES = 2_500_000;
@@ -365,6 +377,8 @@ export interface SceneScreenshotRequest {
   scene: SceneFrame;
   /** The whole screen, or one layer by layer id or scene key ("card#2", "like_button/heart"). */
   target: { kind: "viewer" } | { kind: "layer"; layerId: string };
+  /** With a layer target: draw only that layer and its children (see isolateSceneLayer). */
+  isolate?: boolean;
   /** Pixels per point (default 1). */
   scale?: number;
   /** Downscale so the image is at most this wide. */
@@ -378,11 +392,14 @@ export interface SceneScreenshotRequest {
 
 /** Draw and rasterize a scene (or one layer's box) as a PNG screenshot. */
 export async function renderSceneScreenshot(request: SceneScreenshotRequest): Promise<Screenshot> {
-  const { scene, target } = request;
+  const { target } = request;
+  let { scene } = request;
   let crop: SvgRect = { x: 0, y: 0, width: scene.size[0], height: scene.size[1] };
+  const isolationNotes: string[] = [];
   if (target.kind === "layer") {
-    const node = findSceneNode(scene, target.layerId);
-    if (!node) {
+    const isolated = request.isolate ? isolateSceneLayer(scene, target.layerId) : undefined;
+    const nodes = isolated ? isolated.nodes : [findSceneNode(scene, target.layerId)].filter((n) => !!n);
+    if (!nodes.length) {
       throw new HostError(
         "not_found",
         `Layer "${target.layerId}" isn't drawn ${request.simId ? `in simulation "${request.simId}"` : "on screen"} right now.`,
@@ -391,7 +408,13 @@ export async function renderSceneScreenshot(request: SceneScreenshotRequest): Pr
         },
       );
     }
-    const bounds = sceneNodeBounds(node);
+    if (isolated) {
+      scene = isolated.scene;
+      isolationNotes.push(...isolated.notes);
+    }
+    const bounds = nodes
+      .map(sceneNodeBounds)
+      .reduce<SvgRect | null>((all, b) => (!b ? all : !all ? b : unionBounds(all, b)), null);
     if (!bounds || bounds.width < 0.5 || bounds.height < 0.5) {
       throw new HostError("capture_failed", `Layer "${target.layerId}" has no area to capture.`, {
         hint: 'Give it a size, or use target "viewer" for the whole screen.',
@@ -428,7 +451,7 @@ export async function renderSceneScreenshot(request: SceneScreenshotRequest): Pr
         width: image.width,
         height: image.height,
         timeMs: Math.round(scene.time * 100000) / 100,
-        notes: drawing.notes,
+        notes: [...isolationNotes, ...drawing.notes],
       };
     }
     if (attempt >= 3 || image.width <= 64) {

@@ -17,6 +17,8 @@ import {
   diffDiagnostics,
   HostError,
   isHostError,
+  isolateSceneLayer,
+  sceneNodesFor,
   TEMPLATES,
   type DocumentSummary,
   type HistoryItem,
@@ -252,13 +254,6 @@ function measuredScale(bounds: ViewerBoundsLike): number {
   return bounds.prototypeSize[0] > 0 && bounds.stage.width > 0 ? bounds.stage.width / bounds.prototypeSize[0] : bounds.scale;
 }
 
-function* walkScene(nodes: readonly SceneNode[]): Generator<SceneNode> {
-  for (const node of nodes) {
-    yield node;
-    yield* walkScene(node.children);
-  }
-}
-
 /** Axis-aligned bounds of a node in prototype points. */
 function nodeBounds(node: SceneNode): Rect {
   const m = node.worldTransform;
@@ -277,9 +272,7 @@ function nodeBounds(node: SceneNode): Rect {
 
 /** Where a layer is drawn in a scene: its exact node key, else every copy of it (loops, components). */
 export function sceneLayerBounds(scene: SceneFrame, layerId: string): Rect | null {
-  const nodes = [...walkScene(scene.roots)];
-  const exact = nodes.find((n) => n.key === layerId);
-  const matches = exact ? [exact] : nodes.filter((n) => n.layerId === layerId);
+  const matches = sceneNodesFor(scene, layerId);
   if (!matches.length) return null;
   const rects = matches.map(nodeBounds);
   const left = Math.min(...rects.map((r) => r.x));
@@ -457,15 +450,51 @@ export function createAppHost(options: AppHostOptions): AppHost {
       await prepareSim(simId);
       return manager.values(simId, targets);
     },
+    async override(simId, request) {
+      await prepareSim(simId);
+      return manager.override(simId, request);
+    },
     list: (docId) => manager.list(docId),
   };
 
-  const sceneFunction = () => (manager as SimulationManager & { scene?: (simId: string) => SceneFrame }).scene;
+  const sceneFunction = () => (manager as Partial<Pick<SimulationManager, "sceneAt">>).sceneAt;
 
-  /** get_screenshot({ simId }): draw the simulation's current frame (it doesn't step or hot-swap). */
+  /** Draw a SceneFrame with renderScene: the screen, one layer's box, or (isolate) only that layer and its children. */
+  const drawScene = async (target: ScreenshotTarget, scene: SceneFrame, entry: Entry | undefined, o: ScreenshotOptions, where: string): Promise<Screenshot> => {
+    const draw = options.renderScene!;
+    const screen: Rect = { x: 0, y: 0, width: scene.size[0], height: scene.size[1] };
+    let drawn = scene;
+    let crop: Rect | null = screen;
+    const notes: string[] = [];
+    if (target.kind === "layer") {
+      const isolated = o.isolate ? isolateSceneLayer(scene, target.layerId) : undefined;
+      if (isolated) {
+        drawn = isolated.scene;
+        notes.push(...isolated.notes);
+      }
+      const bounds = sceneLayerBounds(drawn, target.layerId);
+      if (!bounds) {
+        throw new HostError("not_found", `Layer "${target.layerId}" isn't drawn ${where} right now.`, {
+          hint: "Check the id with get_outline. Hidden layers and layers outside a loop's current count aren't drawn.",
+        });
+      }
+      crop = intersectRects(bounds, screen);
+    }
+    if (!crop || crop.width < 1 || crop.height < 1) {
+      throw new HostError("capture_failed", "There's nothing visible to capture: the target has no area on screen.", { hint: 'Try target "viewer" to see the whole screen.' });
+    }
+    const size = screenshotSize(crop, 1, o.scale ?? 1, o.maxWidth);
+    const image = await draw({ scene: drawn, crop, size, assets: assetFiles(entry?.snapshot?.doc, entry?.info.projectPath ?? null) });
+    if (!image) {
+      throw new HostError("capture_failed", "Sonobe couldn't draw the simulation's frame.", { hint: "Try again. If it keeps failing, check the simulation with sim_get_values or sim_trace instead." });
+    }
+    return { data: image.data, mimeType: "image/png", width: image.width, height: image.height, timeMs: Math.round(scene.time * 1000), ...(notes.length ? { notes } : {}) };
+  };
+
+  /** get_screenshot({ simId }): the simulation's frame, or the frame atMs later drawn on a copy (the session doesn't move). */
   const simScreenshot = async (target: ScreenshotTarget, simId: string, o: ScreenshotOptions): Promise<Screenshot> => {
-    const sceneOf = sceneFunction();
-    if (typeof sceneOf !== "function" || !options.renderScene) {
+    const sceneAt = sceneFunction();
+    if (typeof sceneAt !== "function" || !options.renderScene) {
       throw new HostError("sim_screenshot_unavailable", "Screenshots show the live viewer; Sonobe can't draw a simulation's frame yet.", {
         hint: "Take the screenshot without simId, and check the simulation with sim_get_values or sim_trace.",
       });
@@ -475,29 +504,27 @@ export function createAppHost(options: AppHostOptions): AppHost {
         hint: 'Use target "viewer" for the whole screen, or "layer" with a layerId.',
       });
     }
-    const scene = sceneOf.call(manager, simId);
-    const screen: Rect = { x: 0, y: 0, width: scene.size[0], height: scene.size[1] };
-    let crop: Rect | null = screen;
-    if (target.kind === "layer") {
-      const bounds = sceneLayerBounds(scene, target.layerId);
-      if (!bounds) {
-        throw new HostError("not_found", `Layer "${target.layerId}" isn't drawn in simulation "${simId}" right now.`, {
-          hint: "Check the id with get_outline. Hidden layers and layers outside a loop's current count aren't drawn.",
-        });
-      }
-      crop = intersectRects(bounds, screen);
-    }
-    if (!crop || crop.width < 1 || crop.height < 1) {
-      throw new HostError("capture_failed", "There's nothing visible to capture: the target has no area on screen.", { hint: 'Try target "viewer" to see the whole screen.' });
-    }
+    await prepareSim(simId);
+    const scene = sceneAt.call(manager, simId, o.atMs ?? 0);
     const docId = simDocs.get(simId);
-    const entry = docId !== undefined ? findEntry(docId) : undefined;
-    const size = screenshotSize(crop, 1, o.scale ?? 1, o.maxWidth);
-    const image = await options.renderScene({ scene, crop, size, assets: assetFiles(entry?.snapshot?.doc, entry?.info.projectPath ?? null) });
-    if (!image) {
-      throw new HostError("capture_failed", "Sonobe couldn't draw the simulation's frame.", { hint: "Try again. If it keeps failing, check the simulation with sim_get_values or sim_trace instead." });
+    return drawScene(target, scene, docId !== undefined ? findEntry(docId) : undefined, o, `in simulation "${simId}"`);
+  };
+
+  /** get_screenshot({ isolate: true }) without simId: the live viewer can't draw one layer alone, so draw a fresh run like headless servers do. */
+  const isolatedPreview = async (target: ScreenshotTarget, entry: Entry, o: ScreenshotOptions): Promise<Screenshot> => {
+    if (!options.renderScene) {
+      throw new HostError("isolate_unavailable", "This Sonobe build can't draw one layer on its own.", { hint: "Take the screenshot without isolate, or look at the layer's values with sim_get_values." });
     }
-    return { data: image.data, mimeType: "image/png", width: image.width, height: image.height, timeMs: Math.round(scene.time * 1000) };
+    await snapshot(entry);
+    const preview = manager.previewScene(entry.docId, o.atMs !== undefined ? { atMs: o.atMs } : {});
+    const shot = await drawScene(target, preview.scene, entry, o, "on screen");
+    const when = o.atMs !== undefined ? `${o.atMs} ms after it starts` : "once start-up animations settle";
+    shot.notes = [
+      `The live viewer can't draw one layer alone, so this is a fresh run of the document ${when}. Pass simId to isolate a simulation's frame.`,
+      ...(preview.settled || o.atMs !== undefined ? [] : ["The prototype was still animating 5 s after it started, so this shows that moment. Pass atMs to pick a moment."]),
+      ...(shot.notes ?? []),
+    ];
+    return shot;
   };
 
   const conflictResult = (entry: Entry, expected: number, current: number, diagnostics: Diagnostic[], dryRun: boolean): HostApplyResult => ({
@@ -717,6 +744,7 @@ export function createAppHost(options: AppHostOptions): AppHost {
     async screenshot(target, o) {
       const entry = await resolve(o.docId);
       if (o.simId !== undefined) return simScreenshot(target, o.simId, o);
+      if (o.isolate && target.kind === "layer") return isolatedPreview(target, entry, o);
       const scale = o.scale ?? 1;
       let rect: Rect | null;
       let cssPerPoint = 1;
