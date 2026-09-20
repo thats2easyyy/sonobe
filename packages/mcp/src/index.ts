@@ -88,6 +88,14 @@ export {
   type InstanceStep,
 } from "./instances.ts";
 export { createTemplateDocument, TEMPLATES, templateOps, type TemplateInfo } from "./templates.ts";
+export {
+  checkProjectTarget,
+  expandHome,
+  isPlaceholderName,
+  resolveProjectTarget,
+  type ProjectTargetOptions,
+  type ProjectTargetProblem,
+} from "./projectTarget.ts";
 export { explain, type Audience, type ExplainOptions } from "./explain.ts";
 export { describeRemovals, hasDestructiveOps, isDestructiveOp, removedItems, type RemovalSummary } from "./removals.ts";
 export {

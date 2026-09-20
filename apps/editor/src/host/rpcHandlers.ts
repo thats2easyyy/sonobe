@@ -27,6 +27,8 @@ export const RPC_METHODS = [
   "document.save",
   "document.open",
   "document.new",
+  "document.recoverDraft",
+  "drafts.flush",
   "selection.get",
   "viewer.bounds",
   "viewer.diagnostics",
@@ -214,6 +216,8 @@ export function registerRpcHandlers(session: EditorSession, options: RpcHandlerO
       diskProblem: s.diskProblem ? { paths: s.diskProblem.paths.filter((p) => p !== "."), message: s.diskProblem.message, detectedAt: s.diskProblem.detectedAt } : null,
       playing: session.runtime.isPlaying(),
       ...(trust ? { scripts: { count: trust.scriptCount, required: trust.required, trusted: trust.trusted } } : {}),
+      /** The draft that keeps unsaved edits safe from a crash or quit, once it's on disk. */
+      draft: session.drafts?.current() ?? null,
     };
   };
 
@@ -303,8 +307,15 @@ export function registerRpcHandlers(session: EditorSession, options: RpcHandlerO
       const force = optBoolean(p, "force") ?? false;
       /** The person is saving (the close prompt): ask them about outside changes instead of failing. */
       const interactive = optBoolean(p, "interactive") ?? false;
+      /** A new project folder the host already checked and approved (save_document({ path })): no Save panel. */
+      const path = optString(p, "path");
+      /** Never open the Save panel (MCP): a document that was never saved needs `path`. */
+      const noDialog = optBoolean(p, "noDialog") ?? false;
       let result: FileResult;
-      if (saveAs || !doc().projectPath) result = await doc().saveAs();
+      if (path !== undefined) result = await doc().saveTo(path);
+      else if ((saveAs || !doc().projectPath) && noDialog) {
+        throw new RpcProblem("path_needed", `"${doc().doc.project.name}" hasn't been saved to a project yet, so saving it needs a folder.`, { hint: 'Pass path, e.g. "~/Documents/Checkout Flow.sonobe".' });
+      } else if (saveAs || !doc().projectPath) result = await doc().saveAs();
       else if (interactive) result = await saveDocumentInteractively(session.document, session.dialogs);
       else result = await doc().save(force ? { overwriteExternal: true } : {});
       if (result.cancelled) return false;
@@ -319,7 +330,32 @@ export function registerRpcHandlers(session: EditorSession, options: RpcHandlerO
         }
         throw new RpcProblem("save_failed", result.error ?? "The prototype couldn't be saved.", { path: result.path, code: result.errorCode });
       }
-      return { ok: true, path: result.path ?? null, revision: doc().revision };
+      return { ok: true, path: result.path ?? null, revision: doc().revision, ...(result.written ? { written: result.written, deleted: result.deleted ?? [] } : {}) };
+    },
+
+    // open_document({ ref: "draft:<id>" }): bring a recovered draft back (asking about unsaved changes first).
+    "document.recoverDraft": async (p) => {
+      const id = optString(p, "id");
+      if (!id) throw invalid('"id" is required: the draft to recover (list_documents lists them).');
+      const result = await session.restoreDraft(id);
+      if (result.cancelled) return { ok: false, cancelled: true };
+      if (!result.ok) {
+        const code = result.errorCode === "unknown_draft" || result.errorCode === "draft_in_use" || result.errorCode === "no_drafts" ? result.errorCode : "recover_failed";
+        const hints: Record<string, string> = {
+          unknown_draft: "list_documents lists the drafts that can be recovered.",
+          draft_in_use: "Another Sonobe window has it open. Ask the person to switch to that window.",
+          no_drafts: "This Sonobe build doesn't keep drafts.",
+          recover_failed: "The draft's files may be damaged. Ask the person to look at it with Show in Finder on the welcome screen.",
+        };
+        throw new RpcProblem(code, result.error ?? "The draft couldn't be recovered.", { hint: hints[code] });
+      }
+      return { ok: true, notes: result.notes ?? [], ...info() };
+    },
+
+    // Quitting on a signal: write unsaved edits to the draft before the app exits.
+    "drafts.flush": async () => {
+      await session.drafts?.flush();
+      return { flushed: session.drafts !== null, draft: session.drafts?.current() ?? null };
     },
 
     "document.open": async (p) => {

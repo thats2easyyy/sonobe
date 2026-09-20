@@ -10,6 +10,7 @@
     "start": "node scripts/build.mjs && electron . --mute-audio",
     "smoke": "node tests/smoke.mjs",
     "smoke:import": "node tests/import-smoke.mjs",
+    "smoke:drafts": "node tests/drafts-smoke.mjs",
     "test": "vitest run --config vitest.config.ts",
     "icons": "node scripts/icons.mjs",
     "package": "node scripts/package.mjs",

@@ -11,6 +11,8 @@ export const IPC = {
   dialogOpenProject: "sonobe:dialog:open-project",
   dialogSaveProject: "sonobe:dialog:save-project",
   readProject: "sonobe:project:read",
+  /** Like readProject, but a folder that doesn't exist yet reads as null (Save As into a new folder). */
+  readProjectIfExists: "sonobe:project:read-if-exists",
   writeProject: "sonobe:project:write",
   watchProject: "sonobe:project:watch",
   unwatchProject: "sonobe:project:unwatch",
@@ -48,6 +50,12 @@ export const IPC = {
   captureDesignProgress: "sonobe:design:progress",
   /** renderer → main: download a pasted capture's image or font (no CORS in main). */
   fetchCaptureFile: "sonobe:design:fetch-file",
+  /** renderer → main: drafts of unsaved work (electron/drafts.ts). */
+  draftsWrite: "sonobe:drafts:write",
+  draftsRemove: "sonobe:drafts:remove",
+  draftsList: "sonobe:drafts:list",
+  draftsRead: "sonobe:drafts:read",
+  draftsReveal: "sonobe:drafts:reveal",
   rpcRequest: "sonobe:rpc:request",
   rpcResponse: "sonobe:rpc:response",
   /** renderer → main: the full list of registered rpc method names. */

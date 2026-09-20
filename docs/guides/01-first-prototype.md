@@ -168,6 +168,8 @@ Now the card lifts off the page as it grows. Both properties ride the same sprin
 4. Add another Transition and set its type to Color. Feed it from the same Pop Animation and connect it to Background's Color, going from light gray to near black.
 5. Make the card grow only while you hold it. Hint: Down is already on or off by itself, so you won't need the Switch.
 
+Save it with ⌘S (Ctrl+S) to keep it as a project. Until you do, Sonobe keeps your unsaved work as a draft, so if the app quits or crashes, the welcome screen offers it back under **Recovered**.
+
 ## Common mistakes
 
 - Wiring Tap straight into Pop Animation. A pulse is 1 for a single frame, so the spring sets off toward 1 and gets called back 16 milliseconds later. The card twitches, or seems to do nothing. Put a Switch in between.
