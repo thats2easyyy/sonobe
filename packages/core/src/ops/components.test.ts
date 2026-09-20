@@ -519,7 +519,7 @@ describe("createComponent", () => {
       patches: { pop: { ...before.patches.pop!, inputs: { ...before.patches.pop!.inputs, number: { link: "$in.number" } } }, grow: before.patches.grow },
       comments: [],
     });
-    expect(main.patches.grow_2).toStrictEqual({ type: "component", name: "Grow", component: "grow", inputs: { number: { link: "toggle.on" } }, ui: { x: 512, y: 40 } });
+    expect(main.patches.grow_2).toStrictEqual({ type: "component", name: "Grow", component: "grow", inputs: { number: { link: "toggle.on" } }, ui: { x: 522, y: 40 } });
     expect(main.layers[0]!.props.scale).toEqual({ link: "grow_2.output" });
     expect(errorsOf(r.doc)).toEqual([]);
     expectRoundTrip(doc, r);

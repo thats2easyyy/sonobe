@@ -234,7 +234,9 @@ describe("tidyPlanOps", () => {
     // pop moves to the frame's top-left; grow leads the unframed group, which stays anchored; the layer node is saved.
     expect(ops).toContainEqual({ op: "updatePatch", component: "main", id: "pop", ui: { x: 20, y: 44 } });
     expect(ops.some((op) => op.op === "updatePatch" && op.id === "grow")).toBe(false);
-    expect(ops).toContainEqual({ op: "updateComment", component: "main", id: "section", rect: [0, 0, 204, 44 + 102 + 20] });
+    // The frame hugs pop with 20 of padding each side.
+    const popWidth = componentNodeBoxes(doc, mockRegistry, "main").get("pop")!.width;
+    expect(ops).toContainEqual({ op: "updateComment", component: "main", id: "section", rect: [0, 0, popWidth + 40, 44 + 102 + 20] });
     expect(ops).toContainEqual({ op: "setNodePositions", component: "main", positions: { "@card": [30, 400 + 102 + 28] } });
     const tidied = mustApply(doc, ops).doc;
     expect(tidyPlanOps(tidied.components.main!, await planTidy(request(tidied), column))).toEqual([]);

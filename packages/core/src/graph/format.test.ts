@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { formatKnobValue } from "../knobs.ts";
 import type { EnumOption, ValueType } from "../types.ts";
-import { COORDINATE_CHARS, formatNumberShort, formatValue, formatValueLong, formatValueReserve, knobValueReserve, LOOP_PREVIEW_CHARS, NUMBER_SHORT_CHARS, pickCopy } from "./format.ts";
+import { COORDINATE_CHARS, formatNumberShort, formatValue, formatValueLong, formatValueReserve, knobValueReserve, LOOP_PREVIEW_CHARS, loopBadgeReserve, NUMBER_SHORT_CHARS, pickCopy } from "./format.ts";
 
 const loop = (...items: unknown[]) => ({ __loop: true as const, items });
 
@@ -68,9 +68,24 @@ describe("reserved widths", () => {
     expect(formatValueReserve([1931.5, -1229.1], "point", live)).toBe(14);
   });
 
-  it("reserves nothing when nothing prints: no value, or a pulse", () => {
-    expect(formatValueReserve(undefined, "number", live)).toBe(0);
+  it("reserves a port's room before its first value arrives, except a pulse's, which prints nothing, and json's and any's, which follow their value", () => {
+    expect(formatValueReserve(undefined, "number", live)).toBe(NUMBER_SHORT_CHARS);
+    expect(formatValueReserve(undefined, "number", { ...live, subtype: "progress" })).toBe(formatValueReserve(0.5, "number", { ...live, subtype: "progress" }));
+    for (const [type, value] of [
+      ["boolean", false],
+      ["color", { r: 1, g: 0, b: 0, a: 0.5 }],
+      ["text", "Hi"],
+      ["point", [1, 2]],
+      ["point3d", [1, 2, 3]],
+      ["layer", "layer_1"],
+      ["image", { assetId: "a" }],
+    ] as [ValueType, unknown][])
+      expect(formatValueReserve(undefined, type, live), type).toBe(formatValueReserve(value, type, live));
+    expect(formatValueReserve(undefined, "enum", { ...live, enumOptions: [{ key: "a", name: "Ease In" }] })).toBe(7);
     expect(formatValueReserve(true, "pulse", live)).toBe(0);
+    expect(formatValueReserve(undefined, "pulse", live)).toBe(0);
+    expect(formatValueReserve(undefined, "json", live)).toBe(0);
+    expect(formatValueReserve(undefined, "any", live)).toBe(0);
   });
 
   it("uses the longest enum option when the options are known, and at most maxText", () => {
@@ -93,29 +108,58 @@ describe("reserved widths", () => {
     expect(formatValueReserve(null, "json", live)).toBe(1);
   });
 
-  it("reserves a loop's ×N summary with a short preview of its first item, or the watched copy's #k and the whole item", () => {
+  it("reserves a loop's ×N summary with a short preview of its first item, or a watched copy's #k and the whole item, whichever is longer", () => {
     const loop12 = loop(...Array.from({ length: 12 }, (_, i) => i * 1.5));
-    expect(formatValueReserve(loop12, "number", live)).toBe("×12 ".length + LOOP_PREVIEW_CHARS + "…".length);
-    expect(formatValueReserve(loop12, "number", { ...live, copy: 3 })).toBe("#11 ".length + 8);
+    expect(formatValueReserve(loop12, "number", live)).toBe("#11 ".length + NUMBER_SHORT_CHARS);
     expect(formatValueReserve(loop(true, false), "boolean", live)).toBe("×NN Off…".length);
-    expect(formatValueReserve(loop("a"), "text", live)).toBe("×NN ".length + LOOP_PREVIEW_CHARS + "…".length);
-    expect(formatValueReserve(loop([201.5, 366.5]), "point", live)).toBe("×NN ".length + LOOP_PREVIEW_CHARS + "…".length);
-    expect(formatValueReserve(loop(), "number", live)).toBe("×NN ".length + LOOP_PREVIEW_CHARS + "…".length);
-    expect(formatValueReserve(loop(...Array.from({ length: 120 }, () => 0)), "number", live)).toBe("×120 ".length + LOOP_PREVIEW_CHARS + "…".length);
+    expect(formatValueReserve(loop(0.5), "number", { ...live, subtype: "progress" })).toBe("×NN ".length + 6 + "…".length);
+    expect(formatValueReserve(loop("a"), "text", live)).toBe("#NN ".length + "“12345678”".length);
+    expect(formatValueReserve(loop([201.5, 366.5]), "point", live)).toBe("#NN ".length + "-999.9, -999.9".length);
+    expect(formatValueReserve(loop(), "number", live)).toBe("#NN ".length + NUMBER_SHORT_CHARS);
+    expect(formatValueReserve(loop(...Array.from({ length: 120 }, () => 0)), "number", live)).toBe("#120 ".length + NUMBER_SHORT_CHARS);
     // Loop's Index prints "×12 0…", which fits whole.
     expect(formatValue(loop(...Array.from({ length: 12 }, (_, i) => i)), "index", live).length).toBeLessThanOrEqual(formatValueReserve(loop(0), "index", live));
+  });
+
+  it("keeps one room for a loop whichever copy is watched, or none, so watching a copy doesn't resize the node", () => {
+    for (const [type, item] of [
+      ["number", 1.5],
+      ["point", [201.5, 366.5]],
+      ["text", "Hello"],
+      ["color", { r: 1, g: 0, b: 0, a: 0.5 }],
+      ["boolean", true],
+      ["index", 3],
+    ] as [ValueType, unknown][]) {
+      const values = loop(item, item, item);
+      const rooms = [null, 0, 2, 7].map((copy) => formatValueReserve(values, type, { ...live, copy }));
+      expect(new Set(rooms), type).toEqual(new Set([rooms[0]]));
+    }
+  });
+
+  it("keeps a loop's room before its first value when the port carries a loop, and while it's empty", () => {
+    expect(formatValueReserve(undefined, "point", { ...live, loop: true })).toBe(formatValueReserve(loop([187.5, 402.25]), "point", live));
+    expect(formatValueReserve(undefined, "number", { ...live, loop: true })).toBe(formatValueReserve(loop(1, 2), "number", live));
+    // A plain value on a port that carries a loop keeps the loop's room.
+    expect(formatValueReserve(0.5, "number", { ...live, loop: true })).toBe(formatValueReserve(loop(0.5), "number", live));
+    expect(formatValueReserve(undefined, "json", { ...live, loop: true })).toBe(formatValueReserve(loop(1), "json", live));
+    expect(formatValueReserve(undefined, "pulse", { ...live, loop: true })).toBe(0);
   });
 
   it("keeps two digits for a loop's count and a copy's index, so a loop growing past 9 holds still", () => {
     const ofLength = (n: number) => loop(...Array.from({ length: n }, (_, i) => i));
     const counts = [0, 1, 9, 10, 14, 99].map((n) => formatValueReserve(ofLength(n), "number", live));
-    expect(new Set(counts)).toEqual(new Set([1 + 2 + 1 + LOOP_PREVIEW_CHARS + 1]));
+    expect(new Set(counts)).toEqual(new Set([1 + 2 + 1 + NUMBER_SHORT_CHARS]));
     // An empty loop prints "×0" for a watched copy, in the same room.
     const copies = [0, 1, 9, 10, 11, 14, 99].map((n) => formatValueReserve(ofLength(n), "number", { ...live, copy: 3 }));
-    expect(new Set(copies)).toEqual(new Set([1 + 2 + 1 + 8]));
+    expect(new Set(copies)).toEqual(new Set(counts));
     expect(formatValueReserve(ofLength(9), "boolean", live)).toBe(formatValueReserve(ofLength(10), "boolean", live));
     // Touches at rest is an empty loop of points: it keeps the room the first touch needs.
     expect(formatValueReserve(loop(), "point", live)).toBe(formatValueReserve(loop([187.5, 402.25]), "point", live));
+  });
+
+  it("gives the header's loop badge the room of two digits", () => {
+    expect([undefined, 0, 7, 12, 99].map(loopBadgeReserve)).toEqual(["×00", "×00", "×00", "×00", "×00"]);
+    expect(loopBadgeReserve(120)).toBe("×000");
   });
 
   it("is never shorter than what formatValue prints for a value or a watched copy, or a loop's count and preview", () => {

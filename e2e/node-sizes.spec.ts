@@ -23,6 +23,8 @@ interface Row {
   id: string;
   dom: { width: number; height: number };
   estimate: { width: number; height: number };
+  /** Without live values, as inserts and Tidy Up place nodes before they run. */
+  valueFree: { width: number; height: number };
 }
 
 test("the node size estimate matches what the patch editor draws", async ({ page }) => {
@@ -49,13 +51,14 @@ test("the node size estimate matches what the patch editor draws", async ({ page
         const doc = s.doc();
         const diagnostics = [...diagnosticsFor(doc, s.session.registry), ...s.session.runtime.state.getState().diagnostics];
         const model = graph.deriveGraph({ doc, componentId: doc.project.root, registry: s.session.registry, diagnostics });
-        const out: { id: string; dom: { width: number; height: number }; estimate: { width: number; height: number } }[] = [];
+        const out: { id: string; dom: { width: number; height: number }; estimate: { width: number; height: number }; valueFree: { width: number; height: number } }[] = [];
         for (const node of model.nodes) {
           if (node.type === "comment") continue;
           const el = document.querySelector<HTMLElement>(`.sb-pe .react-flow__node[data-id="${CSS.escape(node.id)}"]`);
           if (!el) continue;
           const estimate = graph.estimateNodeSize(node.data, { measure: nodeTextMeasurer(), live: (address: string) => s.session.runtime.runtime.getRawValue(address) });
-          out.push({ id: node.id, dom: { width: el.offsetWidth, height: el.offsetHeight }, estimate });
+          const valueFree = graph.estimateNodeSize(node.data, { measure: nodeTextMeasurer() });
+          out.push({ id: node.id, dom: { width: el.offsetWidth, height: el.offsetHeight }, estimate, valueFree });
         }
         return out;
       },
@@ -69,4 +72,9 @@ test("the node size estimate matches what the patch editor draws", async ({ page
   const off = all.filter((r) => Math.abs(r.estimate.width - r.dom.width) > 3);
   expect(off.length / all.length, off.map((r) => `${r.id} dom ${r.dom.width} estimate ${r.estimate.width}`).join("; ")).toBeLessThanOrEqual(0.02);
   expect(all.filter((r) => Math.abs(r.estimate.height - r.dom.height) > 0.5).map((r) => `${r.id} dom ${r.dom.height} estimate ${r.estimate.height}`)).toEqual([]);
+  // Live values sit in slots that are there before they arrive, so a node mounts at the width it keeps,
+  // and the value-free estimate that places inserts matches it, except where json and any outputs wait
+  // for their value's kind (Shape, JSON Array and the like, 8 of 254 on macOS).
+  const unplaced = all.filter((r) => Math.abs(r.valueFree.width - r.dom.width) > 3);
+  expect(unplaced.length / all.length, unplaced.map((r) => `${r.id} dom ${r.dom.width} value-free ${r.valueFree.width}`).join("; ")).toBeLessThanOrEqual(0.04);
 });
