@@ -148,7 +148,7 @@ Extensions you build yourself don't update automatically. To update, build and p
 
 ## What Claude can do
 
-Sonobe gives Claude 39 tools in six groups: discovery, documents, reading, writing, simulation, and presence and history. Here's what they look like in practice:
+Sonobe gives Claude 41 tools in six groups: discovery, documents, reading, writing, simulation, and presence and history. Here's what they look like in practice:
 
 | You ask for | Claude uses tools like |
 |---|---|
@@ -158,6 +158,7 @@ Sonobe gives Claude 39 tools in six groups: discovery, documents, reading, writi
 | "Wrap this into a component." | `create_component`, `tidy_graph` |
 | "Tap the Save button and see what happens." | `sim_reset`, `sim_dispatch`, `sim_step`, `sim_get_values`, `get_screenshot` |
 | "How long does the sheet take to settle?" | `sim_trace` |
+| "Show me what's under the top card." | `sim_override`, `get_screenshot` |
 | "Is anything broken?" | `get_diagnostics` |
 | "Start a new prototype and save it." | `create_document`, `open_document`, `save_document` |
 | "Undo what you just did." | `list_history`, `undo` |
@@ -186,6 +187,7 @@ Sonobe also offers four ready-made prompts: `import_screen`, `prototype_interact
 - Batches are all or nothing. If any change in a batch fails validation, none of the batch is applied, so you never end up with half a feature.
 - Claude's edits are tied to the version of the document they were based on. If you changed the document in the meantime, Sonobe rejects the edit and Claude re-reads instead of overwriting your work.
 - Claude can preview a batch without applying it, to see the resulting changes and any diagnostics first.
+- To look under a layer or try a value, Claude changes it only inside its own simulation. Your document, the viewer and your undo history don't change, so there's nothing to undo afterwards.
 - Deleting a lot at once asks Claude to confirm first.
 - You can keep working while Claude works. Just avoid editing the exact patches it's changing.
 

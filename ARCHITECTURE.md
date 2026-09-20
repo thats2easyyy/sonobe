@@ -448,7 +448,7 @@ Layer types are declared in `@sonobe/core` (`layerTypes.ts`) with typed props (k
     listDocuments(); openDocument(ref); getDocument(docId?); apply(ops, { label, author, dryRun, expectedRevision });
     getSelection(); screenshot(target, opts); reveal(ids); setWorking(ids, intent | null);
     captureDesign?(request); fetchImage?(url, signal); putAssetFiles?(files, { docId });   // design import (§13)
-    sim: { reset(opts); dispatch(simId, events); step(simId, opts); trace(simId, opts); values(simId, targets) };
+    sim: { reset(opts); dispatch(simId, events); step(simId, opts); trace(simId, opts); values(simId, targets); override(simId, request) };
     history: { list(opts); undo(txnId?); };
   }
   ```
@@ -461,8 +461,10 @@ Layer types are declared in `@sonobe/core` (`layerTypes.ts`) with typed props (k
 | Documents | `list_documents`, `open_document`, `create_document`, `get_document_info`, `save_document` |
 | Read | `get_outline` (compact text projection), `get_layers`, `get_patches`, `get_items`, `find`, `get_selection`, `get_diagnostics`, `explain` |
 | Write | `apply_ops`, `add_layers`, `add_patches`, `connect`, `set_values`, `update_layers`, `delete_items`, `rename`, `create_component`, `tidy_graph`, `import_design` |
-| Simulate | `sim_reset`, `sim_dispatch`, `sim_step`, `sim_trace`, `sim_get_values`, `get_screenshot` |
+| Simulate | `sim_reset`, `sim_dispatch`, `sim_step`, `sim_trace`, `sim_get_values`, `sim_override`, `get_screenshot` |
 | Presence and history | `begin_work`, `finish_work`, `reveal`, `list_history`, `undo` |
+
+- **Simulation overrides** (`sim_override`) are ordinary value ops (setInput, connect, disconnect, layer props, mute) that a session applies to its own copy of the document with `applyOps`, re-derived on every new revision. They never enter history, the live viewer or disk. `get_screenshot` with `isolate: true` draws one layer's subtree from the SceneFrame, on both hosts.
 
 - **Resources:** guides, patch reference, document outline.
 - **Prompts:** `import_screen`, `prototype_interaction`, `debug_interaction`, `explain_prototype`.

@@ -47,6 +47,7 @@ When they have an app or a design in code, start from it instead of drawing laye
 3. `sim_trace` the properties that should move. Check the end value, settle time and overshoot against the requested feel ("snappy" means little or no overshoot and settles fast).
 4. `sim_step` with `until: "idle"`, or `sim_get_values`, for final states.
 5. `get_screenshot` for visual QA: `"@card"` for one layer, `simId` plus `atMs` for a moment in a simulation. Headless servers draw it themselves with approximate text and placeholders for video. Read structure and values from tools, not pixels.
+6. To peek under a layer or A/B a value, use `sim_override` inside the simulation, or `get_screenshot` with `isolate: true` for one layer alone. Never edit and undo just to look: that clutters the person's history.
 
 ## Debugging
 

@@ -90,6 +90,7 @@ patch chosen_name loopSelect<text> "Chosen Name" loop←names.loop index←tappe
 
 - Tap one copy with the target `"@row#2"`.
 - Read one item with an index suffix after the property: `@row.position#2`. Without it you get item 0.
+- See one copy on its own with `get_screenshot` of `"@row#2"` and `isolate: true`. `sim_override` changes every copy at once, so it refuses `#n` targets.
 
 ```json tool:sim_reset
 {}

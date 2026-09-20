@@ -442,7 +442,7 @@ describe("app host simulation screenshots", () => {
     const requests: SceneRenderRequest[] = [];
     let drawn = true;
     const host = appHost([w], {
-      simulations: (o) => Object.assign(createSimulationManager(o), { scene: () => scene }),
+      simulations: (o) => Object.assign(createSimulationManager(o), { sceneAt: () => scene }),
       renderScene: async (request) => {
         requests.push(request);
         return drawn ? { data: "iVBORw0KGgo=", width: request.size.width, height: request.size.height } : null;
@@ -467,11 +467,90 @@ describe("app host simulation screenshots", () => {
     const w = editorWindow(1);
     const host = appHost([w], { renderScene: async () => null });
     const { simId } = await host.sim.reset({});
-    const hasScene = typeof (createSimulationManager({ registry, getDocument: () => ({ docId: "x", doc: createDemoDocument(registry), revision: 0 }) }) as { scene?: unknown }).scene === "function";
+    const hasScene = typeof (createSimulationManager({ registry, getDocument: () => ({ docId: "x", doc: createDemoDocument(registry), revision: 0 }) }) as { sceneAt?: unknown }).sceneAt === "function";
     expect(appHost([w]).simulationScreenshots()).toBe(false);
-    if (hasScene) return; // @sonobe/mcp now exposes scene(simId); the previous test covers drawing.
+    if (hasScene) return; // @sonobe/mcp now exposes sceneAt(simId, atMs); the previous test covers drawing.
     expect(host.simulationScreenshots()).toBe(false);
     expect(await rejection(host.screenshot({ kind: "viewer" }, { simId }))).toMatchObject({ code: "sim_screenshot_unavailable" });
+  });
+
+  const findNode = (nodes: readonly SceneNode[], id: string): SceneNode | undefined => {
+    for (const n of nodes) {
+      const found = n.layerId === id ? n : findNode(n.children, id);
+      if (found) return found;
+    }
+    return undefined;
+  };
+
+  it("draws the frame atMs later, and one layer alone with isolate", async () => {
+    const w = editorWindow(1);
+    const requests: SceneRenderRequest[] = [];
+    const host = appHost([w], {
+      renderScene: async (request) => {
+        requests.push(request);
+        return { data: "iVBORw0KGgo=", width: request.size.width, height: request.size.height };
+      },
+    });
+    const { simId } = await host.sim.reset({});
+    const now = await host.screenshot({ kind: "viewer" }, { simId });
+    const later = await host.screenshot({ kind: "viewer" }, { simId, atMs: 2000 });
+    expect(later.timeMs! - now.timeMs!).toBe(2000);
+    expect(requests[1]!.scene.time - requests[0]!.scene.time).toBeCloseTo(2, 5);
+    // The session itself didn't move.
+    expect((await host.sim.values(simId, ["zoomed.on"])).frame).toBe(0);
+
+    // A layer target crops the scene; isolate draws only that layer's subtree.
+    await host.screenshot({ kind: "layer", layerId: "card" }, { simId });
+    expect(findNode(requests[2]!.scene.roots, "next_card")).toBeDefined();
+    const alone = await host.screenshot({ kind: "layer", layerId: "card" }, { simId, isolate: true });
+    const drawn = requests[3]!;
+    expect(drawn.scene.roots.map((n) => n.key)).toEqual(["card"]);
+    expect(findNode(drawn.scene.roots, "next_card")).toBeUndefined();
+    expect(findNode(drawn.scene.roots, "photo")).toBeDefined();
+    expect(drawn.scene.roots[0]!.transform).toEqual(drawn.scene.roots[0]!.worldTransform);
+    expect(drawn.crop).toEqual(requests[2]!.crop);
+    expect(alone.notes).toBeUndefined();
+
+    // Without simId the live viewer can't isolate a layer, so a fresh run is drawn and the result says so.
+    const preview = await host.screenshot({ kind: "layer", layerId: "next_card" }, { isolate: true });
+    expect(requests[4]!.scene.roots.map((n) => n.key)).toEqual(["next_card"]);
+    expect(preview.notes?.[0]).toContain("The live viewer can't draw one layer alone");
+    expect(w.captures).toEqual([]);
+    expect(await rejection(host.screenshot({ kind: "layer", layerId: "ghost" }, { isolate: true }))).toMatchObject({ code: "not_found" });
+  });
+
+  it("overrides values in a simulation without touching the editor", async () => {
+    const w = editorWindow(1);
+    const requests: SceneRenderRequest[] = [];
+    const host = appHost([w], {
+      renderScene: async (request) => {
+        requests.push(request);
+        return { data: "iVBORw0KGgo=", width: request.size.width, height: request.size.height };
+      },
+    });
+    const before = w.session.document.getState();
+    const { simId } = await host.sim.reset({});
+    const r = await host.sim.override(simId, {
+      set: [
+        { target: "@next_card.opacity", value: 0 },
+        { target: "@card.opacity", value: 0.25 },
+      ],
+    });
+    expect(r.overrides.map((o) => o.summary)).toEqual(["@next_card.opacity = 0 (was the default 1)", "@card.opacity = 0.25 (was the default 1)"]);
+    await host.screenshot({ kind: "viewer" }, { simId });
+    expect(findNode(requests[0]!.scene.roots, "next_card")?.opacity).toBe(0);
+    expect(findNode(requests[0]!.scene.roots, "card")?.opacity).toBe(0.25);
+
+    const after = w.session.document.getState();
+    expect([after.revision, after.canUndo, after.canRedo]).toEqual([before.revision, before.canUndo, before.canRedo]);
+    expect(after.doc).toBe(before.doc);
+    expect(await host.history.list({})).toEqual([]);
+
+    // The person's edit lands under the overrides.
+    await host.apply([{ op: "setInput", target: "photo_scale.end", value: 1.5 }], { label: "bigger zoom", author: CLAUDE });
+    const values = await host.sim.values(simId, ["@next_card.opacity", "photo_scale.end"]);
+    expect(values).toMatchObject({ documentUpdated: true, values: { "@next_card.opacity": 0 }, notes: { "@next_card.opacity": "overridden in this simulation, was the default 1" } });
+    expect((await host.sim.reset({ simId })).clearedOverrides).toHaveLength(2);
   });
 });
 

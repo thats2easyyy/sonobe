@@ -7,6 +7,9 @@
  * engine hit-tests them on, so a tap on a layer that appears partway through a batch is reported
  * truthfully. Traces that don't advance the session run on a clone replayed from the session's
  * own input log, so they get the same per-input reports.
+ *
+ * A session can carry sim_override overrides: value ops applied to its own copy of the document
+ * (overrides.ts), re-applied on every new revision. The document itself never changes.
  */
 
 import {
@@ -44,6 +47,7 @@ import {
   type SimHit,
   type SimHost,
   type SimIssue,
+  type SimOverride,
   type SimState,
   type SimStepResult,
   type SimTarget,
@@ -51,6 +55,14 @@ import {
   type SimValuesResult,
 } from "./host.ts";
 import { instancePathTo, resolveInstancePath, splitInstanceAddress } from "./instances.ts";
+import {
+  applyOverrides,
+  MAX_OVERRIDES,
+  overrideEntries,
+  overrideKeys,
+  overrideNote,
+  type OverrideEntry,
+} from "./overrides.ts";
 
 export interface SimulationManagerOptions {
   registry: EngineRegistry;
@@ -87,6 +99,12 @@ interface Session {
   pendingUpdate: boolean;
   reportedIssues: Set<string>;
   lastUsed: number;
+  /** sim_override changes, applied in order on top of the person's document. */
+  overrides: OverrideEntry[];
+  /** Overrides the person's newer document no longer accepts, not yet reported. */
+  dropped: { target: string; reason: string }[];
+  /** Override ids handed out ("ov_3" is the third). */
+  overrideCount: number;
 }
 
 /** A scheduled input that resolves its target and reports hits when it fires. */
@@ -312,18 +330,41 @@ export function createSimulationManager(options: SimulationManagerOptions): Simu
     return clone;
   };
 
-  /** Hot-swap the document when it changed since the session last looked, and lay it out without advancing time. */
-  const refresh = (session: Session): void => {
-    const current = options.getDocument(session.docId);
-    if (current.revision === session.revision) return;
-    session.runtime.updateDocument(current.doc);
-    pushLog(session, { kind: "update", doc: current.doc });
+  /**
+   * The document a session simulates: the person's, with the session's simulation-only changes on
+   * top. Re-derived on every person revision; overrides the new revision no longer accepts are
+   * dropped and reported once. (Knob overrides compose here too, under the ops:
+   * applyOverrides(withKnobOverride(personDoc, knobs), ops).)
+   */
+  const effectiveDoc = (
+    session: Pick<Session, "overrides" | "dropped">,
+    personDoc: SonobeDocument,
+  ): SonobeDocument => {
+    if (!session.overrides.length) return personDoc;
+    const r = applyOverrides(personDoc, session.overrides, options.registry);
+    session.overrides = r.kept;
+    for (const f of r.failed)
+      session.dropped.push({ target: f.entry.target, reason: f.error.message });
+    return r.doc;
+  };
+
+  /** Hot-swap `doc` into the session and lay it out without advancing time. */
+  const swap = (session: Session, doc: SonobeDocument): void => {
+    session.runtime.updateDocument(doc);
+    pushLog(session, { kind: "update", doc });
     if (typeof session.runtime.refreshScene === "function") {
       session.runtime.refreshScene();
       pushLog(session, { kind: "refresh" });
     } else {
       advance(session, []);
     }
+  };
+
+  /** Hot-swap the document when it changed since the session last looked, and lay it out without advancing time. */
+  const refresh = (session: Session): void => {
+    const current = options.getDocument(session.docId);
+    if (current.revision === session.revision) return;
+    swap(session, effectiveDoc(session, current.doc));
     session.revision = current.revision;
     session.pendingUpdate = true;
   };
@@ -345,19 +386,34 @@ export function createSimulationManager(options: SimulationManagerOptions): Simu
     return out;
   };
 
-  const baseState = (session: Session): SimState => ({
-    simId: session.simId,
-    docId: session.docId,
-    frame: Math.max(0, session.runtime.frame),
-    timeMs: Math.round(session.runtime.time * 100000) / 100,
-    fps: session.fps,
-    seed: session.seed,
-    issues: [],
+  const overrideInfo = (o: OverrideEntry): SimOverride => ({
+    id: o.id,
+    target: o.target,
+    component: o.component,
+    summary: o.summary,
   });
+
+  const baseState = (session: Session): SimState => {
+    const s: SimState = {
+      simId: session.simId,
+      docId: session.docId,
+      frame: Math.max(0, session.runtime.frame),
+      timeMs: Math.round(session.runtime.time * 100000) / 100,
+      fps: session.fps,
+      seed: session.seed,
+      issues: [],
+    };
+    if (session.overrides.length) s.overrides = session.overrides.map(overrideInfo);
+    return s;
+  };
 
   const state = (session: Session): SimState => {
     const s = baseState(session);
     s.issues = newIssues(session);
+    if (session.dropped.length) {
+      s.droppedOverrides = session.dropped;
+      session.dropped = [];
+    }
     if (session.pendingUpdate) {
       s.documentUpdated = true;
       session.pendingUpdate = false;
@@ -879,6 +935,13 @@ export function createSimulationManager(options: SimulationManagerOptions): Simu
     async reset(resetOptions) {
       const existing = resetOptions.simId !== undefined ? require(resetOptions.simId) : undefined;
       const current = options.getDocument(existing?.docId ?? resetOptions.docId);
+      const keep = resetOptions.keepOverrides === true;
+      const kept = {
+        overrides: keep && existing ? existing.overrides : [],
+        dropped: keep && existing ? existing.dropped : [],
+      };
+      const cleared = !keep && existing ? existing.overrides : [];
+      const doc = effectiveDoc(kept, current.doc);
       const seed = resetOptions.seed ?? existing?.seed ?? 1;
       const fps =
         resetOptions.fps ?? existing?.fps ?? ((current.doc.project.fps ?? 60) as 60 | 120);
@@ -890,7 +953,7 @@ export function createSimulationManager(options: SimulationManagerOptions): Simu
         fps,
         platform: {},
       };
-      const runtime = createRuntime(current.doc, runtimeOptions);
+      const runtime = createRuntime(doc, runtimeOptions);
       const simId = existing?.simId ?? `sim_${++counter}`;
       const session: Session = {
         simId,
@@ -900,13 +963,16 @@ export function createSimulationManager(options: SimulationManagerOptions): Simu
         fps,
         runtime,
         runtimeOptions,
-        baseDoc: current.doc,
+        baseDoc: doc,
         log: [],
         loggedSteps: 0,
         logTruncated: false,
         pendingUpdate: false,
         reportedIssues: new Set(),
         lastUsed: ++clock,
+        overrides: kept.overrides,
+        dropped: kept.dropped,
+        overrideCount: existing?.overrideCount ?? 0,
       };
       advance(session, []);
       sessions.set(simId, session);
@@ -915,7 +981,74 @@ export function createSimulationManager(options: SimulationManagerOptions): Simu
         oldest.runtime.dispose();
         sessions.delete(oldest.simId);
       }
-      return state(session);
+      const s = state(session);
+      if (cleared.length) s.clearedOverrides = cleared.map(overrideInfo);
+      return s;
+    },
+
+    async override(simId, request) {
+      const session = require(simId);
+      refresh(session);
+      const person = options.getDocument(session.docId).doc;
+      let next = [...session.overrides];
+      const cleared: OverrideEntry[] = [];
+      const clear = request.clear === "all" ? "all" : (request.clear ?? []);
+      if (clear === "all") {
+        cleared.push(...next);
+        next = [];
+      } else {
+        for (const ref of clear) {
+          const keys = overrideKeys(person, ref);
+          const hits = next.filter((o) => o.id === ref || o.target === ref || keys.includes(o.key));
+          if (!hits.length)
+            throw new HostError("not_overridden", `"${ref}" has no override in ${simId}.`, {
+              hint: next.length
+                ? `Its overrides: ${next.map((o) => `${o.id} ${o.target}`).join(", ")}. Or clear "all".`
+                : `${simId} has no overrides.`,
+            });
+          cleared.push(...hits);
+          next = next.filter((o) => !hits.includes(o));
+        }
+      }
+      let count = session.overrideCount;
+      let applied: OverrideEntry[] = [];
+      for (const entry of overrideEntries(person, request, options.registry)) {
+        const previous = next.find((o) => o.key === entry.key);
+        const full: OverrideEntry = { ...entry, id: previous?.id ?? `ov_${++count}` };
+        next = [...next.filter((o) => o.key !== entry.key), full];
+        applied = [...applied.filter((o) => o.key !== entry.key), full];
+      }
+      if (next.length > MAX_OVERRIDES)
+        throw new HostError(
+          "too_many_overrides",
+          `A simulation holds up to ${MAX_OVERRIDES} overrides; this would make ${next.length}.`,
+          { hint: 'Clear some first (clear: ["ov_1"], or "all").' },
+        );
+      // Check everything against the person's document before the session changes.
+      const derived = applyOverrides(person, next, options.registry);
+      const failure = derived.failed[0];
+      if (failure)
+        throw new HostError(
+          failure.error.code,
+          failure.error.message,
+          failure.error.hint ? { hint: failure.error.hint } : {},
+        );
+      session.overrides = next;
+      session.overrideCount = count;
+      let s: SimState;
+      if (request.restart) s = await manager.reset({ simId, keepOverrides: true });
+      else {
+        if (applied.length || cleared.length) swap(session, derived.doc);
+        s = state(session);
+      }
+      const live = sessions.get(simId) ?? session;
+      return {
+        ...s,
+        overrides: live.overrides.map(overrideInfo),
+        applied: applied.map(overrideInfo),
+        cleared: cleared.map(overrideInfo),
+        restarted: request.restart === true,
+      };
     },
 
     async dispatch(simId, events) {
@@ -1013,13 +1146,13 @@ export function createSimulationManager(options: SimulationManagerOptions): Simu
       const { planned, reports } = plan(docOf(session), session.fps, traceOptions.events ?? []);
       const frameMs = 1000 / session.fps;
       const frameCount = Math.floor(durationMs / frameMs + 1e-9);
+      const cursor = { next: 0 };
       /** Run the trace on `rt`, timing samples by frame count so a Restart Prototype can't make them run backwards. */
       const sample = (rt: SonobeRuntime, stepOnce: (batch: InputEvent[]) => void) => {
         const times: number[] = [];
         const raw: Record<string, unknown[]> = Object.fromEntries(
           targets.map((t) => [t, [] as unknown[]]),
         );
-        const cursor = { next: 0 };
         for (let i = 1; i <= frameCount; i++) {
           stepOnce(due(rt, planned, cursor, i * frameMs, i - 1));
           times.push(i / session.fps);
@@ -1029,8 +1162,17 @@ export function createSimulationManager(options: SimulationManagerOptions): Simu
       };
       let times: number[];
       let raw: Record<string, unknown[]>;
+      let framesAfterTrace = 0;
       if (traceOptions.advance) {
         ({ times, raw } = sample(session.runtime, (batch) => advance(session, batch)));
+        // Events can outlast the trace (a 900 ms drag in a 650 ms trace). The session keeps going until
+        // they finish, like sim_dispatch, so it isn't left with a finger down.
+        for (
+          let i = frameCount + 1;
+          cursor.next < planned.length && framesAfterTrace < MAX_FRAMES_PER_CALL;
+          i++, framesAfterTrace++
+        )
+          advance(session, due(session.runtime, planned, cursor, i * frameMs, i - 1));
       } else if (!session.logTruncated) {
         const clone = replay(session);
         try {
@@ -1061,6 +1203,7 @@ export function createSimulationManager(options: SimulationManagerOptions): Simu
         values: Object.fromEntries(targets.map((t) => [t, raw[t]!.map((v) => toJsonValue(v))])),
         summaries,
       };
+      if (framesAfterTrace) result.framesAfterTrace = framesAfterTrace;
       return result;
     },
 
@@ -1076,6 +1219,13 @@ export function createSimulationManager(options: SimulationManagerOptions): Simu
         ...state(session),
         values: Object.fromEntries(targets.map((t) => [t, read(session.runtime, t)])),
       };
+      const notes: Record<string, string> = {};
+      for (const target of session.overrides.length ? targets : []) {
+        const keys = overrideKeys(docOf(session), target);
+        const o = session.overrides.find((x) => keys.includes(x.key));
+        if (o) notes[target] = overrideNote(o, out.values[target]);
+      }
+      if (Object.keys(notes).length) out.notes = notes;
       return out;
     },
 
