@@ -57,6 +57,7 @@ export const IPC = {
   draftsRemove: "sonobe:drafts:remove",
   draftsList: "sonobe:drafts:list",
   draftsRead: "sonobe:drafts:read",
+  draftsRelease: "sonobe:drafts:release",
   draftsReveal: "sonobe:drafts:reveal",
   rpcRequest: "sonobe:rpc:request",
   rpcResponse: "sonobe:rpc:response",

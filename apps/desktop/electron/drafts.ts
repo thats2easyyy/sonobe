@@ -63,8 +63,8 @@ export interface DraftStore {
   list(): Promise<DraftInfo[]>;
   /** Claim a draft for `owner` and read every file in it. */
   read(owner: number, id: string): Promise<{ info: DraftInfo; manifest: Record<string, unknown>; files: Record<string, string>; binaries: Record<string, Uint8Array> }>;
-  /** A window closed, reloaded or crashed: its drafts become recoverable. */
-  release(owner: number): void;
+  /** A window closed, reloaded or crashed: its drafts become recoverable. With `id`, only that draft (one the editor couldn't open). */
+  release(owner: number, id?: string): void;
   /** Delete the drafts a window claims (it's closing after Save or Don't Save). */
   discard(owner: number): Promise<void>;
   /** At launch: delete drafts with nothing in them and drafts untouched for 90 days. Returns how many went. */
@@ -258,9 +258,16 @@ export function createDraftStore(options: DraftStoreOptions): DraftStore {
           if (!contents || contents.files["project.json"] === undefined) throw new DraftError("unknown_draft", `There's no draft "${id}".`);
           const manifest = await readManifest(id);
           const { [DRAFT_MANIFEST]: _manifestText, ...files } = contents.files;
+          const torn = !manifest || !(await intact(id, manifest, contents));
           // Without a manifest the first write was cut off; inspect names it from project.json.
-          const info = manifest ? infoOf(id, manifest, !(await intact(id, manifest, contents)), manifest) : (await inspect(id))!;
-          if (manifest) manifests.set(id, manifest);
+          const info = manifest ? infoOf(id, manifest, torn, manifest) : (await inspect(id))!;
+          if (manifest && !torn) manifests.set(id, manifest);
+          else {
+            // The next write lists the files really here, which the editor diffs against too, so one clean write makes it whole.
+            const found: Record<string, string> = {};
+            for (const [rel, data] of [...Object.entries(files), ...Object.entries(contents.binaries)]) found[rel] = sha256(data);
+            manifests.set(id, { ...(manifest ?? { formatVersion: 1, id, ...metaFrom({}), updatedAt: 0, appVersion: version }), files: found });
+          }
           return { info, manifest: (manifest ?? {}) as unknown as Record<string, unknown>, files, binaries: contents.binaries };
         } catch (err) {
           claims.delete(id);
@@ -269,9 +276,9 @@ export function createDraftStore(options: DraftStoreOptions): DraftStore {
       });
     },
 
-    release(owner) {
+    release(owner, only) {
       for (const [id, holder] of claims) {
-        if (holder !== owner) continue;
+        if (holder !== owner || (only !== undefined && id !== only)) continue;
         claims.delete(id);
         manifests.delete(id);
       }
@@ -335,6 +342,10 @@ export function registerDraftIpc(ipcMain: Pick<IpcMain, "handle">, store: DraftS
     } catch (err) {
       return failure(err);
     }
+  });
+  ipcMain.handle(IPC.draftsRelease, (event, id: unknown) => {
+    const w = owner(event);
+    if (typeof id === "string" && DRAFT_ID.test(id)) store.release(w, id);
   });
   ipcMain.handle(IPC.draftsReveal, (event, id: unknown) => {
     owner(event);

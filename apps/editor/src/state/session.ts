@@ -365,7 +365,7 @@ export function createEditorSession(options: EditorSessionOptions = {}): EditorS
         label: `Recovered “${info.name}”`,
       });
       selection.getState().setComponentPath([recovered.doc.project.root]);
-      // The project changed on disk after the draft was written: ask which version to keep.
+      // The project changed on disk since the files the draft started from: ask which version to keep.
       if (diskChanged) await document.getState().checkExternalChanges();
       if (info.torn) notes.push("It was cut off while being written, so its last few changes may be missing.");
       if (info.textOnly && Object.keys(recovered.doc.assets).length) notes.push("This browser kept only its text, so its images and other media are missing.");

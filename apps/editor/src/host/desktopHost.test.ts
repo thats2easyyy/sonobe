@@ -138,9 +138,57 @@ describe("desktop host", () => {
     await host.drafts!.write("draft-0001", renamed, { ...meta, revision: 3 });
     expect(draftWrites[1]!.changes).toEqual({ files: { "project.json": serializeDocument(renamed)["project.json"] }, deleted: [] });
 
+    // An outside change read while there are unsaved edits doesn't move the base, so restoring still notices it.
+    const base = draftWrites[0]!.meta.base;
+    const project = serializeDocument(saved);
+    api.readProject = vi.fn(async () => ({ files: { ...project, "project.json": project["project.json"]!.replace("Checkout", "Theirs") }, binaries: {} }));
+    await host.readProject("/p/Checkout.sonobe");
+    await host.drafts!.write("draft-0001", edited, { ...meta, revision: 4 });
+    expect(draftWrites[2]!.meta.base).toEqual(base);
+    // Saving moves it to what was saved.
+    await host.writeProject("/p/Checkout.sonobe", renamed);
+    await host.drafts!.write("draft-0001", edited, { ...meta, revision: 5 });
+    expect(draftWrites[3]!.meta.base).not.toEqual(base);
+    expect(Object.keys(draftWrites[3]!.meta.base as object).sort()).toEqual(["assets/assets.json", "components/main.json", "project.json"]);
+
     await expect(host.drafts!.remove("draft-0001")).rejects.toMatchObject({ code: "draft_in_use" });
     await expect(host.drafts!.open("draft-0002")).rejects.toMatchObject({ code: "unknown_draft", message: "There's no draft." });
     host.drafts!.reveal!("draft-0001");
     expect(api.drafts.reveal).toHaveBeenCalledWith("draft-0001");
+  });
+
+  it("gives back a draft it can't read, and keeps a restored draft's base", async () => {
+    const saved = createEmptyDocument({ name: "Checkout" });
+    const project = serializeDocument(saved);
+    const { api } = fakeApi({ "/p/Checkout.sonobe": { files: project } });
+    const info = { id: "draft-0001", name: "Checkout", projectPath: "/p/Checkout.sonobe", createdAt: 1, updatedAt: 2, revision: 3, counts: { components: 1, layers: 0, patches: 0 } };
+    const stored: Record<string, { files: Record<string, string>; manifest: Record<string, unknown> }> = {
+      "draft-0001": { files: serializeDocument(edit(saved)), manifest: { base: { "project.json": "then" } } },
+      "draft-0002": { files: { ...project, "project.json": project["project.json"]!.replace(/"formatVersion": \d+/, '"formatVersion": 999') }, manifest: {} },
+    };
+    const draftWrites: Record<string, unknown>[] = [];
+    api.drafts = {
+      write: vi.fn(async (_id, _changes, meta) => {
+        draftWrites.push(meta as unknown as Record<string, unknown>);
+        return { ok: true as const };
+      }),
+      remove: vi.fn(async () => ({ ok: true as const })),
+      list: vi.fn(async () => []),
+      read: vi.fn(async (id: string) => ({ ok: true as const, info: { ...info, id }, manifest: stored[id]!.manifest, files: stored[id]!.files, binaries: {} })),
+      release: vi.fn(async () => undefined),
+      reveal: vi.fn(),
+    };
+    const host = createDesktopHost(api);
+
+    await expect(host.drafts!.open("draft-0002")).rejects.toMatchObject({ code: "tooNew" });
+    expect(api.drafts.release).toHaveBeenCalledWith("draft-0002");
+
+    const recovered = await host.drafts!.open("draft-0001");
+    expect(api.drafts.release).toHaveBeenCalledTimes(1);
+    await host.readProject("/p/Checkout.sonobe");
+    expect(host.drafts!.diskChanged("/p/Checkout.sonobe", recovered)).toBe(true);
+    const meta = { name: "Checkout", projectPath: "/p/Checkout.sonobe", revision: 4, createdAt: 1, counts: info.counts, seenIds: { items: {}, components: [], knobs: [], presets: [] } };
+    await host.drafts!.write("draft-0001", recovered.doc, meta);
+    expect(draftWrites[0]!.base).toEqual({ "project.json": "then" });
   });
 });

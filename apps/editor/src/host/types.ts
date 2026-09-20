@@ -83,6 +83,8 @@ export interface DesktopDraftsApi {
   remove(id: string): Promise<DesktopDraftReply>;
   list(): Promise<DraftInfo[]>;
   read(id: string): Promise<DesktopDraftReply<{ info: DraftInfo; manifest: Record<string, unknown>; files: Record<string, string>; binaries: Record<string, ArrayBuffer> }>>;
+  /** Give back a draft read but not opened. Optional: older preloads lack it. */
+  release?(id: string): Promise<void>;
   reveal(id: string): void;
 }
 
@@ -152,7 +154,7 @@ export interface HostDrafts {
   list(): Promise<DraftInfo[]>;
   /** Claim a draft for this window and read it. */
   open(id: string): Promise<RecoveredDraft>;
-  /** Whether the project changed on disk since `draft` was written. Read the project first. */
+  /** Whether the project changed on disk since the files `draft` started from. Read the project first. */
   diskChanged(projectPath: string, draft: RecoveredDraft): boolean;
   /** Show the draft's folder (desktop). */
   reveal?(id: string): void;

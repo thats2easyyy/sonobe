@@ -322,6 +322,8 @@ export interface PasteOptions {
   patchOffset?: readonly [number, number];
   /** Ids that can't be used even though they're free (removed earlier this session). */
   isReserved?: (id: Id) => boolean;
+  /** Component ids that can't be given to an added definition even though they're free (removed earlier this session). */
+  isRetiredComponent?: (id: Id) => boolean;
   /** Fragment components to treat as unavailable, so their instances aren't pasted (applyPastePlan's fallback). */
   excludeComponents?: ReadonlySet<Id>;
 }
@@ -376,12 +378,14 @@ export function planPaste(doc: SonobeDocument, componentId: Id, fragment: Clipbo
   const embedded = fragment.components ?? {};
 
   // Components: reuse a component with the same id and kind; add the fragment's definition otherwise
-  // (under a new id when that id is taken by another kind, or by a name differing only by case).
+  // (under a new id when that id is taken by another kind, by a name differing only by case, or by a
+  // component removed earlier this session).
   const componentIds = new Map<Id, Id>();
   const unavailable = new Set<Id>();
   const kindOf = new Map<Id, ComponentKind>();
   const added = new Map<Id, Component>();
   const takenComponents = Object.keys(doc.components);
+  const componentTaken = (id: Id) => isFileNameTaken(takenComponents, id) || !!options.isRetiredComponent?.(id);
   const resolving = new Set<Id>();
   const resolveComponent = (id: Id): Id | undefined => {
     if (componentIds.has(id)) return componentIds.get(id);
@@ -404,7 +408,7 @@ export function planPaste(doc: SonobeDocument, componentId: Id, fragment: Clipbo
       unavailable.add(id);
       return undefined;
     }
-    const newId = isFileNameTaken(takenComponents, id) ? uniqueId(isValidId(id) ? id : slugify(id, "component"), (c) => isFileNameTaken(takenComponents, c)) : id;
+    const newId = componentTaken(id) ? uniqueId(isValidId(id) ? id : slugify(id, "component"), componentTaken) : id;
     takenComponents.push(newId);
     componentIds.set(id, newId);
     kindOf.set(newId, def.kind);

@@ -124,6 +124,48 @@ describe("restoring drafts", () => {
     expect(last.document.getState()).toMatchObject({ projectPath: null, dirty: true });
   });
 
+  it("still asks about an outside change the lost tab had noticed, and moves on after its own saves", async () => {
+    const storage = createMemoryProjectStorage();
+    const drafts = createMemoryProjectStorage();
+    const lost = tab(storage, drafts, null);
+    await lost.document.getState().saveTo("browser:Deck");
+    const saved = lost.document.getState().doc;
+    lost.document.getState().apply([addRect("Mine")], { label: "Add Mine" });
+    await lost.drafts!.flush();
+    // A teammate saves the project, and the tab notices while it has unsaved edits.
+    await storage.write("Deck", { files: serializeDocument({ ...saved, project: { ...saved.project, name: "Deck (theirs)" } }), deleted: [] });
+    await lost.document.getState().checkExternalChanges(["project.json"]);
+    expect(lost.document.getState().externalChange).toMatchObject({ path: "browser:Deck" });
+    // More edits reach the draft before the tab goes away.
+    lost.document.getState().apply([addRect("Mine 2")], { label: "Add Mine 2" });
+    await lost.drafts!.flush();
+
+    const next = tab(storage, drafts, null);
+    const [draft] = await next.recoverableDrafts();
+    await next.restoreDraft(draft!.id);
+    expect(next.document.getState().externalChange).toMatchObject({ path: "browser:Deck" });
+    expect(await next.document.getState().save()).toMatchObject({ ok: false, errorCode: "disk_changed" });
+
+    // A save while edits keep coming leaves the document dirty: its draft now starts from what was saved.
+    const busyStorage = createMemoryProjectStorage();
+    const busyDrafts = createMemoryProjectStorage();
+    const busy = tab(busyStorage, busyDrafts, null);
+    await busy.document.getState().saveTo("browser:Busy");
+    busy.document.getState().apply([addRect("Before")], { label: "Add Before" });
+    await busy.drafts!.flush();
+    const saving = busy.document.getState().save();
+    busy.document.getState().apply([addRect("During")], { label: "Add During" });
+    expect(await saving).toMatchObject({ ok: true });
+    expect(busy.document.getState().dirty).toBe(true);
+    await busy.drafts!.flush();
+
+    const after = tab(busyStorage, busyDrafts, null);
+    const [kept] = await after.recoverableDrafts();
+    await after.restoreDraft(kept!.id);
+    expect(after.document.getState()).toMatchObject({ externalChange: null, dirty: true });
+    expect(after.document.getState().doc.components.main!.layers.map((l) => l.name)).toEqual(["Before", "During"]);
+  });
+
   it("lets only one tab have a draft, and discards drafts on request", async () => {
     const storage = createMemoryProjectStorage();
     const drafts = createMemoryProjectStorage();
@@ -143,6 +185,24 @@ describe("restoring drafts", () => {
     await other.discardDraft(draft!.id);
     expect(await other.recoverableDrafts()).toEqual([]);
     expect(await drafts.list()).toEqual([]);
+  });
+
+  it("leaves a draft it can't read listed, for a newer Sonobe", async () => {
+    const storage = createMemoryProjectStorage();
+    const drafts = createMemoryProjectStorage();
+    const locks = sharedLocks();
+    const lost = tab(storage, drafts, locks);
+    lost.document.getState().apply([addRect("Card")], { label: "Add Card" });
+    await lost.drafts!.flush();
+    const id = lost.drafts!.current()!.id;
+    lost.host!.dispose();
+    const project = (await drafts.read(id))!.files["project.json"]!;
+    await drafts.write(id, { files: { "project.json": project.replace(/"formatVersion": \d+/, '"formatVersion": 999') }, deleted: [] });
+
+    const next = tab(storage, drafts, locks);
+    expect(await next.restoreDraft(id)).toMatchObject({ ok: false, errorCode: "tooNew" });
+    expect((await next.recoverableDrafts()).map((d) => d.id)).toEqual([id]);
+    expect((await tab(storage, drafts, locks).recoverableDrafts()).map((d) => d.id)).toEqual([id]);
   });
 
   it("notices a draft cut off mid-write and still restores what's there", async () => {
