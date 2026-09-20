@@ -20,7 +20,8 @@ function fakeHelper(name: string, body: string): string {
 
 const request = (name: string, extra: Partial<SymbolRequest> = {}): SymbolRequest => ({ name, size: 17, weight: "regular", scale: "medium", colors: ["#000000FF"], ...extra });
 
-describe("the sfsymbol helper client", () => {
+// The stand-ins run through their #! line, which Windows doesn't (the helper only exists on macOS anyway).
+describe.skipIf(process.platform === "win32")("the sfsymbol helper client", () => {
   it("sends one JSON line per request and returns the answers in order", async () => {
     const helper = fakeHelper(
       "ok",
