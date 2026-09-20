@@ -260,6 +260,18 @@ describe("knob links", () => {
     expect(r.doc.components.spring!.patches.pop!.inputs).toEqual({ number: { link: "$knob.commit_distance" } });
   });
 
+  it("carry through replacePatch when the new port takes the knob, and drop (undoably) when it doesn't", () => {
+    const doc = mustApply(emptyDoc(), [
+      distance,
+      { op: "addKnob", knob: { id: "on", name: "On", type: "boolean", value: true } },
+      { op: "addPatch", patch: { id: "pop", type: "popAnimation", inputs: { number: { link: "$knob.commit_distance" }, bounciness: { link: "$knob.on" } } } },
+    ]).doc;
+    const r = mustApply(doc, [{ op: "replacePatch", id: "pop", patch: { type: "transition" }, inputMap: { number: "progress" } }]);
+    expect(r.doc.components.main!.patches.pop!.inputs).toEqual({ progress: { link: "$knob.commit_distance" } });
+    expect(r.results[0]).toMatchObject({ dropped: [{ to: "pop.bounciness", value: { link: "$knob.on" } }] });
+    expectRoundTrip(doc, r);
+  });
+
   it("keep the Default preset a set started with through a first knob and its undo", () => {
     const doc = mustApply(emptyDoc(), [{ op: "addKnobPreset", preset: { ...DEFAULT_KNOB_PRESET } }]).doc;
     const r = mustApply(doc, [distance]);
