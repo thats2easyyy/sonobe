@@ -5,8 +5,21 @@
 
 import { parseAddress } from "./address.ts";
 import { componentDependencies, listComponentIds } from "./document.ts";
-import { DELAY_ONE_FRAME_TYPE, feedbackLoops, patchEdges, VARIABLE_RECEIVER_TYPE, type FeedbackEdge, type FeedbackLoop, type PatchEdge } from "./graph.ts";
+import { DELAY_ONE_FRAME_TYPE, feedbackLoops, patchEdges, VARIABLE_BROADCASTER_TYPE, VARIABLE_RECEIVER_TYPE, type FeedbackEdge, type FeedbackLoop, type PatchEdge } from "./graph.ts";
 import { getOwn, isValidId } from "./ids.ts";
+import {
+  checkKnobLiteral,
+  componentKnobReads,
+  formatKnobValue,
+  getKnobPreset,
+  hasKnobRange,
+  isKnobType,
+  knobLabel,
+  knobLiteral,
+  knobZeroLiteral,
+  planVariablesToKnobs,
+  uniqueKnobName,
+} from "./knobs.ts";
 import { loopShapes } from "./loopShapes.ts";
 import { describePatch, layerDisplayName, patchDisplayName } from "./names.ts";
 import { listInputs } from "./ops/references.ts";
@@ -25,10 +38,10 @@ import {
   type ResolvedPort,
 } from "./registry.ts";
 import { didYouMean, didYouMeanText } from "./suggest.ts";
-import type { Component, Diagnostic, Id, InputValue, LayerNode, PatchNode, PatchSpec, Registry, Severity, SonobeDocument, SonobeError, Suggestion, ValueType } from "./types.ts";
+import type { Component, Diagnostic, Id, InputValue, KnobSet, LayerNode, Op, PatchNode, PatchSpec, Registry, Severity, SonobeDocument, SonobeError, Suggestion, ValueType } from "./types.ts";
 import { fileNameCollisions } from "./serialize.ts";
 import { checkInputValue, checkLink, checkLiteral, insertPatchSuggestion, resolveSource, resolveTarget, type PortTarget, type ValidateOptions } from "./validate.ts";
-import { isAssetInput, isLayerInput, isLinkInput, isLoopLiteral } from "./values.ts";
+import { formatNumber, isAssetInput, isLayerInput, isLinkInput, isLiteral, isLoopLiteral, zeroLiteral } from "./values.ts";
 import { componentBroadcasters, followingReceivers, type VariableInfo } from "./variables.ts";
 
 export interface DiagnosticsOptions {
@@ -243,6 +256,8 @@ interface ComponentResult {
   refs: readonly Id[];
   /** `graph` holds a feedback loop, whose messages and fixes read patch positions. */
   hasFeedback: boolean;
+  /** Knob ids its links read: these inputs are checked again when knob ids, types or options change. */
+  knobReads: ReadonlySet<Id>;
   list?: readonly Diagnostic[];
 }
 
@@ -303,7 +318,7 @@ function checkComponent(doc: SonobeDocument, c: Component, registry: Registry): 
     patches.push({ head: head.list, inputs });
   }
   const graph = check.graph();
-  return { component: c, ids, layers, patches, graph, touch: check.touch(), copies: check.copies(), refs, hasFeedback: graph.some((d) => d.code === "feedback_loop") };
+  return { component: c, ids, layers, patches, graph, touch: check.touch(), copies: check.copies(), refs, hasFeedback: graph.some((d) => d.code === "feedback_loop"), knobReads: componentKnobReads(c) };
 }
 
 // ---------------------------------------------------------------------------
@@ -398,6 +413,7 @@ function updateComponent(doc: SonobeDocument, c: Component, prev: ComponentResul
   const check = componentChecker(doc, c, registry);
   const flags = { touch: false, copies: false };
   let moved = false;
+  let broadcasterEdited = false;
 
   const layers: ItemResult[] = [];
   let cursor = 0;
@@ -439,6 +455,8 @@ function updateComponent(doc: SonobeDocument, c: Component, prev: ComponentResul
     }
     if (!sameFields(node, b, PATCH_CONTENT_KEYS)) return null;
     if (node.ui !== b.ui && (node.ui?.x !== b.ui?.x || node.ui?.y !== b.ui?.y)) moved = true;
+    // A broadcaster's value decides whether it could be a knob (variables_could_be_knobs).
+    if (node.type === VARIABLE_BROADCASTER_TYPE && node.inputs !== b.inputs) broadcasterEdited = true;
     const spec = getPatchSpec(registry, node.type);
     if (node.inputs === b.inputs || !spec) {
       patches.push(r);
@@ -451,10 +469,10 @@ function updateComponent(doc: SonobeDocument, c: Component, prev: ComponentResul
   }
 
   // Feedback loop messages and fixes read patch positions; loops can't appear or vanish when patches only move.
-  const graph = moved && prev.hasFeedback ? check.graph() : prev.graph;
+  const graph = (moved && prev.hasFeedback) || broadcasterEdited ? check.graph() : prev.graph;
   const touch = flags.touch ? check.touch() : prev.touch;
   const copies = flags.copies ? check.copies() : prev.copies;
-  return { component: c, ids: prev.ids, layers, patches, graph, touch, copies, refs: prev.refs, hasFeedback: graph.some((d) => d.code === "feedback_loop") };
+  return { component: c, ids: prev.ids, layers, patches, graph, touch, copies, refs: prev.refs, hasFeedback: graph.some((d) => d.code === "feedback_loop"), knobReads: prev.knobReads };
 }
 
 function countLayerNodes(layers: readonly LayerNode[]): number {
@@ -538,6 +556,7 @@ function componentChecker(doc: SonobeDocument, c: Component, registry: Registry)
         if (code === "self_edge") code = "self_cycle";
         const source = parseAddress(value.link);
         if (source && (source.kind === "patch" || source.kind === "layer") && !itemIds.includes(source.id)) itemIds.push(source.id);
+        if (code === "unknown_knob" && source?.kind === "knob") suggestions.push(...missingKnobSuggestions(doc, c, target, source.key));
         suggestions.push({ description: "Disconnect it", ops: [{ op: "disconnect", component: c.id, to: target.address }] });
       } else {
         if (code === "not_found" && isLayerInput(value)) code = "missing_layer";
@@ -753,6 +772,18 @@ function componentChecker(doc: SonobeDocument, c: Component, registry: Registry)
     }
     if (followingReceivers(doc, registry, c.id, first.id).length === 0) {
       push(diag("info", "unused_variable", `Nothing reads the variable "${first.name}" yet.`, c.id, [first.id], { hint: "Add a Variable Receiver and choose this variable." }));
+    }
+  }
+  if (variables.size) {
+    const convertible = planVariablesToKnobs(doc, registry, { component: c.id }).knobs;
+    if (convertible.length) {
+      const n = convertible.length;
+      push(
+        diag("info", "variables_could_be_knobs", `${n === 1 ? "1 Variable Broadcaster shares a constant" : `${n} Variable Broadcasters share constants`} in ${c.name}. Knobs would let you tune ${n === 1 ? "it" : "them"} in one panel and compare presets.`, c.id, convertible.map((k) => k.from), {
+          hint: `Convert them with set_knobs({ "convertVariables": { "component": "${c.id}" } }), or Convert Variables to Knobs in the Knobs tab. Every input they drive reads the knob instead, and the broadcasters and receivers go.`,
+          suggestions: [{ description: `Convert ${n === 1 ? "it" : `the ${n} broadcasters`} to knobs: set_knobs({ "convertVariables": { "component": "${c.id}" } })` }],
+        }),
+      );
     }
   }
 
@@ -1036,6 +1067,126 @@ function unpublishSuggestion(c: Component, side: "inputs" | "outputs", key: stri
   return { description: `Unpublish "${name}" from ${c.name} (disconnects its cables)`, ops: [{ op: "updateInterface", component: c.id, [side]: { [key]: null } }] };
 }
 
+/** "commit_distance" → "Commit Distance". */
+const nameFromId = (id: Id) => id.replace(/_+/g, " ").trim().replace(/(^|\s)\S/g, (s) => s.toUpperCase()) || id;
+
+/** Fixes for a link to a knob that isn't there: read the knob it probably meant, or make it. */
+function missingKnobSuggestions(doc: SonobeDocument, c: Component, target: PortTarget, key: Id): Suggestion[] {
+  const out: Suggestion[] = [];
+  const knobs = doc.knobs?.knobs ?? [];
+  const [guess] = didYouMean(key, knobs.map((k) => ({ value: k.id, aliases: [k.name] })));
+  const match = guess === undefined ? undefined : knobs.find((k) => k.id === guess);
+  if (match) out.push({ description: `Read ${knobLabel(match)} instead`, ops: [{ op: "setInput", component: c.id, target: target.address, value: { link: `$knob.${match.id}` } }] });
+  const port = target.port;
+  if (port && isKnobType(port.type) && (port.type !== "enum" || (port.enumOptions?.length ?? 0) >= 2)) {
+    const knob: Extract<Op, { op: "addKnob" }> = { op: "addKnob", knob: { id: key, name: uniqueKnobName(knobs.map((k) => k.name), nameFromId(key)), type: port.type } };
+    const value = port.default === undefined || port.default === null ? zeroLiteral(port.type, port.enumOptions) : port.default;
+    if (isLiteral(value) && value !== null) knob.knob.value = value;
+    if (port.type === "enum") knob.knob.options = port.enumOptions!.map((o) => ({ key: o.key, name: o.name }));
+    out.push({ description: `Make the knob "${key}"`, ops: [knob] });
+  }
+  return out;
+}
+
+/** What reader diagnostics depend on in the knob table: ids, types and enum options, not values. */
+function knobDeclarations(set: KnobSet | undefined): string {
+  return set ? set.knobs.map((k) => `${k.id}:${k.type}:${k.options?.map((o) => o.key).join("|") ?? ""}`).join(",") : "";
+}
+
+/**
+ * The knob table's own diagnostics (they point at the root component, with `knob` and `preset`): bad
+ * or missing values, references to presets that don't exist, values outside a knob's range, and knobs
+ * nothing reads. `read` holds the ids some link reads.
+ */
+function knobDiagnostics(doc: SonobeDocument, read: ReadonlySet<Id>, out: Diagnostic[]): void {
+  const set = doc.knobs;
+  if (!set) return;
+  const root = doc.project.root;
+  const at = (d: Diagnostic, knob?: Id, preset?: Id): Diagnostic => {
+    if (knob !== undefined) d.knob = knob;
+    if (preset !== undefined) d.preset = preset;
+    return d;
+  };
+  const first = set.presets[0];
+  if (!getKnobPreset(set, set.active) && first) {
+    out.push(
+      at(
+        diag("warning", "unknown_knob_preset", `The running preset "${set.active}" doesn't exist, so the prototype runs ${first.name}.`, root, [], {
+          suggestions: [{ description: `Run ${first.name}`, ops: [{ op: "applyKnobPreset", id: first.id }] }],
+        }),
+        undefined,
+        set.active,
+      ),
+    );
+  }
+  for (const knob of set.knobs) {
+    for (const preset of Object.keys(knob.values)) {
+      if (getKnobPreset(set, preset)) continue;
+      out.push(at(diag("warning", "unknown_knob_preset", `Knob "${knob.name}" has a value for "${preset}", which isn't a preset, so nothing uses it.`, root, [], { hint: `Remove "${preset}" from its values in knobs.json, or add a preset with that id.` }), knob.id, preset));
+    }
+    for (const preset of set.presets) {
+      if (!Object.hasOwn(knob.values, preset.id)) {
+        const running = knobLiteral(set, knob, preset.id);
+        out.push(
+          at(
+            diag("warning", "knob_missing_value", `Knob "${knob.name}" has no value in ${preset.name}, so it runs ${formatKnobValue(knob, running)} there.`, root, [], {
+              suggestions: [{ description: `Set it to ${formatKnobValue(knob, running)} in ${preset.name}`, ops: [{ op: "setKnobValue", id: knob.id, preset: preset.id, value: running }] }],
+            }),
+            knob.id,
+            preset.id,
+          ),
+        );
+        continue;
+      }
+      const value = knob.values[preset.id]!;
+      const check = checkKnobLiteral(knob, value, `Knob "${knob.name}" in ${preset.name}`);
+      if (!check.ok) {
+        const fallback = first && first.id !== preset.id && checkKnobLiteral(knob, knob.values[first.id]).ok ? knob.values[first.id]! : knobZeroLiteral(knob);
+        out.push(
+          at(
+            diag("error", "invalid_knob_value", `${check.error.message}${check.error.hint ? ` ${check.error.hint}` : ""}`, root, [], {
+              suggestions: [{ description: `Set it to ${formatKnobValue(knob, fallback)}`, ops: [{ op: "setKnobValue", id: knob.id, preset: preset.id, value: fallback }] }],
+            }),
+            knob.id,
+            preset.id,
+          ),
+        );
+        continue;
+      }
+      if (!hasKnobRange(knob.type)) continue;
+      const numbers = typeof value === "number" ? [value] : Array.isArray(value) ? value : [];
+      const low = knob.min !== undefined ? numbers.find((n) => n < knob.min!) : undefined;
+      const high = knob.max !== undefined ? numbers.find((n) => n > knob.max!) : undefined;
+      if (low === undefined && high === undefined) continue;
+      const range = knob.min !== undefined && knob.max !== undefined ? `${formatNumber(knob.min)}–${formatNumber(knob.max)}` : knob.min !== undefined ? `from ${formatNumber(knob.min)}` : `up to ${formatNumber(knob.max!)}`;
+      const widen: Extract<Op, { op: "updateKnob" }> = { op: "updateKnob", id: knob.id };
+      if (low !== undefined) widen.min = low;
+      if (high !== undefined) widen.max = high;
+      out.push(
+        at(
+          diag("info", "knob_out_of_range", `${knob.name} is ${formatKnobValue(knob, value)} in ${preset.name}, ${high !== undefined ? "above" : "below"} its range ${range}.`, root, [], {
+            hint: "Ranges are soft: the value runs as typed, and the slider stops at the ends.",
+            suggestions: [{ description: "Widen the range", ops: [widen] }],
+          }),
+          knob.id,
+          preset.id,
+        ),
+      );
+    }
+    if (!read.has(knob.id)) {
+      out.push(
+        at(
+          diag("info", "unused_knob", `Knob "${knob.name}" isn't used by anything, so moving it changes nothing.`, root, [], {
+            hint: `Drive an input with it: { "link": "$knob.${knob.id}" }, or remove it.`,
+            suggestions: [{ description: `Remove "${knob.name}"`, ops: [{ op: "removeKnob", id: knob.id }] }],
+          }),
+          knob.id,
+        ),
+      );
+    }
+  }
+}
+
 function documentDiagnostics(doc: SonobeDocument, out: Diagnostic[], files: boolean): void {
   const root = getOwn(doc.components, doc.project.root);
   if (!root) out.push(diag("error", "missing_root", `The project's root component "${doc.project.root}" doesn't exist.`, doc.project.root, []));
@@ -1043,15 +1194,20 @@ function documentDiagnostics(doc: SonobeDocument, out: Diagnostic[], files: bool
   if (files) fileNameDiagnostics(doc, out);
 }
 
-/** Diagnose a whole document (or selected components). */
+/** Diagnose a whole document (or selected components; the knob table is checked only with the whole document). */
 export function getDiagnostics(doc: SonobeDocument, registry: Registry, options: DiagnosticsOptions = {}): Diagnostic[] {
   const out: Diagnostic[] = [];
   documentDiagnostics(doc, out, !options.components);
   const ids = options.components ?? listComponentIds(doc);
+  const read = new Set<Id>();
   for (const id of ids) {
     const c = getOwn(doc.components, id);
-    if (c) for (const d of resultList(checkComponent(doc, c, registry))) out.push(d);
+    if (!c) continue;
+    const result = checkComponent(doc, c, registry);
+    for (const d of resultList(result)) out.push(d);
+    for (const knob of result.knobReads) read.add(knob);
   }
+  if (!options.components) knobDiagnostics(doc, read, out);
   return out;
 }
 
@@ -1103,20 +1259,26 @@ export function createDiagnosticsCache(registry: Registry): DiagnosticsCache {
       return result;
     };
 
+    // A knob's id, type or options reach every input that reads it; values and the running preset don't.
+    const knobsChanged = previous !== null && doc.knobs !== previous.doc.knobs && knobDeclarations(doc.knobs) !== knobDeclarations(previous.doc.knobs);
+
     const out: Diagnostic[] = [];
     documentDiagnostics(doc, out, true);
+    const read = new Set<Id>();
     for (const id of ids) {
       const c = doc.components[id]!;
       const prev = reusable ? previous.results.get(id) : undefined;
       let result: ComponentResult | null = null;
-      if (prev && !reachesChanged(id, new Set())) {
+      if (prev && !reachesChanged(id, new Set()) && !(knobsChanged && prev.knobReads.size)) {
         if (!changed.has(id)) result = prev;
         else result = updateComponent(doc, c, prev, registry);
       }
       result ??= checkComponent(doc, c, registry);
       results.set(id, result);
       for (const d of resultList(result)) out.push(d);
+      for (const knob of result.knobReads) read.add(knob);
     }
+    knobDiagnostics(doc, read, out);
     last = { doc, results };
     return out;
   };

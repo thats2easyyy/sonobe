@@ -1,10 +1,10 @@
 /**
- * File format versioning (research: file-format-interop §5.7). Every project and
- * component file carries `formatVersion`; migrations are pure `vN → vN+1` functions
+ * File format versioning (research: file-format-interop §5.7). Every project, component and knobs
+ * file carries `formatVersion`, counted per file kind; migrations are pure `vN → vN+1` functions
  * run in sequence on load. Never delete a migration.
  */
 
-import { FORMAT_VERSION } from "./document.ts";
+import { COMPONENT_FORMAT_VERSION, KNOBS_FORMAT_VERSION, PROJECT_FORMAT_VERSION } from "./document.ts";
 import type { FormatIssue } from "./schema.ts";
 
 export type FormatErrorCode = "invalidFormat" | "tooNew" | "migrationFailed" | "corrupt";
@@ -24,7 +24,14 @@ export class ProjectFormatError extends Error {
   }
 }
 
-export type MigratedFileKind = "project" | "component";
+export type MigratedFileKind = "project" | "component" | "knobs";
+
+/** The newest format this build reads, per file kind. */
+export const CURRENT_FORMAT_VERSIONS: Readonly<Record<MigratedFileKind, number>> = {
+  project: PROJECT_FORMAT_VERSION,
+  component: COMPONENT_FORMAT_VERSION,
+  knobs: KNOBS_FORMAT_VERSION,
+};
 
 export interface Migration {
   kind: MigratedFileKind;
@@ -34,12 +41,15 @@ export interface Migration {
   migrate(json: Record<string, unknown>): Record<string, unknown>;
 }
 
-/** Registered migrations (format 1 is the first version, so none yet). */
-export const MIGRATIONS: readonly Migration[] = [];
+/** Registered migrations. */
+export const MIGRATIONS: readonly Migration[] = [
+  // Format 2 only adds knobs.json next to project.json; the manifest itself is unchanged.
+  { kind: "project", from: 1, description: "format 2 adds knobs.json", migrate: (json) => json },
+];
 
 export interface MigrateOptions {
   migrations?: readonly Migration[];
-  /** Version this reader understands (defaults to FORMAT_VERSION). */
+  /** Version this reader understands, for every file kind (defaults to CURRENT_FORMAT_VERSIONS). */
   currentVersion?: number;
   file?: string;
 }
@@ -49,8 +59,8 @@ export interface MigrateOptions {
  * the current version. Throws ProjectFormatError.
  */
 export function migrateFile(kind: MigratedFileKind, json: unknown, options: MigrateOptions = {}): Record<string, unknown> {
-  const file = options.file ?? (kind === "project" ? "project.json" : "component file");
-  const current = options.currentVersion ?? FORMAT_VERSION;
+  const file = options.file ?? (kind === "project" ? "project.json" : kind === "knobs" ? "knobs.json" : "component file");
+  const current = options.currentVersion ?? CURRENT_FORMAT_VERSIONS[kind];
   const migrations = options.migrations ?? MIGRATIONS;
   if (!json || typeof json !== "object" || Array.isArray(json)) {
     throw new ProjectFormatError("invalidFormat", `${file} isn't a Sonobe ${kind} file: expected a JSON object.`, { file });

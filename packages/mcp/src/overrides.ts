@@ -8,10 +8,16 @@
 
 import {
   applyOps,
+  checkKnobLiteral,
   didYouMean,
   didYouMeanText,
+  findKnob,
+  findKnobPreset,
   findLayer,
+  formatKnobValue,
+  getKnobPreset,
   isLinkInput,
+  knobLiteral,
   OP_KINDS,
   parseAddress,
   resolveLayerOutputs,
@@ -30,8 +36,16 @@ import { resolveInstancePath, splitInstanceAddress } from "./instances.ts";
 
 /** The ops sim_override takes, as its errors name them. */
 export const OVERRIDE_OPS =
-  "setInput, connect, disconnect, updateLayer { props }, updatePatch { muted }";
-const VALUE_OPS = ["setInput", "connect", "disconnect", "updateLayer", "updatePatch"] as const;
+  "setInput, connect, disconnect, updateLayer { props }, updatePatch { muted }, setKnobValue, applyKnobPreset";
+const VALUE_OPS = [
+  "setInput",
+  "connect",
+  "disconnect",
+  "updateLayer",
+  "updatePatch",
+  "setKnobValue",
+  "applyKnobPreset",
+] as const;
 
 /** Most overrides one simulation holds. */
 export const MAX_OVERRIDES = 50;
@@ -45,6 +59,11 @@ export interface OverrideEntry extends SimOverride {
   /** A number or boolean pinned by set or setInput, and what it was. */
   pinned?: { value: number | boolean; was: string };
   ops: Op[];
+  /**
+   * Apply the ops leniently, for a knob value in a locked preset: the lock guards the person's
+   * document, not a simulation. The value was checked when the override was made.
+   */
+  lenient?: boolean;
 }
 
 export type NewOverride = Omit<OverrideEntry, "id">;
@@ -58,30 +77,41 @@ export interface AppliedOverrides {
 }
 
 /**
- * Apply overrides in order on top of `doc` through the op engine. Entries that fail (the person
- * deleted the layer, a port went away) are left out and returned in `failed`.
+ * Apply overrides in order (knob preset switches first) on top of `doc` through the op engine.
+ * Entries that fail (the person deleted the layer, a port went away) are left out and returned in
+ * `failed`.
  */
 export function applyOverrides(
   doc: SonobeDocument,
   entries: readonly OverrideEntry[],
   registry: Registry,
 ): AppliedOverrides {
-  const kept: OverrideEntry[] = [];
   const failed: AppliedOverrides["failed"] = [];
-  for (const entry of entries) {
-    const r = applyOps(doc, entry.ops, { registry, defaultComponent: entry.component });
-    if (r.ok) {
-      doc = r.doc;
-      kept.push(entry);
-    } else {
+  // A preset switch applies first, so a knob value override without a preset tunes the preset the
+  // simulation ends up running.
+  const presetFirst = [
+    ...entries.filter(isPresetSwitch),
+    ...entries.filter((e) => !isPresetSwitch(e)),
+  ];
+  for (const entry of presetFirst) {
+    const r = applyOps(doc, entry.ops, {
+      registry,
+      defaultComponent: entry.component,
+      ...(entry.lenient ? { lenient: true } : {}),
+    });
+    if (r.ok) doc = r.doc;
+    else
       failed.push({
         entry,
         error: r.errors[0] ?? { code: "override_failed", message: "It no longer applies." },
       });
-    }
   }
+  const kept = entries.filter((e) => !failed.some((f) => f.entry === e));
   return { doc, kept, failed };
 }
+
+const isPresetSwitch = (entry: OverrideEntry) =>
+  entry.ops.length === 1 && entry.ops[0]!.op === "applyKnobPreset";
 
 const COPY = /#\d+/;
 const COPIES = /#\d+/g;
@@ -344,6 +374,73 @@ export function overrideEntries(
           summary: `${op.id} ${state} (${before})`,
           note: `"${op.id}" is ${state} in this simulation`,
           ops: [{ op: "updatePatch", component: c, id: op.id, muted: op.muted }],
+        });
+        break;
+      }
+      case "setKnobValue": {
+        const set = doc.knobs;
+        const knob = findKnob(set, String(op.id));
+        if (!knob.ok)
+          throw new HostError(
+            knob.error.code,
+            `ops[${i}]: ${knob.error.message}`,
+            knob.error.hint ? { hint: knob.error.hint } : {},
+          );
+        const preset = op.preset !== undefined ? findKnobPreset(set, op.preset) : undefined;
+        if (preset && !preset.ok)
+          throw new HostError(
+            preset.error.code,
+            `ops[${i}]: ${preset.error.message}`,
+            preset.error.hint ? { hint: preset.error.hint } : {},
+          );
+        const value = checkKnobLiteral(knob.value, op.value);
+        if (!value.ok)
+          throw new HostError(
+            value.error.code,
+            `ops[${i}]: ${value.error.message}`,
+            value.error.hint ? { hint: value.error.hint } : {},
+          );
+        const k = knob.value;
+        // Without a preset it tunes whichever preset the simulation runs (sim_reset may run another).
+        const presetId = preset?.ok ? preset.value.id : undefined;
+        const before = formatKnobValue(k, knobLiteral(set!, k, presetId));
+        const where =
+          presetId !== undefined ? ` in ${preset!.ok ? preset!.value.name : presetId}` : "";
+        out.push({
+          key: `${doc.project.root}|$knob.${k.id}${presetId !== undefined ? `|${presetId}` : ""}`,
+          target: `$knob.${k.id}`,
+          component: doc.project.root,
+          summary: `${k.name} = ${formatKnobValue(k, value.value)}${where} (was ${before})`,
+          note: `overridden in this simulation${where}, was ${before}`,
+          ops: [
+            {
+              op: "setKnobValue",
+              id: k.id,
+              value: value.value,
+              ...(presetId !== undefined ? { preset: presetId } : {}),
+            },
+          ],
+          lenient: true,
+        });
+        break;
+      }
+      case "applyKnobPreset": {
+        const set = doc.knobs;
+        const preset = findKnobPreset(set, String(op.id));
+        if (!preset.ok)
+          throw new HostError(
+            preset.error.code,
+            `ops[${i}]: ${preset.error.message}`,
+            preset.error.hint ? { hint: preset.error.hint } : {},
+          );
+        const was = getKnobPreset(set, set!.active)?.name ?? set!.active;
+        out.push({
+          key: `${doc.project.root}|knob-preset`,
+          target: `preset ${preset.value.name}`,
+          component: doc.project.root,
+          summary: `runs ${preset.value.name} (the person runs ${was})`,
+          note: `runs ${preset.value.name} in this simulation`,
+          ops: [{ op: "applyKnobPreset", id: preset.value.id }],
         });
         break;
       }

@@ -874,6 +874,8 @@ class RuntimeImpl implements SonobeRuntime {
     const slash = body.lastIndexOf("/");
     const parsed = parseAddress(at + body.slice(slash + 1));
     if (!parsed || parsed.kind === "componentOutput") return {};
+    // A knob is one project-wide value: "$knob.<id>", never inside an instance path.
+    if (parsed.kind === "knob") return slash < 0 ? { target: { parsed, scope: root, path: rootPath } } : {};
     let scope = root;
     let path = rootPath;
     if (slash >= 0) {
@@ -901,6 +903,7 @@ class RuntimeImpl implements SonobeRuntime {
   }
 
   private readTarget({ parsed, scope, path }: ResolvedTarget): Value | Loop | undefined {
+    if (parsed.kind === "knob") return this.graph.knobs.values.get(parsed.key);
     // A layer's Repeat reads as the copies it drew last frame, not the loop it counts.
     if (parsed.kind === "layer" && parsed.key === "repeat" && this.snapshot && scope.layerIndex.get(parsed.id)?.props.has("repeat")) {
       return this.snapshot.counts.get(path.layerPrefix + parsed.id) ?? 1;

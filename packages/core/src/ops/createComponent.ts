@@ -99,7 +99,9 @@ export function createComponent(ctx: OpContext, op: OpOf<"createComponent">): Op
   const inner = new Map<string, InputValue>();
   for (const e of entries) {
     if (!isInside(e.target)) continue;
-    const outside = (isLinkInput(e.value) && !isMovedSource(parseAddress(e.value.link))) || (isLayerInput(e.value) && !movedLayers.has(e.value.layer));
+    // Knobs are project-wide: a knob link reads the same knob inside the new component, so it isn't published.
+    const source = isLinkInput(e.value) ? parseAddress(e.value.link) : undefined;
+    const outside = (isLinkInput(e.value) && source?.kind !== "knob" && !isMovedSource(source)) || (isLayerInput(e.value) && !movedLayers.has(e.value.layer));
     if (!outside) continue;
     const address = targetAddress(e.target);
     const sourceKey = isLinkInput(e.value) ? e.value.link : `layer:${(e.value as { layer: Id }).layer}`;
