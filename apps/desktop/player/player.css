@@ -37,6 +37,18 @@ body {
   touch-action: none;
 }
 
+/* Never seen: the player reads the system's safe-area insets from its padding for Device Info. */
+#safe-area {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 0;
+  height: 0;
+  visibility: hidden;
+  pointer-events: none;
+  padding: env(safe-area-inset-top, 0px) env(safe-area-inset-right, 0px) env(safe-area-inset-bottom, 0px) env(safe-area-inset-left, 0px);
+}
+
 #status {
   position: fixed;
   left: 50%;

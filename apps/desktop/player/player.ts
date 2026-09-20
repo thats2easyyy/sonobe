@@ -3,14 +3,16 @@
  * prototype full-screen with the real engine and DOM renderer, and follows edits made in Sonobe over
  * a WebSocket: new revisions hot-swap into the running prototype, keeping patch state, and restarting
  * the prototype in Sonobe restarts it here too. platform.ts gives it the editor viewer's services
- * (sound, speech, network, links, media) plus haptics through a native host like Sonobe Viewer. A
- * three-finger tap opens the player's menu (gesture.ts, menu.ts).
+ * (sound, speech, network, links, media) plus haptics through a native host like Sonobe Viewer, and
+ * device.ts tells it about the phone (appearance, safe area, rotation). A three-finger tap opens the
+ * player's menu (gesture.ts, menu.ts).
  */
 
-import type { LayerRef, SonobeDocument } from "@sonobe/core";
+import { deviceScreenSize, type LayerRef, type SonobeDocument } from "@sonobe/core";
 import { createRuntime, type InputEvent, type SceneFrame, type SonobeRuntime } from "@sonobe/engine";
 import { createPatchRegistry } from "@sonobe/patches";
 import { clientToPrototype, createDomRenderer, createFontAssetRegistry, createLiveVideoOverlays, DomTextMeasurer, eventTime, type DomRenderer, type LiveVideoOverlays, type LottiePlayerLike } from "@sonobe/renderer";
+import { isMobileDevice, playerDevice, type Insets, type PlayerStage } from "./device.ts";
 import { createMenuGesture, type GestureDecision } from "./gesture.ts";
 import { createPlayerMenu, showTip, type PlayerMenuItem } from "./menu.ts";
 import { playerPlatform, readNativeHost } from "./platform.ts";
@@ -94,12 +96,49 @@ function layerElement(ref: LayerRef): HTMLElement | undefined {
 
 const platform = playerPlatform(window, { resolveAssetUrl, layerElement });
 
+// --- The device: what Device Info reads (device.ts) ------------------------------------------------
+
+const mobile = isMobileDevice(window, native !== null);
+/** Padded by env(safe-area-inset-*) in player.css, so its computed padding is the system's insets. */
+const safeAreaProbe = document.getElementById("safe-area");
+
+function systemInsets(): Insets {
+  if (!safeAreaProbe) return [0, 0, 0, 0];
+  const style = getComputedStyle(safeAreaProbe);
+  const px = (value: string) => {
+    const n = parseFloat(value);
+    return Number.isFinite(n) ? n : 0;
+  };
+  return [px(style.paddingTop), px(style.paddingRight), px(style.paddingBottom), px(style.paddingLeft)];
+}
+
+/** A prototype of `points` drawn to fit this window, centered (layout). */
+function stageFor(points: [number, number]): PlayerStage | null {
+  if (!points[0] || !points[1]) return null;
+  const viewport: [number, number] = [window.innerWidth, window.innerHeight];
+  return { viewport, size: points, scale: Math.min(viewport[0] / points[0], viewport[1] / points[1]) };
+}
+
+const deviceFor = (points: [number, number]) => playerDevice(window, { mobile, insets: systemInsets(), stage: stageFor(points) });
+let reportedDevice = "";
+
+/** Tell the running prototype what changed about the device: the phone turning, the appearance, the insets. */
+function syncDevice(): void {
+  if (!runtime || !size[0] || !size[1]) return;
+  const device = deviceFor(size);
+  const key = JSON.stringify(device);
+  if (key === reportedDevice) return;
+  reportedDevice = key;
+  runtime.setDevice(device);
+}
+
 function layout(): void {
-  if (!renderer || !size[0] || !size[1]) return;
-  const scale = Math.min(window.innerWidth / size[0], window.innerHeight / size[1]);
-  renderer.setScale(scale);
-  stageHost.style.width = `${size[0] * scale}px`;
-  stageHost.style.height = `${size[1] * scale}px`;
+  const stage = stageFor(size);
+  if (!renderer || !stage) return;
+  renderer.setScale(stage.scale);
+  stageHost.style.width = `${size[0] * stage.scale}px`;
+  stageHost.style.height = `${size[1] * stage.scale}px`;
+  syncDevice();
 }
 
 function run(): void {
@@ -149,7 +188,9 @@ function show(message: Extract<Message, { type: "document" }>): void {
     renderer?.dispose();
     platform.reset();
     stageHost.replaceChildren();
-    const next = createRuntime(message.doc, { registry, textMeasurer: measurer, resolveAssetUrl, platform });
+    const device = deviceFor(deviceScreenSize(message.doc.project.device));
+    reportedDevice = JSON.stringify(device);
+    const next = createRuntime(message.doc, { registry, textMeasurer: measurer, resolveAssetUrl, platform, device });
     runtime = next;
     renderer = createDomRenderer(stageHost, { resolveAssetUrl, textMeasurer: measurer, loadLottie, onEvents: (events) => next.dispatch(events) });
     liveVideos = createLiveVideoOverlays(renderer, platform);
@@ -284,5 +325,13 @@ function connect(): void {
 }
 
 window.addEventListener("resize", layout);
+// A turn resizes the window too, but its new insets can settle a little after that: look again.
+const turned = () => {
+  syncDevice();
+  setTimeout(syncDevice, 300);
+};
+screen.orientation?.addEventListener("change", turned);
+window.addEventListener("orientationchange", turned);
+window.matchMedia?.("(prefers-color-scheme: dark)").addEventListener?.("change", syncDevice);
 setStatus("Connecting to Sonobe…", "waiting");
 connect();
