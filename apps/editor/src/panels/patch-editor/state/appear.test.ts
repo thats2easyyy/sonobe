@@ -13,6 +13,9 @@ import {
   FADE_MS,
   LARGE_REVEAL,
   NODE_LEAD_MS,
+  NODE_MS,
+  PLACED_MS,
+  RING_LIMIT,
   WAVE_MS,
   WAVE_STEP_MS,
   waveDelays,
@@ -22,7 +25,7 @@ import {
 } from "./appear.ts";
 
 const node = (id: string, x: number, y = 0, type = "patch"): AppearNodeInput => ({ id, type, position: { x, y } });
-const cable = (source: string, target: string, from = `${source}.out`, invalid?: string): AppearEdgeInput => ({ id: `cable:${target}.in`, source, target, data: { from, ...(invalid ? { invalid } : {}) } });
+const cable = (source: string, target: string, from = `${source}.out`, invalid?: string): AppearEdgeInput => ({ id: `cable:${target}.in`, source, target, data: { from, to: `${target}.in`, ...(invalid ? { invalid } : {}) } });
 const human = { byHand: true };
 const claude = { byHand: false };
 
@@ -75,14 +78,20 @@ describe("batchDelays", () => {
 });
 
 describe("cableStart", () => {
-  it("starts CABLE_LAG_MS after the later appearing end, or now", () => {
+  it("leaves the output CABLE_LAG_MS into its node's appearance, and not before the input's node starts", () => {
     const early = { mode: "node" as const, start: 100, end: 700 };
-    const late = { mode: "node" as const, start: 250, end: 850 };
-    expect(cableStart([early, late], 50)).toBe(250 + CABLE_LAG_MS);
-    expect(cableStart([undefined, early], 50)).toBe(100 + CABLE_LAG_MS);
-    expect(cableStart([undefined, undefined], 50)).toBe(50);
+    const late = { mode: "node" as const, start: 400, end: 1000 };
+    expect(cableStart(early, { mode: "node", start: 140, end: 740 }, 50)).toBe(100 + CABLE_LAG_MS);
+    // An input much later in the wave holds the cable until it starts.
+    expect(cableStart(early, late, 50)).toBe(400);
+    // A backward cable waits for its output.
+    expect(cableStart(late, early, 50)).toBe(400 + CABLE_LAG_MS);
+    // Only one end arriving (a new node wired to one already shown).
+    expect(cableStart(undefined, early, 50)).toBe(100);
+    expect(cableStart(early, undefined, 50)).toBe(100 + CABLE_LAG_MS);
+    expect(cableStart(undefined, undefined, 50)).toBe(50);
     // An end that finished appearing doesn't hold the cable back.
-    expect(cableStart([{ mode: "node", start: 0, end: 40 }], 50)).toBe(50);
+    expect(cableStart({ mode: "node", start: 0, end: 40 }, undefined, 50)).toBe(50);
   });
 });
 
@@ -103,12 +112,11 @@ describe("the appear store", () => {
   });
 
   afterEach(() => {
-    store.dispose();
     vi.useRealTimers();
     document.body.innerHTML = "";
   });
 
-  it("waits for the viewport, then fades frames in first, waves nodes by x and draws cables after both ends", () => {
+  it("waits for the viewport, then fades frames in first, waves nodes by x and draws cables from their outputs", () => {
     store.sync([node("comment:c", -40, -40, "comment"), node("a", 0), node("b", 400), node("c", 800)], [cable("a", "b"), cable("b", "c")], human);
     expect(store.waiting()).toBe(true);
     expect(store.appearance("node", "a")).toBeUndefined();
@@ -123,8 +131,8 @@ describe("the appear store", () => {
     expect(b.start).toBeGreaterThan(a.start);
     expect(c.start).toBeGreaterThan(b.start);
     // The person's changes before the reveal still draw: the reveal is nobody's edit.
-    expect(store.appearance("cable", "cable:b.in")).toMatchObject({ mode: "draw", start: b.start + CABLE_LAG_MS, end: b.start + CABLE_LAG_MS + CABLE_MS });
-    expect(store.appearance("cable", "cable:c.in")!.start).toBe(c.start + CABLE_LAG_MS);
+    expect(store.appearance("cable", "cable:b.in")).toMatchObject({ mode: "draw", start: a.start + CABLE_LAG_MS, end: a.start + CABLE_LAG_MS + CABLE_MS });
+    expect(store.appearance("cable", "cable:c.in")!.start).toBe(b.start + CABLE_LAG_MS);
   });
 
   it("reveals only the nodes in view, and cables with an end in view", () => {
@@ -185,10 +193,69 @@ describe("the appear store", () => {
     expect(store.appearance("cable", "cable:c.in")).toMatchObject({ mode: "draw", start: clock });
     // A new node's cables draw even when the person added it: they come with the node.
     store.sync([node("a", 0), node("b", 300), node("c", 600), node("d", 900)], [cable("a", "b"), cable("b", "c"), cable("c", "d")], human);
-    expect(store.appearance("cable", "cable:d.in")!.start).toBe(store.appearance("node", "d")!.start + CABLE_LAG_MS);
+    expect(store.appearance("cable", "cable:d.in")!.start).toBe(store.appearance("node", "d")!.start);
+    store.sync([node("a", 0), node("b", 300), node("c", 600), node("d", 900), node("s", -300)], [cable("a", "b"), cable("b", "c"), cable("c", "d"), cable("s", "a")], human);
+    expect(store.appearance("cable", "cable:a.in")!.start).toBe(store.appearance("node", "s")!.start + CABLE_LAG_MS);
     // Invalid cables fade.
     store.sync([node("a", 0), node("b", 300), node("c", 600), node("d", 900), node("e", 1200)], [cable("a", "b"), cable("b", "c"), cable("c", "d"), cable("d", "e", "d.out", "These types don't connect.")], claude);
     expect(store.appearance("cable", "cable:e.in")!.mode).toBe("fade");
+  });
+
+  it("travels without the ring in a wave of more than RING_LIMIT nodes", () => {
+    store.sync(Array.from({ length: RING_LIMIT + 1 }, (_, i) => node(`n${i}`, i * 10)), [], human);
+    store.start();
+    expect(store.appearance("node", "n0")).toMatchObject({ mode: "slide" });
+    expect(store.appearance("node", "n0")!.end - store.appearance("node", "n0")!.start).toBe(NODE_MS);
+    advance(2000);
+    const batch = Array.from({ length: RING_LIMIT + 1 }, (_, i) => node(`m${i}`, i * 10, 900));
+    store.sync([...Array.from({ length: RING_LIMIT + 1 }, (_, i) => node(`n${i}`, i * 10)), ...batch], [], claude);
+    expect(store.appearance("node", "m0")).toMatchObject({ mode: "slide" });
+  });
+
+  it("only glows the ring on nodes the person placed, and shows their cables as they are", () => {
+    store.sync([node("a", 0), node("b", 300)], [cable("a", "b")], human);
+    store.start();
+    advance(2000);
+    // Option-drag: the copy b2 lands where the person dropped b, with b's input cable.
+    store.placed({ nodes: ["b2"] });
+    store.sync([node("a", 0), node("b", 300), node("b2", 300, 200)], [cable("a", "b"), cable("a", "b2")], human);
+    expect(store.appearance("node", "b2")).toMatchObject({ mode: "placed", start: clock, end: clock + ACCENT_MS });
+    expect(store.appearance("cable", "cable:b2.in")).toBeUndefined();
+    // The hint is used up: the next copy (⌘D) arrives as usual.
+    store.sync([node("a", 0), node("b", 300), node("b2", 300, 200), node("b3", 340, 240)], [cable("a", "b"), cable("a", "b2"), cable("a", "b3")], human);
+    expect(store.appearance("node", "b3")).toMatchObject({ mode: "node" });
+    expect(store.appearance("cable", "cable:b3.in")).toMatchObject({ mode: "draw" });
+  });
+
+  it("keeps the cable the person dragged into link search, and fades the picked node in without travel", () => {
+    store.sync([node("a", 0), node("c", 800)], [], human);
+    store.start();
+    advance(2000);
+    store.placed({ ports: ["a.out"] });
+    // The picked node b arrives at the cable's end; any other cable it brings still draws.
+    store.sync([node("a", 0), node("b", 400), node("c", 800)], [cable("a", "b"), cable("b", "c")], human);
+    expect(store.appearance("cable", "cable:b.in")).toBeUndefined();
+    expect(store.appearance("node", "b")).toMatchObject({ mode: "still" });
+    expect(store.appearance("cable", "cable:c.in")).toMatchObject({ mode: "draw" });
+    // An input the person dragged from works the same way.
+    store.placed({ ports: ["d.in"] });
+    store.sync([node("a", 0), node("b", 400), node("c", 800), node("z", -300), node("d", 1200)], [cable("a", "b"), cable("b", "c"), cable("z", "d")], human);
+    expect(store.appearance("cable", "cable:d.in")).toBeUndefined();
+    expect(store.appearance("node", "z")).toMatchObject({ mode: "still" });
+  });
+
+  it("forgets a placed hint no change used within PLACED_MS, and skips the ring with reduced motion", () => {
+    store.sync([node("a", 0)], [], human);
+    store.start();
+    advance(2000);
+    store.placed({ nodes: ["b"] });
+    advance(PLACED_MS + 1);
+    store.sync([node("a", 0), node("b", 300)], [], human);
+    expect(store.appearance("node", "b")).toMatchObject({ mode: "node" });
+    reduced = true;
+    store.placed({ nodes: ["c"] });
+    store.sync([node("a", 0), node("b", 300), node("c", 600)], [], human);
+    expect(store.appearance("node", "c")).toBeUndefined();
   });
 
   it("treats a cable into the same input from another output as new", () => {
@@ -266,6 +333,22 @@ describe("the appear store", () => {
       expect(a.style.getPropertyValue("--sb-appear-delay")).toBe("");
       expect(wrapper.hasAttribute("data-appear")).toBe(false);
       expect(wrapper.querySelector(".sb-pe-cable__wire")!.hasAttribute("pathLength")).toBe(false);
+    });
+
+    it("stops with the editor: no timer left, and nothing painted or appearing", () => {
+      const { canvas, nodes } = mountCanvas();
+      const a = nodeEl("a");
+      nodes.append(a);
+      const stop = store.observe(canvas);
+      store.sync([node("a", 0), node("b", 300)], [cable("a", "b")], human);
+      store.start();
+      expect(a.getAttribute("data-appear")).toBe("node");
+      expect(vi.getTimerCount()).toBe(1);
+      stop();
+      expect(vi.getTimerCount()).toBe(0);
+      expect(a.hasAttribute("data-appear")).toBe(false);
+      expect(store.busyFor()).toBe(0);
+      expect(store.appearance("cable", "cable:b.in")).toBeUndefined();
     });
 
     it("paints a wrapper mounted partway through with what's left, and nothing once it's over", async () => {
