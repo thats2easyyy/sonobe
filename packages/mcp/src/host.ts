@@ -222,6 +222,12 @@ export interface ScreenshotOptions {
    * (omitted: once start-up animations settle, up to 5 s).
    */
   atMs?: number;
+  /**
+   * Draw this component instead of what the person is looking at: "graph" is its patch graph,
+   * "canvas" its artboard at frame 0 with authored values, and "@layer" a layer inside it on that
+   * artboard. The app captures the editor when the person is viewing it, and otherwise draws it from
+   * the document (as headless servers always do). Not with "viewer", which plays the whole prototype.
+   */
   component?: Id;
   /**
    * With a layer target: draw only that layer and its children, where they are in the frame, without
@@ -244,6 +250,44 @@ export interface Screenshot {
   timeMs?: number;
   /** What the image approximates or leaves out (headless drawings), in plain words. */
   notes?: string[];
+}
+
+export interface RevealOptions {
+  docId?: Id;
+  /** The component the ids are in (default: the one the person is viewing, else the first that has them). */
+  component?: Id;
+  /** Take the person there: open the component, select the items, fit the view, raise the window. */
+  focus?: boolean;
+}
+
+export interface RevealResult {
+  revealed: boolean;
+  /** The component the items are in. */
+  component?: Id;
+  /** focus opened a component the person wasn't viewing. */
+  opened?: boolean;
+  /** Why nothing (or not everything) was revealed. */
+  reason?: string;
+}
+
+/** One node as the open patch editor draws it, in patch editor points. */
+export interface MeasuredNode {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  /** False: the editor hasn't rendered the node (it's off screen), so the size is its estimate. */
+  measured: boolean;
+}
+
+/** SonobeHost.graphGeometry: the nodes of one component's graph as the editor draws them. */
+export interface MeasuredGraph {
+  docId: Id;
+  component: Id;
+  /** The revision the nodes were drawn from. */
+  revision: number;
+  /** Graph node id (patch id, "@layerId", "$in", "$out") → its box. */
+  nodes: Record<string, MeasuredNode>;
 }
 
 /** The session behind an agent's call, when the transport knows it (the relay's sonobe-client id). */
@@ -659,10 +703,19 @@ export interface SonobeHost {
   getSelection(docId?: Id): Promise<Selection>;
   /** Throws HostError("screenshots_unavailable") when capabilities.screenshots is false. */
   screenshot(target: ScreenshotTarget, options: ScreenshotOptions): Promise<Screenshot>;
-  reveal(
-    ids: Id[],
-    options: { docId?: Id; focus?: boolean },
-  ): Promise<{ revealed: boolean; reason?: string }>;
+  /**
+   * Point the person at items of one component (default: the one they're viewing, else the one that
+   * has the items). With focus: open that component, select the items, fit the view to them and raise
+   * the window. Without focus nothing about their view or selection changes, and items in a component
+   * they aren't viewing come back revealed: false with a reason.
+   */
+  reveal(ids: Id[], options: RevealOptions): Promise<RevealResult>;
+  /**
+   * Optional: where the open patch editor draws the nodes of `component` and how big they are, or
+   * null when it shows another component (or none) or drew an older revision than the current one.
+   * MCP layout tools prefer these boxes to estimates (geometry.ts). Hosts without an editor leave it out.
+   */
+  graphGeometry?(options: { docId?: Id; component: Id }): Promise<MeasuredGraph | null>;
   /**
    * Optional: start the person's live prototype over from its first frame, as Restart Prototype (⌘R)
    * does; phones and the pop-out viewer showing it restart too. Hosts without a live viewer leave it

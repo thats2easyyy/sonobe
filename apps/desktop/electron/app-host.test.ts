@@ -26,6 +26,7 @@ import { createManualScheduler } from "../../editor/src/runtime/scheduler.ts";
 import { createDemoDocument } from "../../editor/src/state/demoDocument.ts";
 import { createEditorSession, type EditorSession } from "../../editor/src/state/session.ts";
 import { writeResult } from "../../../packages/mcp/src/tools/write.ts";
+import { estimateGraphGeometry, resolveGraphGeometry } from "../../../packages/mcp/src/geometry.ts";
 import { createAppHost, hostErrorFromRpc, sceneLayerBounds, type AppHost, type AppHostOptions, type DocumentChange, type RendererTarget, type SceneRenderRequest } from "./app-host.ts";
 import { startMcpServer, type McpServerHandle } from "./mcp-server.ts";
 import { createRpcClient, createRpcFailure, createRpcServer, type RpcServer } from "./rpc.ts";
@@ -437,11 +438,15 @@ describe("app host presence, selection and screenshots", () => {
   it("reveals items, reads the selection, and shows working badges", async () => {
     const w = editorWindow(1);
     const host = appHost([w]);
-    w.session.selection.getState().select({ layers: ["card"], patches: ["zoomed"] });
-    expect(await host.reveal(["card", "zoomed", "ghost"], { focus: true })).toEqual({ revealed: true, reason: "Not found: ghost." });
-    expect(w.focused).toBe(1);
+    w.session.selection.getState().select({ layers: ["card"] });
+    expect(await host.reveal(["card", "zoomed", "ghost"], {})).toEqual({ revealed: true, component: "main", reason: "Not found: ghost." });
+    expect(w.focused).toBe(0);
     // Revealing shows items without replacing the person's selection; getSelection reads it.
-    expect(await host.getSelection()).toEqual({ docId: "photo_zoom", component: "main", layers: ["card"], patches: ["zoomed"], comments: [] });
+    expect(await host.getSelection()).toEqual({ docId: "photo_zoom", component: "main", layers: ["card"], patches: [], comments: [] });
+    // Focus takes the person there: it selects what it reveals and raises the window.
+    expect(await host.reveal(["card", "zoomed"], { focus: true })).toEqual({ revealed: true, component: "main" });
+    expect(w.focused).toBe(1);
+    expect(await host.getSelection()).toMatchObject({ layers: ["card"], patches: ["zoomed"] });
     expect(await host.reveal(["ghost"], {})).toMatchObject({ revealed: false, reason: expect.stringContaining("ghost") });
 
     await host.setWorking({ ids: ["card"], intent: "Tuning the zoom spring" }, { author: CLAUDE });
@@ -452,6 +457,65 @@ describe("app host presence, selection and screenshots", () => {
     await host.setWorking(null, { author: CLAUDE });
     expect(w.session.presence.getState().working).toEqual([]);
     expect(await host.presence()).toEqual([]);
+  });
+
+  it("reveals inside a component the person isn't viewing only with focus", async () => {
+    const w = editorWindow(1);
+    const host = appHost([w]);
+    const made = await host.apply([...pressChain, { op: "createComponent", name: "Press Motion", ref: "motion", patchIds: ["next_pressed", "press_spring"] }], { label: "setup", author: CLAUDE });
+    expect(made.ok).toBe(true);
+    const motion = made.idMap.motion!;
+    // Without focus the person stays on Main, so the honest answer is "not revealed", with the way to do it.
+    expect(await host.reveal(["press_spring"], { component: motion })).toEqual({
+      revealed: false,
+      component: motion,
+      reason: "press_spring is inside Press Motion, and the person is viewing Main. Pass focus: true to open Press Motion for them.",
+    });
+    expect(w.session.selection.getState().componentPath).toEqual(["main"]);
+    expect(w.focused).toBe(0);
+    // With focus the editor opens the component (found without naming it), selects and reveals.
+    expect(await host.reveal(["press_spring"], { focus: true })).toEqual({ revealed: true, component: motion, opened: true });
+    expect(w.session.selection.getState()).toMatchObject({ componentPath: ["main", motion], patches: ["press_spring"] });
+    expect(w.focused).toBe(1);
+  });
+
+  it("reads the patch editor's measured node boxes for the component it shows, at the current revision", async () => {
+    const w = editorWindow(1);
+    const host = appHost([w]);
+    expect(await host.graphGeometry!({ component: "main" })).toBeNull();
+    const { revision } = await host.getDocument();
+    let shown = "main";
+    let drawnRevision = revision;
+    w.session.graphGeometry.register(({ component }) => ({
+      component: component ?? shown,
+      shownComponent: shown,
+      revision: drawnRevision,
+      nodes: [
+        ["zoomed", 40, 60, 212.4, 74, 1],
+        ["@card", 400, 20, 180, 96, 0],
+      ],
+    }));
+    expect(await host.graphGeometry!({ component: "main" })).toEqual({
+      docId: "photo_zoom",
+      component: "main",
+      revision,
+      nodes: { zoomed: { x: 40, y: 60, width: 212.4, height: 74, measured: true }, "@card": { x: 400, y: 20, width: 180, height: 96, measured: false } },
+    });
+    // Boxes of an older revision, or of another component, don't count.
+    drawnRevision = revision - 1;
+    expect(await host.graphGeometry!({ component: "main" })).toBeNull();
+    drawnRevision = revision;
+    shown = "other";
+    expect(await host.graphGeometry!({ component: "main" })).toBeNull();
+    shown = "main";
+
+    // Layout tools lay the measured sizes over their estimates, and editor positions for layer nodes.
+    const snap = await host.getDocument();
+    const estimate = estimateGraphGeometry(snap.doc, registry, "main");
+    const resolved = await resolveGraphGeometry(host, snap, "main");
+    expect(resolved.nodes.get("zoomed")).toEqual({ ...estimate.nodes.get("zoomed"), width: 213, height: 74 });
+    expect(resolved.nodes.get("@card")).toEqual({ ...estimate.nodes.get("@card"), x: 400, y: 20 });
+    expect([...resolved.measured]).toEqual(["zoomed"]);
   });
 
   it("keeps one working badge per session, so one session's finish doesn't clear another's", async () => {
@@ -676,6 +740,75 @@ describe("app host simulation screenshots", () => {
     const values = await host.sim.values(simId, ["@next_card.opacity", "photo_scale.end"]);
     expect(values).toMatchObject({ documentUpdated: true, values: { "@next_card.opacity": 0 }, notes: { "@next_card.opacity": "overridden in this simulation, was the default 1" } });
     expect((await host.sim.reset({ simId })).clearedOverrides).toHaveLength(2);
+  });
+});
+
+describe("app host component screenshots", () => {
+  /** A window with a patch component (Press Motion) and a layer component (Badge Button). */
+  async function withComponents(extra: Partial<AppHostOptions> = {}) {
+    const w = editorWindow(1);
+    const svgs: { svg: string; size: { width: number; height: number } }[] = [];
+    const scenes: SceneRenderRequest[] = [];
+    const host = appHost([w], {
+      renderSvg: async (request) => {
+        svgs.push(request);
+        return { data: "iVBORw0KGgo=", width: request.size.width, height: request.size.height };
+      },
+      renderScene: async (request) => {
+        scenes.push(request);
+        return { data: "iVBORw0KGgo=", width: request.size.width, height: request.size.height };
+      },
+      ...extra,
+    });
+    const made = await host.apply(
+      [
+        ...pressChain,
+        { op: "createComponent", name: "Press Motion", ref: "motion", patchIds: ["next_pressed", "press_spring"] },
+        { op: "addLayer", layer: { id: "badge", type: "rectangle", name: "Badge", props: { position: [40, 60], size: [120, 40] } } },
+        { op: "createComponent", name: "Badge Button", ref: "button", layerIds: ["badge"] },
+      ],
+      { label: "setup", author: CLAUDE },
+    );
+    expect(made.ok).toBe(true);
+    return { w, host, svgs, scenes, motion: made.idMap.motion!, button: made.idMap.button! };
+  }
+
+  it("captures the patch editor when the person is viewing the component, and draws it from the document otherwise", async () => {
+    const { w, host, svgs, motion } = await withComponents();
+    w.server.handle("graph.bounds", () => ({ x: 600, y: 60, width: 500, height: 300 }));
+    // Viewing Main: Press Motion's graph is drawn from the document, without moving the person.
+    const drawn = await host.screenshot({ kind: "graph" }, { component: motion, maxWidth: 500 });
+    expect(svgs).toHaveLength(1);
+    expect(svgs[0]!.svg).toContain('data-node="press_spring"');
+    expect(svgs[0]!.size.width).toBeLessThanOrEqual(500);
+    expect(drawn.notes).toEqual([expect.stringContaining("The patch editor isn't showing Press Motion")]);
+    expect(w.session.selection.getState().componentPath).toEqual(["main"]);
+    expect(w.captures).toEqual([]);
+    // Once the person is in it, the editor itself is captured.
+    await host.reveal(["press_spring"], { focus: true });
+    expect(await host.screenshot({ kind: "graph" }, { component: motion, maxWidth: 250 })).toMatchObject({ width: 250, height: 150 });
+    expect(w.captures).toHaveLength(1);
+    expect(svgs).toHaveLength(1);
+  });
+
+  it("draws a layer component's canvas and a layer inside it at frame 0", async () => {
+    const { host, scenes, button } = await withComponents();
+    const canvas = await host.screenshot({ kind: "canvas" }, { component: button, scale: 2 });
+    expect(canvas).toMatchObject({ width: 240, height: 80, notes: [expect.stringContaining("Badge Button on its own 120×40 artboard at frame 0")] });
+    expect(canvas.timeMs).toBeUndefined();
+    expect(scenes[0]).toMatchObject({ crop: { x: 0, y: 0, width: 120, height: 40 } });
+    expect(scenes[0]!.scene.size).toEqual([120, 40]);
+    const badge = await host.screenshot({ kind: "layer", layerId: "badge" }, { component: button });
+    expect(badge).toMatchObject({ width: 120, height: 40 });
+  });
+
+  it("draws the shown graph from the document when the patch editor panel is hidden, and teaches without a renderer", async () => {
+    const { host, svgs } = await withComponents();
+    const shot = await host.screenshot({ kind: "graph" }, {});
+    expect(svgs[0]!.svg).toContain('data-node="press_next"');
+    expect(shot.notes).toEqual([expect.stringContaining("The patch editor isn't showing Main")]);
+    const bare = await withComponents({ renderSvg: undefined as never });
+    expect(await rejection(bare.host.screenshot({ kind: "graph" }, { component: bare.motion }))).toMatchObject({ code: "target_unavailable", hint: expect.stringContaining("focus: true") });
   });
 });
 

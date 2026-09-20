@@ -177,6 +177,7 @@ Sonobe gives Claude 45 tools in seven groups: discovery, documents, reading, wri
 | "Tap the Save button and see what happens." | `sim_reset`, `sim_dispatch`, `sim_step`, `sim_get_values`, `get_screenshot` |
 | "How long does the sheet take to settle?" | `sim_trace` |
 | "Show me what's under the top card." | `sim_override`, `get_screenshot` |
+| "Check the Swipe Card graph, then show me where the throw happens." | `get_screenshot` with `component`, `reveal` with `focus` |
 | "Let me tune the throw, and compare it with the shipped app." | `set_knobs`, `get_knobs`, `sim_reset` with a `preset`, `apply_knob_preset` |
 | "Is anything broken?" | `get_diagnostics` |
 | "Start the prototype over." | `restart_viewer` |
@@ -185,7 +186,7 @@ Sonobe gives Claude 45 tools in seven groups: discovery, documents, reading, wri
 | "Bring back what we were working on before Sonobe quit." | `list_documents`, `open_document` with `ref: "draft:…"` |
 | "Undo what you just did." | `list_history`, `undo` |
 
-Before building, Claude reads a workflow guide with `get_guide` and looks up patch types with `describe_patch_types`, so it wires real ports with real defaults instead of guessing from memory. While it works, `begin_work`, `reveal` and `finish_work` show you what it's changing.
+Before building, Claude reads a workflow guide with `get_guide` and looks up patch types with `describe_patch_types`, so it wires real ports with real defaults instead of guessing from memory. While it works, `begin_work`, `reveal` and `finish_work` show you what it's changing. Claude can look inside a component without moving you there; it only opens one for you when it reveals something with focus.
 
 Claude can see your selection. Select a few patches in the editor and say "explain these," and it knows which ones you mean.
 

@@ -312,7 +312,8 @@ export type RpcHandler = (params: unknown) => unknown | Promise<unknown>;
  *   when the unsaved-changes prompt opens).
  * - The MCP bridge methods of apps/editor/src/host/rpcHandlers.ts (`document.info`, `document.apply`...).
  *   Optional: `canvas.bounds`, `graph.bounds` and `viewer.layerBounds({ layerId })` resolve a
- *   `{ x, y, width, height, scale? }` rect in viewport CSS pixels so screenshots can target them.
+ *   `{ x, y, width, height, scale? }` rect in viewport CSS pixels so screenshots can target them, and
+ *   `graph.geometry({ component })` lists the patch editor's node boxes (ARCHITECTURE §9.1).
  * - `viewer.showPhonePreview(status: PreviewStatus)`: show the editor's QR panel after Viewer →
  *   Preview on Phone starts the server. Without it the host shows a native dialog with a QR code.
  */

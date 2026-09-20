@@ -390,6 +390,27 @@ export interface SceneScreenshotRequest {
   simId?: string;
 }
 
+/** Rasterize a graph drawing (componentViews.ts drawComponentGraph) as a PNG screenshot. */
+export async function renderGraphScreenshot(
+  drawing: { svg: string; hasText: boolean },
+  notes: string[],
+): Promise<Screenshot> {
+  const image = await rasterizeSvg(drawing.svg, { hasText: drawing.hasText });
+  if (image.png.byteLength > MAX_SCREENSHOT_BYTES)
+    throw new HostError(
+      "image_too_large",
+      `The graph drawing is ${Math.round(image.png.byteLength / 1024)} KB at ${image.width}×${image.height}, over the ${Math.round(MAX_SCREENSHOT_BYTES / 1024)} KB limit.`,
+      { hint: "Pass a smaller maxWidth or scale." },
+    );
+  return {
+    data: Buffer.from(image.png).toString("base64"),
+    mimeType: "image/png",
+    width: image.width,
+    height: image.height,
+    notes,
+  };
+}
+
 /** Draw and rasterize a scene (or one layer's box) as a PNG screenshot. */
 export async function renderSceneScreenshot(request: SceneScreenshotRequest): Promise<Screenshot> {
   const { target } = request;

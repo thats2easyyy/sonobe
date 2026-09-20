@@ -1,8 +1,9 @@
 /**
- * Node boxes of a component's patch graph for tools that place or tidy nodes: the shared node size
- * model from @sonobe/core/graph (SF Pro / SF Mono metrics), with the live values a deterministic
- * runtime prints after one second, since live values widen nodes the way they do in the editor.
- * These are estimates; measured sizes from an open editor can refine them later.
+ * Node boxes of a component's patch graph for tools that place, tidy, list or draw nodes: the shared
+ * node size model from @sonobe/core/graph (SF Pro / SF Mono metrics), with the live values a
+ * deterministic runtime prints after one second, since live values widen nodes the way they do in
+ * the editor. When the app's patch editor shows the component at the same revision, the sizes it
+ * measured (and where it placed layer and interface nodes) replace the estimates.
  */
 
 import {
@@ -15,11 +16,13 @@ import {
 import {
   componentNodeBoxes,
   createElkGroupLayout,
+  flowNodeKind,
   type ElkLike,
   type GroupLayout,
   type Rect,
 } from "@sonobe/core/graph";
 import { createRuntime, type EngineRegistry } from "@sonobe/engine";
+import type { DocumentSnapshot, MeasuredGraph, SonobeHost } from "./host.ts";
 
 export interface GraphGeometry {
   component: Id;
@@ -27,8 +30,8 @@ export interface GraphGeometry {
   nodes: Map<string, Rect>;
   /** Comment id → its frame. */
   frames: Map<string, Rect>;
-  /** False: sizes are estimated from the document, not measured in the editor. */
-  measured: boolean;
+  /** Nodes whose size the open patch editor measured; every other size is estimated from the document. */
+  measured: ReadonlySet<string>;
 }
 
 const LIVE_FRAMES = 60;
@@ -37,7 +40,7 @@ const LIVE_FRAMES = 60;
  * Runs `fn` with the live values of the component after a second on its own (its root is the
  * component), or with none when it can't run headless.
  */
-function withLiveValues<T>(
+export function withLiveValues<T>(
   doc: SonobeDocument,
   registry: EngineRegistry,
   componentId: Id,
@@ -83,8 +86,74 @@ export function estimateGraphGeometry(
         { x: c.rect[0], y: c.rect[1], width: c.rect[2], height: c.rect[3] },
       ]),
     ),
-    measured: false,
+    measured: new Set(),
   };
+}
+
+/**
+ * Estimates by document and component. Hosts hand out one document object per revision, so this
+ * forgets old revisions on its own; running the prototype for live values is the costly part.
+ */
+const estimates = new WeakMap<SonobeDocument, Map<Id, GraphGeometry>>();
+
+/** estimateGraphGeometry, computed once per document object and component. */
+export function cachedGraphEstimate(doc: SonobeDocument, registry: EngineRegistry, componentId: Id): GraphGeometry {
+  let byComponent = estimates.get(doc);
+  if (!byComponent) estimates.set(doc, (byComponent = new Map()));
+  let geometry = byComponent.get(componentId);
+  if (!geometry) byComponent.set(componentId, (geometry = estimateGraphGeometry(doc, registry, componentId)));
+  return geometry;
+}
+
+/** Lay the editor's boxes over the estimate: the sizes it measured, and where it put layer and interface nodes. */
+export function overlayMeasured(estimate: GraphGeometry, drawn: MeasuredGraph): GraphGeometry {
+  const nodes = new Map(estimate.nodes);
+  const measured = new Set<string>();
+  for (const [id, box] of Object.entries(drawn.nodes)) {
+    const base = nodes.get(id);
+    if (!base) continue;
+    // Patches sit at their ui position; the editor places layer and interface nodes from what it measured.
+    const placed = flowNodeKind(id) !== "patch";
+    nodes.set(id, {
+      x: placed ? Math.round(box.x) : base.x,
+      y: placed ? Math.round(box.y) : base.y,
+      width: box.measured ? Math.ceil(box.width) : base.width,
+      height: box.measured ? Math.ceil(box.height) : base.height,
+    });
+    if (box.measured) measured.add(id);
+  }
+  return { ...estimate, nodes, measured };
+}
+
+/**
+ * A component's graph geometry at the snapshot's revision: estimated from the document (cached),
+ * refined by the open editor's measurements when the host has them for this component and revision.
+ */
+export async function resolveGraphGeometry(
+  host: SonobeHost,
+  snap: DocumentSnapshot,
+  componentId: Id,
+): Promise<GraphGeometry> {
+  const estimate = cachedGraphEstimate(snap.doc, host.registry, componentId);
+  if (!host.graphGeometry) return estimate;
+  let drawn: MeasuredGraph | null = null;
+  try {
+    drawn = await host.graphGeometry({ docId: snap.docId, component: componentId });
+  } catch {
+    // Measurements only refine the estimate, which stands on its own.
+  }
+  if (!drawn || drawn.component !== componentId || drawn.revision !== snap.revision) return estimate;
+  return overlayMeasured(estimate, drawn);
+}
+
+/** How the boxes were sized, as a line for tool results. */
+export function sizesNote(geometry: GraphGeometry): string {
+  const total = geometry.nodes.size;
+  const measured = geometry.measured.size;
+  if (total && measured >= total) return "Node sizes are as the patch editor measured them.";
+  if (measured)
+    return `Node sizes: ${measured} of ${total} as the patch editor measured them, the rest (off screen there) estimated.`;
+  return "Node sizes are estimated as the editor draws them (with live values after a second).";
 }
 
 let elk: Promise<ElkLike> | undefined;

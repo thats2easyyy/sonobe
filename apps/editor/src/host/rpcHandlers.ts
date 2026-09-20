@@ -1,7 +1,7 @@
 /**
  * RPC handlers the desktop MCP bridge calls to reach the live document: document info, read, apply
  * (with dry runs and optimistic concurrency), save, open, new; selection; viewer bounds and the
- * panels' registered bounds for screenshots; the live prototype's runtime diagnostics and restart;
+ * panels' registered bounds for screenshots; the patch editor's node geometry; the live prototype's runtime diagnostics and restart;
  * deterministic simulations; history; agent presence; and reveal. Errors are returned through
  * `rpc.fail(code, message, data)` because the context bridge strips Error properties.
  */
@@ -50,8 +50,8 @@ export const RPC_METHODS = [
 
 export type RpcMethod = (typeof RPC_METHODS)[number];
 
-/** Methods registered only while a panel provides them (see EditorSession.bounds). */
-export const OPTIONAL_RPC_METHODS: readonly BoundsMethod[] = BOUNDS_METHODS;
+/** Methods registered only while a panel provides them (see EditorSession.bounds and EditorSession.graphGeometry). */
+export const OPTIONAL_RPC_METHODS: readonly (BoundsMethod | "graph.geometry")[] = [...BOUNDS_METHODS, "graph.geometry"];
 
 export interface RpcHandlerOptions {
   /** Default: session.host.rpc. */
@@ -563,13 +563,17 @@ export function registerRpcHandlers(session: EditorSession, options: RpcHandlerO
       }
       const revealed = [...layers, ...patches, ...comments];
       // Without focus, panels scroll to and highlight the items, but the person's selection and place stay put.
+      const before = session.currentComponentId();
       if (focus && revealed.length) {
         const selection = session.selection.getState();
         if (currentComponentId(selection) !== componentId) selection.setComponentPath(componentPathTo(d, componentId));
         session.selection.getState().select({ layers, patches, comments });
       }
-      if (revealed.length) session.selection.getState().requestReveal(componentId, revealed);
-      return { component: componentId, componentPath: session.selection.getState().componentPath, revealed, missing, focused: focus && revealed.length > 0 };
+      const shown = session.currentComponentId();
+      // Panels only show the component the person is in; a reveal elsewhere (without focus) shows nothing, so it isn't sent.
+      const inView = shown === componentId;
+      if (revealed.length && inView) session.selection.getState().requestReveal(componentId, revealed);
+      return { component: componentId, componentPath: session.selection.getState().componentPath, revealed, missing, focused: focus && revealed.length > 0, shown, inView, opened: shown !== before };
     },
   };
 
@@ -606,11 +610,34 @@ export function registerRpcHandlers(session: EditorSession, options: RpcHandlerO
   syncBounds();
   const unsubscribeBounds = boundsRegistry?.subscribe(syncBounds);
 
+  // graph.geometry exists only while a patch editor is mounted to answer it.
+  const geometrySlot = session.graphGeometry as EditorSession["graphGeometry"] | undefined;
+  let geometryHandle: (() => void) | null = null;
+  const measureGeometry = wrap(async (p) => {
+    const component = optString(p, "component");
+    const reply = await geometrySlot?.get()?.(component !== undefined ? { component } : {});
+    if (!reply) throw new RpcProblem("target_unavailable", "The patch editor isn't showing a graph right now.", { hint: "Ask the person to show the Patch Editor, then try again." });
+    return reply;
+  });
+  const syncGeometry = () => {
+    const available = geometrySlot?.get() !== undefined;
+    if (available && !geometryHandle) geometryHandle = rpc.handle("graph.geometry", measureGeometry);
+    if (!available && geometryHandle) {
+      geometryHandle();
+      geometryHandle = null;
+    }
+  };
+  syncGeometry();
+  const unsubscribeGeometry = geometrySlot?.subscribe(syncGeometry);
+
   return () => {
     for (const off of unregister) off();
     unsubscribeBounds?.();
     for (const off of boundsHandles.values()) off();
     boundsHandles.clear();
+    unsubscribeGeometry?.();
+    geometryHandle?.();
+    geometryHandle = null;
     for (const sim of sims.values()) sim.dispose();
     sims.clear();
   };

@@ -11,9 +11,14 @@ import path from "node:path";
 import { applyOps, getDiagnostics, slugify, uniqueId, type Affected, type Author, type Diagnostic, type Id, type Op, type OpResult, type SonobeDocument, type SonobeError } from "@sonobe/core";
 import type { EngineRegistry, SceneFrame, SceneNode } from "@sonobe/engine";
 import {
+  cachedGraphEstimate,
+  canvasNotes,
   createSimulationManager,
   createTemplateDocument,
+  designScene,
   diagnosticTotals,
+  drawComponentGraph,
+  graphNotes,
   diffDiagnostics,
   HostError,
   isHostError,
@@ -88,6 +93,11 @@ export interface AppHostOptions {
    * SimulationManager has no `scene(simId)`), simulation screenshots explain that they're unavailable.
    */
   renderScene?(request: SceneRenderRequest): Promise<CapturedImage | null>;
+  /**
+   * Draw an SVG at `size` pixels (the hidden scene window), for get_screenshot of a patch graph the
+   * patch editor isn't showing. Without it, such screenshots explain how to open the graph instead.
+   */
+  renderSvg?(request: SvgRenderRequest): Promise<CapturedImage | null>;
   /** Render a URL or HTML page in a hidden browser window and capture it (import_design). */
   captureDesign?(request: DesignCaptureRequest, control?: HostCallControl): Promise<CapturedDesign>;
   /** Download an image for a capture made elsewhere (default: Node's fetch). */
@@ -111,6 +121,12 @@ export interface SceneRenderRequest {
   size: Size;
   /** Asset id → absolute path of its file in the project's assets folder (none for unsaved projects). */
   assets: Record<string, string>;
+}
+
+/** What renderSvg draws: a self-contained SVG document (a component's patch graph) and its size in pixels. */
+export interface SvgRenderRequest {
+  svg: string;
+  size: Size;
 }
 
 export interface DocumentChange {
@@ -576,6 +592,46 @@ export function createAppHost(options: AppHostOptions): AppHost {
     return shot;
   };
 
+  /**
+   * The component to draw from the document for a graph, canvas or layer screenshot, or null to
+   * capture the window: a named component the editor isn't showing in that panel (layers inside a
+   * component always come from its canvas at frame 0), or the shown component when its panel is hidden.
+   */
+  const offScreenComponent = async (entry: Entry, target: ScreenshotTarget, o: ScreenshotOptions): Promise<Id | null> => {
+    if (target.kind === "viewer") return null;
+    if (target.kind === "layer") return o.component ?? null;
+    const onScreen = entry.target.hasMethod(`${target.kind}.bounds`) === true;
+    if (onScreen && o.component === undefined) return null;
+    if (!onScreen && o.component === undefined && !(target.kind === "graph" ? options.renderSvg : options.renderScene)) return null;
+    const shown = await call<{ component?: unknown }>(entry.target, "selection.get").catch(() => null);
+    const current = typeof shown?.component === "string" ? shown.component : undefined;
+    if (o.component === undefined) return current ?? null;
+    return onScreen && current === o.component ? null : o.component;
+  };
+
+  /** get_screenshot of a component no editor panel shows: drawn from the document, as headless servers do. */
+  const documentScreenshot = async (target: ScreenshotTarget, entry: Entry, componentId: Id, o: ScreenshotOptions): Promise<Screenshot> => {
+    const doc = (await snapshot(entry)).doc;
+    const name = doc.components[componentId]?.name ?? componentId;
+    const size = { ...(o.scale !== undefined ? { scale: o.scale } : {}), ...(o.maxWidth !== undefined ? { maxWidth: o.maxWidth } : {}) };
+    if (target.kind === "graph") {
+      if (!options.renderSvg) {
+        throw new HostError("target_unavailable", `The patch editor isn't showing ${name}, and this build of Sonobe can't draw a graph off screen.`, { hint: "reveal with focus: true opens it for the person; then take the screenshot. To read the graph, use get_outline." });
+      }
+      const drawing = drawComponentGraph(doc, registry, componentId, cachedGraphEstimate(doc, registry, componentId), size);
+      const image = await options.renderSvg({ svg: drawing.svg, size: { width: drawing.width, height: drawing.height } });
+      if (!image) throw new HostError("capture_failed", `Sonobe couldn't draw ${name}'s graph.`, { hint: "Try again. To read the graph, use get_outline." });
+      return { data: image.data, mimeType: "image/png", width: image.width, height: image.height, notes: graphNotes(doc, componentId, drawing, true) };
+    }
+    if (!options.renderScene) {
+      throw new HostError("target_unavailable", `The canvas isn't showing ${name}, and this build of Sonobe can't draw it off screen.`, { hint: "reveal with focus: true opens it for the person; then take the screenshot." });
+    }
+    const shot = await drawScene(target.kind === "canvas" ? { kind: "viewer" } : target, designScene(doc, registry, componentId), entry, o, `on ${name}'s canvas`);
+    delete shot.timeMs;
+    shot.notes = [...canvasNotes(doc, componentId), ...(shot.notes ?? [])];
+    return shot;
+  };
+
   const conflictResult = (entry: Entry, expected: number, current: number, diagnostics: Diagnostic[], dryRun: boolean): HostApplyResult => ({
     ok: false,
     docId: entry.docId,
@@ -845,6 +901,8 @@ export function createAppHost(options: AppHostOptions): AppHost {
     async screenshot(target, o) {
       const entry = await resolve(o.docId);
       if (o.simId !== undefined) return simScreenshot(target, o.simId, o);
+      const offScreen = await offScreenComponent(entry, target, o);
+      if (offScreen !== null) return documentScreenshot(target, entry, offScreen, o);
       if (o.isolate && target.kind === "layer") return isolatedPreview(target, entry, o);
       const scale = o.scale ?? 1;
       let rect: Rect | null;
@@ -892,13 +950,37 @@ export function createAppHost(options: AppHostOptions): AppHost {
 
     async reveal(ids, o) {
       const entry = await resolve(o.docId);
-      const reply = await call<{ revealed?: unknown; missing?: unknown }>(entry.target, "reveal", { ids });
+      const reply = await call<{ component?: unknown; revealed?: unknown; missing?: unknown; shown?: unknown; inView?: unknown; opened?: unknown }>(entry.target, "reveal", { ids, ...(o.component !== undefined ? { component: o.component } : {}), ...(o.focus ? { focus: true } : {}) });
       const list = (v: unknown): Id[] => (Array.isArray(v) ? v.filter((id): id is Id => typeof id === "string") : []);
       const revealed = list(reply?.revealed);
       const missing = list(reply?.missing);
+      const component = typeof reply?.component === "string" ? reply.component : o.component;
+      const where = component !== undefined ? { component } : {};
+      if (!revealed.length) return { revealed: false, ...where, reason: `None of these are in ${component ?? "the document"}: ${missing.join(", ") || ids.join(", ")}.` };
+      // Editors before inView reveal in place; a reveal into a component the person isn't viewing shows nothing.
+      if (reply?.inView === false) {
+        const doc = (await snapshot(entry)).doc;
+        const name = (id: unknown) => (typeof id === "string" ? (doc.components[id]?.name ?? id) : "another component");
+        return { revealed: false, ...where, reason: `${revealed[0]} is inside ${name(component)}, and the person is viewing ${name(reply.shown)}. Pass focus: true to open ${name(component)} for them.` };
+      }
       if (o.focus) entry.target.focus();
-      if (!revealed.length) return { revealed: false, reason: `None of these are in the document: ${missing.join(", ") || ids.join(", ")}.` };
-      return missing.length ? { revealed: true, reason: `Not found: ${missing.join(", ")}.` } : { revealed: true };
+      const opened = reply?.opened === true ? { opened: true } : {};
+      return missing.length ? { revealed: true, ...where, ...opened, reason: `Not found: ${missing.join(", ")}.` } : { revealed: true, ...where, ...opened };
+    },
+
+    async graphGeometry(o) {
+      const entry = await resolve(o.docId);
+      if (entry.target.hasMethod("graph.geometry") !== true) return null;
+      const reply = await call<{ component?: unknown; shownComponent?: unknown; revision?: unknown; nodes?: unknown }>(entry.target, "graph.geometry", { component: o.component }).catch(() => null);
+      // Boxes only count for the component asked about, drawn from the revision the caller reads.
+      if (!reply || reply.shownComponent !== o.component || reply.revision !== entry.info.revision || !Array.isArray(reply.nodes)) return null;
+      const nodes: Record<string, { x: number; y: number; width: number; height: number; measured: boolean }> = {};
+      for (const row of reply.nodes) {
+        if (!Array.isArray(row) || typeof row[0] !== "string" || !row.slice(1, 5).every((n) => typeof n === "number" && Number.isFinite(n))) continue;
+        const [id, x, y, width, height, measured] = row as [string, number, number, number, number, unknown];
+        nodes[id] = { x, y, width, height, measured: measured === 1 };
+      }
+      return { docId: entry.docId, component: o.component, revision: entry.info.revision, nodes };
     },
 
     async restartViewer(o) {
