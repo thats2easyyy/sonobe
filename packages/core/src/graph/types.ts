@@ -46,8 +46,9 @@ export interface PortModel {
   /**
    * Inputs linked to a knob: a chip with the knob's name (and value) instead of a cable. A color
    * knob's chip shows its running color ("#RRGGBBAA") as a swatch instead of the value text.
+   * `valueReserve` is the most characters the value prints while the knob is tuned (knobValueReserve).
    */
-  knob?: { id: string; name: string; valueText?: string; color?: string };
+  knob?: { id: string; name: string; valueText?: string; valueReserve?: number; color?: string };
 }
 
 export interface NodeIssue {

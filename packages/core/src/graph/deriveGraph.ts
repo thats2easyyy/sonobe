@@ -14,6 +14,7 @@ import { findLayer, getPatchSpec, interfacePortToPort, resolveLayerOutputs, reso
 import type { Component, Diagnostic, Id, InputValue, LayerNode, PatchNode, Registry, SonobeDocument, Suggestion, ValueType } from "../types.ts";
 import { canConnect, defaultForPort, isLayerInput, isLinkInput, isLoopLiteral, normalizeColor } from "../values.ts";
 import { deepEqual } from "./equal.ts";
+import { knobValueReserve } from "./format.ts";
 import { createPlacementIndex, PLACEMENT_PADDING, type Rect } from "./geometry.ts";
 import { INPUTS_NODE_ID, layerNodeId, OUTPUTS_NODE_ID, readNodePositions } from "./graphNodes.ts";
 import { estimateNodeSize, type NodeTextMeasurer } from "./nodeSize.ts";
@@ -122,7 +123,8 @@ function knobChip(doc: SonobeDocument, link: string): PortModel["knob"] {
   if (!knob) return { id: a.key, name: a.key };
   const value = effectiveKnobLiteral(doc.knobs!, knob.id);
   const color = knob.type === "color" && typeof value === "string" ? normalizeColor(value) : undefined;
-  return { id: knob.id, name: knob.name, ...(value !== undefined && value !== null ? { valueText: formatKnobValue(knob, value) } : {}), ...(color ? { color } : {}) };
+  const reserve = knobValueReserve(knob);
+  return { id: knob.id, name: knob.name, ...(value !== undefined && value !== null ? { valueText: formatKnobValue(knob, value), ...(reserve ? { valueReserve: reserve } : {}) } : {}), ...(color ? { color } : {}) };
 }
 
 function toPortModel(port: ResolvedPort, side: PortSide, address: string, connected: boolean, defaultOverride?: unknown): PortModel {

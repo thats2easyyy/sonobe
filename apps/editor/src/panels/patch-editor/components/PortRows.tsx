@@ -2,9 +2,9 @@
 
 import { canConnect } from "@sonobe/core";
 import { Handle, Position, useUpdateNodeInternals } from "@xyflow/react";
-import { memo, useEffect, useLayoutEffect, useRef, useState, type MouseEvent, type PointerEvent } from "react";
+import { memo, useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type MouseEvent, type PointerEvent } from "react";
 import { PortGlyph } from "../../../ui/PortGlyph.tsx";
-import { formatValue, isLoopValue, isTruthyState, pickCopy } from "@sonobe/core/graph";
+import { isLoopValue, isTruthyState, liveReserve, liveText, pickCopy } from "@sonobe/core/graph";
 import { HEADER_HEIGHT } from "../model/geometry.ts";
 import { layerIdOfNode, type PortModel } from "../model/types.ts";
 import { usePatchEditor, useLiveValue, usePulseCount, useUi } from "../state/context.ts";
@@ -157,10 +157,16 @@ const OutputPort = memo(function OutputPort({ nodeId, port }: { nodeId: string; 
     const label = `${session.document.getState().doc.components[componentId]?.patches[nodeId]?.name ?? nodeId} · ${port.name}`;
     ui.getState().set({ armed: armed ? null : { nodeId, handleId: port.handleId, address: port.address, type: port.type, label } });
   };
-  const text = live === undefined || port.type === "pulse" ? "" : formatValue(live, port.type, { maxText: 10, copy, ...(port.enumOptions ? { enumOptions: port.enumOptions } : {}) });
+  const text = liveText(port, live, copy);
+  // The slot keeps the width of the longest value it can print, so the node holds still while the value changes.
+  const reserve = text ? liveReserve(port, live, copy) : 0;
   return (
     <div className="sb-pe-port sb-pe-port--out" data-connected={port.connected || undefined} data-live={truthy || undefined} data-armed={armed || undefined} onClick={onClick} onContextMenu={onContextMenu} {...hover}>
-      {text && <span className="sb-pe-port__live sb-tabular">{text}</span>}
+      {text && (
+        <span className="sb-pe-port__live sb-tabular" style={reserve ? ({ "--sb-pe-live-reserve": `${reserve}ch` } as CSSProperties) : undefined}>
+          {text}
+        </span>
+      )}
       <span className="sb-pe-port__label">{port.name}</span>
       <Handle type="source" position={Position.Right} id={port.handleId} className="sb-pe-handle sb-pe-handle--out" aria-label={`${port.name} output`}>
         <PortGlyph type={port.type} connected={port.connected || armed} live={truthy} size={9} />
