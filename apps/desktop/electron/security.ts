@@ -49,6 +49,15 @@ export function isAppUrl(raw: string, content: AppContent): boolean {
   }
 }
 
+/**
+ * Where a subframe of an editor window may navigate: only inline documents (the canvas's design
+ * preview is a srcdoc frame). A sandboxed frame with scripts can still navigate itself, so anything
+ * else is refused.
+ */
+export function isAllowedSubframeUrl(raw: string): boolean {
+  return raw === "about:srcdoc" || raw === "about:blank" || raw.startsWith("about:blank#");
+}
+
 /** Permissions the renderer may request from Chromium. Everything else is denied. */
 export const ALLOWED_PERMISSIONS: ReadonlySet<string> = new Set([
   "clipboard-sanitized-write",
