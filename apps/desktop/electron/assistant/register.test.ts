@@ -7,7 +7,7 @@ import { createPatchRegistry } from "@sonobe/patches";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { buildHandoffScript, handoffMcpConfig, type HandoffOptions } from "../claude-handoff.ts";
 import { createSecretStore, createTestCipher, type SecretStore } from "../secrets.ts";
-import type { SubscriptionAgent } from "./acp/engine.ts";
+import type { SubscriptionAgent, SubscriptionAgentOptions } from "./acp/engine.ts";
 import { resolveLimits } from "./agent.ts";
 import { CODE_TOOL_NAMES, CodeFolderError, type CodeFolderKey, type CodeFolderStore } from "./codeFolder.ts";
 import { createConnectionStore } from "./connection.ts";
@@ -615,7 +615,7 @@ describe("the Claude subscription (experimental)", () => {
     const { invoke, sub, api, logs } = withSubscription([{ content: [{ type: "text", text: "On your key." }] }], { connection: createConnectionStore({ file }) }, { available: false });
     const window = fakeSender(1);
     expect((await invoke<AssistantStatus>(window, ASSISTANT_IPC.status)).connection).toEqual({ available: false, subscriptionEnabled: false, provider: "subscription", active: "api_key" });
-    expect(logs).toContain("Assistant ready (your Anthropic API key; Claude subscription: not in this build)");
+    expect(logs).toContain("Assistant ready (your Anthropic API key; Claude subscription: not offered in a packaged build)");
     expect((await invoke<AssistantStatus>(window, ASSISTANT_IPC.setConnection, on)).connection).toEqual({ available: false, subscriptionEnabled: false, provider: "subscription", active: "api_key" });
     await store.set(ASSISTANT_KEY_SECRET, KEY);
     expect(await invoke<AssistantRunResult>(window, ASSISTANT_IPC.send, { text: "hello" })).toMatchObject({ outcome: "completed" });
@@ -659,6 +659,41 @@ describe("the Claude subscription (experimental)", () => {
     } finally {
       await registration.dispose();
       await host.close();
+    }
+  });
+
+  it("hands the subscription's engine each window's own document, and the readers it needs", async () => {
+    let engineOptions: SubscriptionAgentOptions | null = null;
+    const sub = fakeSubscription();
+    const shows: Record<number, { docId: string; projectPath: string | null }> = { 1: { docId: "noddit", projectPath: "/Users/test/Noddit.sonobe" }, 2: { docId: "untitled", projectPath: null } };
+    const folders = fakeFolderStore();
+    await folders.link({ projectPath: "/Users/test/Noddit.sonobe", windowId: "1" }, "/Users/test/code/noddit");
+    const { registration } = setup([], {
+      register: {
+        documentFor: async (id) => shows[id] ?? null,
+        codeFolders: folders,
+        createCodeTools: fakeCodeTools,
+        subscription: {
+          sessionsDir: path.join(dir, "assistant", "claude"),
+          createAgent: (options) => {
+            engineOptions = options;
+            return sub.engine;
+          },
+        },
+      },
+    });
+    try {
+      const options = engineOptions!;
+      // Pinning each chat's tool calls to its own window's document hangs on this.
+      expect(await options.documentFor?.("1")).toEqual(shows[1]);
+      expect(await options.documentFor?.("2")).toEqual(shows[2]);
+      expect(await options.documentFor?.("3")).toBeNull();
+      expect(typeof options.readDocument).toBe("function");
+      expect(await options.codeFolderName?.("1")).toBe("noddit");
+      expect(await options.codeFolderName?.("2")).toBeNull();
+      expect(options.localTools?.infos.map((t) => t.name)).toEqual(CODE_TOOL_NAMES);
+    } finally {
+      await registration.dispose();
     }
   });
 

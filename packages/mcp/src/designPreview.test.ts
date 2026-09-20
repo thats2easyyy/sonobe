@@ -6,7 +6,7 @@
 
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/server";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { DRAFT_IDLE_MS } from "./designPreviews.ts";
 import type { HeadlessHost } from "./headless.ts";
 import { HostError, type CapturedDesign, type DesignCaptureRequest, type DesignPreviewUpdate } from "./host.ts";
@@ -65,9 +65,13 @@ function withCanvas(host: HeadlessHost): HeadlessHost {
   return wrapped;
 }
 
-/** A client of its own server over `host`, as one session: a relay client id, or none. */
-async function session(host: HeadlessHost, clientId?: string): Promise<TestClient> {
-  const server = createSonobeMcpServer(host, { version: "0.1.0-test", now: () => clock }, clientId ? { callScope: () => ({ clientId }) } : {});
+/** A client of its own server over `host`, as one session: a relay client id, or none, and the signal a call gets when `signal` gives one. */
+async function session(host: HeadlessHost, clientId?: string, signal?: () => AbortSignal | undefined): Promise<TestClient> {
+  const callScope = () => {
+    const aborts = signal?.();
+    return { ...(clientId ? { clientId } : {}), ...(aborts ? { signal: aborts } : {}) };
+  };
+  const server = createSonobeMcpServer(host, { version: "0.1.0-test", now: () => clock }, clientId || signal ? { callScope } : {});
   const [clientSide, serverSide] = InMemoryTransport.createLinkedPair();
   await server.connect(serverSide);
   const client = new Client({ name: "claude-code", version: "2.1.278" });
@@ -249,6 +253,29 @@ describe("preview_design", () => {
       [NODDIT, 1, "<body>checkout"],
       [NODDIT, 2, "<body>checkout</body>"],
     ]);
+  });
+
+  it("never draws a call cancelled while it waited for its turn, and leaves the draft as it was", async () => {
+    // The Assistant's Stop cancels a call that may still be waiting behind the one before it.
+    const stop = new AbortController();
+    // The calls' signals, in order: the second is the one Stop cancels.
+    const signals: (AbortSignal | undefined)[] = [undefined, stop.signal];
+    const noddit = await session(withCanvas(project.host), NODDIT, () => signals.shift());
+    let release!: () => void;
+    slowFor = { key: NODDIT, until: new Promise<void>((resolve) => (release = resolve)) };
+    const slow = noddit.call("preview_design", { name: "Checkout", html: "<body>checkout" });
+    const late = noddit.call("preview_design", { append: "<main>late</main>" });
+    await vi.waitFor(() => expect(signals).toHaveLength(0));
+    stop.abort();
+    release();
+    const [first, cancelled] = await Promise.all([slow, late]);
+    expect(first.isError, first.text).toBe(false);
+    expect(cancelled.structured.error).toMatchObject({ code: "cancelled" });
+    expect(updates.map((u) => [u.draftRevision, u.html])).toEqual([[1, "<body>checkout"]]);
+    slowFor = null;
+    const after = await noddit.call("preview_design", { append: "</body>" });
+    expect(updates.at(-1)).toMatchObject({ html: "<body>checkout</body>", draftRevision: 2 });
+    expect(after.structured).toMatchObject({ name: "Checkout", draftRevision: 2 });
   });
 
   it("reports the document's revision, which import_design's expectedRevision takes", async () => {

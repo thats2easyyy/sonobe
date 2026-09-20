@@ -369,6 +369,28 @@ describe("assistant controller on the Claude subscription", () => {
     expect(known.checks).toBe(0);
   });
 
+  it("reads the connection again when a check answers unknown, without checking again", async () => {
+    const host = fakeAssistantHost({ connection: { subscriptionEnabled: true, provider: "subscription" }, subscription: signedIn() });
+    const store = createAssistantStore({ persistModel: false });
+    const controller = createAssistantController(host, store);
+    await controller.refresh();
+    // Another window turns the switch off while this check runs: main's shutdown answers "unknown".
+    host.nextCheck = () => {
+      host.connection = { ...host.connection, subscriptionEnabled: false, active: "api_key" };
+      return subscriptionStatus();
+    };
+    expect(await controller.checkSubscription()).toMatchObject({ state: "unknown" });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(store.getState().status?.connection).toMatchObject({ subscriptionEnabled: false, active: "api_key" });
+    // Main keeps answering "unknown" with the subscription still active: one read, no loop of checks.
+    host.connection = { ...host.connection, subscriptionEnabled: true, active: "subscription" };
+    host.nextCheck = () => subscriptionStatus();
+    await controller.checkSubscription();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(host.checks).toBe(2);
+    expect(store.getState().status?.connection?.active).toBe("subscription");
+  });
+
   it("reports a check the bridge rejected as failed, with what happened", async () => {
     const host = fakeAssistantHost({ connection: { subscriptionEnabled: true, provider: "subscription" }, subscription: signedIn() });
     host.assistant!.checkSubscription = async () => {

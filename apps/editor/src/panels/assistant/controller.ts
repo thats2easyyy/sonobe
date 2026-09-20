@@ -134,7 +134,12 @@ export function createAssistantController(host: AssistantHostLike | null, store:
       } catch (err) {
         subscription = { state: "failed", kind: null, label: null, email: null, adapterVersion: last?.adapterVersion ?? null, message: `Sonobe couldn't check Claude's login: ${messageOf(err)}` };
       }
-      if (!disposed) setSubscription(subscription);
+      if (disposed) return subscription;
+      setSubscription(subscription);
+      // Still "unknown": main's switch is off (another window may have just turned it off, ending this check), or it has no
+      // subscription at all. Its connection says which, so the drawer shows the setup that fits. That read doesn't check again,
+      // so a main that keeps answering "unknown" can't make this loop.
+      if (subscription.state === "unknown") void readStatus({ check: false });
       return subscription;
     })().finally(() => {
       checking = null;
@@ -152,7 +157,8 @@ export function createAssistantController(host: AssistantHostLike | null, store:
     if (status.connection?.active === "subscription" && (state === "unknown" || state === "checking")) void checkSubscription();
   };
 
-  const refresh = async () => {
+  /** Main's status into the store. `check`: then read the login when it isn't known yet (checkIfUnknown). */
+  const readStatus = async ({ check }: { check: boolean }) => {
     try {
       const status = await assistant.status();
       if (disposed) return;
@@ -160,11 +166,12 @@ export function createAssistantController(host: AssistantHostLike | null, store:
         const model = status.models.some((m) => m.id === s.model) ? s.model : status.defaultModel;
         return { status, statusError: null, usage: status.usage, limits: status.limits, model, ...(status.running ? {} : s.runId === null ? { running: false } : {}) };
       });
-      checkIfUnknown(status);
+      if (check) checkIfUnknown(status);
     } catch (err) {
       if (!disposed) store.setState({ statusError: messageOf(err) });
     }
   };
+  const refresh = () => readStatus({ check: true });
 
   const setCodeFolder = (codeFolder: AssistantCodeFolderStatus) => store.setState((s) => (s.status ? { status: { ...s.status, codeFolder } } : {}));
 

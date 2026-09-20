@@ -390,6 +390,21 @@ describe("the adapter's process", { timeout: 15_000 }, () => {
     expect(`${tail}\n${logs.join("\n")}`).not.toMatch(/sk-ant-|0123456789abcdef/);
     expect(logs.some((l) => l.startsWith("warn: Claude's agent adapter exited (code 3).") && l.endsWith("last words"))).toBe(true);
   });
+
+  it("keeps V8's reason for running out of memory in the tail, with the native stack trace folded into one line", async () => {
+    const fatal = "FATAL ERROR: Reached heap limit Allocation failed - JavaScript heap out of memory";
+    // Node's own stderr for it: a few GCs, the reason, then ~6,000 characters of native frames.
+    const frames = Array.from({ length: 43 }, (_, i) => `${String(i + 1).padStart(2)}: 0x${(0x1028ff10c + i * 0x1000).toString(16)} v8::internal::Heap::CollectGarbage(v8::internal::AllocationSpace, v8::internal::GarbageCollectionReason, v8::GCCallbackFlags) [/Applications/Sonobe.app/Contents/Frameworks/Electron Framework]`);
+    const stderr = ["", "<--- Last few GCs --->", "", "[5083:0xb2bc00000]       35 ms: Mark-Compact 15.6 (32.5) -> 15.6 (32.3) MB, pooled: 0 MB, 9.67 / 0.00 ms  (average mu = 0.353, current mu = 0.029) allocation failure; scavenge might not succeed", "", fatal, "----- Native stack trace -----", "", ...frames, ""].join("\n");
+    expect(stderr.length).toBeGreaterThan(4000);
+    const script = `require("node:fs").writeSync(2, ${JSON.stringify(stderr)}); process.exit(134)`;
+    const agent = start({}, { spec: { ...fakeSpec(), args: ["-e", script] } });
+    const failed = await agent.ready.catch((err: unknown) => err);
+    expect(failed).toBeInstanceOf(AgentExitedError);
+    const tail = (failed as AgentExitedError).exit.stderrTail;
+    expect(tail.endsWith(`${fatal}\n----- Native stack trace -----\n\n[left out: Node's native stack trace]`)).toBe(true);
+    expect(logs.some((l) => l.startsWith("warn: Claude's agent adapter exited (code 134).") && l.includes(fatal))).toBe(true);
+  });
 });
 
 describe("the fake agent, directly", { timeout: 15_000 }, () => {

@@ -209,13 +209,29 @@ describe("tool runner: preview_design", () => {
     expect(h.previews.has("photo_zoom")).toBe(false);
   });
 
-  it("records a preview that came back after Stop", async () => {
+  it("records a preview whose answer came back after Stop", async () => {
     const h = harness(() => {
       h.controller.abort();
       return previewed({ replace: "home" });
     });
     expect(await h.runner().run({ id: "p1", name: "preview_design", input: { replace: "home", html: "<main>" } })).toMatchObject({ isError: true });
     expect(h.previews.get("photo_zoom")).toEqual({ component: null, replace: "home" });
+  });
+
+  it("forgets the draft when Stop cut a preview off, since the server may have taken it anyway", async () => {
+    // The real bridge's MCP client gives up as soon as Stop aborts; the server's handler runs on.
+    let stop = false;
+    const h = harness(async (_name, _args, options) => {
+      if (!stop) return previewed({ replace: null });
+      h.controller.abort();
+      throw options.signal?.reason ?? new Error("aborted");
+    });
+    await h.runner().run({ id: "p1", name: "preview_design", input: { name: "Settings", html: "<main>" } });
+    expect(h.previews.get("photo_zoom")).toEqual({ component: null, replace: null });
+    stop = true;
+    const cut = await h.runner().run({ id: "p2", name: "preview_design", input: { replace: "home", html: "<main>" } });
+    expect(cut).toMatchObject({ isError: true, content: [{ type: "text", text: expect.stringMatching(/^The person pressed Stop while preview_design was running/) }] });
+    expect(h.previews.has("photo_zoom")).toBe(false);
   });
 
   it("doesn't ask about a draft the server no longer has, and forgets it", async () => {
@@ -330,19 +346,35 @@ describe("tool runner: chats over a real headless host", () => {
     await rm(dir, { recursive: true, force: true });
   });
 
-  /** The subscription path's bridge (preview_design shown) and a chat maker: each chat has its own drafts and replace guard, and declines every question. */
-  async function setup() {
+  /**
+   * The subscription path's bridge (preview_design shown) and a chat maker: each chat has its own
+   * drafts and replace guard unless given some, and declines every question. `onRead`: called as a
+   * tool's handler reads the document, before it changes anything. `onPreview`: given, the host has a
+   * canvas, and it's called as the canvas takes each preview_design update, after the server kept it.
+   */
+  async function setup(hooks: { onRead?(): void; onPreview?(): void } = {}) {
     dir = await mkdtemp(path.join(tmpdir(), "sonobe-runner-"));
     host = createHeadlessHost({ registry: createPatchRegistry() });
     await host.createDocument({ path: path.join(dir, "Runner Test.sonobe"), template: "photo-zoom" });
     const capturing = Object.create(host) as HeadlessHost;
     Object.defineProperty(capturing, "captureDesign", { value: async (): Promise<CapturedDesign> => ({ capture: CAPTURE as never, images: new Map() }) });
+    if (hooks.onPreview) {
+      const onPreview = hooks.onPreview;
+      Object.defineProperty(capturing, "capabilities", { value: { ...host.capabilities, designPreview: true } });
+      Object.defineProperty(capturing, "showDesignPreview", { value: async () => onPreview() });
+    }
+    Object.defineProperty(capturing, "getDocument", {
+      value: (...args: Parameters<HeadlessHost["getDocument"]>) => {
+        hooks.onRead?.();
+        return host.getDocument(...args);
+      },
+    });
     const bridge = createMcpToolBridge({ host: capturing, version: "0.1.0-test", hidden: new Map() });
     const tools = new Map((await bridge.tools()).map((t) => [t.name, t]));
     const { docId, doc } = await host.getDocument();
     const screen = doc.components[doc.project.root]!.layers[0]!;
     let chats = 0;
-    const chat = () => {
+    const chat = (reply: { previews?: Map<string, PreviewDraft>; signal?: AbortSignal } = {}) => {
       const n = ++chats;
       const events: AssistantEvent[] = [];
       const active: RunGuards = { removedWithoutAsking: 0, confirmations: new Map() };
@@ -356,7 +388,7 @@ describe("tool runner: chats over a real headless host", () => {
           events.push(event);
           if (event.type === "confirm_required") queueMicrotask(() => active.confirmations.get(event.confirmationId)?.(false));
         },
-        signal: new AbortController().signal,
+        signal: reply.signal ?? new AbortController().signal,
         bridge,
         tools,
         limits: resolveLimits(),
@@ -368,7 +400,7 @@ describe("tool runner: chats over a real headless host", () => {
         guardIfAny: () => guard,
         replaceGuard: REPLACE_GUARD,
         active,
-        previews: new Map(),
+        previews: reply.previews ?? new Map(),
         announce: true,
         readOnlyNoticeSent: { value: false },
       });
@@ -402,6 +434,62 @@ describe("tool runner: chats over a real headless host", () => {
       const added = await c.runner.run({ id: "c2", name: "import_design", input: { preview: true, replace: null } });
       expect(added.isError, JSON.stringify(added.content)).toBeFalsy();
       expect(ofType(c.events, "confirm_required")).toHaveLength(1);
+      expect(await screens()).toEqual([...before, "Settings"]);
+    } finally {
+      await bridge.close();
+    }
+  });
+
+  it("asks before a preview import after Stop cut off a preview_design the server still took", async () => {
+    let onPreview: (() => void) | null = null;
+    const { bridge, chat, screen, screens } = await setup({ onPreview: () => onPreview?.() });
+    try {
+      const before = await screens();
+      // One chat over three replies: its drafts carry over, and each reply has its own Stop.
+      const previews = new Map<string, PreviewDraft>();
+      await chat({ previews }).runner.run({ id: "a1", name: "preview_design", input: { name: "Settings", html: "<main>Settings</main>" } });
+      expect([...previews.values()]).toEqual([{ component: null, replace: null }]);
+      // Stop while the canvas takes the redesign's preview_design: the server has kept the draft, the MCP client gives up
+      // at once, and the server's handler goes on.
+      const stop = new AbortController();
+      onPreview = () => {
+        onPreview = null;
+        stop.abort();
+      };
+      const cut = await chat({ previews, signal: stop.signal }).runner.run({ id: "b1", name: "preview_design", input: { replace: screen.id, html: "<main>Settings</main>" } });
+      expect(cut).toMatchObject({ isError: true, content: [{ type: "text", text: expect.stringMatching(/^The person pressed Stop while preview_design was running/) }] });
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      // "Ok, add it": the draft replaces a screen the Assistant never made, so it asks.
+      const next = chat({ previews });
+      await next.runner.run({ id: "c1", name: "import_design", input: { preview: true } });
+      expect(ofType(next.events, "confirm_required")).toEqual([expect.objectContaining({ title: `Replace “${screen.name}”?` })]);
+      expect(await screens()).toEqual(before);
+    } finally {
+      await bridge.close();
+    }
+  });
+
+  it("leaves the draft as it was when Stop reaches a preview_design before the server takes it", async () => {
+    let onRead: (() => void) | null = null;
+    const { bridge, chat, screen, screens } = await setup({ onRead: () => onRead?.() });
+    try {
+      const before = await screens();
+      const previews = new Map<string, PreviewDraft>();
+      await chat({ previews }).runner.run({ id: "a1", name: "preview_design", input: { name: "Settings", html: "<main>Settings</main>" } });
+      // Stop while the redesign's preview_design reads the document: the server sees the cancel before it takes the call.
+      const stop = new AbortController();
+      onRead = () => {
+        onRead = null;
+        stop.abort();
+      };
+      const cut = await chat({ previews, signal: stop.signal }).runner.run({ id: "b1", name: "preview_design", input: { replace: screen.id, html: "<main>Redesign</main>" } });
+      expect(cut).toMatchObject({ isError: true, content: [{ type: "text", text: expect.stringMatching(/^The person pressed Stop while preview_design was running/) }] });
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      // The draft is still the new screen: importing it adds one, without asking.
+      const next = chat({ previews });
+      const added = await next.runner.run({ id: "c1", name: "import_design", input: { preview: true } });
+      expect(added.isError, JSON.stringify(added.content)).toBeFalsy();
+      expect(ofType(next.events, "confirm_required")).toEqual([]);
       expect(await screens()).toEqual([...before, "Settings"]);
     } finally {
       await bridge.close();

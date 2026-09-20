@@ -322,16 +322,19 @@ describe("the Assistant's own preview drafts (the Claude subscription path)", ()
     expect(state.drafts[0]).toMatchObject({ source: "mcp", key: "mcp:Assistant", runId: "r1", turn: 0, status: "writing" });
     state = play([[update({ draftRevision: 2, html: "<html><body><header>Checkout</header><main>Total</main>" }), during("r1")]], state);
     expect(state.drafts[0]?.runId).toBe("r1");
-    state = play([[update({ draftRevision: 3, status: "adding" }), during(null, 4)]], state);
+    state = play([[update({ draftRevision: 3, status: "adding" }), during("r1", 4)]], state);
     expect(state.drafts[0]).toMatchObject({ runId: "r1", status: "adding" });
     // Its import is the Assistant's change, so the update that clears it ends it as added.
     state = play([[update({ draftRevision: 4, status: "cleared", html: null }), during("r1", 5, { kind: "apply", revision: 5, author: ASSISTANT })]], state);
     expect(state.drafts[0]).toMatchObject({ runId: "r1", status: "added" });
   });
 
-  it("don't belong to a run when the Assistant isn't running, and an MCP client's never do", () => {
-    expect(play([[update(), during(null)]]).drafts[0]?.runId).toBe("");
+  it("draw nothing when the Assistant isn't running, and an MCP client's never belong to its run", () => {
+    expect(play([[update(), during(null)]]).drafts).toEqual([]);
     expect(play([[update({ key: "cc-1", author: { kind: "agent", name: "Claude" }, client: { id: "cc-1", label: "Claude Code" } }), during("r1")]]).drafts[0]?.runId).toBe("");
+    // A client of the relay that calls itself "Assistant" is still a client: it draws whether or not the Assistant runs.
+    const namesake = { key: "relay-7", client: { id: "relay-7", label: "Some client" } };
+    expect(play([[update(namesake), during(null)]]).drafts[0]).toMatchObject({ key: "mcp:relay-7", runId: "", status: "writing" });
   });
 
   it("read as the Assistant's own: no Hide preview, and the reply's end stops one left writing", () => {
@@ -402,6 +405,23 @@ describe("the Assistant's own preview drafts (the Claude subscription path)", ()
     // The next reply's first update takes it over.
     state = play([[update({ draftRevision: 3 }), during("r2")]], state, 5000);
     expect(state.drafts[0]).toMatchObject({ runId: "r2", status: "writing" });
+  });
+
+  it("draw nothing when the reply's first call is the one still in flight at Stop, or its draft is gone", () => {
+    // A fresh window: the box's request, Stop before the first preview_design reached the canvas, then that call's update.
+    let state = fold([{ type: "run_started", runId: "r1", model: "claude-sonnet-5" }], { request: pending() });
+    state = { ...state, ...reduceDesignEvent(state, { type: "run_finished", runId: "r1", outcome: "stopped", usage: usage() }, 1200) };
+    state = play([[update(), during(null)]], state, 1300);
+    expect(state.drafts).toEqual([]);
+    expect(activeDraft(state, 1300 + 120_000)).toBeNull();
+    expect(liveMcpDraft(state, 1300 + 120_000)).toBeNull();
+    // The reply's earlier draft was pushed out by five other sessions' drafts: the late update doesn't bring one back.
+    let crowded = play([[update(), during("r1")]]);
+    crowded = { ...crowded, ...reduceDesignEvent(crowded, { type: "run_finished", runId: "r1", outcome: "stopped", usage: usage() }, 1200) };
+    for (let i = 0; i < 5; i++) crowded = play([[update({ key: `cc-${i}`, author: { kind: "agent", name: "Claude" }, client: { id: `cc-${i}`, label: "Claude Code" } }), during(null)]], crowded, 1300);
+    expect(crowded.drafts.some((d) => d.key === "mcp:Assistant")).toBe(false);
+    crowded = play([[update({ draftRevision: 2 }), during(null)]], crowded, 1400);
+    expect(crowded.drafts.some((d) => d.key === "mcp:Assistant")).toBe(false);
   });
 
   it("link to the running reply when applied, from the Assistant's store", () => {

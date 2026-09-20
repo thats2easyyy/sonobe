@@ -16,6 +16,8 @@
  *   "sessionend"                        its Claude Code dies: the prompt fails with the adapter's "process exited
  *                                       unexpectedly", and later ones with "Session not found"; the fake runs on
  *   "limit" / "ratelimit"               says the CLI's usage-limit / 429 text, then fails the prompt with it
+ *   "plainerror"                        fails the prompt with a plain Error, as the adapter does when its Claude Code
+ *                                       fails otherwise: the SDK sends -32603 "Internal error" with the text in data.details
  *   "hang"                              says "Working on it…", then waits for session/cancel
  *   "save" / "open"                     save_document {} / open_document { ref: "/tmp/fake.sonobe" }
  *   "replace <id>"                      the design flow, replacing layer <id>
@@ -98,6 +100,8 @@ const DECLINED_TEXT = "The user doesn't want to proceed with this tool use.";
 const PLAN_TEXT = "Claude Code is in plan mode, so it didn't run a tool that makes changes.";
 /** What the adapter rejects a prompt with when its Claude Code dies (acp-agent.js, 0.79.0). */
 const SESSION_DIED = "The Claude Agent process exited unexpectedly. Please start a new session.";
+/** What the adapter throws when its Claude Code fails to run (a plain Error, so the SDK sends its text as data.details). */
+const PLAIN_ERROR = "Claude Code process exited with code 1";
 /** The CLI's texts for a plan's usage limit and a transient 429. */
 const USAGE_LIMIT_TEXT = "You've hit your limit · resets 3pm";
 const RATE_LIMIT_TEXT = "API Error: 429 rate_limit_error";
@@ -356,6 +360,10 @@ async function reply(t, message, context) {
     await t.say("About to end the session.");
     await t.end();
     throw RequestError.internalError(undefined, SESSION_DIED);
+  }
+  if (has(/\bplainerror\b/i)) {
+    await t.say("Working on it…");
+    throw new Error(PLAIN_ERROR);
   }
   // A client that isn't AIR gets the CLI's own text streamed, then the prompt fails with it ("Internal error: <text>").
   const limit = has(/\blimit\b/i) ? USAGE_LIMIT_TEXT : has(/\bratelimit\b/i) ? RATE_LIMIT_TEXT : null;

@@ -214,7 +214,7 @@ export interface PreviewTarget {
   /** The document's revision, and its newest change: a draft cleared after its author's import went in counts as added. */
   revision: number;
   lastChange: Pick<DocumentChange, "kind" | "revision" | "author"> | null;
-  /** The in-app Assistant's running reply: a draft it writes through preview_design (the subscription path) belongs to that run. */
+  /** The in-app Assistant's running reply: a draft it writes through preview_design (the subscription path) belongs to that run. With none, its updates draw nothing. */
   assistantRunId?: string | null;
 }
 
@@ -257,14 +257,16 @@ export function reducePreviewUpdate(state: DesignData, update: DesignPreviewUpda
     return replaceCurrent({ ...live, status: added ? "added" : "stopped", since: now, mcp: { ...mcp, draftRevision: update.draftRevision, touchedAt: now } });
   }
 
-  const byAssistant = update.author.name === ASSISTANT_AUTHOR;
-  // A call still in flight when its reply ended (Stop) draws after run_finished: the reply's stopped draft stays stopped, rather than
-  // coming back as a stranger's draft for minutes. The next reply's first update takes the draft over.
-  if (byAssistant && !target.assistantRunId && current && current.runId !== "" && !live) return {};
+  // The in-app Assistant's own session: its name, with no relay client id (a client of the relay that calls itself "Assistant" isn't it).
+  const ours = update.author.name === ASSISTANT_AUTHOR && update.key === ASSISTANT_AUTHOR;
+  // It draws only during its own reply. A call still in flight when its reply ended (Stop) draws after run_finished: that draws
+  // nothing, rather than a stranger's draft for minutes, whether or not the reply drew one before (its stopped draft stays
+  // stopped). The next reply's first update takes the draft over.
+  if (ours && !target.assistantRunId) return {};
   // The document's revision when adding began: the import's change comes after it.
   const addingFrom = update.status === "adding" ? ((live?.status === "adding" ? mcp?.addingFrom : null) ?? target.revision) : null;
   // The Assistant's own drafts belong to its running reply, so the box follows them as its own and the reply's end stops one left writing.
-  const runId = byAssistant ? (target.assistantRunId ?? live?.runId ?? "") : "";
+  const runId = ours ? (target.assistantRunId ?? "") : "";
   const next: DesignDraft = {
     source: "mcp",
     key,

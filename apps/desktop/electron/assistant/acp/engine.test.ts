@@ -5,6 +5,10 @@
  * network, no Claude account.
  */
 
+import { realpathSync } from "node:fs";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import { RequestError, type InitializeResponse, type NewSessionRequest, type NewSessionResponse, type PermissionOption, type PromptRequest, type PromptResponse, type RequestPermissionResponse, type SessionConfigOption, type SessionNotification, type SessionUpdate, type SetSessionConfigOptionRequest } from "@agentclientprotocol/sdk";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { systemPrompt } from "../agent.ts";
@@ -12,7 +16,7 @@ import { canvasContextBlock } from "../design.ts";
 import type { AssistantCanvasContext, AssistantEvent, AssistantSendRequest } from "../protocol.ts";
 import { FAKE_TOOLS, fakeBridge, text } from "../testing.ts";
 import type { AssistantToolInfo, LocalTools, ToolCallResult } from "../toolBridge.ts";
-import { createSubscriptionAgent, exitDetail, MODE_NOT_SET, modelValue, NO_RUN, NOT_INSTALLED, parseCliLogin, permissionPrompt, RATE_LIMITED, RESTARTED, SESSION_ENDED, UNANNOUNCED, usageLimitMessage, type SubscriptionAgentOptions } from "./engine.ts";
+import { accountBlockedMessage, createSubscriptionAgent, orgNotAllowedMessage, exitDetail, MODE_NOT_SET, modelValue, NO_RUN, NOT_INSTALLED, parseCliLogin, permissionPrompt, RATE_LIMITED, readCliLogin, RESTARTED, SESSION_ENDED, UNANNOUNCED, usageLimitMessage, type SubscriptionAgentOptions } from "./engine.ts";
 import type { AssistantToolServer, ToolServerHandler } from "./toolServer.ts";
 import { AgentExitedError, AgentStartError, type AcpAgentProcess, type AcpAgentProcessOptions, type AgentAuthStatus, type AgentExit, type ClaudeAgentSpec, type PermissionHandler } from "./types.ts";
 
@@ -294,7 +298,7 @@ function harness(behavior: Partial<Behavior> = {}, options: Partial<Subscription
   bridge.tools = async () => TOOLS;
   const events: AssistantEvent[] = [];
   const logs: string[] = [];
-  const logins: { spec: ClaudeAgentSpec; env: Record<string, string> }[] = [];
+  const logins: { spec: ClaudeAgentSpec; env: Record<string, string>; cwd: string }[] = [];
   let ids = 0;
   const agent = createSubscriptionAgent({
     tools: () => bridge,
@@ -312,8 +316,8 @@ function harness(behavior: Partial<Behavior> = {}, options: Partial<Subscription
     home: "/Users/test",
     documentFor: async () => ({ docId: "noddit", projectPath: "/Users/test/Noddit.sonobe" }),
     log: (level, message) => void logs.push(`${level}: ${message}`),
-    readLogin: async (spec, env) => {
-      logins.push({ spec, env });
+    readLogin: async (spec, { env, cwd }) => {
+      logins.push({ spec, env, cwd });
       return b.cliLogin ?? null;
     },
     announceWaitMs: 100,
@@ -440,6 +444,32 @@ describe("subscription engine: tools", () => {
       // The draft already has its component.
       { name: "import_design", args: { preview: true, docId: "noddit" } },
     ]);
+  });
+
+  it("keeps each window's chat in its own window's prototype", async () => {
+    const shows: Record<string, string> = { w1: "noddit", w2: "onboarding" };
+    const results = new Map<string, (ToolCallResult | null)[]>();
+    const h = harness(
+      {
+        script: async (turn) => {
+          // Each window's message is its own id; each tries the other window's prototype too.
+          const other = turn.message === "w1" ? shows.w2! : shows.w1!;
+          const drawn = await turn.tool(`toolu_${turn.message}_1`, "preview_design", { name: "Checkout", html: "<main>" });
+          const elsewhere = await turn.tool(`toolu_${turn.message}_2`, "preview_design", { docId: other, html: "<main>" });
+          results.set(turn.message, [drawn, elsewhere]);
+          return END;
+        },
+      },
+      { documentFor: async (id) => ({ docId: shows[id]!, projectPath: null }) },
+    );
+    // Both at once, on one adapter.
+    await Promise.all([h.send("w1", {}, undefined, "w1"), h.send("w2", {}, undefined, "w2")]);
+    expect(h.agents).toHaveLength(1);
+    expect(h.bridge.calls).toEqual(expect.arrayContaining([{ name: "preview_design", args: { name: "Checkout", html: "<main>", docId: "noddit" } }, { name: "preview_design", args: { name: "Checkout", html: "<main>", docId: "onboarding" } }]));
+    expect(h.bridge.calls).toHaveLength(2);
+    const refusal = (other: string) => `This chat edits the prototype in its own window, so preview_design didn't run on “${other}”. Leave out docId to change this window's prototype, or ask the person to open the chat in the other window.`;
+    expect(results.get("w1")).toEqual([expect.objectContaining({ structuredContent: { docId: "noddit" } }), expect.objectContaining({ isError: true, content: [{ type: "text", text: refusal("onboarding") }] })]);
+    expect(results.get("w2")).toEqual([expect.objectContaining({ structuredContent: { docId: "onboarding" } }), expect.objectContaining({ isError: true, content: [{ type: "text", text: refusal("noddit") }] })]);
   });
 
   it("runs a call that reaches Sonobe just before its tool_call, once the tool_call comes", async () => {
@@ -674,6 +704,57 @@ describe("subscription engine: permission cards", () => {
     expect(h.bridge.calls.map((c) => c.args.ref)).toEqual(["/tmp/a.sonobe", "/tmp/b.sonobe"]);
   });
 
+  it("says a forced save writes over outside changes, and asks before every one, whatever was allowed for this chat", async () => {
+    const forced = permissionPrompt("save_document", "Save document", { path: "/Users/test/Checkout.sonobe", force: true }, "/Users/test");
+    expect(forced).toEqual({
+      title: "Allow Claude to save over outside changes?",
+      message: "Claude wants to save this prototype to “~/Checkout.sonobe” over changes made to the project outside Sonobe since it was opened or last saved. Those changes will be lost. Claude Code asks before steps that reach outside this prototype.",
+    });
+    expect(permissionPrompt("save_document", "Save document", { force: true }, "/Users/test").message).toMatch(/^Claude wants to save this prototype over changes made to the project outside Sonobe since/);
+
+    // Allowed for this chat on Claude Code's card, which then stops asking about save_document; and on Sonobe's own card, in a mode that never asked.
+    for (const [first, allowAlways] of [[{ ask: true }, "allow-with-updates"], [{}, "sonobe-allow-always"]] as const) {
+      const h = harness({
+        script: async (turn) => {
+          await turn.tool("toolu_s1", "save_document", {}, first);
+          await turn.tool("toolu_s2", "save_document", {});
+          await turn.tool("toolu_s3", "save_document", { force: true });
+          return END;
+        },
+      });
+      const answers = [allowAlways, "sonobe-allow-once"];
+      await h.send("save it", {}, (e) => {
+        if (e.type === "confirm_required") queueMicrotask(() => h.agent.confirm("w1", e.confirmationId, true, answers.shift()));
+      });
+      const cards = ofType(h.events, "confirm_required");
+      expect(cards.map((c) => c.toolUseId)).toEqual(["toolu_s1", "toolu_s3"]);
+      // "Allow for this chat" wouldn't cover the next forced save, so the card doesn't offer it.
+      expect(cards[1]).toMatchObject({ title: "Allow Claude to save over outside changes?", message: expect.stringContaining("Those changes will be lost."), options: [expect.objectContaining({ id: "sonobe-allow-once" }), expect.objectContaining({ id: "sonobe-reject" })] });
+      expect(cards[1]!.options).toHaveLength(2);
+      expect(h.bridge.calls.map((c) => c.args)).toEqual([{ docId: "noddit" }, { docId: "noddit" }, { force: true, docId: "noddit" }]);
+    }
+  });
+
+  it("offers no “Allow for this chat” on Claude Code's card for a forced save", async () => {
+    const h = harness({
+      script: async (turn) => {
+        await turn.tool("toolu_f1", "save_document", { force: true }, { ask: true });
+        await turn.tool("toolu_f2", "save_document", { force: true }, { ask: true });
+        return END;
+      },
+    });
+    await h.send("save over it", {}, (e) => {
+      if (e.type === "confirm_required") queueMicrotask(() => h.agent.confirm("w1", e.confirmationId, true));
+    });
+    const cards = ofType(h.events, "confirm_required");
+    expect(cards.map((c) => [c.title, c.options?.map((o) => o.id)])).toEqual([
+      ["Allow Claude to save over outside changes?", ["allow-once", "reject"]],
+      ["Allow Claude to save over outside changes?", ["allow-once", "reject"]],
+    ]);
+    // Allowed on Claude Code's card, so Sonobe doesn't ask again for that call.
+    expect(h.bridge.calls).toHaveLength(2);
+  });
+
   it("cancels its own question on Stop, and the call doesn't run", async () => {
     const h = harness({
       script: async (turn) => {
@@ -715,6 +796,10 @@ describe("subscription engine: Claude Code's permission mode", () => {
       expect(h.last().closed).toEqual(["fake-1"]);
       expect(h.revoked).toEqual(["w1#1/1"]);
     }
+    // The log keeps the adapter's reason, from its internal error's details.
+    const locked = harness({ mode: "auto", modeError: new RequestError(-32603, "Internal error", { details: "Invalid Mode" }) });
+    await locked.send("save it");
+    expect(locked.logs).toContain('error: Claude\'s agent adapter didn\'t put the session in its "default" mode: Internal error: Invalid Mode');
   });
 });
 
@@ -842,6 +927,24 @@ describe("subscription engine: when the adapter fails", () => {
     expect(other.agent.status().message).toBe("Claude isn't signed in on this computer. In a terminal, run claude-agent-acp --cli auth login, then choose Check again.");
   });
 
+  it("says Claude isn't signed in when a signed-in chat's login stops working, and stops naming the old plan", async () => {
+    // Signed out in Terminal (auth_required), or a token that expired or was revoked, which Claude Code under the SDK reports as an internal error.
+    for (const refusal of [RequestError.authRequired(), RequestError.internalError({ errorKind: "authentication_failed" }, "Failed to authenticate: OAuth session expired and could not be refreshed")]) {
+      const h = harness({ script: async (turn) => (turn.message === "again" ? Promise.reject(refusal) : echo(turn)) });
+      await h.send("hello");
+      expect(h.agent.status()).toMatchObject({ state: "ready", kind: "account", label: "Claude Max", email: "tyler@example.com" });
+      expect(await h.send("again")).toMatchObject({ outcome: "error", error: { code: "not_signed_in", message: "Claude isn't signed in on this computer. Choose Sign in… (it opens Terminal), or run claude-agent-acp --cli auth login in Terminal, then send your message again." } });
+      expect(h.agent.status()).toEqual({ state: "signed_out", kind: "none", label: "Not logged in", email: null, adapterVersion: "0.79.0", message: "Claude isn't signed in on this computer. Choose Sign in… (it opens Terminal), or run claude-agent-acp --cli auth login in Terminal, then choose Check again." });
+      expect(h.last().closed).toEqual(["fake-1"]);
+      if (refusal.code !== -32000) expect(h.logs).toContain("warn: Claude Code couldn't use the Claude login on this computer: Internal error: Failed to authenticate: OAuth session expired and could not be refreshed");
+      // Signed in again: the next message opens a fresh session, which reads the login again.
+      h.behavior.script = echo;
+      h.last().pushAuth(ACCOUNT);
+      expect((await h.send("hello again")).outcome).toBe("completed");
+      expect(h.last().prompts.map((p) => p.sessionId)).toEqual(["fake-1", "fake-1", "fake-2"]);
+    }
+  });
+
   it("teaches the install when Sonobe can't find the adapter", async () => {
     const created: unknown[] = [];
     const h = harness(
@@ -871,8 +974,29 @@ describe("subscription engine: when the adapter fails", () => {
     const exited = harness({ startError: new AgentExitedError({ code: 1, signal: null, stderrTail: "Error: Node.js 22 or later is required\n\nNode.js v24.21.0" }) });
     expect(await exited.send("hello")).toMatchObject({ error: { code: "agent_failed", message: `Claude's agent adapter didn't start: it exited before answering (exit code 1: Error: Node.js 22 or later is required). ${hint}` } });
 
-    const session = harness({ newSessionError: new Error("Internal error: the CLI didn't start.") });
-    expect(await session.send("hello")).toMatchObject({ error: { code: "agent_failed", message: `Claude's agent adapter didn't start: Internal error: the CLI didn't start. ${hint}` } });
+    // A plain Error in the adapter arrives as -32603 "Internal error", with its text in data.details.
+    const session = harness({ newSessionError: new RequestError(-32603, "Internal error", { details: "Claude Code native binary not found at /opt/homebrew/lib/node_modules/@agentclientprotocol/claude-agent-acp/vendor/claude" }) });
+    expect(await session.send("hello")).toMatchObject({ error: { code: "agent_failed", message: `Claude's agent adapter didn't start: Claude Code native binary not found at /opt/homebrew/lib/node_modules/@agentclientprotocol/claude-agent-acp/vendor/claude. ${hint}` } });
+    expect(session.logs).toContain("warn: Claude's agent adapter didn't open a session: Internal error: Claude Code native binary not found at /opt/homebrew/lib/node_modules/@agentclientprotocol/claude-agent-acp/vendor/claude");
+  });
+
+  it("says what went wrong when the adapter can't finish a reply, from the details of its internal error, and logs it", async () => {
+    const failing = (err: Error) => harness({ script: async (turn) => (turn.message === "fail" ? Promise.reject(err) : echo(turn)) });
+    const exited = failing(new RequestError(-32603, "Internal error", { details: "Claude Code process exited with code 1" }));
+    expect(await exited.send("fail")).toMatchObject({ outcome: "error", error: { code: "unknown", message: "Claude's agent adapter couldn't finish the reply: Claude Code process exited with code 1. Send your message again." } });
+    expect(exited.logs).toContain("warn: Claude's agent adapter couldn't finish a reply: Internal error: Claude Code process exited with code 1");
+    // The chat keeps its session.
+    expect((await exited.send("hello")).outcome).toBe("completed");
+    expect(exited.last().prompts.map((p) => p.sessionId)).toEqual(["fake-1", "fake-1"]);
+
+    // Never a key, and never more than about 200 characters of it.
+    const leaky = failing(new RequestError(-32603, "Internal error", { details: `Invalid API key sk-ant-api03-SECRET ${"x".repeat(400)}` }));
+    const { error } = await leaky.send("fail");
+    expect(error!.message).toMatch(/^Claude's agent adapter couldn't finish the reply: Invalid API key sk-ant-… x+…\. Send your message again\.$/);
+    expect(error!.message.length).toBeLessThan(300);
+    expect(`${JSON.stringify(leaky.events)}\n${leaky.logs.join("\n")}`).not.toContain("SECRET");
+    // An error with nothing more to say still says what it is.
+    expect(await failing(new RequestError(-32603, "Internal error")).send("fail")).toMatchObject({ error: { code: "unknown", message: "Claude's agent adapter couldn't finish the reply: Internal error. Send your message again." } });
   });
 
   it("says the plan's usage limit is reached, quoting Claude Code's notice, from a rejection or the notice as the reply", async () => {
@@ -888,8 +1012,13 @@ describe("subscription engine: when the adapter fails", () => {
     for (const text of ["You've reached your weekly limit · resets Mon 9am", "You're out of extra usage · resets 5pm", "Your org is out of usage · contact your admin"]) {
       expect(await limit(text).send("hello")).toMatchObject({ error: { code: "usage_limit", message: usageLimitMessage(text) } });
     }
-    expect(await limit("Credit balance is too low", { errorKind: "billing_error" }).send("hello")).toMatchObject({ error: { code: "usage_limit", message: usageLimitMessage("Credit balance is too low") } });
     expect(usageLimitMessage(null)).toBe("Your Claude plan's usage limit is reached. Try again once it resets, or switch the Assistant to your API key.");
+    // No credit left, or an account on hold: the same code, but nothing resets on its own.
+    expect(await limit("Credit balance is too low", { errorKind: "billing_error" }).send("hello")).toMatchObject({ error: { code: "usage_limit", message: "Your Claude account can't take more requests right now (“Credit balance is too low”). Check your plan or billing at claude.ai, or switch the Assistant to your API key." } });
+    const hold = "Your account is on hold and can't use Claude Code. View details or appeal: https://claude.ai/restricted";
+    expect(await limit(hold, { errorKind: "account_on_hold" }).send("hello")).toMatchObject({ error: { code: "usage_limit", message: accountBlockedMessage(hold) } });
+    const bare = harness({ script: async () => Promise.reject(new RequestError(-32603, "Internal error", { errorKind: "billing_error" })) });
+    expect(await bare.send("hello")).toMatchObject({ error: { code: "usage_limit", message: "Your Claude account can't take more requests right now. Check your plan or billing at claude.ai, or switch the Assistant to your API key." } });
     const replied = harness({
       script: async (turn) => {
         turn.say("You've hit your limit · resets 5pm");
@@ -941,9 +1070,44 @@ describe("subscription engine: when the adapter fails", () => {
     expect(SESSION_ENDED).toBe("Claude Code stopped unexpectedly during this reply. Send your message again to restart it; it won't remember the earlier messages in this chat. If it keeps happening, update the adapter: npm install -g @agentclientprotocol/claude-agent-acp@latest");
     // Another internal error keeps the session (and the chat's history).
     const flaky = harness({ script: async (turn) => (turn.message === "fail" ? Promise.reject(RequestError.internalError(undefined, "API Error: 500 overloaded")) : echo(turn)) });
-    expect(await flaky.send("fail")).toMatchObject({ error: { code: "unknown", message: "Claude's agent adapter couldn't finish the reply: Internal error: API Error: 500 overloaded. Send your message again." } });
+    expect(await flaky.send("fail")).toMatchObject({ error: { code: "unknown", message: "Claude's agent adapter couldn't finish the reply: API Error: 500 overloaded. Send your message again." } });
     await flaky.send("hello");
     expect(flaky.last().prompts.map((p) => p.sessionId)).toEqual(["fake-1", "fake-1"]);
+  });
+
+  it("sends a message again on a new session when the adapter ended the old one before the reply started", async () => {
+    // The adapter closes a session's stream after some errors and then refuses every prompt on it.
+    const ended = new Set<string>();
+    const h = harness({
+      script: async (turn) => {
+        if (ended.has(turn.sessionId)) throw RequestError.internalError(undefined, "The Claude Agent session has ended. Please start a new session.");
+        if (turn.message === "fail") {
+          ended.add(turn.sessionId);
+          throw RequestError.internalError(undefined, "API Error: 500 overloaded");
+        }
+        return echo(turn);
+      },
+    });
+    await h.send("hello");
+    expect(await h.send("fail")).toMatchObject({ error: { code: "unknown" } });
+    h.events.length = 0;
+    expect((await h.send("again")).outcome).toBe("completed");
+    expect(h.last().prompts.map((p) => p.sessionId)).toEqual(["fake-1", "fake-1", "fake-1", "fake-2"]);
+    expect(h.last().closed).toEqual(["fake-1"]);
+    expect(ofType(h.events, "notice").map((n) => n.message)).toEqual([RESTARTED]);
+    expect(ofType(h.events, "run_finished")).toHaveLength(1);
+    expect(h.logs.some((l) => l.includes("had ended this chat's session"))).toBe(true);
+    // Only once: a new session that refuses too fails the reply.
+    const stubborn = harness({ script: async (turn) => (turn.message === "hello" ? echo(turn) : Promise.reject(RequestError.internalError(undefined, "The Claude Agent session has ended. Please start a new session."))) });
+    await stubborn.send("hello");
+    expect(await stubborn.send("again")).toMatchObject({ error: { code: "agent_crashed", message: SESSION_ENDED } });
+    expect(stubborn.last().prompts.map((p) => p.sessionId)).toEqual(["fake-1", "fake-1", "fake-2"]);
+  });
+
+  it("says signing in again won't help when the organization doesn't allow Claude plans in Claude Code", async () => {
+    const h = harness({ script: async () => Promise.reject(RequestError.internalError({ errorKind: "oauth_org_not_allowed" }, "Your organization has disabled Claude subscription access for Claude Code")) });
+    expect(await h.send("hello")).toMatchObject({ error: { code: "permission_denied", message: orgNotAllowedMessage("Your organization has disabled Claude subscription access for Claude Code") } });
+    expect(orgNotAllowedMessage("x")).toBe("Your organization doesn't allow Claude subscription use in Claude Code (“x”), so signing in again won't help. Ask your organization's admin, or switch the Assistant to your API key.");
   });
 
   it("names the stderr line that says what went wrong", () => {
@@ -953,6 +1117,23 @@ describe("subscription engine: when the adapter fails", () => {
     expect(exitDetail({ code: 1, signal: null, stderrTail: "Error: bad key sk-ant-api03-SECRET\nNode.js v24.21.0" })).toBe("exit code 1: Error: bad key sk-ant-…");
     expect(exitDetail({ code: 1, signal: null, stderrTail: "Node.js v24.21.0" })).toBe("exit code 1: Node.js v24.21.0");
     expect(exitDetail({ code: 3, signal: null, stderrTail: "" })).toBe("exit code 3");
+  });
+
+  it("names V8's reason when the adapter runs out of memory, not a native stack frame", () => {
+    const fatal = "FATAL ERROR: Reached heap limit Allocation failed - JavaScript heap out of memory";
+    const frames = [
+      " 1: 0x1028ff10c node::OOMErrorHandler(char const*, v8::OOMDetails const&) [/Applications/Sonobe.app/Contents/Frameworks/Electron Framework]",
+      " 2: 0x102b7123c v8::internal::V8::FatalProcessOutOfMemory(v8::internal::Isolate*, char const*, v8::OOMDetails const&) [/Applications/Sonobe.app/Contents/Frameworks/Electron Framework]",
+      ...Array.from({ length: 40 }, (_, i) => `${i + 3}: 0x${(0x102dd0664 + i * 0x1000).toString(16)} v8::internal::Heap::CollectGarbage(v8::internal::AllocationSpace, v8::internal::GarbageCollectionReason) [/Applications/Sonobe.app/Contents/Frameworks/Electron Framework]`),
+      "43: 0x18e2b84e4 start [/usr/lib/dyld]",
+    ];
+    const gcs = "[5083:0xb2bc00000]       35 ms: Mark-Compact 15.6 (32.5) -> 15.6 (32.3) MB, pooled: 0 MB, 9.67 / 0.00 ms  (average mu = 0.353, current mu = 0.029) allocation failure; scavenge might not succeed";
+    const oom = ["", "<--- Last few GCs --->", "", gcs, "", fatal, "----- Native stack trace -----", "", ...frames].join("\n");
+    expect(exitDetail({ code: null, signal: "SIGABRT", stderrTail: oom })).toBe(`signal SIGABRT: ${fatal}`);
+    // As process.ts keeps it: the frames folded into one line.
+    expect(exitDetail({ code: null, signal: "SIGABRT", stderrTail: `${gcs}\n\n${fatal}\n----- Native stack trace -----\n\n[left out: Node's native stack trace]` })).toBe(`signal SIGABRT: ${fatal}`);
+    // Frames alone say nothing: just how it ended.
+    expect(exitDetail({ code: null, signal: "SIGABRT", stderrTail: frames.join("\n") })).toBe("signal SIGABRT");
   });
 
   it("maps the prompt's stop reasons like the API key's", async () => {
@@ -1013,10 +1194,11 @@ describe("subscription engine: usage and models", () => {
     expect([modelValue(["default", "sonnet", "sonnet[1m]"], "claude-sonnet-5"), modelValue(["claude-opus-5", "opus"], "claude-opus-5"), modelValue(["default", "sonnet"], "claude-haiku-4-5-20251001"), modelValue(["default"], "gpt-5")]).toEqual(["sonnet", "claude-opus-5", null, null]);
 
     // The adapter refuses the switch: the chat keeps its model, and says so.
-    const refused = harness({ configOptions: MODEL_OPTIONS, modelError: new Error("Invalid value for config option model: opus[1m]") });
+    const refused = harness({ configOptions: MODEL_OPTIONS, modelError: new RequestError(-32603, "Internal error", { details: "Invalid value for config option model: opus[1m]" }) });
     await refused.send("hi");
     await refused.send("hi", { model: "claude-opus-5" });
     expect(ofType(refused.events, "notice").map((n) => n.message)).toEqual(["This chat keeps Claude Sonnet 5. Start a new chat to use Claude Opus 5."]);
+    expect(refused.logs).toContain("warn: Claude's agent adapter didn't switch the model: Internal error: Invalid value for config option model: opus[1m]");
 
     const fixed = harness();
     await fixed.send("hi", { model: "claude-haiku-4-5-20251001" });
@@ -1094,7 +1276,8 @@ describe("subscription engine: the Claude login", () => {
     h.behavior.cliLogin = ACCOUNT;
     expect(await h.agent.checkSubscription()).toMatchObject({ state: "ready", kind: "account" });
     expect(h.agents).toHaveLength(1);
-    expect(h.logins).toEqual([{ spec: SPEC, env: expect.objectContaining({ ELECTRON_RUN_AS_NODE: "1" }) }]);
+    // In the sessions folder, as the adapter runs: Claude Code reads project settings from its cwd.
+    expect(h.logins).toEqual([{ spec: SPEC, env: expect.objectContaining({ ELECTRON_RUN_AS_NODE: "1" }), cwd: "/tmp/sonobe-test/assistant/claude" }]);
     h.agent.stop("w1");
     await running;
   });
@@ -1160,6 +1343,19 @@ describe("subscription engine: the Claude login", () => {
     expect(parseCliLogin('{"loggedIn":false,"apiKeySource":"ANTHROPIC_API_KEY"}')).toMatchObject({ kind: "api_key", label: "Anthropic API key", detail: "ANTHROPIC_API_KEY" });
     expect(parseCliLogin('{"loggedIn":false,"apiProvider":"bedrock"}')).toMatchObject({ kind: "external", label: "AWS Bedrock" });
     for (const junk of ["", "not json", "[]", '{"email":"x"}']) expect(parseCliLogin(junk)).toBeNull();
+  });
+
+  it("runs the one-off login check in the folder it names, not the app's", async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), "sonobe-cli-login-"));
+    try {
+      // A stand-in CLI that reports the folder it ran in as the account's email.
+      const script = 'process.stdout.write(JSON.stringify({ loggedIn: true, subscriptionType: "max", email: process.cwd() }))';
+      const spec: ClaudeAgentSpec = { command: process.execPath, args: ["-e", script, "--"], env: {}, displayPath: "claude-agent-acp", version: null, source: "path" };
+      const login = await readCliLogin(spec, { env: { PATH: process.env.PATH ?? "" }, cwd: dir, timeoutMs: 10_000 });
+      expect(login).toEqual({ kind: "account", label: "Claude Max", email: realpathSync(dir), plan: "max", detail: null });
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
   });
 
   it("opens the sign-in with the adapter it found, and teaches when it can't", async () => {

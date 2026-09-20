@@ -108,6 +108,12 @@ const otherWindow = (tool: string, docId: string) =>
 
 const errorMessage = (err: unknown) => (err instanceof Error ? err.message : String(err));
 
+/**
+ * Results Sonobe made up for a call Stop cut off: the bridge gave up on it, but the server may have
+ * run it anyway (a handler past its last look at the signal finishes), so what the call changed is unknown.
+ */
+const cutOff = new WeakSet<ToolCallResult>();
+
 const isRecord = (value: unknown): value is Record<string, unknown> => !!value && typeof value === "object" && !Array.isArray(value);
 
 /** A teaching error's code (results.ts `failure` in @sonobe/mcp), or null. */
@@ -207,7 +213,11 @@ export function createToolRunner(scope: ToolRunScope): ToolRunner {
           : {}),
       });
     } catch (err) {
-      if (signal.aborted) return { content: [{ type: "text", text: `The person pressed Stop while ${name} was running, so it was cancelled. Anything it had already applied stays; check list_history before trying again.` }], isError: true };
+      if (signal.aborted) {
+        const cancelled: ToolCallResult = { content: [{ type: "text", text: `The person pressed Stop while ${name} was running, so it was cancelled. Anything it had already applied stays; check list_history before trying again.` }], isError: true };
+        cutOff.add(cancelled);
+        return cancelled;
+      }
       log("warn", `Assistant tool ${name} failed: ${errorMessage(err)}`);
       return { content: [{ type: "text", text: `The ${name} tool failed: ${errorMessage(err)}` }], isError: true };
     }
@@ -276,7 +286,8 @@ export function createToolRunner(scope: ToolRunScope): ToolRunner {
    * draft's fields as the server merged them (a draft an earlier chat left keeps its replace), a draft
    * the server doesn't have is forgotten, and a preview import drops it once it's layers. A failed call
    * leaves the draft as it was. A result without the fields leaves the draft unknown, and the next
-   * preview import asks the server with a dry run.
+   * preview import asks the server with a dry run, as it does after a call Stop cut off (the server
+   * may have taken that one, a new replace included).
    */
   const trackDraft = (name: string, input: Record<string, unknown>, result: ToolCallResult): void => {
     if (name !== PREVIEW_TOOL && !(name === DESIGN_TOOL && input.preview === true)) return;
@@ -284,7 +295,7 @@ export function createToolRunner(scope: ToolRunScope): ToolRunner {
     const docId = typeof data?.docId === "string" ? data.docId : typeof input.docId === "string" ? input.docId : null;
     if (docId === null) return;
     if (result.isError) {
-      if (errorCode(result) === "no_draft") scope.previews.delete(docId);
+      if (errorCode(result) === "no_draft" || cutOff.has(result)) scope.previews.delete(docId);
       return;
     }
     if (name === DESIGN_TOOL) {

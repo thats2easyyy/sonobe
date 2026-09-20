@@ -32,6 +32,13 @@ const MAX_STDERR_LINE = 16_384;
 const SECRET_LINE = /sk-ant-|\bBearer\s+\S{16,}/i;
 const REDACTED_LINE = "[redacted: the line held a key or token]";
 const LONG_LINE = "[left out: a line over 16 KB]";
+/**
+ * A frame of Node's native stack trace (" 7: 0x102f8a5d8 v8::internal::…"). Dozens follow a fatal
+ * error such as running out of heap, and would push the line that says so out of the tail, so each
+ * run of them is kept as one line.
+ */
+const NATIVE_FRAME = /^\s*\d+: 0x[0-9a-f]+ /i;
+const NATIVE_FRAMES = "[left out: Node's native stack trace]";
 
 const AUTH_STATUS_METHOD = "_auth/status_update";
 const AUTH_KINDS: ReadonlySet<string> = new Set<AgentAuthStatus["kind"]>(["account", "api_key", "gateway", "external", "none"]);
@@ -39,8 +46,9 @@ const CANCELLED: RequestPermissionResponse = { outcome: { outcome: "cancelled" }
 
 const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === "object" && value !== null && !Array.isArray(value);
 /** The agent's plain errors reach Sonobe as -32603 "Internal error" with the text in data.details. */
-const detailsOf = (err: unknown) => (err instanceof RequestError && isRecord(err.data) && typeof err.data.details === "string" ? err.data.details : null);
-const messageOf = (err: unknown) => {
+export const detailsOf = (err: unknown) => (err instanceof RequestError && isRecord(err.data) && typeof err.data.details === "string" ? err.data.details : null);
+/** An error's message with the agent's details, for the log. */
+export const messageOf = (err: unknown) => {
   const details = detailsOf(err);
   return err instanceof Error ? `${err.message}${details ? `: ${details}` : ""}` : String(err);
 };
@@ -72,11 +80,13 @@ export function parseAuthStatus(params: unknown): AgentAuthStatus | null {
   return { kind: raw.kind as AgentAuthStatus["kind"], label: raw.label, email: text(account.email), plan: text(account.plan), detail: text(raw.detail) };
 }
 
-/** The last lines of the adapter's stderr, at most STDERR_TAIL_CHARS, with secret-shaped lines redacted. */
+/** The last lines of the adapter's stderr, at most STDERR_TAIL_CHARS, with secret-shaped lines redacted and native stack traces left out. */
 function stderrTail() {
   let kept = "";
   let partial = "";
   let skipping = false;
+  /** The last line kept was a native stack frame's. */
+  let inFrames = false;
   /** The end of `text`, at most STDERR_TAIL_CHARS, from the start of a line. */
   const last = (text: string) => {
     if (text.length <= STDERR_TAIL_CHARS) return text;
@@ -85,7 +95,10 @@ function stderrTail() {
     return start >= 0 && start < cut.length - 1 ? cut.slice(start + 1) : cut;
   };
   const keep = (line: string) => {
-    kept = last(`${kept}${SECRET_LINE.test(line) ? REDACTED_LINE : line.replace(/\r$/, "")}\n`);
+    const frame = NATIVE_FRAME.test(line);
+    if (frame && inFrames) return;
+    inFrames = frame;
+    kept = last(`${kept}${frame ? NATIVE_FRAMES : SECRET_LINE.test(line) ? REDACTED_LINE : line.replace(/\r$/, "")}\n`);
   };
   return {
     write(chunk: string) {
@@ -101,7 +114,8 @@ function stderrTail() {
       else partial = text;
     },
     text(): string {
-      const unfinished = skipping ? LONG_LINE : partial && SECRET_LINE.test(partial) ? REDACTED_LINE : partial;
+      const frame = !skipping && NATIVE_FRAME.test(partial);
+      const unfinished = skipping ? LONG_LINE : frame ? (inFrames ? "" : NATIVE_FRAMES) : partial && SECRET_LINE.test(partial) ? REDACTED_LINE : partial;
       return last(`${kept}${unfinished}`.trimEnd());
     },
   };

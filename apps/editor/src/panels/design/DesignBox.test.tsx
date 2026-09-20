@@ -963,6 +963,24 @@ describe("DesignBox on the Claude subscription (experimental)", () => {
     expect(fake.sent).toHaveLength(1);
   });
 
+  it("sends on a subscription chat whose switch another window turned off, so main's answer says what to do", async () => {
+    // This window's chat failed signed out; then another window turned the switch off. Sign in… and Check again can't fix that.
+    const signedOut = subscriptionStatus({ state: "signed_out", kind: "none", label: "Not logged in", message: SIGNED_OUT_MESSAGE });
+    const fake = fakeAssistantHost({ connection: { subscriptionEnabled: false, provider: "subscription" }, subscription: signedOut });
+    fake.chatProvider = "subscription";
+    const off = "Claude subscription is off in Settings → Claude. Turn it back on, or start a new chat to use your API key.";
+    fake.nextResult = () => ({ runId: "", outcome: "error", error: { code: "subscription_off", message: off }, usage: usage() });
+    await mount(fake);
+    type("a checkout screen");
+    press("Enter");
+    await settle();
+    expect(fake.checks).toBe(0);
+    expect(fake.sent.map((r) => r.text)).toEqual(["a checkout screen"]);
+    expect(container.querySelector(".sb-design-box__notice")).toBeNull();
+    expect(statusText()).toBe(off);
+    expect(buttonNamed("Open Settings")).toBeTruthy();
+  });
+
   it("keeps the usage meter out of the box: the plan has no budget here", async () => {
     await mount(on());
     act(() => assistantStore.setState({ usage: usage(1_400_000, 1_400_000) }));

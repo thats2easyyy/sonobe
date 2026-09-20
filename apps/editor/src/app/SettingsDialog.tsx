@@ -73,8 +73,8 @@ export const SUBSCRIPTION_SWITCH_DESCRIPTION =
 /**
  * The experimental switch (desktop, with a preload that has it): the Assistant on the person's Claude
  * subscription. Main keeps it, off by default; this asks main and shows what main says. A build that
- * doesn't offer it (a release, unless started with SONOBE_CLAUDE_SUBSCRIPTION=1) shows nothing, and so
- * does one whose answer hasn't come yet, so a release never shows the switch even for a moment.
+ * doesn't offer it (any packaged build, so every release) shows nothing, and so does one whose answer
+ * hasn't come yet, so a release never shows the switch even for a moment.
  */
 function SubscriptionSwitch() {
   const controller = useMemo(() => sharedAssistantController(), []);

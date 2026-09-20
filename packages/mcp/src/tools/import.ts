@@ -162,7 +162,7 @@ export function registerImportTools(tc: ToolContext): void {
       // Not idempotent: each append adds to the draft.
       annotations: { ...UI_ONLY, idempotentHint: false },
     },
-    async (args, ctx) => {
+    async (args, ctx, work) => {
       const modes = [args.html, args.append, args.clear ? true : undefined].filter((m) => m !== undefined).length;
       if (modes !== 1)
         return failure({
@@ -177,6 +177,8 @@ export function registerImportTools(tc: ToolContext): void {
       // The turn is the draft's own, found by the document's id, so the read happens before it.
       const snap = await host.getDocument(args.docId);
       return withDraft(host, now, snap.docId, key, async (drafts) => {
+        // A call cancelled while it waited (Stop in the Assistant, a client that gave up) never draws, and leaves the draft as it was.
+        work.throwIfCancelled();
         const current = drafts.get();
         if (args.clear) {
           if (!current) return success("There's no draft to remove, so nothing changed.", { docId: snap.docId, name: null, component: null, replace: null, bytes: 0, revision: snap.revision, draftRevision: null });

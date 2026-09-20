@@ -1,5 +1,5 @@
 import { CircleAlert, CircleCheck, CircleUserRound, Copy, Info, LoaderCircle, ShieldCheck, TriangleAlert } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Button } from "../../ui/Button.tsx";
 import type { AssistantController } from "./controller.ts";
 import { billedElsewhere, CLAUDE_AGENT_INSTALL } from "./provider.ts";
@@ -24,12 +24,35 @@ export function SubscriptionSetup({ controller, subscription, onDone, doneLabel 
   const state = subscription?.state ?? "unknown";
   const [signIn, setSignIn] = useState<{ state: "idle" | "opening" | "opened" } | { state: "error"; message: string }>({ state: "idle" });
   const [copied, setCopied] = useState<"idle" | "copied" | "failed">("idle");
+  // This setup's own check. Its answer can still be "unknown" (main's switch went off meanwhile, or main couldn't tell):
+  // then it says so, with Check again, rather than spinning, or asking again on its own. The effect reads the ref.
+  const [own, setOwnState] = useState<"idle" | "checking" | "unanswered">("idle");
+  const ownRef = useRef(own);
+  const mounted = useRef(true);
+  const setOwn = useCallback((next: "idle" | "checking" | "unanswered") => {
+    ownRef.current = next;
+    if (mounted.current) setOwnState(next);
+  }, []);
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
+
+  const check = useCallback(() => {
+    setOwn("checking");
+    void controller.checkSubscription().then((answer) => setOwn(!answer || answer.state === "unknown" ? "unanswered" : "idle"));
+  }, [controller, setOwn]);
 
   // Also on a "checking" main answered with (another window's check, or the adapter starting): the controller's check waits
   // for it, rather than the setup spinning until something else reads the status. It shares a check that's already running.
+  // Not while this setup's own check runs (it made the "checking"), and not after one came back unanswered.
   useEffect(() => {
-    if (state === "unknown" || state === "checking") void controller.checkSubscription();
-  }, [state, controller]);
+    if (state === "unknown" || state === "checking") {
+      if (ownRef.current === "idle") check();
+    } else if (ownRef.current === "unanswered") setOwn("idle");
+  }, [state, check, setOwn]);
 
   useEffect(() => {
     if (copied !== "copied") return;
@@ -37,10 +60,10 @@ export function SubscriptionSetup({ controller, subscription, onDone, doneLabel 
     return () => clearTimeout(timer);
   }, [copied]);
 
-  const checking = state === "unknown" || state === "checking";
-  const check = () => {
+  const checking = state === "checking" || (state === "unknown" && own !== "unanswered");
+  const checkAgain = () => {
     setSignIn({ state: "idle" });
-    void controller.checkSubscription();
+    check();
   };
 
   const openSignIn = async () => {
@@ -59,8 +82,8 @@ export function SubscriptionSetup({ controller, subscription, onDone, doneLabel 
     }
   };
 
-  const checkAgain = (
-    <Button size="sm" onClick={check} loading={checking}>
+  const checkAgainButton = (
+    <Button size="sm" onClick={checkAgain} loading={checking}>
       Check again
     </Button>
   );
@@ -71,6 +94,16 @@ export function SubscriptionSetup({ controller, subscription, onDone, doneLabel 
       <p className="sb-assistant-key__status" role="status">
         <LoaderCircle size={13} className="sb-spin" aria-hidden /> Checking Claude…
       </p>
+    );
+  } else if (state === "unknown") {
+    body = (
+      <>
+        <p className="sb-assistant-key__status" role="status">
+          <Info size={13} aria-hidden className="sb-assistant-sub__status-icon" />
+          <span>Sonobe couldn't check Claude's login this time. Choose Check again.</span>
+        </p>
+        <div className="sb-assistant-key__actions">{checkAgainButton}</div>
+      </>
     );
   } else if (state === "ready") {
     const elsewhere = billedElsewhere(subscription);
@@ -95,7 +128,7 @@ export function SubscriptionSetup({ controller, subscription, onDone, doneLabel 
         )}
         {subscription?.adapterVersion ? <p className="sb-assistant-key__replace">Claude's agent adapter {subscription.adapterVersion}</p> : null}
         <div className="sb-assistant-key__actions">
-          {checkAgain}
+          {checkAgainButton}
           {onDone ? (
             <Button size="sm" variant="primary" onClick={onDone} className="sb-assistant-key__done">
               {doneLabel}
@@ -120,7 +153,7 @@ export function SubscriptionSetup({ controller, subscription, onDone, doneLabel 
           </p>
         ) : null}
         <p className="sb-assistant-key__replace">Run it in Terminal, then check again.</p>
-        <div className="sb-assistant-key__actions">{checkAgain}</div>
+        <div className="sb-assistant-key__actions">{checkAgainButton}</div>
       </>
     );
   } else {
@@ -138,7 +171,7 @@ export function SubscriptionSetup({ controller, subscription, onDone, doneLabel 
               Sign in…
             </Button>
           ) : null}
-          {checkAgain}
+          {checkAgainButton}
         </div>
         {signIn.state === "opened" ? (
           <p className="sb-assistant-key__status" role="status">

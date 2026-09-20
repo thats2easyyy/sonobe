@@ -16,7 +16,7 @@
  *                 pickFolder,                                             // the native folder dialog
  *                 handoff: { platform, dir, server, openPath },           // Open in Claude Code (../claude-handoff.ts)
  *                 connection: createConnectionStore({ file }),            // the subscription switch and pick (connection.ts)
- *                 subscription: { available, sessionsDir, signIn: { platform, dir, openPath } } })  // the Claude subscription (acp/); available: unpackaged, or SONOBE_CLAUDE_SUBSCRIPTION=1
+ *                 subscription: { available, sessionsDir, signIn: { platform, dir, openPath } } })  // the Claude subscription (acp/); available: !app.isPackaged
  *   preload.ts  attachAssistantBridge(host, ipcRenderer)   // before contextBridge.exposeInMainWorld
  *
  * Designing on the canvas (design.ts, draftStream.ts, designGuard.ts): the Design with Claude box
