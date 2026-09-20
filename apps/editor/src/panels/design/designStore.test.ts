@@ -1,5 +1,6 @@
 import { applyOps, createEmptyDocument, formatStyleDigest, styleDigest, type Op } from "@sonobe/core";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import type { DesignPreviewUpdate } from "../../host/types.ts";
 import { createManualScheduler } from "../../runtime/scheduler.ts";
 import { getRegistry } from "../../state/registry.ts";
 import { createEditorSession, type EditorSession } from "../../state/session.ts";
@@ -7,7 +8,7 @@ import { assistantStore, initialAssistantData } from "../assistant/assistantStor
 import { sharedAssistantController } from "../assistant/controller.ts";
 import { fakeAssistantHost, usage } from "../assistant/testing.ts";
 import type { AssistantEvent, AssistantImported } from "../assistant/types.ts";
-import { activeDraft, attachDesign, designStore, initialDesignData, reduceDesignEvent, runReply, sendDesign, type DesignData, type DesignRequest } from "./designStore.ts";
+import { activeDraft, applyPreviewUpdate, attachDesign, designStore, initialDesignData, MCP_DRAFT_IDLE_MS, reduceDesignEvent, reducePreviewUpdate, runReply, sendDesign, type DesignData, type DesignDraft, type DesignRequest, type PreviewTarget } from "./designStore.ts";
 
 type Draft = Extract<AssistantEvent, { type: "design_draft" }>;
 const draft = (offset: number, append: string, extra: Partial<Draft> = {}): Draft => ({ type: "design_draft", runId: "r1", turn: 1, toolUseId: "t1", offset, append, done: false, ...extra });
@@ -27,7 +28,7 @@ describe("reduceDesignEvent", () => {
   it("walks a draft from writing to adding to added", () => {
     const html = "<html><body><h1>Checkout</h1></body></html>";
     let state = fold([draft(0, html.slice(0, 12), { fields: { name: "Checkout" } }), draft(12, html.slice(12, 30))], {}, 1000);
-    expect(state.drafts).toEqual([{ runId: "r1", turn: 1, toolUseId: "t1", html: html.slice(0, 30), fields: { name: "Checkout" }, status: "writing", since: 1000, progress: null, error: null, resync: false }]);
+    expect(state.drafts).toEqual([{ source: "assistant", key: "t1", runId: "r1", turn: 1, toolUseId: "t1", html: html.slice(0, 30), fields: { name: "Checkout" }, status: "writing", since: 1000, progress: null, error: null, resync: false }]);
     expect(activeDraft(state, 5000)?.toolUseId).toBe("t1");
 
     state = fold([draft(30, html.slice(30), { done: true, html, fields: { name: "Checkout", width: 402 } })], state, 2000);
@@ -107,6 +108,144 @@ describe("reduceDesignEvent", () => {
     // A run the chat sheet started leaves the box's request behind.
     expect(fold([{ type: "run_started", runId: "r2", model: "claude-sonnet-5" }], state).request).toBeNull();
     expect(fold([{ type: "run_started", runId: "r2", model: "claude-sonnet-5" }]).request).toBeNull();
+  });
+});
+
+describe("reducePreviewUpdate", () => {
+  const CLAUDE_CODE = { id: "cc-1", label: "Claude Code", folder: "/Users/ava/code/placemark" };
+  const AUTHOR = { kind: "agent" as const, name: "Claude" };
+  const update = (extra: Partial<DesignPreviewUpdate> = {}): DesignPreviewUpdate => ({
+    docId: "placemark",
+    key: "cc-1",
+    author: AUTHOR,
+    client: CLAUDE_CODE,
+    name: "Checkout",
+    component: null,
+    replace: null,
+    width: null,
+    height: null,
+    position: null,
+    html: "<html><body><h1>Checkout</h1>",
+    status: "writing",
+    revision: 1,
+    ...extra,
+  });
+  const at = (revision = 0, lastChange: PreviewTarget["lastChange"] = null): PreviewTarget => ({ docId: null, revision, lastChange });
+
+  function play(updates: DesignPreviewUpdate[], start: Partial<DesignData> = {}, target = at(), now = 1000): DesignData {
+    let state: DesignData = { ...initialDesignData(), ...start };
+    for (const u of updates) state = { ...state, ...reducePreviewUpdate(state, u, now, target) };
+    return state;
+  }
+
+  it("draws a session's draft as it grows, with its fields, and moves it to adding", () => {
+    let state = play([update()]);
+    expect(state.drafts).toEqual([
+      {
+        source: "mcp",
+        key: "mcp:cc-1",
+        runId: "",
+        turn: 0,
+        toolUseId: "",
+        html: "<html><body><h1>Checkout</h1>",
+        fields: { name: "Checkout" },
+        status: "writing",
+        since: 1000,
+        progress: null,
+        error: null,
+        resync: false,
+        mcp: { author: AUTHOR, client: CLAUDE_CODE, revision: 1, touchedAt: 1000, addingFrom: null },
+      },
+    ]);
+    state = play([update({ html: "<html><body><h1>Checkout</h1><p>Apple Pay</p>", revision: 2, replace: "home", width: 402, position: [0, 20] })], state, at(), 2000);
+    expect(state.drafts).toHaveLength(1);
+    expect(state.drafts[0]).toMatchObject({ html: "<html><body><h1>Checkout</h1><p>Apple Pay</p>", fields: { name: "Checkout", replace: "home", width: 402, position: [0, 20] }, status: "writing", since: 1000, mcp: { revision: 2, touchedAt: 2000 } });
+    expect(activeDraft(state, 2000)?.key).toBe("mcp:cc-1");
+
+    state = play([update({ revision: 3, status: "adding" })], state, at(7), 3000);
+    expect(state.drafts[0]).toMatchObject({ status: "adding", since: 3000, mcp: { revision: 3, addingFrom: 7 } });
+  });
+
+  it("ends a cleared draft as added after its author's import, else as stopped, and lets it fade", () => {
+    const adding = play([update(), update({ revision: 2, status: "adding" })], {}, at(7));
+    const importChange = { kind: "apply" as const, revision: 8, author: AUTHOR };
+    const added = play([update({ revision: 3, status: "cleared", html: null })], adding, at(8, importChange), 5000);
+    expect(added.drafts[0]).toMatchObject({ status: "added", since: 5000, mcp: { revision: 3 } });
+    expect(activeDraft(added, 5399)?.key).toBe("mcp:cc-1");
+    expect(activeDraft(added, 5400)).toBeNull();
+
+    // Someone else's change, or none since it started adding, isn't its import.
+    expect(play([update({ revision: 3, status: "cleared", html: null })], adding, at(8, { ...importChange, author: { kind: "human", name: "You" } })).drafts[0]?.status).toBe("stopped");
+    expect(play([update({ revision: 3, status: "cleared", html: null })], adding, at(7, { ...importChange, revision: 7 })).drafts[0]?.status).toBe("stopped");
+    // Cleared while writing (preview_design clear, or the draft expired).
+    expect(play([update(), update({ revision: 2, status: "cleared", html: null })], {}, at(8, importChange)).drafts[0]?.status).toBe("stopped");
+    // Nothing to clear.
+    expect(reducePreviewUpdate(initialDesignData(), update({ status: "cleared", html: null }), 1, at())).toEqual({});
+    expect(reducePreviewUpdate(added, update({ revision: 4, status: "cleared", html: null }), 1, at())).toEqual({});
+  });
+
+  it("goes back to writing when the import fails, and starts over after it ended", () => {
+    let state = play([update(), update({ revision: 2, status: "adding" }), update({ revision: 3, html: "<p>Fixed</p>" })], {}, at(4), 1000);
+    expect(state.drafts[0]).toMatchObject({ status: "writing", html: "<p>Fixed</p>", mcp: { addingFrom: null } });
+    state = play([update({ revision: 4, status: "cleared", html: null })], state);
+    // The same session's next draft replaces the ended one and is the newest, whatever its revision.
+    const other: DesignDraft = { source: "assistant", key: "t9", runId: "r1", turn: 1, toolUseId: "t9", html: "<p>Home</p>", fields: {}, status: "added", since: 1000, progress: null, error: null, resync: false };
+    state = play([update({ revision: 1, name: "Profile", html: "<p>Profile</p>" })], { drafts: [state.drafts[0]!, other] });
+    expect(state.drafts.map((d) => [d.key, d.status])).toEqual([
+      ["t9", "added"],
+      ["mcp:cc-1", "writing"],
+    ]);
+  });
+
+  it("ignores an older update and another document's", () => {
+    const state = play([update({ revision: 5, html: "<p>5</p>" })]);
+    expect(reducePreviewUpdate(state, update({ revision: 4, html: "<p>4</p>" }), 1, at())).toEqual({});
+    expect(reducePreviewUpdate(state, update({ revision: 4, status: "cleared", html: null }), 1, at())).toEqual({});
+    expect(reducePreviewUpdate(state, update({ revision: 5, html: "<p>5 again</p>" }), 1, at()).drafts?.[0]?.html).toBe("<p>5 again</p>");
+    // A window that knows its document ignores another's.
+    expect(reducePreviewUpdate(initialDesignData(), update({ docId: "shop" }), 1, { ...at(), docId: "placemark" })).toEqual({});
+    expect(reducePreviewUpdate(initialDesignData(), update(), 1, { ...at(), docId: "placemark" }).drafts).toHaveLength(1);
+  });
+
+  it("keeps two sessions' drafts apart, and previews the newest draft of any source", () => {
+    let state = play([update(), update({ key: "cd-1", client: { id: "cd-1", label: "Claude Desktop" }, name: "Profile" }), update({ revision: 2, html: "<p>more</p>" })]);
+    expect(state.drafts.map((d) => [d.key, d.fields.name, d.html])).toEqual([
+      ["mcp:cc-1", "Checkout", "<p>more</p>"],
+      ["mcp:cd-1", "Profile", "<html><body><h1>Checkout</h1>"],
+    ]);
+    expect(activeDraft(state, 1000)?.key).toBe("mcp:cd-1");
+    // The Assistant's draft starts after them, so it's the one the canvas shows.
+    state = { ...state, ...reduceDesignEvent(state, draft(0, "<html>"), 1000) };
+    expect(activeDraft(state, 1000)?.key).toBe("t1");
+    // The Assistant's events leave MCP drafts alone.
+    state = { ...state, ...reduceDesignEvent(state, { type: "run_finished", runId: "r1", outcome: "stopped", usage: usage() }, 1000) };
+    expect(state.drafts.map((d) => d.status)).toEqual(["writing", "writing", "stopped"]);
+    expect(activeDraft(state, 1000)?.key).toBe("mcp:cd-1");
+  });
+
+  it("leaves the canvas once a draft has had no update for 15 minutes", () => {
+    const state = play([update()], {}, at(), 1000);
+    expect(activeDraft(state, 1000 + MCP_DRAFT_IDLE_MS - 1)?.key).toBe("mcp:cc-1");
+    expect(activeDraft(state, 1000 + MCP_DRAFT_IDLE_MS)).toBeNull();
+    // Another update brings it back.
+    expect(activeDraft(play([update({ revision: 2 })], state, at(), 1000 + MCP_DRAFT_IDLE_MS), 1000 + MCP_DRAFT_IDLE_MS)?.key).toBe("mcp:cc-1");
+  });
+
+  it("reads the window's document when applied, so the import that cleared it counts as added", () => {
+    designStore.setState(initialDesignData());
+    const session = createEditorSession({ host: null, document: createEmptyDocument({ name: "Placemark" }), autoplay: false, scheduler: createManualScheduler(), textMeasurer: "approximate" });
+    try {
+      expect(applyPreviewUpdate(session, update(), 1000)).toBe(true);
+      expect(applyPreviewUpdate(session, update({ revision: 2, status: "adding" }), 1100)).toBe(true);
+      const applied = session.document.getState().apply([{ op: "addLayer", layer: { id: "checkout", type: "group", name: "Checkout" } }], { label: "imported Checkout", author: AUTHOR });
+      expect(applied.ok).toBe(true);
+      expect(applyPreviewUpdate(session, update({ revision: 3, status: "cleared", html: null }), 1200)).toBe(true);
+      expect(designStore.getState().drafts[0]).toMatchObject({ key: "mcp:cc-1", status: "added" });
+      expect(applyPreviewUpdate(session, update({ revision: 4, status: "cleared", html: null }), 1300)).toBe(false);
+    } finally {
+      session.dispose();
+      designStore.setState(initialDesignData());
+    }
   });
 });
 

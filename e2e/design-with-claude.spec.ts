@@ -1,7 +1,9 @@
 /**
  * Design with Claude on the canvas, against a fake Assistant (e2e/fakeAssistant.ts). The dev server
  * sets Vite's DEV, so getAssistantHost() returns the fake, and window.sonobeHost stays unset: the rest
- * of the editor, including the page's import, runs as the browser editor does.
+ * of the editor, including the page's import, runs as the browser editor does. An MCP client's
+ * preview_design drafts reach the canvas through the test hook's previewDesign, which takes the
+ * design.preview RPC's path.
  */
 
 import { expect, test, type Locator, type Page } from "@playwright/test";
@@ -62,6 +64,26 @@ function exampleRequests(page: Page): string[] {
 
 /** The CSP reports the fetch probe causes on purpose. */
 const withoutProbes = (problems: string[]) => problems.filter((p) => !p.includes("https://example.com/x"));
+
+/** A checkout page in the parts Claude Code sends with preview_design: the head and header, then the order, then the pay bar. */
+const CHECKOUT_PARTS = [
+  [
+    "<!doctype html><html><head><style>",
+    ":root{--ink:#111118;--muted:#6B6B78;--line:#ECECF1}",
+    "body{margin:0;font-family:system-ui,sans-serif;color:var(--ink);background:#fff}",
+    "header{padding:64px 20px 12px}h1{margin:0;font-size:34px}header p{margin:4px 0 0;color:var(--muted);font-size:15px}",
+    ".item{display:flex;align-items:center;gap:12px;margin:0 20px;padding:14px 0;border-bottom:1px solid var(--line)}",
+    ".thumb{width:56px;height:56px;border-radius:12px;background:linear-gradient(135deg,#F9A8D4,#8B5CF6)}",
+    ".item b{display:block;font-size:17px}.item span{color:var(--muted);font-size:15px}.price{margin-left:auto;font-weight:600}",
+    ".pay{position:fixed;left:20px;right:20px;bottom:34px;padding:16px;border-radius:14px;background:var(--ink);color:#fff;text-align:center;font-size:17px;font-weight:600}",
+    '</style></head><body><header data-name="Header"><h1 data-name="Title">Checkout</h1><p data-name="Subtitle">2 tickets · Sunset Picnic</p></header>',
+  ].join(""),
+  [
+    '<div class="item" data-name="Ticket"><div class="thumb"></div><div><b data-name="Ticket Name">General admission</b><span>Sat, June 14</span></div><div class="price">$36</div></div>',
+    '<div class="item" data-name="Promo"><div><b data-name="Promo Title">Promo code</b><span>SUMMER10 saves $3.60</span></div><div class="price">−$3.60</div></div>',
+  ].join(""),
+  '<div class="pay" data-name="Pay Button">Pay $32.40 with Apple Pay</div></body></html>',
+];
 
 test.describe("Design with Claude", () => {
   test("draws the page Claude is writing over the artboard, then adds it as layers in one undo step", async ({ page }) => {
@@ -203,6 +225,59 @@ test.describe("Design with Claude", () => {
     await expect(page.getByRole("button", { name: "Copy for Claude Code" })).toBeVisible();
     await expect(preview(page)).toHaveCount(0);
     await screenshot(page, "design-03-no-key");
+    expect(problems).toEqual([]);
+  });
+
+  test("draws the screen Claude Code is writing as its preview_design calls arrive", async ({ page }) => {
+    const problems = collectConsoleProblems(page);
+    await openEditor(page);
+    const client = { id: "cc-1", label: "Claude Code", folder: "/Users/ava/code/placemark" };
+    /** What the desktop sends over design.preview for each of Claude Code's calls (the test hook takes the same path). */
+    const show = (parts: number, status: "writing" | "adding" | "cleared", revision: number) =>
+      hook(page, (s, update) => s.previewDesign(update), {
+        docId: "photo-zoom",
+        key: client.id,
+        author: { kind: "agent" as const, name: "Claude" },
+        client,
+        name: "Checkout",
+        component: null,
+        replace: null,
+        width: null,
+        height: null,
+        position: null,
+        html: status === "cleared" ? null : CHECKOUT_PARTS.slice(0, parts).join(""),
+        status,
+        revision,
+      });
+    const pill = page.locator(".sb-design-preview__pill");
+    const frame = page.frameLocator("iframe[title='Design preview']");
+
+    // It said what it's doing (begin_work), then showed the page's head and header.
+    await hook(page, (s, c) => void s.session.presence.getState().begin({ intent: "designing a checkout screen", author: { kind: "agent", name: "Claude" }, client: c }), client);
+    expect(await show(1, "writing", 1)).toEqual({ applied: true });
+    await expect(pill).toHaveText("Claude Code is writing “Checkout”");
+    await expect(frame.getByText("2 tickets · Sunset Picnic")).toBeVisible();
+    await expect(frame.getByText("General admission")).toHaveCount(0);
+    const [frameBox, artboardBox] = await Promise.all([preview(page).boundingBox(), page.locator(".sb-cv__artboard").boundingBox()]);
+    expect(frameBox && artboardBox).toBeTruthy();
+    for (const key of ["x", "y", "width", "height"] as const) expect(Math.abs(frameBox![key] - artboardBox![key]), key).toBeLessThanOrEqual(2);
+
+    // Its next call appended the order.
+    await show(2, "writing", 2);
+    await expect(frame.getByText("General admission")).toBeVisible();
+    await expect(frame.getByText("SUMMER10 saves $3.60")).toBeVisible();
+    await expect(pill).toHaveText("Claude Code is writing “Checkout”");
+    await expect(page.locator(".sb-cv__label-agent")).toHaveText("Claude Code: designing a checkout screen");
+    await screenshot(page, "design-05-claude-code");
+
+    // import_design with "preview": true says it's adding the whole page, then clears the draft once the layers are in.
+    await show(3, "adding", 3);
+    await expect(pill).toHaveText("Adding the layers…");
+    await expect(frame.getByText("Pay $32.40 with Apple Pay")).toBeVisible();
+    await show(0, "cleared", 4);
+    await expect(preview(page)).toBeHidden();
+    // This test sends only the previews, and they never touch the document.
+    expect((await screens(page)).some((l) => l.name === "Checkout")).toBe(false);
     expect(problems).toEqual([]);
   });
 

@@ -5,7 +5,7 @@
  * the File System Access API.
  */
 
-import type { SeenIdsJSON, SonobeDocument } from "@sonobe/core";
+import type { Author, Id, SeenIdsJSON, SonobeDocument } from "@sonobe/core";
 
 /** A handler registry for calls from the desktop main process (see SonobeHostRpc). */
 export interface RpcRegistrar {
@@ -186,6 +186,31 @@ export interface DesktopCaptureProgress {
   message: string;
   done?: number;
   total?: number;
+}
+
+/**
+ * The `design.preview` RPC's params: an MCP client's preview_design draft, for the canvas to draw.
+ * Structural mirror of DesignPreviewUpdate in packages/mcp/src/host.ts, so the editor doesn't import
+ * the MCP package. Keep in sync.
+ */
+export interface DesignPreviewUpdate {
+  docId: Id;
+  /** The session the draft belongs to (relay client id, else author name). */
+  key: string;
+  author: Author;
+  client?: { id: string; label: string; folder?: string };
+  name: string | null;
+  component: Id | null;
+  replace: Id | null;
+  width: number | null;
+  height: number | null;
+  position: [number, number] | null;
+  /** The whole draft so far; null when cleared. */
+  html: string | null;
+  /** writing: Claude is writing it; adding: import_design is importing it; cleared: gone (imported, cleared or expired). */
+  status: "writing" | "adding" | "cleared";
+  /** Increments with every update of this draft. */
+  revision: number;
 }
 
 /** SecretsStatus in host-api.d.ts. */

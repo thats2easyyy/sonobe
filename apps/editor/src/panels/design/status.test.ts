@@ -7,7 +7,7 @@ import { DESIGN_COPY, designResultChips, designRunState, designStatusLine, toolS
 const context: AssistantCanvasContext = { component: { id: "main", name: "Main", size: [402, 874] }, screens: [{ id: "home", name: "Home" }] };
 const withTarget: AssistantCanvasContext = { ...context, target: { id: "card", name: "Card", type: "group", frame: [16, 120, 370, 200] } };
 const request = (extra: Partial<DesignRequest> = {}): DesignRequest => ({ runId: "r1", text: "a checkout", context, selection: [], ...extra });
-const draftOf = (extra: Partial<DesignDraft> = {}): DesignDraft => ({ runId: "r1", turn: 1, toolUseId: "t1", html: "", fields: {}, status: "writing", since: 0, progress: null, error: null, resync: false, ...extra });
+const draftOf = (extra: Partial<DesignDraft> = {}): DesignDraft => ({ source: "assistant", key: "t1", runId: "r1", turn: 1, toolUseId: "t1", html: "", fields: {}, status: "writing", since: 0, progress: null, error: null, resync: false, ...extra });
 const result = (extra: Partial<DesignResult> = {}): DesignResult => ({ kind: "added", layerId: "checkout", component: "main", name: "Checkout", txnId: "x1", dropped: [], droppedCount: 0, coveredScreen: null, reply: "", ...extra });
 const design = (extra: Partial<DesignData> = {}): DesignData => ({ ...initialDesignData(), open: true, request: request(), ...extra });
 const chip = (name: string, extra: Partial<ToolChip> = {}): ToolChip => ({ toolUseId: `t-${name}`, name, title: name, detail: "", status: "running", changedDocument: false, ...extra });
