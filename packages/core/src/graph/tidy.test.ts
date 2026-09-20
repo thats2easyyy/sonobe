@@ -1,10 +1,12 @@
 import { describe, expect, it } from "vitest";
 import { emptyDoc, mockRegistry, mustApply } from "../testing/fixtures.ts";
 import type { Op, SonobeDocument } from "../types.ts";
+import { deriveGraph } from "./deriveGraph.ts";
 import { homeFrame } from "./frames.ts";
 import { rectContains, rectsOverlap, type Rect } from "./geometry.ts";
+import { readNodePositions } from "./graphNodes.ts";
 import { componentNodeBoxes } from "./placement.ts";
-import { planTidy, tidyPlanOps, type GroupLayout, type TidyFrame, type TidyNode, type TidyRequest } from "./tidy.ts";
+import { createElkGroupLayout, planTidy, tidyPlanOps, type ElkGraphNode, type ElkLike, type GroupLayout, type TidyFrame, type TidyNode, type TidyRequest } from "./tidy.ts";
 
 /** A stand-in for ELK: one column in the order given (reading order), so the frame rules are what's tested. */
 const column: GroupLayout = async (nodes, _edges, options) => {
@@ -91,6 +93,24 @@ describe("planTidy", () => {
     expect(second.plan.frames.size).toBe(0);
   });
 
+  it("changes nothing the second time when the layout's result depends on the order it's given", async () => {
+    // ELK keeps the order it's given. Were that where the last tidy left the nodes, each tidy could flip it: a column in reverse order.
+    const flipping: GroupLayout = (nodes, edges, options) => column([...nodes].reverse(), edges, options);
+    const request: TidyRequest = { nodes: [box("a", 0, 0), box("b", 0, 300), box("c", 400, 100)], edges: [], frames: [frame("f", 600, 0, 300, 400)] };
+    request.nodes = [...request.nodes, box("x", 620, 60), box("y", 620, 200)];
+    const tidied = async (r: TidyRequest) => {
+      const plan = await planTidy(r, flipping);
+      return { plan, next: { ...r, nodes: r.nodes.map((n) => ({ ...n, ...(plan.nodes.get(n.id) ?? {}) })), frames: (r.frames ?? []).map((f) => ({ ...f, ...(plan.frames.get(f.id) ?? {}) })) } };
+    };
+    const first = await tidied(request);
+    expect(first.plan.nodes.size).toBeGreaterThan(0);
+    for (let pass = 2; pass <= 3; pass++) {
+      const again = await tidied(first.next);
+      expect([...again.plan.nodes.keys()], `pass ${pass}`).toEqual([]);
+      expect([...again.plan.frames.keys()], `pass ${pass}`).toEqual([]);
+    }
+  });
+
   it("keeps a selection inside its frame, growing the frame and pushing the next one clear", async () => {
     const r = await run({ ...sectioned(), scope: { kind: "nodes", ids: ["names", "count", "last", "scroll"] } });
     for (const id of ["names", "count", "last"]) expect(rectContains(r.frame("places"), r.node(id)), id).toBe(true);
@@ -139,6 +159,56 @@ describe("planTidy", () => {
     for (const id of ["a", "c"]) expect(rectContains(r.frame("outer"), r.node(id)), id).toBe(true);
     expect(overlaps([...r.nodes, r.frame("inner")].filter((x) => x.id !== "b"))).toEqual([]);
   });
+
+  it("changes nothing the second time when a nested frame reaches past its parent's padding", async () => {
+    // The inner frame sits at the outer one's left edge, so the refit outer frame reaches 20 pt further left than its padding.
+    const request: TidyRequest = { nodes: [box("a", 40, 60), box("b", 40, 400), box("c", 600, 60)], edges: [], frames: [frame("outer", 0, 0, 900, 700), frame("inner", 0, 340, 400, 200)] };
+    const first = await run(request);
+    expect(first.frame("outer").x).toBe(-20);
+    expect(first.node("a").x).toBe(first.frame("inner").x);
+    const second = await run({ ...request, nodes: first.nodes, frames: first.frames });
+    expect([...second.plan.nodes.keys(), ...second.plan.frames.keys()]).toEqual([]);
+  });
+
+  it("changes nothing the second time when the layout never leaves the order it was given", async () => {
+    // Each layout moves the first node to the bottom, so the reading order goes through all twelve rotations.
+    const rotating: GroupLayout = (nodes, edges, options) => column([...nodes.slice(1), nodes[0]!], edges, options);
+    let r: TidyRequest = { nodes: Array.from({ length: 12 }, (_, i) => box(`n${String(i).padStart(2, "0")}`, (i * 7) % 5, i * 200)), edges: [] };
+    const plans = [];
+    for (let pass = 0; pass < 3; pass++) {
+      const plan = await planTidy(r, rotating);
+      plans.push(plan.nodes.size);
+      r = { ...r, nodes: r.nodes.map((n) => ({ ...n, ...(plan.nodes.get(n.id) ?? {}) })) };
+    }
+    expect(plans[0]).toBeGreaterThan(0);
+    expect(plans.slice(1)).toEqual([0, 0]);
+  });
+});
+
+describe("createElkGroupLayout", () => {
+  it("fixes ports at their rows, gives a layer node's inputs its rows in id order, and sorts the cables", async () => {
+    let graph: ElkGraphNode | undefined;
+    const elk: ElkLike = { layout: async (g) => ((graph = g), { ...g, children: g.children?.map((c) => ({ ...c, x: 0, y: 0 })) }) };
+    const ports = (...ids: string[]) => ids.map((id, i) => ({ id, side: id.startsWith("in:") ? ("in" as const) : ("out" as const), y: 41 + 22 * i }));
+    // The editor lists @card's driven properties in the order of their drivers (scale's is higher), which this tidy is about to change.
+    const nodes = [{ ...box("t", 0, 0), ports: ports("in:progress", "in:end", "out:output") }, { ...box("@card", 300, 0), ports: ports("in:scale", "in:opacity", "out:position") }];
+    const edges = [
+      { source: "t", sourceHandle: "out:output", target: "@card", targetHandle: "in:scale" },
+      { source: "t", sourceHandle: "out:output", target: "@card", targetHandle: "in:opacity" },
+      { source: "@card", sourceHandle: "out:position", target: "t", targetHandle: "in:progress" },
+    ];
+    await createElkGroupLayout(elk)(nodes, edges, { direction: "LR", columnGap: 72, rowGap: 28 });
+    expect(graph!.children!.map((c) => [c.id, c.ports!.map((p) => `${p.id}@${p.y}`)])).toEqual([
+      ["t", ["t::in:progress@41", "t::in:end@63", "t::out:output@85"]],
+      ["@card", ["@card::in:opacity@41", "@card::in:scale@63", "@card::out:position@85"]],
+    ]);
+    // Cables in id order, not the document's.
+    expect(graph!.edges).toEqual([
+      { id: "e0", sources: ["t::out:output"], targets: ["@card::in:opacity"] },
+      { id: "e1", sources: ["t::out:output"], targets: ["@card::in:scale"] },
+      { id: "e2", sources: ["@card::out:position"], targets: ["t::in:progress"] },
+    ]);
+  });
 });
 
 describe("tidyPlanOps", () => {
@@ -168,5 +238,42 @@ describe("tidyPlanOps", () => {
     expect(ops).toContainEqual({ op: "setNodePositions", component: "main", positions: { "@card": [30, 400 + 102 + 28] } });
     const tidied = mustApply(doc, ops).doc;
     expect(tidyPlanOps(tidied.components.main!, await planTidy(request(tidied), column))).toEqual([]);
+  });
+
+  /** Tidies main twice through the document, the way tidy_graph does: boxes and cables from deriveGraph each time. */
+  async function tidyTwice(setup: Op[], component = "main") {
+    const request = (d: SonobeDocument): TidyRequest => {
+      const graph = deriveGraph({ doc: d, componentId: component, registry: mockRegistry });
+      return { nodes: [...componentNodeBoxes(d, mockRegistry, component)].map(([id, r]) => ({ id, ...r })), edges: graph.edges.map((e) => ({ source: e.source, target: e.target })) };
+    };
+    const doc = build(setup);
+    const first = tidyPlanOps(doc.components[component]!, await planTidy(request(doc), column));
+    const tidied = mustApply(doc, first).doc;
+    const second = tidyPlanOps(tidied.components[component]!, await planTidy(request(tidied), column));
+    return { first, second, tidied };
+  }
+
+  it("saves a read-only layer node that leads the layout, so the next tidy doesn't move its reader again", async () => {
+    // The layer node is placed left of its reader and anchors the group: the tidy leaves it where it is and moves the reader.
+    const { first, second, tidied } = await tidyTwice([
+      { op: "addLayer", layer: { id: "card", type: "rectangle", name: "Card" } },
+      { op: "addPatch", patch: { id: "t", type: "transition", ui: { x: 400, y: 100 }, inputs: { progress: { link: "@card.opacity" } } } },
+    ]);
+    expect(first.some((op) => op.op === "updatePatch" && op.id === "t")).toBe(true);
+    expect(readNodePositions(tidied.components.main)["@card"]).toBeDefined();
+    expect(second).toEqual([]);
+  });
+
+  it("saves the component inputs node that leads the layout", async () => {
+    const { second, tidied } = await tidyTwice(
+      [
+        { op: "addComponent", ref: "fader", component: { name: "Fader", kind: "patchComponent" } },
+        { op: "updateInterface", component: "$fader", inputs: { amount: { type: "number", default: 0 } } },
+        { op: "addPatch", component: "$fader", patch: { id: "t", type: "transition", ui: { x: 400, y: 100 }, inputs: { progress: { link: "$in.amount" } } } },
+      ],
+      "fader",
+    );
+    expect(readNodePositions(tidied.components.fader)["$in"]).toBeDefined();
+    expect(second).toEqual([]);
   });
 });
