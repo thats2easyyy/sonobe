@@ -87,6 +87,7 @@ import {
   type PortSide,
 } from "./model/types.ts";
 import { centerOfView, createPatchEditorActions, type LinkSearchRequest, type PatchEditorActions, type PickerRequest, type XY } from "./state/actions.ts";
+import { createAppearStore } from "./state/appear.ts";
 import { patchEditorBridge, registerPatchEditor } from "./state/bridge.ts";
 import { PatchEditorContext, type PatchEditorContextValue } from "./state/context.ts";
 import { completeConnectionToLayerProp, dropTargetAt } from "./state/linkToLayer.ts";
@@ -130,6 +131,12 @@ const MIN_CANVAS = 48;
 const SETTLE_FRAMES = 40;
 /** The longest a view move takes (fits animate 200 to 260 ms); past it, don't wait on its promise. */
 const MOVE_MS = 600;
+/** How long graph.bounds waits at most for nodes and cables to finish appearing. */
+const APPEAR_WAIT_MS = 1200;
+/** A first fit slower than this shows the loading placeholder. */
+const LOADING_DELAY_MS = 250;
+/** The placeholder's crossfade out as the graph arrives. */
+const LOADING_LEAVE_MS = 240;
 
 /** The next frame, or a moment later in a window that doesn't paint (hidden windows may not run requestAnimationFrame). */
 const nextFrame = () => new Promise<void>((resolve) => {
@@ -222,6 +229,8 @@ function Canvas({ session, componentId, showBreadcrumbs, showToolbar, toolbarCon
   const [geometry] = useState(() => new Map<string, CableGeometry>());
   const bridge = patchEditorBridge(session);
   const reducedMotion = useReducedMotion();
+  const reducedMotionRef = useLatest(reducedMotion);
+  const [appear] = useState(() => createAppearStore({ reducedMotion: () => reducedMotionRef.current }));
   const pointerRef = useRef<XY | null>(null);
   const hoveringRef = useRef(false);
   const mountedRef = useRef(true);
@@ -379,6 +388,26 @@ function Canvas({ session, componentId, showBreadcrumbs, showToolbar, toolbarCon
     if (next !== nodesRef.current) commit(next);
   }, [model.nodes, selectedSet, tick, commit]);
 
+  // -- Appearing: nodes and cables the canvas isn't showing animate in (state/appear.ts) --------
+  useLayoutEffect(() => (wrapperRef.current ? appear.observe(wrapperRef.current) : undefined), [appear]);
+  useLayoutEffect(() => {
+    const change = session.document.getState().lastChange;
+    appear.sync(model.nodes, model.edges, { byHand: change?.kind === "apply" && change.author.kind === "human" });
+  }, [appear, session, model.nodes, model.edges]);
+  // The first reveal starts as the viewport shows: after the first fit, or a replaced document's.
+  useLayoutEffect(() => {
+    const el = wrapperRef.current;
+    if (!fitted || !el) return;
+    const { x, y, zoom } = flowRef.current.getViewport();
+    const drawn = new Map(nodesRef.current.map((n) => [n.id, n]));
+    appear.start({ x: -x / zoom, y: -y / zoom, width: el.clientWidth / zoom, height: el.clientHeight / zoom }, (id) => {
+      const n = drawn.get(id);
+      const width = n?.measured?.width ?? n?.width;
+      const height = n?.measured?.height ?? n?.height;
+      return width && height ? { width, height } : undefined;
+    });
+  }, [appear, fitted]);
+
   const autoFit = useCallback((): boolean => {
     const el = wrapperRef.current;
     if (!el || el.clientWidth < MIN_CANVAS || el.clientHeight < MIN_CANVAS) return false;
@@ -404,19 +433,24 @@ function Canvas({ session, componentId, showBreadcrumbs, showToolbar, toolbarCon
 
   // Another prototype replaced the document (a lesson, an example, an opened file): its root component
   // can share this component id, so fit the new graph instead of keeping the previous document's view.
+  // The viewport hides until then, and the new graph arrives like a first one.
   useEffect(
     () =>
       session.document.getState().subscribeRevision((s, previous) => {
         const change = s.lastChange;
         if (!change || change === previous.lastChange || change.kind !== "replace") return;
         fitModeRef.current = true;
+        appear.reset();
+        setFitted(false);
         requestAnimationFrame(() =>
           requestAnimationFrame(() => {
-            if (mountedRef.current && fitModeRef.current) autoFit();
+            if (!mountedRef.current) return;
+            if (fitModeRef.current) autoFit();
+            else setFitted(true);
           }),
         );
       }),
-    [session, autoFit],
+    [session, autoFit, appear],
   );
 
   useEffect(() => {
@@ -483,9 +517,11 @@ function Canvas({ session, componentId, showBreadcrumbs, showToolbar, toolbarCon
     () =>
       session.bounds?.register("graph.bounds", async () => {
         await settleView();
+        const appearing = appear.busyFor();
+        if (appearing > 0) await new Promise((resolve) => setTimeout(resolve, Math.min(appearing, APPEAR_WAIT_MS)));
         return rectOfElement(wrapperRef.current, flowRef.current.getZoom());
       }),
-    [session, settleView],
+    [session, settleView, appear],
   );
 
   // Where each node is drawn and how big (graph.geometry), so MCP tools tidy and place by real sizes.
@@ -1281,6 +1317,7 @@ function Canvas({ session, componentId, showBreadcrumbs, showToolbar, toolbarCon
           )}
         </ReactFlow>
         <KnifeOverlay ui={ui} />
+        <LoadingPlaceholder loading={!fitted && !empty} />
         <div className="sb-pe-topbar" data-scrim={(showToolbar && toolbarContainer === undefined) || undefined}>
           {showBreadcrumbs && <PatchEditorBreadcrumbs session={session} className="sb-pe-crumbs--overlay" />}
           <LiveScopeChip />
@@ -1319,6 +1356,50 @@ function KnifeOverlay({ ui }: { ui: UiStore }) {
       <polyline points={points} />
       <circle cx={last[0]} cy={last[1]} r={3} />
     </svg>
+  );
+}
+
+/**
+ * The loading placeholder's skeleton graph in a 464 × 176 box: nodes (left, top, port rows, drawn 124
+ * wide with a 24 px header and 18 px rows) and cables from output rows to input rows.
+ */
+const SKELETON_NODES = [
+  { x: 0, y: 14, rows: 2 },
+  { x: 0, y: 110, rows: 1 },
+  { x: 170, y: 44, rows: 3 },
+  { x: 340, y: 0, rows: 2 },
+  { x: 340, y: 104, rows: 2 },
+] as const;
+const SKELETON_CABLES = ["M 124 51 C 147 51 147 81 170 81", "M 124 147 C 147 147 147 117 170 117", "M 294 81 C 317 81 317 55 340 55", "M 294 99 C 317 99 317 141 340 141"];
+
+/** Skeleton nodes on the empty canvas when the first fit takes longer than LOADING_DELAY_MS. They fade out as the graph arrives; a fast load never shows them. */
+function LoadingPlaceholder({ loading }: { loading: boolean }) {
+  const [phase, setPhase] = useState<"hidden" | "shown" | "leaving">("hidden");
+  useEffect(() => {
+    if (loading) {
+      const timer = setTimeout(() => setPhase("shown"), LOADING_DELAY_MS);
+      return () => clearTimeout(timer);
+    }
+    setPhase((p) => (p === "shown" ? "leaving" : "hidden"));
+    const timer = setTimeout(() => setPhase("hidden"), LOADING_LEAVE_MS);
+    return () => clearTimeout(timer);
+  }, [loading]);
+  if (phase === "hidden") return null;
+  return (
+    <div className="sb-pe-loading" data-leaving={phase === "leaving" || undefined} role="status" aria-label="Loading patches">
+      <svg className="sb-pe-loading__cables" viewBox="0 0 464 176" aria-hidden>
+        {SKELETON_CABLES.map((d) => (
+          <path key={d} d={d} />
+        ))}
+      </svg>
+      {SKELETON_NODES.map((n, i) => (
+        <div key={i} className="sb-pe-loading__node" style={{ left: n.x, top: n.y, "--sb-rows": n.rows, "--sb-col": n.x / 170 } as CSSProperties} aria-hidden>
+          {Array.from({ length: n.rows }, (_, row) => (
+            <span key={row} className="sb-pe-loading__row" />
+          ))}
+        </div>
+      ))}
+    </div>
   );
 }
 
