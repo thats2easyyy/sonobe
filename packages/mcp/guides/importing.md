@@ -23,7 +23,12 @@ Related: `start-here`, `animation`, `gestures`, `layout`
 - **One screen per page**, laid out for the device width (`get_document_info` shows it). The viewer draws the status bar, so leave the top safe area empty (62 points on iPhone 17 Pro).
 - **Real content**: the app's actual copy, numbers, avatars and photos (https or data: URLs), and icons as inline `<svg>`.
 - **The app's tokens**: colors, font family and weights, radii, spacing, shadows. Copy them from its theme files. `<style>` works, and so does `<script src="https://cdn.tailwindcss.com"></script>` in the app.
-- **Names**: put `data-name="Like Button"` on every element the prototype will touch. Its layer takes that name, so its id is predictable (`like_button`).
+- **Names**: put `data-name="Like Button"` on every element the prototype will touch, text included. Its layer takes that name, so its id is predictable (`like_button`).
+  - An element that only holds text becomes a text layer with that name: `<div data-name="Card 1 Address">933 Kapahulu Ave</div>` is `card_1_address`. `aria-label`, `data-testid` and `id` name text the same way. Text nothing names is named by its words.
+  - A box with a background or border keeps the name on its group, and its text keeps its words. To name the words too, wrap them: `<button data-name="Like Button"><span data-name="Like Label">Like</span></button>`. A named `<span>` inside a sentence becomes a text layer of its own.
+  - `<body data-name="Discover">` names the screen when you don't pass `name`.
+  - `::before` and `::after` can't carry a name, so draw anything you'll wire with a real element.
+  - A `data-name` inside a very long paragraph that mixes styles can't get a layer of its own; the result says so.
 - **Structure**: `position: fixed` bars stay on screen; content taller than the screen becomes a Content layer that scrolls; `overflow-x: auto` rows (carousels, chips) scroll sideways.
 - **States**: elements with `display: none`, `visibility: hidden` or `opacity: 0` aren't imported. Import alternate states visible (a filled heart next to the outline), then hide them with `update_layers` and reveal them with patches.
 
@@ -47,7 +52,7 @@ For example, pass this page as `html` with `"name": "Post"`:
 2. **Compare.** `get_screenshot` against the source (or `screenshot: true`). Fix what matters for the prototype with `update_layers`, or change the HTML and import again with `replace` set to the screen's id.
 3. **Name what you wire.** Rename generic "Group" layers the person will talk about.
 4. **Wire the interaction** onto the imported ids, then verify it with `sim_reset`, `sim_dispatch` and `sim_trace`.
-5. **Iterate.** When the design changes (the person edits their app, or you revise the HTML), import again with `replace`. Layers found again at the same name path keep their ids, links and connections, so the wiring survives; the result says how many kept their ids and whether any connection was lost.
+5. **Iterate.** When the design changes (the person edits their app, or you revise the HTML), import again with `replace`. Layers found again at the same name path keep their ids, links and connections, so the wiring survives. Text an earlier import named by its words is found again by those words, even once a `data-name` renames it. The result says how many layers kept their ids and names every connection it had to drop (`@open_until_9_pm.text`), so you can wire those again. Text named by its words that now says something else counts as a new layer, so give text you wire a `data-name`.
 
 A design captured elsewhere imports the same way:
 
