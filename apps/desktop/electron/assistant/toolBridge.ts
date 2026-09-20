@@ -17,6 +17,13 @@ export const ASSISTANT_AUTHOR_NAME = "Assistant";
 /** Tool results longer than this are cut, with a note telling Claude to ask for less. */
 export const MAX_TOOL_RESULT_CHARS = 150_000;
 
+/**
+ * MCP tools the Assistant isn't given. The canvas already draws its import_design html while Claude
+ * writes it (design_draft events), so preview_design would only draw the page twice. The server
+ * instructions' lines that name them are left out too.
+ */
+export const ASSISTANT_HIDDEN_TOOLS: ReadonlySet<string> = new Set(["preview_design"]);
+
 export interface ToolContentBlock {
   type: string;
   text?: string;
@@ -59,7 +66,7 @@ export interface ToolCallOptions {
 }
 
 export interface ToolBridge {
-  /** Every tool, in the server's registration order (stable, so prompt caching holds). */
+  /** Every tool but ASSISTANT_HIDDEN_TOOLS, in the server's registration order (stable, so prompt caching holds). */
   tools(): Promise<readonly AssistantToolInfo[]>;
   /** The MCP server's instructions. */
   instructions(): Promise<string>;
@@ -80,6 +87,14 @@ interface Connection {
   close(): Promise<void>;
 }
 
+/** The server instructions without the lines that teach a tool the Assistant isn't given. */
+function withoutHiddenTools(instructions: string): string {
+  return instructions
+    .split("\n")
+    .filter((line) => ![...ASSISTANT_HIDDEN_TOOLS].some((name) => new RegExp(`\\b${name}\\b`).test(line)))
+    .join("\n");
+}
+
 export function createMcpToolBridge(options: McpToolBridgeOptions): ToolBridge {
   let connecting: Promise<Connection> | null = null;
 
@@ -91,7 +106,7 @@ export function createMcpToolBridge(options: McpToolBridgeOptions): ToolBridge {
       const client = new Client({ name: ASSISTANT_AUTHOR_NAME, version: options.version });
       await client.connect(clientSide);
       const listed = await client.listTools();
-      const tools: AssistantToolInfo[] = listed.tools.map((tool) => {
+      const tools: AssistantToolInfo[] = listed.tools.filter((tool) => !ASSISTANT_HIDDEN_TOOLS.has(tool.name)).map((tool) => {
         const annotations = (tool.annotations ?? {}) as { title?: unknown; readOnlyHint?: unknown };
         const title = typeof tool.title === "string" ? tool.title : typeof annotations.title === "string" ? annotations.title : tool.name;
         return { name: tool.name, title, description: tool.description ?? "", inputSchema: tool.inputSchema as Record<string, unknown>, readOnly: annotations.readOnlyHint === true };
@@ -99,7 +114,7 @@ export function createMcpToolBridge(options: McpToolBridgeOptions): ToolBridge {
       return {
         client,
         tools,
-        instructions: client.getInstructions() ?? "",
+        instructions: withoutHiddenTools(client.getInstructions() ?? ""),
         async close() {
           await client.close().catch(() => undefined);
           await server.close().catch(() => undefined);

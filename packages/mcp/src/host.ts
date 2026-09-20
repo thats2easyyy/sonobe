@@ -35,6 +35,8 @@ export interface HostCapabilities {
   autosave: boolean;
   /** import_design draws `<svg data-sf-symbol>` placeholders as real SF Symbols (Sonobe on a Mac). */
   sfSymbols?: boolean;
+  /** showDesignPreview draws preview_design's drafts on a canvas the person sees (the app). */
+  designPreview?: boolean;
 }
 
 /** One open document. */
@@ -390,6 +392,32 @@ export interface CapturedDesign {
   screenshot?: Screenshot;
   /** What the capture left out or approximated (a screenshot that timed out, images cut off), in plain words. */
   notes?: string[];
+}
+
+/** A draft design on the person's canvas (preview_design), as SonobeHost.showDesignPreview sends it. */
+export interface DesignPreviewUpdate {
+  docId: Id;
+  /** The session the draft belongs to (relay client id, else author name). */
+  key: string;
+  author: Author;
+  client?: WorkClient;
+  /** The screen's name, and where it goes: null where the agent left it to import_design's defaults. */
+  name: string | null;
+  component: Id | null;
+  /** The layer the design will replace; the preview draws over it. */
+  replace: Id | null;
+  width: number | null;
+  height: number | null;
+  position: [number, number] | null;
+  /** The whole draft so far; null when cleared. */
+  html: string | null;
+  /** writing: Claude is writing it; adding: import_design is importing it; cleared: gone (imported, cleared or expired). */
+  status: "writing" | "adding" | "cleared";
+  /**
+   * Increments with every update of this draft. A session's next draft continues the count, so a
+   * later update of `key` always has a higher revision than an earlier one.
+   */
+  revision: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -764,6 +792,13 @@ export interface SonobeHost {
    * away and save with the project. Required by import_design when the import brings new images.
    */
   putAssetFiles?(files: readonly ImportFile[], options: { docId?: Id } & HostCallControl): Promise<void>;
+  /**
+   * Optional: draw, update or clear (html null) an agent's draft design on the canvas of the window
+   * showing `update.docId` (preview_design, and import_design's preview source). Best effort: a
+   * window that's gone resolves without drawing. Hosts without a canvas leave it out, and
+   * preview_design keeps the draft for import_design all the same.
+   */
+  showDesignPreview?(update: DesignPreviewUpdate, control?: HostCallControl): Promise<void>;
 
   /**
    * Optional: subscribe to document changes (new revisions, opened and closed documents).

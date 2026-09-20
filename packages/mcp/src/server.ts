@@ -48,6 +48,8 @@ export interface SonobeMcpServerOptions {
    * relay's client id, and relay clients are attributed by the name they announced (clients.ts).
    */
   clients?: ClientRegistry;
+  /** The clock preview_design's drafts go idle by (default Date.now). */
+  now?(): number;
 }
 
 /** Every tool, in registration order (ARCHITECTURE §10). */
@@ -85,6 +87,7 @@ export const TOOL_NAMES = [
   "get_knobs",
   "set_knobs",
   "apply_knob_preset",
+  "preview_design",
   "import_design",
   "sim_reset",
   "sim_dispatch",
@@ -208,6 +211,7 @@ export function serverInstructions(host: SonobeHost): string {
     "4. Call begin_work with a short intent before editing, and finish_work when you're done.",
     '5. Build in small batches (one feature at a time) with add_layers, add_patches (with connections), connect, set_values or apply_ops. Give new items a "ref" and wire them with "$ref.port" in the same batch. To rebuild items, remove the old ones and add their replacements in the same apply_ops so they keep their ids (ids removed by an earlier batch are retired and get a suffix). To swap one patch for another type, replacePatch changes it in place and keeps the cables that fit. Leave out "ui" positions: add_patches places new patches, and tidy_graph lays out a comment frame and reports overlaps. Every write returns ids, the new revision and diagnostics added/resolved; pass expectedRevision so you never overwrite edits the person made meanwhile.',
     '   Build the numbers the person will want to tune or compare (distances, spring feel, thresholds) as knobs with set_knobs, with presets such as a locked "Shipped app" next to "Proposal" (get_guide("knobs")).',
+    ...(host.capabilities.designPreview ? ["   To design a new screen, show it on the canvas as you write with preview_design, then import it with import_design (preview: true)."] : []),
     "6. Verify before claiming it works: get_diagnostics, then sim_reset → sim_dispatch (tap, drag...) → sim_step or sim_trace on the layer properties that should change. To look under a layer or try a value, use sim_override inside the simulation (or get_screenshot with isolate: true for one layer alone) instead of editing and undoing. The person's live viewer keeps its state through your edits; restart_viewer starts it over.",
     "7. When talking to the person, name layers and patches by their display names (the Card's scale), not raw ids, addresses or JSON.",
     '8. To keep work, call save_document. A prototype that was never saved needs a folder: save_document({ path: "~/Documents/<Name>.sonobe" }), then tell the person where it went (don\'t ask them to press ⌘S).',
