@@ -540,7 +540,7 @@ export interface SceneNode {
   transform: number[];
   /** Maps node-local points (origin top-left, bounds [0,width]×[0,height]) to prototype coordinates. */
   worldTransform: number[];
-  /** Stacking/depth among siblings (higher is in front). */
+  /** Stacking among siblings: higher draws in front and hits first; ties keep document order (see paintOrder). */
   zPosition?: number;
   opacity: number;
   visible: boolean;
@@ -555,6 +555,7 @@ export interface SceneNode {
    * JSON or structured clone.
    */
   props: Record<string, Value>;
+  /** Document order. Draw and hit test them in paintOrder(children) (zPosition first). */
   children: SceneNode[];
 }
 
@@ -563,7 +564,7 @@ export interface SceneFrame {
   time: number;
   size: [number, number];
   background: Color;
-  /** Root-level nodes back → front. */
+  /** Root-level nodes in document order. Draw and hit test them in paintOrder(roots) (zPosition first). */
   roots: SceneNode[];
 }
 

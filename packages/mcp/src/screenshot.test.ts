@@ -138,6 +138,35 @@ describe("headless screenshots", () => {
     expect(png(await c.call("get_screenshot", { maxWidth: 100 })).width).toBe(100);
   }, 30_000);
 
+  it("draws a lifted sibling in front, where touches land", async () => {
+    const c = await setup();
+    const added = await c.call("add_layers", {
+      layers: [
+        {
+          type: "rectangle",
+          name: "Lifted",
+          props: { position: [20, 40], size: [100, 100], color: "#FF0000FF", zPosition: 10 },
+        },
+        {
+          type: "rectangle",
+          name: "Later",
+          props: { position: [60, 80], size: [100, 100], color: "#0000FFFF" },
+        },
+      ],
+    });
+    expect(added.isError, added.text).toBe(false);
+    const screen = png(await c.call("get_screenshot", {}));
+    expect(isRed(screen.pixel(100, 120))).toBe(true);
+    const blue = screen.pixel(140, 160);
+    expect(blue[2]! > 200 && blue[0]! < 70).toBe(true);
+    const simId = (await c.call("sim_reset", {})).structured.simId as string;
+    const tap = await c.call("sim_dispatch", {
+      simId,
+      events: [{ kind: "tap", target: [100, 120] }],
+    });
+    expect(tap.text).toContain("hit lifted");
+  }, 30_000);
+
   it("draws a simulation's frame, later frames on a copy, and teaches bad requests", async () => {
     const c = await setup();
     await buildGrowCard(c);

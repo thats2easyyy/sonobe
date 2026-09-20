@@ -10,6 +10,7 @@ Related: `layout`, `components`, `simulation`
 - A patch fed a loop evaluates **once per index**. Stateful patches (Switch, springs) keep separate state per index.
 - When several loops meet, the output is as long as the longest; shorter loops **wrap**. Keep loops that feed one layer the same length.
 - A **layer bound to a looped value repeats**, once per index. Copies sit on top of each other unless each gets its own position, usually from `gridLayout`.
+- Copies draw in index order, so the last copy is in front (as in Origami). For copy 0 in front, such as the top card of a deck, feed index × −1 into `zPosition` (`multiply` with `value2: -1`). Keep other layers of the same group, such as a backdrop, earlier in the layer list. The front copy is also the one that gets touches, and `sim_dispatch` names it (`hit card#0`).
 - An interaction on a repeated layer gives a loop of taps, one per copy. `loopOptionSwitch` remembers which copy pulsed last, and `loopSelect` picks items by index.
 - Loops are capped at 10,000 items.
 
