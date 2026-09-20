@@ -99,6 +99,26 @@ describe("interaction patches in a runtime", () => {
     expect(rt.getValue("toggle.on")).toBe(true);
   });
 
+  it("throws a card on a quick, short flick once Swipe looks ahead", () => {
+    const deck = (lookahead: number) =>
+      runtime({
+        layers: [{ id: "card", type: "rectangle", name: "Card", props: { position: [37, 250], size: [328, 420] } }],
+        patches: {
+          throw: { type: "swipe", inputs: { layer: { layer: "card" }, axis: "horizontal", minDistance: 95, minVelocity: 800, lookahead } },
+          gone: { type: "switch", inputs: { turnOn: { link: "throw.swiped" } } },
+        },
+      });
+    for (const [lookahead, thrown] of [[0, false], [0.2, true]] as const) {
+      const rt = deck(lookahead);
+      runFrames(rt, 2);
+      runFrames(rt, 6, drag([200, 460], [260, 460], { frames: 5, release: false }));
+      const heading = (rt.getValue("throw.projected") as number[])[0]!;
+      expect(lookahead ? heading > 100 : heading === 60).toBe(true);
+      runFrames(rt, 1, [[pointerEvent("up", 260, 460)]]);
+      expect(rt.getValue("gone.on")).toBe(thrown);
+    }
+  });
+
   it("keeps a toggle per copy of a loop-replicated row", () => {
     const rt = runtime({
       layers: [{ id: "row", type: "rectangle", name: "Row", props: { size: [300, 80], position: { link: "rows.positions" } } }],
