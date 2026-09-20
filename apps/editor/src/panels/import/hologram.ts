@@ -2,16 +2,17 @@
  * When the import hologram plays, and on which surfaces. Imports through the dialog and pasted
  * captures ask for it from importCapture; Claude's import_design marks its apply with source "import",
  * which watchHolograms turns into the same request. The canvas that draws the component takes the
- * request, builds the screen and publishes the show: its timeline, so the Viewer's device screen
- * plays along in step. When no canvas draws that component (patches-only view, another component),
- * the Viewer takes the request and plays it alone. A request nobody takes soon goes stale.
+ * request, builds the screen and publishes the show: its plan and when it started, so the Viewer's
+ * device screen traces the same wireframe in step. When no canvas draws that component (patches-only
+ * view, another component), the Viewer takes the request and plays it alone. A request nobody takes
+ * soon goes stale.
  */
 
 import { findLayer, type Id, type LayerNode, type SonobeDocument } from "@sonobe/core";
 import { createStore, type StoreApi } from "zustand/vanilla";
 import type { DocumentChange } from "../../state/document.ts";
 import type { EditorSession } from "../../state/session.ts";
-import type { HoloTimeline } from "./hologramPlan.ts";
+import type { HoloPlan } from "./hologramPlan.ts";
 
 export interface HologramTarget {
   componentId: Id;
@@ -32,9 +33,8 @@ export interface HologramShow extends HologramTarget {
   nonce: number;
   /** performance.now() at the timeline's zero. */
   start: number;
-  timeline: HoloTimeline;
-  /** Reduced motion: a short crossfade. */
-  reduced: boolean;
+  /** The wireframe, in the points of the surface that planned it, and the timeline (reduced motion: a short crossfade). */
+  plan: HoloPlan;
   /** The canvas builds it (the Viewer plays along), or the Viewer plays it alone. */
   lead: "canvas" | "viewer";
   /** performance.now() when a click, a key or an undo ended it early: everything fades out. */
@@ -151,15 +151,18 @@ export const IMPORT_LABEL = /^(re-?)?import(s|ed|ing)?\b/i;
 /**
  * The screen an agent's change imported, when it imported one. Claude's import_design marks its apply
  * with source "import". A change without the mark still counts when its label starts with "imported"
- * or "re-imported" and it added a new screen: an edit that only says "imported" doesn't.
+ * or "re-imported" and it added a new screen, a top-level layer of its component: an edit that only
+ * says "imported", or adds a layer inside an existing screen, doesn't.
  */
 export function agentImportTarget(change: DocumentChange | null | undefined, doc: SonobeDocument, before: SonobeDocument): HologramTarget | null {
   if (!change || change.kind !== "apply" || change.author.kind !== "agent") return null;
   const marked = change.source === "import";
   if (!marked && (change.source !== undefined || !IMPORT_LABEL.test(change.label.trim()))) return null;
   const target = importedScreen(doc, change);
-  if (target && !marked && findLayer(before.components[target.componentId]?.layers ?? [], target.screenId)) return null;
-  return target;
+  if (!target || marked) return target;
+  const screen = doc.components[target.componentId]?.layers.some((layer) => layer.id === target.screenId);
+  const existed = findLayer(before.components[target.componentId]?.layers ?? [], target.screenId);
+  return screen && !existed ? target : null;
 }
 
 /**
