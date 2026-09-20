@@ -156,7 +156,7 @@ Page dots work the same way. Five dots in a Row group, Equals compares each inde
 ## Reading loops in Sonobe
 
 - A loop cable shows a "×N" badge with its item count.
-- Hovering a looped port shows the value for each index.
+- Hovering a looped port shows the value for each index. Move onto that table to watch one copy: every value in the patch editor and the inspector then shows that copy, until you clear the "Copy #k of N" chip.
 - In traces and in Claude's tools, one item is addressed with `#` and its index. `@card.scale#3` is card 3's scale.
 
 ## Try it

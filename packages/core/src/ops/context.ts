@@ -4,7 +4,7 @@ import { didYouMean, didYouMeanText } from "../suggest.ts";
 import { fileNameKey, getOwn, ID_PATTERN, isValidId, slugify, uniqueId } from "../ids.ts";
 import { liveItemIds, type SeenIds } from "../idLedger.ts";
 import { allLayerIds, findLayer, type LayerLocation } from "../registry.ts";
-import type { ApplyOptions, ApplyResult, Component, Id, Op, OpKind, PatchNode, Registry, SonobeDocument, SonobeError } from "../types.ts";
+import type { ApplyOptions, ApplyResult, Component, DroppedInput, Id, Op, OpKind, PatchNode, Registry, SonobeDocument, SonobeError } from "../types.ts";
 import { makeError, type Check, type ValidateOptions } from "../validate.ts";
 import { isLayerInput, isLinkInput } from "../values.ts";
 
@@ -113,9 +113,11 @@ export const newRenamed = (): RenamedIds => ({ retired: {}, suffixed: {} });
 
 export interface OpOutcome {
   inverse: Op[];
-  /** The op as applied, followed by any ops it caused (receivers following a renamed broadcaster). */
+  /** The op as applied, with any ops it caused (receivers following a renamed broadcaster, values it dropped). */
   applied: Op | Op[];
   ids: Id[];
+  /** Stored values the op dropped as a side effect (OpResult.dropped). */
+  dropped?: DroppedInput[];
 }
 
 /** An outcome's applied ops as a list. */

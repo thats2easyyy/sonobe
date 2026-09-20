@@ -26,6 +26,8 @@ export interface PatchEditorContextValue {
   liveEnabled: boolean;
   /** Which instance live values come from. */
   liveScope: LiveScope;
+  /** Copies of the looped layer instance live values come from (the watched copy picks one); undefined when it isn't looped. */
+  instanceCopies?: number | undefined;
   /** Call before moving the viewport on the user's behalf, so panel resizes keep their view instead of re-fitting. */
   markViewportManual: () => void;
   /** Open a port's context menu (publish, unpublish, disconnect, and the node's own entries). */

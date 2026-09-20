@@ -493,9 +493,10 @@ function textLayer(ctx: Ctx, node: SceneNode, p: PropReader, w: number, h: numbe
   return textMarkup(ctx, lines, style, p.color("textColor"), p.str("textAlignment", "left"), p.str("verticalAlignment", "top"), w, h, DECORATIONS[p.str("textDecoration", "none")] ?? null);
 }
 
-function textFieldLayer(ctx: Ctx, p: PropReader, w: number, h: number): string {
+function textFieldLayer(ctx: Ctx, node: SceneNode, p: PropReader, w: number, h: number): string {
   const style = readTextStyle(p);
-  const value = p.str("text", "");
+  // What the field holds (typed, or set by Set Text), else its Text property.
+  const value = node.textField?.text ?? p.str("text", "");
   const multiline = p.bool("multiline", false);
   const empty = value === "";
   const shown = empty ? p.str("placeholder", "") : p.bool("secure", false) ? "•".repeat(graphemes(value).length) : value;
@@ -654,7 +655,7 @@ function renderNode(ctx: Ctx, node: SceneNode, parentWorld: Affine, cloneRoot = 
       content = textLayer(ctx, node, p, w, h);
       break;
     case "textField":
-      content = textFieldLayer(ctx, p, w, h);
+      content = textFieldLayer(ctx, node, p, w, h);
       break;
     case "image":
       shape = "box";

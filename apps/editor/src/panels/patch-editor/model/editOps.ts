@@ -1,6 +1,6 @@
 /**
- * Op builders for patch editor edits: insert, duplicate with inputs, replace with another type,
- * splice into a cable, align, move, comment around a selection, and history labels.
+ * Op builders for patch editor edits: insert, duplicate with inputs, replace with another type
+ * (the core replacePatch op), splice into a cable, align, move, comment around a selection, and history labels.
  */
 
 import {
@@ -20,6 +20,7 @@ import {
   type InputValue,
   type NewPatch,
   type Op,
+  type OpOf,
   type PatchNode,
   type PatchSpec,
   type Registry,
@@ -161,14 +162,12 @@ function pickPort(ports: readonly ResolvedPort[], accepts: (p: ResolvedPort) => 
   return candidates.find((p) => p.type === preferType) ?? candidates.find((p) => p.type !== "any") ?? candidates[0];
 }
 
-export interface ReplacePlan {
-  ops: Op[];
-  /** Links that had no matching port on the new type. */
-  dropped: number;
-}
-
-/** Replace a patch with another type at the same spot, carrying over values and cables that still fit. */
-export function replacePatchOps(doc: SonobeDocument, componentId: Id, registry: Registry, patchId: Id, newType: string, componentTarget?: Id): ReplacePlan | { error: string } {
+/**
+ * The replacePatch op for Replace With: the core op keeps the id, position, name, and every value
+ * and cable that still fits a port with the same key. A cable whose key the new type lacks (or
+ * doesn't fit) moves to the closest port that takes it, through inputMap and outputMap.
+ */
+export function replacePatchOp(doc: SonobeDocument, componentId: Id, registry: Registry, patchId: Id, newType: string, componentTarget?: Id): { op: OpOf<"replacePatch"> } | { error: string } {
   const component = doc.components[componentId];
   const old = component?.patches[patchId];
   const spec = getPatchSpec(registry, newType);
@@ -184,55 +183,39 @@ export function replacePatchOps(doc: SonobeDocument, componentId: Id, registry: 
   const newPorts = resolveNodePorts(doc, virtual, registry);
   if (!newPorts) return { error: `"${spec.name}" can't be placed here.` };
 
-  const ref = "replacement";
-  const patch: NewPatch = { ref, type: newType, ui: { x: old.ui.x, y: old.ui.y } };
-  if (typeParam) patch.typeParam = typeParam;
-  if (inputCount !== undefined) patch.inputCount = inputCount;
-  if (componentTarget) patch.component = componentTarget;
-  if (old.name && old.name !== oldPorts?.spec.name) patch.name = old.name;
-  const ops: Op[] = [{ op: "addPatch", component: componentId, patch }];
-  let dropped = 0;
-
+  const op: OpOf<"replacePatch"> = { op: "replacePatch", component: componentId, id: patchId, patch: { type: newType } };
+  if (componentTarget) op.patch.component = componentTarget;
+  const inputMap: Record<string, string> = {};
   const usedInputs = new Set<string>();
+  const links: [string, string][] = [];
   for (const [key, value] of Object.entries(old.inputs)) {
-    const oldPort = oldPorts?.inputs.find((p) => p.key === key);
-    if (isLinkInput(value)) {
-      const a = parseAddress(value.link);
-      if (a?.kind === "patch" && a.id === patchId) continue;
-      const fromType = portTypeAt(doc, componentId, registry, value.link, "out") ?? "any";
-      const same = newPorts.inputs.find((p) => p.key === key && canConnect(fromType, p.type).ok && !usedInputs.has(p.key));
-      const target = same ?? pickPort(newPorts.inputs, (p) => canConnect(fromType, p.type).ok && p.type !== "layer", oldPort?.type ?? fromType, usedInputs);
-      if (!target) {
-        dropped++;
-        continue;
-      }
-      usedInputs.add(target.key);
-      ops.push({ op: "connect", component: componentId, from: value.link, to: `$${ref}.${target.key}` });
-    } else {
-      const target = newPorts.inputs.find((p) => p.key === key && p.type === oldPort?.type);
-      if (target && !usedInputs.has(target.key)) {
-        usedInputs.add(target.key);
-        ops.push({ op: "setInput", component: componentId, target: `$${ref}.${target.key}`, value });
-      }
-    }
+    if (isLinkInput(value)) links.push([key, value.link]);
+    else if (newPorts.inputs.some((p) => p.key === key)) usedInputs.add(key);
   }
+  for (const [key, link] of links) {
+    const fromType = portTypeAt(doc, componentId, registry, link, "out") ?? "any";
+    const same = newPorts.inputs.find((p) => p.key === key && canConnect(fromType, p.type).ok && !usedInputs.has(p.key));
+    const oldPort = oldPorts?.inputs.find((p) => p.key === key);
+    const target = same ?? pickPort(newPorts.inputs, (p) => canConnect(fromType, p.type).ok && p.type !== "layer", oldPort?.type ?? fromType, usedInputs);
+    if (!target) continue;
+    usedInputs.add(target.key);
+    if (target.key !== key) inputMap[key] = target.key;
+  }
+  const outputMap: Record<string, string> = {};
   for (const entry of listInputs(component)) {
     if (!isLinkInput(entry.value)) continue;
     const a = parseAddress(entry.value.link);
-    if (a?.kind !== "patch" || a.id !== patchId) continue;
+    if (a?.kind !== "patch" || a.id !== patchId || Object.hasOwn(outputMap, a.key)) continue;
     if (entry.target.kind === "patch" && entry.target.id === patchId) continue;
-    const to = targetAddress(entry.target);
-    const toType = portTypeAt(doc, componentId, registry, to, "in") ?? "any";
+    const toType = portTypeAt(doc, componentId, registry, targetAddress(entry.target), "in") ?? "any";
+    if (newPorts.outputs.some((p) => p.key === a.key && canConnect(p.type, toType).ok)) continue;
     const oldOut = oldPorts?.outputs.find((p) => p.key === a.key);
-    const out = newPorts.outputs.find((p) => p.key === a.key && canConnect(p.type, toType).ok) ?? pickPort(newPorts.outputs, (p) => canConnect(p.type, toType).ok, oldOut?.type ?? toType);
-    if (!out) {
-      dropped++;
-      continue;
-    }
-    ops.push({ op: "connect", component: componentId, from: `$${ref}.${out.key}`, to });
+    const out = pickPort(newPorts.outputs, (p) => canConnect(p.type, toType).ok, oldOut?.type ?? toType);
+    if (out) outputMap[a.key] = out.key;
   }
-  ops.push({ op: "removePatch", component: componentId, id: patchId });
-  return { ops, dropped };
+  if (Object.keys(inputMap).length) op.inputMap = inputMap;
+  if (Object.keys(outputMap).length) op.outputMap = outputMap;
+  return { op };
 }
 
 export interface SplicePlan {

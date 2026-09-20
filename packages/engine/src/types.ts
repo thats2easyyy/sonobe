@@ -576,6 +576,23 @@ export interface SceneNode {
   props: Record<string, Value>;
   /** Document order. Draw and hit test them in paintOrder(children) (zPosition first). */
   children: SceneNode[];
+  /** Text Field only, once it holds state its props don't show: typed text, focus, or a Set Text or Begin/End Editing pulse. */
+  textField?: TextFieldState;
+}
+
+/**
+ * What a Text Field holds beyond its props. Renderers push `text` into the field when `textRevision`
+ * changes and focus or blur it when `editRevision` changes, so no pulse has to be caught on its frame.
+ */
+export interface TextFieldState {
+  /** What the field holds: typed, set by its Text property, or by Set Text. */
+  text: string;
+  /** Changes each time Set Text replaced the text (0 until it first does). */
+  textRevision: number;
+  /** Changes each time Begin Editing or End Editing fired (0 until one does). */
+  editRevision: number;
+  /** What the last of those asked for: true after Begin Editing, false after End Editing. */
+  editing: boolean;
 }
 
 export interface SceneFrame {

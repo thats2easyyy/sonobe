@@ -1,4 +1,4 @@
-/** Property test: random op sequences; every successful op's inverse restores a deep-equal document. */
+/** Property test: random op sequences; every successful op's inverse restores a deep-equal document, strictly and leniently, and so does redo. */
 
 import { describe, expect, it } from "vitest";
 import { allLayers, resolveNodePorts, resolveLayerProps } from "../registry.ts";
@@ -128,6 +128,19 @@ function randomOp(doc: SonobeDocument, rand: () => number): Op | undefined {
       if (chance(0.2)) op.ui = { x: int(500), collapsed: chance(0.5), color: pick(["", "blue"])! };
       return op;
     }
+    case "replacePatch": {
+      const id = pick(patchIds);
+      if (!id) return undefined;
+      const type = pick(["switch", "popAnimation", "transition", "add", "counter", "delay1", "logger"].filter((t) => t !== c.patches[id]!.type))!;
+      const op: Op = { op: "replacePatch", component: cid, id, patch: { type } };
+      if (type === "transition" && chance(0.5)) op.patch.typeParam = pick(["number", "point", "color"])!;
+      if (type === "add" && chance(0.5)) op.patch.inputCount = 2 + int(4);
+      if (chance(0.2)) op.patch.name = pick(["Spring", ""])!;
+      // Carry a value or cable onto a port with another key, like the editor's Replace With.
+      const from = pick(Object.keys(c.patches[id]!.inputs));
+      if (from && type === "popAnimation" && chance(0.5)) op.inputMap = { [from]: "number" };
+      return op;
+    }
     case "removePatch": {
       const id = pick(patchIds);
       return id ? { op: "removePatch", component: cid, id } : undefined;
@@ -245,7 +258,10 @@ function randomOp(doc: SonobeDocument, rand: () => number): Op | undefined {
 describe("inverse ops (property)", () => {
   it("restores deep-equal documents for random op sequences", () => {
     const succeeded = new Map<string, number>();
-    for (const seed of [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]) {
+    // 59, 71, 275 and 384 once left cables or instance values that no longer fit (a port declared
+    // again with another type, one input shared by targets of two types, an input named like a
+    // layer property), so a later inverse failed or restored the wrong document.
+    for (const seed of [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 59, 71, 275, 384]) {
       const rand = mulberry32(seed);
       const start = mustApply(emptyDoc(), SAMPLE_OPS).doc;
       let doc = start;
@@ -266,6 +282,9 @@ describe("inverse ops (property)", () => {
         const redo = applyOps(doc, r.applied, { registry: mockRegistry });
         if (!redo.ok) throw new Error(`seed ${seed} step ${step}: redo of ${JSON.stringify(op)} failed: ${JSON.stringify(redo.errors)}`);
         expect(redo.doc).toStrictEqual(r.doc);
+        // History replays undo and redo leniently, so what an op drops as a side effect must be spelled out.
+        expect(applyOps(doc, r.applied, { registry: mockRegistry, lenient: true }).doc, `lenient redo of ${JSON.stringify(op)}`).toStrictEqual(r.doc);
+        expect(applyOps(r.doc, r.inverse, { registry: mockRegistry, lenient: true }).doc, `lenient undo of ${JSON.stringify(op)}`).toStrictEqual(doc);
         batch.push(op);
         doc = r.doc;
       }

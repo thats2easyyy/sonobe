@@ -2,7 +2,8 @@
  * Per-session state shared between the patch editor and other panels: layer property targets the
  * user asked to drive (shown on layer nodes before anything drives them), a pending "pick a driving
  * patch" request for whichever patch editor shows that component, the cable being dragged (so
- * Layers and Inspector rows can light up), and which component instance live values come from.
+ * Layers and Inspector rows can light up), which component instance live values come from, and the
+ * loop copy read-outs watch.
  */
 
 import type { Id, ValueType } from "@sonobe/core";
@@ -40,6 +41,12 @@ export interface PatchEditorBridgeState {
   cableDrag: CableDrag | null;
   /** instanceChoiceKey(parent, component) → the instance live values come from. */
   instanceChoices: Readonly<Record<string, Id>>;
+  /**
+   * The loop copy live read-outs show, in the patch editor and the inspector: item k of a looped
+   * value (k mod its length), and copy k of a looped component instance you're inside. Null shows
+   * the "×N" summary.
+   */
+  watchedCopy: number | null;
   addTarget: (component: Id, address: string) => void;
   /** Forget targets (all of the component's when `addresses` is omitted). */
   removeTargets: (component: Id, addresses?: readonly string[]) => void;
@@ -47,6 +54,7 @@ export interface PatchEditorBridgeState {
   consumeRequest: (nonce: number) => void;
   setCableDrag: (drag: CableDrag | null) => void;
   chooseInstance: (key: string, instance: Id) => void;
+  watchCopy: (copy: number | null) => void;
 }
 
 export type PatchEditorBridge = StoreApi<PatchEditorBridgeState>;
@@ -71,6 +79,7 @@ export function patchEditorBridge(session: object): PatchEditorBridge {
       request: null,
       cableDrag: null,
       instanceChoices: {},
+      watchedCopy: null,
       addTarget(component, address) {
         const current = get().targets[component] ?? [];
         if (current.includes(address)) return;
@@ -100,6 +109,10 @@ export function patchEditorBridge(session: object): PatchEditorBridge {
       chooseInstance(key, instance) {
         if (get().instanceChoices[key] === instance) return;
         set({ instanceChoices: { ...get().instanceChoices, [key]: instance } });
+      },
+      watchCopy(copy) {
+        const next = copy === null || !Number.isInteger(copy) || copy < 0 ? null : copy;
+        if (get().watchedCopy !== next) set({ watchedCopy: next });
       },
     }));
     bridges.set(session, store);

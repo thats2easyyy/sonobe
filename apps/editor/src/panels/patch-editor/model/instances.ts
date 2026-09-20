@@ -100,6 +100,30 @@ export function resolveLiveScope(doc: SonobeDocument, componentPath: readonly Id
   return { prefix: steps.map((s) => s.instance).join("/"), steps };
 }
 
+/**
+ * The address whose `copies` (runtime inspect) count the copies of the instance you're inside, when
+ * it's a layer instance: "@card.position", "@list/card.position" inside another instance. Null at
+ * the root and for patch instances.
+ */
+export function instanceCopiesAddress(scope: LiveScope): string | null {
+  const last = scope.steps.at(-1);
+  if (scope.prefix === null || !last) return null;
+  const instance = last.instances.find((x) => x.id === last.instance);
+  if (instance?.kind !== "layer") return null;
+  const parent = scope.steps.slice(0, -1).map((s) => s.instance).join("/");
+  return `@${parent ? `${parent}/` : ""}${instance.id}.position`;
+}
+
+/**
+ * The instance path live values come from, with the watched copy: inside a looped instance
+ * (`copies` of them), "card#3" picks that copy (wrapping past the last). Without a watched copy, or
+ * when the instance isn't looped, it's the scope's own path (the engine then reads copy 0).
+ */
+export function watchedPrefix(scope: LiveScope, copies: number | undefined, copy: number | null): string | null {
+  if (scope.prefix === null || copy === null || !copies || !scope.steps.length) return scope.prefix;
+  return `${scope.prefix}#${copy % copies}`;
+}
+
 /** A component-local address as the engine reads it inside `prefix` ("pop.output" → "card/pop.output", "@badge.scale" → "@card/badge.scale"). */
 export function scopedAddress(prefix: string, address: string): string {
   if (!prefix) return address;

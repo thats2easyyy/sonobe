@@ -102,13 +102,16 @@ export function useLiveValues(addresses: readonly string[], options: ValueSubscr
   const [values, setValues] = useState<LiveValues>({});
   const key = addresses.join("\n");
   const hz = options.hz;
+  const scope = options.scope;
+  const scopeKey = scope === undefined || typeof scope === "string" ? scope : `/${scope.instancePath}`;
   useEffect(() => {
     if (!key) {
       setValues({});
       return;
     }
-    return session.runtime.subscribeValues(key.split("\n"), (next) => setValues(next), hz !== undefined ? { hz } : {});
-  }, [session, key, hz]);
+    const valueScope = scopeKey === undefined ? undefined : scopeKey.startsWith("/") ? { instancePath: scopeKey.slice(1) } : (scopeKey as "current" | "root");
+    return session.runtime.subscribeValues(key.split("\n"), (next) => setValues(next), { ...(hz !== undefined ? { hz } : {}), ...(valueScope !== undefined ? { scope: valueScope } : {}) });
+  }, [session, key, hz, scopeKey]);
   return values;
 }
 
