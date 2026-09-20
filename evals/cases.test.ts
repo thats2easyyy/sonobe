@@ -4,13 +4,13 @@
  * MCP against the headless host.
  */
 
+import { existsSync } from "node:fs";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/server";
 import { findLayer, type SonobeDocument } from "@sonobe/core";
-import { saveProjectToDisk } from "@sonobe/core/node";
 import { createHeadlessHost, serveStdioHost } from "@sonobe/mcp";
 import { createPatchRegistry } from "@sonobe/patches";
 import { afterAll, describe, expect, it } from "vitest";
@@ -20,6 +20,7 @@ import {
   listCaseIds,
   loadCase,
   targetLayer,
+  writeStartProject,
   type EvalCase,
 } from "./lib/cases.ts";
 import { checkProject, failureLines } from "./lib/checks.ts";
@@ -35,11 +36,12 @@ afterAll(async () => {
   await Promise.all(temps.map((dir) => rm(dir, { recursive: true, force: true })));
 });
 
-async function saveStart(doc: SonobeDocument): Promise<string> {
+/** The start saved the way the runner saves it. */
+async function saveStart(evalCase: EvalCase, doc: SonobeDocument): Promise<string> {
   const dir = await mkdtemp(path.join(tmpdir(), "sonobe-eval-test-"));
   temps.push(dir);
   const project = path.join(dir, "Prototype.sonobe");
-  await saveProjectToDisk(project, doc);
+  await writeStartProject(evalCase, doc, project);
   return project;
 }
 
@@ -79,9 +81,18 @@ for (const id of ids) {
       expect(namedLayers(evalCase).filter((layer) => !findLayer(root.layers, layer))).toEqual([]);
     });
 
+    it("saves its start project with every asset file", async () => {
+      const start = await buildStartDocument(evalCase, registry);
+      const project = await saveStart(evalCase, start);
+      const missing = Object.values(start.assets)
+        .map((asset) => asset.file)
+        .filter((file) => !existsSync(path.join(project, "assets", file)));
+      expect(missing, "asset records whose files the start doesn't have").toEqual([]);
+    });
+
     it("fails its checks before Claude has done anything", async () => {
       const start = await buildStartDocument(evalCase, registry);
-      const report = await checkProject(evalCase, await saveStart(start), {
+      const report = await checkProject(evalCase, await saveStart(evalCase, start), {
         registry,
         startDoc: start,
       });
@@ -92,7 +103,7 @@ for (const id of ids) {
       const solution = solutionFor(evalCase);
       expect(solution, "add a solution.json").toBeDefined();
       const start = await buildStartDocument(evalCase, registry);
-      const project = await saveStart(start);
+      const project = await saveStart(evalCase, start);
       const host = createHeadlessHost({ registry, autosave: true });
       await host.openDocument(project);
       const [clientSide, serverSide] = InMemoryTransport.createLinkedPair();

@@ -17,7 +17,6 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 import type { SonobeDocument } from "@sonobe/core";
-import { saveProjectToDisk } from "@sonobe/core/node";
 import { createPatchRegistry } from "@sonobe/patches";
 import { formatReport } from "../examples/lib/scenarios.ts";
 import {
@@ -28,6 +27,7 @@ import {
   loadCase,
   renderPrompt,
   selectCaseIds,
+  writeStartProject,
   type EvalCase,
 } from "./lib/cases.ts";
 import { checkProject, type CheckReport } from "./lib/checks.ts";
@@ -207,7 +207,7 @@ async function runOne(session: Session, evalCase: EvalCase, run: number): Promis
   const startDoc = await start;
   const work = await mkdtemp(path.join(tmpdir(), `sonobe-eval-${evalCase.id}-`));
   const projectDir = path.join(work, "Prototype.sonobe");
-  await saveProjectToDisk(projectDir, startDoc);
+  await writeStartProject(evalCase, startDoc, projectDir);
   const mcpConfigPath = path.join(work, "mcp.json");
   await writeFile(
     mcpConfigPath,
