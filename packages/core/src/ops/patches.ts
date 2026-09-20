@@ -290,6 +290,7 @@ export function updatePatch(ctx: OpContext, op: OpOf<"updatePatch">): OpOutcome 
   // Lenient replays (redo) don't prune, so the drops are listed after the op.
   const clears: Op[] = removed.map((e) => ({ op: "setInput", component: component.id, target: targetAddress(e.target), value: null }));
   const outcome: OpOutcome = { ids: [id], applied: clears.length ? [applied, ...clears] : applied, inverse: [inverse, ...restoreInputOps(component.id, removed)] };
+  if (removed.length) outcome.dropped = removed.map((e) => ({ to: targetAddress(e.target), value: e.value }));
   return following?.receivers.length ? followBroadcaster(ctx, outcome, node, following.before, following.receivers) : outcome;
 }
 
@@ -300,6 +301,7 @@ function followBroadcaster(ctx: OpContext, outcome: OpOutcome, node: PatchNode, 
   if (!after.name || sameVariable(after, before)) return outcome;
   const applied: Op[] = [...appliedOps(outcome)];
   const inverse: Op[] = [];
+  const dropped = [...(outcome.dropped ?? [])];
   for (const r of receivers) {
     const change: OpOf<"updatePatch"> = { op: "updatePatch", component: r.componentId, id: r.id };
     const settings: NonNullable<PatchNode["settings"]> = {};
@@ -310,8 +312,9 @@ function followBroadcaster(ctx: OpContext, outcome: OpOutcome, node: PatchNode, 
     const result = updatePatch(ctx, change);
     applied.push(...appliedOps(result));
     inverse.unshift(...result.inverse);
+    dropped.push(...(result.dropped ?? []));
   }
-  return { ids: outcome.ids, applied, inverse: [...inverse, ...outcome.inverse] };
+  return { ids: outcome.ids, applied, inverse: [...inverse, ...outcome.inverse], ...(dropped.length ? { dropped } : {}) };
 }
 
 /** The fields replacePatch's "patch" takes, and hints for the ones people guess. */

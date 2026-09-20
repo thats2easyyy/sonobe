@@ -301,6 +301,26 @@ describe("apply_ops", () => {
     expect(history.text).toContain("replaced 1 patch");
   });
 
+  it("lists what a typeParam or inputCount change drops", async () => {
+    await buildGrowCard(client);
+    const added = await client.call("add_patches", {
+      patches: [{ ref: "pick", type: "optionPicker", name: "Pick", inputCount: 3, inputs: { option1: 4, option2: 6 } }],
+    });
+    expect(added.isError, added.text).toBe(false);
+    const fewer = await client.call("apply_ops", {
+      ops: [{ op: "updatePatch", id: "pick", inputCount: 2 }],
+      dryRun: true,
+    });
+    expect(fewer.text).toContain("Would drop what no longer fits after the typeParam or inputCount change: pick.option2 (6).");
+    const point = await client.call("apply_ops", { ops: [{ op: "updatePatch", id: "card_scale", typeParam: "point" }] });
+    expect(point.isError, point.text).toBe(false);
+    expect(point.text).toContain("Dropped what no longer fits after the typeParam or inputCount change: card_scale.start (1), card_scale.end (1.08). The undo tool brings them back.");
+    expect(point.structured.dropped).toEqual([
+      { to: "card_scale.start", value: 1 },
+      { to: "card_scale.end", value: 1.08 },
+    ]);
+  });
+
   it("creates patch components with published ports", async () => {
     const r = await client.call("apply_ops", {
       ops: [
