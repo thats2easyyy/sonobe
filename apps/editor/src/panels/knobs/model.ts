@@ -249,7 +249,7 @@ export function planMakeKnob(
 }
 
 /** A field's literal as a knob keeps it: the same number, flag, color, key, text or vector (an index reads as a number, a size as a point). */
-function knobValueFor(value: InputValue): Literal | undefined {
+export function knobValueFor(value: InputValue): Literal | undefined {
   if (typeof value === "number" || typeof value === "boolean" || typeof value === "string") return value;
   return Array.isArray(value) && value.every((n) => typeof n === "number") ? value : undefined;
 }
