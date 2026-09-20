@@ -150,6 +150,31 @@ describe("preview_design", () => {
     expect(component.structured.error).toMatchObject({ code: "unknown_component" });
   });
 
+  it("notes a new screen placed entirely outside the device screen, where the canvas and viewer won't show it", async () => {
+    const c = await session(withCanvas(project.host));
+    const note = "Note: “Profile” is at 482, 0, outside the 402 × 874 screen, so the canvas and viewer won't show it. Put new screens at [0, 0].";
+    const beside = await c.call("preview_design", { name: "Profile", position: [482, 0], html: "<body>" });
+    expect(beside.isError, beside.text).toBe(false);
+    expect(beside.text).toBe(`Showing “Profile” on the canvas (1 KB so far). Add the next part with append, then import it with import_design and "preview": true.\n${note}`);
+    // The draft keeps its position, so every call says so until the screen is back on the artboard.
+    expect((await c.call("preview_design", { append: "<main>" })).text).toContain(note);
+    expect((await c.call("preview_design", { position: [0, 0], append: "</main>" })).text).not.toContain("Note:");
+    // Partly on the screen is left alone.
+    expect((await c.call("preview_design", { position: [-300, 700], append: "<p>" })).text).not.toContain("Note:");
+    const nameless = await session(withCanvas(project.host), NODDIT);
+    expect((await nameless.call("preview_design", { position: [-200, 0], width: 200, html: "<body>" })).text).toContain(
+      "Note: The draft is at -200, 0, outside the 402 × 874 screen, so the canvas and viewer won't show it. Put new screens at [0, 0].",
+    );
+    // A redesign draws over the layer it replaces, whatever its position says.
+    expect((await c.call("import_design", { capture: CHECKOUT, name: "Checkout" })).isError).toBe(false);
+    expect((await c.call("preview_design", { replace: "checkout", position: [482, 0], append: "</p>" })).text).not.toContain("Note:");
+    // import_design lands it at the draft's position, and says the same.
+    await c.call("preview_design", { replace: null, append: "</body>" });
+    const r = await importPreview(c, {});
+    expect(r.isError, r.text).toBe(false);
+    expect(r.text).toContain(note);
+  });
+
   it("teaches when the call names no single part, adds to no draft, or grows past the limit", async () => {
     const c = await session(withCanvas(project.host));
     for (const args of [{}, { html: "<p>a</p>", append: "<p>b</p>" }, { html: "<p>a</p>", clear: true }, { clear: false }]) {

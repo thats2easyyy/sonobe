@@ -16,6 +16,7 @@ Related: `start-here`, `animation`, `gestures`, `layout`
 - `selector` imports one element, like a card or a sheet (`"#pricing-card"`, `"[data-testid=checkout]"`).
 - `waitFor` waits for data that loads late; `waitMs` adds time for entrance animations to finish.
 - The viewport defaults to the document's device. Pass `width` and `height` for tablet or desktop layouts.
+- Leave `position` out for a new screen, which goes at [0, 0]. The canvas and viewer draw only the device screen, so a screen placed beside it can't be seen. Until navigation is wired, the new screen covers the one behind it in the viewer. That's expected: offer to wire it (a tap that slides it in, say).
 - `colorScheme: "dark"` imports the page's dark mode (its `prefers-color-scheme` styles), and `"light"` its light mode.
 - `screenshot: true` returns the page as the browser drew it, to compare with `get_screenshot`.
 
