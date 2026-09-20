@@ -101,14 +101,16 @@ describe.skipIf(!helper)(`the sfsymbol helper${built.skipped ? ` (skipped: ${bui
   });
 
   it("covers what a symbol draws past its frame (a badge) in the SVG and the PNG", async () => {
-    const [badge, pair, heart] = await renderer().render([request("person.crop.circle.badge.plus", { size: 48, colors: ["#0A84FFFF", "#34C759FF"] }), request("ipod.and.vision.pro"), request("heart.fill")]);
-    if (!badge?.ok || !badge.svg || !badge.overflow || !pair?.ok || !heart?.ok) throw new Error(`no overflow: ${JSON.stringify([badge, pair, heart]).slice(0, 300)}`);
+    // ipod.and.vision.pro came with macOS 26, so an older Mac checks the badge alone.
+    const hasPair = execFileSync(helper!, ["--list"], { encoding: "utf8" }).split("\n").includes("ipod.and.vision.pro");
+    const [badge, heart, pair] = await renderer().render([request("person.crop.circle.badge.plus", { size: 48, colors: ["#0A84FFFF", "#34C759FF"] }), request("heart.fill"), ...(hasPair ? [request("ipod.and.vision.pro")] : [])]);
+    if (!badge?.ok || !badge.svg || !badge.overflow || !heart?.ok || (hasPair && !pair?.ok)) throw new Error(`no overflow: ${JSON.stringify([badge, heart, pair]).slice(0, 300)}`);
     // SwiftUI lays the symbol out by its 56×58 frame, and draws the badge about 5 pt left of it.
     const [top, right, bottom, left] = badge.overflow;
     expect([badge.width, badge.height, top, right, bottom]).toEqual([56, 58, 0, 0, 0]);
     expect(left).toBeGreaterThan(4);
     expect(badge.svg).toContain(`viewBox="-${left} 0 ${56 + left} 58"`);
-    expect(pair.overflow?.[1]).toBeGreaterThan(3);
+    if (pair?.ok) expect(pair.overflow?.[1]).toBeGreaterThan(3);
     expect(heart.overflow).toBeUndefined();
     // The badge fills the part left of the frame, up to the edge, in both drawings.
     const svg = await alpha(badge.svg, Math.round((56 + left) * 3));
