@@ -1,12 +1,13 @@
 import type { Op } from "@sonobe/core";
 import { buildDoc, MOCK_DEFINITIONS } from "@sonobe/engine/testing";
 import { createPatchRegistry } from "@sonobe/patches";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { createBrowserHost, createMemoryProjectStorage } from "../../host/browserHost.ts";
 import { createManualScheduler } from "../../runtime/scheduler.ts";
 import { createEditorSession, type EditorSession } from "../../state/session.ts";
 import { duplicateSelection } from "../../state/editActions.ts";
-import { createHologramStore, hologramStore, importedScreen, IMPORT_LABEL, isAgentImport, watchAgentImports } from "./hologram.ts";
+import { createHologramStore, hideCoveredChrome, hologramStore, importedScreen, IMPORT_LABEL, isAgentImport, watchAgentImports } from "./hologram.ts";
+import { prefersReducedMotion } from "./hologramDraw.ts";
 import { pasteDesignCapture } from "./importDesign.ts";
 
 const registry = createPatchRegistry({ definitions: MOCK_DEFINITIONS });
@@ -90,6 +91,28 @@ describe("hologram requests", () => {
     expect(store.getState().request).toBeNull();
   });
 
+  it("says which screen a playing hologram covers, and stops only for that screen", () => {
+    const store = createHologramStore();
+    const a = { componentId: "main", screenId: "a" };
+    store.getState().cover(a);
+    expect(store.getState().covering).toEqual(a);
+    const before = store.getState();
+    store.getState().cover({ ...a });
+    expect(store.getState()).toBe(before);
+    store.getState().cover(null);
+    expect(store.getState().covering).toBeNull();
+  });
+
+  it("hides the covered screen's selection chrome and all hover, and nothing else", () => {
+    const chrome = { quad: "…" };
+    const overlay = { selected: ["screen"], hovered: "title", chrome };
+    expect(hideCoveredChrome(null, overlay)).toBe(overlay);
+    expect(hideCoveredChrome("screen", overlay)).toEqual({ selected: [], hovered: null, chrome: null });
+    // Something else selected keeps its chrome.
+    expect(hideCoveredChrome("screen", { selected: ["other"], hovered: null, chrome })).toEqual({ selected: ["other"], hovered: null, chrome });
+    expect(hideCoveredChrome("screen", { selected: ["screen", "other"], hovered: null, chrome })).toEqual({ selected: ["other"], hovered: null, chrome: null });
+  });
+
   it("plays for Claude's import_design, not for its other changes, the person's pastes or duplicates", () => {
     const s = setup();
     const store = hologramStore(s);
@@ -129,5 +152,26 @@ describe("hologram requests", () => {
     const outcome = await pasteDesignCapture(s, JSON.stringify(capture), () => undefined, { desktop: null });
     expect(outcome?.ok).toBe(true);
     expect(hologramStore(s).getState().request).toMatchObject({ componentId: s.document.getState().doc.project.root, screenId: outcome!.screenId });
+  });
+});
+
+describe("reduced motion", () => {
+  afterEach(() => vi.unstubAllGlobals());
+  const env = (attrs: Record<string, string>, osReduces: boolean) => {
+    vi.stubGlobal("window", { matchMedia: () => ({ matches: osReduces }) });
+    vi.stubGlobal("document", { documentElement: { getAttribute: (name: string) => attrs[name] ?? null } });
+  };
+
+  it("follows Settings → Motion over the OS setting, either way", () => {
+    env({}, true);
+    expect(prefersReducedMotion()).toBe(true);
+    env({ "data-motion": "full" }, true);
+    expect(prefersReducedMotion()).toBe(false);
+    env({ "data-motion": "reduce" }, false);
+    expect(prefersReducedMotion()).toBe(true);
+    env({ "data-reduced-motion": "true", "data-motion": "full" }, false);
+    expect(prefersReducedMotion()).toBe(true);
+    env({}, false);
+    expect(prefersReducedMotion()).toBe(false);
   });
 });

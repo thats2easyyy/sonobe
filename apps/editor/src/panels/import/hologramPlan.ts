@@ -12,6 +12,9 @@ import type { CanvasIndex } from "../canvas/sceneIndex.ts";
 /** How a layer's wireframe is drawn: an outline, an ellipse, 1–3 text line bars, or a box with an X. */
 export type HoloShape = "box" | "oval" | "text" | "image";
 
+/** Corner radii in points, clockwise from the top left (the order canvas roundRect takes). */
+export type Radii = readonly [number, number, number, number];
+
 export interface HoloLayer {
   id: Id;
   shape: HoloShape;
@@ -21,8 +24,8 @@ export interface HoloLayer {
   depth: number;
   /** The nearest ancestor that has a wireframe too (null: the screen). */
   parent: Id | null;
-  /** Corner radius in points (boxes). */
-  radius: number;
+  /** Corner radii (boxes and images), rounder where a clipping ancestor's rounded corner cuts them. */
+  radii: Radii;
   /** Line bars (text). */
   lines: number;
 }
@@ -134,6 +137,53 @@ export function holoShapeOf(type: string): HoloShape | null {
 
 const num = (v: unknown, fallback: number) => (typeof v === "number" && Number.isFinite(v) ? v : fallback);
 
+export const SQUARE: Radii = [0, 0, 0, 0];
+
+/** A layer's corner radii as the renderer reads them: cornerRadii when it rounds any corner, else cornerRadius. */
+export function radiiOf(props: Readonly<Record<string, unknown>>): Radii {
+  const raw = props.cornerRadii;
+  if (Array.isArray(raw) && raw.length > 0) {
+    const radii = [0, 1, 2, 3].map((i) => Math.max(0, num(raw[i], 0))) as [number, number, number, number];
+    if (radii.some((r) => r > 0)) return radii;
+  }
+  const r = Math.max(0, num(props.cornerRadius, 0));
+  return [r, r, r, r];
+}
+
+/** What clips a layer: its nearest clipping ancestor's visible rect and corners. */
+export interface HoloClip {
+  rect: Rect;
+  radii: Radii;
+}
+
+/**
+ * The corners `rect` shows inside a clipping ancestor. A corner that pokes out of the ancestor's rounded
+ * corner is rounded concentrically with it (an avatar image clipped to a circle draws as a circle, a
+ * header across a card's top gets the card's top corners), and no corner is rounder than the rect allows.
+ */
+export function clippedRadii(rect: Rect, own: Radii, clip: HoloClip | null): Radii {
+  const max = Math.min(rect.width, rect.height) / 2;
+  const out = own.map((r) => Math.min(r, max)) as [number, number, number, number];
+  if (!clip) return out;
+  const left = rect.x - clip.rect.x;
+  const top = rect.y - clip.rect.y;
+  const right = clip.rect.x + clip.rect.width - (rect.x + rect.width);
+  const bottom = clip.rect.y + clip.rect.height - (rect.y + rect.height);
+  const insets: [number, number][] = [
+    [left, top],
+    [right, top],
+    [right, bottom],
+    [left, bottom],
+  ];
+  insets.forEach(([ix, iy], i) => {
+    const R = clip.radii[i]!;
+    // Only a corner point outside the ancestor's corner arc is cut.
+    if (R <= 0 || ix >= R || iy >= R || (R - ix) ** 2 + (R - iy) ** 2 <= R * R) return;
+    out[i] = Math.min(max, Math.max(out[i]!, R - Math.max(0, Math.min(ix, iy))));
+  });
+  return out;
+}
+
 /** A stable pseudo-random order for index `i` (the same every time: plans replay alike). */
 function scatter(i: number): number {
   let h = Math.imul(i + 1, 0x9e3779b1);
@@ -146,6 +196,9 @@ export function textLines(height: number, fontSize: number, lineHeight: number):
   const line = lineHeight > 0 ? lineHeight : Math.max(1, fontSize) * 1.25;
   return clamp(Math.round(height / line), 1, 3);
 }
+
+/** Layers within this fraction of each other's area rank as equals: a CSS grid's 18.94 and 18.95 pt cells. */
+export const AREA_TOLERANCE = 0.04;
 
 /**
  * The wireframed layers inside a screen, in document order (parents before children): visible layers
@@ -161,32 +214,46 @@ export function collectHoloLayers(index: CanvasIndex, screenId: Id, options: { m
   const all: HoloLayer[] = [];
   const parentOf = new Map<Id, Id | null>();
 
-  const visit = (parentId: Id, parent: Id | null, depth: number, clip: Rect): void => {
+  const visit = (parentId: Id, parent: Id | null, depth: number, clip: HoloClip): void => {
     for (const child of index.children(parentId)) {
-      if (child.hidden) continue;
-      const bounds = index.bounds(child.id);
-      const visible = bounds ? intersectRects(bounds, clip) : null;
-      const shape = holoShapeOf(child.layer.type);
       const props = child.node?.props ?? {};
+      // A hidden or transparent layer draws nothing, and neither does anything inside it.
+      if (child.hidden || num(props.opacity, 1) <= 0.01) continue;
+      const bounds = index.bounds(child.id);
+      const visible = bounds ? intersectRects(bounds, clip.rect) : null;
+      const shape = holoShapeOf(child.layer.type);
+      const radii = visible ? clippedRadii(visible, radiiOf(props), clip) : SQUARE;
       let next = parent;
-      if (visible && shape && visible.width >= minSize && visible.height >= minSize && num(props.opacity, 1) > 0.01) {
-        const radius = shape === "box" || shape === "image" ? clamp(num(props.cornerRadius, 0), 0, Math.min(visible.width, visible.height) / 2) : 0;
-        all.push({ id: child.id, shape, rect: visible, depth, parent, radius, lines: shape === "text" ? textLines(visible.height, num(props.fontSize, 17), num(props.lineHeight, 0)) : 0 });
+      if (visible && shape && visible.width >= minSize && visible.height >= minSize) {
+        all.push({ id: child.id, shape, rect: visible, depth, parent, radii: shape === "box" || shape === "image" ? radii : SQUARE, lines: shape === "text" ? textLines(visible.height, num(props.fontSize, 17), num(props.lineHeight, 0)) : 0 });
         parentOf.set(child.id, parent);
         next = child.id;
       }
       // Children of a layer that doesn't clip can reach outside it.
       if (!child.layer.children?.length) continue;
       if (!child.node?.clip) visit(child.id, next, depth + 1, clip);
-      else if (visible) visit(child.id, next, depth + 1, visible);
+      else if (visible) visit(child.id, next, depth + 1, { rect: visible, radii });
     }
   };
-  visit(screenId, null, 1, screen);
+  const screenNode = entry?.node;
+  visit(screenId, null, 1, { rect: screen, radii: screenNode?.clip ? clippedRadii(screen, radiiOf(screenNode.props ?? {}), null) : SQUARE });
 
   if (all.length <= maxPieces) return { screen, layers: all };
-  // The largest layers carry the layout. Equal ones (a grid of cards) are sampled across the screen
-  // in a fixed scatter rather than by document order, which would leave the bottom rows empty.
-  const ranked = all.map((layer, i) => ({ i, area: layer.rect.width * layer.rect.height, tie: scatter(i) })).sort((a, b) => b.area - a.area || a.tie - b.tie);
+  // The largest layers carry the layout. Near-equal ones (a grid of cards) are sampled across the
+  // screen in a fixed scatter, not by document order or by hair-thin differences in size, which would
+  // leave the bottom rows or whole columns empty.
+  const bySize = all.map((layer, i) => ({ i, area: layer.rect.width * layer.rect.height })).sort((a, b) => b.area - a.area || a.i - b.i);
+  let group = -1;
+  let groupArea = Infinity;
+  const ranked = bySize
+    .map(({ i, area }) => {
+      if (area < groupArea * (1 - AREA_TOLERANCE)) {
+        group++;
+        groupArea = area;
+      }
+      return { i, group, tie: scatter(i) };
+    })
+    .sort((a, b) => a.group - b.group || a.tie - b.tie);
   const kept = new Set(ranked.slice(0, maxPieces).map((r) => all[r.i]!.id));
   const keptAncestor = (id: Id | null): Id | null => {
     let at = id;

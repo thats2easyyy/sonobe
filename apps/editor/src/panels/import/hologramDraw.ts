@@ -6,7 +6,7 @@
  */
 
 import type { Rect } from "../canvas/geometry.ts";
-import type { HoloShape } from "./hologramPlan.ts";
+import type { HoloShape, Radii } from "./hologramPlan.ts";
 
 type RGB = readonly [number, number, number];
 
@@ -25,6 +25,8 @@ export interface HoloColors {
   rain: RGB;
   /** The frame's outline and corners, which also sit on the UI around it. */
   edge: RGB;
+  /** The closing halo just outside the frame, on the UI around it. */
+  halo: RGB;
   /** How strongly the veil's grid shows (0–1). */
   gridAlpha: number;
   /** Wireframe stroke opacity once traced. */
@@ -40,6 +42,7 @@ const DEFAULT_COLORS: HoloColors = {
   fringe: [255, 95, 210],
   rain: [63, 224, 240],
   edge: [232, 254, 255],
+  halo: [94, 242, 255],
   gridAlpha: 0.09,
   wireAlpha: 0.62,
 };
@@ -77,6 +80,7 @@ export function readHoloColors(el: Element): HoloColors {
     fringe: color("--holo-fringe", DEFAULT_COLORS.fringe),
     rain: color("--holo-rain", DEFAULT_COLORS.rain),
     edge: color("--holo-edge", DEFAULT_COLORS.edge),
+    halo: color("--holo-halo", DEFAULT_COLORS.halo),
     gridAlpha: number("--holo-grid-alpha", DEFAULT_COLORS.gridAlpha),
     wireAlpha: number("--holo-wire-alpha", DEFAULT_COLORS.wireAlpha),
   };
@@ -89,13 +93,16 @@ export function mixColor(a: RGB, b: RGB, t: number): RGB {
 }
 
 /**
- * True when the OS or the app asks for reduced motion: Settings → Motion (<html data-motion="reduce">)
- * or :root[data-reduced-motion="true"].
+ * True when the app or the OS asks for reduced motion: :root[data-reduced-motion="true"], else
+ * Settings → Motion (<html data-motion>, which follows the OS unless the person picked Full or
+ * Reduced), else the OS setting.
  */
 export function prefersReducedMotion(): boolean {
   if (typeof window === "undefined") return false;
   const root = document.documentElement;
-  if (root.getAttribute("data-reduced-motion") === "true" || root.getAttribute("data-motion") === "reduce") return true;
+  if (root.getAttribute("data-reduced-motion") === "true") return true;
+  const motion = root.getAttribute("data-motion");
+  if (motion === "reduce" || motion === "full") return motion === "reduce";
   try {
     return !!window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
   } catch {
@@ -220,9 +227,13 @@ export function drawRain(ctx: CanvasRenderingContext2D, r: Rect, seconds: number
     ctx.globalAlpha = (alpha * i) / (RAIN_LEVELS - 1);
     ctx.fill(path);
   });
-  ctx.fillStyle = rgba(c.core, 1);
+  // Heads glow cyan: a halo in the line color around a cyan-white pixel.
+  ctx.lineWidth = Math.max(1, cell * 0.34);
+  ctx.strokeStyle = rgba(c.line, 0.32);
+  ctx.fillStyle = rgba(mixColor(c.line, c.core, 0.4), 1);
   heads.forEach((path, i) => {
     ctx.globalAlpha = (alpha * i) / (RAIN_LEVELS - 1);
+    ctx.stroke(path);
     ctx.fill(path);
   });
   ctx.globalAlpha = 1;
@@ -276,12 +287,19 @@ export function drawLaser(ctx: CanvasRenderingContext2D, r: Rect, y: number, dir
   }
 }
 
+/** Corner radii clockwise from the top left, each fitting `r`. */
+export function fitRadii(r: Rect, radius: number | Radii): [number, number, number, number] {
+  const max = Math.max(0, Math.min(r.width, r.height) / 2);
+  const all = typeof radius === "number" ? [radius, radius, radius, radius] : radius;
+  return all.map((v) => Math.max(0, Math.min(v, max))) as [number, number, number, number];
+}
+
 /** Points around a rounded rect, clockwise from the middle of its top edge, closed. */
-export function perimeterPoints(r: Rect, radius: number): [number, number][] {
-  const rad = Math.max(0, Math.min(radius, r.width / 2, r.height / 2));
+export function perimeterPoints(r: Rect, radius: number | Radii): [number, number][] {
+  const [tl, tr, br, bl] = fitRadii(r, radius);
   const { x, y, width: w, height: h } = r;
   const pts: [number, number][] = [[x + w / 2, y]];
-  const corner = (cx: number, cy: number, from: number) => {
+  const corner = (cx: number, cy: number, rad: number, from: number) => {
     if (rad < 0.5) {
       pts.push([cx + Math.cos(from + Math.PI / 4) * rad * Math.SQRT2, cy + Math.sin(from + Math.PI / 4) * rad * Math.SQRT2]);
       return;
@@ -292,10 +310,10 @@ export function perimeterPoints(r: Rect, radius: number): [number, number][] {
       pts.push([cx + Math.cos(a) * rad, cy + Math.sin(a) * rad]);
     }
   };
-  corner(x + w - rad, y + rad, -Math.PI / 2);
-  corner(x + w - rad, y + h - rad, 0);
-  corner(x + rad, y + h - rad, Math.PI / 2);
-  corner(x + rad, y + rad, Math.PI);
+  corner(x + w - tr, y + tr, tr, -Math.PI / 2);
+  corner(x + w - br, y + h - br, br, 0);
+  corner(x + bl, y + h - bl, bl, Math.PI / 2);
+  corner(x + tl, y + tl, tl, Math.PI);
   pts.push([x + w / 2, y]);
   return pts;
 }
@@ -338,9 +356,10 @@ function polylineLength(pts: readonly [number, number][]): number {
  * Add a rounded rect's outline to a path (a context's current path or a Path2D), traced `p` (0–1) of the way: both halves grow from
  * the middle of the top edge and meet at the bottom. Returns the two tips while it's still tracing.
  */
-export function traceOutline(ctx: CanvasPath, r: Rect, radius: number, p: number): [number, number][] {
+export function traceOutline(ctx: CanvasPath, r: Rect, radius: number | Radii, p: number): [number, number][] {
   if (p >= 1) {
-    if (radius >= 0.5 && ctx.roundRect) ctx.roundRect(r.x, r.y, r.width, r.height, Math.min(radius, r.width / 2, r.height / 2));
+    const radii = fitRadii(r, radius);
+    if (radii.some((v) => v >= 0.5) && ctx.roundRect) ctx.roundRect(r.x, r.y, r.width, r.height, radii);
     else ctx.rect(r.x, r.y, r.width, r.height);
     return [];
   }
@@ -375,19 +394,18 @@ export function traceOval(ctx: CanvasPath, r: Rect, p: number): [number, number]
 }
 
 /** An image's X, drawn from its top corners once the outline is well along (inside rounded corners). */
-export function traceCross(ctx: CanvasPath, r: Rect, p: number, radius = 0): void {
+export function traceCross(ctx: CanvasPath, r: Rect, p: number, radius: number | Radii = 0): void {
   const q = Math.max(0, Math.min(1, (p - 0.35) / 0.65));
   if (q <= 0) return;
-  const rad = Math.max(0, Math.min(radius, r.width / 2, r.height / 2));
-  const inset = Math.max(Math.min(r.width, r.height) > 12 ? 2 : 0, rad * (1 - Math.SQRT1_2));
-  const x0 = r.x + inset;
-  const x1 = r.x + r.width - inset;
-  const y0 = r.y + inset;
-  const y1 = r.y + r.height - inset;
-  ctx.moveTo(x0, y0);
-  ctx.lineTo(x0 + (x1 - x0) * q, y0 + (y1 - y0) * q);
-  ctx.moveTo(x1, y0);
-  ctx.lineTo(x1 - (x1 - x0) * q, y0 + (y1 - y0) * q);
+  // Each arm ends where its diagonal meets the rounded corner.
+  const pad = Math.min(r.width, r.height) > 12 ? 2 : 0;
+  const [tl, tr, br, bl] = fitRadii(r, radius).map((rad) => Math.max(pad, rad * (1 - Math.SQRT1_2)));
+  const arm = (ax: number, ay: number, bx: number, by: number) => {
+    ctx.moveTo(ax, ay);
+    ctx.lineTo(ax + (bx - ax) * q, ay + (by - ay) * q);
+  };
+  arm(r.x + tl!, r.y + tl!, r.x + r.width - br!, r.y + r.height - br!);
+  arm(r.x + r.width - tr!, r.y + tr!, r.x + bl!, r.y + r.height - bl!);
 }
 
 /** Text as 1–3 line bars growing from the left (the last one shorter), added as rects to the path. */
@@ -411,10 +429,10 @@ export function textBars(ctx: CanvasPath, r: Rect, lines: number, p: number): vo
 export interface FrameOptions {
   /** How far the outline has traced (0–1). */
   trace?: number;
-  /** A flare around the frame (0–1). */
+  /** The closing halo just outside the frame (0–1). */
   glow?: number;
-  /** Viewfinder corners. */
-  brackets?: boolean;
+  /** Viewfinder corners, and how strongly they show (0–1). */
+  brackets?: boolean | number;
 }
 
 /** The hologram's frame: a glowing outline with viewfinder corners in the edge color. */
@@ -423,28 +441,31 @@ export function drawFrame(ctx: CanvasRenderingContext2D, r: Rect, c: HoloColors,
   const glow = options.glow ?? 0;
   const outline = { x: Math.round(r.x) + 0.5, y: Math.round(r.y) + 0.5, width: Math.round(r.width) - 1, height: Math.round(r.height) - 1 };
   if (glow > 0) {
-    // The closing flare: a wash over the screen and a halo reaching past the selection outline.
-    ctx.fillStyle = rgba(c.line, 0.14 * glow);
-    ctx.fillRect(r.x, r.y, r.width, r.height);
+    // The closing flare: a thin halo outside the screen, never over the design it just revealed.
     ctx.save();
-    ctx.shadowColor = rgba(c.line, glow);
-    ctx.shadowBlur = 20 * glow;
-    ctx.strokeStyle = rgba(c.line, 0.85 * glow);
+    ctx.beginPath();
+    ctx.rect(r.x - 64, r.y - 64, r.width + 128, r.height + 128);
+    ctx.rect(r.x, r.y, r.width, r.height);
+    ctx.clip("evenodd");
+    ctx.shadowColor = rgba(c.halo, glow);
+    ctx.shadowBlur = 18 * glow;
+    ctx.strokeStyle = rgba(c.halo, 0.95 * glow);
     ctx.lineWidth = 2;
-    ctx.strokeRect(outline.x, outline.y, outline.width, outline.height);
+    ctx.strokeRect(r.x - 1, r.y - 1, r.width + 2, r.height + 2);
     ctx.restore();
   }
   ctx.beginPath();
   const tips = traceOutline(ctx, outline, 0, trace);
   ctx.lineJoin = "miter";
-  ctx.strokeStyle = rgba(c.line, 0.16 + 0.5 * glow);
-  ctx.lineWidth = 3 + 5 * glow;
+  ctx.strokeStyle = rgba(c.line, 0.16 * (1 - glow));
+  ctx.lineWidth = 3;
   ctx.stroke();
   ctx.strokeStyle = rgba(c.line, 0.78 + 0.22 * glow);
   ctx.lineWidth = 1;
   ctx.stroke();
   drawTips(ctx, tips, c);
-  if (options.brackets === false || trace < 1) return;
+  const brackets = options.brackets === undefined || options.brackets === true ? 1 : options.brackets === false ? 0 : options.brackets;
+  if (brackets <= 0 || trace < 1) return;
   const len = Math.max(5, Math.min(16, Math.min(r.width, r.height) * 0.09));
   const { x, y, width: w, height: h } = r;
   ctx.beginPath();
@@ -461,7 +482,7 @@ export function drawFrame(ctx: CanvasRenderingContext2D, r: Rect, c: HoloColors,
   ctx.lineTo(x, y + h);
   ctx.lineTo(x, y + h - len);
   ctx.lineCap = "square";
-  ctx.strokeStyle = rgba(c.edge, 0.92);
+  ctx.strokeStyle = rgba(c.edge, 0.92 * brackets);
   ctx.lineWidth = 2;
   ctx.stroke();
   ctx.lineCap = "butt";

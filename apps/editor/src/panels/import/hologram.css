@@ -14,6 +14,8 @@
   --holo-rain: #3fe0f0;
   /* The frame's outline and corners, which also sit on the UI around it. */
   --holo-edge: #e8feff;
+  /* The closing halo outside the frame. */
+  --holo-halo: #5ef2ff;
   --holo-grid-alpha: 0.09;
   --holo-wire-alpha: 0.62;
 }
@@ -28,6 +30,7 @@
   --holo-fringe: #ff5fd2;
   --holo-rain: #3fe0f0;
   --holo-edge: #0a9fbd;
+  --holo-halo: #00b4d8;
   --holo-grid-alpha: 0.1;
   --holo-wire-alpha: 0.66;
 }

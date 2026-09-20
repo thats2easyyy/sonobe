@@ -2,8 +2,8 @@ import type { SonobeDocument } from "@sonobe/core";
 import { buildDoc, createTestRuntime } from "@sonobe/engine/testing";
 import { describe, expect, it } from "vitest";
 import { buildCanvasIndex } from "../canvas/sceneIndex.ts";
-import { collectHoloLayers, HOLO, holoFrameAt, holoShapeOf, planHologram, sweepCurve, sweepProgressAt, sweepScale, textLines, traceProgress, type HoloLayer } from "./hologramPlan.ts";
-import { visibleRegion } from "./HologramBuild.tsx";
+import { clippedRadii, collectHoloLayers, HOLO, holoFrameAt, holoShapeOf, planHologram, radiiOf, sweepCurve, sweepProgressAt, sweepScale, textLines, traceProgress, type HoloLayer } from "./hologramPlan.ts";
+import { laserLead, pointerEndsHologram, visibleRegion } from "./HologramBuild.tsx";
 import { scanLaserAt, scannerFrame, SCAN_SWEEP_MS } from "./HologramScanner.tsx";
 
 function indexFor(doc: SonobeDocument) {
@@ -54,8 +54,8 @@ describe("collectHoloLayers", () => {
     // Fills, tap targets, hidden and hairline layers draw nothing; clipped and offscreen ones aren't seen.
     expect(collected.layers.map((l) => l.id)).toEqual(["header", "card", "avatar", "name", "bio", "badge", "tabs", "home"]);
     const byId = Object.fromEntries(collected.layers.map((l) => [l.id, l]));
-    expect(byId.card).toMatchObject({ shape: "box", depth: 1, parent: null, radius: 24, rect: { x: 16, y: 140, width: 370, height: 300 } });
-    expect(byId.avatar).toMatchObject({ shape: "image", depth: 2, parent: "card", radius: 40 });
+    expect(byId.card).toMatchObject({ shape: "box", depth: 1, parent: null, radii: [24, 24, 24, 24], rect: { x: 16, y: 140, width: 370, height: 300 } });
+    expect(byId.avatar).toMatchObject({ shape: "image", depth: 2, parent: "card", radii: [40, 40, 40, 40] });
     expect(byId.name).toMatchObject({ shape: "text", lines: 1 });
     expect(byId.bio).toMatchObject({ shape: "text", lines: 3 });
     expect(byId.badge!.shape).toBe("oval");
@@ -104,6 +104,90 @@ describe("collectHoloLayers", () => {
     expect(kept.map((l) => l.rect.y)).toEqual([...kept.map((l) => l.rect.y)].sort((a, b) => a - b));
   });
 
+  it("samples a grid whose cells differ by a hair across every column (18.94 and 18.95 pt)", () => {
+    // A 20-column `1fr` grid: every fifth column comes out a hundredth of a point narrower.
+    const cols = 20;
+    const cells = Array.from({ length: cols * 30 }, (_, i) => {
+      const col = i % cols;
+      const width = col % 5 === 4 ? 18.94 : 18.95;
+      return { id: `c${i}`, type: "rectangle", props: { position: [2 + col * 19.95, 2 + Math.floor(i / cols) * 19], size: [width, 18] } };
+    });
+    const doc = buildDoc({ layers: [{ id: "screen", type: "group", props: { position: [0, 0], size: [402, 874] }, children: cells }] });
+    const kept = collectHoloLayers(indexFor(doc), "screen", { maxPieces: 300 })!.layers;
+    expect(kept).toHaveLength(300);
+    const perColumn = Array.from({ length: cols }, (_, col) => kept.filter((l) => Number(l.id.slice(1)) % cols === col).length);
+    // Every column keeps a fair share, not all or nothing.
+    for (const n of perColumn) expect(n).toBeGreaterThan(5);
+    expect(Math.max(...kept.map((l) => l.rect.y))).toBeGreaterThan(400);
+  });
+
+  it("ranks layers by size before it samples near-equals", () => {
+    const layers = [
+      { id: "big", type: "rectangle", props: { position: [0, 700], size: [300, 100] } },
+      ...Array.from({ length: 10 }, (_, i) => ({ id: `s${i}`, type: "rectangle", props: { position: [0, i * 60], size: [50 + i * 0.01, 50] } })),
+    ];
+    const doc = buildDoc({ layers: [{ id: "screen", type: "group", props: { position: [0, 0], size: [402, 874] }, children: layers }] });
+    const kept = collectHoloLayers(indexFor(doc), "screen", { maxPieces: 4 })!.layers;
+    expect(kept.map((l) => l.id)).toContain("big");
+    expect(kept).toHaveLength(4);
+  });
+
+  it("skips everything inside a transparent layer", () => {
+    const doc = buildDoc({
+      layers: [
+        {
+          id: "screen",
+          type: "group",
+          props: { position: [0, 0], size: [402, 874] },
+          children: [
+            { id: "later", type: "group", props: { position: [0, 400], size: [402, 300], opacity: 0 }, children: [{ id: "inside", type: "rectangle", props: { position: [20, 20], size: [100, 100] } }] },
+            { id: "shown", type: "rectangle", props: { position: [0, 0], size: [402, 100] } },
+          ],
+        },
+      ],
+    });
+    expect(collectHoloLayers(indexFor(doc), "screen")!.layers.map((l) => l.id)).toEqual(["shown"]);
+  });
+
+  it("rounds a layer's corners where a rounded clipping ancestor cuts them", () => {
+    const doc = buildDoc({
+      layers: [
+        {
+          id: "screen",
+          type: "group",
+          props: { position: [0, 0], size: [402, 874] },
+          children: [
+            // An imported avatar: a round clipping frame with a square photo inset by 4 pt.
+            { id: "avatar", type: "group", props: { position: [20, 20], size: [88, 88], cornerRadius: 44, clip: true }, children: [{ id: "photo", type: "image", props: { position: [4, 4], size: [80, 80] } }] },
+            {
+              id: "card",
+              type: "group",
+              props: { position: [16, 140], size: [370, 300], cornerRadius: 24, clip: true },
+              children: [
+                { id: "cover", type: "image", props: { position: [0, 0], size: [370, 120] } },
+                { id: "icon", type: "rectangle", props: { position: [16, 16], size: [24, 24], cornerRadius: 4 } },
+              ],
+            },
+          ],
+        },
+      ],
+    });
+    const byId = Object.fromEntries(collectHoloLayers(indexFor(doc), "screen")!.layers.map((l) => [l.id, l]));
+    // Concentric with the circle: a circle too.
+    expect(byId.photo!.radii).toEqual([40, 40, 40, 40]);
+    // Across the card's top: its top corners only.
+    expect(byId.cover!.radii).toEqual([24, 24, 0, 0]);
+    // Inside the card's corner curve already: its own corners.
+    expect(byId.icon!.radii).toEqual([4, 4, 4, 4]);
+  });
+
+  it("reads per-corner radii the way the renderer does", () => {
+    expect(radiiOf({ cornerRadius: 12 })).toEqual([12, 12, 12, 12]);
+    expect(radiiOf({ cornerRadius: 12, cornerRadii: [0, 0, 0, 0] })).toEqual([12, 12, 12, 12]);
+    expect(radiiOf({ cornerRadius: 12, cornerRadii: [16, 16, 0, 0] })).toEqual([16, 16, 0, 0]);
+    expect(clippedRadii({ x: 0, y: 0, width: 10, height: 40 }, [30, 30, 30, 30], null)).toEqual([5, 5, 5, 5]);
+  });
+
   it("returns null for a screen that isn't drawn", () => {
     const index = indexFor(screenDoc());
     expect(collectHoloLayers(index, "missing")).toBeNull();
@@ -119,7 +203,7 @@ describe("collectHoloLayers", () => {
   });
 });
 
-const layer = (id: string, y: number, parent: string | null = null, extra: Partial<HoloLayer> = {}): HoloLayer => ({ id, shape: "box", rect: { x: 0, y, width: 100, height: 40 }, depth: parent ? 2 : 1, parent, radius: 0, lines: 0, ...extra });
+const layer = (id: string, y: number, parent: string | null = null, extra: Partial<HoloLayer> = {}): HoloLayer => ({ id, shape: "box", rect: { x: 0, y, width: 100, height: 40 }, depth: parent ? 2 : 1, parent, radii: [0, 0, 0, 0], lines: 0, ...extra });
 const SCREEN = { x: 0, y: 0, width: 402, height: 874 };
 
 describe("planHologram", () => {
@@ -237,6 +321,18 @@ describe("canvas build", () => {
     // Scrolled away: nothing to draw.
     expect(visibleRegion({ x: 2000, y: 0, width: 402, height: 874 }, 1000, 800, 48).width).toBe(0);
   });
+
+  it("lets the wireframe run only a few pixels below the laser on its way down", () => {
+    expect(laserLead({ x: 0, y: 0, width: 402, height: 874 })).toBe(10);
+    expect(laserLead({ x: 0, y: 0, width: 40, height: 184 })).toBe(3);
+  });
+
+  it("keeps playing through a pan: a middle-button drag or a drag with Space held", () => {
+    expect(pointerEndsHologram({ button: 0 }, false)).toBe(true);
+    expect(pointerEndsHologram({ button: 2 }, false)).toBe(true);
+    expect(pointerEndsHologram({ button: 1 }, false)).toBe(false);
+    expect(pointerEndsHologram({ button: 0 }, true)).toBe(false);
+  });
 });
 
 describe("dialog scanner", () => {
@@ -251,7 +347,7 @@ describe("dialog scanner", () => {
   });
 
   it("fits a frame with the import's proportions", () => {
-    expect(scannerFrame([402, 874], { width: 300, height: 400 })).toEqual({ width: 156, height: 340 });
+    expect(scannerFrame([402, 874], { width: 300, height: 500 })).toEqual({ width: 193, height: 420 });
     expect(scannerFrame([402, 874], { width: 300, height: 200 })).toEqual({ width: 91, height: 200 });
     expect(scannerFrame([1440, 900], { width: 240, height: 400 })).toEqual({ width: 240, height: 150 });
   });

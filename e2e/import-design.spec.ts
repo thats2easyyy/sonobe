@@ -31,6 +31,80 @@ const pasteText = (page: Page, text: string) =>
     document.dispatchEvent(new ClipboardEvent("paste", { clipboardData: data, bubbles: true, cancelable: true }));
   }, text);
 
+interface HoloClock {
+  /** performance.now() when the hologram mounted; the clock stops there. */
+  start: number | null;
+  /** Move the stopped clock to `ms` after the hologram mounted, a few frames at a time. */
+  seek(ms: number): Promise<void>;
+  /** Run in real time again. */
+  resume(): void;
+}
+
+/**
+ * A page clock that stops the moment the import hologram mounts, so a screenshot can show one exact
+ * frame of it: performance.now() and animation frames follow the clock, real time until then.
+ */
+async function installHoloClock(page: Page): Promise<void> {
+  await page.addInitScript(() => {
+    const realNow = performance.now.bind(performance);
+    const realFrame = window.requestAnimationFrame.bind(window);
+    let now = realNow();
+    let running = true;
+    let queue = new Map<number, FrameRequestCallback>();
+    let nextId = 0;
+    performance.now = () => now;
+    window.requestAnimationFrame = (callback) => {
+      queue.set(++nextId, callback);
+      return nextId;
+    };
+    window.cancelAnimationFrame = (id) => void queue.delete(id);
+    const flush = () => {
+      const due = queue;
+      queue = new Map();
+      for (const callback of due.values()) {
+        try {
+          callback(now);
+        } catch (error) {
+          // Report it as the browser would, without stopping the other frames.
+          queueMicrotask(() => {
+            throw error;
+          });
+        }
+      }
+    };
+    const pump = () => {
+      if (running) {
+        now = realNow();
+        flush();
+      }
+      realFrame(pump);
+    };
+    realFrame(pump);
+    const yieldTask = () => new Promise<void>((resolve) => setTimeout(resolve, 0));
+    const clock: HoloClock = {
+      start: null,
+      async seek(ms) {
+        const target = clock.start! + ms;
+        while (now < target) {
+          now = Math.min(target, now + 50);
+          flush();
+          await yieldTask();
+        }
+        flush();
+        await yieldTask();
+      },
+      resume: () => (running = true),
+    };
+    (window as unknown as { holoClock: HoloClock }).holoClock = clock;
+    new MutationObserver(() => {
+      if (clock.start === null && document.querySelector(".sb-holo")) {
+        clock.start = now;
+        running = false;
+      }
+    }).observe(document, { subtree: true, childList: true });
+  });
+}
+
 test.describe("Import Design", () => {
   test("pastes HTML and adds the screen as named layers in one undo step", async ({ page }) => {
     const problems = collectConsoleProblems(page);
@@ -54,7 +128,6 @@ test.describe("Import Design", () => {
     // then the design materializes as it sweeps back up.
     await expect(page.locator(".sb-holo")).toBeAttached();
     await expect(page.locator('.sb-holo[data-phase="up"]')).toBeAttached({ timeout: 10_000 });
-    await screenshot(page, "import-02-hologram");
     await hologramDone(page);
 
     const imported = await hook(page, (s) => {
@@ -107,6 +180,38 @@ test.describe("Import Design", () => {
     expect(refreshed).toEqual({ screens: 1, keptFollow: true, renamed: true });
 
     await page.getByRole("dialog").waitFor({ state: "detached" }).catch(() => undefined);
+    expect(problems).toEqual([]);
+  });
+
+  test("builds the imported screen as a hologram with the selection held back until it lands", async ({ page }) => {
+    const problems = collectConsoleProblems(page);
+    await installHoloClock(page);
+    await openEditor(page);
+    await page.evaluate(() => window.__sonobe!.layout().setViewMode("canvas"));
+    await runCommand(page, "Import Design");
+    const dialog = page.getByRole("dialog", { name: "Import Design" });
+    await dialog.getByRole("radio", { name: "Paste HTML" }).click();
+    await dialog.getByRole("textbox", { name: "HTML" }).fill(profileHtml);
+    await dialog.getByRole("button", { name: "Import", exact: true }).click();
+    await expect(dialog).toBeHidden({ timeout: 30_000 });
+    await page.waitForFunction(() => (window as unknown as { holoClock: HoloClock }).holoClock.start !== null, undefined, { polling: 50 });
+    const holo = page.locator(".sb-holo");
+    await expect(holo).toHaveAttribute("data-phase", "power");
+    // The new screen is selected, but its outline and handles wait: they'd sit on the hologram's frame.
+    expect((await hook(page, (s) => s.selection().layers)).length).toBe(1);
+    await expect(page.locator(".sb-cv__handle")).toHaveCount(0);
+    await page.waitForFunction(() => [...document.querySelectorAll<HTMLImageElement>(".sb-cv img")].every((img) => img.complete), undefined, { polling: 50 });
+
+    // Halfway back up: the design has materialized below the laser, the wireframe still shows above it.
+    await page.evaluate(() => (window as unknown as { holoClock: HoloClock }).holoClock.seek(2700));
+    await expect(holo).toHaveAttribute("data-phase", "up");
+    await expect(page.locator(".sb-cv__handle")).toHaveCount(0);
+    await expect(page.getByText("Imported “Profile”")).toBeVisible();
+    await screenshot(page, "import-02-hologram");
+
+    await page.evaluate(() => (window as unknown as { holoClock: HoloClock }).holoClock.resume());
+    await hologramDone(page);
+    await expect(page.locator(".sb-cv__handle").first()).toBeVisible();
     expect(problems).toEqual([]);
   });
 

@@ -25,10 +25,14 @@ export interface HologramRequest extends HologramTarget {
 
 export interface HologramState {
   request: HologramRequest | null;
+  /** The screen a playing hologram covers: the canvas hides its selection chrome meanwhile. */
+  covering: HologramTarget | null;
   /** Play the hologram over a screen that was just imported. */
   build(target: HologramTarget): void;
   /** The canvas took the request (or dropped it). */
   take(nonce: number): void;
+  /** Start covering a screen, or stop (null). */
+  cover(target: HologramTarget | null): void;
 }
 
 /** A request the canvas hasn't taken within this long is dropped: the screen wasn't on screen. */
@@ -40,11 +44,26 @@ export function createHologramStore(): StoreApi<HologramState> {
   let nonce = 0;
   return createStore<HologramState>()((set, get) => ({
     request: null,
+    covering: null,
     build: (target) => set({ request: { ...target, nonce: ++nonce, at: now() } }),
     take: (n) => {
       if (get().request?.nonce === n) set({ request: null });
     },
+    cover: (target) => {
+      const current = get().covering;
+      if (current?.componentId !== target?.componentId || current?.screenId !== target?.screenId) set({ covering: target });
+    },
   }));
+}
+
+/**
+ * The canvas overlay's selection and hover while a hologram covers `covered`: the screen's outline,
+ * handles and size badge would sit on the hologram's frame, so they wait for it to finish.
+ */
+export function hideCoveredChrome<C>(covered: Id | null, overlay: { selected: readonly Id[]; hovered: Id | null; chrome: C | null }): { selected: readonly Id[]; hovered: Id | null; chrome: C | null } {
+  if (covered === null) return overlay;
+  const selected = overlay.selected.filter((id) => id !== covered);
+  return { selected, hovered: null, chrome: selected.length === overlay.selected.length ? overlay.chrome : null };
 }
 
 const stores = new WeakMap<EditorSession, StoreApi<HologramState>>();
