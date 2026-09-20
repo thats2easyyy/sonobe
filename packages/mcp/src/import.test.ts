@@ -64,6 +64,16 @@ describe("import_design", () => {
     expect(history.text).toContain("imported Checkout");
   });
 
+  it("re-imports over a screen after one of its layers was removed", async () => {
+    expect((await client.call("import_design", { capture })).isError).toBe(false);
+    expect((await client.call("delete_items", { ids: ["pay_button"] })).isError).toBe(false);
+    const again = await client.call("import_design", { capture, replace: "checkout" });
+    expect(again.isError, again.text).toBe(false);
+    const outline = (await client.call("get_outline", {})).text;
+    expect(outline).toContain('layer pay_button_2 group "Pay Button"');
+    expect(outline).toContain('layer product_photo image "Product Photo"');
+  });
+
   it("teaches when the source is missing, doubled, or not a capture", async () => {
     expect((await client.call("import_design", {})).text).toContain("needs a source");
     expect((await client.call("import_design", { html: "<p>hi</p>", url: "http://localhost:3000" })).text).toContain("only one");

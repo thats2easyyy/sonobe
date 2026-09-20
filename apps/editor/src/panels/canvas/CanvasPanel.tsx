@@ -375,12 +375,16 @@ export function CanvasPanel({ session: sessionProp, sceneSource, onSceneSourceCh
     if (!state) return;
     const { componentId: cid } = latest.current;
     const doc = session.document.getState();
-    const insertOnTop = state.insert?.txnId && doc.historyEntries(1)[0]?.txnId === state.insert.txnId;
+    const insertTxn = state.insert?.txnId;
+    const insertOnTop = insertTxn && doc.historyEntries(1)[0]?.txnId === insertTxn;
     if (state.insert && insertOnTop) {
       if (text === state.initial) return;
-      doc.undo();
-      if (text === "") return;
-      const result = apply(withInsertedText(state.insert.ops, text), "Insert Text");
+      if (text === "") {
+        doc.undo();
+        return;
+      }
+      // One undo step for insert and typing, keeping the new layer's id.
+      const result = doc.amend(insertTxn, withInsertedText(state.insert.ops, text), { label: "Insert Text", defaultComponent: cid });
       const id = result.idMap.inserted;
       if (id) session.selection.getState().select({ layers: [id], patches: [], comments: [] });
       return;
@@ -470,8 +474,7 @@ export function CanvasPanel({ session: sessionProp, sceneSource, onSceneSourceCh
     // Nothing to fold when the copies ended where they started (the move undid itself) or someone else committed meanwhile.
     if (moveOps.length === 0 || store.historyEntries(2)[1]?.txnId !== d.txnId) return;
     const selected = session.selection.getState().layers;
-    if (!store.undoTo(d.txnId).ok) return;
-    const result = session.document.getState().apply([...d.ops, ...moveOps], { label, defaultComponent: componentId });
+    const result = store.amend(d.txnId, [...d.ops, ...moveOps], { label, defaultComponent: componentId });
     if (result.ok) session.selection.getState().select({ layers: selected, patches: [], comments: [] });
   };
 

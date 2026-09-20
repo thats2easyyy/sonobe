@@ -73,6 +73,25 @@ describe("createDiagnosticsCache", () => {
     doc = step(cache, doc, [{ op: "updateLayer", id: "inst", component: "nowhere" }]);
   });
 
+  it("follows published ports read inside and outputs read on the host", () => {
+    const cache = createDiagnosticsCache(mockRegistry);
+    let doc = mustApply(emptyDoc(), [
+      { op: "addComponent", component: { id: "logic", name: "Logic", kind: "patchComponent" } },
+      { op: "updateInterface", component: "logic", inputs: { down: { name: "Down", type: "boolean" } }, outputs: { on: { name: "On", type: "boolean" } } },
+      { op: "addPatch", component: "logic", patch: { id: "held", type: "switch" } },
+      { op: "addPatch", patch: { id: "inst", type: "component", component: "logic" } },
+      { op: "addLayer", layer: { id: "card", type: "rectangle", name: "Card", props: { opacity: { link: "inst.on" } } } },
+    ]).doc;
+    expect(cache.get(doc)).toEqual(getDiagnostics(doc, mockRegistry));
+    // unused_input comes and goes as an inner $in link is added and removed.
+    doc = step(cache, doc, [{ op: "connect", component: "logic", from: "$in.down", to: "held.turnOn" }]);
+    doc = step(cache, doc, [{ op: "disconnect", component: "logic", to: "held.turnOn" }]);
+    // undriven_output (on main) follows the output's link inside the component.
+    doc = step(cache, doc, [{ op: "connect", component: "logic", from: "held.on", to: "$out.on" }]);
+    doc = step(cache, doc, [{ op: "disconnect", component: "logic", to: "$out.on" }]);
+    expect(cache.get(doc).map((d) => d.code)).toContain("undriven_output");
+  });
+
   it("follows asset changes, hand-edited files and unrelated documents", () => {
     const cache = createDiagnosticsCache(mockRegistry);
     const base = buildSampleDocument();

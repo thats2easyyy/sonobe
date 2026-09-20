@@ -174,10 +174,12 @@ export function registerImportTools(tc: ToolContext): void {
       const current = await host.getDocument(snap.docId);
       if (args.expectedRevision !== undefined && args.expectedRevision !== current.revision)
         return failure({ code: "revision_mismatch", message: `The document moved on to revision ${current.revision} while the page was captured (expected ${args.expectedRevision}).`, hint: "Re-read it with get_outline, then import again." });
+      const retired = current.retired?.[component.id];
       let plan: ImportPlan;
       try {
         plan = await planImport(captured.capture, current.doc, captured.images, {
         component: component.id,
+        ...(retired?.length ? { isRetired: (id: string) => retired.includes(id) } : {}),
         ...(args.replace !== undefined ? { replace: args.replace } : {}),
         ...(args.parent !== undefined ? { parent: args.parent } : {}),
         ...(args.index !== undefined ? { index: args.index } : {}),

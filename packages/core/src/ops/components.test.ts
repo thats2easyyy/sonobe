@@ -274,6 +274,105 @@ describe("updateInterface", () => {
     expect(r.doc.components.main!.layers[0]!.props).toEqual({});
     expectRoundTrip(doc, r);
   });
+
+  /** A patch component with two inputs and two outputs, used by a patch instance in main. */
+  const logicDoc = () =>
+    mustApply(emptyDoc(), [
+      { op: "addComponent", component: { id: "logic", name: "Logic", kind: "patchComponent" } },
+      {
+        op: "updateInterface",
+        component: "logic",
+        inputs: { down: { name: "Down", type: "boolean" }, flip: { name: "Flip", type: "pulse" } },
+        outputs: { on: { name: "On", type: "boolean" }, count: { name: "Count", type: "number" } },
+      },
+      { op: "addPatch", component: "logic", patch: { id: "held", type: "switch", inputs: { turnOn: { link: "$in.down" }, flip: { link: "$in.flip" } } } },
+      { op: "addPatch", component: "logic", patch: { id: "taps", type: "counter", inputs: { increase: { link: "$in.flip" } } } },
+      { op: "connect", component: "logic", from: "held.on", to: "$out.on" },
+      { op: "connect", component: "logic", from: "taps.count", to: "$out.count" },
+      { op: "addPatch", patch: { id: "tap", type: "interaction" } },
+      { op: "addPatch", patch: { id: "inst", type: "component", component: "logic", inputs: { down: { link: "tap.down" }, flip: { link: "tap.tap" } } } },
+      { op: "addLayer", layer: { id: "card", type: "rectangle", props: { opacity: { link: "inst.count" } } } },
+      { op: "addPatch", patch: { id: "grow", type: "popAnimation", inputs: { number: { link: "inst.on" } } } },
+    ]).doc;
+
+  it("replace: true makes each given side the whole set, cascading like null, and round-trips", () => {
+    const doc = logicDoc();
+    const r = mustApply(doc, [{ op: "updateInterface", component: "logic", replace: true, inputs: { down: { name: "Down", type: "boolean" } }, outputs: { on: { name: "On", type: "boolean" } } }]);
+    const logic = r.doc.components.logic!;
+    expect(Object.keys(logic.interface.inputs)).toEqual(["down"]);
+    expect(Object.keys(logic.interface.outputs)).toEqual(["on"]);
+    expect(logic.patches.held!.inputs).toEqual({ turnOn: { link: "$in.down" } });
+    expect(logic.patches.taps!.inputs).toEqual({});
+    expect(r.doc.components.main!.patches.inst!.inputs).toEqual({ down: { link: "tap.down" } });
+    expect(r.doc.components.main!.layers[0]!.props).toEqual({});
+    // "on" was declared again without a link, so it keeps its cable, and so does its reader.
+    expect(logic.interface.outputs.on!.link).toBe("held.on");
+    expect(r.doc.components.main!.patches.grow!.inputs).toEqual({ number: { link: "inst.on" } });
+    // Stored in explicit form, so redo doesn't depend on the document.
+    expect(r.applied).toEqual([
+      {
+        op: "updateInterface",
+        component: "logic",
+        inputs: { flip: null, down: { key: "down", name: "Down", type: "boolean" } },
+        outputs: { count: null, on: { key: "on", name: "On", type: "boolean", link: "held.on" } },
+      },
+    ]);
+    expect(r.inverse[0]).toMatchObject({ outputs: { count: { key: "count", link: "taps.count" }, on: { key: "on", link: "held.on" } } });
+    expect(errorsOf(r.doc)).toEqual([]);
+    expectRoundTrip(doc, r);
+  });
+
+  it("replace leaves a side it isn't given alone, and an empty side unpublishes every port", () => {
+    const doc = logicDoc();
+    const r = mustApply(doc, [{ op: "updateInterface", component: "logic", replace: true, inputs: {} }]);
+    expect(r.doc.components.logic!.interface.inputs).toEqual({});
+    expect(Object.keys(r.doc.components.logic!.interface.outputs)).toEqual(["on", "count"]);
+    expect(r.doc.components.main!.patches.inst!.inputs).toEqual({});
+    expectRoundTrip(doc, r);
+    const merged = mustApply(doc, [{ op: "updateInterface", component: "logic", inputs: {} }]);
+    expect(Object.keys(merged.doc.components.logic!.interface.inputs)).toEqual(["down", "flip"]);
+  });
+
+  it("keeps an output's cable when it's declared again without a link; link: null disconnects it", () => {
+    const doc = logicDoc();
+    const kept = mustApply(doc, [{ op: "updateInterface", component: "logic", outputs: { count: { name: "Taps", type: "number" } } }]);
+    expect(kept.doc.components.logic!.interface.outputs.count).toEqual({ key: "count", name: "Taps", type: "number", link: "taps.count" });
+    expectRoundTrip(doc, kept);
+    const cut = mustApply(doc, [{ op: "updateInterface", component: "logic", outputs: { count: { name: "Taps", type: "number", link: null } } }]);
+    expect(cut.doc.components.logic!.interface.outputs.count).toEqual({ key: "count", name: "Taps", type: "number" });
+    expect(cut.applied).toEqual([{ op: "updateInterface", component: "logic", outputs: { count: { key: "count", name: "Taps", type: "number", link: null } } }]);
+    expectRoundTrip(doc, cut);
+    // Connecting an output that had no cable undoes back to no cable.
+    const connected = mustApply(cut.doc, [{ op: "updateInterface", component: "logic", outputs: { count: { name: "Taps", type: "number", link: "taps.count" } } }]);
+    expectRoundTrip(cut.doc, connected);
+    const retyped = firstError(doc, [{ op: "updateInterface", component: "logic", outputs: { count: { name: "Taps", type: "color" } } }]);
+    expect(retyped).toMatchObject({ code: "type_mismatch", message: expect.stringContaining("keeps its connection from taps.count"), hint: expect.stringContaining('"link": null') });
+  });
+
+  it("unpublishing an input disconnects links that read it off a layer instance", () => {
+    const doc = setup();
+    const withReads = mustApply(doc, [{ op: "addPatch", patch: { id: "log", type: "logger", inputs: { value: { link: "@chip_1.label" } } } }]).doc;
+    const r = mustApply(withReads, [{ op: "updateInterface", component: "chip", inputs: { label: null } }]);
+    expect(r.doc.components.main!.patches.log!.inputs).toEqual({});
+    expect(r.doc.components.main!.patches.toggle!.inputs).toEqual({ flip: { link: "@chip_1.tapped" } });
+    expect(errorsOf(r.doc)).toEqual([]);
+    expectRoundTrip(withReads, r);
+  });
+
+  it("teaches the right shape for guessed fields", () => {
+    const doc = logicDoc();
+    const typo = firstError(doc, [{ op: "updateInterface", component: "logic", input: { a: { type: "number" } } } as unknown as Op]);
+    expect(typo).toMatchObject({ code: "unknown_field", message: expect.stringContaining('Did you mean "inputs"?') });
+    const mode = firstError(doc, [{ op: "updateInterface", component: "logic", mode: "replace", inputs: {} } as unknown as Op]);
+    expect(mode.hint).toContain('"replace": true');
+    expect(firstError(doc, [{ op: "updateInterface", component: "logic", replace: "yes" as unknown as boolean, inputs: {} }]).code).toBe("invalid_value");
+    const field = firstError(doc, [{ op: "updateInterface", component: "logic", inputs: { depth: { name: "Depth", type: "number", defaultValue: 1 } as never } }]);
+    expect(field).toMatchObject({ code: "unknown_field", message: expect.stringContaining('Did you mean "default"?') });
+    const rename = firstError(doc, [{ op: "updateInterface", component: "logic", inputs: { down: { key: "pressed", name: "Pressed", type: "boolean" } } }]);
+    expect(rename).toMatchObject({ code: "invalid_value", hint: expect.stringContaining('unpublish "down"') });
+    expect(rename.suggestions![0]!.ops).toEqual([{ op: "updateInterface", component: "logic", inputs: { down: null, pressed: { key: "pressed", name: "Pressed", type: "boolean" } } }]);
+    expect(apply(doc, rename.suggestions![0]!.ops!).ok).toBe(true);
+  });
 });
 
 describe("createComponent", () => {

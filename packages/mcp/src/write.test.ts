@@ -1,3 +1,4 @@
+import { ID_SCENARIO_SETUP, ID_SCENARIOS, runIdScenario, type IdScenarioHost } from "@sonobe/core/testing";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   buildGrowCard,
@@ -459,5 +460,128 @@ describe("cancelled calls", () => {
     await expect(project.host.history.undo({ author, signal: cancelled.signal })).rejects.toMatchObject({ code: "cancelled" });
     expect((await project.host.getDocument()).revision).toBe(before);
     expect((await client.call("list_history", {})).text).not.toContain("dot");
+  });
+});
+
+describe("rebuilding a component", () => {
+  const CLAUDE = { kind: "agent", name: "Claude" } as const;
+
+  describe("shared id scenarios (ARCHITECTURE §3.2)", () => {
+    for (const scenario of ID_SCENARIOS) {
+      it(scenario.name, async () => {
+        const host = project.host;
+        expect((await host.apply(ID_SCENARIO_SETUP, { label: "setup", author: CLAUDE })).ok).toBe(true);
+        const adapter: IdScenarioHost = {
+          apply: (ops, { dryRun }) => host.apply(ops, { label: "edit", author: CLAUDE, dryRun }),
+          undo: async () => void (await host.history.undo({ author: CLAUDE })),
+        };
+        expect(await runIdScenario(adapter, scenario)).toEqual(scenario.expected);
+      });
+    }
+  });
+
+  /** The retro's swipe card: a patch component whose instance in main feeds the Badge. */
+  const buildSwipeCard = async () => {
+    const r = await client.call("apply_ops", {
+      ops: [
+        { op: "addComponent", component: { id: "swipe_card", name: "Swipe Card", kind: "patchComponent" } },
+        {
+          op: "updateInterface",
+          component: "swipe_card",
+          inputs: { down: { name: "Down", type: "boolean" }, swipedLeft: { name: "Swiped Left", type: "pulse" } },
+          outputs: { gone: { name: "Gone", type: "boolean" }, wentLeft: { name: "Went Left", type: "boolean" } },
+        },
+        { op: "addPatch", component: "swipe_card", patch: { id: "went_left", type: "switch", inputs: { turnOn: { link: "$in.swipedLeft" } } } },
+        { op: "addPatch", component: "swipe_card", patch: { id: "card_gone", type: "or", inputs: { value1: { link: "went_left.on" }, value2: { link: "$in.down" } } } },
+        { op: "connect", component: "swipe_card", from: "card_gone.output", to: "$out.gone" },
+        { op: "connect", component: "swipe_card", from: "went_left.on", to: "$out.wentLeft" },
+        { op: "addLayer", layer: { id: "badge", type: "rectangle", name: "Badge" } },
+        { op: "addPatch", patch: { id: "tap", type: "interaction", inputs: { layer: { layer: "badge" } } } },
+        { op: "addPatch", patch: { id: "card_1_swipe", type: "component", component: "swipe_card", name: "Card 1 Swipe", inputs: { down: { link: "tap.down" }, swipedLeft: { link: "tap.tap" } } } },
+        { op: "connect", from: "card_1_swipe.wentLeft", to: "@badge.opacity" },
+      ],
+    });
+    expect(r.isError, r.text).toBe(false);
+  };
+  const rebuild = [
+    { op: "removePatch", component: "swipe_card", id: "went_left" },
+    { op: "updateInterface", component: "swipe_card", replace: true, inputs: { down: { name: "Down", type: "boolean" } }, outputs: { gone: { name: "Gone", type: "boolean" } } },
+  ];
+
+  it("replace: true unpublishes old ports, and the result lists every cable it cut; undo restores them", async () => {
+    await buildSwipeCard();
+    const dry = await client.call("apply_ops", { ops: rebuild, dryRun: true });
+    expect(dry.text).toContain("Would unpublish from Swipe Card: input swipedLeft; output wentLeft.");
+    expect(dry.text).toContain("Would disconnect 2 cables in main: tap.tap → card_1_swipe.swipedLeft, card_1_swipe.wentLeft → @badge.opacity.");
+    expect(dry.structured).toMatchObject({ changed: "none", unpublished: [{ component: "swipe_card", inputs: ["swipedLeft"], outputs: ["wentLeft"] }] });
+
+    const real = await client.call("apply_ops", { ops: rebuild });
+    expect(real.isError, real.text).toBe(false);
+    expect(real.text).toContain("Removed: 1 patch.");
+    expect(real.text).toContain("Unpublished from Swipe Card: input swipedLeft; output wentLeft.");
+    expect(real.text).toContain("Disconnected 1 cable in swipe_card: went_left.on → card_gone.value1.");
+    expect(real.text).toContain("The undo tool brings them back.");
+    expect(real.structured.disconnected).toEqual({
+      count: 3,
+      cables: [
+        { component: "main", from: "tap.tap", to: "card_1_swipe.swipedLeft" },
+        { component: "main", from: "card_1_swipe.wentLeft", to: "@badge.opacity" },
+        { component: "swipe_card", from: "went_left.on", to: "card_gone.value1" },
+      ],
+    });
+    const outline = (await client.call("get_outline", { component: "swipe_card" })).text;
+    expect(outline).toContain('output gone boolean "Gone" ←card_gone.output');
+    expect(outline).not.toContain("swipedLeft");
+
+    expect((await client.call("undo", {})).isError).toBe(false);
+    const restored = (await client.call("get_outline", {})).text;
+    expect(restored).toContain("opacity←card_1_swipe.wentLeft");
+    expect(restored).toContain("swipedLeft←tap.tap");
+  });
+
+  it("warns when a cable reads an output the component doesn't drive", async () => {
+    await buildSwipeCard();
+    const r = await client.call("apply_ops", { ops: [{ op: "disconnect", component: "swipe_card", to: "$out.wentLeft" }] });
+    expect(r.text).toContain("undriven_output");
+    expect(r.text).toContain("Swipe Card doesn't drive that output inside");
+  });
+
+  it("names the retired ids a later batch skipped, on their own line", async () => {
+    await buildSwipeCard();
+    const oneBatch = await client.call("apply_ops", {
+      ops: [
+        { op: "removePatch", component: "swipe_card", id: "card_gone" },
+        { op: "addPatch", component: "swipe_card", patch: { type: "or", name: "Card Gone" } },
+      ],
+    });
+    expect(oneBatch.text).toContain("Created: card_gone (or)");
+    expect(oneBatch.text).not.toContain("Retired ids");
+    await client.call("apply_ops", { ops: [{ op: "removePatch", component: "swipe_card", id: "card_gone" }] });
+    const later = await client.call("apply_ops", { ops: [{ op: "addPatch", component: "swipe_card", patch: { type: "or", name: "Card Gone" } }] });
+    expect(later.text).toContain("Created: card_gone_2 (or)\nRetired ids skipped: card_gone → card_gone_2. Those ids belonged to items removed earlier this session");
+    expect(later.structured.retiredIds).toEqual({ card_gone_2: "card_gone" });
+    const explicit = await client.call("apply_ops", { ops: [{ op: "addPatch", component: "swipe_card", patch: { id: "card_gone", type: "or" } }] });
+    expect(explicit.isError).toBe(true);
+    expect(explicit.text).toContain('"card_gone" belonged to an item removed from swipe_card earlier in this session.');
+    expect(explicit.text).toContain("undo it first");
+  });
+
+  it("names the item that took an id first when two names in a batch slug alike", async () => {
+    const r = await client.call("add_patches", {
+      patches: [
+        { type: "switch", name: "Card Above: Gone" },
+        { type: "switch", name: "Card Above Gone" },
+      ],
+    });
+    expect(r.text).toContain('Suffixed ids: card_above_gone_2 ("Card Above Gone") because card_above_gone ("Card Above: Gone") took card_above_gone earlier in this batch.');
+    expect(r.structured.suffixedIds).toEqual({ card_above_gone_2: "card_above_gone" });
+  });
+
+  it("teaches guessed updateInterface fields", async () => {
+    await buildSwipeCard();
+    const r = await client.call("apply_ops", { ops: [{ op: "updateInterface", component: "swipe_card", mode: "replace", inputs: {} }] });
+    expect(r.isError).toBe(true);
+    expect(r.text).toContain('updateInterface has no field "mode".');
+    expect(r.text).toContain('pass "replace": true');
   });
 });
