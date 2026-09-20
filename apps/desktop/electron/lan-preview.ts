@@ -155,6 +155,17 @@ export function previewUrl(address: string, port: number, token: string): string
   return `http://${host}:${port}/p/${token}/`;
 }
 
+/** The text of the app's own Preview on Phone dialog, for an editor that can't show its QR panel. */
+export function phonePreviewDetail(url: string, lanReachable: boolean): string {
+  return [
+    lanReachable ? "Scan the code with a phone on the same Wi-Fi, or open this link:" : "No local network was found, so only this computer can open the preview:",
+    url,
+    "",
+    ...(lanReachable ? ["On iPhone, scan the code in the Sonobe Viewer app to feel haptics. On the phone, a three-finger tap opens a menu with Restart; restarting in Sonobe restarts the phone too.", ""] : []),
+    "The link includes a private code. Anyone with it can view this prototype while the preview is on.",
+  ].join("\n");
+}
+
 function tokensMatch(candidate: string, token: string): boolean {
   const a = createHash("sha256").update(candidate).digest();
   const b = createHash("sha256").update(token).digest();

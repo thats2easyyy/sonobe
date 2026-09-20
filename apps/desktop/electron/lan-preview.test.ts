@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { WebSocket } from "ws";
-import { etagMatches, lanAddresses, matchPreviewPath, previewUrl, resolveUnder, startLanPreview, type LanPreviewHandle, type PreviewDocument, type PreviewMessage } from "./lan-preview.ts";
+import { etagMatches, lanAddresses, matchPreviewPath, phonePreviewDetail, previewUrl, resolveUnder, startLanPreview, type LanPreviewHandle, type PreviewDocument, type PreviewMessage } from "./lan-preview.ts";
 
 interface Player {
   ws: WebSocket;
@@ -66,6 +66,18 @@ describe("lan preview helpers", () => {
     expect(matchPreviewPath("/p/tok/%E0%A4%A", "tok")).toBeNull();
     expect(resolveUnder("/srv/player", "../secret")).toBeNull();
     expect(resolveUnder("/srv/player", "player.js")).toBe(path.resolve("/srv/player/player.js"));
+  });
+
+  it("words the app's own Preview on Phone dialog like the editor's panel", () => {
+    const url = "http://192.168.1.24:5173/p/abc/";
+    const lan = phonePreviewDetail(url, true);
+    expect(lan.split("\n").slice(0, 2)).toEqual(["Scan the code with a phone on the same Wi-Fi, or open this link:", url]);
+    expect(lan).toContain("Sonobe Viewer app to feel haptics");
+    expect(lan).toContain("a three-finger tap opens a menu with Restart");
+    expect(lan).toContain("Anyone with it can view this prototype");
+    const local = phonePreviewDetail("http://127.0.0.1:5173/p/abc/", false);
+    expect(local).toContain("only this computer can open the preview");
+    expect(local).not.toContain("Sonobe Viewer");
   });
 });
 
