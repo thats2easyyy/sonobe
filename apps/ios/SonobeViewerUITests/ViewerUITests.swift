@@ -96,6 +96,23 @@ final class ViewerUITests: XCTestCase {
         XCTAssertTrue(app.webViews.firstMatch.staticTexts["0"].waitForExistence(timeout: 15), "the deep link didn't open the preview")
     }
 
+    /// A deep link to a host off the local network names the host and asks first; Cancel stays put.
+    func testAsksBeforeOpeningALinkOffTheLocalNetwork() {
+        let app = XCUIApplication()
+        app.launch()
+        XCTAssertTrue(app.navigationBars["Sonobe Viewer"].waitForExistence(timeout: 10), "the connect screen didn't appear")
+
+        app.open(URL(string: "sonobe-viewer://open?url=https://evil.example/p/abc/")!)
+        let confirm = XCUIApplication(bundleIdentifier: "com.apple.springboard").buttons["Open"]
+        if confirm.waitForExistence(timeout: 3) { confirm.tap() }
+
+        let alert = app.alerts["Open a preview from evil.example?"]
+        XCTAssertTrue(alert.waitForExistence(timeout: 5), "no confirmation for a link off the local network")
+        alert.buttons["Cancel"].tap()
+        XCTAssertTrue(app.navigationBars["Sonobe Viewer"].waitForExistence(timeout: 5), "Cancel left the connect screen")
+        XCTAssertFalse(app.webViews.firstMatch.exists)
+    }
+
     /// The server only knows the token of the current session, so an old link explains what to do.
     func testExplainsAnExpiredLink() throws {
         let current = try XCTUnwrap(URL(string: try playerURL()))
