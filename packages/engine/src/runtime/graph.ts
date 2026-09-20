@@ -28,6 +28,8 @@ export interface ScopeInput {
   binding: Binding;
   /** loopBehavior "loop" (replicate the instance) vs "pass". */
   loop: boolean;
+  /** A loop input whose driver evaluates after the instance's copies node (a back-edge: it reads last frame's value). */
+  feedback: boolean;
   default: Value | Loop;
 }
 
@@ -98,7 +100,10 @@ export interface CNode extends NodeSpec {
   order: number;
   bindings: Binding[];
   deps: CNode[];
-  /** Per input slot: the driver evaluates later in the frame (reads the previous frame). */
+  /**
+   * Per input slot: the driver evaluates later in the frame (reads the previous frame). On a copies
+   * node: per loop input of `copiesOf`, then per replicator.
+   */
   feedback: boolean[];
   records: Map<string, NodeRecord>;
   copiesOf: Scope | null;

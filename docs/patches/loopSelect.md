@@ -17,30 +17,45 @@ Loop Select looks items up by their position in a loop. Give it one index to pul
 
 - **Loop** is the list to pick from.
 - **Index** is which position to take, counted from 0. A loop of indices like 2, 1, 0 returns those items in that order.
-- **Output** is the picked items.
+- **Out of Range** decides what an index past the end, or below 0, gives:
+  - **Skip** (the default) leaves it out, so it adds nothing to Output.
+  - **Clamp** takes the nearest end: the first item below 0, the last item past the end.
+  - **Wrap** counts around: in a loop of 3, index 3 is item 0 and −1 is item 2.
+  - **Use Fallback** gives Fallback instead.
+- **Fallback** is what Use Fallback gives. Every mode except Skip also gives it for an index that isn't a number, or when Loop is empty.
+- **Output** is the picked items. With any mode except Skip, it has exactly one item per index.
 - **Output Index** is each picked item's position in Output: 0, 1, 2, ….
-
-An index past the end, or below 0, is skipped and adds nothing to Output.
 
 ## Tips
 - In a carousel, wire the current page number into Index to show that page's title.
+- To read each copy's neighbor, like the card above, feed Index the loop's own Index plus 1 and set Out of Range to Use Fallback. The last copy gets Fallback instead of nothing, so everything downstream keeps running.
+- An empty Output empties everything it feeds: a patch that gets an empty loop runs 0 times, and a layer bound to one draws no copies. When that isn't what you want, choose a mode other than Skip.
 - To keep or drop items by a condition instead of by position, use Loop Filter.
 
 ## Coming from Origami
-The inputs are called Input and Index Loop in Origami. With a single index, Origami's Index output repeats the selected index; here Output Index always counts positions in Output, so it's 0.
+The inputs are called Input and Index Loop in Origami. With a single index, Origami's Index output repeats the selected index; here Output Index always counts positions in Output, so it's 0. Out of Range and Fallback are Sonobe additions.
 
 ## Inputs
 
 | Input | Type | Default | Description |
 |---|---|---|---|
 | **Loop**<br>`loop` | `variant` · whole loop | empty loop | The loop to pick items from. |
-| **Index**<br>`index` | `number` · whole loop | `0` | Which position to pick, counted from 0; a loop of indices picks several in that order, and out-of-range values are skipped. step 1. |
+| **Index**<br>`index` | `number` · whole loop | `0` | Which position to pick, counted from 0; a loop of indices picks several in that order. Out of Range decides what an index past the end gives. step 1. |
+| **Out of Range**<br>`outOfRange` | `enum` | `skip` | What an index past the end, or below 0, gives: Skip leaves it out, Clamp takes the nearest end, Wrap counts around, and Use Fallback gives Fallback. |
+| **Fallback**<br>`fallback` | `variant` | `0` | What an out-of-range index gives with Use Fallback. Every mode except Skip also gives it for an index that isn't a number, or when Loop is empty. |
+
+**Out of Range options**
+
+- **Skip** (`skip`): Leave it out, so Output can be shorter than Index, or empty.
+- **Clamp** (`clamp`): Take the first item below 0 and the last item past the end.
+- **Wrap** (`wrap`): Count around the loop: past the end starts again at the first item, and −1 is the last.
+- **Use Fallback** (`fallback`): Give Fallback instead.
 
 ## Outputs
 
 | Output | Type | Description |
 |---|---|---|
-| **Output**<br>`output` | `variant` · whole loop | The picked items, in the order of Index. |
+| **Output**<br>`output` | `variant` · whole loop | The picked items, in the order of Index. With any mode except Skip, one item per index. |
 | **Output Index**<br>`outputIndex` | `index` · whole loop | Each picked item's position in Output: 0, 1, 2, …. |
 
 ## Types
@@ -76,9 +91,25 @@ patch open switch turnOn←second_tap.output
 patch pop popAnimation number←open.on
 ```
 
+### Dim a row while the row below it is open
+
+Each row reads its neighbor's state at Index + 1. Use Fallback gives the last row false instead of nothing, so all four rows keep drawing.
+
+```text
+layer row rectangle "Row" position←grid.position size←grid.size cornerRadius=12 opacity←dim.output
+patch rows loop count=4
+patch grid gridLayout index←rows.index columns=1 origin=16,120 width=370 itemHeight=72 spacing=8
+patch tap_row interaction layer=@row
+patch open switch flip←tap_row.tap
+patch below add[2] value1←rows.index value2=1
+patch below_open loopSelect<boolean> loop←open.on index←below.output outOfRange=fallback fallback=false
+patch dim transition<number> progress←below_open.output start=1 end=0.4
+```
+
 ## Common mistakes
 
-- Output is empty and connected layers vanish: the index is past the end (a loop of 3 has indices 0 to 2) or below 0. Keep the index between 0 and Loop Count − 1, for example with Clamp.
+- Output is empty and connected layers vanish: the index is past the end (a loop of 3 has indices 0 to 2) or below 0. Set Out of Range to Clamp or Use Fallback, or keep the index between 0 and Loop Count − 1.
+- A feedback loop through Loop Select never starts: on the first frame Delay One Frame passes one value, not a list, so every index past 0 is out of range and Output stays empty. Set Out of Range to Use Fallback, so each index gets a value from the start.
 - Only one item comes out when you wanted the list reordered: Index is a single number, so it picks one item. Wire a loop of indices, for example from a Loop Builder set to Number, to pick several.
 
 ## Pairs well with
