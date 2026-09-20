@@ -51,6 +51,8 @@ declare global {
     __sonobeFakeAssistant?: AssistantHostLike;
     /** Every request send() received, oldest first. */
     __fakeAssistantSent?: FakeSendRequest[];
+    /** Every prompt openInClaudeCode() received, oldest first. */
+    __fakeHandoffs?: string[];
     /** Resolves when __releaseFakeGate() is called; a reply waits on it at `hold`. */
     __fakeGate?: Promise<void>;
     __releaseFakeGate?: () => void;
@@ -60,6 +62,11 @@ declare global {
 /** Define window.__sonobeFakeAssistant before the app loads (per page; call before openEditor). */
 export async function installFakeAssistant(page: Page, options: FakeAssistantOptions): Promise<void> {
   await page.addInitScript(fakeAssistant, { ...options, draftEvents: DRAFT_EVENTS, codeFolder: FAKE_CODE_FOLDER });
+}
+
+/** The prompts Open in Claude Code handed off so far. */
+export function fakeHandoffs(page: Page): Promise<string[]> {
+  return page.evaluate(() => window.__fakeHandoffs ?? []);
 }
 
 /** Let a held reply go on (it imports the page and finishes). */
@@ -90,6 +97,8 @@ function fakeAssistant(options: FakeAssistantOptions & { draftEvents: number; co
   };
   const sent: FakeSendRequest[] = [];
   window.__fakeAssistantSent = sent;
+  const handoffs: string[] = [];
+  window.__fakeHandoffs = handoffs;
   let openGate: () => void = () => undefined;
   window.__fakeGate = new Promise<void>((resolve) => {
     openGate = resolve;
@@ -269,6 +278,12 @@ function fakeAssistant(options: FakeAssistantOptions & { draftEvents: number; co
       unlinkCodeFolder: async () => {
         codeFolder = { linked: null, missing: false };
         return copy(codeFolder);
+      },
+      // The desktop opens a one-time script in Terminal, in the linked folder (linking one first); this records the prompt.
+      openInClaudeCode: async (request) => {
+        handoffs.push(request.prompt);
+        if (!codeFolder.linked) codeFolder = { linked: { ...options.codeFolder }, missing: false };
+        return { ok: true, folder: options.codeFolder.path };
       },
     },
     secrets: {
