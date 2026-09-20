@@ -259,7 +259,12 @@ export async function runRelay(options: RelayOptions): Promise<number> {
   const noticeClient = (message: JsonRpcMessage) => {
     const meta = message.params?._meta as Record<string, unknown> | undefined;
     const info = (message.method === "initialize" ? message.params?.clientInfo : meta?.[CLIENT_INFO_KEY]) as Record<string, unknown> | undefined;
-    const named = Object.fromEntries((["name", "title", "version"] as const).filter((key) => typeof info?.[key] === "string").map((key) => [key, info![key] as string]));
+    // Blank fields stay out (clientInfo's version is required, so some clients send ""): older apps refuse a hello with one.
+    const named = Object.fromEntries(
+      (["name", "title", "version"] as const)
+        .map((key) => [key, typeof info?.[key] === "string" ? (info[key] as string).trim() : ""] as const)
+        .filter(([, value]) => value),
+    );
     const learned = Object.keys(named).length > 0 && JSON.stringify(named) !== JSON.stringify(clientInfo);
     if (learned) clientInfo = named;
     if (hello && !learned) return;
