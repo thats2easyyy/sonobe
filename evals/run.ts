@@ -67,7 +67,8 @@ Runs Claude Code headless on each eval case, then checks the prototype it built.
   --claude <path>    The claude command (default: claude on PATH).
   --sonobe <path>    The Sonobe CLI the MCP server runs (default: packages/cli/dist/sonobe.mjs;
                      build it with npm run build -w @sonobe/cli, or pass packages/cli/src/main.ts).
-  --user-config      Load your own Claude Code settings, CLAUDE.md and skills (default: left out).
+  --user-config      Load your own Claude Code settings and CLAUDE.md (default: left out). Skills
+                     stay off either way.
   --out <dir>        Results folder (default: evals/results/<time>).
   --keep             Keep each run's working folder.
   --check <dir>      Check a project folder against one --case, without Claude.
