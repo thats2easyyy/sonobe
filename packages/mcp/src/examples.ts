@@ -10,7 +10,8 @@
  *
  * A recipe that starts from a design import or tidies by frame (buildRecipe, asynchronous, and for a
  * design its capture and photos) is read from its project folder instead of rebuilt: run.test.ts keeps
- * that folder equal to the recipe's build, and a bundle carries its JSON files, not the photos.
+ * that folder equal to the recipe's build. A bundle carries its JSON files and the design's capture,
+ * which get_example hands to import_design (the photos download from their URLs), not the photos.
  */
 
 import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync } from "node:fs";
@@ -78,6 +79,8 @@ export interface ExampleCatalog {
   suggest(ref: string): string[];
   /** Build an example with a registry (cached). Throws when its recipe no longer applies. */
   build(entry: ExampleEntry, registry: Registry): BuiltExample;
+  /** The design capture an example starts from (Recipe.design), parsed; undefined without one. */
+  design(entry: ExampleEntry): unknown;
 }
 
 /** Most ops in one batch (apply_ops takes 500). */
@@ -113,7 +116,8 @@ function projectFiles(dir: string): string[] {
 
 /**
  * The files the catalog reads from an examples folder, relative to it: the table, each example's
- * README.md and test.json, and the document files of those it reads from their project folder.
+ * README.md and test.json, the document files of those it reads from their project folder, and the
+ * design captures recipes start from.
  */
 export function exampleTextFiles(from: string | undefined = defaultExamplesDir()): string[] {
   return [
@@ -122,6 +126,7 @@ export function exampleTextFiles(from: string | undefined = defaultExamplesDir()
       `${r.folder}/README.md`,
       `${r.folder}/test.json`,
       ...(from && readsProjectFolder(r) ? projectFiles(path.join(from, r.folder)).map((file) => `${r.folder}/${file}`) : []),
+      ...(r.design ? [r.design.capture] : []),
     ]),
   ];
 }
@@ -350,6 +355,10 @@ export function loadExamples(options: { dir?: string | undefined; recipes?: read
       };
       byId.set(entry.id, result);
       return result;
+    },
+    design(entry) {
+      const text = entry.recipe.design ? readText(at(entry.recipe.design.capture)) : undefined;
+      return text === undefined ? undefined : (JSON.parse(text) as unknown);
     },
   };
 }

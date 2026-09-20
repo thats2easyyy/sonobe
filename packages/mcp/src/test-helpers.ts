@@ -7,7 +7,7 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/server";
 import type { EngineRegistry } from "@sonobe/engine";
 import { createHeadlessHost, type HeadlessHost } from "./headless.ts";
-import { serveStdioHost } from "./transports.ts";
+import { serveStdioHost, type StdioOptions } from "./transports.ts";
 
 export interface TempProject {
   dir: string;
@@ -58,9 +58,10 @@ export interface TestClient {
 export async function connectClient(
   host: HeadlessHost,
   clientName = "claude-code",
+  server: Omit<StdioOptions, "version" | "transport"> = {},
 ): Promise<TestClient> {
   const [clientSide, serverSide] = InMemoryTransport.createLinkedPair();
-  const handle = serveStdioHost(host, { version: "0.1.0-test", transport: serverSide });
+  const handle = serveStdioHost(host, { version: "0.1.0-test", transport: serverSide, ...server });
   const client = new Client({ name: clientName, version: "1.0.0" });
   await client.connect(clientSide as never);
   return {
