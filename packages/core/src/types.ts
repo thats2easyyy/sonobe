@@ -140,9 +140,9 @@ export type Value =
  */
 export type Literal = number | boolean | string | number[] | null;
 
-/** Driven by a patch output, a component input ("$in.key"), or nothing else. */
+/** Driven by a patch output, a component input ("$in.key"), a knob ("$knob.id"), or nothing else. */
 export interface LinkInput {
-  link: string; // "patchId.portKey" | "$in.key" | "@layerId.key" (layer output or prop)
+  link: string; // "patchId.portKey" | "$in.key" | "$knob.id" | "@layerId.key" (layer output or prop)
 }
 export interface LayerInput {
   layer: Id;
@@ -286,12 +286,61 @@ export interface AssetFont {
   unicodeRange?: string;
 }
 
+/** Value types a knob can hold. Each maps to a ValueType and to an existing Inspector control. */
+export type KnobType = "number" | "boolean" | "color" | "enum" | "point" | "text";
+
+/** A named, tunable value any input can read through `{ "link": "$knob.<id>" }` (ARCHITECTURE §3.3). */
+export interface Knob {
+  /** Immutable slug in the project-wide knob namespace. */
+  id: Id;
+  /** 1–60 characters, unique among knobs ignoring case. */
+  name: string;
+  /** Panel section label (≤ 40 characters). */
+  group?: string;
+  type: KnobType;
+  /** Document-encoded literal per preset id: number | boolean | "#RRGGBBAA" | enum key | text | [x, y]. */
+  values: Record<Id, Literal>;
+  /** number and point (per axis): soft slider bounds; typed values may go past them. */
+  min?: number;
+  max?: number;
+  /** Above 0: slider snapping, arrow keys and display precision. */
+  step?: number;
+  /** Display suffix only ("pt", "s", "°"), ≤ 12 characters. */
+  unit?: string;
+  /** enum only: at least 2 options with unique keys. */
+  options?: EnumOption[];
+  /** What it changes in the feel (≤ 200 characters). */
+  description?: string;
+}
+
+/** One column of knob values ("Proposal", "Shipped app"). */
+export interface KnobPreset {
+  /** Immutable slug in the project-wide preset namespace. */
+  id: Id;
+  /** 1–40 characters, unique among presets ignoring case. */
+  name: string;
+  /** Refuses value edits, so a reference stays what it is. */
+  locked?: boolean;
+}
+
+/** The project's knobs (knobs.json). */
+export interface KnobSet {
+  /** The preset the prototype runs and value edits change. */
+  active: Id;
+  /** At least one, in display order. */
+  presets: KnobPreset[];
+  /** In panel order. */
+  knobs: Knob[];
+}
+
 export interface SonobeDocument {
   project: ProjectManifest;
   components: Record<Id, Component>;
   /** Script sources keyed by file name relative to scripts/ (e.g. "js_1.js"). */
   scripts: Record<string, string>;
   assets: Record<Id, AssetRecord>;
+  /** Knobs and presets (knobs.json). Absent when the project has none. */
+  knobs?: KnobSet;
 }
 
 // ---------------------------------------------------------------------------
@@ -484,6 +533,7 @@ export interface Registry {
  *   "@layerId.propKey"  layer property
  *   "$in.key"           component published input (source side)
  *   "$out.key"          component published output (target side)
+ *   "$knob.id"          a knob's value (source side, project-wide)
  */
 export type PortAddress = string;
 
@@ -509,6 +559,22 @@ export interface NewPatch {
   settings?: PatchNode["settings"];
   component?: Id;
   ui?: { x: number; y: number };
+}
+
+/** A knob as addKnob takes it: `value` goes into every preset, `values` (by preset id) over it. */
+export interface NewKnob {
+  id?: Id;
+  name: string;
+  type: KnobType;
+  group?: string;
+  description?: string;
+  min?: number;
+  max?: number;
+  step?: number;
+  unit?: string;
+  options?: EnumOption[];
+  value?: Literal;
+  values?: Record<Id, Literal>;
 }
 
 interface OpBase {
@@ -588,7 +654,34 @@ export type Op =
   | { op: "setScript"; file: string; source: string | null }
   | { op: "addAsset"; asset: AssetRecord }
   | { op: "removeAsset"; id: Id }
-  | { op: "setProject"; changes: { [K in keyof Omit<ProjectManifest, "formatVersion">]?: ProjectManifest[K] | null } };
+  | { op: "setProject"; changes: { [K in keyof Omit<ProjectManifest, "formatVersion">]?: ProjectManifest[K] | null } }
+  // Knobs and presets are project-level: these ops take no component. null clears an optional field.
+  | { op: "addKnob"; knob: NewKnob; index?: number }
+  | {
+      op: "updateKnob";
+      id: Id;
+      name?: string;
+      group?: string | null;
+      description?: string | null;
+      /** Converts every value; refused when a value can't convert or a reader can't take the new type. */
+      type?: KnobType;
+      min?: number | null;
+      max?: number | null;
+      step?: number | null;
+      unit?: string | null;
+      options?: EnumOption[] | null;
+      index?: number;
+    }
+  /** Every input that reads the knob keeps its running value as a literal. */
+  | { op: "removeKnob"; id: Id }
+  /** `preset` defaults to the running one. Refused on a locked preset. */
+  | { op: "setKnobValue"; id: Id; value: Literal; preset?: Id }
+  /** Every knob's value in the new preset starts from `copyFrom` (default: the running preset). */
+  | { op: "addKnobPreset"; preset: { id?: Id; name: string; locked?: boolean }; copyFrom?: Id; index?: number }
+  | { op: "updateKnobPreset"; id: Id; name?: string; locked?: boolean; index?: number }
+  | { op: "removeKnobPreset"; id: Id }
+  /** Run another preset: every reader takes its values, live. */
+  | { op: "applyKnobPreset"; id: Id };
 
 export type OpKind = Op["op"];
 
@@ -622,6 +715,9 @@ export interface Diagnostic {
   itemIds: Id[];
   port?: string;
   suggestions?: Suggestion[];
+  /** Knob diagnostics: the knob (and preset) it's about; the component is the root. */
+  knob?: Id;
+  preset?: Id;
 }
 
 export interface OpResult {
@@ -640,6 +736,9 @@ export interface Affected {
   components: Id[];
   layers: Id[];
   patches: Id[];
+  /** Knob and preset ids the batch changed (only when it changed any). */
+  knobs?: Id[];
+  presets?: Id[];
 }
 
 export interface ApplyOptions {

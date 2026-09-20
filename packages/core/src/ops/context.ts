@@ -1,7 +1,7 @@
 /** Shared state and helpers for op handlers. */
 
 import { didYouMean, didYouMeanText } from "../suggest.ts";
-import { fileNameKey, getOwn, ID_PATTERN, isValidId, slugify, uniqueId } from "../ids.ts";
+import { fileNameKey, getOwn, ID_PATTERN, isValidId, RESERVED_IDS, slugify, uniqueId } from "../ids.ts";
 import { liveItemIds, type SeenIds } from "../idLedger.ts";
 import { allLayerIds, findLayer, type LayerLocation } from "../registry.ts";
 import type { ApplyOptions, ApplyResult, Component, Id, Op, OpKind, PatchNode, Registry, SonobeDocument, SonobeError } from "../types.ts";
@@ -74,9 +74,11 @@ export interface AffectedSets {
   components: Set<Id>;
   layers: Set<Id>;
   patches: Set<Id>;
+  knobs: Set<Id>;
+  presets: Set<Id>;
 }
 
-export const newAffected = (): AffectedSets => ({ components: new Set(), layers: new Set(), patches: new Set() });
+export const newAffected = (): AffectedSets => ({ components: new Set(), layers: new Set(), patches: new Set(), knobs: new Set(), presets: new Set() });
 
 export interface OpContext {
   doc: SonobeDocument;
@@ -95,6 +97,10 @@ export interface OpContext {
   readonly retiredItem: (component: Id, id: Id) => boolean;
   /** True when a component id (ignoring case) was seen this session but isn't live at the batch start. */
   readonly retiredComponent: (id: Id) => boolean;
+  /** True when a knob id was seen this session but isn't a knob at the batch start. */
+  readonly retiredKnob: (id: Id) => boolean;
+  /** True when a preset id was seen this session but isn't a preset at the batch start. */
+  readonly retiredPreset: (id: Id) => boolean;
   /** Item ids live in `component` at the batch start. */
   readonly startIds: (component: Id) => ReadonlySet<Id>;
   /** Derived ids the current op gave a suffix, and why (see OpResult.retired and OpResult.suffixed). */
@@ -142,14 +148,18 @@ export function createContext(doc: SonobeDocument, options: ApplyOpsOptions): Op
 const NO_IDS: ReadonlySet<Id> = new Set();
 
 /** Retired-id checks against the batch's input document, so ids freed within the batch stay usable. */
-function retirement(start: SonobeDocument, seen: SeenIds | undefined): Pick<OpContext, "retiredItem" | "retiredComponent" | "startIds"> {
+function retirement(start: SonobeDocument, seen: SeenIds | undefined): Pick<OpContext, "retiredItem" | "retiredComponent" | "retiredKnob" | "retiredPreset" | "startIds"> {
   const startIds = (component: Id) => {
     const c = getOwn(start.components, component);
     return c ? liveItemIds(c) : NO_IDS;
   };
-  if (!seen) return { retiredItem: () => false, retiredComponent: () => false, startIds };
+  if (!seen) return { retiredItem: () => false, retiredComponent: () => false, retiredKnob: () => false, retiredPreset: () => false, startIds };
   let retiredKeys: Set<string> | undefined;
+  const liveKnobs = new Set(start.knobs?.knobs.map((k) => k.id));
+  const livePresets = new Set(start.knobs?.presets.map((p) => p.id));
   return {
+    retiredKnob: (id) => seen.knobs.has(id) && !liveKnobs.has(id),
+    retiredPreset: (id) => seen.presets.has(id) && !livePresets.has(id),
     retiredItem: (component, id) => !!seen.items.get(component)?.has(id) && !startIds(component).has(id),
     retiredComponent: (id) => {
       if (!retiredKeys) {
@@ -172,6 +182,7 @@ export function defineRef(ctx: OpContext, ref: unknown, id: Id): void {
   }
   const name = refName(ref);
   if (name === "in" || name === "out") fail("invalid_ref", `"${ref}" is reserved for published ports.`, { hint: "Pick another ref name." });
+  if (name === "knob") fail("invalid_ref", `"${ref}" is reserved for knobs ("$knob.<id>").`, { hint: "Pick another ref name." });
   if (ctx.refs.has(name) || ctx.pendingRefs.has(name)) fail("duplicate_ref", `The ref "${ref}" is already used in this batch.`, { hint: "Each ref names one new item." });
   ctx.pendingRefs.set(name, { given: ref, id });
 }
@@ -188,7 +199,7 @@ export function knownRefs(ctx: OpContext): string[] {
  */
 export function resolveId(ctx: OpContext, value: unknown): Id {
   if (typeof value !== "string") fail("invalid_op", `Expected an id, but got ${JSON.stringify(value) ?? String(value)}.`);
-  if (!value.startsWith("$") || value === "$in" || value === "$out") return value;
+  if (!value.startsWith("$") || RESERVED_IDS.includes(value)) return value;
   const name = value.slice(1);
   const id = ctx.pendingRefs.get(name)?.id ?? ctx.refs.get(name);
   if (id === undefined) {
@@ -207,7 +218,7 @@ const REF_ADDRESS = /^(@?)(\$[A-Za-z_][A-Za-z0-9_]*)(\.[\s\S]*)$/;
 export function resolveAddress(ctx: OpContext, address: unknown): string {
   if (typeof address !== "string") fail("invalid_address", `Expected an address like "patch.port", but got ${JSON.stringify(address) ?? String(address)}.`);
   const m = REF_ADDRESS.exec(address);
-  if (!m || m[2] === "$in" || m[2] === "$out") return address;
+  if (!m || RESERVED_IDS.includes(m[2]!)) return address;
   return `${m[1]}${resolveId(ctx, m[2])}${m[3]}`;
 }
 

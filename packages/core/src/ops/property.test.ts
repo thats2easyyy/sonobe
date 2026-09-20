@@ -1,10 +1,11 @@
 /** Property test: random op sequences; every successful op's inverse restores a deep-equal document. */
 
 import { describe, expect, it } from "vitest";
+import { hasKnobRange, KNOB_TYPES } from "../knobs.ts";
 import { allLayers, resolveNodePorts, resolveLayerProps } from "../registry.ts";
 import { parseDocumentFiles, serializeDocument } from "../serialize.ts";
 import { emptyDoc, mockRegistry, mustApply, SAMPLE_OPS } from "../testing/fixtures.ts";
-import type { InputValue, InterfacePortInput, NewLayer, NewPatch, Op, SonobeDocument, ValueType } from "../types.ts";
+import type { InputValue, InterfacePortInput, KnobType, Literal, NewKnob, NewLayer, NewPatch, Op, SonobeDocument, ValueType } from "../types.ts";
 import { applyOps, OP_KINDS } from "./apply.ts";
 import { listInputs, targetAddress } from "./references.ts";
 
@@ -30,6 +31,25 @@ function randomOp(doc: SonobeDocument, rand: () => number): Op | undefined {
   const groups = layers.filter((l) => l.type === "group");
   const patchIds = Object.keys(c.patches);
   const ofKind = (kind: string) => componentIds.filter((id) => doc.components[id]!.kind === kind);
+  const set = doc.knobs;
+  const knobs = set?.knobs ?? [];
+  const knobLinks = knobs.map((k) => `$knob.${k.id}`);
+  const knobValue = (type: KnobType): Literal => {
+    switch (type) {
+      case "number":
+        return Math.round(rand() * 1000) / 7;
+      case "boolean":
+        return chance(0.5);
+      case "color":
+        return pick(["#FF00FFFF", "#12345678"])!;
+      case "enum":
+        return pick(["a", "b"])!;
+      case "point":
+        return [int(10), int(10)];
+      case "text":
+        return pick(["", "Hi"])!;
+    }
+  };
 
   const literalFor = (type: ValueType): InputValue | undefined => {
     switch (type) {
@@ -137,6 +157,7 @@ function randomOp(doc: SonobeDocument, rand: () => number): Op | undefined {
         const id = pick(patchIds)!;
         const port = pick(resolveNodePorts(doc, c.patches[id]!, mockRegistry)?.inputs ?? []);
         if (!port) return undefined;
+        if (knobLinks.length && chance(0.3)) return { op: "setInput", component: cid, target: `${id}.${port.key}`, value: { link: pick(knobLinks)! } };
         return { op: "setInput", component: cid, target: `${id}.${port.key}`, value: chance(0.2) ? null : (literalFor(port.type) ?? null) };
       }
       const l = pick(layers);
@@ -146,7 +167,7 @@ function randomOp(doc: SonobeDocument, rand: () => number): Op | undefined {
       return { op: "setInput", component: cid, target: `@${l.id}.${prop.key}`, value: chance(0.2) ? null : (literalFor(prop.type) ?? null) };
     }
     case "connect": {
-      const sources: string[] = [...layers.map((l) => `@${l.id}.opacity`), ...Object.keys(c.interface.inputs).map((k) => `$in.${k}`)];
+      const sources: string[] = [...layers.map((l) => `@${l.id}.opacity`), ...Object.keys(c.interface.inputs).map((k) => `$in.${k}`), ...knobLinks];
       for (const id of patchIds) for (const p of resolveNodePorts(doc, c.patches[id]!, mockRegistry)?.outputs ?? []) sources.push(`${id}.${p.key}`);
       const targets: string[] = [...layers.flatMap((l) => [`@${l.id}.opacity`, `@${l.id}.enabled`, `@${l.id}.position`]), ...Object.keys(c.interface.outputs).map((k) => `$out.${k}`)];
       for (const id of patchIds) for (const p of resolveNodePorts(doc, c.patches[id]!, mockRegistry)?.inputs ?? []) targets.push(`${id}.${p.key}`);
@@ -238,9 +259,65 @@ function randomOp(doc: SonobeDocument, rand: () => number): Op | undefined {
     }
     case "setProject":
       return { op: "setProject", changes: pick([{ name: "Renamed Project" }, { background: "#000" }, { fps: 120 as const }, { fps: null as unknown as 60 }, { generator: null as unknown as string }, { generator: "g" }, { device: { preset: "iphone-se", orientation: "landscape" as const } }])! };
+    case "addKnob": {
+      const type = pick(KNOB_TYPES)!;
+      const knob: NewKnob = { name: `${pick(["Commit Distance", "Grab Tilt", "Tint", "Offset", "Label", "Mode"])!}${chance(0.3) ? ` ${int(3)}` : ""}`, type };
+      if (type === "enum") knob.options = ENUM_OPTIONS;
+      if (chance(0.7)) knob.value = knobValue(type);
+      if (chance(0.2) && set) knob.values = { [pick(set.presets)!.id]: knobValue(type) };
+      if (hasKnobRange(type) && chance(0.4)) Object.assign(knob, { min: -10, max: 200, step: 1, unit: "pt" });
+      if (chance(0.3)) knob.group = pick(["Throw", "Tilt"])!;
+      return { op: "addKnob", knob, index: chance(0.5) ? undefined : int(3) };
+    }
+    case "updateKnob": {
+      const k = pick(knobs);
+      if (!k) return undefined;
+      const op: Op = { op: "updateKnob", id: k.id };
+      if (chance(0.3)) op.name = pick(["Renamed Knob", "Tint", k.name])!;
+      if (chance(0.3)) op.group = pick([null, "Throw", ""]);
+      if (chance(0.2)) op.description = pick([null, "How far the card travels"]);
+      if (chance(0.3)) op.type = pick(KNOB_TYPES)!;
+      if ((op.type ?? k.type) === "enum" && (op.type === "enum" || chance(0.3))) op.options = pick([ENUM_OPTIONS, [...ENUM_OPTIONS, { key: "c", name: "C" }]])!;
+      if (hasKnobRange(op.type ?? k.type) && chance(0.3)) Object.assign(op, { min: pick([null, 0]), max: pick([null, 500]), step: pick([null, 0.5]) });
+      if (chance(0.2)) op.index = int(3);
+      return op;
+    }
+    case "removeKnob": {
+      const k = pick(knobs);
+      return k ? { op: "removeKnob", id: k.id } : undefined;
+    }
+    case "setKnobValue": {
+      const k = pick(knobs);
+      if (!k || !set) return undefined;
+      return { op: "setKnobValue", id: k.id, value: knobValue(k.type), ...(chance(0.5) ? { preset: pick(set.presets)!.id } : {}) };
+    }
+    case "addKnobPreset":
+      return { op: "addKnobPreset", preset: { name: pick(["Proposal", "Shipped app", "Wild"])!, ...(chance(0.2) ? { locked: true } : {}) }, ...(set && chance(0.4) ? { copyFrom: pick(set.presets)!.id } : {}), ...(chance(0.3) ? { index: int(3) } : {}) };
+    case "updateKnobPreset": {
+      const p = set ? pick(set.presets) : undefined;
+      if (!p) return undefined;
+      const op: Op = { op: "updateKnobPreset", id: p.id };
+      if (chance(0.4)) op.name = pick(["Renamed Preset", "Proposal", p.name])!;
+      if (chance(0.5)) op.locked = chance(0.5);
+      if (chance(0.3)) op.index = int(3);
+      return op;
+    }
+    case "removeKnobPreset": {
+      const p = set ? pick(set.presets) : undefined;
+      return p ? { op: "removeKnobPreset", id: p.id } : undefined;
+    }
+    case "applyKnobPreset": {
+      const p = set ? pick(set.presets) : undefined;
+      return p ? { op: "applyKnobPreset", id: p.id } : undefined;
+    }
   }
   return undefined;
 }
+
+const ENUM_OPTIONS = [
+  { key: "a", name: "A" },
+  { key: "b", name: "B" },
+];
 
 describe("inverse ops (property)", () => {
   it("restores deep-equal documents for random op sequences", () => {

@@ -1,13 +1,15 @@
 /**
  * Canonical serialization (ARCHITECTURE §3.1): schema key order, maps sorted by key,
- * short leaf objects on one line, numbers rounded to 6 decimals, -0 → 0, LF, 2-space
- * indent, trailing newline. Plus project folder IO through an FsAdapter.
+ * short leaf objects on one line, float noise trimmed from numbers (0.30000000000000004 → 0.3,
+ * while 1/30 keeps every digit), -0 → 0, LF, 2-space indent, trailing newline. Plus project folder
+ * IO through an FsAdapter.
  */
 
+import { KNOBS_FORMAT_VERSION, projectFormatVersion } from "./document.ts";
 import { fileNameKey, UNSAFE_IDS } from "./ids.ts";
 import { migrateFile, ProjectFormatError, type MigrateOptions } from "./migrations.ts";
-import { formatIssues, parseAssetsFile, parseComponentFile, parseProjectFile, type FormatIssue } from "./schema.ts";
-import type { AssetRecord, Component, Id, ProjectManifest, SonobeDocument } from "./types.ts";
+import { formatIssues, parseAssetsFile, parseComponentFile, parseKnobsFile, parseProjectFile, type FormatIssue } from "./schema.ts";
+import type { AssetRecord, Component, Id, KnobSet, ProjectManifest, SonobeDocument } from "./types.ts";
 import { roundNumber } from "./values.ts";
 
 // ---------------------------------------------------------------------------
@@ -63,11 +65,34 @@ const ASSET = obj(["id", "kind", "name", "file", "mime", "width", "height", "dur
 });
 const ASSETS: Shape = { kind: "map", value: ASSET };
 
+const KNOB = obj(["id", "name", "group", "type", "values", "min", "max", "step", "unit", "options", "description"], {
+  values: { kind: "map", value: DATA },
+  options: { kind: "array", item: obj(["key", "name", "description"]) },
+});
+const KNOBS = obj(["formatVersion", "active", "presets", "knobs"], {
+  presets: { kind: "array", item: obj(["id", "name", "locked"]) },
+  knobs: { kind: "array", item: KNOB },
+});
+
 const isPlainObject = (v: unknown): v is Record<string, unknown> => !!v && typeof v === "object" && !Array.isArray(v);
 const byKey = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0);
 
+/** Float noise: how far below the 6-decimal form a number may sit and still be written as it. */
+const FLOAT_NOISE = 1e-9;
+
+/**
+ * A number as files store it. One within float noise of its 6-decimal form is written in that form,
+ * so arithmetic leftovers stay readable (0.1 + 0.2 → 0.3, 6.1e-15 → 0); any other number is written
+ * exactly, so a value like 1/30 reads back as the same number. Idempotent, and -0 becomes 0.
+ */
+export function canonicalNumber(n: number): number {
+  if (!Number.isFinite(n)) return 0;
+  const rounded = roundNumber(n);
+  return Math.abs(rounded - n) <= FLOAT_NOISE * Math.max(1, Math.abs(n)) ? rounded : n;
+}
+
 function normalizeScalar(v: unknown): unknown {
-  if (typeof v === "number") return Number.isFinite(v) ? roundNumber(v) : null;
+  if (typeof v === "number") return Number.isFinite(v) ? canonicalNumber(v) : null;
   return v;
 }
 
@@ -171,6 +196,11 @@ export function serializeAssets(assets: Record<Id, AssetRecord>): string {
   return serializeWith(assets, ASSETS);
 }
 
+/** knobs.json: presets, then knobs in panel order. A tune changes one line (the knob's values). */
+export function serializeKnobs(set: KnobSet): string {
+  return serializeWith({ formatVersion: KNOBS_FORMAT_VERSION, ...set }, KNOBS);
+}
+
 // ---------------------------------------------------------------------------
 // Document files
 // ---------------------------------------------------------------------------
@@ -180,6 +210,8 @@ export const COMPONENTS_DIR = "components";
 export const SCRIPTS_DIR = "scripts";
 export const ASSETS_DIR = "assets";
 export const ASSETS_FILE = "assets/assets.json";
+/** Written only when the document has knobs. */
+export const KNOBS_FILE = "knobs.json";
 
 const SCRIPT_FILE = /^[A-Za-z0-9_][A-Za-z0-9_.-]*$/;
 
@@ -188,12 +220,16 @@ export function isValidScriptFile(file: string): boolean {
   return SCRIPT_FILE.test(file) && !file.includes("..") && !UNSAFE_IDS.includes(file);
 }
 
-/** Every file of a project folder, keyed by path relative to the folder. */
+/**
+ * Every file of a project folder, keyed by path relative to the folder. project.json says format 2
+ * when the document has knobs and format 1 otherwise, whatever the in-memory manifest says.
+ */
 export function serializeDocument(doc: SonobeDocument): Record<string, string> {
-  const files: Record<string, string> = { [PROJECT_FILE]: serializeProjectManifest(doc.project) };
+  const files: Record<string, string> = { [PROJECT_FILE]: serializeProjectManifest({ ...doc.project, formatVersion: projectFormatVersion(doc) }) };
   for (const id of Object.keys(doc.components).sort(byKey)) files[`${COMPONENTS_DIR}/${id}.json`] = serializeComponent(doc.components[id]!);
   for (const file of Object.keys(doc.scripts).sort(byKey)) files[`${SCRIPTS_DIR}/${file}`] = doc.scripts[file]!;
   files[ASSETS_FILE] = serializeAssets(doc.assets);
+  if (doc.knobs) files[KNOBS_FILE] = serializeKnobs(doc.knobs);
   return files;
 }
 
@@ -317,7 +353,22 @@ export function parseDocumentFiles(files: Record<string, string>, options: Migra
     if (!r.ok) throw new ProjectFormatError("invalidFormat", `${ASSETS_FILE} has problems:\n${r.message}`, { file: ASSETS_FILE, issues: r.issues });
     assets = r.value;
   }
-  return { project, components, scripts, assets };
+  const doc: SonobeDocument = { project, components, scripts, assets };
+  const knobsText = files[KNOBS_FILE];
+  if (knobsText !== undefined) doc.knobs = parseKnobs(knobsText, KNOBS_FILE, options);
+  // What the files say decides the format they're written in again; the manifest in memory follows it.
+  project.formatVersion = projectFormatVersion(doc);
+  return doc;
+}
+
+/** Parse (migrate + validate) knobs.json text. Throws ProjectFormatError. */
+export function parseKnobs(text: string, file = KNOBS_FILE, options: MigrateOptions = {}): KnobSet {
+  return withStackGuard(file, () => {
+    const json = migrateFile("knobs", parseJsonText(text, file), { ...options, file });
+    const r = parseKnobsFile(json, file);
+    if (!r.ok) throw new ProjectFormatError("invalidFormat", `${file} has problems:\n${r.message}`, { file, issues: r.issues });
+    return r.value;
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -361,13 +412,14 @@ async function isRegularFile(fs: FsAdapter, path: string): Promise<boolean> {
 }
 
 /**
- * Document files present in a project folder, as relative paths: project.json, components/*.json,
- * scripts/<valid script names> and assets/assets.json. Only regular files count, so folders (like
- * a scripts/lib/ someone keeps helpers in) are never read, rewritten or deleted.
+ * Document files present in a project folder, as relative paths: project.json, knobs.json,
+ * components/*.json, scripts/<valid script names> and assets/assets.json. Only regular files count,
+ * so folders (like a scripts/lib/ someone keeps helpers in) are never read, rewritten or deleted.
  */
 export async function listDocumentFiles(fs: FsAdapter, dir: string): Promise<string[]> {
   const out: string[] = [];
   if (await isRegularFile(fs, joinPath(dir, PROJECT_FILE))) out.push(PROJECT_FILE);
+  if (await isRegularFile(fs, joinPath(dir, KNOBS_FILE))) out.push(KNOBS_FILE);
   for (const name of await fs.list(joinPath(dir, COMPONENTS_DIR))) {
     if (name.endsWith(".json") && (await isRegularFile(fs, joinPath(dir, COMPONENTS_DIR, name)))) out.push(`${COMPONENTS_DIR}/${name}`);
   }
@@ -434,8 +486,8 @@ export interface SaveResult {
 }
 
 /**
- * Component and script files in a folder that `files` (a serialized document) doesn't have and a
- * save would delete. Never project.json or assets.json, never folders or files with other names,
+ * Component, script and knobs files in a folder that `files` (a serialized document) doesn't have and
+ * a save would delete (knobs.json goes once the last knob does). Never project.json or assets.json, never folders or files with other names,
  * never a path that differs from a saved file only by case (on macOS and Windows that's the same
  * file), and, when `removable` is given, only paths in it.
  */

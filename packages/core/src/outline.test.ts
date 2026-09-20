@@ -60,6 +60,30 @@ describe("getOutline", () => {
     expect(chip).toBe(['component chip "Chip" (layerComponent) 200x100', 'input label text "Label" default="Buy"', 'output tapped pulse "Tapped" ←tap.tap', "patch tap interaction"].join("\n"));
   });
 
+  it("prints the knob block first whenever the root is shown", () => {
+    const doc = mustApply(buildSampleDocument(), [
+      { op: "addKnobPreset", preset: { name: "Proposal" } },
+      { op: "addKnobPreset", preset: { name: "Shipped app", locked: true } },
+      { op: "addKnob", knob: { id: "bounce", name: "Bounce", group: "Press", type: "number", value: 8, min: 0, max: 20, step: 1, unit: "pt", description: "How much the card overshoots." } },
+      { op: "addKnob", knob: { id: "mode", name: "Mode", type: "enum", options: [{ key: "snappy", name: "Snappy" }, { key: "soft", name: "Soft" }], values: { shipped_app: "soft" } } },
+      { op: "setInput", target: "pop.bounciness", value: { link: "$knob.bounce" } },
+    ]).doc;
+    const normal = getOutline(doc, "main", { registry: mockRegistry }).split("\n");
+    expect(normal.slice(0, 4)).toEqual([
+      'knobs 2 · running proposal "Proposal" · presets proposal "Proposal", shipped_app "Shipped app" locked',
+      'knob bounce number "Bounce" group="Press" 0…20 step=1 unit=pt proposal=8 shipped_app=8',
+      'knob mode enum "Mode" proposal=snappy shipped_app=soft',
+      "",
+    ]);
+    expect(normal).toContain("patch pop popAnimation number←toggle.on bounciness←$knob.bounce");
+    expect(getOutline(doc, "main", { detail: "compact", registry: mockRegistry }).split("\n").slice(1, 3)).toEqual(["knob bounce number =8", "knob mode enum =snappy"]);
+    const full = getOutline(doc, undefined, { detail: "full", registry: mockRegistry }).split("\n");
+    expect(full[1]).toBe('knob bounce number "Bounce" group="Press" 0…20 step=1 unit=pt proposal=8 shipped_app=8 description="How much the card overshoots."');
+    expect(full[2]).toBe('knob mode enum "Mode" options=snappy|soft proposal=snappy shipped_app=soft');
+    const other = mustApply(doc, [{ op: "addComponent", component: { id: "chip", name: "Chip", kind: "layerComponent" } }]).doc;
+    expect(getOutline(other, "chip")).not.toContain("knobs");
+  });
+
   it("formats values tersely", () => {
     expect(formatOutlineValue({ loop: [[0, 0], [0, 80]] }, "point")).toBe("loop[0,0|0,80]");
     expect(formatOutlineValue({ asset: "photo" })).toBe("asset:photo");
