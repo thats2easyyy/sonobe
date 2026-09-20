@@ -11,6 +11,7 @@ import {
   type AssistantKeyCheck,
   type AssistantRunResult,
   type AssistantStatus,
+  type HandoffResult,
   type SonobeAssistantApi,
 } from "./protocol.ts";
 
@@ -56,6 +57,7 @@ export function createAssistantApi(ipcRenderer: AssistantIpcRenderer): SonobeAss
     codeFolder: () => invoke<AssistantCodeFolderStatus>(ASSISTANT_IPC.codeFolder),
     linkCodeFolder: () => invoke<AssistantCodeFolderLinkResult>(ASSISTANT_IPC.linkCodeFolder),
     unlinkCodeFolder: () => invoke<AssistantCodeFolderStatus>(ASSISTANT_IPC.unlinkCodeFolder),
+    openInClaudeCode: (request) => invoke<HandoffResult>(ASSISTANT_IPC.openInClaudeCode, { prompt: String(request?.prompt ?? "") }),
   };
 }
 

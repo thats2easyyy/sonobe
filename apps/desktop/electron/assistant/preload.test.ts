@@ -64,6 +64,19 @@ describe("assistant preload bridge", () => {
     ]);
   });
 
+  it("sends Open in Claude Code only the prompt, as text", async () => {
+    const { ipc, invocations } = fakeIpcRenderer(() => ({ ok: true, folder: "~/code/noddit" }));
+    const api = createAssistantApi(ipc);
+    expect(await api.openInClaudeCode({ prompt: "Design a checkout", folder: "/etc", script: "rm -rf ~" } as unknown as Parameters<typeof api.openInClaudeCode>[0])).toEqual({ ok: true, folder: "~/code/noddit" });
+    await api.openInClaudeCode({ prompt: 42 } as unknown as Parameters<typeof api.openInClaudeCode>[0]);
+    await api.openInClaudeCode(undefined as unknown as Parameters<typeof api.openInClaudeCode>[0]);
+    expect(invocations).toEqual([
+      { channel: ASSISTANT_IPC.openInClaudeCode, args: [{ prompt: "Design a checkout" }] },
+      { channel: ASSISTANT_IPC.openInClaudeCode, args: [{ prompt: "42" }] },
+      { channel: ASSISTANT_IPC.openInClaudeCode, args: [{ prompt: "" }] },
+    ]);
+  });
+
   it("strips Electron's remote-method prefix from errors", async () => {
     const ipc: AssistantIpcRenderer = {
       invoke: () => Promise.reject(new Error("Error invoking remote method 'sonobe:assistant:status': Error: Untrusted sender")),
@@ -91,6 +104,6 @@ describe("assistant preload bridge", () => {
     const host: Record<string, unknown> = { platform: "darwin" };
     attachAssistantBridge(host, fakeIpcRenderer().ipc);
     expect(Object.keys(host)).toEqual(["platform", "assistant"]);
-    expect(Object.keys(host.assistant as object).sort()).toEqual(["checkKey", "codeFolder", "confirm", "linkCodeFolder", "onEvent", "reset", "send", "status", "stop", "unlinkCodeFolder"]);
+    expect(Object.keys(host.assistant as object).sort()).toEqual(["checkKey", "codeFolder", "confirm", "linkCodeFolder", "onEvent", "openInClaudeCode", "reset", "send", "status", "stop", "unlinkCodeFolder"]);
   });
 });

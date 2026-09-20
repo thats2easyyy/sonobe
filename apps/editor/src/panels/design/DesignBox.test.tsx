@@ -335,12 +335,120 @@ describe("DesignBox", () => {
       await Promise.resolve();
     });
     expect(clipboard).toEqual([claudePrompt({ docName: "Photo Zoom", text: "a checkout screen", context: canvasContext(session, null, bounds), browser: false })]);
-    expect(clipboard[0]).toContain("import it with import_design (component \"main\")");
+    expect(clipboard[0]).toContain('preview_design (component "main")');
+    expect(clipboard[0]).toContain('then import_design with "preview": true');
     expect(document.body.textContent).toContain("Prompt copied");
     expect(document.body.textContent).toContain("Paste it into Claude Code in your app's folder.");
 
     click(buttonNamed("Add API key…"));
     expect(assistantStore.getState().open).toBe(true);
+  });
+
+  it("without an API key, offers Open in Claude Code first, and opens the request in Terminal with the folder it linked", async () => {
+    const fake = fakeAssistantHost({});
+    await mount(fake);
+    const footer = () => [...container.querySelectorAll(".sb-design-box__footer button")].map((b) => b.textContent || b.getAttribute("aria-label"));
+    // Before Return, plan users find it in the footer.
+    expect(footer()).toEqual(["Match my code…", "Open in Claude Code", "Open chat", "Close"]);
+    type("a checkout screen");
+    press("Enter");
+    const notice = container.querySelector(".sb-design-box__notice")!;
+    expect(notice.textContent).toContain("Designing on the canvas uses your own Anthropic API key, kept in your keychain. With a Claude plan, open it in Claude Code instead: it draws on this canvas as it writes.");
+    expect([...notice.querySelectorAll("button")].map((b) => [b.textContent, b.dataset.variant])).toEqual([
+      ["Open in Claude Code", "ai"],
+      ["Add API key…", "secondary"],
+      ["Copy for Claude Code", "secondary"],
+    ]);
+    expect(footer()).not.toContain("Open in Claude Code");
+
+    await act(async () => {
+      buttonNamed("Open in Claude Code")!.click();
+      await Promise.resolve();
+    });
+    await settle();
+    expect(fake.handoffs).toEqual([claudePrompt({ docName: "Photo Zoom", text: "a checkout screen", context: canvasContext(session, null, bounds), browser: false })]);
+    expect(fake.sent).toEqual([]);
+    expect(document.body.textContent).toContain("Opened Claude Code");
+    expect(document.body.textContent).toContain("In Terminal, in “noddit”. It designs on this canvas as it writes.");
+    // The folder picked for it is linked, the way Match my code… links one.
+    expect(container.querySelector(".sb-design-box__code-label")?.textContent).toBe("Code: noddit");
+    expect(field().value).toBe("a checkout screen");
+  });
+
+  it("says why Claude Code didn't open, with Copy prompt, and stays quiet when the folder dialog is cancelled", async () => {
+    const fake = fakeAssistantHost({});
+    fake.nextHandoff = () => ({ ok: false, cancelled: true });
+    await mount(fake);
+    select(["card"]);
+    type("make it darker");
+    press("Enter");
+    const open = async () => {
+      await act(async () => {
+        buttonNamed("Open in Claude Code")!.click();
+        await Promise.resolve();
+      });
+      await settle();
+    };
+    await open();
+    expect(fake.handoffs).toHaveLength(1);
+    expect(document.querySelector(".sb-toast")).toBeNull();
+
+    fake.nextHandoff = () => ({ ok: false, error: "Open in Claude Code works on macOS for now. Copy the prompt instead, and paste it into Claude Code in your app's folder." });
+    await open();
+    const toastEl = document.querySelector<HTMLElement>(".sb-toast")!;
+    expect(toastEl.dataset.tone).toBe("danger");
+    expect(toastEl.textContent).toContain("Couldn't open Claude Code");
+    expect(toastEl.textContent).toContain("Open in Claude Code works on macOS for now. Copy the prompt instead, and paste it into Claude Code in your app's folder.");
+    const action = toastEl.querySelector<HTMLButtonElement>(".sb-toast__action")!;
+    expect(action.textContent).toBe("Copy prompt");
+    await act(async () => {
+      action.click();
+      await Promise.resolve();
+    });
+    expect(clipboard).toEqual([fake.handoffs[1]]);
+    expect(clipboard[0]).toContain('preview_design (replace "card", component "main")');
+    expect(document.body.textContent).toContain("Prompt copied");
+  });
+
+  it("offers Open in Claude Code in the footer with a key, and asks for a description first", async () => {
+    await mount();
+    await act(async () => {
+      buttonNamed("Open in Claude Code")!.click();
+      await Promise.resolve();
+    });
+    expect(host!.handoffs).toEqual([]);
+    expect(document.body.textContent).toContain("Describe the screen first");
+    expect(document.activeElement).toBe(field());
+
+    type("a checkout screen");
+    await act(async () => {
+      buttonNamed("Open in Claude Code")!.click();
+      await Promise.resolve();
+    });
+    await settle();
+    expect(host!.handoffs).toHaveLength(1);
+    expect(host!.sent).toEqual([]);
+    expect(document.body.textContent).toContain("Opened Claude Code");
+  });
+
+  it("leaves out Open in Claude Code on other platforms and with an older preload", async () => {
+    const windows = fakeAssistantHost({});
+    Object.defineProperty(windows, "platform", { value: "win32" });
+    await mount(windows);
+    type("a checkout screen");
+    press("Enter");
+    expect(buttonNamed("Open in Claude Code")).toBeNull();
+    expect(container.querySelector(".sb-design-box__notice p")?.textContent).toBe("Designing on the canvas uses your own Anthropic API key, kept in your keychain.");
+    expect(buttonNamed("Add API key…")?.dataset.variant).toBe("ai");
+
+    act(() => root.unmount());
+    detach();
+    h.controller!.dispose();
+    root = createRoot(container);
+    const older = fakeAssistantHost({ key: KEY });
+    delete older.assistant!.openInClaudeCode;
+    await mount(older);
+    expect(buttonNamed("Open in Claude Code")).toBeNull();
   });
 
   it("in the browser, copies the browser prompt and offers Import Design", async () => {

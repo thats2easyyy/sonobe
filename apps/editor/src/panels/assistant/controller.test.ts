@@ -204,6 +204,41 @@ describe("assistant controller", () => {
     expect(await controller.linkCodeFolder()).toEqual({ status: { linked: null, missing: false }, error: "Sonobe couldn't link the folder: Untrusted sender" });
   });
 
+  it("opens Claude Code on macOS with the prompt, needing no key, and reads the folder it linked", async () => {
+    const host = fakeAssistantHost();
+    const store = createAssistantStore({ persistModel: false });
+    const controller = createAssistantController(host, store);
+    await controller.refresh();
+    expect(controller.canOpenInClaudeCode).toBe(true);
+    expect(await controller.openInClaudeCode("In my open Sonobe prototype “Noddit”, design a new screen")).toEqual({ ok: true, folder: "~/code/noddit" });
+    expect(host.handoffs).toEqual(["In my open Sonobe prototype “Noddit”, design a new screen"]);
+    expect(store.getState().status?.codeFolder?.linked?.name).toBe("noddit");
+    expect(host.sent).toEqual([]);
+
+    host.nextHandoff = () => ({ ok: false, cancelled: true });
+    expect(await controller.openInClaudeCode("a new screen")).toEqual({ ok: false, cancelled: true });
+    // A cancelled dialog linked nothing, so there's nothing to read again.
+    expect(host.folderCalls).toEqual(["codeFolder"]);
+
+    host.nextHandoff = () => {
+      throw new Error("No handler registered for 'sonobe:assistant:open-claude-code'");
+    };
+    expect(await controller.openInClaudeCode("a new screen")).toEqual({ ok: false, error: "Sonobe couldn't open Claude Code: No handler registered for 'sonobe:assistant:open-claude-code'" });
+  });
+
+  it("offers Claude Code only when the host has it, on macOS or a host that doesn't say", async () => {
+    expect(createAssistantController(null, createAssistantStore({ persistModel: false })).canOpenInClaudeCode).toBe(false);
+    expect(await createAssistantController(null, createAssistantStore({ persistModel: false })).openInClaudeCode("a new screen")).toBeNull();
+    const on = (platform: string | undefined, bridge = fakeAssistantHost().assistant!) => createAssistantController({ ...fakeAssistantHost(), platform, assistant: bridge }, createAssistantStore({ persistModel: false }));
+    expect(on("darwin").canOpenInClaudeCode).toBe(true);
+    expect(on(undefined).canOpenInClaudeCode).toBe(true);
+    expect(on("win32").canOpenInClaudeCode).toBe(false);
+    expect(on("linux").canOpenInClaudeCode).toBe(false);
+    const { openInClaudeCode: _open, ...olderBridge } = fakeAssistantHost().assistant!;
+    expect(on("darwin", olderBridge).canOpenInClaudeCode).toBe(false);
+    expect(await on("darwin", olderBridge).openInClaudeCode("a new screen")).toBeNull();
+  });
+
   it("keeps a stored model the host offers, else uses the host's default", async () => {
     const host = fakeAssistantHost();
     const store = createAssistantStore({ persistModel: false });
