@@ -52,6 +52,16 @@ Tidy Up, MCP `tidy_graph` and `add_patches`, and automatic node placement size n
 2. On macOS, regenerate the font table with `node apps/editor/scripts/measure-node-fonts.ts`.
 3. Run `npx playwright test e2e/node-sizes.spec.ts`. It compares the estimate against the drawn nodes. With `SONOBE_UPDATE_NODE_SIZES=1` it also rewrites `packages/mcp/fixtures/node-sizes`, which `packages/mcp/src/geometry.test.ts` checks the headless estimate against. Knob chips (`.sb-pe-value--knob`) are checked in `e2e/knobs.spec.ts`.
 
+## Adding an MCP tool
+
+Claude sees a tool in several places, and tests check that they agree:
+
+1. Register it in `packages/mcp/src/tools/` with `tc.tool(name, config, handler)`, and add its name to `TOOL_NAMES` in `packages/mcp/src/server.ts`, next to its group. Give it a description that says when to use it, annotations (read-only, destructive or UI only) and, for writes and simulation, an `outputSchema`.
+2. Keep its input a closed `z.object`. The tool wrapper refuses fields a tool doesn't take, with the closest field it does (`packages/mcp/src/inputs.ts`), and `inputs.test.ts` calls every tool with a made-up field. Use `z.looseObject` or `z.record` only where values really pass through.
+3. Add it to `integrations/claude-desktop/manifest.json` in `TOOL_NAMES` order, to the tool tables in `packages/mcp/README.md` and ARCHITECTURE.md §10, and to the tool count in README.md and guide 11. `integrations.test.ts` and `packages/cli/src/docs.test.ts` fail until they match.
+4. Call it in `payload.test.ts`, which calls every tool once, and add it to the annotation checks in `discovery.test.ts`.
+5. Teach it where Claude learns the workflow: the agent guides in `packages/mcp/guides`, the server instructions in `server.ts` when it changes the steps, and the Claude Code skill (`integrations/claude-code/skills/sonobe/SKILL.md`).
+
 ## Adding an MCP tool that can take long
 
 Tools register in `packages/mcp/src/tools/` with `tc.tool(name, config, async (args, ctx, work) => …)`. When a call can take more than a second or two (loading a page, waiting on the person), use `work` (`packages/mcp/src/progress.ts`, ARCHITECTURE §10 "Long calls"):
@@ -89,6 +99,6 @@ Sonobe reimplements interaction-prototyping concepts from public documentation a
 ## Pull requests
 
 - Keep PRs focused. Update docs and tests alongside the code.
-- `npm run typecheck && npm test` must pass.
+- `npm run typecheck && npm test` must pass. CI (`.github/workflows/ci.yml`) runs them and `npm run e2e` on every pull request.
 - For UI changes, attach a screenshot or short recording.
 - Be kind. People of every experience level contribute here, and helping beginners is part of the mission.

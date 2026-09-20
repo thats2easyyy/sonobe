@@ -98,6 +98,8 @@ They hurt when they hide where things come from. Tracing "why did this change?" 
 
 My advice is to keep variables few and name them clearly, and to put each broadcaster right next to the patch whose value it names. To get a value into a component, prefer a published input. It shows up in the inspector, and anyone reading the graph can see where the value comes from.
 
+A constant you'll want to tune or compare, like a spring's bounce or how far a card must travel to count as thrown, belongs in a knob instead of a broadcaster ([guide 13](13-knobs-and-presets.md)). A knob has a slider and a range, any input reads it without a receiver, and presets keep a reference value, like the shipped app's, next to your proposal. Variables are for live values, like a sheet's progress.
+
 ## Organizing big graphs
 
 Graphs grow fast. These habits keep a big one readable.
