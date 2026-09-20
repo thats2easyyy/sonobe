@@ -46,6 +46,12 @@ export const IPC = {
   captureDesignProgress: "sonobe:design:progress",
   /** renderer → main: download a pasted capture's image or font (no CORS in main). */
   fetchCaptureFile: "sonobe:design:fetch-file",
+  /** renderer → main: drafts of unsaved work (electron/drafts.ts). */
+  draftsWrite: "sonobe:drafts:write",
+  draftsRemove: "sonobe:drafts:remove",
+  draftsList: "sonobe:drafts:list",
+  draftsRead: "sonobe:drafts:read",
+  draftsReveal: "sonobe:drafts:reveal",
   rpcRequest: "sonobe:rpc:request",
   rpcResponse: "sonobe:rpc:response",
   /** renderer → main: the full list of registered rpc method names. */

@@ -2,17 +2,19 @@
 
 import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, nativeImage, safeStorage, screen, session, shell, type IpcMainEvent, type IpcMainInvokeEvent } from "electron";
 import { existsSync } from "node:fs";
+import { tmpdir } from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import type { SonobeDocument } from "@sonobe/core";
 import { saveProjectToDisk } from "@sonobe/core/node";
 import { plainSceneFrame } from "@sonobe/engine";
-import { createHttpHandler, isHostError, loadGuides, type NodeMcpHandler } from "@sonobe/mcp";
+import { checkProjectTarget, createHttpHandler, isHostError, loadGuides, resolveProjectTarget, type NodeMcpHandler } from "@sonobe/mcp";
 import { createPatchRegistry } from "@sonobe/patches";
 import { toBuffer as qrPng } from "qrcode";
 import { createAppHost, type AppHost, type CapturedImage, type DocumentChange, type RendererTarget, type SceneRenderRequest } from "./app-host.ts";
 import { abortCaptures, captureDesignInWindow, fetchCaptureImage } from "./design-capture.ts";
 import { createAppWindow, type AppWindow, type WindowContentSource } from "./app-window.ts";
+import { createDraftStore, installQuitOnSignal, registerDraftIpc, type DraftStore } from "./drafts.ts";
 import { registerAssistant } from "./assistant/register.ts";
 import { captureWebContents } from "./capture.ts";
 import { bundledCliPath } from "./cli-path.ts";
@@ -116,6 +118,26 @@ function main(): void {
   const dialogCaptures = new Map<string, AbortController>();
   /** A lower capture deadline for test runs (SONOBE_TEST only, set through __sonobeTest). */
   let testCaptureDeadlineMs: number | undefined;
+  /** Drafts of unsaved work in <userData>/Drafts (ARCHITECTURE §3.5 Drafts). */
+  let drafts: DraftStore | null = null;
+
+  /** Every editor window writes its unsaved edits to its draft (at most 1.5 s each). */
+  const flushDrafts = () =>
+    Promise.allSettled(
+      [...windows.values()]
+        .filter((w) => !w.webContents.isDestroyed() && rpc?.hasMethod(w.webContents, "drafts.flush") === true)
+        .map((w) => rpc!.invoke(w.webContents, "drafts.flush", undefined, { timeoutMs: 1500 })),
+    );
+  // A terminal closing, a background task ending, `kill`: keep the drafts and quit without prompts nobody would answer.
+  installQuitOnSignal({
+    flush: flushDrafts,
+    exit: () => {
+      for (const win of BrowserWindow.getAllWindows()) win.destroy();
+      app.quit();
+      setTimeout(() => app.exit(0), 2000).unref();
+    },
+    log,
+  });
 
   const primaryWindow = (): AppWindow | undefined => {
     const focused = BrowserWindow.getFocusedWindow();
@@ -208,10 +230,17 @@ function main(): void {
       rpc: rpc!,
       appName: APP_NAME,
       log,
+      onDiscardDrafts: async (id) => drafts?.discard(id),
       onCreated: (w) => {
         const id = w.webContents.id;
         windows.set(id, w);
+        // The editor's document goes away with its page: its drafts become recoverable.
+        w.webContents.on("did-start-navigation", (details) => {
+          if (details.isMainFrame && !details.isSameDocument) drafts?.release(id);
+        });
+        w.webContents.on("render-process-gone", () => drafts?.release(id));
         w.webContents.once("destroyed", () => {
+          drafts?.release(id);
           windows.delete(id);
           appHost?.forgetTarget(id);
           for (const [watchId, entry] of watchers) {
@@ -308,6 +337,21 @@ function main(): void {
     access.approve(dir);
     // A new project never deletes files already in the folder.
     await saveProjectToDisk(dir, doc, { removable: new Set() });
+  };
+
+  /** A folder an agent named for a new project: new or empty, outside other projects, in home, a drive or tmp. Approved for the editor. */
+  const agentProjectTarget = async (input: string) => {
+    const mounts = platform === "darwin" ? ["/Volumes"] : platform === "linux" ? ["/media", "/mnt", "/run/media"] : [];
+    const dir = await resolveProjectTarget(input, {
+      home: app.getPath("home"),
+      roots: [app.getPath("home"), tmpdir(), ...mounts],
+      refused: [
+        { dir: app.getPath("userData"), why: "Sonobe keeps its settings and drafts there" },
+        { dir: app.getAppPath(), why: "that's where the Sonobe app itself lives" },
+      ],
+    });
+    access.approve(dir);
+    return dir;
   };
 
   // --- Phone preview (LAN web player) ---------------------------------------------------------
@@ -706,16 +750,25 @@ function main(): void {
     ipcMain.handle(IPC.dialogSaveProject, async (event, defaultName: unknown) => {
       const w = requireWindow(event);
       const name = (typeof defaultName === "string" ? defaultName : "Untitled").replace(/[\\/:*?"<>|\0]/g, "-").trim() || "Untitled";
-      const result = await dialog.showSaveDialog(w.win, {
-        title: "Save Prototype",
-        buttonLabel: "Save",
-        defaultPath: path.join(app.getPath("documents"), name.endsWith(".sonobe") ? name : `${name}.sonobe`),
-        properties: ["createDirectory", "showOverwriteConfirmation"],
-      });
-      if (result.canceled || !result.filePath) return null;
-      const dir = result.filePath.endsWith(".sonobe") ? result.filePath : `${result.filePath}.sonobe`;
-      access.approve(dir);
-      return dir;
+      let defaultPath = path.join(app.getPath("documents"), name.endsWith(".sonobe") ? name : `${name}.sonobe`);
+      for (;;) {
+        const result = await dialog.showSaveDialog(w.win, {
+          title: "Save Prototype",
+          buttonLabel: "Save",
+          defaultPath,
+          properties: ["createDirectory", "showOverwriteConfirmation"],
+        });
+        if (result.canceled || !result.filePath) return null;
+        const dir = result.filePath.endsWith(".sonobe") ? result.filePath : `${result.filePath}.sonobe`;
+        // The folder rules agents follow, except that replacing a prototype (the panel asked) is the person's call.
+        const problem = await checkProjectTarget(dir, { allowExistingProject: true });
+        if (!problem) {
+          access.approve(dir);
+          return dir;
+        }
+        await dialog.showMessageBox(w.win, { type: "info", message: problem.message, detail: problem.hint });
+        defaultPath = problem.suggestion ?? dir;
+      }
     });
 
     ipcMain.handle(IPC.readProject, async (event, dir: unknown) => {
@@ -948,6 +1001,9 @@ function main(): void {
     // Test runs use a reversible cipher so automated launches never touch (or prompt for) the keychain.
     secrets = createSecretStore({ file: path.join(app.getPath("userData"), "secrets.json"), cipher: env.testHooks ? createTestCipher() : safeStorage, log });
     registerIpc();
+    drafts = createDraftStore({ dir: path.join(app.getPath("userData"), "Drafts"), version: VERSION });
+    registerDraftIpc(ipcMain, drafts, { requireWindow, reveal: (folder) => shell.showItemInFolder(folder) });
+    void drafts.prune().then((n) => n && log("info", `Removed ${n} empty or 90-day-old draft${n === 1 ? "" : "s"}`)).catch(() => undefined);
     registerAssistant({ ipcMain, isTrustedSender: (event) => trustedWindow(event as IpcMainInvokeEvent) !== null, host: () => appHost, secrets: () => secrets, version: VERSION, guides: () => loadGuides(bundledResource("guides", "packages/mcp/guides")), log });
 
     appHost = createAppHost({
@@ -962,6 +1018,8 @@ function main(): void {
       defaultProjectDir,
       projectExists: async (dir) => existsSync(path.join(dir, "project.json")),
       writeProject: writeNewProject,
+      newProjectTarget: agentProjectTarget,
+      drafts: { list: () => drafts?.list() ?? Promise.resolve([]) },
       renderScene,
       captureDesign: (request, control = {}) =>
         captureDesignInWindow(request, {

@@ -204,6 +204,20 @@ function Workspace() {
     if (shouldShowWelcomeOnLaunch(hasSeenWelcome(), settingsStore.getState().showWelcomeOnLaunch)) welcomeStore.getState().show("launch");
   }, []);
 
+  // Unsaved work left by a crash or a quit: always offer it at launch (the welcome screen's Recovered section).
+  useEffect(() => {
+    let cancelled = false;
+    void session
+      .recoverableDrafts()
+      .then((drafts) => {
+        if (!cancelled && drafts.length && !welcomeStore.getState().open && !session.document.getState().dirty) welcomeStore.getState().show("launch");
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [session]);
+
   // A project opened from the OS, Open Recent, or Claude replaces whatever the welcome screen offered.
   useEffect(
     () =>

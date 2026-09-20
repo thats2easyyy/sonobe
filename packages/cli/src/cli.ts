@@ -200,8 +200,10 @@ async function cmdNew(args: string[], io: CliIo): Promise<number> {
       ...(values.name ? { name: values.name } : {}),
       ...(values.device ? { device: values.device } : {}),
     });
+    // The folder gets .sonobe when its name has none.
+    const at = created.path ?? dir;
     io.stdout.write(
-      `Created "${created.name}" at ${dir}${values.template ? ` from the ${values.template} template` : ""}.\n\nNext:\n  sonobe outline "${displayPath(io.cwd, dir)}"\n  sonobe mcp --headless "${displayPath(io.cwd, dir)}"   (let Claude edit it)\n`,
+      `Created "${created.name}" at ${at}${values.template ? ` from the ${values.template} template` : ""}.\n\nNext:\n  sonobe outline "${displayPath(io.cwd, at)}"\n  sonobe mcp --headless "${displayPath(io.cwd, at)}"   (let Claude edit it)\n`,
     );
     return 0;
   } catch (err) {

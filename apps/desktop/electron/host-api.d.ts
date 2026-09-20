@@ -211,6 +211,60 @@ export interface DesignCaptureProgress {
   total?: number;
 }
 
+/** How big a draft is ("66 layers"). */
+export interface DraftCounts {
+  components: number;
+  layers: number;
+  patches: number;
+}
+
+/** A draft of unsaved work (ARCHITECTURE §3.5 Drafts). */
+export interface DraftInfo {
+  /** Letters, digits and dashes, 8 to 64 of them. */
+  id: string;
+  name: string;
+  /** The project it has unsaved changes to; null when it was never saved. */
+  projectPath: string | null;
+  createdAt: number;
+  updatedAt: number;
+  revision: number;
+  counts: DraftCounts;
+  /** Its files come from two moments (the app stopped while writing it), so its last changes may be missing. */
+  torn?: boolean;
+}
+
+/** What the editor records in a draft's draft.json (the app adds the file list and times). */
+export interface DraftManifestInput {
+  name: string;
+  projectPath: string | null;
+  revision: number;
+  createdAt: number;
+  counts: DraftCounts;
+  /** Ids the session has seen (seenIdsToJSON in @sonobe/core), so a restored draft continues the session. */
+  seenIds: { items: Record<string, string[]>; components: string[]; knobs: string[]; presets: string[] };
+  /** Digests of the project files the draft started from, to notice outside changes on restore. */
+  base?: Record<string, string>;
+}
+
+/** A draft call's result. Failures are values, because the context bridge drops Error properties. */
+export type DraftReply<T = object> = ({ ok: true } & T) | { ok: false; code: "unknown_draft" | "draft_in_use" | "invalid_draft" | "draft_failed" | string; message: string };
+
+/**
+ * Drafts in `<userData>/Drafts/<id>.sonobe`, one project folder each. A window claims the drafts it
+ * writes or reads; list() shows the ones no window claims (left by a crash, a quit or a signal).
+ */
+export interface SonobeDrafts {
+  /** Write changed files (atomic per file), then draft.json. */
+  write(id: string, changes: ProjectWrite, meta: DraftManifestInput): Promise<DraftReply>;
+  /** Delete a draft this window claims or nobody does. */
+  remove(id: string): Promise<DraftReply>;
+  list(): Promise<DraftInfo[]>;
+  /** Claim a draft for this window and read it. */
+  read(id: string): Promise<DraftReply<{ info: DraftInfo; manifest: Record<string, unknown>; files: Record<string, string>; binaries: Record<string, ArrayBuffer> }>>;
+  /** Show the draft's folder in Finder or Explorer. */
+  reveal(id: string): void;
+}
+
 export type RpcHandler = (params: unknown) => unknown | Promise<unknown>;
 
 /**
@@ -220,8 +274,11 @@ export type RpcHandler = (params: unknown) => unknown | Promise<unknown>;
  * properties. To send a `code` and `data` (e.g. a SonobeError), return `rpc.fail(code, message, data)`.
  *
  * Well-known methods the host calls when registered:
- * - `document.save`: called when the user picks Save in the "unsaved changes" prompt.
+ * - `document.save`: called when the user picks Save in the "unsaved changes" prompt (with
+ *   `interactive: true`), and by save_document (with `noDialog`, and `path` for a new folder).
  *   Resolve `false` to cancel closing.
+ * - `drafts.flush`: write unsaved edits to the window's draft now (before a quit on a signal, and
+ *   when the unsaved-changes prompt opens).
  * - The MCP bridge methods of apps/editor/src/host/rpcHandlers.ts (`document.info`, `document.apply`...).
  *   Optional: `canvas.bounds`, `graph.bounds` and `viewer.layerBounds({ layerId })` resolve a
  *   `{ x, y, width, height, scale? }` rect in viewport CSS pixels so screenshots can target them.
@@ -308,6 +365,9 @@ export interface SonobeHost {
   getViewerWindowStatus(): Promise<ViewerWindowStatus>;
   /** The pop-out viewer window opened, closed, or changed. Returns unsubscribe. */
   onViewerWindowStatus(cb: (status: ViewerWindowStatus) => void): () => void;
+
+  /** Drafts of unsaved work, so it survives a crash, a quit or a killed process. */
+  drafts: SonobeDrafts;
 }
 
 declare global {

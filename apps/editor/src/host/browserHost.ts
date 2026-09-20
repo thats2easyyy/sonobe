@@ -6,8 +6,24 @@
 
 import { parseDocumentFiles, ProjectFormatError } from "@sonobe/core";
 import { getDefaultDialogs, type DialogService } from "../state/dialogs.ts";
-import { assetBinaries, createAssetUrlCache, documentFiles, planProjectWrite, projectDisplayName, sanitizeProjectName, toArrayBuffer } from "./projectFiles.ts";
-import type { HostAdapter } from "./types.ts";
+import {
+  assetBinaries,
+  createAssetUrlCache,
+  createDraftFiles,
+  digestFiles,
+  documentFiles,
+  DRAFT_ID,
+  DRAFT_MANIFEST,
+  draftBaseChanged,
+  isDocumentFile,
+  planProjectWrite,
+  projectDisplayName,
+  readDraftContents,
+  sanitizeProjectName,
+  textDigest,
+  toArrayBuffer,
+} from "./projectFiles.ts";
+import type { DraftInfo, HostAdapter, HostDrafts } from "./types.ts";
 
 export interface StoredProject {
   files: Record<string, string>;
@@ -231,6 +247,73 @@ export async function createDefaultProjectStorage(): Promise<ProjectStorage> {
   return localStorageWorks() ? createLocalStorageProjectStorage() : createMemoryProjectStorage();
 }
 
+type StorageNavigator = Navigator & { storage?: { getDirectory?: () => Promise<unknown> } };
+
+/** Whether this browser can keep drafts at all (OPFS or localStorage). */
+function draftsPossible(): boolean {
+  return typeof (globalThis.navigator as StorageNavigator | undefined)?.storage?.getDirectory === "function" || localStorageWorks();
+}
+
+/** Where drafts go: OPFS "sonobe-drafts" when available, else localStorage (text only), else nowhere. */
+export async function createDefaultDraftStorage(): Promise<ProjectStorage | null> {
+  const nav = globalThis.navigator as StorageNavigator | undefined;
+  if (typeof nav?.storage?.getDirectory === "function") {
+    try {
+      const root = (await nav.storage.getDirectory()) as DirectoryHandleLike;
+      return createDirectoryProjectStorage(await root.getDirectoryHandle("sonobe-drafts", { create: true }), "opfs");
+    } catch {
+      // OPFS blocked: fall through.
+    }
+  }
+  return localStorageWorks() ? createLocalStorageProjectStorage({ prefix: "sonobe.draft:" }) : null;
+}
+
+/** The subset of the Web Locks API (navigator.locks) that claims drafts across tabs. */
+export interface LockManagerLike {
+  request(name: string, options: { ifAvailable?: boolean }, callback: (lock: unknown) => unknown): Promise<unknown>;
+  query(): Promise<{ held?: { name?: string }[] }>;
+}
+
+const DRAFT_LOCK = "sonobe-draft:";
+
+const coded = (code: string, message: string) => Object.assign(new Error(message), { code });
+
+/** DraftInfo from a stored draft, checking its files against the digests its manifest recorded. */
+function storedDraftInfo(id: string, stored: StoredProject): DraftInfo | null {
+  let manifest: Record<string, unknown> = {};
+  try {
+    const parsed: unknown = JSON.parse(stored.files[DRAFT_MANIFEST] ?? "null");
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) manifest = parsed as Record<string, unknown>;
+  } catch {
+    // A manifest cut off mid-write: the draft is torn.
+  }
+  const listed = manifest.files && typeof manifest.files === "object" ? (manifest.files as Record<string, unknown>) : null;
+  if (!listed && stored.files["project.json"] === undefined) return null;
+  let torn = !listed;
+  if (listed) {
+    for (const [rel, digest] of Object.entries(listed)) {
+      const text = stored.files[rel];
+      const bytes = stored.binaries?.[rel];
+      const actual = text !== undefined ? textDigest(text) : bytes ? `bytes:${bytes.byteLength}` : undefined;
+      if (actual !== digest) torn = true;
+    }
+    if (Object.keys(stored.files).some((rel) => isDocumentFile(rel) && !(rel in listed))) torn = true;
+  }
+  const num = (v: unknown) => (typeof v === "number" && Number.isFinite(v) ? v : 0);
+  const counts = (manifest.counts ?? {}) as Record<string, unknown>;
+  return {
+    id,
+    name: typeof manifest.name === "string" && manifest.name ? manifest.name : "Untitled",
+    projectPath: typeof manifest.projectPath === "string" ? manifest.projectPath : null,
+    createdAt: num(manifest.createdAt),
+    updatedAt: num(manifest.updatedAt),
+    revision: num(manifest.revision),
+    counts: { components: num(counts.components), layers: num(counts.layers), patches: num(counts.patches) },
+    ...(torn ? { torn: true } : {}),
+    ...(manifest.textOnly === true ? { textOnly: true } : {}),
+  };
+}
+
 // ---------------------------------------------------------------------------
 // Host
 // ---------------------------------------------------------------------------
@@ -287,6 +370,13 @@ export interface BrowserHostOptions {
   channelName?: string | null;
   /** localStorage key for the recent list. Null disables. */
   recentKey?: string | null;
+  /**
+   * Where drafts of unsaved work go (ARCHITECTURE §3.5 Drafts). Default: when `storage` isn't given,
+   * OPFS "sonobe-drafts", else localStorage (text only); otherwise none. Null: no drafts.
+   */
+  drafts?: ProjectStorage | Promise<ProjectStorage | null> | null;
+  /** Claims drafts across tabs. Default navigator.locks; null keeps claims within this tab. */
+  locks?: LockManagerLike | null;
 }
 
 export interface BrowserHost extends HostAdapter {
@@ -380,12 +470,128 @@ export function createBrowserHost(options: BrowserHostOptions = {}): BrowserHost
     await (await storage).write(nameOf(path), changes);
   };
 
+  // Drafts: one stored project per draft id, its draft.json written last. A tab holds a Web Lock for
+  // each draft it writes or opens, so list() shows only drafts no open tab is working on.
+  const draftStorage: Promise<ProjectStorage | null> | null =
+    options.drafts !== undefined ? (options.drafts === null ? null : Promise.resolve(options.drafts)) : options.storage === undefined && draftsPossible() ? createDefaultDraftStorage() : null;
+  const locks = options.locks !== undefined ? options.locks : ((globalThis.navigator as (Navigator & { locks?: LockManagerLike }) | undefined)?.locks ?? null);
+  const draftFiles = createDraftFiles(assets);
+  const claimed = new Map<string, () => void>();
+  /** Digests of each draft's files as this tab last wrote or read them. */
+  const draftDigests = new Map<string, Record<string, string>>();
+
+  const draftStore = async () => {
+    const s = await draftStorage;
+    if (!s) throw coded("no_drafts", "This browser can't keep drafts.");
+    return s;
+  };
+  const claimDraft = (id: string): Promise<boolean> => {
+    if (claimed.has(id)) return Promise.resolve(true);
+    if (!locks) {
+      claimed.set(id, () => undefined);
+      return Promise.resolve(true);
+    }
+    return new Promise<boolean>((resolve) => {
+      locks
+        .request(`${DRAFT_LOCK}${id}`, { ifAvailable: true }, (lock) => {
+          if (!lock) {
+            resolve(false);
+            return undefined;
+          }
+          resolve(true);
+          // Held until the draft is removed or this tab goes away.
+          return new Promise<void>((release) => claimed.set(id, release));
+        })
+        .catch(() => resolve(false));
+    });
+  };
+  const releaseDraft = (id: string) => {
+    claimed.get(id)?.();
+    claimed.delete(id);
+  };
+  const busyDrafts = async (): Promise<Set<string>> => {
+    const busy = new Set(claimed.keys());
+    if (!locks) return busy;
+    const state = await locks.query().catch(() => ({ held: [] as { name?: string }[] }));
+    for (const lock of state.held ?? []) if (lock.name?.startsWith(DRAFT_LOCK)) busy.add(lock.name.slice(DRAFT_LOCK.length));
+    return busy;
+  };
+
+  const drafts: HostDrafts | undefined = draftStorage
+    ? {
+        async write(id, doc, meta) {
+          if (!DRAFT_ID.test(id)) throw coded("invalid_draft", `"${id}" isn't a draft id.`);
+          const s = await draftStore();
+          if (!(await claimDraft(id))) throw coded("draft_in_use", "Another tab is working on this draft.");
+          const plan = draftFiles.plan(id, doc, meta.projectPath);
+          // localStorage holds text only: the draft keeps the document, not its media.
+          const textOnly = s.kind === "localStorage";
+          const binaries = textOnly ? {} : plan.binaries;
+          await s.write(id, { files: plan.files, deleted: plan.deleted, ...(Object.keys(binaries).length ? { binaries } : {}) });
+          const digests = { ...draftDigests.get(id) };
+          for (const rel of plan.deleted) delete digests[rel];
+          for (const [rel, text] of Object.entries(plan.files)) digests[rel] = textDigest(text);
+          for (const [rel, bytes] of Object.entries(binaries)) digests[rel] = `bytes:${bytes.byteLength}`;
+          const base = meta.projectPath ? known.get(meta.projectPath) : undefined;
+          const manifest = { formatVersion: 1, id, ...meta, updatedAt: Date.now(), ...(base ? { base: digestFiles(base) } : {}), ...(textOnly && Object.keys(doc.assets).length ? { textOnly: true } : {}), files: digests };
+          await s.write(id, { files: { [DRAFT_MANIFEST]: `${JSON.stringify(manifest)}\n` }, deleted: [] });
+          draftDigests.set(id, digests);
+          draftFiles.wrote(id, { all: plan.all, binaries });
+        },
+        async remove(id) {
+          const s = await draftStore();
+          await s.remove(id);
+          releaseDraft(id);
+          draftFiles.forget(id);
+          draftDigests.delete(id);
+        },
+        async list() {
+          const s = await draftStorage;
+          if (!s) return [];
+          const busy = await busyDrafts();
+          const out: DraftInfo[] = [];
+          for (const name of await s.list()) {
+            if (!DRAFT_ID.test(name) || busy.has(name)) continue;
+            const stored = await s.read(name).catch(() => undefined);
+            const info = stored ? storedDraftInfo(name, stored) : null;
+            if (info) out.push(info);
+          }
+          return out.sort((a, b) => b.updatedAt - a.updatedAt);
+        },
+        async open(id) {
+          const s = await draftStore();
+          if (!(await claimDraft(id))) throw coded("draft_in_use", "Another tab has this draft open.");
+          const stored = DRAFT_ID.test(id) ? await s.read(id).catch(() => undefined) : undefined;
+          const info = stored ? storedDraftInfo(id, stored) : null;
+          if (!stored || !info) {
+            releaseDraft(id);
+            throw coded("unknown_draft", `There's no draft "${id}".`);
+          }
+          let manifest: Record<string, unknown> = {};
+          try {
+            manifest = JSON.parse(stored.files[DRAFT_MANIFEST] ?? "{}") as Record<string, unknown>;
+          } catch {
+            // Torn: read what's there.
+          }
+          const recovered = readDraftContents(info, manifest, stored.files, stored.binaries);
+          draftFiles.read(id, documentFiles(stored.files), Object.keys(recovered.binaries));
+          const digests: Record<string, string> = {};
+          for (const [rel, text] of Object.entries(documentFiles(stored.files))) digests[rel] = textDigest(text);
+          for (const [rel, bytes] of Object.entries(recovered.binaries)) digests[rel] = `bytes:${bytes.byteLength}`;
+          draftDigests.set(id, digests);
+          return recovered;
+        },
+        diskChanged: (projectPath, draft) => draftBaseChanged(known.get(projectPath), draft.base),
+      }
+    : undefined;
+
   const host: BrowserHost = {
     kind: "browser",
     platform: "web",
     capabilities: { nativeMenus: false, nativeDialogs: useFsa, watch: channel !== null, reveal: false, persistent: !(options.storage && "kind" in options.storage && options.storage.kind === "memory") },
     rpc: null,
     storage,
+    ...(drafts ? { drafts } : {}),
 
     listProjects: async () => (await storage).list(),
     addDirectory,
@@ -509,6 +715,7 @@ export function createBrowserHost(options: BrowserHostOptions = {}): BrowserHost
 
     dispose() {
       host.setDocumentEdited(false);
+      for (const id of [...claimed.keys()]) releaseDraft(id);
       channel?.close();
       watchers.clear();
       assets.dispose();
