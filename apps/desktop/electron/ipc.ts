@@ -40,6 +40,10 @@ export const IPC = {
   viewerWindowChanged: "sonobe:viewer-window:changed",
   /** renderer → main: render a URL or HTML page in a hidden window and capture it for import. */
   captureDesign: "sonobe:design:capture",
+  /** renderer → main: cancel the capture started with this captureId. */
+  captureDesignCancel: "sonobe:design:cancel",
+  /** main → renderer: what a capture started with a captureId is doing now. */
+  captureDesignProgress: "sonobe:design:progress",
   /** renderer → main: download a pasted capture's image or font (no CORS in main). */
   fetchCaptureFile: "sonobe:design:fetch-file",
   rpcRequest: "sonobe:rpc:request",

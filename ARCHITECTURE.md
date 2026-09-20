@@ -461,12 +461,15 @@ The web player (`apps/desktop/player`) runs the real engine and DOM renderer ful
 
   ```ts
   interface SonobeHost {
-    listDocuments(); openDocument(ref); getDocument(docId?); apply(ops, { label, author, dryRun, expectedRevision });
+    listDocuments(); openDocument(ref, { reload, ...control }); createDocument(request, control?); getDocument(docId?);
+    saveDocument(docId?, { force, ...control }); apply(ops, { label, author, dryRun, expectedRevision, signal });
     getSelection(); screenshot(target, opts); reveal(ids); setWorking(ids, intent | null);
-    captureDesign?(request); fetchImage?(url, signal); putAssetFiles?(files, { docId });   // design import (§13)
+    captureDesign?(request, control?); fetchImage?(url, signal); putAssetFiles?(files, { docId, ...control });   // design import (§13)
     sim: { reset(opts); dispatch(simId, events); step(simId, opts); trace(simId, opts); values(simId, targets); override(simId, request) };
-    history: { list(opts); undo(txnId?); };
+    history: { list(opts); undo({ txnId, signal }); };
   }
+  // control = { signal?, progress?(step) }: the trailing argument of calls that can run long.
+  // Requests stay plain data, because the desktop sends them over IPC.
   ```
 
 **Tools** (annotated readOnly/destructive; every write returns deltas, ids, and diagnostics):
@@ -484,6 +487,20 @@ The web player (`apps/desktop/player`) runs the real engine and DOM renderer ful
 
 - **Resources:** guides, patch reference, document outline.
 - **Prompts:** `import_screen`, `prototype_interaction`, `debug_interaction`, `explain_prototype`.
+
+**Long calls: progress and cancellation** (`progress.ts`). Every tool handler gets a `ToolWork` as its third argument, `(args, ctx, work)`.
+- **Progress.** When the client sends a `progressToken`, `work.step(message, fn, { deadlineMs })` and `work.progress(step)` send `notifications/progress`: `progress` counts the notifications, and the message says where the call is ("Downloading images: 7 of 28"). Stage messages go out at once and count updates at most every 250 ms. Nothing is sent without a token, after a cancel, or after the result.
+- **Heartbeats.** While a step runs, its latest message repeats every 10 s, but only until the step's deadline, so a hung step goes quiet instead of looking alive. Progress resets Claude Code's idle watchdog; SSE keep-alives don't.
+- **One signal.** `work.signal` aborts on `notifications/cancelled`, a closed HTTP stream or a closed transport. Over stdio the SDK's `ctx.mcpReq.signal` sees all three. Stateless HTTP needs more, so `createHttpHandler`:
+  - parses POST bodies itself, so the SDK never clones the web `Request`. After a garbage collection, a cloned Request's signal stops following the original, so the SDK's own disconnect abort was lost.
+  - holds its own AbortController per request, aborted when the response closes before it finished.
+  - routes a 2025-era `notifications/cancelled`, which arrives on a POST of its own at a fresh server, to the call it names, but only when exactly one call in flight has that request id.
+  - streams every 2026-07-28 response from its first byte (`responseMode: "sse"`, keep-alive every 10 s), so a silent call gets its headers at once.
+- **A cancelled call never changes the document.** `work.step` rejects as soon as the call is cancelled, even when the host never settles, and aborts the host's `control.signal`. `host.apply` and `history.undo` refuse once their `signal` has aborted. An apply that has already started finishes. Steps that can't be taken back (open, create, save) wait for the host instead of claiming nothing changed.
+- **Host methods that can run long** take a trailing `control`: `{ signal, progress(step) }`. They stop and free what they hold when the signal aborts, and report stages through `progress`.
+- **Deadlines.** Hosts own the precise limits. `captureDesign` has one deadline (§13) and names the stage it stopped in. The tool's own step deadline is 60 s longer, only as a safety net, so the host's error arrives first.
+- **The relay** forwards SSE progress, turns a `notifications/cancelled` on stdin into an aborted request (the app sees the stream close), aborts calls still running when stdin closes, and tells a 5-minute fetch timeout apart from a lost connection.
+- **Clients.** A hand-written SDK client must pass `onprogress` together with `resetTimeoutOnProgress`. Without `onprogress` it sends no `progressToken`, so the server can't report progress and the client's default 60 s timeout still applies.
 - **Distribution:** Claude Code plugin (`integrations/claude-code`) and `.mcpb` bundle (`integrations/claude-desktop`), both built from a checkout. The app's **Connect Claude** screen shows copy-paste setup for Claude Code and Claude Desktop, filled in for this machine (the app's bundled CLI, or Node plus a checkout). In a source checkout it also shows the commands that build and pack the `.mcpb`.
 
 **Outline projection** (token-lean, read-only):
@@ -539,9 +556,10 @@ People prototype with their real screens instead of redrawing them. Every source
 - **Figma** (`figma.ts`): `figmaToCapture(selection, { exportSvg, imageData })` maps structural Figma nodes (frames, instances, rectangles, circles, text, and vectors as SVG exports) onto the capture format; the plugin in `integrations/figma-plugin` supplies the plugin API and copies the result.
 - **Converter** (`convert.ts`): `planImport(capture, doc, images, options)` returns the ops, the asset files to store first, the screen's ref, a summary and notes. Frames become groups (rectangles when empty, hit areas when they're only tap targets), uniform borders become strokes and other borders thin rectangles, gradients and background images become child layers, the largest outer shadow becomes the layer shadow (a spread-only ring becomes an outside stroke), single-line text hugs its text and grows from its alignment edge, and paragraphs keep their width. Identical image bytes reuse an existing asset. `replace` swaps an earlier screen in the same batch: layers found again at the same name path keep their ids and linked properties (text an earlier import named by its words is also found by its words), other items' connections to them are restored, the notes name every connection it had to drop, and content that already scrolls doesn't get a second Scroll patch. Web fonts become font assets whose `font` field (family, weight, style, unicode-range) the renderer's `createFontAssetRegistry` turns into FontFaces in the editor and the phone player.
 - **Hosts**:
-  - Desktop: `apps/desktop/electron/design-capture.ts` renders in a hidden window with its own session partition (sandboxed, no preload, no permissions, downloads and new windows refused, only http(s) navigations), injects the walker with `executeJavaScript` (outside the page's CSP), and downloads images with that session. `AppHost.captureDesign` serves `import_design`; `putAssetFiles` sends bytes to the editor over the `assets.put` RPC. The preload's `sonobeHost.captureDesign` serves the editor's Import Design dialog.
+  - Desktop: `apps/desktop/electron/design-capture.ts` renders in a hidden window with its own session partition (sandboxed, no preload, no permissions, downloads and new windows refused, only http(s) navigations), injects the walker with `executeJavaScript` (outside the page's CSP), and downloads images with that session. `colorScheme` loads `about:blank` first, then sets `prefers-color-scheme` over the debugger: a new window has no renderer until it navigates, and CDP's Emulation commands wait for one. The debugger stays attached until cleanup, because detaching drops the emulation. `AppHost.captureDesign` serves `import_design`; `putAssetFiles` sends bytes to the editor over the `assets.put` RPC. The preload's `sonobeHost.captureDesign` serves the editor's Import Design dialog. The dialog passes a `captureId` to follow the capture (`onCaptureDesignProgress`) and to stop it (`cancelCaptureDesign`), since an AbortSignal can't cross the context bridge. Reloading or closing the editor window also stops its captures, and so does quitting the app.
   - Browser editor: HTML renders in a sandboxed iframe (`allow-scripts`, opaque origin) that posts the capture back; URLs need the desktop app.
   - Headless: `@sonobe/import/node` renders with Playwright's Chromium when it's installed, and writes new asset files straight into the project's `assets/` folder.
+- **Deadlines and cleanup** (`run.ts`): `createCaptureRun` gives each capture one deadline, 90 s plus `waitMs`, and both hosts route every await through its `step`. Single steps have budgets too: loading 30 s, the color scheme 5 s, reading the layers 45 s plus `waitMs`, the screenshot 15 s. A step that would outrun the deadline gets the deadline's error instead, `capture_timeout`, which names the stage ("It stopped while reading the page's layers"). Images and fonts still downloading 5 s before the deadline become placeholders, and a screenshot that fails is left out. Both come back as notes, not failures. A cancel or the deadline destroys the capture window (or closes Playwright's browser) at once, which also ends a page stuck in a loop and settles debugger commands still waiting. Every path frees the window, and no debugger stays attached.
 - **Front doors**: File → Import Design… (URL, HTML, or a Claude prompt), pasting a capture on the canvas, the `import_design` MCP tool (`url`, `html`, or `capture`), and the Chrome extension (`integrations/chrome-extension`: the service worker runs the walker in the tab's main world, embeds cross-origin images when the person allows it, and copies the capture; the element picker marks one element for the walker's `selector`). Each import is one history group.
 - **Checks**: `packages/import/scripts/fidelity.ts` renders fixture pages, imports them, draws the document with the DOM renderer, and writes source, imported and difference images side by side. `apps/desktop/tests/import-smoke.mjs` runs the desktop path against a local dev server.
 

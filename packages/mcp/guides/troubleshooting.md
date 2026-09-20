@@ -51,6 +51,8 @@ Nothing changed when a write fails. Fix the call and retry.
 | `revision_conflict`                                  | the document changed since you read it  | re-read, then retry with the new `expectedRevision`                                   |
 | `unknown_ref`                                        | no op in the batch defines that `$ref`  | add `"ref"` on the op that creates the item; the error lists the batch's refs         |
 | `human_edit` (undo)                                  | the newest change is the person's       | ask first; pass its `txnId` to undo it anyway                                         |
+| `capture_timeout` (import)                           | the page didn't finish within 90 s plus `waitMs` | the message names the step; follow its hint, such as `waitFor` for a page that loads late, or import without `screenshot` |
+| `cancelled`                                          | the call was cancelled before it changed anything | nothing to undo; call it again when ready                                  |
 
 ## Diagnostics worth knowing
 
@@ -66,4 +68,5 @@ Nothing changed when a write fails. Fix the call and retry.
 - **"isn't implemented yet"** in runtime issues: that patch outputs default values for now. Pick another patch, or tell the person.
 - **A loop shows one copy.** Every copy sits at the same position. Feed `gridLayout` positions into the layer.
 - **A headless screenshot looks slightly off.** Headless servers draw the screen themselves: text uses approximate metrics, and video, Lottie and shaders are placeholders. Check exact values with `sim_get_values`, or open the project in the Sonobe app.
+- **A long call timed out in a script you wrote** (an MCP SDK client): the SDK gives up after 60 s by default. Pass `onprogress` together with `resetTimeoutOnProgress: true`. Without `onprogress` the client never asks for progress, so there's nothing to reset the timer. Check `list_history` before retrying: a call that got past its last step may have finished.
 - **Changes vanished** after a headless session: the host wasn't autosaving, so call `save_document`. `get_document_info` shows "unsaved changes".

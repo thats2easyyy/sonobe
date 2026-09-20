@@ -43,6 +43,15 @@ Node 22.18+ is required. Node 24 is what CI uses.
 - To run on your own iPhone, copy `apps/ios/Config/Local.xcconfig.example` to `Local.xcconfig` and set your team and a bundle id of your own. Git ignores `Local.xcconfig`. Never commit a team ID, a bundle id of your own, or other signing settings to the project.
 - The bridge has two sides: `apps/desktop/player/platform.ts` and `apps/ios/SonobeViewer/Haptics.swift`. Change them together, and update ARCHITECTURE.md §9.2. A player test checks that the app's haptic types exist in the catalog.
 
+## Adding an MCP tool that can take long
+
+Tools register in `packages/mcp/src/tools/` with `tc.tool(name, config, async (args, ctx, work) => …)`. When a call can take more than a second or two (loading a page, waiting on the person), use `work` (`packages/mcp/src/progress.ts`, ARCHITECTURE §10 "Long calls"):
+
+1. Wrap each slow host call in a step: `work.step("Loading the page", (control) => host.captureDesign(request, control), { deadlineMs })`. The step sends its message as progress, repeats it while the host works (until the deadline), and rejects at once when the call is cancelled.
+2. Pass the step's `control` on. A host method that can run long takes it as a trailing `control?: HostCallControl` argument, keeps its request plain data, reports stages with `control.progress`, and stops and frees what it holds when `control.signal` aborts. Keep the host's own deadline shorter than the step's, so its error, which says more, comes first.
+3. Pass `signal: work.signal` (or `tc.signal(ctx)`) to `host.apply` and `history.undo`, so a cancelled call never changes the document. Call `work.throwIfCancelled()` between steps. In a long synchronous loop, `await work.checkpoint()` now and then.
+4. Test it with a v1 SDK client: `client.callTool(params, undefined, { onprogress, resetTimeoutOnProgress: true, timeout: 500 })` for progress, and `{ signal }` to cancel. `packages/mcp/src/import.test.ts` has examples.
+
 ## Code style
 
 - TypeScript, strict ESM. Relative imports use explicit `.ts`/`.tsx` extensions.

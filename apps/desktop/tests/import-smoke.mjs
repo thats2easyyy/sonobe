@@ -11,6 +11,11 @@
  * - A dead dev server explains itself.
  * - The editor's own bridge: window.sonobeHost.captureDesign for the Import dialog.
  * - Pasting a capture (from the Chrome extension) downloads its linked image through the main process.
+ * - Long calls: an import reports progress; colorScheme with a screenshot works for url and html (the
+ *   page reads prefers-color-scheme while it parses); a page stuck in a loop stops at the deadline
+ *   with an error naming the step; a client cancel and a disconnect after a forced GC close the
+ *   capture window at once and change nothing; the dialog's bridge follows progress and cancels;
+ *   no capture window or debugger is left at the end.
  *
  *   npm run build -w @sonobe/editor && node apps/desktop/scripts/build.mjs && node apps/desktop/tests/import-smoke.mjs
  */
@@ -52,10 +57,16 @@ if (!existsSync(path.join(appDir, "dist", "main.cjs")) || !existsSync(path.join(
 // A tiny "dev server": the profile fixture, with its avatar served as a real PNG from this origin.
 const AVATAR = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAYAAABytg0kAAAAFklEQVR42mP8z8Dwn4GBgYGJAQoAAAoXAQFrlYz2AAAAAElFTkSuQmCC", "base64");
 const profile = readFileSync(path.join(repoDir, "packages/import/fixtures/profile.html"), "utf8").replace(/src="data:image\/svg\+xml;utf8,[^"]*"/, 'src="/avatar.png"');
+// The title says which color scheme the page saw while it parsed, so it proves the scheme was set first.
+const schemePage = (label) => `<!doctype html><style>body{margin:0;background:#fff}@media (prefers-color-scheme: dark){body{background:#000;color:#fff}}</style><body><button data-name="Buy" style="margin:40px;padding:12px 20px">Buy ${label}</button><script>document.title = matchMedia("(prefers-color-scheme: dark)").matches ? "Dark" : "Light"</script></body>`;
+const BUSY = '<!doctype html><title>Busy</title><body>busy<script>addEventListener("load", () => setTimeout(() => { for (;;) {} }, 0))</script></body>';
 const server = createServer((req, res) => {
   if (req.url === "/avatar.png") {
     res.writeHead(200, { "content-type": "image/png" });
     res.end(AVATAR);
+  } else if (req.url === "/scheme") {
+    res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
+    res.end(schemePage("url"));
   } else if (req.url === "/profile") {
     res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
     res.end(profile);
@@ -82,8 +93,17 @@ const watchdog = setTimeout(() => {
 
 try {
   mkdirSync(screenshotsDir, { recursive: true });
-  app = await electron.launch({ executablePath: electronPath, args: ["--mute-audio", appDir], cwd: appDir, env, timeout: 30_000 });
+  // --expose-gc: the disconnect check forces a garbage collection in the main process first.
+  app = await electron.launch({ executablePath: electronPath, args: ["--js-flags=--expose-gc", "--mute-audio", appDir], cwd: appDir, env, timeout: 30_000 });
   app.process().stderr?.on("data", (d) => process.stderr.write(`[app] ${d}`));
+  // Track every window after the editor's, so the checks can see capture windows open and close.
+  await app.evaluate(({ app: electronApp }) => {
+    globalThis.__captureWindows = { created: 0, destroyed: [] };
+    electronApp.on("browser-window-created", (_event, w) => {
+      globalThis.__captureWindows.created++;
+      w.webContents.once("destroyed", () => globalThis.__captureWindows.destroyed.push(Date.now()));
+    });
+  });
   const win = await app.firstWindow();
   await poll(() => win.evaluate(() => typeof window.sonobeHost?.captureDesign === "function").catch(() => false), { message: "the editor with sonobeHost.captureDesign" });
   // First launch shows the welcome screen over the editor: mark it seen and reload.
@@ -93,18 +113,28 @@ try {
   const tokenFile = path.join(home, "mcp.json");
   await poll(() => existsSync(tokenFile), { message: "mcp.json" });
   const conn = JSON.parse(readFileSync(tokenFile, "utf8"));
-  const client = new Client({ name: "claude-code", version: "import-smoke" });
-  await client.connect(new StreamableHTTPClientTransport(new URL(conn.url), { requestInit: { headers: { Authorization: `Bearer ${conn.token}` } } }));
-  const call = async (name, args = {}) => {
-    const result = await client.callTool({ name, arguments: args });
+  const connect = async () => {
+    const c = new Client({ name: "claude-code", version: "import-smoke" });
+    const transport = new StreamableHTTPClientTransport(new URL(conn.url), { requestInit: { headers: { Authorization: `Bearer ${conn.token}` } } });
+    await c.connect(transport);
+    return { client: c, transport };
+  };
+  const { client } = await connect();
+  const call = async (name, args = {}, options = undefined) => {
+    const result = await client.callTool({ name, arguments: args }, undefined, options);
     const text = (result.content ?? []).filter((c) => c.type === "text").map((c) => c.text).join("\n");
     return { ...result, text };
   };
   await poll(async () => !(await call("list_documents")).isError, { message: "the editor connected to MCP" });
+  const windowsAtStart = await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().length);
+  const captureWindows = () => app.evaluate(() => ({ created: globalThis.__captureWindows.created, destroyed: globalThis.__captureWindows.destroyed.length, last: globalThis.__captureWindows.destroyed.at(-1) }));
+  const revision = async () => Number((await call("get_document_info")).structuredContent?.revision);
 
   log(`import_design url http://127.0.0.1:${port}/profile`);
-  const imported = await call("import_design", { url: `http://127.0.0.1:${port}/profile`, screenshot: true });
+  const progress = [];
+  const imported = await call("import_design", { url: `http://127.0.0.1:${port}/profile`, screenshot: true }, { onprogress: (p) => progress.push(p.message), resetTimeoutOnProgress: true });
   assert(!imported.isError, "import_design url succeeds", imported.text);
+  assert(progress.includes(`Loading http://127.0.0.1:${port}/profile`) && progress.includes("Reading the page's layers") && progress.some((m) => /^Downloading images: \d+ of \d+/.test(m)) && progress.includes("Taking the page screenshot"), "the import reports its steps as progress", progress);
   assert(imported.text.includes('Imported "Profile" as layer'), "result names the screen", imported.text);
   assert(imported.text.includes('"Profile Card"') && imported.text.includes('"Follow Button"'), "result outline shows named layers", imported.text);
   const source = (imported.content ?? []).find((c) => c.type === "image");
@@ -155,6 +185,118 @@ try {
   assert(/"image":\{"asset":"[a-z_0-9]+"\}/.test(pasted.slice(pasted.indexOf("Remote Avatar") - 400)), "the linked image downloaded as an asset", pasted.slice(pasted.indexOf("Remote Avatar") - 200, pasted.indexOf("Remote Avatar") + 200));
 
   await win.screenshot({ path: path.join(screenshotsDir, "import-editor.png") });
+
+  log("colorScheme with a screenshot (url and html)");
+  for (const [source, args] of [
+    ["url", { url: `http://127.0.0.1:${port}/scheme` }],
+    ["html", { html: schemePage("html") }],
+  ]) {
+    for (const colorScheme of ["dark", "light"]) {
+      const started = Date.now();
+      const r = await call("import_design", { ...args, colorScheme, screenshot: true, position: [804, 0] });
+      const expected = colorScheme === "dark" ? "Dark" : "Light";
+      assert(!r.isError && r.text.includes(`Imported "${expected}"`), `${source} with colorScheme ${colorScheme} imports the ${colorScheme} page`, r.text);
+      assert((r.content ?? []).some((c) => c.type === "image"), `${source} with colorScheme ${colorScheme} returns the screenshot`);
+      assert(Date.now() - started < 10_000, `${source} with colorScheme ${colorScheme} answers quickly`, `${Date.now() - started} ms`);
+    }
+  }
+
+  log("a page stuck in a loop stops at the deadline (lowered to 8 s for this run)");
+  await app.evaluate(() => globalThis.__sonobeTest.setCaptureDeadline(8_000));
+  {
+    const started = Date.now();
+    const stuck = await call("import_design", { html: BUSY });
+    const ms = Date.now() - started;
+    assert(stuck.isError && stuck.text.includes("capture_timeout") && stuck.text.includes("didn't finish within 8 seconds") && stuck.text.includes("reading the page's layers"), "a stuck page fails with a teaching timeout naming the step", stuck.text);
+    assert(ms < 12_000, "the deadline holds", `${ms} ms`);
+    const w = await poll(async () => {
+      const c = await captureWindows();
+      return c.created === c.destroyed ? c : null;
+    }, { timeout: 3_000, message: "the stuck page's window to close" });
+    assert(w, "the stuck page's window is gone");
+  }
+  await app.evaluate(() => globalThis.__sonobeTest.setCaptureDeadline(null));
+
+  log("the client cancels an import (notifications/cancelled over stateless HTTP)");
+  {
+    const before = await revision();
+    const controller = new AbortController();
+    const pending = client.callTool({ name: "import_design", arguments: { html: BUSY, name: "Cancelled Import" } }, undefined, { signal: controller.signal }).then(
+      () => "resolved",
+      (err) => `rejected: ${err.message}`,
+    );
+    await poll(async () => {
+      const c = await captureWindows();
+      return c.created > c.destroyed;
+    }, { message: "the capture window to open" });
+    await new Promise((r) => setTimeout(r, 500));
+    const cancelledAt = Date.now();
+    controller.abort("the person pressed Esc");
+    assert((await pending).startsWith("rejected"), "the cancelled call rejects on the client");
+    const c = await poll(async () => {
+      const w = await captureWindows();
+      return w.created === w.destroyed ? w : null;
+    }, { timeout: 3_000, message: "the capture window to close after the cancel" });
+    assert(c.last - cancelledAt < 1_500, "the cancel closes the capture window promptly", `${c.last - cancelledAt} ms`);
+    await new Promise((r) => setTimeout(r, 300));
+    assert((await revision()) === before, "a cancelled import changes nothing", { before, after: await revision() });
+    assert(!(await call("list_history", { limit: 5 })).text.includes("Cancelled Import"), "a cancelled import leaves no history entry");
+  }
+
+  log("the client disconnects after a garbage collection");
+  {
+    const before = await revision();
+    const other = await connect();
+    const pending = other.client.callTool({ name: "import_design", arguments: { html: BUSY } }).then(
+      () => "resolved",
+      (err) => `rejected: ${err.message}`,
+    );
+    await poll(async () => {
+      const c = await captureWindows();
+      return c.created > c.destroyed;
+    }, { message: "the capture window to open" });
+    await new Promise((r) => setTimeout(r, 500));
+    await app.evaluate(() => {
+      for (let i = 0; i < 3; i++) globalThis.gc?.();
+    });
+    const closedAt = Date.now();
+    await other.transport.close();
+    await pending;
+    const c = await poll(async () => {
+      const w = await captureWindows();
+      return w.created === w.destroyed ? w : null;
+    }, { timeout: 3_000, message: "the capture window to close after the disconnect" });
+    assert(c.last - closedAt < 1_500, "a disconnect closes the capture window promptly", `${c.last - closedAt} ms`);
+    assert((await revision()) === before, "a disconnected import changes nothing");
+  }
+
+  log("the Import dialog's bridge: dark mode, progress, and cancel");
+  {
+    const dark = await win.evaluate((html) => window.sonobeHost.captureDesign({ html, width: 402, height: 874, colorScheme: "dark" }), schemePage("dialog"));
+    assert(dark.ok && dark.capture.root.name === "Dark" && dark.capture.root.fill === "#000000FF", "sonobeHost.captureDesign with colorScheme dark", dark);
+    const cancelled = await win.evaluate(async (html) => {
+      const captureId = "smoke-cancel";
+      const seen = [];
+      const off = window.sonobeHost.onCaptureDesignProgress((p) => {
+        if (p.captureId === captureId) seen.push(p.message);
+      });
+      const pending = window.sonobeHost.captureDesign({ html, width: 402, height: 874, captureId });
+      await new Promise((r) => setTimeout(r, 1_000));
+      const at = Date.now();
+      window.sonobeHost.cancelCaptureDesign(captureId);
+      const reply = await pending;
+      off();
+      return { reply, seen, ms: Date.now() - at };
+    }, BUSY);
+    assert(!cancelled.reply.ok && cancelled.reply.code === "cancelled", "cancelCaptureDesign stops the dialog's capture", cancelled);
+    assert(cancelled.ms < 1_500, "the dialog's cancel is prompt", cancelled.ms);
+    assert(cancelled.seen.includes("Rendering the HTML") && cancelled.seen.includes("Reading the page's layers"), "the dialog receives the capture's progress", cancelled.seen);
+  }
+
+  const left = await app.evaluate(({ BrowserWindow, webContents }) => ({ windows: BrowserWindow.getAllWindows().length, attached: webContents.getAllWebContents().filter((w) => w.debugger.isAttached()).length }));
+  const counts = await captureWindows();
+  assert(left.windows === windowsAtStart && left.attached === 0 && counts.created === counts.destroyed, "no capture window or debugger is left", { ...left, windowsAtStart, ...counts });
+
   await client.close();
   log("ok");
 } catch (err) {

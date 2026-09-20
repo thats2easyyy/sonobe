@@ -447,3 +447,17 @@ describe("history", () => {
     expect(empty.structured.error).toMatchObject({ code: "nothing_to_undo" });
   });
 });
+
+describe("cancelled calls", () => {
+  it("never apply or undo once their signal has aborted", async () => {
+    await buildGrowCard(client);
+    const before = (await project.host.getDocument()).revision;
+    const cancelled = new AbortController();
+    cancelled.abort();
+    const author = { kind: "agent" as const, name: "Claude" };
+    await expect(project.host.apply([{ op: "addLayer", layer: { type: "oval", name: "Dot" } }], { label: "dot", author, signal: cancelled.signal })).rejects.toMatchObject({ code: "cancelled" });
+    await expect(project.host.history.undo({ author, signal: cancelled.signal })).rejects.toMatchObject({ code: "cancelled" });
+    expect((await project.host.getDocument()).revision).toBe(before);
+    expect((await client.call("list_history", {})).text).not.toContain("dot");
+  });
+});

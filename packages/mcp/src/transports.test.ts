@@ -1,0 +1,191 @@
+import { createServer, type Server } from "node:http";
+import v8 from "node:v8";
+import vm from "node:vm";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import type { HeadlessHost } from "./headless.ts";
+import type { CapturedDesign, DesignCaptureRequest, HostCallControl } from "./host.ts";
+import { modernMeta, tempProject, type TempProject } from "./test-helpers.ts";
+import { createHttpHandler, type NodeMcpHandler } from "./transports.ts";
+
+// A real gc() without restarting vitest under --expose-gc.
+v8.setFlagsFromString("--expose-gc");
+const gc = vm.runInNewContext("gc") as () => void;
+
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+const CAPTURE = {
+  format: "sonobe.design-capture",
+  version: 1,
+  source: { kind: "html", title: "Slow" },
+  viewport: { width: 402, height: 874 },
+  root: { kind: "frame", name: "Slow", box: [0, 0, 402, 874], fill: "#FFFFFFFF", children: [] },
+  images: {},
+};
+
+/** captureDesign calls as the host saw them: when each started and when its signal aborted. */
+interface CaptureCall {
+  started: number;
+  aborted?: number;
+}
+
+let project: TempProject;
+let calls: CaptureCall[];
+let capture: (control: HostCallControl, call: CaptureCall) => Promise<CapturedDesign>;
+let host: HeadlessHost;
+const servers: { handler: NodeMcpHandler; server: Server }[] = [];
+let url: string;
+
+/** Serve the host over createHttpHandler on a free port. */
+async function serve(keepAliveMs: number): Promise<string> {
+  const handler = createHttpHandler(host, { version: "0.1.0-test", keepAliveMs });
+  const server = createServer((req, res) => void handler(req, res));
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", () => resolve()));
+  servers.push({ handler, server });
+  return `http://127.0.0.1:${(server.address() as { port: number }).port}/mcp`;
+}
+
+beforeAll(async () => {
+  project = await tempProject();
+  host = Object.create(project.host) as HeadlessHost;
+  Object.defineProperty(host, "captureDesign", {
+    value: (_request: DesignCaptureRequest, control: HostCallControl = {}) => {
+      const call: CaptureCall = { started: Date.now() };
+      calls.push(call);
+      control.signal?.addEventListener("abort", () => (call.aborted = Date.now()), { once: true });
+      return capture(control, call);
+    },
+  });
+  // Keep-alives also reveal a closed connection (the next write fails), so they're slow here: the
+  // disconnect test must see the abort without one.
+  url = await serve(60_000);
+});
+
+afterAll(async () => {
+  for (const { handler, server } of servers) {
+    await handler.close();
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  }
+  await project.cleanup();
+});
+
+beforeEach(() => {
+  calls = [];
+  capture = () => new Promise<never>(() => undefined);
+});
+
+afterEach(async () => {
+  // Let aborted calls finish before the next test counts calls.
+  await sleep(20);
+});
+
+const LEGACY = { "content-type": "application/json", accept: "application/json, text/event-stream", "mcp-protocol-version": "2025-11-25" };
+
+function postTool(id: number, meta: Record<string, unknown> = {}, init: { signal?: AbortSignal; modern?: boolean; url?: string } = {}) {
+  const headers: Record<string, string> = init.modern
+    ? { "content-type": "application/json", accept: "application/json, text/event-stream", "mcp-protocol-version": "2026-07-28", "mcp-method": "tools/call", "mcp-name": "import_design" }
+    : LEGACY;
+  return fetch(init.url ?? url, {
+    method: "POST",
+    headers,
+    body: JSON.stringify({ jsonrpc: "2.0", id, method: "tools/call", params: { name: "import_design", arguments: { html: "<p>slow</p>" }, _meta: { ...meta, ...(init.modern ? modernMeta() : {}) } } }),
+    ...(init.signal ? { signal: init.signal } : {}),
+  });
+}
+
+/** The JSON-RPC messages of an SSE body, in order. */
+async function sseMessages(res: Response): Promise<Record<string, unknown>[]> {
+  const text = await res.text();
+  return text
+    .split(/\r?\n\r?\n/)
+    .map((block) =>
+      block
+        .split(/\r?\n/)
+        .filter((l) => l.startsWith("data:"))
+        .map((l) => l.slice(5).trim())
+        .join("\n"),
+    )
+    .filter(Boolean)
+    .map((data) => JSON.parse(data) as Record<string, unknown>);
+}
+
+async function until(condition: () => boolean, ms = 2_000): Promise<void> {
+  const end = Date.now() + ms;
+  while (!condition() && Date.now() < end) await sleep(10);
+}
+
+describe("createHttpHandler: long calls", () => {
+  it("streams progress notifications before the result (2025-era)", async () => {
+    capture = async (control) => {
+      control.progress?.({ message: "Reading the page's layers" });
+      await sleep(300);
+      return { capture: CAPTURE as never, images: new Map() };
+    };
+    const res = await postTool(1, { progressToken: "p1" });
+    expect(res.headers.get("content-type")).toContain("text/event-stream");
+    const messages = await sseMessages(res);
+    const progress = messages.filter((m) => m.method === "notifications/progress");
+    expect(progress.map((m) => (m.params as { message: string }).message)).toEqual(expect.arrayContaining(["Rendering the HTML", "Reading the page's layers"]));
+    expect(progress.every((m) => (m.params as { progressToken: string }).progressToken === "p1")).toBe(true);
+    const resultAt = messages.findIndex((m) => m.id === 1);
+    expect(resultAt).toBeGreaterThan(messages.indexOf(progress[0]!));
+    expect(JSON.stringify(messages[resultAt])).toContain('Imported \\"Slow\\"');
+  });
+
+  it("aborts the call when the client disconnects, even after a garbage collection", async () => {
+    const before = (await project.host.getDocument()).revision;
+    const controller = new AbortController();
+    const res = postTool(2, {}, { signal: controller.signal }).catch(() => undefined);
+    await until(() => calls.length === 1);
+    for (let i = 0; i < 3; i++) {
+      gc();
+      await sleep(10);
+    }
+    const disconnected = Date.now();
+    controller.abort();
+    await res;
+    await until(() => calls[0]?.aborted !== undefined, 1_000);
+    expect(calls[0]!.aborted).toBeDefined();
+    expect(calls[0]!.aborted! - disconnected).toBeLessThan(500);
+    expect((await project.host.getDocument()).revision).toBe(before);
+  });
+
+  it("routes notifications/cancelled to the call it names, and ignores an ambiguous id", async () => {
+    const cancel = (requestId: number) =>
+      fetch(url, { method: "POST", headers: LEGACY, body: JSON.stringify({ jsonrpc: "2.0", method: "notifications/cancelled", params: { requestId, reason: "the person pressed Esc" } }) });
+
+    const one = postTool(5);
+    await until(() => calls.length === 1);
+    expect((await cancel(5)).status).toBe(202);
+    await until(() => calls[0]?.aborted !== undefined, 1_000);
+    expect(calls[0]!.aborted).toBeDefined();
+    await one;
+
+    // Two clients that happen to use the same id: the cancel can't tell them apart, so it's dropped.
+    const controllers = [new AbortController(), new AbortController()];
+    const both = controllers.map((c) => postTool(9, {}, { signal: c.signal }).catch(() => undefined));
+    await until(() => calls.length === 3);
+    await cancel(9);
+    await sleep(300);
+    expect(calls.slice(1).map((c) => c.aborted)).toEqual([undefined, undefined]);
+    for (const c of controllers) c.abort();
+    await Promise.all(both);
+  });
+
+  it("sends a silent 2026-07-28 call's headers at once, then keep-alives", async () => {
+    capture = async () => (await sleep(1_000), { capture: CAPTURE as never, images: new Map() });
+    const quick = await serve(200);
+    const started = Date.now();
+    const res = await postTool(7, {}, { modern: true, url: quick });
+    expect(Date.now() - started).toBeLessThan(700);
+    expect(res.headers.get("content-type")).toContain("text/event-stream");
+    const text = await res.text();
+    expect(text).toMatch(/^:/m);
+    expect(text).toContain('"resultType":"complete"');
+  });
+
+  it("answers a body that isn't JSON like the SDK does", async () => {
+    const res = await fetch(url, { method: "POST", headers: LEGACY, body: "{not json" });
+    expect(res.status).toBe(400);
+    expect(await res.json()).toMatchObject({ jsonrpc: "2.0", id: null, error: { code: -32700 } });
+  });
+});

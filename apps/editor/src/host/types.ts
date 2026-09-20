@@ -52,6 +52,10 @@ export interface DesktopHostApi {
   assistant?: unknown;
   /** Render a URL or HTML page in a hidden window and capture it (DesignCaptureReply in host-api.d.ts). Optional: older preloads lack it. */
   captureDesign?(request: DesktopCaptureParams): Promise<DesktopCaptureReply>;
+  /** Cancel the capture started with this captureId. Optional: older preloads lack it. */
+  cancelCaptureDesign?(captureId: string): void;
+  /** Progress of captures started with a captureId. Returns unsubscribe. Optional: older preloads lack it. */
+  onCaptureDesignProgress?(cb: (progress: DesktopCaptureProgress) => void): () => void;
   /** Download a pasted capture's http(s) file in the main process. Optional: older preloads lack it. */
   fetchCaptureFile?(url: string): Promise<{ bytes: Uint8Array; mime: string } | null>;
   /** Show the prototype in its own window, or focus it when it's open. */
@@ -73,12 +77,22 @@ export interface DesktopCaptureParams {
   waitMs?: number;
   fullPage?: boolean;
   colorScheme?: "light" | "dark";
+  captureId?: string;
 }
 
 /** DesignCaptureReply in host-api.d.ts. */
 export type DesktopCaptureReply =
-  | { ok: true; capture: unknown; images: [string, { bytes: Uint8Array; mime: string; width?: number; height?: number } | null][] }
+  | { ok: true; capture: unknown; images: [string, { bytes: Uint8Array; mime: string; width?: number; height?: number } | null][]; notes?: string[] }
   | { ok: false; code: string; message: string; hint?: string };
+
+/** DesignCaptureProgress in host-api.d.ts. */
+export interface DesktopCaptureProgress {
+  captureId: string;
+  stage: string;
+  message: string;
+  done?: number;
+  total?: number;
+}
 
 /** SecretsStatus in host-api.d.ts. */
 export interface DesktopSecretsStatus {
