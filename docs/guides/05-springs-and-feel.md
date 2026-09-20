@@ -114,7 +114,7 @@ Two things stand out. Changing Bounciness leaves the response alone, but a bounc
 A process that works:
 
 1. Pick the preset closest to the feel.
-2. Watch it at real size, on a real device if you can. Scan the Viewer's QR code to open the prototype on your phone. A trackpad doesn't feel like a thumb.
+2. Watch it at real size, on a real device if you can. Scan the Viewer's QR code to open the prototype on your phone. A trackpad doesn't feel like a thumb. To watch it again from the start, tap the phone with three fingers and choose Restart Prototype, or press ⌘R in Sonobe, which restarts the phone too.
 3. Change one knob at a time.
 4. Test interruptions. Tap rapidly, or reverse direction mid-flight. Pop Animation keeps its speed when its target changes, so it should turn around smoothly.
 5. Test at the real distance. The same spring feels different on a 40-point toggle and a 700-point sheet. Big distances usually want less bounce.
