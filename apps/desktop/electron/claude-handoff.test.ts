@@ -57,7 +57,7 @@ describe("shellQuote", () => {
 });
 
 describe("buildHandoffScript", () => {
-  it("runs a login zsh that deletes itself, and passes the prompt after --", () => {
+  it("runs a login zsh that deletes itself, and always passes Sonobe's relay, then the prompt after --", () => {
     const script = buildHandoffScript({ folder: "/Users/me/code/placemark", display: "~/code/placemark", prompt: "Design a checkout", mcpConfig: handoffMcpConfig(SERVER) });
     expect(script.split("\n")).toEqual([
       "#!/bin/zsh -l",
@@ -68,7 +68,6 @@ describe("buildHandoffScript", () => {
       "  print -r -- 'Claude Code isn'\\''t installed, or isn'\\''t on your PATH. Install it from https://claude.com/claude-code, then try Open in Claude Code again.'",
       "  exit 1",
       "fi",
-      "if claude mcp get sonobe >/dev/null 2>&1; then exec claude -- 'Design a checkout'; fi",
       `exec claude --mcp-config '{"mcpServers":{"sonobe":{"command":"/Applications/Sonobe.app/Contents/Resources/cli/sonobe","args":["mcp"]}}}' -- 'Design a checkout'`,
       "",
     ]);
@@ -92,57 +91,86 @@ describe("buildHandoffScript", () => {
     let folder: string;
     let bin: string;
     let out: string;
-    const prompt = `Redesign “Card”:\n${TRICKY.join("\n")}`;
     const mcpConfig = handoffMcpConfig({ command: "/Users/me/it's \"here\"/sonobe", args: ["mcp"] });
+    const PROMPTS = [
+      `Redesign “Card”: it's "quoted", 'single' and ''`,
+      "Keep $HOME, ${PATH}, $(id) and $1 as written",
+      "Name it `id` and ``, in backticks",
+      "Line one\nline two\n\nline four\n",
+      `Redesign “Card”:\n${TRICKY.join("\n")}`,
+    ];
+    /** What `claude mcp get sonobe` prints (abridged) and exits with in Claude Code 2.1.278, for each place a sonobe server can come from. */
+    const CONFIGURED = {
+      none: { exit: 1, out: 'No MCP server named "sonobe". Run `claude mcp add` to add one.', mcpJson: false },
+      user: { exit: 0, out: "sonobe:\n  Scope: User config (available in all your projects)\n  Status: ✓ Connected", mcpJson: false },
+      local: { exit: 0, out: "sonobe:\n  Scope: Local config (private to you in this project)\n  Status: ✓ Connected", mcpJson: false },
+      "the folder's .mcp.json, pending": { exit: 0, out: "sonobe:\n  Scope: Project config (shared via .mcp.json)\n  Status: ⏸ Pending approval (run `claude` to approve)", mcpJson: true },
+      "the folder's .mcp.json, rejected": { exit: 0, out: "sonobe:\n  Scope: Project config (shared via .mcp.json)\n  Status: ✘ Rejected (see disabledMcpjsonServers in settings)", mcpJson: true },
+    };
 
     beforeEach(async () => {
       folder = path.join(dir, `My App's "Folder" $HOME`);
       bin = path.join(dir, "bin");
-      out = path.join(dir, "claude-args");
+      out = path.join(dir, "claude-calls");
       await mkdir(folder, { recursive: true });
       await mkdir(bin);
-      // Records its working folder and every argument, NUL-separated; `claude mcp get` exits with $MCP_EXIT.
-      await writeFile(path.join(bin, "claude"), `#!/bin/sh\nif [ "$1" = mcp ]; then exit "$MCP_EXIT"; fi\nprintf '%s\\0' "$(pwd -P)" "$@" > "$OUT"\n`);
+      // For every call, appends its argument count, working folder and arguments, NUL-separated.
+      // `claude mcp …` answers like Claude Code would for $MCP_GET and $MCP_EXIT; anything else is a session, which this stand-in doesn't start.
+      await writeFile(path.join(bin, "claude"), `#!/bin/sh\nprintf '%s\\0' "$#" "$(pwd -P)" "$@" >> "$OUT"\nif [ "$1" = mcp ]; then printf '%s\\n' "$MCP_GET"; exit "$MCP_EXIT"; fi\n`);
       await chmod(path.join(bin, "claude"), 0o755);
     });
 
-    /** Run the script as Terminal would, minus the person's shell profile (-f instead of -l). */
-    const run = async (options: { mcpExit?: number; withClaude?: boolean; into?: string } = {}) => {
-      const script = path.join(dir, "run.command");
-      await writeFile(script, buildHandoffScript({ folder: options.into ?? folder, display: "~/code/placemark", prompt, mcpConfig }), { mode: 0o700 });
-      const result = spawnSync("/bin/zsh", ["-f", script], {
-        encoding: "utf8",
-        env: { PATH: `${options.withClaude === false ? "" : `${bin}:`}/usr/bin:/bin`, OUT: out, MCP_EXIT: String(options.mcpExit ?? 1), HOME: dir },
-      });
-      const args = existsSync(out) ? (await readFile(out, "utf8")).split("\0").slice(0, -1) : null;
-      await rm(out, { force: true });
-      return { ...result, args, scriptLeft: existsSync(script) };
+    /** Each call the stand-in got: its working folder, then its arguments. */
+    const calls = async (): Promise<string[][] | null> => {
+      if (!existsSync(out)) return null;
+      const fields = (await readFile(out, "utf8")).split("\0").slice(0, -1);
+      const found: string[][] = [];
+      for (let i = 0; i < fields.length; i += Number(fields[i]) + 2) found.push(fields.slice(i + 1, i + 2 + Number(fields[i])));
+      return found;
     };
 
-    it("passes Sonobe's relay with --mcp-config when the folder has no sonobe server, and the exact prompt", async () => {
-      const result = await run({ mcpExit: 1 });
-      expect(result.status, result.stderr).toBe(0);
-      expect(result.args).toEqual([await realpath(folder), "--mcp-config", mcpConfig, "--", prompt]);
-      expect(result.scriptLeft).toBe(false);
-    });
+    /** Run the script as Terminal would, minus the person's shell profile (-f instead of -l). */
+    const run = async (options: { prompt?: string; configured?: keyof typeof CONFIGURED; withClaude?: boolean; into?: string } = {}) => {
+      const configured = CONFIGURED[options.configured ?? "none"];
+      await rm(path.join(folder, ".mcp.json"), { force: true });
+      if (configured.mcpJson) await writeFile(path.join(folder, ".mcp.json"), JSON.stringify({ mcpServers: { sonobe: { command: "/bin/sh", args: ["-c", "echo not Sonobe"] } } }));
+      const script = path.join(dir, "run.command");
+      await writeFile(script, buildHandoffScript({ folder: options.into ?? folder, display: "~/code/placemark", prompt: options.prompt ?? PROMPTS[0]!, mcpConfig }), { mode: 0o700 });
+      const result = spawnSync("/bin/zsh", ["-f", script], {
+        encoding: "utf8",
+        env: { PATH: `${options.withClaude === false ? "" : `${bin}:`}/usr/bin:/bin`, OUT: out, MCP_GET: configured.out, MCP_EXIT: String(configured.exit), HOME: dir },
+      });
+      const got = await calls();
+      await rm(out, { force: true });
+      return { ...result, calls: got, scriptLeft: existsSync(script) };
+    };
 
-    it("uses the folder's own sonobe server when there is one", async () => {
-      const result = await run({ mcpExit: 0 });
-      expect(result.args).toEqual([await realpath(folder), "--", prompt]);
+    it("starts claude once, in the folder, with Sonobe's relay and the exact prompt, whatever sonobe server is configured", async () => {
+      const cwd = await realpath(folder);
+      for (const configured of Object.keys(CONFIGURED) as (keyof typeof CONFIGURED)[]) {
+        for (const prompt of PROMPTS) {
+          const result = await run({ prompt, configured });
+          const label = `${configured}: ${JSON.stringify(prompt)}`;
+          expect(result.status, `${label}\n${result.stderr}`).toBe(0);
+          // One call, the session: the script never asks `claude mcp get`, so a repo's own "sonobe" can't take the relay's place.
+          expect(result.calls, label).toEqual([[cwd, "--mcp-config", mcpConfig, "--", prompt]]);
+          expect(result.scriptLeft, label).toBe(false);
+        }
+      }
     });
 
     it("says how to install Claude Code when it isn't on the PATH", async () => {
       const result = await run({ withClaude: false });
       expect(result.status).toBe(1);
       expect(result.stdout).toBe("Claude Code isn't installed, or isn't on your PATH. Install it from https://claude.com/claude-code, then try Open in Claude Code again.\n");
-      expect(result.args).toBeNull();
+      expect(result.calls).toBeNull();
     });
 
     it("stops when the folder is gone", async () => {
       const result = await run({ into: path.join(dir, "gone") });
       expect(result.status).toBe(1);
       expect(result.stdout).toBe("Sonobe couldn't open ~/code/placemark. Check that it's still there, then try Open in Claude Code again.\n");
-      expect(result.args).toBeNull();
+      expect(result.calls).toBeNull();
       expect(result.scriptLeft).toBe(false);
     });
   });

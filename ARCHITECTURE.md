@@ -575,7 +575,7 @@ The web player (`apps/desktop/player`) runs the real engine and DOM renderer ful
 **Bring your own Claude subscription = MCP.**
 - Users connect Claude Desktop or Claude Code (signed in with their own plan) to Sonobe's MCP server.
 - Sonobe never offers claude.ai login, never reads Claude credentials, and never drives a user's subscription headlessly.
-- Open in Claude Code (the canvas's Design with Claude box) writes a one-time script and opens it in the person's Terminal: their own `claude`, in a folder they chose, with the prompt they wrote. They drive that session with their own plan; Sonobe doesn't run it headlessly or read its output or credentials. When no `sonobe` server is configured there, the script passes Sonobe's relay with `--mcp-config` for that session only.
+- Open in Claude Code (the canvas's Design with Claude box) writes a one-time script and opens it in the person's Terminal: their own `claude`, in a folder they chose, with the prompt they wrote. They drive that session with their own plan; Sonobe doesn't run it headlessly or read its output or credentials. The script passes Sonobe's relay as `sonobe` with `--mcp-config`, for that session only, so a server of that name in the folder's `.mcp.json` can't stand in for it.
 - An optional in-app assistant uses the user's own Anthropic API key only.
 - The in-app assistant reads a person's code only from a folder they link in a native dialog, kept in the app's data and never in the document, through three read-only tools of its own that aren't MCP tools (`list_code_files`, `search_code`, `read_code_file`). They stay inside that folder, skip hidden, secret and binary files, redact key-shaped text, and cap what one chat reads.
 
