@@ -109,6 +109,13 @@ describe("structuredContent carries the complete payload", () => {
     await call("rename", { updates: [{ id: "dot", name: "Dot Two" }] });
     await call("create_component", { name: "Badge Piece", layerIds: ["badge"] });
     await call("tidy_graph");
+    const knobs = await call("set_knobs", {
+      presets: [{ name: "Proposal" }, { name: "Shipped app", locked: true }],
+      knobs: [{ name: "Zoom Bounce", connect: ["zoom_spring.bounciness"], values: { "Shipped app": 3 } }],
+    });
+    expect(knobs.isError).not.toBe(true);
+    await call("get_knobs");
+    await call("apply_knob_preset", { preset: "Shipped app" });
     await call("import_design", {
       capture: {
         format: "sonobe.design-capture",
@@ -174,6 +181,8 @@ const FAILURES: { name: ToolName; args: Record<string, unknown>; code?: string }
   { name: "update_layers", args: { updates: [{ ids: ["nope"], props: { opacity: 1 } }] } },
   { name: "rename", args: { updates: [{ id: "nope", name: "Nope" }] } },
   { name: "tidy_graph", args: { component: "nope" } },
+  { name: "set_knobs", args: { knobs: [{ name: "Label", connect: ["zoomed.flip"] }] }, code: "invalid_knob" },
+  { name: "apply_knob_preset", args: { preset: "Nope" }, code: "unknown_knob_preset" },
 ];
 
 describe("teaching errors survive output-schema validation", () => {

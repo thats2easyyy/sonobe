@@ -20,6 +20,7 @@ import { createComponent } from "./createComponent.ts";
 import { checkOpFields } from "./fields.ts";
 import { setNodePositions } from "./graphNodes.ts";
 import { connect, disconnect, rename, setInput } from "./inputs.ts";
+import { addKnob, addKnobPreset, applyKnobPreset, removeKnob, removeKnobPreset, setKnobValue, updateKnob, updateKnobPreset } from "./knobs.ts";
 import { addLayer, moveLayer, removeLayer, updateLayer } from "./layers.ts";
 import { addPatch, removePatch, replacePatch, updatePatch } from "./patches.ts";
 import { addAsset, removeAsset, setProject, setScript } from "./project.ts";
@@ -52,6 +53,14 @@ const HANDLERS = {
   addAsset,
   removeAsset,
   setProject,
+  addKnob,
+  updateKnob,
+  removeKnob,
+  setKnobValue,
+  addKnobPreset,
+  updateKnobPreset,
+  removeKnobPreset,
+  applyKnobPreset,
 } satisfies Record<OpKind, Handler>;
 
 /** Every op kind applyOps understands. */
@@ -108,7 +117,7 @@ function inputRef(value: unknown): string | undefined {
   const raw = isLinkInput(value) ? value.link : isLayerInput(value) ? value.layer : undefined;
   if (typeof raw !== "string") return undefined;
   const m = /^@?\$([A-Za-z_][A-Za-z0-9_]*)(?:\.|$)/.exec(raw);
-  return m && m[1] !== "in" && m[1] !== "out" ? m[1] : undefined;
+  return m && m[1] !== "in" && m[1] !== "out" && m[1] !== "knob" ? m[1] : undefined;
 }
 
 /** An input value an item-creating op holds back until the item it names exists. */
@@ -214,7 +223,7 @@ export function applyOps(doc: SonobeDocument, ops: readonly Op[], options: Apply
         ctx.refs.set(name, ref.id);
         idMap[ref.given] = ref.id;
       }
-      for (const key of ["components", "layers", "patches"] as const) for (const id of ctx.affected[key]) affected[key].add(id);
+      for (const key of ["components", "layers", "patches", "knobs", "presets"] as const) for (const id of ctx.affected[key]) affected[key].add(id);
       inverses.push(outcome.inverse);
       applied.push(...appliedOps(outcome));
       return { outcome };
@@ -303,7 +312,13 @@ export function applyOps(doc: SonobeDocument, ops: readonly Op[], options: Apply
     errors,
     idMap,
     inverse: inverses.reverse().flat(),
-    affected: { components: sorted(affected.components), layers: sorted(affected.layers), patches: sorted(affected.patches) },
+    affected: {
+      components: sorted(affected.components),
+      layers: sorted(affected.layers),
+      patches: sorted(affected.patches),
+      ...(affected.knobs.size ? { knobs: sorted(affected.knobs) } : {}),
+      ...(affected.presets.size ? { presets: sorted(affected.presets) } : {}),
+    },
     applied,
   };
   if (options.dryRun) result.preview = ctx.doc;

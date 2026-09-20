@@ -7,8 +7,8 @@ import type { Id } from "./types.ts";
 
 export const ID_PATTERN = /^[A-Za-z_][A-Za-z0-9_]*$/;
 
-/** Address prefixes reserved for component published ports; never valid item ids. */
-export const RESERVED_IDS: readonly string[] = ["$in", "$out"];
+/** Address prefixes reserved for component published ports and knobs; never valid item ids or batch refs. */
+export const RESERVED_IDS: readonly string[] = ["$in", "$out", "$knob"];
 
 /**
  * Names that can't be map keys in plain objects: `out["__proto__"] = x` sets the prototype instead
@@ -89,7 +89,7 @@ export function uniqueId(base: Id, taken: TakenIds): Id {
   return `${stem}_${n}`;
 }
 
-/** True for a batch temp reference like "$card" (but not "$in" / "$out"). */
+/** True for a batch temp reference like "$card" (but not "$in", "$out" or "$knob"). */
 export function isRefToken(value: string): boolean {
   return value.length > 1 && value.startsWith("$") && ID_PATTERN.test(value.slice(1)) && !RESERVED_IDS.includes(value);
 }

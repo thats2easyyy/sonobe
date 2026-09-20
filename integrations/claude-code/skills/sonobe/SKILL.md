@@ -32,6 +32,7 @@ When they have an app or a design in code, start from it instead of drawing laye
   - `add_layers` for visuals.
   - `add_patches` with `connections` for logic. Give patches a `ref` and wire with `"$ref.port"` in the same call; refs work in any order, so loops fit in one call.
   - `set_values` to tune; `connect` for single wires; `apply_ops` for anything else, such as disconnects, components or moves.
+  - `set_knobs` for numbers the person will want to tune or compare: named knobs with ranges, and presets like a locked "Shipped app" next to "Proposal". Never put reference values in names (see the `knobs` guide).
 - Name things for people: layers by what they are ("Like Button"), patches by what they do ("Liked", "Press Spring").
 - Default to the ISAT chain: Interaction (tap or down) → Switch (remember) → Pop Animation or Classic Animation (move 0…1 smoothly) → Transition (0…1 into real units) → layer property.
   - `down` is a state that ends on release. Wire `tap` into a Switch when the change should stay.

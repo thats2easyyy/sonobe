@@ -7,6 +7,7 @@
  */
 
 import { parseAddress } from "../address.ts";
+import { effectiveKnobLiteral, formatKnobValue, getKnob } from "../knobs.ts";
 import { patchDisplayName } from "../names.ts";
 import { listInputs, targetAddress, type InputEntry } from "../ops/references.ts";
 import { findLayer, getPatchSpec, interfacePortToPort, resolveLayerOutputs, resolveLayerProps, resolveNodePorts, type ResolvedPort, type ResolvedPorts, type ResolvedProp } from "../registry.ts";
@@ -103,6 +104,8 @@ interface PatchCache {
   /** No patch loops and no whole-loop outputs: a node's loop flags depend only on the node itself. */
   loopFree: boolean;
   entries: Map<Id, PatchCacheEntry>;
+  /** The knob set the chips were drawn from. */
+  knobs: SonobeDocument["knobs"];
 }
 
 const patchCaches = new WeakMap<GraphModel, PatchCache>();
@@ -110,6 +113,16 @@ const patchCaches = new WeakMap<GraphModel, PatchCache>();
 const sameItems = <T>(a: readonly T[], b: readonly T[]) => a === b || (a.length === b.length && a.every((x, i) => x === b[i]));
 
 const issueCache = new WeakMap<Diagnostic, NodeIssue>();
+
+/** The chip for an input linked to "$knob.<id>": the knob's name and running value (K1). */
+function knobChip(doc: SonobeDocument, link: string): PortModel["knob"] {
+  const a = parseAddress(link);
+  if (a?.kind !== "knob") return undefined;
+  const knob = getKnob(doc.knobs, a.key);
+  if (!knob) return { id: a.key, name: a.key };
+  const value = effectiveKnobLiteral(doc.knobs!, knob.id);
+  return { id: knob.id, name: knob.name, ...(value !== undefined && value !== null ? { valueText: formatKnobValue(knob, value) } : {}) };
+}
 
 function toPortModel(port: ResolvedPort, side: PortSide, address: string, connected: boolean, defaultOverride?: unknown): PortModel {
   const model: PortModel = {
@@ -301,8 +314,8 @@ export function deriveGraph(options: DeriveGraphOptions): GraphModel {
 
   const previousCache = options.previous ? patchCaches.get(options.previous) : undefined;
   const loopFree = looped.size === 0 && !wholeLoopOutputs;
-  const cache: PatchCache = { registry, componentId, loopFree, entries: new Map() };
-  const reusable = !!previousCache && previousCache.loopFree && loopFree && previousCache.registry === registry && previousCache.componentId === componentId;
+  const cache: PatchCache = { registry, componentId, loopFree, entries: new Map(), knobs: doc.knobs };
+  const reusable = !!previousCache && previousCache.loopFree && loopFree && previousCache.registry === registry && previousCache.componentId === componentId && previousCache.knobs === doc.knobs;
 
   for (const [id, node] of Object.entries(component.patches)) {
     const rp = patchPorts.get(id);
@@ -340,6 +353,8 @@ export function deriveGraph(options: DeriveGraphOptions): GraphModel {
       const model = toPortModel(port, "in", `${id}.${port.key}`, connected, variantDefaults?.[port.key]);
       if (connected) model.link = stripIndex(value.link);
       else if (value !== undefined) model.literal = value;
+      const chip = connected ? knobChip(doc, value.link) : undefined;
+      if (chip) model.knob = chip;
       if (isLayerInput(value)) layerRef ??= value.layer;
       if (inputFeedsLoop(id, port.key, value ?? null)) model.loop = true;
       const issue = portIssue(port.key);
@@ -490,6 +505,8 @@ export function deriveGraph(options: DeriveGraphOptions): GraphModel {
         const value = info.layer.props[p.key];
         const model = toPortModel(p, "in", `@${layerId}.${p.key}`, true);
         if (isLinkInput(value)) model.link = stripIndex(value.link);
+        const chip = isLinkInput(value) ? knobChip(doc, value.link) : undefined;
+        if (chip) model.knob = chip;
         return model;
       });
     // Undriven targets after the driven ones, in the order they were asked for.

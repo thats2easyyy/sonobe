@@ -33,6 +33,8 @@ export interface Expectation {
 
 export interface Scenario {
   name: string;
+  /** Knob preset (id or name) the simulation runs; default: the document's running preset. */
+  preset?: string;
   /** Simulated input with the same shapes as sim_dispatch; atMs counts from the scenario start. */
   events: SimEvent[];
   /** How long to simulate, in milliseconds. */
@@ -117,7 +119,10 @@ export function parseExampleTest(json: unknown, source = "test.json"): ExampleTe
     if (!events.ok) fail(`${where}.events: ${events.message}`);
     if (!Array.isArray(s.expect) || !s.expect.length) fail(`${where}.expect must list at least one expectation.`);
     const expect = (s.expect as unknown[]).map((e, j) => parseExpectation(e, `${where}.expect[${j}]`, fail));
-    return { name: s.name as string, events: (events as { events: SimEvent[] }).events, durationMs: s.durationMs as number, expect };
+    if (s.preset !== undefined && (typeof s.preset !== "string" || !s.preset.trim())) fail(`${where}.preset must name a knob preset, like "Shipped app".`);
+    const scenario: Scenario = { name: s.name as string, events: (events as { events: SimEvent[] }).events, durationMs: s.durationMs as number, expect };
+    if (typeof s.preset === "string") scenario.preset = s.preset;
+    return scenario;
   });
   return { description: description as string, scenarios: parsed };
 }
@@ -306,7 +311,7 @@ export function segmentEvents(events: readonly SimEvent[], durationMs: number, f
 
 /** Run one scenario on a fresh simulation of `docId`, tracing segment by segment. */
 export async function runScenario(host: SonobeHost, docId: string, scenario: Scenario): Promise<ScenarioReport> {
-  const state = await host.sim.reset({ docId });
+  const state = await host.sim.reset({ docId, ...(scenario.preset !== undefined ? { preset: scenario.preset } : {}) });
   const frameMs = 1000 / state.fps;
   const targets = [...new Set(scenario.expect.map((e) => e.target))];
   const times: number[] = [];
