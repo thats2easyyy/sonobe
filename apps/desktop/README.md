@@ -29,7 +29,7 @@ Run these from the repository root with `-w @sonobe/desktop`, or from this folde
 | `npm test` | Unit and integration tests (`electron/**/*.test.ts`) |
 | `npm run smoke` | Muted end-to-end Electron run: host API, MCP loop, phone preview, pop-out viewer |
 | `npm run smoke:import` | Muted design import run against a local dev server: `import_design` by URL and HTML, the Import dialog bridge, and pasting a capture (build the editor and shell first) |
-| `npm run smoke:drafts` | Muted run that kills the app with SIGTERM and SIGKILL, crashes its renderer, and recovers the unsaved work each time; then `save_document({ path })` and Don't Save (build the editor and shell first) |
+| `npm run smoke:drafts` | Muted run that kills the app with SIGTERM and SIGKILL, crashes its renderer, and recovers the unsaved work each time (once by opening the draft's folder, as Finder would); then `save_document({ path })` and Don't Save (build the editor and shell first) |
 | `npm run icons` | Rasterizes `assets/brand/sonobe-mark.svg` into `build/icon.icns`, `icon.ico`, `icons/` |
 | `npm run package` | Unsigned local build: editor, bundles, icons, then electron-builder into `release/` |
 | `npm run package:verify` | Launches the packaged app muted and checks `/health`, the editor, and the CLI (`--dmg` checks the app inside the DMG) |

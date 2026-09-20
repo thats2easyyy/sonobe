@@ -1,5 +1,5 @@
 import { existsSync } from "node:fs";
-import { chmod, mkdir, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readdir, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -164,6 +164,24 @@ describe("draft store", () => {
       await chmod(path.join(folder, "draft.json"), 0o644);
       await chmod(path.join(folder, "project.json"), 0o644);
     }
+  });
+
+  it("tells its own draft folders from projects", async () => {
+    await store.write(WINDOW, ID, { files }, meta());
+    const folder = path.join(dir, `${ID}.sonobe`);
+    expect(await store.idAt(folder)).toBe(ID);
+    expect(await store.idAt(`${folder}/`)).toBe(ID);
+    // Not written yet, but a folder this store would take for a draft (a Save As into Drafts).
+    expect(await store.idAt(path.join(dir, "Mockups1.sonobe"))).toBe("Mockups1");
+    const link = path.join(path.dirname(dir), "linked");
+    await symlink(dir, link);
+    expect(await store.idAt(path.join(link, `${ID}.sonobe`))).toBe(ID);
+
+    expect(await store.idAt(path.join(dir, "My Mockups.sonobe"))).toBeNull();
+    expect(await store.idAt(path.join(folder, "components"))).toBeNull();
+    expect(await store.idAt(path.join(path.dirname(dir), `${ID}.sonobe`))).toBeNull();
+    expect(await store.idAt(path.join(dir, ID))).toBeNull();
+    expect(await store.idAt(`Drafts/${ID}.sonobe`)).toBeNull();
   });
 
   it("removes a draft, discards a closing window's drafts, and prunes empty and old ones at launch", async () => {
