@@ -207,11 +207,18 @@ export function attachViewerHologram(session: EditorSession, content: HTMLElemen
     canvas.style.opacity = String(Math.max(0, frame.alpha * fade));
     if (!rect || width <= 0 || height <= 0) return;
     ctx.setTransform(bw / width, 0, 0, bh / height, (bw / width) * bleed * scale, (bh / height) * bleed * scale);
-    // A screen edge on the device's edge reaches into the bleed.
-    const left = rect.x <= 0.5 ? -bleed : rect.x;
-    const top = rect.y <= 0.5 ? -bleed : rect.y;
-    const right = rect.x + rect.width >= screenWidth - 0.5 ? screenWidth + bleed : rect.x + rect.width;
-    const bottom = rect.y + rect.height >= screenHeight - 0.5 ? screenHeight + bleed : rect.y + rect.height;
+    // A screen edge on the device's edge reaches into the bleed; the rest of the screen stays on the device.
+    const clampX = (x: number) => Math.min(screenWidth + bleed, Math.max(-bleed, x));
+    const clampY = (y: number) => Math.min(screenHeight + bleed, Math.max(-bleed, y));
+    const left = rect.x <= 0.5 ? -bleed : clampX(rect.x);
+    const top = rect.y <= 0.5 ? -bleed : clampY(rect.y);
+    const right = rect.x + rect.width >= screenWidth - 0.5 ? screenWidth + bleed : clampX(rect.x + rect.width);
+    const bottom = rect.y + rect.height >= screenHeight - 0.5 ? screenHeight + bleed : clampY(rect.y + rect.height);
+    // A screen the prototype draws beside the device, not on it: nothing here to cover.
+    if (right - left <= 0 || bottom - top <= 0) {
+      if (canvas.style.background) canvas.style.background = "";
+      return;
+    }
     const veil = { x: left * scale, y: top * scale, width: (right - left) * scale, height: (bottom - top) * scale };
     const fills = left < 0 && top < 0 && right > screenWidth && bottom > screenHeight;
     const square = p.plan.radii.every((r) => r <= 0);
@@ -233,21 +240,43 @@ export function attachViewerHologram(session: EditorSession, content: HTMLElemen
   // which the runtime's frames draw with, and the phase would flicker back at its edges.
   const loop = () => {
     raf = 0;
-    draw(performance.now());
+    guard(() => draw(performance.now()))();
     if (playing) raf = requestAnimationFrame(loop);
   };
 
-  const unsubscribeStore = store.subscribe(sync);
+  // The hologram only decorates: a drawing error ends it here, never in the change or frame that ran it
+  // (a store update inside Claude's import, the runtime's frame loop).
+  let failed = false;
+  const guard = (fn: () => void) => () => {
+    if (failed) return;
+    try {
+      fn();
+    } catch {
+      failed = true;
+      const p = playing;
+      playing = null;
+      unmount();
+      if (p) finishedNonce = p.nonce;
+      try {
+        if (p?.leads) store.getState().stop(p.nonce);
+      } finally {
+        failed = false;
+      }
+    }
+  };
+  const unsubscribeStore = store.subscribe(guard(sync));
   // Until the prototype draws the screen, each of its frames checks: the veil goes up in the frame the
   // screen first appears, and a Viewer playing alone plans the wireframe from it. Then the animation
   // frames draw alone.
-  const unsubscribeFrame = session.runtime.subscribeFrame(() => {
-    const p = playing;
-    if (!p || p.seen) return;
-    if (p.waiting) sync();
-    else draw(performance.now());
-  });
-  sync();
+  const unsubscribeFrame = session.runtime.subscribeFrame(
+    guard(() => {
+      const p = playing;
+      if (!p || p.seen) return;
+      if (p.waiting) sync();
+      else draw(performance.now());
+    }),
+  );
+  guard(sync)();
   return () => {
     unsubscribeStore();
     unsubscribeFrame();

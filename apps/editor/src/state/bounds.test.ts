@@ -31,6 +31,34 @@ describe("bounds registry", () => {
     expect(await registry.measure("graph.bounds")).toEqual({ x: 1, y: 2, width: 0, height: 4 });
   });
 
+  it("measures once every settler lets the surface settle, and the viewer's own capture can wait too", async () => {
+    const registry = createBoundsRegistry();
+    const order: string[] = [];
+    registry.register("canvas.bounds", () => (order.push("measured"), { x: 0, y: 0, width: 10, height: 10 }));
+    let release!: () => void;
+    const remove = registry.addSettler(async (target) => {
+      order.push(`settling ${target}`);
+      await new Promise<void>((resolve) => (release = resolve));
+    });
+    const measuring = registry.measure("canvas.bounds");
+    await Promise.resolve();
+    expect(order).toEqual(["settling canvas.bounds"]);
+    release();
+    expect(await measuring).toEqual({ x: 0, y: 0, width: 10, height: 10 });
+    expect(order).toEqual(["settling canvas.bounds", "measured"]);
+
+    const settling = registry.settle("viewer.bounds");
+    await Promise.resolve();
+    release();
+    await settling;
+    expect(order.at(-1)).toBe("settling viewer.bounds");
+    // A method nobody provides doesn't wait; a removed settler doesn't either.
+    expect(await registry.measure("graph.bounds")).toBeNull();
+    remove();
+    await registry.measure("canvas.bounds");
+    expect(order.filter((o) => o.startsWith("settling"))).toHaveLength(2);
+  });
+
   it("measures elements", () => {
     const el = { isConnected: true, getBoundingClientRect: () => ({ left: 10, top: 20, width: 300, height: 200 }) } as unknown as Element;
     expect(rectOfElement(el, 1.5)).toEqual({ x: 10, y: 20, width: 300, height: 200, scale: 1.5 });

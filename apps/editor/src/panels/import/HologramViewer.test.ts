@@ -18,9 +18,13 @@ let frameId = 0;
 /** Every call the veil's 2D context took, by name. */
 let calls: string[] = [];
 
-/** A 2D context that takes every call: happy-dom has no canvas. */
+/** A 2D context that takes every call: happy-dom has no canvas. Its gradients refuse stops outside 0–1, as a real canvas does. */
 const fakeContext = () => {
-  const gradient = { addColorStop: () => undefined };
+  const gradient = {
+    addColorStop: (offset: number) => {
+      if (!(offset >= 0 && offset <= 1)) throw new RangeError(`The provided value (${offset}) is outside the range (0.0, 1.0).`);
+    },
+  };
   return new Proxy({} as Record<string | symbol, unknown>, {
     get: (target, key) => (key in target ? target[key] : () => (calls.push(String(key)), gradient)),
     set: (target, key, value) => ((target[key] = value), true),
@@ -234,6 +238,24 @@ describe("the Viewer's hologram", () => {
     detach = null;
     expect(veil()).toBeNull();
     expect(store.getState().show).toBeNull();
+  });
+
+  it("covers nothing, and never throws, for a screen the prototype draws beside the device", () => {
+    const device = content.parentElement!;
+    Object.defineProperty(device, "clientWidth", { value: 402 });
+    Object.defineProperty(device, "clientHeight", { value: 874 });
+    device.getBoundingClientRect = () => ({ x: 0, y: 0, left: 0, top: 0, right: 402, bottom: 874, width: 402, height: 874, toJSON: () => ({}) }) as DOMRect;
+    const ops: Op[] = [{ op: "addLayer", component: root(), layer: { id: "beside", type: "group", name: "Beside", props: { position: [640, 0], size: [402, 874] }, children: [{ type: "rectangle", name: "Header", props: { position: [0, 0], size: [402, 120] } }] } }];
+    expect(session.document.getState().apply(ops, { label: "Import “Beside”", source: "import" }).ok).toBe(true);
+    scheduler.frames(2);
+    attach();
+    const store = hologramStore(session);
+    expect(() => store.getState().build({ componentId: root(), screenId: "beside" })).not.toThrow();
+    const show = store.getState().show!;
+    calls = [];
+    for (const ms of [show.plan.timeline.downStart + 100, show.plan.timeline.upStart + 100, show.plan.timeline.upEnd + 10]) expect(() => drawAt(ms, show.start)).not.toThrow();
+    // The device shows none of the screen: no veil, laser or bloom.
+    expect(calls).not.toContain("fillRect");
   });
 });
 

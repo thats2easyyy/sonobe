@@ -250,6 +250,8 @@ export function drawRain(ctx: CanvasRenderingContext2D, r: Rect, seconds: number
  * fringe, the bright core reaching a little past the frame, and emitter flares at both ends.
  */
 export function drawLaser(ctx: CanvasRenderingContext2D, r: Rect, y: number, direction: 1 | -1, c: HoloColors, options: { sheet?: boolean; intensity?: number } = {}): void {
+  // Its gradient stops come from the rect's size: an empty rect has no laser.
+  if (!(r.width > 0) || !(r.height > 0)) return;
   const k = options.intensity ?? 1;
   const ext = Math.min(12, Math.max(4, r.width * 0.05));
   const left = r.x - ext;
@@ -518,7 +520,7 @@ export function roundedRect(ctx: CanvasPath, r: Rect, radii: number | Radii): vo
  * it just revealed. `glow` (0–1) scales it.
  */
 export function drawBloom(ctx: CanvasRenderingContext2D, r: Rect, c: HoloColors, glow: number, radii: number | Radii = 0): void {
-  if (glow <= 0) return;
+  if (glow <= 0 || !(r.width > 0) || !(r.height > 0)) return;
   const reach = bloomReach(r.width, r.height);
   const gap = bloomGap(r.width, r.height);
   const peak = gap * (BLOOM.peak / BLOOM.gap);

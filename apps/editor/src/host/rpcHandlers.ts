@@ -391,7 +391,8 @@ export function registerRpcHandlers(session: EditorSession, options: RpcHandlerO
       return { component: currentComponentId(s), componentPath: s.componentPath, layers: s.layers, patches: s.patches, comments: s.comments, focusedPanel: s.focusedPanel, hovered: s.hovered, theme };
     },
 
-    "viewer.bounds": () => {
+    "viewer.bounds": async () => {
+      await (session.bounds as Partial<EditorSession["bounds"]> | undefined)?.settle?.("viewer.bounds");
       const bounds = session.runtime.viewerBounds();
       if (!bounds) throw new RpcProblem("no_viewer", "The viewer isn't showing, so there's nothing to capture.", { hint: "Show the Viewer panel (⌘2) and try again." });
       return bounds;

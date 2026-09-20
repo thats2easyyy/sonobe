@@ -339,6 +339,12 @@
   font-weight: var(--font-weight-medium);
   line-height: 1.35;
   text-wrap: pretty;
+  /* "Loading <address>": long addresses break anywhere and stop at three lines. */
+  display: -webkit-box;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
 }
 
 .sb-import__scan-meta {

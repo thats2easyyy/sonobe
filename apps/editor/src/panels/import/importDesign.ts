@@ -187,8 +187,13 @@ export async function importCapture(session: EditorSession, capture: DesignCaptu
   const screenId = result.idMap[plan.screenRef] ?? result.idMap[`$${plan.screenRef}`];
   if (screenId) {
     session.selection.getState().select({ layers: [screenId] });
-    // The canvas builds the new screen as a hologram (the dialog, pasted captures).
-    hologramStore(session).getState().build({ componentId, screenId });
+    // The canvas builds the new screen as a hologram (the dialog, pasted captures). The import has
+    // landed either way, so a failing build animation mustn't turn it into an error.
+    try {
+      hologramStore(session).getState().build({ componentId, screenId });
+    } catch {
+      // Only the animation is lost.
+    }
   }
   return { ok: true, ...(screenId ? { screenId } : {}), screenName: plan.screenName, summary: plan.summary, notes: plan.notes };
 }
