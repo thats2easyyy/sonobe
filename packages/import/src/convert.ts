@@ -280,9 +280,9 @@ export async function planImport(capture: DesignCapture, doc: SonobeDocument, im
     };
     visitNew(screen);
     // A new layer derives its id while the tree is built, so it could take a kept id before the layer
-    // keeping it is reached. Name every new layer up front instead, against the ids in use.
-    const taken = new Set([...componentItemIds(target)].filter((id) => !oldIds.has(id)));
-    for (const id of newIds) taken.add(id);
+    // keeping it is reached. Name every new layer up front instead, against the ids in use. That includes
+    // the old screen's ids nothing kept: a layer not found again doesn't take one without its connections.
+    const taken = componentItemIds(target);
     // Where each connection the new screen can't keep was stored ("@card_1_address.text", "tap_like.layer").
     const lost: string[] = [];
     const claim = (l: NewLayer) => {

@@ -311,6 +311,28 @@ describe("re-import edge cases", () => {
     expect(again.notes.join(" ")).toContain("1 connection to layers the new screen doesn't have was removed: @open_until_9_pm.text.");
   });
 
+  it("doesn't give a layer that moved to another parent its old id without its connections", async () => {
+    const shop = (parent: string) =>
+      capture({ name: "Shop", children: [{ kind: "frame", name: parent, nameRank: 5, box: [0, 0, 402, 200], fill: "#EEEEEEFF", children: [{ kind: "frame", name: "Buy Button", nameRank: 5, box: [16, 100, 120, 44], fill: "#0A84FFFF", children: [] }] }] });
+    const first = await imported(shop("Card"));
+    const wired = applyOps(first.doc, [
+      { op: "addPatch", patch: { ref: "tap", type: "interaction", name: "Tap Buy", inputs: { layer: { layer: "buy_button" } } } },
+      { op: "addPatch", patch: { ref: "grow", type: "transition", name: "Buy Scale", typeParam: "number", inputs: { start: 1, end: 1.1 } } },
+      { op: "connect", from: "$grow.output", to: "@buy_button.scale" },
+    ], { registry });
+    expect(wired.errors).toEqual([]);
+    // The button moved into a footer, so it isn't found at its name path.
+    const again = await planImport(shop("Footer"), wired.doc, new Map(), { replace: "shop" });
+    const result = applyOps(wired.doc, again.ops, { registry });
+    expect(result.errors).toEqual([]);
+    const main = result.doc.components.main!;
+    // The address the note calls gone really is gone, instead of naming a new layer that lost its wiring.
+    expect(findLayer(main.layers, "buy_button")).toBeUndefined();
+    expect(findLayer(main.layers, "buy_button_2")!.layer.props.scale).toBeUndefined();
+    expect(again.summary.lostConnections).toBe(2);
+    expect(again.notes.join(" ")).toContain("removed: tap_buy.layer, @buy_button.scale.");
+  });
+
   it("gives new layers ids that aren't retired this session", async () => {
     const first = await imported(screen(["A", "B"]));
     const ids = createIdLedger(first.doc);
