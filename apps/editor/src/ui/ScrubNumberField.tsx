@@ -26,6 +26,8 @@ export interface ScrubNumberFieldProps {
   scale?: number;
   min?: number;
   max?: number;
+  /** min and max bound scrubbing and arrows only: a typed value may go past them (knobs' soft ranges). */
+  softRange?: boolean;
   /** Base step in value units for arrows (±1×, Shift ±10×, Alt ±0.1×) and scrubbing. */
   step?: number;
   /** Max decimals shown. */
@@ -86,6 +88,7 @@ export function ScrubNumberField({
   scale = 1,
   min,
   max,
+  softRange = false,
   step = 1,
   precision = 3,
   pixelsPerStep = 2,
@@ -164,7 +167,8 @@ export function ScrubNumberField({
     setDraft(null);
     const parsed = parseNumberInput(current);
     if (parsed === null) return;
-    const next = clamp(roundTo(parsed / scale, MAX_DECIMALS), { min, max });
+    const rounded = roundTo(parsed / scale, MAX_DECIMALS);
+    const next = softRange ? rounded : clamp(rounded, { min, max });
     if (mixed || next !== value) {
       onChange?.(next, { source: "input", delta: next - value });
       onCommit?.(next);
@@ -179,7 +183,9 @@ export function ScrubNumberField({
       event.preventDefault();
       const typed = draftRef.current !== null ? parseNumberInput(draftRef.current) : null;
       const current = typed !== null ? typed / scale : mixed ? 0 : value;
-      const next = nudgeValue(current, event.key === "ArrowUp" ? 1 : -1, { step, min, max, modifiers: event });
+      // A value typed past a soft range nudges from where it is instead of jumping back inside.
+      const outside = softRange && ((min !== undefined && current < min) || (max !== undefined && current > max));
+      const next = nudgeValue(current, event.key === "ArrowUp" ? 1 : -1, { step, ...(outside ? {} : { min, max }), modifiers: event });
       onChange?.(next, { source: "keyboard", delta: next - current });
       onCommit?.(next);
       setDraft(null);

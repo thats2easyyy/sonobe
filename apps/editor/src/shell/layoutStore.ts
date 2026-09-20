@@ -1,6 +1,6 @@
 /**
- * Shell layout state: panel sizes, collapsed panels, view mode, split direction, drawers, and the
- * HUD tab. Persisted to localStorage (debounced; storage failures are ignored).
+ * Shell layout state: panel sizes, collapsed panels, view mode, split direction, drawers, the HUD
+ * tab, and the Inspector tab. Persisted to localStorage (debounced; storage failures are ignored).
  */
 
 import { useStore } from "zustand";
@@ -12,6 +12,8 @@ export type ViewMode = "canvas" | "split" | "patches";
 export type SplitDirection = "rows" | "columns";
 export type DrawerId = "learn";
 export type HudTab = "console" | "diagnostics" | "ai" | "performance";
+/** The Inspector shows the selection's properties, or the project's knobs (it stays there as the selection changes). */
+export type InspectorTab = "properties" | "knobs";
 export type CollapsiblePanel = "layers" | "viewer" | "inspector" | "hud";
 export type SizedPanel = "layers" | "viewer" | "inspector" | "hud" | "drawer";
 
@@ -24,6 +26,7 @@ export interface LayoutState {
   splitDirection: SplitDirection;
   drawer: DrawerId | null;
   hudTab: HudTab;
+  inspectorTab: InspectorTab;
 }
 
 export interface LayoutActions {
@@ -35,6 +38,7 @@ export interface LayoutActions {
   setDrawer: (drawer: DrawerId | null) => void;
   toggleDrawer: (drawer: DrawerId) => void;
   setHudTab: (tab: HudTab) => void;
+  setInspectorTab: (tab: InspectorTab) => void;
   reset: () => void;
 }
 
@@ -61,11 +65,13 @@ export const DEFAULT_LAYOUT: LayoutState = {
   splitDirection: "rows",
   drawer: null,
   hudTab: "console",
+  inspectorTab: "properties",
 };
 
 const VIEW_MODES: readonly ViewMode[] = ["canvas", "split", "patches"];
 const DRAWERS: readonly DrawerId[] = ["learn"];
 const HUD_TABS: readonly HudTab[] = ["console", "diagnostics", "ai", "performance"];
+const INSPECTOR_TABS: readonly InspectorTab[] = ["properties", "knobs"];
 
 const clampRange = (value: number, [lo, hi]: readonly [number, number]) => Math.min(hi, Math.max(lo, value));
 
@@ -93,12 +99,13 @@ export function sanitizeLayout(input: unknown): LayoutState {
     splitDirection: src.splitDirection === "columns" ? "columns" : "rows",
     drawer: DRAWERS.includes(src.drawer as DrawerId) ? (src.drawer as DrawerId) : null,
     hudTab: HUD_TABS.includes(src.hudTab as HudTab) ? (src.hudTab as HudTab) : DEFAULT_LAYOUT.hudTab,
+    inspectorTab: INSPECTOR_TABS.includes(src.inspectorTab as InspectorTab) ? (src.inspectorTab as InspectorTab) : DEFAULT_LAYOUT.inspectorTab,
   };
 }
 
 export function pickLayout(state: LayoutState): LayoutState {
-  const { sizes, split, collapsed, viewMode, splitDirection, drawer, hudTab } = state;
-  return { sizes, split, collapsed, viewMode, splitDirection, drawer, hudTab };
+  const { sizes, split, collapsed, viewMode, splitDirection, drawer, hudTab, inspectorTab } = state;
+  return { sizes, split, collapsed, viewMode, splitDirection, drawer, hudTab, inspectorTab };
 }
 
 export interface LayoutStoreOptions {
@@ -124,6 +131,7 @@ export function createLayoutStore(options: LayoutStoreOptions = {}): StoreApi<La
     setDrawer: (drawer) => set({ drawer }),
     toggleDrawer: (drawer) => set((s) => ({ drawer: s.drawer === drawer ? null : drawer })),
     setHudTab: (hudTab) => set((s) => ({ hudTab, collapsed: s.collapsed.hud ? { ...s.collapsed, hud: false } : s.collapsed })),
+    setInspectorTab: (inspectorTab) => set((s) => (s.inspectorTab === inspectorTab ? s : { inspectorTab })),
     reset: () => set({ ...DEFAULT_LAYOUT }),
   }));
   if (key) {

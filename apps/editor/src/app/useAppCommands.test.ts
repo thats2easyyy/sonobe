@@ -41,13 +41,46 @@ describe("appCommands", () => {
 
   it("keeps menu aliases out of the palette, listing patch editor aliases only while the patch editor isn't mounted", () => {
     const visible = () => registry.available().map((c) => c.id);
-    expect(visible()).toEqual(["file.new", "file.importDesign", "file.close", "app.settings", "layer.insert", "patch.insert", "patch.tidyUp", "patch.commentAroundSelection", "viewer.fullscreen", "ai.connectClaude", "help.lessons", "help.patchReference", "help.welcome", "help.reportIssue", "help.about", "help.shortcuts"]);
+    expect(visible()).toEqual(["file.new", "file.importDesign", "file.close", "app.settings", "layer.insert", "patch.insert", "patch.tidyUp", "patch.commentAroundSelection", "viewer.fullscreen", "view.showKnobs", "knobs.newKnob", "knobs.newPreset", "ai.connectClaude", "help.lessons", "help.patchReference", "help.welcome", "help.reportIssue", "help.about", "help.shortcuts"]);
     expect(registry.get("patch.alignRight")).toMatchObject({ title: "Align Right Edges", category: "Patches", disabledReason: "Select 2 or more patches" });
     session.selection.getState().select({ patches: ["tap_photo", "zoomed"] });
     expect(visible()).toContain("patch.alignBottom");
     // Once the patch editor registers its own commands (with shortcuts), each align command is listed once.
     for (const id of ["insertPatch", "tidyUp", "commentSelection", "alignLeft", "alignRight", "alignTop", "alignBottom"]) registry.register({ id: `patchEditor.${id}`, title: id, run: () => undefined });
     expect(visible().filter((id) => id.startsWith("patch."))).toEqual([]);
+  });
+
+  it("shows the Knobs tab, and flips between the running preset and the one before it as one undo step", () => {
+    layoutStore.getState().toggleCollapsed("inspector", true);
+    registry.run("view.showKnobs");
+    expect(layoutStore.getState()).toMatchObject({ inspectorTab: "knobs", collapsed: expect.objectContaining({ inspector: false }) });
+
+    expect(registry.isEnabled("knobs.flipPresets")).toBe(false);
+    const doc = session.document.getState();
+    expect(
+      doc.apply(
+        [
+          { op: "addKnobPreset", preset: { id: "proposal", name: "Proposal" } },
+          { op: "addKnobPreset", preset: { id: "shipped", name: "Shipped app" } },
+          { op: "addKnob", knob: { id: "gap", name: "Gap", type: "number", value: 8 } },
+          { op: "addKnobPreset", preset: { id: "wild", name: "Wild" } },
+        ],
+        { label: "Knobs" },
+      ).ok,
+    ).toBe(true);
+    const active = () => session.document.getState().doc.knobs?.active;
+    expect(active()).toBe("proposal");
+    expect(registry.isEnabled("knobs.flipPresets")).toBe(true);
+    // No preset ran before: Flip goes to the next one in order, then back and forth.
+    registry.run("knobs.flipPresets");
+    expect(active()).toBe("shipped");
+    registry.run("knobs.flipPresets");
+    expect(active()).toBe("proposal");
+    registry.run("knobs.flipPresets");
+    expect(active()).toBe("shipped");
+    expect(session.document.getState().historyEntries().map((e) => e.label)).toEqual(["Switch Presets", "Knobs"]);
+    session.document.getState().undo();
+    expect(active()).toBe("proposal");
   });
 
   it("registers a command for every desktop menu item that had none", () => {

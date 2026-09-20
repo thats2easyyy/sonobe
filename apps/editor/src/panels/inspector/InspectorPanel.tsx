@@ -1,13 +1,16 @@
 import { allLayers, isJsonLiteral, zeroLiteral, type Component as SonobeComponent, type InputValue, type InterfacePort, type Op } from "@sonobe/core";
 import { Component, MousePointerClick, PanelRightClose, StickyNote, X } from "lucide-react";
 import { useState } from "react";
+import { KnobsPanel } from "../knobs/KnobsPanel.tsx";
 import { unpublishOps, updatePublishedOps, type PublishSide } from "../patch-editor/model/publish.ts";
+import { layoutStore, useLayout, type InspectorTab } from "../../shell/layoutStore.ts";
 import { Panel } from "../../shell/Panel.tsx";
-import { useCurrentComponent, useEditorSession, useSelection } from "../../state/EditorProvider.tsx";
+import { useCurrentComponent, useDocument, useEditorSession, useSelection } from "../../state/EditorProvider.tsx";
 import { EmptyState } from "../../ui/EmptyState.tsx";
 import { IconButton } from "../../ui/IconButton.tsx";
 import { PortGlyph, VALUE_TYPE_LABELS } from "../../ui/PortGlyph.tsx";
 import { SegmentedControl } from "../../ui/SegmentedControl.tsx";
+import { TabPanel, Tabs } from "../../ui/Tabs.tsx";
 import { TextArea, TextField } from "../../ui/TextField.tsx";
 import { cx } from "../../ui/lib/cx.ts";
 import { ValueControl, type FieldActions } from "./controls.tsx";
@@ -27,11 +30,14 @@ export interface InspectorPanelProps {
 
 type View = "layers" | "patches";
 
+const TABS_ID = "sb-insp-tabs";
+
 /**
  * The Inspector: properties of the selected layers or patches in the current component, generated
  * from their declarations. Layers get sections by category with advanced rows behind "More";
  * patches get docs, options, spring presets with a curve and handoff code, inputs, and live
- * outputs. Nothing selected shows the component's summary and notes.
+ * outputs. Nothing selected shows the component's summary and notes. The Knobs tab shows the
+ * project's knobs and presets, and stays put as the selection changes.
  */
 export function InspectorPanel({ onCollapse, onLearnMore, className }: InspectorPanelProps) {
   const session = useEditorSession();
@@ -39,6 +45,8 @@ export function InspectorPanel({ onCollapse, onLearnMore, className }: Inspector
   const patches = useSelection((s) => s.patches);
   const comments = useSelection((s) => s.comments);
   const [view, setView] = useState<View>("layers");
+  const tab = useLayout((s) => s.inspectorTab);
+  const knobCount = useDocument((s) => s.doc.knobs?.knobs.length ?? 0);
   const both = layers.length > 0 && patches.length > 0;
   const mode: View | "none" = both ? view : layers.length > 0 ? "layers" : patches.length > 0 ? "patches" : "none";
 
@@ -47,28 +55,47 @@ export function InspectorPanel({ onCollapse, onLearnMore, className }: Inspector
       title="Inspector"
       scope="inspector"
       className={cx("sb-insp-panel", className)}
+      headerContent={
+        <Tabs<InspectorTab>
+          size="sm"
+          idBase={TABS_ID}
+          aria-label="Inspector"
+          value={tab}
+          onChange={(next) => layoutStore.getState().setInspectorTab(next)}
+          items={[
+            { value: "properties", label: "Properties" },
+            { value: "knobs", label: "Knobs", ...(knobCount ? { badge: knobCount } : {}) },
+          ]}
+        />
+      }
       actions={onCollapse && <IconButton size="sm" icon={<PanelRightClose size={14} />} label="Hide inspector" shortcut="Mod+7" onClick={onCollapse} />}
     >
-      <div className="sb-insp sb-scroll" onFocusCapture={() => session.selection.getState().setFocusedPanel("inspector")}>
-        {both && (
-          <div className="sb-insp-view">
-            <SegmentedControl
-              size="sm"
-              fullWidth
-              aria-label="Show properties of"
-              value={view}
-              onChange={setView}
-              options={[
-                { value: "layers", label: `${layers.length} ${layers.length === 1 ? "Layer" : "Layers"}` },
-                { value: "patches", label: `${patches.length} ${patches.length === 1 ? "Patch" : "Patches"}` },
-              ]}
-            />
-          </div>
-        )}
-        {mode === "layers" && <LayerInspector key={layers.join(",")} layerIds={layers} />}
-        {mode === "patches" && <PatchInspector key={patches.join(",")} patchIds={patches} {...(onLearnMore ? { onLearnMore } : {})} />}
-        {mode === "none" && <EmptyInspector commentCount={comments.length} />}
-      </div>
+      {tab === "knobs" ? (
+        <TabPanel idBase={TABS_ID} value="knobs" active className="sb-insp sb-scroll">
+          <KnobsPanel />
+        </TabPanel>
+      ) : (
+        <div className="sb-insp sb-scroll" role="tabpanel" id={`${TABS_ID}-panel-properties`} aria-labelledby={`${TABS_ID}-tab-properties`} onFocusCapture={() => session.selection.getState().setFocusedPanel("inspector")}>
+          {both && (
+            <div className="sb-insp-view">
+              <SegmentedControl
+                size="sm"
+                fullWidth
+                aria-label="Show properties of"
+                value={view}
+                onChange={setView}
+                options={[
+                  { value: "layers", label: `${layers.length} ${layers.length === 1 ? "Layer" : "Layers"}` },
+                  { value: "patches", label: `${patches.length} ${patches.length === 1 ? "Patch" : "Patches"}` },
+                ]}
+              />
+            </div>
+          )}
+          {mode === "layers" && <LayerInspector key={layers.join(",")} layerIds={layers} />}
+          {mode === "patches" && <PatchInspector key={patches.join(",")} patchIds={patches} {...(onLearnMore ? { onLearnMore } : {})} />}
+          {mode === "none" && <EmptyInspector commentCount={comments.length} />}
+        </div>
+      )}
     </Panel>
   );
 }

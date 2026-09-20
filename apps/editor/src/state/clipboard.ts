@@ -4,7 +4,9 @@
  * patches run, and the definitions of the components their instances show. Pasting turns a
  * fragment into one atomic applyOps batch that recreates every item with fresh ids (through "$ref"
  * names) and rewires links between copied items to the copies. Links to items that don't exist where
- * you paste are dropped, and so are instances of components that can't be used there.
+ * you paste are dropped, and so are instances of components that can't be used there. Knob links
+ * stay when the document you paste into has that knob with the same type; otherwise the knob's value
+ * (a snapshot the fragment carries) is pasted as a plain value.
  */
 
 import {
@@ -14,12 +16,16 @@ import {
   componentItemIds,
   findLayer,
   formatAddress,
+  getKnob,
   getOwn,
   isAssetInput,
   isFileNameTaken,
+  isKnobType,
   isLayerInput,
   isLinkInput,
+  isLiteral,
   isValidId,
+  knobLiteral,
   parseAddress,
   slugify,
   uniqueId,
@@ -32,7 +38,9 @@ import {
   type ComponentKind,
   type Id,
   type InputValue,
+  type KnobType,
   type LayerNode,
+  type Literal,
   type NewLayer,
   type NewPatch,
   type Op,
@@ -67,6 +75,14 @@ export interface ClipboardFragment {
   assetData?: Record<Id, string>;
   /** Definitions of the components copied instances show, and of the components those contain, by id. */
   components?: Record<Id, Component>;
+  /** The knobs copied links read ("$knob.<id>"), with their running values, by knob id. */
+  knobs?: Record<Id, ClipboardKnob>;
+}
+
+/** A knob a copied link reads, as it was when copied. */
+export interface ClipboardKnob {
+  type: KnobType;
+  value: Literal;
 }
 
 export interface ClipboardItems {
@@ -102,6 +118,24 @@ function collectAssets(values: Iterable<InputValue>, doc: SonobeDocument, into: 
       const record = getOwn(doc.assets, v.asset);
       if (record) into[record.id] = clone(record);
     }
+  }
+}
+
+/** The knob a stored input reads ("$knob.<id>"), if any. */
+function knobIdOf(value: InputValue | undefined): Id | undefined {
+  if (!isLinkInput(value)) return undefined;
+  const a = parseAddress(value.link);
+  return a?.kind === "knob" ? a.key : undefined;
+}
+
+/** Snapshot the knobs these values read: their type and running value. */
+function collectKnobs(values: Iterable<InputValue>, doc: SonobeDocument, into: Record<Id, ClipboardKnob>): void {
+  const set = doc.knobs;
+  if (!set) return;
+  for (const v of values) {
+    const id = knobIdOf(v);
+    const knob = id !== undefined && !Object.hasOwn(into, id) ? getKnob(set, id) : undefined;
+    if (knob) into[knob.id] = { type: knob.type, value: clone(knobLiteral(set, knob)) };
   }
 }
 
@@ -147,10 +181,15 @@ export function createClipboardFragment(doc: SonobeDocument, componentId: Id, it
 
   const assets: Record<Id, AssetRecord> = {};
   const scripts: Record<string, string> = {};
+  const knobs: Record<Id, ClipboardKnob> = {};
   const collect = (layerNodes: readonly LayerNode[], patchNodes: Iterable<PatchNode>) => {
-    walkLayers(layerNodes, (layer) => collectAssets(Object.values(layer.props), doc, assets));
+    walkLayers(layerNodes, (layer) => {
+      collectAssets(Object.values(layer.props), doc, assets);
+      collectKnobs(Object.values(layer.props), doc, knobs);
+    });
     for (const node of patchNodes) {
       collectAssets(Object.values(node.inputs), doc, assets);
+      collectKnobs(Object.values(node.inputs), doc, knobs);
       const file = scriptFileOf(node);
       const source = file !== undefined ? getOwn(doc.scripts, file) : undefined;
       if (file !== undefined && source !== undefined) scripts[file] = source;
@@ -166,6 +205,7 @@ export function createClipboardFragment(doc: SonobeDocument, componentId: Id, it
   if (comments.length) fragment.comments = comments;
   if (Object.keys(scripts).length) fragment.scripts = scripts;
   if (Object.keys(components).length) fragment.components = components;
+  if (Object.keys(knobs).length) fragment.knobs = knobs;
 
   if (options.readAssetBytes) {
     let budget = options.maxAssetBytes ?? MAX_CLIPBOARD_ASSET_BYTES;
@@ -264,6 +304,12 @@ export function parseClipboardFragment(input: unknown): ClipboardFragment | null
   if (Object.keys(scripts).length) fragment.scripts = { ...scripts };
   if (Object.keys(assetData).length) fragment.assetData = { ...assetData };
   if (Object.keys(components).length) fragment.components = clone(components as Record<Id, Component>);
+  // Knob snapshots are optional: a malformed one is left out (its links then paste without a value).
+  if (isObject(value.knobs)) {
+    const knobs: Record<Id, ClipboardKnob> = {};
+    for (const [id, k] of Object.entries(value.knobs)) if (isValidId(id) && isObject(k) && isKnobType(k.type) && isLiteral(k.value) && k.value !== null) knobs[id] = { type: k.type, value: clone(k.value) };
+    if (Object.keys(knobs).length) fragment.knobs = knobs;
+  }
   return fragment;
 }
 
@@ -505,11 +551,21 @@ export function planPaste(doc: SonobeDocument, componentId: Id, fragment: Clipbo
     ops.push({ op: "setScript", file: name, source });
   }
 
+  /** A knob link stays when this document has that knob with the same type; otherwise it becomes the knob's copied value. */
+  const pasteKnob = (value: { link: string }, id: Id): InputValue | undefined => {
+    const here = getKnob(doc.knobs, id);
+    const copied = fragment.knobs ? getOwn(fragment.knobs, id) : undefined;
+    if (here && (!copied || copied.type === here.type)) return clone(value);
+    return copied ? clone(copied.value) : undefined;
+  };
+
   const literal = (value: InputValue): InputValue => {
     if (isAssetInput(value)) {
       const id = assetIds.get(value.asset);
       if (id !== undefined && id !== value.asset) return { ...clone(value), asset: id };
     }
+    const knob = knobIdOf(value);
+    if (knob !== undefined) return pasteKnob(value as { link: string }, knob) ?? clone(value);
     return clone(value);
   };
 
@@ -540,6 +596,8 @@ export function planPaste(doc: SonobeDocument, componentId: Id, fragment: Clipbo
   };
   const remap = (value: InputValue): InputValue | undefined => {
     if (isLinkInput(value)) {
+      const knob = knobIdOf(value);
+      if (knob !== undefined) return pasteKnob(value, knob);
       const link = remapLink(value.link);
       return link === undefined ? undefined : { link };
     }

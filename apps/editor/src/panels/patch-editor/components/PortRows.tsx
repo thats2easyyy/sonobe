@@ -9,7 +9,7 @@ import { HEADER_HEIGHT } from "../model/geometry.ts";
 import { layerIdOfNode, type PortModel } from "../model/types.ts";
 import { usePatchEditor, useLiveValue, usePulseCount, useUi } from "../state/context.ts";
 import { useWatchedCopy } from "../state/watch.ts";
-import { InlineValue } from "./InlineValue.tsx";
+import { InlineValue, KnobChip } from "./InlineValue.tsx";
 
 const HOVER_DELAY_MS = 450;
 let hoverTimer: ReturnType<typeof setTimeout> | undefined;
@@ -108,6 +108,7 @@ const InputPort = memo(function InputPort({ nodeId, port, editable }: { nodeId: 
         <PortGlyph type={port.type} connected={port.connected} size={9} />
       </Handle>
       <span className="sb-pe-port__label">{port.name}</span>
+      {port.knob && <KnobChip knob={port.knob} />}
       {!port.connected && editable && <InlineValue port={port} />}
       {undriven && (
         <button

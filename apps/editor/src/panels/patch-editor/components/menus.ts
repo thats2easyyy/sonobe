@@ -1,8 +1,9 @@
 /** Context menu entries for patches, cables, comments, layer targets, and the canvas. */
 
-import { getPatchSpec, VARIABLE_RECEIVER_TYPE, type Id, type Registry, type SonobeDocument } from "@sonobe/core";
+import { getKnob, getPatchSpec, knobLiteral, VARIABLE_RECEIVER_TYPE, type Id, type Registry, type SonobeDocument } from "@sonobe/core";
 import type { MenuEntry } from "../../../ui/Menu.tsx";
 import { VALUE_TYPE_LABELS } from "../../../ui/PortGlyph.tsx";
+import { knobValueText, planUnlinkKnob } from "../../knobs/model.ts";
 import { COMMENT_COLORS } from "../model/editOps.ts";
 import { publishedKeyOf } from "../model/publish.ts";
 import type { CableData, CommentNodeData, GraphNodeData, LayerNodeData, PatchNodeData, PortModel } from "../model/types.ts";
@@ -124,7 +125,12 @@ export function portMenu(ctx: MenuContext, data: GraphNodeData, port: PortModel)
       onSelect: () => void actions.publishPort(port.address, side),
     });
   }
-  if (side === "in" && port.connected && published === undefined) entries.push({ id: "disconnect", label: "Disconnect", onSelect: () => actions.disconnect([port.address]) });
+  const knob = side === "in" && port.knob ? getKnob(ctx.doc.knobs, port.knob.id) : undefined;
+  if (knob && ctx.doc.knobs) {
+    // A knob-driven input unlinks to the knob's running value rather than to its default.
+    const [op] = planUnlinkKnob(ctx.doc.knobs, knob, ctx.componentId, [{ address: port.address, type: port.type }]);
+    entries.push({ id: "unlinkKnob", label: `Unlink from ${knob.name}`, description: `Keeps ${knobValueText(knob, knobLiteral(ctx.doc.knobs, knob))}`, onSelect: () => actions.apply([op!], `Unlink ${port.name} from ${knob.name}`) });
+  } else if (side === "in" && port.connected && published === undefined) entries.push({ id: "disconnect", label: "Disconnect", onSelect: () => actions.disconnect([port.address]) });
   const rest = data.kind === "patch" ? patchMenu(ctx, data) : layerMenu(ctx, data);
   return rest.length ? [...entries, sep("port-sep"), ...rest] : entries;
 }

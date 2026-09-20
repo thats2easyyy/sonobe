@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { historyAction, historyStepTitle, undoMenuTitle } from "./undoLabels.ts";
+import { convertVariablesLabel, historyAction, historyStepTitle, makeKnobLabel, newPresetLabel, removeKnobLabel, SWITCH_PRESETS_LABEL, tuneKnobLabel, undoMenuTitle } from "./undoLabels.ts";
 
 describe("undo titles", () => {
   it("say what Undo and Redo will revert, without your name or an op count", () => {
@@ -21,5 +21,14 @@ describe("undo titles", () => {
   it("describes a finished step for the status toast", () => {
     expect(historyStepTitle("Undo", "You: Mute Card Shadow")).toBe("Undid Mute Card Shadow");
     expect(historyStepTitle("Redo", "Claude: renamed shadow (3 ops)")).toBe("Redid Claude: renamed shadow");
+  });
+
+  it("name knob edits the way the Knobs tab shows them", () => {
+    expect(makeKnobLabel("Damping Fraction")).toBe("Make Knob “Damping Fraction”");
+    expect(tuneKnobLabel("Commit Distance", "110 pt", "Proposal")).toBe("Tune Commit Distance to 110 pt (Proposal)");
+    expect(SWITCH_PRESETS_LABEL).toBe("Switch Presets");
+    expect(newPresetLabel("Proposal 2")).toBe("New Preset “Proposal 2”");
+    expect(removeKnobLabel("Grab Tilt")).toBe("Remove Knob “Grab Tilt”");
+    expect([convertVariablesLabel(1), convertVariablesLabel(14)]).toEqual(["Convert 1 Variable to Knobs", "Convert 14 Variables to Knobs"]);
   });
 });

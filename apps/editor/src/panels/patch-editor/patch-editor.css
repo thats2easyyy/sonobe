@@ -736,6 +736,35 @@ textarea.sb-pe-title-input {
   padding-left: 3px;
 }
 
+/* An input a knob drives (nodeSize.ts sizes it: keep the padding, gap, glyph and fonts in step). */
+.sb-pe-value--knob {
+  overflow: hidden;
+  background: var(--accent-soft);
+  color: var(--text-accent);
+  font-family: var(--font-sans);
+  cursor: pointer;
+}
+
+.sb-pe-value--knob:hover {
+  background: var(--accent-soft-hover);
+}
+
+.sb-pe-value__knob {
+  flex: none;
+}
+
+.sb-pe-value__name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.sb-pe-value__knob-value {
+  flex: none;
+  color: var(--text-primary);
+  font-family: var(--font-mono);
+}
+
 .sb-pe-value--input {
   width: 64px;
   max-width: 64px;

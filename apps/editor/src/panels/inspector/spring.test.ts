@@ -49,6 +49,30 @@ describe("spring inspector helpers", () => {
     expect(Object.keys(inputs).sort()).toEqual(["bounciness", "speed"]);
   });
 
+  it("reads knob-driven inputs as their knobs' values, and applies presets to those knobs", () => {
+    const doc = applyOps(
+      createEmptyDocument(),
+      [
+        { op: "addKnob", knob: { id: "bounce", name: "Bounce", type: "number", value: 12 } },
+        { op: "addPatch", patch: { id: "pop", type: "popAnimation", typeParam: "number", inputs: { bounciness: { link: "$knob.bounce" }, speed: 16 }, ui: { x: 0, y: 0 } } },
+      ],
+      { registry },
+    ).doc;
+    const readLink = (link: string) => (link === "$knob.bounce" ? doc.knobs!.knobs[0]!.values.default : undefined);
+    const pop = doc.components.main!.patches.pop!;
+    const reading = springConfigForNode(pop, spec("popAnimation"), readLink)!;
+    expect(reading.linked).toEqual([]);
+    expect(reading.config.stiffness).toBeCloseTo(fromBouncinessSpeed(12, 16).stiffness, 6);
+
+    const ops = planPreset("main", "pop", "popAnimation", "bouncy", (port) => (port === "bounciness" ? "bounce" : undefined));
+    expect(ops.map((op) => op.op)).toEqual(["setKnobValue", "setInput"]);
+    const result = applyOps(doc, ops, { registry });
+    expect(result.ok).toBe(true);
+    const tuned = result.doc.knobs!.knobs[0]!.values.default;
+    expect(result.doc.components.main!.patches.pop!.inputs.bounciness).toEqual({ link: "$knob.bounce" });
+    expect(activePreset(result.doc.components.main!.patches.pop!, spec("popAnimation"), (link) => (link === "$knob.bounce" ? tuned : undefined))).toBe("bouncy");
+  });
+
   it("builds curve geometry and handoff code", () => {
     const { config } = springConfigForNode(node("popAnimation", { bounciness: 12, speed: 12 }), spec("popAnimation"))!;
     const geometry = springCurveGeometry(config, 240, 90);

@@ -117,6 +117,7 @@ export function buildMenuSpec(ctx: MenuContext): MenuNode[] {
       cmd("view.toggleCanvas"),
       cmd("view.togglePatchEditor"),
       cmd("view.toggleInspector"),
+      cmd("view.showKnobs"),
       cmd("view.toggleConsole"),
       cmd("view.toggleAssistant"),
       sep,
