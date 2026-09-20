@@ -17,7 +17,7 @@
  * Re-importing over an earlier screen (`replace`) swaps the screen in one step but keeps the ids of
  * layers found again at the same name path, their linked properties, and every connection other items
  * have to them, so interactions wired onto the old screen keep working. The notes name each connection
- * it had to drop.
+ * it had to drop, and the old layers it didn't find again (`plan.dropped`).
  */
 
 import { componentItemIds, findLayer, isLayerInput, isLinkInput, LAYER_TYPE_MAP, listInputs, parseAddress, slugify, targetAddress, uniqueId, type AssetRecord, type Id, type InputValue, type LayerNode, type NewLayer, type NewPatch, type Op, type SonobeDocument } from "@sonobe/core";
@@ -269,6 +269,7 @@ export async function planImport(capture: DesignCapture, doc: SonobeDocument, im
 
   const skipScroll = new Set<string>();
   const restores: Op[] = [];
+  const dropped: { id: Id; name: string }[] = [];
   if (replaced && target) {
     const kept = keepIds(replaced.layer, screen, skipScroll);
     const oldIds = new Set<Id>();
@@ -283,6 +284,16 @@ export async function planImport(capture: DesignCapture, doc: SonobeDocument, im
       l.children?.forEach(visitNew);
     };
     visitNew(screen);
+    // Old layers not found again go with the old screen. A layer is only found again under a parent
+    // that was, so a dropped layer's children are dropped too: list the top-most, count them all.
+    const listDropped = (l: LayerNode) => {
+      for (const child of l.children ?? []) {
+        if (newIds.has(child.id)) listDropped(child);
+        else dropped.push({ id: child.id, name: child.name });
+      }
+    };
+    listDropped(replaced.layer);
+    summary.dropped = [...oldIds].filter((id) => !newIds.has(id)).length;
     // A new layer derives its id while the tree is built, so it could take a kept id before the layer
     // keeping it is reached. Name every new layer up front instead, against the ids in use. That includes
     // the old screen's ids nothing kept: a layer not found again doesn't take one without its connections.
@@ -320,6 +331,11 @@ export async function planImport(capture: DesignCapture, doc: SonobeDocument, im
     ops.push({ op: "removeLayer", component, id: replaced.layer.id });
     summary.kept = kept;
     summary.lostConnections = lost.length;
+    if (dropped.length) {
+      const one = dropped.length === 1;
+      const listed = `${dropped.slice(0, 5).map((l) => l.name).join(", ")}${dropped.length > 5 ? ` and ${dropped.length - 5} more` : ""}`;
+      notes.push(`${dropped.length} layer${one ? "" : "s"} of the old “${replaced.layer.name}” ${one ? "wasn't" : "weren't"} found again and ${one ? "was" : "were"} removed: ${listed}. Give layers you'll import again a data-name so they're found.`);
+    }
     if (lost.length) {
       const one = lost.length === 1;
       const listed = `${lost.slice(0, 5).join(", ")}${lost.length > 5 ? ` and ${lost.length - 5} more` : ""}`;
@@ -353,7 +369,7 @@ export async function planImport(capture: DesignCapture, doc: SonobeDocument, im
   if (ctx.insetShadows) notes.push(`${ctx.insetShadows} inner shadow${ctx.insetShadows === 1 ? " was" : "s were"} left out (Sonobe draws outer shadows).`);
   if (ctx.missingImages) notes.push(`${ctx.missingImages} image${ctx.missingImages === 1 ? "" : "s"} couldn't be downloaded; ${ctx.missingImages === 1 ? "it's" : "they're"} gray placeholders.`);
   summary.layers = ctx.layers;
-  return { ops, files, screenRef, screenName, summary, notes, dropped: [] };
+  return { ops, files, screenRef, screenName, summary, notes, dropped };
 }
 
 // ---------------------------------------------------------------------------

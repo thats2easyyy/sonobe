@@ -1,3 +1,4 @@
+import { fileURLToPath } from "node:url";
 import { createPatchRegistry } from "@sonobe/patches";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { explain } from "./explain.ts";
@@ -47,6 +48,34 @@ describe("read tools", () => {
     expect(short.text).toContain("ui=");
     const bad = await client.call("get_outline", { component: "mian" });
     expect(bad.isError).toBe(true);
+    expect(bad.text).toContain('Did you mean "main"');
+  });
+
+  it("digests the styles a prototype uses instead of the outline", async () => {
+    const card = await client.call("get_outline", { detail: "styles" });
+    expect(card.text).toBe("revision 2\nstyles main (1 layer)\ncolors #FFFFFFFF fill×1\nradii 24×1");
+
+    const { docId } = await project.host.openDocument(
+      fileURLToPath(new URL("../../../examples/05-tab-bar", import.meta.url)),
+    );
+    const styles = await client.call("get_outline", { docId, detail: "styles" });
+    expect(styles.isError, styles.text).toBe(false);
+    expect(styles.text).toBe(
+      [
+        "revision 0",
+        "styles main (92 layers)",
+        "colors #111118FF fill,text×16 · #000000FF shadow×14 · #FFFFFFFF fill,text×12 · #5F5F6BFF text×9 · #FFFFFFB3 text×8 · #8B5CF6FF gradient×3 · #11111859 fill,stroke×2 · #FDE68AFF gradient×2 · #FF3D71FF gradient×2 · #0284C7FF gradient×1 · #0E0F1AFF gradient×1 · #14B8A6FF gradient×1",
+        'fonts "Inter" 400,600,700 ×39',
+        "font sizes 17×13 · 13×12 · 15×5 · 11×4 · 34×4 · 22×1",
+        "radii 24×8 · 1×5 · 18×5 · 12×4 · 3×3 · 2×1",
+        "shadows #00000014 r18 0,6 ×13 · #0000000F r16 0,-4 ×1",
+      ].join("\n"),
+    );
+    expect((await client.call("get_outline", { docId, detail: "styles" })).text).toBe(styles.text);
+    expect(
+      (await client.call("get_outline", { docId, detail: "styles", component: "main" })).text,
+    ).toBe(styles.text);
+    const bad = await client.call("get_outline", { docId, detail: "styles", component: "mian" });
     expect(bad.text).toContain('Did you mean "main"');
   });
 
