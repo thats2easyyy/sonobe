@@ -3,6 +3,7 @@ import { homeFrame, rectContains, rectsOverlap, type Rect } from "@sonobe/core/g
 import { ID_SCENARIO_SETUP, ID_SCENARIOS, runIdScenario, type IdScenarioHost } from "@sonobe/core/testing";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { estimateGraphGeometry } from "./geometry.ts";
+import { frameResize } from "./tools/write.ts";
 import {
   buildGrowCard,
   connectClient,
@@ -689,6 +690,8 @@ describe("tidy_graph with comment frames", () => {
     await client.call("apply_ops", { ops: sectioned });
     const { revision } = await project.host.getDocument();
     const preview = await client.call("tidy_graph", { frames: ["places"], dryRun: true });
+    // PLACES gets wider and shorter: an area that shrank isn't a frame that shrank.
+    expect(preview.text).toContain('places ("PLACES") got wider and shorter: 562×188 (was 330×520)');
     expect(preview.text).toContain("Dry run");
     expect((await project.host.getDocument()).revision).toBe(revision);
     const before = await geometry();
@@ -721,6 +724,15 @@ describe("tidy_graph with comment frames", () => {
     // Boxes the editor drew for another revision are ignored.
     revision = snap.revision - 1;
     expect((await client.call("tidy_graph", { frames: ["places"], dryRun: true })).text).toContain("Node sizes are estimated");
+  });
+});
+
+describe("frameResize", () => {
+  it("words a size change so it's true of both sides", () => {
+    expect(frameResize([330, 120], { width: 798, height: 188 })).toBe("grew to 798×188 (was 330×120)");
+    expect(frameResize([330, 520], { width: 330, height: 188 })).toBe("shrank to 330×188 (was 330×520)");
+    expect(frameResize([330, 520], { width: 562, height: 188 })).toBe("got wider and shorter: 562×188 (was 330×520)");
+    expect(frameResize([600, 120], { width: 400, height: 300 })).toBe("got narrower and taller: 400×300 (was 600×120)");
   });
 });
 
