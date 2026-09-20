@@ -427,7 +427,9 @@ export function createHeadlessHost(options: HeadlessHostOptions = {}): HeadlessH
 
     async screenshot(target, shotOptions) {
       // The graph and the canvas come from the document: a component's patch graph as the editor lays
-      // it out, or the component alone on its artboard at frame 0 (also for "@layer" with a component).
+      // it out, or the component alone on its artboard at frame 0 (also for "@layer" with a component,
+      // except in a simulation, which draws its own frame, as the app does: the tool lets only the
+      // root component through with simId).
       if (target.kind === "graph") {
         const { session } = resolve(shotOptions.docId);
         const componentId = shotOptions.component ?? session.doc.project.root;
@@ -439,7 +441,7 @@ export function createHeadlessHost(options: HeadlessHostOptions = {}): HeadlessH
         });
         return renderGraphScreenshot(drawing, graphNotes(session.doc, componentId, drawing, false));
       }
-      if (target.kind === "canvas" || (target.kind === "layer" && shotOptions.component !== undefined)) {
+      if (target.kind === "canvas" || (target.kind === "layer" && shotOptions.component !== undefined && shotOptions.simId === undefined)) {
         const entry = resolve(shotOptions.docId);
         const componentId = shotOptions.component ?? entry.session.doc.project.root;
         const scene = designScene(entry.session.doc, registry, componentId);
