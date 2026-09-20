@@ -170,6 +170,8 @@ Sonobe gives Claude 41 tools in six groups: discovery, documents, reading, writi
 | "Show me what's under the top card." | `sim_override`, `get_screenshot` |
 | "Is anything broken?" | `get_diagnostics` |
 | "Start a new prototype and save it." | `create_document`, `open_document`, `save_document` |
+| "Save this as Placemark Deck in Documents." | `save_document` with `path: "~/Documents/Placemark Deck.sonobe"` |
+| "Bring back what we were working on before Sonobe quit." | `list_documents`, `open_document` with `ref: "draft:…"` |
 | "Undo what you just did." | `list_history`, `undo` |
 
 Before building, Claude reads a workflow guide with `get_guide` and looks up patch types with `describe_patch_types`, so it wires real ports with real defaults instead of guessing from memory. While it works, `begin_work`, `reveal` and `finish_work` show you what it's changing.
@@ -199,6 +201,8 @@ Sonobe also offers four ready-made prompts: `import_screen`, `prototype_interact
 - To look under a layer or try a value, Claude changes it only inside its own simulation. Your document, the viewer and your undo history don't change, so there's nothing to undo afterwards.
 - Deleting a lot at once asks Claude to confirm first.
 - You can keep working while Claude works. Just avoid editing the exact patches it's changing.
+- Unsaved work isn't lost when Sonobe quits, crashes or is closed from a terminal. It's kept as a draft, and the welcome screen offers it back under **Recovered**. Claude can bring it back too.
+- Claude saves without opening a Save dialog. For a prototype that was never saved, it asks what to call it, saves it to a folder such as `~/Documents/Placemark Deck.sonobe`, and tells you where it went. It never saves into a folder that has other files in it or sits inside another prototype.
 
 ## Prompts for every level
 

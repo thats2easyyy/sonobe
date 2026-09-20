@@ -92,7 +92,7 @@ A `.sonobez` zip of the same layout is used for sharing (later).
 - They are auto-derived from the display name on creation (`card`, `card_2`, `tap_card`, `popAnimation_1`).
 - Renaming changes `name`, never `id`.
 - Ids aren't reused across batches within a session. An id that belonged to an item of a component at any committed revision this session, and isn't live there when a batch starts, is **retired** in that component: a derived id skips it (the op result's `retired` says so) and an explicit one fails with `id_retired`. A batch may still remove an item and add a new one under the same id (a replacement); its inverse restores the old item. Component ids retire the same way, ignoring case. Retirement protects references held outside the batch (an agent's notes, simulator paths, the selection) from silently reaching a different item.
-- Each host keeps the ids it has seen in an `IdLedger` (`createIdLedger`, passed to `applyOps` as `seenIds`) and observes every commit, undo and redo. Opening a document starts a new ledger; a reload continues it; it's never saved with the project (`seenIdsToJSON` lets a draft carry it).
+- Each host keeps the ids it has seen in an `IdLedger` (`createIdLedger`, passed to `applyOps` as `seenIds`) and observes every commit, undo and redo. Opening a document starts a new ledger; a reload continues it. It's never saved with the project, but drafts keep it (`seenIdsToJSON`), and restoring one merges it back (the `seenIds` option of the editor store's `replaceDocument`), so the session continues (§3.5 Drafts).
 - References:
   - a patch port: `patchId.portKey`
   - a layer property: `@layerId.propKey`
@@ -175,6 +175,13 @@ Errors are `{ code, message, hint, address, opIndex, suggestions: [{ description
 **Outside changes.** Other writers share project folders (the app, git, a person, `sonobe mcp --headless`).
 - The app reloads outside changes when clean. With unsaved edits it holds them (`externalChange`) and Save refuses with `disk_changed` until the person keeps their edits or reloads. Changes reported during a save or open are checked once it finishes. A file that no longer parses sets `diskProblem` and marks the document as having something to save.
 - The headless host remembers the files as it last read or wrote them. `save_document` (and autosave) refuse with `disk_changed` when the folder changed since, and only delete stale files the session loaded or wrote. `save_document({ force: true })` writes over the outside changes but still never deletes files the session didn't know; `open_document({ ref, reload: true })` loads the version on disk.
+
+**Drafts.** Unsaved work survives a crash, a quit or a killed process (`apps/editor/src/state/drafts.ts`, `apps/desktop/electron/drafts.ts`).
+- While the document has unsaved edits, the draft keeper writes them a second after the last change (at most five seconds while edits keep coming), once any open gesture ends. It writes only changed files, and asset bytes once. A copy that's only marked unsaved (an example) gets no draft until it's edited. The keeper only reads the document store.
+- A draft is a project folder, `<userData>/Drafts/<id>.sonobe` (in the browser editor: OPFS, or localStorage with text only). Files are written one at a time with atomic renames, and `draft.json` last. It records the name, the project the draft has unsaved changes to (or none), counts, the session's seen ids, digests of the project files it started from, and every file's sha256. Files that don't match it mean a write was cut off: the draft is torn, still opens, and says its last changes may be missing.
+- A window claims the drafts it writes or opens (the browser uses Web Locks). The welcome screen's Recovered section and `list_documents` show only unclaimed drafts, and the welcome screen opens at launch when there are any. Restoring (`EditorSession.restoreDraft`, `open_document({ ref: "draft:<id>" })`) asks about unsaved changes, opens the draft's project first when it has one, puts the draft over it unsaved, and continues its id session. When the project changed on disk after the draft was written, `externalChange` asks which version to keep. Undo history starts fresh.
+- The draft goes away once the document is clean (saved, or undone to the saved state) or replaced after Don't Save, and when a window closes after Save or Don't Save. Launch deletes empty drafts and drafts untouched for 90 days; Discard asks first.
+- SIGTERM, SIGINT and SIGHUP make the app write every window's draft (waiting at most 1.5 s) and quit without the unsaved-changes prompt; a second signal quits at once. The prompt writes the draft before it asks, in case nobody answers. A crashed editor renderer reloads, and its draft is recoverable.
 
 ### 3.6 Diagnostics
 
@@ -442,7 +449,7 @@ Layer types are declared in `@sonobe/core` (`layerTypes.ts`) with typed props (k
 - **RPC.** Main calls into the live document with `createRendererRpcHub().invoke(webContents, method, params)`.
   - Renderer handlers are registered with `sonobeHost.rpc.handle(method, fn)`.
   - Handlers report errors by returning `sonobeHost.rpc.fail(code, message, data)`, because the context bridge strips Error properties.
-  - `document.save` is reserved for the unsaved-changes prompt.
+  - `document.save` backs the unsaved-changes prompt (`interactive`) and `save_document` (`noDialog`, and `path` for a folder main already checked and approved). `document.recoverDraft({ id })` restores a draft, and `drafts.flush` writes the window's draft now (main calls it before quitting on a signal and when the prompt opens).
 - **Menus and clipboard.** Menu commands arrive through `sonobeHost.onCommand(id)`. Cut, Copy, and Paste are native roles, so the editor handles DOM `copy`/`cut`/`paste` events.
 - **Env switches** read by the desktop main process (`apps/desktop/electron/env.ts`): `SONOBE_DEV_URL`, `SONOBE_MUTE`, `SONOBE_MCP_PORT`, `SONOBE_MCP`, `SONOBE_HOME`, `SONOBE_USER_DATA`, `SONOBE_EDITOR_DIST`, `SONOBE_TEST`, `SONOBE_LAN` (start the phone preview server at launch) and `SONOBE_LAN_PORT` (a fixed phone preview port).
 - Two switches are read elsewhere: `SONOBE_GUIDES_DIR` overrides the MCP agent guides folder (`packages/mcp/src/guides.ts`, used by bundles), and `SONOBE_NODE` picks the Node binary for the packaged `sonobe` CLI launcher (`apps/desktop/scripts/build.mjs`), which otherwise uses the app's own runtime.
@@ -479,8 +486,8 @@ The web player (`apps/desktop/player`) runs the real engine and DOM renderer ful
 
   ```ts
   interface SonobeHost {
-    listDocuments(); openDocument(ref, { reload, ...control }); createDocument(request, control?); getDocument(docId?);
-    saveDocument(docId?, { force, ...control }); apply(ops, { label, author, dryRun, expectedRevision, signal });
+    listDocuments(); listDrafts?(); openDocument(ref, { reload, ...control }); createDocument(request, control?); getDocument(docId?);
+    saveDocument(docId?, { force, path, ...control }); apply(ops, { label, author, dryRun, expectedRevision, signal });
     getSelection(); screenshot(target, opts); reveal(ids); setWorking(ids, intent | null);
     captureDesign?(request, control?); fetchImage?(url, signal); putAssetFiles?(files, { docId, ...control });   // design import (§13)
     sim: { reset(opts); dispatch(simId, events); step(simId, opts); trace(simId, opts); values(simId, targets); override(simId, request) };
@@ -501,6 +508,8 @@ The web player (`apps/desktop/player`) runs the real engine and DOM renderer ful
 | Simulate | `sim_reset`, `sim_dispatch`, `sim_step`, `sim_trace`, `sim_get_values`, `sim_override`, `get_screenshot` |
 | Presence and history | `begin_work`, `finish_work`, `reveal`, `list_history`, `undo` |
 
+- **Saving never asks.** `save_document` never opens a dialog. With `path` it saves into a new or empty folder (Save As) and keeps working there. Without one, a document that was never saved goes to `~/Documents/<Name>.sonobe`, or fails with `path_needed` while it's "Untitled". `create_document` and `save_document({ path })` follow one set of folder rules on both hosts (`projectTarget.ts`): `.sonobe` is added, and the folder must be new or empty and not inside another project. The app also keeps agent paths in home, a mounted drive or the temp folder, outside hidden folders and its own data folder. The person's Save panel refuses folders inside a project or with other files too, and reopens next to the project.
+- **Recovered drafts** (§3.5): `list_documents` lists them as `draft:<id>`, `open_document` takes that ref, and `get_document_info` says when unsaved work is kept as a draft.
 - **Simulation overrides** (`sim_override`) are ordinary value ops (setInput, connect, disconnect, layer props, mute) that a session applies to its own copy of the document with `applyOps`, re-derived on every new revision. They never enter history, the live viewer or disk. `get_screenshot` with `isolate: true` draws one layer's subtree from the SceneFrame, on both hosts.
 - **Runtime problems reach agents two ways.** sim_* results list the issues a simulation raised since the last call (with hints and suggestions), and in the app `get_diagnostics` adds a Live viewer section: what the person's running prototype reports right now, read through the `viewer.diagnostics` RPC because it changes without a new revision. The headless host has no live viewer and leaves the section out.
 - **Resources:** guides, patch reference, document outline.
@@ -551,7 +560,7 @@ patch grow transition<number> progress←pop.output start=1 end=1.08
 - `npm run typecheck`: tsc across all packages.
 - `npm test`: Vitest. Golden tests cover spring curves against the Rebound formulas, pulse and loop semantics, ops/inverse round-trips, and canonical serialization stability.
 - `npm run e2e`: Playwright (Chromium project only) against the editor served by Vite on port 5199, with screenshot artifacts. This is what CI runs.
-- `npm run smoke -w @sonobe/desktop`: the muted Electron end-to-end run (`apps/desktop/tests/smoke.mjs`, Playwright `_electron`) covering the host API, the MCP loop, the phone preview and the pop-out viewer. It builds the shell and editor, runs by hand, and isn't part of `npm run e2e` or CI. `SONOBE_SMOKE_SKIP_EDITOR_BUILD=1` reuses `apps/editor/dist`.
+- `npm run smoke -w @sonobe/desktop`: the muted Electron end-to-end run (`apps/desktop/tests/smoke.mjs`, Playwright `_electron`) covering the host API, the MCP loop, the phone preview and the pop-out viewer. It builds the shell and editor, runs by hand, and isn't part of `npm run e2e` or CI. `SONOBE_SMOKE_SKIP_EDITOR_BUILD=1` reuses `apps/editor/dist`. `npm run smoke:drafts -w @sonobe/desktop` (after building both) kills the app with SIGTERM and SIGKILL and recovers the draft.
 - `npm run test:ios`: Sonobe Viewer's Swift unit tests and UI tests on an iOS Simulator (`apps/ios/scripts/test.mjs`), against the real web player and LAN preview server, followed by a check of the app's log for the haptics the UI test's taps played. It needs macOS with Xcode, runs by hand, and isn't part of `npm run e2e` or CI. The player's side of the bridge runs in `npm test` (`apps/desktop/player/*.test.ts`; `player.browser.test.ts` drives mobile Chromium and skips without Playwright's browser).
 - Examples must load, validate with zero errors, and simulate their scripted interactions (`examples/*/test.json`).
 - Automated app and QA runs are muted (`--mute-audio`).

@@ -12,10 +12,10 @@ One server factory serves 2026-07-28 clients (per-request envelopes) and 2025-er
 
 `SonobeHost` (`src/host.ts`) is everything the tools need: documents, `apply` (core `applyOps` + History, attributed to an author), cached diagnostics, selection, screenshots, presence, simulation and history.
 
-- **The desktop app** implements it over the live editor.
+- **The desktop app** implements it over the live editor. Its `saveDocument` never opens the Save panel: with `path` it saves into that folder, a document that was never saved goes to `~/Documents/<Name>.sonobe`, and "Untitled" fails with `path_needed`. `listDrafts()` lists unsaved work an earlier session left, and `openDocument("draft:<id>")` brings it back.
 - **`createHeadlessHost({ registry?, autosave? })`** implements it over folders, through `@sonobe/core/node`:
   - `createDocument({ path, template })` and `openDocument(pathOrDocId)`
-  - saving on request, or after every write with `autosave`
+  - saving on request, or after every write with `autosave`; `saveDocument(docId, { path })` saves as a new folder (with its asset files) and keeps working there
   - safe with other writers in the folder: a save refuses with `disk_changed` when the project changed on disk since the session read or saved it (autosave reports it as `saveError` and keeps the edit in memory); `save_document({ force: true })` overwrites, `open_document({ ref, reload: true })` loads the disk version; saves only delete stale files the session loaded or wrote
   - deterministic simulations
   - presence recorded but not shown
@@ -28,6 +28,8 @@ Browser-safe building blocks for other hosts:
 - `isolateSceneLayer(scene, target)`: a `SceneFrame` with only one layer's subtree, for `get_screenshot` with `isolate: true`.
 
 Node-only screenshot helpers: `renderSceneScreenshot({ scene, target, isolate, scale, maxWidth, maxBytes, assets })`, `loadSceneAssets(scene, doc, projectDir)` and `rasterizeSvg(svg, { hasText })` from `src/screenshot.ts`.
+
+`resolveProjectTarget(path, options)` (`src/projectTarget.ts`, Node only) holds the folder rules for `create_document` and `save_document({ path })` on both hosts: `~` expands, `.sonobe` is added, and the folder must be new or empty and not inside another project (a `*.sonobe` folder or one with a Sonobe `project.json`). With `roots` (the app: home, mounted drives, the temp folder) it also refuses folders outside them, hidden folders under home and `refused` ones such as the app's data folder. Errors: `absolute_path_required`, `path_not_allowed`, `inside_project`, `already_exists`, `folder_not_empty`. `checkProjectTarget` returns the problem instead of throwing; the app's Save panel uses it with `allowExistingProject`.
 
 ## Server and transports
 
