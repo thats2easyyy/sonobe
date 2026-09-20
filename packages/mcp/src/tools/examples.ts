@@ -167,9 +167,10 @@ export function registerExampleTools(tc: ToolContext): void {
             hint: `Pass batch 1${count > 1 ? `…${count}` : ""}.`,
           });
         const ops = built.batches[index]!;
+        const size = built.doc.components[built.doc.project.root]?.size;
         const lines = [
           `# ${entry.name} (${entry.id}): the recipe${count > 1 ? `, batch ${index + 1} of ${count}` : ""}`,
-          `${plural(data.ops, "op")} build the example on a blank document, with its ids, values and layout. Make one with create_document (or use an empty document), then call apply_ops with ${count > 1 ? "each batch in order" : "these ops"}: { "ops": [...] }. Then check it: get_diagnostics, and sim_reset, sim_dispatch and sim_get_values against the scenarios get_example lists.`,
+          `${plural(data.ops, "op")} build the example on a blank document, with its ids, values and layout${size ? `, for a ${size[0]}×${size[1]} screen` : ""}. Make one with create_document (or use an empty document), then call apply_ops with ${count > 1 ? "each batch in order" : "these ops"}: { "ops": [...] }. Then check it: get_diagnostics, and sim_reset, sim_dispatch and sim_get_values against the scenarios get_example lists.`,
           "",
           "```json",
           `[\n${ops.map((op) => `  ${JSON.stringify(op)}`).join(",\n")}\n]`,
