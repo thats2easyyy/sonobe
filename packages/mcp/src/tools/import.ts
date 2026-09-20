@@ -13,7 +13,7 @@ import { deviceScreenSize, findLayer, getOutline, type Id } from "@sonobe/core";
 import { CAPTURE_TIMEOUT_MS, CaptureFormatError, globalFetcher, ImportPlanError, parseCapture, planImport, resolveCaptureFiles, type ImportPlan, type ImportSummary } from "@sonobe/import";
 import type { CallToolResult, ServerContext } from "@modelcontextprotocol/server";
 import { z } from "zod";
-import { draftBytes, draftKb, MAX_DRAFT_CHARS, NO_DRAFT_FIELDS, sessionKey, showsDesignPreviews, withDrafts, type DesignDraft, type DesignDraftFields } from "../designPreviews.ts";
+import { draftBytes, draftKb, MAX_DRAFT_CHARS, NO_DRAFT_FIELDS, sessionKey, showsDesignPreviews, withDraft, type DesignDraft, type DesignDraftFields } from "../designPreviews.ts";
 import { plural } from "../format.ts";
 import { requireComponent } from "../graph.ts";
 import { HostError, type CapturedDesign, type DocumentSnapshot } from "../host.ts";
@@ -62,7 +62,7 @@ const ImportDesignInput = z.object({
   docId: DocIdSchema.optional(),
   component: ComponentIdSchema.optional(),
   name: z.string().max(80).optional().describe('Screen layer name (default: the page title). "Home", "Checkout".'),
-  replace: z.string().optional().describe("Id of an earlier imported screen to replace, keeping the ids and wiring of layers found again."),
+  replace: z.string().nullable().optional().describe("Id of an earlier imported screen to replace, keeping the ids and wiring of layers found again. null imports a new screen, also over a preview draft's replace."),
   parent: z.string().optional().describe("Container layer for the screen (default: the component root)."),
   position: z.tuple([z.number(), z.number()]).optional().describe("Screen position in its parent (default [0, 0])."),
   index: z.number().int().optional().describe("Insert position among siblings (default: front)."),
@@ -116,8 +116,8 @@ export function registerImportTools(tc: ToolContext): void {
       title: "Preview design",
       description: [
         "Draw the screen you're designing on the person's canvas while you write it: they watch the page take shape over the artboard, in a live preview that changes nothing in the document.",
-        'Start with "html": the page\'s <head> (its theme, fonts and <style>) and its first section. Then send the rest in page order with "append". Each call should add about one visual group, so the person sees it take shape every few seconds. "html" again starts the draft over, and "clear" removes it.',
-        'Pass "name" and, for a redesign, "replace" (the layer the design replaces, which the preview draws over) with the first call; fields you leave out later keep their values.',
+        'Start the preview within your first few steps instead of planning the whole page first: "html" with the page\'s <head> (its theme, fonts and <style>) and its first section. Then send the rest in page order with "append", section by section. Each call should add about one visual group, so the person sees it take shape every few seconds. "html" again starts the draft over, and "clear" removes it.',
+        'Pass "name" and, for a redesign, "replace" (the layer the design replaces, which the preview draws over) with the first call; fields you leave out later keep their values, and "replace": null makes it a new screen again.',
         'When the page is complete, import it with import_design and "preview": true, which imports this draft with its fields without sending the html again. Write the page as for import_design\'s html (get_guide("importing")).',
         "Headless servers keep the draft without showing it. A draft left alone for 15 minutes is dropped.",
       ].join(" "),
@@ -125,7 +125,7 @@ export function registerImportTools(tc: ToolContext): void {
         docId: DocIdSchema.optional(),
         component: ComponentIdSchema.optional(),
         name: z.string().max(80).optional().describe('The screen\'s name, which import_design gives it: "Checkout".'),
-        replace: z.string().optional().describe("Id of the layer the design will replace (the preview draws over it)."),
+        replace: z.string().nullable().optional().describe("Id of the layer the design will replace (the preview draws over it); null makes it a new screen again."),
         width: z.number().int().min(100).max(4000).optional().describe("Viewport width in points (default: the device width)."),
         height: z.number().int().min(100).max(8000).optional().describe("Viewport height in points (default: the device height)."),
         position: z.tuple([z.number(), z.number()]).optional().describe("Where the screen goes in the component (default [0, 0])."),
@@ -148,15 +148,16 @@ export function registerImportTools(tc: ToolContext): void {
       const client = tc.client(ctx);
       const key = sessionKey(author, client);
       const shows = showsDesignPreviews(host);
-      return withDrafts(host, now, async (drafts) => {
-        const snap = await host.getDocument(args.docId);
-        const current = drafts.get(snap.docId, key);
+      // The turn is the draft's own, found by the document's id, so the read happens before it.
+      const snap = await host.getDocument(args.docId);
+      return withDraft(host, now, snap.docId, key, async (drafts) => {
+        const current = drafts.get();
         if (args.clear) {
-          if (!current) return success("There's no draft to remove, so nothing changed.", { docId: snap.docId, name: null, bytes: 0, revision: null });
+          if (!current) return success("There's no draft to remove, so nothing changed.", { docId: snap.docId, name: null, bytes: 0, revision: snap.revision, draftRevision: null });
           drafts.drop(current);
           const note = await drafts.update(current, "cleared");
           const name = current.fields.name;
-          return draftResult(`Removed the draft${name ? ` “${name}”` : ""}${shows ? " from the canvas" : ""}. Nothing changed.`, current, 0, note);
+          return draftResult(`Removed the draft${name ? ` “${name}”` : ""}${shows ? " from the canvas" : ""}. Nothing changed.`, snap, current, 0, note);
         }
         if (args.append !== undefined && !current)
           return failure({
@@ -166,12 +167,15 @@ export function registerImportTools(tc: ToolContext): void {
           });
         const fields = mergeFields(current?.fields ?? NO_DRAFT_FIELDS, args);
         const component = requireComponent(snap.doc, fields.component ?? undefined);
-        if (fields.replace !== null && !findLayer(component.layers, fields.replace))
-          return failure({
-            code: "not_found",
-            message: `There's no layer "${fields.replace}" to replace in ${component.id}.`,
-            hint: "Pass the id of the screen or layer the design replaces (get_outline shows it), or leave replace out for a new screen.",
-          });
+        const replaced = fields.replace === null ? null : findLayer(component.layers, fields.replace)?.layer;
+        if (fields.replace !== null && !replaced)
+          return args.replace === undefined
+            ? goneReplace(component.id, fields.replace)
+            : failure({
+                code: "not_found",
+                message: `There's no layer "${fields.replace}" to replace in ${component.id}.`,
+                hint: 'Pass the id of the screen or layer the design replaces (get_outline shows it), or "replace": null for a new screen.',
+              });
         const html = args.html ?? `${current!.html}${args.append}`;
         if (html.length > MAX_DRAFT_CHARS)
           return failure({ code: "html_too_large", message: "The draft is over 1,500,000 characters. Keep the page lean: inline SVG icons instead of big data: images." });
@@ -182,12 +186,15 @@ export function registerImportTools(tc: ToolContext): void {
         const bytes = draftBytes(html);
         const kb = draftKb(bytes);
         const named = fields.name ? ` “${fields.name}”` : "";
+        // Named on every call, so a replace kept from an earlier call is never a surprise.
+        const over = replaced ? ` over “${replaced.name}”, which it replaces` : "";
+        const replacing = replaced ? `, which replaces “${replaced.name}”` : "";
         const text = shows
-          ? `Showing ${fields.name ? `“${fields.name}”` : "the draft"} on the canvas (${kb} KB so far). Add the next part with append, then import it with import_design and "preview": true.`
+          ? `Showing ${fields.name ? `“${fields.name}”` : "the draft"} on the canvas${over} (${kb} KB so far). Add the next part with append, then import it with import_design and "preview": true.`
           : host.kind === "headless"
-            ? `Kept the draft${named} (${kb} KB). This is headless mode with no canvas, so nobody sees it; import it with import_design and "preview": true.`
-            : `Kept the draft${named} (${kb} KB). This Sonobe host can't show it on the canvas; import it with import_design and "preview": true.`;
-        return draftResult(text, draft, bytes, note);
+            ? `Kept the draft${named}${replacing} (${kb} KB). This is headless mode with no canvas, so nobody sees it; import it with import_design and "preview": true.`
+            : `Kept the draft${named}${replacing} (${kb} KB). This Sonobe host can't show it on the canvas; import it with import_design and "preview": true.`;
+        return draftResult(text, snap, draft, bytes, note);
       });
     },
   );
@@ -196,6 +203,8 @@ export function registerImportTools(tc: ToolContext): void {
   const importDesign = async (args: ImportDesignArgs, snap: DocumentSnapshot, ctx: ServerContext, work: ToolWork): Promise<CallToolResult> => {
     const component = requireComponent(snap.doc, args.component);
     const [deviceWidth, deviceHeight] = component.size ?? deviceScreenSize(snap.doc.project.device);
+    // null, like leaving it out, imports a new screen.
+    const replace = args.replace ?? undefined;
     let captured: CapturedDesign;
     if (args.capture !== undefined) {
       let capture;
@@ -272,7 +281,7 @@ export function registerImportTools(tc: ToolContext): void {
       plan = await planImport(captured.capture, current.doc, captured.images, {
       component: component.id,
       ...(retired?.length ? { isRetired: (id: string) => retired.includes(id) } : {}),
-      ...(args.replace !== undefined ? { replace: args.replace } : {}),
+      ...(replace !== undefined ? { replace } : {}),
       ...(args.parent !== undefined ? { parent: args.parent } : {}),
       ...(args.index !== undefined ? { index: args.index } : {}),
       ...(args.name !== undefined ? { name: args.name } : {}),
@@ -293,7 +302,7 @@ export function registerImportTools(tc: ToolContext): void {
       screenId,
       screenName: plan.screenName,
       txnId,
-      replaced: args.replace ?? null,
+      replaced: replace ?? null,
       dropped: plan.dropped.slice(0, MAX_META_DROPPED),
       droppedCount: plan.dropped.length,
       lostConnections: s.lostConnections ?? 0,
@@ -308,11 +317,11 @@ export function registerImportTools(tc: ToolContext): void {
 
     if (args.dryRun) {
       let text: string;
-      if (args.replace !== undefined) {
-        const old = findLayer(current.doc.components[component.id]?.layers ?? [], args.replace)?.layer;
+      if (replace !== undefined) {
+        const old = findLayer(current.doc.components[component.id]?.layers ?? [], replace)?.layer;
         const drops = plan.dropped.length ? ` and remove ${plan.dropped.length} that ${plan.dropped.length === 1 ? "isn't" : "aren't"} in the new design: ${listNames(plan.dropped.map((l) => l.name))}` : "";
         const lost = s.lostConnections ? `, and drop ${plural(s.lostConnections, "connection")}` : "";
-        text = `Dry run: importing over “${old?.name ?? args.replace}” (${args.replace}) would keep ${s.kept ?? 0} of its layers${drops}${lost}. Nothing changed.`;
+        text = `Dry run: importing over “${old?.name ?? replace}” (${replace}) would keep ${s.kept ?? 0} of its layers${drops}${lost}. Nothing changed.`;
       } else text = `Dry run: importing would add “${plan.screenName}”: ${summaryLine(s)}. Nothing changed.`;
       const out = success([text, ...importNotes.map((note) => `Note: ${note}`)].join("\n"), {
         ok: true,
@@ -337,7 +346,7 @@ export function registerImportTools(tc: ToolContext): void {
     // The last point where a cancel stops the import: host.apply refuses once work.signal has aborted.
     const result = await host.apply(plan.ops, {
       docId: snap.docId,
-      label: args.label?.trim() || `${args.replace ? "re-imported" : "imported"} ${plan.screenName}`,
+      label: args.label?.trim() || `${replace ? "re-imported" : "imported"} ${plan.screenName}`,
       author: tc.author(ctx),
       expectedRevision: current.revision,
       signal: work.signal,
@@ -345,7 +354,7 @@ export function registerImportTools(tc: ToolContext): void {
     const screenId = result.idMap[plan.screenRef] ?? result.idMap[`$${plan.screenRef}`];
     const notes: string[] = [];
     if (result.txnId && screenId) {
-      notes.push(`${args.replace ? "Re-imported" : "Imported"} "${plan.screenName}" as layer ${screenId}: ${summaryLine(s)}.`);
+      notes.push(`${replace ? "Re-imported" : "Imported"} "${plan.screenName}" as layer ${screenId}: ${summaryLine(s)}.`);
       if (s.kept !== undefined) notes.push(`${plural(s.kept, "layer")} kept their ids, so interactions wired to them still work.`);
       const after = await host.getDocument(snap.docId);
       const lines = screenOutline(getOutline(after.doc, component.id, { detail: "compact", registry: host.registry }), screenId);
@@ -394,21 +403,28 @@ export function registerImportTools(tc: ToolContext): void {
       // for Claude to fix. A dry run adds nothing, so the draft stays as it is.
       const key = sessionKey(tc.author(ctx), tc.client(ctx));
       const notes: string[] = [];
-      const taken = await withDrafts(host, now, async (drafts) => {
-        const draft = drafts.get(snap.docId, key);
-        if (!draft) return null;
+      const taken = await withDraft(host, now, snap.docId, key, async (drafts) => {
+        const draft = drafts.get();
+        if (!draft)
+          return {
+            failed: failure({
+              code: "no_draft",
+              message: "There's no design preview to import for this session. Show one with preview_design first, or pass html.",
+              hint: "Drafts are kept per document and session, and one left alone for 15 minutes is dropped.",
+            }),
+          };
+        // The draft's replace, when the layer is gone since: say so before rendering the page.
+        if (input.replace === undefined && draft.fields.replace !== null) {
+          const component = requireComponent(snap.doc, input.component ?? draft.fields.component ?? undefined);
+          if (!findLayer(component.layers, draft.fields.replace)) return { failed: goneReplace(component.id, draft.fields.replace) };
+        }
         if (!input.dryRun) {
           const note = await drafts.update(draft, "adding");
           if (note) notes.push(note);
         }
         return { draft, revision: draft.revision };
       });
-      if (!taken)
-        return failure({
-          code: "no_draft",
-          message: "There's no design preview to import for this session. Show one with preview_design first, or pass html.",
-          hint: "Drafts are kept per document and session, and one left alone for 15 minutes is dropped.",
-        });
+      if (taken.failed) return taken.failed;
       const { draft, revision } = taken;
       const args: ImportDesignArgs = { ...draftArgs(draft.fields), ...definedArgs(input), html: draft.html };
       if (input.dryRun) return importDesign(args, snap, ctx, work);
@@ -417,9 +433,9 @@ export function registerImportTools(tc: ToolContext): void {
         out = await importDesign(args, snap, ctx, work);
       } finally {
         const imported = out !== undefined && !out.isError;
-        const note = await withDrafts(host, now, async (drafts) => {
+        const note = await withDraft(host, now, snap.docId, key, async (drafts) => {
           // preview_design changed the draft while it was being added: the newer draft stays as it is.
-          if (drafts.get(snap.docId, key) !== draft || draft.revision !== revision) return null;
+          if (drafts.get() !== draft || draft.revision !== revision) return null;
           if (!imported) return drafts.update(draft, "writing");
           drafts.drop(draft);
           return drafts.update(draft, "cleared");
@@ -431,12 +447,12 @@ export function registerImportTools(tc: ToolContext): void {
   );
 }
 
-/** A draft's fields after a preview_design call: the ones it passed, and the draft's own for the rest. */
-function mergeFields(fields: DesignDraftFields, args: { name?: string; component?: string; replace?: string; width?: number; height?: number; position?: [number, number] }): DesignDraftFields {
+/** A draft's fields after a preview_design call: the ones it passed, and the draft's own for the rest. A null replace clears it. */
+function mergeFields(fields: DesignDraftFields, args: { name?: string; component?: string; replace?: string | null; width?: number; height?: number; position?: [number, number] }): DesignDraftFields {
   return {
     name: args.name ?? fields.name,
     component: args.component ?? fields.component,
-    replace: args.replace ?? fields.replace,
+    replace: args.replace === undefined ? fields.replace : args.replace,
     width: args.width ?? fields.width,
     height: args.height ?? fields.height,
     position: args.position ?? fields.position,
@@ -453,9 +469,22 @@ function definedArgs(args: ImportDesignArgs): Partial<ImportDesignArgs> {
   return Object.fromEntries(Object.entries(args).filter(([, value]) => value !== undefined)) as Partial<ImportDesignArgs>;
 }
 
-/** preview_design's result: the text, a note when the canvas didn't take the update, and the draft's size and revision. */
-function draftResult(text: string, draft: DesignDraft, bytes: number, note: string | null): CallToolResult {
-  return success([text, ...(note ? [`Note: ${note}`] : [])].join("\n"), { docId: draft.docId, name: draft.fields.name, bytes, revision: draft.revision });
+/**
+ * preview_design's result: the text, a note when the canvas didn't take the update, the draft's size and
+ * update count, and the document's revision (`revision` means the document's in every result, which a
+ * preview doesn't change).
+ */
+function draftResult(text: string, snap: DocumentSnapshot, draft: DesignDraft, bytes: number, note: string | null): CallToolResult {
+  return success([text, ...(note ? [`Note: ${note}`] : [])].join("\n"), { docId: draft.docId, name: draft.fields.name, bytes, revision: snap.revision, draftRevision: draft.revision });
+}
+
+/** The failure for a draft whose replace, kept from an earlier preview_design call, names a layer that's gone. */
+function goneReplace(componentId: Id, replace: Id): CallToolResult {
+  return failure({
+    code: "not_found",
+    message: `The draft replaces "${replace}", which isn't in ${componentId} now.`,
+    hint: 'Pass "replace": null to make it a new screen, or the id of the layer it replaces (get_outline shows it).',
+  });
 }
 
 /** "12 layers (3 texts, 1 image) and 1 Scroll patch": what an import adds. */

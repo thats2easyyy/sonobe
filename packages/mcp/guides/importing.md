@@ -60,11 +60,11 @@ For example, pass this page as `html` with `"name": "Post"`:
 
 ## Design on the person's canvas
 
-When you design a new screen, let the person watch it take shape instead of waiting for the import:
+When you design a new screen, let the person watch it take shape instead of waiting for the import. They see nothing until your first `preview_design`, so start it within your first few steps instead of planning the whole page first:
 
 1. Match what's there: `get_outline` with `"detail": "styles"`, plus one `get_screenshot` of a screen.
 2. `begin_work` with what you're designing.
-3. `preview_design` with the page's `<head>` (its theme) and first section as `html`, then `append` one visual group per call (the header, the content, the bottom bar). Each call redraws the page over the artboard.
+3. `preview_design` with the page's `<head>` (its theme) and first section as `html`, then `append` the rest section by section, one visual group per call (the header, the content, the bottom bar). Each call redraws the page over the artboard.
 4. `import_design` with `"preview": true` imports the draft, with the `name`, `replace` and size you gave it.
 5. `finish_work`.
 
@@ -76,7 +76,7 @@ When you design a new screen, let the person watch it take shape instead of wait
 { "append": "<button data-name=\"Like Button\" style=\"margin:16px;border:0;border-radius:999px;padding:8px 14px;background:#FF3B30;color:#fff\">♥ Like</button></body></html>" }
 ```
 
-A redesign passes `replace` with the first call, and the preview draws over that layer. `clear: true` removes a draft you won't import. Headless servers keep the draft without showing it.
+A redesign passes `replace` with the first call, and the preview draws over that layer; later calls keep it, and `"replace": null` makes the draft a new screen again. `clear: true` removes a draft you won't import, with its fields. Headless servers keep the draft without showing it.
 
 ## After importing
 
