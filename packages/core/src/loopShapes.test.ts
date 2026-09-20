@@ -70,4 +70,25 @@ describe("loopShapes", () => {
     );
     expect(filtered.copies("card")).toEqual({ kind: "repeat", count: null });
   });
+
+  it("reads a Loop Select picking one index as one item, which what reads it treats as a plain value", () => {
+    const shapes = loopShapes(
+      build([
+        ...deck,
+        { op: "addPatch", patch: { id: "one", type: "loopSelect", inputs: { loop: { link: "six.index" }, index: 2 } } },
+        { op: "addPatch", patch: { id: "first", type: "loopSelect", inputs: { loop: { link: "six.index" } } } },
+        { op: "addPatch", patch: { id: "many", type: "loopSelect", inputs: { loop: { link: "six.index" }, index: { link: "six.index" } } } },
+        { op: "addPatch", patch: { id: "after", type: "add", inputs: { value1: { link: "one.output" }, value2: 1 } } },
+        { op: "connect", from: "one.output", to: "@card.opacity" },
+      ]),
+      "main",
+      loopRegistry,
+    );
+    expect(shapes.ofLink("one.output")).toEqual({ length: 1, origin: "one" });
+    expect(shapes.ofLink("first.output")).toEqual({ length: 1, origin: "first" });
+    expect(shapes.ofLink("after.output")).toBeNull();
+    // Skip can leave indices out, so a loop of them picks a loop only the running prototype knows the length of.
+    expect(shapes.ofLink("many.output")).toEqual({ length: null, origin: "many" });
+    expect(shapes.count("card")).toBe(1);
+  });
 });

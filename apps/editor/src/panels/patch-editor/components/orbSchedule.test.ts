@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { OrbTone } from "./orb.ts";
-import { CAUSE_MS, createFrameQueue, createOrbQueue, createOrbRelay, RELAY_MAX_MS, RELAY_STAGGER_MS, type RelaySend } from "./orbSchedule.ts";
+import { CAUSE_MS, createFrameQueue, createOrbBudget, createOrbQueue, createOrbRelay, FAR_ORB_CAP, RELAY_MAX_MS, RELAY_STAGGER_MS, staleOrb, type RelaySend } from "./orbSchedule.ts";
 
 /** Drives a queue the way Orb does, with a fake clock: returns [time, tone] for each orb that leaves. */
 function drive(sends: [now: number, tone: OrbTone][], { hold, gap = 200 }: { hold: boolean; gap?: number }) {
@@ -179,6 +179,32 @@ describe("createOrbRelay", () => {
     send("c", "c", 0);
     flush();
     expect(launched.size).toBe(3);
+  });
+});
+
+describe("staleOrb", () => {
+  it("drops an orb whose cable draws in more than the relay's longest wait after its change", () => {
+    expect(staleOrb(1000, 900)).toBe(false);
+    expect(staleOrb(1000, 1000 + RELAY_MAX_MS)).toBe(false);
+    expect(staleOrb(1000, 1001 + RELAY_MAX_MS)).toBe(true);
+    // A reveal: Done turned on 208 ms in, and its cable finished drawing at 715 ms.
+    expect(staleOrb(208, 715)).toBe(true);
+  });
+});
+
+describe("createOrbBudget", () => {
+  it("lets FAR_ORB_CAP orbs fly at once zoomed far out, and any number closer in", () => {
+    const budget = createOrbBudget();
+    const taken = Array.from({ length: FAR_ORB_CAP + 10 }, () => budget.take(0, 400, true));
+    expect(taken.filter(Boolean)).toHaveLength(FAR_ORB_CAP);
+    expect(budget.take(10, 400, false)).toBe(true);
+    // Once they land there's room again.
+    expect(budget.take(400, 800, true)).toBe(true);
+    expect(budget.take(400, 800, true)).toBe(true);
+    // Orbs closer in don't count against it.
+    const near = createOrbBudget(2);
+    for (let i = 0; i < 5; i++) expect(near.take(0, 400, false)).toBe(true);
+    expect([near.take(0, 400, true), near.take(0, 400, true), near.take(0, 400, true)]).toEqual([true, true, false]);
   });
 });
 

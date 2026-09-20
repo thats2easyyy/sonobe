@@ -910,25 +910,25 @@
         "jump": { "link": "finger.turnedOff" },
         "jumpToNumber": { "link": "fling_stop.index" }
       },
-      "ui": { "x": 820, "y": 190 }
+      "ui": { "x": 832, "y": 246 }
     },
     "drag_distance": {
       "type": "pointUnpack",
       "name": "Drag Distance",
       "inputs": { "value": { "link": "sheet_gesture.translation" } },
-      "ui": { "x": 300, "y": 340 }
+      "ui": { "x": 300, "y": 452 }
     },
     "drag_speed": {
       "type": "pointUnpack",
       "name": "Drag Speed",
       "inputs": { "value": { "link": "sheet_gesture.velocity" } },
-      "ui": { "x": 300, "y": 490 }
+      "ui": { "x": 300, "y": 602 }
     },
     "finger": {
       "type": "pulse",
       "name": "Finger Down or Up",
       "inputs": { "on": { "link": "sheet_gesture.down" } },
-      "ui": { "x": 300, "y": 190 }
+      "ui": { "x": 300, "y": 246 }
     },
     "finger_y": {
       "type": "add",
@@ -939,7 +939,7 @@
         "value1": { "link": "grab_y.output" },
         "value2": { "link": "drag_distance.y" }
       },
-      "ui": { "x": 820, "y": 40 }
+      "ui": { "x": 832, "y": 40 }
     },
     "fling_stop": {
       "type": "snap",
@@ -952,7 +952,7 @@
         "value": { "link": "sheet_y_last_frame.output" },
         "velocity": { "link": "drag_speed.y" }
       },
-      "ui": { "x": 560, "y": 190 }
+      "ui": { "x": 560, "y": 246 }
     },
     "grab_y": {
       "type": "sampleAndHold",
@@ -973,7 +973,7 @@
         "progress": { "link": "sheet_openness.progress" },
         "start": 0
       },
-      "ui": { "x": 2120, "y": 40 }
+      "ui": { "x": 2132, "y": 40 }
     },
     "sheet_gesture": {
       "type": "gesture",
@@ -996,7 +996,7 @@
         "start": 760,
         "value": { "link": "sheet_spring.output" }
       },
-      "ui": { "x": 1860, "y": 340 }
+      "ui": { "x": 1872, "y": 452 }
     },
     "sheet_position": {
       "type": "point",
@@ -1005,7 +1005,7 @@
         "x": 0,
         "y": { "link": "sheet_spring.output" }
       },
-      "ui": { "x": 1860, "y": 190 }
+      "ui": { "x": 1872, "y": 246 }
     },
     "sheet_spring": {
       "type": "springAnimation",
@@ -1018,7 +1018,7 @@
         "number": { "link": "sheet_target.output" },
         "tension": 300
       },
-      "ui": { "x": 1600, "y": 40 }
+      "ui": { "x": 1612, "y": 40 }
     },
     "sheet_target": {
       "type": "ifElse",
@@ -1029,14 +1029,14 @@
         "ifFalse": { "link": "stop_y.output" },
         "ifTrue": { "link": "finger_y.output" }
       },
-      "ui": { "x": 1340, "y": 40 }
+      "ui": { "x": 1352, "y": 40 }
     },
     "sheet_y_last_frame": {
       "type": "delay1",
       "name": "Sheet Y Last Frame",
       "typeParam": "number",
       "inputs": { "value": { "link": "sheet_spring.output" } },
-      "ui": { "x": 1860, "y": 40 }
+      "ui": { "x": 1872, "y": 40 }
     },
     "stop_y": {
       "type": "loopSelect",
@@ -1046,7 +1046,7 @@
         "index": { "link": "current_stop.count" },
         "loop": { "link": "stops.loop" }
       },
-      "ui": { "x": 1080, "y": 40 }
+      "ui": { "x": 1092, "y": 40 }
     },
     "stops": {
       "type": "loopBuilder",
@@ -1054,7 +1054,7 @@
       "typeParam": "number",
       "inputCount": 3,
       "inputs": { "item0": 470, "item1": 132, "item2": 760 },
-      "ui": { "x": 40, "y": 190 }
+      "ui": { "x": 40, "y": 246 }
     }
   },
   "comments": []

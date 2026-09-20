@@ -46,6 +46,13 @@ export interface LoopShapes {
 /** Whole-loop outputs whose length is the length of one whole-loop input: patch type → input key. */
 const SAME_LENGTH_AS: Readonly<Record<string, string>> = { loopReverse: "loop", loopShuffle: "loop", runningTotal: "loop" };
 
+/**
+ * Whole-loop outputs with one item per item of one whole-loop input: patch type → input key. A
+ * single value there picks a single item (Loop Select with one index), and a one-item loop reads
+ * like that item: the patches reading it run once and print plain values.
+ */
+export const ONE_ITEM_PER: Readonly<Record<string, string>> = { loopSelect: "index" };
+
 /** Patch type of Loop (Count → indices) and Loop Builder (one item per row). */
 const LOOP_TYPE = "loop";
 const LOOP_BUILDER_TYPE = "loopBuilder";
@@ -104,6 +111,12 @@ export function loopShapes(doc: SonobeDocument, componentId: Id, registry: Regis
     }
     const from = getOwn(SAME_LENGTH_AS, node.type);
     if (from !== undefined && Object.hasOwn(node.inputs, from)) return ofValue(node.inputs[from], "")?.length ?? null;
+    // One index picks one item; a loop of them can pick fewer (Skip), so only the running prototype knows.
+    const picks = getOwn(ONE_ITEM_PER, node.type);
+    if (picks !== undefined) {
+      const shape = Object.hasOwn(node.inputs, picks) ? ofValue(node.inputs[picks], "") : null;
+      return !shape || shape.length === 1 ? 1 : null;
+    }
     return null;
   };
 

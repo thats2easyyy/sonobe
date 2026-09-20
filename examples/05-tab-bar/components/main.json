@@ -1318,7 +1318,7 @@
         "value1": { "link": "current_tab.option" },
         "value2": 1
       },
-      "ui": { "x": 560, "y": 490 }
+      "ui": { "x": 560, "y": 526 }
     },
     "explore_tint": {
       "type": "transition",
@@ -1329,7 +1329,7 @@
         "progress": { "link": "explore_tint_spring.output" },
         "start": "#A1A1AAFF"
       },
-      "ui": { "x": 1080, "y": 490 }
+      "ui": { "x": 1080, "y": 526 }
     },
     "explore_tint_spring": {
       "type": "popAnimation",
@@ -1340,7 +1340,7 @@
         "number": { "link": "explore_selected.output" },
         "speed": 20
       },
-      "ui": { "x": 820, "y": 490 }
+      "ui": { "x": 820, "y": 526 }
     },
     "home_selected": {
       "type": "equals",
@@ -1350,7 +1350,7 @@
         "value1": { "link": "current_tab.option" },
         "value2": 0
       },
-      "ui": { "x": 560, "y": 340 }
+      "ui": { "x": 560, "y": 364 }
     },
     "home_tint": {
       "type": "transition",
@@ -1361,7 +1361,7 @@
         "progress": { "link": "home_tint_spring.output" },
         "start": "#A1A1AAFF"
       },
-      "ui": { "x": 1080, "y": 340 }
+      "ui": { "x": 1080, "y": 364 }
     },
     "home_tint_spring": {
       "type": "popAnimation",
@@ -1372,7 +1372,7 @@
         "number": { "link": "home_selected.output" },
         "speed": 20
       },
-      "ui": { "x": 820, "y": 340 }
+      "ui": { "x": 820, "y": 364 }
     },
     "indicator_offset": {
       "type": "optionPicker",
@@ -1386,7 +1386,7 @@
         "option2": 223.25,
         "option3": 323.75
       },
-      "ui": { "x": 560, "y": 190 }
+      "ui": { "x": 560, "y": 202 }
     },
     "indicator_position": {
       "type": "point",
@@ -1395,7 +1395,7 @@
         "x": { "link": "indicator_spring.output" },
         "y": 6
       },
-      "ui": { "x": 1080, "y": 190 }
+      "ui": { "x": 1080, "y": 202 }
     },
     "indicator_spring": {
       "type": "popAnimation",
@@ -1406,7 +1406,7 @@
         "number": { "link": "indicator_offset.output" },
         "speed": 14
       },
-      "ui": { "x": 820, "y": 190 }
+      "ui": { "x": 820, "y": 202 }
     },
     "profile_selected": {
       "type": "equals",
@@ -1416,7 +1416,7 @@
         "value1": { "link": "current_tab.option" },
         "value2": 3
       },
-      "ui": { "x": 560, "y": 790 }
+      "ui": { "x": 560, "y": 838 }
     },
     "profile_tint": {
       "type": "transition",
@@ -1427,7 +1427,7 @@
         "progress": { "link": "profile_tint_spring.output" },
         "start": "#A1A1AAFF"
       },
-      "ui": { "x": 1080, "y": 790 }
+      "ui": { "x": 1080, "y": 838 }
     },
     "profile_tint_spring": {
       "type": "popAnimation",
@@ -1438,7 +1438,7 @@
         "number": { "link": "profile_selected.output" },
         "speed": 20
       },
-      "ui": { "x": 820, "y": 790 }
+      "ui": { "x": 820, "y": 838 }
     },
     "saved_selected": {
       "type": "equals",
@@ -1448,7 +1448,7 @@
         "value1": { "link": "current_tab.option" },
         "value2": 2
       },
-      "ui": { "x": 560, "y": 640 }
+      "ui": { "x": 560, "y": 688 }
     },
     "saved_tint": {
       "type": "transition",
@@ -1459,7 +1459,7 @@
         "progress": { "link": "saved_tint_spring.output" },
         "start": "#A1A1AAFF"
       },
-      "ui": { "x": 1080, "y": 640 }
+      "ui": { "x": 1080, "y": 688 }
     },
     "saved_tint_spring": {
       "type": "popAnimation",
@@ -1470,7 +1470,7 @@
         "number": { "link": "saved_selected.output" },
         "speed": 20
       },
-      "ui": { "x": 820, "y": 640 }
+      "ui": { "x": 820, "y": 688 }
     },
     "screen_offset": {
       "type": "optionPicker",
@@ -1510,7 +1510,7 @@
       "type": "interaction",
       "name": "Tap Explore",
       "inputs": { "layer": { "layer": "tab_explore" } },
-      "ui": { "x": 40, "y": 190 }
+      "ui": { "x": 40, "y": 202 }
     },
     "tap_home": {
       "type": "interaction",
@@ -1522,13 +1522,13 @@
       "type": "interaction",
       "name": "Tap Profile",
       "inputs": { "layer": { "layer": "tab_profile" } },
-      "ui": { "x": 40, "y": 490 }
+      "ui": { "x": 40, "y": 526 }
     },
     "tap_saved": {
       "type": "interaction",
       "name": "Tap Saved",
       "inputs": { "layer": { "layer": "tab_saved" } },
-      "ui": { "x": 40, "y": 340 }
+      "ui": { "x": 40, "y": 364 }
     }
   },
   "comments": []

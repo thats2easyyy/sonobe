@@ -248,7 +248,7 @@
         "value1": { "link": "tiles.index" },
         "value2": 12
       },
-      "ui": { "x": 300, "y": 190 }
+      "ui": { "x": 300, "y": 224 }
     },
     "intro_spring": {
       "type": "popAnimation",
@@ -259,7 +259,7 @@
         "number": { "link": "tile_shown.output" },
         "speed": 14
       },
-      "ui": { "x": 820, "y": 340 }
+      "ui": { "x": 820, "y": 430 }
     },
     "intro_wait": {
       "type": "wait",
@@ -268,7 +268,7 @@
         "duration": 0.15,
         "start": { "link": "started.started" }
       },
-      "ui": { "x": 300, "y": 640 }
+      "ui": { "x": 300, "y": 742 }
     },
     "is_selected": {
       "type": "equals",
@@ -278,7 +278,7 @@
         "value1": { "link": "tiles.index" },
         "value2": { "link": "selected_tile.option" }
       },
-      "ui": { "x": 560, "y": 340 }
+      "ui": { "x": 560, "y": 430 }
     },
     "preview_color": {
       "type": "popAnimation",
@@ -289,13 +289,13 @@
         "number": { "link": "selected_color.output" },
         "speed": 12
       },
-      "ui": { "x": 1080, "y": 190 }
+      "ui": { "x": 1080, "y": 224 }
     },
     "preview_hex": {
       "type": "colorToHex",
       "name": "Preview Hex",
       "inputs": { "color": { "link": "selected_color.output" } },
-      "ui": { "x": 1080, "y": 340 }
+      "ui": { "x": 1080, "y": 430 }
     },
     "ring_width": {
       "type": "transition",
@@ -327,13 +327,13 @@
         "index": { "link": "selected_tile.option" },
         "loop": { "link": "tile_colors.color" }
       },
-      "ui": { "x": 820, "y": 190 }
+      "ui": { "x": 820, "y": 224 }
     },
     "selected_tile": {
       "type": "loopOptionSwitch",
       "name": "Selected Tile",
       "inputs": { "select": { "link": "tap_tile.tap" } },
-      "ui": { "x": 300, "y": 790 }
+      "ui": { "x": 300, "y": 892 }
     },
     "stagger_delay": {
       "type": "multiply",
@@ -344,19 +344,19 @@
         "value1": { "link": "tiles.index" },
         "value2": 0.04
       },
-      "ui": { "x": 300, "y": 490 }
+      "ui": { "x": 300, "y": 592 }
     },
     "started": {
       "type": "whenPrototypeStarts",
       "name": "Prototype Starts",
       "inputs": {},
-      "ui": { "x": 40, "y": 190 }
+      "ui": { "x": 40, "y": 224 }
     },
     "tap_tile": {
       "type": "interaction",
       "name": "Tap Tile",
       "inputs": { "layer": { "layer": "tile" } },
-      "ui": { "x": 40, "y": 340 }
+      "ui": { "x": 40, "y": 430 }
     },
     "tile_colors": {
       "type": "hslColor",
@@ -390,7 +390,7 @@
         "value1": { "link": "tiles.index" },
         "value2": 1
       },
-      "ui": { "x": 300, "y": 340 }
+      "ui": { "x": 300, "y": 430 }
     },
     "tile_numbers": {
       "type": "formatNumber",
@@ -400,7 +400,7 @@
         "prefix": "#",
         "value": { "link": "tile_number.output" }
       },
-      "ui": { "x": 560, "y": 190 }
+      "ui": { "x": 560, "y": 224 }
     },
     "tile_opacity": {
       "type": "progress",
@@ -411,7 +411,7 @@
         "start": 0,
         "value": { "link": "intro_spring.output" }
       },
-      "ui": { "x": 1080, "y": 640 }
+      "ui": { "x": 1080, "y": 742 }
     },
     "tile_scale": {
       "type": "transition",
@@ -422,7 +422,7 @@
         "progress": { "link": "intro_spring.output" },
         "start": 0.6
       },
-      "ui": { "x": 1080, "y": 490 }
+      "ui": { "x": 1080, "y": 592 }
     },
     "tile_shown": {
       "type": "delay",
@@ -432,7 +432,7 @@
         "duration": { "link": "stagger_delay.output" },
         "value": { "link": "intro_wait.done" }
       },
-      "ui": { "x": 560, "y": 490 }
+      "ui": { "x": 560, "y": 592 }
     },
     "tiles": {
       "type": "loop",

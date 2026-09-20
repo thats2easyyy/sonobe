@@ -10,7 +10,7 @@ import { addressNode, type CableFlowEdge, type FlowNode } from "../model/types.t
 import { usePatchEditor, useLiveValue, useUi } from "../state/context.ts";
 import { ORB_INSET, ORB_RADIUS, ORB_SLOTS, ORB_TRAILS, SWEEP_LENGTH, type OrbTone } from "./orb.ts";
 import { createOrbFlight, type OrbEnds } from "./orbFlight.ts";
-import { createOrbQueue, orbRelayFor, type OrbLeg } from "./orbSchedule.ts";
+import { createOrbQueue, orbBudgetFor, orbRelayFor, staleOrb, type OrbLeg } from "./orbSchedule.ts";
 
 /** How long a cable keeps its orb elements after the last one lands, so a cable that fires now and then doesn't rebuild them each time. */
 const ORB_IDLE_MS = 4000;
@@ -36,11 +36,12 @@ interface OrbProps extends OrbEnds {
  * boolean's glow changes with its orb: the cable keeps the glow it had until the orb leaves (it
  * follows the orb flying into its node a moment behind, orbSchedule.ts), and the orb carries the new
  * one along behind it. With reduced motion the whole cable flashes instead, and zoomed far out only
- * the head travels; either way the glow changes at once. No orb sets off before its cable has drawn
- * in (appear.ts), and none while the graph waits to show. Nothing mounts until the first send, a
- * second or third slot mounts only when orbs overlap, the elements unmount once the cable is idle,
- * and each send replays Web Animations on reused elements (orbFlight.ts), so an orb in flight never
- * re-renders React.
+ * the head travels, and only so many at once (FAR_ORB_CAP); either way the glow changes at once. No
+ * orb sets off before its cable has drawn in (appear.ts), and none while the graph waits to show;
+ * one whose cable draws in too long after its change (staleOrb) is dropped. Nothing mounts until
+ * the first send, a second or third slot mounts only when orbs overlap, the elements unmount once
+ * the cable is idle, and each send replays Web Animations on reused elements (orbFlight.ts), so an
+ * orb in flight never re-renders React.
  */
 const Orb = memo(function Orb(props: OrbProps) {
   const { d, tx, ty, source, color, pulse, reduced } = props;
@@ -69,6 +70,8 @@ const Orb = memo(function Orb(props: OrbProps) {
     };
     /** A send waiting for its slot to mount. */
     let unmounted: OrbTone | null = null;
+    /** When the change behind the send waiting in the queue happened. */
+    let waitingSince = 0;
     let idle: ReturnType<typeof setTimeout> | undefined;
     let wait: ReturnType<typeof setTimeout> | undefined;
     /** Unmounted: a send the relay still holds finds nothing to play. */
@@ -133,7 +136,7 @@ const Orb = memo(function Orb(props: OrbProps) {
     const due = () => {
       const now = performance.now();
       const shown = shownAt();
-      if (shown === Infinity) {
+      if (shown === Infinity || staleOrb(waitingSince, shown)) {
         queue.clear();
         return release();
       }
@@ -146,11 +149,19 @@ const Orb = memo(function Orb(props: OrbProps) {
     };
 
     /** Launch now or once `ready` and the cable's gap allow; returns when it leaves and reaches the input. */
-    const schedule = (tone: OrbTone, ready: number): OrbLeg | null => {
+    const schedule = (tone: OrbTone, ready: number, event: number): OrbLeg | null => {
       const now = performance.now();
       const p = latest.current;
       const go = stopped ? null : queue.offer(now, tone, { ready, hold: !p.pulse });
       if (!go) return null;
+      // A new flight (not a change joining the one waiting) needs room zoomed far out.
+      const flies = go.timer || go.at <= now;
+      if (flies && !p.reduced && !orbBudgetFor(live).take(now, go.at + flight.arrival(tone, p), isFarZoom(flow.getState().transform[2]))) {
+        if (go.timer) queue.clear();
+        release();
+        return null;
+      }
+      if (go.at > now) waitingSince = event;
       if (go.timer) {
         // Mount now, so the elements are ready when it leaves.
         clearTimeout(idle);
@@ -160,16 +171,21 @@ const Orb = memo(function Orb(props: OrbProps) {
       return p.reduced ? null : { leave: go.at, arrive: go.at + flight.arrival(tone, p) };
     };
 
-    /** Send an orb once the cable is there, following the one into its node (or, with reduced motion, flash). False when nobody would see it. */
+    /**
+     * Send an orb once the cable is there, following the one into its node (or, with reduced motion,
+     * flash). False when nobody would see it: the graph waits to show, or the cable draws in too long
+     * after the change.
+     */
     const send = (tone: OrbTone): boolean => {
       const p = latest.current;
+      const now = performance.now();
       const shown = shownAt();
-      if (stopped || shown === Infinity) return false;
+      if (stopped || shown === Infinity || staleOrb(now, shown)) return false;
       if (p.reduced) {
-        schedule(tone, shown);
+        schedule(tone, shown, now);
         return true;
       }
-      orbRelayFor(live).send({ from: nodeOf(p.source), to: nodeOf(p.target), event: performance.now(), launch: (ready) => schedule(tone, Math.max(ready, shown)) });
+      orbRelayFor(live).send({ from: nodeOf(p.source), to: nodeOf(p.target), event: now, launch: (ready) => schedule(tone, Math.max(ready, shown), now) });
       return true;
     };
 
@@ -187,7 +203,9 @@ const Orb = memo(function Orb(props: OrbProps) {
       flip(before: boolean, tone: OrbTone) {
         const p = latest.current;
         const hold = !p.reduced && !isFarZoom(flow.getState().transform[2]);
-        if (!send(tone) || !hold) return;
+        // No orb to carry the change: the cable takes it now.
+        if (!send(tone)) return release();
+        if (!hold) return;
         if (held === null) held = after = before;
         setSlots((n) => Math.max(n, 1));
         showHold();

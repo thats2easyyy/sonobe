@@ -1258,7 +1258,7 @@
         "x": 0,
         "y": { "link": "content_y.output" }
       },
-      "ui": { "x": 1860, "y": 40 }
+      "ui": { "x": 1894, "y": 40 }
     },
     "content_y": {
       "type": "add",
@@ -1269,7 +1269,7 @@
         "value1": { "link": "feed_scroll.y" },
         "value2": { "link": "spacer_height.output" }
       },
-      "ui": { "x": 1600, "y": 40 }
+      "ui": { "x": 1634, "y": 40 }
     },
     "feed_scroll": {
       "type": "scroll",
@@ -1289,13 +1289,13 @@
         "value1": { "link": "refresh_count.count" },
         "value2": 0
       },
-      "ui": { "x": 560, "y": 190 }
+      "ui": { "x": 594, "y": 246 }
     },
     "not_dragging": {
       "type": "not",
       "name": "Not Dragging",
       "inputs": { "value": { "link": "feed_scroll.dragging" } },
-      "ui": { "x": 300, "y": 190 }
+      "ui": { "x": 334, "y": 246 }
     },
     "pull_amount": {
       "type": "progress",
@@ -1306,7 +1306,7 @@
         "start": 0,
         "value": { "link": "feed_scroll.y" }
       },
-      "ui": { "x": 300, "y": 40 }
+      "ui": { "x": 334, "y": 40 }
     },
     "pulled_far": {
       "type": "greaterThanOrEqual",
@@ -1317,13 +1317,13 @@
         "value1": { "link": "feed_scroll.y" },
         "value2": 64
       },
-      "ui": { "x": 300, "y": 340 }
+      "ui": { "x": 334, "y": 408 }
     },
     "refresh_count": {
       "type": "counter",
       "name": "Refresh Count",
       "inputs": { "increase": { "link": "refresh_timer.finished" } },
-      "ui": { "x": 300, "y": 490 }
+      "ui": { "x": 334, "y": 558 }
     },
     "refresh_timer": {
       "type": "wait",
@@ -1332,7 +1332,7 @@
         "duration": 1.6,
         "start": { "link": "refreshing.on" }
       },
-      "ui": { "x": 40, "y": 190 }
+      "ui": { "x": 40, "y": 246 }
     },
     "refreshing": {
       "type": "switch",
@@ -1341,7 +1341,7 @@
         "turnOff": { "link": "refresh_timer.finished" },
         "turnOn": { "link": "start_refresh.output" }
       },
-      "ui": { "x": 820, "y": 40 }
+      "ui": { "x": 854, "y": 40 }
     },
     "spacer_height": {
       "type": "transition",
@@ -1352,7 +1352,7 @@
         "progress": { "link": "spacer_spring.output" },
         "start": 0
       },
-      "ui": { "x": 1340, "y": 40 }
+      "ui": { "x": 1374, "y": 40 }
     },
     "spacer_spring": {
       "type": "popAnimation",
@@ -1363,7 +1363,7 @@
         "number": { "link": "refreshing.on" },
         "speed": 14
       },
-      "ui": { "x": 1080, "y": 40 }
+      "ui": { "x": 1114, "y": 40 }
     },
     "spin": {
       "type": "repeatingAnimation",
@@ -1374,7 +1374,7 @@
         "enabled": { "link": "refreshing.on" },
         "mirrored": false
       },
-      "ui": { "x": 1080, "y": 190 }
+      "ui": { "x": 1114, "y": 246 }
     },
     "spinner_arc": {
       "type": "transition",
@@ -1385,7 +1385,7 @@
         "progress": { "link": "spinner_reveal.output" },
         "start": 0
       },
-      "ui": { "x": 1600, "y": 190 }
+      "ui": { "x": 1634, "y": 246 }
     },
     "spinner_reveal": {
       "type": "max",
@@ -1396,7 +1396,7 @@
         "value1": { "link": "pull_amount.progress" },
         "value2": { "link": "spacer_spring.output" }
       },
-      "ui": { "x": 1340, "y": 190 }
+      "ui": { "x": 1374, "y": 246 }
     },
     "spinner_rotation": {
       "type": "transition",
@@ -1407,7 +1407,7 @@
         "progress": { "link": "spin.progress" },
         "start": 0
       },
-      "ui": { "x": 1340, "y": 340 }
+      "ui": { "x": 1374, "y": 408 }
     },
     "spinner_shape": {
       "type": "circleShape",
@@ -1416,7 +1416,7 @@
         "position": [14, 14],
         "radius": 11
       },
-      "ui": { "x": 40, "y": 790 }
+      "ui": { "x": 40, "y": 870 }
     },
     "start_refresh": {
       "type": "and",
@@ -1426,7 +1426,7 @@
         "value1": { "link": "not_dragging.output" },
         "value2": { "link": "pulled_far.output" }
       },
-      "ui": { "x": 560, "y": 40 }
+      "ui": { "x": 594, "y": 40 }
     },
     "status_text": {
       "type": "ifElse",
@@ -1437,7 +1437,7 @@
         "ifFalse": "Pull down to refresh",
         "ifTrue": "Updated just now"
       },
-      "ui": { "x": 820, "y": 190 }
+      "ui": { "x": 854, "y": 246 }
     }
   },
   "comments": []

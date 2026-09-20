@@ -1,12 +1,14 @@
 /**
  * Recipe definitions and the deterministic document builder behind examples/build.ts. A recipe is
  * a list of core ops; building applies them to an empty document through applyOps (the same op
- * engine the editor and MCP use), then lays the patch graph out: in columns by dataflow (lib/tidy.ts),
- * or frame by frame as tidy_graph does. A recipe can start from a stored design import (`design`),
- * which buildRecipe plans with planImport before the recipe's own ops.
+ * engine the editor and MCP use), then lays the patch graph out: in columns by dataflow, spaced for
+ * the nodes' estimated sizes (lib/tidy.ts), or frame by frame as tidy_graph does. A recipe can start
+ * from a stored design import (`design`), which buildRecipe plans with planImport before the
+ * recipe's own ops.
  */
 
 import { applyOps, createEmptyDocument, DEFAULT_DEVICE, type Op, type Registry, type SonobeDocument } from "@sonobe/core";
+import { componentNodeBoxes } from "@sonobe/core/graph";
 import type { EngineRegistry } from "@sonobe/engine";
 import type { ImportFile, ImportPlan } from "@sonobe/import";
 import { tidyOps } from "./tidy.ts";
@@ -75,9 +77,13 @@ function start(recipe: Recipe): { doc: SonobeDocument; setup: Op[] } {
   return { doc, setup };
 }
 
+/** Clear space the columns layout keeps after a column's widest node and a row's tallest. */
+const TIDY_CLEARANCE: [number, number] = [40, 16];
+
 function tidyColumns(recipe: Recipe, doc: SonobeDocument, registry: Registry): SonobeDocument {
   const root = doc.components[doc.project.root]!;
-  return apply(recipe, doc, tidyOps(root, { spacing: [260, 150] }), registry, "Tidying the graph");
+  const sizes = componentNodeBoxes(doc, registry, root.id);
+  return apply(recipe, doc, tidyOps(root, { spacing: [260, 150], sizes, clearance: TIDY_CLEARANCE }), registry, "Tidying the graph");
 }
 
 /**

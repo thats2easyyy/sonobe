@@ -1845,7 +1845,7 @@
         "start": 0,
         "value": { "link": "inbox_scroll.y" }
       },
-      "ui": { "x": 560, "y": 40 }
+      "ui": { "x": 609, "y": 40 }
     },
     "header_shadow": {
       "type": "transition",
@@ -1856,7 +1856,7 @@
         "progress": { "link": "header_lift.progress" },
         "start": 0
       },
-      "ui": { "x": 820, "y": 40 }
+      "ui": { "x": 869, "y": 40 }
     },
     "inbox_scroll": {
       "type": "scroll",
@@ -1877,7 +1877,7 @@
         "value1": { "link": "inbox_scroll.y" },
         "value2": -400
       },
-      "ui": { "x": 560, "y": 190 }
+      "ui": { "x": 609, "y": 246 }
     },
     "tap_top": {
       "type": "interaction",
@@ -1894,7 +1894,7 @@
         "progress": { "link": "top_button_spring.output" },
         "start": [201, 940]
       },
-      "ui": { "x": 1080, "y": 40 }
+      "ui": { "x": 1129, "y": 40 }
     },
     "top_button_spring": {
       "type": "popAnimation",
@@ -1905,7 +1905,7 @@
         "number": { "link": "scrolled_far.output" },
         "speed": 16
       },
-      "ui": { "x": 820, "y": 190 }
+      "ui": { "x": 869, "y": 246 }
     }
   },
   "comments": []

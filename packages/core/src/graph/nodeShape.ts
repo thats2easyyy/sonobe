@@ -130,7 +130,10 @@ function knobValueChip(knob: NonNullable<PortModel["knob"]>): ValueChip {
 
 type LivePort = Pick<PortModel, "type" | "enumOptions" | "subtype" | "loop">;
 
-const liveFormat = (port: LivePort, copy: number | null): FormatOptions => ({ maxText: 10, copy, ...(port.enumOptions ? { enumOptions: port.enumOptions } : {}) });
+/** Characters of text a live value prints inside its quotes (“Hello wo…”); names and ids print 10. */
+const LIVE_TEXT_CHARS = 8;
+
+const liveFormat = (port: LivePort, copy: number | null): FormatOptions => ({ maxText: port.type === "text" ? LIVE_TEXT_CHARS : 10, copy, ...(port.enumOptions ? { enumOptions: port.enumOptions } : {}) });
 
 /** What an output row prints as its live value, for the watched loop copy when there is one (empty for pulses and missing values). */
 export function liveText(port: LivePort, value: unknown, copy: number | null = null): string {
@@ -147,7 +150,7 @@ export function liveText(port: LivePort, value: unknown, copy: number | null = n
  */
 export function liveReserve(port: LivePort, value: unknown): number {
   if (port.type === "pulse") return 0;
-  return formatValueReserve(value, port.type, { maxText: 10, ...(port.enumOptions ? { enumOptions: port.enumOptions } : {}), ...(port.subtype ? { subtype: port.subtype } : {}), ...(port.loop ? { loop: true } : {}) });
+  return formatValueReserve(value, port.type, { ...liveFormat(port, null), ...(port.subtype ? { subtype: port.subtype } : {}), ...(port.loop ? { loop: true } : {}) });
 }
 
 function headerChips(data: PatchNodeData | LayerNodeData | InterfaceNodeData, live: NodeShapeOptions["live"]): HeaderChip[] {
@@ -158,7 +161,9 @@ function headerChips(data: PatchNodeData | LayerNodeData | InterfaceNodeData, li
       const loopOutput = data.outputs.find((o) => o.loop);
       const value = loopOutput && live ? live(loopOutput.address) : undefined;
       const length = isLoopValue(value) ? value.items.length : data.loopLength;
-      chips.push({ kind: "loop", text: `×${length ?? ""}`, reserve: loopBadgeReserve(length) });
+      // The patch editor runs the prototype, so a count is on its way: size its room from the start
+      // (a canvas with nothing running draws a bare "×" in less).
+      chips.push({ kind: "loop", text: `×${length ?? ""}`, reserve: loopBadgeReserve(length ?? 0) });
     }
     if (data.muted) chips.push({ kind: "chip", text: "Muted" });
     if (data.issues.length) chips.push({ kind: "badge" });
@@ -187,7 +192,8 @@ export function nodeShapeFromData(data: PatchNodeData | LayerNodeData | Interfac
     if (output) {
       const value = options.live?.(output.address);
       const text = liveText(output, value);
-      const reserve = liveReserve(output, value);
+      // Component Inputs never shows live values, so its outputs keep no slot.
+      const reserve = data.kind === "interface" ? 0 : liveReserve(output, value);
       row.out = { label: output.name, ...(text ? { live: text } : {}), ...(reserve ? { reserve } : {}) };
     }
     rows.push(row);

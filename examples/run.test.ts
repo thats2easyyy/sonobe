@@ -1,12 +1,15 @@
 /**
  * The example prototypes. Every folder loads through the headless MCP host with zero error
- * diagnostics, matches its recipe, uses only implemented patch types, documents real ids in its
- * README, and passes the scripted scenarios in its test.json.
+ * diagnostics, matches its recipe, lays its patch graphs out with room between the nodes, uses only
+ * implemented patch types, documents real ids in its README, and passes the scripted scenarios in
+ * its test.json.
  */
 
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
-import { findLayer, type Component, type Diagnostic } from "@sonobe/core";
+import { findLayer, type Component, type Diagnostic, type SonobeDocument } from "@sonobe/core";
+import { componentNodeBoxes } from "@sonobe/core/graph";
+import { createRuntime } from "@sonobe/engine";
 import { createHeadlessHost } from "@sonobe/mcp";
 import { createPatchRegistry } from "@sonobe/patches";
 import { afterAll, describe, expect, it } from "vitest";
@@ -27,6 +30,34 @@ const README_SECTIONS = ["## What you'll learn", "## Build it step by step", "##
  */
 function isPulseMerge(d: Diagnostic, root: Component): boolean {
   return d.code === "pulse_into_state" && d.itemIds.some((id) => root.patches[id]?.type === "or");
+}
+
+/** The least room between two patch nodes, across or down. */
+const NODE_CLEARANCE = 12;
+
+/**
+ * Pairs of patch nodes closer than NODE_CLEARANCE in every component, as the patch editor draws them
+ * with the prototype running a second (the root's live values; slots are there before values arrive).
+ */
+function crowdedNodes(doc: SonobeDocument): string[] {
+  const runtime = createRuntime(doc, { registry, deterministic: true, fps: 60 });
+  for (let i = 0; i < 60; i++) runtime.step();
+  const crowded: string[] = [];
+  for (const [id, component] of Object.entries(doc.components)) {
+    const live = id === doc.project.root ? { live: (address: string) => runtime.getRawValue(address) } : {};
+    const boxes = [...componentNodeBoxes(doc, registry, id, live)].filter(([node]) => Object.hasOwn(component.patches, node));
+    for (let i = 0; i < boxes.length; i++) {
+      for (let j = i + 1; j < boxes.length; j++) {
+        const [a, ra] = boxes[i]!;
+        const [b, rb] = boxes[j]!;
+        const across = Math.max(ra.x - (rb.x + rb.width), rb.x - (ra.x + ra.width));
+        const down = Math.max(ra.y - (rb.y + rb.height), rb.y - (ra.y + ra.height));
+        if (Math.max(across, down) < NODE_CLEARANCE) crowded.push(`${id}: ${a} and ${b} (${Math.round(across)} across, ${Math.round(down)} down)`);
+      }
+    }
+  }
+  runtime.dispose();
+  return crowded;
 }
 
 afterAll(async () => {
@@ -79,6 +110,11 @@ for (const recipe of RECIPES) {
     it("matches its recipe (run node examples/build.ts to regenerate)", async () => {
       const built = await buildRecipe(recipe, registry);
       expect(projectDrift(dir, built.doc, built.files)).toEqual({ changed: [], extra: [] });
+    });
+
+    it("keeps its patch nodes apart (run node examples/build.ts to lay them out again)", async () => {
+      const { doc } = await host.getDocument(await open());
+      expect(crowdedNodes(doc)).toEqual([]);
     });
 
     it("uses only implemented patch types", async () => {

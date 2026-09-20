@@ -148,6 +148,40 @@ export function createOrbRelay(defer: (flush: () => void) => void = queueMicrota
 }
 
 /**
+ * Whether an orb is too late to send: its cable drew in (or finishes drawing at `shown`) more than
+ * RELAY_MAX_MS after the change at `event`, so its node, the viewer and the port dots moved on long
+ * ago. A pulse's orb is dropped then, and a boolean's cable takes its new glow at once.
+ */
+export function staleOrb(event: number, shown: number): boolean {
+  return shown - event > RELAY_MAX_MS;
+}
+
+/**
+ * How many orbs fly at once zoomed far out, where a head is a pixel or two across. Past it a send is
+ * skipped (a boolean's glow changes at once there anyway), so hundreds of cables firing together
+ * don't spend the frame drawing dots nobody can tell apart.
+ */
+export const FAR_ORB_CAP = 48;
+
+export interface OrbBudget {
+  /** Whether an orb may fly at `now`: always closer in; zoomed far out (`far`) while fewer than FAR_ORB_CAP do, counting it until `until`. */
+  take(now: number, until: number, far: boolean): boolean;
+}
+
+export function createOrbBudget(cap = FAR_ORB_CAP): OrbBudget {
+  let flying: number[] = [];
+  return {
+    take(now, until, far) {
+      if (!far) return true;
+      flying = flying.filter((t) => t > now);
+      if (flying.length >= cap) return false;
+      flying.push(until);
+      return true;
+    },
+  };
+}
+
+/**
  * Work that can wait a frame or two, done `budget` ms a frame (and at least one job each frame), so
  * a pulse into dozens of idle cables doesn't build all of their trails in the frame it fires.
  */
@@ -181,10 +215,18 @@ export function createFrameQueue(requestFrame: (run: () => void) => void, now: (
 }
 
 const relays = new WeakMap<object, OrbRelay>();
+const budgets = new WeakMap<object, OrbBudget>();
 
 /** The relay of one patch editor, keyed by its live store, which all of its cables' orbs share. */
 export function orbRelayFor(owner: object): OrbRelay {
   let relay = relays.get(owner);
   if (!relay) relays.set(owner, (relay = createOrbRelay()));
   return relay;
+}
+
+/** The far-zoom orb budget of one patch editor, keyed like orbRelayFor. */
+export function orbBudgetFor(owner: object): OrbBudget {
+  let budget = budgets.get(owner);
+  if (!budget) budgets.set(owner, (budget = createOrbBudget()));
+  return budget;
 }

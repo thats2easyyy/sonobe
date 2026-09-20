@@ -108,17 +108,24 @@ describe("reserved widths", () => {
     expect(formatValueReserve(null, "json", live)).toBe(1);
   });
 
-  it("reserves a loop's ×N summary with a short preview of its first item, or a watched copy's #k and the whole item, whichever is longer", () => {
+  it("reserves a loop's ×NN summary with a short preview of its first item", () => {
     const loop12 = loop(...Array.from({ length: 12 }, (_, i) => i * 1.5));
-    expect(formatValueReserve(loop12, "number", live)).toBe("#11 ".length + NUMBER_SHORT_CHARS);
+    const summary = "×NN ".length + LOOP_PREVIEW_CHARS + "…".length;
+    expect(formatValueReserve(loop12, "number", live)).toBe(summary);
     expect(formatValueReserve(loop(true, false), "boolean", live)).toBe("×NN Off…".length);
-    expect(formatValueReserve(loop(0.5), "number", { ...live, subtype: "progress" })).toBe("×NN ".length + 6 + "…".length);
-    expect(formatValueReserve(loop("a"), "text", live)).toBe("#NN ".length + "“12345678”".length);
-    expect(formatValueReserve(loop([201.5, 366.5]), "point", live)).toBe("#NN ".length + "-999.9, -999.9".length);
-    expect(formatValueReserve(loop(), "number", live)).toBe("#NN ".length + NUMBER_SHORT_CHARS);
-    expect(formatValueReserve(loop(...Array.from({ length: 120 }, () => 0)), "number", live)).toBe("#120 ".length + NUMBER_SHORT_CHARS);
-    // Loop's Index prints "×12 0…", which fits whole.
-    expect(formatValue(loop(...Array.from({ length: 12 }, (_, i) => i)), "index", live).length).toBeLessThanOrEqual(formatValueReserve(loop(0), "index", live));
+    expect(formatValueReserve(loop(0.5), "number", { ...live, subtype: "progress" })).toBe(summary);
+    expect(formatValueReserve(loop("a"), "text", live)).toBe(summary);
+    expect(formatValueReserve(loop([201.5, 366.5]), "point", live)).toBe(summary);
+    expect(formatValueReserve(loop({ r: 1, g: 0, b: 0, a: 1 }), "color", live)).toBe(summary);
+    expect(formatValueReserve(loop(), "number", live)).toBe(summary);
+    // Past 99 copies the count takes a digit from the preview.
+    expect(formatValueReserve(loop(...Array.from({ length: 120 }, () => 0)), "number", live)).toBe(summary);
+    // Loop's Index prints "×12 0…", and a watched copy "#11 11", which fit whole.
+    const indexes12 = loop(...Array.from({ length: 12 }, (_, i) => i));
+    expect(formatValue(indexes12, "index", live).length).toBeLessThanOrEqual(formatValueReserve(indexes12, "index", live));
+    expect(formatValue(indexes12, "index", { ...live, copy: 11 })).toBe("#11 11");
+    // A watched copy's longer item ends in "…" in the summary's room.
+    expect(formatValue(loop([201.5, 366.5]), "point", { ...live, copy: 0 }).length).toBeGreaterThan(summary);
   });
 
   it("keeps one room for a loop whichever copy is watched, or none, so watching a copy doesn't resize the node", () => {
@@ -145,24 +152,25 @@ describe("reserved widths", () => {
     expect(formatValueReserve(undefined, "pulse", { ...live, loop: true })).toBe(0);
   });
 
-  it("keeps two digits for a loop's count and a copy's index, so a loop growing past 9 holds still", () => {
+  it("keeps one room for a loop whatever its length, so a loop growing or emptying holds still", () => {
     const ofLength = (n: number) => loop(...Array.from({ length: n }, (_, i) => i));
-    const counts = [0, 1, 9, 10, 14, 99].map((n) => formatValueReserve(ofLength(n), "number", live));
-    expect(new Set(counts)).toEqual(new Set([1 + 2 + 1 + NUMBER_SHORT_CHARS]));
+    const counts = [0, 1, 9, 10, 14, 99, 100, 2500].map((n) => formatValueReserve(ofLength(n), "number", live));
+    expect(new Set(counts)).toEqual(new Set(["×NN ".length + LOOP_PREVIEW_CHARS + "…".length]));
     // An empty loop prints "×0" for a watched copy, in the same room.
     const copies = [0, 1, 9, 10, 11, 14, 99].map((n) => formatValueReserve(ofLength(n), "number", { ...live, copy: 3 }));
     expect(new Set(copies)).toEqual(new Set(counts));
-    expect(formatValueReserve(ofLength(9), "boolean", live)).toBe(formatValueReserve(ofLength(10), "boolean", live));
+    expect(formatValueReserve(ofLength(9), "boolean", live)).toBe(formatValueReserve(ofLength(100), "boolean", live));
     // Touches at rest is an empty loop of points: it keeps the room the first touch needs.
     expect(formatValueReserve(loop(), "point", live)).toBe(formatValueReserve(loop([187.5, 402.25]), "point", live));
   });
 
-  it("gives the header's loop badge the room of two digits", () => {
-    expect([undefined, 0, 7, 12, 99].map(loopBadgeReserve)).toEqual(["×00", "×00", "×00", "×00", "×00"]);
+  it("gives the header's loop badge the room of two digits, and a bare × no more", () => {
+    expect([0, 7, 12, 99].map(loopBadgeReserve)).toEqual(["×00", "×00", "×00", "×00"]);
     expect(loopBadgeReserve(120)).toBe("×000");
+    expect(loopBadgeReserve(undefined)).toBe("×");
   });
 
-  it("is never shorter than what formatValue prints for a value or a watched copy, or a loop's count and preview", () => {
+  it("is never shorter than what formatValue prints for a value, a loop's count and preview, or a watched copy's index and preview", () => {
     const easing: EnumOption[] = [
       { key: "quadraticInOut", name: "Quadratic In & Out" },
       { key: "linear", name: "Linear" },
@@ -199,14 +207,13 @@ describe("reserved widths", () => {
       const options = { ...live, ...(enumOptions ? { enumOptions } : {}) };
       const plain = formatValue(value, type, options);
       expect(plain.length, `${type} ${plain}`).toBeLessThanOrEqual(formatValueReserve(value, type, options));
+      // The summary's count and the first LOOP_PREVIEW_CHARS of its item fit, and so do a watched
+      // copy's index and as much of its item; a longer item ends early.
       const values = loop(value, value, value);
-      for (const copy of [0, 2, 7]) {
+      for (const copy of [null, 0, 2, 7]) {
         const text = formatValue(values, type, { ...options, copy });
-        expect(text.length, `${type} loop ${text}`).toBeLessThanOrEqual(formatValueReserve(values, type, { ...options, copy }));
+        expect(Math.min(text.length, "#2 ".length + LOOP_PREVIEW_CHARS + 1), `${type} loop ${text}`).toBeLessThanOrEqual(formatValueReserve(values, type, { ...options, copy }));
       }
-      // The summary's count and the first LOOP_PREVIEW_CHARS of its item fit; a longer item ends early.
-      const summary = formatValue(values, type, options);
-      expect(Math.min(summary.length, "×3 ".length + LOOP_PREVIEW_CHARS + 1), `${type} loop ${summary}`).toBeLessThanOrEqual(formatValueReserve(values, type, options));
     }
   });
 

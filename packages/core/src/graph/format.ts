@@ -142,20 +142,20 @@ export const COORDINATE_CHARS = 6;
  */
 export const LOOP_PREVIEW_CHARS = 6;
 
+/** A loop's "×12 " and a watched copy's "#11 ": two digits, so loops of up to 99 print their count whole. */
+const LOOP_PREFIX_CHARS = 4;
+
 const AXES: Partial<Record<ValueType, number>> = { point: 2, size: 2, anchor: 2, point3d: 3, point4d: 4 };
 
 const digits = (n: number) => String(Math.max(0, Math.trunc(n))).length;
 
-/** A loop's count ("×12") and a watched copy's index ("#3") keep two digits, so loops of up to 99 print in full as they grow. */
-const countDigits = (n: number) => Math.max(2, digits(n));
-
 /**
  * The text the header's loop badge keeps room for, whatever its count ("×7" in the room of "×00"),
- * so a loop gaining a digit doesn't widen a node whose header sets its width: two digits, as a
- * loop's live values keep.
+ * so a loop gaining a digit doesn't widen a node whose header sets its width: two digits, or more
+ * past 99. With no count (a loop of unknown length while nothing runs) the badge is a bare "×".
  */
 export function loopBadgeReserve(count: number | undefined): string {
-  return `×${"0".repeat(countDigits(count ?? 0))}`;
+  return count === undefined ? "×" : `×${"0".repeat(Math.max(2, digits(count)))}`;
 }
 
 /** The longest text formatValue's default branch prints for a value of this kind (json and any ports). */
@@ -230,11 +230,11 @@ function plainReserve(value: unknown, type: ValueType, maxText: number, options:
  * for a progress, an angle or an index, "Off", "#RRGGBBAA", quotes around maxText characters, the
  * longest enum option, a point's coordinates to ±999.9). json and any ports keep the room of their
  * value's own kind, so they keep none until a value arrives. A loop (a loop value, or a port that
- * carries one) keeps one room whichever copy is watched, or none: its "×N" summary with a short
- * preview of its first item (LOOP_PREVIEW_CHARS) or a copy's "#k " and the whole item, whichever is
- * longer, with at least two digits for the count. The patch editor draws live values in slots this
- * wide (liveReserve), so a node keeps its width while the prototype runs; a value that prints
- * longer ends in "…". 0 for a pulse, which prints nothing.
+ * carries one) keeps the room of its "×NN " summary with a short preview of its first item
+ * (LOOP_PREVIEW_CHARS) and "…", whatever its length and whichever copy is watched: a copy's "#k "
+ * and item end in "…" there when they're longer, as the preview does past 99 copies. The patch
+ * editor draws live values in slots this wide (liveReserve), so a node keeps its width while the
+ * prototype runs; a value that prints longer ends in "…". 0 for a pulse, which prints nothing.
  */
 export function formatValueReserve(value: unknown, type: ValueType, options: ReserveOptions = {}): number {
   if (type === "pulse") return 0;
@@ -246,8 +246,7 @@ export function formatValueReserve(value: unknown, type: ValueType, options: Res
   const items = isLoopValue(value) ? value.items : [];
   // Before a json or any loop has an item, a number's room.
   const item = plainReserve(items.length ? items[0] : type === "json" || type === "any" ? 0 : undefined, type, 8, options);
-  // "×12 " with the preview and "…", or "#11 " with the whole item: the count's digits cover every copy's index.
-  return 1 + countDigits(items.length) + 1 + Math.max(Math.min(LOOP_PREVIEW_CHARS, item) + 1, item);
+  return LOOP_PREFIX_CHARS + Math.min(LOOP_PREVIEW_CHARS, item) + 1;
 }
 
 /**
