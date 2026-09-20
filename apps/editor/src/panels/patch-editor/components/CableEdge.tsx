@@ -3,7 +3,7 @@
 import { useStore as useFlowStore, type ConnectionLineComponentProps, type EdgeProps } from "@xyflow/react";
 import { memo, useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from "react";
 import { portColorVar } from "../../../theme/tokens.ts";
-import { isTruthyState } from "../model/format.ts";
+import { isTruthyState } from "@sonobe/core/graph";
 import { cablePath, cablePoint } from "../model/geometry.ts";
 import type { CableFlowEdge, FlowNode } from "../model/types.ts";
 import { usePatchEditor, useLiveValue, usePulseCount, useUi } from "../state/context.ts";

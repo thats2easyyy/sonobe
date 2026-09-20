@@ -1,4 +1,8 @@
-/** tidy_graph: layered patch layout by dataflow depth. Positions only; no semantic change. Browser-safe. */
+/**
+ * The examples' patch layout: columns by dataflow depth, separate flows stacked. Positions only.
+ * Kept as it was when the examples were built, so rebuilding them reproduces the committed files;
+ * tidy_graph and the editor's Tidy Up use the frame-aware tidy in @sonobe/core/graph.
+ */
 
 import { isLinkInput, parseAddress, type Component, type Id, type Op } from "@sonobe/core";
 

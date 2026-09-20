@@ -22,7 +22,8 @@ import {
   type Registry,
   type SonobeDocument,
 } from "@sonobe/core";
-import { estimatePatchSize } from "../panels/patch-editor/model/placement.ts";
+import { componentNodeBoxes, estimatePatchSize } from "@sonobe/core/graph";
+import { nodeTextMeasurer } from "../panels/patch-editor/model/measure.ts";
 import { applyPastePlan, createClipboardFragment, planPaste, topLevelLayerIds, type ClipboardFragment } from "./clipboard.ts";
 import { currentComponentId, hasSelection } from "./selection.ts";
 import type { EditorSession } from "./session.ts";
@@ -176,9 +177,11 @@ const shiftedOverlap = (a: Box, b: Box, d: number) => a.x + d < b.x + b.width &&
 export function freePasteOffset(doc: SonobeDocument, componentId: Id, fragment: ClipboardFragment, registry: Registry, step = 24, maxSteps = 80): [number, number] {
   const component = doc.components[componentId];
   if (!component) return [0, 0];
-  const patchBox = (node: PatchNode): Box => ({ x: node.ui.x, y: node.ui.y, ...estimatePatchSize(doc, registry, node) });
+  const measure = nodeTextMeasurer();
+  const patchBox = (node: PatchNode): Box => ({ x: node.ui.x, y: node.ui.y, ...estimatePatchSize(doc, registry, node, { component: componentId, measure }) });
   const frameBox = (c: { rect: readonly [number, number, number, number] }): Box => ({ x: c.rect[0], y: c.rect[1], width: c.rect[2], height: c.rect[3] });
-  const patches = Object.values(component.patches).map(patchBox);
+  const boxes = componentNodeBoxes(doc, registry, componentId, { measure });
+  const patches = Object.keys(component.patches).map((id) => boxes.get(id)!).filter(Boolean);
   const frames = component.comments.map(frameBox);
   const pastedPatches = Object.values(fragment.patches).map(patchBox);
   const pastedFrames = (fragment.comments ?? []).map(frameBox);

@@ -56,13 +56,6 @@ export function alignOps(component: Component, positions: ReadonlyMap<Id, { x: n
   return ops;
 }
 
-const ESTIMATE = { width: 168, header: 30, row: 22, footer: 8 };
-
-/** A rough size for a patch that isn't rendered: a header plus one row per port pair. */
-export function estimatePatchSize(inputCount: number, outputCount: number): { width: number; height: number } {
-  return { width: ESTIMATE.width, height: ESTIMATE.header + Math.max(1, inputCount, outputCount) * ESTIMATE.row + ESTIMATE.footer };
-}
-
 /** The patch editor's zoom, read from React Flow's viewport transform (1 when not rendered). */
 export function flowZoom(root: ParentNode): number {
   const viewport = root.querySelector<HTMLElement>(".sb-pe .react-flow__viewport");
@@ -71,8 +64,8 @@ export function flowZoom(root: ParentNode): number {
   return Number.isFinite(zoom) && zoom > 0 ? zoom : 1;
 }
 
-/** Rects for patches in document coordinates, measuring rendered nodes when possible. */
-export function patchRects(component: Component, ids: readonly Id[], portCounts: (id: Id) => { inputs: number; outputs: number }, root: ParentNode | null = typeof document === "undefined" ? null : document): PatchRect[] {
+/** Rects for patches in document coordinates, measuring rendered nodes when possible, else from `estimate` (the shared node size estimate). */
+export function patchRects(component: Component, ids: readonly Id[], estimate: (id: Id) => { width: number; height: number }, root: ParentNode | null = typeof document === "undefined" ? null : document): PatchRect[] {
   const zoom = root ? flowZoom(root) : 1;
   const rects: PatchRect[] = [];
   for (const id of ids) {
@@ -80,7 +73,7 @@ export function patchRects(component: Component, ids: readonly Id[], portCounts:
     if (!node) continue;
     const element = root?.querySelector<HTMLElement>(`.sb-pe .react-flow__node[data-id="${cssEscape(id)}"]`);
     const box = element?.getBoundingClientRect();
-    const size = box && box.width > 0 && box.height > 0 ? { width: box.width / zoom, height: box.height / zoom } : estimatePatchSize(portCounts(id).inputs, portCounts(id).outputs);
+    const size = box && box.width > 0 && box.height > 0 ? { width: box.width / zoom, height: box.height / zoom } : estimate(id);
     rects.push({ id, x: node.ui.x, y: node.ui.y, ...size });
   }
   return rects;

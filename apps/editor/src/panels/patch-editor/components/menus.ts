@@ -151,6 +151,7 @@ export function commentMenu(ctx: MenuContext, data: CommentNodeData, edit: () =>
       label: "Color",
       submenu: COMMENT_COLORS.map((c): MenuEntry => ({ id: c.key, label: c.name, checked: (data.color ?? "gray") === c.key, onSelect: () => actions.updateComment(data.commentId, { color: c.key }, `Color comment ${c.name.toLowerCase()}`) })),
     },
+    { id: "tidy", label: "Tidy Up Frame", description: "Lay out the patches inside and fit the frame around them", onSelect: () => void actions.tidyUp({ frames: [data.commentId] }) },
     sep("s1"),
     { id: "delete", label: "Delete Comment", shortcut: "Backspace", danger: true, onSelect: () => actions.apply([{ op: "removeComment", component: ctx.componentId, id: data.commentId }], "Delete comment") },
   ];
@@ -176,6 +177,7 @@ export function paneMenu(ctx: MenuContext, at: { x: number; y: number }): MenuEn
     { id: "selectAll", label: "Select All", shortcut: "Mod+A", onSelect: () => actions.selectAll() },
     sep("s1"),
     { id: "tidy", label: "Tidy Up", shortcut: "Ctrl+T", onSelect: () => void actions.tidyUp() },
+    { id: "arrange", label: "Tidy Up and Arrange Frames", description: "Also move the comment frames, as blocks", onSelect: () => void actions.tidyUp({ arrange: true }) },
     { id: "fit", label: "Zoom to Fit", shortcut: "Shift+1", onSelect: ctx.fitView },
     { id: "minimap", label: ctx.minimap ? "Hide Minimap" : "Show Minimap", shortcut: "Shift+M", onSelect: ctx.toggleMinimap },
     ...(ctx.nested ? [sep("s2"), { id: "exit", label: "Exit Component", shortcut: "Alt+Up", onSelect: () => actions.exitComponent() } as MenuEntry] : []),

@@ -1,4 +1,5 @@
 import { findLayer, type Id } from "@sonobe/core";
+import { componentNodeBoxes } from "@sonobe/core/graph";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createManualScheduler } from "../runtime/scheduler.ts";
 import { layoutStore } from "../shell/layoutStore.ts";
@@ -108,8 +109,10 @@ describe("app actions", () => {
     expect(new Set(ys).size).toBeGreaterThanOrEqual(1);
     expect(session.document.getState().undoLabel).toContain("Align bottom edges");
     expect(alignSelection(session, "right", null)).toBe(true);
-    const xs = ["tap_photo", "zoomed", "zoom_spring"].map((id) => root().patches[id]!.ui.x);
-    expect(new Set(xs).size).toBe(1);
+    // Right edges line up, with each patch's width as the patch editor would draw it.
+    const boxes = componentNodeBoxes(session.document.getState().doc, session.registry, "main");
+    const rights = ["tap_photo", "zoomed", "zoom_spring"].map((id) => root().patches[id]!.ui.x + boxes.get(id)!.width);
+    expect(Math.max(...rights) - Math.min(...rights)).toBeLessThanOrEqual(1);
     session.selection.getState().select({ patches: ["zoomed"] });
     expect(alignSelection(session, "right", null)).toBe(false);
   });

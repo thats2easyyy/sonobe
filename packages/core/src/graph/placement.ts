@@ -4,8 +4,14 @@
  * lands inside a comment frame only when you asked for a spot inside that frame.
  */
 
-import { getPatchSpec, resolveNodePorts, type Component, type Id, type PatchNode, type Registry, type SonobeDocument } from "@sonobe/core";
-import { COMMENT_PADDING, estimateNodeSize, HEADER_HEIGHT, padRect, rectContains, rectsOverlap, type Rect } from "./geometry.ts";
+import { FORMAT_VERSION } from "../document.ts";
+import { getOwn } from "../ids.ts";
+import { allLayers } from "../registry.ts";
+import type { Component, Diagnostic, Id, PatchNode, Registry, SonobeDocument } from "../types.ts";
+import { deriveGraph } from "./deriveGraph.ts";
+import { framesAt } from "./frames.ts";
+import { COMMENT_PADDING, padRect, rectContains, rectsOverlap, type Rect } from "./geometry.ts";
+import { estimateNodeSize, type NodeSize, type NodeTextMeasurer } from "./nodeSize.ts";
 
 type XY = { x: number; y: number };
 
@@ -61,8 +67,7 @@ export function findFreePosition(size: { width: number; height: number }, prefer
   const nodes = obstacles.nodes.map((r) => padRect(r, gap));
   const comments = obstacles.comments ?? [];
   // The frame you asked to put the patch in: the one under its title bar's leading edge.
-  const anchor: [number, number] = [base.x + Math.min(24, size.width / 2), base.y + HEADER_HEIGHT / 2];
-  const home = comments.filter((c) => anchor[0] >= c.x && anchor[0] <= c.x + c.width && anchor[1] >= c.y && anchor[1] <= c.y + c.height);
+  const home = framesAt({ ...base, ...size }, comments);
   const interior = (c: Rect): Rect => ({ x: c.x + 8, y: c.y + COMMENT_PADDING.top, width: c.width - 16, height: c.height - COMMENT_PADDING.top - 8 });
   const fits = (rect: Rect) => {
     for (const n of nodes) if (rectsOverlap(n, rect)) return false;
@@ -79,23 +84,66 @@ export function findFreePosition(size: { width: number; height: number }, prefer
   return base;
 }
 
-/** Size estimate for a patch that doesn't exist yet (ports resolved like the editor shows them). */
-export function estimatePatchSize(doc: SonobeDocument, registry: Registry, node: PatchNode): { width: number; height: number } {
-  const ports = resolveNodePorts(doc, node, registry);
-  const spec = ports?.spec ?? getPatchSpec(registry, node.type);
-  return estimateNodeSize({
-    kind: "patch",
-    title: node.name || spec?.name || node.type,
-    collapsed: node.ui.collapsed === true,
-    inputs: (ports?.inputs ?? []).filter((p) => !p.advanced),
-    outputs: ports?.outputs ?? [],
-  });
+const ESTIMATE_ID = "estimate";
+
+/**
+ * Size estimate for one patch, alone (a patch that doesn't exist yet, or one being pasted), drawn
+ * as the editor would draw it in `component` (default: the root).
+ */
+export function estimatePatchSize(doc: SonobeDocument, registry: Registry, node: PatchNode, options: { component?: Id; measure?: NodeTextMeasurer } = {}): NodeSize {
+  const host = getOwn(doc.components, options.component ?? doc.project.root);
+  const scratch: Component = host
+    ? { ...host, id: `${host.id}__${ESTIMATE_ID}`, patches: { [ESTIMATE_ID]: node }, comments: [], interface: { inputs: {}, outputs: {} } }
+    : { formatVersion: FORMAT_VERSION, id: ESTIMATE_ID, name: "Estimate", kind: "patchComponent", interface: { inputs: {}, outputs: {} }, layers: [], patches: { [ESTIMATE_ID]: node }, comments: [] };
+  const model = deriveGraph({ doc: { ...doc, components: { ...doc.components, [scratch.id]: scratch } }, componentId: scratch.id, registry, ...(options.measure ? { measure: options.measure } : {}) });
+  const data = model.nodes.find((n) => n.id === ESTIMATE_ID)?.data;
+  return data ? estimateNodeSize(data, { ...(options.measure ? { measure: options.measure } : {}), layerName: (id) => host && findLayerName(host, id) }) : { width: 164, height: 50 };
 }
 
-/** Obstacles from the document alone (estimated patch sizes, comment frames), for callers without a canvas. */
-export function documentObstacles(doc: SonobeDocument, component: Component, registry: Registry): PlacementObstacles {
+const layerNames = new WeakMap<Component, Map<Id, string>>();
+
+function findLayerName(component: Component, id: Id): string | undefined {
+  let names = layerNames.get(component);
+  if (!names) layerNames.set(component, (names = new Map(allLayers(component.layers).map((l) => [l.id, l.name]))));
+  return names.get(id);
+}
+
+export interface NodeBoxOptions {
+  /** Measures node text (default: the SF Pro metrics table). */
+  measure?: NodeTextMeasurer;
+  /** Live values by address, printed on output rows (a headless runtime stepped a second). */
+  live?: (address: string) => unknown;
+  /** Document diagnostics, for issue badges. */
+  diagnostics?: readonly Diagnostic[];
+}
+
+/**
+ * Every node of a component's graph (patches, "@layer" targets, "$in"/"$out") with its position and
+ * estimated size, as the patch editor would draw it. Comments aren't included; their rect is their box.
+ */
+export function componentNodeBoxes(doc: SonobeDocument, registry: Registry, componentId: Id, options: NodeBoxOptions = {}): Map<string, Rect> {
+  const component = getOwn(doc.components, componentId);
+  if (!component) return new Map();
+  const base = { doc, componentId, registry, ...(options.diagnostics ? { diagnostics: options.diagnostics } : {}), ...(options.measure ? { measure: options.measure } : {}) };
+  const estimate = { ...(options.measure ? { measure: options.measure } : {}), ...(options.live ? { live: options.live } : {}), layerName: (id: Id) => findLayerName(component, id) };
+  let model = deriveGraph(base);
+  const sizes = new Map<string, NodeSize>();
+  for (const node of model.nodes) if (node.type !== "comment") sizes.set(node.id, estimateNodeSize(node.data, estimate));
+  // Live values widen nodes; place layer and interface nodes from those sizes.
+  if (options.live) model = deriveGraph({ ...base, sizes });
+  const boxes = new Map<string, Rect>();
+  for (const node of model.nodes) {
+    const size = sizes.get(node.id);
+    if (size) boxes.set(node.id, { x: node.position.x, y: node.position.y, ...size });
+  }
+  return boxes;
+}
+
+/** Obstacles from the document alone (estimated node sizes, comment frames), for callers without a canvas. */
+export function documentObstacles(doc: SonobeDocument, component: Component, registry: Registry, options: NodeBoxOptions = {}): PlacementObstacles {
+  const withComponent = doc.components[component.id] === component ? doc : { ...doc, components: { ...doc.components, [component.id]: component } };
   return {
-    nodes: Object.values(component.patches).map((node) => ({ x: node.ui.x, y: node.ui.y, ...estimatePatchSize(doc, registry, node) })),
+    nodes: [...componentNodeBoxes(withComponent, registry, component.id, options).values()],
     comments: component.comments.map((c) => ({ x: c.rect[0], y: c.rect[1], width: c.rect[2], height: c.rect[3] })),
   };
 }
@@ -110,7 +158,7 @@ export function freeInsertPosition(doc: SonobeDocument, componentId: Id, registr
   const virtual: PatchNode = { type, inputs: {}, ui: { x: 0, y: 0 } };
   if (options.typeParam) virtual.typeParam = options.typeParam as PatchNode["typeParam"];
   if (options.component) virtual.component = options.component;
-  const size = estimatePatchSize(doc, registry, virtual);
+  const size = estimatePatchSize(doc, registry, virtual, { component: componentId });
   if (!component) return near ?? { x: 40, y: 40 };
   const obstacles = documentObstacles(doc, component, registry);
   let preferred = near;

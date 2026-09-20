@@ -12,7 +12,7 @@ import { ColorPicker } from "../../../ui/ColorPicker.tsx";
 import { useContextMenu, type MenuEntry } from "../../../ui/Menu.tsx";
 import { Popover } from "../../../ui/Popover.tsx";
 import { createScrubSession, formatNumber, nudgeValue, parseNumberInput, type ScrubSession } from "../../../ui/lib/scrubMath.ts";
-import { formatNumberShort, formatValue, shortHex } from "../model/format.ts";
+import { formatNumberShort, formatValue, shortHex } from "@sonobe/core/graph";
 import type { PortModel } from "../model/types.ts";
 import { usePatchEditor } from "../state/context.ts";
 

@@ -18,6 +18,7 @@ import { addComponent, removeComponent, updateComponent, updateInterface } from 
 import { appliedOps, createContext, fail, newAffected, newRenamed, OpFailure, PendingRef, type ApplyOpsOptions, type ApplyOpsResult, type OpContext, type OpOutcome, type RenamedIds } from "./context.ts";
 import { createComponent } from "./createComponent.ts";
 import { checkOpFields } from "./fields.ts";
+import { setNodePositions } from "./graphNodes.ts";
 import { connect, disconnect, rename, setInput } from "./inputs.ts";
 import { addKnob, addKnobPreset, applyKnobPreset, removeKnob, removeKnobPreset, setKnobValue, updateKnob, updateKnobPreset } from "./knobs.ts";
 import { addLayer, moveLayer, removeLayer, updateLayer } from "./layers.ts";
@@ -47,6 +48,7 @@ const HANDLERS = {
   createComponent,
   updateInterface,
   updateComponent,
+  setNodePositions,
   setScript,
   addAsset,
   removeAsset,

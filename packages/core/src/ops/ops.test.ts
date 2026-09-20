@@ -175,7 +175,7 @@ describe("addPatch", () => {
     ]);
     expect(main(r.doc).patches).toStrictEqual({
       transition: { type: "transition", typeParam: "number", inputs: {}, ui: { x: 40, y: 40 } },
-      sum: { type: "add", name: "Sum", typeParam: "number", inputCount: 2, inputs: {}, ui: { x: 240, y: 40 } },
+      sum: { type: "add", name: "Sum", typeParam: "number", inputCount: 2, inputs: {}, ui: { x: 276, y: 40 } },
       switch: { type: "switch", inputs: {}, ui: { x: 10, y: 300 } },
     });
     expectRoundTrip(emptyDoc(), r);
@@ -221,7 +221,7 @@ describe("updatePatch", () => {
     ]).doc;
     const r = mustApply(doc, [{ op: "updatePatch", id: "grow", typeParam: "number" }]);
     const c = main(r.doc);
-    expect(c.patches.grow).toStrictEqual({ type: "transition", typeParam: "number", inputs: { progress: { link: "pop.output" } }, ui: { x: 240, y: 40 } });
+    expect(c.patches.grow).toStrictEqual({ type: "transition", typeParam: "number", inputs: { progress: { link: "pop.output" } }, ui: { x: 276, y: 40 } });
     expect(c.layers[0]!.props).toEqual({});
     expect(r.affected.layers).toEqual(["card"]);
     expectRoundTrip(doc, r);

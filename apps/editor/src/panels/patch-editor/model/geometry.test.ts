@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { boundsVisible, estimateNodeSize, readableViewport } from "./geometry.ts";
+import { boundsVisible, readableViewport } from "./geometry.ts";
 
 const pad = { top: 20, right: 20, bottom: 20, left: 20 };
 
@@ -25,13 +25,5 @@ describe("readableViewport", () => {
     expect(bounds.x * vp.zoom + vp.x).toBe(20);
     expect(bounds.y * vp.zoom + vp.y).toBe(20);
     expect(boundsVisible(bounds, vp, 500, 320)).toBe(false);
-  });
-});
-
-describe("estimateNodeSize", () => {
-  it("sizes nodes from what they show", () => {
-    expect(estimateNodeSize({ kind: "comment" })).toEqual({ width: 240, height: 120 });
-    expect(estimateNodeSize({ kind: "patch", title: "Switch", collapsed: true })).toEqual({ width: 120, height: 28 });
-    expect(estimateNodeSize({ kind: "patch", title: "Switch", inputs: [{ name: "Flip" }, { name: "Turn On" }], outputs: [{ name: "On" }] }).height).toBe(28 + 2 * 22 + 6);
   });
 });
