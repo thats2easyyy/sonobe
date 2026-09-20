@@ -1,7 +1,8 @@
 /**
  * zod input and output schemas shared by tools, the CLI and tests. Value and op shapes stay loose
  * on purpose: core applyOps validates them and returns teaching errors with did-you-mean and
- * ready-to-apply fixes, which beats a generic schema rejection. Browser-safe.
+ * ready-to-apply fixes, which beats a generic schema rejection. Other objects are closed: a field
+ * they don't take fails the call with a did-you-mean (inputs.ts). Browser-safe.
  */
 
 import { OP_KINDS } from "@sonobe/core";
@@ -48,7 +49,7 @@ export interface NewLayerInput {
   component?: string;
 }
 
-export const NewLayerSchema: z.ZodType<NewLayerInput> = z.looseObject({
+export const NewLayerSchema: z.ZodType<NewLayerInput> = z.object({
   ref: z.string().optional().describe('Temp name for later references in this batch ("$ref").'),
   id: z.string().optional().describe("Explicit id (default: derived from the name)."),
   type: z
@@ -72,7 +73,7 @@ export const NewLayerSchema: z.ZodType<NewLayerInput> = z.looseObject({
   component: z.string().optional().describe("For componentInstance: the layer component to show."),
 });
 
-export const NewPatchSchema = z.looseObject({
+export const NewPatchSchema = z.object({
   ref: z
     .string()
     .optional()
