@@ -3,6 +3,7 @@ import type { Op } from "@sonobe/core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createManualScheduler, type ManualScheduler } from "../../runtime/scheduler.ts";
 import { createEditorSession, type EditorSession } from "../../state/session.ts";
+import { designStore, initialDesignData } from "../design/designStore.ts";
 import { HOLOGRAM_STALE_MS, hologramStore } from "./hologram.ts";
 import { HOLO, type HoloPlan } from "./hologramPlan.ts";
 import { attachViewerHologram, followScreen, prototypePlan } from "./HologramViewer.ts";
@@ -61,6 +62,7 @@ afterEach(() => {
   detach?.();
   detach = null;
   session.dispose();
+  designStore.setState(initialDesignData());
   document.body.innerHTML = "";
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
@@ -200,6 +202,30 @@ describe("the Viewer's hologram", () => {
     scheduler.frames(2);
     expect(store.getState().show).toMatchObject({ lead: "viewer", start: 10_000 });
     expect(store.getState().show!.plan.pieces.map((p) => p.shape)).toEqual(["text"]);
+  });
+
+  it("plays nothing for an import Design with Claude's live preview drew on a canvas, and plays one no canvas previewed", () => {
+    attach();
+    const store = hologramStore(session);
+    const importScreen = (id: string) => {
+      const ops: Op[] = [{ op: "addLayer", component: root(), layer: { id, type: "group", name: "Checkout", props: { position: [0, 0], size: [402, 874] }, children: [{ type: "rectangle", name: "Header", props: { position: [0, 0], size: [402, 120] } }] } }];
+      expect(session.document.getState().apply(ops, { label: "imported Checkout", author: { kind: "agent", name: "Assistant" }, source: "import" }).ok).toBe(true);
+      scheduler.frames(2);
+    };
+    const adding = () => designStore.setState({ drafts: [{ source: "assistant", key: "t1", runId: "r1", turn: 1, toolUseId: "t1", html: "<p>Checkout</p>", fields: { name: "Checkout" }, status: "adding", since: Date.now(), progress: null, error: null, resync: false }] });
+    // The canvas draws the component and previews the draft being added: its preview fades onto the layers, and the Viewer shows them as they land.
+    const offCanvas = store.getState().addCanvas(root());
+    adding();
+    importScreen("previewed");
+    expect(store.getState()).toMatchObject({ request: null, show: null });
+    expect(veil()).toBeNull();
+    expect(covers).toEqual([]);
+
+    // With no canvas on the component nothing previewed the draft: the Viewer's hologram is the reveal.
+    offCanvas();
+    importScreen("unpreviewed");
+    expect(store.getState().show).toMatchObject({ lead: "viewer", screenId: "unpreviewed" });
+    expect(veil()).not.toBeNull();
   });
 
   it("plays nothing for a component the prototype doesn't draw", () => {

@@ -1,12 +1,9 @@
 import { expect, test, type Page } from "@playwright/test";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { collectConsoleProblems, hook, openEditor, runCommand, screenshot } from "./helpers.ts";
+import { collectConsoleProblems, hologramDone, hook, openEditor, runCommand, screenshot } from "./helpers.ts";
 
 const profileHtml = readFileSync(fileURLToPath(new URL("../packages/import/fixtures/profile.html", import.meta.url)), "utf8");
-
-/** Wait for the import hologram to finish (about 3.7 s), so screenshots show the design. */
-const hologramDone = (page: Page) => expect(page.locator(".sb-holo")).toHaveCount(0, { timeout: 10_000 });
 
 /** A capture as the Chrome extension copies it. */
 const receiptCapture = {

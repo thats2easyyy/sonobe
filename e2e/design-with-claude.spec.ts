@@ -10,7 +10,7 @@ import { expect, test, type Locator, type Page } from "@playwright/test";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { fakeAssistantSent, fakeHandoffs, installFakeAssistant, releaseFakeGate } from "./fakeAssistant.ts";
-import { collectConsoleProblems, hook, openEditor, screenshot } from "./helpers.ts";
+import { collectConsoleProblems, hook, openEditor, sawHologram, screenshot, watchForHologram } from "./helpers.ts";
 
 const profileHtml = readFileSync(fileURLToPath(new URL("../packages/import/fixtures/profile.html", import.meta.url)), "utf8");
 
@@ -158,7 +158,9 @@ test.describe("Design with Claude", () => {
     expect(await previewFrame!.evaluate(() => fetch("https://example.com/x").then(() => "fetched", () => "refused"))).toBe("refused");
     expect(blocked).toEqual([]);
 
-    // Done: the preview gives way to real layers, and the new screen is selected.
+    // Done: the preview gives way to real layers, and the new screen is selected. The preview was its
+    // reveal, so the import hologram doesn't build it again, on the canvas or in the Viewer.
+    await watchForHologram(page);
     await releaseFakeGate(page);
     await expect(statusLine(box, "Added “Profile”.")).toBeVisible({ timeout: 30_000 });
     await expect(preview(page)).toBeHidden();
@@ -170,6 +172,7 @@ test.describe("Design with Claude", () => {
     await expect(statusLine(box, "Added “Profile”.")).toContainText("It's in front of the other layers in “Main”, so it covers them in the viewer too.");
     for (const chip of ["Undo", "Send to Back", "Make it interactive", "Add knobs", "Try a darker version"]) await expect(box.getByRole("button", { name: chip, exact: true }), chip).toBeVisible();
     await expect(box.getByText("Added a profile screen.")).toBeVisible();
+    expect(await sawHologram(page)).toBe(false);
     await screenshot(page, "design-02-added");
 
     // Undo in the box takes the whole import back.
@@ -195,6 +198,8 @@ test.describe("Design with Claude", () => {
     await expect.poll(async () => (await fakeAssistantSent(page)).at(-1)?.context?.target?.id).toBe(cardId);
     expect((await fakeAssistantSent(page)).at(-1)!.text).toBe("make it darker");
     await expect(statusLine(box, "Updated “Profile Card”")).toBeVisible({ timeout: 30_000 });
+    // Adding it again and redesigning its card played no hologram either.
+    expect(await sawHologram(page)).toBe(false);
 
     // A layer's Redesign with Claude… in the Layers panel picks that layer.
     await page.locator("#sb-layers").getByText("Profile", { exact: true }).first().click({ button: "right" });

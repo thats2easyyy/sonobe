@@ -14,6 +14,9 @@ import { toast } from "../../ui/Toast.tsx";
 import { Toggle } from "../../ui/Toggle.tsx";
 import { readString, writeString } from "../../ui/lib/storage.ts";
 import { useElementSize } from "../../ui/lib/useElementSize.ts";
+import { assistantStore } from "../assistant/assistantStore.ts";
+import { sharedAssistantController } from "../assistant/controller.ts";
+import { chatProvider } from "../assistant/provider.ts";
 import { getAssistantHost, supportsAssistant } from "../assistant/types.ts";
 import { designStore } from "../design/designStore.ts";
 import { HologramScanner, scannerFrame } from "./HologramScanner.tsx";
@@ -56,6 +59,8 @@ function ImportContent({ titleId, onClose, initialTab, deps }: { titleId: string
   const session = useEditorSession();
   const urlSupported = canImportUrl(deps);
   const [assistantAvailable] = useState(() => supportsAssistant(getAssistantHost()));
+  // The experimental switch in Settings → Claude puts the Assistant on the person's Claude subscription.
+  const onSubscription = useStore(assistantStore, (s) => chatProvider(s.status) === "subscription");
   const [tab, setTab] = useState<ImportTab>(() => initialTab ?? ((readString(TAB_KEY) as ImportTab | null) ?? (urlSupported ? "url" : "html")));
   const [url, setUrl] = useState(() => readString(URL_KEY) ?? "http://localhost:3000/");
   const [html, setHtml] = useState("");
@@ -84,6 +89,10 @@ function ImportContent({ titleId, onClose, initialTab, deps }: { titleId: string
   });
 
   useEffect(() => writeString(TAB_KEY, tab), [tab]);
+  // The With Claude tab says what the Assistant runs on.
+  useEffect(() => {
+    if (assistantAvailable && tab === "claude") void sharedAssistantController().refresh();
+  }, [assistantAvailable, tab]);
   // Closing the dialog while an import runs cancels it.
   useEffect(() => () => running.current?.abort(), []);
   useEffect(() => {
@@ -202,7 +211,7 @@ function ImportContent({ titleId, onClose, initialTab, deps }: { titleId: string
           <section className="sb-import__section" aria-label="With Claude">
             {assistantAvailable && (
               <div className="sb-import__assistant">
-                <p className="sb-import__text">Design it here: describe a screen and watch Claude draw it on the canvas, using your own API key.</p>
+                <p className="sb-import__text">Design it here: describe a screen and watch Claude draw it on the canvas, using {onSubscription ? "your Claude subscription" : "your own API key"}.</p>
                 <Button
                   size="sm"
                   variant="ai"

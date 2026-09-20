@@ -1,18 +1,20 @@
 /**
  * When the import hologram plays, and on which surfaces. Imports through the dialog and pasted
  * captures ask for it from importCapture; Claude's import_design marks its apply with source "import",
- * which watchHolograms turns into the same request. The canvas that draws the component takes the
- * request, builds the screen and publishes the show: its plan and when it started, so the Viewer's
- * device screen traces the same wireframe in step. When no canvas draws that component (patches-only
- * view, another component), the Viewer takes the request and plays it alone. A request nobody takes
- * soon goes stale.
+ * which watchHolograms turns into the same request. An import that Design with Claude's live preview
+ * drew asks for none: that preview fades onto the layers instead (requestHologram). The canvas that
+ * draws the component takes the request, builds the screen and publishes the show: its plan and when
+ * it started, so the Viewer's device screen traces the same wireframe in step. When no canvas draws
+ * that component (patches-only view, another component), the Viewer takes the request and plays it
+ * alone. A request nobody takes goes stale after HOLOGRAM_STALE_MS, and the watcher drops it.
  */
 
-import { findLayer, type Id, type LayerNode, type SonobeDocument } from "@sonobe/core";
+import { findLayer, type Author, type Id, type LayerNode, type SonobeDocument } from "@sonobe/core";
 import { createStore, type StoreApi } from "zustand/vanilla";
 import type { CaptureTarget } from "../../state/bounds.ts";
 import type { DocumentChange } from "../../state/document.ts";
 import type { EditorSession } from "../../state/session.ts";
+import { designStore, previewedImport } from "../design/designStore.ts";
 import type { HoloPlan } from "./hologramPlan.ts";
 
 export interface HologramTarget {
@@ -69,6 +71,9 @@ export interface HologramState {
 export const HOLOGRAM_STALE_MS = 1000;
 
 const now = () => (typeof performance !== "undefined" ? performance.now() : 0);
+
+/** Whether a request can still be taken at `at`: it isn't stale yet. */
+const freshRequest = (request: HologramRequest | null, at: number): boolean => request !== null && at - request.at <= HOLOGRAM_STALE_MS;
 
 export function createHologramStore(): StoreApi<HologramState> {
   let nonce = 0;
@@ -144,6 +149,18 @@ export function hologramStore(session: EditorSession): StoreApi<HologramState> {
     stores.set(session, store);
   }
   return store;
+}
+
+/**
+ * Ask for the hologram over a screen that was just imported, unless Design with Claude drew it: while
+ * the draft the canvas previews is being added to that component, the preview is the import's one
+ * reveal, on the canvas and in the Viewer.
+ */
+export function requestHologram(session: EditorSession, target: HologramTarget, author: Author | null): void {
+  const store = hologramStore(session);
+  // Only a canvas draws the preview: with none on that component, the Viewer's hologram is the reveal.
+  if (store.getState().canvases.includes(target.componentId) && previewedImport(designStore.getState(), Date.now(), target.componentId, session.document.getState().doc.project.root, author)) return;
+  store.getState().build(target);
 }
 
 /** "imported Profile", "re-imported Profile", "Import “Profile”": but not "important" or "Paste". */
@@ -253,9 +270,10 @@ const nextFrame = () =>
  */
 async function hologramSettled(store: StoreApi<HologramState>, target: CaptureTarget, doc: Document | undefined): Promise<void> {
   if (target === "graph.bounds") return;
+  // A stale request plays nowhere unless the Viewer already covers for it, and then its veil is mounted.
   const busy = () => {
     const s = store.getState();
-    return s.request !== null || s.show !== null || !!doc?.querySelector(".sb-holo, .sb-vw-holo");
+    return freshRequest(s.request, now()) || s.show !== null || !!doc?.querySelector(".sb-holo, .sb-vw-holo");
   };
   if (!busy()) return;
   const deadline = performance.now() + HOLOGRAM_CAPTURE_WAIT_MS;
@@ -281,7 +299,7 @@ function startWatching(session: EditorSession): () => void {
         else if (change.kind === "undo") store.getState().end(show.nonce);
       }
       const target = agentImportTarget(change, state.doc, previous.doc);
-      if (target) store.getState().build(target);
+      if (target) requestHologram(session, target, change.author);
     } catch {
       // The design landed; only its build animation is lost.
     }
@@ -295,11 +313,33 @@ function startWatching(session: EditorSession): () => void {
     removeListeners = playing === null ? null : listenForEarlyEnd(() => store.getState().end(playing));
     listeningTo = playing;
   };
-  const unsubscribeStore = store.subscribe(sync);
+  // Drop a request nobody took once it's stale (its screen isn't drawn anywhere), so it can't hold
+  // captures back or play late. A Viewer covering for it plays it alone either way.
+  let expiry: ReturnType<typeof setTimeout> | undefined;
+  let expiring: HologramRequest | null = null;
+  const expire = ({ request }: HologramState) => {
+    if (request === expiring) return;
+    clearTimeout(expiry);
+    expiring = request;
+    if (!request) return;
+    const later = () => (expiry = setTimeout(check, request.at + HOLOGRAM_STALE_MS - now() + 1));
+    const check = () => {
+      if (store.getState().request !== request) return;
+      if (freshRequest(request, now())) later();
+      else store.getState().take(request.nonce);
+    };
+    later();
+  };
+  const unsubscribeStore = store.subscribe((s) => {
+    sync(s);
+    expire(s);
+  });
   sync(store.getState());
+  expire(store.getState());
   return () => {
     unsubscribeDocument();
     unsubscribeStore();
+    clearTimeout(expiry);
     removeListeners?.();
     removeSettler?.();
   };
@@ -308,9 +348,9 @@ function startWatching(session: EditorSession): () => void {
 const watchers = new WeakMap<EditorSession, { users: number; stop: () => void }>();
 
 /**
- * Plays the hologram for Claude's imports and ends shows early on a click, a key or an undo. The
- * surfaces that draw it (the canvas, the Viewer) each call it; they share one watcher per session.
- * Returns the release.
+ * Plays the hologram for Claude's imports, drops requests nobody takes, and ends shows early on a
+ * click, a key or an undo. The surfaces that draw it (the canvas, the Viewer) each call it; they
+ * share one watcher per session. Returns the release.
  */
 export function watchHolograms(session: EditorSession): () => void {
   let watcher = watchers.get(session);

@@ -6,6 +6,7 @@ import { createBrowserHost, createMemoryProjectStorage } from "../../host/browse
 import { createManualScheduler } from "../../runtime/scheduler.ts";
 import { createEditorSession, type EditorSession } from "../../state/session.ts";
 import { duplicateSelection } from "../../state/editActions.ts";
+import { designStore, initialDesignData, type DesignDraft } from "../design/designStore.ts";
 import { agentImportTarget, createHologramStore, hideCoveredChrome, HOLOGRAM_STALE_MS, hologramStore, importedScreen, IMPORT_LABEL, pointerEndsHologram, viewerHoloMode, watchHolograms, type HologramState } from "./hologram.ts";
 import { prefersReducedMotion } from "./hologramDraw.ts";
 import type { HoloPlan } from "./hologramPlan.ts";
@@ -16,6 +17,8 @@ let session: EditorSession | null = null;
 afterEach(() => {
   session?.dispose();
   session = null;
+  designStore.setState(initialDesignData());
+  vi.useRealTimers();
 });
 
 function setup() {
@@ -26,6 +29,22 @@ function setup() {
 }
 
 const CLAUDE = { kind: "agent" as const, name: "Claude" };
+const ASSISTANT = { kind: "agent" as const, name: "Assistant" };
+
+/** A Design with Claude draft on the canvas: the in-app Assistant's import_design html by default. */
+const designDraft = (over: Partial<DesignDraft> = {}): DesignDraft => ({ source: "assistant", key: "t1", runId: "r1", turn: 1, toolUseId: "t1", html: "<p>Receipt</p>", fields: { name: "Receipt" }, status: "adding", since: Date.now(), progress: null, error: null, resync: false, ...over });
+/** Claude Code's preview_design draft. */
+const mcpDraft = (over: Partial<DesignDraft> = {}): DesignDraft => designDraft({ source: "mcp", key: "mcp:cc-1", runId: "", turn: 0, toolUseId: "", mcp: { author: CLAUDE, client: null, draftRevision: 2, touchedAt: Date.now(), addingFrom: 0 }, ...over });
+
+/** A design capture as a browser extension copies it. */
+const receiptCapture = {
+  format: "sonobe.design-capture",
+  version: 1,
+  source: { kind: "chrome", title: "Receipt" },
+  viewport: { width: 402, height: 874 },
+  root: { kind: "frame", name: "Receipt", box: [0, 0, 402, 300], fill: "#FFFFFFFF", children: [] },
+  images: {},
+};
 
 /** A show's plan: a phone screen's timeline, no wireframe. */
 const PLAN: HoloPlan = { screen: { x: 0, y: 0, width: 402, height: 874 }, radii: [0, 0, 0, 0], pieces: [], reduced: false, timeline: { downStart: 200, downEnd: 1800, upStart: 2100, upEnd: 3400, end: 3800 } };
@@ -189,6 +208,112 @@ describe("hologram requests", () => {
     expect(builds).toHaveLength(2);
   });
 
+  it("skips the hologram for an import Design with Claude's live preview drew, and asks for it for every other import", async () => {
+    const s = setup();
+    const store = hologramStore(s);
+    const stop = watchHolograms(s);
+    // The canvas that previews the draft (its component, the root).
+    const offCanvas = store.getState().addCanvas(s.document.getState().doc.project.root);
+    const doc = () => s.document.getState();
+    const importAs = (author: typeof CLAUDE, ref: string) => expect(doc().apply(screenOps(ref), { label: "set up the receipt screen", author, source: "import" }).ok, ref).toBe(true);
+    const requested = () => {
+      const request = store.getState().request;
+      if (request) store.getState().take(request.nonce);
+      return request !== null;
+    };
+
+    // The Assistant's import_design html, being added: the preview over the artboard is its reveal.
+    designStore.setState({ drafts: [designDraft()] });
+    importAs(ASSISTANT, "assistant");
+    expect(store.getState()).toMatchObject({ request: null, show: null });
+    // So Claude's screenshot right after it has nothing to wait for.
+    const settled = s.bounds.settle("canvas.bounds").then(() => "settled");
+    expect(await Promise.race([settled, new Promise((resolve) => setTimeout(resolve, 200, "waiting"))])).toBe("settled");
+    // On the Claude subscription, its own preview_design draft, being added by import_design { preview: true }.
+    designStore.setState({ drafts: [mcpDraft({ key: "mcp:Assistant", runId: "r1", mcp: { author: ASSISTANT, client: null, draftRevision: 3, touchedAt: Date.now(), addingFrom: 0 } })] });
+    importAs(ASSISTANT, "subscription");
+    expect(requested()).toBe(false);
+    // Claude Code's preview_design draft, the same way.
+    designStore.setState({ drafts: [mcpDraft()] });
+    importAs(CLAUDE, "claudeCode");
+    expect(requested()).toBe(false);
+    // The stand-in Assistant of the browser editor's tests imports through importCapture, which asks the same way.
+    designStore.setState({ drafts: [designDraft()] });
+    expect((await pasteDesignCapture(s, JSON.stringify(receiptCapture), () => undefined, { desktop: null }))?.ok).toBe(true);
+    expect(requested()).toBe(false);
+
+    // A draft still being written, or being added to another component, isn't this import's reveal.
+    designStore.setState({ drafts: [designDraft({ status: "writing" })] });
+    importAs(CLAUDE, "writing");
+    expect(requested()).toBe(true);
+    designStore.setState({ drafts: [mcpDraft({ fields: { name: "Sheet", component: "sheet" } })] });
+    importAs(CLAUDE, "elsewhere");
+    expect(requested()).toBe(true);
+    // Added and faded: Claude's next plain import (html, a URL, a capture) builds as a hologram again.
+    designStore.setState({ drafts: [designDraft({ status: "added", since: Date.now() - 1000 })] });
+    importAs(CLAUDE, "plain");
+    expect(requested()).toBe(true);
+    // And so do the dialog's imports and pasted captures.
+    expect((await pasteDesignCapture(s, JSON.stringify(receiptCapture), () => undefined, { desktop: null }))?.ok).toBe(true);
+    expect(requested()).toBe(true);
+
+    // Another author's import while a draft is being added isn't that draft's: Claude Code's import over the
+    // Assistant's draft, the Assistant's over Claude Code's, and the person's own paste over Claude Code's.
+    designStore.setState({ drafts: [designDraft()] });
+    importAs(CLAUDE, "overAssistant");
+    expect(requested()).toBe(true);
+    designStore.setState({ drafts: [mcpDraft()] });
+    importAs(ASSISTANT, "overClaudeCode");
+    expect(requested()).toBe(true);
+    expect((await pasteDesignCapture(s, JSON.stringify(receiptCapture), () => undefined, { desktop: null }))?.ok).toBe(true);
+    expect(requested()).toBe(true);
+
+    // With no canvas on the component nothing previewed the draft, so the hologram plays (in the Viewer).
+    offCanvas();
+    designStore.setState({ drafts: [designDraft()] });
+    importAs(ASSISTANT, "noCanvas");
+    expect(requested()).toBe(true);
+    stop();
+  });
+
+  it("lets a request nobody takes go stale: it stops holding screenshots back, and the watcher drops it", async () => {
+    vi.useFakeTimers();
+    const s = setup();
+    const store = hologramStore(s);
+    const stop = watchHolograms(s);
+    s.bounds.register("canvas.bounds", () => ({ x: 0, y: 0, width: 10, height: 10 }));
+    const off = store.getState().addCanvas(s.document.getState().doc.project.root);
+    // An import into a component no canvas or Viewer draws: nobody takes its request.
+    store.getState().build({ componentId: "settings", screenId: "a" });
+    const settled: string[] = [];
+    void s.bounds.settle("canvas.bounds").then(() => settled.push("canvas"));
+    void s.bounds.settle("viewer.bounds").then(() => settled.push("viewer"));
+    // While it's fresh, a canvas could still take it.
+    await vi.advanceTimersByTimeAsync(HOLOGRAM_STALE_MS - 100);
+    expect(settled).toEqual([]);
+    expect(store.getState().request).not.toBeNull();
+    await vi.advanceTimersByTimeAsync(200);
+    expect(settled.sort()).toEqual(["canvas", "viewer"]);
+    expect(store.getState().request).toBeNull();
+    // A stale request holds no capture back, even before the watcher drops it.
+    store.setState({ request: { componentId: "settings", screenId: "old", nonce: 99, at: performance.now() - HOLOGRAM_STALE_MS - 1 } });
+    let later = false;
+    void s.bounds.settle("canvas.bounds").then(() => (later = true));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(later).toBe(true);
+    expect(store.getState().request).toBeNull();
+    // A request that replaces a fresh one gets its own full second.
+    store.getState().build({ componentId: "settings", screenId: "b" });
+    await vi.advanceTimersByTimeAsync(HOLOGRAM_STALE_MS / 2);
+    store.getState().build({ componentId: "settings", screenId: "c" });
+    await vi.advanceTimersByTimeAsync(HOLOGRAM_STALE_MS / 2 + 10);
+    expect(store.getState().request?.screenId).toBe("c");
+    await vi.advanceTimersByTimeAsync(HOLOGRAM_STALE_MS / 2);
+    expect(store.getState().request).toBeNull();
+    off();
+    stop();
+  });
+
   it("ends a show early on an undo, and stops it when its screen goes away or another document opens", () => {
     const s = setup();
     const store = hologramStore(s);
@@ -303,15 +428,7 @@ describe("the Viewer's part", () => {
 
   it("plays for a pasted design capture (the dialog goes through the same importCapture)", async () => {
     const s = setup();
-    const capture = {
-      format: "sonobe.design-capture",
-      version: 1,
-      source: { kind: "chrome", title: "Receipt" },
-      viewport: { width: 402, height: 874 },
-      root: { kind: "frame", name: "Receipt", box: [0, 0, 402, 300], fill: "#FFFFFFFF", children: [] },
-      images: {},
-    };
-    const outcome = await pasteDesignCapture(s, JSON.stringify(capture), () => undefined, { desktop: null });
+    const outcome = await pasteDesignCapture(s, JSON.stringify(receiptCapture), () => undefined, { desktop: null });
     expect(outcome?.ok).toBe(true);
     expect(hologramStore(s).getState().request).toMatchObject({ componentId: s.document.getState().doc.project.root, screenId: outcome!.screenId });
     expect(s.document.getState().lastChange).toMatchObject({ kind: "apply", source: "import", label: "Import “Receipt”" });

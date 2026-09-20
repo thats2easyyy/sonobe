@@ -23,10 +23,10 @@
  *    with tests/fake-claude-agent.mjs in place of Claude's agent adapter (SONOBE_CLAUDE_AGENT) and
  *    FAKE_CLAUDE_MODE=auto: off by default on the API key; the Settings switch; the Assistant's choice and
  *    the fake's login; the canvas box drawing “Checkout” through preview_design and adding it as the
- *    Assistant's undo step (screenshots/subscription-design.png), with its tool steps streamed; the
- *    isolated session options and the mode put back to "default"; a permission card for save
- *    (screenshots/subscription-permission.png); Stop; a crash and the restart; signed out; not installed;
- *    and turning it off, which stops the adapter.
+ *    Assistant's undo step (screenshots/subscription-design.png), with its tool steps streamed and no
+ *    import hologram after the preview; the isolated session options and the mode put back to
+ *    "default"; a permission card for save (screenshots/subscription-permission.png); Stop; a crash
+ *    and the restart; signed out; not installed; and turning it off, which stops the adapter.
  * 4. Relaunches for window-state restore, file-loaded IPC trust, and the dev-server fallback.
  *
  *   node apps/desktop/tests/smoke.mjs
@@ -357,13 +357,15 @@ async function subscriptionSmoke() {
   await sheet.waitFor({ state: "hidden", timeout: 5000 });
   log("subscription: the Assistant offers Claude subscription and API key; the fake is signed in to Claude Max");
 
-  // Every Assistant event this window gets, and whether the canvas ever showed the draft.
+  // Every Assistant event this window gets, whether the canvas ever showed the draft, and whether an import hologram ever played.
   await page.evaluate(() => {
     window.__assistantEvents = [];
     window.sonobeHost.assistant.onEvent((event) => window.__assistantEvents.push(event));
     window.__sawDesignPreview = false;
+    window.__sawHologram = false;
     const look = () => {
       if (document.querySelector("iframe[title='Design preview']")) window.__sawDesignPreview = true;
+      if (document.querySelector(".sb-holo, .sb-vw-holo")) window.__sawHologram = true;
     };
     new MutationObserver(look).observe(document.body, { childList: true, subtree: true });
   });
@@ -405,6 +407,8 @@ async function subscriptionSmoke() {
   assert(!design.some((e) => e.type === "design_draft"), "this path draws through preview_design, not streamed drafts");
   assert(await page.evaluate(() => window.__sawDesignPreview), "the canvas drew the page while Claude wrote it");
   await page.locator("iframe[title='Design preview']").waitFor({ state: "detached", timeout: 5000 });
+  // import_design marks its batch "import" through the app host, but the preview was this import's reveal: neither the canvas nor the Viewer builds it again.
+  assert(!(await page.evaluate(() => window.__sawHologram)), "no import hologram after the preview drew the page");
   await settled();
   await page.screenshot({ path: subscriptionDesignScreenshotPath });
 
@@ -431,7 +435,7 @@ async function subscriptionSmoke() {
   assert(typeof opened._meta.systemPrompt === "string" && opened._meta.systemPrompt.includes("preview_design"), "the system prompt carries the tool guide", String(opened._meta.systemPrompt).slice(0, 200));
   assert(fakeLines().some((l) => l.kind === "mode" && l.from === "auto" && l.to === "default" && l.via === "config_option"), "a session the adapter starts in auto mode is put back in default", fakeLines().filter((l) => l.kind === "mode"));
   assert(fakeLines().some((l) => l.kind === "session/prompt" && l.text.startsWith("<canvas_context>")), "the box's message leads with the canvas context");
-  log(`subscription: the canvas box drew “Checkout” through preview_design (${toolsStarted.length} tool steps), then added it as the Assistant's undo step; isolated session in default mode → ${path.relative(process.cwd(), subscriptionDesignScreenshotPath)}`);
+  log(`subscription: the canvas box drew “Checkout” through preview_design (${toolsStarted.length} tool steps), then added it as the Assistant's undo step with no hologram after the preview; isolated session in default mode → ${path.relative(process.cwd(), subscriptionDesignScreenshotPath)}`);
 
   // The chat sheet: Claude Code's permission card for a save, answered in the app.
   await app.evaluate(({ app: electronApp }, folder) => electronApp.setPath("documents", folder), documents);
