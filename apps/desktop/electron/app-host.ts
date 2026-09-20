@@ -600,6 +600,8 @@ export function createAppHost(options: AppHostOptions): AppHost {
   const offScreenComponent = async (entry: Entry, target: ScreenshotTarget, o: ScreenshotOptions): Promise<Id | null> => {
     if (target.kind === "viewer") return null;
     if (target.kind === "layer") return o.component ?? null;
+    // A crop to one comment frame is drawn from the document, which knows where the frame is.
+    if (target.kind === "graph" && o.frame !== undefined && o.component !== undefined) return o.component;
     const onScreen = entry.target.hasMethod(`${target.kind}.bounds`) === true;
     if (onScreen && o.component === undefined) return null;
     if (!onScreen && o.component === undefined && !(target.kind === "graph" ? options.renderSvg : options.renderScene)) return null;
@@ -615,13 +617,15 @@ export function createAppHost(options: AppHostOptions): AppHost {
     const name = doc.components[componentId]?.name ?? componentId;
     const size = { ...(o.scale !== undefined ? { scale: o.scale } : {}), ...(o.maxWidth !== undefined ? { maxWidth: o.maxWidth } : {}) };
     if (target.kind === "graph") {
+      const frame = o.frame !== undefined ? { frame: o.frame } : {};
       if (!options.renderSvg) {
         throw new HostError("target_unavailable", `The patch editor isn't showing ${name}, and this build of Sonobe can't draw a graph off screen.`, { hint: "reveal with focus: true opens it for the person; then take the screenshot. To read the graph, use get_outline." });
       }
-      const drawing = drawComponentGraph(doc, registry, componentId, cachedGraphEstimate(doc, registry, componentId), size);
+      const drawing = drawComponentGraph(doc, registry, componentId, cachedGraphEstimate(doc, registry, componentId), { ...size, ...frame });
       const image = await options.renderSvg({ svg: drawing.svg, size: { width: drawing.width, height: drawing.height } });
       if (!image) throw new HostError("capture_failed", `Sonobe couldn't draw ${name}'s graph.`, { hint: "Try again. To read the graph, use get_outline." });
-      return { data: image.data, mimeType: "image/png", width: image.width, height: image.height, notes: graphNotes(doc, componentId, drawing, true) };
+      // A frame crop is drawn from the document even when the patch editor shows the component.
+      return { data: image.data, mimeType: "image/png", width: image.width, height: image.height, notes: graphNotes(doc, componentId, drawing, o.frame === undefined) };
     }
     if (!options.renderScene) {
       throw new HostError("target_unavailable", `The canvas isn't showing ${name}, and this build of Sonobe can't draw it off screen.`, { hint: "reveal with focus: true opens it for the person; then take the screenshot." });

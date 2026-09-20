@@ -235,6 +235,11 @@ export interface ScreenshotOptions {
    * SceneFrame, so without simId the app draws a fresh run like headless servers do.
    */
   isolate?: boolean;
+  /**
+   * With a graph target: draw only this comment frame of `component` (its rect plus a margin), for
+   * graphs too big to read whole. Drawn from the document on both hosts, which knows where it is.
+   */
+  frame?: Id;
   /** Device pixel scale (default 1). */
   scale?: number;
   /** Downscale so the image is at most this wide. */

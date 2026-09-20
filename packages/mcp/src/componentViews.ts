@@ -15,6 +15,9 @@ import { withLiveValues, type GraphGeometry } from "./geometry.ts";
 /** Longest edge of a graph drawing in pixels (the screenshot cap). */
 const MAX_EDGE = 2048;
 
+/** Room around a comment frame when a drawing is cropped to it, in points. */
+const FRAME_MARGIN = 24;
+
 /** The component on its own artboard at frame 0, with authored values: what the editor's canvas shows. */
 export function designScene(doc: SonobeDocument, registry: EngineRegistry, componentId: Id): SceneFrame {
   const runtime = createRuntime(componentDocument(doc, componentId), {
@@ -48,6 +51,11 @@ export function graphNotes(doc: SonobeDocument, componentId: Id, drawing: GraphD
   const notes = offscreen
     ? [`The patch editor isn't showing ${name}, so this is drawn from the document the way it lays graphs out (node sizes are estimates). reveal with focus: true opens it for the person; then get_screenshot captures the editor itself.`]
     : ["Drawn from the document the way the patch editor lays it out: node sizes are estimates, and text uses this machine's fonts."];
+  if (drawing.frame) {
+    const comment = doc.components[componentId]?.comments.find((c) => c.id === drawing.frame);
+    const title = comment?.text.split("\n")[0]!.trim();
+    notes.unshift(`Cropped to the comment frame ${drawing.frame}${title ? ` (${JSON.stringify(title)})` : ""}: nodes and cables past its edge are cut off.`);
+  }
   if (drawing.empty) notes.unshift(`${name}'s graph is empty: it has no patches, and no layer that a cable drives or reads.`);
   return notes;
 }
@@ -60,24 +68,34 @@ export interface GraphDrawing {
   hasText: boolean;
   /** The graph has no nodes: no patches and no layer that a cable drives or reads. */
   empty: boolean;
+  /** The comment frame the drawing is cropped to. */
+  frame?: Id;
 }
 
 /**
  * A component's patch graph as SVG, with every node where `geometry` puts it, sized to `scale`
- * pixels per point (default 1, at most 3) within `maxWidth` and the screenshot edge cap.
+ * pixels per point (default 1, at most 3) within `maxWidth` and the screenshot edge cap. `frame`
+ * crops it to one comment frame (a comment id of the component).
  */
 export function drawComponentGraph(
   doc: SonobeDocument,
   registry: EngineRegistry,
   componentId: Id,
   geometry: GraphGeometry,
-  options: { scale?: number; maxWidth?: number } = {},
+  options: { scale?: number; maxWidth?: number; frame?: Id } = {},
 ): GraphDrawing {
   const model = deriveGraph({ doc, componentId, registry });
   const names = new Map(allLayers(doc.components[componentId]?.layers ?? []).map((l) => [l.id, l.name]));
   const layerName = (id: string) => names.get(id);
+  const frame = options.frame !== undefined ? geometry.frames.get(options.frame) : undefined;
+  const crop = frame && {
+    x: frame.x - FRAME_MARGIN,
+    y: frame.y - FRAME_MARGIN,
+    width: frame.width + FRAME_MARGIN * 2,
+    height: frame.height + FRAME_MARGIN * 2,
+  };
   const draw = (scale: number, live?: (address: string) => unknown) =>
-    graphToSvg(model, { boxes: geometry.nodes, layerName, scale, ...(live ? { live } : {}) });
+    graphToSvg(model, { boxes: geometry.nodes, layerName, scale, ...(crop ? { crop } : {}), ...(live ? { live } : {}) });
   return withLiveValues(doc, registry, componentId, (live) => {
     // Size the drawing once at 1 pt per pixel, then pick the scale that fits.
     const natural = draw(1, live);
@@ -93,6 +111,7 @@ export function drawComponentGraph(
       height: drawing.height,
       hasText: drawing.hasText,
       empty: geometry.nodes.size === 0,
+      ...(frame ? { frame: options.frame } : {}),
     };
   });
 }
