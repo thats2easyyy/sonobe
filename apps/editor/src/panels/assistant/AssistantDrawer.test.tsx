@@ -2,6 +2,7 @@
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { appPanels } from "../../app/appPanels.ts";
 import { createAssistantStore } from "./assistantStore.ts";
 import { AssistantDrawer } from "./AssistantDrawer.tsx";
 import { fakeAssistantHost, usage, type FakeAssistantHost } from "./testing.ts";
@@ -58,13 +59,19 @@ async function click(el: Element | null | undefined) {
 }
 
 describe("AssistantDrawer", () => {
-  it("shows a desktop-only notice in the browser, with a link to Connect Claude", async () => {
+  it("shows a desktop-only notice in the browser that points to Import Design", async () => {
     const onConnectClaude = vi.fn();
     await mount(null, { onConnectClaude });
     expect(container.textContent).toContain("The Assistant runs in the Sonobe desktop app");
+    expect(container.textContent).toContain(
+      "It uses your own Anthropic API key, kept in your computer's keychain, so it isn't available in the browser. Claude's live edits need the desktop app too. Here, ask Claude for a screen as HTML and paste it into File → Import Design.",
+    );
+    expect(container.textContent).not.toContain("over MCP");
     expect(container.querySelector("textarea")).toBeNull();
-    await click(buttonByText(/Connect Claude/));
-    expect(onConnectClaude).toHaveBeenCalledTimes(1);
+    await click(buttonByText("Import Design…"));
+    expect(appPanels.getState().open).toBe("importDesign");
+    expect(onConnectClaude).not.toHaveBeenCalled();
+    appPanels.getState().hide();
   });
 
   it("asks for an API key first, explains privacy, and links to the Console and Connect Claude", async () => {
@@ -74,6 +81,7 @@ describe("AssistantDrawer", () => {
 
     expect(container.textContent).toContain("Use your own Anthropic API key");
     expect(container.textContent).toContain("never asks for your claude.ai login");
+    expect(container.textContent).toContain("When you chat, your messages, the parts of this prototype the Assistant reads, and any files it reads from a code folder you link are sent to Anthropic's API.");
     expect(container.textContent).toContain("macOS Keychain");
     expect(container.querySelector("textarea")).toBeNull();
 

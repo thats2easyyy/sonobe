@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { createAssistantStore } from "./assistantStore.ts";
 import { createAssistantController } from "./controller.ts";
 import { fakeAssistantHost, usage } from "./testing.ts";
-import { ANTHROPIC_CONSOLE_KEYS_URL, ASSISTANT_KEY_SECRET } from "./types.ts";
+import { ANTHROPIC_CONSOLE_KEYS_URL, ASSISTANT_KEY_SECRET, type AssistantCanvasContext } from "./types.ts";
 
 describe("assistant controller", () => {
   it("is unavailable in the browser and does nothing", async () => {
@@ -141,6 +141,67 @@ describe("assistant controller", () => {
     expect(host.listeners.size).toBe(1);
     host.emit({ type: "notice", runId: "r1", tone: "info", message: "still listening" });
     expect(store.getState().items).toEqual([expect.objectContaining({ kind: "notice", text: "still listening" })]);
+  });
+
+  it("sends the canvas's context with a message from the Design with Claude box, and tags it", async () => {
+    const host = fakeAssistantHost();
+    const store = createAssistantStore({ persistModel: false });
+    const controller = createAssistantController(host, store);
+    const context: AssistantCanvasContext = { component: { id: "main", name: "Main", size: [402, 874] }, screens: [{ id: "home", name: "Home" }] };
+    await controller.send(" a checkout ", { context });
+    expect(host.sent).toEqual([{ text: "a checkout", model: "claude-sonnet-5", context }]);
+    expect(store.getState().items[0]).toMatchObject({ kind: "user", text: "a checkout", origin: "canvas" });
+
+    await controller.send("and a promo code");
+    expect(host.sent[1]).toEqual({ text: "and a promo code", model: "claude-sonnet-5" });
+    expect(store.getState().items.filter((i) => i.kind === "user")[1]).toEqual({ kind: "user", id: expect.any(String), text: "and a promo code" });
+  });
+
+  it("reads, links and unlinks the code folder into the status", async () => {
+    const host = fakeAssistantHost();
+    const store = createAssistantStore({ persistModel: false });
+    const controller = createAssistantController(host, store);
+    await controller.refresh();
+    expect(store.getState().status?.codeFolder).toEqual({ linked: null, missing: false });
+
+    const linked = await controller.linkCodeFolder();
+    expect(linked).toEqual({ status: { linked: { name: "placemark", path: "~/code/placemark", persisted: true }, missing: false } });
+    expect(store.getState().status?.codeFolder?.linked?.name).toBe("placemark");
+
+    host.nextLink = () => ({ status: host.folder, cancelled: true });
+    expect(await controller.linkCodeFolder()).toMatchObject({ cancelled: true });
+    expect(store.getState().status?.codeFolder?.linked?.name).toBe("placemark");
+
+    host.nextLink = () => ({ status: host.folder, error: "Pick your app's folder, not your whole home folder." });
+    expect(await controller.linkCodeFolder()).toMatchObject({ error: "Pick your app's folder, not your whole home folder." });
+
+    host.folder = { linked: { name: "placemark", path: "~/code/placemark", persisted: true }, missing: true };
+    expect(await controller.codeFolder()).toMatchObject({ missing: true });
+    expect(store.getState().status?.codeFolder?.missing).toBe(true);
+
+    expect(await controller.unlinkCodeFolder()).toEqual({ linked: null, missing: false });
+    expect(store.getState().status?.codeFolder).toEqual({ linked: null, missing: false });
+    expect(host.folderCalls).toEqual(["link", "link", "link", "codeFolder", "unlink"]);
+  });
+
+  it("does nothing with the code folder when the host can't link one", async () => {
+    expect(await createAssistantController(null, createAssistantStore({ persistModel: false })).linkCodeFolder()).toBeNull();
+    const host = fakeAssistantHost();
+    const { codeFolder: _read, linkCodeFolder: _link, unlinkCodeFolder: _unlink, ...olderBridge } = host.assistant!;
+    const controller = createAssistantController({ ...host, assistant: olderBridge }, createAssistantStore({ persistModel: false }));
+    expect(controller.available).toBe(true);
+    expect(await controller.codeFolder()).toBeNull();
+    expect(await controller.linkCodeFolder()).toBeNull();
+    expect(await controller.unlinkCodeFolder()).toBeNull();
+  });
+
+  it("says why a folder couldn't be linked when the bridge rejects", async () => {
+    const host = fakeAssistantHost();
+    host.nextLink = () => {
+      throw new Error("Untrusted sender");
+    };
+    const controller = createAssistantController(host, createAssistantStore({ persistModel: false }));
+    expect(await controller.linkCodeFolder()).toEqual({ status: { linked: null, missing: false }, error: "Sonobe couldn't link the folder: Untrusted sender" });
   });
 
   it("keeps a stored model the host offers, else uses the host's default", async () => {
