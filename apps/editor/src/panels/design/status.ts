@@ -14,7 +14,8 @@ export interface DesignStatusLine {
   /** What the live region says: it changes only when the phase does. */
   text: string;
   tone: "busy" | "done" | "info" | "warn" | "error";
-  action?: "api_key" | "new_chat" | "settings";
+  /** api_key: the sheet's key setup. sign_in: Claude's login in Terminal. setup: the sheet's setup. */
+  action?: "api_key" | "new_chat" | "settings" | "sign_in" | "setup";
   /** Shown after the text but not announced, since it changes as Claude writes ("14 KB"). */
   detail?: string;
 }
@@ -27,6 +28,16 @@ const LAYER_TOOLS = new Set(["add_layers", "update_layers", "rename", "delete_it
 const QUIET_TOOLS = new Set(["begin_work", "finish_work", "reveal"]);
 /** Errors the person fixes with their API key (the box opens the sheet's key setup). */
 const KEY_ERRORS = new Set(["no_key", "invalid_key", "permission_denied"]);
+/**
+ * The Claude subscription's errors, and what fixes them. A crash and the plan's usage limit have none:
+ * their message says what to do (send again, wait, or switch to the API key).
+ */
+const SUBSCRIPTION_ACTIONS: Partial<Record<string, NonNullable<DesignStatusLine["action"]>>> = {
+  not_signed_in: "sign_in",
+  agent_not_installed: "setup",
+  agent_failed: "setup",
+  subscription_off: "settings",
+};
 
 export const DESIGN_COPY = {
   thinking: "Thinking…",
@@ -49,6 +60,8 @@ export function toolStatusText(chip: { name: string; title: string; detail: stri
   if (READ_TOOLS.has(name)) return "Reading your prototype…";
   if (name === "get_guide") return "Reading Sonobe's guide…";
   if (name === "get_screenshot") return "Looking at the screen…";
+  // While its draft is on the canvas, the line is the draft's ("Writing “Checkout”…").
+  if (name === "preview_design") return "Drawing on the canvas…";
   if (CODE_SEARCH_TOOLS.has(name)) return "Looking through your code…";
   if (name === "read_code_file") return detail ? `Reading ${detail}…` : "Looking through your code…";
   if (WIRING_TOOLS.has(name)) return "Wiring it up…";
@@ -142,7 +155,8 @@ const failedLine = (detail: string | null): DesignStatusLine => ({ text: detail 
 
 function errorLine(error: AssistantError | undefined): DesignStatusLine {
   if (!error) return { text: "The Assistant stopped with an error.", tone: "error" };
-  return { text: error.message, tone: "error", ...(KEY_ERRORS.has(error.code) ? { action: "api_key" as const } : {}) };
+  const action = KEY_ERRORS.has(error.code) ? "api_key" : SUBSCRIPTION_ACTIONS[error.code];
+  return { text: error.message, tone: "error", ...(action ? { action } : {}) };
 }
 
 /** The run's tool chips, oldest first. */

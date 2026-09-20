@@ -18,11 +18,12 @@ export const ASSISTANT_AUTHOR_NAME = "Assistant";
 export const MAX_TOOL_RESULT_CHARS = 150_000;
 
 /**
- * MCP tools the Assistant isn't given, and what it does instead. The canvas already draws its
- * import_design html while Claude writes it (design_draft events), so preview_design would only draw
- * the page twice. What names one is left out of what the Assistant sees: the server instructions'
- * lines, the input properties (import_design's preview) and the clauses of tool descriptions. A tool
- * result that names one (the importing guide) ends with a note saying what to do instead.
+ * MCP tools the Assistant isn't given on the API key, and what it does instead. The canvas already
+ * draws its import_design html while Claude writes it (design_draft events), so preview_design would
+ * only draw the page twice. What names one is left out of what the Assistant sees: the server
+ * instructions' lines, the input properties (import_design's preview) and the clauses of tool
+ * descriptions. A tool result that names one (the importing guide) ends with a note saying what to do
+ * instead. The subscription engine's bridge hides nothing: it draws through preview_design.
  */
 export const ASSISTANT_HIDDEN_TOOLS: ReadonlyMap<string, string> = new Map([
   ["preview_design", "The person's canvas already draws import_design's html while you write it, so skip the steps that use preview_design and pass the page to import_design as html."],
@@ -70,7 +71,7 @@ export interface ToolCallOptions {
 }
 
 export interface ToolBridge {
-  /** Every tool but ASSISTANT_HIDDEN_TOOLS, in the server's registration order (stable, so prompt caching holds). */
+  /** Every tool but the hidden ones, in the server's registration order (stable, so prompt caching holds). */
   tools(): Promise<readonly AssistantToolInfo[]>;
   /** The MCP server's instructions. */
   instructions(): Promise<string>;
@@ -82,6 +83,8 @@ export interface McpToolBridgeOptions {
   host: SonobeHost;
   version: string;
   guides?: GuideStore;
+  /** Tools left out, with what to do instead. Default ASSISTANT_HIDDEN_TOOLS; an empty map keeps every tool. */
+  hidden?: ReadonlyMap<string, string>;
 }
 
 interface Connection {
@@ -91,22 +94,24 @@ interface Connection {
   close(): Promise<void>;
 }
 
+type Hidden = ReadonlyMap<string, string>;
+
 /** The hidden tools `text` names. */
-const hiddenToolsIn = (text: string): string[] => [...ASSISTANT_HIDDEN_TOOLS.keys()].filter((name) => new RegExp(`\\b${name}\\b`).test(text));
+const hiddenToolsIn = (hidden: Hidden, text: string): string[] => [...hidden.keys()].filter((name) => new RegExp(`\\b${name}\\b`).test(text));
 
 /** The server instructions without the lines that teach a tool the Assistant isn't given. */
-function withoutHiddenTools(instructions: string): string {
+function withoutHiddenTools(hidden: Hidden, instructions: string): string {
   return instructions
     .split("\n")
-    .filter((line) => !hiddenToolsIn(line).length)
+    .filter((line) => !hiddenToolsIn(hidden, line).length)
     .join("\n");
 }
 
 /** A tool description without its sentences and clauses (";") that name a hidden tool. */
-function withoutHiddenClauses(description: string): string {
+function withoutHiddenClauses(hidden: Hidden, description: string): string {
   const kept: string[] = [];
   for (const clause of description.split(/(?<=[.;]) /)) {
-    if (!hiddenToolsIn(clause).length) kept.push(clause);
+    if (!hiddenToolsIn(hidden, clause).length) kept.push(clause);
     // The clause dropped ended its sentence, so the one before it ends it now.
     else if (clause.endsWith(".") && kept.at(-1)?.endsWith(";")) kept.push(`${kept.pop()!.slice(0, -1)}.`);
   }
@@ -114,24 +119,25 @@ function withoutHiddenClauses(description: string): string {
 }
 
 /** An input schema without the properties whose description names a hidden tool. */
-function withoutHiddenInputs(schema: Record<string, unknown>): Record<string, unknown> {
+function withoutHiddenInputs(hidden: Hidden, schema: Record<string, unknown>): Record<string, unknown> {
   const properties = schema.properties && typeof schema.properties === "object" ? (schema.properties as Record<string, { description?: unknown }>) : {};
-  const hidden = new Set(Object.keys(properties).filter((key) => typeof properties[key]?.description === "string" && hiddenToolsIn(properties[key].description).length));
-  if (!hidden.size) return schema;
+  const dropped = new Set(Object.keys(properties).filter((key) => typeof properties[key]?.description === "string" && hiddenToolsIn(hidden, properties[key].description).length));
+  if (!dropped.size) return schema;
   return {
     ...schema,
-    properties: Object.fromEntries(Object.entries(properties).filter(([key]) => !hidden.has(key))),
-    ...(Array.isArray(schema.required) ? { required: schema.required.filter((key) => !hidden.has(key)) } : {}),
+    properties: Object.fromEntries(Object.entries(properties).filter(([key]) => !dropped.has(key))),
+    ...(Array.isArray(schema.required) ? { required: schema.required.filter((key) => !dropped.has(key)) } : {}),
   };
 }
 
 /** A result that names a hidden tool, with a note saying what to do instead. */
-function withHiddenToolNotes(content: ToolContentBlock[]): ToolContentBlock[] {
-  const named = [...new Set(content.flatMap((block) => (block.type === "text" && typeof block.text === "string" ? hiddenToolsIn(block.text) : [])))];
-  return named.length ? [...content, ...named.map((name) => ({ type: "text", text: `Note: you don't have ${name} here. ${ASSISTANT_HIDDEN_TOOLS.get(name)}` }))] : content;
+function withHiddenToolNotes(hidden: Hidden, content: ToolContentBlock[]): ToolContentBlock[] {
+  const named = [...new Set(content.flatMap((block) => (block.type === "text" && typeof block.text === "string" ? hiddenToolsIn(hidden, block.text) : [])))];
+  return named.length ? [...content, ...named.map((name) => ({ type: "text", text: `Note: you don't have ${name} here. ${hidden.get(name)}` }))] : content;
 }
 
 export function createMcpToolBridge(options: McpToolBridgeOptions): ToolBridge {
+  const hidden = options.hidden ?? ASSISTANT_HIDDEN_TOOLS;
   let connecting: Promise<Connection> | null = null;
 
   const connect = (): Promise<Connection> =>
@@ -142,15 +148,15 @@ export function createMcpToolBridge(options: McpToolBridgeOptions): ToolBridge {
       const client = new Client({ name: ASSISTANT_AUTHOR_NAME, version: options.version });
       await client.connect(clientSide);
       const listed = await client.listTools();
-      const tools: AssistantToolInfo[] = listed.tools.filter((tool) => !ASSISTANT_HIDDEN_TOOLS.has(tool.name)).map((tool) => {
+      const tools: AssistantToolInfo[] = listed.tools.filter((tool) => !hidden.has(tool.name)).map((tool) => {
         const annotations = (tool.annotations ?? {}) as { title?: unknown; readOnlyHint?: unknown };
         const title = typeof tool.title === "string" ? tool.title : typeof annotations.title === "string" ? annotations.title : tool.name;
-        return { name: tool.name, title, description: withoutHiddenClauses(tool.description ?? ""), inputSchema: withoutHiddenInputs(tool.inputSchema as Record<string, unknown>), readOnly: annotations.readOnlyHint === true };
+        return { name: tool.name, title, description: withoutHiddenClauses(hidden, tool.description ?? ""), inputSchema: withoutHiddenInputs(hidden, tool.inputSchema as Record<string, unknown>), readOnly: annotations.readOnlyHint === true };
       });
       return {
         client,
         tools,
-        instructions: withoutHiddenTools(client.getInstructions() ?? ""),
+        instructions: withoutHiddenTools(hidden, client.getInstructions() ?? ""),
         async close() {
           await client.close().catch(() => undefined);
           await server.close().catch(() => undefined);
@@ -179,7 +185,7 @@ export function createMcpToolBridge(options: McpToolBridgeOptions): ToolBridge {
         },
       )) as unknown as ToolCallResult & { _meta?: Record<string, unknown> };
       return {
-        content: withHiddenToolNotes(Array.isArray(result.content) ? result.content : []),
+        content: withHiddenToolNotes(hidden, Array.isArray(result.content) ? result.content : []),
         ...(result.structuredContent ? { structuredContent: result.structuredContent } : {}),
         ...(result.isError ? { isError: true } : {}),
         ...(result._meta ? { meta: result._meta } : {}),

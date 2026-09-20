@@ -1,5 +1,7 @@
+import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
-import { canvasContextBlock, DESIGN_GUIDE, sanitizeCanvasContext } from "./design.ts";
+import { ASSISTANT_SYSTEM_PROMPT, systemPrompt } from "./agent.ts";
+import { canvasContextBlock, DESIGN_GUIDE, DESIGN_GUIDE_PREVIEW, designGuide, sanitizeCanvasContext } from "./design.ts";
 import type { AssistantCanvasContext } from "./protocol.ts";
 
 const context: AssistantCanvasContext = {
@@ -118,5 +120,43 @@ describe("DESIGN_GUIDE", () => {
     expect(lines).toHaveLength(1);
     expect(lines[0]).toMatch(/^- Leave position out for a new screen, which goes at \[0, 0\]: the canvas and viewer draw only the device screen, so a screen placed beside it can't be seen\./);
     expect(lines[0]).toContain("covers the one behind it in the viewer, which is expected; offer to wire it");
+  });
+});
+
+describe("DESIGN_GUIDE_PREVIEW", () => {
+  const drawing = (line: string) => /import_design|preview_design|replace/.test(line) && !line.startsWith("- After the import") && !line.includes("wire patches onto the imported");
+
+  it("keeps every bullet that isn't about drawing and importing the page", () => {
+    const stream = DESIGN_GUIDE.split("\n");
+    const preview = DESIGN_GUIDE_PREVIEW.split("\n");
+    expect(preview).toHaveLength(stream.length);
+    expect(preview.filter((line) => !drawing(line))).toEqual(stream.filter((line) => !drawing(line)));
+    expect(designGuide("stream")).toBe(DESIGN_GUIDE);
+    expect(designGuide("preview")).toBe(DESIGN_GUIDE_PREVIEW);
+  });
+
+  it("draws with preview_design and imports the draft, never the page again", () => {
+    expect(DESIGN_GUIDE_PREVIEW).toContain('start with preview_design (component from the context; name; replace for a redesign) with the page\'s head, theme and first section within your first few steps, append one section at a time with preview_design\'s append, then import it with import_design and "preview": true. Don\'t send the page to import_design again.');
+    expect(DESIGN_GUIDE_PREVIEW).not.toContain("html last");
+    // A declined replace imports the draft as a new screen: leaving replace out would keep the draft's.
+    expect(DESIGN_GUIDE_PREVIEW).toContain('import your design as a new screen (import_design with "preview": true and "replace": null)');
+    expect(DESIGN_GUIDE).not.toContain("preview_design");
+  });
+});
+
+describe("systemPrompt", () => {
+  const instructions = "Call get_outline before editing.";
+
+  it("keeps the API key's prompt byte for byte (the cached prefix)", () => {
+    const prompt = systemPrompt(instructions);
+    expect(prompt).toBe(`${ASSISTANT_SYSTEM_PROMPT}\n\nSonobe's tool guide:\n${instructions}\n\n${DESIGN_GUIDE}`);
+    expect(systemPrompt(instructions, { drawing: "stream" })).toBe(prompt);
+    // Pinned: any change to this text invalidates every chat's prompt cache, so change it on purpose.
+    expect(createHash("sha256").update(prompt).digest("hex")).toBe("5ac706a7f8709e5de9678071064a78623d89425eb8ade6bf12c7aed4a597413e");
+  });
+
+  it("gives the subscription the same prompt with the preview guide", () => {
+    expect(systemPrompt(instructions, { drawing: "preview" })).toBe(`${ASSISTANT_SYSTEM_PROMPT}\n\nSonobe's tool guide:\n${instructions}\n\n${DESIGN_GUIDE_PREVIEW}`);
+    expect(systemPrompt("  ", { drawing: "preview" })).toBe(`${ASSISTANT_SYSTEM_PROMPT}\n\n${DESIGN_GUIDE_PREVIEW}`);
   });
 });

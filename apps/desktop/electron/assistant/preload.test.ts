@@ -104,6 +104,35 @@ describe("assistant preload bridge", () => {
     const host: Record<string, unknown> = { platform: "darwin" };
     attachAssistantBridge(host, fakeIpcRenderer().ipc);
     expect(Object.keys(host)).toEqual(["platform", "assistant"]);
-    expect(Object.keys(host.assistant as object).sort()).toEqual(["checkKey", "codeFolder", "confirm", "linkCodeFolder", "onEvent", "openInClaudeCode", "reset", "send", "status", "stop", "unlinkCodeFolder"]);
+    expect(Object.keys(host.assistant as object).sort()).toEqual(["checkKey", "checkSubscription", "codeFolder", "confirm", "linkCodeFolder", "onEvent", "openInClaudeCode", "reset", "send", "setConnection", "signInToClaude", "status", "stop", "unlinkCodeFolder"]);
+  });
+
+  it("sends only the connection fields main knows, with well-formed values", async () => {
+    const { ipc, invocations } = fakeIpcRenderer();
+    const api = createAssistantApi(ipc);
+    await api.setConnection({ subscriptionEnabled: true, provider: "subscription" });
+    await api.setConnection({ subscriptionEnabled: "yes", provider: "claude_ai", active: "subscription" } as unknown as Parameters<typeof api.setConnection>[0]);
+    await api.setConnection({ provider: "api_key" });
+    await api.setConnection(undefined as unknown as Parameters<typeof api.setConnection>[0]);
+    await api.checkSubscription();
+    await api.signInToClaude();
+    expect(invocations).toEqual([
+      { channel: ASSISTANT_IPC.setConnection, args: [{ subscriptionEnabled: true, provider: "subscription" }] },
+      { channel: ASSISTANT_IPC.setConnection, args: [{}] },
+      { channel: ASSISTANT_IPC.setConnection, args: [{ provider: "api_key" }] },
+      { channel: ASSISTANT_IPC.setConnection, args: [{}] },
+      { channel: ASSISTANT_IPC.checkSubscription, args: [] },
+      { channel: ASSISTANT_IPC.signInToClaude, args: [] },
+    ]);
+  });
+
+  it("passes a permission card's choice only as a short string", async () => {
+    const { ipc, invocations } = fakeIpcRenderer();
+    const api = createAssistantApi(ipc);
+    await api.confirm("c1", true, "allow-with-updates");
+    await api.confirm("c2", true, "x".repeat(201));
+    await api.confirm("c3", false, { id: "reject" } as unknown as string);
+    await api.confirm("c4", false);
+    expect(invocations.map((i) => i.args)).toEqual([["c1", true, "allow-with-updates"], ["c2", true], ["c3", false], ["c4", false]]);
   });
 });

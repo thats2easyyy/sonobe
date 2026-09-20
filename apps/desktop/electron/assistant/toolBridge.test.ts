@@ -123,6 +123,24 @@ describe("MCP tool bridge", () => {
     expect(start.content.map((c) => c.text)).not.toContain(note);
   });
 
+  it("hides nothing for the subscription engine, which draws through preview_design", async () => {
+    const canvas = Object.create(host) as HeadlessHost;
+    Object.defineProperty(canvas, "capabilities", { value: { ...host.capabilities, designPreview: true } });
+    const direct = await serverSurface(canvas);
+    const all = createMcpToolBridge({ host: canvas, version: "0.1.0-test", hidden: new Map() });
+    try {
+      const tools = await all.tools();
+      expect(tools.map((t) => t.name)).toEqual(direct.tools.map((t) => t.name));
+      expect(tools.find((t) => t.name === "import_design")!.inputSchema.properties).toHaveProperty("preview");
+      expect(tools.find((t) => t.name === "import_design")!.description).toBe(direct.tools.find((t) => t.name === "import_design")!.description);
+      expect(await all.instructions()).toBe(direct.instructions);
+      const guide = await all.call("get_guide", { topic: "importing" });
+      expect(guide.content.some((c) => c.text?.startsWith("Note: you don't have"))).toBe(false);
+    } finally {
+      await all.close();
+    }
+  });
+
   it("classifies every tool: it takes docId, so the Assistant pins it to its window's document, or it's in UNPINNED_TOOLS", async () => {
     // Over the server's own list, so the tools the Assistant isn't given (preview_design) are classified too.
     const { tools } = await serverSurface(host);

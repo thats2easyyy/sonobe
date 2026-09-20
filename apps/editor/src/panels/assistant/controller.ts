@@ -1,8 +1,8 @@
 /**
- * The Assistant's controller, shared by the drawer and the canvas's Design with Claude box: talks to
- * window.sonobeHost (assistant, secrets, openExternal) and folds everything into an AssistantState
- * store. Host-agnostic and DOM-free, so it's unit-tested with a fake host. In the browser (no host)
- * every action is a no-op and the drawer shows a desktop-only notice.
+ * The Assistant's controller, shared by the drawer, the canvas's Design with Claude box and Settings:
+ * talks to window.sonobeHost (assistant, secrets, openExternal) and folds everything into an
+ * AssistantState store. Host-agnostic and DOM-free, so it's unit-tested with a fake host. In the
+ * browser (no host) every action is a no-op and the drawer shows a desktop-only notice.
  */
 
 import type { StoreApi } from "zustand/vanilla";
@@ -16,8 +16,12 @@ import {
   type AssistantCanvasContext,
   type AssistantCodeFolderLinkResult,
   type AssistantCodeFolderStatus,
+  type AssistantConnectionUpdate,
   type AssistantHostLike,
   type AssistantRunResult,
+  type AssistantSignInResult,
+  type AssistantStatus,
+  type AssistantSubscriptionStatus,
   type HandoffResult,
 } from "./types.ts";
 
@@ -26,6 +30,8 @@ export interface SaveKeyResult {
   /** Why it wasn't saved or didn't work. */
   message?: string;
 }
+
+export type ConnectionResult = { ok: true; status: AssistantStatus } | { ok: false; error: string };
 
 export interface AssistantController {
   /** False in the browser or with an older desktop preload. */
@@ -39,7 +45,17 @@ export interface AssistantController {
   send(text: string, options?: { context?: AssistantCanvasContext }): Promise<AssistantRunResult | null>;
   stop(): Promise<void>;
   newChat(): Promise<void>;
-  confirm(confirmationId: string, approved: boolean): Promise<void>;
+  /** `optionId`: the choice on a permission card. */
+  confirm(confirmationId: string, approved: boolean, optionId?: string): Promise<void>;
+  /**
+   * The Settings switch and the setup's pick. When it changes what a new chat runs on, main resets this
+   * window's chat, and the transcript clears as with New chat. Null when the host can't.
+   */
+  setConnection(update: AssistantConnectionUpdate): Promise<ConnectionResult | null>;
+  /** Read the Claude login again (main restarts the adapter when no reply runs), into status.subscription. Null when the host can't. */
+  checkSubscription(): Promise<AssistantSubscriptionStatus | null>;
+  /** Sign in…: Terminal runs Claude's own login (macOS). Sonobe never sees it. Null when the host can't. */
+  signInToClaude(): Promise<AssistantSignInResult | null>;
   /** The code folder linked to this window's prototype, into status.codeFolder. Null when the host can't link one. */
   codeFolder(): Promise<AssistantCodeFolderStatus | null>;
   /** Shows the native folder dialog (Match my code…). Null when the host can't link one. */
@@ -59,6 +75,9 @@ export interface AssistantController {
 
 const messageOf = (err: unknown) => (err instanceof Error ? err.message : String(err));
 
+/** Failures after which the status (the key, the subscription's state) is read again, so the drawer shows the setup that fixes it. */
+const REFRESH_CODES = new Set(["no_key", "invalid_key", "not_signed_in", "agent_not_installed", "agent_failed", "subscription_off"]);
+
 export function createAssistantController(host: AssistantHostLike | null, store: StoreApi<AssistantState>): AssistantController {
   if (!supportsAssistant(host)) {
     const noop = async () => undefined;
@@ -72,6 +91,9 @@ export function createAssistantController(host: AssistantHostLike | null, store:
       stop: noop,
       newChat: noop,
       confirm: noop,
+      setConnection: async () => null,
+      checkSubscription: async () => null,
+      signInToClaude: async () => null,
       codeFolder: async () => null,
       linkCodeFolder: async () => null,
       unlinkCodeFolder: async () => null,
@@ -97,6 +119,34 @@ export function createAssistantController(host: AssistantHostLike | null, store:
   const addNotice = (tone: "info" | "warn" | "error", text: string, code?: string) =>
     store.setState((s) => ({ items: [...s.items, { kind: "notice", id: nextItemId("notice"), tone, text, ...(code ? { code } : {}) }] }));
 
+  const setSubscription = (subscription: AssistantSubscriptionStatus) => store.setState((s) => (s.status ? { status: { ...s.status, subscription } } : {}));
+
+  let checking: Promise<AssistantSubscriptionStatus | null> | null = null;
+  const checkSubscription = (): Promise<AssistantSubscriptionStatus | null> => {
+    if (!assistant.checkSubscription) return Promise.resolve(null);
+    // The drawer, the box and the setup may all ask at once: one check answers them.
+    checking ??= (async () => {
+      const last = store.getState().status?.subscription;
+      if (last) setSubscription({ ...last, state: "checking" });
+      let subscription: AssistantSubscriptionStatus;
+      try {
+        subscription = await assistant.checkSubscription!();
+      } catch (err) {
+        subscription = { state: "failed", kind: null, label: null, email: null, adapterVersion: last?.adapterVersion ?? null, message: `Sonobe couldn't check Claude's login: ${messageOf(err)}` };
+      }
+      if (!disposed) setSubscription(subscription);
+      return subscription;
+    })().finally(() => {
+      checking = null;
+    });
+    return checking;
+  };
+
+  /** A new chat runs on the subscription, and this launch hasn't looked at its login yet. */
+  const checkIfUnknown = (status: AssistantStatus) => {
+    if (status.connection?.active === "subscription" && status.subscription?.state === "unknown") void checkSubscription();
+  };
+
   const refresh = async () => {
     try {
       const status = await assistant.status();
@@ -105,6 +155,7 @@ export function createAssistantController(host: AssistantHostLike | null, store:
         const model = status.models.some((m) => m.id === s.model) ? s.model : status.defaultModel;
         return { status, statusError: null, usage: status.usage, limits: status.limits, model, ...(status.running ? {} : s.runId === null ? { running: false } : {}) };
       });
+      checkIfUnknown(status);
     } catch (err) {
       if (!disposed) store.setState({ statusError: messageOf(err) });
     }
@@ -180,7 +231,7 @@ export function createAssistantController(host: AssistantHostLike | null, store:
         store.setState({ running: false, runId: null, thinking: false, usage: result.usage });
         if (result.error) addNotice("error", result.error.message, result.error.code);
       }
-      if (result.error?.code === "no_key" || result.error?.code === "invalid_key") await refresh();
+      if (result.error && REFRESH_CODES.has(result.error.code)) await refresh();
       return result;
     },
     async stop() {
@@ -198,12 +249,40 @@ export function createAssistantController(host: AssistantHostLike | null, store:
         addNotice("error", `Couldn't start a new chat: ${messageOf(err)}`);
       }
     },
-    async confirm(confirmationId, approved) {
-      store.setState((s) => ({ items: s.items.map((i) => (i.kind === "confirm" && i.id === confirmationId && i.status === "pending" ? { ...i, status: approved ? "approved" : "declined" } : i)) }));
+    async confirm(confirmationId, approved, optionId) {
+      store.setState((s) => ({
+        items: s.items.map((i) => (i.kind === "confirm" && i.id === confirmationId && i.status === "pending" ? { ...i, status: approved ? "approved" : "declined", ...(optionId !== undefined ? { optionId } : {}) } : i)),
+      }));
       try {
-        await assistant.confirm(confirmationId, approved);
+        if (optionId !== undefined) await assistant.confirm(confirmationId, approved, optionId);
+        else await assistant.confirm(confirmationId, approved);
       } catch (err) {
         addNotice("error", `Couldn't send your answer: ${messageOf(err)}`);
+      }
+    },
+    async setConnection(update) {
+      if (!assistant.setConnection) return null;
+      const before = store.getState().status?.connection?.active ?? "api_key";
+      let status: AssistantStatus;
+      try {
+        status = await assistant.setConnection(update);
+      } catch (err) {
+        return { ok: false, error: `Sonobe couldn't change the Assistant's connection: ${messageOf(err)}` };
+      }
+      if (disposed) return { ok: true, status };
+      // Main reset this window's chat when what a new chat runs on changed.
+      const reset = (status.connection?.active ?? "api_key") !== before;
+      store.setState({ status, usage: status.usage, limits: status.limits, ...(reset ? { items: [], running: false, runId: null, thinking: false } : {}) });
+      checkIfUnknown(status);
+      return { ok: true, status };
+    },
+    checkSubscription,
+    async signInToClaude() {
+      if (!assistant.signInToClaude) return null;
+      try {
+        return await assistant.signInToClaude();
+      } catch (err) {
+        return { ok: false, error: `Sonobe couldn't open Terminal to sign in: ${messageOf(err)}` };
       }
     },
     codeFolder,

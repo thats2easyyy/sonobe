@@ -2,8 +2,8 @@
  * Design with Claude on the canvas: a box at the bottom of the canvas that sends the person's request
  * to the in-app Assistant with the canvas's context, and a sandboxed live preview of the page Claude
  * is writing over the artboard, from the Assistant or from an MCP client's preview_design (the
- * design.preview RPC). The finished page becomes real layers through import_design, in one undo
- * step; the preview never writes the document.
+ * design.preview RPC; on the Claude subscription the Assistant draws that way too). The finished page
+ * becomes real layers through import_design, in one undo step; the preview never writes the document.
  */
 
 export { canvasContext, designTarget, type DesignTarget } from "./context.ts";
@@ -13,6 +13,8 @@ export { DesignPreview, liveDraftWriter, PREVIEW_POST_MS, previewFrame, previewP
 export {
   activeDraft,
   applyPreviewUpdate,
+  ASSISTANT_AUTHOR,
+  assistantDraft,
   attachDesign,
   designStore,
   dismissDraft,

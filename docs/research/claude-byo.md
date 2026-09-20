@@ -1,7 +1,7 @@
 # Bring-Your-Own-Claude + MCP State of the Art (September 2026)
 
 Research brief for an open-source, AI-native desktop alternative to Meta's Origami Studio.
-Research date: 2026-09-16. All URLs fetched on that date unless noted.
+Research date: 2026-09-16. All URLs fetched on that date unless noted. Revised 2026-09-20: the ratings in the TL;DR (item 7), 2.3 and 2.4 now weigh support article D, and section 2.6 describes the experimental subscription option Sonobe built, which stays off until Anthropic agrees.
 
 Legend: **[VERIFIED]** = seen in a primary source (URL cited). **[VERIFIED-2nd]** = seen only in secondary press/blogs. **[INFERRED]** = my reasoning or synthesis, not stated by a source.
 
@@ -20,6 +20,7 @@ Legend: **[VERIFIED]** = seen in a primary source (URL cited). **[VERIFIED-2nd]*
    - Optionally, an **MCP App** (`ui://` resource) renders an interactive prototype preview inline in Claude Desktop and claude.ai.
    **[INFERRED design, built on VERIFIED capabilities]**
 7. **In-app chat:** ship it as optional, **BYO Anthropic API key** only, using `@anthropic-ai/sdk` (0.126.0) plus its `mcpTools()` helper so it drives our own MCP server. Model IDs: `claude-opus-5`, `claude-sonnet-5`, `claude-haiku-4-5-20251001`. Do **not** silently drive the user's subscription-authenticated Claude Code headlessly as a hidden harness (policy gray zone, section 2.5). A user-initiated "Open in Claude Code" button is fine. **[INFERRED recommendation]**
+   **Revised 2026-09-20:** support article D says "Claude Agent SDK, claude -p, and third-party app usage still draw from your subscription's usage limits", so Anthropic's own support pages describe third-party apps running on a subscription and say how that usage counts. Docs A and B still say "unless previously approved". Sonobe has built the option, as an ACP client of Claude's agent adapter that the person installs and signs in to themselves (section 2.6), and keeps it off by default and out of every release until Anthropic agrees. **[INFERRED; the permission is Anthropic's to give]**
 
 ---
 
@@ -33,7 +34,7 @@ Legend: **[VERIFIED]** = seen in a primary source (URL cited). **[VERIFIED-2nd]*
 | **Claude Code** (CLI, IDE extensions, desktop) | `claude mcp add` (stdio or `--transport http http://127.0.0.1:PORT/mcp`), project `.mcp.json`, or **plugin** bundling `.mcp.json` + skills | **Yes** | **Yes** (subscription OAuth via `/login`) | Semi (a copy-paste command, or `/plugin install`) | v2 runtime (v2.1.232+) speaks 2026-07-28. **[VERIFIED]** |
 | **claude.ai web / mobile / Cowork** | **Custom connector** = remote MCP URL (Streamable HTTP), optional OAuth | **No, not localhost.** Must be reachable on the public internet from Anthropic IPs | **Yes** (Free limited to 1 custom connector) | Paste URL | Would need a tunnel or a cloud relay. **[VERIFIED]** |
 | **Messages API MCP connector** | `mcp_servers` param, beta header `mcp-client-2025-11-20` | No (public https only) | **No, API key** | n/a | Tools only. **[VERIFIED]** |
-| **Agent SDK** | `mcpServers` option (stdio/http/sse/in-process) | Yes | Officially **API key** for third-party products (section 2) | n/a | **[VERIFIED]** |
+| **Agent SDK** | `mcpServers` option (stdio/http/sse/in-process) | Yes | Officially **API key** for third-party products unless approved (section 2); support article D says third-party app usage draws on the subscription (Sonobe's experimental option, 2.6) | n/a | **[VERIFIED]** |
 
 ### 1.1 Claude Desktop
 
@@ -334,6 +335,7 @@ The (paused) credit table: Pro $20, Max 5x $100, Max 20x $200, Team Standard $20
 | Our app shows "Sign in with Claude / claude.ai" and calls the model with the resulting OAuth token | **Not allowed** | A, B **[VERIFIED]** |
 | Our app reads `~/.claude/.credentials.json`, the macOS Keychain entry, or `CLAUDE_CODE_OAUTH_TOKEN` and uses it | **Not allowed** ("may not collect, store, or intermediate Claude.ai credentials or session tokens"; "misrepresent their identity") | A, C **[VERIFIED]** |
 | Our app embeds the Agent SDK with claude.ai login for end users | **Not allowed unless previously approved** | B **[VERIFIED]** |
+| Our app runs the user's own installed Claude agent adapter (built on the Agent SDK) over ACP, signed in through Anthropic's own flow in the adapter's Claude Code, billed to the user's plan (what Sonobe built, section 2.6) | **Open question; ask Anthropic first.** D names third-party apps that authenticate with a subscription through the Agent SDK and says their usage "still draw[s] from your subscription's usage limits". A and B still say "unless previously approved". The app never collects or intermediates credentials, as A requires. | D, A, B **[VERIFIED]**; the rating is **[INFERRED]**. Sonobe keeps it off by default and out of every release until Anthropic agrees. |
 | Our app embeds the Agent SDK / Anthropic SDK with **the user's own API key** (or Bedrock/Vertex/Foundry credential) | **Allowed**, billed to key owner | A, B **[VERIFIED]** |
 | Our app spawns the **user's already-installed, unmodified `claude` binary** (`claude -p`) that uses the user's own login, as a background engine | **Gray zone.** A says users may sign in to the unmodified binary "including where a platform hosts Claude Code", but "preinstalling or running Claude Code in your products" requires Commercial Terms and no intermediation. C prohibits tools that "route third-party traffic against subscription limits". April 2026 enforcement targeted "third-party harnesses". | **[INFERRED]**. Get written confirmation before shipping as a default. |
 | Button in our app: "Open this document in Claude Code", which opens the user's terminal with `claude` in the project dir (MCP pre-registered), and the user drives the session | **Very likely allowed** (the user is using the native app directly) | **[INFERRED]** |
@@ -344,12 +346,24 @@ The (paused) credit table: Pro $20, Max 5x $100, Max 20x $200, Team Standard $20
 - **Default integration = MCP server only.** Zero Anthropic credentials in our app.
 - **Optional in-app assistant = BYO API key only** (plus Bedrock/Vertex/Foundry for enterprises), stored in the OS keychain.
 - **No claude.ai login, no token reuse, no hidden headless harness on subscriptions.** Offer "Open in Claude Code / Claude Desktop" hand-offs instead.
+- **Revised 2026-09-20:** the one exception is the experimental subscription option in section 2.6. The person turns it on, installs the adapter and signs in through Claude Code's own login, and Sonobe reads no credentials. It is off by default, labelled as awaiting Anthropic's permission, and not released until Anthropic agrees.
 - Keep a watch on https://code.claude.com/docs/en/legal-and-compliance and support article 15036540. Policy moved four times in 2026.
 
 ### 2.5 Why headless delegation is risky even though it's technically easy [INFERRED]
 - `claude -p ... --output-format stream-json --mcp-config ./origami.mcp.json` works with the user's saved login when not in `--bare` (https://code.claude.com/docs/en/headless). Anthropic says `--bare` "will become the default for `-p` in a future release", and bare never reads OAuth. Future Claude Code versions may therefore require an API key for this path by default.
 - Enforcement targeted "third-party harnesses", and usage limits "assume ordinary, individual usage".
 - A hidden engine may count as a harness; a user-launched session is ordinary use.
+
+### 2.6 What Sonobe built: the Assistant on a Claude subscription (2026-09-20)
+
+Sonobe's in-app Assistant can run on the person's own Claude subscription, experimentally. It's off by default, behind a switch in Settings → Claude → Experimental labelled "awaiting Anthropic's permission", and it isn't part of any release until Anthropic agrees. The API key stays the default. ARCHITECTURE.md §10 is the contract; this is the summary.
+
+- **Why now.** Support article D says: "Claude Agent SDK, claude -p, and third-party app usage still draw from your subscription's usage limits." A and B still say third-party developers may not offer claude.ai login "unless previously approved". The project will ask Anthropic for that approval before any release, and the option waits on the answer. **[VERIFIED quotes; INFERRED reading]**
+- **How it works.** Sonobe is an ACP client, the pattern ACP editors such as Zed use. It runs Claude's agent adapter, `@agentclientprotocol/claude-agent-acp` (built on the Agent SDK), as a child process on Electron's own Node, and gives it Sonobe's tools through a per-chat loopback MCP endpoint with a bearer token. The adapter isn't bundled (about 270 MB, a Claude Code binary per platform); the person installs it with npm. Sessions start with `tools: []`, `settingSources: []`, `strictMcpConfig: true` and `persistSession: false`, and the adapter's environment has no `ANTHROPIC_API_KEY` or `ANTHROPIC_AUTH_TOKEN`, so the plan pays rather than a stray key.
+- **Credentials.** Sonobe never reads, stores or passes on Claude credentials. The adapter's Claude Code signs in through Anthropic's own flow (Sign in opens Terminal running the adapter's `--cli auth login --claudeai`) and keeps the login where it always does. Sonobe reads only the status the adapter reports (kind, label, plan, email). This matches A's "sign-in to a Claude account must complete through Anthropic's own flow". **[INFERRED]**
+- **What a probe of the real adapter showed** (adapter 0.79.0, Claude Code 2.1.274, outside the app). `initialize` answers in about 150 ms, then the adapter pushes `_auth/status_update` (`{ kind: "account", label: "Claude Max" }` when signed in, `{ kind: "none" }` when not, `{ kind: "api_key" }` when `ANTHROPIC_API_KEY` is set). Signed out, `session/new` still succeeds and `session/prompt` fails with `-32000` "Authentication required". Under a custom system prompt, MCP server instructions don't reach Claude, so Sonobe puts its tool guide in its own prompt. Claude Code doesn't forward a tool's input as it's written, so the canvas draws through `preview_design`. Tools left out of `allowedTools` make the adapter send `session/request_permission` before the call. The CLI also makes one small Haiku request per session, to name it. **[VERIFIED: probed 2026-09-20]**
+- **Tests.** CI tests the option against a fake ACP agent (`apps/desktop/tests/fake-claude-agent.mjs`) and never needs a Claude account.
+- **What's left** (ROADMAP.md): a check with a real Claude login in the app, Anthropic's permission, and then deciding the default.
 
 ---
 
@@ -823,10 +837,13 @@ https://platform.claude.com/docs/en/about-claude/models/overview
 - Configurable models; Sonnet 5 default.
 - An "Open in Claude Code" button that launches the user's terminal/IDE with our plugin (the user drives the session).
 
+**Built since, experimental (2026-09-20):**
+- The in-app assistant on the user's Claude subscription, as an ACP client of the user-installed Claude agent adapter (section 2.6). Off by default, and not released until Anthropic agrees.
+
 **Don't build:**
 - "Sign in with Claude" in our app
 - reading Claude Code credentials
-- a background harness on subscription credentials
+- a background harness on subscription credentials (revised 2026-09-20: except the experimental option in section 2.6, which the person turns on and signs in to themselves, and which stays off and unreleased until Anthropic agrees)
 - sampling-based features (deprecated)
 - a hard dependency on Tasks or Channels (preview/limited client support)
 
@@ -848,7 +865,7 @@ https://platform.claude.com/docs/en/about-claude/models/overview
 | 10 | OAuth registration | DCR | DCR deprecated → Client ID Metadata Documents; RFC 9207 `iss` |
 | 11 | Agent SDK MCP OAuth link | links spec `2025-03-26` authorization | current is 2026-07-28 |
 | 12 | Messages API MCP connector | only tools, public https, beta `mcp-client-2025-11-20` | unchanged; not for localhost |
-| 13 | Subscription use by third parties | Support article D lists "Third-party apps that authenticate with your Claude subscription through the Agent SDK" | Legal page + Agent SDK docs: not permitted unless previously approved; D's changes paused 2026-06-15 |
+| 13 | Subscription use by third parties | Support article D lists "Third-party apps that authenticate with your Claude subscription through the Agent SDK" | Legal page + Agent SDK docs: not permitted unless previously approved; D's changes paused 2026-06-15, and D says such usage "still draw[s] from your subscription's usage limits". Sonobe's option (2.6) waits on Anthropic's answer |
 | 14 | `claude -p` auth | Works with subscription login today | `--bare` (no OAuth) "will become the default for -p in a future release" |
 | 15 | ToolAnnotations defaults | 2025 spec listed defaults | 2026-07-28 schema fetch didn't show defaults; re-verify |
 | 16 | Haiku 4.5 | Widely recommended cheap model | Retirement commitment only not sooner than 2026-10-15 |

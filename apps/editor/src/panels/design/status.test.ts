@@ -35,11 +35,22 @@ describe("toolStatusText", () => {
     for (const name of ["add_layers", "update_layers", "rename", "delete_items"]) expect(text(name)).toBe("Editing layers…");
     for (const name of ["sim_dispatch", "sim_step", "sim_reset"]) expect(text(name)).toBe("Testing it…");
     for (const name of ["begin_work", "finish_work", "reveal"]) expect(text(name)).toBe("");
+    expect(text("preview_design", "", "Preview design")).toBe("Drawing on the canvas…");
     expect(text("list_examples", "", "List examples")).toBe("List examples…");
   });
 });
 
 describe("designStatusLine while the box's reply runs", () => {
+  it("follows the Assistant's own preview draft on the Claude subscription, as it follows import_design's", () => {
+    const mcp = { author: { kind: "agent" as const, name: "Assistant" }, client: null, draftRevision: 1, touchedAt: 0, addingFrom: null };
+    const preview = draftOf({ source: "mcp", key: "mcp:Assistant", turn: 0, toolUseId: "", html: "x".repeat(14 * 1024), fields: { name: "Checkout", component: "main" }, mcp });
+    // The first preview_design call, before its draft reaches the canvas.
+    expect(line(design(), running([turn([chip("preview_design", { title: "Preview design" })])]))?.text).toBe("Drawing on the canvas…");
+    expect(line(design({ drafts: [preview] }), running([turn([chip("preview_design", { title: "Preview design", status: "done" })])]))).toEqual({ text: "Writing “Checkout”…", tone: "busy", detail: "14 KB" });
+    expect(line(design({ drafts: [{ ...preview, status: "adding" }] }), running([turn([chip("import_design", { title: "Import design" })])]))).toEqual({ text: "Adding the layers…", tone: "busy" });
+    expect(line(design({ drafts: [{ ...preview, status: "added" }], request: request({ imported: 1 }), result: result() }), running(), 10_000, here)).toEqual({ text: "Added “Checkout”.", tone: "done" });
+  });
+
   it("thinks before any text or tool", () => {
     expect(line(design({ request: request({ runId: null }) }), running([], null))).toEqual({ text: "Thinking…", tone: "busy" });
     expect(line(design(), running([turn([], "Let me look.")]))).toEqual({ text: "Thinking…", tone: "busy" });
@@ -169,6 +180,16 @@ describe("designStatusLine when the reply is done", () => {
     expect(failed("network", "Sonobe couldn't reach the Anthropic API. Check your internet connection and try again.")).toEqual({ text: "Sonobe couldn't reach the Anthropic API. Check your internet connection and try again.", tone: "error" });
     expect(failed("rate_limited", "Your API key hit its rate limit. Wait a moment, then send your message again.")).toEqual({ text: "Your API key hit its rate limit. Wait a moment, then send your message again.", tone: "error" });
     for (const code of ["no_key", "invalid_key", "permission_denied"]) expect(failed(code, "Key trouble.")).toEqual({ text: "Key trouble.", tone: "error", action: "api_key" });
+  });
+
+  it("offers what fixes a Claude subscription error, and nothing where the message says what to do", () => {
+    const action = (code: string) => line(design({ request: request({ outcome: "error", error: { code, message: "Something." } }) }), idle())?.action;
+    expect(action("not_signed_in")).toBe("sign_in");
+    expect(action("agent_not_installed")).toBe("setup");
+    expect(action("agent_failed")).toBe("setup");
+    expect(action("subscription_off")).toBe("settings");
+    expect(action("agent_crashed")).toBeUndefined();
+    expect(action("usage_limit")).toBeUndefined();
   });
 
   it("covers the other ways a reply ends", () => {
