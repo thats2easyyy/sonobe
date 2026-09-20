@@ -1,6 +1,6 @@
 /** Simulation tools: sim_reset, sim_dispatch, sim_step, sim_trace, sim_get_values, sim_override, get_screenshot. */
 
-import type { Op } from "@sonobe/core";
+import { didYouMean, didYouMeanText, type Op } from "@sonobe/core";
 import type { TraceSummary } from "@sonobe/engine";
 import { z } from "zod";
 import { formatValue, plural, roundForDisplay, sampleIndices, table } from "../format.ts";
@@ -59,6 +59,46 @@ function componentTargetProblem(
     };
   }
   return undefined;
+}
+
+/**
+ * The component whose comment `frame` get_screenshot crops a graph to: `component` when given,
+ * else the one the person is viewing (the root headless), else the only component that has it.
+ */
+async function frameComponent(
+  host: ToolContext["host"],
+  snap: DocumentSnapshot,
+  frame: string,
+  component: string | undefined,
+): Promise<{ component: string } | { code: string; message: string; hint: string }> {
+  const has = (id: string) => snap.doc.components[id]?.comments.some((c) => c.id === frame) ?? false;
+  let home = component;
+  if (home === undefined) {
+    home = snap.doc.project.root;
+    try {
+      const shown = (await host.getSelection(snap.docId)).component;
+      if (snap.doc.components[shown]) home = shown;
+    } catch {
+      // Hosts without a selection draw the root's graph.
+    }
+  }
+  if (has(home)) return { component: home };
+  const others = component === undefined ? Object.keys(snap.doc.components).filter(has) : [];
+  if (others.length === 1) return { component: others[0]! };
+  const comments = snap.doc.components[home]?.comments ?? [];
+  if (others.length > 1)
+    return {
+      code: "ambiguous_frame",
+      message: `Several components have a comment "${frame}": ${others.join(", ")}.`,
+      hint: `Name one with component, e.g. { "target": "graph", "component": "${others[0]}", "frame": "${frame}" }.`,
+    };
+  return {
+    code: "unknown_frame",
+    message: `There's no comment "${frame}" in ${home}.${didYouMeanText(didYouMean(frame, comments.map((c) => c.id)))}`,
+    hint: comments.length
+      ? `Comments there: ${comments.map((c) => `${c.id} (${JSON.stringify(c.text.split("\n")[0]!.trim())})`).join(", ")}.`
+      : `${home} has no comment frames; get_outline lists each component's comments.`,
+  };
 }
 
 function issuesText(state: SimState): string[] {
@@ -448,7 +488,7 @@ export function registerSimulationTools(tc: ToolContext): void {
     {
       title: "Get screenshot",
       description:
-        'A PNG of the prototype screen ("viewer"), one layer ("@layerId", "@row#2" for a loop copy), the canvas ("canvas") or the patch graph ("graph"). component draws one component, even one the person isn\'t viewing: "graph" is its patch graph, "canvas" its artboard at frame 0 with authored values, "@layerId" a layer inside it. The app captures the editor when the person is viewing that component and otherwise draws it from the document, as headless servers always do. Pass simId to draw a simulation\'s current frame (with its sim_override overrides), plus atMs for the frame that many ms later (drawn on a copy, so the session doesn\'t move). A layer target crops the whole screen to the layer\'s box, so layers in front still cover it; isolate: true draws only that layer and its children (to see the card under the top card, isolate "@card_2" or "@card#2"). Headless servers draw the screen themselves with approximate text metrics and placeholders for video, Lottie and shaders; without simId they show the prototype once start-up animations settle (or atMs after it starts). For visual QA; read structure and values with get_outline and sim_get_values.',
+        'A PNG of the prototype screen ("viewer"), one layer ("@layerId", "@row#2" for a loop copy), the canvas ("canvas") or the patch graph ("graph"). component draws one component, even one the person isn\'t viewing: "graph" is its patch graph, "canvas" its artboard at frame 0 with authored values, "@layerId" a layer inside it. frame crops a graph to one comment frame, for big graphs. The app captures the editor when the person is viewing that component and otherwise draws it from the document, as headless servers always do. Pass simId to draw a simulation\'s current frame (with its sim_override overrides), plus atMs for the frame that many ms later (drawn on a copy, so the session doesn\'t move). A layer target crops the whole screen to the layer\'s box, so layers in front still cover it; isolate: true draws only that layer and its children (to see the card under the top card, isolate "@card_2" or "@card#2"). Headless servers draw the screen themselves with approximate text metrics and placeholders for video, Lottie and shaders; without simId they show the prototype once start-up animations settle (or atMs after it starts). For visual QA; read structure and values with get_outline and sim_get_values.',
       input: z.object({
         docId: DocIdSchema.optional(),
         target: z
@@ -473,12 +513,18 @@ export function registerSimulationTools(tc: ToolContext): void {
           .describe(
             'With an "@layerId" target: draw only that layer and its children where they are, without the layers in front of or behind it.',
           ),
+        frame: z
+          .string()
+          .optional()
+          .describe(
+            'With target "graph": draw only this comment frame (its id, as get_outline lists comments), for graphs too big to read whole. Found in component, else the component on screen, else the only one that has it.',
+          ),
         scale: z.number().min(0.25).max(3).optional(),
         maxWidth: z.number().int().min(64).max(1600).optional().describe("Default 800."),
       }),
       annotations: READ_ONLY,
     },
-    async ({ docId, target, component, simId, atMs, isolate, scale, maxWidth }) => {
+    async ({ docId, target, component: requested, simId, atMs, isolate, frame, scale, maxWidth }) => {
       if (!host.capabilities.screenshots) {
         try {
           await host.screenshot({ kind: "viewer" }, {});
@@ -504,6 +550,20 @@ export function registerSimulationTools(tc: ToolContext): void {
           message: `A simulation draws the prototype screen, not the ${shot.kind === "graph" ? "patch graph" : "canvas"}.`,
           hint: 'With simId, use "viewer" or "@layerId". Without it, { "target": "graph", "component": "…" } draws a component\'s patch graph.',
         });
+      let component = requested;
+      if (frame !== undefined) {
+        if (shot.kind !== "graph")
+          return failure({
+            code: "invalid_target",
+            message: `frame crops a patch graph, so it needs target "graph", not "${raw}".`,
+            hint: `For example { "target": "graph", "frame": "${frame}" }.`,
+          });
+        if (simId === undefined) {
+          const found = await frameComponent(host, await host.getDocument(docId), frame, component);
+          if (!("component" in found)) return failure(found);
+          component = found.component;
+        }
+      }
       if (component !== undefined) {
         const problem = componentTargetProblem(await host.getDocument(docId), shot, component, simId);
         if (problem) return failure(problem);
@@ -520,6 +580,7 @@ export function registerSimulationTools(tc: ToolContext): void {
         ...(simId !== undefined ? { simId } : {}),
         ...(atMs !== undefined ? { atMs } : {}),
         ...(isolate ? { isolate } : {}),
+        ...(frame !== undefined ? { frame } : {}),
         ...(scale !== undefined ? { scale } : {}),
         maxWidth: maxWidth ?? 800,
       });
@@ -532,7 +593,7 @@ export function registerSimulationTools(tc: ToolContext): void {
       // Graphs, canvases and component drawings don't play, so they have no moment to name.
       const still = shot.kind === "graph" || shot.kind === "canvas" || component !== undefined;
       const lines = [
-        `${raw}${component !== undefined ? ` of ${component}` : ""}${isolate ? " (isolated)" : ""} · ${image.width}×${image.height}${image.timeMs !== undefined ? ` · ${roundForDisplay(image.timeMs)} ms` : ""}${simId !== undefined ? ` · ${simId}${atMs ? ` + ${roundForDisplay(atMs)} ms (session not advanced)` : ""}` : host.kind === "headless" && !still ? (atMs !== undefined ? ` · ${roundForDisplay(atMs)} ms after the prototype starts` : " · after start-up animations settle") : ""}`,
+        `${raw}${component !== undefined ? ` of ${component}` : ""}${frame !== undefined ? `, frame ${frame}` : ""}${isolate ? " (isolated)" : ""} · ${image.width}×${image.height}${image.timeMs !== undefined ? ` · ${roundForDisplay(image.timeMs)} ms` : ""}${simId !== undefined ? ` · ${simId}${atMs ? ` + ${roundForDisplay(atMs)} ms (session not advanced)` : ""}` : host.kind === "headless" && !still ? (atMs !== undefined ? ` · ${roundForDisplay(atMs)} ms after the prototype starts` : " · after start-up animations settle") : ""}`,
         ...(image.notes ?? []).map((n) => `Note: ${n}`),
       ];
       // Say when the picture differs from the person's document because of sim_override, or could.

@@ -791,6 +791,21 @@ describe("app host component screenshots", () => {
     expect(svgs).toHaveLength(1);
   });
 
+  it("crops a graph to one comment frame from the document, even while the editor shows the component", async () => {
+    const { w, host, svgs, motion } = await withComponents();
+    w.server.handle("graph.bounds", () => ({ x: 600, y: 60, width: 500, height: 300 }));
+    await host.apply([{ op: "addComment", component: motion, comment: { id: "springs", text: "SPRINGS", rect: [100, 80, 300, 200] } }], { label: "frame", author: CLAUDE });
+    await host.reveal(["press_spring"], { focus: true });
+    const shot = await host.screenshot({ kind: "graph" }, { component: motion, frame: "springs" });
+    expect(w.captures).toEqual([]);
+    expect(svgs).toHaveLength(1);
+    expect(svgs[0]!.svg).toContain('viewBox="76 56 348 248"');
+    expect(shot.notes).toEqual([
+      expect.stringContaining('Cropped to the comment frame springs ("SPRINGS")'),
+      expect.stringContaining("Drawn from the document the way the patch editor lays it out"),
+    ]);
+  });
+
   it("draws a layer component's canvas and a layer inside it at frame 0", async () => {
     const { host, scenes, button } = await withComponents();
     const canvas = await host.screenshot({ kind: "canvas" }, { component: button, scale: 2 });

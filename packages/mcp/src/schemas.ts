@@ -1,7 +1,8 @@
 /**
  * zod input and output schemas shared by tools, the CLI and tests. Value and op shapes stay loose
  * on purpose: core applyOps validates them and returns teaching errors with did-you-mean and
- * ready-to-apply fixes, which beats a generic schema rejection. Browser-safe.
+ * ready-to-apply fixes, which beats a generic schema rejection. Other objects are closed: a field
+ * they don't take fails the call with a did-you-mean (inputs.ts). Browser-safe.
  */
 
 import { OP_KINDS } from "@sonobe/core";
@@ -32,7 +33,7 @@ export const InputValueSchema = z
     'A literal (1, true, "text", "#FF3B30FF", [x, y]) or a wrapper: { "link": "patchId.port" | "@layerId.prop" | "$ref.port" | "$knob.knobId" }, { "layer": "layerId" | "$ref" }, { "loop": [..] }, { "json": .. }, { "asset": "assetId" }, { "gradient": .. }. null resets to the default.',
   );
 
-export const OP_HELP = `One op. Kinds: ${OP_KINDS.join(", ")}. Shapes: addLayer { parent?, index?, layer: { ref?, id?, type, name?, props?, children? } } · updateLayer { id, props?, name?, locked?, collapsed? } · moveLayer { id, parent?, index? } · removeLayer { id } · addPatch { patch: { ref?, id?, type, name?, typeParam?, inputCount?, inputs?, settings?, component?, ui? } } · updatePatch { id, name?, typeParam?, inputCount?, muted?, settings?, ui? } · replacePatch { id, patch: { type, typeParam?, inputCount?, settings?, component?, name? }, inputMap?, outputMap? } (changes a patch's type in place: keeps its id, position, name and every value and cable that still fits a port with the same key; inputMap/outputMap { old: new } carry one to a renamed port; the result lists what it dropped) · removePatch { id } · setInput { target, value } · connect { from, to } · disconnect { to } · rename { id, name } · addComment { comment: { text, rect, color? } } · createComponent { name, layerIds?, patchIds? } · updateInterface { component, inputs?, outputs?, replace? } (ports merge by key; null unpublishes one; replace: true makes each side you give the whole set; unpublishing disconnects its cables everywhere, undoably, and so does a new type they no longer fit) · updateComponent { id, name?, notes?, size?, meta? } · setNodePositions { positions: { "@layerId" | "$in" | "$out": [x, y] | null } } (where layer and interface nodes sit in the graph; null places one automatically) · setProject { changes } · knobs (no component): addKnob { knob: { name, type, value?, values?, min?, max?, step?, unit?, options?, group? } } · updateKnob { id, … } · removeKnob { id } · setKnobValue { id, value, preset? } · addKnobPreset { preset: { name, locked? }, copyFrom? } · updateKnobPreset { id, name?, locked? } · removeKnobPreset { id } · applyKnobPreset { id }; inputs read a knob with { "link": "$knob.<id>" }. Every op may name "component"; other fields are refused. Give a new item "ref" and write "$ref" in any op of the batch, before or after the op that creates it. To rebuild items under the same ids, remove and re-add them in one batch.`;
+export const OP_HELP = `One op. Kinds: ${OP_KINDS.join(", ")}. Shapes: addLayer { parent?, index?, layer: { ref?, id?, type, name?, props?, children? } } · updateLayer { id, props?, name?, locked?, collapsed? } · moveLayer { id, parent?, index? } · removeLayer { id } · addPatch { patch: { ref?, id?, type, name?, typeParam?, inputCount?, inputs?, settings?, component?, ui? } } · updatePatch { id, name?, typeParam?, inputCount?, muted?, settings?, ui? } (a new typeParam or inputCount drops the values and cables that no longer fit, and the result lists them) · replacePatch { id, patch: { type, typeParam?, inputCount?, settings?, component?, name? }, inputMap?, outputMap? } (changes a patch's type in place: keeps its id, position, name and every value and cable that still fits a port with the same key; inputMap/outputMap { old: new } carry one to a renamed port; the result lists what it dropped) · removePatch { id } · setInput { target, value } · connect { from, to } · disconnect { to } · rename { id, name } · addComment { comment: { text, rect, color? } } · createComponent { name, layerIds?, patchIds? } · updateInterface { component, inputs?, outputs?, replace? } (ports merge by key; null unpublishes one; replace: true makes each side you give the whole set; unpublishing disconnects its cables everywhere, undoably, and so does a new type they no longer fit) · updateComponent { id, name?, notes?, size?, meta? } · setNodePositions { positions: { "@layerId" | "$in" | "$out": [x, y] | null } } (where layer and interface nodes sit in the graph; null places one automatically) · setProject { changes } · knobs (no component): addKnob { knob: { name, type, value?, values?, min?, max?, step?, unit?, options?, group? } } · updateKnob { id, … } · removeKnob { id } · setKnobValue { id, value, preset? } · addKnobPreset { preset: { name, locked? }, copyFrom? } · updateKnobPreset { id, name?, locked? } · removeKnobPreset { id } · applyKnobPreset { id }; inputs read a knob with { "link": "$knob.<id>" }. Every op may name "component"; other fields are refused, in the op and in the new layer, patch or comment it wraps. Give a new item "ref" and write "$ref" in any op of the batch, before or after the op that creates it. To rebuild items under the same ids, remove and re-add them in one batch.`;
 
 export const OpSchema = z
   .looseObject({ op: z.string().describe(`Op kind: ${OP_KINDS.join(" | ")}.`) })
@@ -48,7 +49,7 @@ export interface NewLayerInput {
   component?: string;
 }
 
-export const NewLayerSchema: z.ZodType<NewLayerInput> = z.looseObject({
+export const NewLayerSchema: z.ZodType<NewLayerInput> = z.object({
   ref: z.string().optional().describe('Temp name for later references in this batch ("$ref").'),
   id: z.string().optional().describe("Explicit id (default: derived from the name)."),
   type: z
@@ -72,7 +73,7 @@ export const NewLayerSchema: z.ZodType<NewLayerInput> = z.looseObject({
   component: z.string().optional().describe("For componentInstance: the layer component to show."),
 });
 
-export const NewPatchSchema = z.looseObject({
+export const NewPatchSchema = z.object({
   ref: z
     .string()
     .optional()
@@ -265,7 +266,7 @@ export const WriteOutputSchema = z.looseObject({
   unpublished: z
     .array(z.looseObject({ component: z.string(), inputs: z.array(z.string()), outputs: z.array(z.string()) }))
     .optional(),
-  /** replacePatch: the values and cables the new type had no fitting port for ({ to, value }). */
+  /** replacePatch and updatePatch (typeParam, inputCount): the values and cables that no longer fit a port ({ to, value }). */
   dropped: z.array(z.looseObject({ to: z.string(), value: z.unknown() })).optional(),
   /** Cables the batch cut (or would) whose inputs still exist: a count and the first 50. */
   disconnected: z

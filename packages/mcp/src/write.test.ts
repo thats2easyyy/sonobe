@@ -3,6 +3,7 @@ import { homeFrame, rectContains, rectsOverlap, type Rect } from "@sonobe/core/g
 import { ID_SCENARIO_SETUP, ID_SCENARIOS, runIdScenario, type IdScenarioHost } from "@sonobe/core/testing";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { estimateGraphGeometry } from "./geometry.ts";
+import { frameResize } from "./tools/write.ts";
 import {
   buildGrowCard,
   connectClient,
@@ -299,6 +300,26 @@ describe("apply_ops", () => {
     expect(outline).toContain("progress←grow_spring.output");
     const history = await client.call("list_history", {});
     expect(history.text).toContain("replaced 1 patch");
+  });
+
+  it("lists what a typeParam or inputCount change drops", async () => {
+    await buildGrowCard(client);
+    const added = await client.call("add_patches", {
+      patches: [{ ref: "pick", type: "optionPicker", name: "Pick", inputCount: 3, inputs: { option1: 4, option2: 6 } }],
+    });
+    expect(added.isError, added.text).toBe(false);
+    const fewer = await client.call("apply_ops", {
+      ops: [{ op: "updatePatch", id: "pick", inputCount: 2 }],
+      dryRun: true,
+    });
+    expect(fewer.text).toContain("Would drop what no longer fits after the typeParam or inputCount change: pick.option2 (6).");
+    const point = await client.call("apply_ops", { ops: [{ op: "updatePatch", id: "card_scale", typeParam: "point" }] });
+    expect(point.isError, point.text).toBe(false);
+    expect(point.text).toContain("Dropped what no longer fits after the typeParam or inputCount change: card_scale.start (1), card_scale.end (1.08). The undo tool brings them back.");
+    expect(point.structured.dropped).toEqual([
+      { to: "card_scale.start", value: 1 },
+      { to: "card_scale.end", value: 1.08 },
+    ]);
   });
 
   it("creates patch components with published ports", async () => {
@@ -669,6 +690,8 @@ describe("tidy_graph with comment frames", () => {
     await client.call("apply_ops", { ops: sectioned });
     const { revision } = await project.host.getDocument();
     const preview = await client.call("tidy_graph", { frames: ["places"], dryRun: true });
+    // PLACES gets wider and shorter: an area that shrank isn't a frame that shrank.
+    expect(preview.text).toContain('places ("PLACES") got wider and shorter: 562×188 (was 330×520)');
     expect(preview.text).toContain("Dry run");
     expect((await project.host.getDocument()).revision).toBe(revision);
     const before = await geometry();
@@ -701,6 +724,15 @@ describe("tidy_graph with comment frames", () => {
     // Boxes the editor drew for another revision are ignored.
     revision = snap.revision - 1;
     expect((await client.call("tidy_graph", { frames: ["places"], dryRun: true })).text).toContain("Node sizes are estimated");
+  });
+});
+
+describe("frameResize", () => {
+  it("words a size change so it's true of both sides", () => {
+    expect(frameResize([330, 120], { width: 798, height: 188 })).toBe("grew to 798×188 (was 330×120)");
+    expect(frameResize([330, 520], { width: 330, height: 188 })).toBe("shrank to 330×188 (was 330×520)");
+    expect(frameResize([330, 520], { width: 562, height: 188 })).toBe("got wider and shorter: 562×188 (was 330×520)");
+    expect(frameResize([600, 120], { width: 400, height: 300 })).toBe("got narrower and taller: 400×300 (was 600×120)");
   });
 });
 

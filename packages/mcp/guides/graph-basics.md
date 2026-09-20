@@ -51,14 +51,36 @@ Some connections convert automatically: number to boolean (on when > 0), boolean
 - A batch can replace an item under its id: remove it, then add the new one. Ids removed by an earlier batch are retired, so new items skip them (`card_2`, reported on a "Retired ids skipped" line) and an explicit retired `id` fails with `id_retired`. Rebuild in one batch to keep ids.
 - To swap a patch for another type, change it in place: `{ "op": "replacePatch", "id": "grow_spring", "patch": { "type": "classicAnimation" } }` keeps its id, position, name, and every value and cable that still fits a port with the same key. `inputMap` / `outputMap` (`{ "number": "progress" }`) carry one to a port with another key. The result lists what it dropped.
 
-Op kinds: `addLayer`, `updateLayer`, `moveLayer`, `removeLayer`, `addPatch`, `updatePatch`, `replacePatch` (a new type in place), `removePatch`, `setInput` (literal or link; `null` resets), `connect`, `disconnect`, `rename`, `addComment`, `updateComment`, `removeComment`, `addComponent`, `removeComponent`, `createComponent`, `updateInterface` (by key; `null` unpublishes; `replace: true` sets a whole side), `updateComponent`, `setNodePositions`, `setScript`, `addAsset`, `removeAsset`, `setProject`. Every op may name a `component`; a field an op doesn't take fails with `unknown_field` and a did-you-mean.
+Op kinds: `addLayer`, `updateLayer`, `moveLayer`, `removeLayer`, `addPatch`, `updatePatch`, `replacePatch` (a new type in place), `removePatch`, `setInput` (literal or link; `null` resets), `connect`, `disconnect`, `rename`, `addComment`, `updateComment`, `removeComment`, `addComponent`, `removeComponent`, `createComponent`, `updateInterface` (by key; `null` unpublishes; `replace: true` sets a whole side), `updateComponent`, `setNodePositions`, `setScript`, `addAsset`, `removeAsset`, `setProject`. Every op may name a `component`; a field an op (or the new layer, patch or comment it wraps) doesn't take fails with `unknown_field` and a did-you-mean, and so does one in any tool's arguments.
+
+## From code to patches
+
+What you'd write in React, SwiftUI or CSS, and the patches that do it. Native patches first; `javascript` is for logic no patch expresses.
+
+| In code | In Sonobe |
+|---|---|
+| `onClick`, `.onTapGesture` | `interaction` on the layer; its `tap` pulse starts what follows |
+| `useState(false)` toggled, `@State var isOn` | `switch`, which a pulse flips, turns on or turns off |
+| a count or an index in state | `counter`; `optionSwitch` for a few named states |
+| `cond ? a : b`, `if` / `else` | `ifElse`, or `optionPicker` chosen by a boolean or an index |
+| `withSpring`, `.animation(.spring())`, a CSS transition | `popAnimation` or `springAnimation` from 0 to 1, then `transition` into real units |
+| `interpolate(x, [a, b], [0, 1])` | `progress`, and `transition` back out |
+| `Math.abs(dx) > 120`, `clamp(x, lo, hi)` | `absoluteValue`, `greaterThan` / `lessThan`, `clamp` |
+| a drag that follows the finger (`DragGesture`) | `gesture` (translation, velocity) into `springAnimation` with `gestureActive`; `snap` or `swipe` decides where it lands |
+| `items.map(item => <Card />)`, `ForEach` | one layer whose Repeat takes a `loop` or `loopBuilder`: N copies are one layer and a loop, not N layers |
+| `setTimeout`, a delay | `wait` after a pulse; `delay` holds a value back |
+| `useEffect(..., [])`, `.onAppear` | `whenPrototypeStarts` |
+| `onScroll`, a scroll offset | `scroll` on the content layer, then `progress` on its position |
+| `GeometryReader`, measuring a view | `layerInfo`, `deviceInfo` |
+
+For a whole interaction built this way, `list_examples` and `get_example` show a verified example with its patch chain and recipe.
 
 ## Organizing the graph
 
 - **Sections are comment frames.** Frame a group of patches with `addComment { "comment": { "text": "Places", "rect": [x, y, w, h] } }`. A node belongs to the frame under its title bar.
-- **Tidy with `tidy_graph`.** It lays each frame's patches out left to right inside the frame, refits the frame, and pushes overlapping frames apart, keeping the sections where they are. `tidy_graph({ "frames": ["places"] })` tidies one section; `ids` tidies some nodes within their frames; `dryRun: true` previews. The result says what grew or moved, and which nodes overlapped before.
-- **Don't estimate node sizes.** Nodes are as wide as their names, inline values and live values; a text Loop Builder is about 280 to 300 pt wide. `add_patches` and `tidy_graph` size them as the editor draws them (measured, when the person has that graph open), so leave out `ui` or tidy afterwards instead of computing a layout. When you need a box, `get_items` prints it (`patch place_names … · ui 460,520 · 286×124`), and a comment's details list the nodes it frames.
-- **Look at the graph.** `get_screenshot({ "target": "graph", "component": "swipe_card" })` draws a component's patch graph, even one the person isn't viewing; `"canvas"` draws a layer component on its artboard. `reveal` with `focus: true` opens a component for the person; without focus, items in a component they aren't viewing come back "not revealed".
+- **Tidy with `tidy_graph`.** It lays each frame's patches out left to right inside the frame, refits the frame, and pushes overlapping frames apart, keeping the sections where they are. `tidy_graph({ "frames": ["places"] })` tidies one section; `ids` tidies some nodes within their frames; `dryRun: true` previews. The result says how each frame's size changed, what moved, and which nodes overlapped before, with their boxes.
+- **Don't estimate node sizes.** Nodes are as wide as their names, inline values and live values; a text Loop Builder is about 280 to 300 pt wide. `add_patches` and `tidy_graph` size them as the editor draws them (measured, when the person has that graph open), so leave out `ui` or tidy afterwards instead of computing a layout. When you need a box, `get_items` prints it (`patch place_names … · ui 460,520 · 286×124`) with the nodes that overlap it, and a comment's details list the nodes it frames and which of them overlap. After placing nodes yourself, check the frame with `get_items`, or the whole graph with `tidy_graph` and `dryRun: true`.
+- **Look at the graph.** `get_screenshot({ "target": "graph", "component": "swipe_card" })` draws a component's patch graph, even one the person isn't viewing, and `"frame": "places"` crops it to one comment frame when the whole graph is too big to read; `"canvas"` draws a layer component on its artboard. `reveal` with `focus: true` opens a component for the person; without focus, items in a component they aren't viewing come back "not revealed".
 - **Layer and interface nodes.** A layer that a cable drives or reads gets a node (`@card`), and published ports get `$in` and `$out`. They sit next to the patches they connect to until someone places them. `get_outline` detail `full` shows `node=x,y` or `node=auto`. Move them with `{ "op": "setNodePositions", "positions": { "@card": [900, 40] } }`; `null` puts one back to automatic. Don't write `meta.patchEditor` yourself: `updateComponent` refuses a write that would drop positions someone placed.
 
 ## Example: dim a dot while it's pressed

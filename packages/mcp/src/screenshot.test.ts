@@ -242,6 +242,39 @@ describe("headless screenshots", () => {
     expect(typo.text).toContain('Did you mean "grow_motion"?');
   }, 30_000);
 
+  it("crops a graph to one comment frame, in the component that has it", async () => {
+    const c = await setup();
+    await buildGrowCard(c);
+    const { doc } = await project!.host.getDocument();
+    const spring = doc.components.main!.patches.grow_spring!.ui;
+    await c.call("apply_ops", {
+      ops: [
+        { op: "addComment", comment: { id: "motion", text: "MOTION\nthe spring", rect: [spring.x - 20, spring.y - 44, 240, 180] } },
+        { op: "createComponent", name: "Other", patchIds: ["tap_card"] },
+      ],
+    });
+    const whole = png(await c.call("get_screenshot", { target: "graph", maxWidth: 1600 }));
+    const cropped = await c.call("get_screenshot", { target: "graph", frame: "motion", maxWidth: 1600 });
+    // The frame plus a 24 pt margin, at 1 px per point.
+    expect([png(cropped).width, png(cropped).height]).toEqual([288, 228]);
+    expect(png(cropped).width).toBeLessThan(whole.width);
+    expect(cropped.text).toContain("graph of main, frame motion · 288×228");
+    expect(cropped.text).toContain('Note: Cropped to the comment frame motion ("MOTION")');
+
+    const layer = await c.call("get_screenshot", { target: "viewer", frame: "motion" });
+    expect(layer.text).toContain('frame crops a patch graph, so it needs target "graph"');
+    const typo = await c.call("get_screenshot", { target: "graph", frame: "moton" });
+    expect(typo.structured.error).toMatchObject({ code: "unknown_frame" });
+    expect(typo.text).toContain('There\'s no comment "moton" in main. Did you mean "motion"?');
+    expect(typo.text).toContain('Comments there: motion ("MOTION").');
+    const elsewhere = await c.call("get_screenshot", { target: "graph", component: "other", frame: "motion" });
+    expect(elsewhere.text).toContain("There's no comment \"motion\" in other.");
+    // A frame only one other component has is found there.
+    await c.call("apply_ops", { ops: [{ op: "addComment", component: "other", comment: { id: "taps", text: "TAPS", rect: [0, 0, 300, 200] } }] });
+    const found = await c.call("get_screenshot", { target: "graph", frame: "taps" });
+    expect(found.text).toContain("graph of other, frame taps · ");
+  }, 30_000);
+
   it("draws image assets from the project folder and notes placeholders", async () => {
     const c = await setup();
     const green = await rasterizeSvg(

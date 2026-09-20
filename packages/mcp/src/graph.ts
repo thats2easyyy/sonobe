@@ -34,7 +34,7 @@ import {
   type SonobeDocument,
 } from "@sonobe/core";
 import { homeFrame } from "@sonobe/core/graph";
-import type { GraphGeometry } from "./geometry.ts";
+import { boxLabel, overlappingPairs, overlapsOf, type GraphGeometry } from "./geometry.ts";
 import { HostError } from "./host.ts";
 
 /** A component by id (default root), or a teaching error. */
@@ -331,9 +331,19 @@ const boxData = (geometry: GraphGeometry, id: string) => {
   return box ? { ...box, measured: geometry.measured.has(id) } : undefined;
 };
 
+/** Most overlapping nodes an item's details list. */
+const MAX_OVERLAPS = 8;
+
+/** "  overlaps: count (460,600 150×90), …": the nodes whose boxes cover this node's box. */
+function overlapLine(geometry: GraphGeometry, others: readonly string[], move: string): string {
+  const listed = others.slice(0, MAX_OVERLAPS).map((o) => boxLabel(o, geometry.nodes.get(o)!));
+  return `  overlaps: ${listed.join(", ")}${others.length > MAX_OVERLAPS ? ` (+${others.length - MAX_OVERLAPS})` : ""}. tidy_graph separates them, or move one (${move}).`;
+}
+
 /**
  * A detailed block for one item, as get_items shows it. With the component's graph geometry,
- * patches and layer nodes show their drawn size and comments list the nodes they frame.
+ * patches and layer nodes show their drawn size and the nodes they overlap, and comments list the
+ * nodes they frame and which of those overlap.
  */
 export function itemDetails(
   doc: SonobeDocument,
@@ -346,9 +356,13 @@ export function itemDetails(
   if (located.kind === "patch") {
     const id = Object.entries(c.patches).find(([, n]) => n === located.patch)![0];
     const box = geometry && boxData(geometry, id);
+    const overlaps = geometry ? overlapsOf(geometry, id) : [];
+    const [head, ...rest] = patchText(doc, c, registry, id, located.patch!, "full", consumers, box).split("\n");
+    // Right under the box it's about.
+    if (overlaps.length) rest.unshift(overlapLine(geometry!, overlaps, "updatePatch ui"));
     return {
-      text: patchText(doc, c, registry, id, located.patch!, "full", consumers, box),
-      data: { id, kind: "patch", component: c.id, node: located.patch, ...(box ? { box } : {}) },
+      text: [head, ...rest].join("\n"),
+      data: { id, kind: "patch", component: c.id, node: located.patch, ...(box ? { box } : {}), ...(overlaps.length ? { overlaps } : {}) },
     };
   }
   if (located.kind === "comment") {
@@ -357,6 +371,7 @@ export function itemDetails(
       `comment ${cm.id} ${JSON.stringify(cm.text)} rect=${cm.rect.join(",")}${cm.color ? ` color=${cm.color}` : ""}`,
     ];
     const members = geometry ? frameMembers(geometry, cm.id) : undefined;
+    const overlapping = members ? overlappingPairs(members.nodes.map((id) => [id, geometry!.nodes.get(id)!] as const)) : [];
     if (members) {
       const { nodes, frames } = members;
       lines.push(
@@ -365,6 +380,12 @@ export function itemDetails(
           : "  frames no nodes (a node belongs to the frame under its title bar)",
       );
       if (frames.length) lines.push(`  frames inside it: ${frames.join(", ")}`);
+      if (overlapping.length) {
+        const label = (id: string) => boxLabel(id, geometry!.nodes.get(id)!);
+        lines.push(
+          `  overlapping: ${overlapping.slice(0, MAX_OVERLAPS).map(([a, b]) => `${label(a)} × ${label(b)}`).join("; ")}${overlapping.length > MAX_OVERLAPS ? ` (+${overlapping.length - MAX_OVERLAPS})` : ""}. tidy_graph({ "frames": ["${cm.id}"] }) lays this frame out.`,
+        );
+      }
     }
     return {
       text: lines.join("\n"),
@@ -374,6 +395,7 @@ export function itemDetails(
         component: c.id,
         comment: cm,
         ...(members ? { members: members.nodes, innerFrames: members.frames } : {}),
+        ...(overlapping.length ? { overlapping } : {}),
       },
     };
   }
@@ -400,7 +422,7 @@ export function itemDetails(
   if (listeners.length) lines.push(`  referenced by: ${listeners.join(", ")}`);
   // Layers a cable drives or reads have a node in the patch graph: saved where someone put it, or placed automatically.
   let graphNode:
-    | { position: [number, number] | null; box?: ReturnType<typeof boxData> }
+    | { position: [number, number] | null; box?: ReturnType<typeof boxData>; overlaps?: string[] }
     | undefined;
   if (layersWithGraphNodes(c).has(layer.id)) {
     const saved = readNodePositions(c)[layerNodeId(layer.id)];
@@ -414,6 +436,11 @@ export function itemDetails(
           ? `  graph node: ${box.x},${box.y}${size}, placed automatically next to its drivers (not saved)`
           : "  graph node: placed automatically next to its drivers (not saved)",
     );
+    const overlaps = geometry ? overlapsOf(geometry, layerNodeId(layer.id)) : [];
+    if (overlaps.length) {
+      lines.push(overlapLine(geometry!, overlaps, "setNodePositions"));
+      graphNode.overlaps = overlaps;
+    }
   }
   return {
     text: lines.join("\n"),

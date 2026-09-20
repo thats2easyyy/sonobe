@@ -435,6 +435,7 @@ export function createHeadlessHost(options: HeadlessHostOptions = {}): HeadlessH
         const drawing = drawComponentGraph(session.doc, registry, componentId, geometry, {
           ...(shotOptions.scale !== undefined ? { scale: shotOptions.scale } : {}),
           ...(shotOptions.maxWidth !== undefined ? { maxWidth: shotOptions.maxWidth } : {}),
+          ...(shotOptions.frame !== undefined ? { frame: shotOptions.frame } : {}),
         });
         return renderGraphScreenshot(drawing, graphNotes(session.doc, componentId, drawing, false));
       }
