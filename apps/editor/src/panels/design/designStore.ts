@@ -28,7 +28,7 @@ export interface McpDraftSession {
   client: WorkClient | null;
   /** The last update's revision; an older update changes nothing. */
   revision: number;
-  /** When the last update came (epoch ms). A draft idle for MCP_DRAFT_IDLE_MS leaves the canvas: its session may be gone. */
+  /** When the last update came (epoch ms). A draft with no update for a while leaves the canvas (mcpDraftIdleAt): its session may be gone. */
   touchedAt: number;
   /** The document's revision when import_design started adding it; null while it's written. */
   addingFrom: number | null;
@@ -60,8 +60,17 @@ export interface DesignRequest {
   outcome?: AssistantOutcome;
   error?: AssistantError;
 }
-export interface DesignResult { kind: "added" | "updated"; layerId: string; component: string; name: string; txnId: string | null; dropped: string[]; droppedCount: number; coveredScreen: string | null; reply: string }
-export interface DesignData { open: boolean; newScreen: boolean; request: DesignRequest | null; drafts: DesignDraft[]; result: DesignResult | null }
+/** The screen the box's import made. What it covers is read from the document when it's shown (status.ts resultPlacement). */
+export interface DesignResult { kind: "added" | "updated"; layerId: string; component: string; name: string; txnId: string | null; dropped: string[]; droppedCount: number; reply: string }
+export interface DesignData {
+  open: boolean;
+  newScreen: boolean;
+  request: DesignRequest | null;
+  drafts: DesignDraft[];
+  result: DesignResult | null;
+  /** Counts openBox calls: the box moves focus to its field on each, even when it's already open. */
+  focusRequest: number;
+}
 export interface DesignState extends DesignData { openBox(): void; closeBox(): void; setNewScreen(value: boolean): void }
 
 /** DesignDraft.error when the reply hit max_tokens before the page was finished. */
@@ -70,20 +79,22 @@ export const DRAFT_TOO_LONG = "too_long";
 const DRAFTS_KEPT = 5;
 /** How long a draft stays on the canvas after it's added, fails or stops: the preview's fade. */
 const FADE_MS = 400;
-/** How long an MCP client's draft stays on the canvas without an update (the MCP server drops it after as long). */
+/** How long an MCP client's draft stays on the canvas without an update while it's being added (the MCP server drops a draft after as long). */
 export const MCP_DRAFT_IDLE_MS = 15 * 60_000;
+/** How long one that's being written stays without an update: Claude sends each part within seconds, so its session has most likely stopped. */
+export const MCP_DRAFT_STALLED_MS = 3 * 60_000;
 const REPLY_CHARS = 280;
 /** The start of the agent's notice when an edit is refused in Read only. */
 const READ_ONLY_NOTICE = "Claude is set to Read only";
 
 export function initialDesignData(): DesignData {
-  return { open: false, newScreen: false, request: null, drafts: [], result: null };
+  return { open: false, newScreen: false, request: null, drafts: [], result: null, focusRequest: 0 };
 }
 
 /** The app-wide Design with Claude store (the canvas header, ⌘K, the Layers menu and the box share it). */
 export const designStore: StoreApi<DesignState> = createStore<DesignState>()((set) => ({
   ...initialDesignData(),
-  openBox: () => set({ open: true }),
+  openBox: () => set((s) => ({ open: true, focusRequest: s.focusRequest + 1 })),
   closeBox: () => set({ open: false }),
   setNewScreen: (value) => set({ newScreen: value }),
 }));
@@ -245,8 +256,57 @@ export function applyPreviewUpdate(session: EditorSession, update: DesignPreview
   return true;
 }
 
-/** An MCP client's draft that had no update for MCP_DRAFT_IDLE_MS: its session may have ended without clearing it. */
-const isIdleDraft = (draft: DesignDraft, now: number): boolean => draft.mcp !== undefined && now - draft.mcp.touchedAt >= MCP_DRAFT_IDLE_MS;
+/** When an MCP client's draft leaves the canvas if no update comes: its session may have ended without clearing it. Null for the Assistant's drafts. */
+export function mcpDraftIdleAt(draft: DesignDraft): number | null {
+  if (!draft.mcp) return null;
+  return draft.mcp.touchedAt + (draft.status === "writing" ? MCP_DRAFT_STALLED_MS : MCP_DRAFT_IDLE_MS);
+}
+
+const isIdleDraft = (draft: DesignDraft, now: number): boolean => {
+  const at = mcpDraftIdleAt(draft);
+  return at !== null && now >= at;
+};
+
+/** End a live MCP draft on this canvas (Hide preview): it fades out onto the layers. The session's next update brings it back. False when there's none. */
+export function dismissDraft(key: string, now = Date.now()): boolean {
+  const draft = designStore.getState().drafts.find((d) => d.key === key);
+  if (!draft?.mcp || !isLive(draft.status)) return false;
+  designStore.setState((s) => ({ drafts: s.drafts.map((d) => (d.key === key ? { ...d, status: "stopped", since: now } : d)) }));
+  return true;
+}
+
+/** The MCP draft the canvas shows now, while it's live. */
+export function liveMcpDraft(state: DesignData, now: number): DesignDraft | null {
+  const draft = activeDraft(state, now);
+  return draft?.mcp && isLive(draft.status) ? draft : null;
+}
+
+/** End each MCP draft once it goes idle, so the canvas and the box let go of it when that happens (activeDraft already skips it). Returns stop. */
+function endIdleDrafts(): () => void {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const schedule = () => {
+    clearTimeout(timer);
+    timer = undefined;
+    const next = Math.min(...designStore.getState().drafts.flatMap((d) => (isLive(d.status) ? (mcpDraftIdleAt(d) ?? []) : [])));
+    if (!Number.isFinite(next)) return;
+    timer = setTimeout(() => {
+      const now = Date.now();
+      const { drafts } = designStore.getState();
+      const ended = drafts.map((d): DesignDraft => (isLive(d.status) && isIdleDraft(d, now) ? { ...d, status: "stopped", since: now } : d));
+      // The store change schedules the next one.
+      if (ended.some((d, i) => d !== drafts[i])) designStore.setState({ drafts: ended });
+      else schedule();
+    }, Math.max(0, next - Date.now()) + 1);
+  };
+  const stop = designStore.subscribe((state, previous) => {
+    if (state.drafts !== previous.drafts) schedule();
+  });
+  schedule();
+  return () => {
+    stop();
+    clearTimeout(timer);
+  };
+}
 
 /** The draft the canvas previews: the newest writing/adding one of any source, else one that left those states < 400 ms ago (the fade). */
 export function activeDraft(state: DesignData, now: number): DesignDraft | null {
@@ -289,14 +349,36 @@ function locateScreen(doc: SonobeDocument, screenId: Id, likely: readonly Id[]):
   return null;
 }
 
-/** Subscribe to host.assistant.onEvent (default getAssistantHost()); on tool_finished.imported, select and reveal the screen when it's in the current component and the selection hasn't changed since the run started; set result. Returns detach. */
+/**
+ * Whether an import went into this window's document. Claude can pass another open document's docId,
+ * and the editor doesn't know its own, so it checks that its newest change is the import's and added or
+ * changed the screen (txnIds count per window, so they alone can collide). Without a txnId, whether the
+ * screen is here at all.
+ */
+function holdsImport(session: EditorSession, imported: AssistantImported): boolean {
+  const { doc, lastChange } = session.document.getState();
+  if (imported.txnId === null) return locateScreen(doc, imported.screenId, []) !== null;
+  return lastChange?.kind === "apply" && lastChange.txnId === imported.txnId && lastChange.affected.layers.includes(imported.screenId);
+}
+
+/**
+ * Subscribe to host.assistant.onEvent (default getAssistantHost()); on tool_finished.imported into this
+ * window's document, select and reveal the screen when it's in the current component and the selection
+ * hasn't changed since the run started; set result. Also ends MCP drafts that go idle. Returns detach.
+ */
 export function attachDesign(session: EditorSession, host: AssistantHostLike | null = getAssistantHost()): () => void {
   // The chip's × means "New screen" until the selection changes.
   const stopSelection = session.selection.subscribe((state, previous) => {
     if (state.layers !== previous.layers && designStore.getState().newScreen) designStore.getState().setNewScreen(false);
   });
+  const stopIdle = endIdleDrafts();
   const onEvent = host?.assistant?.onEvent;
-  if (!onEvent) return stopSelection;
+  if (!onEvent) {
+    return () => {
+      stopSelection();
+      stopIdle();
+    };
+  }
 
   /** Each running reply's selection when it started (then the screen it selected). */
   const baselines = new Map<string, readonly Id[]>();
@@ -308,20 +390,16 @@ export function attachDesign(session: EditorSession, host: AssistantHostLike | n
     const { doc, lastChange } = session.document.getState();
     const touched = lastChange?.txnId !== undefined && lastChange.txnId === imported.txnId ? lastChange.affected.components : [];
     const found = locateScreen(doc, imported.screenId, [...touched, ...(request ? [request.context.component.id] : []), session.currentComponentId()]);
-    const kind = imported.replaced ? "updated" : "added";
-    // A new screen lands in front: name the top-level screen it covers.
-    const behind = kind === "added" && found && found.loc.parent === null && found.loc.index > 0 ? found.loc.siblings[found.loc.index - 1]! : null;
     resultRun = runId;
     designStore.setState({
       result: {
-        kind,
+        kind: imported.replaced ? "updated" : "added",
         layerId: imported.screenId,
         component: found?.componentId ?? request?.context.component.id ?? session.currentComponentId(),
         name: found?.loc.layer.name ?? imported.name,
         txnId: imported.txnId,
         dropped: imported.dropped,
         droppedCount: imported.droppedCount,
-        coveredScreen: behind?.name ?? null,
         reply: runReply(assistantStore.getState(), runId),
       },
     });
@@ -335,7 +413,13 @@ export function attachDesign(session: EditorSession, host: AssistantHostLike | n
     baselines.set(runId, [imported.screenId]);
   };
 
-  const unsubscribe = onEvent((event) => {
+  const unsubscribe = onEvent((received) => {
+    // An import into another open document isn't this window's: its draft stops here, and the box's request didn't add anything here.
+    let event = received;
+    if (event.type === "tool_finished" && event.imported && !holdsImport(session, event.imported)) {
+      const { imported: _elsewhere, ...rest } = event;
+      event = rest;
+    }
     const patch = reduceDesignEvent(designStore.getState(), event, Date.now());
     if (Object.keys(patch).length) designStore.setState(patch);
     switch (event.type) {
@@ -359,6 +443,7 @@ export function attachDesign(session: EditorSession, host: AssistantHostLike | n
   return () => {
     unsubscribe();
     stopSelection();
+    stopIdle();
   };
 }
 
