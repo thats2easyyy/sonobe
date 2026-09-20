@@ -95,6 +95,8 @@ When a replicated layer disappears, the Viewer says so: a notice like "Card has 
 
 Read it from where the empty loop started to where it erased things. The fix buttons change the patch that started it, usually the Out of Range input of a Loop Select (guide 07). Restarting with ⌘R won't help here, because the wiring empties the list again on every frame.
 
+One case is different. When you edit while this notice is up, Sonobe starts a hidden copy of the prototype from scratch and runs it for two frames. If that copy draws the layer, the wiring is fine, but the running prototype still holds state from before your edit, like a counter that already counted down. The notice then says "The prototype kept state from before your edit". Click Restart.
+
 Claude sees the same warning in its simulations, and when it reads a value that comes back empty, `sim_get_values` adds a note saying why, such as "Not drawn: Layer "Card" has 0 copies because…".
 
 ### Ask for a trace

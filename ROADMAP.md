@@ -35,7 +35,7 @@ The first two finish Stage 4. The rest are Stage 5.
 - [x] Canvas: direct manipulation, snapping, insert shapes and text, alignment tools
 - [x] Layer ↔ patch bridges: Touch button, inspector property links, drag a cable onto a property
 - [ ] Viewer: device picker, frame, restart, hit-target overlay, pop-out window, LAN web player with QR code, recording (partial: recording remains)
-- [ ] Native iPhone preview: Sonobe Viewer (`apps/ios`) plays the LAN web player full screen with real haptics. Haptic and Vibrate reach UIFeedbackGenerator and Core Haptics over a small bridge, the app scans the Preview on Phone code, and `npm run test:ios` runs its tests on a simulator. Android phones vibrate in the browser (partial: tested only in the Simulator, built from source until TestFlight, and importing SF Symbols as real icons remains)
+- [ ] Native iPhone preview: Sonobe Viewer (`apps/ios`) plays the LAN web player full screen with real haptics. Haptic and Vibrate reach UIFeedbackGenerator and Core Haptics over a small bridge, the app scans the Preview on Phone code, and `npm run test:ios` runs its tests on a simulator. Android phones vibrate in the browser. The phone gets the viewer's sound, network requests, links and camera, restarts when Sonobe does, and opens a menu with a three-finger tap (partial: tested only in the Simulator, built from source until TestFlight, and importing SF Symbols as real icons remains)
 - [x] Assets: images, video, sound, fonts, Lottie (drag and drop)
 - [x] Examples: 15 canonical recipes as runnable projects with scripted tests
 - [x] Learn panel: 5 interactive lessons, the guides, the examples, and the patch reference
