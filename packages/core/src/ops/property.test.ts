@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest";
 import { allLayers, resolveNodePorts, resolveLayerProps } from "../registry.ts";
 import { parseDocumentFiles, serializeDocument } from "../serialize.ts";
 import { emptyDoc, mockRegistry, mustApply, SAMPLE_OPS } from "../testing/fixtures.ts";
-import type { InputValue, NewLayer, NewPatch, Op, SonobeDocument, ValueType } from "../types.ts";
+import type { InputValue, InterfacePortInput, NewLayer, NewPatch, Op, SonobeDocument, ValueType } from "../types.ts";
 import { applyOps, OP_KINDS } from "./apply.ts";
 import { listInputs, targetAddress } from "./references.ts";
 
@@ -191,6 +191,19 @@ function randomOp(doc: SonobeDocument, rand: () => number): Op | undefined {
       return chosen.length ? { op: "createComponent", component: cid, name: pick(["Logic", "Spring Group"])!, patchIds: chosen } : undefined;
     }
     case "updateInterface": {
+      if (chance(0.25)) {
+        // Replace one side with a random subset of its ports (outputs sometimes without their link), plus maybe a new input.
+        const side = chance(0.5) ? "inputs" : "outputs";
+        const ports: Record<string, InterfacePortInput> = {};
+        for (const [key, port] of Object.entries(c.interface[side])) {
+          if (!chance(0.6)) continue;
+          const { link: _link, ...unlinked } = port;
+          ports[key] = chance(0.5) ? port : unlinked;
+        }
+        const fresh = pick(["label", "value", "enabled"].filter((k) => !Object.hasOwn(c.interface.inputs, k)));
+        if (side === "inputs" && fresh && chance(0.5)) ports[fresh] = { key: fresh, name: fresh, type: "number" };
+        return { op: "updateInterface", component: cid, replace: true, [side]: ports };
+      }
       if (chance(0.5)) {
         const existing = Object.keys(c.interface.inputs);
         if (existing.length && chance(0.4)) return { op: "updateInterface", component: cid, inputs: { [pick(existing)!]: null } };

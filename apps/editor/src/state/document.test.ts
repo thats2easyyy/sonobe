@@ -1,4 +1,5 @@
 import { applyOps, createEmptyDocument, findLayer, parseDocumentFiles, serializeDocument, type Op, type SonobeDocument } from "@sonobe/core";
+import { ID_SCENARIO_SETUP, ID_SCENARIOS, runIdScenario, type IdScenarioHost } from "@sonobe/core/testing";
 import { describe, expect, it, vi } from "vitest";
 import { createBrowserHost, createMemoryProjectStorage } from "../host/browserHost.ts";
 import { createDesktopHost } from "../host/desktopHost.ts";
@@ -97,6 +98,46 @@ describe("document store: apply, undo, redo", () => {
     store.getState().apply([{ op: "removeLayer", id: "card" }], { label: "Delete Card" });
     store.getState().apply([addRect("Card")], { label: "Add Card" });
     expect(layerIds(store)).toEqual(["card_2"]);
+    expect(store.getState().isRetiredId("main", "card")).toBe(true);
+    expect(store.getState().isRetiredId("main", "card_2")).toBe(false);
+    expect(store.getState().retiredIds()).toEqual({ main: ["card"] });
+  });
+
+  describe("shared id scenarios (ARCHITECTURE §3.2)", () => {
+    const setup = () => {
+      const r = applyOps(createEmptyDocument(), ID_SCENARIO_SETUP, { registry });
+      if (!r.ok) throw new Error(JSON.stringify(r.errors));
+      return r.doc;
+    };
+    for (const scenario of ID_SCENARIOS) {
+      it(scenario.name, async () => {
+        const store = createDocumentStore({ registry, document: setup() });
+        const host: IdScenarioHost = {
+          apply: async (ops, { dryRun }) => store.getState().apply(ops, { label: "edit", author: CLAUDE_AUTHOR, dryRun }),
+          undo: async () => void store.getState().undo(CLAUDE_AUTHOR),
+        };
+        expect(await runIdScenario(host, scenario)).toEqual(scenario.expected);
+      });
+    }
+  });
+
+  it("amends a gesture's steps into one group that can create the same items again", () => {
+    const store = createDocumentStore({ registry, document: createEmptyDocument() });
+    store.getState().apply([addRect("Sticker")], { label: "Insert" });
+    const txnId = store.getState().lastChange!.txnId!;
+    const amended = store.getState().amend(txnId, [addRect("Sticker", { id: "sticker", props: { opacity: 0.5 } })], { label: "Insert Sticker" });
+    expect(amended.ok).toBe(true);
+    expect(layerIds(store)).toEqual(["sticker"]);
+    expect(store.getState().historyEntries().map((e) => e.label)).toEqual(["Insert Sticker"]);
+    // Derived ids too: the undone layer's id is free for the final version.
+    store.getState().apply([addRect("Label")], { label: "Insert" });
+    expect(store.getState().amend(store.getState().lastChange!.txnId!, [addRect("Label")], { label: "Insert Label" }).results[0]!.ids).toEqual(["label"]);
+    // A failing amend puts the undone groups back.
+    const before = store.getState().doc;
+    const failed = store.getState().amend(store.getState().lastChange!.txnId!, [{ op: "removeLayer", id: "ghost" }], { label: "Broken" });
+    expect(failed.ok).toBe(false);
+    expect(store.getState().doc.components.main).toEqual(before.components.main);
+    expect(store.getState().historyEntries().map((e) => e.label)).toEqual(["Insert Label", "Insert Sticker"]);
   });
 
   it("undoTo undoes several groups at once", () => {

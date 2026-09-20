@@ -15,8 +15,9 @@ import { makeError } from "../validate.ts";
 import { isLayerInput, isLinkInput } from "../values.ts";
 import { addComment, removeComment, updateComment } from "./comments.ts";
 import { addComponent, removeComponent, updateComponent, updateInterface } from "./components.ts";
-import { appliedOps, createContext, fail, newAffected, OpFailure, PendingRef, type ApplyOpsOptions, type ApplyOpsResult, type OpContext, type OpOutcome } from "./context.ts";
+import { appliedOps, createContext, fail, newAffected, newRenamed, OpFailure, PendingRef, type ApplyOpsOptions, type ApplyOpsResult, type OpContext, type OpOutcome, type RenamedIds } from "./context.ts";
 import { createComponent } from "./createComponent.ts";
+import { checkOpFields } from "./fields.ts";
 import { connect, disconnect, rename, setInput } from "./inputs.ts";
 import { addLayer, moveLayer, removeLayer, updateLayer } from "./layers.ts";
 import { addPatch, removePatch, updatePatch } from "./patches.ts";
@@ -54,6 +55,14 @@ const HANDLERS = {
 export const OP_KINDS = Object.keys(HANDLERS) as OpKind[];
 
 const sorted = (s: Set<Id>) => [...s].sort();
+
+/** OpResult.retired and OpResult.suffixed, when the op gave a derived id a suffix. */
+function renamedFields(renamed: RenamedIds): Pick<OpResult, "retired" | "suffixed"> {
+  return {
+    ...(Object.keys(renamed.retired).length ? { retired: { ...renamed.retired } } : {}),
+    ...(Object.keys(renamed.suffixed).length ? { suffixed: { ...renamed.suffixed } } : {}),
+  };
+}
 
 const isObject = (v: unknown): v is Record<string, unknown> => !!v && typeof v === "object" && !Array.isArray(v);
 
@@ -190,11 +199,13 @@ export function applyOps(doc: SonobeDocument, ops: readonly Op[], options: Apply
   const attempt = (task: Task): { outcome: OpOutcome } | { pending: PendingRef } | { error: SonobeError } => {
     const before = ctx.doc;
     ctx.pendingRefs = new Map();
+    ctx.renamed = newRenamed();
     ctx.affected = newAffected();
     const kind = isObject(task.op) ? task.op.op : undefined;
     try {
       const handler = typeof kind === "string" && Object.hasOwn(HANDLERS, kind) ? (HANDLERS as Record<string, Handler>)[kind] : undefined;
       if (!handler) fail("unknown_op", `There's no op "${String(kind)}".${didYouMeanText(didYouMean(String(kind), OP_KINDS))}`, { hint: `Ops: ${OP_KINDS.join(", ")}.` });
+      if (!ctx.lenient && !task.followUp) checkOpFields(task.op as Record<string, unknown>, kind as OpKind);
       const outcome = (handler as (ctx: OpContext, op: Op) => OpOutcome)(ctx, task.op as Op);
       for (const [name, ref] of ctx.pendingRefs) {
         ctx.refs.set(name, ref.id);
@@ -246,7 +257,7 @@ export function applyOps(doc: SonobeDocument, ops: readonly Op[], options: Apply
         recordFailure(task.index, r.error);
         continue;
       }
-      if (!task.followUp) results[task.index] = { index: task.index, ok: true, ids: r.outcome.ids };
+      if (!task.followUp) results[task.index] = { index: task.index, ok: true, ids: r.outcome.ids, ...renamedFields(ctx.renamed) };
       if (!split.waiting.length) continue;
       const component = (appliedOps(r.outcome)[0] as { component?: Id } | undefined)?.component;
       for (const w of split.waiting) {

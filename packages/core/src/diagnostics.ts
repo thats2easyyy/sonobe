@@ -532,7 +532,9 @@ function componentChecker(doc: SonobeDocument, c: Component, registry: Registry)
       push(diag("error", code, withHint(r.error), c.id, itemIds, { port: target.key, suggestions }));
       return;
     }
-    if (!isLinkInput(value) || !target.port) return;
+    if (!isLinkInput(value)) return;
+    undrivenOutput(target, value.link, itemIds);
+    if (!target.port) return;
     const src = resolveSource(doc, c, value.link, validate);
     if (!src.ok || !src.value.port || src.value.port.type !== "pulse" || !STATE_TYPES.has(target.port.type)) return;
     if (acceptsPulses(target)) return;
@@ -544,6 +546,36 @@ function componentChecker(doc: SonobeDocument, c: Component, registry: Registry)
       diag("warning", "pulse_into_state", `${src.value.address} is a pulse, which is on for a single frame, but ${target.address} expects a steady ${target.port.type}. Did you mean to use a Switch?`, c.id, itemIds, {
         port: target.key,
         suggestions,
+      }),
+    );
+  };
+
+  /** undriven_output: a link reads an instance's published output that its component doesn't drive inside. */
+  const undrivenOutput = (target: PortTarget, link: string, itemIds: readonly Id[]) => {
+    const source = parseAddress(link);
+    if (!source || (source.kind !== "patch" && source.kind !== "layer")) return;
+    let componentId: Id | undefined;
+    let instanceName: string;
+    if (source.kind === "patch") {
+      const node = getOwn(c.patches, source.id);
+      if (node?.type !== COMPONENT_PATCH_TYPE) return;
+      componentId = node.component;
+      instanceName = patchName(source.id);
+    } else {
+      const layer = findLayer(c.layers, source.id)?.layer;
+      if (layer?.type !== COMPONENT_INSTANCE_LAYER_TYPE) return;
+      componentId = layer.component;
+      instanceName = layerDisplayName(layer);
+    }
+    const shown = componentId === undefined ? undefined : getOwn(doc.components, componentId);
+    const port = shown ? getOwn(shown.interface.outputs, source.key) : undefined;
+    if (!shown || !port || port.link !== undefined) return;
+    const reader = target.kind === "componentOutput" ? `The published output "${target.port?.name ?? target.key}"` : `The ${target.port?.name ?? target.key} of "${itemName(target.itemId!)}"`;
+    push(
+      diag("warning", "undriven_output", `${reader} reads "${port.name}" from "${instanceName}", but ${shown.name} doesn't drive that output inside, so it stays at its default.`, c.id, [...itemIds, source.id], {
+        port: target.key,
+        hint: `Inside ${shown.name}, connect a patch output to "$out.${source.key}", or disconnect this cable.`,
+        suggestions: [{ description: "Disconnect it", ops: [{ op: "disconnect", component: c.id, to: target.address }] }, unpublishSuggestion(shown, "outputs", source.key, port.name)],
       }),
     );
   };
@@ -628,9 +660,31 @@ function componentChecker(doc: SonobeDocument, c: Component, registry: Registry)
     const r = checkLiteral(doc, c, port.default, interfacePortToPort(port, "input"), `$in.${key}`, validate);
     if (!r.ok) push(diag("error", r.error.code, withHint(r.error), c.id, [], { port: key }));
   }
+  const readInputs = new Set<string>();
+  for (const e of listInputs(c)) {
+    if (!isLinkInput(e.value)) continue;
+    const a = parseAddress(e.value.link);
+    if (a?.kind === "componentInput") readInputs.add(a.key);
+  }
+  for (const [key, port] of Object.entries(c.interface.inputs)) {
+    if (readInputs.has(key)) continue;
+    push(
+      diag("info", "unused_input", `The published input "${port.name}" of ${c.name} isn't read inside the component, so values sent to it do nothing.`, c.id, [], {
+        port: key,
+        hint: `Read it inside with { "link": "$in.${key}" }, or unpublish it.`,
+        suggestions: [unpublishSuggestion(c, "inputs", key, port.name)],
+      }),
+    );
+  }
   for (const [key, port] of Object.entries(c.interface.outputs)) {
     if (port.link === undefined) {
-      push(diag("info", "unconnected_output", `The published output "${key}" of ${c.id} isn't connected to anything inside the component.`, c.id, [], { port: key }));
+      push(
+        diag("info", "unconnected_output", `The published output "${port.name}" of ${c.name} isn't connected to anything inside the component.`, c.id, [], {
+          port: key,
+          hint: `Connect a patch output to "$out.${key}" inside, or unpublish it.`,
+          suggestions: [unpublishSuggestion(c, "outputs", key, port.name)],
+        }),
+      );
       continue;
     }
     const target: PortTarget = { kind: "componentOutput", address: `$out.${key}`, key, port: interfacePortToPort(port, "output"), bindable: true };
@@ -736,6 +790,11 @@ function componentChecker(doc: SonobeDocument, c: Component, registry: Registry)
   }
 
   return { ids, layerHead, layerProp, patchHead, patchInput, graph, touch };
+}
+
+/** Unpublish a port (updateInterface with null), which disconnects its cables everywhere. */
+function unpublishSuggestion(c: Component, side: "inputs" | "outputs", key: string, name: string): Suggestion {
+  return { description: `Unpublish "${name}" from ${c.name} (disconnects its cables)`, ops: [{ op: "updateInterface", component: c.id, [side]: { [key]: null } }] };
 }
 
 function documentDiagnostics(doc: SonobeDocument, out: Diagnostic[], files: boolean): void {

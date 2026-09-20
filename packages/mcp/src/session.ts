@@ -1,14 +1,14 @@
 /**
- * DocumentSession: one document plus its undo history, revision counter, id reservations and
- * cached diagnostics. Hosts wrap it with file IO (HeadlessHost) or keep their own store (the app).
+ * DocumentSession: one document plus its undo history, revision counter, the ids it has seen (so
+ * removed ids retire, ARCHITECTURE §3.2) and cached diagnostics. Hosts wrap it with file IO (HeadlessHost) or keep their own store (the app).
  * Browser-safe.
  */
 
 import {
   applyOps,
-  componentItemIds,
   createHistory,
   createDiagnosticsCache,
+  createIdLedger,
   describeHistoryEntry,
   type Author,
   type Diagnostic,
@@ -16,6 +16,7 @@ import {
   type HistoryEntry,
   type Id,
   type Op,
+  type SeenIds,
   type SonobeDocument,
 } from "@sonobe/core";
 import type { EngineRegistry } from "@sonobe/engine";
@@ -42,6 +43,8 @@ export interface DocumentSession {
   readonly doc: SonobeDocument;
   readonly revision: number;
   readonly dirty: boolean;
+  /** Every id seen this session; ids seen in a component and gone from it are retired there. */
+  readonly seenIds: SeenIds;
   apply(ops: Op[], options: HostApplyOptions): HostApplyResult;
   undo(options: UndoOptions): UndoResult;
   listHistory(options: { limit?: number; author?: string }): HistoryItem[];
@@ -79,13 +82,6 @@ export function diffDiagnostics(
     resolved: before.filter((d) => !afterKeys.has(diagnosticKey(d))),
     totals: diagnosticTotals(after),
   };
-}
-
-/** Every item id in every component. */
-function allItemIds(doc: SonobeDocument): Set<Id> {
-  const ids = new Set<Id>();
-  for (const c of Object.values(doc.components)) for (const id of componentItemIds(c)) ids.add(id);
-  return ids;
 }
 
 /** "added 2 layers, 3 patches and 4 connections" */
@@ -179,7 +175,7 @@ export function createDocumentSession(
   });
   let doc = initial;
   let savedRevision = 0;
-  const seen = allItemIds(initial);
+  const ids = createIdLedger(initial);
   // Incremental: a small write re-checks only what it changed.
   const diagnosticsCache = createDiagnosticsCache(registry);
   const diagnostics = (): Diagnostic[] => diagnosticsCache.get(doc);
@@ -201,6 +197,7 @@ export function createDocumentSession(
     get dirty() {
       return history.revision !== savedRevision;
     },
+    seenIds: ids,
 
     apply(ops, applyOptions) {
       const base = {
@@ -232,14 +229,12 @@ export function createDocumentSession(
           },
         };
       }
-      const current = new Set(allItemIds(doc));
-      const reservedIds = [...seen].filter((id) => !current.has(id));
       const before = diagnostics();
       const result = applyOps(doc, ops, {
         registry,
         atomic: applyOptions.atomic !== false,
         dryRun: !!applyOptions.dryRun,
-        reservedIds,
+        seenIds: ids,
         ...(applyOptions.defaultComponent !== undefined
           ? { defaultComponent: applyOptions.defaultComponent }
           : {}),
@@ -265,7 +260,7 @@ export function createDocumentSession(
       }
       if (!result.applied.length) return out;
       doc = result.doc;
-      for (const id of allItemIds(doc)) seen.add(id);
+      ids.observe(doc, result.affected.components);
       const entry = history.push({
         label: applyOptions.label,
         author: applyOptions.author,
@@ -326,6 +321,7 @@ export function createDocumentSession(
       const before = diagnostics();
       const steps = history.undoTo(targetId)!;
       let next: SonobeDocument | undefined = doc;
+      const touched = new Set<Id>();
       for (const step of steps) {
         const r = applyOps(next, step.ops, { registry, lenient: true });
         if (!r.ok) {
@@ -333,6 +329,7 @@ export function createDocumentSession(
           break;
         }
         next = r.doc;
+        for (const id of r.affected.components) touched.add(id);
       }
       if (!next) {
         for (let i = 0; i < steps.length; i++) history.redo();
@@ -345,6 +342,7 @@ export function createDocumentSession(
         );
       }
       doc = next;
+      ids.observe(doc, touched);
       return {
         docId: options.docId,
         revision: history.revision,
@@ -369,7 +367,8 @@ export function createDocumentSession(
 
     replace(next) {
       doc = next;
-      for (const id of allItemIds(doc)) seen.add(id);
+      // A reload continues the session: ids the reload removed stay retired.
+      ids.observe(doc);
       history.clear();
       savedRevision = history.revision;
     },

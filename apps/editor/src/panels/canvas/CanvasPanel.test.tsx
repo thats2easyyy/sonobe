@@ -173,6 +173,34 @@ describe("CanvasPanel", () => {
     expect(position("card")).toEqual([16, 146]);
   });
 
+  it("inserting a text layer and typing is one undo step that keeps the new layer's id", () => {
+    mount();
+    act(() => {
+      registry.run("canvas.tool.text");
+    });
+    const frames: FrameRequestCallback[] = [];
+    const requestFrame = globalThis.requestAnimationFrame;
+    globalThis.requestAnimationFrame = (callback) => frames.push(callback);
+    try {
+      pointer("pointerdown", at(40, 820));
+      pointer("pointerup", at(40, 820));
+    } finally {
+      globalThis.requestAnimationFrame = requestFrame;
+    }
+    const inserted = session.selection.getState().layers[0]!;
+    act(() => {
+      for (const callback of frames.splice(0)) callback(performance.now());
+    });
+    const editor = container.querySelector<HTMLTextAreaElement>(".sb-cv__text-editor")!;
+    editor.value = "Hello";
+    act(() => {
+      editor.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+    });
+    expect(session.selection.getState().layers).toEqual([inserted]);
+    expect(findLayer(session.document.getState().doc.components.main!.layers, inserted)!.layer.props.text).toBe("Hello");
+    expect(session.document.getState().historyEntries().map((e) => e.label)).toEqual(["Insert Text"]);
+  });
+
   it("Escape during an ⌥-drag leaves no copy behind", () => {
     mount();
     pointer("pointerdown", at(200, 520));

@@ -147,6 +147,15 @@ interface RendererHistoryEntry {
 interface Snapshot {
   revision: number;
   doc: SonobeDocument;
+  /** Item ids the editor retired this session, per component (older editors don't send them). */
+  retired?: Record<Id, Id[]>;
+}
+
+/** document.get's `retired`, when it has the right shape. */
+function retiredOf(value: unknown): Record<Id, Id[]> | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const entries = Object.entries(value).filter((e): e is [Id, Id[]] => Array.isArray(e[1]) && e[1].every((id) => typeof id === "string"));
+  return entries.length ? Object.fromEntries(entries) : undefined;
 }
 
 interface Entry {
@@ -385,9 +394,10 @@ export function createAppHost(options: AppHostOptions): AppHost {
   /** The document at the entry's last described revision (fetched only when it changed). */
   const snapshot = async (entry: Entry): Promise<Snapshot> => {
     if (entry.snapshot && entry.snapshot.revision === entry.info.revision) return entry.snapshot;
-    const reply = (await call<unknown>(entry.target, "document.get", { format: "json", diagnostics: true })) as { revision?: unknown; document?: unknown; diagnostics?: unknown } | null;
+    const reply = (await call<unknown>(entry.target, "document.get", { format: "json", diagnostics: true })) as { revision?: unknown; document?: unknown; diagnostics?: unknown; retired?: unknown } | null;
     if (!reply || typeof reply.revision !== "number" || !reply.document || typeof reply.document !== "object") throw unexpectedReply("document.get");
-    entry.snapshot = { revision: reply.revision, doc: reply.document as SonobeDocument };
+    const retired = retiredOf(reply.retired);
+    entry.snapshot = { revision: reply.revision, doc: reply.document as SonobeDocument, ...(retired ? { retired } : {}) };
     entry.info = { ...entry.info, revision: reply.revision };
     // The editor already knows the document's diagnostics; older builds don't send them, and diagnosticsOf computes them here.
     if (Array.isArray(reply.diagnostics)) entry.diagnostics = { doc: entry.snapshot.doc, list: reply.diagnostics as Diagnostic[] };
@@ -613,7 +623,7 @@ export function createAppHost(options: AppHostOptions): AppHost {
     async getDocument(docId) {
       const entry = await resolve(docId);
       const snap = await snapshot(entry);
-      return { docId: entry.docId, ...(entry.info.projectPath ? { path: entry.info.projectPath } : {}), doc: snap.doc, revision: snap.revision, dirty: entry.info.dirty };
+      return { docId: entry.docId, ...(entry.info.projectPath ? { path: entry.info.projectPath } : {}), doc: snap.doc, revision: snap.revision, dirty: entry.info.dirty, ...(snap.retired ? { retired: snap.retired } : {}) };
     },
 
     async saveDocument(docId, saveOptions = {}) {
@@ -656,7 +666,7 @@ export function createAppHost(options: AppHostOptions): AppHost {
       if (!r.ok && r.errors.some((e) => e.code === "revision_mismatch")) return conflictResult(entry, o.expectedRevision ?? before.revision, reply.revision, beforeDiagnostics, dryRun);
 
       // The editor's own applied ops carry the ids it generated. A local replay can't know which ids the
-      // editor reserved (removed this session), so it's only a fallback for builds that don't send them.
+      // editor retired (removed this session), so it's only a fallback for builds that don't send them.
       const applied: Op[] = Array.isArray(reply.applied)
         ? reply.applied
         : applyOps(before.doc, ops, { registry, atomic: o.atomic !== false, dryRun: true, ...(o.defaultComponent !== undefined ? { defaultComponent: o.defaultComponent } : {}) }).applied;

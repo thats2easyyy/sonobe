@@ -169,6 +169,22 @@ describe("applyOps", () => {
     expect(lenient.ok).toBe(true);
   });
 
+  it("refuses fields an op kind doesn't take, with a did-you-mean", () => {
+    const doc = buildSampleDocument();
+    const typo = apply(doc, [{ op: "setInput", target: "pop.speed", vlaue: 3 } as unknown as Op]).errors[0]!;
+    expect(typo).toMatchObject({ code: "unknown_field", opIndex: 0, message: 'setInput has no field "vlaue". Did you mean "value"?', hint: "setInput takes: component, target, value." });
+    const unwrapped = apply(doc, [{ op: "addPatch", type: "switch", name: "Liked" } as unknown as Op]).errors[0]!;
+    expect(unwrapped).toMatchObject({ code: "unknown_field", hint: expect.stringContaining('Put "type" inside "patch"') });
+    const topRef = apply(doc, [{ op: "addLayer", ref: "card", layer: { type: "rectangle" } } as unknown as Op]).errors[0]!;
+    expect(topRef.hint).toContain('Put "ref" inside "layer"');
+    expect(apply(doc, [{ op: "removeComponent", component: "main" } as unknown as Op]).errors[0]!.hint).toContain('"id"');
+    // Every op may name a component, and fields set to undefined are fine.
+    expect(apply(doc, [{ op: "setProject", component: "main", changes: { name: "X" } } as Op]).ok).toBe(true);
+    expect(apply(doc, [{ op: "updatePatch", id: "pop", name: undefined, muted: true }]).ok).toBe(true);
+    // Lenient applies (undo, redo) don't check fields.
+    expect(apply(doc, [{ op: "updatePatch", id: "pop", muted: true, extra: 1 } as unknown as Op], { lenient: true }).ok).toBe(true);
+  });
+
   it("requires a registry and a list of ops", () => {
     expect(() => applyOps(emptyDoc(), [], {} as never)).toThrow(TypeError);
     expect(apply(emptyDoc(), "nope" as never).errors[0]!.code).toBe("invalid_op");

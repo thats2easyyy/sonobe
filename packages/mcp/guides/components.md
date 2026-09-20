@@ -183,6 +183,28 @@ output scale number "Scale" ←shrink.output
 patch press_spring popAnimation<number> "Press Spring" number←$in.down bounciness=0 speed=20
 ```
 
+## Rebuilding a component
+
+- `updateInterface` merges ports by key: a port you name replaces that key, `null` unpublishes it, and other keys stay. `"replace": true` makes each side you send the whole set. Unpublishing disconnects the port's cables inside and on every instance; the result lists them, and undo brings them back. To rename a key, unpublish it and publish the new one.
+- Rebuild in one batch: remove the old patches and add their replacements in the same `apply_ops`, so they keep their ids and simulator paths. Ids removed by an earlier batch are retired: new items skip them (`shrink_2`), and the result says so on a "Retired ids skipped" line.
+
+```json tool:apply_ops
+{
+  "component": "press_feedback",
+  "ops": [
+    {
+      "op": "updateInterface",
+      "replace": true,
+      "inputs": {
+        "down": { "name": "Down", "type": "boolean", "default": false },
+        "depth": { "name": "Depth", "type": "number", "default": 0.95 }
+      }
+    },
+    { "op": "connect", "from": "$in.depth", "to": "shrink.end" }
+  ]
+}
+```
+
 ## Variables
 
 - `variableBroadcaster` shares a value under a name. Set it with `"settings": { "name": "Dark Mode", "scope": "global" }`.

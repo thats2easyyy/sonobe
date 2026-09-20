@@ -1,7 +1,8 @@
 /** Shared state and helpers for op handlers. */
 
 import { didYouMean, didYouMeanText } from "../suggest.ts";
-import { getOwn, ID_PATTERN, isValidId, slugify, uniqueId } from "../ids.ts";
+import { fileNameKey, getOwn, ID_PATTERN, isValidId, slugify, uniqueId } from "../ids.ts";
+import { liveItemIds, type SeenIds } from "../idLedger.ts";
 import { allLayerIds, findLayer, type LayerLocation } from "../registry.ts";
 import type { ApplyOptions, ApplyResult, Component, Id, Op, OpKind, PatchNode, Registry, SonobeDocument, SonobeError } from "../types.ts";
 import { makeError, type Check, type ValidateOptions } from "../validate.ts";
@@ -16,8 +17,15 @@ export interface ApplyOpsOptions extends ApplyOptions {
    * diagnostics restore exactly.
    */
   lenient?: boolean;
-  /** Ids that must never be assigned to new items (e.g. deleted earlier this session). */
+  /** Ids that must never be assigned to new items (e.g. soft-deleted items in the trash). */
   reservedIds?: Iterable<Id>;
+  /**
+   * The ids the host session has seen (an IdLedger, ARCHITECTURE §3.2). An id seen in a component
+   * that isn't live there when the batch starts is retired: a derived id skips it (OpResult.retired
+   * says so) and an explicit id fails with id_retired. A batch may still remove an item and add a new
+   * one under its id. Component ids retire the same way, ignoring case. Not checked when lenient.
+   */
+  seenIds?: SeenIds;
 }
 
 export interface ApplyOpsResult extends ApplyResult {
@@ -83,8 +91,25 @@ export interface OpContext {
   /** Every ref some op in the batch defines (name without "$") → the index of that op. */
   readonly batchRefs: Map<string, number>;
   readonly reserved: ReadonlySet<Id>;
+  /** True when `id` was seen in `component` this session but isn't live there at the batch start. */
+  readonly retiredItem: (component: Id, id: Id) => boolean;
+  /** True when a component id (ignoring case) was seen this session but isn't live at the batch start. */
+  readonly retiredComponent: (id: Id) => boolean;
+  /** Item ids live in `component` at the batch start. */
+  readonly startIds: (component: Id) => ReadonlySet<Id>;
+  /** Derived ids the current op gave a suffix, and why (see OpResult.retired and OpResult.suffixed). */
+  renamed: RenamedIds;
   affected: AffectedSets;
 }
+
+export interface RenamedIds {
+  /** New id → the retired id it would have had. */
+  retired: Record<Id, Id>;
+  /** New id → the id an item created earlier in the batch took. */
+  suffixed: Record<Id, Id>;
+}
+
+export const newRenamed = (): RenamedIds => ({ retired: {}, suffixed: {} });
 
 export interface OpOutcome {
   inverse: Op[];
@@ -108,7 +133,32 @@ export function createContext(doc: SonobeDocument, options: ApplyOpsOptions): Op
     pendingRefs: new Map(),
     batchRefs: new Map(),
     reserved: new Set(options.reservedIds ?? []),
+    ...retirement(doc, lenient ? undefined : options.seenIds),
+    renamed: newRenamed(),
     affected: newAffected(),
+  };
+}
+
+const NO_IDS: ReadonlySet<Id> = new Set();
+
+/** Retired-id checks against the batch's input document, so ids freed within the batch stay usable. */
+function retirement(start: SonobeDocument, seen: SeenIds | undefined): Pick<OpContext, "retiredItem" | "retiredComponent" | "startIds"> {
+  const startIds = (component: Id) => {
+    const c = getOwn(start.components, component);
+    return c ? liveItemIds(c) : NO_IDS;
+  };
+  if (!seen) return { retiredItem: () => false, retiredComponent: () => false, startIds };
+  let retiredKeys: Set<string> | undefined;
+  return {
+    retiredItem: (component, id) => !!seen.items.get(component)?.has(id) && !startIds(component).has(id),
+    retiredComponent: (id) => {
+      if (!retiredKeys) {
+        const live = new Set(Object.keys(start.components).map(fileNameKey));
+        retiredKeys = new Set([...seen.components].map(fileNameKey).filter((key) => !live.has(key)));
+      }
+      return retiredKeys.has(fileNameKey(id));
+    },
+    startIds,
   };
 }
 
@@ -192,17 +242,36 @@ export function commitComponent(ctx: OpContext, component: Component): void {
 
 /** A validated explicit id, or a unique id derived from a name or type. */
 export function newItemId(ctx: OpContext, component: Component, options: { explicit?: unknown; name?: unknown; fallback: string; taken: ReadonlySet<Id> }): Id {
-  const isTaken = (id: string) => options.taken.has(id) || ctx.reserved.has(id);
+  const retired = (id: string) => ctx.retiredItem(component.id, id);
+  const isTaken = (id: string) => options.taken.has(id) || ctx.reserved.has(id) || retired(id);
   if (options.explicit !== undefined && options.explicit !== null) {
     const explicit = options.explicit;
     if (!isValidId(explicit)) {
       fail("invalid_id", `"${String(explicit)}" isn't a valid id.`, { hint: `Ids use letters, digits and underscores and don't start with a digit, like "${slugify(String(explicit), options.fallback)}".` });
     }
-    if (isTaken(explicit)) fail("id_taken", `The id "${explicit}" is already used in ${component.id}.`, { hint: `Leave "id" out to get a free one, like "${uniqueId(explicit, isTaken)}".` });
+    if (options.taken.has(explicit)) {
+      fail("id_taken", `The id "${explicit}" is already used in ${component.id}.`, { hint: `Leave "id" out to get a free one, like "${uniqueId(explicit, isTaken)}". To replace that item, remove it earlier in the same batch.` });
+    }
+    if (ctx.reserved.has(explicit)) fail("id_taken", `The id "${explicit}" is reserved in ${component.id}.`, { hint: `Leave "id" out to get a free one, like "${uniqueId(explicit, isTaken)}".` });
+    if (retired(explicit)) {
+      fail("id_retired", `"${explicit}" belonged to an item removed from ${component.id} earlier in this session. Removed ids aren't given to new items, so anything still holding the old id fails instead of reaching the new one.`, {
+        hint: `To rebuild an item under its old id, remove it and add the new one in the same batch (if the removal is already applied, undo it first). Or leave "id" out to get "${uniqueId(explicit, isTaken)}".`,
+      });
+    }
     return explicit;
   }
-  const base = typeof options.name === "string" && options.name.trim() ? options.name : options.fallback;
-  return uniqueId(slugify(base, slugify(options.fallback)), isTaken);
+  const name = typeof options.name === "string" && options.name.trim() ? options.name : undefined;
+  const base = slugify(name ?? options.fallback, slugify(options.fallback));
+  const id = uniqueId(base, isTaken);
+  // Unnamed items of one type (switch, switch_2) are expected; names that slug alike aren't.
+  if (id !== base) noteRenamed(ctx, id, base, retired(base), name !== undefined && options.taken.has(base) && !ctx.startIds(component.id).has(base));
+  return id;
+}
+
+/** Record why a derived id got a suffix: its base is retired, or another item of this batch took it. */
+export function noteRenamed(ctx: OpContext, id: Id, base: Id, retired: boolean, takenInBatch: boolean): void {
+  if (retired) ctx.renamed.retired[id] = base;
+  else if (takenInBatch) ctx.renamed.suffixed[id] = base;
 }
 
 /** Validate an insertion index: undefined → end, negative counts from the end, clamped to range. */

@@ -292,7 +292,65 @@ describe("getDiagnostics", () => {
       // addComponent refuses content with problems; a lenient apply stands in for a file that already has them.
     ], { lenient: true }).doc;
     const d = getDiagnostics(doc, mockRegistry, { components: ["chip"] });
-    expect(d.map((x) => `${x.severity}:${x.code}:${x.port}`)).toEqual(["error:invalid_value:big", "error:dangling_link:a", "info:unconnected_output:b"]);
+    expect(d.map((x) => `${x.severity}:${x.code}:${x.port}`)).toEqual(["error:invalid_value:big", "info:unused_input:big", "error:dangling_link:a", "info:unconnected_output:b"]);
+  });
+
+  /** A patch component with an unread input and an undriven output, whose instance feeds a layer. */
+  const swipeDoc = () =>
+    mustApply(emptyDoc(), [
+      { op: "addComponent", component: { id: "swipe_card", name: "Swipe Card", kind: "patchComponent" } },
+      {
+        op: "updateInterface",
+        component: "swipe_card",
+        inputs: { down: { name: "Down", type: "boolean" }, swipedLeft: { name: "Swiped Left", type: "pulse" } },
+        outputs: { gone: { name: "Gone", type: "boolean" }, wentLeft: { name: "Went Left", type: "boolean" } },
+      },
+      { op: "addPatch", component: "swipe_card", patch: { id: "card_gone", type: "switch", inputs: { turnOn: { link: "$in.down" } } } },
+      { op: "connect", component: "swipe_card", from: "card_gone.on", to: "$out.gone" },
+      { op: "addLayer", layer: { id: "badge", type: "rectangle", name: "Badge" } },
+      { op: "addPatch", patch: { id: "card_1_swipe", type: "component", component: "swipe_card", name: "Card 1 Swipe" } },
+      { op: "setInput", target: "@badge.opacity", value: { link: "card_1_swipe.wentLeft" } },
+    ]).doc;
+
+  it("flags published inputs nothing inside reads, with an unpublish fix", () => {
+    const doc = swipeDoc();
+    const d = getDiagnostics(doc, mockRegistry).find((x) => x.code === "unused_input")!;
+    expect(d).toMatchObject({ severity: "info", component: "swipe_card", port: "swipedLeft", message: 'The published input "Swiped Left" of Swipe Card isn\'t read inside the component, so values sent to it do nothing.' });
+    expect(d.suggestions![0]!.ops).toEqual([{ op: "updateInterface", component: "swipe_card", inputs: { swipedLeft: null } }]);
+    const fixed = mustApply(doc, d.suggestions![0]!.ops!).doc;
+    expect(getDiagnostics(fixed, mockRegistry).some((x) => x.code === "unused_input")).toBe(false);
+    const output = getDiagnostics(doc, mockRegistry).find((x) => x.code === "unconnected_output")!;
+    expect(output).toMatchObject({ port: "wentLeft", message: 'The published output "Went Left" of Swipe Card isn\'t connected to anything inside the component.' });
+    expect(output.suggestions![0]!.ops).toEqual([{ op: "updateInterface", component: "swipe_card", outputs: { wentLeft: null } }]);
+  });
+
+  it("warns on the host when a cable reads an instance output its component doesn't drive", () => {
+    const doc = swipeDoc();
+    const d = getDiagnostics(doc, mockRegistry).find((x) => x.code === "undriven_output")!;
+    expect(d).toMatchObject({
+      severity: "warning",
+      component: "main",
+      itemIds: ["badge", "card_1_swipe"],
+      port: "opacity",
+      message: 'The Opacity of "Badge" reads "Went Left" from "Card 1 Swipe", but Swipe Card doesn\'t drive that output inside, so it stays at its default.',
+    });
+    expect(d.suggestions!.map((s) => s.ops)).toEqual([
+      [{ op: "disconnect", component: "main", to: "@badge.opacity" }],
+      [{ op: "updateInterface", component: "swipe_card", outputs: { wentLeft: null } }],
+    ]);
+    for (const s of d.suggestions!) expect(getDiagnostics(mustApply(doc, s.ops!).doc, mockRegistry).some((x) => x.code === "undriven_output")).toBe(false);
+    const driven = mustApply(doc, [{ op: "connect", component: "swipe_card", from: "card_gone.on", to: "$out.wentLeft" }]).doc;
+    expect(getDiagnostics(driven, mockRegistry).some((x) => x.code === "undriven_output")).toBe(false);
+  });
+
+  it("warns for layer instances too", () => {
+    const doc = mustApply(emptyDoc(), [
+      { op: "addComponent", component: { id: "chip", name: "Chip", kind: "layerComponent" } },
+      { op: "updateInterface", component: "chip", outputs: { tapped: { name: "Tapped", type: "pulse" } } },
+      { op: "addLayer", layer: { id: "chip_1", type: "componentInstance", component: "chip", name: "Buy Chip" } },
+      { op: "addPatch", patch: { id: "liked", type: "switch", name: "Liked", inputs: { flip: { link: "@chip_1.tapped" } } } },
+    ]).doc;
+    expect(getDiagnostics(doc, mockRegistry).find((x) => x.code === "undriven_output")).toMatchObject({ itemIds: ["liked", "chip_1"], message: expect.stringContaining('The Flip of "Liked" reads "Tapped" from "Buy Chip"') });
   });
 
   it("reports component ids and script names that would share a file", () => {
