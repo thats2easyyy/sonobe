@@ -17,9 +17,17 @@ export interface SceneRenderRequest {
   mediaTimeoutMs?: number;
 }
 
+/** A self-contained SVG (a component's patch graph) drawn at a size in CSS pixels. */
+export interface SvgRenderRequest {
+  svg: string;
+  width: number;
+  height: number;
+}
+
 declare global {
   interface Window {
     __sonobeRenderScene?(request: SceneRenderRequest): Promise<{ width: number; height: number }>;
+    __sonobeRenderSvg?(request: SvgRenderRequest): Promise<{ width: number; height: number }>;
   }
 }
 
@@ -66,4 +74,19 @@ window.__sonobeRenderScene = async (request) => {
   await nextPaint();
   await nextPaint();
   return { width: width * scale, height: height * scale };
+};
+
+// An SVG goes in as an image, so nothing in it runs or loads; system fonts still draw its text.
+window.__sonobeRenderSvg = async (request) => {
+  renderer?.dispose();
+  renderer = null;
+  const img = new Image(request.width, request.height);
+  img.src = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(request.svg)}`;
+  await img.decode().catch(() => undefined);
+  stage.replaceChildren(img);
+  stage.style.width = `${request.width}px`;
+  stage.style.height = `${request.height}px`;
+  await nextPaint();
+  await nextPaint();
+  return { width: request.width, height: request.height };
 };

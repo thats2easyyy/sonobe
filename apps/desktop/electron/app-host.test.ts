@@ -743,6 +743,75 @@ describe("app host simulation screenshots", () => {
   });
 });
 
+describe("app host component screenshots", () => {
+  /** A window with a patch component (Press Motion) and a layer component (Badge Button). */
+  async function withComponents(extra: Partial<AppHostOptions> = {}) {
+    const w = editorWindow(1);
+    const svgs: { svg: string; size: { width: number; height: number } }[] = [];
+    const scenes: SceneRenderRequest[] = [];
+    const host = appHost([w], {
+      renderSvg: async (request) => {
+        svgs.push(request);
+        return { data: "iVBORw0KGgo=", width: request.size.width, height: request.size.height };
+      },
+      renderScene: async (request) => {
+        scenes.push(request);
+        return { data: "iVBORw0KGgo=", width: request.size.width, height: request.size.height };
+      },
+      ...extra,
+    });
+    const made = await host.apply(
+      [
+        ...pressChain,
+        { op: "createComponent", name: "Press Motion", ref: "motion", patchIds: ["next_pressed", "press_spring"] },
+        { op: "addLayer", layer: { id: "badge", type: "rectangle", name: "Badge", props: { position: [40, 60], size: [120, 40] } } },
+        { op: "createComponent", name: "Badge Button", ref: "button", layerIds: ["badge"] },
+      ],
+      { label: "setup", author: CLAUDE },
+    );
+    expect(made.ok).toBe(true);
+    return { w, host, svgs, scenes, motion: made.idMap.motion!, button: made.idMap.button! };
+  }
+
+  it("captures the patch editor when the person is viewing the component, and draws it from the document otherwise", async () => {
+    const { w, host, svgs, motion } = await withComponents();
+    w.server.handle("graph.bounds", () => ({ x: 600, y: 60, width: 500, height: 300 }));
+    // Viewing Main: Press Motion's graph is drawn from the document, without moving the person.
+    const drawn = await host.screenshot({ kind: "graph" }, { component: motion, maxWidth: 500 });
+    expect(svgs).toHaveLength(1);
+    expect(svgs[0]!.svg).toContain('data-node="press_spring"');
+    expect(svgs[0]!.size.width).toBeLessThanOrEqual(500);
+    expect(drawn.notes).toEqual([expect.stringContaining("The patch editor isn't showing Press Motion")]);
+    expect(w.session.selection.getState().componentPath).toEqual(["main"]);
+    expect(w.captures).toEqual([]);
+    // Once the person is in it, the editor itself is captured.
+    await host.reveal(["press_spring"], { focus: true });
+    expect(await host.screenshot({ kind: "graph" }, { component: motion, maxWidth: 250 })).toMatchObject({ width: 250, height: 150 });
+    expect(w.captures).toHaveLength(1);
+    expect(svgs).toHaveLength(1);
+  });
+
+  it("draws a layer component's canvas and a layer inside it at frame 0", async () => {
+    const { host, scenes, button } = await withComponents();
+    const canvas = await host.screenshot({ kind: "canvas" }, { component: button, scale: 2 });
+    expect(canvas).toMatchObject({ width: 240, height: 80, notes: [expect.stringContaining("Badge Button on its own 120×40 artboard at frame 0")] });
+    expect(canvas.timeMs).toBeUndefined();
+    expect(scenes[0]).toMatchObject({ crop: { x: 0, y: 0, width: 120, height: 40 } });
+    expect(scenes[0]!.scene.size).toEqual([120, 40]);
+    const badge = await host.screenshot({ kind: "layer", layerId: "badge" }, { component: button });
+    expect(badge).toMatchObject({ width: 120, height: 40 });
+  });
+
+  it("draws the shown graph from the document when the patch editor panel is hidden, and teaches without a renderer", async () => {
+    const { host, svgs } = await withComponents();
+    const shot = await host.screenshot({ kind: "graph" }, {});
+    expect(svgs[0]!.svg).toContain('data-node="press_next"');
+    expect(shot.notes).toEqual([expect.stringContaining("The patch editor isn't showing Main")]);
+    const bare = await withComponents({ renderSvg: undefined as never });
+    expect(await rejection(bare.host.screenshot({ kind: "graph" }, { component: bare.motion }))).toMatchObject({ code: "target_unavailable", hint: expect.stringContaining("focus: true") });
+  });
+});
+
 describe("app host simulations", () => {
   it("runs deterministic simulations of the live document and hot-swaps edits", async () => {
     const w = editorWindow(1);

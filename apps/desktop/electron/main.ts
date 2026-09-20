@@ -11,7 +11,7 @@ import { plainSceneFrame } from "@sonobe/engine";
 import { checkProjectTarget, createClientRegistry, createHttpHandler, isHostError, loadGuides, resolveProjectTarget, type NodeMcpHandler } from "@sonobe/mcp";
 import { createPatchRegistry } from "@sonobe/patches";
 import { toBuffer as qrPng } from "qrcode";
-import { createAppHost, type AppHost, type CapturedImage, type DocumentChange, type RendererTarget, type SceneRenderRequest } from "./app-host.ts";
+import { createAppHost, type AppHost, type CapturedImage, type DocumentChange, type RendererTarget, type SceneRenderRequest, type SvgRenderRequest } from "./app-host.ts";
 import { abortCaptures, captureDesignInWindow, fetchCaptureImage } from "./design-capture.ts";
 import { createAppWindow, type AppWindow, type WindowContentSource } from "./app-window.ts";
 import { createDraftStore, installQuitOnSignal, registerDraftIpc, type DraftStore } from "./drafts.ts";
@@ -708,6 +708,23 @@ function main(): void {
     });
   };
 
+  /** A patch graph the patch editor isn't showing (get_screenshot with component), drawn in the same hidden window. */
+  const renderSvg = (request: SvgRenderRequest): Promise<CapturedImage | null> => {
+    const task = async () => {
+      const win = await sceneRenderer();
+      const { width, height } = request.size;
+      win.setContentSize(Math.max(1, Math.ceil(width)), Math.max(1, Math.ceil(height)));
+      await win.webContents.executeJavaScript(`window.__sonobeRenderSvg(${JSON.stringify({ svg: request.svg, width, height })})`, true);
+      return captureWebContents(win.webContents, { x: 0, y: 0, width, height }, request.size);
+    };
+    const run = sceneQueue.then(task, task);
+    sceneQueue = run.catch(() => undefined);
+    return run.catch((err: unknown) => {
+      log("warn", `Couldn't draw a patch graph: ${errorMessage(err)}`);
+      return null;
+    });
+  };
+
   const requireSecrets = (): SecretStore => {
     if (!secrets) throw new Error("Secure storage isn't ready yet.");
     return secrets;
@@ -1071,6 +1088,7 @@ function main(): void {
       newProjectTarget: agentProjectTarget,
       drafts: { list: () => drafts?.list() ?? Promise.resolve([]) },
       renderScene,
+      renderSvg,
       captureDesign: (request, control = {}) =>
         captureDesignInWindow(request, {
           log,

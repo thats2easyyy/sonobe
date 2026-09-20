@@ -96,7 +96,8 @@ export function estimateGraphGeometry(
  */
 const estimates = new WeakMap<SonobeDocument, Map<Id, GraphGeometry>>();
 
-function cachedEstimate(doc: SonobeDocument, registry: EngineRegistry, componentId: Id): GraphGeometry {
+/** estimateGraphGeometry, computed once per document object and component. */
+export function cachedGraphEstimate(doc: SonobeDocument, registry: EngineRegistry, componentId: Id): GraphGeometry {
   let byComponent = estimates.get(doc);
   if (!byComponent) estimates.set(doc, (byComponent = new Map()));
   let geometry = byComponent.get(componentId);
@@ -133,7 +134,7 @@ export async function resolveGraphGeometry(
   snap: DocumentSnapshot,
   componentId: Id,
 ): Promise<GraphGeometry> {
-  const estimate = cachedEstimate(snap.doc, host.registry, componentId);
+  const estimate = cachedGraphEstimate(snap.doc, host.registry, componentId);
   if (!host.graphGeometry) return estimate;
   let drawn: MeasuredGraph | null = null;
   try {

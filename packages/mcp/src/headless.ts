@@ -31,7 +31,9 @@ import {
 } from "./host.ts";
 import { ToolCancelledError } from "./progress.ts";
 import { resolveProjectTarget } from "./projectTarget.ts";
-import { loadSceneAssets, renderSceneScreenshot } from "./screenshot.ts";
+import { canvasNotes, designScene, drawComponentGraph, graphNotes } from "./componentViews.ts";
+import { cachedGraphEstimate } from "./geometry.ts";
+import { loadSceneAssets, renderGraphScreenshot, renderSceneScreenshot } from "./screenshot.ts";
 import { createDocumentSession, type DocumentSession } from "./session.ts";
 import { createSimulationManager, type SimulationManager } from "./sim.ts";
 import { createTemplateDocument, TEMPLATES } from "./templates.ts";
@@ -423,12 +425,33 @@ export function createHeadlessHost(options: HeadlessHostOptions = {}): HeadlessH
     },
 
     async screenshot(target, shotOptions) {
-      if (target.kind === "canvas" || target.kind === "graph") {
-        throw new HostError(
-          "target_unavailable",
-          `Headless mode has no ${target.kind === "graph" ? "patch graph" : "editor canvas"} to capture; its screenshots draw the prototype screen.`,
-          { hint: 'Use target "viewer" for the whole screen, or "@layerId" for one layer.' },
-        );
+      // The graph and the canvas come from the document: a component's patch graph as the editor lays
+      // it out, or the component alone on its artboard at frame 0 (also for "@layer" with a component).
+      if (target.kind === "graph") {
+        const { session } = resolve(shotOptions.docId);
+        const componentId = shotOptions.component ?? session.doc.project.root;
+        const geometry = cachedGraphEstimate(session.doc, registry, componentId);
+        const drawing = drawComponentGraph(session.doc, registry, componentId, geometry, {
+          ...(shotOptions.scale !== undefined ? { scale: shotOptions.scale } : {}),
+          ...(shotOptions.maxWidth !== undefined ? { maxWidth: shotOptions.maxWidth } : {}),
+        });
+        return renderGraphScreenshot(drawing, graphNotes(session.doc, componentId, drawing, false));
+      }
+      if (target.kind === "canvas" || (target.kind === "layer" && shotOptions.component !== undefined)) {
+        const entry = resolve(shotOptions.docId);
+        const componentId = shotOptions.component ?? entry.session.doc.project.root;
+        const scene = designScene(entry.session.doc, registry, componentId);
+        const shot = await renderSceneScreenshot({
+          scene,
+          target: target.kind === "layer" ? target : { kind: "viewer" },
+          assets: await loadSceneAssets(scene, entry.session.doc, entry.path),
+          ...(shotOptions.scale !== undefined ? { scale: shotOptions.scale } : {}),
+          ...(shotOptions.maxWidth !== undefined ? { maxWidth: shotOptions.maxWidth } : {}),
+          ...(shotOptions.isolate ? { isolate: true } : {}),
+        });
+        shot.notes = [...canvasNotes(entry.session.doc, componentId), ...(shot.notes ?? [])];
+        delete shot.timeMs;
+        return shot;
       }
       let docId = shotOptions.docId;
       let scene;
