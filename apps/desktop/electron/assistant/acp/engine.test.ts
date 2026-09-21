@@ -16,7 +16,7 @@ import { canvasContextBlock } from "../design.ts";
 import type { AssistantCanvasContext, AssistantEvent, AssistantSendRequest } from "../protocol.ts";
 import { FAKE_TOOLS, fakeBridge, text } from "../testing.ts";
 import type { AssistantToolInfo, LocalTools, ToolCallResult } from "../toolBridge.ts";
-import { accountBlockedMessage, createSubscriptionAgent, orgNotAllowedMessage, exitDetail, MODE_NOT_SET, modelValue, NO_RUN, NOT_INSTALLED, parseCliLogin, permissionPrompt, RATE_LIMITED, readCliLogin, RESTARTED, SESSION_ENDED, UNANNOUNCED, usageLimitMessage, type SubscriptionAgentOptions } from "./engine.ts";
+import { accountBlockedMessage, createSubscriptionAgent, orgNotAllowedMessage, exitDetail, MODE_NOT_SET, modelValue, NO_RUN, NOT_INSTALLED, parseCliLogin, permissionPrompt, RATE_LIMITED, readCliLogin, RESTARTED, SESSION_ENDED, TOOL_NAMES_NOTE, UNANNOUNCED, usageLimitMessage, type SubscriptionAgentOptions } from "./engine.ts";
 import type { AssistantToolServer, ToolServerHandler } from "./toolServer.ts";
 import { AgentExitedError, AgentStartError, type AcpAgentProcess, type AcpAgentProcessOptions, type AgentAuthStatus, type AgentExit, type ClaudeAgentSpec, type PermissionHandler } from "./types.ts";
 
@@ -354,7 +354,7 @@ describe("subscription engine: sessions", () => {
       cwd: "/tmp/sonobe-test/assistant/claude",
       mcpServers: [{ type: "http", name: "sonobe", url: `http://127.0.0.1:4321/c/${encodeURIComponent(h.registered[0]!)}/mcp`, headers: [{ name: "Authorization", value: "Bearer token-1" }] }],
       _meta: {
-        systemPrompt: systemPrompt("Call get_outline before editing.", { drawing: "preview" }),
+        systemPrompt: systemPrompt(`${TOOL_NAMES_NOTE}\nCall get_outline before editing.`, { drawing: "preview" }),
         claudeCode: {
           options: {
             tools: [],
@@ -366,8 +366,6 @@ describe("subscription engine: sessions", () => {
             maxTurns: 30,
             // Every tool but the ones that reach outside the prototype, which ask first.
             allowedTools: ["get_outline", "add_layers", "delete_items", "apply_ops", "import_design", "preview_design"].map((n) => `mcp__sonobe__${n}`),
-            // Every tool's short name resolves to it (Claude sometimes calls one that way).
-            toolAliases: Object.fromEntries(TOOLS.map((t) => [t.name, `mcp__sonobe__${t.name}`])),
             env: { ENABLE_TOOL_SEARCH: "false", MCP_TOOL_TIMEOUT: "1800000", CLAUDE_AGENT_SDK_CLIENT_APP: "sonobe/0.1.0-test" },
           },
         },

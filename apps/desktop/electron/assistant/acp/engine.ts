@@ -97,6 +97,16 @@ const USAGE_LIMIT_PREFIXES = [
   "You're out of extra usage",
   "Your seat type doesn't include extra usage",
 ] as const;
+/**
+ * The guide names Sonobe's tools without Claude Code's prefix ("get_outline"), and Claude sometimes calls one
+ * that way. Claude Code has no tool of that name, and a call to one comes with no schema to follow, so its
+ * numbers and booleans arrive as strings: say what the tools are called here.
+ */
+export const TOOL_NAMES_NOTE = `In this app your Sonobe tools are named ${TOOL_PREFIX}<tool>: ${TOOL_PREFIX}get_outline, ${TOOL_PREFIX}preview_design, ${TOOL_PREFIX}import_design and so on. The guide below writes them without that prefix; always call them by their full ${TOOL_PREFIX} names.`;
+
+/** The subscription's system prompt: the API key's, with the preview drawing guide and the tools' names as Claude Code gives them. */
+export const subscriptionPrompt = (instructions: string): string => systemPrompt(`${TOOL_NAMES_NOTE}\n${instructions}`, { drawing: "preview" });
+
 /** The adapter's error kinds (RequestError data.errorKind) that mean the account can't pay for more: no credit left, or on hold. */
 const PLAN_ERROR_KINDS: ReadonlySet<string> = new Set(["billing_error", "account_on_hold"]);
 /**
@@ -888,7 +898,7 @@ export function createSubscriptionAgent(options: SubscriptionAgentOptions): Subs
         _meta: {
           // The tool guide rides in the system prompt, cached from the first request. The endpoint sends
           // no MCP instructions: Claude Code would add them to the first message as a reminder, sending the guide twice.
-          systemPrompt: systemPrompt(instructions, { drawing: "preview" }),
+          systemPrompt: subscriptionPrompt(instructions),
           claudeCode: {
             options: {
               tools: [],
@@ -900,10 +910,6 @@ export function createSubscriptionAgent(options: SubscriptionAgentOptions): Subs
               model: model.id,
               maxTurns: limits.maxTurns,
               allowedTools: toolNames.filter((name) => !ASKING_TOOLS.has(name)).map((name) => `${TOOL_PREFIX}${name}`),
-              // Claude sometimes calls a tool by the short name the guide uses ("get_outline"), which Claude Code
-              // would refuse as "No such tool available": each short name resolves to Sonobe's tool (and still asks
-              // before the ones outside allowedTools, under that name).
-              toolAliases: Object.fromEntries(toolNames.map((name) => [name, `${TOOL_PREFIX}${name}`])),
               env: { ENABLE_TOOL_SEARCH: "false", MCP_TOOL_TIMEOUT: "1800000", CLAUDE_AGENT_SDK_CLIENT_APP: `sonobe/${options.version}` },
             },
           },
