@@ -16,7 +16,7 @@ import { createPatchRegistry } from "@sonobe/patches";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { AssistantCanvasContext, AssistantEvent, AssistantSendRequest } from "../protocol.ts";
 import { createMcpToolBridge, type ToolBridge } from "../toolBridge.ts";
-import { createSubscriptionAgent, MODE_NOT_SET, RATE_LIMITED, RESTARTED, SESSION_ENDED, type SubscriptionAgent } from "./engine.ts";
+import { createSubscriptionAgent, MODE_NOT_SET, RATE_LIMITED, RESTARTED, SESSION_ENDED, TOOL_NAMES_NOTE, type SubscriptionAgent } from "./engine.ts";
 import { locateClaudeAgent } from "./locate.ts";
 import { CLAUDE_AGENT_ENV } from "./types.ts";
 
@@ -192,14 +192,17 @@ describe("the Assistant on the Claude subscription, over the fake agent", () => 
     expect((await host.getDocument(docId)).revision).toBe(revision);
   });
 
-  it("runs a tool Claude calls by its short name, as it sometimes does after reading the guide", async () => {
+  it("tells Claude its tools' full names, and shows a call Claude Code refused by a short name as its reason", async () => {
     const result = await send("bare");
+    const opened = (await fakeLog()).find((l) => l.kind === "session/new") as { params?: { _meta?: { systemPrompt?: string } } } | undefined;
+    expect(opened?.params?._meta?.systemPrompt).toContain(TOOL_NAMES_NOTE);
     expect(result.outcome).toBe("completed");
-    expect(reply()).toBe("Read the outline by its short name.");
-    expect(ofType("tool_finished").at(-1)).toMatchObject({ name: "get_outline", status: "done" });
+    expect(reply()).toBe("That tool wasn't there.");
+    // The chip says why, not the fence around it; nothing reached Sonobe.
+    expect(ofType("tool_finished").at(-1)).toMatchObject({ name: "get_outline", status: "error", detail: "<tool_use_error>Error: No such tool available: get_outline</tool_use_error>" });
     const log = await fakeLog();
-    expect(log.some((l) => l.kind === "no_such_tool")).toBe(false);
-    expect(log.find((l) => l.kind === "mcp_result")).toMatchObject({ tool: "get_outline", isError: false });
+    expect(log.some((l) => l.kind === "no_such_tool")).toBe(true);
+    expect(log.some((l) => l.kind === "mcp_result")).toBe(false);
   });
 
   it("shows Claude Code's question before a save as a permission card, and passes the choice back", async () => {

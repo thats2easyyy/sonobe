@@ -107,6 +107,19 @@ describe("reduceDesignEvent", () => {
     expect(reduceDesignEvent(failed, { type: "tool_finished", runId: "r1", toolUseId: "t1", name: "update_layers", status: "done", detail: "", changedDocument: true }, 1)).toEqual({});
   });
 
+  it("puts a failed draft behind a later import in the same reply, and keeps a failure after one", () => {
+    // The preview import failed, then Claude imported the page again (with its html): the box says what was added.
+    const retried = fold([draft(0, "<html>", { done: true, html: "<html>" }), finished("t1", { status: "error", detail: "Input validation error", changedDocument: false }), finished("t2", { imported: imported() })], { request: pending({ runId: "r1" }) });
+    expect(retried.drafts[0]).toMatchObject({ status: "stopped", error: null });
+    expect(retried.request?.imported).toBe(1);
+    // An import, then a redesign that failed: the failure is what the box says.
+    const later = fold([finished("t1", { imported: imported() }), draft(0, "<html>", { toolUseId: "t2", done: true, html: "<html>" }), finished("t2", { status: "error", detail: "The page didn't load", changedDocument: false })], { request: pending({ runId: "r1" }) });
+    expect(later.drafts.at(-1)).toMatchObject({ status: "failed", error: "The page didn't load" });
+    // Another reply's failed draft stays as it was.
+    const other = fold([draft(0, "<html>", { runId: "r0", done: true, html: "<html>" }), finished("t1", { runId: "r0", status: "error", detail: "x", changedDocument: false }), finished("t2", { imported: imported() })]);
+    expect(other.drafts[0]).toMatchObject({ status: "failed" });
+  });
+
   it("keeps the last five drafts, whatever sent them", () => {
     const state = fold(Array.from({ length: 7 }, (_, i) => draft(0, "<p>", { runId: i % 2 ? "r1" : "mcp:claude-code", toolUseId: `t${i}` })));
     expect(state.drafts.map((d) => d.toolUseId)).toEqual(["t2", "t3", "t4", "t5", "t6"]);

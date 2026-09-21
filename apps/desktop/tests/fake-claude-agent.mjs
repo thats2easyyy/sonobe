@@ -19,8 +19,8 @@
  *   "plainerror"                        fails the prompt with a plain Error, as the adapter does when its Claude Code
  *                                       fails otherwise: the SDK sends -32603 "Internal error" with the text in data.details
  *   "hang"                              says "Working on it…", then waits for session/cancel
- *   "bare"                              calls get_outline by its short name, as Claude sometimes does: it runs only
- *                                       when the session's toolAliases map it (else "No such tool available")
+ *   "bare"                              calls get_outline by its short name, as Claude sometimes does: Claude Code
+ *                                       refuses it ("No such tool available") unless the session's toolAliases map it
  *   "save" / "open"                     save_document {} / open_document { ref: "/tmp/fake.sonobe" }
  *   "replace <id>"                      the design flow, replacing layer <id>
  *   "wire", "interactive"               get_outline, then add_patches: press feedback on the first “Pay” layer

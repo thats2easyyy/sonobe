@@ -184,6 +184,12 @@ export function reduceDesignEvent(state: DesignData, event: AssistantEvent, now:
         if (event.imported) patch = updateRunDraft(state, event.runId, (d) => d.status === "adding", finish);
         else if (event.status !== "done") patch = updateRunDraft(state, event.runId, (d) => isLive(d.status), finish);
       }
+      if (event.imported) {
+        // The screen is in: a draft of this reply that failed before it (Claude tried again, perhaps with its html) is behind it now,
+        // so the box says what was added rather than the earlier failure. A failure after an import still shows.
+        const base = patch.drafts ?? state.drafts;
+        if (base.some((d) => d.runId === event.runId && d.status === "failed")) patch = { ...patch, drafts: base.map((d): DesignDraft => (d.runId === event.runId && d.status === "failed" ? { ...d, status: "stopped", error: null } : d)) };
+      }
       if (event.imported && request?.runId === event.runId) return { ...patch, request: { ...request, imported: (request.imported ?? 0) + 1 } };
       return patch;
     }
