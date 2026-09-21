@@ -47,7 +47,8 @@ async function alpha(svg: string, width: number): Promise<{ width: number; heigh
   return { width: image.width, height: image.height, a };
 }
 
-describe.skipIf(!helper)(`the sfsymbol helper${built.skipped ? ` (skipped: ${built.skipped})` : ""}`, () => {
+// The helper is a native process that renders each symbol: a fresh CI runner takes several seconds where a laptop takes one.
+describe.skipIf(!helper)(`the sfsymbol helper${built.skipped ? ` (skipped: ${built.skipped})` : ""}`, { timeout: 30_000 }, () => {
   it("draws heart.fill as an SVG that matches SwiftUI's own 3x bitmap within a pixel", async () => {
     const [drawing] = await renderer().render([request("heart.fill", { colors: ["#F24D47FF"] })]);
     expect(drawing).toMatchObject({ ok: true, width: 21, height: 18 });
