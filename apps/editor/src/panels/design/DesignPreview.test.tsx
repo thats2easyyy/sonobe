@@ -255,20 +255,70 @@ describe("DesignPreview", () => {
     expect(wrapper()).toBeNull();
   });
 
-  it("sweeps the hologram's scanner over the page while Claude writes it, then fades it off", () => {
-    const scan = () => container.querySelector<HTMLElement>(".sb-design-preview__scan");
-    show([draft()]);
-    render();
-    expect(scan()!.dataset.state).toBe("on");
-    expect(wrapper()!.dataset.scanning).toBe("true");
-    const canvas = scan()!.querySelector<HTMLCanvasElement>("canvas")!;
-    const screen = rectToScreen(VIEWPORT, { x: 0, y: 0, width: 402, height: 874 });
-    expect(parseFloat(canvas.style.width)).toBe(Math.round(screen.width) + 28);
-    show([draft({ html: "<p>Hi</p>", status: "adding" })]);
-    expect(scan()!.dataset.state).toBe("off");
-    expect(wrapper()!.dataset.scanning).toBeUndefined();
-    show([draft({ html: "<p>Hi</p>", status: "added", since: Date.now() })]);
-    expect(scan()).toBeNull();
+  describe("the build", () => {
+    const buildCanvas = () => container.querySelector<HTMLCanvasElement>(".sb-design-build");
+    /** A 2D context that draws nothing, and Path2D, which happy-dom lacks: the build runs. */
+    function canvasStub() {
+      const noop = () => undefined;
+      const ctx = new Proxy({}, { get: (_, key) => (key === "createLinearGradient" || key === "createRadialGradient" ? () => ({ addColorStop: noop }) : noop), set: () => true });
+      vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue(ctx as unknown as CanvasRenderingContext2D);
+      vi.stubGlobal("Path2D", class { rect = noop; roundRect = noop; ellipse = noop; moveTo = noop; lineTo = noop; arcTo = noop; closePath = noop; });
+    }
+    afterEach(() => vi.unstubAllGlobals());
+
+    it("starts over the new screen's place as soon as the box sends a request, before Claude writes", () => {
+      canvasStub();
+      show([], request());
+      render();
+      expect(buildCanvas()).not.toBeNull();
+      expect(iframe()).toBeNull();
+      expect(wrapper()!.dataset.building).toBe("true");
+      expect(wrapper()!.style.transform).toBe("translate(100px, 50px)");
+      expect([parseFloat(wrapper()!.style.width), parseFloat(wrapper()!.style.height)]).toEqual([201, 437]);
+      expect(container.querySelector("[data-design-pill]")?.textContent).toBe("Claude is designing the screen");
+      // A redesign waits for Claude's draft to say where it lands; a finished request builds nothing.
+      show([], request({ context: context({ target: { id: "card", name: "Card", type: "group", frame: [16, 146, 370, 200] } }) }));
+      expect(wrapper()).toBeNull();
+      show([], request({ outcome: "completed" }));
+      expect(wrapper()).toBeNull();
+    });
+
+    it("keeps building into the request's draft, with the page's frame covered until the final sweep", () => {
+      canvasStub();
+      const req = request({ runId: "r1" });
+      show([], req);
+      render();
+      const canvas = buildCanvas();
+      show([draft({ html: "<p>Hi</p>" })], req);
+      // The same build carries on: its canvas isn't replaced.
+      expect(buildCanvas()).toBe(canvas);
+      expect(iframe()!.style.clipPath).toBe("inset(100% 0 0 0)");
+    });
+
+    it("holds an added page on screen until its build has revealed it", () => {
+      vi.useFakeTimers();
+      canvasStub();
+      show([draft({ html: "<p>Hi</p>", status: "adding" })]);
+      render();
+      show([draft({ html: "<p>Hi</p>", status: "added", since: Date.now() })]);
+      act(() => vi.advanceTimersByTime(1000));
+      render();
+      expect(wrapper()!.dataset.state).toBe("live");
+      expect(buildCanvas()).not.toBeNull();
+    });
+
+    it("shows the page as it is when there's no canvas to build on", () => {
+      vi.useFakeTimers();
+      vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue(null);
+      show([draft({ html: "<p>Hi</p>", status: "adding" })]);
+      render();
+      expect(buildCanvas()).toBeNull();
+      show([draft({ html: "<p>Hi</p>", status: "added", since: Date.now() })]);
+      expect(wrapper()!.dataset.state).toBe("leaving");
+      act(() => vi.advanceTimersByTime(401));
+      render();
+      expect(wrapper()).toBeNull();
+    });
   });
 });
 

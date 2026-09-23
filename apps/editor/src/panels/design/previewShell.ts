@@ -1,7 +1,8 @@
 /**
  * The live design preview's sandboxed page: a srcdoc shell whose CSP meta comes first in its head, and
  * a nonce bootstrap that swaps in the HTML Claude is writing. Claude's own scripts never run; only
- * Tailwind's CDN script is recreated. The preview only paints: it captures and writes nothing.
+ * Tailwind's CDN script is recreated. The preview captures and writes nothing: after each swap it
+ * posts only its elements' boxes to the canvas, which builds the page from them (buildPlan.ts).
  */
 
 /** The only script sources the preview recreates (Tailwind's CDN builds). */
@@ -9,6 +10,9 @@ export const PREVIEW_SCRIPT_PREFIXES: readonly string[] = ["https://cdn.tailwind
 
 /** The `type` of the messages the canvas posts into the preview. */
 export const PREVIEW_MESSAGE_TYPE = "sonobe-design-preview";
+
+/** The `type` of the messages the preview posts back: its elements' boxes. */
+export const PREVIEW_BOXES_TYPE = "sonobe-design-preview-boxes";
 
 /** Nothing leaves the frame: no fetches, frames, forms or base URL; styles, images, fonts and media over https or inline. */
 export function previewCsp(nonce: string): string {
@@ -45,7 +49,11 @@ export function previewShellHtml(nonce: string): string {
  * embeds, on* attributes and javascript: URLs; swaps in the page's head styles, its html and body
  * attributes and its body; and adds each allowed CDN script once. When one loads, the last page is
  * swapped in again: Tailwind's v3 Play CDN styles only what changes after it starts, so a page that
- * came in one post would stay unstyled. Clicks and submits are cancelled.
+ * came in one post would stay unstyled. Clicks and submits are cancelled. After each swap (and again
+ * once styles and fonts settle) it measures the page's visible elements and posts their boxes to the
+ * parent as `[path, shape, x, y, width, height, lines, radius]`: an image, video, canvas or svg, or an
+ * element with a background image, as an image; an element with its own text as text line bars; a box
+ * with a background, border or shadow as a box (an oval when it's round). Layout-only boxes are skipped.
  */
 export const PREVIEW_BOOTSTRAP: string = `(function () {
   "use strict";
@@ -56,6 +64,68 @@ export const PREVIEW_BOOTSTRAP: string = `(function () {
   var STRIP = "script, meta[http-equiv], base, iframe, frame, object, embed";
   var added = Object.create(null);
   var last = null;
+  var MAX_BOXES = 600;
+  var MEDIA = { img: 1, svg: 1, video: 1, canvas: 1, picture: 1 };
+  var soon = 0;
+  var later = 0;
+  function shown(color) {
+    return !!color && color !== "transparent" && color.slice(-3) !== ", 0)" && color.slice(-2) !== "/0" && color.slice(-4) !== "/ 0)";
+  }
+  function ownText(el) {
+    for (var n = el.firstChild; n; n = n.nextSibling) if (n.nodeType === 3 && n.nodeValue.trim()) return true;
+    return false;
+  }
+  function bordered(cs) {
+    var sides = ["Top", "Right", "Bottom", "Left"];
+    for (var i = 0; i < sides.length; i++) if (parseFloat(cs["border" + sides[i] + "Width"]) > 0 && shown(cs["border" + sides[i] + "Color"])) return true;
+    return false;
+  }
+  function measure() {
+    var out = [];
+    var vw = document.documentElement.clientWidth;
+    var vh = document.documentElement.clientHeight;
+    var range = document.createRange();
+    function push(path, shape, r, lines, radius) {
+      if (r.width < 2 || r.height < 2 || r.right <= 0 || r.bottom <= 0 || r.left >= vw || r.top >= vh) return;
+      out.push([path, shape, r.left, r.top, r.width, r.height, lines, radius]);
+    }
+    function visit(el, path) {
+      var kids = el.children;
+      for (var i = 0; i < kids.length && out.length < MAX_BOXES; i++) {
+        var child = kids[i];
+        var at = path + "/" + i;
+        var cs = getComputedStyle(child);
+        if (cs.display === "none" || cs.visibility === "hidden" || parseFloat(cs.opacity) === 0) continue;
+        var r = child.getBoundingClientRect();
+        var radius = parseFloat(cs.borderTopLeftRadius) || 0;
+        if (MEDIA[child.localName] || (cs.backgroundImage && cs.backgroundImage.indexOf("url(") !== -1)) {
+          push(at, 3, r, 1, radius);
+          continue;
+        }
+        if (ownText(child)) {
+          range.selectNodeContents(child);
+          var t = range.getBoundingClientRect();
+          var lh = parseFloat(cs.lineHeight) || (parseFloat(cs.fontSize) || 16) * 1.2;
+          if (shown(cs.backgroundColor) || bordered(cs)) push(at + "#box", 0, r, 1, radius);
+          push(at, 2, t.width >= 2 ? t : r, Math.max(1, Math.min(3, Math.round(t.height / lh))), 0);
+          continue;
+        }
+        if (shown(cs.backgroundColor) || bordered(cs) || (cs.boxShadow && cs.boxShadow !== "none")) {
+          var oval = radius >= Math.min(r.width, r.height) / 2 - 0.5 && Math.abs(r.width - r.height) < 2;
+          push(at, oval ? 1 : 0, r, 1, radius);
+        }
+        visit(child, at);
+      }
+    }
+    if (document.body) visit(document.body, "");
+    window.parent.postMessage({ type: ${JSON.stringify(PREVIEW_BOXES_TYPE)}, nonce: nonce, boxes: out }, "*");
+  }
+  function remeasure() {
+    clearTimeout(soon);
+    clearTimeout(later);
+    soon = setTimeout(measure, 30);
+    later = setTimeout(measure, 450);
+  }
   function cancel(event) {
     event.preventDefault();
     event.stopImmediatePropagation();
@@ -141,12 +211,14 @@ export const PREVIEW_BOOTSTRAP: string = `(function () {
   }
   function renderLast() {
     if (last !== null) render(last);
+    remeasure();
   }
   window.addEventListener("message", function (event) {
     var data = event.data;
     if (event.source !== window.parent || !data || data.type !== ${JSON.stringify(PREVIEW_MESSAGE_TYPE)} || data.nonce !== nonce || typeof data.html !== "string") return;
     last = data.html;
     render(data.html);
+    remeasure();
   });
 })();`;
 
