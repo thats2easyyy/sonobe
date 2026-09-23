@@ -152,7 +152,8 @@ describe("the Assistant on the Claude subscription, over the fake agent", () => 
     expect(opened.params._meta.systemPrompt).toContain("start with preview_design (component from the context; name; replace for a redesign)");
     expect(opened.params._meta.systemPrompt).toContain("preview_design");
     const options = opened.params._meta.claudeCode.options;
-    expect(options).toMatchObject({ tools: [], settingSources: [], persistSession: false, strictMcpConfig: true, allowDangerouslySkipPermissions: false, model: "claude-sonnet-5", maxTurns: 30, env: { ENABLE_TOOL_SEARCH: "false", MCP_TOOL_TIMEOUT: "1800000", CLAUDE_AGENT_SDK_CLIENT_APP: "sonobe/0.1.0-test" } });
+    expect(options).toMatchObject({ tools: [], settingSources: [], persistSession: false, strictMcpConfig: true, allowDangerouslySkipPermissions: false, model: "claude-sonnet-5", env: { ENABLE_TOOL_SEARCH: "false", MCP_TOOL_TIMEOUT: "1800000", CLAUDE_AGENT_SDK_CLIENT_APP: "sonobe/0.1.0-test" } });
+    expect(options).not.toHaveProperty("maxTurns");
     expect(options.allowedTools).toContain("mcp__sonobe__preview_design");
     expect(options.allowedTools).not.toContain("mcp__sonobe__save_document");
     expect(agent.snapshot("w1").usage).toMatchObject({ inputTokens: 1200, outputTokens: 300, cacheReadTokens: 20_000, estimatedCostUsd: 0 });
