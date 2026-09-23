@@ -2,9 +2,11 @@
  * The live preview over the artboard: the page Claude is writing, drawn in a sandboxed iframe where
  * the screen will land, with a pill saying who is doing what. The pill stays in view: in the
  * artboard's label row over a frame at its top, else above the frame, else just inside its top edge.
- * The page comes from the in-app Assistant or from an MCP client such as Claude Code. Once it's added,
- * it fades out onto the real layers: it is that import's reveal, so the import hologram doesn't build
- * the screen again (designStore's previewedImport).
+ * The page comes from the in-app Assistant or from an MCP client such as Claude Code. While Claude
+ * writes, the hologram's scanner sweeps over it, its veil thin enough for the page to show through,
+ * so the part not written yet reads as on its way; it fades off once the page is complete. Once it's
+ * added, the preview fades out onto the real layers: it is that import's reveal, so the import
+ * hologram doesn't build the screen again (designStore's previewedImport).
  */
 
 import type { Author } from "@sonobe/core";
@@ -13,6 +15,7 @@ import { createPortal } from "react-dom";
 import { useLatest } from "../../ui/lib/hooks.ts";
 import type { Rect } from "../canvas/geometry.ts";
 import { rectToScreen, type Viewport } from "../canvas/viewport.ts";
+import { HologramScanner } from "../import/HologramScanner.tsx";
 import type { DesignTarget } from "./context.ts";
 import { activeDraft, assistantDraft, designStore, draftComponent, draftRequest, mcpDraftIdleAt, useDesign, type DesignData, type DesignDraft, type DesignRequest } from "./designStore.ts";
 import { PREVIEW_MESSAGE_TYPE, previewShellHtml, renderablePrefix } from "./previewShell.ts";
@@ -28,6 +31,9 @@ const LABEL_CLEARANCE = 22;
 /** The pill's height, and its gap from the frame's edge (design.css). */
 const PILL_HEIGHT = 24;
 const PILL_GAP = 8;
+/** How opaque the scanner's veil is over the page Claude is writing, and over the artboard before the page starts. */
+export const SCAN_VEIL = 0.55;
+export const SCAN_VEIL_EMPTY = 0.85;
 
 const isLive = (draft: DesignDraft) => draft.status === "writing" || draft.status === "adding";
 
@@ -125,10 +131,16 @@ export function DesignPreview({ viewport, bounds, componentId, rootId, artboard,
   const place = atTop && labelSlot && labelInView ? "label" : roomAbove ? "above" : "inside";
   // Inside, it keeps below the ruler while the frame's top is scrolled under it.
   const insideTop = Math.min(Math.max(0, insetTop - y), Math.max(0, screen.height - PILL_HEIGHT - PILL_GAP * 2)) + PILL_GAP;
+  const scanning = draft.status === "writing";
 
   return (
-    <div className="sb-design-preview" data-state={leaving ? "leaving" : "live"} style={{ transform: `translate(${x}px, ${y}px)`, width: screen.width, height: screen.height }}>
+    <div className="sb-design-preview" data-state={leaving ? "leaving" : "live"} data-scanning={scanning || undefined} style={{ transform: `translate(${x}px, ${y}px)`, width: screen.width, height: screen.height }}>
       <PreviewFrame key={draft.key} html={draft.html} complete={draft.status !== "writing"} hold={draft.resync && draft.status === "writing"} width={frame.width} height={frame.height} zoom={viewport.zoom} />
+      {!leaving && (
+        <div className="sb-design-preview__scan" data-state={scanning ? "on" : "off"} aria-hidden>
+          <HologramScanner key={draft.key} width={screen.width} height={screen.height} veil={draft.html ? SCAN_VEIL : SCAN_VEIL_EMPTY} className="sb-design-preview__scan-canvas" />
+        </div>
+      )}
       {place !== "label" ? (
         <div className="sb-design-preview__pill" data-design-pill="" data-status={draft.status} data-place={place} data-lift={(place === "above" && atTop) || undefined} style={place === "inside" ? { top: insideTop } : undefined}>
           <span className="sb-design-preview__dot" aria-hidden />
