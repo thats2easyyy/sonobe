@@ -254,6 +254,22 @@ describe("DesignPreview", () => {
     act(() => vi.advanceTimersByTime(401));
     expect(wrapper()).toBeNull();
   });
+
+  it("sweeps the hologram's scanner over the page while Claude writes it, then fades it off", () => {
+    const scan = () => container.querySelector<HTMLElement>(".sb-design-preview__scan");
+    show([draft()]);
+    render();
+    expect(scan()!.dataset.state).toBe("on");
+    expect(wrapper()!.dataset.scanning).toBe("true");
+    const canvas = scan()!.querySelector<HTMLCanvasElement>("canvas")!;
+    const screen = rectToScreen(VIEWPORT, { x: 0, y: 0, width: 402, height: 874 });
+    expect(parseFloat(canvas.style.width)).toBe(Math.round(screen.width) + 28);
+    show([draft({ html: "<p>Hi</p>", status: "adding" })]);
+    expect(scan()!.dataset.state).toBe("off");
+    expect(wrapper()!.dataset.scanning).toBeUndefined();
+    show([draft({ html: "<p>Hi</p>", status: "added", since: Date.now() })]);
+    expect(scan()).toBeNull();
+  });
 });
 
 describe("an MCP client's draft", () => {

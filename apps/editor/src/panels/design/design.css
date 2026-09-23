@@ -312,6 +312,37 @@
   opacity: 0;
 }
 
+/* The scanner draws its own frame while Claude writes. */
+.sb-design-preview[data-scanning]::after {
+  opacity: 0;
+}
+
+/* The hologram's scanner over the page Claude is writing; it fades off once the page is complete. */
+.sb-design-preview__scan {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  animation: sb-design-scan-in 320ms var(--ease-out);
+  transition: opacity 360ms var(--ease-out);
+}
+
+.sb-design-preview__scan[data-state="off"] {
+  opacity: 0;
+}
+
+.sb-design-preview__scan-canvas {
+  position: absolute;
+  top: 0;
+  left: 0;
+  display: block;
+}
+
+@keyframes sb-design-scan-in {
+  from {
+    opacity: 0;
+  }
+}
+
 /*
  * While the person decides whether Claude may replace a screen, the screen shows through the new
  * version, and the pill (which would say the layers are being added) steps aside.
@@ -391,8 +422,10 @@
   animation: none;
 }
 
-:root[data-motion="reduce"] .sb-design-preview {
+:root[data-motion="reduce"] .sb-design-preview,
+:root[data-motion="reduce"] .sb-design-preview__scan {
   transition: none;
+  animation: none;
 }
 
 :root[data-motion="reduce"] .sb-design-preview__dot::after {
@@ -405,8 +438,10 @@
     animation: none;
   }
 
-  :root:not([data-motion="full"]) .sb-design-preview {
+  :root:not([data-motion="full"]) .sb-design-preview,
+  :root:not([data-motion="full"]) .sb-design-preview__scan {
     transition: none;
+    animation: none;
   }
 
   :root:not([data-motion="full"]) .sb-design-preview__dot::after {

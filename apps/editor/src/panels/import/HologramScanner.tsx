@@ -1,7 +1,9 @@
 /**
- * The Import Design dialog's scanner while a page is captured: a frame with the import's proportions,
- * pixel rain over a faint grid, and a laser sweeping slowly down and back up. Drawn with the canvas
- * build's code on one 2D canvas; reduced motion shows the still frame.
+ * The scanner while a design is on its way: a frame with the import's proportions, pixel rain over a
+ * faint grid, and a laser sweeping slowly down and back up. The Import Design dialog shows it while a
+ * page is captured, and the live design preview lays it over the page Claude is writing, its veil thin
+ * enough for the page to show through. Drawn with the canvas build's code on one 2D canvas; reduced
+ * motion shows the still frame.
  */
 
 import { useLayoutEffect, useRef } from "react";
@@ -20,6 +22,10 @@ export interface HologramScannerProps {
   /** The frame's size in CSS pixels. */
   width: number;
   height: number;
+  /** How opaque the veil is (0–1). Default 1: the page behind it is hidden. */
+  veil?: number;
+  /** Default `sb-holo-scan`, the dialog's. */
+  className?: string;
 }
 
 /** Where the laser is `t` ms into the scan (0 top → 1 bottom), and which way it's going. */
@@ -28,8 +34,10 @@ export function scanLaserAt(t: number): { y: number; direction: 1 | -1 } {
   return u < 1 ? { y: sweepCurve(u), direction: 1 } : { y: 1 - sweepCurve(u - 1), direction: -1 };
 }
 
-export function HologramScanner({ width, height }: HologramScannerProps) {
+export function HologramScanner({ width, height, veil = 1, className = "sb-holo-scan" }: HologramScannerProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  // The sweep keeps its place when the frame resizes (a zoom over the live preview).
+  const startRef = useRef<number | null>(null);
   const w = Math.max(1, Math.round(width));
   const h = Math.max(1, Math.round(height));
 
@@ -40,7 +48,7 @@ export function HologramScanner({ width, height }: HologramScannerProps) {
     const colors = readHoloColors(canvas);
     const frame: Rect = { x: PAD_X, y: PAD_Y, width: w, height: h };
     const reduced = prefersReducedMotion();
-    const start = performance.now();
+    const start = (startRef.current ??= performance.now());
     let raf = 0;
     const draw = (now: number) => {
       const dpr = fitCanvas(canvas, w + PAD_X * 2, h + PAD_Y * 2);
@@ -50,7 +58,9 @@ export function HologramScanner({ width, height }: HologramScannerProps) {
       ctx.beginPath();
       ctx.rect(frame.x, frame.y, frame.width, frame.height);
       ctx.clip();
+      ctx.globalAlpha = Math.max(0, Math.min(1, veil));
       drawVeil(ctx, frame, colors);
+      ctx.globalAlpha = 1;
       drawGrid(ctx, frame, colors);
       const t = now - start;
       const laser = scanLaserAt(t);
@@ -61,7 +71,7 @@ export function HologramScanner({ width, height }: HologramScannerProps) {
       if (!reduced) drawLaser(ctx, frame, Math.min(frame.y + frame.height - 0.75, Math.max(frame.y + 0.75, y)), laser.direction, colors);
       drawFrame(ctx, frame, colors);
     };
-    draw(start);
+    draw(performance.now());
     if (reduced) return;
     const loop = (now: number) => {
       draw(now);
@@ -69,9 +79,9 @@ export function HologramScanner({ width, height }: HologramScannerProps) {
     };
     raf = requestAnimationFrame(loop);
     return () => cancelAnimationFrame(raf);
-  }, [w, h]);
+  }, [w, h, veil]);
 
-  return <canvas ref={canvasRef} className="sb-holo-scan" aria-hidden style={{ width: w + PAD_X * 2, height: h + PAD_Y * 2, margin: `${-PAD_Y}px ${-PAD_X}px` }} />;
+  return <canvas ref={canvasRef} className={className} aria-hidden style={{ width: w + PAD_X * 2, height: h + PAD_Y * 2, margin: `${-PAD_Y}px ${-PAD_X}px` }} />;
 }
 
 /** The biggest frame with the import's proportions that fits `box` (CSS px), no taller than `max`. */
