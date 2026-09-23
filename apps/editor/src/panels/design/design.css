@@ -312,32 +312,22 @@
   opacity: 0;
 }
 
-/* The scanner draws its own frame while Claude writes. */
-.sb-design-preview[data-scanning]::after {
+/* The build draws its own frame while the screen is built. */
+.sb-design-preview[data-building]::after {
   opacity: 0;
 }
 
-/* The hologram's scanner over the page Claude is writing; it fades off once the page is complete. */
-.sb-design-preview__scan {
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
-  animation: sb-design-scan-in 320ms var(--ease-out);
-  transition: opacity 360ms var(--ease-out);
-}
-
-.sb-design-preview__scan[data-state="off"] {
-  opacity: 0;
-}
-
-.sb-design-preview__scan-canvas {
+/* Design with Claude's build over the preview (DesignBuild): above the page's frame, below the pill. */
+.sb-design-build {
   position: absolute;
   top: 0;
   left: 0;
   display: block;
+  pointer-events: none;
+  animation: sb-design-build-in 240ms var(--ease-out);
 }
 
-@keyframes sb-design-scan-in {
+@keyframes sb-design-build-in {
   from {
     opacity: 0;
   }
@@ -423,7 +413,7 @@
 }
 
 :root[data-motion="reduce"] .sb-design-preview,
-:root[data-motion="reduce"] .sb-design-preview__scan {
+:root[data-motion="reduce"] .sb-design-build {
   transition: none;
   animation: none;
 }
@@ -439,7 +429,7 @@
   }
 
   :root:not([data-motion="full"]) .sb-design-preview,
-  :root:not([data-motion="full"]) .sb-design-preview__scan {
+  :root:not([data-motion="full"]) .sb-design-build {
     transition: none;
     animation: none;
   }
