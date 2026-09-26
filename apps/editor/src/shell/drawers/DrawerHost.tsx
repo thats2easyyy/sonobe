@@ -2,7 +2,7 @@ import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "re
 import { Splitter } from "../../ui/Splitter.tsx";
 import { isFocusVisible } from "../../ui/lib/focus.ts";
 import { useDismissableLayer } from "../../ui/lib/layerStack.ts";
-import { DEFAULT_LAYOUT, SIZE_LIMITS, layoutStore, useLayout, type DrawerId } from "../layoutStore.ts";
+import { DEFAULT_LAYOUT, SIZE_LIMITS, layoutStore, setLiveDrawerWidth, useLayout, type DrawerId } from "../layoutStore.ts";
 
 const EXIT_MS = 150;
 
@@ -13,8 +13,6 @@ export interface DrawerHostProps {
    * can point at the inspector while its steps stay visible.
    */
   docked?: boolean;
-  /** Called while the edge is dragged, before the size is committed. */
-  onLiveResize?: (width: number) => void;
 }
 
 /**
@@ -22,7 +20,7 @@ export interface DrawerHostProps {
  * belongs to the canvas; the left edge resizes it. Opened from the keyboard it takes focus, and
  * closing it gives focus back to what opened it.
  */
-export function DrawerHost({ learn, docked = false, onLiveResize }: DrawerHostProps) {
+export function DrawerHost({ learn, docked = false }: DrawerHostProps) {
   const drawer = useLayout((s) => s.drawer);
   const width = useLayout((s) => s.sizes.drawer);
   const [rendered, setRendered] = useState<DrawerId | null>(drawer);
@@ -86,9 +84,12 @@ export function DrawerHost({ learn, docked = false, onLiveResize }: DrawerHostPr
         className="sb-drawer__splitter"
         onResize={(size) => {
           if (asideRef.current) asideRef.current.style.width = `${size}px`;
-          onLiveResize?.(size);
+          setLiveDrawerWidth(size);
         }}
-        onResizeEnd={(size) => layoutStore.getState().setSize("drawer", size)}
+        onResizeEnd={(size) => {
+          layoutStore.getState().setSize("drawer", size);
+          setLiveDrawerWidth(null);
+        }}
       />
       {learn}
     </aside>
