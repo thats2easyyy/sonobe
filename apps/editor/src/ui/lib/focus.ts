@@ -14,7 +14,7 @@ const FOCUSABLE = [
 export function getFocusable(container: Element | null | undefined): HTMLElement[] {
   if (!container) return [];
   return [...container.querySelectorAll<HTMLElement>(FOCUSABLE)].filter(
-    (el) => !el.closest("[inert]") && el.getClientRects().length > 0,
+    (el) => el.getAttribute("tabindex") !== "-1" && !el.closest("[inert]") && el.getClientRects().length > 0,
   );
 }
 
