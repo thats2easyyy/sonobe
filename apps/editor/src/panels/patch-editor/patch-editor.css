@@ -2054,12 +2054,11 @@ textarea.sb-pe-title-input {
 
 .sb-pe-empty {
   position: absolute;
-  top: 50%;
-  left: 50%;
+  top: 0;
+  left: 0;
   z-index: 4;
-  width: min(340px, calc(100% - 32px));
+  width: min(360px, 100%);
   pointer-events: none;
-  transform: translate(-50%, -50%);
 }
 
 .sb-pe-empty .sb-btn {
@@ -2076,25 +2075,8 @@ textarea.sb-pe-title-input {
   inset: -1px 0;
 }
 
-.sb-pe-empty__legend {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-3);
-  padding: 0 var(--space-5) var(--space-4);
-  color: var(--text-secondary);
-  font-size: var(--font-size-sm);
-}
-
-.sb-pe-empty__keys {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--space-3) var(--space-5);
-}
-
-.sb-pe-empty__keys > span {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--space-3);
+.sb-pe-topbar:not(:empty) ~ .sb-pe-empty {
+  top: calc(var(--control-h-md) + 2 * var(--space-5));
 }
 
 /* Hover card */

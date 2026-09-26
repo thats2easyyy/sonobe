@@ -11,6 +11,7 @@ import { Kbd } from "../../../ui/Kbd.tsx";
 import { useContextMenu, type MenuEntry } from "../../../ui/Menu.tsx";
 import { PortGlyph } from "../../../ui/PortGlyph.tsx";
 import { Tooltip } from "../../../ui/Tooltip.tsx";
+import { detectPlatform, formatShortcutLabel } from "../../../ui/commands/shortcutManager.ts";
 import { FIT_VIEW_PADDING } from "../model/geometry.ts";
 import { instanceChoiceKey } from "../model/instances.ts";
 import { patchEditorBridge } from "../state/bridge.ts";
@@ -262,29 +263,13 @@ export function EmptyGraph() {
         variant="inline"
         size="sm"
         title="No patches yet"
-        description="Double-click here to add a patch."
+        description={`Double-click the canvas or press ${formatShortcutLabel("Alt+Enter", detectPlatform())} to add a patch.`}
         actions={
-          <>
-            <Button variant="secondary" size="sm" icon={<Plus size={14} />} onClick={() => actions.openPicker()}>
-              Insert patch
-            </Button>
-            <Kbd shortcut="Alt+Enter" />
-          </>
+          <Button variant="secondary" size="sm" icon={<Plus size={14} />} onClick={() => actions.openPicker()}>
+            Insert patch
+          </Button>
         }
       />
-      <div className="sb-pe-empty__legend">
-        <span className="sb-pe-empty__keys">
-          <span>
-            <Kbd>I</Kbd> Interaction
-          </span>
-          <span>
-            <Kbd>S</Kbd> Switch
-          </span>
-          <span>
-            <Kbd>A</Kbd> Pop Animation
-          </span>
-        </span>
-      </div>
     </div>
   );
 }
