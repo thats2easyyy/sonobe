@@ -1,5 +1,5 @@
 import type { PatchCategory } from "@sonobe/core";
-import { ArrowLeft, BookOpen, X } from "lucide-react";
+import { ArrowLeft, X } from "lucide-react";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useStore } from "zustand";
 import { useEditorSession } from "../../state/EditorProvider.tsx";
@@ -182,7 +182,7 @@ export function LearnDrawer({ onClose, view, defaultView, onViewChange, onConnec
   } else if (lesson) {
     body = <LessonPlayer key={lesson.id} lesson={lesson} onBack={openLessons} onOpenLesson={openLesson} onOpenGuide={(slug) => openGuide(slug)} />;
   } else if (current.kind === "lessons" || current.kind === "lesson") {
-    body = <LessonsHome onOpenLesson={openLesson} onOpenGuides={openHome} />;
+    body = <LessonsHome onOpenLesson={openLesson} />;
   } else if (guide) {
     body = <GuideReader guide={guide} catalog={catalog} examples={examples} onOpenGuide={openGuide} onHome={openHome} onTryExample={(e) => void tryExample(e)} {...(onConnectClaude ? { onConnectClaude } : {})} />;
   } else {
@@ -192,7 +192,7 @@ export function LearnDrawer({ onClose, view, defaultView, onViewChange, onConnec
   return (
     <div className={cx("sb-learnx", className)} data-view={current.kind}>
       <header className="sb-learnx__header">
-        {showBack ? <IconButton size="sm" icon={<ArrowLeft size={14} />} label="Back" onClick={() => goBack(true)} /> : <BookOpen size={14} strokeWidth={2} className="sb-learnx__header-icon" aria-hidden />}
+        {showBack && <IconButton size="sm" icon={<ArrowLeft size={14} />} label="Back" onClick={() => goBack(true)} />}
         <h2 className="sb-learnx__title">Learn</h2>
         <SegmentedControl<Section>
           size="sm"

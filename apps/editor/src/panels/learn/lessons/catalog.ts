@@ -328,7 +328,7 @@ export const BUILDING_WITH_CLAUDE: Lesson = {
     {
       id: "setup",
       title: "Copy the setup",
-      body: "Pick **Claude Code** or **Claude Desktop**, then press **Copy**. Run the command in a terminal, or paste the config into Claude Desktop and restart it.",
+      body: "Pick **Claude Code** or **Claude Desktop**. In a browser, first save the prototype as a project folder and paste its path into **Project folder**. Then press **Copy**, run the command in a terminal, or paste the config into Claude Desktop and restart it.",
       target: { selector: ".sb-connect .sb-copyblock__button" },
       manual: "I've already set this up",
       prepare: (app) => app.openConnect(),

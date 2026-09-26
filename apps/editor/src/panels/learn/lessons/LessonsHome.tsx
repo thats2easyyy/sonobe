@@ -10,8 +10,6 @@ import { useStartLesson } from "./useStartLesson.ts";
 
 export interface LessonsHomeProps {
   onOpenLesson: (id: string) => void;
-  /** Not used: the Guides tab is one tap away in the header. */
-  onOpenGuides?: () => void;
 }
 
 /** The lesson list: the suggested lesson open with one button, every other lesson a single row. */

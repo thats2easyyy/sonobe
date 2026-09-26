@@ -280,6 +280,61 @@ test.describe("Design with Claude", () => {
     expect(problems).toEqual([]);
   });
 
+  test("the box and the Assistant sheet take turns: neither is left clipped beside the other", async ({ page }) => {
+    const problems = collectConsoleProblems(page);
+    await installFakeAssistant(page, { html: profileHtml });
+    await openEditor(page);
+    await openBox(page);
+    const sheet = page.locator(".sb-assistant-sheet");
+
+    await designField(page).fill("a profile screen");
+    await designBox(page).getByRole("button", { name: "Open chat" }).click();
+    await expect(sheet).toBeVisible();
+    await expect(designField(page)).toHaveCount(0);
+    await expect(sheet.getByRole("textbox")).toHaveValue("a profile screen");
+
+    // Closing the sheet gives focus to the canvas, not the page.
+    await page.keyboard.press("Escape");
+    await expect(sheet).toHaveCount(0);
+    await expect(page.locator(".sb-cv")).toBeFocused();
+
+    await page.locator(".sb-cv__design").click();
+    await expect(designField(page)).toBeVisible();
+    await expect(sheet).toHaveCount(0);
+
+    const canvas = await page.locator(".sb-cv").boundingBox();
+    const box = await designBox(page).boundingBox();
+    expect(box!.x + box!.width).toBeLessThanOrEqual(canvas!.x + canvas!.width);
+    expect(problems).toEqual([]);
+  });
+
+  test("the box keeps its request when Learn or the sheet takes the side, and Learn and the sheet share a left edge", async ({ page }) => {
+    const problems = collectConsoleProblems(page);
+    await installFakeAssistant(page, { html: profileHtml });
+    await openEditor(page);
+    await openBox(page);
+    await designField(page).fill("a checkout screen");
+
+    await page.getByRole("button", { name: "Learn", exact: true }).click();
+    const learn = page.getByRole("complementary", { name: "Learn" });
+    await expect(learn).toBeVisible();
+    await expect(designField(page)).toHaveCount(0);
+    const viewportWidth = page.viewportSize()!.width;
+    const learnWidth = (await learn.boundingBox())!.width;
+    await expect.poll(async () => viewportWidth - (await learn.boundingBox())!.x).toBe(learnWidth);
+
+    await page.locator(".sb-cv__design").click();
+    await expect(designField(page)).toHaveValue("a checkout screen");
+    await expect(learn).toHaveCount(0);
+
+    await designBox(page).getByRole("button", { name: "Open chat" }).click();
+    const sheet = page.locator(".sb-assistant-sheet");
+    await expect(sheet).toBeVisible();
+    expect((await sheet.boundingBox())!.width).toBe(learnWidth);
+    await expect.poll(async () => viewportWidth - (await sheet.boundingBox())!.x).toBe(learnWidth);
+    expect(problems).toEqual([]);
+  });
+
   test("draws the screen Claude Code is writing as its preview_design calls arrive", async ({ page }) => {
     const problems = collectConsoleProblems(page);
     await openEditor(page);

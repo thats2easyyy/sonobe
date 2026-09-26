@@ -150,6 +150,13 @@ describe("lesson catalog", () => {
     expect(BUILDING_WITH_CLAUDE.steps.filter((step) => step.manual).map((step) => step.id)).toEqual(["setup", "prompt", "change"]);
   });
 
+  it("tells the browser's reader what unlocks the setup's Copy button, and keeps its target and skip", () => {
+    const setup = BUILDING_WITH_CLAUDE.steps.find((step) => step.id === "setup")!;
+    expect(setup.body).toContain("first save the prototype as a project folder and paste its path into **Project folder**");
+    expect(setup.target).toEqual({ selector: ".sb-connect .sb-copyblock__button" });
+    expect(setup.manual).toBe("I've already set this up");
+  });
+
   it("treats a check that throws as unfinished", () => {
     const ctx = createLessonContext({ doc: FIRST_PROTOTYPE.starter!(registry) });
     expect(evaluateStep({ id: "x", title: "X", body: "", check: () => { throw new Error("boom"); } }, ctx, ctx)).toEqual({ done: false, hint: null });

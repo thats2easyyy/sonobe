@@ -139,7 +139,11 @@
   margin: 0;
 }
 
-/* Small buttons keep their look and reach 24px tall. */
+/* Small buttons read 12px like every interactive label and reach 24px tall. */
+.sb-design-box .sb-btn[data-size="sm"] {
+  font-size: var(--font-size-sm);
+}
+
 .sb-design-box .sb-btn[data-size="sm"]::after {
   content: "";
   position: absolute;
@@ -199,7 +203,7 @@
   min-width: 0;
   height: var(--control-h-sm);
   color: var(--text-secondary);
-  font-size: var(--font-size-xs);
+  font-size: var(--font-size-sm);
   font-weight: var(--font-weight-medium);
 }
 

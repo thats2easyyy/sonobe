@@ -25,11 +25,6 @@
   padding-left: var(--space-3);
 }
 
-.sb-learnx__header-icon {
-  flex: none;
-  color: var(--text-secondary);
-}
-
 .sb-learnx__title {
   font-size: var(--font-size-md);
   font-weight: var(--font-weight-semibold);
@@ -43,7 +38,7 @@
   flex: 1 1 auto;
   min-height: 0;
   overflow-y: auto;
-  padding: var(--space-6);
+  padding: var(--space-6) var(--space-5);
   overscroll-behavior: contain;
 }
 

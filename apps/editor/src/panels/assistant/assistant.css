@@ -19,6 +19,13 @@
   height: var(--panel-header-h);
   padding: 0 var(--space-3) 0 var(--space-5);
   border-bottom: 1px solid var(--border-subtle);
+  --control-h-xs: 24px;
+  --control-h-sm: 24px;
+}
+
+.sb-assistant__header .sb-select {
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-medium);
 }
 
 .sb-assistant__title {
@@ -974,6 +981,7 @@
   display: flex;
   border-left: 1px solid var(--border-default);
   background: var(--bg-panel);
+  box-shadow: var(--shadow-popover);
   animation: sb-assistant-sheet-in var(--duration-slow) var(--ease-out);
 }
 

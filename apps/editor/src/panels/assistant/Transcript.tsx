@@ -1,7 +1,7 @@
 import { Ban, Check, ChevronRight, CircleAlert, Info, KeyRound, LoaderCircle, MessageSquarePlus, RefreshCw, ShieldQuestion, SkipForward, TriangleAlert, Trash2, X } from "lucide-react";
 import { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import { Button } from "../../ui/Button.tsx";
-import { isEditableTarget } from "../../ui/commands/shortcutManager.ts";
+import { detectPlatform, formatShortcutLabel, isEditableTarget } from "../../ui/commands/shortcutManager.ts";
 import { Tooltip } from "../../ui/Tooltip.tsx";
 import { Markdown } from "../learn/Markdown.tsx";
 import "../learn/markdown.css";
@@ -294,7 +294,7 @@ export function Transcript({ items, running, thinking, onConfirm, onManageKey, o
     return (
       <div className="sb-assistant-empty">
         <p className="sb-assistant-empty__title">What should we build?</p>
-        <p className="sb-assistant-empty__body">Describe a change and Claude makes it. It shows in AI Activity as Assistant and can be undone with ⌘Z.</p>
+        <p className="sb-assistant-empty__body">Describe a change and Claude makes it. It shows in AI Activity as Assistant and can be undone with {formatShortcutLabel("Mod+Z", detectPlatform())}.</p>
         <div className="sb-assistant-suggestions">
           {SUGGESTIONS.map((text) => (
             <button key={text} type="button" className="sb-assistant-suggestion" onClick={() => onSuggestion(text)}>

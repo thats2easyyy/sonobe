@@ -276,7 +276,14 @@ describe("Transcript", () => {
   it("leaves the empty chat left-aligned with its three starter prompts", () => {
     renderItems([]);
     expect(container.querySelector(".sb-assistant-empty__title")?.textContent).toBe("What should we build?");
-    expect(container.querySelector(".sb-assistant-empty__body")?.textContent).toBe("Describe a change and Claude makes it. It shows in AI Activity as Assistant and can be undone with ⌘Z.");
+    expect(container.querySelector(".sb-assistant-empty__body")?.textContent).toBe("Describe a change and Claude makes it. It shows in AI Activity as Assistant and can be undone with Ctrl+Z.");
     expect(buttons()).toEqual(["Explain how this prototype works", "Make the photo zoom in when I tap it", "Add a like button with a bouncy animation"]);
+  });
+
+  it("names the undo shortcut of the platform it runs on", () => {
+    const platform = vi.spyOn(window.navigator, "platform", "get").mockReturnValue("MacIntel");
+    renderItems([]);
+    expect(container.querySelector(".sb-assistant-empty__body")?.textContent).toContain("undone with ⌘Z.");
+    platform.mockRestore();
   });
 });

@@ -3,9 +3,12 @@ import { findLayer } from "@sonobe/core";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { keepBoxClearOfDrawers } from "../../app/rightDrawers.ts";
 import { createManualScheduler } from "../../runtime/scheduler.ts";
+import { createLayoutStore } from "../../shell/layoutStore.ts";
 import { createEditorSession, type EditorSession } from "../../state/session.ts";
 import { Toaster, toast } from "../../ui/Toast.tsx";
+import { createLessonLayout } from "../learn/lessons/lessonLayout.ts";
 import { assistantStore, initialAssistantData } from "../assistant/assistantStore.ts";
 import { createAssistantController, type AssistantController } from "../assistant/controller.ts";
 import { fakeAssistantHost, NOT_INSTALLED_MESSAGE, SIGNED_OUT_ERROR, SIGNED_OUT_MESSAGE, signedIn, subscriptionStatus, usage, type FakeAssistantHost } from "../assistant/testing.ts";
@@ -527,6 +530,48 @@ describe("DesignBox", () => {
     expect(container.querySelector(".sb-design-box__chips")).toBeNull();
     act(() => designStore.setState({ request: null }));
     expect(container.querySelector(".sb-design-box__chips")).toBeNull();
+  });
+
+  it("hands the canvas over to the chat: Open chat opens the sheet, closes the box and carries the request", async () => {
+    const layout = createLayoutStore({ storageKey: null });
+    const stopKeeping = keepBoxClearOfDrawers(designStore, assistantStore, layout, createLessonLayout({ layout, storageKey: null }));
+    try {
+      await mount();
+      expect(box()).not.toBeNull();
+      type("a profile screen");
+      click(buttonNamed("Open chat"));
+      expect(assistantStore.getState().open).toBe(true);
+      expect(assistantStore.getState().draft).toBe("a profile screen");
+      expect(designStore.getState().open).toBe(false);
+      expect(box()).toBeNull();
+    } finally {
+      stopKeeping();
+    }
+  });
+
+  it("puts the request after what the chat already has typed", async () => {
+    await mount();
+    assistantStore.getState().setDraft("and keep the header ");
+    type("a profile screen");
+    click(buttonNamed("Open chat"));
+    expect(assistantStore.getState().draft).toBe("and keep the header\na profile screen");
+    expect(designStore.getState().text).toBe("");
+  });
+
+  it("keeps the request when the box closes under it and comes back", async () => {
+    const layout = createLayoutStore({ storageKey: null });
+    const stopKeeping = keepBoxClearOfDrawers(designStore, assistantStore, layout, createLessonLayout({ layout, storageKey: null }));
+    try {
+      await mount(fakeAssistantHost({}));
+      type("a checkout screen");
+      press("Enter");
+      click(buttonNamed("Add API key…"));
+      expect(box()).toBeNull();
+      act(() => designStore.getState().openBox());
+      expect(field().value).toBe("a checkout screen");
+    } finally {
+      stopKeeping();
+    }
   });
 
   it("without an API key keeps the text, explains, and copies a prompt for Claude Code", async () => {

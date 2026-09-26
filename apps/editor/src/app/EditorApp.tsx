@@ -19,7 +19,7 @@ import { CanvasPanel } from "../panels/canvas/CanvasPanel.tsx";
 import { ConnectClaudeButton } from "../panels/connect/ConnectClaudeButton.tsx";
 import { connectClaudeStore, useConnectClaude } from "../panels/connect/connectStore.ts";
 import { designCommands } from "../panels/design/commands.ts";
-import { attachDesign } from "../panels/design/designStore.ts";
+import { attachDesign, designStore } from "../panels/design/designStore.ts";
 import { followDesignBox } from "../panels/design/layout.ts";
 import { Hud } from "../panels/hud/Hud.tsx";
 import { InspectorPanel } from "../panels/inspector/InspectorPanel.tsx";
@@ -45,7 +45,7 @@ import { appPanels, useAppPanels } from "./appPanels.ts";
 import { ExternalChangeBanner } from "./ExternalChangeBanner.tsx";
 import { useHudAutoOpen } from "./hudAutoOpen.ts";
 import { learnNav, useLearnNav } from "./learnStore.ts";
-import { keepOneRightDrawer } from "./rightDrawers.ts";
+import { keepBoxClearOfDrawers, keepOneRightDrawer } from "./rightDrawers.ts";
 import { ServiceDialogs } from "./ServiceDialogs.tsx";
 import { ScriptTrustBanner } from "./ScriptTrustBanner.tsx";
 import { getAppSession } from "./session.ts";
@@ -238,6 +238,7 @@ function Workspace() {
   );
 
   useEffect(() => keepOneRightDrawer(layoutStore, assistantStore, lessonLayout), []);
+  useEffect(() => keepBoxClearOfDrawers(designStore, assistantStore, layoutStore, lessonLayout), []);
 
   // A lesson layout saved before a reload, with no lesson left to show: put the normal layout back.
   useEffect(() => {
