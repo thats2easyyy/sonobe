@@ -8,7 +8,7 @@
  */
 
 import { expect, test, type Page } from "@playwright/test";
-import { collectConsoleProblems, hook, openEditor } from "./helpers.ts";
+import { collectConsoleProblems, hook, openEditor, patchZoom } from "./helpers.ts";
 
 interface Launch {
   t: number;
@@ -144,7 +144,7 @@ test("zoomed far out, a boolean's glow changes at once while only the orb's head
   await recordLaunches(page);
   await openEditor(page);
   await buildTicker(page);
-  for (let i = 0; i < 12 && !(await page.locator('.sb-pe__canvas[data-lod="far"]').count()); i++) await page.locator('[aria-label="Zoom out"]').first().click();
+  for (let i = 0; i < 12 && !(await page.locator('.sb-pe__canvas[data-lod="far"]').count()); i++) await patchZoom(page, "Zoom Out");
   await expect(page.locator('.sb-pe__canvas[data-lod="far"]')).toHaveCount(1);
   await settle(page);
   const value = "cable:orb_not.value";

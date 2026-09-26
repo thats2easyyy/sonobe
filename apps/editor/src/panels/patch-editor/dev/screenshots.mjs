@@ -72,7 +72,7 @@ const SHOTS = [
     name: "patch-editor-01-default",
     viewport: { width: 1100, height: 560 },
     run: async (page) => {
-      // React Flow's credit shows small in the bottom-left corner, away from the zoom controls.
+      // React Flow's credit shows small in the bottom-left corner.
       const pane = await page.locator(".sb-pe .react-flow__pane").boundingBox();
       const attribution = await page.locator(".sb-pe .react-flow__attribution").boundingBox();
       check("01", !!pane && !!attribution && attribution.x < pane.x + pane.width / 3 && attribution.y > pane.y + pane.height - 40 && attribution.height <= 20, "React Flow credit sits small in the bottom-left corner");
@@ -80,7 +80,7 @@ const SHOTS = [
       const toolbar = await page.locator(".sb-pe-topbar .sb-pe-toolbar").boundingBox();
       const rects = await nodeRects(page);
       check("01", !!toolbar && rects.every((r) => !overlaps(r, toolbar)), "the toolbar doesn't cover a node");
-      const zoom = await page.locator(".sb-pe-zoom__value").innerText();
+      const zoom = await page.locator(".sb-pe-zoomchip").innerText();
       check("01", parseInt(zoom, 10) >= 65, `readable first fit (zoom ${zoom})`);
     },
   },

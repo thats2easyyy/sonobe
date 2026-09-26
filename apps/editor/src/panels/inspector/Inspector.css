@@ -110,6 +110,8 @@
 }
 
 .sb-insp-header__actions {
+  --control-h-xs: 24px;
+  --control-h-sm: 24px;
   display: flex;
   grid-area: actions;
   align-items: center;

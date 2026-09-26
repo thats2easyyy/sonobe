@@ -51,7 +51,7 @@ import { useLatest } from "../../ui/lib/hooks.ts";
 import { useContextMenu } from "../../ui/Menu.tsx";
 import { toast } from "../../ui/Toast.tsx";
 import { CableEdgeView, ConnectionLineView } from "./components/CableEdge.tsx";
-import { ArmedHint, EmptyGraph, LiveScopeChip, PatchEditorBreadcrumbs, Toolbar, WatchedCopyChip, ZoomControls } from "./components/Chrome.tsx";
+import { ArmedHint, EmptyGraph, LiveScopeChip, PatchEditorBreadcrumbs, Toolbar, WatchedCopyChip } from "./components/Chrome.tsx";
 import { LinkDragSearch, PatchInfoDialog, PatchPickerDialog, SpliceChooser, type SpliceChoiceRequest } from "./components/Dialogs.tsx";
 import { cableMenu, commentMenu, layerMenu, paneMenu, patchMenu, portMenu, type MenuContext } from "./components/menus.ts";
 import { CommentNodeView, InterfaceNodeView, LayerNodeView, PatchNodeView } from "./components/NodeViews.tsx";
@@ -135,9 +135,10 @@ const SETTLE_FRAMES = 40;
 const MOVE_MS = 600;
 /** How long graph.bounds waits at most for nodes and cables to finish appearing. */
 const APPEAR_WAIT_MS = 1200;
-/** Panes narrower than these drop the zoom steppers (narrow) or shorten the armed hint (compact). */
+/** Panes narrower than COMPACT_PANE shrink the toolbar and shorten the armed hint; under NARROW_PANE a pane also carries data-narrow. */
 const NARROW_PANE = 300;
 const COMPACT_PANE = 480;
+const COMPACT_MINIMAP = { width: 140, height: 100 } as const;
 /** How far the graph must run past a pane edge before that edge fades. */
 const CROP_TOLERANCE = 8;
 const NO_CROP = { right: false, bottom: false };
@@ -456,6 +457,7 @@ function Canvas({ session, componentId, arrivals, showBreadcrumbs, showToolbar, 
   }, [appear, fitted, arrivals]);
 
   const [paneSize, setPaneSize] = useState<"regular" | "compact" | "narrow">("regular");
+  const insertLabel = paneSize === "regular" || (paneSize === "compact" && componentPath.length < 2);
   // Which edges of the pane the graph runs past, so the canvas can fade them (readable zoom keeps big graphs cropped).
   const [crop, setCrop] = useState(NO_CROP);
   const boundsCache = useRef<{ nodes: FlowNode[]; bounds: Rect | undefined }>({ nodes: [], bounds: undefined });
@@ -1133,7 +1135,7 @@ function Canvas({ session, componentId, arrivals, showBreadcrumbs, showToolbar, 
     if (!event.ctrlKey || (event.button !== 0 && event.button !== 2)) return;
     const target = event.target as Element;
     if (!target.closest(".react-flow__pane, .react-flow__edge, .react-flow__node-comment")) return;
-    if (target.closest(".react-flow__node:not(.react-flow__node-comment), .react-flow__resize-control, .sb-pe-title-input, .sb-pe-zoom, .sb-pe-toolbar, .react-flow__minimap")) return;
+    if (target.closest(".react-flow__node:not(.react-flow__node-comment), .react-flow__resize-control, .sb-pe-title-input, .sb-pe-toolbar, .react-flow__minimap")) return;
     event.preventDefault();
     event.stopPropagation();
     event.currentTarget.setPointerCapture?.(event.pointerId);
@@ -1474,6 +1476,7 @@ function Canvas({ session, componentId, arrivals, showBreadcrumbs, showToolbar, 
               pannable
               zoomable
               position="bottom-right"
+              style={paneSize === "regular" ? undefined : COMPACT_MINIMAP}
               nodeBorderRadius={3}
               nodeClassName={(n) => (n.data.kind === "patch" ? `sb-pe-mm sb-pe-mm--${n.data.category}` : `sb-pe-mm sb-pe-mm--${n.data.kind}`)}
               ariaLabel="Minimap"
@@ -1485,10 +1488,9 @@ function Canvas({ session, componentId, arrivals, showBreadcrumbs, showToolbar, 
           {showBreadcrumbs && <PatchEditorBreadcrumbs session={session} className="sb-pe-crumbs--overlay" />}
           <LiveScopeChip />
           <WatchedCopyChip />
-          {showToolbar && toolbarContainer === undefined && <Toolbar />}
+          {showToolbar && toolbarContainer === undefined && <Toolbar roomy={paneSize === "regular"} labelled={insertLabel} />}
         </div>
-        {showToolbar && toolbarContainer && <Toolbar container={toolbarContainer} />}
-        <ZoomControls />
+        {showToolbar && toolbarContainer && <Toolbar container={toolbarContainer} roomy={paneSize === "regular"} labelled={insertLabel} />}
         <ArmedHint />
         {empty && <EmptyGraph />}
         <PortHoverCard model={model} />

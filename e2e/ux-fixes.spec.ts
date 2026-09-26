@@ -1,5 +1,5 @@
 import { expect, test, type Locator } from "@playwright/test";
-import { blurFields, collectConsoleProblems, flowNode, hook, modKey, newIds, openEditor, patchIds, runCommand } from "./helpers.ts";
+import { blurFields, collectConsoleProblems, flowNode, hook, modKey, newIds, openEditor, patchIds, patchZoom, runCommand } from "./helpers.ts";
 
 test.describe("patch editor: align keys, publishing ports, and variables", () => {
   test("⌘[ ⌘] ⇧⌘[ ⇧⌘] align left, right, top, and bottom", async ({ page }) => {
@@ -176,5 +176,67 @@ test.describe("layers panel: the Touch menu under a real mouse", () => {
     await page.mouse.up();
     await expect.poll(async () => newIds(before, await patchIds(page)).length).toBe(1);
     expect(problems).toEqual([]);
+  });
+});
+
+test.describe("polish: patch graph chrome and inspector header", () => {
+  test("zoom lives in the Patches header, and nothing but the opt-in minimap floats over the graph", async ({ page }) => {
+    const problems = collectConsoleProblems(page);
+    await openEditor(page);
+    const header = page.locator(".sb-app-patches .sb-panel__header");
+    const chip = header.getByRole("button", { name: /^Patches zoom/ });
+    await expect(chip).toBeVisible();
+    await expect(page.locator(".sb-pe__canvas").getByRole("button", { name: /^(Zoom (in|out|to fit)|(Show|Hide) minimap)$/i })).toHaveCount(0);
+    const percent = async () => parseInt(((await chip.getAttribute("aria-label")) ?? "").replace(/\D+/g, ""), 10);
+    const start = await percent();
+    await patchZoom(page, "Zoom Out");
+    await expect.poll(percent).toBeLessThan(start);
+    await patchZoom(page, "Zoom to 100%");
+    await expect.poll(percent).toBe(100);
+    await header.getByRole("button", { name: "Zoom to fit" }).click();
+    await expect.poll(percent).toBeLessThan(100);
+    await chip.click();
+    await page.getByRole("menuitemcheckbox", { name: /Show Minimap/ }).click();
+    await expect(page.locator(".sb-pe-minimap")).toBeVisible();
+    expect(problems).toEqual([]);
+  });
+
+  test("the React Flow credit sits under the graph, clear of every node and frame, with the bottom panel open too", async ({ page }) => {
+    await openEditor(page);
+    await expect(page.locator(".sb-pe .react-flow__attribution")).toBeVisible();
+    for (const tab of [null, "Performance"]) {
+      if (tab) await page.getByRole("tab", { name: tab }).click();
+      await expect
+        .poll(() =>
+          page.evaluate(() => {
+            const credit = document.querySelector(".sb-pe .react-flow__attribution")!.getBoundingClientRect();
+            const graph = document.querySelector(".sb-pe .react-flow__renderer")!.getBoundingClientRect();
+            const clipped = (r: DOMRect) => ({ left: Math.max(r.left, graph.left), right: Math.min(r.right, graph.right), top: Math.max(r.top, graph.top), bottom: Math.min(r.bottom, graph.bottom) });
+            return [...document.querySelectorAll(".sb-pe .react-flow__node")].filter((node) => {
+              const r = clipped(node.getBoundingClientRect());
+              return r.left < credit.right && r.right > credit.left && r.top < credit.bottom && r.bottom > credit.top;
+            }).length;
+          }),
+        )
+        .toBe(0);
+    }
+  });
+
+  test("a 400px Patches pane keeps the Patch label and the zoom chip's chevron, and gives up only the fit button", async ({ page }) => {
+    await page.setViewportSize({ width: 1180, height: 760 });
+    await openEditor(page);
+    const header = page.locator(".sb-app-patches .sb-panel__header");
+    await expect(header.getByRole("button", { name: "Insert patch" })).toHaveText("Patch");
+    await expect(header.getByRole("button", { name: "Zoom to fit" })).toBeHidden();
+    await expect(header.getByRole("button", { name: /^Patches zoom/ }).locator("svg")).toBeVisible();
+  });
+
+  test("the item header's actions in the Inspector are 24px tall, for a layer and for a patch", async ({ page }) => {
+    await openEditor(page);
+    const heights = () => page.locator(".sb-insp-header__actions button").evaluateAll((buttons) => buttons.map((b) => Math.round(b.getBoundingClientRect().height)));
+    await hook(page, (s) => s.session.selection.getState().select({ patches: [], comments: [], layers: ["event_title"] }));
+    await expect.poll(heights).toEqual([24, 24]);
+    await hook(page, (s) => s.session.selection.getState().select({ patches: ["zoom_spring"], comments: [], layers: [] }));
+    await expect.poll(heights).toEqual([24, 24]);
   });
 });

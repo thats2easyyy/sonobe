@@ -95,7 +95,13 @@ export function createUiStore(initial: { minimap?: boolean } = {}): UiStore {
     pointerPort: null,
     namingComponent: null,
     loopCopies: 0,
-    set: (partial) => set(partial),
+    // The keyboard card on an input reads "Arm an output first" once nothing is armed, so it goes when the arm ends.
+    set: (partial) =>
+      set((state) => {
+        const armEnded = state.armed !== null && partial.armed === null;
+        const staleCard = state.hoverPort?.keyboard === true && state.hoverPort.side === "in";
+        return armEnded && staleCard && !("hoverPort" in partial) ? { ...partial, hoverPort: null } : partial;
+      }),
   }));
 }
 

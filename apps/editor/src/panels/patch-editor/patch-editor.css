@@ -1822,7 +1822,7 @@ textarea.sb-pe-title-input {
 }
 
 .sb-pe-crumbs button {
-  min-width: 7ch;
+  min-width: 5ch;
   max-width: 14ch;
   height: 24px;
   padding: 0 var(--space-3);
@@ -1900,23 +1900,19 @@ textarea.sb-pe-title-input {
   backdrop-filter: blur(8px);
 }
 
-.sb-pe-toolbar,
-.sb-pe-zoom {
+.sb-pe-toolbar {
   z-index: 5;
   display: flex;
   align-items: center;
   gap: 2px;
+  flex: none;
+  margin-left: auto;
   padding: 2px;
   border-radius: var(--radius-md);
   background: var(--bg-elevated);
   box-shadow:
     0 0 0 1px var(--border-subtle),
     var(--shadow-sm);
-}
-
-.sb-pe-toolbar {
-  flex: none;
-  margin-left: auto;
 }
 
 /* The labelled Insert patch button keeps the icon buttons' 24px target and reads at the interactive-label size. */
@@ -1932,64 +1928,66 @@ textarea.sb-pe-title-input {
 
 /* Docked in the Patches panel header: plain header buttons. */
 .sb-pe-toolbar[data-docked] {
-  gap: 2px;
   margin-left: 0;
   padding: 0;
   background: transparent;
   box-shadow: none;
 }
 
-.sb-pe-zoom {
-  position: absolute;
-  right: var(--space-5);
-  bottom: calc(var(--space-5) + var(--sb-pe-credit-h));
-}
-
-.sb-pe-zoom__divider {
-  width: 1px;
-  height: 14px;
-  margin: 0 2px;
-  background: var(--border-default);
-}
-
-.sb-pe-zoom__value {
-  position: relative;
-  min-width: 40px;
+/* The zoom menu's trigger, in the style of the Canvas and Viewer zoom chips. */
+.sb-pe-zoomchip {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 52px;
   height: var(--control-h-sm);
-  padding: 0;
+  padding: 0 var(--space-3) 0 var(--space-4);
   border: 0;
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius-md);
   background: transparent;
   color: var(--text-secondary);
-  font-size: var(--font-size-xs);
+  font: inherit;
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-medium);
   cursor: pointer;
+  transition:
+    background-color var(--duration-fast) var(--ease-out),
+    color var(--duration-fast) var(--ease-out);
 }
 
-.sb-pe-zoom__value::after {
-  content: "";
-  position: absolute;
-  inset: -1px 0;
+.sb-pe-zoomchip > span {
+  flex: 1 1 auto;
+  text-align: right;
 }
 
-.sb-pe__canvas[data-narrow] .sb-pe-zoom__optional {
-  display: none;
+@media (hover: hover) {
+  .sb-pe-zoomchip:hover {
+    background: var(--bg-hover);
+    color: var(--text-primary);
+  }
 }
 
-.sb-pe-zoom__value:hover {
-  background: var(--bg-hover);
+.sb-pe-zoomchip[aria-expanded="true"] {
+  background: var(--bg-pressed);
   color: var(--text-primary);
+}
+
+.sb-pe-zoomchip:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 1px;
 }
 
 .sb-pe .react-flow__minimap.sb-pe-minimap {
   right: var(--space-5);
-  bottom: calc(var(--space-5) + 30px);
+  bottom: var(--space-5);
   margin: 0;
   overflow: hidden;
   border-radius: var(--radius-lg);
   background: var(--bg-elevated);
   box-shadow:
     0 0 0 1px var(--border-subtle),
-    var(--shadow-md);
+    var(--shadow-popover);
 }
 
 .sb-pe .react-flow__minimap-mask {
@@ -2030,7 +2028,7 @@ textarea.sb-pe-title-input {
 
 .sb-pe-hint {
   position: absolute;
-  bottom: calc(var(--space-5) + 30px + var(--sb-pe-credit-h));
+  bottom: calc(var(--space-5) + var(--sb-pe-credit-h));
   left: 50%;
   z-index: 5;
   display: flex;

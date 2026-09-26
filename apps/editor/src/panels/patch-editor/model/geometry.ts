@@ -62,7 +62,7 @@ export const FAR_ZOOM = 0.35;
 export const isFarZoom = (zoom: number): boolean => zoom < FAR_ZOOM;
 
 export interface ReadableViewportOptions {
-  /** Screen-space room kept around the graph (floating toolbar above, zoom controls below). */
+  /** Screen-space room kept around the graph (the top bar above). */
   padding?: { top: number; right: number; bottom: number; left: number };
   /** Never zoom in past this. Default 1. */
   maxZoom?: number;
@@ -75,9 +75,9 @@ export interface ReadableViewportOptions {
   readableZoom?: number;
 }
 
-const DEFAULT_PADDING = { top: 52, right: 40, bottom: 52, left: 36 } as const;
+const DEFAULT_PADDING = { top: 52, right: 40, bottom: 28, left: 36 } as const;
 
-/** React Flow fitView padding with the same room as a readable fit: the top bar above, zoom controls below. */
+/** React Flow fitView padding with the same room as a readable fit: the top bar above. */
 export const FIT_VIEW_PADDING = { top: `${DEFAULT_PADDING.top}px`, right: `${DEFAULT_PADDING.right}px`, bottom: `${DEFAULT_PADDING.bottom}px`, left: `${DEFAULT_PADDING.left}px` } as const;
 
 /** A viewport that shows `bounds` in a `width` × `height` canvas: fit and centered, or readable from the top-left. */

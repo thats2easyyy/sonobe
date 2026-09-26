@@ -1,14 +1,14 @@
-/** Patch editor chrome: toolbar, zoom and minimap controls, live scope and watched copy, hints, empty state. */
+/** Patch editor chrome: toolbar with the zoom menu, live scope and watched copy, hints, empty state. */
 
-import { useReactFlow, useViewport } from "@xyflow/react";
-import { ChevronDown, ChevronLeft, ChevronRight, Map as MapIcon, MessageSquarePlus, Minus, Plus, Scan, Workflow, X } from "lucide-react";
-import { useLayoutEffect, useRef, useState, type FocusEvent, type KeyboardEvent } from "react";
+import { useReactFlow, useStore as useFlowStore } from "@xyflow/react";
+import { ChevronDown, ChevronLeft, ChevronRight, MessageSquarePlus, Plus, Scan, Workflow, X } from "lucide-react";
+import { useRef, useState, type ComponentPropsWithRef, type FocusEvent, type KeyboardEvent } from "react";
 import { createPortal } from "react-dom";
 import { Button } from "../../../ui/Button.tsx";
 import { EmptyState } from "../../../ui/EmptyState.tsx";
 import { IconButton } from "../../../ui/IconButton.tsx";
 import { Kbd } from "../../../ui/Kbd.tsx";
-import { useContextMenu, type MenuEntry } from "../../../ui/Menu.tsx";
+import { Menu, useContextMenu, type MenuEntry } from "../../../ui/Menu.tsx";
 import { PortGlyph } from "../../../ui/PortGlyph.tsx";
 import { Tooltip } from "../../../ui/Tooltip.tsx";
 import { detectPlatform, formatShortcutLabel } from "../../../ui/commands/shortcutManager.ts";
@@ -23,10 +23,11 @@ export { PatchEditorBreadcrumbs, type PatchEditorBreadcrumbsProps } from "./Brea
 export interface ToolbarProps {
   /** Render into this element (a panel header) instead of over the canvas. */
   container?: Element | null;
+  /** False in a pane under 480px: the fit button steps aside for the zoom menu. */
+  roomy?: boolean;
+  /** False when the header is short of room (a pane under 300px, or a folded component path in one under 480px): Insert patch drops its "Patch" label. */
+  labelled?: boolean;
 }
-
-/** Below this header width the Insert patch button drops its "Patch" label. */
-const LABELLED_INSERT_MIN = 300;
 
 /** One Tab stop for a toolbar: arrows, Home and End move between its buttons. */
 function useRovingToolbar() {
@@ -53,22 +54,52 @@ function useRovingToolbar() {
   };
 }
 
-/** Tidy up, comment, insert. Docked in a panel header when `container` is given, else floating in the canvas's top bar. */
-export function Toolbar({ container }: ToolbarProps) {
+/** The zoom menu, with a button for the most used step, fitting the graph. Zoom in, out, 100% and the minimap sit in the menu. */
+function ZoomTools({ roomy, tabIndex }: { roomy: boolean; tabIndex: (index: number) => number }) {
+  const flow = useReactFlow();
+  const { ui, markViewportManual } = usePatchEditor();
+  const minimap = useUi((s) => s.minimap);
+  const percent = useFlowStore((s) => Math.round(s.transform[2] * 100));
+  const step = (move: () => Promise<unknown>) => () => {
+    markViewportManual();
+    void move();
+  };
+  const fit = () => void flow.fitView({ duration: 200, padding: FIT_VIEW_PADDING });
+  const entries: MenuEntry[] = [
+    { id: "zoomIn", label: "Zoom In", shortcut: "Mod+=", onSelect: step(() => flow.zoomIn({ duration: 120 })) },
+    { id: "zoomOut", label: "Zoom Out", shortcut: "Mod+-", onSelect: step(() => flow.zoomOut({ duration: 120 })) },
+    { id: "zoomReset", label: "Zoom to 100%", shortcut: "Mod+0", onSelect: step(() => flow.zoomTo(1, { duration: 160 })) },
+    { id: "zoomFit", label: "Zoom to Fit", shortcut: "Shift+1", onSelect: fit },
+    { type: "separator" },
+    { id: "minimap", label: "Show Minimap", shortcut: "Shift+M", checked: minimap, onSelect: () => ui.getState().set({ minimap: !minimap }) },
+  ];
+  return (
+    <>
+      {roomy && <IconButton size="sm" icon={<Scan size={14} />} label="Zoom to fit" shortcut="Shift+1" tabIndex={tabIndex(3)} onClick={fit} />}
+      <Menu aria-label="Patches zoom" placement="bottom-end" entries={entries}>
+        <ZoomChip percent={percent} tabIndex={tabIndex(roomy ? 4 : 3)} />
+      </Menu>
+    </>
+  );
+}
+
+/** The menu trigger; its tooltip steps aside while the menu is open. */
+function ZoomChip({ percent, ...rest }: { percent: number } & ComponentPropsWithRef<"button">) {
+  return (
+    <Tooltip content="Zoom" disabled={rest["aria-expanded"] === true}>
+      <button type="button" className="sb-pe-zoomchip" aria-label={`Patches zoom: ${percent}%`} {...rest}>
+        <span className="sb-tabular">{percent}%</span>
+        <ChevronDown size={12} strokeWidth={2} aria-hidden />
+      </button>
+    </Tooltip>
+  );
+}
+
+/** Tidy up, comment, insert and the zoom menu. Docked in a panel header when `container` is given, else floating in the canvas's top bar. */
+export function Toolbar({ container, roomy = true, labelled = true }: ToolbarProps) {
   const { actions } = usePatchEditor();
   const docked = container !== undefined && container !== null;
   const roving = useRovingToolbar();
-  const [labelled, setLabelled] = useState(true);
-  useLayoutEffect(() => {
-    const host = container?.closest("header") ?? container ?? roving.ref.current?.parentElement;
-    if (!host) return;
-    const measure = () => setLabelled(host.clientWidth >= LABELLED_INSERT_MIN);
-    measure();
-    if (typeof ResizeObserver === "undefined") return;
-    const observer = new ResizeObserver(measure);
-    observer.observe(host);
-    return () => observer.disconnect();
-  }, [container, roving.ref]);
   const bar = (
     <div ref={roving.ref} className="sb-pe-toolbar" data-docked={docked || undefined} role="toolbar" aria-label="Patch editor tools" onFocus={roving.onFocus} onKeyDown={roving.onKeyDown}>
       <IconButton size="sm" icon={<Workflow size={14} />} label="Tidy up" shortcut="Ctrl+T" tabIndex={roving.tabIndex(0)} onClick={() => void actions.tidyUp()} />
@@ -82,61 +113,10 @@ export function Toolbar({ container }: ToolbarProps) {
       ) : (
         <IconButton size="sm" icon={<Plus size={14} />} label="Insert patch" shortcut="Alt+Enter" tabIndex={roving.tabIndex(2)} onClick={() => actions.openPicker()} />
       )}
+      <ZoomTools roomy={roomy} tabIndex={roving.tabIndex} />
     </div>
   );
   return docked ? createPortal(bar, container) : bar;
-}
-
-export function ZoomControls() {
-  const flow = useReactFlow();
-  const { zoom } = useViewport();
-  const { ui, markViewportManual } = usePatchEditor();
-  const minimap = useUi((s) => s.minimap);
-  const percent = Math.round(zoom * 100);
-  return (
-    <div className="sb-pe-zoom" role="group" aria-label="Zoom">
-      <IconButton className="sb-pe-zoom__optional" size="sm" icon={<MapIcon size={14} />} label={minimap ? "Hide minimap" : "Show minimap"} shortcut="Shift+M" active={minimap} onClick={() => ui.getState().set({ minimap: !minimap })} tooltipPlacement="top" />
-      <span className="sb-pe-zoom__divider sb-pe-zoom__optional" aria-hidden />
-      <IconButton
-        className="sb-pe-zoom__optional"
-        size="sm"
-        icon={<Minus size={14} />}
-        label="Zoom out"
-        shortcut="Mod+-"
-        onClick={() => {
-          markViewportManual();
-          void flow.zoomOut({ duration: 120 });
-        }}
-        tooltipPlacement="top"
-      />
-      <Tooltip content="Zoom to 100%" shortcut="Mod+0" placement="top">
-        <button
-          type="button"
-          className="sb-pe-zoom__value sb-tabular"
-          onClick={() => {
-            markViewportManual();
-            void flow.zoomTo(1, { duration: 160 });
-          }}
-          aria-label={`${percent}%, zoom to 100%`}
-        >
-          {percent}%
-        </button>
-      </Tooltip>
-      <IconButton
-        className="sb-pe-zoom__optional"
-        size="sm"
-        icon={<Plus size={14} />}
-        label="Zoom in"
-        shortcut="Mod+="
-        onClick={() => {
-          markViewportManual();
-          void flow.zoomIn({ duration: 120 });
-        }}
-        tooltipPlacement="top"
-      />
-      <IconButton size="sm" icon={<Scan size={14} />} label="Zoom to fit" shortcut="Shift+1" onClick={() => void flow.fitView({ duration: 200, padding: FIT_VIEW_PADDING })} tooltipPlacement="top" />
-    </div>
-  );
 }
 
 /** Copies listed by name in the live scope menu; the watched copy chip steps through more. */

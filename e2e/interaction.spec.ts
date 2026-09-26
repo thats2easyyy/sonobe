@@ -113,13 +113,17 @@ test.describe("patch editor chrome and graph states", () => {
     const tidy = tools.getByRole("button", { name: "Tidy up" });
     const comment = tools.getByRole("button", { name: "Add comment" });
     const insert = tools.getByRole("button", { name: "Insert patch" });
+    const zoom = tools.getByRole("button", { name: /^Patches zoom/ });
     await tidy.focus();
     await page.keyboard.press("ArrowRight");
     await expect(comment).toBeFocused();
     await page.keyboard.press("End");
-    await expect(insert).toBeFocused();
+    await expect(zoom).toBeFocused();
     await page.keyboard.press("ArrowRight");
     await expect(tidy).toBeFocused();
+    await page.keyboard.press("ArrowLeft");
+    await expect(zoom).toBeFocused();
+    await page.keyboard.press("ArrowLeft");
     await page.keyboard.press("ArrowLeft");
     await expect(insert).toBeFocused();
     await expect(tidy).toHaveAttribute("tabindex", "-1");
@@ -194,9 +198,29 @@ test.describe("patch editor chrome and graph states", () => {
     await page.keyboard.press("Enter");
     await expect.poll(() => storedInput(page, "heart_scale.end")).toBe("zoom_spring.output");
     await expect(hint).toBeHidden();
+    await expect(page.getByRole("tooltip")).toBeHidden();
 
     await page.keyboard.press("Escape");
     await expect(flowNode(page, "heart_scale")).toBeFocused();
+  });
+
+  test("the keyboard card on an input goes when the armed output is cancelled", async ({ page }) => {
+    await openEditor(page);
+    await runCommand(page, "Patches Only");
+    await fitPatches(page);
+    const focused = page.locator(":focus");
+    await flowNode(page, "zoom_spring").focus();
+    await page.keyboard.press("ArrowRight");
+    await page.keyboard.press("ArrowRight");
+    await page.keyboard.press("Enter");
+    await flowNode(page, "heart_scale").focus();
+    await page.keyboard.press("ArrowRight");
+    await page.keyboard.press("ArrowDown");
+    await expect(focused).toHaveAttribute("aria-label", /Enter connects Zoom Spring/);
+    await expect(page.getByRole("tooltip")).toContainText("Enter connects Zoom Spring");
+    await page.keyboard.press("Escape");
+    await expect(page.getByRole("tooltip")).toBeHidden();
+    await expect(page.getByRole("status").filter({ hasText: "Select an input to connect" })).toBeHidden();
   });
 
   test("a cable reached with the keyboard is named by its ends and shows it has focus", async ({ page }) => {
@@ -303,7 +327,8 @@ test.describe("patch editor chrome and graph states", () => {
     await expect.poll(async () => (await canvas.boundingBox())!.width).toBeLessThan(300);
     await expect(canvas).toHaveAttribute("data-narrow", "true");
     await expect(canvas).toHaveAttribute("data-compact", "true");
-    await expect(page.getByRole("button", { name: "Zoom out" })).toBeHidden();
+    await expect(page.getByRole("button", { name: "Zoom to fit" })).toBeHidden();
+    await expect(page.getByRole("button", { name: /^Patches zoom/ })).toBeVisible();
     await page.reload();
     await expect(canvas).toHaveAttribute("data-narrow", "true");
   });

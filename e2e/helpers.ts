@@ -238,6 +238,12 @@ export async function fitPatches(page: Page): Promise<void> {
   await page.waitForTimeout(350);
 }
 
+/** Choose a step from the Patches header's zoom menu, such as "Zoom Out" or "Zoom to 100%". */
+export async function patchZoom(page: Page, item: string): Promise<void> {
+  await page.getByRole("button", { name: /^Patches zoom/ }).click();
+  await page.getByRole("menuitem", { name: item }).click();
+}
+
 /** Drag a cable from an output onto empty canvas and pick a patch from link-drag search. */
 export async function connectNewPatch(page: Page, fromNode: string, fromPort: string, query: string, type: string): Promise<string> {
   await fitPatches(page);

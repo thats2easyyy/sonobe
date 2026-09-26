@@ -10,7 +10,7 @@
  *   </Panel>
  *
  * Props (all optional): `session` (default: the EditorProvider's), `showBreadcrumbs` (crumbs in the
- * canvas's top bar, default true), `showToolbar` (tidy up / comment / insert, default true),
+ * canvas's top bar, default true), `showToolbar` (tidy up / comment / insert / zoom, default true),
  * `toolbarContainer` (dock the toolbar in that element, such as a panel header, instead of the top
  * bar; while it's null the toolbar isn't shown), `defaultMinimap` (default false), `commands`
  * (register "patchEditor.*" commands and single-key inserts, default true), `className`, `style`,
