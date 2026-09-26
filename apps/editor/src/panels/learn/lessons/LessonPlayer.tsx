@@ -1,19 +1,22 @@
-import { ArrowRight, BookOpen, Check, Crosshair, FileQuestionMark, Lightbulb, LogOut, PartyPopper, RotateCcw } from "lucide-react";
-import { useEffect, useId, useState } from "react";
-import { useDocument, useEditorSession } from "../../../state/EditorProvider.tsx";
+import { ArrowRight, BookOpen, Check, Crosshair, FileQuestionMark, Lightbulb, LogOut, RotateCcw } from "lucide-react";
+import { useEffect, useId, useRef, useState } from "react";
+import { useDocument } from "../../../state/EditorProvider.tsx";
 import { Button } from "../../../ui/Button.tsx";
-import { toast } from "../../../ui/Toast.tsx";
-import { nextLesson } from "./catalog.ts";
+import { Tooltip } from "../../../ui/Tooltip.tsx";
+import { LESSONS, nextLesson } from "./catalog.ts";
 import { InlineText } from "./InlineText.tsx";
 import { lessonLayout } from "./lessonLayout.ts";
 import { lessonStore, useLessons } from "./lessonStore.ts";
 import { findLessonTarget, LessonSpotlight } from "./LessonSpotlight.tsx";
-import { isLessonDocumentOpen, loadLessonStarter } from "./runner.ts";
+import { isLessonDocumentOpen } from "./runner.ts";
 import type { Lesson } from "./types.ts";
 import { useLessonRunner } from "./useLessonRunner.ts";
+import { useStartLesson } from "./useStartLesson.ts";
 
 /** A finished step lingers a moment so the check mark registers before the next step opens. */
 export const ADVANCE_DELAY_MS = 900;
+
+const EXIT_HINT = "Progress on this lesson isn't kept";
 
 export interface LessonPlayerProps {
   lesson: Lesson;
@@ -24,20 +27,17 @@ export interface LessonPlayerProps {
   onOpenGuide?: (slug: string) => void;
 }
 
-const LEVELS = ["Level 0", "Level 1", "Level 2", "Level 3", "Level 4"];
-
 /**
  * One lesson: an intro with Start, then the steps with a live check and spotlight, then a celebration.
  * Progress resumes only while the lesson's practice prototype is open; otherwise it offers a restart.
  * While the lesson is on screen the shell uses the lesson layout (see lessonLayout.ts).
  */
 export function LessonPlayer({ lesson, onBack, onOpenLesson, onOpenGuide }: LessonPlayerProps) {
-  const session = useEditorSession();
   const titleId = useId();
+  const titleRef = useRef<HTMLHeadingElement>(null);
   const active = useLessons((s) => (s.active?.id === lesson.id ? s.active : null));
   const completed = useLessons((s) => s.completed[lesson.id] !== undefined);
   const documentOpen = useDocument((s) => isLessonDocumentOpen(lesson, s.doc));
-  const [busy, setBusy] = useState(false);
   const [spotlightKey, setSpotlightKey] = useState(0);
   const stepCount = lesson.steps.length;
   const stepIndex = active ? Math.min(active.step, stepCount) : 0;
@@ -47,6 +47,11 @@ export function LessonPlayer({ lesson, onBack, onOpenLesson, onOpenGuide }: Less
   const finished = inLesson && stepIndex >= stepCount;
   const runner = useLessonRunner(lesson, stepIndex, running);
   const next = nextLesson(lesson.id);
+  const focusTitle = () => titleRef.current?.focus({ preventScroll: true });
+  const { busy, start } = useStartLesson(lesson, focusTitle);
+
+  // The view underneath the focused button changes, so keyboard focus goes to the lesson heading.
+  useEffect(focusTitle, []);
 
   useEffect(() => {
     if (!running || !runner.done || runner.step !== stepIndex) return;
@@ -70,16 +75,13 @@ export function LessonPlayer({ lesson, onBack, onOpenLesson, onOpenGuide }: Less
     else if (!runner.done) lessonLayout.showPanelsFor(runner.target);
   }, [running, runner.done, runner.target]);
 
-  const start = async () => {
-    setBusy(true);
-    try {
-      if (await loadLessonStarter(session, lesson)) lessonStore.getState().start(lesson.id);
-    } catch (err) {
-      toast.error("Couldn't start the lesson", { description: err instanceof Error ? err.message : String(err) });
-    } finally {
-      setBusy(false);
-    }
-  };
+  // A window resized mid-step may need Layers folded or back.
+  useEffect(() => {
+    if (!running || runner.done) return;
+    const refit = () => lessonLayout.showPanelsFor(runner.target);
+    window.addEventListener("resize", refit);
+    return () => window.removeEventListener("resize", refit);
+  }, [running, runner.done, runner.target]);
 
   const exit = () => {
     lessonStore.getState().exit();
@@ -97,35 +99,29 @@ export function LessonPlayer({ lesson, onBack, onOpenLesson, onOpenGuide }: Less
   return (
     <div className="sb-lesson" data-lesson={lesson.id} aria-labelledby={titleId}>
       <header className="sb-lesson__intro">
-        <div className="sb-learnx__eyebrow">
-          Lesson {lesson.number} · {LEVELS[lesson.level]} · about {lesson.minutes} min
+        <div className="sb-lesson__eyebrow sb-tabular">
+          Lesson {lesson.number} of {LESSONS.length} · about {lesson.minutes} min{running ? ` · Step ${stepIndex + 1} of ${stepCount}` : ""}
         </div>
-        <h3 className="sb-lesson__title" id={titleId}>
+        <h3 className="sb-lesson__title" id={titleId} ref={titleRef} tabIndex={-1}>
           {lesson.title}
         </h3>
         <p className="sb-lesson__summary">{lesson.summary}</p>
-        {inLesson && (
-          <div className="sb-lesson__progress" role="progressbar" aria-label="Lesson progress" aria-valuemin={0} aria-valuemax={stepCount} aria-valuenow={stepIndex} aria-valuetext={finished ? "Finished" : `Step ${stepIndex + 1} of ${stepCount}`}>
-            <span className="sb-lesson__progress-fill" style={{ width: `${(stepIndex / stepCount) * 100}%` }} />
-          </div>
-        )}
       </header>
 
       {!active && (
         <section className="sb-lesson__start">
-          <h4 className="sb-learnx__section-title">You'll be able to</h4>
+          <h4 className="sb-lesson__heading">You'll be able to</h4>
           <ul className="sb-lesson__outcomes">
             {lesson.outcomes.map((outcome) => (
               <li key={outcome}>
-                <Check size={12} strokeWidth={2.5} aria-hidden />
                 {outcome}
               </li>
             ))}
           </ul>
+          <p className="sb-lesson__note">{lesson.starter ? "Starting opens a small practice prototype. If you have unsaved changes, Sonobe asks first." : "This lesson works with the prototype you have open."}</p>
           <Button variant="primary" trailingIcon={<ArrowRight size={13} />} loading={busy} onClick={() => void start()}>
             {completed ? "Do it again" : "Start lesson"}
           </Button>
-          <p className="sb-lesson__note">{lesson.starter ? "Starting opens a small practice prototype. If you have unsaved changes, Sonobe asks first." : "This lesson works with the prototype you have open."}</p>
         </section>
       )}
 
@@ -139,17 +135,47 @@ export function LessonPlayer({ lesson, onBack, onOpenLesson, onOpenGuide }: Less
             This lesson checks its own practice prototype, and a different one is open now. Restart the lesson to get a fresh copy. If the open prototype has unsaved changes, Sonobe asks first.
           </p>
           <div className="sb-lesson__actions">
-            <Button size="sm" variant="primary" icon={<RotateCcw size={12} />} loading={busy} onClick={() => void start()}>
+            <Button variant="primary" icon={<RotateCcw size={13} />} loading={busy} onClick={() => void start()}>
               Restart lesson
             </Button>
-            <Button size="sm" variant="ghost" icon={<LogOut size={12} />} onClick={exit}>
-              Exit lesson
-            </Button>
+            <Tooltip content={EXIT_HINT}>
+              <Button variant="ghost" icon={<LogOut size={13} />} onClick={exit}>
+                Exit lesson
+              </Button>
+            </Tooltip>
           </div>
         </section>
       )}
 
-      {running && (
+      {finished && (
+        <section className="sb-lesson__celebrate" role="status" aria-live="polite">
+          <div className="sb-lesson__celebrate-row">
+            <Check size={14} strokeWidth={2.25} aria-hidden />
+            <div>
+              <h4 className="sb-lesson__celebrate-title">{lesson.celebrate.title}</h4>
+              <p className="sb-lesson__celebrate-text">{lesson.celebrate.body}</p>
+            </div>
+          </div>
+          <div className="sb-lesson__celebrate-actions">
+            {next ? (
+              <Button variant="primary" trailingIcon={<ArrowRight size={13} />} onClick={() => onOpenLesson(next.id)}>
+                Next: {next.title}
+              </Button>
+            ) : (
+              <Button variant="primary" onClick={exit}>
+                Back to lessons
+              </Button>
+            )}
+            {lesson.guide && onOpenGuide && (
+              <Button className="sb-lesson__guide" variant="ghost" icon={<BookOpen size={13} />} onClick={() => onOpenGuide(lesson.guide!)}>
+                Read the guide
+              </Button>
+            )}
+          </div>
+        </section>
+      )}
+
+      {(running || finished) && (
         <ol className="sb-lesson__steps">
           {lesson.steps.map((step, index) => {
             const state = index < stepIndex ? "done" : index === stepIndex ? (runner.done ? "passed" : "current") : "upcoming";
@@ -188,12 +214,12 @@ export function LessonPlayer({ lesson, onBack, onOpenLesson, onOpenGuide }: Less
                       {!runner.done && (runner.target || current.manual) && (
                         <div className="sb-lesson__actions">
                           {runner.target && (
-                            <Button size="sm" variant="ghost" icon={<Crosshair size={12} />} onClick={showMe}>
+                            <Button variant="secondary" icon={<Crosshair size={13} />} onClick={showMe}>
                               Show me
                             </Button>
                           )}
                           {current.manual && (
-                            <Button size="sm" variant="secondary" onClick={() => lessonStore.getState().advance(stepCount)}>
+                            <Button variant="secondary" onClick={() => lessonStore.getState().advance(stepCount)}>
                               {current.manual}
                             </Button>
                           )}
@@ -208,48 +234,19 @@ export function LessonPlayer({ lesson, onBack, onOpenLesson, onOpenGuide }: Less
         </ol>
       )}
 
-      {finished && (
-        <section className="sb-lesson__celebrate" role="status" aria-live="polite">
-          <div className="sb-lesson__burst" aria-hidden>
-            {Array.from({ length: 12 }, (_, i) => (
-              <span key={i} style={{ "--i": i } as React.CSSProperties} />
-            ))}
-          </div>
-          <span className="sb-lesson__celebrate-icon" aria-hidden>
-            <PartyPopper size={20} strokeWidth={1.75} />
-          </span>
-          <h4 className="sb-lesson__celebrate-title">{lesson.celebrate.title}</h4>
-          <p className="sb-lesson__celebrate-text">{lesson.celebrate.body}</p>
-          <div className="sb-lesson__celebrate-actions">
-            {next ? (
-              <Button variant="primary" trailingIcon={<ArrowRight size={13} />} onClick={() => onOpenLesson(next.id)}>
-                Next: {next.title}
-              </Button>
-            ) : (
-              <Button variant="primary" onClick={exit}>
-                Back to lessons
-              </Button>
-            )}
-            {lesson.guide && onOpenGuide && (
-              <Button variant="ghost" icon={<BookOpen size={13} />} onClick={() => onOpenGuide(lesson.guide!)}>
-                Read the guide
-              </Button>
-            )}
-          </div>
-        </section>
-      )}
-
       {inLesson && (
         <footer className="sb-lesson__footer">
-          {lesson.starter && (
-            <Button size="sm" variant="ghost" icon={<RotateCcw size={12} />} loading={busy} onClick={() => void start()}>
+          {lesson.starter && !finished && (
+            <Button variant="ghost" icon={<RotateCcw size={13} />} loading={busy} onClick={() => void start()}>
               Start over
             </Button>
           )}
           <span className="sb-lesson__spacer" />
-          <Button size="sm" variant="ghost" icon={<LogOut size={12} />} onClick={exit}>
-            {finished ? "Close lesson" : "Exit lesson"}
-          </Button>
+          <Tooltip content={EXIT_HINT} disabled={finished}>
+            <Button variant="ghost" icon={<LogOut size={13} />} onClick={exit}>
+              {finished ? "Close lesson" : "Exit lesson"}
+            </Button>
+          </Tooltip>
         </footer>
       )}
 

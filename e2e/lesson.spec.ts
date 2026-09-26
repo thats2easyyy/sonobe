@@ -101,6 +101,79 @@ test.describe("interactive lessons", () => {
     expect(warnings).toEqual([]);
   });
 
+  test("lesson 1 fits the 1024x680 minimum window: the patch editor keeps room beside the drawer", async ({ page }) => {
+    await page.setViewportSize({ width: 1024, height: 680 });
+    const problems = collectConsoleProblems(page);
+    await openEditor(page);
+    const inspector = page.locator("#sb-inspector");
+    const learn = page.getByRole("complementary", { name: "Learn" });
+    const step = (title: string) => learn.locator('.sb-lesson__step[aria-current="step"]').filter({ hasText: title });
+    // The patch editor's room, measured against the docked drawer's left edge: nothing of it hides under the drawer.
+    const editorRoom = async () => {
+      const editor = await page.locator(".sb-pe").boundingBox();
+      const drawer = await learn.boundingBox();
+      if (!editor || !drawer) throw new Error("The patch editor or the drawer isn't showing");
+      return Math.min(editor.x + editor.width, drawer.x) - editor.x;
+    };
+
+    await page.getByRole("button", { name: "Learn", exact: true }).click();
+    await learn.locator(".sb-lessoncard").filter({ hasText: "Your first prototype" }).click();
+    await learn.getByRole("button", { name: "Start lesson" }).click();
+    await expect(step("Make the photo listen for taps")).toBeVisible();
+    expect(await editorRoom()).toBeGreaterThanOrEqual(320);
+    await expect(flowNode(page, "photo_scale")).toBeInViewport({ ratio: 1 });
+    await expect(page.locator("[data-lesson-spotlight]")).toBeVisible();
+
+    // The Layers row's action button overlays the name, so hover its corner.
+    const patchIds = () => hook(page, (s) => Object.keys(s.doc().components[s.doc().project.root]!.patches));
+    const before = await patchIds();
+    await page.locator("#sb-layers").getByText("Photo", { exact: true }).first().hover({ position: { x: 4, y: 4 } });
+    await page.getByRole("button", { name: "Touch: add an interaction to Photo" }).click();
+    await page.getByRole("menuitem", { name: /^Tap/ }).click();
+    await expect.poll(async () => (await patchIds()).length).toBe(before.length + 1);
+    const interaction = (await patchIds()).find((id) => !before.includes(id))!;
+    const toggle = await connectNewPatch(page, interaction, "tap", "Switch", "switch");
+    const spring = await connectNewPatch(page, toggle, "on", "Pop Animation", "popAnimation");
+    await fitPatches(page);
+    await dragCable(page, handle(page, spring, "out:output"), handle(page, "photo_scale", "in:progress"));
+    await expect(step("Choose how big it grows")).toBeVisible();
+
+    // The Inspector step folds Layers away, so the graph keeps its width beside the Inspector.
+    await flowNode(page, "photo_scale").click({ position: { x: 48, y: 10 } });
+    await expect(inspector).toBeVisible();
+    await expect(page.locator("#sb-layers")).toHaveCount(0);
+    expect(await editorRoom()).toBeGreaterThanOrEqual(320);
+    await expect(flowNode(page, "photo_scale")).toBeInViewport({ ratio: 1 });
+
+    // Resizing mid-step re-fits: a wide window keeps Layers, the narrow one folds it again.
+    await page.setViewportSize({ width: 1680, height: 1050 });
+    await expect(page.locator("#sb-layers")).toBeVisible();
+    await page.setViewportSize({ width: 1024, height: 680 });
+    await expect(page.locator("#sb-layers")).toHaveCount(0);
+    const end = inspector.getByRole("spinbutton", { name: "End", exact: true });
+    await end.click();
+    await end.fill("1.2");
+    await end.press("Enter");
+    await blurFields(page);
+
+    // The last step points at the Viewer, which is a rail at this width: the ring is on the rail, and opening it works.
+    await expect(step("Tap the photo")).toBeVisible();
+    const rail = page.locator('.sb-rail[data-panel="viewer"]');
+    await expect(rail).toBeVisible();
+    await expect(page.locator("[data-lesson-spotlight]")).toBeVisible();
+    await rail.getByRole("button").first().click();
+    const photo = await centerOf(page.locator('#sb-viewer [data-layer="photo"]').first());
+    await page.mouse.click(photo.x, photo.y);
+    await expect(learn.getByRole("heading", { name: "You built a prototype" })).toBeVisible();
+
+    // Closing the lesson puts Layers, the Inspector and the layout from before it back.
+    await learn.getByRole("button", { name: "Close lesson" }).click();
+    await expect(page.locator("#sb-layers")).toBeVisible();
+    await expect(inspector).toBeVisible();
+    expect(await page.evaluate(() => localStorage.getItem("sonobe.lessons.layout.v1"))).toBeNull();
+    expect(problems).toEqual([]);
+  });
+
   test("resumes only on the lesson's practice prototype, and offers a restart otherwise", async ({ page }) => {
     const problems = collectConsoleProblems(page);
     await openEditor(page);
@@ -149,6 +222,39 @@ test.describe("interactive lessons", () => {
     await learn.getByRole("button", { name: "Exit lesson" }).click();
     await expect(inspector).toBeVisible();
     await expect(main).not.toHaveAttribute("data-drawer-docked");
+    expect(problems).toEqual([]);
+  });
+
+  test("the lessons home only offers Continue while the practice prototype is open", async ({ page }) => {
+    const problems = collectConsoleProblems(page);
+    await openEditor(page);
+    const learn = page.getByRole("complementary", { name: "Learn" });
+    await page.getByRole("button", { name: "Learn", exact: true }).click();
+    await expect(learn.getByRole("button", { name: "Start Your first prototype" })).toBeVisible();
+    await expect(learn.getByText("0 of 5 done")).toBeVisible();
+
+    // Saved progress on another prototype: the row offers a restart and says why, with no "In progress" badge.
+    await page.evaluate(() => localStorage.setItem("sonobe.lessons.v1", JSON.stringify({ active: { id: "first-prototype", step: 3 }, completed: {} })));
+    await page.reload();
+    await page.waitForFunction(() => (window.__sonobe?.frame() ?? -1) > 3, undefined, { timeout: 30_000 });
+    if (!(await learn.isVisible())) await page.getByRole("button", { name: "Learn", exact: true }).click();
+    const suggested = learn.locator(".sb-lessoncard[data-expanded]");
+    await expect(suggested).toContainText("Your practice prototype isn't open");
+    await expect(suggested.getByRole("button", { name: "Restart Your first prototype" })).toBeVisible();
+    await expect(learn.getByText("In progress")).toHaveCount(0);
+    await expect(learn.getByText(/Step 4 of 6/)).toHaveCount(0);
+
+    // Restart on the row opens a fresh practice copy straight away, then the row continues at step 1, and Exit drops it.
+    await suggested.getByRole("button", { name: "Restart Your first prototype" }).click();
+    await expect.poll(() => hook(page, (s) => s.doc().project.name)).toBe("Your First Prototype");
+    await expect(learn.locator('.sb-lesson__step[aria-current="step"]')).toContainText("Make the photo listen for taps");
+    await expect(learn.getByRole("heading", { name: "Your first prototype" })).toBeFocused();
+    await learn.getByRole("button", { name: "Back" }).click();
+    await expect(suggested).toContainText("Step 1 of 6");
+    await expect(suggested.getByRole("button", { name: "Continue Your first prototype" })).toBeVisible();
+    await suggested.getByRole("button", { name: "Continue Your first prototype" }).click();
+    await learn.getByRole("button", { name: "Exit lesson" }).click();
+    await expect(learn.getByRole("button", { name: "Start Your first prototype" })).toBeVisible();
     expect(problems).toEqual([]);
   });
 });

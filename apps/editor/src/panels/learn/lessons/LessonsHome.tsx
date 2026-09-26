@@ -1,82 +1,106 @@
-import { ArrowRight, Check, ChevronRight, GraduationCap } from "lucide-react";
+import { Check, ChevronRight } from "lucide-react";
+import type { ReactNode } from "react";
+import { useDocument } from "../../../state/EditorProvider.tsx";
 import { Button } from "../../../ui/Button.tsx";
 import { getLesson, LESSONS } from "./catalog.ts";
 import { useLessons } from "./lessonStore.ts";
+import { isLessonDocumentOpen } from "./runner.ts";
+import type { Lesson } from "./types.ts";
+import { useStartLesson } from "./useStartLesson.ts";
 
 export interface LessonsHomeProps {
   onOpenLesson: (id: string) => void;
-  onOpenGuides: () => void;
+  /** Not used: the Guides tab is one tap away in the header. */
+  onOpenGuides?: () => void;
 }
 
-/** The lesson list: continue where you left off, then every lesson with its progress. */
-export function LessonsHome({ onOpenLesson, onOpenGuides }: LessonsHomeProps) {
+/** The lesson list: the suggested lesson open with one button, every other lesson a single row. */
+export function LessonsHome({ onOpenLesson }: LessonsHomeProps) {
   const active = useLessons((s) => s.active);
   const completed = useLessons((s) => s.completed);
   const inProgress = active ? getLesson(active.id) : undefined;
   const resume = inProgress && active && active.step < inProgress.steps.length ? inProgress : undefined;
+  const practiceOpen = useDocument((s) => (resume ? isLessonDocumentOpen(resume, s.doc) : false));
   const suggested = resume ?? LESSONS.find((l) => completed[l.id] === undefined);
+  const doneCount = LESSONS.filter((l) => completed[l.id] !== undefined).length;
 
   return (
-    <div className="sb-learnx__stack">
-      {suggested && (
-        <section className="sb-learnx__hero">
-          <div className="sb-learnx__eyebrow">{resume ? "Pick up where you left off" : Object.keys(completed).length ? "Up next" : "Start here"}</div>
-          <div className="sb-learnx__hero-title">{suggested.title}</div>
-          <p className="sb-learnx__hero-text">{suggested.summary}</p>
-          <div className="sb-learnx__hero-meta">
-            <span>about {suggested.minutes} min</span>
-            {resume && active && (
-              <span>
-                step {active.step + 1} of {resume.steps.length}
-              </span>
-            )}
-          </div>
-          <div className="sb-learnx__hero-actions">
-            <Button size="sm" variant="primary" trailingIcon={<ArrowRight size={13} />} onClick={() => onOpenLesson(suggested.id)}>
-              {resume ? "Continue" : "Open the lesson"}
-            </Button>
-          </div>
-        </section>
-      )}
-
-      <section aria-labelledby="sb-lessons-title">
-        <h3 className="sb-learnx__section-title" id="sb-lessons-title">
+    <section className="sb-lessons" aria-labelledby="sb-lessons-title">
+      <div className="sb-lessons__head">
+        <h3 className="sb-lessons__title" id="sb-lessons-title">
           Lessons
         </h3>
-        <ol className="sb-lessonlist">
-          {LESSONS.map((lesson) => {
-            const done = completed[lesson.id] !== undefined;
-            const current = resume?.id === lesson.id;
+        <span className="sb-lessons__count sb-tabular">
+          {doneCount} of {LESSONS.length} done
+        </span>
+      </div>
+      <ol className="sb-lessonlist">
+        {LESSONS.map((lesson) => {
+          const done = completed[lesson.id] !== undefined;
+          const marker = done ? <Check size={12} strokeWidth={2.75} /> : lesson.number;
+          if (lesson.id !== suggested?.id) {
             return (
               <li key={lesson.id}>
-                <button type="button" className="sb-lessoncard" data-done={done || undefined} data-current={current || undefined} onClick={() => onOpenLesson(lesson.id)}>
+                <button type="button" className="sb-lessoncard" data-done={done || undefined} onClick={() => onOpenLesson(lesson.id)}>
                   <span className="sb-lessoncard__number sb-tabular" aria-hidden>
-                    {done ? <Check size={12} strokeWidth={2.75} /> : lesson.number}
+                    {marker}
                   </span>
-                  <span className="sb-lessoncard__text">
-                    <span className="sb-lessoncard__title">{lesson.title}</span>
-                    <span className="sb-lessoncard__summary">{lesson.summary}</span>
-                    <span className="sb-lessoncard__meta">
-                      {lesson.minutes} min{done ? " · Done" : current ? " · In progress" : ""}
-                    </span>
-                  </span>
-                  <ChevronRight size={14} strokeWidth={2} className="sb-lessoncard__chevron" aria-hidden />
+                  <span className="sb-lessoncard__title">{lesson.title}</span>
+                  <span className="sb-lessoncard__meta sb-tabular">{done ? "Done" : `${lesson.minutes} min`}</span>
+                  <ChevronRight size={14} strokeWidth={1.75} className="sb-lessoncard__chevron" aria-hidden />
                 </button>
               </li>
             );
-          })}
-        </ol>
-      </section>
+          }
+          return (
+            <li key={lesson.id}>
+              <SuggestedLesson lesson={lesson} marker={marker} done={done} step={resume?.id === lesson.id && active ? active.step : undefined} practiceOpen={practiceOpen} onOpenLesson={onOpenLesson} />
+            </li>
+          );
+        })}
+      </ol>
+    </section>
+  );
+}
 
-      <section className="sb-learnx__tip">
-        <GraduationCap size={14} strokeWidth={2} aria-hidden />
-        <div>
-          Lessons check your work as you go, so you learn by doing. Prefer to read first?{" "}
-          <button type="button" className="sb-learnx__inline-link" onClick={onOpenGuides}>
-            Browse the guides
-          </button>
-        </div>
-      </section>
+interface SuggestedLessonProps {
+  lesson: Lesson;
+  marker: ReactNode;
+  done: boolean;
+  /** Set when this lesson is the one in progress. */
+  step: number | undefined;
+  practiceOpen: boolean;
+  onOpenLesson: (id: string) => void;
+}
+
+function SuggestedLesson({ lesson, marker, done, step, practiceOpen, onOpenLesson }: SuggestedLessonProps) {
+  const { busy, start } = useStartLesson(lesson, () => onOpenLesson(lesson.id));
+  const resuming = step !== undefined;
+  const restart = resuming && !practiceOpen;
+  const label = restart ? "Restart" : resuming ? "Continue" : "Start";
+  const act = () => (restart ? void start() : onOpenLesson(lesson.id));
+  return (
+    <div className="sb-lessoncard" data-expanded data-done={done || undefined} data-current={(resuming && practiceOpen) || undefined} onClick={act}>
+      <span className="sb-lessoncard__number sb-tabular" aria-hidden>
+        {marker}
+      </span>
+      <span className="sb-lessoncard__text">
+        <span className="sb-lessoncard__title">{lesson.title}</span>
+        <span className="sb-lessoncard__summary">{lesson.summary}</span>
+        <span className="sb-lessoncard__meta sb-tabular">{resuming ? (practiceOpen ? `Step ${step + 1} of ${lesson.steps.length}` : "Your practice prototype isn't open") : `${lesson.minutes} min`}</span>
+        <Button
+          variant="primary"
+          className="sb-lessoncard__action"
+          aria-label={`${label} ${lesson.title}`}
+          loading={busy}
+          onClick={(event) => {
+            event.stopPropagation();
+            act();
+          }}
+        >
+          {label}
+        </Button>
+      </span>
     </div>
   );
 }

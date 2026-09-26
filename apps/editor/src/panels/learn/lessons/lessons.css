@@ -1,9 +1,28 @@
 /* Lessons: the list, the player (intro, steps, celebration), and the spotlight ring. */
 
+.sb-lessons__head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-4);
+  margin-bottom: var(--space-4);
+}
+
+.sb-lessons__title {
+  margin: 0;
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-semibold);
+}
+
+.sb-lessons__count {
+  color: var(--text-secondary);
+  font-size: var(--font-size-xs);
+}
+
 .sb-lessonlist {
   display: flex;
   flex-direction: column;
-  gap: var(--space-3);
+  gap: var(--space-1);
   margin: 0;
   padding: 0;
   list-style: none;
@@ -11,29 +30,43 @@
 
 .sb-lessoncard {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   gap: var(--space-5);
   width: 100%;
-  padding: var(--space-5);
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-lg);
-  background: var(--bg-elevated);
+  min-height: 44px;
+  padding: var(--space-3) var(--space-5);
+  border: 0;
+  border-radius: var(--radius-md);
+  background: transparent;
   color: var(--text-primary);
   text-align: left;
-  transition:
-    border-color var(--duration-fast) var(--ease-out),
-    background-color var(--duration-fast) var(--ease-out);
+  transition: background-color var(--duration-fast) var(--ease-out);
 }
 
 @media (hover: hover) {
   .sb-lessoncard:hover {
-    border-color: var(--border-default);
     background: var(--bg-hover);
   }
 }
 
+.sb-lessoncard[data-expanded] {
+  align-items: flex-start;
+  margin-bottom: var(--space-3);
+  padding: var(--space-5);
+  border-radius: var(--radius-lg);
+  background: var(--bg-elevated);
+  box-shadow: inset 0 0 0 1px var(--border-subtle);
+  cursor: pointer;
+}
+
+@media (hover: hover) {
+  .sb-lessoncard[data-expanded]:hover {
+    background: color-mix(in srgb, var(--bg-elevated) 94%, var(--text-primary));
+  }
+}
+
 .sb-lessoncard[data-current] {
-  border-color: color-mix(in srgb, var(--accent) 45%, var(--border-subtle));
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 45%, var(--border-subtle));
 }
 
 .sb-lessoncard__number {
@@ -51,19 +84,28 @@
 }
 
 .sb-lessoncard[data-done] .sb-lessoncard__number {
-  background: var(--success-soft);
-  color: var(--success-text);
+  background: var(--success);
+  color: var(--text-on-success);
 }
 
 .sb-lessoncard__text {
   display: flex;
   flex: 1 1 auto;
   flex-direction: column;
-  gap: var(--space-1);
+  align-items: flex-start;
+  gap: var(--space-2);
   min-width: 0;
 }
 
 .sb-lessoncard__title {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-medium);
+  line-height: 22px;
+}
+
+.sb-lessoncard[data-expanded] .sb-lessoncard__title {
   font-size: var(--font-size-md);
   font-weight: var(--font-weight-semibold);
 }
@@ -76,14 +118,17 @@
 }
 
 .sb-lessoncard__meta {
-  margin-top: var(--space-2);
-  color: var(--text-tertiary);
-  font-size: var(--font-size-xs);
+  flex: none;
+  color: var(--text-secondary);
+  font-size: var(--font-size-sm);
+}
+
+.sb-lessoncard__action {
+  margin-top: var(--space-3);
 }
 
 .sb-lessoncard__chevron {
   flex: none;
-  align-self: center;
   color: var(--text-tertiary);
 }
 
@@ -92,6 +137,7 @@
   display: flex;
   flex-direction: column;
   gap: var(--space-7);
+  min-height: 100%;
 }
 
 .sb-lesson__intro {
@@ -100,11 +146,19 @@
   gap: var(--space-2);
 }
 
+.sb-lesson__eyebrow {
+  color: var(--text-secondary);
+  font-size: var(--font-size-xs);
+}
+
 .sb-lesson__title {
-  font-size: var(--font-size-xl);
+  font-size: var(--font-size-lg);
   font-weight: var(--font-weight-semibold);
-  letter-spacing: -0.015em;
   line-height: var(--line-height-tight);
+}
+
+.sb-lesson__title:focus-visible {
+  outline: none;
 }
 
 .sb-lesson__summary {
@@ -114,23 +168,6 @@
   text-wrap: pretty;
 }
 
-.sb-lesson__progress {
-  position: relative;
-  height: 4px;
-  margin-top: var(--space-4);
-  overflow: hidden;
-  border-radius: var(--radius-full);
-  background: var(--bg-field);
-}
-
-.sb-lesson__progress-fill {
-  position: absolute;
-  inset: 0 auto 0 0;
-  border-radius: inherit;
-  background: var(--accent);
-  transition: width var(--duration-slower) var(--ease-out);
-}
-
 .sb-lesson__start {
   display: flex;
   flex-direction: column;
@@ -138,32 +175,45 @@
   gap: var(--space-5);
 }
 
+.sb-lesson__heading {
+  margin: 0;
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-semibold);
+}
+
 .sb-lesson__outcomes {
   display: flex;
   flex-direction: column;
   gap: var(--space-3);
-  margin: calc(var(--space-3) * -1) 0 0;
+  margin: 0;
   padding: 0;
   list-style: none;
   color: var(--text-secondary);
   font-size: var(--font-size-sm);
+  line-height: 1.45;
 }
 
 .sb-lesson__outcomes li {
   display: flex;
-  align-items: center;
+  align-items: baseline;
   gap: var(--space-4);
 }
 
-.sb-lesson__outcomes svg {
+.sb-lesson__outcomes li::before {
   flex: none;
-  color: var(--success-text);
+  width: 4px;
+  height: 4px;
+  border-radius: var(--radius-full);
+  background: var(--text-tertiary);
+  content: "";
+  transform: translateY(-2px);
 }
 
 .sb-lesson__note {
-  color: var(--text-tertiary);
-  font-size: var(--font-size-xs);
+  color: var(--text-secondary);
+  font-size: var(--font-size-sm);
   line-height: 1.5;
+  text-wrap: pretty;
 }
 
 .sb-lesson__steps {
@@ -228,7 +278,7 @@
 .sb-lesson__step[data-state="passed"] .sb-lesson__marker {
   border-color: transparent;
   background: var(--success);
-  color: var(--text-on-accent);
+  color: var(--text-on-success);
 }
 
 .sb-lesson__step[data-state="passed"] .sb-lesson__marker {
@@ -241,14 +291,17 @@
   flex-direction: column;
   gap: var(--space-4);
   min-width: 0;
-  padding-top: 2px;
 }
 
 .sb-lesson__step-title {
   color: var(--text-primary);
-  font-size: var(--font-size-md);
-  font-weight: var(--font-weight-medium);
-  line-height: 1.35;
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-semibold);
+  line-height: 22px;
+}
+
+.sb-lesson__step:not([data-state="current"]):not([data-state="passed"]) .sb-lesson__step-title {
+  font-weight: var(--font-weight-regular);
 }
 
 .sb-lesson__step[data-state="upcoming"] .sb-lesson__step-title {
@@ -284,8 +337,8 @@
 .sb-lesson__tip {
   display: flex;
   gap: var(--space-3);
-  color: var(--text-tertiary);
-  font-size: var(--font-size-xs);
+  color: var(--text-secondary);
+  font-size: var(--font-size-sm);
   line-height: 1.5;
 }
 
@@ -304,7 +357,7 @@
   border-radius: var(--radius-md);
   background: var(--info-soft);
   color: var(--info-text);
-  font-size: var(--font-size-xs);
+  font-size: var(--font-size-sm);
   line-height: 1.45;
 }
 
@@ -321,7 +374,6 @@
   display: flex;
   flex-wrap: wrap;
   gap: var(--space-3);
-  margin-left: calc(var(--space-3) * -1);
 }
 
 /* Another prototype is open: offer a restart instead of steps that can't be checked. */
@@ -349,14 +401,11 @@
   color: var(--text-secondary);
 }
 
-.sb-lesson__elsewhere .sb-lesson__actions {
-  margin-left: 0;
-}
-
 .sb-lesson__footer {
   display: flex;
   align-items: center;
   gap: var(--space-3);
+  margin-top: auto;
   padding-top: var(--space-5);
   border-top: 1px solid var(--border-subtle);
 }
@@ -367,86 +416,53 @@
 
 /* Celebration */
 .sb-lesson__celebrate {
-  position: relative;
   display: flex;
   flex-direction: column;
   align-items: flex-start;
-  gap: var(--space-4);
-  padding: var(--space-7) var(--space-6) var(--space-6);
-  overflow: hidden;
-  border-radius: var(--radius-xl);
-  background:
-    radial-gradient(120% 100% at 0% 0%, color-mix(in srgb, var(--success) 22%, transparent), transparent 60%),
-    linear-gradient(160deg, color-mix(in srgb, var(--accent) 18%, var(--bg-elevated)), var(--bg-elevated));
-  box-shadow: inset 0 0 0 1px var(--border-subtle);
-  animation: sb-lesson-rise var(--duration-slower) var(--ease-out);
+  gap: var(--space-5);
+  animation: sb-lesson-rise var(--duration-base) var(--ease-out);
 }
 
-.sb-lesson__celebrate-icon {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 40px;
-  height: 40px;
-  border-radius: var(--radius-full);
+.sb-lesson__celebrate-row {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-4);
+  width: 100%;
+  padding: var(--space-5);
+  border-radius: var(--radius-lg);
   background: var(--success-soft);
+  box-shadow: inset 0 0 0 1px var(--border-subtle);
+}
+
+.sb-lesson__celebrate-row > svg {
+  flex: none;
+  margin-top: 2px;
   color: var(--success-text);
 }
 
 .sb-lesson__celebrate-title {
-  font-size: var(--font-size-lg);
+  font-size: var(--font-size-md);
   font-weight: var(--font-weight-semibold);
+  line-height: var(--line-height-tight);
 }
 
 .sb-lesson__celebrate-text {
+  margin-top: var(--space-2);
   color: var(--text-secondary);
   font-size: var(--font-size-sm);
-  line-height: 1.55;
+  line-height: 1.5;
   text-wrap: pretty;
 }
 
 .sb-lesson__celebrate-actions {
   display: flex;
-  flex-wrap: wrap;
+  flex-direction: column;
+  align-items: flex-start;
   gap: var(--space-3);
-  margin-top: var(--space-3);
 }
 
-.sb-lesson__burst {
-  position: absolute;
-  top: 36px;
-  left: 44px;
-  pointer-events: none;
-}
-
-.sb-lesson__burst span {
-  position: absolute;
-  width: 6px;
-  height: 6px;
-  border-radius: 2px;
-  background: var(--accent);
-  opacity: 0;
-  animation: sb-lesson-confetti 900ms var(--ease-out) forwards;
-  animation-delay: calc(var(--i) * 18ms);
-}
-
-.sb-lesson__burst span:nth-child(3n + 1) {
-  background: var(--success);
-}
-
-.sb-lesson__burst span:nth-child(3n + 2) {
-  background: var(--warn);
-}
-
-@keyframes sb-lesson-confetti {
-  0% {
-    opacity: 1;
-    transform: rotate(calc(var(--i) * 30deg)) translateY(0) scale(1);
-  }
-  100% {
-    opacity: 0;
-    transform: rotate(calc(var(--i) * 30deg)) translateY(-56px) scale(0.6);
-  }
+.sb-lesson__guide {
+  margin-left: calc(var(--space-4) * -1);
 }
 
 @keyframes sb-lesson-pop {
@@ -467,9 +483,7 @@
   position: fixed;
   z-index: calc(var(--z-modal) + 1);
   border-radius: var(--radius-lg);
-  box-shadow:
-    0 0 0 2px var(--accent),
-    0 0 0 6px color-mix(in srgb, var(--accent) 30%, transparent);
+  box-shadow: 0 0 0 2px var(--accent);
   pointer-events: none;
   transition:
     left var(--duration-base) var(--ease-out),
@@ -479,33 +493,9 @@
   animation: sb-spotlight-in var(--duration-slow) var(--ease-out);
 }
 
-/* The breathing glow fades on its own layer (opacity only), so it never repaints the page behind the lesson. */
-.sb-spotlight::after {
-  content: "";
-  position: absolute;
-  inset: 0;
-  border-radius: inherit;
-  box-shadow: 0 0 0 10px color-mix(in srgb, var(--accent) 14%, transparent);
-  opacity: 0;
-  pointer-events: none;
-  animation: sb-spotlight-breathe 1.8s var(--ease-in-out) 240ms infinite;
-}
-
 @keyframes sb-spotlight-in {
   from {
     opacity: 0;
     transform: scale(1.12);
-  }
-}
-
-@keyframes sb-spotlight-breathe {
-  50% {
-    opacity: 1;
-  }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .sb-spotlight::after {
-    animation: none;
   }
 }

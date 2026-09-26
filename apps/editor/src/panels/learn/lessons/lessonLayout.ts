@@ -4,12 +4,13 @@
  * the patch editor, so the graph has room to read. A step that points at the Inspector shows it
  * until the lesson moves on. Leaving the lesson (exit, close the drawer, open another prototype)
  * puts back the layout from before. The earlier layout is saved in localStorage, so a reload
- * mid-lesson still restores it.
+ * mid-lesson still restores it. In a window too narrow to give the patch editor room beside the
+ * Inspector or the Viewer, Layers folds away for the steps that don't point at it.
  */
 
 import { useStore } from "zustand";
 import { createStore, type StoreApi } from "zustand/vanilla";
-import { layoutStore, type LayoutStore, type ViewMode } from "../../../shell/layoutStore.ts";
+import { fitPanelWidths, layoutStore, MIN_CENTER_WIDTH, type LayoutStore, type ViewMode } from "../../../shell/layoutStore.ts";
 import { readJSON, removeKey, writeJSON } from "../../../ui/lib/storage.ts";
 import type { LessonTarget } from "./types.ts";
 
@@ -19,7 +20,12 @@ export const LESSON_LAYOUT_KEY = "sonobe.lessons.layout.v1";
 export interface LessonLayoutSnapshot {
   inspectorCollapsed: boolean;
   viewMode: ViewMode;
+  /** Set only while the lesson has folded Layers away: whether Layers was collapsed before it did. */
+  layersCollapsed?: boolean;
 }
+
+/** The patch editor stays at least this wide in a lesson. Under it, Layers folds away for steps that don't need it. */
+export const LESSON_MIN_EDITOR_WIDTH = 320;
 
 /** What a lesson shows: the patch editor alone in the center, no Inspector. */
 export const LESSON_LAYOUT: LessonLayoutSnapshot = { inspectorCollapsed: true, viewMode: "patches" };
@@ -40,12 +46,17 @@ export interface LessonLayout extends StoreApi<LessonLayoutState> {
   leave(): void;
   /** Restore a layout left behind (a reload or crash mid-lesson) when no lesson is on screen. */
   releaseStale(): void;
-  /** Show the Inspector while a step points at it, and collapse it again when a later step doesn't. */
+  /**
+   * Show the Inspector while a step points at it, and collapse it again when a later step doesn't.
+   * In a narrow window, also fold Layers away for a step that doesn't point at it.
+   */
   showPanelsFor(target: LessonTarget | null | undefined): void;
 }
 
 export interface LessonLayoutOptions {
   layout?: Pick<StoreApi<LayoutStore>, "getState">;
+  /** The window's width in px (the window's own by default). */
+  viewportWidth?: () => number;
   /** null disables persistence. */
   storageKey?: string | null;
 }
@@ -55,7 +66,7 @@ const VIEW_MODES: readonly ViewMode[] = ["canvas", "split", "patches"];
 export function isLessonLayoutSnapshot(value: unknown): value is LessonLayoutSnapshot {
   if (!value || typeof value !== "object") return false;
   const v = value as Record<string, unknown>;
-  return typeof v.inspectorCollapsed === "boolean" && VIEW_MODES.includes(v.viewMode as ViewMode);
+  return typeof v.inspectorCollapsed === "boolean" && VIEW_MODES.includes(v.viewMode as ViewMode) && (v.layersCollapsed === undefined || typeof v.layersCollapsed === "boolean");
 }
 
 /** True when a lesson target is in (or is) the Inspector. */
@@ -63,13 +74,25 @@ export function targetsInspector(target: LessonTarget | null | undefined): boole
   return !!target && /^#sb-inspector(?![\w-])/.test(target.selector.trim());
 }
 
+/** True when a lesson target is in (or is) Layers. */
+function targetsLayers(target: LessonTarget | null | undefined): boolean {
+  return !!target && /^#sb-layers(?![\w-])/.test(target.selector.trim());
+}
+
+/** True when a lesson target is in (or is) the Viewer. */
+function targetsViewer(target: LessonTarget | null | undefined): boolean {
+  return !!target && /^#sb-viewer(?![\w-])/.test(target.selector.trim());
+}
+
 function applyLayout(layout: LayoutStore, next: LessonLayoutSnapshot): void {
+  if (next.layersCollapsed !== undefined && layout.collapsed.layers !== next.layersCollapsed) layout.toggleCollapsed("layers", next.layersCollapsed);
   if (layout.collapsed.inspector !== next.inspectorCollapsed) layout.toggleCollapsed("inspector", next.inspectorCollapsed);
   if (layout.viewMode !== next.viewMode) layout.setViewMode(next.viewMode);
 }
 
 export function createLessonLayout(options: LessonLayoutOptions = {}): LessonLayout {
   const layout = options.layout ?? layoutStore;
+  const viewportWidth = options.viewportWidth ?? (() => window.innerWidth);
   const key = options.storageKey === undefined ? LESSON_LAYOUT_KEY : options.storageKey;
   const stored = key ? (readJSON(key, isLessonLayoutSnapshot) ?? null) : null;
   const store = createStore<LessonLayoutState>()(() => ({ active: false, snapshot: stored, inspectorForStep: false }));
@@ -79,6 +102,25 @@ export function createLessonLayout(options: LessonLayoutOptions = {}): LessonLay
     if (snapshot) applyLayout(layout.getState(), snapshot);
     if (key) removeKey(key);
     store.setState({ active: false, snapshot: null, inspectorForStep: false });
+  };
+
+  const setLayersFolded = (folded: boolean) => {
+    const current = layout.getState();
+    const { snapshot } = store.getState();
+    if (!snapshot) return;
+    const { layersCollapsed, ...before } = snapshot;
+    const next: LessonLayoutSnapshot = folded ? { ...before, layersCollapsed: current.collapsed.layers } : before;
+    if (folded && !current.collapsed.layers) current.toggleCollapsed("layers", true);
+    if (!folded && current.collapsed.layers && layersCollapsed === false) current.toggleCollapsed("layers", false);
+    if (key) writeJSON(key, next);
+    store.setState({ snapshot: next });
+  };
+
+  const tooNarrow = (target: LessonTarget | null | undefined) => {
+    const current = layout.getState();
+    const collapsed = { layers: false, viewer: current.collapsed.viewer, inspector: !targetsInspector(target) };
+    const fitted = fitPanelWidths(current.sizes, collapsed, viewportWidth() - current.sizes.drawer, MIN_CENTER_WIDTH, targetsViewer(target));
+    return fitted.center < LESSON_MIN_EDITOR_WIDTH;
   };
 
   return Object.assign(store, {
@@ -110,6 +152,8 @@ export function createLessonLayout(options: LessonLayoutOptions = {}): LessonLay
         if (!current.collapsed.inspector) current.toggleCollapsed("inspector", true);
         store.setState({ inspectorForStep: false });
       }
+      const foldLayers = !targetsLayers(target) && tooNarrow(target);
+      if (foldLayers !== (state.snapshot?.layersCollapsed !== undefined)) setLayersFolded(foldLayers);
     },
   });
 }

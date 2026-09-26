@@ -11,7 +11,8 @@ import type { Lesson, LessonContext, LessonTarget } from "./types.ts";
 const node = (id: string | undefined): string => `.sb-pe .react-flow__node[data-id="${id ?? ""}"]`;
 const handleOf = (id: string | undefined, handle: string): LessonTarget | null => (id ? { selector: `${node(id)} .react-flow__handle[data-handleid="${handle}"]` } : null);
 const layerRow = (layerId: string): LessonTarget => ({ selector: `#sb-layers [data-layer-id="${layerId}"]`, closest: ".sb-tree__row" });
-const inViewer = (layerId: string): LessonTarget => ({ selector: `#sb-viewer [data-layer="${layerId}"]` });
+const VIEWER_RAIL = '.sb-rail[data-panel="viewer"]';
+const inViewer = (layerId: string): LessonTarget => ({ selector: `#sb-viewer [data-layer="${layerId}"], ${VIEWER_RAIL}` });
 const INSPECTOR: LessonTarget = { selector: "#sb-inspector" };
 
 /** Lesson 1's chain: Interaction on @photo → Switch.flip → Pop Animation.number → the Transition driving @photo.scale. */
@@ -98,7 +99,7 @@ export const FIRST_PROTOTYPE: Lesson = {
     {
       id: "tap",
       title: "Tap the photo",
-      body: "Click the photo in the **Viewer**. It springs up to 1.2×. Click again and it springs back.",
+      body: "Click the photo in the **Viewer**. If the Viewer is folded into its side rail, open it first. The photo springs up to 1.2×. Click again and it springs back.",
       tip: "Try clicking again while it's still moving. The spring turns around smoothly instead of starting over.",
       target: inViewer("photo"),
       check: (ctx) => {
@@ -286,9 +287,9 @@ export const LISTS_WITH_LOOPS: Lesson = {
     {
       id: "copies",
       title: "See the copies",
-      body: "Look at the **Viewer**: the one **Row** layer now draws once for every index. Anything a loop feeds gets copied, one per item.",
+      body: "Look at the **Viewer** (open it from its side rail if it is folded): the one **Row** layer now draws once for every index. Anything a loop feeds gets copied, one per item.",
       tip: "Nothing changed? Make sure the prototype is playing (the Play button in the toolbar).",
-      target: { selector: "#sb-viewer" },
+      target: { selector: `#sb-viewer, ${VIEWER_RAIL}` },
       check: (ctx) => ctx.copies("row") >= 5,
     },
     {
