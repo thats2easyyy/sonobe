@@ -28,6 +28,7 @@ const COMPONENT_SHORTCUTS: Partial<Record<string, Shortcut>> = {
   "view.commandPalette": ["Mod+K", "Mod+Shift+P"], // shell/useShellCommands.tsx app.commandPalette
   "view.toggleLayers": "Mod+1", // shell/useShellCommands.tsx
   "view.toggleViewer": "Mod+2",
+  "view.toggleAssistant": "Mod+6", // panels/assistant/commands.ts ai.assistant
   "view.toggleInspector": "Mod+7",
   "view.toggleConsole": "Mod+J", // view.toggleHud
   "help.learn": "Mod+/",

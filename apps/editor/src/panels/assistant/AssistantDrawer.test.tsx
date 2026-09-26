@@ -35,16 +35,23 @@ const flush = async () => {
 /** The drawer's own text, without a portal's (menus, tooltips). */
 const text = () => container.textContent ?? "";
 
-async function mount(host: FakeAssistantHost | null, props: { onConnectClaude?: () => void; onClose?: () => void } = {}) {
+async function mount(host: FakeAssistantHost | null, props: { onConnectClaude?: () => void; onClose?: () => void; seed?: (store: ReturnType<typeof createAssistantStore>) => void } = {}) {
   const store = createAssistantStore({ persistModel: false });
+  props.seed?.(store);
+  const { seed: _seed, ...rest } = props;
   await act(async () => {
-    root.render(<AssistantDrawer host={host} store={store} {...props} />);
+    root.render(<AssistantDrawer host={host} store={store} {...rest} />);
   });
   await flush();
   return store;
 }
 
 const buttonByText = (text: string | RegExp) => [...container.querySelectorAll("button")].find((b) => (typeof text === "string" ? b.textContent?.trim() === text : text.test(b.textContent ?? "")));
+/** The tooltip text a keyboard-focused element shows. */
+const tooltipOf = (el: Element | null) => {
+  act(() => (el as HTMLElement).focus());
+  return document.querySelector('[role="tooltip"]')?.textContent ?? "";
+};
 const buttonByLabel = (label: string) => container.querySelector<HTMLButtonElement>(`button[aria-label="${label}"]`);
 
 function typeInto(el: HTMLInputElement | HTMLTextAreaElement, value: string) {
@@ -54,6 +61,13 @@ function typeInto(el: HTMLInputElement | HTMLTextAreaElement, value: string) {
     el.dispatchEvent(new Event("input", { bubbles: true }));
   });
 }
+
+/** Past the frame the drawer waits for before it moves focus. */
+const afterFrame = () =>
+  act(async () => {
+    await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  });
 
 async function click(el: Element | null | undefined) {
   expect(el).toBeTruthy();
@@ -173,6 +187,136 @@ describe("AssistantDrawer", () => {
     expect(buttonByLabel("Send")).not.toBeNull();
   });
 
+  it("keeps an unsent message through the setup and a closed sheet, and drops it on New chat", async () => {
+    const host = fakeAssistantHost({ key: "sk-ant-api03-abcdefgh1234" });
+    const store = await mount(host);
+    typeInto(container.querySelector("textarea")!, "Make the heart pop when tapped");
+    expect(store.getState().draft).toBe("Make the heart pop when tapped");
+
+    await click(buttonByLabel("API key"));
+    expect(container.querySelector("textarea")).toBeNull();
+    await click(buttonByText("Back to chat"));
+    expect(container.querySelector("textarea")?.value).toBe("Make the heart pop when tapped");
+
+    // The sheet unmounts when it closes; the draft is in the store, so it comes back with it.
+    await act(async () => root.unmount());
+    root = createRoot(container);
+    await act(async () => {
+      root.render(<AssistantDrawer host={host} store={store} />);
+    });
+    await flush();
+    expect(container.querySelector("textarea")?.value).toBe("Make the heart pop when tapped");
+
+    await click(buttonByText("Explain how this prototype works"));
+    expect(store.getState().draft).toBe("Make the heart pop when tapped");
+    await click(buttonByLabel("New chat"));
+    expect(store.getState().draft).toBe("");
+    expect(container.querySelector("textarea")?.value).toBe("");
+  });
+
+  it("focuses the message field when it opens, after New chat and on returning from the setup", async () => {
+    const host = fakeAssistantHost({ key: "sk-ant-api03-abcdefgh1234" });
+    await mount(host);
+    const field = () => container.querySelector("textarea")!;
+    await afterFrame();
+    expect(document.activeElement).toBe(field());
+
+    await click(buttonByLabel("API key"));
+    await afterFrame();
+    expect(document.activeElement).toBe(container.querySelector('input[type="password"]'));
+    await click(buttonByText("Back to chat"));
+    await afterFrame();
+    expect(document.activeElement).toBe(field());
+
+    await click(buttonByText("Explain how this prototype works"));
+    (document.activeElement as HTMLElement).blur();
+    await click(buttonByLabel("New chat"));
+    await afterFrame();
+    expect(document.activeElement).toBe(field());
+  });
+
+  it("takes focus on opening even from a control elsewhere, but not from a question waiting for its answer", async () => {
+    const outside = document.createElement("button");
+    document.body.appendChild(outside);
+    outside.focus();
+    await mount(fakeAssistantHost({ key: "sk-ant-api03-abcdefgh1234" }));
+    await afterFrame();
+    expect(document.activeElement).toBe(container.querySelector("textarea"));
+
+    act(() => root.unmount());
+    root = createRoot(container);
+    outside.focus();
+    await mount(fakeAssistantHost({ key: "sk-ant-api03-abcdefgh1234" }), {
+      seed: (store) =>
+        store.setState({ items: [{ kind: "confirm", id: "c1", runId: "r1", title: "Delete 3 layers?", message: "Claude wants to delete 3 layers.", count: 3, status: "pending", confirmKind: "delete" }] }),
+    });
+    await afterFrame();
+    expect(container.contains(document.activeElement)).toBe(true);
+    expect(document.activeElement).toBe(buttonByText("Keep them"));
+    outside.remove();
+  });
+
+  it("puts the key field first in the setup and focuses it", async () => {
+    await mount(fakeAssistantHost());
+    await afterFrame();
+    const field = container.querySelector<HTMLInputElement>('input[type="password"]')!;
+    expect(document.activeElement).toBe(field);
+    const order = [...container.querySelectorAll("h3, label, summary, .sb-assistant-callout__title")].map((el) => el.textContent?.trim());
+    expect(order).toEqual(["Use your own Anthropic API key", "API key", "Details", "Prefer your Claude subscription?"]);
+    expect(field.getAttribute("aria-describedby")).toBe(container.querySelector(".sb-assistant-privacy__summary")!.id);
+    expect(container.querySelector(".sb-assistant-key__icon")).toBeNull();
+  });
+
+  it("says Claude is working while a reply runs, and keeps the draft", async () => {
+    const host = fakeAssistantHost({ key: "sk-ant-api03-abcdefgh1234" });
+    host.nextResult = (_request, emit) =>
+      new Promise(() => {
+        emit({ type: "run_started", runId: "r1", model: "claude-sonnet-5" });
+      });
+    const store = await mount(host);
+    await click(buttonByText("Explain how this prototype works"));
+    const field = container.querySelector("textarea")!;
+    expect(field.getAttribute("placeholder")).toBe("Claude is working… Esc to stop");
+    typeInto(field, "and make the button orange");
+    await act(async () => {
+      field.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));
+    });
+    expect(field.value).toBe("and make the button orange");
+    expect(store.getState().draft).toBe("and make the button orange");
+    expect(host.sent).toHaveLength(1);
+  });
+
+  it("puts the header at one row with the plan and billing in a strip under it", async () => {
+    await mount(fakeAssistantHost({ key: "sk-ant-api03-abcdefgh1234" }));
+    const header = container.querySelector(".sb-assistant__header")!;
+    expect(header.querySelector(".sb-assistant__mark")).toBeNull();
+    expect(header.querySelector(".sb-assistant__subtitle")).toBeNull();
+    expect(header.querySelector(".sb-assistant__title")?.textContent).toBe("Assistant");
+    expect(container.querySelector(".sb-assistant__body > .sb-assistant__subtitle")?.textContent).toBe("Your API key · sk-ant-…1234");
+  });
+
+  it("offers New chat on a notice that says to start one", async () => {
+    const host = fakeAssistantHost({ key: "sk-ant-api03-abcdefgh1234" });
+    host.nextResult = (_request, emit) => {
+      emit({ type: "run_started", runId: "r1", model: "claude-sonnet-5" });
+      emit({ type: "notice", runId: "r1", tone: "warn", message: "This chat used its 1,500K token budget. Start a new chat to keep going." });
+      emit({ type: "run_finished", runId: "r1", outcome: "budget", usage: usage(1_500_000) });
+      return { runId: "r1", outcome: "budget", usage: usage(1_500_000) };
+    };
+    await mount(host);
+    await click(buttonByText("Explain how this prototype works"));
+    await click(container.querySelector(".sb-assistant-notice button"));
+    expect(host.resets).toBe(1);
+    expect(container.textContent).toContain("What should we build?");
+  });
+
+  it("describes the models compactly on the API key", async () => {
+    await mount(fakeAssistantHost({ key: "sk-ant-api03-abcdefgh1234" }));
+    await click(container.querySelector('button[aria-label^="Model"]') ?? buttonByText(/Sonnet 5/));
+    expect(document.body.textContent).toContain("Fast and capable · $2 in / $10 out per 1M tokens");
+    expect(document.body.textContent).not.toContain("per million tokens");
+  });
+
   it("sends a starter suggestion and starts a new chat", async () => {
     const host = fakeAssistantHost({ key: "sk-ant-api03-abcdefgh1234" });
     await mount(host);
@@ -254,7 +398,7 @@ describe("AssistantDrawer on the Claude subscription (experimental)", () => {
     expect(text()).toContain(SIGNED_OUT_MESSAGE);
     await click(buttonByText("Sign in…"));
     expect(host.signIns).toBe(1);
-    expect(text()).toContain("Finish signing in in Terminal, then choose Check again.");
+    expect(text()).toContain("Finish signing in from Terminal, then choose Check again.");
 
     host.nextSignIn = () => ({ ok: false, error: "Run claude-agent-acp --cli auth login in a terminal, then check again." });
     await click(buttonByText("Sign in…"));
@@ -345,20 +489,21 @@ describe("AssistantDrawer on the Claude subscription (experimental)", () => {
     // What pays comes first, so a narrow header doesn't cut it; the tooltip has it all.
     expect(subtitle.textContent).toBe("Billed to Anthropic API key");
     expect(subtitle.getAttribute("data-tone")).toBe("warn");
-    expect(subtitle.getAttribute("title")).toBe("Claude subscription · billed to Anthropic API key");
+    expect(subtitle.hasAttribute("title")).toBe(false);
+    expect(tooltipOf(subtitle)).toBe("Claude subscription · billed to Anthropic API key");
     await click(buttonByText("Explain how this prototype works"));
     expect(container.querySelector(".sb-assistant-usage__text")?.textContent).toBe("22K tokens · billed to Anthropic API key");
-    expect(container.querySelector(".sb-assistant-usage")?.getAttribute("title")).toContain("not your Claude plan");
+    expect(tooltipOf(container.querySelector(".sb-assistant-usage"))).toContain("not your Claude plan");
     await click(container.querySelector('button[aria-label^="Model"]') ?? buttonByText(/Sonnet 5/));
     expect(document.body.textContent).toContain("Billed to Anthropic API key.");
     expect(document.body.textContent).not.toContain("Uses your Claude plan's limits.");
   });
 
-  it("puts the plan first in the header, and says the whole subtitle on hover", async () => {
+  it("puts the plan first in the header, and has nothing more to say on hover when it fits", async () => {
     await mount(fakeAssistantHost({ ...subscriptionOn, subscription: signedIn() }));
     const subtitle = container.querySelector(".sb-assistant__subtitle")!;
     expect(subtitle.textContent).toBe("Claude Max · subscription");
-    expect(subtitle.getAttribute("title")).toBe("Claude Max · subscription");
+    expect(subtitle.hasAttribute("title")).toBe(false);
     expect(subtitle.getAttribute("data-tone")).toBeNull();
   });
 
@@ -371,7 +516,7 @@ describe("AssistantDrawer on the Claude subscription (experimental)", () => {
     expect(text()).toContain("Choose Claude subscription above, or connect Claude Desktop or Claude Code to Sonobe");
   });
 
-  it("moves focus to the field once a permission card is answered, so Escape still stops the reply", async () => {
+  it("keeps focus in the field through a permission card, so Escape still stops the reply", async () => {
     const host = fakeAssistantHost({ ...subscriptionOn, subscription: signedIn() });
     host.nextResult = (_request, emit) =>
       new Promise(() => {
@@ -393,7 +538,9 @@ describe("AssistantDrawer on the Claude subscription (experimental)", () => {
       });
     await mount(host);
     await click(buttonByText("Explain how this prototype works"));
-    expect(document.activeElement).toBe(container.querySelector('[role="alertdialog"]'));
+    // The suggestion left focus in the message field, and a question doesn't take it from there.
+    expect(document.activeElement).toBe(container.querySelector("textarea"));
+    expect(container.querySelector('[role="alertdialog"]')).not.toBeNull();
     await click(buttonByText("Allow"));
     expect(host.confirmations).toEqual([["p1", true, "allow-once"]]);
     expect(container.querySelector(".sb-assistant-confirm__result")?.textContent).toBe("Allowed");
@@ -482,6 +629,14 @@ describe("AssistantDrawer on the Claude subscription (experimental)", () => {
     expect(container.querySelector(".sb-assistant__subtitle")?.textContent).toBe("Your API key · sk-ant-…1234");
   });
 
+  it("focuses the first button of a setup that has no field", async () => {
+    const host = fakeAssistantHost({ ...subscriptionOn, subscription: subscriptionStatus({ state: "signed_out", kind: "none", label: "Claude", email: null, message: SIGNED_OUT_MESSAGE }) });
+    await mount(host);
+    await afterFrame();
+    expect(container.contains(document.activeElement)).toBe(true);
+    expect(document.activeElement?.tagName).toBe("BUTTON");
+  });
+
   it("says not signed in in the header while signed out, whatever plan the last login named", async () => {
     // A signed-in chat's next message failed with auth_required: the status can still carry the old plan's label.
     const host = fakeAssistantHost({ ...subscriptionOn, subscription: subscriptionStatus({ state: "signed_out", kind: "none", label: "Claude Max", email: null, message: SIGNED_OUT_MESSAGE }) });
@@ -490,7 +645,7 @@ describe("AssistantDrawer on the Claude subscription (experimental)", () => {
     expect(text()).toContain(SIGNED_OUT_MESSAGE);
     const subtitle = container.querySelector(".sb-assistant__subtitle")!;
     expect(subtitle.textContent).toBe("Claude subscription · not signed in");
-    expect(subtitle.getAttribute("title")).toBe("Claude subscription · not signed in");
+    expect(subtitle.hasAttribute("title")).toBe(false);
     expect(subtitle.getAttribute("data-tone")).toBeNull();
   });
 });

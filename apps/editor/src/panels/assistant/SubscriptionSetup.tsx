@@ -1,4 +1,4 @@
-import { CircleAlert, CircleCheck, CircleUserRound, Copy, Info, LoaderCircle, ShieldCheck, TriangleAlert } from "lucide-react";
+import { CircleAlert, CircleCheck, Copy, Info, LoaderCircle, TriangleAlert } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Button } from "../../ui/Button.tsx";
 import type { AssistantController } from "./controller.ts";
@@ -175,7 +175,7 @@ export function SubscriptionSetup({ controller, subscription, onDone, doneLabel 
         </div>
         {signIn.state === "opened" ? (
           <p className="sb-assistant-key__status" role="status">
-            Finish signing in in Terminal, then choose Check again.
+            Finish signing in from Terminal, then choose Check again.
           </p>
         ) : signIn.state === "error" ? (
           <p className="sb-assistant-key__status" data-tone="danger" role="alert">
@@ -189,9 +189,6 @@ export function SubscriptionSetup({ controller, subscription, onDone, doneLabel 
   return (
     <div className="sb-assistant-key">
       <div className="sb-assistant-key__intro">
-        <span className="sb-assistant-key__icon" aria-hidden>
-          <CircleUserRound size={18} strokeWidth={1.75} />
-        </span>
         <h3 className="sb-assistant-key__title">Use your Claude subscription</h3>
         <p className="sb-assistant-key__lead">The Assistant runs Claude through Claude's agent adapter, with the Claude account you're signed in to on this computer. It draws on your plan's usage limits. No API key.</p>
       </div>
@@ -201,7 +198,6 @@ export function SubscriptionSetup({ controller, subscription, onDone, doneLabel 
       </div>
 
       <div className="sb-assistant-privacy">
-        <ShieldCheck size={15} aria-hidden className="sb-assistant-privacy__icon" />
         <ul>
           <li>Sonobe never sees your Claude login: the adapter uses the one Claude Code keeps on this computer.</li>
           <li>Your messages, the parts of this prototype Claude reads, and files from a linked code folder go to Anthropic under your Claude account.</li>

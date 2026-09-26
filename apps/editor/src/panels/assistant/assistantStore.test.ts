@@ -104,7 +104,7 @@ describe("reduceEvent", () => {
     expect(state.items.map((i) => i.kind)).toEqual(["user", "assistant", "confirm", "notice"]);
     expect(state.items[1]).toMatchObject({ tools: [{ status: "skipped" }] });
     expect(state.items[2]).toMatchObject({ status: "declined" });
-    expect(state.items[3]).toMatchObject({ tone: "info", text: "Stopped." });
+    expect(state.items[3]).toMatchObject({ tone: "info", text: "Stopped.", code: "stopped" });
   });
 
   it("shows run errors with their code", () => {
@@ -113,6 +113,44 @@ describe("reduceEvent", () => {
       { type: "run_finished", runId: "r1", outcome: "error", error: { code: "invalid_key", message: "Anthropic didn't accept this API key." }, usage: usage() },
     ]);
     expect(state.items.at(-1)).toMatchObject({ kind: "notice", tone: "error", code: "invalid_key", text: "Anthropic didn't accept this API key." });
+  });
+
+  it("gives the budget notice its code, so it can offer New chat", () => {
+    const state = fold(
+      [
+        { type: "run_started", runId: "r1", model: "claude-sonnet-5" },
+        { type: "notice", runId: "r1", tone: "warn", message: "This chat used its 1,500K token budget. Start a new chat to keep going." },
+        { type: "run_finished", runId: "r1", outcome: "budget", usage: usage(1_500_000) },
+      ],
+      { items: [user], running: true },
+    );
+    expect(state.items.at(-1)).toMatchObject({ kind: "notice", tone: "warn", code: "budget" });
+    const plain = fold([
+      { type: "run_started", runId: "r1", model: "claude-sonnet-5" },
+      { type: "notice", runId: "r1", tone: "info", message: "Paused." },
+      { type: "run_finished", runId: "r1", outcome: "max_turns", usage: usage() },
+    ]);
+    expect(plain.items.at(-1)).not.toHaveProperty("code");
+  });
+
+  describe("a question that arrives while the sheet is closed", () => {
+    const ask: AssistantEvent = { type: "confirm_required", runId: "r1", confirmationId: "c1", toolUseId: "t1", title: "Delete 14 items?", message: "…", count: 14 };
+
+    it("opens the sheet, so the run isn't left waiting on a question nobody sees", () => {
+      const state = fold([{ type: "run_started", runId: "r1", model: "claude-sonnet-5" }, ask], { items: [user], running: true, open: false });
+      expect(state.open).toBe(true);
+      expect(state.items.at(-1)).toMatchObject({ kind: "confirm", status: "pending" });
+    });
+
+    it("stays closed for the canvas's box, which shows the question itself", () => {
+      const canvas: ChatItem = { kind: "user", id: "u2", text: "a checkout", origin: "canvas" };
+      const state = fold([{ type: "run_started", runId: "r1", model: "claude-sonnet-5" }, ask], { items: [user, canvas], running: true, open: false });
+      expect(state.open).toBe(false);
+    });
+
+    it("leaves an open sheet as it is", () => {
+      expect(reduceEvent({ ...initialAssistantData(), open: true, items: [user] }, ask)).not.toHaveProperty("open");
+    });
   });
 
   it("adds notices and ignores another run's finish", () => {
@@ -257,6 +295,15 @@ describe("assistant store", () => {
     expect(store.getState().open).toBe(false);
     store.getState().setModel("claude-opus-5");
     expect(store.getState().model).toBe("claude-opus-5");
+  });
+
+  it("keeps the draft until it's cleared", () => {
+    const store = createAssistantStore({ persistModel: false });
+    expect(store.getState().draft).toBe("");
+    store.getState().setDraft("Make the heart pop");
+    store.getState().hide();
+    store.getState().show();
+    expect(store.getState().draft).toBe("Make the heart pop");
   });
 
   it("opens on the setup, and closing leaves it", () => {

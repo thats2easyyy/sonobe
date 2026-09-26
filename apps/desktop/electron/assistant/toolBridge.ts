@@ -264,12 +264,16 @@ export function describeToolInput(input: unknown): string {
   return "";
 }
 
-/** The first line of a result, for activity chips. */
+/** The first line of a result, for activity chips. A failure adds its "Hint:" line, which says what to do. */
 export function describeToolResult(result: ToolCallResult): string {
   for (const item of result.content) {
     if (item.type === "text" && typeof item.text === "string") {
-      const line = item.text.split("\n").find((l) => l.trim());
-      if (line) return clip(line.trim(), 140);
+      const lines = item.text.split("\n").map((l) => l.trim()).filter(Boolean);
+      const [first] = lines;
+      if (!first) continue;
+      if (!result.isError) return clip(first.replace(/ as layer [^\s:]+(?=:)/, ""), 140);
+      const hint = lines.find((l) => l.startsWith("Hint:"));
+      return [clip(first, 140), hint && clip(hint, 140)].filter(Boolean).join(" ");
     }
     if (item.type === "image") return "Screenshot";
   }

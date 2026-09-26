@@ -256,7 +256,7 @@ export function createAssistantController(host: AssistantHostLike | null, store:
     async newChat() {
       try {
         const status = await assistant.reset();
-        store.setState({ items: [], running: false, runId: null, thinking: false, status, usage: status.usage, limits: status.limits });
+        store.setState({ items: [], draft: "", running: false, runId: null, thinking: false, status, usage: status.usage, limits: status.limits });
         checkIfUnknown(status);
       } catch (err) {
         addNotice("error", `Couldn't start a new chat: ${messageOf(err)}`);

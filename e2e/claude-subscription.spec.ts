@@ -128,8 +128,8 @@ test.describe("The Assistant on your Claude subscription (experimental)", () => 
     const card = sheet(page).getByRole("alertdialog", { name: "Allow Claude to save this prototype?" });
     await expect(card).toBeVisible();
     await expect(card.getByRole("button")).toHaveText(["Allow", "Allow for this chat", "Don't allow"]);
-    // Nothing is picked for you: focus is on the card, not a choice.
-    await expect(card).toBeFocused();
+    // Nothing is picked for you, and the field keeps focus, so what you type next can't answer it.
+    await expect(field).toBeFocused();
     await screenshot(page, "subscription-05-permission");
 
     await card.getByRole("button", { name: "Allow", exact: true }).click();

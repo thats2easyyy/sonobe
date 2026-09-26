@@ -31,6 +31,12 @@ function mount(props: Partial<ComposerProps> = {}) {
   return container.querySelector("textarea")!;
 }
 
+/** The tooltip text a keyboard-focused element shows. */
+function tooltipOf(el: Element | null) {
+  act(() => (el as HTMLElement).focus());
+  return document.querySelector('[role="tooltip"]')?.textContent ?? "";
+}
+
 function type(textarea: HTMLTextAreaElement, value: string) {
   act(() => {
     Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")!.set!.call(textarea, value);
@@ -76,19 +82,29 @@ describe("Composer", () => {
     const meter = container.querySelector(".sb-assistant-usage");
     expect(meter).not.toBeNull();
     expect(container.querySelector('[role="meter"]')?.getAttribute("aria-valuetext")).toBe("500K of 1M budget used in this chat");
-    expect(meter?.getAttribute("title")).toMatch(/^Cache reads count at a tenth and cache writes at 1\.25×, the way they're billed\. Estimated at list prices/);
-    expect(meter?.getAttribute("title")).toContain("900K tokens in all.");
+    expect(tooltipOf(meter)).toMatch(/^Estimated at list prices\. Your Anthropic Console shows the real bill\. Cache reads count at a tenth and cache writes at 1\.25×/);
+    expect(tooltipOf(meter)).toContain("900K tokens in all.");
 
-    // Default: always shown.
-    mount({ usage: usage(0), usageThreshold: undefined });
+    // Default: shown once there is something to count.
+    mount({ usage: usage(1_000), usageThreshold: undefined });
     expect(container.querySelector(".sb-assistant-usage")).not.toBeNull();
+  });
+
+  it("shows no usage meter before the first reply, on the API key", () => {
+    mount({ usage: usage(0) });
+    expect(container.querySelector(".sb-assistant-usage")).toBeNull();
+    mount({ usage: null });
+    expect(container.querySelector(".sb-assistant-usage")).toBeNull();
+    // The plan's meter stays: it says who pays.
+    mount({ usage: usage(0), provider: "subscription", billedTo: "Anthropic API key" });
+    expect(container.querySelector(".sb-assistant-usage__text")?.textContent).toBe("0 tokens · billed to Anthropic API key");
   });
 
   it("falls back to total tokens from hosts that don't send budget tokens", () => {
     const { budgetTokens: _budget, ...older } = usage(250_000);
     mount({ usage: older });
     expect(container.querySelector('[role="meter"]')?.getAttribute("aria-valuetext")).toBe("250K of 1M budget used in this chat");
-    expect(container.querySelector(".sb-assistant-usage")?.getAttribute("title")).not.toContain("in all");
+    expect(tooltipOf(container.querySelector(".sb-assistant-usage"))).not.toContain("in all");
   });
 
   it("clears the text once an async send says it went, unless it changed meanwhile", async () => {
@@ -124,7 +140,7 @@ describe("Composer", () => {
   it("on the Claude subscription, says what pays when it isn't the plan", () => {
     mount({ usage: usage(12_400), provider: "subscription", billedTo: "Anthropic API key" });
     expect(container.querySelector(".sb-assistant-usage__text")?.textContent).toBe("12K tokens · billed to Anthropic API key");
-    expect(container.querySelector(".sb-assistant-usage")?.getAttribute("title")).toBe(
+    expect(tooltipOf(container.querySelector(".sb-assistant-usage"))).toBe(
       "Tokens this chat used, as Claude's agent adapter counts them. Claude's adapter is set to use Anthropic API key, so that pays for them at its own rates, not your Claude plan.",
     );
   });

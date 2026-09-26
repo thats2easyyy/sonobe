@@ -1,6 +1,7 @@
 import { ArrowUp, Square } from "lucide-react";
-import { forwardRef, useState, type KeyboardEvent } from "react";
+import { forwardRef, useRef, useState, type KeyboardEvent } from "react";
 import { IconButton } from "../../ui/IconButton.tsx";
+import { Tooltip } from "../../ui/Tooltip.tsx";
 import { TextArea } from "../../ui/TextField.tsx";
 import { budgetFraction, formatCost, formatTokens } from "./format.ts";
 import type { AssistantLimits, AssistantProvider, AssistantUsage } from "./types.ts";
@@ -25,6 +26,9 @@ export interface ComposerProps {
   provider?: AssistantProvider;
   /** On the subscription, what pays when it isn't the person's Claude plan (billedElsewhere: "Anthropic API key"). */
   billedTo?: string | null;
+  /** The text in the field, when the parent keeps it (the drawer does, so a draft outlives the sheet). Omit it and the field keeps its own. */
+  value?: string;
+  onValueChange?: (value: string) => void;
 }
 
 /** What the budget counts: billed-weight tokens, or the plain total from older hosts. */
@@ -34,15 +38,17 @@ const budgetUsed = (usage: AssistantUsage | null) => usage?.budgetTokens ?? usag
 export function UsageMeter({ usage, limits, provider = "api_key", billedTo = null }: { usage: AssistantUsage | null; limits: AssistantLimits | null; provider?: AssistantProvider; billedTo?: string | null }) {
   if (provider === "subscription") {
     const total = usage?.totalTokens ?? 0;
-    const title = billedTo
+    const explanation = billedTo
       ? `Tokens this chat used, as Claude's agent adapter counts them. Claude's adapter is set to use ${billedTo}, so that pays for them at its own rates, not your Claude plan.`
       : "Tokens this chat used, as Claude's agent adapter counts them. Your Claude plan's own usage limits apply.";
     return (
-      <div className="sb-assistant-usage" title={title}>
-        <span className="sb-assistant-usage__text">
-          {formatTokens(total)} tokens · {billedTo ? `billed to ${billedTo}` : "your Claude plan"}
-        </span>
-      </div>
+      <Tooltip content={explanation} placement="top">
+        <div className="sb-assistant-usage" tabIndex={0}>
+          <span className="sb-assistant-usage__text">
+            {formatTokens(total)} tokens · {billedTo ? `billed to ${billedTo}` : "your Claude plan"}
+          </span>
+        </div>
+      </Tooltip>
     );
   }
   const used = budgetUsed(usage);
@@ -50,32 +56,42 @@ export function UsageMeter({ usage, limits, provider = "api_key", billedTo = nul
   const fraction = budgetFraction(used, budget);
   const level = fraction >= 0.9 ? "high" : fraction >= 0.7 ? "medium" : "low";
   const label = budget ? `${formatTokens(used)} of ${formatTokens(budget)} budget used in this chat` : `${formatTokens(used)} tokens used in this chat`;
-  const title = [
-    "Cache reads count at a tenth and cache writes at 1.25×, the way they're billed.",
-    "Estimated at list prices from input, cache and output tokens. Your Anthropic Console shows what you're actually billed.",
+  const explanation = [
+    "Estimated at list prices. Your Anthropic Console shows the real bill.",
+    "Cache reads count at a tenth and cache writes at 1.25×, as they're billed.",
     usage?.cacheReadTokens ? `${formatTokens(usage.cacheReadTokens)} tokens came from the prompt cache.` : "",
     usage && usage.budgetTokens !== undefined ? `${formatTokens(usage.totalTokens)} tokens in all.` : "",
   ]
     .filter(Boolean)
     .join(" ");
   return (
-    <div className="sb-assistant-usage" title={title}>
-      <div className="sb-assistant-usage__bar" role="meter" aria-label="Token budget" aria-valuemin={0} aria-valuemax={budget || 1} aria-valuenow={used} aria-valuetext={label} data-level={level}>
-        <span style={{ width: `${Math.round(fraction * 100)}%` }} />
+    <Tooltip content={explanation} placement="top">
+      <div className="sb-assistant-usage" tabIndex={0}>
+        <div className="sb-assistant-usage__bar" role="meter" aria-label="Token budget" aria-valuemin={0} aria-valuemax={budget || 1} aria-valuenow={used} aria-valuetext={label} data-level={level}>
+          <span style={{ width: `${Math.round(fraction * 100)}%` }} />
+        </div>
+        <span className="sb-assistant-usage__text">
+          {formatTokens(used)}
+          {budget ? ` / ${formatTokens(budget)}` : ""} tokens · ≈ {formatCost(usage?.estimatedCostUsd ?? 0)}
+        </span>
       </div>
-      <span className="sb-assistant-usage__text">
-        {formatTokens(used)}
-        {budget ? ` / ${formatTokens(budget)}` : ""} tokens · ≈ {formatCost(usage?.estimatedCostUsd ?? 0)}
-      </span>
-    </div>
+    </Tooltip>
   );
 }
 
 /** Message field with Send and Stop. Enter sends; Shift+Enter adds a line. */
-export const Composer = forwardRef<HTMLTextAreaElement, ComposerProps>(function Composer({ running, disabled = false, onSend, onStop, usage, limits, placeholder, ariaLabel, ariaDescribedBy, sendLabel = "Send", usageThreshold = 0, provider = "api_key", billedTo = null }, ref) {
-  const [text, setText] = useState("");
+export const Composer = forwardRef<HTMLTextAreaElement, ComposerProps>(function Composer({ running, disabled = false, onSend, onStop, usage, limits, placeholder, ariaLabel, ariaDescribedBy, sendLabel = "Send", usageThreshold = 0, provider = "api_key", billedTo = null, value, onValueChange }, ref) {
+  const [own, setOwn] = useState("");
+  const text = value ?? own;
+  const current = useRef(text);
+  current.current = text;
+  const setText = (next: string) => {
+    if (value === undefined) setOwn(next);
+    onValueChange?.(next);
+  };
   const canSend = !disabled && !running && text.trim().length > 0;
-  const showMeter = provider === "subscription" ? usageThreshold === 0 : budgetFraction(budgetUsed(usage), limits?.tokenBudget ?? 0) >= usageThreshold;
+  // Nothing to show before the first reply: an empty api_key meter is a row of zeros.
+  const showMeter = provider === "subscription" ? usageThreshold === 0 : budgetUsed(usage) > 0 && budgetFraction(budgetUsed(usage), limits?.tokenBudget ?? 0) >= usageThreshold;
 
   const send = () => {
     if (!canSend) return;
@@ -83,7 +99,7 @@ export const Composer = forwardRef<HTMLTextAreaElement, ComposerProps>(function 
     if (sent === false) return;
     if (sent instanceof Promise) {
       void sent.then((ok) => {
-        if (ok) setText((current) => (current === text ? "" : current));
+        if (ok && current.current === text) setText("");
       });
       return;
     }
@@ -106,7 +122,7 @@ export const Composer = forwardRef<HTMLTextAreaElement, ComposerProps>(function 
           rows={1}
           aria-label={ariaLabel ?? "Message the Assistant"}
           aria-describedby={ariaDescribedBy}
-          placeholder={placeholder ?? (disabled ? "Add an API key to start chatting" : "Describe what to build or ask a question…")}
+          placeholder={placeholder ?? (disabled ? "Add an API key to start chatting" : running ? "Claude is working… Esc to stop" : "Describe what to build or ask a question…")}
           disabled={disabled}
           onChange={(event) => setText(event.target.value)}
           onKeyDown={onKeyDown}

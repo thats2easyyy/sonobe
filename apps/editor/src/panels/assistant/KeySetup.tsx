@@ -1,4 +1,4 @@
-import { CircleAlert, CircleCheck, ExternalLink, KeyRound, LoaderCircle, Plug, ShieldCheck } from "lucide-react";
+import { ChevronRight, CircleAlert, CircleCheck, ExternalLink, LoaderCircle } from "lucide-react";
 import { useId, useState } from "react";
 import { Button } from "../../ui/Button.tsx";
 import { TextField } from "../../ui/TextField.tsx";
@@ -63,26 +63,8 @@ export function KeySetup({ controller, status, keyCheck, onConnectClaude, onDone
   return (
     <div className="sb-assistant-key">
       <div className="sb-assistant-key__intro">
-        <span className="sb-assistant-key__icon" aria-hidden>
-          <KeyRound size={18} strokeWidth={1.75} />
-        </span>
         <h3 className="sb-assistant-key__title">Use your own Anthropic API key</h3>
-        <p className="sb-assistant-key__lead">The Assistant chats with Claude using an API key from your Anthropic account. Usage is billed to that account at API rates, separately from any Claude plan.</p>
-      </div>
-
-      <div className="sb-assistant-callout" data-tone="ai">
-        <Plug size={15} aria-hidden className="sb-assistant-callout__icon" />
-        <div>
-          <p className="sb-assistant-callout__title">Prefer your Claude subscription?</p>
-          <p className="sb-assistant-callout__body">
-            {subscriptionEnabled
-              ? "Choose Claude subscription above, or connect Claude Desktop or Claude Code to Sonobe and build with your own Claude plan there. No API key needed."
-              : "Connect Claude Desktop or Claude Code to Sonobe and build with your own Claude plan. No API key needed."}
-          </p>
-          <Button size="sm" variant="ghost" className="sb-assistant-callout__action" onClick={onConnectClaude}>
-            Connect Claude Desktop or Claude Code
-          </Button>
-        </div>
+        <p className="sb-assistant-key__lead">Usage is billed to your Anthropic account at API rates.</p>
       </div>
 
       {status.hasKey ? (
@@ -119,64 +101,56 @@ export function KeySetup({ controller, status, keyCheck, onConnectClaude, onDone
               </Button>
             ) : null}
           </div>
-          <p className="sb-assistant-key__replace">To use a different key, paste it below.</p>
         </div>
       ) : null}
 
-      <ol className="sb-assistant-key__steps">
-        <li>
-          <span className="sb-assistant-key__step-title">Create a key</span>
-          <span className="sb-assistant-key__step-body">
-            Sign in at{" "}
-            <button type="button" className="sb-assistant-link" onClick={() => controller.openConsole()}>
-              console.anthropic.com
-              <ExternalLink size={11} aria-hidden />
-            </button>{" "}
-            and create an API key under Settings → API Keys.
-          </span>
-        </li>
-        <li>
-          <label className="sb-assistant-key__step-title" htmlFor={fieldId}>
-            Paste it here
+      <div className="sb-assistant-key__field">
+        <div className="sb-assistant-key__label-row">
+          <label className="sb-assistant-key__label" htmlFor={fieldId}>
+            {status.hasKey ? "Replace key" : "API key"}
           </label>
-          <form
-            className="sb-assistant-key__form"
-            onSubmit={(event) => {
-              event.preventDefault();
-              void save();
+          <button type="button" className="sb-assistant-link" onClick={() => controller.openConsole()}>
+            console.anthropic.com
+            <ExternalLink size={11} aria-hidden />
+          </button>
+        </div>
+        <form
+          className="sb-assistant-key__form"
+          onSubmit={(event) => {
+            event.preventDefault();
+            void save();
+          }}
+        >
+          <TextField
+            id={fieldId}
+            type="password"
+            mono
+            value={value}
+            placeholder="sk-ant-…"
+            autoComplete="off"
+            spellCheck={false}
+            aria-describedby={hintId}
+            invalid={!!error}
+            disabled={!secretsOk || saving}
+            onChange={(event) => {
+              setValue(event.target.value);
+              setError(null);
             }}
-          >
-            <TextField
-              id={fieldId}
-              type="password"
-              mono
-              value={value}
-              placeholder="sk-ant-…"
-              autoComplete="off"
-              spellCheck={false}
-              aria-describedby={hintId}
-              invalid={!!error}
-              disabled={!secretsOk || saving}
-              onChange={(event) => {
-                setValue(event.target.value);
-                setError(null);
-              }}
-            />
-            <Button type="submit" variant="primary" disabled={!secretsOk || !value.trim()} loading={saving}>
-              Save key
-            </Button>
-          </form>
-          {error ? (
-            <p className="sb-assistant-key__status" data-tone="danger" role="alert">
-              {error}
-            </p>
-          ) : validation?.warning ? (
-            <p className="sb-assistant-key__status" data-tone="warn">
-              {validation.warning}
-            </p>
-          ) : null}
-        </li>
-      </ol>
+          />
+          <Button type="submit" variant="primary" disabled={!secretsOk || !value.trim()} loading={saving}>
+            Save key
+          </Button>
+        </form>
+        {error ? (
+          <p className="sb-assistant-key__status" data-tone="danger" role="alert">
+            {error}
+          </p>
+        ) : validation?.warning ? (
+          <p className="sb-assistant-key__status" data-tone="warn">
+            {validation.warning}
+          </p>
+        ) : null}
+      </div>
 
       {!secretsOk ? (
         <div className="sb-assistant-callout" data-tone="warn" role="alert">
@@ -188,14 +162,36 @@ export function KeySetup({ controller, status, keyCheck, onConnectClaude, onDone
         </div>
       ) : null}
 
-      <div className="sb-assistant-privacy" id={hintId}>
-        <ShieldCheck size={15} aria-hidden className="sb-assistant-privacy__icon" />
-        <ul>
-          <li>Your key is encrypted with {backend} and kept in Sonobe's app data, never in your project files. Only Sonobe's main process reads it, to call Anthropic's API.</li>
-          <li>When you chat, your messages, the parts of this prototype the Assistant reads, and any files it reads from a code folder you link are sent to Anthropic's API.</li>
-          {/* The Claude subscription's Sign in… opens Claude Code's own login in Terminal. */}
-          <li>{subscriptionEnabled ? "Sonobe never reads Claude credentials." : "Sonobe never asks for your claude.ai login and never reads Claude credentials."}</li>
-        </ul>
+      <div className="sb-assistant-privacy">
+        <p id={hintId} className="sb-assistant-privacy__summary">
+          Your key is encrypted with {backend} and never stored in your project files.
+        </p>
+        <details className="sb-assistant-privacy__details">
+          <summary className="sb-assistant-privacy__toggle">
+            <ChevronRight size={12} aria-hidden />
+            Details
+          </summary>
+          <ul>
+            <li>Only Sonobe's main process reads the key, to call Anthropic's API.</li>
+            <li>When you chat, your messages, the parts of this prototype the Assistant reads, and any files it reads from a code folder you link are sent to Anthropic's API.</li>
+            {/* The Claude subscription's Sign in… opens Claude Code's own login in Terminal. */}
+            <li>{subscriptionEnabled ? "Sonobe never reads Claude credentials." : "Sonobe never asks for your claude.ai login and never reads Claude credentials."}</li>
+          </ul>
+        </details>
+      </div>
+
+      <div className="sb-assistant-callout" data-tone="ai">
+        <div>
+          <p className="sb-assistant-callout__title">Prefer your Claude subscription?</p>
+          <p className="sb-assistant-callout__body">
+            {subscriptionEnabled
+              ? "Choose Claude subscription above, or connect Claude Desktop or Claude Code to Sonobe and build with your own Claude plan there. No API key needed."
+              : "Connect Claude Desktop or Claude Code to Sonobe and build with your own Claude plan. No API key needed."}
+          </p>
+          <Button size="sm" variant="ghost" className="sb-assistant-callout__action" onClick={onConnectClaude}>
+            Connect Claude Desktop or Claude Code
+          </Button>
+        </div>
       </div>
     </div>
   );

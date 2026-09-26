@@ -13,7 +13,7 @@ import { FilePlus, FolderOpen, FolderSearch, Save, SaveAll, ScanLine, X } from "
 import { lazy, Suspense, useEffect, useState, type ReactNode } from "react";
 import { getDesktopHostApi } from "../host/detect.ts";
 import { registerRpcHandlers } from "../host/rpcHandlers.ts";
-import { useAssistant } from "../panels/assistant/assistantStore.ts";
+import { assistantStore, useAssistant } from "../panels/assistant/assistantStore.ts";
 import { assistantCommand } from "../panels/assistant/commands.ts";
 import { CanvasPanel } from "../panels/canvas/CanvasPanel.tsx";
 import { ConnectClaudeButton } from "../panels/connect/ConnectClaudeButton.tsx";
@@ -45,6 +45,7 @@ import { appPanels, useAppPanels } from "./appPanels.ts";
 import { ExternalChangeBanner } from "./ExternalChangeBanner.tsx";
 import { useHudAutoOpen } from "./hudAutoOpen.ts";
 import { learnNav, useLearnNav } from "./learnStore.ts";
+import { keepOneRightDrawer } from "./rightDrawers.ts";
 import { ServiceDialogs } from "./ServiceDialogs.tsx";
 import { ScriptTrustBanner } from "./ScriptTrustBanner.tsx";
 import { getAppSession } from "./session.ts";
@@ -235,6 +236,8 @@ function Workspace() {
       }),
     [session],
   );
+
+  useEffect(() => keepOneRightDrawer(layoutStore, assistantStore, lessonLayout), []);
 
   // A lesson layout saved before a reload, with no lesson left to show: put the normal layout back.
   useEffect(() => {

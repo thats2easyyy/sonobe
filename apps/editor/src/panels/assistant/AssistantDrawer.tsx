@@ -1,4 +1,4 @@
-import { CircleUserRound, KeyRound, LoaderCircle, MessageSquarePlus, Monitor, ScanLine, Sparkles, TriangleAlert, X } from "lucide-react";
+import { CircleUserRound, KeyRound, LoaderCircle, MessageSquarePlus, Monitor, ScanLine, TriangleAlert, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { StoreApi } from "zustand/vanilla";
 import { appPanels } from "../../app/appPanels.ts";
@@ -8,6 +8,7 @@ import { EmptyState } from "../../ui/EmptyState.tsx";
 import { IconButton } from "../../ui/IconButton.tsx";
 import { SegmentedControl } from "../../ui/SegmentedControl.tsx";
 import { Select, type SelectOption } from "../../ui/Select.tsx";
+import { Tooltip } from "../../ui/Tooltip.tsx";
 import { cx } from "../../ui/lib/cx.ts";
 import { connectClaudeStore } from "../connect/connectStore.ts";
 import { assistantStore as defaultStore, useAssistant, type AssistantState } from "./assistantStore.ts";
@@ -34,6 +35,9 @@ export interface AssistantDrawerProps {
   controller?: AssistantController;
   className?: string;
 }
+
+/** "Quickest and cheapest, for small edits." → "Quickest and cheapest": the menu rows are one line. */
+const gist = (text: string) => text.split(/[.,]\s|\.$/)[0] ?? text;
 
 /**
  * The Assistant drawer: chat with Claude using the person's own Anthropic API key (or, with the
@@ -63,7 +67,9 @@ export function AssistantDrawer({ onClose, onConnectClaude, onImportDesign, host
   const limits = useAssistant((s) => s.limits, store);
   const keyCheck = useAssistant((s) => s.keyCheck, store);
   const managing = useAssistant((s) => s.setup, store);
+  const draft = useAssistant((s) => s.draft, store);
   const setManaging = (setup: boolean) => store.getState().setSetup(setup);
+  const rootRef = useRef<HTMLElement>(null);
   const composerRef = useRef<HTMLTextAreaElement>(null);
   // The login's last answer (not "checking" or "unknown"): a check from the setup keeps it up until it answers.
   const settled = useRef<AssistantSubscriptionState | null>(null);
@@ -86,10 +92,10 @@ export function AssistantDrawer({ onClose, onConnectClaude, onImportDesign, host
     label: m.label,
     description:
       provider !== "subscription"
-        ? `${m.description} $${m.pricing.input}/$${m.pricing.output} per million tokens (in/out).`
+        ? `${gist(m.description)} · $${m.pricing.input} in / $${m.pricing.output} out per 1M tokens`
         : billedTo
-          ? `${m.description} Billed to ${billedTo}.`
-          : `${m.description} Uses your Claude plan's limits.`,
+          ? `${gist(m.description)}. Billed to ${billedTo}.`
+          : `${gist(m.description)}. Uses your Claude plan's limits.`,
   }));
   const subscriptionState = status?.subscription?.state;
   if (subscriptionState && subscriptionState !== "checking" && subscriptionState !== "unknown") settled.current = subscriptionState;
@@ -112,7 +118,30 @@ export function AssistantDrawer({ onClose, onConnectClaude, onImportDesign, host
     void controller.send(text);
   };
 
-  const subtitle = controller.available ? providerSubtitle(status, provider) : { text: "Desktop only", full: "Desktop only" };
+  const focusComposer = () => requestAnimationFrame(() => composerRef.current?.focus({ preventScroll: true }));
+  const newChat = () => void controller.newChat().then(focusComposer);
+
+  // Focus goes to the message field when the sheet opens (a frame later: the palette gives focus back as it closes),
+  // after New chat, and on returning from the setup; in the setup, to its first field or button. The first time is
+  // unconditional, since opening the sheet is the person asking for it; later, not over focus they put elsewhere,
+  // and never over a question waiting for their answer, whose card has taken focus itself.
+  const surface = !controller.available || status === null ? "other" : showSetup ? "setup" : "chat";
+  const focusedOnce = useRef(false);
+  useEffect(() => {
+    if (surface === "other") return;
+    const frame = requestAnimationFrame(() => {
+      const first = !focusedOnce.current;
+      focusedOnce.current = true;
+      if (surface === "chat" && store.getState().items.some((item) => item.kind === "confirm" && item.status === "pending")) return;
+      const active = document.activeElement;
+      if (!first && active && active !== document.body && !rootRef.current?.contains(active)) return;
+      const target = surface === "chat" ? composerRef.current : (rootRef.current?.querySelector<HTMLElement>("input:not(:disabled)") ?? rootRef.current?.querySelector<HTMLElement>(".sb-assistant__scroll .sb-btn:not(:disabled)"));
+      target?.focus({ preventScroll: true });
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [surface, store]);
+
+  const subtitle = providerSubtitle(status, provider);
 
   let body;
   if (!controller.available) {
@@ -195,6 +224,7 @@ export function AssistantDrawer({ onClose, onConnectClaude, onImportDesign, host
             composerRef.current?.focus({ preventScroll: true });
           }}
           onManageKey={() => setManaging(true)}
+          onNewChat={newChat}
           onSuggestion={(text) => {
             send(text);
             composerRef.current?.focus();
@@ -203,18 +233,19 @@ export function AssistantDrawer({ onClose, onConnectClaude, onImportDesign, host
         {provider !== active ? (
           <p className="sb-assistant-provider-note">
             This chat uses {providerName(provider)}. A new chat uses {providerName(active)}.{" "}
-            <button type="button" className="sb-assistant-link" disabled={running} onClick={() => void controller.newChat()}>
+            <button type="button" className="sb-assistant-link" disabled={running} onClick={newChat}>
               New chat
             </button>
           </p>
         ) : null}
-        <Composer ref={composerRef} running={running} onSend={send} onStop={() => void controller.stop()} usage={usage} limits={limits} provider={provider} billedTo={billedTo} />
+        <Composer ref={composerRef} running={running} onSend={send} onStop={() => void controller.stop()} usage={usage} limits={limits} provider={provider} billedTo={billedTo} value={draft} onValueChange={store.getState().setDraft} />
       </>
     );
   }
 
   return (
     <section
+      ref={rootRef}
       className={cx("sb-assistant", className)}
       aria-label="Assistant"
       onKeyDown={(event) => {
@@ -226,32 +257,45 @@ export function AssistantDrawer({ onClose, onConnectClaude, onImportDesign, host
       }}
     >
       <header className="sb-assistant__header">
-        <span className="sb-assistant__mark" aria-hidden>
-          <Sparkles size={14} strokeWidth={2} />
-        </span>
-        <div className="sb-assistant__heading">
-          <h2 className="sb-assistant__title">Assistant</h2>
-          <p className="sb-assistant__subtitle" data-tone={billedTo ? "warn" : undefined} title={subtitle.full}>
-            {billedTo ? <TriangleAlert size={11} aria-hidden className="sb-assistant__subtitle-icon" /> : null}
-            {subtitle.text}
-          </p>
-        </div>
+        <h2 className="sb-assistant__title">Assistant</h2>
         <div className="sb-assistant__actions">
           {controller.available && status && !showSetup ? (
             <>
-              <Select options={modelOptions} value={model} onChange={(id) => store.getState().setModel(id)} aria-label="Model" size="sm" variant="ghost" disabled={running} searchable={false} renderValue={(option) => option?.label.replace(/^Claude /, "") ?? "Model"} />
-              <IconButton icon={<MessageSquarePlus size={15} />} label="New chat" size="sm" disabled={items.length === 0 && !running} onClick={() => void controller.newChat()} />
+              <Select
+                options={modelOptions}
+                value={model}
+                onChange={(id) => store.getState().setModel(id)}
+                aria-label="Model"
+                size="sm"
+                variant="ghost"
+                disabled={running}
+                searchable={false}
+                menuWidth={440}
+                placement="bottom-end"
+                renderValue={(option) => option?.label.replace(/^Claude /, "") ?? "Model"}
+              />
+              <IconButton icon={<MessageSquarePlus size={14} />} label="New chat" size="sm" disabled={items.length === 0 && !running} onClick={newChat} />
               {provider === "subscription" && !switchedOff ? (
-                <IconButton icon={<CircleUserRound size={15} />} label="Claude subscription" size="sm" onClick={() => setManaging(true)} />
+                <IconButton icon={<CircleUserRound size={14} />} label="Claude subscription" size="sm" onClick={() => setManaging(true)} />
               ) : (
-                <IconButton icon={<KeyRound size={15} />} label="API key" size="sm" onClick={() => setManaging(true)} />
+                <IconButton icon={<KeyRound size={14} />} label="API key" size="sm" onClick={() => setManaging(true)} />
               )}
             </>
           ) : null}
-          {onClose ? <IconButton icon={<X size={15} />} label="Close Assistant" size="sm" onClick={onClose} /> : null}
+          {onClose ? <IconButton icon={<X size={14} />} label="Close Assistant" size="sm" onClick={onClose} /> : null}
         </div>
       </header>
-      <div className="sb-assistant__body">{body}</div>
+      <div className="sb-assistant__body">
+        {controller.available && status && (provider === "subscription" || status.hasKey) ? (
+          <Tooltip content={subtitle.full} placement="bottom-start" disabled={subtitle.full === subtitle.text}>
+            <p className="sb-assistant__subtitle" data-tone={billedTo ? "warn" : undefined} tabIndex={subtitle.full === subtitle.text ? undefined : 0}>
+              {billedTo ? <TriangleAlert size={11} aria-hidden className="sb-assistant__subtitle-icon" /> : null}
+              {subtitle.text}
+            </p>
+          </Tooltip>
+        ) : null}
+        {body}
+      </div>
     </section>
   );
 }

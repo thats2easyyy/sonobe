@@ -11,7 +11,9 @@ export function assistantCommand(toggle: () => void = () => assistantStore.getSt
   return {
     id: ASSISTANT_COMMAND_ID,
     title: "Assistant",
-    category: "Help",
+    category: "View",
+    shortcut: "Mod+6",
+    allowInInput: true,
     description: "Chat with Claude inside Sonobe using your own Anthropic API key",
     keywords: ["ai", "chat", "claude", "api key", "anthropic", "build", "help me"],
     icon: Sparkles,

@@ -117,9 +117,11 @@ describe("assistant controller", () => {
     expect(host.confirmations).toEqual([["c1", false]]);
     expect(store.getState().items.at(-1)).toMatchObject({ kind: "confirm", status: "declined" });
 
+    store.getState().setDraft("an unsent thought");
     await controller.newChat();
     expect(host.resets).toBe(1);
     expect(store.getState().items).toEqual([]);
+    expect(store.getState().draft).toBe("");
 
     controller.openConsole();
     expect(host.opened).toEqual([ANTHROPIC_CONSOLE_KEYS_URL]);

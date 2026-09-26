@@ -63,6 +63,8 @@ export interface AssistantState {
   usage: AssistantUsage | null;
   limits: AssistantLimits | null;
   keyCheck: KeyCheckState;
+  /** The unsent message in the composer: it outlives the sheet closing and a visit to the setup. */
+  draft: string;
   show: () => void;
   hide: () => void;
   toggle: () => void;
@@ -71,9 +73,10 @@ export interface AssistantState {
   showSetup: () => void;
   setSetup: (setup: boolean) => void;
   setModel: (model: string) => void;
+  setDraft: (draft: string) => void;
 }
 
-export type AssistantData = Omit<AssistantState, "show" | "hide" | "toggle" | "setOpen" | "showSetup" | "setSetup" | "setModel">;
+export type AssistantData = Omit<AssistantState, "show" | "hide" | "toggle" | "setOpen" | "showSetup" | "setSetup" | "setModel" | "setDraft">;
 
 let itemCounter = 0;
 /** Local ids for transcript items. */
@@ -108,9 +111,12 @@ function latestTurn(items: ChatItem[], runId: string): number | null {
   return null;
 }
 
-const OUTCOME_NOTICES: Partial<Record<string, { tone: "info" | "warn"; text: string }>> = {
-  stopped: { tone: "info", text: "Stopped." },
+const OUTCOME_NOTICES: Partial<Record<string, { tone: "info" | "warn"; text: string; code?: string }>> = {
+  stopped: { tone: "info", text: "Stopped.", code: "stopped" },
 };
+
+/** The newest message came from the canvas's Design with Claude box, which shows its own confirmations. */
+const fromCanvas = (items: readonly ChatItem[]): boolean => items.findLast((item) => item.kind === "user")?.origin === "canvas";
 
 /** Fold one host event into state. Pure. */
 export function reduceEvent(state: AssistantData, event: AssistantEvent): Partial<AssistantData> {
@@ -159,6 +165,8 @@ export function reduceEvent(state: AssistantData, event: AssistantEvent): Partia
       };
     case "confirm_required":
       return {
+        // A question nobody can see stalls the run: the sheet opens for it, unless the canvas's box shows it.
+        ...(!state.open && !fromCanvas(state.items) ? { open: true } : {}),
         items: [
           ...state.items,
           {
@@ -198,8 +206,13 @@ export function reduceEvent(state: AssistantData, event: AssistantEvent): Partia
               ? { ...item, status: "declined" as const }
               : item,
         );
+      // The budget notice arrives as a plain notice event; the outcome tells which one it was.
+      if (event.outcome === "budget") {
+        const at = items.findLastIndex((item) => item.kind === "notice");
+        items = items.map((item, i) => (i === at && item.kind === "notice" ? { ...item, code: "budget" } : item));
+      }
       const notice = OUTCOME_NOTICES[event.outcome];
-      if (notice) items = [...items, { kind: "notice", id: nextItemId("notice"), tone: notice.tone, text: notice.text }];
+      if (notice) items = [...items, { kind: "notice", id: nextItemId("notice"), tone: notice.tone, text: notice.text, ...(notice.code ? { code: notice.code } : {}) }];
       if (event.error) items = [...items, { kind: "notice", id: nextItemId("error"), tone: "error", text: event.error.message, code: event.error.code }];
       return {
         items,
@@ -233,7 +246,7 @@ function storedModel(): string {
 }
 
 export function initialAssistantData(model: string = DEFAULT_MODEL_ID): AssistantData {
-  return { open: false, setup: false, status: null, statusError: null, items: [], running: false, runId: null, thinking: false, model, usage: null, limits: null, keyCheck: { state: "idle" } };
+  return { open: false, setup: false, status: null, statusError: null, items: [], running: false, runId: null, thinking: false, model, usage: null, limits: null, keyCheck: { state: "idle" }, draft: "" };
 }
 
 export function createAssistantStore(options: { persistModel?: boolean } = {}): StoreApi<AssistantState> {
@@ -251,6 +264,7 @@ export function createAssistantStore(options: { persistModel?: boolean } = {}): 
       if (persist) writeString(MODEL_STORAGE_KEY, model);
       set({ model });
     },
+    setDraft: (draft) => set({ draft }),
   }));
 }
 

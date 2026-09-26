@@ -16,41 +16,30 @@
   flex: none;
   align-items: center;
   gap: var(--space-4);
-  min-height: var(--panel-header-h);
-  padding: var(--space-3) var(--space-3) var(--space-3) var(--space-5);
+  height: var(--panel-header-h);
+  padding: 0 var(--space-3) 0 var(--space-5);
   border-bottom: 1px solid var(--border-subtle);
 }
 
-.sb-assistant__mark {
-  display: inline-flex;
-  flex: none;
-  align-items: center;
-  justify-content: center;
-  width: 24px;
-  height: 24px;
-  border-radius: var(--radius-md);
-  background: var(--ai-soft);
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--ai) 22%, transparent);
-  color: var(--ai-text);
-}
-
-.sb-assistant__heading {
+.sb-assistant__title {
   flex: 1 1 auto;
   min-width: 0;
-}
-
-.sb-assistant__title {
   margin: 0;
   font-size: var(--font-size-md);
   font-weight: var(--font-weight-semibold);
   line-height: var(--line-height-tight);
 }
 
+/* What the chat runs on, and what pays for it: a strip under the header so the billing text is always in view. */
 .sb-assistant__subtitle {
-  margin: 1px 0 0;
+  flex: none;
+  height: 22px;
+  margin: 0;
+  padding: 0 var(--space-5);
   overflow: hidden;
   color: var(--text-tertiary);
   font-size: var(--font-size-xs);
+  line-height: 22px;
   white-space: nowrap;
   text-overflow: ellipsis;
 }
@@ -61,7 +50,7 @@
 }
 
 .sb-assistant__subtitle-icon {
-  margin-right: 3px;
+  margin-right: var(--space-2);
   vertical-align: -1px;
 }
 
@@ -122,8 +111,8 @@
 
 .sb-assistant-link:focus-visible {
   border-radius: var(--radius-xs);
-  outline: none;
-  box-shadow: var(--focus-ring);
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 1px;
 }
 
 .sb-visually-hidden {
@@ -150,23 +139,10 @@
   gap: var(--space-2);
 }
 
-.sb-assistant-key__icon {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 32px;
-  height: 32px;
-  margin-bottom: var(--space-2);
-  border-radius: var(--radius-lg);
-  background: var(--ai-soft);
-  color: var(--ai-text);
-}
-
 .sb-assistant-key__title {
   margin: 0;
   font-size: var(--font-size-lg);
   font-weight: var(--font-weight-semibold);
-  letter-spacing: -0.01em;
   text-wrap: balance;
 }
 
@@ -178,53 +154,22 @@
   text-wrap: pretty;
 }
 
-.sb-assistant-key__steps {
+.sb-assistant-key__field {
   display: flex;
   flex-direction: column;
-  gap: var(--space-5);
-  margin: 0;
-  padding: 0;
-  list-style: none;
-  counter-reset: sb-key-step;
+  gap: var(--space-3);
 }
 
-.sb-assistant-key__steps > li {
-  position: relative;
+.sb-assistant-key__label-row {
   display: flex;
-  flex-direction: column;
-  gap: var(--space-2);
-  padding-left: 28px;
-  counter-increment: sb-key-step;
-}
-
-.sb-assistant-key__steps > li::before {
-  content: counter(sb-key-step);
-  position: absolute;
-  top: 0;
-  left: 0;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 18px;
-  height: 18px;
-  border-radius: var(--radius-full);
-  background: var(--bg-field);
-  box-shadow: inset 0 0 0 1px var(--border-default);
-  color: var(--text-secondary);
-  font-size: var(--font-size-2xs);
-  font-weight: var(--font-weight-semibold);
-  font-variant-numeric: tabular-nums;
-}
-
-.sb-assistant-key__step-title {
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-4);
   font-size: var(--font-size-sm);
+}
+
+.sb-assistant-key__label {
   font-weight: var(--font-weight-medium);
-}
-
-.sb-assistant-key__step-body {
-  color: var(--text-secondary);
-  font-size: var(--font-size-sm);
-  line-height: 1.5;
 }
 
 .sb-assistant-key__form {
@@ -243,7 +188,7 @@
   gap: var(--space-2);
   margin: 0;
   color: var(--text-secondary);
-  font-size: var(--font-size-xs);
+  font-size: var(--font-size-sm);
   line-height: 1.45;
 }
 
@@ -266,7 +211,6 @@
   padding: var(--space-4) var(--space-5);
   border-radius: var(--radius-lg);
   background: var(--bg-sunken);
-  box-shadow: inset 0 0 0 1px var(--border-subtle);
 }
 
 .sb-assistant-key__saved-row {
@@ -277,7 +221,7 @@
 }
 
 .sb-assistant-key__ok {
-  color: var(--success);
+  color: var(--success-text);
 }
 
 .sb-assistant-key__hint {
@@ -300,8 +244,8 @@
 
 .sb-assistant-key__replace {
   margin: 0;
-  color: var(--text-tertiary);
-  font-size: var(--font-size-xs);
+  color: var(--text-secondary);
+  font-size: var(--font-size-sm);
 }
 
 /* --- Claude subscription setup (experimental) --------------------------------------------------- */
@@ -372,7 +316,7 @@
   border-top: 1px solid var(--border-subtle);
   background: var(--bg-sunken);
   color: var(--text-secondary);
-  font-size: var(--font-size-xs);
+  font-size: var(--font-size-sm);
   line-height: 1.5;
   text-wrap: pretty;
 }
@@ -381,34 +325,30 @@
   border-top: 0;
 }
 
-/* Callouts: the subscription alternative, keychain warnings. */
+/* Callouts: keychain warnings, and the way to Claude Desktop or Claude Code, which reads as a footnote. */
 .sb-assistant-callout {
   display: flex;
   gap: var(--space-3);
   padding: var(--space-4) var(--space-5);
   border-radius: var(--radius-lg);
   background: var(--bg-sunken);
-  box-shadow: inset 0 0 0 1px var(--border-subtle);
 }
 
 .sb-assistant-callout[data-tone="ai"] {
-  background: color-mix(in srgb, var(--ai-soft) 70%, var(--bg-panel));
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--ai) 20%, transparent);
+  padding: var(--space-6) 0 0;
+  border-top: 1px solid var(--border-subtle);
+  border-radius: 0;
+  background: none;
 }
 
 .sb-assistant-callout[data-tone="warn"] {
   background: var(--warn-soft);
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--warn) 25%, transparent);
 }
 
 .sb-assistant-callout__icon {
   flex: none;
   margin-top: 2px;
   color: var(--text-secondary);
-}
-
-.sb-assistant-callout[data-tone="ai"] .sb-assistant-callout__icon {
-  color: var(--ai-text);
 }
 
 .sb-assistant-callout[data-tone="warn"] .sb-assistant-callout__icon {
@@ -424,38 +364,73 @@
 .sb-assistant-callout__body {
   margin: var(--space-1) 0 0;
   color: var(--text-secondary);
-  font-size: var(--font-size-xs);
+  font-size: var(--font-size-sm);
   line-height: 1.5;
   text-wrap: pretty;
 }
 
-.sb-assistant-callout__action {
-  margin: var(--space-2) 0 0 calc(var(--space-3) * -1);
+.sb-btn.sb-assistant-callout__action {
+  margin: var(--space-3) 0 0 calc(var(--space-4) * -1);
   color: var(--ai-text);
 }
 
 .sb-assistant-privacy {
   display: flex;
-  gap: var(--space-3);
-  color: var(--text-tertiary);
-  font-size: var(--font-size-xs);
+  flex-direction: column;
+  gap: var(--space-2);
+  color: var(--text-secondary);
+  font-size: var(--font-size-sm);
   line-height: 1.5;
 }
 
-.sb-assistant-privacy__icon {
-  flex: none;
-  margin-top: 1px;
-  color: var(--success);
+.sb-assistant-privacy__summary {
+  margin: 0;
+  text-wrap: pretty;
+}
+
+.sb-assistant-privacy__toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  color: var(--text-secondary);
+  cursor: pointer;
+  list-style: none;
+}
+
+.sb-assistant-privacy__toggle::-webkit-details-marker {
+  display: none;
+}
+
+.sb-assistant-privacy__toggle:hover {
+  color: var(--text-primary);
+}
+
+.sb-assistant-privacy__toggle:focus-visible {
+  border-radius: var(--radius-xs);
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 1px;
+}
+
+.sb-assistant-privacy__toggle svg {
+  transition: transform var(--duration-fast) var(--ease-out);
+}
+
+.sb-assistant-privacy__details[open] .sb-assistant-privacy__toggle svg {
+  transform: rotate(90deg);
 }
 
 .sb-assistant-privacy ul {
   display: flex;
   flex-direction: column;
-  gap: var(--space-2);
-  margin: 0;
+  gap: var(--space-3);
+  margin: var(--space-3) 0 0;
   padding: 0;
   list-style: none;
   text-wrap: pretty;
+}
+
+.sb-assistant-privacy > ul {
+  margin-top: 0;
 }
 
 /* --- Transcript --------------------------------------------------------------------------------- */
@@ -503,7 +478,7 @@
 .sb-assistant-msg__origin {
   margin-bottom: calc(var(--space-2) - var(--space-3));
   color: var(--text-tertiary);
-  font-size: var(--font-size-2xs);
+  font-size: var(--font-size-xs);
 }
 
 .sb-assistant-msg__md {
@@ -520,11 +495,16 @@
   margin-bottom: 0;
 }
 
-/* Tool activity chips. */
+/* The markdown's 0.88em would land under the 11px floor at this body size. */
+.sb-assistant-msg__md .sb-md__code-inline {
+  font-size: var(--font-size-xs);
+}
+
+/* Tool activity: plain rows, no boxes. Reads fold; edits carry Claude's dot. */
 .sb-assistant-tools {
   display: flex;
   flex-direction: column;
-  gap: var(--space-1);
+  gap: var(--space-2);
   margin: 0;
   padding: 0;
   list-style: none;
@@ -533,15 +513,13 @@
 .sb-assistant-tool {
   display: flex;
   align-items: center;
-  gap: var(--space-2);
+  gap: var(--space-3);
+  min-height: 20px;
   min-width: 0;
   max-width: 100%;
-  padding: 3px var(--space-3) 3px var(--space-2);
-  border-radius: var(--radius-md);
-  background: var(--bg-sunken);
-  box-shadow: inset 0 0 0 1px var(--border-subtle);
   color: var(--text-secondary);
-  font-size: var(--font-size-xs);
+  font-size: var(--font-size-sm);
+  line-height: 16px;
   animation: sb-assistant-in var(--duration-base) var(--ease-out);
 }
 
@@ -550,44 +528,112 @@
   flex: none;
   align-items: center;
   justify-content: center;
-  width: 16px;
+  width: 12px;
   height: 16px;
-  border-radius: var(--radius-full);
   color: var(--text-tertiary);
 }
 
-.sb-assistant-tool[data-status="done"] .sb-assistant-tool__icon {
-  color: var(--success);
+.sb-assistant-tool__edit {
+  width: 6px;
+  height: 6px;
+  border-radius: var(--radius-full);
+  background: var(--ai);
 }
 
-.sb-assistant-tool[data-status="done"][data-edited] .sb-assistant-tool__icon {
-  background: color-mix(in srgb, var(--ai) 16%, transparent);
-  color: var(--ai-text);
+.sb-assistant-tool[data-status="error"] {
+  align-items: flex-start;
+  color: var(--danger-text);
 }
 
 .sb-assistant-tool[data-status="error"] .sb-assistant-tool__icon {
   color: var(--danger-text);
 }
 
-.sb-assistant-tool[data-status="declined"] .sb-assistant-tool__icon,
-.sb-assistant-tool[data-status="skipped"] .sb-assistant-tool__icon {
-  color: var(--text-tertiary);
-}
-
-.sb-assistant-tool__title {
-  flex: none;
-  color: var(--text-primary);
-  font-weight: var(--font-weight-medium);
-}
-
-.sb-assistant-tool__detail {
+.sb-assistant-tool__text {
+  flex: 1 1 auto;
   min-width: 0;
   overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;
 }
 
-/* Notices (stopped, limits, errors). */
+/* A failure says what happened and what to do, so it wraps instead of cutting. */
+.sb-assistant-tool[data-status="error"] .sb-assistant-tool__text {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.sb-assistant-tool__detail {
+  color: var(--text-tertiary);
+}
+
+.sb-assistant-tool[data-status="error"] .sb-assistant-tool__detail {
+  color: inherit;
+}
+
+.sb-assistant-tool-fold {
+  min-width: 0;
+}
+
+.sb-assistant-tool-fold__toggle {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  max-width: 100%;
+  min-height: 20px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--text-secondary);
+  font: inherit;
+  font-size: var(--font-size-sm);
+  line-height: 16px;
+  text-align: left;
+  cursor: pointer;
+  transition: color var(--duration-fast) var(--ease-standard);
+}
+
+.sb-assistant-tool-fold__toggle::after {
+  content: "";
+  position: absolute;
+  inset: -2px 0;
+}
+
+.sb-assistant-tool-fold__toggle:hover {
+  color: var(--text-primary);
+}
+
+.sb-assistant-tool-fold__toggle:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 1px;
+}
+
+.sb-assistant-tool-fold__toggle svg {
+  flex: none;
+  color: var(--text-tertiary);
+  transition: transform var(--duration-fast) var(--ease-out);
+}
+
+.sb-assistant-tool-fold__toggle[aria-expanded="true"] svg {
+  transform: rotate(90deg);
+}
+
+.sb-assistant-tool-fold__count {
+  color: var(--text-tertiary);
+  white-space: pre;
+}
+
+.sb-assistant-tool-fold > .sb-assistant-tools {
+  margin-top: var(--space-2);
+  padding-left: var(--space-5);
+}
+
+/* Notices (limits, errors). */
 .sb-assistant-notice {
   display: flex;
   align-items: flex-start;
@@ -596,7 +642,7 @@
   border-radius: var(--radius-md);
   background: var(--bg-sunken);
   color: var(--text-secondary);
-  font-size: var(--font-size-xs);
+  font-size: var(--font-size-sm);
   line-height: 1.5;
   animation: sb-assistant-in var(--duration-base) var(--ease-out);
 }
@@ -613,7 +659,7 @@
 
 .sb-assistant-notice__icon {
   flex: none;
-  margin-top: 2px;
+  margin-top: 3px;
 }
 
 .sb-assistant-notice__text {
@@ -622,13 +668,31 @@
   text-wrap: pretty;
 }
 
-.sb-assistant-notice__action {
+.sb-btn.sb-assistant-notice__action {
   flex: none;
   margin: -3px -6px -3px 0;
   color: inherit;
 }
 
-/* Deletion confirmation. */
+/* "Stopped." is a line in the margin of the chat, not a message. */
+.sb-assistant-stopped {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  margin: 0;
+  color: var(--text-tertiary);
+  font-size: var(--font-size-xs);
+}
+
+.sb-assistant-stopped::before,
+.sb-assistant-stopped::after {
+  content: "";
+  flex: 1 1 0;
+  height: 1px;
+  background: var(--border-subtle);
+}
+
+/* A question the Assistant is waiting on. */
 .sb-assistant-confirm {
   display: flex;
   flex-direction: column;
@@ -636,29 +700,43 @@
   padding: var(--space-4) var(--space-5);
   border-radius: var(--radius-lg);
   background: var(--bg-elevated);
-  box-shadow:
-    inset 0 0 0 1px color-mix(in srgb, var(--danger) 35%, var(--border-default)),
-    var(--shadow-sm);
+  box-shadow: inset 0 0 0 1px var(--border-default);
   animation: sb-assistant-in var(--duration-base) var(--ease-out);
 }
 
-/* Replacing a screen can be undone like any edit, and a permission question isn't a warning: the AI accent, not the danger one. */
-.sb-assistant-confirm[data-kind="replace"],
-.sb-assistant-confirm[data-kind="permission"] {
-  box-shadow:
-    inset 0 0 0 1px color-mix(in srgb, var(--ai) 35%, var(--border-default)),
-    var(--shadow-sm);
+/* The card takes focus when nothing else has it; the ring belongs on its buttons. */
+.sb-assistant-confirm:focus {
+  outline: none;
 }
 
+.sb-assistant-confirm[data-kind="delete"] {
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--danger) 35%, var(--border-default));
+}
+
+/* Replacing a screen can be undone like any edit, and a permission question isn't a warning: Claude's colour on the glyph. */
 .sb-assistant-confirm[data-kind="replace"] .sb-assistant-confirm__icon,
 .sb-assistant-confirm[data-kind="permission"] .sb-assistant-confirm__icon {
   color: var(--ai-text);
 }
 
+/* Answered: one line, the question on hover. */
 .sb-assistant-confirm[data-status="approved"],
 .sb-assistant-confirm[data-status="declined"] {
-  background: var(--bg-sunken);
-  box-shadow: inset 0 0 0 1px var(--border-subtle);
+  flex-direction: row;
+  align-items: center;
+  gap: var(--space-3);
+  min-height: 20px;
+  padding: 0;
+  border-radius: 0;
+  background: none;
+  box-shadow: none;
+  color: var(--text-tertiary);
+}
+
+.sb-assistant-confirm[data-status="approved"] .sb-assistant-confirm__icon,
+.sb-assistant-confirm[data-status="declined"] .sb-assistant-confirm__icon {
+  flex: none;
+  color: var(--text-tertiary);
 }
 
 .sb-assistant-confirm__head {
@@ -677,13 +755,32 @@
   font-weight: var(--font-weight-semibold);
 }
 
-.sb-assistant-confirm__message,
-.sb-assistant-confirm__result {
+.sb-assistant-confirm__message {
   margin: 0;
   color: var(--text-secondary);
-  font-size: var(--font-size-xs);
+  font-size: var(--font-size-sm);
   line-height: 1.5;
   overflow-wrap: anywhere;
+}
+
+.sb-assistant-confirm__label,
+.sb-assistant-confirm__result {
+  min-width: 0;
+  margin: 0;
+  overflow: hidden;
+  font-size: var(--font-size-sm);
+  line-height: 16px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sb-assistant-confirm__label {
+  flex: 0 1 auto;
+}
+
+.sb-assistant-confirm__result {
+  flex: 0 0 auto;
+  max-width: 100%;
 }
 
 .sb-assistant-confirm__actions {
@@ -704,7 +801,7 @@
   align-items: center;
   gap: var(--space-3);
   color: var(--text-tertiary);
-  font-size: var(--font-size-xs);
+  font-size: var(--font-size-sm);
 }
 
 .sb-assistant-typing__dots {
@@ -729,28 +826,16 @@
   animation-delay: 0.3s;
 }
 
-/* Empty chat. */
+/* Empty chat: left-aligned, sitting on the composer. */
 .sb-assistant-empty {
   display: flex;
   flex: 1 1 auto;
   flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: var(--space-3);
-  padding: var(--space-8) var(--space-6);
-  text-align: center;
-}
-
-.sb-assistant-empty__mark {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 36px;
-  height: 36px;
-  margin-bottom: var(--space-2);
-  border-radius: var(--radius-xl);
-  background: var(--ai-soft);
-  color: var(--ai-text);
+  justify-content: flex-end;
+  gap: var(--space-2);
+  min-height: 0;
+  padding: var(--space-6) var(--space-5) var(--space-5);
+  overflow-y: auto;
 }
 
 .sb-assistant-empty__title {
@@ -760,7 +845,6 @@
 }
 
 .sb-assistant-empty__body {
-  max-width: 300px;
   margin: 0;
   color: var(--text-secondary);
   font-size: var(--font-size-sm);
@@ -771,32 +855,27 @@
 .sb-assistant-suggestions {
   display: flex;
   flex-direction: column;
-  align-items: stretch;
-  gap: var(--space-2);
-  width: 100%;
-  max-width: 300px;
-  margin-top: var(--space-4);
+  margin: var(--space-3) calc(var(--space-4) * -1) 0;
 }
 
 .sb-assistant-suggestion {
-  padding: var(--space-3) var(--space-4);
+  display: flex;
+  align-items: center;
+  height: 28px;
+  padding: 0 var(--space-4);
   border: 0;
   border-radius: var(--radius-md);
-  background: var(--bg-field);
-  box-shadow: inset 0 0 0 1px var(--border-subtle);
+  background: none;
   color: var(--text-primary);
   font: inherit;
   font-size: var(--font-size-sm);
   text-align: left;
   cursor: pointer;
-  transition:
-    background var(--duration-fast) var(--ease-standard),
-    box-shadow var(--duration-fast) var(--ease-standard);
+  transition: background-color var(--duration-fast) var(--ease-standard);
 }
 
 .sb-assistant-suggestion:hover {
-  background: var(--bg-field-hover);
-  box-shadow: inset 0 0 0 1px var(--border-default);
+  background: var(--bg-hover);
 }
 
 .sb-assistant-suggestion:active {
@@ -804,8 +883,8 @@
 }
 
 .sb-assistant-suggestion:focus-visible {
-  outline: none;
-  box-shadow: var(--focus-ring);
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 1px;
 }
 
 /* --- Composer ----------------------------------------------------------------------------------- */
@@ -826,11 +905,12 @@
   align-items: flex-end;
 }
 
+/* One line sits in the middle of the 40px field; more lines grow it. */
 .sb-assistant-composer__input.sb-textarea {
   width: 100%;
   min-height: 40px;
   max-height: 180px;
-  padding-right: 44px;
+  padding: 11px 44px 11px var(--space-4);
   font-size: var(--font-size-sm);
   line-height: 1.45;
   resize: none;
@@ -839,22 +919,23 @@
 .sb-assistant-composer__send,
 .sb-assistant-composer__stop {
   position: absolute;
-  right: 6px;
-  bottom: 6px;
-}
-
-.sb-assistant-composer__send:not(:disabled) {
-  background: var(--ai);
-  color: var(--text-on-accent);
+  right: var(--space-4);
+  bottom: 9px;
 }
 
 .sb-assistant-usage {
   display: flex;
   align-items: center;
   gap: var(--space-3);
+  border-radius: var(--radius-xs);
   color: var(--text-tertiary);
-  font-size: var(--font-size-2xs);
+  font-size: var(--font-size-xs);
   font-variant-numeric: tabular-nums;
+}
+
+.sb-assistant-usage:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 1px;
 }
 
 .sb-assistant-usage__bar {
@@ -886,19 +967,14 @@
 
 .sb-assistant-sheet {
   position: fixed;
-  top: var(--toolbar-h, 44px);
+  top: calc(var(--toolbar-h, 44px) + var(--sb-banner-h, 0px));
   right: 0;
   bottom: 0;
   z-index: var(--z-drawer);
   display: flex;
   border-left: 1px solid var(--border-default);
   background: var(--bg-panel);
-  box-shadow: -18px 0 48px -18px rgba(0, 0, 0, 0.55);
   animation: sb-assistant-sheet-in var(--duration-slow) var(--ease-out);
-}
-
-[data-theme="light"] .sb-assistant-sheet {
-  box-shadow: -18px 0 48px -18px rgba(20, 20, 40, 0.2);
 }
 
 .sb-assistant-sheet[data-state="closing"] {
