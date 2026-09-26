@@ -81,6 +81,15 @@ describe("Hud", () => {
     expect(stop).toHaveBeenCalledOnce();
   });
 
+  it("lists the slowest patches in a section of their own, each row a button that reveals the patch", () => {
+    vi.spyOn(session.runtime, "runtime", "get").mockReturnValue({ patchTimings: () => [{ patchId: "spring", ms: 0.4 }, { patchId: "flip", ms: 0.1 }] } as never);
+    render({ tab: "performance" });
+    const section = container.querySelector<HTMLElement>('section[aria-label="Slowest patches"]')!;
+    expect(section.querySelector("h3")?.textContent).toBe("Slowest patches");
+    expect([...section.querySelectorAll("li")].map((li) => li.textContent)).toEqual(["spring0.40 ms", "flip0.10 ms"]);
+    expect(container.querySelector(".sb-perfx__stats")?.textContent).not.toContain("Slowest patches");
+  });
+
   it("keeps the Diagnostics severity filter across tab switches", () => {
     session.document.getState().apply(
       [
