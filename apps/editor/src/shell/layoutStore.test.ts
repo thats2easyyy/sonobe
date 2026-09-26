@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { DEFAULT_LAYOUT, SIZE_LIMITS, createLayoutStore, sanitizeLayout } from "./layoutStore.ts";
+import { DEFAULT_LAYOUT, SIZE_LIMITS, createLayoutStore, fitPanelWidths, sanitizeLayout } from "./layoutStore.ts";
 
 describe("sanitizeLayout", () => {
   it("falls back to defaults for garbage", () => {
@@ -27,6 +27,12 @@ describe("sanitizeLayout", () => {
     expect(layout.splitDirection).toBe("columns");
     expect(layout.drawer).toBeNull();
     expect(layout.hudTab).toBe("ai");
+  });
+
+  it("starts the console at 200 for new layouts and leaves a saved height alone", () => {
+    expect(DEFAULT_LAYOUT.sizes.hud).toBe(200);
+    expect(sanitizeLayout({ sizes: { hud: 164 } }).sizes.hud).toBe(164);
+    expect(sanitizeLayout({}).sizes.hud).toBe(200);
   });
 
   it("keeps the Learn drawer", () => {
@@ -107,5 +113,47 @@ describe("createLayoutStore", () => {
   it("survives corrupt storage", () => {
     localStorage.setItem("test.layout", "{not json");
     expect(createLayoutStore({ storageKey: "test.layout" }).getState().sizes).toEqual(DEFAULT_LAYOUT.sizes);
+  });
+});
+
+describe("fitPanelWidths", () => {
+  const open = { layers: false, viewer: false, inspector: false };
+  const fit = (available: number, overrides: { sizes?: Partial<typeof DEFAULT_LAYOUT.sizes>; collapsed?: Partial<typeof open>; keepViewer?: boolean } = {}) =>
+    fitPanelWidths({ ...DEFAULT_LAYOUT.sizes, ...overrides.sizes }, { ...open, ...overrides.collapsed }, available, undefined, overrides.keepViewer);
+
+  it("leaves the saved sizes alone when the window has room", () => {
+    expect(fit(1440)).toEqual({ sizes: { layers: 232, viewer: 296, inspector: 272 }, viewerAuto: false, center: 637 });
+  });
+
+  it("shrinks the Viewer first, toward its minimum", () => {
+    expect(fit(1180)).toEqual({ sizes: { layers: 232, viewer: 273, inspector: 272 }, viewerAuto: false, center: 400 });
+  });
+
+  it("shrinks Layers and then the Inspector once the Viewer is at its minimum", () => {
+    expect(fit(1120).sizes).toEqual({ layers: 205, viewer: 240, inspector: 272 });
+    expect(fit(1085, { sizes: { layers: 200, viewer: 240, inspector: 300 } }).sizes).toEqual({ layers: 180, viewer: 240, inspector: 262 });
+  });
+
+  it("turns the Viewer into a rail when the centre would still be under 400 at 1024", () => {
+    expect(fit(1024)).toEqual({ sizes: { layers: 232, viewer: 296, inspector: 272 }, viewerAuto: true, center: 482 });
+  });
+
+  it("keeps the Viewer open at its smallest for a person who asked for it, and lets the centre give", () => {
+    const fitted = fit(1024, { keepViewer: true });
+    expect(fitted).toEqual({ sizes: { layers: 180, viewer: 240, inspector: 240 }, viewerAuto: false, center: 361 });
+  });
+
+  it("fits the largest panels a person can set", () => {
+    const fitted = fit(1440, { sizes: { layers: 420, viewer: 640, inspector: 440 } });
+    expect(fitted).toEqual({ sizes: { layers: 357, viewer: 240, inspector: 440 }, viewerAuto: false, center: 400 });
+  });
+
+  it("takes the room of a docked drawer off the row", () => {
+    expect(fit(1440 - DEFAULT_LAYOUT.sizes.drawer)).toEqual({ sizes: { layers: 180, viewer: 240, inspector: 257 }, viewerAuto: false, center: 400 });
+  });
+
+  it("counts a collapsed panel as a rail and never auto-collapses a Viewer the person collapsed", () => {
+    expect(fit(1024, { collapsed: { viewer: true } })).toEqual({ sizes: { layers: 232, viewer: 296, inspector: 272 }, viewerAuto: false, center: 482 });
+    expect(fit(700, { collapsed: { layers: true, viewer: true, inspector: true } }).sizes).toEqual({ layers: 232, viewer: 296, inspector: 272 });
   });
 });

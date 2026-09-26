@@ -7,8 +7,10 @@
   color: var(--text-primary);
 }
 
-/* Toolbar */
+/* Toolbar: 28px controls, 16px icons */
 .sb-toolbar {
+  --control-h-sm: 28px;
+  --control-h-md: 28px;
   position: relative;
   z-index: var(--z-panel);
   display: grid;
@@ -52,17 +54,20 @@
   flex: none;
   width: 1px;
   height: 16px;
-  margin: 0 var(--space-3);
+  margin: 0 var(--space-2);
   background: var(--border-default);
 }
 
+/* The name takes up the slack when the window is narrow, so the device picker keeps its width. */
 .sb-toolbar__doc {
+  position: relative;
   display: inline-flex;
   align-items: center;
   gap: var(--space-2);
+  flex: 0 1 auto;
   min-width: 0;
   height: var(--control-h-md);
-  padding: 0 var(--space-3);
+  padding: 0 var(--space-6) 0 var(--space-4);
   border: 0;
   border-radius: var(--radius-md);
   background: transparent;
@@ -83,6 +88,7 @@
 }
 
 .sb-toolbar__doc-title {
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -96,7 +102,7 @@
 .sb-toolbar__doc-input {
   width: 180px;
   height: var(--control-h-md);
-  padding: 0 var(--space-3);
+  padding: 0 var(--space-4);
   border: 0;
   border-radius: var(--radius-md);
   outline: none;
@@ -106,9 +112,14 @@
   font-weight: var(--font-weight-semibold);
 }
 
-.sb-toolbar__device {
+.sb-toolbar .sb-toolbar__device.sb-select {
+  flex: none;
+  min-width: 96px;
   max-width: 190px;
+  border-radius: var(--radius-md);
   color: var(--text-secondary);
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-medium);
 }
 
 .sb-toolbar__search {
@@ -117,7 +128,7 @@
   gap: var(--space-4);
   width: 212px;
   height: var(--control-h-md);
-  margin-right: var(--space-4);
+  margin-right: var(--space-2);
   padding: 0 var(--space-4) 0 var(--space-5);
   border: 0;
   border-radius: var(--radius-md);
@@ -125,6 +136,7 @@
   box-shadow: inset 0 0 0 1px var(--border-subtle);
   color: var(--text-tertiary);
   font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-medium);
   transition:
     background-color var(--duration-fast) var(--ease-standard),
     color var(--duration-fast) var(--ease-standard);
@@ -143,6 +155,50 @@
   white-space: nowrap;
 }
 
+/* View mode: the segments say their names while there is room. */
+.sb-toolbar__view .sb-segmented__item {
+  font-size: var(--font-size-sm);
+}
+
+.sb-toolbar__learn,
+.sb-toolbar__assistant {
+  padding: 0 var(--space-4) 0 var(--space-4);
+}
+
+.sb-toolbar__learn .sb-btn__icon,
+.sb-toolbar__assistant .sb-btn__icon {
+  margin-left: 0;
+}
+
+.sb-toolbar__learn[data-active],
+.sb-toolbar__assistant[data-active] {
+  background: var(--accent-soft);
+  color: var(--text-accent);
+}
+
+@media (hover: hover) {
+  .sb-toolbar__learn[data-active]:hover:not(:disabled),
+  .sb-toolbar__assistant[data-active]:hover:not(:disabled) {
+    background: var(--accent-soft-hover);
+    color: var(--text-accent);
+  }
+}
+
+.sb-toolbar__assistant .sb-btn__icon {
+  position: relative;
+}
+
+/* Waiting for an answer: an accent dot at the corner of the icon, present in the icon-only layout too. */
+.sb-toolbar__pending {
+  position: absolute;
+  top: -1px;
+  right: -2px;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+}
+
 @media (max-width: 1320px) {
   .sb-toolbar__search {
     width: auto;
@@ -150,15 +206,47 @@
   .sb-toolbar__search-label {
     display: none;
   }
+  .sb-toolbar__learn {
+    width: var(--control-h-md);
+    padding: 0;
+  }
+  .sb-toolbar__learn .sb-btn__label {
+    display: none;
+  }
 }
 
-/* Unsaved changes marker */
+/* Assistant and Connect Claude both carry words, so the Assistant's yields sooner. */
+@media (max-width: 1439px) {
+  .sb-toolbar__assistant {
+    width: var(--control-h-md);
+    padding: 0;
+  }
+  .sb-toolbar__assistant .sb-btn__label {
+    display: none;
+  }
+}
+
+@media (max-width: 1180px) {
+  .sb-toolbar__view .sb-segmented__label {
+    display: none;
+  }
+}
+
+/* Unsaved changes marker: it sits in room the name button always keeps, so nothing moves when it appears. */
 .sb-toolbar__dirty {
-  flex: none;
-  width: 6px;
-  height: 6px;
+  position: absolute;
+  top: 50%;
+  right: var(--space-2);
+  width: 8px;
+  height: 8px;
+  margin-top: -4px;
   border-radius: 50%;
-  background: var(--text-tertiary);
+  background: var(--text-secondary);
+}
+
+/* Banners stack above the panels. */
+.sb-shell__banners {
+  flex: none;
 }
 
 /* Main layout */
@@ -173,6 +261,7 @@
 .sb-shell__row {
   display: flex;
   flex: 1 1 auto;
+  min-width: 0;
   min-height: 0;
 }
 
@@ -199,7 +288,7 @@
   display: flex;
   flex: 1 1 0;
   flex-direction: column;
-  min-width: 260px;
+  min-width: var(--sb-center-min, 400px);
   min-height: 0;
 }
 
@@ -235,7 +324,14 @@
   flex: 1 1 auto;
 }
 
-/* Panels */
+/* Panels: the controls in a 34px header are 24px, with 14px icons. */
+.sb-panel__header,
+.sb-rail,
+.sb-drawer > * > header {
+  --control-h-xs: 24px;
+  --control-h-sm: 24px;
+}
+
 .sb-panel {
   display: flex;
   flex: 1 1 auto;
@@ -264,8 +360,9 @@
 .sb-panel__title {
   flex: none;
   color: var(--text-primary);
-  font-size: var(--font-size-sm);
+  font-size: var(--font-size-md);
   font-weight: var(--font-weight-semibold);
+  letter-spacing: -0.005em;
 }
 
 .sb-panel__header-content {
@@ -280,7 +377,7 @@
   display: flex;
   flex: none;
   align-items: center;
-  gap: 1px;
+  gap: var(--space-1);
   margin-left: auto;
 }
 
@@ -353,12 +450,16 @@
   display: flex;
   border-left: 1px solid var(--border-default);
   background: var(--bg-panel);
-  box-shadow: -18px 0 48px -18px rgba(0, 0, 0, 0.55);
+  box-shadow: var(--shadow-popover);
   animation: sb-drawer-in var(--duration-slow) var(--ease-out);
 }
 
-[data-theme="light"] .sb-drawer {
-  box-shadow: -18px 0 48px -18px rgba(20, 20, 40, 0.2);
+.sb-drawer[data-docked] {
+  box-shadow: none;
+}
+
+.sb-drawer:focus {
+  outline: none;
 }
 
 .sb-drawer[data-state="closing"] {

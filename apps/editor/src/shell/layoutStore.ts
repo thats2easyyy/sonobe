@@ -71,7 +71,7 @@ export const SIZE_LIMITS: Record<SizedPanel, readonly [number, number]> = {
 export const SPLIT_LIMITS = [0.15, 0.85] as const;
 
 export const DEFAULT_LAYOUT: LayoutState = {
-  sizes: { layers: 232, viewer: 296, inspector: 272, hud: 164, drawer: 360 },
+  sizes: { layers: 232, viewer: 296, inspector: 272, hud: 200, drawer: 360 },
   // The patch editor gets the larger share, and the console starts as a tab strip (it opens on the first error).
   split: 0.42,
   collapsed: { layers: false, viewer: false, inspector: false, hud: true },
@@ -81,6 +81,48 @@ export const DEFAULT_LAYOUT: LayoutState = {
   hudTab: "console",
   inspectorTab: "properties",
 };
+
+/** Width of a collapsed panel's rail and of the splitter that sits beside an open one. */
+const RAIL_WIDTH = 36;
+const SPLITTER_WIDTH = 1;
+/** The centre (canvas and patch editor) keeps at least this much before the Viewer gives way. */
+export const MIN_CENTER_WIDTH = 400;
+
+type FittedPanel = "layers" | "viewer" | "inspector";
+
+export interface FittedPanels {
+  sizes: Record<FittedPanel, number>;
+  /** The Viewer shows as a rail because the window is too narrow for it, though the person hasn't collapsed it. */
+  viewerAuto: boolean;
+  /** Width left for the centre. */
+  center: number;
+}
+
+/**
+ * The panel widths that fit `available` px (the shell row). The Viewer shrinks toward its minimum
+ * first, then Layers, then the Inspector; if the centre would still be under `minCenter`, the Viewer
+ * becomes a rail (`viewerAuto`) and the others shrink instead. `keepViewer` refuses that and keeps
+ * the Viewer open at its smallest, for a person who asked for it. Nothing here is saved.
+ */
+export function fitPanelWidths(sizes: Pick<LayoutState["sizes"], FittedPanel>, collapsed: Pick<LayoutState["collapsed"], FittedPanel>, available: number, minCenter = MIN_CENTER_WIDTH, keepViewer = false): FittedPanels {
+  const fit = (viewerHidden: boolean) => {
+    const hidden: Record<FittedPanel, boolean> = { layers: collapsed.layers, viewer: viewerHidden, inspector: collapsed.inspector };
+    const widths = { layers: sizes.layers, viewer: sizes.viewer, inspector: sizes.inspector };
+    let excess = minCenter - available;
+    for (const panel of ["layers", "viewer", "inspector"] as const) excess += hidden[panel] ? RAIL_WIDTH : widths[panel] + SPLITTER_WIDTH;
+    for (const panel of ["viewer", "layers", "inspector"] as const) {
+      if (hidden[panel] || excess <= 0) continue;
+      const cut = Math.min(excess, Math.max(0, widths[panel] - SIZE_LIMITS[panel][0]));
+      widths[panel] -= cut;
+      excess -= cut;
+    }
+    return { widths, excess };
+  };
+  const natural = fit(collapsed.viewer);
+  const auto = !collapsed.viewer && !keepViewer && natural.excess > 0;
+  const { widths, excess } = auto ? fit(true) : natural;
+  return { sizes: widths, viewerAuto: auto, center: minCenter - excess };
+}
 
 const VIEW_MODES: readonly ViewMode[] = ["canvas", "split", "patches"];
 const DRAWERS: readonly DrawerId[] = ["learn"];

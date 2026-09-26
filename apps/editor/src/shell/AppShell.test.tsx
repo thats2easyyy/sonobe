@@ -7,7 +7,9 @@ import { DESIGN_CANVAS_SPLIT, followDesignBox } from "../panels/design/layout.ts
 import { ThemeProvider } from "../theme/ThemeProvider.tsx";
 import { CommandProvider } from "../ui/commands/CommandProvider.tsx";
 import { AppShell } from "./AppShell.tsx";
+import { IconButton } from "../ui/IconButton.tsx";
 import { layoutStore, savedLayout } from "./layoutStore.ts";
+import { Panel } from "./Panel.tsx";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -28,6 +30,18 @@ afterAll(() => {
 
 let container: HTMLDivElement;
 let root: Root;
+
+function renderShell(props: Parameters<typeof AppShell>[0] = {}) {
+  act(() =>
+    root.render(
+      <ThemeProvider>
+        <CommandProvider>
+          <AppShell {...props} />
+        </CommandProvider>
+      </ThemeProvider>,
+    ),
+  );
+}
 
 beforeEach(() => {
   layoutStore.getState().reset();
@@ -91,5 +105,124 @@ describe("AppShell", () => {
     act(() => designStore.getState().closeBox());
     expect(layoutStore.getState().split).toBe(249 / CENTER_HEIGHT);
     stop();
+  });
+});
+
+describe("AppShell focus", () => {
+  const hideLayers = () => container.querySelector<HTMLButtonElement>('[aria-label="Hide layers"]')!;
+  const showLayers = () => container.querySelector<HTMLButtonElement>('[aria-label="Show Layers"]')!;
+
+  const layersSlot = (
+    <Panel id="layers" title="Layers" actions={<IconButton size="sm" icon={null} label="Hide layers" onClick={() => layoutStore.getState().toggleCollapsed("layers", true)} />}>
+      <input aria-label="Filter layers" />
+    </Panel>
+  );
+
+  it("moves focus to the rail when a panel collapses, and back to the panel's Hide button when the rail reopens it", () => {
+    renderShell({ slots: { layers: layersSlot } });
+    act(() => hideLayers().focus());
+    act(() => hideLayers().click());
+    expect(container.querySelector("#sb-layers")).toBeNull();
+    expect(document.activeElement).toBe(showLayers());
+
+    act(() => showLayers().click());
+    expect(document.activeElement).toBe(hideLayers());
+  });
+
+  it("does the same for a shortcut pressed while focus is inside the panel, and leaves focus alone when it is elsewhere", () => {
+    renderShell({ slots: { layers: layersSlot } });
+    act(() => container.querySelector<HTMLInputElement>('[aria-label="Filter layers"]')!.focus());
+    act(() => layoutStore.getState().toggleCollapsed("layers"));
+    expect(document.activeElement).toBe(showLayers());
+    act(() => layoutStore.getState().toggleCollapsed("layers"));
+    expect(document.activeElement).toBe(hideLayers());
+
+    act(() => container.querySelector<HTMLButtonElement>(".sb-toolbar__search")!.focus());
+    const toolbarButton = document.activeElement;
+    act(() => layoutStore.getState().toggleCollapsed("layers"));
+    expect(document.activeElement).toBe(toolbarButton);
+  });
+
+  it("gives focus back to the Learn button when the drawer it opened from the keyboard closes", () => {
+    renderShell({ slots: { learn: <button type="button">Close lesson</button> } });
+    const opener = container.querySelector<HTMLButtonElement>('button[aria-label="Learn"]')!;
+    act(() => opener.focus());
+    act(() => layoutStore.getState().toggleDrawer("learn"));
+    const aside = container.querySelector<HTMLElement>('aside[aria-label="Learn"]')!;
+    expect(document.activeElement).toBe(aside);
+    act(() => container.querySelector<HTMLButtonElement>("aside button")!.focus());
+    act(() => layoutStore.getState().setDrawer(null));
+    expect(document.activeElement).toBe(opener);
+  });
+
+  it("closes the drawer on Escape, except a docked one, where Escape belongs to the canvas", () => {
+    renderShell({ slots: { learn: <p>Lessons</p> } });
+    const escape = () => act(() => void document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true })));
+    act(() => layoutStore.getState().setDrawer("learn"));
+    escape();
+    expect(layoutStore.getState().drawer).toBeNull();
+
+    renderShell({ slots: { learn: <p>Lessons</p> }, drawerDocked: true });
+    act(() => layoutStore.getState().setDrawer("learn"));
+    escape();
+    expect(layoutStore.getState().drawer).toBe("learn");
+  });
+});
+
+describe("AppShell fit", () => {
+  const clientWidth = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "clientWidth");
+  // The shell measures its row when it mounts, so the width is set before a fresh mount.
+  const rowWidth = (width: number) => {
+    Object.defineProperty(HTMLElement.prototype, "clientWidth", { configurable: true, get() { return (this as HTMLElement).classList?.contains("sb-shell__row") ? width : 0; } });
+    act(() => root.unmount());
+    root = createRoot(container);
+  };
+  afterEach(() => {
+    if (clientWidth) Object.defineProperty(HTMLElement.prototype, "clientWidth", clientWidth);
+    else delete (HTMLElement.prototype as { clientWidth?: unknown }).clientWidth;
+  });
+
+  const slots = { viewer: <p>Viewer body</p>, layers: <p>Layers body</p>, inspector: <p>Inspector body</p> };
+  const shell = () => container.querySelector<HTMLElement>(".sb-shell")!;
+
+  it("writes fitted widths and shows the Viewer as a rail without saving it as collapsed, when 1024px is too narrow", () => {
+    rowWidth(1024);
+    renderShell({ slots });
+    expect(container.querySelector('.sb-rail[data-panel="viewer"]')).not.toBeNull();
+    expect(container.querySelector("#sb-viewer")).toBeNull();
+    expect(layoutStore.getState().collapsed.viewer).toBe(false);
+    expect(shell().style.getPropertyValue("--sb-inspector-w")).toBe("272px");
+    expect(shell().style.getPropertyValue("--sb-center-min")).toBe("400px");
+  });
+
+  it("opens the Viewer from its rail at its smallest, with the other panels giving way", () => {
+    rowWidth(1024);
+    renderShell({ slots });
+    act(() => container.querySelector<HTMLButtonElement>('.sb-rail[data-panel="viewer"] button')!.click());
+    expect(container.querySelector("#sb-viewer")).not.toBeNull();
+    expect(shell().style.getPropertyValue("--sb-viewer-w")).toBe("240px");
+    expect(shell().style.getPropertyValue("--sb-layers-w")).toBe("180px");
+    expect(shell().style.getPropertyValue("--sb-center-min")).toBe("361px");
+  });
+
+  it("keeps a Viewer opened at 1024px open while other panels are hidden and shown again", () => {
+    rowWidth(1024);
+    renderShell({ slots });
+    act(() => container.querySelector<HTMLButtonElement>('.sb-rail[data-panel="viewer"] button')!.click());
+    act(() => layoutStore.getState().toggleCollapsed("layers", true));
+    act(() => layoutStore.getState().toggleCollapsed("inspector", true));
+    expect(container.querySelector("#sb-viewer")).not.toBeNull();
+    act(() => layoutStore.getState().toggleCollapsed("inspector", false));
+    act(() => layoutStore.getState().toggleCollapsed("layers", false));
+    expect(container.querySelector("#sb-viewer")).not.toBeNull();
+    expect(container.querySelector('.sb-rail[data-panel="viewer"]')).toBeNull();
+  });
+
+  it("shrinks panels toward their minimums at 1180px and keeps the saved sizes", () => {
+    rowWidth(1180);
+    renderShell({ slots });
+    expect(container.querySelector('.sb-rail[data-panel="viewer"]')).toBeNull();
+    expect(shell().style.getPropertyValue("--sb-viewer-w")).toBe("273px");
+    expect(layoutStore.getState().sizes.viewer).toBe(296);
   });
 });

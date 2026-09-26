@@ -7,6 +7,8 @@ import { layoutStore } from "./layoutStore.ts";
 
 export interface ShellCommandHandlers {
   openPalette: () => void;
+  /** Shows or hides the Viewer. It can be a rail because the window is narrow, which a plain toggle of the saved state wouldn't see. */
+  toggleViewer: () => void;
 }
 
 /** Registers the shell's own commands: the palette, panels, view modes, the Learn drawer, and theme. */
@@ -21,7 +23,7 @@ export function useShellCommands(handlers: ShellCommandHandlers): void {
       // Hidden: listing the palette inside itself only adds noise (the toolbar shows ⌘K).
       { id: "app.commandPalette", title: "Show Command Palette", category: "General", shortcut: ["Mod+K", "Mod+Shift+P"], allowInInput: true, hidden: true, icon: CommandIcon, keywords: ["actions", "search"], run: () => latest.current.openPalette() },
       { id: "view.toggleLayers", title: "Show or Hide Layers", category: "View", shortcut: "Mod+1", icon: PanelLeft, run: () => layout().toggleCollapsed("layers") },
-      { id: "view.toggleViewer", title: "Show or Hide Viewer", category: "View", shortcut: "Mod+2", icon: Smartphone, run: () => layout().toggleCollapsed("viewer") },
+      { id: "view.toggleViewer", title: "Show or Hide Viewer", category: "View", shortcut: "Mod+2", icon: Smartphone, run: () => latest.current.toggleViewer() },
       { id: "view.toggleInspector", title: "Show or Hide Inspector", category: "View", shortcut: "Mod+7", icon: PanelRight, run: () => layout().toggleCollapsed("inspector") },
       { id: "view.toggleHud", title: "Show or Hide Console", category: "View", shortcut: "Mod+J", icon: PanelBottom, keywords: ["hud", "logs", "bottom"], run: () => layout().toggleCollapsed("hud") },
       { id: "view.canvasOnly", title: "Canvas Only", category: "View", shortcut: "Alt+1", icon: SquareMousePointer, run: () => layout().setViewMode("canvas") },

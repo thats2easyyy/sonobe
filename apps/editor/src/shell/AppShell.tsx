@@ -1,11 +1,13 @@
 import { DEFAULT_DEVICE } from "@sonobe/core";
 import { Layers, SlidersHorizontal, Smartphone } from "lucide-react";
-import { useRef, useState, type CSSProperties, type ReactNode } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { CommandPalette } from "../ui/CommandPalette.tsx";
 import { Splitter } from "../ui/Splitter.tsx";
+import { getFocusable } from "../ui/lib/focus.ts";
+import { observeResize } from "../ui/lib/observeResize.ts";
 import { useElementSize } from "../ui/lib/useElementSize.ts";
 import { DrawerHost } from "./drawers/DrawerHost.tsx";
-import { SIZE_LIMITS, SPLIT_LIMITS, layoutStore, useLayout, type SizedPanel } from "./layoutStore.ts";
+import { DEFAULT_LAYOUT, MIN_CENTER_WIDTH, SIZE_LIMITS, SPLIT_LIMITS, fitPanelWidths, layoutStore, useLayout } from "./layoutStore.ts";
 import { PanelRail } from "./Panel.tsx";
 import { Toolbar, type ToolbarProps } from "./Toolbar.tsx";
 import { useShellCommands } from "./useShellCommands.tsx";
@@ -47,6 +49,15 @@ export interface AppShellProps {
 
 const noop = () => undefined;
 
+const SIDE_PANELS = ["layers", "viewer", "inspector"] as const;
+type SidePanel = (typeof SIDE_PANELS)[number];
+
+/** Where focus goes once a side panel has collapsed to its rail, or reopened from it. */
+interface FocusIntent {
+  panel: SidePanel;
+  to: "rail" | "panel";
+}
+
 /**
  * The editor frame: toolbar; Layers | Viewer | Canvas / Patch Editor | Inspector; bottom HUD; and the
  * Learn drawer. Panels resize (sizes are written to CSS variables while dragging and committed on
@@ -76,33 +87,97 @@ export function AppShell({
   const { setSize, setSplit, toggleCollapsed } = layoutStore.getState();
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [centerRef, center] = useElementSize<HTMLDivElement>();
+  const [rowRef, row] = useElementSize<HTMLDivElement>();
+  const [keepViewer, setKeepViewer] = useState(false);
+  const bannersRef = useRef<HTMLDivElement>(null);
+  const focusIntent = useRef<FocusIntent | null>(null);
 
-  useShellCommands({ openPalette: () => setPaletteOpen(true) });
+  const fitted = row.width > 0 ? fitPanelWidths(sizes, collapsed, row.width, MIN_CENTER_WIDTH, keepViewer) : null;
+  const shown = fitted?.sizes ?? sizes;
+  const viewerRail = collapsed.viewer || !!fitted?.viewerAuto;
+
+  const showViewer = () => {
+    if (rootRef.current?.querySelector('.sb-rail[data-panel="viewer"]')?.contains(document.activeElement)) focusIntent.current = { panel: "viewer", to: "panel" };
+    setKeepViewer(true);
+    toggleCollapsed("viewer", false);
+  };
+
+  useShellCommands({
+    openPalette: () => setPaletteOpen(true),
+    toggleViewer: () => (viewerRail ? showViewer() : toggleCollapsed("viewer", true)),
+  });
+
+  useEffect(() => {
+    if (!keepViewer) return;
+    const allOpen = { layers: false, viewer: false, inspector: false };
+    if (collapsed.viewer || (row.width > 0 && !fitPanelWidths(sizes, allOpen, row.width).viewerAuto)) setKeepViewer(false);
+  }, [keepViewer, collapsed.viewer, sizes, row.width]);
+
+  useEffect(
+    () =>
+      layoutStore.subscribe((state, prev) => {
+        const active = document.activeElement;
+        for (const panel of SIDE_PANELS) {
+          if (state.collapsed[panel] === prev.collapsed[panel]) continue;
+          if (state.collapsed[panel]) {
+            const inside = document.getElementById(`sb-${panel}`)?.contains(active) || active?.getAttribute("aria-controls") === `sb-${panel}`;
+            if (inside) focusIntent.current = { panel, to: "rail" };
+          } else if (rootRef.current?.querySelector(`.sb-rail[data-panel="${panel}"]`)?.contains(active)) {
+            focusIntent.current = { panel, to: "panel" };
+          }
+        }
+      }),
+    [],
+  );
+
+  useLayoutEffect(() => {
+    const intent = focusIntent.current;
+    if (!intent) return;
+    focusIntent.current = null;
+    const root = rootRef.current;
+    if (!root) return;
+    const target =
+      intent.to === "rail"
+        ? root.querySelector<HTMLElement>(`.sb-rail[data-panel="${intent.panel}"] .sb-iconbtn`)
+        : (root.querySelector<HTMLElement>(`#sb-${intent.panel} .sb-panel__header button[aria-label^="Hide"]`) ?? getFocusable(document.getElementById(`sb-${intent.panel}`))[0]);
+    target?.focus();
+  });
+
+  useEffect(() => {
+    const banners = bannersRef.current;
+    const root = rootRef.current;
+    if (!banners || !root) return;
+    const measure = () => root.style.setProperty("--sb-banner-h", `${banners.offsetHeight}px`);
+    measure();
+    return observeResize([banners], measure);
+  }, []);
 
   const live = (name: string, value: string) => rootRef.current?.style.setProperty(name, value);
 
   const style = {
-    "--sb-layers-w": `${sizes.layers}px`,
-    "--sb-viewer-w": `${sizes.viewer}px`,
-    "--sb-inspector-w": `${sizes.inspector}px`,
+    "--sb-layers-w": `${shown.layers}px`,
+    "--sb-viewer-w": `${shown.viewer}px`,
+    "--sb-inspector-w": `${shown.inspector}px`,
+    ...(fitted ? { "--sb-center-min": `${Math.max(0, Math.min(MIN_CENTER_WIDTH, fitted.center))}px` } : {}),
     "--sb-hud-h": `${sizes.hud}px`,
     "--sb-drawer-w": `${sizes.drawer}px`,
     "--sb-split": String(split),
     "--sb-titlebar-inset": `${titlebarInset}px`,
   } as CSSProperties;
 
-  const sideSplitter = (panel: SizedPanel, label: string, controls: string, invert = false) => (
+  const sideSplitter = (panel: SidePanel, label: string, controls: string, invert = false) => (
     <Splitter
       orientation="vertical"
-      size={sizes[panel]}
+      size={shown[panel]}
       min={SIZE_LIMITS[panel][0]}
       max={SIZE_LIMITS[panel][1]}
+      defaultSize={DEFAULT_LAYOUT.sizes[panel]}
       invert={invert}
       label={label}
       controls={controls}
       onResize={(size) => live(`--sb-${panel}-w`, `${size}px`)}
       onResizeEnd={(size) => setSize(panel, size)}
-      onToggleCollapse={panel === "drawer" || panel === "hud" ? undefined : () => toggleCollapsed(panel)}
+      onToggleCollapse={() => toggleCollapsed(panel)}
     />
   );
 
@@ -123,11 +198,13 @@ export function AppShell({
         onOpenPalette={() => setPaletteOpen(true)}
         claude={slots.claude}
       />
-      {slots.banner}
-      <div className="sb-shell__main" data-drawer-docked={(drawerDocked && drawerOpen && slots.learn !== undefined) || undefined}>
-        <div className="sb-shell__row">
+      <div ref={bannersRef} className="sb-shell__banners">
+        {slots.banner}
+      </div>
+      <main className="sb-shell__main" data-drawer-docked={(drawerDocked && drawerOpen && slots.learn !== undefined) || undefined}>
+        <div ref={rowRef} className="sb-shell__row">
           {collapsed.layers ? (
-            <PanelRail title="Layers" side="left" icon={<Layers size={13} />} shortcut="Mod+1" onExpand={() => toggleCollapsed("layers", false)} />
+            <PanelRail panel="layers" title="Layers" side="left" icon={<Layers size={14} strokeWidth={1.75} />} shortcut="Mod+1" onExpand={() => toggleCollapsed("layers", false)} />
           ) : (
             <>
               <div id="sb-layers" className="sb-shell__slot sb-shell__layers">
@@ -137,8 +214,8 @@ export function AppShell({
             </>
           )}
 
-          {collapsed.viewer ? (
-            <PanelRail title="Viewer" side="left" icon={<Smartphone size={13} />} shortcut="Mod+2" onExpand={() => toggleCollapsed("viewer", false)} />
+          {viewerRail ? (
+            <PanelRail panel="viewer" title="Viewer" side="left" icon={<Smartphone size={14} strokeWidth={1.75} />} shortcut="Mod+2" onExpand={showViewer} />
           ) : (
             <>
               <div id="sb-viewer" className="sb-shell__slot sb-shell__viewer">
@@ -170,7 +247,7 @@ export function AppShell({
           </div>
 
           {collapsed.inspector ? (
-            <PanelRail title="Inspector" side="right" icon={<SlidersHorizontal size={13} />} shortcut="Mod+7" onExpand={() => toggleCollapsed("inspector", false)} />
+            <PanelRail panel="inspector" title="Inspector" side="right" icon={<SlidersHorizontal size={14} strokeWidth={1.75} />} shortcut="Mod+7" onExpand={() => toggleCollapsed("inspector", false)} />
           ) : (
             <>
               {sideSplitter("inspector", "Resize inspector", "sb-inspector", true)}
@@ -188,7 +265,7 @@ export function AppShell({
             size={sizes.hud}
             min={SIZE_LIMITS.hud[0]}
             max={SIZE_LIMITS.hud[1]}
-            defaultSize={164}
+            defaultSize={DEFAULT_LAYOUT.sizes.hud}
             label="Resize console"
             controls="sb-hud"
             onResize={(size) => live("--sb-hud-h", `${size}px`)}
@@ -201,7 +278,7 @@ export function AppShell({
         </div>
 
         <DrawerHost learn={slots.learn} docked={drawerDocked} onLiveResize={(size) => live("--sb-drawer-w", `${size}px`)} />
-      </div>
+      </main>
 
       <CommandPalette open={paletteOpen} onOpenChange={setPaletteOpen} />
     </div>

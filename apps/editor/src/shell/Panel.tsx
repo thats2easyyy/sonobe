@@ -68,6 +68,8 @@ export function Panel({
 }
 
 export interface PanelRailProps {
+  /** Which panel this stands for; the shell finds the rail by it to move focus. */
+  panel?: string;
   title: string;
   side: "left" | "right";
   icon: ReactNode;
@@ -76,12 +78,12 @@ export interface PanelRailProps {
 }
 
 /** What a collapsed side panel leaves behind: a slim rail that brings it back. */
-export function PanelRail({ title, side, icon, shortcut, onExpand }: PanelRailProps) {
+export function PanelRail({ panel, title, side, icon, shortcut, onExpand }: PanelRailProps) {
   return (
-    <div className="sb-rail" data-side={side} role="region" aria-label={`${title} (hidden)`}>
+    <div className="sb-rail" data-side={side} data-panel={panel} role="region" aria-label={`${title} (hidden)`}>
       <IconButton
         size="sm"
-        icon={side === "left" ? <PanelLeftOpen size={14} /> : <PanelRightOpen size={14} />}
+        icon={side === "left" ? <PanelLeftOpen size={14} strokeWidth={1.75} /> : <PanelRightOpen size={14} strokeWidth={1.75} />}
         label={`Show ${title}`}
         shortcut={shortcut}
         tooltipPlacement={side === "left" ? "right" : "left"}

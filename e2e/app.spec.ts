@@ -78,4 +78,38 @@ test.describe("editor app", () => {
     await screenshot(page, "app-11-light-columns");
     expect(problems).toEqual([]);
   });
+
+  test("fits the smallest window: the Inspector stays on screen and the Viewer gives way to its rail", async ({ page }) => {
+    await page.setViewportSize({ width: 1024, height: 680 });
+    const problems = collectConsoleProblems(page);
+    await openEditor(page);
+
+    const hideInspector = page.getByRole("button", { name: "Hide inspector" });
+    await expect(hideInspector).toBeVisible();
+    const inspector = (await page.locator("#sb-inspector").boundingBox())!;
+    expect(inspector.x + inspector.width).toBeLessThanOrEqual(1024);
+    const hide = (await hideInspector.boundingBox())!;
+    expect(hide.x + hide.width).toBeLessThanOrEqual(1024);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(1024);
+    expect((await page.locator(".sb-shell__center").boundingBox())!.width).toBeGreaterThanOrEqual(400);
+
+    // The Viewer is a rail the window made, not one the person chose: nothing is saved as collapsed, and the rail opens it.
+    await expect(page.getByRole("region", { name: "Viewer (hidden)" })).toBeVisible();
+    expect(await hook(page, (s) => s.layout().collapsed.viewer)).toBe(false);
+    await page.getByRole("button", { name: "Show Viewer" }).click();
+    await expect(page.locator("#sb-viewer")).toBeVisible();
+    const opened = (await page.locator("#sb-inspector").boundingBox())!;
+    expect(opened.x + opened.width).toBeLessThanOrEqual(1024);
+    expect(problems).toEqual([]);
+  });
+
+  test("keeps focus in the shell when a panel is hidden and shown from the keyboard", async ({ page }) => {
+    await openEditor(page);
+    await page.getByRole("button", { name: "Hide layers" }).focus();
+    await page.keyboard.press("Enter");
+    const show = page.getByRole("button", { name: "Show Layers" });
+    await expect(show).toBeFocused();
+    await page.keyboard.press("Enter");
+    await expect(page.getByRole("button", { name: "Hide layers" })).toBeFocused();
+  });
 });

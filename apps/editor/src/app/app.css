@@ -77,12 +77,15 @@
   color: var(--warn-text);
 }
 
+/* The instruction wraps to two lines rather than being cut. */
 .sb-banner__text {
+  display: -webkit-box;
   flex: 1 1 auto;
   min-width: 0;
   overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  line-height: var(--line-height-normal);
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
 }
 
 .sb-banner__text strong {
