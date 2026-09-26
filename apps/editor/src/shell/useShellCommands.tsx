@@ -27,7 +27,7 @@ export function useShellCommands(handlers: ShellCommandHandlers): void {
       { id: "view.toggleInspector", title: "Show or Hide Inspector", category: "View", shortcut: "Mod+7", icon: PanelRight, run: () => layout().toggleCollapsed("inspector") },
       { id: "view.toggleHud", title: "Show or Hide Console", category: "View", shortcut: "Mod+J", icon: PanelBottom, keywords: ["hud", "logs", "bottom"], run: () => layout().toggleCollapsed("hud") },
       { id: "view.canvasOnly", title: "Canvas Only", category: "View", shortcut: "Alt+1", icon: SquareMousePointer, run: () => layout().setViewMode("canvas") },
-      { id: "view.split", title: "Canvas and Patches", category: "View", shortcut: "Alt+2", icon: LayoutTemplate, keywords: ["split view"], run: () => layout().setViewMode("split") },
+      { id: "view.split", title: "Canvas and Patches", category: "View", shortcut: "Alt+2", icon: LayoutTemplate, aliases: ["Split"], keywords: ["split view"], run: () => layout().setViewMode("split") },
       { id: "view.patchesOnly", title: "Patches Only", category: "View", shortcut: "Alt+3", icon: Workflow, keywords: ["full patch graph"], run: () => layout().setViewMode("patches") },
       {
         id: "view.toggleSplitDirection",
@@ -36,6 +36,7 @@ export function useShellCommands(handlers: ShellCommandHandlers): void {
         icon: Columns2,
         keywords: ["vertical", "horizontal", "side by side", "orientation"],
         when: () => layout().viewMode === "split",
+        disabledReason: "Switch to Canvas and Patches first",
         run: () => layout().toggleSplitDirection(),
       },
       { id: "view.showDiagnostics", title: "Show Diagnostics", category: "View", shortcut: "Mod+Shift+M", icon: TriangleAlert, keywords: ["problems", "warnings", "errors"], run: () => layout().setHudTab("diagnostics") },

@@ -17,6 +17,8 @@ export interface Command {
   description?: string;
   /** Extra search terms for the palette. */
   keywords?: readonly string[];
+  /** Other names the UI calls this command ("Split" on the toolbar). Unlike a keyword, a match on one is an answer, so Return runs it. */
+  aliases?: readonly string[];
   shortcut?: string | readonly string[];
   scope?: ShortcutScope;
   allowInInput?: boolean;

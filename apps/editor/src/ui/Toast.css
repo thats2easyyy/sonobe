@@ -5,24 +5,24 @@
   flex-direction: column;
   gap: var(--space-4);
   width: 356px;
-  max-width: calc(100vw - 32px);
+  max-width: calc(100vw - var(--sb-toast-inset, 0px) - 32px);
   pointer-events: none;
 }
 
 .sb-toaster[data-placement="bottom-right"] {
-  right: var(--space-6);
+  right: calc(var(--sb-toast-inset, 0px) + var(--space-6));
   bottom: calc(var(--tabbar-h) + var(--space-4));
 }
 
 .sb-toaster[data-placement="bottom-center"] {
-  left: 50%;
+  left: calc((100vw - var(--sb-toast-inset, 0px)) / 2);
   bottom: calc(var(--tabbar-h) + var(--space-4));
   transform: translateX(-50%);
 }
 
 .sb-toaster[data-placement="top-right"] {
   top: calc(var(--toolbar-h) + var(--space-4));
-  right: var(--space-6);
+  right: calc(var(--sb-toast-inset, 0px) + var(--space-6));
   flex-direction: column-reverse;
 }
 

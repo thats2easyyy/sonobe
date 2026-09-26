@@ -64,7 +64,7 @@ export interface SearchListProps<T> {
   onActiveChange?: (item: T | null) => void;
   /** Section headers when the query is empty (items should already be ordered by group). */
   groupBy?: (item: T) => string | undefined;
-  /** Rows shown greyed out that can't be picked; while searching they sort after the enabled rows of the same match tier (a match on the first key, then the others). */
+  /** Rows shown greyed out that can't be picked; while searching they sort after every enabled row, so the first row is never one that can't run while another matches. */
   isDisabled?: (item: T) => boolean;
   /** Keys whose matches alone don't earn an active row: while searching, start with none unless an enabled row matched some other key, so Enter never picks a hidden match. */
   weakKeys?: readonly string[];
@@ -143,7 +143,7 @@ export function SearchList<T>({
   const rows = useMemo<Row<T>[]>(() => {
     let results = fuzzySearch(items, query, keys, { limit: searching ? limit : undefined });
     if (isDisabled && searching) {
-      const rank = (r: (typeof results)[number]) => (primaryKey !== undefined && r.matches[primaryKey] ? 0 : 2) + (isDisabled(r.item) ? 1 : 0);
+      const rank = (r: (typeof results)[number]) => (isDisabled(r.item) ? 2 : 0) + (primaryKey !== undefined && r.matches[primaryKey] ? 0 : 1);
       results = results.map((r, i) => ({ r, i, rank: rank(r) })).sort((a, b) => a.rank - b.rank || a.i - b.i).map(({ r }) => r);
     }
     return results.map((r, index) => ({

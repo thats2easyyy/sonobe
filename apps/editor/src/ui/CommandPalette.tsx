@@ -22,6 +22,7 @@ export interface PaletteRow extends PaletteItem {
  */
 export const PALETTE_KEYS: FuzzyKey<PaletteRow>[] = [
   { name: "title", get: (i) => i.title, wordStart: true },
+  { name: "aliases", get: (i) => i.command.aliases, weight: 0.9, wordStart: true },
   { name: "keywords", get: (i) => (i.title === i.command.title ? i.command.keywords : [i.command.title, ...(i.command.keywords ?? [])]), weight: 0.7, wordStart: true },
   { name: "category", get: (i) => i.command.category, weight: 0.5, wordStart: true },
 ];
@@ -110,7 +111,7 @@ function PaletteBody({ placeholder, onClose }: { placeholder: string; onClose: (
               {Icon ? <Icon size={15} strokeWidth={1.75} /> : null}
             </span>
             <span className="sb-palette__title">{ctx.highlight("title", item.title)}</span>
-            {ctx.matches.keywords && !ctx.matches.title && <span className="sb-palette__matches">matches “{ctx.query.trim()}”</span>}
+            {(ctx.matches.keywords || ctx.matches.aliases) && !ctx.matches.title && <span className="sb-palette__matches">matches “{ctx.query.trim()}”</span>}
             {ctx.query && item.command.category && <span className="sb-palette__category">{ctx.highlight("category", item.command.category)}</span>}
             {!item.enabled && item.reason && <span className="sb-palette__reason">{item.reason}</span>}
             {item.command.shortcut && <Kbd shortcut={item.command.shortcut} className="sb-palette__kbd" />}

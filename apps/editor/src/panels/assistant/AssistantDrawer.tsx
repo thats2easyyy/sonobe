@@ -142,6 +142,8 @@ export function AssistantDrawer({ onClose, onConnectClaude, onImportDesign, host
   }, [surface, store]);
 
   const subtitle = providerSubtitle(status, provider);
+  // With only the API key there is one answer to "what does this run on", so its hint waits in the key button's tooltip; the strip is for telling a plan from a key.
+  const showStrip = provider === "subscription" || (subscriptionOn && status?.hasKey === true);
 
   let body;
   if (!controller.available) {
@@ -278,7 +280,7 @@ export function AssistantDrawer({ onClose, onConnectClaude, onImportDesign, host
               {provider === "subscription" && !switchedOff ? (
                 <IconButton icon={<CircleUserRound size={14} />} label="Claude subscription" size="sm" onClick={() => setManaging(true)} />
               ) : (
-                <IconButton icon={<KeyRound size={14} />} label="API key" size="sm" onClick={() => setManaging(true)} />
+                <IconButton icon={<KeyRound size={14} />} label="API key" tooltip={status.hasKey && !showStrip ? `API key · ${status.keyHint ?? ""}` : undefined} size="sm" onClick={() => setManaging(true)} />
               )}
             </>
           ) : null}
@@ -286,7 +288,7 @@ export function AssistantDrawer({ onClose, onConnectClaude, onImportDesign, host
         </div>
       </header>
       <div className="sb-assistant__body">
-        {controller.available && status && (provider === "subscription" || status.hasKey) ? (
+        {controller.available && status && showStrip ? (
           <Tooltip content={subtitle.full} placement="bottom-start" disabled={subtitle.full === subtitle.text}>
             <p className="sb-assistant__subtitle" data-tone={billedTo ? "warn" : undefined} tabIndex={subtitle.full === subtitle.text ? undefined : 0}>
               {billedTo ? <TriangleAlert size={11} aria-hidden className="sb-assistant__subtitle-icon" /> : null}

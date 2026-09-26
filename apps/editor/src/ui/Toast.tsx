@@ -1,5 +1,5 @@
 import { CircleCheck, CircleX, Info, Sparkles, TriangleAlert, X } from "lucide-react";
-import { useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore, type CSSProperties, type ReactNode } from "react";
 import { Button } from "./Button.tsx";
 import { IconButton } from "./IconButton.tsx";
 import { Portal } from "./Portal.tsx";
@@ -105,10 +105,12 @@ const ICONS: Record<ToastTone, ReactNode> = {
 
 export interface ToasterProps {
   placement?: "bottom-right" | "bottom-center" | "top-right";
+  /** Width in px of a sheet covering the right edge; the stack sits in the free area beside it. */
+  inset?: number;
 }
 
 /** Renders the toast stack. Mount once near the app root. Hovering or focusing a toast pauses timers. */
-export function Toaster({ placement = "bottom-right" }: ToasterProps) {
+export function Toaster({ placement = "bottom-right", inset = 0 }: ToasterProps) {
   const items = useSyncExternalStore(subscribe, () => toasts, () => toasts);
   const [hovered, setHovered] = useState(false);
   const [focused, setFocused] = useState(false);
@@ -127,6 +129,7 @@ export function Toaster({ placement = "bottom-right" }: ToasterProps) {
         data-placement={placement}
         data-layer-ignore
         aria-label="Notifications"
+        style={inset > 0 ? ({ "--sb-toast-inset": `${inset}px` } as CSSProperties) : undefined}
         onPointerEnter={() => setHovered(true)}
         onPointerLeave={() => setHovered(false)}
         onFocus={() => setFocused(true)}

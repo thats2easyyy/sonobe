@@ -76,6 +76,26 @@ describe("SearchList weakKeys", () => {
   });
 });
 
+describe("SearchList isDisabled", () => {
+  const rowsData = [
+    { name: "Swap Split Direction", tag: "", off: true },
+    { name: "Canvas and Patches", tag: "split", off: false },
+  ];
+  const twoKeys: FuzzyKey<(typeof rowsData)[number]>[] = [
+    { name: "name", get: (i) => i.name },
+    { name: "tag", get: (i) => i.tag },
+  ];
+  const names = () => [...container.querySelectorAll('[role="option"]')].map((el) => el.textContent);
+
+  it("lists every enabled match above the disabled ones, whichever key matched, and never preselects a disabled row", () => {
+    act(() =>
+      root.render(<SearchList items={rowsData} keys={twoKeys} getId={(i) => i.name} isDisabled={(i) => i.off} query="split" onSelect={() => undefined} aria-label="Rows" renderItem={(item) => <span>{item.name}</span>} />),
+    );
+    expect(names()).toEqual(["Canvas and Patches", "Swap Split Direction"]);
+    expect(container.querySelector('[role="option"][data-active]')?.textContent).toBe("Canvas and Patches");
+  });
+});
+
 describe("SearchHints", () => {
   it("reads navigate, the overlay's verb, and close", () => {
     act(() => root.render(<div className="sb-searchlist__footer"><SearchHints verb="insert" /></div>));

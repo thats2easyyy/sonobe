@@ -127,7 +127,7 @@ describe("AssistantDrawer", () => {
     await flush();
     expect(host.secretsMap.get(ASSISTANT_KEY_SECRET)).toBe("sk-ant-api03-abcdefgh1234");
     expect(container.textContent).toContain("What should we build?");
-    expect(container.textContent).toContain("sk-ant-…1234");
+    expect(tooltipOf(buttonByLabel("API key"))).toBe("API key · sk-ant-…1234");
   });
 
   it("disables saving when the keychain isn't available", async () => {
@@ -286,13 +286,15 @@ describe("AssistantDrawer", () => {
     expect(host.sent).toHaveLength(1);
   });
 
-  it("puts the header at one row with the plan and billing in a strip under it", async () => {
+  it("keeps the header at one row and the key hint in the key button's tooltip, not in a strip over the empty chat", async () => {
     await mount(fakeAssistantHost({ key: "sk-ant-api03-abcdefgh1234" }));
     const header = container.querySelector(".sb-assistant__header")!;
     expect(header.querySelector(".sb-assistant__mark")).toBeNull();
     expect(header.querySelector(".sb-assistant__subtitle")).toBeNull();
     expect(header.querySelector(".sb-assistant__title")?.textContent).toBe("Assistant");
-    expect(container.querySelector(".sb-assistant__body > .sb-assistant__subtitle")?.textContent).toBe("Your API key · sk-ant-…1234");
+    expect(container.querySelector(".sb-assistant__subtitle")).toBeNull();
+    expect(container.textContent).not.toContain("sk-ant-");
+    expect(tooltipOf(buttonByLabel("API key"))).toBe("API key · sk-ant-…1234");
   });
 
   it("offers New chat on a notice that says to start one", async () => {
@@ -626,7 +628,8 @@ describe("AssistantDrawer on the Claude subscription (experimental)", () => {
     await click(container.querySelector(".sb-assistant-provider-note button"));
     expect(host.resets).toBe(1);
     expect(container.querySelector(".sb-assistant-provider-note")).toBeNull();
-    expect(container.querySelector(".sb-assistant__subtitle")?.textContent).toBe("Your API key · sk-ant-…1234");
+    expect(container.querySelector(".sb-assistant__subtitle")).toBeNull();
+    expect(tooltipOf(buttonByLabel("API key"))).toBe("API key · sk-ant-…1234");
   });
 
   it("focuses the first button of a setup that has no field", async () => {

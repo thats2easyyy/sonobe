@@ -20,8 +20,8 @@ import { learnNav } from "../learnStore.ts";
 import { settingsStore, useSettings } from "../settings.ts";
 import { recentFolder } from "./recent.ts";
 import { RecoveredDrafts } from "./RecoveredDrafts.tsx";
-import { getTemplates, thumbnailFor } from "./templates.ts";
-import { Tip, TruncatedText, useTruncated } from "./Tip.tsx";
+import { getTemplates, templateTag, thumbnailFor } from "./templates.ts";
+import { Tip, TruncatedText } from "./Tip.tsx";
 import type { WelcomeReason } from "./welcomeStore.ts";
 import "./welcome.css";
 
@@ -276,19 +276,18 @@ function WelcomeContent({ titleId, reason, onClose, createRef }: ContentProps) {
 
 function TemplateButton({ example, describedBy, disabled, onOpen }: { example: ExampleProject; describedBy: string | undefined; disabled: boolean; onOpen: () => void }) {
   const thumbnail = thumbnailFor(example.folder);
-  const [descRef, clamped] = useTruncated();
+  const tag = templateTag(example);
   const button = (
     <button type="button" className="sb-template" onClick={onOpen} disabled={disabled} aria-describedby={describedBy}>
       <span className="sb-template__thumb">{thumbnail ? <img src={thumbnail} alt="" loading="lazy" decoding="async" draggable={false} /> : <span className="sb-template__placeholder" />}</span>
       <span className="sb-template__name">{example.name}</span>
+      {tag && <span className="sb-template__tag">{tag}</span>}
       {example.description && (
-        <span ref={descRef} className="sb-template__desc" id={describedBy}>
+        <span className="sb-visually-hidden" id={describedBy}>
           {example.description}
         </span>
       )}
     </button>
   );
-  return example.description ? <Tooltip content={<Tip>{example.description}</Tip>} disabled={!clamped}>
-      {button}
-    </Tooltip> : button;
+  return example.description ? <Tooltip content={<Tip>{example.description}</Tip>}>{button}</Tooltip> : button;
 }

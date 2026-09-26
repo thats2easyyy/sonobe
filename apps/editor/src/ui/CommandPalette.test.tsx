@@ -86,6 +86,35 @@ describe("CommandPalette", () => {
     expect(document.querySelector(".sb-palette__category mark")?.textContent).toBe("Edit");
   });
 
+  it("runs a command found by an alias on Enter, above the disabled command named the same", async () => {
+    const split = vi.fn();
+    const own = new CommandRegistry();
+    own.register([
+      { id: "view.toggleSplitDirection", title: "Swap Split Direction", category: "View", when: () => false, disabledReason: "Switch to Canvas and Patches first", run: () => undefined },
+      { id: "view.split", title: "Canvas and Patches", category: "View", aliases: ["Split"], run: split },
+    ]);
+    act(() => root.unmount());
+    root = createRoot(container);
+    act(() =>
+      root.render(
+        <CommandProvider registry={own} platform="mac" attach={false}>
+          <CommandPalette open onOpenChange={() => undefined} />
+        </CommandProvider>,
+      ),
+    );
+    const input = search("split");
+    expect(rows()).toEqual([
+      { title: "Canvas and Patches", disabled: false, reason: undefined },
+      { title: "Swap Split Direction", disabled: true, reason: "Switch to Canvas and Patches first" },
+    ]);
+    expect(document.querySelector('[role="option"][data-active] .sb-palette__title')?.textContent).toBe("Canvas and Patches");
+    act(() => {
+      input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+    });
+    await new Promise((resolve) => requestAnimationFrame(resolve));
+    expect(split).toHaveBeenCalled();
+  });
+
   it("marks keyword-only matches and doesn't run one on Enter until you pick it", () => {
     const comment = vi.fn();
     const group = vi.fn();
@@ -104,14 +133,14 @@ describe("CommandPalette", () => {
       ),
     );
     const input = search("group");
-    expect(rows().map((r) => r.title)).toEqual(["Group Patches into Component", "Comment Selected Patches"]);
+    expect(rows().map((r) => r.title)).toEqual(["Comment Selected Patches", "Group Patches into Component"]);
     expect(document.querySelector(".sb-palette__matches")?.textContent).toBe("matches “group”");
     expect(document.querySelector('[role="option"][data-active]')).toBeNull();
     act(() => {
       input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
     });
     expect(comment).not.toHaveBeenCalled();
-    for (let i = 0; i < 2; i++) act(() => void input.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true })));
+    act(() => void input.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true })));
     expect(document.querySelector('[role="option"][data-active] .sb-palette__title')?.textContent).toBe("Comment Selected Patches");
   });
 });

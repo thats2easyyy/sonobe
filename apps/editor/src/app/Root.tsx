@@ -3,6 +3,7 @@ import { ThemeProvider } from "../theme/ThemeProvider.tsx";
 import { CommandProvider } from "../ui/commands/CommandProvider.tsx";
 import { Toaster } from "../ui/Toast.tsx";
 import { EditorApp } from "./EditorApp.tsx";
+import { useRightDrawerInset } from "./rightDrawers.ts";
 
 /** The widget gallery is a design-system page, so it loads only when visited. */
 const Gallery = lazy(() => import("../gallery/Gallery.tsx").then((m) => ({ default: m.Gallery })));
@@ -21,6 +22,11 @@ function useHashRoute(): string {
   return route;
 }
 
+/** Its own component so a drag of the drawer edge re-renders the toasts and not the whole editor. */
+function DrawerAwareToaster() {
+  return <Toaster inset={useRightDrawerInset()} />;
+}
+
 /** App root: theme, commands and shortcuts, toasts; the editor, or the widget gallery at #gallery. */
 export function Root() {
   const route = useHashRoute();
@@ -34,7 +40,7 @@ export function Root() {
         ) : (
           <EditorApp />
         )}
-        <Toaster />
+        <DrawerAwareToaster />
       </CommandProvider>
     </ThemeProvider>
   );

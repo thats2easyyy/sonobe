@@ -1,8 +1,17 @@
 import type { StoreApi } from "zustand/vanilla";
-import type { AssistantState } from "../panels/assistant/assistantStore.ts";
+import { useAssistant, type AssistantState } from "../panels/assistant/assistantStore.ts";
 import type { DesignState } from "../panels/design/designStore.ts";
 import type { LessonLayoutState } from "../panels/learn/lessons/lessonLayout.ts";
-import type { LayoutStore } from "../shell/layoutStore.ts";
+import { useLayout, useLiveDrawerWidth, type LayoutStore } from "../shell/layoutStore.ts";
+
+/** The width of the drawer covering the window's right edge (Learn or the Assistant), or 0: toasts keep clear of it. */
+export function useRightDrawerInset(): number {
+  const learnOpen = useLayout((s) => s.drawer !== null);
+  const assistantOpen = useAssistant((s) => s.open);
+  const width = useLayout((s) => s.sizes.drawer);
+  const liveWidth = useLiveDrawerWidth();
+  return learnOpen || assistantOpen ? (liveWidth ?? width) : 0;
+}
 
 /**
  * Learn and the Assistant share the right-hand side: whichever opened last is the one showing. A docked

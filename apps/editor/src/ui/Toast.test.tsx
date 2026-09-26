@@ -84,3 +84,17 @@ describe("Toast timing", () => {
     expect(titles()).toEqual([]);
   });
 });
+
+describe("Toaster inset", () => {
+  const stack = () => document.querySelector<HTMLElement>(".sb-toaster")!;
+
+  it("keeps clear of a sheet on the right edge", () => {
+    act(() => root.render(<Toaster inset={360} />));
+    expect(stack().style.getPropertyValue("--sb-toast-inset")).toBe("360px");
+  });
+
+  it("sets nothing when no sheet is open", () => {
+    act(() => root.render(<Toaster inset={0} />));
+    expect(stack().style.getPropertyValue("--sb-toast-inset")).toBe("");
+  });
+});
