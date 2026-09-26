@@ -4,11 +4,12 @@
  * addresses; with a fixed URL it just shows that URL.
  */
 
-import { Copy, Hand, QrCode, Vibrate, Wifi, WifiOff } from "lucide-react";
+import { Copy, QrCode, Vibrate, Wifi, WifiOff } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Button } from "../../ui/Button.tsx";
 import { IconButton } from "../../ui/IconButton.tsx";
 import { Popover } from "../../ui/Popover.tsx";
+import { Tooltip } from "../../ui/Tooltip.tsx";
 import { toast } from "../../ui/Toast.tsx";
 import { useControllableState } from "../../ui/lib/hooks.ts";
 import { getPreviewHostApi, toPreviewStatus, type PreviewHostApi, type PreviewStatus } from "./hostBridge.ts";
@@ -191,15 +192,18 @@ export function PhonePreviewButton({ url: urlProp = null, preview, open: openPro
 
   return (
     <>
-      <button ref={setAnchor} type="button" className="sb-vw__pill sb-vw__phone" data-live={(managed && running) || undefined} aria-haspopup="dialog" aria-expanded={open} onClick={() => setOpen(!open)}>
-        {managed && running ? <span className="sb-vw__dot" aria-hidden /> : <QrCode size={12} strokeWidth={2} aria-hidden />}
-        On phone
-        {managed && running && clients > 0 && (
-          <span className="sb-vw__pill-meta sb-tabular" aria-label={phoneClientsLabel(clients)}>
-            {clients}
-          </span>
-        )}
-      </button>
+      <Tooltip placement="top" disabled={open} content={running && managed ? `Preview on phone · ${phoneClientsLabel(clients)}` : "Preview on phone"}>
+        <button ref={setAnchor} type="button" className="sb-vw__pill sb-vw__phone" data-connected={clients > 0 || undefined} aria-haspopup="dialog" aria-expanded={open} onClick={() => setOpen(!open)}>
+          <QrCode size={12} strokeWidth={2} aria-hidden />
+          {managed && running && <span className="sb-vw__dot" aria-hidden />}
+          <span className="sb-vw__pill-label">On phone</span>
+          {managed && running && clients > 0 && (
+            <span className="sb-vw__pill-meta sb-tabular" aria-label={phoneClientsLabel(clients)}>
+              {clients}
+            </span>
+          )}
+        </button>
+      </Tooltip>
       <Popover open={open} onOpenChange={setOpen} anchor={anchor} placement="top" role="dialog" aria-label="Preview on your phone" className="sb-phone">
         <div className="sb-phone__title">Preview on your phone</div>
         {url ? (
@@ -238,20 +242,16 @@ export function PhonePreviewButton({ url: urlProp = null, preview, open: openPro
                 {phoneClientsLabel(clients)}
               </div>
             )}
-            <p className="sb-phone__note" data-tone={lanReachable ? undefined : "warn"}>
-              {lanReachable ? <Wifi size={12} aria-hidden /> : <WifiOff size={12} aria-hidden />}
-              {lanReachable ? "Scan with your phone's camera. Your phone and this computer need to be on the same Wi-Fi." : "No local network was found, so only this computer can open this link."}
-            </p>
-            {lanReachable && (
-              <p className="sb-phone__note">
-                <Vibrate size={12} aria-hidden />
-                On iPhone, scan this code in the Sonobe Viewer app to feel haptics.
+            {(clients === 0 || !lanReachable) && (
+              <p className="sb-phone__note" data-tone={lanReachable ? undefined : "warn"}>
+                {lanReachable ? <Wifi size={12} aria-hidden /> : <WifiOff size={12} aria-hidden />}
+                {lanReachable ? "Scan with your phone's camera. Your phone and this computer need to be on the same Wi-Fi." : "No local network was found, so only this computer can open this link."}
               </p>
             )}
             {lanReachable && (
               <p className="sb-phone__note">
-                <Hand size={12} aria-hidden />
-                On the phone, a three-finger tap opens a menu with Restart. Restarting here restarts the phone too.
+                <Vibrate size={12} aria-hidden />
+                On iPhone, scan with the Sonobe Viewer app to feel haptics. A three-finger tap opens its menu.
               </p>
             )}
             {managed && (

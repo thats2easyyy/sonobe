@@ -125,7 +125,7 @@ async function viewerQa(context: BrowserContext, page: Page) {
   await page.waitForSelector(".sonobe-device .sonobe-stage");
   await page.waitForTimeout(600);
   check("viewer renders the device frame", (await page.locator(".sonobe-device").count()) === 1);
-  check("viewer shows the fps readout", (await page.locator(".sb-vw__pill-meta").first().textContent())?.includes("fps") ?? false);
+  check("viewer shows the playback status", (await page.locator(".sb-vw__pill[data-static]").textContent())?.includes("Live") ?? false);
   check("viewer header has no second device picker", (await page.locator('[data-testid=viewer-column] .sb-panel__header [aria-label="Device"]').count()) === 0);
   check("viewer header names the device when there's room", await page.locator(".sb-vw__device-name").isVisible());
   await shot(page, "viewer-01-default");
@@ -140,8 +140,10 @@ async function viewerQa(context: BrowserContext, page: Page) {
     s.selection.getState().clear();
   });
 
-  await page.getByRole("button", { name: "Show hit targets" }).click();
+  check("the hit targets chip is absent while they are off", (await page.getByRole("button", { name: "Show hit targets" }).count()) === 0);
+  await chooseMenu(page, "More viewer options", "Show Hit Targets");
   await page.waitForTimeout(500);
+  check("the hit targets chip appears while they are on", (await page.getByRole("button", { name: "Show hit targets" }).count()) === 1);
   await shot(page, "viewer-03-hit-targets", "[data-testid=viewer-column]");
   await page.getByRole("button", { name: "Show hit targets" }).click();
 
@@ -154,12 +156,12 @@ async function viewerQa(context: BrowserContext, page: Page) {
 
   await page.locator("body").click({ position: { x: 5, y: 5 } });
   await page.keyboard.press("Alt+KeyD");
-  await chooseMenu(page, /^Viewer zoom:/, "Actual Size (1:1)");
+  await chooseMenu(page, /^Viewer zoom:/, "Actual Size");
   await page.waitForTimeout(300);
   check("⌥D hides the device frame", (await page.locator(".sonobe-device[data-frame=off]").count()) === 1);
-  check("the zoom menu switches to 1:1", (await page.getByRole("button", { name: "Viewer zoom: 1:1" }).count()) === 1);
+  check("the zoom menu switches to actual size", (await page.getByRole("button", { name: "Viewer zoom: 100%" }).count()) === 1);
   await shot(page, "viewer-05-no-frame-1to1", "[data-testid=viewer-column]");
-  await chooseMenu(page, /^Viewer zoom:/, "Fit to Panel");
+  await chooseMenu(page, /^Viewer zoom:/, "Zoom to Fit");
   await page.keyboard.press("Alt+KeyD");
 
   await page.getByRole("button", { name: "More viewer options" }).click();
@@ -225,11 +227,32 @@ async function viewerQa(context: BrowserContext, page: Page) {
       return { overflow: Math.max(0, ...visible.map((el) => el.getBoundingClientRect().right - box.right)), labels: [...new Set(labels)] };
     });
     check(`viewer header fits at ${width}px`, layout.overflow <= 0.5, `overflows by ${layout.overflow}px`);
-    for (const needed of ["Restart prototype", "Device frame", "More viewer options"]) check(`"${needed}" stays in the header at ${width}px`, layout.labels.includes(needed), JSON.stringify(layout.labels));
+    check(`"More viewer options" stays in the header at ${width}px`, layout.labels.includes("More viewer options"), JSON.stringify(layout.labels));
+    check(`Restart and the device frame stay out of the header at ${width}px`, !layout.labels.includes("Restart prototype") && !layout.labels.includes("Device frame"), JSON.stringify(layout.labels));
     check(`zoom stays in the header at ${width}px`, layout.labels.some((l) => l.startsWith("Viewer zoom:")), JSON.stringify(layout.labels));
     await shot(page, `viewer-13-header-${width}`, "[data-testid=viewer-column] .sb-panel__header");
   }
   await shot(page, "viewer-14-narrow", "[data-testid=viewer-column]");
+
+  // Fit never scrolls, and the footer holds the status, play/pause, a warning, and the phone pill.
+  for (const width of [240, 296, 640]) {
+    await open(page, `panels=both&viewerWidth=${width}`);
+    await page.waitForSelector(".sonobe-device .sonobe-stage");
+    await sessionEval(page, (s) => s.runtime.state.setState({ diagnostics: [{ code: "loop_limit", severity: "warning", message: "Too many copies", component: "main", itemIds: [] }] }));
+    await page.waitForTimeout(300);
+    const fit = await page.evaluate(() => {
+      const scroll = document.querySelector(".sb-vw__scroll") as HTMLElement;
+      return { x: scroll.scrollWidth - scroll.clientWidth, y: scroll.scrollHeight - scroll.clientHeight };
+    });
+    check(`fit mode doesn't scroll at ${width}px`, fit.x <= 0 && fit.y <= 0, JSON.stringify(fit));
+    const footer = await page.evaluate(() => {
+      const el = document.querySelector(".sb-vw__footer") as HTMLElement;
+      const box = el.getBoundingClientRect();
+      const inner = [...el.querySelectorAll<HTMLElement>(".sb-vw__pill, .sb-iconbtn")];
+      return { spill: Math.max(0, ...inner.map((c) => Math.max(box.left - c.getBoundingClientRect().left, c.getBoundingClientRect().right - box.right))), count: inner.length };
+    });
+    check(`the footer fits the panel at ${width}px`, footer.spill <= 0.5 && footer.count >= 4, JSON.stringify(footer));
+  }
 
   // Desktop host: the phone preview server and a host viewer window.
   const hostPage = await context.newPage();

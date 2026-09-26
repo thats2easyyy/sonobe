@@ -71,27 +71,69 @@ describe("ViewerPanel", () => {
     expect(container.querySelector(".sb-vw__pill")?.textContent).toContain("Paused");
   });
 
-  it("keeps zoom, restart, frame, and hit targets in the header, with no second device picker", () => {
+  it("keeps zoom, More and Hide in the header, with Restart and the frame in the menu", () => {
     mount(<ViewerPanel onCollapse={() => undefined} />);
     const header = container.querySelector(".sb-panel__header")!;
     expect(header.querySelector('[aria-label="Device"]')).toBeNull();
     expect(header.querySelector('[aria-label^="Viewer zoom:"]')).not.toBeNull();
-    for (const label of ["Restart prototype", "Device frame", "Show hit targets", "More viewer options", "Hide viewer"]) {
+    for (const label of ["More viewer options", "Hide viewer"]) {
       expect(header.querySelector(`[aria-label="${label}"]`), label).not.toBeNull();
+    }
+    for (const label of ["Restart prototype", "Device frame", "Show hit targets"]) {
+      expect(header.querySelector(`[aria-label="${label}"]`), label).toBeNull();
     }
     expect(header.querySelector(".sb-vw__device-name")?.textContent).toBeTruthy();
     const restart = vi.spyOn(session.runtime, "restart");
-    act(() => button("Restart prototype")!.click());
+    chooseMore("Restart");
     expect(restart).toHaveBeenCalledOnce();
+    act(() => button("More viewer options")!.click());
+    expect(menuItem("Restart")?.textContent).toMatch(/^Restart(⌘R|Ctrl\+R)$/);
+    expect(menuItem("Show Device Frame")).toBeDefined();
   });
 
-  it("switches between fit and 1:1 from the zoom menu", () => {
+  it("shows a hit targets chip in the header only while hit targets are on", () => {
+    mount(<ViewerPanel />);
+    expect(button("Show hit targets")).toBeNull();
+    chooseMore("Show Hit Targets");
+    expect(button("Show hit targets")?.getAttribute("aria-pressed")).toBe("true");
+    act(() => button("Show hit targets")!.click());
+    expect(button("Show hit targets")).toBeNull();
+  });
+
+  it("gives the zoom and More triggers tooltips that step aside while their menu is open", () => {
+    vi.useFakeTimers();
+    try {
+      mount(<ViewerPanel />);
+      const hover = (el: HTMLElement) => {
+        act(() => void el.dispatchEvent(new PointerEvent("pointerover", { bubbles: true, pointerType: "mouse" })));
+        act(() => void el.dispatchEvent(new PointerEvent("pointerenter", { pointerType: "mouse" })));
+        act(() => void vi.advanceTimersByTime(600));
+      };
+      const zoom = document.querySelector<HTMLElement>('button[aria-label^="Viewer zoom:"]')!;
+      hover(zoom);
+      expect(document.querySelector('[role="tooltip"]')?.textContent).toBe("Zoom");
+      act(() => void zoom.dispatchEvent(new PointerEvent("pointerout", { bubbles: true, pointerType: "mouse" })));
+      act(() => void zoom.dispatchEvent(new PointerEvent("pointerleave", { pointerType: "mouse" })));
+      const more = button("More viewer options")!;
+      act(() => void more.click());
+      expect(document.querySelector('[role="tooltip"]')).toBeNull();
+      hover(more);
+      expect(document.querySelector('[role="tooltip"]')).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("switches between fit and actual size from the zoom menu", () => {
     mount(<ViewerPanel />);
     expect(container.querySelector(".sb-vw__scroll")?.getAttribute("data-zoom")).toBe("fit");
     act(() => document.querySelector<HTMLButtonElement>('button[aria-label^="Viewer zoom:"]')!.click());
-    act(() => menuItem("Actual Size (1:1)")!.click());
+    act(() => menuItem("Actual Size")!.click());
     expect(container.querySelector(".sb-vw__scroll")?.getAttribute("data-zoom")).toBe("actual");
-    expect(document.querySelector('button[aria-label="Viewer zoom: 1:1"]')).not.toBeNull();
+    expect(document.querySelector('button[aria-label="Viewer zoom: 100%"]')).not.toBeNull();
+    act(() => document.querySelector<HTMLButtonElement>('button[aria-label^="Viewer zoom:"]')!.click());
+    act(() => menuItem("Zoom to Fit")!.click());
+    expect(container.querySelector(".sb-vw__scroll")?.getAttribute("data-zoom")).toBe("fit");
   });
 
   it("registers viewer commands; ⌥D toggles the frame", () => {
@@ -160,9 +202,14 @@ describe("ViewerPanel", () => {
     expect(document.querySelector(".sb-phone__url code")?.textContent).toBe(RUNNING.url);
     expect(document.querySelector(".sb-phone__status")?.textContent).toContain("1 phone connected");
     expect([...document.querySelectorAll(".sb-phone__alt")].map((b) => b.textContent)).toEqual(["10.0.0.2:5204"]);
-    const notes = [...document.querySelectorAll(".sb-phone__note")].map((p) => p.textContent);
-    expect(notes).toContain("On iPhone, scan this code in the Sonobe Viewer app to feel haptics.");
-    expect(notes).toContain("On the phone, a three-finger tap opens a menu with Restart. Restarting here restarts the phone too.");
+    const notes = () => [...document.querySelectorAll(".sb-phone__note")].map((p) => p.textContent);
+    expect(notes()).toEqual(["On iPhone, scan with the Sonobe Viewer app to feel haptics. A three-finger tap opens its menu."]);
+    expect(document.querySelector(".sb-vw__phone")?.hasAttribute("data-connected")).toBe(true);
+    act(() => listener?.({ ...RUNNING, clients: 0 }));
+    expect(notes()).toHaveLength(2);
+    expect(notes()[0]).toContain("same Wi-Fi");
+    expect(document.querySelector(".sb-vw__phone .sb-vw__dot")).not.toBeNull();
+    expect(document.querySelector(".sb-vw__phone")?.hasAttribute("data-connected")).toBe(false);
     act(() => listener?.({ ...RUNNING, clients: 3 }));
     expect(buttonWithText("On phone")!.textContent).toContain("3");
     await act(async () => {
@@ -171,6 +218,59 @@ describe("ViewerPanel", () => {
     });
     expect(host.stopPreview).toHaveBeenCalledOnce();
     expect(buttonWithText("Start phone preview")).toBeDefined();
+  });
+
+  it("keeps the status text fixed, and shows fps only when it falls under the target", () => {
+    mount(<ViewerPanel />);
+    const status = () => container.querySelector(".sb-vw__pill[data-static]")!;
+    expect(status().textContent).toBe("Paused");
+    expect(status().getAttribute("role")).toBeNull();
+    act(() => session.runtime.state.setState({ playing: true, fps: 60 }));
+    expect(status().textContent).toBe("Live");
+    act(() => session.runtime.state.setState({ fps: 41.6 }));
+    expect(status().textContent).toBe("Live42 fps");
+    expect(container.querySelector(".sb-vw__pill-meta")?.textContent).toBe("42 fps");
+  });
+
+  it("opens Diagnostics from the footer warning, which hides while the note over the stage names it", () => {
+    const showDiagnostics = vi.fn();
+    registry.register({ id: "view.showDiagnostics", title: "Show Diagnostics", category: "View", run: showDiagnostics });
+    mount(<ViewerPanel />);
+    const pill = () => container.querySelector<HTMLButtonElement>('.sb-vw__footer-end button[data-tone="warn"]');
+    expect(pill()).toBeNull();
+    const loop = { code: "empty_loop", severity: "warning" as const, message: 'Layer "Event Card" has 0 copies because ...', component: "main", itemIds: ["card"] };
+    const limit = { code: "loop_limit", severity: "warning" as const, message: "Too many.", component: "main", itemIds: [] };
+    act(() => session.runtime.state.setState({ diagnostics: [loop] }));
+    expect(pill()).toBeNull();
+    act(() => session.runtime.state.setState({ diagnostics: [loop, limit] }));
+    expect(pill()?.getAttribute("aria-label")).toContain("1 runtime warning");
+    act(() => pill()!.click());
+    expect(showDiagnostics).toHaveBeenCalledOnce();
+  });
+
+  it("keeps an empty_loop warning in the footer while the stale-state note, which doesn't name it, is showing", () => {
+    mount(<ViewerPanel />);
+    const pill = () => container.querySelector<HTMLButtonElement>('.sb-vw__footer-end button[data-tone="warn"]');
+    const loop = { code: "empty_loop", severity: "warning" as const, message: 'Layer "Event Card" has 0 copies because ...', component: "main", itemIds: ["card"] };
+    act(() => session.runtime.state.setState({ diagnostics: [loop], staleState: { layerId: "card", copies: 4 } }));
+    expect(container.querySelector(".sb-vw__window-note")?.textContent).toContain("kept state from before your edit");
+    expect(pill()?.getAttribute("aria-label")).toContain("1 runtime warning");
+  });
+
+  it("lets keyboard users reach the frame count and fps tooltip on the status", () => {
+    mount(<ViewerPanel />);
+    expect(container.querySelector(".sb-vw__pill[data-static]")?.getAttribute("tabindex")).toBe("0");
+  });
+
+  it("puts notes over the stage, not in the layout", () => {
+    mount(<ViewerPanel />);
+    const loop = { code: "empty_loop", severity: "warning" as const, message: 'Layer "Event Card" has 0 copies because ...', component: "main", itemIds: ["card"] };
+    act(() => session.runtime.state.setState({ diagnostics: [loop] }));
+    const note = container.querySelector(".sb-vw__window-note")!;
+    expect(note.closest(".sb-vw__notices")).not.toBeNull();
+    expect(note.closest(".sb-vw__viewport")).not.toBeNull();
+    const notices = container.querySelector(".sb-vw__notices")!;
+    expect(notices.compareDocumentPosition(container.querySelector(".sb-vw__scroll")!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
   it("detaches into a floating window and docks back", () => {

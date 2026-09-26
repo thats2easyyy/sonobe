@@ -1,17 +1,16 @@
 /* Viewer panel */
 .sb-vw {
+  --sb-vw-footer-h: 44px;
   position: relative;
   display: flex;
   flex: 1 1 auto;
   flex-direction: column;
   min-height: 0;
-  background:
-    radial-gradient(110% 70% at 50% 0%, color-mix(in srgb, var(--accent) 6%, transparent), transparent 62%),
-    var(--canvas-bg);
+  background: var(--canvas-bg);
 }
 
-/* The header reflows by panel width: the device name goes first, then the hit targets button. Everything
-   stays reachable from the "More viewer options" menu. */
+/* The header reflows by panel width: the device name goes first. Everything stays reachable from the
+   "More viewer options" menu, and the footer compacts when it runs short. */
 .sb-vw-panel {
   container: sb-viewer / inline-size;
 }
@@ -31,12 +30,6 @@
   }
 }
 
-@container sb-viewer (max-width: 279px) {
-  .sb-vw__hdr-hit {
-    display: none;
-  }
-}
-
 .sb-vw__zoom {
   display: inline-flex;
   flex: none;
@@ -50,7 +43,7 @@
   background: transparent;
   color: var(--text-secondary);
   font: inherit;
-  font-size: var(--font-size-xs);
+  font-size: var(--font-size-sm);
   font-weight: var(--font-weight-medium);
   cursor: pointer;
   transition:
@@ -85,7 +78,7 @@
   position: relative;
   flex: 1 1 auto;
   min-height: 0;
-  /* The renderer layers use z-index: keep them below dialogs, menus, and the issue banner. */
+  /* The renderer layers use z-index: keep them below dialogs, menus, and the notices. */
   isolation: isolate;
 }
 
@@ -99,16 +92,26 @@
   scrollbar-width: thin;
 }
 
+/* Fit never scrolls. The padding is FIT_PADDING in viewerModel.ts. */
+.sb-vw__scroll[data-zoom="fit"] {
+  padding: var(--space-5);
+  overflow: hidden;
+}
+
 .sb-vw__fit {
   position: relative;
   flex: none;
   margin: auto;
 }
 
+/* The device is scaled by a transform on its child, so this wrapper has no size of its own: its
+   unscaled box would otherwise make the stage scrollable. */
 .sb-vw__device {
   position: absolute;
   top: 0;
   left: 0;
+  width: 0;
+  height: 0;
   isolation: isolate;
 }
 
@@ -120,8 +123,19 @@
   outline: none;
 }
 
-.sb-vw__fit:focus-within .sonobe-device-screen {
-  box-shadow: 0 0 0 2px color-mix(in srgb, var(--focus-ring) 55%, transparent);
+/* Keyboard focus on the prototype rings the frame (the screen, with the frame off). The widths are
+   divided by the scale so the ring draws at 2px whatever the zoom. */
+.sb-vw__fit:has(.sonobe-device-content:focus-visible) .sonobe-device-body,
+.sb-vw__fit:has(.sonobe-device-content:focus-visible) .sonobe-device[data-frame="off"] .sonobe-device-screen {
+  outline: calc(2px / var(--sb-vw-scale, 1)) solid var(--focus-ring);
+  outline-offset: calc(3px / var(--sb-vw-scale, 1));
+}
+
+@media (forced-colors: active) {
+  .sb-vw__fit:has(.sonobe-device-content:focus-visible) .sonobe-device-body,
+  .sb-vw__fit:has(.sonobe-device-content:focus-visible) .sonobe-device[data-frame="off"] .sonobe-device-screen {
+    outline-color: Highlight;
+  }
 }
 
 .sb-vw-highlight {
@@ -151,7 +165,10 @@
   opacity: 0.8;
 }
 
+/* Drawn on the prototype's light screen, so it keeps its own greys instead of the editor's tokens. */
 .sb-vw__empty {
+  --sb-vw-empty-ink: #1c1c1e;
+  --sb-vw-empty-ink-soft: #636366;
   position: absolute;
   display: flex;
   align-items: center;
@@ -166,11 +183,7 @@
   align-items: center;
   gap: var(--space-2);
   max-width: 236px;
-  padding: var(--space-6) var(--space-7);
-  border-radius: var(--radius-xl);
-  background: var(--bg-elevated);
-  box-shadow: var(--shadow-popover);
-  color: var(--text-secondary);
+  color: var(--sb-vw-empty-ink-soft);
   font-size: var(--font-size-sm);
   line-height: var(--line-height-normal);
   text-align: center;
@@ -178,12 +191,13 @@
 }
 
 .sb-vw__empty-card svg {
-  margin-bottom: var(--space-2);
-  color: var(--text-tertiary);
+  margin-bottom: var(--space-3);
+  color: var(--sb-vw-empty-ink-soft);
+  opacity: 0.7;
 }
 
 .sb-vw__empty-card strong {
-  color: var(--text-primary);
+  color: var(--sb-vw-empty-ink);
   font-size: var(--font-size-md);
   font-weight: var(--font-weight-semibold);
 }
@@ -193,184 +207,72 @@
   inset: 0;
 }
 
-.sb-vw__issue {
+/* Notes and the error banner stack over the top of the stage, so none of them moves the device. */
+.sb-vw__notices {
   position: absolute;
   top: var(--space-4);
-  left: 50%;
+  right: var(--space-4);
+  left: var(--space-4);
   z-index: 3;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  pointer-events: none;
+}
+
+.sb-vw__notices > * {
+  pointer-events: auto;
+}
+
+.sb-vw__issue,
+.sb-vw__window-note {
   display: flex;
   align-items: center;
   gap: var(--space-3);
-  max-width: calc(100% - var(--space-8));
   min-height: 30px;
-  padding: var(--space-1) var(--space-2) var(--space-1) var(--space-5);
+  padding: var(--space-2) var(--space-2) var(--space-2) var(--space-4);
   border-radius: var(--radius-lg);
   background: var(--bg-elevated);
+  font-size: var(--font-size-sm);
+}
+
+.sb-vw__issue > svg,
+.sb-vw__window-note > svg {
+  flex: none;
+}
+
+.sb-vw__issue {
   box-shadow:
     0 0 0 1px color-mix(in srgb, var(--danger) 45%, transparent),
     var(--shadow-popover);
   color: var(--danger-text);
-  font-size: var(--font-size-sm);
-  transform: translateX(-50%);
-}
-
-.sb-vw__issue > svg {
-  flex: none;
 }
 
 .sb-vw__issue-text {
+  flex: 1 1 auto;
   min-width: 0;
+  display: -webkit-box;
   overflow: hidden;
   color: var(--text-primary);
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 5;
+  line-clamp: 5;
 }
 
-.sb-vw__footer {
-  display: flex;
+.sb-vw__issue-more {
   flex: none;
-  align-items: center;
-  justify-content: center;
-  gap: var(--space-3);
-  height: 44px;
-  padding: 0 var(--space-4);
-}
-
-.sb-vw__transport {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--space-1);
-  height: 26px;
-  padding: 0 var(--space-1);
-  border-radius: var(--radius-full);
-  background: var(--bg-elevated);
-  box-shadow:
-    0 0 0 1px var(--border-subtle),
-    var(--shadow-sm);
-}
-
-.sb-vw__transport .sb-iconbtn {
-  border-radius: var(--radius-full);
-}
-
-.sb-vw__pill {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--space-3);
-  height: 26px;
-  padding: 0 var(--space-5) 0 var(--space-4);
-  border: 0;
-  border-radius: var(--radius-full);
-  background: var(--bg-elevated);
-  box-shadow:
-    0 0 0 1px var(--border-subtle),
-    var(--shadow-sm);
   color: var(--text-secondary);
-  font: inherit;
-  font-size: var(--font-size-xs);
-  font-weight: var(--font-weight-medium);
-  white-space: nowrap;
-}
-
-.sb-vw__pill-meta {
-  padding-left: var(--space-3);
-  border-left: 1px solid var(--border-default);
-  color: var(--text-tertiary);
-}
-
-.sb-vw__pill[data-tone="warn"] {
-  gap: var(--space-2);
-  padding: 0 var(--space-4);
-  color: var(--warn-text);
-}
-
-.sb-vw__pill:focus-visible {
-  outline: 2px solid var(--focus-ring);
-  outline-offset: 1px;
-}
-
-.sb-vw__phone {
-  cursor: pointer;
-  transition: color var(--duration-fast) var(--ease-out);
-}
-
-@media (hover: hover) {
-  .sb-vw__phone:hover {
-    color: var(--text-primary);
-  }
-}
-
-.sb-vw__phone[aria-expanded="true"] {
-  color: var(--text-primary);
-}
-
-.sb-vw__phone[data-live] .sb-vw__dot,
-.sb-phone__status[data-connected] .sb-vw__dot {
-  background: var(--success);
-  box-shadow: 0 0 0 3px var(--success-soft);
-}
-
-.sb-vw__dot {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: var(--text-tertiary);
-}
-
-.sb-vw__pill[data-playing] .sb-vw__dot {
-  position: relative;
-  background: var(--success);
-}
-
-/*
- * The pulse ring animates only transform and opacity, so the compositor runs it. An animated
- * box-shadow repaints and re-layerizes the whole page every frame, which costs a large patch graph
- * about 14 ms a frame while the prototype plays.
- */
-.sb-vw__pill[data-playing] .sb-vw__dot::after {
-  content: "";
-  position: absolute;
-  inset: 0;
-  border-radius: 50%;
-  box-shadow: 0 0 0 3px var(--success-soft);
-  pointer-events: none;
-  animation: sb-vw-pulse 2s ease-in-out infinite;
-}
-
-@keyframes sb-vw-pulse {
-  50% {
-    transform: scale(1.6);
-    opacity: 0;
-  }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .sb-vw__pill[data-playing] .sb-vw__dot::after {
-    animation: none;
-  }
-}
-
-.sb-vw__floating-note.sb-empty {
-  flex: 1 1 auto;
 }
 
 /* The desktop's pop-out viewer window is open: say so here, with a way to show or close it. */
 .sb-vw__window-note {
-  display: flex;
-  flex: none;
-  align-items: center;
-  gap: var(--space-3);
-  margin: var(--space-4) var(--space-4) 0;
-  padding: var(--space-1) var(--space-1) var(--space-1) var(--space-4);
-  border-radius: var(--radius-md);
-  background: color-mix(in srgb, var(--bg-elevated) 88%, transparent);
-  box-shadow: 0 0 0 1px var(--border-subtle);
+  border: 1px solid var(--border-subtle);
+  box-shadow: var(--shadow-popover);
   color: var(--text-secondary);
-  font-size: var(--font-size-xs);
 }
 
 .sb-vw__window-note svg {
-  flex: none;
   color: var(--text-tertiary);
 }
 
@@ -386,16 +288,207 @@
 .sb-vw__window-note-text {
   flex: 1 1 auto;
   min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  padding-block: var(--space-1);
+  overflow-wrap: anywhere;
+  text-wrap: pretty;
 }
 
-/* The restart offer is a sentence: it wraps instead of losing its end in a narrow viewer. */
-.sb-vw__window-note[data-wrap] .sb-vw__window-note-text {
-  padding-block: var(--space-1);
-  white-space: normal;
-  text-wrap: pretty;
+.sb-vw__window-note .sb-btn {
+  flex: none;
+}
+
+/* Status on the left of play/pause and the chips on its right, so the button stays at the centre. */
+.sb-vw__footer {
+  display: grid;
+  flex: none;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  align-items: center;
+  column-gap: var(--space-4);
+  min-width: 0;
+  height: var(--sb-vw-footer-h);
+  padding: 0 var(--space-4);
+}
+
+.sb-vw__transport {
+  display: inline-flex;
+}
+
+/* Nothing sits beside the play button, so its target is 24px wide as well as tall. */
+.sb-vw__transport .sb-iconbtn::after {
+  inset: -1px;
+}
+
+.sb-vw__footer-end {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  min-width: 0;
+}
+
+.sb-vw__pill {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-3);
+  height: var(--control-h-sm);
+  padding: 0 var(--space-4);
+  border: 0;
+  border-radius: var(--radius-md);
+  background: transparent;
+  box-shadow: inset 0 0 0 1px var(--border-default);
+  color: var(--text-secondary);
+  font: inherit;
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-medium);
+  white-space: nowrap;
+  transition:
+    background-color var(--duration-fast) var(--ease-out),
+    color var(--duration-fast) var(--ease-out);
+}
+
+button.sb-vw__pill {
+  cursor: pointer;
+}
+
+button.sb-vw__pill::after {
+  content: "";
+  position: absolute;
+  inset: -1px 0;
+}
+
+@media (hover: hover) {
+  button.sb-vw__pill:hover {
+    background: var(--bg-hover);
+    color: var(--text-primary);
+  }
+}
+
+.sb-vw__pill:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 1px;
+}
+
+/* Read-only status: text, not a control. */
+.sb-vw__pill[data-static] {
+  justify-self: end;
+  padding: 0;
+  background: none;
+  box-shadow: none;
+  cursor: default;
+}
+
+.sb-vw__pill[data-static]:focus-visible {
+  outline-offset: 4px;
+}
+
+.sb-vw__pill-meta {
+  padding-left: var(--space-3);
+  border-left: 1px solid var(--border-default);
+  color: var(--text-tertiary);
+}
+
+.sb-vw__pill[data-static] .sb-vw__pill-meta {
+  padding-left: 0;
+  border-left: 0;
+  color: var(--warn-text);
+}
+
+.sb-vw__pill[data-tone="warn"] {
+  gap: var(--space-2);
+  color: var(--warn-text);
+}
+
+@media (hover: hover) {
+  button.sb-vw__pill[data-tone="warn"]:hover {
+    color: var(--warn-text);
+  }
+}
+
+.sb-vw__phone[aria-expanded="true"] {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.sb-vw__dot {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--text-tertiary);
+}
+
+.sb-vw__pill[data-playing] .sb-vw__dot {
+  background: var(--success);
+}
+
+/* A running preview server with no phone on it yet is a ring; a phone connected fills it. */
+.sb-vw__phone .sb-vw__dot {
+  background: transparent;
+  box-shadow: inset 0 0 0 1.5px var(--text-tertiary);
+}
+
+.sb-vw__phone[data-connected] .sb-vw__dot,
+.sb-phone__status[data-connected] .sb-vw__dot {
+  background: var(--success);
+  box-shadow: none;
+}
+
+@media (forced-colors: active) {
+  .sb-vw__dot {
+    background: CanvasText;
+  }
+
+  .sb-vw__pill[data-playing] .sb-vw__dot,
+  .sb-vw__phone[data-connected] .sb-vw__dot,
+  .sb-phone__status[data-connected] .sb-vw__dot {
+    background: Highlight;
+  }
+
+  .sb-vw__phone:not([data-connected]) .sb-vw__dot {
+    border: 1.5px solid CanvasText;
+    box-sizing: border-box;
+    background: transparent;
+  }
+}
+
+/* The "On phone" chip drops to an icon and dot when the footer runs short of room: below 250px, or below
+   340px while a warning chip shares the row. The label stays in its accessible name and tooltip. */
+@container sb-viewer (max-width: 249px) {
+  .sb-vw__phone .sb-vw__pill-label,
+  .sb-vw__phone .sb-vw__pill-meta {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    overflow: hidden;
+    border: 0;
+    clip-path: inset(50%);
+  }
+
+  .sb-vw__phone {
+    padding: 0 var(--space-3);
+  }
+}
+
+@container sb-viewer (max-width: 339px) {
+  .sb-vw__footer:has(.sb-vw__footer-end button[data-tone="warn"]) .sb-vw__phone .sb-vw__pill-label,
+  .sb-vw__footer:has(.sb-vw__footer-end button[data-tone="warn"]) .sb-vw__phone .sb-vw__pill-meta {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    overflow: hidden;
+    border: 0;
+    clip-path: inset(50%);
+  }
+
+  .sb-vw__footer:has(.sb-vw__footer-end button[data-tone="warn"]) .sb-vw__phone {
+    padding: 0 var(--space-3);
+  }
+}
+
+.sb-vw__floating-note.sb-empty {
+  align-content: flex-start;
 }
 
 /* Floating window */
@@ -515,7 +608,7 @@
 .sb-phone__qr[data-state="failed"] {
   padding: var(--space-6);
   color: #56565e;
-  font-size: var(--font-size-xs);
+  font-size: var(--font-size-sm);
   text-align: center;
 }
 
@@ -560,8 +653,8 @@
   display: flex;
   gap: var(--space-3);
   margin: 0;
-  color: var(--text-tertiary);
-  font-size: var(--font-size-xs);
+  color: var(--text-secondary);
+  font-size: var(--font-size-sm);
   line-height: var(--line-height-normal);
 }
 
@@ -591,7 +684,7 @@
   border-radius: var(--radius-md);
   background: color-mix(in srgb, var(--danger) 12%, transparent);
   color: var(--danger-text);
-  font-size: var(--font-size-xs);
+  font-size: var(--font-size-sm);
   line-height: var(--line-height-normal);
 }
 
@@ -600,7 +693,7 @@
   align-items: center;
   gap: var(--space-3);
   color: var(--text-secondary);
-  font-size: var(--font-size-xs);
+  font-size: var(--font-size-sm);
   font-weight: var(--font-weight-medium);
 }
 
@@ -610,8 +703,8 @@
   align-items: center;
   justify-content: center;
   gap: var(--space-2);
-  color: var(--text-tertiary);
-  font-size: var(--font-size-xs);
+  color: var(--text-secondary);
+  font-size: var(--font-size-sm);
 }
 
 .sb-phone__alt {
@@ -636,10 +729,10 @@
   outline-offset: 1px;
 }
 
-/* The knob preset that just started running, over the stage for a moment. */
+/* The knob preset that just started running, over the bottom of the stage for a moment. */
 .sb-vw__preset-caption {
   position: absolute;
-  top: var(--space-5);
+  bottom: calc(var(--sb-vw-footer-h) + var(--space-4));
   left: 50%;
   z-index: 2;
   display: inline-flex;
@@ -647,13 +740,12 @@
   gap: var(--space-2);
   max-width: calc(100% - 32px);
   padding: var(--space-2) var(--space-4);
-  border-radius: var(--radius-full);
-  background: color-mix(in srgb, var(--bg-elevated) 92%, transparent);
-  box-shadow:
-    0 0 0 1px var(--border-subtle),
-    var(--shadow-md);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+  background: var(--bg-elevated);
+  box-shadow: var(--shadow-popover);
   color: var(--text-primary);
-  font-size: var(--font-size-xs);
+  font-size: var(--font-size-sm);
   font-weight: var(--font-weight-medium);
   white-space: nowrap;
   translate: -50% 0;
@@ -664,7 +756,7 @@
 @keyframes sb-vw-caption {
   0% {
     opacity: 0;
-    transform: translateY(-4px);
+    transform: translateY(4px);
   }
   12%,
   75% {

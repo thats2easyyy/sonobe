@@ -1,7 +1,7 @@
 import { applyOps, createEmptyDocument, createRegistry, deviceScreenSize, type LayerNode, type SonobeDocument } from "@sonobe/core";
 import { buildDoc, createTestRuntime } from "@sonobe/engine/testing";
 import { describe, expect, it } from "vitest";
-import { componentInPrototype, devicePresetOps, emptyLoopNotice, fitScale, formatFps, interactiveLayerIds, layerSceneRect, layerScreenRect, nodesForLayers, outlinePoints, phoneClientsLabel, presetForDevice, qrPath, rotateDeviceOps, sceneKeysForLayers } from "./viewerModel.ts";
+import { FIT_PADDING, componentInPrototype, deviceSizeLabel, devicePresetOps, emptyLoopNotice, fitScale, formatFps, fpsBelowTarget, interactiveLayerIds, layerSceneRect, layerScreenRect, nodesForLayers, outlinePoints, phoneClientsLabel, presetForDevice, qrPath, rotateDeviceOps, sceneKeysForLayers } from "./viewerModel.ts";
 
 describe("layerScreenRect", () => {
   it("maps a layer's box through the stage's client rect", () => {
@@ -105,6 +105,24 @@ describe("formatting", () => {
   it("formats fps", () => {
     expect(formatFps(60)).toBe("60 fps");
     expect(formatFps(59.84)).toBe("59.8 fps");
+  });
+
+  it("shows the frame rate only when it fell clearly under the target", () => {
+    expect(fpsBelowTarget(60, 60)).toBe(false);
+    expect(fpsBelowTarget(56, 60)).toBe(false);
+    expect(fpsBelowTarget(48, 60)).toBe(true);
+    expect(fpsBelowTarget(0, 60)).toBe(false);
+    expect(fpsBelowTarget(100, 120)).toBe(true);
+  });
+
+  it("leaves a size out of a device row when the name already has it", () => {
+    expect(deviceSizeLabel({ name: "Desktop 1440×900", size: [1440, 900] })).toBeUndefined();
+    expect(deviceSizeLabel({ name: "iPhone 16", size: [393, 852] })).toBe("393 × 852");
+  });
+
+  it("fits the device with 12px around it", () => {
+    expect(fitScale([200, 400], [224, 424], FIT_PADDING)).toBe(1);
+    expect(fitScale([200, 400], [124, 424], FIT_PADDING)).toBe(0.5);
   });
 
   it("merges QR module runs into rows of rects", () => {

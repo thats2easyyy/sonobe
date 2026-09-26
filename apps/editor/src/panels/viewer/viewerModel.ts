@@ -9,6 +9,9 @@ import type { SceneFrame, SceneNode } from "@sonobe/engine";
 
 export type ViewerZoom = "fit" | "actual";
 
+/** Room around the device in Fit mode, in px. Matches the stage's padding in viewer.css. */
+export const FIT_PADDING = 12;
+
 /** The preset for device settings, with a size override applied. */
 export function presetForDevice(device: DeviceSettings): DevicePreset {
   const preset = getDevicePreset(device.preset);
@@ -175,6 +178,17 @@ export function phoneClientsLabel(clients: number): string {
 /** "60 fps" / "59.8 fps". */
 export function formatFps(fps: number): string {
   return `${Number.isInteger(fps) ? fps : fps.toFixed(1)} fps`;
+}
+
+/** Whether a measured frame rate is worth showing: it fell clearly under the project's rate. */
+export function fpsBelowTarget(fps: number, target: number): boolean {
+  return fps > 0 && fps < target * 0.9;
+}
+
+/** A device menu row's second line: its size, unless the name already says it ("Desktop 1440×900"). */
+export function deviceSizeLabel(preset: Pick<DevicePreset, "name" | "size">): string | undefined {
+  const [w, h] = preset.size;
+  return preset.name.includes(`${w}×${h}`) ? undefined : `${w} × ${h}`;
 }
 
 export interface FloatingRect {

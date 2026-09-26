@@ -12,8 +12,9 @@
  *     className?      string
  *   />
  *
- * Header: zoom menu (fit, 1:1), restart, device frame, hit targets, and a "More viewer options" menu
- * (rotate, device, frame, hit targets, pop out, phone preview). It reflows with container queries.
+ * Header: zoom menu (fit, actual size), a hit targets chip while they are on, and a "More viewer
+ * options" menu (restart, rotate, device, frame, hit targets, pop out, phone preview). It and the
+ * footer reflow with container queries.
  *
  * Commands (registered only when missing): viewer.toggleDeviceFrame (Alt+D), viewer.toggleHitTargets,
  * viewer.actualSize, viewer.rotateDevice, viewer.popOut, viewer.previewOnDevice. Play/pause and
@@ -44,9 +45,12 @@ export {
 } from "./hostBridge.ts";
 export {
   clampFloatingRect,
+  deviceSizeLabel,
   devicePresetOps,
+  FIT_PADDING,
   fitScale,
   formatFps,
+  fpsBelowTarget,
   interactiveLayerIds,
   isFloatingRect,
   layerScreenRect,

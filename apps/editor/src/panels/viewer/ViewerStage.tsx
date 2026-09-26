@@ -8,7 +8,7 @@ import type { Diagnostic, Id } from "@sonobe/core";
 import type { SceneFrame } from "@sonobe/engine";
 import { createDeviceFrame, type DeviceFrame, type DeviceFrameLayout } from "@sonobe/renderer";
 import { CircleAlert, Layers } from "lucide-react";
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { useStore } from "zustand";
 import type { ViewerHandle } from "../../runtime/runtimeHost.ts";
 import { currentComponentId, itemKindOf } from "../../state/selection.ts";
@@ -17,11 +17,12 @@ import { Button } from "../../ui/Button.tsx";
 import { EmptyState } from "../../ui/EmptyState.tsx";
 import { cx } from "../../ui/lib/cx.ts";
 import { useLatest } from "../../ui/lib/hooks.ts";
+import { Tooltip } from "../../ui/Tooltip.tsx";
 import { useElementSize } from "../../ui/lib/useElementSize.ts";
 import { attachViewerHologram } from "../import/HologramViewer.ts";
 import { watchPressedCopy } from "../patch-editor/api.ts";
 import { registerBoundsProvider } from "./hostBridge.ts";
-import { fitScale, interactiveLayerIds, layerScreenRect, nodesForLayers, outlinePoints, presetForDevice, sceneKeysForLayers, type HighlightScope, type ViewerZoom } from "./viewerModel.ts";
+import { FIT_PADDING, fitScale, interactiveLayerIds, layerScreenRect, nodesForLayers, outlinePoints, presetForDevice, sceneKeysForLayers, type HighlightScope, type ViewerZoom } from "./viewerModel.ts";
 import "./viewer.css";
 
 export interface ViewerStageProps {
@@ -33,11 +34,12 @@ export interface ViewerStageProps {
   primary?: boolean;
   /** The effective scale, whenever it changes. */
   onScaleChange?: (scale: number) => void;
+  /** Notes drawn over the top of the stage, under the error banner. They never move the device. */
+  notices?: ReactNode;
   className?: string;
 }
 
 const SVG_NS = "http://www.w3.org/2000/svg";
-const STAGE_PADDING = 20;
 
 interface HighlightTargets {
   selected: ReadonlySet<Id>;
@@ -104,7 +106,7 @@ function createHighlightOverlay(container: HTMLElement): HighlightOverlay {
   };
 }
 
-export function ViewerStage({ session, showFrame, zoom, showHitTargets, primary = true, onScaleChange, className }: ViewerStageProps) {
+export function ViewerStage({ session, showFrame, zoom, showHitTargets, primary = true, onScaleChange, notices, className }: ViewerStageProps) {
   const device = useStore(session.document, (s) => s.doc.project.device);
   const rootExists = useStore(session.document, (s) => !!s.doc.components[s.doc.project.root]);
   const empty = useStore(session.document, (s) => (s.doc.components[s.doc.project.root]?.layers.length ?? 0) === 0);
@@ -165,7 +167,7 @@ export function ViewerStage({ session, showFrame, zoom, showHitTargets, primary 
     setLayout(frame.layout);
   }, [preset, showFrame, orientation]);
 
-  const scale = layout ? (zoom === "actual" ? 1 : fitScale([layout.width, layout.height], [box.width, box.height], STAGE_PADDING)) : 0.3;
+  const scale = layout ? (zoom === "actual" ? 1 : fitScale([layout.width, layout.height], [box.width, box.height], FIT_PADDING)) : 0.3;
 
   useLayoutEffect(() => {
     const el = frameRef.current?.element;
@@ -252,15 +254,32 @@ export function ViewerStage({ session, showFrame, zoom, showHitTargets, primary 
 
   return (
     <div className={cx("sb-vw__viewport", className)}>
+      <div className="sb-vw__notices">
+        {rootExists && firstError && (
+          <div className="sb-vw__issue" role="status">
+            <CircleAlert size={14} aria-hidden />
+            <Tooltip content={firstError.message} placement="bottom">
+              <span className="sb-vw__issue-text">{firstError.message}</span>
+            </Tooltip>
+            {errors.length > 1 && <span className="sb-vw__issue-more sb-tabular">{`(+${errors.length - 1} more)`}</span>}
+            {firstError.itemIds.length > 0 && (
+              <Button size="sm" variant="secondary" onClick={() => reveal(firstError)}>
+                Show
+              </Button>
+            )}
+          </div>
+        )}
+        {notices}
+      </div>
       <div ref={scrollRef} className="sb-vw__scroll" data-zoom={zoom}>
-        <div className="sb-vw__fit" style={{ width: layout ? layout.width * scale : 0, height: layout ? layout.height * scale : 0, visibility: rootExists ? undefined : "hidden" }}>
+        <div className="sb-vw__fit" style={{ width: layout ? layout.width * scale : 0, height: layout ? layout.height * scale : 0, visibility: rootExists ? undefined : "hidden", "--sb-vw-scale": scale } as CSSProperties}>
           <div ref={hostRef} className="sb-vw__device" />
           {rootExists && empty && screen && (
             <div className="sb-vw__empty" style={{ left: screen.x * scale, top: screen.y * scale, width: screen.width * scale, height: screen.height * scale }}>
               <div className="sb-vw__empty-card">
-                <Layers size={18} strokeWidth={1.75} aria-hidden />
+                <Layers size={32} strokeWidth={1.5} aria-hidden />
                 <strong>Nothing to show yet</strong>
-                <span>Draw a layer on the Canvas, or ask Claude to build something.</span>
+                <span>Draw a layer, or ask Claude to build one.</span>
               </div>
             </div>
           )}
@@ -273,20 +292,6 @@ export function ViewerStage({ session, showFrame, zoom, showHitTargets, primary 
           title="This prototype can't run"
           description="Its root component is missing. Undo the last change, or open another project."
         />
-      )}
-      {rootExists && firstError && (
-        <div className="sb-vw__issue" role="status">
-          <CircleAlert size={14} aria-hidden />
-          <span className="sb-vw__issue-text" title={firstError.message}>
-            {firstError.message}
-            {errors.length > 1 ? ` (+${errors.length - 1} more)` : ""}
-          </span>
-          {firstError.itemIds.length > 0 && (
-            <Button size="sm" variant="ghost" onClick={() => reveal(firstError)}>
-              Show
-            </Button>
-          )}
-        </div>
       )}
     </div>
   );
