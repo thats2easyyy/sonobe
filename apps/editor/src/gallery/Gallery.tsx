@@ -21,7 +21,7 @@ import { Button } from "../ui/Button.tsx";
 import { ColorField } from "../ui/ColorField.tsx";
 import { ColorPicker } from "../ui/ColorPicker.tsx";
 import { CommandPalette } from "../ui/CommandPalette.tsx";
-import { Dialog } from "../ui/Dialog.tsx";
+import { DIALOG_WIDTH, Dialog } from "../ui/Dialog.tsx";
 import { EmptyState } from "../ui/EmptyState.tsx";
 import { IconButton } from "../ui/IconButton.tsx";
 import { Kbd } from "../ui/Kbd.tsx";
@@ -32,6 +32,7 @@ import { ScrubNumberField } from "../ui/ScrubNumberField.tsx";
 import { SearchList } from "../ui/SearchList.tsx";
 import { SegmentedControl } from "../ui/SegmentedControl.tsx";
 import { Select } from "../ui/Select.tsx";
+import { Slider } from "../ui/Slider.tsx";
 import { Splitter } from "../ui/Splitter.tsx";
 import { TabPanel, Tabs } from "../ui/Tabs.tsx";
 import { TextArea, TextField } from "../ui/TextField.tsx";
@@ -99,6 +100,7 @@ function Foundations({ theme }: { theme: ThemeName }) {
     ["md · 13", "var(--font-size-md)", "Insert patch…"],
     ["sm · 12", "var(--font-size-sm)", "Default UI text for panels and menus"],
     ["xs · 11", "var(--font-size-xs)", "Labels, hints, and metadata"],
+    ["2xs · 10", "var(--font-size-2xs)", "Patch editor node text only"],
   ];
   return (
     <Section title="Foundations" description="The tokens every widget is built from. Themes change the values, never the names.">
@@ -234,6 +236,18 @@ function Buttons() {
           <IconButton size="xs" icon={<Lock size={11} />} label="Lock" />
         </Row>
       </Demo>
+      <Demo label="Icon button sizes · sm and xs keep a 24px hit area" wide>
+        <Row>
+          {(["xs", "sm", "md", "lg"] as const).map((size) => (
+            <span key={size} className="sb-gallery__inline">
+              <IconButton size={size} icon={<Copy size={size === "xs" ? 11 : size === "lg" ? 16 : 13} />} label={`Copy (${size})`} variant="secondary" />
+              {size}
+            </span>
+          ))}
+          <IconButton size="md" variant="solid" icon={<Play size={13} fill="currentColor" strokeWidth={0} />} label="Send" />
+          <IconButton size="md" variant="solid" icon={<Play size={13} fill="currentColor" strokeWidth={0} />} label="Send (disabled)" disabled />
+        </Row>
+      </Demo>
     </Section>
   );
 }
@@ -250,6 +264,7 @@ function Inputs() {
   const [tint, setTint] = useState("#F2555A80");
   const [pickerColor, setPickerColor] = useState("#3FC1C9FF");
   const [name, setName] = useState("Event Card");
+  const [distance, setDistance] = useState(95);
   return (
     <Section title="Inputs" description="Scrub on drag (Shift ×10, Alt ×0.1), click to type (math works: 667-49-64.5), arrows to nudge, Escape to revert.">
       <Demo label="Scrub number fields">
@@ -259,6 +274,24 @@ function Inputs() {
           <ScrubNumberField aria-label="Width" label="W" value={0} mixed />
           <ScrubNumberField aria-label="Scale" value={1.05} linked precision={2} />
           <ScrubNumberField aria-label="Height" label="H" value={220} disabled />
+        </Stack>
+      </Demo>
+      <Demo label="Slider · ticks mark other presets, the thumb still drags">
+        <Stack>
+          <Slider
+            aria-label="Commit distance"
+            min={0}
+            max={200}
+            step={1}
+            value={distance}
+            onChange={setDistance}
+            valueText={(v) => `${v} pt`}
+            ticks={[
+              { value: 95, label: "Shipped app: 95 pt", onSelect: () => undefined },
+              { value: 140, label: "Proposal: 140 pt", onSelect: () => setDistance(140) },
+            ]}
+          />
+          <Slider aria-label="Disabled" min={0} max={1} value={0.4} onChange={() => undefined} disabled />
         </Stack>
       </Demo>
       <Demo label="Vector fields · 2, 3, and 4 components">
@@ -307,6 +340,8 @@ function Selection() {
   const [touch, setTouch] = useState(true);
   const [clip, setClip] = useState(false);
   const [loop, setLoop] = useState(true);
+  const [mixedToggle, setMixedToggle] = useState(true);
+  const [mixedOn, setMixedOn] = useState(false);
   return (
     <Section title="Selection" description="Segmented controls for a few visible options, selects for many, toggles for settings that apply immediately.">
       <Demo label="Segmented controls">
@@ -338,6 +373,7 @@ function Selection() {
         <Stack>
           <Toggle label="Receives touches" checked={touch} onChange={setTouch} />
           <Toggle label="Clip contents" size="sm" checked={clip} onChange={setClip} />
+          <Toggle label="Receives touches (mixed)" mixed={mixedToggle} checked={mixedOn} onChange={(next) => { setMixedToggle(false); setMixedOn(next); }} />
           <Checkbox label="Loop" checked={loop} onChange={setLoop} />
           <Checkbox label="Some layers are locked" checked={false} indeterminate />
           <Checkbox label="Disabled" checked disabled />
@@ -410,21 +446,19 @@ function Overlays({ onOpenPalette }: { onOpenPalette: () => void }) {
             </div>
           </Popover>
           <Button onClick={() => setDialogOpen(true)}>Open dialog</Button>
-          <Dialog open={dialogOpen} onOpenChange={setDialogOpen} aria-labelledby="sb-gallery-dialog-title" width={420}>
-            <div className="sb-gallery__dialog">
-              <h3 id="sb-gallery-dialog-title" className="sb-gallery__dialog-title">
-                Delete “Event Card”?
-              </h3>
-              <p className="sb-gallery__dialog-text">It has 5 layers and 4 connected patches. You can undo this.</p>
-              <div className="sb-gallery__dialog-actions">
-                <Button variant="ghost" onClick={() => setDialogOpen(false)}>
-                  Cancel
-                </Button>
-                <Button variant="danger" onClick={() => setDialogOpen(false)}>
-                  Delete
-                </Button>
-              </div>
-            </div>
+          <Dialog open={dialogOpen} onOpenChange={setDialogOpen} width={DIALOG_WIDTH.sm}>
+            <Dialog.Header title="Rename prototype" description="The name shows in the title bar and in Sonobe Viewer." />
+            <Dialog.Body>
+              <TextField aria-label="Name" defaultValue="Event Card" data-autofocus />
+            </Dialog.Body>
+            <Dialog.Footer start={<Button variant="ghost">Reset name</Button>}>
+              <Dialog.Close>
+                <Button variant="ghost">Cancel</Button>
+              </Dialog.Close>
+              <Dialog.Close>
+                <Button variant="primary">Rename</Button>
+              </Dialog.Close>
+            </Dialog.Footer>
           </Dialog>
           <Button icon={<Search size={13} />} onClick={onOpenPalette}>
             Command palette <Kbd shortcut="Mod+K" variant="plain" />
@@ -630,6 +664,16 @@ function Feedback() {
               </Button>
             }
           />
+        </div>
+      </Demo>
+      <Demo label="Empty state · inline, under a panel header">
+        <div className="sb-gallery__box">
+          <EmptyState variant="inline" icon={<Search size={16} />} title="Nothing selected" description="Select a layer to edit its properties." />
+        </div>
+      </Demo>
+      <Demo label="Empty state · inline with an action">
+        <div className="sb-gallery__box">
+          <EmptyState variant="inline" title="No knobs yet" description="Knobs tune a prototype while it runs." actions={<Button size="sm">New knob</Button>} />
         </div>
       </Demo>
     </Section>

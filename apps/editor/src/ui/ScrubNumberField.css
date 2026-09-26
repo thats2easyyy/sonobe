@@ -20,8 +20,9 @@
 }
 
 @media (hover: hover) {
-  .sb-scrub:not([data-disabled]):not([data-linked]):hover {
+  .sb-scrub:not([data-disabled]):not([data-linked]):not([data-scrubbing]):not(:focus-within):hover {
     background: var(--bg-field-hover);
+    box-shadow: inset 0 0 0 1px var(--border-default);
   }
 }
 
@@ -59,7 +60,7 @@
   outline: none;
   background: transparent;
   color: var(--text-primary);
-  font-family: var(--font-mono);
+  font-family: var(--font-sans);
   font-size: var(--font-size-xs);
   font-variant-numeric: tabular-nums;
   text-overflow: ellipsis;
@@ -80,7 +81,6 @@
 
 .sb-scrub__input::placeholder {
   color: var(--text-tertiary);
-  font-family: var(--font-sans);
 }
 
 .sb-scrub__input::selection {

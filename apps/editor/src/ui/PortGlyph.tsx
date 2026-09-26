@@ -34,7 +34,7 @@ export const VALUE_TYPE_LABELS: Record<ValueType, string> = {
 
 export interface PortGlyphProps {
   type: ValueType | "variant";
-  /** Connected ports are solid; unconnected ports are dimmed. */
+  /** Marks the glyph `data-connected`; the patch editor draws unconnected node handles hollow. */
   connected?: boolean;
   /** A true boolean or a firing pulse glows. */
   live?: boolean;
@@ -43,7 +43,7 @@ export interface PortGlyphProps {
   style?: CSSProperties;
 }
 
-/** Port marker: color by value type, shape by structure (circle, pill, diamond, square, ring). */
+/** Port marker: color by value type, shape by structure (circle, pill, diamond, square, ringed dot for any). */
 export function PortGlyph({ type, connected = true, live = false, size = 9, className, style }: PortGlyphProps) {
   const group = portGroup(type);
   return (

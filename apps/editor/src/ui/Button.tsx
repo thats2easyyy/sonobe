@@ -56,7 +56,7 @@ export function Button({
       )}
       {loading && (
         <span className="sb-btn__spinner" aria-hidden>
-          <LoaderCircle size={14} strokeWidth={2} />
+          <LoaderCircle size={14} strokeWidth={2} data-spinner />
         </span>
       )}
     </button>

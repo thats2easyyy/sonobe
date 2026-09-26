@@ -169,6 +169,29 @@ describe("Slider", () => {
     expect(onChangeSpy).not.toHaveBeenCalled();
   });
 
+  it("drags from the thumb when a tick sits under it", () => {
+    const onSelect = vi.fn();
+    const onChangeSpy = vi.fn();
+    act(() => root.render(<Controlled onChangeSpy={onChangeSpy} ticks={[{ value: 95, label: "Shipped app: 95 pt", onSelect }]} />));
+    layOut();
+    const thumb = container.querySelector<HTMLElement>(".sb-slider__thumb")!;
+    pointer("pointerdown", 195, thumb);
+    pointer("pointermove", 220, thumb);
+    pointer("pointerup", 220, thumb);
+    expect(onSelect).not.toHaveBeenCalled();
+    expect(slider().getAttribute("aria-valuenow")).toBe("120");
+  });
+
+  it("draws the focus ring for the keyboard, not for a pointer press", () => {
+    act(() => root.render(<Controlled />));
+    layOut();
+    pointer("pointerdown", 150);
+    pointer("pointerup", 150);
+    expect(slider().hasAttribute("data-pointer-focus")).toBe(true);
+    press("ArrowRight");
+    expect(slider().hasAttribute("data-pointer-focus")).toBe(false);
+  });
+
   it("does nothing while disabled", () => {
     const onChangeSpy = vi.fn();
     act(() => root.render(<Controlled disabled onChangeSpy={onChangeSpy} />));

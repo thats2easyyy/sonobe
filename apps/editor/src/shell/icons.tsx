@@ -1,11 +1,12 @@
 import type { PatchCategory } from "@sonobe/core";
 import {
   Blend,
+  Boxes,
   Braces,
   Circle,
   Code,
   Component,
-  Copy,
+  Cpu,
   Film,
   GitBranch,
   Group,
@@ -15,12 +16,11 @@ import {
   PaintBucket,
   Pointer,
   Repeat,
-  Scan,
   Shapes,
   Smartphone,
-  Sparkle,
   Spline,
   Square,
+  SquareDashed,
   SquareFunction,
   TextCursorInput,
   ToggleLeft,
@@ -31,6 +31,11 @@ import {
   type LucideIcon,
 } from "lucide-react";
 
+/** Icon box sizes (px) and stroke: 16 toolbar, 14 headers, rails and rows, 12 inside chips. */
+export const ICON_SIZE = { sm: 12, md: 14, lg: 16 } as const;
+export const ICON_STROKE = 1.75;
+
+/** One glyph per layer type, shared by the Layers panel and the patch editor. */
 export const LAYER_TYPE_ICONS: Record<string, LucideIcon> = {
   group: Group,
   rectangle: Square,
@@ -41,17 +46,17 @@ export const LAYER_TYPE_ICONS: Record<string, LucideIcon> = {
   shape: Spline,
   colorFill: PaintBucket,
   gradient: Blend,
-  hitArea: Scan,
+  hitArea: SquareDashed,
   textField: TextCursorInput,
   lottie: Film,
-  shader: Sparkle,
-  clone: Copy,
+  shader: Cpu,
+  clone: Boxes,
   componentInstance: Component,
 };
 
-export function LayerTypeIcon({ type, size = 14 }: { type: string; size?: number }) {
+export function LayerTypeIcon({ type, size = ICON_SIZE.md }: { type: string; size?: number }) {
   const Icon = LAYER_TYPE_ICONS[type] ?? Square;
-  return <Icon size={size} strokeWidth={1.75} />;
+  return <Icon size={size} strokeWidth={ICON_STROKE} />;
 }
 
 export const CATEGORY_ICONS: Record<PatchCategory, LucideIcon> = {

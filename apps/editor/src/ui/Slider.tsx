@@ -53,6 +53,8 @@ function snap(value: number, min: number, step: number): number {
 export function Slider({ value, min, max, step, onChange, onCommit, ticks = [], "aria-label": ariaLabel, valueText, arrowKeys = "both", disabled = false, className }: SliderProps) {
   const trackRef = useRef<HTMLDivElement>(null);
   const [dragging, setDragging] = useState(false);
+  // Focus from a pointer press isn't keyboard focus, and only keyboard focus draws the ring.
+  const [pointerFocus, setPointerFocus] = useState(false);
   const drag = useRef<{ pointerId: number; last: number } | null>(null);
   const baseStep = step !== undefined && step > 0 ? step : (max - min) / 100 || 1;
   const latest = useLatest({ value, onChange, onCommit, min, max, baseStep });
@@ -90,6 +92,7 @@ export function Slider({ value, min, max, step, onChange, onCommit, ticks = [], 
     event.currentTarget.setPointerCapture?.(event.pointerId);
     drag.current = { pointerId: event.pointerId, last: latest.current.value };
     setDragging(true);
+    setPointerFocus(true);
     emit(valueAt(event.clientX, event.altKey));
   };
 
@@ -113,6 +116,7 @@ export function Slider({ value, min, max, step, onChange, onCommit, ticks = [], 
 
   const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
     if (disabled) return;
+    setPointerFocus(false);
     const { value: current, min: lo, max: hi, baseStep: s } = latest.current;
     const unit = s * stepMultiplier(event);
     let next: number | undefined;
@@ -149,6 +153,7 @@ export function Slider({ value, min, max, step, onChange, onCommit, ticks = [], 
       aria-disabled={disabled || undefined}
       className={cx("sb-slider", className)}
       data-dragging={dragging || undefined}
+      data-pointer-focus={pointerFocus || undefined}
       data-disabled={disabled || undefined}
       data-overflow={overflow}
       style={{ "--sb-slider-ratio": ratioOf(value, min, max) } as CSSProperties}
@@ -157,6 +162,7 @@ export function Slider({ value, min, max, step, onChange, onCommit, ticks = [], 
       onPointerUp={finish}
       onPointerCancel={finish}
       onKeyDown={onKeyDown}
+      onBlur={() => setPointerFocus(false)}
     >
       <div ref={trackRef} className="sb-slider__track">
         <span className="sb-slider__fill" aria-hidden />

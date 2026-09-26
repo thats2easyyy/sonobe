@@ -9,23 +9,26 @@ export interface ToggleProps extends ButtonProps {
   checked: boolean;
   onChange?: (checked: boolean) => void;
   size?: "sm" | "md";
+  /** The selection disagrees: on for some, off for others. Reads as a mixed checkbox, since a switch has no mixed state. Clicking turns them all on. */
+  mixed?: boolean;
   /** Visible label; clicking it toggles too. */
   label?: ReactNode;
 }
 
 /** On/off switch for settings that apply immediately. */
-export function Toggle({ checked, onChange, size = "md", label, className, onClick, ...rest }: ToggleProps) {
+export function Toggle({ checked, onChange, size = "md", mixed = false, label, className, onClick, ...rest }: ToggleProps) {
   const control = (
     <button
       type="button"
-      role="switch"
-      aria-checked={checked}
+      role={mixed ? "checkbox" : "switch"}
+      aria-checked={mixed ? "mixed" : checked}
       className={cx("sb-toggle", !label && className)}
       data-size={size}
-      data-checked={checked || undefined}
+      data-checked={(checked && !mixed) || undefined}
+      data-mixed={mixed || undefined}
       onClick={(event) => {
         onClick?.(event);
-        if (!event.defaultPrevented) onChange?.(!checked);
+        if (!event.defaultPrevented) onChange?.(mixed ? true : !checked);
       }}
       {...rest}
     >

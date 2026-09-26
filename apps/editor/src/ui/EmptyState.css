@@ -58,3 +58,48 @@
   gap: var(--space-3);
   margin-top: var(--space-3);
 }
+
+/* Inline: a left-aligned line of text under a header, with its action beside it or, when it doesn't fit, below. */
+.sb-empty[data-variant="inline"] {
+  display: flex;
+  flex-flow: row wrap;
+  align-items: center;
+  justify-content: flex-start;
+  gap: var(--space-3) var(--space-4);
+  max-width: calc(60ch + var(--space-5) * 2);
+  padding: var(--space-4) var(--space-5);
+  overflow: auto;
+  text-align: left;
+}
+
+.sb-empty[data-variant="inline"] .sb-empty__title {
+  display: flex;
+  align-items: center;
+  flex: 1 0 100%;
+  gap: var(--space-3);
+  font-size: var(--font-size-sm);
+  text-wrap: pretty;
+}
+
+.sb-empty[data-variant="inline"] .sb-empty__icon {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  border-radius: 0;
+  background: none;
+  box-shadow: none;
+}
+
+.sb-empty[data-variant="inline"] .sb-empty__icon svg {
+  max-width: 100%;
+  max-height: 100%;
+}
+
+.sb-empty[data-variant="inline"] .sb-empty__description {
+  max-width: 60ch;
+}
+
+.sb-empty[data-variant="inline"] .sb-empty__actions {
+  margin: 0;
+}

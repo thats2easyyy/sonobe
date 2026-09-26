@@ -4,7 +4,6 @@
   flex: none;
   background: var(--border-default);
   touch-action: none;
-  outline: none;
 }
 
 .sb-splitter[data-orientation="vertical"] {
@@ -53,6 +52,17 @@
 .sb-splitter:focus-visible::after {
   opacity: 1;
   transition-delay: 0ms;
+}
+
+/* The accent line is the only focus indicator; the global ring would draw a 5px slab around it. */
+.sb-splitter:focus-visible {
+  outline: none;
+}
+
+@media (forced-colors: active) {
+  .sb-splitter:focus-visible::after {
+    outline: 2px solid Highlight;
+  }
 }
 
 :root[data-resizing="vertical"],

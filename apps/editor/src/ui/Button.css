@@ -102,7 +102,7 @@
 
 .sb-btn[data-variant="danger"] {
   background: var(--danger);
-  color: #fff;
+  color: var(--text-on-accent);
   box-shadow: var(--highlight-top);
 }
 
@@ -188,6 +188,19 @@
   height: var(--control-h-lg);
 }
 
+/* Small buttons keep their look and reach 24px tall. The target stops at the box sideways so neighbours never overlap. */
+.sb-iconbtn[data-size="sm"]::after {
+  content: "";
+  position: absolute;
+  inset: -1px 0;
+}
+
+.sb-iconbtn[data-size="xs"]::after {
+  content: "";
+  position: absolute;
+  inset: -3px 0;
+}
+
 .sb-iconbtn[data-variant="secondary"] {
   background: var(--bg-field);
   box-shadow: inset 0 0 0 1px var(--border-default);
@@ -231,6 +244,11 @@
 }
 
 .sb-iconbtn:disabled {
+  color: var(--text-disabled);
+}
+
+.sb-iconbtn[data-variant="solid"]:disabled {
+  background: var(--bg-field);
   color: var(--text-disabled);
 }
 
