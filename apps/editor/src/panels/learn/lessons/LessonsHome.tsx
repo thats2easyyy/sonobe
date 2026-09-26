@@ -23,15 +23,10 @@ export function LessonsHome({ onOpenLesson }: LessonsHomeProps) {
   const doneCount = LESSONS.filter((l) => completed[l.id] !== undefined).length;
 
   return (
-    <section className="sb-lessons" aria-labelledby="sb-lessons-title">
-      <div className="sb-lessons__head">
-        <h3 className="sb-lessons__title" id="sb-lessons-title">
-          Lessons
-        </h3>
-        <span className="sb-lessons__count sb-tabular">
-          {doneCount} of {LESSONS.length} done
-        </span>
-      </div>
+    <section className="sb-lessons" aria-label="Lessons">
+      <p className="sb-lessons__count sb-tabular">
+        {doneCount} of {LESSONS.length} done
+      </p>
       <ol className="sb-lessonlist">
         {LESSONS.map((lesson) => {
           const done = completed[lesson.id] !== undefined;

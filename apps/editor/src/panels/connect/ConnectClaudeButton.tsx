@@ -54,7 +54,7 @@ export function ConnectClaudeButton({ onClick, host, className }: ConnectClaudeB
     <Tooltip content={<span className="sb-claudebtn__tooltip">{tooltip[state]}</span>}>
       <button type="button" className={cx("sb-claudebtn", className)} data-state={state} onClick={onClick ?? (() => connectClaudeStore.getState().show())}>
         <span className="sb-claudebtn__icon" aria-hidden>
-          <Plug size={14} strokeWidth={1.75} />
+          <Plug size={16} strokeWidth={1.75} />
           <span className="sb-claudebtn__dot" />
         </span>
         <span className="sb-claudebtn__label">{label}</span>

@@ -1,4 +1,4 @@
-import { Ban, Check, ChevronRight, CircleAlert, Info, KeyRound, LoaderCircle, MessageSquarePlus, RefreshCw, ShieldQuestion, SkipForward, TriangleAlert, Trash2, X } from "lucide-react";
+import { ArrowRight, Ban, Check, ChevronRight, CircleAlert, Info, KeyRound, LoaderCircle, MessageSquarePlus, RefreshCw, ShieldQuestion, SkipForward, TriangleAlert, Trash2, X } from "lucide-react";
 import { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import { Button } from "../../ui/Button.tsx";
 import { detectPlatform, formatShortcutLabel, isEditableTarget } from "../../ui/commands/shortcutManager.ts";
@@ -298,7 +298,8 @@ export function Transcript({ items, running, thinking, onConfirm, onManageKey, o
         <div className="sb-assistant-suggestions">
           {SUGGESTIONS.map((text) => (
             <button key={text} type="button" className="sb-assistant-suggestion" onClick={() => onSuggestion(text)}>
-              {text}
+              <span>{text}</span>
+              <ArrowRight size={12} strokeWidth={1.75} className="sb-assistant-suggestion__arrow" aria-hidden />
             </button>
           ))}
         </div>

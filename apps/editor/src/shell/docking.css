@@ -6,6 +6,17 @@
   margin-right: var(--sb-drawer-w);
 }
 
+/* A floating drawer also stops the bottom bar short, so its status chip and collapse button stay reachable. */
+.sb-shell__main[data-drawer-over] > .sb-shell__hud,
+.sb-shell__main[data-drawer-over] > .sb-splitter {
+  margin-right: var(--sb-drawer-w);
+}
+
+/* A drawer that floats over the panels leaves the Inspector under it, but the center column ends where the drawer starts, so no header action is half covered. */
+.sb-shell__main[data-drawer-over] > .sb-shell__row > .sb-shell__center {
+  margin-right: max(0px, calc(var(--sb-drawer-w) - var(--sb-inspector-slot)));
+}
+
 .sb-drawer[data-docked] {
   box-shadow: none;
 }

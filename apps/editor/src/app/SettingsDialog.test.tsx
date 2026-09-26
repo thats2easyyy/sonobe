@@ -57,7 +57,7 @@ async function mount(host: FakeAssistantHost | null) {
 const subscriptionSwitch = () => document.querySelector<HTMLButtonElement>(`[role="switch"][aria-label="${SUBSCRIPTION_SWITCH_LABEL}"]`);
 
 describe("Settings → Claude → the experimental subscription switch", () => {
-  it("is off by default, and says it's awaiting Anthropic's permission and in no release", async () => {
+  it("is off by default, and says it's experimental and off until Anthropic allows it", async () => {
     const host = fakeAssistantHost();
     await mount(host);
     const toggle = subscriptionSwitch()!;
@@ -66,7 +66,7 @@ describe("Settings → Claude → the experimental subscription switch", () => {
     expect(toggle.disabled).toBe(false);
     const row = toggle.closest('[role="group"]')!;
     expect(row.textContent).toContain("Use my Claude subscription in the Assistant");
-    expect(row.textContent).toContain("Experimental · awaiting Anthropic's permission. Off by default and not part of any release until Anthropic agrees.");
+    expect(row.textContent).toContain("Experimental. Off by default until Anthropic allows it.");
     expect(row.textContent).toContain(SUBSCRIPTION_SWITCH_DESCRIPTION);
     // Nothing tells anyone how to turn it on in a release: no environment variable, no command.
     expect(row.textContent).not.toMatch(/SONOBE_|environment|npm |=1/);
@@ -81,6 +81,7 @@ describe("Settings → Claude → the experimental subscription switch", () => {
     const details = subscriptionSwitch()!.closest('[role="group"]')!.querySelector<HTMLDetailsElement>("details.sb-settings__details")!;
     expect(details.open).toBe(false);
     expect(details.querySelector("summary")!.textContent).toBe("Details");
+    expect(details.textContent).toContain("awaiting Anthropic's permission");
     expect(details.textContent).toContain("your plan's usage limits");
   });
 

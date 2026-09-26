@@ -1,13 +1,14 @@
 import { DEFAULT_DEVICE } from "@sonobe/core";
 import { Layers, SlidersHorizontal, Smartphone } from "lucide-react";
 import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import { useAssistant } from "../panels/assistant/assistantStore.ts";
 import { CommandPalette } from "../ui/CommandPalette.tsx";
 import { Splitter } from "../ui/Splitter.tsx";
 import { getFocusable } from "../ui/lib/focus.ts";
 import { observeResize } from "../ui/lib/observeResize.ts";
 import { useElementSize } from "../ui/lib/useElementSize.ts";
 import { DrawerHost } from "./drawers/DrawerHost.tsx";
-import { DEFAULT_LAYOUT, MIN_CENTER_WIDTH, SIZE_LIMITS, SPLIT_LIMITS, fitPanelWidths, layoutStore, useLayout } from "./layoutStore.ts";
+import { DEFAULT_LAYOUT, MIN_CENTER_WIDTH, SIZE_LIMITS, SPLIT_LIMITS, drawerOverhang, fitPanelWidths, layoutStore, useLayout, useLiveDrawerWidth } from "./layoutStore.ts";
 import { PanelRail } from "./Panel.tsx";
 import { Toolbar, type ToolbarProps } from "./Toolbar.tsx";
 import { useShellCommands } from "./useShellCommands.tsx";
@@ -84,6 +85,7 @@ export function AppShell({
   const viewMode = useLayout((s) => s.viewMode);
   const splitDirection = useLayout((s) => s.splitDirection);
   const drawerOpen = useLayout((s) => s.drawer !== null);
+  const assistantOpen = useAssistant((s) => s.open);
   const { setSize, setSplit, toggleCollapsed } = layoutStore.getState();
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [centerRef, center] = useElementSize<HTMLDivElement>();
@@ -92,7 +94,12 @@ export function AppShell({
   const bannersRef = useRef<HTMLDivElement>(null);
   const focusIntent = useRef<FocusIntent | null>(null);
 
-  const fitted = row.width > 0 ? fitPanelWidths(sizes, collapsed, row.width, MIN_CENTER_WIDTH, keepViewer) : null;
+  const learnShown = drawerOpen && slots.learn !== undefined;
+  const docked = drawerDocked && learnShown;
+  const drawerWidth = useLiveDrawerWidth() ?? sizes.drawer;
+  const floating = !docked && (learnShown || assistantOpen);
+  const overhang = floating ? drawerOverhang(drawerWidth, sizes.inspector, collapsed.inspector) : 0;
+  const fitted = row.width > 0 ? fitPanelWidths(sizes, collapsed, row.width - overhang, MIN_CENTER_WIDTH, keepViewer) : null;
   const shown = fitted?.sizes ?? sizes;
   const viewerRail = collapsed.viewer || !!fitted?.viewerAuto;
 
@@ -110,8 +117,8 @@ export function AppShell({
   useEffect(() => {
     if (!keepViewer) return;
     const allOpen = { layers: false, viewer: false, inspector: false };
-    if (collapsed.viewer || (row.width > 0 && !fitPanelWidths(sizes, allOpen, row.width).viewerAuto)) setKeepViewer(false);
-  }, [keepViewer, collapsed.viewer, sizes, row.width]);
+    if (collapsed.viewer || (row.width > 0 && !fitPanelWidths(sizes, allOpen, row.width - overhang).viewerAuto)) setKeepViewer(false);
+  }, [keepViewer, collapsed.viewer, sizes, row.width, overhang]);
 
   useEffect(
     () =>
@@ -160,7 +167,8 @@ export function AppShell({
     "--sb-inspector-w": `${shown.inspector}px`,
     ...(fitted ? { "--sb-center-min": `${Math.max(0, Math.min(MIN_CENTER_WIDTH, fitted.center))}px` } : {}),
     "--sb-hud-h": `${sizes.hud}px`,
-    "--sb-drawer-w": `${sizes.drawer}px`,
+    "--sb-drawer-w": `${drawerWidth}px`,
+    "--sb-inspector-slot": collapsed.inspector ? "var(--rail-w)" : "calc(var(--sb-inspector-w) + 1px)",
     "--sb-split": String(split),
     "--sb-titlebar-inset": `${titlebarInset}px`,
   } as CSSProperties;
@@ -201,7 +209,7 @@ export function AppShell({
       <div ref={bannersRef} className="sb-shell__banners">
         {slots.banner}
       </div>
-      <main className="sb-shell__main" data-drawer-docked={(drawerDocked && drawerOpen && slots.learn !== undefined) || undefined}>
+      <main className="sb-shell__main" data-drawer-docked={docked || undefined} data-drawer-over={floating || undefined}>
         <div ref={rowRef} className="sb-shell__row">
           {collapsed.layers ? (
             <PanelRail panel="layers" title="Layers" side="left" icon={<Layers size={14} strokeWidth={1.75} />} shortcut="Mod+1" onExpand={() => toggleCollapsed("layers", false)} />
@@ -277,7 +285,7 @@ export function AppShell({
           {slots.hud}
         </div>
 
-        <DrawerHost learn={slots.learn} docked={drawerDocked} onLiveResize={(size) => live("--sb-drawer-w", `${size}px`)} />
+        <DrawerHost learn={slots.learn} docked={drawerDocked} />
       </main>
 
       <CommandPalette open={paletteOpen} onOpenChange={setPaletteOpen} />

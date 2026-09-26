@@ -1,20 +1,7 @@
 /* Lessons: the list, the player (intro, steps, celebration), and the spotlight ring. */
 
-.sb-lessons__head {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: var(--space-4);
-  margin-bottom: var(--space-4);
-}
-
-.sb-lessons__title {
-  margin: 0;
-  font-size: var(--font-size-sm);
-  font-weight: var(--font-weight-semibold);
-}
-
 .sb-lessons__count {
+  margin: 0 0 var(--space-4);
   color: var(--text-secondary);
   font-size: var(--font-size-xs);
 }

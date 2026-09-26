@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { DEFAULT_LAYOUT, SIZE_LIMITS, createLayoutStore, fitPanelWidths, sanitizeLayout } from "./layoutStore.ts";
+import { DEFAULT_LAYOUT, SIZE_LIMITS, createLayoutStore, drawerOverhang, fitPanelWidths, sanitizeLayout } from "./layoutStore.ts";
 
 describe("sanitizeLayout", () => {
   it("falls back to defaults for garbage", () => {
@@ -155,5 +155,23 @@ describe("fitPanelWidths", () => {
   it("counts a collapsed panel as a rail and never auto-collapses a Viewer the person collapsed", () => {
     expect(fit(1024, { collapsed: { viewer: true } })).toEqual({ sizes: { layers: 232, viewer: 296, inspector: 272 }, viewerAuto: false, center: 482 });
     expect(fit(700, { collapsed: { layers: true, viewer: true, inspector: true } }).sizes).toEqual({ layers: 232, viewer: 296, inspector: 272 });
+  });
+});
+
+describe("drawerOverhang", () => {
+  it("is how far a drawer reaches past the Inspector's slot", () => {
+    expect(drawerOverhang(360, 272, false)).toBe(87);
+    expect(drawerOverhang(360, 272, true)).toBe(324);
+  });
+
+  it("is nothing when the Inspector is at least as wide as the drawer", () => {
+    expect(drawerOverhang(300, 440, false)).toBe(0);
+  });
+
+  it("makes the centre give up the overhang before anything overflows at 1024", () => {
+    const overhang = drawerOverhang(360, 272, false);
+    const fitted = fitPanelWidths(DEFAULT_LAYOUT.sizes, { layers: false, viewer: false, inspector: false }, 1024 - overhang);
+    expect(fitted.viewerAuto).toBe(true);
+    expect(fitted.center).toBe(400);
   });
 });

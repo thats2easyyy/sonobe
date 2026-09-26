@@ -124,6 +124,11 @@ export function fitPanelWidths(sizes: Pick<LayoutState["sizes"], FittedPanel>, c
   return { sizes: widths, viewerAuto: auto, center: minCenter - excess };
 }
 
+/** How far a drawer floating over the panels reaches past the Inspector's slot: the centre column gives up this much, so the drawer never covers half of one of its header actions. */
+export function drawerOverhang(drawerWidth: number, inspectorSize: number, inspectorCollapsed: boolean): number {
+  return Math.max(0, drawerWidth - (inspectorCollapsed ? RAIL_WIDTH : inspectorSize + SPLITTER_WIDTH));
+}
+
 const VIEW_MODES: readonly ViewMode[] = ["canvas", "split", "patches"];
 const DRAWERS: readonly DrawerId[] = ["learn"];
 const HUD_TABS: readonly HudTab[] = ["console", "diagnostics", "ai", "performance"];
@@ -230,4 +235,15 @@ export const layoutStore = createLayoutStore();
 
 export function useLayout<T>(selector: (state: LayoutStore) => T): T {
   return useStore(layoutStore, selector);
+}
+
+const liveDrawerStore = createStore<{ width: number | null }>()(() => ({ width: null }));
+
+/** The width a drawer's edge is being dragged to, before it is committed; null when no drag is under way. */
+export function setLiveDrawerWidth(width: number | null): void {
+  liveDrawerStore.setState({ width });
+}
+
+export function useLiveDrawerWidth(): number | null {
+  return useStore(liveDrawerStore, (s) => s.width);
 }

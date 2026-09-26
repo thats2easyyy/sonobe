@@ -44,7 +44,7 @@ async function openBox(page: Page): Promise<void> {
 }
 
 test.describe("The Assistant on your Claude subscription (experimental)", () => {
-  test("the switch in Settings is off by default and says it awaits Anthropic's permission; on, the Assistant offers the subscription", async ({ page }) => {
+  test("the switch in Settings is off by default and says it is experimental and off until Anthropic allows it; on, the Assistant offers the subscription", async ({ page }) => {
     const problems = collectConsoleProblems(page);
     await installFakeAssistant(page, { html: CHECKOUT, hasKey: false });
     await openEditor(page);
@@ -58,7 +58,7 @@ test.describe("The Assistant on your Claude subscription (experimental)", () => 
     const settings = page.getByRole("dialog", { name: "Settings" });
     const toggle = settings.getByRole("switch", { name: "Use my Claude subscription in the Assistant" });
     await expect(toggle).toHaveAttribute("aria-checked", "false");
-    await expect(settings.getByText("Experimental · awaiting Anthropic's permission. Off by default and not part of any release until Anthropic agrees.", { exact: false })).toBeVisible();
+    await expect(settings.getByText("Experimental. Off by default until Anthropic allows it.", { exact: false })).toBeVisible();
     await toggle.scrollIntoViewIfNeeded();
     await screenshot(page, "subscription-01-settings");
     await toggle.click();

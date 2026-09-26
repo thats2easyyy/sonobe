@@ -8,7 +8,8 @@ import { ThemeProvider } from "../theme/ThemeProvider.tsx";
 import { CommandProvider } from "../ui/commands/CommandProvider.tsx";
 import { AppShell } from "./AppShell.tsx";
 import { IconButton } from "../ui/IconButton.tsx";
-import { layoutStore, savedLayout } from "./layoutStore.ts";
+import { assistantStore } from "../panels/assistant/assistantStore.ts";
+import { layoutStore, savedLayout, setLiveDrawerWidth } from "./layoutStore.ts";
 import { Panel } from "./Panel.tsx";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -167,6 +168,34 @@ describe("AppShell focus", () => {
     escape();
     expect(layoutStore.getState().drawer).toBe("learn");
   });
+
+  it("marks the shell while a drawer floats over the panels, so the centre column can end where it starts", () => {
+    renderShell({ slots: { learn: <p>Lessons</p> } });
+    const main = () => container.querySelector<HTMLElement>(".sb-shell__main")!;
+    expect(main().dataset.drawerOver).toBeUndefined();
+    act(() => layoutStore.getState().setDrawer("learn"));
+    expect(main().dataset.drawerOver).toBe("true");
+    expect(main().dataset.drawerDocked).toBeUndefined();
+    act(() => layoutStore.getState().setDrawer(null));
+    expect(main().dataset.drawerOver).toBeUndefined();
+
+    renderShell({ slots: { learn: <p>Lessons</p> }, drawerDocked: true });
+    act(() => layoutStore.getState().setDrawer("learn"));
+    expect(main().dataset.drawerOver).toBeUndefined();
+    expect(main().dataset.drawerDocked).toBe("true");
+  });
+});
+
+describe("AppShell with the Assistant sheet", () => {
+  it("marks the shell while the Assistant floats over the panels", () => {
+    renderShell();
+    const main = () => container.querySelector<HTMLElement>(".sb-shell__main")!;
+    expect(main().dataset.drawerOver).toBeUndefined();
+    act(() => assistantStore.getState().show());
+    expect(main().dataset.drawerOver).toBe("true");
+    act(() => assistantStore.getState().hide());
+    expect(main().dataset.drawerOver).toBeUndefined();
+  });
 });
 
 describe("AppShell fit", () => {
@@ -216,6 +245,20 @@ describe("AppShell fit", () => {
     act(() => layoutStore.getState().toggleCollapsed("layers", false));
     expect(container.querySelector("#sb-viewer")).not.toBeNull();
     expect(container.querySelector('.sb-rail[data-panel="viewer"]')).toBeNull();
+  });
+
+  it("re-fits the panels while a floating drawer's edge is dragged, and lets go when it ends", () => {
+    rowWidth(1180);
+    renderShell({ slots: { ...slots, learn: <p>Lessons</p> } });
+    act(() => layoutStore.getState().setDrawer("learn"));
+    const viewerRail = () => container.querySelector('.sb-rail[data-panel="viewer"]') !== null;
+    expect(viewerRail()).toBe(false);
+    act(() => setLiveDrawerWidth(480));
+    expect(shell().style.getPropertyValue("--sb-drawer-w")).toBe("480px");
+    expect(viewerRail()).toBe(true);
+    act(() => setLiveDrawerWidth(null));
+    expect(shell().style.getPropertyValue("--sb-drawer-w")).toBe(`${layoutStore.getState().sizes.drawer}px`);
+    expect(viewerRail()).toBe(false);
   });
 
   it("shrinks panels toward their minimums at 1180px and keeps the saved sizes", () => {

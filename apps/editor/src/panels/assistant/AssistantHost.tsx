@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { DEFAULT_LAYOUT, SIZE_LIMITS, layoutStore, useLayout } from "../../shell/layoutStore.ts";
+import { DEFAULT_LAYOUT, SIZE_LIMITS, layoutStore, setLiveDrawerWidth, useLayout } from "../../shell/layoutStore.ts";
 import { Splitter } from "../../ui/Splitter.tsx";
 import { useDismissableLayer } from "../../ui/lib/layerStack.ts";
 import { observeResize } from "../../ui/lib/observeResize.ts";
@@ -82,8 +82,12 @@ export function AssistantHost(props: Omit<AssistantDrawerProps, "onClose" | "sto
         className="sb-assistant-sheet__splitter"
         onResize={(size) => {
           if (ref.current) ref.current.style.width = `${size}px`;
+          setLiveDrawerWidth(size);
         }}
-        onResizeEnd={(size) => layoutStore.getState().setSize("drawer", size)}
+        onResizeEnd={(size) => {
+          layoutStore.getState().setSize("drawer", size);
+          setLiveDrawerWidth(null);
+        }}
       />
       <AssistantDrawer {...props} onClose={close} />
     </aside>

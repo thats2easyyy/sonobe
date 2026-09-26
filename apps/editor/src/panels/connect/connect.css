@@ -307,15 +307,15 @@
   color: var(--text-tertiary);
 }
 
-.sb-copyblock__button {
-  flex: none;
+/* Like the buttons in a panel header, a small button in this dialog is 24px with a 12px label. */
+.sb-connect .sb-btn[data-size="sm"],
+.sb-copyblock .sb-btn[data-size="sm"] {
+  --control-h-sm: 24px;
+  font-size: var(--font-size-sm);
 }
 
-/* The 22px button gets a 24px target. */
-.sb-copyblock__button::after {
-  content: "";
-  position: absolute;
-  inset: -1px;
+.sb-copyblock__button {
+  flex: none;
 }
 
 /* A disabled button takes no pointer events, so its tooltip hangs off this wrapper. */
@@ -509,14 +509,14 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 14px;
-  height: 14px;
+  width: 16px;
+  height: 16px;
 }
 
 .sb-claudebtn__dot {
   position: absolute;
-  right: -4px;
-  bottom: -4px;
+  right: -3px;
+  bottom: -3px;
   width: 7px;
   height: 7px;
   border-radius: 50%;

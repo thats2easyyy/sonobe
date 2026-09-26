@@ -77,8 +77,8 @@ export interface SettingsDialogProps {
 }
 
 export const SUBSCRIPTION_SWITCH_LABEL = "Use my Claude subscription in the Assistant";
-export const SUBSCRIPTION_SWITCH_DESCRIPTION = "Experimental · awaiting Anthropic's permission. Off by default and not part of any release until Anthropic agrees.";
-const SUBSCRIPTION_SWITCH_DETAILS = "When it's on, the Assistant runs Claude through Claude's agent adapter. It uses the Claude account you're signed in to on this computer, and your plan's usage limits.";
+export const SUBSCRIPTION_SWITCH_DESCRIPTION = "Experimental. Off by default until Anthropic allows it.";
+const SUBSCRIPTION_SWITCH_DETAILS = "It's awaiting Anthropic's permission and isn't part of any release until Anthropic agrees. When it's on, the Assistant runs Claude through Claude's agent adapter. It uses the Claude account you're signed in to on this computer, and your plan's usage limits.";
 
 /**
  * The experimental switch (desktop, with a preload that has it): the Assistant on the person's Claude
@@ -102,7 +102,7 @@ function SubscriptionSwitch() {
   };
   if (!connection || connection.available === false) return null;
   return (
-    // The description is the switch's too: a screen reader says it's experimental and awaiting Anthropic's permission.
+    // The description is the switch's too: a screen reader says it's experimental and off until Anthropic allows it.
     <Row name={SUBSCRIPTION_SWITCH_LABEL} description={SUBSCRIPTION_SWITCH_DESCRIPTION} descriptionId={descriptionId} details={SUBSCRIPTION_SWITCH_DETAILS}>
       <Toggle aria-label={SUBSCRIPTION_SWITCH_LABEL} aria-describedby={descriptionId} checked={connection.subscriptionEnabled} disabled={saving} onChange={(checked) => void change(checked)} />
     </Row>

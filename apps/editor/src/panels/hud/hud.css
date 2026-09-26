@@ -24,6 +24,7 @@
   height: 100%;
 }
 
+/* The collapsed strip is a status bar: it keeps the shell's --tabbar-h instead of the 34px panel header. */
 .sb-hudx[data-collapsed] .sb-hudx__bar {
   height: 100%;
   border-bottom: 0;
@@ -56,6 +57,8 @@ button.sb-hudx__stat {
   border-radius: var(--radius-md);
   background: transparent;
   color: inherit;
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-medium);
 }
 
 button.sb-hudx__stat::after {

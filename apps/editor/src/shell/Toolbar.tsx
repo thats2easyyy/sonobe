@@ -263,7 +263,7 @@ export function Toolbar({ documentTitle, dirty = false, onRename, documentMenu, 
 
       <div className="sb-toolbar__right">
         <button type="button" className="sb-toolbar__search" onClick={onOpenPalette}>
-          <Search size={14} strokeWidth={1.75} aria-hidden />
+          <Search size={16} strokeWidth={1.75} aria-hidden />
           <span className="sb-toolbar__search-label">Search commands</span>
           <Kbd shortcut="Mod+K" variant="plain" />
         </button>

@@ -315,14 +315,14 @@ async function subscriptionSmoke() {
   assert(defaults.sent === "no_key", "a message with the switch off runs on the API key", defaults.sent);
   assert(!existsSync(fakeLog) && count("Starting Claude's agent adapter") === 0, "the adapter never started", fakeLines());
 
-  // Settings → Claude: the switch says it awaits Anthropic's permission, and main keeps it.
+  // Settings → Claude: the switch says it is experimental and off until Anthropic allows it, and main keeps it.
   await command("app.settings");
   const settings = page.getByRole("dialog", { name: "Settings" });
   const toggle = settings.getByRole("switch", { name: "Use my Claude subscription in the Assistant" });
   await toggle.waitFor({ timeout: 10_000 });
   assert((await toggle.getAttribute("aria-checked")) === "false", "the switch is off in Settings", await toggle.getAttribute("aria-checked"));
   const described = await toggle.evaluate((el) => document.getElementById(el.getAttribute("aria-describedby") ?? "")?.textContent ?? "");
-  assert(described.startsWith("Experimental · awaiting Anthropic's permission. Off by default and not part of any release until Anthropic agrees."), "the switch says it awaits Anthropic's permission", described);
+  assert(described.startsWith("Experimental. Off by default until Anthropic allows it."), "the switch says it is experimental and off until Anthropic allows it", described);
   await toggle.scrollIntoViewIfNeeded();
   await toggle.click();
   await poll(async () => (await toggle.getAttribute("aria-checked")) === "true", { message: "the switch to turn on" });
@@ -334,7 +334,7 @@ async function subscriptionSmoke() {
   await settings.getByRole("button", { name: "Done" }).click();
   await settings.waitFor({ state: "hidden", timeout: 5000 });
   assert(!existsSync(fakeLog), "turning the switch on doesn't start the adapter");
-  log("subscription: off by default on the API key; the Settings switch awaits Anthropic's permission and turns it on in main");
+  log("subscription: off by default on the API key; the Settings switch says it is off until Anthropic allows it, and turns it on in main");
 
   // The Assistant offers both; picking the subscription reads the fake's login.
   const sheet = page.locator(".sb-assistant-sheet");

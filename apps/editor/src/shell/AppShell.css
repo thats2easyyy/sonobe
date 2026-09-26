@@ -122,6 +122,12 @@
   font-weight: var(--font-weight-medium);
 }
 
+/* The picker's menu rows keep 14px glyphs; the toolbar shows its current one at the toolbar's 16px. */
+.sb-toolbar__device .sb-select__icon svg {
+  width: 16px;
+  height: 16px;
+}
+
 .sb-toolbar__search {
   display: inline-flex;
   align-items: center;
