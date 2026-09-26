@@ -128,4 +128,13 @@ describe("cable menu", () => {
     find(cableMenu({ ...ctx, geometry }, cable), "Insert Color to RGB")!.onSelect!();
     expect(calls.explainConnection).toHaveBeenCalledWith("heart_color.output", "card_shadow.start", { x: 200, y: 40 });
   });
+
+  it("finds the geometry the canvas stores under each derived cable's edge id", () => {
+    const doc = createDemoDocument(registry);
+    const { ctx, calls } = menuFixture(doc, "main");
+    const edge = deriveGraph({ doc, componentId: "main", registry }).edges[0]!;
+    const geometry = new Map([[edge.id, { id: edge.id, sx: 0, sy: 10, tx: 100, ty: 10 }]]);
+    find(cableMenu({ ...ctx, geometry }, { ...edge.data!, suggestions: cable.suggestions } as CableData), "Insert Color to RGB")!.onSelect!();
+    expect(calls.explainConnection).toHaveBeenCalledWith(edge.data!.from, edge.data!.to, { x: 50, y: 10 });
+  });
 });
