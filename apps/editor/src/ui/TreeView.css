@@ -1,10 +1,20 @@
 .sb-tree {
+  --tree-bg: var(--bg-panel);
+  --tree-selected: color-mix(in srgb, var(--bg-selected) 65%, transparent);
   position: relative;
   height: 100%;
   overflow: auto;
-  outline: none;
   font-size: var(--font-size-sm);
   user-select: none;
+}
+
+.sb-tree:focus-within {
+  --tree-selected: var(--bg-selected);
+}
+
+.sb-tree:focus-visible,
+.sb-tree__rename:focus-visible {
+  outline: none;
 }
 
 .sb-tree__canvas {
@@ -13,6 +23,7 @@
 }
 
 .sb-tree__row {
+  --row-tint: transparent;
   position: absolute;
   top: 0;
   left: var(--space-2);
@@ -20,33 +31,50 @@
   display: flex;
   align-items: center;
   padding: 0 var(--space-2) 0 var(--space-2);
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius-md);
+  background: var(--row-tint);
   color: var(--text-primary);
   cursor: default;
 }
 
 @media (hover: hover) {
-  .sb-tree:not([data-dragging]) .sb-tree__row:hover {
-    background: var(--bg-hover);
+  :where(.sb-tree:not([data-dragging])) .sb-tree__row:hover {
+    --row-tint: var(--bg-hover);
   }
 }
 
 .sb-tree__row[data-selected] {
-  background: var(--bg-selected-muted);
+  --row-tint: var(--tree-selected);
 }
 
 @media (hover: hover) {
-  .sb-tree:not([data-dragging]) .sb-tree__row[data-selected]:hover {
-    background: var(--bg-selected-muted);
+  :where(.sb-tree:not([data-dragging])) .sb-tree__row[data-selected]:hover {
+    --row-tint: var(--bg-selected-hover);
   }
 }
 
-.sb-tree:focus-within .sb-tree__row[data-selected] {
-  background: var(--bg-selected);
+.sb-tree__row:has(.sb-tree__actions [aria-expanded="true"]) {
+  --row-tint: var(--bg-hover);
 }
 
-.sb-tree:focus-visible .sb-tree__row[data-focused] {
-  box-shadow: inset 0 0 0 1px var(--focus-ring);
+.sb-tree__row[data-selected]:has(.sb-tree__actions [aria-expanded="true"]) {
+  --row-tint: var(--bg-selected-hover);
+}
+
+.sb-tree[data-kbd]:focus-visible .sb-tree__row[data-focused] {
+  box-shadow: inset 0 0 0 2px var(--focus-ring);
+}
+
+@media (forced-colors: active) {
+  .sb-tree[data-kbd]:focus-visible .sb-tree__row[data-focused] {
+    outline: 2px solid Highlight;
+    outline-offset: -2px;
+  }
+
+  .sb-tree__row[data-selected] {
+    outline: 1px solid Highlight;
+    outline-offset: -1px;
+  }
 }
 
 .sb-tree__row[data-dragging] {
@@ -68,7 +96,26 @@
   color: var(--text-tertiary);
 }
 
+.sb-tree__chevron[data-visible] {
+  position: relative;
+}
+
+.sb-tree__chevron[data-visible]::after {
+  content: "";
+  position: absolute;
+  inset: -4px;
+}
+
+.sb-tree__row[data-selected] .sb-tree__chevron,
+.sb-tree__row[data-selected] .sb-tree__trailing {
+  color: var(--text-secondary);
+}
+
 @media (hover: hover) {
+  :where(.sb-tree:not([data-dragging])) .sb-tree__row:hover .sb-tree__chevron {
+    color: var(--text-secondary);
+  }
+
   .sb-tree__chevron[data-visible]:hover {
     background: var(--bg-pressed);
     color: var(--text-primary);
@@ -119,27 +166,36 @@
 }
 
 .sb-tree__actions {
-  display: none;
+  display: inline-flex;
   flex: none;
   align-items: center;
-  gap: 1px;
   margin-left: var(--space-2);
 }
 
 @media (hover: hover) {
-  .sb-tree:not([data-dragging]) .sb-tree__row:hover .sb-tree__actions {
-    display: inline-flex;
-  }
-}
-
-.sb-tree:focus-within .sb-tree__row[data-focused] .sb-tree__actions,
-.sb-tree__actions:focus-within {
-  display: inline-flex;
-}
-
-@media (hover: none) {
   .sb-tree__actions {
-    display: inline-flex;
+    position: absolute;
+    top: var(--space-1);
+    right: var(--space-2);
+    bottom: var(--space-1);
+    margin-left: 0;
+    padding-left: var(--space-5);
+    background:
+      linear-gradient(to right, transparent, var(--row-tint) var(--space-5)),
+      linear-gradient(to right, transparent, var(--tree-bg) var(--space-5));
+    visibility: hidden;
+    pointer-events: none;
+  }
+
+  .sb-tree__actions > * {
+    pointer-events: auto;
+  }
+
+  :where(.sb-tree:not([data-dragging])) .sb-tree__row:hover .sb-tree__actions,
+  :where(.sb-tree:not([data-dragging])[data-kbd]) .sb-tree__row[data-focused] .sb-tree__actions,
+  :where(.sb-tree:not([data-dragging])) .sb-tree__actions:has(:focus-visible),
+  :where(.sb-tree:not([data-dragging])) .sb-tree__actions:has([aria-expanded="true"]) {
+    visibility: visible;
   }
 }
 
@@ -186,6 +242,6 @@
 .sb-tree__drop[data-kind="inside"] {
   left: var(--space-2);
   right: var(--space-2);
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius-md);
   box-shadow: inset 0 0 0 2px var(--accent);
 }

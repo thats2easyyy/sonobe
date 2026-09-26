@@ -1,5 +1,6 @@
 import { ChevronRight } from "lucide-react";
-import { useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent, type MouseEvent, type PointerEvent, type ReactNode } from "react";
+import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent, type MouseEvent, type PointerEvent, type ReactNode } from "react";
+import { Tooltip } from "./Tooltip.tsx";
 import { cx } from "./lib/cx.ts";
 import { useControllableState, useLatest } from "./lib/hooks.ts";
 import { observeResize } from "./lib/observeResize.ts";
@@ -25,6 +26,12 @@ export interface TreeRowState {
   dragging: boolean;
 }
 
+/** Passed with a row's context menu: `keyboard` is true for ContextMenu and Shift+F10, and `rect` is the row in viewport coordinates, to anchor a keyboard menu with `useContextMenu().openAt`. */
+export interface TreeRowMenuInfo {
+  keyboard: boolean;
+  rect: { x: number; y: number; width: number; height: number };
+}
+
 export interface TreeViewProps<T extends TreeNodeLike<T>> {
   nodes: readonly T[];
   getLabel: (node: T) => string;
@@ -35,13 +42,21 @@ export interface TreeViewProps<T extends TreeNodeLike<T>> {
   selected?: ReadonlySet<string>;
   defaultSelected?: Iterable<string>;
   onSelectedChange?: (selected: Set<string>) => void;
-  /** Enables rename (Enter, F2, double-click the label). */
+  /** Enables rename (Enter, F2, double-click the label; see `renameOnDoubleClick`). */
   onRename?: (id: string, name: string) => void;
   /** Enables drag reorder. `target.index` refers to the parent's children before removal. */
   onMove?: (ids: string[], target: { parentId: string | null; index: number }) => void;
   /** Double-click outside the label (or Enter when rename is off). */
   onActivate?: (node: T) => void;
-  onRowContextMenu?: (node: T, event: MouseEvent<HTMLDivElement>) => void;
+  /** Starts the inline editor for a row whenever `nonce` changes; the value present on mount is ignored. */
+  renameRequest?: { id: string; nonce: number };
+  /** Whether double-clicking a row's label renames it (default true). When false, a double-click anywhere on the row calls `onActivate`. */
+  renameOnDoubleClick?: (node: T) => boolean;
+  /** Scrolls a row into view whenever `nonce` changes, including rows a virtualized tree has not rendered. */
+  scrollToId?: { id: string; nonce: number };
+  /** Whether rows expand and collapse (default true). False draws no chevrons, for a tree whose expansion is fixed, such as a filtered one. */
+  expandable?: boolean;
+  onRowContextMenu?: (node: T, event: MouseEvent<HTMLDivElement>, info: TreeRowMenuInfo) => void;
   canHaveChildren?: (node: T) => boolean;
   canDrag?: (node: T) => boolean;
   renderIcon?: (node: T, state: TreeRowState) => ReactNode;
@@ -74,6 +89,8 @@ interface Press {
 
 const OVERSCAN = 6;
 const DRAG_THRESHOLD = 4;
+const AUTOSCROLL_EDGE = 28;
+const AUTOSCROLL_MAX = 14;
 
 function sameTarget(a: TreeDropTarget | null, b: TreeDropTarget | null): boolean {
   if (a === b) return true;
@@ -111,6 +128,10 @@ export function TreeView<T extends TreeNodeLike<T>>({
   onRename,
   onMove,
   onActivate,
+  renameRequest,
+  renameOnDoubleClick,
+  scrollToId,
+  expandable = true,
   onRowContextMenu,
   canHaveChildren,
   canDrag,
@@ -143,6 +164,11 @@ export function TreeView<T extends TreeNodeLike<T>>({
   const containerRef = useRef<HTMLDivElement>(null);
   const anchorId = useRef<string | null>(null);
   const press = useRef<Press | null>(null);
+  const pointerY = useRef(0);
+  const autoscrollFrame = useRef(0);
+  const pointerFocusing = useRef(false);
+  const menuFromKeyboard = useRef(false);
+  const handledRename = useRef(renameRequest?.nonce);
   const [focusedId, setFocusedId] = useState<string | null>(null);
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [drag, setDrag] = useState<{ ids: string[]; target: TreeDropTarget | null } | null>(null);
@@ -163,6 +189,7 @@ export function TreeView<T extends TreeNodeLike<T>>({
   const rowDomId = (id: string) => `${baseId}-row-${id}`;
 
   const toggleExpanded = (id: string, open?: boolean, recursive = false) => {
+    if (!expandable) return;
     const next = new Set(expanded);
     const shouldOpen = open ?? !next.has(id);
     for (const target of recursive ? subtreeIds(nodes, id) : [id]) {
@@ -205,6 +232,31 @@ export function TreeView<T extends TreeNodeLike<T>>({
     else if (top + rowHeight > el.scrollTop + el.clientHeight) el.scrollTop = top + rowHeight - el.clientHeight;
   };
 
+  useLayoutEffect(() => {
+    if (!onRename || !renameRequest || renameRequest.nonce === handledRename.current) return;
+    handledRename.current = renameRequest.nonce;
+    const index = indexById.get(renameRequest.id);
+    if (index === undefined) return;
+    scrollToIndex(index);
+    setFocusedId(renameRequest.id);
+    setRenamingId(renameRequest.id);
+  }, [renameRequest?.nonce]);
+
+  useLayoutEffect(() => {
+    if (!scrollToId) return;
+    const index = indexById.get(scrollToId.id);
+    if (index !== undefined) scrollToIndex(index);
+  }, [scrollToId?.nonce]);
+
+  useEffect(() => () => cancelAnimationFrame(autoscrollFrame.current), []);
+
+  const focusContainer = () => {
+    const before = pointerFocusing.current;
+    pointerFocusing.current = true;
+    containerRef.current?.focus({ preventScroll: true });
+    pointerFocusing.current = before;
+  };
+
   const moveFocus = (index: number, extend: boolean) => {
     const clamped = Math.max(0, Math.min(rows.length - 1, index));
     const row = rows[clamped];
@@ -215,8 +267,26 @@ export function TreeView<T extends TreeNodeLike<T>>({
     scrollToIndex(clamped);
   };
 
+  const openRowMenu = (id: string) => {
+    const index = indexById.get(id);
+    if (!onRowContextMenu || index === undefined) return;
+    scrollToIndex(index);
+    const dispatch = () => {
+      const el = document.getElementById(rowDomId(id));
+      if (!el) return;
+      const rect = el.getBoundingClientRect();
+      menuFromKeyboard.current = true;
+      el.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: rect.left + 28, clientY: rect.bottom }));
+      menuFromKeyboard.current = false;
+    };
+    if (document.getElementById(rowDomId(id))) dispatch();
+    else requestAnimationFrame(dispatch);
+  };
+
   const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
     if (event.target !== containerRef.current) return;
+    pointerFocusing.current = false;
+    event.currentTarget.dataset.kbd = "";
     if (drag && event.key === "Escape") {
       press.current = null;
       setDrag(null);
@@ -241,14 +311,21 @@ export function TreeView<T extends TreeNodeLike<T>>({
         moveFocus(rows.length - 1, event.shiftKey);
         break;
       case "ArrowRight":
-        if (row.hasChildren && !row.expanded) toggleExpanded(row.id, true, event.altKey);
+        if (expandable && row.hasChildren && !row.expanded) toggleExpanded(row.id, true, event.altKey);
         else if (row.expanded) moveFocus(index + 1, false);
         else return;
         break;
       case "ArrowLeft":
-        if (row.expanded) toggleExpanded(row.id, false, event.altKey);
+        if (expandable && row.expanded) toggleExpanded(row.id, false, event.altKey);
         else if (row.parentId !== null) moveFocus(indexById.get(row.parentId) ?? index, false);
         else return;
+        break;
+      case "ContextMenu":
+        openRowMenu(row.id);
+        break;
+      case "F10":
+        if (!event.shiftKey) return;
+        openRowMenu(row.id);
         break;
       case "Enter":
       case "F2":
@@ -272,7 +349,7 @@ export function TreeView<T extends TreeNodeLike<T>>({
 
   const onRowPointerDown = (event: PointerEvent<HTMLDivElement>, row: FlatTreeRow<T>) => {
     if (event.button !== 0 || renamingId === row.id) return;
-    containerRef.current?.focus({ preventScroll: true });
+    focusContainer();
     setFocusedId(row.id);
     const mod = event.metaKey || event.ctrlKey;
     let deferredSelect = false;
@@ -293,19 +370,11 @@ export function TreeView<T extends TreeNodeLike<T>>({
     };
   };
 
-  const onPointerMove = (event: PointerEvent<HTMLDivElement>) => {
+  const dragTo = (clientY: number) => {
     const p = press.current;
     const el = containerRef.current;
-    if (!p || !el || p.pointerId !== event.pointerId || !p.draggable) return;
-    if (!p.active) {
-      if (Math.hypot(event.clientX - p.startX, event.clientY - p.startY) < DRAG_THRESHOLD) return;
-      p.active = true;
-      el.setPointerCapture(event.pointerId);
-    }
-    const rect = el.getBoundingClientRect();
-    if (event.clientY < rect.top + 20) el.scrollTop -= 6;
-    else if (event.clientY > rect.bottom - 20) el.scrollTop += 6;
-    const y = event.clientY - rect.top + el.scrollTop;
+    if (!p || !el) return;
+    const y = clientY - el.getBoundingClientRect().top + el.scrollTop;
     const current = latestRows.current;
     const dragged = new Set(p.ids);
     let target: TreeDropTarget | null = null;
@@ -322,8 +391,47 @@ export function TreeView<T extends TreeNodeLike<T>>({
     }
     setDrag((prev) => (prev && sameTarget(prev.target, target) ? prev : { ids: p.ids, target }));
   };
+  const dragToLatest = useLatest(dragTo);
+
+  const startAutoscroll = () => {
+    if (autoscrollFrame.current) return;
+    const tick = () => {
+      const el = containerRef.current;
+      if (!el || !press.current?.active) {
+        autoscrollFrame.current = 0;
+        return;
+      }
+      const rect = el.getBoundingClientRect();
+      const y = pointerY.current;
+      const nearTop = AUTOSCROLL_EDGE - (y - rect.top);
+      const nearBottom = AUTOSCROLL_EDGE - (rect.bottom - y);
+      const pressure = nearTop > 0 ? -Math.min(nearTop, AUTOSCROLL_EDGE) : nearBottom > 0 ? Math.min(nearBottom, AUTOSCROLL_EDGE) : 0;
+      if (pressure) {
+        const before = el.scrollTop;
+        el.scrollTop += Math.sign(pressure) * Math.ceil((Math.abs(pressure) / AUTOSCROLL_EDGE) * AUTOSCROLL_MAX);
+        if (el.scrollTop !== before) dragToLatest.current(y);
+      }
+      autoscrollFrame.current = requestAnimationFrame(tick);
+    };
+    autoscrollFrame.current = requestAnimationFrame(tick);
+  };
+
+  const onPointerMove = (event: PointerEvent<HTMLDivElement>) => {
+    const p = press.current;
+    const el = containerRef.current;
+    if (!p || !el || p.pointerId !== event.pointerId || !p.draggable) return;
+    pointerY.current = event.clientY;
+    if (!p.active) {
+      if (Math.hypot(event.clientX - p.startX, event.clientY - p.startY) < DRAG_THRESHOLD) return;
+      p.active = true;
+      el.setPointerCapture(event.pointerId);
+      startAutoscroll();
+    }
+    dragTo(event.clientY);
+  };
 
   const onPointerUp = (event: PointerEvent<HTMLDivElement>) => {
+    pointerFocusing.current = false;
     const p = press.current;
     if (!p || p.pointerId !== event.pointerId) return;
     press.current = null;
@@ -364,6 +472,8 @@ export function TreeView<T extends TreeNodeLike<T>>({
       dragging: !!drag?.ids.includes(row.id),
     };
     const label = getLabel(row.node);
+    const labelId = `${rowDomId(row.id)}-label`;
+    const trailingId = `${rowDomId(row.id)}-trailing`;
     return (
       <div
         {...getRowProps?.(row.node)}
@@ -375,6 +485,9 @@ export function TreeView<T extends TreeNodeLike<T>>({
         aria-posinset={row.index + 1}
         aria-expanded={row.hasChildren ? row.expanded : undefined}
         aria-selected={isSelected}
+        aria-labelledby={state.renaming ? undefined : labelId}
+        aria-label={state.renaming ? label : undefined}
+        aria-describedby={renderTrailing ? trailingId : undefined}
         className="sb-tree__row"
         data-selected={isSelected || undefined}
         data-focused={state.focused || undefined}
@@ -384,19 +497,20 @@ export function TreeView<T extends TreeNodeLike<T>>({
         onPointerDown={(event) => onRowPointerDown(event, row)}
         onDoubleClick={(event) => {
           const target = event.target as Element;
-          if (onRename && target.closest(".sb-tree__label")) setRenamingId(row.id);
+          if (onRename && (renameOnDoubleClick?.(row.node) ?? true) && target.closest(".sb-tree__label")) setRenamingId(row.id);
           else onActivate?.(row.node);
         }}
         onContextMenu={(event) => {
           if (!selected.has(row.id)) selectOnly(row.id);
           setFocusedId(row.id);
-          onRowContextMenu?.(row.node, event);
+          const rect = event.currentTarget.getBoundingClientRect();
+          onRowContextMenu?.(row.node, event, { keyboard: menuFromKeyboard.current, rect: { x: rect.left, y: rect.top, width: rect.width, height: rect.height } });
         }}
       >
         <span className="sb-tree__indent" style={{ width: row.depth * indent }} aria-hidden />
         <span
           className="sb-tree__chevron"
-          data-visible={row.hasChildren || undefined}
+          data-visible={(expandable && row.hasChildren) || undefined}
           data-expanded={row.expanded || undefined}
           aria-hidden
           onPointerDown={(event) => event.stopPropagation()}
@@ -406,7 +520,7 @@ export function TreeView<T extends TreeNodeLike<T>>({
             if (row.hasChildren) toggleExpanded(row.id, undefined, event.altKey);
           }}
         >
-          {row.hasChildren && <ChevronRight size={12} strokeWidth={2} />}
+          {expandable && row.hasChildren && <ChevronRight size={12} strokeWidth={1.75} />}
         </span>
         {renderIcon && (
           <span className="sb-tree__icon" aria-hidden>
@@ -418,15 +532,15 @@ export function TreeView<T extends TreeNodeLike<T>>({
             initial={label}
             onDone={(name) => {
               setRenamingId(null);
-              containerRef.current?.focus({ preventScroll: true });
+              focusContainer();
               if (name !== null && name !== label) onRename?.(row.id, name);
             }}
           />
         ) : (
-          <span className="sb-tree__label">{label}</span>
+          <TreeLabel id={labelId} label={label} />
         )}
         {renderTrailing && (
-          <span className="sb-tree__trailing" onPointerDown={(event) => event.stopPropagation()} onDoubleClick={(event) => event.stopPropagation()}>
+          <span id={trailingId} className="sb-tree__trailing" onPointerDown={(event) => event.stopPropagation()} onDoubleClick={(event) => event.stopPropagation()}>
             {renderTrailing(row.node, state)}
           </span>
         )}
@@ -450,6 +564,15 @@ export function TreeView<T extends TreeNodeLike<T>>({
       className={cx("sb-tree sb-scroll", className)}
       data-dragging={drag ? "" : undefined}
       onKeyDown={onKeyDown}
+      onPointerDownCapture={(event) => {
+        pointerFocusing.current = true;
+        event.currentTarget.removeAttribute("data-kbd");
+      }}
+      onContextMenu={(event) => {
+        if (event.target !== event.currentTarget || !event.currentTarget.hasAttribute("data-kbd") || focusedId === null) return;
+        event.preventDefault();
+        openRowMenu(focusedId);
+      }}
       onScroll={(event) => {
         if (!virtual) return;
         const top = event.currentTarget.scrollTop;
@@ -459,10 +582,13 @@ export function TreeView<T extends TreeNodeLike<T>>({
       onPointerUp={onPointerUp}
       onPointerCancel={() => {
         press.current = null;
+        pointerFocusing.current = false;
         setDrag(null);
       }}
       onFocus={(event) => {
-        if (event.target !== event.currentTarget || focusedId !== null || rows.length === 0) return;
+        if (event.target !== event.currentTarget) return;
+        if (!pointerFocusing.current) event.currentTarget.dataset.kbd = "";
+        if (focusedId !== null || rows.length === 0) return;
         setFocusedId((rows.find((r) => selected.has(r.id)) ?? rows[0]!).id);
       }}
     >
@@ -475,6 +601,17 @@ export function TreeView<T extends TreeNodeLike<T>>({
         </div>
       )}
     </div>
+  );
+}
+
+function TreeLabel({ id, label }: { id: string; label: string }) {
+  const [truncated, setTruncated] = useState(false);
+  return (
+    <Tooltip content={truncated ? label : undefined} placement="bottom-start">
+      <span id={id} className="sb-tree__label" onPointerEnter={(event) => setTruncated(event.currentTarget.scrollWidth > event.currentTarget.clientWidth)}>
+        {label}
+      </span>
+    </Tooltip>
   );
 }
 
