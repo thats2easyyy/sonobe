@@ -23,13 +23,20 @@
   }
 }
 
-.sb-colorfield:focus-within,
+.sb-colorfield:has(input:focus),
 .sb-colorfield[data-open] {
   box-shadow: inset 0 0 0 1px var(--accent);
 }
 
 .sb-colorfield[data-linked] {
   background: var(--accent-soft);
+}
+
+@media (forced-colors: active) {
+  .sb-colorfield:has(input:focus),
+  .sb-colorfield[data-open] {
+    outline: 2px solid Highlight;
+  }
 }
 
 .sb-colorfield__swatch {
@@ -72,6 +79,10 @@
   font-family: var(--font-mono);
   font-size: var(--font-size-xs);
   text-transform: uppercase;
+}
+
+.sb-colorfield__hex:focus-visible {
+  outline: none;
 }
 
 .sb-colorfield__hex::placeholder {

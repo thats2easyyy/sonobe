@@ -200,6 +200,7 @@ function Buttons() {
           </Button>
           <Button>Duplicate</Button>
           <Button variant="ghost">Cancel</Button>
+          <Button variant="ghost-danger">Discard changes</Button>
           <Button variant="danger" icon={<Trash size={13} />}>
             Delete
           </Button>
@@ -344,20 +345,33 @@ function Selection() {
   const [mixedOn, setMixedOn] = useState(false);
   return (
     <Section title="Selection" description="Segmented controls for a few visible options, selects for many, toggles for settings that apply immediately.">
-      <Demo label="Segmented controls">
+      <Demo label="Segmented controls · md 26 (toolbar) and sm 22 (panels, dialogs, rows)">
         <Stack>
           <SegmentedControl aria-label="Layout" value={layout} onChange={setLayout} options={[{ value: "none", label: "None" }, { value: "row", label: "Row" }, { value: "column", label: "Column" }, { value: "grid", label: "Grid" }]} />
-          <SegmentedControl
-            aria-label="Alignment"
-            size="sm"
-            value={align}
-            onChange={setAlign}
-            options={[
-              { value: "left", icon: <AlignLeft size={13} />, tooltip: "Align left" },
-              { value: "center", icon: <AlignCenter size={13} />, tooltip: "Align center" },
-              { value: "right", icon: <AlignRight size={13} />, tooltip: "Align right" },
-            ]}
-          />
+          <SegmentedControl aria-label="Layout (small)" size="sm" value={layout} onChange={setLayout} options={[{ value: "none", label: "None" }, { value: "row", label: "Row" }, { value: "column", label: "Column" }, { value: "grid", label: "Grid" }]} />
+          <Row>
+            <SegmentedControl
+              aria-label="Alignment"
+              value={align}
+              onChange={setAlign}
+              options={[
+                { value: "left", icon: <AlignLeft size={14} />, tooltip: "Align left" },
+                { value: "center", icon: <AlignCenter size={14} />, tooltip: "Align center" },
+                { value: "right", icon: <AlignRight size={14} />, tooltip: "Align right" },
+              ]}
+            />
+            <SegmentedControl
+              aria-label="Alignment (small)"
+              size="sm"
+              value={align}
+              onChange={setAlign}
+              options={[
+                { value: "left", icon: <AlignLeft size={14} />, tooltip: "Align left" },
+                { value: "center", icon: <AlignCenter size={14} />, tooltip: "Align center" },
+                { value: "right", icon: <AlignRight size={14} />, tooltip: "Align right" },
+              ]}
+            />
+          </Row>
           <SegmentedControl aria-label="Theme" fullWidth size="sm" value="dark" onChange={() => undefined} options={[{ value: "system", label: "System" }, { value: "dark", label: "Dark" }, { value: "light", label: "Light" }]} />
         </Stack>
       </Demo>
@@ -384,6 +398,7 @@ function Selection() {
 }
 
 const MENU_ENTRIES: MenuEntry[] = [
+  { type: "label", label: "Layer “Event Card”", plain: true },
   { id: "dup", label: "Duplicate", icon: <Copy size={14} />, shortcut: "Mod+D" },
   { id: "group", label: "Group Selection", icon: <Group size={14} />, shortcut: "Mod+G" },
   { type: "separator" },
@@ -399,7 +414,7 @@ const MENU_ENTRIES: MenuEntry[] = [
     ],
   },
   { id: "snap", label: "Snap to Pixel Grid", checked: true, keepOpen: true },
-  { id: "lock", label: "Lock", icon: <LockOpen size={14} />, shortcut: "Mod+Shift+L", disabled: true },
+  { id: "lock", label: "Lock", icon: <LockOpen size={14} />, shortcut: "Mod+Shift+L", disabled: true, tooltip: "Unlock the group this layer is in first" },
   { type: "separator" },
   { id: "delete", label: "Delete", icon: <Trash size={14} />, shortcut: "Backspace", danger: true },
 ];

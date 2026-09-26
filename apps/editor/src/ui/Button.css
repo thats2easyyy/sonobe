@@ -100,6 +100,11 @@
   color: var(--text-secondary);
 }
 
+.sb-btn[data-variant="ghost-danger"] {
+  background: transparent;
+  color: var(--danger-text);
+}
+
 .sb-btn[data-variant="danger"] {
   background: var(--danger);
   color: var(--text-on-accent);
@@ -124,6 +129,9 @@
     background: var(--bg-hover);
     color: var(--text-primary);
   }
+  .sb-btn[data-variant="ghost-danger"]:hover:not(:disabled) {
+    background: var(--danger-soft);
+  }
   .sb-btn[data-variant="danger"]:hover:not(:disabled) {
     background: var(--danger-hover);
   }
@@ -141,13 +149,17 @@
   background: var(--bg-pressed);
 }
 
+.sb-btn[data-variant="ghost-danger"]:active:not(:disabled) {
+  background: color-mix(in srgb, var(--danger) 26%, transparent);
+}
+
 .sb-btn:disabled:not([data-loading]) {
   background: var(--bg-field);
   color: var(--text-disabled);
   box-shadow: none;
 }
 
-.sb-btn[data-variant="ghost"]:disabled:not([data-loading]) {
+.sb-btn:is([data-variant="ghost"], [data-variant="ghost-danger"]):disabled:not([data-loading]) {
   background: transparent;
 }
 

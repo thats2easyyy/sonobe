@@ -1,5 +1,6 @@
-import { Search } from "lucide-react";
+import { CornerDownLeft, Search } from "lucide-react";
 import { useId, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode, type RefObject } from "react";
+import { Kbd } from "./Kbd.tsx";
 import { cx } from "./lib/cx.ts";
 import { fuzzySearch, highlightSegments, type FieldMatch, type FuzzyKey } from "./lib/fuzzy.ts";
 import { useControllableState, useLatest } from "./lib/hooks.ts";
@@ -19,6 +20,27 @@ export function HighlightedText({ text, indices }: { text: string; indices?: rea
           <span key={i}>{segment.text}</span>
         ),
       )}
+    </>
+  );
+}
+
+/** The footer line every search overlay ends with: "↑↓ navigate  ↵ <verb>  Esc close". */
+export function SearchHints({ verb }: { verb: string }) {
+  return (
+    <>
+      <span className="sb-searchlist__hint">
+        <Kbd>↑</Kbd>
+        <Kbd>↓</Kbd> navigate
+      </span>
+      <span className="sb-searchlist__hint">
+        <Kbd>
+          <CornerDownLeft size={10} strokeWidth={2.25} />
+        </Kbd>
+        {verb}
+      </span>
+      <span className="sb-searchlist__hint">
+        <Kbd>Esc</Kbd> close
+      </span>
     </>
   );
 }

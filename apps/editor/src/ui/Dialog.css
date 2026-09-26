@@ -75,7 +75,16 @@
 }
 
 .sb-dialog__close {
-  margin: -1px calc(-1 * var(--space-2)) 0 0;
+  margin: -2px calc(-1 * var(--space-2)) 0 0;
+}
+
+.sb-dialog__close.sb-iconbtn[data-size] {
+  width: 24px;
+  height: 24px;
+}
+
+.sb-dialog__close.sb-iconbtn[data-size]::after {
+  inset: 0;
 }
 
 .sb-dialog__body {

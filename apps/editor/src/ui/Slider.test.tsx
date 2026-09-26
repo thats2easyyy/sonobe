@@ -169,6 +169,14 @@ describe("Slider", () => {
     expect(onChangeSpy).not.toHaveBeenCalled();
   });
 
+  it("hides ticks from assistive tech and forwards aria-describedby to the slider", () => {
+    act(() => root.render(<Controlled aria-describedby="knob-hint" ticks={[{ value: 40, label: "Shipped app: 40 pt", onSelect: () => undefined }]} />));
+    expect(slider().getAttribute("aria-describedby")).toBe("knob-hint");
+    const tick = container.querySelector<HTMLButtonElement>(".sb-slider__tick")!;
+    expect(tick.getAttribute("aria-hidden")).toBe("true");
+    expect(tick.tabIndex).toBe(-1);
+  });
+
   it("drags from the thumb when a tick sits under it", () => {
     const onSelect = vi.fn();
     const onChangeSpy = vi.fn();

@@ -1,8 +1,7 @@
-import { CornerDownLeft } from "lucide-react";
 import { useCallback, useMemo, useState, type KeyboardEvent } from "react";
 import { Dialog } from "./Dialog.tsx";
 import { Kbd } from "./Kbd.tsx";
-import { SearchList } from "./SearchList.tsx";
+import { SearchHints, SearchList } from "./SearchList.tsx";
 import { useCommandList, useCommands } from "./commands/CommandProvider.tsx";
 import { commandDisabledReason, commandTitle } from "./commands/commandRegistry.ts";
 import { orderPaletteItems, type PaletteItem } from "./commands/paletteOrder.ts";
@@ -118,23 +117,7 @@ function PaletteBody({ placeholder, onClose }: { placeholder: string; onClose: (
           </div>
         );
       }}
-      footer={
-        <>
-          <span className="sb-palette__hint">
-            <Kbd>↑</Kbd>
-            <Kbd>↓</Kbd> to navigate
-          </span>
-          <span className="sb-palette__hint">
-            <Kbd>
-              <CornerDownLeft size={10} strokeWidth={2.25} />
-            </Kbd>
-            to run
-          </span>
-          <span className="sb-palette__hint">
-            <Kbd>Esc</Kbd> to close
-          </span>
-        </>
-      }
+      footer={<SearchHints verb="run" />}
     />
   );
 }

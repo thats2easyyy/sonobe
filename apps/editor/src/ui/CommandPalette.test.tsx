@@ -57,6 +57,10 @@ describe("CommandPalette", () => {
     expect(rows().map((r) => r.title)).toEqual(["Close Prototype", "Undo Mute Card Shadow"]);
   });
 
+  it("ends with the shared hint line, running on Enter", () => {
+    expect([...document.querySelectorAll(".sb-searchlist__hint")].map((el) => el.textContent)).toEqual(["↑↓ navigate", "run", "Esc close"]);
+  });
+
   it("finds unavailable commands greyed out with why, and won't run them", () => {
     const input = search("copy");
     expect(rows()).toEqual([{ title: "Copy", disabled: true, reason: "Select a layer, patch, or comment first" }]);

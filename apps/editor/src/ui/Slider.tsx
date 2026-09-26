@@ -27,6 +27,8 @@ export interface SliderProps {
   onCommit?: (value: number) => void;
   ticks?: readonly SliderTick[];
   "aria-label": string;
+  /** Id of the element that describes the slider, read after its name and value. */
+  "aria-describedby"?: string;
   /** The value for people and screen readers, with its unit ("95 pt"). Default: the number. */
   valueText?: (value: number) => string;
   /** "horizontal" leaves ↑ and ↓ to the surrounding list (rows that move with them). Default "both". */
@@ -50,7 +52,7 @@ function snap(value: number, min: number, step: number): number {
  * pointing further out, leave it be; the slider itself never produces one.
  * Ticks mark other values, such as the same knob in other presets.
  */
-export function Slider({ value, min, max, step, onChange, onCommit, ticks = [], "aria-label": ariaLabel, valueText, arrowKeys = "both", disabled = false, className }: SliderProps) {
+export function Slider({ value, min, max, step, onChange, onCommit, ticks = [], "aria-label": ariaLabel, "aria-describedby": ariaDescribedBy, valueText, arrowKeys = "both", disabled = false, className }: SliderProps) {
   const trackRef = useRef<HTMLDivElement>(null);
   const [dragging, setDragging] = useState(false);
   // Focus from a pointer press isn't keyboard focus, and only keyboard focus draws the ring.
@@ -145,6 +147,7 @@ export function Slider({ value, min, max, step, onChange, onCommit, ticks = [], 
       role="slider"
       tabIndex={disabled ? -1 : 0}
       aria-label={ariaLabel}
+      aria-describedby={ariaDescribedBy}
       aria-valuemin={min}
       aria-valuemax={max}
       aria-valuenow={value}
@@ -171,6 +174,7 @@ export function Slider({ value, min, max, step, onChange, onCommit, ticks = [], 
             key={`${i}-${tick.label}`}
             type="button"
             tabIndex={-1}
+            aria-hidden
             className="sb-slider__tick"
             aria-label={tick.label}
             title={tick.label}

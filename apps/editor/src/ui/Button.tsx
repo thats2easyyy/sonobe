@@ -3,11 +3,11 @@ import type { ComponentPropsWithRef, ReactNode } from "react";
 import { cx } from "./lib/cx.ts";
 import "./Button.css";
 
-export type ButtonVariant = "primary" | "secondary" | "ghost" | "danger" | "ai";
+export type ButtonVariant = "primary" | "secondary" | "ghost" | "ghost-danger" | "danger" | "ai";
 export type ButtonSize = "sm" | "md" | "lg";
 
 export interface ButtonProps extends ComponentPropsWithRef<"button"> {
-  /** primary: the one main action. secondary: default. ghost: toolbars and low emphasis. ai: Claude actions. */
+  /** primary: the one main action. secondary: default. ghost: toolbars and low emphasis. ghost-danger: a destructive choice that isn't the main action (a dialog footer's left side). danger: the confirming destructive action. ai: Claude actions. */
   variant?: ButtonVariant;
   size?: ButtonSize;
   icon?: ReactNode;

@@ -18,6 +18,7 @@ import {
 } from "react";
 import { Kbd } from "./Kbd.tsx";
 import { Popover } from "./Popover.tsx";
+import { Tooltip } from "./Tooltip.tsx";
 import { cx } from "./lib/cx.ts";
 import { useMergedRefs } from "./lib/hooks.ts";
 import type { Placement, Rect } from "./lib/position.ts";
@@ -31,6 +32,8 @@ export interface MenuItemEntry {
   /** Registry format, e.g. "Mod+D". Display only; bind it through the command registry. */
   shortcut?: string;
   description?: string;
+  /** Shown beside the row on hover and keyboard focus, also when the row is disabled (say why). */
+  tooltip?: string;
   disabled?: boolean;
   danger?: boolean;
   /** Renders a checkmark item (menuitemcheckbox). */
@@ -41,7 +44,8 @@ export interface MenuItemEntry {
   onSelect?: () => void;
 }
 
-export type MenuEntry = MenuItemEntry | { type: "separator"; id?: string } | { type: "label"; id?: string; label: string };
+/** A label is an uppercase eyebrow; `plain` keeps its case, for a sentence that names something. */
+export type MenuEntry = MenuItemEntry | { type: "separator"; id?: string } | { type: "label"; id?: string; label: string; plain?: boolean };
 
 const isItem = (entry: MenuEntry | undefined): entry is MenuItemEntry => !!entry && (entry.type === undefined || entry.type === "item");
 
@@ -69,7 +73,7 @@ export function MenuList({ entries, onClose, "aria-label": ariaLabel, autoFocus 
   const hoverTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const typeahead = useRef({ text: "", at: 0 });
 
-  const enabled = useMemo(() => entries.flatMap((entry, i) => (isItem(entry) && !entry.disabled ? [i] : [])), [entries]);
+  const navigable = useMemo(() => entries.flatMap((entry, i) => (isItem(entry) && (!entry.disabled || entry.tooltip) ? [i] : [])), [entries]);
   const hasIcons = useMemo(() => entries.some((entry) => isItem(entry) && (!!entry.icon || entry.checked !== undefined)), [entries]);
 
   const focusIndex = useCallback((index: number) => {
@@ -78,7 +82,8 @@ export function MenuList({ entries, onClose, "aria-label": ariaLabel, autoFocus 
   }, []);
 
   useLayoutEffect(() => {
-    if (autoFocus === "first" && enabled.length > 0) focusIndex(enabled[0]!);
+    const first = navigable.find((i) => !(entries[i] as MenuItemEntry).disabled);
+    if (autoFocus === "first" && first !== undefined) focusIndex(first);
     else if (autoFocus === "container") containerRef.current?.focus({ preventScroll: true });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -86,10 +91,10 @@ export function MenuList({ entries, onClose, "aria-label": ariaLabel, autoFocus 
   useEffect(() => () => clearTimeout(hoverTimer.current), []);
 
   const move = (direction: 1 | -1) => {
-    if (enabled.length === 0) return;
-    const position = enabled.indexOf(active);
+    if (navigable.length === 0) return;
+    const position = navigable.indexOf(active);
     const next =
-      position === -1 ? (direction === 1 ? enabled[0]! : enabled[enabled.length - 1]!) : enabled[(position + direction + enabled.length) % enabled.length]!;
+      position === -1 ? (direction === 1 ? navigable[0]! : navigable[navigable.length - 1]!) : navigable[(position + direction + navigable.length) % navigable.length]!;
     focusIndex(next);
   };
 
@@ -114,10 +119,10 @@ export function MenuList({ entries, onClose, "aria-label": ariaLabel, autoFocus 
         move(-1);
         break;
       case "Home":
-        if (enabled.length) focusIndex(enabled[0]!);
+        if (navigable.length) focusIndex(navigable[0]!);
         break;
       case "End":
-        if (enabled.length) focusIndex(enabled[enabled.length - 1]!);
+        if (navigable.length) focusIndex(navigable[navigable.length - 1]!);
         break;
       case "ArrowRight":
         if (isItem(entry) && entry.submenu) setOpenSub({ index: active, viaKeyboard: true });
@@ -139,7 +144,7 @@ export function MenuList({ entries, onClose, "aria-label": ariaLabel, autoFocus 
         const now = Date.now();
         const text = now - typeahead.current.at > 600 ? event.key.toLowerCase() : typeahead.current.text + event.key.toLowerCase();
         typeahead.current = { text, at: now };
-        const match = enabled.find((i) => (entries[i] as MenuItemEntry).label.toLowerCase().startsWith(text));
+        const match = navigable.find((i) => (entries[i] as MenuItemEntry).label.toLowerCase().startsWith(text));
         if (match !== undefined) focusIndex(match);
       }
     }
@@ -161,14 +166,14 @@ export function MenuList({ entries, onClose, "aria-label": ariaLabel, autoFocus 
         if (entry.type === "separator") return <div key={entry.id ?? `sep-${index}`} role="separator" className="sb-menu__separator" />;
         if (entry.type === "label")
           return (
-            <div key={entry.id ?? `label-${index}`} role="presentation" className="sb-menu__label">
+            <div key={entry.id ?? `label-${index}`} role="presentation" className="sb-menu__label" data-plain={entry.plain || undefined}>
               {entry.label}
             </div>
           );
         const item = entry as MenuItemEntry;
         const hasSubmenu = !!item.submenu;
         const subOpen = openSub?.index === index;
-        return (
+        const row = (
           <div
             key={item.id}
             ref={(el) => {
@@ -182,6 +187,7 @@ export function MenuList({ entries, onClose, "aria-label": ariaLabel, autoFocus 
             tabIndex={-1}
             className="sb-menu__item"
             data-active={active === index || subOpen || undefined}
+            data-checked={item.checked || undefined}
             data-danger={item.danger || undefined}
             data-disabled={item.disabled || undefined}
             onPointerMove={() => {
@@ -227,6 +233,13 @@ export function MenuList({ entries, onClose, "aria-label": ariaLabel, autoFocus 
               </Popover>
             )}
           </div>
+        );
+        return item.tooltip ? (
+          <Tooltip key={item.id} content={item.tooltip} placement="right">
+            {row}
+          </Tooltip>
+        ) : (
+          row
         );
       })}
     </div>

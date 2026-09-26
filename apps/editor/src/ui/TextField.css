@@ -22,7 +22,7 @@
 }
 
 @media (hover: hover) {
-  .sb-textfield:not([data-disabled]):hover {
+  .sb-textfield:not([data-disabled]):not(:focus-within):hover {
     background: var(--bg-field-hover);
   }
 }
@@ -101,7 +101,15 @@
   font-size: var(--font-size-sm);
   line-height: var(--line-height-normal);
   resize: vertical;
-  transition: box-shadow var(--duration-fast) var(--ease-standard);
+  transition:
+    background-color var(--duration-fast) var(--ease-standard),
+    box-shadow var(--duration-fast) var(--ease-standard);
+}
+
+@media (hover: hover) {
+  .sb-textarea:not(:disabled):not(:focus):hover {
+    background: var(--bg-field-hover);
+  }
 }
 
 .sb-textarea[data-autogrow] {
@@ -115,11 +123,24 @@
 }
 
 .sb-textarea:focus {
+  outline: none;
+  background: var(--bg-field);
   box-shadow: inset 0 0 0 1px var(--accent);
 }
 
 .sb-textarea[data-invalid] {
   box-shadow: inset 0 0 0 1px var(--danger);
+}
+
+@media (forced-colors: active) {
+  .sb-textfield:focus-within,
+  .sb-textarea:focus {
+    outline: 2px solid Highlight;
+  }
+}
+
+.sb-textarea:disabled {
+  color: var(--text-disabled);
 }
 
 .sb-textarea::placeholder {

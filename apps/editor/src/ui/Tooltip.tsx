@@ -13,7 +13,7 @@ import {
 } from "react";
 import { Kbd } from "./Kbd.tsx";
 import { Portal } from "./Portal.tsx";
-import { isFocusVisible } from "./lib/focus.ts";
+import { isFocusVisible, isTextEntry } from "./lib/focus.ts";
 import { useMergedRefs } from "./lib/hooks.ts";
 import type { Placement } from "./lib/position.ts";
 import { useFloating } from "./lib/useFloating.ts";
@@ -111,7 +111,9 @@ export function Tooltip({ content, shortcut, placement = "bottom", delay = 500, 
     },
     onFocus: (event) => {
       child.props.onFocus?.(event);
-      if (isFocusVisible(event.currentTarget)) show(true);
+      const target = event.target as Element;
+      if (target !== event.currentTarget && isTextEntry(target)) return;
+      if (isFocusVisible(target)) show(true);
     },
     onBlur: (event) => {
       child.props.onBlur?.(event);
@@ -143,9 +145,11 @@ function TooltipBubble({
   shortcut?: string | readonly string[];
 }) {
   const floating = useFloating<HTMLDivElement>({ open: true, anchor, placement, offset: 6 });
+  // useFloating caps the width at the room left in the viewport, which would lift .sb-tooltip's own cap.
+  const style = { ...floating.style, maxWidth: floating.style.maxWidth === undefined ? undefined : `min(var(--sb-tooltip-max-width), ${floating.style.maxWidth}px)` };
   return (
     <Portal themeFrom={anchor}>
-      <div ref={floating.ref} id={id} role="tooltip" className="sb-tooltip" data-side={floating.side} style={floating.style}>
+      <div ref={floating.ref} id={id} role="tooltip" className="sb-tooltip" data-side={floating.side} style={style}>
         <span className="sb-tooltip__text">{content}</span>
         {shortcut && <Kbd shortcut={shortcut} variant="plain" className="sb-tooltip__kbd" />}
       </div>

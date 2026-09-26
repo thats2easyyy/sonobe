@@ -2,7 +2,7 @@
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { SearchList } from "./SearchList.tsx";
+import { SearchHints, SearchList } from "./SearchList.tsx";
 import type { FuzzyKey } from "./lib/fuzzy.ts";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -73,5 +73,13 @@ describe("SearchList weakKeys", () => {
     expect(container.querySelector('[role="option"][data-active]')).not.toBeNull();
     renderRows();
     expect(container.querySelector('[role="option"][data-active]')).not.toBeNull();
+  });
+});
+
+describe("SearchHints", () => {
+  it("reads navigate, the overlay's verb, and close", () => {
+    act(() => root.render(<div className="sb-searchlist__footer"><SearchHints verb="insert" /></div>));
+    const hints = [...container.querySelectorAll(".sb-searchlist__hint")].map((el) => el.textContent);
+    expect(hints).toEqual(["↑↓ navigate", "insert", "Esc close"]);
   });
 });

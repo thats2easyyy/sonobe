@@ -15,7 +15,7 @@ export { Popover, type PopoverProps } from "./Popover.tsx";
 export { Portal, type PortalProps } from "./Portal.tsx";
 export { PortGlyph, VALUE_TYPE_LABELS, type PortGlyphProps } from "./PortGlyph.tsx";
 export { ScrubNumberField, type NumberChangeMeta, type ScrubNumberFieldProps } from "./ScrubNumberField.tsx";
-export { HighlightedText, SearchList, type SearchListProps, type SearchListRenderContext } from "./SearchList.tsx";
+export { HighlightedText, SearchHints, SearchList, type SearchListProps, type SearchListRenderContext } from "./SearchList.tsx";
 export { SegmentedControl, type SegmentedControlProps, type SegmentedOption } from "./SegmentedControl.tsx";
 export { Slider, type SliderProps, type SliderTick } from "./Slider.tsx";
 export { Select, type SelectOption, type SelectProps } from "./Select.tsx";

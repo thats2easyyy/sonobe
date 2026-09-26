@@ -3,7 +3,8 @@
   display: flex;
   align-items: center;
   gap: var(--space-4);
-  max-width: 280px;
+  --sb-tooltip-max-width: 280px;
+  max-width: var(--sb-tooltip-max-width);
   padding: 4px 8px;
   border-radius: var(--radius-sm);
   background: var(--bg-tooltip);
