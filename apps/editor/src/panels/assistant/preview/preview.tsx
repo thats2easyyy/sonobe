@@ -40,7 +40,7 @@ function scriptFirstRun(emit: (event: AssistantEvent) => void) {
   emit({ type: "tool_started", runId: r, toolUseId: "t4", name: "add_patches", title: "Add patches", detail: "Zoom Transition" });
   emit({ type: "tool_finished", runId: r, toolUseId: "t4", name: "add_patches", status: "done", detail: "Added 1 patch and 2 connections", changedDocument: true });
   emit({ type: "turn_started", runId: r, turn: 3 });
-  emit({ type: "text_delta", runId: r, turn: 3, delta: "Done. **Tap Photo** flips **Zoomed**, a **Zoom Spring** animates it, and **Zoom Transition** drives the Photo's scale from 1 to 1.08.\n\nTap the photo in the viewer to try it. Every change is in History as “Assistant” if you want to undo." });
+  emit({ type: "text_delta", runId: r, turn: 3, delta: "Done. **Tap Photo** flips **Zoomed**, a **Zoom Spring** animates it, and **Zoom Transition** drives the Photo's scale from 1 to 1.08.\n\nTap the photo in the viewer to try it. It shows in AI Activity as Assistant, and ⌘Z undoes it." });
   emit({ type: "usage", runId: r, usage: { ...chatUsage, totalTokens: 96_000, estimatedCostUsd: 0.19 }, limits: LIMITS });
   emit({ type: "run_finished", runId: r, outcome: "completed", usage: { ...chatUsage, totalTokens: 96_000, estimatedCostUsd: 0.19 } });
 }

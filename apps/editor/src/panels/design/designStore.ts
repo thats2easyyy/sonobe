@@ -77,8 +77,10 @@ export interface DesignData {
   result: DesignResult | null;
   /** Counts openBox calls: the box moves focus to its field on each, even when it's already open. */
   focusRequest: number;
+  /** What's typed in the box's field, kept here so a request outlives the box closing (the sheet or Learn opening) and reopening. */
+  text: string;
 }
-export interface DesignState extends DesignData { openBox(): void; closeBox(): void; setNewScreen(value: boolean): void }
+export interface DesignState extends DesignData { openBox(): void; closeBox(): void; setNewScreen(value: boolean): void; setText(text: string): void }
 
 /** DesignDraft.error when the reply hit max_tokens before the page was finished. */
 export const DRAFT_TOO_LONG = "too_long";
@@ -101,7 +103,7 @@ const REPLY_CHARS = 280;
 const READ_ONLY_NOTICE = "Claude is set to Read only";
 
 export function initialDesignData(): DesignData {
-  return { open: false, newScreen: false, request: null, drafts: [], result: null, focusRequest: 0 };
+  return { open: false, newScreen: false, request: null, drafts: [], result: null, focusRequest: 0, text: "" };
 }
 
 /** The app-wide Design with Claude store (the canvas header, ⌘K, the Layers menu and the box share it). */
@@ -110,6 +112,7 @@ export const designStore: StoreApi<DesignState> = createStore<DesignState>()((se
   openBox: () => set((s) => ({ open: true, focusRequest: s.focusRequest + 1 })),
   closeBox: () => set({ open: false }),
   setNewScreen: (value) => set({ newScreen: value }),
+  setText: (text) => set({ text }),
 }));
 
 export function useDesign<T>(selector: (s: DesignState) => T): T {

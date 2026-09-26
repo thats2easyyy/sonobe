@@ -290,6 +290,17 @@ function DesignBoxPanel({ session, bounds, onHeightChange }: DesignBoxProps): JS
     </Button>
   );
 
+  // The unsent request goes with the person to the chat's field, after whatever is already typed there.
+  const openChat = () => {
+    const text = design.text.trim();
+    if (text) {
+      const draft = assistantStore.getState().draft;
+      assistantStore.getState().setDraft(draft.trim() ? `${draft.trimEnd()}\n${text}` : text);
+      designStore.getState().setText("");
+    }
+    assistantStore.getState().show();
+  };
+
   const linkCodeFolder = async () => {
     setCodeError(null);
     const linked = await controller.linkCodeFolder();
@@ -468,13 +479,15 @@ function DesignBoxPanel({ session, bounds, onHeightChange }: DesignBoxProps): JS
         <span className="sb-design-box__chip" data-kind={target ? (target.isResult ? "result" : "redesign") : "new"}>
           <Sparkles size={12} aria-hidden />
           <span className="sb-design-box__chip-label">{copy.chip}</span>
-          {target ? <IconButton size="xs" icon={<X size={11} />} label="Design a new screen instead" className="sb-design-box__chip-clear" onClick={() => designStore.getState().setNewScreen(true)} /> : null}
+          {target ? <IconButton size="sm" icon={<X size={12} />} label="Design a new screen instead" className="sb-design-box__chip-clear" onClick={() => designStore.getState().setNewScreen(true)} /> : null}
         </span>
         {closeButton}
       </div>
 
       <Composer
         ref={composerRef}
+        value={design.text}
+        onValueChange={designStore.getState().setText}
         running={boxRun}
         disabled={busy}
         onSend={onSend}
@@ -519,7 +532,7 @@ function DesignBoxPanel({ session, bounds, onHeightChange }: DesignBoxProps): JS
           <span className="sb-design-box__spacer" />
           {/* The no-key notice offers it first; otherwise it's here, for plan users with or without a key. */}
           {controller.canOpenInClaudeCode && !noKey ? openButton("ghost") : null}
-          <Button size="sm" variant="ghost" icon={<MessageSquare size={13} />} onClick={() => assistantStore.getState().show()}>
+          <Button size="sm" variant="ghost" icon={<MessageSquare size={13} />} onClick={openChat}>
             Open chat
           </Button>
         </footer>
