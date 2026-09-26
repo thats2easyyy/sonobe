@@ -1,14 +1,15 @@
-import { BookOpen, CircleAlert, Copy, Layers, LoaderCircle, Monitor, RefreshCw, ShieldCheck, Sparkles, SquareTerminal, X } from "lucide-react";
-import { useEffect, useId, useRef, useState, type ReactNode, type RefObject } from "react";
+import { BookOpen, Check, ChevronRight, CircleAlert, Copy, LoaderCircle, Monitor, RefreshCw, SquareTerminal } from "lucide-react";
+import { useEffect, useState, type ReactNode } from "react";
 import { getDesktopHostApi } from "../../host/detect.ts";
 import { Button } from "../../ui/Button.tsx";
-import { Dialog } from "../../ui/Dialog.tsx";
-import { IconButton } from "../../ui/IconButton.tsx";
+import { Dialog, DIALOG_WIDTH } from "../../ui/Dialog.tsx";
 import { SegmentedControl } from "../../ui/SegmentedControl.tsx";
 import { TextField } from "../../ui/TextField.tsx";
 import { toast } from "../../ui/Toast.tsx";
 import { detectHostPlatform } from "../../ui/commands/shortcutManager.ts";
+import { cx } from "../../ui/lib/cx.ts";
 import { readString, writeString } from "../../ui/lib/storage.ts";
+import { getAssistantHost, supportsAssistant } from "../assistant/types.ts";
 import { claudeDesktopBundle, detectRepoPath, IS_DEV_BUILD } from "./buildInfo.ts";
 import {
   claudeCodeCommand,
@@ -75,16 +76,17 @@ function useStoredString(key: string): [string, (value: string) => void] {
   ];
 }
 
+/** Shown, dimmed, in the command until the project folder is filled in. */
+const PROJECT_PLACEHOLDER = "<project folder>";
+
 /**
- * Connect Claude: explains bring-your-own-plan over MCP, shows the MCP server status, and gives the
- * Claude Code command and Claude Desktop setup for this machine, example prompts, and privacy notes.
+ * Connect Claude: the MCP server's status, then the Claude Code command or Claude Desktop setup for this
+ * machine, example prompts, and privacy notes.
  */
 export function ConnectClaudeDialog({ open, onOpenChange, ...rest }: ConnectClaudeDialogProps) {
-  const titleId = useId();
-  const bodyRef = useRef<HTMLDivElement>(null);
   return (
-    <Dialog open={open} onOpenChange={onOpenChange} aria-labelledby={titleId} width={660} className="sb-connect-dialog" initialFocusRef={bodyRef} style={{ maxHeight: "min(800px, calc(100vh - 48px))" }}>
-      <ConnectClaudeContent titleId={titleId} bodyRef={bodyRef} onClose={() => onOpenChange(false)} {...rest} />
+    <Dialog open={open} onOpenChange={onOpenChange} width={DIALOG_WIDTH.lg} className="sb-connect-dialog" style={{ maxHeight: "min(720px, calc(100vh - 48px))" }}>
+      <ConnectClaudeContent onClose={() => onOpenChange(false)} {...rest} />
     </Dialog>
   );
 }
@@ -97,12 +99,10 @@ export function ConnectClaudeHost(props: Omit<ConnectClaudeDialogProps, "open" |
 }
 
 interface ContentProps extends Omit<ConnectClaudeDialogProps, "open" | "onOpenChange"> {
-  titleId: string;
-  bodyRef: RefObject<HTMLDivElement | null>;
   onClose: () => void;
 }
 
-function ConnectClaudeContent({ titleId, bodyRef, onClose, host, onOpenGuide, defaults, initialTab = "code" }: ContentProps) {
+function ConnectClaudeContent({ onClose, host, onOpenGuide, defaults, initialTab = "code" }: ContentProps) {
   const [api] = useState<ConnectHostLike | null>(() => (host === undefined ? (getDesktopHostApi() ?? null) : host));
   const browser = api === null;
   const platform = defaults?.platform ?? api?.platform ?? guessPlatform();
@@ -128,13 +128,16 @@ function ConnectClaudeContent({ titleId, bodyRef, onClose, host, onOpenGuide, de
 
   const nodePath = storedNode || defaults?.nodePath || "node";
   const repoPath = storedRepo || defaults?.repoPath || detectedRepo || "";
-  const project = storedProject || defaults?.headlessProject || "";
+  const project = (storedProject || defaults?.headlessProject || "").trim();
+  const projectMissing = browser && project === "";
   const cliPath = mcp.status?.cliPath ?? null;
-  const spec = mcpLaunchSpec({ mode, nodePath, repoPath, cliPath,...(browser ? { headlessProject: project || (shell === "windows" ? "C:\\path\\to\\Prototype.sonobe" : "/path/to/Prototype.sonobe") } : {}) });
+  const spec = mcpLaunchSpec({ mode, nodePath, repoPath, cliPath, ...(browser ? { headlessProject: project || PROJECT_PLACEHOLDER } : {}) });
   const tokenFile = mcp.status?.tokenFile ? tildePath(mcp.status.tokenFile) : "~/.sonobe/mcp.json";
 
-  const launchSettings = (
-    <LaunchSettings
+  const [assistantAvailable] = useState(() => supportsAssistant(getAssistantHost()));
+  const projectField = browser ? <ProjectField shell={shell} project={project} onChange={setProject} /> : null;
+  const advanced = (
+    <Advanced
       mode={mode}
       onModeChange={setMode}
       nodePath={storedNode || defaults?.nodePath || ""}
@@ -142,31 +145,22 @@ function ConnectClaudeContent({ titleId, bodyRef, onClose, host, onOpenGuide, de
       repoPath={repoPath}
       onRepoPathChange={setRepoPath}
       shell={shell}
-      browser={browser}
       cliPath={cliPath}
-      project={project}
-      onProjectChange={setProject}
-    />
+    >
+      {tab === "code" && !isHeadlessSpec(spec) && <SetUpBefore />}
+    </Advanced>
   );
 
   return (
     <div className="sb-connect">
-      <header className="sb-connect__header">
-        <span className="sb-connect__mark" aria-hidden>
-          <Sparkles size={16} strokeWidth={2} />
-        </span>
-        <div className="sb-connect__heading">
-          <h2 className="sb-connect__title" id={titleId}>
-            Connect Claude
-          </h2>
-          <p className="sb-connect__subtitle">Build with Claude Desktop or Claude Code on your own Claude plan. There's no API key to paste, and you never sign in to Claude here.</p>
-        </div>
-        <IconButton size="sm" icon={<X size={14} />} label="Close" shortcut="Escape" onClick={onClose} />
-      </header>
+      <Dialog.Header
+        title="Connect Claude"
+        description={assistantAvailable ? "Let Claude Desktop or Claude Code build on your Claude plan. To chat inside Sonobe, open Assistant." : "Let Claude Desktop or Claude Code build on your Claude plan."}
+        onClose={onClose}
+      />
 
-      <div className="sb-connect__body sb-scroll" ref={bodyRef} tabIndex={-1}>
-        <StatusCard browser={browser} mcp={mcp} />
-        <FlowDiagram browser={browser} />
+      <Dialog.Body className="sb-connect__body">
+        <StatusRow browser={browser} mcp={mcp} />
 
         <section className="sb-connect__section" aria-label="Setup">
           <SegmentedControl<ConnectTab>
@@ -179,24 +173,20 @@ function ConnectClaudeContent({ titleId, bodyRef, onClose, host, onOpenGuide, de
               { value: "desktop", label: "Claude Desktop", icon: <Monitor size={13} /> },
             ]}
           />
+          {!browser && <p className="sb-connect__hint">Claude in a web browser can't reach apps on your computer, so use one of these.</p>}
           {tab === "code" ? (
-            <ClaudeCodeSteps spec={spec} shell={shell} browser={browser} launchSettings={launchSettings} />
+            <ClaudeCodeSteps spec={spec} shell={shell} browser={browser} blocked={projectMissing} projectField={projectField} />
           ) : (
-            <DesktopSteps spec={spec} platform={platform} launchSettings={launchSettings} mode={mode} browser={browser} />
+            <DesktopSteps spec={spec} platform={platform} mode={mode} browser={browser} blocked={projectMissing} projectField={projectField} />
           )}
-          <p className="sb-connect__note">
-            <CircleAlert size={13} strokeWidth={2} aria-hidden />
-            <span>Claude in a web browser can't reach apps on your computer. Use Claude Desktop or Claude Code.</span>
-          </p>
         </section>
 
         <PromptExamples />
 
-        <section className="sb-connect__privacy" aria-labelledby={`${titleId}-privacy`}>
-          <h3 className="sb-connect__section-title" id={`${titleId}-privacy`}>
-            <ShieldCheck size={13} strokeWidth={2} aria-hidden /> What stays private
-          </h3>
-          <ul>
+        {advanced}
+
+        <Disclosure title="What stays private">
+          <ul className="sb-connect__privacy">
             <li>Sonobe's MCP server listens only on this computer (127.0.0.1) and rejects requests from web pages, so other devices and websites can't reach it.</li>
             <li>
               Every request needs the token in <code>{tokenFile}</code>, a file only your account can read. You never paste it anywhere.
@@ -204,27 +194,30 @@ function ConnectClaudeContent({ titleId, bodyRef, onClose, host, onOpenGuide, de
             <li>You sign in to Claude inside Claude's own app. Sonobe never asks for your Claude login and never sees your credentials.</li>
             <li>What Claude reads through Sonobe, like the outline, live values, or a screenshot, becomes part of your Claude conversation under your plan's settings.</li>
           </ul>
-        </section>
-      </div>
+        </Disclosure>
+      </Dialog.Body>
 
-      <footer className="sb-connect__footer">
-        {onOpenGuide && (
-          <Button
-            variant="ghost"
-            icon={<BookOpen size={13} />}
-            onClick={() => {
-              onOpenGuide(CLAUDE_GUIDE);
-              onClose();
-            }}
-          >
-            Read Working with Claude
-          </Button>
-        )}
-        <span className="sb-connect__spacer" />
-        <Button variant="primary" onClick={onClose}>
+      <Dialog.Footer
+        start={
+          onOpenGuide && (
+            <Button
+              variant="ghost"
+              icon={<BookOpen size={13} />}
+              onClick={() => {
+                onOpenGuide(CLAUDE_GUIDE);
+                onClose();
+              }}
+            >
+              Read Working with Claude
+            </Button>
+          )
+        }
+      >
+        {/* The kit would pick a field inside the closed Advanced disclosure, which can't take focus. */}
+        <Button variant="primary" onClick={onClose} data-autofocus={browser ? undefined : ""}>
           Done
         </Button>
-      </footer>
+      </Dialog.Footer>
     </div>
   );
 }
@@ -243,29 +236,31 @@ function Step({ n, title, children }: { n: number; title: string; children: Reac
   );
 }
 
+/** A closed-by-default section: its text stays in the page, so find-in-page opens it. */
+function Disclosure({ title, className, children }: { title: string; className?: string; children: ReactNode }) {
+  return (
+    <details className={cx("sb-connect__disclosure", className)}>
+      <summary>
+        <ChevronRight size={12} strokeWidth={2} aria-hidden />
+        {title}
+      </summary>
+      <div className="sb-connect__disclosure-body">{children}</div>
+    </details>
+  );
+}
+
 /**
  * Claude Code: the relay installs once at user scope, so every session gets Sonobe's tools wherever it
  * starts. A headless server works on one folder, so it stays with that project (local scope).
  */
-function ClaudeCodeSteps({ spec, shell, browser, launchSettings }: { spec: ReturnType<typeof mcpLaunchSpec>; shell: ShellFlavor; browser: boolean; launchSettings: ReactNode }) {
+function ClaudeCodeSteps({ spec, shell, browser, blocked, projectField }: { spec: ReturnType<typeof mcpLaunchSpec>; shell: ShellFlavor; browser: boolean; blocked: boolean; projectField: ReactNode }) {
   const headless = isHeadlessSpec(spec);
   return (
     <ol className="sb-connect__steps">
       <Step n={1} title={headless ? "Run this in the folder where you start Claude" : "Run this once in a terminal, from any folder"}>
-        <CopyBlock text={claudeCodeCommand(spec, shell)} label="Claude Code command" />
-        {headless ? (
-          <p className="sb-connect__hint">Headless mode works on one prototype folder, so it's set up for that Claude Code project only.</p>
-        ) : (
-          <>
-            <p className="sb-connect__hint">
-              If Claude Code says <code>sonobe</code> already exists, it's set up. To point it at this copy of Sonobe, run <code>{claudeCodeRemoveCommand("user")}</code>, then the command again.
-            </p>
-            <p className="sb-connect__hint">
-              Set up before? Earlier versions added Sonobe to one folder only, and that entry wins in its folder. Run <code>{claudeCodeRemoveCommand("local")}</code> in that folder.
-            </p>
-          </>
-        )}
-        {launchSettings}
+        {projectField}
+        <CopyBlock text={claudeCodeCommand(spec, shell)} label="Claude Code command" placeholder={PROJECT_PLACEHOLDER} disabledReason={blocked ? "Add your project folder first" : undefined} />
+        {headless && <p className="sb-connect__hint">Headless mode edits, simulates, saves, and takes approximate screenshots of the folder directly.</p>}
       </Step>
       <Step n={2} title={headless ? "Start Claude Code in that folder and ask" : "Start a new Claude Code session in any folder and ask"}>
         <div className="sb-connect__ask">“{browser ? "Show me the outline of this prototype." : "List the documents open in Sonobe."}”</div>
@@ -277,75 +272,82 @@ function ClaudeCodeSteps({ spec, shell, browser, launchSettings }: { spec: Retur
   );
 }
 
-function StatusCard({ browser, mcp }: { browser: boolean; mcp: McpStatusState }) {
+/** For anyone whose earlier setup gets in the way of the command. */
+function SetUpBefore() {
+  return (
+    <>
+      <p className="sb-connect__hint">
+        If Claude Code says <code>sonobe</code> already exists, it's set up. To point it at this copy of Sonobe, run <code>{claudeCodeRemoveCommand("user")}</code>, then the command again.
+      </p>
+      <p className="sb-connect__hint">
+        Earlier versions added Sonobe to one folder only, and that entry wins in its folder. Run <code>{claudeCodeRemoveCommand("local")}</code> in that folder.
+      </p>
+    </>
+  );
+}
+
+/** One status row: the server, the sessions connected to it, or what to do when it's off. */
+function StatusRow({ browser, mcp }: { browser: boolean; mcp: McpStatusState }) {
   if (browser) {
     return (
-      <div className="sb-connect__status" data-tone="neutral" role="status">
-        <span className="sb-connect__status-icon" aria-hidden>
-          <Monitor size={15} strokeWidth={2} />
-        </span>
-        <div className="sb-connect__status-text">
-          <div className="sb-connect__status-title">Live editing needs the desktop app</div>
-          <div className="sb-connect__status-desc">Claude reaches your open document through a small server that the Sonobe desktop app runs on your computer. A browser can't run one. Open this prototype in the desktop app, or save it as a project folder and let Claude work on the folder with the headless command below.</div>
-        </div>
-      </div>
+      <Status tone="neutral" lead={<Monitor size={14} strokeWidth={2} />} title="Live editing needs the desktop app">
+        In a browser, Claude can edit a saved project folder instead. Use the command below.
+      </Status>
     );
   }
   if (mcp.loading) {
-    return (
-      <div className="sb-connect__status" data-tone="neutral" role="status">
-        <span className="sb-connect__status-icon" aria-hidden>
-          <LoaderCircle size={15} strokeWidth={2} className="sb-connect__spin" />
-        </span>
-        <div className="sb-connect__status-text">
-          <div className="sb-connect__status-title">Checking Sonobe's MCP server…</div>
-        </div>
-      </div>
-    );
+    return <Status tone="neutral" lead={<LoaderCircle size={14} strokeWidth={2} className="sb-connect__spin" data-spinner />} title="Checking Sonobe's MCP server…" />;
   }
   if (mcp.status?.running) {
     const status = mcp.status;
     const connected = connectedSessions(status);
-    const server = (
-      <>
-        Sonobe's server is running{status.url ? " at " : "."}
-        {status.url && <code className="sb-connect__url">{status.url}</code>}
-        {status.url ? ". " : " "}Only apps on this computer can connect.
-      </>
-    );
     // Green only for a connected session: a server that's listening says nothing about Claude.
     return (
-      <div className="sb-connect__status" data-tone={connected.length ? "success" : "neutral"} role="status">
-        <span className="sb-connect__status-dot" data-on={connected.length > 0} aria-hidden />
-        <div className="sb-connect__status-text">
-          <div className="sb-connect__status-title">{connected.length === 0 ? "No Claude session is connected" : connected.length === 1 ? `${connected[0]!.label} is connected` : `${connected.length} sessions are connected`}</div>
-          <div className="sb-connect__status-desc">
-            {connected.length === 0 ? "Sessions show up here once Claude starts Sonobe's server. Set it up below, then start a new Claude Code session or restart Claude Desktop. " : null}
-            {server}
-          </div>
-          {status.clients.length > 0 && (
-            <ul className="sb-connect__sessions" aria-label="Sessions">
-              {status.clients.map((session) => (
-                <SessionRow key={session.id} session={session} appVersion={status.version} />
-              ))}
-            </ul>
-          )}
-        </div>
-      </div>
+      <Status
+        tone={connected.length ? "success" : "neutral"}
+        lead={connected.length > 0 ? <Check size={14} strokeWidth={2} /> : <span className="sb-connect__status-dot" />}
+        title={connected.length === 0 ? "No Claude session is connected" : connected.length === 1 ? `${connected[0]!.label} is connected` : `${connected.length} sessions are connected`}
+      >
+        {connected.length === 0 ? "Sessions show up here once Claude starts Sonobe's server. Set it up below, then start a new session or restart Claude Desktop. " : null}
+        Sonobe's server is running{status.url ? " at " : "."}
+        {status.url && <code className="sb-connect__url">{status.url}</code>}
+        {status.clients.length > 0 && (
+          <ul className="sb-connect__sessions" aria-label="Sessions">
+            {status.clients.map((session) => (
+              <SessionRow key={session.id} session={session} appVersion={status.version} />
+            ))}
+          </ul>
+        )}
+      </Status>
     );
   }
   return (
-    <div className="sb-connect__status" data-tone="warn" role="status">
-      <span className="sb-connect__status-icon" aria-hidden>
-        <CircleAlert size={15} strokeWidth={2} />
+    <Status
+      tone="warn"
+      lead={<CircleAlert size={14} strokeWidth={2} />}
+      title={mcp.error ? "Couldn't read the MCP server status" : "Sonobe's MCP server is off"}
+      action={
+        <Button size="sm" variant="secondary" icon={<RefreshCw size={12} />} onClick={mcp.refresh}>
+          Check again
+        </Button>
+      }
+    >
+      {mcp.error ?? "It normally starts with the app. If Sonobe was launched with SONOBE_MCP=0, quit and open it again without that setting."}
+    </Status>
+  );
+}
+
+function Status({ tone, lead, title, action, children }: { tone: "neutral" | "success" | "warn"; lead: ReactNode; title: string; action?: ReactNode; children?: ReactNode }) {
+  return (
+    <div className="sb-connect__status" data-tone={tone} role="status">
+      <span className="sb-connect__status-lead" aria-hidden>
+        {lead}
       </span>
       <div className="sb-connect__status-text">
-        <div className="sb-connect__status-title">{mcp.error ? "Couldn't read the MCP server status" : "Sonobe's MCP server is off"}</div>
-        <div className="sb-connect__status-desc">{mcp.error ?? "It normally starts with the app. If Sonobe was launched with SONOBE_MCP=0, quit and open it again without that setting."}</div>
+        <div className="sb-connect__status-title">{title}</div>
+        {children && <div className="sb-connect__status-desc">{children}</div>}
       </div>
-      <Button size="sm" variant="secondary" icon={<RefreshCw size={12} />} onClick={mcp.refresh}>
-        Check again
-      </Button>
+      {action}
     </div>
   );
 }
@@ -359,7 +361,7 @@ function SessionRow({ session, appVersion }: { session: McpSessionInfo; appVersi
       : session.state === "connected"
         ? `Connected ${relativeTime(session.connectedAt, now)} · no tool calls yet`
         : "No tool calls";
-  const state = session.state === "gone" ? "Disconnected" : session.state === "idle" ? "Quiet" : null;
+  const state = session.state === "gone" ? "Disconnected" : session.state === "idle" ? "Idle" : null;
   const olderRelay = session.via === "relay" && session.relayVersion !== null && appVersion !== null && session.relayVersion !== appVersion;
   return (
     <li className="sb-connect__session" data-state={session.state}>
@@ -372,12 +374,10 @@ function SessionRow({ session, appVersion }: { session: McpSessionInfo; appVersi
         </div>
         {session.folder && <code className="sb-connect__session-folder">{tildePath(session.folder)}</code>}
         <div className="sb-connect__session-desc">{activity}</div>
-        {session.via === "http" && (
-          <div className="sb-connect__session-desc">It connected without Sonobe's relay (or through an older Sonobe's relay), so Sonobe can't tell which session it is. Sessions set up with the steps below show up by name.</div>
-        )}
+        {session.via === "http" && <div className="sb-connect__session-note">It connected without Sonobe's relay, so Sonobe can't tell which session it is. Set up with the steps below to see it by name.</div>}
         {olderRelay && (
-          <div className="sb-connect__session-desc" data-tone="warn">
-            Runs the relay from Sonobe {session.relayVersion}, not this app's {appVersion}. Its setup points at another copy of Sonobe; set it up again with the steps below.
+          <div className="sb-connect__session-note" data-tone="warn">
+            Runs the relay from Sonobe {session.relayVersion}, not this app's {appVersion}. Set up again to use this app's version.
           </div>
         )}
       </div>
@@ -385,39 +385,7 @@ function SessionRow({ session, appVersion }: { session: McpSessionInfo; appVersi
   );
 }
 
-function FlowDiagram({ browser }: { browser: boolean }) {
-  return (
-    <ol className="sb-connect__flow" aria-label="How Claude connects to Sonobe">
-      <li className="sb-connect__node" data-tone="ai">
-        <span className="sb-connect__node-icon" aria-hidden>
-          <Sparkles size={13} strokeWidth={2} />
-        </span>
-        <span className="sb-connect__node-title">Claude Desktop or Claude Code</span>
-        <span className="sb-connect__node-sub">signed in with your plan</span>
-      </li>
-      <li className="sb-connect__edge" aria-hidden>
-        <span>MCP</span>
-      </li>
-      <li className="sb-connect__node">
-        <span className="sb-connect__node-icon" aria-hidden>
-          <SquareTerminal size={13} strokeWidth={2} />
-        </span>
-        <span className="sb-connect__node-title">{browser ? "sonobe mcp --headless" : "Sonobe's local server"}</span>
-        <span className="sb-connect__node-sub">{browser ? "runs on your computer" : "127.0.0.1, token required"}</span>
-      </li>
-      <li className="sb-connect__edge" aria-hidden />
-      <li className="sb-connect__node">
-        <span className="sb-connect__node-icon" aria-hidden>
-          <Layers size={13} strokeWidth={2} />
-        </span>
-        <span className="sb-connect__node-title">{browser ? "Your project folder" : "This document"}</span>
-        <span className="sb-connect__node-sub">{browser ? "edits save to disk" : "one undo entry per change"}</span>
-      </li>
-    </ol>
-  );
-}
-
-interface LaunchSettingsProps {
+interface AdvancedProps {
   mode: LaunchMode;
   onModeChange: (mode: LaunchMode) => void;
   nodePath: string;
@@ -425,11 +393,9 @@ interface LaunchSettingsProps {
   repoPath: string;
   onRepoPathChange: (value: string) => void;
   shell: ShellFlavor;
-  browser: boolean;
   /** The app's bundled CLI launcher, when the desktop host reports one. */
   cliPath: string | null;
-  project: string;
-  onProjectChange: (value: string) => void;
+  children?: ReactNode;
 }
 
 /** What the chosen launch mode runs. */
@@ -443,51 +409,61 @@ function launchHint(mode: LaunchMode, cliPath: string | null): ReactNode {
   );
 }
 
-function LaunchSettings({ mode, onModeChange, nodePath, onNodePathChange, repoPath, onRepoPathChange, shell, browser, cliPath, project, onProjectChange }: LaunchSettingsProps) {
+/** How Claude starts Sonobe, for anyone who isn't using the app's own CLI. Changes the commands above. */
+function Advanced({ mode, onModeChange, nodePath, onNodePathChange, repoPath, onRepoPathChange, shell, cliPath, children }: AdvancedProps) {
   return (
-    <div className="sb-connect__settings">
-      <div className="sb-connect__settings-row">
-        <SegmentedControl<LaunchMode>
-          size="sm"
-          aria-label="How Claude starts Sonobe"
-          value={mode}
-          onChange={onModeChange}
-          options={[
-            { value: "installed", label: cliPath ? "Sonobe app" : "sonobe command" },
-            { value: "checkout", label: "From source" },
-          ]}
-        />
-        <span className="sb-connect__hint">{launchHint(mode, cliPath)}</span>
+    <Disclosure title="Advanced">
+      <div className="sb-connect__settings">
+        <div className="sb-connect__settings-row">
+          <SegmentedControl<LaunchMode>
+            size="sm"
+            aria-label="How Claude starts Sonobe"
+            value={mode}
+            onChange={onModeChange}
+            options={[
+              { value: "installed", label: cliPath ? "Sonobe app" : "sonobe command" },
+              { value: "checkout", label: "From source" },
+            ]}
+          />
+          <span className="sb-connect__hint">{launchHint(mode, cliPath)}</span>
+        </div>
+        {mode === "checkout" && (
+          <div className="sb-connect__fields">
+            <label className="sb-connect__field">
+              <span className="sb-connect__field-label">Node</span>
+              <TextField size="sm" mono value={nodePath} placeholder="node" aria-describedby="sb-connect-node-hint" onChange={(event) => onNodePathChange(event.target.value)} />
+            </label>
+            <label className="sb-connect__field">
+              <span className="sb-connect__field-label">Sonobe folder</span>
+              <TextField size="sm" mono value={repoPath} placeholder={shell === "windows" ? "C:\\path\\to\\sonobe" : "/path/to/sonobe"} onChange={(event) => onRepoPathChange(event.target.value)} />
+            </label>
+            <p className="sb-connect__hint" id="sb-connect-node-hint">
+              If Claude can't start Sonobe, use Node's full path. <code>{shell === "windows" ? "where node" : "which node"}</code> prints it.
+            </p>
+          </div>
+        )}
+        {children}
       </div>
-      {mode === "checkout" && (
-        <div className="sb-connect__fields">
-          <label className="sb-connect__field">
-            <span className="sb-connect__field-label">Node</span>
-            <TextField size="sm" mono value={nodePath} placeholder="node" aria-describedby="sb-connect-node-hint" onChange={(event) => onNodePathChange(event.target.value)} />
-          </label>
-          <label className="sb-connect__field">
-            <span className="sb-connect__field-label">Sonobe folder</span>
-            <TextField size="sm" mono value={repoPath} placeholder={shell === "windows" ? "C:\\path\\to\\sonobe" : "/path/to/sonobe"} onChange={(event) => onRepoPathChange(event.target.value)} />
-          </label>
-          <p className="sb-connect__hint" id="sb-connect-node-hint">
-            If Claude can't start Sonobe, use Node's full path. <code>{shell === "windows" ? "where node" : "which node"}</code> prints it.
-          </p>
-        </div>
-      )}
-      {browser && (
-        <div className="sb-connect__fields">
-          <label className="sb-connect__field">
-            <span className="sb-connect__field-label">Project folder</span>
-            <TextField size="sm" mono value={project} placeholder={shell === "windows" ? "C:\\path\\to\\Prototype.sonobe" : "/path/to/Prototype.sonobe"} onChange={(event) => onProjectChange(event.target.value)} />
-          </label>
-          <p className="sb-connect__hint">Headless mode edits, simulates, saves, and takes approximate screenshots of the folder directly. Only the app sees your selection.</p>
-        </div>
-      )}
+    </Disclosure>
+  );
+}
+
+/** The folder the headless server works on. The commands stay disabled until it's filled in. */
+function ProjectField({ shell, project, onChange }: { shell: ShellFlavor; project: string; onChange: (value: string) => void }) {
+  return (
+    <div className="sb-connect__field">
+      <label className="sb-connect__field-label" htmlFor="sb-connect-project">
+        Project folder
+      </label>
+      <TextField id="sb-connect-project" size="sm" mono value={project} placeholder={shell === "windows" ? "C:\\path\\to\\Prototype.sonobe" : "/path/to/Prototype.sonobe"} aria-describedby="sb-connect-project-hint" onChange={(event) => onChange(event.target.value)} />
+      <p className="sb-connect__hint" id="sb-connect-project-hint">
+        {project === "" ? "Save this prototype as a project folder first, then paste its path here." : "Claude reads and edits the files in this folder."}
+      </p>
     </div>
   );
 }
 
-function DesktopSteps({ spec, platform, launchSettings, mode, browser }: { spec: ReturnType<typeof mcpLaunchSpec>; platform: string; launchSettings: ReactNode; mode: LaunchMode; browser: boolean }) {
+function DesktopSteps({ spec, platform, mode, browser, blocked, projectField }: { spec: ReturnType<typeof mcpLaunchSpec>; platform: string; mode: LaunchMode; browser: boolean; blocked: boolean; projectField: ReactNode }) {
   const bundle = browser ? null : claudeDesktopBundle();
   const configPath = claudeDesktopConfigPath(platform);
   let n = 0;
@@ -506,9 +482,10 @@ function DesktopSteps({ spec, platform, launchSettings, mode, browser }: { spec:
       )}
       <Step n={++n} title={bundle ? "Or add Sonobe by hand" : "Add Sonobe to Claude Desktop's config"}>
         <p className="sb-connect__text">
-          In Claude Desktop, open <strong>Settings → Developer → Edit Config</strong> and add this to <code>claude_desktop_config.json</code>:
+          In Claude Desktop, open <strong>Settings → Developer → Edit Config</strong> and add the snippet below to <code>claude_desktop_config.json</code>.
         </p>
-        <CopyBlock text={claudeDesktopConfig(spec)} label="Claude Desktop config" kind="config" />
+        {projectField}
+        <CopyBlock text={claudeDesktopConfig(spec)} label="Claude Desktop config" kind="config" placeholder={PROJECT_PLACEHOLDER} disabledReason={blocked ? "Add your project folder first" : undefined} />
         <p className="sb-connect__hint">
           {configPath ? (
             <>
@@ -522,7 +499,6 @@ function DesktopSteps({ spec, platform, launchSettings, mode, browser }: { spec:
               ? " Claude Desktop doesn't see your terminal's PATH, so replace sonobe with the command's full path."
               : ""}
         </p>
-        {launchSettings}
       </Step>
       <Step n={++n} title="Restart Claude Desktop and ask">
         <div className="sb-connect__ask">“{browser ? "Show me the outline of this prototype." : "List the documents open in Sonobe."}”</div>

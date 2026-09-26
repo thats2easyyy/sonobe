@@ -20,76 +20,31 @@
   grid-column: 1;
 }
 
-.sb-import__header {
-  display: flex;
-  flex: none;
-  align-items: flex-start;
-  gap: var(--space-5);
-  padding: var(--space-6) var(--space-5) var(--space-5) var(--space-7);
-  border-bottom: 1px solid var(--border-subtle);
+/* Tabs differ in height; a floor keeps the centred dialog from jumping between them. */
+.sb-import__body {
+  min-height: min(500px, calc(100vh - 220px));
 }
 
-.sb-import__mark {
-  display: inline-flex;
-  flex: none;
-  align-items: center;
-  justify-content: center;
-  width: 32px;
-  height: 32px;
-  border-radius: var(--radius-lg);
-  background: var(--accent-soft);
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 22%, transparent);
-  color: var(--text-accent);
-}
-
-.sb-import__heading {
-  flex: 1 1 auto;
-  min-width: 0;
-}
-
-.sb-import__title {
-  font-size: var(--font-size-lg);
-  font-weight: var(--font-weight-semibold);
-  letter-spacing: -0.01em;
-}
-
-.sb-import__subtitle,
 .sb-import__text {
-  margin-top: var(--space-2);
   color: var(--text-secondary);
   font-size: var(--font-size-sm);
   line-height: 1.5;
   text-wrap: pretty;
 }
 
-.sb-import__text {
-  margin-top: 0;
-}
-
-.sb-import__body {
+.sb-import__content {
   display: flex;
-  flex: 1 1 auto;
   flex-direction: column;
   gap: var(--space-6);
-  min-height: 0;
-  overflow-y: auto;
-  padding: var(--space-6) var(--space-7) var(--space-7);
-  overscroll-behavior: contain;
 }
 
-.sb-import__body > * {
+.sb-import__content > * {
   flex-shrink: 0;
 }
 
 .sb-import__section {
   display: flex;
   flex-direction: column;
-  gap: var(--space-5);
-}
-
-.sb-import__row {
-  display: flex;
-  align-items: flex-end;
   gap: var(--space-5);
 }
 
@@ -100,42 +55,26 @@
   min-width: 0;
 }
 
-.sb-import__field--grow {
-  flex: 1 1 auto;
-}
-
 .sb-import__label {
   color: var(--text-secondary);
-  font-size: var(--font-size-xs);
+  font-size: var(--font-size-sm);
   font-weight: var(--font-weight-medium);
 }
 
 .sb-import__hint {
   color: var(--text-tertiary);
-  font-size: var(--font-size-xs);
+  font-size: var(--font-size-sm);
   line-height: 1.45;
   text-wrap: pretty;
 }
 
-.sb-import__hint code,
-.sb-import__text code {
+.sb-import__hint code {
   padding: 0 4px;
   border-radius: var(--radius-sm);
   background: var(--bg-field);
   color: var(--text-secondary);
   font-family: var(--font-mono);
-}
-
-.sb-import__size {
-  display: inline-flex;
-  align-items: center;
-  height: var(--control-h-md);
-  padding: 0 var(--space-4);
-  border-radius: var(--radius-md);
-  background: var(--bg-field);
-  color: var(--text-secondary);
-  font-size: var(--font-size-sm);
-  white-space: nowrap;
+  font-size: 0.92em;
 }
 
 .sb-import__code {
@@ -156,7 +95,7 @@
 }
 
 .sb-import__code:focus-visible {
-  box-shadow: inset 0 0 0 1px var(--accent), 0 0 0 3px var(--focus-ring);
+  box-shadow: inset 0 0 0 1px var(--accent);
 }
 
 .sb-import__code::placeholder {
@@ -168,12 +107,14 @@
   align-items: center;
   align-self: flex-start;
   gap: var(--space-2);
+  min-height: 24px;
   padding: 0;
   border: 0;
   background: none;
   color: var(--text-secondary);
   font: inherit;
   font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-medium);
   cursor: pointer;
 }
 
@@ -262,8 +203,9 @@
   align-self: flex-start;
 }
 
-/* Prompts read as sentences: wrap between words, in the UI font. */
-.sb-import__steps .sb-copyblock__code {
+/* Prompts read as sentences: wrap between words, in the UI font. The inner code element carries its own font. */
+.sb-import-dialog .sb-import__steps .sb-copyblock .sb-copyblock__code,
+.sb-import-dialog .sb-import__steps .sb-copyblock .sb-copyblock__code code {
   font-family: var(--font-sans);
   font-size: var(--font-size-sm);
   word-break: normal;
@@ -276,17 +218,14 @@
   font-weight: var(--font-weight-medium);
 }
 
-.sb-import__footer {
-  display: flex;
-  flex: none;
-  align-items: center;
-  gap: var(--space-4);
-  padding: var(--space-5) var(--space-7);
-  border-top: 1px solid var(--border-subtle);
-}
-
-.sb-import__status {
-  flex: 1 1 auto;
+/* Why Import is off, beside the buttons. */
+.sb-import__reason {
+  min-width: 0;
+  margin-right: auto;
+  color: var(--text-secondary);
+  font-size: var(--font-size-sm);
+  line-height: 1.4;
+  text-wrap: pretty;
 }
 
 /* The scan phase: the hologram scanner and the progress, over the form while a page is captured. */

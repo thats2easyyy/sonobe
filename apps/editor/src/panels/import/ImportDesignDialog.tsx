@@ -1,12 +1,11 @@
-import { ChevronRight, CircleAlert, Code, Globe, ScanLine, Sparkles, X } from "lucide-react";
-import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type FormEvent } from "react";
+import { ChevronRight, CircleAlert, Code, Globe, Sparkles } from "lucide-react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { useStore } from "zustand";
 import { connectClaudeStore } from "../connect/connectStore.ts";
 import { CopyBlock } from "../connect/CopyBlock.tsx";
 import { useEditorSession } from "../../state/EditorProvider.tsx";
 import { Button } from "../../ui/Button.tsx";
-import { Dialog } from "../../ui/Dialog.tsx";
-import { IconButton } from "../../ui/IconButton.tsx";
+import { Dialog, DIALOG_WIDTH } from "../../ui/Dialog.tsx";
 import { SegmentedControl } from "../../ui/SegmentedControl.tsx";
 import { Select } from "../../ui/Select.tsx";
 import { TextField } from "../../ui/TextField.tsx";
@@ -47,15 +46,14 @@ export interface ImportDesignDialogProps {
 
 /** Import Design: bring a screen from a running app, from HTML, or through Claude, onto the canvas as real layers. */
 export function ImportDesignDialog({ open, onOpenChange, initialTab, deps }: ImportDesignDialogProps) {
-  const titleId = useId();
   return (
-    <Dialog open={open} onOpenChange={onOpenChange} aria-labelledby={titleId} width={560} className="sb-import-dialog" modalScope="import" closeOnOverlayClick={false} style={{ maxHeight: "min(720px, calc(100vh - 48px))" }}>
-      <ImportContent titleId={titleId} onClose={() => onOpenChange(false)} {...(initialTab ? { initialTab } : {})} {...(deps ? { deps } : {})} />
+    <Dialog open={open} onOpenChange={onOpenChange} width={DIALOG_WIDTH.md} className="sb-import-dialog" modalScope="import" closeOnOverlayClick={false} style={{ maxHeight: "min(720px, calc(100vh - 48px))" }}>
+      <ImportContent onClose={() => onOpenChange(false)} {...(initialTab ? { initialTab } : {})} {...(deps ? { deps } : {})} />
     </Dialog>
   );
 }
 
-function ImportContent({ titleId, onClose, initialTab, deps }: { titleId: string; onClose: () => void; initialTab?: ImportTab; deps?: ImportDeps }) {
+function ImportContent({ onClose, initialTab, deps }: { onClose: () => void; initialTab?: ImportTab; deps?: ImportDeps }) {
   const session = useEditorSession();
   const urlSupported = canImportUrl(deps);
   const [assistantAvailable] = useState(() => supportsAssistant(getAssistantHost()));
@@ -77,6 +75,7 @@ function ImportContent({ titleId, onClose, initialTab, deps }: { titleId: string
   const running = useRef<AbortController | null>(null);
   const [problem, setProblem] = useState<{ message: string; hint?: string } | null>(null);
   const urlRef = useRef<HTMLInputElement>(null);
+  const cancelRef = useRef<HTMLButtonElement>(null);
   const htmlRef = useRef<HTMLTextAreaElement>(null);
   const [width, height] = importViewport(session);
   const doc = useStore(session.document, (s) => s.doc);
@@ -95,6 +94,10 @@ function ImportContent({ titleId, onClose, initialTab, deps }: { titleId: string
   }, [assistantAvailable, tab]);
   // Closing the dialog while an import runs cancels it.
   useEffect(() => () => running.current?.abort(), []);
+  // The form goes inert while an import runs; Cancel is the one control left.
+  useEffect(() => {
+    if (busy) cancelRef.current?.focus();
+  }, [busy]);
   useEffect(() => {
     setProblem(null);
     if (tab === "url") urlRef.current?.focus();
@@ -104,6 +107,17 @@ function ImportContent({ titleId, onClose, initialTab, deps }: { titleId: string
   const trimmedUrl = url.trim();
   const validUrl = /^https?:\/\/\S+$/i.test(trimmedUrl);
   const canSubmit = !busy && ((tab === "url" && urlSupported && validUrl) || (tab === "html" && html.trim() !== ""));
+
+  const submitBlocker =
+    tab === "claude"
+      ? "Claude does the importing. Copy a prompt below."
+      : tab === "url" && !urlSupported
+        ? "Use the desktop app, or paste the HTML."
+        : tab === "url" && !validUrl
+          ? "Enter an address that starts with http:// or https://."
+          : tab === "html" && html.trim() === ""
+            ? "Paste the page's HTML first."
+            : undefined;
 
   const submit = async (event?: FormEvent) => {
     event?.preventDefault();
@@ -151,170 +165,168 @@ function ImportContent({ titleId, onClose, initialTab, deps }: { titleId: string
 
   return (
     <form className="sb-import" onSubmit={(event) => void submit(event)}>
-      <header className="sb-import__header">
-        <span className="sb-import__mark" aria-hidden>
-          <ScanLine size={16} strokeWidth={2} />
-        </span>
-        <div className="sb-import__heading">
-          <h2 className="sb-import__title" id={titleId}>
-            Import Design
-          </h2>
-          <p className="sb-import__subtitle">Bring a screen from your app onto the canvas as real layers: backgrounds, text, images, icons and text fields you can wire up and animate.</p>
-        </div>
-        <IconButton size="sm" icon={<X size={14} />} label="Close" shortcut="Escape" onClick={onClose} />
-      </header>
+      <Dialog.Header title="Import Design" description="Bring a screen from your app onto the canvas as layers you can animate." onClose={onClose} />
 
-      <div className="sb-import__body sb-scroll" inert={busy}>
-        <SegmentedControl<ImportTab>
-          fullWidth
-          aria-label="Import from"
-          value={tab}
-          onChange={setTab}
-          options={[
-            { value: "url", label: "From URL", icon: <Globe size={13} /> },
-            { value: "html", label: "Paste HTML", icon: <Code size={13} /> },
-            { value: "claude", label: "With Claude", icon: <Sparkles size={13} /> },
-          ]}
-        />
+      <Dialog.Body className="sb-import__body">
+        <div className="sb-import__content" inert={busy}>
+          <SegmentedControl<ImportTab>
+            fullWidth
+            aria-label="Import from"
+            value={tab}
+            onChange={setTab}
+            options={[
+              { value: "url", label: "From URL", icon: <Globe size={13} /> },
+              { value: "html", label: "Paste HTML", icon: <Code size={13} /> },
+              { value: "claude", label: "With Claude", icon: <Sparkles size={13} /> },
+            ]}
+          />
 
-        {tab === "url" && (
-          <section className="sb-import__section" aria-label="From URL">
-            {!urlSupported && (
-              <p className="sb-import__note" role="status">
-                <CircleAlert size={13} strokeWidth={2} aria-hidden />
-                <span>Importing from a URL needs the Sonobe desktop app: a browser tab can't read another site's layout. Paste the page's HTML instead.</span>
-              </p>
-            )}
-            <label className="sb-import__field">
-              <span className="sb-import__label">Page address</span>
-              <TextField ref={urlRef} mono value={url} disabled={!urlSupported || busy} placeholder="http://localhost:3000/settings" onChange={(event) => setUrl(event.target.value)} aria-label="Page address" invalid={trimmedUrl !== "" && !validUrl} spellCheck={false} />
-              <span className="sb-import__hint">Start your app's dev server and open the screen you want. Storybook stories work too.</span>
-            </label>
-          </section>
-        )}
+          {tab === "url" && (
+            <section className="sb-import__section" aria-label="From URL">
+              {!urlSupported && (
+                <p className="sb-import__note" role="status">
+                  <CircleAlert size={13} strokeWidth={2} aria-hidden />
+                  <span>Importing from a URL needs the Sonobe desktop app: a browser tab can't read another site's layout. Paste the page's HTML instead.</span>
+                </p>
+              )}
+              <label className="sb-import__field">
+                <span className="sb-import__label">Page address</span>
+                <TextField ref={urlRef} mono value={url} disabled={!urlSupported || busy} placeholder="http://localhost:3000/settings" onChange={(event) => setUrl(event.target.value)} aria-label="Page address" invalid={trimmedUrl !== "" && !validUrl} spellCheck={false} />
+                <span className="sb-import__hint">Start your app's dev server and open the screen you want. Storybook stories work too.</span>
+              </label>
+            </section>
+          )}
 
-        {tab === "html" && (
-          <section className="sb-import__section" aria-label="Paste HTML">
-            <label className="sb-import__field">
-              <span className="sb-import__label">HTML</span>
-              <textarea ref={htmlRef} className="sb-import__code sb-scroll sb-selectable" value={html} disabled={busy} spellCheck={false} placeholder={'<!doctype html>\n<html>\n  <head><style>…</style></head>\n  <body>…</body>\n</html>'} onChange={(event) => setHtml(event.target.value)} aria-label="HTML" onKeyDown={(event) => {
-                if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) void submit();
-              }} />
-              <span className="sb-import__hint">
-                A complete page with its CSS. Put <code>data-name="Like Button"</code> on elements to name their layers.
-              </span>
-            </label>
-          </section>
-        )}
+          {tab === "html" && (
+            <section className="sb-import__section" aria-label="Paste HTML">
+              <label className="sb-import__field">
+                <span className="sb-import__label">HTML</span>
+                <textarea ref={htmlRef} className="sb-import__code sb-scroll sb-selectable" value={html} disabled={busy} spellCheck={false} placeholder={'<!doctype html>\n<html>\n  <head><style>…</style></head>\n  <body>…</body>\n</html>'} onChange={(event) => setHtml(event.target.value)} aria-label="HTML" onKeyDown={(event) => {
+                  if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) void submit();
+                }} />
+                <span className="sb-import__hint">
+                  A complete page with its CSS. Put <code>data-name="Like Button"</code> on elements to name their layers.
+                </span>
+              </label>
+            </section>
+          )}
 
-        {tab === "claude" && (
-          <section className="sb-import__section" aria-label="With Claude">
-            {assistantAvailable && (
-              <div className="sb-import__assistant">
-                <p className="sb-import__text">Design it here: describe a screen and watch Claude draw it on the canvas, using {onSubscription ? "your Claude subscription" : "your own API key"}.</p>
-                <Button
-                  size="sm"
-                  variant="ai"
-                  icon={<Sparkles size={12} />}
-                  onClick={() => {
-                    onClose();
-                    designStore.getState().openBox();
-                  }}
-                >
-                  Design on the canvas…
-                </Button>
-              </div>
-            )}
-            <p className="sb-import__text">Claude can import screens straight from your code. It opens your running app, or rebuilds the screen from source when the app isn't a web app (SwiftUI, React Native, Flutter), then wires up the interactions you describe.</p>
-            <ol className="sb-import__steps">
-              <li>
-                <span className="sb-import__step-title">Connect Claude Code or Claude Desktop</span>
-                <Button size="sm" variant="ai" icon={<Sparkles size={12} />} onClick={() => connectClaudeStore.getState().show()}>
-                  Connect Claude…
-                </Button>
-              </li>
-              <li>
-                <span className="sb-import__step-title">In your app's folder, ask</span>
-                {IMPORT_PROMPTS.map((prompt) => (
-                  <CopyBlock key={prompt} text={prompt} label="Prompt" kind="prompt" />
-                ))}
-              </li>
-            </ol>
-          </section>
-        )}
+          {tab === "claude" && (
+            <section className="sb-import__section" aria-label="With Claude">
+              {assistantAvailable && (
+                <div className="sb-import__assistant">
+                  <p className="sb-import__text">Design it here: describe a screen and watch Claude draw it on the canvas, using {onSubscription ? "your Claude subscription" : "your own API key"}.</p>
+                  <Button
+                    size="sm"
+                    variant="ai"
+                    icon={<Sparkles size={12} />}
+                    onClick={() => {
+                      onClose();
+                      designStore.getState().openBox();
+                    }}
+                  >
+                    Design on the canvas…
+                  </Button>
+                </div>
+              )}
+              <p className="sb-import__text">Claude can import screens straight from your code. It opens your running app, or rebuilds the screen from source when the app isn't a web app (SwiftUI, React Native, Flutter), then builds the interactions you describe.</p>
+              <ol className="sb-import__steps">
+                <li>
+                  <span className="sb-import__step-title">Connect Claude Code or Claude Desktop</span>
+                  <Button
+                    size="sm"
+                    variant="ai"
+                    icon={<Sparkles size={12} />}
+                    onClick={() => {
+                      onClose();
+                      connectClaudeStore.getState().show();
+                    }}
+                  >
+                    Connect Claude…
+                  </Button>
+                </li>
+                <li>
+                  <span className="sb-import__step-title">In your app's folder, ask</span>
+                  {IMPORT_PROMPTS.map((prompt) => (
+                    <CopyBlock key={prompt} text={prompt} label="prompt" kind="prompt" />
+                  ))}
+                </li>
+              </ol>
+            </section>
+          )}
 
-        {tab !== "claude" && (
-          <section className="sb-import__section" aria-label="Options">
-            <div className="sb-import__row">
-              <label className="sb-import__field sb-import__field--grow">
+          {tab !== "claude" && (
+            <section className="sb-import__section" aria-label="Options">
+              <label className="sb-import__field">
                 <span className="sb-import__label">Screen name</span>
                 <TextField value={name} disabled={busy} placeholder="From the page title" onChange={(event) => setName(event.target.value)} aria-label="Screen name" />
-              </label>
-              <div className="sb-import__field">
-                <span className="sb-import__label">Size</span>
-                <span className="sb-import__size sb-tabular">
-                  {width} × {height}
+                <span className="sb-import__hint sb-tabular">
+                  Size {width} × {height}
                 </span>
-              </div>
-            </div>
-            {screens.length > 0 && (
-              <div className="sb-import__field">
-                <span className="sb-import__label">Add to the prototype</span>
-                <Select
-                  aria-label="Add to the prototype"
-                  value={target}
-                  onChange={setTarget}
-                  options={[
-                    { value: "new", label: "As a new screen" },
-                    ...screens.map((l) => ({ value: `replace:${l.id}`, label: `Replace “${l.name}”`, description: "Keeps the wiring of layers it finds again", group: "Refresh an earlier import" })),
-                  ]}
-                />
-              </div>
-            )}
-            <button type="button" className="sb-import__more" aria-expanded={showMore} onClick={() => setShowMore((v) => !v)}>
-              <ChevronRight size={13} strokeWidth={2} className="sb-import__chevron" aria-hidden />
-              More options
-            </button>
-            {showMore && (
-              <div className="sb-import__options">
-                <label className="sb-import__field">
-                  <span className="sb-import__label">Only this element</span>
-                  <TextField mono size="sm" value={selector} disabled={busy} placeholder="#pricing-card" onChange={(event) => setSelector(event.target.value)} aria-label="Only this element" spellCheck={false} />
-                </label>
-                <label className="sb-import__field">
-                  <span className="sb-import__label">Wait for</span>
-                  <TextField mono size="sm" value={waitFor} disabled={busy} placeholder="[data-loaded]" onChange={(event) => setWaitFor(event.target.value)} aria-label="Wait for" spellCheck={false} />
-                </label>
-                <Toggle size="sm" checked={fullPage} onChange={setFullPage} label="Import the whole page, not just the first screen" />
-                <Toggle size="sm" checked={scrolling} onChange={setScrolling} label="Make long pages and scroll areas scroll" />
-                {urlSupported && <Toggle size="sm" checked={dark} onChange={setDark} label="Dark appearance" />}
-              </div>
-            )}
-          </section>
-        )}
+              </label>
+              {screens.length > 0 && (
+                <div className="sb-import__field">
+                  <span className="sb-import__label">Add to the prototype</span>
+                  <Select
+                    aria-label="Add to the prototype"
+                    value={target}
+                    onChange={setTarget}
+                    options={[
+                      { value: "new", label: "As a new screen" },
+                      ...screens.map((l) => ({ value: `replace:${l.id}`, label: `Replace “${l.name}”`, description: "Keeps the wiring of layers it finds again", group: "Refresh an earlier import" })),
+                    ]}
+                  />
+                </div>
+              )}
+              <button type="button" className="sb-import__more" aria-expanded={showMore} onClick={() => setShowMore((v) => !v)}>
+                <ChevronRight size={12} strokeWidth={2} className="sb-import__chevron" aria-hidden />
+                More options
+              </button>
+              {showMore && (
+                <div className="sb-import__options">
+                  <label className="sb-import__field">
+                    <span className="sb-import__label">Only this element</span>
+                    <TextField mono size="sm" value={selector} disabled={busy} placeholder="#pricing-card" onChange={(event) => setSelector(event.target.value)} aria-label="Only this element" spellCheck={false} />
+                  </label>
+                  <label className="sb-import__field">
+                    <span className="sb-import__label">Wait for</span>
+                    <TextField mono size="sm" value={waitFor} disabled={busy} placeholder="[data-loaded]" onChange={(event) => setWaitFor(event.target.value)} aria-label="Wait for" spellCheck={false} />
+                  </label>
+                  <Toggle size="sm" checked={fullPage} onChange={setFullPage} label="Import the whole page, not just the first screen" />
+                  <Toggle size="sm" checked={scrolling} onChange={setScrolling} label="Make long pages and scroll areas scroll" />
+                  {urlSupported && <Toggle size="sm" checked={dark} onChange={setDark} label="Dark appearance" />}
+                </div>
+              )}
+            </section>
+          )}
 
-        {problem && (
-          <div className="sb-import__problem" role="alert">
-            <CircleAlert size={14} strokeWidth={2} aria-hidden />
-            <div>
-              <div className="sb-import__problem-title">{problem.message}</div>
-              {problem.hint && <div className="sb-import__problem-hint">{problem.hint}</div>}
+          {problem && (
+            <div className="sb-import__problem" role="alert">
+              <CircleAlert size={14} strokeWidth={2} aria-hidden />
+              <div>
+                <div className="sb-import__problem-title">{problem.message}</div>
+                {problem.hint && <div className="sb-import__problem-hint">{problem.hint}</div>}
+              </div>
             </div>
-          </div>
-        )}
-      </div>
+          )}
+        </div>
+      </Dialog.Body>
       <ImportScan busy={busy} status={status ?? (tab === "url" ? "Loading the page…" : "Rendering the HTML…")} size={[width, height]} source={tab === "url" ? hostOf(trimmedUrl) : "HTML"} />
 
-      <footer className="sb-import__footer">
-        <span className="sb-import__status" />
+      <Dialog.Footer>
         {/* While an import runs, Cancel stops it and keeps the dialog open. */}
-        <Button onClick={busy ? cancelImport : onClose}>{tab === "claude" ? "Done" : "Cancel"}</Button>
-        {tab !== "claude" && (
-          <Button type="submit" variant="primary" loading={busy} disabled={!canSubmit}>
-            Import
-          </Button>
+        {!busy && submitBlocker && (
+          <p className="sb-import__reason" id="sb-import-reason">
+            {submitBlocker}
+          </p>
         )}
-      </footer>
+        <Button ref={cancelRef} onClick={busy ? cancelImport : onClose}>
+          Cancel
+        </Button>
+        <Button type="submit" variant="primary" loading={busy} disabled={!canSubmit} aria-describedby={!busy && submitBlocker ? "sb-import-reason" : undefined}>
+          Import
+        </Button>
+      </Dialog.Footer>
     </form>
   );
 }

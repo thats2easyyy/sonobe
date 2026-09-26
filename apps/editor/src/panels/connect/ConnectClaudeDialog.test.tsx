@@ -91,7 +91,7 @@ describe("Connect Claude sessions", () => {
   it("flags a session running an older relay, and explains clients without one", async () => {
     const text = await show({ host: appHost({ ...RUNNING, clients: [session({ relayVersion: "0.0.9" }), session({ id: "http", label: "Unidentified MCP client", name: null, version: null, folder: null, via: "http" })], version: "0.1.0" }), defaults: { mode: "installed", platform: "darwin" } });
     expect(text).toContain("2 sessions are connected");
-    expect(text).toContain("Runs the relay from Sonobe 0.0.9, not this app's 0.1.0");
+    expect(text).toContain("Runs the relay from Sonobe 0.0.9, not this app's 0.1.0. Set up again to use this app's version.");
     expect(text).toContain("Unidentified MCP client");
     expect(text).toContain("Sonobe can't tell which session it is");
   });
@@ -150,6 +150,97 @@ describe("Connect Claude setup", () => {
     const text = await show({ host: null, initialTab: "code", defaults: { mode: "checkout", platform: "darwin", repoPath: "/Users/me/sonobe" } });
     expect(text).toContain("takes approximate screenshots");
     expect(text).not.toContain("Screenshots need the desktop app");
+  });
+});
+
+describe("Connect Claude without a project folder", () => {
+  const copyButtons = () => [...document.querySelectorAll<HTMLButtonElement>(".sb-connect .sb-copyblock__button")];
+  const typeProject = async (value: string) => {
+    const field = document.querySelector<HTMLInputElement>("#sb-connect-project")!;
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(field, value);
+      field.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+  };
+
+  it("turns Copy off and says what to do, and keeps the placeholder path out of the command", async () => {
+    const text = await show({ host: null, initialTab: "code", defaults: { mode: "checkout", platform: "darwin", repoPath: "/Users/me/sonobe" } });
+    expect(text).toContain("Save this prototype as a project folder first, then paste its path here.");
+    expect(copyButtons().map((b) => b.disabled)).toEqual([true]);
+    expect(document.querySelector<HTMLInputElement>("#sb-connect-project")!.placeholder).toBe("/path/to/Prototype.sonobe");
+    expect(document.querySelector(".sb-copyblock__code")!.textContent).not.toContain("/path/to/Prototype.sonobe");
+    const [button] = copyButtons();
+    expect(document.getElementById(button!.getAttribute("aria-describedby")!)!.textContent).toBe("Add your project folder first");
+    expect(document.querySelector(".sb-copyblock__placeholder")!.textContent).toBe("<project folder>");
+  });
+
+  it("turns Copy off for the Claude Desktop config too", async () => {
+    await show({ host: null, initialTab: "desktop", defaults: { mode: "checkout", platform: "darwin", repoPath: "/Users/me/sonobe" } });
+    expect(copyButtons().map((b) => b.disabled)).toEqual([true]);
+    expect(document.querySelector(".sb-copyblock__code")!.textContent).not.toContain("/path/to/Prototype.sonobe");
+  });
+
+  it("turns Copy on once the folder is filled in", async () => {
+    await show({ host: null, initialTab: "code", defaults: { mode: "checkout", platform: "darwin", repoPath: "/Users/me/sonobe" } });
+    await typeProject("/Users/me/Deck.sonobe");
+    expect(copyButtons().map((b) => b.disabled)).toEqual([false]);
+    expect(document.querySelector(".sb-copyblock__code")!.textContent).toContain("mcp --headless /Users/me/Deck.sonobe");
+    expect(document.body.textContent).not.toContain("Save this prototype as a project folder first");
+    expect(document.querySelector("#sb-connect-project-hint")!.textContent).toBe("Claude reads and edits the files in this folder.");
+    expect(document.querySelector(".sb-copyblock__placeholder")).toBeNull();
+    expect(copyButtons()[0]!.hasAttribute("aria-describedby")).toBe(false);
+  });
+
+  it("has no project field, and Copy works, in the desktop app", async () => {
+    await show({ host: appHost(RUNNING), initialTab: "code", defaults: { mode: "installed", platform: "darwin" } });
+    expect(document.querySelector("#sb-connect-project")).toBeNull();
+    expect(copyButtons().map((b) => b.disabled)).toEqual([false]);
+  });
+});
+
+describe("Connect Claude layout", () => {
+  it("keeps the lesson's targets on screen and tucks the rest into closed disclosures", async () => {
+    await show({ host: appHost({ ...RUNNING, cliPath: APP_CLI }), initialTab: "code", defaults: { mode: "installed", platform: "darwin" } });
+    expect(document.querySelector(".sb-connect .sb-copyblock__button")).not.toBeNull();
+    expect(document.querySelector(".sb-connect__prompts")).not.toBeNull();
+    expect(document.querySelector(".sb-connect__prompts")!.closest("details")).toBeNull();
+    expect([...document.querySelectorAll("h3")].map((h) => h.textContent)).toContain("Try asking");
+    const disclosures = [...document.querySelectorAll<HTMLDetailsElement>(".sb-connect__disclosure")];
+    expect(disclosures.map((d) => d.querySelector("summary")!.textContent)).toEqual(["Advanced", "What stays private"]);
+    expect(disclosures.map((d) => d.open)).toEqual([false, false]);
+    expect(document.querySelector(".sb-connect__flow")).toBeNull();
+  });
+
+  describe("the Assistant line", () => {
+    const setHost = (value: unknown) => Object.defineProperty(window, "sonobeHost", { value, configurable: true, writable: true });
+    afterEach(() => {
+      delete (window as { sonobeHost?: unknown }).sonobeHost;
+    });
+
+    it("points to the Assistant when the host runs it", async () => {
+      setHost({ assistant: { send: () => {} }, secrets: { set: () => {} } });
+      expect(await show({ host: appHost(RUNNING), defaults: { mode: "installed", platform: "darwin" } })).toContain("To chat inside Sonobe, open Assistant.");
+    });
+
+    it("leaves it out for a desktop host without the Assistant", async () => {
+      setHost({});
+      expect(await show({ host: appHost(RUNNING), defaults: { mode: "installed", platform: "darwin" } })).not.toContain("open Assistant");
+    });
+  });
+
+  it("leaves the Assistant out in a browser, where it isn't available", async () => {
+    expect(await show({ host: null, defaults: { mode: "checkout", platform: "darwin", repoPath: "/Users/me/sonobe" } })).not.toContain("open Assistant");
+  });
+
+  it("keeps the connecting spinner turning under reduced motion", async () => {
+    await show({ host: { platform: "darwin", getMcpStatus: () => new Promise(() => {}) }, defaults: { mode: "installed", platform: "darwin" } });
+    expect(document.querySelector(".sb-connect__spin")!.hasAttribute("data-spinner")).toBe(true);
+  });
+
+  it("calls a session that stopped calling tools idle", async () => {
+    const text = await show({ host: appHost({ ...RUNNING, clients: [session({ state: "idle" })], version: "0.1.0" }), defaults: { mode: "installed", platform: "darwin" } });
+    expect(text).toContain("· Idle");
+    expect(text).not.toContain("Quiet");
   });
 });
 
