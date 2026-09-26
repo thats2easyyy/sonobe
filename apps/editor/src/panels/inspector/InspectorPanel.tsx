@@ -130,8 +130,8 @@ function EmptyInspector({ commentCount }: { commentCount: number }) {
             <TextArea
               aria-label="Component notes"
               rows={3}
-              placeholder="What should this prototype show? Notes help teammates and Claude."
-              className="sb-insp-textarea"
+              placeholder={component.kind === "prototype" ? "What should this prototype show?" : "What is this for?"}
+              className="sb-insp-textarea sb-insp-notes"
               value={draft ?? notes}
               onChange={(event) => setDraft(event.target.value)}
               onBlur={commitNotes}
@@ -140,7 +140,7 @@ function EmptyInspector({ commentCount }: { commentCount: number }) {
           </InspectorSection>
         </>
       )}
-      <p className="sb-insp-tip">{commentCount ? "A comment is selected. Edit its text in the patch editor." : "Nothing selected. Drag any number to scrub it; hold Shift for ×10."}</p>
+      <p className="sb-insp-tip">{commentCount ? "A comment is selected. Edit its text in the patch editor." : "Select a layer or patch to edit it. Drag a number to scrub it."}</p>
       {component && component.kind !== "prototype" && <PublishedPorts component={component} />}
     </>
   );

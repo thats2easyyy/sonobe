@@ -68,6 +68,11 @@ const rows = () => [...container.querySelectorAll<HTMLElement>('[role="treeitem"
 const labels = () => rows().map((r) => r.querySelector(".sb-tree__label")?.textContent);
 const rowNamed = (name: string) => rows().find((r) => r.querySelector(".sb-tree__label")?.textContent === name)!;
 const button = (label: string, scope: ParentNode = container) => scope.querySelector<HTMLButtonElement>(`button[aria-label="${label}"]`)!;
+const focusVisibly = (el: HTMLElement) => {
+  const matches = el.matches.bind(el);
+  Object.defineProperty(el, "matches", { value: (selector: string) => (selector === ":focus-visible" ? true : matches(selector)), configurable: true });
+  act(() => el.focus());
+};
 const menuItem = (label: string) => [...document.querySelectorAll<HTMLElement>('[role="menuitem"], [role="menuitemcheckbox"]')].find((el) => el.querySelector(".sb-menu__title")?.textContent === label)!;
 
 function pointer(target: Element, type: "pointerdown" | "pointerup", init: PointerEventInit = {}) {
@@ -123,11 +128,31 @@ describe("LayersPanel", () => {
     expect(container.querySelector(".sb-layerspanel__component")).toBeNull();
   });
 
-  it("describes only the ambiguous Touch rows, so the rest stay on one line", () => {
+  it("keeps every Touch row on one line and explains the ambiguous ones in a tooltip", () => {
     mount(fixture());
     click(button("Touch: add an interaction to A", rowNamed("A")));
-    const described = [...document.querySelectorAll('[role="menuitem"]')].filter((el) => el.querySelector(".sb-menu__description")).map((el) => el.querySelector(".sb-menu__title")?.textContent);
-    expect(described).toEqual(["Press", "Long Press", "Scroll Y", "Scroll X"]);
+    const rows = [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')];
+    expect(rows.some((el) => el.querySelector(".sb-menu__description"))).toBe(false);
+    focusVisibly(menuItem("Press"));
+    expect(document.querySelector(".sb-tooltip")?.textContent).toBe("While the layer is held down");
+    focusVisibly(menuItem("Tap"));
+    expect(document.querySelector(".sb-tooltip")).toBeNull();
+  });
+
+  it("opens a Touch row's tooltip when the arrow keys reach it", () => {
+    mount(fixture());
+    click(button("Touch: add an interaction to A", rowNamed("A")));
+    const keyDown = (key: string) => act(() => void document.activeElement!.dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true, cancelable: true })));
+    expect(document.activeElement).toBe(menuItem("Tap"));
+    keyDown("ArrowDown");
+    expect(document.activeElement).toBe(menuItem("Press"));
+    expect(document.querySelector(".sb-tooltip")?.textContent).toBe("While the layer is held down");
+    keyDown("ArrowDown");
+    expect(document.activeElement).toBe(menuItem("Long Press"));
+    expect(document.querySelector(".sb-tooltip")?.textContent).toBe("After holding still for a moment");
+    keyDown("ArrowDown");
+    expect(document.activeElement).toBe(menuItem("Double Tap"));
+    expect(document.querySelector(".sb-tooltip")).toBeNull();
   });
 
   it("puts the filter right under the header", () => {
@@ -157,6 +182,27 @@ describe("LayersPanel", () => {
     act(() => s.selection.getState().select({ layers: ["c"] }));
     expect(rowNamed("Title").getAttribute("aria-selected")).toBe("true");
     expect(rowNamed("B").getAttribute("aria-selected")).toBe("false");
+  });
+
+  it("clears the selection on Escape in the tree and on a click in its empty area", () => {
+    const s = mount(fixture());
+    act(() => s.selection.getState().select({ layers: ["a"] }));
+    const tree = container.querySelector<HTMLElement>(".sb-tree")!;
+    const escape = () => act(() => void tree.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true })));
+    escape();
+    expect(s.selection.getState().layers).toEqual([]);
+    act(() => s.selection.getState().select({ layers: ["b", "c"] }));
+    pointer(container.querySelector(".sb-tree__canvas") ?? tree, "pointerdown");
+    expect(s.selection.getState().layers).toEqual([]);
+  });
+
+  it("leaves Escape alone in the tree when nothing is selected", () => {
+    const s = mount(fixture());
+    const tree = container.querySelector<HTMLElement>(".sb-tree")!;
+    const event = new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true });
+    act(() => void tree.dispatchEvent(event));
+    expect(event.defaultPrevented).toBe(false);
+    expect(s.selection.getState().layers).toEqual([]);
   });
 
   it("hides, shows, and locks layers from the row buttons", () => {
@@ -320,22 +366,26 @@ describe("LayersPanel", () => {
     expect(s.selection.getState().componentPath.at(-1)).toBe("card");
   });
 
-  it("lists Group with the basic layers and keeps a disabled Component Instance on one line", () => {
+  it("lists Group with the basic layers and says why Component Instance is disabled in a tooltip", () => {
     const s = mount(fixture());
     click(button("Insert layer"));
     const labelsIn = () => [...document.querySelectorAll(".sb-menu__label")].map((el) => el.textContent);
     expect(labelsIn()).not.toContain("Containers");
     expect(menuItem("Group")).toBeTruthy();
-    const instance = menuItem("Component Instance (none yet)");
+    const instance = menuItem("Component Instance");
     expect(instance.getAttribute("aria-disabled")).toBe("true");
-    expect(instance.textContent).toBe("Component Instance (none yet)");
+    expect(instance.textContent).toBe("Component Instance");
     expect(instance.querySelector(".sb-menu__description")).toBeNull();
+    focusVisibly(instance);
+    expect(document.querySelector(".sb-tooltip")?.textContent).toContain("No layer components yet");
     act(() => {
       document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
     });
     act(() => s.selection.getState().select({ layers: ["a"] }));
     click(button("Insert layer"));
-    expect(labelsIn().some((label) => label?.startsWith("Insert above"))).toBe(false);
+    const anchor = [...document.querySelectorAll<HTMLElement>(".sb-menu__label")].find((el) => el.textContent?.startsWith("Insert above"))!;
+    expect(anchor.textContent).toBe("Insert above “A”");
+    expect(anchor.hasAttribute("data-plain")).toBe(true);
   });
 
   it("scrolls the virtualized list to a layer selected elsewhere", () => {

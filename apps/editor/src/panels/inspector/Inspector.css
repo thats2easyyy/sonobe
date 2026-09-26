@@ -465,6 +465,10 @@
   min-height: var(--control-h-sm);
 }
 
+.sb-insp-row__control > .sb-segmented:not([data-full]) {
+  align-self: flex-start;
+}
+
 .sb-insp-select {
   width: 100%;
 }
@@ -489,6 +493,11 @@
   width: 100%;
   min-height: 56px;
   user-select: text;
+}
+
+.sb-insp-textarea.sb-insp-notes,
+.sb-insp-textarea.sb-insp-notes:focus {
+  background: var(--bg-sunken);
 }
 
 .sb-insp-add {

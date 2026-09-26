@@ -159,9 +159,9 @@ button.sb-layerspanel__crumb {
   white-space: nowrap;
 }
 
-.sb-layerspanel__empty .sb-empty__title {
-  color: var(--text-secondary);
-  font-weight: var(--font-weight-normal);
+.sb-layerspanel__empty .sb-empty__actions {
+  flex: 1 0 100%;
+  justify-content: flex-start;
 }
 
 .sb-layerspanel__starters {
@@ -193,6 +193,7 @@ button.sb-layerspanel__crumb {
 }
 
 .sb-layerspanel__link {
+  position: relative;
   padding: 0;
   border: 0;
   background: none;
@@ -205,6 +206,12 @@ button.sb-layerspanel__crumb {
   .sb-layerspanel__link:hover {
     text-decoration: underline;
   }
+}
+
+.sb-layerspanel__link::after {
+  content: "";
+  position: absolute;
+  inset: -4px -6px;
 }
 
 .sb-layerspanel__link:focus-visible {

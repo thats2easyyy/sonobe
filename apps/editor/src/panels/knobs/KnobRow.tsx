@@ -1,19 +1,21 @@
 /**
- * One knob in the Knobs tab: its name (the full name, the description and "Used by 4" as the tooltip),
- * a ≠ mark when it differs from the partner, and its control. The description is the row's accessible
- * description as well as part of the tooltip. The context menu edits the knob,
+ * One knob in the Knobs tab: its name, a ≠ mark when it differs from the partner, and its control.
+ * The row's tooltip (the full name, the description and "Used by 4") opens on hover over the name and
+ * when a control in the row has keyboard focus. The description is the row's accessible description as
+ * well as part of the tooltip. The context menu edits the knob,
  * copies the partner's value, shows what reads it, and removes it (every input keeps the running value).
  */
 
 import { findLayer, getPatchSpec, patchDisplayName, parseAddress, type KnobReader, type KnobSet } from "@sonobe/core";
 import { ArrowLeftRight, Ellipsis, ListTree, Pencil, Trash2 } from "lucide-react";
-import { forwardRef, useEffect, useId, useRef, useState, type ReactNode } from "react";
+import { forwardRef, useId, useRef, useState, type ReactNode } from "react";
 import { useEditorSession } from "../../state/EditorProvider.tsx";
 import type { EditorSession } from "../../state/session.ts";
 import { removeKnobLabel } from "../../state/undoLabels.ts";
 import { IconButton } from "../../ui/IconButton.tsx";
 import { ContextMenu, Menu, type MenuEntry } from "../../ui/Menu.tsx";
 import { Tooltip } from "../../ui/Tooltip.tsx";
+import { isFocusVisible, isTextEntry } from "../../ui/lib/focus.ts";
 import { revealItems } from "../hud/reveal.ts";
 import { KnobControl } from "./KnobControl.tsx";
 import { knobValueText, presetName, type KnobRowModel } from "./model.ts";
@@ -65,8 +67,13 @@ export const KnobRow = forwardRef<HTMLDivElement, KnobRowProps>(function KnobRow
   const partnerText = partnerLabel ? `${partnerLabel}: ${knobValueText(knob, row.partnerValue)}` : null;
   const descriptionId = useId();
   const partnerId = useId();
-  const controlRef = useRef<HTMLDivElement>(null);
+  const nameRef = useRef<HTMLSpanElement>(null);
   const [truncated, setTruncated] = useState(false);
+  const [keyboardFocus, setKeyboardFocus] = useState(false);
+  const measureName = () => {
+    const name = nameRef.current;
+    if (name) setTruncated(name.scrollWidth > name.clientWidth);
+  };
   const tooltip: ReactNode = (
     <span className="sb-knob-row__tip">
       {truncated && <span>{knob.name}</span>}
@@ -76,14 +83,6 @@ export const KnobRow = forwardRef<HTMLDivElement, KnobRowProps>(function KnobRow
     </span>
   );
 
-  // The slider reads the partner's value as its description, and the marks on its track, a pointer
-  // shortcut for "Use Value from…", stay out of the accessibility tree.
-  useEffect(() => {
-    const slider = controlRef.current?.querySelector('[role="slider"]');
-    if (partnerText) slider?.setAttribute("aria-describedby", partnerId);
-    else slider?.removeAttribute("aria-describedby");
-    controlRef.current?.querySelectorAll(".sb-slider__tick").forEach((tick) => tick.setAttribute("aria-hidden", "true"));
-  }, [partnerText, partnerId, row.ticks.length, knob.type, locked]);
   const entries = (): MenuEntry[] => [
     { id: "edit", label: "Edit Knob…", icon: <Pencil size={14} />, onSelect: onEdit },
     ...(partnerLabel
@@ -152,8 +151,8 @@ export const KnobRow = forwardRef<HTMLDivElement, KnobRowProps>(function KnobRow
           ) : (
             diff
           )}
-          <Tooltip content={tooltip} placement="left" delay={500}>
-            <span className="sb-knob-row__name" onPointerEnter={(event) => setTruncated(event.currentTarget.scrollWidth > event.currentTarget.clientWidth)}>
+          <Tooltip content={tooltip} placement="left">
+            <span ref={nameRef} className="sb-knob-row__name" onPointerEnter={measureName}>
               {knob.name}
             </span>
           </Tooltip>
@@ -161,9 +160,19 @@ export const KnobRow = forwardRef<HTMLDivElement, KnobRowProps>(function KnobRow
             <IconButton size="xs" className="sb-knob-row__menu" icon={<Ellipsis size={12} />} label={`${knob.name} options`} />
           </Menu>
         </div>
-        <div ref={controlRef} className="sb-knob-row__control">
-          <KnobControl knob={knob} value={row.value} edit={edit} disabled={locked} ticks={row.ticks} rowKeys />
-        </div>
+        <Tooltip content={keyboardFocus ? tooltip : undefined} placement="left">
+          <div
+            className="sb-knob-row__control"
+            onFocus={(event) => {
+              measureName();
+              const target = event.target as Element;
+              setKeyboardFocus(isFocusVisible(target) && !(target !== event.currentTarget && isTextEntry(target)));
+            }}
+            onBlur={() => setKeyboardFocus(false)}
+          >
+            <KnobControl knob={knob} value={row.value} edit={edit} disabled={locked} ticks={row.ticks} rowKeys {...(partnerText ? { describedBy: partnerId } : {})} />
+          </div>
+        </Tooltip>
       </div>
     </ContextMenu>
   );

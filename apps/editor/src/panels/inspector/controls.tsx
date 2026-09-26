@@ -430,7 +430,6 @@ function EnumControl({ field, actions, label }: ValueControlProps) {
     return (
       <SegmentedControl
         size="sm"
-        fullWidth
         aria-label={label}
         value={field.mixed ? "" : value}
         options={options.map((o) => ({ value: o.key, icon: icons[o.key], tooltip: o.name, "aria-label": o.name }))}

@@ -30,7 +30,7 @@ import {
   Upload,
   X,
 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent, type MouseEvent, type PointerEvent, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent, type KeyboardEvent, type MouseEvent, type PointerEvent, type ReactNode } from "react";
 import { LayerTypeIcon } from "../../shell/icons.tsx";
 import { Panel } from "../../shell/Panel.tsx";
 import { dragHasFiles, filesFromDataTransfer } from "../../state/assets.ts";
@@ -49,7 +49,7 @@ import {
   type ArrangeDirection,
 } from "../../state/editActions.ts";
 import { useDocument, useEditorSession, useLiveValues, useSelection } from "../../state/EditorProvider.tsx";
-import { selectBreadcrumbs } from "../../state/selection.ts";
+import { hasSelection, selectBreadcrumbs } from "../../state/selection.ts";
 import { Button } from "../../ui/Button.tsx";
 import { useOptionalCommands } from "../../ui/commands/CommandProvider.tsx";
 import { EmptyState } from "../../ui/EmptyState.tsx";
@@ -348,7 +348,7 @@ export function LayersPanel({ onCollapse, className }: LayersPanelProps) {
 
   const insertEntries = (): MenuEntry[] => {
     const specs = [...registry.layers.values()];
-    const out: MenuEntry[] = [];
+    const out: MenuEntry[] = insertAnchorName ? [{ type: "label", id: "insert-anchor", label: `Insert above “${insertAnchorName}”`, plain: true }, { type: "separator", id: "insert-anchor-rule" }] : [];
     for (const category of LAYER_CATEGORY_ORDER) {
       const list = specs.filter((spec) => menuCategory(spec.category) === category);
       if (list.length === 0) continue;
@@ -362,7 +362,7 @@ export function LayersPanel({ onCollapse, className }: LayersPanelProps) {
         out.push(
           targets.length
             ? { id: "insert-componentInstance", label: "Component Instance", icon: <LayerTypeIcon type={spec.type} />, submenu: targets.map((c): MenuEntry => ({ id: `insert-instance-${c.id}`, label: c.name, onSelect: () => insert(spec.type, c.id) })) }
-            : { id: "insert-componentInstance", label: "Component Instance (none yet)", icon: <LayerTypeIcon type={spec.type} />, disabled: true },
+            : { id: "insert-componentInstance", label: "Component Instance", icon: <LayerTypeIcon type={spec.type} />, disabled: true, tooltip: "No layer components yet. Select layers and choose Create Component." },
         );
       }
     }
@@ -479,6 +479,13 @@ export function LayersPanel({ onCollapse, className }: LayersPanelProps) {
     if (event.button === 0 && (target.classList.contains("sb-tree") || target.classList.contains("sb-tree__canvas"))) sel().clear();
   };
 
+  const onTreeKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+    if (event.key !== "Escape" || event.defaultPrevented || !(event.target as Element).closest(".sb-tree")) return;
+    if (!hasSelection(sel())) return;
+    event.preventDefault();
+    sel().clear();
+  };
+
   const onBackgroundContextMenu = (event: MouseEvent<HTMLDivElement>) => {
     if (event.defaultPrevented || (event.target as Element).closest(".sb-tree__row")) return;
     event.preventDefault();
@@ -531,22 +538,22 @@ export function LayersPanel({ onCollapse, className }: LayersPanelProps) {
     <EmptyState
       size="sm"
       variant="inline"
-      title={
-        <>
-          {query.trim() ? `No matching layers for “${query.trim()}”.` : "No matching layers."}{" "}
-          <button type="button" className="sb-layerspanel__link" onClick={clearFilter}>
-            Clear
-          </button>
-        </>
+      title={query.trim() ? `No matching layers for “${query.trim()}”` : "No matching layers"}
+      description="Try another name, or clear the filter."
+      actions={
+        <button type="button" className="sb-layerspanel__link" onClick={clearFilter}>
+          Clear
+        </button>
       }
     />
   ) : !canHoldLayers ? (
-    <EmptyState size="sm" variant="inline" title="Patch components hold logic only. Select layers and choose Create Component to reuse them." />
+    <EmptyState size="sm" variant="inline" title="Patch components hold logic only." description="Select layers and choose Create Component to reuse them." />
   ) : (
     <EmptyState
       size="sm"
       variant="inline"
-      title="No layers yet. Drop an image or add one."
+      title="No layers yet"
+      description="Drop an image here, or add a layer."
       actions={
         <div className="sb-layerspanel__starters">
           {["rectangle", "text", "image"].filter((type) => registry.layers.has(type)).map((type) => (
@@ -568,7 +575,7 @@ export function LayersPanel({ onCollapse, className }: LayersPanelProps) {
         <>
           {canHoldLayers ? (
             <Menu aria-label="Insert layer" placement="bottom-end" entries={insertEntries}>
-              <IconButton size="sm" icon={<Plus size={14} />} label="Insert layer" tooltip={insertAnchorName ? `Insert layer above “${insertAnchorName}”` : undefined} shortcut={keyOf("layer.insert")} />
+              <IconButton size="sm" icon={<Plus size={14} />} label="Insert layer" shortcut={keyOf("layer.insert")} />
             </Menu>
           ) : (
             <IconButton size="sm" icon={<Plus size={14} />} label="Insert layer" tooltip="Patch components hold only patches" disabled />
@@ -626,6 +633,7 @@ export function LayersPanel({ onCollapse, className }: LayersPanelProps) {
           onPointerOver={onPointerOver}
           onPointerLeave={onPointerLeave}
           onPointerDown={onBackgroundPointerDown}
+          onKeyDown={onTreeKeyDown}
           onContextMenu={onBackgroundContextMenu}
           onDragOver={onFileDragOver}
           onDragLeave={onFileDragLeave}

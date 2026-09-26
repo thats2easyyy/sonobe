@@ -28,11 +28,13 @@ export interface KnobControlProps {
   compact?: boolean;
   /** ↑ and ↓ belong to the surrounding list (Knobs tab rows). */
   rowKeys?: boolean;
+  /** Id of an element the slider is described by, read after its name and value. */
+  describedBy?: string;
 }
 
 const hasSlider = (knob: Knob) => knob.type === "number" && knob.min !== undefined && knob.max !== undefined && knob.max > knob.min;
 
-export function KnobControl({ knob, value, edit, label = knob.name, disabled = false, ticks = [], compact = false, rowKeys = false }: KnobControlProps) {
+export function KnobControl({ knob, value, edit, label = knob.name, disabled = false, ticks = [], compact = false, rowKeys = false, describedBy }: KnobControlProps) {
   if (knob.type === "number") {
     const n = typeof value === "number" ? value : 0;
     const step = knob.step;
@@ -59,6 +61,7 @@ export function KnobControl({ knob, value, edit, label = knob.name, disabled = f
         {slider && (
           <Slider
             aria-label={label}
+            {...(describedBy ? { "aria-describedby": describedBy } : {})}
             value={n}
             min={knob.min!}
             max={knob.max!}

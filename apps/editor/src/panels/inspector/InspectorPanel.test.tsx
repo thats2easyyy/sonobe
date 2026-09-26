@@ -123,13 +123,31 @@ async function eventually(check: () => void) {
 describe("InspectorPanel", () => {
   it("shows a friendly empty state with the component's notes", () => {
     const s = mount(fixture());
-    expect(container.textContent).toContain("Nothing selected");
+    expect(container.textContent).toContain("Select a layer or patch to edit it.");
     expect(container.textContent).toContain("3 layers · 3 patches");
     const notes = container.querySelector<HTMLTextAreaElement>('textarea[aria-label="Component notes"]')!;
     type(notes, "Tap the card to grow it.");
     act(() => notes.dispatchEvent(new FocusEvent("focusout", { bubbles: true })));
     act(() => notes.dispatchEvent(new FocusEvent("blur")));
     expect(main(s).notes).toBe("Tap the card to grow it.");
+  });
+
+  it("words the notes prompt for the kind of component", () => {
+    const s = mount(build([{ op: "addComponent", component: { id: "chip", name: "Chip", kind: "layerComponent" } }]));
+    const placeholder = () => container.querySelector<HTMLTextAreaElement>('textarea[aria-label="Component notes"]')!.placeholder;
+    expect(placeholder()).toBe("What should this prototype show?");
+    act(() => s.selection.getState().enterComponent("chip"));
+    expect(placeholder()).toBe("What is this for?");
+  });
+
+  it("goes back to the component's header and notes when the selection is cleared", () => {
+    const s = mount(fixture());
+    act(() => s.selection.getState().select({ layers: ["card"] }));
+    expect(container.querySelector('textarea[aria-label="Component notes"]')).toBeNull();
+    act(() => s.selection.getState().clear());
+    expect(container.querySelector(".sb-insp-header__name")?.textContent).toBe("Main");
+    expect(container.querySelector('textarea[aria-label="Component notes"]')).not.toBeNull();
+    expect(container.textContent).toContain("Prototype · 3 layers · 3 patches");
   });
 
   it("generates sections for a layer and edits a value with one undo step", () => {

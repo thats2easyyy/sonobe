@@ -74,7 +74,7 @@ export function touchMenuEntries(session: EditorSession, layerId: Id): MenuEntry
         id: `touch-${option.kind}`,
         label: option.label,
         icon: TOUCH_ICONS[option.kind],
-        ...(option.description ? { description: option.description } : {}),
+        ...(option.description ? { tooltip: option.description } : {}),
         onSelect: () => void addTouchInteraction(session, layerId, option.kind),
       }),
     ),

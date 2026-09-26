@@ -14,6 +14,11 @@ import { knobsUi } from "./knobsStore.ts";
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 const registry = getRegistry();
+const focusVisibly = (el: HTMLElement) => {
+  const matches = el.matches.bind(el);
+  Object.defineProperty(el, "matches", { value: (selector: string) => (selector === ":focus-visible" ? true : matches(selector)), configurable: true });
+  act(() => el.focus());
+};
 let container: HTMLDivElement;
 let root: Root;
 let session: EditorSession | null = null;
@@ -290,6 +295,41 @@ describe("Knobs tab", () => {
     const slider = row.querySelector('[role="slider"]')!;
     expect(document.getElementById(slider.getAttribute("aria-describedby")!)!.textContent).toBe("Shipped app: 5");
     expect(row.querySelector(".sb-slider__tick")!.getAttribute("aria-hidden")).toBe("true");
+  });
+
+  it("opens the row's tooltip when its slider has keyboard focus", () => {
+    mount(deck([{ op: "updateKnob", id: "bounce", description: "How much it overshoots." }]));
+    const slider = rowOf("Bounce").querySelector<HTMLElement>('[role="slider"]')!;
+    expect(document.querySelector(".sb-tooltip")).toBeNull();
+    focusVisibly(slider);
+    const tip = document.querySelector(".sb-tooltip")!;
+    expect(tip.textContent).toContain("How much it overshoots.");
+    expect(tip.textContent).toContain("Used by 1");
+    act(() => slider.blur());
+    expect(document.querySelector(".sb-tooltip")).toBeNull();
+  });
+
+  it("opens only the options button's own tooltip when it has keyboard focus", () => {
+    mount(deck([{ op: "updateKnob", id: "bounce", description: "How much it overshoots." }]));
+    focusVisibly(rowOf("Bounce").querySelector<HTMLElement>('button[aria-label="Bounce options"]')!);
+    expect([...document.querySelectorAll(".sb-tooltip")].map((el) => el.textContent)).toEqual(["Bounce options"]);
+  });
+
+  it("opens the row's tooltip on hover over the name, not over the control", () => {
+    vi.useFakeTimers();
+    try {
+      mount(deck([{ op: "updateKnob", id: "bounce", description: "How much it overshoots." }]));
+      const row = rowOf("Bounce");
+      const hover = (el: Element) => act(() => void el.dispatchEvent(new PointerEvent("pointerover", { bubbles: true, pointerType: "mouse" })));
+      hover(row.querySelector('[role="slider"]')!);
+      act(() => void vi.advanceTimersByTime(700));
+      expect(document.querySelector(".sb-tooltip")).toBeNull();
+      hover(row.querySelector(".sb-knob-row__name")!);
+      act(() => void vi.advanceTimersByTime(700));
+      expect(document.querySelector(".sb-tooltip")?.textContent).toContain("How much it overshoots.");
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("marks the rows of a locked preset so their numbers stay readable", () => {
