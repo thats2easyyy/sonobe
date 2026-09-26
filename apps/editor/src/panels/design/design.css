@@ -312,6 +312,27 @@
   opacity: 0;
 }
 
+/* The build draws its own frame while the screen is built. */
+.sb-design-preview[data-building]::after {
+  opacity: 0;
+}
+
+/* Design with Claude's build over the preview (DesignBuild): above the page's frame, below the pill. */
+.sb-design-build {
+  position: absolute;
+  top: 0;
+  left: 0;
+  display: block;
+  pointer-events: none;
+  animation: sb-design-build-in 240ms var(--ease-out);
+}
+
+@keyframes sb-design-build-in {
+  from {
+    opacity: 0;
+  }
+}
+
 /*
  * While the person decides whether Claude may replace a screen, the screen shows through the new
  * version, and the pill (which would say the layers are being added) steps aside.
@@ -391,8 +412,10 @@
   animation: none;
 }
 
-:root[data-motion="reduce"] .sb-design-preview {
+:root[data-motion="reduce"] .sb-design-preview,
+:root[data-motion="reduce"] .sb-design-build {
   transition: none;
+  animation: none;
 }
 
 :root[data-motion="reduce"] .sb-design-preview__dot::after {
@@ -405,8 +428,10 @@
     animation: none;
   }
 
-  :root:not([data-motion="full"]) .sb-design-preview {
+  :root:not([data-motion="full"]) .sb-design-preview,
+  :root:not([data-motion="full"]) .sb-design-build {
     transition: none;
+    animation: none;
   }
 
   :root:not([data-motion="full"]) .sb-design-preview__dot::after {

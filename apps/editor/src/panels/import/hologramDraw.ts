@@ -245,6 +245,45 @@ export function drawRain(ctx: CanvasRenderingContext2D, r: Rect, seconds: number
   ctx.globalAlpha = 1;
 }
 
+/** The glyphs that fall with the rain while a design is built. */
+export const RAIN_GLYPHS = "01<>/{}[]=+*#アイウエオカキクケコサシスセソタチツテトナニヌネノ";
+
+/**
+ * Glyph rain: short columns of characters falling between the pixel rain's columns, each a bright
+ * head and a fading trail, the characters flickering as they fall. Like drawRain, a pure function of time.
+ */
+export function drawGlyphRain(ctx: CanvasRenderingContext2D, r: Rect, seconds: number, c: HoloColors, options: { seed?: number; alpha?: number } = {}): void {
+  const seed = options.seed ?? 7;
+  const alpha = options.alpha ?? 1;
+  const size = Math.max(8, Math.min(15, Math.round(rainCell(r) * 2.2)));
+  const pitch = size * 2.6;
+  const cols = Math.floor(r.width / pitch);
+  if (cols <= 0 || r.height <= 0) return;
+  const x0 = r.x + (r.width - cols * pitch) / 2 + pitch / 2 - size / 2;
+  ctx.font = `${size}px ui-monospace, SFMono-Regular, Menlo, monospace`;
+  ctx.textBaseline = "top";
+  for (let col = 0; col < cols; col++) {
+    // Only some columns carry glyphs at a time.
+    if (hash01(seed, col, 11) < 0.45) continue;
+    const speed = r.height * (0.16 + 0.22 * hash01(seed, col, 12));
+    const trail = 3 + Math.floor(hash01(seed, col, 13) * 4);
+    const period = (r.height + trail * size) / speed + 0.6 + 2.4 * hash01(seed, col, 14);
+    const local = (seconds + hash01(seed, col, 15) * period) % period;
+    const head = r.y + local * speed;
+    const x = x0 + col * pitch;
+    const flicker = Math.floor(seconds * 7);
+    for (let i = 0; i <= trail; i++) {
+      const y = head - i * size * 1.05;
+      if (y < r.y - size || y > r.y + r.height) continue;
+      const glyph = RAIN_GLYPHS[Math.floor(hash01(col, i, flicker + i * 3) * RAIN_GLYPHS.length)]!;
+      const a = alpha * (i === 0 ? 0.95 : 0.6 * (1 - i / (trail + 1)) ** 1.5);
+      if (a <= 0.02) continue;
+      ctx.fillStyle = rgba(i === 0 ? mixColor(c.line, c.core, 0.6) : c.rain, a);
+      ctx.fillText(glyph, x, y);
+    }
+  }
+}
+
 /**
  * The laser across a rect at `y`: a soft light sheet on the side it came from, a glow, a thin magenta
  * fringe, the bright core reaching a little past the frame, and emitter flares at both ends.
